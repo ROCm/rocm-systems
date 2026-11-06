@@ -8,25 +8,6 @@
  * @addtogroup HRR HRR external region annotations
  * @{
  * @ingroup HRRTest
- * Tests for the region annotation channel (hrr/hrr_regions.h).
- *
- * HRR only observes memory that crosses a HIP API, so the per-object blocks a
- * framework allocator carves out of one large hipMalloc are invisible to it and
- * an intra-segment overrun reproduces at replay without being detectable. A
- * producer outside the runtime writes those bounds into a `.hrrr` sidecar under
- * the archive's `regions` directory; these tests are that producer, written
- * synthetically so the behaviour can be asserted without PyTorch.
- *
- * Two groups:
- *
- *   CPU-only  the sidecar framing itself — a well-formed stream reads back
- *             record for record, a torn tail costs only the torn batch, and a
- *             stream carrying the wrong magic is refused.
- *   GPU       a workload that carves blocks out of a segment by pointer
- *             arithmetic exactly as a caching allocator does, replayed against a
- *             synthetic sidecar. The contrast is the point: the same archive
- *             replays clean with a stale pointer merely reported, and stops hard
- *             once --guard-blocks makes the overrun fault.
  */
 
 #include "hrr_test_common.hh"
@@ -49,12 +30,7 @@
 
 namespace fs = std::filesystem;
 
-// ScopedDir, set_proc_search_path, hrr_single_process_archive, hrr_quote_path,
-// hrr_capture_direct and hrr_playback_merged all come from hrr_test_common.hh.
 
-// ---------------------------------------------------------------------------
-// Workload — a caching allocator in miniature
-// ---------------------------------------------------------------------------
 
 namespace {
 constexpr size_t kSegBytes   = 1u << 20;  // one "segment", from a single hipMalloc
@@ -75,9 +51,6 @@ constexpr int kOverrunFloats  = kFloatsPerBlock + 16384;
 constexpr size_t kProbeBytes = 64 * 1024;
 constexpr size_t kProbeFarOff = 1u << 20;  // past the end of the probe alloc
 
-// A second probe, for the same bypassed-allocation case reached through a
-// pointer embedded in a by-value struct instead of passed whole. Sized apart
-// from the first so find_alloc_base can tell the two allocations apart.
 constexpr size_t kProbe2Bytes = 32 * 1024;
 }  // namespace
 
@@ -106,11 +79,6 @@ __global__ void hrr_regions_fill_pair(HrrRegionsPtrPair a, float v) {
   }
 }
 
-// ===========================================================================
-// The captured workload. One hipMalloc, three launches at hand-computed offsets
-// inside it — which is all a framework allocator's block layout is, as far as
-// the HIP dispatch table can tell.
-// ===========================================================================
 TEST_CASE("Unit_HRR_Regions_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
 
@@ -125,7 +93,6 @@ TEST_CASE("Unit_HRR_Regions_Direct", "[.][hrr-direct]") {
   const int threads = 256;
   auto grid = [&](int n) { return dim3((n + threads - 1) / threads); };
 
-  // In bounds. The ordinary case, and the control for everything below.
   hipLaunchKernelGGL(hrr_regions_fill, grid(kFloatsPerBlock), dim3(threads), 0,
                      nullptr, block0, kFloatsPerBlock, 1.0f);
   HRR_HIP_CHECK(hipGetLastError());
@@ -177,21 +144,8 @@ TEST_CASE("Unit_HRR_Regions_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFree(seg));
 }
 
-// ===========================================================================
-// A memcpy whose destination HIP never saw.
-//
-// Every other bypassed-allocation case in this file fakes the address: the
-// workload passes `probe + kProbeFarOff`, which nothing allocated, and no
-// thread dereferences it. That trick cannot be reused for a memcpy, because a
-// memcpy has to *succeed at capture* for the event to be recorded at all. The
-// memory therefore has to genuinely exist while genuinely being invisible to
-// HRR, which means a real allocation made below the HIP API.
-//
-// HSA is that allocator. A coarse-grained device pool gives a buffer the GPU
-// can reach, allocated through a path the HIP dispatch table never sees, so
-// nothing in the archive can explain the address — exactly the property the
-// assertion needs.
-// ===========================================================================
+// A memcpy needs a destination that exists yet is invisible to HRR, so it must be a real allocation made below the HIP API.
+// HSA provides that: a coarse-grained device pool buffer the HIP dispatch table never sees.
 
 #if defined(HRR_HAVE_HSA)
 namespace {
@@ -231,8 +185,6 @@ hsa_status_t hrr_find_pool(hsa_amd_memory_pool_t pool, void* data) {
       !alloc_allowed)
     return HSA_STATUS_SUCCESS;
 
-  // Coarse-grained: device-local, not host-coherent. What hipMalloc would give
-  // us, had it been asked.
   if (flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED) {
     *static_cast<hsa_amd_memory_pool_t*>(data) = pool;
     return HSA_STATUS_INFO_BREAK;
@@ -319,8 +271,6 @@ TEST_CASE("Unit_HRR_Regions_MemcpyDirect", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipMemcpy(seg, host.data(), kHsaSegBytes, hipMemcpyHostToDevice));
   HRR_HIP_CHECK(hipDeviceSynchronize());
 
-  // A companion hipMalloc plus a D2H copy back, so the roundtrip has something
-  // the replay can compare byte for byte.
   char* known = nullptr;
   HRR_HIP_CHECK(hipMalloc(&known, kHsaSegBytes));
   HRR_HIP_CHECK(hipMemcpy(known, seg, kHsaSegBytes, hipMemcpyDeviceToDevice));
@@ -335,9 +285,6 @@ TEST_CASE("Unit_HRR_Regions_MemcpyDirect", "[.][hrr-direct]") {
 }
 #endif  // HRR_HAVE_HSA
 
-// ---------------------------------------------------------------------------
-// Synthetic producer
-// ---------------------------------------------------------------------------
 
 namespace {
 
@@ -391,9 +338,6 @@ uint64_t find_alloc_base(const fs::path& archive_path, uint64_t want_size) {
   return 0;
 }
 
-// True if any recorded allocation covers `addr`. The bypass test needs an
-// address the replay genuinely cannot translate, and the driver is free to
-// place the workload's two allocations wherever it likes.
 bool covered_by_recorded_alloc(const fs::path& archive_path, uint64_t addr) {
   hrr::Archive arc;
   REQUIRE(hrr::load_archive(archive_path.string(), arc));
@@ -407,9 +351,6 @@ bool covered_by_recorded_alloc(const fs::path& archive_path, uint64_t addr) {
 
 }  // namespace
 
-// ===========================================================================
-// CPU-only: the sidecar framing
-// ===========================================================================
 
 TEST_CASE("Unit_HRR_Regions_StreamFraming", "[.][hrr]") {
   ScopedDir dir(fs::temp_directory_path() / "hrr_region_framing");
@@ -429,7 +370,6 @@ TEST_CASE("Unit_HRR_Regions_StreamFraming", "[.][hrr]") {
     const auto found = hrr::find_region_streams(archive.string());
     REQUIRE(found.size() == 1);
     CHECK(found[0] == stream.string());
-    // An archive with no producer is the normal case and must not be an error.
     CHECK(hrr::find_region_streams((dir.path / "pid-2").string()).empty());
   }
 
@@ -515,15 +455,11 @@ TEST_CASE("Unit_HRR_Regions_StreamFraming", "[.][hrr]") {
   }
 }
 
-// ===========================================================================
-// GPU: replay against a synthetic sidecar
-// ===========================================================================
 
 #if defined(HRR_PLAYBACK_EXE) && defined(HRR_TEST_EXE)
 
 namespace {
 
-// Replace whatever sidecar is in the archive with these records.
 void install_sidecar(const fs::path& archive_path,
                      const std::vector<hrr_region_rec>& recs) {
   const fs::path regions = archive_path / "regions";
@@ -533,10 +469,6 @@ void install_sidecar(const fs::path& archive_path,
 
 }  // namespace
 
-// ---------------------------------------------------------------------------
-// The layout HRR could not see, supplied after the fact, changes what replay
-// can say about the same archive.
-// ---------------------------------------------------------------------------
 TEST_CASE("Unit_HRR_Regions_Roundtrip", "[.][hrr]") {
   ScopedDir cap(fs::temp_directory_path() / "hrr_regions_roundtrip.hrr");
   hrr_capture_direct("Unit_HRR_Regions_Direct", cap.path, /*min_events=*/5);
@@ -603,17 +535,8 @@ TEST_CASE("Unit_HRR_Regions_Roundtrip", "[.][hrr]") {
   }
 }
 
-// ---------------------------------------------------------------------------
-// The bypass case: a kernel argument that resolves in no map at all, because
-// the allocation behind it never crossed a HIP API. Without an annotation it
-// reaches the GPU as an address from the recorded process; with one, replay
-// backs the segment and the pointer translates.
-//
-// A producer declares its segments uniformly, without knowing which ones HIP
-// saw, so this also checks the other half: declaring a segment the archive
-// already has must not allocate anything, or the captured layout the replay is
-// reproducing would be shadowed by a second buffer.
-// ---------------------------------------------------------------------------
+// A kernel argument that resolves in no map, because its allocation never crossed a HIP API.
+// Annotation makes replay back the segment. Declaring a segment the archive already has must not allocate a second buffer.
 TEST_CASE("Unit_HRR_Regions_SegmentMaterialization", "[.][hrr]") {
   ScopedDir cap(fs::temp_directory_path() / "hrr_regions_segments.hrr");
   hrr_capture_direct("Unit_HRR_Regions_Direct", cap.path, /*min_events=*/5);
@@ -658,18 +581,8 @@ TEST_CASE("Unit_HRR_Regions_SegmentMaterialization", "[.][hrr]") {
   }
 }
 
-// ---------------------------------------------------------------------------
-// The same bypassed segment, reached only through a pointer embedded in a
-// by-value struct. A whole-pointer argument and an embedded one are the same
-// fact about memory, so both have to materialise the segment behind them —
-// otherwise a framework that hands its kernels a struct of tensor bases, which
-// is the common case, gets none of the benefit of annotating its allocator.
-//
-// The assertion works because nothing else reaches this segment: the sidecar
-// declares only the range around the second probe, which the workload passes
-// exclusively inside the struct. A replay that ignores embedded pointers
-// materialises nothing at all.
-// ---------------------------------------------------------------------------
+// The same bypassed segment reached only through a pointer embedded in a by-value struct, the common framework case.
+// Nothing else reaches it, so a replay that ignores embedded pointers materialises nothing.
 TEST_CASE("Unit_HRR_Regions_EmbeddedPointerMaterialization", "[.][hrr]") {
   ScopedDir cap(fs::temp_directory_path() / "hrr_regions_embedded.hrr");
   hrr_capture_direct("Unit_HRR_Regions_Direct", cap.path, /*min_events=*/5);
@@ -696,21 +609,8 @@ TEST_CASE("Unit_HRR_Regions_EmbeddedPointerMaterialization", "[.][hrr]") {
   CHECK(out.find("Region segs    : 1 materialised") != std::string::npos);
 }
 
-// ---------------------------------------------------------------------------
-// A memcpy is the first touch of a bypassed segment.
-//
-// Region materialisation must run for every handler, not only kernel-argument
-// translation: a sidecar-declared allocation whose first touch is a captured
-// copy would otherwise fail as unmapped in the memcpy handler.
-// That contradicted the promise made above `advance_to` in `dispatch_event`,
-// which says the region timeline is advanced there so that memcpys and every
-// other handler see the same view: the advance was shared, the materialisation
-// was not.
-//
-// The destination here is HSA memory, so unlike the other bypass tests the
-// address is not a fabricated one — it is a real buffer the dispatch table
-// genuinely never saw, and the sidecar is the only thing that can explain it.
-// ---------------------------------------------------------------------------
+// Region materialisation must run for every handler, not only kernel-argument translation.
+// The destination is real HSA memory the dispatch table never saw, so only the sidecar can explain it.
 #if defined(HRR_HAVE_HSA)
 namespace {
 
@@ -774,9 +674,6 @@ TEST_CASE("Unit_HRR_Regions_MemcpyFirstTouchMaterialization", "[.][hrr]") {
     auto [rc, out] = hrr_playback_merged(archive);
     INFO("Annotated replay:\n" << out);
     CHECK(rc == 0);
-    // Before the memcpy path learned to materialise, this line was absent
-    // entirely: translate_ptr failed and the handler gave up before the
-    // sidecar was ever consulted.
     CHECK(out.find("Region segs    : 1 materialised") != std::string::npos);
     CHECK(out.find("not mapped") == std::string::npos);
   }

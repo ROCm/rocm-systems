@@ -218,7 +218,6 @@ class CheckTest(unittest.TestCase):
         self.assertEqual(loaded["cases"]["Kept"]["skip"][0]["reason"], "npu")
         self.assertFalse(loaded["cases"]["New"])
         again = listing(("Kept", ["[hrr]"]), ("New", ["[hrr]"]))
-        # None and {} are the same empty entry; a second check is clean.
         self.path.write_text(cfg.render(loaded))
         with mock.patch.object(cfg.subprocess, "run", return_value=completed(again)):
             with contextlib.redirect_stdout(io.StringIO()):

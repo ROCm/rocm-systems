@@ -8,9 +8,6 @@
  * @addtogroup HRR HRR Archive Slots
  * @{
  * @ingroup HRRTest
- * GPU-free unit tests for the helpers that keep archive pointers out of HIP: which JIT options
- * carry a pointer, and reading a string out of a fixed-size record field that
- * the archive did not NUL-terminate.
  */
 
 #include "hrr_test_common.hh"
@@ -37,13 +34,6 @@ static_assert(hipJitOptionOverrideDirectiveValues == 28, "table assumes hipJitOp
 static_assert(hipJitOptionIRtoISAOptExt == 10000, "table assumes hipJitOption numbering");
 static_assert(hipJitOptionIRtoISAOptCountExt == 10001, "table assumes hipJitOption numbering");
 
-/**
- * Test Description
- * ----------------
- *   - The options whose value is a pointer (log buffers, symbol tables, the
- *     HIP-only option string) are not integer-valued; the integer ones are; a
- *     number the table does not know is refused.
- */
 HRR_TEST_CASE(Unit_HRR_Slots_JitOptionClassification) {
   for (int o : {hipJitOptionWallTime, hipJitOptionInfoLogBuffer, hipJitOptionErrorLogBuffer,
                 hipJitOptionGlobalSymbolNames, hipJitOptionGlobalSymbolAddresses,
@@ -58,12 +48,6 @@ HRR_TEST_CASE(Unit_HRR_Slots_JitOptionClassification) {
   CHECK_FALSE(hrr::jit_option_value_is_integer(99999));
 }
 
-/**
- * Test Description
- * ----------------
- *   - jit_options_carry_pointer looks at the first n options only, and an empty
- *     list carries none.
- */
 HRR_TEST_CASE(Unit_HRR_Slots_JitOptionArray) {
   const hipJitOption ints[] = {hipJitOptionMaxRegisters, hipJitOptionOptimizationLevel};
   CHECK_FALSE(hrr::jit_options_carry_pointer(ints, 2));
@@ -74,13 +58,6 @@ HRR_TEST_CASE(Unit_HRR_Slots_JitOptionArray) {
   CHECK_FALSE(hrr::jit_options_carry_pointer(mixed, 1));
 }
 
-/**
- * Test Description
- * ----------------
- *   - bounded_cstr stops at the first NUL, takes the whole field when there is
- *     none, and never reads past the field: a buffer with no NUL at all, held
- *     in exactly-sized storage, comes back as exactly the field's bytes.
- */
 HRR_TEST_CASE(Unit_HRR_Slots_BoundedCstr) {
   const uint8_t terminated[8] = {'a', 'b', 'c', 0, 'x', 'y', 'z', 0};
   CHECK(hrr::bounded_cstr(terminated, sizeof(terminated)) == "abc");

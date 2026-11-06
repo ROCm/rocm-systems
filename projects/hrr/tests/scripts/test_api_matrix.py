@@ -40,7 +40,6 @@ def api_entry(name, observable="REAL", payload_loss=()):
 MANIFEST = {"apis": [api_entry("hipA"), api_entry("hipB", "NOOP"),
                      api_entry("hipC")]}
 
-# A minimal valid overlay: one explicit tier list, one pattern, one override.
 OVERLAY = {
     "version": 1,
     "defaults": {"tier": "T0", "expect": "derived", "workloads": ["W0"]},

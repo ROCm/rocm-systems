@@ -44,7 +44,6 @@ __global__ void hrr_pinned_triple(int* out, const int* in, int n) {
   if (i < n) out[i] = in[i] * 3 + 1;
 }
 
-// The same kernel with the pinned pointer inside a by-value struct.
 struct PinnedIn { const int* in; int n; };
 __global__ void hrr_pinned_triple_struct(int* out, PinnedIn s) {
   const int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -169,7 +168,6 @@ TEST_CASE("Unit_HRR_PinnedHostModule_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipHostFree(in));
 }
 
-// The deprecated hipMallocHost and hipFreeHost, which replay still replays.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 TEST_CASE("Unit_HRR_PinnedMallocHost_Direct", "[.][hrr-direct]") {
@@ -181,7 +179,6 @@ TEST_CASE("Unit_HRR_PinnedMallocHost_Direct", "[.][hrr-direct]") {
 }
 #pragma clang diagnostic pop
 
-// A 2 MiB allocation: over HIP_HRR_HOST_SNAPSHOT_MAX_MB=1, within 2.
 TEST_CASE("Unit_HRR_PinnedHostLarge_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
   int* in = nullptr;
@@ -244,12 +241,9 @@ TEST_CASE("Unit_HRR_PinnedHostStructLowBits_Direct", "[.][hrr-direct]") {
   munmap(p, 1 << 16);
 }
 
-// Forks while another thread snapshots a 32 MiB pinned allocation, so most forks
-// land while it holds the pinned tracking lock. Each child frees an address
-// capture does not track, which takes that lock and fails without device work.
-// A child that inherited the lock held never exits.
-// The forks wait for the launcher's first launches to finish: the first loads
-// the code object and creates the null stream, which take ROCr's memory lock,
+// Forks while another thread snapshots a 32 MiB pinned allocation, so most forks land while it holds the pinned tracking lock.
+// Each child frees an address capture does not track, which takes that lock; a child that inherited it held never exits.
+// The forks wait for the launcher's first launches: the first loads the code object and creates the null stream under ROCr's memory lock,
 // and a child forked then hangs in hipFree on a lock capture does not own.
 TEST_CASE("Unit_HRR_PinnedHostFork_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));

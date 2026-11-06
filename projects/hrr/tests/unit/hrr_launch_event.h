@@ -5,10 +5,7 @@
  */
 #pragma once
 
-// A crafted kernel launch event, shared by the reader tests (hrr-unit-tests) and
-// the handler tests (hrr-handler-tests, through hrr_handler_test_util.h). Kept
-// apart from that header because it is POSIX only and the reader tests build
-// everywhere.
+// Kept apart from hrr_handler_test_util.h, which is POSIX only; the reader tests build everywhere.
 
 #include "hrr/hrr_api_args.h"
 

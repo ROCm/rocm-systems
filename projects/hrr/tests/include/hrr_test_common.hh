@@ -8,19 +8,6 @@
  * @addtogroup HRR HRR shared test helpers
  * @{
  * @ingroup HRRTest
- * Helpers shared by hrr_roundtrip_test.cc and hrr_api_matrix_test.cc.
- *
- * The capture/replay pattern every roundtrip follows:
- *   1. Spawn HrrTest as a subprocess with HIP_HRR_CAPTURE_OUTPUT set, running a
- *      hidden "[.][hrr-direct]" workload case by name.  A clean subprocess is
- *      required on Windows so MSYS2/bash SEH handling does not interfere with
- *      HIP's internal __try/__except frames.
- *   2. Inspect the resulting archive directory.
- *   3. Run hrr-playback over it and assert on the outcome.
- *
- * The API-matrix tests add a fourth mode on top: rather than asserting only on
- * D2H fidelity, they assert that each API's *replay class* (faithful / noop /
- * error-stub) matches what HRR's generator declares it to be.
  */
 
 #pragma once
@@ -45,18 +32,10 @@
 #include <utility>
 #include <vector>
 
-// Local HRR test harness.
-//
-// The HRR project owns its behavior tests and must not depend on the hip-tests
-// Catch2 infrastructure (the hip-tests Catch2 helper headers). These macros
-// replace only the small pieces the migrated HRR tests actually use.
+// HRR tests must not depend on the hip-tests Catch2 infrastructure; these macros replace the few pieces used.
 
-// HRR_TEST_CASE mirrors the hip-tests test-case macro but with a fixed [hrr] tag so
-// the HRR project's tests do not rely on the hip-tests GET_TAGS() config lookup.
 #define HRR_TEST_CASE(name) TEST_CASE(#name, "[hrr]")
 
-// HRR_HIP_CHECK replaces the hip-tests HIP error check: fail the current Catch2 test if a HIP call
-// does not return hipSuccess, reporting the error code and string.
 #define HRR_HIP_CHECK(expr)                                                     \
   do {                                                                          \
     hipError_t _hrr_err = (expr);                                              \
@@ -75,27 +54,16 @@
     SKIP(_hrr_skip_msg.str());                                                 \
   } while (0)
 
-// ---------------------------------------------------------------------------
-// Shared capture/replay helpers.
-//
-// hrr_run_roundtrip and hrr_capture_direct spawn the test binary itself and are
-// therefore only defined when HRR_TEST_EXE names it (the integration target).
-// ---------------------------------------------------------------------------
+// hrr_run_roundtrip and hrr_capture_direct spawn the test binary, so they exist only when HRR_TEST_EXE names it.
 
 namespace fs = std::filesystem;
 
-// Platform path separator for setEnv("PATH", ...).
-// ';' on Windows, ':' on POSIX.
 #ifdef _WIN32
 static constexpr char kPathSep = ';';
 #else
 static constexpr char kPathSep = ':';
 #endif
 
-// Set PATH so the subprocess can find the ROCm runtime binaries.
-// On Windows: DLLs are found via PATH.
-// On Linux:   fork() inherits LD_LIBRARY_PATH from the parent automatically;
-//             no explicit setEnv needed.
 inline void set_proc_search_path(hrr::test::SpawnProc& proc) {
   const char* cur_path = getenv("PATH");
   proc.setEnv("PATH",
@@ -141,15 +109,12 @@ inline std::string hrr_playback_exe() {
 #endif
 }
 
-// RAII guard: removes a directory tree on scope exit (even on REQUIRE failure).
 struct ScopedDir {
   fs::path path;
   explicit ScopedDir(fs::path p) : path(std::move(p)) { fs::remove_all(path); }
   ~ScopedDir() { fs::remove_all(path); }
 };
 
-// `name` under the temp directory, suffixed with this process's id so
-// concurrent runs of the suite do not share it.
 inline fs::path hrr_temp_dir(const std::string& name) {
 #ifdef _WIN32
   const unsigned long pid = GetCurrentProcessId();
@@ -179,10 +144,6 @@ inline std::string read_text_file(const fs::path& path) {
   return ss.str();
 }
 
-// Every per-process archive under `root`, or `root` itself if the capture
-// wrote a flat archive. Unlike hrr_single_process_archive this does not
-// REQUIRE a particular count: callers that only want to read an archive should
-// tolerate zero or many rather than failing the test on the shape.
 inline std::vector<fs::path> hrr_process_archives(const fs::path& root) {
   std::vector<fs::path> archives;
   if (fs::exists(root / "events.bin")) {
@@ -227,20 +188,9 @@ inline std::string hrr_quote_path(const fs::path& p) {
 #endif
 }
 
-// ---------------------------------------------------------------------------
-// hrr_parse_d2h_summary: extract the pass/fail counts from the playback
-// "D2H checks" summary line, which hrr_playback.cpp prints as:
-//
-//   "[HRR]   D2H checks     : N pass (E exact, T within tol), M fail, K skipped"
-//
-// The parenthetical breakdown is always part of the line, so the format string
-// has to consume it: a format that stops at "pass," matches only the pass count
-// and leaves the fail count at its initial value, which silently turns every
-// caller's fail assertion into a no-op.
-//
-// Returns false when the line is absent or does not match, so a future change
-// to the producer surfaces as a test failure instead of a phantom zero.
-// ---------------------------------------------------------------------------
+// hrr_parse_d2h_summary: parses the "D2H checks" line, "N pass (E exact, T within tol), M fail, K skipped".
+// The format must consume the parenthetical, or the fail count keeps its initial value and callers' fail assertions become no-ops.
+// Returns false when the line is absent so a producer change fails the test.
 inline bool hrr_parse_d2h_summary(const std::string& out, int& d2h_pass, int& d2h_fail) {
   const size_t pos = out.find("D2H checks");
   if (pos == std::string::npos) return false;
@@ -250,30 +200,14 @@ inline bool hrr_parse_d2h_summary(const std::string& out, int& d2h_pass, int& d2
                      &d2h_pass, &d2h_fail) == 2;
 }
 
-// ---------------------------------------------------------------------------
-// hrr_d2h_mismatch_exit: whether a non-zero hrr-playback exit is explained by
-// D2H mismatches alone, the one failure Windows tolerates (see
-// hrr_run_playback):
-//   - exit 2: the divergence guard stopped the replay after too many D2H
-//     mismatches (it prints no summary);
-//   - exit 1 with a summary line that counts at least one failed D2H check.
-// A fatal HIP error aborts the replay before the summary is printed, so its
-// exit 1 is never taken for a mismatch.
-// ---------------------------------------------------------------------------
+// Whether a non-zero hrr-playback exit is explained by D2H mismatches alone, the one failure Windows tolerates.
+// Exit 2 is the divergence guard; exit 1 needs a summary counting a failed D2H check. A fatal HIP error never counts.
 inline bool hrr_d2h_mismatch_exit(int ret, const std::string& out) {
   if (ret == 2) return true;
   int d2h_pass = 0, d2h_fail = 0;
   return ret == 1 && hrr_parse_d2h_summary(out, d2h_pass, d2h_fail) && d2h_fail > 0;
 }
 
-// ---------------------------------------------------------------------------
-// hrr_run_playback — spawn hrr-playback, capture stdout, assert:
-//   1. Exit code == 0.
-//   2. The "D2H checks" summary line is present and shows >= 1 pass, 0 fail.
-//
-// If require_d2h == true (default) we REQUIRE pass >= 1.
-// Workloads with no D2H memcpy (e.g. DeviceInfo, Occupancy) pass require_d2h=false.
-// ---------------------------------------------------------------------------
 inline void hrr_run_playback(const fs::path& cap_path,
                              const std::string& extra_args = "",
                              bool require_d2h = true) {
@@ -298,18 +232,13 @@ inline void hrr_run_playback(const fs::path& cap_path,
     return;
   }
 #endif
-  // When require_d2h is false (e.g. no D2H in workload, or Linux fat-binary
-  // limitation) we only assert that hrr-playback did not crash (signal).
-  // A non-zero exit due to D2H mismatch is accepted.
   if (require_d2h) {
     REQUIRE(ret == 0);
   } else {
-    // Treat SIGSEGV/SIGBUS (>128) as hard failure; clean exit or D2H-fail (1) is ok.
     REQUIRE(ret < 128);
     if (ret != 0) return;  // D2H mismatch expected — skip summary parse
   }
 
-  // Parse the D2H summary line.
   int d2h_pass = 0, d2h_fail = 0;
   if (!hrr_parse_d2h_summary(out, d2h_pass, d2h_fail)) {
     FAIL("hrr-playback output missing or malformed 'D2H checks' summary line");
@@ -322,17 +251,8 @@ inline void hrr_run_playback(const fs::path& cap_path,
 }
 
 #if defined(HRR_TEST_EXE)
-// ---------------------------------------------------------------------------
-// Helper: shared roundtrip body — capture → verify archive → playback.
-//
-// min_events:  minimum number of events expected in events.bin.  Every workload
-//   must produce at least a few events (malloc, memcpy, kernel, free) — a value
-//   of 5 is a conservative floor that would catch a totally empty capture.
-//   Use a higher value for workloads known to emit many events (StressApis, etc.).
-// require_d2h: if true (default), asserts that playback validated at least one
-//   D2H blob.  Pass false for workloads that conditionally skip D2H (e.g. the
-//   texture workload on devices without image support).
-// ---------------------------------------------------------------------------
+// min_events is a floor that catches an empty capture; raise it for event-heavy workloads.
+// require_d2h=false is for workloads that conditionally skip D2H.
 inline void hrr_run_roundtrip(const std::string& direct_case,
                               const fs::path& cap_path,
                               size_t min_events = 5,
@@ -353,9 +273,6 @@ inline void hrr_run_roundtrip(const std::string& direct_case,
        fs::recursive_directory_iterator(archive_path / "blobs")) ++bc;
   INFO("Blob count: " << bc); REQUIRE(bc >= 1);
 
-  // Load the archive and assert a minimum event count.  This catches generator
-  // bugs that silently produce empty or near-empty archives while still writing
-  // at least one blob (which would otherwise satisfy the blob_count >= 1 check).
   hrr::Archive arc;
   bool arc_ok = hrr::load_archive(cap_path.string(), arc);
   INFO("Archive event count: " << arc.events.size());
@@ -365,21 +282,9 @@ inline void hrr_run_roundtrip(const std::string& direct_case,
   hrr_run_playback(cap_path, /*extra_args=*/"", require_d2h);
 }
 
-// ---------------------------------------------------------------------------
-// Env-aware capture + playback helpers (used by the repro roundtrips).
-//
-// hrr_capture_direct: spawn a hidden _Direct workload with HIP_HRR_CAPTURE_OUTPUT
-//   set, REQUIRE a clean capture, and assert the archive has >= min_events.
-//   Pairs in env are set in the workload's environment as well.
-//
-// hrr_playback_env: run hrr-playback with arbitrary extra environment pairs
-//   (e.g. HIP_HRR_REPLAY_ZERO_INIT / HIP_HRR_REPLAY_DIVERGENCE_ABORT) and return
-//   {exit_code, stdout}.  Note: SpawnProc only captures stdout here, so the
-//   divergence-guard "[HRR] replay DIVERGED" message (emitted on stderr) is NOT
-//   visible — the deterministic, observable contract is the exit code (2 ==
-//   clean divergence stop), which is what the callers assert.  Tests that need
-//   stderr use hrr_playback_merged below.
-// ---------------------------------------------------------------------------
+// hrr_capture_direct: spawns a hidden _Direct workload with HIP_HRR_CAPTURE_OUTPUT set, requires a clean capture and >= min_events.
+// hrr_playback_env: SpawnProc captures only stdout, so the stderr divergence message is invisible.
+// Callers assert the exit code (2 == clean divergence stop); use hrr_playback_merged for stderr.
 inline void hrr_capture_direct(const std::string& direct_case,
                                const fs::path& cap_path,
                                size_t min_events = 5,
@@ -430,13 +335,7 @@ inline std::pair<int, std::string> run_playback_raw(const fs::path& cap_path,
   return {ret, proc.getOutput()};
 }
 
-// ===========================================================================
-// API-matrix support
-// ===========================================================================
 
-// Replay behaviour HRR's generator declares for an API.  These mirror the
-// classification sets in projects/hrr/tools/gen_hrr_api_args.py: every API
-// is exactly one of these at replay time.
 enum class HrrReplayClass {
   kReal,       // A real handler ran (GENERATED, MANUAL or CUSTOM).
   kNoop,       // NOOP_PLAYBACK_APIS — one-time warning, returns hipSuccess.
@@ -521,17 +420,8 @@ inline std::pair<int, std::string> hrr_playback_merged(
 // callers that care about the hang specifically check for it.
 inline constexpr int kHrrWatchdogKilled = hrr::test::SpawnProc::kKilledOnTimeout;
 
-// ---------------------------------------------------------------------------
-// hrr_playback_watchdog — replay under a deadline.
-//
-// Some replays do not fail, they hang: were hipStreamWriteValue64 a no-op at
-// replay, a program that waits on the value it was supposed to write would
-// wait forever. Without a
-// deadline that turns into a CI job that runs until the harness kills it,
-// which is both slower to diagnose and easy to misread as infrastructure
-// flake. Killing the child ourselves turns the hang into an assertable
-// outcome.
-// ---------------------------------------------------------------------------
+// Replays under a deadline: a no-op hipStreamWriteValue64 would leave a waiting program hanging until the harness kills it.
+// Killing the child turns the hang into an assertable outcome.
 inline std::pair<int, std::string> hrr_playback_watchdog(
     const fs::path& cap_path, int timeout_seconds,
     const std::string& extra_args = "") {
@@ -566,20 +456,9 @@ inline std::string hrr_unreplayable_marker(const std::string& api) {
   return "[HRR] " + api + ": NOT REPLAYABLE";
 }
 
-// ---------------------------------------------------------------------------
-// hrr_replay_failed_apis — every API whose handler returned a HIP error.
-//
-// A failing handler prints one of two lines depending on whether the replay
-// was told to keep going:
-//
-//   [HRR] Fatal: T19 Event 54 (hipDrvLaunchKernelEx) returned 400 (invalid
-//         resource handle) — aborting replay
-//   [HRR] Error: T19 Event 54 (hipDrvLaunchKernelEx) returned 400 (invalid
-//         resource handle) — continuing
-//
-// Both are parsed. Without --continue-on-error there is at most one, and
-// everything after it went unobserved; with it, this is the full set.
-// ---------------------------------------------------------------------------
+// hrr_replay_failed_apis: every API whose handler returned a HIP error.
+// Both "[HRR] Fatal: ... aborting replay" and "[HRR] Error: ... continuing" lines are parsed.
+// Without --continue-on-error there is at most one; with it, the full set.
 inline std::set<std::string> hrr_replay_failed_apis(const std::string& merged) {
   std::set<std::string> failed;
   for (const char* tag : {"] Fatal: ", "] Error: "}) {
@@ -599,21 +478,9 @@ inline std::set<std::string> hrr_replay_failed_apis(const std::string& merged) {
   return failed;
 }
 
-// ---------------------------------------------------------------------------
-// hrr_replay_reached_apis — the APIs a --verbose replay actually dispatched,
-// in the order it printed them.
-//
-// Two line formats, one per replay path:
-//
-//   [HRR] Event 33: hipMemExportToShareableHandle        (single-threaded)
-//   [HRR] T19 [12] hipMemcpyAsync                        (multi-threaded)
-//
-// This is what makes "no warning was printed, therefore a real handler ran"
-// sound. Silence from an API the replay never reached is absence of evidence:
-// it happens whenever the process dies partway, which a handler that
-// dereferences a capture-time host pointer does. The last entry is then the
-// event that killed it.
-// ---------------------------------------------------------------------------
+// hrr_replay_reached_apis: the APIs a --verbose replay dispatched, in order, from "Event N: <api>" or "T<tid> [<i>] <api>" lines.
+// Silence from an API the replay never reached is no evidence, as when a handler kills the process.
+// The last entry is then the event that killed it.
 inline std::vector<std::string> hrr_replay_reached_apis(
     const std::string& merged) {
   std::vector<std::string> reached;
@@ -657,9 +524,6 @@ inline bool hrr_replay_aborted(const std::string& merged_output) {
          std::string::npos;
 }
 
-// Classify how `api` behaved during a replay, given that replay's merged
-// stdout+stderr.
-//
 // Returns kReal when no marker is present, which is only sound when the API
 // was captured *and* the replay reached it. Callers establish the first with
 // hrr_info_api_counts() and the second with hrr_replay_aborted().
@@ -678,17 +542,8 @@ inline HrrReplayClass hrr_observed_replay_class(const std::string& merged_output
   return HrrReplayClass::kReal;
 }
 
-// Parse one `hrr-playback --info` report's "Event Type Breakdown" table into
-// the accumulator. The table format is:
-//
-//   Event Type Breakdown:
-//     Type                   Count
-//     ----                   -----
-//     hipMalloc                  4
-//     ...
-//
-// check_matrix.py (projects/hrr/tools/api-matrix) reads the observations this
-// parser feeds, so "captured" here is what its report counts as captured.
+// Parses one `hrr-playback --info` "Event Type Breakdown" table into the accumulator.
+// check_matrix.py reads the observations this feeds, so "captured" here is what its report counts.
 inline void hrr_parse_info_breakdown(const std::string& info,
                                      std::map<std::string, long long>& counts) {
   bool in_table = false;
@@ -702,7 +557,6 @@ inline void hrr_parse_info_breakdown(const std::string& info,
 
     if (s.rfind("Event Type Breakdown", 0) == 0) { in_table = true; continue; }
     if (!in_table) continue;
-    // Any other section header ends the table.
     if (s.rfind("Kernel Call Counts", 0) == 0 || s.rfind("Kernel Summary", 0) == 0 ||
         s.rfind("Event Log", 0) == 0 || s.rfind("Threads:", 0) == 0 ||
         s.rfind("Code Objects:", 0) == 0) {
@@ -712,7 +566,6 @@ inline void hrr_parse_info_breakdown(const std::string& info,
     if (s.find_first_not_of("- ") == std::string::npos) continue;  // rule line
     if (s.rfind("Type", 0) == 0) continue;                          // column header
 
-    // "<name><spaces><count>"
     const size_t sp = s.find_last_of(" \t");
     if (sp == std::string::npos) continue;
     const std::string name = s.substr(0, s.find_last_not_of(" \t", sp) + 1);
@@ -723,16 +576,8 @@ inline void hrr_parse_info_breakdown(const std::string& info,
   }
 }
 
-// ---------------------------------------------------------------------------
-// hrr_info_api_counts — {api name -> event count} for a whole capture.
-//
-// Pointed at an archive *root*, `hrr-playback --info` prints only the
-// process table and no breakdown; the breakdown comes from running it against
-// each pid-<pid> sub-archive. So resolve first and merge, which also gives the
-// right answer for a multi-process capture.
-//
-// --info does not touch the GPU, so this is usable from CPU-only test cases.
-// ---------------------------------------------------------------------------
+// hrr_info_api_counts: {api name -> event count} for a whole capture.
+// On an archive root --info prints no breakdown, so resolve each pid-<pid> sub-archive and merge. It does not touch the GPU.
 inline std::map<std::string, long long> hrr_info_api_counts(const fs::path& cap_path) {
   std::map<std::string, long long> counts;
   for (const auto& archive : hrr_process_archives(cap_path)) {
@@ -745,19 +590,8 @@ inline std::map<std::string, long long> hrr_info_api_counts(const fs::path& cap_
   return counts;
 }
 
-// ---------------------------------------------------------------------------
-// hrr_expect_replay_class — the core API-matrix assertion.
-//
-// Asserts two things about `api` for the archive at cap_path:
-//   1. It was captured (present in the --info Event Type Breakdown).  Without
-//      this, an API the workload silently failed to call would look identical
-//      to a faithfully-replayed one, and the matrix would report false green.
-//   2. Its replay class matches `expected`.
-//
-// `merged_output` is the merged stdout+stderr of a replay of the same archive,
-// obtained from hrr_playback_merged().  It is passed in rather than produced
-// here so that one replay can validate a whole family of APIs.
-// ---------------------------------------------------------------------------
+// The core API-matrix assertion: `api` was captured (else a missed call looks like a faithful replay) and its replay class matches `expected`.
+// `merged_output` comes from hrr_playback_merged() so one replay can validate a family of APIs.
 inline void hrr_expect_replay_class(const std::map<std::string, long long>& captured,
                                     const std::string& merged_output,
                                     const std::string& api,

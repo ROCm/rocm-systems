@@ -26,37 +26,19 @@
 
 namespace hrr::test {
 
-// Minimal, shell-free subprocess helper for HRR behavior tests.
+// Minimal shell-free subprocess helper for HRR tests: per-child environment overrides,
+// optional stdout capture, optional deadline.
 //
-// It implements only what the migrated HRR tests need: overriding environment
-// variables for the child, launching a child process without going through a
-// shell, and optionally capturing its stdout. It replaces the hip-tests
-// SpawnProc helper. Extend only this file if Windows ever needs richer process
-// semantics rather than re-importing the hip-tests process helpers.
+// POSIX uses fork()/execvp(). The argument string is split on whitespace; quotes stay literal in a token
+// (Catch2's test-spec parser strips them). Overrides apply in the child only, so the parent's environment is never mutated.
 //
-// POSIX: the child is launched with fork()/execvp(). The argument string is
-// split on whitespace into argv tokens; no shell is involved, so quote
-// characters are literal parts of a token (a token like "name" is passed to the
-// child including the quotes — Catch2's own test-spec parser then strips them).
-// Environment overrides are applied in the child only (via setenv after fork),
-// so the parent's environment is never mutated; from the child's point of view
-// an overridden variable such as PATH is replaced entirely with the given value.
+// run() returns the exit code, 128 + signal number if killed by a signal, or 127 if the launch failed.
 //
-// run() returns the child's exit code, or 128 + signal number if it was killed
-// by a signal (127 if the process could not be launched). Both the capturing
-// and non-capturing paths use the same normalization.
-//
-// runWithTimeout() adds a deadline. Some replays do not fail, they hang: an API
-// that is a no-op at replay leaves a program waiting forever on a value that is
-// never written. Without a deadline that becomes a CI job that runs until the
-// harness kills it, which is both slower to diagnose and easy to misread as
-// infrastructure flake. Killing the child ourselves turns the hang into an
-// assertable outcome, reported as kKilledOnTimeout.
+// runWithTimeout() kills a hung replay (for example a no-op API leaves a program waiting forever)
+// and returns kKilledOnTimeout, so a hang becomes an assertable outcome instead of a stuck CI job.
 class SpawnProc {
  public:
-  // capture_stderr merges the child's stderr into the same captured stream as
-  // its stdout, so a test asserting on diagnostics written to stderr sees them
-  // in getOutput(). It has no effect unless capture_stdout is also set.
+  // capture_stderr merges stderr into getOutput(); it has no effect without capture_stdout.
   explicit SpawnProc(std::string exe, bool capture_stdout = false,
                      bool capture_stderr = false)
       : exe_(std::move(exe)),
@@ -72,16 +54,12 @@ class SpawnProc {
   // HIP_HRR_CAPTURE_OUTPUT into a single space, which still enables capture.
   void unsetEnv(const std::string& key) { unset_env_.push_back(key); }
 
-  // Exit code reported when the deadline fired and the child had to be killed.
-  // 128 + SIGKILL matches the encoding run() already uses for a signalled
-  // child, so callers that only distinguish "crashed" from "clean" need no
-  // special case; callers that care about the hang check for this value.
+  // Exit code when the deadline killed the child: 128 + SIGKILL, the encoding run() uses for a signalled child.
   static constexpr int kKilledOnTimeout = 128 + 9;
 
   int run(const std::string& args) { return run_impl(args, 0); }
 
-  // As run(), but kill the child after timeout_seconds and return
-  // kKilledOnTimeout. A timeout_seconds of 0 or less means no deadline.
+  // Returns kKilledOnTimeout if the deadline fires; timeout_seconds <= 0 means no deadline.
   int runWithTimeout(const std::string& args, int timeout_seconds) {
     return run_impl(args, timeout_seconds);
   }
@@ -101,8 +79,6 @@ class SpawnProc {
 #endif
   }
 
-  // Split on whitespace into argv tokens, keeping every other character
-  // (including quotes) literal. No shell-style quote or escape processing.
   static std::vector<std::string> split_args(const std::string& args) {
     std::vector<std::string> out;
     std::string cur;
@@ -125,8 +101,7 @@ class SpawnProc {
 
 #if !defined(_WIN32)
   int run_posix(const std::vector<std::string>& tokens) {
-    // argv[0] is the executable itself; execvp performs the PATH lookup (using
-    // the child's environment) when exe_ is not an absolute/relative path.
+    // execvp does the PATH lookup, using the child's environment, when exe_ is not a path.
     std::vector<char*> argv;
     argv.push_back(const_cast<char*>(exe_.c_str()));
     for (const auto& t : tokens) argv.push_back(const_cast<char*>(t.c_str()));
@@ -145,8 +120,6 @@ class SpawnProc {
     }
 
     if (pid == 0) {
-      // Child: apply environment overrides (affects this process only), wire up
-      // stdout capture if requested, then exec. On failure exit with 127.
       for (const auto& key : unset_env_) {
         ::unsetenv(key.c_str());
       }
@@ -168,9 +141,8 @@ class SpawnProc {
       ::_exit(127);
     }
 
-    // Parent. Arm the deadline before draining the pipe: the read below blocks
-    // until the child exits or is killed, so the kill has to come from another
-    // thread.
+    // Arm the deadline before draining the pipe: the read blocks until the child exits,
+    // so the kill has to come from another thread.
     std::atomic<bool> finished{false};
     std::thread watchdog;
     if (timeout_seconds_ > 0) {
@@ -219,18 +191,14 @@ class SpawnProc {
 
 #if defined(_WIN32)
   int run_windows(const std::vector<std::string>& tokens) {
-    // Build a command line: the executable followed by the raw tokens. Callers
-    // are responsible for quoting paths that contain spaces (CreateProcess does
-    // not use a shell). Rejoining with single spaces preserves the caller's
-    // quoting.
+    // Callers quote paths with spaces: CreateProcess uses no shell, so rejoining with single
+    // spaces preserves their quoting.
     std::string cmdline = exe_;
     for (const auto& t : tokens) {
       cmdline += " ";
       cmdline += t;
     }
 
-    // Build the child environment block: inherit the parent's environment, then
-    // apply overrides, without mutating the parent's environment.
     std::string env_block = build_env_block();
 
     HANDLE read_h = nullptr;
@@ -274,8 +242,6 @@ class SpawnProc {
       return 127;
     }
 
-    // Arm the deadline before draining the pipe, for the same reason as the
-    // POSIX path: the read below blocks until the child goes away.
     std::atomic<bool> finished{false};
     std::thread watchdog;
     if (timeout_seconds_ > 0) {

@@ -8,11 +8,6 @@
  * @addtogroup HRR HRR Access Policy Window
  * @{
  * @ingroup HRRTest
- * Handler-level tests that the access policy window's base_ptr, a device
- * address of the capturing process, is translated to the live pointer before
- * it reaches HIP. The two entry points that carry a window are called with a
- * crafted record and a seeded pointer map; the HIP call is a stand-in defined
- * in this file, so no GPU is needed.
  */
 
 #include <catch2/catch_test_macros.hpp>
@@ -29,7 +24,6 @@ hipError_t playback_hipStreamSetAttribute(PlaybackContext& ctx, const uint8_t* p
 
 namespace {
 
-// What the stand-ins below saw.
 struct HipCall {
   int calls = 0;
   int attr = -1;
@@ -42,8 +36,6 @@ constexpr uint64_t kRecordedBase = 0x7f0000005000ull;
 
 }  // namespace
 
-// Stand-ins for the HIP calls. The test executable defines them, so the
-// handlers' calls bind here instead of to the HIP runtime.
 extern "C" hipError_t hipStreamSetAttribute(hipStream_t, hipStreamAttrID attr,
                                             const hipStreamAttrValue* value) {
   ++g_stream.calls;
@@ -60,13 +52,6 @@ extern "C" hipError_t hipGraphKernelNodeSetAttribute(hipGraphNode_t, hipKernelNo
   return hipSuccess;
 }
 
-/**
- * Test Description
- * ----------------
- *   - hipStreamSetAttribute with an access policy window reaches HIP with the
- *     window's base_ptr translated to the live allocation, not the recorded
- *     address. Any other attribute is forwarded as recorded.
- */
 TEST_CASE("Unit_HRR_AccessPolicyWindow_StreamAttributeTranslatesBasePtr", "[hrr]") {
   char live[256];
   PlaybackContext ctx;
@@ -85,7 +70,6 @@ TEST_CASE("Unit_HRR_AccessPolicyWindow_StreamAttributeTranslatesBasePtr", "[hrr]
   CHECK(g_stream.attr == hipStreamAttributeAccessPolicyWindow);
   CHECK(g_stream.base_ptr == static_cast<void*>(live));
 
-  // Another attribute is not a window: its bytes are not read as one.
   a->attr = hipStreamAttributeSynchronizationPolicy;
   g_stream = {};
   REQUIRE(playback_hipStreamSetAttribute(ctx, rec.bytes()) == hipSuccess);
@@ -93,13 +77,6 @@ TEST_CASE("Unit_HRR_AccessPolicyWindow_StreamAttributeTranslatesBasePtr", "[hrr]
   CHECK(g_stream.base_ptr == reinterpret_cast<void*>(kRecordedBase));
 }
 
-/**
- * Test Description
- * ----------------
- *   - hipGraphKernelNodeSetAttribute with an access policy window, called
- *     through the generated handler in the dispatch table, reaches HIP with
- *     the window's base_ptr translated to the live allocation.
- */
 TEST_CASE("Unit_HRR_AccessPolicyWindow_KernelNodeAttributeTranslatesBasePtr", "[hrr]") {
   char live[256];
   PlaybackContext ctx;

@@ -8,29 +8,9 @@
  * @addtogroup HRR HRR fat binary header checks
  * @{
  * @ingroup HRRTest
- * Tests for which registered fat binaries capture stores as blobs.
- *
- * Capture stores each registered fat binary so replay can load it with
- * hipModuleLoadData, and the byte count it stores comes from the bundle
- * header. HIP checks that header before it loads the bundle, and capture
- * applies the same checks: a bundle whose header fails them is not stored,
- * and neither is a bundle HIP refused to register after it initialised.
- *
- * Two paths record fat binaries and both are exercised:
- *   - registered before HIP initialises: swept from HIP's list in
- *     hip_capture_init, where only the header checks apply;
- *   - registered after: seen by the __hipRegisterFatBinary shim, which also
- *     has HIP's verdict.
- * The workload calls __hipRegisterFatBinary itself with bundles laid out in
- * memory the way clang-offload-bundler lays them out, valid and altered.
- *
- * Every code object capture stores, in a fat binary or under code_objects/,
- * has its .comment and .debug* sections zeroed: they hold the compiler build
- * and the build paths, and the GPU never loads them.
- *
- * A fat binary is stored whatever its size, HIP_HRR_CAPTURE_MAX_BLOB_MB
- * notwithstanding: replay loads it to run its kernels and resolve its device
- * globals.
+ * Capture stores each registered fat binary, sized from the bundle header, and applies the same header checks HIP does.
+ * A bundle failing them, or one HIP refused after initialising, is not stored. Stored code objects have .comment and .debug* sections zeroed.
+ * Fat binaries are stored whatever their size, HIP_HRR_CAPTURE_MAX_BLOB_MB notwithstanding, because replay loads them to run kernels.
  */
 
 #include "hrr_test_common.hh"
@@ -66,16 +46,13 @@ constexpr char     kBundleMagic[]   = "__CLANG_OFFLOAD_BUNDLE__";
 constexpr size_t   kBundleMagicLen  = sizeof(kBundleMagic) - 1;
 constexpr size_t   kTableStart      = kBundleMagicLen + sizeof(uint64_t);
 constexpr size_t   kEntryHeaderSize = 3 * sizeof(uint64_t);
-// HIP hands COMGR only this much of the bundle to find the entry table in.
 constexpr size_t   kTableLimit      = 4096;
-// Where clang-offload-bundler puts the first code object.
 constexpr size_t   kPayloadOffset   = 4096;
 constexpr size_t   kMarkerPayload   = 64;
 constexpr char     kHostId[]        = "host-x86_64-unknown-linux-gnu-";
 constexpr char     kTargetPrefix[]  = "hipv4-amdgcn-amd-amdhsa--";
 // A real target no runner has, so HIP finds no code object for its GPUs.
 constexpr char     kForeignId[]     = "hipv4-amdgcn-amd-amdhsa--gfx600";
-// The compressed header as HIP reads it (version 2): 24 bytes up to the data.
 constexpr size_t   kCompressedHeaderSize = 24;
 constexpr uint32_t kHipfMagic       = 0x48495046u;  // "HIPF"
 
@@ -89,8 +66,6 @@ void put_u64(std::vector<uint8_t>& b, size_t at, uint64_t v) {
   std::memcpy(b.data() + at, &v, sizeof(v));
 }
 
-// An uncompressed bundle of total_size bytes: magic, entry count and entry
-// table at the front, zero elsewhere. Callers place the payloads.
 std::vector<uint8_t> uncompressed_bundle(const std::vector<BundleEntry>& entries,
                                          size_t total_size) {
   std::vector<uint8_t> b(total_size, 0);
@@ -158,7 +133,6 @@ std::vector<uint8_t> host_overflow_bundle(const std::string& target_id,
   return b;
 }
 
-// What clang emits for one target: an empty host entry, then the code object.
 std::vector<uint8_t> valid_bundle(const std::string& target_id,
                                   const std::vector<uint8_t>& payload) {
   auto b = uncompressed_bundle({{kPayloadOffset, 0, kHostId},
@@ -174,8 +148,6 @@ std::vector<uint8_t> marker_payload(const char* marker) {
   return p;
 }
 
-// The bundles registered before HIP initialises; the parent rebuilds the same
-// bytes to recognise what the capture stored.
 constexpr char     kPreInitValidMarker[]    = "HRR fatbin pre-init valid";
 constexpr char     kPreInitLongIdMarker[]   = "HRR fatbin pre-init long id";
 constexpr char     kPreInitOverflowMarker[] = "HRR fatbin pre-init overflow";
@@ -193,7 +165,6 @@ std::vector<uint8_t> preinit_long_id()    { return long_id_bundle(kPreInitLongId
 std::vector<uint8_t> preinit_overflow() {
   return host_overflow_bundle(kForeignId, marker_payload(kPreInitOverflowMarker));
 }
-// foreign_bundle() with kBundlePad bytes in its host entry, which HIP never loads.
 std::vector<uint8_t> preinit_padded() {
   const std::vector<uint8_t> payload = marker_payload(kPreInitPaddedMarker);
   const size_t pad_at = kPayloadOffset + payload.size();
@@ -257,19 +228,13 @@ uint64_t read_u64(const std::vector<uint8_t>& b, size_t at) {
 
 }  // namespace
 
-// ===========================================================================
-// The captured workload.
-// ===========================================================================
 TEST_CASE("Unit_HRR_FatBinHeader_Direct", "[.][hrr-direct]") {
-  // HIP is not initialised yet: it only notes these and returns a handle, and
-  // capture sees them when it starts, by sweeping HIP's list.
   REQUIRE(register_fat_binary(pin(preinit_valid())) != nullptr);
   REQUIRE(register_fat_binary(pin(preinit_compressed())) != nullptr);
   REQUIRE(register_fat_binary(pin(preinit_long_id())) != nullptr);
   REQUIRE(register_fat_binary(pin(preinit_overflow())) != nullptr);
   REQUIRE(register_fat_binary(pin(preinit_padded())) != nullptr);
 
-  // Initialises HIP, and with it capture.
   HRR_HIP_CHECK(hipSetDevice(0));
   hipDeviceProp_t prop{};
   HRR_HIP_CHECK(hipGetDeviceProperties(&prop, 0));
@@ -278,10 +243,8 @@ TEST_CASE("Unit_HRR_FatBinHeader_Direct", "[.][hrr-direct]") {
   REQUIRE(co.size() > 4);
   REQUIRE(std::memcmp(co.data(), "\x7f" "ELF", 4) == 0);
 
-  // From here HIP digests each bundle inside the call. These two it loads.
   REQUIRE(register_fat_binary(pin(valid_bundle(target, co))) != nullptr);
   REQUIRE(register_fat_binary(pin(host_overflow_bundle(target, co))) != nullptr);
-  // And these it refuses: no code object for this GPU, a bad header.
   REQUIRE(register_fat_binary(pin(live_foreign())) == nullptr);
   REQUIRE(register_fat_binary(pin(live_compressed())) == nullptr);
 }
@@ -294,27 +257,19 @@ struct RecordedFatBinary {
   std::vector<uint8_t> blob;
 };
 
-// True when the capture stored bytes from the start of `bundle`: all of it, or
-// the leading part a header overstating or understating its size would give.
 bool stored_from(const RecordedFatBinary& r, const std::vector<uint8_t>& bundle) {
   return r.has_blob && !r.blob.empty() && r.blob.size() <= bundle.size() &&
          std::memcmp(r.blob.data(), bundle.data(), r.blob.size()) == 0;
 }
 }  // namespace
 
-// ---------------------------------------------------------------------------
-// One capture covers both paths. Before the header checks, every altered
-// bundle here was stored: the short compressed headers as their first 23
-// bytes, the others whole, and the two HIP refused after it initialised as
-// well, although no launch from them can succeed.
-// ---------------------------------------------------------------------------
+// One capture covers both paths. Before the header checks every altered bundle was stored, including the two HIP refused after initialising.
 HRR_TEST_CASE(Unit_HRR_FatBinHeaderChecks) {
   ScopedDir cap(fs::temp_directory_path() / "hrr_fatbin_header.hrr");
   std::string out;
   { hrr::test::SpawnProc proc(hrr_self_exe(), /*capture_stdout=*/true,
                               /*capture_stderr=*/true);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
-    // The refusals are reported as warnings.
     proc.setEnv("AMD_LOG_LEVEL", "2");
     proc.setEnv("HIP_HRR_CAPTURE_MAX_BLOB_MB", "1");
     set_proc_search_path(proc);
@@ -376,8 +331,6 @@ HRR_TEST_CASE(Unit_HRR_FatBinHeaderChecks) {
   REQUIRE(overflow != nullptr);
   CHECK(overflow->blob_size == 0);
 
-  // The stored valid bundle is the one the workload built: its code object
-  // entry ends exactly where the blob ends.
   const auto& vb = valid->blob;
   REQUIRE(vb.size() > kPayloadOffset + 4);
   CHECK(std::memcmp(vb.data(), kBundleMagic, kBundleMagicLen) == 0);
@@ -395,7 +348,6 @@ HRR_TEST_CASE(Unit_HRR_FatBinHeaderChecks) {
     if (r.ret == 0 && !r.has_blob && r.blob_size == 0) ++refused_live;
   CHECK(refused_live == 2);
 
-  // No bytes from any altered or refused bundle reached the archive.
   const struct {
     const char*          name;
     std::vector<uint8_t> bytes;
@@ -414,29 +366,21 @@ HRR_TEST_CASE(Unit_HRR_FatBinHeaderChecks) {
     CHECK(hits == 0);
   }
 
-  // Each refusal says why.
   CHECK(out.find("is smaller than its 24-byte header") != std::string::npos);
   CHECK(out.find("past the first 4096 bytes") != std::string::npos);
   CHECK(out.find("an offset and size that overflow") != std::string::npos);
   CHECK(out.find("HIP did not register it") != std::string::npos);
 }
 
-// ===========================================================================
-// Code objects are stored without their build paths and compiler build.
-// ===========================================================================
 TEST_CASE("Unit_HRR_CodeObjectScrub_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
   hipDeviceProp_t prop{};
   HRR_HIP_CHECK(hipGetDeviceProperties(&prop, 0));
   const std::string target = std::string(kTargetPrefix) + prop.gcnArchName;
-  // Debug information is what puts the source file name and build directory
-  // into a code object.
   const std::vector<uint8_t> co = compile_code_object({"-g"});
 
-  // Stored as a fat binary blob.
   REQUIRE(register_fat_binary(pin(valid_bundle(target, co))) != nullptr);
 
-  // Stored under code_objects/, and launched so replay runs the stored copy.
   hipModule_t mod = nullptr;
   HRR_HIP_CHECK(hipModuleLoadData(&mod, co.data()));
   hipFunction_t fn = nullptr;
@@ -503,7 +447,6 @@ bool contains(const std::vector<uint8_t>& bytes, const std::string& needle) {
 
 HRR_TEST_CASE(Unit_HRR_CodeObjectScrub) {
   ScopedDir cap(fs::temp_directory_path() / "hrr_code_object_scrub.hrr");
-  // Replay checks the kernel's result, so the scrubbed copy loads and runs.
   hrr_run_roundtrip("Unit_HRR_CodeObjectScrub_Direct", cap.path);
 
   hrr::Archive arc;
@@ -552,7 +495,6 @@ HRR_TEST_CASE(Unit_HRR_CodeObjectScrub) {
   INFO("Fat binary code objects: " << bundle_count.elves << " ELF, " << bundle_count.sections
                                    << " sections, " << bundle_count.left << " not zeroed, "
                                    << bundle_count.typed << " not SHT_NOBITS");
-  // The probe was built with -g, so both copies had something to zero.
   CHECK(module_count.sections >= 2);
   CHECK(bundle_count.sections >= 2);
   CHECK(module_count.left == 0);
@@ -562,8 +504,6 @@ HRR_TEST_CASE(Unit_HRR_CodeObjectScrub) {
   CHECK(bundle_count.typed == 0);
 }
 
-// The walker reads a section name only inside its string table, even when the
-// bytes after the table would complete a name it looks for.
 HRR_TEST_CASE(Unit_HRR_CodeObjectScrubWalker) {
   std::vector<uint8_t> elf(80 + 2 * 64, 0);
   auto put = [&](size_t at, uint64_t v, size_t n) { std::memcpy(elf.data() + at, &v, n); };
@@ -583,7 +523,6 @@ HRR_TEST_CASE(Unit_HRR_CodeObjectScrubWalker) {
   put(sh + 32, 6, 8);
   ScrubCount c;
   CHECK_FALSE(count_scrub_sections(elf.data(), elf.size(), c));
-  // Declared up to its terminator, the same table parses.
   put(sh + 32, 10, 8);
   c = ScrubCount{};
   CHECK(count_scrub_sections(elf.data(), elf.size(), c));

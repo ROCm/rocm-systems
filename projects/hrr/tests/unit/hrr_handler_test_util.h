@@ -5,8 +5,6 @@
  */
 #pragma once
 
-// Helpers for the handler-level tests (hrr-handler-tests), which link the
-// playback handlers in and call them with crafted records.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -33,7 +31,6 @@ inline bool have_device() {
   return hipGetDeviceCount(&n) == hipSuccess && n > 0;
 }
 
-// Run `fn` with stderr redirected to a temporary file and return what it wrote.
 template <typename Fn>
 std::string capture_stderr(Fn&& fn) {
   char path[] = "/tmp/hrr_handler_stderrXXXXXX";
@@ -56,7 +53,6 @@ std::string capture_stderr(Fn&& fn) {
   return out;
 }
 
-// Call the handler the dispatch table holds for `id` with a crafted record.
 inline hipError_t dispatch(PlaybackContext& ctx, hrr_api_id_t id, const uint8_t* record) {
   REQUIRE(hrr_playback_dispatch[id] != nullptr);
   return hrr_playback_dispatch[id](ctx, record);

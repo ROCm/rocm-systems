@@ -8,16 +8,6 @@
  * @addtogroup HRR HRR Graph Dependency Bounds
  * @{
  * @ingroup HRRTest
- * Tests that the hand-written graph-node handlers (hip_playback.cpp) do not
- * read past a record whose dependency count is larger than the record holds
- *
- *
- * The handlers are linked in and called directly with a record built here, held
- * in a heap buffer of exactly sizeof(record) so that AddressSanitizer reports
- * any read past it. The target is built with AddressSanitizer by default
- * (HRR_HANDLER_TESTS_ASAN): without the bound the 1000-dependency case copies
- * 8000 bytes out of a 128-byte field and the sanitizer aborts the run. No case
- * reaches a HIP call, so no GPU is needed.
  */
 
 #include <catch2/catch_test_macros.hpp>
@@ -48,12 +38,6 @@ constexpr uint64_t kGraph = 0x1000;
 
 }  // namespace
 
-/**
- * Test Description
- * ----------------
- *   - The capacity helper: 128 bytes of 8-byte nodes hold 16, and a count above
- *     that does not fit, however large.
- */
 TEST_CASE("Unit_HRR_GraphDeps_InlineCapacity", "[hrr]") {
   CHECK(hrr::inline_capacity(128, 8) == 16);
   CHECK(hrr::inline_count_fits(0, 128, 8));
@@ -63,14 +47,6 @@ TEST_CASE("Unit_HRR_GraphDeps_InlineCapacity", "[hrr]") {
   CHECK_FALSE(hrr::inline_count_fits(1, 0, 8));
 }
 
-/**
- * Test Description
- * ----------------
- *   - A node recorded with more dependencies than the record stores (capture
- *     keeps 16 and records the caller's count too) is refused, not replayed
- *     with the missing ordering edges: the graph is marked incomplete and the
- *     message gives both counts. The two symbol-copy handlers do the same.
- */
 TEST_CASE("Unit_HRR_GraphDeps_TruncatedDependencyListIsRefused", "[hrr]") {
   CHECK(hrr::deps_complete(0, 0));
   CHECK(hrr::deps_complete(16, 16));
@@ -101,14 +77,6 @@ TEST_CASE("Unit_HRR_GraphDeps_TruncatedDependencyListIsRefused", "[hrr]") {
   CHECK(err.find("holds 16") != std::string::npos);
 }
 
-/**
- * Test Description
- * ----------------
- *   - hipGraphAddMemAllocNode with a dependency count of 17, 1000 and
- *     UINT32_MAX against a 16-slot field is refused: it returns without a HIP
- *     call, the graph is marked incomplete, and the message names the API and
- *     the event's sequence number. Under AddressSanitizer nothing is read past the record.
- */
 TEST_CASE("Unit_HRR_GraphDeps_MemAllocNodeRefusesOversizeCount", "[hrr]") {
   for (uint32_t n : {17u, 1000u, UINT32_MAX}) {
     PlaybackContext ctx;
@@ -136,12 +104,6 @@ TEST_CASE("Unit_HRR_GraphDeps_MemAllocNodeRefusesOversizeCount", "[hrr]") {
   }
 }
 
-/**
- * Test Description
- * ----------------
- *   - The same refusal in the two symbol-copy handlers, which read their
- *     dependencies through a different helper.
- */
 TEST_CASE("Unit_HRR_GraphDeps_SymbolCopyNodesRefuseOversizeCount", "[hrr]") {
   constexpr uint64_t kSym = 0x2000, kDev = 0x3000;
   char symbol_storage[64];
@@ -204,13 +166,6 @@ TEST_CASE("Unit_HRR_GraphDeps_SymbolCopyNodesRefuseOversizeCount", "[hrr]") {
   }
 }
 
-/**
- * Test Description
- * ----------------
- *   - The truncated-list refusal in the two symbol-copy handlers (dep_array):
- *     16 dependencies stored and 20 recorded is refused, not replayed with the
- *     missing ordering edges, as for the nodes that use translate_node_deps.
- */
 TEST_CASE("Unit_HRR_GraphDeps_SymbolCopyNodesRefuseTruncatedList", "[hrr]") {
   constexpr uint64_t kSym = 0x2000, kDev = 0x3000;
   char symbol_storage[64];

@@ -8,22 +8,11 @@
  * @addtogroup HRR HRR kernel-argument signature check
  * @{
  * @ingroup HRRTest
- * Replay checks a kernel launch record's arguments against the signature of the
- * kernel in the code object before it launches (AIRUNTIME-3070).
- *
- * The handler tests stand in for the code object. This one captures a real
- * launch on a GPU, so the signature replay compares against comes from
- * hipKernelGetParamInfo on the code object the archive carries. It replays the
- * archive unmodified as the control, then replays copies whose launch record
- * is edited to disagree with that signature. CLR reads kernelParams[i] only for
- * the kernel's own parameters, and only each parameter's size, so only a record
- * that does not cover the signature is refused. The handler tests cover the
- * comparison itself; here a record with too few arguments must be refused with
- * a line naming the sequence and the kernel, exit non-zero, and launch nothing.
- * Two edits are not refused, because nothing is read past the record: one more
- * argument appended, and an int recorded as eight bytes. Each must replay as
- * the unmodified archive does. Reading the signature must also leave no GPU
- * error behind.
+ * Replay checks a launch record's arguments against the kernel signature in the code object before launching (AIRUNTIME-3070).
+ * This captures a real launch on a GPU, replays it unmodified as the control, then replays copies whose record is edited.
+ * Only a record with too few arguments is refused: it must name the sequence and kernel, exit non-zero and launch nothing.
+ * An extra argument or an int recorded as eight bytes replays like the control, since CLR reads nothing past the record.
+ * Reading the signature must also leave no GPU error behind.
  */
 
 #include "hrr_test_common.hh"
@@ -51,15 +40,10 @@ constexpr int kExpected = kScale * 7 + kBias;
 constexpr const char* kProbeName = "hrr_sigcheck_probe";
 }  // namespace
 
-// Three explicit arguments of three kinds: a device pointer and two ints.
 __global__ void hrr_sigcheck_probe(int* out, int scale, int bias) {
   if (threadIdx.x == 0) out[0] = scale * 7 + bias;
 }
 
-// ===========================================================================
-// The captured workload: one launch whose result is read back, so a launch
-// that never happens is visible in the replayed D2H check as well.
-// ===========================================================================
 TEST_CASE("Unit_HRR_KernelSignature_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
 
@@ -169,8 +153,6 @@ void mutate(LaunchRecord& rec, Mutation m) {
   rec.fix_length();
 }
 
-// Copy the archive and splice `replacement` over the original launch record in
-// the copy's events.bin. Returns the copy's root.
 void splice_record(const fs::path& copy_root, const std::vector<uint8_t>& original,
                    const std::vector<uint8_t>& replacement) {
   const std::vector<fs::path> archives = hrr_process_archives(copy_root);
@@ -187,7 +169,6 @@ void splice_record(const fs::path& copy_root, const std::vector<uint8_t>& origin
   write_file(events, file);
 }
 
-// The one launch event of the kernel under test, found by name.
 LaunchRecord find_launch_record(const hrr::Archive& arc) {
   const hrr::Event* found = nullptr;
   size_t n = 0;
@@ -202,8 +183,7 @@ LaunchRecord find_launch_record(const hrr::Archive& arc) {
   return LaunchRecord(*found);
 }
 
-// The summary's launch counter. Replay stdout carries the summary, stderr the
-// refusal; both are merged.
+// Replay stdout carries the summary and stderr the refusal; both are merged.
 size_t kernels_launched(const std::string& out) {
   const size_t at = out.find("Kernels launched:");
   REQUIRE(at != std::string::npos);
@@ -212,18 +192,7 @@ size_t kernels_launched(const std::string& out) {
 
 }  // namespace
 
-// ---------------------------------------------------------------------------
-// One capture, replayed unmodified and then once per mutation.
-//
-//   - Control: the unmodified archive replays, launches its one kernel, and the
-//     read-back check passes. Without it a refusal below could be a replay that
-//     refuses everything.
-//   - Each mutated copy: replay exits non-zero, prints the refusal naming the
-//     record's sequence and the kernel, launches no kernel, and the read-back
-//     of the buffer the kernel would have written does not pass.
-//   - An extra argument, or one wider than its parameter, replays like the
-//     control: CLR reads neither past the record.
-// ---------------------------------------------------------------------------
+// The control must replay cleanly, or a refusal below could be a replay that refuses everything.
 TEST_CASE("Unit_HRR_KernelSignature_MismatchedArchiveRefused", "[.][hrr]") {
   ScopedDir cap(fs::temp_directory_path() / "hrr_kernel_signature.hrr");
   hrr_capture_direct("Unit_HRR_KernelSignature_Direct", cap.path, 5);
@@ -233,7 +202,6 @@ TEST_CASE("Unit_HRR_KernelSignature_MismatchedArchiveRefused", "[.][hrr]") {
   REQUIRE(hrr::load_archive(archive.string(), loaded));
   const LaunchRecord parsed = find_launch_record(loaded);
   const std::vector<uint8_t>& original = parsed.bytes;
-  // Pointer, scale, bias: capture records no hidden arguments.
   REQUIRE(parsed.args.size() == 3);
 
   SECTION("the unmodified archive replays") {

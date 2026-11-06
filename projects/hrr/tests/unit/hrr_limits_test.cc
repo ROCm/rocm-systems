@@ -8,11 +8,6 @@
  * @addtogroup HRR HRR Replay Limits
  * @{
  * @ingroup HRRTest
- * GPU-free unit tests for the bounds replay puts on what a malformed archive
- * can make it wait for or allocate: a gap or duplicate in the
- * recorded sequence numbers, a file larger than the cap, and a HIP query that
- * never completes. Each case builds a synthetic archive on disk with the
- * TmpArchive fixture and fails (hangs, then times out) if its bound is removed.
  */
 
 #include "hrr_test_common.hh"
@@ -50,9 +45,6 @@ hrr_event_header make_record(uint64_t seq, uint64_t thread_id = 42) {
   return h;
 }
 
-// Records of `len` bytes each (header included) whose payload is zeros. A
-// device-synchronize record parses without reading its payload, so the padding
-// is retained raw and nothing else.
 std::vector<uint8_t> padded_records(int n, uint32_t len) {
   std::vector<uint8_t> out;
   for (int i = 0; i < n; ++i) {
@@ -65,8 +57,6 @@ std::vector<uint8_t> padded_records(int n, uint32_t len) {
   return out;
 }
 
-// RAII synthetic archive directory: events.bin holds the file header and the
-// record bytes it is given.
 struct TmpArchive {
   fs::path root;
 
@@ -77,7 +67,6 @@ struct TmpArchive {
     fs::create_directories(root / "code_objects");
   }
 
-  // Event i is recorded by thread 42 + (i % distinct_threads).
   TmpArchive(const std::string& name, const std::vector<uint64_t>& seqs,
              uint64_t distinct_threads = 1)
       : TmpArchive(name) {
@@ -102,7 +91,6 @@ struct TmpArchive {
   }
 };
 
-// Restores the process-wide file cap when a test ends, pass or fail.
 struct FileCapGuard {
   uint64_t saved = hrr::max_file_bytes();
   ~FileCapGuard() { hrr::set_max_file_bytes(saved); }
@@ -136,11 +124,6 @@ ReplayResult replay(const hrr::Archive& a, uint64_t max_waits) {
 
 }  // namespace
 
-/**
- * Test Description
- * ----------------
- *   - A well-formed sequence replays to the end without stalling.
- */
 HRR_TEST_CASE(Unit_HRR_Limits_ContiguousSequenceReplays) {
   TmpArchive arc("contiguous", {0, 1, 2, 3});
   hrr::Archive a;
@@ -149,14 +132,6 @@ HRR_TEST_CASE(Unit_HRR_Limits_ContiguousSequenceReplays) {
   CHECK(r.last == hrr::TurnResult::Turn);
 }
 
-/**
- * Test Description
- * ----------------
- *   - A gap in the recorded sequence (0, 1, 3) leaves event 3 waiting for a
- *     turn nobody hands over. The wait ends as Stalled after the configured
- *     number of waits and reports the numbers: it wanted 3, the replay was
- *     at 2.
- */
 HRR_TEST_CASE(Unit_HRR_Limits_SequenceGapEndsReplay) {
   TmpArchive arc("gap", {0, 1, 3});
   hrr::Archive a;
@@ -168,12 +143,6 @@ HRR_TEST_CASE(Unit_HRR_Limits_SequenceGapEndsReplay) {
   CHECK(r.observed == 2);
 }
 
-/**
- * Test Description
- * ----------------
- *   - A duplicate sequence number (0, 1, 1): the second event 1 finds the
- *     replay already past it (at 2) and stalls rather than spinning forever.
- */
 HRR_TEST_CASE(Unit_HRR_Limits_DuplicateSequenceEndsReplay) {
   TmpArchive arc("dup", {0, 1, 1});
   hrr::Archive a;
@@ -185,12 +154,6 @@ HRR_TEST_CASE(Unit_HRR_Limits_DuplicateSequenceEndsReplay) {
   CHECK(r.observed == 2);
 }
 
-/**
- * Test Description
- * ----------------
- *   - A wait that another thread cuts short by setting the fatal flag returns
- *     Fatal, not Stalled, so a failing thread still stops the others at once.
- */
 HRR_TEST_CASE(Unit_HRR_Limits_FatalFlagEndsWait) {
   std::atomic<uint64_t> next_seq{0};
   std::atomic<bool> fatal{true};
@@ -200,13 +163,6 @@ HRR_TEST_CASE(Unit_HRR_Limits_FatalFlagEndsWait) {
   CHECK(observed == 0);
 }
 
-/**
- * Test Description
- * ----------------
- *   - read_file_capped refuses a file above the cap and the message names the
- *     path and the size; read_blob and read_code_object go through it. Raising
- *     the cap to the file's size lets the same file load.
- */
 HRR_TEST_CASE(Unit_HRR_Limits_ReadFileRefusesOversize) {
   FileCapGuard guard;
   CHECK(guard.saved == hrr::kDefaultMaxFileBytes);  // max_file_bytes() default
@@ -238,11 +194,6 @@ HRR_TEST_CASE(Unit_HRR_Limits_ReadFileRefusesOversize) {
   CHECK(hrr::read_blob(a, 1, 2, data));
 }
 
-/**
- * Test Description
- * ----------------
- *   - A missing file is reported as such, not as a size refusal.
- */
 HRR_TEST_CASE(Unit_HRR_Limits_ReadFileMissing) {
   std::vector<uint8_t> data;
   std::string err;
@@ -251,13 +202,6 @@ HRR_TEST_CASE(Unit_HRR_Limits_ReadFileMissing) {
   CHECK(err.find("file cap") == std::string::npos);
 }
 
-/**
- * Test Description
- * ----------------
- *   - retry_bounded, the loop behind hipEventQuery/hipStreamQuery replay, makes
- *     exactly max_attempts calls when the query never completes, stops at the
- *     first success, and makes no call when the bound is zero.
- */
 HRR_TEST_CASE(Unit_HRR_Limits_QueryRetryIsBounded) {
   uint64_t calls = 0;
   CHECK_FALSE(hrr::retry_bounded(25, [&] { ++calls; return false; }));
@@ -272,12 +216,6 @@ HRR_TEST_CASE(Unit_HRR_Limits_QueryRetryIsBounded) {
   CHECK(calls == 0);
 }
 
-/**
- * Test Description
- * ----------------
- *   - A duplicate sequence number is reported at once: the turn has passed, so
- *     waiting longer cannot help, however large the wait bound is.
- */
 HRR_TEST_CASE(Unit_HRR_Limits_DuplicateIsReportedImmediately) {
   std::atomic<uint64_t> next_seq{7};
   std::atomic<bool> fatal{false};
@@ -289,22 +227,12 @@ HRR_TEST_CASE(Unit_HRR_Limits_DuplicateIsReportedImmediately) {
   CHECK(std::chrono::steady_clock::now() - t0 < std::chrono::seconds(5));
 }
 
-/**
- * Test Description
- * ----------------
- *   - While a thread holds a turn and is inside its HIP call (busy > 0), a
- *     waiting thread does not count waits, so a call that runs longer than the
- *     bound is not mistaken for a missing event. When the call returns and the
- *     turn is handed over, the wait ends normally; a gap with nothing in
- *     flight still stalls.
- */
 HRR_TEST_CASE(Unit_HRR_Limits_NoStallWhileACallIsInFlight) {
   std::atomic<uint64_t> next_seq{4};
   std::atomic<bool> fatal{false};
   std::atomic<int> busy{1};
   hrr::TurnResult result = hrr::TurnResult::Stalled;
 
-  // The bound is tiny, and the call below outlasts it by a wide margin.
   std::thread waiter([&] { result = hrr::wait_for_turn(next_seq, 5, fatal, /*max_waits=*/20, nullptr, &busy); });
   std::this_thread::sleep_for(std::chrono::milliseconds(300));
   next_seq.store(5);  // the call returns and hands the turn on
@@ -312,7 +240,6 @@ HRR_TEST_CASE(Unit_HRR_Limits_NoStallWhileACallIsInFlight) {
   waiter.join();
   CHECK(result == hrr::TurnResult::Turn);
 
-  // A gap with nothing in flight stalls as before.
   std::atomic<uint64_t> stuck{4};
   uint64_t observed = 0;
   CHECK(hrr::wait_for_turn(stuck, 6, fatal, /*max_waits=*/20, &observed, &busy) ==
@@ -345,22 +272,12 @@ HRR_TEST_CASE(Unit_HRR_Limits_ParseU64) {
   CHECK_FALSE(hrr::parse_u64(nullptr, &v));
 }
 
-// ---------------------------------------------------------------------------
-// Caps on threads, host memory, events and wall time
-// ---------------------------------------------------------------------------
 
-// Restores the process-wide event cap when a test ends, pass or fail.
 struct EventCapGuard {
   uint64_t saved = hrr::max_events();
   ~EventCapGuard() { hrr::set_max_events(saved); }
 };
 
-/**
- * Test Description
- * ----------------
- *   - check_thread_cap allows a recorded thread count up to the cap and
- *     refuses one above it, with the recorded count and the cap in the message.
- */
 HRR_TEST_CASE(Unit_HRR_Limits_ThreadCap) {
   std::string why;
   CHECK(hrr::check_thread_cap(256, 256, &why));
@@ -371,14 +288,6 @@ HRR_TEST_CASE(Unit_HRR_Limits_ThreadCap) {
   CHECK_FALSE(hrr::check_thread_cap(1, 0, nullptr));
 }
 
-/**
- * Test Description
- * ----------------
- *   - hrr-playback --multi-thread on an archive recording more threads than
- *     --max-threads exits non-zero with the recorded count in the message,
- *     before it creates a replay thread (and before it touches the GPU, so the
- *     case needs no device).
- */
 HRR_TEST_CASE(Unit_HRR_Limits_PlaybackRefusesTooManyThreads) {
   TmpArchive arc("threads", {0, 1, 2, 3, 4, 5}, /*distinct_threads=*/6);
   auto [ret, out] = hrr_playback_merged(arc.root, "--multi-thread --max-threads 4");
@@ -387,14 +296,6 @@ HRR_TEST_CASE(Unit_HRR_Limits_PlaybackRefusesTooManyThreads) {
   CHECK(out.find("--max-threads") != std::string::npos);
 }
 
-/**
- * Test Description
- * ----------------
- *   - --max-wall-seconds above the documented maximum is refused with the
- *     maximum named, not silently shortened to it; the maximum itself and 0
- *     are not refused for their value (the run goes on to need a device, so
- *     only the refusal is checked here).
- */
 HRR_TEST_CASE(Unit_HRR_Limits_PlaybackRefusesWallSecondsAboveMaximum) {
   TmpArchive arc("wallmax", {0, 1});
   auto [ret, out] = hrr_playback_merged(arc.root, "--max-wall-seconds 31536001");
@@ -403,12 +304,6 @@ HRR_TEST_CASE(Unit_HRR_Limits_PlaybackRefusesWallSecondsAboveMaximum) {
   CHECK(out.find("--max-wall-seconds") != std::string::npos);
 }
 
-/**
- * Test Description
- * ----------------
- *   - load_archive stops at the event cap: an archive with three events fails
- *     to load under a cap of two and loads under a cap of three.
- */
 HRR_TEST_CASE(Unit_HRR_Limits_EventCap) {
   EventCapGuard guard;
   CHECK(guard.saved == hrr::kDefaultMaxEvents);  // max_events() default
@@ -424,11 +319,6 @@ HRR_TEST_CASE(Unit_HRR_Limits_EventCap) {
   CHECK(b.events.size() == 3);
 }
 
-/**
- * Test Description
- * ----------------
- *   - hrr-playback --max-events refuses an over-cap archive without a GPU.
- */
 HRR_TEST_CASE(Unit_HRR_Limits_PlaybackRefusesTooManyEvents) {
   TmpArchive arc("events_cli", {0, 1, 2});
   auto [ret, out] = hrr_playback_merged(arc.root, "--max-events 2");
@@ -462,11 +352,6 @@ HRR_TEST_CASE(Unit_HRR_Limits_ByteBudget) {
   CHECK(b.used() == 0);
 }
 
-/**
- * Test Description
- * ----------------
- *   - Many threads charging the same budget never take it past the cap.
- */
 HRR_TEST_CASE(Unit_HRR_Limits_ByteBudgetConcurrent) {
   hrr::ByteBudget b(1000);
   std::atomic<uint64_t> granted{0};
@@ -482,12 +367,6 @@ HRR_TEST_CASE(Unit_HRR_Limits_ByteBudgetConcurrent) {
   CHECK(b.used() >= 1000 - 7);
 }
 
-/**
- * Test Description
- * ----------------
- *   - ScopedCharge holds bytes while alive and returns them when it ends; a
- *     refused charge holds nothing.
- */
 HRR_TEST_CASE(Unit_HRR_Limits_ScopedCharge) {
   hrr::ByteBudget b(100);
   {
@@ -501,12 +380,6 @@ HRR_TEST_CASE(Unit_HRR_Limits_ScopedCharge) {
   CHECK(b.used() == 0);
 }
 
-/**
- * Test Description
- * ----------------
- *   - The wall-clock watchdog calls its handler once after the limit, and not
- *     at all when it is destroyed before the limit or when the limit is zero.
- */
 HRR_TEST_CASE(Unit_HRR_Limits_WallClockWatchdog) {
   using namespace std::chrono_literals;
   std::atomic<int> fired{0};
@@ -530,15 +403,6 @@ HRR_TEST_CASE(Unit_HRR_Limits_WallClockWatchdog) {
   CHECK(off.load() == 0);
 }
 
-/**
- * Test Description
- * ----------------
- *   - Host allocations are charged before they are made and released when the
- *     recorded address is freed or replaced (a second pass replays the same
- *     events; record_alloc itself leaves the charge with the live entry), so
- *     the budget does not drift upward; a refused charge ends
- *     the whole replay (fatal_error), not just the call, and takes no charge.
- */
 HRR_TEST_CASE(Unit_HRR_Limits_PlaybackContextHostBudget) {
   PlaybackContext ctx;
   ctx.host_budget.set_cap(100);
@@ -560,7 +424,6 @@ HRR_TEST_CASE(Unit_HRR_Limits_PlaybackContextHostBudget) {
   ctx.host_budget.release(60);  // the replaced 60-byte buffer's own release
   CHECK(ctx.host_budget.used() == 0);
 
-  // Replaced the way the handlers do it: free the old entry, then charge the new.
   REQUIRE(ctx.charge_host(60, "third"));
   ctx.record_alloc(0x10, nullptr, 60, AllocKind::HostMalloc);
   ctx.remove_alloc(0x10);
@@ -572,12 +435,10 @@ HRR_TEST_CASE(Unit_HRR_Limits_PlaybackContextHostBudget) {
   ctx.remove_alloc(0x10);
   CHECK(ctx.host_budget.used() == 0);
 
-  // A device allocation is never charged to the host budget.
   ctx.record_alloc(0x20, nullptr, 500, AllocKind::Device);
   ctx.remove_alloc(0x20);
   CHECK(ctx.host_budget.used() == 0);
 
-  // A refusal ends the replay and holds nothing.
   CHECK_FALSE(ctx.fatal_error.load());
   CHECK_FALSE(ctx.charge_host(101, "too big"));
   CHECK(ctx.fatal_error.load());
@@ -592,12 +453,6 @@ HRR_TEST_CASE(Unit_HRR_Limits_PlaybackContextHostBudget) {
   CHECK(ctx2.host_budget.used() == 0);
 }
 
-/**
- * Test Description
- * ----------------
- *   - find_duplicate_seq reports a sequence number that occurs twice, wherever
- *     the two events sit in the stream, and nothing for distinct numbers.
- */
 HRR_TEST_CASE(Unit_HRR_Limits_FindDuplicateSeq) {
   uint64_t dup = 0;
   CHECK_FALSE(hrr::find_duplicate_seq({}, &dup));
@@ -606,13 +461,6 @@ HRR_TEST_CASE(Unit_HRR_Limits_FindDuplicateSeq) {
   CHECK(dup == 1);
 }
 
-/**
- * Test Description
- * ----------------
- *   - find_seq_gap reports the first number missing between the smallest and
- *     largest, wherever the events sit in the stream; a contiguous stream (not
- *     necessarily starting at 0), an empty one and duplicates are not a gap.
- */
 HRR_TEST_CASE(Unit_HRR_Limits_FindSeqGap) {
   uint64_t missing = 0;
   CHECK_FALSE(hrr::find_seq_gap({}, &missing));
@@ -626,19 +474,7 @@ HRR_TEST_CASE(Unit_HRR_Limits_FindSeqGap) {
   CHECK(missing == 12);
 }
 
-// ---------------------------------------------------------------------------
-// The archive load is bounded in bytes and in time
-// ---------------------------------------------------------------------------
 
-/**
- * Test Description
- * ----------------
- *   - load_archive charges each record's raw bytes to the budget it is given
- *     and refuses an archive that does not fit, naming --max-host-bytes. It
- *     stops at the record that crosses the cap, so it holds far fewer events
- *     than the file has, and gives its charge back. The same archive loads
- *     under a larger budget, which stays charged for what the archive holds.
- */
 HRR_TEST_CASE(Unit_HRR_Limits_LoadByteBudget) {
   constexpr uint32_t kLen = 100 * 1024;
   constexpr int kRecords = 40;  // 4 MB of records
@@ -658,13 +494,6 @@ HRR_TEST_CASE(Unit_HRR_Limits_LoadByteBudget) {
   CHECK(large.used() >= uint64_t(kRecords) * kLen);
 }
 
-/**
- * Test Description
- * ----------------
- *   - read_raw_record charges a record before it allocates it: a header that
- *     claims a 60 MiB record under a 1 MiB budget is OverBudget, the buffer
- *     never grows past the header, and nothing is left charged.
- */
 HRR_TEST_CASE(Unit_HRR_Limits_RecordChargedBeforeAllocation) {
   const fs::path path = fs::temp_directory_path() / "hrr_lim_bigclaim.bin";
   {
@@ -686,14 +515,6 @@ HRR_TEST_CASE(Unit_HRR_Limits_RecordChargedBeforeAllocation) {
   fs::remove(path);
 }
 
-/**
- * Test Description
- * ----------------
- *   - A kernel launch whose arguments expand when parsed is charged for the
- *     expansion, not just its raw bytes: 20000 zero-length arguments are 60 kB
- *     on disk but 20000 KernelArg structs in memory. A budget that holds the
- *     raw record and not the expansion refuses it; a larger one loads it.
- */
 HRR_TEST_CASE(Unit_HRR_Limits_LoadChargesParsedKernelExpansion) {
   constexpr uint16_t kArgs = 20000;
   const auto body = make_launch_with_snapshot(0, {}, 0, kArgs);
@@ -718,15 +539,6 @@ HRR_TEST_CASE(Unit_HRR_Limits_LoadChargesParsedKernelExpansion) {
   CHECK(roomy_budget.used() >= raw + expanded);
 }
 
-/**
- * Test Description
- * ----------------
- *   - Each non-empty argument buffer is its own allocation of at least 32 bytes,
- *     so an argument of one byte with one pointer offset is charged for the two
- *     allocations, not for its 3 bytes: 20000 of them hold 128 bytes each, not
- *     the 67 their byte counts add up to. A budget that fits the byte counts
- *     and not the allocations refuses the record.
- */
 HRR_TEST_CASE(Unit_HRR_Limits_LoadChargesPerAllocationOverhead) {
   constexpr uint16_t kArgs = 20000;
   const auto body = make_launch_with_snapshot(0, {}, 0, kArgs, /*pointer_args=*/true);
@@ -749,13 +561,6 @@ HRR_TEST_CASE(Unit_HRR_Limits_LoadChargesPerAllocationOverhead) {
   CHECK(roomy.used() >= body.size() + by_allocations);
 }
 
-/**
- * Test Description
- * ----------------
- *   - hrr-playback --info on an archive larger than --max-host-bytes refuses
- *     it, naming the option, without a GPU; the same command with the cap
- *     raised prints the summary.
- */
 HRR_TEST_CASE(Unit_HRR_Limits_PlaybackInfoRefusesOverByteBudget) {
   TmpArchive arc("info_bytes");
   arc.write_events(padded_records(40, 100 * 1024));
@@ -767,21 +572,6 @@ HRR_TEST_CASE(Unit_HRR_Limits_PlaybackInfoRefusesOverByteBudget) {
   CHECK(ok_ret == 0);
 }
 
-/**
- * Test Description
- * ----------------
- *   - The event vector is charged at its capacity, and a growth holds the old
- *     and the new buffer at once: 5000 header-only records cost far more than
- *     5000 slots, so a budget sized for 5000 events refuses them.
- *   - A growth takes the new buffer before it gives the old one back: 4097
- *     events grow the vector from 4096 to 8192 slots, a peak of 12288, and a
- *     budget of 11000 slots, which holds either buffer and the sort's scratch
- *     but not both buffers, refuses them. A load that fits keeps the capacity
- *     charged.
- *   - The sort's scratch buffer is charged too: 8192 events fill a vector that
- *     has just grown, and a budget that holds the growth but not the sort's
- *     N/2 scratch refuses them.
- */
 HRR_TEST_CASE(Unit_HRR_Limits_LoadChargesEventVectorAndSort) {
   constexpr uint64_t kSlot = sizeof(hrr::Event);
   {
@@ -835,14 +625,6 @@ HRR_TEST_CASE(Unit_HRR_Limits_LoadChargesEventVectorAndSort) {
   }
 }
 
-/**
- * Test Description
- * ----------------
- *   - The blob and code-object maps hold one node per file, so a directory of
- *     empty files is charged for them: 2000 of each, under a budget that holds
- *     the one event and no map, refuses the archive and gives its charge back;
- *     under a larger budget the same archive loads.
- */
 HRR_TEST_CASE(Unit_HRR_Limits_LoadChargesBlobAndCodeObjectMaps) {
   for (const char* kind : {"blobs", "code_objects"}) {
     const char* ext = std::string(kind) == "blobs" ? ".blob" : ".hsaco";

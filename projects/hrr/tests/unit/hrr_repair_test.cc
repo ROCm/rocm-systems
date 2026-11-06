@@ -8,14 +8,6 @@
  * @addtogroup HRR HRR Repair
  * @{
  * @ingroup HRRTest
- * GPU-free tests that `hrr-playback --repair` never writes through a symbolic
- * link. Each case plants a link where repair writes (the old
- * predictable events temp name, events.bin, manifest.json, a pid-* directory)
- * and checks the link target's contents afterwards, and that a torn events.bin
- * is still recovered when nothing hostile is planted.
- *
- * POSIX only: the checks use symlink(2) and O_NOFOLLOW. Windows keeps its own
- * link refusal in hrr_playback.cpp.
  */
 
 #include "hrr_test_common.hh"
@@ -80,8 +72,6 @@ std::string read_text(const fs::path& p) {
   return ss.str();
 }
 
-// A scratch directory holding an archive and a "victim" file outside it that a
-// planted link points at.
 struct Scratch {
   fs::path root;     // the scratch directory
   fs::path archive;  // root/archive: a torn single-process archive
@@ -100,7 +90,6 @@ struct Scratch {
   ~Scratch() { fs::remove_all(root); }
 };
 
-// Names in `dir` that look like leftover repair temporaries.
 std::set<std::string> repair_leftovers(const fs::path& dir) {
   std::set<std::string> out;
   for (const auto& e : fs::directory_iterator(dir)) {
@@ -112,13 +101,6 @@ std::set<std::string> repair_leftovers(const fs::path& dir) {
 
 }  // namespace
 
-/**
- * Test Description
- * ----------------
- *   - With nothing planted, repair recovers the torn events.bin: the four
- *     whole records survive, the trailer is added, and no temporary file is
- *     left behind, and the permissions of events.bin are unchanged.
- */
 HRR_TEST_CASE(Unit_HRR_Repair_RecoversTornEventsWithoutLeftovers) {
   Scratch s("clean");
   struct stat before;
@@ -133,20 +115,11 @@ HRR_TEST_CASE(Unit_HRR_Repair_RecoversTornEventsWithoutLeftovers) {
   CHECK(a.events.size() == 4);
   CHECK(repair_leftovers(s.archive).empty());
 
-  // The replacement keeps the permissions of the file it replaced.
   struct stat st;
   REQUIRE(::stat((s.archive / "events.bin").c_str(), &st) == 0);
   CHECK((st.st_mode & 07777) == (before.st_mode & 07777));
 }
 
-/**
- * Test Description
- * ----------------
- *   - A symbolic link planted at the old predictable temporary name
- *     (events.bin.repair.tmp) is left alone: repair uses an unpredictable
- *     exclusive name, so the link's target keeps its contents and the link is
- *     still there, and the repair itself succeeds.
- */
 HRR_TEST_CASE(Unit_HRR_Repair_LinkAtOldTempNameIsLeftAlone) {
   Scratch s("tmplink");
   const fs::path link = s.archive / "events.bin.repair.tmp";
@@ -163,13 +136,6 @@ HRR_TEST_CASE(Unit_HRR_Repair_LinkAtOldTempNameIsLeftAlone) {
   CHECK(a.complete);
 }
 
-/**
- * Test Description
- * ----------------
- *   - A symbolic link at manifest.json is refused: repair exits non-zero, the
- *     link target keeps its contents, and events.bin is not rewritten (the
- *     refusal comes before any write).
- */
 HRR_TEST_CASE(Unit_HRR_Repair_ManifestLinkIsRefused) {
   Scratch s("manifestlink");
   const std::string torn_before = read_text(s.archive / "events.bin");
@@ -184,12 +150,6 @@ HRR_TEST_CASE(Unit_HRR_Repair_ManifestLinkIsRefused) {
   CHECK(repair_leftovers(s.archive).empty());
 }
 
-/**
- * Test Description
- * ----------------
- *   - events.bin that is itself a symbolic link to a torn file elsewhere is
- *     refused; the real file it names is not rewritten.
- */
 HRR_TEST_CASE(Unit_HRR_Repair_EventsLinkIsRefused) {
   Scratch s("eventslink");
   const fs::path real = s.root / "real_events.bin";
@@ -204,14 +164,6 @@ HRR_TEST_CASE(Unit_HRR_Repair_EventsLinkIsRefused) {
   CHECK(fs::is_symlink(s.archive / "events.bin"));
 }
 
-/**
- * Test Description
- * ----------------
- *   - Repairing an archive root whose pid-* entry is a symbolic link to a
- *     directory elsewhere does not write into that directory: the process whose
- *     directory is real is repaired, the linked one is reported as failed and
- *     the directory it names is untouched.
- */
 HRR_TEST_CASE(Unit_HRR_Repair_PidDirectoryLinkIsRefused) {
   Scratch s("pidlink");
   const fs::path elsewhere = s.root / "elsewhere";
@@ -236,12 +188,6 @@ HRR_TEST_CASE(Unit_HRR_Repair_PidDirectoryLinkIsRefused) {
   CHECK(a.complete);
 }
 
-/**
- * Test Description
- * ----------------
- *   - A symbolic link the user names as the archive is theirs: repair resolves
- *     it and repairs the directory it points to.
- */
 HRR_TEST_CASE(Unit_HRR_Repair_UserNamedLinkIsResolved) {
   Scratch s("userlink");
   const fs::path link = s.root / "latest";
@@ -256,12 +202,6 @@ HRR_TEST_CASE(Unit_HRR_Repair_UserNamedLinkIsResolved) {
   CHECK(a.complete);
 }
 
-/**
- * Test Description
- * ----------------
- *   - safefs::open_dir_at refuses a link to a directory and a plain file, and
- *     opens a real directory.
- */
 HRR_TEST_CASE(Unit_HRR_SafeFs_OpenDirRefusesLinks) {
   Scratch s("opendir");
   fs::create_directory_symlink(s.archive, s.root / "link");
@@ -276,13 +216,6 @@ HRR_TEST_CASE(Unit_HRR_SafeFs_OpenDirRefusesLinks) {
   CHECK_FALSE(hrr::safefs::open_dir_at(parent.get(), "../x", &err).valid());
 }
 
-/**
- * Test Description
- * ----------------
- *   - create_exclusive_temp makes distinct, private, new files, and
- *     commit_replace over a name that is a link replaces the link without
- *     writing through it.
- */
 HRR_TEST_CASE(Unit_HRR_SafeFs_TempIsExclusiveAndReplaceDoesNotFollow) {
   Scratch s("temp");
   std::string err;
@@ -299,7 +232,6 @@ HRR_TEST_CASE(Unit_HRR_SafeFs_TempIsExclusiveAndReplaceDoesNotFollow) {
   REQUIRE(::fstat(t1.get(), &st) == 0);
   CHECK((st.st_mode & 0777) == 0600);
 
-  // Replace a name that is a link: the link goes, the target stays.
   fs::create_symlink(s.victim, s.archive / "final");
   REQUIRE(::write(t1.get(), "new", 3) == 3);
   t1.reset();
@@ -314,12 +246,6 @@ HRR_TEST_CASE(Unit_HRR_SafeFs_TempIsExclusiveAndReplaceDoesNotFollow) {
   CHECK(hrr::safefs::stat_entry(dir.get(), "lnk") == hrr::safefs::Entry::Other);
 }
 
-/**
- * Test Description
- * ----------------
- *   - Repair keeps the permissions of the files it replaces: a group-readable
- *     0640 events.bin and manifest.json are still 0640 afterwards.
- */
 HRR_TEST_CASE(Unit_HRR_Repair_KeepsFilePermissions) {
   Scratch s("modes");
   write_text(s.archive / "manifest.json", "{\"pid\": 7, \"complete\": false}\n");
@@ -336,12 +262,6 @@ HRR_TEST_CASE(Unit_HRR_Repair_KeepsFilePermissions) {
   CHECK((st.st_mode & 07777) == 0640);
 }
 
-/**
- * Test Description
- * ----------------
- *   - Repair does not carry setuid or setgid over to the files it writes: a
- *     04750 events.bin and a 02750 manifest.json come back as 0750.
- */
 HRR_TEST_CASE(Unit_HRR_Repair_DropsSetuidAndSetgid) {
   Scratch s("setid");
   write_text(s.archive / "manifest.json", "{\"pid\": 7, \"complete\": false}\n");
@@ -358,13 +278,6 @@ HRR_TEST_CASE(Unit_HRR_Repair_DropsSetuidAndSetgid) {
   CHECK((st.st_mode & 07777) == 0750);
 }
 
-/**
- * Test Description
- * ----------------
- *   - A link at the root's manifest.json is refused before any process
- *     directory is repaired: exit non-zero, every process left as it was, the
- *     link target untouched.
- */
 HRR_TEST_CASE(Unit_HRR_Repair_RootManifestLinkIsRefusedBeforeFanOut) {
   Scratch s("rootmanifest");
   const fs::path rootdir = s.root / "capture";
@@ -384,11 +297,6 @@ HRR_TEST_CASE(Unit_HRR_Repair_RootManifestLinkIsRefusedBeforeFanOut) {
   CHECK(read_text(rootdir / "pid-200" / "events.bin") == before200);
 }
 
-/**
- * Test Description
- * ----------------
- *   - A linked pid-* directory is not listed in the rewritten root index.
- */
 HRR_TEST_CASE(Unit_HRR_Repair_LinkedPidDirectoryIsNotIndexed) {
   Scratch s("pidindex");
   const fs::path elsewhere = s.root / "elsewhere";
@@ -411,12 +319,6 @@ HRR_TEST_CASE(Unit_HRR_Repair_LinkedPidDirectoryIsNotIndexed) {
   CHECK(index.find("\"pid\": 200") == std::string::npos);
 }
 
-/**
- * Test Description
- * ----------------
- *   - open_dir_nofollow_leaf resolves "link/../x" the way the kernel does (the
- *     parent of what the link points to), not by textual collapsing.
- */
 HRR_TEST_CASE(Unit_HRR_SafeFs_DotDotAfterLinkIsResolvedByTheKernel) {
   Scratch s("dotdot");
   fs::create_directories(s.root / "real" / "sub");
@@ -435,13 +337,6 @@ HRR_TEST_CASE(Unit_HRR_SafeFs_DotDotAfterLinkIsResolvedByTheKernel) {
   CHECK(got.st_ino != want_lexical.st_ino);
 }
 
-/**
- * Test Description
- * ----------------
- *   - safefs::Fd owns its descriptor: valid() reflects it, a move transfers it
- *     and leaves the source empty, release() hands it back without closing it,
- *     and reset() closes it.
- */
 HRR_TEST_CASE(Unit_HRR_SafeFs_FdOwnsItsDescriptor) {
   hrr::safefs::Fd none;
   CHECK_FALSE(none.valid());
@@ -472,12 +367,6 @@ HRR_TEST_CASE(Unit_HRR_SafeFs_FdOwnsItsDescriptor) {
   CHECK(::fcntl(released, F_GETFD) == -1);  // reset() did
 }
 
-/**
- * Test Description
- * ----------------
- *   - random_hex yields 16 lower-case hex digits and differs between calls;
- *     errno_text names what failed and the system's description of errno.
- */
 HRR_TEST_CASE(Unit_HRR_SafeFs_RandomHexAndErrnoText) {
   std::string a, b;
   REQUIRE(hrr::safefs::random_hex(&a));
@@ -492,13 +381,6 @@ HRR_TEST_CASE(Unit_HRR_SafeFs_RandomHexAndErrnoText) {
   CHECK(text.find(std::strerror(ENOENT)) != std::string::npos);
 }
 
-/**
- * Test Description
- * ----------------
- *   - unlink_at removes the name it is given; given a symbolic link it removes
- *     the link and leaves the target alone; given a name that is not there it
- *     does nothing.
- */
 HRR_TEST_CASE(Unit_HRR_SafeFs_UnlinkAtRemovesTheNameNotTheTarget) {
   Scratch s("unlink");
   std::string err;
@@ -517,13 +399,6 @@ HRR_TEST_CASE(Unit_HRR_SafeFs_UnlinkAtRemovesTheNameNotTheTarget) {
   hrr::safefs::unlink_at(dir.get(), "absent");  // no effect, no crash
 }
 
-/**
- * Test Description
- * ----------------
- *   - create_exclusive_temp creates the file with the mode it is asked for
- *     (private 0600 by default; the umask applies), under the stem it is
- *     given, with an unpredictable suffix.
- */
 HRR_TEST_CASE(Unit_HRR_SafeFs_TempFileModeAndName) {
   Scratch s("tempmode");
   std::string err;

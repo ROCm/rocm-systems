@@ -8,44 +8,8 @@
  * @addtogroup HRR HRR dispatch-table swap and capture shutdown
  * @{
  * @ingroup HRRTest
- * What the capture leaves behind when it shuts down, and what it refuses to
- * record once it has.
- *
- *   Unit_HRR_DispatchSwap_WrapperOutlivesCapture:
- *     A profiler-style wrapper goes into the hipMemcpy slot after the shims are
- *     installed, and a thread keeps calling hipMemcpy through it across exit.
- *     Uninstall must leave the wrapper in its slot while restoring the others,
- *     and the shim the wrapper still calls must add nothing after the trailer:
- *     no event record, and no blob the manifest does not count.
- *
- *   Unit_HRR_FailedBlobWrite_LeavesCaptureIncomplete:
- *     A blob that cannot be written leaves an event naming a missing file, so
- *     the archive must not claim to be complete.
- *
- *   Unit_HRR_FailedBlobClose_LeavesCaptureIncomplete:
- *     The same, when the blob is small enough to sit in the stdio buffer and
- *     its write fails only when the file is closed.
- *
- *   Unit_HRR_DispatchSwap_NoUnreplayableAfterTrailer:
- *     A shim reached after the trailer, whose event is dropped, must not list
- *     its API under manifest.unreplayable_apis; one reached before must.
- *
- *   Unit_HRR_DispatchSwap_ChildKeepsInheritedPreload:
- *     Preloading the tool must not drop what the test process itself preloads,
- *     such as an emulator's interposer; the child needs both.
- *
- *   Unit_HRR_Fork_ChildArchiveCompleteAfterParentFailure:
- *     The failure above marks the parent's archive only. A child forked
- *     afterwards writes its own archive and must still get its trailer, and
- *     the parent must keep capturing after fork().
- *
- * The live dispatch table is reached through rocprofiler-register, the way a
- * profiler reaches it: hrr_dispatch_tool.cc is loaded as the tool library.
- * Preloading the same library lets a workload act as the capture opens its
- * manifest, after the trailer is written.
- * Linux only, like the rocprofiler-register integration in libamdhip64. A
- * runtime built without that integration has no table to reach, so the tests
- * that need it skip.
+ * The live dispatch table is reached through rocprofiler-register, as a profiler does: hrr_dispatch_tool.cc is loaded as the tool library.
+ * Linux only. A runtime built without that integration has no table, so the tests that need it skip.
  */
 
 #include "hrr_test_common.hh"
@@ -104,7 +68,6 @@ HipDispatchTable* tool_hip_table() {
   return fn ? static_cast<HipDispatchTable*>(fn()) : nullptr;
 }
 
-// The leading fields of rocprofiler_register_registration_info_t.
 struct RegistrationInfo {
   size_t size;
   const char* common_name;
@@ -131,8 +94,6 @@ bool hip_registered() {
   return hip;
 }
 
-// True, after telling the driver, when no tool can get the HIP table because
-// the runtime never registered it. Call after hip::init().
 bool runtime_has_no_table() {
   if (tool_hip_table() || hip_registered()) return false;
   printf(HRR_NO_TABLE_MARKER "\n");
@@ -176,9 +137,6 @@ hipError_t memcpy_with_failing_blob(void* dev, size_t bytes = kBigBlob,
   return err;
 }
 
-// ---------------------------------------------------------------------------
-// Wrapped slot
-// ---------------------------------------------------------------------------
 
 using MemcpyFn = decltype(HipDispatchTable::hipMemcpy_fn);
 
@@ -199,15 +157,12 @@ hipError_t wrapped_hipMemcpy(void* dst, const void* src, size_t bytes, hipMemcpy
 void caller_loop(void* dev) {
   unsigned char buf[64] = {0x5e};
   for (uint64_t i = 1; !g_swap.stop.load(std::memory_order_acquire); ++i) {
-    // A fresh payload each call, so each one is a new blob rather than a dedup hit.
     std::memcpy(buf + 8, &i, sizeof(i));
     (void)hipMemcpy(dev, buf, sizeof(buf), hipMemcpyHostToDevice);
     g_swap.calls.fetch_add(1, std::memory_order_release);
   }
 }
 
-// Runs after hip_capture_shutdown(). Lets the caller go on through the wrapper
-// for a while first, so calls after the capture closed are certain to exist.
 void swap_late_check() {
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
   const uint64_t at_hook = g_swap.calls.load(std::memory_order_acquire);
@@ -262,12 +217,8 @@ TEST_CASE("Unit_HRR_DispatchSwap_Direct", "[.][hrr-direct]") {
   g_swap.caller = new std::thread(caller_loop, dev);
   while (g_swap.calls.load(std::memory_order_acquire) < 64)
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
-  // Returning starts exit with the caller still running.
 }
 
-// ---------------------------------------------------------------------------
-// Failed blob write
-// ---------------------------------------------------------------------------
 
 TEST_CASE("Unit_HRR_FailedBlobWrite_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
@@ -299,9 +250,6 @@ TEST_CASE("Unit_HRR_FailedBlobClose_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFree(dev));
 }
 
-// ---------------------------------------------------------------------------
-// Unreplayable call after the trailer
-// ---------------------------------------------------------------------------
 
 using UserObjectCreateFn = decltype(HipDispatchTable::hipUserObjectCreate_fn);
 std::atomic<UserObjectCreateFn> g_late_shim{nullptr};
@@ -335,7 +283,6 @@ TEST_CASE("Unit_HRR_DispatchSwap_Unreplayable_Direct", "[.][hrr-direct]") {
   REQUIRE(t != nullptr);
   REQUIRE(t->size >= offsetof(HipDispatchTable, hipUserObjectCreate_fn) + sizeof(void*));
 
-  // Recorded while capture runs, so listed with its event.
   HRR_HIP_CHECK(hipLaunchHostFunc(nullptr, noop_host_fn, nullptr));
   HRR_HIP_CHECK(hipDeviceSynchronize());
 
@@ -345,8 +292,6 @@ TEST_CASE("Unit_HRR_DispatchSwap_Unreplayable_Direct", "[.][hrr-direct]") {
   REQUIRE(tool_set_fopen_hook(before_own_manifest));
 }
 
-// Reports what the child was started with: whether the tool is loaded, and the
-// whole LD_PRELOAD.
 TEST_CASE("Unit_HRR_DispatchSwap_Preload_Direct", "[.][hrr-direct]") {
   const char* preload = std::getenv("LD_PRELOAD");
   const bool tool = dlsym(RTLD_DEFAULT, "hrr_dispatch_tool_set_fopen_hook") != nullptr;
@@ -354,9 +299,6 @@ TEST_CASE("Unit_HRR_DispatchSwap_Preload_Direct", "[.][hrr-direct]") {
   fflush(stdout);
 }
 
-// ---------------------------------------------------------------------------
-// fork() after a failure
-// ---------------------------------------------------------------------------
 
 pid_t g_fork_parent = 0;
 
@@ -376,7 +318,6 @@ hipError_t add_node_with_too_many_deps(hipGraph_t graph, const hipGraphNode_t* d
 
 TEST_CASE("Unit_HRR_Fork_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
-  // The tool arms the late hook only once it has the table.
   if (runtime_has_no_table()) return;
   INFO("rocprofiler-register did not pass the HIP table to " HRR_DISPATCH_TOOL);
   REQUIRE(tool_hip_table() != nullptr);
@@ -385,10 +326,8 @@ TEST_CASE("Unit_HRR_Fork_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipMalloc(&dev, kBigBlob));
   HRR_HIP_CHECK(memcpy_with_failing_blob(dev));
 
-  // Unreplayable in the parent's archive only.
   HRR_HIP_CHECK(hipLaunchHostFunc(nullptr, noop_host_fn, nullptr));
   HRR_HIP_CHECK(hipDeviceSynchronize());
-  // Truncated in both archives: the child makes the same call.
   hipGraph_t graph = nullptr;
   HRR_HIP_CHECK(hipGraphCreate(&graph, 0));
   hipGraphNode_t deps[kTooManyDeps] = {};
@@ -424,16 +363,12 @@ TEST_CASE("Unit_HRR_Fork_Direct", "[.][hrr-direct]") {
   REQUIRE(WIFEXITED(status));
   REQUIRE(WEXITSTATUS(status) == 0);
 
-  // fork() must hand the parent back both writer locks: this call takes them.
   unsigned char buf[64] = {0x3c};
   HRR_HIP_CHECK(hipMemcpy(dev, buf, sizeof(buf), hipMemcpyHostToDevice));
   HRR_HIP_CHECK(hipGraphDestroy(graph));
   HRR_HIP_CHECK(hipFree(dev));
 }
 
-// ---------------------------------------------------------------------------
-// Drivers
-// ---------------------------------------------------------------------------
 
 // The baked-in path, or the same file next to this binary when the build was
 // unpacked somewhere else. CMake builds both into the same directory.
@@ -467,14 +402,12 @@ std::string capture_workload(const fs::path& cap, const char* direct_case, bool 
   return out;
 }
 
-// True when the workload found no HIP table to use; the caller skips.
 bool skipped_without_table(const std::string& out) {
   if (out.find(HRR_NO_TABLE_MARKER) == std::string::npos) return false;
   SUCCEED("libamdhip64 does not register with rocprofiler-register - skipping");
   return true;
 }
 
-// The token after "key": in a manifest.json, or "" if the key is absent.
 std::string manifest_value(const fs::path& archive, const std::string& key) {
   const std::string text = read_text_file(archive / "manifest.json");
   const std::string needle = "\"" + key + "\":";
@@ -487,7 +420,6 @@ std::string manifest_value(const fs::path& archive, const std::string& key) {
   return text.substr(at, end - at);
 }
 
-// Files under `dir` with `extension`, and of them those exactly `size` bytes long.
 std::pair<size_t, size_t> count_files(const fs::path& dir, const std::string& extension,
                                       uintmax_t size = 0) {
   std::pair<size_t, size_t> n{0, 0};
@@ -526,9 +458,6 @@ TrailerScan scan_events(const fs::path& archive) {
 
 }  // namespace
 
-// Before the slot-by-slot swap, uninstall copied the whole table back and the
-// wrapper vanished; and a shim reached through it after flush() appended to a
-// finalized archive.
 HRR_TEST_CASE(Unit_HRR_DispatchSwap_WrapperOutlivesCapture) {
   ScopedDir cap(fs::temp_directory_path() / "hrr_dispatch_swap.hrr");
   const std::string out = capture_workload(cap.path, "Unit_HRR_DispatchSwap_Direct", true);
@@ -542,7 +471,6 @@ HRR_TEST_CASE(Unit_HRR_DispatchSwap_WrapperOutlivesCapture) {
   unsigned long long calls = 0;
   REQUIRE(sscanf(out.c_str() + at, HRR_SWAP_MARKER " kept=%d restored=%zu calls=%llu", &kept,
                  &restored, &calls) == 3);
-  // Uninstall ran before the check, and left the wrapper where it was.
   CHECK(restored > 0);
   CHECK(kept == 1);
 
@@ -554,8 +482,6 @@ HRR_TEST_CASE(Unit_HRR_DispatchSwap_WrapperOutlivesCapture) {
   for (const auto& ev : ar.events)
     if (ev.header().event_type == HRR_API_HIPMEMCPY) ++memcpys;
   INFO("hipMemcpy calls " << calls << ", recorded " << memcpys);
-  // The shim was reached through the wrapper, and was still being called once
-  // the archive stopped taking records.
   REQUIRE(memcpys > 0);
   REQUIRE(calls > memcpys);
 
@@ -569,7 +495,6 @@ HRR_TEST_CASE(Unit_HRR_DispatchSwap_WrapperOutlivesCapture) {
   CHECK(manifest_value(archive, "blob_count") == std::to_string(files));
 }
 
-// Before, the failed write was only a warning and the archive got its trailer.
 HRR_TEST_CASE(Unit_HRR_FailedBlobWrite_LeavesCaptureIncomplete) {
   ScopedDir cap(fs::temp_directory_path() / "hrr_failed_blob.hrr");
   capture_workload(cap.path, "Unit_HRR_FailedBlobWrite_Direct", false);
@@ -586,7 +511,6 @@ HRR_TEST_CASE(Unit_HRR_FailedBlobWrite_LeavesCaptureIncomplete) {
   CHECK(manifest_value(archive, "complete") == "false");
 }
 
-// Before, fclose()'s result was ignored and the truncated blob was published.
 HRR_TEST_CASE(Unit_HRR_FailedBlobClose_LeavesCaptureIncomplete) {
   ScopedDir cap(fs::temp_directory_path() / "hrr_failed_blob_close.hrr");
   const std::string out = capture_workload(cap.path, "Unit_HRR_FailedBlobClose_Direct", false);
@@ -619,7 +543,6 @@ HRR_TEST_CASE(Unit_HRR_FailedBlobClose_LeavesCaptureIncomplete) {
   CHECK(manifest_value(archive, "complete") == "false");
 }
 
-// Before, the shim listed its API before the cut-off dropped its event.
 HRR_TEST_CASE(Unit_HRR_DispatchSwap_NoUnreplayableAfterTrailer) {
   ScopedDir cap(fs::temp_directory_path() / "hrr_late_unreplayable.hrr");
   const std::string out =
@@ -627,7 +550,6 @@ HRR_TEST_CASE(Unit_HRR_DispatchSwap_NoUnreplayableAfterTrailer) {
   INFO("Workload output:\n" << out);
   if (skipped_without_table(out)) return;
 
-  // The shim ran between the trailer and the manifest, and the call succeeded.
   const size_t at = out.find(HRR_LATE_MARKER " err=");
   REQUIRE(at != std::string::npos);
   int err = -1;
@@ -653,8 +575,6 @@ HRR_TEST_CASE(Unit_HRR_DispatchSwap_NoUnreplayableAfterTrailer) {
   CHECK(manifest.find("\"hipUserObjectCreate\"") == std::string::npos);
 }
 
-// Before, the child got the tool alone and lost whatever this process preloads,
-// which under rocJitsu is the emulator itself.
 HRR_TEST_CASE(Unit_HRR_DispatchSwap_ChildKeepsInheritedPreload) {
   // A library every process here has loaded already, so preloading it changes
   // nothing but the variable. Restored on the way out, failed or not.
@@ -682,13 +602,11 @@ HRR_TEST_CASE(Unit_HRR_DispatchSwap_ChildKeepsInheritedPreload) {
       capture_workload(cap.path, "Unit_HRR_DispatchSwap_Preload_Direct", false, true);
   INFO("Workload output:\n" << out);
 
-  // The tool is loaded, and in front of what this process preloads.
   const std::string expected =
       HRR_PRELOAD_MARKER " tool=1 preload=" + dispatch_tool_path() + ":" + inherited + "\n";
   CHECK(out.find(expected) != std::string::npos);
 }
 
-// Before, the child inherited the parent's incomplete flag and lost its trailer.
 HRR_TEST_CASE(Unit_HRR_Fork_ChildArchiveCompleteAfterParentFailure) {
   ScopedDir cap(fs::temp_directory_path() / "hrr_fork_incomplete.hrr");
   const std::string out = capture_workload(cap.path, "Unit_HRR_Fork_Direct", true);
@@ -719,8 +637,6 @@ HRR_TEST_CASE(Unit_HRR_Fork_ChildArchiveCompleteAfterParentFailure) {
   CHECK(manifest_value(child_dir, "complete") == "true");
 }
 
-// Before, the child listed the parent's unreplayable APIs, and a truncation the
-// parent had already warned about was not listed for the child's own event.
 HRR_TEST_CASE(Unit_HRR_Fork_ChildListsOnlyItsOwnUnreplayableApis) {
   ScopedDir cap(fs::temp_directory_path() / "hrr_fork_unreplayable.hrr");
   const std::string out = capture_workload(cap.path, "Unit_HRR_Fork_Direct", true);

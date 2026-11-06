@@ -98,7 +98,6 @@ extern "C" __global__ void mtx_rtc_coop(int* out, int n) {
 __device__ int mtx_rtc_global[64];
 )";
 
-// Compile kRtcSource and return the code object bytes.
 std::vector<char> compile_rtc() {
   hiprtcProgram prog = nullptr;
   HIPRTC_CHECK(hiprtcCreateProgram(&prog, kRtcSource, "mtx_rtc.hip",
@@ -139,23 +138,11 @@ int device_attr(hipDeviceAttribute_t attr, int device = 0) {
 
 }  // namespace
 
-// ===========================================================================
-// T0 — dense LLM inference / serving substrate.
-//
-// The highest-priority use-case surface: PyTorch eager + hipBLASLt + a
-// stream-captured graph. Most of it is already covered elsewhere; what this
-// workload adds is the launch and module holes it actually depends on and no
-// existing workload reaches — hipDrvLaunchKernelEx (Triton's default modern launch path),
-// hipLaunchKernelExC (CK cluster launches), hipLaunchHostFunc recorded into a
-// captured graph (CK's FMHA-backward launcher via aiter's mha_bwd) and
-// hipModuleUnload.
-//
+// T0 -- dense LLM inference / serving substrate: the launch and module holes no other workload reaches.
 // Final blob: d_out[i] == 7 + 7.
-// ===========================================================================
 TEST_CASE("Unit_HRR_ApiMatrix_UC1Dense_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
 
-  // ---- Device and runtime identity ---------------------------------------
   {
     int count = 0, dev = 0, rt = 0, drv = 0;
     HRR_HIP_CHECK(hipGetDeviceCount(&count));
@@ -167,7 +154,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_UC1Dense_Direct", "[.][hrr-direct]") {
     REQUIRE(total_bytes > 0);
   }
 
-  // ---- Allocation --------------------------------------------------------
   int *d_a = nullptr, *d_b = nullptr, *d_out = nullptr;
   HRR_HIP_CHECK(hipMalloc(&d_a, kSZ));
   HRR_HIP_CHECK(hipMalloc(&d_b, kSZ));
@@ -178,8 +164,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_UC1Dense_Direct", "[.][hrr-direct]") {
                           hipHostMallocDefault));
   for (int i = 0; i < kN; ++i) h_pinned[i] = 7;
 
-  // hipHostRegister / hipHostGetDevicePointer / hipHostUnregister — the
-  // zero-copy path torch uses for pinned staging buffers.
   std::vector<int> h_reg(kN, 7);
   if (hipHostRegister(h_reg.data(), kSZ, hipHostRegisterDefault) == hipSuccess) {
     void* dev_ptr = nullptr;
@@ -192,7 +176,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_UC1Dense_Direct", "[.][hrr-direct]") {
     (void)hipPointerGetAttributes(&attrs, d_a);
   }
 
-  // ---- Streams and events ------------------------------------------------
   hipStream_t s_default = nullptr, s_prio = nullptr;
   HRR_HIP_CHECK(hipStreamCreate(&s_default));
   hipStream_t s_nb = nullptr;
@@ -212,7 +195,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_UC1Dense_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipEventCreate(&ev_stop));
   HRR_HIP_CHECK(hipEventCreateWithFlags(&ev_flag, hipEventDisableTiming));
 
-  // ---- Data movement -----------------------------------------------------
   HRR_HIP_CHECK(hipMemcpy(d_a, h_pinned, kSZ, hipMemcpyHostToDevice));
   HRR_HIP_CHECK(hipMemcpyAsync(d_b, h_pinned, kSZ, hipMemcpyHostToDevice, s_default));
   HRR_HIP_CHECK(hipMemcpyWithStream(d_out, h_pinned, kSZ, hipMemcpyHostToDevice, s_nb));
@@ -228,7 +210,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_UC1Dense_Direct", "[.][hrr-direct]") {
                               s_default));
   HRR_HIP_CHECK(hipStreamSynchronize(s_default));
 
-  // ---- Chevron launch (the __hipPushCallConfiguration path) --------------
   HRR_HIP_CHECK(hipEventRecord(ev_start, s_default));
   hipLaunchKernelGGL(hrr_mtx_add, dim3((kN + 255) / 256), dim3(256), 0, s_default,
                      d_a, d_b, d_out, kN);
@@ -242,13 +223,11 @@ TEST_CASE("Unit_HRR_ApiMatrix_UC1Dense_Direct", "[.][hrr-direct]") {
   }
   HRR_HIP_CHECK(hipStreamWaitEvent(s_nb, ev_stop, 0));
 
-  // hipFuncGetAttributes against the chevron kernel's device function.
   {
     hipFuncAttributes fattr{};
     (void)hipFuncGetAttributes(&fattr, reinterpret_cast<const void*>(hrr_mtx_add));
   }
 
-  // ---- Module path: load, launch four ways, unload -----------------------
   std::vector<char> co = compile_rtc();
   hipModule_t mod = nullptr;
   HRR_HIP_CHECK(hipModuleLoadData(&mod, co.data()));
@@ -264,11 +243,9 @@ TEST_CASE("Unit_HRR_ApiMatrix_UC1Dense_Direct", "[.][hrr-direct]") {
   int  n_arg    = kN;
   void* kargs[] = {&d_out, &fill_val, &n_arg};
 
-  // 1. hipModuleLaunchKernel — the baseline module launch.
   HRR_HIP_CHECK(hipModuleLaunchKernel(fn, blocks, 1, 1, 256, 1, 1, 0, s_default,
                                   kargs, nullptr));
 
-  // 2. hipExtModuleLaunchKernel — global-work-size form, with event timing.
   HRR_HIP_CHECK(hipExtModuleLaunchKernel(fn, kN, 1, 1, 256, 1, 1, 0, s_default,
                                      kargs, nullptr, nullptr, nullptr, 0));
 
@@ -313,7 +290,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_UC1Dense_Direct", "[.][hrr-direct]") {
   // matters for workloads that load and unload modules at high rates.
   HRR_HIP_CHECK(hipModuleUnload(mod));
 
-  // ---- Dispatch-table lookups torch and RCCL use -------------------------
   {
     void* sym = nullptr;
     (void)hipGetProcAddress("hipMalloc", &sym, 0, 0, nullptr);
@@ -322,7 +298,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_UC1Dense_Direct", "[.][hrr-direct]") {
                              reinterpret_cast<const void*>(hrr_mtx_add));
   }
 
-  // ---- Stream-captured graph, with a host function recorded into it -------
   {
     hipStreamCaptureStatus status = hipStreamCaptureStatusNone;
     hipGraph_t graph = nullptr;
@@ -355,7 +330,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_UC1Dense_Direct", "[.][hrr-direct]") {
     HRR_HIP_CHECK(hipGraphDestroy(graph));
   }
 
-  // ---- Final D2H: the blob replay must reproduce -------------------------
   HRR_HIP_CHECK(hipDeviceSynchronize());
   std::vector<int> h_out(kN, 0);
   HRR_HIP_CHECK(hipMemcpy(h_out.data(), d_out, kSZ, hipMemcpyDeviceToHost));
@@ -379,16 +353,8 @@ TEST_CASE("Unit_HRR_ApiMatrix_UC1Dense_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFree(d_a));
 }
 
-// ===========================================================================
-// T1 — the payload-loss class.
-//
-// Most take a const-struct pointer or a >8-byte by-value struct. Some
-// replay through a real handler, some are NOOP and
-// hipLaunchCooperativeKernelMultiDevice is UNREPLAYABLE; the matrix asserts
-// each one's class.
-//
+// T1 -- payload-loss class: const-struct pointers or >8-byte by-value structs; the matrix asserts each API's replay class.
 // Final blob: d[i] == 3.
-// ===========================================================================
 TEST_CASE("Unit_HRR_ApiMatrix_PayloadLoss_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
 
@@ -400,7 +366,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_PayloadLoss_Direct", "[.][hrr-direct]") {
                      d, 3, kN);
   HRR_HIP_CHECK(hipStreamSynchronize(s));
 
-  // ---- The 64-byte IPC handle ---------------------------------------------
   // hipIpcMemHandle_t is HIP_IPC_HANDLE_SIZE (64) bytes passed by value, and
   // capture does not record it. HIP rejects an open in the owning process, and
   // capture records hipIpcOpenMemHandle only on hipSuccess, so the matrix
@@ -434,7 +399,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_PayloadLoss_Direct", "[.][hrr-direct]") {
     }
   }
 
-  // ---- hipMemCreate's allocation properties -------------------------------
   // hipMemAllocationProp is carried inline and replay allocates with the
   // recorded type and location. A non-zero location.id would exercise that on
   // a multi-GPU host.
@@ -457,7 +421,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_PayloadLoss_Direct", "[.][hrr-direct]") {
     }
   }
 
-  // ---- hipStreamBatchMemOp's op list --------------------------------------
   // The op array is a plain (non-const) pointer, so the mechanical detector in
   // derive_manifest.py never flagged it — api_matrix.yaml marks it by hand.
   // The ops are carried inline and their device addresses are translated at
@@ -483,7 +446,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_PayloadLoss_Direct", "[.][hrr-direct]") {
     }
   }
 
-  // ---- External memory / semaphore import ---------------------------------
   // Both take a const descriptor pointer. There is no portable handle to
   // import here, so both fail, and capture records them only on hipSuccess:
   // the matrix expects no event for either.
@@ -515,7 +477,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_PayloadLoss_Direct", "[.][hrr-direct]") {
     }
   }
 
-  // ---- Multi-device launch descriptors ------------------------------------
   // hipLaunchParams carries the kernel as a host function address, which is
   // the payload-loss shape this tier is about, in the launch family that has
   // the least chance of surviving it. One device is enough to record it.
@@ -534,7 +495,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_PayloadLoss_Direct", "[.][hrr-direct]") {
     (void)hipStreamSynchronize(s);
   }
 
-  // ---- Final D2H ----------------------------------------------------------
   HRR_HIP_CHECK(hipDeviceSynchronize());
   std::vector<int> h(kN, 0);
   HRR_HIP_CHECK(hipMemcpy(h.data(), d, kSZ, hipMemcpyDeviceToHost));
@@ -544,34 +504,10 @@ TEST_CASE("Unit_HRR_ApiMatrix_PayloadLoss_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFree(d));
 }
 
-// ===========================================================================
-// T2 — silent failures: where one of these is NOOP at replay, it returns
-// hipSuccess and does nothing. The matrix asserts which ones are NOOP.
-//
-// These rank above breadth, because a replay that reports success while
-// producing wrong numbers is worse than one that refuses to run. Four
-// families:
-//
-//   graph mutation      ggml/llama.cpp mutates its instantiated graph per
-//                       token; the graph was legitimately stream-captured, so
-//                       the check that refuses graphs replay cannot rebuild
-//                       never fires, and where the mutation replays as a
-//                       no-op every token replays the first token's
-//                       parameters.
-//   stream value ops    XLA's VMM allocator waits on a value a no-op would
-//                       never write; replay would hang.
-//   hipHostAlloc        allocates nothing. cudaHostAlloc hipifies here while
-//                       cudaMallocHost hipifies to the working spelling.
-//   __device__ symbols  MoRI's globalGpuStates arrives through
-//                       hipModuleGetGlobal / hipMemcpyToSymbol; where those
-//                       are no-ops, replayed kernels dereference zeros.
-//
-// Note the D2H at the end is written by a *chevron* launch, not by any of the
-// above: the archive must still have a valid blob for the roundtrip to mean
-// anything.
-//
+// T2 -- silent failures: APIs that are NOOP at replay return hipSuccess and do nothing; the matrix asserts which.
+// Families: graph mutation, stream value ops, hipHostAlloc, __device__ symbols (MoRI globalGpuStates).
+// The final D2H comes from a chevron launch so the archive still has a valid blob.
 // Final blob: d[i] == 5.
-// ===========================================================================
 TEST_CASE("Unit_HRR_ApiMatrix_SilentFailure_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
 
@@ -580,7 +516,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_SilentFailure_Direct", "[.][hrr-direct]") {
   hipStream_t s = nullptr;
   HRR_HIP_CHECK(hipStreamCreate(&s));
 
-  // ---- Legacy pinned-alloc spellings --------------------------------------
   {
     void* p = nullptr;
     if (hipHostAlloc(&p, kSZ, hipHostMallocDefault) == hipSuccess && p) {
@@ -594,7 +529,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_SilentFailure_Direct", "[.][hrr-direct]") {
     if (hipMemAllocHost(&ah, kSZ) == hipSuccess && ah) (void)hipFreeHost(ah);
   }
 
-  // ---- __device__ symbol access -------------------------------------------
   {
     std::vector<char> co = compile_rtc();
     hipModule_t mod = nullptr;
@@ -633,7 +567,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_SilentFailure_Direct", "[.][hrr-direct]") {
     (void)hipStreamSynchronize(s);
   }
 
-  // ---- Stream value operations --------------------------------------------
   // Write then wait on the same location. At capture both succeed; were the
   // write a no-op at replay, a real waiter would never be satisfied. Use a
   // pinned host flag so this cannot wedge the *capture* run.
@@ -657,7 +590,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_SilentFailure_Direct", "[.][hrr-direct]") {
     }
   }
 
-  // ---- Cooperative module launch ------------------------------------------
   // Live on Instinct through MIOpen's Winograd Fury RxS solver.
   if (device_attr(hipDeviceAttributeCooperativeLaunch)) {
     std::vector<char> co = compile_rtc();
@@ -675,7 +607,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_SilentFailure_Direct", "[.][hrr-direct]") {
     }
   }
 
-  // ---- Graph mutation family ----------------------------------------------
   // Capture a graph the supported way, instantiate it, then mutate it the way
   // llama.cpp does per token. Not every spelling is a no-op at replay; the
   // matrix asserts each one's class.
@@ -712,7 +643,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_SilentFailure_Direct", "[.][hrr-direct]") {
       if (type == hipGraphNodeTypeKernel) {
         hipKernelNodeParams kp{};
         if (hipGraphKernelNodeGetParams(nodes[i], &kp) == hipSuccess) {
-          // The per-token mutation: same node, new arguments.
           (void)hipGraphKernelNodeSetParams(nodes[i], &kp);
           (void)hipGraphExecKernelNodeSetParams(exec, nodes[i], &kp);
 
@@ -757,7 +687,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_SilentFailure_Direct", "[.][hrr-direct]") {
       }
     }
 
-    // hipGraphExecUpdate — the whole-graph form of the same mutation.
     {
       hipGraphExecUpdateResult update_result{};
       hipGraphNode_t error_node = nullptr;
@@ -852,7 +781,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_SilentFailure_Direct", "[.][hrr-direct]") {
     HRR_HIP_CHECK(hipFree(d_copy));
   }
 
-  // ---- Final D2H ----------------------------------------------------------
   HRR_HIP_CHECK(hipDeviceSynchronize());
   std::vector<int> h(kN, 0);
   HRR_HIP_CHECK(hipMemcpy(h.data(), d, kSZ, hipMemcpyDeviceToHost));
@@ -862,16 +790,8 @@ TEST_CASE("Unit_HRR_ApiMatrix_SilentFailure_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFree(d));
 }
 
-// ===========================================================================
-// T3 — multi-GPU: device identity, peer access, IPC and VMM.
-//
-// The multi-GPU APIs are the least faithfully replayed group, and the problem
-// is structural rather than per-API — events carry no device ID and alloc_map
-// has no device field, so a replay cannot know which GPU an allocation
-// belonged to. Needs two visible devices; the test skips on a host with fewer.
-//
-// Final blob: d1[i] == 0x5A5A5A5A, copied device-to-device across the pair.
-// ===========================================================================
+// T3 -- multi-GPU: events carry no device ID and alloc_map has no device field, so replay cannot know an allocation's GPU.
+// Needs two visible devices; skipped otherwise. Final blob: d1[i] == 0x5A5A5A5A.
 TEST_CASE("Unit_HRR_ApiMatrix_MultiGpu_Direct", "[.][hrr-direct]") {
   int ndev = 0;
   HRR_HIP_CHECK(hipGetDeviceCount(&ndev));
@@ -883,7 +803,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_MultiGpu_Direct", "[.][hrr-direct]") {
 
   HRR_HIP_CHECK(hipSetDevice(src_dev));
 
-  // ---- Topology queries ----------------------------------------------------
   int can_access = 0;
   HRR_HIP_CHECK(hipDeviceCanAccessPeer(&can_access, src_dev, dst_dev));
   {
@@ -905,7 +824,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_MultiGpu_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipMemset(d1, 0, kSZ));
   HRR_HIP_CHECK(hipDeviceSynchronize());
 
-  // ---- Peer access and peer copies ----------------------------------------
   HRR_HIP_CHECK(hipSetDevice(src_dev));
   const bool peer_enabled =
       can_access && hipDeviceEnablePeerAccess(dst_dev, 0) == hipSuccess;
@@ -920,7 +838,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_MultiGpu_Direct", "[.][hrr-direct]") {
     HRR_HIP_CHECK(hipStreamDestroy(peer_stream));
   }
 
-  // ---- VMM: reserve, create, map, set access, unmap -----------------------
   // hipMemCreate's properties are carried inline, so replay uses the recorded
   // device, not device 0, in a two-GPU capture.
   if (device_attr(hipDeviceAttributeVirtualMemoryManagementSupported, src_dev)) {
@@ -959,10 +876,7 @@ TEST_CASE("Unit_HRR_ApiMatrix_MultiGpu_Direct", "[.][hrr-direct]") {
     }
   }
 
-  // The shareable-handle family is in
-  // Unit_HRR_ApiMatrix_ShareableHandle_Direct.
 
-  // ---- Verify the peer copy landed, and leave the blob for replay ---------
   HRR_HIP_CHECK(hipSetDevice(dst_dev));
   std::vector<int> h(kN, 0);
   HRR_HIP_CHECK(hipMemcpy(h.data(), d1, kSZ, hipMemcpyDeviceToHost));
@@ -974,17 +888,8 @@ TEST_CASE("Unit_HRR_ApiMatrix_MultiGpu_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFree(d0));
 }
 
-// ===========================================================================
-// T3 — the fabric / shareable-handle family, on its own.
-//
-// MoRI's VMHeap and the PyTorch symmetric-memory path both hand memory between
-// ranks with these. hipMemRetainAllocationHandle and
-// hipMemGetAllocationPropertiesFromHandle are NOOP at replay,
-// hipMemExportToShareableHandle is REAL and hipMemImportFromShareableHandle is
-// UNREPLAYABLE.
-//
-// No final blob: nothing here writes device memory.
-// ===========================================================================
+// T3 -- fabric / shareable-handle family (MoRI VMHeap, PyTorch symmetric memory).
+// hipMemExportToShareableHandle is REAL, hipMemImportFromShareableHandle UNREPLAYABLE, the other two NOOP. No final blob.
 TEST_CASE("Unit_HRR_ApiMatrix_ShareableHandle_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
   if (!device_attr(hipDeviceAttributeVirtualMemoryManagementSupported, 0))
@@ -1059,18 +964,8 @@ TEST_CASE("Unit_HRR_ApiMatrix_ShareableHandle_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFree(d));
 }
 
-// ===========================================================================
-// T4 — breadth: the APIs no existing workload reaches.
-//
-// The suite's 42 workloads already cover the device, stream, event, memcpy,
-// memset, mempool, module, occupancy and graph families, so this workload is
-// deliberately the remainder rather than another pass over the same ground:
-// error-string and last-error handling, the library and link loaders, batch
-// memory operations, user objects, device resource partitioning, and the
-// stream-per-thread (_spt) spellings.
-//
+// T4 -- breadth: APIs no existing workload reaches (errors, library/link loaders, batch memops, user objects, _spt spellings).
 // Final blob: d[i] == 11.
-// ===========================================================================
 TEST_CASE("Unit_HRR_ApiMatrix_Breadth_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
 
@@ -1079,7 +974,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_Breadth_Direct", "[.][hrr-direct]") {
   hipStream_t s = nullptr;
   HRR_HIP_CHECK(hipStreamCreate(&s));
 
-  // ---- Error handling ------------------------------------------------------
   {
     (void)hipGetLastError();
     (void)hipPeekAtLastError();
@@ -1093,7 +987,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_Breadth_Direct", "[.][hrr-direct]") {
     (void)hipApiName(0);
   }
 
-  // ---- Stream identity and attributes --------------------------------------
   {
     int stream_dev = 0;
     unsigned long long stream_id = 0;
@@ -1110,7 +1003,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_Breadth_Direct", "[.][hrr-direct]") {
     }
   }
 
-  // ---- CU-masked streams (RCCL's channel isolation path) -------------------
   // hipExtStreamGetCUMask rejects a buffer smaller than one bit per CU, so the
   // word count has to come from the device rather than a constant: a fixed 8
   // words covers parts up to 256 CUs but not gfx94X's 304, and a rejected call
@@ -1132,7 +1024,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_Breadth_Direct", "[.][hrr-direct]") {
     }
   }
 
-  // ---- Host callbacks ------------------------------------------------------
   // Both record a host function pointer belonging to this process, which means
   // nothing in the replaying one.
   {
@@ -1142,7 +1033,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_Breadth_Direct", "[.][hrr-direct]") {
     (void)hipStreamSynchronize(s);
   }
 
-  // ---- User objects --------------------------------------------------------
   {
     hipUserObject_t obj = nullptr;
     int payload = 0;
@@ -1154,7 +1044,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_Breadth_Direct", "[.][hrr-direct]") {
     }
   }
 
-  // ---- Library loader (the hipModule successor) ----------------------------
   {
     std::vector<char> co = compile_rtc();
     hipLibrary_t lib = nullptr;
@@ -1181,7 +1070,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_Breadth_Direct", "[.][hrr-direct]") {
     }
   }
 
-  // ---- Module-level introspection -----------------------------------------
   {
     std::vector<char> co = compile_rtc();
     hipModule_t mod = nullptr;
@@ -1192,7 +1080,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_Breadth_Direct", "[.][hrr-direct]") {
     }
   }
 
-  // ---- Link-time code assembly ---------------------------------------------
   {
     hipLinkState_t link_state = nullptr;
     if (hipLinkCreate(0, nullptr, nullptr, &link_state) == hipSuccess) {
@@ -1211,11 +1098,9 @@ TEST_CASE("Unit_HRR_ApiMatrix_Breadth_Direct", "[.][hrr-direct]") {
   // the in-tree dispatch table but not in the SDK headers this suite compiles
   // against, so it has no call site. Those APIs come back as not-exercised.
 
-  // ---- Profiler control ----------------------------------------------------
   (void)hipProfilerStart();
   (void)hipProfilerStop();
 
-  // ---- Stream-per-thread spellings -----------------------------------------
   {
     HRR_HIP_CHECK(hipMemsetAsync(d, 0, kSZ, hipStreamPerThread));
     hipLaunchKernelGGL(hrr_mtx_fill, dim3((kN + 255) / 256), dim3(256), 0,
@@ -1223,7 +1108,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_Breadth_Direct", "[.][hrr-direct]") {
     HRR_HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
   }
 
-  // ---- Final D2H -----------------------------------------------------------
   HRR_HIP_CHECK(hipDeviceSynchronize());
   std::vector<int> h(kN, 0);
   HRR_HIP_CHECK(hipMemcpy(h.data(), d, kSZ, hipMemcpyDeviceToHost));
@@ -1233,22 +1117,10 @@ TEST_CASE("Unit_HRR_ApiMatrix_Breadth_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFree(d));
 }
 
-// ===========================================================================
-// T4 — the explicit graph node-construction API.
-//
-// The other graph coverage in this suite builds graphs by stream capture,
-// which is how PyTorch, vLLM and llama.cpp build theirs. This workload builds
-// one the other way, node by node. Around 55 APIs sit on that path; most now
-// replay for real, and the handful that do not answer with ERROR_STUB and
-// poison the graph so instantiating it fails loudly. A matrix that never
-// calls them cannot notice if one quietly starts doing something else.
-//
-// The external-semaphore node family is absent on purpose: those nodes need an
-// imported semaphore, which needs a real fd from another process, and a call
-// that fails is never recorded. They stay not-exercised, which is accurate.
-//
-// Final blob: d[i] == 17, written by a graph launched from an explicit node.
-// ===========================================================================
+// T4 -- explicit graph node construction, node by node, unlike the stream-captured graphs elsewhere.
+// APIs that answer ERROR_STUB poison the graph so instantiation fails loudly.
+// External-semaphore nodes are omitted: they need an imported fd, and failed calls are not recorded.
+// Final blob: d[i] == 17.
 TEST_CASE("Unit_HRR_ApiMatrix_GraphNodes_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
 
@@ -1265,7 +1137,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_GraphNodes_Direct", "[.][hrr-direct]") {
   hipGraph_t graph = nullptr;
   HRR_HIP_CHECK(hipGraphCreate(&graph, 0));
 
-  // ---- One node of every kind ---------------------------------------------
   hipGraphNode_t empty_node = nullptr;
   (void)hipGraphAddEmptyNode(&empty_node, graph, nullptr, 0);
 
@@ -1374,7 +1245,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_GraphNodes_Direct", "[.][hrr-direct]") {
     }
   }
 
-  // Child graph, and the generic hipGraphAddNode spelling.
   hipGraph_t child = nullptr;
   hipGraphNode_t child_node = nullptr;
   if (hipGraphCreate(&child, 0) == hipSuccess) {
@@ -1393,7 +1263,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_GraphNodes_Direct", "[.][hrr-direct]") {
     (void)hipGraphAddNode(&generic_node, build_only, nullptr, 0, &np);
   }
 
-  // Batch memory operations as a graph node: XLA's VMM allocator shape.
   {
     hipStreamBatchMemOpParams op{};
     op.operation = hipStreamMemOpWriteValue32;
@@ -1411,7 +1280,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_GraphNodes_Direct", "[.][hrr-direct]") {
     }
   }
 
-  // Driver-API node spellings.
   {
     HIP_MEMCPY3D drv_copy{};
     drv_copy.srcMemoryType = hipMemoryTypeDevice;
@@ -1439,7 +1307,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_GraphNodes_Direct", "[.][hrr-direct]") {
                                     reinterpret_cast<hipDeviceptr_t>(d_copy));
   }
 
-  // ---- Topology queries and edits -----------------------------------------
   (void)hipGraphAddDependencies(graph, &memset_node, &host_node, 1);
   (void)hipGraphRemoveDependencies(graph, &memset_node, &host_node, 1);
   {
@@ -1469,7 +1336,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_GraphNodes_Direct", "[.][hrr-direct]") {
                                           &num_dependents);
   }
 
-  // Kernel-node attributes: the cooperative flag and the priority CK sets.
   {
     hipKernelNodeAttrValue attr{};
     (void)hipGraphKernelNodeGetAttribute(kernel_node,
@@ -1486,7 +1352,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_GraphNodes_Direct", "[.][hrr-direct]") {
     }
   }
 
-  // Clone, and the node-identity mapping between original and clone.
   {
     hipGraph_t clone = nullptr;
     if (hipGraphClone(&clone, graph) == hipSuccess) {
@@ -1496,7 +1361,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_GraphNodes_Direct", "[.][hrr-direct]") {
     }
   }
 
-  // User objects tied to a graph's lifetime.
   {
     hipUserObject_t obj = nullptr;
     int payload = 0;
@@ -1508,7 +1372,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_GraphNodes_Direct", "[.][hrr-direct]") {
     }
   }
 
-  // ---- Instantiate, mutate the executable, launch -------------------------
   hipGraphExec_t exec = nullptr;
   if (hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0) == hipSuccess) {
     (void)hipGraphExecEventRecordNodeSetEvent(exec, record_node, ev_a);
@@ -1539,7 +1402,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_GraphNodes_Direct", "[.][hrr-direct]") {
     }
   }
 
-  // ---- Capturing into a graph that already has nodes ----------------------
   {
     hipGraph_t target = nullptr;
     if (hipGraphCreate(&target, 0) == hipSuccess) {
@@ -1555,7 +1417,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_GraphNodes_Direct", "[.][hrr-direct]") {
     }
   }
 
-  // Graph memory pool accounting.
   {
     size_t used = 0;
     (void)hipDeviceGetGraphMemAttribute(0, hipGraphMemAttrUsedMemHigh, &used);
@@ -1567,7 +1428,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_GraphNodes_Direct", "[.][hrr-direct]") {
   if (build_only != nullptr) (void)hipGraphDestroy(build_only);
   (void)hipGraphDestroy(graph);
 
-  // ---- Final D2H -----------------------------------------------------------
   hipLaunchKernelGGL(hrr_mtx_fill, dim3((kN + 255) / 256), dim3(256), 0, s, d,
                      17, kN);
   HRR_HIP_CHECK(hipStreamSynchronize(s));
@@ -1583,19 +1443,8 @@ TEST_CASE("Unit_HRR_ApiMatrix_GraphNodes_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFree(d));
 }
 
-// ===========================================================================
-// T4 — the legacy driver-context ABI and the stream-per-thread spellings.
-//
-// Two families no modern workload reaches, for opposite reasons. The hipCtx*
-// and hipConfigureCall/hipSetupArgument/hipLaunchByPtr surfaces are the
-// pre-runtime-API spellings, still exported and still reachable from old
-// code. The _spt spellings are what any translation unit compiled with
-// -fgpu-default-stream=per-thread calls instead of the plain names — the same
-// operations under different API IDs, and a recording made by such a program
-// contains those IDs rather than the ones every other workload here produces.
-//
-// Final blob: d[i] == 19.
-// ===========================================================================
+// T4 -- legacy driver-context ABI (hipCtx*, hipConfigureCall/hipSetupArgument/hipLaunchByPtr) and the _spt spellings.
+// _spt calls record different API IDs than the plain names. Final blob: d[i] == 19.
 TEST_CASE("Unit_HRR_ApiMatrix_LegacySurface_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
 
@@ -1606,16 +1455,12 @@ TEST_CASE("Unit_HRR_ApiMatrix_LegacySurface_Direct", "[.][hrr-direct]") {
   hipEvent_t ev = nullptr;
   HRR_HIP_CHECK(hipEventCreateWithFlags(&ev, hipEventDisableTiming));
 
-  // The driver-context family is in Unit_HRR_ApiMatrix_LegacyCtx_Direct.
   (void)hipSetDeviceFlags(hipDeviceScheduleAuto);
 
-  // ---- The pre-chevron launch ABI, minus the argument pushes --------------
-  // hipSetupArgument is in Unit_HRR_ApiMatrix_LegacyLaunch_Direct.
   {
     (void)hipConfigureCall(dim3(1), dim3(64), 0, s);
   }
 
-  // ---- Function and kernel attributes -------------------------------------
   {
     (void)hipFuncSetAttribute(reinterpret_cast<const void*>(hrr_mtx_fill),
                               hipFuncAttributeMaxDynamicSharedMemorySize, 0);
@@ -1632,7 +1477,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_LegacySurface_Direct", "[.][hrr-direct]") {
 #endif
   }
 
-  // ---- Module and library loaders in their remaining spellings ------------
   {
     std::vector<char> co = compile_rtc();
     hipModule_t fat_module = nullptr;
@@ -1668,7 +1512,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_LegacySurface_Direct", "[.][hrr-direct]") {
     }
   }
 
-  // ---- Pointer and allocation introspection -------------------------------
   {
     hipDeviceptr_t base = 0;
     size_t range_size = 0;
@@ -1691,7 +1534,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_LegacySurface_Direct", "[.][hrr-direct]") {
 #endif
   }
 
-  // ---- Deprecated device-property spellings -------------------------------
   {
     hipDeviceProp_tR0000 old_props{};
     if (hipGetDevicePropertiesR0000(&old_props, 0) == hipSuccess) {
@@ -1700,8 +1542,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_LegacySurface_Direct", "[.][hrr-direct]") {
     }
   }
 
-  // ---- Batched memory operations ------------------------------------------
-  // The 1D batch form is what a collective's gather/scatter step turns into.
   {
     int* batch_dst = nullptr;
     if (hipMalloc(&batch_dst, kSZ) == hipSuccess) {
@@ -1718,7 +1558,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_LegacySurface_Direct", "[.][hrr-direct]") {
     }
   }
 
-  // ---- Driver 2D copy with no alignment requirement ------------------------
   {
     int* unaligned_dst = nullptr;
     if (hipMalloc(&unaligned_dst, kSZ) == hipSuccess) {
@@ -1736,7 +1575,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_LegacySurface_Direct", "[.][hrr-direct]") {
     }
   }
 
-  // ---- Driver entry-point lookup ------------------------------------------
   // Both of these are NOOP at replay. hipGetProcAddress_spt is in
   // Unit_HRR_ApiMatrix_ProcAddress_Direct.
   {
@@ -1748,7 +1586,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_LegacySurface_Direct", "[.][hrr-direct]") {
     (void)hipGetDriverEntryPoint_spt("hipMalloc", &spt_entry, 0, &spt_status);
   }
 
-  // ---- Stream-per-thread spellings ----------------------------------------
   // The two _spt kernel launches are in
   // Unit_HRR_ApiMatrix_SptKernelLaunch_Direct and
   // Unit_HRR_ApiMatrix_SptCoopLaunch_Direct. The callback pair below is
@@ -1789,7 +1626,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_LegacySurface_Direct", "[.][hrr-direct]") {
     (void)hipStreamSynchronize(hipStreamPerThread);
   }
 
-  // ---- Capture, in the _spt spellings and with the v2 query ---------------
   {
     if (hipStreamBeginCapture_spt(hipStreamPerThread,
                                   hipStreamCaptureModeThreadLocal)
@@ -1829,7 +1665,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_LegacySurface_Direct", "[.][hrr-direct]") {
     }
   }
 
-  // ---- Final D2H -----------------------------------------------------------
   hipLaunchKernelGGL(hrr_mtx_fill, dim3((kN + 255) / 256), dim3(256), 0, s, d,
                      19, kN);
   HRR_HIP_CHECK(hipStreamSynchronize(s));
@@ -1843,16 +1678,8 @@ TEST_CASE("Unit_HRR_ApiMatrix_LegacySurface_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFree(d));
 }
 
-// ===========================================================================
-// T4 — the stream-per-thread kernel launches, one archive each.
-//
-// A translation unit compiled -fgpu-default-stream=per-thread calls these
-// instead of the plain names, so this is not an exotic surface: it is what an
-// ordinary chevron launch becomes under a common compiler flag. The plain
-// hipLaunchKernel is lowered to hipModuleLaunchKernel before capture sees it;
-// the _spt spellings are recorded under their own event ids and replay through
-// the same launch path as the plain ones.
-// ===========================================================================
+// T4 -- stream-per-thread kernel launches, one archive each.
+// The plain hipLaunchKernel is lowered to hipModuleLaunchKernel before capture; the _spt spellings are recorded under their own ids.
 TEST_CASE("Unit_HRR_ApiMatrix_SptKernelLaunch_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
 
@@ -1886,14 +1713,7 @@ TEST_CASE("Unit_HRR_ApiMatrix_SptCoopLaunch_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFree(d));
 }
 
-// ===========================================================================
-// T4 — symbol lookup by name.
-//
-// Capture records the symbol string of hipGetProcAddress_spt, and its handler
-// replays the lookup with it. hipGetDriverEntryPoint is NOOP at replay.
-//
-// No final blob: nothing here touches device memory.
-// ===========================================================================
+// T4 -- symbol lookup by name: capture records hipGetProcAddress_spt's symbol string; hipGetDriverEntryPoint is NOOP at replay.
 TEST_CASE("Unit_HRR_ApiMatrix_ProcAddress_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
 
@@ -1911,14 +1731,7 @@ TEST_CASE("Unit_HRR_ApiMatrix_ProcAddress_Direct", "[.][hrr-direct]") {
                               &spt_status);
 }
 
-// ===========================================================================
-// T4 — the driver-context family.
-//
-// hipCtxCreate, hipCtxPopCurrent, hipCtxPushCurrent and hipCtxDestroy are
-// REAL at replay.
-//
-// No final blob: nothing here writes device memory.
-// ===========================================================================
+// T4 -- driver-context family: hipCtxCreate, PopCurrent, PushCurrent and Destroy are REAL at replay.
 TEST_CASE("Unit_HRR_ApiMatrix_LegacyCtx_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
 
@@ -1932,7 +1745,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_LegacyCtx_Direct", "[.][hrr-direct]") {
     (void)hipDevicePrimaryCtxRelease(dev);
   }
 
-  // First context: everything except the push, then torn down.
   hipCtx_t ctx = nullptr;
   if (hipCtxCreate(&ctx, 0, dev) == hipSuccess) {
     unsigned int api_version = 0;
@@ -1960,15 +1772,7 @@ TEST_CASE("Unit_HRR_ApiMatrix_LegacyCtx_Direct", "[.][hrr-direct]") {
   }
 }
 
-// ===========================================================================
-// T4 — the argument pushes of the pre-chevron launch ABI.
-//
-// hipSetupArgument(const void* arg, size_t size, size_t offset) pushes `size`
-// bytes from `arg` into the pending kernarg buffer. Capture records up to 256
-// of those bytes, and the handler replays them.
-//
-// No final blob: the launch this configures is never issued.
-// ===========================================================================
+// T4 -- hipSetupArgument pushes: capture records up to 256 bytes per push and the handler replays them.
 TEST_CASE("Unit_HRR_ApiMatrix_LegacyLaunch_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
 
@@ -1977,7 +1781,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_LegacyLaunch_Direct", "[.][hrr-direct]") {
   hipStream_t s = nullptr;
   HRR_HIP_CHECK(hipStreamCreate(&s));
 
-  // Recorded as an ordinary hipModuleLaunchKernel event.
   hipLaunchKernelGGL(hrr_mtx_noargs, dim3(1), dim3(64), 0, s);
   HRR_HIP_CHECK(hipStreamSynchronize(s));
 
@@ -1994,14 +1797,8 @@ TEST_CASE("Unit_HRR_ApiMatrix_LegacyLaunch_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFree(d));
 }
 
-// ===========================================================================
-// T4 — memory-pool sharing.
-//
-// hipMemPoolExportToShareableHandle is REAL at replay and
-// hipMemPoolImportFromShareableHandle is UNREPLAYABLE.
-//
+// T4 -- memory-pool sharing: hipMemPoolExportToShareableHandle is REAL, hipMemPoolImportFromShareableHandle UNREPLAYABLE.
 // Final blob: d[i] == 23.
-// ===========================================================================
 TEST_CASE("Unit_HRR_ApiMatrix_MemPoolShare_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
 
@@ -2014,7 +1811,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_MemPoolShare_Direct", "[.][hrr-direct]") {
   location.type = hipMemLocationTypeDevice;
   location.id = 0;
 
-  // The default pool for the device, and the setter that redirects it.
   {
     hipMemPool_t current = nullptr;
     (void)hipMemGetMemPool(&current, &location, hipMemAllocationTypePinned);
@@ -2033,8 +1829,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_MemPoolShare_Direct", "[.][hrr-direct]") {
     if (hipMallocFromPoolAsync(&pool_ptr, kSZ, pool, s) == hipSuccess) {
       HRR_HIP_CHECK(hipStreamSynchronize(s));
 
-      // Export data for a pointer inside the pool, and the import that
-      // consumes it. Both are NOOP at replay.
       hipMemPoolPtrExportData export_data{};
       if (hipMemPoolExportPointer(&export_data, pool_ptr) == hipSuccess) {
         void* imported = nullptr;
@@ -2057,7 +1851,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_MemPoolShare_Direct", "[.][hrr-direct]") {
     (void)hipMemPoolDestroy(pool);
   }
 
-  // ---- Final D2H -----------------------------------------------------------
   hipLaunchKernelGGL(hrr_mtx_fill, dim3((kN + 255) / 256), dim3(256), 0, s, d,
                      23, kN);
   HRR_HIP_CHECK(hipStreamSynchronize(s));
@@ -2070,22 +1863,9 @@ TEST_CASE("Unit_HRR_ApiMatrix_MemPoolShare_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFree(d));
 }
 
-// ===========================================================================
-// T4 — the second breadth pass: the families the first one left with no call
-// site at all.
-//
-// Everything here is called for one reason — to find out what replay does with
-// it — so almost every call is unchecked. What matters is that the call
-// happens and, if it succeeds, that the archive gets an event for it.
-//
-// Worth knowing while reading this: HRR's capture shims record only on
-// hipSuccess. An API that cannot succeed on this machine therefore cannot be
-// captured, and cannot be given a replay class by any amount of test code.
-// Those come back as not-exercised and are answered in api_matrix.yaml with a
-// measured reason rather than another call site.
-//
+// T4 -- second breadth pass: families the first left with no call site; most calls are unchecked.
+// Capture shims record only on hipSuccess, so an API that cannot succeed here stays not-exercised (see api_matrix.yaml).
 // Final blob: d[i] == 29.
-// ===========================================================================
 
 TEST_CASE("Unit_HRR_ApiMatrix_Breadth2_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
@@ -2100,7 +1880,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_Breadth2_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipEventCreateWithFlags(&ev, hipEventDisableTiming));
   std::vector<int> host(kN, 7);
 
-  // ---- Profiler control and odds and ends ---------------------------------
   {
     (void)hipProfilerStart();
     (void)hipProfilerStop();
@@ -2116,10 +1895,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_Breadth2_Direct", "[.][hrr-direct]") {
   // so there is no way to write the call. api_matrix.yaml carries the same
   // reason for each of them.
 
-  // ---- Batch memory operations --------------------------------------------
-  // The batched spellings of copy, prefetch and discard. A recording made by a
-  // program that uses them contains these IDs and nothing else, so a gap here
-  // is a gap for that whole program.
   {
     void* dsts[1] = {d2};
     void* srcs[1] = {d};
@@ -2132,11 +1907,8 @@ TEST_CASE("Unit_HRR_ApiMatrix_Breadth2_Direct", "[.][hrr-direct]") {
     (void)hipMemcpyBatchAsync(dsts, srcs, sizes, 1, &copy_attrs, attr_indices,
                               1, &fail_index, s);
 
-    // rowLength and layerHeight are in elements and the extent is in bytes,
-    // and both operands need a location hint: without one the runtime rejects
-    // the batch before the capture shim records anything, which is how this
-    // call spent a while looking like a missing call site rather than a wrong
-    // one.
+// rowLength and layerHeight are in elements, the extent in bytes, and both operands need a location hint.
+// Without a hint the runtime rejects the batch before the capture shim records it.
     hipMemLocation op_loc{};
     op_loc.type = hipMemLocationTypeDevice;
     op_loc.id = 0;
@@ -2163,7 +1935,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_Breadth2_Direct", "[.][hrr-direct]") {
     (void)hipStreamSynchronize(s);
   }
 
-  // ---- Graph node kinds the first graph workload does not build -----------
   // The driver-flavoured node constructors take a hipCtx_t and reject a null
   // one with hipErrorInvalidValue, so this block needs a real context to build
   // anything at all.
@@ -2175,7 +1946,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_Breadth2_Direct", "[.][hrr-direct]") {
 
     hipGraph_t graph = nullptr;
     if (hipGraphCreate(&graph, 0) == hipSuccess) {
-      // The generic node constructor, which takes the node kind as data.
       hipGraphNode_t generic_node = nullptr;
       hipGraphNodeParams node_params{};
       node_params.type = hipGraphNodeTypeMemset;
@@ -2186,7 +1956,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_Breadth2_Direct", "[.][hrr-direct]") {
       node_params.memset.value = 0;
       (void)hipGraphAddNode(&generic_node, graph, nullptr, 0, &node_params);
 
-      // Batch memory operation node.
       hipStreamBatchMemOpParams memop{};
       memop.waitValue.operation = hipStreamMemOpWaitValue32;
       memop.waitValue.address = reinterpret_cast<hipDeviceptr_t>(d);
@@ -2212,7 +1981,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_Breadth2_Direct", "[.][hrr-direct]") {
       // a backtrace through hip_table_interface.cpp:3083. There is nothing to
       // record and no way to record it.
 
-      // Driver-flavoured memcpy node.
       HIP_MEMCPY3D drv_copy{};
       drv_copy.srcMemoryType = hipMemoryTypeDevice;
       drv_copy.srcDevice = reinterpret_cast<hipDeviceptr_t>(d);
@@ -2237,7 +2005,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_Breadth2_Direct", "[.][hrr-direct]") {
     if (node_ctx) (void)hipCtxDestroy(node_ctx);
   }
 
-  // ---- JIT link and the rest of the library loader ------------------------
   {
     std::vector<char> code_object = compile_rtc();
 
@@ -2276,8 +2043,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_Breadth2_Direct", "[.][hrr-direct]") {
       (void)hipLibraryUnload(library);
     }
 
-    // hipLibraryLoadFromFile needs a path, so give it one rather than leaving
-    // the only file-based loader in the API untested.
     {
       hipLibrary_t file_library = nullptr;
       if (hipLibraryLoadFromFile(&file_library, co_path.string().c_str(),
@@ -2288,7 +2053,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_Breadth2_Direct", "[.][hrr-direct]") {
       fs::remove(co_path, ec);
     }
 
-    // The legacy hcc launch spelling, which needs a module-loaded function.
     hipModule_t module = nullptr;
     if (hipModuleLoadData(&module, code_object.data()) == hipSuccess) {
       hipFunction_t func = nullptr;
@@ -2323,10 +2087,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_Breadth2_Direct", "[.][hrr-direct]") {
 
   // The two cluster-occupancy queries are absent for the same header reason.
 
-  // ---- The hipArray copy spellings and the texture-object queries ---------
-  // Tagged T4 rather than T5 because they are ordinary memcpy entry points
-  // that happen to take an array; the texture *sampling* path is what section
-  // 10 rules out, not these.
   {
     hipChannelFormatDesc channel = hipCreateChannelDesc<int>();
     hipArray_t array = nullptr;
@@ -2368,7 +2128,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_Breadth2_Direct", "[.][hrr-direct]") {
     }
   }
 
-  // ---- Capture-dependency mutation, unconditionally -----------------------
   // The legacy-surface workload only reaches this when the capture reports a
   // dependency to replace, which it does not always do.
   {
@@ -2402,7 +2161,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_Breadth2_Direct", "[.][hrr-direct]") {
     }
   }
 
-  // ---- Final D2H -----------------------------------------------------------
   hipLaunchKernelGGL(hrr_mtx_fill, dim3((kN + 255) / 256), dim3(256), 0, s, d,
                      29, kN);
   HRR_HIP_CHECK(hipStreamSynchronize(s));
@@ -2417,14 +2175,7 @@ TEST_CASE("Unit_HRR_ApiMatrix_Breadth2_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFree(d));
 }
 
-// ===========================================================================
-// T4 — the two resets, which end the archive they are in.
-//
-// hipDeviceReset and hipDevicePrimaryCtxReset tear down everything the process
-// has on the device. Recording them anywhere else would mean every event after
-// them replays against a device that was just reset, so they get a workload
-// whose whole content is the teardown.
-// ===========================================================================
+// T4 -- hipDeviceReset and hipDevicePrimaryCtxReset end the archive they are in, so they get their own workload.
 TEST_CASE("Unit_HRR_ApiMatrix_Reset_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
 
@@ -2442,19 +2193,8 @@ TEST_CASE("Unit_HRR_ApiMatrix_Reset_Direct", "[.][hrr-direct]") {
   (void)hipDeviceReset();
 }
 
-// ===========================================================================
-// T5 — deprioritised families, not part of a default sweep.
-//
-// There is verified-negative evidence for everything here: MIOpen
-// has zero texture occurrences across its whole repository, shipped
-// rocFFT/rocSPARSE/rocRAND import zero texture symbols, and the managed-memory
-// caller that does exist (FBGEMM_GPU) belongs to a recommender workload that
-// does not appear in Instinct MLPerf submissions. The workload exists so the
-// matrix can still make a statement about these APIs when asked, not because
-// an AI/ML path reaches them.
-//
+// T5 -- deprioritised families (textures, managed memory): no AI/ML library caller found, kept so the matrix can still answer.
 // Final blob: d[i] == 13.
-// ===========================================================================
 TEST_CASE("Unit_HRR_ApiMatrix_Deprioritised_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
 
@@ -2463,7 +2203,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_Deprioritised_Direct", "[.][hrr-direct]") {
   hipStream_t s = nullptr;
   HRR_HIP_CHECK(hipStreamCreate(&s));
 
-  // ---- Managed memory ------------------------------------------------------
   {
     int* managed = nullptr;
     if (hipMallocManaged(reinterpret_cast<void**>(&managed), kSZ,
@@ -2501,7 +2240,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_Deprioritised_Direct", "[.][hrr-direct]") {
     }
   }
 
-  // ---- Driver-flavoured array creation ------------------------------------
   // Deliberately outside the image-support guard below, so they run on every
   // device. Capture records them only when they succeed; gfx950 reports no
   // image support and returns hipErrorNotSupported for both, so there they
@@ -2527,7 +2265,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_Deprioritised_Direct", "[.][hrr-direct]") {
       (void)hipArrayDestroy(drv_array3);
   }
 
-  // ---- Textures, arrays and surfaces --------------------------------------
   if (device_attr(hipDeviceAttributeImageSupport)) {
     hipChannelFormatDesc channel =
         hipCreateChannelDesc(32, 0, 0, 0, hipChannelFormatKindFloat);
@@ -2571,7 +2308,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_Deprioritised_Direct", "[.][hrr-direct]") {
     }
   }
 
-  // ---- Texture and surface teardown ---------------------------------------
   // Creating either object needs image support, which this part does not have,
   // so the handle is necessarily null. The three destroy entry points accept
   // that, return success and are recorded, which is enough to hold their
@@ -2584,7 +2320,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_Deprioritised_Direct", "[.][hrr-direct]") {
     (void)hipTexObjectDestroy(0);
   }
 
-  // ---- Cooperative and extended launch spellings with no library caller ----
   {
     int n_arg = kN;
     int fill_val = 13;
@@ -2606,7 +2341,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_Deprioritised_Direct", "[.][hrr-direct]") {
                      d, 13, kN);
   HRR_HIP_CHECK(hipStreamSynchronize(s));
 
-  // ---- Final D2H -----------------------------------------------------------
   HRR_HIP_CHECK(hipDeviceSynchronize());
   std::vector<int> h(kN, 0);
   HRR_HIP_CHECK(hipMemcpy(h.data(), d, kSZ, hipMemcpyDeviceToHost));

@@ -28,7 +28,6 @@ namespace {
 constexpr int    kElems = 1024;
 constexpr size_t kBytes = kElems * sizeof(int);
 
-// The summary's placed and fell-back counts; false without a summary line.
 bool hrr_place_counts(const std::string& out, unsigned long long& placed,
                       unsigned long long& fell) {
   const auto at = out.find("Placement");
@@ -46,8 +45,6 @@ __global__ void hrr_place_deref(int* out, int* const* cell, const int* expect, i
 }
 
 namespace {
-// Allocate a buffer (hipMallocAsync on `s` when given), store its address in a
-// cell with hipMemcpy, read the buffer through the cell, free both.
 void hrr_place_round(int* out, int seed, hipStream_t s) {
   int* buf = nullptr;
   if (s) {

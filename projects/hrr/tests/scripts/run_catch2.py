@@ -215,7 +215,6 @@ def _apply_config(args: argparse.Namespace) -> tuple[list[str], list[tuple[str, 
         raise SystemExit(1) from exc
     # The executable may be a wrapper (python fake.py spec); only its trailing
     # selector is Catch2's. Listing still uses command[0], which is the binary
-    # in CI. Tests mock list_cases.
     names = [case["name"] for case in listed]
     _run, skipped = hrr_test_config.resolve(config, names, os_name, archs, ignore=ignore)
     records = [
@@ -265,7 +264,6 @@ def _report(root: ET.Element) -> tuple[dict[str, int], str]:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    # A mutable cell so the input file is removed even when the suite times out.
     state = {"input_file": None}
     try:
         return _run_suite(args, state)
@@ -346,16 +344,11 @@ def _run_suite(args: argparse.Namespace, state: dict) -> int:
 
     # A crash can leave syntactically valid, but incomplete, JUnit without a
     # failed case. Preserve the raw transcript only for that exceptional path.
-    # Catch2 returns 4 when the selected cases were all skipped; that is not a
-    # crash and must not dump the banner. Any other non-zero status with no
-    # failed case is one, skipped cases or not (a crash at exit after some
-    # cases skipped, for instance, must still leave a log).
     if completed.returncode not in (0, 4) and counts["FAIL"] == 0:
         print("\nCatch2 terminated without a JUnit failure:")
         print(completed.stdout, end="")
     # Catch2 uses 4 for "tests were skipped / none ran". That is a skip, not a
     # failed suite: returning it would paint gfx90a red after every GPU case
-    # correctly skipped for hipErrorNoDevice.
     if completed.returncode == 4 and counts["FAIL"] == 0:
         return 0
     return completed.returncode

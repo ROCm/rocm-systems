@@ -8,42 +8,13 @@
  * @addtogroup HRR HRR Per-Thread-Default-Stream Workloads
  * @{
  * @ingroup HRRTest
- * Direct GPU workloads for the per-thread-default-stream (`_spt`) entry points,
- * hidden with the Catch2 [.] tag and driven from hrr_roundtrip_test.cc exactly
- * like the other _Direct workloads.
+ * `_spt` entry points are reached by compiling with -fgpu-default-stream=per-thread, so these workloads call the ordinary names.
+ * The option is set per source in CMakeLists.txt, which is why this file is its own translation unit.
  *
- * `_spt` is not an API surface applications call by name: it is reached by
- * building with `-fgpu-default-stream=per-thread`, which defines
- * HIP_API_PER_THREAD_DEFAULT_STREAM so amd_hip_runtime_pt_api.h redirects the
- * ordinary names (hipMemset -> hipMemset_spt, and so on).  These workloads
- * therefore call the ordinary names and let the compiler select the entry
- * points, which is why they need their own translation unit: the option is set
- * per source in CMakeLists.txt, and the other HrrTest workloads must keep
- * resolving to the plain entry points.
+ * Oracle policy: a replay-validated buffer must be written and read by APIs that snapshot a blob at capture and reproduce their effect at replay.
+ * Several `_spt` handlers are no-ops, so those workloads use a scratch buffer and write the validated one separately.
  *
- * Because the source no longer names the API under test, the archive is the only
- * evidence that the redirect took effect.  Every roundtrip driver asserts the
- * recorded `_spt` API ids before replaying, so if the per-source option is ever
- * dropped these stop testing nothing and fail instead.
- *
- * Two conventions hold throughout, both of them load-bearing:
- *
- *  - Oracle policy.  A replay-validated buffer must be written and read by APIs
- *    that both snapshot a data blob at capture and reproduce their effect at
- *    replay.  Several `_spt` handlers are deliberate no-ops, so where the API
- *    under test is one of them it operates on a scratch buffer and the validated
- *    buffer is written separately.  Those workloads cover the capture path; the
- *    recorded-id assertions are what makes that coverage meaningful.  Where the
- *    handler is faithful the workload validates the effect directly, one D2H per
- *    API so a single regressed handler fails its own buffer.
- *
- *  - Macro ordering.  Workloads disagree about which names must stay redirected:
- *    one tests hipMemcpy_spt, the rest need the plain hipMemcpy as their oracle,
- *    and the graph frame needs the plain stream-capture pair.  The redirects are
- *    therefore undone in stages, and each stage is followed by a preprocessor
- *    check rather than a comment asking the next reader to be careful, so
- *    reordering the file breaks the build instead of quietly testing the plain
- *    entry point.
+ * Macro ordering: the redirects are undone in stages, each followed by a preprocessor check, so reordering the file breaks the build.
  */
 
 #include "hrr_test_common.hh"
@@ -55,15 +26,9 @@
 #error "hrr_spt_workload_test.cc requires the per-thread default stream compile option"
 #endif
 
-// Driver-style entry points are absent from amd_hip_runtime_pt_api.h, so they
-// are never redirected and stay usable as an oracle whatever the macro state
-// below is.  hipMemsetD32 / hipMemsetD32Async / hipMemcpyDtoDAsync have faithful
-// replay handlers, and hipMemcpyHtoD / hipMemcpyDtoH / hipMemcpyDtoHAsync have
-// hand-written capture shims that snapshot the blob a D2H read is validated
-// against.  The workloads whose own API under test is a redirected memcpy use
-// these instead of the plain hipMemcpy the rest of the file relies on.
+// Driver-style entry points are never redirected, so they stay usable as an oracle: hipMemsetD32*, hipMemcpyDtoDAsync, hipMemcpyHtoD, hipMemcpyDtoH*.
+// Their capture shims or replay handlers are faithful.
 
-// Device symbol for the symbol-memcpy variants, sized to hold a whole transfer.
 __device__ int g_hrr_spt_symbol[256];
 
 #if !defined(hipMemcpy) || !defined(hipMemcpyAsync) || !defined(hipMemcpy2D) || \
@@ -72,31 +37,14 @@ __device__ int g_hrr_spt_symbol[256];
 #error "Unit_HRR_MemcpySpt_Direct must run before the memcpy redirects are undone"
 #endif
 
-// ===========================================================================
-// Workload: memcpy on the per-thread default stream
-//
-// Exercises hipMemcpy_spt, hipMemcpyAsync_spt, hipMemcpy2D_spt,
-// hipMemcpy2DAsync_spt, hipMemcpyToSymbol_spt and hipMemcpyToSymbolAsync_spt
-// through their ordinary names.  All six have no-op playback handlers, so they
-// run against a scratch buffer that is freed before the validated one is
-// written: routing the oracle through them would leave the replayed buffer at
-// its zero-init value and fail the D2H for a reason that has nothing to do with
-// whether the redirect took effect.  This is capture-path coverage, and
-// Unit_HRR_MemcpySptRoundtrip asserts each recorded id.
-//
-// The oracle is hipMemcpyHtoD / hipMemcpyDtoH rather than the plain hipMemcpy
-// the later workloads use, because hipMemcpy has to stay redirected here to
-// reach hipMemcpy_spt at all.
-// Final blob: 0x41414141.
-// ===========================================================================
+// Exercises the six memcpy _spt names. All have no-op playback handlers, so they run on a scratch buffer freed before the validated one is written.
+// The oracle is hipMemcpyHtoD / hipMemcpyDtoH, because hipMemcpy must stay redirected here. Final blob: 0x41414141.
 TEST_CASE("Unit_HRR_MemcpySpt_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
   constexpr int    N   = 256;
   constexpr size_t SZ  = N * sizeof(int);
   constexpr int    VAL = 0x41414141;
 
-  // 2-D geometry covering the buffer contiguously, so no unwritten padding can
-  // reach a validated blob.
   constexpr size_t PITCH = 128;
   constexpr size_t ROWS  = SZ / PITCH;
   static_assert(PITCH * ROWS == SZ, "2-D copy must cover the whole buffer");
@@ -105,7 +53,6 @@ TEST_CASE("Unit_HRR_MemcpySpt_Direct", "[.][hrr-direct]") {
   for (int i = 0; i < N; ++i) h_src[i] = VAL;
   int* h_chk = new int[N]();
 
-  // ---- APIs under test, on a scratch buffer -------------------------------
   int* d_spt = nullptr;
   HRR_HIP_CHECK(hipMalloc(&d_spt, SZ));
 
@@ -137,7 +84,6 @@ TEST_CASE("Unit_HRR_MemcpySpt_Direct", "[.][hrr-direct]") {
 
   HRR_HIP_CHECK(hipFree(d_spt));
 
-  // ---- Replay oracle, on driver-style entry points -------------------------
   int* d_ok = nullptr;
   HRR_HIP_CHECK(hipMalloc(&d_ok, SZ));
   HRR_HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(d_ok), h_src, SZ));
@@ -153,46 +99,17 @@ TEST_CASE("Unit_HRR_MemcpySpt_Direct", "[.][hrr-direct]") {
   delete[] h_out;
 }
 
-// hipMemcpy must keep resolving to the plain entry point: only its hand-written
-// capture shim writes the data blob a D2H read is validated against, and
-// hipMemcpy_spt has a NOOP playback handler.  Leaving it redirected would strip
-// the workloads below of their replay oracle.  The same holds for every other
-// redirected memcpy name, so undo the redirect for any of them they start using.
+// hipMemcpy must resolve to the plain entry point: only its capture shim writes the blob a D2H read is validated against.
+// The same holds for every other redirected memcpy name.
 #undef hipMemcpy
 
 #if defined(hipMemcpy)
 #error "the workloads below need the plain hipMemcpy as their replay oracle"
 #endif
 
-// ===========================================================================
-// Workload: memset on the per-thread default stream
-//
-// Exercises hipMemset_spt / hipMemsetAsync_spt / hipMemset2D_spt /
-// hipMemset2DAsync_spt through their ordinary names.  Each API fills its OWN
-// buffer with its OWN byte pattern and each buffer is read back by its OWN D2H,
-// so every API has an independent oracle: a NOOP playback handler for any single
-// one of them leaves that buffer at its replay zero-init value and fails that
-// D2H.  Pointing all four at one buffer would leave only the last writer
-// observable.
-//
-// Pattern choice.  D2H validation is byte-exact by default, but a replay can
-// opt into a float tolerance (HIP_HRR_D2H_TOL, say atol=rtol=1e-3) in any of
-// f32/bf16/f16/f64.  So an expected value has to decode above
-// atol/(1-rtol) = 1.001e-3 in EVERY candidate encoding before a
-// zero-initialised replay buffer is reported as a mismatch under any opt-in.
-// As a repeated byte, the smallest decode is always the f16 one and the
-// largest the f64 one:
-//   0x41 -> f16 2.63  f32 1.21e1  bf16 1.21e1  f64 2.26e6
-//   0x42 -> f16 3.13  f32 4.86e1  bf16 4.85e1  f64 1.57e11
-//   0x44 -> f16 4.27  f32 7.85e2  bf16 7.84e2  f64 7.48e20
-//   0x4C -> f16 17.2  f32 5.36e7  bf16 5.35e7  f64 3.55e59
-// A small-magnitude pattern would not do: 0x2A, for instance, decodes to
-// 1.51e-13 as f32, well inside the tolerance, so an all-zero replay buffer
-// would be accepted.
-// Distinct per-API patterns also make a swapped destination pointer visible.
-// Every workload in this file follows the same rule for the same reason.
+// Each API fills its own buffer with its own byte pattern, read back by its own D2H, so a NOOP handler fails its own check.
+// Patterns must decode above 1.001e-3 as f16, f32, bf16 and f64, or a zero-initialised replay buffer passes under D2H tolerance.
 // Final blobs: 0x41414141 / 0x42424242 / 0x44444444 / 0x4C4C4C4C.
-// ===========================================================================
 TEST_CASE("Unit_HRR_MemsetSpt_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
   constexpr int    N  = 256;
@@ -216,10 +133,6 @@ TEST_CASE("Unit_HRR_MemsetSpt_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipMalloc(&d_set2d_async, SZ));
 
   HRR_HIP_CHECK(hipMemset(d_set, 0x41, SZ));
-  // The async variants need a null stream or they are indistinguishable from
-  // the plain ones: PER_THREAD_DEFAULT_STREAM substitutes only a null or legacy
-  // stream and passes an explicitly created one straight through.
-  //
   // Omitting the stream instead, and so taking the _spt prototype's
   // hipStreamPerThread default, reaches the same stream but is deliberately not
   // exercised here: it records the sentinel handle, and replay only resolves
@@ -233,7 +146,6 @@ TEST_CASE("Unit_HRR_MemsetSpt_Direct", "[.][hrr-direct]") {
   // legacy stream the readbacks below run on.
   HRR_HIP_CHECK(hipDeviceSynchronize());
 
-  // One D2H blob per API under test.
   int* h = new int[N]();
   HRR_HIP_CHECK(hipMemcpy(h, d_set, SZ, hipMemcpyDeviceToHost));
   for (int i = 0; i < N; ++i) REQUIRE(h[i] == 0x41414141);
@@ -251,21 +163,14 @@ TEST_CASE("Unit_HRR_MemsetSpt_Direct", "[.][hrr-direct]") {
   delete[] h;
 }
 
-// ===========================================================================
-// Workload: hipMemset3D_spt / hipMemset3DAsync_spt
-//
-// The 3-D memsets are no-op on replay, for the plain entry points as much as the
-// per-thread ones, so this is capture-path coverage on a scratch pitched
-// allocation with the validated buffer written separately.
+// The 3-D memsets are no-ops on replay, plain or per-thread, so this covers capture only.
 // Final blob: 0x45454545.
-// ===========================================================================
 TEST_CASE("Unit_HRR_Memset3DSpt_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
   constexpr int    N   = 256;
   constexpr size_t SZ  = N * sizeof(int);
   constexpr int    VAL = 0x45454545;
 
-  // ---- APIs under test, on a scratch allocation ---------------------------
   {
     hipPitchedPtr pp3{};
     hipExtent     ext3 = make_hipExtent(16 * sizeof(int), 4, 2);
@@ -276,7 +181,6 @@ TEST_CASE("Unit_HRR_Memset3DSpt_Direct", "[.][hrr-direct]") {
     HRR_HIP_CHECK(hipFree(pp3.ptr));
   }
 
-  // ---- Replay oracle -----------------------------------------------------
   int* d = nullptr;
   HRR_HIP_CHECK(hipMalloc(&d, SZ));
   HRR_HIP_CHECK(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(d), VAL, N));
@@ -290,16 +194,8 @@ TEST_CASE("Unit_HRR_Memset3DSpt_Direct", "[.][hrr-direct]") {
   delete[] h;
 }
 
-// ===========================================================================
-// Workload: hipMemcpy3D_spt / hipMemcpy3DAsync_spt
-//
-// Unlike the 1-D and 2-D per-thread copies these two have faithful replay
-// handlers, so the effect is validated directly: each copies a filled source
-// over a destination pre-filled with a different pattern, and each destination
-// has its own D2H.  A regressed handler leaves its destination holding the
-// replayed pre-fill instead of the copied pattern and fails that buffer.
+// These two have faithful replay handlers, so each copies a filled source over a differently pre-filled destination with its own D2H.
 // Final blobs: 0x46464646 in both destinations, over a 0x4A4A4A4A pre-fill.
-// ===========================================================================
 TEST_CASE("Unit_HRR_Memcpy3DSpt_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
   constexpr int    N       = 256;
@@ -307,7 +203,6 @@ TEST_CASE("Unit_HRR_Memcpy3DSpt_Direct", "[.][hrr-direct]") {
   constexpr int    VAL     = 0x46464646;
   constexpr int    PREFILL = 0x4A4A4A4A;
 
-  // 3-D geometry covering the whole linear buffer: one slice of ROWS rows.
   constexpr size_t PITCH = 128;
   constexpr size_t ROWS  = SZ / PITCH;
   static_assert(PITCH * ROWS == SZ, "3-D copy must cover the whole buffer");
@@ -324,7 +219,6 @@ TEST_CASE("Unit_HRR_Memcpy3DSpt_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(d_dst_async), PREFILL, N));
   HRR_HIP_CHECK(hipDeviceSynchronize());
 
-  // ---- APIs under test ---------------------------------------------------
   {
     hipMemcpy3DParms p{};
     p.srcPtr = make_hipPitchedPtr(d_src, PITCH, PITCH, ROWS);
@@ -338,7 +232,6 @@ TEST_CASE("Unit_HRR_Memcpy3DSpt_Direct", "[.][hrr-direct]") {
     HRR_HIP_CHECK(hipDeviceSynchronize());
   }
 
-  // One D2H blob per API under test.
   int* h = new int[N]();
   HRR_HIP_CHECK(hipMemcpy(h, d_dst, SZ, hipMemcpyDeviceToHost));
   for (int i = 0; i < N; ++i) REQUIRE(h[i] == VAL);
@@ -351,25 +244,14 @@ TEST_CASE("Unit_HRR_Memcpy3DSpt_Direct", "[.][hrr-direct]") {
   delete[] h;
 }
 
-// ===========================================================================
-// Workload: per-thread-default-stream stream and event queries
-//
-// Exercises hipStreamIsCapturing_spt, hipStreamQuery_spt,
-// hipStreamSynchronize_spt, hipStreamGetPriority_spt, hipStreamGetFlags_spt and
-// hipEventRecord_spt.  None of these writes device memory, so there is nothing
-// for a D2H to prove about them beyond the recorded ids and a replay that runs
-// to completion; the validated buffer exists to give the roundtrip an oracle at
-// all.  The tolerant checks mirror the plain variants elsewhere in the suite,
-// where an unsupported query is a legitimate answer rather than a failure.
+// None of these queries writes device memory, so only the recorded ids and a replay that completes are checked.
 // Final blob: 0x4C4C4C4C.
-// ===========================================================================
 TEST_CASE("Unit_HRR_StreamQuerySpt_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
   constexpr int    N   = 256;
   constexpr size_t SZ  = N * sizeof(int);
   constexpr int    VAL = 0x4C4C4C4C;
 
-  // ---- APIs under test ---------------------------------------------------
   // A null stream keeps the redirect observable: an explicitly created stream is
   // passed straight through and would make these identical to the plain calls.
   {
@@ -400,7 +282,6 @@ TEST_CASE("Unit_HRR_StreamQuerySpt_Direct", "[.][hrr-direct]") {
 
   HRR_HIP_CHECK(hipDeviceSynchronize());
 
-  // ---- Replay oracle -----------------------------------------------------
   int* d = nullptr;
   HRR_HIP_CHECK(hipMalloc(&d, SZ));
   HRR_HIP_CHECK(hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(d), VAL, N));
@@ -414,17 +295,8 @@ TEST_CASE("Unit_HRR_StreamQuerySpt_Direct", "[.][hrr-direct]") {
   delete[] h;
 }
 
-// ===========================================================================
-// Workload: hipStreamWaitEvent_spt cross-stream ordering
-//
-// The handler translates both the stream and the event handle, so the effect is
-// validated directly: stream s1 waiting on an event recorded on s0 after a
-// memset has to be reproduced for the copy chain to carry the pattern through to
-// the readback.  Both streams are explicit here because the point is ordering
-// between two of them; the redirect still applies, and the recorded id is what
-// the roundtrip checks.
-// Final blob: 0x42424242.
-// ===========================================================================
+// Stream s1 waiting on an event recorded on s0 after a memset must be reproduced for the copy chain to carry the pattern.
+// Both streams are explicit because the point is ordering. Final blob: 0x42424242.
 TEST_CASE("Unit_HRR_StreamWaitEventSpt_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
   constexpr int    N   = 256;
@@ -444,7 +316,6 @@ TEST_CASE("Unit_HRR_StreamWaitEventSpt_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipMemsetD32Async(reinterpret_cast<hipDeviceptr_t>(d0), VAL, N, s0));
   HRR_HIP_CHECK(hipEventRecord(ev, s0));
 
-  // API under test.
   HRR_HIP_CHECK(hipStreamWaitEvent(s1, ev, 0));
 
   HRR_HIP_CHECK(hipMemcpyDtoDAsync(reinterpret_cast<hipDeviceptr_t>(d1),
@@ -462,30 +333,11 @@ TEST_CASE("Unit_HRR_StreamWaitEventSpt_Direct", "[.][hrr-direct]") {
   delete[] h;
 }
 
-// ===========================================================================
-// Graph workloads: why the capture frame keeps the plain entry points
-//
-// HRR replays a graph only when it can find it in PlaybackContext::graph_map,
-// and one place populates that map: the hand-written hipStreamEndCapture
-// handler, which records the graph against the captured handle.  The generated
-// hipStreamEndCapture_spt handler discards the graph it produces, so a frame
-// closed through the redirected name leaves hipGraphInstantiate with nothing to
-// instantiate and replay aborts.
-//
-// The frame therefore has to reach the plain entry points, which means undoing
-// the redirect for those two names.  The order is load-bearing:
-//
-//   1. hipStreamEndCapture first, leaving hipStreamBeginCapture redirected so
-//      Unit_HRR_StreamCaptureBeginSpt_Direct can still reach
-//      hipStreamBeginCapture_spt, the API it exists to test.
-//   2. hipStreamBeginCapture afterwards, for the two workloads whose APIs under
-//      test sit inside the frame rather than opening it.
-//
-// hipStreamBeginCapture_spt's own handler does not set ctx.in_graph_capture,
-// which gates timing, sync-after-launch and the zero-init memsets.  None of
-// those apply to a memset-only frame with no allocation or kernel launch in it,
-// so step 1 leaves a correct replay.
-// ===========================================================================
+// The graph frame keeps the plain entry points: replay finds graphs only through graph_map, which the hand-written hipStreamEndCapture handler populates.
+// The generated hipStreamEndCapture_spt handler discards its graph. Order is load-bearing:
+//   1. undo hipStreamEndCapture first, so hipStreamBeginCapture stays redirected for the workload that tests it;
+//   2. then undo hipStreamBeginCapture, for the workloads whose APIs sit inside the frame.
+// hipStreamBeginCapture_spt does not set ctx.in_graph_capture; that is harmless for a memset-only frame.
 #undef hipStreamEndCapture
 
 #if !defined(hipStreamBeginCapture)
@@ -495,14 +347,8 @@ TEST_CASE("Unit_HRR_StreamWaitEventSpt_Direct", "[.][hrr-direct]") {
 #error "the graph capture frame needs the plain hipStreamEndCapture"
 #endif
 
-// ===========================================================================
-// Workload: hipStreamBeginCapture_spt
-//
-// The API under test opens the frame and the plain end capture closes it, so a
-// regressed handler shows up as a graph that never replays rather than as a
-// tolerated no-op.
+// The API under test opens the frame and the plain end capture closes it, so a regressed handler shows as a graph that never replays.
 // Final blob: 0x4A4A4A4A.
-// ===========================================================================
 TEST_CASE("Unit_HRR_StreamCaptureBeginSpt_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
   constexpr int    N   = 256;
@@ -546,14 +392,8 @@ TEST_CASE("Unit_HRR_StreamCaptureBeginSpt_Direct", "[.][hrr-direct]") {
 #error "the workloads below still test hipGraphLaunch_spt and the _spt capture queries"
 #endif
 
-// ===========================================================================
-// Workload: hipGraphLaunch_spt
-//
-// The graph is built through the supported stream-capture path and launched via
-// the redirected name, whose handler translates the graph-exec handle recorded
-// by the hand-written hipGraphInstantiate handler.
+// The graph is built by stream capture and launched through the redirected name, whose handler translates the recorded graph-exec handle.
 // Final blob: 0x44444444.
-// ===========================================================================
 TEST_CASE("Unit_HRR_GraphLaunchSpt_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
   constexpr int    N   = 256;
@@ -573,7 +413,6 @@ TEST_CASE("Unit_HRR_GraphLaunchSpt_Direct", "[.][hrr-direct]") {
   hipGraphExec_t exec = nullptr;
   HRR_HIP_CHECK(hipGraphInstantiate(&exec, g, nullptr, nullptr, 0));
 
-  // API under test.
   HRR_HIP_CHECK(hipGraphLaunch(exec, s));
   HRR_HIP_CHECK(hipStreamSynchronize(s));
 
@@ -589,16 +428,8 @@ TEST_CASE("Unit_HRR_GraphLaunchSpt_Direct", "[.][hrr-direct]") {
   delete[] h;
 }
 
-// ===========================================================================
-// Workload: hipStreamIsCapturing_spt / hipStreamGetCaptureInfo_spt
-//
-// The per-thread capture queries run inside a plain begin/end-capture frame.
-// Their handlers only translate the stream and write to replay-local outputs, so
-// the frame around them is what makes the captured memset replayable as a graph
-// and the readback below meaningful; the live REQUIREs on the reported status are
-// what prove the queries observed the frame they were called in.
+// The queries run inside a plain begin/end-capture frame so the memset replays as a graph; the REQUIREs on the reported status prove they saw the frame.
 // Final blob: 0x5A5A5A5A.
-// ===========================================================================
 TEST_CASE("Unit_HRR_StreamCaptureQuerySpt_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
   constexpr int    N   = 256;
@@ -612,7 +443,6 @@ TEST_CASE("Unit_HRR_StreamCaptureQuerySpt_Direct", "[.][hrr-direct]") {
 
   HRR_HIP_CHECK(hipStreamBeginCapture(s, hipStreamCaptureModeThreadLocal));
 
-  // APIs under test.
   hipStreamCaptureStatus st = hipStreamCaptureStatusNone;
   HRR_HIP_CHECK(hipStreamIsCapturing(s, &st));
   REQUIRE(st == hipStreamCaptureStatusActive);

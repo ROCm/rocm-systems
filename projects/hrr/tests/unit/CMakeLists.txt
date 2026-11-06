@@ -2,12 +2,6 @@
 #
 # SPDX-License-Identifier: MIT
 
-# HRR unit tests.
-#
-# These exercise the archive wire format, crash-truncation recovery in the
-# reader, and CPU-side playback invariants. They do not issue HIP runtime calls,
-# but their sources include <hip/hip_runtime.h> (via the local test harness and
-# the playback helper header), so HIP headers are required to build them.
 
 add_executable(hrr-unit-tests
   hrr_format_test.cc
@@ -22,10 +16,8 @@ set_target_properties(hrr-unit-tests PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON)
 
-# Capture's code object scrubber lives in CLR and needs nothing but <cstring>,
-# so it is compiled in here and fed malformed images on its own. A checkout of
-# projects/hrr without the CLR sources still registers its cases, as skipped,
-# so the binary keeps matching tests/config/unit.yaml.
+# The code object scrubber needs only <cstring>. Without the CLR sources its cases register as
+# skipped, so the binary keeps matching tests/config/unit.yaml.
 target_sources(hrr-unit-tests PRIVATE hrr_scrub_test.cc)
 set(HRR_CAPTURE_SRC ${CMAKE_CURRENT_SOURCE_DIR}/../../../clr/hipamd/src/hrr)
 if(EXISTS ${HRR_CAPTURE_SRC}/hip_capture_scrub.cpp)
@@ -34,9 +26,6 @@ if(EXISTS ${HRR_CAPTURE_SRC}/hip_capture_scrub.cpp)
   target_compile_definitions(hrr-unit-tests PRIVATE HRR_HAVE_CAPTURE_SCRUB=1)
 endif()
 
-# ../include makes the local harness headers (hrr_test_common.hh,
-# hrr_test_process.hh) available. hrr_reader.h, hip_playback.h, and
-# hrr/hrr_api_args.h come transitively from hrr::reader.
 target_include_directories(hrr-unit-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../include)
 
 # hrr_test_process.hh (the SpawnProc harness) starts a std::thread watchdog.
@@ -59,18 +48,9 @@ target_compile_definitions(hrr-unit-tests PRIVATE
   ROCM_BIN_PATH="${ROCM_PATH}/bin"
 )
 
-# hrr_recovery_test.cc spawns hrr-playback for its --repair / --info cases.
-#
-#   * When the playback tool is built in this same tree (HRR_BUILD_PLAYBACK=ON),
-#     point at the just-built binary via its absolute target path so the tests
-#     exercise the in-tree hrr-playback rather than any installed copy, and make
-#     the unit target depend on it so it is built first.
-#   * Otherwise fall back to the bare name "hrr-playback", which SpawnProc
-#     resolves from PATH (the test prepends ROCM_BIN_PATH). This keeps the
-#     CPU-only reader/format tests buildable with HRR_BUILD_PLAYBACK=OFF; the two
-#     recovery cases that invoke hrr-playback then require an hrr-playback on
-#     PATH at run time (build with HRR_BUILD_PLAYBACK=ON to exercise them in
-#     tree).
+# hrr_recovery_test.cc spawns hrr-playback for --repair / --info. With HRR_BUILD_PLAYBACK=ON use the
+# in-tree binary and build it first; otherwise use the bare name, resolved from PATH, so those two
+# cases need an hrr-playback on PATH at run time.
 if(TARGET hrr-playback)
   target_compile_definitions(hrr-unit-tests PRIVATE
     HRR_PLAYBACK_EXE="$<TARGET_FILE:hrr-playback>")
@@ -82,18 +62,10 @@ endif()
 
 add_test(NAME hrr-unit-tests COMMAND hrr-unit-tests)
 
-# Handler-level tests: playback handlers and helpers in hip_playback.cpp (and
-# the generated handlers), linked in and called with crafted records or stand-ins
-# for the HIP call. They link the HIP runtime like hrr-playback does but reach no
-# HIP call, so they need no GPU. Each change that adds handler code adds its test
-# file to HRR_HANDLER_TEST_SOURCES.
-#
-# Built with AddressSanitizer by default so an over-read of a record aborts the
-# run instead of passing by luck; set HRR_HANDLER_TESTS_ASAN=OFF for a
-# toolchain without the sanitizer runtime.
-#
-# POSIX only: hrr_handler_test_util.h captures stderr with mkstemp/dup2, which
-# MSVC does not provide.
+# Handler tests link hip_playback.cpp and the generated handlers and call them with crafted records;
+# no GPU needed. Built with AddressSanitizer by default so an over-read aborts the run
+# (HRR_HANDLER_TESTS_ASAN=OFF for a toolchain without the runtime). POSIX only: the util header uses
+# mkstemp/dup2.
 if(TARGET hrr-playback AND NOT WIN32)
   option(HRR_HANDLER_TESTS_ASAN "Build hrr-handler-tests with AddressSanitizer" ON)
 

@@ -8,9 +8,6 @@
  * @addtogroup HRR HRR Blob Refusal
  * @{
  * @ingroup HRRTest
- * Handler-level tests (hrr-handler-tests links hip_playback.cpp in): a blob the
- * file cap refuses ends the replay, a blob that is merely absent does not.
- * No HIP call is made and no GPU is needed.
  */
 
 #include <catch2/catch_test_macros.hpp>
@@ -31,13 +28,6 @@ struct FileCapGuard {
 
 }  // namespace
 
-/**
- * Test Description
- * ----------------
- *   - A blob over --max-file-bytes is not reported as a missing blob: load_blob
- *     returns null and sets fatal_error at once, so the replay ends even under
- *     --continue-on-error and before a consuming handler reaches its HIP call.
- */
 TEST_CASE("Unit_HRR_Blob_CapRefusalEndsTheReplay", "[hrr]") {
   hrr_test::BlobDir dir("0123456789abcdef");
   FileCapGuard guard;
@@ -52,12 +42,6 @@ TEST_CASE("Unit_HRR_Blob_CapRefusalEndsTheReplay", "[hrr]") {
   CHECK(err.find("file cap") != std::string::npos);
 }
 
-/**
- * Test Description
- * ----------------
- *   - A blob under the cap loads, and one that is absent from the archive is
- *     null without ending the replay.
- */
 TEST_CASE("Unit_HRR_Blob_AbsentBlobDoesNotEndTheReplay", "[hrr]") {
   hrr_test::BlobDir dir("0123456789abcdef");
   PlaybackContext ctx;

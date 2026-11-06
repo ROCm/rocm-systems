@@ -8,23 +8,6 @@
  * @addtogroup HRR HRR pitched device-to-host validation
  * @{
  * @ingroup HRRTest
- * Device-to-host copies whose host side is a pitched rect: hipDrvMemcpy3D,
- * hipDrvMemcpy3DAsync, hipDrvMemcpy2DUnaligned, hipMemcpy3D, hipMemcpy3DAsync,
- * hipMemcpy2D, hipMemcpy2DAsync, hipMemcpy3D_spt, hipMemcpy3DAsync_spt,
- * hipMemcpyParam2D and hipMemcpyParam2DAsync.
- *
- * Every copy reads a window at a non-zero offset of a pitched device buffer
- * into a window at a different offset of a host buffer with a different pitch,
- * so the copied rows are neither dense nor at the start of either buffer.
- * Capture records only those rows, packed end to end, and the archive says so
- * with HRR_FILE_FLAG_PACKED_HOST_RECTS. Replay reads the packed rows back as a
- * dense host rect. Two dense copies whose copied run starts past the host base
- * pointer cover the case where the rows are contiguous but not at the start.
- *
- * The same rects serve pitched host-to-device copies through all four
- * hipMemcpy3D spellings and through hipMemcpy2D and hipMemcpy2DAsync, and
- * rejected ones, which must leave no blob at all. A pair of copies with a
- * 16 MiB host pitch checks that a blob costs the bytes copied, not the pitch.
  */
 
 #include "hrr_test_common.hh"
@@ -53,31 +36,24 @@ namespace fs = std::filesystem;
 
 namespace {
 
-// Device buffer: kDevDepth slices of kDevRows rows, rows kDevPitch bytes apart.
 constexpr size_t kDevPitch = 256;
 constexpr size_t kDevRows = 8;
 constexpr size_t kDevDepth = 3;
 constexpr size_t kDevSlice = kDevPitch * kDevRows;
 constexpr size_t kDevBytes = kDevSlice * kDevDepth;
 
-// Host buffers: a different pitch, so no copied row lines up with the device.
 constexpr size_t kHostPitch = 160;
 constexpr size_t kHostRows = 6;
 constexpr size_t kHostDepth = 3;
 constexpr size_t kHostSlice = kHostPitch * kHostRows;
 constexpr size_t kHostBytes = kHostSlice * kHostDepth;
 
-// The copied window and where it starts on each side. The 2D copies take the
-// first slice of it, into host slice 0.
 constexpr size_t kWidth = 48, kHeight = 3, kDepth = 2;
 constexpr size_t kSrcX = 16, kSrcY = 2, kSrcZ = 1;
 constexpr size_t kDstX = 40, kDstY = 1, kDstZ = 1;
 
-// The first copied byte of the 3D copies' host buffers. hipMemcpy2D has no
-// offset arguments, so its pointer is already the first copied byte.
 constexpr size_t kFirst3D = kDstZ * kHostSlice + kDstY * kHostPitch + kDstX;
 
-// Blob sizes: only the copied rows, packed end to end.
 constexpr size_t kRows3D = kWidth * kHeight * kDepth;
 constexpr size_t kRows2D = kWidth * kHeight;
 
@@ -93,9 +69,6 @@ constexpr int kPitchedCopies = static_cast<int>(sizeof(kFill));
 // with a row or a slice, so reading the wrong offset or pitch reads other bytes.
 uint8_t dev_byte(size_t offset) { return static_cast<uint8_t>((offset * 2654435761u) >> 24); }
 
-// A host buffer after copying `depth` slices of the window, salted with
-// `fill`, into host slice `dst_z` onwards: `fill` everywhere except the copied
-// rows.
 std::vector<uint8_t> expected_host(uint8_t fill, size_t depth, size_t dst_z) {
   std::vector<uint8_t> host(kHostBytes, fill);
   for (size_t z = 0; z < depth; ++z)
@@ -120,8 +93,6 @@ std::string byte_diff(const std::vector<uint8_t>& got, const std::vector<uint8_t
   return buf;
 }
 
-// The blob capture records for a copy whose first copied byte is host[first]:
-// the copied rows of `host`, packed end to end.
 std::vector<uint8_t> packed_rows(const std::vector<uint8_t>& host, size_t first, size_t depth) {
   std::vector<uint8_t> rows;
   for (size_t z = 0; z < depth; ++z)
@@ -133,7 +104,6 @@ std::vector<uint8_t> packed_rows(const std::vector<uint8_t>& host, size_t first,
   return rows;
 }
 
-// The expected-output blob of the one `api` event in the archive.
 template <typename Args>
 fs::path d2h_blob(const hrr::Archive& arc, hrr_api_id_t api) {
   INFO("API: " << hrr::event_type_name(static_cast<uint16_t>(api)));
@@ -235,8 +205,6 @@ struct ScopedOverflowingPitch {
 // recorded pitch, reading past its end. Only the version keeps it out.
 static_assert(HRR_VERSION >= 7, "packed host rects need HRR_VERSION 7 or later");
 
-// Clears the file flags in the header of events.bin for the lifetime of the
-// object, so replay reads the archive as one captured before packed host rects.
 struct ScopedLegacyArchive {
   fs::path events;
   uint16_t original = 0;
@@ -263,8 +231,6 @@ struct ScopedLegacyArchive {
   }
 };
 
-// Byte-exact D2H with the divergence guard off, so the exit code is the D2H
-// verdict alone: 0 when every check passes, 1 when one fails.
 std::pair<int, std::string> exact_replay(const fs::path& cap) {
   return hrr_playback_env(cap, {{"HIP_HRR_REPLAY_DIVERGENCE_ABORT", "0"}});
 }
@@ -279,9 +245,6 @@ void require_replay(const fs::path& cap, int want_ret, int want_pass, int want_f
   REQUIRE(ret == want_ret);
 }
 
-// Edits one expected blob twice and replays after each edit: first the first
-// byte of the second copied row, then the last byte of the last one. Replay
-// must report each edit as exactly one failed check.
 void check_blob_edits(const fs::path& cap, const fs::path& blob, size_t rows) {
   INFO("Expected blob: " << blob.string());
   REQUIRE(fs::file_size(blob) == rows);
@@ -294,16 +257,11 @@ void check_blob_edits(const fs::path& cap, const fs::path& blob, size_t rows) {
 
 }  // namespace
 
-// ---------------------------------------------------------------------------
-// Workload: the eleven pitched copies, each into its own host buffer, each
-// checked here against the layout the replay assertions assume.
-// ---------------------------------------------------------------------------
 TEST_CASE("Unit_HRR_PitchedD2H_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
 
   void* dev = nullptr;
   HRR_HIP_CHECK(hipMalloc(&dev, kDevBytes));
-  // Salts the device buffer with copy k's fill byte; see kFill.
   std::vector<uint8_t> image(kDevBytes);
   auto load = [&](int k) {
     for (size_t i = 0; i < kDevBytes; ++i) image[i] = dev_byte(i) ^ kFill[k];
@@ -382,7 +340,6 @@ TEST_CASE("Unit_HRR_PitchedD2H_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipStreamSynchronize(s));
   REQUIRE(byte_diff(h4, expected_host(kFill[4], kDepth, kDstZ)) == "");
 
-  // hipMemcpy2D takes no offsets: the window is wherever the pointers point.
   const void* src2d =
       static_cast<const uint8_t*>(dev) + kSrcZ * kDevSlice + kSrcY * kDevPitch + kSrcX;
   const size_t dst2d = kDstY * kHostPitch + kDstX;
@@ -432,17 +389,6 @@ TEST_CASE("Unit_HRR_PitchedD2H_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFree(dev));
 }
 
-/**
- * Test Description
- * ----------------
- *   - Capture Unit_HRR_PitchedD2H_Direct and check that each of the eleven
- *     pitched copies recorded an expected-output blob, and that the
- *     hipDrvMemcpy3D and hipMemcpy2D blobs hold only the copied rows, packed
- *     end to end, and none of the host buffer's fill.
- *   - Replay: all eleven checks must pass. Reading a
- *     packed blob with the recorded pitch and position runs past its end, and
- *     that check is skipped instead.
- */
 HRR_TEST_CASE(Unit_HRR_PitchedD2HRoundtrip) {
 #ifdef _WIN32
   HRR_SKIP("pitched D2H HRR roundtrip is disabled on Windows");
@@ -465,7 +411,6 @@ HRR_TEST_CASE(Unit_HRR_PitchedD2HRoundtrip) {
     d2h_blob<hrr_args_hipMemcpy3DAsync_spt>(arc, HRR_API_HIPMEMCPY3DASYNC_SPT);
     d2h_blob<hrr_args_hipMemcpyParam2D>(arc, HRR_API_HIPMEMCPYPARAM2D);
     d2h_blob<hrr_args_hipMemcpyParam2DAsync>(arc, HRR_API_HIPMEMCPYPARAM2DASYNC);
-    // The host bytes around the copied rows never reach the archive.
     CHECK(byte_diff(drv3d, packed_rows(expected_host(kFill[0], kDepth, kDstZ), kFirst3D,
                                        kDepth)) == "");
     CHECK(byte_diff(m2d, packed_rows(expected_host(kFill[5], 1, 0), kDstY * kHostPitch + kDstX,
@@ -474,16 +419,6 @@ HRR_TEST_CASE(Unit_HRR_PitchedD2HRoundtrip) {
   require_replay(cap.path, 0, kPitchedCopies, 0);
 }
 
-/**
- * Test Description
- * ----------------
- *   - Capture Unit_HRR_PitchedD2H_Direct, then edit the expected blob of
- *     hipDrvMemcpy3D, hipMemcpy3D and hipMemcpy2D in turn, replaying after
- *     each edit.
- *   - A flipped first byte of the second copied row must fail exactly that
- *     check.
- *   - A flipped last byte of the last copied row must fail exactly that check.
- */
 HRR_TEST_CASE(Unit_HRR_PitchedD2HBlobEdits) {
 #ifdef _WIN32
   HRR_SKIP("pitched D2H HRR roundtrip is disabled on Windows");
@@ -506,24 +441,6 @@ HRR_TEST_CASE(Unit_HRR_PitchedD2HBlobEdits) {
   }
 }
 
-/**
- * Test Description
- * ----------------
- *   - Capture Unit_HRR_PitchedD2H_Direct, then cut the last byte off expected
- *     blobs, so they are short of the rect the way blobs captured before
- *     rect-shaped D2H blobs are, and replay.
- *   - With one blob short, that check is counted as skipped and the other ten
- *     pass.
- *   - With all eleven short, every check is skipped and the replay fails rather
- *     than passing as an archive with no validation blobs.
- *   - With HRR_FILE_FLAG_PACKED_HOST_RECTS cleared, replay reads the archive as
- *     one captured before packed blobs. Every packed blob is then short of the
- *     host rect, so every check is skipped and the replay fails.
- *   - With the recorded host pitch of hipMemcpy3D set to SIZE_MAX, a packed
- *     archive still passes all eleven checks: replay reads its host side as
- *     dense. With the flag cleared as well, that host rect overflows size_t
- *     and every check is skipped.
- */
 HRR_TEST_CASE(Unit_HRR_PitchedD2HShortBlobs) {
 #ifdef _WIN32
   HRR_SKIP("pitched D2H HRR roundtrip is disabled on Windows");
@@ -545,7 +462,6 @@ HRR_TEST_CASE(Unit_HRR_PitchedD2HShortBlobs) {
       d2h_blob<hrr_args_hipMemcpyParam2D>(arc, HRR_API_HIPMEMCPYPARAM2D),
       d2h_blob<hrr_args_hipMemcpyParam2DAsync>(arc, HRR_API_HIPMEMCPYPARAM2DASYNC)};
   REQUIRE(blobs.size() == static_cast<size_t>(kPitchedCopies));
-  // Every check skipped fails the replay: it validated nothing.
   const auto all_skipped = [&cap] {
     const auto [ret, out] = exact_replay(cap.path);
     INFO("Playback stdout:\n" << out);
@@ -580,11 +496,7 @@ HRR_TEST_CASE(Unit_HRR_PitchedD2HShortBlobs) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// A hipMemcpy2D device-to-host whose two host rows are a page apart, with the
-// page between them PROT_NONE. The copy never touches that page, so capture
-// must not read it either: a blob taken from the first byte to the last faults.
-// ---------------------------------------------------------------------------
+// A hipMemcpy2D D2H whose host rows are a page apart with a PROT_NONE page between: capture must not read it.
 TEST_CASE("Unit_HRR_PitchedD2HGap_Direct", "[.][hrr-direct]") {
 #ifndef _WIN32
   HRR_HIP_CHECK(hipSetDevice(0));
@@ -602,7 +514,6 @@ TEST_CASE("Unit_HRR_PitchedD2HGap_Direct", "[.][hrr-direct]") {
   for (size_t i = 0; i < kDevBytes; ++i) image[i] = dev_byte(i);
   HRR_HIP_CHECK(hipMemcpy(dev, image.data(), kDevBytes, hipMemcpyHostToDevice));
 
-  // Row 0 ends page 0 and row 1 ends page 2, so the pitch spans the gap.
   uint8_t* dst = base + page - kWidth;
   const size_t dpitch = 2 * page;
   const auto* src = static_cast<const uint8_t*>(dev) + kSrcY * kDevPitch + kSrcX;
@@ -616,14 +527,6 @@ TEST_CASE("Unit_HRR_PitchedD2HGap_Direct", "[.][hrr-direct]") {
 #endif
 }
 
-/**
- * Test Description
- * ----------------
- *   - Capture Unit_HRR_PitchedD2HGap_Direct, whose host destination has a
- *     PROT_NONE page between its two rows. Capture must finish, and the
- *     expected blob must hold the two rows packed end to end.
- *   - Replay: the one check must pass.
- */
 HRR_TEST_CASE(Unit_HRR_PitchedD2HGapRoundtrip) {
 #ifdef _WIN32
   HRR_SKIP("pitched D2H HRR roundtrip is disabled on Windows");
@@ -645,29 +548,19 @@ HRR_TEST_CASE(Unit_HRR_PitchedD2HGapRoundtrip) {
 #endif
 }
 
-// ---------------------------------------------------------------------------
-// Dense host rects that do not start at the base pointer: a hipDrvMemcpy3D of
-// one row at the kDst* offsets, and a hipMemcpy3D whose host rows and slices are
-// packed (pitch == width, ysize == height) into slices 1 and 2 of its buffer.
-// The copied bytes are one contiguous run that starts `first` bytes in, and
-// the blob holds that run alone.
-// ---------------------------------------------------------------------------
 
 namespace {
 
 constexpr uint8_t kDenseFill[] = {0x71, 0x72};
 constexpr int kDenseCopies = 2;
 
-// hipDrvMemcpy3D: one row at the 3D destination offsets.
 constexpr size_t kDenseRowFirst = kFirst3D;
 constexpr size_t kDenseRowExtent = kDenseRowFirst + kWidth;
 
-// hipMemcpy3D: kDepth packed slices from host slice 1.
 constexpr size_t kPackedSlice = kWidth * kHeight;
 constexpr size_t kPackedFirst = kPackedSlice;
 constexpr size_t kPackedExtent = kPackedFirst + kDepth * kPackedSlice;
 
-// The hipDrvMemcpy3D host buffer after its copy: `fill` except the one row.
 std::vector<uint8_t> expected_dense_row(uint8_t fill) {
   std::vector<uint8_t> host(kHostBytes, fill);
   for (size_t x = 0; x < kWidth; ++x)
@@ -676,8 +569,6 @@ std::vector<uint8_t> expected_dense_row(uint8_t fill) {
   return host;
 }
 
-// The hipMemcpy3D host buffer after its copy: `fill` in slice 0, then the
-// window's rows packed end to end.
 std::vector<uint8_t> expected_packed(uint8_t fill) {
   std::vector<uint8_t> host(kPackedExtent, fill);
   for (size_t z = 0; z < kDepth; ++z)
@@ -688,7 +579,6 @@ std::vector<uint8_t> expected_packed(uint8_t fill) {
   return host;
 }
 
-// host[first, extent): the blob capture records for a dense copy.
 std::vector<uint8_t> dense_blob(const std::vector<uint8_t>& host, size_t first, size_t extent) {
   return {host.begin() + static_cast<std::ptrdiff_t>(first),
           host.begin() + static_cast<std::ptrdiff_t>(extent)};
@@ -746,16 +636,6 @@ TEST_CASE("Unit_HRR_DenseOffsetD2H_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFree(dev));
 }
 
-/**
- * Test Description
- * ----------------
- *   - Capture Unit_HRR_DenseOffsetD2H_Direct. Each expected blob must hold
- *     the copied run alone, none of the buffer's fill before it.
- *   - Replay: both checks must pass. Comparing from
- *     the pointer the copy was given compares the buffer's fill with the run,
- *     and fails.
- *   - Editing a blob's first or last byte must fail exactly that check.
- */
 HRR_TEST_CASE(Unit_HRR_DenseOffsetD2HRoundtrip) {
 #ifdef _WIN32
   HRR_SKIP("dense offset D2H HRR roundtrip is disabled on Windows");
@@ -772,7 +652,6 @@ HRR_TEST_CASE(Unit_HRR_DenseOffsetD2HRoundtrip) {
                                                 kPackedExtent)) == "");
   require_replay(cap.path, 0, kDenseCopies, 0);
 
-  // One capture serves every edit, so the edits run in turn, not as sections.
   const std::pair<fs::path, std::pair<size_t, size_t>> edits[] = {
       {row, {kDenseRowFirst, kDenseRowExtent}}, {packed, {kPackedFirst, kPackedExtent}}};
   for (const auto& [blob, span] : edits) {
@@ -786,22 +665,14 @@ HRR_TEST_CASE(Unit_HRR_DenseOffsetD2HRoundtrip) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Host-to-device: hipMemcpy3D, hipMemcpy3DAsync and their _spt forms read the
-// pitched host rect the copies above write (the kDst* offsets) into the device rect they read
-// (the kSrc* offsets). The source blob holds the copied rows packed, and
-// replay reads it as a dense host rect.
-// ---------------------------------------------------------------------------
 
 namespace {
 
-// One fill per device buffer, so the four readbacks record distinct blobs.
 constexpr uint8_t kDevFill[] = {0x51, 0x52, 0x53, 0x54};
 constexpr int kH2DCopies = 4;
 
 uint8_t host_byte(size_t offset) { return static_cast<uint8_t>(dev_byte(offset) ^ 0xA5); }
 
-// A device buffer filled with `fill` after one pitched H2D copy of the window.
 std::vector<uint8_t> expected_dev(uint8_t fill) {
   std::vector<uint8_t> dev(kDevBytes, fill);
   for (size_t z = 0; z < kDepth; ++z)
@@ -830,7 +701,6 @@ fs::path blob_path(const hrr::Archive& arc, uint64_t lo, uint64_t hi) {
   return it->second;
 }
 
-// The source blob hash of the one H2D event of type `api`.
 template <typename Args>
 std::pair<uint64_t, uint64_t> h2d_hash(const hrr::Archive& arc, hrr_api_id_t api) {
   const auto args = event_args<Args>(arc, api);
@@ -838,7 +708,6 @@ std::pair<uint64_t, uint64_t> h2d_hash(const hrr::Archive& arc, hrr_api_id_t api
   return {args[0]->blob_hash_lo, args[0]->blob_hash_hi};
 }
 
-// The H2D source blob shared by the four 3D copies, which read the same rect.
 fs::path h2d_blob(const hrr::Archive& arc) {
   const auto sync = h2d_hash<hrr_args_hipMemcpy3D>(arc, HRR_API_HIPMEMCPY3D);
   REQUIRE(h2d_hash<hrr_args_hipMemcpy3DAsync>(arc, HRR_API_HIPMEMCPY3DASYNC) == sync);
@@ -900,13 +769,6 @@ TEST_CASE("Unit_HRR_PitchedH2D_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipStreamDestroy(s));
 }
 
-/**
- * Test Description
- * ----------------
- *   - Capture Unit_HRR_PitchedH2D_Direct: the H2D source blob must hold the
- *     copied rows of the host rect, packed end to end.
- *   - Replay: all four device readbacks must match.
- */
 HRR_TEST_CASE(Unit_HRR_PitchedH2DRoundtrip) {
 #ifdef _WIN32
   HRR_SKIP("pitched H2D HRR roundtrip is disabled on Windows");
@@ -924,19 +786,6 @@ HRR_TEST_CASE(Unit_HRR_PitchedH2DRoundtrip) {
   require_replay(cap.path, 0, kH2DCopies, 0);
 }
 
-/**
- * Test Description
- * ----------------
- *   - Capture Unit_HRR_PitchedH2D_Direct, then clear
- *     HRR_FILE_FLAG_PACKED_HOST_RECTS, so replay reads the archive as one
- *     captured before packed blobs. Its width*height*depth source blob then
- *     looks like the flat blob such an archive holds.
- *   - Rewrite each readback's expected blob to the buffer's fill alone, which
- *     is what the device holds if the copy is skipped.
- *   - Replay must skip all four copies and pass all four readbacks. Reading the
- *     short blob with the recorded pitch and position runs past its end and
- *     writes other bytes into the device rect.
- */
 HRR_TEST_CASE(Unit_HRR_PitchedH2DShortBlob) {
 #ifdef _WIN32
   HRR_SKIP("pitched H2D HRR roundtrip is disabled on Windows");
@@ -962,18 +811,12 @@ HRR_TEST_CASE(Unit_HRR_PitchedH2DShortBlob) {
   require_replay(cap.path, 0, kH2DCopies, 0);
 }
 
-// ---------------------------------------------------------------------------
-// Host-to-device: hipMemcpy2D and hipMemcpy2DAsync read the first slice of the
-// same host window, from a pointer at its first byte, into the first slice of
-// the device window. The source blob holds width * height bytes.
-// ---------------------------------------------------------------------------
 
 namespace {
 
 constexpr uint8_t kDev2DFill[] = {0x61, 0x62};
 constexpr int kH2D2DCopies = 2;
 
-// A device buffer filled with `fill` after one hipMemcpy2D of the window.
 std::vector<uint8_t> expected_dev_2d(uint8_t fill) {
   std::vector<uint8_t> dev(kDevBytes, fill);
   for (size_t y = 0; y < kHeight; ++y)
@@ -982,7 +825,6 @@ std::vector<uint8_t> expected_dev_2d(uint8_t fill) {
   return dev;
 }
 
-// The H2D source blob shared by the two 2D copies, which read the same rect.
 fs::path h2d_2d_blob(const hrr::Archive& arc) {
   const auto sync = h2d_hash<hrr_args_hipMemcpy2D>(arc, HRR_API_HIPMEMCPY2D);
   REQUIRE(h2d_hash<hrr_args_hipMemcpy2DAsync>(arc, HRR_API_HIPMEMCPY2DASYNC) == sync);
@@ -1004,7 +846,6 @@ TEST_CASE("Unit_HRR_PitchedH2D2D_Direct", "[.][hrr-direct]") {
   for (int i = 0; i < kH2D2DCopies; ++i) {
     HRR_HIP_CHECK(hipMalloc(&dev[i], kDevBytes));
     HRR_HIP_CHECK(hipMemset(dev[i], kDev2DFill[i], kDevBytes));
-    // See Unit_HRR_PitchedH2D_Direct: the fill must land before the async copy.
     HRR_HIP_CHECK(hipDeviceSynchronize());
     uint8_t* dst = static_cast<uint8_t*>(dev[i]) + kSrcY * kDevPitch + kSrcX;
     if (i == 0) {
@@ -1026,13 +867,6 @@ TEST_CASE("Unit_HRR_PitchedH2D2D_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipStreamDestroy(s));
 }
 
-/**
- * Test Description
- * ----------------
- *   - Capture Unit_HRR_PitchedH2D2D_Direct: the H2D source blob must hold
- *     the copied rows of the host rect, packed end to end.
- *   - Replay: both device readbacks must match.
- */
 HRR_TEST_CASE(Unit_HRR_PitchedH2D2DRoundtrip) {
 #ifdef _WIN32
   HRR_SKIP("pitched H2D HRR roundtrip is disabled on Windows");
@@ -1050,15 +884,6 @@ HRR_TEST_CASE(Unit_HRR_PitchedH2D2DRoundtrip) {
   require_replay(cap.path, 0, kH2D2DCopies, 0);
 }
 
-/**
- * Test Description
- * ----------------
- *   - Capture Unit_HRR_PitchedH2D2D_Direct, cut the last byte off its H2D
- *     source blob, and rewrite each readback's expected blob to the buffer's
- *     fill alone, which is what the device holds if the copy is skipped.
- *   - Replay must skip both copies and pass both readbacks. Handing the short
- *     blob to hipMemcpy2D reads past its end and writes the window.
- */
 HRR_TEST_CASE(Unit_HRR_PitchedH2D2DShortBlob) {
 #ifdef _WIN32
   HRR_SKIP("pitched H2D HRR roundtrip is disabled on Windows");
@@ -1087,11 +912,7 @@ HRR_TEST_CASE(Unit_HRR_PitchedH2D2DShortBlob) {
   require_replay(cap.path, 0, kH2D2DCopies, 0);
 }
 
-// ---------------------------------------------------------------------------
-// A sparse host pitch: hipMemcpy2D copies kSparseRows rows of kWidth bytes,
-// kSparsePitch bytes apart, to the device and back into the same host rows.
-// The host span is 48 MiB, but the copies move 192 bytes, and so must the blobs.
-// ---------------------------------------------------------------------------
+// A 48 MiB host span with only 192 bytes copied: blobs must cost the bytes copied, not the span.
 
 namespace {
 
@@ -1104,7 +925,6 @@ constexpr size_t kSparseBytes = kSparseRows * kWidth;
 TEST_CASE("Unit_HRR_SparsePitch_Direct", "[.][hrr-direct]") {
 #ifndef _WIN32
   HRR_HIP_CHECK(hipSetDevice(0));
-  // Pages the copies never touch are never faulted in.
   const size_t span = (kSparseRows - 1) * kSparsePitch + kWidth;
   void* map = mmap(nullptr, span, PROT_READ | PROT_WRITE,
                    MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
@@ -1129,15 +949,6 @@ TEST_CASE("Unit_HRR_SparsePitch_Direct", "[.][hrr-direct]") {
 #endif
 }
 
-/**
- * Test Description
- * ----------------
- *   - Capture Unit_HRR_SparsePitch_Direct. The H2D source blob and the D2H
- *     expected blob must each hold the 192 copied bytes, packed end to end.
- *     A blob of the whole host span is 48 MiB.
- *   - Replay: the H2D copy writes the device rows
- *     from the packed blob, and the D2H check must pass.
- */
 HRR_TEST_CASE(Unit_HRR_SparsePitchRoundtrip) {
 #ifdef _WIN32
   HRR_SKIP("sparse pitch HRR roundtrip is disabled on Windows");
@@ -1164,10 +975,7 @@ HRR_TEST_CASE(Unit_HRR_SparsePitchRoundtrip) {
 #endif
 }
 
-// ---------------------------------------------------------------------------
-// Rejected copies: the runtime refuses a null device side before it touches
-// the host rect, so capture must not read that rect either.
-// ---------------------------------------------------------------------------
+// The runtime refuses a null device side before touching the host rect, so capture must not read that rect either.
 TEST_CASE("Unit_HRR_RejectedMemcpy3D_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
 
@@ -1199,7 +1007,6 @@ TEST_CASE("Unit_HRR_RejectedMemcpy3D_Direct", "[.][hrr-direct]") {
 
 namespace {
 
-// Every event of type `api` must be a failed call with no blob of either kind.
 template <typename Args>
 size_t check_rejected(const hrr::Archive& arc, hrr_api_id_t api) {
   const auto args = event_args<Args>(arc, api);
@@ -1215,16 +1022,6 @@ size_t check_rejected(const hrr::Archive& arc, hrr_api_id_t api) {
 
 }  // namespace
 
-/**
- * Test Description
- * ----------------
- *   - Capture Unit_HRR_RejectedMemcpy3D_Direct: each of the four hipMemcpy3D
- *     spellings is refused once host-to-device and once device-to-host.
- *   - A refused call is either not recorded at all or recorded with its error
- *     and both blob hashes zero: its host rect was never validated, and reading
- *     it can run past the caller's buffer.
- *   - Replay must pass with nothing to substitute or validate.
- */
 HRR_TEST_CASE(Unit_HRR_RejectedMemcpy3DNoBlob) {
 #ifdef _WIN32
   HRR_SKIP("rejected hipMemcpy3D HRR roundtrip is disabled on Windows");

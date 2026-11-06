@@ -10,20 +10,15 @@
  * @ingroup HRRTest
  * A minimal rocprofiler-register tool for hrr_dispatch_swap_test.cc.
  *
- * libamdhip64 does not export its live dispatch table. A profiler gets it from
- * rocprofiler-register, which loads the library named by
- * ROCPROFILER_REGISTER_LIBRARY and passes it each runtime's tables. This one
- * keeps the HIP table so the workload can wrap a slot the way a profiler
- * attaching after capture would.
+ * libamdhip64 does not export its live dispatch table. rocprofiler-register loads the library named by
+ * ROCPROFILER_REGISTER_LIBRARY and passes it each runtime's tables. This tool keeps the HIP table
+ * so a workload can wrap a slot like a profiler attaching after capture.
  *
- * It also registers an exit handler when the HIP table arrives. That happens on
- * the first use of the table, before hip::init() registers
- * hip_capture_shutdown(), so the handler runs after the capture has shut down
- * and can inspect what shutdown left behind.
+ * It registers an exit handler on the table's first use, before hip::init() registers hip_capture_shutdown(),
+ * so the handler runs after capture shutdown and can inspect what it left behind.
  *
- * Preloaded with LD_PRELOAD, it also stands in front of fopen() and open(), so a
- * workload can act at the moment the capture opens a file, e.g. between the
- * trailer and the manifest. Without a hook it only forwards the call.
+ * Preloaded with LD_PRELOAD, it also hooks fopen() and open() so a workload can act when capture opens a file,
+ * e.g. between the trailer and the manifest. Without a hook it only forwards the call.
  */
 
 #include <dlfcn.h>
@@ -64,8 +59,6 @@ void* hooked_fopen(const char* name, std::atomic<FopenFn>& next, const char* pat
 std::atomic<FopenFn> g_next_fopen{nullptr};
 std::atomic<FopenFn> g_next_fopen64{nullptr};
 
-// As hooked_fopen(), for the files the capture opens with open() on POSIX, the
-// manifest among them.
 using OpenFn = int (*)(const char*, int, ...);
 int hooked_open(const char* name, std::atomic<OpenFn>& next, const char* path, int flags,
                 mode_t mode) {
@@ -129,16 +122,12 @@ HRR_TOOL_EXPORT int rocprofiler_set_api_table(const char* name, uint64_t /*lib_v
   return 0;
 }
 
-// The live HipDispatchTable, or null if rocprofiler-register never passed one.
 HRR_TOOL_EXPORT void* hrr_dispatch_tool_hip_table() { return g_hip_table.load(); }
 
-// Runs `hook` from the exit handler above, after hip_capture_shutdown().
 HRR_TOOL_EXPORT void hrr_dispatch_tool_set_late_hook(void (*hook)()) {
   g_late_hook.store(hook, std::memory_order_release);
 }
 
-// Runs `hook` with the path on every fopen() and open() while the library is
-// preloaded.
 HRR_TOOL_EXPORT void hrr_dispatch_tool_set_fopen_hook(void (*hook)(const char*)) {
   g_fopen_hook.store(hook, std::memory_order_release);
 }

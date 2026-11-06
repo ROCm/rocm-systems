@@ -8,7 +8,6 @@
  * @addtogroup HRR HRR Playback
  * @{
  * @ingroup HRRTest
- * CPU-only unit tests for HRR playback helper invariants (no GPU required).
  */
 
 #include "hrr_test_common.hh"
@@ -24,9 +23,7 @@
 // synchronize is illegal mid-capture (HIP 900/901). Lock that guard down: a
 // regression that dropped it would break HRR graph replay.
 HRR_TEST_CASE(Unit_HRR_Playback_ReplayedH2DDrainGraphGuard) {
-  // Outside graph capture: the replayed H2D restore must be drained.
   REQUIRE(hrr_replayed_h2d_needs_drain(false));
-  // During graph capture: draining is illegal, so it must be skipped.
   REQUIRE_FALSE(hrr_replayed_h2d_needs_drain(true));
 }
 
@@ -37,11 +34,8 @@ HRR_TEST_CASE(Unit_HRR_Playback_ReplayedH2DDrainGraphGuard) {
 // kernel input with zeros. Draining is skipped when zero-init is turned off and
 // during graph capture, where the zero-init is never issued.
 HRR_TEST_CASE(Unit_HRR_Playback_ZeroInitDrainGuard) {
-  // Normal replay: the zero-init must be ordered ahead of later events.
   REQUIRE(hrr_zero_init_needs_drain(true, false));
-  // HIP_HRR_REPLAY_ZERO_INIT=0: nothing was issued, so nothing to drain.
   REQUIRE_FALSE(hrr_zero_init_needs_drain(false, false));
-  // During graph capture: zero-init is skipped and a sync would be illegal.
   REQUIRE_FALSE(hrr_zero_init_needs_drain(true, true));
   REQUIRE_FALSE(hrr_zero_init_needs_drain(false, true));
 }
@@ -67,9 +61,6 @@ HRR_TEST_CASE(Unit_HRR_Playback_VersionOption) {
   REQUIRE(out.find("source revision        : ") != std::string::npos);
 }
 
-// Placement holds each recorded allocation rounded out to whole pages, merges
-// what overlaps or touches, and leaves out an allocation exported over IPC
-// and any other over the same pages.
 HRR_TEST_CASE(Unit_HRR_Playback_PlacementPlan) {
   const uint64_t P = 4096, B = 0x7f0000000000ull;
   auto plan = hrr_place_plan({{B + 3 * P, B + 3 * P + 8},  // one page
@@ -84,8 +75,6 @@ HRR_TEST_CASE(Unit_HRR_Playback_PlacementPlan) {
   CHECK(plan[0].end == B + 4 * P);
 }
 
-// An allocation is placed only inside a range still held, and its range is
-// held again once it is freed.
 HRR_TEST_CASE(Unit_HRR_Playback_PlacementHeldRanges) {
   HrrHeldRanges h;
   h.add(0x10000, 0x20000);
@@ -111,7 +100,6 @@ HRR_TEST_CASE(Unit_HRR_Playback_PlacementRangeChecked) {
   REQUIRE(hrr_place_range(B, G + 1, G, &b, &e));  // spills into a second granule
   CHECK(e == B + 2 * G);
 
-  // rec + size lands exactly on 2^64, and one past it.
   CHECK_FALSE(hrr_place_range(B, 0 - B, G, &b, &e));
   CHECK_FALSE(hrr_place_range(B, 0 - B + 1, G, &b, &e));
   CHECK_FALSE(hrr_place_range(B, ~0ull, G, &b, &e));
@@ -119,9 +107,7 @@ HRR_TEST_CASE(Unit_HRR_Playback_PlacementRangeChecked) {
   CHECK_FALSE(hrr_place_range(B + 5, ~0ull, G, &b, &e));
   // rec + size ends just below 2^64: no wrap, but rounding up to a granule does.
   CHECK_FALSE(hrr_place_range(B, (0 - B) - 1, G, &b, &e));
-  // The same from a different start.
   CHECK_FALSE(hrr_place_range(1ull << 63, (1ull << 63) - 1, G, &b, &e));
-  // Nothing to place.
   CHECK_FALSE(hrr_place_range(B, 0, G, &b, &e));
 }
 

@@ -8,15 +8,10 @@
  * @addtogroup HRR HRR capabilities and addresses kept out of the archive
  * @{
  * @ingroup HRRTest
- * Tests that capture records that a call happened without recording what the
- * call handed back when that is a capability or an address in the capturing
- * process.
+ * Capture records that a call happened without recording a capability or an address in the capturing process.
  *
- * An IPC handle lets any process on the machine open the allocation while its
- * exporter lives, so the archive leaves its bytes zero. A resolved entry point
- * from hipGetProcAddress or hipGetDriverEntryPoint is an address in the runtime
- * as the capturing process loaded it, and replay looks the name up again, so
- * it is not recorded either.
+ * An IPC handle lets any process on the machine open the allocation while its exporter lives, so the archive leaves its bytes zero.
+ * A resolved entry point is an address in the runtime as this process loaded it, and replay looks the name up again, so it is not recorded.
  */
 
 #include "hrr_test_common.hh"
@@ -77,13 +72,9 @@ bool all_zero(const uint8_t* p, size_t n) {
 }
 }  // namespace
 
-// ===========================================================================
-// The captured workload: two handle exports, an event export, the entry-point
-// lookups plain and _spt, and a second process that exports one allocation of
-// its own and opens one handle of each kind. Capture records only a call that
-// succeeded, and a process cannot open its own handle, so only another process
-// reaches the by-value open shims. What each call returned goes to stdout.
-// ===========================================================================
+// Workload: two handle exports, an event export, entry-point lookups (plain and _spt), and a second process
+// that exports one allocation and opens one handle of each kind. Capture records only successful calls and
+// a process cannot open its own handle, so only another process reaches the by-value open shims.
 TEST_CASE("Unit_HRR_CaptureCapabilities_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
   void* mem[2] = {nullptr, nullptr};
@@ -167,10 +158,6 @@ TEST_CASE("Unit_HRR_CaptureCapabilitiesImport_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFree(own));
 }
 
-// ---------------------------------------------------------------------------
-// One capture of both processes, then each archive record by record, then a
-// replay of the importer's.
-// ---------------------------------------------------------------------------
 HRR_TEST_CASE(Unit_HRR_CaptureCapabilities) {
   ScopedDir cap(fs::temp_directory_path() / "hrr_capture_capabilities.hrr");
   std::string out;
@@ -251,7 +238,6 @@ HRR_TEST_CASE(Unit_HRR_CaptureCapabilities) {
     }
   }
 
-  // Each export is recorded, and its handle is not; the importer adds one.
   const bool imported = tags[HRR_CAPS_OPEN_MEM] == "0" && tags[HRR_CAPS_OPEN_EVENT] == "0";
   REQUIRE(exports.size() == handles.size() + (tags.count(HRR_CAPS_IMPORTER) ? 1 : 0));
   for (const auto& a : exports) {
@@ -259,7 +245,6 @@ HRR_TEST_CASE(Unit_HRR_CaptureCapabilities) {
     CHECK(all_zero(a.handle_bytes, sizeof(a.handle_bytes)));
   }
 
-  // The lookups keep their name and lose their answer.
   REQUIRE(addr_fields.count(HRR_API_HIPGETPROCADDRESS));
   REQUIRE(addr_fields.count(HRR_API_HIPGETPROCADDRESS_SPT));
   CHECK(addr_fields.count(HRR_API_HIPGETDRIVERENTRYPOINT) == tags.count(HRR_CAPS_ENTRY));
@@ -276,7 +261,6 @@ HRR_TEST_CASE(Unit_HRR_CaptureCapabilities) {
     return;
   }
 
-  // The importer's opens, by value, are recorded without the handle.
   REQUIRE(mem_opens.size() == 1);
   REQUIRE(event_opens.size() == 1);
   CHECK(all_zero(mem_opens[0].handle_bytes, sizeof(mem_opens[0].handle_bytes)));

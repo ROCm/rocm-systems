@@ -8,10 +8,6 @@
  * @addtogroup HRR HRR Query Retry
  * @{
  * @ingroup HRRTest
- * Handler-level tests (hrr-handler-tests links hip_playback.cpp in) for the
- * bounded hipEventQuery/hipStreamQuery retry. They call
- * replay_query_until_success with stand-ins for the HIP query, so no HIP call
- * is made and no GPU is needed.
  */
 
 #include <catch2/catch_test_macros.hpp>
@@ -38,14 +34,6 @@ hipError_t query_probe(void* p) {
 
 }  // namespace
 
-/**
- * Test Description
- * ----------------
- *   - A query that never completes is called exactly max_query_attempts times,
- *     then the replay ends: the result is hipErrorNotReady, the message names
- *     the API and the bound, and fatal_error is set (so --continue-on-error
- *     does not carry on past it).
- */
 TEST_CASE("Unit_HRR_Query_NeverCompletingQueryEndsTheReplay", "[hrr]") {
   PlaybackContext ctx;
   ctx.max_query_attempts = 7;
@@ -60,12 +48,6 @@ TEST_CASE("Unit_HRR_Query_NeverCompletingQueryEndsTheReplay", "[hrr]") {
   CHECK(err.find("7 attempts") != std::string::npos);
 }
 
-/**
- * Test Description
- * ----------------
- *   - A query that completes before the bound returns hipSuccess after
- *     exactly the calls it took, and the replay is not ended.
- */
 TEST_CASE("Unit_HRR_Query_CompletingQueryReturnsSuccess", "[hrr]") {
   PlaybackContext ctx;
   ctx.max_query_attempts = 100;
@@ -76,12 +58,6 @@ TEST_CASE("Unit_HRR_Query_CompletingQueryReturnsSuccess", "[hrr]") {
   CHECK_FALSE(ctx.fatal_error.load());
 }
 
-/**
- * Test Description
- * ----------------
- *   - An error other than hipErrorNotReady is returned at once, without
- *     retrying and without ending the replay on its own.
- */
 TEST_CASE("Unit_HRR_Query_OtherErrorIsReturnedAtOnce", "[hrr]") {
   PlaybackContext ctx;
   ctx.max_query_attempts = 100;
@@ -93,11 +69,6 @@ TEST_CASE("Unit_HRR_Query_OtherErrorIsReturnedAtOnce", "[hrr]") {
   CHECK_FALSE(ctx.fatal_error.load());
 }
 
-/**
- * Test Description
- * ----------------
- *   - A bound of zero makes no query at all and ends the replay.
- */
 TEST_CASE("Unit_HRR_Query_ZeroBoundMakesNoCall", "[hrr]") {
   PlaybackContext ctx;
   ctx.max_query_attempts = 0;
@@ -110,14 +81,6 @@ TEST_CASE("Unit_HRR_Query_ZeroBoundMakesNoCall", "[hrr]") {
   CHECK(ctx.fatal_error.load());
 }
 
-/**
- * Test Description
- * ----------------
- *   - By default a query has no attempt bound (the default is UINT64_MAX), so
- *     one that returns hipErrorNotReady many times still completes (a
- *     long-polled kernel must replay). The count is small: the bound is
- *     checked as a value, not by running past the old 5,000,000 default.
- */
 TEST_CASE("Unit_HRR_Query_DefaultHasNoAttemptBound", "[hrr]") {
   PlaybackContext ctx;
   CHECK(ctx.max_query_attempts == UINT64_MAX);
@@ -129,11 +92,6 @@ TEST_CASE("Unit_HRR_Query_DefaultHasNoAttemptBound", "[hrr]") {
   CHECK_FALSE(ctx.fatal_error.load());
 }
 
-/**
- * Test Description
- * ----------------
- *   - A spinning query ends when another thread has already failed the replay.
- */
 TEST_CASE("Unit_HRR_Query_StopsWhenReplayIsFatal", "[hrr]") {
   PlaybackContext ctx;
   ctx.fatal_error.store(true);

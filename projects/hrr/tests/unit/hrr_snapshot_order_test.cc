@@ -8,17 +8,6 @@
  * @addtogroup HRR HRR Snapshot Ordering
  * @{
  * @ingroup HRRTest
- * A kernel launch gives up the global replay turn before its handler runs, so
- * the free of a pinned host buffer at the next sequence number can start while
- * the launch is still queuing its snapshot of that buffer. The launch holds
- * host_free_mu shared from before it hands the turn on until its launch call
- * returns; a free takes it exclusive. dispatch_event hands the turn on through
- * HrrTurnGuard, which takes the hold first for a launch, and the tests drive
- * that guard. They do not run dispatch_event: that it passes the guard the
- * right launch flag is not covered, only that hrr_is_launch_handler names the
- * launch handlers and not the frees. No device work: the runtime call of the
- * free fails, as the pointers are not the runtime's, so what the tests observe
- * is whether the free call returns while the hold is taken.
  */
 
 #include <catch2/catch_test_macros.hpp>
@@ -67,7 +56,6 @@ void launch_against_free(PlaybackContext& ctx, const std::function<void()>& free
   });
   while (!started.load()) std::this_thread::yield();
 
-  // Give a free that is not held back every chance to finish.
   for (int i = 0; i < 30 && !freed.load(); ++i)
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   CHECK_FALSE(freed.load());
@@ -78,7 +66,6 @@ void launch_against_free(PlaybackContext& ctx, const std::function<void()>& free
   CHECK(freed_after_release.load());
 }
 
-// A pinned buffer the replay owns, recorded as `rec`.
 struct Buffer {
   void* p = nullptr;
   Buffer() {
@@ -90,12 +77,6 @@ struct Buffer {
 
 }  // namespace
 
-/**
- * Test Description
- * ----------------
- *   - The memory came from hipHostRegister: hipHostUnregister, which the
- *     runtime refuses here, must wait for a launch that holds the lock.
- */
 TEST_CASE("Unit_HRR_SnapshotOrder_UnregisterWaitsForLaunch", "[hrr]") {
   Buffer b;
   PlaybackContext ctx;
@@ -112,12 +93,6 @@ TEST_CASE("Unit_HRR_SnapshotOrder_UnregisterWaitsForLaunch", "[hrr]") {
   });
 }
 
-/**
- * Test Description
- * ----------------
- *   - The memory came from hipHostMalloc: hipHostFree and hipFreeHost must
- *     wait for a launch that holds the lock.
- */
 TEST_CASE("Unit_HRR_SnapshotOrder_HostFreeWaitsForLaunch", "[hrr]") {
   Buffer b;
   PlaybackContext ctx;
@@ -141,12 +116,6 @@ TEST_CASE("Unit_HRR_SnapshotOrder_HostFreeWaitsForLaunch", "[hrr]") {
   }
 }
 
-/**
- * Test Description
- * ----------------
- *   - The handlers a launch event dispatches to are the ones dispatch_event
- *     gives the launch hold, and the frees are not.
- */
 TEST_CASE("Unit_HRR_SnapshotOrder_LaunchHandlersTakeTheHold", "[hrr]") {
   CHECK(hrr_is_launch_handler(hrr_playback_dispatch[HRR_API_HIPMODULELAUNCHKERNEL]));
   CHECK(hrr_is_launch_handler(hrr_playback_dispatch[HRR_API_HIPLAUNCHKERNEL]));
@@ -155,12 +124,6 @@ TEST_CASE("Unit_HRR_SnapshotOrder_LaunchHandlersTakeTheHold", "[hrr]") {
   CHECK_FALSE(hrr_is_launch_handler(hrr_playback_dispatch[HRR_API_HIPHOSTUNREGISTER]));
 }
 
-/**
- * Test Description
- * ----------------
- *   - A launch's guard takes the hold before it moves next_seq, and neither
- *     the handler's release nor the guard's end leaves the lock held.
- */
 TEST_CASE("Unit_HRR_SnapshotOrder_GuardReleasesTheHold", "[hrr]") {
   PlaybackContext ctx;
   {

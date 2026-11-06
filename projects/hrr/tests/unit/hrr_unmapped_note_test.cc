@@ -8,10 +8,6 @@
  * @addtogroup HRR HRR Unmapped Note
  * @{
  * @ingroup HRRTest
- * Handler-level tests of which pointer misses reach the unmapped-pointer
- * policy (playback/hip_playback.h): the handlers are called through the
- * dispatch table with crafted records and the per-thread note is read back.
- * Every case returns before any HIP call, so no GPU is needed.
  */
 
 #include <catch2/catch_test_macros.hpp>
@@ -34,14 +30,6 @@ constexpr uint64_t kReserved = 0x7f0000000000ull;
 
 }  // namespace
 
-/**
- * Test Description
- * ----------------
- *   - hipMemMap at an address in no reservation or allocation is noted for the
- *     policy, so it is counted and stops --strict-unmapped.
- *   - At an address inside a reservation it is skipped as before, unnoted, and
- *     hipMemUnmap, a release, is never noted.
- */
 TEST_CASE("Unit_HRR_UnmappedNote_MemMap", "[hrr]") {
   PlaybackContext ctx;
   char live[16];
@@ -66,14 +54,6 @@ TEST_CASE("Unit_HRR_UnmappedNote_MemMap", "[hrr]") {
   CHECK(hrr_unmapped_note.count == 0);
 }
 
-/**
- * Test Description
- * ----------------
- *   - hipIpcOpenMemHandle with a handle no replayed export matches is skipped,
- *     so its pointer is never mapped. Closing that pointer is a release of
- *     memory replay never had: it succeeds without a HIP call and is not noted,
- *     so --strict-unmapped does not stop there.
- */
 TEST_CASE("Unit_HRR_UnmappedNote_IpcCloseOfSkippedImport", "[hrr]") {
   PlaybackContext ctx;
   const uint64_t imported = 0x7e0000000000ull;

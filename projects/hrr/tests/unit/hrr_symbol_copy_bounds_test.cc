@@ -8,15 +8,6 @@
  * @addtogroup HRR HRR Symbol Copy Bounds
  * @{
  * @ingroup HRRTest
- * Tests that the six graph symbol-copy handlers (hip_playback.cpp) refuse a
- * record whose offset and count do not fit the symbol's registered size.
- *
- * The offset and count come from the archive. Each handler adds the offset to
- * the symbol's live address and forwards the sum to a 1D memcpy node call, and
- * HIP does not bound that copy against the symbol. The handlers are linked in
- * and called with crafted records and a symbol registry seeded here; the three
- * 1D HIP calls are stand-ins that count their calls, so no GPU is needed and a
- * test can show HIP was never reached.
  */
 
 #include <catch2/catch_test_macros.hpp>
@@ -42,7 +33,6 @@ namespace {
 using hrr_test::capture_stderr;
 using hrr_test::ExactRecord;
 
-// What the stand-ins below saw.
 struct Seen {
   int calls = 0;
   const void* dst = nullptr;
@@ -58,8 +48,6 @@ constexpr size_t kSymSize = 64;
 char g_symbol[256];  // the live global; larger than registered, to spot a stray write
 char g_dev[256];
 
-// A registry holding a kSymSize-byte symbol, a device allocation for the other
-// operand, and the graph, node and exec the handlers translate.
 struct Fixture {
   PlaybackContext ctx;
   Fixture() {
@@ -72,7 +60,6 @@ struct Fixture {
   }
 };
 
-// One entry per handler: fills a record from (offset, count) and runs it.
 struct Handler {
   const char* name;
   hipError_t (*run)(PlaybackContext&, uint64_t offset, uint64_t count);
@@ -143,8 +130,6 @@ const Handler kHandlers[] = {
 
 }  // namespace
 
-// Stand-ins for the HIP calls. The test executable defines them, so the
-// handlers' calls bind here instead of to the HIP runtime.
 extern "C" hipError_t hipGraphAddMemcpyNode1D(hipGraphNode_t* node, hipGraph_t, const hipGraphNode_t*,
                                               size_t, void* dst, const void* src, size_t count,
                                               hipMemcpyKind) {
@@ -175,13 +160,6 @@ extern "C" hipError_t hipGraphExecMemcpyNodeSetParams1D(hipGraphExec_t, hipGraph
   return hipSuccess;
 }
 
-/**
- * Test Description
- * ----------------
- *   - Control: a copy that fits the symbol, including one that ends exactly at
- *     its end, reaches HIP once, aimed at the live symbol plus the offset. This
- *     shows the refusals below are the bound and not a setup failure.
- */
 TEST_CASE("Unit_HRR_SymbolCopyBounds_InRangeCopyReachesHip", "[hrr]") {
   struct Fit { uint64_t off, n; };
   for (const Handler& h : kHandlers) {
@@ -200,14 +178,6 @@ TEST_CASE("Unit_HRR_SymbolCopyBounds_InRangeCopyReachesHip", "[hrr]") {
   }
 }
 
-/**
- * Test Description
- * ----------------
- *   - A record whose offset is at or past the symbol's size, or whose offset
- *     plus count passes it, is refused with hipErrorInvalidValue and HIP is
- *     never called. The message names the API, the offset and the registered
- *     size.
- */
 TEST_CASE("Unit_HRR_SymbolCopyBounds_OutOfRangeIsRefusedBeforeHip", "[hrr]") {
   struct Bad { uint64_t off, n; };
   for (const Handler& h : kHandlers) {

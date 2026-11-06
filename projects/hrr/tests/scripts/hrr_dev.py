@@ -111,7 +111,6 @@ def container_script(repo: Path, backend: str) -> str:
         targets = ";".join(job["arch"] for job in EMULATOR_JOBS)
     lines = [
         "set -euo pipefail",
-        # Non-root pip falls back to a user install; put its scripts on PATH.
         'export PATH="$HOME/.local/bin:$PATH"',
         f'python3 -m pip install --no-cache-dir --index-url "{ROCM_INDEX_URL}" '
         f'"rocm[devel]=={ROCM_SDK_VERSION}"',
@@ -180,9 +179,7 @@ def container_script(repo: Path, backend: str) -> str:
 
 
 def exec_command(repo: Path, backend: str) -> list[str]:
-    # No passwd entry for --user uid:gid, so HOME would be "/".
     command = ["docker", "exec", "-w", str(repo), "-e", "HOME=/tmp"]
-    # Pass the token by name so its value stays off the process list.
     if os.environ.get("GH_TOKEN"):
         command += ["-e", "GH_TOKEN"]
     elif os.environ.get("GITHUB_TOKEN"):

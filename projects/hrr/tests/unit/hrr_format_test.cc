@@ -8,12 +8,6 @@
  * @addtogroup HRR HRR Format
  * @{
  * @ingroup HRRTest
- * Unit tests for the HRR binary archive format:
- *   - hrr_file_header magic and version round-trips correctly
- *   - hrr_event_header fields (sequence_id, event_type, payload_length) survive
- *     a write-then-read cycle
- *   - hrr::load_archive() rejects truncated / bad-magic files
- *   - hrr::hash_hex() produces correctly formatted 32-char hex strings
  */
 
 #include "hrr_test_common.hh"
@@ -29,12 +23,7 @@
 
 namespace fs = std::filesystem;
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
-// Minimal archive on disk: events.bin with file header + N events, plus the
-// required empty blobs/ and code_objects/ subdirectories.
 struct TmpArchive {
   fs::path root;
 
@@ -49,7 +38,6 @@ struct TmpArchive {
 
   std::string path() const { return root.string(); }
 
-  // Write events.bin with a valid file header followed by the given raw bytes.
   void write_events(const std::vector<uint8_t>& body) {
     std::ofstream f(root / "events.bin", std::ios::binary);
     hrr_file_header fh{};
@@ -59,7 +47,6 @@ struct TmpArchive {
     f.write(reinterpret_cast<const char*>(body.data()), body.size());
   }
 
-  // Write a raw events.bin (no automatic header — for negative tests).
   void write_raw(const std::vector<uint8_t>& bytes) {
     std::ofstream f(root / "events.bin", std::ios::binary);
     f.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
@@ -84,23 +71,10 @@ static std::vector<uint8_t> make_set_device_event(uint64_t seq, int32_t device_i
   return bytes;
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
-/**
- * Test Description
- * ----------------
- *   - Write a 3-event archive (hipSetDevice calls with distinct sequence IDs
- *     and device IDs), load with hrr::load_archive(), verify that:
- *       * version == HRR_VERSION
- *       * event_count == 3
- *       * each event's sequence_id, event_type, and deviceId field match
- */
 HRR_TEST_CASE(Unit_HRR_Format_Roundtrip) {
   TmpArchive arc("roundtrip");
 
-  // Build body: 3 hipSetDevice events with seq IDs 0, 1, 2 and device IDs 7, 3, 0
   std::vector<uint8_t> body;
   for (int i = 0; i < 3; ++i) {
     auto ev = make_set_device_event(/*seq=*/i, /*device=*/7 - i * 2);
@@ -127,11 +101,6 @@ HRR_TEST_CASE(Unit_HRR_Format_Roundtrip) {
   }
 }
 
-/**
- * Test Description
- * ----------------
- *   - A file with a bad magic number must be rejected by load_archive().
- */
 HRR_TEST_CASE(Unit_HRR_Format_BadMagic) {
   TmpArchive arc("bad_magic");
 
@@ -146,42 +115,23 @@ HRR_TEST_CASE(Unit_HRR_Format_BadMagic) {
   REQUIRE_FALSE(hrr::load_archive(arc.path(), archive));
 }
 
-/**
- * Test Description
- * ----------------
- *   - A truncated file (header present but first event cut short) must not
- *     crash and must return an empty event list.
- */
 HRR_TEST_CASE(Unit_HRR_Format_TruncatedEvent) {
   TmpArchive arc("truncated");
 
-  // Write one full event then only 10 bytes of a second.
   auto ev = make_set_device_event(0, 0);
   std::vector<uint8_t> body(ev.begin(), ev.end());
   body.insert(body.end(), 10, 0xAB);  // truncated second event
   arc.write_events(body);
 
   hrr::Archive archive;
-  // load_archive may return true (with partial data) or false — either is
-  // acceptable.  What must NOT happen is a crash or reading the truncated
-  // second event as a valid event.
   hrr::load_archive(arc.path(), archive);
-  // The first complete event must be present.
   REQUIRE(archive.events.size() >= 1);
   const auto* a0 =
       reinterpret_cast<const hrr_args_hipSetDevice*>(archive.events[0].raw_payload.data());
   CHECK(a0->hdr.sequence_id == 0u);
-  // The truncated second event must NOT appear as a parsed event.
   CHECK(archive.events.size() == 1);
 }
 
-/**
- * Test Description
- * ----------------
- *   - hrr::hash_hex() must produce a 32-character lowercase hex string.
- *   - Known values: hash_hex(0,0) == "0000...0" (32 zeros),
- *     hash_hex(0x1, 0x2) == 32-char string with expected nibbles.
- */
 HRR_TEST_CASE(Unit_HRR_Format_HashHex) {
   std::string z = hrr::hash_hex(0, 0);
   REQUIRE(z.size() == 32);
@@ -194,12 +144,6 @@ HRR_TEST_CASE(Unit_HRR_Format_HashHex) {
   REQUIRE(h.substr(16, 16) == "f000000000000000");
 }
 
-/**
- * Test Description
- * ----------------
- *   - event_type_name() returns a non-null, non-empty string for a known
- *     event type and "UNKNOWN" for an out-of-range type.
- */
 HRR_TEST_CASE(Unit_HRR_Format_EventTypeName) {
   const char* name = hrr::event_type_name(HRR_API_HIPSETDEVICE);
   REQUIRE(name != nullptr);
@@ -209,20 +153,7 @@ HRR_TEST_CASE(Unit_HRR_Format_EventTypeName) {
   REQUIRE(std::string(unk) == "UNKNOWN");
 }
 
-// ---------------------------------------------------------------------------
-// CPU-only translate_ptr unit tests (no GPU required)
-//
-// These tests construct a PlaybackContext entirely on the CPU, populate
-// alloc_map with fake entries, and verify translate_ptr behaviour.
-// No HIP API calls are made.
-// ---------------------------------------------------------------------------
 
-/**
- * Test Description
- * ----------------
- *   - record_alloc maps a base address exactly.
- *   - translate_ptr(base) returns the live pointer.
- */
 HRR_TEST_CASE(Unit_HRR_TranslatePtr_ExactMatch) {
   PlaybackContext ctx;
   void* fake_live = reinterpret_cast<void*>(static_cast<uintptr_t>(0xDEAD0000u));
@@ -230,12 +161,6 @@ HRR_TEST_CASE(Unit_HRR_TranslatePtr_ExactMatch) {
   CHECK(ctx.translate_ptr(0xBEEF0000ULL) == fake_live);
 }
 
-/**
- * Test Description
- * ----------------
- *   - An address that falls within a recorded allocation (base + offset) is
- *     returned as (live_ptr + offset).
- */
 HRR_TEST_CASE(Unit_HRR_TranslatePtr_SubAlloc_ReturnsOffset) {
   PlaybackContext ctx;
   void* fake_live = reinterpret_cast<void*>(static_cast<uintptr_t>(0xDEAD0000u));
@@ -254,12 +179,6 @@ HRR_TEST_CASE(Unit_HRR_TranslatePtr_SubAlloc_ReturnsOffset) {
   CHECK(result == expected);
 }
 
-/**
- * Test Description
- * ----------------
- *   - An address exactly one byte past the end of a recorded allocation
- *     returns nullptr (out of range).
- */
 HRR_TEST_CASE(Unit_HRR_TranslatePtr_OutOfRange_ReturnsNull) {
   PlaybackContext ctx;
   void* fake_live = reinterpret_cast<void*>(static_cast<uintptr_t>(0xDEAD0000u));
@@ -267,11 +186,6 @@ HRR_TEST_CASE(Unit_HRR_TranslatePtr_OutOfRange_ReturnsNull) {
   CHECK(ctx.translate_ptr(0xBEEF0400ULL) == nullptr);  // base + 1024 = one past end
 }
 
-/**
- * Test Description
- * ----------------
- *   - translate_ptr(0) always returns nullptr regardless of alloc_map state.
- */
 HRR_TEST_CASE(Unit_HRR_TranslatePtr_Zero_ReturnsNull) {
   PlaybackContext ctx;
   void* fake_live = reinterpret_cast<void*>(static_cast<uintptr_t>(0xDEAD0000u));
@@ -295,43 +209,22 @@ HRR_TEST_CASE(Unit_HRR_TranslatePtr_TightestEnclosing) {
   void* liveOuter = reinterpret_cast<void*>(static_cast<uintptr_t>(0xA0000000u));
   void* liveInner = reinterpret_cast<void*>(static_cast<uintptr_t>(0xB0000000u));
 
-  // Outer entry [0x10000, 0x12000) and inner entry [0x10800, 0x11800) overlap.
   ctx.record_alloc(0x10000ULL, liveOuter, 0x2000);
   ctx.record_alloc(0x10800ULL, liveInner, 0x1000);
 
-  // 0x11000 is inside BOTH ranges; the tightest enclosing entry is the inner
-  // one (largest base <= rec == 0x10800).  Expected = liveInner + (0x11000 -
-  // 0x10800) = liveInner + 0x800.
-  // uintptr_t arithmetic compared as void*: see the comment in
-  // Unit_HRR_TranslatePtr_SubAlloc_ReturnsOffset above (UB-free on fabricated
-  // addresses, and avoids Catch2's strlen()-based char* stringifier).
   void* result = ctx.translate_ptr(0x11000ULL);
   void* expectedInner =
       reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(liveInner) + 0x800);
   CHECK(result == expectedInner);
 
-  // An address inside only the outer entry still resolves to the outer entry.
   void* outer_only = ctx.translate_ptr(0x10100ULL);
   void* expectedOuter =
       reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(liveOuter) + 0x100);
   CHECK(outer_only == expectedOuter);
 }
 
-// ---------------------------------------------------------------------------
-// AllocKind free-dispatch (CPU-only)
-//
-// The playback teardown loop releases each alloc_map entry with the API that
-// matches its AllocKind (Device -> hipFree, HostMalloc -> hipHostFree, and
-// HostRegister / DevicePtrAlias -> not via hipFree).  Passing a host pointer to
-// hipFree returns errors and can corrupt allocator bookkeeping.  These tests
-// verify the kind tagging the dispatch relies on: record_alloc preserves the
-// kind, and the free-routing decision (mirrored from hrr_playback.cpp) sends a
-// host pointer to hipFree for NONE of the host kinds.
-// ---------------------------------------------------------------------------
 
 namespace {
-// Mirrors the teardown switch in hrr_playback.cpp: returns true iff this kind
-// is released via hipFree.  Only AllocKind::Device must map to hipFree.
 bool kind_uses_hipFree(AllocKind k) {
   switch (k) {
     case AllocKind::Device:         return true;
@@ -371,7 +264,6 @@ HRR_TEST_CASE(Unit_HRR_AllocKind_FreeDispatch) {
   CHECK(ctx.alloc_map.at(0x3000ULL).kind == AllocKind::HostRegister);
   CHECK(ctx.alloc_map.at(0x4000ULL).kind == AllocKind::DevicePtrAlias);
 
-  // Only the Device entry may be released via hipFree.
   for (const auto& [rec, entry] : ctx.alloc_map) {
     if (entry.kind == AllocKind::Device) {
       CHECK(kind_uses_hipFree(entry.kind));
@@ -381,14 +273,6 @@ HRR_TEST_CASE(Unit_HRR_AllocKind_FreeDispatch) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Archive reader SIZE_OK guard tests (CPU-only, no GPU required)
-//
-// These tests verify that load_archive() does not crash or produce a decoded
-// event when an event's payload_length is too small for its declared type.
-// The SIZE_OK macro in hrr_reader.cpp guards every typed cast; these tests
-// confirm it fires correctly for known event types.
-// ---------------------------------------------------------------------------
 
 /**
  * Test Description
@@ -408,8 +292,6 @@ HRR_TEST_CASE(Unit_HRR_AllocKind_FreeDispatch) {
 HRR_TEST_CASE(Unit_HRR_Format_SmallPayloadForType) {
   TmpArchive arc("small_payload");
 
-  // Build a hipMalloc event whose payload_length is exactly sizeof(hrr_event_header)
-  // — the header is present but the malloc fields (ptr, size, ret) are absent.
   hrr_event_header hdr{};
   hdr.event_type     = static_cast<uint16_t>(HRR_API_HIPMALLOC);
   hdr.sequence_id    = 0;
@@ -423,27 +305,15 @@ HRR_TEST_CASE(Unit_HRR_Format_SmallPayloadForType) {
   arc.write_events(body);
 
   hrr::Archive archive;
-  // load_archive must not crash and should return true (file is structurally valid).
   bool ok = hrr::load_archive(arc.path(), archive);
   REQUIRE(ok);
 
-  // Policy: the event is RETAINED in the archive (raw_payload intact for
-  // tracing/debugging), but the SIZE_OK guard prevents typed decode.
   REQUIRE(archive.events.size() == 1);
-  // Typed fields stay at safe defaults — no OOB cast occurred in the reader.
   CHECK(archive.events[0].malloc_ev.ptr_handle == 0u);
   CHECK(archive.events[0].malloc_ev.size == 0u);
-  // raw_payload must be exactly header-sized (confirms reader did not over-read).
   CHECK(archive.events[0].raw_payload.size() == sizeof(hrr_event_header));
 }
 
-/**
- * Test Description
- * ----------------
- *   - An event with an unknown event_type and a valid payload_length must not
- *     crash load_archive() and must be silently accepted into the event list
- *     (raw_payload retained for future replay use).
- */
 HRR_TEST_CASE(Unit_HRR_Format_UnknownEventType) {
   TmpArchive arc("unknown_type");
 
@@ -461,23 +331,11 @@ HRR_TEST_CASE(Unit_HRR_Format_UnknownEventType) {
 
   hrr::Archive archive;
   REQUIRE(hrr::load_archive(arc.path(), archive));
-  // Unknown types fall through to the default: case — raw_payload is kept,
-  // no typed fields are populated, and the archive is not rejected.
   REQUIRE(archive.events.size() == 1);
   CHECK(archive.events[0].header().event_type == 0xFFFFu);
   CHECK(archive.events[0].malloc_ev.ptr_handle == 0u);
 }
 
-/**
- * Test Description
- * ----------------
- *   - A pinned host snapshot record round-trips through the reader, and replay
- *     points it at its own pinned buffer at the recorded offset.
- *   - A launch whose record runs past the event is not decoded by the reader
- *     nor by replay, and replay refuses a record that names a device allocation or the inside of one,
- *     runs past its allocation, differs from its blob in length, or has an
- *     unknown direction.
- */
 HRR_TEST_CASE(Unit_HRR_Format_HostSnapshotRecord) {
   auto record = [](uint64_t ptr, uint64_t off, uint64_t len, uint8_t direction) {
     const uint64_t f[5] = {ptr, off, len, 0x1122334455667788ULL, 0x99aabbccddeeff00ULL};

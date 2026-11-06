@@ -8,13 +8,6 @@
  * @addtogroup HRR HRR hipMemcpy3D Array Handles
  * @{
  * @ingroup HRRTest
- * Handler-level tests that the srcArray and dstArray of a replayed
- * hipMemcpy3D, hipMemcpy3DAsync and their _spt forms are array handles replay
- * created, never the address the archive recorded: CLR dereferences those
- * fields, so a recorded address would make the archive choose what the runtime
- * reads. The refusals return before any HIP call, so no GPU is needed. A
- * handler that wrongly reaches HIP with a recorded address crashes in the
- * runtime, which Catch2 reports against the running test.
  */
 
 #include <catch2/catch_test_macros.hpp>
@@ -40,7 +33,6 @@ struct Spelling {
   size_t ret_offset;
 };
 
-// The four spellings differ only in their record type.
 #define HRR_SPELLING(ID, API, T)                                                  \
   { ID, API, offsetof(T, parms_bytes), offsetof(T, blob_hash_lo), offsetof(T, ret) }
 const Spelling kSpellings[] = {
@@ -77,18 +69,8 @@ std::vector<uint8_t> make_record(const Spelling& s, hipMemcpyKind kind, uint64_t
 
 }  // namespace
 
-/**
- * Test Description
- * ----------------
- *   - A copy whose srcArray or dstArray was never created at replay is refused
- *     with hipErrorInvalidValue, naming the end and the recorded address, in
- *     all four spellings and whatever the copy kind. Nothing reaches HIP.
- *   - A handle that was created for the other end does not excuse the missing
- *     one.
- */
 TEST_CASE("Unit_HRR_Memcpy3DArray_UnknownHandleIsRefused", "[hrr]") {
   PlaybackContext ctx;
-  // Only the destination array exists at replay.
   ctx.record_array(kRecordedDst, reinterpret_cast<hipArray_t>(0x1000));
 
   for (hipMemcpyKind kind : {hipMemcpyDeviceToDevice, hipMemcpyHostToDevice, hipMemcpyDeviceToHost}) {
@@ -199,14 +181,6 @@ TEST_CASE("Unit_HRR_Memcpy3DArray_HostCopiesAreNotIssued", "[hrr]") {
   }
 }
 
-/**
- * Test Description
- * ----------------
- *   - The translation step replaces a recorded srcArray and dstArray with the
- *     live handles, leaves a null field null, and does not touch the pointers.
- *     The copy handlers above stop before HIP for every handle, so this is
- *     where a known handle is seen to become the live one.
- */
 TEST_CASE("Unit_HRR_Memcpy3DArray_TranslatesRecordedHandles", "[hrr]") {
   PlaybackContext ctx;
   auto* const live_src = reinterpret_cast<hipArray_t>(0x1000);
@@ -235,15 +209,6 @@ TEST_CASE("Unit_HRR_Memcpy3DArray_TranslatesRecordedHandles", "[hrr]") {
   CHECK(one.dstArray == live_dst);
 }
 
-/**
- * Test Description
- * ----------------
- *   - hipMemcpy3DBatchAsync refuses a batch in which an operand, source or
- *     destination, is an array that replay never created, an array with a null
- *     handle, or of a type that is neither pointer nor array: CLR dereferences
- *     the array and leaves the operand of an unknown type uninitialised. The
- *     refusal is hipErrorInvalidValue with a stderr line naming the end.
- */
 TEST_CASE("Unit_HRR_Memcpy3DBatchArray_BadOperandIsRefused", "[hrr]") {
   PlaybackContext ctx;
   ctx.record_array(kRecordedDst, reinterpret_cast<hipArray_t>(0x1000));

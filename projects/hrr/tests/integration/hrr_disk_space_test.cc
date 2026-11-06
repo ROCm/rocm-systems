@@ -8,31 +8,10 @@
  * @addtogroup HRR HRR capture free-space reserve
  * @{
  * @ingroup HRRTest
- * Tests for how capture stops before the file system holding the archive
- * fills.
- *
- * The writer keeps free the smaller of 15% of that file system and 4 GiB. It
- * refuses to open below that, and stops, leaving an archive marked incomplete,
- * when a write would eat into it. CI runners have far more free space than any
- * workload can fill, so this file fakes the file system instead: the test
- * binary defines statvfs, fstatvfs, their 64-bit names and fsync itself. The
- * writer reads free space through its pid-<pid> descriptor, which fstatvfs
- * resolves to a path through /proc/self/fd. The dynamic linker binds
- * the HIP runtime's calls to these definitions before libc's, and they forward
- * to libc for every path outside HIP_HRR_CAPTURE_OUTPUT.
- *
- * Under that directory they report a file system of HRR_TEST_FAKE_FS_TOTAL
- * bytes. Free space starts at HRR_TEST_FAKE_FS_AVAIL (1 TiB when unset), and a
- * workload can then pin it relative to the reserve: either fixed, or shrinking
- * as the archive grows on disk. Two one-shot holds park the next statvfs or
- * fsync, so a test can line up the races the writer has to survive.
- *
- * The size limits the user sets, HIP_HRR_CAPTURE_MAX_MB and
- * HIP_HRR_CAPTURE_MAX_BLOB_MB, are tested here too, with free space left at its
- * default so only the limit can stop the capture.
- *
- * POSIX only: Windows reads free space through GetDiskFreeSpaceExA, which this
- * file does not fake.
+ * The writer keeps free the smaller of 15% of the file system and 4 GiB, refuses to open below it, and stops when a write would eat into it.
+ * CI has far more free space than a workload can fill, so this binary defines statvfs, fstatvfs, their 64-bit names and fsync itself.
+ * The dynamic linker binds HIP's calls to these before libc's; they forward to libc outside HIP_HRR_CAPTURE_OUTPUT.
+ * POSIX only: Windows reads free space through GetDiskFreeSpaceExA, which is not faked.
  */
 
 #include "hrr_test_common.hh"
@@ -74,8 +53,6 @@ namespace {
 
 constexpr uint64_t kBlock = 4096;
 constexpr uint64_t kDefaultAvail = 1ull << 40;
-// Free space one block short of the reserve: every check fails, whatever is
-// pending.
 constexpr int64_t kBelowReserve = -static_cast<int64_t>(kBlock);
 
 enum FakeMode : int { kOff = 0, kFixed = 1, kShrinking = 2 };
@@ -112,7 +89,6 @@ bool is_faked(const char* path) {
 
 uint64_t round_up(uint64_t v) { return (v + kBlock - 1) / kBlock * kBlock; }
 
-// The writer's reserve, computed the same way from the same total.
 uint64_t keep_free(uint64_t total) {
   return std::min<uint64_t>(total / 100 * 15, 4ull << 30);
 }
@@ -121,7 +97,6 @@ uint64_t check_interval(uint64_t total) {
   return std::max<uint64_t>(std::min<uint64_t>(64ull << 20, keep_free(total) / 4), 1);
 }
 
-// Bytes the capture directory takes on disk, each file in whole blocks.
 uint64_t used_bytes() {
   const char* root = fake_root();
   if (root == nullptr) return 0;
@@ -159,7 +134,6 @@ bool wait_for(const std::atomic<bool>& flag, int timeout_ms) {
   return true;
 }
 
-// Fills *buf for a path under the capture directory; false for any other.
 bool fill_fake(const char* path, struct statvfs* buf) {
   if (auto hook = g_hrr_statvfs_hook.load(std::memory_order_acquire)) hook(path);
   if (!is_faked(path)) return false;
@@ -275,8 +249,6 @@ void arm_fixed(int64_t headroom) {
   g_mode.store(kFixed);
 }
 
-// Free space starts `headroom` above the reserve and shrinks by whatever the
-// capture writes from here on.
 void arm_shrinking(int64_t headroom) {
   g_used_base.store(used_bytes());
   g_headroom.store(headroom);
@@ -295,7 +267,6 @@ void quick_exit_hook() {
   _exit(0);
 }
 
-// Every workload starts here, before its first HIP call.
 void begin_workload() {
   // Capture opens at HIP initialization and reads free space at once, so no
   // call yet means HIP has not initialized and the hook goes in first.
@@ -307,7 +278,6 @@ void begin_workload() {
   REQUIRE(g_fake_calls.load() > 0);
 }
 
-// Distinct bytes per seed, so content-addressed blobs never deduplicate.
 std::vector<unsigned char> pattern(size_t len, uint32_t seed) {
   std::vector<unsigned char> v(len);
   uint32_t x = seed * 2654435761u + 0x9e3779b9u;
@@ -336,7 +306,6 @@ void record_in_child() {
   (void)__hipPopCallConfiguration(&grid, &block, &shared, &stream);
 }
 
-// Wait for a forked child for at most 60 s; -1 when it had to be killed.
 int wait_child(pid_t child) {
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
   int status = 0;
@@ -354,14 +323,12 @@ int wait_child(pid_t child) {
 constexpr uint64_t kTotal64K  = 64ull << 10;
 constexpr uint64_t kTotal16M  = 16ull << 20;
 constexpr uint64_t kTotal64M  = 64ull << 20;
-// At least the check interval for a 64 MiB file system, so one copy is checked.
 constexpr size_t   kBigCopy   = 4u << 20;
 constexpr size_t   kStepCopy  = 256u << 10;
 constexpr int      kStepCount = 16;
 constexpr size_t   kTinyCopy  = 64;
 constexpr int      kTinyCount = 1500;
 constexpr int      kMemsetCount = 200;
-// Events still buffered when the capture stops are flushed into events.bin.
 constexpr uint64_t kEventSlack = 64u << 10;
 // HIP_HRR_CAPTURE_MAX_MB for Unit_HRR_CaptureLimit_StopsAtSize, with room for
 // the fat binaries the capture records at start, and the copies that pass it.
@@ -381,7 +348,6 @@ struct HrrDiskSpaceMid {
 
 }  // namespace
 
-// Written by the to-symbol graph copies of Unit_HRR_CaptureLimit_SkipsLargeBlob_Direct.
 __device__ unsigned char hrr_limit_symbol[kBigCopy];
 
 __global__ void hrr_disk_space_big_arg(HrrDiskSpaceBig big, int* out) {
@@ -392,9 +358,6 @@ __global__ void hrr_disk_space_mid_arg(HrrDiskSpaceMid mid, int* out) {
   if (threadIdx.x == 0) out[0] = mid.bytes[0] + mid.bytes[sizeof(mid.bytes) - 1];
 }
 
-// ===========================================================================
-// Workloads. Each runs in its own process under the fake file system.
-// ===========================================================================
 
 TEST_CASE("Unit_HRR_DiskSpace_RefusedAtStart_Direct", "[.][hrr-direct]") {
   begin_workload();
@@ -413,7 +376,6 @@ TEST_CASE("Unit_HRR_DiskSpace_StopsBeforeReserve_Direct", "[.][hrr-direct]") {
   const uint64_t interval = check_interval(fake_total());
   void* dev = nullptr;
   HRR_HIP_CHECK(hipMalloc(&dev, 1u << 20));
-  // Larger than the interval, so it is checked and the count starts from zero.
   copy_to_device(dev, 100, 1u << 20);
   const fs::path active =
       fs::path(fake_root()) / ("pid-" + std::to_string(getpid())) / "active";
@@ -428,7 +390,6 @@ TEST_CASE("Unit_HRR_DiskSpace_StopsBeforeReserve_Direct", "[.][hrr-direct]") {
   // Stopped while the program runs on, so producers must stop writing sidecars.
   CHECK_FALSE(fs::exists(active));
 
-  // The capture went no further into the reserve than one check interval.
   INFO("used " << used << " headroom " << headroom << " interval " << interval);
   CHECK(used <= static_cast<uint64_t>(headroom) + interval + kEventSlack);
 
@@ -465,7 +426,6 @@ TEST_CASE("Unit_HRR_DiskSpace_ForkAfterStop_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipMalloc(&dev, kBigCopy));
   arm_fixed(kBelowReserve);
   copy_to_device(dev, 400, kBigCopy);
-  // Plenty free again: a child that ignored the stop would open an archive.
   disarm();
 
   const pid_t parent = getpid();
@@ -483,7 +443,6 @@ TEST_CASE("Unit_HRR_DiskSpace_ForkAfterStop_Direct", "[.][hrr-direct]") {
   REQUIRE(WIFEXITED(status));
   REQUIRE(WEXITSTATUS(status) == 0);
 
-  // The child opened nothing and finalized nothing, its own or the parent's.
   CHECK_FALSE(fs::exists(root / ("pid-" + std::to_string(child))));
   CHECK_FALSE(fs::exists(root / "manifest.json"));
   CHECK_FALSE(fs::exists(root / ("pid-" + std::to_string(parent)) / "manifest.json"));
@@ -503,7 +462,6 @@ TEST_CASE("Unit_HRR_DiskSpace_RefusedForkChild_Direct", "[.][hrr-direct]") {
   const pid_t child = fork();
   if (child == 0) {
     g_quick_exit_pid.store(getpid());
-    // Its open, and so the refusal, comes with its first record.
     record_in_child();
     std::exit(0);
   }
@@ -516,7 +474,6 @@ TEST_CASE("Unit_HRR_DiskSpace_RefusedForkChild_Direct", "[.][hrr-direct]") {
 
   CHECK_FALSE(fs::exists(root / ("pid-" + std::to_string(child))));
   CHECK_FALSE(fs::exists(root / "manifest.json"));
-  // The parent's capture is untouched.
   copy_to_device(dev, 501, kStepCopy);
   HRR_HIP_CHECK(hipFree(dev));
 }
@@ -606,7 +563,6 @@ TEST_CASE("Unit_HRR_DiskSpace_DuplicateRacingStop_Direct", "[.][hrr-direct]") {
 
 TEST_CASE("Unit_HRR_DiskSpace_DuplicateChargedOnce_Direct", "[.][hrr-direct]") {
   begin_workload();
-  // Room for one copy of the blob above the reserve, not for two.
   copy_same_bytes_twice(static_cast<int64_t>(kBigCopy + kBigCopy / 2));
 }
 
@@ -648,11 +604,9 @@ TEST_CASE("Unit_HRR_DiskSpace_EventsCheckedAcrossInterval_Direct", "[.][hrr-dire
   mid.bytes[0] = 3;
   mid.bytes[sizeof(mid.bytes) - 1] = 4;
 
-  // The first launch writes the code object while free space is plenty.
   hipLaunchKernelGGL(hrr_disk_space_mid_arg, dim3(1), dim3(64), 0, nullptr, mid, out);
   HRR_HIP_CHECK(hipGetLastError());
   HRR_HIP_CHECK(hipDeviceSynchronize());
-  // A one-block blob reaches the interval, so the count starts again from here.
   void* scratch = nullptr;
   HRR_HIP_CHECK(hipMalloc(&scratch, kBlock));
   copy_to_device(scratch, 970, kBlock);
@@ -681,7 +635,6 @@ TEST_CASE("Unit_HRR_DiskSpace_BufferedEventsCounted_Direct", "[.][hrr-direct]") 
   HRR_HIP_CHECK(hipMalloc(&scratch, kBlock));
   copy_to_device(scratch, 950, kBlock);
 
-  // No blobs from here on, only small buffered records.
   arm_fixed(kBelowReserve);
   for (int i = 0; i < kMemsetCount; ++i)
     HRR_HIP_CHECK(hipMemsetAsync(dev, i & 0xff, sizeof(int), nullptr));
@@ -706,8 +659,6 @@ TEST_CASE("Unit_HRR_DiskSpace_StopsAfterRename_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFree(dev));
 }
 
-// Run with HIP_HRR_CAPTURE_MAX_MB set to kLimitMiB: twice that in distinct
-// copies, then one read back after the capture has stopped.
 TEST_CASE("Unit_HRR_CaptureLimit_StopsAtSize_Direct", "[.][hrr-direct]") {
   if (getenv("HIP_HRR_CAPTURE_MAX_MB") == nullptr)
     HRR_SKIP("started by Unit_HRR_CaptureLimit_StopsAtSize");
@@ -721,8 +672,6 @@ TEST_CASE("Unit_HRR_CaptureLimit_StopsAtSize_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFree(dev));
 }
 
-// Run with HIP_HRR_CAPTURE_MAX_MB set to kLimitMiB: the parent reaches it, then
-// forks a child that records once.
 TEST_CASE("Unit_HRR_CaptureLimit_ForkAfterStop_Direct", "[.][hrr-direct]") {
   if (getenv("HIP_HRR_CAPTURE_MAX_MB") == nullptr)
     HRR_SKIP("started by Unit_HRR_CaptureLimit_ForkAfterStop");
@@ -747,9 +696,6 @@ TEST_CASE("Unit_HRR_CaptureLimit_ForkAfterStop_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFree(dev));
 }
 
-// Run with HIP_HRR_CAPTURE_MAX_BLOB_MB set to 1: two copies, a 2D copy, a
-// registration and two to-symbol graph copies from pinned memory over it, then
-// one copy under it and its read back.
 TEST_CASE("Unit_HRR_CaptureLimit_SkipsLargeBlob_Direct", "[.][hrr-direct]") {
   if (getenv("HIP_HRR_CAPTURE_MAX_BLOB_MB") == nullptr)
     HRR_SKIP("started by Unit_HRR_CaptureLimit_SkipsLargeBlob");
@@ -782,9 +728,6 @@ TEST_CASE("Unit_HRR_CaptureLimit_SkipsLargeBlob_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFree(dev));
 }
 
-// ===========================================================================
-// Drivers.
-// ===========================================================================
 
 namespace {
 
@@ -861,8 +804,6 @@ fs::path cap_dir(const char* name) {
 
 }  // namespace
 
-// Below the reserve at start, capture stays off, leaves nothing behind, and the
-// program runs as if it were never asked to capture.
 HRR_TEST_CASE(Unit_HRR_DiskSpace_RefusedAtStart) {
   ScopedDir cap(cap_dir("refused"));
   const WorkloadRun run = run_workload("Unit_HRR_DiskSpace_RefusedAtStart_Direct", cap.path,
@@ -876,9 +817,6 @@ HRR_TEST_CASE(Unit_HRR_DiskSpace_RefusedAtStart) {
     CHECK(ent.path().filename().string().rfind("pid-", 0) != 0);
 }
 
-// Free space shrinks with every blob written. The capture stops within one
-// check interval of the reserve and leaves an archive that is incomplete but
-// whole.
 HRR_TEST_CASE(Unit_HRR_DiskSpace_StopsBeforeReserve) {
   ScopedDir cap(cap_dir("stops"));
   const WorkloadRun run =
@@ -905,8 +843,6 @@ HRR_TEST_CASE(Unit_HRR_DiskSpace_SmallBlobsCountedInBlocks) {
   CHECK(count_h2d(arc, kTinyCopy) < static_cast<size_t>(kTinyCount));
 }
 
-// A child forked after the stop opens no archive of its own and does not
-// finalize the parent's when it exits.
 HRR_TEST_CASE(Unit_HRR_DiskSpace_ForkAfterStop) {
   ScopedDir cap(cap_dir("fork_stop"));
   const WorkloadRun run =
@@ -918,8 +854,6 @@ HRR_TEST_CASE(Unit_HRR_DiskSpace_ForkAfterStop) {
   CHECK(count_processes(cap.path) == 1);
 }
 
-// A child whose own open is refused leaves no trace, and the parent's archive
-// stays complete.
 HRR_TEST_CASE(Unit_HRR_DiskSpace_RefusedForkChild) {
   ScopedDir cap(cap_dir("fork_refused"));
   const WorkloadRun run =
@@ -934,8 +868,6 @@ HRR_TEST_CASE(Unit_HRR_DiskSpace_RefusedForkChild) {
   CHECK(root.find(kIncomplete) == std::string::npos);
 }
 
-// A crash after the stop still leaves a manifest that says the archive is
-// incomplete, although events.bin is already closed.
 HRR_TEST_CASE(Unit_HRR_DiskSpace_CrashAfterStop) {
   ScopedDir cap(cap_dir("crash"));
   const WorkloadRun run =
@@ -948,8 +880,6 @@ HRR_TEST_CASE(Unit_HRR_DiskSpace_CrashAfterStop) {
   CHECK(read_text_file(proc_dir / "manifest.json").find(kIncomplete) != std::string::npos);
 }
 
-// The process exits while another thread is stopping the capture. The final
-// manifests still say incomplete.
 HRR_TEST_CASE(Unit_HRR_DiskSpace_StopWhileExiting) {
   ScopedDir cap(cap_dir("exiting"));
   const WorkloadRun run =
@@ -960,8 +890,6 @@ HRR_TEST_CASE(Unit_HRR_DiskSpace_StopWhileExiting) {
   load_stopped_archive(cap.path, run, arc);
 }
 
-// Two threads copy the same bytes while the capture stops. Neither copy may be
-// recorded against a blob that was never written.
 HRR_TEST_CASE(Unit_HRR_DiskSpace_DuplicateRacingStop) {
   ScopedDir cap(cap_dir("duplicate"));
   const WorkloadRun run =
@@ -995,8 +923,6 @@ HRR_TEST_CASE(Unit_HRR_DiskSpace_DuplicateChargedOnce) {
   }
 }
 
-// A record of at least the check interval is checked before it is written, so
-// the launch that would cross into the reserve is not recorded.
 HRR_TEST_CASE(Unit_HRR_DiskSpace_LargeEventCheckedBeforeWrite) {
   ScopedDir cap(cap_dir("large_event"));
   const WorkloadRun run =
@@ -1025,7 +951,6 @@ HRR_TEST_CASE(Unit_HRR_DiskSpace_EventsCheckedAcrossInterval) {
   hrr::Archive arc;
   load_stopped_archive(cap.path, run, arc);
 
-  // Everything recorded from the scratch copy on, the last check that passed.
   const uint64_t interval = check_interval(kTotal64K);
   size_t from = arc.events.size();
   for (size_t i = 0; i < arc.events.size(); ++i)
@@ -1041,7 +966,6 @@ HRR_TEST_CASE(Unit_HRR_DiskSpace_EventsCheckedAcrossInterval) {
     unchecked += ev.header().payload_length;
     if (ev.kernel_launch != nullptr &&
         ev.kernel_launch->kernel_name.find("hrr_disk_space_mid_arg") != std::string::npos) {
-      // Each launch alone stays under the interval, so it takes the counted path.
       CHECK(ev.header().payload_length < interval);
       ++launches;
     }
@@ -1051,8 +975,6 @@ HRR_TEST_CASE(Unit_HRR_DiskSpace_EventsCheckedAcrossInterval) {
   CHECK(launches < 2);
 }
 
-// Event records count toward the next check like blobs do, so a run of
-// buffered events with no blobs still stops.
 HRR_TEST_CASE(Unit_HRR_DiskSpace_BufferedEventsCounted) {
   ScopedDir cap(cap_dir("events"));
   const WorkloadRun run =
@@ -1068,8 +990,6 @@ HRR_TEST_CASE(Unit_HRR_DiskSpace_BufferedEventsCounted) {
   CHECK(memsets < static_cast<size_t>(kMemsetCount));
 }
 
-// The writer reads free space through the pid-<pid> it opened, so renaming that
-// directory does not turn the reserve off.
 HRR_TEST_CASE(Unit_HRR_DiskSpace_StopsAfterRename) {
   ScopedDir cap(cap_dir("renamed"));
   const WorkloadRun run =
@@ -1097,8 +1017,6 @@ uint64_t capped_bytes(const fs::path& proc_dir) {
 
 }  // namespace
 
-// The archive stops growing at the user's limit: the write that would pass it is
-// not made, capture stops as it does for space, and the program runs on.
 HRR_TEST_CASE(Unit_HRR_CaptureLimit_StopsAtSize) {
   ScopedDir cap(cap_dir("limit_size"));
   const WorkloadRun run =
@@ -1111,7 +1029,6 @@ HRR_TEST_CASE(Unit_HRR_CaptureLimit_StopsAtSize) {
   hrr::Archive arc;
   load_stopped_archive(cap.path, run, arc);
   CHECK(count_h2d(arc, kLimitCopy) < static_cast<size_t>(kLimitCopies));
-  // Stopped by the copy that would have passed the limit, not before.
   const uint64_t held = capped_bytes(hrr_single_process_archive(cap.path));
   INFO("archive holds " << held << " bytes");
   CHECK(held <= kLimitMiB << 20);

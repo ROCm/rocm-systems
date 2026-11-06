@@ -8,12 +8,6 @@
  * @addtogroup HRR HRR Kernel Argument Signature
  * @{
  * @ingroup HRRTest
- * Handler-level tests that replay checks a launch record's arguments against
- * the signature of the kernel it resolved before it launches: the handlers are
- * called through the dispatch table with crafted records, and the code object's
- * signature is a stand-in (PlaybackContext::kernel_param_sizes). Every refusal
- * returns before the launch, so no GPU is needed. A launch that matches goes on
- * to HIP and is covered by the integration suite.
  */
 
 #include <catch2/catch_test_macros.hpp>
@@ -41,7 +35,6 @@ struct Payload {
   void put(const void* d, size_t n) {
     b.insert(b.end(), static_cast<const uint8_t*>(d), static_cast<const uint8_t*>(d) + n);
   }
-  // One argument record: value_kind 0 (by value), size, then `size` bytes.
   void arg(uint16_t size) {
     const uint8_t kind = 0;
     put(&kind, 1);
@@ -59,8 +52,6 @@ struct Payload {
   }
 };
 
-// A hipModuleLaunchKernel event for kernel "k" that declares and carries one
-// argument per size.
 Payload launch(const Sizes& sizes) {
   Payload records;
   records.args(sizes);
@@ -70,8 +61,6 @@ Payload launch(const Sizes& sizes) {
   return p;
 }
 
-// A context whose kernel "k" resolves to a function whose code object declares
-// parameters of the given sizes.
 void declare(PlaybackContext& ctx, Sizes declared) {
   ctx.func_cache["k"] = fake_func();
   ctx.kernel_param_sizes = [declared](hipFunction_t f, std::vector<size_t>& out) {
@@ -100,12 +89,6 @@ void check_refused(PlaybackContext& ctx, const Payload& p, const char* what) {
 
 }  // namespace
 
-/**
- * Test Description
- * ----------------
- *   - A launch record with fewer arguments than the code object's kernel
- *     declares is refused before the launch, naming the sequence.
- */
 TEST_CASE("Unit_HRR_KernelArgsSignature_TooFewArguments", "[hrr]") {
   PlaybackContext ctx;
   declare(ctx, {8, 8, 4});
@@ -113,13 +96,6 @@ TEST_CASE("Unit_HRR_KernelArgsSignature_TooFewArguments", "[hrr]") {
   check_refused(ctx, p, "carries 2 arguments, the kernel declares 3");
 }
 
-/**
- * Test Description
- * ----------------
- *   - An argument narrower than its parameter is refused before the launch,
- *     with the argument's index. Extra and wider arguments are not refused:
- *     they go on to HIP, which the integration suite covers on a GPU.
- */
 TEST_CASE("Unit_HRR_KernelArgsSignature_NarrowArgument", "[hrr]") {
   PlaybackContext ctx;
   declare(ctx, {8, 16});
@@ -127,12 +103,6 @@ TEST_CASE("Unit_HRR_KernelArgsSignature_NarrowArgument", "[hrr]") {
   check_refused(ctx, narrow, "argument 1 is 4 bytes, the kernel declares 16");
 }
 
-/**
- * Test Description
- * ----------------
- *   - A graph kernel node whose arguments do not match the signature is not
- *     added: the node is skipped and its graph is marked incomplete.
- */
 TEST_CASE("Unit_HRR_KernelArgsSignature_GraphKernelNode", "[hrr]") {
   PlaybackContext ctx;
   declare(ctx, {8, 8});
@@ -179,7 +149,6 @@ TEST_CASE("Unit_HRR_KernelArgsSignature_GraphSetParams", "[hrr]") {
   ctx.graph_node_map[0x88] = reinterpret_cast<hipGraphNode_t>(uintptr_t{0x3000});
   ctx.graph_exec_map[0x99] = reinterpret_cast<hipGraphExec_t>(uintptr_t{0x4000});
 
-  // Two arguments for a three-parameter kernel.
   auto tail = [](Payload& p) {
     const char* name = "k";
     const uint16_t name_len = 1, num_args = 2;
@@ -250,15 +219,6 @@ TEST_CASE("Unit_HRR_KernelArgsSignature_ArgumentsCarryReadPadding", "[hrr]") {
   }
 }
 
-/**
- * Test Description
- * ----------------
- *   - A kernel set-params record with no parameters, as capture writes it for a
- *     call the runtime refused with hipErrorInvalidValue, replays as that
- *     recorded failure: hipSuccess, one note. The same record with a recorded
- *     success still fails with hipErrorInvalidValue. Covers
- *     hipGraphKernelNodeSetParams and hipGraphExecKernelNodeSetParams.
- */
 TEST_CASE("Unit_HRR_KernelArgsSignature_SetParamsWithoutParameters", "[hrr]") {
   const int32_t refused = static_cast<int32_t>(hipErrorInvalidValue);
   auto run = [](hrr_api_id_t id, int32_t recorded, std::string* err) {

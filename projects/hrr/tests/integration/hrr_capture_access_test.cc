@@ -8,67 +8,6 @@
  * @addtogroup HRR HRR capture access
  * @{
  * @ingroup HRRTest
- * What the capture writer does with the file system, as opposed to what it
- * records:
- *
- *   Unit_HRR_CaptureArchiveIsPrivate:
- *     every archive directory the capture creates or reuses is 0700 and every
- *     file 0600, with the umask cleared and, where HIP can run under it, set
- *     to 0277, while a missing parent of the archive gets the default mode
- *     (POSIX).
- *
- *   Unit_HRR_CaptureRefusesPlantedLinks:
- *     a symbolic link planted at pid-<pid>/events.bin, at pid-<pid> itself, or
- *     at pid-<pid>/blobs, or a hard link planted at pid-<pid>/events.bin,
- *     disables the capture; links planted at every pid-<pid>/blobs/<prefix>
- *     are not written through and leave the archive marked incomplete; and a
- *     hard link planted at pid-<pid>/manifest.json
- *     is not written through, neither at exit nor from the crash callback; a
- *     link planted at another pid-* in the base directory, or at the root
- *     manifest's old temporary file name, is not followed (POSIX).
- *
- *   Unit_HRR_CaptureDoesNotBlockOnPlantedFifo:
- *     a FIFO planted at pid-<pid>/manifest.json does not hold up the exit
- *     (POSIX).
- *
- *   Unit_HRR_CaptureSurvivesUnusableOutputPath:
- *     an output path that cannot be created disables the capture with a
- *     message instead of failing the application's HIP calls (POSIX).
- *
- *   Unit_HRR_CaptureDisabledInForkedChild:
- *     a forked child whose archive cannot be opened says capture is disabled,
- *     runs no capture shim, and leaves no empty pid-<pid> behind (POSIX).
- *
- *   Unit_HRR_CaptureKeepsRootManifestWhenBaseIsUnreadable:
- *     a base directory that cannot be listed leaves the root manifest as it
- *     was, and the application exits cleanly (POSIX, without
- *     CAP_DAC_OVERRIDE).
- *
- *   Unit_HRR_CaptureMarksUnwrittenFilesIncomplete:
- *     a blob or code object that cannot be written leaves the archive marked
- *     incomplete (POSIX).
- *
- *   Unit_HRR_CaptureActiveMarker:
- *     pid-<pid>/active, the file producers read as "capture is on", exists
- *     while the capture runs, names the process instance on Linux, and is
- *     gone after a clean exit; a stale one is removed when the archive is
- *     refused (POSIX).
- *
- *   Unit_HRR_CaptureMovesEarlierArchiveAside:
- *     a process whose pid-<pid> already holds an archive from an earlier
- *     process with the same pid moves it to pid-<pid>.prev-1, untouched, and
- *     records a fresh archive, which readers find on their own; when it cannot
- *     move it, capture is disabled and the earlier archive stays (POSIX).
- *
- *   Unit_HRR_CaptureWritesThroughCheckedDirs:
- *     pid-<pid> renamed while the capture runs, with a symbolic link planted in
- *     its place, is still where the blobs, the manifest and the active marker's
- *     removal go, and nothing is written through the link (POSIX).
- *
- *   Unit_HRR_CaptureClosesArchiveDirs:
- *     a capture whose blobs span most blobs/<xx> prefixes holds at most three
- *     archive directory descriptors while it runs, and none after it has shut
- *     down (Linux).
  */
 
 #include "hrr_test_common.hh"
@@ -130,7 +69,6 @@ fs::perms perms_of(const fs::path& p) {
   return fs::symlink_status(p).permissions() & fs::perms::all;
 }
 
-// Sets the umask for its lifetime; the workloads a test spawns inherit it.
 struct ScopedUmask {
   mode_t saved;
   explicit ScopedUmask(mode_t mask) : saved(::umask(mask)) {}
@@ -189,7 +127,6 @@ std::uintmax_t events_bytes(const fs::path& base) {
   return ec ? 0 : n;
 }
 
-// Runs a workload with capture into base, stdout and stderr captured.
 PlantedRun capture_workload(const fs::path& base, const std::string& workload) {
   hrr::test::SpawnProc proc(hrr_self_exe(), /*capture_stdout=*/true, /*capture_stderr=*/true);
   proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", base.string());
@@ -198,7 +135,6 @@ PlantedRun capture_workload(const fs::path& base, const std::string& workload) {
   return {ret, proc.getOutput()};
 }
 
-// Paths, relative to the archive, of its files under `sub` with extension `ext`.
 std::vector<fs::path> archive_files(const fs::path& archive, const char* sub, const char* ext) {
   std::vector<fs::path> out;
   for (const auto& ent : fs::recursive_directory_iterator(archive / sub)) {
@@ -209,8 +145,6 @@ std::vector<fs::path> archive_files(const fs::path& archive, const char* sub, co
   return out;
 }
 
-// The one pid-* entry under base, whatever it holds; empty unless there is
-// exactly one.
 fs::path only_pid_dir(const fs::path& base) {
   std::vector<fs::path> found;
   for (const auto& ent : fs::directory_iterator(base))
@@ -222,8 +156,6 @@ bool refused_active_marker(const std::string& output) {
   return disabled_because(output, "cannot create ", "/active (");
 }
 
-// True if both directories hold the same entries and every file the same bytes.
-// A bool, for the reason given at file_holds.
 bool same_tree(const fs::path& a, const fs::path& b) {
   const auto tree = [](const fs::path& dir) {
     std::map<std::string, std::string> out;
@@ -244,11 +176,6 @@ bool manifest_says_complete(const fs::path& archive, bool complete) {
 }  // namespace
 
 #ifndef _WIN32
-// ---------------------------------------------------------------------------
-// Hidden ([.]) workload for the crash-callback section: records a few events,
-// then dies on SIGABRT so the CLR crash callback finalizes the archive through
-// emergency_finalize.
-// ---------------------------------------------------------------------------
 TEST_CASE("Unit_HRR_CaptureAbort_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
   void* d = nullptr;
@@ -258,15 +185,9 @@ TEST_CASE("Unit_HRR_CaptureAbort_Direct", "[.][hrr-direct]") {
   std::raise(SIGABRT);
 }
 
-// ---------------------------------------------------------------------------
-// Hidden ([.]) workload for Unit_HRR_CaptureDisabledInForkedChild: records a
-// few events, then forks with RLIMIT_NOFILE at 3. The capture writer opens a
-// forked child's archive on the child's first record, which the child makes
-// before it restores the limit, so that open cannot get a descriptor and fails.
-// The child then calls through both dispatch tables. A capture shim left in either would read
-// the clock to timestamp its record, so the child counts its clock reads. It
-// exits 1 if a runtime call read it, 2 if a compiler call did, 3 for both.
-// ---------------------------------------------------------------------------
+// Forks with RLIMIT_NOFILE at 3 so the child's archive open cannot get a descriptor and fails.
+// The child counts clock reads to detect a capture shim left in either dispatch table.
+// Exit 1: runtime call read the clock, 2: compiler call did, 3: both.
 static int g_child_clock_reads = 0;
 
 TEST_CASE("Unit_HRR_CaptureForkWithoutFds_Direct", "[.][hrr-direct]") {
@@ -276,8 +197,6 @@ TEST_CASE("Unit_HRR_CaptureForkWithoutFds_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipMemset(d, 0, 256));
   HRR_HIP_CHECK(hipDeviceSynchronize());
 
-  // With 0, 1 and 2 taken, the first descriptor the child asks for is over the
-  // limit.
   for (int fd = 0; fd < 3; ++fd)
     if (::fcntl(fd, F_GETFD) < 0) REQUIRE(::open("/dev/null", O_RDWR) == fd);
   struct rlimit saved{};
@@ -314,14 +233,8 @@ TEST_CASE("Unit_HRR_CaptureForkWithoutFds_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFree(d));
 }
 
-// ---------------------------------------------------------------------------
-// Hidden ([.]) workload for Unit_HRR_CaptureActiveMarker: once HIP is up, and
-// with it the capture, its pid-<pid>/active is a private regular file. On Linux
-// it holds one line, the boot id and the start time from /proc/self/stat, so a
-// later process with the same pid cannot take it for its own. The command name
-// is set first to one with spaces and parentheses, which the writer has to read
-// past.
-// ---------------------------------------------------------------------------
+// Once HIP is up, pid-<pid>/active is a private regular file. On Linux it holds the boot id and start time from /proc/self/stat.
+// The command name is set to one with spaces and parentheses, which the writer has to read past.
 TEST_CASE("Unit_HRR_CaptureActiveMarker_Direct", "[.][hrr-direct]") {
 #ifdef __linux__
   std::ofstream("/proc/self/comm") << "hrr) a (b) 1 2";
@@ -355,14 +268,8 @@ TEST_CASE("Unit_HRR_CaptureActiveMarker_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFree(d));
 }
 
-// ---------------------------------------------------------------------------
-// Hidden ([.]) workload for Unit_HRR_CaptureActiveMarker. The capture writer
-// removes a stale pid-<pid>/active before it reads free space on pid-<pid>,
-// and creates its own marker after. The statvfs hook from
-// hrr_disk_space_test.cc plants a hard link to HRR_TEST_VICTIM there in
-// between, so the writer opens that file and refuses it. The workload's one
-// HIP call opens the capture.
-// ---------------------------------------------------------------------------
+// The writer removes a stale pid-<pid>/active before reading free space and creates its own after.
+// The statvfs hook plants a hard link to HRR_TEST_VICTIM in between, so the writer opens and refuses it.
 extern std::atomic<void (*)(const char*)> g_hrr_statvfs_hook;
 
 namespace {
@@ -384,15 +291,8 @@ TEST_CASE("Unit_HRR_CaptureMarkerRefused_Direct", "[.][hrr-direct]") {
   g_hrr_statvfs_hook = nullptr;
 }
 
-// ---------------------------------------------------------------------------
-// Hidden ([.]) workload for Unit_HRR_CaptureWritesThroughCheckedDirs: once HIP
-// is up, and with it the capture, renames its own pid-<pid> to "moved" and
-// plants a symbolic link to HRR_TEST_VICTIM at pid-<pid>, as someone who can
-// write to the base directory could. It then copies 32 distinct host buffers
-// to the device, blobs spread over many blobs/<xx> prefixes, and exits
-// cleanly, which writes manifest.json and removes the marker.
-// Run without either variable, it does nothing.
-// ---------------------------------------------------------------------------
+// Renames its own pid-<pid> to "moved" and plants a symlink to HRR_TEST_VICTIM in its place, then copies 32 distinct buffers.
+// Without both variables it does nothing.
 TEST_CASE("Unit_HRR_CaptureRenamedArchive_Direct", "[.][hrr-direct]") {
   const char* base = std::getenv("HIP_HRR_CAPTURE_OUTPUT");
   const char* victim = std::getenv("HRR_TEST_VICTIM");
@@ -411,15 +311,8 @@ TEST_CASE("Unit_HRR_CaptureRenamedArchive_Direct", "[.][hrr-direct]") {
 }
 
 #ifdef __linux__
-// ---------------------------------------------------------------------------
-// Hidden ([.]) workload for Unit_HRR_CaptureClosesArchiveDirs: copies 512
-// distinct host buffers to the device, blobs spread over most of the 256
-// blobs/<xx> prefixes, then prints how many of its descriptors are directories
-// in its pid-<pid>: once while the capture runs, and once from an exit handler
-// that runs after the capture has shut down. The handler is registered before
-// the first HIP call, which registers the capture's own, so it runs after it.
-// Run without HIP_HRR_CAPTURE_OUTPUT, it does nothing.
-// ---------------------------------------------------------------------------
+// Copies 512 distinct buffers, then prints how many descriptors are directories in its pid-<pid>, once live and once from an exit handler.
+// The handler is registered before the first HIP call, so it runs after the capture's own. Without HIP_HRR_CAPTURE_OUTPUT it does nothing.
 namespace {
 char g_fd_archive[4096];  // pid-<pid>, resolved
 
@@ -467,21 +360,6 @@ TEST_CASE("Unit_HRR_CaptureClosesArchiveDirs_Direct", "[.][hrr-direct]") {
 
 #endif
 
-// ---------------------------------------------------------------------------
-/**
- * Test Description
- * ----------------
- *   - With the umask cleared, captures Unit_HRR_GpuWorkload_Direct into a
- *     directory whose parent does not exist yet, then captures it again into
- *     the same directory after creating that run's pid-<pid> with mode 0755.
- *   - Captures it a third time with the umask set to 0277, which takes the
- *     owner's write bit off every file and directory created under it, when
- *     the process can still write in a directory created under that umask.
- *   - Every directory in the archive is 0700 and every regular file 0600: the
- *     archive holds host buffers, kernel arguments and code objects. The parent
- *     the capture had to create is not part of the archive and gets the
- *     default mode.
- */
 HRR_TEST_CASE(Unit_HRR_CaptureArchiveIsPrivate) {
 #ifdef _WIN32
   HRR_SKIP("POSIX permission bits");
@@ -529,32 +407,6 @@ HRR_TEST_CASE(Unit_HRR_CaptureArchiveIsPrivate) {
 #endif
 }
 
-// ---------------------------------------------------------------------------
-/**
- * Test Description
- * ----------------
- *   - Plants a symbolic link at pid-<pid>/events.bin pointing at a file with
- *     known contents, at pid-<pid> pointing at an empty directory, at
- *     pid-<pid>/blobs pointing at an empty directory, or at every
- *     pid-<pid>/blobs/<prefix> pointing at an empty directory; a hard link at
- *     pid-<pid>/events.bin to a file with known contents; and a hard link at
- *     pid-<pid>/manifest.json pointing at a file with known contents, followed
- *     by a workload that exits cleanly or one that aborts and leaves the
- *     manifest to the crash callback.
- *   - Each target stays untouched: a capture would otherwise truncate and
- *     write the file, fill the directory or overwrite the hard-linked manifest.
- *   - Each symbolic link and the hard link at events.bin disable the capture,
- *     which says so on stderr, and the workload still succeeds; with the links
- *     at the blob prefixes the capture runs without its blobs and its manifest
- *     says complete: false; with the hard link at manifest.json the capture
- *     runs and writes events.bin, and a hard-linked file shaped like a process
- *     manifest, planted in another pid-*, is not read into the root manifest.
- *   - A symbolic link at another pid-* in the base directory, pointing at a
- *     directory with a process manifest in it, is not read into the root
- *     manifest; a symbolic link at manifest.json.<pid>.tmp in the base
- *     directory, the root manifest's old predictable temporary name, is not
- *     written through.
- */
 HRR_TEST_CASE(Unit_HRR_CaptureRefusesPlantedLinks) {
 #ifdef _WIN32
   HRR_SKIP("POSIX symbolic links");
@@ -676,8 +528,6 @@ HRR_TEST_CASE(Unit_HRR_CaptureRefusesPlantedLinks) {
   }
 
   SECTION("link at another pid-* is not read into the root manifest") {
-    // A directory that holds a well-formed process manifest, reachable only
-    // through the link.
     const fs::path elsewhere = work.path / "elsewhere";
     fs::create_directories(elsewhere);
     write_text(elsewhere / "manifest.json", "{\n  \"pid\": 424243,\n  \"complete\": true\n}\n");
@@ -691,8 +541,6 @@ HRR_TEST_CASE(Unit_HRR_CaptureRefusesPlantedLinks) {
   }
 
   SECTION("link at the root manifest's <pid>.tmp name") {
-    // A predictable temporary name anyone with write access to the base
-    // directory could pre-plant.
     const PlantedRun run = capture_after_planting(
         base, script,
         "ln -s '" + victim_file.string() + "' \"$HRR_TEST_BASE/manifest.json.$$.tmp\"\n");
@@ -704,15 +552,6 @@ HRR_TEST_CASE(Unit_HRR_CaptureRefusesPlantedLinks) {
 #endif
 }
 
-// ---------------------------------------------------------------------------
-/**
- * Test Description
- * ----------------
- *   - Plants a FIFO at pid-<pid>/manifest.json with nothing on the other end.
- *   - The workload exits cleanly before the deadline and events.bin is
- *     written: neither the manifest write at exit nor the root manifest's read
- *     of it waits for the other end of the FIFO.
- */
 HRR_TEST_CASE(Unit_HRR_CaptureDoesNotBlockOnPlantedFifo) {
 #ifdef _WIN32
   HRR_SKIP("POSIX FIFOs");
@@ -730,16 +569,6 @@ HRR_TEST_CASE(Unit_HRR_CaptureDoesNotBlockOnPlantedFifo) {
 #endif
 }
 
-// ---------------------------------------------------------------------------
-/**
- * Test Description
- * ----------------
- *   - Points HIP_HRR_CAPTURE_OUTPUT below a regular file, so no directory of
- *     the archive can be created, and runs Unit_HRR_GpuWorkload_Direct.
- *   - The workload succeeds and stderr says capture is disabled: setting up the
- *     archive runs inside hip::init, and a failure there must not reach the
- *     application's HIP calls.
- */
 HRR_TEST_CASE(Unit_HRR_CaptureSurvivesUnusableOutputPath) {
 #ifdef _WIN32
   HRR_SKIP("POSIX paths");
@@ -757,17 +586,6 @@ HRR_TEST_CASE(Unit_HRR_CaptureSurvivesUnusableOutputPath) {
 #endif
 }
 
-// ---------------------------------------------------------------------------
-/**
- * Test Description
- * ----------------
- *   - Runs Unit_HRR_CaptureForkWithoutFds_Direct, whose child makes its first
- *     record with no descriptor to spare, so its own archive cannot be opened.
- *   - The child says capture is disabled, and the pid-<pid> it created for
- *     itself is removed again, so a refused capture leaves nothing behind.
- *     The parent's archive is the only one left.
- *   - The child's runtime and compiler calls no longer run a capture shim.
- */
 HRR_TEST_CASE(Unit_HRR_CaptureDisabledInForkedChild) {
 #ifdef _WIN32
   HRR_SKIP("POSIX fork");
@@ -789,17 +607,6 @@ HRR_TEST_CASE(Unit_HRR_CaptureDisabledInForkedChild) {
 #endif
 }
 
-// ---------------------------------------------------------------------------
-/**
- * Test Description
- * ----------------
- *   - Captures Unit_HRR_GpuWorkload_Direct once, then sets the base directory
- *     to 0333 (searchable and writable, not readable) and captures it again.
- *   - The second workload exits cleanly and its archive is written, while the
- *     root manifest stays as the first capture left it: one written from a
- *     listing that stopped early would drop the archives it did not reach.
- *   - Skipped where the mode does not stop the listing (CAP_DAC_OVERRIDE).
- */
 HRR_TEST_CASE(Unit_HRR_CaptureKeepsRootManifestWhenBaseIsUnreadable) {
 #ifdef _WIN32
   HRR_SKIP("POSIX permission bits");
@@ -828,17 +635,6 @@ HRR_TEST_CASE(Unit_HRR_CaptureKeepsRootManifestWhenBaseIsUnreadable) {
 #endif
 }
 
-// ---------------------------------------------------------------------------
-/**
- * Test Description
- * ----------------
- *   - Captures Unit_HRR_GpuWorkload_Direct once to learn the names of its
- *     blobs and code objects, then captures it again after creating a
- *     directory at each of those names in the second run's pid-<pid>, so the
- *     final rename of every blob, or of every code object, fails.
- *   - The first archive is complete; the second says complete: false, since
- *     its events refer to files it does not have.
- */
 HRR_TEST_CASE(Unit_HRR_CaptureMarksUnwrittenFilesIncomplete) {
 #ifdef _WIN32
   HRR_SKIP("POSIX rename semantics");
@@ -872,21 +668,6 @@ HRR_TEST_CASE(Unit_HRR_CaptureMarksUnwrittenFilesIncomplete) {
 #endif
 }
 
-// ---------------------------------------------------------------------------
-/**
- * Test Description
- * ----------------
- *   - Runs Unit_HRR_CaptureActiveMarker_Direct, which finds its
- *     pid-<pid>/active while the capture runs, holding its boot id and start
- *     time on Linux; after a clean exit it is gone.
- *   - Plants a stale pid-<pid>/active next to a symbolic link at
- *     pid-<pid>/events.bin: the capture is refused and the stale marker is
- *     removed, so producers do not take the refused archive for a live one.
- *   - Runs Unit_HRR_CaptureMarkerRefused_Direct, which plants a hard link to
- *     a file outside the archive at pid-<pid>/active while the archive opens:
- *     capture is disabled, the message gives EPERM as the reason, and the
- *     linked file keeps its contents.
- */
 HRR_TEST_CASE(Unit_HRR_CaptureActiveMarker) {
 #ifdef _WIN32
   HRR_SKIP("POSIX paths");
@@ -937,23 +718,6 @@ HRR_TEST_CASE(Unit_HRR_CaptureActiveMarker) {
 #endif
 }
 
-// ---------------------------------------------------------------------------
-/**
- * Test Description
- * ----------------
- *   - Captures Unit_HRR_GpuWorkload_Direct, then copies that archive into the
- *     next run's pid-<pid> before it starts, as a process that reuses an
- *     earlier process's pid finds it.
- *   - The run moves the earlier archive to pid-<pid>.prev-1, byte for byte as
- *     it was, says so on stderr, and records a fresh archive in pid-<pid>: its
- *     first event has sequence number 0 and it loads complete. The root
- *     manifest lists one process, and the reader resolves the base directory
- *     to the fresh archive alone.
- *   - With the base directory read-only, so the earlier archive cannot be
- *     moved, capture is disabled with a message and pid-<pid> keeps the earlier
- *     archive as it was. Skipped where the mode does not stop the rename
- *     (CAP_DAC_OVERRIDE).
- */
 HRR_TEST_CASE(Unit_HRR_CaptureMovesEarlierArchiveAside) {
 #ifdef _WIN32
   HRR_SKIP("planting relies on /bin/sh and exec keeping the pid");
@@ -1017,19 +781,6 @@ HRR_TEST_CASE(Unit_HRR_CaptureMovesEarlierArchiveAside) {
 #endif
 }
 
-// ---------------------------------------------------------------------------
-/**
- * Test Description
- * ----------------
- *   - Runs Unit_HRR_CaptureRenamedArchive_Direct, which renames its pid-<pid>
- *     to "moved" after the capture has opened it and plants a symbolic link to
- *     an empty directory at pid-<pid>, then records blobs and exits cleanly.
- *   - The directory behind the link stays empty: the writer creates, opens and
- *     renames everything relative to the directories it checked, so neither
- *     the blobs nor the manifest follow the path to the link.
- *   - "moved" holds the whole archive: its blobs, a manifest that says
- *     complete: true, no active marker, and events.bin loads complete.
- */
 HRR_TEST_CASE(Unit_HRR_CaptureWritesThroughCheckedDirs) {
 #ifdef _WIN32
   HRR_SKIP("POSIX symbolic links");
@@ -1057,18 +808,6 @@ HRR_TEST_CASE(Unit_HRR_CaptureWritesThroughCheckedDirs) {
 #endif
 }
 
-// ---------------------------------------------------------------------------
-/**
- * Test Description
- * ----------------
- *   - Runs Unit_HRR_CaptureClosesArchiveDirs_Direct, which records 512
- *     distinct blobs and reports how many of its descriptors are directories
- *     in its archive, during the capture and after it has shut down.
- *   - The blobs land in at least 128 blobs/<xx> prefixes, so a descriptor
- *     kept per prefix would show.
- *   - During the capture the writer holds at most pid-<pid>, blobs/ and
- *     code_objects/; after it, none.
- */
 HRR_TEST_CASE(Unit_HRR_CaptureClosesArchiveDirs) {
 #ifndef __linux__
   HRR_SKIP("/proc/self/fd");
@@ -1086,7 +825,6 @@ HRR_TEST_CASE(Unit_HRR_CaptureClosesArchiveDirs) {
     if (ent.is_directory()) ++prefixes;
   CHECK(prefixes >= 128);
   CHECK(manifest_says_complete(archives.front(), true));
-  // -1 when the workload did not report it.
   const auto reported = [&run](const std::string& when) {
     const std::string head = "archive directory descriptors " + when + ": ";
     const size_t at = run.output.find(head);

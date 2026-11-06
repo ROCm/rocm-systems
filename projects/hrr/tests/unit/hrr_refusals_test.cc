@@ -8,11 +8,6 @@
  * @addtogroup HRR HRR Refusals
  * @{
  * @ingroup HRRTest
- * Handler-level tests that an archive integer does not reach HIP as a pointer
- * or handle: the generated handlers are called through the dispatch table with
- * crafted records, the hand-written ones directly. Every case here is a
- * refusal or a failed lookup, so it returns before any HIP call and needs no
- * GPU.
  */
 
 #include <catch2/catch_test_macros.hpp>
@@ -50,14 +45,6 @@ TEST_CASE("Unit_HRR_Refusals_LinkAddFileIsRefused", "[hrr]") {
   CHECK(ctx.unreplayable_apis.count("hipLinkAddFile") == 1);
 }
 
-/**
- * Test Description
- * ----------------
- *   - hipLinkCreate is refused when any recorded JIT option is one whose value
- *     is a pointer (a log buffer, a symbol table) or a number the table does
- *     not know, and the replay records it as unreplayable by name. A 256-byte
- *     option-value block full of pointer-looking values is never forwarded.
- */
 TEST_CASE("Unit_HRR_Refusals_LinkCreateRefusesPointerCarryingOptions", "[hrr]") {
   for (int option : {static_cast<int>(hipJitOptionInfoLogBuffer),
                      static_cast<int>(hipJitOptionErrorLogBuffer),
@@ -80,14 +67,6 @@ TEST_CASE("Unit_HRR_Refusals_LinkCreateRefusesPointerCarryingOptions", "[hrr]") 
   }
 }
 
-/**
- * Test Description
- * ----------------
- *   - A sample of the APIs the generator refuses because an argument would
- *     reach HIP as a raw pointer or handle (a texture reference, external
- *     memory, an execution context, a graphics resource, a library) are
- *     refused by name through the dispatch table.
- */
 TEST_CASE("Unit_HRR_Refusals_GeneratedHandlersRefuseUntranslatableSlots", "[hrr]") {
   struct Case { hrr_api_id_t id; const char* api; size_t record_size; };
   const Case cases[] = {
@@ -135,15 +114,6 @@ TEST_CASE("Unit_HRR_Refusals_Memcpy2DWithUnmappedEndIsRefused", "[hrr]") {
   }
 }
 
-/**
- * Test Description
- * ----------------
- *   - A 2D copy that does nothing is not refused: one with a zero width or
- *     height (ihipMemcpy2D returns success before it looks at either pointer, so
- *     its ends can be null or in no map), and a host-to-host copy (a no-op, as in
- *     the 1D path). Both return hipSuccess without a HIP call and with no
- *     message.
- */
 TEST_CASE("Unit_HRR_Refusals_Memcpy2DNoOpCopiesAreNotRefused", "[hrr]") {
   PlaybackContext ctx;
   struct Case { uint64_t width, height; hipMemcpyKind kind; };

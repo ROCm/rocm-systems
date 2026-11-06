@@ -8,13 +8,10 @@
  * @addtogroup HRR HRR host-backed allocation budget
  * @{
  * @ingroup HRRTest
- * hipMallocManaged and a hipMemCreate with a host location can be backed by
- * host memory, so replay charges them to --max-host-bytes like hipHostMalloc,
- * refuses a record that would pass the cap, and gives the charge back on hipFree
- * and hipMemRelease. Each workload allocates 2 MiB three times in a row,
- * freeing the buffer in between, so a replay whose cap holds one buffer (3 MiB)
- * only gets through if the free returns the charge, and a cap below one buffer
- * (1 MiB) refuses the first.
+ * hipMallocManaged and a host-located hipMemCreate can be host-backed, so replay charges them to --max-host-bytes,
+ * refuses a record that would pass the cap, and refunds the charge on hipFree and hipMemRelease.
+ * Each workload allocates 2 MiB three times, freeing in between, so a 3 MiB cap passes only if free refunds the charge
+ * and a 1 MiB cap refuses the first allocation.
  */
 
 #include "hrr_test_common.hh"
@@ -82,8 +79,6 @@ TEST_CASE("Unit_HRR_HostBudgetMemCreate_Direct", "[.][hrr-direct]") {
   }
 }
 
-// Within a one-buffer cap the free returns the charge; under the buffer, the
-// first allocation is refused.
 HRR_TEST_CASE(Unit_HRR_HostBudgetManagedRoundtrip) {
   hrr_budget_replay("Unit_HRR_HostBudgetManaged_Direct", "hrr_budget_managed", "3145728",
                     "hipMallocManaged");
@@ -94,12 +89,9 @@ HRR_TEST_CASE(Unit_HRR_HostBudgetMemCreateRoundtrip) {
                     "hipMemCreate (host location)");
 }
 
-// A handle that hipMemMap still holds keeps its charge after hipMemRelease, until
-// hipMemUnmap. The workload maps h1, releases it, then creates h2 before the
-// unmap: with the hold the 3 MiB replay is refused at h2 (h1's 2 MiB is still
-// charged); without it the release would have returned the charge and h2 fits.
-// A 5 MiB cap takes h1 + h2 plus the replay's cached blobs, so the replay
-// completes.
+// hipMemRelease keeps the charge while hipMemMap still holds the handle, until hipMemUnmap. The workload maps h1,
+// releases it, then creates h2 before the unmap: with the hold the 3 MiB replay is refused at h2; without it h2 fits.
+// A 5 MiB cap takes h1 + h2 plus the replay's cached blobs.
 TEST_CASE("Unit_HRR_HostBudgetMemMapHold_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
   hipMemAllocationProp prop{};
@@ -151,10 +143,8 @@ HRR_TEST_CASE(Unit_HRR_HostBudgetMemMapHoldRoundtrip) {
   }
 }
 
-// A managed buffer the workload never frees stays live through the --kernel-filter
-// warm-up pass. The timed pass replays the same allocation and replaces it, which
-// must return the old charge: the cap holds one buffer (3 MiB), so a charge that
-// is kept makes the second pass refuse.
+// A managed buffer never freed stays live through the --kernel-filter warm-up. The timed pass replaces it
+// and must return the old charge: the cap holds one buffer (3 MiB), so a kept charge makes the second pass refuse.
 TEST_CASE("Unit_HRR_HostBudgetManagedLeak_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
   void* p = nullptr;

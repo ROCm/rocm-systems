@@ -8,23 +8,16 @@
  * @addtogroup HRR HRR Capture Gate
  * @{
  * @ingroup HRRTest
- * When HIP_HRR_CAPTURE_OUTPUT must not arm capture:
+ * When HIP_HRR_CAPTURE_OUTPUT must not arm capture.
  *
- *   Unit_HRR_BlankCaptureOutputCapturesNothing:
- *     An exported empty variable reaches CLR as a single space, and a value of
- *     other blanks is no path either. The workload runs with each and must leave
- *     no archive under a directory of that name.
+ * Unit_HRR_BlankCaptureOutputCapturesNothing: an empty variable reaches CLR as a single space and other blanks are no path either;
+ * neither may create an archive under a directory of that name.
  *
- *   Unit_HRR_SecureExecIgnoresCaptureOutput (Linux):
- *     A set-group-ID copy of this binary, for one of the user's supplementary
- *     groups, starts in secure-execution mode. It must write no archive and
- *     print the notice, and print no notice when the variable is unset. A copy
- *     without the bit captures and prints no notice. No root is needed.
- *     Secure-execution mode ignores LD_LIBRARY_PATH, so the copy only tests this
- *     build when the loader finds the same libamdhip64 without it (an installed
- *     ROCm, a RUNPATH or a loader cache that lists the build). The case skips
- *     when it does not, when the filesystem is mounted nosuid, when no_new_privs
- *     is set, and when the kernel does not mark the copy secure.
+ * Unit_HRR_SecureExecIgnoresCaptureOutput (Linux): a set-group-ID copy of this binary, for one of the user's supplementary groups,
+ * starts in secure-execution mode. It must write no archive and print the notice, and print none when the variable is unset.
+ * A copy without the bit captures and prints no notice. No root is needed.
+ * Secure-execution mode ignores LD_LIBRARY_PATH, so the copy only tests this build when the loader finds the same libamdhip64 without it.
+ * The case also skips on a nosuid filesystem, with no_new_privs set, or when the kernel does not mark the copy secure.
  */
 
 #include "hrr_test_common.hh"
@@ -79,10 +72,8 @@ constexpr const char* kSecureExecNotice =
 constexpr const char* kProbeRuntime = "hrr-probe hip-runtime=";
 constexpr const char* kProbeSecure = "hrr-probe at-secure=";
 
-// A group the file can be given that differs from the effective one, so a
-// set-group-ID exec changes the effective group and the kernel sets AT_SECURE.
-// The owner of a file may give it any of their supplementary groups; root may
-// give it any group at all.
+// A group differing from the effective one, so a set-group-ID exec changes it and the kernel sets AT_SECURE.
+// The file's owner may use a supplementary group; root may use any.
 bool pick_other_group(gid_t* out) {
   const gid_t egid = getegid();
   const int n = getgroups(0, nullptr);
@@ -103,7 +94,6 @@ bool pick_other_group(gid_t* out) {
   return false;
 }
 
-// The libamdhip64 the loader gave this process, as a canonical path.
 std::string loaded_hip_runtime() {
   std::string found;
   dl_iterate_phdr(
@@ -118,7 +108,6 @@ std::string loaded_hip_runtime() {
   return found;
 }
 
-// The rest of the line after `key` in a child's output, or "" if absent.
 std::string probe_value(const std::string& out, const char* key) {
   const size_t at = out.find(key);
   if (at == std::string::npos) return {};
@@ -131,10 +120,9 @@ struct CopyRun {
   std::string out;
 };
 
-// Runs the probe and the GPU workload in the copy, capturing to `cap` unless it
-// is empty, with no LD_LIBRARY_PATH: secure-execution mode ignores it, so the
-// control has to do without it too. An empty `cap` also drops a capture this
-// test was itself launched under.
+// Runs the probe and the GPU workload in the copy, capturing to `cap` unless it is empty.
+// No LD_LIBRARY_PATH: secure-execution mode ignores it, so the control must do without it too.
+// An empty `cap` also drops a capture this test was itself launched under.
 CopyRun run_copy(const fs::path& exe, const fs::path& cap) {
   hrr::test::SpawnProc proc(exe.string(), /*capture_stdout=*/true, /*capture_stderr=*/true);
   if (!cap.empty())
@@ -150,8 +138,7 @@ CopyRun run_copy(const fs::path& exe, const fs::path& cap) {
 
 }  // namespace
 
-// Hidden: reports what the loader and the kernel gave this process, for the
-// case below. It makes no HIP call.
+// Hidden: reports the loaded runtime and AT_SECURE to the case below. Makes no HIP call.
 TEST_CASE("Unit_HRR_SecureExecProbe_Direct", "[.][hrr-direct]") {
   std::printf("%s%s\n%s%lu\n", kProbeRuntime, loaded_hip_runtime().c_str(), kProbeSecure,
               getauxval(AT_SECURE));

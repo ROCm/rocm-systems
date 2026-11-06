@@ -8,23 +8,6 @@
  * @addtogroup HRR HRR Repro Workload (regression micro-kernels)
  * @{
  * @ingroup HRRTest
- * Direct GPU micro-kernel workloads that reproduce specific capture and replay
- * behaviours:
- *
- *   - dropped-first-hipMalloc capture (the first HIP call is a hipMalloc),
- *   - embedded device pointers inside a by-value struct kernel argument,
- *   - an uncaptured host write that deterministically diverges replay,
- *   - the "null optional output pointer + 0x20000" GPU-fault class, and
- *   - replay zero-init of an allocation whose capture-time contents come from
- *     an unrecorded write (host or HSA runtime).
- *
- * Like hrr_workload.cc, every TEST_CASE here is hidden with the Catch2 [.] tag
- * so it is NOT auto-discovered by CTest.  Each is driven from hrr_roundtrip.cc:
- * a parent test sets HIP_HRR_CAPTURE_OUTPUT, spawns the _Direct case as a
- * subprocess to capture, then runs hrr-playback to validate the replay.
- *
- * All divergence is injected deterministically (via an uncaptured host write),
- * never via genuine GPU nondeterminism, so the replay outcomes are reproducible.
  */
 
 #include "hrr_test_common.hh"
@@ -35,9 +18,6 @@
 
 #include <cstdint>
 
-// ---------------------------------------------------------------------------
-// Workload parameters (kept local so this file is self-contained)
-// ---------------------------------------------------------------------------
 
 namespace {
 constexpr int    kN          = 1 << 10;          // 1K floats
@@ -59,9 +39,6 @@ constexpr unsigned kSlotSentinel = 0xCAFEBABEu;
 constexpr int      kNullWriteIndex = 0x8000;
 }  // namespace
 
-// ---------------------------------------------------------------------------
-// Kernels
-// ---------------------------------------------------------------------------
 
 __global__ void hrr_repro_scale(const float* in, float* out, float s, int n) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -73,9 +50,6 @@ __global__ void hrr_repro_copy(const float* in, float* out, int n) {
   if (i < n) out[i] = in[i];
 }
 
-// By-value struct argument carrying embedded device pointers.  The capture
-// layer must detect a, b, c as device pointers inside the struct payload and
-// translate them at replay.
 struct HrrAddArgs {
   const float* a;
   const float* b;
@@ -88,9 +62,6 @@ __global__ void hrr_repro_addStruct(HrrAddArgs args) {
   if (i < args.n) args.c[i] = args.a[i] + args.b[i];
 }
 
-// Writes the (host-mapped) flag value into every output element.  The flag is
-// set by an uncaptured CPU store, so replay sees a different value -> the D2H
-// readback diverges every iteration.
 __global__ void hrr_repro_writeFlag(int* out, const int* flag, int n) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i < n) out[i] = flag[0];
@@ -108,17 +79,8 @@ __global__ void hrr_repro_slotmap(float* required_out, const unsigned* flag,
     optional_out[kNullWriteIndex] = 1.0f;
 }
 
-// ===========================================================================
-// A1. First-hipMalloc capture
-//
-// Makes the VERY FIRST HIP call in the process a hipMalloc (no hipSetDevice,
-// no warm-up allocation).  hip_capture_init() is deferred into hip::init(),
-// which the HIP_INIT macro runs *before* the body of this first hipMalloc — so
-// the allocation must be captured, or `da` is not translated at replay and the
-// D2H validation fails.
-//
-// H2D(da=1) -> scale(out = da*2) -> D2H(out)  => out[i] == 2.0f
-// ===========================================================================
+// The first HIP call is a hipMalloc. hip_capture_init() is deferred into hip::init(), which runs before the body.
+// The allocation must still be captured, or `da` is not translated at replay and D2H validation fails.
 TEST_CASE("Unit_HRR_FirstMalloc_Direct", "[.][hrr-direct]") {
   float* da = nullptr;
   HRR_HIP_CHECK(hipMalloc(&da, kSZ));  // intentionally the first HIP call
@@ -144,15 +106,6 @@ TEST_CASE("Unit_HRR_FirstMalloc_Direct", "[.][hrr-direct]") {
   delete[] hout;
 }
 
-// ===========================================================================
-// A2. Embedded device pointers in a by-value struct argument
-//
-// The kernel takes a single HrrAddArgs by value; a, b, c are device pointers
-// embedded inside the struct.  Exercises embedded-pointer capture + replay
-// translation (kind-3 args).
-//
-// a=1, b=1 -> c = a + b = 2  => c[i] == 2.0f
-// ===========================================================================
 TEST_CASE("Unit_HRR_EmbeddedPtrStruct_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
 
@@ -184,16 +137,8 @@ TEST_CASE("Unit_HRR_EmbeddedPtrStruct_Direct", "[.][hrr-direct]") {
   delete[] hc;
 }
 
-// ===========================================================================
-// A3. Uncaptured host write -> deterministic replay divergence
-//
-// A mapped host flag is written by the CPU (kFlagSentinel) — NOT a HIP call, so
-// it is never recorded.  A loop of kDivergeIters kernels each write the flag
-// value into an output buffer and read it back (D2H).  At capture every D2H
-// blob holds kFlagSentinel; at replay the flag buffer is fresh (zero), so every
-// D2H validation fails.  This is the deterministic lever for the divergence
-// guard test — no genuine GPU nondeterminism is involved.
-// ===========================================================================
+// A mapped host flag is written by the CPU, which is not a HIP call and so is never recorded.
+// At replay the flag buffer is fresh (zero), so every D2H validation fails: the lever for the divergence guard test.
 TEST_CASE("Unit_HRR_UncapturedHostWrite_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
 
@@ -222,18 +167,8 @@ TEST_CASE("Unit_HRR_UncapturedHostWrite_Direct", "[.][hrr-direct]") {
   delete[] hout;
 }
 
-// ===========================================================================
-// A4. Null optional output pointer (the "null + 0x20000" fault class)
-//
-// Mirrors ~/hrr-testing/slotmap-repro/slotmap_repro.cpp, but front-loads the
-// uncaptured-host-write divergence loop so the divergence guard trips BEFORE
-// the faulting slotmap kernel is dispatched.  At replay the guard sets the
-// fatal flag during the readback loop and the replay stops cleanly (exit 2),
-// so the recorded-null optional_out write at 0x20000 is never reached.
-//
-// At capture flag == sentinel, so the optional branch is skipped and the run is
-// clean; the optional_out argument is genuinely NULL (recorded as 0x0).
-// ===========================================================================
+// Mirrors slotmap_repro.cpp but runs the divergence loop first, so the guard stops replay (exit 2) before the faulting kernel is dispatched.
+// At capture the optional branch is skipped; optional_out is genuinely NULL (recorded as 0x0).
 TEST_CASE("Unit_HRR_NullOptionalPtr_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
 
@@ -244,7 +179,6 @@ TEST_CASE("Unit_HRR_NullOptionalPtr_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&flag_dev), flag, 0));
   flag[0] = kSlotSentinel;  // uncaptured CPU store
 
-  // Divergence source: many D2H readbacks whose value depends on the flag.
   int* dcount = nullptr;
   HRR_HIP_CHECK(hipMalloc(&dcount, kN * sizeof(int)));
   int* hcount = new int[kN];
@@ -266,7 +200,6 @@ TEST_CASE("Unit_HRR_NullOptionalPtr_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipGetLastError());
   HRR_HIP_CHECK(hipDeviceSynchronize());
 
-  // D2H readback of the always-valid output so capture records a blob.
   float* hreq = new float[kN];
   HRR_HIP_CHECK(hipMemcpy(hreq, required_out, kSZ, hipMemcpyDeviceToHost));
   REQUIRE(hreq[1] == 1.0f);
@@ -278,15 +211,8 @@ TEST_CASE("Unit_HRR_NullOptionalPtr_Direct", "[.][hrr-direct]") {
   delete[] hreq;
 }
 
-// ===========================================================================
-// A5. Zero-init read of an allocation initialized by an unrecorded write
-//
-// hipMalloc a buffer and zero it through the lower-level HSA runtime. HRR
-// records HIP calls only, so replay sees the allocation but not the HSA fill and
-// must reproduce the zeros through HIP_HRR_REPLAY_ZERO_INIT. This makes the
-// capture oracle deterministic without recording a hipMemset that playback
-// would execute independently of the zero-init knob.
-// ===========================================================================
+// HRR records HIP calls only, so replay sees the allocation but not the HSA zero fill.
+// It must reproduce the zeros through HIP_HRR_REPLAY_ZERO_INIT, without recording a hipMemset that playback would run independently.
 TEST_CASE("Unit_HRR_ZeroInitRead_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
 

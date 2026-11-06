@@ -8,10 +8,6 @@
  * @addtogroup HRR HRR Code Object Scrub
  * @{
  * @ingroup HRRTest
- * GPU-free unit tests for capture's code object scrubber (CLR's
- * hip_capture_scrub.cpp, compiled in on its own). It parses the application's
- * memory, so each case feeds it a malformed image and checks that it writes
- * nothing outside a section it has fully validated.
  */
 
 #include "hrr_test_common.hh"
@@ -86,7 +82,6 @@ std::string contents(const std::vector<uint8_t>& elf, size_t i) {
   return std::string(p, p + get<uint64_t>(elf, sh + 32));
 }
 
-// An uncompressed offload bundle with one entry, `elf`, whose id is `id_size` long.
 std::vector<uint8_t> make_bundle(const std::vector<uint8_t>& elf, uint64_t id_size) {
   const std::string id = "hipv4-amdgcn-amd-amdhsa--gfx950";
   std::vector<uint8_t> b(24 + 8 + 24, 0);
@@ -138,7 +133,6 @@ HRR_TEST_CASE(Unit_HRR_Scrub_RefusesOutOfBoundsTables) {
     return scrub_code_object(elf.data(), elf.size()) == 0 && elf == before;
   };
 
-  // .comment runs one byte past the end of the image: only .debug_str changes.
   auto elf = good;
   put(elf, header_of(elf, 3) + 24, uint64_t(elf.size() - kLeaky[2].data.size() + 1));
   auto expected = elf;
@@ -166,7 +160,6 @@ HRR_TEST_CASE(Unit_HRR_Scrub_RefusesOutOfBoundsTables) {
   CHECK(unchanged(make_bundle(good, ~uint64_t{0} - 40)));
   CHECK(unchanged(make_bundle(good, 1u << 20)));
 
-  // Every truncation of the image, and of the bundle, is refused.
   const auto bundle = make_bundle(good, 31);
   for (const auto* whole : {&good, &bundle})
     for (size_t n = 0; n < whole->size(); ++n) {

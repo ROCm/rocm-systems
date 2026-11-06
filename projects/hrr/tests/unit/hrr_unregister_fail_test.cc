@@ -8,10 +8,6 @@
  * @addtogroup HRR HRR Host Unregister
  * @{
  * @ingroup HRRTest
- * hipHostUnregister must not free a replay buffer: not when the call fails, and
- * not when it succeeds while a graph node still points into the buffer. A
- * buffer whose unregister failed is not reused. The cases call HIP, so they
- * skip without a GPU.
  */
 
 #include <catch2/catch_test_macros.hpp>
@@ -28,8 +24,6 @@ hipError_t playback_hipHostRegister(PlaybackContext& ctx, const uint8_t* pl);
 hipError_t playback_hipHostUnregister(PlaybackContext& ctx, const uint8_t* pl);
 
 namespace {
-// Replays a hipHostRegister of size bytes at the recorded address rec. The blob
-// is not in the archive, so the buffer is zero-filled.
 hipError_t replay_register(PlaybackContext& ctx, uint64_t rec, size_t size) {
   hrr_test::ExactRecord<hrr_args_hipHostRegister> reg;
   reg.get()->hostPtr = rec;
@@ -41,13 +35,6 @@ hipError_t replay_register(PlaybackContext& ctx, uint64_t rec, size_t size) {
 }
 }  // namespace
 
-/**
- * Test Description
- * ----------------
- *   - The recorded registration names a buffer this process allocated and
- *     never registered. hipHostUnregister fails. The buffer and both maps
- *     must still name it afterwards, so a later snapshot can write it.
- */
 TEST_CASE("Unit_HRR_HostUnregister_FailedCallKeepsBuffer", "[hrr]") {
   if (!hrr_test::have_device()) SKIP("needs a GPU: without one the call fails with hipErrorNoDevice");
 
@@ -74,13 +61,6 @@ TEST_CASE("Unit_HRR_HostUnregister_FailedCallKeepsBuffer", "[hrr]") {
   free(buf);
 }
 
-/**
- * Test Description
- * ----------------
- *   - The address is registered again and unregistering the old block fails
- *     (it was unregistered behind replay's back). The new registration gets a
- *     fresh block rather than the old one.
- */
 TEST_CASE("Unit_HRR_HostUnregister_FailedReplaceTakesNewBlock", "[hrr]") {
   if (!hrr_test::have_device()) SKIP("needs a GPU to register host memory");
 
@@ -95,15 +75,6 @@ TEST_CASE("Unit_HRR_HostUnregister_FailedReplaceTakesNewBlock", "[hrr]") {
   CHECK(hipHostUnregister(fresh) == hipSuccess);
 }
 
-/**
- * Test Description
- * ----------------
- *   - A graph memcpy node built on a registered address keeps the buffer
- *     pointer replay translated it to. The address is registered again, which
- *     reuses the buffer, then unregistered. The buffer must stay writable,
- *     charged once, until the context is destroyed. Under AddressSanitizer a
- *     freed buffer fails the write.
- */
 TEST_CASE("Unit_HRR_HostUnregister_GraphNodeKeepsBuffer", "[hrr]") {
   if (!hrr_test::have_device()) SKIP("needs a GPU to register host memory");
 
@@ -111,7 +82,6 @@ TEST_CASE("Unit_HRR_HostUnregister_GraphNodeKeepsBuffer", "[hrr]") {
   constexpr size_t kSize = 256;
   PlaybackContext ctx;
   REQUIRE(replay_register(ctx, kHost, kSize) == hipSuccess);
-  // What a hipGraphAddMemcpyNode1D on kHost is given (translate_ptr).
   auto* node_ptr = static_cast<unsigned char*>(ctx.translate_ptr(kHost));
   REQUIRE(node_ptr != nullptr);
 
@@ -124,7 +94,6 @@ TEST_CASE("Unit_HRR_HostUnregister_GraphNodeKeepsBuffer", "[hrr]") {
   CHECK_FALSE(ctx.has_alloc(kHost));
   CHECK(ctx.host_budget.used() == kSize);
 
-  // What the node's next launch does to its destination.
   std::memset(node_ptr, 0x5A, kSize);
   CHECK(node_ptr[kSize - 1] == 0x5A);
 }

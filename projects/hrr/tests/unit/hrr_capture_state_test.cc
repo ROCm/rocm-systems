@@ -8,10 +8,6 @@
  * @addtogroup HRR HRR Graph Capture State
  * @{
  * @ingroup HRRTest
- * Handler-level tests that replay's graph-capture flag follows the recorded
- * application. The hipStreamEndCapture handler is called through the dispatch
- * table with a record whose stream replay never created, so it returns before
- * any HIP call and needs no GPU.
  */
 
 #include <catch2/catch_test_macros.hpp>
@@ -22,15 +18,6 @@
 
 #include <cstdint>
 
-/**
- * Test Description
- * ----------------
- *   - A recorded hipStreamEndCapture ends the capture whatever it returned:
- *     capture records it as failed only for an invalidated or unjoined capture,
- *     and both still end it. The flag that keeps replay from synchronizing
- *     inside a capture is cleared for a success, for both failures, and when
- *     the stream is not in the map.
- */
 TEST_CASE("Unit_HRR_CaptureState_EndCaptureClearsFlag", "[hrr]") {
   for (hipError_t recorded : {hipSuccess, hipErrorStreamCaptureInvalidated,
                               hipErrorStreamCaptureUnjoined}) {

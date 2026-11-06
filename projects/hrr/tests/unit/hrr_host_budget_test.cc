@@ -8,11 +8,6 @@
  * @addtogroup HRR HRR Host Budget
  * @{
  * @ingroup HRRTest
- * Handler-level tests for the host-memory budget (--max-host-bytes): the
- * budgeted blob and code-object cache (PlaybackContext::cache_file, behind
- * load_blob and load_code_object) and the host-allocation handlers' refusal
- * paths. No case needs a GPU; the few that reach a HIP call expect its failure
- * without one.
  */
 
 #include <catch2/catch_test_macros.hpp>
@@ -48,7 +43,6 @@ namespace fs = std::filesystem;
 
 namespace {
 
-// A throwaway archive directory with blobs/ and code_objects/.
 struct ScratchArchive {
   fs::path root;
   explicit ScratchArchive(const std::string& name) {
@@ -74,13 +68,6 @@ struct ScratchArchive {
 
 }  // namespace
 
-/**
- * Test Description
- * ----------------
- *   - load_blob charges a blob's size to the host budget before reading it, and
- *     a second load of the same blob returns the cached bytes without
- *     charging again.
- */
 TEST_CASE("Unit_HRR_HostBudget_BlobCacheChargesOnce", "[hrr]") {
   ScratchArchive arc("once");
   arc.add_blob(1, 2, 64);
@@ -117,13 +104,11 @@ TEST_CASE("Unit_HRR_HostBudget_BlobCacheRefusesOverBudgetAndMissing", "[hrr]") {
   ctx.host_budget.set_cap(100);
   REQUIRE(ctx.load_blob(1, 2, nullptr) != nullptr);
 
-  // A missing blob: null, nothing charged, replay not ended.
   const std::string missing_err = hrr_test::capture_stderr(
       [&] { CHECK(ctx.load_blob(9, 9, nullptr) == nullptr); });
   CHECK(ctx.host_budget.used() == 64);
   CHECK_FALSE(ctx.fatal_error.load());
 
-  // 64 + 64 > 100.
   const std::string err = hrr_test::capture_stderr(
       [&] { CHECK(ctx.load_blob(3, 4, nullptr) == nullptr); });
   CHECK(ctx.host_budget.used() == 64);
@@ -132,12 +117,6 @@ TEST_CASE("Unit_HRR_HostBudget_BlobCacheRefusesOverBudgetAndMissing", "[hrr]") {
   CHECK(err.find("--max-host-bytes") != std::string::npos);
 }
 
-/**
- * Test Description
- * ----------------
- *   - Threads that miss on the same blob at once end up with exactly one
- *     charge: the loser of the insert gives its charge back.
- */
 TEST_CASE("Unit_HRR_HostBudget_ConcurrentLoadsOfOneBlobChargeOnce", "[hrr]") {
   ScratchArchive arc("concurrent");
   arc.add_blob(5, 6, 50);
@@ -156,13 +135,6 @@ TEST_CASE("Unit_HRR_HostBudget_ConcurrentLoadsOfOneBlobChargeOnce", "[hrr]") {
   CHECK(ctx.host_budget.used() == 50);
 }
 
-/**
- * Test Description
- * ----------------
- *   - The code-object cache goes through the same budget, under its own key:
- *     a blob and a code object with the same hash are two entries, two
- *     charges.
- */
 TEST_CASE("Unit_HRR_HostBudget_CodeObjectCacheIsChargedSeparately", "[hrr]") {
   ScratchArchive arc("co");
   arc.add_blob(7, 8, 40);
@@ -178,20 +150,12 @@ TEST_CASE("Unit_HRR_HostBudget_CodeObjectCacheIsChargedSeparately", "[hrr]") {
   CHECK(sz == 30);
   CHECK(ctx.host_budget.used() == 70);
 
-  // Another 40 would pass the cap.
   arc.add_code_object(9, 9, 40);
   (void)hrr_test::capture_stderr([&] { CHECK(ctx.load_code_object(9, 9, &sz) == nullptr); });
   CHECK(ctx.host_budget.used() == 70);
   CHECK(ctx.fatal_error.load());
 }
 
-/**
- * Test Description
- * ----------------
- *   - hipHostMalloc, hipMallocHost and hipHostRegister refuse a recorded size
- *     the budget cannot hold before they call HIP: hipErrorMemoryAllocation,
- *     the replay ended, nothing charged, no mapping recorded.
- */
 TEST_CASE("Unit_HRR_HostBudget_HostAllocationHandlersRefuseOverBudget", "[hrr]") {
   {
     PlaybackContext ctx;
@@ -234,14 +198,6 @@ TEST_CASE("Unit_HRR_HostBudget_HostAllocationHandlersRefuseOverBudget", "[hrr]")
   }
 }
 
-/**
- * Test Description
- * ----------------
- *   - The replay's dispatch table (what dispatch_event calls) reaches the
- *     charging handlers for hipHostMalloc, hipMallocHost and hipFreeHost, not a
- *     generated one that skips the budget (or, for hipMallocHost/hipFreeHost, a
- *     NOOP). Calling a dispatch entry over budget refuses the allocation.
- */
 TEST_CASE("Unit_HRR_HostBudget_DispatchTableUsesTheChargingHandlers", "[hrr]") {
   CHECK(hrr_playback_dispatch[HRR_API_HIPHOSTMALLOC] == &playback_hipHostMalloc);
   CHECK(hrr_playback_dispatch[HRR_API_HIPMALLOCHOST] == &playback_hipMallocHost);
@@ -259,21 +215,6 @@ TEST_CASE("Unit_HRR_HostBudget_DispatchTableUsesTheChargingHandlers", "[hrr]") {
   CHECK(ctx.fatal_error.load());
 }
 
-/**
- * Test Description
- * ----------------
- *   - Recording a pinned allocation again at an address that still holds one,
- *     through the dispatch entries replay calls, drops the old entry. The new
- *     allocation is over budget here so no HIP allocation is made: only the
- *     replaced entry's release is observed.
- *   - The old charge goes back only if the runtime let go of the buffer. A
- *     hipHostMalloc entry's buffer is freed (a null live pointer frees
- *     cleanly where a runtime is up, and fails without one, which the charge
- *     must then follow); a failing hipHostFree keeps the charge, and the
- *     buffer is left alone. A hipHostRegister entry's charge stays either way,
- *     and a failing hipHostUnregister leaves its buffer alone too. The seeds
- *     are not pinned, so the failures need no GPU.
- */
 TEST_CASE("Unit_HRR_HostBudget_DispatchFreesReplacedHostAllocation", "[hrr]") {
   auto run = [](uint32_t api, auto& rec, AllocKind kind, void* live, size_t expect_used) {
     PlaybackContext ctx;
@@ -354,14 +295,6 @@ TEST_CASE("Unit_HRR_HostBudget_ManagedAllocationRefusedOverBudget", "[hrr]") {
   }
 }
 
-/**
- * Test Description
- * ----------------
- *   - hipMemCreate with a host location (Host, HostNuma or HostNumaCurrent)
- *     refuses a size the budget cannot hold before it calls HIP: the same
- *     refusal as hipHostMalloc, nothing charged, no handle recorded. This holds
- *     through the dispatch table too.
- */
 TEST_CASE("Unit_HRR_HostBudget_HostMemCreateRefusedOverBudget", "[hrr]") {
   CHECK(hrr_playback_dispatch[HRR_API_HIPMEMCREATE] == &playback_hipMemCreate);
   for (hipMemLocationType loc : {hipMemLocationTypeHost, hipMemLocationTypeHostNuma,
@@ -389,13 +322,6 @@ TEST_CASE("Unit_HRR_HostBudget_HostMemCreateRefusedOverBudget", "[hrr]") {
   }
 }
 
-/**
- * Test Description
- * ----------------
- *   - hipMemCreate with a device location is not charged to the host budget:
- *     a size far over the cap does not end the replay and leaves nothing
- *     charged, whatever the HIP call returns.
- */
 TEST_CASE("Unit_HRR_HostBudget_DeviceMemCreateNotCharged", "[hrr]") {
   // Without a device hipMemCreate fails at the ordinal check, before the
   // charge decision, so the case would pass even if device memory were charged.
@@ -419,17 +345,6 @@ TEST_CASE("Unit_HRR_HostBudget_DeviceMemCreateNotCharged", "[hrr]") {
   CHECK(err.find("--max-host-bytes") == std::string::npos);
 }
 
-/**
- * Test Description
- * ----------------
- *   - A managed entry holds its charge until it is removed: remove_alloc (what
- *     hipFree calls) returns it, a device entry returns nothing, and removing
- *     the same address twice does not give back more than was charged.
- *   - A managed allocation recorded again at an address that still holds one
- *     frees the old entry and gives its charge back before the new one is
- *     charged. The new allocation is over budget here so no HIP allocation is
- *     made: only the replaced entry's release is observed.
- */
 TEST_CASE("Unit_HRR_HostBudget_ManagedAllocationReturnsChargeOnFree", "[hrr]") {
   {
     PlaybackContext ctx;
@@ -465,14 +380,6 @@ TEST_CASE("Unit_HRR_HostBudget_ManagedAllocationReturnsChargeOnFree", "[hrr]") {
   }
 }
 
-/**
- * Test Description
- * ----------------
- *   - host_landing_buffer hands back the same buffer for a smaller request,
- *     charges a larger one whole (the outgrown block stays resident for the
- *     nodes holding it), and on a refusal returns null, ends the replay and
- *     leaves the buffer as it was.
- */
 TEST_CASE("Unit_HRR_HostBudget_LandingBufferChargesWholeBlock", "[hrr]") {
   PlaybackContext ctx;
   ctx.host_budget.set_cap(200);
@@ -497,14 +404,6 @@ TEST_CASE("Unit_HRR_HostBudget_LandingBufferChargesWholeBlock", "[hrr]") {
   CHECK(ctx.host_landing_buffer(0, 8) == nullptr);  // a null recorded key stays null
 }
 
-/**
- * Test Description
- * ----------------
- *   - A graph node keeps the host pointer it was given, so growing the buffer
- *     for the same recorded key must not free it: the pointer from before the
- *     growth stays writable (AddressSanitizer aborts on a write through a freed
- *     block).
- */
 TEST_CASE("Unit_HRR_HostBudget_LandingBufferPointerSurvivesGrowth", "[hrr]") {
   PlaybackContext ctx;
 
@@ -512,21 +411,10 @@ TEST_CASE("Unit_HRR_HostBudget_LandingBufferPointerSurvivesGrowth", "[hrr]") {
   REQUIRE(n1 != nullptr);
   REQUIRE(ctx.host_landing_buffer(0x20, 4096) != nullptr);  // grows the same key
 
-  // Launching graph 1 now writes through the pointer node 1 was given.
   std::memset(n1, 0x44, 16);
   CHECK(n1[15] == 0x44);
 }
 
-/**
- * Test Description
- * ----------------
- *   - A host-located hipMemCreate handle keeps its charge while a hipMemMap
- *     holds it: hipMemRelease alone does not give the bytes back (the runtime
- *     keeps the memory until the last hipMemUnmap), the unmap does. A handle
- *     mapped twice is returned only by the second unmap, and one never mapped is
- *     returned by the release. Each step checks the exact figure, so a charge
- *     returned twice shows too.
- */
 TEST_CASE("Unit_HRR_HostBudget_MemCreateChargeHeldWhileMapped", "[hrr]") {
   auto* h1 = reinterpret_cast<hipMemGenericAllocationHandle_t>(uintptr_t{0x1000});
   auto* h2 = reinterpret_cast<hipMemGenericAllocationHandle_t>(uintptr_t{0x2000});
@@ -535,7 +423,6 @@ TEST_CASE("Unit_HRR_HostBudget_MemCreateChargeHeldWhileMapped", "[hrr]") {
   PlaybackContext ctx;
   ctx.host_budget.set_cap(1000);
 
-  // Create, map, release: the charge stays, then the unmap returns it.
   REQUIRE(ctx.charge_host(300, "seed"));
   ctx.vmm_note_create(0x7000, h1, 300);
   ctx.vmm_note_map(va, 300, h1);
@@ -544,7 +431,6 @@ TEST_CASE("Unit_HRR_HostBudget_MemCreateChargeHeldWhileMapped", "[hrr]") {
   ctx.vmm_note_unmap(va, 300);
   CHECK(ctx.host_budget.used() == 0);
 
-  // Two mappings: only the last unmap returns it.
   REQUIRE(ctx.charge_host(200, "seed"));
   ctx.vmm_note_create(0x7100, h2, 200);
   ctx.vmm_note_map(va, 100, h2);
@@ -557,19 +443,12 @@ TEST_CASE("Unit_HRR_HostBudget_MemCreateChargeHeldWhileMapped", "[hrr]") {
   ctx.vmm_note_unmap(va2, 100);  // nothing mapped any more
   CHECK(ctx.host_budget.used() == 0);
 
-  // Never mapped: the release returns it at once.
   REQUIRE(ctx.charge_host(50, "seed"));
   ctx.vmm_note_create(0x7200, h1, 50);
   ctx.vmm_note_release(h1);
   CHECK(ctx.host_budget.used() == 0);
 }
 
-/**
- * Test Description
- * ----------------
- *   - Host blocks start on a 64-byte cache line, so two small blocks never
- *     share one (hipHostRegister's alignment advice).
- */
 TEST_CASE("Unit_HRR_HostBudget_HostBlocksStartOnCacheLine", "[hrr]") {
   PlaybackContext ctx;
   for (uint64_t rec = 1; rec <= 8; ++rec) {
@@ -579,14 +458,6 @@ TEST_CASE("Unit_HRR_HostBudget_HostBlocksStartOnCacheLine", "[hrr]") {
   }
 }
 
-/**
- * Test Description
- * ----------------
- *   - Releasing a region's stand-in buffer removes the alloc_map entry only if
- *     that entry is the stand-in. When the archive has since allocated managed
- *     memory at the region base, region DEL leaves the managed entry and its
- *     charge in place.
- */
 TEST_CASE("Unit_HRR_HostBudget_RegionReleaseKeepsReplacingAllocation", "[hrr]") {
   auto* managed = reinterpret_cast<void*>(uintptr_t{0xB0000});
   PlaybackContext ctx;
@@ -602,12 +473,6 @@ TEST_CASE("Unit_HRR_HostBudget_RegionReleaseKeepsReplacingAllocation", "[hrr]") 
   CHECK_FALSE(ctx.has_alloc(0xB000));
 }
 
-/**
- * Test Description
- * ----------------
- *   - A hipHostRegister the budget allows but the allocator cannot back is
- *     refused with hipErrorMemoryAllocation, and its charge is given back.
- */
 TEST_CASE("Unit_HRR_HostBudget_HostRegisterAllocationFailureRefuses", "[hrr]") {
   constexpr uint64_t kHuge = uint64_t{1} << 62;  // more than any address space
   PlaybackContext ctx;
