@@ -56,6 +56,34 @@ TEST(RaceDetector, EventRegistry_TrimmedWaveLocalEventsAreNotBarrierQueued) {
   wave.flushBarrierPendingEvents();
 }
 
+TEST(RaceDetector, EventRegistry_LdsEventsWithoutBytesAreTrimmedOnceComplete) {
+  // An LDS event can touch no LDS bytes: an async copy with no active lanes, or
+  // a tensor transfer that moves no data. It still holds a counter slot, but no
+  // other wave can race with it, so once its wait completes it is trimmable
+  // like a wave-local event, and must not be queued for barrier retirement.
+  int N = EventRegistry::kTrimAttemptInterval;
+  RaceDetector detector(/*nWaves=*/
+                        1, /*vgprCount=*/2, /*sgprCount=*/2, Dim3d(0), [](RaceViolation) {},
+                        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4),
+                        /*ldsSizeBytes=*/64 * 1024);
+  auto &wave = detector.getWaveRaceState(0);
+  const std::array obligations{rocjitsu::amdgpu::MemoryCounterObligation{
+      rocjitsu::amdgpu::WaitCounterType::ASYNCCNT, MemoryOrderClass::ASYNC_STORE}};
+
+  for (int i = 0; i < N; ++i) {
+    wave.registerLdsRangeEvent(testInstruction(/*pc=*/static_cast<uint64_t>(i)),
+                               MemoryEventType::LDS_TO_GLOBAL, /*ranges=*/{}, obligations,
+                               MemoryOrderClass::ASYNC_STORE);
+    PendingWaitCount wait;
+    wait.add(rocjitsu::amdgpu::WaitCounterType::ASYNCCNT, 0);
+    wave.dispatch(wait);
+  }
+
+  EXPECT_GT(detector.events().trimmedCount(), 0);
+  EXPECT_TRUE(wave.getBarrierPendingEvents().empty());
+  EXPECT_TRUE(detector.getLdsReadEvents().empty());
+}
+
 namespace {
 using namespace rocjitsu;
 using amdgpu::MemoryCounterObligation;

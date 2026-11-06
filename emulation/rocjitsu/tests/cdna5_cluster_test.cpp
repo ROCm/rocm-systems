@@ -449,8 +449,10 @@ TEST(Gfx1250ExecutionTest, GlobalStoreAsyncFromLdsB128StraddlingTheEndReadsItsIn
   EXPECT_EQ(payload, (std::array<uint32_t, 4>{0x11111111u, 0x22222222u, 0, 0}));
 }
 
-// B128 records each lane's base address; the lane reads 16 bytes from it.
-TEST(Gfx1250ExecutionTest, GlobalStoreAsyncFromLdsB128RecordsLaneBaseAddress) {
+// B128 records each lane's base address; the lane reads 16 bytes from it. With
+// SADDR, SCALE_OFFSET scales the VGPR global offset by the data size (CDNA5 ISA
+// 10.8.1), but not the LDS address.
+TEST(Gfx1250ExecutionTest, GlobalStoreAsyncFromLdsB128ScalesOnlyTheGlobalOffset) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
@@ -459,25 +461,31 @@ TEST(Gfx1250ExecutionTest, GlobalStoreAsyncFromLdsB128RecordsLaneBaseAddress) {
   wf->set_exec(0x3u);
   wf->set_lds_base(cu->allocate_lds(256));
   wf->set_lds_size(256);
-  write_wave_sgpr(*cu, *wf, 0, 0x1b0000u);
+  constexpr uint64_t kGlobalBase = 0x1b0000u;
+  write_wave_sgpr(*cu, *wf, 0, static_cast<uint32_t>(kGlobalBase));
   write_wave_sgpr(*cu, *wf, 1, 0u);
-  // v0 holds the global offset and v1 the LDS source address.
+  // v0 holds the global offset in elements and v1 the LDS source address.
   const uint32_t vgpr_base = wf->vgpr_alloc().base;
-  cu->write_vgpr(vgpr_base, 0, 0);
-  cu->write_vgpr(vgpr_base, 1, 16);
+  cu->write_vgpr(vgpr_base, 0, 1);
+  cu->write_vgpr(vgpr_base, 1, 2);
   cu->write_vgpr(vgpr_base + 1, 0, 32);
   cu->write_vgpr(vgpr_base + 1, 1, 48);
 
-  constexpr auto words = cdna5::build_vglobal(cdna5::kGlobalStoreAsyncFromLdsB128Vglobal,
-                                              {.saddr = 0, .vsrc = 1, .vaddr = 0});
+  constexpr auto words =
+      cdna5::build_vglobal(cdna5::kGlobalStoreAsyncFromLdsB128Vglobal,
+                           {.saddr = 0, .scale_offset = 1, .vsrc = 1, .vaddr = 0});
   auto inst = decode_gfx1250(words, "global_store_async_from_lds_b128");
   ASSERT_NE(inst, nullptr);
   inst->execute(*inst, wf);
   auto *state = inst->data_as<amdgpu::VectorMemState>();
   ASSERT_NE(state, nullptr);
   EXPECT_EQ(state->elem_size * state->num_elems, 16u);
+  EXPECT_EQ(state->per_lane_addr[0], kGlobalBase + 16);
+  EXPECT_EQ(state->per_lane_addr[1], kGlobalBase + 32);
   EXPECT_EQ(state->per_lane_lds_addr[0], wf->lds_base() + 32);
   EXPECT_EQ(state->per_lane_lds_addr[1], wf->lds_base() + 48);
+  EXPECT_EQ(state->per_lane_lds_src_bytes[0], 16u);
+  EXPECT_EQ(state->per_lane_lds_src_bytes[1], 16u);
 }
 
 TEST(Gfx1250ExecutionTest, AsyncLdsAddressRejectsAccessOutsideAllocation) {
