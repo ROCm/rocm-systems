@@ -62,7 +62,7 @@ void write_bytes(std::vector<uint8_t> &image, uint64_t offset, const void *data,
   assert(offset <= image.size() && size <= image.size() - offset &&
          "code-object fuzz seed write exceeds image");
   if (size != 0)
-    std::memcpy(image.data() + offset, data, size);
+    std::copy_n(static_cast<const uint8_t *>(data), size, image.begin() + offset);
 }
 
 std::vector<uint8_t> make_device_elf(uint32_t machine_flag) {
