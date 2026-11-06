@@ -868,7 +868,8 @@ TEST(RjDecodeBenchmark, PreservesConcreteGfx1251Identity) {
 
 TEST(RjDecodeBenchmark, AcceptsGfx1100TargetAndChecksElfIdentity) {
   ASSERT_FALSE(g_decode_benchmark.empty());
-  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_decode_benchmark_gfx1100_");
+  rocjitsu::test::ScopedTempDirectory temp_dir;
+  ASSERT_TRUE(temp_dir.initialize("rj_decode_benchmark_gfx1100_"));
   const std::filesystem::path temp_path(temp_dir.path());
   const std::filesystem::path input = temp_path / "gfx1100.co";
   const std::filesystem::path output = temp_path / "stdout.txt";
