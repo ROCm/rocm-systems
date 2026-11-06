@@ -220,8 +220,23 @@ set +e
 DRIVER_STATUS=${PIPESTATUS[0]}
 set -e
 
-# Non-zero merely means findings were reported; only no output as well is a
-# genuine failure to run.
+# A non-zero status means a translation unit failed to parse, not that there
+# were findings: the enabled checks are plain warnings and .clang-tidy sets no
+# WarningsAsErrors, so findings alone exit 0.
+#
+# Count the parse errors here, before the NCCL filter, which would otherwise
+# drop the only evidence of one in an NCCL-owned file and leave a broken run
+# looking like a clean one.
+PARSE_ERRORS=$(grep -cE 'error:' "${BUILD_DIR}/clang-tidy-all.txt" || true)
+
+if [[ "$PARSE_ERRORS" -gt 0 ]]; then
+  echo "ERROR: ${PARSE_ERRORS} compiler error(s); the analysis did not see every" >&2
+  echo "       translation unit, so a clean finding list would be misleading." >&2
+  echo "       First 20:" >&2
+  grep -E 'error:' "${BUILD_DIR}/clang-tidy-all.txt" | head -20 >&2
+  exit 2
+fi
+
 if [[ "$DRIVER_STATUS" -ne 0 && ! -s "${BUILD_DIR}/clang-tidy-all.txt" ]]; then
   echo "ERROR: run-clang-tidy exited ${DRIVER_STATUS} and produced no findings;" >&2
   echo "       this is a failure to run, not a clean result. stderr:" >&2
