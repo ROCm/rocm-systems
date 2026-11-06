@@ -6,11 +6,14 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <sys/wait.h>
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
+#include <climits>
 #include <csignal>
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <thread>
 #include <unistd.h>
 #include "TestBed.hpp"
@@ -44,6 +47,12 @@
   {                                                                                     \
     if (ev.verbose) TEST_INFO("Calling PIPE_READ to Child %d", childId); \
     int const lostChildId = WaitForChild(childId);                                      \
+    if (lostChildId == kChildWaitTimedOut)                                              \
+    {                                                                                   \
+      TEST_ERROR("Child %d did not reply within %d s (UT_CHILD_TIMEOUT_S)", childId,    \
+                 ChildReplyTimeoutSec());                                               \
+      FAIL() << AbandonChildren(childId, /*waitForExit=*/false);                        \
+    }                                                                                   \
     if (lostChildId >= 0)                                                               \
     {                                                                                   \
       TEST_ERROR("Child %d pipe closed while waiting for child %d", lostChildId, childId); \
@@ -53,25 +62,27 @@
     if (ev.verbose) TEST_INFO("Got PIPE_READ %ld from Child %d", retval, childId); \
     if (retval != static_cast<ssize_t>(sizeof(val)))                                    \
     {                                                                                   \
-      if (retval == -1)                                                                 \
-        TEST_ERROR("Unable to read from child %d: Error %s", childId, strerror(errno)); \
-      else if (retval == 0)                                                             \
-        TEST_ERROR("Child %d pipe closed unexpectedly", childId);                       \
-      else                                                                              \
-        TEST_ERROR("Child %d pipe read incomplete (%ld / %lu)", childId, retval, sizeof(val)); \
+      ReportReadFailure(childId, retval, sizeof(val));                                  \
       FAIL() << AbandonChildren(childId);                                               \
     }                                                                                   \
   }
-#define PIPE_CHECK(childId)                         \
-  {                                                 \
-    int response = 0;                               \
-    PIPE_READ(childId, response);                   \
-    if (response != TEST_SUCCESS)                   \
-    {                                               \
-      TEST_ERROR("Child %d reports failure", childId); \
-      ASSERT_EQ(response, TEST_SUCCESS);            \
-      FAIL();                                       \
-    }                                               \
+#define PIPE_CHECK(childId, command)                                                    \
+  {                                                                                     \
+    TestBedChild::Reply reply = {};                                                     \
+    PIPE_READ(childId, reply);                                                          \
+    std::string const mismatch = ReplyMismatch(childList[childId]->replySeq, reply, command); \
+    if (!mismatch.empty())                                                              \
+    {                                                                                   \
+      TEST_ERROR("Child %d %s", childId, mismatch.c_str());                             \
+      FAIL() << AbandonChildren(childId, /*waitForExit=*/false, kOutOfSequence);        \
+    }                                                                                   \
+    if (reply.status != TEST_SUCCESS)                                                   \
+    {                                                                                   \
+      TEST_ERROR("Child %d reports failure", childId);                                  \
+      this->childFailed = true;                                                         \
+      ASSERT_EQ(reply.status, TEST_SUCCESS);                                            \
+      FAIL();                                                                           \
+    }                                                                                   \
   }
 
 namespace RcclUnitTesting
@@ -81,12 +92,78 @@ namespace RcclUnitTesting
     // Matched by suite, not by test: one sweep's sample, so exact test names leave siblings exposed.
     char const* const kGfx95NoPoolSuites[] = {"AlltoAll", "ReduceScatter", "AllGather",
                                               "P2pChannelScaling", "Broadcast", "GroupCall"};
+
+    // Reaps pid. A worker still alive at deadline (e.g. stuck in a collective
+    // teardown) is SIGKILLed and the current test fails. With noDeadline the
+    // wait is unbounded.
+    pid_t ReapChild(pid_t const pid, int* status, bool const noDeadline,
+                    std::chrono::steady_clock::time_point const deadline)
+    {
+      pid_t waitResult = -1;
+      if (!noDeadline)
+      {
+        while (true)
+        {
+          waitResult = waitpid(pid, status, WNOHANG);
+          if (waitResult == -1 && errno == EINTR) continue;
+          if (waitResult != 0) return waitResult;
+          if (std::chrono::steady_clock::now() >= deadline) break;
+          std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+        TEST_ERROR("Child pid %d did not exit before the teardown deadline (UT_CHILD_TIMEOUT_S); killing it", pid);
+        ADD_FAILURE() << "Child pid " << pid << " did not exit before the teardown deadline (UT_CHILD_TIMEOUT_S)";
+        kill(pid, SIGKILL);
+      }
+      do
+      {
+        waitResult = waitpid(pid, status, 0);
+      } while (waitResult == -1 && errno == EINTR);
+      return waitResult;
+    }
+
+    char const* const kOutOfSequence = "sent an out-of-sequence reply";
+
+    // Consumes the next reply sequence number of a child (its replySeq). Empty if
+    // reply answers command in order; otherwise describes the mismatch. A mismatch
+    // means the pipe is out of step and cannot be resynchronized.
+    std::string ReplyMismatch(uint32_t& replySeq, TestBedChild::Reply const& reply, int const command)
+    {
+      uint32_t const expectedSeq = ++replySeq;
+      if (reply.command == command && reply.seq == expectedSeq) return "";
+      return "sent reply #" + std::to_string(reply.seq) + " to " + TestBedChild::CommandName(reply.command) +
+             " where reply #" + std::to_string(expectedSeq) + " to " + TestBedChild::CommandName(command) +
+             " was expected";
+    }
+
+    // poll() timeout for the time left until deadline; -1 (no limit) when timeoutSec is 0.
+    int PollTimeoutMs(int const timeoutSec, std::chrono::steady_clock::time_point const deadline)
+    {
+      if (timeoutSec <= 0) return -1;
+      auto const remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+        deadline - std::chrono::steady_clock::now());
+      return static_cast<int>(std::clamp<long long>(remaining.count(), 0, INT_MAX));
+    }
+
+    void ReportReadFailure(int const childId, ssize_t const retval, size_t const expectedBytes)
+    {
+      if (retval == -1)
+      {
+        TEST_ERROR("Unable to read from child %d: Error %s", childId, strerror(errno));
+      }
+      else if (retval == 0)
+      {
+        TEST_ERROR("Child %d pipe closed unexpectedly", childId);
+      }
+      else
+      {
+        TEST_ERROR("Child %d pipe read incomplete (%ld / %lu)", childId, retval, expectedBytes);
+      }
+    }
   }
 
   TestBed::TestBed() :
     numDevicesAvailable(0),
-    numActiveChildren(0),
-    numActiveRanks(0)
+    numGroupCalls(0)
   {
     // Ignore SIGPIPE so a write to a dead pool worker fails with EPIPE instead
     // of killing the parent.
@@ -135,19 +212,6 @@ namespace RcclUnitTesting
       return false;
     }
 
-    // Parent-side descriptors must not leak into subsequently exec'd workers.
-    // Child-side descriptors are the only descriptors preserved across exec.
-    if (fcntl(child->parentWriteFd, F_SETFD, FD_CLOEXEC) == -1 ||
-        fcntl(child->parentReadFd, F_SETFD, FD_CLOEXEC) == -1 ||
-        fcntl(child->childWriteFd, F_SETFD, 0) == -1 ||
-        fcntl(child->childReadFd, F_SETFD, 0) == -1)
-    {
-      TEST_ERROR("Unable to configure pipe descriptors for child %d: %s",
-                 child->childId, strerror(errno));
-      child->ClosePipes();
-      return false;
-    }
-
     // Construct all arguments before fork. A HIP-initialized parent can have
     // background threads holding libc locks, so the child must do only
     // async-signal-safe work before replacing its process image.
@@ -174,9 +238,9 @@ namespace RcclUnitTesting
     pid_t const pid = fork();
     if (pid == 0)
     {
-      close(child->parentWriteFd);
-      close(child->parentReadFd);
-      execv("/proc/self/exe", const_cast<char* const*>(childArgv));
+      // InitPipes made every end close-on-exec; keep only this worker's own ends.
+      if (fcntl(child->childReadFd, F_SETFD, 0) == 0 && fcntl(child->childWriteFd, F_SETFD, 0) == 0)
+        execv("/proc/self/exe", const_cast<char* const*>(childArgv));
       _exit(127);
     }
     if (pid < 0)
@@ -194,10 +258,22 @@ namespace RcclUnitTesting
     return true;
   }
 
+  int TestBed::ChildReplyTimeoutSec() const
+  {
+    if (ev.debugPause || ev.childTimeoutSec <= 0) return 0;
+    // ExecuteCollectives replies only after its own UT_TIMEOUT_US expires and
+    // the timed-out comms are aborted.
+    long long const collectiveTimeoutSec = 2 * ((static_cast<long long>(ev.timeoutUs) + 999999) / 1000000);
+    return static_cast<int>(std::min<long long>(std::max<long long>(ev.childTimeoutSec, collectiveTimeoutSec), INT_MAX));
+  }
+
   int TestBed::WaitForChild(int const childId)
   {
     // A peer that dies can leave childId blocked in a collective forever, so
-    // watch every active child's pipe, not only the one being read.
+    // watch every active child's pipe, not only the one being read. A child
+    // that hangs without dying is caught by the reply timeout.
+    int const timeoutSec = ChildReplyTimeoutSec();
+    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(timeoutSec);
     std::vector<pollfd> fds;
     std::vector<int> fdChildIds;
     for (int c = 0; c < static_cast<int>(childList.size()); ++c)
@@ -211,11 +287,13 @@ namespace RcclUnitTesting
 
     while (true)
     {
-      if (poll(fds.data(), fds.size(), -1) < 0)
+      int const pollResult = poll(fds.data(), fds.size(), PollTimeoutMs(timeoutSec, deadline));
+      if (pollResult < 0)
       {
         if (errno == EINTR) continue;
         return -1;  // the read that follows reports the error
       }
+      if (pollResult == 0) return kChildWaitTimedOut;
       for (size_t i = 0; i < fds.size(); ++i)
       {
         if (fds[i].revents == 0) continue;
@@ -228,9 +306,9 @@ namespace RcclUnitTesting
     }
   }
 
-  std::string TestBed::AbandonChildren(int const lostChildId)
+  std::string TestBed::AbandonChildren(int const lostChildId, bool const waitForExit, char const* what)
   {
-    std::string reason = "Child " + std::to_string(lostChildId) + " stopped responding";
+    std::string reason = "Child " + std::to_string(lostChildId) + " " + what;
     TestBedChild* const lost = (lostChildId >= 0 && lostChildId < static_cast<int>(childList.size()))
                                ? childList[lostChildId] : nullptr;
     if (lost != nullptr && lost->pid > 0)
@@ -239,7 +317,7 @@ namespace RcclUnitTesting
       // while), so give it time to finish dying and report the real cause.
       int status = 0;
       pid_t waitResult = 0;
-      auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+      auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(waitForExit ? 30 : 0);
       while ((waitResult = waitpid(lost->pid, &status, WNOHANG)) == 0 &&
              std::chrono::steady_clock::now() < deadline)
       {
@@ -259,34 +337,188 @@ namespace RcclUnitTesting
     TEST_ERROR("%s", reason.c_str());
 
     // Surviving workers may be waiting on the lost one inside a collective, so
-    // they cannot be asked to stop. childList either borrows pool workers or
-    // owns its children, and the pool may also hold workers from an earlier
-    // config: collect each worker once.
-    std::set<TestBedChild*> workers(this->poolChildren.begin(), this->poolChildren.end());
-    workers.insert(this->childList.begin(), this->childList.end());
-    workers.erase(nullptr);
-    for (TestBedChild* c : workers)
+    // they cannot be asked to stop. Kill them all first so they die in
+    // parallel; the destructors then reap them and close their pipes.
+    for (auto const* workers : {&this->ownedChildren, &this->poolChildren})
     {
-      if (c->pid > 0) kill(c->pid, SIGKILL);
-    }
-    for (TestBedChild* c : workers)
-    {
-      if (c->pid > 0)
+      for (auto const& c : *workers)
       {
-        while (waitpid(c->pid, nullptr, 0) == -1 && errno == EINTR) {}
+        if (c && c->pid > 0) kill(c->pid, SIGKILL);
       }
-      c->ClosePipes();
-      delete c;
     }
-
+    this->ownedChildren.clear();
     this->poolChildren.clear();
-    this->childList.clear();
+    this->poolWorkerState.clear();
     this->configUsedPool = false;
-    this->numActiveChildren = 0;
-    this->numActiveRanks = 0;
-    this->rankToChildMap.clear();
-    this->rankToDeviceMap.clear();
+    ResetActiveConfig();
     return reason;
+  }
+
+  void TestBed::ResetActiveConfig()
+  {
+    this->childList.clear();
+    this->rankToChildMap.clear();
+    this->childFailed = false;
+  }
+
+  bool TestBed::SelectRanks(int const rank, std::vector<int>& ranks) const
+  {
+    ranks.clear();
+    int const numRanks = NumActiveRanks();
+    if (rank != -1 && (rank < 0 || rank >= numRanks))
+    {
+      ADD_FAILURE() << "Rank " << rank << " is not active (" << numRanks << " active ranks)";
+      return false;
+    }
+    for (int i = 0; i < numRanks; ++i)
+      if (rank == -1 || rank == i) ranks.push_back(i);
+    return true;
+  }
+
+  bool TestBed::SelectGroups(int const groupId, std::vector<int>& groups) const
+  {
+    groups.clear();
+    if (groupId != -1 && (groupId < 0 || groupId >= this->numGroupCalls))
+    {
+      ADD_FAILURE() << "Group " << groupId << " is not active (" << this->numGroupCalls << " group calls)";
+      return false;
+    }
+    for (int i = 0; i < this->numGroupCalls; ++i)
+      if (groupId == -1 || groupId == i) groups.push_back(i);
+    return true;
+  }
+
+  std::vector<std::vector<int>> TestBed::RanksPerChild(std::vector<int> const& ranks) const
+  {
+    std::vector<std::vector<int>> ranksPerChild(NumActiveChildren());
+    for (int const rank : ranks)
+      ranksPerChild[rankToChildMap[rank]].push_back(rank);
+    return ranksPerChild;
+  }
+
+  std::vector<int> TestBed::AllChildIds() const
+  {
+    std::vector<int> childIds(NumActiveChildren());
+    for (int childId = 0; childId < NumActiveChildren(); ++childId) childIds[childId] = childId;
+    return childIds;
+  }
+
+  std::vector<int> TestBed::ChildrenWithRanks(std::vector<std::vector<int>> const& ranksPerChild)
+  {
+    std::vector<int> childIds;
+    for (int childId = 0; childId < static_cast<int>(ranksPerChild.size()); ++childId)
+      if (!ranksPerChild[childId].empty()) childIds.push_back(childId);
+    return childIds;
+  }
+
+  bool TestBed::WriteToChild(int const childId, CommandMessage const& message)
+  {
+    std::vector<char> const& bytes = message.Bytes();
+    if (RcclUnitTesting::safe_pipe_write(childList[childId]->parentWriteFd, bytes.data(), bytes.size()) ==
+        static_cast<ssize_t>(bytes.size()))
+      return true;
+    TEST_ERROR("Unable to write to child %d: Error %s", childId, strerror(errno));
+    [&]() { FAIL() << AbandonChildren(childId); }();  // FAIL() only compiles in a void function
+    return false;
+  }
+
+  bool TestBed::SendToRanks(int const command, std::vector<int> const& groupList, std::vector<int> const& rankList,
+                            int const collId, OnChildFailure const onFailure, CommandMessage const& args)
+  {
+    // Send every command before waiting, so children work in parallel.
+    std::vector<int> ackChildIds;
+    for (int const group : groupList)
+    {
+      for (int const rank : rankList)
+      {
+        int const childId = rankToChildMap[rank];
+        TestBedChild::RankTarget const target = {rank, group, collId};
+        if (!WriteToChild(childId, CommandMessage() << command << target << args)) return false;
+        ackChildIds.push_back(childId);
+      }
+    }
+    bool allAcked = false;
+    CollectAcks(command, ackChildIds, onFailure, &allAcked);
+    return allAcked;
+  }
+
+  bool TestBed::PoolWorkersFor(std::vector<std::vector<int>> const& deviceIdsPerChild,
+                               std::vector<int>& workers) const
+  {
+    // Map each child onto a distinct pool worker by representative device.
+    workers.clear();
+    std::set<int> usedWorkers;
+    for (auto const& deviceIds : deviceIdsPerChild)
+    {
+      int const worker = deviceIds.empty() ? -1 : deviceIds[0];
+      if (worker < 0 || worker >= (int)this->poolChildren.size() ||
+          this->poolChildren[worker] == nullptr || usedWorkers.count(worker))
+      {
+        return false;  // out-of-range, missing worker, or collision (multi-rank-per-GPU)
+      }
+      usedWorkers.insert(worker);
+      workers.push_back(worker);
+    }
+    return true;
+  }
+
+  void TestBed::WarmPoolWorkers(std::vector<std::vector<int>> const& deviceIdsPerChild)
+  {
+    if (!this->poolMode || !ev.commWarmAhead) return;
+    std::vector<int> workers;
+    if (!PoolWorkersFor(deviceIdsPerChild, workers)) return;
+
+    int const cmd = TestBedChild::CHILD_WARMUP;
+    for (int const worker : workers)
+    {
+      if (this->poolWorkerState[worker] != PoolWorkerState::Cold) continue;
+      // A failed write leaves the worker Cold; InitComms then reports the dead pipe.
+      if (RcclUnitTesting::safe_pipe_write(this->poolChildren[worker]->parentWriteFd, &cmd, sizeof(cmd)) ==
+          static_cast<ssize_t>(sizeof(cmd)))
+      {
+        this->poolWorkerState[worker] = PoolWorkerState::Warming;
+        if (ev.verbose) TEST_INFO("Warming pool worker %d", worker);
+      }
+    }
+  }
+
+  bool TestBed::FinishWarmup(int const worker, std::chrono::steady_clock::time_point const deadline)
+  {
+    TestBedChild* const child = this->poolChildren[worker].get();
+    this->poolWorkerState[worker] = PoolWorkerState::Warm;
+
+    int const timeoutSec = ChildReplyTimeoutSec();
+    pollfd fd = {child->parentReadFd, POLLIN, 0};
+    int pollResult;
+    do
+    {
+      pollResult = poll(&fd, 1, PollTimeoutMs(timeoutSec, deadline));
+    } while (pollResult < 0 && errno == EINTR);
+
+    std::string problem;
+    TestBedChild::Reply reply = {};
+    if (pollResult == 0)
+    {
+      problem = "did not reply within " + std::to_string(timeoutSec) + " s (UT_CHILD_TIMEOUT_S)";
+    }
+    else if (RcclUnitTesting::safe_pipe_read(child->parentReadFd, &reply, sizeof(reply)) !=
+             static_cast<ssize_t>(sizeof(reply)))
+    {
+      problem = "pipe closed";
+    }
+    else
+    {
+      problem = ReplyMismatch(child->replySeq, reply, TestBedChild::CHILD_WARMUP);
+      if (problem.empty() && reply.status != TEST_SUCCESS) problem = "reported failure";
+    }
+    if (problem.empty()) return true;
+
+    std::string const reason = "Pool worker " + std::to_string(worker) + " (pid " +
+                               std::to_string(child->pid) + ") warm-up " + problem;
+    TEST_ERROR("%s; removing it from the pool", reason.c_str());
+    ADD_FAILURE() << reason;
+    this->poolChildren[worker].reset();
+    return false;
   }
 
   void TestBed::InitComms(std::vector<std::vector<int>> const& deviceIdsPerProcess,
@@ -307,7 +539,7 @@ namespace RcclUnitTesting
 
     // If children/comms from a previous test mode (e.g. SP) are still active,
     // ensure they are cleanly stopped before creating new ones for MP mode
-    if (this->numActiveChildren > 0)
+    if (NumActiveChildren() > 0)
     {
       this->DestroyComms();
     }
@@ -319,27 +551,18 @@ namespace RcclUnitTesting
       FAIL() << "DestroyComms failed to clear childList before InitComms";
     }
 
-    // Count up the total number of GPUs to use and track child/deviceId per rank
+    // Track the owning child of each rank
+    int const numChildren = static_cast<int>(deviceIdsPerProcess.size());
     this->memAllocType = memAllocType;
-    this->numActiveChildren = deviceIdsPerProcess.size();
-    this->numActiveRanks = 0;
     this->numGroupCalls = numGroupCalls;
     this->numCollectivesInGroup = numCollectivesInGroup;
     this->useBlocking = useBlocking;
     this->numStreamsPerGroup = numStreamsPerGroup;
     this->rankToChildMap.clear();
-    this->rankToDeviceMap.clear();
-    if (ev.verbose) TEST_INFO("Setting up %d active child processes", this->numActiveChildren);
+    if (ev.verbose) TEST_INFO("Setting up %d active child processes", numChildren);
 
-    for (int childId = 0; childId < this->numActiveChildren; ++childId)
-    {
-      for (auto i = 0; i < deviceIdsPerProcess[childId].size(); ++i)
-      {
-        this->rankToChildMap.push_back(childId);
-        this->rankToDeviceMap.push_back(deviceIdsPerProcess[childId][i]);
-        ++this->numActiveRanks;
-      }
-    }
+    for (int childId = 0; childId < numChildren; ++childId)
+      this->rankToChildMap.insert(this->rankToChildMap.end(), deviceIdsPerProcess[childId].size(), childId);
 
     // Comm pool (UT_COMM_POOL): worker d is pinned to device d and keeps its
     // device-code object resident, so reuse skips the ~15-30s load per config.
@@ -356,48 +579,45 @@ namespace RcclUnitTesting
         {
           poolSize = detectedGpus;
         }
-        this->poolChildren.assign(poolSize, nullptr);
+        this->poolChildren.resize(poolSize);
+        this->poolWorkerState.assign(poolSize, PoolWorkerState::Cold);
         for (int d = 0; d < poolSize; ++d)
         {
-          this->poolChildren[d] = new TestBedChild(d, ev.verbose, ev.printValues, ev.useMultithreading);
-          if (!SpawnChildProcess(this->poolChildren[d], memAllocType))
+          this->poolChildren[d] = std::make_unique<TestBedChild>(d, ev.verbose, ev.printValues, ev.useMultithreading);
+          if (!SpawnChildProcess(this->poolChildren[d].get(), memAllocType))
           {
             // Reap the half-built pool; FAIL() (not TEST_ERROR) so the sweep
             // stops instead of indexing an empty childList -> SEGV.
             TeardownPool();
-            this->numActiveChildren = 0;
-            this->numActiveRanks = 0;
-            this->rankToChildMap.clear();
-            this->rankToDeviceMap.clear();
             FAIL() << "Unable to start pool child process " << d;
           }
         }
-        // Do NOT pre-warm workers: under the runner's --jobs N it storms
-        // ncclCommInitAll across all GPUs and fails intermittently.
+        // Do NOT pre-warm the whole pool here: under the runner's --jobs N it
+        // storms ncclCommInitAll across all GPUs and fails intermittently.
+        // Sweeps warm only the next configs' workers (WarmPoolWorkers).
       }
 
-
-      // Map this config's children onto distinct pool workers by representative device.
-      bool mappable = true;
-      std::vector<TestBedChild*> mapped(this->numActiveChildren, nullptr);
-      std::set<int> usedWorkers;
-      for (int c = 0; c < this->numActiveChildren && mappable; ++c)
+      std::vector<int> workers;
+      bool mappable = PoolWorkersFor(deviceIdsPerProcess, workers);
+      // Workers warm in parallel, so they share one reply deadline.
+      auto const warmupDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(ChildReplyTimeoutSec());
+      for (int const worker : workers)
       {
-        int const worker = deviceIdsPerProcess[c].empty() ? -1 : deviceIdsPerProcess[c][0];
-        if (worker < 0 || worker >= (int)this->poolChildren.size() ||
-            this->poolChildren[worker] == nullptr || usedWorkers.count(worker))
+        if (this->poolWorkerState[worker] == PoolWorkerState::Warming && !FinishWarmup(worker, warmupDeadline))
         {
-          mappable = false;  // out-of-range, missing worker, or collision (multi-rank-per-GPU) -> fork-fresh
-          break;
+          mappable = false;  // worker removed from the pool -> fork-fresh
         }
-        usedWorkers.insert(worker);
-        mapped[c] = this->poolChildren[worker];
       }
 
       if (mappable)
       {
         // Reuse: childList borrows the selected pool workers (pool retains ownership).
-        childList = mapped;
+        childList.clear();
+        for (int const worker : workers)
+        {
+          childList.push_back(this->poolChildren[worker].get());
+          this->poolWorkerState[worker] = PoolWorkerState::Warm;
+        }
         this->configUsedPool = true;
       }
     }
@@ -406,25 +626,19 @@ namespace RcclUnitTesting
     {
       // ---- Classic fork-fresh path (pool disabled, or an unmappable config) ----
       // The childList invariant was checked above after any prior teardown.
-      childList.resize(this->numActiveChildren);
-      for (int childId = 0; childId < this->numActiveChildren; ++childId)
+      for (int childId = 0; childId < numChildren; ++childId)
       {
-        childList[childId] = new TestBedChild(childId, ev.verbose, ev.printValues, ev.useMultithreading);
-        if (!SpawnChildProcess(childList[childId], memAllocType))
+        auto child = std::make_unique<TestBedChild>(childId, ev.verbose, ev.printValues, ev.useMultithreading);
+        if (!SpawnChildProcess(child.get(), memAllocType))
         {
-          // SpawnChildProcess already closed the failed child's pipe descriptors.
-          // Remove the never-started child so teardown does not write to or wait on it.
-          TestBedChild* failedChild = childList[childId];
-          delete failedChild;
-          childList.resize(childId);
-          this->numActiveChildren = childId;
+          // The never-started child is dropped here, so teardown does not write to or wait on it.
           // FAIL() only returns from InitComms and callers may carry on, so no
           // rank may still map to a child that was never started.
-          this->numActiveRanks = 0;
           this->rankToChildMap.clear();
-          this->rankToDeviceMap.clear();
           FAIL() << "Unable to start child process " << childId;
         }
+        childList.push_back(child.get());
+        this->ownedChildren.push_back(std::move(child));
       }
     }
 
@@ -433,7 +647,7 @@ namespace RcclUnitTesting
       TEST_INFO("============================================================");
       TEST_INFO(" Pausing for debug attach: (e.g. sudo rocgdb -p <PID>)");
       TEST_INFO("============================================================");
-      for (int childId = 0; childId < this->numActiveChildren; ++childId) {
+      for (int childId = 0; childId < NumActiveChildren(); ++childId) {
         TEST_INFO(" Child %02d: processID: %d", childId, childList[childId]->pid);
       }
       TEST_INFO("============================================================");
@@ -441,16 +655,16 @@ namespace RcclUnitTesting
       scanf("%*c");
     }
 
-    // Determine number of unique GPUs being used.
-    std::set<int> unique_devices;
-    for (auto a:  this->rankToDeviceMap)
-      unique_devices.insert(a);
-    bool useMulti = unique_devices.size() < this->rankToDeviceMap.size() ? true : false;
+    // Use the MultiRank interfaces when some GPU hosts more than one rank.
+    std::set<int> uniqueDevices;
+    for (auto const& deviceIds : deviceIdsPerProcess)
+      uniqueDevices.insert(deviceIds.begin(), deviceIds.end());
+    bool const useMulti = static_cast<int>(uniqueDevices.size()) < NumActiveRanks();
 
     // Tell first rank to get ncclUniqueId
     int getIdCmd = TestBedChild::CHILD_GET_UNIQUE_ID;
     PIPE_WRITE(0, getIdCmd);
-    PIPE_CHECK(0);
+    PIPE_CHECK(0, TestBedChild::CHILD_GET_UNIQUE_ID);
 
     // Receive back unique ID from first rank
     ncclUniqueId id;
@@ -458,8 +672,9 @@ namespace RcclUnitTesting
 
     // Send InitComms command to each active child process
     int const cmd = TestBedChild::CHILD_INIT_COMMS;
+    int const numRanks = NumActiveRanks();
     int rankOffset = 0;
-    for (int childId = 0; childId < this->numActiveChildren; ++childId)
+    for (int childId = 0; childId < NumActiveChildren(); ++childId)
     {
       if (ev.verbose) TEST_INFO("Sending InitComm event to child %d", childId);
       PIPE_WRITE(childId, cmd);
@@ -468,7 +683,7 @@ namespace RcclUnitTesting
       PIPE_WRITE(childId, id);
 
       // Send total number of ranks to child process
-      PIPE_WRITE(childId, this->numActiveRanks);
+      PIPE_WRITE(childId, numRanks);
 
       // Send the rank offset for this child process
       PIPE_WRITE(childId, rankOffset);
@@ -503,10 +718,7 @@ namespace RcclUnitTesting
 
     // Wait for child acknowledgement
     // This is done after previous loop to avoid deadlock as every rank needs to enter ncclInitCommRank
-    std::vector<int> ackChildIds;
-    for (int childId = 0; childId < this->numActiveChildren; ++childId)
-      ackChildIds.push_back(childId);
-    CollectAcks(ackChildIds);
+    CollectAcks(TestBedChild::CHILD_INIT_COMMS, AllChildIds(), OnChildFailure::StopIfOwed);
     InteractiveWait("Finishing InitComms");
   }
 
@@ -533,11 +745,15 @@ namespace RcclUnitTesting
                                   int             const streamIdx)
   {
     InteractiveWait("Starting SetCollectiveArgs");
-    // Build list of ranks this applies to (-1 for rank means to set for all)
     std::vector<int> rankList;
-    for (int i = 0; i < this->numActiveRanks; ++i)
-      if (rank == -1 || rank == i) rankList.push_back(i);
+    if (!SelectRanks(rank, rankList)) return;
 
+    if (groupId < 0 || groupId >= this->numGroupCalls ||
+        groupId >= static_cast<int>(this->numStreamsPerGroup.size()))
+    {
+      FAIL() << "SetCollectiveArgs group " << groupId << " is not active (" << this->numGroupCalls
+             << " group calls)";
+    }
     if (streamIdx < 0 || streamIdx >= this->numStreamsPerGroup[groupId])
     {
       TEST_ERROR("StreamIdx for group %d collective %d is out of bounds (%d/%d):", groupId, collId, streamIdx, numStreamsPerGroup[groupId]);
@@ -558,47 +774,112 @@ namespace RcclUnitTesting
       FAIL();
     }
 
-    // Loop over all ranks and send CollectiveArgs to appropriate child process
-    int const cmd = TestBedChild::CHILD_SET_COLL_ARGS;
-    for (auto currRank : rankList)
-    {
-      int const childId = rankToChildMap[currRank];
-      PIPE_WRITE(childId, cmd);
-      PIPE_WRITE(childId, currRank);
-      PIPE_WRITE(childId, collId);
-      PIPE_WRITE(childId, groupId);
-      PIPE_WRITE(childId, funcType);
-      PIPE_WRITE(childId, dataType);
-      PIPE_WRITE(childId, numInputElements);
-      PIPE_WRITE(childId, numOutputElements);
-      PIPE_WRITE(childId, streamIdx);
-      PIPE_WRITE(childId, optionalArgs);
-      PIPE_CHECK(childId);
-    }
+    SendToRanks(TestBedChild::CHILD_SET_COLL_ARGS, {groupId}, rankList, collId, OnChildFailure::Report,
+                CommandMessage() << funcType << dataType << numInputElements << numOutputElements
+                                 << streamIdx << optionalArgs);
     InteractiveWait("Finishing SetCollectiveArgs");
   }
 
-  void TestBed::CollectAcks(std::vector<int> const& childIds, bool* allSucceeded)
+  void TestBed::CollectAcks(int const command, std::vector<int> const& childIds,
+                            OnChildFailure const onFailure, bool* allSucceeded)
   {
     if (allSucceeded) *allSucceeded = false;
+    char const* const commandName = TestBedChild::CommandName(command);
 
-    // Read every acknowledgement before failing: stopping at the first failure
-    // leaves the remaining acks queued, and the next command on those children
-    // would consume them as its own.
+    // Drain every ack before failing, or the next command reads a stale one. Arrival
+    // order lets a failure be seen while an earlier child is blocked on the failed one.
+    using Clock = std::chrono::steady_clock;
+    std::map<int, int> pendingAcks;
+    for (int childId : childIds) ++pendingAcks[childId];
+    int const replyTimeoutSec = ChildReplyTimeoutSec();
+    auto const replyDeadline = Clock::now() + std::chrono::seconds(replyTimeoutSec);
     int numFailed = 0;
-    for (int childId : childIds)
+    int firstFailedChild = -1;
+    while (!pendingAcks.empty())
     {
-      int response = 0;
-      PIPE_READ(childId, response);
-      if (response != TEST_SUCCESS)
+      // Watch every active child for a hangup: a dead peer can leave a pending
+      // child blocked forever. Only pending children are read.
+      std::vector<pollfd> fds;
+      std::vector<int> fdChildIds;
+      for (int c = 0; c < static_cast<int>(childList.size()); ++c)
       {
-        TEST_ERROR("Child %d reports failure", childId);
-        ++numFailed;
+        if (childList[c] == nullptr || childList[c]->parentReadFd < 0) continue;
+        fds.push_back({childList[c]->parentReadFd, static_cast<short>(pendingAcks.count(c) ? POLLIN : 0), 0});
+        fdChildIds.push_back(c);
       }
+      for (auto const& pending : pendingAcks)
+      {
+        if (std::find(fdChildIds.begin(), fdChildIds.end(), pending.first) != fdChildIds.end()) continue;
+        TEST_ERROR("Child %d has no pipe to read its acknowledgement from", pending.first);
+        FAIL() << AbandonChildren(pending.first);
+      }
+
+      int const pollResult = poll(fds.data(), fds.size(), PollTimeoutMs(replyTimeoutSec, replyDeadline));
+      if (pollResult < 0)
+      {
+        if (errno == EINTR) continue;
+        TEST_ERROR("poll on child pipes failed: %s", strerror(errno));
+        FAIL() << AbandonChildren(pendingAcks.begin()->first);
+      }
+      if (pollResult == 0)
+      {
+        int const stuckChild = pendingAcks.begin()->first;
+        TEST_ERROR("Child %d did not reply within %d s (UT_CHILD_TIMEOUT_S)", stuckChild, replyTimeoutSec);
+        FAIL() << AbandonChildren(stuckChild, /*waitForExit=*/false);
+      }
+
+      for (size_t i = 0; i < fds.size(); ++i)
+      {
+        if (fds[i].revents == 0) continue;
+        int const childId = fdChildIds[i];
+        if (!pendingAcks.count(childId))
+        {
+          TEST_ERROR("Child %d pipe closed while waiting for child %d", childId, pendingAcks.begin()->first);
+          FAIL() << AbandonChildren(childId);
+        }
+        TestBedChild::Reply reply = {};
+        ssize_t const retval = RcclUnitTesting::safe_pipe_read(fds[i].fd, &reply, sizeof(reply));
+        if (retval != static_cast<ssize_t>(sizeof(reply)))
+        {
+          ReportReadFailure(childId, retval, sizeof(reply));
+          FAIL() << AbandonChildren(childId);
+        }
+        std::string const mismatch = ReplyMismatch(childList[childId]->replySeq, reply, command);
+        if (!mismatch.empty())
+        {
+          TEST_ERROR("Child %d %s", childId, mismatch.c_str());
+          FAIL() << AbandonChildren(childId, /*waitForExit=*/false, kOutOfSequence);
+        }
+        if (--pendingAcks[childId] == 0) pendingAcks.erase(childId);
+        if (reply.status != TEST_SUCCESS)
+        {
+          TEST_ERROR("Child %d reports failure", childId);
+          if (numFailed++ == 0) firstFailedChild = childId;
+          // Children still owing an ack may be blocked on this one and cannot
+          // read an abort request; stopping the workers is the only way out.
+          if (onFailure != OnChildFailure::Report && !pendingAcks.empty())
+          {
+            std::string waiting;
+            for (auto const& pending : pendingAcks)
+            {
+              waiting += (waiting.empty() ? "" : ", ") + std::to_string(pending.first);
+            }
+            TEST_ERROR("Not waiting for child(ren) %s after child %d failed", waiting.c_str(), childId);
+            FAIL() << AbandonChildren(childId, /*waitForExit=*/false, "reported failure");
+          }
+        }
+      }
+    }
+    if (numFailed > 0 && onFailure == OnChildFailure::StopAlways)
+    {
+      TEST_ERROR("%s: work queued on the other children waits on child %d", commandName, firstFailedChild);
+      FAIL() << AbandonChildren(firstFailedChild, /*waitForExit=*/false, "reported failure");
     }
     if (numFailed > 0)
     {
-      FAIL() << numFailed << " of " << childIds.size() << " child acknowledgements reported failure";
+      this->childFailed = true;
+      FAIL() << commandName << ": " << numFailed << " of " << childIds.size()
+             << " child acknowledgements reported failure";
     }
     if (allSucceeded) *allSucceeded = true;
   }
@@ -611,42 +892,12 @@ namespace RcclUnitTesting
                                     bool   const userRegistered)
   {
     InteractiveWait("Starting AllocateMemInternal");
+    std::vector<int> rankList, groupList;
+    if (!SelectRanks(rank, rankList) || !SelectGroups(groupId, groupList)) return false;
 
-    // Build list of ranks this applies to (-1 for rank means to set for all)
-    std::vector<int> rankList;
-    for (int i = 0; i < this->numActiveRanks; ++i)
-      if (rank == -1 || rank == i) rankList.push_back(i);
-
-    // Build list of groups this applies to (-1 for groupId means to set for all)
-    std::vector<int> groupList;
-    for (int i = 0; i < this->numGroupCalls; ++i)
-      if (groupId == -1 || groupId == i) groupList.push_back(i);
-
-    // Loop over all ranks and send allocation command to appropriate child process.
-    // The lambda confines the early return of the ASSERT-based PIPE_WRITE.
-    bool allocated = false;
-    [&]()
-    {
-      int const cmd = TestBedChild::CHILD_ALLOCATE_MEM;
-      std::vector<int> ackChildIds;
-      for (auto currGroup : groupList) {
-        for (auto currRank : rankList)
-        {
-          int const childId = rankToChildMap[currRank];
-          PIPE_WRITE(childId, cmd);
-          PIPE_WRITE(childId, currRank);
-          PIPE_WRITE(childId, collId);
-          PIPE_WRITE(childId, inPlace);
-          PIPE_WRITE(childId, useManagedMem);
-          PIPE_WRITE(childId, userRegistered);
-          PIPE_WRITE(childId, currGroup);
-          ackChildIds.push_back(childId);
-        }
-      }
-      // Each CHILD_ALLOCATE_MEM command produces one acknowledgement. Read one
-      // acknowledgement from the child that received that command.
-      CollectAcks(ackChildIds, &allocated);
-    }();
+    bool const allocated = SendToRanks(TestBedChild::CHILD_ALLOCATE_MEM, groupList, rankList, collId,
+                                       OnChildFailure::Report,
+                                       CommandMessage() << inPlace << useManagedMem << userRegistered);
     InteractiveWait("Finishing AllocateMemInternal");
     return allocated;
   }
@@ -656,43 +907,30 @@ namespace RcclUnitTesting
                                     int    const rank)
   {
     InteractiveWait("Starting RegisterMemInternal");
-    // Build list of ranks this applies to (-1 for rank means to set for all)
-    std::vector<int> rankList;
-    for (int i = 0; i < this->numActiveRanks; ++i)
-      if (rank == -1 || rank == i) rankList.push_back(i);
-
-    // Build list of groups this applies to (-1 for groupId means to set for all)
-    std::vector<int> groupList;
-    for (int i = 0; i < this->numGroupCalls; ++i)
-      if (groupId == -1 || groupId == i) groupList.push_back(i);
+    std::vector<int> rankList, groupList;
+    if (!SelectRanks(rank, rankList) || !SelectGroups(groupId, groupList)) return;
 
     // Group selected ranks by child so each child can register all of its
     // selected local ranks in one grouped RCCL call.
-    std::vector<std::vector<int>> ranksPerChild(this->numActiveChildren);
-    for (int currRank : rankList)
-      ranksPerChild[rankToChildMap[currRank]].push_back(currRank);
+    std::vector<std::vector<int>> const ranksPerChild = RanksPerChild(rankList);
+    std::vector<int> const childIds = ChildrenWithRanks(ranksPerChild);
 
+    // Symmetric-window registration is collective over the comm, so peers wait on each other.
+    OnChildFailure const registrationFailure = this->memAllocType == MEM_ALLOC_SYMMETRIC_WIN
+                                               ? OnChildFailure::StopIfOwed : OnChildFailure::Report;
     int const regCmd = TestBedChild::CHILD_REGISTER_MEM;
     for (auto currGroup : groupList) {
       // Send to all participating children before waiting so collective
       // symmetric-window registration can make progress across processes.
-      for (int childId = 0; childId < this->numActiveChildren; ++childId) {
-        if (ranksPerChild[childId].empty()) continue;
+      for (int const childId : childIds) {
         PIPE_WRITE(childId, regCmd);
         PIPE_WRITE(childId, currGroup);
         PIPE_WRITE(childId, collId);
-        int const numRanks = static_cast<int>(ranksPerChild[childId].size());
-        PIPE_WRITE(childId, numRanks);
-        for (int currRank : ranksPerChild[childId])
-          PIPE_WRITE(childId, currRank);
+        PIPE_WRITE_VEC(childId, ranksPerChild[childId]);
       }
 
-      std::vector<int> ackChildIds;
-      for (int childId = 0; childId < this->numActiveChildren; ++childId) {
-        if (!ranksPerChild[childId].empty()) ackChildIds.push_back(childId);
-      }
       bool allAcked = false;
-      CollectAcks(ackChildIds, &allAcked);
+      CollectAcks(TestBedChild::CHILD_REGISTER_MEM, childIds, registrationFailure, &allAcked);
       if (!allAcked) return;
     }
     InteractiveWait("Finishing RegisterMemInternal");
@@ -726,32 +964,11 @@ namespace RcclUnitTesting
                             CollFuncPtr const prepDataFunc)
   {
     InteractiveWait("Starting PrepareData");
-    // Build list of ranks this applies to (-1 for rank means to set for all)
-    std::vector<int> rankList;
-    for (int i = 0; i < this->numActiveRanks; ++i)
-      if (rank == -1 || rank == i) rankList.push_back(i);
+    std::vector<int> rankList, groupList;
+    if (!SelectRanks(rank, rankList) || !SelectGroups(groupId, groupList)) return;
 
-    // Build list of groups this applies to (-1 for groupId means to set for all)
-    std::vector<int> groupList;
-    for (int i = 0; i < this->numGroupCalls; ++i)
-      if (groupId == -1 || groupId == i) groupList.push_back(i);
-
-    // Loop over all ranks and send prepare data command to appropriate child process
-    int const cmd = TestBedChild::CHILD_PREPARE_DATA;
-    intptr_t const prepDataFuncOffset = CollFuncPtrToOffset(prepDataFunc);
-    for (auto currGroup : groupList)
-    {
-      for (auto currRank : rankList)
-      {
-        int const childId = rankToChildMap[currRank];
-        PIPE_WRITE(childId, cmd);
-        PIPE_WRITE(childId, currRank);
-        PIPE_WRITE(childId, currGroup);
-        PIPE_WRITE(childId, collId);
-        PIPE_WRITE(childId, prepDataFuncOffset);
-        PIPE_CHECK(childId);
-      }
-    }
+    SendToRanks(TestBedChild::CHILD_PREPARE_DATA, groupList, rankList, collId, OnChildFailure::Report,
+                CommandMessage() << CollFuncPtrToOffset(prepDataFunc));
     InteractiveWait("Finishing PrepareData");
   }
 
@@ -763,48 +980,34 @@ namespace RcclUnitTesting
     int const cmd = TestBedChild::CHILD_EXECUTE_COLL;
     ++TestBed::NumTestsRun();
 
-    std::vector<std::vector<int>> ranksPerChild(this->numActiveChildren);
-    for (int rank = 0; rank < currentRanks.size(); ++rank)
+    for (int const currRank : currentRanks)
     {
-      if (currentRanks[rank] < 0 || currentRanks[rank] >= this->numActiveRanks)
+      if (currRank < 0 || currRank >= NumActiveRanks())
       {
-        FAIL() << "ExecuteCollectives rank " << currentRanks[rank] << " is not active ("
-               << this->numActiveRanks << " active ranks)";
+        FAIL() << "ExecuteCollectives rank " << currRank << " is not active ("
+               << NumActiveRanks() << " active ranks)";
       }
-      ranksPerChild[rankToChildMap[currentRanks[rank]]].push_back(rank);
     }
-
-    // Build list of groups this applies to (-1 for groupId means to set for all)
     std::vector<int> groupList;
-    for (int i = 0; i < this->numGroupCalls; ++i)
-      if (groupId == -1 || groupId == i) groupList.push_back(i);
+    if (!SelectGroups(groupId, groupList)) return;
 
+    // An empty currentRanks runs every rank.
+    std::vector<int> const childIds = currentRanks.empty() ? AllChildIds()
+                                                           : ChildrenWithRanks(RanksPerChild(currentRanks));
     for (auto currGroup : groupList) {
-      // Send ExecuteColl command to each active child process
-      for (int childId = 0; childId < this->numActiveChildren; ++childId)
+      // Send ExecuteColl command to each participating child process
+      for (int const childId : childIds)
       {
-        if ((currentRanks.size() == 0) || (ranksPerChild[childId].size() > 0))
-        {
-          InteractiveWait("Starting ExecuteCollectives for child " + std::to_string(childId));
-          PIPE_WRITE(childId, cmd);
-          PIPE_WRITE(childId, ev.timeoutUs);
-          PIPE_WRITE(childId, currGroup);
-          PIPE_WRITE(childId, useHipGraph);
-          int tempCurrentRanks = currentRanks.size();
-          PIPE_WRITE(childId, tempCurrentRanks);
-          for (int rank = 0; rank < currentRanks.size(); ++rank){
-            PIPE_WRITE(childId, currentRanks[rank]);
-          }
-        }
+        InteractiveWait("Starting ExecuteCollectives for child " + std::to_string(childId));
+        PIPE_WRITE(childId, cmd);
+        PIPE_WRITE(childId, ev.timeoutUs);
+        PIPE_WRITE(childId, currGroup);
+        PIPE_WRITE(childId, useHipGraph);
+        PIPE_WRITE_VEC(childId, currentRanks);
       }
 
-      std::vector<int> ackChildIds;
-      for (int childId = 0; childId < this->numActiveChildren; ++childId)
-      {
-        if ((currentRanks.size() == 0) || (ranksPerChild[childId].size() > 0)) ackChildIds.push_back(childId);
-      }
       bool allAcked = false;
-      CollectAcks(ackChildIds, &allAcked);
+      CollectAcks(TestBedChild::CHILD_EXECUTE_COLL, childIds, OnChildFailure::StopIfOwed, &allAcked);
       if (!allAcked) return;
     }
 
@@ -814,63 +1017,35 @@ namespace RcclUnitTesting
   void TestBed::ValidateResults(bool& isCorrect, int const groupId, int const collId, int const rank)
   {
     InteractiveWait("Starting ValidateResults");
+    isCorrect = false;
+    std::vector<int> rankList, groupList;
+    if (!SelectRanks(rank, rankList) || !SelectGroups(groupId, groupList)) return;
 
-    // Build list of ranks this applies to (-1 for rank means to set for all)
-    std::vector<int> rankList;
-    for (int i = 0; i < this->numActiveRanks; ++i)
-      if (rank == -1 || rank == i) rankList.push_back(i);
-
-    // Build list of groups this applies to (-1 for groupId means to set for all)
-    std::vector<int> groupList;
-    for (int i = 0; i < this->numGroupCalls; ++i)
-      if (groupId == -1 || groupId == i) groupList.push_back(i);
-
-    int const cmd = TestBedChild::CHILD_VALIDATE_RESULTS;
-
-    isCorrect = true;
-    for (auto currGroup : groupList)
-    {
-      // Send ValidateResults command to each active child process
-      for (auto currRank : rankList)
-      {
-        int const childId = rankToChildMap[currRank];
-        PIPE_WRITE(childId, cmd);
-        PIPE_WRITE(childId, currRank);
-        PIPE_WRITE(childId, currGroup);
-        PIPE_WRITE(childId, collId);
-
-        int response = 0;
-        PIPE_READ(childId, response);
-        isCorrect &= (response == TEST_SUCCESS);
-      }
-    }
-
-    ASSERT_EQ(isCorrect, true) << "Output does not match expected";
-
+    isCorrect = SendToRanks(TestBedChild::CHILD_VALIDATE_RESULTS, groupList, rankList, collId,
+                            OnChildFailure::Report);
     InteractiveWait("Finishing ValidateResults");
   }
 
   void TestBed::LaunchGraphs(int const groupId)
   {
     InteractiveWait("Starting LaunchGraphs");
-
-    // Build list of groups this applies to (-1 for groupId means to set for all)
     std::vector<int> groupList;
-    for (int i = 0; i < this->numGroupCalls; ++i)
-      if (groupId == -1 || groupId == i) groupList.push_back(i);
+    if (!SelectGroups(groupId, groupList)) return;
 
+    // A launch only queues the graph, so the replies arrive without peers waiting on
+    // each other. But the launched graphs wait on any child that failed to launch,
+    // and no later command could complete, so a failed launch stops every worker.
     int const cmd = TestBedChild::CHILD_LAUNCH_GRAPHS;
     for (auto currGroup : groupList)
     {
-      for (int childId = 0; childId < this->numActiveChildren; ++childId)
+      for (int childId = 0; childId < NumActiveChildren(); ++childId)
       {
-        // Send LaunchGraphs command to each active child process
         PIPE_WRITE(childId, cmd);
         PIPE_WRITE(childId, currGroup);
-
-        // Wait for child acknowledgement
-        PIPE_CHECK(childId);
       }
+      bool allLaunched = false;
+      CollectAcks(TestBedChild::CHILD_LAUNCH_GRAPHS, AllChildIds(), OnChildFailure::StopAlways, &allLaunched);
+      if (!allLaunched) return;
     }
 
     InteractiveWait("Finishing LaunchGraphs");
@@ -879,64 +1054,37 @@ namespace RcclUnitTesting
   void TestBed::DeallocateMem(int const groupId, int const collId, int const rank)
   {
     InteractiveWait("Starting DeallocateMem");
-
-    // Build list of ranks this applies to (-1 for rank means to set for all)
-    std::vector<int> rankList;
-    for (int i = 0; i < this->numActiveRanks; ++i)
-      if (rank == -1 || rank == i) rankList.push_back(i);
-
-    // Build list of groups this applies to (-1 for groupId means to set for all)
-    std::vector<int> groupList;
-    for (int i = 0; i < this->numGroupCalls; ++i)
-      if (groupId == -1 || groupId == i) groupList.push_back(i);
+    std::vector<int> rankList, groupList;
+    if (!SelectRanks(rank, rankList) || !SelectGroups(groupId, groupList)) return;
 
     // Symmetric registration is grouped across every rank owned by a child.
     // Mirror that shape during teardown, and finish deregistration on every
     // child before any backing allocation is freed.
-    std::vector<std::vector<int>> ranksPerChild(this->numActiveChildren);
-    for (int currRank : rankList)
-      ranksPerChild[rankToChildMap[currRank]].push_back(currRank);
+    std::vector<std::vector<int>> const ranksPerChild = RanksPerChild(rankList);
+    std::vector<int> const childIds = ChildrenWithRanks(ranksPerChild);
 
+    OnChildFailure const registrationFailure = this->memAllocType == MEM_ALLOC_SYMMETRIC_WIN
+                                               ? OnChildFailure::StopIfOwed : OnChildFailure::Report;
     int const deregCmd = TestBedChild::CHILD_DEREGISTER_MEM;
-    int const deallocCmd = TestBedChild::CHILD_DEALLOCATE_MEM;
     for (auto currGroup : groupList) {
       // Phase 1: deregister all selected windows/handles. Send every child its
       // command before waiting so any collective registration teardown can
       // make progress across processes.
-      for (int childId = 0; childId < this->numActiveChildren; ++childId) {
-        if (ranksPerChild[childId].empty()) continue;
+      for (int const childId : childIds) {
         PIPE_WRITE(childId, deregCmd);
         PIPE_WRITE(childId, currGroup);
         PIPE_WRITE(childId, collId);
-        int const numRanks = static_cast<int>(ranksPerChild[childId].size());
-        PIPE_WRITE(childId, numRanks);
-        for (int currRank : ranksPerChild[childId])
-          PIPE_WRITE(childId, currRank);
+        PIPE_WRITE_VEC(childId, ranksPerChild[childId]);
       }
 
-      std::vector<int> deregAckChildIds;
-      for (int childId = 0; childId < this->numActiveChildren; ++childId)
-        if (!ranksPerChild[childId].empty()) deregAckChildIds.push_back(childId);
-
       bool allDeregistered = false;
-      CollectAcks(deregAckChildIds, &allDeregistered);
+      CollectAcks(TestBedChild::CHILD_DEREGISTER_MEM, childIds, registrationFailure, &allDeregistered);
       if (!allDeregistered) return;
 
       // Phase 2: now no selected communicator retains a window/registration
       // over these buffers, so their backing allocations can be released.
-      std::vector<int> deallocAckChildIds;
-      for (auto currRank : rankList)
-      {
-        int const childId = rankToChildMap[currRank];
-        PIPE_WRITE(childId, deallocCmd);
-        PIPE_WRITE(childId, currRank);
-        PIPE_WRITE(childId, currGroup);
-        PIPE_WRITE(childId, collId);
-        deallocAckChildIds.push_back(childId);
-      }
-
-      // Each CHILD_DEALLOCATE_MEM command produces one acknowledgement.
-      CollectAcks(deallocAckChildIds);
+      if (!SendToRanks(TestBedChild::CHILD_DEALLOCATE_MEM, {currGroup}, rankList, collId, OnChildFailure::Report))
+        return;
     }
 
     InteractiveWait("Finishing DeallocateMem");
@@ -947,15 +1095,15 @@ namespace RcclUnitTesting
     isSupported = false;
     int const cmd = TestBedChild::CHILD_QUERY_SYMMETRIC;
     bool allSupported = true;
-    for (int childId = 0; childId < this->numActiveChildren; ++childId)
+    for (int childId = 0; childId < NumActiveChildren(); ++childId)
     {
       PIPE_WRITE(childId, cmd);
-      PIPE_CHECK(childId);
+      PIPE_CHECK(childId, TestBedChild::CHILD_QUERY_SYMMETRIC);
       int childSupported = 0;
       PIPE_READ(childId, childSupported);
       if (!childSupported) allSupported = false;
     }
-    isSupported = allSupported && this->numActiveChildren > 0;
+    isSupported = allSupported && NumActiveChildren() > 0;
   }
 
   void TestBed::DestroyComms()
@@ -963,6 +1111,14 @@ namespace RcclUnitTesting
     InteractiveWait("Starting DestroyComms");
 
     int const cmd = TestBedChild::CHILD_DESTROY_COMMS;
+    // After any child failure, healthy ranks must abort too: finalizing would
+    // block them in the intranode barrier waiting for the failed rank.
+    int const abortComms = this->childFailed ? 1 : 0;
+    if (abortComms && NumActiveChildren() > 0)
+    {
+      TEST_WARN("DestroyComms: aborting communicators on all %d children after a child failure",
+                NumActiveChildren());
+    }
 
     // Send DestroyComms command to all active child processes first so they can
     // work in parallel, then collect acknowledgements in a second pass. Run the
@@ -977,15 +1133,13 @@ namespace RcclUnitTesting
       // the common (non-verbose) path, which is hot in the test suite.
       Clock::time_point sendStart, waitStart;
       if (ev.verbose) sendStart = Clock::now();
-      for (int childId = 0; childId < this->numActiveChildren; ++childId)
+      for (int childId = 0; childId < NumActiveChildren(); ++childId)
       {
         PIPE_WRITE(childId, cmd);
+        PIPE_WRITE(childId, abortComms);
       }
       if (ev.verbose) waitStart = Clock::now();
-      std::vector<int> ackChildIds;
-      for (int childId = 0; childId < this->numActiveChildren; ++childId)
-        ackChildIds.push_back(childId);
-      CollectAcks(ackChildIds);
+      CollectAcks(TestBedChild::CHILD_DESTROY_COMMS, AllChildIds(), OnChildFailure::StopIfOwed);
 
       if (ev.verbose)
       {
@@ -994,7 +1148,7 @@ namespace RcclUnitTesting
         long long const sendMs = duration_cast<milliseconds>(waitStart - sendStart).count();
         long long const waitMs = duration_cast<milliseconds>(Clock::now() - waitStart).count();
         TEST_INFO("DestroyComms: %d children, send %lld ms, parallel teardown %lld ms",
-                  this->numActiveChildren, sendMs, waitMs);
+                  NumActiveChildren(), sendMs, waitMs);
       }
     }();
 
@@ -1003,15 +1157,14 @@ namespace RcclUnitTesting
       // Pool mode: comms/streams were freed on the workers, but keep the workers alive for
       // the next config (their device-code kernels stay resident). Drop the borrowed refs;
       // the pool keeps ownership. Finalize() (between sweeps / at teardown) reaps the pool.
-      this->childList.clear();
-      this->numActiveChildren = 0;
-      this->numActiveRanks = 0;
+      ResetActiveConfig();
     }
     else
     {
       // Classic / fork-fresh: reap the per-config children this call owns.
       TeardownOwnedChildList();
     }
+    this->childFailed = false;
 
     InteractiveWait("Finishing DestroyComms");
   }
@@ -1025,16 +1178,13 @@ namespace RcclUnitTesting
     {
       // Send DestroyGraphs command to all active child processes first so they
       // can work in parallel, then collect acknowledgements in a second pass.
-      for (int childId = 0; childId < this->numActiveChildren; ++childId)
+      for (int childId = 0; childId < NumActiveChildren(); ++childId)
       {
         PIPE_WRITE(childId, cmd);
         PIPE_WRITE(childId, currGroup);
       }
-      std::vector<int> ackChildIds;
-      for (int childId = 0; childId < this->numActiveChildren; ++childId)
-        ackChildIds.push_back(childId);
       bool allAcked = false;
-      CollectAcks(ackChildIds, &allAcked);
+      CollectAcks(TestBedChild::CHILD_DESTROY_GRAPHS, AllChildIds(), OnChildFailure::Report, &allAcked);
       if (!allAcked) return;
     }
 
@@ -1052,9 +1202,9 @@ namespace RcclUnitTesting
 
   void TestBed::TeardownOwnedChildList()
   {
-    // Only reaps children that childList OWNS (classic / fork-fresh path). In pool mode
-    // childList holds borrowed pool refs (cleared by DestroyComms), so this is a no-op.
-    if (this->configUsedPool || this->numActiveChildren == 0)
+    // Only reaps the fork-fresh children of the active config. A pool config
+    // owns none (DestroyComms drops its borrowed refs), so this is a no-op.
+    if (this->ownedChildren.empty())
       return;
 
     InteractiveWait("Starting Finalize");
@@ -1063,11 +1213,8 @@ namespace RcclUnitTesting
     // HIP/RCCL failure. Teardown must still close every pipe, reap every child,
     // and restore the empty-childList invariant.
     int const cmd = TestBedChild::CHILD_STOP;
-    for (int childId = 0; childId < this->numActiveChildren; ++childId)
+    for (auto const& child : this->ownedChildren)
     {
-      TestBedChild* child = childList[childId];
-      if (child == nullptr)
-        continue;
       if (child->pid > 0 && child->parentWriteFd >= 0)
         (void)RcclUnitTesting::safe_pipe_write(child->parentWriteFd, &cmd, sizeof(cmd));
       if (child->parentWriteFd >= 0)
@@ -1077,20 +1224,18 @@ namespace RcclUnitTesting
       }
     }
 
-    // Wait for processes to stop
-    for (int childId = 0; childId < this->numActiveChildren; ++childId)
+    // Wait for processes to stop. Children tear down in parallel, so they share one deadline.
+    int const timeoutSec = ChildReplyTimeoutSec();
+    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(timeoutSec);
+    for (int childId = 0; childId < static_cast<int>(this->ownedChildren.size()); ++childId)
     {
-      TestBedChild* child = childList[childId];
-      if (child == nullptr)
-        continue;
+      TestBedChild* const child = this->ownedChildren[childId].get();
       int returnVal = 0;
       pid_t waitResult = -1;
       if (child->pid > 0)
       {
-        do
-        {
-          waitResult = waitpid(child->pid, &returnVal, 0);
-        } while (waitResult == -1 && errno == EINTR);
+        waitResult = ReapChild(child->pid, &returnVal, timeoutSec == 0, deadline);
+        child->pid = -1;
       }
       if (waitResult > 0 && WIFSIGNALED(returnVal))
       {
@@ -1100,17 +1245,11 @@ namespace RcclUnitTesting
       {
         TEST_ERROR("Child process %d exited with code %d", childId, WEXITSTATUS(returnVal));
       }
-      // Only close the read end AFTER the child process is dead
-      if (child->parentReadFd >= 0)
-        close(child->parentReadFd);
-      delete child;
     }
+    // Only close the read ends AFTER the child processes are dead
+    this->ownedChildren.clear();
 
-    childList.clear();
-
-    // Reset bookkeeping
-    this->numActiveChildren = 0;
-    this->numActiveRanks = 0;
+    ResetActiveConfig();
 
     InteractiveWait("Finishing Finalize");
   }
@@ -1120,9 +1259,21 @@ namespace RcclUnitTesting
     if (this->poolChildren.empty())
       return;
 
+    // A warming worker writes its reply before it reads STOP; collect it so a
+    // failed warm-up is reported and the reply does not hit a closed pipe.
+    auto const warmupDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(ChildReplyTimeoutSec());
+    for (int worker = 0; worker < (int)this->poolWorkerState.size(); ++worker)
+    {
+      if (this->poolChildren[worker] != nullptr &&
+          this->poolWorkerState[worker] == PoolWorkerState::Warming)
+      {
+        (void)FinishWarmup(worker, warmupDeadline);
+      }
+    }
+
     // Best-effort stop (avoid the ASSERT-based PIPE_WRITE during teardown), then reap.
     int const cmd = TestBedChild::CHILD_STOP;
-    for (TestBedChild* c : this->poolChildren)
+    for (auto const& c : this->poolChildren)
     {
       if (!c)
       {
@@ -1134,7 +1285,9 @@ namespace RcclUnitTesting
         (void)RcclUnitTesting::safe_pipe_write(c->parentWriteFd, &cmd, sizeof(cmd));
       c->ClosePipes();
     }
-    for (TestBedChild* c : this->poolChildren)
+    int const timeoutSec = ChildReplyTimeoutSec();
+    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(timeoutSec);
+    for (auto const& c : this->poolChildren)
     {
       if (!c)
       {
@@ -1144,11 +1297,8 @@ namespace RcclUnitTesting
       if (c->pid > 0)
       {
         int returnVal = 0;
-        pid_t waitResult = -1;
-        do
-        {
-          waitResult = waitpid(c->pid, &returnVal, 0);
-        } while (waitResult == -1 && errno == EINTR);
+        pid_t const waitResult = ReapChild(c->pid, &returnVal, timeoutSec == 0, deadline);
+        c->pid = -1;
         if (waitResult > 0 && WIFSIGNALED(returnVal))
         {
           TEST_ERROR("Pool worker %d killed by signal %d", c->childId, WTERMSIG(returnVal));
@@ -1158,13 +1308,11 @@ namespace RcclUnitTesting
           TEST_ERROR("Pool worker %d exited with code %d", c->childId, WEXITSTATUS(returnVal));
         }
       }
-      delete c;
     }
     this->poolChildren.clear();
-    this->childList.clear();      // borrowed refs only; do not delete
+    this->poolWorkerState.clear();
     this->configUsedPool = false;
-    this->numActiveChildren = 0;
-    this->numActiveRanks = 0;
+    ResetActiveConfig();
   }
 
   TestBed::~TestBed()
@@ -1316,24 +1464,42 @@ namespace RcclUnitTesting
     int numSymmetricConfigsRun = 0;
     int numSymmetricConfigsSkipped = 0;
 
-    // Sweep over the number of ranks
+    // Sweep over the number of ranks: either single process all GPUs, or 1 process per GPU
+    struct RankConfig { int numGpus; int isMultiProcess; int ranksPerGpu; };
+    std::vector<RankConfig> rankConfigs;
     for (int numGpus : ev.GetNumGpusList())
     for (int isMultiProcess : ev.GetIsMultiProcessList())
-    for (int ranksPerGpu=1; ranksPerGpu <= ev.maxRanksPerGpu && isCorrect; ++ranksPerGpu)
+    for (int ranksPerGpu=1; ranksPerGpu <= ev.maxRanksPerGpu; ++ranksPerGpu)
     {
-      // Test either single process all GPUs, or 1 process per GPU
-      int const numChildren = isMultiProcess ? numGpus : 1;
-      int const numRanks    = numGpus*ranksPerGpu;
-      if(enableSweep == false && (numGpus < 8 || numRanks < 8)) {
+      if(enableSweep == false && (numGpus < 8 || numGpus*ranksPerGpu < 8)) {
         continue;
       }
-      const std::vector<int>& gpuPriorityOrder = ev.GetGpuPriorityOrder();
-      this->InitComms(this->GetDeviceIdsList(numChildren, numGpus, ranksPerGpu, gpuPriorityOrder),1,1,1,true,memAllocType);
+      rankConfigs.push_back({numGpus, isMultiProcess, ranksPerGpu});
+    }
+    const std::vector<int>& gpuPriorityOrder = ev.GetGpuPriorityOrder();
+    auto deviceIdsFor = [&](RankConfig const& rc) {
+      return this->GetDeviceIdsList(rc.isMultiProcess ? rc.numGpus : 1, rc.numGpus, rc.ranksPerGpu, gpuPriorityOrder);
+    };
+
+    for (size_t rcIdx = 0; rcIdx < rankConfigs.size() && isCorrect; ++rcIdx)
+    {
+      int const numGpus        = rankConfigs[rcIdx].numGpus;
+      int const isMultiProcess = rankConfigs[rcIdx].isMultiProcess;
+      int const ranksPerGpu    = rankConfigs[rcIdx].ranksPerGpu;
+      int const numRanks       = numGpus*ranksPerGpu;
+      this->InitComms(deviceIdsFor(rankConfigs[rcIdx]),1,1,1,true,memAllocType);
       if (testing::Test::HasFailure())
       {
         isCorrect = false;
         this->DestroyComms();
         continue;
+      }
+
+      // Two configs ahead: the next one alone (often single-process on warm
+      // worker 0) is too short to hide a worker's ~2 s device-code load.
+      for (size_t ahead = rcIdx + 1; ahead < rankConfigs.size() && ahead <= rcIdx + 2; ++ahead)
+      {
+        this->WarmPoolWorkers(deviceIdsFor(rankConfigs[ahead]));
       }
 
       // Symmetric sweeps only cover configurations where RCCL can select symmetric kernels
@@ -1388,7 +1554,7 @@ namespace RcclUnitTesting
                                                     &numInputElements,
                                                     &numOutputElements);
           optionalArgs.redOp = redOps[rdIdx];
-          optionalArgs.root = roots[rtIdx] % this->numActiveRanks;
+          optionalArgs.root = roots[rtIdx] % numRanks;
           // Set biasNumElements if bias is enabled
           if (optionalArgs.useBias)
           {

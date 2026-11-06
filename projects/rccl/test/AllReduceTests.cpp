@@ -5,6 +5,7 @@
  ************************************************************************/
 #include "TestBed.hpp"
 #include "CallCollectiveForked.hpp"
+#include "ScopedEnvVar.hpp"
 #include "SingleProcMemRegTestUtils.hpp"
 #include "StandaloneUtils.hpp"
 
@@ -122,11 +123,10 @@ namespace RcclUnitTesting
         std::vector<const char *>   const channelList     = {"84", "112"};
         bool                        const enableSweep     = false;
         for (auto channel : channelList) {
-          setenv("NCCL_MIN_NCHANNELS", channel, 1);
+          ScopedEnvVar minChannels("NCCL_MIN_NCHANNELS", channel);
           testBed.RunSimpleSweep(funcTypes, dataTypes, redOps, roots, numElements,
                                 inPlaceList, managedMemList, useHipGraphList, enableSweep);
           testBed.Finalize();
-          unsetenv("NCCL_MIN_NCHANNELS");
         }
       }
     }
@@ -347,7 +347,7 @@ namespace RcclUnitTesting
   {
     // Set RCCL_LOG_ROCTX=1 to enable ROCTX logging
     // Verify that ROCTX logging doesn't break functionality when enabled
-    setenv("RCCL_LOG_ROCTX", "1", 1);
+    ScopedEnvVar logRoctx("RCCL_LOG_ROCTX", "1");
 
     const int nranks = 8;
     size_t count = 2048;
@@ -360,8 +360,6 @@ namespace RcclUnitTesting
         expected[i] = i * nranks;
     }
     callCollectiveForked(nranks, ncclCollAllReduce, sendBuff, recvBuff, expected);
-
-    unsetenv("RCCL_LOG_ROCTX");
   }
 
 #ifdef RCCL_ALLREDUCE_WITH_BIAS
@@ -467,7 +465,7 @@ namespace RcclUnitTesting
                                         -1);
               testBed.AllocateMem(inPlace, useManagedMem);
               testBed.PrepareData();
-              testBed.ExecuteCollectives({}, useHipGraph);
+              testBed.ExecuteCollectives({}, -1, useHipGraph);
               testBed.ValidateResults(isCorrect);
               testBed.DeallocateMem();
           }
@@ -844,7 +842,7 @@ namespace RcclUnitTesting
   {
     TestBed testBed;
 
-    if (testBed.numDevicesAvailable < 1)
+    if (testBed.NumDevicesAvailable() < 1)
       GTEST_SKIP() << "Requires at least 1 GPU";
 
     ncclFunc_t                  const funcType      = ncclCollAllReduce;

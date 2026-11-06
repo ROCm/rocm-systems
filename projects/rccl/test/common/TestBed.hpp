@@ -8,10 +8,12 @@
 #include <map>
 #include "CollectiveArgs.hpp"
 #include "TestBedChild.hpp"
+#include "PipeUtils.hpp"
 #include "EnvVars.hpp"
 #include <gtest/gtest.h>
 #include <iomanip>
 #include <chrono>
+#include <memory>
 
 namespace RcclUnitTesting
 {
@@ -20,27 +22,16 @@ namespace RcclUnitTesting
   class TestBed
   {
   public:
-    int                        numDevicesAvailable;   // # of devices detected on node
-    std::vector<TestBedChild*> childList;             // List of child processes
-    std::vector<int>           rankToChildMap;        // Tracks which child process each rank is assigned to
-    std::vector<int>           rankToDeviceMap;       // Tracks which device each rank is assigned to
-    std::vector<int>           numCollectivesInGroup; // # of collectives to execute per group call
-    std::vector<int>           numStreamsPerGroup;    // # of different streams available per group call
-    int                        numGroupCalls;         // Total # of group calls to be executed
-    int                        numActiveChildren;     // List of active children (with usable RCCL comms)
-    int                        numActiveRanks;        // Current # of ranks in use
-    bool                       useBlocking;           // RCCL communication with blocking or non-blocking option
-    MemAllocType               memAllocType = MEM_ALLOC_HIP; // Allocation mode of the current config
-    EnvVars                    ev;                    // Environment variables
-
-    // Comm process pool: poolChildren[d] is pinned to device d; Finalize() is
-    // the pool-reset boundary (re-forks the pool with the current env).
-    bool                       poolMode;              // reuse workers across configs (UT_COMM_POOL != 0)
-    std::vector<TestBedChild*> poolChildren;          // persistent pool, index == pinned device id
-    bool                       configUsedPool;        // last InitComms served from the pool (skip Finalize in DestroyComms)
+    EnvVars ev;  // Environment variables; tests read the run's configuration here
 
     // Constructor - Creates one child process per detected GPU device that waits for further commands
     TestBed();
+    TestBed(TestBed const&) = delete;
+    TestBed& operator=(TestBed const&) = delete;
+
+    int NumActiveChildren() const { return static_cast<int>(childList.size()); }
+    int NumActiveRanks() const    { return static_cast<int>(rankToChildMap.size()); }
+    int NumDevicesAvailable() const { return numDevicesAvailable; }
 
     // Prepare TestBed with multiple group call customization
     void InitComms(std::vector<std::vector<int>> const& deviceIdsPerChild,
@@ -123,6 +114,11 @@ namespace RcclUnitTesting
     // Release the RCCL comms
     void DestroyComms();
 
+    // Pool mode (UT_COMM_WARMAHEAD): starts loading device code on the cold pool
+    // workers a later InitComms(deviceIdsPerChild) will use, without waiting.
+    // That InitComms collects the replies.
+    void WarmPoolWorkers(std::vector<std::vector<int>> const& deviceIdsPerChild);
+
     // Query whether every active rank's comm supports symmetric kernels (requires InitComms)
     void QuerySymmetricSupport(bool& isSupported);
 
@@ -132,12 +128,6 @@ namespace RcclUnitTesting
     // Explicit TestBed destructor that releases all child processes
     // No further calls to TestBed should be performed after this call
     void Finalize();
-
-    // Teardown helpers. TeardownOwnedChildList reaps the per-config fork-fresh children
-    // that childList owns (classic / pool-fallback path). TeardownPool reaps the
-    // persistent pool workers. Finalize() is the pool-reset boundary and runs both.
-    void TeardownOwnedChildList();
-    void TeardownPool();
 
     // Destructor - Calls Finalize() to release all child processes
     ~TestBed();
@@ -196,30 +186,111 @@ namespace RcclUnitTesting
                         bool                        const& enableSweep = true,
                         MemAllocType                       memAllocType = MEM_ALLOC_HIP);
 
-    // Wait for user-input if in interactive mode
-    void InteractiveWait(std::string message);
-
     // Used to track total number of calls to ExecuteCollectives()
     static int& NumTestsRun();
 
   private:
+    // Gives white-box tests access to the internals below.
+    friend class TestBedPeer;
+
+    int                        numDevicesAvailable;   // # of devices detected on node
+    std::vector<TestBedChild*> childList;             // Active child processes (with usable RCCL comms); owned by ownedChildren or poolChildren
+    std::vector<std::unique_ptr<TestBedChild>> ownedChildren; // Fork-fresh workers of the active config (empty when it uses the pool)
+    std::vector<int>           rankToChildMap;        // Child process of each active rank
+    std::vector<int>           numCollectivesInGroup; // # of collectives to execute per group call
+    std::vector<int>           numStreamsPerGroup;    // # of different streams available per group call
+    int                        numGroupCalls;         // Total # of group calls to be executed
+    bool                       useBlocking;           // RCCL communication with blocking or non-blocking option
+    MemAllocType               memAllocType = MEM_ALLOC_HIP; // Allocation mode of the current config
+
+    // Comm process pool: poolChildren[d] is pinned to device d; Finalize() is
+    // the pool-reset boundary (re-forks the pool with the current env).
+    bool                       poolMode;              // reuse workers across configs (UT_COMM_POOL != 0)
+    std::vector<std::unique_ptr<TestBedChild>> poolChildren; // persistent pool, index == pinned device id
+    // Cold: device code not loaded yet. Warming: a WARMUP reply is still unread,
+    // so nothing else may be sent to or read from that worker. Warm: loaded.
+    enum class PoolWorkerState { Cold, Warming, Warm };
+    std::vector<PoolWorkerState> poolWorkerState;     // parallel to poolChildren
+    bool                       configUsedPool;        // last InitComms served from the pool (skip Finalize in DestroyComms)
+    bool                       childFailed = false;   // a child reported failure since the last DestroyComms (abort, not finalize)
+
+    // Teardown helpers. TeardownOwnedChildList reaps ownedChildren (classic /
+    // pool-fallback path). TeardownPool reaps the persistent pool workers.
+    // Finalize() is the pool-reset boundary and runs both.
+    void TeardownOwnedChildList();
+    void TeardownPool();
+
+    // Wait for user-input if in interactive mode
+    void InteractiveWait(std::string message);
+
     // Starts a worker in a fresh process image so it never inherits HIP/HSA
     // runtime state from the test parent.
     bool SpawnChildProcess(TestBedChild* child, MemAllocType memAllocType);
 
+    // WaitForChild result when childId sent nothing within ChildReplyTimeoutSec().
+    static constexpr int kChildWaitTimedOut = -2;
+
+    // Seconds the parent waits for any single child reply (0 = no limit). Never
+    // shorter than the child's own collective timeout, and off under UT_DEBUG_PAUSE.
+    int ChildReplyTimeoutSec() const;
+
     // Blocks until childList[childId] has data (or EOF) to read. Returns the id
-    // of another active child whose pipe closed first, or -1.
+    // of another active child whose pipe closed first, kChildWaitTimedOut, or -1.
     int WaitForChild(int childId);
 
-    // Called when a child stops answering (it crashed or broke the protocol).
-    // Reports how it ended, kills and reaps every worker this TestBed owns or
-    // borrows, and resets it to no active children; the next InitComms starts
-    // fresh workers. Returns the report for the test failure message.
-    std::string AbandonChildren(int lostChildId);
+    // Kills and reaps every worker after lostChildId is lost (waitForExit: let it
+    // report its exit status first); returns the failure report.
+    std::string AbandonChildren(int lostChildId, bool waitForExit = true,
+                                char const* what = "stopped responding");
 
-    // Reads one acknowledgement from each listed child (a child may appear once
-    // per command it was sent), then fails if any reported failure.
-    void CollectAcks(std::vector<int> const& childIds, bool* allSucceeded = nullptr);
+    // Fills workers with the pool worker serving each child of deviceIdsPerChild.
+    // False when some child has no distinct live worker (fork-fresh path).
+    bool PoolWorkersFor(std::vector<std::vector<int>> const& deviceIdsPerChild,
+                        std::vector<int>& workers) const;
+
+    // Reads a Warming worker's reply by deadline; on failure removes it from the pool and fails the test.
+    bool FinishWarmup(int worker, std::chrono::steady_clock::time_point deadline);
+
+    // What a child failure means for the children still running the same command.
+    enum class OnChildFailure
+    {
+      Report,       // children are independent: read every ack, then fail the test
+      StopIfOwed,   // children wait on each other: with acks still owed, stop every worker
+      StopAlways,   // peers' queued GPU work waits on the failed child: always stop every worker
+    };
+
+    // Reads one ack to command (a TestBedChild::CHILD_* id) per listed child id (a child
+    // listed n times owes n acks) and fails the test, naming command, if any reported
+    // failure. An ack to another command, or out of order, stops all workers.
+    void CollectAcks(int command, std::vector<int> const& childIds,
+                     OnChildFailure onFailure = OnChildFailure::Report, bool* allSucceeded = nullptr);
+
+    // Writes message to a child's command pipe. A failed write stops all workers
+    // and fails the test, so false means the caller must send nothing more.
+    bool WriteToChild(int childId, CommandMessage const& message);
+
+    // Sends command, then a TestBedChild::RankTarget, then args to the child of
+    // each listed rank, once per listed group, and collects the acks. Returns
+    // whether every child succeeded.
+    bool SendToRanks(int command, std::vector<int> const& groupList, std::vector<int> const& rankList,
+                     int collId, OnChildFailure onFailure, CommandMessage const& args = CommandMessage());
+
+    // Forgets the active config's children, ranks and failure flag; owned children
+    // must already be reaped. configUsedPool still reports how that config was served.
+    void ResetActiveConfig();
+
+    // Fill ranks / groups with the selection (-1 = all active). False, with a test
+    // failure, when a specific rank / group is not active, so a mistyped target
+    // cannot turn the command into a silent no-op.
+    bool SelectRanks(int rank, std::vector<int>& ranks) const;
+    bool SelectGroups(int groupId, std::vector<int>& groups) const;
+
+    // ranks grouped by owning child, indexed by child id.
+    std::vector<std::vector<int>> RanksPerChild(std::vector<int> const& ranks) const;
+
+    // Ids of all active children / of the children that own at least one rank, ascending.
+    std::vector<int> AllChildIds() const;
+    static std::vector<int> ChildrenWithRanks(std::vector<std::vector<int>> const& ranksPerChild);
 
     // AllocateMem is split into AllocateMemInternal + RegisterMemInternal to maintain
     // compatibility with existing tests, and extend registration for symmetric memory.

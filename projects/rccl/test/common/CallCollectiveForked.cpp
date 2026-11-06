@@ -8,6 +8,9 @@
 #include "CollectiveArgs.hpp"
 #include <rccl/rccl.h>
 #include <gtest/gtest.h>
+#include <string>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #define HIPCALL(cmd)                                                                          \
     do {                                                                                      \
@@ -25,11 +28,13 @@
     if (res != ncclSuccess) {                                   \
          printf("NCCL failure %s:%d '%s'\n",                    \
             __FILE__,__LINE__,ncclGetErrorString(res));         \
+         exit(-1);                                              \
     }                                                           \
 } while(0)
 
 namespace RcclUnitTesting
 {
+static constexpr int kChildSkipped = 77;
 
 void callCollective(ncclUniqueId id, int collID, int rank, int nranks, const std::vector<int>& send, std::vector<int>& recv, bool use_managed_mem){
     switch(collID){
@@ -139,13 +144,14 @@ void callCollectiveForked(int nranks,  int collID, const std::vector<int>& sendB
       }
     };
 
+    // A child must never return into gtest: it would go on to run the rest of the suite.
     for(int r = 0; r < nranks; ++r){
       children[r] = fork();
       if(children[r] == 0){
         int ngpus = 0;
         HIPCALL(hipGetDeviceCount(&ngpus));
         if(ngpus != nranks){
-          exit(0);
+          _exit(kChildSkipped);
         }
         //child processes
         if(r == 0)
@@ -154,17 +160,44 @@ void callCollectiveForked(int nranks,  int collID, const std::vector<int>& sendB
           getNCCLidFromParent(r);
 
         callCollective(id, collID, r, nranks, sendBuff, recvBuff, use_managed_mem);
-        for(int i = 0; i < recvBuff.size(); ++i){
-          ASSERT_EQ(recvBuff[i], expected[i]);
+        int status = 0;
+        for(size_t i = 0; i < recvBuff.size(); ++i){
+          if(recvBuff[i] != expected[i]){
+            printf("Rank %d: recvBuff[%zu] = %d, expected %d\n", r, i, recvBuff[i], expected[i]);
+            status = 1;
+            break;
+          }
         }
-        exit(0);
+        fflush(stdout);
+        _exit(status);
       }
     }
 
     getAndDistributeNCCLid(nranks);
-    
-    for(int r = 0; r < nranks; ++r)
-      wait(NULL); // Wait for all children
+
+    int numSkipped = 0;
+    for(int r = 0; r < nranks; ++r){
+      if(children[r] < 0){
+        ADD_FAILURE() << "fork failed for rank " << r;
+        continue;
+      }
+      int status = 0;
+      if(waitpid(children[r], &status, 0) != children[r]){
+        ADD_FAILURE() << "waitpid failed for rank " << r;
+        continue;
+      }
+      if(WIFEXITED(status) && WEXITSTATUS(status) == kChildSkipped){
+        ++numSkipped;
+        continue;
+      }
+      EXPECT_TRUE(WIFEXITED(status) && WEXITSTATUS(status) == 0)
+          << "rank " << r << " child "
+          << (WIFSIGNALED(status) ? "killed by signal " + std::to_string(WTERMSIG(status))
+                                  : "exited with status " + std::to_string(WEXITSTATUS(status)));
+    }
+    if(numSkipped == nranks)
+      GTEST_SKIP() << "Requires exactly " << nranks << " GPUs";
+    EXPECT_EQ(numSkipped, 0) << "only some ranks saw " << nranks << " GPUs";
 }
 
 }

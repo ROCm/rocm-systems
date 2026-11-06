@@ -35,7 +35,7 @@
 #include <vector>
 
 #include "../common/LogCapture.hpp"
-#include "../common/ScopedEnv.hpp"
+#include "../common/ScopedEnvVar.hpp"
 #include "nccl.h"
 #include "fakes/debug_fakes.h"
 
@@ -187,7 +187,7 @@ class RecorderMicrotest : public ::testing::Test {
 
   // Re-runs the singleton's constructor with RCCL_REPLAY_FILE (and optionally RCCL_LOG_LEVEL) set.
   Recorder& Restart(const char* file, const char* logLevel = nullptr) {
-    RcclUnitTesting::ScopedEnv replayFile("RCCL_REPLAY_FILE", file), level("RCCL_LOG_LEVEL", logLevel);
+    RcclUnitTesting::ScopedEnvVar replayFile("RCCL_REPLAY_FILE", file), level("RCCL_LOG_LEVEL", logLevel);
     Recorder& r = Recorder::instance();
     r.~Recorder();
     new (&r) Recorder();

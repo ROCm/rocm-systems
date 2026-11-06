@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 #include <fcntl.h>
+#include "EnvIsolationListener.hpp"
 #include "EnvVars.hpp"
 #include "TestBed.hpp"
 int main(int argc, char **argv)
@@ -38,18 +39,14 @@ int main(int argc, char **argv)
 
         // Instantiate child worker
         RcclUnitTesting::TestBedChild child(childId, verbose, printValues, useRankThreading);
-        child.childReadFd   = childReadFd;
-        child.childWriteFd  = childWriteFd;
-        child.parentReadFd  = -1;
-        child.parentWriteFd = -1;
-        child.memAllocType  = memAllocType;
 
         // Enter worker execution loop
-        child.StartExecutionLoop();
+        child.StartExecutionLoop(childReadFd, childWriteFd, memAllocType);
         return 0; // Exit cleanly when CHILD_STOP is received
     }
 
   ::testing::InitGoogleTest(&argc, argv);
+  RcclUnitTesting::EnvIsolationListener::Install();
   RcclUnitTesting::EnvVars ev;
   ev.ShowConfig();
   int retCode = RUN_ALL_TESTS();

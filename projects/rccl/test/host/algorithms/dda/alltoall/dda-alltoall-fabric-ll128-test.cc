@@ -15,7 +15,7 @@
 #include <string>
 
 #include "../common/DdaFabricTestHelpers.hpp"
-#include "../common/ScopedEnv.hpp"
+#include "../common/ScopedEnvVar.hpp"
 #include "algorithms/dda/DdaCollSeams.h"
 
 #include "fakes/param_redirect.h"
@@ -27,7 +27,7 @@
 namespace {
 
 using RcclUnitTesting::DdaFabricMockComm;
-using RcclUnitTesting::ScopedEnv;
+using RcclUnitTesting::ScopedEnvVar;
 
 void* const kSendbuff = reinterpret_cast<void*>(0x1000);
 void* const kRecvbuff = reinterpret_cast<void*>(0x2000);
@@ -81,8 +81,8 @@ class DdaAlltoallFabricLL128Microtest : public ::testing::Test {
 
   DdaFabricMockComm mock_;
   std::map<std::string, int64_t> params_;
-  ScopedEnv lpb_{"RCCL_DDA_LL128_A2A_LPB", nullptr};
-  ScopedEnv maxBpp_{"RCCL_DDA_LL128_A2A_MAXBPP", nullptr};
+  ScopedEnvVar lpb_{"RCCL_DDA_LL128_A2A_LPB", nullptr};
+  ScopedEnvVar maxBpp_{"RCCL_DDA_LL128_A2A_MAXBPP", nullptr};
 };
 
 TEST_F(DdaAlltoallFabricLL128Microtest, Eligible_BaselineFp32) {
@@ -226,19 +226,19 @@ TEST_F(DdaAlltoallFabricLL128Microtest, Launch_GridStaysWithinTheEpochCells) {
 
 TEST_F(DdaAlltoallFabricLL128Microtest, Launch_LinesPerBlockAndMaxBlocksPerPeerFromEnv) {
   {
-    ScopedEnv lpb("RCCL_DDA_LL128_A2A_LPB", "2");
+    ScopedEnvVar lpb("RCCL_DDA_LL128_A2A_LPB", "2");
     EXPECT_EQ(RunOne(5 * kLineFloats).grid.y, 3u);
     EXPECT_EQ(RunOne(2 * kLineFloats).grid.y, 1u);
   }
   {
-    ScopedEnv maxBpp("RCCL_DDA_LL128_A2A_MAXBPP", "3");
+    ScopedEnvVar maxBpp("RCCL_DDA_LL128_A2A_MAXBPP", "3");
     EXPECT_EQ(RunOne(32 * kLineFloats).grid.y, 3u);
-    ScopedEnv one("RCCL_DDA_LL128_A2A_MAXBPP", "1");
+    ScopedEnvVar one("RCCL_DDA_LL128_A2A_MAXBPP", "1");
     EXPECT_EQ(RunOne(32 * kLineFloats).grid.y, 1u);
   }
   for (const char* bad : {"", "0", "-2", "x"}) {
-    ScopedEnv lpb("RCCL_DDA_LL128_A2A_LPB", bad);
-    ScopedEnv maxBpp("RCCL_DDA_LL128_A2A_MAXBPP", bad);
+    ScopedEnvVar lpb("RCCL_DDA_LL128_A2A_LPB", bad);
+    ScopedEnvVar maxBpp("RCCL_DDA_LL128_A2A_MAXBPP", bad);
     EXPECT_EQ(RunOne(5 * kLineFloats).grid.y, 2u) << "env '" << bad << "'";
     EXPECT_EQ(RunOne(64 * kLineFloats).grid.y, 16u) << "env '" << bad << "'";
   }

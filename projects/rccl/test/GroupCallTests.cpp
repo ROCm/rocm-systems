@@ -3,6 +3,7 @@
  *
  * See LICENSE.txt for license information
  ************************************************************************/
+#include "ScopedEnvVar.hpp"
 #include "TestBed.hpp"
 
 #include <algorithm>
@@ -53,6 +54,7 @@ namespace RcclUnitTesting
     return TEST_SUCCESS;
   }
 
+  // Skips from inside a helper only return from the helper; callers must check IsSkipped().
   static void RequireGfx95EightRank(TestBed& testBed, int totalRanks)
   {
     if (!testBed.ev.isGfx95)
@@ -66,14 +68,14 @@ namespace RcclUnitTesting
     }
   }
 
-  static void EnableWarpSpeedGroupedTestEnv()
+  // gfx950 WarpSpeed auto-selects >256 channels; validChannelsForWarpSpeed then returns
+  // ncclInvalidArgument. Declare before the TestBed so its pooled workers inherit it.
+  struct WarpSpeedGroupedTestEnv
   {
-    setenv("RCCL_WARP_SPEED_FORCE_ENABLE", "1", 1);
-    // gfx950 WarpSpeed auto-selects >256 channels; validChannelsForWarpSpeed
-    // then returns ncclInvalidArgument. Set before TestBed so pooled children inherit it.
-    setenv("NCCL_MIN_NCHANNELS", "56", 1);
-    setenv("NCCL_MAX_NCHANNELS", "56", 1);
-  }
+    ScopedEnvVar forceEnable{"RCCL_WARP_SPEED_FORCE_ENABLE", "1"};
+    ScopedEnvVar minChannels{"NCCL_MIN_NCHANNELS", "56"};
+    ScopedEnvVar maxChannels{"NCCL_MAX_NCHANNELS", "56"};
+  };
 
   struct WarpSpeedLaunchGeometry
   {
@@ -772,7 +774,7 @@ namespace RcclUnitTesting
   // the launch geometry and how many device works one batch must hold. nChannels=1
   // covers the degenerate single-channel ring; larger counts cover multi-channel
   // partitioning. NCCL_MIN/MAX_NCHANNELS are consumed at communicator init, so they are
-  // set before InitComms and cleared after the comms are destroyed.
+  // set before InitComms and restored after the worker pool is finalized.
   TEST(GroupCall, MultiRootBroadcastChannelCounts)
   {
     TestBed testBed;
@@ -787,8 +789,8 @@ namespace RcclUnitTesting
     bool isCorrect = true;
     for (auto channels : channelList)
     {
-      setenv("NCCL_MIN_NCHANNELS", channels, 1);
-      setenv("NCCL_MAX_NCHANNELS", channels, 1);
+      ScopedEnvVar minChannels("NCCL_MIN_NCHANNELS", channels);
+      ScopedEnvVar maxChannels("NCCL_MAX_NCHANNELS", channels);
 
       for (int totalRanks : testBed.ev.GetNumGpusList())
       for (int isMultiProcess : testBed.ev.GetIsMultiProcessList())
@@ -827,8 +829,6 @@ namespace RcclUnitTesting
       // Finalize inside the loop: pooled workers snapshot env at fork, so the
       // next channel count needs a freshly-forked pool to be seen.
       testBed.Finalize();
-      unsetenv("NCCL_MIN_NCHANNELS");
-      unsetenv("NCCL_MAX_NCHANNELS");
     }
   }
 
@@ -890,7 +890,7 @@ namespace RcclUnitTesting
   // batch indexing when collOpCount > 1 and distinct work lives on higher channels.
   TEST(GroupCall, WarpSpeedMultipleAllGatherEnabled)
   {
-    EnableWarpSpeedGroupedTestEnv();
+    WarpSpeedGroupedTestEnv warpSpeedEnv;
     TestBed testBed;
 
     int const totalRanks      = 8;
@@ -900,6 +900,7 @@ namespace RcclUnitTesting
     bool const useManagedMem  = false;
 
     RequireGfx95EightRank(testBed, totalRanks);
+    if (::testing::Test::IsSkipped()) return;
 
     std::vector<ncclDataType_t> dataTypes;
     testBed.GetSupportedDataTypes(dataTypes, {ncclBfloat16});
@@ -947,10 +948,8 @@ namespace RcclUnitTesting
     std::string const debugFile = debugPrefix + ".%p.log";
     std::string const debugGlob = debugPrefix + ".*";
     RemoveGlobbedFiles(debugGlob);
-    EnableWarpSpeedGroupedTestEnv();
-    setenv("NCCL_DEBUG", "INFO", 1);
-    setenv("NCCL_DEBUG_SUBSYS", "COLL", 1);
-    setenv("NCCL_DEBUG_FILE", debugFile.c_str(), 1);
+    WarpSpeedGroupedTestEnv warpSpeedEnv;
+    ScopedDebugLog collLog("COLL", debugFile);
 
     TestBed testBed;
 
@@ -961,6 +960,7 @@ namespace RcclUnitTesting
     bool const useManagedMem  = false;
 
     RequireGfx95EightRank(testBed, totalRanks);
+    if (::testing::Test::IsSkipped()) return;
 
     std::vector<ncclDataType_t> dataTypes;
     testBed.GetSupportedDataTypes(dataTypes, {ncclBfloat16});
@@ -998,9 +998,6 @@ namespace RcclUnitTesting
       testBed.DestroyComms();
     }
 
-    unsetenv("NCCL_DEBUG_FILE");
-    unsetenv("NCCL_DEBUG_SUBSYS");
-    unsetenv("NCCL_DEBUG");
     testBed.Finalize();
 
     if (!scraped)
@@ -1024,10 +1021,8 @@ namespace RcclUnitTesting
     std::string const debugFile = debugPrefix + ".%p.log";
     std::string const debugGlob = debugPrefix + ".*";
     RemoveGlobbedFiles(debugGlob);
-    EnableWarpSpeedGroupedTestEnv();
-    setenv("NCCL_DEBUG", "INFO", 1);
-    setenv("NCCL_DEBUG_SUBSYS", "COLL", 1);
-    setenv("NCCL_DEBUG_FILE", debugFile.c_str(), 1);
+    WarpSpeedGroupedTestEnv warpSpeedEnv;
+    ScopedDebugLog collLog("COLL", debugFile);
 
     TestBed testBed;
 
@@ -1040,6 +1035,7 @@ namespace RcclUnitTesting
     bool const useManagedMem        = false;
 
     RequireGfx95EightRank(testBed, totalRanks);
+    if (::testing::Test::IsSkipped()) return;
 
     std::vector<ncclDataType_t> dataTypes;
     testBed.GetSupportedDataTypes(dataTypes, {ncclBfloat16});
@@ -1077,9 +1073,6 @@ namespace RcclUnitTesting
       testBed.DestroyComms();
     }
 
-    unsetenv("NCCL_DEBUG_FILE");
-    unsetenv("NCCL_DEBUG_SUBSYS");
-    unsetenv("NCCL_DEBUG");
     testBed.Finalize();
 
     if (!scraped)
@@ -1093,7 +1086,7 @@ namespace RcclUnitTesting
   // Two AllReduces in one group with WarpSpeed forced on.
   TEST(GroupCall, WarpSpeedMultipleAllReduceEnabled)
   {
-    EnableWarpSpeedGroupedTestEnv();
+    WarpSpeedGroupedTestEnv warpSpeedEnv;
     TestBed testBed;
 
     int const totalRanks      = 8;
@@ -1103,6 +1096,7 @@ namespace RcclUnitTesting
     bool const useManagedMem  = false;
 
     RequireGfx95EightRank(testBed, totalRanks);
+    if (::testing::Test::IsSkipped()) return;
 
     std::vector<ncclDataType_t> dataTypes;
     testBed.GetSupportedDataTypes(dataTypes, {ncclFloat});
@@ -1143,7 +1137,7 @@ namespace RcclUnitTesting
   // AllGather + AllReduce in one group with WarpSpeed forced on.
   TEST(GroupCall, WarpSpeedMixedAllGatherAllReduceEnabled)
   {
-    EnableWarpSpeedGroupedTestEnv();
+    WarpSpeedGroupedTestEnv warpSpeedEnv;
     TestBed testBed;
 
     int const totalRanks      = 8;
@@ -1154,6 +1148,7 @@ namespace RcclUnitTesting
     bool const useManagedMem  = false;
 
     RequireGfx95EightRank(testBed, totalRanks);
+    if (::testing::Test::IsSkipped()) return;
 
     std::vector<ncclDataType_t> dataTypes;
     testBed.GetSupportedDataTypes(dataTypes, {ncclBfloat16});

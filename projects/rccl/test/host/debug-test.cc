@@ -29,7 +29,7 @@
 #include <thread>
 #include <vector>
 
-#include "../common/ScopedEnv.hpp"
+#include "../common/ScopedEnvVar.hpp"
 #include "utils.h"
 
 namespace {
@@ -717,8 +717,8 @@ TEST_F(DebugMicrotest, Reset_DeprecatedPublicEntryPointStillResets) {
 #pragma clang diagnostic pop
 
 TEST_F(DebugMicrotest, Env_WithoutTheEnvPluginReadsTheProcessEnvironment) {
-  using RcclUnitTesting::ScopedEnv;
-  ScopedEnv debug("NCCL_DEBUG", "WARN"), levels("NCCL_DEBUG_LEVELS", nullptr), subsys("NCCL_DEBUG_SUBSYS", nullptr),
+  using RcclUnitTesting::ScopedEnvVar;
+  ScopedEnvVar debug("NCCL_DEBUG", "WARN"), levels("NCCL_DEBUG_LEVELS", nullptr), subsys("NCCL_DEBUG_SUBSYS", nullptr),
     warnInfo("NCCL_WARN_ENABLE_DEBUG_INFO", nullptr), tsLevels("NCCL_DEBUG_TIMESTAMP_LEVELS", nullptr),
     tsFormat("NCCL_DEBUG_TIMESTAMP_FORMAT", nullptr), file("NCCL_DEBUG_FILE", nullptr);
   g_envPluginReady = false;

@@ -102,6 +102,53 @@ namespace RcclUnitTesting
     ssize_t const numBytes = static_cast<ssize_t>(vec.size() * sizeof(T));
     return count == 0 || safe_pipe_read(fd, vec.data(), numBytes) == numBytes;
   }
+
+  /**
+   * @brief One command's bytes, appended in send order with <<.
+   */
+  class CommandMessage
+  {
+  public:
+    template <typename T>
+    CommandMessage& operator<<(T const& val)
+    {
+      static_assert(std::is_trivially_copyable<T>::value, "values are sent as raw bytes");
+      char const* const begin = reinterpret_cast<char const*>(&val);
+      bytes.insert(bytes.end(), begin, begin + sizeof(T));
+      return *this;
+    }
+    CommandMessage& operator<<(CommandMessage const& other)
+    {
+      bytes.insert(bytes.end(), other.bytes.begin(), other.bytes.end());
+      return *this;
+    }
+    std::vector<char> const& Bytes() const { return bytes; }
+
+  private:
+    std::vector<char> bytes;
+  };
+
+  /**
+   * @brief Reads values with >> in the order a CommandMessage appended them.
+   * After a short read it reads nothing more and converts to false.
+   */
+  class CommandReader
+  {
+  public:
+    explicit CommandReader(int fd) : fd(fd) {}
+    template <typename T>
+    CommandReader& operator>>(T& val)
+    {
+      static_assert(std::is_trivially_copyable<T>::value, "values are sent as raw bytes");
+      ok = ok && safe_pipe_read(fd, &val, sizeof(T)) == static_cast<ssize_t>(sizeof(T));
+      return *this;
+    }
+    explicit operator bool() const { return ok; }
+
+  private:
+    int  fd;
+    bool ok = true;
+  };
 }
 
 #endif // PIPE_UTILS_HPP

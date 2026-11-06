@@ -22,7 +22,7 @@
 #include <vector>
 
 #include "ScopedHook.h"
-#include "../common/ScopedEnv.hpp"
+#include "../common/ScopedEnvVar.hpp"
 #include "../common/TopoRailPlane.hpp"
 #include "fakes/graph_fakes.h"
 #include "fakes/param_redirect.h"
@@ -1035,7 +1035,7 @@ TEST_F(TopoLocalMicrotest, NetDevsPolicy_ParsesTheEnvironmentOnce) {
                         {"MAX:2", NETDEVS_POLICY_MAX, 2}, {"MAX:0", NETDEVS_POLICY_AUTO, -1},
                         {"bogus", NETDEVS_POLICY_AUTO, -1}, {nullptr, NETDEVS_POLICY_AUTO, -1}};
   for (const Case& c : cases) {
-    RcclUnitTesting::ScopedEnv policyEnv("NCCL_NETDEVS_POLICY", c.env);
+    RcclUnitTesting::ScopedEnvVar policyEnv("NCCL_NETDEVS_POLICY", c.env);
     netDevsPolicy = NETDEVS_POLICY_UNDEF;
     netDevsPolicyNum = -1;
 
@@ -1964,8 +1964,8 @@ TEST_F(TopoMicrotest, GetFusionEnv_ReadsEnvOrDefaultsByPlatform) {
   EXPECT_EQ(PATH_PHB, level);
   ASSERT_EQ(ncclSuccess, ncclTopoGetFusionEnv(&level, nullptr, 107, NCCL_TOPO_CPU_ARCH_X86));
   EXPECT_EQ(PATH_PORT, level);
-  RcclUnitTesting::ScopedEnv mergeLevel("NCCL_NET_MERGE_LEVEL", "PIX");
-  RcclUnitTesting::ScopedEnv forceMerge("NCCL_NET_FORCE_MERGE", "a,b");
+  RcclUnitTesting::ScopedEnvVar mergeLevel("NCCL_NET_MERGE_LEVEL", "PIX");
+  RcclUnitTesting::ScopedEnvVar forceMerge("NCCL_NET_FORCE_MERGE", "a,b");
   ASSERT_EQ(ncclSuccess, ncclTopoGetFusionEnv(&level, &force, 60, NCCL_TOPO_CPU_ARCH_X86));
   EXPECT_EQ(PATH_PIX, level);
   EXPECT_STREQ("a,b", force);
@@ -1979,7 +1979,7 @@ TEST_F(TopoMicrotest, GetMergePolicy_RailOnVeraRubinOrByEnv) {
   ASSERT_EQ(ncclSuccess, ncclTopoGetMergePolicy(&policy, 107, NCCL_TOPO_CPU_ARCH_ARM));
   EXPECT_EQ(NCCL_NET_MERGE_POLICY_RAIL, policy);
   for (const char* env : {"rail", "ALL", "both"}) {
-    RcclUnitTesting::ScopedEnv policyEnv("NCCL_NET_MERGE_POLICY", env);
+    RcclUnitTesting::ScopedEnvVar policyEnv("NCCL_NET_MERGE_POLICY", env);
     ASSERT_EQ(ncclSuccess, ncclTopoGetMergePolicy(&policy, 60, NCCL_TOPO_CPU_ARCH_X86));
     EXPECT_EQ(env[0] == 'r' ? NCCL_NET_MERGE_POLICY_RAIL : NCCL_NET_MERGE_POLICY_ALL, policy) << env;
   }

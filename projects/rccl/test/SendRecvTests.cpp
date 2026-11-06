@@ -3,6 +3,7 @@
  *
  * See LICENSE.txt for license information
  ************************************************************************/
+#include "ScopedEnvVar.hpp"
 #include "TestBed.hpp"
 
 #include <glob.h>
@@ -116,84 +117,19 @@ namespace RcclUnitTesting
     globfree(&g);
   }
 
-  // Force a lightweight NET loopback for P2P+SHM-disabled tests. IB-CAST on this path treats
-  // each GPU as its own node and ibv_create_qp fails (EAGAIN); GIN still opens IB QPs even when
-  // NCCL_NET=Socket. Socket + GIN off still goes through net.cc staging-buffer allocation.
-  struct NetLoopbackEnvBackup {
-    bool        hadNet           = false;
-    bool        hadGinEnable     = false;
-    bool        hadMinNchannels  = false;
-    bool        hadMaxNchannels  = false;
-    std::string net;
-    std::string ginEnable;
-    std::string minNchannels;
-    std::string maxNchannels;
+  // Send/recv over a lightweight NET loopback: P2P and SHM off so every pair falls through to NET.
+  // IB-CAST on this path treats each GPU as its own node and ibv_create_qp fails (EAGAIN); GIN still
+  // opens IB QPs even when NCCL_NET=Socket. Socket + GIN off still goes through net.cc staging-buffer
+  // allocation.
+  struct NetLoopbackOnlyEnv
+  {
+    ScopedEnvVar p2pDisable{"NCCL_P2P_DISABLE", "1"};
+    ScopedEnvVar shmDisable{"NCCL_SHM_DISABLE", "1"};
+    ScopedEnvVar net{"NCCL_NET", "Socket"};
+    ScopedEnvVar ginEnable{"NCCL_GIN_ENABLE", "0"};
+    ScopedEnvVar minChannels{"NCCL_MIN_NCHANNELS", "1"};
+    ScopedEnvVar maxChannels{"NCCL_MAX_NCHANNELS", "2"};
   };
-
-  static NetLoopbackEnvBackup netLoopbackEnvBackup;
-
-  static void PinNetLoopbackTransport()
-  {
-    if (const char* v = ::getenv("NCCL_NET")) {
-      netLoopbackEnvBackup.hadNet = true;
-      netLoopbackEnvBackup.net    = v;
-    } else {
-      netLoopbackEnvBackup.hadNet = false;
-      netLoopbackEnvBackup.net.clear();
-    }
-
-    if (const char* v = ::getenv("NCCL_GIN_ENABLE")) {
-      netLoopbackEnvBackup.hadGinEnable = true;
-      netLoopbackEnvBackup.ginEnable    = v;
-    } else {
-      netLoopbackEnvBackup.hadGinEnable = false;
-      netLoopbackEnvBackup.ginEnable.clear();
-    }
-
-    if (const char* v = ::getenv("NCCL_MIN_NCHANNELS")) {
-      netLoopbackEnvBackup.hadMinNchannels = true;
-      netLoopbackEnvBackup.minNchannels    = v;
-    } else {
-      netLoopbackEnvBackup.hadMinNchannels = false;
-      netLoopbackEnvBackup.minNchannels.clear();
-    }
-
-    if (const char* v = ::getenv("NCCL_MAX_NCHANNELS")) {
-      netLoopbackEnvBackup.hadMaxNchannels = true;
-      netLoopbackEnvBackup.maxNchannels    = v;
-    } else {
-      netLoopbackEnvBackup.hadMaxNchannels = false;
-      netLoopbackEnvBackup.maxNchannels.clear();
-    }
-
-    ::setenv("NCCL_NET", "Socket", 1);
-    ::setenv("NCCL_GIN_ENABLE", "0", 1);
-    ::setenv("NCCL_MIN_NCHANNELS", "1", 1);
-    ::setenv("NCCL_MAX_NCHANNELS", "2", 1);
-  }
-
-  static void UnpinNetLoopbackTransport()
-  {
-    if (netLoopbackEnvBackup.hadMaxNchannels)
-      ::setenv("NCCL_MAX_NCHANNELS", netLoopbackEnvBackup.maxNchannels.c_str(), 1);
-    else
-      ::unsetenv("NCCL_MAX_NCHANNELS");
-
-    if (netLoopbackEnvBackup.hadMinNchannels)
-      ::setenv("NCCL_MIN_NCHANNELS", netLoopbackEnvBackup.minNchannels.c_str(), 1);
-    else
-      ::unsetenv("NCCL_MIN_NCHANNELS");
-
-    if (netLoopbackEnvBackup.hadGinEnable)
-      ::setenv("NCCL_GIN_ENABLE", netLoopbackEnvBackup.ginEnable.c_str(), 1);
-    else
-      ::unsetenv("NCCL_GIN_ENABLE");
-
-    if (netLoopbackEnvBackup.hadNet)
-      ::setenv("NCCL_NET", netLoopbackEnvBackup.net.c_str(), 1);
-    else
-      ::unsetenv("NCCL_NET");
-  }
 
   TEST(SendRecv, SinglePairs)
   {
@@ -534,27 +470,18 @@ namespace RcclUnitTesting
   {
     // P2P and SHM left ENABLED so cross-GPU pairs use intranode connections, which always allocate
     // the LL staging buffer -> legacy LL is the deterministic below-threshold choice.
-    setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "0", 1); // force useLL128SendRecv=false even on gfx942/gfx950
-    setenv("NCCL_P2P_LL128_ENABLE", "0", 1);         // disable gfx1250 LL128
-    setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold
-    setenv("NCCL_P2P_LL_THRESHOLD", "16384", 1);     // pin legacy-LL threshold to the 16 KiB boundary the sweep straddles
+    ScopedEnvVar allocP2pNetLlBuffers("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "0"); // force useLL128SendRecv=false even on gfx942/gfx950
+    ScopedEnvVar p2pLl128Enable("NCCL_P2P_LL128_ENABLE", "0");               // disable gfx1250 LL128
+    ScopedEnvVar maxP2pNchannels("NCCL_MAX_P2P_NCHANNELS", "1");             // single channel -> deterministic per-channel threshold
+    ScopedEnvVar p2pLlThreshold("NCCL_P2P_LL_THRESHOLD", "16384");           // pin legacy-LL threshold to the 16 KiB boundary the sweep straddles
     std::string const debugGlob = "/tmp/rccl_legacy_ll_" + std::to_string(getpid()) + ".*";
     RemoveGlobbedFiles(debugGlob);
-    setenv("NCCL_DEBUG", "INFO", 1);
-    setenv("NCCL_DEBUG_SUBSYS", "COLL", 1);
-    setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_legacy_ll_" + std::to_string(getpid()) + ".%p").c_str(), 1);
+    ScopedDebugLog collLog("COLL", "/tmp/rccl_legacy_ll_" + std::to_string(getpid()) + ".%p");
     {
       TestBed testBed;
       RunLL128BoundarySweep(testBed, debugGlob, ExpectProto::LegacyLL);
     }
     RemoveGlobbedFiles(debugGlob);
-    unsetenv("NCCL_DEBUG_FILE");
-    unsetenv("NCCL_DEBUG_SUBSYS");
-    unsetenv("NCCL_DEBUG");
-    unsetenv("NCCL_P2P_LL_THRESHOLD");
-    unsetenv("NCCL_MAX_P2P_NCHANNELS");
-    unsetenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS");
-    unsetenv("NCCL_P2P_LL128_ENABLE");
   }
 
   // NCCL_ALLOC_P2P_NET_LL_BUFFERS=0: exercises the branch of the net.cc staging-buffer allocation
@@ -563,34 +490,20 @@ namespace RcclUnitTesting
   // Verifies end-to-end correctness and that LL128 is not selected. See RunLL128BoundarySweep.
   TEST(SendRecv, LL128NetBuffersDisabled)
   {
-    setenv("NCCL_P2P_DISABLE", "1", 1);              // disable P2P/IPC so send/recv does not use it
-    setenv("NCCL_SHM_DISABLE", "1", 1);              // disable SHM so send/recv falls through to NET
-    PinNetLoopbackTransport();
-    setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "0", 1); // disabled case
-    setenv("NCCL_P2P_LL128_ENABLE", "0", 1);         // disable gfx1250 LL128
-    setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold
-    setenv("NCCL_P2P_LL_THRESHOLD", "16384", 1);     // legacy-LL threshold governs when the LL128 path is off
+    NetLoopbackOnlyEnv netLoopback;
+    ScopedEnvVar allocP2pNetLlBuffers("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "0"); // disabled case
+    ScopedEnvVar p2pLl128Enable("NCCL_P2P_LL128_ENABLE", "0");               // disable gfx1250 LL128
+    ScopedEnvVar maxP2pNchannels("NCCL_MAX_P2P_NCHANNELS", "1");             // single channel -> deterministic per-channel threshold
+    ScopedEnvVar p2pLlThreshold("NCCL_P2P_LL_THRESHOLD", "16384");           // legacy-LL threshold governs when the LL128 path is off
     // Capture the per-op protocol selection so we can assert LL128/SIMPLE were used (see helper).
     std::string const debugGlob = "/tmp/rccl_ll128_disabled_" + std::to_string(getpid()) + ".*";
     RemoveGlobbedFiles(debugGlob);
-    setenv("NCCL_DEBUG", "INFO", 1);
-    setenv("NCCL_DEBUG_SUBSYS", "COLL", 1);
-    setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_ll128_disabled_" + std::to_string(getpid()) + ".%p").c_str(), 1);
+    ScopedDebugLog collLog("COLL", "/tmp/rccl_ll128_disabled_" + std::to_string(getpid()) + ".%p");
     {
       TestBed testBed;
       RunLL128BoundarySweep(testBed, debugGlob, ExpectProto::NoLL128);
     }
     RemoveGlobbedFiles(debugGlob);
-    unsetenv("NCCL_DEBUG_FILE");
-    unsetenv("NCCL_DEBUG_SUBSYS");
-    unsetenv("NCCL_DEBUG");
-    unsetenv("NCCL_P2P_LL_THRESHOLD");
-    unsetenv("NCCL_MAX_P2P_NCHANNELS");
-    unsetenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS");
-    unsetenv("NCCL_P2P_LL128_ENABLE");
-    UnpinNetLoopbackTransport();
-    unsetenv("NCCL_SHM_DISABLE");
-    unsetenv("NCCL_P2P_DISABLE");
   }
 
   // NCCL_ALLOC_P2P_NET_LL_BUFFERS=1 with LL128 enabled for the comm: exercises the branch that
@@ -601,20 +514,16 @@ namespace RcclUnitTesting
   // gate now requires it (see the matrix above). See RunLL128BoundarySweep.
   TEST(SendRecv, LL128NetBuffersEnabled)
   {
-    setenv("NCCL_P2P_DISABLE", "1", 1);              // disable P2P/IPC so send/recv does not use it
-    setenv("NCCL_SHM_DISABLE", "1", 1);              // disable SHM so send/recv falls through to NET
-    PinNetLoopbackTransport();
-    setenv("RCCL_LL128_FORCE_ENABLE", "1", 1);       // ll128Enabled=true (required by the P2P LL128 gate)
-    setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "1", 1); // enabled case
-    setenv("NCCL_P2P_LL128_ENABLE", "1", 1);         // gfx1250: LL128 opt-in (2-GPU sweeps use the threshold path)
-    setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold
-    setenv("NCCL_P2P_LL128_THRESHOLD", "16384", 1);  // pin LL128 threshold to the 16 KiB boundary the sweep straddles
+    NetLoopbackOnlyEnv netLoopback;
+    ScopedEnvVar ll128ForceEnable("RCCL_LL128_FORCE_ENABLE", "1");           // ll128Enabled=true (required by the P2P LL128 gate)
+    ScopedEnvVar allocP2pNetLlBuffers("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "1"); // enabled case
+    ScopedEnvVar p2pLl128Enable("NCCL_P2P_LL128_ENABLE", "1");               // gfx1250: LL128 opt-in (2-GPU sweeps use the threshold path)
+    ScopedEnvVar maxP2pNchannels("NCCL_MAX_P2P_NCHANNELS", "1");             // single channel -> deterministic per-channel threshold
+    ScopedEnvVar p2pLl128Threshold("NCCL_P2P_LL128_THRESHOLD", "16384");     // pin LL128 threshold to the 16 KiB boundary the sweep straddles
     // Capture the per-op protocol selection so we can assert LL128 was actually chosen (see helper).
     std::string const debugGlob = "/tmp/rccl_ll128_enabled_" + std::to_string(getpid()) + ".*";
     RemoveGlobbedFiles(debugGlob);
-    setenv("NCCL_DEBUG", "INFO", 1);
-    setenv("NCCL_DEBUG_SUBSYS", "COLL", 1);
-    setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_ll128_enabled_" + std::to_string(getpid()) + ".%p").c_str(), 1);
+    ScopedDebugLog collLog("COLL", "/tmp/rccl_ll128_enabled_" + std::to_string(getpid()) + ".%p");
     {
       TestBed testBed;
 #if defined(ENABLE_LL128)
@@ -627,17 +536,6 @@ namespace RcclUnitTesting
 #endif
     }
     RemoveGlobbedFiles(debugGlob);
-    unsetenv("NCCL_DEBUG_FILE");
-    unsetenv("NCCL_DEBUG_SUBSYS");
-    unsetenv("NCCL_DEBUG");
-    unsetenv("NCCL_P2P_LL128_THRESHOLD");
-    unsetenv("NCCL_MAX_P2P_NCHANNELS");
-    unsetenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS");
-    unsetenv("NCCL_P2P_LL128_ENABLE");
-    unsetenv("RCCL_LL128_FORCE_ENABLE");
-    UnpinNetLoopbackTransport();
-    unsetenv("NCCL_SHM_DISABLE");
-    unsetenv("NCCL_P2P_DISABLE");
   }
 
   // Both the P2P opt-in flag AND the comm's ll128Enabled gate are required for P2P LL128. This pins
@@ -649,27 +547,18 @@ namespace RcclUnitTesting
   TEST(SendRecv, Ll128DisabledDoesNotEnableP2pLL128)
   {
     // ll128Enabled left at its gfx942/gfx950 default (off): RCCL_LL128_FORCE_ENABLE is NOT set.
-    setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "1", 1); // P2P opt-in ON, but ll128Enabled off -> no LL128
-    setenv("NCCL_P2P_LL128_ENABLE", "0", 1);         // disable gfx1250 LL128
-    setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold
-    setenv("NCCL_P2P_LL_THRESHOLD", "16384", 1);     // legacy-LL threshold governs the fallback path
+    ScopedEnvVar allocP2pNetLlBuffers("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "1"); // P2P opt-in ON, but ll128Enabled off -> no LL128
+    ScopedEnvVar p2pLl128Enable("NCCL_P2P_LL128_ENABLE", "0");               // disable gfx1250 LL128
+    ScopedEnvVar maxP2pNchannels("NCCL_MAX_P2P_NCHANNELS", "1");             // single channel -> deterministic per-channel threshold
+    ScopedEnvVar p2pLlThreshold("NCCL_P2P_LL_THRESHOLD", "16384");           // legacy-LL threshold governs the fallback path
     std::string const debugGlob = "/tmp/rccl_ll128_disabled_gate_" + std::to_string(getpid()) + ".*";
     RemoveGlobbedFiles(debugGlob);
-    setenv("NCCL_DEBUG", "INFO", 1);
-    setenv("NCCL_DEBUG_SUBSYS", "COLL", 1);
-    setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_ll128_disabled_gate_" + std::to_string(getpid()) + ".%p").c_str(), 1);
+    ScopedDebugLog collLog("COLL", "/tmp/rccl_ll128_disabled_gate_" + std::to_string(getpid()) + ".%p");
     {
       TestBed testBed;
       RunLL128BoundarySweep(testBed, debugGlob, ExpectProto::LegacyLL);
     }
     RemoveGlobbedFiles(debugGlob);
-    unsetenv("NCCL_DEBUG_FILE");
-    unsetenv("NCCL_DEBUG_SUBSYS");
-    unsetenv("NCCL_DEBUG");
-    unsetenv("NCCL_P2P_LL_THRESHOLD");
-    unsetenv("NCCL_MAX_P2P_NCHANNELS");
-    unsetenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS");
-    unsetenv("NCCL_P2P_LL128_ENABLE");
   }
 
   // Both conditions required (mirror of the above): forcing ll128Enabled on with
@@ -683,29 +572,19 @@ namespace RcclUnitTesting
     // P2P and SHM left ENABLED so cross-GPU pairs use intranode connections (deterministic legacy LL
     // below-threshold). RCCL_LL128_FORCE_ENABLE flips comm->topo->ll128Enabled, but with the flag
     // below off useLL128SendRecv stays false.
-    setenv("RCCL_LL128_FORCE_ENABLE", "1", 1);       // force comm->topo->ll128Enabled = true
-    setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "0", 1); // P2P LL128 opt-in OFF -> useLL128SendRecv=false
-    setenv("NCCL_P2P_LL128_ENABLE", "0", 1);         // disable gfx1250 LL128
-    setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold
-    setenv("NCCL_P2P_LL_THRESHOLD", "16384", 1);     // legacy-LL threshold governs the fallback path
+    ScopedEnvVar ll128ForceEnable("RCCL_LL128_FORCE_ENABLE", "1");           // force comm->topo->ll128Enabled = true
+    ScopedEnvVar allocP2pNetLlBuffers("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "0"); // P2P LL128 opt-in OFF -> useLL128SendRecv=false
+    ScopedEnvVar p2pLl128Enable("NCCL_P2P_LL128_ENABLE", "0");               // disable gfx1250 LL128
+    ScopedEnvVar maxP2pNchannels("NCCL_MAX_P2P_NCHANNELS", "1");             // single channel -> deterministic per-channel threshold
+    ScopedEnvVar p2pLlThreshold("NCCL_P2P_LL_THRESHOLD", "16384");           // legacy-LL threshold governs the fallback path
     std::string const debugGlob = "/tmp/rccl_ll128_indep_" + std::to_string(getpid()) + ".*";
     RemoveGlobbedFiles(debugGlob);
-    setenv("NCCL_DEBUG", "INFO", 1);
-    setenv("NCCL_DEBUG_SUBSYS", "COLL", 1);
-    setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_ll128_indep_" + std::to_string(getpid()) + ".%p").c_str(), 1);
+    ScopedDebugLog collLog("COLL", "/tmp/rccl_ll128_indep_" + std::to_string(getpid()) + ".%p");
     {
       TestBed testBed;
       RunLL128BoundarySweep(testBed, debugGlob, ExpectProto::LegacyLL);
     }
     RemoveGlobbedFiles(debugGlob);
-    unsetenv("NCCL_DEBUG_FILE");
-    unsetenv("NCCL_DEBUG_SUBSYS");
-    unsetenv("NCCL_DEBUG");
-    unsetenv("NCCL_P2P_LL_THRESHOLD");
-    unsetenv("NCCL_MAX_P2P_NCHANNELS");
-    unsetenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS");
-    unsetenv("NCCL_P2P_LL128_ENABLE");
-    unsetenv("RCCL_LL128_FORCE_ENABLE");
   }
 
   // ---------------------------------------------------------------------------
@@ -725,20 +604,16 @@ namespace RcclUnitTesting
   // kernel (via ExpectProto::LL128).
   TEST(SendRecv, SeparateThresholdLL128UsesLL128Knob)
   {
-    setenv("NCCL_P2P_DISABLE", "1", 1);              // disable P2P/IPC so send/recv does not use it
-    setenv("NCCL_SHM_DISABLE", "1", 1);              // disable SHM so send/recv falls through to NET
-    PinNetLoopbackTransport();
-    setenv("RCCL_LL128_FORCE_ENABLE", "1", 1);       // ll128Enabled=true (required by the P2P LL128 gate)
-    setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "1", 1); // enable the LL128 staging buffer
-    setenv("NCCL_P2P_LL128_ENABLE", "1", 1);         // gfx1250: LL128 opt-in (2-GPU sweeps use the threshold path)
-    setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold
-    setenv("NCCL_P2P_LL_THRESHOLD", "0", 1);         // legacy-LL knob at 0: must NOT affect the LL128 path
-    setenv("NCCL_P2P_LL128_THRESHOLD", "16384", 1);  // LL128 knob governs -> LL128 below 16 KiB
+    NetLoopbackOnlyEnv netLoopback;
+    ScopedEnvVar ll128ForceEnable("RCCL_LL128_FORCE_ENABLE", "1");           // ll128Enabled=true (required by the P2P LL128 gate)
+    ScopedEnvVar allocP2pNetLlBuffers("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "1"); // enable the LL128 staging buffer
+    ScopedEnvVar p2pLl128Enable("NCCL_P2P_LL128_ENABLE", "1");               // gfx1250: LL128 opt-in (2-GPU sweeps use the threshold path)
+    ScopedEnvVar maxP2pNchannels("NCCL_MAX_P2P_NCHANNELS", "1");             // single channel -> deterministic per-channel threshold
+    ScopedEnvVar p2pLlThreshold("NCCL_P2P_LL_THRESHOLD", "0");               // legacy-LL knob at 0: must NOT affect the LL128 path
+    ScopedEnvVar p2pLl128Threshold("NCCL_P2P_LL128_THRESHOLD", "16384");     // LL128 knob governs -> LL128 below 16 KiB
     std::string const debugGlob = "/tmp/rccl_sep_ll128_" + std::to_string(getpid()) + ".*";
     RemoveGlobbedFiles(debugGlob);
-    setenv("NCCL_DEBUG", "INFO", 1);
-    setenv("NCCL_DEBUG_SUBSYS", "COLL", 1);
-    setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_sep_ll128_" + std::to_string(getpid()) + ".%p").c_str(), 1);
+    ScopedDebugLog collLog("COLL", "/tmp/rccl_sep_ll128_" + std::to_string(getpid()) + ".%p");
     {
       TestBed testBed;
 #if defined(ENABLE_LL128)
@@ -748,18 +623,6 @@ namespace RcclUnitTesting
 #endif
     }
     RemoveGlobbedFiles(debugGlob);
-    unsetenv("NCCL_DEBUG_FILE");
-    unsetenv("NCCL_DEBUG_SUBSYS");
-    unsetenv("NCCL_DEBUG");
-    unsetenv("NCCL_P2P_LL128_THRESHOLD");
-    unsetenv("NCCL_P2P_LL_THRESHOLD");
-    unsetenv("NCCL_MAX_P2P_NCHANNELS");
-    unsetenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS");
-    unsetenv("NCCL_P2P_LL128_ENABLE");
-    unsetenv("RCCL_LL128_FORCE_ENABLE");
-    UnpinNetLoopbackTransport();
-    unsetenv("NCCL_SHM_DISABLE");
-    unsetenv("NCCL_P2P_DISABLE");
   }
 
   // Legacy LL path reads NCCL_P2P_LL_THRESHOLD only: force NCCL_P2P_LL128_THRESHOLD=0 (irrelevant on
@@ -768,34 +631,24 @@ namespace RcclUnitTesting
   // LegacyLLIntranode (NCCL_ALLOC_P2P_NET_LL_BUFFERS=0 -> useLL128SendRecv=false on every arch).
   TEST(SendRecv, SeparateThresholdLegacyLLUsesLLKnob)
   {
-    setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "0", 1); // force useLL128SendRecv=false even on gfx942/gfx950
-    setenv("NCCL_P2P_LL128_ENABLE", "0", 1);         // disable gfx1250 LL128
-    setenv("NCCL_MAX_P2P_NCHANNELS", "1", 1);        // single channel -> deterministic per-channel threshold
-    setenv("NCCL_P2P_LL128_THRESHOLD", "0", 1);      // LL128 knob at 0: must NOT affect the legacy-LL path
-    setenv("NCCL_P2P_LL_THRESHOLD", "16384", 1);     // legacy-LL knob governs -> legacy LL below 16 KiB
+    ScopedEnvVar allocP2pNetLlBuffers("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "0"); // force useLL128SendRecv=false even on gfx942/gfx950
+    ScopedEnvVar p2pLl128Enable("NCCL_P2P_LL128_ENABLE", "0");               // disable gfx1250 LL128
+    ScopedEnvVar maxP2pNchannels("NCCL_MAX_P2P_NCHANNELS", "1");             // single channel -> deterministic per-channel threshold
+    ScopedEnvVar p2pLl128Threshold("NCCL_P2P_LL128_THRESHOLD", "0");         // LL128 knob at 0: must NOT affect the legacy-LL path
+    ScopedEnvVar p2pLlThreshold("NCCL_P2P_LL_THRESHOLD", "16384");           // legacy-LL knob governs -> legacy LL below 16 KiB
     std::string const debugGlob = "/tmp/rccl_sep_legacy_ll_" + std::to_string(getpid()) + ".*";
     RemoveGlobbedFiles(debugGlob);
-    setenv("NCCL_DEBUG", "INFO", 1);
-    setenv("NCCL_DEBUG_SUBSYS", "COLL", 1);
-    setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_sep_legacy_ll_" + std::to_string(getpid()) + ".%p").c_str(), 1);
+    ScopedDebugLog collLog("COLL", "/tmp/rccl_sep_legacy_ll_" + std::to_string(getpid()) + ".%p");
     {
       TestBed testBed;
       RunLL128BoundarySweep(testBed, debugGlob, ExpectProto::LegacyLL);
     }
     RemoveGlobbedFiles(debugGlob);
-    unsetenv("NCCL_DEBUG_FILE");
-    unsetenv("NCCL_DEBUG_SUBSYS");
-    unsetenv("NCCL_DEBUG");
-    unsetenv("NCCL_P2P_LL_THRESHOLD");
-    unsetenv("NCCL_P2P_LL128_THRESHOLD");
-    unsetenv("NCCL_MAX_P2P_NCHANNELS");
-    unsetenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS");
-    unsetenv("NCCL_P2P_LL128_ENABLE");
   }
 
   TEST(SendRecv, UserBufferRegister)
   {
-    setenv("RCCL_ENABLE_INTRANET", "1", 1);
+    ScopedEnvVar enableIntranet("RCCL_ENABLE_INTRANET", "1");
     TestBed testBed;
 
     // Configuration
@@ -890,8 +743,6 @@ namespace RcclUnitTesting
       testBed.DestroyComms();
     }
     testBed.Finalize();
-    unsetenv("NCCL_P2P_LL128_ENABLE");
-    unsetenv("RCCL_ENABLE_INTRANET");
   }
 
   static bool RunGfx1250FourRankRing(TestBed& testBed, int const sendBytes[4], int const recvBytes[4])
@@ -929,21 +780,16 @@ namespace RcclUnitTesting
     if (!DeviceIsGfx1250()) {
       GTEST_SKIP() << "Skipping... gfx1250 SendRecv default path is gfx1250-only.";
     }
-    unsetenv("NCCL_P2P_LL128_ENABLE");
+    ScopedEnvVar p2pLl128Enable("NCCL_P2P_LL128_ENABLE", nullptr);
     std::string const debugGlob = "/tmp/rccl_gfx1250_default_" + std::to_string(getpid()) + ".*";
     RemoveGlobbedFiles(debugGlob);
-    setenv("NCCL_DEBUG", "INFO", 1);
-    setenv("NCCL_DEBUG_SUBSYS", "COLL", 1);
-    setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_gfx1250_default_" + std::to_string(getpid()) + ".%p").c_str(), 1);
+    ScopedDebugLog collLog("COLL", "/tmp/rccl_gfx1250_default_" + std::to_string(getpid()) + ".%p");
     {
       TestBed testBed;
       int numGpus = testBed.ev.maxGpus;
       if (numGpus < 2) {
         testBed.Finalize();
         RemoveGlobbedFiles(debugGlob);
-        unsetenv("NCCL_DEBUG_FILE");
-        unsetenv("NCCL_DEBUG_SUBSYS");
-        unsetenv("NCCL_DEBUG");
         GTEST_SKIP() << "Skipping... default protocol scrape needs 2 GPUs (detected " << numGpus << ").";
       }
       const std::vector<int>& gpuPriorityOrder = testBed.ev.GetGpuPriorityOrder();
@@ -977,9 +823,6 @@ namespace RcclUnitTesting
     EXPECT_FALSE(DebugLogsContainProtocol(debugGlob, "LL128")) << "default ENABLE=-1 must not select LL128";
     EXPECT_TRUE(DebugLogsContainProtocol(debugGlob, "Simple")) << "16 KiB and 2 MiB should be SIMPLE on default";
     RemoveGlobbedFiles(debugGlob);
-    unsetenv("NCCL_DEBUG_FILE");
-    unsetenv("NCCL_DEBUG_SUBSYS");
-    unsetenv("NCCL_DEBUG");
   }
 
   // ENABLE=1: SendRecv LL128 from 0 through the nRanks cap, SIMPLE above it.
@@ -988,21 +831,15 @@ namespace RcclUnitTesting
     if (!DeviceIsGfx1250()) {
       GTEST_SKIP() << "Skipping... gfx1250 ENABLE=1 windows are gfx1250-only.";
     }
-    setenv("NCCL_P2P_LL128_ENABLE", "1", 1);
+    ScopedEnvVar p2pLl128Enable("NCCL_P2P_LL128_ENABLE", "1");
     std::string const debugGlob = "/tmp/rccl_gfx1250_enable1_win_" + std::to_string(getpid()) + ".*";
     RemoveGlobbedFiles(debugGlob);
-    setenv("NCCL_DEBUG", "INFO", 1);
-    setenv("NCCL_DEBUG_SUBSYS", "COLL", 1);
-    setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_gfx1250_enable1_win_" + std::to_string(getpid()) + ".%p").c_str(), 1);
+    ScopedDebugLog collLog("COLL", "/tmp/rccl_gfx1250_enable1_win_" + std::to_string(getpid()) + ".%p");
     {
       TestBed testBed;
       if (testBed.ev.maxGpus != 4 && testBed.ev.maxGpus != 8 && testBed.ev.maxGpus != 16) {
         testBed.Finalize();
         RemoveGlobbedFiles(debugGlob);
-        unsetenv("NCCL_DEBUG_FILE");
-        unsetenv("NCCL_DEBUG_SUBSYS");
-        unsetenv("NCCL_DEBUG");
-        unsetenv("NCCL_P2P_LL128_ENABLE");
         GTEST_SKIP() << "Skipping... ENABLE=1 windows key off nRanks 4/8/16 (detected "
                      << testBed.ev.maxGpus << " GPUs).";
       }
@@ -1043,10 +880,6 @@ namespace RcclUnitTesting
     EXPECT_FALSE(DebugLogsContainNeedle(debugGlob, "protocol=LL dir=send bytes=2048"))
       << "a 4 KiB LL floor would leave 2 KiB on legacy LL";
     RemoveGlobbedFiles(debugGlob);
-    unsetenv("NCCL_DEBUG_FILE");
-    unsetenv("NCCL_DEBUG_SUBSYS");
-    unsetenv("NCCL_DEBUG");
-    unsetenv("NCCL_P2P_LL128_ENABLE");
   }
 
   // Argus: fully mixed ring send {2KiB, 8KiB, 2KiB, 8KiB}. Splitting LL+LL128 into
@@ -1056,21 +889,15 @@ namespace RcclUnitTesting
     if (!DeviceIsGfx1250()) {
       GTEST_SKIP() << "Skipping... gfx1250 ENABLE=1 mixed ring is gfx1250-only.";
     }
-    setenv("NCCL_P2P_LL128_ENABLE", "1", 1);
+    ScopedEnvVar p2pLl128Enable("NCCL_P2P_LL128_ENABLE", "1");
     std::string const debugGlob = "/tmp/rccl_gfx1250_alt_ring_" + std::to_string(getpid()) + ".*";
     RemoveGlobbedFiles(debugGlob);
-    setenv("NCCL_DEBUG", "INFO", 1);
-    setenv("NCCL_DEBUG_SUBSYS", "COLL", 1);
-    setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_gfx1250_alt_ring_" + std::to_string(getpid()) + ".%p").c_str(), 1);
+    ScopedDebugLog collLog("COLL", "/tmp/rccl_gfx1250_alt_ring_" + std::to_string(getpid()) + ".%p");
     {
       TestBed testBed;
       if (testBed.ev.maxGpus < 4) {
         testBed.Finalize();
         RemoveGlobbedFiles(debugGlob);
-        unsetenv("NCCL_DEBUG_FILE");
-        unsetenv("NCCL_DEBUG_SUBSYS");
-        unsetenv("NCCL_DEBUG");
-        unsetenv("NCCL_P2P_LL128_ENABLE");
         GTEST_SKIP() << "Skipping... Argus mixed ring needs 4 GPUs (detected " << testBed.ev.maxGpus << ").";
       }
       int const sendBytes[4] = {2048, 8192, 2048, 8192};
@@ -1084,10 +911,6 @@ namespace RcclUnitTesting
     EXPECT_FALSE(DebugLogsContainNeedle(debugGlob, "protocol=LL dir=send bytes=2048"));
     EXPECT_FALSE(DebugLogsContainNeedle(debugGlob, "protocol=LL dir=recv bytes=2048"));
     RemoveGlobbedFiles(debugGlob);
-    unsetenv("NCCL_DEBUG_FILE");
-    unsetenv("NCCL_DEBUG_SUBSYS");
-    unsetenv("NCCL_DEBUG");
-    unsetenv("NCCL_P2P_LL128_ENABLE");
   }
 
   // Default mixed ring must complete: 2 KiB stays LL, 8 KiB is SIMPLE, which one kernel can mix.
@@ -1096,7 +919,7 @@ namespace RcclUnitTesting
     if (!DeviceIsGfx1250()) {
       GTEST_SKIP() << "Skipping... gfx1250 default mixed ring is gfx1250-only.";
     }
-    unsetenv("NCCL_P2P_LL128_ENABLE");
+    ScopedEnvVar p2pLl128Enable("NCCL_P2P_LL128_ENABLE", nullptr);
     {
       TestBed testBed;
       if (testBed.ev.maxGpus < 4) {

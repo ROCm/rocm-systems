@@ -42,4 +42,17 @@ namespace RcclUnitTesting
     std::string name_;
     std::optional<std::string> previousValue_;
   };
+
+  // Sends NCCL_DEBUG=INFO output for one debug subsystem to debugFile for the lifetime of the object.
+  struct ScopedDebugLog
+  {
+    ScopedDebugLog(const char* subsystem, std::string const& debugFile)
+      : subsys("NCCL_DEBUG_SUBSYS", subsystem), file("NCCL_DEBUG_FILE", debugFile.c_str())
+    {
+    }
+
+    ScopedEnvVar level{"NCCL_DEBUG", "INFO"};
+    ScopedEnvVar subsys;
+    ScopedEnvVar file;
+  };
 }
