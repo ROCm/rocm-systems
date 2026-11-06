@@ -5265,7 +5265,7 @@ def test_gfx11_graphics_sources_use_vgpr_selectors():
         assert (
             profile.normalize_operand_type('ENC_DS', 'data0', 'OPR_VGPR') == 'OPR_VGPR'
         )
-        assert profile.has_gfx11_image_address_extension
+        assert profile.mimg_nsa_dword_count_expr == '1u'
 
 
 def test_rdna3_5_disassembly_overrides_do_not_change_rdna3():
@@ -7549,8 +7549,8 @@ def test_generated_decoders_publish_instruction_lookahead_bounds(
         'cdna3': 2,
         'cdna4': 4,
         'cdna5': 4,
-        'rdna1': 3,
-        'rdna2': 3,
+        'rdna1': 5,
+        'rdna2': 5,
         'rdna3': 3,
         'rdna3_5': 3,
         'rdna4': 3,
@@ -7572,8 +7572,8 @@ def test_generated_decoders_publish_instruction_lookahead_bounds(
         ('cdna3', CdnaProfile, 2),
         ('cdna4', Cdna4Profile, 4),
         ('cdna5', Cdna5Profile, 4),
-        ('rdna1', Rdna1Profile, 3),
-        ('rdna2', Rdna2Profile, 3),
+        ('rdna1', Rdna1Profile, 5),
+        ('rdna2', Rdna2Profile, 5),
         ('rdna3', Rdna3Profile, 3),
         ('rdna3_5', Rdna3_5Profile, 3),
         ('rdna4', Rdna4Profile, 3),
