@@ -830,21 +830,14 @@ TEST(BinaryTranslatorE2E, OutputDecodesAsValidRdna4) {
     const size_t words = sec->size() / sizeof(uint32_t);
     size_t pc = 0;
     while (pc < words) {
-      try {
-        std::unique_ptr<rocjitsu::Instruction> inst(decode_valid(*decoder, &data[pc]));
-        if (!inst) {
-          ++decode_failures;
-          ++pc;
-          continue;
-        }
-        pc += inst->size() / 4;
-        ++inst_count;
-      } catch (const std::exception &e) {
-        std::cerr << "  decode fail at 0x" << std::hex << pc * 4 << " word=0x" << data[pc] << ": "
-                  << e.what() << "\n";
+      std::unique_ptr<rocjitsu::Instruction> inst(decode_valid(*decoder, &data[pc]));
+      if (!inst) {
         ++decode_failures;
         ++pc;
+        continue;
       }
+      pc += inst->size() / 4;
+      ++inst_count;
     }
   }
   EXPECT_GT(inst_count, 0) << "Text section should contain instructions";
@@ -872,18 +865,14 @@ TEST(BinaryTranslatorE2E, NoGfx9WaitcntInOutput) {
     const size_t words = sec->size() / sizeof(uint32_t);
     size_t pc = 0;
     while (pc < words) {
-      try {
-        std::unique_ptr<rocjitsu::Instruction> inst(decode_valid(*decoder, &data[pc]));
-        if (!inst) {
-          ++pc;
-          continue;
-        }
-        EXPECT_NE(std::string_view(inst->mnemonic()), "s_waitcnt")
-            << "GFX9 s_waitcnt found in translated output at offset 0x" << std::hex << pc * 4;
-        pc += inst->size() / 4;
-      } catch (...) {
+      std::unique_ptr<rocjitsu::Instruction> inst(decode_valid(*decoder, &data[pc]));
+      if (!inst) {
         ++pc;
+        continue;
       }
+      EXPECT_NE(std::string_view(inst->mnemonic()), "s_waitcnt")
+          << "GFX9 s_waitcnt found in translated output at offset 0x" << std::hex << pc * 4;
+      pc += inst->size() / 4;
     }
   }
 }
@@ -956,22 +945,17 @@ TEST(BinaryTranslatorE2E, DumpTranslation) {
     size_t words = size / 4, pc = 0;
     printf("\n--- %s (%zu bytes, %zu words) ---\n", label, size, words);
     while (pc < words) {
-      try {
-        std::unique_ptr<rocjitsu::Instruction> inst(decode_valid(*dec, &data[pc]));
-        if (!inst) {
-          printf("  0x%04zx: ???\n", pc * 4);
-          ++pc;
-          continue;
-        }
-        printf("  0x%04zx: %-45s [", pc * 4, inst->disassemble().c_str());
-        for (int i = 0; i < inst->size() / 4; i++)
-          printf("%s%08X", i ? " " : "", data[pc + i]);
-        printf("]\n");
-        pc += inst->size() / 4;
-      } catch (...) {
-        printf("  0x%04zx: [decode error] 0x%08X\n", pc * 4, data[pc]);
+      std::unique_ptr<rocjitsu::Instruction> inst(decode_valid(*dec, &data[pc]));
+      if (!inst) {
+        printf("  0x%04zx: ???\n", pc * 4);
         ++pc;
+        continue;
       }
+      printf("  0x%04zx: %-45s [", pc * 4, inst->disassemble().c_str());
+      for (int i = 0; i < inst->size() / 4; i++)
+        printf("%s%08X", i ? " " : "", data[pc + i]);
+      printf("]\n");
+      pc += inst->size() / 4;
     }
   };
 

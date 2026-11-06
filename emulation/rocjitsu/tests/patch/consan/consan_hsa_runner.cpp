@@ -416,13 +416,4 @@ int run(int argc, char **argv) {
 
 } // namespace
 
-int main(int argc, char **argv) {
-  try {
-    return run(argc, argv);
-  } catch (const std::exception &error) {
-    std::cerr << "HSA runner tool failure: " << error.what() << '\n';
-    // An exception is not completion; process teardown reclaims its HSA
-    // resources rather than freeing allocations a GPU may still be using.
-    ::_exit(3);
-  }
-}
+int main(int argc, char **argv) { return run(argc, argv); }
