@@ -91,6 +91,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Fixed `ncclCommSplit` and `ncclCommShrink` crashing when `newcomm` is `NULL`. They now return `ncclInvalidArgument`.
 * Fixed `ncclCommSplit` and `ncclCommShrink` leaking the child communicator when a late initialization step failed, for example with an invalid `RCCL_UNROLL_FACTOR`. The error is still returned, and the child handle is now returned too so it can be released with `ncclCommDestroy`.
 * Fixed communicator initialization leaking memory when connecting rings or trees failed.
+* Fixed communicator creation with socket encryption (`ncclSetEncryption`) failing intermittently on 2-rank communicators, including one process driving 2 GPUs, and on any communicator with `NCCL_BOOTSTRAP_BIDIR_ALLGATHER=0`. The TLS server sent session tickets that bootstrap clients which only write never read, so closing such a socket reset the connection and dropped the bootstrap data still queued. RCCL no longer sends TLS session tickets.
 
 ### Known issues
 
