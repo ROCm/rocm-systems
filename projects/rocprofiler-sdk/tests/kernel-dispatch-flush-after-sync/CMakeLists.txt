@@ -57,13 +57,15 @@ set(CMAKE_HIP_EXTENSIONS OFF)
 set(CMAKE_HIP_STANDARD_REQUIRED ON)
 
 find_package(rocprofiler-sdk REQUIRED)
+find_package(Threads REQUIRED)
 
 set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
 add_executable(kernel-dispatch-flush-after-sync)
 target_sources(kernel-dispatch-flush-after-sync PRIVATE main.cpp)
 target_link_libraries(
-    kernel-dispatch-flush-after-sync PRIVATE rocprofiler-sdk::rocprofiler-sdk
-                                             rocprofiler-sdk::tests-build-flags)
+    kernel-dispatch-flush-after-sync
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::tests-build-flags
+            Threads::Threads)
 
 rocprofiler_add_integration_execute_test(
     kernel-dispatch-flush-after-sync
