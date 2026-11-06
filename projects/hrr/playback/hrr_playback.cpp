@@ -65,9 +65,11 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <map>
 #include <optional>
+#include <sstream>
 #include <string>
 #ifdef _WIN32
 #  include <fcntl.h>
@@ -179,42 +181,43 @@ struct ProcessInfo {
   bool complete = false;
 };
 
-static bool read_process_manifest(const fs::path& path, ProcessInfo& out) {
-  FILE* f = fopen(path.string().c_str(), "r");
-  if (!f) return false;
-
+// The one manifest.json parser: --repair feeds it bytes read through the verified
+// digests, the directory scan feeds it the file as it is.
+static bool parse_process_manifest(const std::string& text, ProcessInfo& out) {
   ProcessInfo info{};
   bool saw_pid = false;
-  char line[256];
-  while (fgets(line, sizeof(line), f)) {
+  size_t pos = 0;
+  while (pos < text.size()) {
+    size_t end = text.find('\n', pos);
+    if (end == std::string::npos) end = text.size();
+    const std::string line = text.substr(pos, end - pos);
+    pos = end + 1;
     unsigned long long u = 0;
     char b[8] = {};
-    if (sscanf(line, " \"pid\": %llu", &u) == 1) {
+    if (sscanf(line.c_str(), " \"pid\": %llu", &u) == 1) {
       info.pid = static_cast<uint64_t>(u);
       saw_pid = true;
-      continue;
-    }
-    if (sscanf(line, " \"parent_pid\": %llu", &u) == 1) {
+    } else if (sscanf(line.c_str(), " \"parent_pid\": %llu", &u) == 1) {
       info.parent_pid = static_cast<uint64_t>(u);
-      continue;
-    }
-    if (sscanf(line, " \"event_count\": %llu", &u) == 1) {
+    } else if (sscanf(line.c_str(), " \"event_count\": %llu", &u) == 1) {
       info.event_count = static_cast<uint64_t>(u);
-      continue;
-    }
-    if (sscanf(line, " \"blob_count\": %llu", &u) == 1) {
+    } else if (sscanf(line.c_str(), " \"blob_count\": %llu", &u) == 1) {
       info.blob_count = static_cast<uint64_t>(u);
-      continue;
-    }
-    if (sscanf(line, " \"complete\": %7[^,\n ]", b) == 1) {
+    } else if (sscanf(line.c_str(), " \"complete\": %7[^,\n ]", b) == 1) {
       info.complete = (strcmp(b, "true") == 0);
-      continue;
     }
   }
-  fclose(f);
   if (!saw_pid) return false;
   out = info;
   return true;
+}
+
+static bool read_process_manifest(const fs::path& path, ProcessInfo& out) {
+  std::ifstream f(path, std::ios::binary);
+  if (!f) return false;
+  std::ostringstream ss;
+  ss << f.rdbuf();
+  return parse_process_manifest(ss.str(), out);
 }
 
 static bool read_root_owner_pid(const fs::path& root, uint64_t& owner_pid) {
@@ -1361,16 +1364,19 @@ static int repair_archive(const hrr::Archive& archive) {
   bool have_info = false;
 #ifdef HRR_HAVE_ARCHIVE_SIGN
   if (archive.checked) {
-    hrr::ManifestIds ids;
+    std::vector<uint8_t> data;
     std::string read_err;
     bool refused = false;
-    have_info = hrr::read_manifest_ids(archive.path, &archive.verified, ids, &read_err, &refused);
-    if (refused) {
-      fprintf(stderr, "[HRR] repair: %s\n", read_err.c_str());
-      return 1;
+    // A manifest.json the signature did not list is not read at all.
+    if (archive.verified.count("manifest.json")) {
+      if (hrr::read_archive_file(archive.path, "manifest.json", &archive.verified, data,
+                                 &read_err, &refused)) {
+        have_info = parse_process_manifest(std::string(data.begin(), data.end()), info);
+      } else if (refused) {
+        fprintf(stderr, "[HRR] repair: %s\n", read_err.c_str());
+        return 1;
+      }
     }
-    info.pid = ids.pid;
-    info.parent_pid = ids.parent_pid;
   } else
 #endif
   {
