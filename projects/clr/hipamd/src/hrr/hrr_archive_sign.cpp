@@ -51,7 +51,7 @@ bool unhex(const std::string& s, uint8_t* out, size_t n) {
       else return false;
       v = v * 16 + x;
     }
-    if (out) out[i] = static_cast<uint8_t>(v);
+    out[i] = static_cast<uint8_t>(v);
   }
   return true;
 }
