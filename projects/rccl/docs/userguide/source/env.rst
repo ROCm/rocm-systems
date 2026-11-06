@@ -1811,7 +1811,7 @@ parent's settings.
 
 Value accepted
 ^^^^^^^^^^^^^^
-0 or 1. Unset by default, in which case the communicator's ``graphUsageMode``
+``0`` or ``1``. Unset by default, in which case the communicator's ``graphUsageMode``
 applies. In RCCL that defaults to ``0``, so graph mixing support is
 **disabled** by default.
 

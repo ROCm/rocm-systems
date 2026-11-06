@@ -299,20 +299,20 @@ ncclConfig_t
 
  .. c:macro:: graphUsageMode
 
-  Set the graph usage mode for the communicator: 0 (no graphs), 1 (one graph)
-  or 2 (either multiple graphs or a mix of graph and non-graph). In RCCL the
-  default is 0.
+  Set the graph usage mode for the communicator: ``0`` (no graphs), ``1`` (one graph)
+  or ``2`` (either multiple graphs or a mix of graph and non-graph). In RCCL, the
+  default is ``0``.
 
-  Only 2 turns on graph mixing support, and only when every communicator
+  Only ``2`` turns on graph mixing support, and only when every communicator
   involved uses it. :ref:`NCCL_GRAPH_MIXING_SUPPORT` describes what that
   support covers and how the variable, when set to ``0`` or ``1``, overrides
   this field.
 
-  Capturing collectives in mode 0 is accepted by the API but not supported and
-  can lead to hangs. A communicator used from graphs should therefore set 1
-  (one graph at a time) or 2.
+  Capturing collectives in mode ``0`` is accepted by the API, but not supported and
+  can lead to hangs. A communicator used from graphs should therefore set ``1``
+  (one graph at a time) or ``2``.
 
-  Mode 2 cannot be combined with capture-time stream ordering disabled; see
+  Mode ``2`` cannot be combined with capture-time stream ordering disabled; see
   :c:macro:`graphStreamOrdering`.
 
  .. c:macro:: graphStreamOrdering
