@@ -1,0 +1,49 @@
+grbm.ch_util:
+  name: CH Utilization
+  formula: 100 * SUM(GRBM_CH_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum)
+  unit: Percent
+  description: >-
+    Percentage of GPU-active cycles the Central Hub is handling traffic between shader
+    engines and GL2.
+grbm.cp_util:
+  name: CP Utilization
+  formula: 100 * SUM(GRBM_CP_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum)
+  unit: Percent
+  description: >-
+    Percentage of GPU-active cycles the Command Processor is busy.
+grbm.gl1_util:
+  name: GL1 Utilization
+  formula: 100 * SUM(GRBM_GL1CC_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum)
+  unit: Percent
+  description: >-
+    Percentage of GPU-active cycles GL1 is processing requests from WGPs.
+grbm.glarb_util:
+  name: GLARB Utilization
+  formula: 100 * SUM(GRBM_GLARB_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum)
+  unit: Percent
+  description: >-
+    Percentage of GPU-active cycles Graphics Level Arbiter is forwarding requests
+    from GL1 to GL2.
+grbm.gpu_active_cycles:
+  name: GPU Active Cycles
+  formula: AVG(GRBM_GUI_ACTIVE_sum)
+  unit: Cycles
+  description: Total GPU-active cycles during the measurement window.
+grbm.sdma_util:
+  name: SDMA Utilization
+  formula: 100 * SUM(GRBM_SDMA_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum)
+  unit: Percent
+  description: >-
+    Percentage of GPU-active cycles SDMA is performing data copy operations.
+grbm.utcl1_util:
+  name: UTCL1 Utilization
+  formula: 100 * SUM(GRBM_UTCL1_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum)
+  unit: Percent
+  description: >-
+    Percentage of GPU-active cycles UTCL1 is processing translation requests.
+grbm.utcl2_util:
+  name: UTCL2 Utilization
+  formula: 100 * SUM(GRBM_UTCL2_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum)
+  unit: Percent
+  description: >-
+    Percentage of GPU-active cycles UTCL2 is performing page table walks.

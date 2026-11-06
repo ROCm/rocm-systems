@@ -1,0 +1,164 @@
+spi.alloc_failure_barrier_full:
+  name: Allocation Failure - Barrier Full
+  formula: 100 * SUM(SPI_RA_BAR_CU_FULL_CSN_sum) / SUM(SPI_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of SPI-busy cycles workgroup allocation failed due to full barrier
+    slots.
+spi.alloc_failure_bulky_full:
+  name: Allocation Failure - Bulky Full
+  formula: 100 * SUM(SPI_RA_BULKY_FULL_CSN_sum) / SUM(SPI_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of SPI-busy cycles workgroup allocation failed because a bulky workgroup
+    could not be placed.
+spi.alloc_failure_lds_full:
+  name: Allocation Failure - LDS Full
+  formula: 100 * SUM(SPI_RA_LDS_CU_FULL_CSN_sum) / SUM(SPI_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of SPI-busy cycles workgroup allocation failed due to full LDS.
+spi.alloc_failure_named_barriers_full:
+  name: Allocation Failure - Named Barriers Full
+  formula: 100 * SUM(SPI_RA_NAMED_BAR_FULL_CSN_sum) / SUM(SPI_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of SPI-busy cycles workgroup allocation failed due to named barrier
+    exhaustion.
+spi.alloc_failure_temp_space_full:
+  name: Allocation Failure - Temp Space Full
+  formula: 100 * SUM(SPI_RA_TMP_STALL_CSN_sum) / SUM(SPI_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of SPI-busy cycles workgroup allocation failed due to exhausted scratch
+    space.
+spi.alloc_failure_vgpr_full:
+  name: Allocation Failure - VGPR Full
+  formula: 100 * SUM(SPI_RA_VGPR_SIMD_FULL_CSN_sum) / SUM(SPI_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of SPI-busy cycles workgroup allocation failed due to VGPR exhaustion.
+spi.alloc_failure_waveslots_full:
+  name: Allocation Failure - Waveslots Full
+  formula: 100 * SUM(SPI_RA_WAVE_SIMD_FULL_CSN_sum) / SUM(SPI_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of SPI-busy cycles workgroup allocation failed due to full wavefront
+    slots.
+spi.context_restore_rate:
+  name: Context Restore Rate
+  formula: 100 * SUM(SPI_ALL_WAVE_RESTORED_sum) / SUM(SPI_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of SPI-busy cycles the GPU is restoring wavefront contexts.
+spi.context_save_rate:
+  name: Context Save Rate
+  formula: 100 * SUM(SPI_ALL_WAVE_SAVED_sum) / SUM(SPI_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of SPI-busy cycles the GPU is saving wavefront contexts.
+spi.cpc_pre_alloc_req_stall_rate:
+  name: CPC Pre-Allocation Request Stall Rate
+  formula: 100 * SUM(SPI_RA_PRE_ALLOC_STALL_sum) / SUM(SPI_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of SPI-busy cycles where SPI cannot accept new pre-allocation requests
+    from CPC because its internal pre-allocation pipeline is full.
+spi.dispatched_clusters:
+  name: Dispatched Clusters
+  formula: AVG(SPI_CSN_NUM_CLUSTERS_sum)
+  unit: Count
+  description: Total cluster-level dispatches issued by SPI.
+spi.dispatched_group_groups:
+  name: Dispatched Group-of-Groups
+  formula: AVG(SPI_CSN_NUM_GROUPS_OF_GROUPS_sum)
+  unit: Count
+  description: Total group-of-groups dispatch operations issued by SPI.
+spi.dispatched_wavefronts:
+  name: Dispatched Wavefronts
+  formula: AVG(SPI_ALL_WAVE_sum)
+  unit: Wavefronts
+  description: >-
+    The total number of wavefronts, summed over all workgroups, forming this kernel
+    launch. On AMD Instinct CDNA accelerators and GCN GPUs, the wavefront size is
+    always 64 work-items, so the total number of wavefronts should equal the grid
+    size divided by 64, rounded up.
+spi.dispatched_workgroups:
+  name: Dispatched Workgroups
+  formula: AVG(SPI_RA_REQ_ALLOC_sum)
+  unit: Workgroups
+  description: >-
+    Workgroups launched via successful SPI resource allocation (SPI_RA_REQ_ALLOC_sum).
+    SPI_CSN_NUM_THREADGROUPS_sum is CS-pipe scoped and reads zero for gfx1250 compute
+    dispatches.
+spi.per_queue_outstanding_dispatch_req_p0_q0_sum:
+  name: Per-Queue Outstanding Dispatch Requests (P0_Q0_sum)
+  formula: SUM(SPI_CSQ_P0_Q0_OCCUPANCY_sum) / SUM(SPI_BUSY_sum)
+  unit: Requests
+  description: Average in-flight dispatch requests in CPC pipe 0, queue 0.
+spi.per_queue_outstanding_dispatch_req_p0_q1_sum:
+  name: Per-Queue Outstanding Dispatch Requests (P0_Q1_sum)
+  formula: SUM(SPI_CSQ_P0_Q1_OCCUPANCY_sum) / SUM(SPI_BUSY_sum)
+  unit: Requests
+  description: Average in-flight dispatch requests in CPC pipe 0, queue 1.
+spi.per_queue_outstanding_dispatch_req_p1_q0_sum:
+  name: Per-Queue Outstanding Dispatch Requests (P1_Q0_sum)
+  formula: SUM(SPI_CSQ_P1_Q0_OCCUPANCY_sum) / SUM(SPI_BUSY_sum)
+  unit: Requests
+  description: Average in-flight dispatch requests in CPC pipe 1, queue 0.
+spi.per_queue_outstanding_dispatch_req_p1_q1_sum:
+  name: Per-Queue Outstanding Dispatch Requests (P1_Q1_sum)
+  formula: SUM(SPI_CSQ_P1_Q1_OCCUPANCY_sum) / SUM(SPI_BUSY_sum)
+  unit: Requests
+  description: Average in-flight dispatch requests in CPC pipe 1, queue 1.
+spi.per_se_wavefront_life:
+  name: Per-SE Wavefront Life
+  formula: SUM(SPI_ALL_WAVE_IN_FLIGHT_sum) / SUM(SPI_ALL_WAVE_sum)
+  unit: Cycles
+  description: Average wavefront lifetime in cycles per Shader Engine.
+spi.per_se_wavefront_occupancy:
+  name: Per-SE Wavefront Occupancy
+  formula: SUM(SPI_ALL_WAVE_IN_FLIGHT_sum) / SUM(SPI_BUSY_sum)
+  unit: Wavefronts
+  description: Average wavefronts in-flight per Shader Engine.
+spi.resource_allocation_rate:
+  name: Resource Allocation Rate
+  formula: 100 * SUM(SPI_RA_REQ_ALLOC_sum) / SUM(SPI_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of SPI-busy cycles SPI successfully allocated resources and dispatched
+    a workgroup.
+spi.resource_no_allocation_rate:
+  name: Resource No-Allocation Rate
+  formula: 100 * SUM(SPI_RA_REQ_NO_ALLOC_CSN_sum) / SUM(SPI_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of SPI-busy cycles SPI failed to allocate resources for a workgroup.
+spi.thread_dispatch_rate:
+  name: Thread Dispatch Rate
+  formula: SUM(SPI_ALL_WAVE_ITEMS_sum) / SUM(SPI_BUSY_sum)
+  unit: Threads per Cycle
+  description: Average threads launched per busy cycle.
+spi.util:
+  name: SPI Utilization
+  formula: 100 * SUM(SPI_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum * $se_per_gpu)
+  unit: Percent
+  description: >-
+    Percentage of GPU-busy cycles the SPI is dispatching workgroups.
+spi.wavefront_dispatch_fifo_full_rate:
+  name: Wavefront Dispatch FIFO Full Rate
+  formula: 100 * SUM(SPI_RA_WR_CTL_FULL_sum) / SUM(SPI_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of SPI-busy cycles the wavefront dispatch FIFO is full.
+spi.wavefront_dispatch_rate:
+  name: Wavefront Dispatch Rate
+  formula: SUM(SPI_ALL_WAVE_sum) / SUM(SPI_BUSY_sum)
+  unit: Wavefronts per Cycle
+  description: Average wavefronts launched per busy cycle.
+spi.workgroup_manager_util:
+  name: Workgroup Manager Utilization
+  formula: 100 * SUM(GRBM_SPI_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum)
+  unit: Percent
+  description: >-
+    Percentage of GPU-active cycles the SPI is dispatching workgroups.

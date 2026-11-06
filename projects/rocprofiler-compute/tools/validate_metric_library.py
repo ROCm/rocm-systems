@@ -130,14 +130,20 @@ CEILINGS_WITHOUT_METRIC = ("I8Ops", "I32Ops", "I64Ops", "MALLBw")
 ARCH_CEILINGS_WITHOUT_METRIC = {
     # The roofline shows the combined F6F4 MFMA rate.
     "gfx950": ("MFMAF4Flops", "MFMAF6Flops"),
+    # The roofline shows the F32 and F64 VALU rates only.
+    "gfx115x": ("FP16Flops", "BF16Flops"),
+    # The VALU rows show theoretical peaks.
+    "gfx1250": ("FP16Flops", "FP32Flops", "FP64Flops"),
 }
 VARIABLE_FIELDS = ("formula",)
 # Metric fields the runtime evaluates.
 EXPRESSION_FIELDS = ("formula", *METRIC_OPTIONAL_FIELDS)
 # Ids allowed to share another id's formula (id -> that id): the same counters bounded
-# by a different measured ceiling. gfx950 counts MXF8 matrix work in the F8 counter.
+# by a different measured ceiling. gfx950 and gfx1250 count MXF8 matrix work in the F8
+# counter.
 SHARED_FORMULA_IDS = {
     "compute.mfma_flops_mxf8": "compute.mfma_flops_f8",
+    "compute.wmma_flops_mxfp8": "compute.wmma_flops_fp8",
 }
 # Ids that hold another id's formula on a different arch (id -> that id): one label
 # shows two equations on an arch (D8 Kind 3), and the parent arch's equation keeps
@@ -145,7 +151,12 @@ SHARED_FORMULA_IDS = {
 SPLIT_FORMULA_IDS = {}
 # Ids allowed to share a value on an arch although their formulas differ (arch -> id
 # pairs): different quantities whose formulas coincide there.
-SAME_VALUE_IDS = {}
+SAME_VALUE_IDS = {
+    "gfx115x": [
+        # The CDNA total performance; gfx115x's panel counts only VALU instructions.
+        ("compute.total_flops", "compute.valu_flops"),
+    ],
+}
 # The same-value check evaluates each formula on one dispatch per normalization
 # ($denom), with counters drawn from this seed. Machine values with no static source are
 # drawn too: the ones each device reports (CU, SE and SIMD counts, waves per CU, clocks,
@@ -236,10 +247,64 @@ DISPLAY_VARIANTS = {
         "11.2.9": _PIPELINE_MFMA_UTIL,
     },
 }
+DISPLAY_VARIANTS["gfx115x"] = {
+    # LDS bandwidth with gfx115x's 32 LDS banks per CU written as a constant.
+    "3.4.3": (
+        "LDS Estimated Bandwidth",
+        "lds.theoretical_bw",
+        "32 * 4 * SUM(SQC_LDS_IDX_ACTIVE_sum - SQC_LDS_BANK_CONFLICT_sum)"
+        " / (SUM(End_Timestamp - Start_Timestamp) / 1e9)",
+    ),
+    "4.1.0": (
+        "VALU FLOPs",
+        "compute.valu_flops",
+        "SUM($wave_size * SQ_INSTS_VALU_sum) / SUM(End_Timestamp - Start_Timestamp)",
+    ),
+    "4.1.1": (
+        "VALU FLOPs (F64)",
+        "compute.valu_flops_f64",
+        "SUM($wave_size * SQ_INSTS_VALU_DP_sum) / SUM(End_Timestamp - Start_Timestamp)",
+    ),
+}
+DISPLAY_VARIANTS["gfx1250"] = {
+    "3.3.4": (
+        "GL0 Hit Rate",
+        "gl0.hit_rate",
+        "SUM(TX_VMW_REQ_sum - TX_VMW_REQ_MISS_sum) / SUM(TX_VMW_REQ_sum) * 100",
+    ),
+}
 # Rows whose unit differs from their metric's (positional id -> label, unit).
 _CDNA_UNIT_VARIANTS = {"7.1.8": ("LDS Allocation", "Bytes")}
 UNIT_VARIANTS = {
     arch: _CDNA_UNIT_VARIANTS for arch in ("gfx908", "gfx90a", "gfx942", "gfx950")
+}
+UNIT_VARIANTS["gfx115x"] = {
+    "3.4.0": ("LDS Req", "(Requests + $normUnit)"),
+    "7.2.4": ("LDS Allocation", "Bytes"),
+    "9.2.0": ("Total Requests", "(Count + $normUnit)"),
+    "9.2.1": ("Read Requests", "(Count + $normUnit)"),
+    "9.2.2": ("Write Requests", "(Count + $normUnit)"),
+    "9.4.0": ("GL1 Read Requests", "(Count + $normUnit)"),
+    "9.4.2": ("GL1 Write Requests", "(Count + $normUnit)"),
+    "11.2.0": ("Total Requests", "(Count + $normUnit)"),
+    "11.2.1": ("Read Requests", "(Count + $normUnit)"),
+    "11.2.2": ("Write Requests", "(Count + $normUnit)"),
+    "11.4.0": ("GL2 Read Requests", "(Count + $normUnit)"),
+    "11.4.1": ("GL2 Read 128B Requests", "(Count + $normUnit)"),
+    "11.4.2": ("GL2 Write Requests", "(Count + $normUnit)"),
+}
+UNIT_VARIANTS["gfx1250"] = {
+    "2.1.17": ("Active WGPs", "WGPs per Cycle"),
+    "3.4.0": ("LDS Load Requests", "(Requests + $normUnit)"),
+    "3.4.1": ("LDS Store Requests", "(Requests + $normUnit)"),
+    "3.4.2": ("LDS Atomic Requests", "(Requests + $normUnit)"),
+    "3.4.3": ("Async Load Requests", "(Requests + $normUnit)"),
+    "3.4.4": ("Async Store Requests", "(Requests + $normUnit)"),
+    "3.4.14": ("TDM Load Requests", "(Requests + $normUnit)"),
+    "3.4.15": ("TDM Store Requests", "(Requests + $normUnit)"),
+    "6.2.0": ("Dispatched Workgroups", "Count"),
+    "6.2.1": ("Dispatched Wavefronts", "Count"),
+    "7.2.5": ("LDS Allocation", "Bytes"),
 }
 
 
