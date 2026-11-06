@@ -170,9 +170,8 @@ TEST_CASE("Unit_HRR_PinnedMemAllocHost_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipHostFree(in));
 }
 
-// The kernel is recorded into a graph, then the host changes the buffer and
-// launches the graph twice. The bytes the kernel reads are those at each
-// hipGraphLaunch, not those from when the node was captured.
+// The host changes the buffer between two launches of a recorded graph. The
+// kernel reads the bytes present at each hipGraphLaunch.
 TEST_CASE("Unit_HRR_PinnedHostGraph_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
   int *in = nullptr, *dev_in = nullptr, *dout = nullptr;
@@ -204,9 +203,8 @@ TEST_CASE("Unit_HRR_PinnedHostGraph_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipHostFree(in));
 }
 
-// The input goes back to bytes the archive already holds: A, B, A, B. Capture
-// finds the third and fourth snapshots among the blobs it has written and
-// must still record them, since each differs from the record before it.
+// The input alternates A, B, A, B. Capture already holds the third and fourth
+// blobs but must still record them, since each differs from the record before.
 TEST_CASE("Unit_HRR_PinnedHostRevisit_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
   int *in = nullptr, *dev_in = nullptr, *dout = nullptr;
@@ -411,8 +409,7 @@ HRR_TEST_CASE(Unit_HRR_PinnedHostRoundtrip) {
   }
 }
 
-// The graph's kernels read the buffer at hipGraphLaunch. Replay restores both
-// launches; the launch that only recorded the node is skipped.
+// Replay restores both graph launches, not the launch that only recorded the node.
 HRR_TEST_CASE(Unit_HRR_PinnedHostGraphRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_pinned_host_graph"};
   hrr_capture_direct("Unit_HRR_PinnedHostGraph_Direct", cap.path, 5);
@@ -427,9 +424,8 @@ HRR_TEST_CASE(Unit_HRR_PinnedHostGraphRoundtrip) {
         std::string::npos);
 }
 
-// Every launch is restored, the two whose bytes were already in the archive
-// included. Without the third and fourth records replay would leave B in the
-// buffer for the third launch and its check would fail.
+// Replay restores every launch. Without the third and fourth records it
+// would leave B in the buffer for the third launch.
 HRR_TEST_CASE(Unit_HRR_PinnedHostRevisitRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_pinned_host_revisit"};
   hrr_capture_direct("Unit_HRR_PinnedHostRevisit_Direct", cap.path, 5);

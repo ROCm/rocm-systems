@@ -4362,9 +4362,8 @@ hipError_t playback_hipGraphInstantiateWithFlags(PlaybackContext& ctx,
     return r;
 }
 
-// hipStreamPerThread is a token rather than a stream capture saw created, so
-// translate_stream would send it, and the null stream of an _spt call, to the
-// legacy null stream. Both mean this thread's default stream.
+// hipStreamPerThread, and the null stream of an _spt call, mean this thread's
+// default stream. translate_stream would send both to the legacy null stream.
 static hipStream_t spt_aware_stream(PlaybackContext& ctx, uint64_t rec, bool spt) {
     if (rec == reinterpret_cast<uint64_t>(hipStreamPerThread) || (spt && rec == 0))
         return hipStreamPerThread;
@@ -4374,9 +4373,8 @@ static hipStream_t spt_aware_stream(PlaybackContext& ctx, uint64_t rec, bool spt
 // ---------------------------------------------------------------------------
 // Manual playback: hipGraphLaunch
 // ---------------------------------------------------------------------------
-// Payload: the fixed hrr_args struct, then u16 num_snapshots, then that many
-// 41-byte pinned host snapshot records. The copies are queued on the launch
-// stream ahead of the graph.
+// Payload: the fixed hrr_args struct, u16 num_snapshots, then that many 41-byte
+// pinned host snapshot records. The copies are queued ahead of the graph.
 static hipError_t playback_graph_launch(PlaybackContext& ctx, const uint8_t* payload,
                                         const char* api, bool spt) {
     const auto* hdr = reinterpret_cast<const hrr_event_header*>(payload);
@@ -4436,8 +4434,8 @@ static hipError_t playback_graph_launch(PlaybackContext& ctx, const uint8_t* pay
         timing_ok = (HRR_HIP_CHECK(hipEventRecord(tl_g_start, stream)) == hipSuccess);
 
     hipError_t r = spt ? hipGraphLaunch_spt(exec, stream) : hipGraphLaunch(exec, stream);
-    // The graph and its snapshot copies are queued. Not held across the sync
-    // below, which can wait on a graph that waits for work yet to replay.
+    // Release before the sync below: it can wait on a graph that waits for
+    // work yet to replay.
     hrr_launch_release();
 
     if (timing_ok)

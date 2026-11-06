@@ -102,8 +102,7 @@ MANUAL_CAPTURE_APIS: Set[str] = {
     "hipLaunchKernelExC",
     # Cooperative launch — void** kernelParams, same encoding as the others.
     "hipModuleLaunchCooperativeKernel",
-    # Graph launch — pinned host memory the graph's kernels read is snapshotted
-    # here, at the launch that runs them, and the records follow the fixed event.
+    # Graph launch — snapshot records for pinned host memory follow the fixed event.
     "hipGraphLaunch",
     "hipGraphLaunch_spt",
     # <<<>>> launch config — must save grid/block/shared/stream into TLS for hipLaunchByPtr
@@ -341,8 +340,6 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     # built via the unsupported explicit node API.
     "hipGraphInstantiateWithFlags",
     "hipGraphLaunch",
-    # Pinned bytes a graph kernel reads are those at hipGraphLaunch, not those
-    # at the capturing launch. The event carries the same snapshot records.
     "hipGraphLaunch_spt",
     # DtoH driver-style copies — dst is a host pointer (not in alloc_map); need temp buffer
     "hipMemcpyDtoH",
@@ -689,8 +686,7 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipMalloc3DArray",
     # hipMalloc3D — pitchedDevPtr output (stale), hipExtent non-castable; output not needed for D2H — noop
     "hipMalloc3D",
-    # hipMallocHost / hipFreeHost / hipHostAlloc / hipMemAllocHost are replayed
-    # by hand: see MANUAL_PLAYBACK_APIS.
+    # hipMallocHost / hipFreeHost / hipHostAlloc / hipMemAllocHost: see MANUAL_PLAYBACK_APIS.
     # hipMemAllocPitch — hipDeviceptr_t* output (type mismatch) + output not in alloc_map — noop
     "hipMemAllocPitch",
     # hipHostGetFlags — output flag ptr (stale) — noop

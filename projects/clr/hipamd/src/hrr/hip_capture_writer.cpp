@@ -128,22 +128,14 @@ namespace writer {
 // 128-bit content hash of a blob or code object.
 //
 // The key only has to be unique within one archive: replay opens the file
-// named by the hash it recorded and never recomputes it, so an archive written
-// by an older runtime still replays. What it cannot be is a byte-at-a-time
-// FNV. A pinned host snapshot hashes the whole allocation on every launch that
-// reads it. A serving step can keep a multi-megabyte buffer in pinned memory
-// that its kernels read on every step. Two dependent 64-bit multiplies per
-// byte run at about 1 GB/s, so one snapshot of a large buffer was most of the
-// capture cost of a step.
+// named by the recorded hash and never recomputes it, so older archives still
+// replay. A byte-at-a-time FNV is too slow, though. A pinned host snapshot
+// hashes the whole allocation on every launch, and FNV runs at about 1 GB/s.
 //
-// Four independent lanes hide the multiply latency. Each lane takes xxHash64's
-// round (multiply the input, add, rotate, multiply), which is a bijection of
-// the input word for a fixed state. A multiply alone is not enough: it never
-// moves a difference down, so top-bit flips in two words of one lane cancel.
-// The length is mixed into the seed so a prefix of another buffer does not
-// share its hash, and the tail is accumulated whole rather than byte by byte.
-// Each half of the result chains all four lanes through the avalanche, in
-// opposite orders.
+// Four independent lanes hide the multiply latency. Each lane uses xxHash64's
+// round, which is a bijection of the input word. A multiply alone is not
+// enough: top-bit flips in two words of one lane would cancel. The length is
+// mixed into the seed, so a prefix of a buffer does not share its hash.
 // ---------------------------------------------------------------------------
 
 static inline uint64_t hash_load64(const uint8_t* p) {
@@ -182,7 +174,6 @@ static Hash128 hash_buffer(const void* data, size_t len) {
     d = hash_round(d, hash_load64(p + 24));
     p += 32;
   }
-  // At most three whole words and a partial one are left, one per lane.
   uint64_t* lane[3] = {&a, &b, &c};
   for (int i = 0; p + 8 <= end; i++, p += 8) *lane[i] = hash_round(*lane[i], hash_load64(p));
   if (p < end) {
@@ -1872,10 +1863,8 @@ class BlobClaim {
 
 Hash128 hash_bytes(const void* data, size_t len) { return hash_buffer(data, len); }
 
-// False whenever write_blob() would not simply return `h`: an open archive
-// it has not finalized, a child that has yet to reopen, a buffer over the cap,
-// or bytes not written. A write still in flight is not trusted either: it may
-// yet fail and unpublish the key, and write_blob() waits for it.
+// False whenever write_blob() would do more than return `h`. A write still in
+// flight counts as not written: it may fail and unpublish the key.
 bool blob_written(Hash128 h, size_t len) {
   if (g_reopen_after_fork.load(std::memory_order_acquire)) return false;
   if (g_max_blob_bytes != 0 && len > g_max_blob_bytes) return false;

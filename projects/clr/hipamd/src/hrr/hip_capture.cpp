@@ -41,7 +41,7 @@
 // HIP runtime internals
 #include "../hip_global.hpp"       // hip::asKernel()
 #include "../hip_internal.hpp"
-#include "../hip_graph_internal.hpp"  // graph exec nodes, for pinned snapshots at launch
+#include "../hip_graph_internal.hpp"
 #include "hip/amd_detail/hip_api_trace.hpp"
 #include "utils/flags.hpp"         // HIP_HRR_CAPTURE_OUTPUT flag
 
@@ -200,7 +200,7 @@ struct HostSnap {
   hrr_cap::Hash128 hash{}, last{};
   hipStream_t      last_stream = nullptr;
   bool             record = false;  // contents or stream differ from the last record
-  bool             cached = false;  // hash names a blob the archive already holds
+  bool             cached = false;  // the archive already holds the blob
   std::unique_ptr<uint8_t[]> copy;  // the bytes, until hashed and written
 };
 std::mutex                       g_pinned_mu;  // also held while a snapshot hashes
@@ -282,10 +282,8 @@ static void pinned_scan_locked(const uint8_t* bytes, size_t sz) {
     } else {
       s.last        = it->second.last;
       s.last_stream = it->second.last_stream;
-      // Most launches find bytes the archive already holds: a decode step
-      // reuses a request buffer it rarely writes. Hashing them in place,
-      // under the lock that keeps them allocated, is one read; the hash is
-      // of exactly the bytes read, so the blob it names is this snapshot.
+      // Most launches find bytes the archive already holds. Hash them in
+      // place under the lock, which saves a copy.
       const auto* src = reinterpret_cast<const void*>(s.base);
       const hrr_cap::Hash128 h = hrr_cap::writer::hash_bytes(src, s.size);
       if (hrr_cap::writer::blob_written(h, s.size)) {
@@ -294,9 +292,8 @@ static void pinned_scan_locked(const uint8_t* bytes, size_t sz) {
         t_snaps.push_back(std::move(s));
         continue;
       }
-      // New bytes are copied, then hashed and written from the copy after the
-      // lock, so the blob holds the bytes its hash names even if the host
-      // changed them after the hash above.
+      // New bytes are copied and written after the lock. The host may change
+      // the buffer meanwhile, so the blob must come from the copy.
       s.copy.reset(new (std::nothrow) uint8_t[s.size]);
       if (s.copy) {
         std::memcpy(s.copy.get(), src, s.size);
@@ -351,9 +348,8 @@ static void pinned_finish_snapshots() {
 }
 
 // One kernel of a graph, resolved before the tracking lock is taken. The
-// exec's own GetNodes() is its launch order, filled on the first launch, so
-// this walks the cloned vertices instead. The parameter pointers stay valid
-// for the launch that follows.
+// exec's GetNodes() is empty until the first launch, so this walks the cloned
+// vertices. The parameter pointers stay valid through the launch.
 struct PinnedGraphKernel {
   hipFunction_t f = nullptr;
   void** params = nullptr;
@@ -383,8 +379,7 @@ static void pinned_collect_graph(hip::Graph* graph, std::vector<hip::Graph*>& se
 
 // Takes the snapshot of one launch before the real call and drops it after,
 // whether or not the launch was recorded. A graph exec is snapshotted the same
-// way: its kernels read pinned memory when the graph launches, not when the
-// capturing launch recorded the node.
+// way, at hipGraphLaunch.
 struct PinnedSnapshot {
   PinnedSnapshot(hipFunction_t f, void** params, void** extra,
                  const void* kbuf = nullptr, size_t ksz = 0) {
@@ -412,9 +407,8 @@ struct PinnedSnapshot {
   ~PinnedSnapshot() { t_snaps.clear(); }
 };
 
-// The stream a launch really ran on, as pinned tracking compares it. The null
-// stream of an _spt call and hipStreamPerThread are both this thread's own
-// default stream, which differs per thread.
+// The stream a launch ran on. The null stream of an _spt call and
+// hipStreamPerThread both mean this thread's default stream.
 static hipStream_t pinned_stream(hipStream_t stream, bool spt) {
   if (spt && !stream) stream = hipStreamPerThread;
   hip::getStreamPerThread(stream);
@@ -422,10 +416,7 @@ static hipStream_t pinned_stream(hipStream_t stream, bool spt) {
 }
 
 // Replay restores a record on its launch's stream, so a launch on another
-// stream than the last record's needs its own. A record written while this
-// stream is capturing does not become the allocation's last: replay restores
-// nothing for that launch, and the graph launch that runs the kernel records
-// the bytes again.
+// stream needs its own record.
 static void pinned_mark_stream(hipStream_t stream) {
   for (HostSnap& s : t_snaps)
     if (s.last_stream != stream && (s.hash.lo || s.hash.hi)) s.record = true;
@@ -443,9 +434,9 @@ static bool pinned_stream_is_capturing(hipStream_t stream) {
          reinterpret_cast<hip::Stream*>(cs)->GetCaptureStatus() != hipStreamCaptureStatusNone;
 }
 
-// Writes the event and, while still holding the tracking lock, makes each
-// recorded snapshot the allocation's last. The lock orders that update with
-// the event.
+// Writes the event and updates each allocation's last record under the same
+// lock, so both happen in one order. A launch under stream capture updates
+// nothing: replay restores nothing for it, and the graph launch records the bytes.
 static void pinned_write_event(uint16_t api, void* payload, uint32_t size,
                                hipStream_t stream) {
   const bool capturing = pinned_stream_is_capturing(stream);
@@ -1920,8 +1911,8 @@ hipError_t capture_hipHostUnregister(void* hostPtr) {
   return r;
 }
 
-// A graph launch event is the fixed hrr_args struct, then u16 num_snapshots,
-// then one 41-byte record per snapshot (the kernel-launch record layout).
+// A graph launch event is the fixed hrr_args struct, u16 num_snapshots, then
+// one 41-byte record per snapshot, in the kernel-launch layout.
 template <typename Args>
 static hipError_t capture_graph_launch(uint16_t api, hipGraphExec_t graphExec, hipStream_t stream,
                                       hipError_t (*real)(hipGraphExec_t, hipStream_t)) {
