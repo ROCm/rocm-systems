@@ -84,6 +84,29 @@ class TuningGeneralMicrotest : public ::testing::Test {
     return result.timeUs;
   }
 
+  // A Ring graph with 2 channels over PATH_NVL, bwIntra 10 and bwInter 1, for ncclTuningRingModelInit.
+  void SetRingInitComm(int nNodes, int nRanks, int minCompCap) {
+    comm_->nNodes = nNodes;
+    comm_->nRanks = nRanks;
+    comm_->minCompCap = minCompCap;
+    ncclTopoGraph& graph = comm_->graphs[NCCL_ALGO_RING];
+    graph.nChannels = 2;
+    graph.bwIntra = 10.0f;
+    graph.bwInter = 1.0f;
+    graph.typeIntra = PATH_NVL;
+    graph.sameChannels = 1;
+  }
+
+  ncclResult_t RingInit(int proto) {
+    return ncclTuningRingModelInit(comm_.get(), NCCL_ALGO_RING * NCCL_NUM_PROTOCOLS + proto, nullptr);
+  }
+  float RingBw(ncclFunc_t func, int proto) {
+    return comm_->tuningContext.generalBandwidths[func][NCCL_ALGO_RING][proto];
+  }
+  float RingLat(ncclFunc_t func, int proto) {
+    return comm_->tuningContext.generalLatencies[func][NCCL_ALGO_RING][proto];
+  }
+
   std::unique_ptr<ncclComm> comm_;
 };
 
@@ -192,14 +215,15 @@ TEST_F(TuningGeneralMicrotest, TimeEstimatePenalizesDeepFp8RingOnly) {
   EXPECT_FLOAT_EQ(2048.0f, ncclTuningGetTime(&input, NCCL_ALGO_RING, &latency, &bandwidth));
 }
 
-// gfx1250 reports compute capability 12.5 (125) and RCCL wires XGMI as PATH_NVL, so a single-node
-// gfx1250 comm takes ring.cc's single-node Blackwell NVLink branch.
+// ncclCudaCompCap() (src/misc/utils.cc) gives gfx1250 125. ncclTopoAddXGMI (src/graph/topo.cc) links XGMI
+// peers as LINK_NVL and the Ring search starts typeIntra at the minimum GPU path type (src/graph/search.cc),
+// so a gfx1250 Ring within an XGMI tray is PATH_NVL and takes ring.cc's single-node Blackwell NVLink branch.
+// A Ring spanning trays is PATH_SYS and does not.
 TEST_F(TuningGeneralMicrotest, RingSimplePlateauScalesWithStepsAndWorkOnSingleNodeNvl) {
   comm_->nNodes = 1;
   comm_->minCompCap = 125;
   comm_->graphs[NCCL_ALGO_RING].typeIntra = PATH_NVL;
-  // AllReduce takes the plateau too. Each Ring step past the first keeps 0.1/0.4 of the remaining
-  // distance to the full 0.4 delta: two steps give 1 + 0.75 * 0.4, fourteen saturate at 1.4.
+  // Two ranks (two AllReduce steps) sit below saturation; eight (fourteen steps) saturate at 1.4.
   EXPECT_NEAR(13.0, RingSimpleTimeUs(ncclFuncAllReduce, 2, 1024), 1e-3);
   EXPECT_NEAR(14.0, RingSimpleTimeUs(ncclFuncAllReduce, 8, 1024), 1e-3);
   // A one-step Ring gets no plateau.
@@ -210,24 +234,134 @@ TEST_F(TuningGeneralMicrotest, RingSimplePlateauScalesWithStepsAndWorkOnSingleNo
   EXPECT_NEAR(12.8125, RingSimpleTimeUs(ncclFuncAllGather, 4, 1 << 20), 1e-3);
 }
 
-TEST_F(TuningGeneralMicrotest, RingSimplePlateauIsFixedMultiNodeAndAbsentElsewhere) {
+// Multi-node, only AllReduce takes the plateau, at a fixed factor whatever the intra-node link.
+TEST_F(TuningGeneralMicrotest, RingSimplePlateauIsFixedMultiNode) {
   comm_->nNodes = 2;
   comm_->minCompCap = 125;
   comm_->graphs[NCCL_ALGO_RING].typeIntra = PATH_NVL;
   EXPECT_NEAR(14.0, RingSimpleTimeUs(ncclFuncAllReduce, 2, 1024), 1e-3);
-  // Single node: gfx942 (compute capability 94) over XGMI and any comm over PCI take no plateau, and
-  // nothing applies below 64 bytes per rank/channel.
+  EXPECT_NEAR(10.0, RingSimpleTimeUs(ncclFuncAllGather, 8, 1024), 1e-3);
+  comm_->graphs[NCCL_ALGO_RING].typeIntra = PATH_PIX;
+  EXPECT_NEAR(14.0, RingSimpleTimeUs(ncclFuncAllReduce, 2, 1024), 1e-3);
+}
+
+// Compute capability below 80 is NVIDIA-only; every AMD target reports 90 or more.
+TEST_F(TuningGeneralMicrotest, RingSimplePlateauIsLargerMultiNodeBeforeAmpere) {
+  comm_->nNodes = 2;
+  comm_->minCompCap = 70;
+  comm_->graphs[NCCL_ALGO_RING].typeIntra = PATH_NVL;
+  EXPECT_NEAR(19.0, RingSimpleTimeUs(ncclFuncAllReduce, 2, 1024), 1e-3);
+}
+
+// gfx942 reports compute capability 94, below the Blackwell gate.
+TEST_F(TuningGeneralMicrotest, RingSimplePlateauIsAbsentOnNonBlackwell) {
   comm_->nNodes = 1;
   comm_->minCompCap = 94;
+  comm_->graphs[NCCL_ALGO_RING].typeIntra = PATH_NVL;
   EXPECT_NEAR(10.0, RingSimpleTimeUs(ncclFuncAllReduce, 8, 1024), 1e-3);
   EXPECT_NEAR(10.0, RingSimpleTimeUs(ncclFuncAllGather, 8, 1024), 1e-3);
+}
+
+TEST_F(TuningGeneralMicrotest, RingSimplePlateauIsAbsentOverPci) {
+  comm_->nNodes = 1;
   comm_->minCompCap = 125;
   comm_->graphs[NCCL_ALGO_RING].typeIntra = PATH_PIX;
   EXPECT_NEAR(10.0, RingSimpleTimeUs(ncclFuncAllGather, 8, 1024), 1e-3);
+}
+
+// A seven-step Ring isolates the 64-byte threshold from step scaling.
+TEST_F(TuningGeneralMicrotest, RingSimplePlateauIsAbsentBelow64Bytes) {
+  comm_->nNodes = 1;
+  comm_->minCompCap = 125;
   comm_->graphs[NCCL_ALGO_RING].typeIntra = PATH_NVL;
-  // A seven-step Ring isolates the 64-byte threshold from step scaling.
   EXPECT_NEAR(10.0, RingSimpleTimeUs(ncclFuncAllGather, 8, 63), 1e-3);
   EXPECT_NEAR(14.0, RingSimpleTimeUs(ncclFuncAllGather, 8, 64), 1e-3);
+}
+
+TEST_F(TuningGeneralMicrotest, RingModelSimIsInvalidWithoutBandwidth) {
+  comm_->tuningContext.generalBandwidths[ncclFuncAllGather][NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = -1.0f;
+  ncclTuningInput_t input = MakeTimeInput(1024, 1, ncclFloat32);
+  input.func = ncclFuncAllGather;
+  ncclTuningResult_t result = NCCL_TUNING_RESULT_INIT;
+  result.algo = NCCL_ALGO_RING;
+  result.proto = NCCL_PROTO_SIMPLE;
+  result.valid = 1;
+  EXPECT_EQ(ncclSuccess, ncclTuningRingModelSim(&input, &result));
+  EXPECT_EQ(0, result.valid);
+}
+
+TEST_F(TuningGeneralMicrotest, RingModelInitRejectsNonAlgoProtoIds) {
+  EXPECT_EQ(ncclInvalidUsage, ncclTuningRingModelInit(comm_.get(), -1, nullptr));
+  EXPECT_EQ(ncclInvalidUsage, ncclTuningRingModelInit(comm_.get(), NCCL_TUNING_COUNT, nullptr));
+  // The first symmetric-kernel id.
+  EXPECT_EQ(ncclInvalidUsage,
+            ncclTuningRingModelInit(comm_.get(), NCCL_NUM_ALGORITHMS * NCCL_NUM_PROTOCOLS, nullptr));
+}
+
+TEST_F(TuningGeneralMicrotest, RingModelInitSingleNodeSimpleLatencyAndBandwidth) {
+  SetRingInitComm(1, 4, 94);
+  auto& k = comm_->tuningContext.tuningConstants;
+  k.baseLatencies[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = 5.0;
+  k.hwLatencies[NCCL_HW_NVLINK][NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = 1.0;
+  k.hwLatencies[NCCL_HW_NVLINK][NCCL_ALGO_TREE][NCCL_PROTO_SIMPLE] = 3.0;
+  ASSERT_EQ(ncclSuccess, RingInit(NCCL_PROTO_SIMPLE));
+  // busBw = bwIntra 10 * 2 channels; bandwidth = busBw * nRanks / nSteps; latency = base + nSteps * hw.
+  EXPECT_NEAR(80.0f / 6, RingBw(ncclFuncAllReduce, NCCL_PROTO_SIMPLE), 1e-4);
+  EXPECT_NEAR(11.0f, RingLat(ncclFuncAllReduce, NCCL_PROTO_SIMPLE), 1e-4);
+  EXPECT_NEAR(80.0f / 3, RingBw(ncclFuncAllGather, NCCL_PROTO_SIMPLE), 1e-4);
+  EXPECT_NEAR(8.0f, RingLat(ncclFuncAllGather, NCCL_PROTO_SIMPLE), 1e-4);
+  // Broadcast on shared channels pays one hop; otherwise nSteps hops at the Tree Simple latency.
+  EXPECT_NEAR(20.0f, RingBw(ncclFuncBroadcast, NCCL_PROTO_SIMPLE), 1e-4);
+  EXPECT_NEAR(6.0f, RingLat(ncclFuncBroadcast, NCCL_PROTO_SIMPLE), 1e-4);
+  comm_->graphs[NCCL_ALGO_RING].sameChannels = 0;
+  ASSERT_EQ(ncclSuccess, RingInit(NCCL_PROTO_SIMPLE));
+  EXPECT_NEAR(17.0f, RingLat(ncclFuncBroadcast, NCCL_PROTO_SIMPLE), 1e-4);
+}
+
+TEST_F(TuningGeneralMicrotest, RingModelInitCapsLlAndLl128Bandwidth) {
+  SetRingInitComm(1, 4, 94);
+  int cc = ncclTuningGetCompCapIndex(comm_.get());
+  auto& k = comm_->tuningContext.tuningConstants;
+  // LL halves busBw 20 and caps it at llMaxBw; LL128 keeps 92% and caps it at nChannels * per-channel max.
+  k.llMaxBws[cc][0] = 4.0;
+  k.perChMaxRingLL128Bws[cc][0] = 3.0;
+  ASSERT_EQ(ncclSuccess, RingInit(NCCL_PROTO_LL));
+  ASSERT_EQ(ncclSuccess, RingInit(NCCL_PROTO_LL128));
+  EXPECT_NEAR(4.0f * 4 / 3, RingBw(ncclFuncAllGather, NCCL_PROTO_LL), 1e-4);
+  EXPECT_NEAR(6.0f * 4 / 3, RingBw(ncclFuncAllGather, NCCL_PROTO_LL128), 1e-4);
+  k.llMaxBws[cc][0] = 100.0;
+  k.perChMaxRingLL128Bws[cc][0] = 100.0;
+  ASSERT_EQ(ncclSuccess, RingInit(NCCL_PROTO_LL));
+  ASSERT_EQ(ncclSuccess, RingInit(NCCL_PROTO_LL128));
+  EXPECT_NEAR(10.0f * 4 / 3, RingBw(ncclFuncAllGather, NCCL_PROTO_LL), 1e-4);
+  EXPECT_NEAR(18.4f * 4 / 3, RingBw(ncclFuncAllGather, NCCL_PROTO_LL128), 1e-4);
+}
+
+TEST_F(TuningGeneralMicrotest, RingModelInitMultiNodeNetOverheadAndInterLatency) {
+  SetRingInitComm(2, 8, 100);
+  comm_->maxLocalRanks = 4;
+  comm_->cpuArch = NCCL_TOPO_CPU_ARCH_X86;
+  comm_->cpuVendor = NCCL_TOPO_CPU_VENDOR_AMD;
+  comm_->graphs[NCCL_ALGO_RING].latencyInter = 0.5f;
+  auto& k = comm_->tuningContext.tuningConstants;
+  k.baseLatencies[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = 5.0;
+  k.hwLatencies[NCCL_HW_NVLINK][NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = 1.0;
+  k.hwLatencies[NCCL_HW_NET][NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = 4.0;
+  k.hwLatencies[NCCL_HW_NET][NCCL_ALGO_TREE][NCCL_PROTO_SIMPLE] = 7.0;
+  ASSERT_EQ(ncclSuccess, RingInit(NCCL_PROTO_SIMPLE));
+  // Compute capability 100 on two nodes takes bwInter 1. Intra steps cost max(1, 3 * 2 us AMD x86 net
+  // overhead) = 6; inter steps cost 4 + 2 * latencyInter = 5. AllReduce: 12 intra + 2 inter steps.
+  EXPECT_NEAR(16.0f / 14, RingBw(ncclFuncAllReduce, NCCL_PROTO_SIMPLE), 1e-4);
+  EXPECT_NEAR(87.0f, RingLat(ncclFuncAllReduce, NCCL_PROTO_SIMPLE), 1e-4);
+  EXPECT_NEAR(46.0f, RingLat(ncclFuncAllGather, NCCL_PROTO_SIMPLE), 1e-4);
+  // One rank per node: inter steps use the Tree NET latency, 7 + 1 = 8.
+  comm_->maxLocalRanks = 1;
+  ASSERT_EQ(ncclSuccess, RingInit(NCCL_PROTO_SIMPLE));
+  EXPECT_NEAR(93.0f, RingLat(ncclFuncAllReduce, NCCL_PROTO_SIMPLE), 1e-4);
+  // Below compute capability 100, up to two nodes keep bwIntra 10.
+  comm_->minCompCap = 94;
+  ASSERT_EQ(ncclSuccess, RingInit(NCCL_PROTO_SIMPLE));
+  EXPECT_NEAR(160.0f / 14, RingBw(ncclFuncAllReduce, NCCL_PROTO_SIMPLE), 1e-4);
 }
 
 TEST_F(TuningGeneralMicrotest, ThreadCountValidationUsesDefaultAndBounds) {
