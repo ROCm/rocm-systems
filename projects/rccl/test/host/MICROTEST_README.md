@@ -127,12 +127,6 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `rccl-UnitTestsMicroParam<Unit>`.
   - `include/param/parser_{default,enum,bitset,list}.h` (header-only, from
     `param-parsers-test.cc`); suite `ParamParsersMicrotest.*`.
-  - `graph/rccl_graph_gen.cc` (`RCCL_GRAPH_GEN_CC_PATH`, from
-    `rccl-graph-gen-test.cc`); suites `GraphGen*Test.*`. Covers ring
-    construction for every `generateRings` dispatch arm (degenerate, the 4/6/8
-    tables, prime strides, Walecki, Walecki+greedy) and the load-balanced cut
-    selection in `findRingCutIndices`. `greedyRingGen`'s out-of-memory arm is
-    driven through the heap half of `fakes/libc_seam.h`.
 - **`rccl-UnitTestsMicroBootstrap`**: `bootstrap.cc` (via `BOOTSTRAP_CC_PATH`, from
   `bootstrap-test.cc`); suites `Bootstrap*Microtest.*`. Ranks run as threads over the
   in-memory socket layer and net plugin in `fakes/bootstrap_micro_fakes.cc`. Its own binary
@@ -401,18 +395,6 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   from `cft-dev-runtime-test.cc`); suites `CftDevRuntime*`. Its own binary because
   `rccl-UnitTestsMicro` fakes most of `core.cc`, which the LE-info queries call. See
   `test_categories_micro_cft_dev_runtime.yaml`.
-- **`rccl-UnitTestsMicroConnect`** — `src/graph/connect.cc` (via `CONNECT_CC_PATH`,
-  suites `EveryRank/ConnectMicrotest.*` and `ConnectMicrotestReject.*`):
-  `ncclTopoPreset` and `ncclTopoPostset` run unstubbed on a hand-built
-  single-node comm, with the real `rings.cc`, `trees.cc`, `rccl_graph_gen.cc` and
-  `archinfo.cc` linked in. Its own binary because every other micro target links
-  `topo_stubs.cc`, whose Preset/Postset stubs would be duplicate symbols; the few
-  remaining dependencies (logging, params, `bootstrapAllGather`, and the
-  WarpSpeed channel helpers `rcclGetMaxWarpsPerBlock` /
-  `rcclWarpSpeedComputeNChannels`) are faked in `connect-test.cc` itself.
-  The WarpSpeed helpers are referenced only when gfx950 CI copies
-  `ENABLE_WARP_SPEED` onto this binary; the scenes leave `warpSpeedEnabled`
-  false, so the stubs exist to link. See `test_categories_micro_connect.yaml`.
 - **`rccl-UnitTestsMicroParam<Unit>`** — `src/param/`, one binary per test file under
   `test/host/param/` (`param/host_tests.cmake`); see `test_categories_micro_param.yaml`.
   - `rccl-UnitTestsMicroParam`: `param/param.cc`, `param/c_api.cc`,
@@ -526,25 +508,33 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `AMDSMI_WRAP_CC_PATH`, from `misc/amdsmi-wrap-test.cc`); suite
   `AmdsmiWrapMicrotest.*`. See `test_categories_micro_misc.yaml`.
 
-- **`rccl-UnitTestsMicroSearch`** — `src/graph/search.cc` (via `SEARCH_CC_PATH`, from
-  `search-test.cc`); suites `Search*`. Its own binary so search.cc is the only unit under
-  test in it: the rest of `src/graph` it searches over (`xml.cc`, `topo.cc`, `paths.cc`,
-  `rome_models.cc`) is linked real as a collaborator, and `topo.cc` comes in through
-  `topo_include.cc` rather than as a source file because `TopoSetNetDevsPolicy` can only
-  be defined from inside that TU. Shares `TopoScene.h` and `fakes/graph_fakes.cc` with
-  `rccl-UnitTestsMicroTopo`. See `test_categories_micro_search.yaml`.
-
-- **`rccl-UnitTestsMicroTopo`** — the rest of the real `src/graph` files, each `#include`d
-  from its own test TU via `<STEM>_CC_PATH`: `xml.cc` (`Xml*`), `topo.cc` (`Topo*`),
-  `paths.cc` (`Paths*`), `rome_models.cc` (`graph-rome-models-test.cc`, `GraphRomeModels*`),
-  `connect.cc` (`graph-connect-test.cc`, `GraphConnect*`), `rings.cc` (`Rings*`), `trees.cc`
-  (`Trees*`). `search.cc` is linked real here too, but only as a collaborator -- `paths.cc`
-  calls `ncclTopoGetNetDev` and `ncclTopoGetLinkType` -- and its tests live in
-  `rccl-UnitTestsMicroSearch`. Its own binary: `rccl-UnitTestsMicroGraph` links `tuning_fakes.cc`, which
-  defines `connect.cc`'s params, and `os_fakes.cc`, whose CPU and sysfs seams these tests
-  cannot drive. Topologies come from XML built in `TopoScene.h`; HIP and amd-smi come from
-  `fakes/hip_fakes.cc` and `fakes/amdsmi_fakes.cc`, the other externals from
-  `fakes/graph_fakes.cc`. See `test_categories_micro_topo.yaml`.
+- **`rccl-UnitTestsMicroGraph<Unit>`** — `src/graph/`, one binary per test file; tests mirror
+  the source tree under `test/host/graph/` (`graph/topo-test.cc` builds
+  `rccl-UnitTestsMicroGraphTopo`). Each test `#include`s its unit via `<STEM>_CC_PATH` and links
+  the real sibling units it reaches. They share `test_categories_micro_graph.yaml`.
+  - `xml.cc` (`Xml*`), `topo.cc` (`Topo*`), `paths.cc` (`Paths*`), `search.cc` (`Search*`),
+    `rings.cc` (`Rings*`), `rome_models.cc` (`rome-models-test.cc`,
+    `GraphRomeModels*` and `RomeModels*`) and `connect.cc` (`graph-connect-test.cc`,
+    `GraphConnect*`, `EveryRank/ConnectMicrotest.*` and `ConnectMicrotestReject.*`; the
+    `ConnectMicrotest` cases run the real `rccl_graph_gen.cc`, included in a namespace).
+    Topologies come from XML built in `graph/TopoScene.h`; HIP and amd-smi come from
+    `fakes/hip_fakes.cc` and `fakes/amdsmi_fakes.cc`, the other externals from
+    `fakes/graph_fakes.cc`. Sibling units read their params through graph_fakes.cc's
+    `g_loadParam`, as the unit under test does. These binaries are built without
+    `ENABLE_WARP_SPEED`: the `GraphConnect*` cases assert the non-warp-speed channel caps.
+    `topo.cc` and the NETDEVS policy setter come from `graph/topo_include.cc`, which
+    `topo-test.cc` `#include`s and `rccl-UnitTestsMicroGraphSearch` links.
+  - `trees.cc` (`TREES_CC_PATH`, from `trees-test.cc`, `rccl-UnitTestsMicroGraphTrees`);
+    suite `TreesMicrotest.*`. No fakes.
+  - `graph-dev-test.cc` (`rccl-UnitTestsMicroGraphDev`); suite `TopoGpuDevMicrotest.*`. The
+    real `xml`, `topo`, `paths`, `search` and `rome_models` against `fakes/nccl_fakes.cc` and
+    `fakes/os_fakes.cc`.
+  - `rccl_graph_gen.cc` (`RCCL_GRAPH_GEN_CC_PATH`, from `rccl-graph-gen-test.cc`,
+    `rccl-UnitTestsMicroGraphRcclGraphGen`); suites `GraphGen*Test.*`. Covers ring
+    construction for every `generateRings` dispatch arm (degenerate, the 4/6/8
+    tables, prime strides, Walecki, Walecki+greedy) and the load-balanced cut
+    selection in `findRingCutIndices`. `greedyRingGen`'s out-of-memory arm is
+    driven through the heap half of `fakes/libc_seam.h`.
 
 - **`rccl-UnitTestsMicroDebug`** — `debug.cc` (via `DEBUG_CC_PATH`, from
   `debug-test.cc`); suite `Debug*`. Its own binary because it is the real
@@ -577,10 +567,6 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     compiled here.
   - `device/p2p.cu` (`DIAG_P2P_DEVICE_CU_PATH`, from `diag-p2p-device-test.cc`, binary
     `rccl-UnitTestsMicroDiagnosticsP2pDevice`); suite `DiagP2pDeviceMicrotest.*`.
-- **`rccl-UnitTestsMicroGraph`**: the real `src/graph/{xml,topo,paths,search,rome_models}.cc`,
-  compiled as sources; suite `TopoGpuDevMicrotest.*` in `graph-dev-test.cc`. Its own binary:
-  every other target links fakes for the graph symbols these files define. See
-  `test_categories_micro_graph.yaml`.
 - **`rccl-UnitTestsMicroGinHostFinalize`**: `src/gin/gin_host.cc` (via
   `GIN_HOST_CC_PATH`, suite `GinHostFinalizeTest.*`): host finalize, connect
   failure / retry, and the register, deregister and DevCommSetup walks over
@@ -918,7 +904,7 @@ symbol.
 | `src/graph/*.cc` (topo, paths, connect, rome consensus) and `search.cc`'s *dependencies* | `fakes/topo_stubs.cc` |
 | `src/graph/search.cc`'s own entry points (targets that don't compile the real file, i.e. all but `rccl-UnitTestsMicroSearch`, `rccl-UnitTestsMicroTopo` and `rccl-UnitTestsMicroGraph`) | `fakes/search_fakes.cc` |
 | `src/graph/tuning.cc`, `src/graph/connect.cc` params | `fakes/tuning_fakes.cc` |
-| everything `src/graph/*.cc` calls outside `src/graph` (`rccl-UnitTestsMicroTopo` and `rccl-UnitTestsMicroSearch`, which compile the real graph files) | `fakes/graph_fakes.cc` |
+| everything `src/graph/*.cc` calls outside `src/graph` (the `graph/` binaries except `rccl-UnitTestsMicroGraph{Dev,RcclGraphGen,Trees}`) | `fakes/graph_fakes.cc` |
 | `src/group.cc` | `fakes/group_fakes.cc` |
 | `src/config/algorithm_*.cc` | compiled real (no fakes file) |
 | `src/config/collconfig.cc` (targets that do not compile the real file) | `fakes/collconfig_fakes.cc` |
@@ -1482,7 +1468,7 @@ can be configured **directly** to build every host binary — `rccl-HostUnitTest
 `rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker|-warpspeed]`,
 `rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroGinHostFinalize`, `rccl-UnitTestsMicroCe`,
 `rccl-UnitTestsMicroDiagnostics`, `rccl-UnitTestsMicroDiagnostics<Unit>` (one per `src/diagnostics/` test file),
-`rccl-UnitTestsMicroGraph`,
+`rccl-UnitTestsMicroGraph<Unit>` (one per `src/graph/` test file),
 `rccl-UnitTestsMicroDda<SubDir><Unit>` (one per `src/algorithms/dda/` test file),
 `rccl-UnitTestsMicroMisc<Unit>` (one per `src/misc/` test file),
 `rccl-UnitTestsMicroOs<Unit>` (one per `src/os/` test file),
@@ -1551,15 +1537,12 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroEnqueueTaskPrepTaskPosttuning # task_prep/task_posttuning.cc
 ./build/rccl-UnitTestsMicroEnqueueTaskSched   # src/enqueue/task_sched/ tests
 ./build/rccl-UnitTestsMicroOsLinux            # src/os/linux.cc; one binary per src/os/ test file
-./build/rccl-UnitTestsMicroConnect            # src/graph/connect.cc Preset/Postset tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics.cc tests
-./build/rccl-UnitTestsMicroGraph              # src/graph/{xml,topo,paths,search,rome_models}.cc tests
 ./build/rccl-UnitTestsMicroMemManager         # src/mem_manager.cc tests
 ./build/rccl-UnitTestsMicroAllocator          # src/allocator.cc tests
 ./build/rccl-UnitTestsMicroMnnvl              # src/mnnvl.cc tests
 ./build/rccl-UnitTestsMicroAlloc              # src/include/alloc.h tests
-./build/rccl-UnitTestsMicroSearch             # src/graph/search.cc tests
-./build/rccl-UnitTestsMicroTopo               # the rest of src/graph/*.cc tests
+./build/rccl-UnitTestsMicroGraphTopo          # src/graph/topo.cc; one binary per src/graph/ test file
 ./build/rccl-UnitTestsMicroGinHost            # src/gin/gin_host.cc GIN_PROXY_NTHREADS
 ./build/rccl-UnitTestsMicroGinHostFinalize    # src/gin/gin_host.cc host finalize
 ./build/rccl-UnitTestsMicroNcclDeviceRequirements  # nccl_device requirement builders tests

@@ -268,7 +268,7 @@ endforeach()
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/misc/gdr-probe-test.cc"
   "${_rccl_reg_access_flags}" "the production registration flags")
 unset(_rccl_reg_access_flags)
-# graph_fakes.cc hand-writes these params, whose NCCL_PARAMs are in files rccl-UnitTestsMicroTopo doesn't compile.
+# graph_fakes.cc hand-writes these params, whose NCCL_PARAMs are in files the graph/ binaries don't compile.
 # Each entry is <src file>|<production line>|<fake body, up to its ';'>.
 foreach(_pin
     "init.cc|NCCL_PARAM(P2pDisable, \"P2P_DISABLE\", 0)|ncclParamP2pDisable() { return g_loadParam(\"P2P_DISABLE\", 0)"
@@ -383,7 +383,6 @@ function(rccl_define_micro_source_lists)
     nccl-utility-test.cc                 # src/include/nccl_device/utility.h (header-only, no fakes)
     # sym-kernels-index-test.cc: added conditionally below, only when GENERATE_SYM_KERNELS is ON.
     process-isolated-runner-test.cc
-    rccl-graph-gen-test.cc               # src/graph/rccl_graph_gen.cc ring construction + cut balancing
     # real IsArchMatch, for wrap-test.cc (path is build-directory-relative).
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     # real ncclP2pImportShareableBuffer, for dev-runtime-test.cc's cuMem window import.
@@ -536,18 +535,6 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroConnect -- REAL src/graph/connect.cc (#included via CONNECT_CC_PATH) with the real
-  # ring/tree helpers it calls; connect-test.cc fakes the few remaining symbols itself.
-  set(TEST_MICRO_CONNECT_SOURCE_FILES
-    connect-test.cc
-    fakes/hip_fakes.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/graph/rings.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/graph/trees.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/graph/rccl_graph_gen.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
-    ../common/main_altrsmi.cpp
-    PARENT_SCOPE)
-
   # rccl-UnitTestsMicroDebug -- src/debug.cc. Own binary: it is the real ncclDebugLog, which
   # every shared fake set also defines.
   set(TEST_MICRO_DEBUG_SOURCE_FILES
@@ -681,28 +668,6 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroGraph: the real src/graph topology TUs, which every other micro binary fakes.
-  set(TEST_MICRO_GRAPH_SOURCE_FILES
-    graph-dev-test.cc
-    fakes/amdsmi_fakes.cc
-    fakes/env_fakes.cc
-    fakes/hip_fakes.cc
-    fakes/nccl_fakes.cc
-    fakes/os_fakes.cc
-    fakes/rccl_wrap_fakes.cc
-    fakes/transport_stubs.cc
-    fakes/tuning_fakes.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/graph/paths.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/graph/rome_models.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/graph/search.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/graph/topo.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/graph/xml.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/misc/nvmlwrap_stub.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
-    ../common/main_altrsmi.cpp
-    PARENT_SCOPE)
-
   # rccl-UnitTestsMicroProxy -- src/proxy.cc. Own binary: it compiles the real proxy.cc, which
   # proxy_fakes.cc fakes for the other binaries.
   set(TEST_MICRO_PROXY_SOURCE_FILES
@@ -711,61 +676,6 @@ function(rccl_define_micro_source_lists)
     fakes/env_fakes.cc
     fakes/hip_fakes.cc
     fakes/os_fakes.cc
-    ../common/main_altrsmi.cpp
-    PARENT_SCOPE)
-
-  # rccl-UnitTestsMicroRomeModels
-  set(TEST_MICRO_ROME_MODELS_SOURCE_FILES
-    rome-models-test.cc
-    fakes/nccl_fakes.cc
-    fakes/hip_fakes.cc
-    fakes/env_fakes.cc
-    fakes/topo_stubs.cc
-    fakes/search_fakes.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
-    ../common/main_altrsmi.cpp
-    PARENT_SCOPE)
-
-  # rccl-UnitTestsMicroSearch -- src/graph/search.cc on its own, both the
-  # ring/tree channel search and the NCCL_GRAPH_FILE XML-graph import path.
-  # Own binary so search.cc is the only unit under test here; the rest of
-  # src/graph (xml/topo/paths/rome_models) is linked real because the search
-  # runs over a system those files build, and every other microtest target
-  # takes search.cc's own entry points from fakes/search_fakes.cc instead.
-  set(TEST_MICRO_SEARCH_SOURCE_FILES
-    search-test.cc
-    topo_include.cc              # topo.cc, included (not compiled) for TopoSetNetDevsPolicy
-    fakes/graph_fakes.cc
-    fakes/amdsmi_fakes.cc
-    fakes/hip_fakes.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/graph/xml.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/graph/paths.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/graph/rome_models.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
-    ../common/main_altrsmi.cpp
-    PARENT_SCOPE)
-
-  # rccl-UnitTestsMicroTopo -- the src/graph units listed below, one test TU each.
-  # Own binary: rccl-UnitTestsMicroGraph links tuning_fakes.cc, which defines connect.cc's params,
-  # and os_fakes.cc, whose CPU and sysfs seams these tests cannot drive.
-  set(TEST_MICRO_TOPO_SOURCE_FILES
-    xml-test.cc
-    topo-test.cc
-    paths-test.cc
-    graph-rome-models-test.cc
-    graph-connect-test.cc
-    rings-test.cc
-    trees-test.cc
-    fakes/graph_fakes.cc
-    fakes/amdsmi_fakes.cc
-    fakes/hip_fakes.cc
-    # search.cc is tested by rccl-UnitTestsMicroSearch, but paths.cc calls into it
-    # (ncclTopoGetNetDev, ncclTopoGetLinkType), so it is linked real here rather
-    # than faked -- a collaborator, not a unit under test.
-    ${RCCL_HOST_HIPIFY_DIR}/src/graph/search.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
@@ -1420,7 +1330,6 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     DEV_RUNTIME_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/dev_runtime.cc"
     DEV_RUNTIME_SEGMENTS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/dev_runtime_segments.cc"
     RCCL_DEV_RUNTIME_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rccl_dev_runtime.cc"
-    RCCL_GRAPH_GEN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/rccl_graph_gen.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
 # wrap-test.cc includes rccl_wrap.cc. Production librccl always compiles the LL128
 # arm; without this the broadcast protocol tests exercise the compiled-out fallback.
@@ -1512,22 +1421,6 @@ foreach(_variant "" "-uncached" "-faultinj")
     target_compile_definitions(${_init_tgt} PRIVATE ENABLE_FAULT_INJECTION)
   endif()
 endforeach()
-
-# ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroConnect -- ncclTopoPreset / ncclTopoPostset unstubbed.
-# ---------------------------------------------------------------------------
-set_source_files_properties(
-  ${RCCL_HOST_HIPIFY_DIR}/src/graph/rings.cc
-  ${RCCL_HOST_HIPIFY_DIR}/src/graph/trees.cc
-  ${RCCL_HOST_HIPIFY_DIR}/src/graph/rccl_graph_gen.cc
-  PROPERTIES GENERATED TRUE)
-rccl_add_micro_binary(rccl-UnitTestsMicroConnect
-  SOURCES ${TEST_MICRO_CONNECT_SOURCE_FILES}
-  EXTRA_DEFS
-    ${_MICRO_MODE_DEFS}
-    ${_MICRO_AMDSMI_DEF}
-    CONNECT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/connect.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_connect.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroMemManager
@@ -1647,73 +1540,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroProxy
     RCCL_OS_FAKES_OMIT_ncclSocketClose   # fakes/proxy_micro_fakes.cc defines it
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_proxy.yaml")
 
-# ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroRomeModels
-# ---------------------------------------------------------------------------
-rccl_add_micro_binary(rccl-UnitTestsMicroRomeModels
-  SOURCES ${TEST_MICRO_ROME_MODELS_SOURCE_FILES}
-  EXTRA_DEFS
-    ${_MICRO_MODE_DEFS}
-    ROME_MODELS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/rome_models.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_rome_models.yaml")
-
-# ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroGraph is its own binary because the others link fakes for the graph symbols these TUs define.
-# ---------------------------------------------------------------------------
-set_source_files_properties(
-  ${RCCL_HOST_HIPIFY_DIR}/src/graph/paths.cc
-  ${RCCL_HOST_HIPIFY_DIR}/src/graph/rome_models.cc
-  ${RCCL_HOST_HIPIFY_DIR}/src/graph/search.cc
-  ${RCCL_HOST_HIPIFY_DIR}/src/graph/topo.cc
-  ${RCCL_HOST_HIPIFY_DIR}/src/graph/xml.cc
-  ${RCCL_HOST_HIPIFY_DIR}/src/misc/nvmlwrap_stub.cc
-  PROPERTIES GENERATED TRUE)
-rccl_add_micro_binary(rccl-UnitTestsMicroGraph
-  SOURCES ${TEST_MICRO_GRAPH_SOURCE_FILES}
-  EXTRA_DEFS
-    ${_MICRO_MODE_DEFS}
-    ${_MICRO_AMDSMI_DEF}
-    RCCL_NCCL_FAKES_OMIT_GRAPH
-    RCCL_TRANSPORT_STUBS_OMIT_ncclPxnDisable
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_graph.yaml")
-
-# ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroTopo
-# ---------------------------------------------------------------------------
-rccl_add_micro_binary(rccl-UnitTestsMicroTopo
-  SOURCES ${TEST_MICRO_TOPO_SOURCE_FILES}
-  # The warp-speed arms of connect.cc call rcclGetMaxWarpsPerBlock/rcclWarpSpeedComputeNChannels (rccl_wrap.cc).
-  REMOVE_DEFS ENABLE_WARP_SPEED
-  EXTRA_DEFS
-    ${_MICRO_MODE_DEFS}
-    ${_MICRO_AMDSMI_DEF}
-    XML_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/xml.cc"
-    TOPO_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/topo.cc"
-    PATHS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/paths.cc"
-    ROME_MODELS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/rome_models.cc"
-    CONNECT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/connect.cc"
-    RINGS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/rings.cc"
-    TREES_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/trees.cc"
-    TOPO_EXPL_MODELS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../tools/topo_expl/models"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_topo.yaml")
-
-# ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroSearch
-# ---------------------------------------------------------------------------
-set_source_files_properties(
-  ${RCCL_HOST_HIPIFY_DIR}/src/graph/paths.cc
-  ${RCCL_HOST_HIPIFY_DIR}/src/graph/rome_models.cc
-  ${RCCL_HOST_HIPIFY_DIR}/src/graph/search.cc
-  ${RCCL_HOST_HIPIFY_DIR}/src/graph/xml.cc
-  PROPERTIES GENERATED TRUE)
-rccl_add_micro_binary(rccl-UnitTestsMicroSearch
-  SOURCES ${TEST_MICRO_SEARCH_SOURCE_FILES}
-  EXTRA_DEFS
-    ${_MICRO_MODE_DEFS}
-    ${_MICRO_AMDSMI_DEF}
-    SEARCH_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/search.cc"
-    TOPO_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/topo.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_search.yaml")
+include("${CMAKE_CURRENT_LIST_DIR}/graph/host_tests.cmake")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroDiagnostics -- src/diagnostics.cc
