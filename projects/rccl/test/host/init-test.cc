@@ -2480,17 +2480,11 @@ TEST_F(InitMicrotest, CommAlloc_MemPoolCreateFails_ReturnsError) {
   EXPECT_NE(ncclSuccess, commAlloc(comm.get(), nullptr, 8, 0));
 }
 
-// NCCL 2.32: a device that reports no memory-pool support (Windows TCC, HIP_MEM_POOL_SUPPORT=0) gets no
-// comm->memPool -- persistent work buffers then use plain hipMalloc -- instead of a failing pool create.
+// A device that reports no memory-pool support skips pool creation and leaves comm->memPool unset.
 TEST_F(InitMicrotest, CommAlloc_MemPoolsUnsupported_SkipsPoolCreate) {
   InstallCommAllocSuccess();
   g_hipMemPoolResult = hipErrorNotSupported;  // would fail init if commAlloc still created the pool
-  auto defaultAttr = g_hipDeviceGetAttribute;
-  g_hipDeviceGetAttribute = [defaultAttr](int* pi, hipDeviceAttribute_t attr, int dev) {
-    if (attr != hipDeviceAttributeMemoryPoolsSupported) return defaultAttr(pi, attr, dev);
-    *pi = 0;
-    return hipSuccess;
-  };
+  g_hipMemoryPoolsSupported = 0;
   auto comm = FreshComm();
   EXPECT_EQ(ncclSuccess, commAlloc(comm.get(), nullptr, 8, 0));
   EXPECT_EQ(nullptr, comm->memPool);

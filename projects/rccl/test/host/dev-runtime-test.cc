@@ -6355,9 +6355,7 @@ TEST_F(CommQueryPropertiesTest, UninitialisedProps_ReturnsInvalidUsage) {
   EXPECT_EQ(ncclCommQueryProperties(comm, &raw), ncclInvalidUsage);
 }
 
-// NCCL 2.32 derives nLsaTeams from the topology instead of running
-// ncclDevrInitOnce, so a property query sets up no device-runtime state: no VMM
-// granularity query, and bigSize -- the "initialised" marker -- stays 0.
+// nLsaTeams comes from the topology, so a property query leaves device-runtime state (bigSize) untouched.
 TEST_F(CommQueryPropertiesTest, NLsaTeams_DoesNotInitialiseDeviceRuntime) {
   ScopedHook granularity(g_hipMemGetAllocationGranularity,
                          [](size_t* g, const hipMemAllocationProp*, hipMemAllocationGranularity_flags) {
