@@ -1717,6 +1717,7 @@ bool Device::populateOCLDeviceConstants() {
       info_.simdPerCU_ *= 2;
       max_waves_per_cu *= 2;
     }
+    info_.maxWavesPerCU_ = max_waves_per_cu;
 
     if (HSA_STATUS_SUCCESS !=
         hsa_agent_get_info(bkendDevice_,
@@ -1725,7 +1726,7 @@ bool Device::populateOCLDeviceConstants() {
       return false;
     }
 
-    info_.maxThreadsPerCU_ = info_.wavefrontWidth_ * max_waves_per_cu;
+    info_.maxThreadsPerCU_ = info_.wavefrontWidth_ * info_.maxWavesPerCU_;
     uint32_t cache_sizes[4];
     /* FIXIT [skudchad] -  Seems like hardcoded in HSA backend so 0*/
     if (HSA_STATUS_SUCCESS !=
