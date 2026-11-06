@@ -830,6 +830,50 @@ TEST(RjDecodeBenchmark, PreservesConcreteGfx1251Identity) {
       << read_text_file(error);
 }
 
+TEST(RjDecodeBenchmark, AcceptsGfx1100TargetAndChecksElfIdentity) {
+  ASSERT_FALSE(g_decode_benchmark.empty());
+  const rocjitsu::test::ScopedTempDirectory temp_dir("rj_decode_benchmark_gfx1100_");
+  const std::filesystem::path temp_path(temp_dir.path());
+  const std::filesystem::path input = temp_path / "gfx1100.co";
+  const std::filesystem::path output = temp_path / "stdout.txt";
+  const std::filesystem::path error = temp_path / "stderr.txt";
+
+  constexpr std::array<uint32_t, 1> kNop = {0xBF800000u};
+  {
+    const std::vector<uint8_t> image =
+        make_smoke_code_object(rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1100, kNop);
+    std::ofstream out(input, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(image.data()),
+              static_cast<std::streamsize>(image.size()));
+  }
+
+  const std::string help_command = shell_quote(g_decode_benchmark.string()) + " --help > " +
+                                   shell_quote(output.string()) + " 2> " +
+                                   shell_quote(error.string());
+  int status = std::system(help_command.c_str());
+  EXPECT_TRUE(command_succeeded(status)) << read_text_file(error);
+  EXPECT_TRUE(contains(read_text_file(output),
+                       "Target: auto, gfx942, gfx950, gfx1100, gfx1200, gfx1201, gfx1250, gfx1251"))
+      << read_text_file(output);
+
+  const std::string explicit_command =
+      shell_quote(g_decode_benchmark.string()) + " " + shell_quote(input.string()) +
+      " --target gfx1100 --iterations 1 --invalid-limit 0 > " + shell_quote(output.string()) +
+      " 2> " + shell_quote(error.string());
+  status = std::system(explicit_command.c_str());
+  EXPECT_TRUE(command_succeeded(status)) << read_text_file(error);
+  EXPECT_TRUE(contains(read_text_file(output), "1 valid instructions")) << read_text_file(output);
+
+  const std::string mismatch_command =
+      shell_quote(g_decode_benchmark.string()) + " " + shell_quote(input.string()) +
+      " --target gfx1201 --iterations 1 --invalid-limit 0 > " + shell_quote(output.string()) +
+      " 2> " + shell_quote(error.string());
+  status = std::system(mismatch_command.c_str());
+  EXPECT_TRUE(command_exited_with(status, 2));
+  EXPECT_TRUE(contains(read_text_file(error), "does not match code-object target"))
+      << read_text_file(error);
+}
+
 TEST(RjDbtTranslate, RejectsStandaloneConcreteTargetMismatch) {
   const rocjitsu::test::ScopedTempDirectory temp_dir("rj_dbt_translate_target_mismatch_");
   const std::filesystem::path temp_path(temp_dir.path());
