@@ -1,6 +1,5 @@
-# Pure-processing tests: no capture code, no libdw.
+# Pure-processing tests: no capture code.
 add_executable(processing_tests
-    test_addr2line_client.cpp
     test_elf_symbols.cpp
     test_symbol_name.cpp
     test_frame_filters.cpp

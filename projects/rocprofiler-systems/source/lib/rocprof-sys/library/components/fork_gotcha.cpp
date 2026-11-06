@@ -66,9 +66,12 @@ prefork_setup()
                 "may result is segmentation fault");
     // TIMEMORY_CONDITIONAL_DEMANGLED_BACKTRACE(get_debug_env(), 16);
 
-    if(config::get_use_sampling())
+    if(config::get_use_timemory_sampling())
     {
         sampling::block_samples();
+    }
+    if(config::get_use_sampling())
+    {
         sampling::prefork_lock_pmc_sampler();
     }
 
@@ -99,7 +102,7 @@ postfork_parent()
 
     rocprofsys::categories::enable_categories(config::get_enabled_categories());
 
-    if(config::get_use_sampling())
+    if(config::get_use_timemory_sampling())
     {
         sampling::unblock_samples();
     }

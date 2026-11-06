@@ -58,6 +58,7 @@
 #include "library/components/ucx_gotcha_policy.hpp"
 #include "library/components/vaapi_gotcha.hpp"
 #include "library/coverage.hpp"
+#include "library/cpu_snap/sampling.hpp"
 #include "library/kokkosp.hpp"
 #include "library/process_sampler.hpp"
 #include "library/rocprofiler-sdk.hpp"
@@ -769,7 +770,7 @@ rocprofsys_init_tooling_hidden(void)
             push_enable_sampling_on_child_threads(get_use_causal());
             sampling::unblock_signals();
         }
-        else if(get_use_sampling())
+        else if(get_use_timemory_sampling())
         {
             {
                 ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
@@ -786,6 +787,15 @@ rocprofsys_init_tooling_hidden(void)
             trace_cache::get_buffer_storage().start(getpid());
         }
 
+        auto const use_cpu_snap = get_use_cpu_snap_sampling();
+        // After storage starts (cpu-snap stores its stream there) and before the
+        // sampling window registers, so that the window's initial pause reaches it.
+        if(use_cpu_snap)
+        {
+            ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
+            cpu_snap::setup();
+        }
+
         rocprofiler_sdk::set_session(get_control_session());
 
         {
@@ -795,7 +805,7 @@ rocprofsys_init_tooling_hidden(void)
             // clang-format off
             auto subscribers = std::to_array<control::subscriber>({
                 { .on_pause = &rocprofiler_sdk::pause, .on_resume = &rocprofiler_sdk::resume, .name = "rocm", .scopes = { control::scope::global } },
-                { .on_pause = &sampling::pause, .on_resume = &sampling::resume, .name = "sampling",
+                { .on_pause = use_cpu_snap ? &cpu_snap::pause : &sampling::pause, .on_resume = use_cpu_snap ? &cpu_snap::resume : &sampling::resume, .name = "sampling",
                   .scopes = { control::scope::global, control::scope::sampling } },
                 { .on_pause = &component::pause_mpip, .on_resume = &component::resume_mpip, .name = "mpi", .scopes = { control::scope::global } },
                 { .on_pause = &ucx_t::pause, .on_resume = &ucx_t::resume, .name = "ucx", .scopes = { control::scope::global } },
@@ -858,11 +868,17 @@ rocprofsys_init_tooling_hidden(void)
                 }
             }
 
-            if(const auto samp_dur = config::get_sampling_duration(); samp_dur > 0.0)
+            // The timemory sampler delays each thread's timers itself; cpu-snap starts
+            // paused for the delay through this window.
+            const auto samp_delay = use_cpu_snap ? config::get_sampling_delay() : 0.0;
+            const auto samp_dur   = config::get_sampling_duration();
+            if(samp_delay > 0.0 || samp_dur > 0.0)
             {
                 g_sampling_dur_window = make_time_window(
                     get_control_session(), g_sampling_dur_window_clock,
-                    { .duration = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    { .delay = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                          std::chrono::duration<double>{ samp_delay }),
+                      .duration = std::chrono::duration_cast<std::chrono::nanoseconds>(
                           std::chrono::duration<double>{ samp_dur }) },
                     control::scope::sampling);
             }
@@ -916,7 +932,7 @@ rocprofsys_init_tooling_hidden(void)
         component::vaapi_gotcha::start();
     }
 
-    if(get_use_sampling())
+    if(get_use_timemory_sampling())
     {
         sampling::block_signals();
     }
@@ -1116,6 +1132,12 @@ rocprofsys_finalize_hidden(void)
     {
         state::process::set(state::process::Finalized);
 
+        // Join cpu-snap's worker and flush its last chunk before the cache shuts down.
+        if(get_use_cpu_snap_sampling())
+        {
+            cpu_snap::stop();
+        }
+
         // Flush buffered traces in case of child process
 
         LOG_DEBUG("Shutting down control session...");
@@ -1140,6 +1162,11 @@ rocprofsys_finalize_hidden(void)
     stop_time_windows();
 
     sampling::block_samples();
+
+    if(get_use_cpu_snap_sampling())
+    {
+        cpu_snap::stop();
+    }
 
     thread_info::set_stop(clocks::timeline::now_ns());
 
@@ -1329,7 +1356,7 @@ rocprofsys_finalize_hidden(void)
         causal::sampling::shutdown();
     }
 
-    if(get_use_sampling())
+    if(get_use_timemory_sampling())
     {
         LOG_DEBUG("Shutting down sampling...");
         sampling::shutdown();
@@ -1377,10 +1404,15 @@ rocprofsys_finalize_hidden(void)
     }
 
     // ensure that all the MT instances are flushed
-    if(get_use_sampling())
+    if(get_use_timemory_sampling())
     {
         LOG_DEBUG("Post-processing the sampling backtraces...");
         sampling::post_process();
+    }
+
+    if(get_use_cpu_snap_sampling())
+    {
+        cpu_snap::post_process();
     }
 
     if(get_use_causal())

@@ -19,6 +19,6 @@ using storage_parser_t = storage_parser<
     region_sample, in_time_sample, pmc_event_with_sample, pmc::collectors::gpu::sample,
     pmc::collectors::nic::sample, pmc::collectors::cpu::sample,
     pmc::collectors::gpu_perf_counter::sample, pmc::collectors::hipfile::sample,
-    backtrace_region_sample, scratch_memory_sample, kfd_sample>;
+    backtrace_region_sample, scratch_memory_sample, kfd_sample, cpu_snap_sample>;
 
 }  // namespace rocprofsys::trace_cache

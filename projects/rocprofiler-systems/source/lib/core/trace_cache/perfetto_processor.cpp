@@ -518,6 +518,7 @@ perfetto_processor_t::perfetto_processor_t(
 , m_use_annotations(config::get_perfetto_annotations())
 , m_default_group_by_queue(config::get_group_by_queue())
 , m_tracks(tracks)
+, m_cpu_snap_decoder([this](const backtrace_region_sample& sample) { handle(sample); })
 {
     for(const auto& agent_ptr : m_agent_manager.get_agents())
     {
@@ -1191,6 +1192,12 @@ perfetto_processor_t::handle([[maybe_unused]] const backtrace_region_sample& _bt
     (_bts.category == trait::name<category::timer_sampling>::value)
         ? write_sampling_track_data<category::timer_sampling>(_bts, m_use_annotations)
         : write_sampling_track_data<category::overflow_sampling>(_bts, m_use_annotations);
+}
+
+void
+perfetto_processor_t::handle(const cpu_snap_sample& sample)
+{
+    m_cpu_snap_decoder.feed(sample);
 }
 
 void

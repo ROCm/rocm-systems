@@ -36,6 +36,7 @@ target_sources(
 add_subdirectory(rocprofiler-sdk)
 add_subdirectory(pmc)
 add_subdirectory(causal)
+add_subdirectory(cpu_snap)
 add_subdirectory(components)
 add_subdirectory(coverage)
 

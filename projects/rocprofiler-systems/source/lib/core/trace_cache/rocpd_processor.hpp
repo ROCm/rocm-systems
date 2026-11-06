@@ -47,6 +47,7 @@ public:
     void handle(const gpu_perf_counter_sample& sample) override;
     void handle(const hipfile_pmc_sample& sample) override;
     void handle(const kfd_sample& sample) override;
+    void handle(const cpu_snap_sample&) override {}
 
 private:
     void post_process_metadata();
