@@ -173,6 +173,10 @@ set(TEST_reducescatter_wave 154)
 set(TEST_tile_reduce 155)
 set(TEST_tile_reduce_wave 156)
 set(TEST_tile_reduce_wg 157)
+set(TEST_qp_pingpong 158)
+set(TEST_qp_putnbi 159)
+set(TEST_sdma_pingpong 160)
+set(TEST_sdma_putnbi 161)
 set(TEST_buffer_register_symmetric 162)
 set(TEST_tile_put_wave_rowmajor 163)
 set(TEST_tile_put_wave_colmajor 164)
@@ -185,7 +189,8 @@ set(TEST_tile_get_wg_colmajor 170)
 set(TEST_signaladd 171)
 set(TEST_signalset 172)
 set(TEST_signalwaituntil 173)
-set(TEST_signal_ops_on_stream 174)
+set(TEST_qp_putnbi_poll 174)
+set(TEST_sdma_putnbi_poll 175)
 set(TEST_tile_put_rowmajor_start_coord 177)
 set(TEST_tile_get_rowmajor_start_coord 178)
 set(TEST_tile_put_wave_rowmajor_start_coord 179)
@@ -204,6 +209,7 @@ set(TEST_tile_put_wave_3d 191)
 set(TEST_tile_get_wave_3d 192)
 set(TEST_tile_put_wave_4d 193)
 set(TEST_tile_get_wave_4d 194)
+set(TEST_signal_ops_on_stream 195)
 
 # MPI should already be found by the parent CMakeLists.txt
 # Use standard CMake MPI variables set by find_package(MPI)
@@ -1219,6 +1225,30 @@ function(add_other_tests)
         add_rocshmem_functional_test(NAME shmemptr RANKS 2 WORKGROUPS 8 THREADS 1 MAX_MSG_SIZE 8)
         add_rocshmem_functional_test(NAME shmemptr RANKS 2 WORKGROUPS 16 THREADS 128 MAX_MSG_SIZE 8)
     end_test_group()
+
+    # qp_*_tester.cpp is only compiled in when USE_GDA is set.
+    if(USE_GDA)
+        begin_test_group(CATEGORY "RMA;NBI;QP" TIER full BACKENDS "gda" GPUS "all" EXTRA_LABELS "GDA")
+            add_rocshmem_functional_test(NAME qp_pingpong RANKS 2 WORKGROUPS 1 THREADS 1
+                ENV_VARS "ROCSHMEM_BACKEND=gda")
+            add_rocshmem_functional_test(NAME qp_putnbi RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576
+                ENV_VARS "ROCSHMEM_BACKEND=gda")
+            add_rocshmem_functional_test(NAME qp_putnbi_poll RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576
+                ENV_VARS "ROCSHMEM_BACKEND=gda")
+        end_test_group()
+    endif()
+
+    # sdma_*_tester.cpp needs USE_IPC/USE_SDMA, and a single node (no MPI hostfile).
+    if(USE_IPC AND USE_SDMA AND (USE_SLR_LAUNCHER OR NOT DEFINED ENV{HOSTFILE}))
+        begin_test_group(CATEGORY "RMA;NBI;SDMA" TIER full BACKENDS "ipc" GPUS "all" EXTRA_LABELS "SDMA")
+            add_rocshmem_functional_test(NAME sdma_pingpong RANKS 2 WORKGROUPS 1 THREADS 1
+                ENV_VARS "ROCSHMEM_BACKEND=ipc" "ROCSHMEM_SDMA_ENABLED=1" "ROCSHMEM_SDMA_THRESHOLD=0")
+            add_rocshmem_functional_test(NAME sdma_putnbi RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576
+                ENV_VARS "ROCSHMEM_BACKEND=ipc" "ROCSHMEM_SDMA_ENABLED=1" "ROCSHMEM_SDMA_THRESHOLD=0")
+            add_rocshmem_functional_test(NAME sdma_putnbi_poll RANKS 2 WORKGROUPS 1 THREADS 1 MAX_MSG_SIZE 1048576
+                ENV_VARS "ROCSHMEM_BACKEND=ipc" "ROCSHMEM_SDMA_ENABLED=1" "ROCSHMEM_SDMA_THRESHOLD=0")
+        end_test_group()
+    endif()
 
     # Flood tests - don't work with RO backend (AIROCSHMEM-324)
     begin_test_group(CATEGORY "FLOOD;RMA;PUT" TIER full BACKENDS "ipc;gda" GPUS "all")
