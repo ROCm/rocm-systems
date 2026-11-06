@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vds.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/decode_factories.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include <memory>
@@ -28,6 +29,7 @@ DsAddU32Vds::DsAddU32Vds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -59,6 +61,7 @@ DsSubU32Vds::DsSubU32Vds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -90,6 +93,7 @@ DsRsubU32Vds::DsRsubU32Vds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -121,6 +125,7 @@ DsIncU32Vds::DsIncU32Vds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -152,6 +157,7 @@ DsDecU32Vds::DsDecU32Vds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -183,6 +189,7 @@ DsMinI32Vds::DsMinI32Vds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -214,6 +221,7 @@ DsMaxI32Vds::DsMaxI32Vds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -245,6 +253,7 @@ DsMinU32Vds::DsMinU32Vds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -276,6 +285,7 @@ DsMaxU32Vds::DsMaxU32Vds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -307,6 +317,7 @@ DsAndB32Vds::DsAndB32Vds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -338,6 +349,7 @@ DsOrB32Vds::DsOrB32Vds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -369,6 +381,7 @@ DsXorB32Vds::DsXorB32Vds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -403,6 +416,7 @@ DsMskorB32Vds::DsMskorB32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -432,6 +446,7 @@ DsStoreB32Vds::DsStoreB32Vds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -464,6 +479,7 @@ DsStore2addrB32Vds::DsStore2addrB32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -497,6 +513,7 @@ DsStore2addrStride64B32Vds::DsStore2addrStride64B32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -532,6 +549,7 @@ DsCmpstoreB32Vds::DsCmpstoreB32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -564,6 +582,7 @@ DsMinNumF32Vds::DsMinNumF32Vds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -595,6 +614,7 @@ DsMaxNumF32Vds::DsMaxNumF32Vds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -644,6 +664,7 @@ DsAddF32Vds::DsAddF32Vds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -673,6 +694,8 @@ DsStoreB8Vds::DsStoreB8Vds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  data0.set_register_byte_mask(0x1);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -702,6 +725,8 @@ DsStoreB16Vds::DsStoreB16Vds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  data0.set_register_byte_mask(0x3);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -736,6 +761,7 @@ DsAddRtnU32Vds::DsAddRtnU32Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -770,6 +796,7 @@ DsSubRtnU32Vds::DsSubRtnU32Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -804,6 +831,7 @@ DsRsubRtnU32Vds::DsRsubRtnU32Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -839,6 +867,7 @@ DsIncRtnU32Vds::DsIncRtnU32Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -873,6 +902,7 @@ DsDecRtnU32Vds::DsDecRtnU32Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -907,6 +937,7 @@ DsMinRtnI32Vds::DsMinRtnI32Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -941,6 +972,7 @@ DsMaxRtnI32Vds::DsMaxRtnI32Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -975,6 +1007,7 @@ DsMinRtnU32Vds::DsMinRtnU32Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1009,6 +1042,7 @@ DsMaxRtnU32Vds::DsMaxRtnU32Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1043,6 +1077,7 @@ DsAndRtnB32Vds::DsAndRtnB32Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1077,6 +1112,7 @@ DsOrRtnB32Vds::DsOrRtnB32Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1111,6 +1147,7 @@ DsXorRtnB32Vds::DsXorRtnB32Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1148,6 +1185,7 @@ DsMskorRtnB32Vds::DsMskorRtnB32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1183,6 +1221,7 @@ DsStorexchgRtnB32Vds::DsStorexchgRtnB32Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1221,6 +1260,7 @@ DsStorexchg2addrRtnB32Vds::DsStorexchg2addrRtnB32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1259,6 +1299,7 @@ DsStorexchg2addrStride64RtnB32Vds::DsStorexchg2addrStride64RtnB32Vds(const Machi
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1298,6 +1339,7 @@ DsCmpstoreRtnB32Vds::DsCmpstoreRtnB32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1333,6 +1375,7 @@ DsMinNumRtnF32Vds::DsMinNumRtnF32Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1368,6 +1411,7 @@ DsMaxNumRtnF32Vds::DsMaxNumRtnF32Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1395,6 +1439,7 @@ DsSwizzleB32Vds::DsSwizzleB32Vds(const MachineInst *inst)
   num_dst_ = 1;
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1423,6 +1468,8 @@ DsLoadB32Vds::DsLoadB32Vds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1452,6 +1499,7 @@ DsLoad2addrB32Vds::DsLoad2addrB32Vds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1482,6 +1530,7 @@ DsLoad2addrStride64B32Vds::DsLoad2addrStride64B32Vds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1512,6 +1561,8 @@ DsLoadI8Vds::DsLoadI8Vds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1541,6 +1592,8 @@ DsLoadU8Vds::DsLoadU8Vds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1570,6 +1623,8 @@ DsLoadI16Vds::DsLoadI16Vds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1599,6 +1654,8 @@ DsLoadU16Vds::DsLoadU16Vds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1627,6 +1684,7 @@ DsConsumeVds::DsConsumeVds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1655,6 +1713,7 @@ DsAppendVds::DsAppendVds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   dsmem_in.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1686,6 +1745,7 @@ DsAddU64Vds::DsAddU64Vds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1717,6 +1777,7 @@ DsSubU64Vds::DsSubU64Vds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1748,6 +1809,7 @@ DsRsubU64Vds::DsRsubU64Vds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1779,6 +1841,7 @@ DsIncU64Vds::DsIncU64Vds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1810,6 +1873,7 @@ DsDecU64Vds::DsDecU64Vds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1841,6 +1905,7 @@ DsMinI64Vds::DsMinI64Vds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1872,6 +1937,7 @@ DsMaxI64Vds::DsMaxI64Vds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1903,6 +1969,7 @@ DsMinU64Vds::DsMinU64Vds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1934,6 +2001,7 @@ DsMaxU64Vds::DsMaxU64Vds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1965,6 +2033,7 @@ DsAndB64Vds::DsAndB64Vds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -1996,6 +2065,7 @@ DsOrB64Vds::DsOrB64Vds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -2027,6 +2097,7 @@ DsXorB64Vds::DsXorB64Vds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -2061,6 +2132,7 @@ DsMskorB64Vds::DsMskorB64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -2090,6 +2162,7 @@ DsStoreB64Vds::DsStoreB64Vds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -2122,6 +2195,7 @@ DsStore2addrB64Vds::DsStore2addrB64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -2155,6 +2229,7 @@ DsStore2addrStride64B64Vds::DsStore2addrStride64B64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -2190,6 +2265,7 @@ DsCmpstoreB64Vds::DsCmpstoreB64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -2222,6 +2298,7 @@ DsMinNumF64Vds::DsMinNumF64Vds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -2253,6 +2330,7 @@ DsMaxNumF64Vds::DsMaxNumF64Vds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -2284,6 +2362,7 @@ DsAddF64Vds::DsAddF64Vds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -2312,6 +2391,7 @@ DsAtomicAsyncBarrierArriveB64Vds::DsAtomicAsyncBarrierArriveB64Vds(const Machine
   dsmem.apply_fieldless_caps(false, false, false);
   dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::ASYNCCNT, amdgpu::MemoryCompletionClass::ASYNC_LOAD}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -2348,6 +2428,7 @@ DsAddRtnU64Vds::DsAddRtnU64Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -2382,6 +2463,7 @@ DsSubRtnU64Vds::DsSubRtnU64Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -2416,6 +2498,7 @@ DsRsubRtnU64Vds::DsRsubRtnU64Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -2451,6 +2534,7 @@ DsIncRtnU64Vds::DsIncRtnU64Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -2485,6 +2569,7 @@ DsDecRtnU64Vds::DsDecRtnU64Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -2519,6 +2604,7 @@ DsMinRtnI64Vds::DsMinRtnI64Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -2553,6 +2639,7 @@ DsMaxRtnI64Vds::DsMaxRtnI64Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -2587,6 +2674,7 @@ DsMinRtnU64Vds::DsMinRtnU64Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -2621,6 +2709,7 @@ DsMaxRtnU64Vds::DsMaxRtnU64Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -2655,6 +2744,7 @@ DsAndRtnB64Vds::DsAndRtnB64Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -2689,6 +2779,7 @@ DsOrRtnB64Vds::DsOrRtnB64Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -2723,6 +2814,7 @@ DsXorRtnB64Vds::DsXorRtnB64Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -2760,6 +2852,7 @@ DsMskorRtnB64Vds::DsMskorRtnB64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -2795,6 +2888,7 @@ DsStorexchgRtnB64Vds::DsStorexchgRtnB64Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -2833,6 +2927,7 @@ DsStorexchg2addrRtnB64Vds::DsStorexchg2addrRtnB64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -2871,6 +2966,7 @@ DsStorexchg2addrStride64RtnB64Vds::DsStorexchg2addrStride64RtnB64Vds(const Machi
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -2910,6 +3006,7 @@ DsCmpstoreRtnB64Vds::DsCmpstoreRtnB64Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   data1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -2945,6 +3042,7 @@ DsMinNumRtnF64Vds::DsMinNumRtnF64Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -2980,6 +3078,7 @@ DsMaxNumRtnF64Vds::DsMaxNumRtnF64Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -3015,6 +3114,7 @@ DsAddRtnF64Vds::DsAddRtnF64Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -3049,6 +3149,7 @@ DsAtomicBarrierArriveRtnB64Vds::DsAtomicBarrierArriveRtnB64Vds(const MachineInst
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -3080,6 +3181,8 @@ DsLoadB64Vds::DsLoadB64Vds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -3109,6 +3212,7 @@ DsLoad2addrB64Vds::DsLoad2addrB64Vds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -3139,6 +3243,7 @@ DsLoad2addrStride64B64Vds::DsLoad2addrStride64B64Vds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -3174,6 +3279,7 @@ DsAddRtnF32Vds::DsAddRtnF32Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -3208,6 +3314,7 @@ DsCondxchg32RtnB64Vds::DsCondxchg32RtnB64Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -3240,6 +3347,7 @@ DsCondSubU32Vds::DsCondSubU32Vds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -3272,6 +3380,7 @@ DsSubClampU32Vds::DsSubClampU32Vds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -3304,6 +3413,7 @@ DsPkAddF16Vds::DsPkAddF16Vds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -3335,6 +3445,7 @@ DsPkAddBf16Vds::DsPkAddBf16Vds(const MachineInst *inst)
   dsmem_in.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -3364,6 +3475,8 @@ DsStoreB8D16HiVds::DsStoreB8D16HiVds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  data0.set_register_byte_mask(0x4);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -3394,6 +3507,8 @@ DsStoreB16D16HiVds::DsStoreB16D16HiVds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  data0.set_register_byte_mask(0xc);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -3424,6 +3539,7 @@ DsLoadU8D16Vds::DsLoadU8D16Vds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -3453,6 +3569,7 @@ DsLoadU8D16HiVds::DsLoadU8D16HiVds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -3483,6 +3600,7 @@ DsLoadI8D16Vds::DsLoadI8D16Vds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -3512,6 +3630,7 @@ DsLoadI8D16HiVds::DsLoadI8D16HiVds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -3542,6 +3661,7 @@ DsLoadU16D16Vds::DsLoadU16D16Vds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -3572,6 +3692,7 @@ DsLoadU16D16HiVds::DsLoadU16D16HiVds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -3607,6 +3728,7 @@ DsCondSubRtnU32Vds::DsCondSubRtnU32Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -3642,6 +3764,7 @@ DsSubClampRtnU32Vds::DsSubClampRtnU32Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -3677,6 +3800,7 @@ DsPkAddRtnF16Vds::DsPkAddRtnF16Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -3712,6 +3836,7 @@ DsPkAddRtnBf16Vds::DsPkAddRtnBf16Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -3741,6 +3866,7 @@ DsStoreAddtidB32Vds::DsStoreAddtidB32Vds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -3770,6 +3896,7 @@ DsLoadAddtidB32Vds::DsLoadAddtidB32Vds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -3800,6 +3927,7 @@ DsPermuteB32Vds::DsPermuteB32Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3828,6 +3956,7 @@ DsBpermuteB32Vds::DsBpermuteB32Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3856,6 +3985,7 @@ DsBpermuteFiB32Vds::DsBpermuteFiB32Vds(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3884,6 +4014,7 @@ DsStoreB96Vds::DsStoreB96Vds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -3913,6 +4044,7 @@ DsStoreB128Vds::DsStoreB128Vds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -4066,6 +4198,8 @@ DsLoadB96Vds::DsLoadB96Vds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -4095,6 +4229,8 @@ DsLoadB128Vds::DsLoadB128Vds(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+  flags_ |= SIMPLE_MEMORY_RESULT;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;

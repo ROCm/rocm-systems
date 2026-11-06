@@ -73,29 +73,29 @@ on_memory_copy(typename SdkBackend::memory_copy_record_t* record,
         rocprofiler_sdk::stream_stack_service<SdkBackend>::get_stream_id(record).handle;
 
     auto& metadata_registry = Externals::get_metadata_registry();
-    metadata_registry.add_thread_info({
-        .parent_process_id = Externals::get_ppid(),
-        .process_id        = Externals::get_pid(),
-        .thread_id         = record->thread_id,
-        .start             = k_zero_start_timestamp,
-        .end               = k_zero_end_timestamp,
-        .extdata           = k_empty_json,
+    metadata_registry.ensure_thread(record->thread_id, [&] {
+        return typename Externals::thread_info_t{
+            .parent_process_id = Externals::get_ppid(),
+            .process_id        = Externals::get_pid(),
+            .thread_id         = record->thread_id,
+            .start             = k_zero_start_timestamp,
+            .end               = k_zero_end_timestamp,
+            .extdata           = k_empty_json,
+        };
     });
 
-    metadata_registry.add_track({
-        .track_name = fmt::format("GPU Memory Copy to Agent [{}] Thread {}",
-                                  dst_agent->logical_node_id, record->thread_id),
-        .thread_id  = record->thread_id,
-        .extdata    = k_empty_json,
-    });
+    auto const track_name = fmt::format("GPU Memory Copy to Agent [{}] Thread {}",
+                                        dst_agent->logical_node_id, record->thread_id);
+    metadata_registry.ensure_track(track_name, record->thread_id);
 
     metadata_registry.add_stream(stream_id);
 
+    const auto name =
+        SdkBackend::get_buffer_tracing_names().at(record->kind, record->operation);
+
     Externals::get_buffer_storage().store(typename Externals::memory_copy_sample_t{
         record->start_timestamp, record->end_timestamp, record->thread_id,
-        record->dst_agent_id.handle, record->src_agent_id.handle,
-        static_cast<std::int32_t>(record->kind),
-        static_cast<std::int32_t>(record->operation), record->bytes,
+        record->dst_agent_id.handle, record->src_agent_id.handle, name, record->bytes,
         record->correlation_id.internal,
         SdkBackend::get_parent_stack_id(record->correlation_id),
         SdkBackend::get_memory_copy_dst_address(*record),
@@ -106,11 +106,11 @@ on_memory_copy(typename SdkBackend::memory_copy_record_t* record,
         if(const auto sequent_tid =
                Externals::get_thread_info_sequent_tid(record->thread_id))
         {
-            const auto name =
+            const auto bundle_name =
                 fmt::format("memory_copy: {} -> {}", src_agent->logical_node_id,
                             dst_agent->logical_node_id);
 
-            Externals::write_timemory_bundle(name, *sequent_tid,
+            Externals::write_timemory_bundle(bundle_name, *sequent_tid,
                                              end_timestamp_ns - beg_timestamp_ns);
         }
     }

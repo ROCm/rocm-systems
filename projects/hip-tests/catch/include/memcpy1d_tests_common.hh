@@ -6,7 +6,10 @@
 
 #pragma once
 
+#include <chrono>
 #include <functional>
+#include <future>
+#include <thread>
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
@@ -229,13 +232,37 @@ void MemcpyWithDirectionCommonTests(F memcpy_func, const hipStream_t kernel_stre
 // Synchronization behavior checks
 template <typename F>
 void MemcpySyncBehaviorCheck(F memcpy_func, const bool should_sync,
-                             const hipStream_t kernel_stream) {
-  LaunchDelayKernel(std::chrono::milliseconds{100}, kernel_stream);
-  HIP_CHECK(memcpy_func());
+                            const hipStream_t kernel_stream) {
+  constexpr std::chrono::milliseconds kBlockingCopyReleaseDelay{200};
+  constexpr std::chrono::milliseconds kAsyncCopyReleaseTimeout{10000};
+
+  EventsGuard kernel_done(1);
+  LinearAllocGuard<int> release(LinearAllocs::hipHostMalloc, sizeof(int));
+  *release.ptr() = 0;
+  WaitForHostRelease<<<1, 1, 0, kernel_stream>>>(release.ptr());
+  const hipError_t launch_error = hipGetLastError();
+  const hipError_t record_error = hipEventRecord(kernel_done, kernel_stream);
+
+  const auto release_delay = should_sync ? kBlockingCopyReleaseDelay : kAsyncCopyReleaseTimeout;
+  std::promise<void> query_done;
+  std::thread releaser([flag = release.ptr(), query_done_future = query_done.get_future(),
+                        release_delay] {
+    query_done_future.wait_for(release_delay);
+    __atomic_store_n(flag, 1, __ATOMIC_RELEASE);
+  });
+  const auto memcpy_error = memcpy_func();
+  const auto query_error = hipEventQuery(kernel_done);
+  query_done.set_value();
+  releaser.join();
+  HIP_CHECK(launch_error);
+  HIP_CHECK(record_error);
+  HIP_CHECK(hipStreamSynchronize(kernel_stream));
+
+  HIP_CHECK(memcpy_error);
   if (should_sync) {
-    HIP_CHECK(hipStreamQuery(kernel_stream));
+    HIP_CHECK(query_error);
   } else {
-    HIP_CHECK_ERROR(hipStreamQuery(kernel_stream), hipErrorNotReady);
+    HIP_CHECK_ERROR(query_error, hipErrorNotReady);
   }
 }
 

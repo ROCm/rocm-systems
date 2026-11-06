@@ -335,6 +335,14 @@ FILTER[gfx1153]=\
 "$BLACKLIST_ALL_ASICS:"\
 "$BLACKLIST_GFX11"
 
+FILTER[gfx1170]=\
+"$BLACKLIST_ALL_ASICS:"\
+"$BLACKLIST_GFX11"
+
+FILTER[gfx1171]=\
+"$BLACKLIST_ALL_ASICS:"\
+"$BLACKLIST_GFX11"
+
 FILTER[gfx1036]=\
 "$BLACKLIST_ALL_ASICS:"\
 "$BLACKLIST_GFX10_NV2X"
@@ -367,6 +375,19 @@ FILTER[gfx1201]=\
 "$BLACKLIST_GFX12"
 
 FILTER[gfx1250]=\
+"$BLACKLIST_ALL_ASICS_NO_CU_MASK:"\
+"$BLACKLIST_GFX12:"\
+"KFDEventTest.SignalInvalidEvent:"\
+"KFDQMTest.MultipleCpQueuesStressDispatch:"\
+"KFDCWSRTest.InternalRegTest:"\
+"KFDEvictTest.QueueTest:"\
+"KFDEvictTest.BasicTest:"\
+"KFDRASTest.*:"\
+"KFDExceptionTest.AddressFault:"\
+"KFDQMTest.GpuMemCopyTest:"\
+"KFDDBGTest.HitTrapOnWaveStartEndEvent"
+
+FILTER[gfx1251]=\
 "$BLACKLIST_ALL_ASICS_NO_CU_MASK:"\
 "$BLACKLIST_GFX12:"\
 "KFDEventTest.SignalInvalidEvent:"\

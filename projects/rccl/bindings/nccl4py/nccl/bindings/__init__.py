@@ -2,6 +2,8 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+"""Low-level Python bindings for NCCL."""
+
 from .nccl import *
 
 # Hand-written wrappers for RCCL-only collectives

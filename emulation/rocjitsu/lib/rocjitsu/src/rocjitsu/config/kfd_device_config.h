@@ -10,8 +10,17 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace rocjitsu::config {
+
+/// @brief Hardware block version for device IP discovery.
+struct DeviceIpVersion {
+  uint16_t hardware_id = 0;
+  uint8_t major = 0;
+  uint8_t minor = 0;
+  uint8_t revision = 0;
+};
 
 /// @brief Per-field topology values explicitly supplied by configuration.
 struct KfdDiscoveryOverrides {
@@ -76,6 +85,7 @@ struct KfdDeviceConfig {
   bool present = false;                      ///< True if device section existed in config.
   uint32_t num_sdma_queues_per_engine = 0;   ///< Regular SDMA queues per engine.
   KfdDiscoveryOverrides discovery_overrides; ///< Explicit PCI discovery topology overrides.
+  std::vector<DeviceIpVersion> ip_versions;  ///< Die-zero, instance-zero discovery versions.
 };
 
 } // namespace rocjitsu::config

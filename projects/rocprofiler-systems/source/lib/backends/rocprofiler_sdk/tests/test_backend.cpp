@@ -3,6 +3,7 @@
 
 #include "backends/rocprofiler_sdk/backend.hpp"
 #include "backends/rocprofiler_sdk/tests/mock_sdk.hpp"
+#include "common/clocks.hpp"
 #include <cstdint>
 
 #include <gmock/gmock.h>
@@ -341,6 +342,12 @@ TEST_F(backend_test, context_is_valid_returns_false_on_sdk_error)
 }
 
 // ─── get_timestamp ────────────────────────────────────────────────────────────
+
+// rocprofiler_get_timestamp() reads CLOCK_BOOTTIME (default_clock_id in the SDK's
+// internal common/utility.hpp). CPU events are stamped with clocks::timeline, so
+// both must read the same clock for CPU and SDK events to line up in the trace.
+static_assert(clocks::timeline::k_timeline_clock_id == CLOCK_BOOTTIME,
+              "clocks::timeline must match the rocprofiler-sdk host clock");
 
 TEST_F(backend_test, get_timestamp_returns_value_written_by_sdk)
 {
@@ -840,6 +847,26 @@ TEST_F(backend_test, check_version_compatibility_throws_on_runtime_version_misma
 
     using sut_v = backend<version_mismatch_tag>;
     EXPECT_THROW(sut_v::check_version_compatibility(), std::runtime_error);
+}
+
+TEST_F(backend_test, marker_constants_forward_wrapper_values)
+{
+    EXPECT_EQ(sut::CALLBACK_TRACING_MARKER_CONTROL_API,
+              mock_sdk::CALLBACK_TRACING_MARKER_CONTROL_API);
+    EXPECT_EQ(sut::MARKER_CORE_API_ID_roctxMarkA,
+              mock_sdk::MARKER_CORE_API_ID_roctxMarkA);
+    EXPECT_EQ(sut::MARKER_CORE_API_ID_roctxRangePushA,
+              mock_sdk::MARKER_CORE_API_ID_roctxRangePushA);
+    EXPECT_EQ(sut::MARKER_CORE_API_ID_roctxRangePop,
+              mock_sdk::MARKER_CORE_API_ID_roctxRangePop);
+    EXPECT_EQ(sut::MARKER_CORE_API_ID_roctxRangeStartA,
+              mock_sdk::MARKER_CORE_API_ID_roctxRangeStartA);
+    EXPECT_EQ(sut::MARKER_CORE_API_ID_roctxRangeStop,
+              mock_sdk::MARKER_CORE_API_ID_roctxRangeStop);
+    EXPECT_EQ(sut::MARKER_CONTROL_API_ID_roctxProfilerPause,
+              mock_sdk::MARKER_CONTROL_API_ID_roctxProfilerPause);
+    EXPECT_EQ(sut::MARKER_CONTROL_API_ID_roctxProfilerResume,
+              mock_sdk::MARKER_CONTROL_API_ID_roctxProfilerResume);
 }
 
 }  // namespace rocprofsys::backends::rocprofiler_sdk::testing

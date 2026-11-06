@@ -56,11 +56,14 @@
 #include "suites/functional/memory_alignment.h"
 #include "suites/functional/memory_atomics.h"
 #include "suites/functional/memory_allocation.h"
+#include "suites/functional/memory_fragment.h"
 #include "suites/functional/memory_fill.h"
 #include "suites/functional/deallocation_notifier.h"
 #include "suites/functional/virtual_memory.h"
+#include "suites/functional/loader_reserved_address.h"
 #include "suites/functional/svm_memory.h"
 #include "suites/functional/time_stamp.h"
+#include "suites/functional/heap_reservation.h"
 #include "suites/performance/dispatch_time.h"
 #include "suites/performance/memory_async_copy.h"
 #if ENABLE_COPY_NUMA
@@ -69,6 +72,7 @@
 #include "suites/performance/memory_async_copy_on_engine.h"
 #include "suites/performance/enqueueLatency.h"
 #include "suites/performance/agent_preload.h"
+#include "suites/performance/signal_hint_cost.h"
 #include "suites/negative/memory_allocate_negative_tests.h"
 #include "suites/negative/queue_validation.h"
 #include "suites/stress/memory_concurrent_tests.h"
@@ -93,6 +97,8 @@
 #include "suites/functional/gpu_coredump.h"
 #include "suites/functional/gpu_discovery_deprecated.h"
 #include "suites/functional/gl2_cache_test.h"
+#include "suites/functional/signal_batch_test.h"
+#include "suites/functional/signal_hints.h"
 #include "amd_smi/amdsmi.h"
 #include "common/common.h"
 #include "suites/functional/counted_queues.h"
@@ -375,6 +381,15 @@ TEST(rocrtstFunc, Time_Stamp) {
   RunCustomTestEpilog(&ts);
 }
 
+TEST(rocrtstFunc, Heap_Reservation) {
+    if (rocrtst::SkipIfNotWsl("heap VA pools are reserved only by the WSL/DXG thunk")) return;
+    HeapReservationTest hr;
+
+    if (!RunCustomTestProlog(&hr)) return;
+    hr.HeapReservationSurvivesConstrainedAddressSpace();
+    RunCustomTestEpilog(&hr);
+}
+
 TEST(rocrtstFunc, BarrierPkt_TimeStamp) {
     TimeStamp ts;
     RunCustomTestProlog(&ts);
@@ -487,6 +502,80 @@ TEST(rocrtstFunc, GL2_PersistingCache_NegativeCPUAgent) {
     RunCustomTestEpilog(&gl2);
 }
 
+TEST(rocrtstFunc, Signal_Batch_Host_Pool) {
+    SignalBatchTest batch_test;
+    if (!RunCustomTestProlog(&batch_test)) return;
+    batch_test.HostPoolBatch();
+    RunCustomTestEpilog(&batch_test);
+}
+
+TEST(rocrtstFunc, Signal_Batch_Device_Pools) {
+    SignalBatchTest batch_test;
+    if (!RunCustomTestProlog(&batch_test)) return;
+    batch_test.DevicePoolsFollowQuery();
+    RunCustomTestEpilog(&batch_test);
+}
+
+TEST(rocrtstFunc, Signal_Batch_Async_Copy_Completion) {
+    SignalBatchTest batch_test;
+    if (!RunCustomTestProlog(&batch_test)) return;
+    batch_test.AsyncCopyCompletesMember();
+    RunCustomTestEpilog(&batch_test);
+}
+
+TEST(rocrtstFunc, Signal_Batch_Negative) {
+    SignalBatchTest batch_test;
+    if (!RunCustomTestProlog(&batch_test)) return;
+    batch_test.NegativeArguments();
+    RunCustomTestEpilog(&batch_test);
+}
+
+// Duplicate consumers stay invalid when interrupt waits are off. SetUp leaves
+// HSA_ENABLE_INTERRUPT alone because enable_interrupt() defaults to false.
+TEST(rocrtstFunc, Signal_Batch_Negative_InterruptDisabled) {
+    RestoreEnvironmentVariable restore_interrupt("HSA_ENABLE_INTERRUPT");
+    rocrtst::SetEnv("HSA_ENABLE_INTERRUPT", "0");
+    SignalBatchTest batch_test;
+    if (!RunCustomTestProlog(&batch_test)) return;
+    batch_test.NegativeArguments();
+    RunCustomTestEpilog(&batch_test);
+}
+
+TEST(rocrtstFunc, Signal_Batch_Agent_Queries) {
+    SignalBatchTest batch_test;
+    if (!RunCustomTestProlog(&batch_test)) return;
+    batch_test.AgentQueries();
+    RunCustomTestEpilog(&batch_test);
+}
+
+TEST(rocrtstFunc, Signal_Handle_Hints) {
+    SignalBatchTest batch_test;
+    if (!RunCustomTestProlog(&batch_test)) return;
+    batch_test.HandleHints();
+    RunCustomTestEpilog(&batch_test);
+}
+
+TEST(rocrtstFunc, Signal_Hints_Value_Binary) {
+    SignalHintsTest hints_test;
+    if (!RunCustomTestProlog(&hints_test)) return;
+    hints_test.ValueBinary();
+    RunCustomTestEpilog(&hints_test);
+}
+
+TEST(rocrtstFunc, Signal_Hints_Timestamps) {
+    SignalHintsTest hints_test;
+    if (!RunCustomTestProlog(&hints_test)) return;
+    hints_test.Timestamps();
+    RunCustomTestEpilog(&hints_test);
+}
+
+TEST(rocrtstFunc, Signal_Hints_Interrupts) {
+    SignalHintsTest hints_test;
+    if (!RunCustomTestProlog(&hints_test)) return;
+    hints_test.Interrupts();
+    RunCustomTestEpilog(&hints_test);
+}
+
 TEST(rocrtstFunc, Memory_Atomic_Add_Test) {
     MemoryAtomic ma(ADD);
     if (!RunCustomTestProlog(&ma)) return;
@@ -555,6 +644,27 @@ TEST(rocrtstFunc, Memory_Atomic_Xchg_Test) {
     if (!RunCustomTestProlog(&ma)) return;
     ma.MemoryAtomicTest();
     RunCustomTestEpilog(&ma);
+}
+
+TEST(rocrtstFunc, Memory_Fragment_Overlap_Test) {
+    MemoryFragment mf;
+    if (!RunCustomTestProlog(&mf)) return;
+    mf.FragmentOverlapTest();
+    RunCustomTestEpilog(&mf);
+}
+
+TEST(rocrtstFunc, Memory_Fragment_ZeroInit_Test) {
+    MemoryFragment mf;
+    if (!RunCustomTestProlog(&mf)) return;
+    mf.FragmentZeroInitTest();
+    RunCustomTestEpilog(&mf);
+}
+
+TEST(rocrtstFunc, Memory_Fragment_Coherence_Test) {
+    MemoryFragment mf;
+    if (!RunCustomTestProlog(&mf)) return;
+    mf.FragmentCoherenceTest();
+    RunCustomTestEpilog(&mf);
 }
 
 TEST(rocrtstFunc, DISABLED_DebugBasicTests) {
@@ -784,6 +894,20 @@ TEST(rocrtstFunc, VirtMemory_Imported_Handle_Pointer_Info_Test) {
   if (!RunCustomTestProlog(&vmt)) return;
   vmt.TestImportedHandlePointerInfo();
   RunCustomTestEpilog(&vmt);
+}
+
+TEST(rocrtstFunc, VirtMemory_Host_Backed_Alloc_Import_Info_Test) {
+  VirtMemoryTestBasic vmt;
+  if (!RunCustomTestProlog(&vmt)) return;
+  vmt.TestHostBackedAllocImportInfo();
+  RunCustomTestEpilog(&vmt);
+}
+
+TEST(rocrtstFunc, Loader_ReservedAddress_Test) {
+  LoaderReservedAddressTest lra;
+  if (!RunCustomTestProlog(&lra)) return;
+  lra.LoadAtAddressTest();
+  RunCustomTestEpilog(&lra);
 }
 
 TEST(rocrtstFunc, Filter_Devices_Test) {
@@ -1044,6 +1168,11 @@ TEST(rocrtstPerf, AQL_Dispatch_Time_Multi_Interrupt) {
 TEST(rocrtstPerf, Agent_Preload_Latency) {
   AgentPreloadTest apt;
   RunGenericTest(&apt);
+}
+
+TEST(rocrtstPerf, Signal_Hint_Cost) {
+  SignalHintCost hint_cost;
+  RunGenericTest(&hint_cost);
 }
 
 

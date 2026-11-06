@@ -39,6 +39,10 @@
  */
 
 #include "gin/gin_rocshmem_gda_factory.h"
+#include "dv_dlopen.h"
+#include "ib_gid_utils.h"
+#include "param.h"
+#include "gin_rocshmem_gda_inspect.h"
 #include <gda/queue_pair_provider.hpp>
 #include <gda/ibv_wrapper.hpp>
 #include <gda/gda_enums.hpp>
@@ -114,6 +118,7 @@ struct gin_dest_info {
   int qpn;
   int psn;
   union ibv_gid gid;
+  enum ibv_mtu active_mtu;
 };
 
 struct rocshmem_gin_qp_set {
@@ -148,6 +153,10 @@ struct rocshmem_gin_qp_set {
   std::vector<struct ibv_qp*> ibv_qps;
   std::vector<struct ibv_cq*> ibv_cqs;
 
+  // Per-peer negotiated MTU; BNXT's GPU SQ needs it for PSN/packet-count math (see
+  // initialize_host_gpu_qp). Set in gin_modify_qps_init_to_rtr.
+  std::vector<enum ibv_mtu> negotiated_mtu;
+
   // QueuePair objects
   QueuePair* host_qps = nullptr;
   QueuePair* gpu_qps = nullptr;
@@ -157,6 +166,7 @@ struct rocshmem_gin_qp_set {
   struct ibv_mr* fetch_atomic_dummy_mr = nullptr;
 
   uint32_t sq_size = envvar::gda::sq_size;
+  uint8_t traffic_class = 0;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -252,6 +262,50 @@ static GDAProvider gin_detect_provider(struct ibv_device_attr* attr) {
   return GDAProvider::UNSET;
 }
 
+NCCL_PARAM(GinRocshmemRoutableFlidGidIndex, "IB_ROUTABLE_FLID_GID_INDEX", 1);
+
+// Selects a GID from query_gid_table() output (matches GDABackend::select_gid_index() logic):
+//   1. IB type: use immediately, preferring the routable-FLID GID when it has a nonzero FLID, as
+//      ncclIbGetGidIndex() does, so cross-subnet peers are reachable
+//   2. Skip link-local (FE80 prefix) and all-zero
+//   3. Prefer RoCEv2 over RoCEv1
+// The table spans all ports and may have holes, so entries are filtered on port_num and the
+// routable GID is matched on gid_index. Callers must use entries[pos].gid_index, never pos.
+// Returns the chosen position, or -1 if no entry is usable.
+static int gin_select_gid_pos(const struct ibv_gid_entry* entries, int n, int port, int routable_gid_index) {
+  const uint8_t local_gid_prefix[2] = {0xFE, 0x80};
+  int selected = -1;
+
+  for (int i = 0; i < n; i++) {
+    if (entries[i].port_num != (uint32_t)port) continue;
+    const union ibv_gid* g = &entries[i].gid;
+    uint32_t gtype = entries[i].gid_type;
+
+    if (gtype == IBV_GID_TYPE_IB) {
+      for (int j = 0; j < n; j++) {
+        if (entries[j].port_num == (uint32_t)port && entries[j].gid_index == (uint32_t)routable_gid_index &&
+            ncclIbGidFlid(entries[j].gid.raw) != 0) {
+          return j;
+        }
+      }
+      return i;
+    }
+
+    if (memcmp(g->raw, local_gid_prefix, 2) == 0) continue;
+    bool all_zero = true;
+    for (int b = 0; b < 16; b++) {
+      if (g->raw[b] != 0) {
+        all_zero = false;
+        break;
+      }
+    }
+    if (all_zero) continue;
+
+    if (selected == -1 || gtype > entries[selected].gid_type) selected = i;
+  }
+  return selected;
+}
+
 static int gin_open_ib_device(rocshmem_gin_qp_set* set) {
   struct ibv_device** dev_list = nullptr;
   int ndev = 0;
@@ -306,7 +360,7 @@ static int gin_open_ib_device(rocshmem_gin_qp_set* set) {
     }
 
     // Check for active port
-    struct ibv_port_attr port_attr;
+    struct ibv_port_attr port_attr {};
     int port = 1;
     if (ibv.query_port(ctx, port, &port_attr) != 0 || port_attr.state != IBV_PORT_ACTIVE) {
       LOG_WARN("GIN QP factory: device %s port %d not active (state=%d), skipping", ibv.get_device_name(dev_list[d]),
@@ -324,50 +378,16 @@ static int gin_open_ib_device(rocshmem_gin_qp_set* set) {
     set->nic.nic_name = ibv.get_device_name(dev_list[d]);
     set->provider = provider;
 
-    // Select GID — matches GDABackend::select_gid_index() logic:
-    //   1. IB type → use immediately (non-Ethernet)
-    //   2. Skip link-local (FE80 prefix) and all-zero
-    //   3. Prefer RoCEv2 over RoCEv1
     {
-      const uint8_t local_gid_prefix[2] = {0xFE, 0x80};
       int gid_tbl_len = port_attr.gid_tbl_len;
       struct ibv_gid_entry* gid_entries = (struct ibv_gid_entry*)calloc(gid_tbl_len, sizeof(struct ibv_gid_entry));
       ssize_t n = ibv.query_gid_table(ctx, gid_entries, gid_tbl_len, 0);
-      int selected_idx = -1;
+      int pos = gin_select_gid_pos(gid_entries, (int)n, port, (int)ncclParamGinRocshmemRoutableFlidGidIndex());
       uint32_t selected_type = IBV_GID_TYPE_ROCE_V1;
-
-      for (int i = 0; i < n; i++) {
-        union ibv_gid* g = &gid_entries[i].gid;
-        uint32_t gtype = gid_entries[i].gid_type;
-
-        // IB mode: use immediately
-        if (gtype == IBV_GID_TYPE_IB) {
-          selected_idx = i;
-          selected_type = gtype;
-          set->nic.gid = *g;
-          set->nic.gid_index = i;
-          break;
-        }
-
-        // Skip link-local
-        if (memcmp(g->raw, local_gid_prefix, 2) == 0) continue;
-        // Skip all-zero
-        bool all_zero = true;
-        for (int b = 0; b < 16; b++) {
-          if (g->raw[b] != 0) {
-            all_zero = false;
-            break;
-          }
-        }
-        if (all_zero) continue;
-
-        // First valid, or prefer higher type (RoCEv2 > RoCEv1)
-        if (selected_idx == -1 || gtype > selected_type) {
-          selected_idx = i;
-          selected_type = gtype;
-          set->nic.gid = *g;
-          set->nic.gid_index = i;
-        }
+      if (pos >= 0) {
+        selected_type = gid_entries[pos].gid_type;
+        set->nic.gid = gid_entries[pos].gid;
+        set->nic.gid_index = gid_entries[pos].gid_index;
       }
       set->nic.gid_type = selected_type;
       free(gid_entries);
@@ -405,8 +425,8 @@ static int gin_load_dv_library(rocshmem_gin_qp_set* set) {
 #if defined(GDA_IONIC)
   case GDAProvider::IONIC:
     {
-      set->dv_handle = dlopen("libionic.so", RTLD_LAZY);
-      if (!set->dv_handle) set->dv_handle = dlopen("/usr/local/lib/libionic.so", RTLD_LAZY);
+      set->dv_handle = ncclDvDlopen("libionic.so", RTLD_LAZY);
+      if (!set->dv_handle) set->dv_handle = ncclDvDlopen("/usr/local/lib/libionic.so", RTLD_LAZY);
       if (!set->dv_handle) {
         LOG_ERROR("GIN QP factory: failed to load libionic.so: %s", dlerror());
         return -1;
@@ -419,15 +439,15 @@ static int gin_load_dv_library(rocshmem_gin_qp_set* set) {
       DLSYM_HELPER(set->ionic_dv, ionic_dv_, set->dv_handle, pd_set_sqcmb);
       DLSYM_HELPER(set->ionic_dv, ionic_dv_, set->dv_handle, pd_set_rqcmb);
       DLSYM_HELPER(set->ionic_dv, ionic_dv_, set->dv_handle, pd_set_udma_mask);
-      DLSYM_OPT_HELPER(set->ionic_dv, ionic_dv_, set->dv_handle, create_cq_ex);
+      DLSYM_HELPER(set->ionic_dv, ionic_dv_, set->dv_handle, create_cq_ex);
       return 0;
     }
 #endif
 #if defined(GDA_BNXT)
   case GDAProvider::BNXT:
     {
-      set->dv_handle = dlopen("libbnxt_re.so", RTLD_LAZY);
-      if (!set->dv_handle) set->dv_handle = dlopen("/usr/local/lib/libbnxt_re.so", RTLD_LAZY);
+      set->dv_handle = ncclDvDlopen("libbnxt_re.so", RTLD_LAZY);
+      if (!set->dv_handle) set->dv_handle = ncclDvDlopen("/usr/local/lib/libbnxt_re.so", RTLD_LAZY);
       if (!set->dv_handle) {
         LOG_ERROR("GIN QP factory: failed to load libbnxt_re.so: %s", dlerror());
         return -1;
@@ -451,7 +471,7 @@ static int gin_load_dv_library(rocshmem_gin_qp_set* set) {
 #if defined(GDA_MLX5)
   case GDAProvider::MLX5:
     {
-      set->dv_handle = dlopen("libmlx5.so", RTLD_LAZY);
+      set->dv_handle = ncclDvDlopen("libmlx5.so", RTLD_LAZY);
       if (!set->dv_handle) {
         LOG_ERROR("GIN QP factory: failed to load libmlx5.so: %s", dlerror());
         return -1;
@@ -540,16 +560,12 @@ static int gin_create_cqs(rocshmem_gin_qp_set* set) {
       cq_attr.comp_mask = IBV_CQ_INIT_ATTR_MASK_PD;
 
       memset(&ionic_cq_attr, 0, sizeof(ionic_cq_attr));
-      if (set->ionic_dv.create_cq_ex) {
-        ionic_cq_attr.comp_mask = IONIC_CQ_INIT_ATTR_MASK_FLAGS;
-        ionic_cq_attr.flags = IONIC_CQ_INIT_ATTR_CCQE;
-      }
+      ionic_cq_attr.comp_mask = IONIC_CQ_INIT_ATTR_MASK_FLAGS;
+      ionic_cq_attr.flags = IONIC_CQ_INIT_ATTR_CCQE;
 
       for (int i = 0; i < n; i++) {
         cq_attr.parent_domain = set->nic.pd_uxdma[i & 1];
-        struct ibv_cq_ex* cq_ex = nullptr;
-        if (set->ionic_dv.create_cq_ex) cq_ex = set->ionic_dv.create_cq_ex(set->nic.context, &cq_attr, &ionic_cq_attr);
-        if (!cq_ex) cq_ex = ibv.create_cq_ex(set->nic.context, &cq_attr);
+        struct ibv_cq_ex* cq_ex = set->ionic_dv.create_cq_ex(set->nic.context, &cq_attr, &ionic_cq_attr);
         if (!cq_ex) return -1;
         set->ibv_cqs[i] = ibv.cq_ex_to_cq(cq_ex);
         if (!set->ibv_cqs[i]) return -1;
@@ -844,12 +860,65 @@ static int gin_modify_qps_rst_to_init(rocshmem_gin_qp_set* set) {
   return 0;
 }
 
+static int gin_ibv_mtu_to_int(enum ibv_mtu mtu) {
+  switch (mtu) {
+  case IBV_MTU_256: return 256;
+  case IBV_MTU_512: return 512;
+  case IBV_MTU_1024: return 1024;
+  case IBV_MTU_2048: return 2048;
+  case IBV_MTU_4096: return 4096;
+  default:
+    LOG_WARN("GIN QP factory: invalid ibv_mtu %d", mtu);
+    return 0;
+  }
+}
+
+// Mirrors connect.cc's std::min(remDevInfo->mtu, ibDev->portAttr.active_mtu). Caller must have
+// already validated local_mtu.
+static int gin_negotiate_path_mtu(enum ibv_mtu local_mtu, enum ibv_mtu remote_mtu, enum ibv_mtu* out) {
+  if (gin_ibv_mtu_to_int(remote_mtu) == 0) return -1;
+  *out = (local_mtu < remote_mtu) ? local_mtu : remote_mtu;
+  return 0;
+}
+
+// Test-only wrappers declared in gin_rocshmem_gda_inspect.h; no extra build guard needed since
+// this TU only compiles under ENABLE_ROCSHMEM_GIN already.
+extern "C" int ginTestIbvMtuToInt(int mtu) {
+  return gin_ibv_mtu_to_int(static_cast<enum ibv_mtu>(mtu));
+}
+
+extern "C" int ginTestNegotiatePathMtu(int local_mtu, int remote_mtu, int* out_mtu) {
+  if (gin_ibv_mtu_to_int(static_cast<enum ibv_mtu>(local_mtu)) == 0) return -1;
+  enum ibv_mtu out;
+  int rc = gin_negotiate_path_mtu(static_cast<enum ibv_mtu>(local_mtu), static_cast<enum ibv_mtu>(remote_mtu), &out);
+  if (rc != 0) return rc;
+  *out_mtu = gin_ibv_mtu_to_int(out);
+  return 0;
+}
+
+static_assert(IBV_GID_TYPE_IB == 0 && IBV_GID_TYPE_ROCE_V1 == 1 && IBV_GID_TYPE_ROCE_V2 == 2,
+              "ginTestSelectGidIndex callers pass these gid_type values");
+
+extern "C" int ginTestSelectGidIndex(const unsigned char (*gid_raw)[16], const unsigned* gid_index,
+                                     const unsigned* port_num, const unsigned* gid_type, int n, int port,
+                                     int routable_gid_index) {
+  std::vector<struct ibv_gid_entry> entries(n);
+  for (int i = 0; i < n; i++) {
+    memset(&entries[i], 0, sizeof(entries[i]));
+    memcpy(entries[i].gid.raw, gid_raw[i], 16);
+    entries[i].gid_index = gid_index[i];
+    entries[i].port_num = port_num[i];
+    entries[i].gid_type = gid_type[i];
+  }
+  int pos = gin_select_gid_pos(entries.data(), n, port, routable_gid_index);
+  return pos < 0 ? -1 : (int)entries[pos].gid_index;
+}
+
 static int gin_modify_qps_init_to_rtr(rocshmem_gin_qp_set* set, struct gin_dest_info* remote_info) {
   struct ibv_qp_attr attr;
   memset(&attr, 0, sizeof(attr));
   attr.qp_state = IBV_QPS_RTR;
   attr.min_rnr_timer = 12;
-  attr.path_mtu = set->nic.portinfo.active_mtu;
   attr.ah_attr.port_num = set->nic.port;
 
 #if defined(GDA_IONIC)
@@ -861,17 +930,51 @@ static int gin_modify_qps_init_to_rtr(rocshmem_gin_qp_set* set, struct gin_dest_
   int mask = IBV_QP_STATE | IBV_QP_PATH_MTU | IBV_QP_RQ_PSN | IBV_QP_DEST_QPN | IBV_QP_AV | IBV_QP_MAX_DEST_RD_ATOMIC |
              IBV_QP_MIN_RNR_TIMER;
 
+  enum ibv_mtu local_mtu = set->nic.portinfo.active_mtu;
+  if (gin_ibv_mtu_to_int(local_mtu) == 0) {
+    return -1;
+  }
+
+  set->negotiated_mtu.resize(set->nRanks);
+  bool warned_zero_flid = false;
+
   for (int i = 0; i < set->nRanks; i++) {
+    if (gin_negotiate_path_mtu(local_mtu, remote_info[i].active_mtu, &attr.path_mtu) != 0) {
+      return -1;
+    }
+    set->negotiated_mtu[i] = attr.path_mtu;
+
     if (set->nic.portinfo.link_layer == IBV_LINK_LAYER_ETHERNET) {
       attr.ah_attr.grh.sgid_index = set->nic.gid_index;
       attr.ah_attr.is_global = 1;
       attr.ah_attr.grh.hop_limit = 255;
       attr.ah_attr.sl = 1;
-      attr.ah_attr.grh.traffic_class = envvar::gda::traffic_class;
+      attr.ah_attr.grh.traffic_class = set->traffic_class;
       memcpy(&attr.ah_attr.grh.dgid, &remote_info[i].gid, 16);
     } else {
+      // Mirrors transport/net_ib/connect.cc::ncclIbQpRtr().
+      bool sameSubnet = (ncclIbGidSubnetPrefix16(set->nic.gid.global.subnet_prefix) ==
+                         ncclIbGidSubnetPrefix16(remote_info[i].gid.global.subnet_prefix));
+      bool needGlobal = !sameSubnet || (set->nic.portinfo.flags & IBV_QPF_GRH_REQUIRED);
       attr.ah_attr.is_global = 0;
+      memset(&attr.ah_attr.grh, 0, sizeof(attr.ah_attr.grh));
       attr.ah_attr.dlid = remote_info[i].lid;
+      if (needGlobal) {
+        if (!sameSubnet) {
+          uint16_t flid = ncclIbGidFlid(remote_info[i].gid.raw);
+          if (flid != 0) {
+            attr.ah_attr.dlid = flid;
+          } else if (!warned_zero_flid) {
+            warned_zero_flid = true;
+            LOG_WARN("GIN QP factory: remote FLID is zero even though endpoints are on different "
+                     "subnets, using dlid as fallback (further occurrences suppressed)");
+          }
+        }
+        attr.ah_attr.is_global = 1;
+        attr.ah_attr.grh.sgid_index = set->nic.gid_index;
+        attr.ah_attr.grh.hop_limit = 255;
+        memcpy(&attr.ah_attr.grh.dgid, &remote_info[i].gid, 16);
+      }
     }
     attr.rq_psn = remote_info[i].psn;
     attr.dest_qp_num = remote_info[i].qpn;
@@ -1020,7 +1123,8 @@ int rocshmem_gin_qp_set::initialize_host_gpu_qp(QueuePair* host_gpu_qp, int idx)
       void*    msntbl      = bnxt_qps[idx].msntbl;
       uint32_t msn_tbl_sz  = bnxt_qps[idx].msn_tbl_sz;
       uint32_t psn_sz_log2 = bit_log2(bnxt_qps[idx].mem_info.sq_psn_sz);
-      uint32_t mtu         = 128 << nic.portinfo.active_mtu; // ibv_mtu enum: 1=256, 2=512, 3=1024, 4=2048, 5=4096
+      // Negotiated (not local-only) MTU: feeds fill_psns_for_msntbl's packet-count math.
+      uint32_t mtu         = gin_ibv_mtu_to_int(negotiated_mtu[idx]);
 
       void*    cq_buf   = bnxt_scqs[idx].buf;
       uint32_t cq_depth = bnxt_scqs[idx].depth;
@@ -1083,7 +1187,8 @@ int rocshmem_gin_qp_set::initialize_host_gpu_qp(QueuePair* host_gpu_qp, int idx)
 ///////////////////////////////////////////////////////////////////////////////
 
 int rocshmem_gin_create_qps(int nRanks, int myRank, int (*allgather)(void* ctx, void* buf, size_t size),
-                            void* allgather_ctx, rocshmem_gin_qp_set_t* out_qp_set, void*** out_gpu_qps) {
+                            void* allgather_ctx, int traffic_class, rocshmem_gin_qp_set_t* out_qp_set,
+                            void*** out_gpu_qps) {
   // Note: log_pe_number and device-side logd_constants must be initialized
   // by the consumer binary (e.g. rccl-tests) which links rocshmem's device
   // bitcode and can resolve HIP_SYMBOL(logd_constants).
@@ -1091,6 +1196,7 @@ int rocshmem_gin_create_qps(int nRanks, int myRank, int (*allgather)(void* ctx, 
   auto* set = new rocshmem_gin_qp_set();
   set->nRanks = nRanks;
   set->myRank = myRank;
+  set->traffic_class = static_cast<uint8_t>(traffic_class);
 
   // 1. Open IB device and detect provider
   if (gin_open_ib_device(set) != 0) {
@@ -1150,6 +1256,7 @@ int rocshmem_gin_create_qps(int nRanks, int myRank, int (*allgather)(void* ctx, 
       local_infos[i].lid = set->nic.portinfo.lid;
       local_infos[i].psn = 0;
       local_infos[i].gid = set->nic.gid;
+      local_infos[i].active_mtu = set->nic.portinfo.active_mtu;
 #if defined(GDA_MLX5)
       if (set->provider == GDAProvider::MLX5) local_infos[i].qpn = set->mlx5_qps[i].qpn;
       else
@@ -1236,7 +1343,8 @@ int rocshmem_gin_create_qps(int nRanks, int myRank, int (*allgather)(void* ctx, 
     *out_gpu_qps = gpu_ptr_array;
   }
 
-  LOG_TRACE("GIN QP factory: %d QPs ready on %s (rank %d/%d)", nRanks, set->nic.nic_name.c_str(), myRank, nRanks);
+  LOG_TRACE("GIN QP factory: %d QPs ready on %s (rank %d/%d, tc=%d)", nRanks, set->nic.nic_name.c_str(), myRank,
+            nRanks, set->traffic_class);
   *out_qp_set = set;
   return 0;
 

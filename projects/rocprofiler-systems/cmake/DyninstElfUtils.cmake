@@ -65,12 +65,27 @@ endif()
 # Mode 1: build elfutils from source
 # --------------------------------------------------------------------------------------
 if(ROCPROFSYS_BUILD_ELFUTILS)
+    # elfutils only builds with GCC. When the project is built with another compiler
+    # (e.g. amdclang) the bundled elfutils is still built with the system GCC: it is a
+    # plain C shared library, so mixing compilers is safe.
     if(
-        NOT (${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU")
-        OR NOT (${CMAKE_C_COMPILER_ID} STREQUAL "GNU")
+        "${CMAKE_C_COMPILER_ID}" STREQUAL "GNU"
+        AND "${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU"
     )
-        rocprofiler_systems_message(FATAL_ERROR
-            "ElfUtils will only build with the GNU compiler"
+        set(_eu_cc "${CMAKE_C_COMPILER}")
+        set(_eu_cxx "${CMAKE_CXX_COMPILER}")
+    else()
+        find_program(_eu_cc NAMES gcc)
+        find_program(_eu_cxx NAMES g++)
+        if(NOT _eu_cc OR NOT _eu_cxx)
+            rocprofiler_systems_message(
+                FATAL_ERROR
+                "ElfUtils will only build with the GNU compiler and no gcc/g++ was found in PATH"
+            )
+        endif()
+        rocprofiler_systems_message(
+            STATUS
+            "Building elfutils with ${_eu_cc} (project compiler is ${CMAKE_CXX_COMPILER_ID})"
         )
     endif()
 
@@ -136,8 +151,8 @@ if(ROCPROFSYS_BUILD_ELFUTILS)
         BUILD_IN_SOURCE 1
         ${_eu_patch_args}
         CONFIGURE_COMMAND
-            ${CMAKE_COMMAND} -E env CC=${CMAKE_C_COMPILER}
-            CFLAGS=-fPIC\ -O3\ -Wno-error=maybe-uninitialized CXX=${CMAKE_CXX_COMPILER}
+            ${CMAKE_COMMAND} -E env CC=${_eu_cc}
+            CFLAGS=-fPIC\ -O3\ -Wno-error=maybe-uninitialized CXX=${_eu_cxx}
             CXXFLAGS=-fPIC\ -O3\ -Wno-error=maybe-uninitialized
             [=[LDFLAGS=-Wl,-rpath='$$ORIGIN' -pthread]=] <SOURCE_DIR>/configure
             --enable-install-elfh --prefix=${_eu_root} --disable-libdebuginfod

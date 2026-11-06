@@ -70,8 +70,8 @@ concept HasAsyncMma = GpuIsa<Isa> && requires { requires Isa::ASYNC_MMA_WAVE_SIZ
 
 /// @brief Derived concept: ISA has a dedicated AccVGPR register file.
 ///
-/// @details True for CDNA2/3/4 (`MAX_ACC_VGPRS_PER_WF > 0`).
-/// False for CDNA1 and all RDNA ISAs.
+/// @details True for CDNA1-4 (`MAX_ACC_VGPRS_PER_WF > 0`).
+/// False for RDNA and CDNA5 ISAs.
 template <typename Isa>
 concept HasAccVgpr = GpuIsa<Isa> && (Isa::MAX_ACC_VGPRS_PER_WF > 0);
 

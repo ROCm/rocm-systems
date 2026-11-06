@@ -24,6 +24,7 @@ THE SOFTWARE.
 #include <dlfcn.h>
 
 #include <mutex>  //  NOLINT(build/c++11)
+#include <string>
 
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcException.h"
@@ -31,6 +32,10 @@ THE SOFTWARE.
 
 namespace amd {
 namespace rdc {
+// Loads one library and keeps it until unload(). Loading the same filename again returns the
+// library already loaded, with the first call's dlopen_flags, because handlers and modules
+// created from it may still be in use. Loading a different filename fails; filenames are
+// compared as strings.
 class RdcLibraryLoader {
  public:
   RdcLibraryLoader();
@@ -42,7 +47,7 @@ class RdcLibraryLoader {
   rdc_status_t load_symbol(T* func_handler, const char* func_name);
 
   template <typename T>
-  rdc_status_t load(const char* filename, T* func_make_handler);
+  rdc_status_t load(const char* filename, T* func_make_handler, int dlopen_flags = RTLD_LAZY);
 
   rdc_status_t unload();
 
@@ -50,21 +55,21 @@ class RdcLibraryLoader {
 
  private:
   void* libHandler_;
+  std::string filename_;
   std::mutex library_mutex_;
 };
 
 template <typename T>
 rdc_status_t RdcLibraryLoader::load_symbol(T* func_handler, const char* func_name) {
-  if (!libHandler_) {
-    RDC_LOG(RDC_ERROR, "Must load the library before loading the symbol");
-    return RDC_ST_FAIL_LOAD_MODULE;
-  }
-
   if (!func_handler || !func_name) {
     return RDC_ST_FAIL_LOAD_MODULE;
   }
 
   std::lock_guard<std::mutex> guard(library_mutex_);
+  if (!libHandler_) {
+    RDC_LOG(RDC_ERROR, "Must load the library before loading the symbol");
+    return RDC_ST_FAIL_LOAD_MODULE;
+  }
 
   *reinterpret_cast<void**>(func_handler) = dlsym(libHandler_, func_name);
   if (*func_handler == nullptr) {
@@ -77,13 +82,13 @@ rdc_status_t RdcLibraryLoader::load_symbol(T* func_handler, const char* func_nam
 }
 
 template <typename T>
-rdc_status_t RdcLibraryLoader::load(const char* filename, T* func_make_handler) {
+rdc_status_t RdcLibraryLoader::load(const char* filename, T* func_make_handler, int dlopen_flags) {
   if (filename == nullptr || func_make_handler == nullptr) {
     return RDC_ST_FAIL_LOAD_MODULE;
   }
 
   try {
-    rdc_status_t status = load(filename);
+    rdc_status_t status = load(filename, dlopen_flags);
     if (status != RDC_ST_OK) {
       return status;
     }

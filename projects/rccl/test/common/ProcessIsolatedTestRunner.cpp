@@ -587,6 +587,19 @@ void ProcessIsolatedTestRunner::displayCapturedOutput(
     flush(std::cerr, output.stderrContent);
 }
 
+void ProcessIsolatedTestRunner::exitChild(int code)
+{
+    fflush(NULL);
+#if defined(RCCL_TEST_CODE_COVERAGE)
+    __llvm_profile_write_file();
+    using WriteFn = int (*)(void);
+    auto libWrite = reinterpret_cast<WriteFn>(
+        dlsym(RTLD_DEFAULT, "rcclCoverageWriteFile"));
+    if(libWrite) libWrite();
+#endif
+    _exit(code);
+}
+
 // Re-exec child entrypoint: if kReexecMarkerEnvVar is set, runs the named test
 // and _exit()s with the result. Returns normally only in the original parent.
 void ProcessIsolatedTestRunner::handleReexecEntrypoint(
@@ -603,16 +616,7 @@ void ProcessIsolatedTestRunner::handleReexecEntrypoint(
     {
         if(testConfig.name == target)
         {
-            int result = runTestInProcess(testConfig);
-            fflush(NULL);
-#if defined(RCCL_TEST_CODE_COVERAGE)
-            __llvm_profile_write_file();
-            using WriteFn = int (*)(void);
-            auto libWrite = reinterpret_cast<WriteFn>(
-                dlsym(RTLD_DEFAULT, "rcclCoverageWriteFile"));
-            if(libWrite) libWrite();
-#endif
-            _exit(result);
+            exitChild(runTestInProcess(testConfig));
         }
     }
 
@@ -824,6 +828,12 @@ bool ProcessIsolatedTestRunner::executeAllTests(const ExecutionOptions& options)
 #endif
 
             setenv(kReexecMarkerEnvVar, cfg.name.c_str(), 1);
+
+            // The one-test filter maps to shard 0 only; inherited shard vars make the child run 0 tests and exit 0.
+            // GTEST_OUTPUT is kept: the child leaves via _exit(), which skips gtest's report writer.
+            unsetenv("GTEST_TOTAL_SHARDS");
+            unsetenv("GTEST_SHARD_INDEX");
+            unsetenv("GTEST_SHARD_STATUS_FILE");
 
             // gtestInfo was validated non-null in the parent before any
             // fork; no need to re-check here.

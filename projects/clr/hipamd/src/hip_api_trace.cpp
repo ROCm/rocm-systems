@@ -8,6 +8,7 @@
 #include <hip/amd_detail/hip_api_trace.hpp>
 
 #include "hip_internal.hpp"
+#include "platform/activity.hpp"
 
 #include <atomic>
 #include <cstdint>
@@ -872,6 +873,13 @@ hipError_t hipStreamSetAttribute(hipStream_t stream, hipStreamAttrID attr,
 hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t count,
                                hipMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs,
                                size_t* failIdx, hipStream_t stream);
+hipError_t hipExtMemcpyBatchAsync(void** dsts, void** srcs,
+                                  size_t* sizes, size_t* sizesDst,
+                                  hipExtMemcpyWait* waits,
+                                  hipExtMemcpySignal* signals,
+                                  size_t count,
+                                  hipExtMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs,
+                                  hipStream_t stream);
 hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opList, size_t* failIdx,
                                  unsigned long long flags, hipStream_t stream);
 hipError_t hipMemcpy3DPeer(hipMemcpy3DPeerParms* p);
@@ -889,6 +897,7 @@ hipError_t hipLibraryGetKernel(hipKernel_t* pKernel, hipLibrary_t library, const
 hipError_t hipLibraryGetKernelCount(unsigned int* count, hipLibrary_t library);
 hipError_t hipLibraryGetGlobal(void** dptr, size_t* bytes, hipLibrary_t library, const char* name);
 hipError_t hipLibraryGetManaged(void** dptr, size_t* bytes, hipLibrary_t library, const char* name);
+hipError_t hipLibraryGetModule(hipModule_t* pMod, hipLibrary_t library);
 hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKernels,
                                       hipLibrary_t library);
 hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t kernel);
@@ -940,9 +949,12 @@ hipError_t hipExecutionCtxWaitEvent(hipExecutionCtx_t ctx, hipEvent_t event);
 hipError_t hipMemGetDefaultMemPool(hipMemPool_t* memPool, hipMemLocation* location,
                                    hipMemAllocationType type);
 hipError_t hipModuleEnumerateFunctions(hipFunction_t* functions, unsigned int numFunctions,
-                                    hipModule_t mod);
+                                         hipModule_t mod);
 hipError_t hipDeviceFlushGPUDirectRDMAWrites(hipFlushGPUDirectRDMAWritesTarget target,
                                              hipFlushGPUDirectRDMAWritesScope scope);
+hipError_t hipKernelSetAttributeForDevice(hipKernel_t kernel, hipFuncAttribute attr, int value,
+                                          int device);
+hipError_t hipKernelSetCacheConfig(hipKernel_t kernel, hipFuncCache_t config, hipDevice_t dev);
 }  // namespace hip
 
 namespace hip {
@@ -1333,6 +1345,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
       hip::hipOccupancyMaxPotentialClusterSize;
   ptrDispatchTable->hipLibraryGetGlobal_fn = hip::hipLibraryGetGlobal;
   ptrDispatchTable->hipLibraryGetManaged_fn = hip::hipLibraryGetManaged;
+  ptrDispatchTable->hipLibraryGetModule_fn = hip::hipLibraryGetModule;
   ptrDispatchTable->hipPeekAtLastError_fn = hip::hipPeekAtLastError;
   ptrDispatchTable->hipPointerGetAttribute_fn = hip::hipPointerGetAttribute;
   ptrDispatchTable->hipPointerGetAttributes_fn = hip::hipPointerGetAttributes;
@@ -1491,6 +1504,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipStreamGetAttribute_fn = hip::hipStreamGetAttribute;
   ptrDispatchTable->hipStreamSetAttribute_fn = hip::hipStreamSetAttribute;
   ptrDispatchTable->hipMemcpyBatchAsync_fn = hip::hipMemcpyBatchAsync;
+  ptrDispatchTable->hipExtMemcpyBatchAsync_fn = hip::hipExtMemcpyBatchAsync;
   ptrDispatchTable->hipMemcpy3DBatchAsync_fn = hip::hipMemcpy3DBatchAsync;
   ptrDispatchTable->hipMemcpy3DPeer_fn = hip::hipMemcpy3DPeer;
   ptrDispatchTable->hipMemcpy3DPeerAsync_fn = hip::hipMemcpy3DPeerAsync;
@@ -1511,6 +1525,8 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipMemGetMemPool_fn = hip::hipMemGetMemPool;
   ptrDispatchTable->hipKernelGetAttribute_fn = hip::hipKernelGetAttribute;
   ptrDispatchTable->hipKernelSetAttribute_fn = hip::hipKernelSetAttribute;
+  ptrDispatchTable->hipKernelSetAttributeForDevice_fn = hip::hipKernelSetAttributeForDevice;
+  ptrDispatchTable->hipKernelSetCacheConfig_fn = hip::hipKernelSetCacheConfig;
   ptrDispatchTable->hipKernelGetFunction_fn = hip::hipKernelGetFunction;
   ptrDispatchTable->hipGreenCtxCreate_fn = hip::hipGreenCtxCreate;
   ptrDispatchTable->hipExecutionCtxDestroy_fn = hip::hipExecutionCtxDestroy;
@@ -1559,6 +1575,9 @@ template <typename Tp> void ToolsInit(Tp* table) {
   auto rocp_reg_status = rocprofiler_register_library_api_table(
       dispatch_table_info<Tp>::name, dispatch_table_info<Tp>::import_func,
       dispatch_table_info<Tp>::version, table_array.data(), table_array.size(), &lib_id);
+  if (rocp_reg_status == ROCP_REG_SUCCESS) {
+    amd::activity_prof::tool_attached.store(true, std::memory_order_relaxed);
+  }
 
   // TODO(jrmadsen): check environment variable? Does this need to compile on Windows?
   bool report_register_errors = false;
@@ -2274,15 +2293,24 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipInitDevice_fn, 543);
 HIP_ENFORCE_ABI(HipDispatchTable, hipModuleEnumerateFunctions_fn, 544);
 // HIP_RUNTIME_API_TABLE_STEP_VERSION == 35
 HIP_ENFORCE_ABI(HipDispatchTable, hipDeviceFlushGPUDirectRDMAWrites_fn, 545);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 36
+HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryGetModule_fn, 546);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 37
+HIP_ENFORCE_ABI(HipDispatchTable, hipKernelSetAttributeForDevice_fn, 547);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 38
+HIP_ENFORCE_ABI(HipDispatchTable, hipKernelSetCacheConfig_fn, 548);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 39
+HIP_ENFORCE_ABI(HipDispatchTable, hipExtMemcpyBatchAsync_fn, 549);
+
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
 //
 //  HIP_ENFORCE_ABI(<table>, <functor>, 8)
 //
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
-HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 546)
+HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 550)
 
-static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 35,
+static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 39,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "
               "pointers and then update this check so it is true");
 #endif

@@ -53,6 +53,7 @@ class ExpansionKind(Enum):
     WMMA = auto()
     CMP_REMOVED = auto()
     ATOMIC_FP_POLICY = auto()
+    BUFFER_FORMAT_POLICY = auto()
 
 
 @dataclass
@@ -723,11 +724,28 @@ class LegalizationGenerator:
 # ---------------------------------------------------------------------------
 
 
+# Matches BufferFormatEncoding and BufferStoreMissingChannel in buffer_format.h.
+# RDNA1 and RDNA2 differ for packed formats despite sharing many numeric IDs.
+_BUFFER_FORMAT_FAMILIES = {
+    'cdna1': ('Gfx9', 'Zero'),
+    'cdna2': ('Gfx9', 'Zero'),
+    'cdna3': ('Gfx9', 'Zero'),
+    'cdna4': ('Gfx9', 'Zero'),
+    'rdna1': ('Rdna1', 'Zero'),
+    'rdna2': ('Rdna2', 'Zero'),
+    'rdna3': ('Gfx11', 'Zero'),
+    'rdna3_5': ('Gfx11', 'Zero'),
+    'rdna4': ('Gfx11', 'ReplicateFirst'),
+}
+
+
 def _apply_domain_rules(
     entries: list[LegalizationEntry],
     src_isa: str,
     dst_isa: str,
 ) -> None:
+    src_format, src_fill = _BUFFER_FORMAT_FAMILIES.get(src_isa, (src_isa, None))
+    dst_format, dst_fill = _BUFFER_FORMAT_FAMILIES.get(dst_isa, (dst_isa, None))
     src_wc = _WAITCNT_MODELS.get(src_isa)
     dst_wc = _WAITCNT_MODELS.get(dst_isa)
     dst_has_split_barrier = dst_isa in _SPLIT_BARRIER_ISAS
@@ -742,6 +760,23 @@ def _apply_domain_rules(
         # downstream encoding/semantic translators have the right dst_op even
         # when the action is overridden to flag a domain-specific lowering.
         prev_op = entry.action.target_opcode
+
+        # Formatted accesses need compatible descriptor/format encoding; stores
+        # also need the same missing-channel policy. Raw re-encoding is insufficient.
+        if (
+            name.startswith(
+                ('BUFFER_LOAD_', 'BUFFER_STORE_', 'TBUFFER_LOAD_', 'TBUFFER_STORE_')
+            )
+            and 'FORMAT' in name
+            and (
+                src_format != dst_format
+                or (
+                    name.startswith(('BUFFER_STORE_', 'TBUFFER_STORE_'))
+                    and src_fill != dst_fill
+                )
+            )
+        ):
+            entry.action = LegalizationAction.expand(ExpansionKind.BUFFER_FORMAT_POLICY)
 
         if name in (
             'S_WAITCNT',
