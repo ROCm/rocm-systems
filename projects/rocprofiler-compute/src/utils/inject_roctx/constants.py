@@ -6,7 +6,7 @@
 from typing import Tuple
 
 # Backends recognized by install_global_wraps.
-KNOWN_ML_API_BACKENDS: Tuple[str, ...] = ("torch", "triton")
+KNOWN_ML_API_BACKENDS: Tuple[str, ...] = ("torch", "triton", "jax")
 
 # Backend name for user ROCTx regions, which carry no backend tag.
 USER_REGION_BACKEND = "user"

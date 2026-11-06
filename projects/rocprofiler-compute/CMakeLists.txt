@@ -412,6 +412,13 @@ add_test(
 )
 
 add_test(
+    NAME test_profile_jax_trace
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_profile_jax_trace.xml
+        ${COV_OPTION} tests/integration/test_profile_jax_trace.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
     NAME test_profile_ml_api_trace
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_profile_ml_api_trace.xml
@@ -449,6 +456,7 @@ set_tests_properties(
     test_profile_iteration_multiplexing_stochastic
     test_profile_torch_trace
     test_profile_triton_trace
+    test_profile_jax_trace
     test_profile_ml_api_trace
     test_torch_trace_coverage
     test_profile_membw
@@ -946,6 +954,13 @@ add_test(
 )
 
 add_test(
+    NAME test_inject_roctx_jax
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_inject_roctx_jax.xml
+        ${COV_OPTION} tests/unit/utils/inject_roctx/test_jax.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
     NAME test_inject_roctx_torch_gpu
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_inject_roctx_torch_gpu.xml
@@ -1165,10 +1180,12 @@ if(${ENABLE_COVERAGE})
         test_rocpd_data
         test_profile_torch_trace
         test_profile_triton_trace
+        test_profile_jax_trace
         test_profile_ml_api_trace
         test_torch_trace_coverage
         test_inject_roctx_package
         test_inject_roctx_torch
+        test_inject_roctx_jax
         test_inject_roctx_torch_trace_collector
         test_inject_roctx_torch_gpu
         test_analysis_db

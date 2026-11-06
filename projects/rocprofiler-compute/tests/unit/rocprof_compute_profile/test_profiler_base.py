@@ -796,7 +796,7 @@ def test_pre_processing_persists_membw_analysis_config(
 
 @pytest.mark.parametrize(
     "trace_ml_api, expected",
-    [(None, None), ([], ["torch", "triton"]), (["triton"], ["triton"])],
+    [(None, None), ([], ["torch", "triton", "jax"]), (["triton"], ["triton"])],
 )
 def test_pre_processing_persists_traced_frameworks(tmp_path, trace_ml_api, expected):
     """A bare --trace-ml-api is saved as every framework."""
@@ -1272,15 +1272,24 @@ def test_run_profiling_native_tool_path(
         assert mocks.console_error.called is expect_error
 
 
-@pytest.mark.parametrize("trace_ml_api", [["torch", "triton"], []])
-def test_sanitize_trace_ml_api_injects_torch_and_triton(tmp_path, trace_ml_api):
-    """Both frameworks are injected, and a bare --trace-ml-api stays unchanged."""
+@pytest.mark.parametrize(
+    "trace_ml_api, expected_inject",
+    [
+        (["torch", "triton"], "--frameworks torch triton --"),
+        ([], "--frameworks jax torch triton --"),
+    ],
+)
+def test_sanitize_trace_ml_api_injects_all_supported_backends(
+    tmp_path, trace_ml_api, expected_inject
+):
+    """A named list injects those names. A bare --trace-ml-api injects every
+    KNOWN_ML_API_BACKENDS entry."""
     remaining = _setup_test_files(tmp_path, [sys.executable, "{script}"], "script")
     args = _make_sanitize_args(remaining, trace_ml_api=list(trace_ml_api))
     profiler = RocProfCompute_Base(args, profiler_mode="rocprofiler-sdk", soc=None)
     profiler.sanitize()
     assert args.trace_ml_api == trace_ml_api
-    assert "--frameworks torch triton --" in args.remaining
+    assert expected_inject in args.remaining
 
 
 def test_sanitize_rejects_ml_api_trace_with_attach_pid(tmp_path):
