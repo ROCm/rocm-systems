@@ -195,3 +195,21 @@ def test_eager_dot_general_is_root(
     out = captured_analyze_output(capsys)
     heading = root_operator_line(out, "jax.dot_general")
     assert "jax.dot_general" in heading
+
+
+def test_pmap_is_root(
+    jax_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
+):
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--list-operators",
+        "jax",
+        "--path",
+        jax_trace_profiled_workload,
+    ])
+    assert code == 0
+    out = captured_analyze_output(capsys)
+    root_operator_line(out, "jax.pmap.pmap_square")
+    root_operator_line(out, "jax.pmap.pmap_double")
+    assert "jax.shard_map." not in out
