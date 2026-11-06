@@ -364,6 +364,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   so a fake tests this binary's own error-propagation logic just as well
   without pulling in that file's dependency floor. See
   `test_categories_micro_scheduler.yaml`.
+- **`rccl-UnitTestsMicroEnqueue-warpspeed`** — the `enqueue.cc` host
+  microtests compiled binary-wide with `ENABLE_WARP_SPEED`. It exercises the
+  emitted plan count, packing mode, and launch mode that the macro-off enqueue
+  binary cannot represent. See `test_categories_micro_enqueue.yaml`.
 
 - **`rccl-UnitTestsMicroTaskPrep`** — `src/enqueue/task_prep/task_prep.cc` (via
   `TASK_PREP_CC_PATH`, suite `TaskPrepMicrotest.*`),
@@ -1373,7 +1377,7 @@ not reconstruct.
 above (`./install.sh -t`, wired via `add_subdirectory(host)`), the same file
 can be configured **directly** to build every host binary — `rccl-HostUnitTests`,
 `rccl-UnitTestsMicro`, `rccl-UnitTestsMicroWarpSpeed`,
-`rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker]`,
+`rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker|-warpspeed]`,
 `rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroGinHostFinalize`, `rccl-UnitTestsMicroDdaIpc`, `rccl-UnitTestsMicroCe`, `rccl-UnitTestsMicroDiagnostics`,
 `rccl-UnitTestsMicroGraph`, `rccl-UnitTestsMicroDda`, `rccl-UnitTestsMicroMisc`,
 `rccl-UnitTestsMicroTransport<Unit>` (one per `src/transport/` test file),
@@ -1425,6 +1429,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroDdaColl            # src/algorithms/dda/*/dda_*.cu launchers
 ./build/rccl-UnitTestsMicroEnqueue            # enqueue.cc tests
 ./build/rccl-UnitTestsMicroEnqueue-devlinker  # same, RCCL_DEVICE_LINKER arm
+./build/rccl-UnitTestsMicroEnqueue-warpspeed  # same, ENABLE_WARP_SPEED arm
 ./build/rccl-UnitTestsMicroCollTrace          # misc/latency_profiler tests
 ./build/rccl-UnitTestsMicroRecorder           # misc/recorder.cc tests
 ./build/rccl-UnitTestsMicroApiTrace           # misc/api_trace.cc tests
