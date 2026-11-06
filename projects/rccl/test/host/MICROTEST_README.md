@@ -70,11 +70,6 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `transport/p2p-test.cc`.
   - `rma/rma_proxy_progress.cc` (`RMA_PROXY_PROGRESS_CC_PATH`, from
     `rma-proxy-progress-test.cc`); suite `RmaProxyProgressTest.*`.
-  - `plugin/gin.cc` (`GIN_CC_PATH`, from `gin-plugin-init-test.cc`); suite
-    `GinPluginInitTest.*`. NVIDIA/nccl#2179 GIN init-context leak.
-  - `plugin/rma.cc` (`RMA_PLUGIN_CC_PATH`, from `rma-plugin-init-test.cc`); suite
-    `RmaPluginInitTest.*`. NVIDIA/nccl@8136781a37 RMA init-context leak
-    (AICOMRCCL-3322), the RMA counterpart of the GIN fix above.
   - `group.cc` (`GROUP_CC_PATH`, from `group-test.cc`); suites
     `GroupEndInternalTest.*`, `GroupCommHeadChainTest.*`,
     `ReclaimPlannerStateTest.*`, `AsyncLaunchTest.*`, `GroupJobAbortTest.*`,
@@ -489,26 +484,36 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `build/coverage/rccl-UnitTestsMicroGinHost/coverage.lcov` give the per-line
   breakdown, and note that lcov and `llvm-cov` count branches differently, so
   the two totals will not agree.
-- **`rccl-UnitTestsMicroPlugin`** — `plugin/net.cc`, `plugin/plugin_open.cc` and the
-  `plugin/net/net_v6.cc` to `net_v12.cc` shims (via `PLUGIN_NET_CC_PATH`,
-  `PLUGIN_OPEN_CC_PATH` and `NET_V<N>_CC_PATH`, one test TU each); suite `Plugin*`. Its
-  own binary: `gin-plugin-init-test.cc` in `rccl-UnitTestsMicro` defines
-  `ncclPluginLibPaths`, `ncclClosePluginLib` and `ncclGetNetPluginLib`, which
-  `plugin_open.cc` defines. It links `fakes/transport_stubs.cc` with
-  `RCCL_TRANSPORT_STUBS_OMIT_ncclGpuGdrSupport`, since `net.cc` defines that too. See
-  `test_categories_micro_plugin.yaml`.
+- **`rccl-UnitTestsMicroPlugin<Unit>`** — `src/plugin/`, one binary per test file; tests
+  mirror the source tree under `test/host/plugin/`, and `<Unit>` is the test's path in
+  UpperCamel, less a prefix that repeats its directory (`net/net-v6-test.cc` builds
+  `rccl-UnitTestsMicroPluginNetV6`). They share `test_categories_micro_plugin.yaml`.
+  - `net.cc` (`PLUGIN_NET_CC_PATH`, from `plugin-net-test.cc`); suites `PluginNet*`. It
+    links `fakes/transport_stubs.cc` with `RCCL_TRANSPORT_STUBS_OMIT_ncclGpuGdrSupport`,
+    since `net.cc` defines that too, and `fakes/plugin_stubs.cc` for `ncclPluginLibPaths` and the
+    `net_v<N>.cc` getters.
+  - `plugin_open.cc` (`PLUGIN_OPEN_CC_PATH`, from `plugin-open-test.cc`); suites `PluginOpen*`.
+  - `net/net_v6.cc` to `net_v12.cc` (`NET_V<N>_CC_PATH`, from `net/net-v<N>-test.cc`); suites
+    `PluginNetV<N>*`.
+  - `gin.cc` (`GIN_CC_PATH`, from `gin-plugin-init-test.cc`); suites `GinPluginInitTest.*`,
+    `GinFinalizeTest.*`. NVIDIA/nccl#2179 GIN init-context leak.
+  - `rma.cc` (`RMA_PLUGIN_CC_PATH`, from `rma-plugin-init-test.cc`); suite
+    `RmaPluginInitTest.*`. NVIDIA/nccl@8136781a37 RMA init-context leak
+    (AICOMRCCL-3322), the RMA counterpart of the GIN fix above.
+  - `profiler.cc` (`PROFILER_CC_PATH`, from `profiler-test.cc`), against the real
+    `profiler/profiler_v1..v7.cc` adapters; suites `Profiler*`. The test file defines the
+    logging, env, plugin-open and dlsym seams itself.
+  - `profiler/profiler_v1.cc` to `profiler_v7.cc` (`PROFILER_V<N>_CC_PATH`, from
+    `profiler/profiler-v<N>-test.cc`); suites `ProfilerV<N>*`. `plugin/profiler/fake_lib_dlsym.cc`
+    resolves their fake plugin libraries.
+  - `tuner/csv_tuner.cc` (`CSV_TUNER_CC_PATH`, from `tuner/csv-tuner-test.cc`); suite
+    `CsvTunerMicrotest.*`.
 - **`rccl-UnitTestsMicroDdaIpc`**: `algorithms/dda/all_reduce/dda_all_reduce_ipc.cu`
   (`DDA_ALL_REDUCE_IPC_CC_PATH`, from `dda-allreduce-ipc-test.cc`); suites
   `DdaAllReduceIpc*`. Eligibility gates, datatype dispatch and flat/tree kernel
   selection, observed through the `g_hipExtLaunchKernel` seam. Its own binary:
   `rccl-UnitTestsMicro` links `fakes/dda_fakes.cc`, which defines the same symbols.
   See `test_categories_micro_dda_ipc.yaml`.
-- **`rccl-UnitTestsMicroProfiler`** — `plugin/profiler.cc` (via `PROFILER_CC_PATH`, from
-  `profiler-test.cc`) and the `plugin/profiler/profiler_v1..v7.cc` adapters (via
-  `PROFILER_V<N>_CC_PATH`, from `profiler-v<N>-test.cc`); suites `Profiler*`. Its own binary
-  because the tests define the logging, env, plugin-open and dlsym seams the shared fakes also
-  define. See `test_categories_micro_profiler.yaml`.
-
 - **`rccl-UnitTestsMicroProxy`**: `proxy.cc` (via `PROXY_CC_PATH`, from
   `proxy-test.cc`); suites `Proxy*`. Its externals are in
   `fakes/proxy_micro_fakes.cc` (sockets are socketpair-backed). Its own binary:
@@ -604,7 +609,7 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `GIN_HOST_CC_PATH`, suite `GinHostFinalizeTest.*`): host finalize, connect
   failure / retry, and the register, deregister and DevCommSetup walks over
   closed backends, against `fakes/gin_vtable_fake.h` (also used by
-  `gin-plugin-init-test.cc`). Separate from
+  `plugin/gin-plugin-init-test.cc`). Separate from
   `rccl-UnitTestsMicroGinHost`: both compile `gin_host.cc`, and
   `gin/gin-host-test.cc` defines the same ConnectOnce seams. Also separate from
   `rccl-UnitTestsMicro`, which fakes those entry points in
@@ -964,6 +969,7 @@ symbol.
 | rocSHMEM host API | `fakes/rocshmem_fakes.cc` |
 | `src/transport/p2p.cc` shareable-buffer entry points (`rccl-UnitTestsMicroDiagnostics`, `rccl-UnitTestsMicroTransportNet`) | `fakes/transport_p2p_fakes.cc` |
 | `src/transport/p2p.cc` registration entry points, macro-renamed in one unit via `fakes/transport_p2p_reg_seam.h` (`rccl-UnitTestsMicro`, which compiles the real file) | `fakes/transport_p2p_reg_fakes.cc` |
+| `src/plugin/plugin_open.cc` library path table and `src/plugin/net/net_v*.cc` getters (targets that do not compile the real files) | `fakes/plugin_stubs.cc` |
 | selected entry points from `src/{transport,proxy}.cc`, `src/transport/{generic,coll_net,net,nvls}.cc`, `src/{graph/paths,tuning/tuning,plugin/net}.cc` (targets that do not compile the real files) | `fakes/transport_stubs.cc` |
 | libc (`gethostname`, `dladdr`), process-wide for units linking libc directly | `fakes/libc_interposers.cc` |
 | libc macro-renamed in one unit via `fakes/libc_seam.h` (sockets/stdio/exit for `ras/client.cc` and `ras/client_support.cc`; `gethostname`/`access` for `diagnostics/ib_write_bw.cc`; heap for `graph/rccl_graph_gen.cc`; files, `ioctl`, `atexit`, clock, aligned allocation, thread start and sleep for `transport/net_telemetry.cc`; `opendir` for `misc/gdr_peermem.cc`; `open`/`read`/`close` for `transport/net_socket.cc`; `clock_gettime` for `transport/net_ib/wqe_lat_mon.cc` and `transport/net_ib_cast/scheduler.cc`; the OS surface of `os/linux*.cc` and `misc/{socket,signals}.cc`) | `fakes/libc_fakes.cc` |
@@ -1536,9 +1542,8 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroDdaIpc             # src/algorithms/dda/all_reduce/dda_all_reduce_ipc.cu
 ./build/rccl-UnitTestsMicroParam              # src/param/*.cc, src/misc/param.cc tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/p2p.cc tests
-./build/rccl-UnitTestsMicroPlugin             # src/plugin/{net,plugin_open}.cc + net/net_v*.cc
+./build/rccl-UnitTestsMicroPluginNet          # src/plugin/net.cc; one binary per src/plugin/ test file
 ./build/rccl-UnitTestsMicroCe                 # src/ce_coll.cc tests
-./build/rccl-UnitTestsMicroProfiler           # src/plugin/profiler.cc + profiler_v1..v7.cc
 ./build/rccl-UnitTestsMicroRmaProxy           # src/rma/rma_proxy.cc tests
 ./build/rccl-UnitTestsMicroProxy              # src/proxy.cc tests
 ./build/rccl-UnitTestsMicroDda                # src/algorithms/dda/ tests

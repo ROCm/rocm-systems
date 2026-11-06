@@ -375,8 +375,6 @@ function(rccl_define_micro_source_lists)
   set(TEST_MICRO_SOURCE_FILES
     rma-proxy-launch-test.cc            # RMA proxy queue + stream-memop coverage
     rma-proxy-progress-test.cc
-    gin-plugin-init-test.cc
-    rma-plugin-init-test.cc              # src/plugin/rma.cc ncclRmaPluginInit leak fix (AICOMRCCL-3322)
     rma-test.cc
     rma-ce-test.cc
     ras-test.cc
@@ -391,7 +389,6 @@ function(rccl_define_micro_source_lists)
     tuning-test.cc                       # src/tuning/tuning.cc
     tuning-general-test.cc
     cost-model-test.cc                   # src/tuning/cost_model.cc modelMap + dispatch
-    csv-tuner-test.cc                    # src/plugin/tuner/csv_tuner.cc
     param-utils-test.cc                  # src/include/param/utils.h, src/include/param/parser_common.h
     param-parsers-test.cc                # src/include/param/parser_{default,enum,bitset,list}.h
     param-registry-test.cc               # src/param/param_registry.cc
@@ -1052,42 +1049,6 @@ function(rccl_define_micro_source_lists)
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/nvmlwrap_stub.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
-    ../common/main_altrsmi.cpp
-    PARENT_SCOPE)
-
-  # rccl-UnitTestsMicroPlugin -- src/plugin/net.cc, net/net_v*.cc, plugin_open.cc. Own binary: gin-plugin-init-test.cc
-  # defines ncclPluginLibPaths, ncclClosePluginLib and ncclGetNetPluginLib in rccl-UnitTestsMicro.
-  set(TEST_MICRO_PLUGIN_SOURCE_FILES
-    fakes/hip_fakes.cc
-    plugin-net-test.cc
-    plugin-open-test.cc
-    net-v6-test.cc
-    net-v7-test.cc
-    net-v8-test.cc
-    net-v9-test.cc
-    net-v10-test.cc
-    net-v11-test.cc
-    net-v12-test.cc
-    fakes/env_fakes.cc
-    fakes/nccl_fakes.cc
-    fakes/transport_stubs.cc
-    ../common/GpuCountProbe.cpp
-    ../common/ProcessIsolatedTestRunner.cpp
-    ../common/main_altrsmi.cpp
-    PARENT_SCOPE)
-
-  # rccl-UnitTestsMicroProfiler -- src/plugin/profiler.cc and its profiler_v1..v7.cc adapters. Own binary: the
-  # tests define the logging, env, plugin-open and dlsym seams the shared fakes also define.
-  set(TEST_MICRO_PROFILER_SOURCE_FILES
-    profiler-test.cc
-    profiler-v1-test.cc
-    profiler-v2-test.cc
-    profiler-v3-test.cc
-    profiler-v4-test.cc
-    profiler-v5-test.cc
-    profiler-v6-test.cc
-    profiler-v7-test.cc
-    fakes/utils_fakes.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
@@ -1910,9 +1871,6 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     TUNING_GENERAL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_general.cc"
     COST_MODEL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/cost_model.cc"
     ALGORITHM_REGISTRY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/config/algorithm_registry.cc"
-    CSV_TUNER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/tuner/csv_tuner.cc"
-    # Source tuner/ dir, so a test can check the generator embedded the CSVs verbatim.
-    RCCL_TUNER_CSV_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../tuner"
     RING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/ring.cc"
     RAS_CLIENT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/client.cc"
     RMA_PROXY_LAUNCH_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_proxy_launch.cc"
@@ -1920,8 +1878,6 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     # rma_tmp.cc, not rma.cc: src/CMakeLists.txt lists plugin/rma.cc first, so
     # add_file_unique() renames this one. Re-check after any source-list reorder.
     RMA_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_tmp.cc"
-    # Per the note above, plugin/rma.cc comes first and so keeps its own name.
-    RMA_PLUGIN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/rma.cc"
     # rma_ce.cc has no basename collision, so it keeps its own name.
     RMA_CE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_ce.cc"
     GROUP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/group.cc"
@@ -1937,8 +1893,6 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     DEV_RUNTIME_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/dev_runtime.cc"
     DEV_RUNTIME_SEGMENTS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/dev_runtime_segments.cc"
     RCCL_DEV_RUNTIME_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rccl_dev_runtime.cc"
-    # plugin/gin.cc is the first gin.cc in SRC_FILES, so hipify keeps the name.
-    GIN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/gin.cc"
     GDR_PROBE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/gdr_probe.cc"
     IONICDV_SYMBOLS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/ionicdvsymbols.cc"
     MLX5DV_SYMBOLS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/mlx5dvsymbols.cc"
@@ -2418,24 +2372,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroClientSupport
     CLIENT_SUPPORT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/client_support.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
 
-# ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroPlugin
-# ---------------------------------------------------------------------------
-rccl_add_micro_binary(rccl-UnitTestsMicroPlugin
-  SOURCES ${TEST_MICRO_PLUGIN_SOURCE_FILES}
-  EXTRA_DEFS
-    ${_MICRO_MODE_DEFS}
-    PLUGIN_NET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/net.cc"
-    PLUGIN_OPEN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/plugin_open.cc"
-    NET_V6_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/net/net_v6.cc"
-    NET_V7_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/net/net_v7.cc"
-    NET_V8_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/net/net_v8.cc"
-    NET_V9_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/net/net_v9.cc"
-    NET_V10_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/net/net_v10.cc"
-    NET_V11_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/net/net_v11.cc"
-    NET_V12_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/net/net_v12.cc"
-    RCCL_TRANSPORT_STUBS_OMIT_ncclGpuGdrSupport  # net.cc defines it
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_plugin.yaml")
+include("${CMAKE_CURRENT_LIST_DIR}/plugin/host_tests.cmake")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroSymKernels
@@ -2459,23 +2396,6 @@ if(_MICRO_BUILD_SYM_KERNELS)
       SYM_MODEL_LSA_A2A_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/sym_model/lsa_a2a.cc"
     CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
 endif()
-
-# ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroProfiler
-# ---------------------------------------------------------------------------
-rccl_add_micro_binary(rccl-UnitTestsMicroProfiler
-  SOURCES ${TEST_MICRO_PROFILER_SOURCE_FILES}
-  EXTRA_DEFS
-    ${_MICRO_MODE_DEFS}
-    PROFILER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/profiler.cc"
-    PROFILER_V1_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/profiler/profiler_v1.cc"
-    PROFILER_V2_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/profiler/profiler_v2.cc"
-    PROFILER_V3_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/profiler/profiler_v3.cc"
-    PROFILER_V4_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/profiler/profiler_v4.cc"
-    PROFILER_V5_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/profiler/profiler_v5.cc"
-    PROFILER_V6_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/profiler/profiler_v6.cc"
-    PROFILER_V7_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/profiler/profiler_v7.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_profiler.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroTaskPrep -- host-only microtests for src/enqueue/task_prep/.
