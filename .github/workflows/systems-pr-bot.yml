@@ -25,6 +25,7 @@ permissions:
   pull-requests: write   # post / update the policy results table comment
   issues: write          # add / remove the "Not ready to Review" label
   checks: read
+  actions: read          # select formatting runs for this PR's pinned target
 
 # Avoid two runs racing on the same PR's comment/label (e.g. fast pushes).
 concurrency:
@@ -78,6 +79,8 @@ jobs:
       - name: Enforce policy
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+          # Use the workflow token for Actions reads independently of App grants.
+          ACTIONS_TOKEN: ${{ github.token }}
           HAS_GITHUB_APP_TOKEN: ${{ steps.app-secrets.outputs.available }}
           POST_COMMENTS: ${{ steps.app-secrets.outputs.available }}
           MUTATE_PR: ${{ steps.app-secrets.outputs.available }}
@@ -85,4 +88,6 @@ jobs:
           REPO: ${{ github.event.repository.name }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: python tools/systems_pr_bot/policy_check.py --timeout-seconds 900 --poll-seconds 15

@@ -54,8 +54,7 @@ jobs:
           - suite: formatting-integration
             include: '^(\.github/(actions/changed-files/|workflows/)|\.(pre-commit-config\.yaml|clang-format)\Z|shared/cuid/\.(pre-commit-config\.yaml|clang-format|codespellrc|gersemirc)\Z|projects/rocprofiler-compute/(tools/|\.(pre-commit-config\.yaml|clang-format)\Z))'
             sparse-checkout: |
-              .github/actions/changed-files
-              .github/workflows
+              .github
               runtimes
               emulation/mirage
               emulation/rocjitsu
@@ -63,6 +62,13 @@ jobs:
               projects/rocprofiler-compute
             dependencies: pyyaml pre-commit
             run: python -B .github/workflows/tests/formatting_integration_test.py -v
+          - suite: systems-pr-bot
+            include: '^(tools/systems_pr_bot/|\.github/workflows/)'
+            sparse-checkout: |
+              tools/systems_pr_bot
+              .github/workflows
+            dependencies: requests pyyaml
+            run: python -B tools/systems_pr_bot/test_policy_check_ut.py -v
     steps:
       - name: Checkout scope inspector
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -84,6 +90,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # Shared integration fixtures require a non-shallow source checkout.
+          fetch-depth: 0
           sparse-checkout: ${{ matrix.sparse-checkout }}
 
       - name: Set up Python
