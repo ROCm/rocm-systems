@@ -261,9 +261,11 @@ __host__ inline MPI_Datatype HostInterface::get_mpi_type() {
 
 template <> __host__ inline MPI_Datatype HostInterface::get_mpi_type<__half>() {
     LOG_ERROR_EXIT("host::mpi\t__half is not supported on the host/MPI path");
+    return 0;
 }
 template <> __host__ inline MPI_Datatype HostInterface::get_mpi_type<__hip_bfloat16>() {
   LOG_ERROR_EXIT("host::mpi\t__hip_bfloat16 is not supported on the host/MPI path");
+  return 0;
 }
 
 GET_MPI_TYPE(int, MPI_INT)
