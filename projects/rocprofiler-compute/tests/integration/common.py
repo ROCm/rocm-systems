@@ -42,6 +42,7 @@ config["app_mpi_aware_laplace_eqn"] = ["./tests/mpi_aware_laplace_eqn", "-i", "5
 config["rocflop"] = ["./tests/rocflop", "--device", "0", "--fp16"]
 config["torch_test_app"] = ["python3", "./tests/simple_net.py"]
 config["triton_test_app"] = ["python3", "./tests/triton_ffn.py"]
+config["jax_test_app"] = ["python3", "./tests/jax_workload.py"]
 config["ml_api_test_app"] = ["python3", "./tests/torch_triton_net.py"]
 config["cleanup"] = True
 
@@ -346,6 +347,23 @@ def require_triton(*, gpu: bool = False) -> None:
         import triton  # noqa: F401
     except Exception as e:
         pytest.skip(f"Triton import failed: {type(e).__name__}: {e}")
+
+
+def require_jax(*, gpu: bool = False) -> None:
+    """Skip when JAX (or, with gpu=True, a GPU device) is unavailable."""
+    if importlib.util.find_spec("jax") is None:
+        pytest.skip("JAX is not installed")
+    try:
+        import jax
+    except Exception as e:
+        pytest.skip(f"JAX import failed: {type(e).__name__}: {e}")
+    if gpu:
+        try:
+            devices = jax.devices()
+        except Exception as e:
+            pytest.skip(f"jax.devices() failed: {type(e).__name__}: {e}")
+        if not any(getattr(device, "platform", "") == "gpu" for device in devices):
+            pytest.skip("No JAX GPU device")
 
 
 def get_available_sets_for_arch(gpu_arch):
