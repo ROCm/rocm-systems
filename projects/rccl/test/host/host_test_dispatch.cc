@@ -1813,8 +1813,6 @@ int main(int argc, char **argv)
         }
     }
 
-    writeMergedCoverage(coverageDirectory(), ran, runShell);
-
     if (!options.outputPath.empty()) {
         // Merging the children's reports walks every case in the tree, which is tens of
         // thousands of them, so this too is a pause the caller would otherwise see unexplained.
@@ -1832,6 +1830,10 @@ int main(int argc, char **argv)
         fmt::print("----- report: wrote {} -----\n", options.outputPath);
         std::fflush(stdout);
     }
+
+    // After the report: every test has already run by this point, and the per-binary llvm
+    // invocations below are long enough that a category timeout can land in the middle of them.
+    writeMergedCoverage(coverageDirectory(), ran, runShell);
 
     return failures == 0 ? 0 : 1;
 }
