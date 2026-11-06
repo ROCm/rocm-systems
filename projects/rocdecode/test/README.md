@@ -148,12 +148,16 @@ for how an existing directory is treated).
 | `ROCDECODE_CONFORMANCE_KEYS` | Override the object keys. |
 | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION` | Read via boto3's default credential chain. |
 
-Fetching needs `boto3` (`pip install boto3`). **Without boto3, or without credentials that
-can read the bucket, the sweep prints a skip banner and exits `0`** rather than failing —
-pull requests from forks get no repository secrets, and that case is expected. The
-consequence is that a green run has not necessarily decoded anything; check for the skip
-banner if in doubt. Under GitHub Actions a missing `boto3` is a hard error instead, so CI
-cannot silently turn the gate into a no-op.
+Credentials are only needed to *download* the corpus. If the streams are already on disk —
+in `ROCDECODE_CONFORMANCE_DIR` or passed with `--conformance-dir` — the sweep uses them and
+runs offline, with no boto3 and no AWS account.
+
+Otherwise fetching needs `boto3` (`pip install boto3`). **With no local corpus and no
+credentials that can read the bucket, the sweep prints a skip banner and exits `0`** rather
+than failing — pull requests from forks get no repository secrets, and that case is
+expected. The consequence is that a green run has not necessarily decoded anything; check
+for the skip banner if in doubt. Under GitHub Actions a missing `boto3` is a hard error
+instead, so CI cannot silently turn the gate into a no-op.
 
 ### Reading the results
 

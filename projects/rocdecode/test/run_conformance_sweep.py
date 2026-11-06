@@ -578,6 +578,16 @@ def resolve_corpus(args: argparse.Namespace) -> Optional[Dict[str, Path]]:
         except CorpusUnavailable as exc:
             blocker = str(exc)
 
+    # A corpus already on disk makes fetching unnecessary, so use it whatever
+    # stopped the fetch: no boto3, no credentials, or credentials the bucket
+    # refuses.
+    corpus = default_corpus_dir()
+    found = find_codec_dirs(corpus)
+    if found:
+        logging.info(f"++ Cannot fetch the corpus: {blocker.splitlines()[0]}")
+        logging.info(f"++ Using the corpus already at {corpus}")
+        return found
+
     announce_skip(blocker)
     return None
 
