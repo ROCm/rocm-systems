@@ -62,12 +62,6 @@ Units sharing a binary must be `#include`d from *different* test TUs and must no
 export colliding non-`static` symbols; otherwise a unit needs its own binary:
 
 - **`rccl-UnitTestsMicro`** — one unit per test TU:
-  - `register/register.cc`, `register/coll_reg.cc` and `register/sendrecv_reg.cc`
-    (`REGISTER_CC_PATH`, `COLL_REG_CC_PATH`, `SENDRECV_REG_CC_PATH`, from `register-test.cc`,
-    `coll-reg-test.cc` and `sendrecv-reg-test.cc`); suites `Register*`. Their calls into `p2p.cc`,
-    compiled here for real, go through `fakes/transport_p2p_reg_seam.h`. `fakes/register_seam.h`
-    renames `register.cc`'s definitions of the three names `nccl_fakes.cc` keeps as seams for
-    `transport/p2p-test.cc`.
   - `group.cc` (`GROUP_CC_PATH`, from `group-test.cc`); suites
     `GroupEndInternalTest.*`, `GroupCommHeadChainTest.*`,
     `ReclaimPlannerStateTest.*`, `AsyncLaunchTest.*`, `GroupJobAbortTest.*`,
@@ -129,12 +123,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `makeOption(s)` /
     `ncclOptionSetAssertUnique`'s duplicate-name `WARN` (captured via
     `../common/LogCapture.hpp`). The rest of `src/param/*` and
-    `src/include/param/*.h` is covered by the two entries below and
-    `rccl-UnitTestsMicroParam`.
+    `src/include/param/*.h` is covered by the entry below and
+    `rccl-UnitTestsMicroParam<Unit>`.
   - `include/param/parser_{default,enum,bitset,list}.h` (header-only, from
     `param-parsers-test.cc`); suite `ParamParsersMicrotest.*`.
-  - `param/param_registry.cc` (`PARAM_REGISTRY_CC_PATH`, from
-    `param-registry-test.cc`); suite `ParamRegistryMicrotest.*`.
   - `graph/rccl_graph_gen.cc` (`RCCL_GRAPH_GEN_CC_PATH`, from
     `rccl-graph-gen-test.cc`); suites `GraphGen*Test.*`. Covers ring
     construction for every `generateRings` dispatch arm (degenerate, the 4/6/8
@@ -421,11 +413,28 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   The WarpSpeed helpers are referenced only when gfx950 CI copies
   `ENABLE_WARP_SPEED` onto this binary; the scenes leave `warpSpeedEnabled`
   false, so the stubs exist to link. See `test_categories_micro_connect.yaml`.
-- **`rccl-UnitTestsMicroParam`** — `param/param.cc`, `param/c_api.cc`,
-  `misc/param.cc` and `include/param/param.h` (via `PARAM_CC_PATH` / `C_API_CC_PATH`
-  / `MISC_PARAM_CC_PATH`, from `param-test.cc`); suites `Param*`. Its own binary
-  because `misc/param.cc` defines `ncclGetEnv`, `initEnv` and `ncclLoadParam`, which
-  the shared fakes in `rccl-UnitTestsMicro` also define.
+- **`rccl-UnitTestsMicroParam<Unit>`** — `src/param/`, one binary per test file under
+  `test/host/param/` (`param/host_tests.cmake`); see `test_categories_micro_param.yaml`.
+  - `rccl-UnitTestsMicroParam`: `param/param.cc`, `param/c_api.cc`,
+    `misc/param.cc` and `include/param/param.h` (via `PARAM_CC_PATH` / `C_API_CC_PATH`
+    / `MISC_PARAM_CC_PATH`, from `param/param-test.cc`); suites `Param*`. Its only fake is
+    `fakes/hip_fakes.cc`, for the runner's GPU-count probe: `misc/param.cc` defines
+    `ncclGetEnv`, `initEnv` and `ncclLoadParam`, as `fakes/env_fakes.cc` does.
+  - `rccl-UnitTestsMicroParamRegistry`: `param/param_registry.cc` (`PARAM_REGISTRY_CC_PATH`,
+    from `param/param-registry-test.cc`); suite `ParamRegistryMicrotest.*`.
+- **`rccl-UnitTestsMicroRegister<Unit>`** — `src/register/`, one binary per test file under
+  `test/host/register/` (`register/host_tests.cmake`); suites `Register*`, see
+  `test_categories_micro_register.yaml`. Calls into `p2p.cc` go through
+  `fakes/transport_p2p_reg_seam.h`.
+  - `rccl-UnitTestsMicroRegister`: `register/register.cc` (`REGISTER_CC_PATH`, from
+    `register/register-test.cc`). `fakes/register_seam.h` renames `register.cc`'s definitions
+    of the three names `nccl_fakes.cc` keeps as seams for `transport/p2p-test.cc`.
+  - `rccl-UnitTestsMicroRegisterCollReg`: `register/coll_reg.cc` (`COLL_REG_CC_PATH`, from
+    `register/coll-reg-test.cc`). `register.cc`'s `ncclParamLocalRegister` comes from
+    `fakes/register_fakes.cc`.
+  - `rccl-UnitTestsMicroRegisterSendrecvReg`: `register/sendrecv_reg.cc`
+    (`SENDRECV_REG_CC_PATH`, from `register/sendrecv-reg-test.cc`). `ncclParamLocalRegister`
+    comes from `fakes/register_fakes.cc`.
 - **`rccl-UnitTestsMicroGinHost`** — `gin/gin_host.cc` (`GIN_HOST_CC_PATH`, from
   `gin/gin-host-test.cc`); suites `GinHost<EntryPoint>Microtest`, one per entry
   point. Covers every function in the file: type
@@ -953,6 +962,7 @@ symbol.
 | `src/rccl_wrap.cc`'s dependencies (`rccl-UnitTestsMicro`, which compiles the real file and tests it directly) | `fakes/wrap_fakes.cc` |
 | `src/recorder.cc` | `fakes/recorder_fakes.cc` |
 | `src/register/*.cc` (targets that do not compile the real files) | `fakes/register_stubs.cc` |
+| `src/register/register.cc`'s `ncclParamLocalRegister` (`rccl-UnitTestsMicroRegister{CollReg,SendrecvReg}`) | `fakes/register_fakes.cc` |
 | `src/rma/*.cc` | `fakes/rma_fakes.cc` |
 | `src/scheduler/*.cc`'s own public entry points (targets that don't compile the real files, e.g. `rccl-UnitTestsMicroEnqueue`) and the deep launch paths | `fakes/sched_stubs.cc` |
 | `src/sym_kernels.cc` | `fakes/sym_kernels_fakes.cc` |
@@ -973,7 +983,7 @@ symbol.
 | generated `sym_kernels_host.cc` (targets that do not compile it) | `fakes/sym_kernels_index_fakes.cc` |
 | rocSHMEM host API | `fakes/rocshmem_fakes.cc` |
 | `src/transport/p2p.cc` shareable-buffer entry points (`rccl-UnitTestsMicroDiagnosticsP2p`, `rccl-UnitTestsMicroTransportNet`) | `fakes/transport_p2p_fakes.cc` |
-| `src/transport/p2p.cc` registration entry points, macro-renamed in one unit via `fakes/transport_p2p_reg_seam.h` (`rccl-UnitTestsMicro`, which compiles the real file) | `fakes/transport_p2p_reg_fakes.cc` |
+| `src/transport/p2p.cc` registration entry points, macro-renamed via `fakes/transport_p2p_reg_seam.h` (the `rccl-UnitTestsMicroRegister*` binaries; renamed because `rccl-UnitTestsMicro` still links it beside the real file) | `fakes/transport_p2p_reg_fakes.cc` |
 | `src/plugin/plugin_open.cc` library registry and `src/plugin/net/net_v*.cc` getters (targets that do not compile the real files) | `fakes/plugin_stubs.cc` |
 | selected entry points from `src/{transport,proxy}.cc`, `src/transport/{generic,coll_net,net,nvls}.cc`, `src/{graph/paths,tuning/tuning,plugin/net}.cc` (targets that do not compile the real files) | `fakes/transport_stubs.cc` |
 | libc (`gethostname`, `dladdr`), process-wide for units linking libc directly | `fakes/libc_interposers.cc` |
@@ -1556,7 +1566,9 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroNcclDeviceCore     # nccl_device/core.cc tests
 ./build/rccl-UnitTestsMicroDevcomm            # devcomm/devcomm_v22902.cc, devcomm_v22907.cc tests
 ./build/rccl-UnitTestsMicroCftDevRuntime      # cft_dev_runtime.cc tests
-./build/rccl-UnitTestsMicroParam              # src/param/*.cc, src/misc/param.cc tests
+./build/rccl-UnitTestsMicroParam              # src/param/{param,c_api}.cc, src/misc/param.cc tests
+./build/rccl-UnitTestsMicroParamRegistry      # src/param/param_registry.cc tests
+./build/rccl-UnitTestsMicroRegister           # src/register/register.cc; one binary per src/register/ test file
 ./build/rccl-UnitTestsMicroDiagnosticsIbWriteBw  # src/diagnostics/ib_write_bw.cc tests
 ./build/rccl-UnitTestsMicroDiagnosticsP2p     # src/diagnostics/p2p.cc tests
 ./build/rccl-UnitTestsMicroDiagnosticsP2pDevice  # src/diagnostics/device/p2p.cu launchers
