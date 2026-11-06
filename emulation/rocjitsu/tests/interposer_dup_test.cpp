@@ -232,6 +232,19 @@ TEST(InterposerDupTest, ConstructorPreservesDescriptorLimit) {
   }
 }
 
+TEST(InterposerDupTest, ConstructorPreparesTopologyBeforeFileLimitDrops) {
+  // Re-exec with LD_PRELOAD so initialization precedes the hard limit drop.
+  // A fork-only child would discard its parent's keeper lease.
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  ASSERT_EXIT(
+      {
+        const rlimit zero{};
+        uint32_t gpu_id = 0;
+        _exit(setrlimit(RLIMIT_FSIZE, &zero) == 0 && read_gpu_id(gpu_id) && gpu_id != 0 ? 0 : 1);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
 TEST(InterposerDupTest, Dup2PreservesHiddenEventBacking) {
   check_hidden_backing_after_dup(HiddenBacking::Events, false);
 }
