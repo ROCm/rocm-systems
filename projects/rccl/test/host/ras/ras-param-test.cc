@@ -14,12 +14,6 @@
 
 #include "fakes/env_fakes.h"
 
-// rasTimeoutFactorSec collides with fakes/ras_param_fakes.cc and rasTimeoutFactorNs with ras-test.cc;
-// the parameter accessor rename keeps this included implementation consistently isolated.
-#define ncclParamRasTimeoutFactor RasParamTestNcclParamRasTimeoutFactor
-#define rasTimeoutFactorNs RasParamTestRasTimeoutFactorNs
-#define rasTimeoutFactorSec RasParamTestRasTimeoutFactorSec
-
 #include RAS_PARAM_CC_PATH
 
 namespace {

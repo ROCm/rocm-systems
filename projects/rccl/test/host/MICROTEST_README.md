@@ -315,14 +315,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `fakes/libc_seam_undef.h` positional rename pair (guard-less by design, so
     every header declaring a renamed name must precede it and the undef half
     must immediately follow the unit -- see `fakes/libc_seam.h:9-19`) instead
-    of the shared `fakes/nccl_fakes.cc` the other units in this binary use.
+    of the shared `fakes/nccl_fakes.cc` the other RAS units use.
   - `ras/ras_param.cc` (`RAS_PARAM_CC_PATH`, from `ras/ras-param-test.cc`); suite
     `RasParamMicrotest.*`. Covers environment parsing, invalid-value fallback,
-    cached parameter reads, and nanosecond/second scaling. The test includes the
-    production file under renamed `ncclParamRasTimeoutFactor`,
-    `rasTimeoutFactorNs`, and `rasTimeoutFactorSec` symbols so it can link beside
-    `fakes/ras_param_fakes.cc` and the `ras-test.cc` timeout fake in the shared
-    microtest binary.
+    cached parameter reads, and nanosecond/second scaling.
   - `ras/client_support.cc` (`CLIENT_SUPPORT_CC_PATH`, from
     `ras/client-support-test.cc`); suites `RasClientSupportMicrotest.*` and
     `Commands/RasClientSupportEnqueueFailureMicrotest.*`. Raw socket I/O is
@@ -942,7 +938,7 @@ symbol.
 | `src/plugin/profiler.cc` (`ncclProfilerCallback`, until it has its own fakes file) | `fakes/nccl_fakes.cc` |
 | `src/proxy.cc` | `fakes/proxy_fakes.cc` |
 | externals `src/proxy.cc` reaches (`rccl-UnitTestsMicroProxy`, which compiles it) | `fakes/proxy_micro_fakes.cc` |
-| `src/ras/ras_param.cc` (seconds and nanoseconds timeout scaling) | `fakes/ras_param_fakes.{h,cc}` (the direct `ras-param-test.cc` inclusion uses renamed symbols) |
+| `src/ras/ras_param.cc` (seconds and nanoseconds timeout scaling) | `fakes/ras_param_fakes.{h,cc}` |
 | `src/rccl_arch_thresholds.cc` | `fakes/rccl_arch_thresholds_fakes.cc` |
 | `src/rccl_wrap.cc`'s own public entry points (targets that don't compile the real file, e.g. `rccl-UnitTestsMicroEnqueue`) | `fakes/rccl_wrap_fakes.cc` |
 | `src/rccl_wrap.cc`'s dependencies (`rccl-UnitTestsMicro`, which compiles the real file and tests it directly) | `fakes/wrap_fakes.cc` |

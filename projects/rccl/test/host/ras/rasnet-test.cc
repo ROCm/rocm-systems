@@ -22,59 +22,6 @@
 
 #include <gtest/gtest.h>
 
-// Rename rasnet.cc and ras.cc non-static symbols so new definitions cannot collide with ras-test.cc.
-#define rasNextLink RasNetTestNextLink
-#define rasPrevLink RasNetTestPrevLink
-#define rasConnsHead RasNetTestConnsHead
-#define rasConnsTail RasNetTestConnsTail
-#define rasSocketsHead RasNetTestSocketsHead
-#define rasSocketsTail RasNetTestSocketsTail
-#define getNewConnEntry RasNetTestGetNewConnEntry
-#define rasConnCreate RasNetTestConnCreate
-#define rasConnFind RasNetTestConnFind
-#define rasConnsHandleTimeouts RasNetTestConnsHandleTimeouts
-#define rasConnDisconnect RasNetTestConnDisconnect
-#define rasNetAcceptNewSocket RasNetTestAcceptNewSocket
-#define rasSocksHandleTimeouts RasNetTestSocksHandleTimeouts
-#define rasSocketTerminate RasNetTestSocketTerminate
-#define rasSockEventLoop RasNetTestSockEventLoop
-#define rasNetHandleTimeouts RasNetTestHandleTimeouts
-#define rasMsgHandleKeepAlive RasNetTestMsgHandleKeepAlive
-#define rasLinkAddFallback RasNetTestLinkAddFallback
-#define rasLinkConnUpdate RasNetTestLinkConnUpdate
-#define rasNetTerminate RasNetTestTerminate
-
-#define rasPfds RasNetTestPfds
-#define rasNetListeningSocket RasNetTestListeningSocket
-#define rasLine RasNetTestLine
-#define rasPeers RasNetTestPeers
-#define nRasPeers RasNetTestNPeers
-#define rasPeersHash RasNetTestPeersHash
-#define rasDeadPeersHash RasNetTestDeadPeersHash
-#define rasMsgAlloc RasNetTestMsgAlloc
-#define rasConnEnqueueMsg RasNetTestConnEnqueueMsg
-#define rasConnSendMsg RasNetTestConnSendMsg
-#define rasMsgRecv RasNetTestMsgRecv
-#define rasMsgHandle RasNetTestMsgHandle
-#define rasGetNewPollEntry RasNetTestGetNewPollEntry
-#define rasClientsNotifyEvent RasNetTestClientsNotifyEvent
-#define rasCollReqInit RasNetTestCollReqInit
-#define rasNetSendCollReq RasNetTestSendCollReq
-#define rasCollsPurgeConn RasNetTestCollsPurgeConn
-#define rasConnSendPeersUpdate RasNetTestConnSendPeersUpdate
-#define rasPeerFind RasNetTestPeerFind
-#define rasLinkCalculatePeer RasNetTestLinkCalculatePeer
-#define rasTimeoutFactorNs RasNetTestTimeoutFactorNs
-
-#define ncclSocketDefaultMagic RasNetTestSocketDefaultMagic
-#define ncclSocketInit RasNetTestSocketInit
-#define ncclSocketConnect RasNetTestSocketConnect
-#define ncclSocketReady RasNetTestSocketReady
-#define ncclSocketAccept RasNetTestSocketAccept
-#define ncclSocketShutdown RasNetTestSocketShutdown
-#define ncclSocketClose RasNetTestSocketClose
-#define ncclSocketToString RasNetTestSocketToString
-
 #include "alloc.h"
 #include "ras/ras_internal.h"
 
