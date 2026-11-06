@@ -90,6 +90,88 @@ export ROCDECODE_CONFORMANCE_DIR="$HOME/Movies/rocDecodeConformance"
 Codecs whose directory is missing are reported as `WARNING` and skipped, so the sweep
 still runs (and CTest still passes) without the full data set.
 
+Two tools read this variable, and they treat the directory differently. `validate.sh` only
+ever reads it. `run_conformance_sweep.py` can also *manage* it as a download cache, and
+tells the two apart by a `.rocdecode-conformance-etag` marker file that it writes itself:
+
+| Directory contents | What `run_conformance_sweep.py` does |
+| --- | --- |
+| Has the marker | Treats it as its own cache: re-downloads when the bucket's ETags change, and replaces the codec folders when it does. |
+| Has a corpus but no marker | Yours. Uses it as-is, never downloads over it, never deletes anything. |
+| Empty, or no marker and no recognisable corpus | Downloads the corpus into it (refusing if non-empty, so an unrelated directory is never cleared). |
+
+So a hand-populated directory set up as above keeps working, and is never overwritten.
+
+## `run_rocdecode.py` — CI entry point
+
+What the media libs CI job runs. Builds and runs the installed CTest suite, then runs the
+conformance sweep as a second phase. It operates on an **installed ROCm tree**
+(`$ROCM_PATH/share/rocdecode/`), not a source checkout, which is what distinguishes it from
+`validate.sh` — use `validate.sh` when working in the repo.
+
+A missing sweep runner, or a sweep that skips for want of credentials, is not a failure.
+A real conformance failure fails the run, the same way a CTest failure does.
+
+## `run_conformance_sweep.py` — the conformance sweep
+
+Run by `run_rocdecode.py`, and runnable on its own for local debugging. It fetches the
+stream corpus, builds the `videoDecode` sample, then runs
+`testScripts/run_rocDecode_Conformance.py` once per codec and turns the per-codec exit
+codes into a single verdict.
+
+```shell
+python test/run_conformance_sweep.py [--codecs AVC,HEVC] [--conformance-dir DIR]
+```
+
+| Option | Description |
+| --- | --- |
+| `--conformance-dir DIR` | Use the corpus already at this path; skips fetching entirely. |
+| `--codecs LIST` | Comma-separated codecs to run (default: all four). The supported way to run a deliberate subset — a requested codec with no corpus is a failure, not a skip. |
+| `--gpu-device-id N` | GPU index to decode on (default: `0`). |
+| `--results-dir DIR` | Where per-codec logs are written (default: `./conformance-results`). |
+| `--videodecode-exe PATH` | Use this binary instead of building the sample. |
+| `--bucket NAME` | S3 bucket holding the corpus zips. |
+| `--keys LIST` | Comma-separated object keys of the corpus zips. |
+| `--region NAME` | Bucket region; corrected automatically if S3 reports another. |
+
+### Corpus and credentials
+
+The conformance streams are not redistributable, so they are not published with the build
+artifacts — they live in a private S3 bucket and are downloaded on demand into
+`ROCDECODE_CONFORMANCE_DIR` (see [Conformance stream location](#conformance-stream-location)
+for how an existing directory is treated).
+
+| Variable | Purpose |
+| --- | --- |
+| `ROCDECODE_CONFORMANCE_DIR` | Corpus location, and the download destination. |
+| `ROCDECODE_CONFORMANCE_BUCKET` | Override the bucket. |
+| `ROCDECODE_CONFORMANCE_KEYS` | Override the object keys. |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION` | Read via boto3's default credential chain. |
+
+Credentials are only needed to *download* the corpus. If the streams are already on disk —
+in `ROCDECODE_CONFORMANCE_DIR` or passed with `--conformance-dir` — the sweep uses them and
+runs offline, with no boto3 and no AWS account.
+
+Otherwise fetching needs `boto3` (`pip install boto3`). **With no local corpus and no
+credentials that can read the bucket, the sweep prints a skip banner and exits `0`** rather
+than failing — pull requests from forks get no repository secrets, and that case is
+expected. The consequence is that a green run has not necessarily decoded anything; check
+for the skip banner if in doubt. Under GitHub Actions a missing `boto3` is a hard error
+instead, so CI cannot silently turn the gate into a no-op.
+
+### Reading the results
+
+Each codec prints a tally on one line, which is the quickest way to read a per-codec result
+out of a log holding all four:
+
+```
+CONFORMANCE_COUNTS total=127 passed=127 digest_failures=0 teardown_failures=0 unfinished=0 skipped=0
+```
+
+The five counts are disjoint and sum to `total`. Every failing stream is also named
+individually on stdout. Per-codec logs land under `--results-dir`, with the full transcript
+in `rocDecode_output.log` and the digest lines in `rocDecode_conformance.log`.
+
 ## `perf_regression.py` — performance regression check
 
 Measures decode FPS (running the `videoDecodePerf` sample on each stream) and compares it
@@ -232,4 +314,3 @@ Requires `ROCDECODE_PERF_DIR` (streams + baseline) as described under
 `pandas` and `lxml` must be installed (`pip install pandas lxml`).
 
 <!-- Add future skills here as new "### /<skill-name> — <summary>" subsections. -->
-
