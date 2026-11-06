@@ -33,6 +33,8 @@
 
 // DOT FUNCTIONS
 #if defined(__clang__) && defined(__HIP__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 __DEVICE__
 inline int amd_mixed_dot(short2 a, short2 b, int c, bool saturate) {
   return __ockl_sdot2(get_native_vector(a), get_native_vector(b), c, saturate);
@@ -57,6 +59,7 @@ __DEVICE__
 inline uint amd_mixed_dot(uint a, uint b, uint c, bool saturate) {
   return __ockl_udot8(a, b, c, saturate);
 }
+#pragma clang diagnostic pop
 #endif
 
 #pragma pop_macro("__DEVICE__")

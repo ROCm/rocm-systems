@@ -132,6 +132,8 @@ __CG_STATIC_QUALIFIER__ void wait_async_copies() {
  */
 namespace multi_grid {
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 __CG_STATIC_QUALIFIER__ __hip_uint32_t num_grids() {
   return static_cast<__hip_uint32_t>(__ockl_multi_grid_num_grids());
 }
@@ -154,6 +156,7 @@ __CG_STATIC_QUALIFIER__ void sync() {
   wait_async_copies();
   __ockl_multi_grid_sync();
 }
+#pragma clang diagnostic pop
 
 }  // namespace multi_grid
 
@@ -190,18 +193,23 @@ __CG_STATIC_QUALIFIER__ __hip_uint32_t block_rank() {
                                      (blockIdx.y * gridDim.x) + (blockIdx.x));
 }
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 __CG_STATIC_QUALIFIER__ bool is_valid() { return static_cast<bool>(__ockl_grid_is_valid()); }
 
 __CG_STATIC_QUALIFIER__ void sync() {
   wait_async_copies();
   __ockl_grid_sync();
 }
+#pragma clang diagnostic pop
 
 __CG_STATIC_QUALIFIER__ dim3 grid_dim() {
   return (dim3(static_cast<__hip_uint32_t>(gridDim.x), static_cast<__hip_uint32_t>(gridDim.y),
                static_cast<__hip_uint32_t>(gridDim.z)));
 }
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 __CG_STATIC_QUALIFIER__ unsigned int barrier_arrive() {
   wait_async_copies();
   return __ockl_grid_bar_arrive();
@@ -213,6 +221,7 @@ __CG_STATIC_QUALIFIER__ unsigned int barrier_signal() {
 }
 
 __CG_STATIC_QUALIFIER__ void barrier_wait(unsigned int s) { __ockl_grid_bar_wait(s); }
+#pragma clang diagnostic pop
 }  // namespace grid
 
 /**
