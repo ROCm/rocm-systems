@@ -1,4 +1,4 @@
-import { matchAnchorWidth } from '../shared/dropdownGeometry';
+import { fontWeights } from '../../theme/typography';
 import {
   Autocomplete,
   Box,
@@ -12,8 +12,8 @@ import CheckBoxOutlineBlankIcon from '@mui/icons-material/CheckBoxOutlineBlank';
 import { boundedGridSelection, filterBenchmarkOptions } from './benchmarkExplorer';
 import { MAX_BENCHMARK_CHARTS } from '../../config/benchmarkGrid';
 
-// Size before Popper's flip/overflow calculations, using the larger side of the
-// anchor. A fixed 340px list can extend below a short dialog/phone viewport.
+// The list always opens below the field. Size it before Popper's overflow
+// calculations to the space below, so it never runs past the viewport (it scrolls instead).
 const benchmarkViewport = {
   name: 'benchmarkViewport', enabled: true, phase: 'beforeRead',
   fn: ({ state }) => {
@@ -23,7 +23,7 @@ const benchmarkViewport = {
     const top = viewport?.offsetTop ?? 0;
     const bottom = top + (viewport?.height ?? window.innerHeight);
     const rect = anchor.getBoundingClientRect();
-    const height = Math.max(0, Math.min(340, Math.max(rect.top - top, bottom - rect.bottom) - 8));
+    const height = Math.max(0, Math.min(340, bottom - rect.bottom - 8));
     state.elements.popper.style.setProperty('--benchmark-listbox-height', `${height}px`);
     state.rects.popper.height = state.elements.popper.offsetHeight;
   },
@@ -69,14 +69,14 @@ export function BenchmarkGridPicker({
       renderOption={(props, option, state) => {
         const { key, ...optionProps } = props;
         return (
-          <Box component="li" key={key} {...optionProps} sx={{ gap: 1, py: 0.75 }}>
-            <Box component="span" aria-hidden="true" sx={{ display: 'inline-flex', p: 0.25, pointerEvents: 'none', color: state.selected ? 'primary.main' : 'text.secondary' }}>
+          <Box component="li" key={key} {...optionProps} sx={{ gap: 1, py: '6px' }}>
+            <Box component="span" aria-hidden="true" sx={{ display: 'inline-flex', p: '2px', pointerEvents: 'none', color: state.selected ? 'dashboard.selectionAccent' : 'text.secondary' }}>
               {state.selected ? <CheckBoxIcon fontSize="small" /> : <CheckBoxOutlineBlankIcon fontSize="small" />}
             </Box>
             <ListItemText
               primary={option.name}
               secondary={<><Box component="span" sx={{ display: 'block', overflowWrap: 'anywhere' }}>{option.id}</Box>{[option.operation, formatDataType(option.problem?.dtype)].filter(Boolean).join(' · ')}</>}
-              slotProps={{ primary: { variant: 'body2', fontWeight: 650 }, secondary: { variant: 'caption' } }}
+              slotProps={{ primary: { variant: 'body2', fontWeight: fontWeights.emphasized }, secondary: { variant: 'caption' } }}
             />
           </Box>
         );
@@ -85,16 +85,17 @@ export function BenchmarkGridPicker({
         <TextField
           {...params}
           label="Benchmarks to graph"
+
           placeholder={selected.length === 0 ? 'Search and select benchmarks…' : ''}
           helperText={`${selected.length} of ${maximum} benchmarks selected · ${availableOptions.length} available in the selected targets / suites · Search all; up to 50 matches shown`}
         />
       )}
       slots={{ paper: Paper }}
       slotProps={{
-        popper: { modifiers: [matchAnchorWidth, benchmarkViewport, { name: 'flip', options: { padding: 8 } }, { name: 'preventOverflow', options: { padding: 8 } }] },
+        popper: { placement: 'bottom-start', modifiers: [benchmarkViewport, { name: 'flip', enabled: false }, { name: 'preventOverflow', options: { padding: 8, altAxis: false } }] },
         listbox: { sx: { maxHeight: 'min(340px, var(--benchmark-listbox-height, calc(100dvh - 16px)))', overflowY: 'auto', overscrollBehavior: 'contain', '& .MuiAutocomplete-option': { overflowWrap: 'anywhere' } } },
       }}
-      sx={{ width: '100%', maxWidth: 720, '& .MuiAutocomplete-inputRoot': { maxHeight: 'min(240px, 30dvh)', overflowY: 'auto', overscrollBehavior: 'contain' }, '& .MuiAutocomplete-tag': { maxWidth: 'calc(100% - 6px)' } }}
+      sx={{ width: '100%', maxWidth: 720, '& .MuiAutocomplete-inputRoot': { height: 'min(120px, 20dvh)', minHeight: 44, alignContent: 'flex-start', alignItems: 'flex-start', overflowY: 'auto', overscrollBehavior: 'contain' }, '& .MuiAutocomplete-tag': { maxWidth: 'calc(100% - 6px)' } }}
     />
   );
 }

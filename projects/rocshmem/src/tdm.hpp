@@ -65,7 +65,7 @@
 namespace rocshmem {
 namespace tdm {
 
-// LDS bytes for a double-buffered copy_region call with this tile size.
+// LDS bytes for a double-buffered copy_pipelined_shallow call with this tile size.
 // Host code (constmem.cpp, rocshmem.cpp) needs this under plain USE_TDM,
 // not ROCSHMEM_TDM_ENABLED -- its arch macros aren't defined when
 // compiling host-only code, which would make this disappear there.
@@ -203,10 +203,10 @@ __device__ __forceinline__ Descriptor2D make_descriptor_2d(
 // ==============================================================================
 
 // Stalls until fewer than Cnt+1 of this wave's TDM ops remain in flight;
-// wait<0>() drains all of them. Cnt (and CachePolicy below) must be a
+// tensor_wait<0>() drains all of them. Cnt (and CachePolicy below) must be a
 // template parameter: the builtins require an immarg (compile-time literal).
 template <uint16_t Cnt>
-__device__ __forceinline__ void wait() {
+__device__ __forceinline__ void tensor_wait() {
   __builtin_amdgcn_s_wait_tensorcnt(Cnt);
 }
 
@@ -257,14 +257,16 @@ __device__ __forceinline__ size_t covered_bytes(size_t total_bytes, uint32_t til
 
 // Copies covered_bytes(bytes, tile_bytes_cap) bytes tile by tile through
 // lds_scratch. double_buffered overlaps load(tile N+1) with store(tile N)
-// (needs 2*tile_bytes_cap bytes); otherwise each tile is a serialized
+// (needs 2*tile_bytes_cap bytes), but drains both before starting the next
+// pair (tensor_wait<0>()) -- pipeline depth 1. Otherwise each tile is a serialized
 // load-wait-store-wait. tile_bytes_cap must be a multiple of 8 bytes.
 //
 // LoadCachePolicy/StoreCachePolicy are template parameters (see load_to_lds
 // above), built with make_cache_policy(hint, scope).
 template <int LoadCachePolicy, int StoreCachePolicy>
-__device__ inline void copy_region(void *dst, const void *src, size_t bytes, void *lds_scratch,
-                                   uint32_t tile_bytes_cap, bool double_buffered) {
+__device__ inline void copy_pipelined_shallow(void *dst, const void *src, size_t bytes,
+                                              void *lds_scratch, uint32_t tile_bytes_cap,
+                                              bool double_buffered) {
   const size_t covered = covered_bytes(bytes, tile_bytes_cap);
   if (covered == 0) return;
   const uint32_t tile_bytes =
@@ -295,7 +297,7 @@ __device__ inline void copy_region(void *dst, const void *src, size_t bytes, voi
       const bool has_next = (i + 1) < full_tiles;
 
       // Wait for the current tile's load to land before storing from it.
-      wait<0>();
+      tensor_wait<0>();
 
       // Prefetch tile i+1 into pong and store tile i from ping — both
       // enqueued before the next wait, so the tensor engine runs them
@@ -313,7 +315,7 @@ __device__ inline void copy_region(void *dst, const void *src, size_t bytes, voi
       pong = tmp;
     }
     // Drain the last in-flight load+store pair.
-    wait<0>();
+    tensor_wait<0>();
   } else {
     const uintptr_t lds_addr = reinterpret_cast<uintptr_t>(lds_base);
     for (size_t i = 0; i < full_tiles; ++i) {
@@ -321,24 +323,24 @@ __device__ inline void copy_region(void *dst, const void *src, size_t bytes, voi
 
       desc.group0 = make_group0(lds_addr, reinterpret_cast<uintptr_t>(src_bytes + offset));
       load_to_lds<LoadCachePolicy>(desc);
-      wait<0>();
+      tensor_wait<0>();
 
       desc.group0 = make_group0(lds_addr, reinterpret_cast<uintptr_t>(dst_bytes + offset));
       store_from_lds<StoreCachePolicy>(desc);
-      wait<0>();
+      tensor_wait<0>();
     }
   }
 }
 
-// Same contract as copy_region, but always double-buffered and more
-// tightly pipelined: waits only until <=1 op is in flight (wait<1>())
-// instead of draining every iteration, so a load and a store are usually
-// both in flight. Tiles issue in load/store pairs (parity picks the
-// buffer); each op is issued exactly two slots after the op it depends on,
-// so wait<1>() before op N guarantees op N-2 already completed.
+// Same contract as copy_pipelined_shallow, but always double-buffered and
+// more tightly pipelined (depth 2): waits only until <=1 op is in flight
+// (tensor_wait<1>()) instead of draining every iteration, so a load and a store
+// are usually both in flight. Tiles issue in load/store pairs (parity picks
+// the buffer); each op is issued exactly two slots after the op it depends
+// on, so tensor_wait<1>() before op N guarantees op N-2 already completed.
 template <int LoadCachePolicy, int StoreCachePolicy>
-__device__ inline void copy_region_pipelined(void *dst, const void *src, size_t bytes,
-                                             void *lds_scratch, uint32_t tile_bytes_cap) {
+__device__ inline void copy_pipelined_deep(void *dst, const void *src, size_t bytes,
+                                           void *lds_scratch, uint32_t tile_bytes_cap) {
   const size_t covered = covered_bytes(bytes, tile_bytes_cap);
   if (covered == 0) return;
   const uint32_t tile_bytes =
@@ -372,26 +374,26 @@ __device__ inline void copy_region_pipelined(void *dst, const void *src, size_t 
     const bool has_odd = tile_odd < full_tiles;
 
     if (has_odd) {
-      wait<1>();
+      tensor_wait<1>();
       issue_load(buf[tile_odd & 1u], reinterpret_cast<uintptr_t>(src_bytes + tile_odd * tile_bytes));
     }
 
     // No odd tile: load(tile_even) was only one op ago, not two, so
-    // wait<1>() would race ahead of it -- drain fully instead.
+    // tensor_wait<1>() would race ahead of it -- drain fully instead.
     if (has_odd) {
-      wait<1>();
+      tensor_wait<1>();
     } else {
-      wait<0>();
+      tensor_wait<0>();
     }
     issue_store(buf[tile_even & 1u], reinterpret_cast<uintptr_t>(dst_bytes + tile_even * tile_bytes));
 
     if (has_odd) {
-      wait<1>();
+      tensor_wait<1>();
       issue_store(buf[tile_odd & 1u], reinterpret_cast<uintptr_t>(dst_bytes + tile_odd * tile_bytes));
 
       const size_t next_even = tile_even + 2;
       if (next_even < full_tiles) {
-        wait<1>();
+        tensor_wait<1>();
         issue_load(buf[next_even & 1u],
                    reinterpret_cast<uintptr_t>(src_bytes + next_even * tile_bytes));
       }
@@ -399,7 +401,7 @@ __device__ inline void copy_region_pipelined(void *dst, const void *src, size_t 
   }
 
   // Drain everything still in flight before returning.
-  wait<0>();
+  tensor_wait<0>();
 }
 
 // ==============================================================================

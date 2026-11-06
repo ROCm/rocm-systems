@@ -176,8 +176,8 @@ std::string ComputeUnitCore::disassemble_instruction(std::span<const uint32_t> e
 ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemory *memory,
                                  L2Cache *l2, uint32_t wf_size, uint32_t vgpr_storage_lane_count,
                                  uint32_t vgpr_allocation_block_size)
-    : simdojo::CompositeComponent(std::move(name)), config_(config), memory_(memory),
-      wf_size_(wf_size), vgpr_storage_lane_count_(vgpr_storage_lane_count),
+    : simdojo::CompositeComponent(std::move(name)), config_(config), arithmetic_(config.arithmetic),
+      memory_(memory), wf_size_(wf_size), vgpr_storage_lane_count_(vgpr_storage_lane_count),
       vgpr_allocation_block_size_(vgpr_allocation_block_size),
       scratch_slots_per_cu_(config.num_wf_slots),
       setreg_vgpr_msb_fixup_(has_setreg_vgpr_msb_fixup(config)), decoder_(create_decoder(config)),
@@ -1621,8 +1621,11 @@ void ComputeUnitCore::report_routed_access(const Instruction &inst, Wavefront &w
     access.wavefront_size = 1;
     access.active_lane_mask = 1;
     access.architectural_exec_lane_mask = 1;
-    access.valid_lane_mask = 1;
-    access.request_lane_mask = 1;
+    // The pipeline skips a buffer access whose bounds mask clears every DWORD.
+    // Like an out-of-range vector lane, its lane is active but not valid.
+    const bool accessed = state.load_dword_mask != 0;
+    access.valid_lane_mask = accessed;
+    access.request_lane_mask = accessed;
     access.addresses = std::span<const uint64_t>(&state.addr, 1);
     break;
   }

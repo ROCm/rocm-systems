@@ -54,6 +54,13 @@ def pytest_addoption(parser):
         help="Memory copies issued after Tool B registered",
     )
     parser.addoption(
+        "--copy-bytes",
+        action="store",
+        type=int,
+        default=16 << 20,
+        help="Bytes moved by each copy the workload issues",
+    )
+    parser.addoption(
         "--phase2-allocates",
         action="store",
         type=int,
@@ -85,6 +92,11 @@ def phase2_dispatches(request):
 @pytest.fixture
 def phase2_copies(request):
     return request.config.getoption("--phase2-copies")
+
+
+@pytest.fixture
+def copy_bytes(request):
+    return request.config.getoption("--copy-bytes")
 
 
 @pytest.fixture
