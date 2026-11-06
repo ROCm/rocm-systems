@@ -94,6 +94,7 @@ test_categories:
       - "Add4G.*"
       - "RcclEpWaveTest.*"
       - "RcclEpLayoutTest.*"
+      - "DeviceApi.RejectedCreate*"
     exclude_windows:
       - "*"
     labels:
