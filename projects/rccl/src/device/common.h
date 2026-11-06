@@ -63,6 +63,8 @@ struct ncclShmemGroup {
   } devicePlugin;
   int32_t dstSizes[NCCL_MAX_ARITY + 1];
   uint64_t redOpArgs;
+  // Near-recv layout of the current slice's recv source: mode | region phases << 8, 0 when off.
+  uint32_t nearRecv;
 };
 
 struct ncclShmemData {

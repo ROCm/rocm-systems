@@ -272,6 +272,33 @@ __host__ __device__ constexpr bool ncclConnStepNeedsSysAcquire(int connFlags) {
 #define RCCL_PIPELINE_SHIFT 24
 #define RCCL_REG_SHIFT 28
 
+// SPX/NPS1 PoC (RCCL_SPX_NEAR_RECV): a near-recv SIMPLE buffer holds one 1 MiB region per step,
+// and a step travels as 16 KiB pieces placed on chosen blocks of its region. Near-AID blocks follow
+// a fixed pattern inside a region; the region's phase bit says which of its two forms applies.
+#define NCCL_NET_NEAR_RECV_PIECE_SIZE (16 * 1024)
+#define NCCL_NET_NEAR_RECV_REGION_SIZE (1024 * 1024)
+#define NCCL_NET_NEAR_RECV_PIECES_PER_REGION (NCCL_NET_NEAR_RECV_REGION_SIZE / 2 / NCCL_NET_NEAR_RECV_PIECE_SIZE)
+enum ncclNetNearRecvMode {
+  ncclNetNearRecvOff = 0,
+  ncclNetNearRecvNear = 1,   // pieces on near-AID blocks
+  ncclNetNearRecvFar = 2,    // pieces on far-AID blocks (negative control)
+  ncclNetNearRecvContig = 3  // pieces back to back, as many WRs as the other modes
+};
+
+// Byte offset of logical piece `piece` from the start of the request's first region; bit r of
+// `phases` is the phase of region r of the request.
+__host__ __device__ inline uint64_t ncclNearRecvPieceOffset(int piece, int mode, uint8_t phases) {
+  int region = piece / NCCL_NET_NEAR_RECV_PIECES_PER_REGION;
+  int pieceInRegion = piece % NCCL_NET_NEAR_RECV_PIECES_PER_REGION;
+  int block = pieceInRegion;
+  if (mode != ncclNetNearRecvContig) {
+    int phase = ((phases >> region) & 1) ^ (mode == ncclNetNearRecvFar);
+    // Exactly one block of each pair (2j, 2j+1) has the wanted parity.
+    block = 2 * pieceInRegion + (((pieceInRegion >> 2) & 1) ^ phase);
+  }
+  return (uint64_t)region * NCCL_NET_NEAR_RECV_REGION_SIZE + (uint64_t)block * NCCL_NET_NEAR_RECV_PIECE_SIZE;
+}
+
 struct ncclConnInfo {
   // Regular comm mechanism
   char* buffs[NCCL_NUM_PROTOCOLS]; // Local for recv, remote for send
@@ -302,6 +329,9 @@ struct ncclConnInfo {
   // of the proxy issuing a GDR flush. Both live in local VRAM.
   uint64_t* gdrFlushFlag;
   uint64_t* gdrFlushSeq;
+  // Net recv only: ncclNetNearRecvMode of the SIMPLE buffer and the phase bit of each step's region.
+  uint8_t nearRecvMode;
+  uint8_t nearRecvPhaseMask;
 };
 
 // A gdrFlushSeq entry packs the flag value in its low bits with the per-QP
