@@ -136,9 +136,14 @@ namespace writer {
 // byte run at about 1 GB/s, so one snapshot of a large buffer was most of the
 // capture cost of a step.
 //
-// Four independent lanes, one multiply per 8 bytes, hide that multiply latency.
+// Four independent lanes hide the multiply latency. Each lane takes xxHash64's
+// round (multiply the input, add, rotate, multiply), which is a bijection of
+// the input word for a fixed state. A multiply alone is not enough: it never
+// moves a difference down, so top-bit flips in two words of one lane cancel.
 // The length is mixed into the seed so a prefix of another buffer does not
 // share its hash, and the tail is accumulated whole rather than byte by byte.
+// Each half of the result chains all four lanes through the avalanche, in
+// opposite orders.
 // ---------------------------------------------------------------------------
 
 static inline uint64_t hash_load64(const uint8_t* p) {
@@ -156,33 +161,41 @@ static inline uint64_t hash_avalanche(uint64_t x) {
   return x;
 }
 
+static inline uint64_t hash_round(uint64_t acc, uint64_t in) {
+  acc += in * 0xC2B2AE3D27D4EB4FULL;
+  acc = (acc << 31) | (acc >> 33);
+  return acc * 0x9E3779B185EBCA87ULL;
+}
+
 static Hash128 hash_buffer(const void* data, size_t len) {
   const auto* p = static_cast<const uint8_t*>(data);
   const auto* end = p + len;
-  constexpr uint64_t kP = 0x9E3779B185EBCA87ULL;
   uint64_t a = 0x243F6A8885A308D3ULL ^ len;
   uint64_t b = 0x13198A2E03707344ULL ^ len;
   uint64_t c = 0xA4093822299F31D0ULL;
   uint64_t d = 0x082EFA98EC4E6C89ULL;
 
   while (p + 32 <= end) {
-    a = (a ^ hash_load64(p)) * kP;
-    b = (b ^ hash_load64(p + 8)) * kP;
-    c = (c ^ hash_load64(p + 16)) * kP;
-    d = (d ^ hash_load64(p + 24)) * kP;
+    a = hash_round(a, hash_load64(p));
+    b = hash_round(b, hash_load64(p + 8));
+    c = hash_round(c, hash_load64(p + 16));
+    d = hash_round(d, hash_load64(p + 24));
     p += 32;
   }
-  while (p + 8 <= end) {
-    a = (a ^ hash_load64(p)) * kP;
-    p += 8;
-  }
+  // At most three whole words and a partial one are left, one per lane.
+  uint64_t* lane[3] = {&a, &b, &c};
+  for (int i = 0; p + 8 <= end; i++, p += 8) *lane[i] = hash_round(*lane[i], hash_load64(p));
   if (p < end) {
     uint64_t tail = 0;
     memcpy(&tail, p, static_cast<size_t>(end - p));
-    b = (b ^ tail) * kP;
+    d = hash_round(d, tail);
   }
 
-  return {hash_avalanche(a ^ (b * kP) ^ c), hash_avalanche(d ^ (c * kP) ^ b ^ len)};
+  uint64_t lo = hash_avalanche(a ^ len);
+  uint64_t hi = hash_avalanche(d ^ ~len);
+  lo = hash_avalanche(hash_avalanche(hash_avalanche(lo + b) + c) + d);
+  hi = hash_avalanche(hash_avalanche(hash_avalanche(hi + c) + b) + a);
+  return {lo, hi};
 }
 
 static void hash_hex(Hash128 h, char buf[33]) {
