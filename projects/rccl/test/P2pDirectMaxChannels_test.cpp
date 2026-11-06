@@ -81,6 +81,15 @@ TEST(P2pDirectMaxChannelsTests, SelfTransfersKeepThePerPeerTile)
     EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncRecv, /*peer=*/0, 128), 64);
 }
 
+TEST(P2pDirectMaxChannelsTests, P2pNetCommunicatorKeepsThePerPeerTile)
+{
+    TwoRankComm comm(256, 64, 256);
+    comm.get()->p2pNet = 1;
+
+    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSend, kPeer, 128), 64);
+    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncRecv, kPeer, 128), 64);
+}
+
 TEST(P2pDirectMaxChannelsTests, RequestedPoolLeavesRoomForASplitRound)
 {
     // A round split into a widened and a per-peer work needs both tiles in one empty plan.

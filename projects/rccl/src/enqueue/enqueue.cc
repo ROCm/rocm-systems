@@ -1401,7 +1401,8 @@ int rcclP2pChannelStrideForApi(struct ncclComm* comm, ncclFunc_t collAPI, int pe
   bool directApi = collAPI == ncclFuncSend || collAPI == ncclFuncRecv || collAPI == ncclFuncSendRecv;
   // A self transfer is one local copy work with one partitioning for both directions. Mixed API
   // groups can otherwise widen only one side and copy beyond the other side's final partition.
-  if (peer == comm->rank || directMaxChannels <= 0 || !directApi || useMemcpy || !rcclP2pPeerIsLocal(comm, peer))
+  if (peer == comm->rank || directMaxChannels <= 0 || !directApi || useMemcpy || comm->p2pNet ||
+      !rcclP2pPeerIsLocal(comm, peer))
     return comm->p2pnChannelsPerPeer;
   // A split round needs batches for the widened plus the per-peer tile, and must fit an empty plan.
   int argsRoom = ncclDevMaxChannelsForArgsBytes(comm->workArgsBytes) - comm->p2pnChannelsPerPeer;
