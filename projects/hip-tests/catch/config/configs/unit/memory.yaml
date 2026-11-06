@@ -616,6 +616,12 @@ memory:
   Unit_hipMemset3DAsync_SeekSetArrayPortion:
     <<: *level_default
     tags: [memset, P1]
+  Unit_hipMemset3D_FullRowSubvolumePadding:
+    <<: *level_default
+    tags: [memset, P1]
+  Unit_hipMemset3D_CroppedSpanValidation:
+    <<: *level_default
+    tags: [memset, P1]
   Unit_hipMemset3D_RegressInLoop:
     <<: *level_default
     tags: [memset, P1]

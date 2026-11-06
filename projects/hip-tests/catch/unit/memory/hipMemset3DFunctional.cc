@@ -41,9 +41,19 @@ Testcase Scenarios :
  portion with hipMemset3D api.
  14) Seek device pitched ptr to desired portion of 3d array and memset the
  portion with hipMemset3DAsync api.
+ 15) Preserve slice and row gaps in full-width cropped subvolumes for direct,
+ asynchronous and captured fills.
+ 16) Reject invalid slice heights and strided spans at the direct, asynchronous
+ and captured API call.
 */
 
+#include <algorithm>
+#include <cstdint>
+#include <limits>
+#include <vector>
+
 #include <hip_test_common.hh>
+#include <resource_guards.hh>
 
 /*
  * Defines
@@ -498,4 +508,124 @@ HIP_TEST_CASE(Unit_hipMemset3D_SeekSetArrayPortion) {
 HIP_TEST_CASE(Unit_hipMemset3DAsync_SeekSetArrayPortion) {
 
   seekAndSet3DArrayPortion(1);
+}
+
+enum class SubvolumeFillMode { Direct, Async, Captured };
+
+/**
+ * Test Description
+ * ------------------------
+ * - Fill full-width rows of a cropped subvolume and preserve slice and row gaps.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemset3DFunctional.cc
+ * Test requirements
+ * ------------------------
+ * - HIP_VERSION >= 7.18
+ */
+HIP_TEST_CASE(Unit_hipMemset3D_FullRowSubvolumePadding) {
+  const auto mode =
+      GENERATE(SubvolumeFillMode::Direct, SubvolumeFillMode::Async, SubvolumeFillMode::Captured);
+  const size_t fillHeight = GENERATE(1, 5);
+  constexpr size_t pitch = 256;
+  constexpr size_t height = 7;
+  constexpr size_t depth = 5;
+  constexpr size_t bytes = pitch * height * depth;
+  constexpr size_t offset = pitch * (height + 1);
+  LinearAllocGuard<uint8_t> device(LinearAllocs::hipMalloc, bytes);
+  StreamGuard stream(Streams::withFlags, hipStreamNonBlocking);
+  std::vector<uint8_t> poison(bytes, 0xa5);
+  std::vector<uint8_t> expected(poison);
+  std::vector<uint8_t> output(bytes);
+  HIP_CHECK(hipMemcpy(device.ptr(), poison.data(), bytes, hipMemcpyHostToDevice));
+  for (size_t z = 0; z < 3; ++z) {
+    for (size_t y = 0; y < fillHeight; ++y) {
+      for (size_t x = 0; x < pitch; ++x) {
+        expected[offset + z * pitch * height + y * pitch + x] = 0x31;
+      }
+    }
+  }
+  const auto dst = make_hipPitchedPtr(device.ptr() + offset, pitch, pitch, height);
+  const auto extent = make_hipExtent(pitch, fillHeight, 3);
+  if (mode == SubvolumeFillMode::Direct) {
+    HIP_CHECK(hipMemset3D(dst, 0x31, extent));
+    HIP_CHECK(hipDeviceSynchronize());
+  } else {
+    if (mode == SubvolumeFillMode::Captured) {
+      HIP_CHECK(hipStreamBeginCapture(stream.stream(), hipStreamCaptureModeGlobal));
+    }
+    HIP_CHECK(hipMemset3DAsync(dst, 0x31, extent, stream.stream()));
+    if (mode == SubvolumeFillMode::Captured) {
+      hipGraph_t graph = nullptr;
+      hipGraphExec_t graphExec = nullptr;
+      HIP_CHECK(hipStreamEndCapture(stream.stream(), &graph));
+      HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+      HIP_CHECK(hipGraphLaunch(graphExec, stream.stream()));
+      HIP_CHECK(hipStreamSynchronize(stream.stream()));
+      HIP_CHECK(hipGraphExecDestroy(graphExec));
+      HIP_CHECK(hipGraphDestroy(graph));
+    } else {
+      HIP_CHECK(hipStreamSynchronize(stream.stream()));
+    }
+  }
+  HIP_CHECK(hipMemcpy(output.data(), device.ptr(), bytes, hipMemcpyDeviceToHost));
+  const auto mismatch = std::mismatch(output.begin(), output.end(), expected.begin());
+  const size_t first = std::distance(output.begin(), mismatch.first);
+  INFO("first mismatch byte=" << first << ", slice=" << first / (pitch * height) << ", row="
+                              << (first / pitch) % height << ", column=" << first % pitch);
+  INFO("actual=" << (first < output.size() ? static_cast<unsigned>(output[first]) : 0)
+                 << ", expected="
+                 << (first < expected.size() ? static_cast<unsigned>(expected[first]) : 0));
+  REQUIRE(mismatch.first == output.end());
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - Reject invalid slice heights and out-of-allocation strided spans.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemset3DFunctional.cc
+ * Test requirements
+ * ------------------------
+ * - HIP_VERSION >= 7.18
+ */
+HIP_TEST_CASE(Unit_hipMemset3D_CroppedSpanValidation) {
+  const auto mode =
+      GENERATE(SubvolumeFillMode::Direct, SubvolumeFillMode::Async, SubvolumeFillMode::Captured);
+  constexpr size_t pitch = 256;
+  LinearAllocGuard<uint8_t> device(LinearAllocs::hipMalloc, pitch * 6);
+  StreamGuard stream(Streams::withFlags, hipStreamNonBlocking);
+  const auto fill = [&](void* pointer, size_t sliceHeight, hipExtent extent) {
+    const auto dst = make_hipPitchedPtr(pointer, pitch, pitch, sliceHeight);
+    if (mode == SubvolumeFillMode::Direct) return hipMemset3D(dst, 0x31, extent);
+    if (mode == SubvolumeFillMode::Async)
+      return hipMemset3DAsync(dst, 0x31, extent, stream.stream());
+    HIP_CHECK(hipStreamBeginCapture(stream.stream(), hipStreamCaptureModeGlobal));
+    const auto status = hipMemset3DAsync(dst, 0x31, extent, stream.stream());
+    hipGraph_t graph = nullptr;
+    const auto endStatus = hipStreamEndCapture(stream.stream(), &graph);
+    if (endStatus == hipSuccess) {
+      size_t count = 0;
+      HIP_CHECK(hipGraphGetNodes(graph, nullptr, &count));
+      HIP_CHECK(hipGraphDestroy(graph));
+      REQUIRE(count == 0);
+    } else {
+      REQUIRE(endStatus == hipErrorStreamCaptureInvalidated);
+      REQUIRE(graph == nullptr);
+    }
+    return status;
+  };
+  HIP_CHECK_ERROR(fill(device.ptr() + pitch * 4, 3, make_hipExtent(pitch, 1, 2)),
+                  hipErrorInvalidValue);
+  for (size_t sliceHeight : {size_t{0}, size_t{1}}) {
+    HIP_CHECK_ERROR(fill(device.ptr(), sliceHeight, make_hipExtent(pitch, 2, 3)),
+                    hipErrorInvalidValue);
+  }
+  HIP_CHECK_ERROR(fill(device.ptr(), std::numeric_limits<size_t>::max() / pitch + 1,
+                       make_hipExtent(pitch, 1, 2)),
+                  hipErrorInvalidValue);
+  HIP_CHECK(hipStreamSynchronize(stream.stream()));
+  // Do not leak the deliberately rejected calls into the next test.
+  static_cast<void>(hipGetLastError());
 }
