@@ -2301,6 +2301,44 @@ TEST_F(EnqueueMicrotest, EffectiveP2pBatchEnable_MultiNodeOtherArch_IsDisabled) 
   }
 }
 
+TEST_F(EnqueueMicrotest, P2pBatchEligible_Gfx942FourNode_ThresholdDefaultVersusSet) {
+  // Reaches the enqueue wrapper, which the channel.h tests do not. gfx942 leaves
+  // batching off unless RCCL_P2P_BATCH_ENABLE is set, so both cases force it on.
+  // SetParam covers one key; this case has to set the enable and the threshold.
+  constexpr ssize_t perPeer = 128 * 1024;
+  BatchComm bc(/*nNodes=*/4, "gfx942");
+  auto setEnableAndThreshold = [](int64_t threshold, bool thresholdSet) {
+    g_loadParam = [threshold, thresholdSet](const char* env, int64_t deft) {
+      if (std::strcmp(env, "RCCL_P2P_BATCH_ENABLE") == 0) return int64_t(1);
+      if (thresholdSet && std::strcmp(env, "RCCL_P2P_BATCH_THRESHOLD") == 0) return threshold;
+      return deft;
+    };
+  };
+
+  setEnableAndThreshold(/*threshold=*/-1, /*thresholdSet=*/false);
+  EXPECT_TRUE(rcclP2pBatchEligible(bc.get(), perPeer, perPeer));
+
+  setEnableAndThreshold(/*threshold=*/-1, /*thresholdSet=*/true);
+  EXPECT_TRUE(rcclP2pBatchEligible(bc.get(), perPeer, perPeer));
+
+  setEnableAndThreshold(/*threshold=*/64 * 1024, /*thresholdSet=*/true);
+  EXPECT_FALSE(rcclP2pBatchEligible(bc.get(), perPeer, perPeer));
+
+  setEnableAndThreshold(/*threshold=*/perPeer, /*thresholdSet=*/true);
+  EXPECT_TRUE(rcclP2pBatchEligible(bc.get(), perPeer, perPeer));
+}
+
+TEST_F(EnqueueMicrotest, P2pBatchEligible_Gfx950_UnsetThresholdFollowsNodeCount) {
+  // 128 KiB is above the 64 KiB arch default. Multi-node gfx950 turns batching
+  // on with the threshold left unset. BatchComm leaves nRanks at 0, so passing
+  // that instead of nNodes would fuse the 16-node case.
+  constexpr ssize_t perPeer = 128 * 1024;
+  BatchComm at16(/*nNodes=*/16, "gfx950");
+  EXPECT_FALSE(rcclP2pBatchEligible(at16.get(), perPeer, perPeer));
+  BatchComm at15(/*nNodes=*/15, "gfx950");
+  EXPECT_TRUE(rcclP2pBatchEligible(at15.get(), perPeer, perPeer));
+}
+
 // ===========================================================================
 // rcclAddonLaunchBegin (enqueue.cc:2092) / rcclAddonLaunchEnd (:2125) -- the
 // bracket an addon collective wraps its own launch in.
