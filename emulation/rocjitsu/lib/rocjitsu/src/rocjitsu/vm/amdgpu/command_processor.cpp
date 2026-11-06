@@ -519,8 +519,18 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
     uint32_t idx = 0;
     if (RJ_AMDHSA_BITS_GET(kcp, KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER)) {
       if (pkt.queue_ptr != 0) {
-        for (uint32_t word = 0; word < 4; ++word)
-          cu->write_sgpr(sbase + idx + word, launch_metadata->scratch_resource_descriptor[word]);
+        for (uint32_t word = 0; word < 4; ++word) {
+          uint32_t value = launch_metadata->scratch_resource_descriptor[word];
+          if (word == 3 &&
+              (cu->arch() == ROCJITSU_CODE_ARCH_RDNA1 || cu->arch() == ROCJITSU_CODE_ARCH_RDNA2)) {
+            // ROCr leaves INDEX_STRIDE for the CP to fill from this kernel's
+            // wave size. Buffer spills must use the same lane interleave as FLAT.
+            // This covers the compiler buffer-spill path. Explicit private V#
+            // requests on GFX11+ remain outside this qualification.
+            value = (value & ~(3u << 21)) | ((wf->wf_size() == 32 ? 2u : 3u) << 21);
+          }
+          cu->write_sgpr(sbase + idx + word, value);
+        }
       }
       idx += 4;
     }
@@ -599,30 +609,37 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
   uint32_t wg_id_x =
       (pkt.pm4_abi || pkt.enable_wg_id_y || pkt.enable_wg_id_z) ? grid_wg_id_x : global_wg_id;
 
-  // System SGPRs: workgroup_id_{x,y,z} placed sequentially after user SGPRs.
-  // Only the IDs whose enable bits are set in compute_pgm_rsrc2 are written.
-  // When kernel_code_properties is 0 (internal test dispatches), always write
-  // workgroup_id_x as a fallback since internal kernels expect it.
+  // Descriptor ID bits govern AQL and PM4. Internal dispatches that need
+  // the legacy X SGPR request it explicitly through DispatchEntry.
   uint32_t sys_idx = pkt.num_user_sgprs;
-  const auto properties = isa_properties(cu->arch());
-  const bool pm4_ttmp_ids = pkt.pm4_abi && properties.uses_ttmp_workgroup_ids;
+  const rj_code_arch_t arch = cu->arch();
+  const auto properties = isa_properties(arch);
   {
-    bool kcp_zero = (pkt.kernel_code_properties == 0) && !pkt.pm4_abi;
-    if (!pm4_ttmp_ids && (pkt.enable_wg_id_x || kcp_zero))
-      cu->write_sgpr(sbase + sys_idx++, wg_id_x);
-    if (!pm4_ttmp_ids && pkt.enable_wg_id_y)
-      cu->write_sgpr(sbase + sys_idx++, wg_id_y);
-    if (!pm4_ttmp_ids && pkt.enable_wg_id_z)
-      cu->write_sgpr(sbase + sys_idx++, wg_id_z);
+    if (!properties.uses_ttmp_workgroup_ids) {
+      if (pkt.enable_wg_id_x)
+        cu->write_sgpr(sbase + sys_idx++, wg_id_x);
+      if (pkt.enable_wg_id_y)
+        cu->write_sgpr(sbase + sys_idx++, wg_id_y);
+      if (pkt.enable_wg_id_z)
+        cu->write_sgpr(sbase + sys_idx++, wg_id_z);
+    }
     if (pkt.enable_wg_info) {
-      // RDNA CS SGPR ABI: wave count [5:0] and ordered append term [17:6].
-      // With ordered append disabled, the term is the wave index. RDNA1–3.5
-      // also have first-wave [31]; RDNA2–3.5 add wave ID [24:20]. RDNA4
-      // supplies the wave ID in TTMP8 and leaves those SGPR bits clear.
-      uint32_t info = pkt.wfs_per_workgroup | (wf_index_in_wg << 6);
-      if (!pm4_ttmp_ids) {
+      // CS SGPR ABI: wave count [5:0] and ordered append term [17:6].
+      // With ordered append disabled, the term is the wave index. CDNA3/4
+      // reserve that field as zero. CDNA1-4 and RDNA1-3.5 have first-wave
+      // [31]; CDNA3/4 and RDNA2-3.5 also carry wave ID [24:20]. The CDNA3/4
+      // manuals list a 34-bit concatenation: [24:20] assumes their 14-bit
+      // zero field is the 12-bit ordered-append slot, matching RDNA2/3.
+      // That position is not hardware-qualified on gfx942/gfx950. RDNA4
+      // supplies its wave ID in TTMP8 and leaves those SGPR bits clear.
+      uint32_t info = pkt.wfs_per_workgroup;
+      if (arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4)
+        info |= wf_index_in_wg << 6;
+      if (!properties.uses_ttmp_workgroup_ids) {
         info |= wf_index_in_wg == 0 ? 1u << 31 : 0;
-        if (cu->arch() != ROCJITSU_CODE_ARCH_RDNA1)
+        if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
+            arch == ROCJITSU_CODE_ARCH_RDNA2 || arch == ROCJITSU_CODE_ARCH_RDNA3 ||
+            arch == ROCJITSU_CODE_ARCH_RDNA3_5)
           info |= wf_index_in_wg << 20;
       }
       cu->write_sgpr(sbase + sys_idx++, info);
@@ -824,9 +841,21 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
                         scratch_outcome == VmAccessOutcome::Complete);
     });
 
+    // Absolute flat-scratch targets receive the queue base and a separate
+    // per-wave byte offset. The prologue adds that offset to both FLAT_SCRATCH
+    // and the private buffer V#, so supplying zero aliases every wave's spills.
+    const bool wave_offset_sgpr =
+        pkt.enable_private_segment && arch_appends_private_segment_wave_offset_sgpr(arch);
+    if (wave_offset_sgpr) {
+      const uint64_t offset = wave_scratch - scratch_pool;
+      if (offset > std::numeric_limits<uint32_t>::max())
+        return VmAccessOutcome::Malformed;
+      cu->write_sgpr(sbase + sys_idx, static_cast<uint32_t>(offset));
+    }
     if (flat_scratch_init_sgpr >= 0) {
-      cu->write_sgpr(sbase + flat_scratch_init_sgpr, static_cast<uint32_t>(wave_scratch));
-      cu->write_sgpr(sbase + flat_scratch_init_sgpr + 1, static_cast<uint32_t>(wave_scratch >> 32));
+      const uint64_t initial_base = wave_offset_sgpr ? scratch_pool : wave_scratch;
+      cu->write_sgpr(sbase + flat_scratch_init_sgpr, static_cast<uint32_t>(initial_base));
+      cu->write_sgpr(sbase + flat_scratch_init_sgpr + 1, static_cast<uint32_t>(initial_base >> 32));
     }
   }
   return VmAccessOutcome::Complete;
@@ -3212,6 +3241,7 @@ util::Result CommandProcessor::dispatch_pm4(const ComputeQueueRecord &queue, Pm4
   dp.enabled_cus = queue.enabled_cus;
   dp.kernel_wave_size = (initiator & (1u << 15)) ? 32 : 64;
   if (RJ_AMDHSA_BITS_GET(rsrc2, COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT)) {
+    dp.enable_private_segment = true;
     dp.pm4_scratch_waves_per_se = regs[kPm4ComputeTmpringSize] & 0xfff;
     const auto properties = isa_properties(arch);
     const uint32_t wave_bytes = ((regs[kPm4ComputeTmpringSize] >> 12) &
@@ -4190,6 +4220,10 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
       RJ_AMDHSA_BITS_GET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y);
   dp.enable_wg_id_z =
       RJ_AMDHSA_BITS_GET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z);
+  dp.enable_wg_info =
+      RJ_AMDHSA_BITS_GET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO);
+  dp.enable_private_segment =
+      RJ_AMDHSA_BITS_GET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT);
   dp.enable_vgpr_workitem_id = static_cast<uint8_t>(
       RJ_AMDHSA_BITS_GET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_VGPR_WORKITEM_ID));
   dp.workgroup_size_x = pkt.workgroup_size_x;

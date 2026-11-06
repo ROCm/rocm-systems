@@ -152,8 +152,8 @@ void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
     }
     uint64_t addr = saddr_val + vaddr + offset;
     if (decode_flat_private) {
-      const auto translated =
-          amdgpu::translate_flat_address(wf, addr, lane, amdgpu::FlatPrivateLayout::EncodedLane);
+      const auto translated = amdgpu::translate_flat_address(
+          wf, addr, lane, amdgpu::flat_private_layout(wf.cu().arch()));
       if (translated.private_address) {
         addr = translated.value;
         d.scratch_swizzle = true;
@@ -162,7 +162,8 @@ void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
         d.scratch_lane_mask |= uint64_t{1} << lane;
       }
     } else {
-      assert(!amdgpu::translate_flat_address(wf, addr, lane, amdgpu::FlatPrivateLayout::EncodedLane)
+      assert(!amdgpu::translate_flat_address(wf, addr, lane,
+                                             amdgpu::flat_private_layout(wf.cu().arch()))
                   .private_address &&
              "gfx1250 global memory address must not use flat private scratch encoding");
     }
