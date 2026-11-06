@@ -17,6 +17,7 @@
 #include <cstdarg>
 #include <cstdint>
 #include <cstring>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -1646,8 +1647,22 @@ TEST_F(RasClientSupportMicrotest, RunComms_MoreRanksThanCommNRanks_ReturnsIntern
   ExpectRunCommsRejects(BuildRasCollComms({MakeCommSpec(1, {RankSpec{0, 0}, RankSpec{1, 0}})}));
 }
 
-TEST_F(RasClientSupportMicrotest, RunComms_NoRanks_ReturnsInternalError) {
-  ExpectRunCommsRejects(BuildRasCollComms({MakeCommSpec(1)}));
+// A comm with no reported ranks is zeroed, not malformed: rasCollCommsInit emits one for a comm
+// still initializing when it samples ncclComms.  Rejecting the whole report would close the client
+// and regress JSON output, so it must be accepted and summarized with a zero (NOCOMM) status rather
+// than reaching COMPILER_CLZ(0).
+TEST_F(RasClientSupportMicrotest, RunComms_ZeroRankComm_AcceptedAsNoComm) {
+  struct rasPeerInfo peers[] = {MakePeer(4000)};
+  rasPeers = peers;
+  nRasPeers = 1;
+
+  struct rasClient* client = MakeClient();
+  client->status = RAS_CLIENT_COMMS;
+  client->coll = MakeCollective(BuildRasCollComms({MakeCommSpec(0)}), {MakeAddr(4000)});
+  bool closed = false;
+  ASSERT_EQ(rasClientRun(client, &closed), ncclSuccess);
+  EXPECT_NE(std::string::npos, DrainSendQueue(client).find("NOCOMM"));
+  FreeClient(client);
 }
 
 TEST_F(RasClientSupportMicrotest, RunComms_NegativeCounts_ReturnsInternalError) {
@@ -1710,6 +1725,41 @@ TEST_F(RasClientSupportMicrotest, RunComms_StatusCodeOutOfRange_ReturnsInternalE
     (async ? r.asyncError : r.initState) = static_cast<ncclResult_t>(ncclNumResults);
     ExpectRunCommsRejects(BuildRasCollComms({MakeCommSpec(1, {r})}));
   }
+}
+
+// One known peer (port 100 -> rasPeers[0]); the comm's second rank sits on an unknown peer (port
+// 200, a rasPeerFind miss -> peerIdxConv -1).  The node-counting loop must treat the unknown peer
+// as its own node via its `value == -1` guard, not dereference rasPeers[-1] (which ASan would flag
+// if the guard were dropped).  The two peers are two distinct nodes.
+TEST_F(RasClientSupportMicrotest, RunComms_UnknownPeer_CountedAsSeparateNode) {
+  struct rasPeerInfo peers[] = {MakePeer(100)};
+  rasPeers = peers;
+  nRasPeers = 1;
+  InstallPortBucketNodeGrouping();
+
+  struct rasClient* client = MakeClient();
+  client->status = RAS_CLIENT_COMMS;
+  client->coll = MakeCollective(BuildRasCollComms({MakeCommSpec(2, {RankSpec{0, 0}, RankSpec{1, 1}})}),
+                                {MakeAddr(100), MakeAddr(200)});
+  bool closed = false;
+  ASSERT_EQ(rasClientRun(client, &closed), ncclSuccess);
+
+  // Table row columns: Group Comms Nodes Ranks/node Ranks/comm Ranks-in-group Status Errors.  The
+  // first line whose first three tokens are integers is the single comm's data row; its third
+  // column is the node count.
+  std::string out = DrainSendQueue(client);
+  int nodes = -1;
+  std::istringstream lines(out);
+  for (std::string line; std::getline(lines, line);) {
+    std::istringstream cols(line);
+    int group, comms, n;
+    if (cols >> group >> comms >> n) {
+      nodes = n;
+      break;
+    }
+  }
+  EXPECT_EQ(nodes, 2);
+  FreeClient(client);
 }
 
 // =============================================================================================
