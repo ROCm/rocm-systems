@@ -190,8 +190,10 @@ TEST(RaceDetector, LdsValidationRejectsNegativeAndOverflowingRanges) {
   for (const auto type : {MemoryEventType::LDS_TO_VGPR, MemoryEventType::VGPR_TO_LDS}) {
     IntervalSet intervals;
     intervals.append(64, 68);
-    detector.allocateEventId(WaveId{0}, testInstruction(0), type, {}, 1, 0xf, std::move(intervals),
-                             amdgpu::WaitCounterType::DSCNT, MemoryOrderClass::LDS);
+    detector.allocateEventId(
+        WaveId{0}, testInstruction(0), type, {}, 1, 0xf, std::move(intervals),
+        CounterObligations{amdgpu::WaitCounterType::DSCNT, MemoryOrderClass::LDS},
+        MemoryOrderClass::LDS);
   }
   struct Range {
     int address;
@@ -323,7 +325,8 @@ TEST(RaceDetector, LdsCounterAccountingIgnoresNegativeIntervals) {
     intervals.append(64, 68);
     const auto event = detector.allocateEventId(
         WaveId{0}, testInstruction(0), type, {}, 1, 0xf, std::move(intervals),
-        amdgpu::WaitCounterType::DSCNT, MemoryOrderClass::LDS);
+        CounterObligations{amdgpu::WaitCounterType::DSCNT, MemoryOrderClass::LDS},
+        MemoryOrderClass::LDS);
     detector.validateRead(64, WaveId{1}, 0, 4);
     detector.validateWrite(64, WaveId{1}, 0, 4);
     EXPECT_EQ(violations.size(), 1u);

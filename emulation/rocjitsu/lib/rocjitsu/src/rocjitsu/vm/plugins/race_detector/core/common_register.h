@@ -4,7 +4,9 @@
 #pragma once
 #include "rocjitsu/isa/arch/amdgpu/shared/memory_issue.h"
 
+#include <array>
 #include <cassert>
+#include <optional>
 #include <ostream>
 #include <span>
 #include <sstream>
@@ -141,6 +143,34 @@ inline MemoryOrderClass defaultMemoryOrder(MemoryEventType t) {
   assert(false && "invalid memory event type");
   return MemoryOrderClass::UNORDERED;
 }
+
+/// Counter obligations of an event that waits on one counter, or on two
+/// counters with the same completion order, as unit tests and the
+/// default-counter registration overloads describe events. Converts to the
+/// obligation span that event registration takes; the span refers to this
+/// object, so pass a temporary directly to the registering call.
+class CounterObligations {
+public:
+  CounterObligations(
+      amdgpu::WaitCounterType waitCounterType, MemoryOrderClass memoryOrder,
+      std::optional<amdgpu::WaitCounterType> additionalWaitCounterType = std::nullopt)
+      : obligations_{amdgpu::MemoryCounterObligation{waitCounterType, memoryOrder}, {}} {
+    if (additionalWaitCounterType)
+      obligations_[count_++] = {*additionalWaitCounterType, memoryOrder};
+  }
+
+  /// The default counter and order for an event type.
+  explicit CounterObligations(MemoryEventType type)
+      : CounterObligations(defaultWaitCounterType(type), defaultMemoryOrder(type)) {}
+
+  operator std::span<const amdgpu::MemoryCounterObligation>() const {
+    return {obligations_.data(), count_};
+  }
+
+private:
+  std::array<amdgpu::MemoryCounterObligation, 2> obligations_;
+  size_t count_ = 1;
+};
 
 /// A register reference (type + index).
 class CommonRegister {
