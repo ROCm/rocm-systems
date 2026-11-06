@@ -145,6 +145,13 @@ static uint32_t RmaProxyAtomicLoad32(const uint32_t* ptr,
 #define ncclRmaProxyPutLaunch ncclRmaProxyPutLaunchUut
 #define ncclRmaProxyWaitLaunch ncclRmaProxyWaitLaunchUut
 #define ncclRmaProxyReclaimPlan ncclRmaProxyReclaimPlanUut
+
+// rma_proxy.cc is not linked here, and fakes/rma_fakes.cc fakes this unit itself. These tests build one rail
+// spanning every rank, for which the real world-to-rail-peer mapping is the identity.
+ncclResult_t ncclRmaProxyWorldToPeer(const struct ncclRmaProxyCtx*, int worldRank, int* peer) {
+  *peer = worldRank;
+  return ncclSuccess;
+}
 #define allocMemCPUAccessible RmaProxyAllocMemCPUAccessible
 #define freeMemCPUAccessible RmaProxyFreeMemCPUAccessible
 #undef ncclCalloc

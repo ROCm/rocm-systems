@@ -382,10 +382,6 @@ unset(_rccl_src_root)
 function(rccl_define_micro_source_lists)
   # rccl-UnitTestsMicro -- the broad-coverage micro binary.
   set(TEST_MICRO_SOURCE_FILES
-    rma-proxy-launch-test.cc            # RMA proxy queue + stream-memop coverage
-    rma-proxy-progress-test.cc
-    rma-test.cc
-    rma-ce-test.cc
     param-utils-test.cc                  # src/include/param/utils.h, src/include/param/parser_common.h
     param-parsers-test.cc                # src/include/param/parser_{default,enum,bitset,list}.h
     param-registry-test.cc               # src/param/param_registry.cc
@@ -409,6 +405,10 @@ function(rccl_define_micro_source_lists)
     ${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v22902.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v22907.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v23204.cc
+    # real ncclRmaProxyEnabled / ncclLaunchRma / ncclRmaCeInit, for dev_runtime.cc and group.cc
+    # (rma_tmp.cc: see RMA_CC_PATH in rma/host_tests.cmake).
+    ${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_tmp.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_ce.cc
     fakes/amdsmi_fakes.cc
     fakes/channel_fakes.cc
     fakes/argcheck_fakes.cc
@@ -599,21 +599,6 @@ function(rccl_define_micro_source_lists)
     fakes/tuning_fakes.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/argcheck.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
-    ../common/main_altrsmi.cpp
-    PARENT_SCOPE)
-
-  # rccl-UnitTestsMicroRmaProxy -- REAL src/rma/rma_proxy.cc.
-  set(TEST_MICRO_RMA_PROXY_SOURCE_FILES
-    rma-proxy-test.cc
-    # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
-    fakes/hip_fakes.cc
-    fakes/hsa_fakes.cc
-    fakes/nccl_fakes.cc
-    fakes/search_fakes.cc
-    fakes/os_fakes.cc
-    fakes/rma_fakes.cc
-    fakes/rocmwrap_fakes.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
@@ -1403,6 +1388,15 @@ endif()
 # Shared micro-test binary definitions (identical for BOTH build paths).
 # =====================================================================
 rccl_define_micro_source_lists()
+
+# Real src/ siblings that several binaries compile. They read their params through g_loadParam (nccl_fakes.h).
+set_source_files_properties(
+  ${RCCL_HOST_HIPIFY_DIR}/src/dev_runtime.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/rccl_dev_runtime.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_tmp.cc
+  PROPERTIES
+  GENERATED TRUE
+  COMPILE_OPTIONS "-include;fakes/nccl_fakes.h;-include;fakes/param_redirect.h")
 # rocshmem.hpp is only on the include path under ENABLE_ROCSHMEM.
 if(ENABLE_ROCSHMEM)
   list(APPEND TEST_MICRO_INIT_SOURCE_FILES fakes/rocshmem_fakes.cc)
@@ -1433,6 +1427,10 @@ set_source_files_properties(
   ${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v22907.cc
   ${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v23204.cc
   PROPERTIES GENERATED TRUE)
+# fakes/rma_fakes.cc defines these two as seams; rename the real ones.
+set_source_files_properties(${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_ce.cc PROPERTIES
+  GENERATED TRUE
+  COMPILE_DEFINITIONS "ncclRmaCePutLaunch=ncclRmaCePutLaunchUut;ncclRmaCeWaitLaunch=ncclRmaCeWaitLaunchUut")
 rccl_add_micro_binary(rccl-UnitTestsMicro
   SOURCES ${TEST_MICRO_SOURCE_FILES}
   EXTRA_INCLUDES
@@ -1441,20 +1439,12 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     COMM_DUMP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/commDump.cc"
-    RMA_PROXY_LAUNCH_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_proxy_launch.cc"
-    RMA_PROXY_PROGRESS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_proxy_progress.cc"
-    # rma_tmp.cc, not rma.cc: src/CMakeLists.txt lists plugin/rma.cc first, so
-    # add_file_unique() renames this one. Re-check after any source-list reorder.
-    RMA_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_tmp.cc"
-    # rma_ce.cc has no basename collision, so it keeps its own name.
-    RMA_CE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_ce.cc"
     GROUP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/group.cc"
     WRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rccl_wrap.cc"
     REGISTER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/register/register.cc"
     COLL_REG_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/register/coll_reg.cc"
     SENDRECV_REG_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/register/sendrecv_reg.cc"
-    RCCL_RMA_FAKES_OMIT_ncclRmaInitialized
-    RCCL_RMA_FAKES_OMIT_PROXY_LAUNCH_FLOOR
+    RCCL_RMA_FAKES_OMIT_ncclRmaInitialized  # rma_tmp.cc defines it
     RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
     DEV_RUNTIME_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/dev_runtime.cc"
     DEV_RUNTIME_SEGMENTS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/dev_runtime_segments.cc"
@@ -1507,17 +1497,7 @@ endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/algorithms/dda/host_tests.cmake")
 
-# ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroRmaProxy
-# ---------------------------------------------------------------------------
-rccl_add_micro_binary(rccl-UnitTestsMicroRmaProxy
-  SOURCES ${TEST_MICRO_RMA_PROXY_SOURCE_FILES}
-  EXTRA_DEFS
-    ${_MICRO_MODE_DEFS}
-    RMA_PROXY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_proxy.cc"
-    # rma_proxy.cc defines ncclRmaProxyWorldToPeer itself.
-    RCCL_RMA_FAKES_OMIT_ncclRmaProxyWorldToPeer
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_rma_proxy.yaml")
+include("${CMAKE_CURRENT_LIST_DIR}/rma/host_tests.cmake")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroDebug
