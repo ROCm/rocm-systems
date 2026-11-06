@@ -2539,7 +2539,7 @@ testResult_t run() {
     if (proc == 0) printf("#\n# Reducing maxBytes to %ld due to memory limitation\n", maxBytes);
   }
 
-  const char* tlsPsk = getenv("NCCL_TESTS_TLS_PSK");
+  const char* tlsPsk = getenv(NCCL_TESTS_TLS_PSK_ENV);
   if (tlsPsk) {
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,32,0)
     // Looked up at run time: a direct reference would keep the binary from loading against
@@ -2547,7 +2547,7 @@ testResult_t run() {
     typedef ncclResult_t (*ncclSetEncryption_t)(const ncclEncryptionConfig_t*);
     ncclSetEncryption_t setEncryption = (ncclSetEncryption_t) dlsym(RTLD_DEFAULT, "ncclSetEncryption");
     if (setEncryption == NULL) {
-      fprintf(stderr, "NCCL_TESTS_TLS_PSK is set, but the RCCL library (%d) has no ncclSetEncryption; 2.32 or newer is required.\n",
+      fprintf(stderr, NCCL_TESTS_TLS_PSK_ENV " is set, but the RCCL library (%d) has no ncclSetEncryption; 2.32 or newer is required.\n",
         test_ncclVersion);
       return testInvalidUsage;
     }
@@ -2555,9 +2555,12 @@ testResult_t run() {
     encryption.mode = NCCL_ENCRYPTION_MODE_PSK;
     encryption.psk = tlsPsk;
     NCCLCHECK(setEncryption(&encryption));
-    if (proc == 0) printf("# Socket encryption: TLS, %zu-byte pre-shared key\n", strlen(tlsPsk));
+    // RCCL keeps its own copy of the key. Dropping the variable keeps it out of RCCL's RAS
+    // environment report, which collects every NCCL_* entry, and out of child processes.
+    unsetenv(NCCL_TESTS_TLS_PSK_ENV);
+    if (proc == 0) printf("# Socket encryption: TLS (PSK)\n");
 #else
-    fprintf(stderr, "NCCL_TESTS_TLS_PSK is set, but rccl-tests was built against RCCL %d headers; 2.32 or newer is required.\n",
+    fprintf(stderr, NCCL_TESTS_TLS_PSK_ENV " is set, but rccl-tests was built against RCCL %d headers; 2.32 or newer is required.\n",
       NCCL_VERSION_CODE);
     return testInvalidUsage;
 #endif

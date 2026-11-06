@@ -132,7 +132,12 @@ before the communicator is created, so RCCL's bootstrap, proxy and socket-transp
 TLS-encrypted. The key must be at least 32 bytes and identical on all ranks, and RCCL must be
 built with `-DTLS_BACKEND=OPENSSL3` (otherwise communicator creation fails instead of falling back
 to plaintext). Requires RCCL 2.32 or newer, both at build time and at run time; with older
-headers or an older library the test exits with an error.
+headers or an older library the test exits with an error. The variable must reach every rank:
+if only some ranks have the key, bootstrap hangs instead of failing.
+
+```shell
+NCCL_TESTS_TLS_PSK=<key> mpirun -np 8 -x NCCL_TESTS_TLS_PSK ./build/all_reduce_perf -b 8 -e 128M -f 2
+```
 
 #### Grouped-broadcast (AllGatherV) mode
 
