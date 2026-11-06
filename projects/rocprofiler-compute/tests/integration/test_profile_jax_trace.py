@@ -213,3 +213,20 @@ def test_pmap_is_root(
     root_operator_line(out, "jax.pmap.pmap_square")
     root_operator_line(out, "jax.pmap.pmap_double")
     assert "jax.shard_map." not in out
+
+
+def test_jax_operator_filter_train_step(
+    jax_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
+):
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--operator",
+        "jax:*train_step*",
+        "--path",
+        jax_trace_profiled_workload,
+    ])
+    assert code == 0
+    out = captured_analyze_output(capsys)
+    assert "Matched JAX Operators:" in out
+    assert "jax.jit.train_step" in out
