@@ -459,15 +459,6 @@ class OmniSoC_Base:
         from the metric expressions of those sections.
         """
         args = self.get_args()
-
-        # File id dict
-        config_arch = canonical_config_arch(self.__arch) or self.__arch
-        config_root_dir = f"{args.config_dir}/{config_arch}"
-        config_filename_dict = {
-            filename.name.split("_")[0]: str(filename)
-            for filename in Path(config_root_dir).glob("*.yaml")
-        }
-
         filter_blocks = args.filter_blocks
         if filter_blocks and self.__arch:
             warn_numeric_metric_ids(filter_blocks, self.__arch)
@@ -484,6 +475,18 @@ class OmniSoC_Base:
             ]
         elif args.roof_only:
             filter_blocks = ["4"]
+        return self.counters_for_blocks(filter_blocks), filter_blocks
+
+    def counters_for_blocks(self, filter_blocks: list[str]) -> set[str]:
+        """Return the counters that the -b tokens filter_blocks select; no tokens
+        select every report section."""
+        args = self.get_args()
+        config_arch = canonical_config_arch(self.__arch) or self.__arch
+        config_root_dir = f"{args.config_dir}/{config_arch}"
+        config_filename_dict = {
+            filename.name.split("_")[0]: str(filename)
+            for filename in Path(config_root_dir).glob("*.yaml")
+        }
 
         expressions: list[str] = []
         if not filter_blocks:
@@ -510,9 +513,7 @@ class OmniSoC_Base:
             counters |= library.get_counters_for_metrics(
                 library_ids, self._mspec.gpu_series
             )
-        counters = self._expand_tcc_template_counters(counters)
-
-        return counters, filter_blocks
+        return self._expand_tcc_template_counters(counters)
 
     def _expand_tcc_template_counters(self, counters: set[str]) -> set[str]:
         """
