@@ -545,23 +545,22 @@ __device__ inline void ldsTileRows(uint64_t global, uint32_t lds, uint32_t rows)
 // and compiles the head peel out.
 template <LdsDir DIR, CachePolicy cp, bool Aligned>
 __device__ inline void warpLdsCopy(uint64_t global, uint32_t lds, size_t sizeInBytes) {
-  // Only the low bits that steer the split are made uniform. The symmetric kernels
-  // run at the SGPR limit, and holding the full 64-bit address in SGPRs there spills.
-  const uint32_t lineOff = uniform(static_cast<uint32_t>(global)) & (LINE - 1);
-  lds = uniform(lds);
-  sizeInBytes = uniform(static_cast<uint64_t>(sizeInBytes));
-  if (sizeInBytes == 0) return;            // a zero-extent tile is not a valid descriptor
+  // No uniform() hints: a readfirstlane at entry puts a VALU->SALU dependency ahead of
+  // every tile's issue, and the symmetric reduce loops are latency-bound per tile.
+  // The range lives in LDS, so its size fits 32 bits; 64-bit compares go through the VALU.
+  const uint32_t n = static_cast<uint32_t>(sizeInBytes);
+  const uint32_t lineOff = static_cast<uint32_t>(global) & (LINE - 1);
+  if (n == 0) return;            // a zero-extent tile is not a valid descriptor
 
-  if (((lineOff | (static_cast<uint32_t>(sizeInBytes) & (WIDTH - 1))) == 0) &&
-      sizeInBytes <= static_cast<size_t>(MAX_ROWS) * WIDTH) {
-    ldsTileRows<DIR, cp>(global, lds, static_cast<uint32_t>(sizeInBytes / WIDTH));
+  if (((lineOff | (n & (WIDTH - 1))) == 0) && n <= MAX_ROWS * WIDTH) {
+    ldsTileRows<DIR, cp>(global, lds, n / WIDTH);
     return;
   }
 
-  size_t off = 0;
+  uint32_t off = 0;
   if constexpr (!Aligned) {
     uint32_t head = (LINE - lineOff) & (LINE - 1);
-    if (head > sizeInBytes) head = static_cast<uint32_t>(sizeInBytes);
+    if (head > n) head = n;
     if (head) {
       ldsTileBytes<DIR, cp>(global, lds, head);
       off = head;
@@ -569,17 +568,17 @@ __device__ inline void warpLdsCopy(uint64_t global, uint32_t lds, size_t sizeInB
   }
 
     // Bulk: whole 256B rows, split across as many tiles as the 16-bit length field needs.
-  size_t rows = (sizeInBytes - off) / WIDTH;
+  uint32_t rows = (n - off) / WIDTH;
   while (rows) {
-    const uint32_t chunk = rows < MAX_ROWS ? static_cast<uint32_t>(rows) : MAX_ROWS;
-    ldsTileRows<DIR, cp>(global + off, lds + static_cast<uint32_t>(off), chunk);
-    off += static_cast<size_t>(chunk) * WIDTH;
+    const uint32_t chunk = rows < MAX_ROWS ? rows : MAX_ROWS;
+    ldsTileRows<DIR, cp>(global + off, lds + off, chunk);
+    off += chunk * WIDTH;
     rows -= chunk;
   }
 
     // Tail: the < 256B sub-row remainder, again at byte granularity.
-  const uint32_t tail = static_cast<uint32_t>(sizeInBytes - off);
-  if (tail) ldsTileBytes<DIR, cp>(global + off, lds + static_cast<uint32_t>(off), tail);
+  const uint32_t tail = n - off;
+  if (tail) ldsTileBytes<DIR, cp>(global + off, lds + off, tail);
 }
 
 // ---- core: partition + issue the whole copy for the team [start, stop). -----
