@@ -16,6 +16,7 @@ rocprofiler_add_integration_execute_test(
     TARGET thread-trace-test-app
     TIMEOUT 10
     LABELS "integration-tests"
+    SKIP_REGULAR_EXPRESSION "test skipped"
     PRELOAD "$<TARGET_FILE:thread-trace-single-tool>")
 
 # Multi dispatch test
@@ -24,6 +25,7 @@ rocprofiler_add_integration_execute_test(
     TARGET thread-trace-test-app
     TIMEOUT 10
     LABELS "integration-tests"
+    SKIP_REGULAR_EXPRESSION "test skipped"
     PRELOAD "$<TARGET_FILE:thread-trace-multi-tool>")
 
 # Agent profiling test
@@ -32,6 +34,7 @@ rocprofiler_add_integration_execute_test(
     TARGET thread-trace-test-app
     TIMEOUT 10
     LABELS "integration-tests"
+    SKIP_REGULAR_EXPRESSION "test skipped"
     PRELOAD "$<TARGET_FILE:thread-trace-agent-tool>")
 
 # Same agent profiling test, but forcing the HSA queue/signal backend instead of KFD.
@@ -40,6 +43,7 @@ rocprofiler_add_integration_execute_test(
     TARGET thread-trace-test-app
     TIMEOUT 10
     LABELS "integration-tests"
+    SKIP_REGULAR_EXPRESSION "test skipped"
     PRELOAD "$<TARGET_FILE:thread-trace-agent-tool>"
     ENVIRONMENT "ROCPROFILER_SQTT_FORCE_HSA=1")
 
@@ -49,6 +53,7 @@ rocprofiler_add_integration_execute_test(
     TARGET thread-trace-test-app
     TIMEOUT 10
     LABELS "integration-tests"
+    SKIP_REGULAR_EXPRESSION "test skipped"
     PRELOAD "$<TARGET_FILE:thread-trace-agent-tool>"
     ENVIRONMENT "ATT_START_BEFORE_HSA_INIT=1")
 
@@ -58,6 +63,7 @@ rocprofiler_add_integration_execute_test(
     TARGET thread-trace-test-app
     TIMEOUT 10
     LABELS "integration-tests"
+    SKIP_REGULAR_EXPRESSION "test skipped"
     PRELOAD "$<TARGET_FILE:thread-trace-agent-tool>"
     ENVIRONMENT "ATT_START_BEFORE_HSA_INIT=1;ATT_STOP_BEFORE_HSA_INIT=1")
 
@@ -79,6 +85,7 @@ rocprofiler_add_integration_execute_test(
     TARGET thread-trace-test-app
     TIMEOUT 30
     LABELS "integration-tests"
+    SKIP_REGULAR_EXPRESSION "test skipped"
     PRELOAD "$<TARGET_FILE:thread-trace-agent-tool>"
     ENVIRONMENT "ATT_LARGE_BUFFER_TEST=1"
     DISABLED ${IS_DISABLED})

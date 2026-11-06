@@ -32,14 +32,17 @@
 #include <atomic>
 #include <cassert>
 #include <fstream>
+#include <string_view>
 
 namespace Callbacks
 {
 rocprofiler_thread_trace_decoder_id_t decoder{};
 std::atomic<size_t>                   latency{0};
+std::atomic<size_t>                   trace_bytes{0};
 std::atomic<bool>                     has_sdata{false};
 std::atomic<bool>                     has_excess_detail{false};
 ExecMaskCheck                         exec_mask_check{};
+bool                                  auto_perf_level{false};
 
 // defined in kernel_lds.cpp
 constexpr uint64_t SDATA_RECORD = 0xDEADBEEF;
@@ -77,6 +80,7 @@ shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
 {
     assert(shader_data.start_timestamp.gpu_clock <= shader_data.end_timestamp.gpu_clock);
     assert(shader_data.start_timestamp.system_clock <= shader_data.end_timestamp.system_clock);
+    trace_bytes += shader_data.data_size;
 
     auto parse = [](rocprofiler_thread_trace_decoder_record_type_t record_type_id,
                     void*                                          trace_events,
@@ -118,6 +122,32 @@ init(bool enable_exec_mask_check)
     exec_mask_check.set_enabled(enable_exec_mask_check);
     if(rocprofiler_thread_trace_decoder_create(&decoder, "") != ROCPROFILER_STATUS_SUCCESS)
         DECODER_CALL(rocprofiler_thread_trace_decoder_create(&decoder, "/opt/rocm/lib"));
+
+    // At the AUTO performance level, gfx11/gfx12 GPUs can lose the thread trace state
+    // while idle, so the trace can come back empty.
+    auto find_auto_perf_level =
+        [](rocprofiler_agent_version_t, const void** agents, size_t num_agents, void* user_data) {
+            for(size_t i = 0; i < num_agents; ++i)
+            {
+                const auto* agent = static_cast<const rocprofiler_agent_t*>(agents[i]);
+                if(agent->type != ROCPROFILER_AGENT_TYPE_GPU || !agent->name) continue;
+
+                auto name = std::string_view{agent->name};
+                if(name.substr(0, 5) != "gfx11" && name.substr(0, 5) != "gfx12") continue;
+
+                auto level = std::string{};
+                auto ifs   = std::ifstream{"/sys/class/drm/renderD" +
+                                         std::to_string(agent->drm_render_minor) +
+                                         "/device/power_dpm_force_performance_level"};
+                if(ifs >> level && level == "auto") *static_cast<bool*>(user_data) = true;
+            }
+            return ROCPROFILER_STATUS_SUCCESS;
+        };
+    ROCPROFILER_CALL(rocprofiler_query_available_agents(ROCPROFILER_AGENT_INFO_VERSION_0,
+                                                        find_auto_perf_level,
+                                                        sizeof(rocprofiler_agent_t),
+                                                        &auto_perf_level),
+                     "Failed to query agents");
 }
 
 void
@@ -131,6 +161,8 @@ finalize(void* /* tool_data */)
     {
         if(extra_args && latency != 0 && has_excess_detail)
             throw std::runtime_error("Got detailed profiling in nondetail mode");
+        else if(!extra_args && latency == 0 && trace_bytes == 0 && auto_perf_level)
+            std::cout << "test skipped: empty thread trace with AMDSMI_DEV_PERF_LEVEL_AUTO\n";
         else if(!extra_args && latency == 0)
             throw std::runtime_error("Missing detailed profiling!");
 
