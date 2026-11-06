@@ -6,6 +6,8 @@ import os
 
 import pytest
 
+from . import gpu_uses_auto_perf_level
+
 
 def has_kfd_profiler_interface():
     """Return whether a native KFD device node is available to the test process."""
@@ -31,6 +33,24 @@ def skip_if_hw_counter_values_unavailable(values):
 
     if not found_value:
         pytest.fail("no hardware counter values were reported")
+
+
+def skip_if_zero_counters_in_auto_mode(values, gpu_agent):
+    """Skip when a counter reads zero on a gfx11/gfx12 GPU at the AUTO performance level.
+
+    At AUTO these GPUs gate the perfmon clock of some hardware blocks, so counters from
+    those blocks can read zero for some or all dispatches. See 'Setting GPU performance
+    level for PMC profiling' in the rocprofv3 documentation.
+    """
+    try:
+        has_zero = any(not float(value) > 0 for value in values)
+    except (TypeError, ValueError):
+        return
+
+    if has_zero and gpu_agent is not None and gpu_uses_auto_perf_level(gpu_agent):
+        pytest.skip(
+            "Zero counters with AMDSMI_DEV_PERF_LEVEL_AUTO; nonzero values not required"
+        )
 
 
 def skip_if_scratch_memory_unavailable(scratch_records):

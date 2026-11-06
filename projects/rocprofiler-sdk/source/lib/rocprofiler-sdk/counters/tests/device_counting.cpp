@@ -55,9 +55,11 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <fstream>
 #include <set>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <unordered_map>
 
@@ -138,6 +140,30 @@ global_sync_samples()
 {
     static common::Synchronized<std::vector<captured_sync_sample>> samples;
     return samples;
+}
+
+// At the AUTO performance level, gfx11/gfx12 GPUs gate the perfmon clock of some
+// hardware blocks, so device counters from those blocks can read zero.
+bool
+zero_counter_in_auto_mode(const std::vector<rocprofiler_counter_record_t>& records)
+{
+    for(const auto& record : records)
+    {
+        if(record.counter_value > 0.0) continue;
+
+        const auto* agent = rocprofiler::agent::get_agent(record.agent_id);
+        if(!agent || !agent->name) continue;
+
+        auto name = std::string_view{agent->name};
+        if(name.substr(0, 5) != "gfx11" && name.substr(0, 5) != "gfx12") continue;
+
+        auto level = std::string{};
+        auto ifs   = std::ifstream{
+            fmt::format("/sys/class/drm/renderD{}/device/power_dpm_force_performance_level",
+                        agent->drm_render_minor)};
+        if(ifs >> level && level == "auto") return true;
+    }
+    return false;
 }
 
 std::atomic<size_t>&
@@ -967,6 +993,8 @@ TEST_F(device_counting_service_test, sync_grbm_verify)
     test_run(ROCPROFILER_COUNTER_FLAG_NONE, {"GRBM_COUNT"}, 50000);
     auto local_recs = global_recs().rlock([](const auto& data) { return data; });
     ROCP_INFO << local_recs.size();
+    if(zero_counter_in_auto_mode(local_recs))
+        GTEST_SKIP() << "Zero counters with AMDSMI_DEV_PERF_LEVEL_AUTO";
 
     for(const auto& val : local_recs)
     {
@@ -1306,6 +1334,8 @@ TEST_F(device_counting_service_test, sync_gpu_util_verify)
     test_run(ROCPROFILER_COUNTER_FLAG_NONE, {"GPU_UTIL"}, 50000);
     auto local_recs = global_recs().rlock([](const auto& data) { return data; });
     ROCP_INFO << local_recs.size();
+    if(zero_counter_in_auto_mode(local_recs))
+        GTEST_SKIP() << "Zero counters with AMDSMI_DEV_PERF_LEVEL_AUTO";
 
     for(const auto& val : local_recs)
     {
@@ -1340,6 +1370,8 @@ TEST_F(device_counting_service_test, sync_sq_waves_verify)
     auto local_recs = global_recs().rlock([](const auto& data) { return data; });
     ROCP_INFO << local_recs.size();
     ASSERT_FALSE(local_recs.empty());
+    if(zero_counter_in_auto_mode(local_recs))
+        GTEST_SKIP() << "Zero counters with AMDSMI_DEV_PERF_LEVEL_AUTO";
 
     for(const auto& val : local_recs)
     {
