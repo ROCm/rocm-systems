@@ -1212,9 +1212,10 @@ WriteInterceptor(const void* packets,
             if(gpu_backend_available) kernel_replay::blit::forget_kept_list(queue);
 
             // Save this agent's tracked device allocations so every pass runs against identical
-            // inputs. Plan whole-region placement against GPU then pinned-host budgets and
-            // materialize at most one arena per tier before capture starts. The blit copies both
-            // tiers; without it, the pinned tier is copied synchronously.
+            // inputs. Place them against the GPU budget, then pinned host for what does not fit,
+            // cutting the region at the boundary, and materialize at most one arena per tier before
+            // capture starts. The blit copies both tiers; without it, the pinned tier is copied
+            // synchronously.
             const auto snapshot = kernel_replay::memory_snapshot::snap(
                 kernel_replay::memory_snapshot::capture_context_t{
                     replay_agent,

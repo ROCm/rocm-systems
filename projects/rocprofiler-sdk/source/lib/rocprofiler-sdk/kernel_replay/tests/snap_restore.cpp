@@ -468,9 +468,10 @@ TEST(kernel_replay_snapshot, planned_regions_materialize_into_gpu_and_pinned_are
     ASSERT_EQ(snapshot.storage(), msnp::storage_kind::mixed);
     ASSERT_EQ(snapshot.segments.size(), 2);
 
-    size_t              gpu_extents  = 0;
-    size_t              host_extents = 0;
-    std::array<bool, 3> pinned_buffers{};
+    // A buffer cut at the GPU budget starts on the GPU, so its pinned part is found by offset.
+    size_t                               gpu_extents  = 0;
+    size_t                               host_extents = 0;
+    std::array<std::optional<size_t>, 3> pinned_offsets{};
     for(const auto& extent : snapshot.extents)
     {
         const auto kind = snapshot.segments.at(extent.segment_index).backing.kind();
@@ -481,13 +482,14 @@ TEST(kernel_replay_snapshot, planned_regions_materialize_into_gpu_and_pinned_are
             ++host_extents;
             const auto* live = snapshot.regions.at(extent.region_index).live_address;
             for(size_t i = 0; i < buffers.size(); ++i)
-                if(live == buffers[i]) pinned_buffers[i] = true;
+                if(live == buffers[i]) pinned_offsets[i] = extent.region_offset / sizeof(float);
         }
     }
     EXPECT_GT(gpu_extents, 0);
     EXPECT_GT(host_extents, 0);
-    EXPECT_TRUE(
-        std::any_of(pinned_buffers.begin(), pinned_buffers.end(), [](bool v) { return v; }));
+    EXPECT_TRUE(std::any_of(pinned_offsets.begin(), pinned_offsets.end(), [](const auto& offset) {
+        return offset.has_value();
+    }));
 
     for(auto* buffer : buffers)
         launch_fill(buffer, 29.0f, n);
@@ -499,8 +501,8 @@ TEST(kernel_replay_snapshot, planned_regions_materialize_into_gpu_and_pinned_are
         // Pinned extents must be restored synchronously before the GPU batch/target continuation.
         for(size_t i = 0; i < buffers.size(); ++i)
         {
-            if(!pinned_buffers[i]) continue;
-            const auto sample = read_device(buffers[i], 64);
+            if(!pinned_offsets[i]) continue;
+            const auto sample = read_device(buffers[i] + *pinned_offsets[i], 64);
             for(const auto value : sample)
                 EXPECT_FLOAT_EQ(value, original[i]);
         }
@@ -521,6 +523,73 @@ TEST(kernel_replay_snapshot, planned_regions_materialize_into_gpu_and_pinned_are
         unrecord_for_snapshot_test(buffers[i]);
         ASSERT_EQ(hipFree(buffers[i]), hipSuccess);
     }
+}
+
+// A region larger than what is left of the GPU budget is cut on a tile boundary: the front stays on
+// the GPU and the rest goes to pinned host memory. Both restores put each piece back where it came
+// from. The runtime's own allocations are far smaller than the budget, so this buffer is the one
+// cut.
+TEST(kernel_replay_snapshot, region_over_the_gpu_budget_is_cut_into_pinned_host)
+{
+    if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
+
+    constexpr int    n     = static_cast<int>(N_ELEMS);
+    constexpr size_t bytes = N_ELEMS * sizeof(float);
+    constexpr auto   budgets =
+        msnp::storage_budgets_t{8U * 1024U * 1024U + 1000U, 512U * 1024U * 1024U};
+    constexpr size_t tile = 16U * 1024U;
+
+    float* buffer = nullptr;
+    ASSERT_EQ(hipMalloc(&buffer, bytes), hipSuccess);
+    const auto allocation = mt::query_alloc(buffer);
+    ASSERT_TRUE(allocation.trackable);
+    record_for_snapshot_test(buffer, bytes, allocation.agent);
+
+    auto ctx = capture_context(allocation.agent, msnp::capture_mode::automatic);
+    ASSERT_TRUE(ctx.has_value());
+
+    const auto copy_all = [](const auto& regions) {
+        for(const auto& copy : regions)
+        {
+            const auto status = hsa_memory_copy(copy.dest, copy.source, copy.size);
+            if(status != HSA_STATUS_SUCCESS) return status;
+        }
+        return HSA_STATUS_SUCCESS;
+    };
+
+    for(const bool batched : {false, true})
+    {
+        SCOPED_TRACE(batched ? "captured through a batch callback" : "captured directly");
+        launch_iota(buffer, 1.0f, n);
+        auto snapshot = msnp::snap(
+            *ctx, budgets, batched ? msnp::batch_copy_fn_t{copy_all} : msnp::batch_copy_fn_t{});
+        ASSERT_TRUE(snapshot.complete());
+
+        auto pieces = std::vector<msnp::snapshot_extent_t>{};
+        for(const auto& extent : snapshot.extents)
+            if(snapshot.regions.at(extent.region_index).live_address == buffer)
+                pieces.push_back(extent);
+        const auto kind = [&](const msnp::snapshot_extent_t& extent) {
+            return snapshot.segments.at(extent.segment_index).backing.kind();
+        };
+        ASSERT_EQ(pieces.size(), 2);
+        EXPECT_EQ(kind(pieces[0]), msnp::storage_kind::gpu_local);
+        EXPECT_EQ(pieces[0].region_offset, 0);
+        EXPECT_GT(pieces[0].size, 0);
+        EXPECT_EQ(pieces[0].size % tile, 0);
+        EXPECT_EQ(kind(pieces[1]), msnp::storage_kind::pinned_host);
+        EXPECT_EQ(pieces[1].region_offset, pieces[0].size);
+        EXPECT_EQ(pieces[0].size + pieces[1].size, bytes);
+
+        launch_fill(buffer, 29.0f, n);
+        ASSERT_TRUE(batched ? msnp::restore(snapshot, copy_all) : msnp::restore(snapshot));
+        const auto restored = read_device(buffer, n);
+        for(int i = 0; i < n; ++i)
+            ASSERT_FLOAT_EQ(restored[i], 1.0f + static_cast<float>(i)) << "at element " << i;
+    }
+
+    unrecord_for_snapshot_test(buffer);
+    ASSERT_EQ(hipFree(buffer), hipSuccess);
 }
 
 // With batch callbacks, the blit copies the pinned arena too: nothing is copied around them.
