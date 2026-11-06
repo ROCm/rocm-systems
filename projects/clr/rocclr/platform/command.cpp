@@ -63,6 +63,9 @@ Event::~Event() {
 
 // ================================================================================================
 AccumulateCommand::~AccumulateCommand() {
+  for (Command* command : held_commands_) {
+    command->release();
+  }
   // When an external owner (e.g. the graph signal pool) reclaims the signals,
   // do not destroy them here.
   if (!owns_hw_events_) {
