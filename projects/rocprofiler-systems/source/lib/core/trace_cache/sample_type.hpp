@@ -31,6 +31,7 @@ enum class type_identifier_t : std::uint32_t
     kfd_sample              = 0x000B,
     gpu_perf_counter_sample = 0x000C,
     hipfile_pmc_sample      = 0x000D,
+    cpu_snap_sample         = 0x000E,
     fragmented_space        = 0xFFFF
 };
 
@@ -453,6 +454,27 @@ struct kfd_sample
         archive(thread_id, name, start_timestamp, end_timestamp, args_str, category,
                 track_name, event_metadata, device_id, device_type, pmc_info_name, value,
                 system_tid);
+    }
+};
+
+/// One chunk of cpu-snap's encoded call-stack stream, stored unchanged. A process's
+/// chunks decode only in store order from the first one: the stream is stateful.
+struct cpu_snap_sample
+{
+    static constexpr type_identifier_t type_identifier =
+        type_identifier_t::cpu_snap_sample;
+
+    cpu_snap_sample() = default;
+    explicit cpu_snap_sample(std::vector<std::uint8_t> bytes_in)
+    : bytes(std::move(bytes_in))
+    {}
+
+    std::vector<std::uint8_t> bytes;
+
+    template <typename Archive>
+    void serialize(Archive& archive)
+    {
+        archive(bytes);
     }
 };
 

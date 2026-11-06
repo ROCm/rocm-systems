@@ -3,9 +3,9 @@
 /**
  * @file symbolizer.hpp
  * @brief Batched IP -> "function [binary]" string resolver. Bundles
- *        proc_maps with addr2line. Call preload() once with all unique
- *        IPs (one popen per binary instead of per IP), then look up
- *        via resolve() or operator().
+ *        proc_maps with dwfl_client (in-process libdwfl, replacing the
+ *        former `addr2line` child process). Call preload() once with all
+ *        unique IPs, then look up via resolve() or operator().
  *
  * Default output format: `"function(args) [binary]"`, e.g.
  *   `"__nanosleep [libc.so.6]"` or `"main [myapp]"`.
@@ -19,7 +19,7 @@
  * `"0x<hex>"` (no binary to attach).
  *
  * Inline-frame expansion: each cache entry stores the full inline
- * call-chain returned by `addr2line -i` (innermost first). Use
+ * call-chain returned by dwfl_client (innermost first). Use
  * resolve_inline() to surface the chain; resolve() keeps its
  * outer-name-only contract (returns the back() of the chain).
  */
@@ -36,7 +36,7 @@
 
 #include "cpu_snap/core/format_hex.hpp"
 #include "cpu_snap/core/module_map.hpp"
-#include "cpu_snap/processing/symbols/addr2line_client.hpp"
+#include "cpu_snap/processing/symbols/dwfl_client.hpp"
 #include "cpu_snap/processing/symbols/elf_symbols.hpp"
 #include "cpu_snap/processing/symbols/proc_maps.hpp"
 #include "cpu_snap/processing/symbols/symbol_name.hpp"
@@ -58,7 +58,7 @@ struct symbolizer_config
     bool include_binary_name = true;
 
     /**
-     * @brief Expand inline-call chains via addr2line -i.
+     * @brief Expand inline-call chains (DWARF inlined-subroutine scopes).
      *
      * When true, resolve_inline(ip) returns the full innermost-first
      * chain of inlined frames the optimizer folded into the IP's
@@ -67,8 +67,8 @@ struct symbolizer_config
      * name (matching resolve(ip)'s legacy behavior).
      *
      * Cost when true: trace size grows ~2-3x per sample (more frames
-     * per IP). Symbolizer preload time unchanged (addr2line -ifCe is
-     * invoked either way; only the parse + cache shape changes).
+     * per IP). Symbolizer preload time unchanged (dwfl_client resolves
+     * the chain either way; only the cache shape changes).
      *
      * Default false preserves the pre-feature behavior for callers
      * that don't opt in explicitly.
@@ -78,7 +78,7 @@ struct symbolizer_config
 
 /**
  * @brief Batched IP -> "function[binary]" resolver wrapping proc_maps
- *        and @c addr2line.
+ *        and dwfl_client.
  *
  * See the file-level comment for the format toggles.
  */
@@ -131,9 +131,9 @@ public:
     /**
      * @brief Resolve a batch of IPs in one pass.
      *
-     * IPs are grouped by owning binary so @c addr2line is invoked at
-     * most once per binary, not once per IP. Results land in the
-     * internal cache.
+     * IPs are grouped by owning binary and resolved per binary by
+     * dwfl_client, which keeps one libdwfl session per binary. Results
+     * land in the internal cache.
      *
      * @param ips Instruction pointers to resolve. Already-cached IPs
      *            are skipped (idempotent).
@@ -234,10 +234,10 @@ public:
     }
 
     /**
-     * @brief Source location captured by addr2line for an IP.
+     * @brief Source location of an IP, formatted like addr2line.
      * @param ip Instruction pointer.
-     * @return "file:line" string captured by addr2line for this IP, or
-     *         empty view if unavailable.
+     * @return "file:line" string for this IP, or empty view if
+     *         unavailable.
      */
     std::string_view file_line(std::uint64_t ip) const noexcept
     {
@@ -256,12 +256,12 @@ public:
      *
      * @param ip Instruction pointer.
      * @return   The cached string, or an owned copy of the freshly
-     *           resolved string. Falls back to a single-IP addr2line
-     *           invocation if @p ip was not in the preload batch; in
-     *           the worst case returns @c "0x<hex>".
+     *           resolved string. Resolves @p ip on its own if it was not
+     *           in the preload batch; in the worst case returns
+     *           @c "0x<hex>".
      *
-     * @note Each fallback path costs one @c popen; prefer preload() for
-     *       bulk symbolisation.
+     * @note Resolves with timestamp 0: in module_map mode use
+     *       preload_at() and resolve() instead.
      */
     std::string operator()(std::uint64_t ip)
     {
@@ -331,7 +331,7 @@ public:
      *        `name`/`binary` pair.
      *
      * Exposed for unit testing the format policy independently of
-     * addr2line/proc_maps.
+     * dwfl_client/proc_maps.
      * @param name Function name.
      * @param base Binary basename.
      * @return Formatted "name [base]" or just "name" depending on the toggle.
@@ -456,8 +456,8 @@ private:
                || basename_of(path) == "linux-vdso.so.1";
     }
 
-    /** "<basename>+0x<addr>" fallback for the popen-failure path and for
-     *  addresses outside every ELF symbol. */
+    /** "<basename>+0x<addr>" fallback for pseudo-modules and for addresses
+     *  outside every ELF symbol. */
     [[nodiscard]] static std::string
     fallback_hex_for(std::uint64_t addr, std::string_view base)
     {
@@ -467,18 +467,19 @@ private:
         return out;
     }
 
-    /** Without .debug_info addr2line names an address after the nearest
-     *  preceding symbol; use the sized ELF symbol containing @p vaddr,
-     *  or <base>+0x<vaddr> if none. With .debug_info, trust @p addr2line_name. */
+    /** Without .debug_info the client (like addr2line) names an address
+     *  after the nearest preceding symbol; use the sized ELF symbol
+     *  containing @p vaddr, or <base>+0x<vaddr> if none. With .debug_info,
+     *  trust @p client_name. */
     [[nodiscard]] std::string correct_symbol_name(std::string_view path,
                                                   std::string_view base,
                                                   std::uint64_t     vaddr,
-                                                  std::string_view  addr2line_name) const
+                                                  std::string_view  client_name) const
     {
         const auto& table = m_maps.symbols_for(std::string{ path });
         if(table.has_debug_info)
         {
-            return format_with_binary(addr2line_name, base);
+            return format_with_binary(client_name, base);
         }
 
         const auto found = cpu_snap::processing::symbols::detail::find_symbol(vaddr, table.symbols);
@@ -496,16 +497,11 @@ private:
                        const std::vector<std::pair<std::uint64_t, std::uint64_t>>& pairs)
     {
         const std::string base    = basename_of(path);
-        auto              results = addr2line_client::resolve(path, pairs);
+        auto              results = m_client.resolve(path, pairs);
         for(std::size_t i = 0; i < pairs.size(); ++i)
         {
             const auto& [ip, vaddr] = pairs[i];
-            if(!results[i])
-            {
-                m_cache.emplace(ip, std::vector<std::string>{ fallback_hex_for(ip, base) });
-                continue;
-            }
-            store_chain(ip, vaddr, path, base, std::move(*results[i]));
+            store_chain(ip, vaddr, path, base, std::move(results.at(i)));
         }
     }
 
@@ -536,6 +532,7 @@ private:
     symbolizer_config                                           m_cfg{};
     cpu_snap::processing::symbols::proc_maps                                m_maps;
     const cpu_snap::core::module_map*                           m_module_map = nullptr;
+    dwfl_client                                                 m_client;
     std::unordered_map<std::uint64_t, std::vector<std::string>> m_cache;
     std::unordered_map<std::uint64_t, std::string>              m_file_line;
 };

@@ -659,7 +659,7 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
 
     auto const thread_state_guard = state::thread::scoped(state::thread::Internal);
     auto const coverage           = (mode == state::process::Mode::coverage);
-    auto const use_sampling       = config::get_use_sampling();
+    auto const use_sampling       = config::get_use_timemory_sampling();
     auto const use_causal         = config::get_use_causal();
     auto const offset             = (!enabled || !active || info->is_offset);
     auto const use_bundle         = (active && !coverage && !offset && !is_paused());
