@@ -546,6 +546,9 @@ texture:
   Unit_tex1DLayeredGrad_Positive_ReadModeNormalizedFloat:
     <<: *level_default
     tags: [image]
+  Unit_tex1DLayeredLod_NonzeroMipSelection:
+    <<: *level_default
+    tags: [sample, image]
   Unit_tex1DLayeredLod_Positive_ReadModeElementType:
     <<: *level_default
     tags: [sample, image]
@@ -562,6 +565,9 @@ texture:
     <<: *level_default
     tags: [image]
   Unit_tex2D_Positive_ReadModeNormalizedFloat:
+    <<: *level_default
+    tags: [image]
+  Unit_tex2Dgather_DistinctChannelsAndPointerOverload:
     <<: *level_default
     tags: [image]
   Unit_tex2Dgather_Positive_ReadModeElementType:
@@ -585,6 +591,9 @@ texture:
   Unit_tex2DLayeredGrad_Positive_ReadModeNormalizedFloat:
     <<: *level_default
     tags: [image]
+  Unit_tex2DLayeredLod_NonzeroMipSelection:
+    <<: *level_default
+    tags: [sample, image]
   Unit_tex2DLayeredLod_Positive_ReadModeElementType:
     <<: *level_default
     tags: [sample, image]
@@ -601,6 +610,9 @@ texture:
     <<: *level_default
     tags: [image]
   Unit_tex3D_Positive_ReadModeNormalizedFloat:
+    <<: *level_default
+    tags: [image]
+  Unit_tex3DGrad_NonzeroMipSelection:
     <<: *level_default
     tags: [image]
   Unit_tex3DGrad_Positive_ReadModeElementType:
