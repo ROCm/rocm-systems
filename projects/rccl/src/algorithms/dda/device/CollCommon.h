@@ -497,7 +497,6 @@ __device__ __forceinline__ bool ddaLLSpinOneStale(const uint32_t* const (&line)[
 // spin tick per sweep; with kDdaLLSpinOneMinLines or more selected lines a waiting lane spins on one stale line between
 // sweeps. A single selected line is polled alone: there is no other load to share its wait, and a sweep would issue kN
 // loads of it. d0/d1 of slots outside mask are overwritten. Returns false if aborted.
-// Lanes may pass different masks: nothing in the wait reads another lane.
 template <int kN>
 __device__ __forceinline__ bool ddaLLWaitLineFlagsBatched(const uint32_t* const (&line)[kN], uint32_t mask,
                                                           uint32_t flag, DdaKernelParams params, uint32_t (&d0)[kN],
