@@ -66,5 +66,7 @@ set_tests_properties(
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                SKIP_REGULAR_EXPRESSION
                "PC sampling unavailable"
+               RESOURCE_LOCK
+               "${ROCPROFILER_SAMPLES_GPU_PROFILING_LOCK}"
                DISABLED
                "${IS_PC_SAMPLING_DISABLED}")
