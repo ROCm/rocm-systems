@@ -4,9 +4,11 @@
 
 """CLI leaf test: set command."""
 
+import json
+
 from common.common import amdsmi
 
-from cli.base import TestCliBase
+from cli.base import AmdSmiExitCode, TestCliBase
 
 
 def _strip_prefix(value, prefix):
@@ -19,6 +21,198 @@ def _strip_prefix(value, prefix):
 
 
 class TestSet(TestCliBase):
+    def _requested_gpu_data(self, command: str) -> dict:
+        rc, output, stderr = self.util.RunCmdSync(command)
+        self.assertEqual(rc, self.PASS, f"{command}: {stderr}")
+        entries = json.loads(output)["gpu_data"]
+        self.assertEqual(len(entries), 1, command)
+        return entries[0]
+
+    def _requested_write(self, command: str) -> bool:
+        rc, _, stderr = self.util.RunCmdSync(command, msg_in=self._prompt_answer_for(command))
+        if rc == amdsmi.AmdSmiStatus.NOT_SUPPORTED:
+            return False
+        self.assertEqual(rc, self.PASS, f"{command}: {stderr}")
+        return True
+
+    def test_fan_set_reset(self) -> None:
+        tested = 0
+        for entry in self.list_data:
+            gpu = entry["gpu"]
+            cmd = f"amd-smi metric --fan --json -g {gpu}"
+            if self._requested_gpu_data(cmd)["fan"]["max"] == "N/A":
+                continue
+            with self.subTest(gpu=gpu):
+                reset = f"amd-smi reset --fans -g {gpu}"
+                self.addCleanup(
+                    self.RunCmds, [(reset, [self.PASS, amdsmi.AmdSmiStatus.NOT_SUPPORTED])]
+                )
+                if not self._requested_write(f"amd-smi set --fan 50% -g {gpu}"):
+                    continue
+                tested += 1
+                self.assertAlmostEqual(
+                    self._requested_gpu_data(cmd)["fan"]["usage"]["value"], 50, delta=1
+                )
+                self.RunCmds([(reset, self.PASS)])
+        if not tested:
+            self.skipTest("no GPU supports fan control")
+
+    def test_power_cap_after_static_limit(self) -> None:
+        tested = 0
+        for entry in self.list_data:
+            gpu = entry["gpu"]
+            cmd = f"amd-smi static --limit --json -g {gpu}"
+            limits = self._requested_gpu_data(cmd)["limit"]
+            for sensor in self.power_types:
+                limit = limits[sensor]
+                if not isinstance(limit, dict) or not all(
+                    isinstance(limit[key], dict)
+                    for key in ("min_power_limit", "max_power_limit", "socket_power_limit")
+                ):
+                    continue
+                original = limit["socket_power_limit"]["value"]
+                low = max(1, int(limit["min_power_limit"]["value"]))
+                high = int(limit["max_power_limit"]["value"])
+                if not original or low >= high:
+                    continue
+                value = low if original != low else high
+                with self.subTest(gpu=gpu, sensor=sensor):
+                    restore = f"amd-smi set --power-cap {original} {sensor} -g {gpu}"
+                    self.addCleanup(self.RunCmds, [(restore, self.PASS)])
+                    if not self._requested_write(
+                        f"amd-smi set --power-cap {value} {sensor} -g {gpu}"
+                    ):
+                        continue
+                    tested += 1
+                    self.assertEqual(
+                        self._requested_gpu_data(cmd)["limit"][sensor]["socket_power_limit"][
+                            "value"
+                        ],
+                        value,
+                    )
+                    self.RunCmds([(restore, self.PASS)])
+        if not tested:
+            self.skipTest("no GPU supports changing a power cap")
+
+    def test_power_cap_above_max(self) -> None:
+        tested = 0
+        for entry in self.list_data:
+            gpu = entry["gpu"]
+            cmd = f"amd-smi static --limit --json -g {gpu}"
+            for sensor, limit in self._requested_gpu_data(cmd)["limit"].items():
+                if sensor not in self.power_types or not isinstance(limit, dict):
+                    continue
+                if not isinstance(limit["max_power_limit"], dict) or not isinstance(
+                    limit["socket_power_limit"], dict
+                ):
+                    continue
+                original = limit["socket_power_limit"]["value"]
+                if not original:
+                    continue
+                with self.subTest(gpu=gpu, sensor=sensor):
+                    restore = f"amd-smi set --power-cap {original} {sensor} -g {gpu}"
+                    self.addCleanup(self.RunCmds, [(restore, self.PASS)])
+                    value = int(limit["max_power_limit"]["value"]) + 1
+                    self.RunCmds(
+                        [
+                            (
+                                f"amd-smi set --power-cap {value} {sensor} -g {gpu}",
+                                AmdSmiExitCode.INVALID_PARAMETER_VALUE,
+                            )
+                        ]
+                    )
+                    self.assertEqual(
+                        self._requested_gpu_data(cmd)["limit"][sensor]["socket_power_limit"][
+                            "value"
+                        ],
+                        original,
+                    )
+                    tested += 1
+        if not tested:
+            self.skipTest("no GPU reports power cap limits")
+
+    def test_xgmi_plpd_static(self) -> None:
+        tested = 0
+        for entry in self.list_data:
+            gpu = entry["gpu"]
+            cmd = f"amd-smi static --json -g {gpu}"
+            policy = self._requested_gpu_data(cmd)["xgmi_plpd"]
+            if not isinstance(policy, dict):
+                continue
+            original = int(policy["current_id"])
+            for option in policy["policies"]:
+                value = int(option["policy_id"])
+                if value == original:
+                    continue
+                with self.subTest(gpu=gpu, policy=value):
+                    restore = f"amd-smi set --xgmi-plpd {original} -g {gpu}"
+                    self.addCleanup(self.RunCmds, [(restore, self.PASS)])
+                    if not self._requested_write(f"amd-smi set --xgmi-plpd {value} -g {gpu}"):
+                        continue
+                    tested += 1
+                    self.assertEqual(
+                        int(self._requested_gpu_data(cmd)["xgmi_plpd"]["current_id"]), value
+                    )
+                    self.RunCmds([(restore, self.PASS)])
+        if not tested:
+            self.skipTest("no GPU supports changing XGMI PLPD policy")
+
+    def test_ptl_static_limit_json(self) -> None:
+        tested = 0
+        for entry in self.list_data:
+            gpu = entry["gpu"]
+            cmd = f"amd-smi static -l --json -g {gpu}"
+            limits = self._requested_gpu_data(cmd)["limit"]
+            settings = []
+            if limits["ptl_state"] in ("Enabled", "Disabled"):
+                original = int(limits["ptl_state"] == "Enabled")
+                settings.append(
+                    (
+                        "--ptl-status",
+                        "ptl_state",
+                        original,
+                        1 - original,
+                        "Disabled" if original else "Enabled",
+                    )
+                )
+            if limits["ptl_format"] != "N/A":
+                original = limits["ptl_format"]
+                value = "I8,F32" if original != "I8,F32" else "F16,F32"
+                settings.append(("--ptl-format", "ptl_format", original, value, value))
+            for option, key, original, value, expected in settings:
+                with self.subTest(gpu=gpu, option=option):
+                    restore = f"amd-smi set {option} {original} -g {gpu}"
+                    self.addCleanup(self.RunCmds, [(restore, self.PASS)])
+                    if not self._requested_write(f"amd-smi set {option} {value} -g {gpu}"):
+                        continue
+                    tested += 1
+                    self.assertEqual(self._requested_gpu_data(cmd)["limit"][key], expected)
+                    self.RunCmds([(restore, self.PASS)])
+        if not tested:
+            self.skipTest("no GPU supports PTL settings")
+
+    def test_process_isolation_clean_local_data(self) -> None:
+        tested = 0
+        for entry in self.list_data:
+            gpu = entry["gpu"]
+            cmd = f"amd-smi static --json -g {gpu}"
+            state = self._requested_gpu_data(cmd)["process_isolation"]
+            if state not in ("Enabled", "Disabled"):
+                continue
+            with self.subTest(gpu=gpu):
+                restore = f"amd-smi set --process-isolation {int(state == 'Enabled')} -g {gpu}"
+                self.addCleanup(self.RunCmds, [(restore, self.PASS)])
+                if not self._requested_write(f"amd-smi set --process-isolation 1 -g {gpu}"):
+                    continue
+                tested += 1
+                self.assertEqual(self._requested_gpu_data(cmd)["process_isolation"], "Enabled")
+                self.RunCmds(
+                    [(f"amd-smi reset -l -g {gpu}", [self.PASS, amdsmi.AmdSmiStatus.NOT_SUPPORTED])]
+                )
+                self.RunCmds([(restore, self.PASS)])
+        if not tested:
+            self.skipTest("no GPU supports process isolation")
+
     def test_command(self):
         self.common.print_func_name("")
         msg = f"{self.tab}### amd-smi set"
@@ -195,3 +389,63 @@ class TestSet(TestCliBase):
         self.RunCmds(cmds)
 
         return
+
+    def _gfx_clock_range(self, gpu):
+        """(min, max) SCLK limits `amd-smi metric -c` reports for *gpu*."""
+        data = self._requested_gpu_data(f"amd-smi metric -c --json --gpu {gpu}")
+        clocks = data["clock"]
+        return (
+            self._clk_limit_value(clocks, "SCLK", "MIN"),
+            self._clk_limit_value(clocks, "SCLK", "MAX"),
+        ), clocks
+
+    def _restore_gfx_clock(self, gpu, low, high):
+        self.util.RunCmdSync(f"amd-smi reset --clocks --gpu {gpu}")
+        if self._gfx_clock_range(gpu)[0] != (low, high):
+            self.util.RunCmdSync(f"amd-smi set -L sclk max {high} --gpu {gpu}")
+            self.util.RunCmdSync(f"amd-smi set -L sclk min {low} --gpu {gpu}")
+
+    def test_gfx_clock(self):
+        """Set SCLK min/max limits, verify them via `metric -c`, then reset clocks."""
+        self.common.print_func_name("")
+        tested = 0
+        for index, entry in enumerate(self.list_data):
+            gpu = entry["gpu"]
+            target = str(self.static_data["gpu_data"][index]["asic"]["target_graphics_version"])
+            # Navi (RDNA) parts do not support writing gfx clock limits.
+            if target.startswith(("gfx10", "gfx11", "gfx12")):
+                continue
+            (low, high), clocks = self._gfx_clock_range(gpu)
+            new_min = self._clk_limit_probe_value(clocks, "SCLK", "MIN")
+            new_max = self._clk_limit_probe_value(clocks, "SCLK", "MAX")
+            if None in (low, high, new_min, new_max):
+                continue
+
+            with self.subTest(gpu=gpu):
+                self.addCleanup(self._restore_gfx_clock, gpu, low, high)
+                # Narrow the ceiling first so MIN never has to exceed the current MAX.
+                supported = True
+                for bound, value in (("max", new_max), ("min", new_min)):
+                    cmd = f"amd-smi set -L sclk {bound} {value} --gpu {gpu}"
+                    (rc, _, std_err) = self.util.RunCmdSync(cmd)
+                    if rc == amdsmi.AmdSmiStatus.NOT_SUPPORTED:
+                        supported = False
+                        break
+                    self.assertEqual(rc, self.PASS, f"'{cmd}' failed with rc={rc}: {std_err}")
+                if not supported:
+                    continue
+                tested += 1
+
+                # sclk limits are applied exactly, unlike mclk/fclk which snap to DPM levels.
+                self.assertEqual(self._gfx_clock_range(gpu)[0], (new_min, new_max))
+
+                cmd = f"amd-smi reset --clocks --gpu {gpu}"
+                (rc, _, std_err) = self.util.RunCmdSync(cmd)
+                # Overdrive reset reports NOT_SUPPORTED on parts without it; clocks still reset.
+                self.assertIn(rc, (self.PASS, amdsmi.AmdSmiStatus.NOT_SUPPORTED), std_err)
+                reset_min, reset_max = self._gfx_clock_range(gpu)[0]
+                self.assertLessEqual(reset_min, low, f"GPU {gpu}: reset did not restore min")
+                self.assertGreaterEqual(reset_max, high, f"GPU {gpu}: reset did not restore max")
+
+        if not tested:
+            self.skipTest("no GPU supports setting gfx clock limits")
