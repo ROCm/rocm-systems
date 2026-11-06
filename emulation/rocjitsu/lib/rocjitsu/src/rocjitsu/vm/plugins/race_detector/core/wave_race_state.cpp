@@ -279,6 +279,19 @@ void WaveRaceState::registerLdsEvent(
                              std::move(intervals), counterObligations, memoryOrder);
 }
 
+void WaveRaceState::registerLdsRangeEvent(
+    InstructionSnapshot instruction, MemoryEventType type, std::span<const LdsByteRange> ranges,
+    std::span<const amdgpu::MemoryCounterObligation> counterObligations,
+    MemoryOrderClass memoryOrder) {
+  IntervalSet intervals;
+  for (const auto &range : ranges)
+    appendLdsInterval(intervals, range.address, static_cast<int>(range.bytes), *detector,
+                      /*elementBytes=*/1);
+  intervals.finalize();
+  registerEventWithIntervals(instruction, type, {}, 0, 0xF, std::move(intervals),
+                             counterObligations, memoryOrder);
+}
+
 void WaveRaceState::registerDualOffsetLdsEvent(InstructionSnapshot instruction,
                                                MemoryEventType type,
                                                std::vector<uint32_t> registers, uint64_t execMask,
@@ -393,7 +406,7 @@ void WaveRaceState::applyCounterConstraint(amdgpu::WaitCounterType type, int max
   // can still be pending after the counter constraint is satisfied.
   for (MemoryOrderClass order :
        {MemoryOrderClass::VMEM, MemoryOrderClass::LDS, MemoryOrderClass::GDS,
-        MemoryOrderClass::ASYNC_LOAD, MemoryOrderClass::ASYNC_STORE}) {
+        MemoryOrderClass::ASYNC_LOAD, MemoryOrderClass::ASYNC_STORE, MemoryOrderClass::TENSOR}) {
     auto belongsToOrder = [&](EventId eventId) {
       return detector->events().pendingCompletionClass(eventId, type) == order;
     };
