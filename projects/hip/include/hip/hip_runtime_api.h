@@ -591,7 +591,9 @@ typedef enum hipDeviceAttribute_t {
                                                        ///< management)
   hipDeviceAttributeHandleTypeFabricSupported,   ///< Device supports exporting memory to a fabric handle
   hipDeviceAttributeHostAllocDmaBufSupported,  ///< Device supports host-allocated DMABuf buffer sharing
-  hipDeviceAttributeGPUDirectRDMASupported,  ///< Device supports GPUDirect RDMA APIs
+  hipDeviceAttributeGPUDirectRDMASupported,  ///< Device supports GPUDirect RDMA APIs. When set,
+                                             ///< the device also reports native write ordering
+                                             ///< or at least one flush option
   hipDeviceAttributeGPUDirectRDMAFlushWritesOptions,  ///< Bitmask of
                                                       ///< hipFlushGPUDirectRDMAWritesOptions
                                                       ///< describing the flush paths the device

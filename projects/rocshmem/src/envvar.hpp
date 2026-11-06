@@ -585,7 +585,8 @@ namespace envvar {
   namespace tdm {
     template <typename T> using var = var<T, category::tag::TDM>;
     extern const var<uint32_t> tile_bytes;
-    extern const var<size_t> threshold;
+    extern const var<size_t> put_threshold;
+    extern const var<size_t> get_threshold;
   }  // namespace tdm
 
   /**
