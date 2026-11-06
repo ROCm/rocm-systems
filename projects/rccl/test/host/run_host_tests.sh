@@ -166,7 +166,7 @@ do_host_tests() {
       binaries+=("$bin:$XML_FILE")
       continue
     fi
-    # rccl-UnitTestsMicroDdaColl -> host_tests_micro_dda_coll.xml
+    # rccl-UnitTestsMicroDdaAllGatherFabricLl -> host_tests_micro_dda_all_gather_fabric_ll.xml
     xml_stem="$(printf '%s' "${bin#rccl-UnitTests}" | sed 's/\([a-z0-9]\)\([A-Z]\)/\1_\2/g; s/-/_/g' \
       | tr '[:upper:]' '[:lower:]')"
     binaries+=("$bin:$SCRIPT_DIR/host_tests_${xml_stem}.xml")
