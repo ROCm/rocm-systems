@@ -396,7 +396,11 @@ class ResultsEmitter:
             self.manifest["coverage"] = coverage
 
     def finalize_summary(self, summary):
-        self.manifest["summary"] = summary
+        # Remove the "partial" sentinel written by the incremental snapshots;
+        # its absence (or explicit False) signals that this run.json is final.
+        final_summary = dict(summary)
+        final_summary.pop("partial", None)
+        self.manifest["summary"] = final_summary
         self.manifest.setdefault(
             "finished_at", datetime.datetime.now(datetime.timezone.utc).isoformat()
         )
@@ -414,10 +418,17 @@ class ResultsEmitter:
             _atomic_write(os.path.join(run_dir, "run.json"),
                           json.dumps(self.manifest, indent=2, default=str))
 
-            with open(os.path.join(run_dir, "tests.jsonl"), "w", encoding="utf-8") as f:
-                for t in self.tests:
-                    slim = {k: v for k, v in t.items() if k != "perf_rows"}
-                    f.write(json.dumps(slim, default=str) + "\n")
+            # tests.jsonl may already exist from the incremental per-test writer
+            # (_append_test_record in test_executor.py). In that case it is the
+            # authoritative record (it was written right after each test, so it
+            # reflects partial results even if the run was killed). Only write
+            # it here if it does not exist yet (non-incremental callers).
+            tests_jsonl = os.path.join(run_dir, "tests.jsonl")
+            if not os.path.exists(tests_jsonl):
+                with open(tests_jsonl, "w", encoding="utf-8") as f:
+                    for t in self.tests:
+                        slim = {k: v for k, v in t.items() if k != "perf_rows"}
+                        f.write(json.dumps(slim, default=str) + "\n")
 
             with open(os.path.join(run_dir, "perf.jsonl"), "w", encoding="utf-8") as f:
                 for t in self.tests:
