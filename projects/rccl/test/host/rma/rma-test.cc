@@ -22,7 +22,7 @@
 #include <vector>
 
 #include "ScopedHook.h"
-#include "../common/LogCapture.hpp"  // DebugLevelToMask
+#include "../../common/LogCapture.hpp"  // DebugLevelToMask
 #include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/dev_runtime_micro_fakes.h"

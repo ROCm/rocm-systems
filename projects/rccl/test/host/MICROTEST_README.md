@@ -68,8 +68,6 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     compiled here for real, go through `fakes/transport_p2p_reg_seam.h`. `fakes/register_seam.h`
     renames `register.cc`'s definitions of the three names `nccl_fakes.cc` keeps as seams for
     `transport/p2p-test.cc`.
-  - `rma/rma_proxy_progress.cc` (`RMA_PROXY_PROGRESS_CC_PATH`, from
-    `rma-proxy-progress-test.cc`); suite `RmaProxyProgressTest.*`.
   - `group.cc` (`GROUP_CC_PATH`, from `group-test.cc`); suites
     `GroupEndInternalTest.*`, `GroupCommHeadChainTest.*`,
     `ReclaimPlannerStateTest.*`, `AsyncLaunchTest.*`, `GroupJobAbortTest.*`,
@@ -85,7 +83,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     Its cuMem window-import tests run the real `transport/p2p.cc`, compiled
     here as a plain source. The `devcomm/devcomm_v22902.cc` and
     `devcomm/devcomm_v22907.cc` compat tables are also compiled here, for
-    `getNcclVersionCompat`.
+    `getNcclVersionCompat`. The real `rma/rma.cc` and `rma/rma_ce.cc` are
+    compiled here too, for `dev_runtime.cc` and `group.cc`, with `rma_ce.cc`'s
+    two launch entry points renamed to `*Uut` (`fakes/rma_fakes.cc` keeps them
+    as seams).
   - `include/nccl_device/utility.h` (header-only, from `nccl-utility-test.cc`);
     suite `NcclUtilityMicrotest.*`.
   - the generated `sym_kernels_host.cc` (`SYM_KERNELS_HOST_CC_PATH`, from
@@ -482,19 +483,29 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   it compiles the real `proxy.cc`, which `fakes/proxy_fakes.cc` fakes for the
   other binaries. See `test_categories_micro_proxy.yaml`.
 
-- **`rccl-UnitTestsMicroRmaProxy`** — `src/rma/rma_proxy.cc` (via
-  `RMA_PROXY_CC_PATH`, from `rma-proxy-test.cc`); suite
-  `RmaProxyAllocGraphTest.*`. Its own binary, not sharing `rccl-UnitTestsMicro`:
-  that target resolves `ncclRmaProxyConnectOnce` / `ncclRmaProxyRegister` /
-  `ncclRmaProxyDeregister` from `fakes/dev_runtime_micro_fakes.cc`, and
-  `rma_proxy.cc` defines all three, so linking the unit under test there is a
-  duplicate symbol. `ncclGdrCopy` (owned by `init.cc`) is defined in the test TU
-  rather than a fakes file: `allocMemCPUAccessible()` is a header-static
-  template, so this global is the only seam that steers it, and the suite owns
-  it outright. Compiles the real `utils.cc` oracle TU for `getBusId` and the
-  memory stack. The suite drives the public lifecycle --
-  `ncclRmaProxyCreateContext` / `ncclRmaProxyDestroyContext` -- so production
-  owns the context and its cleanup. See `test_categories_micro_rma_proxy.yaml`.
+- **`rccl-UnitTestsMicroRma<Unit>`** — `src/rma/`, one binary per test file under
+  `test/host/rma/`, registered in `rma/host_tests.cmake`; `<Unit>` is the test's stem in
+  UpperCamel, less a repeated `rma-` (`rma/rma-proxy-launch-test.cc` builds
+  `rccl-UnitTestsMicroRmaProxyLaunch`). A binary whose unit reaches `dev_runtime.cc`
+  compiles it real, as `rccl-UnitTestsMicro` does; `rccl-UnitTestsMicroRmaCe` also compiles
+  the real `rma.cc`. See `test_categories_micro_rma.yaml`.
+  - `rma/rma.cc` (`RMA_CC_PATH`, from `rma/rma-test.cc`); suites `RmaDebugLogging*`,
+    `RmaLaunch*`, `RmaProxyGating*`, `RmaProxyReady*`, `RmaPut*`, `RmaSchedule*`,
+    `RmaWaitSignal*`.
+  - `rma/rma_ce.cc` (`RMA_CE_CC_PATH`, from `rma/rma-ce-test.cc`); suites `RmaCe*`.
+  - `rma/rma_proxy_launch.cc` (`RMA_PROXY_LAUNCH_CC_PATH`, from
+    `rma/rma-proxy-launch-test.cc`); suites `RmaProxyBatchMemOp*`, `RmaProxyDescriptor*`,
+    `RmaProxyLaunch*`, `RmaProxyParams*`, `RmaProxyQueue*`, `RmaProxyReclaim*`.
+  - `rma/rma_proxy_progress.cc` (`RMA_PROXY_PROGRESS_CC_PATH`, from
+    `rma/rma-proxy-progress-test.cc`); suite `RmaProxyProgressTest.*`.
+  - `rma/rma_proxy.cc` (`RMA_PROXY_CC_PATH`, from `rma/rma-proxy-test.cc`); suite
+    `RmaProxyAllocGraphTest.*`. `ncclGdrCopy` (owned by `init.cc`) is defined in the test TU
+    rather than a fakes file: `allocMemCPUAccessible()` is a header-static
+    template, so this global is the only seam that steers it, and the suite owns
+    it outright. Compiles the real `utils.cc` oracle TU for `getBusId` and the
+    memory stack. The suite drives the public lifecycle --
+    `ncclRmaProxyCreateContext` / `ncclRmaProxyDestroyContext` -- so production
+    owns the context and its cleanup.
 - **`rccl-UnitTestsMicroMiscRoctxNvmlStub`** (+ **`-roctx`**) — `src/misc/roctx.cc` and
   `src/misc/nvmlwrap_stub.cc` (via `ROCTX_CC_PATH` / `NVMLWRAP_STUB_CC_PATH`,
   from `misc/roctx-nvml-stub-test.cc`); suites `RoctxNvml*`. See
@@ -1468,7 +1479,7 @@ can be configured **directly** to build every host binary — `rccl-HostUnitTest
 `rccl-UnitTestsMicroTransport<Unit>` (one per `src/transport/` test file),
 `rccl-UnitTestsMicroEnqueue<Unit>` (one per other `src/enqueue/` test file),
 `rccl-UnitTestsMicroTuning<Unit>` (one per `src/tuning/` test file),
-`rccl-UnitTestsMicroSymKernels`, `rccl-UnitTestsMicroRmaProxy`,
+`rccl-UnitTestsMicroSymKernels`, `rccl-UnitTestsMicroRma<Unit>`,
 `rccl-UnitTestsMicroNetIbCastConnect`, `rccl-UnitTestsMicroNetIbCastQpSharing` and
 `rccl-UnitTestsMicroP2pResiliency` — **without configuring/building all of
 librccl**. It compiles just the tests + fakes + the hipified unit-under-test
@@ -1551,7 +1562,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroDiagnosticsP2pDevice  # src/diagnostics/device/p2p.cu launchers
 ./build/rccl-UnitTestsMicroPluginNet          # src/plugin/net.cc; one binary per src/plugin/ test file
 ./build/rccl-UnitTestsMicroCe                 # src/ce_coll.cc tests
-./build/rccl-UnitTestsMicroRmaProxy           # src/rma/rma_proxy.cc tests
+./build/rccl-UnitTestsMicroRmaProxy           # src/rma/rma_proxy.cc; one binary per src/rma/ test file
 ./build/rccl-UnitTestsMicroProxy              # src/proxy.cc tests
 ./build/rccl-UnitTestsMicroDdaFabricInit      # src/algorithms/dda/fabric/fabric_init.cu; one binary per src/algorithms/dda/ test file
 ./build/rccl-UnitTestsMicroTransportP2p       # src/transport/p2p.cc; one binary per src/transport/ test file
