@@ -135,6 +135,9 @@ private:
   template <typename PostOptions>
   __device__ void commit_sq(sq_idx_t reserve_idx_base, int wqe_count, const gda_mlx5_wqe& wqe);
 
+  template <typename PostOptions>
+  __device__ uint32_t reserve_atomic(int wqe_count);
+
 #if defined(BUILD_DEBUG_DEVICE)
   __device__ __noinline__ void print_cqe_error(const mlx5_cqe64* cqe,
                                                uint8_t opcode, uint8_t owner);
@@ -206,6 +209,19 @@ __device__ __forceinline__ void QueuePairMLX5::commit_sq(
     // no one else is here, just set the SQ indices
     sq.reserve_idx = next_commit_idx;
     sq.commit_idx  = next_commit_idx;
+  }
+
+// precondition: called with all active lanes using different QPs
+template <typename PostOptions>
+__device__ __forceinline__ uint32_t QueuePairMLX5::reserve_atomic(int wqe_count) {
+  if constexpr (PostOptions::ThreadSafe) {
+    // reserve wqe_count atomic fetch slots
+    return __hip_atomic_fetch_add(&fetching_atomic_idx, wqe_count,
+                                  __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+  } else {
+    uint32_t atomic_idx = fetching_atomic_idx;
+    fetching_atomic_idx = atomic_idx + wqe_count;
+    return atomic_idx;
   }
 }
 
@@ -306,10 +322,16 @@ __device__ __noinline__ QueuePairMLX5::amo_ret_t<Fetch> QueuePairMLX5::post_wqe_
   uint64_t* atomic_laddr = get_atomic_addr<Fetch>();
   uint32_t atomic_lkey   = get_atomic_lkey<Fetch>();
   if constexpr (Fetch == AMOFetchType::Blocking) {
-    // TODO: atomic_fetch_add(&fetching_atomic_idx, num_wqes)
     /* assumes the FETCHING_ATOMIC_CNT >= sq_depth; this is not generally true
      * TODO: fix this for the case where there are > 1024 concurrent AMOs */
-    uint32_t atomic_idx = static_cast<uint32_t>(reserve_idx);
+    uint32_t atomic_idx_base = 0;
+    if (wf_info.is_pe_group_last) {
+      // reserve atomic fetch indices for this wave
+      atomic_idx_base = reserve_atomic<PostOptions>(wqe_count);
+    }
+    // fetch atomic fetch base index from PE group leader
+    atomic_idx_base = __shfl(atomic_idx_base, wf_info.pe_group_last_phys_lane_id);
+    uint32_t atomic_idx = atomic_idx_base + wf_info.pe_group_logical_lane_id;
     atomic_laddr += (atomic_idx % FETCHING_ATOMIC_CNT);
   }
 
@@ -359,10 +381,10 @@ __device__ __noinline__ QueuePairMLX5::amo_ret_t<Fetch> QueuePairMLX5::post_wqe_
   uint64_t* atomic_laddr = get_atomic_addr<Fetch>();
   uint32_t atomic_lkey   = get_atomic_lkey<Fetch>();
   if constexpr (Fetch == AMOFetchType::Blocking) {
-    // TODO: atomic_fetch_add(&fetching_atomic_idx, num_wqes)
     /* assumes the FETCHING_ATOMIC_CNT >= sq_depth; this is not generally true
      * TODO: fix this for the case where there are > 1024 concurrent AMOs */
-    uint32_t atomic_idx = static_cast<uint32_t>(reserve_idx);
+    // reserve atomic fetch index
+    uint32_t atomic_idx = reserve_atomic<PostOptions>(1);
     atomic_laddr += (atomic_idx % FETCHING_ATOMIC_CNT);
   }
 
