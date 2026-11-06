@@ -159,6 +159,10 @@ static bool ncclSymkGinBackendUnsupported(struct ncclComm* comm) {
 // confines them to gfx1250 builds whose SDK ships the TDM descriptor header.
 // 0 off, 1 offer to the tuner, 2 force (skips the cost model and the deep-loop size bar; for A/B
 // measurement). NCCL_SYM_KERNEL forces one named kernel, 2 forces whichever the collective has.
+// Bytes a block of the hierarchical ReduceScatter sends each other package per round. Smaller rounds
+// start the finishers sooner, and bigger ones amortize the flag handshake. Clamped to the slot size.
+RCCL_PARAM(SymRsHierChunkBytes, "SYM_RS_HIER_CHUNK_BYTES", ncclSymkRsHierChunkBytes)
+
 NCCL_PARAM(SymTmaEnable, "SYM_TMA_ENABLE", 1)
 
 bool ncclSymkTmaAvailable(struct ncclComm* comm) {
@@ -291,6 +295,9 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
   if (!symk->initialized) {
     symk->initialized = true;
     symk->kcomm.hierScaleInSize = computeHierScaleInSize(comm);
+    symk->kcomm.rsHierRoundBytes = uint32_t(
+      std::clamp<int64_t>(rcclParamSymRsHierChunkBytes(), ncclSymkRsHierMinRoundBytes, ncclSymkRsHierChunkBytes) &
+      ~int64_t(15));
     int agHierGroups = ncclSymkAgHierGroups(comm);
     if (ncclSymkHierAvailable(comm) && symk->kcomm.hierScaleInSize == 0) {
       INFO(NCCL_INIT,

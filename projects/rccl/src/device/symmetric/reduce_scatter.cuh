@@ -637,7 +637,7 @@ __device__ __forceinline__ void ncclSymkRun_ReduceScatter_HierLsaLD(ncclSymkDevW
   // 8-bit floats sum as 32-bit ones, which leaves room to hold only pairs of their sources at once.
   constexpr int UnrollPacks = ncclSymkUnrollPacks, UnrollPeers = sizeof(T) == 1 ? 2 : 4;
   constexpr int EltPerPack = ncclSymkBytePerPack / sizeof(T);
-  constexpr size_t RoundElts = ncclSymkRsHierChunkBytes / sizeof(T);
+  size_t const RoundElts = args->kcomm.rsHierRoundBytes / sizeof(T);
   ncclSymkArgsHandler handler{args};
   ncclDevComm const& comm = handler.comm;
   ncclLsaBarrierSession<ncclCoopCta> bar{ncclCoopCta(), comm, ncclTeamTagLsa(), blockIdx.x};

@@ -44,10 +44,14 @@ constexpr __host__ __device__ int ncclSymkAgHierGroupBlocks(int nBlocks, int nGr
   return n > 1 ? n : 1;
 }
 
-// Max blocks for the hierarchical LSA ReduceScatter kernel, and the bytes of partial sums a block sends
-// each other package per round. Each block lands two rounds of these, one slot per sending package.
-constexpr int ncclSymkRsHierMaxBlocks = 32;
+// Max blocks for the hierarchical LSA ReduceScatter kernel, and the size of one landing slot: the most
+// bytes of partial sums a block sends each other package per round. Each block lands two rounds of
+// these, one slot per sending package. A round may carry fewer bytes (rsHierChunkBytes below), but slots
+// keep this stride.
+constexpr int ncclSymkRsHierMaxBlocks = 96;
 constexpr size_t ncclSymkRsHierChunkBytes = 64 << 10;
+// Bounds on the bytes a round carries. A multiple of a 16-byte pack keeps every round's start aligned.
+constexpr size_t ncclSymkRsHierMinRoundBytes = 1 << 10;
 // Flags a block of it keeps: a ready count from each other package, the block's round count, then a
 // credit count from each other package and one spare.
 constexpr __host__ __device__ int ncclSymkRsHierFlagsPerBlock(int nGroups) {
@@ -141,6 +145,8 @@ struct ncclSymkDevComm {
   // Per block of the hierarchical ReduceScatter, the flags that pace those slots: counterparts raise a
   // ready count when a round's sums land, and owners raise a credit count once they have read them.
   ncclDevResourceHandle rsHierFlags;
+  // Bytes of partial sums a block sends each other package per round, at most ncclSymkRsHierChunkBytes.
+  uint32_t rsHierRoundBytes;
   // Profiler counters (host-pinned), indexed by channel id and per-channel slot.
   // workPhases holds per-phase timestamps published behind a fence.
   struct ncclDevProfiler* workStarted;
