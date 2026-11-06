@@ -16,7 +16,6 @@ Metric ID format X.Y.Z:
 """
 
 import sys
-from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -25,13 +24,13 @@ import yaml
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SETS_DIR = PROJECT_ROOT / "src" / "rocprof_compute_soc" / "profile_configs" / "sets"
 ANALYSIS_DIR = PROJECT_ROOT / "src" / "rocprof_compute_soc" / "analysis_configs"
-GPU_SPEC_PATH = PROJECT_ROOT / "src" / "utils" / "mi_gpu_spec.yaml"
 
 # Make src/ importable so we can reuse the canonical counter definitions.
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
-from utils.utils_common import canonical_config_arch  # noqa: E402
-from utils.utils_counter_defs import (  # noqa: E402
-    counter_to_block,
+from utils.mi_gpu_spec import mi_gpu_specs
+from utils.utils_common import canonical_config_arch
+from utils.utils_counter_defs import (
+    counters_over_block_limits,
     extract_counters_and_variables,
     metric_expressions,
 )
@@ -76,40 +75,6 @@ def load_analysis_configs(arch: str) -> dict[int, dict[str, Any]]:
     return result
 
 
-def load_perfmon_configs() -> dict[str, dict[str, int]]:
-    """Return {gpu_arch: {block: max_counters}} from mi_gpu_spec.yaml."""
-    data = yaml.safe_load(GPU_SPEC_PATH.read_text())
-    result: dict[str, dict[str, int]] = {}
-    for series in data.get("mi_gpu_spec", []):
-        for arch_entry in series.get("gpu_archs", []):
-            arch = arch_entry.get("gpu_arch")
-            perfmon = arch_entry.get("perfmon_config", {})
-            if arch and perfmon:
-                # Filter out non-block entries like TCC_channels
-                result[arch] = {
-                    k: v
-                    for k, v in perfmon.items()
-                    if isinstance(v, int) and "_" not in k
-                }
-    return result
-
-
-def load_gpu_series_mapping() -> dict[str, str]:
-    """Return {gpu_arch: gpu_series} mapping from mi_gpu_spec.yaml."""
-    data = yaml.safe_load(GPU_SPEC_PATH.read_text())
-    result: dict[str, str] = {}
-    for series in data.get("mi_gpu_spec", []):
-        gpu_series = series.get("gpu_series")
-        if not gpu_series:
-            continue
-        for arch_entry in series.get("gpu_archs", []):
-            arch = arch_entry.get("gpu_arch")
-            if arch:
-                # Store uppercase to match mi_gpu_specs.get_gpu_series() behavior
-                result[arch] = gpu_series.upper()
-    return result
-
-
 # ---------------------------------------------------------------------------
 # Validation (single pass over all sets files)
 # ---------------------------------------------------------------------------
@@ -118,8 +83,6 @@ def load_gpu_series_mapping() -> dict[str, str]:
 def validate() -> list[str]:
     """Run all checks, return error messages."""
     errors: list[str] = []
-    perfmon_configs = load_perfmon_configs()
-    gpu_series_map = load_gpu_series_mapping()
     shared_arch_expansions = {"gfx115x": ["gfx1150", "gfx1151", "gfx1152", "gfx1153"]}
 
     for sets_path in sorted(SETS_DIR.glob("gfx*_sets.yaml")):
@@ -190,7 +153,7 @@ def validate() -> list[str]:
                 continue
 
             for target_arch in target_arches:
-                gpu_series = gpu_series_map.get(target_arch)
+                gpu_series = mi_gpu_specs.get_gpu_series(target_arch)
                 if not gpu_series:
                     errors.append(
                         f"[{target_arch}] arch missing from mi_gpu_spec.yaml; "
@@ -198,30 +161,18 @@ def validate() -> list[str]:
                     )
                     continue
 
-                limits = perfmon_configs.get(target_arch)
-                if limits is None:
-                    continue
-
+                limits = mi_gpu_specs.get_perfmon_config(target_arch)
                 counters, _ = extract_counters_and_variables(
                     "\n".join(expressions), gpu_series
                 )
-                # *_ACCUM is the per-bucket alias for SQ_ACCUM_PREV_HIRES, which is
-                # injected automatically by the profiler for level counters
-                counters = {c for c in counters if not c.endswith("_ACCUM")}
-                block_counters: dict[str, set[str]] = defaultdict(set)
-                for c in counters:
-                    block_counters[counter_to_block(c)].add(c)
-
-                for block, block_ctrs in sorted(block_counters.items()):
-                    if block not in limits:
-                        continue
-                    if len(block_ctrs) > limits[block]:
-                        errors.append(
-                            f"[{target_arch}] set '{set_option}': block {block} needs "
-                            f"{len(block_ctrs)} counters but limit is "
-                            f"{limits[block]}. "
-                            f"Counters: {sorted(block_ctrs)}"
-                        )
+                over_limit = counters_over_block_limits(counters, limits)
+                for block, block_ctrs in over_limit.items():
+                    errors.append(
+                        f"[{target_arch}] set '{set_option}': block {block} needs "
+                        f"{len(block_ctrs)} counters but limit is "
+                        f"{limits[block]}. "
+                        f"Counters: {sorted(block_ctrs)}"
+                    )
 
     return errors
 
