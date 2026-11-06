@@ -140,3 +140,24 @@ def test_list_jax_operators_train_step_stats(
         if stripped and not stripped.startswith("|"):
             break
     assert kernel_children
+
+
+def test_nested_jit_not_child_of_train_step(
+    jax_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
+):
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--list-operators",
+        "jax",
+        "--path",
+        jax_trace_profiled_workload,
+    ])
+    assert code == 0
+    out = captured_analyze_output(capsys)
+    child_lines = [
+        line
+        for line in out.splitlines()
+        if line.lstrip().startswith(("├─", "└─")) and "jax.jit.matmul_relu" in line
+    ]
+    assert child_lines == []
