@@ -2519,6 +2519,7 @@ set(_rj_interposer_pm4_tests
     MergedSyncFilesRetainPendingFenceAcrossDupAndImport
     ThreadDimensionsMaskPartialGroupsForDirectAndIndirectDispatch
     GridProductOverflowFailsFence
+    IndirectBranchFetchesHighVaShader
     UnmappedShaderFailsFence
     OversizedLdsFailsFence
     FailedFenceIsStillAvailable
@@ -2572,6 +2573,17 @@ foreach(_config IN ITEMS gfx1100_w7900 gfx1201_r9700)
         TokenLargeFenceOnlyBufferNeedsTemporaryAttachment
         CONFIG "${CMAKE_SOURCE_DIR}/configs/${_config}.json"
         SUFFIX ".fallback" PREFIX prlimit --fsize=4096:4096
+    )
+endforeach()
+
+foreach(
+    _config
+    IN
+    ITEMS gfx90a_mi210_kmd gfx942_cdna3_kmd gfx950_mi350x_kmd gfx1250_mi455x
+)
+    rj_add_interposer_test_suite(
+        InterposerPm4Test IndirectBranchFetchesHighVaShader
+        CONFIG "${CMAKE_SOURCE_DIR}/configs/${_config}.json"
     )
 endforeach()
 
