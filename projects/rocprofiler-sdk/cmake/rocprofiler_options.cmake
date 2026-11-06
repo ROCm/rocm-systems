@@ -113,6 +113,18 @@ rocprofiler_add_option(ROCPROFILER_BUILD_DEPRECATED_WARNINGS
 rocprofiler_add_option(
     ROCPROFILER_BUILD_AQLPROFILE
     "Enable building with internal AQLProfile library (recommended)" ON ADVANCED)
+# Build:
+#   cmake -B build -DROCPROFILER_BUILD_AQLPROFILE=ON -DROCPROFILER_BUILD_TESTS=ON \
+#         -DROCPROFILER_AQLPROFILE_DEBUG_TRACE=ON -DCTRL_V3_GPU_TARGETS=gfx1250
+#   cmake --build build --target ctrl_v3
+# Run (from the directory containing ctrl_v3, so its .hsaco is found; PM4 packet
+# dumps go to stderr, e.g. 'BuildPredExecPacket' size(2) : c0002300 01000000):
+#   ./ctrl_v3 --pmc GRBM_COUNT --verbose 2> pm4_trace.log
+rocprofiler_add_option(
+    ROCPROFILER_AQLPROFILE_DEBUG_TRACE
+    "Enable PM4 packet trace logging (DEBUG_TRACE) in the in-tree AQLProfile pm4 command builders"
+    OFF
+    ADVANCED)
 
 # In the future, we will do this even with clang-tidy enabled
 foreach(_OPT ROCPROFILER_BUILD_WERROR)

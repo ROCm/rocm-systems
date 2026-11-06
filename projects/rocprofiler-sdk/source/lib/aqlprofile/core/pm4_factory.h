@@ -200,11 +200,8 @@ public:
         // Checking that the block index is in proper range
         if(DecodeSpmInstanceIndex(info, event->block_index) >= info->instance_count)
             throw std::runtime_error("Bad Index");
-            // Checking that the counter event index is in proper range
-#if 0
-    if (event->counter_id > info->event_id_max)
-      throw event_exception(std::string("Bad event ID, "), *event);
-#endif
+        // Checking that the counter event index is in proper range
+        if(event->event_id > info->event_id_max) throw std::runtime_error("Bad event ID");
         return info;
     }
 
@@ -216,11 +213,9 @@ public:
         // Checking that the block index is in proper range
         if(DecodeSpmInstanceIndex(info, event->block_index) >= info->instance_count)
             throw event_exception(std::string("Bad block index, "), *event);
-            // Checking that the counter event index is in proper range
-#if 0
-    if (event->counter_id > info->event_id_max)
-      throw event_exception(std::string("Bad event ID, "), *event);
-#endif
+        // Checking that the counter event index is in proper range
+        if(event->counter_id > info->event_id_max)
+            throw event_exception(std::string("Bad event ID, "), *event);
         return info;
     }
 

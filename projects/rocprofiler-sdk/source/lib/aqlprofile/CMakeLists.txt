@@ -49,6 +49,10 @@ target_link_libraries(
             $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-sdk-hsa-runtime-nolink>)
 set_target_properties(rocprofiler-sdk-aqlprofile PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
+if(ROCPROFILER_AQLPROFILE_DEBUG_TRACE)
+    target_compile_definitions(rocprofiler-sdk-aqlprofile PRIVATE DEBUG_TRACE=1)
+endif()
+
 add_subdirectory(core)
 add_subdirectory(util)
 add_subdirectory(pm4)
