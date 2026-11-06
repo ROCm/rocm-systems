@@ -6009,6 +6009,49 @@ pub fn amdsmi_get_lib_version() -> AmdsmiResult<AmdsmiVersionT> {
     Ok(version)
 }
 
+/// Get the ROCm version.
+///
+/// This function retrieves the installed ROCm version by locating and querying
+/// `librocm-core.so`.
+///
+/// # Arguments
+///
+/// * `version` - A mutable pointer to an `AmdsmiVersionT` structure where the version information will be stored.
+///
+/// # Returns
+///
+/// * `AmdsmiResult<AmdsmiVersionT>` - Returns `Ok(AmdsmiVersionT)` containing the [`AmdsmiVersionT`] if successful, or an error if it fails.
+///
+/// # Example
+///
+/// ```rust
+/// # use amdsmi::*;
+/// #
+/// # fn main() {
+/// #   // Initialize the AMD SMI library
+/// #   amdsmi_init(AmdsmiInitFlagsT::AmdsmiInitAmdGpus).expect("Failed to initialize AMD SMI");
+/// #
+///     // Retrieve the ROCm version information
+///     match amdsmi_get_rocm_version() {
+///         Ok(version) => println!("ROCm version: {:?}", version),
+///         Err(e) => panic!("Failed to get ROCm version: {}", e),
+///     }
+/// #
+/// #   // Shut down the AMD SMI library
+/// #   amdsmi_shut_down().expect("Failed to shut down AMD SMI");
+/// # }
+/// ```
+///
+/// # Errors
+///
+/// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_rocm_version` call fails, including when the ROCm core runtime isn't installed.
+pub fn amdsmi_get_rocm_version() -> AmdsmiResult<AmdsmiVersionT> {
+    let mut version = MaybeUninit::<AmdsmiVersionT>::uninit();
+    call_unsafe!(amdsmi_wrapper::amdsmi_get_rocm_version(version.as_mut_ptr()));
+    let version = unsafe { version.assume_init() };
+    Ok(version)
+}
+
 /// Retrieve the GPU accelerator partition profile.
 ///
 /// This function retrieves the GPU accelerator partition profile for a given processor handle.
