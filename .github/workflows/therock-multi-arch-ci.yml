@@ -77,9 +77,6 @@ on:
         type: boolean
         default: false
         description: "Build native Linux packages and run install tests"
-      # TEMPORARY: defaults to false until ROCm/TheRock#9650 is resolved. The
-      # native MSI build runs on self-hosted Windows runners that lack the
-      # dotnet SDK needed to install WiX, so it fails on every run.
       build_native_windows:
         type: boolean
         default: false
@@ -194,9 +191,10 @@ jobs:
       build_python_packages: ${{ inputs.build_python_packages || false }}
       build_pytorch: ${{ inputs.build_pytorch || false }}
       build_jax: ${{ inputs.build_jax || false }}
-      build_native_linux: ${{ inputs.build_native_linux || false }}
-      # TEMPORARY: disabled until ROCm/TheRock#9650 is resolved.
-      build_native_windows: ${{ inputs.build_native_windows || false }}
+      # Preserve manual workflow_dispatch control and enable native package
+      # builds for pull requests carrying the opt-in label.
+      build_native_linux: ${{ inputs.build_native_linux || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:native-linux-packages')) }}
+      build_native_windows: ${{ inputs.build_native_windows || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:native-windows-packages')) }}
       baseline_repository: ${{ inputs.baseline_repository || (inputs.baseline_run_id != '' && github.repository) || '' }}
       # Enable automatic stage reuse - TheRock finds commit-compatible baselines
       # and determines which stages to rebuild based on changed files

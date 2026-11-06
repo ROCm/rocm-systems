@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/branch_stack.h"
 #include "rocjitsu/isa/decoder.h"
@@ -85,8 +86,8 @@ protected:
     config.sgprs_per_wf = 104;
     config.vgprs_per_wf = 256;
     config.functional_quantum = 1;
-    cu = ComputeUnitCore::create("cbranch_fork_join_cu", config, &memory, &l2);
-    ASSERT_NE(cu, nullptr);
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "cbranch_fork_join_cu", config, &memory, &l2));
     wf = cu->dispatch_wf(0, kCodeBase, 104, 256);
     ASSERT_NE(wf, nullptr);
     wf->set_exec(~uint64_t{0});
@@ -510,6 +511,8 @@ TEST_P(CbranchForkJoinTest, GetpcRoundTripsThroughGForkWithLoadBias) {
   constexpr uint64_t kExport = 0xFFFFFFFF12345004ULL;
   constexpr uint64_t kForkPc = 0x2000;
   constexpr uint64_t kFewLanes = 0x15;
+  util::FailureOr<uint32_t> getpc = build_s_getpc_b64(36, GetParam());
+  ASSERT_TRUE(getpc.succeeded());
   for (uint64_t bias : {uint64_t{0}, uint64_t{0x00007FFF00000000ULL}}) {
     SCOPED_TRACE(::testing::Message() << "bias=" << std::hex << bias);
     wf->set_code_load_bias(bias);
@@ -520,7 +523,7 @@ TEST_P(CbranchForkJoinTest, GetpcRoundTripsThroughGForkWithLoadBias) {
       set_sgpr64(0, kStackSentinel);
       set_sgpr64(2, kStackSentinel);
       wf->pc = kHighPc;
-      ASSERT_NO_FATAL_FAILURE(execute(build_s_getpc_b64(36, GetParam())));
+      ASSERT_NO_FATAL_FAILURE(execute(getpc.value()));
       ASSERT_EQ(sgpr64(36), kExport);
 
       wf->pc = kForkPc;

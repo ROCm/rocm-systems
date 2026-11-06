@@ -92,20 +92,69 @@ foreach(
     mnemonic
     IN
     ITEMS
+        v_add_sub
         v_round_f64
+        v_div_fixup
+        v_div_fmas
+        v_div_scale
         v_fma_dx9_zero
         v_fma
         v_fma_mix
         v_fmaak
         v_fmac
         v_fmamk
+        v_exponent
+        v_min_max_med3
+        v_min_max_med3_num
+        v_min_max
+        v_min_max_num
+        v_minimum_maximum3
+        v_minimum_maximum
+        v_minimummaximum_maximumminimum
+        v_minmax_maxmin
+        v_minmax_maxmin_num
+        v_mul_dx9_zero_f32
+        v_mul
+        v_pk_add_mul_f16
         v_pk_fma_f16
         v_pk_fmac_f16
+        v_pk_selection_f16
         v_rcp_rsq_sqrt_f64
 )
     string(REGEX REPLACE "^v_" "" test_name "${mnemonic}")
     set(target "rj_arith_${test_name}_test")
     rj_arith_add_test(${target} fp/${mnemonic}_test.cpp)
+endforeach()
+
+# Conversion layouts share contract checks; family references remain independent.
+foreach(
+    family
+    IN
+    ITEMS
+        integer_pack
+        byte
+        float16
+        float32
+        float64
+        normalized
+        packed
+        fp8_widen
+        fp8_narrow
+)
+    set(target "rj_arith_conversion_${family}_test")
+    rj_arith_add_test(${target} conversion/${family}_test.cpp)
+endforeach()
+
+# Dot-product formats retain family-specific arithmetic and status expectations.
+foreach(family IN ITEMS integer fp8 half dot2)
+    set(target "rj_arith_dot_${family}_test")
+    rj_arith_add_test(${target} dot/${family}_test.cpp)
+endforeach()
+
+# Graphics families retain their independent interpolation and selection references.
+foreach(family IN ITEMS cube interp mullit)
+    set(target "rj_arith_graphics_${family}_test")
+    rj_arith_add_test(${target} graphics/${family}_test.cpp)
 endforeach()
 
 # Infrastructure has no all-entry-point registry; contracts live in family helpers.

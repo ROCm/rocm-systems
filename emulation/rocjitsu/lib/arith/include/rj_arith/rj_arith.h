@@ -6,7 +6,10 @@
 
 // IWYU pragma: begin_exports
 #include "detail/rj_arith_common.h"
+#include "detail/rj_arith_conversion.h"
+#include "detail/rj_arith_dot.h"
 #include "detail/rj_arith_fp.h"
+#include "detail/rj_arith_graphics.h"
 #include "detail/rj_arith_wmma.h"
 // IWYU pragma: end_exports
 

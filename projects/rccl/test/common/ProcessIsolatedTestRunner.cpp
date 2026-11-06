@@ -9,6 +9,7 @@
 #include <fcntl.h>
 #include <gtest/gtest.h>
 #include <poll.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -27,6 +28,7 @@
 #include <thread>
 
 #include "ErrCode.hpp"
+#include "GpuCountProbe.hpp"
 
 #if defined(RCCL_TEST_CODE_COVERAGE)
 #include <dlfcn.h>
@@ -199,14 +201,40 @@ static std::vector<int> gpuPoolFromKfd()
     return pool;
 }
 
+std::vector<int> clampPoolToDeviceCount(std::vector<int> pool, int hipDeviceCount)
+{
+    if(hipDeviceCount > 0 && static_cast<size_t>(hipDeviceCount) < pool.size())
+    {
+        TEST_INFO(
+            "GPU pool reported %zu device(s) but HIP can open only %d; "
+            "clamping pool to %d",
+            pool.size(), hipDeviceCount, hipDeviceCount
+        );
+        pool.resize(static_cast<size_t>(hipDeviceCount));
+    }
+    return pool;
+}
+
 // Detects available GPU indices: first from HIP_VISIBLE_DEVICES, then from
-// KFD sysfs. Returns empty if neither source yields a pool.
+// KFD sysfs, then clamped to the devices HIP can actually open. Returns empty
+// if neither source yields a pool.
 static std::vector<int> detectGpuPool()
 {
     auto pool = gpuPoolFromEnv();
     if(pool.empty())
         pool = gpuPoolFromKfd();
-    return pool;
+
+    const int hipDeviceCount = gpuCountViaFreshImage();
+    if(hipDeviceCount == kGpuCountProbeFailed && !pool.empty())
+    {
+        TEST_INFO(
+            "WARNING: could not determine how many devices HIP can open; "
+            "leaving the detected pool of %zu device(s) unclamped",
+            pool.size()
+        );
+    }
+
+    return clampPoolToDeviceCount(std::move(pool), hipDeviceCount);
 }
 
 // Tracks which physical GPU device indices from a fixed pool are in use.

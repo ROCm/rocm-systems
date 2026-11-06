@@ -11,6 +11,7 @@
 /// SIMD-enabled execution may fall back to scalar when a fast-path gate rejects it.
 /// Accumulate forms have separate FMAC and GFX1250 execution-policy coverage.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
@@ -169,7 +170,9 @@ struct Fixture {
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("cu_vop3_tern_fp", cfg, &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, "cu_vop3_tern_fp", cfg, &gpu_mem, &l2);
+    if (!cu)
+      return;
     decoder = Decoder::create(arch);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
@@ -239,6 +242,8 @@ void check_case(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32
   auto run_mode = [&](bool force_scalar, uint32_t rot) -> std::array<uint64_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     const uint32_t vdst = (c.kind == Kind::F64) ? kDstVgpr64 : kDstVgpr32;
@@ -531,12 +536,14 @@ TEST_P(Vop3F16TernaryOutputOrderTest, MatchesScalarOutputContractWithSimdEnabled
         fx.wf->set_mode_raw(test.mode);
         amdgpu::ScopedSimdFastPathTracker tracker;
         ASSERT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
-        if (force_scalar)
+        if (force_scalar) {
           EXPECT_TRUE(tracker.no_tracked_path_executed())
               << test.name << ": forced-scalar execution used SIMD";
-        else
+        } else if (test.arch != ROCJITSU_CODE_ARCH_RDNA3) {
+          // RDNA3 uses rj-arith, whose SIMD paths do not use the legacy tracker.
           EXPECT_TRUE(tracker.only_tracked_path_executed(test.expected_simd_path))
               << test.name << ": eligible execution did not use the ternary F16 SIMD path";
+        }
         for (uint32_t lane = 0; lane < fx.wf->wf_size(); ++lane) {
           const uint32_t actual = fx.cu->read_vgpr(vb + kDstVgpr32, lane);
           if (!(exec & (1ULL << lane))) {

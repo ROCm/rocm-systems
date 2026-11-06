@@ -4,6 +4,7 @@
 /// @file wave_debug_test.cpp
 /// @brief Wave-level KFD debugger groundwork, exercised through the compute unit.
 
+#include "compute_unit_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
@@ -58,7 +59,9 @@ struct WaveDebugFixture {
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("cu_wave_debug", cfg, &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, "cu_wave_debug", cfg, &gpu_mem, &l2);
+    if (!cu)
+      return;
     l2.set_gpu_vm(&gpu_mem.gpu_vm());
     cu->set_gpu_vm(&gpu_mem.gpu_vm());
   }
@@ -73,6 +76,7 @@ TEST(WaveDebugTest, DebuggerReadsPreservePhysicalStorageBoundsAtNonzeroOffsets) 
   const auto check = []<GpuIsa Isa>(rj_code_arch_t arch) {
     SCOPED_TRACE(arch);
     WaveDebugFixture fx(arch, 2);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     using ComputeUnit = amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, Isa>;
     const auto *cu = dynamic_cast<const ComputeUnit *>(fx.cu.get());
     ASSERT_NE(cu, nullptr);
@@ -116,6 +120,7 @@ TEST(WaveDebugTest, DebuggerReadsPreserveSmallAllocationStorage) {
   for (auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4}) {
     SCOPED_TRACE(arch);
     WaveDebugFixture fx(arch, 2);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     auto *first_wave = fx.dispatch(kKernelAddr);
     ASSERT_NE(first_wave, nullptr);
     auto *wave = fx.cu->dispatch_wf(0, kKernelAddr, 16, 4);
@@ -142,6 +147,7 @@ TEST(WaveDebugTest, DebuggerReadsPreserveSmallAllocationStorage) {
 
 TEST(WaveDebugTest, DebuggerReadsPreserveStoredLanesForWave32) {
   WaveDebugFixture fx(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   auto *wave = fx.cu->dispatch_wf(0, kKernelAddr, 16, 4, 32);
   ASSERT_NE(wave, nullptr);
   ASSERT_EQ(wave->wf_size(), 32u);
@@ -161,6 +167,7 @@ TEST(WaveDebugTest, DebuggerReadsPreserveStoredLanesForWave32) {
 
 TEST(WaveDebugTest, DebuggerReadsPreservePhysicalLaneBoundsForGfx1250) {
   WaveDebugFixture fx(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   auto *wave = fx.cu->dispatch_wf(0, kKernelAddr, 16, 4, 32);
   ASSERT_NE(wave, nullptr);
   ASSERT_EQ(wave->wf_size(), 32u);
@@ -176,6 +183,7 @@ TEST(WaveDebugTest, DebuggerReadsPreservePhysicalLaneBoundsForGfx1250) {
 
 TEST(WaveDebugTest, STrapExecutesConfiguredTrapHandlerInstructions) {
   WaveDebugFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   fx.gpu_mem.write32(kKernelAddr, kSTrapBreakpoint);
   fx.gpu_mem.write32(kKernelAddr + 4, kSEndpgm);
 
@@ -232,6 +240,7 @@ TEST(WaveDebugTest, STrapExecutesConfiguredTrapHandlerInstructions) {
 // response, or resuming a breakpoint changes which lanes execute user code.
 TEST(WaveDebugTest, TrapHandlerRestoresInterruptedExecBeforeReporting) {
   WaveDebugFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   fx.gpu_mem.write32(kKernelAddr, kSTrapBreakpoint);
   fx.gpu_mem.write32(kKernelAddr + 4, kSEndpgm);
 
@@ -277,6 +286,7 @@ TEST(WaveDebugTest, TrapHandlerRestoresInterruptedExecBeforeReporting) {
 // converged out of a branch being reported active again.
 TEST(WaveDebugTest, TrapHandlerRestoresInterruptedExecWhenReturningWithoutStopping) {
   WaveDebugFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   fx.gpu_mem.write32(kKernelAddr, kSTrapBreakpoint);
   fx.gpu_mem.write32(kKernelAddr + 4, kSEndpgm);
 
@@ -331,6 +341,7 @@ TEST(WaveDebugTest, TrapHandlerRestoresInterruptedExecWhenReturningWithoutStoppi
 
 TEST(WaveDebugTest, UnmappedInstructionFetchReportsMemoryViolationAtBranchTarget) {
   WaveDebugFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint32_t kProcessId = 7;
   constexpr uint64_t kBranchTarget = 0x100;
   std::vector<uint8_t> kernel_page(amdgpu::GpuMemory::PAGE_SIZE);
@@ -371,6 +382,7 @@ TEST(WaveDebugTest, UnmappedInstructionFetchReportsMemoryViolationAtBranchTarget
 
 TEST(WaveDebugTest, UnmappedScalarLoadReportsMemoryViolationAfterInstruction) {
   WaveDebugFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint32_t kProcessId = 7;
   std::vector<uint8_t> kernel_page(amdgpu::GpuMemory::PAGE_SIZE);
   KfdProcess::PageTable page_table;
@@ -412,6 +424,7 @@ TEST(WaveDebugTest, UnmappedScalarLoadReportsMemoryViolationAfterInstruction) {
 // while something still meant it to be stopped.
 TEST(WaveDebugTest, RuntimeAndDebuggerSuspensionDoNotClobberEachOther) {
   WaveDebugFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   fx.gpu_mem.write32(kKernelAddr, kSEndpgm);
   auto *wave = fx.dispatch(kKernelAddr);
   ASSERT_NE(wave, nullptr);
@@ -449,6 +462,7 @@ TEST(WaveDebugTest, RuntimeAndDebuggerSuspensionDoNotClobberEachOther) {
 // zero the other two.
 TEST(WaveDebugTest, TrapEntryPublishesTheWorkgroupCoordinateCwsrSerializes) {
   WaveDebugFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   fx.gpu_mem.write32(kKernelAddr, kSTrapBreakpoint);
   fx.gpu_mem.write32(kKernelAddr + 4, kSEndpgm);
   fx.gpu_mem.write32(kTrapHandlerAddr, kSEndpgm);
@@ -479,6 +493,7 @@ TEST(WaveDebugTest, TrapEntryPublishesTheWorkgroupCoordinateCwsrSerializes) {
 // single-step armed, so resuming took an extra step.
 TEST(WaveDebugTest, SendmsghaltPublishesArchitecturalStatusHalt) {
   WaveDebugFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint32_t kStatusHalt = 1u << 13;
   constexpr uint32_t kSSendmsghaltInterrupt = 0xBF910001u; // s_sendmsghalt sendmsg(MSG_INTERRUPT)
 
@@ -527,6 +542,7 @@ TEST(WaveDebugTest, SendmsghaltPublishesArchitecturalStatusHalt) {
 // provenance marker has to come out clear on this path.
 TEST(WaveDebugTest, HandlerSetregHaltIsNotAttributedToSendmsghalt) {
   WaveDebugFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint32_t kStatusHalt = 1u << 13;
 
   fx.gpu_mem.write32(kKernelAddr, kSTrapBreakpoint);
@@ -568,6 +584,7 @@ TEST(WaveDebugTest, HandlerSetregHaltIsNotAttributedToSendmsghalt) {
 // must leave alone.
 TEST(WaveDebugTest, SelfHaltedMarkerDoesNotSurviveTheStopThatSetIt) {
   WaveDebugFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint32_t kSSendmsghaltInterrupt = 0xBF910001u;
 
   fx.gpu_mem.write32(kKernelAddr, kSTrapBreakpoint);
@@ -620,6 +637,7 @@ TEST(WaveDebugTest, SelfHaltedMarkerDoesNotSurviveTheStopThatSetIt) {
 // the scheduler and lets it retire.
 TEST(WaveDebugTest, SendmsghaltWithoutADebugSessionHaltsAndStaysReleasable) {
   WaveDebugFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint32_t kStatusHalt = 1u << 13;
   constexpr uint32_t kSSendmsghaltInterrupt = 0xBF910001u;
   constexpr uint64_t kApplicationExec = 0x5u;
@@ -716,6 +734,7 @@ TEST(WaveDebugTest, CwsrLayoutIsModelledForGfx94AndGfx1250) {
 // cause raised before a debugger attached, since the handler declines then.
 TEST(WaveDebugTest, EnabledExceptionIsDeliveredAfterAnEarlierDisabledOccurrence) {
   WaveDebugFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint32_t kInvalidCause = 1u << 0;
   constexpr uint32_t kOverflowCause = 1u << 3;
   constexpr uint32_t kModeExcpEnShift = 12;
@@ -758,6 +777,7 @@ TEST(WaveDebugTest, EnabledExceptionIsDeliveredAfterAnEarlierDisabledOccurrence)
 
 TEST(WaveDebugTest, Gfx1250AluExceptionDeliveryUsesTrapCtrlNotModeVgprMsb) {
   WaveDebugFixture fx(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint32_t kInvalidCause = 1u << 0;
   constexpr uint32_t kOverflowCause = 1u << 3;
   // Keep SRC2 in a nonzero bank. VOP2 does not use that role, but a regression
@@ -806,6 +826,7 @@ TEST(WaveDebugTest, Gfx1250AluExceptionDeliveryUsesTrapCtrlNotModeVgprMsb) {
 // left loads' destination registers stale in an undebugged process.
 TEST(WaveDebugTest, DeclinedMemoryViolationStillIssuesTheAccess) {
   WaveDebugFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint32_t kProcessId = 11;
   constexpr uint64_t kPageSize = amdgpu::GpuMemory::PAGE_SIZE;
   constexpr uint64_t kUnmappedAddr = 0x900000;
@@ -873,6 +894,7 @@ TEST(WaveDebugTest, DeclinedMemoryViolationStillIssuesTheAccess) {
 // EC_QUEUE_WAVE_MEMORY_VIOLATION, so the whole touched range is validated.
 TEST(WaveDebugTest, ScalarLoadStraddlingIntoUnmappedPageReportsMemoryViolation) {
   WaveDebugFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint32_t kProcessId = 9;
   constexpr uint64_t kPageSize = amdgpu::GpuMemory::PAGE_SIZE;
   constexpr uint64_t kDataAddr = 0x40000;
@@ -928,6 +950,7 @@ TEST(WaveDebugTest, ScalarLoadStraddlingIntoUnmappedPageReportsMemoryViolation) 
 
 TEST(WaveDebugTest, ScalarAtomicX2AtPageEndChecksOnlyItsAccessWidth) {
   WaveDebugFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint32_t kProcessId = 9;
   constexpr uint64_t kPageSize = amdgpu::GpuMemory::PAGE_SIZE;
   constexpr uint64_t kDataAddr = 0x40000;
@@ -998,6 +1021,7 @@ TEST(WaveDebugTest, ScalarAtomicX2AtPageEndChecksOnlyItsAccessWidth) {
 // address for SETPC.
 TEST(WaveDebugTest, SwappcResolvesLinkedRel32AndSetpcReturns) {
   WaveDebugFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint64_t kLoadBias = 0x7FFF00000000ULL;
   constexpr uint64_t kCallerPc = kLoadBias + 0xA3A8;
   constexpr uint64_t kCalleePc = kLoadBias + 0x8D60;
@@ -1030,6 +1054,7 @@ TEST(WaveDebugTest, SwappcResolvesLinkedRel32AndSetpcReturns) {
 // re-stops it. The engine must not run past that one instruction.
 TEST(WaveDebugTest, SingleStepExecutesOneInstructionThenReports) {
   WaveDebugFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   fx.gpu_mem.write32(kKernelAddr, 0xBF800000u);     // s_nop 0
   fx.gpu_mem.write32(kKernelAddr + 4, 0xBF800000u); // s_nop 0
   fx.gpu_mem.write32(kKernelAddr + 8, kSEndpgm);
@@ -1070,6 +1095,7 @@ TEST(WaveDebugTest, SingleStepExecutesOneInstructionThenReports) {
 // aborting the emulator when no debugger is attached.
 TEST(WaveDebugTest, STrapWithoutDebuggerIsNoOp) {
   WaveDebugFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   fx.gpu_mem.write32(kKernelAddr, kSTrapBreakpoint);
   fx.gpu_mem.write32(kKernelAddr + 4, kSEndpgm);
 
@@ -1086,6 +1112,7 @@ TEST(WaveDebugTest, STrapWithoutDebuggerIsNoOp) {
 
 TEST(WaveDebugTest, IllegalInstructionStopsWaveUnderDebugger) {
   WaveDebugFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   fx.gpu_mem.write32(kKernelAddr, 0xFFFFFFFFu);
   uint32_t illegal_count = 0;
   fx.cu->set_illegal_inst_handler([&](amdgpu::Wavefront &wave) {
@@ -1107,6 +1134,7 @@ TEST(WaveDebugTest, IllegalInstructionStopsWaveUnderDebugger) {
 
 TEST(WaveDebugTest, IllegalInstructionWithoutHandlerHalts) {
   WaveDebugFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   fx.gpu_mem.write32(kKernelAddr, 0xFFFFFFFFu);
   auto *wave = fx.dispatch(kKernelAddr);
   ASSERT_NE(wave, nullptr);
@@ -1116,6 +1144,7 @@ TEST(WaveDebugTest, IllegalInstructionWithoutHandlerHalts) {
 
 TEST(WaveDebugTest, Pm4DecodeFailureDoesNotNotifyAqlOwner) {
   WaveDebugFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   fx.gpu_mem.write32(kKernelAddr, 0xFFFFFFFFu);
   uint32_t notifications = 0;
   fx.cu->set_illegal_inst_handler([&](amdgpu::Wavefront &) {
@@ -1134,6 +1163,7 @@ TEST(WaveDebugTest, Pm4DecodeFailureDoesNotNotifyAqlOwner) {
 
 TEST(WaveDebugTest, STrapWithoutConfiguredHandlerAdvancesPcWithoutChangingWaveState) {
   WaveDebugFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   fx.gpu_mem.write32(kKernelAddr, kSTrapSeven);
 
   auto *wf = fx.dispatch(kKernelAddr);
@@ -1152,6 +1182,7 @@ TEST(WaveDebugTest, STrapWithoutConfiguredHandlerAdvancesPcWithoutChangingWaveSt
 
 TEST(WaveDebugTest, Gfx1250TrapWithoutConfiguredHandlerAdvancesPc) {
   WaveDebugFixture fx(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   fx.gpu_mem.write32(kKernelAddr, kGfx12STrap);
 
   auto *wf = fx.dispatch(kKernelAddr);
@@ -1167,6 +1198,7 @@ TEST(WaveDebugTest, Rdna4TrapEntryAndReturnUseTheGfx12WaveStateLayout) {
   constexpr uint32_t kApplicationStatus = 1u | (0xAu << 1);
   constexpr uint32_t kSchedMode = 2u;
   WaveDebugFixture fx(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   fx.gpu_mem.write32(kHighKernelAddr, kGfx12STrap);
   fx.gpu_mem.write32(kHighKernelAddr + 4, kSEndpgm);
 
@@ -1219,6 +1251,7 @@ TEST(WaveDebugTest, Gfx1250TrapEntryAndReturnFollowTheGfx12Abi) {
   constexpr uint32_t kApplicationStatus = 1u | (0xAu << 1);
   constexpr uint64_t kScratchBase = 0x0000001240008000ULL;
   WaveDebugFixture fx(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   fx.gpu_mem.write32(kHighKernelAddr, kGfx12STrap);
   fx.gpu_mem.write32(kHighKernelAddr + 4, kSEndpgm);
 
@@ -1271,6 +1304,7 @@ TEST(WaveDebugTest, Gfx1250TrapEntryAndReturnFollowTheGfx12Abi) {
 // (slot reuse) clears all debugger state.
 TEST(WaveDebugTest, TrapRegistersRoundTripAndReset) {
   WaveDebugFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   auto *wf = fx.dispatch(kKernelAddr);
   ASSERT_NE(wf, nullptr);
 

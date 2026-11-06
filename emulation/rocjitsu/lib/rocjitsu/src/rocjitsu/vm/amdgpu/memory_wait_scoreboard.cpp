@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/branch_stack.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/flat_address.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/image_resource.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h"
 #include "rocjitsu/isa/instruction.h"
@@ -175,13 +176,7 @@ MemoryWaitScoreboard::FlatLanes MemoryWaitScoreboard::flat_lanes(const Instructi
   if (!shared_base || !result.requests)
     return result;
   const auto arch = wf.cu().arch();
-  const auto layout = arch == ROCJITSU_CODE_ARCH_CDNA5 ? FlatPrivateLayout::EncodedLane
-                      : arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-                              arch == ROCJITSU_CODE_ARCH_RDNA4
-                          ? FlatPrivateLayout::Linear
-                      : arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2
-                          ? FlatPrivateLayout::None
-                          : FlatPrivateLayout::Interleaved;
+  const auto layout = flat_private_layout(arch);
   const auto address = registers.source_register(*modifiers.flat_address);
   uint64_t remaining = result.requests;
   while (remaining) {
@@ -258,6 +253,33 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
   RegisterModifiers modifiers;
   inst.amdgpu_register_modifiers(modifiers);
   const RegisterAccess registers(wf);
+  if (modifiers.image_address) {
+    uint32_t components = modifiers.image_coordinate_count;
+    uint32_t prefix = modifiers.image_prefix_words;
+    const RegisterModifiers::Gfx9ImageTuple &tuple = modifiers.gfx9_image_tuple;
+    if (tuple.resource_selector != ~0u) {
+      const std::optional<uint32_t> descriptor =
+          registers.scalar_control_value(tuple.resource_selector + 3);
+      const ImageCoordinateShape shape =
+          image_coordinate_shape(descriptor.value_or(0) >> 28, tuple.image_array);
+      components = shape.coordinates() + tuple.mip;
+      const uint32_t dimensions = shape.spatial_dimensions();
+      prefix =
+          tuple.derivatives ? 2 * (modifiers.image_a16 ? (dimensions + 1) / 2 : dimensions) : 0;
+    }
+    for (uint32_t word = 0; word < prefix; ++word) {
+      const uint16_t reg = modifiers.image_coordinates[word];
+      if (reg < wf.num_vgprs())
+        access({RegClass::VGPR, reg, 1}, lanes, 0xf, false);
+    }
+    for (uint32_t component = 0; component < components; ++component) {
+      const uint32_t word = prefix + (modifiers.image_a16 ? component / 2 : component);
+      const uint16_t reg = modifiers.image_coordinates[word];
+      if (reg < wf.num_vgprs())
+        access({RegClass::VGPR, reg, 1}, lanes,
+               modifiers.image_a16 ? (component % 2 ? 0xc : 0x3) : 0xf, false);
+    }
+  }
   if (modifiers.exec_all_if_nonzero)
     lanes = wave32_exec_all_if_nonzero(lanes);
   if (modifiers.exec_whole_quads)
@@ -557,7 +579,7 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
                                   (name.find("mixlo_") != std::string_view::npos ||
                                    name.find("mixhi_") != std::string_view::npos);
     if (mix_preservation || !op || op == hwreg || op == modifiers.buffer_resource ||
-        (!pending_scalar_ && !op->is_vgpr()))
+        op == modifiers.image_address || (!pending_scalar_ && !op->is_vgpr()))
       return;
     if (op == modifiers.block_data) {
       for (uint32_t word = 0; word < kBlockDwordCount; ++word)
@@ -569,10 +591,22 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     const auto reg = resolve(*op, write);
     if (!reg || reg->cls == RegClass::ACC_VGPR)
       return;
-    const uint64_t accessed_lanes = reg->cls != RegClass::VGPR ? ~uint64_t{0}
-                                    : write                    ? destination_lanes
-                                    : op == modifiers.src0     ? src0_lanes
-                                                               : lanes;
+    uint64_t accessed_lanes = reg->cls != RegClass::VGPR ? ~uint64_t{0}
+                              : write                    ? destination_lanes
+                              : op == modifiers.src0     ? src0_lanes
+                                                         : lanes;
+    // Interpolation coefficients are quad broadcasts, including inactive lanes.
+    if (!write && reg->cls == RegClass::VGPR && name.starts_with("v_interp_") &&
+        (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 ||
+         wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4)) {
+      const uint64_t quads =
+          (lanes | (lanes >> 1) | (lanes >> 2) | (lanes >> 3)) & 0x1111111111111111ULL;
+      const bool p2 = name.starts_with("v_interp_p2");
+      if (op == inst.src_operand(0))
+        accessed_lanes = quads << (p2 ? 2 : 1);
+      else if (op == inst.src_operand(2) && !p2)
+        accessed_lanes = quads;
+    }
     if (vector && !lanes && !write && !inst.is_memory_op())
       return;
     uint8_t bytes = op->register_byte_mask();
@@ -659,6 +693,14 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
   if (!branch_stack && (!preserves_destination || distinguishes_preservation)) {
     inst.implicit_uses(implicit);
     implicit -= preservation_uses;
+  }
+  // Image coordinates were checked above with their A16 byte masks. Their
+  // register-level liveness uses must not turn a packed half into a full read.
+  if (modifiers.image_address) {
+    RegisterSet coordinate_uses;
+    for (uint32_t selector : modifiers.image_coordinates)
+      coordinate_uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(selector), 1});
+    implicit -= coordinate_uses;
   }
   implicit.for_each([&](RegisterRef reg) {
     // Operand-derived reads preserve their bank roles above.
