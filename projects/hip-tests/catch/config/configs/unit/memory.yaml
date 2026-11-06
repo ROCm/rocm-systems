@@ -971,7 +971,19 @@ memory:
   Unit_hipMemcpyBatchAsync_LegacyFlags_Ignored:
     <<: *level_2
     tags: [P1]
-  Unit_hipExtMemcpyBatchAsync_WaitsSignals_Reserved_Negative:
+  Unit_hipExtMemcpyBatchAsync_WaitsSignals_Negative:
+    <<: *level_2
+    tags: [P1]
+  Unit_hipExtMemcpyBatchAsync_Signal:
+    <<: *level_2
+    tags: [P1]
+  Unit_hipExtMemcpyBatchAsync_Signal_AfterCopy:
+    <<: *level_2
+    tags: [P1]
+  Unit_hipExtMemcpyBatchAsync_Wait:
+    <<: *level_2
+    tags: [P1]
+  Unit_hipExtMemcpyBatchAsync_WaitSignal_Kernel:
     <<: *level_2
     tags: [P1]
   Unit_hipExtMemcpyBatchAsync_StreamCapture_Negative:

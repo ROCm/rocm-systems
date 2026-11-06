@@ -489,11 +489,13 @@ typedef enum hipExtMemcpyWaitOp {
 } hipExtMemcpyWaitOp;
 
 /**
- * Per-entry wait condition for hipExtMemcpyBatchAsync. Reserved for future use;
- * layout may change before support is enabled.
+ * Per-entry wait condition for hipExtMemcpyBatchAsync, polled by the copy engine before
+ * the copy. Not supported for pageable host memory, host-to-host copies or
+ * hipMemcpyFlagExtPreferComputeEngine.
+ * Devices with 32-bit polls require the masked compare to lie within one 32-bit half.
  */
 typedef struct hipExtMemcpyWait {
-  void*    addr;        ///< GPU address to poll; NULL iff compareOp is None
+  void*    addr;        ///< 8-byte aligned address to poll; NULL iff compareOp is None
   uint64_t value;       ///< Reference value for comparison
   uint64_t mask;        ///< AND mask applied before comparison (0 = full 64-bit word)
   uint32_t compareOp;   ///< Comparison function; see hipExtMemcpyWaitOp
@@ -512,11 +514,12 @@ typedef enum hipExtMemcpySignalOp {
 } hipExtMemcpySignalOp;
 
 /**
- * Per-entry signal-after-copy for hipExtMemcpyBatchAsync. Reserved for future use;
- * layout may change before support is enabled.
+ * Per-entry signal-after-copy for hipExtMemcpyBatchAsync, applied by the copy engine
+ * after the copy. Not supported for pageable host memory, host-to-host copies,
+ * hipMemcpyFlagExtPreferComputeEngine, or without 64-bit PCIe atomics.
  */
 typedef struct hipExtMemcpySignal {
-  void*    addr;        ///< GPU address to signal; NULL iff signalOp is None
+  void*    addr;        ///< 8-byte aligned address to signal; NULL iff signalOp is None
   uint64_t data;        ///< Data value for the atomic operation
   uint32_t signalOp;    ///< Atomic operation; see hipExtMemcpySignalOp
   uint32_t reserved0;   ///< Reserved; must be 0
