@@ -59,51 +59,51 @@ inline __m256d selection_omod_round(__m256d before, __m256d scaled, uint64_t fla
 }
 
 // Correct the x86 selection rules for NaNs and opposite-signed zeros.
+// Requires the default CPU FP environment. Bitwise NaN selection/quieting keeps
+// the Compatibility payload contract independent of compiler FP optimizations.
 template <bool Maximum, bool PropagateNaN> __m256 minmax(__m256 x, __m256 y) {
-  auto a = _mm256_castps_si256(x), b = _mm256_castps_si256(y);
-  auto magnitude = _mm256_set1_epi32(INT32_MAX);
-  auto infinity = _mm256_set1_epi32(0x7f800000);
-  auto quiet = _mm256_set1_epi32(0x00400000);
-  auto an = _mm256_cmpgt_epi32(_mm256_and_si256(a, magnitude), infinity);
-  auto bn = _mm256_cmpgt_epi32(_mm256_and_si256(b, magnitude), infinity);
-  auto value = Maximum ? _mm256_max_ps(x, y) : _mm256_min_ps(x, y);
-  auto equal = _mm256_cmp_ps(x, y, _CMP_EQ_OQ);
-  auto tie = Maximum ? _mm256_and_si256(a, b) : _mm256_or_si256(a, b);
-  value = _mm256_blendv_ps(value, _mm256_castsi256_ps(tie), equal);
+  auto x_nan = _mm256_cmp_ps(x, x, _CMP_UNORD_Q);
+  auto quiet_bit = _mm256_castsi256_ps(_mm256_set1_epi32(0x00400000));
   if constexpr (PropagateNaN) {
-    auto selected = _mm256_blendv_epi8(b, a, an);
-    value = _mm256_blendv_ps(value, _mm256_castsi256_ps(_mm256_or_si256(selected, quiet)),
-                             _mm256_castsi256_ps(_mm256_or_si256(an, bn)));
+    // Select the first NaN before setting its quiet bit; preserve sign/payload.
+    auto nan = _mm256_or_ps(_mm256_blendv_ps(y, x, x_nan), quiet_bit);
+    auto either_nan = _mm256_cmp_ps(x, y, _CMP_UNORD_Q);
+    // Opposite operand orders expose both zero signs; AND selects +0, OR -0.
+    auto value = Maximum ? _mm256_and_ps(_mm256_max_ps(x, y), _mm256_max_ps(y, x))
+                         : _mm256_or_ps(_mm256_min_ps(x, y), _mm256_min_ps(y, x));
+    return _mm256_blendv_ps(value, nan, either_nan);
   } else {
-    value = _mm256_blendv_ps(value, x, _mm256_castsi256_ps(bn));
-    value = _mm256_blendv_ps(value, _mm256_castsi256_ps(_mm256_or_si256(a, quiet)),
-                             _mm256_castsi256_ps(_mm256_and_si256(an, bn)));
+    auto x_quiet = _mm256_or_ps(x, _mm256_and_ps(x_nan, quiet_bit));
+    auto equal = _mm256_cmp_ps(x, y, _CMP_EQ_OQ);
+    auto y_nan = _mm256_cmp_ps(y, y, _CMP_UNORD_Q);
+    auto value = Maximum ? _mm256_max_ps(x, y) : _mm256_min_ps(x, y);
+    auto tie = Maximum ? _mm256_and_ps(x, y) : _mm256_or_ps(x, y);
+    value = _mm256_blendv_ps(value, tie, equal);
+    return _mm256_blendv_ps(value, x_quiet, y_nan);
   }
-  return value;
 }
 
 // Correct the x86 selection rules for NaNs and opposite-signed zeros.
 template <bool Maximum, bool PropagateNaN> __m256d minmax(__m256d x, __m256d y) {
-  auto a = _mm256_castpd_si256(x), b = _mm256_castpd_si256(y);
-  auto magnitude = _mm256_set1_epi64x(INT64_MAX);
-  auto infinity = _mm256_set1_epi64x(INT64_C(0x7ff0000000000000));
-  auto quiet = _mm256_set1_epi64x(INT64_C(0x0008000000000000));
-  auto an = _mm256_cmpgt_epi64(_mm256_and_si256(a, magnitude), infinity);
-  auto bn = _mm256_cmpgt_epi64(_mm256_and_si256(b, magnitude), infinity);
-  auto value = Maximum ? _mm256_max_pd(x, y) : _mm256_min_pd(x, y);
-  auto equal = _mm256_cmp_pd(x, y, _CMP_EQ_OQ);
-  auto tie = Maximum ? _mm256_and_si256(a, b) : _mm256_or_si256(a, b);
-  value = _mm256_blendv_pd(value, _mm256_castsi256_pd(tie), equal);
+  auto x_nan = _mm256_cmp_pd(x, x, _CMP_UNORD_Q);
+  auto quiet_bit = _mm256_castsi256_pd(_mm256_set1_epi64x(0x0008000000000000LL));
   if constexpr (PropagateNaN) {
-    auto selected = _mm256_blendv_epi8(b, a, an);
-    value = _mm256_blendv_pd(value, _mm256_castsi256_pd(_mm256_or_si256(selected, quiet)),
-                             _mm256_castsi256_pd(_mm256_or_si256(an, bn)));
+    // Select the first NaN before setting its quiet bit; preserve sign/payload.
+    auto nan = _mm256_or_pd(_mm256_blendv_pd(y, x, x_nan), quiet_bit);
+    auto either_nan = _mm256_cmp_pd(x, y, _CMP_UNORD_Q);
+    // Opposite operand orders expose both zero signs; AND selects +0, OR -0.
+    auto value = Maximum ? _mm256_and_pd(_mm256_max_pd(x, y), _mm256_max_pd(y, x))
+                         : _mm256_or_pd(_mm256_min_pd(x, y), _mm256_min_pd(y, x));
+    return _mm256_blendv_pd(value, nan, either_nan);
   } else {
-    value = _mm256_blendv_pd(value, x, _mm256_castsi256_pd(bn));
-    value = _mm256_blendv_pd(value, _mm256_castsi256_pd(_mm256_or_si256(a, quiet)),
-                             _mm256_castsi256_pd(_mm256_and_si256(an, bn)));
+    auto x_quiet = _mm256_or_pd(x, _mm256_and_pd(x_nan, quiet_bit));
+    auto equal = _mm256_cmp_pd(x, y, _CMP_EQ_OQ);
+    auto y_nan = _mm256_cmp_pd(y, y, _CMP_UNORD_Q);
+    auto value = Maximum ? _mm256_max_pd(x, y) : _mm256_min_pd(x, y);
+    auto tie = Maximum ? _mm256_and_pd(x, y) : _mm256_or_pd(x, y);
+    value = _mm256_blendv_pd(value, tie, equal);
+    return _mm256_blendv_pd(value, x_quiet, y_nan);
   }
-  return value;
 }
 
 // RDNA3 selection adds IEEE-mode signaling-NaN priority to number preference.
