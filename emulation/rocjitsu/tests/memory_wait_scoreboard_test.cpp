@@ -857,6 +857,58 @@ TEST(MemoryWaitExecutionTest, D16ImageWaitsTrackPartialResultsAndRealImplicitRea
   }
 }
 
+TEST(MemoryWaitExecutionTest, SampleAndLoadWaitsAreIndependent) {
+  GpuMemory memory("sample_wait_memory");
+  L2Cache l2("sample_wait_l2");
+  ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 32;
+  config.vgprs_per_wf = 32;
+  auto cu = ComputeUnitCore::create("sample_wait_cu", config, &memory, &l2);
+  auto *wf = cu->dispatch_wf(0, 0, 32, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->wait_counters().increment(WaitCounterType::LOADCNT);
+  wf->set_wait_counter("wait_samplecnt", 0);
+  EXPECT_TRUE(wf->wait_satisfied());
+  wf->wait_counters().increment(WaitCounterType::SAMPLECNT);
+  EXPECT_FALSE(wf->wait_satisfied());
+  wf->wait_counters().decrement(WaitCounterType::SAMPLECNT);
+  EXPECT_TRUE(wf->wait_satisfied());
+  wf->set_wait_counter("wait_loadcnt", 0);
+  EXPECT_FALSE(wf->wait_satisfied());
+  wf->wait_counters().decrement(WaitCounterType::LOADCNT);
+  EXPECT_TRUE(wf->wait_satisfied());
+  wf->halt();
+}
+
+TEST(MemoryWaitExecutionTest, SampleWaitMasksUpperImmediateBits) {
+  GpuMemory memory("sample_wait_memory");
+  L2Cache l2("sample_wait_l2");
+  ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 32;
+  config.vgprs_per_wf = 32;
+  auto cu = ComputeUnitCore::create("sample_wait_cu", config, &memory, &l2);
+  Wavefront *wf = cu->dispatch_wf(0, 0, 32, 32);
+  ASSERT_NE(wf, nullptr);
+  std::unique_ptr<Decoder> decoder = Decoder::create(config.arch);
+  ASSERT_NE(decoder, nullptr);
+  for (uint16_t threshold : std::array<uint16_t, 3>{0x3f, 0x40, 0x80}) {
+    SCOPED_TRACE(threshold);
+    wf->wait_counters().increment(WaitCounterType::SAMPLECNT);
+    const auto words = rdna4::build_sopp(rdna4::kSWaitSamplecnt, {.simm16 = threshold});
+    DecodeResult decoded = decoder->decode_window(words);
+    ASSERT_TRUE(decoded.succeeded());
+    decoded.value()->execute(*decoded.value(), wf);
+    EXPECT_EQ(wf->wait_satisfied(), threshold == 0x3f);
+    wf->wait_counters().decrement(WaitCounterType::SAMPLECNT);
+    EXPECT_TRUE(wf->wait_satisfied());
+  }
+  wf->halt();
+}
+
 TEST(MemoryWaitExecutionTest, WaitIdleAndRdna4CompatibilityWaitDrainEveryFunctionalCounter) {
   for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
     for (uint32_t word : {0xbf890000u, 0xbf89fc07u, 0xbf89ffffu, 0xbf8a0000u}) {
@@ -878,10 +930,10 @@ TEST(MemoryWaitExecutionTest, WaitIdleAndRdna4CompatibilityWaitDrainEveryFunctio
           rocjitsu::test::initialize_compute_unit(cu, "wait_cu", config, &memory, &l2));
       auto *wf = cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
       ASSERT_NE(wf, nullptr);
-      const auto counters = {WaitCounterType::LOADCNT, WaitCounterType::STORECNT,
-                             WaitCounterType::DSCNT,   WaitCounterType::KMCNT,
-                             WaitCounterType::EXPCNT,  WaitCounterType::TENSORCNT,
-                             WaitCounterType::ASYNCCNT};
+      const auto counters = {WaitCounterType::LOADCNT,  WaitCounterType::STORECNT,
+                             WaitCounterType::DSCNT,    WaitCounterType::KMCNT,
+                             WaitCounterType::EXPCNT,   WaitCounterType::TENSORCNT,
+                             WaitCounterType::ASYNCCNT, WaitCounterType::SAMPLECNT};
       for (auto counter : counters)
         wf->wait_counters().increment(counter);
       auto decoder = Decoder::create(arch);
