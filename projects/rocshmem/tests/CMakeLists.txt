@@ -35,6 +35,12 @@ IF (BUILD_UNIT_TESTS)
     add_subdirectory(unit_tests)
 ENDIF()
 
+# Regression test for rocprofiler-register integration: verifies ROCSHMEM_ROCPROFILER_REGISTER=1 was set
+# at compile time. Catches the regression at both link time and runtime. No MPI or GPU required.
+if(USE_ROCPROFILER_REGISTER AND TARGET rocprofiler-register::rocprofiler-register)
+    add_subdirectory(rocprofiler_register)
+endif()
+
 # Print top-level test summary if CTest is enabled
 if(BUILD_CTESTS AND (BUILD_FUNCTIONAL_TESTS OR BUILD_UNIT_TESTS))
     # Get all tests from this directory and subdirectories
