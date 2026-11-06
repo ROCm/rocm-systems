@@ -5483,9 +5483,9 @@ hipError_t playback_hipMemAddressFree(PlaybackContext& ctx, const uint8_t* pl) {
 hipError_t playback_hipMemCreate(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipMemCreate*>(pl);
     uint64_t rec_handle = a->handle;  // recorded output handle
-    // The allocation property is carried inline (DEREF_FIELDS). It used to be
-    // hardcoded to Pinned on device 0, which builds the wrong topology without
-    // saying so for a heap that maps cross-node peers.
+    // The allocation property is carried inline (DEREF_FIELDS); hardcoding
+    // Pinned/device 0 would build the wrong topology for a heap that maps
+    // cross-node peers.
     hipMemAllocationProp prop{};
     if (a->prop_present) {
         std::memcpy(&prop, a->prop_bytes, sizeof(prop));

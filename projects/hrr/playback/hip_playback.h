@@ -163,9 +163,8 @@ struct HrrHeldRanges {
 // ---- Unmapped-pointer policy ----
 // A recorded pointer argument that resolves in no allocation, VMM reservation
 // or region is memory replay does not know, most often a buffer a framework
-// carved out of its own pool without HIP seeing it. One such pointer used to
-// cost the whole replay, every later event included, and the handlers did not
-// agree on it: some skipped the call, most aborted.
+// carved out of its own pool without HIP seeing it. One such pointer must not
+// cost the whole replay, so every handler follows the same policy.
 //
 // The policy, the same for every handler: PlaybackContext::translate_ptr
 // notes the miss here, and dispatch_event, not the handler, decides. By
@@ -244,9 +243,8 @@ struct PlaybackContext {
     // replay pushed a capture-time hipCtx_t and the thread was left with no
     // current device, which killed the process several events later.
     std::unordered_map<uint64_t, hipCtx_t>       ctx_map;
-    // JIT linker states. hipLinkCreate used to throw its output away, so
-    // hipLinkComplete and hipLinkDestroy were handed the capturing process's
-    // pointer and failed no matter what the linker inputs were.
+    // JIT linker states, so hipLinkComplete and hipLinkDestroy get this
+    // process's hipLinkState_t, not the capturing process's pointer.
     std::unordered_map<uint64_t, hipLinkState_t> link_state_map;
 
     // Device allocations: recorded base address -> {live ptr, size}
