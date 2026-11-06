@@ -330,13 +330,21 @@ void
 start_completion_monitor();
 
 /**
- * @brief Stop and join the completion-monitor thread, retiring any stragglers
+ * @brief Defer destruction while the completion monitor references @p signal
  *
- * Closes the producer admission gate, wakes the monitor, joins it, then retires what is left so
- * pooled signals and correlation-id references are released. Must run before the signal pool is
- * torn down, so those releases target a live pool. A batch whose completion signal never dropped
- * produces no dispatch record and keeps its pooled signal, since its timestamps were never
- * written and the GPU may still write to that signal. Every caller returns with the monitor
+ * Signal values coordinate dispatch completion but do not retain the HSA signal object. Returns
+ * true when the monitor took responsibility for forwarding destruction after its final status and
+ * timing reads; false when the caller should forward destruction immediately.
+ */
+bool
+defer_pending_signal_destruction(hsa_signal_t signal);
+
+/**
+ * @brief Stop and join the completion-monitor thread, draining any stragglers
+ *
+ * Closes the producer admission gate, wakes the monitor, joins it, then waits for every remaining
+ * completion before reading its timing and releasing its signal. Must run before the signal pool
+ * is torn down, so those releases target a live pool. Every caller returns with the monitor
  * thread dead and every record delivered, waiting on the record emitter to do so. Producers still
  * inside the doorbell path are not waited on; they see the monitor stopped and dispose of their
  * own batch.

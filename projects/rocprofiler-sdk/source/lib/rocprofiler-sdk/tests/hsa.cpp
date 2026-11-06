@@ -23,8 +23,10 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
+#include "lib/common/scope_destructor.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+#include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 
 #include <gtest/gtest.h>
 
@@ -107,6 +109,50 @@ TEST(hsa, tables)
     EXPECT_EQ(table.amd_ext_, amd_ext);
     EXPECT_EQ(table.finalizer_ext_, fini_ext);
     EXPECT_EQ(table.image_ext_, img_ext);
+}
+
+TEST(hsa, dispatch_time_queries_runtime_once)
+{
+    namespace hsa = ::rocprofiler::hsa;
+
+    static size_t dispatch_time_calls = 0;
+    dispatch_time_calls               = 0;
+
+    auto* core                     = hsa::get_core_table();
+    auto* amd_ext                  = hsa::get_amd_ext_table();
+    auto  original_system_get_info = core->hsa_system_get_info_fn;
+    auto  original_dispatch_time   = amd_ext->hsa_amd_profiling_get_dispatch_time_fn;
+    auto  original_async_copy_time = amd_ext->hsa_amd_profiling_get_async_copy_time_fn;
+    auto  restore                  = ::rocprofiler::common::scope_destructor{[&]() {
+        core->hsa_system_get_info_fn                      = original_system_get_info;
+        amd_ext->hsa_amd_profiling_get_dispatch_time_fn   = original_dispatch_time;
+        amd_ext->hsa_amd_profiling_get_async_copy_time_fn = original_async_copy_time;
+    }};
+
+    core->hsa_system_get_info_fn = [](hsa_system_info_t, void* value) {
+        *static_cast<uint64_t*>(value) = 1000000000UL;
+        return HSA_STATUS_SUCCESS;
+    };
+    amd_ext->hsa_amd_profiling_get_dispatch_time_fn =
+        [](hsa_agent_t, hsa_signal_t, hsa_amd_profiling_dispatch_time_t* time) {
+            ++dispatch_time_calls;
+            time->start = 100;
+            time->end   = 200;
+            return HSA_STATUS_SUCCESS;
+        };
+    amd_ext->hsa_amd_profiling_get_async_copy_time_fn = hsa_amd_profiling_get_async_copy_time;
+
+    auto raw_time      = ::rocprofiler::kernel_dispatch::profiling_time{};
+    auto adjusted_time = ::rocprofiler::kernel_dispatch::get_dispatch_time(
+        hsa_agent_t{1}, hsa_signal_t{2}, rocprofiler_kernel_id_t{3}, 0, &raw_time);
+
+    EXPECT_EQ(dispatch_time_calls, 1);
+    EXPECT_EQ(raw_time.status, HSA_STATUS_SUCCESS);
+    EXPECT_EQ(raw_time.start, 100);
+    EXPECT_EQ(raw_time.end, 200);
+    EXPECT_EQ(adjusted_time.status, HSA_STATUS_SUCCESS);
+    EXPECT_EQ(adjusted_time.start, 100);
+    EXPECT_EQ(adjusted_time.end, 200);
 }
 
 TEST(hsa, high_precision_timestamp_contexts)

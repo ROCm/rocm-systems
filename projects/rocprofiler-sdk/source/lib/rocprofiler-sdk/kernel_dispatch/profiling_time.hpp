@@ -45,6 +45,7 @@ profiling_time
 get_dispatch_time(hsa_agent_t             agent,
                   hsa_signal_t            signal,
                   rocprofiler_kernel_id_t kernel_id,
-                  std::optional<uint64_t> baseline = {});
+                  std::optional<uint64_t> baseline = {},
+                  profiling_time*         raw_time = nullptr);
 }  // namespace kernel_dispatch
 }  // namespace rocprofiler
