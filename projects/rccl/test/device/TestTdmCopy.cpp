@@ -280,6 +280,12 @@ INSTANTIATE_TEST_SUITE_P(
     // shape (16KB windows, 8KB chunks, head 0, delta 0), and shifting by delta 1 (head 256B, 7936B chunks).
     BlockCase{65536,       32768, 0, 128, 64, "two_slot_whole_chunks"},
     BlockCase{256 + 2 * 7936, 16384, 1, 128, 32, "two_slot_shift_whole_chunks"},
+    // One slot with dst 16B past a boundary (delta 240: head 240B, 3840B chunks on a 4KB window), the run
+    // overflowing a chunk by under, exactly, and just over 256B; then a block whose 8KB runs overflow 7936B chunks.
+    BlockCase{240 + 3840 + 100, 4096,  0, 144, 32,  "one_slot_straggler"},
+    BlockCase{240 + 3840 + 256, 4096,  0, 144, 32,  "one_slot_straggler_row"},
+    BlockCase{240 + 3840 + 257, 4096,  0, 144, 32,  "one_slot_past_straggler"},
+    BlockCase{65536,            65536, 0, 144, 256, "one_slot_straggler_team"},
     // Every delta % 4 across a whole block.
     BlockCase{(1 << 20) + 13, 65536, 0, 0, 256, "team_delta128"},
     BlockCase{(1 << 20) + 13, 65536, 1, 0, 256, "team_delta129"},

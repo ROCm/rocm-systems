@@ -258,8 +258,9 @@ __device__ TDM_API void tdmCopyAsyncByTeam(void* dst, const void* src, size_t si
 ///       -- a warp cannot drain its teammates' ops. tdmCopy*()/*ByTeam() blocking
 ///       forms already do this internally.
 /// \note For BLOCK-wide visibility follow with __syncthreads(); if copied data is
-///       consumed within the block AND the vector head ran, also
-///       __threadfence_block() so those ordinary global stores are observed.
+///       consumed within the block, also __threadfence_block(): the head, and a
+///       run's last <= 256B when it would cost a whole extra chunk, go through
+///       ordinary global stores.
 __device__ TDM_API void tdmWait() TDM_DELETED;
 
 // ============================================================================
@@ -371,9 +372,9 @@ __device__ TDM_API void asyncStoreFromLDS(const uint8_t* ldsSrc, uint8_t* global
 //
 // VISIBILITY
 //   tdmWait() drains only the calling wave's TDM ops. Cross-warp / block-wide
-//   visibility is the caller's __syncthreads(); the vector head's ordinary
-//   global stores additionally want __threadfence_block() if consumed within the
-//   block. Host-after-kernel and grid dependencies are handled by the stream.
+//   visibility is the caller's __syncthreads(); the vector head's and stragglers'
+//   ordinary global stores additionally want __threadfence_block() if consumed
+//   within the block. Host-after-kernel and grid dependencies are handled by the stream.
 //
 // BUILTINS: verify names against your tree:
 //   grep -iE 'tensor_(load|store)|tensorcnt' \
@@ -678,6 +679,18 @@ __device__ inline void issue(void* dst, const void* src, size_t sizeBytes, void*
 
   if (nSlots == 1) {
     // One slot: each chunk's store waits for its load, and the next load for the store.
+    // A run that overflows one chunk by at most ALIGN bytes (the slot lost o to the
+    // offset) would pay a whole extra load/store pair for the remainder, so the warp
+    // copies that remainder with vectors while the chunk is in flight.
+    if (len > chunkBytes && len - chunkBytes <= ALIGN) {
+      ldsTileBytes<LdsDir::Load, cp>(sB, win + o - sigma, chunkBytes + delta);
+      if (vecHead) warpVecCopy(s, d, head, warpThread, warpThreads);
+      warpVecCopy(s + begin + chunkBytes, d + begin + chunkBytes, len - chunkBytes, warpThread, warpThreads);
+      waitTensor0();
+      storeChunk(win, dB, chunkBytes);
+      waitTensor0();
+      return;
+    }
     for (size_t off = 0; off < len; off += chunkBytes) {
       const uint32_t n = len - off < chunkBytes ? static_cast<uint32_t>(len - off) : chunkBytes;
       ldsTileBytes<LdsDir::Load, cp>(sB + off, win + o - sigma, n + delta);
