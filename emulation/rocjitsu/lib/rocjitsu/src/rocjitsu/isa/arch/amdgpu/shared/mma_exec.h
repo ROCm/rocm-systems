@@ -23,6 +23,7 @@
 ///     Input B[col][k]: use input_loc(dim=N, K, B, i=col, k, b, bits).
 
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/cdna3_mfma.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx11_dot2.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h"
@@ -1098,10 +1099,11 @@ template <typename Run> bool dispatch_matrix_fmt_pair(uint32_t a_fmt, uint32_t b
 /// Cbuf[row*stride+col] += sum_k Abuf[row*K+k] * Bbuf[k*stride+col], run as
 /// native-width rows over the col (N) dimension with a scalar tail. A/B/C must
 /// already be hoisted into dense buffers (lane permutation, per-element scale,
-/// and 2:4 sparsity gather folded in by the caller). Float uses fused FMA
-/// (matching the hardware's single-rounding MACs; the scalar reference is
-/// non-fused, so f32 agrees to a few ULP and packed f16/bf16 rounds identically);
-/// integer MAC is exact, so the SIMD and scalar paths are bit-identical.
+/// and 2:4 sparsity gather folded in by the caller). Float uses fused FMA (the
+/// scalar reference is non-fused, so f32 agrees to a few ULP and packed f16/bf16
+/// rounds identically); integer MAC is exact, so the SIMD and scalar paths are
+/// bit-identical. CDNA3 low-precision MFMA doesn't round this way and doesn't
+/// come through here: see cdna3_mfma.h.
 /// Templated so the `if constexpr (has_stdx_simd)` callers never instantiate it
 /// on a platform without <experimental/simd>.
 ///
@@ -1410,6 +1412,36 @@ inline PackedOutputLoc output_loc_16(uint32_t M, uint32_t N, uint32_t i, uint32_
   return {f32.reg / 2, f32.lane, f32.reg % 2};
 }
 
+/// CDNA3's f32-source shapes that read XF32. All its other f32 shapes are plain FMA.
+constexpr bool cdna3_mfma_shape_is_xf32(uint32_t M, uint32_t K, uint32_t blocks) {
+  return blocks == 1 && ((M == 16 && K == 8) || (M == 32 && K == 4));
+}
+
+/// The CDNA3 arithmetic for these source readers and this shape, unless it is plain FMA.
+template <typename ExtractA, typename ExtractB>
+constexpr std::optional<Cdna3MfmaArithmetic> cdna3_mfma_arithmetic(uint32_t M, uint32_t K,
+                                                                   uint32_t blocks) {
+  constexpr bool a_fp8 = std::is_same_v<ExtractA, ExtractFp8Fnuz>;
+  constexpr bool b_fp8 = std::is_same_v<ExtractB, ExtractFp8Fnuz>;
+  constexpr bool a_f8 = a_fp8 || std::is_same_v<ExtractA, ExtractBf8Fnuz>;
+  constexpr bool b_f8 = b_fp8 || std::is_same_v<ExtractB, ExtractBf8Fnuz>;
+  if constexpr (std::is_same_v<ExtractA, ExtractF16> && std::is_same_v<ExtractB, ExtractF16>) {
+    return kCdna3MfmaF16;
+  } else if constexpr (std::is_same_v<ExtractA, ExtractBf16> &&
+                       std::is_same_v<ExtractB, ExtractBf16>) {
+    return kCdna3MfmaBf16;
+  } else if constexpr (a_f8 && b_f8) {
+    return cdna3_mfma_f8(a_fp8, b_fp8);
+  } else if constexpr (std::is_same_v<ExtractA, ExtractF32> &&
+                       std::is_same_v<ExtractB, ExtractF32>) {
+    if (cdna3_mfma_shape_is_xf32(M, K, blocks))
+      return kCdna3MfmaXf32;
+    return std::nullopt;
+  } else {
+    return std::nullopt;
+  }
+}
+
 /// Generic MFMA execute for f32 output: D = C + A x B.
 ///
 /// All inputs are read before any outputs are written to avoid WAR hazards
@@ -1495,15 +1527,44 @@ void exec_f32_mixed(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, ui
     }
   };
 
+  // CDNA3 low-precision sources don't round after each product: see cdna3_mfma.h. The hoist is the
+  // same.
+  const std::optional<Cdna3MfmaArithmetic> cdna3_arithmetic =
+      cu.arch() == ROCJITSU_CODE_ARCH_CDNA3 ? cdna3_mfma_arithmetic<ExtractA, ExtractB>(M, K, B)
+                                            : std::nullopt;
+  auto run_cdna3 = [&]() {
+    alignas(64) float a_values[MAX_AB];
+    alignas(64) float b_values[MAX_BSTRIDE];
+    alignas(64) float c_values[MAX_C];
+    for (uint32_t b = 0; b < B; ++b) {
+      stage_operands(b, N, a_values, b_values);
+      for (uint32_t row = 0; row < M; ++row)
+        for (uint32_t col = 0; col < N; ++col) {
+          auto out = physicalize_out(output_loc_32(M, N, row, col, b), wf);
+          c_values[row * N + col] =
+              (const_acc != ACC_FROM_VGPR)
+                  ? std::bit_cast<float>(const_acc)
+                  : std::bit_cast<float>(RegisterAccess(cu).read_vgpr(s2 + out.reg, out.lane));
+        }
+      cdna3_mfma_matmul(*cdna3_arithmetic, M, N, K, a_values, b_values, c_values);
+      for (uint32_t row = 0; row < M; ++row)
+        for (uint32_t col = 0; col < N; ++col) {
+          auto out = physicalize_out(output_loc_32(M, N, row, col, b), wf);
+          results.push_back({out.reg, out.lane, std::bit_cast<uint32_t>(c_values[row * N + col])});
+        }
+    }
+  };
+
   // SIMD fast path. Works for any MFMA shape and any f32-producing extract
   // (f16/bf16/fp8/bf8/f32). Per block: hoist A into row-major (row,k), B into
   // row-major (k,col), and C into (row,col) dense f32 buffers (lane
   // permutation folded in during the hoist), then run the dense MxNxK matmul
-  // as native-width FMA rows over the N (column) dimension. Uses fused FMA,
-  // matching the GFX9 MFMA hardware's single-rounding MACs (the scalar path
-  // above is non-fused; results agree to a few ULP). N columns that don't
-  // fill a full SIMD lane group fall to a scalar (fused) tail.
-  if constexpr (util::has_stdx_simd) {
+  // as native-width FMA rows over the N (column) dimension. Uses fused FMA
+  // (the scalar path above is non-fused; results agree to a few ULP). N columns
+  // that don't fill a full SIMD lane group fall to a scalar (fused) tail.
+  if (cdna3_arithmetic) {
+    run_cdna3();
+  } else if constexpr (util::has_stdx_simd) {
     // Pad the column (N) leading dimension up to a SIMD-width multiple so
     // every matmul row starts W-aligned: the inner loop then uses aligned
     // loads/stores for any N, and the staging buffers live on the stack
@@ -5893,6 +5954,11 @@ void exec_f32_mfma_f32_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, ui
           auto bl = input_loc(N, K, BATCH, col, k, b, in_bits);
           B_buf[k * N + col] = std::bit_cast<float>(B_words[bl.vgpr_offset * wf + bl.lane]);
         }
+      // CDNA3 XF32 doesn't round after each product: see cdna3_mfma.h.
+      if (cu.arch() == ROCJITSU_CODE_ARCH_CDNA3 && cdna3_mfma_shape_is_xf32(M, K, BATCH)) {
+        cdna3_mfma_matmul(kCdna3MfmaXf32, M, N, K, A_buf, B_buf, C_batch);
+        continue;
+      }
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t c0 = 0; c0 < N; c0 += W) {
           util::native<float> c_row;
@@ -5996,6 +6062,11 @@ void exec_f32_mfma_f16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, ui
           auto bl = input_loc(N, K, B, col, k, b, in_bits);
           B_buf[k * N + col] = B_f32[(bl.vgpr_offset * wf + bl.lane) * 2 + bl.sub_element];
         }
+      // CDNA3 doesn't round after each product: see cdna3_mfma.h.
+      if (cu.arch() == ROCJITSU_CODE_ARCH_CDNA3) {
+        cdna3_mfma_matmul(kCdna3MfmaF16, M, N, K, A_buf, B_buf, C_batch);
+        continue;
+      }
       // Dense MxKxN matmul, W-lane native SIMD FMA over N (N/W chunks per row).
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t c0 = 0; c0 < N; c0 += W) {
@@ -6099,6 +6170,11 @@ void exec_f32_mfma_bf16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, u
           auto bl = input_loc(N, K, B, col, k, b, in_bits);
           B_buf[k * N + col] = B_f32[(bl.vgpr_offset * wf + bl.lane) * 2 + bl.sub_element];
         }
+      // CDNA3 doesn't round after each product: see cdna3_mfma.h.
+      if (cu.arch() == ROCJITSU_CODE_ARCH_CDNA3) {
+        cdna3_mfma_matmul(kCdna3MfmaBf16, M, N, K, A_buf, B_buf, C_batch);
+        continue;
+      }
       // Dense MxKxN matmul, W-lane native SIMD FMA over N (N/W chunks per row).
       for (uint32_t row = 0; row < M; ++row)
         for (uint32_t c0 = 0; c0 < N; c0 += W) {
@@ -6190,19 +6266,24 @@ void exec_f32_mfma_f8_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uin
         auto bl = input_loc(N, K, B, col, k, 0, in_bits);
         B_buf[k * N + col] = B_f32[(bl.vgpr_offset * wf + bl.lane) * 4 + bl.sub_element];
       }
-    // Dense MxKxN matmul, W-lane (zmm) stdx FMA over N (N/W chunks per row).
-    for (uint32_t row = 0; row < M; ++row)
-      for (uint32_t c0 = 0; c0 < N; c0 += W) {
-        util::native<float> c_row;
-        c_row.copy_from(&C_buf[row * N + c0], util::stdx::vector_aligned);
-        for (uint32_t k = 0; k < K; ++k) {
-          util::native<float> a_bcast(A_buf[row * K + k]);
-          util::native<float> b_row;
-          b_row.copy_from(&B_buf[k * N + c0], util::stdx::vector_aligned);
-          c_row = util::stdx::fma(a_bcast, b_row, c_row);
+    // FNUZ means CDNA3, whose FP8 and BF8 don't round after each product.
+    if constexpr (FNUZ) {
+      cdna3_mfma_matmul(cdna3_mfma_f8(A_FP8, B_FP8), M, N, K, A_buf, B_buf, C_buf);
+    } else {
+      // Dense MxKxN matmul, W-lane (zmm) stdx FMA over N (N/W chunks per row).
+      for (uint32_t row = 0; row < M; ++row)
+        for (uint32_t c0 = 0; c0 < N; c0 += W) {
+          util::native<float> c_row;
+          c_row.copy_from(&C_buf[row * N + c0], util::stdx::vector_aligned);
+          for (uint32_t k = 0; k < K; ++k) {
+            util::native<float> a_bcast(A_buf[row * K + k]);
+            util::native<float> b_row;
+            b_row.copy_from(&B_buf[k * N + c0], util::stdx::vector_aligned);
+            c_row = util::stdx::fma(a_bcast, b_row, c_row);
+          }
+          c_row.copy_to(&C_buf[row * N + c0], util::stdx::vector_aligned);
         }
-        c_row.copy_to(&C_buf[row * N + c0], util::stdx::vector_aligned);
-      }
+    }
     // Scatter directly back to VGPRs (no Result staging vector).
     bool has_nan_or_inf = false;
     for (uint32_t row = 0; row < M; ++row)

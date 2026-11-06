@@ -16,6 +16,7 @@ tests consume the captured bits directly and require no GPU.
 | `gfx1201_dot4_edge_cases.h` | Native FP8/BF8 DOT4 results for mixed formats, grouped rounding, subnormals and NaN precedence. |
 | `packed_operand_cases.h` | 440 packed WMMA instruction/operand captures for modifiers, selectors and inline constants. |
 | `packed_wmma_cases.h` | Seven F16/BF16 matrix inputs with packed outputs for both architectures and wave sizes. |
+| `cdna3_mfma_cases.h` | Selected MI300X outputs for all 20 dense FP16, BF16, XF32, FP8 and BF8 MFMA forms. |
 
 The DOT4 edge fixtures were captured separately on R9700 with ROCm SDK
 `10.1.0a20260812`. They include raw results with the first source replaced by
@@ -139,3 +140,29 @@ matrix model, with a single group of four products.
 The DOT4 arithmetic fixture uses xorshift32 seed `0x713fa225` and retains all
 256 hardware outputs. It checks input format selection, NaN precedence and
 rounding, including independence from the host floating-point rounding mode.
+
+## CDNA3 MFMA
+
+`cdna3_mfma_cases.h` holds 204 raw results selected from 63,963,136 captured on an AMD Instinct
+MI300X (`gfx942`) with ROCm 7.2.4, on a RunPod host with an EPYC 9474F. Each of the 20 dense FP16,
+BF16, XF32, FP8 and BF8 forms ran as one instruction per wave over 4,096 waves, under the kernel's
+default MODE. The probe sources are not part of this repository.
+
+Inputs used a fixed seed. Each wave took one of four input types in turn: uniform values in
+[-1, 1); random exponents across the format's range; a few exact values; and uniform values with
+one in ten replaced by an infinity, NaN, signed zero, subnormal or near-maximum value. FP8 and BF8
+sources are random bytes, or a small set of bytes for the third type. C is FP32 of the same type.
+
+Each form keeps two results per input type, preferring ones where sequential FMA gives a different
+answer, plus one NaN and one infinite result. BF8 by BF8 also keeps two with an infinite or NaN C
+next to a product above 2^25.
+
+`shared/cdna3_mfma.h` reproduces all 63,963,136 words, including NaN bits. Running the same probes
+and real programs under rocjitsu with this model also reproduced the card's output files byte for
+byte, for chains of 1,600 `V_MFMA_F32_32X32X8_F16` instructions and rocBLAS F16 GEMM up to n=2048.
+Six forms were captured on one pod and 14 on another, a day apart. The second reproduced two forms
+from the first byte for byte and repeated its own results.
+
+The model is inferred from these observations and from MMA-Sim (Xie et al., MICRO 2026), not from a
+specification of hardware internals. These captures do not cover `V_SMFMAC_*`, non-default MODE
+settings, or non-zero CBSZ, ABID or BLGP.
