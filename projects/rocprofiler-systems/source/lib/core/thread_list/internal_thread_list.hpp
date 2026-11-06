@@ -5,6 +5,7 @@
 
 #include <mutex>
 #include <shared_mutex>
+#include <string>
 #include <sys/types.h>
 #include <unordered_set>
 
@@ -60,6 +61,14 @@ private:
     mutable std::mutex        m_mutex;
     std::unordered_set<pid_t> m_tids;
 };
+
+/// System TID of the calling thread.
+[[nodiscard("the TID is the only result")]] pid_t
+current_tid() noexcept;
+
+/// Kernel name (comm) of thread @p tid of this process; empty if it cannot be read.
+[[nodiscard("the name is the only result")]] std::string
+thread_name(pid_t tid);
 
 /// Process-wide list. Heap-backed and never destroyed, so it stays valid during static
 /// destruction and for detached threads. Needed because the pthread_create gotcha has

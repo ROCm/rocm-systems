@@ -165,6 +165,17 @@ pthread_create_gotcha::wrapper::operator()() const
         m_config.registered->set_value();
     }
 
+    const auto _own_tid = thread_list::current_tid();
+    if(m_config.exclude)
+    {
+        LOG_DEBUG("Thread {} '{}' excluded: {}", _own_tid,
+                  thread_list::thread_name(_own_tid), m_config.origin);
+    }
+    else
+    {
+        LOG_DEBUG("Thread {} eligible for sampling", _own_tid);
+    }
+
     using thread_bundle_data_t = thread_data<thread_bundle_t>;
     auto _child_internal_tid   = utility::get_thread_index();
     if(static_cast<size_t>(_child_internal_tid) >= ROCPROFSYS_MAX_THREADS ||
@@ -621,6 +632,7 @@ struct rocm_thread_launch
     void* (*func)(void*);
     void*              arg;
     std::promise<void> registered;
+    std::string        origin;
 
     static void* run(void* launch_ptr)
     {
@@ -633,10 +645,25 @@ struct rocm_thread_launch
             thread_list::get_internal_thread_list()
         };
         launch->registered.set_value();
+        const auto tid = thread_list::current_tid();
+        LOG_DEBUG("Thread {} '{}' excluded: {}", tid, thread_list::thread_name(tid),
+                  launch->origin);
         launch.reset();
         return func(arg);
     }
 };
+
+// "symbol in library" of a start routine, for diagnostics.
+std::string
+describe_start_routine(void* func_ptr)
+{
+    Dl_info info;
+    if(func_ptr == nullptr || dladdr(func_ptr, &info) == 0)
+        return "unknown start routine";
+    return fmt::format("start routine {} in {}",
+                       info.dli_sname != nullptr ? info.dli_sname : "?",
+                       info.dli_fname != nullptr ? info.dli_fname : "?");
+}
 
 bool
 is_rocm_internal_thread(void* func_ptr)
@@ -670,7 +697,9 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
     // loops
     if(is_rocm_internal_thread(reinterpret_cast<void*>(func)))
     {
-        auto launch     = std::make_unique<rocm_thread_launch>(func, arg);
+        auto launch    = std::make_unique<rocm_thread_launch>(func, arg);
+        launch->origin = "ROCm runtime thread, " +
+                         describe_start_routine(reinterpret_cast<void*>(func));
         auto registered = launch->registered.get_future();
         auto creation   = thread_list::get_internal_thread_list().begin_creation();
         auto ret = (*m_wrappee)(thread, attr, &rocm_thread_launch::run, launch.get());
@@ -763,13 +792,20 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
     auto const promise = active ? std::make_shared<std::promise<void>>() : promise_t{};
     auto const registered =
         exclude ? std::make_shared<std::promise<void>>() : promise_t{};
+    auto origin = std::string{};
+    if(exclude)
+    {
+        origin = std::string{ offset ? "started by rocprof-sys" : "child sampling off" } +
+                 ", " + describe_start_routine(reinterpret_cast<void*>(func));
+    }
     auto const config = wrapper_config{ .enable_causal   = enable_causal,
                                         .enable_sampling = enable_sampling,
                                         .offset          = offset,
                                         .exclude         = exclude,
                                         .parent_tid      = tid,
                                         .promise         = promise,
-                                        .registered      = registered };
+                                        .registered      = registered,
+                                        .origin          = std::move(origin) };
     auto*      wrap   = new wrapper{ func, arg, config };
     state::thread::set(state::thread::Internal);
 
