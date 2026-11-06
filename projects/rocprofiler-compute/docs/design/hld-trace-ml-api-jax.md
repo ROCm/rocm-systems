@@ -24,10 +24,8 @@
   - The HLD was planned by considering JAX 0.11.0, where `jax.jit` can be
     wrapped by intercepting `jaxlib._jax.PjitFunction`.
   - numpy is a jax dependency, and JAX 0.11.0 requires numpy >= 2.1.
-  - ROCm-enabled JAX: install ROCm first; the JAX wheels do not pull ROCm.
-    Pin `jax`, `jax_rocmN_plugin`, and `jax_rocmN_pjrt` to the same version
-    ([TheRock JAX install](https://github.com/ROCm/TheRock/blob/main/RELEASES.md#installing-multi-arch-jax-python-packages),
-    [Install JAX for ROCm](https://rocm.docs.amd.com/projects/ai-ecosystem/en/latest/frameworks/jax/install.html)).
+  - ROCm-enabled JAX can be pip installed
+    ([Install JAX for ROCm](https://rocm.docs.amd.com/projects/ai-ecosystem/en/latest/frameworks/jax/install.html)).
 
 ## Problem statement
 
