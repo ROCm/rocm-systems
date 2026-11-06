@@ -435,8 +435,8 @@ Version history, so an archive written by an older runtime can be placed:
 - **v12** records `hipExtMemcpyBatchAsync`, appended to `HipDispatchTable`,
   which shifts the compiler API IDs up by one again. A v11 reader would decode
   those events as the wrong API.
-- **v13** puts pinned host snapshot records after a `hipGraphLaunch` event's
-  fixed fields. A v12 reader would launch the graph without restoring them.
+- **v13** puts pinned host snapshot records after the fixed fields of a
+  `hipGraphLaunch` or `hipGraphLaunch_spt` event. A v12 reader would launch the graph without restoring them.
 
 ```
 <output_dir>/

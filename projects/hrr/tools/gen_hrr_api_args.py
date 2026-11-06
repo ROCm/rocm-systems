@@ -2097,9 +2097,9 @@ _HEADER_PREAMBLE = """\
  * v12: hipExtMemcpyBatchAsync was appended to HipDispatchTable,
  * shifting the compiler API IDs up by one. A v11 reader would decode
  * those events as the wrong API.
- * v13: a hipGraphLaunch event carries pinned host snapshot records after
- * its fixed fields. A v12 reader would launch the graph without restoring
- * them. */
+ * v13: a hipGraphLaunch or hipGraphLaunch_spt event carries pinned host
+ * snapshot records after its fixed fields. A v12 reader would launch the
+ * graph without restoring them. */
 #define HRR_VERSION ((uint16_t)13u)
 
 /* Written once at byte 0 of events.bin. */

@@ -102,7 +102,8 @@ Hash128 write_blob(const void* data, size_t len, bool capped = true);
 Hash128 hash_bytes(const void* data, size_t len);
 
 // True when write_blob() of `len` bytes hashing to `h` would write nothing and
-// return `h`: the blob is already in this archive. Takes g_blob_mu.
+// return `h`: the blob is already in this archive. Takes g_file_mu, then
+// g_blob_mu, one at a time.
 bool blob_written(Hash128 h, size_t len);
 
 // Write a code object (.hsaco) blob. Returns hash, or {} as write_blob() does.

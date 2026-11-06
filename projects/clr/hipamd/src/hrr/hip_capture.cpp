@@ -203,7 +203,7 @@ struct HostSnap {
   bool             cached = false;  // hash names a blob the archive already holds
   std::unique_ptr<uint8_t[]> copy;  // the bytes, until hashed and written
 };
-std::mutex                       g_pinned_mu;  // also held while a snapshot copies
+std::mutex                       g_pinned_mu;  // also held while a snapshot hashes
 std::map<uintptr_t, PinnedAlloc> g_pinned;
 std::atomic<size_t>              g_pinned_count{0};
 // The pinned allocations the launch this thread is making points into.
