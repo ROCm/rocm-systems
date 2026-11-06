@@ -22,7 +22,7 @@
 //   GlobalStore_*   — global stores and vmcnt interaction
 //   MultiReg_*      — multi-register loads
 //   Mixed_*         — simultaneous vmcnt and lgkmcnt events
-//   DualOffset_*    — dual-offset LDS events
+//   DualAddress_*   — LDS events with two address sets per lane
 //   TensorDma_*     — tensor load/store LDS races and tensorcnt waits
 
 #include "race_test_builder.h"
@@ -2147,15 +2147,11 @@ TEST(RaceDetector, Dtl_MultiLane_CrossWaveSafeWithBarrier) {
   EXPECT_FALSE(b.hasRace());
 }
 
-// ---- Dual-offset LDS ----
+// ---- Two LDS address sets per lane ----
 
-TEST(RaceDetector, DualOffset_CrossWaveRace) {
-  // registerDualOffsetLdsEvent: each lane writes TWO 8-byte intervals.
-  // Lane 0 base=100: [100, 108) (offset0=0) and [116, 124) (offset1=2).
-  // Another wave reading either interval without a barrier → RACE.
-  //
-  // Uses RaceDetector/WaveRaceState directly since the builder doesn't
-  // expose registerDualOffsetLdsEvent.
+TEST(RaceDetector, DualAddress_CrossWaveRace) {
+  // Like ds_write2_b64, lane 0 writes [100, 108) and [116, 124). Another wave
+  // reading either interval without a barrier races.
   std::vector<RaceViolation> violations;
   RaceDetector detector(/*nWaves=*/
                         2, /*vgprCount=*/4,
@@ -2164,13 +2160,17 @@ TEST(RaceDetector, DualOffset_CrossWaveRace) {
                         counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4),
                         /*ldsSizeBytes=*/64 * 1024);
   auto &rs = detector.getWaveRaceState(0);
-  std::vector<uint32_t> ldsAddrs(64, 0);
-  ldsAddrs[0] = 100;
-  rs.registerDualOffsetLdsEvent(testInstruction(/*pc=*/0), MemoryEventType::VGPR_TO_LDS,
-                                /*registers=*/{},
-                                /*execMask=*/1, /*waveSize=*/64, ldsAddrs,
-                                /*offset0=*/0, /*offset1=*/2);
-  // Lane 0 wrote: [100, 108) and [116, 124)
+  std::vector<uint32_t> firstAddrs(64, 0);
+  std::vector<uint32_t> secondAddrs(64, 0);
+  firstAddrs[0] = 100;
+  secondAddrs[0] = 116;
+  const std::array obligations{
+      amdgpu::MemoryCounterObligation{defaultWaitCounterType(MemoryEventType::VGPR_TO_LDS),
+                                      defaultMemoryOrder(MemoryEventType::VGPR_TO_LDS)}};
+  rs.registerLdsEvent(testInstruction(/*pc=*/0), MemoryEventType::VGPR_TO_LDS,
+                      /*registers=*/{}, /*execMask=*/1, /*waveSize=*/64, firstAddrs, secondAddrs,
+                      /*bytesPerLane=*/8, /*byteMask=*/0xF, obligations,
+                      defaultMemoryOrder(MemoryEventType::VGPR_TO_LDS));
   detector.validateRead(/*addr=*/100, WaveId{1}, /*lane=*/0, /*nBytes=*/4);
   EXPECT_EQ(violations.size(), 1u); // first interval
   detector.validateRead(/*addr=*/116, WaveId{1}, /*lane=*/0, /*nBytes=*/4);

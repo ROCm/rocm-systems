@@ -40,8 +40,8 @@ struct CounterCapacities {
 /// event allocation and lifecycle transitions.
 ///
 /// Every event registration method (registerEvent, registerScalarLoad,
-/// registerLdsEvent, registerLdsRangeEvent and registerDualOffsetLdsEvent)
-/// takes the producing instruction as an InstructionSnapshot; the event's PC
+/// registerLdsEvent and registerLdsRangeEvent) takes the producing
+/// instruction as an InstructionSnapshot; the event's PC
 /// comes from the snapshot. The encoding is decoded only if a plugin report
 /// needs its disassembly.
 class WaveRaceState {
@@ -152,25 +152,6 @@ public:
                              std::span<const LdsByteRange> ranges,
                              std::span<const amdgpu::MemoryCounterObligation> counterObligations,
                              MemoryOrderClass memoryOrder);
-
-  /// Register an LDS event with dual-offset intervals. Each active lane
-  /// contributes two 8-byte intervals at laneBaseAddresses[lane] + offset0*8
-  /// and laneBaseAddresses[lane] + offset1*8. So each active lane contributes 2 intervals of 8
-  /// bytes each.
-  void registerDualOffsetLdsEvent(InstructionSnapshot instruction, MemoryEventType type,
-                                  std::vector<uint32_t> registers, uint64_t execMask, int waveSize,
-                                  std::span<const uint32_t> laneBaseAddresses, int32_t offset0,
-                                  int32_t offset1);
-  void registerDualOffsetLdsEvent(
-      InstructionSnapshot instruction, MemoryEventType type, std::vector<uint32_t> registers,
-      uint64_t execMask, int waveSize, std::span<const uint32_t> laneBaseAddresses, int32_t offset0,
-      int32_t offset1, amdgpu::WaitCounterType waitCounterType, MemoryOrderClass memoryOrder,
-      std::optional<amdgpu::WaitCounterType> additionalWaitCounterType = std::nullopt);
-  void registerDualOffsetLdsEvent(
-      InstructionSnapshot instruction, MemoryEventType type, std::vector<uint32_t> registers,
-      uint64_t execMask, int waveSize, std::span<const uint32_t> laneBaseAddresses, int32_t offset0,
-      int32_t offset1, std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-      MemoryOrderClass memoryOrder);
 
   /// Dispatch the counter thresholds changed by one wait instruction.
   void dispatch(const PendingWaitCount &);
