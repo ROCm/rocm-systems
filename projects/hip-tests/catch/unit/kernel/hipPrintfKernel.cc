@@ -44,7 +44,19 @@ HIP_TEST_CASE(Unit_kernel_ChkPrintf) {
 
     capture.beginCapture();
     hipLaunchKernelGGL(run_printf, dim3(1), dim3(1), 0, 0);
-    HIP_CHECK(hipDeviceSynchronize());
+    hipError_t err = hipGetLastError();
+    if (err != hipSuccess) {
+      // A kernel was not launched and as such printed nothing. Calling
+      // endCapture would trigger a blocking read on a pipe which is empty,
+      // causing the test to hang. Instead, we exit earlier.
+      capture.abortCapture();
+      HIP_CHECK(err);
+    }
+    err = hipDeviceSynchronize();
+    if (err != hipSuccess) {
+      capture.abortCapture();
+      HIP_CHECK(err);
+    }
     capture.endCapture();
 
     auto CapturedData = capture.getCapturedData();
