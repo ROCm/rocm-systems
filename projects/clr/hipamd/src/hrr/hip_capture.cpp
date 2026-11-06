@@ -412,6 +412,15 @@ struct PinnedSnapshot {
   ~PinnedSnapshot() { t_snaps.clear(); }
 };
 
+// The stream a launch really ran on, as pinned tracking compares it. The null
+// stream of an _spt call and hipStreamPerThread are both this thread's own
+// default stream, which differs per thread.
+static hipStream_t pinned_stream(hipStream_t stream, bool spt) {
+  if (spt && !stream) stream = hipStreamPerThread;
+  hip::getStreamPerThread(stream);
+  return stream;
+}
+
 // Replay restores a record on its launch's stream, so a launch on another
 // stream than the last record's needs its own. A record written while this
 // stream is capturing does not become the allocation's last: replay restores
@@ -688,7 +697,10 @@ static void serialize_kernel_launch(
       if (!sig.at(i).info_.hidden_) num_args++;
   }
   push_u16(num_args);
-  pinned_mark_stream(stream);
+  const hipStream_t pin_stream =
+      pinned_stream(stream, api_id == HRR_API_HIPLAUNCHKERNEL_SPT ||
+                                api_id == HRR_API_HIPLAUNCHCOOPERATIVEKERNEL_SPT);
+  pinned_mark_stream(pin_stream);
   push_u16(pinned_record_count());
 
   // HIP_HRR_DEBUG_ARGS dumps every captured arg (kind, size, full bytes,
@@ -827,7 +839,7 @@ static void serialize_kernel_launch(
   // A record becomes the allocation's last only once its event is written, in
   // the same order as the events. Replay restores nothing for a launch into a
   // stream capture, so a record written for one does not become the last.
-  pinned_write_event(api_id, payload.data(), static_cast<uint32_t>(payload.size()), stream);
+  pinned_write_event(api_id, payload.data(), static_cast<uint32_t>(payload.size()), pin_stream);
 }
 
 static hrr_cap::Hash128 kernel_code_object_hash(amd::Kernel* kernel);
@@ -1920,7 +1932,8 @@ static hipError_t capture_graph_launch(uint16_t api, hipGraphExec_t graphExec, h
   a.ret       = static_cast<int32_t>(r);
   a.graphExec = reinterpret_cast<uint64_t>(graphExec);
   a.stream    = reinterpret_cast<uint64_t>(stream);
-  pinned_mark_stream(stream);
+  const hipStream_t pin_stream = pinned_stream(stream, api == HRR_API_HIPGRAPHLAUNCH_SPT);
+  pinned_mark_stream(pin_stream);
   const uint16_t n = pinned_record_count();
   std::vector<uint8_t> payload(sizeof(a));
   std::memcpy(payload.data(), &a, sizeof(a));
@@ -1935,7 +1948,7 @@ static hipError_t capture_graph_launch(uint16_t api, hipGraphExec_t graphExec, h
     push_u64(s.hash.lo); push_u64(s.hash.hi);
     payload.push_back(0);
   }
-  pinned_write_event(api, payload.data(), static_cast<uint32_t>(payload.size()), stream);
+  pinned_write_event(api, payload.data(), static_cast<uint32_t>(payload.size()), pin_stream);
   return r;
 }
 
