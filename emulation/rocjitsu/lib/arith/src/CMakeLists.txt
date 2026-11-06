@@ -40,6 +40,10 @@ add_library(
     fp/minmax.cpp
     fp/mixed_fma.cpp
     fp/packed_fma.cpp
+    graphics/cube.cpp
+    graphics/interp16.cpp
+    graphics/interp32.cpp
+    graphics/mullit.cpp
     register/dpp.cpp
     wmma/swmmac16.cpp
     wmma/swmmac8.cpp
