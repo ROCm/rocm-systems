@@ -20,6 +20,10 @@ HBM_TITLES = (
     "EA to HBM",
     "GL2C-EA Interface - HBM Bandwidth",
 )
+DRAM_TITLES = (
+    "EA to DRAM",
+    "GL2C-EA Interface - DRAM Bandwidth",
+)
 
 
 def _write_empty_template(path: Path) -> None:
@@ -101,19 +105,26 @@ def test_gfx1201_does_not_fall_back_to_the_gfx125x_template(
     assert "Using gfx125x template" not in output
 
 
-def test_family_templates_keep_the_shared_hbm_titles():
-    """The split copies the gfx12 contract and does not rename HBM titles."""
-    gfx120x = (ANALYSIS_CONFIGS / GFX120X_TEMPLATE_FILENAME).read_bytes()
-    gfx125x = (ANALYSIS_CONFIGS / GFX125X_TEMPLATE_FILENAME).read_bytes()
-    assert gfx120x == gfx125x
-    text = gfx120x.decode("utf-8")
+def test_family_templates_name_device_memory_per_family():
+    """gfx120x names those sections DRAM; gfx125x keeps the HBM titles."""
+    gfx120x = (ANALYSIS_CONFIGS / GFX120X_TEMPLATE_FILENAME).read_text(encoding="utf-8")
+    gfx125x = (ANALYSIS_CONFIGS / GFX125X_TEMPLATE_FILENAME).read_text(encoding="utf-8")
+    assert gfx120x != gfx125x
+    for title in DRAM_TITLES:
+        assert title in gfx120x
+        assert title not in gfx125x
     for title in HBM_TITLES:
-        assert title in text
+        assert title in gfx125x
+        assert title not in gfx120x
     assert not (ANALYSIS_CONFIGS / "gfx12_config_template.yaml").exists()
-    for arch in ("gfx1201", "gfx1250"):
+    expectations = {"gfx1201": DRAM_TITLES, "gfx1250": HBM_TITLES}
+    absent = {"gfx1201": HBM_TITLES, "gfx1250": DRAM_TITLES}
+    for arch, titles in expectations.items():
         panel_text = "\n".join(
             path.read_text(encoding="utf-8")
             for path in (ANALYSIS_CONFIGS / arch).glob("*.yaml")
         )
-        for title in HBM_TITLES:
+        for title in titles:
             assert title in panel_text
+        for title in absent[arch]:
+            assert title not in panel_text

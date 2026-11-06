@@ -139,11 +139,11 @@ Panel Config:
     GL2-Fabric Read BW: >-
       Bytes L2 read over its EA interface, from the 32, 64, 128, and 256-byte read
       request counts. The 64 MB Infinity Cache serves part of this traffic, so it is
-      not compared against the GDDR6 peak.
+      not compared against the DRAM (GDDR6) peak.
     GL2-Fabric Write BW: >-
       Bytes L2 wrote over its EA interface, from the 32, 64, 128, and 256-byte write
       request counts. The Infinity Cache absorbs part of this traffic, so it is not
-      compared against the GDDR6 peak.
+      compared against the DRAM (GDDR6) peak.
     LDS Bank Conflicts: >-
       Cycles LDS stalled on conflicting bank addresses, averaged per dispatch.
     Wave Dependency Wait: >-

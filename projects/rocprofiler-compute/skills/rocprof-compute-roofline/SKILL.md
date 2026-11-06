@@ -111,12 +111,13 @@ know the intent, the counters know what ran.
 HBM answers "am I limited by main memory", while L2 and vL1D show whether
 caches are absorbing the traffic.
 
-On gfx1201 (Navi 48, for example the Radeon RX 9070 XT), the `HBM` roof is
-GDDR6 device memory and the `MALL` roof is the 64 MB Infinity Cache. The
-`AI HBM` point counts GL2C requests destined for DRAM, which the Infinity Cache
-can also serve, and no counter separates the two. Read that point against both
-roofs: above `HBM` and below `MALL` means the Infinity Cache is absorbing the
-traffic. Never call such a kernel limited by GDDR6. The WMMA counter there does
+On gfx1201 (Navi 48, for example the Radeon RX 9070 XT), the device-memory
+roof is `DRAM` and the `MALL` roof is the 64 MB Infinity Cache. The
+`AI DRAM` point counts GL2C requests destined for DRAM, which the Infinity
+Cache can also serve, and no counter separates the two. Read that point
+against both roofs: above `DRAM` and below `MALL` means the Infinity Cache is
+absorbing the traffic. Never call such a kernel limited by DRAM. MI
+architectures and gfx1250 keep the `HBM` roof. The WMMA counter there does
 not separate FP16, BF16, and FP8, and it requires a working SQ event 233
 counter; check the profiling warnings and counter output.
 

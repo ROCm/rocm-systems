@@ -18,7 +18,7 @@ class gfx1201_soc(OmniSoC_Base):
     """SoC handler for gfx1201 (RDNA 4 Navi 48, e.g. Radeon RX 9070 XT).
 
     Public RDNA 4 docs: monolithic die, 64 CUs, 8 MB L2, 64 MB Infinity Cache,
-    GDDR6. The register spec has no Infinity Cache performance counter.
+    DRAM (GDDR6). The register spec has no Infinity Cache performance counter.
     SQ event 233 counts WMMA instructions per vec32, so a wave64 WMMA counts
     twice. Event 256 counts the cycles of WMMA work.
     """

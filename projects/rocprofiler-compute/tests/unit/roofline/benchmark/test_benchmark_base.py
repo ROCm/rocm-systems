@@ -133,7 +133,7 @@ def test_spec_matches_the_benchmark_class(gpu_arch):
 
 @pytest.mark.parametrize("gpu_arch", ROOFLINE_ARCHS)
 def test_literal_kernel_sources_define_their_symbol(gpu_arch):
-    """HBM and LDS sources must define the names their launchers hard-code."""
+    """Device-memory and LDS sources must define the names their launchers resolve."""
     bench = BENCH_CLASSES[gpu_arch](0, dict(CACHE_SIZES), gpu_arch)
 
     for test_key, source_attr, kernel_name in LITERAL_KERNEL_NAMES:
@@ -212,6 +212,18 @@ def test_gfx1201_enabled_matrix_tests_have_operations_and_kernels():
     for matrix_type in enabled:
         assert bench.matrix_ops[matrix_type] > 0
         assert matrix_type in bench.matrix_kernel_selector
+
+
+def test_gfx1201_measures_dram_in_its_own_column():
+    """gfx1201 launches DRAM_bw and writes the DRAMBw column."""
+    bench = BENCH_CLASSES["gfx1201"](0, dict(CACHE_SIZES), "gfx1201")
+
+    assert not runs_benchmark(bench, "HBM")
+    assert runs_benchmark(bench, "DRAM")
+    assert bench.tests["DRAM"] == bench.dram_bw_benchmark
+    assert bench.csv_cols_map["DRAM"] == "DRAMBw"
+    assert "HBM" not in bench.csv_cols_map
+    assert_source_defines(bench.hbm_bw_src, "DRAM_bw", "gfx1201 DRAM")
 
 
 def test_gfx1201_measures_infinity_cache_with_its_own_kernel():

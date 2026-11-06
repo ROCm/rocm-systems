@@ -397,15 +397,19 @@ class Bench_base(ABC):
     # Benchmarking kernel methods
     # -----------------------------------------------------------------------------
 
-    # HBM bandwidth benchmark
-    def hbm_bw_benchmark(self, device: int) -> float:
+    # Device-memory bandwidth benchmark. Defaults keep every HBM architecture
+    # on the HBM_bw entry point and the HBM test key. gfx1201 passes DRAM_bw
+    # and the DRAM label, and registers the result under the DRAM test key.
+    def hbm_bw_benchmark(
+        self, device: int, kernel_name: str = "HBM_bw", label: str = "HBM"
+    ) -> float:
         num_experiments = DEFAULT_NUM_EXPERIMENTS
         hip.hipSetDevice(device)
 
         cus = hip.hipGetDeviceProperties(device).multiProcessorCount
 
         prog = self.Program(self.hbm_bw_src)
-        func = prog.get_kernel("HBM_bw")
+        func = prog.get_kernel(kernel_name)
 
         workgroup_size = DEFAULT_WORKGROUP_SIZE
         unroll = 16
@@ -450,7 +454,7 @@ class Bench_base(ABC):
         event_ms = total_bytes / peak / 1e6
 
         print(
-            f"HBM BW, GPU ID: {device}, workgroupSize:{workgroup_size}, "
+            f"{label} BW, GPU ID: {device}, workgroupSize:{workgroup_size}, "
             f"workgroups:{workgroups}, experiments:{num_experiments}, "
             f"traffic:{total_bytes} bytes, duration:{event_ms:.1f} ms, "
             f"peak:{peak:.1f} GB/sec"

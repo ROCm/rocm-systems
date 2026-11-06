@@ -558,7 +558,7 @@ mi_gpu_spec:
               physical: 6402
 
   #########################################################
-  # RDNA 4 (gfx120x). Navi 48 is monolithic: 8 MB L2, 64 MB Infinity Cache, GDDR6.
+  # RDNA 4 (gfx120x). Navi 48 is monolithic: 8 MB L2, 64 MB Infinity Cache, DRAM.
   - gpu_series: rdna4
     gpu_archs:
       - gpu_arch: gfx1201
@@ -577,18 +577,18 @@ mi_gpu_spec:
           GL1C: 4
           GL2A: 4
           GL2C: 4
-        # GDDR6 is measured in the HBM column and the 64 MB Infinity Cache in the
-        # MALL column. No counter attributes traffic to the Infinity Cache, so its
-        # roof is drawn without a kernel point.
+        # Device memory is DRAM (CSV column DRAMBw). The 64 MB Infinity Cache
+        # uses the MALL column. No counter attributes traffic to the Infinity
+        # Cache, so its roof is drawn without a kernel point.
         roofline:
-          bandwidth: [HBM, MALL, L2, L1, L0, LDS]
+          bandwidth: [DRAM, MALL, L2, L1, L0, LDS]
           plot_mall: true
           valu: [FP16, FP32, FP64, I8, I32, I64]
           wmma: [FP8, FP16, BF16]
         models:
           - gpu_model: rdna4_navi48
             design:
-              memory_levels: ["LDS", "L0", "L1", "L2", "MALL", "HBM"]
+              memory_levels: ["LDS", "L0", "L1", "L2", "MALL", "DRAM"]
             chip_ids:
               physical: 30032  # 0x7550, Radeon RX 9070 XT
 

@@ -1,7 +1,7 @@
 {
   "archs": ["gfx1201"],
-  "description": "RDNA 4 Navi 48: WGPs, LDS/L0 and the read-only L1 caches, GL1, 8 MB L2, 64 MB Infinity Cache, GDDR6.",
-  "scope": {"labels": ["GPU", "GDDR6"], "split": "gddr6"},
+  "description": "RDNA 4 Navi 48: WGPs, LDS/L0 and the read-only L1 caches, GL1, 8 MB L2, 64 MB Infinity Cache, DRAM (GDDR6).",
+  "scope": {"labels": ["GPU", "DRAM"], "split": "dram"},
   "blocks": [
     {"id": "cu", "title": "WGPs", "column": 0, "order": 0, "position": "grid", "style": "list", "content": [
       {"metric": "Wavefront Occupancy", "title": "Wave Occ", "category": "util", "bar": false},
@@ -43,7 +43,7 @@
 
     {"id": "infinity_cache", "title": "Infinity Cache (64 MB)", "column": 4, "order": 0, "position": "grid", "style": "panel"},
 
-    {"id": "gddr6", "title": "GDDR6", "column": 5, "order": 0, "position": "grid", "style": "panel", "content": [
+    {"id": "dram", "title": "DRAM (GDDR6)", "column": 5, "order": 0, "position": "grid", "style": "panel", "content": [
       {"metric": "DRAM Read Requests", "title": "Read Req", "category": "read", "bar": false},
       {"metric": "DRAM Write Requests", "title": "Write Req", "category": "write", "bar": false},
       {"metric": "DRAM Read Bandwidth", "title": "Read BW", "category": "read", "bar": false},
