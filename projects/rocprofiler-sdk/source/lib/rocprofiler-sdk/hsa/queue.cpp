@@ -728,8 +728,7 @@ WriteInterceptor(const void* packets,
             if(kernel_replay::local_context_has_overrides())
             {
                 auto disabled = [](const auto& e) {
-                    auto ov = kernel_replay::local_context_override({.handle = e.ctx->context_idx});
-                    return ov.has_value() && !*ov;
+                    return !kernel_replay::is_locally_enabled({.handle = e.ctx->context_idx});
                 };
                 auto& cbc = _packet_data.tracing_data.callback_contexts;
                 auto& bfc = _packet_data.tracing_data.buffered_contexts;
@@ -1204,9 +1203,10 @@ WriteInterceptor(const void* packets,
 
             // Localized context control for this replay loop. This guard installs the thread-local
             // routing that connects the tool's PASS toggle callbacks (writers, via
-            // replay_local_enable/disable_context) to the services that read it at dispatch (via
-            // kernel_replay::local_context_override). It lives for the whole loop and is torn down
-            // when the guard exits; global context state is never touched. It captures the contexts
+            // replay_local_enable/disable_context) to the dispatch hooks and the kernel dispatch
+            // tracing filter, which resolve it per context through
+            // kernel_replay::is_locally_enabled. It lives for the whole loop and is torn down when
+            // the guard exits; global context state is never touched. It captures the contexts
             // active now (loop start) as the toggle mask, so a tool may only enable/disable one of
             // those and a local start cannot promote a globally-stopped context
             // (local_context.hpp).

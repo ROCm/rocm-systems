@@ -25,6 +25,7 @@
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_hooks/client_ids.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 
 namespace rocprofiler
@@ -62,8 +63,13 @@ kernel_dispatch_phase_enter_hook(
         auto& tracer = *ctx->dispatch_thread_trace;
         if(!tracer.collects_on(agent_id)) continue;
 
-        auto [packet, bSerial] =
-            tracer.pre_kernel_call(queue, kernel_id, dispatch_id, user_data, correlation_id);
+        // A kernel-replay pass may have locally stopped this context. pre_kernel_call still runs
+        // for it, because its disabled path is what keeps the dispatch serialized.
+        const bool locally_enabled =
+            kernel_replay::is_locally_enabled({.handle = ctx->context_idx});
+
+        auto [packet, bSerial] = tracer.pre_kernel_call(
+            queue, kernel_id, dispatch_id, user_data, correlation_id, locally_enabled);
         if(packet)
             inst_pkt.emplace_back(std::move(packet), hsa::queue_hooks::THREAD_TRACE_CLIENT_ID);
         is_serialized |= bSerial;

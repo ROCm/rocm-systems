@@ -96,5 +96,12 @@ local_context_override(rocprofiler_context_id_t context_id)
     if(itr == tl_control->overrides.end()) return std::nullopt;
     return itr->second;
 }
+
+bool
+is_locally_enabled(rocprofiler_context_id_t context_id)
+{
+    auto ov = local_context_override(context_id);
+    return !ov || *ov;
+}
 }  // namespace kernel_replay
 }  // namespace rocprofiler

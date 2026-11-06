@@ -135,10 +135,16 @@ bool
 baseline_reaches_dispatch_cb(thread_trace::DispatchThreadTracer& tracer,
                              const hsa::Queue&                   queue,
                              std::atomic<int>&                   hits,
-                             rocprofiler_user_data_t*            user_data)
+                             rocprofiler_user_data_t*            user_data,
+                             rocprofiler_context_id_t            context_id)
 {
     hits.store(0);
-    tracer.pre_kernel_call(queue, /*kernel_id=*/1, /*dispatch_id=*/0, user_data, nullptr);
+    tracer.pre_kernel_call(queue,
+                           /*kernel_id=*/1,
+                           /*dispatch_id=*/0,
+                           user_data,
+                           nullptr,
+                           kernel_replay::is_locally_enabled(context_id));
     const bool reached = hits.load() == 1;
     hits.store(0);
     return reached;
@@ -182,7 +188,7 @@ TEST(thread_trace, local_context_override_skips_pre_kernel_call)
     ASSERT_FALSE(kernel_replay::local_context_override(params.context_id).has_value())
         << "no replay loop is active, so this context must carry no override";
 
-    if(!baseline_reaches_dispatch_cb(tracer, fq, hits, &user_data))
+    if(!baseline_reaches_dispatch_cb(tracer, fq, hits, &user_data, params.context_id))
     {
         tracer.resource_deinit();
         GTEST_SKIP() << "no dispatch reaches the ATT callback through a fake queue on this agent, "
@@ -198,12 +204,22 @@ TEST(thread_trace, local_context_override_skips_pre_kernel_call)
         kernel_replay::set_toggles_armed(false);
 
         hits.store(0);
-        tracer.pre_kernel_call(fq, /*kernel_id=*/1, /*dispatch_id=*/2, &user_data, nullptr);
+        tracer.pre_kernel_call(fq,
+                               /*kernel_id=*/1,
+                               /*dispatch_id=*/2,
+                               &user_data,
+                               nullptr,
+                               kernel_replay::is_locally_enabled(params.context_id));
         EXPECT_EQ(hits.load(), 0) << "ATT dispatch callback must not run when locally stopped";
     }
 
     hits.store(0);
-    tracer.pre_kernel_call(fq, /*kernel_id=*/1, /*dispatch_id=*/3, &user_data, nullptr);
+    tracer.pre_kernel_call(fq,
+                           /*kernel_id=*/1,
+                           /*dispatch_id=*/3,
+                           &user_data,
+                           nullptr,
+                           kernel_replay::is_locally_enabled(params.context_id));
     EXPECT_EQ(hits.load(), 1) << "the local stop must not outlive the replay loop";
 
     tracer.resource_deinit();
@@ -243,7 +259,7 @@ TEST(thread_trace, local_context_override_forced_on_still_invokes_dispatch_cb)
     ASSERT_FALSE(kernel_replay::local_context_override(params.context_id).has_value())
         << "no replay loop is active, so this context must carry no override";
 
-    if(!baseline_reaches_dispatch_cb(tracer, fq, hits, &user_data))
+    if(!baseline_reaches_dispatch_cb(tracer, fq, hits, &user_data, params.context_id))
     {
         tracer.resource_deinit();
         GTEST_SKIP() << "no dispatch reaches the ATT callback through a fake queue on this agent, "
@@ -259,7 +275,12 @@ TEST(thread_trace, local_context_override_forced_on_still_invokes_dispatch_cb)
         kernel_replay::set_toggles_armed(false);
 
         hits.store(0);
-        tracer.pre_kernel_call(fq, /*kernel_id=*/1, /*dispatch_id=*/1, &user_data, nullptr);
+        tracer.pre_kernel_call(fq,
+                               /*kernel_id=*/1,
+                               /*dispatch_id=*/1,
+                               &user_data,
+                               nullptr,
+                               kernel_replay::is_locally_enabled(params.context_id));
         EXPECT_EQ(hits.load(), 1) << "ATT only skips when forced off; a local start is not a skip";
     }
 

@@ -415,7 +415,8 @@ TEST(ThreadTraceQueueHooks, StoppingContextKeepsSerializeAllRequest)
     corr_id.internal = 44;
     auto user_data   = rocprofiler_user_data_t{.value = corr_id.internal};
 
-    auto [packet, serialize] = tracer.pre_kernel_call(fq, 1, 1, &user_data, &corr_id);
+    auto [packet, serialize] =
+        tracer.pre_kernel_call(fq, 1, 1, &user_data, &corr_id, /*locally_enabled=*/true);
     EXPECT_FALSE(packet) << "a stopped tracer must not inject ATT packets";
     EXPECT_TRUE(serialize) << "a stopping SERIALIZE_ALL tracer must keep requesting serialization";
     EXPECT_EQ(tracer.pending_post_moves(), 0);

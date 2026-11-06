@@ -26,6 +26,7 @@
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_hooks/client_ids.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
 
 #include <atomic>
 #include <cstdint>
@@ -75,6 +76,11 @@ kernel_dispatch_phase_enter_hook(
         // than inside it.
         if(!ctx->dispatch_counter_collection->collects_on(agent_id)) continue;
 
+        // A kernel-replay pass may have locally stopped this context. queue_cb still runs for it,
+        // because its disabled path is what keeps the dispatch serialized.
+        const bool locally_enabled =
+            kernel_replay::is_locally_enabled({.handle = ctx->context_idx});
+
         for(auto& cb : ctx->dispatch_counter_collection->callbacks)
         {
             auto [packet, bSerial] = queue_cb(ctx,
@@ -85,7 +91,8 @@ kernel_dispatch_phase_enter_hook(
                                               dispatch_id,
                                               user_data,
                                               ext_corr_ids,
-                                              correlation_id);
+                                              correlation_id,
+                                              locally_enabled);
             if(packet)
                 inst_pkt.emplace_back(std::move(packet), hsa::queue_hooks::COUNTERS_CLIENT_ID);
             is_serialized |= bSerial;
