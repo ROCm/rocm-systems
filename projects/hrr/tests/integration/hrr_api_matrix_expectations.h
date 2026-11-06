@@ -715,7 +715,7 @@ inline constexpr HrrTierFloor kHrrTierFloors[] = {
     {"T1", 14, 1, kHrrWorkloadsT1},
     {"T2", 34, 1, kHrrWorkloadsT2},
     {"T3", 20, 2, kHrrWorkloadsT3},
-    {"T4", 254, 1, kHrrWorkloadsT4},
+    {"T4", 258, 1, kHrrWorkloadsT4},
     {"T5", 12, 1, kHrrWorkloadsT5},
 };
 
