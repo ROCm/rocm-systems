@@ -21,8 +21,8 @@
   - Without an outer `jit`, each op is compiled and executed on its own when
     Python reaches it (`x @ x`, `jnp.sum`, …). That is eager dispatch.
 - Assumptions:
-  - The wrap was planned against JAX 0.11.0, where `type(jax.jit(identity))`
-    is `jaxlib._jax.PjitFunction`.
+  - The HLD was planned by considering JAX 0.11.0, where `jax.jit` can be
+    wrapped by intercepting `jaxlib._jax.PjitFunction`.
   - numpy is a JAX dependency (`jax.numpy`). The injector does not wrap
     `jnp.*` and does not import `jax.numpy`. rocprofiler-compute already
     depends on numpy for analysis; the workload must supply a numpy that
