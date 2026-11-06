@@ -36,4 +36,12 @@ template <typename T> constexpr T clamp(T value, T low, T high) {
   return value < low ? low : high < value ? high : value;
 }
 
+// Leading or trailing zero count; a zero word returns UINT32_MAX.
+template <bool Trailing, typename T> uint32_t bit_count_zero(T a) {
+  if (!a) {
+    return UINT32_MAX;
+  }
+  return Trailing ? __builtin_ctzll(static_cast<unsigned long long>(a)) : countl_zero(a);
+}
+
 } // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE

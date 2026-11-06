@@ -44,7 +44,15 @@ add_library(
     graphics/interp16.cpp
     graphics/interp32.cpp
     graphics/mullit.cpp
+    register/cndmask.cpp
     register/dpp.cpp
+    register/ds_permute.cpp
+    register/ds_swizzle.cpp
+    register/lane_transfer.cpp
+    register/move.cpp
+    register/permlane.cpp
+    register/relative_move.cpp
+    register/swap.cpp
     wmma/swmmac16.cpp
     wmma/swmmac8.cpp
     wmma/swmmac_float.cpp
