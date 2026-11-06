@@ -4795,13 +4795,19 @@ fail:
   goto exit;
 }
 
+// A child init can unlink childAbortFlag concurrently, so it is loaded once and only that snapshot is written.
+static void setChildAbortFlags(ncclComm_t comm, uint32_t uval) {
+  uint32_t* childAbortFlag = COMPILER_ATOMIC_LOAD(&comm->childAbortFlag, std::memory_order_acquire);
+  if (childAbortFlag != nullptr) {
+    COMPILER_ATOMIC_STORE(childAbortFlag, uval, std::memory_order_release);
+    COMPILER_ATOMIC_STORE(comm->childAbortFlagDev, uval, std::memory_order_release);
+  }
+}
+
 static ncclResult_t setCommAbortFlags(ncclComm_t comm, int value) {
   // Set abort flags
   uint32_t uval = static_cast<uint32_t>(value);
-  if (comm->childAbortFlag != nullptr) {
-    COMPILER_ATOMIC_STORE(comm->childAbortFlag, uval, std::memory_order_release);
-    COMPILER_ATOMIC_STORE(comm->childAbortFlagDev, uval, std::memory_order_release);
-  }
+  setChildAbortFlags(comm, uval);
   COMPILER_ATOMIC_STORE(comm->abortFlag, uval, std::memory_order_release);
   COMPILER_ATOMIC_STORE(comm->abortFlagDev, uval, std::memory_order_release);
   return ncclSuccess;
@@ -4841,10 +4847,7 @@ static ncclResult_t commRevokeAsync(struct ncclAsyncJob* job_) {
   if (comm->localPersistentRefs == 0) {
     NCCLCHECKGOTO(setCommAbortFlags(comm, 0), res, exit);
   } else {
-    if (comm->childAbortFlag != nullptr) {
-      COMPILER_ATOMIC_STORE(comm->childAbortFlag, 0u, std::memory_order_release);
-      COMPILER_ATOMIC_STORE(comm->childAbortFlagDev, 0u, std::memory_order_release);
-    }
+    setChildAbortFlags(comm, 0u);
     COMPILER_ATOMIC_STORE(comm->abortFlag, 0u, std::memory_order_release);
   }
 
@@ -5035,8 +5038,8 @@ static ncclResult_t ncclCommInitChildComm(ncclComm_t comm, ncclComm_t* newcomm, 
       NCCLCHECKGOTO(ncclCudaHostCalloc(&childComm->abortFlagDev, 1), res, fail);
       NCCLCHECKGOTO(ncclCalloc(&childComm->abortFlagRefCount, 1), res, fail);
       /* temporarily used to abort everything during child comm init. */
-      comm->childAbortFlag = childComm->abortFlag;
       comm->childAbortFlagDev = childComm->abortFlagDev;
+      COMPILER_ATOMIC_STORE(&comm->childAbortFlag, childComm->abortFlag, std::memory_order_release);
       *childComm->abortFlagRefCount = 1;
     }
     if (config == NULL) {
@@ -5113,10 +5116,7 @@ ncclResult_t ncclCommShrink_impl(ncclComm_t comm, int* excludeRanksList, int exc
     NCCLCHECKGOTO(setCommAbortFlags(comm, 1), res, exit);
     NCCLCHECKGOTO(ncclStrongStreamSynchronize(&comm->sharedRes->deviceStream), res, exit);
     if (__atomic_load_n(&comm->revokedFlag, __ATOMIC_ACQUIRE) && comm->localPersistentRefs != 0) {
-      if (comm->childAbortFlag != nullptr) {
-        COMPILER_ATOMIC_STORE(comm->childAbortFlag, 0u, std::memory_order_release);
-        COMPILER_ATOMIC_STORE(comm->childAbortFlagDev, 0u, std::memory_order_release);
-      }
+      setChildAbortFlags(comm, 0u);
       COMPILER_ATOMIC_STORE(comm->abortFlag, 0u, std::memory_order_release);
     } else {
       NCCLCHECKGOTO(setCommAbortFlags(comm, 0), res, exit);
