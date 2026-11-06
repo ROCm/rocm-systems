@@ -541,16 +541,20 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   (via `COLL_TRACE{,_EVENT,_FUNC,_UTILS}_CC_PATH`, all from `misc/latency_profiler/coll-trace-test.cc`);
   suites `CollTrace*`. See `test_categories_micro_misc.yaml`.
 
-- **`rccl-UnitTestsMicroDiagnostics`**: `src/diagnostics/p2p.cc` (via
-  `DIAG_P2P_CC_PATH`, suite `DiagP2pMicrotest.*`) and `src/diagnostics/ib_write_bw.cc`
-  (via `DIAG_IB_WRITE_BW_CC_PATH`, suite `DiagIbWriteBwMicrotest.*`). Its own binary: it fakes the
-  `transport/p2p.cc` shareable-buffer entry points that `rccl-UnitTestsMicro`
-  compiles for real. Also `src/diagnostics.cc` (`DIAGNOSTICS_CC_PATH`, suite
-  `DiagnosticsMicrotest.*`) and `src/diagnostics/device/p2p.cu` (`DIAG_P2P_DEVICE_CU_PATH`,
-  suite `DiagP2pDeviceMicrotest.*`), each with its symbols renamed so the fakes of
-  both stay linked. It builds with `__HIP_PLATFORM_AMD__`, so it pins the AMD
-  remediation advice and the HIP wording of the report lines; the NVIDIA arm of
-  `p2p.cc` is not compiled here. See `test_categories_micro_diagnostics.yaml`.
+- **`rccl-UnitTestsMicroDiagnostics`**: `src/diagnostics.cc` (via `DIAGNOSTICS_CC_PATH`, from
+  `diagnostics-test.cc`); suite `DiagnosticsMicrotest.*`.
+- **`rccl-UnitTestsMicroDiagnostics{IbWriteBw,P2p,P2pDevice}`**: `src/diagnostics/`, one binary per
+  test file under `test/host/diagnostics/`. All four diagnostics binaries share
+  `test_categories_micro_diagnostics.yaml`.
+  - `ib_write_bw.cc` (`DIAG_IB_WRITE_BW_CC_PATH`, from `diag-ib-write-bw-test.cc`, binary
+    `rccl-UnitTestsMicroDiagnosticsIbWriteBw`); suite `DiagIbWriteBwMicrotest.*`.
+  - `p2p.cc` (`DIAG_P2P_CC_PATH`, from `diag-p2p-test.cc`, binary
+    `rccl-UnitTestsMicroDiagnosticsP2p`); suite `DiagP2pMicrotest.*`. Fakes the `transport/p2p.cc`
+    shareable-buffer entry points. It builds with `__HIP_PLATFORM_AMD__`, so it pins the AMD
+    remediation advice and the HIP wording of the report lines; the NVIDIA arm of `p2p.cc` is not
+    compiled here.
+  - `device/p2p.cu` (`DIAG_P2P_DEVICE_CU_PATH`, from `diag-p2p-device-test.cc`, binary
+    `rccl-UnitTestsMicroDiagnosticsP2pDevice`); suite `DiagP2pDeviceMicrotest.*`.
 - **`rccl-UnitTestsMicroGraph`**: the real `src/graph/{xml,topo,paths,search,rome_models}.cc`,
   compiled as sources; suite `TopoGpuDevMicrotest.*` in `graph-dev-test.cc`. Its own binary:
   every other target links fakes for the graph symbols these files define. See
@@ -955,7 +959,7 @@ symbol.
 | `src/transport/net_socket/common.cc` (targets that do not compile the real file) | `fakes/transport_net_socket_common_fakes.{h,cc}` |
 | generated `sym_kernels_host.cc` (targets that do not compile it) | `fakes/sym_kernels_index_fakes.cc` |
 | rocSHMEM host API | `fakes/rocshmem_fakes.cc` |
-| `src/transport/p2p.cc` shareable-buffer entry points (`rccl-UnitTestsMicroDiagnostics`, `rccl-UnitTestsMicroTransportNet`) | `fakes/transport_p2p_fakes.cc` |
+| `src/transport/p2p.cc` shareable-buffer entry points (`rccl-UnitTestsMicroDiagnosticsP2p`, `rccl-UnitTestsMicroTransportNet`) | `fakes/transport_p2p_fakes.cc` |
 | `src/transport/p2p.cc` registration entry points, macro-renamed in one unit via `fakes/transport_p2p_reg_seam.h` (`rccl-UnitTestsMicro`, which compiles the real file) | `fakes/transport_p2p_reg_fakes.cc` |
 | `src/plugin/plugin_open.cc` library registry and `src/plugin/net/net_v*.cc` getters (targets that do not compile the real files) | `fakes/plugin_stubs.cc` |
 | selected entry points from `src/{transport,proxy}.cc`, `src/transport/{generic,coll_net,net,nvls}.cc`, `src/{graph/paths,tuning/tuning,plugin/net}.cc` (targets that do not compile the real files) | `fakes/transport_stubs.cc` |
@@ -1453,7 +1457,8 @@ above (`./install.sh -t`, wired via `add_subdirectory(host)`), the same file
 can be configured **directly** to build every host binary — `rccl-HostUnitTests`,
 `rccl-UnitTestsMicro`, `rccl-UnitTestsMicroWarpSpeed`,
 `rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker|-warpspeed]`,
-`rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroGinHostFinalize`, `rccl-UnitTestsMicroCe`, `rccl-UnitTestsMicroDiagnostics`,
+`rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroGinHostFinalize`, `rccl-UnitTestsMicroCe`,
+`rccl-UnitTestsMicroDiagnostics`, `rccl-UnitTestsMicroDiagnostics<Unit>` (one per `src/diagnostics/` test file),
 `rccl-UnitTestsMicroGraph`,
 `rccl-UnitTestsMicroDda<SubDir><Unit>` (one per `src/algorithms/dda/` test file),
 `rccl-UnitTestsMicroMisc<Unit>` (one per `src/misc/` test file),
@@ -1522,7 +1527,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroEnqueueTaskSched   # src/enqueue/task_sched/ tests
 ./build/rccl-UnitTestsMicroOsLinux            # src/os/linux.cc; one binary per src/os/ test file
 ./build/rccl-UnitTestsMicroConnect            # src/graph/connect.cc Preset/Postset tests
-./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics.cc + src/diagnostics/ tests
+./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics.cc tests
 ./build/rccl-UnitTestsMicroGraph              # src/graph/{xml,topo,paths,search,rome_models}.cc tests
 ./build/rccl-UnitTestsMicroMemManager         # src/mem_manager.cc tests
 ./build/rccl-UnitTestsMicroAllocator          # src/allocator.cc tests
@@ -1536,7 +1541,9 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroCore               # nccl_device/core.cc tests
 ./build/rccl-UnitTestsMicroCftDevRuntime      # cft_dev_runtime.cc tests
 ./build/rccl-UnitTestsMicroParam              # src/param/*.cc, src/misc/param.cc tests
-./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/p2p.cc tests
+./build/rccl-UnitTestsMicroDiagnosticsIbWriteBw  # src/diagnostics/ib_write_bw.cc tests
+./build/rccl-UnitTestsMicroDiagnosticsP2p     # src/diagnostics/p2p.cc tests
+./build/rccl-UnitTestsMicroDiagnosticsP2pDevice  # src/diagnostics/device/p2p.cu launchers
 ./build/rccl-UnitTestsMicroPluginNet          # src/plugin/net.cc; one binary per src/plugin/ test file
 ./build/rccl-UnitTestsMicroCe                 # src/ce_coll.cc tests
 ./build/rccl-UnitTestsMicroRmaProxy           # src/rma/rma_proxy.cc tests
