@@ -25,7 +25,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <ctime>
-#include <exception>
 #include <filesystem>
 #include <format>
 #include <memory>
@@ -176,17 +175,17 @@ bool validate_socket_paths(const std::vector<std::string> &socket_paths, std::si
       return false;
     }
 
-    try {
-      const std::string normalized =
-          std::filesystem::absolute(socket_path).lexically_normal().string();
-      if (!normalized_paths.insert(normalized).second) {
-        util::Logger::warn(
-            std::format("vfu: socket paths resolve to the same lexical path: {}", socket_path));
-        return false;
-      }
-    } catch (const std::exception &error) {
+    std::error_code error;
+    const std::filesystem::path absolute = std::filesystem::absolute(socket_path, error);
+    if (error) {
       util::Logger::warn(
-          std::format("vfu: cannot normalize socket path {}: {}", socket_path, error.what()));
+          std::format("vfu: cannot normalize socket path {}: {}", socket_path, error.message()));
+      return false;
+    }
+    const std::string normalized = absolute.lexically_normal().string();
+    if (!normalized_paths.insert(normalized).second) {
+      util::Logger::warn(
+          std::format("vfu: socket paths resolve to the same lexical path: {}", socket_path));
       return false;
     }
   }
@@ -207,19 +206,16 @@ int run_vfio_server_impl(const std::string &config_path,
     util::Logger::warn("vfu: cannot block the signals this server waits on");
     return 1;
   }
-  config::LoadedConfig loaded;
-  try {
-    util::StringDiagnostic diagnostic;
-    auto maybe_loaded = config::load_config(config_path, kEmbeddedSchema, diagnostic.emitter());
-    if (maybe_loaded.failed()) {
-      util::Logger::warn(std::format("vfu: cannot read {}: {}", config_path, diagnostic.message()));
-      return 1;
-    }
-    loaded = std::move(maybe_loaded.value());
-  } catch (const std::exception &error) {
-    util::Logger::warn(std::format("vfu: cannot read {}: {}", config_path, error.what()));
+  util::StringDiagnostic load_diagnostic;
+  util::FailureOr<config::LoadedConfig> maybe_loaded =
+      config::load_config(config_path, kEmbeddedSchema, load_diagnostic.emitter());
+  if (maybe_loaded.failed()) {
+    util::Logger::warn(
+        std::format("vfu: cannot read {}: {}", config_path, load_diagnostic.message()));
     return 1;
   }
+  config::LoadedConfig loaded = std::move(maybe_loaded.value());
+
   SoC *soc = loaded.soc();
   if (soc == nullptr) {
     util::Logger::warn(std::format("vfu: {} describes no GPU to present", config_path));
@@ -254,19 +250,14 @@ int run_vfio_server_impl(const std::string &config_path,
   simdojo::SimulationEngine engine(engine_config);
 
   util::StringDiagnostic diagnostic;
-  VirtualMachine *machine_ptr = nullptr;
-  try {
-    auto machine = assemble_virtual_machine_topology(loaded, engine.topology(),
-                                                     /*daemon_mode=*/false, diagnostic.emitter());
-    if (machine.failed()) {
-      util::Logger::warn("vfu: cannot assemble the local node: ", diagnostic.message());
-      return 1;
-    }
-    machine_ptr = machine.value();
-  } catch (const std::exception &error) {
-    util::Logger::warn(std::format("vfu: cannot assemble the local node: {}", error.what()));
+  util::FailureOr<VirtualMachine *> machine =
+      assemble_virtual_machine_topology(loaded, engine.topology(),
+                                        /*daemon_mode=*/false, diagnostic.emitter());
+  if (machine.failed()) {
+    util::Logger::warn("vfu: cannot assemble the local node: ", diagnostic.message());
     return 1;
   }
+  VirtualMachine *machine_ptr = machine.value();
   if (machine_ptr->num_socs() != socket_paths.size()) {
     util::Logger::warn(std::format("vfu: assembled node has {} local GPU(s), expected {}",
                                    machine_ptr->num_socs(), socket_paths.size()));
@@ -296,32 +287,27 @@ int run_vfio_server_impl(const std::string &config_path,
     bool complete_ = true;
   } frontend_shutdown(pci_devices);
 
-  try {
-    traces.reserve(socket_paths.size());
-    pci_devices.reserve(socket_paths.size());
-    for (std::size_t gpu_index = 0; gpu_index < socket_paths.size(); ++gpu_index) {
-      SoC *local_soc = machine_ptr->soc(static_cast<uint32_t>(gpu_index));
-      if (local_soc == nullptr) {
-        util::Logger::warn(std::format("vfu: local GPU {} has no SoC", gpu_index));
-        return 1;
-      }
-      traces.push_back(std::make_unique<BarAccessTrace>(symbols));
-      const config::KfdDeviceConfig &identity =
-          loaded.devices.empty() ? loaded.device : loaded.devices[gpu_index];
-      const std::string name = socket_paths.size() == 1 ? "pci" : std::format("pci{}", gpu_index);
-      auto *device = static_cast<GpuPciDevice *>(machine_ptr->add_child(
-          std::make_unique<GpuPciDevice>(name, gpu_pci_spec_from_config(identity, loaded.pci),
-                                         traces.back().get(), local_soc)));
-      pci_devices.push_back(device);
-      if (!device->usable())
-        return 1;
-    }
-    if (engine.create(diagnostic.emitter()).failed()) {
-      util::Logger::warn("vfu: cannot create the local GPU node: ", diagnostic.message());
+  traces.reserve(socket_paths.size());
+  pci_devices.reserve(socket_paths.size());
+  for (std::size_t gpu_index = 0; gpu_index < socket_paths.size(); ++gpu_index) {
+    SoC *local_soc = machine_ptr->soc(static_cast<uint32_t>(gpu_index));
+    if (local_soc == nullptr) {
+      util::Logger::warn(std::format("vfu: local GPU {} has no SoC", gpu_index));
       return 1;
     }
-  } catch (const std::exception &error) {
-    util::Logger::warn(std::format("vfu: cannot create the local GPU node: {}", error.what()));
+    traces.push_back(std::make_unique<BarAccessTrace>(symbols));
+    const config::KfdDeviceConfig &identity =
+        loaded.devices.empty() ? loaded.device : loaded.devices[gpu_index];
+    const std::string name = socket_paths.size() == 1 ? "pci" : std::format("pci{}", gpu_index);
+    auto *device =
+        static_cast<GpuPciDevice *>(machine_ptr->add_child(std::make_unique<GpuPciDevice>(
+            name, gpu_pci_spec_from_config(identity, loaded.pci), traces.back().get(), local_soc)));
+    pci_devices.push_back(device);
+    if (!device->usable())
+      return 1;
+  }
+  if (engine.create(diagnostic.emitter()).failed()) {
+    util::Logger::warn("vfu: cannot create the local GPU node: ", diagnostic.message());
     return 1;
   }
 
@@ -387,59 +373,41 @@ int run_vfio_server_impl(const std::string &config_path,
     status = engine_status.code == 0 ? 1 : engine_status.code;
   }
 
-  // Declare hosts before threads so exceptional unwinding also joins every
-  // serving thread before destroying a host or stopping the engine.
+  // Declare hosts before threads so every serving thread is joined before
+  // destroying a host or stopping the engine.
   std::vector<std::unique_ptr<VfioDeviceHost>> hosts;
   std::vector<std::unique_ptr<std::atomic<ServingOutcome>>> serving_outcomes;
   std::vector<std::jthread> serving_threads;
   if (status == 0) {
-    try {
-      hosts.reserve(socket_paths.size());
-      for (std::size_t gpu_index = 0; gpu_index < socket_paths.size(); ++gpu_index) {
-        hosts.push_back(
-            std::make_unique<VfioDeviceHost>(socket_paths[gpu_index], *pci_devices[gpu_index]));
-        if (!hosts.back()->build()) {
-          status = 1;
-          break;
-        }
+    hosts.reserve(socket_paths.size());
+    for (std::size_t gpu_index = 0; gpu_index < socket_paths.size(); ++gpu_index) {
+      hosts.push_back(
+          std::make_unique<VfioDeviceHost>(socket_paths[gpu_index], *pci_devices[gpu_index]));
+      if (!hosts.back()->build()) {
+        status = 1;
+        break;
       }
-    } catch (const std::exception &error) {
-      util::Logger::warn(std::format("vfu: cannot build a PCI transport: {}", error.what()));
-      status = 1;
     }
   }
 
   if (status == 0) {
-    try {
-      serving_outcomes.reserve(hosts.size());
-      serving_threads.reserve(hosts.size());
-      for (const std::unique_ptr<VfioDeviceHost> &host : hosts) {
-        serving_outcomes.push_back(
-            std::make_unique<std::atomic<ServingOutcome>>(ServingOutcome::Running));
-        VfioDeviceHost *host_ptr = host.get();
-        std::atomic<ServingOutcome> *outcome = serving_outcomes.back().get();
-        // Each host has its own protocol loop; all inherit the blocked mask.
-        serving_threads.emplace_back([host_ptr, outcome](std::stop_token stop_token) {
-          try {
-            const VfioDeviceHost::ServeResult result = host_ptr->run(stop_token);
-            const ServingOutcome reason =
-                result == VfioDeviceHost::ServeResult::Failed
-                    ? ServingOutcome::Failed
-                    : (stop_token.stop_requested() ? ServingOutcome::RequestedStop
-                                                   : ServingOutcome::Stopped);
-            outcome->store(reason, std::memory_order_release);
-          } catch (const std::exception &error) {
-            util::Logger::warn(std::format("vfu: PCI serving failed: {}", error.what()));
-            outcome->store(ServingOutcome::Failed, std::memory_order_release);
-          } catch (...) {
-            util::Logger::warn("vfu: PCI serving failed with a non-standard exception");
-            outcome->store(ServingOutcome::Failed, std::memory_order_release);
-          }
-        });
-      }
-    } catch (const std::exception &error) {
-      util::Logger::warn(std::format("vfu: cannot start PCI serving threads: {}", error.what()));
-      status = 1;
+    serving_outcomes.reserve(hosts.size());
+    serving_threads.reserve(hosts.size());
+    for (const std::unique_ptr<VfioDeviceHost> &host : hosts) {
+      serving_outcomes.push_back(
+          std::make_unique<std::atomic<ServingOutcome>>(ServingOutcome::Running));
+      VfioDeviceHost *host_ptr = host.get();
+      std::atomic<ServingOutcome> *outcome = serving_outcomes.back().get();
+      // Each host has its own protocol loop; all inherit the blocked mask.
+      serving_threads.emplace_back([host_ptr, outcome](std::stop_token stop_token) {
+        const VfioDeviceHost::ServeResult result = host_ptr->run(stop_token);
+        const ServingOutcome reason =
+            result == VfioDeviceHost::ServeResult::Failed
+                ? ServingOutcome::Failed
+                : (stop_token.stop_requested() ? ServingOutcome::RequestedStop
+                                               : ServingOutcome::Stopped);
+        outcome->store(reason, std::memory_order_release);
+      });
     }
   }
 
