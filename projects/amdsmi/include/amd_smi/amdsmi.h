@@ -10074,6 +10074,10 @@ amdsmi_status_t amdsmi_get_nic_numa_info(amdsmi_processor_handle processor_handl
  *
  *  @platform{host} @platform{gpu_bm_linux}
  *
+ *  @details Reads the port state on every call, so changes after ::amdsmi_init() are reported.
+ *  Returns ::AMDSMI_STATUS_DRIVER_NOT_LOADED if the NIC driver was unbound after
+ *  ::amdsmi_init(), and ::AMDSMI_STATUS_INTERNAL_EXCEPTION if a value cannot be parsed.
+ *
  *  @param[in] processor_handle NIC for which to query
  *
  *  @param[out] info reference to the nic port info struct.
@@ -10094,7 +10098,9 @@ amdsmi_status_t amdsmi_get_nic_port_info(amdsmi_processor_handle processor_handl
  *  @details A NIC whose RDMA driver is absent (for example, ionic_rdma blacklisted)
  *  is still enumerated: this call returns ::AMDSMI_STATUS_SUCCESS with a zeroed
  *  struct. Check @p info->num_rdma_dev rather than the return value to tell
- *  whether any RDMA device was reported.
+ *  whether any RDMA device was reported. The driver binding and port states are read on
+ *  every call, so a driver unbound after ::amdsmi_init() also gives a zeroed struct. A value
+ *  that cannot be parsed returns ::AMDSMI_STATUS_INTERNAL_EXCEPTION.
  *
  *  @param[in] processor_handle NIC for which to query
  *

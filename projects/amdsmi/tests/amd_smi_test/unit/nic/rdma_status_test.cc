@@ -6,19 +6,26 @@
 // required getters drops it. Driven through the test seam, so each getter's
 // status is set independently and no NIC hardware is needed.
 //
-// Coverage stops at populate_amd_ainic_device(). Reaching the public
-// amdsmi_get_nic_rdma_dev_info() needs a handle registered with AMDSmiSystem,
-// which no seam exposes, so its zeroed-struct contract is unverified here.
+// The public getters are reached through an AI-NIC registered with AMDSmiSystem.
+// Port and RDMA info go through the same stubs on every call; the rest comes
+// from what discovery stored.
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <iterator>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <system_error>
 
 #include "amd_smi/impl/amd_smi_nic_testing.h"
+#include "test_fixture_utils.h"
 
 namespace {
 
@@ -26,6 +33,7 @@ using amd::smi::AMDSmiAINICDevice;
 using amd::smi::nic_info_getters_t;
 using amd::smi::nic_set_info_getters_for_testing;
 using amd::smi::populate_amd_ainic_device;
+using amd::smi::testing::ScopedProcessorRegistration;
 
 // Positions in nic_info_getters_t, in declaration order.
 constexpr size_t kBus = 0;
@@ -208,6 +216,156 @@ TEST_F(NicUnit, RestoreRebindsProductionGetters) {
   nic_set_info_getters_for_testing(nullptr);
   AMDSmiAINICDevice::AINICInfo info = {};
   EXPECT_EQ(populate_amd_ainic_device(nullptr, 0x1000, info), AMDSMI_STATUS_INVAL);
+}
+
+// An AI-NIC registered with AMDSmiSystem whose discovery copy is all zeros, so a
+// stub-filled result from a public getter can only come from a read made when it
+// was called. Heap-allocated: the device holds over 600 KB.
+class RegisteredNic {
+ public:
+  explicit RegisteredNic(const AMDSmiAINICDevice::AINICInfo& discovered)
+      : nic_(std::make_unique<AMDSmiAINICDevice>(discovered)), registration_(nic_.get()) {}
+  RegisteredNic() : RegisteredNic(*std::make_unique<AMDSmiAINICDevice::AINICInfo>()) {}
+
+  amdsmi_processor_handle handle() const { return registration_.handle(); }
+
+ private:
+  // Declaration order is setup order; teardown unregisters before amdsmi_shut_down().
+  ScopedAmdsmiInit init_;
+  std::unique_ptr<AMDSmiAINICDevice> nic_;
+  ScopedProcessorRegistration registration_;
+};
+
+TEST_F(NicUnit, PortInfoIsReadWhenCalled) {
+  RegisteredNic nic;
+  auto port = std::make_unique<amdsmi_nic_port_info_t>();
+  EXPECT_EQ(amdsmi_get_nic_port_info(nic.handle(), port.get()), AMDSMI_STATUS_SUCCESS);
+  EXPECT_TRUE(IsFilledWith(*port, FillByte(kPort)));
+
+  g_status[kPort] = SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+  EXPECT_EQ(amdsmi_get_nic_port_info(nic.handle(), port.get()), AMDSMI_STATUS_DRIVER_NOT_LOADED);
+}
+
+// The amdsmi.h contract for a NIC without RDMA, at the public getter: a tolerated
+// status is SUCCESS with a zeroed struct, and every other status surfaces.
+TEST_F(NicUnit, RdmaDevInfoIsReadWhenCalled) {
+  RegisteredNic nic;
+  auto rdma = std::make_unique<amdsmi_nic_rdma_devices_info_t>();
+  EXPECT_EQ(amdsmi_get_nic_rdma_dev_info(nic.handle(), rdma.get()), AMDSMI_STATUS_SUCCESS);
+  EXPECT_TRUE(IsFilledWith(*rdma, FillByte(kRdma)));
+
+  for (const StatusMapping& mapping : kStatusMappings) {
+    g_status[kRdma] = mapping.nic;
+    const amdsmi_status_t status = amdsmi_get_nic_rdma_dev_info(nic.handle(), rdma.get());
+    if (IsToleratedForRdma(mapping.nic)) {
+      EXPECT_EQ(status, AMDSMI_STATUS_SUCCESS) << "smi_nic_status_t=" << mapping.nic;
+      ExpectRdmaZeroed(*rdma);
+    } else {
+      EXPECT_EQ(status, mapping.amdsmi) << "smi_nic_status_t=" << mapping.nic;
+    }
+  }
+}
+
+// The whole-struct getter keeps the discovery copy and reads port and RDMA info now.
+TEST_F(NicUnit, AinicInfoReadsPortAndRdmaWhenCalled) {
+  RegisteredNic nic;
+  auto info = std::make_unique<AMDSmiAINICDevice::AINICInfo>();
+  std::memset(info.get(), 0x5A, sizeof(*info));
+  EXPECT_EQ(amdsmi_get_ainic_info(nic.handle(), info.get()), AMDSMI_STATUS_SUCCESS);
+  EXPECT_TRUE(IsFilledWith(info->asic, 0));
+  EXPECT_TRUE(IsFilledWith(info->port, FillByte(kPort)));
+  EXPECT_TRUE(IsFilledWith(info->rdma_dev, FillByte(kRdma)));
+
+  g_status[kRdma] = SMI_NIC_STATUS_ERROR;
+  EXPECT_EQ(amdsmi_get_ainic_info(nic.handle(), info.get()), AMDSMI_STATUS_API_FAILED);
+  g_status[kPort] = SMI_NIC_STATUS_NOT_FOUND;
+  EXPECT_EQ(amdsmi_get_ainic_info(nic.handle(), info.get()), AMDSMI_STATUS_NOT_FOUND);
+}
+
+// ASIC, bus, driver and NUMA info do not change while the NIC is present, so they
+// come from what discovery stored; a getter call now would fail.
+TEST_F(NicUnit, StaticInfoComesFromDiscovery) {
+  ASSERT_EQ(Populate(), AMDSMI_STATUS_SUCCESS);
+  RegisteredNic nic(info_);
+  g_status.fill(SMI_NIC_STATUS_ERROR);
+
+  amdsmi_nic_asic_info_t asic = {};
+  EXPECT_EQ(amdsmi_get_nic_asic_info(nic.handle(), &asic), AMDSMI_STATUS_SUCCESS);
+  EXPECT_TRUE(IsFilledWith(asic, FillByte(kAsic)));
+  amdsmi_nic_bus_info_t bus = {};
+  EXPECT_EQ(amdsmi_get_nic_bus_info(nic.handle(), &bus), AMDSMI_STATUS_SUCCESS);
+  EXPECT_TRUE(IsFilledWith(bus, FillByte(kBus)));
+  amdsmi_nic_driver_info_t driver = {};
+  EXPECT_EQ(amdsmi_get_nic_driver_info(nic.handle(), &driver), AMDSMI_STATUS_SUCCESS);
+  EXPECT_TRUE(IsFilledWith(driver, FillByte(kDriver)));
+  amdsmi_nic_numa_info_t numa = {};
+  EXPECT_EQ(amdsmi_get_nic_numa_info(nic.handle(), &numa), AMDSMI_STATUS_SUCCESS);
+  EXPECT_TRUE(IsFilledWith(numa, FillByte(kNuma)));
+}
+
+template <typename Info>
+smi_nic_status_t ThrowParseError(smi_nic_ctx_t, uint64_t, Info*) {
+  throw std::invalid_argument("stoul");
+}
+
+// The NIC library's std::stoul throws on sysfs text it cannot parse. A getter must
+// return a status instead of letting the exception reach a C caller.
+TEST_F(NicUnit, UnparsableValueIsAStatus) {
+  static const nic_info_getters_t kThrowingGetters = {
+      Stub<kBus, smi_nic_bus_info_t>,       Stub<kDriver, smi_nic_driver_info_t>,
+      Stub<kAsic, smi_nic_asic_info_t>,     Stub<kNuma, smi_nic_numa_info_t>,
+      ThrowParseError<smi_nic_port_info_t>, ThrowParseError<smi_nic_rdma_devices_info_t>,
+  };
+  RegisteredNic nic;
+  nic_set_info_getters_for_testing(&kThrowingGetters);
+  auto port = std::make_unique<amdsmi_nic_port_info_t>();
+  EXPECT_EQ(amdsmi_get_nic_port_info(nic.handle(), port.get()), AMDSMI_STATUS_INTERNAL_EXCEPTION);
+  auto rdma = std::make_unique<amdsmi_nic_rdma_devices_info_t>();
+  EXPECT_EQ(amdsmi_get_nic_rdma_dev_info(nic.handle(), rdma.get()),
+            AMDSMI_STATUS_INTERNAL_EXCEPTION);
+}
+
+// The counter path starts at /sys/class/net/<netdev>. A real netdev name cannot contain '/', so
+// only a test can aim it at a scratch tree through "..", and then remove or break that directory.
+TEST_F(NicUnit, RdmaPortStatisticsListingFailureIsAStatus) {
+  FakeSysfsTree tree;
+  ASSERT_FALSE(tree.root().empty());
+  const std::string counters =
+      "device/infiniband/rdma0/subsystem/rdma0/subsystem/rdma0/ports/1/hw_counters";
+  tree.WriteFile(counters + "/rx_packets", "7\n");
+
+  auto discovered = std::make_unique<AMDSmiAINICDevice::AINICInfo>();
+  discovered->rdma_dev.num_rdma_dev = 1;
+  amdsmi_nic_rdma_dev_info_t& dev = discovered->rdma_dev.rdma_dev_info[0];
+  std::snprintf(dev.rdma_dev, sizeof(dev.rdma_dev), "rdma0");
+  dev.num_rdma_ports = 1;
+  amdsmi_nic_rdma_port_info_t& port = dev.rdma_port_info[0];
+  std::snprintf(port.netdev, sizeof(port.netdev), "../../..%s", tree.root().c_str());
+  port.rdma_port = 1;
+  RegisteredNic nic(*discovered);
+
+  std::array<amdsmi_nic_stat_t, 4> stats{};
+  uint32_t count = static_cast<uint32_t>(stats.size());
+  ASSERT_EQ(amdsmi_get_nic_rdma_port_statistics(nic.handle(), 0, &count, stats.data()),
+            AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(count, 1u);
+  EXPECT_STREQ(stats[0].name, "rx_packets");
+  EXPECT_EQ(stats[0].value, 7u);
+
+  const std::filesystem::path dir = std::filesystem::path(tree.root()) / counters;
+  std::error_code ec;
+  std::filesystem::remove_all(dir, ec);
+  ASSERT_FALSE(ec) << ec.message();
+  count = static_cast<uint32_t>(stats.size());
+  EXPECT_EQ(amdsmi_get_nic_rdma_port_statistics(nic.handle(), 0, &count, stats.data()),
+            AMDSMI_STATUS_FILE_ERROR);
+
+  // A self-referencing link: the listing fails with ELOOP instead of ENOENT.
+  std::filesystem::create_directory_symlink(dir.filename(), dir, ec);
+  ASSERT_FALSE(ec) << ec.message();
+  count = static_cast<uint32_t>(stats.size());
+  EXPECT_EQ(amdsmi_get_nic_rdma_port_statistics(nic.handle(), 0, &count, stats.data()),
+            AMDSMI_STATUS_FILE_ERROR);
 }
 
 }  // namespace
