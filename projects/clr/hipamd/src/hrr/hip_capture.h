@@ -5,16 +5,6 @@
  */
 #pragma once
 
-/*
- * hip_capture.h — In-tree HIP capture layer public API.
- *
- * Captures HIP API calls to a .hrr archive for later replay.
- * Independent of the profiler layer — no profiler headers included.
- *
- * Binary format is compatible with hrr_reader.h / hrr_replay.cpp.
- * Format constants (HRR_MAGIC, HRR_VERSION, hrr_file_header) are in
- * hrr_api_args.h — included by hip_capture.cpp and hip_capture_writer.cpp.
- */
 
 #include <cstddef>
 #include <cstdint>
@@ -29,9 +19,6 @@ struct Hash128 {
 
 }  // namespace hrr_cap
 
-// ---------------------------------------------------------------------------
-// Public API — called from hip_context.cpp and hip_capture.cpp
-// ---------------------------------------------------------------------------
 
 // Check if capture is enabled (HIP_HRR_CAPTURE_OUTPUT env var set and not empty or blank,
 // and the process not started in secure-execution mode)

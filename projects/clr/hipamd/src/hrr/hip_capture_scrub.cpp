@@ -10,8 +10,6 @@
 
 // Field offsets are spelled out rather than taken from <elf.h>, which Windows
 // does not have and whose Elf64_* typedefs collide with CLR's own ELF headers.
-// The image is the application's memory, so every read is bounds-checked and
-// copied out with memcpy, whatever its alignment.
 
 namespace hrr_cap {
 namespace scrub {

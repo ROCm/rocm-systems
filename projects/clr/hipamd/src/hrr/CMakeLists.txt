@@ -1,6 +1,5 @@
 # HRR In-Tree Capture Layer
 # Adds capture source files to the amdhip64 target.
-# No separate library — capture is compiled into amdhip64 directly.
 if(CLR_HRR_CODEGEN_CHECK)
   # Regenerate HRR sources in the binary tree and verify the checked-in files.
   # The checked-in generated files remain the compilation inputs.
@@ -28,7 +27,6 @@ target_sources(amdhip64 PRIVATE
 
 # Capture headers live here; the shared HRR archive wire format now lives in
 # projects/hrr/include and is included as "hrr/hrr_api_args.h".
-# Playback tools (hrr-playback, hrr_reader) now live in projects/hrr.
 target_include_directories(amdhip64 PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${CMAKE_CURRENT_SOURCE_DIR}/../../../../hrr/include
