@@ -451,6 +451,11 @@ inline __host__ __device__ void ncclP2pPartBounds(int nParts, int part, size_t b
 // implemented in channel.h
 inline __host__ uint8_t ncclP2pChannelBaseForRound(struct ncclComm* comm, int p2pRound, int p2pBatchEnable);
 
+inline __host__ __device__ int ncclP2pWorkChannelStride(int channelsPerPeer, int nSendChannels, int nRecvChannels) {
+  int workChannels = nSendChannels > nRecvChannels ? nSendChannels : nRecvChannels;
+  return channelsPerPeer > workChannels ? channelsPerPeer : workChannels;
+}
+
 // ncclP2pChannelToPart and ncclP2pChannelForPart are inverses. The device code
 // uses ncclP2pChannelToPart to determine which part "this" channel is responsible for.
 inline __host__ int ncclP2pChannelForPart(int nP2pChannels, int base, int part, int nParts, int nNodes, int shiftSize) {

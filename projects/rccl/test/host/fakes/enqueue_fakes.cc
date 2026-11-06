@@ -33,6 +33,7 @@ ASSERT_HOOK_MATCHES_PROD(g_getCollNetSupport, ncclGetCollNetSupport);
 ASSERT_HOOK_MATCHES_PROD(g_getRegBuff, ncclGetRegBuff);
 ASSERT_HOOK_MATCHES_PROD(g_rcclEffectiveP2pBatchEnable, rcclEffectiveP2pBatchEnable);
 ASSERT_HOOK_MATCHES_PROD(g_rcclP2pTaskParts, rcclP2pTaskParts);
+ASSERT_HOOK_MATCHES_PROD(g_rcclP2pChannelStrideForApi, rcclP2pChannelStrideForApi);
 ASSERT_HOOK_MATCHES_PROD(g_enqueueCheck, ncclEnqueueCheck);
 ASSERT_HOOK_MATCHES_PROD(g_rcclLogCollInfo, rcclLogCollInfo);
 ASSERT_HOOK_MATCHES_PROD(g_rcclAddonLaunchBegin, rcclAddonLaunchBegin);
@@ -89,8 +90,13 @@ std::function<int(struct ncclComm*, ncclFunc_t)> g_rcclP2pTaskParts = DefaultP2p
 // task_posttuning.cc without the production enqueue/transport objects, so keep
 // the default-off policy here.
 int64_t rcclParamP2pDirectMaxChannels() { return 0; }
-int rcclP2pChannelStrideForApi(struct ncclComm* comm, ncclFunc_t, int, int, bool) {
+static int DefaultP2pChannelStrideForApi(struct ncclComm* comm, ncclFunc_t, int, int, bool) {
   return comm->p2pnChannelsPerPeer;
+}
+std::function<int(struct ncclComm*, ncclFunc_t, int, int, bool)> g_rcclP2pChannelStrideForApi =
+  DefaultP2pChannelStrideForApi;
+int rcclP2pChannelStrideForApi(struct ncclComm* comm, ncclFunc_t collAPI, int peer, int maxChannels, bool useMemcpy) {
+  return g_rcclP2pChannelStrideForApi(comm, collAPI, peer, maxChannels, useMemcpy);
 }
 
 // enqueue.cc:437-441 splits the default on ROCm version; mirrored rather than pinned to one arm.
@@ -140,6 +146,7 @@ void ResetEnqueueFakes() {
   g_getRegBuff = DefaultGetRegBuff;
   g_rcclEffectiveP2pBatchEnable = DefaultEffectiveP2pBatchEnable;
   g_rcclP2pTaskParts = DefaultP2pTaskParts;
+  g_rcclP2pChannelStrideForApi = DefaultP2pChannelStrideForApi;
   g_enqueueCheck = DefaultEnqueueCheck;
   g_rcclLogCollInfo = DefaultLogCollInfo;
   g_rcclAddonLaunchBegin = DefaultAddonLaunchBegin;

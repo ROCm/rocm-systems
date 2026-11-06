@@ -1770,7 +1770,7 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
     auto addWork = [&](bool useRecv, bool useSend) -> ncclResult_t {
       int workChannels[2] = {useRecv ? nChannels[0] : 0, useSend ? nChannels[1] : 0};
       int nWorkParts = std::max(workChannels[0], workChannels[1]);
-      int channelStride = std::max(comm->p2pnChannelsPerPeer, nWorkParts);
+      int channelStride = ncclP2pWorkChannelStride(comm->p2pnChannelsPerPeer, workChannels[1], workChannels[0]);
       bool wideP2P = channelStride > comm->p2pnChannelsPerPeer && !(useRecv && proxied[0]) && !(useSend && proxied[1]);
 
       struct ncclWorkList* workNode =
@@ -1983,9 +1983,7 @@ static ncclResult_t scheduleP2pTasksToPlan(struct ncclComm* comm, int* p2pEpoch,
         // the other on the per-peer tile; then each direction is its own work item.
         int strides[2] = {rcclP2pChannelStride(comm, recv), rcclP2pChannelStride(comm, send)};
         int maxStride = std::max(strides[0], strides[1]);
-        // Equal-size direct directions with the same cap make the same tuning decisions and stay
-        // one work only when their effective transports also keep the same caps. Different caps,
-        // sizes, or a NET direction can put one direction on each tile and must reserve two.
+        // A NET direction, or unequal caps or sizes, can split the round into two works; reserve both tiles.
         if (maxStride > nChannelsMax) {
           if (rcclP2pTaskUsesNetwork(comm, recv, *p2pRound, /*isSendNotRecv=*/false)) strides[0] = nChannelsMax;
           if (rcclP2pTaskUsesNetwork(comm, send, *p2pRound, /*isSendNotRecv=*/true)) strides[1] = nChannelsMax;

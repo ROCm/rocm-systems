@@ -55,6 +55,9 @@ extern std::function<int(struct ncclComm*)> g_rcclEffectiveP2pBatchEnable;
 // enqueue.cc's rcclP2pTaskParts: default p2pnChannelsPerPeer; install the multi-node AINIC Scatter limit per test.
 extern std::function<int(struct ncclComm*, ncclFunc_t)> g_rcclP2pTaskParts;
 
+// enqueue.cc's direct-P2P stride policy: default p2pnChannelsPerPeer.
+extern std::function<int(struct ncclComm*, ncclFunc_t, int, int, bool)> g_rcclP2pChannelStrideForApi;
+
 // enqueue.cc's collective entry, COLL log line and addon-launch bracket. Fail loud until a test installs them.
 struct ncclInfo;
 struct rcclAddonLaunchState;

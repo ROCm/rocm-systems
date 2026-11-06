@@ -5729,6 +5729,21 @@ TEST_F(EnqueueMicrotest, AddP2pToPlan_WidenedSendWithPerPeerRecv_SplitsWidenedWo
   }
 }
 
+TEST_F(EnqueueMicrotest, AddP2pToPlan_ProxiedWidenedWorkDoesNotShareWideBatch) {
+  WidenedP2pScene sc(ncclFuncSend, ssize_t(1) << 30, ncclFuncAlltoAll, ssize_t(1) << 30);
+  constexpr int kOverlapChannel = 128;
+  addWorkBatchToPlan(sc.bp.c(), sc.bp.p(), kOverlapChannel, ncclDevWorkTypeP2p, ncclDevFuncId_P2p(false),
+                     NCCL_PROGRESS_P2P_COUNTER_INDEX, /*workOffset=*/0, /*p2pRound=*/1,
+                     /*batchP2P=*/false, /*wideP2P=*/true);
+  sc.channelPeers[WidenedP2pScene::kSendRank].send[1].proxyConn.proxyProgress =
+    reinterpret_cast<decltype(sc.channelPeers[0].send[1].proxyConn.proxyProgress)>(0x1);
+
+  ASSERT_EQ(ncclSuccess, sc.add());
+
+  EXPECT_EQ(2, sc.bp.queueLength(kOverlapChannel))
+    << "a proxied work must not share the existing proxy-less widened batch";
+}
+
 TEST_F(EnqueueMicrotest, AddP2pToPlan_SplitRound_RecordsEachWorkForTheProfiler) {
   // KernelCh steps are counted per work and channel: the two works of a split round need their own
   // pair ids, in emission order, and channel masks that reach past channel 63.

@@ -1906,17 +1906,18 @@ TEST_F(ProfilerThreadMicrotest, PostPlanWork_MixedActivationSplitWorksKeepTheDev
   EXPECT_EQ(starts[0].d.kernelCh.pTimer, 10u);
 }
 
-// Only channels below 64 are asserted: the post loop runs to MAXCHANNELS but shifts a 64-bit mask, which is
-// undefined for channels >= 64.
-TEST_F(ProfilerThreadMicrotest, PostPlanWork_P2pOnChannels0And63_BumpsExactlyThose) {
+TEST_F(ProfilerThreadMicrotest, PostPlanWork_P2pMultiwordMaskBumpsExactlyThoseChannels) {
   Load(ncclProfileKernelCh);
   CreateThread(comm_.get());
   ncclTaskP2p* t = AddP2p(ncclProfileKernelCh);
-  t->channelMask = {{0x1 | (1ull << 63)}};
+  t->channelMask.masks[0] = 0x1 | (1ull << 63);
+  t->channelMask.masks[2] = 0x1;
   ASSERT_EQ(ncclSuccess, ncclProfilerPostPlanWork(comm_.get(), plan_.get()));
-  for (int c = 0; c < 64; c++) EXPECT_EQ(comm_->profiler.workCounter[c], c == 0 || c == 63 ? 1u : 0u) << c;
+  for (int c = 0; c < MAXCHANNELS; c++)
+    EXPECT_EQ(comm_->profiler.workCounter[c], c == 0 || c == 63 || c == 128 ? 1u : 0u) << c;
   EXPECT_EQ(OpsOn(comm_.get(), 0), 1u);
   EXPECT_EQ(OpsOn(comm_.get(), 63), 1u);
+  EXPECT_EQ(OpsOn(comm_.get(), 128), 1u);
 }
 
 TEST_F(ProfilerThreadMicrotest, ReserveSymCounters_WritesTheNextSymCounterPerPlanChannel) {
