@@ -28,7 +28,7 @@ on:
         default: "ROCm/rocjitsu-test-corpus"
         required: true
       corpus_ref:
-        description: "Branch, tag, or SHA used by HIP, race, and DBT corpus tests"
+        description: "Branch, tag, or SHA used by HIP, race, file-limit, and DBT corpus tests. A missing file-limit matrix is skipped only for a SHA in ROCJITSU_FILE_LIMIT_LEGACY_CORPUS_SHAS that differs from the shared pin."
         # Last updated on 2026/11/06.
         default: "d2fb14fdd23738b14ac6a340c4c2e94e60fbb43b"
         required: true
@@ -651,6 +651,12 @@ jobs:
           )
           if [[ "${{ matrix.run_race_corpus }}" == "true" ]]; then
             corpus_test_flags+=(--race-tests)
+            # The shared pin has cases for every race target, so an empty
+            # suite there means the corpus lost them. Other refs may predate a
+            # target's cases and only report the empty suite.
+            if [[ "$(git rev-parse HEAD)" == "${ROCJITSU_DBT_CORPUS_REF}" ]]; then
+              corpus_test_flags+=(--require-race-cases)
+            fi
           fi
           if [[ "${{ matrix.enable_ubsan }}" == "1" ]]; then
             corpus_test_flags+=(--ubsan)
