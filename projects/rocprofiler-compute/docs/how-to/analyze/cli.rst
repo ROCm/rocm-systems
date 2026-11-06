@@ -938,3 +938,12 @@ After profiling with ``--experimental --trace-ml-api triton`` (see
 :ref:`triton-trace`), use ``--list-operators triton`` and
 ``--operator 'triton:PATTERN'``, such as ``--operator 'triton:*rmsnorm_kernel*'``.
 They show only Triton kernels.
+
+
+JAX operator analysis
+=====================
+
+After profiling with ``--experimental --trace-ml-api jax`` (see
+:ref:`jax-trace`), use ``--list-operators jax`` and
+``--operator 'jax:*train_step*'``. They print a ``JAX Operator Call Tree:``
+with kernels as direct children of the compiled function or eager primitive.
