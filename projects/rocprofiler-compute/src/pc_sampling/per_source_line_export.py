@@ -39,7 +39,7 @@ BASE_COLUMNS = (
     "Source line number",
     "Source line",
     "Total count",
-    "Active count",
+    "Issue count",
     "Stall count",
     "Wave occupancy percent",
     "Active thread percent",
