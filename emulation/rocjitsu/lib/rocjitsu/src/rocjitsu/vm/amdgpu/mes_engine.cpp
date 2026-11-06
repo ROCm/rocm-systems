@@ -16,7 +16,6 @@ RJ_DIAGNOSTIC_POP
 #include <array>
 #include <bit>
 #include <cstring>
-#include <exception>
 #include <format>
 #include <optional>
 #include <utility>
@@ -427,31 +426,25 @@ bool MesEngine::register_aql_queue(Queue &queue) {
   if (!plan || !plan->factory)
     return false;
   queue.queue_id = kMesManagedQueueIdBase | next_queue_ordinal_;
-  try {
-    queue.queue_handle = queue_registry_.register_queue({
-        .identity = {.address_space = queue.address_space,
-                     .interrupt_sink = interrupt_sink_,
-                     .process_id = queue.process_id,
-                     .queue_id = queue.queue_id},
-        .ring = {.base_address = queue.ring_base,
-                 .size_bytes = static_cast<uint32_t>(queue.ring_dwords * sizeof(uint32_t)),
-                 .consumer_pointer_address = queue.read_pointer_address,
-                 .producer_pointer_address = queue.write_pointer_address},
-        .doorbell = callbacks_.queue_doorbell(static_cast<uint32_t>(queue.doorbell_offset),
-                                              QueuePacketFormat::Aql),
-        .binding_factory = plan->factory,
-        .abi = QueueAbi::KfdAql,
-        .queue_descriptor_address =
-            queue.write_pointer_address - offsetof(amd_queue_t, write_dispatch_id),
-        .xcd_fanout = plan->xcd_fanout,
-        .type = amdgpu::QueueType::Compute,
-        .packet_format = amdgpu::QueuePacketFormat::Aql,
-    });
-  } catch (const std::exception &error) {
-    util::Logger::warn(
-        std::format("{}: cannot create AQL queue binding: {}", diagnostic_name_, error.what()));
-    return false;
-  }
+  queue.queue_handle = queue_registry_.register_queue({
+      .identity = {.address_space = queue.address_space,
+                   .interrupt_sink = interrupt_sink_,
+                   .process_id = queue.process_id,
+                   .queue_id = queue.queue_id},
+      .ring = {.base_address = queue.ring_base,
+               .size_bytes = static_cast<uint32_t>(queue.ring_dwords * sizeof(uint32_t)),
+               .consumer_pointer_address = queue.read_pointer_address,
+               .producer_pointer_address = queue.write_pointer_address},
+      .doorbell = callbacks_.queue_doorbell(static_cast<uint32_t>(queue.doorbell_offset),
+                                            QueuePacketFormat::Aql),
+      .binding_factory = plan->factory,
+      .abi = QueueAbi::KfdAql,
+      .queue_descriptor_address =
+          queue.write_pointer_address - offsetof(amd_queue_t, write_dispatch_id),
+      .xcd_fanout = plan->xcd_fanout,
+      .type = amdgpu::QueueType::Compute,
+      .packet_format = amdgpu::QueuePacketFormat::Aql,
+  });
   return static_cast<bool>(queue.queue_handle);
 }
 
@@ -472,28 +465,22 @@ bool MesEngine::register_pm4_queue(Queue &queue) {
       compute_bindings_.make_pm4(next_queue_ordinal_, std::move(packet_callbacks));
   if (!plan || !plan->factory)
     return false;
-  try {
-    queue.queue_handle = queue_registry_.register_queue({
-        .identity = {.address_space = queue.address_space,
-                     .interrupt_sink = interrupt_sink_,
-                     .process_id = queue.process_id,
-                     .queue_id = queue.queue_id},
-        .ring = {.base_address = queue.ring_base,
-                 .size_bytes = static_cast<uint32_t>(queue.ring_dwords * sizeof(uint32_t)),
-                 .consumer_pointer_address = queue.read_pointer_address,
-                 .producer_pointer_address = queue.write_pointer_address},
-        .doorbell = callbacks_.queue_doorbell(static_cast<uint32_t>(queue.doorbell_offset),
-                                              QueuePacketFormat::Pm4),
-        .binding_factory = plan->factory,
-        .xcd_fanout = plan->xcd_fanout,
-        .type = amdgpu::QueueType::Compute,
-        .packet_format = amdgpu::QueuePacketFormat::Pm4,
-    });
-  } catch (const std::exception &error) {
-    util::Logger::warn(
-        std::format("{}: cannot create PM4 queue binding: {}", diagnostic_name_, error.what()));
-    return false;
-  }
+  queue.queue_handle = queue_registry_.register_queue({
+      .identity = {.address_space = queue.address_space,
+                   .interrupt_sink = interrupt_sink_,
+                   .process_id = queue.process_id,
+                   .queue_id = queue.queue_id},
+      .ring = {.base_address = queue.ring_base,
+               .size_bytes = static_cast<uint32_t>(queue.ring_dwords * sizeof(uint32_t)),
+               .consumer_pointer_address = queue.read_pointer_address,
+               .producer_pointer_address = queue.write_pointer_address},
+      .doorbell = callbacks_.queue_doorbell(static_cast<uint32_t>(queue.doorbell_offset),
+                                            QueuePacketFormat::Pm4),
+      .binding_factory = plan->factory,
+      .xcd_fanout = plan->xcd_fanout,
+      .type = amdgpu::QueueType::Compute,
+      .packet_format = amdgpu::QueuePacketFormat::Pm4,
+  });
   return static_cast<bool>(queue.queue_handle);
 }
 
@@ -504,29 +491,23 @@ bool MesEngine::register_sdma_queue(Queue &queue) {
     return false;
   }
   queue.queue_id = kMesManagedQueueIdBase | next_queue_ordinal_;
-  try {
-    queue.queue_handle = queue_registry_.register_queue({
-        .identity = {.address_space = queue.address_space,
-                     .interrupt_sink = interrupt_sink_,
-                     .process_id = queue.process_id,
-                     .queue_id = queue.queue_id},
-        .ring = {.base_address = queue.ring_base,
-                 .size_bytes = static_cast<uint32_t>(queue.ring_dwords * sizeof(uint32_t)),
-                 .consumer_pointer_address = queue.read_pointer_address,
-                 .producer_pointer_address = queue.write_pointer_address},
-        .doorbell = callbacks_.queue_doorbell(static_cast<uint32_t>(queue.doorbell_offset),
-                                              QueuePacketFormat::Sdma),
-        .binding_factory = sdma_queue_binding_factory_,
-        .initial_consumer_cursor = queue.initial_read_pointer,
-        .engine_id = queue.engine_id,
-        .type = amdgpu::QueueType::Sdma,
-        .packet_format = amdgpu::QueuePacketFormat::Sdma,
-    });
-  } catch (const std::exception &error) {
-    util::Logger::warn(
-        std::format("{}: cannot create SDMA queue binding: {}", diagnostic_name_, error.what()));
-    return false;
-  }
+  queue.queue_handle = queue_registry_.register_queue({
+      .identity = {.address_space = queue.address_space,
+                   .interrupt_sink = interrupt_sink_,
+                   .process_id = queue.process_id,
+                   .queue_id = queue.queue_id},
+      .ring = {.base_address = queue.ring_base,
+               .size_bytes = static_cast<uint32_t>(queue.ring_dwords * sizeof(uint32_t)),
+               .consumer_pointer_address = queue.read_pointer_address,
+               .producer_pointer_address = queue.write_pointer_address},
+      .doorbell = callbacks_.queue_doorbell(static_cast<uint32_t>(queue.doorbell_offset),
+                                            QueuePacketFormat::Sdma),
+      .binding_factory = sdma_queue_binding_factory_,
+      .initial_consumer_cursor = queue.initial_read_pointer,
+      .engine_id = queue.engine_id,
+      .type = amdgpu::QueueType::Sdma,
+      .packet_format = amdgpu::QueuePacketFormat::Sdma,
+  });
   return static_cast<bool>(queue.queue_handle);
 }
 
@@ -573,14 +554,7 @@ VmAccessOutcome MesEngine::commit_queue(Queue queue, bool created_address_space)
   const std::vector<Queue>::iterator existing =
       std::ranges::find(mapped_queues_, queue.doorbell_offset, &Queue::doorbell_offset);
   if (existing == mapped_queues_.end()) {
-    try {
-      mapped_queues_.push_back(queue);
-    } catch (...) {
-      if (queue.queue_handle)
-        (void)queue_registry_.unregister_queue(queue.queue_handle, QueueCloseMode::ForceCancel);
-      rollback_created_address_space(queue, created_address_space);
-      return VmAccessOutcome::Faulted;
-    }
+    mapped_queues_.push_back(queue);
     if (queue.queue_handle)
       ++next_queue_ordinal_;
     if (queue.address_space && queue.process_context_address != 0) {
