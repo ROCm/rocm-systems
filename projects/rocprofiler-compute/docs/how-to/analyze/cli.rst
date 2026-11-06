@@ -682,6 +682,8 @@ format is ``stdout``.
 
 ``--list-stats`` is available only with ``stdout`` and ``txt`` output.
 
+``--list-operators`` and ``--operator`` are available only with ``stdout``.
+
 * ``stdout`` format:
    * Print analysis report to the terminal.
    * NOTE: This option will not generate any file or folder.
@@ -781,13 +783,12 @@ PyTorch operator analysis
 .. warning::
 
    These options require ``--experimental``. After profiling with
-   ``--experimental --torch-trace`` (see :ref:`torch-operator-profiling`),
+   ``--experimental --trace-ml-api torch`` (see :ref:`torch-operator-profiling`),
    use ``rocprof-compute analyze ... --experimental`` with
-   ``--list-torch-operators`` or ``--torch-operator`` as needed.
+   ``--list-operators torch`` or ``--operator`` as needed.
 
-These options work only with the default ``--output-format stdout``. If you
-combine ``--list-torch-operators`` with ``--torch-operator``, rocprof-compute
-lists all operators and ignores the filter.
+If you pass both ``--list-operators`` and ``--operator``, rocprof-compute
+lists the operators and ignores ``--operator``.
 
 
 List all operators
@@ -797,7 +798,7 @@ Display all PyTorch operators captured during profiling:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze --experimental --list-torch-operators --path ./workload
+   $ rocprof-compute analyze --experimental --list-operators torch --path ./workload
 
    ================================================================================
    PyTorch Operator Call Tree: ./workload
@@ -858,15 +859,19 @@ line ``Operator summary: (no operators with recorded dispatches)``.
 Filtering by Operator
 ---------------------
 
-``--torch-operator`` selects PyTorch operators with shell-style glob patterns.
-A pattern can match an operator's name or its full call path, such as
-``nn.Module.Net.forward/aten::addmm``. Matching is case-sensitive.
+``--operator`` selects operators with shell-style glob patterns. Matching is
+case-sensitive. A pattern can match an operator's name or its full call path,
+such as ``nn.Module.Net.forward/aten::addmm``.
+
+A prefix limits a pattern to one framework, as in ``torch:*relu*``. A pattern
+without a prefix uses the prefix before it. If no prefix comes before it, the
+pattern matches every traced framework and user ROCTx regions.
 
 * **Wildcard** — ``*relu*`` matches any operator whose name contains ``relu``.
 * **Call path** — ``*/aten::addmm`` matches ``aten::addmm`` when another
   operator calls it.
 * **Exact** — ``aten::addmm``
-* **Match all** — no arguments, ``all``, ``*``, or ``**``
+* **Match all** — no arguments, or ``**``
 
 rocprof-compute prints the call tree of the matching operators. The metric
 tables then cover only the kernels that those operators launched. To narrow
@@ -884,80 +889,52 @@ These options do not change the printed operator tree. Kernel IDs depend on
 
 .. code-block:: shell-session
 
-   # Wildcard match
-   $ rocprof-compute analyze --experimental --torch-operator "*relu*" --path ./workload
+   # Match PyTorch operators only
+   $ rocprof-compute analyze --experimental --operator 'torch:*relu*' --path ./workload
 
-   # Path match
-   $ rocprof-compute analyze --experimental --torch-operator "*/aten::addmm" --path ./workload
+   # Match a call path in every traced framework
+   $ rocprof-compute analyze --experimental --operator '*/aten::addmm' --path ./workload
 
-   # Match all operators (no arguments)
-   $ rocprof-compute analyze --experimental --torch-operator --path ./workload
+   # Match every operator (no arguments)
+   $ rocprof-compute analyze --experimental --operator --path ./workload
 
-**Filter multiple operators** (space or comma separated):
+**Filter multiple operators.** Here ``*relu*`` uses the ``torch:`` prefix
+before it:
 
 .. code-block:: shell-session
 
    $ rocprof-compute analyze --experimental \
-       --torch-operator "*relu*,*addmm*" --path ./workload
+       --operator 'torch:*conv*' '*relu*' 'triton:*matmul*' --path ./workload
+
+
+User ROCTx regions
+------------------
+
+Every ``--trace-ml-api`` run also records the ROCTx ranges that your
+application adds. The ``user`` prefix selects them.
+
+``--list-operators user`` lists each user ROCTx region with everything that
+ran inside it. ``--operator 'user:PATTERN'`` selects the regions whose name
+matches PATTERN. The result includes all operators and kernels inside each
+region. A framework pattern such as ``torch:*relu*`` keeps only that
+framework's operators below a match. Other patterns in the same command add
+more operators. They never remove anything from a selected region.
+
+.. code-block:: shell-session
+
+   $ rocprof-compute analyze --experimental --list-operators user torch --path ./workload
+
+   $ rocprof-compute analyze --experimental \
+       --operator 'user:*UserDefined*' --path ./workload
+
+   $ rocprof-compute analyze --experimental \
+       --operator 'user:*UserDefined*' 'torch:*relu*' --path ./workload
 
 
 Triton operator analysis
 ========================
 
-.. warning::
-
-   Triton operator analysis requires ``--experimental``. After profiling with
-   ``--experimental --triton-trace`` (see :ref:`triton-trace`), use
-   ``rocprof-compute analyze ... --experimental`` with
-   ``--list-triton-operators`` or ``--triton-operator`` as needed.
-
-Triton kernels are analyzed the same way as PyTorch operators.
-``--list-triton-operators`` and ``--triton-operator`` report only the kernels
-that Triton launched, even when the same run also captured PyTorch operators.
-
-List all captured Triton kernels
----------------------------------
-
-Display all Triton kernels captured during profiling:
-
-.. code-block:: shell-session
-
-   $ rocprof-compute analyze --experimental --list-triton-operators --path ./workload
-
-   ================================================================================
-   Triton Operator Call Tree: ./workload
-   Sorted by total GPU kernel duration.
-   ================================================================================
-
-   triton.JITFunction.matmul_kernel triton_ffn.py:120 (calls: 1, dispatches: 2, total: 0.03 ms, dispatch_mean: 0.01 ms, dispatch_min: 4.40 us, dispatch_max: 0.02 ms)
-   └─ triton.CompiledKernel.matmul_kernel triton_ffn.py:120 (calls: 1, dispatches: 2, total: 0.03 ms, dispatch_mean: 0.01 ms, dispatch_min: 4.40 us, dispatch_max: 0.02 ms)
-      ├─ matmul_kernel (id 0) (dispatches: 1, total: 0.02 ms)
-      └─ __amd_rocclr_initHeap (id 7) (dispatches: 1, total: 4.40 us)
-
-   ...
-
-   Operator summary (Min/Max/Mean are per-dispatch over the subtree; sorted by Total):
-   ╒════════════════════════════════════════════════════════════════════════╤═════════╤══════════════╤═════════╤═══════════╤═════════════╤═════════╤═════════╤═════════╕
-   │ Operator                                                               │   Calls │   Dispatches │   Total │   % Total │   Mean/Call │    Mean │     Min │     Max │
-   ╞════════════════════════════════════════════════════════════════════════╪═════════╪══════════════╪═════════╪═══════════╪═════════════╪═════════╪═════════╪═════════╡
-   │ triton.JITFunction.matmul_kernel                                       │     9.0 │         10.0 │ 0.30 ms │     88.81 │     0.03 ms │ 0.03 ms │ 4.40 us │ 0.06 ms │
-   ├────────────────────────────────────────────────────────────────────────┼─────────┼──────────────┼─────────┼───────────┼─────────────┼─────────┼─────────┼─────────┤
-   │ triton.JITFunction.matmul_kernel/triton.CompiledKernel.matmul_kernel   │     9.0 │         10.0 │ 0.30 ms │     88.81 │     0.03 ms │ 0.03 ms │ 4.40 us │ 0.06 ms │
-   ├────────────────────────────────────────────────────────────────────────┼─────────┼──────────────┼─────────┼───────────┼─────────────┼─────────┼─────────┼─────────┤
-   │ ...                                                                    │         │              │         │           │             │         │         │         │
-   ╘════════════════════════════════════════════════════════════════════════╧═════════╧══════════════╧═════════╧═══════════╧═════════════╧═════════╧═════════╧═════════╛
-
-Filter the Triton kernels
--------------------------
-
-``--triton-operator`` uses the same patterns and options as
-``--torch-operator``; see :ref:`operator-filtering`.
-
-.. code-block:: shell-session
-
-   # Wildcard match
-   $ rocprof-compute analyze --experimental --triton-operator "*rmsnorm_kernel*" --path ./workload
-
-   # Filter multiple kernels (space or comma separated)
-   $ rocprof-compute analyze --experimental \
-       --triton-operator "*matmul*,*rmsnorm_kernel*" --path ./workload
+After profiling with ``--experimental --trace-ml-api triton`` (see
+:ref:`triton-trace`), use ``--list-operators triton`` and
+``--operator 'triton:PATTERN'``, such as ``--operator 'triton:*rmsnorm_kernel*'``.
+They show only Triton kernels.

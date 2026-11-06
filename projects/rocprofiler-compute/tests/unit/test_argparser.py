@@ -200,6 +200,55 @@ def test_pc_sampling_analyze_options():
 
 
 # =============================================================================
+# ML API trace options
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    "values, expected",
+    [([], []), (["torch", "triton"], ["torch", "triton"])],
+)
+def test_profile_trace_ml_api_keeps_workload_command(values, expected):
+    args = build_args(
+        ["profile", "--trace-ml-api", *values, "--", "./vcopy"], experimental=True
+    )
+    assert args.trace_ml_api == expected
+    assert args.remaining == ["--", "./vcopy"]
+
+
+def test_analyze_operator_options_take_space_separated_values():
+    args = build_args(
+        [
+            "analyze",
+            "--list-operators",
+            "torch",
+            "user",
+            "--operator",
+            "torch:*conv*",
+            "*relu*",
+        ],
+        experimental=True,
+    )
+    assert args.list_operators == ["torch", "user"]
+    assert args.operator == ["torch:*conv*", "*relu*"]
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["profile", "--trace-ml-api", "user", "--", "./vcopy"],
+        ["profile", "--trace-ml-api", "torch,triton", "--", "./vcopy"],
+        ["analyze", "--list-operators", "pytorch"],
+    ],
+)
+def test_ml_api_options_reject_unknown_values(argv, capsys):
+    with pytest.raises(SystemExit) as exc:
+        build_args(argv, experimental=True)
+    assert exc.value.code == 2
+    assert "invalid choice" in capsys.readouterr().err
+
+
+# =============================================================================
 # Experimental Feature Tests
 # =============================================================================
 
