@@ -4,6 +4,11 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 ## RDC 1.4.0 for ROCm 10.2.0
 
+### Added
+
+- **RDC's test suite reports how long RDC takes to read telemetry from your GPUs**.
+  - The new poll latency test in `rdctst` prints the median, 95th percentile and maximum time to read 9 common fields from every GPU, so you can see RDC's run times in your own test environment.
+
 ### Changed
 
 - **`rdc_health_get()` returns `RDC_ST_GROUP_NOT_FOUND` for a GPU group that does not exist**.
