@@ -27,12 +27,17 @@
 
 #include <rocprofiler-sdk/hsa.h>
 
+#include <cstddef>
 #include <cstdint>
+#include <mutex>
+#include <vector>
 
 namespace rocprofiler
 {
 namespace hsa
 {
+class AgentCache;
+
 /**
  * @brief Ensure @p signal contains a usable HSA signal with @p initial_value.
  *
@@ -69,6 +74,54 @@ construct_hsa_signal(signal_t&          signal,
  */
 common::container::pool<signal_t>*
 get_signal_pool();
+
+/**
+ * @brief Signals in one agent's signal-capable device memory, created a batch at a time.
+ *
+ * They are GPU-only (no KFD event) and accessible to the owning agent and the host. The host never
+ * writes them and never waits on them: it reads a member only after a later dispatch on the same
+ * queue has completed, so a dispatch whose completion the host waits for must not use one.
+ */
+struct device_signal_source
+{
+    hsa_agent_t               agent       = {};
+    hsa_amd_memory_pool_t     memory_pool = {};
+    std::mutex                mtx         = {};
+    std::vector<hsa_signal_t> unused      = {};
+    size_t                    created     = 0;
+    size_t                    handed_out  = 0;
+
+    // Gives @p signal a device signal, or a host signal once batch creation has failed.
+    void construct(signal_t& signal);
+
+    // Destroys the signals never handed out. Returns the number destroyed.
+    size_t destroy_unused();
+};
+
+/**
+ * @brief Get the pool of device-memory completion signals for kernel dispatches on @p agent.
+ *
+ * The CP's completion write to these does not cross PCIe. See ::device_signal_source for how they
+ * may be used. Returns nullptr when the agent has no signal-capable device memory or
+ * ROCPROFILER_DEVICE_SIGNALS is false.
+ */
+common::container::pool<signal_t>*
+get_device_signal_pool(const AgentCache& agent);
+
+// Whether any dispatch has been given a device-memory completion signal pool.
+bool
+device_signals_in_use();
+
+/**
+ * @brief Account for one completed dispatch on a device signal whose value the host read back.
+ *
+ * Each dispatch decrements the signal by one, so @p observed must be one below
+ * signal_t::idle_value. On a match this updates idle_value and returns true. Otherwise it leaves
+ * the signal unchanged and returns false: the signal is not where the accounting says, so it must
+ * not be handed to another dispatch.
+ */
+bool
+retire_device_signal(signal_t& signal, hsa_signal_value_t observed);
 
 /**
  * @brief Initialize the signal pool.
