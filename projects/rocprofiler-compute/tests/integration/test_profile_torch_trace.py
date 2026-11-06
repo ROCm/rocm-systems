@@ -512,7 +512,7 @@ def test_list_torch_operators_wins_over_filter(
     assert code == 0
     captured = capsys.readouterr()
     out = captured.out + captured.err
-    assert "Operator filters are ignored" in out
+    assert "--operator is ignored" in out
     assert "PyTorch Operator Call Tree:" in out
     assert "Matched PyTorch Operators:" not in out
 
