@@ -12,7 +12,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 **rocpd:**
 
-  - `counters_collection` no longer sums a counter that kernel replay collects once per `--pmc` group. Every pass reports the same `dispatch_id`, and the repeated readings are stored on that dispatch. The view now uses `AVG`, so a deterministic counter such as `SQ_WAVES` collected three times at 512 reports 512 instead of 1536. A counter collected once is unchanged. The individual readings remain in `rocpd_pmc_event`.
+  - `counters_collection` no longer sums a counter that kernel replay collects once per `--pmc` group when every pass reports the same value. Three readings of 512 report 512. Readings that differ, such as hardware instances of one counter, are still summed. The individual readings remain in `rocpd_pmc_event`.
 
 ### Known issues
 

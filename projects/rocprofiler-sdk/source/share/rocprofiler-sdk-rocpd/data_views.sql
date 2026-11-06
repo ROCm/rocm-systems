@@ -784,11 +784,13 @@ SELECT
     PMC_I.expression,
     PMC_I.value_type,
     PMC_I.id AS counter_id,
-    -- Kernel replay attaches every pass of a repeated counter to the first dispatch event.
-    -- Those readings are one measurement collected again, so the view reports their average
-    -- and stays one row per dispatch. The individual readings remain in rocpd_pmc_event.
-    -- A counter collected once is unchanged, because the average of one value is that value.
-    AVG(PMC_E.value) AS value,
+    -- Several rows can share a counter name. Hardware instances of one collection differ and
+    -- still add up. Kernel replay writes the same reading again for each pass, and those
+    -- copies are one measurement, so identical readings report that value once.
+    CASE
+        WHEN MIN(PMC_E.value) = MAX(PMC_E.value) THEN MIN(PMC_E.value)
+        ELSE SUM(PMC_E.value)
+    END AS value,
     K.start,
     K.end,
     PMC_I.is_constant,

@@ -273,6 +273,20 @@ def test_group_unique_counters_are_unaffected(current_schema):
         assert rows == [(100.0 * (pass_index + 1),)]
 
 
+def test_different_readings_of_one_counter_still_sum(current_schema):
+    """Hardware instances of one counter differ, so the view still adds them."""
+
+    conn = build_database(current_schema)
+    insert_common_rows(conn, ["SQ_WAVES"])
+    insert_dispatch(conn, row_id=1, event_id=1, dispatch_id=1, start=1000)
+    insert_counter(conn, row_id=1, event_id=1, pmc_id=1, value=100.0)
+    insert_counter(conn, row_id=2, event_id=1, pmc_id=1, value=300.0)
+    rows = conn.execute(
+        "SELECT value FROM counters_collection WHERE counter_name = 'SQ_WAVES'"
+    ).fetchall()
+    assert rows == [(400.0,)]
+
+
 def test_single_reading_is_unchanged(current_schema):
     """A dispatch with one reading of a counter reports that reading."""
 

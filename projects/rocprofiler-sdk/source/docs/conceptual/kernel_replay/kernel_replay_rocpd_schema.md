@@ -13,13 +13,13 @@ rocprofv3 --pmc SQ_WAVES,SQ_INSTS_VALU,GRBM_COUNT \
 ```
 
 On a kernel that launches 512 waves, each pass reads `SQ_WAVES` as 512. The view used to report
-1536. It now reports `AVG`, which is 512. A counter collected in only one group is unchanged,
-because the average of one value is that value. A run that never replayed is unchanged for the
-same reason.
+1536. Identical readings now report that value once, so this reports 512. Readings that are not
+identical, such as hardware instances of one counter, are still summed. A counter collected once
+is unchanged. A run that never replayed is unchanged when each counter name is collected once.
 
 The three readings stay in `rocpd_pmc_event`. A query against that table still lists 512, 512, and
-512. For a deterministic counter those readings are the same number, so the average is exactly
-what each pass collected.
+512. For a deterministic counter those readings are the same number, so the view reports
+that number instead of adding the copies.
 
 `counters_collection` stays one row per dispatch per counter. That is the file most people read.
 Keeping a row per pass, with its own timestamps, would be a larger schema change, and it is not
