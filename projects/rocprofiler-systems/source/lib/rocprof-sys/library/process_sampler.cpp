@@ -3,6 +3,7 @@
 
 #include "library/process_sampler.hpp"
 #include "core/config.hpp"
+#include "core/thread_list/internal_thread_list.hpp"
 #include "library/pmc/sampler.hpp"
 #include "library/runtime.hpp"
 #include <cstdint>
@@ -61,6 +62,9 @@ sampler::poll(std::atomic<state::process::State>* _state, nsec_t _interval,
     threading::set_thread_name("omni.sampler");
 
     auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    const thread_list::scoped_internal_thread _internal_thread{
+        thread_list::get_internal_thread_list()
+    };
 
     // notify thread started
     if(_ready)
