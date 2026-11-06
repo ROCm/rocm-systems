@@ -202,7 +202,7 @@ All tests support the same set of arguments :
 
 ### Running multiple operations in parallel
 
-RCCL Tests allow to partition the set of GPUs into smaller sets, each executing the same operation in parallel. 
+RCCL Tests allow to partition the set of GPUs into smaller sets, each executing the same operation in parallel.
 To split the GPUs, RCCL will compute a "color" for each rank, based on the `NCCL_TESTS_SPLIT` environment variable, then all ranks
 with the same color will end up in the same group. The resulting group is printed next to each GPU at the beginning of the test.
 
@@ -219,6 +219,17 @@ Here are a few examples:
 - `NCCL_TESTS_SPLIT="AND 0x1"` or `NCCL_TESTS_SPLIT="MOD 2"`: Run two operations, each operation using every other rank.
 
 Note that the reported bandwidth is per group, hence to get the total bandwidth used by all groups, one must multiply by the number of groups.
+
+### Hierarchical alltoall over two GIN backends
+
+`alltoall_perf -R 2 -D 5` creates two DevComms on the same communicator: one on the Anvil SDMA GIN backend for intra-node (LSA) peers, and one on a network GIN backend for all other peers. Half of the `-V` CTAs drive each DevComm, so `-V` must be at least 2. It needs a CMake build with `-DENABLE_DEVICE_API=ON -DENABLE_ROCSHMEM_GIN=ON`, and both backends active on the communicator: leave `NCCL_GIN_TYPE` unset. When either backend is not active on the communicator, the test prints `# SKIP` and exits successfully.
+
+- `RCCL_TESTS_A2A_HIER_NET_GIN_TYPE=<type>` selects the network backend (default: `2`, PROXY).
+- `RCCL_TESTS_A2A_HIER_GROUP_SIZE=<n>` splits each node's ranks into groups of `n` consecutive local ranks and sends to local peers in other groups over the network backend, so a single node moves data on both backends. Default: `0` (all local peers use Anvil SDMA).
+
+```shell
+mpirun -np 8 -x RCCL_TESTS_A2A_HIER_GROUP_SIZE=4 ./build/alltoall_perf -b 1M -e 1G -f 2 -g 1 -R 2 -D 5 -V 16 -c 1
+```
 
 ## Unit tests
 

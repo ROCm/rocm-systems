@@ -343,7 +343,7 @@ testResult_t AllGatherDeviceTime(struct threadArgs* args, ncclDataType_t type, n
   double devUs = 0.0;
   TESTCHECK(gin_devtime::measure(args, gridCtas, loop,
       [&](int i, long long* d_start, long long* d_end) {
-        ncclDevComm* devComm = args->devComms + i;
+        ncclDevComm* devComm = testDevComms(args, i);
         ncclWindow_t sendwin = (ncclWindow_t)(in_place ? args->recvRegHandles[i] : args->sendRegHandles[i]);
         ncclWindow_t recvwin = (ncclWindow_t)args->recvRegHandles[i];
         size_t sendoff = in_place ? args->sendInplaceOffset * (size_t)devComm->rank : 0;
