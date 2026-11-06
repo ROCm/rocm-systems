@@ -17,7 +17,7 @@
 
 #include <gtest/gtest.h>
 
-#include "../common/LogCapture.hpp"
+#include "../../common/LogCapture.hpp"
 
 // collectives.cc is included directly below. These renames must be active before
 // comm.h and ras_internal.h declare the collaborators, and intentionally remain
