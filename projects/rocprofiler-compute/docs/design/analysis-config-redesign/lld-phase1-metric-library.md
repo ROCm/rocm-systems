@@ -106,6 +106,15 @@ variables:
 
 ### Layer 1.5 -- Collectables
 
+> **Current state.** The multi-pass work (Phase 2 of the
+> [single-pass and multi-pass HLD](../../single-pass_and_multi-pass_metrics/hld-plan.md))
+> already keeps one formula per collectable id per architecture, in
+> `analysis_configs/<arch>/collectables.yaml`, in the `id` / `formula` shape shown
+> below. Today that file is read by the panel loader, which appends each
+> referenced collectable to its table as a `_collect.<name>` row. Panel formulas
+> still name collectables as `_collect.<name>`, not `$collect.<name>`. The
+> `MetricLibrary` loader and the rest of Layer 1.5 below are not implemented yet.
+
 A collectable is a formula fragment whose counters fit in a single hardware pass. It
 sits between raw PMC counters (Layer 1) and full metric formulas (Layer 2) in the
 layer hierarchy.

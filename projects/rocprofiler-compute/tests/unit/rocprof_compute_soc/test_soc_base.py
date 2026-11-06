@@ -33,6 +33,9 @@ from utils.utils_common import (
     MEMBW_ANALYSIS_PANEL_ID,
     canonical_config_arch,
     convert_metric_id_to_panel_info,
+    load_collectable_formulas,
+    load_panel_file,
+    panel_config_paths,
 )
 from utils.utils_counter_defs import extract_counters_and_variables
 
@@ -892,7 +895,7 @@ def test_panel_counters_add_up_to_full_profile(gpu_arch: str) -> None:
     the default profile, and with panel 30 to --membw-analysis."""
     config_dir = config.analysis_configs_dir
     counters_by_file: dict[str, set[str]] = {}
-    for path in (config_dir / canonical_config_arch(gpu_arch)).glob("*.yaml"):
+    for path in panel_config_paths(config_dir / canonical_config_arch(gpu_arch)):
         file_id = path.name.split("_")[0]
         panel = str(int(file_id) // 100)
         soc = offline_soc(config_dir, gpu_arch, [panel], membw_analysis=True)
@@ -977,10 +980,11 @@ def test_post_profiling_roofline_gating(
 def _composite_metric_ids(arch_dir: Path) -> list[tuple[str, list[str]]]:
     """(metric id, part metric ids) of every composite parent under arch_dir."""
     found: list[tuple[str, list[str]]] = []
-    for path in sorted(arch_dir.glob("*.yaml")):
+    collectable_formulas = load_collectable_formulas(arch_dir)
+    for path in panel_config_paths(arch_dir):
         panel = str(int(path.name.split("_")[0]) // 100)
-        with open(path, encoding="utf-8") as stream:
-            sections = yaml.safe_load(stream)["Panel Config"]["data source"]
+        panel_file = load_panel_file(path, collectable_formulas)
+        sections = panel_file["Panel Config"]["data source"]
         for section in sections:
             table = section.get("metric_table")
             if not table:

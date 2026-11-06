@@ -51,6 +51,9 @@ from utils.utils_common import (
     get_arch_alias_to_panel_id,
     is_only_pc_sampling,
     is_tcc_channel_counter,
+    load_collectable_formulas,
+    load_panel_file,
+    panel_config_paths,
     parse_sets_yaml,
     validate_roofline_csv,
 )
@@ -316,8 +319,10 @@ class OmniSoC_Base:
             )
             return
 
-        with open(config_filename_dict[file_id], encoding="utf-8") as stream:
-            file_config = yaml.safe_load(stream)
+        file_config = load_panel_file(
+            Path(config_filename_dict[file_id]),
+            load_collectable_formulas(Path(config_root_dir)),
+        )
         if panel_id is None:
             for section in file_config["Panel Config"]["data source"]:
                 if "metric_table" in section:
@@ -451,7 +456,7 @@ class OmniSoC_Base:
         config_root_dir = f"{args.config_dir}/{config_arch}"
         config_filename_dict = {
             filename.name.split("_")[0]: str(filename)
-            for filename in Path(config_root_dir).glob("*.yaml")
+            for filename in panel_config_paths(Path(config_root_dir))
         }
 
         filter_blocks = args.filter_blocks
@@ -873,12 +878,14 @@ def iter_analysis_config_metrics(
         expressions metric_expressions of the metric
         metric      metric body, including composite metadata
     """
-    for config_path in sorted(config_root.glob("*.yaml")):
+    collectable_formulas = load_collectable_formulas(config_root)
+    for config_path in panel_config_paths(config_root):
         stem_id = config_path.name.split("_")[0]
         if stem_id in exclude_file_ids:
             continue
-        with open(config_path, encoding="utf-8") as stream:
-            panel_config = yaml.safe_load(stream)["Panel Config"]
+        panel_config = load_panel_file(config_path, collectable_formulas)[
+            "Panel Config"
+        ]
         for section in panel_config["data source"]:
             table = section.get("metric_table")
             if table is None:
