@@ -1906,10 +1906,9 @@ constinit thread_local ComputeUnitCore::InstructionVmSnapshot
     *ComputeUnitCore::instruction_vm_snapshot_ = nullptr;
 
 template <bool EnableAsync>
-[[gnu::always_inline]] inline ComputeUnitCore::IssueOutcome ComputeUnitCore::issue_instruction_impl(
-    Wavefront *active,
-    std::conditional_t<EnableAsync, AsyncInstructionWindow *, NoAsyncWindow> window,
-    std::conditional_t<EnableAsync, AsyncInstructionWindowStorage *, NoAsyncWindow> storage) {
+[[gnu::always_inline]] inline ComputeUnitCore::IssueOutcome
+ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<EnableAsync> window,
+                                        MaybeAsyncWindowStorage<EnableAsync> storage) {
   uint32_t vmid = active->process_id();
   const auto drain_async_window = [&]() {
     if constexpr (EnableAsync) {
@@ -2067,10 +2066,8 @@ template <bool EnableAsync>
 template <bool EnableAsync>
 [[gnu::always_inline]] inline ComputeUnitCore::IssueOutcome
 ComputeUnitCore::issue_decoded_instruction(
-    Wavefront *active,
-    std::conditional_t<EnableAsync, AsyncInstructionWindow *, NoAsyncWindow> window,
-    std::conditional_t<EnableAsync, AsyncInstructionWindowStorage *, NoAsyncWindow> storage,
-    const GpuVmAccess *vm_access, uint32_t vmid,
+    Wavefront *active, MaybeAsyncWindow<EnableAsync> window,
+    MaybeAsyncWindowStorage<EnableAsync> storage, const GpuVmAccess *vm_access, uint32_t vmid,
     const std::array<rj_code_binary_inst_t, DecodedInstructionCache::kNumWords> &words,
     DecodeResult &decoded, bool debugger_active,
     DecodedInstructionCache::ScopedReturn &return_decoded) {
