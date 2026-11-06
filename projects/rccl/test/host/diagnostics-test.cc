@@ -1,9 +1,9 @@
 /*************************************************************************
  * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
- * Host-only microtests for src/diagnostics.cc, #include-d via DIAGNOSTICS_CC_PATH. Its runners are renamed there so
- * they sit beside fakes/diagnostics_fakes.cc; popen/pclose, ncclCalloc/free and the two checks it drives are seams,
- * safe as macros only because every header diagnostics.cc includes is included first.
+ * Host-only microtests for src/diagnostics.cc, #include-d via DIAGNOSTICS_CC_PATH. popen/pclose, ncclCalloc/free and
+ * the two checks it drives are seams, safe as macros only because every header diagnostics.cc includes is included
+ * first.
  *
  * See LICENSE.txt for license information
  ************************************************************************/
@@ -87,13 +87,9 @@ static void DiagnosticsFree(void* ptr) {
 #define pclose(stream) g_diagnosticsPclose(stream)
 #define ncclDiagRunIbWriteBw(comm) g_diagnosticsIbWriteBw(comm)
 #define ncclDiagP2pRun(comm) g_diagnosticsP2pRun(comm)
-#define ncclDiagChildRunStream DiagnosticsChildRunStream
-#define ncclDiagChildRun DiagnosticsChildRun
 
 #include DIAGNOSTICS_CC_PATH
 
-#undef ncclDiagChildRun
-#undef ncclDiagChildRunStream
 #undef ncclDiagP2pRun
 #undef ncclDiagRunIbWriteBw
 #undef pclose
@@ -199,8 +195,7 @@ class DiagnosticsMicrotest : public ::testing::Test {
     output_.assign(std::max(outputSize, 1) + 1, 'Z');
     truncated_ = true;
     lines_.clear();
-    return DiagnosticsChildRunStream(command, timeoutSec, output_.data(), outputSize, RecordLine, &lines_,
-                                     &truncated_);
+    return ncclDiagChildRunStream(command, timeoutSec, output_.data(), outputSize, RecordLine, &lines_, &truncated_);
   }
 
   void BuildComm(int nRanks, int rank, int nNodes) {
@@ -301,7 +296,7 @@ TEST_F(DiagnosticsMicrotest, ChildRun_RejectsNullCommandAndSubSecondTimeoutWitho
 
 TEST_F(DiagnosticsMicrotest, ChildRun_WrapsCommandInMpiScrubTimeoutAndLineBuffering) {
   ScriptChild("", 0);
-  EXPECT_EQ(DiagnosticsChildRun("ib_write_bw -d mlx5_0", 30, nullptr, 0, nullptr), 0);
+  EXPECT_EQ(ncclDiagChildRun("ib_write_bw -d mlx5_0", 30, nullptr, 0, nullptr), 0);
   ASSERT_EQ(commands_.size(), 1u);
   EXPECT_EQ(commands_[0],
             "for __v in $(env | sed -nE '/^(OMPI_|OPAL_|PMIX_|PMI_|PRTE_|PERFTEST_FORCE_MPI=)/s/=.*//p'); do unset "
@@ -375,7 +370,7 @@ TEST_F(DiagnosticsMicrotest, ChildRunStream_NoRoomForOutputStillStreamsLines) {
   EXPECT_TRUE(truncated_);
   EXPECT_EQ(lines_, (std::vector<std::string>{"one\n"}));
   bool truncated = false;
-  EXPECT_EQ(DiagnosticsChildRunStream("srv", kTimeoutSec, nullptr, 64, nullptr, nullptr, &truncated), 0);
+  EXPECT_EQ(ncclDiagChildRunStream("srv", kTimeoutSec, nullptr, 64, nullptr, nullptr, &truncated), 0);
   EXPECT_TRUE(truncated);
   ScriptChild("", 0);
   EXPECT_EQ(RunStream("srv", kTimeoutSec, 0), 0);
@@ -385,14 +380,14 @@ TEST_F(DiagnosticsMicrotest, ChildRunStream_NoRoomForOutputStillStreamsLines) {
 TEST_F(DiagnosticsMicrotest, ChildRun_ReturnsExitCodeOnlyForNormalExit) {
   char output[16];
   ScriptChild("x\n", 3 << 8);
-  EXPECT_EQ(DiagnosticsChildRun("tool", kTimeoutSec, output, sizeof(output), nullptr), 3);
+  EXPECT_EQ(ncclDiagChildRun("tool", kTimeoutSec, output, sizeof(output), nullptr), 3);
   EXPECT_STREQ(output, "x\n");
   ScriptChild("", 124 << 8);
-  EXPECT_EQ(DiagnosticsChildRun("tool", kTimeoutSec, output, sizeof(output), nullptr), 124);
+  EXPECT_EQ(ncclDiagChildRun("tool", kTimeoutSec, output, sizeof(output), nullptr), 124);
   ScriptChild("", SIGKILL);
-  EXPECT_EQ(DiagnosticsChildRun("tool", kTimeoutSec, output, sizeof(output), nullptr), -1);
+  EXPECT_EQ(ncclDiagChildRun("tool", kTimeoutSec, output, sizeof(output), nullptr), -1);
   ScriptChild("", -1);
-  EXPECT_EQ(DiagnosticsChildRun("tool", kTimeoutSec, output, sizeof(output), nullptr), -1);
+  EXPECT_EQ(ncclDiagChildRun("tool", kTimeoutSec, output, sizeof(output), nullptr), -1);
 }
 
 // The only tests that spawn: the shell wrapper itself is what is under test.
@@ -411,7 +406,7 @@ TEST_F(DiagnosticsMicrotest, ChildRun_RealChildLosesMpiEnvAndStdinAndMergesStder
   }
   char output[128];
   bool truncated = true;
-  const int exitCode = DiagnosticsChildRun(
+  const int exitCode = ncclDiagChildRun(
       "sh -c 'echo ${OMPI_COMM_WORLD_RANK-unset} ${PMI_RANK-unset} ${PERFTEST_FORCE_MPI-unset} "
       "${PERFTEST_FORCE_MPIX-unset} ${KEEP_OMPI_X-unset}; cat; echo err >&2; exit 5'",
       kTimeoutSec, output, sizeof(output), &truncated);
@@ -429,7 +424,7 @@ TEST_F(DiagnosticsMicrotest, ChildRun_RealChildLosesMpiEnvAndStdinAndMergesStder
 
 TEST_F(DiagnosticsMicrotest, ChildRun_RealTimeoutKillsAHungChild) {
   char output[16];
-  EXPECT_EQ(DiagnosticsChildRun("sleep 30", 1, output, sizeof(output), nullptr), 124);
+  EXPECT_EQ(ncclDiagChildRun("sleep 30", 1, output, sizeof(output), nullptr), 124);
   EXPECT_STREQ(output, "");
 }
 
