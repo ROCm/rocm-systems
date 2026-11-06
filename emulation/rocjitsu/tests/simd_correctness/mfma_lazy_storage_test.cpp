@@ -81,4 +81,58 @@ TEST(MfmaLazyStorageTest, F16SpecOutputCrossesChunksAndOverlapsInput) {
   }
 }
 
+TEST(MfmaLazyStorageTest, StaticGenericMatchesRuntimeForPermutedBatchAndOverlap) {
+  for (bool force_scalar : {true, false}) {
+    ForceScalarGuard guard;
+    util::set_force_scalar_for_testing(force_scalar);
+    ExactFixture dynamic_fixture(ROCJITSU_CODE_ARCH_CDNA4, WF_SIZE);
+    ExactFixture static_fixture(ROCJITSU_CODE_ARCH_CDNA4, WF_SIZE);
+    ASSERT_NE(dynamic_fixture.wf, nullptr);
+    ASSERT_NE(static_fixture.wf, nullptr);
+    for (ExactFixture *fixture : {&dynamic_fixture, &static_fixture}) {
+      fixture->seed_words(1, 16, 777);
+      fixture->seed(0, 2, Fmt::F16, Mode::RandomInt, 88);
+      fixture->seed(64, 2, Fmt::F16, Mode::RandomInt, 99);
+      fixture->seed(128, 16, Fmt::F32, Mode::RandomInt, 111);
+    }
+    const uint32_t dynamic_base = dynamic_fixture.vbase;
+    const uint32_t static_base = static_fixture.vbase;
+    amdgpu::exec_f32(*dynamic_fixture.cu, 16, 16, 4, 4, 16, dynamic_base + 1, dynamic_base,
+                     dynamic_base + 64, dynamic_base + 128, amdgpu::extract_f16,
+                     amdgpu::extract_f16, amdgpu::ACC_FROM_VGPR, 1, 0, 1);
+    amdgpu::exec_f32<16, 16, 4, 4>(*static_fixture.cu, 16, static_base + 1, static_base,
+                                   static_base + 64, static_base + 128, amdgpu::extract_f16,
+                                   amdgpu::extract_f16, amdgpu::ACC_FROM_VGPR, 1, 0, 1);
+    EXPECT_EQ(dynamic_fixture.snapshot(1, 16), static_fixture.snapshot(1, 16))
+        << "force_scalar=" << force_scalar;
+  }
+}
+
+TEST(MfmaLazyStorageTest, StaticMixedMatchesRuntimeWithOverlap) {
+  for (bool force_scalar : {true, false}) {
+    ForceScalarGuard guard;
+    util::set_force_scalar_for_testing(force_scalar);
+    ExactFixture dynamic_fixture(ROCJITSU_CODE_ARCH_CDNA4, WF_SIZE);
+    ExactFixture static_fixture(ROCJITSU_CODE_ARCH_CDNA4, WF_SIZE);
+    ASSERT_NE(dynamic_fixture.wf, nullptr);
+    ASSERT_NE(static_fixture.wf, nullptr);
+    for (ExactFixture *fixture : {&dynamic_fixture, &static_fixture}) {
+      fixture->seed_words(1, 4, 777);
+      fixture->seed(0, 16, Fmt::FP8, Mode::RandomInt, 88);
+      fixture->seed(64, 8, Fmt::RAW4, Mode::RandomInt, 99);
+      fixture->seed(128, 4, Fmt::F32, Mode::RandomInt, 111);
+    }
+    const uint32_t dynamic_base = dynamic_fixture.vbase;
+    const uint32_t static_base = static_fixture.vbase;
+    amdgpu::exec_f32_mixed(*dynamic_fixture.cu, 16, 16, 128, 1, 8, 4, dynamic_base + 1,
+                           dynamic_base, dynamic_base + 64, dynamic_base + 128, amdgpu::extract_fp8,
+                           amdgpu::extract_fp4, amdgpu::ACC_FROM_VGPR);
+    amdgpu::exec_f32_mixed<16, 16, 128, 1>(*static_fixture.cu, 8, 4, static_base + 1, static_base,
+                                           static_base + 64, static_base + 128, amdgpu::extract_fp8,
+                                           amdgpu::extract_fp4, amdgpu::ACC_FROM_VGPR);
+    EXPECT_EQ(dynamic_fixture.snapshot(1, 4), static_fixture.snapshot(1, 4))
+        << "force_scalar=" << force_scalar;
+  }
+}
+
 } // namespace

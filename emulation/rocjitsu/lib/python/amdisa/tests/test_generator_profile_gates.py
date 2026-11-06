@@ -2237,7 +2237,7 @@ def test_unsupported_swmmac_layout_does_not_emit_sparse_setup(
     assert 'index_base' not in body
     assert 'index_key' not in body
     assert 'exec_swmmac' not in body
-    assert 'amdgpu::exec_f32(' in body
+    assert 'amdgpu::exec_f32<16, 16, 32, 0>(' in body
 
 
 @pytest.mark.parametrize(
@@ -2714,6 +2714,7 @@ def test_dynamic_mfma_aliases_use_profile_selected_operand_bases(
     else:
         assert 'uint32_t s0b = src0_base;' in body
         assert 'uint32_t s1b = src1_base;' in body
+    assert 'amdgpu::exec_f32_mixed<16, 16, 128, 0>(' in body
     assert (
         'a_bits, b_bits, dst, s0b, s1b, s2, ea, eb, const_acc);'
         in _generated_matrix_call(body, 'exec_f32_mixed')
