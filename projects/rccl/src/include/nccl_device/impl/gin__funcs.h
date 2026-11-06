@@ -546,7 +546,7 @@ NCCL_DEVICE_INLINE void ncclGinPut_C_impl(
       while (remaining > 0) {
         struct ncclSegmentWindow const& dstSegmentWindow = dstWin->ginMultiSegmentWins[dstSeg];
         struct ncclSegmentWindow const& srcSegmentWindow = srcWin->ginMultiSegmentWins[srcSeg];
-        if (!doneSysmemFence && srcSegmentWindow.memType == CU_MEM_LOCATION_TYPE_HOST_NUMA) {
+        if (!doneSysmemFence && ncclMemLocationIsHostNuma(srcSegmentWindow.memType)) {
           localRequiredRelease = cuda::thread_scope_system;
           doneSysmemFence = true;
         }
@@ -684,7 +684,7 @@ NCCL_DEVICE_INLINE void ncclGin_BackendMask<beMask>::put(
         while (remaining > 0) {
           struct ncclSegmentWindow const& dstSegmentWindow = dstWin->ginMultiSegmentWins[dstSeg];
           struct ncclSegmentWindow const& srcSegmentWindow = srcWin->ginMultiSegmentWins[srcSeg];
-          if (!doneSysmemFence && srcSegmentWindow.memType == CU_MEM_LOCATION_TYPE_HOST_NUMA) {
+          if (!doneSysmemFence && ncclMemLocationIsHostNuma(srcSegmentWindow.memType)) {
             // for safety, escalate to system regardless of what the user requested
             localRequiredRelease = cuda::thread_scope_system;
             doneSysmemFence = true;
