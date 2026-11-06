@@ -36,6 +36,7 @@ public:
     virtual void handle(const hipfile_pmc_sample& sample)      = 0;
     virtual void handle(const backtrace_region_sample& sample) = 0;
     virtual void handle(const kfd_sample& sample)              = 0;
+    virtual void handle(const cpu_snap_sample& sample)         = 0;
 
     virtual void prepare_for_processing() = 0;
     virtual void finalize_processing()    = 0;

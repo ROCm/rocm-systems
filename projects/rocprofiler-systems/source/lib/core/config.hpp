@@ -224,6 +224,12 @@ get_use_hipfile() ROCPROFSYS_HOT;
 bool&
 get_use_sampling() ROCPROFSYS_HOT;
 
+[[nodiscard]] bool
+get_use_timemory_sampling();
+
+[[nodiscard]] bool
+get_use_cpu_snap_sampling();
+
 bool&
 get_use_process_sampling() ROCPROFSYS_HOT;
 

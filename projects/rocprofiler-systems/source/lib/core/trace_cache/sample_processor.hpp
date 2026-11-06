@@ -104,6 +104,9 @@ struct sample_processor_t
             case type_identifier_t::kfd_sample:
                 handle_sample(static_cast<const kfd_sample&>(sample));
                 break;
+            case type_identifier_t::cpu_snap_sample:
+                handle_sample(static_cast<const cpu_snap_sample&>(sample));
+                break;
             default: throw std::runtime_error("Unsupported sample type");
         }
     }

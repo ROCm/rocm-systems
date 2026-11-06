@@ -6,8 +6,10 @@
 #include "agent_manager.hpp"
 #include "config.hpp"
 #include "core/perfetto/fwd.hpp"
+#include "core/trace_cache/cpu_snap_decoder.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_processor_interface.hpp"
+#include "core/trace_cache/sample_type.hpp"
 #include "library/pmc/collectors/hipfile/sample.hpp"
 #include <cstdint>
 
@@ -43,9 +45,9 @@ public:
                          pid_t ppid, rocprofsys::track_registry& tracks);
 
     void prepare_for_processing() override;
-    // Cached-mode drain runs at cache_manager scope (engine.stop());
-    // per-pid finalize has nothing to do.
-    void finalize_processing() override {}
+    // Cached-mode drain runs at cache_manager scope (engine.stop()); per-pid
+    // finalize only reports cpu-snap data losses.
+    void finalize_processing() override { m_cpu_snap_decoder.report_losses(); }
 
     void handle(const kernel_dispatch_sample& sample) override;
     void handle(const scratch_memory_sample& sample) override;
@@ -61,6 +63,7 @@ public:
     void handle(const hipfile_pmc_sample& sample) override;
     void handle(const backtrace_region_sample& sample) override;
     void handle(const kfd_sample& sample) override;
+    void handle(const cpu_snap_sample& sample) override;
 
 private:
     // Returns a cached ::perfetto::Track for the given (category, args...) key,
@@ -99,6 +102,7 @@ private:
     std::map<std::uint32_t, std::uint64_t>           m_unified_memory_fault_counts;
     bool                                             m_cpu_pmc_initialized{ false };
     std::optional<std::uint32_t>                     m_cpu_pmc_owner_device_id;
+    cpu_snap_decoder                                 m_cpu_snap_decoder;
 };
 }  // namespace trace_cache
 }  // namespace rocprofsys

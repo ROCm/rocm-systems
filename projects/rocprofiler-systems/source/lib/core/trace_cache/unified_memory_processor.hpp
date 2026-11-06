@@ -156,6 +156,7 @@ public:
     void handle(const gpu_perf_counter_sample&) override {}
     void handle(const hipfile_pmc_sample&) override {}
     void handle(const backtrace_region_sample&) override {}
+    void handle(const cpu_snap_sample&) override {}
 
 private:
     void handle_page_migrate(const kfd_sample& sample);

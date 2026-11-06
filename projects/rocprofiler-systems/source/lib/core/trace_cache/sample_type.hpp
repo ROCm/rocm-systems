@@ -31,6 +31,7 @@ enum class type_identifier_t : std::uint32_t
     kfd_sample              = 0x000B,
     gpu_perf_counter_sample = 0x000C,
     hipfile_pmc_sample      = 0x000D,
+    cpu_snap_sample         = 0x000E,
     fragmented_space        = 0xFFFF
 };
 
@@ -723,6 +724,42 @@ get_size(const kfd_sample& item)
                              item.track_name, item.event_metadata, item.device_id,
                              item.device_type, item.pmc_info_name, item.value,
                              item.system_tid);
+}
+
+struct cpu_snap_sample : cacheable_t
+{
+    static constexpr type_identifier_t type_identifier =
+        type_identifier_t::cpu_snap_sample;
+
+    cpu_snap_sample() = default;
+    explicit cpu_snap_sample(std::vector<std::uint8_t> bytes_in)
+    : bytes(std::move(bytes_in))
+    {}
+
+    std::vector<std::uint8_t> bytes;
+};
+
+template <>
+inline void
+serialize(std::uint8_t* buffer, const cpu_snap_sample& item)
+{
+    utility::store_value(buffer, item.bytes);
+}
+
+template <>
+inline cpu_snap_sample
+deserialize(std::uint8_t*& buffer)
+{
+    cpu_snap_sample item;
+    utility::parse_value(buffer, item.bytes);
+    return item;
+}
+
+template <>
+inline size_t
+get_size(const cpu_snap_sample& item)
+{
+    return utility::get_size(item.bytes);
 }
 
 }  // namespace rocprofsys::trace_cache

@@ -163,7 +163,7 @@ struct config_value_validation
 // ROCPROFSYS_TRACE_DURATION=abc -> 0.0. If timemory callbacks become
 // unconditional and available before constructor parsing, the explicit env and
 // config-file validation paths can be removed.
-const auto k_strict_config_value_validations = std::array<config_value_validation, 6>{ {
+const auto k_strict_config_value_validations = std::array<config_value_validation, 7>{ {
     { .name        = env_vars::MODE,
       .rule        = config_value_rule::choice,
       .expectation = "one of the registered choices" },
@@ -186,6 +186,11 @@ const auto k_strict_config_value_validations = std::array<config_value_validatio
     { .name        = env_vars::TRACE_PERIOD_CLOCK_ID,
       .rule        = config_value_rule::choice,
       .expectation = "one of the registered choices" },
+    { .name = env_vars::USE_EXPERIMENTAL_CALLSTACK_SAMPLER,
+      .rule = config_value_rule::boolean,
+      .expectation =
+          "a boolean value (0, non-zero integer, true, false, on, off, yes, no, "
+          "y, n, t, f)" },
 } };
 
 [[nodiscard]] bool
@@ -653,6 +658,75 @@ configure_rocm_tracing_settings(const std::shared_ptr<settings>& _config)
 
     register_rocm_group_by_queue_setting(_config, rocm_domain_choices);
 }
+
+// Settings read only by the timemory sampler; the cpu-snap engine ignores them.
+constexpr auto k_timemory_only_sampling_settings = std::to_array<std::string_view>({
+    env_vars::SAMPLING_TIDS,
+    env_vars::SAMPLING_CPUTIME_FREQ,
+    env_vars::SAMPLING_CPUTIME_DELAY,
+    env_vars::SAMPLING_CPUTIME_TIDS,
+    env_vars::SAMPLING_CPUTIME_SIGNAL,
+    env_vars::SAMPLING_REALTIME_FREQ,
+    env_vars::SAMPLING_REALTIME_DELAY,
+    env_vars::SAMPLING_REALTIME_TIDS,
+    env_vars::SAMPLING_REALTIME_SIGNAL,
+    env_vars::SAMPLING_OVERFLOW_FREQ,
+    env_vars::SAMPLING_OVERFLOW_TIDS,
+    env_vars::SAMPLING_OVERFLOW_SIGNAL,
+    env_vars::SAMPLING_OVERFLOW_EVENT,
+    env_vars::SAMPLING_ALLOCATOR_SIZE,
+    env_vars::SAMPLING_KEEP_INTERNAL,
+    env_vars::SAMPLING_KEEP_DYNINST_SUFFIX,
+    env_vars::SAMPLING_INCLUDE_INLINES,
+});
+
+[[nodiscard]] bool
+use_experimental_callstack_sampler()
+{
+    return get_setting_value<bool>(
+               std::string{ env_vars::USE_EXPERIMENTAL_CALLSTACK_SAMPLER })
+        .value_or(false);
+}
+
+void
+validate_cpu_snap_sampling_settings()
+{
+    auto const use_sampling =
+        get_setting_value<bool>(std::string{ env_vars::USE_SAMPLING }).value_or(false);
+    if(!use_sampling || !use_experimental_callstack_sampler())
+    {
+        return;
+    }
+
+    auto const is_enabled = [](const char* name) {
+        return get_setting_value<bool>(std::string{ name }).value_or(false);
+    };
+
+    // cpu-snap runs only its signal trigger here (no perf_event_open), and that trigger
+    // does not expose CPU-time sampling yet.
+    if(is_enabled(env_vars::SAMPLING_CPUTIME))
+    {
+        throw std::runtime_error(fmt::format(
+            "Error! {}=ON samples wall time only for now, but {} is enabled. Disable "
+            "it or turn {} off",
+            env_vars::USE_EXPERIMENTAL_CALLSTACK_SAMPLER, env_vars::SAMPLING_CPUTIME,
+            env_vars::USE_EXPERIMENTAL_CALLSTACK_SAMPLER));
+    }
+    if(is_enabled(env_vars::SAMPLING_OVERFLOW))
+    {
+        throw std::runtime_error(fmt::format(
+            "Error! {}=ON has no overflow sampling, but {} is enabled. Disable it or "
+            "turn {} off",
+            env_vars::USE_EXPERIMENTAL_CALLSTACK_SAMPLER, env_vars::SAMPLING_OVERFLOW,
+            env_vars::USE_EXPERIMENTAL_CALLSTACK_SAMPLER));
+    }
+
+    // Listed whether or not they are set, so the message does not depend on how a
+    // setting got its value.
+    LOG_WARNING("{}=ON ignores these settings: {}",
+                env_vars::USE_EXPERIMENTAL_CALLSTACK_SAMPLER,
+                fmt::join(k_timemory_only_sampling_settings, ", "));
+}
 }  // namespace
 
 void
@@ -848,6 +922,11 @@ configure_settings(bool _init)
     ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_SAMPLING,
                               "Enable statistical sampling of call-stack", false,
                               "backend", "sampling");
+
+    ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_EXPERIMENTAL_CALLSTACK_SAMPLER,
+                              "Use the experimental call-stack sampler when "
+                              "ROCPROFSYS_USE_SAMPLING is enabled. Wall time only.",
+                              false, "sampling", "advanced");
 
     ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_THREAD_SAMPLING,
                               "[DEPRECATED] Renamed to ROCPROFSYS_USE_PROCESS_SAMPLING",
@@ -1836,6 +1915,7 @@ configure_settings(bool _init)
     configure_mode_settings(_config);
     configure_signal_handler(_config);
     configure_disabled_settings(_config);
+    validate_cpu_snap_sampling_settings();
 
     LOG_DEBUG("Configuration complete");
 
@@ -2111,7 +2191,7 @@ get_sampling_signals(std::int64_t)
         _v.emplace(get_sampling_cputime_signal());
         _v.emplace(get_sampling_realtime_signal());
     }
-    else
+    else if(!get_use_cpu_snap_sampling())
     {
         if(get_use_sampling() && !get_use_sampling_cputime() &&
            !get_use_sampling_realtime() && !get_use_sampling_overflow())
@@ -2737,6 +2817,18 @@ get_use_sampling()
     static bool _v = false;
     return _v;
 #endif
+}
+
+bool
+get_use_timemory_sampling()
+{
+    return get_use_sampling() && !use_experimental_callstack_sampler();
+}
+
+bool
+get_use_cpu_snap_sampling()
+{
+    return get_use_sampling() && use_experimental_callstack_sampler();
 }
 
 bool&

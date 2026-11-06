@@ -185,7 +185,7 @@ thread_init()
             {
                 causal::sampling::shutdown();
             }
-            else if(get_use_sampling())
+            else if(get_use_timemory_sampling())
             {
                 sampling::shutdown();
             }
@@ -254,21 +254,21 @@ thread_init()
         // the main thread will initialize sampling when it initializes the tooling
         if(_idx > 0)
         {
-            auto const _use_causal   = get_use_causal();
-            auto const _use_sampling = get_use_sampling();
-            if(_use_causal || _use_sampling)
+            auto const use_causal            = get_use_causal();
+            auto const use_timemory_sampling = get_use_timemory_sampling();
+            if(use_causal || use_timemory_sampling)
             {
                 ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
-                if(_use_causal)
+                if(use_causal)
                 {
                     causal::sampling::setup();
                 }
-                else if(_use_sampling)
+                else if(use_timemory_sampling)
                 {
                     sampling::setup();
                 }
             }
-            return (_use_causal || _use_sampling);
+            return (use_causal || use_timemory_sampling);
         }
         return false;
     }();

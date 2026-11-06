@@ -4,6 +4,7 @@
 set(trace_cache_sources
     ${CMAKE_CURRENT_LIST_DIR}/cache_manager.cpp
     ${CMAKE_CURRENT_LIST_DIR}/buffer_storage.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/cpu_snap_decoder.cpp
     ${CMAKE_CURRENT_LIST_DIR}/data_types.cpp
     ${CMAKE_CURRENT_LIST_DIR}/discovery.cpp
     ${CMAKE_CURRENT_LIST_DIR}/metadata_registry.cpp
@@ -20,6 +21,7 @@ set(trace_cache_headers
     ${CMAKE_CURRENT_LIST_DIR}/storage_parser.hpp
     ${CMAKE_CURRENT_LIST_DIR}/buffer_storage.hpp
     ${CMAKE_CURRENT_LIST_DIR}/cacheable.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/cpu_snap_decoder.hpp
     ${CMAKE_CURRENT_LIST_DIR}/type_registry.hpp
     ${CMAKE_CURRENT_LIST_DIR}/cache_type_traits.hpp
     ${CMAKE_CURRENT_LIST_DIR}/metadata_registry.hpp
@@ -35,6 +37,8 @@ set(trace_cache_headers
 )
 
 target_sources(rocprofiler-systems-core-library PRIVATE ${trace_cache_sources})
+
+target_link_libraries(rocprofiler-systems-core-library PRIVATE cpu_snap::processing)
 
 target_include_directories(
     rocprofiler-systems-core-library
