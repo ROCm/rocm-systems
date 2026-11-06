@@ -4,8 +4,9 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Seams for the src/transport/p2p.cc registration entry points, for a unit compiled in a binary that also
-// compiles the real p2p.cc. transport_p2p_reg_seam.h renames the unit's calls to the micro_* trampolines below.
+// Seams for the src/transport/p2p.cc registration entry points. They take micro_* names, and
+// transport_p2p_reg_seam.h renames a unit's calls to them, only because rccl-UnitTestsMicro still links this file
+// beside the real p2p.cc.
 // Defaults fail loudly, except ncclP2pUsesMemcpy (false, as with NCCL_P2P_USE_CUDA_MEMCPY unset).
 
 #ifndef RCCL_TEST_HOST_TRANSPORT_P2P_REG_FAKES_H_

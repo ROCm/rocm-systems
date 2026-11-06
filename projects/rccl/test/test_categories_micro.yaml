@@ -22,8 +22,6 @@ test_categories:
       - "ParamUtilsMicrotest.*"
       # include/param/parser_{default,enum,bitset,list}.h
       - "ParamParsersMicrotest.*"
-      # param/param_registry.cc
-      - "ParamRegistryMicrotest.*"
       # group.cc
       - "GroupEndInternalTest.*"
       - "GroupCommHeadChainTest.*"
@@ -72,8 +70,6 @@ test_categories:
       - "Win*"
       # test/common/ProcessIsolatedTestRunner.cpp
       - "ProcessIsolatedRunnerMicrotest.*"
-      # register/*.cc
-      - "Register*"
       # test/host/host_test_dispatch.cc (rccl-UnitTestsMicroHostDispatch)
       - "HostDispatch*"
     exclude_windows:
