@@ -87,6 +87,17 @@ jobs:
             rocm-version: "6.4"
           - system: { distro: "rhel", version: "10" }
             rocm-version: "7.0"
+          # Ubuntu 26.04 has no amdgpu-install repo for these ROCm versions
+          - system: { distro: "ubuntu", version: "26.04" }
+            rocm-version: "6.3"
+          - system: { distro: "ubuntu", version: "26.04" }
+            rocm-version: "6.4"
+          - system: { distro: "ubuntu", version: "26.04" }
+            rocm-version: "7.0"
+          - system: { distro: "ubuntu", version: "26.04" }
+            rocm-version: "7.1"
+          - system: { distro: "ubuntu", version: "26.04" }
+            rocm-version: "7.2"
 
     steps:
       - uses: actions/checkout@v6
