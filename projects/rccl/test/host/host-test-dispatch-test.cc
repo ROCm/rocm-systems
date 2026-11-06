@@ -1050,10 +1050,11 @@ TEST(HostDispatchLcovMicrotest, EachSourceFileKeepsItsOwnRecord)
         tracefile("/src/enqueue.cc", "DA:7,1\n"),
     });
 
-    EXPECT_TRUE(hasLine(merged, "SF:/src/init.cc")) << merged;
-    EXPECT_TRUE(hasLine(merged, "SF:/src/enqueue.cc")) << merged;
-    EXPECT_EQ(merged.find("end_of_record"), merged.find("end_of_record"));
-    EXPECT_EQ(std::count(merged.begin(), merged.end(), '\n') > 0, true);
+    // formatLcov walks a std::map, so the whole output is deterministic and path-sorted: pinning
+    // it is what proves each DA: line sits inside its own file's record rather than the other's.
+    EXPECT_EQ(merged,
+              "SF:/src/enqueue.cc\nFNF:0\nFNH:0\nDA:7,1\nLF:1\nLH:1\nend_of_record\n"
+              "SF:/src/init.cc\nFNF:0\nFNH:0\nDA:10,1\nLF:1\nLH:1\nend_of_record\n");
 }
 
 TEST(HostDispatchLcovMicrotest, CountingLinesAreRecomputedNotCarriedOver)
