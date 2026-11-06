@@ -82,7 +82,7 @@ Panel Config:
         metric: {}
     - metric_table:
         id: 1304
-        title: GL2C-EA Interface - HBM Bandwidth
+        title: GL2C-EA Interface - DRAM Bandwidth
         header: *id001
         metric:
           GL2 Cache Read BW:

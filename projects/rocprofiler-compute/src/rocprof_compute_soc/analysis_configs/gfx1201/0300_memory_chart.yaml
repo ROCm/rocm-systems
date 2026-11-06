@@ -2,9 +2,9 @@
 #
 # Levels follow the RDNA 4 ISA (section 1.2.3) and the Navi 48 Hot Chips 2025
 # disclosure: L0 per WGP, the read-only instruction and scalar caches, the GL1
-# write-combining cache, an 8 MB L2, a 64 MB Infinity Cache, then GDDR6.
+# write-combining cache, an 8 MB L2, a 64 MB Infinity Cache, then DRAM (GDDR6).
 # The Infinity Cache has no counter. Requests the L2 sends toward DRAM can
-# still be served by the Infinity Cache, so the GDDR6 metrics count traffic
+# still be served by the Infinity Cache, so the DRAM metrics count traffic
 # destined for DRAM, not traffic that reached it.
 Panel Config:
   id: 300
@@ -140,7 +140,7 @@ Panel Config:
       cli_style: mem_chart
   - metric_table:
       id: 308
-      title: EA to HBM
+      title: EA to DRAM
       header: *id001
       metric:
         DRAM Read Requests:
@@ -247,13 +247,13 @@ Panel Config:
       request counts. 64-byte requests include atomics.
     DRAM Read Requests: >-
       L2 read requests over EA destined for DRAM. The 64 MB Infinity Cache can serve
-      them before they reach GDDR6.
+      them before they reach DRAM.
     DRAM Write Requests: >-
       L2 write requests over EA destined for DRAM. The 64 MB Infinity Cache can absorb
-      them before they reach GDDR6.
+      them before they reach DRAM.
     DRAM Read Bandwidth: >-
       Bytes L2 read over EA for requests destined for DRAM, in 32-byte units. Infinity
-      Cache hits are included, so this can exceed the 640 GB/s GDDR6 peak.
+      Cache hits are included, so this can exceed the 640 GB/s DRAM (GDDR6) peak.
     DRAM Write Bandwidth: >-
       Bytes L2 wrote over EA for requests destined for DRAM, in 32-byte units. Infinity
       Cache hits are included.

@@ -274,20 +274,20 @@ def test_roofline_mem_levels_are_measured_levels_in_hierarchy_order() -> None:
 
 
 def test_roofline_mem_levels_plots_mall_where_the_arch_opts_in() -> None:
-    """gfx1201 draws its Infinity Cache (MALL) roof between L2 and GDDR6 (HBM)."""
+    """gfx1201 draws its Infinity Cache (MALL) roof between L2 and DRAM."""
     assert roofline_mem_levels("gfx1201", "rdna4_navi48") == [
         "LDS",
         "L0",
         "L1",
         "L2",
         "MALL",
-        "HBM",
+        "DRAM",
     ]
 
 
 def test_gfx1201_plot_points_use_the_matching_traffic() -> None:
     """Each gfx1201 AI row divides the VALU plus WMMA FLOPs by its level's bytes;
-    AI HBM uses the GL2C/EA requests destined for DRAM."""
+    AI DRAM uses the GL2C/EA requests destined for DRAM."""
     config = yaml.safe_load(GFX1201_ROOFLINE_YAML.read_text(encoding="utf-8"))
     metrics = config["Panel Config"]["data source"][1]["metric_table"]["metric"]
     counters = {
@@ -317,7 +317,7 @@ def test_gfx1201_plot_points_use_the_matching_traffic() -> None:
         "AI L1": 64 * (6 + 7),
         "AI L0": 64 * 8,
         "AI LDS": (20 - 4) * 4 * 32,
-        "AI HBM": 256 * (9 + 10),
+        "AI DRAM": 256 * (9 + 10),
     }
     for metric, byte_count in expected_bytes.items():
         expression = build_eval_string(metrics[metric]["value"])
@@ -327,17 +327,17 @@ def test_gfx1201_plot_points_use_the_matching_traffic() -> None:
 
 
 def test_gfx1201_dram_destined_rows_compare_one_value_with_both_roofs() -> None:
-    """The DRAM-destined bandwidth is shown against the GDDR6 and Infinity Cache
-    peaks, since no counter separates the two."""
+    """The DRAM bandwidth is shown against the DRAM and Infinity Cache peaks,
+    since no counter separates the two."""
     config = yaml.safe_load(GFX1201_ROOFLINE_YAML.read_text(encoding="utf-8"))
     rates = config["Panel Config"]["data source"][0]["metric_table"]["metric"]
-    gddr6 = rates["DRAM-Destined BW (GDDR6 Peak)"]
+    dram = rates["DRAM BW"]
     infinity_cache = rates["DRAM-Destined BW (Infinity Cache Peak)"]
 
-    assert gddr6["value"] == infinity_cache["value"]
-    assert "GL2C_EA_RDREQ_DRAM_sum" in gddr6["value"]
-    assert "GL2C_EA_WRREQ_DRAM_sum" in gddr6["value"]
-    assert gddr6["peak"] == "$HBMBw_empirical_peak * 1e9"
+    assert dram["value"] == infinity_cache["value"]
+    assert "GL2C_EA_RDREQ_DRAM_sum" in dram["value"]
+    assert "GL2C_EA_WRREQ_DRAM_sum" in dram["value"]
+    assert dram["peak"] == "$DRAMBw_empirical_peak * 1e9"
     assert infinity_cache["peak"] == "$MALLBw_empirical_peak * 1e9"
 
 
@@ -508,8 +508,9 @@ def test_fp8_special_mfma_only() -> None:
 
 
 def test_calc_ceilings_gfx1201_draws_infinity_cache_roof() -> None:
-    """gfx1201 reads its MALL roof from MALLBw alongside the GDDR6 (HBM) roof."""
+    """gfx1201 reads its MALL roof from MALLBw alongside the DRAM roof."""
     benchmark_data = full_benchmark_data()
+    benchmark_data["DRAMBw"] = [str(BW_VALUE)]
     benchmark_data["MALLBw"] = ["2000.0"]
 
     result = calc_ceilings(
@@ -521,7 +522,8 @@ def test_calc_ceilings_gfx1201_draws_infinity_cache_roof() -> None:
     )
 
     assert result["mall"][2] == 2000.0
-    assert result["hbm"][2] == BW_VALUE
+    assert result["dram"][2] == BW_VALUE
+    assert result["hbm"] == []
     assert result["valu"][2] == PEAK_VALUES["FP16Flops"]
     assert result["matrix_ops"][2] == PEAK_VALUES["WMMAF16Flops"]
     assert_graph_points_positive_finite(result)
@@ -856,6 +858,7 @@ def test_construct_roof_invalid_matrix_only_peak_returns_empty_geometry(
 
     assert graph_points == {
         "hbm": [],
+        "dram": [],
         "mall": [],
         "l2": [],
         "l1": [],

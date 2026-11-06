@@ -711,24 +711,24 @@ that contains both ``roofline.csv`` and application performance counters
    On gfx1201 (Navi 48, for example the Radeon RX 9070 XT), the roofline has
    two device-memory roofs:
 
-   * ``HBM`` is the measured GDDR6 bandwidth. Navi 48 has no HBM; the column
-     keeps its historical name. The 256-bit, 20 Gbps GDDR6 interface peaks at
+   * ``DRAM`` is the measured device-memory bandwidth (CSV column ``DRAMBw``).
+     Navi 48 has no HBM. The 256-bit, 20 Gbps DRAM (GDDR6) interface peaks at
      640 GB/s.
    * ``MALL`` is the measured bandwidth of the 64 MB Infinity Cache. The
      benchmark reads a buffer of half the Infinity Cache capacity repeatedly,
      so the reads miss in the 8 MB L2 and hit in the Infinity Cache.
 
-   The ``AI HBM`` point counts GL2C/EA requests destined for DRAM
+   The ``AI DRAM`` point counts GL2C/EA requests destined for DRAM
    (``GL2C_EA_RDREQ_DRAM`` and ``GL2C_EA_WRREQ_DRAM``). The Infinity Cache
    serves some of those requests, and no performance counter separates its hits
-   from GDDR6 traffic, so the point is read against both roofs. A kernel whose
-   working set fits in the Infinity Cache can sit above the ``HBM`` roof and
+   from DRAM traffic, so the point is read against both roofs. A kernel whose
+   working set fits in the Infinity Cache can sit above the ``DRAM`` roof and
    below the ``MALL`` roof. A kernel whose working set is larger sits near the
-   ``HBM`` roof.
+   ``DRAM`` roof.
 
    A Navi 48 copy-kernel measurement reported about 2 TB/s of DRAM-destined
    traffic for working sets up to 64 MiB and about 560 GB/s above that.
-   Compare the measured ``MALL`` and ``HBM`` roofs with those values on your
+   Compare the measured ``MALL`` and ``DRAM`` roofs with those values on your
    system.
 
    The gfx1201 WMMA instruction counter requires a ROCprofiler-SDK and

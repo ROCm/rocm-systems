@@ -7,8 +7,7 @@
 # Benchmarking class for gfx1201 products: Navi 48 RDNA4 dGPUs such as the
 # AMD Radeon RX 9070 XT and Radeon AI PRO R9700.
 #
-# Navi 48: 64 CUs, 8 MB L2, 64 MB Infinity Cache, 256-bit GDDR6 at 20 Gbps
-# (640 GB/s).
+# Navi 48: 64 CUs, 8 MB L2, 64 MB Infinity Cache, DRAM (GDDR6, 640 GB/s).
 #
 # The gfx12 base class targets gfx1250, whose WMMA builtins (16x16x32,
 # 16x16x64, 16x16x128) do not exist on RDNA4. This class therefore replaces the
@@ -49,9 +48,17 @@ class Bench_gfx1201(benchmark_gfx12_base.Bench_gfx12):
     def __init__(self, device_id: int, cache_sizes: dict, gpu_arch: str) -> None:
         super().__init__(device_id, cache_sizes)
 
-        # GDDR6 is measured through the HBM column and the Infinity Cache through
-        # the MALL column. mi_gpu_spec.yaml lists no F4/F6/F32/F64/I8 matrix path,
-        # so those tests are marked unsupported by apply_roofline_spec.
+        # DRAM is the device-memory roofline test (CSV column DRAMBw).
+        # Infinity Cache uses the MALL column. mi_gpu_spec.yaml lists no
+        # F4/F6/F32/F64/I8 matrix path, so those tests are marked unsupported
+        # by apply_roofline_spec. DRAM keeps HBM's place in the CSV column order.
+        ordered_tests = {}
+        for name, func in self.tests.items():
+            if name == "HBM":
+                ordered_tests["DRAM"] = self.dram_bw_benchmark
+            else:
+                ordered_tests[name] = func
+        self.tests = ordered_tests
         self.tests["MALL"] = self.mall_bw_bench
         self.apply_roofline_spec(gpu_arch)
 
@@ -67,6 +74,13 @@ class Bench_gfx1201(benchmark_gfx12_base.Bench_gfx12):
             "F16": WMMA_FLOPS_PER_INSTRUCTION * WMMA_ACC,
             "BF16": WMMA_FLOPS_PER_INSTRUCTION * WMMA_ACC,
         }
+
+    def dram_bw_benchmark(self, device: int) -> float:
+        """Measure sustained DRAM read bandwidth for Navi 48.
+
+        The result is stored under the DRAM roofline test (CSV column DRAMBw).
+        """
+        return self.hbm_bw_benchmark(device, "DRAM_bw", "DRAM")
 
     # -----------------------------------------------------------------------------
     # Infinity Cache (MALL) bandwidth benchmark
@@ -136,11 +150,33 @@ class Bench_gfx1201(benchmark_gfx12_base.Bench_gfx12):
     def set_kernel_source(self) -> None:
         super().set_kernel_source()
 
-        # hbm_bw_src is inherited unchanged. RDNA4 has no on-package HBM, but
-        # the base kernel streams a dataset far larger than the 64 MB Infinity
-        # Cache, so it measures sustained GDDR6 and is reported in the "HBM"
-        # column. (Do not swap in a templated kernel here: the base looks the
-        # entry point up by the unmangled name "HBM_bw".)
+        # DRAM bandwidth. Same streaming body as the gfx12 base (a dataset far
+        # larger than the 64 MB Infinity Cache), with the entry point renamed.
+        # The source stays on hbm_bw_src because hbm_bw_benchmark compiles that
+        # attribute. The roofline test key is DRAM (CSV column DRAMBw). Keep
+        # this kernel extern "C": the launcher looks the entry point up by the
+        # unmangled name "DRAM_bw".
+        self.hbm_bw_src = """
+        extern "C" __global__ void DRAM_bw(__uint128_t *src, long numSteps)
+        {
+            unsigned long offset = (unsigned long)blockIdx.x * blockDim.x
+                                   + threadIdx.x;
+            const unsigned long stride = (unsigned long)gridDim.x * blockDim.x;
+            __uint128_t v = 0;
+
+            #pragma unroll 1
+            for (long step = 0; step < numSteps; step++)
+            {
+                #pragma unroll
+                for (int i = 0; i < 16; i++)
+                {
+                    v |= __builtin_nontemporal_load(&src[offset]);
+                    offset += stride;
+                }
+            }
+            if (v == 0) src[0] = v;
+        }
+        """
 
         # Ordinary (temporal) loads, so the Infinity Cache keeps the buffer
         # between passes.

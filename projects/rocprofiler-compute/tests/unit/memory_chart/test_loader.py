@@ -130,7 +130,7 @@ def test_gfx1201_columns_follow_the_rdna4_hierarchy():
         ["gl1"],
         ["l2"],
         ["infinity_cache"],
-        ["gddr6"],
+        ["dram"],
     ]
 
 
@@ -141,7 +141,7 @@ def test_gfx1201_infinity_cache_shows_no_metrics():
     assert all(arrow.source != "infinity_cache" for arrow in layout.arrows)
 
 
-def test_gfx1201_gddr6_counts_dram_destined_gl2_requests():
+def test_gfx1201_dram_counts_dram_destined_gl2_requests():
     metrics = {
         name: metric
         for source in PanelConfigs.for_arch("gfx1201")["data source"]
