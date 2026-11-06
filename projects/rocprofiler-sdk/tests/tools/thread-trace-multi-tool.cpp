@@ -36,7 +36,7 @@ namespace Multi
 rocprofiler_client_id_t* client_id = nullptr;
 
 rocprofiler_thread_trace_control_flags_t
-dispatch_callback(rocprofiler_agent_id_t /* agent */,
+dispatch_callback(rocprofiler_agent_id_t agent,
                   rocprofiler_queue_id_t /* queue_id  */,
                   rocprofiler_async_correlation_id_t /* correlation_id  */,
                   rocprofiler_kernel_id_t /* kernel_id */,
@@ -50,6 +50,7 @@ dispatch_callback(rocprofiler_agent_id_t /* agent */,
     assert(dispatch_userdata && "Dispatch callback passed null!");
     dispatch_userdata->ptr = userdata;
 
+    Callbacks::add_traced_agent(agent);
     return ROCPROFILER_THREAD_TRACE_CONTROL_START_AND_STOP;
 }
 
