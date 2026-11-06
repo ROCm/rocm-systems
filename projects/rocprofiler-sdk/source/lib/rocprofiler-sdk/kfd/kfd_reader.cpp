@@ -26,6 +26,7 @@
 #include "lib/common/logging.hpp"
 #include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
+#include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/kfd/dlog_drain.hpp"
@@ -51,6 +52,8 @@
 #include <climits>
 #include <cstdint>
 #include <deque>
+#include <future>
+#include <memory>
 #include <mutex>
 #include <new>
 #include <string>
@@ -262,6 +265,9 @@ struct dlog_session
     bool notify_read_err_logged = false;
 };
 
+using processor_fences_t     = std::vector<std::shared_future<void>>;
+using reader_fence_request_t = std::shared_ptr<std::promise<processor_fences_t>>;
+
 struct reader_state
 {
     std::thread       thread = {};
@@ -304,7 +310,8 @@ struct reader_state
     std::atomic<bool> reader_unavailable = {false};
     // Bumped once per completed drain pass. A sync point waits for it to advance
     // twice, which proves a whole pass ran after the request.
-    std::atomic<uint64_t> drain_epoch = {0};
+    std::atomic<uint64_t>                                     drain_epoch = {0};
+    common::Synchronized<std::vector<reader_fence_request_t>> fences      = {};
 
     // Copier is the sole producer, processor the sole consumer.
     record_pipe<kBatchPipeDepth> pipe             = {};
@@ -560,6 +567,7 @@ copy_records(reader_state& st)
     for(size_t i = 0; i < _n; ++i)
     {
         auto& _s = st.sessions[i];
+        spill_overflow_to_pipe(st.pipe, _s.overflow, &st.reader_copied_unpublished);
         if(!_s.ready.load(std::memory_order_acquire) || _s.quarantined) continue;
 
         auto* base      = static_cast<uint8_t*>(_s.smap);
@@ -911,7 +919,9 @@ processor_loop()
             continue;
         }
 
-        process_batch(proc, *_batch);
+        // A fence marker carries no records: fulfilling it IS the processing, and it proves every
+        // batch queued ahead of it has already been paired and handed off.
+        if(!_batch->take_fence()) process_batch(proc, *_batch);
         st.pipe.pop();
 
         // Retained-start eviction is stream-driven inside process_batch (at its
@@ -919,10 +929,11 @@ processor_loop()
         // purge or wall-clock timer here.
     }
 
-    // Drain whatever the reader published on its way out.
+    // Drain whatever the reader published on its way out, markers included: a flush blocked on
+    // one must not outlive the thread that answers it.
     while(auto* _batch = st.pipe.peek())
     {
-        process_batch(proc, *_batch);
+        if(!_batch->take_fence()) process_batch(proc, *_batch);
         st.pipe.pop();
     }
 
@@ -967,11 +978,36 @@ all_live_overflow_empty(const reader_state& st)
 uint64_t
 drain_sessions_bounded(reader_state& st)
 {
-    uint64_t seen = 0;
+    uint64_t seen     = 0;
+    auto     requests = st.fences.wlock([](auto& pending) {
+        auto captured = std::vector<reader_fence_request_t>{};
+        captured.swap(pending);
+        return captured;
+    });
     for(int _pass = 0; _pass < kMaxDrainPassesPerWake; ++_pass)
     {
         const uint64_t _copied = copy_records(st);
         seen += _copied;
+        if(_pass == 0)
+        {
+            for(auto& request : requests)
+            {
+                auto       completions = processor_fences_t{};
+                const auto count       = st.session_count.load(std::memory_order_acquire);
+                for(size_t index = 0; index < count; ++index)
+                {
+                    auto& session    = st.sessions[index];
+                    auto  completion = std::make_shared<std::promise<void>>();
+                    completions.emplace_back(completion->get_future().share());
+                    auto& marker      = session.overflow.emplace_back();
+                    marker.gpu_id     = session.gpu_id;
+                    marker.completion = std::move(completion);
+                    spill_overflow_to_pipe(
+                        st.pipe, session.overflow, &st.reader_copied_unpublished);
+                }
+                request->set_value(std::move(completions));
+            }
+        }
         // Stage 1: advance drain_epoch only when every live session's overflow
         // is drained into the pipe, so the fence's +2 proves pre-request records
         // were PUBLISHED into the pipe, not merely copied into an overflow deque.
@@ -1144,7 +1180,8 @@ reader_loop()
         // triggers on its own -- the backstop below bounds the case where it re-
         // triggers (count still set) but the drain copies nothing.
 
-        if(st.any_session_ready.load(std::memory_order_acquire))
+        if(st.any_session_ready.load(std::memory_order_acquire) || !all_live_overflow_empty(st) ||
+           st.fences.rlock([](const auto& pending) { return !pending.empty(); }))
         {
             const uint64_t _copied = drain_sessions_bounded(st);
             total_seen += _copied;
@@ -1582,6 +1619,44 @@ wait_for_reader_quiesce(uint64_t timeout_ns)
             return false;
         }
         std::this_thread::sleep_for(std::chrono::microseconds{200});
+    }
+    return true;
+}
+
+bool
+flush_reader_records()
+{
+    if(!kfd_reader_state_constructed()) return true;
+    auto& st = state();
+    if(!st.running.load(std::memory_order_acquire)) return true;
+    if(st.reader_unavailable.load(std::memory_order_acquire)) return false;
+
+    auto request = std::make_shared<std::promise<processor_fences_t>>();
+    auto ready   = request->get_future();
+    st.fences.wlock([&request](auto& pending) { pending.emplace_back(request); });
+    nudge_reader();
+    while(ready.wait_for(std::chrono::milliseconds{1}) != std::future_status::ready)
+    {
+        if(st.reader_done.load(std::memory_order_acquire) ||
+           st.reader_unavailable.load(std::memory_order_acquire))
+            return false;
+    }
+
+    try
+    {
+        for(const auto& completion : ready.get())
+        {
+            while(completion.wait_for(std::chrono::milliseconds{1}) != std::future_status::ready)
+            {
+                if(!st.running.load(std::memory_order_acquire) ||
+                   st.reader_unavailable.load(std::memory_order_acquire))
+                    return false;
+            }
+            completion.get();
+        }
+    } catch(const std::future_error&)
+    {
+        return false;
     }
     return true;
 }

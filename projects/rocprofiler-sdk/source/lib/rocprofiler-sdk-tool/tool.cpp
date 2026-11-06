@@ -485,7 +485,22 @@ flush()
         if(itr > null_buffer_id)
         {
             ROCP_INFO << "flushing buffer " << itr.handle;
-            ROCPROFILER_CALL(rocprofiler_flush_buffer(itr), "buffer flush");
+            // BUFFER_BUSY is not fatal here. It means the records already in the buffer were
+            // delivered but the SDK would not promise the window is complete -- the flush ran on
+            // an SDK-owned thread, or a completion pipeline is no longer draining. Aborting the
+            // profiled application over an incomplete trace is worse than emitting one, so this
+            // warns and carries on; every other status is still a hard error.
+            auto _status = rocprofiler_flush_buffer(itr);
+            if(_status == ROCPROFILER_STATUS_ERROR_BUFFER_BUSY)
+            {
+                ROCP_WARNING << "buffer " << itr.handle
+                             << " flushed without a complete-delivery guarantee; trailing "
+                                "kernel-dispatch records may be missing from this window";
+            }
+            else
+            {
+                ROCPROFILER_CALL(_status, "buffer flush");
+            }
         }
     }
     ROCP_INFO << "Buffers flushed";

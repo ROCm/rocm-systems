@@ -934,6 +934,62 @@ TEST(record_pipe, spill_overflow_hands_off_fifo_and_reports_remaining)
     EXPECT_TRUE(spill_overflow_to_pipe(pipe, overflow));  // nothing queued -> no-op
 }
 
+TEST(record_pipe, fence_follows_overflow_without_waiting_for_new_records)
+{
+    auto pipe                          = record_pipe<2>{};
+    auto overflow                      = std::deque<record_batch>{};
+    auto completion                    = std::make_shared<std::promise<void>>();
+    auto ready                         = completion->get_future();
+    overflow.emplace_back().gpu_id     = 1;
+    overflow.emplace_back().completion = completion;
+    overflow.emplace_back().gpu_id     = 2;
+
+    EXPECT_FALSE(spill_overflow_to_pipe(pipe, overflow));
+    ASSERT_NE(pipe.peek(), nullptr);
+    EXPECT_EQ(pipe.peek()->gpu_id, 1);
+    EXPECT_FALSE(pipe.peek()->take_fence());
+    EXPECT_EQ(ready.wait_for(std::chrono::nanoseconds{0}), std::future_status::timeout);
+    pipe.pop();
+    EXPECT_TRUE(spill_overflow_to_pipe(pipe, overflow));
+    ASSERT_NE(pipe.peek(), nullptr);
+    EXPECT_TRUE(pipe.peek()->take_fence());
+    // Idempotent: a second take must not re-satisfy the promise, which would throw out of
+    // whatever scope the processor happens to be in.
+    EXPECT_FALSE(pipe.peek()->take_fence());
+    pipe.pop();
+    EXPECT_EQ(ready.wait_for(std::chrono::nanoseconds{0}), std::future_status::ready);
+    EXPECT_FALSE(pipe.empty());
+    ASSERT_NE(pipe.peek(), nullptr);
+    EXPECT_EQ(pipe.peek()->gpu_id, 2);
+    EXPECT_FALSE(pipe.peek()->take_fence());
+    pipe.pop();
+    ASSERT_NE(pipe.acquire(), nullptr);
+    EXPECT_FALSE(pipe.acquire()->completion);
+}
+
+// A marker the processor never reaches through the steady-state loop must still be answered on
+// the way out: stop_reader joins the reader first, so anything the reader published -- markers
+// included -- is drained by the processor's exit pass before reader_done is observed.
+TEST(record_pipe, fence_is_answered_by_the_shutdown_drain)
+{
+    auto pipe                          = record_pipe<2>{};
+    auto overflow                      = std::deque<record_batch>{};
+    auto completion                    = std::make_shared<std::promise<void>>();
+    auto ready                         = completion->get_future();
+    overflow.emplace_back().completion = completion;
+
+    EXPECT_TRUE(spill_overflow_to_pipe(pipe, overflow));
+    EXPECT_EQ(ready.wait_for(std::chrono::nanoseconds{0}), std::future_status::timeout);
+
+    // The processor's exit pass, verbatim.
+    while(auto* batch = pipe.peek())
+    {
+        batch->take_fence();
+        pipe.pop();
+    }
+    EXPECT_EQ(ready.wait_for(std::chrono::nanoseconds{0}), std::future_status::ready);
+}
+
 // Shutdown data-loss regression: the processor reads ONLY the pipe, so overflow must
 // be pumped through before reader_done or copied batches are silently lost.
 TEST(record_pipe, shutdown_drains_overflow_before_declaring_done)

@@ -13,6 +13,44 @@ Supported buffer record categories are enumerated in ``rocprofiler_buffer_catego
 a buffered tracing service requires buffer creation. Flushing the buffer implicitly or explicitly invokes a callback to the tool, which provides an array of one or more buffer records.
 To flush a buffer explicitly, use ``rocprofiler_flush_buffer`` function.
 
+Kernel-dispatch delivery at the end of a collection window
+----------------------------------------------------------
+
+A successful explicit flush of a kernel-dispatch buffer delivers the records for
+dispatches that the application synchronized before the flush began. This applies
+to both signal and signal-less completion, including dispatches recorded while a
+context was active but processed after ``rocprofiler_stop_context``. Records
+already discarded by the configured buffer policy cannot be recovered.
+
+GPU synchronization and profiling-record delivery are separate operations. First
+synchronize the required application work, then flush and check the returned
+status before consuming the records. Either sequence is supported when no new
+work is submitted between these operations:
+
+* Synchronize application work, stop the context, flush the buffer, consume records.
+* Synchronize application work, flush the buffer, stop the context, consume records.
+
+Stopping a context deactivates collection for subsequent submissions; it does not
+flush kernel-dispatch records. Records for earlier submissions can still arrive
+after stop. If a dispatch is unfinished at flush time, its record is not required
+to be delivered until a later flush after the application synchronizes it.
+
+Explicit kernel-dispatch flushing waits for a finite snapshot of SDK work rather
+than for every queue or the entire completion pipeline to become idle. It does
+not synchronize GPU execution and is not extended by later submissions. There is
+no wall-clock timeout for synchronous delivery. Tool callbacks must return and
+must not wait for the application thread that is itself waiting in flush.
+
+``ROCPROFILER_STATUS_ERROR_BUFFER_BUSY`` reports an incomplete window, not a
+failed call: the records already in the buffer were delivered, but the SDK will
+not promise that every synchronized dispatch is among them. It is returned when
+the caller is an SDK completion or buffer-callback thread, where waiting could
+deadlock, and when a completion pipeline is no longer draining. Retry from an
+application thread if the cause was re-entry. Clients must check the status and
+must not treat a non-success return as fatal; aborting over an incomplete trace
+loses the trace entirely. The existing dispatch-log quiescence budget applies to
+lifecycle/teardown operations, not this explicit delivery contract.
+
 Subscribing to buffer tracing services
 --------------------------------------
 
