@@ -21,29 +21,11 @@
 #include "comm.h"
 #include "socket.h"
 
-// Rename peers.cc symbols that ras-test.cc already supplies in the shared microtest binary.
+// Route peers.cc's message calls to fakes/ras_message_fakes.cc and its socket formatting to this file.
 #define ncclSocketToString PeersTestNcclSocketToString
-#define rasNetListeningSocket PeersTestRasNetListeningSocket
-#define rasLine PeersTestRasLine
-#define rasNextLink PeersTestRasNextLink
-#define rasPrevLink PeersTestRasPrevLink
 #define rasConnEnqueueMsg RasMessageTestEnqueue
 #define rasMsgAlloc RasMessageTestAlloc
 #define rasMsgFree RasMessageTestFree
-#define rasPeers PeersTestRasPeers
-#define nRasPeers PeersTestNRasPeers
-#define rasPeersHash PeersTestRasPeersHash
-#define rasDeadPeers PeersTestRasDeadPeers
-#define nRasDeadPeers PeersTestNRasDeadPeers
-#define rasDeadPeersHash PeersTestRasDeadPeersHash
-#define rasLocalHandleAddRanks PeersTestRasLocalHandleAddRanks
-#define rasPeerFind PeersTestRasPeerFind
-#define rasConnSendPeersUpdate PeersTestRasConnSendPeersUpdate
-#define rasMsgHandlePeersUpdate PeersTestRasMsgHandlePeersUpdate
-#define rasPeerDeclareDead PeersTestRasPeerDeclareDead
-#define rasPeerIsDead PeersTestRasPeerIsDead
-#define ncclSocketsCompare PeersTestNcclSocketsCompare
-#define rasPeersTerminate PeersTestRasPeersTerminate
 
 #include "ras/ras_internal.h"
 #include "fakes/ras_net_fakes.h"

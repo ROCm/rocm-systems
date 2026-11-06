@@ -140,7 +140,7 @@ class RasDiagnosticsEnvMicrotest : public ::testing::Test {
 }  // namespace
 
 // ===========================================================================
-// rasDiagnosticsNcclEnvCollectLocal (through the shared microtest copy of rasDiagnosticsCollectLocalRecords)
+// rasDiagnosticsNcclEnvCollectLocal (through the real rasDiagnosticsCollectLocalRecords)
 // ===========================================================================
 
 TEST_F(RasDiagnosticsEnvMicrotest, EnvironmentViews_EnumerationAndLookupStayInSync) {
