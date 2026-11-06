@@ -16,7 +16,7 @@ Panel Config:
           pct_of_peak: Percent of Peak
         metric:
           VALU FLOPs (FP32):
-            value: SUM(SQ_INSTS_VALU_sum * $wave_size) / SUM(End_Timestamp - Start_Timestamp)
+            value: SUM($wave_size * (SQ_INSTS_VALU_sum - SQ_WMMA_VALU_INSTS_sum)) / SUM(End_Timestamp - Start_Timestamp)
             unit: GFLOP/s
             peak: $max_sclk * $cu_per_gpu * 128 / 1000
             pct_of_peak: true
@@ -120,9 +120,10 @@ Panel Config:
             pct_of_peak: false
   metrics_description:
     VALU FLOPs (FP32): >-
-      Floating-point operations per second on the VALU, from all issued VALU
-      instructions times the wavefront size. Peak is FP32 FMA single-issue
-      (128 FLOPs/CU/cycle). VOPD dual-issue can exceed it.
+      Floating-point operations per second on the VALU, excluding WMMA
+      instructions already counted in SQ_INSTS_VALU, times the wavefront size.
+      Peak is FP32 FMA single-issue (128 FLOPs/CU/cycle). VOPD dual-issue can
+      exceed it.
     WMMA FLOPs (F16->F32 16x16x16): >-
       Matrix FLOPs per second, counting 8192 FLOPs per vec32 WMMA instruction.
       The counter increments once per vec32, so a wave64 WMMA counts twice.
