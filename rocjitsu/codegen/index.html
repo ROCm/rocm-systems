@@ -1863,7 +1863,7 @@ layout formulas and a fixed inventory of source/target layout names.</p>
 </tr>
 <tr>
 <td><code>codegen/</code></td>
-<td>Generate C++ decoders, encoders, and instruction execute bodies</td>
+<td>Generate C++ decoders, encoders and execute bodies, and native assembly dispatch tables</td>
 </tr>
 <tr>
 <td><code>legalization.py</code></td>
@@ -2037,6 +2037,8 @@ code generation:</p>
 <span class="w">  </span>--dbt-output<span class="w"> </span>/path/to/dbt-output
 </code></pre></div>
 <h2 id="generated-file-locations">Generated file locations<a class="headerlink" href="#generated-file-locations" title="Permanent link">&para;</a></h2>
+<p>The portable C++ switches and native assembly tables share the same
+opcode-to-factory rows.</p>
 <table>
 <thead>
 <tr>
@@ -2047,7 +2049,7 @@ code generation:</p>
 </thead>
 <tbody>
 <tr>
-<td>ISA decoders, encoders, execute bodies, and <code>insts.h</code></td>
+<td>ISA decoders (including <code>decode_factories.h</code>, <code>decode_tables.inc</code>, and <code>decode_tables.S</code>), encoders, execute bodies, and <code>insts.h</code></td>
 <td><code>lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/&lt;output-directory&gt;/</code></td>
 <td><code>codegen/</code></td>
 </tr>
