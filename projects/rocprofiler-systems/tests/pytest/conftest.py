@@ -679,10 +679,14 @@ def pytest_collection_finish(session) -> None:
                 returncode=1,
             )
         if not session.items:
+            opts = session.config.option
+            active = [f"-m '{opts.markexpr}'" if opts.markexpr else "",
+                      f"-k '{opts.keyword}'" if opts.keyword else ""]
+            filters = " ".join(a for a in active if a) or "none"
             pytest.exit(
-                "CTestTestfile.cmake generation collected 0 tests; check the pytest "
-                "configuration (python_files, -m/-k filters) that applies to this directory",
-                returncode=1,
+                 f"CTestTestfile.cmake generation collected 0 tests (filters: {filters}); "
+                 "check python_files in pytest-generate.ini and the -m/-k filters",
+                 returncode=1,
             )
         raw_path = session.config.getoption("--ctest-output-path", default=None)
         output_path = Path(raw_path) if raw_path else None
