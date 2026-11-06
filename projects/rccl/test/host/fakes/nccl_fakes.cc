@@ -28,6 +28,7 @@
 #include "comm.h"         // ncclCommGraphRegister / Deregister
 #include "strongstream.h" // ncclStrongStream*
 #include "mem_manager.h"  // ncclMemTrack / ncclMemUntrack / ncclDynMemMarkExportToPeer
+#include "ipcsocket.h"
 
 #include <algorithm>
 #include <functional>
@@ -231,6 +232,10 @@ ncclResult_t ncclProxyClientQueryFdBlocking(struct ncclComm*           comm,
 {
     return g_proxyClientQueryFdBlocking(comm, proxyConn, localFd, rmtFd);
 }
+
+#ifndef RCCL_NCCL_FAKES_OMIT_IPC_FD_CLOSE
+int ncclIpcFdClose(ncclIpcFd fd) { return ::close(fd); }
+#endif
 
 // --- Controllable seam: ncclRegLocalIsValid -----------------------------
 // Default preserves the old stub: report the record as not locally valid

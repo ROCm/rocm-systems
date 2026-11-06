@@ -285,7 +285,6 @@ function(rccl_define_micro_source_lists)
     fakes/nccl_device_core_fakes.cc      # src/nccl_device/core.cc ncclTeam* accessors
     fakes/ibvwrap_fakes.cc               # src/misc/ibvwrap.cc PD / MR registration seams
     fakes/nccl_fakes.cc
-    fakes/ipcsocket_fakes.cc             # ncclIpcFdClose for p2p.cc / dev_runtime.cc
     fakes/libc_fakes.cc
     fakes/ras_fakes.cc
     fakes/ras_net_fakes.cc
@@ -2003,6 +2002,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroLinux
   SOURCES ${TEST_MICRO_LINUX_SOURCE_FILES}
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
+    RCCL_NCCL_FAKES_OMIT_IPC_FD_CLOSE
     LINUX_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/os/linux.cc"
     LINUX_IPCSOCKET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/os/linux_ipcsocket.cc"
     LINUX_SOCKET_PAIR_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/os/linux_socket_pair.cc"
