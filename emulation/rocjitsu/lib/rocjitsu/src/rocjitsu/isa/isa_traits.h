@@ -108,6 +108,24 @@ template <GpuIsa Isa> inline constexpr bool supports_wave_size(uint32_t wf) {
          arch == ROCJITSU_CODE_ARCH_RDNA4;
 }
 
+/// @brief Return true when the architecture exposes image memory instructions.
+/// @details CDNA3 and later omit these instructions even where their descriptor
+/// layouts share fields with image-capable architectures.
+[[nodiscard]] inline constexpr bool arch_has_image_memory_instructions(rj_code_arch_t arch) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_CDNA2:
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return true;
+  default:
+    return false;
+  }
+}
+
 /// @brief Return true when scalar selectors 102 and 103 name FLAT_SCRATCH.
 ///
 /// @details GFX10+ makes those selectors ordinary SGPRs. Keep both the legacy
