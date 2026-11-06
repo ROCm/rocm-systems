@@ -1911,13 +1911,17 @@ def process_rocpd_csv(
     missing_dispatches: List[int] = []
 
     # Group by unique kernel and merge into a single row
-    for group_key, group_df in df.groupby([
+    grouped = df.groupby([
         "Dispatch_ID",
         "Kernel_Name",
         "Grid_Size",
         "Workgroup_Size",
         "LDS_Per_Workgroup",
-    ]):
+    ])
+    by_pass_tables = (
+        _pivot_counters_by_pass(df, grouped.ngroup()) if use_provenance else {}
+    )
+    for group_id, (group_key, group_df) in enumerate(grouped):
         row = {
             "GPU_ID": group_df["GPU_ID"].iloc[0],
             "Grid_Size": group_df["Grid_Size"].iloc[0],
@@ -1935,7 +1939,7 @@ def process_rocpd_csv(
         if use_provenance:
             row.update(
                 _merge_counters_with_pass_provenance(
-                    group_df, pass_layout, missing_dispatches
+                    by_pass_tables[group_id], pass_layout, missing_dispatches
                 )
             )
         else:
@@ -2034,18 +2038,17 @@ def assign_native_ids(counter_set: pd.DataFrame) -> pd.DataFrame:
 
 
 def _merge_counters_with_pass_provenance(
-    group_df: pd.DataFrame,
+    by_pass: pd.DataFrame,
     pass_layout: "PassLayout",
     missing_dispatches: List[int],
 ) -> Dict[str, Any]:
     """Build base + shadow counter columns for one dispatch group.
 
-    The group is pivoted once into a counter by pass table. The base column
-    is the first pass in natural order that has a value. A duplicated counter
-    also gets a column for every layout pass that collects it, and a dispatch
+    ``by_pass`` is the group's counter by pass table. The base column is the
+    first pass in natural order that has a value. A duplicated counter also
+    gets a column for every layout pass that collects it, and a dispatch
     missing that pass stores NaN so later dispatches still align.
     """
-    by_pass = _pivot_counters_by_pass(group_df)
     merged: Dict[str, Any] = by_pass.bfill(axis=1).iloc[:, 0].to_dict()
     shadow = by_pass.reindex(columns=list(pass_layout.pass_keys))
     missing = 0
@@ -2061,20 +2064,46 @@ def _merge_counters_with_pass_provenance(
     return merged
 
 
-def _pivot_counters_by_pass(group_df: pd.DataFrame) -> pd.DataFrame:
-    """One dispatch's values as a counter by pass table, passes in natural order.
+def _pivot_counters_by_pass(
+    df: pd.DataFrame, group_ids: pd.Series
+) -> Dict[int, pd.DataFrame]:
+    """Each dispatch's values as a counter by pass table, passes in natural order.
 
-    Rows keep the order counters first appear in. A repeated (counter, pass)
-    row keeps its last value.
+    The whole frame is pivoted once and then split by ``group_ids``; a row
+    with a NaN id belongs to no dispatch and is dropped. Each table keeps only
+    the passes its dispatch has. Rows keep the order counters first appear in
+    within their dispatch. A repeated (counter, pass) row keeps its last value.
+    A table without empty cells keeps the counter value dtype, because the
+    whole-frame pivot turns integer values into floats.
     """
-    cells = group_df.assign(
-        Counter_Name=group_df["Counter_Name"].astype(str),
-        Pass_Key=group_df["Pass_Key"].astype(str),
-    ).drop_duplicates(["Counter_Name", "Pass_Key"], keep="last")
+    cells = df.assign(
+        Group_ID=group_ids,
+        Counter_Name=df["Counter_Name"].astype(str),
+        Pass_Key=df["Pass_Key"].astype(str),
+    )
+    cells = (
+        cells[cells["Group_ID"].notna()]
+        .astype({"Group_ID": int})
+        .drop_duplicates(["Group_ID", "Counter_Name", "Pass_Key"], keep="last")
+    )
     by_pass = cells.pivot(
-        index="Counter_Name", columns="Pass_Key", values="Counter_Value"
+        index=["Group_ID", "Counter_Name"],
+        columns="Pass_Key",
+        values="Counter_Value",
+    ).reindex(
+        index=pd.MultiIndex.from_frame(
+            cells[["Group_ID", "Counter_Name"]].drop_duplicates()
+        ),
+        columns=sorted(cells["Pass_Key"].unique(), key=natural_pass_sort_key),
     )
-    return by_pass.reindex(
-        index=cells["Counter_Name"].unique(),
-        columns=sorted(by_pass.columns, key=natural_pass_sort_key),
-    )
+    passes_by_group = cells.groupby("Group_ID")["Pass_Key"].agg(set)
+    tables: Dict[int, pd.DataFrame] = {}
+    for group_id, table in by_pass.groupby(level="Group_ID", sort=False):
+        present = passes_by_group[group_id]
+        table = table.droplevel("Group_ID").loc[
+            :, [key for key in table.columns if key in present]
+        ]
+        if not table.isna().to_numpy().any():
+            table = table.astype(df["Counter_Value"].dtype)
+        tables[group_id] = table
+    return tables
