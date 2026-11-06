@@ -83,7 +83,12 @@ cases:
   Unit_HRR_CaptureCapabilities_Direct: {}
   Unit_HRR_CaptureClosesArchiveDirs: {}
   Unit_HRR_CaptureClosesArchiveDirs_Direct: {}
-  Unit_HRR_CaptureCrashDuringFork: {}
+  Unit_HRR_CaptureCrashDuringFork:
+    skip:
+      - when: {arch: ["gfx125*"], emulator: true}
+        kind: disabled
+        reason: "The parent hangs in the crash path under rocJitsu, the watchdog kills it, and the test sees exit 137 instead of 139"
+        issue: "https://github.com/ROCm/rocm-systems/issues/15217"
   Unit_HRR_CaptureCrashDuringFork_Direct: {}
   Unit_HRR_CaptureCrashOnSmallStack: {}
   Unit_HRR_CaptureCrashSmallStack_Direct: {}
