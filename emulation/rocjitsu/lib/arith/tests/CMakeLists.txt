@@ -151,6 +151,12 @@ foreach(family IN ITEMS integer fp8 half dot2)
     rj_arith_add_test(${target} dot/${family}_test.cpp)
 endforeach()
 
+# Graphics families retain their independent interpolation and selection references.
+foreach(family IN ITEMS cube interp mullit)
+    set(target "rj_arith_graphics_${family}_test")
+    rj_arith_add_test(${target} graphics/${family}_test.cpp)
+endforeach()
+
 # Infrastructure has no all-entry-point registry; contracts live in family helpers.
 rj_arith_add_test(rj_arith_cpu_test common/cpu_test.cpp)
 target_compile_definitions(

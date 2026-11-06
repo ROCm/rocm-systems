@@ -571,10 +571,22 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     const auto reg = resolve(*op, write);
     if (!reg || reg->cls == RegClass::ACC_VGPR)
       return;
-    const uint64_t accessed_lanes = reg->cls != RegClass::VGPR ? ~uint64_t{0}
-                                    : write                    ? destination_lanes
-                                    : op == modifiers.src0     ? src0_lanes
-                                                               : lanes;
+    uint64_t accessed_lanes = reg->cls != RegClass::VGPR ? ~uint64_t{0}
+                              : write                    ? destination_lanes
+                              : op == modifiers.src0     ? src0_lanes
+                                                         : lanes;
+    // Interpolation coefficients are quad broadcasts, including inactive lanes.
+    if (!write && reg->cls == RegClass::VGPR && name.starts_with("v_interp_") &&
+        (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 ||
+         wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4)) {
+      const uint64_t quads =
+          (lanes | (lanes >> 1) | (lanes >> 2) | (lanes >> 3)) & 0x1111111111111111ULL;
+      const bool p2 = name.starts_with("v_interp_p2");
+      if (op == inst.src_operand(0))
+        accessed_lanes = quads << (p2 ? 2 : 1);
+      else if (op == inst.src_operand(2) && !p2)
+        accessed_lanes = quads;
+    }
     if (vector && !lanes && !write && !inst.is_memory_op())
       return;
     uint8_t bytes = op->register_byte_mask();
