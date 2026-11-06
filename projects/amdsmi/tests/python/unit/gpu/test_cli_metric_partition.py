@@ -561,3 +561,104 @@ class TestCliMetricPartitionVirtualOS(unittest.TestCase):
         self.assertIn("usage", captured)
         self.assertIn("temperature", captured)
         self.assertEqual(partition_calls, [])
+
+
+class TestCliMetricVrTemperature(unittest.TestCase):
+    """VR temperature fields (vrgfx, vrmem, vrsoc) are read from gpu_metrics_info
+    and appear in both the socket-level path (partition metrics absent) and the
+    partition path (partition metrics present).
+
+    Behaviors locked in place:
+    * Values present in gpu_metrics_info are formatted as "<n> °C".
+    * A key absent from gpu_metrics_info (get() returns "N/A") is omitted from
+      the output dict (the formatter's ``continue`` branch skips "N/A" scalars).
+    * The fields survive in both the partition and socket-level branches.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        if not METRIC_PATH or not os.path.isfile(METRIC_PATH):
+            raise unittest.SkipTest(
+                f"amd-smi CLI metric.py not found (looked in {_CLI_DIR or amdsmi_path})"
+            )
+        modules = _build_fake_amdsmi(
+            amdsmi_get_temp_metric=lambda *_: 50,
+            AmdSmiTemperatureType=types.SimpleNamespace(
+                EDGE="EDGE", HOTSPOT="HOTSPOT", VRAM="VRAM"
+            ),
+            AmdSmiTemperatureMetric=types.SimpleNamespace(CURRENT="CURRENT", CRITICAL="CRITICAL"),
+        )
+        stub_modules(cls, modules)
+        cls.interface = modules["amdsmi.amdsmi_interface"]
+        cls.metric_module = _load_metric_module()
+
+    def _run_temperature(self, gpu_metrics, partition_metrics=None):
+        _patch_interface(
+            self,
+            self.interface,
+            amdsmi_get_gpu_metrics_info=lambda _h: gpu_metrics,
+            amdsmi_get_gpu_partition_metrics_info=lambda _h: partition_metrics,
+        )
+        commands = object.__new__(self.metric_module.MetricCommands)
+        commands.logger = _FakeLogger()
+        commands.helpers = _FakeHelpers()
+        commands.group_check_printed = True
+        commands.device_handles = []
+        commands.metric_gpu(_build_args(clock=False, temperature=True, partition=False))
+        captured = commands.logger.captured_values
+        self.assertIsNotNone(captured, "metric_gpu did not store a values payload")
+        assert captured is not None
+        self.assertIn("temperature", captured)
+        return captured["temperature"]
+
+    def test_vr_temps_present_in_socket_path(self):
+        # All three VR fields present in gpu_metrics → formatted with degree symbol.
+        temps = self._run_temperature(
+            gpu_metrics={"temperature_vrgfx": 75, "temperature_vrmem": 68, "temperature_vrsoc": 72}
+        )
+        self.assertEqual(temps["vrgfx"], "75 \N{DEGREE SIGN}C")
+        self.assertEqual(temps["vrmem"], "68 \N{DEGREE SIGN}C")
+        self.assertEqual(temps["vrsoc"], "72 \N{DEGREE SIGN}C")
+
+    def test_vr_temps_absent_from_gpu_metrics_are_na(self):
+        # Keys missing from gpu_metrics default to "N/A" via dict.get(). The
+        # formatter's scalar branch skips overwriting them, so they remain in
+        # the output as the raw "N/A" string (not formatted with a unit).
+        temps = self._run_temperature(gpu_metrics={})
+        self.assertEqual(temps["vrgfx"], "N/A")
+        self.assertEqual(temps["vrmem"], "N/A")
+        self.assertEqual(temps["vrsoc"], "N/A")
+
+    def test_partial_vr_temps_missing_fields_stay_na(self):
+        # Only vrgfx is populated; vrmem and vrsoc default to "N/A".
+        temps = self._run_temperature(gpu_metrics={"temperature_vrgfx": 80})
+        self.assertEqual(temps["vrgfx"], "80 \N{DEGREE SIGN}C")
+        self.assertEqual(temps["vrmem"], "N/A")
+        self.assertEqual(temps["vrsoc"], "N/A")
+
+    def test_vr_temps_present_in_partition_path(self):
+        # When partition metrics are present the partition branch is taken, but
+        # VR fields still come from gpu_metrics_info and must appear.
+        _patch_interface(
+            self,
+            self.interface,
+            amdsmi_get_gpu_metrics_info=lambda _h: {
+                "temperature_vrgfx": 90,
+                "temperature_vrmem": 85,
+                "temperature_vrsoc": 88,
+            },
+            amdsmi_get_gpu_partition_metrics_info=lambda _h: {},
+        )
+        commands = object.__new__(self.metric_module.MetricCommands)
+        commands.logger = _FakeLogger()
+        commands.helpers = _FakeHelpers()
+        commands.group_check_printed = True
+        commands.device_handles = []
+        commands.metric_gpu(_build_args(clock=False, temperature=True, partition=True))
+        captured = commands.logger.captured_values
+        self.assertIsNotNone(captured)
+        assert captured is not None
+        temps = captured["temperature"]
+        self.assertEqual(temps["vrgfx"], "90 \N{DEGREE SIGN}C")
+        self.assertEqual(temps["vrmem"], "85 \N{DEGREE SIGN}C")
+        self.assertEqual(temps["vrsoc"], "88 \N{DEGREE SIGN}C")
