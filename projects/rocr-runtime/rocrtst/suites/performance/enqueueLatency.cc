@@ -55,6 +55,14 @@
 #include "gtest/gtest.h"
 #include "hsa/hsa.h"
 
+// Kernel dispatch header used by every packet this test enqueues. Both the
+// acquire and the release fence scope are set explicitly, as they are at every
+// other kernel dispatch site in rocrtst.
+static const uint16_t kDispatchPacketHeader =
+    (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |
+    (HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
+    (HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+
 #define RET_IF_HSA_ERR(err) { \
   if ((err) != HSA_STATUS_SUCCESS) { \
     const char* msg = 0; \
@@ -199,7 +207,7 @@ void EnqueueLatency::EnqueueSinglePacket() {
     rocrtst::WriteAQLToQueueLoc(main_queue(), index, &aql());
 
     rocrtst::AtomicSetPacketHeader(
-        HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE,
+        kDispatchPacketHeader,
         aql().setup,
         reinterpret_cast<hsa_kernel_dispatch_packet_t *>
                                      (&(q_base_addr)[index & queue_mask]));
@@ -273,8 +281,7 @@ void EnqueueLatency::EnqueueMultiPackets() {
     // Write the aql packet at the calculated queue index address.
 
     rocrtst::AtomicSetPacketHeader(
-        (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |
-        (1 << HSA_PACKET_HEADER_BARRIER),
+        kDispatchPacketHeader | (1 << HSA_PACKET_HEADER_BARRIER),
         aql().setup,
         reinterpret_cast<hsa_kernel_dispatch_packet_t *>
                       (&(q_base_addr)[index[num_of_pkts_ - 1] & queue_mask]));
@@ -284,7 +291,7 @@ void EnqueueLatency::EnqueueMultiPackets() {
     // one, for now.
     for (int32_t j = num_of_pkts_ - 1; j >= 0; j--) {
       rocrtst::AtomicSetPacketHeader(
-          HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE,
+          kDispatchPacketHeader,
           aql().setup,
           reinterpret_cast<hsa_kernel_dispatch_packet_t *>
                                      (&(q_base_addr)[index[j] & queue_mask]));
