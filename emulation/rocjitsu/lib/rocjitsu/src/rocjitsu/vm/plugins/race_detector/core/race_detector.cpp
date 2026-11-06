@@ -26,22 +26,6 @@ WaveRaceState &RaceDetector::getWaveRaceState(int waveIndex) {
 EventId
 RaceDetector::allocateEventId(WaveId waveId, InstructionSnapshot instruction, MemoryEventType type,
                               std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
-                              IntervalSet ldsIntervals, amdgpu::WaitCounterType waitCounterType,
-                              MemoryOrderClass memoryOrder,
-                              std::optional<amdgpu::WaitCounterType> additionalWaitCounterType) {
-  std::array<amdgpu::MemoryCounterObligation, 2> obligations{
-      amdgpu::MemoryCounterObligation{waitCounterType, memoryOrder}, {}};
-  size_t count = 1;
-  if (additionalWaitCounterType)
-    obligations[count++] = {*additionalWaitCounterType, memoryOrder};
-  return allocateEventId(waveId, instruction, type, std::move(registers), execMask, byteMask,
-                         std::move(ldsIntervals), std::span(obligations.data(), count),
-                         memoryOrder);
-}
-
-EventId
-RaceDetector::allocateEventId(WaveId waveId, InstructionSnapshot instruction, MemoryEventType type,
-                              std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
                               IntervalSet ldsIntervals,
                               std::span<const amdgpu::MemoryCounterObligation> counterObligations,
                               MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask) {

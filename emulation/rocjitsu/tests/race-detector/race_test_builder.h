@@ -52,9 +52,10 @@ public:
       regs[i] = vgprBase + i;
       waves_[wave]->checkVgprWrite(vgprBase + i, exec, byteMask, memoryOrder);
     }
-    waves_[wave]->registerEvent(testInstruction(pc_++), MemoryEventType::GLOBAL_TO_VGPR,
-                                std::move(regs), exec, byteMask, amdgpu::WaitCounterType::VMCNT,
-                                memoryOrder, additionalWaitCounterType);
+    waves_[wave]->registerEvent(
+        testInstruction(pc_++), MemoryEventType::GLOBAL_TO_VGPR, std::move(regs), exec, byteMask,
+        CounterObligations{amdgpu::WaitCounterType::VMCNT, memoryOrder, additionalWaitCounterType},
+        memoryOrder);
   }
 
   /// Register a generic FLAT load whose active lanes resolve uniformly to
@@ -92,7 +93,9 @@ public:
                                  memoryOrder);
     waves_[wave]->registerLdsEvent(testInstruction(pc_++), MemoryEventType::GLOBAL_TO_LDS,
                                    /*registers=*/{}, exec, waveSize_, ldsAddrs, bytesPerLane,
-                                   /*byteMask=*/0xF, amdgpu::WaitCounterType::VMCNT, memoryOrder);
+                                   /*byteMask=*/0xF,
+                                   CounterObligations{amdgpu::WaitCounterType::VMCNT, memoryOrder},
+                                   memoryOrder);
   }
 
   /// Register a tensor DMA load into LDS (tracked by tensorcnt). The load
@@ -117,7 +120,8 @@ public:
     waves_[wave]->prepareForCounterIncrement(amdgpu::WaitCounterType::VMCNT);
     waves_[wave]->registerEvent(testInstruction(pc_++), MemoryEventType::VGPR_TO_GLOBAL,
                                 /*registers=*/{}, exec, /*byteMask=*/0xF,
-                                amdgpu::WaitCounterType::VMCNT, memoryOrder);
+                                CounterObligations{amdgpu::WaitCounterType::VMCNT, memoryOrder},
+                                memoryOrder);
   }
 
   /// Register a scalar load into SGPRs with its architecture-specific counter.
@@ -151,7 +155,9 @@ public:
                    amdgpu::WaitCounterType waitCounterType = amdgpu::WaitCounterType::LGKMCNT) {
     waves_[wave]->prepareForCounterIncrement(waitCounterType);
     waves_[wave]->registerEvent(testInstruction(pc_++), MemoryEventType::SCALAR_TO_GLOBAL, {},
-                                defaultExec_, 0xF, waitCounterType, MemoryOrderClass::UNORDERED);
+                                defaultExec_, 0xF,
+                                CounterObligations{waitCounterType, MemoryOrderClass::UNORDERED},
+                                MemoryOrderClass::UNORDERED);
   }
 
   /// Apply issue-time backpressure before checking an operation's accesses.
@@ -175,10 +181,11 @@ public:
     std::vector<uint32_t> ldsAddrs(waveSize_, 0);
     ldsAddrs[lane] = addr;
     uint64_t laneMask = 1ULL << lane;
-    waves_[wave]->registerLdsEvent(testInstruction(pc_++), MemoryEventType::VGPR_TO_LDS,
-                                   /*registers=*/{}, laneMask, waveSize_, ldsAddrs, bytes,
-                                   /*byteMask=*/0xF, waitCounterType, memoryOrder,
-                                   additionalWaitCounterType);
+    waves_[wave]->registerLdsEvent(
+        testInstruction(pc_++), MemoryEventType::VGPR_TO_LDS,
+        /*registers=*/{}, laneMask, waveSize_, ldsAddrs, bytes,
+        /*byteMask=*/0xF,
+        CounterObligations{waitCounterType, memoryOrder, additionalWaitCounterType}, memoryOrder);
   }
 
   /// Register an LDS read and validate against outstanding writes.
@@ -196,9 +203,10 @@ public:
     ldsAddrs[lane] = addr;
     uint64_t laneMask = 1ULL << lane;
     std::vector<uint32_t> regs = {static_cast<uint32_t>(vgprDst)};
-    waves_[wave]->registerLdsEvent(testInstruction(pc_++), MemoryEventType::LDS_TO_VGPR,
-                                   std::move(regs), laneMask, waveSize_, ldsAddrs, bytes, byteMask,
-                                   waitCounterType, memoryOrder, additionalWaitCounterType);
+    waves_[wave]->registerLdsEvent(
+        testInstruction(pc_++), MemoryEventType::LDS_TO_VGPR, std::move(regs), laneMask, waveSize_,
+        ldsAddrs, bytes, byteMask,
+        CounterObligations{waitCounterType, memoryOrder, additionalWaitCounterType}, memoryOrder);
   }
 
   /// Register a CDNA1-4 generic FLAT load whose active lanes resolve uniformly

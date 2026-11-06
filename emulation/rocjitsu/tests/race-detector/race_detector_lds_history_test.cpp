@@ -60,9 +60,9 @@ protected:
     const auto type = !write                            ? MemoryEventType::LDS_TO_VGPR
                       : order == MemoryOrderClass::VMEM ? MemoryEventType::GLOBAL_TO_LDS
                                                         : MemoryEventType::VGPR_TO_LDS;
-    event.id =
-        detector_.allocateEventId(WaveId{wave}, testInstruction(/*pc=*/0), type, {}, /*execMask=*/1,
-                                  /*byteMask=*/0xF, std::move(intervals), counter, order);
+    event.id = detector_.allocateEventId(
+        WaveId{wave}, testInstruction(/*pc=*/0), type, {}, /*execMask=*/1,
+        /*byteMask=*/0xF, std::move(intervals), CounterObligations{counter, order}, order);
     events_.push_back(event);
   }
 
