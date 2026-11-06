@@ -12,6 +12,7 @@
 #include <functional>
 #include <limits>
 #include <optional>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -192,6 +193,10 @@ struct reader_catalog_t
 
     std::unordered_map<size_t, std::string> strings_by_id;
 
+    // A schema that stores one text under several string ids maps each later
+    // id to the first id with that text. Empty when every id is unique.
+    std::unordered_map<size_t, size_t> canonical_string_ids;
+
     std::unordered_map<size_t, reader_types::node_info_ptr_t>    nodes_by_id;
     std::unordered_map<size_t, reader_types::process_info_ptr_t> processes_by_id;
     std::unordered_map<size_t, reader_types::thread_info_ptr_t>  threads_by_id;
@@ -220,6 +225,14 @@ struct reader_catalog_t
     uint64_t m_memory_activity_first_id{ 0 };
     uint64_t m_memory_activity_last_id{ 0 };
     bool     m_memory_activity_has_ids{ false };
+
+    // Set by ph_ctx before populate so a rocpd reader can skip the grouped
+    // event scans. Empty root disables the cache. derived_aggregates_ready
+    // is set when those lists were restored from the file.
+    std::string              aggregate_cache_root;
+    std::vector<std::string> aggregate_cache_paths;
+    uint32_t                 aggregate_cache_source{ 0 };
+    bool                     derived_aggregates_ready{ false };
 
 private:
     void link_owner(reader_types::track_info_t& track,

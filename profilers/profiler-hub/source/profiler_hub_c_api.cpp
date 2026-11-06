@@ -1,12 +1,17 @@
+#include "cache_directory.hpp"
 #include "event_query.hpp"
 #include "file_probe_failure.hpp"
 #include "ph_ctx.hpp"
 #include "ph_future.hpp"
+#include "sql_cancel.hpp"
 #include "profiler-hub/c/profiler_hub.h"
 #include "profiler-hub/c/profiler_hub_trim.h"
 #include "profiler-hub/cpp/reader.hpp"
 
+#include <cstdint>
+#include <cstring>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <string>
 #include <tuple>
@@ -22,6 +27,9 @@ guard_call(Fn&& fn)
     try
     {
         return std::forward<Fn>(fn)();
+    } catch(const profiler_hub::operation_cancelled&)
+    {
+        return PH_RESULT_CANCELLED;
     } catch(...)
     {
         return PH_RESULT_INTERNAL_ERROR;
@@ -151,6 +159,16 @@ ph_ctx_create_files(ph_ctx_t*           ctx,
                     uint32_t           path_count,
                     ph_future_t        future)
 {
+    return ph_ctx_create_files_cached(ctx, paths, path_count, nullptr, future);
+}
+
+ph_result_t
+ph_ctx_create_files_cached(ph_ctx_t*           ctx,
+                           const char* const* paths,
+                           uint32_t           path_count,
+                           const char*        cache_directory,
+                           ph_future_t        future)
+{
     if(ctx == nullptr)
     {
         return PH_RESULT_INVALID_CONTEXT;
@@ -176,7 +194,9 @@ ph_ctx_create_files(ph_ctx_t*           ctx,
     std::unique_ptr<ph_ctx> created;
     try
     {
-        created = std::make_unique<ph_ctx>(std::move(files));
+        const std::string cache =
+            cache_directory == nullptr ? std::string{} : std::string{ cache_directory };
+        created = std::make_unique<ph_ctx>(std::move(files), cache);
         if(future == nullptr)
         {
             created->load();
@@ -199,6 +219,58 @@ ph_ctx_create_files(ph_ctx_t*           ctx,
 
     *ctx = created.release();
     return PH_RESULT_SUCCESS;
+}
+
+ph_result_t
+ph_trace_cache_directory(const char*        cache_root,
+                         const char* const* paths,
+                         uint32_t           path_count,
+                         char*              directory,
+                         uint32_t*          capacity)
+{
+    return guard_call([&]() -> ph_result_t {
+        if(capacity == nullptr) return PH_RESULT_INVALID_ARGUMENT;
+        if(path_count > 0 && paths == nullptr) return PH_RESULT_INVALID_ARGUMENT;
+
+        const bool no_cache =
+            cache_root == nullptr || cache_root[0] == '\0' || path_count == 0;
+        std::string result;
+        if(!no_cache)
+        {
+            std::vector<std::string> files;
+            files.reserve(path_count);
+            for(uint32_t index = 0; index < path_count; ++index)
+            {
+                if(paths[index] == nullptr) return PH_RESULT_INVALID_ARGUMENT;
+                files.emplace_back(paths[index]);
+            }
+            result = profiler_hub::trace_cache_directory(cache_root, files);
+            if(result.empty())
+            {
+                *capacity = 0;
+                return PH_RESULT_INVALID_FILE;
+            }
+        }
+
+        if(result.size() >= std::numeric_limits<uint32_t>::max())
+        {
+            return PH_RESULT_INTERNAL_ERROR;
+        }
+        const uint32_t required = static_cast<uint32_t>(result.size() + 1);
+        if(directory == nullptr)
+        {
+            *capacity = required;
+            return PH_RESULT_SUCCESS;
+        }
+        if(*capacity < required)
+        {
+            *capacity = required;
+            return PH_RESULT_INVALID_ARGUMENT;
+        }
+        std::memcpy(directory, result.c_str(), required);
+        *capacity = required;
+        return PH_RESULT_SUCCESS;
+    });
 }
 
 ph_result_t
@@ -425,6 +497,17 @@ ph_get_track_events(ph_ctx_t         ctx,
 }
 
 ph_result_t
+ph_release_track_events(ph_ctx_t ctx, ph_event_list_t* events)
+{
+    if(ctx == nullptr) return PH_RESULT_INVALID_CONTEXT;
+    if(events == nullptr) return PH_RESULT_INVALID_ARGUMENT;
+    return guard_call([ctx, events]() {
+        ctx->release_track_events(events);
+        return PH_RESULT_SUCCESS;
+    });
+}
+
+ph_result_t
 ph_get_correlated_events(ph_ctx_t          ctx,
                          const ph_event_t* event,
                          ph_event_list_t*  events,
@@ -601,6 +684,17 @@ ph_get_track_samples(ph_ctx_t          ctx,
 
             return PH_RESULT_SUCCESS;
         });
+}
+
+ph_result_t
+ph_release_track_samples(ph_ctx_t ctx, ph_sample_list_t* samples)
+{
+    if(ctx == nullptr) return PH_RESULT_INVALID_CONTEXT;
+    if(samples == nullptr) return PH_RESULT_INVALID_ARGUMENT;
+    return guard_call([ctx, samples]() {
+        ctx->release_track_samples(samples);
+        return PH_RESULT_SUCCESS;
+    });
 }
 
 ph_result_t
@@ -873,6 +967,7 @@ ph_event_query_read(ph_event_query_t  query,
             {
                 return PH_RESULT_CANCELLED;
             }
+            const profiler_hub::sql_cancel_scope cancel{ future };
             *count = query->ctx->read_table_events(
                 query->query, event_type, after_id, last_id, rows, capacity);
             if(future != nullptr && future->stop_token().stop_requested())
@@ -906,12 +1001,59 @@ ph_event_query_id_span(ph_event_query_t query,
         {
             return PH_RESULT_CANCELLED;
         }
+        const profiler_hub::sql_cancel_scope cancel{ future };
         uint64_t first = 0;
         uint64_t last  = 0;
         if(query->ctx->table_event_id_span(query->query, event_type, first, last))
         {
             *first_id = first;
             *last_id  = last;
+        }
+        return PH_RESULT_SUCCESS;
+    });
+}
+
+ph_result_t
+ph_event_query_summarize_durations(ph_event_query_t                    query,
+                                   uint32_t                            event_type,
+                                   ph_name_duration_summary_callback_t callback,
+                                   void*                               user_data,
+                                   ph_future_t                         future)
+{
+    if(query == nullptr || query->ctx == nullptr)
+    {
+        return PH_RESULT_INVALID_CONTEXT;
+    }
+    if(callback == nullptr || !known_event_type(event_type))
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+
+    return guard_call([query, event_type, callback, user_data, future]() {
+        if(future != nullptr && future->stop_token().stop_requested())
+        {
+            return PH_RESULT_CANCELLED;
+        }
+        const profiler_hub::sql_cancel_scope cancel{ future };
+        std::vector<profiler_hub::name_duration_summary_t> rows;
+        if(!query->ctx->summarize_name_durations(query->query, event_type, rows))
+        {
+            return PH_RESULT_UNSUPPORTED_FILE;
+        }
+        if(future != nullptr && future->stop_token().stop_requested())
+        {
+            return PH_RESULT_CANCELLED;
+        }
+        for(const profiler_hub::name_duration_summary_t& row : rows)
+        {
+            const ph_name_duration_summary_t view = {
+                row.name.c_str(),
+                row.count,
+                row.min_duration,
+                row.max_duration,
+                row.total_duration,
+            };
+            callback(&view, user_data);
         }
         return PH_RESULT_SUCCESS;
     });
@@ -929,6 +1071,7 @@ visit_catalog_text(const profiler_hub::reader_catalog_t& catalog,
     {
         for(const auto& entry : catalog.strings_by_id)
         {
+            if(catalog.canonical_string_ids.contains(entry.first)) continue;
             visitor(static_cast<uint64_t>(entry.first), entry.second.c_str(), user_data);
         }
         return PH_RESULT_SUCCESS;

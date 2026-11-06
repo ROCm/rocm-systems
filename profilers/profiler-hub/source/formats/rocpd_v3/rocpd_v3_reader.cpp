@@ -1,11 +1,11 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "reader_impl.hpp"
+#include "rocpd_v3_reader.hpp"
+#include "catalog_aggregate_store.hpp"
 #include "json_serializers.hpp"
 #include "profiler-hub/cpp/reader.hpp"
 #include "profiler-hub/cpp/storage.hpp"
-#include "storage_impl.hpp"
 
 #include "queries/select/table_select_query.hpp"
 
@@ -270,176 +270,77 @@ count_events(const data_storage::schema_v3::read_statements& stmts,
 
 }  // namespace
 
-reader_t::impl::impl(std::unique_ptr<profiler_hub::storage_t> storage)
-: m_storage(storage ? std::move(storage)
-                    : throw std::invalid_argument(
-                          "Provided pointer to a non-existing storage!"))
-, m_backend(m_storage->m_impl->create_database(storage_t::impl::storage_type_t::read))
-, m_read_statements(
-      std::make_shared<data_storage::schema_v3::read_statements>(m_backend,
-                                                                 m_backend->get_uuid()))
-, m_catalog(std::make_shared<reader_catalog_t>())
+std::unique_ptr<reader_t::impl>
+make_rocpd_v3_reader(std::unique_ptr<profiler_hub::storage_t> storage,
+                     std::shared_ptr<reader_catalog_t>        catalog)
 {
-    ensure_track_topology_indexes();
-    m_catalog->build_all(*m_read_statements);
+    return std::make_unique<rocpd_v3_reader>(std::move(storage), std::move(catalog));
 }
 
-reader_t::impl::impl(std::unique_ptr<profiler_hub::storage_t> storage,
-                     std::shared_ptr<reader_catalog_t>        catalog)
-: m_storage(storage ? std::move(storage)
-                    : throw std::invalid_argument(
-                          "Provided pointer to a non-existing storage!"))
-, m_backend(m_storage->m_impl->create_database(storage_t::impl::storage_type_t::read))
+rocpd_v3_reader::rocpd_v3_reader(std::unique_ptr<profiler_hub::storage_t> storage,
+                                 std::shared_ptr<reader_catalog_t>        catalog)
+: reader_t::impl(std::move(storage), std::move(catalog))
+, m_backend(open_sqlite())
 , m_read_statements(
       std::make_shared<data_storage::schema_v3::read_statements>(m_backend,
                                                                  m_backend->get_uuid()))
-, m_catalog(std::move(catalog))
 {}
 
 void
-reader_t::impl::ensure_track_topology_indexes()
+rocpd_v3_reader::ensure_track_topology_indexes()
 {
     m_read_statements->create_track_topology_indexes();
 }
 
 void
-reader_t::impl::build_catalog_category(reader_t::catalog_category_t category,
-                                       reader_catalog_t&            catalog)
+rocpd_v3_reader::build_catalog_category(catalog_category_t category,
+                                        reader_catalog_t&  catalog)
 {
     switch(category)
     {
-        case reader_t::catalog_category_t::string_list:
+        case catalog_category_t::string_list:
             catalog.build_string_list(*m_read_statements);
             break;
-        case reader_t::catalog_category_t::nodes:
+        case catalog_category_t::nodes:
             catalog.build_nodes(*m_read_statements);
             break;
-        case reader_t::catalog_category_t::processes:
+        case catalog_category_t::processes:
             catalog.build_processes(*m_read_statements);
             break;
-        case reader_t::catalog_category_t::threads:
+        case catalog_category_t::threads:
             catalog.build_threads(*m_read_statements);
             break;
-        case reader_t::catalog_category_t::agents:
+        case catalog_category_t::agents:
             catalog.build_agents(*m_read_statements);
             break;
-        case reader_t::catalog_category_t::tracks:
+        case catalog_category_t::tracks:
+            if(load_derived_tracks(catalog)) return;
             catalog.build_tracks(*m_read_statements);
             break;
-        case reader_t::catalog_category_t::stream_hardware_links:
+        case catalog_category_t::stream_hardware_links:
+            if(catalog.derived_aggregates_ready) return;
             catalog.build_stream_hardware_links(*m_read_statements);
             break;
-        case reader_t::catalog_category_t::code_objects:
+        case catalog_category_t::code_objects:
             catalog.build_code_objects(*m_read_statements);
             break;
-        case reader_t::catalog_category_t::kernel_symbols:
+        case catalog_category_t::kernel_symbols:
             catalog.build_kernel_symbols(*m_read_statements);
             break;
-        case reader_t::catalog_category_t::streams:
+        case catalog_category_t::streams:
             catalog.build_streams(*m_read_statements);
             break;
-        case reader_t::catalog_category_t::queues:
+        case catalog_category_t::queues:
             catalog.build_queues(*m_read_statements);
             break;
-        case reader_t::catalog_category_t::pmc_infos:
+        case catalog_category_t::pmc_infos:
             catalog.build_pmc_infos(*m_read_statements);
             break;
     }
 }
 
-reader_types::node_info_list_t
-reader_t::impl::get_all_nodes()
-{
-    return m_catalog->nodes;
-}
-
-reader_types::process_info_list_t
-reader_t::impl::get_all_processes()
-{
-    return m_catalog->processes;
-}
-
-reader_types::thread_info_list_t
-reader_t::impl::get_all_threads()
-{
-    return m_catalog->threads;
-}
-
-reader_types::agent_info_list_t
-reader_t::impl::get_all_agents()
-{
-    return m_catalog->agents;
-}
-
-reader_types::track_info_list_t
-reader_t::impl::get_all_tracks()
-{
-    return m_catalog->tracks;
-}
-
-reader_types::stream_hardware_link_list_t
-reader_t::impl::get_stream_hardware_links()
-{
-    return m_catalog->stream_hardware_links;
-}
-
-reader_types::kernel_symbol_info_list_t
-reader_t::impl::get_all_kernel_symbols()
-{
-    return m_catalog->kernel_symbols;
-}
-
-reader_types::code_object_info_list_t
-reader_t::impl::get_all_code_objects()
-{
-    return m_catalog->code_objects;
-}
-
-reader_types::stream_info_list_t
-reader_t::impl::get_all_streams()
-{
-    return m_catalog->streams;
-}
-
-reader_types::queue_info_list_t
-reader_t::impl::get_all_queues()
-{
-    return m_catalog->queues;
-}
-
-reader_types::pmc_info_list_t
-reader_t::impl::get_all_pmc_infos()
-{
-    return m_catalog->pmc_infos;
-}
-
-void
-reader_t::impl::apply_pagination(reader_types::timeline_event_list_t& events,
-                                 const reader_types::pagination_t&    pagination)
-{
-    if(pagination.offset.has_value())
-    {
-        auto off = pagination.offset.value();
-        if(off >= events.size())
-        {
-            events.clear();
-            return;
-        }
-        events.erase(events.begin(), events.begin() + static_cast<ptrdiff_t>(off));
-    }
-
-    if(pagination.limit.has_value())
-    {
-        auto lim = pagination.limit.value();
-        if(lim < events.size())
-        {
-            events.resize(lim);
-        }
-    }
-}
-
 reader_types::timeline_event_list_t
-reader_t::impl::get_events(const reader_types::event_filter_t& filter)
+rocpd_v3_reader::get_events(const reader_types::event_filter_t& filter)
 {
     reader_types::timeline_event_list_t all_events;
 
@@ -468,7 +369,7 @@ reader_t::impl::get_events(const reader_types::event_filter_t& filter)
 }
 
 reader_types::timeline_event_list_t
-reader_t::impl::get_events_for_track(reader_types::track_info_ptr_t      track,
+rocpd_v3_reader::get_events_for_track(reader_types::track_info_ptr_t      track,
                                      const reader_types::event_filter_t& filter)
 {
     if(!track) return {};
@@ -541,7 +442,7 @@ reader_t::impl::get_events_for_track(reader_types::track_info_ptr_t      track,
 }
 
 std::optional<std::pair<size_t, size_t>>
-reader_t::impl::get_event_id_span(reader_types::event_type_t type)
+rocpd_v3_reader::get_event_id_span(reader_types::event_type_t type)
 {
     const auto rows = statements_for(*m_read_statements, type).id_span().to_vector();
     if(rows.empty() || !rows.front().min_id.has_value() ||
@@ -551,7 +452,7 @@ reader_t::impl::get_event_id_span(reader_types::event_type_t type)
 }
 
 void
-reader_t::impl::visit_track_events_in_id_range(
+rocpd_v3_reader::visit_track_events_in_id_range(
     const reader_types::track_info_ptr_t& track,
     reader_types::event_type_t            type,
     size_t                                id_begin,
@@ -607,7 +508,7 @@ reader_t::impl::visit_track_events_in_id_range(
 }
 
 reader_types::timeline_event_list_t
-reader_t::impl::get_category_track_events(const reader_types::track_info_ptr_t& track,
+rocpd_v3_reader::get_category_track_events(const reader_types::track_info_ptr_t& track,
                                           const reader_types::event_filter_t&   filter)
 {
     if(!track->node_info) return {};
@@ -684,7 +585,7 @@ reader_t::impl::get_category_track_events(const reader_types::track_info_ptr_t& 
 }
 
 reader_types::counter_timeline_event_list_t
-reader_t::impl::get_counter_events_for_track(reader_types::track_info_ptr_t      track,
+rocpd_v3_reader::get_counter_events_for_track(reader_types::track_info_ptr_t      track,
                                              const reader_types::event_filter_t& filter)
 {
     if(!track || !track->node_info) return {};
@@ -756,7 +657,7 @@ reader_t::impl::get_counter_events_for_track(reader_types::track_info_ptr_t     
 }
 
 size_t
-reader_t::impl::get_event_count(const reader_types::event_filter_t& filter)
+rocpd_v3_reader::get_event_count(const reader_types::event_filter_t& filter)
 {
     const auto range = range_of(filter.time_window);
 
@@ -772,7 +673,7 @@ reader_t::impl::get_event_count(const reader_types::event_filter_t& filter)
 // ============================================================================
 
 std::optional<data_storage::schema_v3::event_id_result>
-reader_t::impl::resolve_event_metadata(const reader_types::timeline_event_t& event)
+rocpd_v3_reader::resolve_event_metadata(const reader_types::timeline_event_t& event)
 {
     auto db_id = event.unique_identifier.id;
 
@@ -802,7 +703,7 @@ reader_t::impl::resolve_event_metadata(const reader_types::timeline_event_t& eve
 }
 
 reader_types::event_data_ptr_t
-reader_t::impl::build_event_data(
+rocpd_v3_reader::build_event_data(
     const data_storage::schema_v3::event_id_result& event_meta)
 {
     auto event_data             = std::make_shared<reader_types::event_data_t>();
@@ -833,7 +734,7 @@ reader_t::impl::build_event_data(
 // ============================================================================
 
 reader_types::track_info_ptr_t
-reader_t::impl::track_of(const reader_types::timeline_event_t& event)
+rocpd_v3_reader::track_of(const reader_types::timeline_event_t& event)
 {
     const auto& statements =
         statements_for(*m_read_statements, event.unique_identifier.type);
@@ -845,7 +746,7 @@ reader_t::impl::track_of(const reader_types::timeline_event_t& event)
 }
 
 std::optional<reader_types::region_data_t>
-reader_t::impl::get_region_details(const reader_types::timeline_event_t& event)
+rocpd_v3_reader::get_region_details(const reader_types::timeline_event_t& event)
 {
     if(event.unique_identifier.type != reader_types::event_type_t::region)
     {
@@ -882,13 +783,26 @@ reader_t::impl::get_region_details(const reader_types::timeline_event_t& event)
         {
             data.event = build_event_data(event_meta.value());
         }
+
+        // rocpd_arg rows hang off the region's rocpd_event id, the same join
+        // the legacy reader uses (rocpd_region -> rocpd_event -> rocpd_arg).
+        const auto arg_rows = m_read_statements->arg_detail()(r.event_id.value()).to_vector();
+        data.args.reserve(arg_rows.size());
+        for(const auto& arg : arg_rows)
+        {
+            data.args.push_back(reader_types::arg_data_t{ .position = arg.position,
+                                                          .type     = arg.type,
+                                                          .name     = arg.name,
+                                                          .value    = arg.value,
+                                                          .extdata  = arg.extdata });
+        }
     }
 
     return data;
 }
 
 std::optional<reader_types::kernel_dispatch_data_t>
-reader_t::impl::get_kernel_dispatch_details(const reader_types::timeline_event_t& event)
+rocpd_v3_reader::get_kernel_dispatch_details(const reader_types::timeline_event_t& event)
 {
     if(event.unique_identifier.type != reader_types::event_type_t::kernel_dispatch)
         return std::nullopt;
@@ -960,7 +874,7 @@ reader_t::impl::get_kernel_dispatch_details(const reader_types::timeline_event_t
 }
 
 std::optional<reader_types::memory_copy_data_t>
-reader_t::impl::get_memory_copy_details(const reader_types::timeline_event_t& event)
+rocpd_v3_reader::get_memory_copy_details(const reader_types::timeline_event_t& event)
 {
     if(event.unique_identifier.type != reader_types::event_type_t::memory_copy)
         return std::nullopt;
@@ -1028,7 +942,7 @@ reader_t::impl::get_memory_copy_details(const reader_types::timeline_event_t& ev
 }
 
 std::optional<reader_types::memory_alloc_data_t>
-reader_t::impl::get_memory_alloc_details(const reader_types::timeline_event_t& event)
+rocpd_v3_reader::get_memory_alloc_details(const reader_types::timeline_event_t& event)
 {
     if(event.unique_identifier.type != reader_types::event_type_t::memory_allocate)
         return std::nullopt;
@@ -1077,7 +991,7 @@ reader_t::impl::get_memory_alloc_details(const reader_types::timeline_event_t& e
 // ============================================================================
 
 reader_types::call_stack_t
-reader_t::impl::get_call_stack(const reader_types::timeline_event_t& event)
+rocpd_v3_reader::get_call_stack(const reader_types::timeline_event_t& event)
 {
     using reader_types::event_type_t;
     if(event.unique_identifier.type != event_type_t::region) return {};
@@ -1191,7 +1105,7 @@ reader_t::impl::get_call_stack(const reader_types::timeline_event_t& event)
 }
 
 reader_types::source_context_list_t
-reader_t::impl::get_source_context(const reader_types::timeline_event_t& event)
+rocpd_v3_reader::get_source_context(const reader_types::timeline_event_t& event)
 {
     auto event_meta = resolve_event_metadata(event);
     if(!event_meta.has_value()) return {};
@@ -1200,7 +1114,7 @@ reader_t::impl::get_source_context(const reader_types::timeline_event_t& event)
 }
 
 reader_types::arg_data_list_t
-reader_t::impl::get_arguments(const reader_types::timeline_event_t& event)
+rocpd_v3_reader::get_arguments(const reader_types::timeline_event_t& event)
 {
     auto event_meta = resolve_event_metadata(event);
     if(!event_meta.has_value() || !event_meta->event_id.has_value()) return {};
@@ -1224,7 +1138,7 @@ reader_t::impl::get_arguments(const reader_types::timeline_event_t& event)
 }
 
 reader_types::timeline_event_list_t
-reader_t::impl::get_correlated_events(const reader_types::timeline_event_t& event)
+rocpd_v3_reader::get_correlated_events(const reader_types::timeline_event_t& event)
 {
     static_assert(static_cast<int>(reader_types::event_type_t::region) == 0);
     static_assert(static_cast<int>(reader_types::event_type_t::kernel_dispatch) == 1);
@@ -1286,7 +1200,7 @@ reader_t::impl::get_correlated_events(const reader_types::timeline_event_t& even
 // ============================================================================
 
 reader_types::time_window_t
-reader_t::impl::get_data_time_range()
+rocpd_v3_reader::get_data_time_range()
 {
     size_t global_min = std::numeric_limits<size_t>::max();
     size_t global_max = 0;
@@ -1322,7 +1236,7 @@ reader_t::impl::get_data_time_range()
 }
 
 reader_types::event_counts_t
-reader_t::impl::get_event_counts(const reader_types::time_window_t& window)
+rocpd_v3_reader::get_event_counts(const reader_types::time_window_t& window)
 {
     const auto range = range_of(window);
 

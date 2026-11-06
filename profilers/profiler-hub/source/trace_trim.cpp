@@ -4,6 +4,7 @@
 #include "trace_trim.hpp"
 
 #include "ph_future.hpp"
+#include "sql_cancel.hpp"
 #include "trim_schema.hpp"
 
 #include "common/debug.hpp"
@@ -21,6 +22,31 @@
 
 namespace profiler_hub
 {
+
+std::string
+table_guid(std::string_view table)
+{
+    // Longer names first, so rocpd_pmc_event is not read as rocpd_event.
+    constexpr std::string_view k_prefixes[] = {
+        "rocpd_pmc_event",
+        "rocpd_kernel_dispatch",
+        "rocpd_memory_allocate",
+        "rocpd_memory_copy",
+        "rocpd_hip_event",
+        "rocpd_region",
+        "rocpd_sample",
+        "rocpd_event",
+        "rocpd_arg",
+    };
+    for(const std::string_view prefix : k_prefixes)
+    {
+        if(table.size() <= prefix.size() + 1 || table[prefix.size()] != '_') continue;
+        if(table.substr(0, prefix.size()) != prefix) continue;
+        return std::string{ table.substr(prefix.size() + 1) };
+    }
+    return {};
+}
+
 namespace
 {
 
@@ -33,6 +59,10 @@ struct master_row_t
     std::string table_name;
     std::string sql;
 };
+
+class sqlite_connection_t;
+void
+interrupt_trim_connection(void* connection) noexcept;
 
 struct planned_copy_t
 {
@@ -62,7 +92,14 @@ public:
 
     void execute(const std::string& sql) const
     {
-        if(sqlite_api_policy::exec(m_db, sql.c_str()) != sqlite_api_policy::result_ok)
+        const profiler_hub::running_sql activity{ interrupt_trim_connection,
+                                                  const_cast<sqlite_connection_t*>(this) };
+        const int                       rc = sqlite_api_policy::exec(m_db, sql.c_str());
+        if(rc == sqlite_api_policy::result_interrupt)
+        {
+            throw profiler_hub::sql_interrupted{};
+        }
+        if(rc != sqlite_api_policy::result_ok)
         {
             throw std::runtime_error(sqlite_api_policy::errmsg(m_db));
         }
@@ -71,6 +108,12 @@ public:
 private:
     sqlite_api_policy::database_t m_db{ nullptr };
 };
+
+void
+interrupt_trim_connection(void* connection) noexcept
+{
+    sqlite_api_policy::interrupt(static_cast<sqlite_connection_t*>(connection)->get());
+}
 
 std::string
 sql_text(sqlite_api_policy::statement_t statement, int column)

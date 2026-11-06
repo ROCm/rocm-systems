@@ -20,6 +20,27 @@ downstream consumer of the library.
 
 ## [Unreleased]
 
+### Fixed
+
+- `ph_future_cancel` interrupts the SQLite statement a call is running, the
+  same way a cancelled Optiq query calls `sqlite3_interrupt`. The call
+  returns `PH_RESULT_CANCELLED` instead of waiting for that statement to
+  finish. A future that was not attached can still be reused for the next
+  page.
+- Cancelling `ph_get_track_events` stops an on-disk track-cache read between
+  checkpoints. The future ends `PH_FUTURE_CANCELLED` and the event list stays
+  empty.
+- A trace opened from several files uses one histogram grid. The reported
+  origin and bucket size cover every file. `ph_get_correlated_events` and
+  `ph_get_call_stack` use `ph_event_t.track_id` to choose the file when that
+  track is open and the event id is in it.
+- `ph_trim_trace` keeps a duration row that ends on `start_ts` and a sample
+  at `start_ts`. A row or sample that begins at `end_ts` is still left out.
+  The per-node table suffix is parsed without the schema-3 trim source, so a
+  build with schema 3 disabled still links.
+- Schema-3 region details include the `rocpd_arg` rows for that region's
+  event. Optiq shows them in the Arguments panel.
+
 ### Added
 
 - `ph_pmc_info_t.id` is `rocpd_info_pmc.id`, not the index of the counter in
@@ -147,6 +168,10 @@ downstream consumer of the library.
 
 ### Changed
 
+- `ph_trace_cache_directory()` and the cache writers name the folder
+  `<date>_<format>_<version>_<name>_<size>` instead of a 16-digit hash, for
+  example `20261106-110502_rocpd_v3.0.0_trace_70b_1024_32_1.5GB`. Folders
+  named with the old hash are no longer read and can be deleted.
 - `storage_t::get_storage_version()` uses the same schema-version rules as
   `probe_file()`. All three split tags are required, otherwise
   `schema_version` must be `major`, `major.minor`, or `major.minor.patch`.
@@ -195,6 +220,12 @@ downstream consumer of the library.
 
 ### Fixed
 
+- An asynchronous call that throws now finishes its future with
+  `PH_FUTURE_ERROR` and `PH_RESULT_INTERNAL_ERROR`, so `ph_future_wait`
+  does not stay blocked. A call that returns `PH_RESULT_CANCELLED` finishes
+  its future as `PH_FUTURE_CANCELLED`. `ph_future_cancel` requests a stop
+  even when the future is not attached, so a synchronous table read can
+  observe it and the same future can be reused.
 - `ph_ctx::initialize_track_list()` no longer crashes on tracks with no
   associated process (e.g. the new per-agent+queue category tracks, which
   have no `pid`) — `node_info`/`process_info` are now null-checked the same

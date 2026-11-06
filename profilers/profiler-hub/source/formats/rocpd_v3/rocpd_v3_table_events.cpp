@@ -3,7 +3,7 @@
 
 #include "event_query.hpp"
 #include "reader_catalog.hpp"
-#include "reader_impl.hpp"
+#include "rocpd_v3_reader.hpp"
 
 #include "data_storage/backends/database_backend.hpp"
 #include "profiler-hub/c/profiler_hub_types.h"
@@ -13,6 +13,7 @@
 #include <cstring>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -797,12 +798,12 @@ sample_id_span(data_storage::sqlite_backend& backend,
 }  // namespace
 
 uint32_t
-reader_t::impl::read_table_events(const resolved_event_query& query,
-                                  uint32_t                    event_type,
-                                  uint64_t                    after_id,
-                                  uint64_t                    last_id,
-                                  ph_table_event*             rows,
-                                  uint32_t                    capacity)
+rocpd_v3_reader::read_table_events(const resolved_event_query& query,
+                                   uint32_t                    event_type,
+                                   uint64_t                    after_id,
+                                   uint64_t                    last_id,
+                                   ph_table_event*             rows,
+                                   uint32_t                    capacity)
 {
     if(rows == nullptr || capacity == 0 || m_catalog == nullptr || m_backend == nullptr)
     {
@@ -963,9 +964,9 @@ reader_t::impl::read_table_events(const resolved_event_query& query,
 }
 
 bool
-reader_t::impl::table_event_id_span(uint32_t  event_type,
-                                    uint64_t& first_id,
-                                    uint64_t& last_id)
+rocpd_v3_reader::table_event_id_span(uint32_t  event_type,
+                                     uint64_t& first_id,
+                                     uint64_t& last_id)
 {
     first_id = 0;
     last_id  = 0;
@@ -1001,6 +1002,216 @@ reader_t::impl::table_event_id_span(uint32_t  event_type,
         found    = true;
     });
     return found;
+}
+
+namespace
+{
+
+struct duration_summary_row
+{
+    std::optional<std::string> name;
+    int64_t                    name_id{};
+    int64_t                    count{};
+    std::optional<int64_t>     min_duration;
+    std::optional<int64_t>     max_duration;
+    std::optional<int64_t>     total_duration;
+};
+
+uint64_t
+non_negative(int64_t value)
+{
+    return value < 0 ? 0 : static_cast<uint64_t>(value);
+}
+
+void
+add_summary(std::unordered_map<std::string, name_duration_summary_t>& groups,
+            std::string                                               name,
+            uint64_t                                                  count,
+            uint64_t                                                  min_duration,
+            uint64_t                                                  max_duration,
+            uint64_t                                                  total_duration)
+{
+    if(count == 0) return;
+    name_duration_summary_t& group = groups[std::move(name)];
+    if(group.count == 0)
+    {
+        group.min_duration = min_duration;
+        group.max_duration = max_duration;
+    }
+    else
+    {
+        group.min_duration = std::min(group.min_duration, min_duration);
+        group.max_duration = std::max(group.max_duration, max_duration);
+    }
+    group.count += count;
+    group.total_duration += total_duration;
+}
+
+std::string
+kernel_label(const reader_catalog_t& catalog, uint64_t id)
+{
+    const auto found = catalog.kernel_symbols_by_id.find(static_cast<size_t>(id));
+    if(found == catalog.kernel_symbols_by_id.end() || !found->second)
+    {
+        return std::to_string(id);
+    }
+    if(!found->second->display_name.empty()) return found->second->display_name;
+    if(!found->second->name.empty()) return found->second->name;
+    return std::to_string(id);
+}
+
+std::string
+string_label(const reader_catalog_t& catalog, uint64_t id)
+{
+    const auto found = catalog.strings_by_id.find(static_cast<size_t>(id));
+    if(found == catalog.strings_by_id.end()) return std::to_string(id);
+    return found->second;
+}
+
+}  // namespace
+
+bool
+rocpd_v3_reader::summarize_name_durations(const resolved_event_query&           query,
+                                          uint32_t                              event_type,
+                                          std::vector<name_duration_summary_t>& rows)
+{
+    rows.clear();
+    if(m_backend == nullptr || m_catalog == nullptr) return false;
+    sample_table_kind sample_kind;
+    track_kind_t      sample_track_kind;
+    if(sample_table_of(event_type, sample_kind, sample_track_kind)) return true;
+    const auto type = reader_event_type(event_type);
+    if(!type.has_value()) return true;
+    if(!query.event_types.empty() &&
+       std::find(query.event_types.begin(), query.event_types.end(), event_type) ==
+           query.event_types.end())
+    {
+        return true;
+    }
+
+    const table_source* source = source_for(type.value());
+    if(source == nullptr) return true;
+    if(type.value() == event_type_t::hip_event &&
+       !sqlite_table_present(*m_backend,
+                             std::string(source->table) + "_" + m_backend->get_uuid()))
+    {
+        return true;
+    }
+
+    const std::string text_filter = string_clause(*source, type.value(), query);
+    if(query.has_string_filter && text_filter.empty()) return true;
+    const std::string tracks = track_clause(*source, type.value(), *m_catalog, query);
+    if(!query.tracks.empty() && tracks.empty()) return true;
+
+    std::string where;
+    if(query.time.has_value())
+    {
+        add_and(where,
+                std::string(source->alias) + ".start <= " +
+                    std::to_string(query.time->end) + " AND " + source->alias +
+                    ".end >= " + std::to_string(query.time->start));
+    }
+    if(query.node_id.has_value())
+    {
+        add_and(where,
+                std::string(source->alias) + ".nid = " + std::to_string(*query.node_id));
+    }
+    if(query.process_id.has_value())
+    {
+        add_and(where,
+                std::string(source->alias) + ".pid = " + std::to_string(*query.process_id));
+    }
+    if(query.thread_id.has_value())
+    {
+        add_and(where,
+                std::string(source->alias) + ".tid = " + std::to_string(*query.thread_id));
+    }
+    if(query.agent_id.has_value())
+    {
+        if(source->agent_column == nullptr) return true;
+        add_and(where,
+                id_or_unrecorded(std::string(source->alias) + "." + source->agent_column,
+                                 static_cast<size_t>(*query.agent_id)));
+    }
+    if(type.value() == event_type_t::region)
+    {
+        if(event_type == PH_EVENT_TYPE_REGION_SAMPLE)
+        {
+            add_and(where, "S.track_id IS NOT NULL");
+        }
+        else
+        {
+            add_and(where, "S.track_id IS NULL");
+        }
+    }
+    add_and(where, text_filter);
+    add_and(where, tracks);
+
+    const bool        by_text = type.value() == event_type_t::memory_allocate;
+    const std::string name_expr =
+        by_text          ? "IFNULL(MA.type, '')"
+        : type.value() == event_type_t::kernel_dispatch ? "IFNULL(K.kernel_id, 0)"
+                                                        : "IFNULL(" + std::string(source->name_id) +
+                                                              ", 0)";
+    const std::string duration =
+        std::string(source->alias) + ".end - " + source->alias + ".start";
+    const std::string sql =
+        "SELECT " + name_expr + ", COUNT(*), MIN(" + duration + "), MAX(" + duration +
+        "), SUM(" + duration + ") FROM " + source->table + "_" + m_backend->get_uuid() +
+        " " + source->alias + " INNER JOIN rocpd_event E ON E.id = " + source->alias +
+        ".event_id LEFT JOIN rocpd_sample S ON S.event_id = " + source->alias +
+        ".event_id WHERE " + (where.empty() ? std::string("1") : where) + " GROUP BY 1";
+
+    std::unordered_map<std::string, name_duration_summary_t> groups;
+    auto                                                     collect = [&](const duration_summary_row& row) {
+        const uint64_t count = row.count > 0 ? static_cast<uint64_t>(row.count) : 0;
+        std::string    name  = row.name.value_or("");
+        if(!by_text)
+        {
+            const uint64_t id = row.name_id < 0 ? 0 : static_cast<uint64_t>(row.name_id);
+            name = type.value() == event_type_t::kernel_dispatch
+                       ? kernel_label(*m_catalog, id)
+                       : string_label(*m_catalog, id);
+        }
+        add_summary(groups,
+                    std::move(name),
+                    count,
+                    non_negative(row.min_duration.value_or(0)),
+                    non_negative(row.max_duration.value_or(0)),
+                    non_negative(row.total_duration.value_or(0)));
+    };
+
+    if(by_text)
+    {
+        m_backend
+            ->create_read_statement_executor<duration_summary_row>(
+                sql,
+                &duration_summary_row::name,
+                &duration_summary_row::count,
+                &duration_summary_row::min_duration,
+                &duration_summary_row::max_duration,
+                &duration_summary_row::total_duration)()
+            .for_each(collect);
+    }
+    else
+    {
+        m_backend
+            ->create_read_statement_executor<duration_summary_row>(
+                sql,
+                &duration_summary_row::name_id,
+                &duration_summary_row::count,
+                &duration_summary_row::min_duration,
+                &duration_summary_row::max_duration,
+                &duration_summary_row::total_duration)()
+            .for_each(collect);
+    }
+    rows.reserve(groups.size());
+    for(auto& entry : groups)
+    {
+        entry.second.name = entry.first;
+        rows.push_back(std::move(entry.second));
+    }
+    return true;
 }
 
 }  // namespace profiler_hub

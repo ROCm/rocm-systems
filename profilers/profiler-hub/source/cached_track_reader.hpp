@@ -11,6 +11,7 @@
 #include <array>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -21,6 +22,8 @@
 
 namespace profiler_hub
 {
+
+class track_file_store;
 
 /**
  * Serves the events and samples of a track as C API lists. A request for a whole track
@@ -66,6 +69,18 @@ public:
                                            uint64_t                              start_ts,
                                            uint64_t                              end_ts);
 
+    /** Builds one track and returns it. Does not keep the events. @p keep_name
+     *  owns each display name; its pointer is stored on the event. */
+    [[nodiscard]] std::vector<ph_event_t> load_events(
+        const reader_types::track_info_ptr_t&                track,
+        const std::function<const char*(std::string_view)>& keep_name);
+
+    [[nodiscard]] std::vector<ph_sample_t> load_samples(
+        const reader_types::track_info_ptr_t& track);
+
+    /** When set, nesting_depth_of reads the store instead of the event cache. */
+    void set_track_store(track_file_store* store, uint32_t source_index);
+
 private:
     template <typename Item>
     struct cache_entry
@@ -83,16 +98,19 @@ private:
                               Build&&                               build);
 
     [[nodiscard]] std::vector<ph_event_t> build_sorted_events(
-        track_row_reader&                     reader,
-        const reader_types::track_info_ptr_t& track);
+        track_row_reader&                                    reader,
+        const reader_types::track_info_ptr_t&                track,
+        const std::function<const char*(std::string_view)>& keep_name);
 
     [[nodiscard]] std::vector<ph_event_t> read_thread_track_in_parts(
-        track_row_reader&                     reader,
-        const reader_types::track_info_ptr_t& track);
+        track_row_reader&                                    reader,
+        const reader_types::track_info_ptr_t&                track,
+        const std::function<const char*(std::string_view)>& keep_name);
 
     // ph_event_t.name has to outlive the row that produced it. The deque is
     // append-only, so a c_str() taken after emplace stays valid.
     [[nodiscard]] const char* keep_name(std::string_view text);
+    [[nodiscard]] std::function<const char*(std::string_view)> name_keeper();
 
     connection_source&   m_source;
     common::thread_pool& m_workers;
@@ -117,6 +135,9 @@ private:
 
     std::mutex              m_name_mutex;
     std::deque<std::string> m_names;
+
+    track_file_store* m_store{ nullptr };
+    uint32_t          m_store_source{ 0 };
 };
 
 }  // namespace profiler_hub

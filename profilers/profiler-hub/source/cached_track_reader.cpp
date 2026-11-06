@@ -4,6 +4,7 @@
 #include "cached_track_reader.hpp"
 
 #include "common/helper_group.hpp"
+#include "track_file_store.hpp"
 #include "common/natural_merge_sort.hpp"
 #include "depth_tracker.hpp"
 #include "event_partitions.hpp"
@@ -300,14 +301,14 @@ cached_track_reader::events(const reader_types::track_info_ptr_t& track,
     {
         return as_list(cached(m_events_cache, track, [&] {
             return with_reader(m_source, [&](track_row_reader& reader) {
-                return build_sorted_events(reader, track);
+                return build_sorted_events(reader, track, name_keeper());
             });
         }));
     }
 
     const auto& whole = cached(m_events_cache, track, [&] {
         return with_reader(m_source, [&](track_row_reader& reader) {
-            return build_sorted_events(reader, track);
+            return build_sorted_events(reader, track, name_keeper());
         });
     });
 
@@ -325,7 +326,7 @@ cached_track_reader::nesting_depth(const reader_types::track_info_ptr_t& track)
 
     const auto& whole = cached(m_events_cache, track, [&] {
         return with_reader(m_source, [&](track_row_reader& reader) {
-            return build_sorted_events(reader, track);
+            return build_sorted_events(reader, track, name_keeper());
         });
     });
 
@@ -346,6 +347,19 @@ cached_track_reader::nesting_depth_of(const reader_types::track_info_ptr_t& trac
        track->category == reader_types::track_kind_t::pmc_agent)
     {
         return std::nullopt;
+    }
+
+    if(m_store != nullptr && m_store->ready() &&
+       m_store->has_local_events(m_store_source, static_cast<uint32_t>(track->id)))
+    {
+        try
+        {
+            return m_store->nesting_depth_of(
+                m_store_source, static_cast<uint32_t>(track->id), id, type);
+        }
+        catch(const std::exception&)
+        {
+        }
     }
 
     const auto             whole = events(track, 0, 0);
@@ -407,21 +421,55 @@ cached_track_reader::samples(const reader_types::track_info_ptr_t& track,
 }
 
 std::vector<ph_event_t>
-cached_track_reader::build_sorted_events(track_row_reader&                     reader,
-                                         const reader_types::track_info_ptr_t& track)
+cached_track_reader::load_events(
+    const reader_types::track_info_ptr_t&                track,
+    const std::function<const char*(std::string_view)>& keep_name)
+{
+    if(!track) return {};
+    return with_reader(m_source, [&](track_row_reader& reader) {
+        return build_sorted_events(reader, track, keep_name);
+    });
+}
+
+std::vector<ph_sample_t>
+cached_track_reader::load_samples(const reader_types::track_info_ptr_t& track)
+{
+    if(!track) return {};
+    return with_reader(m_source, [&](track_row_reader& reader) {
+        auto sorted = to_ph_samples(reader.counter_events_for_track(track, {}));
+        sort_by_timestamp(sorted);
+        return sorted;
+    });
+}
+
+void
+cached_track_reader::set_track_store(track_file_store* store, uint32_t source_index)
+{
+    m_store        = store;
+    m_store_source = source_index;
+}
+
+std::function<const char*(std::string_view)>
+cached_track_reader::name_keeper()
+{
+    return [this](std::string_view text) { return keep_name(text); };
+}
+
+std::vector<ph_event_t>
+cached_track_reader::build_sorted_events(
+    track_row_reader&                                    reader,
+    const reader_types::track_info_ptr_t&                track,
+    const std::function<const char*(std::string_view)>& keep_name)
 {
     if(track->category == reader_types::track_kind_t::thread &&
        track->event_count >= m_options.parallel_read_min_events)
     {
-        auto merged = read_thread_track_in_parts(reader, track);
+        auto merged = read_thread_track_in_parts(reader, track, keep_name);
         assign_depths(merged);
         return merged;
     }
 
-    auto sorted = to_ph_events(
-        reader.events_for_track(track, {}), track, [&](std::string_view text) {
-            return keep_name(text);
-        });
+    auto sorted = to_ph_events(reader.events_for_track(track, {}), track, keep_name);
     sort_by_start(sorted);
     assign_depths(sorted);
     return sorted;
@@ -429,8 +477,9 @@ cached_track_reader::build_sorted_events(track_row_reader&                     r
 
 std::vector<ph_event_t>
 cached_track_reader::read_thread_track_in_parts(
-    track_row_reader&                     reader,
-    const reader_types::track_info_ptr_t& track)
+    track_row_reader&                                    reader,
+    const reader_types::track_info_ptr_t&                track,
+    const std::function<const char*(std::string_view)>& keep_name)
 {
     std::vector<table_id_span> spans;
     for(const auto type : event_tables)
@@ -455,19 +504,25 @@ cached_track_reader::read_thread_track_in_parts(
     };
 
     const uint32_t track_id = static_cast<uint32_t>(track->id);
-    const auto     visitor  = [](void*                                    context,
+    struct collect_t
+    {
+        std::vector<ph_event_t>*                         events;
+        const std::function<const char*(std::string_view)>* keep;
+    };
+    const auto visitor = [](void*                                    context,
                             reader_types::unique_timeline_event_id_t id,
                             reader_types::timestamp_ns_t             start,
                             reader_types::timestamp_ns_t             end,
                             std::string_view                         name) {
-        static_cast<std::vector<ph_event_t>*>(context)->push_back(
-            ph_event_t{ .id            = id.id,
-                             .start         = start,
-                             .end           = end,
-                             .name          = name.empty() ? "" : name.data(),
-                             .type          = to_ph_event_type(id.type),
-                             .nesting_depth = 0,
-                             .track_id      = 0 });
+        auto* collect = static_cast<collect_t*>(context);
+        collect->events->push_back(ph_event_t{
+            .id            = id.id,
+            .start         = start,
+            .end           = end,
+            .name          = (*collect->keep)(name),
+            .type          = to_ph_event_type(id.type),
+            .nesting_depth = 0,
+            .track_id      = 0 });
     };
 
     std::atomic<size_t> next{ 0 };
@@ -482,12 +537,13 @@ cached_track_reader::read_thread_track_in_parts(
             {
                 std::vector<ph_event_t> events;
                 events.reserve(expected_events(ranges[i]));
+                collect_t collect{ &events, &keep_name };
                 worker_reader.visit_events_in_id_range(track,
                                                        ranges[i].type,
                                                        ranges[i].begin,
                                                        ranges[i].end,
                                                        visitor,
-                                                       &events);
+                                                       &collect);
                 for(auto& event : events)
                 {
                     event.track_id = track_id;
