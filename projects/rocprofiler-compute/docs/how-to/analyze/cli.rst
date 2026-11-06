@@ -936,6 +936,15 @@ After profiling with ``--experimental --trace-ml-api triton`` (see
 They show only Triton kernels.
 
 
+JAX operator analysis
+=====================
+
+After profiling with ``--experimental --trace-ml-api jax`` (see
+:ref:`jax-trace`), use ``--list-operators jax`` and
+``--operator 'jax:*train_step*'``. They print a ``JAX Operator Call Tree:``
+with kernels as direct children of the compiled function or eager primitive.
+
+
 .. _cli-debug-options:
 
 Debug options
@@ -964,3 +973,4 @@ Analyze mode has these debug options:
 
 * ``--debug-verify-deps``: Check that the Python dependencies of analyze mode are
   installed, then exit. It doesn't need ``--path``.
+
