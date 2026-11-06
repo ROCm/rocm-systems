@@ -767,7 +767,9 @@ class Settings {
       uint groupMemCarveout_ : 1;             //!< Group memory carveout functionality
       uint sdma_indirect_supported_ : 1;     //!< SDMA linear indirect copy (gfx1250+)
       uint aql_device_ring_buf_ : 1;          //!< Place the AQL queue ring buffer in device memory
-      uint reserved_ : 7;
+      uint sdma_wait_signal_supported_ : 1;   //!< SDMA memory wait/signal in batch copies
+      uint sdma_poll64_supported_ : 1;        //!< SDMA 64-bit masked memory poll (gfx1250+)
+      uint reserved_ : 5;
     };
     uint value_;
   };

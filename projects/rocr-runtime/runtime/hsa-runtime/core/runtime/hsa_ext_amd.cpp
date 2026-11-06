@@ -596,7 +596,7 @@ hsa_status_t hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* cop
     if (op.wait.scope > HSA_FENCE_SCOPE_SYSTEM)
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     if (op.wait.function != HSA_AMD_MEMORY_COPY_WAIT_ALWAYS &&
-        op.wait.addr == nullptr)
+        (op.wait.addr == nullptr || !IsMultipleOf(op.wait.addr, sizeof(uint64_t))))
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     if (op.wait.function == HSA_AMD_MEMORY_COPY_WAIT_ALWAYS) {
       if (op.wait.addr != nullptr || op.wait.value != 0 || op.wait.mask != 0)
@@ -613,7 +613,7 @@ hsa_status_t hsa_amd_memory_async_batch_copy(const hsa_amd_memory_copy_op_t* cop
     if (op.signal.scope > HSA_FENCE_SCOPE_SYSTEM)
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     if (op.signal.operation != HSA_AMD_MEMORY_COPY_SIGNAL_NONE &&
-        op.signal.addr == nullptr)
+        (op.signal.addr == nullptr || !IsMultipleOf(op.signal.addr, sizeof(uint64_t))))
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     if (op.signal.operation == HSA_AMD_MEMORY_COPY_SIGNAL_NONE) {
       if (op.signal.addr != nullptr || op.signal.data != 0 || op.signal.scope != 0)
