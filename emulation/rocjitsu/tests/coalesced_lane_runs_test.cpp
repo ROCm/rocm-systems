@@ -24,12 +24,13 @@ using LaneRuns = std::vector<amdgpu::CoalescedLaneRun>;
 LaneRuns coalesced_runs(std::span<const uint64_t> addrs, uint64_t lane_mask, uint32_t stride,
                         size_t stop_after = SIZE_MAX, bool *completed = nullptr) {
   LaneRuns runs;
-  const bool done = amdgpu::for_each_coalesced_lane_run(
-      addrs.data(), lane_mask, static_cast<uint32_t>(addrs.size()), stride,
-      amdgpu::MemoryTransactionPolicy{}, [&](const amdgpu::CoalescedLaneRun &run) {
-        runs.push_back(run);
-        return runs.size() < stop_after;
-      });
+  const bool done = amdgpu::for_each_coalesced_lane_run(addrs.data(), lane_mask,
+                                                        static_cast<uint32_t>(addrs.size()), stride,
+                                                        amdgpu::MemoryTransactionPolicy{},
+                                                        [&](const amdgpu::CoalescedLaneRun &run) {
+                                                          runs.push_back(run);
+                                                          return runs.size() < stop_after;
+                                                        }) == amdgpu::ScanEnd::Completed;
   if (completed)
     *completed = done;
   return runs;
@@ -105,11 +106,12 @@ TEST(CoalescedLaneRunsTest, LaneOrderedScanMatchesMaximalRuns) {
            {full, full & ~uint64_t{0x100}, full & 0x5555555555555555, uint64_t{0}}) {
         SCOPED_TRACE(::testing::Message() << wf_size << ' ' << mask << ' ' << addrs[0]);
         LaneRuns actual;
-        EXPECT_TRUE(amdgpu::for_each_lane_ordered_run(addrs.data(), mask, wf_size, kStride,
-                                                      [&](const amdgpu::CoalescedLaneRun &run) {
-                                                        actual.push_back(run);
-                                                        return true;
-                                                      }));
+        EXPECT_EQ(amdgpu::for_each_lane_ordered_run(addrs.data(), mask, wf_size, kStride,
+                                                    [&](const amdgpu::CoalescedLaneRun &run) {
+                                                      actual.push_back(run);
+                                                      return true;
+                                                    }),
+                  amdgpu::ScanEnd::Completed);
         expect_same_runs(actual, lane_ordered_runs(addrs, mask, kStride));
       }
     }
@@ -124,11 +126,12 @@ TEST(CoalescedLaneRunsTest, LaneOrderedScanStopsWhenCallbackReturnsFalse) {
       addrs[lane] = 0x1000 + uint64_t{lane ^ 4u} * 16;
     const uint64_t full = wf_size == 64 ? UINT64_MAX : UINT32_MAX;
     LaneRuns actual;
-    EXPECT_FALSE(amdgpu::for_each_lane_ordered_run(addrs.data(), full, wf_size, 16,
-                                                   [&](const amdgpu::CoalescedLaneRun &run) {
-                                                     actual.push_back(run);
-                                                     return false;
-                                                   }));
+    EXPECT_EQ(amdgpu::for_each_lane_ordered_run(addrs.data(), full, wf_size, 16,
+                                                [&](const amdgpu::CoalescedLaneRun &run) {
+                                                  actual.push_back(run);
+                                                  return false;
+                                                }),
+              amdgpu::ScanEnd::Stopped);
     auto expected = lane_ordered_runs(addrs, full, 16);
     ASSERT_GT(expected.size(), 1u);
     expected.resize(1);
@@ -260,7 +263,7 @@ TEST(CoalescedLaneRunsTest, DenseStridedWindowsPreserveRunsAndEarlyStops) {
                                                         [&](const amdgpu::CoalescedLaneRun &run) {
                                                           actual.push_back(run);
                                                           return !stop;
-                                                        });
+                                                        }) == amdgpu::ScanEnd::Completed;
                 EXPECT_EQ(completed, !stop);
                 expect_same_runs(actual, expected);
               }
@@ -372,18 +375,20 @@ TEST(CoalescedLaneRunsTest, WrappingOperandRetainsLaterLaneOrderAndCallbackStops
        {amdgpu::MemoryTransactionPolicy{}, amdgpu::MemoryTransactionPolicy::unqualified_64()}) {
     LaneRuns actual;
     // Observe request metadata only: a wrapping operand cannot be dereferenced.
-    EXPECT_TRUE(amdgpu::for_each_coalesced_lane_run(addresses.data(), 0xff, addresses.size(), 16,
-                                                    policy,
-                                                    [&](const amdgpu::CoalescedLaneRun &run) {
-                                                      actual.push_back(run);
-                                                      return true;
-                                                    }));
+    EXPECT_EQ(amdgpu::for_each_coalesced_lane_run(addresses.data(), 0xff, addresses.size(), 16,
+                                                  policy,
+                                                  [&](const amdgpu::CoalescedLaneRun &run) {
+                                                    actual.push_back(run);
+                                                    return true;
+                                                  }),
+              amdgpu::ScanEnd::Completed);
     expect_same_runs(actual, LaneRuns(expected.begin(), expected.end()));
     for (size_t stop = 1; stop <= expected.size(); ++stop) {
       size_t calls = 0;
-      EXPECT_FALSE(amdgpu::for_each_coalesced_lane_run(
-          addresses.data(), 0xff, addresses.size(), 16, policy,
-          [&](const amdgpu::CoalescedLaneRun &) { return ++calls != stop; }));
+      EXPECT_EQ(amdgpu::for_each_coalesced_lane_run(
+                    addresses.data(), 0xff, addresses.size(), 16, policy,
+                    [&](const amdgpu::CoalescedLaneRun &) { return ++calls != stop; }),
+                amdgpu::ScanEnd::Stopped);
       EXPECT_EQ(calls, stop);
     }
   }
