@@ -65,6 +65,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 
 * `RCCL_DDA_LL128_RS_THREADS` removed (was default `1024`): reduce-scatter LL128 now launches a fixed 512-thread block, one warp per slice, so the thread count is no longer a tuning knob.
 ### Resolved issues
+* Fixed `ncclDevrFinalize` freeing the LSA flat virtual-address reservation on gfx1250 while peer maps can still be live. That `cuMemAddressFree` can hang or double-free. gfx1250, and `NCCL_CUMEM_SKIP_FREE=1`, skip the free until process exit again. gfx950 still frees the reservation when skip-free is left on automatic. `NCCL_CUMEM_SKIP_FREE=0` forces the free on every architecture.
 * Fixed the calling thread's HIP stream-capture mode remaining relaxed when device-communicator GIN setup fails. `ncclDevCommCreate` still switches to relaxed mode while it builds the device communicator, and a failed `ncclGinDevCommSetup` now returns through the same cleanup path that restores the mode the application had set. Matches upstream NCCL 2.31.2 (PR 2229).
 * Fixed the device linker dropping feature suffixes such as `xnack+` from `GPU_TARGETS`, which left address sanitizer builds without instrumented device code.
 * Fixed `NCCL_CUMEM_ENABLE=1` being ignored on Linux kernels older than 6.8 (for example 6.6 on MI308X). cuMem stayed off, so RCCL buffers bypassed the memory manager and `ncclCommSuspend` released no GPU memory.
@@ -198,6 +199,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Fixed multi-receive `irecv` failing with a fatal network error in the `IB` transport when `NCCL_IB_USE_INLINE=1`.
 * Fixed Anvil SDMA (`NCCL_GIN_TYPE=7`) GIN contexts sharing signal cells across logical contexts on a connection, which let a consecutive `ncclGinAllContexts` barrier return early on a stale count. Each logical context now has its own signals.
 * Fixed GIN signal shadows being sized for the requested context count instead of the rounded-up `ginContextCount`, which let the last contexts write past the shadow region when the GIN connection count does not divide the requested context count.
+* Fixed a memory leak when Device API communicator creation fails. `ncclDevCommCreate` copies the caller's `ncclDevCommRequirements_t`, including its resource and team lists, and did not free that copy when it then rejected the request, for example for `cftCaps` the communicator does not support. A request that `ncclDevCommCreate` itself rejects now releases its copy, so an application can retry after such a failure.
 
 ### Known issues
 * The FP8 ReduceSum and ReduceCopy device APIs are not exported in the LLVM bitcode library.

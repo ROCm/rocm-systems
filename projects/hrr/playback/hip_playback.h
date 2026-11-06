@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <iterator>
 #include <memory>
+#include <new>
 #include <map>
 #include <set>
 #include <unordered_map>
@@ -200,8 +201,9 @@ enum class AllocKind : uint8_t {
     Device,        // hipMalloc / hipMallocPitch                    -> hipFree
     Managed,       // hipMallocManaged: host-backed, charged to host_budget -> hipFree
     HostMalloc,    // hipHostMalloc / hipMallocHost                 -> hipHostFree
-    HostRegister,  // hipHostRegister backing buffer  -> hipHostUnregister + free
-                   //   (released via host_reg_bufs; skipped in the alloc_map loop)
+    HostRegister,  // hipHostRegister backing buffer  -> hipHostUnregister
+                   //   (via host_reg_bufs; skipped in the alloc_map loop; the
+                   //   block is freed with the context)
     DevicePtrAlias // hipHostGetDevicePointer result  -> not separately freed
                    //   (alias into an already-tracked pinned host allocation)
 };
@@ -446,8 +448,8 @@ struct PlaybackContext {
     // Appended under map_mutex (unique_lock); no lock needed to read (single writer).
     std::vector<hipEvent_t> owned_timing_events;
 
-    // Backing buffers for hipHostRegister replay: recorded ptr -> malloc'd host buffer.
-    // Needed so hipHostUnregister can call hipHostUnregister then free the buffer.
+    // Registered hipHostRegister replay buffers: recorded ptr -> block in
+    // host_reg_blocks. Needed so hipHostUnregister can find the buffer.
     // Guarded by map_mutex.
     std::unordered_map<uint64_t, void*> host_reg_bufs;
 
@@ -960,8 +962,8 @@ struct PlaybackContext {
     void erase_alloc_locked(std::unordered_map<uint64_t, AllocEntry>::iterator it) {
         // Host allocations (and managed memory, which the runtime may back
         // from host memory) were charged to host_budget before they were made.
+        // A hipHostRegister block stays charged in host_reg_blocks.
         if (it->second.kind == AllocKind::HostMalloc ||
-            it->second.kind == AllocKind::HostRegister ||
             it->second.kind == AllocKind::Managed)
             host_budget.release(it->second.size);
         alloc_map.erase(it);
@@ -976,13 +978,46 @@ struct PlaybackContext {
     // moved or freed before teardown.
     // Keyed by the recorded host address so the same recorded destination
     // reuses one block until a later event asks for more room.
-    struct LandingBuffer {
-        std::unique_ptr<uint8_t[]> cur;   // the block new nodes are given
+    // Blocks start on a 64-byte cache line, as hipHostRegister asks of
+    // registered memory, so two blocks never share one.
+    struct HostBlockFree {
+        void operator()(uint8_t* p) const { ::operator delete[](p, std::align_val_t{64}); }
+    };
+    using HostBlockPtr = std::unique_ptr<uint8_t[], HostBlockFree>;
+    struct HostBlock {
+        HostBlockPtr cur;   // the block new nodes are given
         size_t size = 0;
         // Blocks an earlier node may still point into, outgrown but not freed.
-        std::vector<std::unique_ptr<uint8_t[]>> retired;
+        std::vector<HostBlockPtr> retired;
     };
-    std::unordered_map<uint64_t, LandingBuffer> host_landing_buffers;
+    std::unordered_map<uint64_t, HostBlock> host_landing_buffers;
+    // hipHostRegister backing buffers, kept the same way: a graph node may
+    // still point into one after hipHostUnregister.
+    std::unordered_map<uint64_t, HostBlock> host_reg_blocks;
+
+    // The block for a recorded host address, at least sz bytes, zero-filled
+    // when new. Null when the allocation fails, and with the replay ended
+    // when the budget refuses a new block.
+    void* host_block(std::unordered_map<uint64_t, HostBlock>& blocks, uint64_t rec,
+                     size_t sz, const char* what) {
+        std::unique_lock lk(map_mutex);
+        auto& buf = blocks[rec];
+        if (!buf.cur || buf.size < sz) {
+            // Charged whole, since the outgrown block stays resident.
+            if (!charge_host(sz, what)) return nullptr;
+            HostBlockPtr next(new (std::align_val_t{64}, std::nothrow) uint8_t[sz ? sz : 1]());
+            if (!next) {
+                host_budget.release(sz);
+                fprintf(stderr, "[HRR] no %zu-byte %s for recorded host address 0x%llx\n", sz,
+                        what, static_cast<unsigned long long>(rec));
+                return nullptr;
+            }
+            if (buf.cur) buf.retired.push_back(std::move(buf.cur));
+            buf.cur = std::move(next);
+            buf.size = sz;
+        }
+        return buf.cur.get();
+    }
 
     // A recorded key of 0 is a null host pointer the capturing process passed,
     // and the call it belonged to failed there. Handing back a real buffer
@@ -990,17 +1025,7 @@ struct PlaybackContext {
     // and the caller's null check reports it.
     void* host_landing_buffer(uint64_t rec, size_t sz) {
         if (!rec) return nullptr;
-        std::unique_lock lk(map_mutex);
-        auto& buf = host_landing_buffers[rec];
-        if (!buf.cur || buf.size < sz) {
-            // Charged whole, since the outgrown block stays resident.
-            if (!charge_host(sz, "graph host operand buffer")) return nullptr;
-            auto next = std::make_unique<uint8_t[]>(sz ? sz : 1);
-            if (buf.cur) buf.retired.push_back(std::move(buf.cur));
-            buf.cur = std::move(next);
-            buf.size = sz;
-        }
-        return buf.cur.get();
+        return host_block(host_landing_buffers, rec, sz, "graph host operand buffer");
     }
 
     // ---- Symbol registration and lookup ----

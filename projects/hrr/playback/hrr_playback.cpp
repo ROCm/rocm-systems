@@ -1953,7 +1953,8 @@ int main(int argc, char** argv) {
     ctx.kernel_filter.clear();
     if (!run_pass(ctx, archive, thread_events, use_mt, /*log=*/false)) {
       fprintf(stderr, "[HRR] Fatal error in warm-up pass — aborting\n");
-      return 1;
+      // As after the timed pass: queued work may still use ctx's host blocks.
+      std::exit(1);
     }
     ctx.fatal_error.store(false, std::memory_order_release);
     ctx.kernel_filter    = filter;
@@ -1995,7 +1996,7 @@ int main(int argc, char** argv) {
     // matching API. Dispatch on AllocEntry::kind:
     //   Device, Managed -> hipFree
     //   HostMalloc     -> hipHostFree
-    //   HostRegister   -> released below via host_reg_bufs (hipHostUnregister+free)
+    //   HostRegister   -> unregistered below via host_reg_bufs
     //   DevicePtrAlias -> not separately freed (alias into a pinned host alloc)
     for (auto& [rec, entry] : ctx.alloc_map) {
       switch (entry.kind) {
@@ -2007,17 +2008,10 @@ int main(int argc, char** argv) {
       }
     }
     // Captures routinely end mid-stream with hipHostRegister'd buffers still live;
-    // playback_hipHostUnregister never ran for them, so unregister + free each
-    // remaining backing buffer here to avoid leaking both the pinned registration
-    // and the malloc'd buffer every run.
+    // playback_hipHostUnregister never ran for them, so unregister each here.
+    // The blocks are freed with the context.
     for (auto& [rec, buf] : ctx.host_reg_bufs) {
-      if (!buf) continue;
-      (void)hipHostUnregister(buf);
-#ifdef _WIN32
-      _aligned_free(buf);
-#else
-      free(buf);
-#endif
+      if (buf) (void)hipHostUnregister(buf);
     }
     ctx.host_reg_bufs.clear();
     for (auto& [rec, str]   : ctx.stream_map)  (void)hipStreamDestroy(str);
@@ -2050,7 +2044,9 @@ int main(int argc, char** argv) {
       return 2;
     }
     fprintf(stderr, "[HRR] Replay aborted due to fatal HIP error — exiting\n");
-    return 1;
+    // The pass ended without its device sync, so work still queued may use
+    // ctx's host blocks: exit without destroying ctx.
+    std::exit(1);
   }
 
   // ---------------------------------------------------------------------------

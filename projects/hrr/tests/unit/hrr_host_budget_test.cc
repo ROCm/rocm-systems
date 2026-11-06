@@ -40,6 +40,10 @@ hipError_t playback_hipFreeHost(PlaybackContext& ctx, const uint8_t* pl);
 hipError_t playback_hipMallocManaged(PlaybackContext& ctx, const uint8_t* pl);
 hipError_t playback_hipMemCreate(PlaybackContext& ctx, const uint8_t* pl);
 
+// AddressSanitizer aborts on a failed allocation unless told to return null,
+// which the allocation-failure case below needs.
+extern "C" const char* __asan_default_options() { return "allocator_may_return_null=1"; }
+
 namespace fs = std::filesystem;
 
 namespace {
@@ -265,9 +269,10 @@ TEST_CASE("Unit_HRR_HostBudget_DispatchTableUsesTheChargingHandlers", "[hrr]") {
  *   - The old charge goes back only if the runtime let go of the buffer. A
  *     hipHostMalloc entry's buffer is freed (a null live pointer frees
  *     cleanly where a runtime is up, and fails without one, which the charge
- *     must then follow); a failing hipHostFree keeps the charge, as a failing
- *     hipHostUnregister does for a hipHostRegister entry, and the buffer is
- *     left alone. The seeds are not pinned, so the failures need no GPU.
+ *     must then follow); a failing hipHostFree keeps the charge, and the
+ *     buffer is left alone. A hipHostRegister entry's charge stays either way,
+ *     and a failing hipHostUnregister leaves its buffer alone too. The seeds
+ *     are not pinned, so the failures need no GPU.
  */
 TEST_CASE("Unit_HRR_HostBudget_DispatchFreesReplacedHostAllocation", "[hrr]") {
   auto run = [](uint32_t api, auto& rec, AllocKind kind, void* live, size_t expect_used) {
@@ -562,6 +567,21 @@ TEST_CASE("Unit_HRR_HostBudget_MemCreateChargeHeldWhileMapped", "[hrr]") {
 /**
  * Test Description
  * ----------------
+ *   - Host blocks start on a 64-byte cache line, so two small blocks never
+ *     share one (hipHostRegister's alignment advice).
+ */
+TEST_CASE("Unit_HRR_HostBudget_HostBlocksStartOnCacheLine", "[hrr]") {
+  PlaybackContext ctx;
+  for (uint64_t rec = 1; rec <= 8; ++rec) {
+    void* p = ctx.host_landing_buffer(rec, 8);
+    REQUIRE(p != nullptr);
+    CHECK(reinterpret_cast<uintptr_t>(p) % 64 == 0);
+  }
+}
+
+/**
+ * Test Description
+ * ----------------
  *   - Releasing a region's stand-in buffer removes the alloc_map entry only if
  *     that entry is the stand-in. When the archive has since allocated managed
  *     memory at the region base, region DEL leaves the managed entry and its
@@ -580,6 +600,24 @@ TEST_CASE("Unit_HRR_HostBudget_RegionReleaseKeepsReplacingAllocation", "[hrr]") 
 
   hrr_release_region(ctx, 0xB000, managed);  // now it is the entry's own buffer
   CHECK_FALSE(ctx.has_alloc(0xB000));
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - A hipHostRegister the budget allows but the allocator cannot back is
+ *     refused with hipErrorMemoryAllocation, and its charge is given back.
+ */
+TEST_CASE("Unit_HRR_HostBudget_HostRegisterAllocationFailureRefuses", "[hrr]") {
+  constexpr uint64_t kHuge = uint64_t{1} << 62;  // more than any address space
+  PlaybackContext ctx;
+  ctx.host_budget.set_cap(kHuge);
+
+  hrr_test::ExactRecord<hrr_args_hipHostRegister> reg;
+  reg.get()->hostPtr = 0x6000;
+  reg.get()->sizeBytes = kHuge;
+  reg.get()->blob_hash_lo = 1;
+  CHECK(playback_hipHostRegister(ctx, reg.bytes()) == hipErrorMemoryAllocation);
   CHECK(ctx.host_budget.used() == 0);
 }
 
