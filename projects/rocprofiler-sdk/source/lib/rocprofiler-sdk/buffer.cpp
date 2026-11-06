@@ -28,6 +28,7 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
@@ -329,6 +330,10 @@ rocprofiler_flush_buffer(rocprofiler_buffer_id_t buffer_id)
     auto status = rocprofiler::pc_sampling::flush_internal_agent_buffers(buffer_id);
     if(status != ROCPROFILER_STATUS_SUCCESS) return status;
 #endif
+
+    // Kernel-dispatch records are written by the queue-interposition record emitter after the GPU
+    // completes the dispatch; deliver the ones already completed before flushing.
+    rocprofiler::hsa::queue_interposition::flush_completed_dispatches();
 
     return rocprofiler::buffer::flush(buffer_id, true);
 }
