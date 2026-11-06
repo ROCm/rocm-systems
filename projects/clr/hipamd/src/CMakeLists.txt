@@ -7,13 +7,6 @@ include(GNUInstallDirs)
 set(VERSION_MAJOR_AMDHIP ${HIP_VERSION_MAJOR})
 set(VERSION_MINOR_AMDHIP ${HIP_VERSION_MINOR})
 
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Werror")
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-error=deprecated-declarations")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=deprecated-declarations")
-endif()
-
 option(BUILD_SHARED_LIBS "Build the shared library" ON)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
@@ -154,6 +147,7 @@ target_compile_definitions(amdhip64 PRIVATE __HIP_PLATFORM_AMD__)
 target_compile_definitions(amdhip64 PRIVATE HIP_ABI_IMPL)
 target_link_libraries(amdhip64 PRIVATE ${OPENGL_LIBRARIES})
 target_link_libraries(amdhip64 PRIVATE ${CMAKE_DL_LIBS})
+target_link_libraries(amdhip64 PRIVATE clr::warnings)
 # Add link to comgr, hsa-runtime and other required libraries in target files
 # This is required for static libraries
 if(NOT BUILD_SHARED_LIBS)

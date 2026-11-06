@@ -8,6 +8,17 @@ project(hrr LANGUAGES CXX)
 option(HRR_BUILD_PLAYBACK "Build HRR playback tools" ON)
 option(HRR_BUILD_TESTS "Build HRR unit tests" OFF)
 
+# Strict warnings default to OFF
+option(HRR_ENABLE_WERROR "Build HRR targets with -Wall -Werror" OFF)
+
+# Single source of truth for strict-warning flags, mirroring CLR's clr_warnings
+# target.
+add_library(hrr_warnings INTERFACE)
+add_library(hrr::warnings ALIAS hrr_warnings)
+if(HRR_ENABLE_WERROR AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  target_compile_options(hrr_warnings INTERFACE -Wall -Werror)
+endif()
+
 # Public HIP headers from this tree, searched ahead of the SDK's. A HIP API added
 # to the tree is declared here before any SDK that CI installs has it, so
 # playback can name it. Headers only: the runtime library still comes from

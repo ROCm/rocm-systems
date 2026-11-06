@@ -26,6 +26,7 @@ class Program : public device::Program {
   ~Program();
 
   // Initialize Binary for GPU (used only for clCreateProgramWithBinary()).
+  using device::Program::initClBinary;
   virtual bool initClBinary(char* binaryIn, size_t size);
 
   //! Return a typecasted GPU device
