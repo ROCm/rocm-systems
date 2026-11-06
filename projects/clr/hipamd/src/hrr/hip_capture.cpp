@@ -371,7 +371,7 @@ static void pinned_collect_graph(hip::Graph* graph, std::vector<hip::Graph*>& se
       hipKernelNodeParams kp{};
       kn->GetParams(&kp);
       PinnedGraphKernel k;
-      k.f = hip::GraphKernelNode::getFunc(kp, static_cast<unsigned>(ihipGetDevice()));
+      k.f = hip::GraphKernelNode::getFunc(kp, static_cast<unsigned>(kn->GetDeviceId()));
       k.params = kp.kernelParams;
       k.extra = kp.extra;
       out.push_back(k);
