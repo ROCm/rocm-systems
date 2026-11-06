@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/branch_stack.h"
 #include "rocjitsu/isa/decoder.h"
@@ -85,8 +86,8 @@ protected:
     config.sgprs_per_wf = 104;
     config.vgprs_per_wf = 256;
     config.functional_quantum = 1;
-    cu = ComputeUnitCore::create("cbranch_fork_join_cu", config, &memory, &l2);
-    ASSERT_NE(cu, nullptr);
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "cbranch_fork_join_cu", config, &memory, &l2));
     wf = cu->dispatch_wf(0, kCodeBase, 104, 256);
     ASSERT_NE(wf, nullptr);
     wf->set_exec(~uint64_t{0});
