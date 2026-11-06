@@ -1535,7 +1535,7 @@ TEST_F(SearchXmlChannelMicrotest, ChannelIndexBeyondMaxChannels_IsRejected) {
   AddChild(channel, "net", "1122334455667788");
 
   EXPECT_EQ(ncclInvalidUsage, ncclTopoGetChannelFromXml(channel, kChannel, system(), graph()));
-  EXPECT_TRUE(Logged("channel 256 out of range"));
+  EXPECT_TRUE(Logged(("channel " + std::to_string(kChannel) + " out of range").c_str()));
   EXPECT_EQ(graph()->nIntraChannels, 0);
   EXPECT_EQ(graph()->intraNets[0], 0);
 }
