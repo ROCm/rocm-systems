@@ -496,8 +496,8 @@ static __device__ __forceinline__ void rsHierSumRest(Red red, Src const& src, in
 // This block's slots for a round on the given rank of scaleUp, one per other package. Rounds alternate
 // between two sets so senders can store a round while the owners' finishers still read the one before.
 static __device__ char* rsHierSlots(ncclDevComm const& comm, ncclTeam scaleUp, ncclDevResourceHandle slotsBuf, int peer,
-                                    uint64_t round) {
-  size_t roundBytes = size_t(scaleUp.nRanks - 1) * ncclSymkRsHierChunkBytes;
+                                    uint64_t round, size_t chunkBytes) {
+  size_t roundBytes = size_t(scaleUp.nRanks - 1) * chunkBytes;
   return (char*)ncclGetResourceBufferLsaPointer(comm, slotsBuf, ncclTeamRankToLsa(comm, scaleUp, peer)) +
          (2 * blockIdx.x + (round & 1)) * roundBytes;
 }
@@ -507,10 +507,13 @@ static __device__ char* rsHierSlots(ncclDevComm const& comm, ncclTeam scaleUp, n
 // the package s + 1 behind. pack is this lane's first pack of the tile, and nLeft is as for
 // rsHierSumGroup. inputLsa is a pointer getter so the window is read before the loops: ncclSymPtr
 // re-reads it after every store.
-template <bool Full, int UnrollPeers, int UnrollPacks, typename T, typename Pack, typename Red>
+// With Push, our partner's copy is not read from its input but from stageLocal, our stage buffer for this
+// round, whose entry for each package holds the partner's copy of the tile of that package's block.
+template <bool Push, bool Full, int UnrollPeers, int UnrollPacks, typename T, typename Pack, typename Red>
 static __device__ void rsHierSendTile(ncclDevComm const& comm, ncclTeam scaleIn, ncclTeam scaleUp, Red red,
                                       ncclLsaPointerGetter<Pack> const& inputLsa, size_t nAllElts,
-                                      ncclDevResourceHandle slotsBuf, uint64_t round, int pack, int nLeft) {
+                                      ncclDevResourceHandle slotsBuf, uint64_t round, int pack, int nLeft,
+                                      char const* stageLocal, size_t chunkBytes) {
   using Acc = typename Red::EltType;
   using AccPack = BytePack<sizeof(Pack) * sizeof(Acc) / sizeof(T)>;
   NVCC_PRAGMA_UNROLL_DISABLED
@@ -519,11 +522,16 @@ static __device__ void rsHierSendTile(ncclDevComm const& comm, ncclTeam scaleIn,
     if (to >= scaleUp.nRanks) to -= scaleUp.nRanks;
     ncclLsaPointerGetter<Pack> copies = inputLsa;
     copies.base = (Pack*)((T*)inputLsa.base + ncclTeamRankToWorld(comm, scaleUp, to) * nAllElts) + pack;
-    auto copy = [&] __device__(int i) -> Pack const* { return copies(rsHierCopyLsa(comm, scaleIn, i)); };
+    auto copy = [&] __device__(int i) -> Pack const* {
+      if NCCL_IF_CONSTEXPR (Push) {
+        if (i == 1) return (Pack const*)(stageLocal + size_t(to) * chunkBytes) + pack;
+      }
+      return copies(rsHierCopyLsa(comm, scaleIn, i));
+    };
     AccPack acc[UnrollPacks];
     rsHierSumGroup<2, /*Init=*/true, Full, UnrollPacks, T, Pack>(red, copy, 0, nLeft, acc);
     rsHierSumRest<UnrollPeers, Full, UnrollPacks, T, Pack>(red, copy, 2, scaleIn.nRanks, nLeft, acc);
-    Pack* dst = (Pack*)(rsHierSlots(comm, scaleUp, slotsBuf, to, round) + s * ncclSymkRsHierChunkBytes) + pack;
+    Pack* dst = (Pack*)(rsHierSlots(comm, scaleUp, slotsBuf, to, round, chunkBytes) + s * chunkBytes) + pack;
     NVCC_PRAGMA_UNROLL_AUTO
     for (int u = 0; u < UnrollPacks; u++) {
       if (Full || u * WARP_SIZE < nLeft) rsHierStore(dst + u * WARP_SIZE, applyCast<Acc, T>(acc[u]));
@@ -533,10 +541,10 @@ static __device__ void rsHierSendTile(ncclDevComm const& comm, ncclTeam scaleIn,
 
 // A sender's part of a round. Warp tiles go round-robin to the nWarps sending warps, of which ours is
 // warp.
-template <int BytePerPack, int UnrollPeers, int UnrollPacks, typename T, typename Red>
+template <bool Push, int BytePerPack, int UnrollPeers, int UnrollPacks, typename T, typename Red>
 static __device__ void rsHierSend(ncclDevComm const& comm, ncclTeam scaleIn, ncclTeam scaleUp, Red red, int warp,
                                   int nWarps, ncclSymPtr<T> input, size_t nAllElts, ncclDevResourceHandle slotsBuf,
-                                  uint64_t round, int nPacks) {
+                                  uint64_t round, int nPacks, char const* stageLocal, size_t chunkBytes) {
   using Pack = BytePack<BytePerPack>;
   constexpr int TilePacks = UnrollPacks * WARP_SIZE;
   int lane = threadIdx.x % WARP_SIZE;
@@ -544,29 +552,37 @@ static __device__ void rsHierSend(ncclDevComm const& comm, ncclTeam scaleIn, ncc
   int tile = warp * TilePacks;
   NVCC_PRAGMA_UNROLL_DISABLED
   for (; tile + TilePacks <= nPacks; tile += nWarps * TilePacks) {
-    rsHierSendTile</*Full=*/true, UnrollPeers, UnrollPacks, T>(comm, scaleIn, scaleUp, red, inputLsa, nAllElts,
-                                                               slotsBuf, round, tile + lane, 0);
+    rsHierSendTile<Push, /*Full=*/true, UnrollPeers, UnrollPacks, T>(comm, scaleIn, scaleUp, red, inputLsa, nAllElts,
+                                                                     slotsBuf, round, tile + lane, 0, stageLocal,
+                                                                     chunkBytes);
   }
   // Only the last tile of a work range can be partial, which is not worth the code of bigger groups.
   if (tile < nPacks) {
-    rsHierSendTile</*Full=*/false, /*UnrollPeers=*/2, UnrollPacks, T>(
-      comm, scaleIn, scaleUp, red, inputLsa, nAllElts, slotsBuf, round, tile + lane, nPacks - tile - lane);
+    rsHierSendTile<Push, /*Full=*/false, /*UnrollPeers=*/2, UnrollPacks, T>(
+      comm, scaleIn, scaleUp, red, inputLsa, nAllElts, slotsBuf, round, tile + lane, nPacks - tile - lane,
+      stageLocal, chunkBytes);
   }
 }
 
 // One warp tile of a finisher's round: sums our package's copies of the tile of our own block with the
 // sums the other packages stored into our slots, and writes that to output.
-template <bool Full, int UnrollPeers, int UnrollPacks, typename T, typename Pack, typename Red>
+// With Push, our partner's copy of our block is stageOwn, the entry of our stage buffer for our package.
+template <bool Push, bool Full, int UnrollPeers, int UnrollPacks, typename T, typename Pack, typename Red>
 static __device__ void rsHierFinishTile(ncclDevComm const& comm, ncclTeam scaleIn, ncclTeam scaleUp, Red red,
                                         ncclLsaPointerGetter<Pack> const& blockLsa, char const* slots, T* output,
-                                        int pack, int nLeft) {
+                                        int pack, int nLeft, char const* stageOwn, size_t chunkBytes) {
   using Acc = typename Red::EltType;
   using AccPack = BytePack<sizeof(Pack) * sizeof(Acc) / sizeof(T)>;
-  constexpr int SlotPacks = ncclSymkRsHierChunkBytes / sizeof(Pack);
+  size_t const SlotPacks = chunkBytes / sizeof(Pack);
   ncclLsaPointerGetter<Pack> copies = blockLsa;
   copies.base = (Pack*)blockLsa.base + pack;
   Pack const* slot0 = (Pack const*)slots + pack;
-  auto copy = [&] __device__(int i) -> Pack const* { return copies(rsHierCopyLsa(comm, scaleIn, i)); };
+  auto copy = [&] __device__(int i) -> Pack const* {
+    if NCCL_IF_CONSTEXPR (Push) {
+      if (i == 1) return (Pack const*)stageOwn + pack;
+    }
+    return copies(rsHierCopyLsa(comm, scaleIn, i));
+  };
   auto slot = [&] __device__(int s) -> Pack const* { return slot0 + s * SlotPacks; };
   AccPack acc[UnrollPacks];
   // Every package has two ranks or more and there are two packages or more, so every tile has our own
@@ -583,10 +599,10 @@ static __device__ void rsHierFinishTile(ncclDevComm const& comm, ncclTeam scaleI
 }
 
 // A finisher's part of a round, dealing warp tiles the same way.
-template <int BytePerPack, int UnrollPeers, int UnrollPacks, typename T, typename Red>
+template <bool Push, int BytePerPack, int UnrollPeers, int UnrollPacks, typename T, typename Red>
 static __device__ void rsHierFinish(ncclDevComm const& comm, ncclTeam scaleIn, ncclTeam scaleUp, Red red, int warp,
                                     int nWarps, ncclSymPtr<T> input, size_t nAllElts, char const* slots, T* output,
-                                    int nPacks) {
+                                    int nPacks, char const* stageOwn, size_t chunkBytes) {
   using Pack = BytePack<BytePerPack>;
   constexpr int TilePacks = UnrollPacks * WARP_SIZE;
   int lane = threadIdx.x % WARP_SIZE;
@@ -594,13 +610,53 @@ static __device__ void rsHierFinish(ncclDevComm const& comm, ncclTeam scaleIn, n
   int tile = warp * TilePacks;
   NVCC_PRAGMA_UNROLL_DISABLED
   for (; tile + TilePacks <= nPacks; tile += nWarps * TilePacks) {
-    rsHierFinishTile</*Full=*/true, UnrollPeers, UnrollPacks, T>(comm, scaleIn, scaleUp, red, blockLsa, slots, output,
-                                                                 tile + lane, 0);
+    rsHierFinishTile<Push, /*Full=*/true, UnrollPeers, UnrollPacks, T>(comm, scaleIn, scaleUp, red, blockLsa, slots,
+                                                                       output, tile + lane, 0, stageOwn, chunkBytes);
   }
   if (tile < nPacks) {
-    rsHierFinishTile</*Full=*/false, /*UnrollPeers=*/2, UnrollPacks, T>(comm, scaleIn, scaleUp, red, blockLsa, slots,
-                                                                        output, tile + lane, nPacks - tile - lane);
+    rsHierFinishTile<Push, /*Full=*/false, /*UnrollPeers=*/2, UnrollPacks, T>(
+      comm, scaleIn, scaleUp, red, blockLsa, slots, output, tile + lane, nPacks - tile - lane, stageOwn, chunkBytes);
   }
+}
+
+// Push mode: stores our copy of the tile of every package's block that our package partner owns into the
+// partner's stage buffer, at the entry for that package. stagePartner is the partner's stage buffer for
+// this round. input is the round's start in our own input, and our copy of a block is read locally.
+template <int BytePerPack, int UnrollPacks, typename T>
+static __device__ void rsHierStagePush(ncclDevComm const& comm, ncclTeam scaleIn, ncclTeam scaleUp, int warp,
+                                       int nWarps, ncclSymPtr<T> input, size_t nAllElts, char* stagePartner,
+                                       int nPacks, size_t chunkBytes) {
+  using Pack = BytePack<BytePerPack>;
+  constexpr int TilePacks = UnrollPacks * WARP_SIZE;
+  int lane = threadIdx.x % WARP_SIZE;
+  int const partnerShift = (1 - scaleIn.rank) - scaleIn.rank;
+  T const* mine = input.localPtr();
+  NVCC_PRAGMA_UNROLL_DISABLED
+  for (int h = 0; h < scaleUp.nRanks; h++) {
+    // World rank of the partner's counterpart on package h: ours there, moved by the partner's offset.
+    Pack const* src = (Pack const*)(mine + size_t(ncclTeamRankToWorld(comm, scaleUp, h) + partnerShift) * nAllElts);
+    Pack* dst = (Pack*)(stagePartner + size_t(h) * chunkBytes);
+    NVCC_PRAGMA_UNROLL_DISABLED
+    for (int tile = warp * TilePacks; tile < nPacks; tile += nWarps * TilePacks) {
+      int pack = tile + lane;
+      Pack v[UnrollPacks];
+      NVCC_PRAGMA_UNROLL_AUTO
+      for (int u = 0; u < UnrollPacks; u++) {
+        if (pack + u * WARP_SIZE < nPacks) v[u] = rsHierLoad(src + pack + u * WARP_SIZE);
+      }
+      NVCC_PRAGMA_UNROLL_AUTO
+      for (int u = 0; u < UnrollPacks; u++) {
+        if (pack + u * WARP_SIZE < nPacks) rsHierStore(dst + pack + u * WARP_SIZE, v[u]);
+      }
+    }
+  }
+}
+
+// This block's row of rsHierFlags on the given LSA rank.
+static __device__ uint64_t* rsHierFlagRowLsa(ncclDevComm const& comm, ncclDevResourceHandle flagsBuf, int lsaRank,
+                                             int nGroups) {
+  return (uint64_t*)ncclGetResourceBufferLsaPointer(comm, flagsBuf, lsaRank) +
+         blockIdx.x * ncclSymkRsHierFlagsPerBlock(nGroups);
 }
 
 // This block's row of rsHierFlags on the given rank of scaleUp.
@@ -632,12 +688,19 @@ static __device__ void rsHierWaitFlags(ncclDevComm const& comm, uint64_t* flags,
 // a ready flag on each owner once a round's sums are stored, and finishers raise a credit flag on each
 // sender once they have read them. Every rank splits the work the same way, so peers agree on the
 // rounds and their slots.
-template <bool EnableProfiler, template <typename> typename Red, typename T>
-__device__ __forceinline__ void ncclSymkRun_ReduceScatter_HierLsaLD(ncclSymkDevWorkArgs const* args) {
+//
+// Push mode (needs two ranks per package) changes how a package's copies get here. Where the kernel above
+// has each rank read its partner's copies of the blocks it reduces, each rank instead stores its copies
+// of the partner's blocks into a stage buffer on the partner, then raises a stage-ready flag on it. The
+// sums then read the partner's copy from the local stage buffer. Two rounds of stage entries alternate,
+// and a partner's credit flag for each of our sender and finisher says it has read a round's entries.
+template <bool Push, bool EnableProfiler, template <typename> typename Red, typename T>
+static __device__ __forceinline__ void rsHierLsaLD_impl(ncclSymkDevWorkArgs const* args) {
   // 8-bit floats sum as 32-bit ones, which leaves room to hold only pairs of their sources at once.
   constexpr int UnrollPacks = ncclSymkUnrollPacks, UnrollPeers = sizeof(T) == 1 ? 2 : 4;
   constexpr int EltPerPack = ncclSymkBytePerPack / sizeof(T);
-  size_t const RoundElts = args->kcomm.rsHierRoundBytes / sizeof(T);
+  size_t const chunkBytes = args->kcomm.rsHierRoundBytes;
+  size_t const RoundElts = chunkBytes / sizeof(T);
   ncclSymkArgsHandler handler{args};
   ncclDevComm const& comm = handler.comm;
   ncclLsaBarrierSession<ncclCoopCta> bar{ncclCoopCta(), comm, ncclTeamTagLsa(), blockIdx.x};
@@ -653,6 +716,14 @@ __device__ __forceinline__ void ncclSymkRun_ReduceScatter_HierLsaLD(ncclSymkDevW
                     blockIdx.x * ncclSymkRsHierFlagsPerBlock(scaleUp.nRanks);
   uint64_t* ready = flags;
   uint64_t* credit = flags + scaleUp.nRanks;
+  // Push mode: our partner raises these on us, and we raise the same ones on it.
+  uint64_t* stageFlags = flags + 2 * scaleUp.nRanks;  // [0] stage ready, [1] sender credit, [2] finisher credit
+  uint64_t* partnerStageFlags = nullptr;
+  int partnerLsa = 0;
+  if NCCL_IF_CONSTEXPR (Push) {
+    partnerLsa = ncclTeamRankToLsa(comm, scaleIn, 1 - scaleIn.rank);
+    partnerStageFlags = rsHierFlagRowLsa(comm, flagsBuf, partnerLsa, scaleUp.nRanks) + 2 * scaleUp.nRanks;
+  }
   // Peers never write the round count, so it carries over from this block's last launch.
   uint64_t seq = flags[nPeers];
 
@@ -692,19 +763,50 @@ __device__ __forceinline__ void ncclSymkRun_ReduceScatter_HierLsaLD(ncclSymkDevW
         // The opening barrier frees the slots for this launch's first two rounds. After that, a round's
         // slots last held the round two back, which each owner credits once it has read it.
         if (round >= 2) {
-          if (role.thread_rank() == 0) rsHierWaitFlags(comm, credit, nPeers, seq + round - 1);
+          if (role.thread_rank() == 0) {
+            rsHierWaitFlags(comm, credit, nPeers, seq + round - 1);
+            // Likewise the partner's reads of the stage entries we stored two rounds back.
+            if NCCL_IF_CONSTEXPR (Push) rsHierWaitFlags(comm, stageFlags + 1, 2, seq + round - 1);
+          }
+          role.sync();
+        }
+        char const* stageLocal = nullptr;
+        if NCCL_IF_CONSTEXPR (Push) {
+          size_t stageOff = size_t(2 * blockIdx.x + (round & 1)) * scaleUp.nRanks * chunkBytes;
+          stageLocal = (char const*)ncclGetResourceBufferLocalPointer(comm, args->kcomm.rsHierStage) + stageOff;
+          char* stagePartner = (char*)ncclGetResourceBufferLsaPointer(comm, args->kcomm.rsHierStage, partnerLsa) + stageOff;
+          // Store before waiting: the partner is doing the same, and each waits for the other's stores.
+          if (aligned) {
+            rsHierStagePush<ncclSymkBytePerPack, UnrollPacks, T>(comm, scaleIn, scaleUp, roleWarp, role.nWarps,
+                                                                 input + lo, dw.nElts, stagePartner, n / EltPerPack,
+                                                                 chunkBytes);
+          } else {
+            rsHierStagePush<sizeof(T), UnrollPacks, T>(comm, scaleIn, scaleUp, roleWarp, role.nWarps, input + lo,
+                                                       dw.nElts, stagePartner, n, chunkBytes);
+          }
+          role.sync();
+          if (role.thread_rank() == 0) {
+            cuda::atomic_thread_fence(cuda::memory_order_release, cuda::thread_scope_system);
+            cuda::atomic_ref<uint64_t>(partnerStageFlags[0]).store(seq + round + 1, cuda::memory_order_relaxed);
+            rsHierWaitFlags(comm, stageFlags, 1, seq + round + 1);
+          }
           role.sync();
         }
         if (aligned) {
-          rsHierSend<ncclSymkBytePerPack, UnrollPeers, UnrollPacks, T>(
-            comm, scaleIn, scaleUp, red, roleWarp, role.nWarps, input + lo, dw.nElts, slotsBuf, round, n / EltPerPack);
+          rsHierSend<Push, ncclSymkBytePerPack, UnrollPeers, UnrollPacks, T>(
+            comm, scaleIn, scaleUp, red, roleWarp, role.nWarps, input + lo, dw.nElts, slotsBuf, round, n / EltPerPack,
+            stageLocal, chunkBytes);
         } else {
-          rsHierSend<sizeof(T), UnrollPeers, UnrollPacks, T>(comm, scaleIn, scaleUp, red, roleWarp, role.nWarps,
-                                                             input + lo, dw.nElts, slotsBuf, round, n);
+          rsHierSend<Push, sizeof(T), UnrollPeers, UnrollPacks, T>(comm, scaleIn, scaleUp, red, roleWarp, role.nWarps,
+                                                                   input + lo, dw.nElts, slotsBuf, round, n,
+                                                                   stageLocal, chunkBytes);
         }
         role.sync();
         if (role.thread_rank() == 0) {
           cuda::atomic_thread_fence(cuda::memory_order_release, cuda::thread_scope_system);
+          if NCCL_IF_CONSTEXPR (Push) {
+            cuda::atomic_ref<uint64_t>(partnerStageFlags[1]).store(seq + round + 1, cuda::memory_order_relaxed);
+          }
           NVCC_PRAGMA_UNROLL_DISABLED
           for (int s = 0; s < nPeers; s++) {
             int to = scaleUp.rank + 1 + s;
@@ -714,20 +816,33 @@ __device__ __forceinline__ void ncclSymkRun_ReduceScatter_HierLsaLD(ncclSymkDevW
           }
         }
       } else {
-        char const* slots = rsHierSlots(comm, scaleUp, slotsBuf, scaleUp.rank, round);
-        if (role.thread_rank() == 0) rsHierWaitFlags(comm, ready, nPeers, seq + round + 1);
+        char const* slots = rsHierSlots(comm, scaleUp, slotsBuf, scaleUp.rank, round, chunkBytes);
+        char const* stageOwn = nullptr;
+        if NCCL_IF_CONSTEXPR (Push) {
+          stageOwn = (char const*)ncclGetResourceBufferLocalPointer(comm, args->kcomm.rsHierStage) +
+                     size_t(2 * blockIdx.x + (round & 1)) * scaleUp.nRanks * chunkBytes +
+                     size_t(scaleUp.rank) * chunkBytes;
+        }
+        if (role.thread_rank() == 0) {
+          rsHierWaitFlags(comm, ready, nPeers, seq + round + 1);
+          if NCCL_IF_CONSTEXPR (Push) rsHierWaitFlags(comm, stageFlags, 1, seq + round + 1);
+        }
         role.sync();
         if (aligned) {
-          rsHierFinish<ncclSymkBytePerPack, UnrollPeers, UnrollPacks, T>(comm, scaleIn, scaleUp, red, roleWarp,
-                                                                         role.nWarps, input + lo, dw.nElts, slots,
-                                                                         output + lo, n / EltPerPack);
+          rsHierFinish<Push, ncclSymkBytePerPack, UnrollPeers, UnrollPacks, T>(
+            comm, scaleIn, scaleUp, red, roleWarp, role.nWarps, input + lo, dw.nElts, slots, output + lo,
+            n / EltPerPack, stageOwn, chunkBytes);
         } else {
-          rsHierFinish<sizeof(T), UnrollPeers, UnrollPacks, T>(comm, scaleIn, scaleUp, red, roleWarp, role.nWarps,
-                                                               input + lo, dw.nElts, slots, output + lo, n);
+          rsHierFinish<Push, sizeof(T), UnrollPeers, UnrollPacks, T>(comm, scaleIn, scaleUp, red, roleWarp,
+                                                                     role.nWarps, input + lo, dw.nElts, slots,
+                                                                     output + lo, n, stageOwn, chunkBytes);
         }
         role.sync();
         if (role.thread_rank() == 0) {
           cuda::atomic_thread_fence(cuda::memory_order_release, cuda::thread_scope_system);
+          if NCCL_IF_CONSTEXPR (Push) {
+            cuda::atomic_ref<uint64_t>(partnerStageFlags[2]).store(seq + round + 1, cuda::memory_order_relaxed);
+          }
           NVCC_PRAGMA_UNROLL_DISABLED
           for (int s = 0; s < nPeers; s++) {
             int from = scaleUp.rank - 1 - s;
@@ -743,6 +858,12 @@ __device__ __forceinline__ void ncclSymkRun_ReduceScatter_HierLsaLD(ncclSymkDevW
 
   if NCCL_IF_CONSTEXPR (EnableProfiler) ncclSymkProfilerPhase(args, NCCL_KERNEL_PHASE_BEFORE_CLOSE);
   bar.sync(ncclCoopCta(), cuda::memory_order_release);
+}
+
+template <bool EnableProfiler, template <typename> typename Red, typename T>
+__device__ __forceinline__ void ncclSymkRun_ReduceScatter_HierLsaLD(ncclSymkDevWorkArgs const* args) {
+  if (args->kcomm.rsHierPush) rsHierLsaLD_impl</*Push=*/true, EnableProfiler, Red, T>(args);
+  else rsHierLsaLD_impl</*Push=*/false, EnableProfiler, Red, T>(args);
 }
 
 template <typename Red, typename T>

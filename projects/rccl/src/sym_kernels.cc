@@ -160,8 +160,17 @@ static bool ncclSymkGinBackendUnsupported(struct ncclComm* comm) {
 // 0 off, 1 offer to the tuner, 2 force (skips the cost model and the deep-loop size bar; for A/B
 // measurement). NCCL_SYM_KERNEL forces one named kernel, 2 forces whichever the collective has.
 // Bytes a block of the hierarchical ReduceScatter sends each other package per round. Smaller rounds
-// start the finishers sooner, and bigger ones amortize the flag handshake. Clamped to the slot size.
-RCCL_PARAM(SymRsHierChunkBytes, "SYM_RS_HIER_CHUNK_BYTES", ncclSymkRsHierChunkBytes)
+// start the finishers sooner, and bigger ones amortize the flag handshake. Clamped to 1 KiB through 1 GiB.
+// -1 picks the biggest round that keeps the landing buffers within SYM_RS_HIER_MAX_BYTES, and a value set
+// here is used as given, so it can exceed that budget.
+RCCL_PARAM(SymRsHierChunkBytes, "SYM_RS_HIER_CHUNK_BYTES", -1)
+// Per-rank budget in bytes for each of the hierarchical ReduceScatter's landing buffers (slots, and the
+// stage buffer in push mode) when SYM_RS_HIER_CHUNK_BYTES is not set. Both grow with the package count.
+RCCL_PARAM(SymRsHierMaxBytes, "SYM_RS_HIER_MAX_BYTES", 256 << 20)
+
+// 1: the hierarchical ReduceScatter pushes each rank's copies of its package partner's blocks into a stage
+// buffer on the partner, which then reduces from local memory. 0: it pulls them. Needs two ranks per package.
+RCCL_PARAM(SymRsHierPush, "SYM_RS_HIER_PUSH", 0)
 
 NCCL_PARAM(SymTmaEnable, "SYM_TMA_ENABLE", 1)
 
@@ -295,9 +304,7 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
   if (!symk->initialized) {
     symk->initialized = true;
     symk->kcomm.hierScaleInSize = computeHierScaleInSize(comm);
-    symk->kcomm.rsHierRoundBytes = uint32_t(
-      std::clamp<int64_t>(rcclParamSymRsHierChunkBytes(), ncclSymkRsHierMinRoundBytes, ncclSymkRsHierChunkBytes) &
-      ~int64_t(15));
+    symk->kcomm.rsHierRoundBytes = ncclSymkRsHierChunkBytes;
     int agHierGroups = ncclSymkAgHierGroups(comm);
     if (ncclSymkHierAvailable(comm) && symk->kcomm.hierScaleInSize == 0) {
       INFO(NCCL_INIT,
@@ -331,6 +338,7 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
     struct ncclDevResourceRequirements hierPushFlagsReq = {};
     struct ncclDevResourceRequirements rsHierSlotsReq = {};
     struct ncclDevResourceRequirements rsHierFlagsReq = {};
+    struct ncclDevResourceRequirements rsHierStageReq = {};
     if (agHierGroups > 0) {
       hierPushFlagsReq.bufferSize = size_t(ncclSymkAgHierMaxBlocks) * agHierGroups * sizeof(uint64_t);
       hierPushFlagsReq.bufferAlign = 128;
@@ -340,7 +348,26 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
     }
     // The hierarchical ReduceScatter runs only where the LSA team spans the comm.
     if (agHierGroups >= 2 && ncclTeamLsa(comm).nRanks == comm->nRanks) {
-      rsHierSlotsReq.bufferSize = size_t(ncclSymkRsHierMaxBlocks) * 2 * (agHierGroups - 1) * ncclSymkRsHierChunkBytes;
+      symk->kcomm.rsHierPush = rcclParamSymRsHierPush() != 0 && symk->kcomm.hierScaleInSize == 2;
+      if (rcclParamSymRsHierPush() != 0 && !symk->kcomm.rsHierPush) {
+        INFO(NCCL_INIT, "Symmetric hierarchical ReduceScatter push mode off: it needs two ranks per package");
+      }
+      // Slots hold a round per other package, and push mode's stage buffer one per package, each for two rounds
+      // of every block, so the bytes a round carries decide how much memory they take.
+      size_t slotEntries = size_t(ncclSymkRsHierMaxBlocks) * 2 * (agHierGroups - 1);
+      size_t stageEntries = symk->kcomm.rsHierPush ? size_t(ncclSymkRsHierMaxBlocks) * 2 * agHierGroups : 0;
+      int64_t chunkEnv = rcclParamSymRsHierChunkBytes();
+      // Automatic: the default round, or less if the budget can't hold it. An explicit value is not limited by the budget.
+      int64_t chunk = chunkEnv >= 0 ? chunkEnv :
+                                      std::min<int64_t>(ncclSymkRsHierChunkBytes,
+                                                        rcclParamSymRsHierMaxBytes() / std::max(slotEntries, stageEntries));
+      symk->kcomm.rsHierRoundBytes = uint32_t(
+        std::clamp<int64_t>(chunk, ncclSymkRsHierMinRoundBytes, ncclSymkRsHierMaxRoundBytes) & ~int64_t(15));
+      INFO(NCCL_INIT, "Symmetric hierarchical ReduceScatter: %d packages, %u bytes per round, slots %zu bytes%s",
+           agHierGroups, symk->kcomm.rsHierRoundBytes, slotEntries * symk->kcomm.rsHierRoundBytes,
+           symk->kcomm.rsHierPush ? " (push mode)" : "");
+
+      rsHierSlotsReq.bufferSize = slotEntries * symk->kcomm.rsHierRoundBytes;
       rsHierSlotsReq.bufferAlign = 128;
       rsHierSlotsReq.outBufferHandle = &symk->kcomm.rsHierSlots;
       rsHierSlotsReq.next = reqs.resourceRequirementsList;
@@ -352,6 +379,14 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
       rsHierFlagsReq.outBufferHandle = &symk->kcomm.rsHierFlags;
       rsHierFlagsReq.next = reqs.resourceRequirementsList;
       reqs.resourceRequirementsList = &rsHierFlagsReq;
+
+      if (symk->kcomm.rsHierPush) {
+        rsHierStageReq.bufferSize = stageEntries * symk->kcomm.rsHierRoundBytes;
+        rsHierStageReq.bufferAlign = 128;
+        rsHierStageReq.outBufferHandle = &symk->kcomm.rsHierStage;
+        rsHierStageReq.next = reqs.resourceRequirementsList;
+        reqs.resourceRequirementsList = &rsHierStageReq;
+      }
     }
 
     struct ncclDevResourceRequirements ginInboxRailReq = {};
