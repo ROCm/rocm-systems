@@ -53,7 +53,7 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             args.rocprofiler_sdk_tool_path,  # Our rocprofiler-sdk tool
             native_tool_path,  # Native tool (if provided)
         ]
-        if getattr(self, "_selected_frameworks", set()):
+        if args.trace_ml_api is not None:
             # Without this the marker tier's ROCTX calls bind to legacy
             # libroctx64, which rocprofiler-sdk does not trace.
             ld_preload_parts.append(
@@ -78,7 +78,7 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             "ROCPROF_OUTPUT_PATH": f"{args.output_directory}/out/pmc_1",
         })
 
-        if getattr(self, "_selected_frameworks", set()):
+        if args.trace_ml_api is not None:
             options["ROCPROF_MARKER_API_TRACE"] = "1"
 
         if args.iteration_multiplexing:

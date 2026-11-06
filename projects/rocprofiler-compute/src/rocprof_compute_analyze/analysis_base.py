@@ -14,7 +14,6 @@ import pandas as pd
 
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils import file_io, parser, schema
-from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.logger import (
     console_debug,
     console_error,
@@ -328,24 +327,6 @@ class OmniAnalyze_Base:
             args.path[0][0]
         )
         profiling_config = self.get_profiling_config()
-
-        # --ml-api-trace enables every backend.
-        ml_api_trace = profiling_config.get("ml_api_trace", False)
-        for backend in KNOWN_ML_API_BACKENDS:
-            needs_trace = getattr(
-                args, f"{backend}_operator", None
-            ) is not None or getattr(args, f"list_{backend}_operators", False)
-            if needs_trace and not (
-                profiling_config.get(f"{backend}_trace", False) or ml_api_trace
-            ):
-                console_error(
-                    "ml api trace",
-                    f'Workload was not profiled with "--{backend}-trace" or '
-                    '"--ml-api-trace". '
-                    f"Cannot use --{backend}-operator or "
-                    f"--list-{backend}-operators.",
-                )
-
         for dir_info in args.path:
             if not any([
                 profiling_config.get("iteration_multiplexing"),

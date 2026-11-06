@@ -311,31 +311,23 @@ class RocProfCompute:
                 "Use --output-format stdout or txt, or remove --list-stats."
             )
 
-        operator_filter = (
-            args.torch_operator is not None or args.triton_operator is not None
-        )
-        operator_listing = args.list_torch_operators or args.list_triton_operators
-
-        if operator_filter or operator_listing:
-            if args.output_format != "stdout":
-                console_error(
-                    "ml api trace",
-                    "Operator flags (--torch-operator, --triton-operator, "
-                    "--list-torch-operators, --list-triton-operators) are only "
-                    "supported with --output-format stdout (the default). "
-                    "The matched operator call tree is printed directly to "
-                    "stdout and is not captured in txt, csv, or db output. "
-                    "Remove the --output-format option or drop the operator flags.",
-                )
-
-            if operator_filter and operator_listing:
-                console_warning(
-                    "ml api trace",
-                    "Operator filters are ignored when a --list-*-operators "
-                    "flag is used; the full operator tree will be shown. "
-                    "Drop the listing flag to apply the operator filter, or "
-                    "drop the filter to list all operators.",
-                )
+        listing = args.list_operators is not None
+        filtering = args.operator is not None
+        if (listing or filtering) and args.output_format != "stdout":
+            console_error(
+                "ml api trace",
+                "Operator flags (--operator, --list-operators) are only "
+                "supported with --output-format stdout (the default). "
+                "The matched operator call tree is printed directly to "
+                "stdout and is not captured in txt, csv, or db output. "
+                "Remove the --output-format option or drop the operator flags.",
+            )
+        if listing and filtering:
+            console_warning(
+                "ml api trace",
+                "--operator is ignored when --list-operators is used. "
+                "Drop --list-operators to apply the operator filter.",
+            )
 
     @demarcate
     def handle_list_args(self) -> None:
