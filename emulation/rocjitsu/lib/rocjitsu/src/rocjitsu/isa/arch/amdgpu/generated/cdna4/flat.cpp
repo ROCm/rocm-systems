@@ -4073,11 +4073,10 @@ GlobalLoadLdsDwordx4Flat::GlobalLoadLdsDwordx4Flat(const MachineInst *inst)
                  : 0))),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &m0;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 0;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (!(inst_.lds != 0)) {
@@ -4100,6 +4099,8 @@ GlobalLoadLdsDwordx4Flat::GlobalLoadLdsDwordx4Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   m0.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -4127,11 +4128,10 @@ GlobalLoadLdsDwordx3Flat::GlobalLoadLdsDwordx3Flat(const MachineInst *inst)
                  : 0))),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &m0;
   num_src_ = 2;
-  num_dst_ = 1;
+  num_dst_ = 0;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (!(inst_.lds != 0)) {
@@ -4154,6 +4154,8 @@ GlobalLoadLdsDwordx3Flat::GlobalLoadLdsDwordx3Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &saddr;
   }
   m0.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 

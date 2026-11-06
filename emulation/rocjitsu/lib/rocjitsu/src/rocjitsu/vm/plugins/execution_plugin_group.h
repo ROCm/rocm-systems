@@ -128,6 +128,7 @@ public:
     const bool observes_scalar_register_writes = p->observes_scalar_register_writes();
     const bool observes_memory_routing = p->observes_memory_routing();
     const bool observes_tensor_dma_memory_access = p->observes_tensor_dma_memory_access();
+    const bool observes_tensor_dma_issue = p->observes_tensor_dma_issue();
     serialize_hot_hooks_ |= p->requires_serial_hot_hooks();
     observes_before_execute_instruction_ |= observes_before_execute_instruction;
     observes_after_execute_instruction_ |= observes_after_execute_instruction;
@@ -139,15 +140,17 @@ public:
     observes_scalar_register_writes_ |= observes_scalar_register_writes;
     observes_memory_routing_ |= observes_memory_routing;
     observes_tensor_dma_memory_access_ |= observes_tensor_dma_memory_access;
+    observes_tensor_dma_issue_ |= observes_tensor_dma_issue;
     supports_async_instructions_ &= p->supports_async_instructions();
     SinkBundle sink = build_sink_bundle(p->name() + ".log");
     if (auto *configured_sink = sink.get())
       p->sink_ = configured_sink;
-    plugins_.push_back(PluginEntry{
-        std::move(sink), observes_before_execute_instruction, observes_after_execute_instruction,
-        observes_async_instruction_issued, observes_memory_instruction_routing, observes_vgpr_reads,
-        observes_vgpr_writes, observes_sgpr_reads, observes_scalar_register_writes,
-        observes_memory_routing, observes_tensor_dma_memory_access, std::move(p)});
+    plugins_.push_back(
+        PluginEntry{std::move(sink), observes_before_execute_instruction,
+                    observes_after_execute_instruction, observes_async_instruction_issued,
+                    observes_memory_instruction_routing, observes_vgpr_reads, observes_vgpr_writes,
+                    observes_sgpr_reads, observes_scalar_register_writes, observes_memory_routing,
+                    observes_tensor_dma_memory_access, observes_tensor_dma_issue, std::move(p)});
     return true;
   }
 
@@ -181,6 +184,10 @@ public:
   /// @brief Whether any contained plugin consumes the tensor-DMA memory hook.
   /// @details False for an empty group, so the caller's guard covers both.
   bool observes_tensor_dma_memory_access() const { return observes_tensor_dma_memory_access_; }
+
+  /// @brief Whether any contained plugin consumes the tensor-DMA issue hook.
+  /// @details False for an empty group, so the caller's guard covers both.
+  bool observes_tensor_dma_issue() const { return observes_tensor_dma_issue_; }
 
   /// Whether any contained plugin observes SGPR reads. Plugin policy is
   /// sampled when each plugin is added so SGPR access stays O(1).
@@ -325,6 +332,28 @@ public:
         if (entry.observes_tensor_dma_memory_access &&
             plugin_observes_hot_hooks(index, &wf, cached))
           entry.plugin->onAmdgpuTensorDmaMemoryAccess(access, wf);
+      }
+    });
+  }
+
+  /// Whether any tensor-DMA issue observer is subscribed to this wavefront.
+  bool observes_tensor_dma_issue(const amdgpu::Wavefront &wf) const {
+    const bool cached = has_hot_hook_subscription_cache(&wf);
+    for (size_t index = 0; index != plugins_.size(); ++index) {
+      const auto &entry = plugins_[index];
+      if (entry.observes_tensor_dma_issue && plugin_observes_hot_hooks(index, &wf, cached))
+        return true;
+    }
+    return false;
+  }
+
+  void onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObservation &issue,
+                               const amdgpu::Wavefront &wf) {
+    dispatch_wave_hot_hook(&wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        auto &entry = plugins_[index];
+        if (entry.observes_tensor_dma_issue && plugin_observes_hot_hooks(index, &wf, cached))
+          entry.plugin->onAmdgpuTensorDmaIssued(issue, wf);
       }
     });
   }
@@ -613,6 +642,7 @@ private:
   bool observes_vgpr_writes_ = false;
   bool observes_memory_routing_ = false;
   bool observes_tensor_dma_memory_access_ = false;
+  bool observes_tensor_dma_issue_ = false;
   bool observes_sgpr_reads_ = false;
   bool observes_scalar_register_writes_ = false;
   bool supports_async_instructions_ = true;
@@ -700,6 +730,7 @@ private:
     bool observes_scalar_register_writes = true;
     bool observes_memory_routing = false;
     bool observes_tensor_dma_memory_access = false;
+    bool observes_tensor_dma_issue = false;
     OwnedPlugin plugin;
   };
 

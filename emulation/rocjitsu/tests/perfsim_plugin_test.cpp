@@ -144,13 +144,34 @@ bool is_loader_symbol_version_error(std::string_view error, std::string_view ope
   return runtime_symbol_version_not_found(loader_reason(error, opened_path));
 }
 
+class ScopedStderrCapture {
+public:
+  ScopedStderrCapture() { testing::internal::CaptureStderr(); }
+  ~ScopedStderrCapture() {
+    if (active_)
+      testing::internal::GetCapturedStderr();
+  }
+
+  ScopedStderrCapture(const ScopedStderrCapture &) = delete;
+  ScopedStderrCapture &operator=(const ScopedStderrCapture &) = delete;
+
+  std::string finish() {
+    active_ = false;
+    return testing::internal::GetCapturedStderr();
+  }
+
+private:
+  bool active_ = true;
+};
+
 class SyntheticInstruction final : public Instruction {
 public:
-  SyntheticInstruction(std::string_view mnemonic, std::span<const uint32_t> words,
+  template <std::size_t WordCount>
+  SyntheticInstruction(std::string_view mnemonic, const std::array<uint32_t, WordCount> &words,
                        uint64_t flags = 0)
       : Instruction(mnemonic, nullptr) {
-    if (words.size() > raw_.size())
-      throw std::invalid_argument("too many synthetic instruction words");
+    static_assert(WordCount <= std::tuple_size_v<decltype(raw_)>,
+                  "too many synthetic instruction words");
     std::ranges::copy(words, raw_.begin());
     raw_encoding_ = raw_.data();
     size_ = static_cast<int>(words.size() * sizeof(uint32_t));
@@ -177,19 +198,19 @@ struct WaveFixture {
     cu = ComputeUnitCore::create("perfsim_test_cu", config, memory.get(), l2.get());
   }
 
-  Wavefront &wave(uint32_t dispatch_id, uint32_t rocjitsu_workgroup_id,
+  Wavefront *wave(uint32_t dispatch_id, uint32_t rocjitsu_workgroup_id,
                   std::array<uint32_t, 3> coordinate, uint32_t wave_in_group, uint32_t queue_id = 3,
                   uint32_t process_id = 4) {
     Wavefront *wf = cu->dispatch_wf(rocjitsu_workgroup_id, 0x1000, 64, 64);
     if (!wf)
-      throw std::runtime_error("could not allocate test wavefront");
+      return nullptr;
     wf->set_dispatch_id(dispatch_id);
     wf->set_wg_coord(coordinate[0], coordinate[1], coordinate[2]);
     wf->set_wave_in_group(wave_in_group);
     wf->set_queue_id(queue_id);
     wf->set_process_id(process_id);
     wf->set_cluster_info(0, 1);
-    return *wf;
+    return wf;
   }
 };
 
@@ -531,7 +552,9 @@ TEST_F(PerfsimPluginTest, GpuCompilerSimV13StagesUntilDispatchIsAccepted) {
   const KernelDispatchInfo info = dispatch_info(43);
   plugin.onAmdgpuDispatchPacketProcessed(info);
   plugin.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
-  Wavefront &wave = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
+  Wavefront *wave_ptr = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
+  ASSERT_NE(wave_ptr, nullptr);
+  Wavefront &wave = *wave_ptr;
   plugin.onAmdgpuWavefrontDispatched(wave);
 
   const std::array<uint32_t, 1> end_words{0xBF810000};
@@ -554,7 +577,7 @@ TEST_F(PerfsimPluginTest, GpuCompilerSimV13StagesUntilDispatchIsAccepted) {
 
 TEST_F(PerfsimPluginTest, CancellationRetainsFailureReasonAndReleasesWaveIdentity) {
   WaveFixture fixture(1);
-  testing::internal::CaptureStderr();
+  ScopedStderrCapture stderr_capture;
   {
     auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
     auto plugin = std::make_unique<PerfsimPlugin>();
@@ -566,7 +589,9 @@ TEST_F(PerfsimPluginTest, CancellationRetainsFailureReasonAndReleasesWaveIdentit
     constexpr uint32_t kFailedDispatch = 46;
     group->onAmdgpuDispatchPacketProcessed(dispatch_info(kFailedDispatch));
     group->onAmdgpuDispatchExecutionBegin(kFailedDispatch);
-    Wavefront &failed = fixture.wave(kFailedDispatch, 0, {0, 0, 0}, 0);
+    Wavefront *failed_ptr = fixture.wave(kFailedDispatch, 0, {0, 0, 0}, 0);
+    ASSERT_NE(failed_ptr, nullptr);
+    Wavefront &failed = *failed_ptr;
     group->onAmdgpuWavefrontDispatched(failed);
     const std::array<uint32_t, 1> words{0x7E000200};
     SyntheticInstruction instruction("v_add_f32", words);
@@ -578,7 +603,9 @@ TEST_F(PerfsimPluginTest, CancellationRetainsFailureReasonAndReleasesWaveIdentit
     constexpr uint32_t kNextDispatch = 47;
     group->onAmdgpuDispatchPacketProcessed(dispatch_info(kNextDispatch));
     group->onAmdgpuDispatchExecutionBegin(kNextDispatch);
-    Wavefront &next = fixture.wave(kNextDispatch, 1, {1, 0, 0}, 0);
+    Wavefront *next_ptr = fixture.wave(kNextDispatch, 1, {1, 0, 0}, 0);
+    ASSERT_NE(next_ptr, nullptr);
+    Wavefront &next = *next_ptr;
     group->onAmdgpuWavefrontDispatched(next);
     const std::array<uint32_t, 1> end_words{0xBF810000};
     SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
@@ -587,7 +614,7 @@ TEST_F(PerfsimPluginTest, CancellationRetainsFailureReasonAndReleasesWaveIdentit
     group->onAmdgpuDispatchExecutionEnd(kNextDispatch);
     group->onShutdown();
   }
-  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  const std::string diagnostic = stderr_capture.finish();
   EXPECT_NE(diagnostic.find("wavefront cancelled after an instruction failure"), std::string::npos);
   EXPECT_EQ(diagnostic.find("wavefront slot was reset"), std::string::npos);
   const auto trace = lines(read_file(trace_.path()));
@@ -600,7 +627,7 @@ TEST_F(PerfsimPluginTest, CancellationRetainsFailureReasonAndReleasesWaveIdentit
 
 TEST_F(PerfsimPluginTest, SetupRollbackCanRetryTheSameLogicalWave) {
   WaveFixture fixture(1);
-  testing::internal::CaptureStderr();
+  ScopedStderrCapture stderr_capture;
   {
     auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
     auto plugin = std::make_unique<PerfsimPlugin>();
@@ -612,12 +639,16 @@ TEST_F(PerfsimPluginTest, SetupRollbackCanRetryTheSameLogicalWave) {
     group->onAmdgpuDispatchPacketProcessed(dispatch_info(dispatch));
     group->onAmdgpuDispatchExecutionBegin(dispatch);
     for (uint32_t retry = 0; retry < 2; ++retry) {
-      Wavefront &wave = fixture.wave(dispatch, 0, {0, 0, 0}, 0);
+      Wavefront *wave_ptr = fixture.wave(dispatch, 0, {0, 0, 0}, 0);
+      ASSERT_NE(wave_ptr, nullptr);
+      Wavefront &wave = *wave_ptr;
       group->onAmdgpuWavefrontDispatched(wave);
       fixture.cu->abort_workgroup(dispatch, 0);
       EXPECT_TRUE(wave.is_halted());
     }
-    Wavefront &wave = fixture.wave(dispatch, 0, {0, 0, 0}, 0);
+    Wavefront *wave_ptr = fixture.wave(dispatch, 0, {0, 0, 0}, 0);
+    ASSERT_NE(wave_ptr, nullptr);
+    Wavefront &wave = *wave_ptr;
     group->onAmdgpuWavefrontDispatched(wave);
     const std::array<uint32_t, 1> words{0xBF810000};
     SyntheticInstruction end("s_endpgm", words, PROGRAM_TERMINATOR);
@@ -626,7 +657,7 @@ TEST_F(PerfsimPluginTest, SetupRollbackCanRetryTheSameLogicalWave) {
     group->onAmdgpuDispatchExecutionEnd(dispatch);
     group->onShutdown();
   }
-  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  const std::string diagnostic = stderr_capture.finish();
   EXPECT_EQ(diagnostic.find("skipped dispatch"), std::string::npos);
   const auto trace = lines(read_file(trace_.path()));
   EXPECT_NE(line_with_prefix(trace, "begin 46 "), trace.size());
@@ -636,7 +667,7 @@ TEST_F(PerfsimPluginTest, SetupRollbackCanRetryTheSameLogicalWave) {
 
 TEST_F(PerfsimPluginTest, ReclaimsFaultAbortedWaveStateBeforePhysicalSlotReuse) {
   WaveFixture fixture(1);
-  testing::internal::CaptureStderr();
+  ScopedStderrCapture stderr_capture;
   {
     PerfsimPlugin plugin;
     ASSERT_TRUE(plugin.initialize(plugin_config().c_str()).succeeded());
@@ -645,7 +676,9 @@ TEST_F(PerfsimPluginTest, ReclaimsFaultAbortedWaveStateBeforePhysicalSlotReuse) 
     constexpr uint32_t AbortedDispatch = 44;
     plugin.onAmdgpuDispatchPacketProcessed(dispatch_info(AbortedDispatch));
     plugin.onAmdgpuDispatchExecutionBegin(AbortedDispatch);
-    Wavefront &aborted = fixture.wave(AbortedDispatch, 0, {0, 0, 0}, 0);
+    Wavefront *aborted_ptr = fixture.wave(AbortedDispatch, 0, {0, 0, 0}, 0);
+    ASSERT_NE(aborted_ptr, nullptr);
+    Wavefront &aborted = *aborted_ptr;
     plugin.onAmdgpuWavefrontDispatched(aborted);
     const std::array<uint32_t, 1> add_words{0x7E000200};
     SyntheticInstruction add("v_add_f32", add_words);
@@ -659,7 +692,9 @@ TEST_F(PerfsimPluginTest, ReclaimsFaultAbortedWaveStateBeforePhysicalSlotReuse) 
     constexpr uint32_t ReusedDispatch = 45;
     plugin.onAmdgpuDispatchPacketProcessed(dispatch_info(ReusedDispatch));
     plugin.onAmdgpuDispatchExecutionBegin(ReusedDispatch);
-    Wavefront &reused = fixture.wave(ReusedDispatch, 1, {1, 0, 0}, 0);
+    Wavefront *reused_ptr = fixture.wave(ReusedDispatch, 1, {1, 0, 0}, 0);
+    ASSERT_NE(reused_ptr, nullptr);
+    Wavefront &reused = *reused_ptr;
     ASSERT_EQ(&reused, &aborted);
     plugin.onAmdgpuWavefrontDispatched(reused);
     EXPECT_TRUE(plugin.observes_hot_hooks_for_wavefront(&reused));
@@ -671,7 +706,7 @@ TEST_F(PerfsimPluginTest, ReclaimsFaultAbortedWaveStateBeforePhysicalSlotReuse) 
     plugin.onAmdgpuDispatchExecutionEnd(ReusedDispatch);
     plugin.onShutdown();
   }
-  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  const std::string diagnostic = stderr_capture.finish();
   EXPECT_NE(diagnostic.find("wavefront slot was reset without a terminal callback"),
             std::string::npos);
 
@@ -686,7 +721,7 @@ TEST_F(PerfsimPluginTest, ReclaimsFaultAbortedWaveStateBeforePhysicalSlotReuse) 
 
 TEST_F(PerfsimPluginTest, RetainsRejectedDispatchStateUntilLiveWaveRetires) {
   WaveFixture fixture(1);
-  testing::internal::CaptureStderr();
+  ScopedStderrCapture stderr_capture;
   {
     PerfsimPlugin plugin;
     ASSERT_TRUE(plugin.initialize(plugin_config().c_str()).succeeded());
@@ -695,7 +730,9 @@ TEST_F(PerfsimPluginTest, RetainsRejectedDispatchStateUntilLiveWaveRetires) {
     constexpr uint32_t Dispatch = 50;
     plugin.onAmdgpuDispatchPacketProcessed(dispatch_info(Dispatch));
     plugin.onAmdgpuDispatchExecutionBegin(Dispatch);
-    Wavefront &wave = fixture.wave(Dispatch, 0, {0, 0, 0}, 0);
+    Wavefront *wave_ptr = fixture.wave(Dispatch, 0, {0, 0, 0}, 0);
+    ASSERT_NE(wave_ptr, nullptr);
+    Wavefront &wave = *wave_ptr;
     plugin.onAmdgpuWavefrontDispatched(wave);
 
     // Execution end normally follows every wave halt. Exercise the malformed
@@ -712,7 +749,7 @@ TEST_F(PerfsimPluginTest, RetainsRejectedDispatchStateUntilLiveWaveRetires) {
     EXPECT_FALSE(plugin.observes_hot_hooks_for_wavefront(&wave));
     plugin.onShutdown();
   }
-  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  const std::string diagnostic = stderr_capture.finish();
   EXPECT_NE(diagnostic.find("dispatch ended with live wavefronts"), std::string::npos);
 
   const auto trace = lines(read_file(trace_.path()));
@@ -724,7 +761,7 @@ TEST_F(PerfsimPluginTest, RetainsRejectedDispatchStateUntilLiveWaveRetires) {
 TEST_F(PerfsimPluginTest, SelectsExactDispatchNameWithoutRejectingOtherDispatches) {
   WaveFixture fixture;
   const std::string config = plugin_config_with_dispatch_name("target_kernel");
-  testing::internal::CaptureStderr();
+  ScopedStderrCapture stderr_capture;
   {
     PerfsimPlugin plugin;
     ASSERT_TRUE(plugin.initialize(config.c_str()).succeeded());
@@ -734,7 +771,9 @@ TEST_F(PerfsimPluginTest, SelectsExactDispatchNameWithoutRejectingOtherDispatche
     setup.kernel_name = "target_kernel_suffix";
     plugin.onAmdgpuDispatchPacketProcessed(setup);
     plugin.onAmdgpuDispatchExecutionBegin(setup.dispatch_id);
-    Wavefront &setup_wave = fixture.wave(setup.dispatch_id, 0, {0, 0, 0}, 0);
+    Wavefront *setup_wave_ptr = fixture.wave(setup.dispatch_id, 0, {0, 0, 0}, 0);
+    ASSERT_NE(setup_wave_ptr, nullptr);
+    Wavefront &setup_wave = *setup_wave_ptr;
     plugin.onAmdgpuWavefrontDispatched(setup_wave);
     EXPECT_FALSE(plugin.observes_hot_hooks_for_wavefront(&setup_wave));
     const std::array<uint32_t, 1> add_words{0x7E000200};
@@ -747,7 +786,9 @@ TEST_F(PerfsimPluginTest, SelectsExactDispatchNameWithoutRejectingOtherDispatche
     target.kernel_name = "target_kernel";
     plugin.onAmdgpuDispatchPacketProcessed(target);
     plugin.onAmdgpuDispatchExecutionBegin(target.dispatch_id);
-    Wavefront &target_wave = fixture.wave(target.dispatch_id, 1, {1, 0, 0}, 0);
+    Wavefront *target_wave_ptr = fixture.wave(target.dispatch_id, 1, {1, 0, 0}, 0);
+    ASSERT_NE(target_wave_ptr, nullptr);
+    Wavefront &target_wave = *target_wave_ptr;
     plugin.onAmdgpuWavefrontDispatched(target_wave);
     EXPECT_TRUE(plugin.observes_hot_hooks_for_wavefront(&target_wave));
     const std::array<uint32_t, 1> end_words{0xBF810000};
@@ -757,7 +798,7 @@ TEST_F(PerfsimPluginTest, SelectsExactDispatchNameWithoutRejectingOtherDispatche
     plugin.onAmdgpuDispatchExecutionEnd(target.dispatch_id);
     plugin.onShutdown();
   }
-  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  const std::string diagnostic = stderr_capture.finish();
   EXPECT_EQ(diagnostic.find("skipped dispatch"), std::string::npos);
 
   const auto trace = lines(read_file(trace_.path()));
@@ -772,7 +813,7 @@ TEST_F(PerfsimPluginTest, SelectsExactDispatchNameWithoutRejectingOtherDispatche
 TEST_F(PerfsimPluginTest, DiscardsUnselectedFaultAbortedDispatchWithoutEnd) {
   WaveFixture fixture(1);
   const std::string config = plugin_config_with_dispatch_name("target_kernel");
-  testing::internal::CaptureStderr();
+  ScopedStderrCapture stderr_capture;
   {
     PerfsimPlugin plugin;
     ASSERT_TRUE(plugin.initialize(config.c_str()).succeeded());
@@ -782,7 +823,9 @@ TEST_F(PerfsimPluginTest, DiscardsUnselectedFaultAbortedDispatchWithoutEnd) {
     filtered.kernel_name = "other_kernel";
     plugin.onAmdgpuDispatchPacketProcessed(filtered);
     plugin.onAmdgpuDispatchExecutionBegin(filtered.dispatch_id);
-    Wavefront &filtered_wave = fixture.wave(filtered.dispatch_id, 0, {0, 0, 0}, 0);
+    Wavefront *filtered_wave_ptr = fixture.wave(filtered.dispatch_id, 0, {0, 0, 0}, 0);
+    ASSERT_NE(filtered_wave_ptr, nullptr);
+    Wavefront &filtered_wave = *filtered_wave_ptr;
     plugin.onAmdgpuWavefrontDispatched(filtered_wave);
     EXPECT_FALSE(plugin.observes_hot_hooks_for_wavefront(&filtered_wave));
 
@@ -794,7 +837,9 @@ TEST_F(PerfsimPluginTest, DiscardsUnselectedFaultAbortedDispatchWithoutEnd) {
     target.kernel_name = "target_kernel";
     plugin.onAmdgpuDispatchPacketProcessed(target);
     plugin.onAmdgpuDispatchExecutionBegin(target.dispatch_id);
-    Wavefront &target_wave = fixture.wave(target.dispatch_id, 1, {1, 0, 0}, 0);
+    Wavefront *target_wave_ptr = fixture.wave(target.dispatch_id, 1, {1, 0, 0}, 0);
+    ASSERT_NE(target_wave_ptr, nullptr);
+    Wavefront &target_wave = *target_wave_ptr;
     plugin.onAmdgpuWavefrontDispatched(target_wave);
     EXPECT_TRUE(plugin.observes_hot_hooks_for_wavefront(&target_wave));
 
@@ -805,7 +850,7 @@ TEST_F(PerfsimPluginTest, DiscardsUnselectedFaultAbortedDispatchWithoutEnd) {
     plugin.onAmdgpuDispatchExecutionEnd(target.dispatch_id);
     plugin.onShutdown();
   }
-  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  const std::string diagnostic = stderr_capture.finish();
   EXPECT_EQ(diagnostic.find("skipped dispatch 46"), std::string::npos);
   EXPECT_EQ(diagnostic.find("dispatch was incomplete at plugin shutdown"), std::string::npos);
   EXPECT_EQ(diagnostic.find("matched no dispatches"), std::string::npos);
@@ -819,7 +864,7 @@ TEST_F(PerfsimPluginTest, DiscardsUnselectedFaultAbortedDispatchWithoutEnd) {
 
 TEST_F(PerfsimPluginTest, ReportsConfiguredDispatchNameWhenEveryDispatchMisses) {
   const std::string config = plugin_config_with_dispatch_name("missing_kernel");
-  testing::internal::CaptureStderr();
+  ScopedStderrCapture stderr_capture;
   {
     PerfsimPlugin plugin;
     ASSERT_TRUE(plugin.initialize(config.c_str()).succeeded());
@@ -834,7 +879,7 @@ TEST_F(PerfsimPluginTest, ReportsConfiguredDispatchNameWhenEveryDispatchMisses) 
     }
     plugin.onShutdown();
   }
-  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  const std::string diagnostic = stderr_capture.finish();
   const std::string expected =
       "[rocjitsu:perfsim] configured dispatch_name 'missing_kernel' matched no dispatches";
   const size_t first = diagnostic.find(expected);
@@ -850,7 +895,7 @@ TEST_F(PerfsimPluginTest, ReportsConfiguredDispatchNameWhenEveryDispatchMisses) 
 TEST_F(PerfsimPluginTest, CapsStagingToFirstDistinctWorkgroupsWithoutBlockingReplay) {
   WaveFixture fixture(3);
   const std::string config = plugin_config_with_observed_workgroup_cap(1);
-  testing::internal::CaptureStderr();
+  ScopedStderrCapture stderr_capture;
   {
     ExecutionPluginGroup group(PluginSinkConfig{});
     auto plugin = std::make_unique<PerfsimPlugin>();
@@ -862,12 +907,18 @@ TEST_F(PerfsimPluginTest, CapsStagingToFirstDistinctWorkgroupsWithoutBlockingRep
     info.wfs_per_workgroup = 2;
     group.onAmdgpuDispatchPacketProcessed(info);
     group.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
-    Wavefront &first = fixture.wave(info.dispatch_id, 10, {1000, 0, 0}, 0);
-    Wavefront &same_workgroup = fixture.wave(info.dispatch_id, 10, {1000, 0, 0}, 1);
+    Wavefront *first_ptr = fixture.wave(info.dispatch_id, 10, {1000, 0, 0}, 0);
+    ASSERT_NE(first_ptr, nullptr);
+    Wavefront &first = *first_ptr;
+    Wavefront *same_workgroup_ptr = fixture.wave(info.dispatch_id, 10, {1000, 0, 0}, 1);
+    ASSERT_NE(same_workgroup_ptr, nullptr);
+    Wavefront &same_workgroup = *same_workgroup_ptr;
     // This coordinate collides with {1000,0,0} under FFM's packed cluster ID.
     // The observation cap is defined in terms of RocJITsu workgroup identity,
     // so the collision must not admit this distinct workgroup.
-    Wavefront &capped = fixture.wave(info.dispatch_id, 11, {0, 1, 0}, 0);
+    Wavefront *capped_ptr = fixture.wave(info.dispatch_id, 11, {0, 1, 0}, 0);
+    ASSERT_NE(capped_ptr, nullptr);
+    Wavefront &capped = *capped_ptr;
     group.onAmdgpuWavefrontDispatched(first);
     group.onAmdgpuWavefrontDispatched(same_workgroup);
     group.onAmdgpuWavefrontDispatched(capped);
@@ -942,7 +993,7 @@ TEST_F(PerfsimPluginTest, CapsStagingToFirstDistinctWorkgroupsWithoutBlockingRep
     group.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
     group.onShutdown();
   }
-  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  const std::string diagnostic = stderr_capture.finish();
   EXPECT_EQ(diagnostic.find("skipped dispatch"), std::string::npos);
 
   const auto trace = lines(read_file(trace_.path()));
@@ -970,7 +1021,9 @@ TEST_F(PerfsimPluginTest, RequestsV13AndForwardsOwnedFieldsInOrder) {
     plugin.onAmdgpuDispatchPacketProcessed(info);
     info.kernel_name = "mutated_after_callback";
     plugin.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
-    Wavefront &wave = fixture.wave(info.dispatch_id, 99, {2, 3, 4}, 5);
+    Wavefront *wave_ptr = fixture.wave(info.dispatch_id, 99, {2, 3, 4}, 5);
+    ASSERT_NE(wave_ptr, nullptr);
+    Wavefront &wave = *wave_ptr;
     plugin.onAmdgpuWavefrontDispatched(wave);
 
     const std::array<uint32_t, 2> wmma_words{0xCC400123, 0xABCDEF01};
@@ -1089,7 +1142,9 @@ TEST_F(PerfsimPluginTest, FallsBackToV8AndForwardsLegacyPayloadPrefixes) {
     info.kernel_name = "ignored_by_v8";
     plugin.onAmdgpuDispatchPacketProcessed(info);
     plugin.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
-    Wavefront &wave = fixture.wave(info.dispatch_id, 99, {2, 3, 4}, 5);
+    Wavefront *wave_ptr = fixture.wave(info.dispatch_id, 99, {2, 3, 4}, 5);
+    ASSERT_NE(wave_ptr, nullptr);
+    Wavefront &wave = *wave_ptr;
     plugin.onAmdgpuWavefrontDispatched(wave);
 
     const std::array<uint32_t, 3> tensor_words{0xD0710001, 0x7C000000, 0x18140C00};
@@ -1210,7 +1265,7 @@ TEST_F(PerfsimPluginTest, ReportsNegotiatedVersionForUnrepresentableInstruction)
   setenv("ROCJITSU_PERFSIM_FAKE_MODE", "v8_only", 1);
   WaveFixture fixture;
   const std::string config = plugin_config();
-  testing::internal::CaptureStderr();
+  ScopedStderrCapture stderr_capture;
   {
     PerfsimPlugin plugin;
     ASSERT_TRUE(plugin.initialize(config.c_str()).succeeded());
@@ -1219,7 +1274,9 @@ TEST_F(PerfsimPluginTest, ReportsNegotiatedVersionForUnrepresentableInstruction)
     const KernelDispatchInfo info = dispatch_info(9);
     plugin.onAmdgpuDispatchPacketProcessed(info);
     plugin.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
-    Wavefront &wave = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
+    Wavefront *wave_ptr = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
+    ASSERT_NE(wave_ptr, nullptr);
+    Wavefront &wave = *wave_ptr;
     plugin.onAmdgpuWavefrontDispatched(wave);
 
     const std::array<uint32_t, 5> words{};
@@ -1229,7 +1286,7 @@ TEST_F(PerfsimPluginTest, ReportsNegotiatedVersionForUnrepresentableInstruction)
     plugin.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
     plugin.onShutdown();
   }
-  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  const std::string diagnostic = stderr_capture.finish();
   EXPECT_NE(diagnostic.find("instruction encoding is not representable by FFM v8"),
             std::string::npos);
   EXPECT_EQ(diagnostic.find("FFM v13"), std::string::npos);
@@ -1256,7 +1313,7 @@ TEST_F(PerfsimPluginTest, RejectsMalformedTensorDmaMetadataIndependently) {
     const MalformedCase &test_case = cases[index];
     SCOPED_TRACE(test_case.name);
     WaveFixture fixture;
-    testing::internal::CaptureStderr();
+    ScopedStderrCapture stderr_capture;
     {
       PerfsimPlugin plugin;
       ASSERT_TRUE(plugin.initialize(config.c_str()).succeeded());
@@ -1266,7 +1323,9 @@ TEST_F(PerfsimPluginTest, RejectsMalformedTensorDmaMetadataIndependently) {
       const KernelDispatchInfo info = dispatch_info(dispatch_id);
       plugin.onAmdgpuDispatchPacketProcessed(info);
       plugin.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
-      Wavefront &wave = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
+      Wavefront *wave_ptr = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
+      ASSERT_NE(wave_ptr, nullptr);
+      Wavefront &wave = *wave_ptr;
       plugin.onAmdgpuWavefrontDispatched(wave);
 
       const std::array<uint32_t, 3> words{0xD0710001, 0x7C000000, 0x18140C00};
@@ -1299,7 +1358,7 @@ TEST_F(PerfsimPluginTest, RejectsMalformedTensorDmaMetadataIndependently) {
       plugin.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
       plugin.onShutdown();
     }
-    const std::string diagnostic = testing::internal::GetCapturedStderr();
+    const std::string diagnostic = stderr_capture.finish();
     EXPECT_NE(diagnostic.find("tensor-DMA observation is malformed"), std::string::npos);
 
     const std::string dispatch_prefix = std::to_string(18 + index) + " ";
@@ -1321,7 +1380,9 @@ TEST_F(PerfsimPluginTest, PreservesMixedFlatAndDualLdsRecordOrder) {
   const KernelDispatchInfo info = dispatch_info(11);
   plugin.onAmdgpuDispatchPacketProcessed(info);
   plugin.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
-  Wavefront &wave = fixture.wave(info.dispatch_id, 10, {0, 0, 0}, 0);
+  Wavefront *wave_ptr = fixture.wave(info.dispatch_id, 10, {0, 0, 0}, 0);
+  ASSERT_NE(wave_ptr, nullptr);
+  Wavefront &wave = *wave_ptr;
   wave.set_lds_base(0x1000);
   plugin.onAmdgpuWavefrontDispatched(wave);
 
@@ -1512,7 +1573,9 @@ TEST_F(PerfsimPluginTest, SplitsMixedFlatResourcesInFirstRequestLaneOrder) {
   const KernelDispatchInfo info = dispatch_info(13);
   plugin.onAmdgpuDispatchPacketProcessed(info);
   plugin.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
-  Wavefront &wave = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
+  Wavefront *wave_ptr = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
+  ASSERT_NE(wave_ptr, nullptr);
+  Wavefront &wave = *wave_ptr;
   plugin.onAmdgpuWavefrontDispatched(wave);
 
   const std::array<uint32_t, 1> words{0xDEAD0004};
@@ -1607,7 +1670,9 @@ TEST_F(PerfsimPluginTest, ReportsFlatDdsLoadsAsLdsWithOriginalAddresses) {
   const KernelDispatchInfo info = dispatch_info(15);
   plugin.onAmdgpuDispatchPacketProcessed(info);
   plugin.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
-  Wavefront &wave = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
+  Wavefront *wave_ptr = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
+  ASSERT_NE(wave_ptr, nullptr);
+  Wavefront &wave = *wave_ptr;
   plugin.onAmdgpuWavefrontDispatched(wave);
 
   const std::array<uint32_t, 1> words{0xDEAD0015};
@@ -1669,7 +1734,7 @@ TEST_F(PerfsimPluginTest, RejectsWholeDispatchForFlatDdsStoresAndAtomics) {
       {17, "flat_atomic_add", true, AtomicOp::ADD},
   }};
 
-  testing::internal::CaptureStderr();
+  ScopedStderrCapture stderr_capture;
   for (const auto &test : cases) {
     WaveFixture fixture;
     const std::string config = plugin_config();
@@ -1680,7 +1745,9 @@ TEST_F(PerfsimPluginTest, RejectsWholeDispatchForFlatDdsStoresAndAtomics) {
     const KernelDispatchInfo info = dispatch_info(test.dispatch_id);
     plugin.onAmdgpuDispatchPacketProcessed(info);
     plugin.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
-    Wavefront &wave = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
+    Wavefront *wave_ptr = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
+    ASSERT_NE(wave_ptr, nullptr);
+    Wavefront &wave = *wave_ptr;
     plugin.onAmdgpuWavefrontDispatched(wave);
 
     const std::array<uint32_t, 1> words{0xDEAD0016};
@@ -1723,7 +1790,7 @@ TEST_F(PerfsimPluginTest, RejectsWholeDispatchForFlatDdsStoresAndAtomics) {
     plugin.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
     plugin.onShutdown();
   }
-  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  const std::string diagnostic = stderr_capture.finish();
   EXPECT_EQ(std::ranges::count(diagnostic, '\n'), cases.size());
   EXPECT_NE(diagnostic.find("FLAT DDS store or atomic"), std::string::npos);
 
@@ -1747,7 +1814,9 @@ TEST_F(PerfsimPluginTest, MatchesFfmRegularMemoryCallbackSizes) {
   const KernelDispatchInfo info = dispatch_info(14);
   plugin.onAmdgpuDispatchPacketProcessed(info);
   plugin.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
-  Wavefront &wave = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
+  Wavefront *wave_ptr = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
+  ASSERT_NE(wave_ptr, nullptr);
+  Wavefront &wave = *wave_ptr;
   wave.set_lds_base(0x1000);
   plugin.onAmdgpuWavefrontDispatched(wave);
 
@@ -1828,7 +1897,9 @@ TEST_F(PerfsimPluginTest, ForwardsNominalWidthsForPartialOobVbufferAccesses) {
   const KernelDispatchInfo info = dispatch_info(15);
   plugin.onAmdgpuDispatchPacketProcessed(info);
   plugin.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
-  Wavefront &wave = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
+  Wavefront *wave_ptr = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
+  ASSERT_NE(wave_ptr, nullptr);
+  Wavefront &wave = *wave_ptr;
   plugin.onAmdgpuWavefrontDispatched(wave);
 
   struct PartialOobCase {
@@ -1909,7 +1980,7 @@ TEST_F(PerfsimPluginTest, RejectsWholeDispatchWhenFlatAtomicResolvesToScratch) {
   WaveFixture fixture;
   setenv("ROCJITSU_PERFSIM_FAKE_MODE", "gpucsim_name", 1);
   const std::string config = plugin_config();
-  testing::internal::CaptureStderr();
+  ScopedStderrCapture stderr_capture;
   {
     PerfsimPlugin plugin;
     ASSERT_TRUE(plugin.initialize(config.c_str()).succeeded());
@@ -1918,7 +1989,9 @@ TEST_F(PerfsimPluginTest, RejectsWholeDispatchWhenFlatAtomicResolvesToScratch) {
     const KernelDispatchInfo info = dispatch_info(12);
     plugin.onAmdgpuDispatchPacketProcessed(info);
     plugin.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
-    Wavefront &wave = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
+    Wavefront *wave_ptr = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
+    ASSERT_NE(wave_ptr, nullptr);
+    Wavefront &wave = *wave_ptr;
     plugin.onAmdgpuWavefrontDispatched(wave);
 
     const std::array<uint32_t, 1> atomic_words{0xDEAD0003};
@@ -1957,7 +2030,7 @@ TEST_F(PerfsimPluginTest, RejectsWholeDispatchWhenFlatAtomicResolvesToScratch) {
     plugin.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
     plugin.onShutdown();
   }
-  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  const std::string diagnostic = stderr_capture.finish();
   EXPECT_NE(diagnostic.find("FLAT atomic resolving to scratch"), std::string::npos);
 
   const auto trace = lines(read_file(trace_.path()));
@@ -1979,8 +2052,12 @@ TEST_F(PerfsimPluginTest, ReplaysInterleavedDispatchesAsOneGloballyOrderedEpoch)
     plugin.onAmdgpuDispatchPacketProcessed(dispatch_info(id));
     plugin.onAmdgpuDispatchExecutionBegin(id);
   }
-  Wavefront &first = fixture.wave(21, 1, {1, 0, 0}, 0);
-  Wavefront &second = fixture.wave(22, 2, {2, 0, 0}, 0);
+  Wavefront *first_ptr = fixture.wave(21, 1, {1, 0, 0}, 0);
+  ASSERT_NE(first_ptr, nullptr);
+  Wavefront &first = *first_ptr;
+  Wavefront *second_ptr = fixture.wave(22, 2, {2, 0, 0}, 0);
+  ASSERT_NE(second_ptr, nullptr);
+  Wavefront &second = *second_ptr;
   plugin.onAmdgpuWavefrontDispatched(first);
   plugin.onAmdgpuWavefrontDispatched(second);
 
@@ -2026,7 +2103,9 @@ TEST_F(PerfsimPluginTest, ReplaysLargeEpochInOrder) {
   const KernelDispatchInfo info = dispatch_info(24);
   plugin.onAmdgpuDispatchPacketProcessed(info);
   plugin.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
-  Wavefront &wave = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
+  Wavefront *wave_ptr = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
+  ASSERT_NE(wave_ptr, nullptr);
+  Wavefront &wave = *wave_ptr;
   plugin.onAmdgpuWavefrontDispatched(wave);
 
   constexpr uint32_t kAddCount = 4096;
@@ -2068,8 +2147,12 @@ TEST_F(PerfsimPluginTest, CompactsInterleavedChunksWithoutReorderingSurvivors) {
     plugin.onAmdgpuDispatchPacketProcessed(dispatch_info(id));
     plugin.onAmdgpuDispatchExecutionBegin(id);
   }
-  Wavefront &rejected_wave = fixture.wave(33, 0, {0, 0, 0}, 0);
-  Wavefront &supported_wave = fixture.wave(34, 1, {1, 0, 0}, 0);
+  Wavefront *rejected_wave_ptr = fixture.wave(33, 0, {0, 0, 0}, 0);
+  ASSERT_NE(rejected_wave_ptr, nullptr);
+  Wavefront &rejected_wave = *rejected_wave_ptr;
+  Wavefront *supported_wave_ptr = fixture.wave(34, 1, {1, 0, 0}, 0);
+  ASSERT_NE(supported_wave_ptr, nullptr);
+  Wavefront &supported_wave = *supported_wave_ptr;
   plugin.onAmdgpuWavefrontDispatched(rejected_wave);
   plugin.onAmdgpuWavefrontDispatched(supported_wave);
 
@@ -2083,7 +2166,7 @@ TEST_F(PerfsimPluginTest, CompactsInterleavedChunksWithoutReorderingSurvivors) {
     plugin.onAmdgpuBeforeExecuteInstruction(kSupportedFirstPc + i * 4, add, supported_wave);
   }
 
-  testing::internal::CaptureStderr();
+  ScopedStderrCapture stderr_capture;
   SyntheticInstruction scratch("scratch_load_dword", add_words, MEMORY_OP);
   plugin.onAmdgpuBeforeExecuteInstruction(0x30000, scratch, rejected_wave);
 
@@ -2093,7 +2176,7 @@ TEST_F(PerfsimPluginTest, CompactsInterleavedChunksWithoutReorderingSurvivors) {
   plugin.onAmdgpuBeforeExecuteInstruction(supported_end_pc, end, supported_wave);
   plugin.onAmdgpuWavefrontHalted(supported_wave);
   plugin.onAmdgpuDispatchExecutionEnd(34);
-  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  const std::string diagnostic = stderr_capture.finish();
   EXPECT_NE(diagnostic.find("dedicated SCRATCH instructions are not FFM-compatible"),
             std::string::npos);
   EXPECT_EQ(std::ranges::count(diagnostic, '\n'), 1);
@@ -2132,7 +2215,7 @@ TEST_F(PerfsimPluginTest, CompactsInterleavedChunksWithoutReorderingSurvivors) {
 TEST_F(PerfsimPluginTest, RejectsLongLivedDispatchAtStagingBudgetAndReusesBudget) {
   WaveFixture fixture;
   const std::string config = plugin_config_with_staging_budget(4096);
-  testing::internal::CaptureStderr();
+  ScopedStderrCapture stderr_capture;
   {
     PerfsimPlugin plugin;
     ASSERT_TRUE(plugin.initialize(config.c_str()).succeeded());
@@ -2141,7 +2224,9 @@ TEST_F(PerfsimPluginTest, RejectsLongLivedDispatchAtStagingBudgetAndReusesBudget
     const KernelDispatchInfo rejected_info = dispatch_info(25);
     plugin.onAmdgpuDispatchPacketProcessed(rejected_info);
     plugin.onAmdgpuDispatchExecutionBegin(rejected_info.dispatch_id);
-    Wavefront &rejected_wave = fixture.wave(rejected_info.dispatch_id, 0, {0, 0, 0}, 0);
+    Wavefront *rejected_wave_ptr = fixture.wave(rejected_info.dispatch_id, 0, {0, 0, 0}, 0);
+    ASSERT_NE(rejected_wave_ptr, nullptr);
+    Wavefront &rejected_wave = *rejected_wave_ptr;
     plugin.onAmdgpuWavefrontDispatched(rejected_wave);
 
     const std::array<uint32_t, 1> add_words{0x7E000200};
@@ -2155,7 +2240,9 @@ TEST_F(PerfsimPluginTest, RejectsLongLivedDispatchAtStagingBudgetAndReusesBudget
     const KernelDispatchInfo supported_info = dispatch_info(26);
     plugin.onAmdgpuDispatchPacketProcessed(supported_info);
     plugin.onAmdgpuDispatchExecutionBegin(supported_info.dispatch_id);
-    Wavefront &supported_wave = fixture.wave(supported_info.dispatch_id, 1, {1, 0, 0}, 0);
+    Wavefront *supported_wave_ptr = fixture.wave(supported_info.dispatch_id, 1, {1, 0, 0}, 0);
+    ASSERT_NE(supported_wave_ptr, nullptr);
+    Wavefront &supported_wave = *supported_wave_ptr;
     plugin.onAmdgpuWavefrontDispatched(supported_wave);
     const std::array<uint32_t, 1> end_words{0xBF810000};
     SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
@@ -2164,7 +2251,7 @@ TEST_F(PerfsimPluginTest, RejectsLongLivedDispatchAtStagingBudgetAndReusesBudget
     plugin.onAmdgpuDispatchExecutionEnd(supported_info.dispatch_id);
     plugin.onShutdown();
   }
-  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  const std::string diagnostic = stderr_capture.finish();
   const size_t budget_diagnostic = diagnostic.find("staging budget of 4096 bytes exceeded");
   ASSERT_NE(budget_diagnostic, std::string::npos);
   EXPECT_EQ(diagnostic.find("staging budget", budget_diagnostic + 1), std::string::npos);
@@ -2189,14 +2276,18 @@ TEST_F(PerfsimPluginTest, RejectedDispatchDoesNotBlockOverlappingSupportedDispat
     plugin.onAmdgpuDispatchPacketProcessed(dispatch_info(id));
     plugin.onAmdgpuDispatchExecutionBegin(id);
   }
-  Wavefront &rejected_wave = fixture.wave(27, 0, {0, 0, 0}, 0);
-  Wavefront &supported_wave = fixture.wave(28, 1, {1, 0, 0}, 0);
+  Wavefront *rejected_wave_ptr = fixture.wave(27, 0, {0, 0, 0}, 0);
+  ASSERT_NE(rejected_wave_ptr, nullptr);
+  Wavefront &rejected_wave = *rejected_wave_ptr;
+  Wavefront *supported_wave_ptr = fixture.wave(28, 1, {1, 0, 0}, 0);
+  ASSERT_NE(supported_wave_ptr, nullptr);
+  Wavefront &supported_wave = *supported_wave_ptr;
   plugin.onAmdgpuWavefrontDispatched(rejected_wave);
   plugin.onAmdgpuWavefrontDispatched(supported_wave);
 
   const std::array<uint32_t, 1> add_words{0x7E000200};
   SyntheticInstruction add("v_add_f32", add_words);
-  testing::internal::CaptureStderr();
+  ScopedStderrCapture stderr_capture;
   for (uint32_t i = 0; i < 128; ++i)
     plugin.onAmdgpuBeforeExecuteInstruction(0xB000 + i * 4, add, rejected_wave);
 
@@ -2205,7 +2296,7 @@ TEST_F(PerfsimPluginTest, RejectedDispatchDoesNotBlockOverlappingSupportedDispat
   plugin.onAmdgpuBeforeExecuteInstruction(0xC000, end, supported_wave);
   plugin.onAmdgpuWavefrontHalted(supported_wave);
   plugin.onAmdgpuDispatchExecutionEnd(28);
-  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  const std::string diagnostic = stderr_capture.finish();
   EXPECT_NE(diagnostic.find("staging budget of 4096 bytes exceeded"), std::string::npos);
   EXPECT_EQ(std::ranges::count(diagnostic, '\n'), 1);
 
@@ -2232,7 +2323,7 @@ TEST_F(PerfsimPluginTest, RejectedDispatchDoesNotBlockOverlappingSupportedDispat
 TEST_F(PerfsimPluginTest, IgnoresCallbacksAfterEarlyDispatchRejection) {
   WaveFixture fixture;
   const std::string config = plugin_config_with_staging_budget(4096);
-  testing::internal::CaptureStderr();
+  ScopedStderrCapture stderr_capture;
   {
     PerfsimPlugin plugin;
     ASSERT_TRUE(plugin.initialize(config.c_str()).succeeded());
@@ -2242,7 +2333,9 @@ TEST_F(PerfsimPluginTest, IgnoresCallbacksAfterEarlyDispatchRejection) {
     rejected_info.code_target = ROCJITSU_CODE_TARGET_GFX950;
     plugin.onAmdgpuDispatchPacketProcessed(rejected_info);
     plugin.onAmdgpuDispatchExecutionBegin(rejected_info.dispatch_id);
-    Wavefront &rejected_wave = fixture.wave(rejected_info.dispatch_id, 0, {0, 0, 0}, 0);
+    Wavefront *rejected_wave_ptr = fixture.wave(rejected_info.dispatch_id, 0, {0, 0, 0}, 0);
+    ASSERT_NE(rejected_wave_ptr, nullptr);
+    Wavefront &rejected_wave = *rejected_wave_ptr;
     plugin.onAmdgpuWavefrontDispatched(rejected_wave);
 
     const std::array<uint32_t, 1> add_words{0x7E000200};
@@ -2253,7 +2346,9 @@ TEST_F(PerfsimPluginTest, IgnoresCallbacksAfterEarlyDispatchRejection) {
     const KernelDispatchInfo supported_info = dispatch_info(30);
     plugin.onAmdgpuDispatchPacketProcessed(supported_info);
     plugin.onAmdgpuDispatchExecutionBegin(supported_info.dispatch_id);
-    Wavefront &supported_wave = fixture.wave(supported_info.dispatch_id, 1, {1, 0, 0}, 0);
+    Wavefront *supported_wave_ptr = fixture.wave(supported_info.dispatch_id, 1, {1, 0, 0}, 0);
+    ASSERT_NE(supported_wave_ptr, nullptr);
+    Wavefront &supported_wave = *supported_wave_ptr;
     plugin.onAmdgpuWavefrontDispatched(supported_wave);
     const std::array<uint32_t, 1> end_words{0xBF810000};
     SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
@@ -2273,7 +2368,7 @@ TEST_F(PerfsimPluginTest, IgnoresCallbacksAfterEarlyDispatchRejection) {
     plugin.onAmdgpuDispatchExecutionEnd(rejected_info.dispatch_id);
     plugin.onShutdown();
   }
-  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  const std::string diagnostic = stderr_capture.finish();
   const size_t target_diagnostic = diagnostic.find("code target is not gfx1250");
   ASSERT_NE(target_diagnostic, std::string::npos);
   EXPECT_EQ(diagnostic.find("code target is not gfx1250", target_diagnostic + 1),
@@ -2288,7 +2383,7 @@ TEST_F(PerfsimPluginTest, RejectsTensorDmaBeforeMaterializingAddressesOverBudget
   struct AddressSource {
     bool *materialized = nullptr;
   } source{&addresses_materialized};
-  testing::internal::CaptureStderr();
+  ScopedStderrCapture stderr_capture;
   {
     PerfsimPlugin plugin;
     ASSERT_TRUE(plugin.initialize(config.c_str()).succeeded());
@@ -2297,7 +2392,9 @@ TEST_F(PerfsimPluginTest, RejectsTensorDmaBeforeMaterializingAddressesOverBudget
     const KernelDispatchInfo info = dispatch_info(32);
     plugin.onAmdgpuDispatchPacketProcessed(info);
     plugin.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
-    Wavefront &wave = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
+    Wavefront *wave_ptr = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
+    ASSERT_NE(wave_ptr, nullptr);
+    Wavefront &wave = *wave_ptr;
     plugin.onAmdgpuWavefrontDispatched(wave);
 
     const std::array<uint32_t, 3> tensor_words{0xD0710001, 0x7C000000, 0x18140C00};
@@ -2331,7 +2428,7 @@ TEST_F(PerfsimPluginTest, RejectsTensorDmaBeforeMaterializingAddressesOverBudget
     plugin.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
     plugin.onShutdown();
   }
-  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  const std::string diagnostic = stderr_capture.finish();
   EXPECT_FALSE(addresses_materialized);
   EXPECT_NE(diagnostic.find("staging budget of 4096 bytes exceeded"), std::string::npos);
   EXPECT_EQ(std::ranges::count(diagnostic, '\n'), 1);
@@ -2352,8 +2449,12 @@ TEST_F(PerfsimPluginTest, PreservesCollidingWrappedFfmWaveIdentities) {
   const KernelDispatchInfo info = dispatch_info(23);
   plugin.onAmdgpuDispatchPacketProcessed(info);
   plugin.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
-  Wavefront &first = fixture.wave(info.dispatch_id, 1, {1000, 0, 0}, 0);
-  Wavefront &second = fixture.wave(info.dispatch_id, 2, {0, 1, 0}, 0);
+  Wavefront *first_ptr = fixture.wave(info.dispatch_id, 1, {1000, 0, 0}, 0);
+  ASSERT_NE(first_ptr, nullptr);
+  Wavefront &first = *first_ptr;
+  Wavefront *second_ptr = fixture.wave(info.dispatch_id, 2, {0, 1, 0}, 0);
+  ASSERT_NE(second_ptr, nullptr);
+  Wavefront &second = *second_ptr;
   plugin.onAmdgpuWavefrontDispatched(first);
   plugin.onAmdgpuWavefrontDispatched(second);
 
@@ -2378,7 +2479,7 @@ TEST_F(PerfsimPluginTest, PreservesCollidingWrappedFfmWaveIdentities) {
 TEST_F(PerfsimPluginTest, RejectsWholeUnsupportedDispatchWithoutBackendCallbacks) {
   WaveFixture fixture;
   const std::string config = plugin_config();
-  testing::internal::CaptureStderr();
+  ScopedStderrCapture stderr_capture;
   {
     PerfsimPlugin plugin;
     ASSERT_TRUE(plugin.initialize(config.c_str()).succeeded());
@@ -2387,7 +2488,9 @@ TEST_F(PerfsimPluginTest, RejectsWholeUnsupportedDispatchWithoutBackendCallbacks
     info.code_target = ROCJITSU_CODE_TARGET_GFX950;
     plugin.onAmdgpuDispatchPacketProcessed(info);
     plugin.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
-    Wavefront &wave = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
+    Wavefront *wave_ptr = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
+    ASSERT_NE(wave_ptr, nullptr);
+    Wavefront &wave = *wave_ptr;
     plugin.onAmdgpuWavefrontDispatched(wave);
     const std::array<uint32_t, 1> words{0xBF810000};
     SyntheticInstruction end("s_endpgm", words, PROGRAM_TERMINATOR);
@@ -2396,7 +2499,7 @@ TEST_F(PerfsimPluginTest, RejectsWholeUnsupportedDispatchWithoutBackendCallbacks
     plugin.onAmdgpuDispatchExecutionEnd(info.dispatch_id);
     plugin.onShutdown();
   }
-  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  const std::string diagnostic = stderr_capture.finish();
   EXPECT_NE(diagnostic.find("skipped dispatch 31"), std::string::npos);
   EXPECT_EQ(std::ranges::count(diagnostic, '\n'), 1);
 
@@ -2416,7 +2519,9 @@ TEST_F(PerfsimPluginTest, ReusesOnlyConsecutiveRepeatedWaitOrdinals) {
   const KernelDispatchInfo info = dispatch_info(35);
   plugin.onAmdgpuDispatchPacketProcessed(info);
   plugin.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
-  Wavefront &wave = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
+  Wavefront *wave_ptr = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
+  ASSERT_NE(wave_ptr, nullptr);
+  Wavefront &wave = *wave_ptr;
   plugin.onAmdgpuWavefrontDispatched(wave);
 
   const std::array<uint32_t, 1> wait_words{0xBF8C0000};
@@ -2463,7 +2568,9 @@ TEST_F(PerfsimPluginTest, MatchesFfmSwmmacSmemAndClusterInstructionCounters) {
   const KernelDispatchInfo info = dispatch_info(36);
   plugin.onAmdgpuDispatchPacketProcessed(info);
   plugin.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
-  Wavefront &wave = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
+  Wavefront *wave_ptr = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
+  ASSERT_NE(wave_ptr, nullptr);
+  Wavefront &wave = *wave_ptr;
   plugin.onAmdgpuWavefrontDispatched(wave);
 
   const std::array<uint32_t, 1> swmmac_words{0xDEAD3601};
@@ -2601,9 +2708,9 @@ TEST_F(PerfsimPluginTest, LoadsAsRocjitsuPluginWithPublicOptionSchema) {
                                      ",\"max_staged_bytes\":4096,\"max_observed_workgroups\":1}";
   const std::string config = std::string{"{\"plugins\":{\"perfsim\":"} + adapter_config + "}}";
   ExecutionPluginGroup group(PluginSinkConfig{});
-  testing::internal::CaptureStderr();
+  ScopedStderrCapture stderr_capture;
   const size_t loaded = PluginLoader::load_from_config(config, group, PERFSIM_PLUGIN_DIR);
-  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  const std::string diagnostic = stderr_capture.finish();
   ASSERT_EQ(loaded, 1);
   EXPECT_EQ(diagnostic.find("not in schema"), std::string::npos);
   ASSERT_EQ(group.num_plugins(), 1u);
@@ -2854,7 +2961,9 @@ TEST_F(PerfsimPluginTest, RealBackendMatchesDirectFfmForCanonicalStream) {
     plugin.onInit();
     plugin.onAmdgpuDispatchPacketProcessed(info);
     plugin.onAmdgpuDispatchExecutionBegin(info.dispatch_id);
-    Wavefront &wave = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
+    Wavefront *wave_ptr = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
+    ASSERT_NE(wave_ptr, nullptr);
+    Wavefront &wave = *wave_ptr;
     plugin.onAmdgpuWavefrontDispatched(wave);
 
     SyntheticInstruction nop("s_nop", kNopEncoding);
@@ -2917,7 +3026,9 @@ TEST_F(PerfsimPluginTest, RealBackendMatchesDirectFfmForCanonicalStream) {
       const KernelDispatchInfo additional_info = dispatch_info(dispatch_id);
       plugin.onAmdgpuDispatchPacketProcessed(additional_info);
       plugin.onAmdgpuDispatchExecutionBegin(dispatch_id);
-      Wavefront &additional_wave = fixture.wave(dispatch_id, 0, {0, 0, 0}, 0);
+      Wavefront *additional_wave_ptr = fixture.wave(dispatch_id, 0, {0, 0, 0}, 0);
+      ASSERT_NE(additional_wave_ptr, nullptr);
+      Wavefront &additional_wave = *additional_wave_ptr;
       SyntheticInstruction additional_nop("s_nop", kNopEncoding);
       plugin.onAmdgpuWavefrontDispatched(additional_wave);
       plugin.onAmdgpuBeforeExecuteInstruction(kNopPc, additional_nop, additional_wave, kNopFetch);

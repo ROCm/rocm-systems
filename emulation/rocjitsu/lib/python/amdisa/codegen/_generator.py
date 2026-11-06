@@ -25,6 +25,7 @@ import cgen
 
 from amdisa.codegen.execute import input_policy
 from amdisa.codegen.execute.conversion import share_stages
+from amdisa.codegen.execute.required_vgpr import append_required_vgpr_offset
 from amdisa.codegen.execute.floating_policy import (
     F16_TRANSCENDENTAL_OPS,
     FLUSH_NEAREST_F32_OPS,
@@ -63,7 +64,7 @@ from amdisa.semantics import (
     takes_output_modifiers,
     takes_source_modifiers,
 )
-from amdisa.isa_profile import DppOpcodeRule, FloatDotAccumulation
+from amdisa.isa_profile import DppOpcodeRule, FloatDotAccumulation, SwmmacLayout
 
 from amdisa.codegen.config import CodegenConfig
 from amdisa.codegen.cpp_file import CppFile
@@ -202,6 +203,106 @@ def _exec_mask_flag_stmts(sem) -> list[str]:
         )
         if prop in props
     ]
+
+
+# Execution-block flag (instruction.h) for each encoding with a generated
+# class, including the hand-templated VOPD dual-issue class (gen_vopd). Exports
+# issue to no block. Every such encoding must appear here, so a new encoding
+# fails generation until it is classified.
+_ENCODING_EXECUTION_BLOCKS: dict[str, str | None] = {
+    'ENC_SOP1': 'SALU',
+    'ENC_SOP2': 'SALU',
+    'ENC_SOPC': 'SALU',
+    'ENC_SOPK': 'SALU',
+    'ENC_SOPP': 'SALU',
+    'ENC_SMEM': 'SMEM',
+    'ENC_VOP1': 'VALU',
+    'ENC_VOP2': 'VALU',
+    'ENC_VOP3': 'VALU',
+    'ENC_VOP3P': 'VALU',
+    'ENC_VOPC': 'VALU',
+    'VOP3_SDST_ENC': 'VALU',
+    'VOP3P_MFMA': 'VALU',
+    'ENC_VINTERP': 'VALU',
+    'ENC_VINTRP': 'VALU',
+    'VOPDXY': 'VALU',
+    'VOPD3XY': 'VALU',
+    'ENC_DS': 'LDS',
+    'ENC_VDS': 'LDS',
+    'ENC_LDSDIR': 'LDS',
+    'ENC_VDSDIR': 'LDS',
+    'ENC_MUBUF': 'VMEM',
+    'ENC_MTBUF': 'VMEM',
+    'ENC_MIMG': 'VMEM',
+    'ENC_FLAT': 'VMEM',
+    'ENC_VBUFFER': 'VMEM',
+    'ENC_VFLAT': 'VMEM',
+    'ENC_VGLOBAL': 'VMEM',
+    'ENC_VSCRATCH': 'VMEM',
+    'ENC_VIMAGE': 'VMEM',
+    'ENC_VSAMPLE': 'VMEM',
+    'ENC_EXP': None,
+    'ENC_VEXPORT': None,
+}
+
+
+def _execution_block_flag_stmt(enc_name: str) -> str:
+    """Return the ``flags_ |= ...;`` statement naming the block ``enc_name`` issues to."""
+    try:
+        block = _ENCODING_EXECUTION_BLOCKS[enc_name.upper()]
+    except KeyError:
+        raise ValueError(
+            f'{enc_name}: no execution block; add it to _ENCODING_EXECUTION_BLOCKS'
+        ) from None
+    return f' flags_ |= {block};' if block else ''
+
+
+# Operations evaluated by the VALU transcendental unit, in both the vector and
+# the pseudo-scalar (V_S_*) forms, at every data width. This is the unit, not
+# the S_DELAY_ALU dependency class: see TRANSCENDENTAL in instruction.h.
+_TRANSCENDENTAL_CLASSES = frozenset({'vector_unary', 'pseudo_scalar_unary'})
+_TRANSCENDENTAL_OPERATIONS = frozenset(
+    {'rcp', 'rcp_iflag', 'rsq', 'sqrt', 'exp2', 'log2', 'sin', 'cos', 'tanh'}
+)
+
+# Instructions that may sleep or halt their wave, depending on their operands
+# and the wave's state.
+_SUSPENDS_WAVE_NAMES = frozenset(
+    {'S_SLEEP', 'S_SLEEP_VAR', 'S_MONITOR_SLEEP', 'S_SETHALT', 'S_SENDMSGHALT'}
+)
+
+# PC writers whose semantics carry no control-flow class, so they are named
+# here: trap entry and return (S_RFE derives as a no-op), and the debug
+# conditional branches, which are modelled as never taken. They get WRITES_PC
+# rather than BRANCH/COND_BRANCH so CFG construction is unchanged.
+_WRITES_PC_NAMES = frozenset(
+    {
+        'S_TRAP',
+        'S_RFE_B64',
+        'S_RFE_I64',
+        'S_RFE_RESTORE_B64',
+        'S_CBRANCH_CDBGSYS',
+        'S_CBRANCH_CDBGUSER',
+        'S_CBRANCH_CDBGSYS_OR_USER',
+        'S_CBRANCH_CDBGSYS_AND_USER',
+    }
+)
+
+
+def _instruction_class_flag_stmts(name: str, sem) -> list[str]:
+    """Return ``flags_ |= ...;`` for TRANSCENDENTAL, SUSPENDS_WAVE and WRITES_PC."""
+    stmts = []
+    if (
+        sem is not None
+        and sem.semantic_class in _TRANSCENDENTAL_CLASSES
+        and sem.operation in _TRANSCENDENTAL_OPERATIONS
+    ):
+        stmts.append('flags_ |= TRANSCENDENTAL;')
+    if name in _SUSPENDS_WAVE_NAMES:
+        stmts.append('flags_ |= SUSPENDS_WAVE;')
+    if name in _WRITES_PC_NAMES:
+        stmts.append('flags_ |= WRITES_PC;')
+    return stmts
 
 
 def _memory_wait_producer(name: str) -> bool:
@@ -367,6 +468,7 @@ class CodeGenerator:
         'smem_atomic': 'scalar',
         'dcache_discard': 'scalar',
         'scratch_load_lds': 'vmem_load',
+        'global_load_lds': 'vmem_load',
         'flat_load': 'flat_load',
         'flat_store': 'flat_store',
         'flat_atomic': 'flat_atomic',
@@ -2637,7 +2739,7 @@ class CodeGenerator:
             ''')
             vopd3_constructor_branch = cpp_block('''
               if ((word0_ >> @VOPD3_PREFIX_SHIFT@) == @VOPD3_PREFIX@) {
-                format_ = Format::Vopd3;
+                format_ = Format::Vopd3;@VOPD3_EXECUTION_BLOCK@
                 size_ = 12;
                 encoding_id_ = @VOPD3_PREFIX@;
                 word2_ = words[2];
@@ -2672,9 +2774,15 @@ class CodeGenerator:
                   srcy2_.set_wave_mask();
               } else {
             ''')
-            vopd3_constructor_branch = vopd3_constructor_branch.replace(
-                '@VOPD3_PREFIX_SHIFT@', str(32 - vopd3_prefix.prefix_bits)
-            ).replace('@VOPD3_PREFIX@', f'0x{vopd3_prefix.prefix:X}')
+            vopd3_constructor_branch = (
+                vopd3_constructor_branch.replace(
+                    '@VOPD3_PREFIX_SHIFT@', str(32 - vopd3_prefix.prefix_bits)
+                )
+                .replace('@VOPD3_PREFIX@', f'0x{vopd3_prefix.prefix:X}')
+                .replace(
+                    '@VOPD3_EXECUTION_BLOCK@', _execution_block_flag_stmt('VOPD3XY')
+                )
+            )
             vopd3_validation_branch = cpp_block('''
               if ((word0 >> @VOPD3_PREFIX_SHIFT@) == @VOPD3_PREFIX@) {
                 const uint16_t opx = static_cast<uint16_t>((word0 >> 18) & 0x3F);
@@ -3135,7 +3243,7 @@ class CodeGenerator:
               word1_ = words[1];
 
             @VOPD3_CONSTRUCTOR_BRANCH@
-                format_ = Format::VopdXy;
+                format_ = Format::VopdXy;@VOPD_EXECUTION_BLOCK@
                 encoding_id_ = @VOPD_PREFIX@;
                 opx_ = static_cast<uint16_t>((word0_ >> 22) & 0xF);
                 opy_ = static_cast<uint16_t>((word0_ >> 17) & 0x1F);
@@ -3259,6 +3367,7 @@ class CodeGenerator:
             .replace('@VOPD_IMPL_INCLUDES@', vopd_impl_includes.rstrip())
             .replace('@VOPD_SRC0_TYPE_EXPR@', vopd_src0_type_expr)
             .replace('@VOPD_EXEC_FN@', vopd_exec_fn)
+            .replace('@VOPD_EXECUTION_BLOCK@', _execution_block_flag_stmt('VOPDXY'))
             .replace(
                 '@INLINE_EXECUTION_HELPERS@',
                 (
@@ -4347,6 +4456,8 @@ class CodeGenerator:
                 validation_body += ' }'
             if profile.vskip_affected_encoding(enc_upper):
                 size_line += ' flags_ |= VSKIP_AFFECTED;'
+            # First, so it stays outside the extension-decode guard.
+            size_line = _execution_block_flag_stmt(enc_upper) + size_line
             validation_body += ' return Result::success();'
             if has_encoding_validation:
                 public_members.append(
@@ -5583,8 +5694,11 @@ class CodeGenerator:
                                 s1b, s2, ea, eb, const_acc, vb, scale_a, scale_b, scale_a_byte,
                                 scale_b_byte, c_modifier);
                           }});
-                      if (!dispatched)
-                        throw util::UnimplementedInst(mnemonic());
+                      if (!dispatched) {{
+                        wf.report_instruction_execution_error(
+                            amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+                        return;
+                      }}
                     }}
                     '''))
         return outputs
@@ -6205,16 +6319,40 @@ class CodeGenerator:
             .replace('@OPSEL_HI_2@', self._op_sel_hi_2_field('ENC_VOP3P'))
         )
 
-        execution = textwrap.dedent('''\
+        required_vgpr_guards: list[str] = []
+        for name, operand in (
+            ('dst_off', 'vdst'),
+            ('src0_off', 'src0'),
+            ('src1_off', 'src1'),
+        ):
+            append_required_vgpr_offset(
+                required_vgpr_guards, name, operand, uses_vgpr_msb_indexing=True
+            )
+
+        matrix_a_fmt, matrix_b_fmt = self._cdna5_wmma_scale_formats('inst_.')
+        execution = (
+            (
+                'namespace {\n'
+                + self._emit_cdna5_wmma_scale_format_pair_legal()
+                + '} // namespace\n'
+            )
+            + textwrap.dedent('''\
             void VWmmaScaleF32Vop3px2::execute_impl(amdgpu::Wavefront &wf) {
               auto &cu = wf.cu();
+              const uint32_t matrix_a_fmt = @MATRIX_A_FMT@;
+              const uint32_t matrix_b_fmt = @MATRIX_B_FMT@;
+              if (!isGfx1250WmmaScaleFormatPairLegal(
+                      matrix_a_fmt, matrix_b_fmt, scale_inst_.neg & 0x3u,
+                      scale_inst_.neg_hi & 0x3u)) {
+                wf.report_instruction_execution_error(
+                    amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+                return;
+              }
               uint32_t vb = wf.vgpr_alloc().base;
-              uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                             vdst.vgpr_msb_role());
-              uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                                   src0.vgpr_msb_role());
-              uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                                   src1.vgpr_msb_role());
+            @REQUIRED_VGPR_GUARDS@
+              uint32_t dst = vb + *dst_off;
+              uint32_t src0_base = vb + *src0_off;
+              uint32_t src1_base = vb + *src1_off;
               uint32_t const_acc;
               auto src2_off =
                   Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
@@ -6226,8 +6364,6 @@ class CodeGenerator:
                 const_acc = amdgpu::RegisterAccess(wf).read_scalar(src2);
               }
 
-              const uint32_t matrix_a_fmt = inst_.opsel;
-              const uint32_t matrix_b_fmt = (inst_.@OPSEL_HI_2@ << 2) | inst_.opsel_hi;
               const uint32_t matrix_a_scale =
                   (scale_inst_.opsel & 0x1u) | (((scale_inst_.opsel >> 2u) & 0x1u) << 1u);
               const uint32_t matrix_b_scale =
@@ -6282,14 +6418,49 @@ class CodeGenerator:
                           amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));
                     });
               }
-              if (!dispatched)
-                throw util::UnimplementedInst(mnemonic());
+              if (!dispatched) {
+                wf.report_instruction_execution_error(
+                    amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+                return;
+              }
             }
-            ''').replace('@OPSEL_HI_2@', self._op_sel_hi_2_field('ENC_VOP3P'))
+            ''')
+            .replace('@OPSEL_HI_2@', self._op_sel_hi_2_field('ENC_VOP3P'))
+            .replace('@REQUIRED_VGPR_GUARDS@', '\n'.join(required_vgpr_guards))
+            .replace('@MATRIX_A_FMT@', matrix_a_fmt)
+            .replace('@MATRIX_B_FMT@', matrix_b_fmt)
+        )
         return _ImplOutputs(model=[model], execution=[execution])
 
-    def _emit_cdna5_scaled_wmma_vop3px2_decoder_helpers(self) -> str:
+    def _cdna5_wmma_scale_formats(self, matrix: str) -> tuple[str, str]:
+        """Derive the matrix formats shared by scaled-WMMA decode and execution."""
+        opsel_hi_2 = self._op_sel_hi_2_field('ENC_VOP3P')
+        return (
+            f'{matrix}op == 0x88u ? 4u : {matrix}opsel',
+            f'{matrix}op == 0x88u ? 4u : '
+            f'({matrix}{opsel_hi_2} << 2u) | {matrix}opsel_hi',
+        )
+
+    @staticmethod
+    def _emit_cdna5_wmma_scale_format_pair_legal() -> str:
         return textwrap.dedent('''\
+            bool isGfx1250WmmaScaleFormatPairLegal(uint32_t matrix_a_fmt, uint32_t matrix_b_fmt,
+                                                   uint32_t scale_a_fmt, uint32_t scale_b_fmt) {
+              if (matrix_a_fmt > 4u || matrix_b_fmt > 4u || scale_a_fmt > 2u || scale_b_fmt > 2u)
+                return false;
+              if (scale_a_fmt == 0u && scale_b_fmt == 0u)
+                return true;
+              if ((scale_a_fmt != 0u && matrix_a_fmt != 4u) ||
+                  (scale_b_fmt != 0u && matrix_b_fmt != 4u))
+                return false;
+              return matrix_a_fmt != 4u || matrix_b_fmt != 4u || scale_a_fmt == scale_b_fmt;
+            }
+            ''')
+
+    def _emit_cdna5_scaled_wmma_vop3px2_decoder_helpers(self) -> str:
+        matrix_a_fmt, matrix_b_fmt = self._cdna5_wmma_scale_formats('matrix->')
+        return (
+            textwrap.dedent('''\
             namespace {
 
             bool isVop3pOp(const MachineInst opcode, uint32_t op) {
@@ -6304,17 +6475,7 @@ class CodeGenerator:
               return !scale16 || ((selector - 256u) % 2u == 0u && selector < 511u);
             }
 
-            bool isGfx1250WmmaScaleFormatPairLegal(uint32_t matrix_a_fmt, uint32_t matrix_b_fmt,
-                                                   uint32_t scale_a_fmt, uint32_t scale_b_fmt) {
-              if (matrix_a_fmt > 4u || matrix_b_fmt > 4u || scale_a_fmt > 2u || scale_b_fmt > 2u)
-                return false;
-              if (scale_a_fmt == 0u && scale_b_fmt == 0u)
-                return true;
-              if ((scale_a_fmt != 0u && matrix_a_fmt != 4u) ||
-                  (scale_b_fmt != 0u && matrix_b_fmt != 4u))
-                return false;
-              return matrix_a_fmt != 4u || matrix_b_fmt != 4u || scale_a_fmt == scale_b_fmt;
-            }
+            @SCALE_FORMAT_PAIR_LEGAL@
 
             bool isGfx1250WmmaScalePairValid(const MachineInst *opcode) {
               const auto *scale = reinterpret_cast<const Vop3pMachineInst *>(opcode);
@@ -6334,16 +6495,21 @@ class CodeGenerator:
 
               const uint32_t scale_a_fmt = scale->neg & 0x3u;
               const uint32_t scale_b_fmt = scale->neg_hi & 0x3u;
-              if (matrix->op == 0x88u)
-                return isGfx1250WmmaScaleFormatPairLegal(4u, 4u, scale_a_fmt, scale_b_fmt);
-              const uint32_t matrix_a_fmt = matrix->opsel;
-              const uint32_t matrix_b_fmt = (matrix->@OPSEL_HI_2@ << 2u) | matrix->opsel_hi;
+              const uint32_t matrix_a_fmt = @MATRIX_A_FMT@;
+              const uint32_t matrix_b_fmt = @MATRIX_B_FMT@;
               return isGfx1250WmmaScaleFormatPairLegal(matrix_a_fmt, matrix_b_fmt, scale_a_fmt,
                                                        scale_b_fmt);
             }
 
             } // namespace
-            ''').replace('@OPSEL_HI_2@', self._op_sel_hi_2_field('ENC_VOP3P'))
+            ''')
+            .replace(
+                '@SCALE_FORMAT_PAIR_LEGAL@',
+                self._emit_cdna5_wmma_scale_format_pair_legal(),
+            )
+            .replace('@MATRIX_A_FMT@', matrix_a_fmt)
+            .replace('@MATRIX_B_FMT@', matrix_b_fmt)
+        )
 
     def _execute_operand_roles(
         self, inst: Instruction, sem: InstructionSemantics
@@ -6701,6 +6867,92 @@ class CodeGenerator:
         # no abs modifier field.
         has_abs = profile.has_abs_modifier(inst.enc_name)
         self._enc_name = enc_name
+
+        # Shared context for instruction-body selection.
+        from amdisa.codegen.execute import ExecuteContext, DISPATCH
+
+        ctx = ExecuteContext(
+            inst=inst,
+            sem=sem,
+            dst_ops=dst_ops,
+            src_ops=src_ops,
+            profile=profile,
+            enc_name=enc_name,
+            is_vop3=is_vop3,
+            has_abs=has_abs,
+            opsel_exprs=self._vop3p_opsel_exprs(),
+            op_sel_hi_2_expr=self._op_sel_hi_2_expr(inst.enc_name),
+            arch_name=self.isa_spec.arch_name.lower(),
+            enc_field_names=getattr(self, '_current_inst_fields', set()),
+            encoding_map=self.isa_spec.encoding_map,
+            supports_dpp=(
+                cls == 'vector_movrel'
+                and inst.available_encodings is not None
+                and self._instruction_supports_dpp(inst, enc_name)
+            ),
+            supports_dpp8=(
+                cls == 'vector_movrel'
+                and inst.available_encodings is not None
+                and self._instruction_supports_dpp8(inst, enc_name)
+            ),
+            supports_sdwa=(
+                cls == 'vector_movrel'
+                and inst.available_encodings is not None
+                and self._instruction_supports_sdwa(inst, enc_name)
+            ),
+            result_writer=result_writer,
+        )
+        from amdisa.codegen.execute.rj_arith_vector import gen_integer_dot
+
+        from amdisa.codegen.execute.rj_arith_float import (
+            RjArithBody,
+            gen_float_unary32,
+            gen_float_unary64,
+            gen_float64_word,
+            gen_float_fma64,
+            gen_float_binary64,
+            gen_float_unary16,
+            gen_float_binary32,
+            gen_float_binary16,
+            gen_float_fma32,
+            gen_float_fma16,
+            gen_float_ternary_selection,
+            gen_packed_fma16,
+            gen_mixed_fma,
+            gen_packed_binary16,
+            gen_float_dot32,
+            gen_half_dot,
+        )
+
+        from amdisa.codegen.execute.rj_arith_division import gen_division
+
+        rj_arith_division = gen_division(ctx)
+        if rj_arith_division is not None:
+            return RjArithBody(rj_arith_division)
+
+        if result_writer is None:
+            for handler in (
+                gen_integer_dot,
+                gen_half_dot,
+                gen_float_dot32,
+                gen_packed_binary16,
+                gen_packed_fma16,
+                gen_mixed_fma,
+                gen_float_unary16,
+                gen_float_unary32,
+                gen_float_unary64,
+                gen_float_binary64,
+                gen_float_fma64,
+                gen_float64_word,
+                gen_float_binary16,
+                gen_float_binary32,
+                gen_float_ternary_selection,
+                gen_float_fma16,
+                gen_float_fma32,
+            ):
+                rj_arith_body = handler(ctx)
+                if rj_arith_body is not None:
+                    return RjArithBody(rj_arith_body)
 
         # Try SemaAST pipeline for validated classes.
         from amdisa.sema_derive import derive_sema_block
@@ -7153,40 +7405,6 @@ class CodeGenerator:
                     body = '  // SOP1 scalar conversions preserve SCC.\n' + body
                 return body
 
-        # Try the registry (covers all extracted gen_ functions).
-        from amdisa.codegen.execute import ExecuteContext, DISPATCH
-
-        ctx = ExecuteContext(
-            inst=inst,
-            sem=sem,
-            dst_ops=dst_ops,
-            src_ops=src_ops,
-            profile=profile,
-            enc_name=enc_name,
-            is_vop3=is_vop3,
-            has_abs=has_abs,
-            opsel_exprs=self._vop3p_opsel_exprs(),
-            op_sel_hi_2_expr=self._op_sel_hi_2_expr(inst.enc_name),
-            arch_name=self.isa_spec.arch_name.lower(),
-            enc_field_names=getattr(self, '_current_inst_fields', set()),
-            encoding_map=self.isa_spec.encoding_map,
-            supports_dpp=(
-                cls == 'vector_movrel'
-                and inst.available_encodings is not None
-                and self._instruction_supports_dpp(inst, enc_name)
-            ),
-            supports_dpp8=(
-                cls == 'vector_movrel'
-                and inst.available_encodings is not None
-                and self._instruction_supports_dpp8(inst, enc_name)
-            ),
-            supports_sdwa=(
-                cls == 'vector_movrel'
-                and inst.available_encodings is not None
-                and self._instruction_supports_sdwa(inst, enc_name)
-            ),
-            result_writer=result_writer,
-        )
         if ctx.supports_dpp8 and self._semantic_stages_src0(sem):
             # MOVREL builds rel_src from the semantic src[0], which can differ
             # from the encoded source selected for ordinary DPP staging.
@@ -7239,6 +7457,17 @@ class CodeGenerator:
                 f'  wf.set_vgpr_msb_mode(static_cast<uint8_t>({src_ops[0]}.encoding_value_ & 0xffu));'
             )
             return '\n'.join(L)
+
+        if cls == 'round_mode':
+            # S_ROUND_MODE loads MODE.FP_ROUND from SIMM16[3:0]
+            # ([1:0] f32, [3:2] f16/f64); other MODE bits are preserved.
+            return (
+                '  wf.set_fp_round_mode(static_cast<uint32_t>(simm16.encoding_value_));'
+            )
+
+        if cls == 'denorm_mode':
+            # S_DENORM_MODE loads MODE.FP_DENORM (bits 7:4) from SIMM16[3:0].
+            return '  wf.set_fp_denorm_mode(static_cast<uint32_t>(simm16.encoding_value_));'
 
         if cls == 'nop':
             return '  (void)wf;\n throw util::UnimplementedInst(mnemonic());'
@@ -7931,7 +8160,7 @@ class CodeGenerator:
         if cls == 'smem_atomic':
             return self._gen_smem_atomic(sem)
 
-        if cls in ('flat_load', 'scratch_load_lds'):
+        if cls in ('flat_load', 'scratch_load_lds', 'global_load_lds'):
             return self._gen_flat_load(dst_ops, src_ops, sem)
 
         if cls == 'flat_store':
@@ -8315,11 +8544,6 @@ class CodeGenerator:
         return '\n'.join(L)
 
     def _gen_smem_atomic(self, sem: InstructionSemantics) -> str:
-        # This emitter computes a global address; buffer forms need V# addressing.
-        if sem.name.upper().startswith('S_BUFFER_ATOMIC_'):
-            raise ValueError(
-                f'{sem.name}: smem_atomic supports only global S_ATOMIC_* addressing'
-            )
         # Semantics has no op-less smem_atomic fallback, so a missing op is a
         # derivation bug rather than an unimplemented variant.
         op_enum = self._ATOMIC_OP_ENUM.get(sem.operation)
@@ -8354,7 +8578,7 @@ class CodeGenerator:
         self._append_wait_counter_type(L, sem)
         L.extend(
             [
-                '  auto address = smem_calculate_address(inst_, wf);',
+                '  auto address = smem_calculate_address(inst_, wf, d.get());',
                 '  if (!address) return;',
                 '  d->addr = *address;',
                 '  set_data(std::move(d));',
@@ -8801,7 +9025,9 @@ class CodeGenerator:
             )
         )
 
-    def _append_flat_lds_destination(self, lines: list[str], dedicated: bool) -> None:
+    def _append_flat_lds_destination(
+        self, lines: list[str], dedicated: bool, num_elems: int
+    ) -> None:
         indent = '  ' if dedicated else '    '
         if not dedicated:
             lines.append('  if (inst_.lds && (inst_.seg == 1 || inst_.seg == 2)) {')
@@ -8820,7 +9046,8 @@ class CodeGenerator:
         )
         lines.append(
             f'{indent}amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),'
-            f' static_cast<int64_t>(wf.m0() & {mask}) + offset, 4, 4);'
+            f' static_cast<int64_t>(wf.m0() & {mask}) + offset,'
+            f' {num_elems * 4}, {16 if num_elems >= 3 else num_elems * 4});'
         )
         if not dedicated:
             lines.append('  }')
@@ -8831,14 +9058,17 @@ class CodeGenerator:
         L = []
         esz, ne = sem.elem_size, sem.num_elems
         block = sem.name in ('GLOBAL_LOAD_BLOCK', 'SCRATCH_LOAD_BLOCK')
-        dedicated_lds = sem.semantic_class == 'scratch_load_lds'
+        dedicated_flat_lds_load = sem.semantic_class in (
+            'scratch_load_lds',
+            'global_load_lds',
+        )
         legacy_lds = self._legacy_flat_lds_load(sem)
         sc0, sc1, nt = self._coherency_exprs()
         acc = self._acc_vgpr_expr
         L.append(
             '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
         )
-        if not dedicated_lds:
+        if not dedicated_flat_lds_load:
             L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdst')};")
         L.append(f'  d->elem_size = {esz};')
         L.append(
@@ -8873,8 +9103,8 @@ class CodeGenerator:
         if sem.name.startswith('CLUSTER_LOAD_'):
             L.append('  d->request_force_l1_bypass = true;')
         L.append('  flat_calculate_addresses(inst_, wf, *d);')
-        if dedicated_lds or legacy_lds:
-            self._append_flat_lds_destination(L, dedicated_lds)
+        if dedicated_flat_lds_load or legacy_lds:
+            self._append_flat_lds_destination(L, dedicated_flat_lds_load, ne)
         if block:
             L.append('  d->set_block_dword_mask(wf.m0());')
         L.append('  set_data(std::move(d));')
@@ -8941,7 +9171,9 @@ class CodeGenerator:
         stride = esz * ne
         L.append(f'  d->store_data.resize(wf.wf_size() * {stride});')
         if esz == 4:
-            L.append('  data.copy_dwords_lane_major(d->store_data, exec);')
+            L.append(
+                '  if (data.copy_dwords_lane_major(d->store_data, exec).failed()) return;'
+            )
             L.append('  set_data(std::move(d));')
             return '\n'.join(L)
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
@@ -9950,7 +10182,7 @@ class CodeGenerator:
                 '  if (exec) {',
                 '    auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec);',
                 '    if (data.valid()) {',
-                '      data.copy_dwords_lane_major(d->store_data, exec);',
+                '      if (data.copy_dwords_lane_major(d->store_data, exec).failed()) return;',
                 '      set_data(std::move(d));',
                 '      return;',
                 '    }',
@@ -10039,7 +10271,9 @@ class CodeGenerator:
                 f'    auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, {stride // 4}, exec);'
             )
             L.append('    if (data.valid()) {')
-            L.append('      data.copy_dwords_lane_major(d->store_data, exec);')
+            L.append(
+                '      if (data.copy_dwords_lane_major(d->store_data, exec).failed()) return;'
+            )
             L.append('      set_data(std::move(d));')
             L.append('      return;')
             L.append('    }')
@@ -10152,7 +10386,11 @@ class CodeGenerator:
         L.append('    });')
         L.append('  } else {')
         L.append(
-            '    const auto addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();'
+            '    auto maybe_addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();'
+        )
+        L.append('    if (maybe_addresses.failed()) return;')
+        L.append(
+            '    const std::span<const uint32_t> addresses = maybe_addresses.value();'
         )
         L.append(
             '    calculate_addresses([&](uint32_t lane) { return addresses[lane]; });'
@@ -10204,12 +10442,20 @@ class CodeGenerator:
         # Each source word keeps independent allocation validation, including
         # a pair straddling the end of the wave's register allocation.
         L.append(
-            '  auto addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();'
+            '  auto maybe_addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();'
+        )
+        L.append('  if (maybe_addresses.failed()) return;')
+        L.append(
+            '  const std::span<const uint32_t> addresses = maybe_addresses.value();'
         )
         for group in (0, 1):
             for i in range(dwords_per_access):
                 L.append(
-                    f'  auto data{group}_{i} = amdgpu::RegisterAccess(cu).read_vgpr_region(data{group}_base + {i}, 1, exec).lanes();'
+                    f'  auto maybe_data{group}_{i} = amdgpu::RegisterAccess(cu).read_vgpr_region(data{group}_base + {i}, 1, exec).lanes();'
+                )
+                L.append(f'  if (maybe_data{group}_{i}.failed()) return;')
+                L.append(
+                    f'  const std::span<const uint32_t> data{group}_{i} = maybe_data{group}_{i}.value();'
                 )
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
@@ -10964,8 +11210,10 @@ class CodeGenerator:
                     legacy_flat_lds_load = bool(
                         inst_sem and self._legacy_flat_lds_load(inst_sem)
                     )
-                    dedicated_scratch_lds_load = bool(
-                        inst_sem and inst_sem.semantic_class == 'scratch_load_lds'
+                    dedicated_flat_lds_load = bool(
+                        inst_sem
+                        and inst_sem.semantic_class
+                        in ('scratch_load_lds', 'global_load_lds')
                     )
                     readwrite_output_sources = []
                     vgpr_msb_role_body = []
@@ -11235,7 +11483,7 @@ class CodeGenerator:
                                 'if (!inst_.lds) dst_operands_[num_dst_++] = &vdst;'
                             )
                         elif opnd.is_output and not (
-                            dedicated_scratch_lds_load and opnd.name == 'vdst'
+                            dedicated_flat_lds_load and opnd.name == 'vdst'
                         ):
                             opnd_body.append(
                                 f'dst_operands_[{dst_idx}] = &{destination_operand};'
@@ -11466,7 +11714,7 @@ class CodeGenerator:
                                 f'modifiers.block_data = &{self.isa_spec.profile.flat_store_src_field};'
                             )
                         if is_smem and inst.name.startswith(
-                            ('S_BUFFER_LOAD_', 'S_BUFFER_STORE_')
+                            ('S_BUFFER_LOAD_', 'S_BUFFER_STORE_', 'S_BUFFER_ATOMIC_')
                         ):
                             words = (
                                 2
@@ -13383,6 +13631,9 @@ class CodeGenerator:
                     # Result-combinator metadata (RESULT_COPY / RESULT_OR) for
                     # EXEC-state all-ones reasoning.
                     ctor_body_parts.extend(_result_combinator_flag_stmts(_mem_sem))
+                    ctor_body_parts.extend(
+                        _instruction_class_flag_stmts(inst.name, _mem_sem)
+                    )
 
                     ctor_body = ''.join(ctor_body_parts)
                     class_ctor_impl_str = (
@@ -13418,6 +13669,9 @@ class CodeGenerator:
                             enc.enc_name,
                             result_writer=_mask_result_writer,
                         )
+                        from amdisa.codegen.execute.rj_arith_float import RjArithBody
+
+                        _rj_arith_arithmetic = isinstance(body, RjArithBody)
                         body_true16_vop3 = self._true16_vop3_info(
                             inst, sem, enc.enc_name
                         ).body_uses_true16
@@ -14031,6 +14285,11 @@ class CodeGenerator:
                         _portable_probe = self._can_force_shared_simd_probe(
                             inst, enc.enc_name
                         )
+                        # rj-arith owns SIMD selection for migrated instructions. Never
+                        # run a legacy arithmetic probe ahead of the rj-arith body.
+                        if _rj_arith_arithmetic:
+                            can_share = False
+                            _portable_probe = False
                         if not body_throws and (can_share or _portable_probe):
                             self._shared_execute_candidates[
                                 (inst.mnemonic, enc.enc_name)
@@ -14087,6 +14346,8 @@ class CodeGenerator:
                             or _local_true16_probe
                             or _renamed_vop3p_probe
                         )
+                        if _rj_arith_arithmetic:
+                            _local_simd_probe = None
                         _local_simd_probe_body = ''
                         _local_simd_probe, _local_scalar_body = share_stages(
                             _local_simd_probe, _local_body
@@ -14729,6 +14990,38 @@ class CodeGenerator:
                     cpp_includes.append(
                         ('rocjitsu/isa/arch/amdgpu/shared/lds_direct.h', False)
                     )
+
+                from amdisa.codegen.execute.rj_arith_division import DIVISION_NAMES
+
+                if self.isa_spec.arch_name in ('rdna3', 'rdna4') and any(
+                    i.name in DIVISION_NAMES for i in all_insts
+                ):
+                    cpp_includes.append(
+                        (
+                            'rocjitsu/isa/arch/amdgpu/shared/rj_arith_division_exec.h',
+                            False,
+                        )
+                    )
+
+                from amdisa.codegen.execute.rj_arith_float import FLOAT_NAMES
+
+                if self.isa_spec.arch_name in ('rdna3', 'rdna4') and any(
+                    i.name in FLOAT_NAMES for i in all_insts
+                ):
+                    cpp_includes.append(
+                        ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h', False)
+                    )
+                from amdisa.codegen.execute.rj_arith_vector import INTEGER_DOT_NAMES
+
+                if self.isa_spec.arch_name in ('rdna3', 'rdna4') and any(
+                    (i.name in INTEGER_DOT_NAMES for i in all_insts)
+                ):
+                    cpp_includes.append(
+                        (
+                            'rocjitsu/isa/arch/amdgpu/shared/rj_arith_vector_exec.h',
+                            False,
+                        )
+                    )
                 has_matrix_exec = any(
                     self.semantics
                     and (s := self.semantics.instructions.get(i.name))
@@ -14736,19 +15029,38 @@ class CodeGenerator:
                     for i in all_insts
                 )
                 requires_compute_unit = any(
-                    self.semantics
-                    and (s := self.semantics.instructions.get(i.name))
-                    and s.semantic_class
-                    in (
-                        'scalar_shader_cycles',
-                        'scalar_sendmsg_rtn',
-                        'vector_cvt_scale',
+                    (
+                        self.semantics
+                        and (s := self.semantics.instructions.get(i.name))
+                        and (
+                            s.semantic_class
+                            in (
+                                'scalar_shader_cycles',
+                                'scalar_sendmsg_rtn',
+                                'vector_cvt_scale',
+                            )
+                        )
+                        for i in all_insts
                     )
-                    for i in all_insts
                 )
                 if requires_compute_unit:
                     cpp_includes.append(('rocjitsu/vm/amdgpu/compute_unit.h', False))
                 if has_matrix_exec:
+                    if self.isa_spec.profile.uses_rj_arith_matrix:
+                        cpp_includes.append(
+                            ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_exec.h', False)
+                        )
+                    if (
+                        self.isa_spec.profile.uses_rj_arith_matrix
+                        and self.isa_spec.profile.swmmac_layout
+                        == SwmmacLayout.RUNTIME_WAVE
+                    ):
+                        cpp_includes.append(
+                            (
+                                'rocjitsu/isa/arch/amdgpu/shared/rj_arith_sparse_exec.h',
+                                False,
+                            )
+                        )
                     cpp_includes.append(
                         (
                             self.config.handwritten_include(
@@ -16746,7 +17058,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             cgen.Line(
                 f'{operand_base_decl}'
                 'public:\n'
-                '  enum class Literal32Widening { ZeroExtend, SignExtend, Replicate32, F64HighBits };\n'
+                '  enum class Literal32Widening : uint8_t { ZeroExtend, SignExtend, Replicate32, F64HighBits };\n'
                 '  static constexpr bool kStaticRegisterAccess = true;\n'
                 f'{operand_ctor_decl}'
                 '  Operand(int size_bits, OperandType opr_type, int encoding_value,\n'
@@ -16761,11 +17073,12 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 f'{execution_backend_public_decl}'
                 f'{execution_decls}'
                 '  uint64_t widened_literal32_value() const;\n'
+                '  // Pack literal state with the byte-sized widening enum to keep operands at 64 bytes.\n'
+                '  uint64_t literal64_value_ = 0;\n'
+                '  std::optional<Literal32Widening> literal32_widening_;\n'
                 '  uint16_t literal16_display_value_ = 0;\n'
                 '  bool has_literal16_display_ = false;\n'
-                '  uint64_t literal64_value_ = 0;\n'
                 '  bool has_literal64_ = false;\n'
-                '  std::optional<Literal32Widening> literal32_widening_;\n'
                 f'{packed_16bit_field}'
                 '};'
             )
@@ -17491,7 +17804,9 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                         uint64_t lane_mask = count == 0 ? 0 : util::mask<uint64_t>(static_cast<int>(count)) << lane_base;
                         auto region = amdgpu::RegisterAccess(wf).read_vgpr_region(
                             wf.vgpr_alloc().base + voff, 1, lane_mask);
-                        std::ranges::copy_n(region.lanes().begin() + lane_base, count, out);
+                        auto maybe_lanes = region.lanes();
+                        if (maybe_lanes.failed()) return;
+                        std::ranges::copy_n(maybe_lanes.value().begin() + lane_base, count, out);
                         return;
                       }
                       std::ranges::fill_n(
@@ -17570,7 +17885,9 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                                    : util::mask<uint64_t>(static_cast<int>(count)) << lane_base;
                     auto region = amdgpu::RegisterAccess(wf).read_vgpr_region(
                         wf.vgpr_alloc().base + voff, 1, lane_mask);
-                    std::ranges::copy_n(region.lanes().begin() + lane_base, count, out);
+                    auto maybe_lanes = region.lanes();
+                    if (maybe_lanes.failed()) return;
+                    std::ranges::copy_n(maybe_lanes.value().begin() + lane_base, count, out);
                     return;
                   }
                   std::ranges::fill_n(
