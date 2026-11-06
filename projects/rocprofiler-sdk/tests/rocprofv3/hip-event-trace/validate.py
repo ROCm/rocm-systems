@@ -152,10 +152,48 @@ def test_hip_event_timestamps(json_data):
         assert (
             itr.start_timestamp > init_time
         ), f"start {itr.start_timestamp} before init {init_time}"
-        # end_timestamp is a CPU timestamp taken when the async handler fires,
-        # which can occur after fini_time is recorded on a different thread.
-        # Unlike kernel dispatch (which uses GPU profiling timestamps), barrier
-        # completion timestamps are not bounded by fini_time.
+        # Barrier times come from the GPU, as kernel dispatch times do, but fall back
+        # to the CPU (end = when the async handler fires, which can follow fini_time on
+        # a different thread), so they are not bounded by fini_time here.
+
+
+# A kernel's end and the next barrier's start agree to a few hundred ns when both are
+# read from completion signals (MI355X); allow 1 us.
+GPU_TIME_SKEW_NS = 1000
+
+
+def test_hip_event_record_after_kernel(json_data):
+    """Verify a record barrier is timed on the GPU, after the kernel before it.
+
+    The app launches a kernel and then records an event on the same stream. On the GPU the
+    record barrier starts once that kernel has ended. CPU times would start at the enqueue,
+    while the kernel still runs.
+    """
+    data = json_data["rocprofiler-sdk-tool"]
+    kernels_by_queue = {}
+    for k in data["buffer_records"]["kernel_dispatch"]:
+        kernels_by_queue.setdefault(k.dispatch_info.queue_id.handle, []).append(k)
+
+    checked = 0
+    for r in data["buffer_records"]["hip_event"]:
+        if r.operation != HIP_EVENT_RECORD:
+            continue
+        before = [
+            k
+            for k in kernels_by_queue.get(r.queue_id.handle, [])
+            if k.correlation_id.internal < r.correlation_id.internal
+        ]
+        if not before:
+            continue
+        kernel = max(before, key=lambda k: k.correlation_id.internal)
+        assert kernel.end_timestamp <= r.start_timestamp + GPU_TIME_SKEW_NS, (
+            f"record (correlation {r.correlation_id.internal}) starts at {r.start_timestamp}, "
+            f"{kernel.end_timestamp - r.start_timestamp} ns before the kernel before it "
+            f"(correlation {kernel.correlation_id.internal}) ends"
+        )
+        checked += 1
+
+    assert checked > 0, "no record barrier follows a kernel on its queue"
 
 
 def test_hip_event_fields(json_data):

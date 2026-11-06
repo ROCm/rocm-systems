@@ -878,6 +878,45 @@ struct barrier_info_session_t
     common::container::small_vector<barrier_data_t, 1> barrier_data = {};
 };
 
+// The barrier's time on the GPU. The CP writes it to the completion signal plan_barrier put in
+// the packet, as it does for a kernel's, because the intercept queue is created with profiling
+// enabled. A read that fails, or that is not a time from this run (without profiling the call
+// succeeds with garbage), falls back to the CPU: the enqueue and the completion handler.
+profiling_time
+get_barrier_time(const barrier_info_session_t& session, hsa_signal_t signal)
+{
+    // a time from this run lies between the enqueue and now, up to clock skew
+    constexpr uint64_t max_skew_ns = 1000000000;
+
+    const auto now = common::timestamp_ns();
+    const auto cpu_time =
+        profiling_time{.status = HSA_STATUS_SUCCESS, .start = session.enqueue_ts, .end = now};
+
+    auto gpu_time = hsa_amd_profiling_dispatch_time_t{};
+    auto status   = hsa::get_amd_ext_table()->hsa_amd_profiling_get_dispatch_time_fn(
+        session.queue.get_agent().get_hsa_agent(), signal, &gpu_time);
+
+    if(status != HSA_STATUS_SUCCESS || gpu_time.end > now + max_skew_ns ||
+       gpu_time.start + max_skew_ns < session.enqueue_ts)
+    {
+        ROCP_CI_LOG(WARNING) << fmt::format(
+            "hsa_amd_profiling_get_dispatch_time for a HIP event barrier (signal={{.handle={}}}) "
+            "returned status={} start={} end={}, outside [{}, {}]: using the CPU times",
+            signal.handle,
+            static_cast<int>(status),
+            gpu_time.start,
+            gpu_time.end,
+            session.enqueue_ts,
+            now);
+        return cpu_time;
+    }
+
+    return tracing::adjust_profiling_time("barrier",
+                                          "hsa_amd_profiling_get_dispatch_time",
+                                          profiling_time{status, gpu_time.start, gpu_time.end},
+                                          profiling_time{cpu_time});
+}
+
 // Event barriers get their own session type and completion handler rather than riding on
 // hsa::queue_info_session_t and AsyncSignalHandler. Three things prevent folding them in:
 //
@@ -928,9 +967,7 @@ BarrierAsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
 
     for(auto& bdata : barrier_session.barrier_data)
     {
-        auto barrier_time = profiling_time{.status = HSA_STATUS_SUCCESS,
-                                           .start  = barrier_session.enqueue_ts,
-                                           .end    = common::timestamp_ns()};
+        auto barrier_time = get_barrier_time(barrier_session, bdata.completion_signal);
 
         auto* _corr_id          = barrier_session.correlation_id;
         auto  _tid              = barrier_session.tid;
