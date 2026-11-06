@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/opcodes.h"
@@ -165,7 +166,9 @@ TEST_P(ImageResourceTest, DecodedQueryCompactsMaskAndPreservesInactiveLanesWithA
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 32;
   cfg.vgprs_per_wf = 32;
-  auto cu = amdgpu::ComputeUnitCore::create("query_cu", cfg, &memory, &l2);
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "query_cu", cfg, &memory, &l2));
   auto *wf = cu->dispatch_wf(0, 0, 32, 32);
   ASSERT_NE(wf, nullptr);
   const uint32_t last = wf->wf_size() - 1;
@@ -227,7 +230,9 @@ TEST(Cdna2ImageResourceTest, AccumulatorDestinationKeepsLodInVgpr) {
   cfg.num_wf_slots = 2;
   cfg.sgprs_per_wf = 32;
   cfg.vgprs_per_wf = 512;
-  auto cu = amdgpu::ComputeUnitCore::create("query_acc_cu", cfg, &memory, &l2);
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "query_acc_cu", cfg, &memory, &l2));
   auto *reserved = cu->dispatch_wf(0, 0, 32, 512);
   auto *wf = cu->dispatch_wf(0, 0, 32, 512);
   ASSERT_NE(reserved, nullptr);

@@ -5,6 +5,7 @@
 /// @brief CDNA4 V_FMAC_F64 decode, split-register, partial-EXEC, and MODE-aware
 /// SIMD regressions.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
@@ -60,7 +61,9 @@ public:
     config.sgprs_per_wf = kSgprsPerWave;
     config.vgprs_per_wf = kVgprsPerWave;
     config.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("vop2_fma_f64_simd_cu", config, &gpu_memory, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, "vop2_fma_f64_simd_cu", config, &gpu_memory, &l2);
+    if (!cu)
+      return;
     decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
     wf = cu->dispatch_wf(0, 0, kSgprsPerWave, kVgprsPerWave);
   }
@@ -89,6 +92,8 @@ RunResult run_fmac(bool force_scalar, uint64_t exec, uint32_t mode, bool literal
                    const RawInputs *raw_inputs = nullptr) {
   util::set_force_scalar_for_testing(force_scalar);
   Vop2FmaF64Fixture fixture;
+  if (::testing::Test::HasFatalFailure())
+    return {};
   EXPECT_NE(fixture.cu, nullptr);
   EXPECT_NE(fixture.wf, nullptr);
   fixture.wf->set_exec(exec);

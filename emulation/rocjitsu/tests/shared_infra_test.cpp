@@ -4,6 +4,7 @@
 /// @file shared_infra_test.cpp
 /// @brief Phase B unit tests: addr_calc, MMA execution, wavefront context, CU factory.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
@@ -7716,15 +7717,18 @@ struct CdnaBufferWave {
   static constexpr uint32_t kSrd = 40;
   static constexpr uint32_t kSoffset = 8;
 
-  explicit CdnaBufferWave(rj_code_arch_t arch)
-      : cu(amdgpu::ComputeUnitCore::create("cdna_mubuf_cu",
-                                           {.arch = arch,
-                                            .num_wf_slots = 1,
-                                            .sgprs_per_wf = 128,
-                                            .vgprs_per_wf = 16,
-                                            .lds_size_kb = 64},
-                                           &mem, &l2)),
-        wf(cu ? cu->dispatch_wf(0, 0, 128, 16) : nullptr) {}
+  explicit CdnaBufferWave(rj_code_arch_t arch) {
+    rocjitsu::test::initialize_compute_unit(cu, "cdna_mubuf_cu",
+                                            {.arch = arch,
+                                             .num_wf_slots = 1,
+                                             .sgprs_per_wf = 128,
+                                             .vgprs_per_wf = 16,
+                                             .lds_size_kb = 64},
+                                            &mem, &l2);
+    if (!cu)
+      return;
+    wf = cu->dispatch_wf(0, 0, 128, 16);
+  }
 
   void set_resource(const std::array<uint32_t, 4> &resource) {
     for (uint32_t i = 0; i < resource.size(); ++i)
@@ -7748,7 +7752,7 @@ struct CdnaBufferWave {
   amdgpu::GpuMemory mem{"cdna_mubuf_mem"};
   amdgpu::L2Cache l2{"cdna_mubuf_l2"};
   std::unique_ptr<amdgpu::ComputeUnitCore> cu;
-  amdgpu::Wavefront *wf;
+  amdgpu::Wavefront *wf = nullptr;
 };
 
 cdna4::MubufMachineInst cdna_mubuf_offen_inst(uint32_t op) {

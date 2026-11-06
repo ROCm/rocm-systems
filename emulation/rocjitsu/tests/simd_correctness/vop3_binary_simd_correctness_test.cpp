@@ -13,6 +13,7 @@
 /// with EXPECT_EQ (util::set_force_scalar_for_testing flips the gate in-process).
 /// In-process inactive lanes must stay preserved under full and partial EXEC.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
@@ -213,7 +214,9 @@ struct Fixture {
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("cu_vop3_bin_simd", cfg, &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, "cu_vop3_bin_simd", cfg, &gpu_mem, &l2);
+    if (!cu)
+      return;
     decoder = Decoder::create(arch);
     if (plugins)
       cu->set_plugin_group(std::move(plugins));
@@ -444,6 +447,8 @@ void check(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32_t cl
   auto run_mode = [&](bool force_scalar) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
@@ -565,6 +570,8 @@ void check_f16(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32_
   auto run_mode = [&](bool force_scalar) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};

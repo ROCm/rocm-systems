@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "counting_gpu_memory.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna1/isa.h"
@@ -312,7 +313,9 @@ TEST(BufferFormatTest, Cdna4FormattedLoadCanWriteLdsWithoutClobberingVgprs) {
   cfg.sgprs_per_wf = 32;
   cfg.vgprs_per_wf = 32;
   cfg.lds_size_kb = 64;
-  auto cu = amdgpu::ComputeUnitCore::create("format_lds_cu", cfg, &memory, &l2);
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "format_lds_cu", cfg, &memory, &l2));
   auto *wf = cu->dispatch_wf(0, 0, 32, 32);
   ASSERT_NE(wf, nullptr);
   wf->set_exec(1);
@@ -356,7 +359,8 @@ protected:
     cfg.sgprs_per_wf = 106;
     cfg.vgprs_per_wf = 32;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("formatted_cu", cfg, &memory, &l2);
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "formatted_cu", cfg, &memory, &l2));
     wf = cu->dispatch_wf(0, 0, 106, 32);
     ASSERT_NE(wf, nullptr);
     wf->set_exec(5); // Lane 1 must not read, store or receive a load result.
