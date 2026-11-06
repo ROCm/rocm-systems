@@ -202,7 +202,7 @@
     <div class="md-source__repository md-source__repository--active">
       ROCm/rocm-systems
       <ul class="md-source__facts">
-        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 551 · build snapshot" aria-label="Stars: 551">551</li>
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 552 · build snapshot" aria-label="Stars: 552">552</li>
         <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 489 · build snapshot" aria-label="Forks: 489">489</li>
       </ul>
     </div>
@@ -255,7 +255,7 @@
     <div class="md-source__repository md-source__repository--active">
       ROCm/rocm-systems
       <ul class="md-source__facts">
-        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 551 · build snapshot" aria-label="Stars: 551">551</li>
+        <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 552 · build snapshot" aria-label="Stars: 552">552</li>
         <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 489 · build snapshot" aria-label="Forks: 489">489</li>
       </ul>
     </div>
@@ -2652,13 +2652,15 @@ instead copy the instruction's PC and encoding as it executes, and disassemble
 the copy when the report is written. Validate the encoding before copying it:
 <code>raw_encoding()</code> is null when the instruction has no encoding, and the copy
 needs <code>size()</code> to be a positive multiple of four bytes that fits the buffer.
-An encoding is at most four words (the CU's 16-byte fetch window). The example
-rejects anything else at capture, as the race detector does, so every stored
-copy can be disassembled.</p>
+The CU normally fetches four words starting at the PC. GFX10 MIMG with
+NSA=3 uses a fifth word. The fetch-aware hook receives all five for that
+instruction. The example stores up to five words, as the race detector does,
+and rejects invalid sizes at capture. Perfsim's FFM event format has its own
+four-word encoding limit.</p>
 <div class="highlight"><pre><span></span><code><span class="c1">// Set for each wave in onAmdgpuWavefrontDispatched() with wf.set_plugin_state().</span>
 <span class="k">struct</span><span class="w"> </span><span class="nc">LastInstruction</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="n">WavefrontState</span><span class="w"> </span><span class="p">{</span>
 <span class="w">  </span><span class="kt">uint64_t</span><span class="w"> </span><span class="n">pc</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
-<span class="w">  </span><span class="n">std</span><span class="o">::</span><span class="n">array</span><span class="o">&lt;</span><span class="kt">uint32_t</span><span class="p">,</span><span class="w"> </span><span class="mi">4</span><span class="o">&gt;</span><span class="w"> </span><span class="n">words</span><span class="p">{};</span>
+<span class="w">  </span><span class="n">std</span><span class="o">::</span><span class="n">array</span><span class="o">&lt;</span><span class="kt">uint32_t</span><span class="p">,</span><span class="w"> </span><span class="mi">5</span><span class="o">&gt;</span><span class="w"> </span><span class="n">words</span><span class="p">{};</span>
 <span class="w">  </span><span class="kt">size_t</span><span class="w"> </span><span class="n">word_count</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span><span class="w"> </span><span class="c1">// Zero until the wave executes an instruction.</span>
 <span class="p">};</span>
 
