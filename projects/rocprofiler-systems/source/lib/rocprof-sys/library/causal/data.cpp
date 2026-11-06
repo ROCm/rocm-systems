@@ -512,7 +512,7 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
     using duration_nsec_t = std::chrono::duration<double, std::nano>;
     using duration_sec_t  = std::chrono::duration<double, std::ratio<1>>;
 
-    const thread_list::scoped_internal_thread _internal_thread{
+    const thread_list::scoped_internal_thread internal_thread{
         thread_list::get_internal_thread_list()
     };
     const auto& _thr_info = thread_info::init(true);
