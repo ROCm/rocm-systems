@@ -27,7 +27,7 @@ It also implements per-dispatch counters through runtime-contract section 11 (cu
 | `projects/clr/rocclr/device/rocm/rocdevice.cpp` | done-call drain after event waits |
 | `projects/rocprofiler-register/.../rocprofiler_register.cpp` | `hip_runtime_contract` added to the known libraries (RC-PKT-0a) |
 | `experimental/oop-tracing-poc/collector/dlogc.cpp` | Out-of-process dispatch-log collector |
-| `experimental/oop-tracing-poc/correlator/join.py` | Joins LTTng events and dispatch-log records, writes Perfetto JSON |
+| `experimental/oop-tracing-poc/correlator/join.py` | Joins LTTng events and dispatch-log records, writes Perfetto JSON. Pairs `<api>_enter`/`<api>_exit` per thread (the shape decided on Nov 4 and emitted by ROCm/rocm-systems#15122), with correlation and parent ids; also reads this branch's one-event probes |
 | `experimental/oop-tracing-poc/counters/poc_selector.cpp` | Counter selector loaded by rocprofiler-register (aqlprofile packets, slot pool, done handling) |
 | `experimental/oop-tracing-poc/apps/` | `app.hip` (2 streams, copies), `bench.hip` (overhead benchmarks) |
 | `experimental/oop-tracing-poc/scripts/` | Run and benchmark scripts (run inside the container) |

@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """Local POC correlator: LTTng runtime tracepoints + CP dispatch log -> Perfetto/Chrome JSON.
 
-    join.py <run_dir>     (reads <run_dir>/lttng, dlog.csv, clocks.csv; writes trace.json)
+    join.py <run_dir> [--provider=rocm_hip]     (reads <run_dir>/lttng, and dlog.csv and clocks.csv when present;
+                           writes trace.json). The LTTng session needs the vpid and vtid contexts.
 
-Joins, as in the dispatch-tracing design (section 5), with the doorbell-slot key from
-rocprofiler-sdk's in-process reader:
-  API call      one event per call: [start_timestamp, event time] on (pid, tid)
+Joins, as in the dispatch-tracing design (section 5) and the collector design (8.5), with the
+doorbell-slot key from rocprofiler-sdk's in-process reader:
+  API call      <api>_enter / <api>_exit pair on (pid, tid), paired in call order; the collector
+                assigns the correlation id and the enclosing call as parent. Also reads this
+                branch's one-event probes (<api> with start_timestamp)
   dispatch      kernel_dispatch probe -> innermost API call on its thread containing it
   log records   (doorbell_off & 1023, dispatch_id) == (doorbell_slot, packet_index & 0xffffffff)
   GPU time      linear fit of GPU clock -> CLOCK_MONOTONIC from collector clock pairs
 """
-import bisect
 import csv
 import json
 import statistics
@@ -20,47 +22,93 @@ from pathlib import Path
 
 import bt2
 
-run = Path(sys.argv[1])
+args = [a for a in sys.argv[1:] if not a.startswith("--provider=")]
+provider = next((a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("--provider=")),
+                "rocm_hip")
+run = Path(args[0])
+
+
+def value(v):
+    """A babeltrace2 field as a Python value."""
+    if isinstance(v, bt2._StringFieldConst):
+        return str(v)
+    if isinstance(v, (bt2._ArrayFieldConst,)):
+        return [value(x) for x in v]
+    if isinstance(v, bt2._RealFieldConst):
+        return float(v)
+    return int(v)
 
 
 def field(ev, name, default=None):
     try:
-        v = ev[name]
+        return value(ev[name])
     except KeyError:
         return default
-    return str(v) if isinstance(v, bt2._StringFieldConst) else int(v)
+
+
+def payload(ev):
+    """The event's own fields: not the transport's (opcode, activity id) or the length and
+    padding fields LTTng adds for strings and arrays."""
+    return {f: value(v) for f, v in ev.payload_field.items()
+            if not f.startswith("_") and not f.endswith("_padding")}
 
 
 # ------------------------------------------------------------------ runtime tracepoints
-api_calls = []   # dict(name, pid, tid, start, end, args)
-probes = []      # dict(pid, tid, t, slot, index, kernel, queue_id, grid, wg)
+api_calls = []     # dict(id, parent, name, pid, tid, start, end, args, exit)
+probes = []        # dict(pid, tid, t, slot, index, kernel, queue_id, grid, wg)
+stacks = defaultdict(list)  # (pid, tid) -> open calls, innermost last
+unmatched_exit = 0
 for msg in bt2.TraceCollectionMessageIterator(str(run / "lttng")):
     if type(msg) is not bt2._EventMessageConst:
         continue
     ev = msg.event
-    if not ev.name.startswith("rocm_hip:"):
+    if not ev.name.startswith(provider + ":"):
         continue
-    name = ev.name.split(":", 1)[1].split(";", 1)[0]
+    name = ev.name.split(":", 1)[1].split(";", 1)[0]  # drop the keyword suffix (;k0;)
     t = msg.default_clock_snapshot.value  # LTTng monotonic clock, ns
     pid, tid = field(ev, "vpid"), field(ev, "vtid")
+    if pid is None or tid is None:
+        sys.exit("events have no vpid/vtid: add them with lttng add-context -u -t vpid -t vtid")
+    stack = stacks[(pid, tid)]
     if name == "kernel_dispatch":
         probes.append(dict(pid=pid, tid=tid, t=t, slot=field(ev, "doorbell_slot"),
                            index=field(ev, "packet_index"), kernel=field(ev, "kernel_name"),
                            queue_id=field(ev, "queue_id"),
                            grid=[field(ev, f"grid_{a}") for a in "xyz"],
                            wg=[field(ev, f"workgroup_{a}") for a in "xyz"]))
-    else:
-        skip = {"start_timestamp", "_ms_ActivityId", "__ms_ActivityId_length",
-                "_ms_ActivityId_padding"}
-        args = {f: (str(v) if isinstance(v, bt2._StringFieldConst) else int(v))
-                for f, v in ev.payload_field.items() if f not in skip}
-        api_calls.append(dict(name=name, pid=pid, tid=tid, start=field(ev, "start_timestamp"),
-                              end=t, args=args))
+    elif name.endswith("_enter"):
+        call = dict(id=len(api_calls) + 1, parent=stack[-1]["id"] if stack else None,
+                    name=name[: -len("_enter")], pid=pid, tid=tid, start=t, end=None,
+                    args=payload(ev), exit=None)
+        api_calls.append(call)  # the collector assigns correlation ids (collector design 8.5)
+        stack.append(call)
+    elif name.endswith("_exit"):
+        api = name[: -len("_exit")]
+        # Pairs nest in call order on a thread (RC-API-1): the exit closes the innermost call.
+        # An exit for another API means an enter was lost; close calls up to the matching one.
+        depth = next((i for i in range(len(stack) - 1, -1, -1) if stack[i]["name"] == api), None)
+        if depth is None:
+            unmatched_exit += 1
+            continue
+        call = stack[depth]
+        del stack[depth:]
+        call["end"] = t
+        call["exit"] = payload(ev)
+    elif field(ev, "start_timestamp") is not None:
+        # This branch's own tltrace probes: one event per call, written on return with the start
+        # time as a field (before the Nov 4 enter/exit decision). A complete call, not nested.
+        args = payload(ev)
+        start = args.pop("start_timestamp")
+        api_calls.append(dict(id=len(api_calls) + 1, parent=stack[-1]["id"] if stack else None,
+                              name=name, pid=pid, tid=tid, start=start, end=t, args=args,
+                              exit={}))
+open_calls = [c for c in api_calls if c["end"] is None]  # no exit: crash, hang, or trace ended
 
 # ------------------------------------------------------------------ dispatch log
 gpu_dispatches = []  # dict(gpu, slot, id, start_tick, end_tick)
 open_start = {}
-rows = sorted(csv.DictReader(open(run / "dlog.csv")), key=lambda r: int(r["gpu_ts"]))
+dlog = run / "dlog.csv"
+rows = sorted(csv.DictReader(open(dlog)), key=lambda r: int(r["gpu_ts"])) if dlog.exists() else []
 unpaired_end = 0
 for r in rows:
     key = (int(r["gpu_id"]), int(r["doorbell_off"]), int(r["dispatch_id"]))
@@ -77,7 +125,8 @@ for r in rows:
 # ------------------------------------------------------------------ clock fit per GPU
 fit = {}
 samples = defaultdict(list)
-for r in csv.DictReader(open(run / "clocks.csv")):
+clocks = run / "clocks.csv"
+for r in (csv.DictReader(open(clocks)) if clocks.exists() else []):
     mid = (int(r["mono_before"]) + int(r["mono_after"])) / 2
     samples[int(r["gpu_id"])].append((int(r["gpu_clock"]), mid))
 for gpu, pts in samples.items():
@@ -95,9 +144,9 @@ def to_ns(gpu, tick):
 
 # ------------------------------------------------------------------ joins
 calls_by_tid = defaultdict(list)
-for i, c in enumerate(api_calls):
-    c["id"] = i + 1  # the collector assigns correlation ids (collector design 8.5)
-    calls_by_tid[(c["pid"], c["tid"])].append(c)
+for c in api_calls:
+    if c["end"] is not None:
+        calls_by_tid[(c["pid"], c["tid"])].append(c)
 for lst in calls_by_tid.values():
     lst.sort(key=lambda c: c["start"])
 
@@ -133,16 +182,19 @@ for p in sorted(probes, key=lambda p: p["t"]):
 log_left = sum(len(v) for v in log_by_key.values())
 
 # ------------------------------------------------------------------ Perfetto / Chrome JSON
-t0 = min([c["start"] for c in api_calls] + [p["t"] for p in probes])
+t0 = min([c["start"] for c in api_calls] + [p["t"] for p in probes], default=0)
 us = lambda ns: (ns - t0) / 1000.0
 events = []
 pids = {c["pid"] for c in api_calls}
 for pid in pids:
     events.append(dict(ph="M", name="process_name", pid=pid, args=dict(name=f"app (pid {pid})")))
 for c in api_calls:
+    if c["end"] is None:
+        continue
     events.append(dict(ph="X", name=c["name"], cat="hip_api", pid=c["pid"], tid=c["tid"],
                        ts=us(c["start"]), dur=(c["end"] - c["start"]) / 1000.0,
-                       args=dict(c["args"], correlation_id=c["id"])))
+                       args=dict(correlation_id=c["id"], parent_id=c["parent"],
+                                 enter=c["args"], exit=c["exit"])))
 gpu_pid_base = 1_000_000
 for gpu in {p["gpu"] for p in matched}:
     events.append(dict(ph="M", name="process_name", pid=gpu_pid_base + gpu,
@@ -167,7 +219,9 @@ json.dump(dict(traceEvents=events, displayTimeUnit="ns"), open(run / "trace.json
 
 # ------------------------------------------------------------------ report
 lat = sorted(p["gpu_start"] - p["t"] for p in matched)
-print(f"API calls: {len(api_calls)}   kernel_dispatch probes: {len(probes)}   "
+nested = sum(1 for c in api_calls if c["parent"] is not None)
+print(f"API calls: {len(api_calls)} ({nested} nested, {len(open_calls)} without exit, "
+      f"{unmatched_exit} exits without enter)   kernel_dispatch probes: {len(probes)}   "
       f"log dispatches: {len(gpu_dispatches)} (unpaired END: {unpaired_end}, open START: {len(open_start)})")
 print(f"matched probe->log: {len(matched)}   probes without log: {no_log}   "
       f"log without probe: {log_left}   probes without API call: {no_call}")
