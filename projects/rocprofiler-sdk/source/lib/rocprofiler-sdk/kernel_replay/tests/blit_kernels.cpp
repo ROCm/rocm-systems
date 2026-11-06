@@ -21,8 +21,9 @@
 // SOFTWARE.
 
 // Runs the kernel replay blit's code object on the first GPU the way the SDK does: raw AQL
-// dispatches with only the explicit kernel arguments written. Each layout is restored once and
-// checked byte for byte, including the gaps between regions.
+// dispatches with only the explicit kernel arguments written. Each layout is copied once and
+// checked byte for byte, including the gaps between regions. The restore kernels are checked
+// against digests and changed tiles worked out on the host.
 
 #include "lib/rocprofiler-sdk/kernel_replay/blit-copy-kernel.hpp"
 
@@ -40,8 +41,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <memory>
 #include <optional>
 #include <random>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -50,18 +53,39 @@ namespace
 {
 namespace abi = rocprofiler::kernel_replay::blit::kernel_abi;
 
-constexpr auto kernel_names = std::array<const char*, 4>{
+enum kernel_index : size_t
+{
+    count_tiles = 0,
+    scan_tiles,
+    expand_tiles,
+    copy_tiles,
+    capture_tiles,
+    restore_changed_tiles,
+    restore_listed_tiles,
+    check_tiles,
+    kernel_count
+};
+
+constexpr auto kernel_names = std::array<const char*, kernel_count>{
     "kernel_replay_count_tiles",
     "kernel_replay_scan_tiles",
     "kernel_replay_expand_tiles",
     "kernel_replay_copy_tiles",
+    "kernel_replay_capture_tiles",
+    "kernel_replay_restore_changed_tiles",
+    "kernel_replay_restore_listed_tiles",
+    "kernel_replay_check_tiles",
 };
 
-constexpr auto kernel_arg_sizes = std::array<uint32_t, 4>{
+constexpr auto kernel_arg_sizes = std::array<uint32_t, kernel_count>{
     sizeof(abi::count_tiles_args_t),
     sizeof(abi::scan_tiles_args_t),
     sizeof(abi::expand_tiles_args_t),
     sizeof(abi::copy_tiles_args_t),
+    sizeof(abi::capture_tiles_args_t),
+    sizeof(abi::restore_changed_args_t),
+    sizeof(abi::restore_listed_args_t),
+    sizeof(abi::check_tiles_args_t),
 };
 
 constexpr auto kernarg_stride = size_t{64};
@@ -74,6 +98,30 @@ struct kernel_t
     uint32_t group_segment_size   = 0;
     uint32_t kernarg_size         = 0;
 };
+
+// One dispatch of a chain, with its arguments.
+struct step_t
+{
+    kernel_index                          kernel     = copy_tiles;
+    uint32_t                              workgroups = 0;
+    std::array<std::byte, kernarg_stride> args       = {};
+};
+
+template <typename Args>
+step_t
+make_step(kernel_index kernel, uint32_t workgroups, const Args& args)
+{
+    static_assert(sizeof(Args) <= kernarg_stride);
+    auto step = step_t{kernel, workgroups};
+    std::memcpy(step.args.data(), &args, sizeof(args));
+    return step;
+}
+
+uint64_t
+address(const void* ptr)
+{
+    return reinterpret_cast<uint64_t>(ptr);
+}
 
 struct pool_search_t
 {
@@ -140,6 +188,7 @@ public:
     bool               available() const { return m_reason.empty(); }
     const std::string& reason() const { return m_reason; }
     const auto&        kernels() const { return m_kernels; }
+    uint32_t           copy_workgroups() const { return m_cu_count * abi::copy_workgroups_per_cu; }
 
     void* allocate_device(size_t size) const
     {
@@ -149,6 +198,15 @@ public:
             return nullptr;
         return ptr;
     }
+
+    // Host memory the GPU reads over PCIe, like the SDK's pinned snapshot arena.
+    void* allocate_pinned(size_t size) const { return allocate_host(m_staging_pool, size); }
+
+    // Dispatches `steps` with the SDK's fences and returns whether they completed in time.
+    bool run(const std::vector<step_t>& steps) const;
+
+private:
+    gpu_t();
 
     void* allocate_host(hsa_amd_memory_pool_t pool, size_t size) const
     {
@@ -164,22 +222,16 @@ public:
         return ptr;
     }
 
-    // Copies `regions` with the four kernels and returns whether the copy completed in time.
-    bool restore(const std::vector<abi::copy_descriptor_t>& regions) const;
-
-private:
-    gpu_t();
-
-    std::string              m_reason{};
-    hsa_agent_t              m_gpu{};
-    hsa_amd_memory_pool_t    m_device_pool{};
-    hsa_amd_memory_pool_t    m_kernarg_pool{};
-    hsa_amd_memory_pool_t    m_staging_pool{};
-    hsa_queue_t*             m_queue    = nullptr;
-    uint32_t                 m_cu_count = 0;
-    std::array<kernel_t, 4>  m_kernels{};
-    hsa_executable_t         m_executable{};
-    hsa_code_object_reader_t m_reader{};
+    std::string                        m_reason{};
+    hsa_agent_t                        m_gpu{};
+    hsa_amd_memory_pool_t              m_device_pool{};
+    hsa_amd_memory_pool_t              m_kernarg_pool{};
+    hsa_amd_memory_pool_t              m_staging_pool{};
+    hsa_queue_t*                       m_queue    = nullptr;
+    uint32_t                           m_cu_count = 0;
+    std::array<kernel_t, kernel_count> m_kernels{};
+    hsa_executable_t                   m_executable{};
+    hsa_code_object_reader_t           m_reader{};
 };
 
 gpu_t::gpu_t()
@@ -272,95 +324,38 @@ gpu_t::gpu_t()
 }
 
 bool
-gpu_t::restore(const std::vector<abi::copy_descriptor_t>& regions) const
+gpu_t::run(const std::vector<step_t>& steps) const
 {
-    const auto descriptor_count = static_cast<uint32_t>(regions.size());
-    auto       total_tiles      = uint64_t{0};
-    for(const auto& region : regions)
-        total_tiles += abi::tiles_for(region.size);
-    const auto tile_count = static_cast<uint32_t>(total_tiles);
-
-    const auto descriptors_size = regions.size() * sizeof(abi::copy_descriptor_t);
-    auto*      descriptors      = allocate_device(descriptors_size);
-    auto*      first_tiles      = allocate_device(size_t{descriptor_count} * sizeof(uint32_t));
-    auto*      chunk_totals =
-        allocate_device(size_t{abi::chunks_for(descriptor_count)} * sizeof(uint32_t));
-    auto*      tile_count_buffer = allocate_device(sizeof(uint32_t));
-    auto*      tiles    = allocate_device(size_t{tile_count} * sizeof(abi::copy_descriptor_t));
-    auto*      kernargs = allocate_host(m_kernarg_pool, kernarg_stride * m_kernels.size());
-    auto*      staging  = allocate_host(m_staging_pool, descriptors_size);
-    auto       done     = hsa_signal_t{};
-    const auto release  = [&] {
-        if(done.handle != 0) hsa_signal_destroy(done);
-        for(void* ptr :
-            {descriptors, first_tiles, chunk_totals, tile_count_buffer, tiles, kernargs, staging})
-            if(ptr) hsa_amd_memory_pool_free(ptr);
-    };
-    if(!descriptors || !first_tiles || !chunk_totals || !tile_count_buffer || !tiles || !kernargs ||
-       !staging || hsa_signal_create(1, 0, nullptr, &done) != HSA_STATUS_SUCCESS)
+    auto* kernargs = allocate_host(m_kernarg_pool, kernarg_stride * steps.size());
+    auto  done     = hsa_signal_t{};
+    if(!kernargs || hsa_signal_create(1, 0, nullptr, &done) != HSA_STATUS_SUCCESS)
     {
-        release();
+        if(kernargs) hsa_amd_memory_pool_free(kernargs);
         return false;
     }
-
-    std::memcpy(staging, regions.data(), descriptors_size);
-    if(hsa_memory_copy(descriptors, staging, descriptors_size) != HSA_STATUS_SUCCESS)
-    {
-        release();
-        return false;
-    }
-
-    const auto address           = [](const void* ptr) { return reinterpret_cast<uint64_t>(ptr); };
-    const auto chunks            = abi::chunks_for(descriptor_count);
-    const auto copy_workgroups   = m_cu_count * abi::copy_workgroups_per_cu;
-    const auto expand_workgroups = std::min(
-        static_cast<uint32_t>((total_tiles + abi::workgroup_size - 1) / abi::workgroup_size),
-        copy_workgroups);
-    const auto workgroups =
-        std::array<uint32_t, 4>{chunks, chunks, expand_workgroups, copy_workgroups};
-
-    auto*      args = static_cast<std::byte*>(kernargs);
-    const auto count_args =
-        abi::count_tiles_args_t{address(descriptors), address(chunk_totals), descriptor_count, 0};
-    const auto scan_args   = abi::scan_tiles_args_t{address(descriptors),
-                                                  address(chunk_totals),
-                                                  address(first_tiles),
-                                                  address(tile_count_buffer),
-                                                  descriptor_count,
-                                                  chunks};
-    const auto expand_args = abi::expand_tiles_args_t{address(descriptors),
-                                                      address(first_tiles),
-                                                      address(tile_count_buffer),
-                                                      address(tiles),
-                                                      descriptor_count,
-                                                      expand_workgroups};
-    const auto copy_args =
-        abi::copy_tiles_args_t{address(tiles), address(tile_count_buffer), copy_workgroups, 0};
-    std::memcpy(args + 0 * kernarg_stride, &count_args, sizeof(count_args));
-    std::memcpy(args + 1 * kernarg_stride, &scan_args, sizeof(scan_args));
-    std::memcpy(args + 2 * kernarg_stride, &expand_args, sizeof(expand_args));
-    std::memcpy(args + 3 * kernarg_stride, &copy_args, sizeof(copy_args));
+    auto* args = static_cast<std::byte*>(kernargs);
+    for(size_t index = 0; index < steps.size(); ++index)
+        std::memcpy(args + index * kernarg_stride, steps.at(index).args.data(), kernarg_stride);
 
     // The same packet chain as the SDK: every dispatch waits for the previous one, system scope
-    // at the two ends, and the copy signals completion.
-    const auto first_index = hsa_queue_add_write_index_scacq_screl(m_queue, m_kernels.size());
-    while(first_index + m_kernels.size() - hsa_queue_load_read_index_scacquire(m_queue) >
-          m_queue->size)
+    // at the two ends, and the last one signals completion.
+    const auto first_index = hsa_queue_add_write_index_scacq_screl(m_queue, steps.size());
+    while(first_index + steps.size() - hsa_queue_load_read_index_scacquire(m_queue) > m_queue->size)
     {}
     auto* packets = static_cast<hsa_kernel_dispatch_packet_t*>(m_queue->base_address);
-    auto  headers = std::array<uint16_t, 4>{};
-    for(size_t index = 0; index < m_kernels.size(); ++index)
+    auto  headers = std::vector<uint16_t>(steps.size());
+    for(size_t index = 0; index < steps.size(); ++index)
     {
-        const auto& kernel          = m_kernels.at(index);
+        const auto& kernel          = m_kernels.at(steps.at(index).kernel);
         const auto  first           = (index == 0);
-        const auto  last            = (index + 1 == m_kernels.size());
+        const auto  last            = (index + 1 == steps.size());
         auto&       packet          = packets[(first_index + index) & (m_queue->size - 1)];
         packet.reserved0            = 0;
         packet.reserved2            = 0;
         packet.workgroup_size_x     = static_cast<uint16_t>(abi::workgroup_size);
         packet.workgroup_size_y     = 1;
         packet.workgroup_size_z     = 1;
-        packet.grid_size_x          = workgroups.at(index) * abi::workgroup_size;
+        packet.grid_size_x          = steps.at(index).workgroups * abi::workgroup_size;
         packet.grid_size_y          = 1;
         packet.grid_size_z          = 1;
         packet.private_segment_size = kernel.private_segment_size;
@@ -375,13 +370,13 @@ gpu_t::restore(const std::vector<abi::copy_descriptor_t>& regions) const
                             ((last ? HSA_FENCE_SCOPE_SYSTEM : HSA_FENCE_SCOPE_AGENT)
                              << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
     }
-    for(size_t index = 0; index < m_kernels.size(); ++index)
+    for(size_t index = 0; index < steps.size(); ++index)
     {
         auto* word =
             reinterpret_cast<uint32_t*>(&packets[(first_index + index) & (m_queue->size - 1)]);
         __atomic_store_n(word, uint32_t{headers.at(index)} | (uint32_t{1} << 16), __ATOMIC_RELEASE);
     }
-    hsa_signal_store_screlease(m_queue->doorbell_signal, first_index + m_kernels.size() - 1);
+    hsa_signal_store_screlease(m_queue->doorbell_signal, first_index + steps.size() - 1);
 
     using clock         = std::chrono::steady_clock;
     const auto deadline = clock::now() + std::chrono::seconds{60};
@@ -390,12 +385,203 @@ gpu_t::restore(const std::vector<abi::copy_descriptor_t>& regions) const
         value = hsa_signal_wait_scacquire(
             done, HSA_SIGNAL_CONDITION_EQ, 0, 1000000000, HSA_WAIT_STATE_BLOCKED);
 
-    release();
+    hsa_signal_destroy(done);
+    hsa_amd_memory_pool_free(kernargs);
     return value == 0;
 }
 
-// Source and destination spans with the regions at the same offsets in both. The destination
-// starts as a sentinel, so a copy outside a region shows up in the gaps.
+template <typename Tp>
+std::vector<Tp>
+read_device(const void* device, size_t count)
+{
+    auto values = std::vector<Tp>(count);
+    if(count != 0) hsa_memory_copy(values.data(), device, count * sizeof(Tp));
+    return values;
+}
+
+// The buffers the SDK keeps in its workspace for one tile list, here allocated separately, and
+// the dispatches it makes over them.
+class workspace_t
+{
+public:
+    workspace_t(const std::vector<abi::copy_descriptor_t>& regions, bool digests)
+    : m_descriptor_count{static_cast<uint32_t>(regions.size())}
+    {
+        for(const auto& region : regions)
+            m_tile_count += static_cast<uint32_t>(abi::tiles_for(region.size));
+        const auto descriptors_size = regions.size() * sizeof(abi::copy_descriptor_t);
+        m_descriptors               = allocate(descriptors_size);
+        m_first_tiles               = allocate(size_t{m_descriptor_count} * sizeof(uint32_t));
+        m_chunk_totals = allocate(size_t{abi::chunks_for(m_descriptor_count)} * sizeof(uint32_t));
+        m_tile_total   = allocate(sizeof(uint32_t));
+        m_counters     = allocate(abi::counter_count * sizeof(uint32_t));
+        m_tiles        = allocate(size_t{m_tile_count} * sizeof(abi::copy_descriptor_t));
+        if(digests)
+        {
+            m_digests = allocate(size_t{m_tile_count} * sizeof(uint64_t));
+            m_flags   = allocate(m_tile_count);
+            m_changed = allocate(size_t{m_tile_count} * sizeof(uint32_t));
+        }
+        m_ok = m_ok && hsa_memory_copy(m_descriptors, regions.data(), descriptors_size) ==
+                           HSA_STATUS_SUCCESS;
+    }
+
+    ~workspace_t()
+    {
+        for(void* buffer : m_buffers)
+            hsa_amd_memory_pool_free(buffer);
+    }
+
+    workspace_t(const workspace_t&) = delete;
+    workspace_t& operator=(const workspace_t&) = delete;
+
+    bool     ok() const { return m_ok; }
+    uint32_t tile_count() const { return m_tile_count; }
+
+    // The SDK's copy: three dispatches build the tile list, and the last copies it, digesting the
+    // tiles when the workspace has digests.
+    std::vector<step_t> copy_steps() const
+    {
+        const auto chunks            = abi::chunks_for(m_descriptor_count);
+        const auto copy_workgroups   = gpu_t::get().copy_workgroups();
+        const auto expand_workgroups = std::min(
+            (m_tile_count + abi::workgroup_size - 1) / abi::workgroup_size, copy_workgroups);
+        auto steps = std::vector<step_t>{
+            make_step(count_tiles,
+                      chunks,
+                      abi::count_tiles_args_t{
+                          address(m_descriptors), address(m_chunk_totals), m_descriptor_count, 0}),
+            make_step(scan_tiles,
+                      chunks,
+                      abi::scan_tiles_args_t{address(m_descriptors),
+                                             address(m_chunk_totals),
+                                             address(m_first_tiles),
+                                             address(m_tile_total),
+                                             m_descriptor_count,
+                                             chunks}),
+            make_step(expand_tiles,
+                      expand_workgroups,
+                      abi::expand_tiles_args_t{address(m_descriptors),
+                                               address(m_first_tiles),
+                                               address(m_tile_total),
+                                               address(m_tiles),
+                                               address(m_digests),
+                                               address(m_flags),
+                                               m_digests ? address(m_counters) : 0,
+                                               m_descriptor_count,
+                                               expand_workgroups}),
+        };
+        if(m_digests)
+            steps.push_back(make_step(capture_tiles,
+                                      copy_workgroups,
+                                      abi::capture_tiles_args_t{address(m_tiles),
+                                                                address(m_tile_total),
+                                                                address(m_digests),
+                                                                copy_workgroups,
+                                                                0}));
+        else
+            steps.push_back(
+                make_step(copy_tiles,
+                          copy_workgroups,
+                          abi::copy_tiles_args_t{
+                              address(m_tiles), address(m_tile_total), copy_workgroups, 0}));
+        return steps;
+    }
+
+    // A full restore: the copy kernel over the capture's list, each tile back to its source.
+    step_t restore_all() const
+    {
+        const auto workgroups = gpu_t::get().copy_workgroups();
+        return make_step(
+            copy_tiles,
+            workgroups,
+            abi::copy_tiles_args_t{address(m_tiles), address(m_tile_total), workgroups, 1});
+    }
+
+    step_t restore_changed(uint32_t slot) const
+    {
+        const auto workgroups = gpu_t::get().copy_workgroups();
+        return make_step(restore_changed_tiles,
+                         workgroups,
+                         abi::restore_changed_args_t{address(m_tiles),
+                                                     address(m_tile_total),
+                                                     address(m_digests),
+                                                     address(m_flags),
+                                                     address(m_changed),
+                                                     address(m_counters),
+                                                     slot,
+                                                     workgroups});
+    }
+
+    step_t restore_listed(uint32_t slot) const
+    {
+        const auto workgroups = gpu_t::get().copy_workgroups();
+        return make_step(restore_listed_tiles,
+                         workgroups,
+                         abi::restore_listed_args_t{address(m_tiles),
+                                                    address(m_changed),
+                                                    address(m_counters) + slot * sizeof(uint32_t),
+                                                    workgroups,
+                                                    0});
+    }
+
+    step_t check() const
+    {
+        const auto workgroups = gpu_t::get().copy_workgroups();
+        return make_step(check_tiles,
+                         workgroups,
+                         abi::check_tiles_args_t{address(m_tiles),
+                                                 address(m_tile_total),
+                                                 address(m_digests),
+                                                 address(m_flags),
+                                                 address(m_counters),
+                                                 workgroups,
+                                                 0});
+    }
+
+    std::vector<uint32_t> counters() const
+    {
+        return read_device<uint32_t>(m_counters, abi::counter_count);
+    }
+    std::vector<uint64_t> digests() const { return read_device<uint64_t>(m_digests, m_tile_count); }
+    std::vector<uint8_t>  flags() const { return read_device<uint8_t>(m_flags, m_tile_count); }
+    std::vector<uint32_t> changed(uint32_t count) const
+    {
+        return read_device<uint32_t>(m_changed, count);
+    }
+
+    void set_counter(uint32_t index, uint32_t value) const
+    {
+        hsa_memory_copy(static_cast<uint32_t*>(m_counters) + index, &value, sizeof(value));
+    }
+
+private:
+    void* allocate(size_t size)
+    {
+        auto* buffer = gpu_t::get().allocate_device(size);
+        if(buffer)
+            m_buffers.push_back(buffer);
+        else
+            m_ok = false;
+        return buffer;
+    }
+
+    bool               m_ok               = true;
+    uint32_t           m_descriptor_count = 0;
+    uint32_t           m_tile_count       = 0;
+    std::vector<void*> m_buffers          = {};
+    void*              m_descriptors      = nullptr;
+    void*              m_first_tiles      = nullptr;
+    void*              m_chunk_totals     = nullptr;
+    void*              m_tile_total       = nullptr;
+    void*              m_counters         = nullptr;
+    void*              m_tiles            = nullptr;
+    void*              m_digests          = nullptr;
+    void*              m_flags            = nullptr;
+    void*              m_changed          = nullptr;
+};
+
+// Source and destination spans with the regions at the same offsets in both.
 struct layout_t
 {
     std::vector<std::pair<uint64_t, uint64_t>> regions{};  // offset, size
@@ -432,16 +618,46 @@ random_sizes(size_t count, uint64_t smallest, uint64_t largest, uint64_t seed)
     return sizes;
 }
 
+std::vector<std::byte>
+pattern(uint64_t size)
+{
+    auto bytes = std::vector<std::byte>(size);
+    for(size_t index = 0; index < bytes.size(); ++index)
+        bytes.at(index) = static_cast<std::byte>((index * 131 + 7) >> 3);
+    return bytes;
+}
+
+// The digest blit-copy-kernel.hpp defines, worked out byte by byte on the (little-endian) host.
+uint64_t
+host_digest(const std::byte* data, uint64_t size)
+{
+    auto digest = uint64_t{0};
+    for(auto offset = uint64_t{0}; offset < size; offset += 8)
+    {
+        auto word = uint64_t{0};
+        std::memcpy(&word, data + offset, std::min<uint64_t>(8, size - offset));
+        digest += abi::digest_term(word, offset / 8);
+    }
+    return digest;
+}
+
+size_t
+count_mismatches(const std::vector<std::byte>& actual, const std::vector<std::byte>& expected)
+{
+    auto count = size_t{0};
+    for(size_t index = 0; index < actual.size(); ++index)
+        count += (actual.at(index) != expected.at(index));
+    return count;
+}
+
 void
 check_layout(const layout_t& layout)
 {
     auto& gpu = gpu_t::get();
     if(!gpu.available()) GTEST_SKIP() << gpu.reason();
 
-    auto source = std::vector<std::byte>(layout.span);
-    for(size_t index = 0; index < source.size(); ++index)
-        source.at(index) = static_cast<std::byte>((index * 131 + 7) >> 3);
-    auto dest = std::vector<std::byte>(layout.span, sentinel);
+    const auto source = pattern(layout.span);
+    auto       dest   = std::vector<std::byte>(layout.span, sentinel);
 
     auto* device_source = gpu.allocate_device(layout.span);
     auto* device_dest   = gpu.allocate_device(layout.span);
@@ -452,10 +668,12 @@ check_layout(const layout_t& layout)
 
     auto regions = std::vector<abi::copy_descriptor_t>{};
     for(const auto& [offset, size] : layout.regions)
-        regions.push_back({size,
-                           reinterpret_cast<uint64_t>(device_source) + offset,
-                           reinterpret_cast<uint64_t>(device_dest) + offset});
-    ASSERT_TRUE(gpu.restore(regions)) << "the blit did not complete";
+        regions.push_back({size, address(device_source) + offset, address(device_dest) + offset});
+    {
+        const auto workspace = workspace_t{regions, false};
+        ASSERT_TRUE(workspace.ok());
+        ASSERT_TRUE(gpu.run(workspace.copy_steps())) << "the blit did not complete";
+    }
     ASSERT_EQ(hsa_memory_copy(dest.data(), device_dest, layout.span), HSA_STATUS_SUCCESS);
     hsa_amd_memory_pool_free(device_source);
     hsa_amd_memory_pool_free(device_dest);
@@ -473,6 +691,159 @@ check_layout(const layout_t& layout)
                       << " is " << int(dest.at(index)) << ", expected " << int(expected);
     }
     EXPECT_EQ(mismatches, 0);
+}
+
+// A capture with digests of `layout` from live device memory into a snapshot in device memory,
+// or in host memory the GPU reads over PCIe like the pinned arena.
+class capture_t
+{
+public:
+    capture_t(const layout_t& layout, bool host_snapshot)
+    : m_original{pattern(layout.span)}
+    {
+        auto& gpu = gpu_t::get();
+        m_live    = gpu.allocate_device(layout.span);
+        m_snapshot =
+            host_snapshot ? gpu.allocate_pinned(layout.span) : gpu.allocate_device(layout.span);
+        if(!m_live || !m_snapshot ||
+           hsa_memory_copy(m_live, m_original.data(), layout.span) != HSA_STATUS_SUCCESS)
+            return;
+
+        auto regions = std::vector<abi::copy_descriptor_t>{};
+        for(const auto& [offset, size] : layout.regions)
+        {
+            const auto region = abi::copy_descriptor_t{
+                size, address(m_live) + offset, address(m_snapshot) + offset};
+            regions.push_back(region);
+            for(uint64_t index = 0; index < abi::tiles_for(size); ++index)
+            {
+                const auto tile = abi::tile_of(region, index);
+                m_tiles.emplace_back(tile.source_address - address(m_live), tile.size);
+            }
+        }
+        m_workspace = std::make_unique<workspace_t>(regions, true);
+        m_ok        = m_workspace->ok() && gpu.run(m_workspace->copy_steps());
+    }
+
+    ~capture_t()
+    {
+        if(m_live) hsa_amd_memory_pool_free(m_live);
+        if(m_snapshot) hsa_amd_memory_pool_free(m_snapshot);
+    }
+
+    capture_t(const capture_t&) = delete;
+    capture_t& operator=(const capture_t&) = delete;
+
+    bool                          ok() const { return m_ok; }
+    const workspace_t&            workspace() const { return *m_workspace; }
+    const std::vector<std::byte>& original() const { return m_original; }
+
+    // Offset and size of each tile, in the order the kernels list them.
+    const std::vector<std::pair<uint64_t, uint64_t>>& tiles() const { return m_tiles; }
+
+    std::vector<std::byte> live() const
+    {
+        return read_device<std::byte>(m_live, m_original.size());
+    }
+    std::vector<std::byte> snapshot() const
+    {
+        return read_device<std::byte>(m_snapshot, m_original.size());
+    }
+    void write_live(const std::vector<std::byte>& bytes) const
+    {
+        hsa_memory_copy(m_live, bytes.data(), bytes.size());
+    }
+
+    // Changes one byte in each of `tiles` on top of `bytes`.
+    std::vector<std::byte> touched(std::vector<std::byte>    bytes,
+                                   const std::set<uint32_t>& tiles,
+                                   std::byte                 value) const
+    {
+        for(const auto tile : tiles)
+        {
+            const auto [offset, size] = m_tiles.at(tile);
+            bytes.at(offset + size / 2) ^= value;
+        }
+        return bytes;
+    }
+
+private:
+    bool                                       m_ok       = false;
+    std::vector<std::byte>                     m_original = {};
+    void*                                      m_live     = nullptr;
+    void*                                      m_snapshot = nullptr;
+    std::vector<std::pair<uint64_t, uint64_t>> m_tiles    = {};
+    std::unique_ptr<workspace_t>               m_workspace{};
+};
+
+std::set<uint32_t>
+every(uint32_t step, uint32_t first, uint32_t count)
+{
+    auto tiles = std::set<uint32_t>{};
+    for(auto tile = first; tile < count; tile += step)
+        tiles.insert(tile);
+    return tiles;
+}
+
+void
+check_digests(const layout_t& layout)
+{
+    auto& gpu = gpu_t::get();
+    if(!gpu.available()) GTEST_SKIP() << gpu.reason();
+
+    const auto capture = capture_t{layout, false};
+    ASSERT_TRUE(capture.ok());
+    const auto snapshot = capture.snapshot();
+    for(const auto& [offset, size] : layout.regions)
+        ASSERT_TRUE(std::equal(snapshot.begin() + offset,
+                               snapshot.begin() + offset + size,
+                               capture.original().begin() + offset))
+            << "region at " << offset << " was not captured";
+
+    const auto digests = capture.workspace().digests();
+    ASSERT_EQ(digests.size(), capture.tiles().size());
+    for(size_t tile = 0; tile < digests.size(); ++tile)
+    {
+        const auto [offset, size] = capture.tiles().at(tile);
+        ASSERT_EQ(digests.at(tile), host_digest(capture.original().data() + offset, size))
+            << "tile " << tile << " at " << offset << ", " << size << " bytes";
+    }
+}
+
+void
+check_restore_changed(bool host_snapshot)
+{
+    auto& gpu = gpu_t::get();
+    if(!gpu.available()) GTEST_SKIP() << gpu.reason();
+
+    const auto capture =
+        capture_t{make_layout(random_sizes(40, 1, 200000, 11), 16, 64, 12), host_snapshot};
+    ASSERT_TRUE(capture.ok());
+    const auto tile_count = capture.workspace().tile_count();
+    const auto changed    = every(5, 0, tile_count);
+
+    // The first restore, before pass 1, also clears the count the next one uses.
+    capture.write_live(capture.touched(capture.original(), changed, std::byte{0x5a}));
+    capture.workspace().set_counter(1, 77);
+    ASSERT_TRUE(gpu.run({capture.workspace().restore_changed(0)}));
+    EXPECT_EQ(count_mismatches(capture.live(), capture.original()), 0);
+    auto counters = capture.workspace().counters();
+    EXPECT_EQ(counters.at(0), changed.size());
+    EXPECT_EQ(counters.at(1), 0);
+    const auto listed = capture.workspace().changed(counters.at(0));
+    EXPECT_EQ(std::set<uint32_t>(listed.begin(), listed.end()), changed);
+    const auto flags = capture.workspace().flags();
+    for(uint32_t tile = 0; tile < tile_count; ++tile)
+        EXPECT_EQ(flags.at(tile) != 0, changed.count(tile) == 1) << "tile " << tile;
+
+    // Hashing before every pass alternates between the two counts.
+    const auto next = every(7, 3, tile_count);
+    capture.write_live(capture.touched(capture.original(), next, std::byte{0x33}));
+    ASSERT_TRUE(gpu.run({capture.workspace().restore_changed(1)}));
+    EXPECT_EQ(count_mismatches(capture.live(), capture.original()), 0);
+    counters = capture.workspace().counters();
+    EXPECT_EQ(counters.at(0), 0);
+    EXPECT_EQ(counters.at(1), next.size());
 }
 
 TEST(kernel_replay_blit_kernels, use_no_scratch_and_only_explicit_arguments)
@@ -521,5 +892,97 @@ TEST(kernel_replay_blit_kernels, many_tiny_regions)
 TEST(kernel_replay_blit_kernels, mixed_sizes)
 {
     check_layout(make_layout(random_sizes(500, 1, std::uint64_t{1} << 20, 8), 16, 256, 9));
+}
+
+TEST(kernel_replay_blit_kernels, capture_digests_partial_words_and_tile_tails)
+{
+    check_digests(make_layout(
+        {1, 7, 8, 9, 15, 16, 17, 24, 4095, 4097, 16383, 16384, 16385, 49153}, 16, 64, 21));
+}
+
+TEST(kernel_replay_blit_kernels, capture_digests_at_any_byte_offset)
+{
+    check_digests(make_layout({1, 3, 17, 255, 4097, 16385, 40961, 100003}, 1, 31, 22));
+}
+
+TEST(kernel_replay_blit_kernels, capture_digests_tiles_split_into_pieces)
+{
+    check_digests(make_layout({16384, 16384, 9000}, 4096, 4096, 23));
+}
+
+TEST(kernel_replay_blit_kernels, capture_digests_large_and_tiny_regions)
+{
+    check_digests(make_layout(random_sizes(300, 1, std::uint64_t{4} << 20, 24), 16, 256, 25));
+}
+
+TEST(kernel_replay_blit_kernels, restore_all_runs_the_capture_list_backwards)
+{
+    auto& gpu = gpu_t::get();
+    if(!gpu.available()) GTEST_SKIP() << gpu.reason();
+
+    for(const auto host_snapshot : {false, true})
+    {
+        const auto layout  = make_layout(random_sizes(50, 1, 300000, 41), 16, 64, 42);
+        const auto capture = capture_t{layout, host_snapshot};
+        ASSERT_TRUE(capture.ok());
+
+        auto written = capture.original();
+        for(auto& byte : written)
+            byte ^= std::byte{0xff};
+        capture.write_live(written);
+        ASSERT_TRUE(gpu.run({capture.workspace().restore_all()}));
+
+        // The regions come back; the gaps between them keep what was written.
+        auto expected = written;
+        for(const auto& [offset, size] : layout.regions)
+            std::copy_n(capture.original().begin() + offset, size, expected.begin() + offset);
+        EXPECT_EQ(count_mismatches(capture.live(), expected), 0)
+            << (host_snapshot ? "from a host snapshot" : "from a device snapshot");
+    }
+}
+
+TEST(kernel_replay_blit_kernels, restore_changed_from_a_device_snapshot)
+{
+    check_restore_changed(false);
+}
+
+TEST(kernel_replay_blit_kernels, restore_changed_from_a_host_snapshot)
+{
+    check_restore_changed(true);
+}
+
+TEST(kernel_replay_blit_kernels, restore_listed_and_check_the_rest)
+{
+    auto& gpu = gpu_t::get();
+    if(!gpu.available()) GTEST_SKIP() << gpu.reason();
+
+    const auto capture = capture_t{make_layout(random_sizes(60, 1, 120000, 31), 16, 64, 32), false};
+    ASSERT_TRUE(capture.ok());
+    const auto tile_count = capture.workspace().tile_count();
+    const auto listed     = every(4, 1, tile_count);
+    capture.write_live(capture.touched(capture.original(), listed, std::byte{0x5a}));
+    ASSERT_TRUE(gpu.run({capture.workspace().restore_changed(0)}));
+    ASSERT_EQ(capture.workspace().counters().at(0), listed.size());
+
+    // A later pass writes the same tiles. The check after it ignores them, and the list restores
+    // them.
+    capture.write_live(capture.touched(capture.original(), listed, std::byte{0x0f}));
+    ASSERT_TRUE(gpu.run({capture.workspace().check()}));
+    EXPECT_EQ(capture.workspace().counters().at(abi::unlisted_counter), 0);
+    ASSERT_TRUE(gpu.run({capture.workspace().restore_listed(0)}));
+    EXPECT_EQ(count_mismatches(capture.live(), capture.original()), 0);
+
+    // One that also writes a tile off the list: the check counts it, and the list misses it.
+    const auto unlisted = std::set<uint32_t>{0};
+    auto       written  = capture.touched(capture.original(), listed, std::byte{0x0f});
+    written             = capture.touched(written, unlisted, std::byte{0x40});
+    capture.write_live(written);
+    ASSERT_TRUE(gpu.run({capture.workspace().check()}));
+    EXPECT_EQ(capture.workspace().counters().at(abi::unlisted_counter), 1);
+    ASSERT_TRUE(gpu.run({capture.workspace().restore_listed(0)}));
+    const auto live           = capture.live();
+    const auto [offset, size] = capture.tiles().at(0);
+    EXPECT_NE(live.at(offset + size / 2), capture.original().at(offset + size / 2));
+    EXPECT_EQ(count_mismatches(live, capture.original()), 1);
 }
 }  // namespace

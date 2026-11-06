@@ -144,13 +144,16 @@ capture_context(hsa_agent_t agent, msnp::capture_mode mode, bool gpu_backend_ava
 void
 record_for_snapshot_test(void* ptr, size_t size, hsa_agent_t agent)
 {
-    mt::inventory().wlock([&](auto& map) { map[ptr] = mt::alloc_info_t{size, agent}; });
+    mt::modify_inventory([&](auto& map) {
+        map[ptr] = mt::alloc_info_t{size, agent};
+        return true;
+    });
 }
 
 void
 unrecord_for_snapshot_test(void* ptr)
 {
-    mt::inventory().wlock([&](auto& map) { map.erase(ptr); });
+    mt::modify_inventory([&](auto& map) { return map.erase(ptr) > 0; });
 }
 
 std::vector<float>
@@ -518,6 +521,157 @@ TEST(kernel_replay_snapshot, planned_regions_materialize_into_gpu_and_pinned_are
         unrecord_for_snapshot_test(buffers[i]);
         ASSERT_EQ(hipFree(buffers[i]), hipSuccess);
     }
+}
+
+// With batch callbacks, the blit copies the pinned arena too: nothing is copied around them.
+TEST(kernel_replay_snapshot, batch_callbacks_copy_pinned_extents_too)
+{
+    if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
+
+    constexpr int              n     = 2 * 1024 * 1024;
+    constexpr size_t           bytes = static_cast<size_t>(n) * sizeof(float);
+    std::array<float*, 3>      buffers{};
+    const std::array<float, 3> original = {3.0f, 5.0f, 7.0f};
+
+    hsa_agent_t agent{.handle = 0};
+    for(size_t i = 0; i < buffers.size(); ++i)
+    {
+        ASSERT_EQ(hipMalloc(&buffers[i], bytes), hipSuccess);
+        const auto allocation = mt::query_alloc(buffers[i]);
+        ASSERT_TRUE(allocation.trackable);
+        if(agent.handle == 0) agent = allocation.agent;
+        record_for_snapshot_test(buffers[i], bytes, agent);
+        launch_fill(buffers[i], original[i], n);
+    }
+
+    auto ctx = capture_context(agent, msnp::capture_mode::automatic);
+    ASSERT_TRUE(ctx.has_value());
+
+    size_t     captured = 0;
+    const auto copy_all = [&](const auto& regions) {
+        captured += regions.size();
+        for(const auto& copy : regions)
+        {
+            const auto status = hsa_memory_copy(copy.dest, copy.source, copy.size);
+            if(status != HSA_STATUS_SUCCESS) return status;
+        }
+        return HSA_STATUS_SUCCESS;
+    };
+    auto snapshot = msnp::snap(
+        *ctx, msnp::storage_budgets_t{10U * 1024U * 1024U, 512U * 1024U * 1024U}, copy_all);
+    ASSERT_TRUE(snapshot.complete());
+    ASSERT_EQ(snapshot.storage(), msnp::storage_kind::mixed);
+    EXPECT_TRUE(snapshot.batched);
+    EXPECT_EQ(captured, snapshot.extents.size());
+    EXPECT_GT(snapshot.stored_bytes(msnp::storage_kind::gpu_local), 0);
+    EXPECT_GT(snapshot.stored_bytes(msnp::storage_kind::pinned_host), 0);
+    EXPECT_EQ(snapshot.stored_bytes(msnp::storage_kind::gpu_local) +
+                  snapshot.stored_bytes(msnp::storage_kind::pinned_host),
+              snapshot.footprint_bytes());
+
+    for(auto* buffer : buffers)
+        launch_fill(buffer, 29.0f, n);
+
+    size_t restored = 0;
+    ASSERT_TRUE(msnp::restore(snapshot, [&](const auto& regions) {
+        restored = regions.size();
+        return copy_all(regions);
+    }));
+    EXPECT_EQ(restored, snapshot.extents.size());
+
+    for(size_t i = 0; i < buffers.size(); ++i)
+    {
+        const auto values = read_device(buffers[i], n);
+        for(const auto value : values)
+            ASSERT_FLOAT_EQ(value, original[i]);
+        unrecord_for_snapshot_test(buffers[i]);
+        ASSERT_EQ(hipFree(buffers[i]), hipSuccess);
+    }
+}
+
+// Every change to the inventory counts, and a change that changes nothing does not.
+TEST(kernel_replay_snapshot, inventory_generation_counts_changes)
+{
+    auto       entry  = 0;
+    void*      ptr    = &entry;
+    const auto before = mt::inventory_generation();
+
+    record_for_snapshot_test(ptr, sizeof(entry), hsa_agent_t{.handle = 1});
+    EXPECT_EQ(mt::inventory_generation(), before + 1);
+    mt::modify_inventory([](auto&) { return false; });
+    EXPECT_EQ(mt::inventory_generation(), before + 1);
+    unrecord_for_snapshot_test(ptr);
+    EXPECT_EQ(mt::inventory_generation(), before + 2);
+    unrecord_for_snapshot_test(ptr);
+    EXPECT_EQ(mt::inventory_generation(), before + 2);
+}
+
+// A replay looks at its captured regions again only after the inventory changes. Another
+// allocation leaves them all live; freeing one makes with_captured_regions() decline, and
+// restore() skip it.
+TEST(kernel_replay_snapshot, captured_regions_checked_after_the_inventory_changes)
+{
+    if(!ensure_live_tracking()) GTEST_SKIP() << "could not activate rocprofiler / no HIP GPU";
+
+    constexpr int         n = 4096;
+    std::array<float*, 3> buffers{};
+    hsa_agent_t           agent{.handle = 0};
+    for(auto*& buffer : buffers)
+    {
+        ASSERT_EQ(hipMalloc(&buffer, n * sizeof(float)), hipSuccess);
+        const auto allocation = mt::query_alloc(buffer);
+        ASSERT_TRUE(allocation.trackable);
+        agent = allocation.agent;
+        launch_fill(buffer, 11.0f, n);
+    }
+    record_for_snapshot_test(buffers[0], n * sizeof(float), agent);
+    record_for_snapshot_test(buffers[1], n * sizeof(float), agent);
+    unrecord_for_snapshot_test(buffers[2]);
+
+    const auto ctx = capture_context(agent, msnp::capture_mode::force_gpu);
+    ASSERT_TRUE(ctx.has_value());
+    auto snapshot = msnp::snap(*ctx);
+    ASSERT_TRUE(snapshot.complete());
+
+    auto       uses = 0;
+    const auto use  = [&]() {
+        ++uses;
+        return HSA_STATUS_SUCCESS;
+    };
+    auto status = msnp::with_captured_regions(snapshot, use);
+    ASSERT_TRUE(status.has_value());
+    EXPECT_EQ(*status, HSA_STATUS_SUCCESS);
+
+    record_for_snapshot_test(buffers[2], n * sizeof(float), agent);
+    EXPECT_NE(mt::inventory_generation(), snapshot.inventory_generation);
+    status = msnp::with_captured_regions(snapshot, use);
+    ASSERT_TRUE(status.has_value());
+    EXPECT_EQ(uses, 2);
+
+    unrecord_for_snapshot_test(buffers[1]);
+    status = msnp::with_captured_regions(snapshot, use);
+    EXPECT_FALSE(status.has_value());
+    EXPECT_EQ(uses, 2);
+
+    launch_fill(buffers[0], 23.0f, n);
+    launch_fill(buffers[1], 23.0f, n);
+    ASSERT_TRUE(msnp::restore(snapshot, [&](const auto& regions) {
+        for(const auto& copy : regions)
+        {
+            const auto copy_status = hsa_memory_copy(copy.dest, copy.source, copy.size);
+            if(copy_status != HSA_STATUS_SUCCESS) return copy_status;
+        }
+        return HSA_STATUS_SUCCESS;
+    }));
+    for(const auto value : read_device(buffers[0], n))
+        ASSERT_FLOAT_EQ(value, 11.0f);
+    for(const auto value : read_device(buffers[1], n))
+        ASSERT_FLOAT_EQ(value, 23.0f);
+
+    unrecord_for_snapshot_test(buffers[0]);
+    unrecord_for_snapshot_test(buffers[2]);
+    for(auto* buffer : buffers)
+        ASSERT_EQ(hipFree(buffer), hipSuccess);
 }
 
 TEST(kernel_replay_snapshot, unavailable_gpu_and_pinned_arenas_decline_capture)

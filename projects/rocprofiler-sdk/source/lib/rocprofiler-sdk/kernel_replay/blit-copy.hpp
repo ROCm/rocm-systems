@@ -75,21 +75,78 @@ private:
 
     std::unique_ptr<implementation> m_impl;
 
-    friend std::optional<packet_info> create(const hsa::Queue&, const std::vector<copy_region_t>&);
+    friend struct packet_builder;
 };
 
-std::optional<packet_info>
-create(const hsa::Queue& queue, const std::vector<copy_region_t>& regions);
-
-// Submit all GPU-backed regions as raw AQL packets: three dispatches that cut them into 16 KiB
-// tiles on the GPU, one that copies the tiles a wave each, and a barrier on its completion. The
-// completion signal, argument buffer and tile workspace are reused from per-agent state after the
-// dependent target kernel drains.
+// Submit all regions as raw AQL packets: three dispatches that cut them into 16 KiB tiles on the
+// GPU, one that copies the tiles a wave each, and a barrier on its completion. The completion
+// signal, argument buffer and tile workspace are reused from per-agent state after the dependent
+// target kernel drains.
 hsa_status_t
 copy(const hsa::Queue&                     queue,
      hsa_amd_queue_intercept_packet_writer writer,
      const std::vector<copy_region_t>&     regions,
      std::vector<packet_info>&             pending);
+
+// Like copy(), and the tile list stays on the GPU for the restores below until another tile list
+// replaces it. With `digests`, the copy also sums every tile it reads into a digest for
+// restore_changed(), restore_listed() and check_unlisted(); without room for them, the capture
+// keeps just its list.
+hsa_status_t
+capture(const hsa::Queue&                     queue,
+        hsa_amd_queue_intercept_packet_writer writer,
+        const std::vector<copy_region_t>&     regions,
+        bool                                  digests,
+        std::vector<packet_info>&             pending);
+
+// Whether the tile list on this queue's agent is a capture's, and whether it has digests.
+bool
+has_kept_list(const hsa::Queue& queue);
+
+bool
+has_digests(const hsa::Queue& queue);
+
+// Forgets that tile list. A replay calls this before its capture, which copies nothing when there
+// is nothing to capture, so it never restores from an older capture's list.
+void
+forget_kept_list(const hsa::Queue& queue);
+
+// Copies every tile of that capture back, one dispatch over its list.
+hsa_status_t
+restore_all(const hsa::Queue&                     queue,
+            hsa_amd_queue_intercept_packet_writer writer,
+            std::vector<packet_info>&             pending);
+
+// Hashes every tile of that capture, copies back the ones whose digest changed, and keeps a list
+// of them. Each call makes a new list.
+hsa_status_t
+restore_changed(const hsa::Queue&                     queue,
+                hsa_amd_queue_intercept_packet_writer writer,
+                std::vector<packet_info>&             pending);
+
+// Copies back the tiles on the last list, without hashing.
+hsa_status_t
+restore_listed(const hsa::Queue&                     queue,
+               hsa_amd_queue_intercept_packet_writer writer,
+               std::vector<packet_info>&             pending);
+
+// Counts the tiles off the last list whose digest changed anyway: restores from the list missed
+// them.
+hsa_status_t
+check_unlisted(const hsa::Queue&                     queue,
+               hsa_amd_queue_intercept_packet_writer writer,
+               std::vector<packet_info>&             pending);
+
+struct digest_counts_t
+{
+    uint32_t tiles            = 0;
+    uint32_t changed          = 0;  // on the last list
+    uint32_t unlisted_changed = 0;  // found by check_unlisted()
+};
+
+// Reads the counts after the restores and the check complete.
+std::optional<digest_counts_t>
+read_digest_counts(const hsa::Queue& queue);
 }  // namespace blit
 }  // namespace kernel_replay
 }  // namespace rocprofiler

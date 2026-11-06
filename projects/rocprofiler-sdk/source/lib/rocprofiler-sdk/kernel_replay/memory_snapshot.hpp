@@ -23,6 +23,7 @@
 #pragma once
 
 #include "lib/rocprofiler-sdk/kernel_replay/blit-copy.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
 
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
@@ -30,6 +31,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <vector>
 
 namespace rocprofiler
@@ -161,9 +163,12 @@ struct snapshot_t
     std::vector<storage_segment_t> segments{};
     std::vector<snapshot_extent_t> extents{};
     capture_status                 status{capture_status::unavailable};
+    bool                           batched              = false;  // through a batch callback
+    uint64_t                       inventory_generation = 0;      // when captured
 
     bool         complete() const { return status == capture_status::complete; }
     size_t       footprint_bytes() const;
+    size_t       stored_bytes(storage_kind kind) const;
     storage_kind storage() const;
 };
 
@@ -174,8 +179,9 @@ using batch_copy_fn_t = std::function<hsa_status_t(const std::vector<blit::copy_
 snapshot_t
 snap(const capture_context_t&);
 
-// GPU-local storage is captured through one batch blit callback, which must finish the copy before
-// it returns. Pinned-host storage is captured synchronously.
+// Every extent, GPU-local and pinned-host alike, is captured through one batch blit callback,
+// which must finish the copy before it returns. Without a callback, extents are captured
+// synchronously.
 snapshot_t
 snap(const capture_context_t&, const batch_copy_fn_t& batch_copy);
 
@@ -191,10 +197,31 @@ snap(hsa_agent_t agent);
 bool
 restore(const snapshot_t& snapshot);
 
-// GPU-local storage restores through one batch blit callback. Pinned-host storage restores
-// synchronously and invokes the callback with no copy regions so the caller submits the target.
+// A snapshot captured through a batch callback restores every extent through this one. Otherwise
+// pinned-host extents restore synchronously first and the callback gets only the GPU-local ones,
+// possibly none, so the caller still submits the target.
 bool
 restore(const snapshot_t& snapshot, const batch_copy_fn_t& batch_copy);
+
+// Whether every region the snapshot captured is still allocated: one comparison unless the
+// inventory changed since the capture. Call it under the inventory's lock.
+bool
+captured_regions_live(const snapshot_t& snapshot, const memory_tracker::tracked_map_t& inventory);
+
+// Runs `use()` under the inventory read lock if every region the snapshot captured is still
+// allocated, so it can read and write them all. Returns nothing, without running it, if one was
+// freed. A template, so the call does not allocate.
+template <typename Use>
+std::optional<hsa_status_t>
+with_captured_regions(const snapshot_t& snapshot, Use&& use)
+{
+    if(!snapshot.complete()) return std::nullopt;
+    return memory_tracker::inventory().rlock(
+        [&](const memory_tracker::tracked_map_t& inventory) -> std::optional<hsa_status_t> {
+            if(!captured_regions_live(snapshot, inventory)) return std::nullopt;
+            return use();
+        });
+}
 }  // namespace memory_snapshot
 }  // namespace kernel_replay
 }  // namespace rocprofiler
