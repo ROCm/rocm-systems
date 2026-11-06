@@ -1,7 +1,7 @@
 ---
 graph:
   Unit_hipGraphAddEmptyNode_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [node]
   Unit_hipGraphAddEmptyNode_NegTest:
     <<: *level_default
@@ -22,7 +22,7 @@ graph:
     <<: *level_default
     tags: [node]
   Unit_hipGraphAddDependencies_Positive_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [dependency]
   Unit_hipGraphAddDependencies_Positive_Parameters:
     <<: *level_default
@@ -34,7 +34,7 @@ graph:
     <<: *level_default
     tags: [node]
   Unit_hipGraphAddEventRecordNode_Functional_WithoutFlags:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
@@ -64,7 +64,7 @@ graph:
     <<: *level_default
     tags: [node]
   Unit_hipGraphAddEventWaitNode_Functional_Simple:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [node]
   Unit_hipGraphAddEventWaitNode_MultGraphMultStrmDependency:
     <<: *level_default
@@ -85,13 +85,13 @@ graph:
     <<: *level_default
     tags: [node]
   Unit_hipGraph_BasicFunctional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [lifecycle, P0]
   Unit_hipGraph_SimpleGraphWithKernel:
     <<: *level_default
     tags: [exec]
   Unit_hipGraphAddMemcpyNode_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [node, image]
   Unit_hipGraphAddMemcpyNode_Negative_Parameters:
     <<: *level_default
@@ -103,7 +103,7 @@ graph:
     <<: *level_default
     tags: [lifecycle]
   Unit_hipGraphClone_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [lifecycle]
   Unit_hipGraphClone_MultiThreaded:
     <<: *level_default
@@ -112,7 +112,7 @@ graph:
     <<: *level_default
     tags: [lifecycle]
   Unit_hipGraphInstantiateWithFlags_DependencyGraph:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [lifecycle]
   Unit_hipGraphInstantiateWithFlags_DependencyGraphDeviceCtxtChg:
     <<: *level_default
@@ -166,7 +166,7 @@ graph:
       reason: "AIRUNTIME-2744 - Unit_hipGraphInstantiateWithParams_Negative needs to be re-triaged"
     tags: [lifecycle]
   Unit_hipGraphInstantiateWithParams_DependencyGraph:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [lifecycle]
   Unit_hipGraphInstantiateWithParams_StreamCapture:
     <<: *level_default
@@ -181,7 +181,7 @@ graph:
     <<: *level_default
     tags: [node]
   Unit_hipGraphAddHostNode_BasicFunc:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [node]
   Unit_hipGraphAddMemcpyNodeFromSymbol_Negative:
     <<: *level_default
@@ -202,13 +202,13 @@ graph:
     <<: *level_default
     tags: [node]
   Unit_hipGraphAddMemcpyNodeFromSymbol_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [node]
   Unit_hipGraphAddMemcpyNodeFromSymbol_Negative_Parameters:
     <<: *level_default
     tags: [node]
   Unit_hipGraphChildGraphNodeGetGraph_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [query]
   Unit_hipGraphChildGraphNodeGetGraph_Negative:
     <<: *level_default
@@ -217,7 +217,7 @@ graph:
     <<: *level_default
     tags: [query]
   Unit_hipGraphNodeFindInClone_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [query]
   Unit_hipGraphNodeFindInClone_MultipleClone:
     <<: *level_default
@@ -229,7 +229,7 @@ graph:
     <<: *level_default
     tags: [exec]
   Unit_hipGraphExecHostNodeSetParams_BasicFunc:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [exec]
   Unit_hipGraphAddMemcpyNodeToSymbol_Negative:
     <<: *level_default
@@ -250,13 +250,13 @@ graph:
     <<: *level_default
     tags: [node]
   Unit_hipGraphAddMemcpyNodeToSymbol_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [node]
   Unit_hipGraphAddMemcpyNodeToSymbol_Negative_Parameters:
     <<: *level_default
     tags: [node]
   Unit_hipGraphExecMemsetNodeSetParams_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
   Unit_hipGraphExecMemsetNodeSetParams_Negative_Parameters:
     <<: *level_default
     tags: [exec]
@@ -280,7 +280,7 @@ graph:
     <<: *level_default
     tags: [node]
   Unit_hipGraphMemcpyNodeSetParamsToSymbol_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
@@ -295,7 +295,7 @@ graph:
     <<: *level_default
     tags: [lifecycle]
   Unit_hipGraphDestroyNode_DestroyDependencyNode:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [lifecycle]
   Unit_hipGraphDestroyNode_Complx_ChkNumOfNodesNDep:
     <<: *level_default
@@ -316,7 +316,7 @@ graph:
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [lifecycle]
   Unit_hipGraphGetNodes_Positive_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [query]
   Unit_hipGraphGetNodes_Positive_CapturedStream:
     <<: *level_default
@@ -325,7 +325,7 @@ graph:
     <<: *level_default
     tags: [query]
   Unit_hipGraphGetRootNodes_Positive_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [query]
   Unit_hipGraphGetRootNodes_Positive_CapturedStream:
     <<: *level_default
@@ -358,10 +358,10 @@ graph:
     <<: *level_default
     tags: [node]
   Unit_hipGraphHostNodeSetParams_BasicFunc:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [node]
   Unit_hipGraphAddMemcpyNode1D_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [node, P0]
   Unit_hipGraphAddMemcpyNode1D_Negative_Parameters:
     <<: *level_default
@@ -385,7 +385,7 @@ graph:
     <<: *level_default
     tags: [node]
   Unit_hipGraphAddChildGraphNode_SingleChildNode:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [node]
   Unit_hipGraphAddChildGraphNode_Cmplx_NestedGraphs:
     <<: *level_default
@@ -436,7 +436,7 @@ graph:
     <<: *level_default
     tags: [query]
   Unit_hipGraphNodeGetType_NodeType:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [query]
   Unit_hipGraphNodeGetType_NodeTypeOfClonedGraph_NodeTypeInThread:
     <<: *level_default
@@ -451,7 +451,7 @@ graph:
     <<: *level_default
     tags: [query]
   Unit_hipGraphExecMemcpyNodeSetParams1D_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [exec]
   Unit_hipGraphExecMemcpyNodeSetParams1D_Negative:
     <<: *level_default
@@ -478,7 +478,7 @@ graph:
       reason: "ROCM-30708 - child process; spawned by name from Unit_hipGraphExecMemcpyNodeSetParams1D_SdmaMemcpyOrderedAfterProducer, never run standalone."
     tags: [exec]
   Unit_hipGraphGetEdges_Positive_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [query]
   Unit_hipGraphGetEdges_Positive_CapturedStream:
     <<: *level_default
@@ -487,7 +487,7 @@ graph:
     <<: *level_default
     tags: [query]
   Unit_hipGraphRemoveDependencies_Positive_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [dependency]
   Unit_hipGraphRemoveDependenciesPositive_CapturedStream:
     <<: *level_default
@@ -511,7 +511,7 @@ graph:
     <<: *level_default
     tags: [lifecycle]
   Unit_hipGraphInstantiate_functionalScenarios:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [lifecycle]
   Unit_hipGraphExecUpdate_Negative_Basic:
     <<: *level_default
@@ -523,7 +523,7 @@ graph:
     <<: *level_default
     tags: [exec]
   Unit_hipGraphExecUpdate_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [exec]
   Unit_hipGraphExecUpdate_Negative_Functional_ParametersChanged:
     <<: *level_default
@@ -577,7 +577,7 @@ graph:
     <<: *level_default
     tags: [exec]
   Unit_hipGraphExecEventRecordNodeSetEvent_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [exec]
   Unit_hipGraphExecEventRecordNodeSetEvent_VerifyEventNotChanged:
     <<: *level_default
@@ -592,7 +592,7 @@ graph:
     <<: *level_default
     tags: [node]
   Unit_hipGraphEventWaitNodeSetEvent_SetGet:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [node]
   Unit_hipGraphEventWaitNodeSetEvent_Negative:
     <<: *level_default
@@ -621,7 +621,7 @@ graph:
     <<: *level_default
     tags: [exec]
   Unit_hipGraphExecMemcpyNodeSetParamsFromSymbol_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
@@ -633,7 +633,7 @@ graph:
     <<: *level_default
     tags: [exec]
   Unit_hipGraphEventRecordNodeGetEvent_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [query]
   Unit_hipGraphEventRecordNodeGetEvent_Negative:
     <<: *level_default
@@ -642,19 +642,19 @@ graph:
     <<: *level_default
     tags: [node]
   Unit_hipGraphEventRecordNodeSetEvent_SetGet:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [node]
   Unit_hipGraphEventRecordNodeSetEvent_Negative:
     <<: *level_default
     tags: [node]
   Unit_hipGraphEventWaitNodeGetEvent_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [query]
   Unit_hipGraphEventWaitNodeGetEvent_Negative:
     <<: *level_default
     tags: [query]
   Unit_hipGraphExecMemcpyNodeSetParams_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [exec]
   Unit_hipGraphExecMemcpyNodeSetParams_Negative_Parameters:
     <<: *level_default
@@ -672,7 +672,7 @@ graph:
       reason: "AIRUNTIME-2892 - fails under device ASAN on gfx90a but passes on the non-ASAN build; disabled on asan pending re-triage."
     tags: [exec, image]
   Unit_hipStreamBeginCapture_Positive_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [capture]
   Unit_hipStreamBeginCapture_Negative_Parameters:
     <<: *level_default
@@ -798,7 +798,7 @@ graph:
     <<: *level_default
     tags: [capture]
   Unit_hipGraphAddMemcpyNode1D_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [node]
   Unit_hipGraphAddMemcpyNode1D_Negative:
     <<: *level_default
@@ -897,7 +897,7 @@ graph:
     <<: *level_default
     tags: [capture, P0]
   Unit_hipStreamIsCapturing_Positive_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [capture]
   Unit_hipStreamIsCapturing_Positive_Thread:
     <<: *level_default
@@ -909,7 +909,7 @@ graph:
     <<: *level_default
     tags: [capture]
   Unit_hipGraphMemFreeNodeGetParams_ValidArgs:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [query]
   Unit_hipGraphMemFreeNodeGetParams_InvalidArgs:
     <<: *level_default
@@ -939,7 +939,7 @@ graph:
     <<: *level_default
     tags: [exec]
   Unit_hipGraphExecBatchMemOpNodeSetParams_UpdateTakesEffect:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - PAL does not implement batch memory operations; gfx1201 (amd_windows) fails: launch_and_read() == 1000 -> 0 == 1000 (0x3e8); needs to be re-triaged"
@@ -948,7 +948,7 @@ graph:
     <<: *level_default
     tags: [node]
   Unit_hipGraphBatchMemOpNode_WriteAndWait:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [amd_windows, nvidia]
       reason: "AIRUNTIME-2892 - gfx1201 (amd_windows) fails: result == 1000 -> 0 == 1000 (0x3e8); needs to be re-triaged on nvidia"
@@ -963,19 +963,19 @@ graph:
     <<: *level_default
     tags: [exec]
   Unit_hipDrvGraphExecMemcpyNodeSetParams_Positive:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [exec]
   Unit_hipDrvGraphAddMemFreeNode_Negative_Params:
     <<: *level_default
     tags: [node]
   Unit_hipDrvGraphAddMemFreeNode_Positive:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [node]
   Unit_hipStreamCapture_ExtModuleLaunchKernel:
     <<: *level_default
     tags: [capture]
   Unit_hipStreamBeginCaptureToGraph_BasicFunctional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [capture]
   Unit_hipStreamBeginCaptureToGraph_CaptureIndepGraph:
     <<: *level_default
@@ -1032,7 +1032,7 @@ graph:
     <<: *level_default
     tags: [query]
   Unit_hipGetProcAddress_GraphAPIs_AddMemcpy1DKernelNodes:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [query]
   Unit_hipGetProcAddress_GraphAPIs_AddMemsetMemcpyNodes:
     <<: *level_default
@@ -1068,20 +1068,21 @@ graph:
     <<: *level_default
     tags: [exec]
   Unit_hipGraphExecNodeSetParams_Positive:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [exec]
   Unit_hipGraphNodeSetParams_Negative_Parameters:
     <<: *level_default
     tags: [node]
   Unit_hipGraphNodeSetParams_Positive:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [node]
   Unit_hipGraphExecGetFlags_Negative:
     <<: *level_default
     tags: [exec]
-  Unit_hipGraphExecGetFlags_Positive: *level_default
+  Unit_hipGraphExecGetFlags_Positive:
+    level: [*level_0, *level_default]
   Unit_hipStreamGetCaptureInfo_Positive_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [capture]
   Unit_hipStreamGetCaptureInfo_Positive_UniqueID:
     <<: *level_default
@@ -1135,7 +1136,7 @@ graph:
     <<: *level_default
     tags: [node]
   Unit_hipGraphMemcpyNodeSetParamsFromSymbol_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
@@ -1144,7 +1145,7 @@ graph:
     <<: *level_default
     tags: [node]
   Unit_hipGraphExecEventWaitNodeSetEvent_SetAndVerifyMemory:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [exec]
   Unit_hipGraphExecEventWaitNodeSetEvent_VerifyEventNotChanged:
     <<: *level_default
@@ -1153,7 +1154,7 @@ graph:
     <<: *level_default
     tags: [exec]
   Unit_hipGraphAddMemsetNode_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
   Unit_hipGraphAddMemsetNode_Negative_Parameters:
     <<: *level_default
     tags: [node]
@@ -1200,7 +1201,7 @@ graph:
     <<: *level_default
     tags: [query, image]
   Unit_hipGraphMemcpyNodeSetParams_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [node, image]
   Unit_hipGraphMemcpyNodeSetParams_Negative_Parameters:
     <<: *level_default
@@ -1212,7 +1213,7 @@ graph:
     <<: *level_default
     tags: [query]
   Unit_hipGraphKernelNodeGetParams_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [query]
   Unit_hipGraphKernelNodeSetAttribute_Functional: *level_default
   Unit_hipGraphKernelNodeSetAttribute_Negative: *level_default
@@ -1220,7 +1221,7 @@ graph:
     <<: *level_default
     tags: [node]
   Unit_hipGraphKernelNodeSetParams_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [node]
   Unit_hipGraphKernelNodeGetSetParams_Functional:
     <<: *level_default
@@ -1229,7 +1230,7 @@ graph:
     <<: *level_default
     tags: [exec]
   Unit_hipGraphExecKernelNodeSetParams_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [exec]
   Unit_hipGraphLaunch_Positive:
     <<: *level_default
@@ -1253,7 +1254,7 @@ graph:
       reason: "ROCM-30708 - child process; spawned by name from Unit_hipGraphLaunch_SdmaMemcpyOrderedAfterProducer, never run standalone."
     tags: [exec]
   Unit_hipGraphMemcpyNodeSetParams1D_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [node]
   Unit_hipGraphMemcpyNodeSetParams1D_Negative_Parameters:
     <<: *level_default
@@ -1277,7 +1278,7 @@ graph:
       reason: "AIRUNTIME-2744 - needs to be re-triaged"
     tags: [exec]
   Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
@@ -1289,13 +1290,13 @@ graph:
     <<: *level_default
     tags: [exec]
   Unit_hipGraphNodeGetDependentNodes_Positive_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [dependency]
   Unit_hipGraphNodeGetDependentNodes_Negative_Parameters:
     <<: *level_default
     tags: [dependency]
   Unit_hipGraphNodeGetDependencies_Positive_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [dependency]
   Unit_hipGraphNodeGetDependencies_Negative_Parameters:
     <<: *level_default
@@ -1307,7 +1308,7 @@ graph:
     <<: *level_default
     tags: [query]
   Unit_hipGraphHostNodeGetParams_BasicFunc:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [query]
   Unit_hipGraphHostNodeGetParams_SetParams:
     <<: *level_default
@@ -1316,7 +1317,7 @@ graph:
     <<: *level_default
     tags: [exec]
   Unit_hipGraphExecChildGraphNodeSetParams_BasicFunc:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [exec]
   Unit_hipGraphExecChildGraphNodeSetParams_ChildTopology:
     <<: *level_default
@@ -1325,7 +1326,7 @@ graph:
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [exec]
   Unit_hipStreamGetCaptureInfo_v2_Positive_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [capture]
   Unit_hipStreamGetCaptureInfo_v2_Positive_UniqueID:
     <<: *level_default
@@ -1337,7 +1338,7 @@ graph:
     <<: *level_default
     tags: [lifecycle]
   Unit_hipGraphCreate_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [lifecycle, smoke]
   Unit_hipGraphDestroy_Positive_Basic:
     <<: *level_default
@@ -1346,13 +1347,13 @@ graph:
     <<: *level_default
     tags: [lifecycle]
   Unit_hipStreamSetCaptureDependencies_Positive_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [capture]
   Unit_hipStreamAddCaptureDependencies_Positive_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [capture]
   Unit_hipStreamUpdateCaptureDependencies_Positive_Parameters:
     <<: *level_default
@@ -1370,7 +1371,7 @@ graph:
     <<: *level_default
     tags: [capture]
   Unit_hipLaunchHostFunc_Positive_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [capture]
   Unit_hipLaunchHostFunc_Positive_Thread:
     <<: *level_default
@@ -1397,7 +1398,7 @@ graph:
     <<: *level_default
     tags: [capture, managed_memory]
   Unit_hipUserObjectCreate_Functional_1:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [userobj]
   Unit_hipUserObjectCreate_Functional_2:
     <<: *level_default
@@ -1424,7 +1425,7 @@ graph:
     <<: *level_default
     tags: [userobj]
   Unit_hipGraphRetainUserObject_Functional_1:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [userobj]
   Unit_hipGraphRetainUserObject_Functional_2:
     <<: *level_default
@@ -1508,7 +1509,7 @@ graph:
     <<: *level_default
     tags: [lifecycle]
   Unit_hipGraphNodeSetEnabled_Functional_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [node]
   Unit_hipGraphNodeSetEnabled_Functional_KernelNode:
     <<: *level_default
@@ -1523,7 +1524,7 @@ graph:
     <<: *level_default
     tags: [node]
   Unit_hipGraphNodeGetEnabled_Functional_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [query]
   Unit_hipGraphNodeGetEnabled_Negative_Functional:
     <<: *level_default
@@ -1532,10 +1533,10 @@ graph:
     <<: *level_default
     tags: [lifecycle]
   Unit_hipGraphExecDestroy_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [lifecycle]
   Unit_hipGraphUpload_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [exec]
   Unit_hipGraphUpload_Functional_multidevice_test:
     <<: *level_default
@@ -1583,7 +1584,7 @@ graph:
     <<: *level_2
     tags: [exec]
   Unit_hipGraphKernelNodeCopyAttributes_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [node]
   Unit_hipGraphKernelNodeCopyAttributes_Attribute_Negative:
     <<: *level_default
@@ -1673,7 +1674,7 @@ graph:
     <<: *level_default
     tags: [node]
   Unit_hipGraphKernelNodeSetAttribute_Positive_Cooperative:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [node]
   Unit_hipGraphKernelNodeSetAttribute_Negative_Parameters:
     <<: *level_default
@@ -1724,7 +1725,7 @@ graph:
       reason: "AIRUNTIME-2892 - gfx1201 (amd_windows) fails: false -> false; needs to be re-triaged"
     tags: [node]
   Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [query]
   Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_MultiDevice:
     <<: *level_default
@@ -1772,7 +1773,7 @@ graph:
     <<: *level_default
     tags: [node]
   Unit_hipGraphAddMemAllocNode_Functional_1:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [node]
   Unit_hipGraphAddMemAllocNode_Functional_2:
     <<: *level_default
@@ -1808,13 +1809,13 @@ graph:
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [node]
   Unit_hipGraphAddMemFreeNode_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [node]
   Unit_hipDrvGraphMemcpyNodeGetParams_Negative_Parameters:
     <<: *level_default
     tags: [query]
   Unit_hipDrvGraphMemcpyNodeGetParams_Positive:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [query]
   Unit_hipDrvGraphMemcpyNodeSetParams_Positive_Basic:
     <<: *level_default
@@ -1823,13 +1824,13 @@ graph:
       reason: "AIRUNTIME-2892 - gfx1201 (amd_wsl) fails: false -> false; needs to be re-triaged"
     tags: [node]
   Unit_hipDrvGraphMemcpyNodeSetParams_Positive_Array:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [node, image]
   Unit_hipDrvGraphMemcpyNodeSetParams_Negative_Parameters:
     <<: *level_default
     tags: [node]
   Unit_hipDeviceSetGraphMemAttribute_Positive_Default:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [exec]
   Unit_hipDeviceSetGraphMemAttribute_Negative_Parameters:
     <<: *level_default
@@ -1841,7 +1842,7 @@ graph:
     <<: *level_default
     tags: [query]
   Unit_hipDeviceGetGraphMemAttribute_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [query]
   Unit_hipDeviceGetGraphMemAttribute_Functional_Multi_Device:
     <<: *level_default
@@ -1859,7 +1860,7 @@ graph:
     <<: *level_default
     tags: [exec]
   Unit_hipDrvGraphExecMemsetNodeSetParams_BasicPositive:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [exec]
   Unit_hipDrvGraphExecMemsetNodeSetParams_Negative:
     <<: *level_default
@@ -1868,9 +1869,9 @@ graph:
     <<: *level_default
     tags: [exec]
   Unit_hipGraphAddNodeTypeMemset_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
   Unit_hipGraphAddNodeTypeKernel_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [node]
   Unit_hipGraphAddNodeTypeHost_Positive_Basic:
     <<: *level_default
@@ -1894,7 +1895,7 @@ graph:
     <<: *level_default
     tags: [node]
   Unit_hipDrvGraphAddMemsetNode_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
   Unit_hipDrvGraphAddMemsetNode_Negative_Parameters:
     <<: *level_default
     tags: [node]

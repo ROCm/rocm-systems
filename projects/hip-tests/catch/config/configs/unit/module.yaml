@@ -4,7 +4,7 @@ module:
     <<: *level_2
     tags: [module]
   Unit_hipModuleLaunchCooperativeKernel_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [amd_windows, amd_wsl]
       reason: "AIRUNTIME-2892 - needs to be further investigated. gfx1201 (amd_windows) FAILs (false -> false, Rock window failures on gfx1151); gfx1201 (amd_wsl) self-skips because cooperative launch is not supported."
@@ -25,7 +25,7 @@ module:
     <<: *level_default
     tags: [launch]
   Unit_hipModuleLaunchKernel_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - needs to be further investigated. gfx1201 (amd_windows) FAILs (false -> false, Rock window failures on gfx1151)."
@@ -61,7 +61,7 @@ module:
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [launch]
   Unit_hipModuleLoadDataEx_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [nvidia_windows]
       reason: "AIRUNTIME-2744 - fails in PSDB; needs to be re-triaged."
@@ -73,7 +73,7 @@ module:
       reason: "AIRUNTIME-2744 - fails in PSDB; needs to be re-triaged."
     tags: [load]
   Unit_hipGetFuncBySymbol_PositiveTest:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [function]
   Unit_hipGetFuncBySymbol_NegativeTests:
     <<: *level_default
@@ -88,7 +88,7 @@ module:
     <<: *level_default
     tags: [function, multigpu]
   Unit_hipModuleGetFunction_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [function, P0]
   Unit_hipModuleGetFunction_Negative_Parameters:
     <<: *level_default
@@ -112,7 +112,7 @@ module:
     <<: *level_default
     tags: [resource]
   Unit_hipFuncGetAttribute_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [function]
   Unit_hipFuncGetAttribute_Negative_Parameters:
     <<: *level_default
@@ -127,13 +127,13 @@ module:
     <<: *level_default
     tags: [load]
   Unit_hipModuleLoadFatBinary_PosiiveTsts:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [load]
   Unit_hipDrvLaunchKernelEx_NegTsts:
     <<: *level_default
     tags: [launch]
   Unit_hipDrvLaunchKernelEx_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [launch, P0]
   Unit_hipDrvLaunchKernelEx_With_Different_Kernels:
     <<: *level_default
@@ -166,7 +166,7 @@ module:
     <<: *level_default
     tags: [launch]
   Unit_hipModuleLoadData_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [nvidia_windows]
       reason: "AIRUNTIME-2744 - fails in PSDB; needs to be re-triaged."
@@ -181,7 +181,7 @@ module:
     <<: *level_default
     tags: [load]
   Unit_hipModuleLoad_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [nvidia_windows]
       reason: "AIRUNTIME-2744 - fails in PSDB; needs to be re-triaged."
@@ -223,7 +223,7 @@ module:
     <<: *level_default
     tags: [load, P0]
   Unit_hipModuleGetFunctionCount_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
@@ -238,7 +238,7 @@ module:
     <<: *level_default
     tags: [function]
   Unit_hipModuleEnumerateFunctions_HandlesUsable:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [function]
   Unit_hipModuleEnumerateFunctions_Negative:
     <<: *level_default
@@ -283,7 +283,7 @@ module:
       reason: "AIRUNTIME-2892 - needs to be further investigated. gfx1201 (amd_windows) FAILs (false -> false, Rock window failures on gfx1151); gfx1201 (amd_wsl) self-skips because cooperative launch is not supported."
     tags: [multigpu]
   Unit_hipModuleGetGlobal_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [resource]
   Unit_hipModuleGetGlobal_Positive_Parameters:
     <<: *level_default
@@ -313,7 +313,7 @@ module:
     <<: *level_default
     tags: [multigpu, resource]
   Unit_hipModule_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [load]
   Unit_hipModuleGetTexRef_Positive_Basic:
     <<: *level_default
@@ -340,7 +340,7 @@ module:
       reason: "AIRUNTIME-2744 - disabled due to defect EXSWHTEC-167; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device. amd_windows re-disabled (AIRUNTIME-2892): test passes but the full suite exceeds the 120min CI timeout with these tests enabled; improve test runtimes or raise the TheRock total timeout."
     tags: [resource, image]
   Unit_hipFuncSetAttribute_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [function, P0]
   Unit_hipExtModuleLaunchKernel_CheckCodeObjAttr:
     <<: *level_default
@@ -352,7 +352,7 @@ module:
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [launch]
   Unit_hipExtModuleLaunchKernel_UniformWorkGroup:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [launch]
   Unit_hipExtModuleLaunchKernel_Positive_Parameters:
     <<: *level_default
@@ -376,7 +376,7 @@ module:
     <<: *level_default
     tags: [launch]
   Unit_hipFuncGetAttributes_basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [function]
   Unit_FatBin_NoCompatibleCodeObject_ReturnsInvalidImage:
     <<: *level_default

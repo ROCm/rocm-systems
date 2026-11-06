@@ -86,12 +86,28 @@ def load_categories(categories_path):
     return categories
 
 
+def flatten_levels(levels):
+    """Flatten a `level` value into a sorted list of level numbers.
+
+    Entries may be numbers, lists or level anchors (`{level: [...]}`), so anchors
+    combine as `level: [*level_0, *level_default]`.
+    """
+    if isinstance(levels, dict):
+        return flatten_levels(levels.get("level", []))
+    if not isinstance(levels, list):
+        return [levels]
+    flat = []
+    for item in levels:
+        for level in flatten_levels(item):
+            if level not in flat:
+                flat.append(level)
+    return sorted(flat)
+
+
 def create_test_definition(
     group, case_name, case_config, platform, os_name, arch, categories, asan=False
 ):
-    levels = case_config.get("level", [0, 1, 2])
-    if not isinstance(levels, list):
-        levels = [levels]
+    levels = flatten_levels(case_config.get("level", [1, 2]))
     tags = case_config.get("tags", [])
     disabled = case_config.get("disabled", [])
     unsupported = case_config.get("unsupported", [])

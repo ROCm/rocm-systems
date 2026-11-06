@@ -19,7 +19,7 @@ compiler:
     <<: *level_default
     tags: [integration, rtc]
   Unit_hipClassKernel_Value:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [integration, rtc]
   Unit_test_spirv_mode:
     <<: *level_default
