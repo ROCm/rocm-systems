@@ -75,3 +75,21 @@ def test_jax_trace_profile_csvs(jax_trace_profiled_workload):
     assert any("jax.jit.matmul_relu" in fn for fn in functions)
     assert any("jax.dot_general" in fn for fn in functions)
     assert any("jax.pmap." in fn for fn in functions)
+
+
+def test_list_jax_operators_prints_call_tree(
+    jax_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
+):
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--list-operators",
+        "jax",
+        "--path",
+        jax_trace_profiled_workload,
+    ])
+    assert code == 0
+    captured = capsys.readouterr()
+    out = captured.out + captured.err
+    assert "JAX Operator Call Tree:" in out
+    assert "Operator summary" in out
