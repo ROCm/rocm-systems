@@ -394,9 +394,10 @@ __device__ __noinline__ QueuePairMLX5::amo_ret_t<Fetch> QueuePairMLX5::post_wqe_
 
 // precondition: called with all active lanes using different QPs
 __device__ inline __noinline__ void QueuePairMLX5::quiet_single() {
-  // check how many WQEs have been posted so far
-  sq_idx_t commit_idx = __scoped_atomic_load_n(&sq.commit_idx,
-                                               __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+  /* check how many WQEs have been posted so far
+   * does not need to be atomic: inter-thread quiet requires an external synchronization,
+   * which ensures that a plain load reads updated data */
+  sq_idx_t commit_idx = sq.commit_idx;
   // poll until we have completed all these WQEs
   poll_cq_until(commit_idx);
   // system-scope acquire fence, to ensure we see updated get or AMO data
@@ -404,7 +405,9 @@ __device__ inline __noinline__ void QueuePairMLX5::quiet_single() {
 }
 
 __device__ __forceinline__ QueuePairMLX5::sq_idx_t QueuePairMLX5::cq_target() {
-  return __scoped_atomic_load_n(&sq.commit_idx, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+  /* does not need to be atomic: inter-thread quiet requires an external synchronization,
+   * which ensures that a plain load reads updated data */
+  return sq.commit_idx;
 }
 
 /* precondition: called with all active lanes using different QPs
