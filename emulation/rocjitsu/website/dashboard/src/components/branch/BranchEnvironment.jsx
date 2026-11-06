@@ -37,8 +37,8 @@ export default function BranchEnvironment({ candidate, reference, selection, rep
         {metadataLabel(fact.label, fact.key)}
         {fact.baselineLabel && fact.candidateLabel && fact.baselineLabel !== fact.candidateLabel && <Typography variant="caption">Reference label: {fact.baselineLabel}</Typography>}
       </TableCell>
-      <TableCell sx={{ fontFamily: monoFont }}>{(fact.format ?? formatMetadataValue)(fact.baseline)}</TableCell>
-      <TableCell sx={{ fontFamily: monoFont }}>{(fact.format ?? formatMetadataValue)(fact.candidate)}</TableCell>
+      <TableCell title={fact.format ? fact.baseline : undefined} sx={{ fontFamily: monoFont }}>{(fact.format ?? formatMetadataValue)(fact.baseline)}</TableCell>
+      <TableCell title={fact.format ? fact.candidate : undefined} sx={{ fontFamily: monoFont }}>{(fact.format ?? formatMetadataValue)(fact.candidate)}</TableCell>
     </TableRow>;
   });
   return <Box component="details" data-testid="branch-environment" sx={{ borderTop: 1, borderColor: 'divider', mt: 1 }}>
