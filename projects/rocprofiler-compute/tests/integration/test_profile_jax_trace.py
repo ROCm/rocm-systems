@@ -161,3 +161,20 @@ def test_nested_jit_not_child_of_train_step(
         if line.lstrip().startswith(("├─", "└─")) and "jax.jit.matmul_relu" in line
     ]
     assert child_lines == []
+
+
+def test_direct_matmul_relu_is_root(
+    jax_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
+):
+    code = binary_handler_analyze_rocprof_compute([
+        "--experimental",
+        "analyze",
+        "--list-operators",
+        "jax",
+        "--path",
+        jax_trace_profiled_workload,
+    ])
+    assert code == 0
+    out = captured_analyze_output(capsys)
+    heading = root_operator_line(out, "jax.jit.matmul_relu")
+    assert "jax.jit.matmul_relu" in heading
