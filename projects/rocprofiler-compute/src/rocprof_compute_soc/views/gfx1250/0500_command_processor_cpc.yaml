@@ -1,0 +1,25 @@
+view: CPC (Command Processor - Compute)
+legacy_panel_id: 500
+alias: cpc
+tables:
+- id: 501
+  title: CPC Utilizations
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: cp.cpc_util
+    legacy_id: 5.1.0
+  - metric: cp.cpc_micro_engine_busy_dispatching_workgroups
+    legacy_id: 5.1.1
+  - metric: cp.cpc_adc_pipe0_busy_dispatching_workgroups
+    legacy_id: 5.1.2
+  - metric: cp.cpc_adc_pipe1_busy_dispatching_workgroups
+    legacy_id: 5.1.3
+  - metric: cp.cpc_adc_pipe2_busy_dispatching_workgroups
+    legacy_id: 5.1.4
+  - metric: cp.cpc_adc_pipe3_busy_dispatching_workgroups
+    legacy_id: 5.1.5

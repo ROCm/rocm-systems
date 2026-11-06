@@ -1,0 +1,70 @@
+view: Memory Bandwidth Analysis
+legacy_panel_id: 3000
+alias: membw_analysis
+tables:
+- id: 3001
+  title: L1 Cache
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+  metrics:
+  - metric: compute.l1_cache_vmem_stalled_by_l1_cache
+    label: L1 Cache - VMEM stalled by L1 Cache
+    legacy_id: 30.1.0
+  - metric: vl1d.cache_ta_stalled_by_tcp_aggregated
+    label: L1 Cache - TA stalled by TCP (aggregated)
+    legacy_id: 30.1.1
+  - metric: vl1d.cache_tcp_stalled_by_utcl1
+    label: L1 Cache - TCP stalled by UTCL1
+    legacy_id: 30.1.2
+  - metric: vl1d.cache_tcp_stalled_by_utcl2
+    label: L1 Cache - TCP stalled by UTCL2
+    legacy_id: 30.1.3
+  - metric: vl1d.cache_tcp_stalled_by_td
+    label: L1 Cache - TCP stalled by TD
+    legacy_id: 30.1.4
+  - metric: vl1d.cache_tcp_stalled_by_l2
+    label: L1 Cache - TCP stalled by L2
+    legacy_id: 30.1.5
+- id: 3002
+  title: L2 Bottleneck Detection Indicators
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+  metrics:
+  - metric: l2.input_buffer_stall_rate
+    label: L2 Back Pressure Indicator
+    legacy_id: 30.2.0
+  - metric: fabric.rd_hbm_stall
+    label: L2 Memory BW Bound - Read Credit Pressure
+  - metric: fabric.wr_hbm_stall
+    label: L2 Memory BW Bound - Write Credit Pressure
+  - metric: fabric.memory_bw_bound_combined_credit_pressure
+    label: L2 Memory BW Bound - Combined Credit Pressure
+    legacy_id: 30.2.3
+  - metric: l2.lat_fifo_full_rate
+    label: L2 Internal Resource Pressure - Latency FIFO
+    legacy_id: 30.2.4
+  - metric: l2.wr_data_fifo_full_rate
+    label: L2 Internal Resource Pressure - Source FIFO
+    legacy_id: 30.2.5
+  - metric: l2.hit_rate
+    label: L2 Cache Efficiency
+  - metric: fabric.remote_access_pressure_gmi
+    legacy_id: 30.2.7
+- id: 3003
+  title: EA Bottleneck Detection Indicators
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+  metrics:
+  - metric: fabric.ea_io_bw_bound_combined
+    label: EA IO BW Bound - Combined
+    legacy_id: 30.3.0
+  - metric: fabric.ea_wr_backpressure
+    legacy_id: 30.3.1
+  - metric: fabric.ea_hbm_atomic_pressure
+    legacy_id: 30.3.2
