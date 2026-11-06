@@ -249,7 +249,12 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
             f"sys.path.insert(0, {cli_dir!r})\n"
             "import amdsmi_init\n"
         )
-        result = subprocess.run([sys.executable, "-c", child], capture_output=True, text=True)
+        result = subprocess.run(
+            [sys.executable, "-c", child],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+        )
         self.assertEqual(
             result.returncode,
             int(self.ExitCode.IMPORT_ERROR),
