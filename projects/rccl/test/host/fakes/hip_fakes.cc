@@ -78,6 +78,7 @@ ASSERT_HOOK_MATCHES_PROD(g_hipDeviceSynchronize,          hipDeviceSynchronize);
 ASSERT_HOOK_MATCHES_PROD(g_hipDeviceGetStreamPriorityRange, hipDeviceGetStreamPriorityRange);
 ASSERT_HOOK_MATCHES_PROD(g_hipStreamCreateWithPriority,   hipStreamCreateWithPriority);
 ASSERT_HOOK_MATCHES_PROD(g_hipDrvGetErrorString,         hipDrvGetErrorString);
+ASSERT_HOOK_MATCHES_PROD(g_hipFuncSetAttribute,           hipFuncSetAttribute);
 #define RCCL_ASSERT_INTERCEPTOR_HOOK(name, params) ASSERT_HOOK_MATCHES_PROD(g_##name, name);
 RCCL_HIP_PROFILE_INTERCEPTORS_HOOKED(RCCL_ASSERT_INTERCEPTOR_HOOK)
 #undef RCCL_ASSERT_INTERCEPTOR_HOOK
@@ -274,6 +275,12 @@ static hipError_t DefaultHipGetDeviceCount(int* count)
     return hipSuccess;
 }
 std::function<hipError_t(int*)> g_hipGetDeviceCount = DefaultHipGetDeviceCount;
+
+static hipError_t DefaultHipFuncSetAttribute(const void*, hipFuncAttribute, int)
+{
+    return hipSuccess;
+}
+std::function<hipError_t(const void*, hipFuncAttribute, int)> g_hipFuncSetAttribute = DefaultHipFuncSetAttribute;
 
 // Defined with the plain HIP stubs below, where the attribute switch lives.
 static hipError_t DefaultHipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int device);
@@ -667,6 +674,8 @@ static hipError_t DefaultHipStreamWaitEvent(hipStream_t, hipEvent_t, unsigned in
 std::function<hipError_t(hipEvent_t, hipStream_t)> g_hipEventRecord = DefaultHipEventRecord;
 std::function<hipError_t(hipStream_t, hipEvent_t, unsigned int)> g_hipStreamWaitEvent =
     DefaultHipStreamWaitEvent;
+static hipError_t DefaultHipEventSynchronize(hipEvent_t) { return hipErrorInvalidValue; }
+std::function<hipError_t(hipEvent_t)> g_hipEventSynchronize = DefaultHipEventSynchronize;
 
 static hipError_t DefaultHipStreamBatchMemOp(hipStream_t, unsigned int,
                                              hipStreamBatchMemOpParams*, unsigned int)
@@ -727,6 +736,7 @@ void ResetHipFakes()
     g_hipSetDevice                  = DefaultHipSetDevice;
     g_hipDeviceGet                  = DefaultHipDeviceGet;
     g_hipGetDeviceCount             = DefaultHipGetDeviceCount;
+    g_hipFuncSetAttribute           = DefaultHipFuncSetAttribute;
     g_hipDeviceCanAccessPeer        = DefaultHipDeviceCanAccessPeer;
     g_hipDeviceEnablePeerAccess     = DefaultHipDeviceEnablePeerAccess;
     g_hipDeviceDisablePeerAccess    = DefaultHipDeviceDisablePeerAccess;
@@ -783,6 +793,7 @@ void ResetHipFakes()
     g_hipLaunchKernel               = DefaultHipLaunchKernel;
     g_hipEventRecord                = DefaultHipEventRecord;
     g_hipStreamWaitEvent            = DefaultHipStreamWaitEvent;
+    g_hipEventSynchronize           = DefaultHipEventSynchronize;
     g_hipEventQueryRequiresRecord   = false;
     g_recordedEvents.clear();
     g_hipStreamBatchMemOp           = DefaultHipStreamBatchMemOp;
@@ -940,6 +951,11 @@ hipError_t hipFree(void* ptr) { return g_hipFree(ptr); }
 hipError_t hipGetDevice(int* deviceId) { return g_hipGetDevice(deviceId); }
 
 hipError_t hipGetDeviceCount(int* count) { return g_hipGetDeviceCount(count); }
+
+hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int value)
+{
+    return g_hipFuncSetAttribute(func, attr, value);
+}
 
 const char* hipGetErrorString(hipError_t) { return "[hip_fake] stub error"; }
 hipError_t hipDrvGetErrorString(hipError_t err, const char** str) { return g_hipDrvGetErrorString(err, str); }
@@ -1129,7 +1145,7 @@ hipError_t hipStreamCreate(hipStream_t*) { return hipErrorInvalidValue; }
 hipError_t hipPointerGetAttributes(hipPointerAttribute_t*, const void*) { return hipErrorInvalidValue; }
 hipError_t hipHostGetDevicePointer(void**, void*, unsigned int) { return hipErrorInvalidValue; }
 hipError_t hipIpcGetEventHandle(hipIpcEventHandle_t*, hipEvent_t) { return hipErrorInvalidValue; }
-hipError_t hipEventSynchronize(hipEvent_t) { return hipErrorInvalidValue; }
+hipError_t hipEventSynchronize(hipEvent_t event) { return g_hipEventSynchronize(event); }
 
 // --- init.cc deep-path HIP stubs (commAlloc/devCommSetup) ---------------
 hipError_t hipRuntimeGetVersion(int* version) { return g_hipRuntimeGetVersion(version); }

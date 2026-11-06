@@ -101,7 +101,13 @@ ncclResult_t bootstrapInit(int nHandles, void* handle, struct ncclComm* comm, st
   return g_bootstrapInit(nHandles, handle, comm, parent);
 }
 
-ncclResult_t bootstrapIntraNodeBarrier(void*, int*, int, int, int) { return ncclSuccess; }
+static ncclResult_t DefaultBootstrapIntraNodeBarrier(void*, int*, int, int, int) { return ncclSuccess; }
+std::function<ncclResult_t(void*, int*, int, int, int)> g_bootstrapIntraNodeBarrier =
+    DefaultBootstrapIntraNodeBarrier;
+ncclResult_t bootstrapIntraNodeBarrier(void* commState, int* ranks, int rank, int nranks, int tag) {
+  return g_bootstrapIntraNodeBarrier(commState, ranks, rank, nranks, tag);
+}
+ASSERT_HOOK_MATCHES_PROD(g_bootstrapIntraNodeBarrier, bootstrapIntraNodeBarrier);
 
 static ncclResult_t DefaultBootstrapSplit(uint64_t, struct ncclComm*, struct ncclComm*, int, int, int*) { ::abort(); }
 std::function<ncclResult_t(uint64_t, struct ncclComm*, struct ncclComm*, int, int, int*)> g_bootstrapSplit =
@@ -120,6 +126,7 @@ void ResetBootstrapStubs() {
   g_bootstrapBarrier = DefaultBootstrapBarrier;
   g_bootstrapSend = DefaultBootstrapSend;
   g_bootstrapRecv = DefaultBootstrapRecv;
+  g_bootstrapIntraNodeBarrier = DefaultBootstrapIntraNodeBarrier;
   g_bootstrapGetUniqueIdResult = ncclSuccess;
   g_bootstrapGetUniqueIdCalls = 0;
   g_bcastGrowHandleResult = ncclSuccess;

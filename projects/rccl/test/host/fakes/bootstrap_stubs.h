@@ -38,6 +38,8 @@ extern std::function<ncclResult_t(void* /*commState*/, int /*peer*/, int /*tag*/
     g_bootstrapSend;
 extern std::function<ncclResult_t(void* /*commState*/, int /*peer*/, int /*tag*/, void* /*data*/, int /*size*/)>
     g_bootstrapRecv;
+extern std::function<ncclResult_t(void* /*commState*/, int* /*ranks*/, int /*rank*/, int /*nranks*/, int /*tag*/)>
+    g_bootstrapIntraNodeBarrier;
 
 extern ncclResult_t g_bootstrapGetUniqueIdResult;
 extern int g_bootstrapGetUniqueIdCalls;

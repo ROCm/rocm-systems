@@ -313,6 +313,7 @@ if(BUILD_TESTS)
     DdaIpcTests.cpp
     # Also in rccl-UnitTestsFixtures; built here without DWORDX4_INTRINSICS_FORCE_OFF, so it runs the b128 re-read.
     device/DdaReduceScatterFabricLLTests.cpp
+    device/DdaAllReduceFabricLLTests.cpp
     NetPluginReloadTests.cpp
     GinPluginInitFailTests.cpp
     plugin/net_reload_plugin.cpp
@@ -327,6 +328,7 @@ if(BUILD_TESTS)
     common/EnvVars.cpp
     common/PrepDataFuncs.cpp
     common/PtrUnion.cpp
+    common/GpuCountProbe.cpp
     common/ProcessIsolatedTestRunner.cpp
     common/TestBed.cpp
     common/TestBedChild.cpp
@@ -414,6 +416,7 @@ if(BUILD_TESTS)
       device/LlFifoSysScopeTests.cpp
       device/DdaIpcGpuBarrierOrderingTests.cpp
       device/DdaReduceScatterFabricLLTests.cpp
+      device/DdaAllReduceFabricLLTests.cpp
       device/DdaVecElementAddTests.cpp
       device/DdaLL128PollWireTests.cpp
       device/TestTDM.cpp
@@ -431,6 +434,7 @@ if(BUILD_TESTS)
       DeviceApiTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
+      common/GpuCountProbe.cpp
       common/ProcessIsolatedTestRunner.cpp
       common/TestChecks.cpp
       ../src/misc/kernel_config.cc
@@ -532,6 +536,7 @@ if(BUILD_TESTS)
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/TestChecks.cpp
+      common/GpuCountProbe.cpp
       common/ProcessIsolatedTestRunner.cpp
     )
     target_compile_definitions(rccl-UnitTestsGinAnvilPlugin PRIVATE ENABLE_FAULT_INJECTION)
@@ -543,6 +548,7 @@ if(BUILD_TESTS)
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/TestChecks.cpp
+      common/GpuCountProbe.cpp
       common/ProcessIsolatedTestRunner.cpp
     )
 
@@ -681,6 +687,7 @@ if(BUILD_TESTS)
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/TestChecks.cpp
+      common/GpuCountProbe.cpp
       common/ProcessIsolatedTestRunner.cpp
     )
 
@@ -883,6 +890,7 @@ if(BUILD_TESTS)
       transport/Gin/GinMtuNegotiationTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
+      common/GpuCountProbe.cpp
       common/ProcessIsolatedTestRunner.cpp
     )
 
@@ -903,7 +911,6 @@ if(BUILD_TESTS)
     # internal (Debug-visible) symbols normally.
     target_compile_options(rccl-UnitTestsFixturesDebug PRIVATE
       -fvisibility=hidden -fvisibility-inlines-hidden)
-    # NetDevsPolicyTests and NetDevsPolicyP2pNetTests load a topology XML fixture
     # SearchTests.cpp #includes the hipify-generated copy of src/graph/search.cc
     # directly (via #include SEARCH_CC_PATH) so it can exercise search.cc's
     # internal symbols in the same TU. Pass the absolute path as a source-scoped
@@ -913,11 +920,35 @@ if(BUILD_TESTS)
       COMPILE_DEFINITIONS
         "SEARCH_CC_PATH=\"${PROJECT_BINARY_DIR}/hipify/src/graph/search.cc\"")
 
-    # TopoEnvPolicyTests and NetDevsPolicyP2pNetTests load a topology XML fixture
-    # from the source tree (tools/topo_expl/models). Expose the test source dir
-    # so they can build the path.
-    target_compile_definitions(rccl-UnitTestsFixturesDebug PRIVATE
-      RCCL_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    # Stage the topo_expl fixtures beside the binary (build and install); common/TopoFixtures.hpp finds them.
+    set(RCCL_TEST_TOPO_FIXTURE_NAMES
+      topo_8p6l_5nic.xml
+      topo_8p_ts1.xml
+      topo_8p_950_pcie.xml)
+    set(RCCL_TEST_TOPO_FIXTURE_DIR "${CMAKE_CURRENT_BINARY_DIR}/rccl-test-topo-models")
+    set(RCCL_TEST_TOPO_FIXTURES)
+    set(RCCL_TEST_TOPO_FIXTURES_STAGED)
+    foreach(fixture ${RCCL_TEST_TOPO_FIXTURE_NAMES})
+      list(APPEND RCCL_TEST_TOPO_FIXTURES "${PROJECT_SOURCE_DIR}/tools/topo_expl/models/${fixture}")
+      list(APPEND RCCL_TEST_TOPO_FIXTURES_STAGED "${RCCL_TEST_TOPO_FIXTURE_DIR}/${fixture}")
+    endforeach()
+    add_custom_command(
+      OUTPUT ${RCCL_TEST_TOPO_FIXTURES_STAGED}
+      COMMAND ${CMAKE_COMMAND} -E make_directory "${RCCL_TEST_TOPO_FIXTURE_DIR}"
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different ${RCCL_TEST_TOPO_FIXTURES}
+        "${RCCL_TEST_TOPO_FIXTURE_DIR}"
+      DEPENDS ${RCCL_TEST_TOPO_FIXTURES}
+      COMMENT "Staging RCCL test topology fixtures"
+      VERBATIM)
+    add_custom_target(rccl-test-topo-fixtures DEPENDS ${RCCL_TEST_TOPO_FIXTURES_STAGED})
+    add_dependencies(rccl-UnitTestsFixturesDebug rccl-test-topo-fixtures)
+    # Pin the binary to this directory, where the fixtures are staged and where this
+    # target already lands. In an RCCL top-level build that is ${CMAKE_BINARY_DIR}/test.
+    set_target_properties(rccl-UnitTestsFixturesDebug PROPERTIES
+      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+    install(FILES ${RCCL_TEST_TOPO_FIXTURES}
+      DESTINATION ${CMAKE_INSTALL_BINDIR}/rccl-test-topo-models
+      COMPONENT tests)
 
     # GinAllReduceEligibilityTests.cpp calls ncclAllReduceGinSdmaEligible() only
     # when ENABLE_ROCSHMEM_GIN is defined (otherwise it GTEST_SKIPs). Match librccl.
@@ -945,6 +976,7 @@ if(BUILD_TESTS)
       AltRsmiTests.cpp
       ../src/misc/alt_rsmi.cc
       common/main_altrsmi.cpp
+      common/GpuCountProbe.cpp
       common/ProcessIsolatedTestRunner.cpp
     )
 
@@ -999,6 +1031,7 @@ if(BUILD_TESTS)
     if(CMAKE_BUILD_TYPE MATCHES "Debug")
       list(APPEND TEST_AMDSMI_SOURCE_FILES
         AmdSmiWrapTests.cpp
+        common/GpuCountProbe.cpp
         common/ProcessIsolatedTestRunner.cpp
       )
 
@@ -1132,6 +1165,7 @@ if(BUILD_TESTS)
       ProfilerKernelChMPITests.cpp
       SymmetricKernelMPITests.cpp
       SymmetricWindowMPITests.cpp
+      SymmetricAllGatherTdmMPITests.cpp
       DeviceApiMPITests.cpp
       CommNetMismatchMPITests.cpp
       test_sparse_send_recv.cpp
@@ -1171,6 +1205,22 @@ if(BUILD_TESTS)
     target_link_options(rccl-UnitTestsMPI PRIVATE
       "LINKER:--export-dynamic-symbol=ncclGinPlugin_v13"
       "LINKER:--export-dynamic-symbol=ncclRmaPlugin_v13")
+
+    # The NetIbMPI connection-setup helpers are [[nodiscard]] so that dropping
+    # their result is caught rather than reviewed for. On its own that is only a
+    # warning, and WERROR defaults to OFF, so a bare SetupConnection(...) would
+    # still build and carry on with the comms the helper just closed. Promoting
+    # the warning to an error here is the whole of the enforcement: nothing
+    # checks the call sites but the compiler, and nothing keeps the attribute on
+    # the helpers but review.
+    #
+    # Scoped to the NetIbMPI sources rather than the whole target: other MPI
+    # tests discard [[nodiscard]] results of their own, and reworking those is
+    # not this change's business.
+    set(NETIBMPI_TEST_SOURCE_FILES ${MPI_TEST_SOURCE_FILES})
+    list(FILTER NETIBMPI_TEST_SOURCE_FILES INCLUDE REGEX "transport/NetIbMPI/")
+    set_source_files_properties(${NETIBMPI_TEST_SOURCE_FILES}
+      PROPERTIES COMPILE_OPTIONS -Werror=unused-result)
 
     list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsMPI)
 
