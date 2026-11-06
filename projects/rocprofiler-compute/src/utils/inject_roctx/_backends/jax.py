@@ -10,7 +10,6 @@ Primitive.bind_with_trace with ROCTX ranges.
 
 import importlib.util
 import threading
-from functools import partial
 from pathlib import Path
 from typing import Any, Callable
 
@@ -140,13 +139,11 @@ def _roctx_pmap_call(compiled: object, *args: Any, **kwargs: Any) -> object:
 
 
 def _roctx_pmap_factory(fun: object, *args: Any, **kwargs: Any) -> object:
-    """Call original jax.pmap and return a marked callable."""
+    """Call original jax.pmap and return a marked callable that forwards attributes."""
     compiled = _STATE.pmap_factory(fun, *args, **kwargs)
     if getattr(compiled, "_roctx_wrapped", False):
         return compiled
-    wrapped = partial(_roctx_pmap_call, compiled)
-    wrapped._roctx_wrapped = True
-    return wrapped
+    return _RoctxPmapCallable(compiled)
 
 
 _roctx_pmap_factory._roctx_wrapped = True
@@ -243,6 +240,34 @@ def _wrap_primitive_bind_with_trace() -> None:
         "ml api trace",
         "Wrapped Primitive.bind_with_trace with ROCTX markers",
     )
+
+
+class _RoctxPmapCallable:
+    """pmap result that opens a ROCTX range, then forwards to the compiled function."""
+
+    __slots__ = ("_compiled", "_roctx_wrapped")
+
+    def __init__(self, compiled: object) -> None:
+        object.__setattr__(self, "_compiled", compiled)
+        object.__setattr__(self, "_roctx_wrapped", True)
+
+    def __call__(self, *args: Any, **kwargs: Any) -> object:
+        return _roctx_pmap_call(self._compiled, *args, **kwargs)
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._compiled, name)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if name in ("_compiled", "_roctx_wrapped"):
+            object.__setattr__(self, name, value)
+            return
+        setattr(self._compiled, name, value)
+
+    def __dir__(self):
+        names = set(dir(type(self)))
+        compiled = object.__getattribute__(self, "_compiled")
+        names.update(dir(compiled))
+        return sorted(names)
 
 
 class JaxBackend:
