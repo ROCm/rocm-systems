@@ -8,8 +8,8 @@
  * @addtogroup HRR HRR Repro Workload (regression micro-kernels)
  * @{
  * @ingroup HRRTest
- * Direct GPU micro-kernel workloads that reproduce the specific behaviours and
- * regressions exercised by the playback fixes in this area:
+ * Direct GPU micro-kernel workloads that reproduce specific capture and replay
+ * behaviours:
  *
  *   - dropped-first-hipMalloc capture (the first HIP call is a hipMalloc),
  *   - embedded device pointers inside a by-value struct kernel argument,
@@ -109,13 +109,13 @@ __global__ void hrr_repro_slotmap(float* required_out, const unsigned* flag,
 }
 
 // ===========================================================================
-// A1. First-hipMalloc capture regression
+// A1. First-hipMalloc capture
 //
 // Makes the VERY FIRST HIP call in the process a hipMalloc (no hipSetDevice,
 // no warm-up allocation).  hip_capture_init() is deferred into hip::init(),
 // which the HIP_INIT macro runs *before* the body of this first hipMalloc — so
-// the allocation must be captured.  If the first-call capture ever regresses,
-// `da` will not be translated at replay and the D2H validation fails.
+// the allocation must be captured, or `da` is not translated at replay and the
+// D2H validation fails.
 //
 // H2D(da=1) -> scale(out = da*2) -> D2H(out)  => out[i] == 2.0f
 // ===========================================================================

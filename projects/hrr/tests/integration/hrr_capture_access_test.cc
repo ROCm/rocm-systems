@@ -691,8 +691,8 @@ HRR_TEST_CASE(Unit_HRR_CaptureRefusesPlantedLinks) {
   }
 
   SECTION("link at the root manifest's <pid>.tmp name") {
-    // The name the root manifest's temporary file used to have, which anyone
-    // who can write to the base directory could predict.
+    // A predictable temporary name anyone with write access to the base
+    // directory could pre-plant.
     const PlantedRun run = capture_after_planting(
         base, script,
         "ln -s '" + victim_file.string() + "' \"$HRR_TEST_BASE/manifest.json.$$.tmp\"\n");

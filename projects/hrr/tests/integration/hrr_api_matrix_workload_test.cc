@@ -435,10 +435,9 @@ TEST_CASE("Unit_HRR_ApiMatrix_PayloadLoss_Direct", "[.][hrr-direct]") {
   }
 
   // ---- hipMemCreate's allocation properties -------------------------------
-  // hipMemAllocationProp used to be dropped, with playback hardcoding
-  // location.id = 0 and type = Pinned. It is now carried inline and replay
-  // allocates with the recorded type and location. Setting location.id to a
-  // non-zero device here would exercise that on a multi-GPU host.
+  // hipMemAllocationProp is carried inline and replay allocates with the
+  // recorded type and location. A non-zero location.id would exercise that on
+  // a multi-GPU host.
   if (device_attr(hipDeviceAttributeVirtualMemoryManagementSupported)) {
     hipMemAllocationProp prop{};
     prop.type = hipMemAllocationTypePinned;
@@ -461,8 +460,8 @@ TEST_CASE("Unit_HRR_ApiMatrix_PayloadLoss_Direct", "[.][hrr-direct]") {
   // ---- hipStreamBatchMemOp's op list --------------------------------------
   // The op array is a plain (non-const) pointer, so the mechanical detector in
   // derive_manifest.py never flagged it — api_matrix.yaml marks it by hand.
-  // The ops used to be dropped from the archive; they are now carried inline
-  // and their device addresses are translated at replay.
+  // The ops are carried inline and their device addresses are translated at
+  // replay.
   {
     uint32_t* flag = nullptr;
     if (hipHostMalloc(reinterpret_cast<void**>(&flag), sizeof(uint32_t),
@@ -922,10 +921,8 @@ TEST_CASE("Unit_HRR_ApiMatrix_MultiGpu_Direct", "[.][hrr-direct]") {
   }
 
   // ---- VMM: reserve, create, map, set access, unmap -----------------------
-  // hipMemCreate's properties used to be dropped and playback hardcoded
-  // location.id = 0, which put the replayed heap on the wrong device in a
-  // two-GPU capture. They are now carried inline, and the recorded device is
-  // used.
+  // hipMemCreate's properties are carried inline, so replay uses the recorded
+  // device, not device 0, in a two-GPU capture.
   if (device_attr(hipDeviceAttributeVirtualMemoryManagementSupported, src_dev)) {
     hipMemAllocationProp prop{};
     prop.type = hipMemAllocationTypePinned;
@@ -2246,10 +2243,8 @@ TEST_CASE("Unit_HRR_ApiMatrix_Breadth2_Direct", "[.][hrr-direct]") {
 
     // hipLinkAddFile and hipLibraryLoadFromFile are the two file-based
     // loaders, so the code object is written once, up front, and both read
-    // it. It used to be created further down, after hipLinkAddFile had
-    // already been handed the path: capture records only successful calls,
-    // so hipLinkAddFile failed on a missing file and never reached the
-    // archive, leaving a T4 row the matrix expects to be captured.
+    // it. Capture records only successful calls, so hipLinkAddFile must see
+    // the file already present or the T4 row the matrix expects is missing.
     const fs::path co_path = fs::temp_directory_path() / "hrr_matrix_rtc.co";
     {
       std::ofstream out(co_path, std::ios::binary);

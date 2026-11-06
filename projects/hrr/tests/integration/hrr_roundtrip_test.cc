@@ -597,7 +597,7 @@ static void hrr_require_recorded_apis(const fs::path& cap_path,
 
 // ---------------------------------------------------------------------------
 // Repro roundtrips — capture the micro-kernel workloads from
-// hrr_repro_workload.cc and validate the playback behaviours fixed in this area.
+// hrr_repro_workload.cc and validate the replay.
 // ---------------------------------------------------------------------------
 
 /**
@@ -608,14 +608,12 @@ static void hrr_require_recorded_apis(const fs::path& cap_path,
  *     REQUIRE the D2H validates — i.e. the very first allocation was captured
  *     and translated.
  *
- *   Hidden ([.]) because it reproduces the known dropped-first-hipMalloc
- *   limitation: capture shims are installed from hip_capture_init() (run inside
- *   hip::init()), which is the in-flight first HIP API call, so that first call
- *   itself is not recorded.  When the first call is a hipMalloc the allocation
- *   is missing and replay aborts with "H2D dst ... not mapped".  The accepted
- *   workaround is a warm-up allocation before the real work.  Run explicitly by
- *   name; this case PASSES once first-call capture is fixed (the warm-up is no
- *   longer required), so it doubles as the regression guard for that fix.
+ *   Hidden ([.]) because capture shims are installed from hip_capture_init()
+ *   (run inside hip::init()), which is the in-flight first HIP API call, so
+ *   that call itself is not recorded.  When it is a hipMalloc the allocation
+ *   is missing and replay aborts with "H2D dst ... not mapped".  Run explicitly
+ *   by name; it passes once first-call capture works without a warm-up
+ *   allocation.
  */
 TEST_CASE("Unit_HRR_FirstMallocRoundtrip", "[.][hrr-repro]") {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_firstmalloc"};

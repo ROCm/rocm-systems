@@ -51,7 +51,7 @@
 #
 # hrr_kernel_signature_test.cc covers the check replay makes of a kernel launch
 # record's arguments against the signature of the kernel in the code object
-# (AIRUNTIME-3070): an unmodified archive replays, a copy whose launch record has
+# Results: an unmodified archive replays, a copy whose launch record has
 # too few arguments is refused with nothing launched, and copies with an extra or
 # a wider argument replay like the original. Contains its own hidden
 # [.][hrr-direct] workload.

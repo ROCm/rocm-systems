@@ -1308,8 +1308,7 @@ def _strip_launchers(command: str) -> str:
         # env's assignments come first, one a line, so preflight can apply them.
         ("env FOO=1 python train.py", "FOO=1\npython"),
         ("env A=1 nice -n 5 env B=2 app", "A=1\nB=2\napp"),
-        # The operand cases: skipping only dashed arguments used to leave the
-        # duration or the niceness as the workload.
+        # Operands (duration, niceness) are skipped along with the dashed options.
         ("timeout 60s python train.py", "python"),
         ("timeout -s KILL 30 python train.py", "python"),
         ("nice -n 10 vllm serve", "vllm"),
@@ -1319,7 +1318,7 @@ def _strip_launchers(command: str) -> str:
         # rather than guessing.
         ("srun -N2 python train.py", "srun"),
         # env's own options change the environment in ways an assignment
-        # cannot carry, and used to come back as the workload themselves.
+        # cannot carry, so `env` itself is the workload.
         ("env -u LD_PRELOAD app", "env"),
         ("env --ignore-environment app", "env"),
         ("/usr/bin/env -i A=1 app", "/usr/bin/env"),
@@ -1335,7 +1334,7 @@ def test_the_workload_is_found_behind_its_launcher(command, expected):
     [
         ("#!/venv/bin/python3", "/venv/bin/python3"),
         ("#!/usr/bin/env python3", "python3"),
-        # -S used to come back as the interpreter, and the package scan ran it.
+        # -S is not the interpreter; the package scan must not run it.
         ("#!/usr/bin/env -S python3 -u", "python3"),
         ("#!/usr/bin/env -Spython3", "python3"),
         ("#!/usr/bin/env --split-string=python3 -u", "python3"),

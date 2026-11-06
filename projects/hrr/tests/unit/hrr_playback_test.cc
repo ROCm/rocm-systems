@@ -101,7 +101,7 @@ HRR_TEST_CASE(Unit_HRR_Playback_PlacementHeldRanges) {
 
 // The range placement maps for an allocation is checked: a size that wraps
 // 2^64, or rounding that does, is refused rather than turned into a small range
-// inside a held one (AIRUNTIME-3069).
+// inside a held one.
 HRR_TEST_CASE(Unit_HRR_Playback_PlacementRangeChecked) {
   const uint64_t G = 1ull << 21, B = 0x7f0000000000ull;
   uint64_t b = 0, e = 0;

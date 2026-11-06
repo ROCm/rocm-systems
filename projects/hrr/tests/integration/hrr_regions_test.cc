@@ -699,9 +699,9 @@ TEST_CASE("Unit_HRR_Regions_EmbeddedPointerMaterialization", "[.][hrr]") {
 // ---------------------------------------------------------------------------
 // A memcpy is the first touch of a bypassed segment.
 //
-// Region materialisation used to be wired into kernel-argument translation
-// only, so a sidecar-declared allocation whose first touch was a captured copy
-// failed as unmapped in the memcpy handler before materialisation could run.
+// Region materialisation must run for every handler, not only kernel-argument
+// translation: a sidecar-declared allocation whose first touch is a captured
+// copy would otherwise fail as unmapped in the memcpy handler.
 // That contradicted the promise made above `advance_to` in `dispatch_event`,
 // which says the region timeline is advanced there so that memcpys and every
 // other handler see the same view: the advance was shared, the materialisation
