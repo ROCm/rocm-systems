@@ -34,6 +34,10 @@ downstream consumer of the library.
   origin and bucket size cover every file. `ph_get_correlated_events` and
   `ph_get_call_stack` use `ph_event_t.track_id` to choose the file when that
   track is open and the event id is in it.
+- `ph_trim_trace` keeps a duration row that ends on `start_ts` and a sample
+  at `start_ts`. A row or sample that begins at `end_ts` is still left out.
+  The per-node table suffix is parsed without the schema-3 trim source, so a
+  build with schema 3 disabled still links.
 
 ### Added
 

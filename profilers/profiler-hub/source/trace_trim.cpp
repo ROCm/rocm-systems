@@ -22,6 +22,31 @@
 
 namespace profiler_hub
 {
+
+std::string
+table_guid(std::string_view table)
+{
+    // Longer names first, so rocpd_pmc_event is not read as rocpd_event.
+    constexpr std::string_view k_prefixes[] = {
+        "rocpd_pmc_event",
+        "rocpd_kernel_dispatch",
+        "rocpd_memory_allocate",
+        "rocpd_memory_copy",
+        "rocpd_hip_event",
+        "rocpd_region",
+        "rocpd_sample",
+        "rocpd_event",
+        "rocpd_arg",
+    };
+    for(const std::string_view prefix : k_prefixes)
+    {
+        if(table.size() <= prefix.size() + 1 || table[prefix.size()] != '_') continue;
+        if(table.substr(0, prefix.size()) != prefix) continue;
+        return std::string{ table.substr(prefix.size() + 1) };
+    }
+    return {};
+}
+
 namespace
 {
 

@@ -410,11 +410,6 @@ These were found by reading the code and have not been confirmed with a test.
   - Reader connections open the trace read-write and create indexes in it.
     The first open can change the file's modification time.
   - Trimmed copies also carry these indexes.
-- **Trim**
-  - Trim windows are strict (`start < end_ts AND end > start_ts`), while the
-    header calls the start inclusive.
-  - `trace_trim.cpp` calls `table_guid`, which is defined in the schema-3 trim
-    source, so a build with `PROFILER_HUB_ENABLE_ROCPD_V3=OFF` may fail to link.
 - **Missing data**
   - Schema-3 region details do not include arguments.
   - Schema 2 has no memory allocation details and no HIP events.

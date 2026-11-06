@@ -30,9 +30,11 @@ public:
     {
         if(table == "rocpd_api" || table == "rocpd_op" || table == "rocpd_monitor")
         {
+            // start_ts is inclusive and end_ts is exclusive: a row that ends on
+            // the start is kept, and a row that starts on the end is not.
             return trim_statement_t{ row_kind_t::interval,
                                      full_copy(table) + " WHERE \"start\" < " +
-                                         std::to_string(window_end) + " AND \"end\" > " +
+                                         std::to_string(window_end) + " AND \"end\" >= " +
                                          std::to_string(window_start) };
         }
         if(table == "rocpd_api_ops" && tables.count("rocpd_api") != 0 &&

@@ -100,7 +100,7 @@ public:
                 return trim_statement_t{
                     role->kind,
                     "INSERT INTO " + quoted + " SELECT * FROM oldDb." + quoted +
-                        " WHERE \"start\" < " + end + " AND \"end\" > " + start };
+                        " WHERE \"start\" < " + end + " AND \"end\" >= " + start };
             case row_kind_t::sample: return sample_statement(*role, table, tables, start, end);
             case row_kind_t::event: return event_statement(*role, table, tables);
             case row_kind_t::event_child: return child_statement(*role, table, tables);
@@ -117,7 +117,7 @@ private:
     {
         const std::string quoted = quote_ident(table);
         std::string       sql    = "INSERT INTO " + quoted + " SELECT S.* FROM oldDb." +
-                           quoted + " S WHERE (S.\"timestamp\" > " + start +
+                           quoted + " S WHERE (S.\"timestamp\" >= " + start +
                            " AND S.\"timestamp\" < " + end + ")";
         const std::string region = sibling(table, "rocpd_sample", "rocpd_region");
         if(!region.empty() && tables.count(region) != 0)
@@ -179,18 +179,6 @@ std::unique_ptr<trim_schema_t>
 make_rocpd_v3_trim_schema()
 {
     return std::make_unique<rocpd_v3_trim_schema_t>();
-}
-
-std::string
-table_guid(std::string_view table)
-{
-    const table_role_t* role = role_of(table);
-    if(role == nullptr || table.size() <= role->prefix.size() ||
-       table[role->prefix.size()] != '_')
-    {
-        return {};
-    }
-    return std::string{ table.substr(role->prefix.size() + 1) };
 }
 
 }  // namespace profiler_hub
