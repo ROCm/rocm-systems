@@ -20,6 +20,7 @@
 #include "bootstrap.h"
 #include "nccl_device/gin/rocshmem_gda/gin_rocshmem_device_host_common_gda.h"
 #include "gin/gin_rocshmem_gda_factory.h"
+#include "gin/gin_type_env.h"
 #include <hip/hip_runtime.h>
 
 // RCCL env-var parameters for traffic class (defined in transport/net_ib/)
@@ -98,8 +99,7 @@ static int ginGdaBootstrapAllgather(void* ctx, void* buf, size_t perRankSize) {
 ///////////////////////////////////////////////////////////////////////////////
 
 static ncclResult_t ginRocshmemGdaInit(void** ctx, uint64_t commId, ncclDebugLogger_t logFunction) {
-  const char* gin_type = getenv("NCCL_GIN_TYPE");
-  if (!gin_type || atoi(gin_type) != NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA) return ncclInternalError;
+  if (!ncclGinTypeEnabled(NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA, /*enabledByDefault=*/false)) return ncclInternalError;
   if (rocshmem_gin_probe_devices() <= 0) return ncclInternalError;
   // Allocate init context; bootstrap filled by ncclGinRocshmemSetInitContext
   struct ginRocshmemInitCtx* ictx = new ginRocshmemInitCtx{};
