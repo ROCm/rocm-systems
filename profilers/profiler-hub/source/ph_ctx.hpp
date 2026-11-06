@@ -225,9 +225,10 @@ private:
     [[nodiscard]] trace_source_t& source_at(uint32_t index);
     [[nodiscard]] const trace_source_t& source_at(uint32_t index) const;
     [[nodiscard]] const placed_track_t* place_of(uint32_t track_id) const;
-    // The file that holds this event. Only the id and type identify it.
-    // One open file is that file. Several files are searched by id.
-    [[nodiscard]] trace_source_t* source_for_event(uint64_t        event_id,
+    // The file that holds this event. A known track_id whose file contains
+    // the id selects that file. Otherwise the files are searched by id.
+    [[nodiscard]] trace_source_t* source_for_event(uint32_t        track_id,
+                                                   uint64_t        event_id,
                                                    ph_event_type_t event_type);
     void open_sources();
     [[nodiscard]] ph_optional_uint64_t global_track_id(

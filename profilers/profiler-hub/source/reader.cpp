@@ -463,6 +463,14 @@ reader_t::get_histogram(size_t max_buckets) const
     return m_impl->get_histogram(max_buckets);
 }
 
+reader_types::histogram_t
+reader_t::get_histogram(reader_types::timestamp_ns_t origin,
+                        reader_types::timestamp_ns_t bucket_size,
+                        size_t                       bucket_count) const
+{
+    return m_impl->get_histogram(histogram_grid_t{ origin, bucket_size, bucket_count });
+}
+
 reader_types::time_window_t
 reader_t::get_data_time_range() const
 {

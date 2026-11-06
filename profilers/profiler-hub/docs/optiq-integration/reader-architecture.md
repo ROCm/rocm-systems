@@ -404,15 +404,8 @@ is the only caller in this integration.
 
 ## 6. Open issues found while documenting
 
-These were found by reading the code. None of them has been fixed or confirmed
-with a test.
+These were found by reading the code and have not been confirmed with a test.
 
-- **Several sources**
-  - Without a cache folder, each source builds its own histogram grid, but the
-    result reports source 0's origin and bucket size.
-  - `ph_get_correlated_events` and `ph_get_call_stack` pick the first source
-    that has the event id, so ids that repeat across files can pick the
-    wrong file.
 - **Writing to the trace**
   - Reader connections open the trace read-write and create indexes in it.
     The first open can change the file's modification time.

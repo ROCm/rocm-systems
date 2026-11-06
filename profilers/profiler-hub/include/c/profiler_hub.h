@@ -315,8 +315,10 @@ extern "C"
      *        dispatches. A memory copy reaches regions and memory copies. A
      *        memory allocation reaches regions.
      * @param ctx Context to query.
-     * @param event Event returned by ph_get_track_events(). Only @p event->id and
-     *        @p event->type are used. The object does not need to stay alive
+     * @param event Event returned by ph_get_track_events(). @p event->id and
+     *        @p event->type select the row. @p event->track_id selects the
+     *        file when that track belongs to one of the open sources and the
+     *        row is in that file. The object does not need to stay alive
      *        after this call returns.
      * @param events Out parameter receiving the correlated events; it is set to
      *        an empty list before any other work, so it is valid on failure.
@@ -355,9 +357,11 @@ extern "C"
      *        supplies file and line data. A non-region event or an id that is
      *        not in the trace yields an empty list.
      * @param ctx Context to query.
-     * @param event Event returned by ph_get_track_events(). Only @p event->id
-     *        and @p event->type are used. The object does not need to stay
-     *        alive after this call returns.
+     * @param event Event returned by ph_get_track_events(). @p event->id and
+     *        @p event->type select the row. @p event->track_id selects the
+     *        file when that track belongs to one of the open sources and the
+     *        row is in that file. The object does not need to stay alive
+     *        after this call returns.
      * @param call_stack Out parameter receiving the frames; it is set to an
      *        empty list before any other work, so it is valid on failure.
      *        Index 0 is the top of the stack, the most recent call.

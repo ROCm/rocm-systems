@@ -116,6 +116,8 @@ public:
         const reader_types::event_filter_t& filter) override;
 
     [[nodiscard]] reader_types::histogram_t get_histogram(size_t max_buckets) override;
+    [[nodiscard]] reader_types::histogram_t get_histogram(
+        const histogram_grid_t& grid) override;
 
     // Event detail queries
     [[nodiscard]] std::optional<reader_types::region_data_t> get_region_details(

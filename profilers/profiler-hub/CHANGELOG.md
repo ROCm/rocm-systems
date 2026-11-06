@@ -30,6 +30,10 @@ downstream consumer of the library.
 - Cancelling `ph_get_track_events` stops an on-disk track-cache read between
   checkpoints. The future ends `PH_FUTURE_CANCELLED` and the event list stays
   empty.
+- A trace opened from several files uses one histogram grid. The reported
+  origin and bucket size cover every file. `ph_get_correlated_events` and
+  `ph_get_call_stack` use `ph_event_t.track_id` to choose the file when that
+  track is open and the event id is in it.
 
 ### Added
 

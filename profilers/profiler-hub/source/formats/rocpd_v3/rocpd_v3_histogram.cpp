@@ -195,9 +195,15 @@ duration_source_sql(const reader_catalog_t&                         catalog,
 reader_types::histogram_t
 rocpd_v3_reader::get_histogram(size_t max_buckets)
 {
+    return get_histogram(make_histogram_grid(*m_catalog, max_buckets));
+}
+
+reader_types::histogram_t
+rocpd_v3_reader::get_histogram(const histogram_grid_t& grid)
+{
     return build_histogram(
         *m_catalog,
-        max_buckets,
+        grid,
         [this](const reader_types::track_info_ptr_t& track,
                const histogram_grid_t& grid) -> reader_types::histogram_bucket_list_t {
             if(track->category == reader_types::track_kind_t::pmc_agent)

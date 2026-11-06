@@ -8,6 +8,7 @@
 #include "profiler-hub/cpp/storage.hpp"
 
 #include "data_storage/backends/sqlite_backend.hpp"
+#include "histogram_grid.hpp"
 #include "event_query.hpp"
 #include "reader_catalog.hpp"
 
@@ -89,6 +90,10 @@ struct reader_t::impl
         const reader_types::event_filter_t& filter) = 0;
 
     [[nodiscard]] virtual reader_types::histogram_t get_histogram(size_t max_buckets) = 0;
+
+    /** @brief Histogram for this file's tracks on a grid shared by every source. */
+    [[nodiscard]] virtual reader_types::histogram_t get_histogram(
+        const histogram_grid_t& grid) = 0;
 
     // Event detail queries. A format without the data keeps the empty default.
     [[nodiscard]] virtual std::optional<reader_types::region_data_t> get_region_details(

@@ -277,7 +277,7 @@ sequenceDiagram
   O->>O: zero-initialize ph_event_t and ph_event_list_t
   O->>C: ph_get_correlated_events(event id, type)
   C->>X: wait_until_ready
-  X->>X: source_for_event(id, type)
+  X->>X: source_for_event(track, id, type)
   alt one source
     X->>X: source 0
   else several sources

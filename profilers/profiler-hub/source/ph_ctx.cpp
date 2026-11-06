@@ -446,7 +446,9 @@ ph_ctx::place_of(uint32_t track_id) const
 }
 
 ph_ctx::trace_source_t*
-ph_ctx::source_for_event(uint64_t event_id, ph_event_type_t event_type)
+ph_ctx::source_for_event(uint32_t        track_id,
+                         uint64_t        event_id,
+                         ph_event_type_t event_type)
 {
     const auto type = to_reader_event_type(event_type);
     if(!type.has_value() || m_sources.empty()) return nullptr;
@@ -455,14 +457,23 @@ ph_ctx::source_for_event(uint64_t event_id, ph_event_type_t event_type)
     profiler_hub::reader_types::timeline_event_t query;
     query.unique_identifier = { .id   = static_cast<size_t>(event_id),
                                 .type = type.value() };
-    for(uint32_t index = 0; index < m_sources.size(); ++index)
-    {
-        trace_source_t& held  = source_at(index);
-        const auto      track = held.pool->with_connection(
+    const auto contains = [&query](trace_source_t& held) {
+        const auto track = held.pool->with_connection(
             [&query](profiler_hub::common::connection& connection) {
                 return connection.reader().track_of(query);
             });
-        if(track) return &held;
+        return static_cast<bool>(track);
+    };
+
+    if(const placed_track_t* place = place_of(track_id))
+    {
+        trace_source_t& held = source_at(place->source_index);
+        if(contains(held)) return &held;
+    }
+    for(uint32_t index = 0; index < m_sources.size(); ++index)
+    {
+        trace_source_t& held = source_at(index);
+        if(contains(held)) return &held;
     }
     return nullptr;
 }
@@ -893,12 +904,11 @@ ph_ctx::get_correlated_events(uint32_t        track_id,
                               uint64_t        event_id,
                               ph_event_type_t event_type)
 {
-    (void) track_id;
     LOG_DEBUG("[Profiler-Hub] Get correlated events. Event id {}, type {}",
               event_id,
               static_cast<int>(event_type));
 
-    trace_source_t* held_ptr = source_for_event(event_id, event_type);
+    trace_source_t* held_ptr = source_for_event(track_id, event_id, event_type);
     if(held_ptr == nullptr)
     {
         return ph_event_list_t{ .list_size = 0, .events = nullptr };
@@ -983,12 +993,11 @@ ph_ctx::get_correlated_events(uint32_t        track_id,
 ph_call_stack_t
 ph_ctx::get_call_stack(uint32_t track_id, uint64_t event_id, ph_event_type_t event_type)
 {
-    (void) track_id;
     LOG_DEBUG("[Profiler-Hub] Get call stack. Event id {}, type {}",
               event_id,
               static_cast<int>(event_type));
 
-    trace_source_t* origin_ptr = source_for_event(event_id, event_type);
+    trace_source_t* origin_ptr = source_for_event(track_id, event_id, event_type);
     if(origin_ptr == nullptr)
     {
         return ph_call_stack_t{ .list_size = 0, .frames = nullptr };
@@ -1426,13 +1435,15 @@ ph_ctx::build_histogram(uint32_t max_buckets, ph_histogram_t& output)
         return;
     }
 
+    const profiler_hub::histogram_grid_t grid = histogram_grid(max_buckets);
     std::vector<profiler_hub::reader_types::histogram_t> parts;
     parts.reserve(m_sources.size());
     for(const std::unique_ptr<trace_source_t>& held : m_sources)
     {
         parts.push_back(held->pool->with_connection(
-            [max_buckets](profiler_hub::common::connection& connection) {
-                return connection.reader().get_histogram(max_buckets);
+            [&grid](profiler_hub::common::connection& connection) {
+                return connection.reader().get_histogram(
+                    grid.origin, grid.bucket_size, grid.bucket_count);
             }));
     }
 
@@ -1485,12 +1496,10 @@ ph_ctx::build_histogram(uint32_t max_buckets, ph_histogram_t& output)
         }
     }
 
-    profiler_hub::reader_types::histogram_t empty_histogram{};
-    const auto& first = parts.empty() ? empty_histogram : parts.front();
     storage->histogram =
-        ph_histogram_t{ static_cast<std::uint64_t>(first.origin_ts),
-                        static_cast<std::uint64_t>(first.bucket_size),
-                        narrow_histogram_count(first.bucket_count),
+        ph_histogram_t{ static_cast<std::uint64_t>(grid.origin),
+                        static_cast<std::uint64_t>(grid.bucket_size),
+                        narrow_histogram_count(grid.bucket_count),
                         narrow_histogram_count(storage->tracks.size()),
                         storage->tracks.empty() ? nullptr : storage->tracks.data() };
     output = storage->histogram;

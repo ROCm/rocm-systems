@@ -360,6 +360,13 @@ struct reader_t
      */
     [[nodiscard]] reader_types::histogram_t get_histogram(size_t max_buckets = 500) const;
 
+    /** @brief Histogram for this file's tracks on a caller-supplied grid.
+     *         Several sources share one origin and bucket size. */
+    [[nodiscard]] reader_types::histogram_t get_histogram(
+        reader_types::timestamp_ns_t origin,
+        reader_types::timestamp_ns_t bucket_size,
+        size_t                       bucket_count) const;
+
     [[nodiscard]] reader_types::time_window_t get_data_time_range() const;
 
     /**
