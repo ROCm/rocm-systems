@@ -161,3 +161,11 @@ def test_jax_pmap_call_emits_pmap_marker(monkeypatch):
     assert mapped(1) == 1
     assert [item["marker"] for item in pushes] == ["jax.pmap.pmap_square"]
     assert pushes[0]["backend"] == "jax"
+
+
+def test_jax_primitive_emits_dot_general_marker(monkeypatch):
+    _jax_mod, _compiled_type, primitive_type = install_jax_backend(monkeypatch)
+    pushes = record_scopes(monkeypatch)
+    primitive_type("dot_general").bind_with_trace(None, (), (), {})
+    assert [item["marker"] for item in pushes] == ["jax.dot_general"]
+    assert pushes[0]["backend"] == "jax"
