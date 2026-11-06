@@ -1,6 +1,15 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+// ci-diag (log only): report whether sqlite3.h is on the include path here.
+#if defined(__has_include)
+#    if __has_include(<sqlite3.h>)
+#        pragma message("ci-diag writer_test.cpp: sqlite3.h VISIBLE")
+#    else
+#        pragma message("ci-diag writer_test.cpp: sqlite3.h NOT visible")
+#    endif
+#endif
+
 #include "profiler-hub/reader.hpp"
 #include "profiler-hub/storage.hpp"
 #include "profiler-hub/version.hpp"

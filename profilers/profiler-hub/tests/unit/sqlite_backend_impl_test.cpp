@@ -23,6 +23,12 @@
 #    ifndef NOMINMAX
 #        define NOMINMAX
 #    endif
+// ci-diag (log only): tlhelp32.h is included before windows.h in this block.
+#    ifdef WINAPI
+#        pragma message("ci-diag sqlite_backend_impl_test.cpp: WINAPI defined before tlhelp32.h")
+#    else
+#        pragma message("ci-diag sqlite_backend_impl_test.cpp: WINAPI NOT defined before tlhelp32.h")
+#    endif
 #    include <tlhelp32.h>
 #    include <windows.h>
 #endif

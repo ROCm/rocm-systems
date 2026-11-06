@@ -22,6 +22,11 @@ add_executable(profiler-hub_unit_tests ${UNIT_TEST_SOURCES})
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 
+# ci-diag (log only): what the SQLite target gives the unit tests.
+message(STATUS "[ci-diag] SQLite3_FOUND=${SQLite3_FOUND} SQLITE3_SOURCE_DIR=${SQLITE3_SOURCE_DIR}")
+get_target_property(_ci_diag_sqlite_links profiler-hub-sqlite3 INTERFACE_LINK_LIBRARIES)
+message(STATUS "[ci-diag] profiler-hub-sqlite3 INTERFACE_LINK_LIBRARIES=${_ci_diag_sqlite_links}")
+
 target_link_libraries(
     profiler-hub_unit_tests
     PRIVATE
