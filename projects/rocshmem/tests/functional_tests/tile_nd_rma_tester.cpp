@@ -9,14 +9,24 @@
  * @brief Functional tests for 3D and 4D tile RMA (put/get) operations.
  *
  * Tests tile put and get for rank-3 and rank-4 tensors using fixed problem
- * sizes (no message-size sweep). Both thread-level and workgroup-collective
- * variants are covered.
+ * sizes (no message-size sweep). Thread-level, wavefront-collective and
+ * workgroup-collective variants are covered.
  *
  * Fixed shapes:
  *   3D: (D0=8, D1=16, D2=4)  — 512 elements per tile
  *   4D: (D0=2, D1=8, D2=8, D3=4) — 512 elements per tile
  *
- * Verification: flat linear fill (value = index % 256), flat linear check.
+ * Layouts:
+ *   Contiguous: densely packed tensor, tile covers the whole tensor.
+ *   Strided 3D: innermost dimension packed, rows padded to 2 * D2 elements
+ *               and planes padded to 2 * D1 rows.
+ *   Strided 4D: innermost stride of 2 elements (no contiguous runs) and
+ *               dimension 1 padded to twice its packed stride.
+ *
+ * Verification: the source is filled with value = flat_index % 256 and the
+ * destination is zeroed. Since source and destination share the same layout,
+ * every element covered by the tile must match the source and every padding
+ * element must remain zero.
  */
 
 #include "tile_nd_rma_tester.hpp"
@@ -32,68 +42,115 @@
 using namespace rocshmem;
 
 /******************************************************************************
+ * TEST TYPE TABLE
+ *****************************************************************************/
+
+enum class TileNDScope { Thread, Wave, WG };
+
+struct TileNDInfo {
+  int ndim;
+  bool is_put;
+  TileNDScope scope;
+  bool strided;
+};
+
+// X(name, ndim, is_put, scope, strided)
+#define TILE_ND_FOREACH_TEST_TYPE(X)                          \
+  X(TilePut3D,             3, true,  Thread, false)           \
+  X(TileGet3D,             3, false, Thread, false)           \
+  X(TilePutWG3D,           3, true,  WG,     false)           \
+  X(TileGetWG3D,           3, false, WG,     false)           \
+  X(TilePutWave3D,         3, true,  Wave,   false)           \
+  X(TileGetWave3D,         3, false, Wave,   false)           \
+  X(TilePut4D,             4, true,  Thread, false)           \
+  X(TileGet4D,             4, false, Thread, false)           \
+  X(TilePutWG4D,           4, true,  WG,     false)           \
+  X(TileGetWG4D,           4, false, WG,     false)           \
+  X(TilePutWave4D,         4, true,  Wave,   false)           \
+  X(TileGetWave4D,         4, false, Wave,   false)           \
+  X(TilePut3DStrided,      3, true,  Thread, true)            \
+  X(TileGet3DStrided,      3, false, Thread, true)            \
+  X(TilePutWG3DStrided,    3, true,  WG,     true)            \
+  X(TileGetWG3DStrided,    3, false, WG,     true)            \
+  X(TilePutWave3DStrided,  3, true,  Wave,   true)            \
+  X(TileGetWave3DStrided,  3, false, Wave,   true)            \
+  X(TilePut4DStrided,      4, true,  Thread, true)            \
+  X(TileGet4DStrided,      4, false, Thread, true)            \
+  X(TilePutWG4DStrided,    4, true,  WG,     true)            \
+  X(TileGetWG4DStrided,    4, false, WG,     true)            \
+  X(TilePutWave4DStrided,  4, true,  Wave,   true)            \
+  X(TileGetWave4DStrided,  4, false, Wave,   true)
+
+__host__ __device__ constexpr TileNDInfo tile_nd_info(TestType type) {
+#define TILE_ND_INFO_CASE(NAME, NDIM, IS_PUT, SCOPE, STRIDED) \
+  case NAME##TestType:                                        \
+    return TileNDInfo{NDIM, IS_PUT, TileNDScope::SCOPE, STRIDED};
+  switch (type) {
+    TILE_ND_FOREACH_TEST_TYPE(TILE_ND_INFO_CASE)
+    default:
+      return TileNDInfo{0, false, TileNDScope::Thread, false};
+  }
+#undef TILE_ND_INFO_CASE
+}
+
+// Tensor extents and element strides for the given rank and layout.
+__host__ __device__ inline void tile_nd_shape(int ndim, bool strided,
+                                              int *dims, int *strides) {
+  if (ndim == 3) {
+    dims[0] = TileNDRMATester::D0_3D;
+    dims[1] = TileNDRMATester::D1_3D;
+    dims[2] = TileNDRMATester::D2_3D;
+    strides[2] = 1;
+    strides[1] = strided ? 2 * dims[2] : dims[2];
+    strides[0] = (strided ? 2 : 1) * dims[1] * strides[1];
+  } else {
+    dims[0] = TileNDRMATester::D0_4D;
+    dims[1] = TileNDRMATester::D1_4D;
+    dims[2] = TileNDRMATester::D2_4D;
+    dims[3] = TileNDRMATester::D3_4D;
+    strides[3] = strided ? 2 : 1;
+    strides[2] = dims[3] * strides[3];
+    strides[1] = (strided ? 2 : 1) * dims[2] * strides[2];
+    strides[0] = dims[1] * strides[1];
+  }
+}
+
+__host__ __device__ constexpr int tile_nd_slot_elems(bool strided) {
+  return strided ? TileNDRMATester::SLOT_ELEMS_STRIDED
+                 : TileNDRMATester::TILE_ELEMS;
+}
+
+/******************************************************************************
  * TENSOR / TUPLE TYPES
  *****************************************************************************/
 
-template <typename T>
-struct Tensor3D {
+template <typename T, int N>
+struct TensorND {
   using element_type = T;
-  static constexpr int ndim = 3;
+  static constexpr int ndim = N;
 
   T* data;
-  int d0, d1, d2;
+  int s[N];
 
-  __device__ Tensor3D(T* data_, int d0_, int d1_, int d2_)
-      : data(data_), d0(d0_), d1(d1_), d2(d2_) {}
+  __device__ TensorND(T* data_, const int* strides) : data(data_) {
+    for (int d = 0; d < N; d++) s[d] = strides[d];
+  }
 
   __device__ T* data_handle() const { return data; }
-  __device__ int stride(int dim) const {
-    if (dim == 0) return d1 * d2;
-    if (dim == 1) return d2;
-    return 1;
-  }
+  __device__ int stride(int dim) const { return s[dim]; }
 };
 
-template <typename T>
-struct Tensor4D {
-  using element_type = T;
-  static constexpr int ndim = 4;
+template <int N>
+struct TupleND {
+  int v[N];
 
-  T* data;
-  int d0, d1, d2, d3;
-
-  __device__ Tensor4D(T* data_, int d0_, int d1_, int d2_, int d3_)
-      : data(data_), d0(d0_), d1(d1_), d2(d2_), d3(d3_) {}
-
-  __device__ T* data_handle() const { return data; }
-  __device__ int stride(int dim) const {
-    if (dim == 0) return d1 * d2 * d3;
-    if (dim == 1) return d2 * d3;
-    if (dim == 2) return d3;
-    return 1;
+  __device__ explicit TupleND(int fill) {
+    for (int d = 0; d < N; d++) v[d] = fill;
   }
-};
-
-struct Tuple3D {
-  int x, y, z;
-  __device__ Tuple3D(int x_, int y_, int z_) : x(x_), y(y_), z(z_) {}
-  __device__ int get(int dim) const {
-    if (dim == 0) return x;
-    if (dim == 1) return y;
-    return z;
+  __device__ explicit TupleND(const int* vals) {
+    for (int d = 0; d < N; d++) v[d] = vals[d];
   }
-};
-
-struct Tuple4D {
-  int x, y, z, w;
-  __device__ Tuple4D(int x_, int y_, int z_, int w_)
-      : x(x_), y(y_), z(z_), w(w_) {}
-  __device__ int get(int dim) const {
-    if (dim == 0) return x;
-    if (dim == 1) return y;
-    if (dim == 2) return z;
-    return w;
-  }
+  __device__ int get(int dim) const { return v[dim]; }
 };
 
 /******************************************************************************
@@ -105,23 +162,24 @@ __global__ void TileNDRMATest(long long int* start_time, long long int* end_time
                                float* source, float* dest,
                                int loop, int skip,
                                ShmemContextType ctx_type) {
+  constexpr TileNDInfo info = tile_nd_info(Type);
+  constexpr int N = info.ndim;
+  static_assert(N == 3 || N == 4, "unhandled TestType");
+
   __shared__ rocshmem_ctx_t ctx;
   rocshmem_wg_ctx_create(ctx_type, &ctx);
 
   const int wg_id = get_flat_grid_id();
+  const int slot_offset = wg_id * tile_nd_slot_elems(info.strided);
 
-  // Each workgroup operates on its own slot in the buffer.
-  // All test types use a fixed tile of TILE_ELEMS elements per slot.
-  constexpr int D0_3D = TileNDRMATester::D0_3D;
-  constexpr int D1_3D = TileNDRMATester::D1_3D;
-  constexpr int D2_3D = TileNDRMATester::D2_3D;
-  constexpr int D0_4D = TileNDRMATester::D0_4D;
-  constexpr int D1_4D = TileNDRMATester::D1_4D;
-  constexpr int D2_4D = TileNDRMATester::D2_4D;
-  constexpr int D3_4D = TileNDRMATester::D3_4D;
-  constexpr int TILE_ELEMS = TileNDRMATester::TILE_ELEMS;
+  int dims[N];
+  int strides[N];
+  tile_nd_shape(N, info.strided, dims, strides);
 
-  const int slot_offset = wg_id * TILE_ELEMS;
+  TensorND<float, N> src(source + slot_offset, strides);
+  TensorND<float, N> dst(dest + slot_offset, strides);
+  TupleND<N> start(0);
+  TupleND<N> boundary(dims);
 
   for (int i = 0; i < loop + skip; i++) {
     if (i == skip) {
@@ -136,78 +194,22 @@ __global__ void TileNDRMATest(long long int* start_time, long long int* end_time
       __syncthreads();
     }
 
-    if constexpr (Type == TilePut3DTestType) {
-      Tensor3D<float> src(source + slot_offset, D0_3D, D1_3D, D2_3D);
-      Tensor3D<float> dst(dest   + slot_offset, D0_3D, D1_3D, D2_3D);
-      Tuple3D start(0, 0, 0);
-      Tuple3D boundary(D0_3D, D1_3D, D2_3D);
-      rocshmem_ctx_tile_put(ctx, dst, src, start, boundary, 1, 0);
-    } else if constexpr (Type == TileGet3DTestType) {
-      Tensor3D<float> src(source + slot_offset, D0_3D, D1_3D, D2_3D);
-      Tensor3D<float> dst(dest   + slot_offset, D0_3D, D1_3D, D2_3D);
-      Tuple3D start(0, 0, 0);
-      Tuple3D boundary(D0_3D, D1_3D, D2_3D);
-      rocshmem_ctx_tile_get(ctx, dst, src, start, boundary, 1, 0);
-    } else if constexpr (Type == TilePutWG3DTestType) {
-      Tensor3D<float> src(source + slot_offset, D0_3D, D1_3D, D2_3D);
-      Tensor3D<float> dst(dest   + slot_offset, D0_3D, D1_3D, D2_3D);
-      Tuple3D start(0, 0, 0);
-      Tuple3D boundary(D0_3D, D1_3D, D2_3D);
-      rocshmem_ctx_tile_put_wg(ctx, dst, src, start, boundary, 1, 0);
-    } else if constexpr (Type == TileGetWG3DTestType) {
-      Tensor3D<float> src(source + slot_offset, D0_3D, D1_3D, D2_3D);
-      Tensor3D<float> dst(dest   + slot_offset, D0_3D, D1_3D, D2_3D);
-      Tuple3D start(0, 0, 0);
-      Tuple3D boundary(D0_3D, D1_3D, D2_3D);
-      rocshmem_ctx_tile_get_wg(ctx, dst, src, start, boundary, 1, 0);
-    } else if constexpr (Type == TilePut4DTestType) {
-      Tensor4D<float> src(source + slot_offset, D0_4D, D1_4D, D2_4D, D3_4D);
-      Tensor4D<float> dst(dest   + slot_offset, D0_4D, D1_4D, D2_4D, D3_4D);
-      Tuple4D start(0, 0, 0, 0);
-      Tuple4D boundary(D0_4D, D1_4D, D2_4D, D3_4D);
-      rocshmem_ctx_tile_put(ctx, dst, src, start, boundary, 1, 0);
-    } else if constexpr (Type == TileGet4DTestType) {
-      Tensor4D<float> src(source + slot_offset, D0_4D, D1_4D, D2_4D, D3_4D);
-      Tensor4D<float> dst(dest   + slot_offset, D0_4D, D1_4D, D2_4D, D3_4D);
-      Tuple4D start(0, 0, 0, 0);
-      Tuple4D boundary(D0_4D, D1_4D, D2_4D, D3_4D);
-      rocshmem_ctx_tile_get(ctx, dst, src, start, boundary, 1, 0);
-    } else if constexpr (Type == TilePutWG4DTestType) {
-      Tensor4D<float> src(source + slot_offset, D0_4D, D1_4D, D2_4D, D3_4D);
-      Tensor4D<float> dst(dest   + slot_offset, D0_4D, D1_4D, D2_4D, D3_4D);
-      Tuple4D start(0, 0, 0, 0);
-      Tuple4D boundary(D0_4D, D1_4D, D2_4D, D3_4D);
-      rocshmem_ctx_tile_put_wg(ctx, dst, src, start, boundary, 1, 0);
-    } else if constexpr (Type == TileGetWG4DTestType) {
-      Tensor4D<float> src(source + slot_offset, D0_4D, D1_4D, D2_4D, D3_4D);
-      Tensor4D<float> dst(dest   + slot_offset, D0_4D, D1_4D, D2_4D, D3_4D);
-      Tuple4D start(0, 0, 0, 0);
-      Tuple4D boundary(D0_4D, D1_4D, D2_4D, D3_4D);
-      rocshmem_ctx_tile_get_wg(ctx, dst, src, start, boundary, 1, 0);
-    } else if constexpr (Type == TilePutWave3DTestType) {
-      Tensor3D<float> src(source + slot_offset, D0_3D, D1_3D, D2_3D);
-      Tensor3D<float> dst(dest   + slot_offset, D0_3D, D1_3D, D2_3D);
-      Tuple3D start(0, 0, 0);
-      Tuple3D boundary(D0_3D, D1_3D, D2_3D);
-      rocshmem_ctx_tile_put_wave(ctx, dst, src, start, boundary, 1, 0);
-    } else if constexpr (Type == TileGetWave3DTestType) {
-      Tensor3D<float> src(source + slot_offset, D0_3D, D1_3D, D2_3D);
-      Tensor3D<float> dst(dest   + slot_offset, D0_3D, D1_3D, D2_3D);
-      Tuple3D start(0, 0, 0);
-      Tuple3D boundary(D0_3D, D1_3D, D2_3D);
-      rocshmem_ctx_tile_get_wave(ctx, dst, src, start, boundary, 1, 0);
-    } else if constexpr (Type == TilePutWave4DTestType) {
-      Tensor4D<float> src(source + slot_offset, D0_4D, D1_4D, D2_4D, D3_4D);
-      Tensor4D<float> dst(dest   + slot_offset, D0_4D, D1_4D, D2_4D, D3_4D);
-      Tuple4D start(0, 0, 0, 0);
-      Tuple4D boundary(D0_4D, D1_4D, D2_4D, D3_4D);
-      rocshmem_ctx_tile_put_wave(ctx, dst, src, start, boundary, 1, 0);
-    } else if constexpr (Type == TileGetWave4DTestType) {
-      Tensor4D<float> src(source + slot_offset, D0_4D, D1_4D, D2_4D, D3_4D);
-      Tensor4D<float> dst(dest   + slot_offset, D0_4D, D1_4D, D2_4D, D3_4D);
-      Tuple4D start(0, 0, 0, 0);
-      Tuple4D boundary(D0_4D, D1_4D, D2_4D, D3_4D);
-      rocshmem_ctx_tile_get_wave(ctx, dst, src, start, boundary, 1, 0);
+    if constexpr (info.is_put) {
+      if constexpr (info.scope == TileNDScope::Thread) {
+        rocshmem_ctx_tile_put(ctx, dst, src, start, boundary, 1, 0);
+      } else if constexpr (info.scope == TileNDScope::Wave) {
+        rocshmem_ctx_tile_put_wave(ctx, dst, src, start, boundary, 1, 0);
+      } else {
+        rocshmem_ctx_tile_put_wg(ctx, dst, src, start, boundary, 1, 0);
+      }
+    } else {
+      if constexpr (info.scope == TileNDScope::Thread) {
+        rocshmem_ctx_tile_get(ctx, dst, src, start, boundary, 1, 0);
+      } else if constexpr (info.scope == TileNDScope::Wave) {
+        rocshmem_ctx_tile_get_wave(ctx, dst, src, start, boundary, 1, 0);
+      } else {
+        rocshmem_ctx_tile_get_wg(ctx, dst, src, start, boundary, 1, 0);
+      }
     }
   }
 
@@ -225,15 +227,15 @@ __global__ void TileNDRMATest(long long int* start_time, long long int* end_time
  *****************************************************************************/
 
 TileNDRMATester::TileNDRMATester(TesterArguments args) : Tester(args) {
+  const TileNDInfo info = tile_nd_info(_type);
+  if (info.ndim == 0) {
+    std::cerr << "TileNDRMATester: unhandled TestType " << _type << "\n";
+    exit(EXIT_FAILURE);
+  }
+
   // Fixed tile size — no message sweep.
   const size_t total_threads = args.num_wgs * args.num_threads;
-  const size_t num_elements  = static_cast<size_t>(total_threads) * TILE_ELEMS;
-
-  // Put: local=source, remote=dest. Get: remote=source, local=dest.
-  const bool is_put = (_type == TilePut3DTestType     || _type == TilePutWG3DTestType     ||
-                       _type == TilePutWave3DTestType ||
-                       _type == TilePut4DTestType     || _type == TilePutWG4DTestType     ||
-                       _type == TilePutWave4DTestType);
+  num_elements = total_threads * tile_nd_slot_elems(info.strided);
 
   source_buf = static_cast<float*>(rocshmem_malloc(num_elements * sizeof(float)));
   dest_buf   = static_cast<float*>(rocshmem_malloc(num_elements * sizeof(float)));
@@ -242,7 +244,8 @@ TileNDRMATester::TileNDRMATester(TesterArguments args) : Tester(args) {
     exit(EXIT_FAILURE);
   }
 
-  if (is_put) {
+  // Put: local=source, remote=dest. Get: remote=source, local=dest.
+  if (info.is_put) {
     source = source_buf;
     dest   = dest_buf;
   } else {
@@ -250,12 +253,7 @@ TileNDRMATester::TileNDRMATester(TesterArguments args) : Tester(args) {
     dest   = source_buf; // local dest
   }
 
-  // Flat linear fill: value[i] = i % 256
-  std::vector<float> h_src(num_elements);
-  for (size_t i = 0; i < num_elements; i++)
-    h_src[i] = static_cast<float>(i % 256);
-  CHECK_HIP(hipMemcpy(source, h_src.data(), num_elements * sizeof(float),
-                      hipMemcpyHostToDevice));
+  resetBuffers(0);
 
   // Report a single fixed message size for bandwidth calculation.
   max_msg_size = static_cast<size_t>(TILE_ELEMS) * sizeof(float);
@@ -268,9 +266,6 @@ TileNDRMATester::~TileNDRMATester() {
 }
 
 void TileNDRMATester::resetBuffers(uint64_t /*size*/) {
-  const size_t total_threads = args.num_wgs * args.num_threads;
-  const size_t num_elements  = static_cast<size_t>(total_threads) * TILE_ELEMS;
-
   // Zero dest; re-fill source with the flat linear pattern.
   CHECK_HIP(hipMemset(dest, 0, num_elements * sizeof(float)));
 
@@ -283,63 +278,65 @@ void TileNDRMATester::resetBuffers(uint64_t /*size*/) {
 
 void TileNDRMATester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
                                    uint64_t /*size*/) {
-#define LAUNCH(TYPE)                                                       \
-  hipLaunchKernelGGL(TileNDRMATest<TYPE##TestType>, gridSize, blockSize,  \
-                     0, stream, start_time, end_time, source, dest,       \
-                     loop, args.skip, _shmem_context)
+#define TILE_ND_LAUNCH_CASE(NAME, NDIM, IS_PUT, SCOPE, STRIDED)              \
+  case NAME##TestType:                                                       \
+    hipLaunchKernelGGL(TileNDRMATest<NAME##TestType>, gridSize, blockSize,   \
+                       0, stream, start_time, end_time, source, dest, loop,  \
+                       args.skip, _shmem_context);                           \
+    break;
 
   switch (_type) {
-    case TilePut3DTestType:    LAUNCH(TilePut3D);    break;
-    case TileGet3DTestType:    LAUNCH(TileGet3D);    break;
-    case TilePutWG3DTestType:  LAUNCH(TilePutWG3D);  break;
-    case TileGetWG3DTestType:  LAUNCH(TileGetWG3D);  break;
-    case TilePut4DTestType:    LAUNCH(TilePut4D);    break;
-    case TileGet4DTestType:    LAUNCH(TileGet4D);    break;
-    case TilePutWG4DTestType:    LAUNCH(TilePutWG4D);    break;
-    case TileGetWG4DTestType:    LAUNCH(TileGetWG4D);    break;
-    case TilePutWave3DTestType:  LAUNCH(TilePutWave3D);  break;
-    case TileGetWave3DTestType:  LAUNCH(TileGetWave3D);  break;
-    case TilePutWave4DTestType:  LAUNCH(TilePutWave4D);  break;
-    case TileGetWave4DTestType:  LAUNCH(TileGetWave4D);  break;
+    TILE_ND_FOREACH_TEST_TYPE(TILE_ND_LAUNCH_CASE)
     default:
       std::cerr << "TileNDRMATester: unhandled TestType " << _type << "\n";
       exit(-1);
   }
-#undef LAUNCH
+#undef TILE_ND_LAUNCH_CASE
 
   num_msgs       = (loop + args.skip) * args.num_wgs;
   num_timed_msgs = loop * args.num_wgs;
 }
 
 void TileNDRMATester::verifyResults(uint64_t /*size*/) {
+  const TileNDInfo info = tile_nd_info(_type);
+
   // For put: PE 1 receives into dest — verify on PE 1 (check_id=1).
   // For get: PE 0 receives into dest — verify on PE 0 (check_id=0).
-  const bool is_put = (_type == TilePut3DTestType     || _type == TilePutWG3DTestType     ||
-                       _type == TilePutWave3DTestType ||
-                       _type == TilePut4DTestType     || _type == TilePutWG4DTestType     ||
-                       _type == TilePutWave4DTestType);
-  const int check_id = is_put ? 1 : 0;
-
+  const int check_id = info.is_put ? 1 : 0;
   if (args.myid != check_id) return;
 
-  const size_t num_wgs     = args.num_wgs;
-  const size_t num_threads = args.num_threads;
-  // For WG-collective ops each WG transfers one tile; for thread ops each
-  // thread transfers one — but we launch one thread per WG for the nd tests.
-  const size_t num_tiles = num_wgs;
+  // One tile is transferred per workgroup.
+  const size_t num_tiles  = args.num_wgs;
+  const size_t slot_elems = tile_nd_slot_elems(info.strided);
 
-  std::vector<float> h_dest(num_tiles * TILE_ELEMS);
-  CHECK_HIP(hipMemcpy(h_dest.data(), dest,
-                      num_tiles * TILE_ELEMS * sizeof(float),
+  int dims[4];
+  int strides[4];
+  tile_nd_shape(info.ndim, info.strided, dims, strides);
+
+  std::vector<bool> in_tile(slot_elems, false);
+  for (int idx = 0; idx < TILE_ELEMS; idx++) {
+    size_t off = 0;
+    int rem = idx;
+    for (int d = info.ndim - 1; d >= 0; d--) {
+      off += static_cast<size_t>(rem % dims[d]) * strides[d];
+      rem /= dims[d];
+    }
+    in_tile[off] = true;
+  }
+
+  std::vector<float> h_dest(num_tiles * slot_elems);
+  CHECK_HIP(hipMemcpy(h_dest.data(), dest, h_dest.size() * sizeof(float),
                       hipMemcpyDeviceToHost));
 
   for (size_t tile = 0; tile < num_tiles; tile++) {
-    for (size_t i = 0; i < static_cast<size_t>(TILE_ELEMS); i++) {
-      float expected = static_cast<float>(i % 256);
-      float actual   = h_dest[tile * TILE_ELEMS + i];
+    for (size_t i = 0; i < slot_elems; i++) {
+      const size_t flat = tile * slot_elems + i;
+      const float expected = in_tile[i] ? static_cast<float>(flat % 256) : 0.0f;
+      const float actual   = h_dest[flat];
       if (actual != expected) {
         std::cerr << "TileNDRMATester: verification failed"
                   << " tile=" << tile << " idx=" << i
+                  << (in_tile[i] ? "" : " (padding)")
                   << " got=" << actual << " expected=" << expected << "\n";
         exit(-1);
       }
