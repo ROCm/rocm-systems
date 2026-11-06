@@ -9,7 +9,7 @@ Load the plan, review it critically, execute every task in order, verify at ever
 
 **Announce at start:** "I'm using the `executing-plans` skill to implement this plan."
 
-If subagent dispatch is available and the plan has 3+ independent tasks, prefer the `amdsmi-development` agent's subagent-driven mode — it isolates per-task context and gives higher-quality output. Use this skill when subagents aren't available or the plan is small enough to run inline.
+If subagent dispatch is available and the plan has 3+ independent tasks, prefer the `AMD-SMI Development Agent`'s subagent-driven mode — it isolates per-task context and gives higher-quality output. Use this skill when subagents aren't available or the plan is small enough to run inline.
 
 ## Process
 
