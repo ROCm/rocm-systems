@@ -1201,7 +1201,7 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
       plan->channelMask.masks[maskIdx] |= (1ull << relativeIdx);
     }
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-    plan->threadPerBlock = std::max(task->nWarps * comm->WarpSize, 3 * comm->WarpSize);
+    plan->threadPerBlock = rcclPlanThreadsPerBlock(comm, task->nWarps);
 #else
     plan->threadPerBlock = std::max(plan->threadPerBlock, 192 /* 3*WARP_SIZE */);
 #endif
