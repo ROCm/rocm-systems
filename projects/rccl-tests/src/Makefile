@@ -19,7 +19,7 @@ HIPIFY_PL_EXE=$(ROCM_PATH)/bin/hipify-perl
 HIPIFY_PL_FLAGS = -quiet-warnings
 CXX = $(HIPCC)
 
-HIPCUFLAGS := -std=c++14
+HIPCUFLAGS := -std=c++17
 LDFLAGS    :=
 HIPLDFLAGS :=
 
