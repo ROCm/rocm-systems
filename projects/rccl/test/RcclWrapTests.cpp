@@ -3308,7 +3308,7 @@ TEST(RcclAlltoAllDecision, Gfx1250_AboveDdaCap_DirectFallback)
     EXPECT_EQ(dec.algo, RCCL_DIRECT_ALLTOALL);
 }
 
-// gfx1250 DPX table, 8 ranks: DDA LL to 2 MiB total, DDA LL128 above it to 16 MiB, DDA VMM past that.
+// gfx1250 DPX table, 8 ranks: DDA LL to 128 KiB total, DDA LL128 above it to 16 MiB, DDA VMM past that.
 TEST(RcclAlltoAllDecision, Gfx1250Dpx_A2aBands)
 {
     auto comm = std::make_unique<ncclComm>();
@@ -3316,8 +3316,8 @@ TEST(RcclAlltoAllDecision, Gfx1250Dpx_A2aBands)
     comm->archThresholds = rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
     ASSERT_NE(comm->archThresholds, nullptr);
     const size_t align = 16u * (size_t)comm->nRanks;
-    const std::pair<size_t, int> cases[] = {{2ul << 20, RCCL_DDA_FABRIC_LL},
-                                            {(2ul << 20) + align, RCCL_DDA_FABRIC_LL128},
+    const std::pair<size_t, int> cases[] = {{128ul << 10, RCCL_DDA_FABRIC_LL},
+                                            {(128ul << 10) + align, RCCL_DDA_FABRIC_LL128},
                                             {16ul << 20, RCCL_DDA_FABRIC_LL128},
                                             {(16ul << 20) + align, RCCL_DDA_FABRIC_VMM}};
     for (const auto& c : cases)
@@ -3337,8 +3337,8 @@ TEST(RcclAlltoAllDecision, Gfx1250Dpx_A2aBandsIgnoreBufferAlignment)
     comm->archThresholds = rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
     ASSERT_NE(comm->archThresholds, nullptr);
     const size_t align = 16u * (size_t)comm->nRanks;
-    const std::pair<size_t, int> cases[] = {{2ul << 20, RCCL_DDA_FABRIC_LL},
-                                            {(2ul << 20) + align, RCCL_DDA_FABRIC_LL128},
+    const std::pair<size_t, int> cases[] = {{128ul << 10, RCCL_DDA_FABRIC_LL},
+                                            {(128ul << 10) + align, RCCL_DDA_FABRIC_LL128},
                                             {16ul << 20, RCCL_DDA_FABRIC_LL128}};
     const std::pair<size_t, size_t> offsets[] = {{0, 0}, {2, 0}, {0, 2}, {1, 1}};
     for (const auto& c : cases)
