@@ -1279,7 +1279,7 @@ def test_run_profiling_native_tool_path(
         ([], "--frameworks jax torch triton --"),
     ],
 )
-def test_sanitize_trace_ml_api_injects_frameworks(
+def test_sanitize_trace_ml_api_injects_all_supported_backends(
     tmp_path, trace_ml_api, expected_inject
 ):
     """A named list injects those names. A bare --trace-ml-api injects every
