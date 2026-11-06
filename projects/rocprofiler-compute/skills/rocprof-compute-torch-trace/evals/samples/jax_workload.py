@@ -51,6 +51,7 @@ def pmap_double(v):
 
 
 mapped = jax.pmap(pmap_double)
+mapped.lower(xs)
 mapped(xs)
 
 
