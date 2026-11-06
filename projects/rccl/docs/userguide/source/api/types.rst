@@ -336,7 +336,8 @@ ncclConfig_t
   still succeeds. See :ref:`NCCL_GRAPH_STREAM_ORDERING`. Do not rely on this
   fallback: keep the two settings apart on every communicator, including those
   created by ``ncclCommSplit``, ``ncclCommShrink`` or ``ncclCommGrow`` without
-  a config, which inherit their parent's settings. RCCL enforces this
+  a config, which inherit their parent's settings; joining ranks of
+  ``ncclCommGrow`` use defaults instead. RCCL enforces this
   compatibility fallback within a single communicator only. Communicators
   created by ``ncclCommSplit`` with ``splitShare`` share one internal
   serialization event with their parent, so ordering ``0`` on one and

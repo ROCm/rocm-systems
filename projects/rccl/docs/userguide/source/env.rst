@@ -1807,7 +1807,7 @@ leaves the field in effect.
 Do not rely on the fallback described there: keep the two settings apart on
 every communicator, including those created by ``ncclCommSplit``,
 ``ncclCommShrink`` or ``ncclCommGrow`` without a config, which inherit their
-parent's settings.
+parent's settings; joining ranks of ``ncclCommGrow`` use defaults instead.
 
 Value accepted
 ^^^^^^^^^^^^^^
