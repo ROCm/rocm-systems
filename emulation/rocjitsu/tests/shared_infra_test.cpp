@@ -405,20 +405,20 @@ TEST(MfmaExecTest, InputLocF16_16x16) {
 }
 
 TEST(MfmaExecTest, Gfx11WmmaIu8InputLocReplicatesKAcrossHalfwaves) {
-  auto g0k0 = amdgpu::gfx11_wmma_input_loc(16, 16, /*i=*/3, /*k=*/0, 8,
-                                           /*lane_group=*/0);
+  auto g0k0 = amdgpu::gfx11_wmma_input_loc<16, 16>(/*i=*/3, /*k=*/0, 8,
+                                                   /*lane_group=*/0);
   EXPECT_EQ(g0k0.vgpr_offset, 0u);
   EXPECT_EQ(g0k0.lane, 3u);
   EXPECT_EQ(g0k0.sub_element, 0u);
 
-  auto g0k15 = amdgpu::gfx11_wmma_input_loc(16, 16, /*i=*/3, /*k=*/15, 8,
-                                            /*lane_group=*/0);
+  auto g0k15 = amdgpu::gfx11_wmma_input_loc<16, 16>(/*i=*/3, /*k=*/15, 8,
+                                                    /*lane_group=*/0);
   EXPECT_EQ(g0k15.vgpr_offset, 3u);
   EXPECT_EQ(g0k15.lane, 3u);
   EXPECT_EQ(g0k15.sub_element, 3u);
 
-  auto g1k15 = amdgpu::gfx11_wmma_input_loc(16, 16, /*i=*/3, /*k=*/15, 8,
-                                            /*lane_group=*/1);
+  auto g1k15 = amdgpu::gfx11_wmma_input_loc<16, 16>(/*i=*/3, /*k=*/15, 8,
+                                                    /*lane_group=*/1);
   EXPECT_EQ(g1k15.vgpr_offset, 3u);
   EXPECT_EQ(g1k15.lane, 19u);
   EXPECT_EQ(g1k15.sub_element, 3u);
@@ -435,7 +435,7 @@ TEST(MfmaExecTest, Gfx1250WmmaIu8K64PreservesSixteenElementKBlocks) {
       Anchor{32, 3, 16}, Anchor{47, 3, 31}, Anchor{48, 19, 16}, Anchor{63, 19, 31},
   };
   for (const auto &anchor : anchors) {
-    const auto loc = amdgpu::wmma_input_loc(16, 64, /*i=*/3, anchor.k, 8);
+    const auto loc = amdgpu::wmma_input_loc<16, 64>(/*i=*/3, anchor.k, 8);
     EXPECT_EQ(loc.lane, anchor.lane) << anchor.k;
     EXPECT_EQ(loc.vgpr_offset, anchor.slot / 4) << anchor.k;
     EXPECT_EQ(loc.sub_element, anchor.slot % 4) << anchor.k;
@@ -443,41 +443,41 @@ TEST(MfmaExecTest, Gfx1250WmmaIu8K64PreservesSixteenElementKBlocks) {
 }
 
 TEST(MfmaExecTest, Gfx11WmmaOutputLoc32PairsRowsAcrossHalfwaves) {
-  auto r0 = amdgpu::gfx11_wmma_output_loc_32(amdgpu::WMMA_WAVE32, 16, 16, /*row=*/0, /*col=*/5);
+  auto r0 = amdgpu::gfx11_wmma_output_loc_32<16, 16>(amdgpu::WMMA_WAVE32, /*row=*/0, /*col=*/5);
   EXPECT_EQ(r0.reg, 0u);
   EXPECT_EQ(r0.lane, 5u);
 
-  auto r1 = amdgpu::gfx11_wmma_output_loc_32(amdgpu::WMMA_WAVE32, 16, 16, /*row=*/1, /*col=*/5);
+  auto r1 = amdgpu::gfx11_wmma_output_loc_32<16, 16>(amdgpu::WMMA_WAVE32, /*row=*/1, /*col=*/5);
   EXPECT_EQ(r1.reg, 0u);
   EXPECT_EQ(r1.lane, 21u);
 
-  auto r2 = amdgpu::gfx11_wmma_output_loc_32(amdgpu::WMMA_WAVE32, 16, 16, /*row=*/2, /*col=*/5);
+  auto r2 = amdgpu::gfx11_wmma_output_loc_32<16, 16>(amdgpu::WMMA_WAVE32, /*row=*/2, /*col=*/5);
   EXPECT_EQ(r2.reg, 1u);
   EXPECT_EQ(r2.lane, 5u);
 
-  auto r15 = amdgpu::gfx11_wmma_output_loc_32(amdgpu::WMMA_WAVE32, 16, 16, /*row=*/15, /*col=*/5);
+  auto r15 = amdgpu::gfx11_wmma_output_loc_32<16, 16>(amdgpu::WMMA_WAVE32, /*row=*/15, /*col=*/5);
   EXPECT_EQ(r15.reg, 7u);
   EXPECT_EQ(r15.lane, 21u);
 }
 
 TEST(MfmaExecTest, Gfx11WmmaOutputLoc32UsesFourLaneGroupsForWave64) {
-  auto r0 = amdgpu::gfx11_wmma_output_loc_32(amdgpu::WMMA_WAVE64, 16, 16, /*row=*/0, /*col=*/5);
+  auto r0 = amdgpu::gfx11_wmma_output_loc_32<16, 16>(amdgpu::WMMA_WAVE64, /*row=*/0, /*col=*/5);
   EXPECT_EQ(r0.reg, 0u);
   EXPECT_EQ(r0.lane, 5u);
 
-  auto r1 = amdgpu::gfx11_wmma_output_loc_32(amdgpu::WMMA_WAVE64, 16, 16, /*row=*/1, /*col=*/5);
+  auto r1 = amdgpu::gfx11_wmma_output_loc_32<16, 16>(amdgpu::WMMA_WAVE64, /*row=*/1, /*col=*/5);
   EXPECT_EQ(r1.reg, 0u);
   EXPECT_EQ(r1.lane, 21u);
 
-  auto r2 = amdgpu::gfx11_wmma_output_loc_32(amdgpu::WMMA_WAVE64, 16, 16, /*row=*/2, /*col=*/5);
+  auto r2 = amdgpu::gfx11_wmma_output_loc_32<16, 16>(amdgpu::WMMA_WAVE64, /*row=*/2, /*col=*/5);
   EXPECT_EQ(r2.reg, 0u);
   EXPECT_EQ(r2.lane, 37u);
 
-  auto r3 = amdgpu::gfx11_wmma_output_loc_32(amdgpu::WMMA_WAVE64, 16, 16, /*row=*/3, /*col=*/5);
+  auto r3 = amdgpu::gfx11_wmma_output_loc_32<16, 16>(amdgpu::WMMA_WAVE64, /*row=*/3, /*col=*/5);
   EXPECT_EQ(r3.reg, 0u);
   EXPECT_EQ(r3.lane, 53u);
 
-  auto r15 = amdgpu::gfx11_wmma_output_loc_32(amdgpu::WMMA_WAVE64, 16, 16, /*row=*/15, /*col=*/5);
+  auto r15 = amdgpu::gfx11_wmma_output_loc_32<16, 16>(amdgpu::WMMA_WAVE64, /*row=*/15, /*col=*/5);
   EXPECT_EQ(r15.reg, 3u);
   EXPECT_EQ(r15.lane, 53u);
 }
@@ -485,36 +485,36 @@ TEST(MfmaExecTest, Gfx11WmmaOutputLoc32UsesFourLaneGroupsForWave64) {
 TEST(MfmaExecTest, SwmmacK32InputLocUsesSparseHardwareLayout) {
   // RDNA4 K=32 SWMMAC is not the dense WMMA K=16/K=32 register layout.
   // These positions match the gfx12 builtin layout used by the silicon tests.
-  auto a_h_g2s0 = amdgpu::swmmac_a_input_loc(16, 32, /*row=*/3, /*compressed_k=*/4, 16);
+  auto a_h_g2s0 = amdgpu::swmmac_a_input_loc<16, 32>(/*row=*/3, /*compressed_k=*/4, 16);
   EXPECT_EQ(a_h_g2s0.lane, 19u);
   EXPECT_EQ(a_h_g2s0.vgpr_offset, 0u);
   EXPECT_EQ(a_h_g2s0.sub_element, 0u);
 
-  auto a_h_g4s1 = amdgpu::swmmac_a_input_loc(16, 32, /*row=*/3, /*compressed_k=*/9, 16);
+  auto a_h_g4s1 = amdgpu::swmmac_a_input_loc<16, 32>(/*row=*/3, /*compressed_k=*/9, 16);
   EXPECT_EQ(a_h_g4s1.lane, 3u);
   EXPECT_EQ(a_h_g4s1.vgpr_offset, 2u);
   EXPECT_EQ(a_h_g4s1.sub_element, 1u);
 
-  auto b_h_k10 = amdgpu::swmmac_b_input_loc(16, 32, /*col=*/5, /*dense_k=*/10, 16);
+  auto b_h_k10 = amdgpu::swmmac_b_input_loc<16, 32>(/*col=*/5, /*dense_k=*/10, 16);
   EXPECT_EQ(b_h_k10.lane, 21u);
   EXPECT_EQ(b_h_k10.vgpr_offset, 1u);
   EXPECT_EQ(b_h_k10.sub_element, 0u);
 
-  auto a_fp8_g4s1 = amdgpu::swmmac_a_input_loc(16, 32, /*row=*/3, /*compressed_k=*/9, 8);
+  auto a_fp8_g4s1 = amdgpu::swmmac_a_input_loc<16, 32>(/*row=*/3, /*compressed_k=*/9, 8);
   EXPECT_EQ(a_fp8_g4s1.lane, 19u);
   EXPECT_EQ(a_fp8_g4s1.vgpr_offset, 0u);
   EXPECT_EQ(a_fp8_g4s1.sub_element, 1u);
 
-  auto b_fp8_k10 = amdgpu::swmmac_b_input_loc(16, 32, /*col=*/5, /*dense_k=*/10, 8);
+  auto b_fp8_k10 = amdgpu::swmmac_b_input_loc<16, 32>(/*col=*/5, /*dense_k=*/10, 8);
   EXPECT_EQ(b_fp8_k10.lane, 5u);
   EXPECT_EQ(b_fp8_k10.vgpr_offset, 2u);
   EXPECT_EQ(b_fp8_k10.sub_element, 2u);
 
-  auto h_idx_g2s0 = amdgpu::swmmac_index_loc(16, 32, 16, /*row=*/3, /*compressed_k=*/4, 16);
+  auto h_idx_g2s0 = amdgpu::swmmac_index_loc<16, 32>(16, /*row=*/3, /*compressed_k=*/4, 16);
   EXPECT_EQ(h_idx_g2s0.lane, 19u);
   EXPECT_EQ(h_idx_g2s0.local_compressed_k, 0u);
 
-  auto fp8_idx_g4s0 = amdgpu::swmmac_index_loc(16, 32, 8, /*row=*/3, /*compressed_k=*/8, 16);
+  auto fp8_idx_g4s0 = amdgpu::swmmac_index_loc<16, 32>(8, /*row=*/3, /*compressed_k=*/8, 16);
   EXPECT_EQ(fp8_idx_g4s0.lane, 19u);
   EXPECT_EQ(fp8_idx_g4s0.local_compressed_k, 0u);
 }
@@ -526,12 +526,12 @@ TEST(MfmaExecTest, Gfx1250SwmmacK128Iu8LocationsMatchHardwareReferenceKernels) {
   for (uint32_t ck = 0; ck < 64; ++ck) {
     const uint32_t expected_a_lane = 5u + 16u * ((ck >> 4) & 1u);
     const uint32_t expected_a_slot = (ck & 15u) + 16u * (ck >> 5);
-    const auto a = amdgpu::swmmac_a_input_loc(16, 128, /*row=*/5, ck, 8);
+    const auto a = amdgpu::swmmac_a_input_loc<16, 128>(/*row=*/5, ck, 8);
     EXPECT_EQ(a.lane, expected_a_lane) << ck;
     EXPECT_EQ(a.vgpr_offset, expected_a_slot / 4) << ck;
     EXPECT_EQ(a.sub_element, expected_a_slot % 4) << ck;
 
-    const auto index = amdgpu::swmmac_index_loc(16, 128, 8, /*row=*/5, ck, /*index_entries=*/32);
+    const auto index = amdgpu::swmmac_index_loc<16, 128>(8, /*row=*/5, ck, /*index_entries=*/32);
     EXPECT_EQ(index.lane, 5u + 16u * (ck / 32u)) << ck;
     EXPECT_EQ(index.local_compressed_k, ck % 32u) << ck;
   }
@@ -539,7 +539,7 @@ TEST(MfmaExecTest, Gfx1250SwmmacK128Iu8LocationsMatchHardwareReferenceKernels) {
   for (uint32_t k = 0; k < 128; ++k) {
     const uint32_t expected_lane = 7u + 16u * ((k >> 5) & 1u);
     const uint32_t expected_slot = (k & 31u) + 32u * (k >> 6);
-    const auto b = amdgpu::swmmac_b_input_loc(16, 128, /*col=*/7, k, 8);
+    const auto b = amdgpu::swmmac_b_input_loc<16, 128>(/*col=*/7, k, 8);
     EXPECT_EQ(b.lane, expected_lane) << k;
     EXPECT_EQ(b.vgpr_offset, expected_slot / 4) << k;
     EXPECT_EQ(b.sub_element, expected_slot % 4) << k;
@@ -709,21 +709,21 @@ TEST(TransposeLoadTest, Cdna5DsTrB8MatchesMatrixLayout) {
 }
 
 TEST(MfmaExecTest, Gfx12Wave64WmmaLocSplitsKAcrossFourLaneGroups) {
-  auto a_k8 = amdgpu::gfx12_wmma_input_loc(amdgpu::WMMA_WAVE64, 16, 16, /*i=*/3, /*k=*/8, 16);
+  auto a_k8 = amdgpu::gfx12_wmma_input_loc<16, 16>(amdgpu::WMMA_WAVE64, /*i=*/3, /*k=*/8, 16);
   EXPECT_EQ(a_k8.lane, 35u);
   EXPECT_EQ(a_k8.vgpr_offset, 0u);
   EXPECT_EQ(a_k8.sub_element, 0u);
 
-  auto a_k15 = amdgpu::gfx12_wmma_input_loc(amdgpu::WMMA_WAVE64, 16, 16, /*i=*/3, /*k=*/15, 8);
+  auto a_k15 = amdgpu::gfx12_wmma_input_loc<16, 16>(amdgpu::WMMA_WAVE64, /*i=*/3, /*k=*/15, 8);
   EXPECT_EQ(a_k15.lane, 51u);
   EXPECT_EQ(a_k15.vgpr_offset, 0u);
   EXPECT_EQ(a_k15.sub_element, 3u);
 
-  auto out32 = amdgpu::gfx12_wmma_output_loc_32(amdgpu::WMMA_WAVE64, 16, 16, /*row=*/13, /*col=*/5);
+  auto out32 = amdgpu::gfx12_wmma_output_loc_32<16, 16>(amdgpu::WMMA_WAVE64, /*row=*/13, /*col=*/5);
   EXPECT_EQ(out32.lane, 53u);
   EXPECT_EQ(out32.reg, 1u);
 
-  auto out16 = amdgpu::gfx12_wmma_output_loc_16(amdgpu::WMMA_WAVE64, 16, 16, /*row=*/13, /*col=*/5);
+  auto out16 = amdgpu::gfx12_wmma_output_loc_16<16, 16>(amdgpu::WMMA_WAVE64, /*row=*/13, /*col=*/5);
   EXPECT_EQ(out16.lane, 53u);
   EXPECT_EQ(out16.reg, 0u);
   EXPECT_EQ(out16.sub_element, 1u);
@@ -731,36 +731,36 @@ TEST(MfmaExecTest, Gfx12Wave64WmmaLocSplitsKAcrossFourLaneGroups) {
 
 TEST(MfmaExecTest, Gfx12Wave64SwmmacK32LocUsesSparseHardwareLayout) {
   auto a_h_g4s1 =
-      amdgpu::swmmac_a_input_loc(amdgpu::WMMA_WAVE64, 16, 32, /*row=*/3, /*compressed_k=*/9, 16);
+      amdgpu::swmmac_a_input_loc<16, 32>(amdgpu::WMMA_WAVE64, /*row=*/3, /*compressed_k=*/9, 16);
   EXPECT_EQ(a_h_g4s1.lane, 35u);
   EXPECT_EQ(a_h_g4s1.vgpr_offset, 0u);
   EXPECT_EQ(a_h_g4s1.sub_element, 1u);
 
   auto b_h_k20 =
-      amdgpu::swmmac_b_input_loc(amdgpu::WMMA_WAVE64, 16, 32, /*col=*/5, /*dense_k=*/20, 16);
+      amdgpu::swmmac_b_input_loc<16, 32>(amdgpu::WMMA_WAVE64, /*col=*/5, /*dense_k=*/20, 16);
   EXPECT_EQ(b_h_k20.lane, 37u);
   EXPECT_EQ(b_h_k20.vgpr_offset, 2u);
   EXPECT_EQ(b_h_k20.sub_element, 0u);
 
   auto a_fp8_g2s0 =
-      amdgpu::swmmac_a_input_loc(amdgpu::WMMA_WAVE64, 16, 32, /*row=*/3, /*compressed_k=*/4, 8);
+      amdgpu::swmmac_a_input_loc<16, 32>(amdgpu::WMMA_WAVE64, /*row=*/3, /*compressed_k=*/4, 8);
   EXPECT_EQ(a_fp8_g2s0.lane, 35u);
   EXPECT_EQ(a_fp8_g2s0.vgpr_offset, 0u);
   EXPECT_EQ(a_fp8_g2s0.sub_element, 0u);
 
   auto b_fp8_k10 =
-      amdgpu::swmmac_b_input_loc(amdgpu::WMMA_WAVE64, 16, 32, /*col=*/5, /*dense_k=*/10, 8);
+      amdgpu::swmmac_b_input_loc<16, 32>(amdgpu::WMMA_WAVE64, /*col=*/5, /*dense_k=*/10, 8);
   EXPECT_EQ(b_fp8_k10.lane, 37u);
   EXPECT_EQ(b_fp8_k10.vgpr_offset, 0u);
   EXPECT_EQ(b_fp8_k10.sub_element, 2u);
 
-  auto h_idx_g4s1 = amdgpu::swmmac_index_loc(amdgpu::WMMA_WAVE64, 16, 32, 16, /*row=*/3,
-                                             /*compressed_k=*/9, 16);
+  auto h_idx_g4s1 = amdgpu::swmmac_index_loc<16, 32>(amdgpu::WMMA_WAVE64, 16, /*row=*/3,
+                                                     /*compressed_k=*/9, 16);
   EXPECT_EQ(h_idx_g4s1.lane, 35u);
   EXPECT_EQ(h_idx_g4s1.local_compressed_k, 1u);
 
-  auto fp8_idx_g2s0 = amdgpu::swmmac_index_loc(amdgpu::WMMA_WAVE64, 16, 32, 8, /*row=*/3,
-                                               /*compressed_k=*/4, 16);
+  auto fp8_idx_g2s0 = amdgpu::swmmac_index_loc<16, 32>(amdgpu::WMMA_WAVE64, 8, /*row=*/3,
+                                                       /*compressed_k=*/4, 16);
   EXPECT_EQ(fp8_idx_g2s0.lane, 35u);
   EXPECT_EQ(fp8_idx_g2s0.local_compressed_k, 0u);
 }
@@ -870,11 +870,11 @@ TEST(MfmaExecTest, SwmmacI32K64U4VaryingSelectorsMatchSparseReference) {
       const uint32_t old = cu->read_vgpr(index_base, lane);
       cu->write_vgpr(index_base, lane, old | ((pair[0] | (pair[1] << 2u)) << shift));
       for (uint32_t slot = 0; slot < 2; ++slot)
-        write_nibble(a_base, amdgpu::swmmac_a_input_loc(32, 16, 64, row, 2u * group + slot, 4), 1u);
+        write_nibble(a_base, amdgpu::swmmac_a_input_loc<16, 64>(32, row, 2u * group + slot, 4), 1u);
     }
   for (uint32_t k = 0; k < 64; ++k)
     for (uint32_t col = 0; col < 16; ++col)
-      write_nibble(b_base, amdgpu::swmmac_b_input_loc(32, 16, 64, col, k, 4), (k % 15u) + 1u);
+      write_nibble(b_base, amdgpu::swmmac_b_input_loc<16, 64>(32, col, k, 4), (k % 15u) + 1u);
 
   amdgpu::exec_rdna_swmmac_i32<4, 64>(*cu, 32, d_base, a_base, b_base, index_base, /*index_key=*/0,
                                       /*a_signed=*/false,
@@ -887,7 +887,7 @@ TEST(MfmaExecTest, SwmmacI32K64U4VaryingSelectorsMatchSparseReference) {
         expected += ((4u * group + pair[0]) % 15u) + 1u;
         expected += ((4u * group + pair[1]) % 15u) + 1u;
       }
-      const auto out = amdgpu::wmma_output_loc_32(16, 16, row, col);
+      const auto out = amdgpu::wmma_output_loc_32<16, 16>(row, col);
       EXPECT_EQ(cu->read_vgpr(d_base + out.reg, out.lane), expected) << row << "," << col;
     }
 }
@@ -946,7 +946,7 @@ TEST(MfmaExecTest, SwmmacF32K32Fp8MatchesSparseReference) {
       cu->write_vgpr(index_base, index_lane, old_index | (field << index_shift));
       for (uint32_t slot = 0; slot < 2; ++slot) {
         const uint32_t compressed_k = 2u * group + slot;
-        const auto loc = amdgpu::swmmac_a_input_loc(M, K, row, compressed_k, 8);
+        const auto loc = amdgpu::swmmac_a_input_loc<M, K>(row, compressed_k, 8);
         write_packed_byte(*cu, a_base + loc.vgpr_offset, loc.lane, loc.sub_element,
                           util::f32_to_fp8_e4m3_rne(a_value(row, group, slot)));
       }
@@ -955,7 +955,7 @@ TEST(MfmaExecTest, SwmmacF32K32Fp8MatchesSparseReference) {
 
   for (uint32_t k = 0; k < K; ++k) {
     for (uint32_t col = 0; col < N; ++col) {
-      const auto loc = amdgpu::swmmac_b_input_loc(N, K, col, k, 8);
+      const auto loc = amdgpu::swmmac_b_input_loc<N, K>(col, k, 8);
       write_packed_byte(*cu, b_base + loc.vgpr_offset, loc.lane, loc.sub_element,
                         util::f32_to_fp8_e4m3_rne(b_value(k, col)));
     }
@@ -963,13 +963,13 @@ TEST(MfmaExecTest, SwmmacF32K32Fp8MatchesSparseReference) {
 
   for (uint32_t row = 0; row < M; ++row) {
     for (uint32_t col = 0; col < N; ++col) {
-      const auto out = amdgpu::wmma_output_loc_32(M, N, row, col);
+      const auto out = amdgpu::wmma_output_loc_32<M, N>(row, col);
       cu->write_vgpr(c_base + out.reg, out.lane, std::bit_cast<uint32_t>(c_value(row, col)));
     }
   }
 
-  amdgpu::exec_swmmac_f32(*cu, M, N, K, 8, d_base, a_base, b_base, c_base, index_base, 16,
-                          /*index_key=*/0, amdgpu::extract_fp8, amdgpu::extract_fp8);
+  amdgpu::exec_swmmac_f32<M, N, K>(*cu, 8, d_base, a_base, b_base, c_base, index_base, 16,
+                                   /*index_key=*/0, amdgpu::extract_fp8, amdgpu::extract_fp8);
 
   for (uint32_t row = 0; row < M; ++row) {
     for (uint32_t col = 0; col < N; ++col) {
@@ -984,7 +984,7 @@ TEST(MfmaExecTest, SwmmacF32K32Fp8MatchesSparseReference) {
           ref += av * bv;
         }
       }
-      const auto out = amdgpu::wmma_output_loc_32(M, N, row, col);
+      const auto out = amdgpu::wmma_output_loc_32<M, N>(row, col);
       EXPECT_EQ(cu->read_vgpr(d_base + out.reg, out.lane), std::bit_cast<uint32_t>(ref))
           << "row=" << row << " col=" << col;
     }
@@ -994,34 +994,34 @@ TEST(MfmaExecTest, SwmmacF32K32Fp8MatchesSparseReference) {
 }
 
 TEST(MfmaExecTest, WmmaF8f6f4K128InputLocUsesPairAwareSubbyteLayouts) {
-  auto ab6 = amdgpu::wmma_f8f6f4_input_loc(16, 128, /*i=*/3, /*k=*/4, 6,
-                                           /*mixed_subbyte=*/false);
+  auto ab6 = amdgpu::wmma_f8f6f4_input_loc<16, 128>(/*i=*/3, /*k=*/4, 6,
+                                                    /*mixed_subbyte=*/false);
   EXPECT_EQ(ab6.lane, 19u);
   EXPECT_EQ(ab6.vgpr_offset, 0u);
   EXPECT_EQ(ab6.bit_offset, 0u);
   EXPECT_EQ(ab6.data_bits, 6u);
 
-  auto ab4 = amdgpu::wmma_f8f6f4_input_loc(16, 128, /*i=*/3, /*k=*/4, 4,
-                                           /*mixed_subbyte=*/false);
+  auto ab4 = amdgpu::wmma_f8f6f4_input_loc<16, 128>(/*i=*/3, /*k=*/4, 4,
+                                                    /*mixed_subbyte=*/false);
   EXPECT_EQ(ab4.lane, 19u);
   EXPECT_EQ(ab4.vgpr_offset, 0u);
   EXPECT_EQ(ab4.bit_offset, 0u);
   EXPECT_EQ(ab4.data_bits, 4u);
 
-  auto mixed6 = amdgpu::wmma_f8f6f4_input_loc(16, 128, /*i=*/3, /*k=*/4, 6,
-                                              /*mixed_subbyte=*/true);
+  auto mixed6 = amdgpu::wmma_f8f6f4_input_loc<16, 128>(/*i=*/3, /*k=*/4, 6,
+                                                       /*mixed_subbyte=*/true);
   EXPECT_EQ(mixed6.lane, 3u);
   EXPECT_EQ(mixed6.vgpr_offset, 0u);
   EXPECT_EQ(mixed6.bit_offset, 24u);
 
-  auto mixed4 = amdgpu::wmma_f8f6f4_input_loc(16, 128, /*i=*/3, /*k=*/31, 4,
-                                              /*mixed_subbyte=*/true);
+  auto mixed4 = amdgpu::wmma_f8f6f4_input_loc<16, 128>(/*i=*/3, /*k=*/31, 4,
+                                                       /*mixed_subbyte=*/true);
   EXPECT_EQ(mixed4.lane, 3u);
   EXPECT_EQ(mixed4.vgpr_offset, 3u);
   EXPECT_EQ(mixed4.bit_offset, 28u);
 
-  auto ab8 = amdgpu::wmma_f8f6f4_input_loc(16, 128, /*i=*/3, /*k=*/4, 8,
-                                           /*mixed_subbyte=*/false);
+  auto ab8 = amdgpu::wmma_f8f6f4_input_loc<16, 128>(/*i=*/3, /*k=*/4, 8,
+                                                    /*mixed_subbyte=*/false);
   EXPECT_EQ(ab8.lane, 3u);
   EXPECT_EQ(ab8.vgpr_offset, 1u);
   EXPECT_EQ(ab8.sub_element, 0u);
@@ -1063,7 +1063,7 @@ TEST(MfmaExecTest, WmmaF8f6f4K128InputLocMatchesOperandLayoutsExhaustively) {
         }
         const uint32_t expected_bit = expected_slot * data_bits;
         const auto actual =
-            amdgpu::wmma_f8f6f4_input_loc(16, 128, index, k, data_bits, /*mixed_subbyte=*/false);
+            amdgpu::wmma_f8f6f4_input_loc<16, 128>(index, k, data_bits, /*mixed_subbyte=*/false);
         EXPECT_EQ(actual.lane, expected_lane);
         EXPECT_EQ(actual.vgpr_offset, expected_bit / 32u);
         EXPECT_EQ(actual.bit_offset, expected_bit % 32u);
@@ -1083,7 +1083,7 @@ TEST(MfmaExecTest, WmmaF8f6f4K128InputLocMatchesOperandLayoutsExhaustively) {
         const uint32_t expected_slot = 32u * (k / 64u) + (k % 32u);
         const uint32_t expected_bit = expected_slot * data_bits;
         const auto actual =
-            amdgpu::wmma_f8f6f4_input_loc(16, 128, index, k, data_bits, /*mixed_subbyte=*/true);
+            amdgpu::wmma_f8f6f4_input_loc<16, 128>(index, k, data_bits, /*mixed_subbyte=*/true);
         EXPECT_EQ(actual.lane, expected_lane);
         EXPECT_EQ(actual.vgpr_offset, expected_bit / 32u);
         EXPECT_EQ(actual.bit_offset, expected_bit % 32u);
@@ -1103,7 +1103,7 @@ TEST(MfmaExecTest, Cdna5BlockScaledWmmaUsesContiguousKBlocks) {
         const uint32_t expected_lane = index + 16u * ((k / block_elems) & 1u);
         const uint32_t expected_slot = (k / (2u * block_elems)) * block_elems + (k % block_elems);
         const uint32_t expected_bit = expected_slot * data_bits;
-        const auto actual = amdgpu::wmma_block_scaled_input_loc(16, 128, index, k, data_bits);
+        const auto actual = amdgpu::wmma_block_scaled_input_loc<16, 128>(index, k, data_bits);
         EXPECT_EQ(actual.lane, expected_lane);
         EXPECT_EQ(actual.vgpr_offset, expected_bit / 32u);
         EXPECT_EQ(actual.bit_offset, expected_bit % 32u);
@@ -1142,37 +1142,37 @@ TEST(MfmaExecTest, Cdna4ScaledMfmaInputLocMatchesDenseF8F6F4Layout) {
 }
 
 TEST(MfmaExecTest, WmmaF4_32x16x128UsesConsecutiveM16ALayoutAndScaleLane) {
-  auto row0 = amdgpu::wmma_a_input_loc(32, 128, /*row=*/0, /*k=*/0, 4, 4);
+  auto row0 = amdgpu::wmma_a_input_loc<32, 128>(/*row=*/0, /*k=*/0, 4, 4);
   EXPECT_EQ(row0.lane, 0u);
   EXPECT_EQ(row0.vgpr_offset, 0u);
   EXPECT_EQ(row0.bit_offset, 0u);
 
-  auto row8 = amdgpu::wmma_a_input_loc(32, 128, /*row=*/8, /*k=*/0, 4, 4);
+  auto row8 = amdgpu::wmma_a_input_loc<32, 128>(/*row=*/8, /*k=*/0, 4, 4);
   EXPECT_EQ(row8.lane, 8u);
   EXPECT_EQ(row8.vgpr_offset, 0u);
   EXPECT_EQ(row8.bit_offset, 0u);
 
-  auto row16 = amdgpu::wmma_a_input_loc(32, 128, /*row=*/16, /*k=*/4, 4, 4);
+  auto row16 = amdgpu::wmma_a_input_loc<32, 128>(/*row=*/16, /*k=*/4, 4, 4);
   EXPECT_EQ(row16.lane, 16u);
   EXPECT_EQ(row16.vgpr_offset, 8u);
   EXPECT_EQ(row16.bit_offset, 0u);
 
-  auto row24 = amdgpu::wmma_a_input_loc(32, 128, /*row=*/24, /*k=*/7, 4, 4);
+  auto row24 = amdgpu::wmma_a_input_loc<32, 128>(/*row=*/24, /*k=*/7, 4, 4);
   EXPECT_EQ(row24.lane, 24u);
   EXPECT_EQ(row24.vgpr_offset, 8u);
   EXPECT_EQ(row24.bit_offset, 12u);
 
-  EXPECT_EQ(amdgpu::wmma_a_scale_lane(32, 128, /*row=*/0, 0, 4, 4), 0u);
-  EXPECT_EQ(amdgpu::wmma_a_scale_lane(32, 128, /*row=*/8, 0, 4, 4), 8u);
-  EXPECT_EQ(amdgpu::wmma_a_scale_lane(32, 128, /*row=*/16, 0, 4, 4), 16u);
-  EXPECT_EQ(amdgpu::wmma_a_scale_lane(32, 128, /*row=*/24, 0, 4, 4), 24u);
+  EXPECT_EQ((amdgpu::wmma_a_scale_lane<32, 128>(/*row=*/0, 0, 4, 4)), 0u);
+  EXPECT_EQ((amdgpu::wmma_a_scale_lane<32, 128>(/*row=*/8, 0, 4, 4)), 8u);
+  EXPECT_EQ((amdgpu::wmma_a_scale_lane<32, 128>(/*row=*/16, 0, 4, 4)), 16u);
+  EXPECT_EQ((amdgpu::wmma_a_scale_lane<32, 128>(/*row=*/24, 0, 4, 4)), 24u);
 }
 
 // The M=32 A layout is represented by two consecutive M=16 slices.
 TEST(MfmaExecTest, WmmaF4_32x16x128ALayoutMatchesConsecutiveM16Slices) {
   const auto split_a_loc = [](uint32_t row, uint32_t k) {
-    auto loc = amdgpu::wmma_f8f6f4_input_loc(16, 128, row % 16, k, 4,
-                                             /*mixed_subbyte=*/false);
+    auto loc = amdgpu::wmma_f8f6f4_input_loc<16, 128>(row % 16, k, 4,
+                                                      /*mixed_subbyte=*/false);
     loc.vgpr_offset += 8 * (row / 16);
     return loc;
   };
@@ -1180,7 +1180,7 @@ TEST(MfmaExecTest, WmmaF4_32x16x128ALayoutMatchesConsecutiveM16Slices) {
   for (uint32_t row = 0; row < 32; ++row) {
     for (uint32_t k = 0; k < 128; ++k) {
       SCOPED_TRACE(::testing::Message() << "row=" << row << " k=" << k);
-      const auto actual = amdgpu::wmma_a_input_loc(32, 128, row, k, 4, 4);
+      const auto actual = amdgpu::wmma_a_input_loc<32, 128>(row, k, 4, 4);
       const auto expected = split_a_loc(row, k);
       ASSERT_EQ(actual.lane, expected.lane);
       ASSERT_EQ(actual.vgpr_offset, expected.vgpr_offset);
@@ -1193,7 +1193,7 @@ TEST(MfmaExecTest, WmmaF4_32x16x128ALayoutMatchesConsecutiveM16Slices) {
 // C and D use the same consecutive row slices as A.
 TEST(MfmaExecTest, WmmaF4_32x16x128CDLayoutMatchesConsecutiveM16Slices) {
   const auto split_output_loc = [](uint32_t row, uint32_t col) {
-    auto loc = amdgpu::wmma_output_loc_32(16, 16, row % 16, col);
+    auto loc = amdgpu::wmma_output_loc_32<16, 16>(row % 16, col);
     loc.reg += 8 * (row / 16);
     return loc;
   };
@@ -1201,7 +1201,7 @@ TEST(MfmaExecTest, WmmaF4_32x16x128CDLayoutMatchesConsecutiveM16Slices) {
   for (uint32_t row = 0; row < 32; ++row) {
     for (uint32_t col = 0; col < 16; ++col) {
       SCOPED_TRACE(::testing::Message() << "row=" << row << " col=" << col);
-      const auto actual = amdgpu::wmma_output_loc_32(32, 16, row, col);
+      const auto actual = amdgpu::wmma_output_loc_32<32, 16>(row, col);
       const auto expected = split_output_loc(row, col);
       ASSERT_EQ(actual.reg, expected.reg);
       ASSERT_EQ(actual.lane, expected.lane);
@@ -1213,7 +1213,7 @@ TEST(MfmaExecTest, WmmaF4_32x16x128CDLayoutMatchesConsecutiveM16Slices) {
 TEST(MfmaExecTest, WmmaF4_32x16x128AScaleLaneMatchesRow) {
   for (uint32_t row = 0; row < 32; ++row) {
     SCOPED_TRACE(::testing::Message() << "row=" << row);
-    const uint32_t actual = amdgpu::wmma_a_scale_lane(32, 128, row, /*scale_select=*/0, 4, 4);
+    const uint32_t actual = amdgpu::wmma_a_scale_lane<32, 128>(row, /*scale_select=*/0, 4, 4);
     ASSERT_EQ(actual, row);
   }
 }
