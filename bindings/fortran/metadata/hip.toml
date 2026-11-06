@@ -1,0 +1,213 @@
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+#
+# What the hip C headers cannot express, beyond the defaults the generator derives
+# from them: one table per C function, and a key with braces names several. A _64
+# or _spt variant without a table takes its base's. See "Fixing a binding" in the
+# generator README; `gen.sh --explain <function>` shows what applies.
+
+format = 1
+# nullable:
+#   Arguments documented as nullable. The module procedures take them OPTIONAL and
+#   pass c_null_ptr when absent (an OPTIONAL dummy in a bind(C) interface needs F2018).
+# by-value:
+#   `void** extra` of the launch entry points: by reference, a variable holding
+#   c_null_ptr arrives as its own non-NULL address, so HIP sees both kernelParams
+#   and extra set and returns hipErrorInvalidValue. kernelParams stays by reference.
+# function-pointer:
+#   Kernels the headers declare `const void*`, so callers can pass c_funloc(...).
+#   The launch entry points (hipLaunchKernel, ...) keep type(c_ptr) for compatibility.
+# scalar-host:
+#   Not listed: enum pointers that are input arrays with their own count
+#   (hipDrvPointerGetAttributes attributes, hipLibraryLoad* jitOptions/libraryOptions).
+
+[hipBindTexture]
+offset = "scalar-host"
+
+[hipBindTexture2D]
+offset = "scalar-host"
+
+# hipChooseDevice is declared under its versioned symbol, which the key must name.
+[hipChooseDeviceR0600]
+device = "scalar-host"
+
+[hipDevSmResourceSplitByCount]
+nbGroups = "scalar-host"
+
+[hipDeviceCanAccessPeer]
+canAccessPeer = "scalar-host"
+
+[hipDeviceComputeCapability]
+major = "scalar-host"
+minor = "scalar-host"
+
+[hipDeviceGet]
+device = "scalar-host"
+
+[hipDeviceGetAttribute]
+pi = "scalar-host"
+
+[hipDeviceGetLimit]
+pValue = "scalar-host"
+
+[hipDeviceGetLuid]
+deviceNodeMask = "scalar-host"
+
+[hipDeviceGetP2PAttribute]
+value = "scalar-host"
+
+[hipDeviceGetTexture1DLinearMaxWidth]
+max_width = "scalar-host"
+
+[hipDevicePrimaryCtxGetState]
+flags = "scalar-host"
+active = "scalar-host"
+
+[hipDeviceTotalMem]
+bytes = "scalar-host"
+
+[hipDrvLaunchKernelEx]
+extra = "by-value"
+
+[hipEventElapsedTime]
+ms = "scalar-host"
+
+[hipExtGetLinkTypeAndHopCount]
+linktype = "scalar-host"
+hopcount = "scalar-host"
+
+[hipFuncGetAttribute]
+value = "scalar-host"
+
+[hipGetDriverEntryPoint]
+driverStatus = ["scalar-host", "nullable"]
+
+[hipGetProcAddress]
+symbolStatus = ["scalar-host", "nullable"]
+
+# hipGraphExecUpdate documents updateResult_out as [in], but it is an output.
+[hipGraphExecUpdate]
+updateResult_out = "scalar-host"
+
+[hipGraphGetEdges]
+from = "nullable"
+to = "nullable"
+
+[hipGraphGetNodes]
+nodes = "nullable"
+
+[hipGraphGetRootNodes]
+pRootNodes = "nullable"
+
+[hipGraphNodeGetDependencies]
+pDependencies = "nullable"
+
+[hipGraphNodeGetDependentNodes]
+pDependentNodes = "nullable"
+
+[hipKernelGetAttribute]
+pi = "scalar-host"
+
+[hipKernelGetParamInfo]
+paramOffset = "scalar-host"
+paramSize = ["scalar-host", "nullable"]
+
+[hipLibraryGetGlobal]
+dptr = "nullable"
+bytes = ["scalar-host", "nullable"]
+
+[hipLibraryGetManaged]
+dptr = "nullable"
+bytes = ["scalar-host", "nullable"]
+
+[hipLinkComplete]
+sizeOut = ["scalar-host", "nullable"]
+
+[hipMallocPitch]
+pitch = "scalar-host"
+
+[hipMemAllocPitch]
+pitch = "scalar-host"
+
+[hipMemGetAllocationGranularity]
+granularity = "scalar-host"
+
+[hipMemcpy3DBatchAsync]
+failIdx = "scalar-host"
+
+[hipMemcpyBatchAsync]
+failIdx = "scalar-host"
+
+[hipModuleGetGlobal]
+dptr = "nullable"
+bytes = ["scalar-host", "nullable"]
+
+[hipModuleLaunchKernel]
+extra = "by-value"
+
+[hipModuleOccupancyMaxActiveBlocksPerMultiprocessor]
+numBlocks = "scalar-host"
+
+[hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags]
+numBlocks = "scalar-host"
+
+[hipModuleOccupancyMaxPotentialBlockSize]
+gridSize = "scalar-host"
+blockSize = "scalar-host"
+
+[hipModuleOccupancyMaxPotentialBlockSizeWithFlags]
+gridSize = "scalar-host"
+blockSize = "scalar-host"
+
+[hipOccupancyAvailableDynamicSMemPerBlock]
+dynamicSmemSize = "scalar-host"
+f = "function-pointer"
+
+[hipOccupancyMaxActiveBlocksPerMultiprocessor]
+numBlocks = "scalar-host"
+f = "function-pointer"
+
+[hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags]
+numBlocks = "scalar-host"
+f = "function-pointer"
+
+[hipOccupancyMaxActiveClusters]
+numClusters = "scalar-host"
+f = "function-pointer"
+
+[hipOccupancyMaxPotentialBlockSize]
+gridSize = "scalar-host"
+blockSize = "scalar-host"
+f = "function-pointer"
+
+[hipOccupancyMaxPotentialClusterSize]
+clusterSize = "scalar-host"
+f = "function-pointer"
+
+[hipStreamGetCaptureInfo]
+pId = ["scalar-host", "nullable"]
+
+[hipStreamGetCaptureInfo_v2]
+id_out = ["scalar-host", "nullable"]
+graph_out = "nullable"
+dependencies_out = "nullable"
+numDependencies_out = ["scalar-host", "nullable"]
+
+[hipStreamIsCapturing]
+pCaptureStatus = "scalar-host"
+
+[hipTexRefGetAddressMode]
+pam = "scalar-host"
+
+[hipTexRefGetMipmapLevelBias]
+pbias = "scalar-host"
+
+[hipTexRefGetMipmapLevelClamp]
+pminMipmapLevelClamp = "scalar-host"
+pmaxMipmapLevelClamp = "scalar-host"
+
+[hipTexRefSetAddress]
+ByteOffset = "scalar-host"
+
+[hipThreadExchangeStreamCaptureMode]
+mode = "scalar-host"
