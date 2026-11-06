@@ -7,6 +7,7 @@
 #ifndef HIP_GLOBAL_HPP
 #define HIP_GLOBAL_HPP
 
+#include <cstdint>
 #include <vector>
 #include <string>
 
@@ -69,7 +70,7 @@ class Var {
   hipError_t GetStatDeviceVar(amd::Memory** mem, int deviceId);
   hipError_t GetDeviceVarPtr(amd::Memory** mem, int deviceId);
 
-  hipError_t AllocateManagedVarPtr();
+  hipError_t EnsureManagedVarIsMapped();
 
   void ResizeDVar(size_t size) { dMem_.resize(size); }
 
@@ -87,8 +88,13 @@ class Var {
     size_ = size;
     dVarKind_ = DVK_Managed;
   }
-  bool GetAllocFlag() const { return allocFlag_; }
-  void SetAllocFlag(bool val) { allocFlag_ = val; }
+  bool IsManagedVarMapped() const { return managedVarMapped_; }
+  void SetManagedVarMapped(bool val) { managedVarMapped_ = val; }
+
+  //! Position in StatCO's registration order. A device written up to this number already
+  //! holds this variable's device-side pointer.
+  uint64_t GetManagedRegNum() const { return managedRegNum_; }
+  void SetManagedRegNum(uint64_t number) { managedRegNum_ = number; }
 
  private:
   std::vector<amd::Memory*> dMem_;  //!< Per-device memory objects; index matches g_devices
@@ -98,9 +104,11 @@ class Var {
   int type_;                        //!< Channel type (textures/surfaces only)
   int norm_;                        //!< Normalisation flag (textures/surfaces only)
   FatBinaryInfo** modules_;         //!< Owning fat binary; nullptr for dynamic COs
-  void* managedVarPtr_;             //!< Host pointer to managed-memory allocation (DVK_Managed)
+  void* managedVarPtr_;             //!< Managed storage, or its host shadow ptr (DVK_Managed)
   size_t align_;                    //!< Alignment of the managed allocation in bytes
-  bool allocFlag_;                  //!< false = host alloc; true = ihipMallocManaged alloc
+  bool managedVarMapped_;           //! Set once ihipMallocManaged has run for this variable.
+  //! StatCO registration number; 0 until RegisterManagedVar assigns it
+  uint64_t managedRegNum_ = 0;
 };
 
 };  // namespace hip

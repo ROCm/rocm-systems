@@ -378,6 +378,30 @@ collected in the following table.
           CTA-policy gates in ``rcclUseAllGatherDirect`` still apply.
         | Any other value: Disabled.
 
+    * - | ``RCCL_DIRECT_REDUCE_SCATTER_DISABLE``
+        | Disables the direct ReduceScatter algorithm. Unlike
+          ``RCCL_DIRECT_ALLGATHER_DISABLE`` there is no automatic mode: the
+          algorithm is eligible by default, and any non-zero value turns it off
+          outright. Read once per process on the first eligibility check, so
+          changing it afterwards has no effect.
+      - | ``0``: Enabled (default). The architecture, PXN, size and node-count
+          gates in ``rcclUseReduceScatterDirect`` still apply.
+        | Any other value: Disabled.
+
+    * - | ``RCCL_DIRECT_REDUCE_SCATTER_THRESHOLD``
+        | Sets the largest ReduceScatter, in total bytes (``recvcount`` x type
+          size x the number of ranks), that can select the direct ReduceScatter
+          algorithm. The algorithm is additionally restricted to gfx950, needs
+          PXN enabled and ``RCCL_DIRECT_REDUCE_SCATTER_DISABLE`` unset or ``0``,
+          and is only considered at 2, 4, 8 or 16 nodes. Narrower per-node-count
+          windows apply on top of this value: 128 KiB to 2 MiB at 2 nodes, and
+          up to 4 MiB at 4 nodes.
+      - | Total bytes
+        | Default: ``8388608`` (8 MiB). This is also a hard upper limit, so
+          larger values are clamped to it and only lower values change
+          behavior.
+        | Leave unset or set to ``8388608`` to use the default.
+
     * - | ``RCCL_HIERARCHICAL_ALLGATHER_MIN_BYTES_PER_RANK``
         | Sets the smallest AllGather, in bytes per rank (``sendcount`` x type
           size), that can select hierarchical AllGather, so that small startup
@@ -667,6 +691,24 @@ in the following table.
       - | ``0``: Disabled (default).
         | ``1``: Enabled.
 
+    * - | ``RCCL_IB_UDMA_POLICY``
+        | Selects how queue pairs (QPs) are assigned to the two uDMA pipelines
+          of an AINIC. Applies only to AINIC with the ``IB-CAST`` transport.
+          With QP sharing enabled, the sharing groups choose the pipeline in
+          place of the per-channel assignment of ``0`` and ``1``.
+      - | ``0``: Pin each channel's send QPs, and separately its receive QPs,
+          to one pipeline per device, alternating pipelines as each is first
+          used (default).
+        | ``1``: Round-robin P2P QPs across the pipelines in creation order.
+          Collective QPs behave as with ``0``.
+        | ``2``: Leave the pipeline choice to the driver.
+        | ``3``: Split each connection across both pipelines. The default
+          ``NCCL_IB_QPS_PER_CONNECTION`` of 2 is enough. Splitting is lost with
+          ``NCCL_IB_QPS_PER_CONNECTION=1`` or ``RCCL_IB_QPS_PER_P2P=1``, and on
+          RMA comms, which use one QP; every QP of a channel then uses the same
+          pipeline.
+        | Other values log a warning and fall back to ``0``.
+
     * - | ``NCCL_NCHANNELS_PER_NET_PEER``
         | Sets the number of channels used per network (remote) peer.
         | This overrides the value of the ``nChannelsPerNetPeer`` field in
@@ -775,6 +817,27 @@ in the following table.
         | ``6``: rocSHMEM GDA (required for that backend to initialize)
         | ``7``: Anvil SDMA (also accepts unset)
 
+    * - | ``NCCL_GIN_ALLREDUCE_GFX1250_ENABLE``
+        | Opt in to GinScatter AllReduce on gfx1250.
+      - | ``0``: gfx1250 keeps the pre-existing AllReduce selectors (default)
+        | ``1``: symmetric ``ncclSum`` fp32/fp16/bf16 messages from 64 MiB
+          through 4 GiB use GinScatter when scratch can hold them
+        | Eligible sums below 64 MiB yield to DDA. Sums below 8 MiB already
+          used DDA. From 8 MiB to 64 MiB, DDA LL/LL128 can take those sums
+
+    * - | ``NCCL_GIN_ALLREDUCE_SCRATCH_BYTES``
+        | GinScatter incoming scratch size, in bytes.
+      - | ``536870912`` (512 MiB) by default, matching the CE AllReduce pool
+        | ``0``: do not allocate scratch, and do not select GinScatter
+
+    * - | ``NCCL_GIN_PROXY_POLL_BATCH``
+        | Maximum GIN operations the proxy thread issues per peer in each
+          progress iteration. Larger values cut polling overhead when queues
+          are deep.
+      - | Integer value (default: ``32``)
+        | Values below ``1`` are treated as ``1``, which issues one operation
+          per iteration and never sends the RMA aggregation hint
+
     * - | ``NCCL_RMA_PLUGIN``
         | Selects external one-sided RMA plugins, which are also the backend
           the built-in GIN proxy forwards to.
@@ -782,6 +845,84 @@ in the following table.
         | A short name is resolved against the ``librccl-rma`` prefix, so
           ``example`` loads ``librccl-rma-example.so``
         | See :ref:`using-rccl-rma-plugin`
+
+QP scheduling (CAST)
+====================
+
+CAST (Congestion Aware Sprayed Traffic) adds a dynamic QP (Queue Pair) scheduler
+that balances RDMA traffic across multiple QPs per connection based on measured
+round-trip time (RTT). The following variables tune the scheduler and are
+accessible with either the ``RCCL_`` or ``NCCL_`` prefix; the ``RCCL_`` form is
+shown below.
+
+These variables only take effect when the IB-CAST net plugin is loaded
+(``NCCL_NET=IB-CAST`` or ``ROCM-IB``, or an AINIC NIC with ``NCCL_NET`` unset)
+*and* the CAST QP scheduler is enabled (see ``RCCL_IB_QP_SCHED_ENABLE`` below).
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40,60
+
+    * - **Environment variable**
+      - **Values**
+
+    * - | ``RCCL_IB_QP_SCHED_ENABLE``
+        | Enables the CAST QP scheduler.
+      - | ``-1``: Auto (default).
+        | ``0``: Force off.
+        | ``1``: Force on.
+        | Auto resolves to enabled only when ``NCCL_NET=IB-CAST`` is set
+          explicitly. Everywhere else — AINIC with ``NCCL_NET`` unset, or
+          ``NCCL_NET=ROCM-IB`` — auto resolves to disabled; use
+          ``RCCL_IB_QP_SCHED_ENABLE=1`` to override.
+        | On AINIC, the scheduler only has an effect once ID-based receive
+          matching (``NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=1``) is
+          enabled. Without it, forcing the scheduler on (``1``) reports
+          "enabled", but WRR and split-data are no-ops, so nothing is
+          actually rebalanced.
+        | Always disabled when port failover/recovery
+          (``NCCL_IB_RESILIENCY_PORT_FAILOVER``/``_PORT_RECOVERY``) or QP
+          sharing (``RCCL_IB_QP_SHARING_ENABLE``) is active — load-balancer
+          integration with those features is still pending.
+
+    * - | ``RCCL_IB_QP_SCHED_RESET_INTERVAL``
+        | Interval at which accumulated RTT statistics are reset, to prevent
+          stale samples from permanently biasing the scheduler. Value is in
+          milliseconds.
+      - | Integer milliseconds. Default: ``60000`` (60 seconds).
+        | ``0``: Never reset.
+
+    * - | ``RCCL_IB_QP_SCHED_UPDATE_INTERVAL``
+        | Minimum interval between scheduler weight updates. Value is in
+          microseconds.
+      - | Integer microseconds. Default: ``50``.
+        | Values outside the range 1 µs to 60 s are ignored.
+
+    * - | ``RCCL_IB_QP_SCHED_WEIGHT``
+        | Exponential moving average (EMA) weight applied to new RTT samples.
+      - | Floating-point value in the range ``0`` to ``1.0``. Default: ``0``.
+        | ``0``: Simple average.
+        | Values closer to ``1.0`` react faster to recent samples.
+
+    * - | ``RCCL_IB_QP_SCHED_SPLIT_DATA_MIN``
+        | Minimum chunk size when splitting a message across QPs (split-data
+          mode, enabled via ``NCCL_IB_SPLIT_DATA_ON_QPS``). Value is in bytes.
+      - | Integer bytes. Default: ``65536``.
+        | Only positive values are applied.
+
+    * - | ``RCCL_IB_QP_SCHED_LOG_PATH``
+        | Directory for a per-process scheduler log file (one line per QP:
+          device, min/current/max weight, and smoothed RTT). Log file is
+          named ``cast_log_<hostname>_<pid>``.
+      - | String directory path.
+        | Default: unset (logging disabled).
+
+    * - | ``RCCL_IB_QP_SCHED_LOG_INTERVAL``
+        | Interval at which scheduler statistics are written to the log file.
+          Value is in microseconds. Only used when
+          ``RCCL_IB_QP_SCHED_LOG_PATH`` is set.
+      - | Integer microseconds. Default: ``1000000`` (1 second).
+        | Values outside the range 1 µs to 60 s are ignored.
 
 Development and testing (advanced)
 ==================================
@@ -1143,6 +1284,32 @@ threshold table introduced for gfx1250.
         | ``N`` (bytes): Use ``N`` as the LL128 tier ceiling, overriding the table.
           Pre-table default: ``0`` (LL128 tier was off before the arch table).
 
+    * - | ``RCCL_DDA_LL128_AG_THREADS``
+        | Threads per block for the DDA LL128 ``ncclAllGather`` kernel. When ``0``
+          (default), resolved from ``ddaAgLL128Threads`` in the arch table: the
+          gfx1250 DPX table uses 256 threads for gathered sizes (``nRanks`` x
+          per-rank bytes) of 4 MiB to 32 MiB, and every other case uses 512.
+          Values that are not a multiple of 32 from 32 to 1024 are ignored.
+      - | ``0``: Resolved from the per-arch table at runtime (default).
+        | ``N``: Use ``N`` threads per block, overriding the table. ``N`` must be a
+          multiple of 32 from 32 to 1024. Pre-table default: ``512``.
+
+    * - | ``RCCL_DDA_A2A_PUSH``
+        | Selects the ``ncclAllToAll`` kernel on the DDA fabric (VMM) tier. The push
+          kernels write each rank's chunks straight into its peers' DDA scratch
+          buffers and sync all ranks before finishing.
+      - | ``1``: Push kernels (default).
+        | ``0``: The previous pull kernel, where each rank reads its chunks from its
+          peers' DDA scratch buffers.
+
+    * - | ``RCCL_DDA_A2A_TDM``
+        | Moves the data of the DDA fabric ``ncclAllToAll`` push kernels through the
+          tensor data mover (TDM) on gfx1250. In-place calls, and builds or devices
+          without TDM support, use vector loads and stores. Has no effect when
+          ``RCCL_DDA_A2A_PUSH=0``.
+      - | ``1``: Use the TDM (default).
+        | ``0``: Use vector loads and stores.
+
     * - | ``RCCL_CE_ALLREDUCE``
         | Enables the Copy Engine (CE) registered-window AllReduce path. When ``-1`` (auto),
           CE AllReduce is on by default for gfx1250 communicators that meet all
@@ -1300,4 +1467,3 @@ threshold table introduced for gfx1250.
         | ``2``: Forced. Wherever the collective has a TDM kernel, it is selected
           regardless of predicted time or message size. Intended for A/B
           measurement, not production.
-

@@ -64,6 +64,10 @@ extern std::function<ncclResult_t(struct ncclSocket*, bool)> g_ncclSocketClose;
 extern ncclResult_t g_ncclOsTopoGetStrFromSysResult;
 extern int g_ncclOsTopoGetStrFromSysCalls;
 extern std::function<ncclResult_t(const char*, const char*, char*, int)> g_ncclOsTopoGetStrFromSys;
+// A g_ncclOsTopoGetStrFromSys that answers bios_version and numa_balancing, as the IB GDR Hyper-V check reads
+// them; a null answer, or any other file, is a failed read.
+std::function<ncclResult_t(const char*, const char*, char*, int)> SysfsAnswers(const char* bios,
+                                                                              const char* numaBalancing);
 
 // fillInfo's MLOPart PCI-function fallback (init.cc:1092) probes sysfs for the class of its own BDF.
 // The default is an accelerator class, i.e. what sysfs reports for a real GPU's own BDF; a test that
