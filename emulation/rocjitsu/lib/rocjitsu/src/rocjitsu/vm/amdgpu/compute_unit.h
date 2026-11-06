@@ -667,6 +667,7 @@ public:
     observes_memory_instruction_routing_ = plugin_group_->observes_memory_instruction_routing();
     observes_vgpr_reads_ = plugin_group_->observes_vgpr_reads();
     observes_vgpr_writes_ = plugin_group_->observes_vgpr_writes();
+    observes_only_watched_vgprs_ = plugin_group_->observes_only_watched_vgprs();
     observes_sgpr_reads_ = plugin_group_->observes_sgpr_reads();
     observes_scalar_register_writes_ = plugin_group_->observes_scalar_register_writes();
     observes_memory_routing_ = plugin_group_->observes_memory_routing();
@@ -1114,6 +1115,13 @@ public:
       sgpr_file_[reg_idx] = val;
   }
 
+  /// Whether a VGPR callback for this owned register has a consumer. When every
+  /// VGPR observer filters by watch, unwatched registers are skipped.
+  bool observes_vgpr_callback(const Wavefront &wf, uint32_t reg_idx) const {
+    return owns_vgpr_range(wf, reg_idx, 1) &&
+           (!observes_only_watched_vgprs_ || wf.vgpr_watched(reg_idx - wf.vgpr_alloc().base));
+  }
+
   /// @brief Notify plugins that a wavefront read lanes of a physical VGPR.
   /// @details Low-level notification primitive used by RegisterAccess and the
   /// concrete CU implementation. Instruction emulators should acquire observed
@@ -1123,7 +1131,7 @@ public:
                         uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const {
     if (!observes_register_access_)
       return;
-    if (wf && lane_mask != 0 && owns_vgpr_range(*wf, reg_idx, 1)) {
+    if (wf && lane_mask != 0 && observes_vgpr_callback(*wf, reg_idx)) {
       if (observes_vgpr_reads_)
         observe_vgpr_read(wf, reg_idx, lane_mask, byte_mask);
     }
@@ -1138,7 +1146,7 @@ public:
       return;
     if (wf)
       lane_mask &= wf->vgpr_write_mask();
-    if (wf && lane_mask != 0 && byte_mask != 0 && owns_vgpr_range(*wf, reg_idx, 1)) {
+    if (wf && lane_mask != 0 && byte_mask != 0 && observes_vgpr_callback(*wf, reg_idx)) {
       if (observes_vgpr_writes_)
         observe_vgpr_write(wf, reg_idx, lane_mask, byte_mask);
     }
@@ -1152,7 +1160,7 @@ public:
       uint8_t byte_mask = rocjitsu::ExecutionPlugin::kFullByteMask) const {
     if (!observes_register_access_)
       return;
-    if (wf && lane_mask != 0 && byte_mask != 0 && owns_vgpr_range(*wf, reg_idx, 1)) {
+    if (wf && lane_mask != 0 && byte_mask != 0 && observes_vgpr_callback(*wf, reg_idx)) {
       if (observes_vgpr_writes_)
         observe_vgpr_write(wf, reg_idx, lane_mask, byte_mask);
     }
@@ -1759,6 +1767,7 @@ protected:
   bool observes_memory_instruction_routing_ = false;
   bool observes_vgpr_reads_ = false;
   bool observes_vgpr_writes_ = false;
+  bool observes_only_watched_vgprs_ = false;
   bool observes_sgpr_reads_ = false;
   bool observes_scalar_register_writes_ = false;
   bool pool_driven_ = false;

@@ -120,6 +120,8 @@ public:
     observes_memory_instruction_routing_ |= observes_memory_instruction_routing;
     observes_vgpr_reads_ |= observes_vgpr_reads;
     observes_vgpr_writes_ |= observes_vgpr_writes;
+    if ((observes_vgpr_reads || observes_vgpr_writes) && !p->observes_only_watched_vgprs())
+      every_vgpr_observer_filters_by_watch_ = false;
     observes_sgpr_reads_ |= observes_sgpr_reads;
     observes_scalar_register_writes_ |= observes_scalar_register_writes;
     observes_memory_routing_ |= observes_memory_routing;
@@ -159,6 +161,11 @@ public:
   bool observes_memory_instruction_routing() const { return observes_memory_instruction_routing_; }
   bool observes_vgpr_reads() const { return observes_vgpr_reads_; }
   bool observes_vgpr_writes() const { return observes_vgpr_writes_; }
+  /// True when every VGPR observer receives callbacks only for watched
+  /// registers, so unwatched registers need no notification at all.
+  bool observes_only_watched_vgprs() const {
+    return (observes_vgpr_reads_ || observes_vgpr_writes_) && every_vgpr_observer_filters_by_watch_;
+  }
   bool observes_scalar_register_writes() const { return observes_scalar_register_writes_; }
 
   /// @brief Whether any contained plugin consumes the routed-memory hook.
@@ -623,6 +630,7 @@ private:
   bool observes_memory_instruction_routing_ = false;
   bool observes_vgpr_reads_ = false;
   bool observes_vgpr_writes_ = false;
+  bool every_vgpr_observer_filters_by_watch_ = true;
   bool observes_memory_routing_ = false;
   bool observes_tensor_dma_memory_access_ = false;
   bool observes_tensor_dma_issue_ = false;

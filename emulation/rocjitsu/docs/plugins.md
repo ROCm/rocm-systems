@@ -451,6 +451,18 @@ Plugins can opt out of individual high-frequency hooks by overriding
 group samples these stable flags when the plugin is added and avoids both
 fanout and upstream observation work when no contained plugin consumes a hook.
 
+A plugin that needs VGPR callbacks only for a few registers at a time can
+override `observes_only_watched_vgprs()` to return true and mark those
+registers with `Wavefront::watch_vgpr()` and `unwatch_vgpr()`. Register indices
+count from the wave's VGPR allocation base, and watches are counted, so several
+plugins can watch the same register. The compute unit then skips VGPR read and
+write callbacks for unwatched registers. The filter applies only when every
+plugin in the group that observes VGPRs opts in; otherwise every VGPR observer
+receives every callback. Watches are cleared when the wave's slot is reused,
+so a plugin must stop updating a wave's watches once that wave halts or is
+cancelled. The race detector watches registers that have pending
+memory-result events, because its register checks can report nothing else.
+
 For finer-grained selection, `observes_hot_hooks_for_wavefront(wf)` controls
 all high-frequency callbacks for one wavefront. After every plugin's
 `onAmdgpuWavefrontDispatched()` callback completes, the group samples and caches

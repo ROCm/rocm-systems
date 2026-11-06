@@ -84,6 +84,7 @@ public:
   ~RaceDetectorPlugin() override;
 
   bool observes_sgpr_reads() const override { return true; }
+  bool observes_only_watched_vgprs() const override { return true; }
   bool observes_memory_routing() const override { return true; }
   bool observes_tensor_dma_issue() const override { return true; }
   /// Skip waves without race state, including slots between a halt and the
@@ -154,7 +155,13 @@ private:
   RaceWavefrontState *get_state(const amdgpu::Wavefront *wf) {
     return wf ? get_state(*wf) : nullptr;
   }
-  void release_wave_state(amdgpu::Wavefront &wf) { wf.clear_plugin_state(slot_index()); }
+  /// The detector outlives its waves, and a halted wave's slot can be reused,
+  /// so stop the wave's race state from updating that slot's VGPR watches.
+  void release_wave_state(amdgpu::Wavefront &wf) {
+    if (auto *state = get_state(wf); state && state->race_state)
+      state->race_state->setVgprWatchHook({});
+    wf.clear_plugin_state(slot_index());
+  }
 
   mutable std::mutex dispatch_mutex_;
   std::map<WorkgroupKey, std::unique_ptr<RaceDetector>> detectors_;
