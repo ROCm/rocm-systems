@@ -12,6 +12,8 @@ set(UNIT_TEST_SOURCES
     writer_test.cpp
     reader_test.cpp
     sqlite_backend_impl_test.cpp
+    schema_validation_test.cpp
+    schema_301_usage_test.cpp
 )
 
 add_executable(profiler-hub_unit_tests ${UNIT_TEST_SOURCES})
@@ -27,6 +29,9 @@ target_link_libraries(
     PRIVATE
         profiler-hub
         profiler-hub_queries
+        # schema_validation_test counts rows with the sqlite backend templates,
+        # which call sqlite3 directly from the test translation unit.
+        profiler-hub-sqlite3
         GTest::gtest
         GTest::gtest_main
         GTest::gmock
