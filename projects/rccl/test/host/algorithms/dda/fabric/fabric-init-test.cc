@@ -466,6 +466,15 @@ TEST_F(FabricInitCommInitMicrotest, CommInit_AllSucceed_BarrierUsesCommGeometry)
   EXPECT_EQ(barrier.selfRank, kRank);
   EXPECT_EQ(barrier.nRanks, kNRanks);
   EXPECT_EQ(barrier.peerFlags, state->resources->peerFlagsDev->get());
+  EXPECT_TRUE(barrier.useEpoch);
+}
+
+TEST_F(FabricInitCommInitMicrotest, CommInit_PushPeerEpochOff_BarrierUsesCasFlags) {
+  ScopedHook epochOff(g_loadParam, [](const char* name, int64_t deftVal) {
+    return std::string(name) == "RCCL_DDA_A2A_PUSH_PEER_EPOCH" ? 0 : deftVal;
+  });
+  ASSERT_EQ(ncclDdaFabricCommInit(comm_.get()), ncclSuccess);
+  EXPECT_FALSE(StateOf(comm_->ddaFabricBarrierState->barrierHost).useEpoch);
 }
 
 TEST_F(FabricInitCommInitMicrotest, CommInit_WithManager_TracksAndUntracksEveryAllocationInIt) {

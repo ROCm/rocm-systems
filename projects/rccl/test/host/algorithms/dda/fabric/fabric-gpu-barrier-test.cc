@@ -45,7 +45,10 @@ using dda_fabric_test::ParamName;
 using dda_fabric_test::PeerRanks;
 
 constexpr int kNBlocks = 3;
-size_t FlagBytes(int nRanks, int nBlocks) { return static_cast<size_t>(nRanks) * nBlocks * sizeof(FlagType); }
+// Toggle flags, epoch flags (nRanks * nBlocks each), then one epoch cell per block.
+size_t FlagBytes(int nRanks, int nBlocks) {
+  return (2 * static_cast<size_t>(nRanks) * nBlocks + static_cast<size_t>(nBlocks)) * sizeof(FlagType);
+}
 
 using InitResult = std::pair<std::unique_ptr<FabricGpuBarrierResources>, FabricGpuBarrier>;
 
@@ -179,7 +182,7 @@ TEST_F(FabricGpuBarrierMicrotest, MallocAndInit_AllSucceed_ExchangesOverTheGiven
 
 // Not a page multiple, so a wrongly sized peer mapping rounds differently.
 TEST_F(FabricGpuBarrierMicrotest, MallocAndInit_AllSucceed_PeersMapTheWholeFlagBuffer) {
-  constexpr int kManyBlocks = 300;  // 4800 B of flags
+  constexpr int kManyBlocks = 300;  // 10800 B of flags
   InitResult& r = Init(kNRanks, kRank, kManyBlocks);
   ASSERT_NE(r.first, nullptr);
   auto* const* table = static_cast<FlagType* const*>(r.first->peerFlagsDev->get());

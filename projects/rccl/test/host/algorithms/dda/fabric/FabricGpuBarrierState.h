@@ -20,6 +20,7 @@ struct FabricGpuBarrierState {
   int selfRank;
   int nRanks;
   dda::common::FabricGpuBarrier::FlagType** peerFlags;
+  bool useEpoch;
 };
 static_assert(sizeof(FabricGpuBarrierState) == sizeof(dda::common::FabricGpuBarrier),
               "FabricGpuBarrier layout changed");
