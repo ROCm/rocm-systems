@@ -1,0 +1,61 @@
+inherit: ../gfx942/lds.yaml
+lds.ai:
+  formula: SUM($wave_size * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + 2 * SQ_INSTS_VALU_FMA_F16 + SQ_INSTS_VALU_TRANS_F16 + SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + 2 * SQ_INSTS_VALU_FMA_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + 2 * SQ_INSTS_VALU_FMA_F64 + SQ_INSTS_VALU_TRANS_F64) + SQ_INSTS_VALU_MFMA_MOPS_F16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F32 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F64 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F8 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F6F4 * 512) / SUM((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4 * $lds_banks_per_cu)
+lds.atomic:
+  name: LDS ATOMIC
+  formula: SUM(SQ_INSTS_LDS_ATOMIC) / SUM($denom)
+  unit: (Instructions + $normUnit)
+  description: >-
+    The total number of LDS atomic instructions per normalization unit.
+lds.atomic_bw:
+  name: LDS ATOMIC Bandwidth
+  formula: 64 * SUM(SQ_INSTS_LDS_ATOMIC_BANDWIDTH) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    The effective bandwidth of LDS atomic operations, accounting for the work-items
+    executed (execution mask). Calculated as the total bytes accessed by LDS atomic
+    operations divided by the kernel duration.
+lds.command_fifo_full_rate:
+  name: LDS Command FIFO Full Rate
+  formula: SUM(SQ_LDS_CMD_FIFO_FULL) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: >-
+    The number of cycles where the LDS command FIFO was full, per normalization unit.
+    High values indicate backpressure in LDS instruction dispatch, which may stall
+    wavefronts waiting to issue LDS operations.
+lds.data_fifo_full_rate:
+  name: LDS Data FIFO Full Rate
+  formula: SUM(SQ_LDS_DATA_FIFO_FULL) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: >-
+    The number of cycles where the LDS data FIFO was full, per normalization unit.
+    High values indicate backpressure in LDS data return path, which may stall wavefronts
+    waiting for LDS read/atomic results.
+lds.load:
+  name: LDS LOAD
+  formula: SUM(SQ_INSTS_LDS_LOAD) / SUM($denom)
+  unit: (Instructions + $normUnit)
+  description: >-
+    The total number of LDS load instructions per normalization unit.
+lds.load_bw:
+  name: LDS LOAD Bandwidth
+  formula: 64 * SUM(SQ_INSTS_LDS_LOAD_BANDWIDTH) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    The effective bandwidth of LDS load operations, accounting for the work-items
+    executed (execution mask). Calculated as the total bytes loaded from LDS divided
+    by the kernel duration.
+lds.store:
+  name: LDS STORE
+  formula: SUM(SQ_INSTS_LDS_STORE) / SUM($denom)
+  unit: (Instructions + $normUnit)
+  description: >-
+    The total number of LDS store instructions per normalization unit.
+lds.store_bw:
+  name: LDS STORE Bandwidth
+  formula: 64 * SUM(SQ_INSTS_LDS_STORE_BANDWIDTH) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    The effective bandwidth of LDS store operations, accounting for the work-items
+    executed (execution mask). Calculated as the total bytes stored to LDS divided
+    by the kernel duration.

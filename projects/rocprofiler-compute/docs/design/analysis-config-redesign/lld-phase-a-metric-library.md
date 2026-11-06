@@ -59,9 +59,9 @@ returns its columns. The validator checks, for every arch:
 
 - every ceiling the benchmark measures on a device of the arch is the `peak_empirical`
   of exactly one metric, or is listed in `CEILINGS_WITHOUT_METRIC` (the VALU integer
-  rates `I8Ops`, `I32Ops` and `I64Ops`: no row shows them as a peak), or in
-  `ARCH_CEILINGS_WITHOUT_METRIC` for the rates one arch's roofline combines or does not
-  show;
+  rates `I8Ops`, `I32Ops` and `I64Ops`, and `MALLBw`, which analyze skips: no row shows
+  them as a peak), or in `ARCH_CEILINGS_WITHOUT_METRIC` for the rates one arch's roofline
+  combines or does not show (the gfx950 F4 and F6 MFMA rates);
 - no metric names a ceiling the arch does not measure.
 
 So a new ceiling, or a new arch, fails validation until a metric claims each ceiling.
@@ -544,7 +544,9 @@ flowchart TD
 - Two ids with the same formula on one arch are one metric: the validator rejects them,
   and they are merged into one id (each panel's label becomes a view label in Phase B).
   The exceptions are listed in `SHARED_FORMULA_IDS`: the same counters bounded by a
-  different measured ceiling; a row whose label names the listed id shows that id.
+  different measured ceiling (gfx950 counts MXF8 matrix work in the F8 counter, so
+  `compute.mfma_flops_mxf8` shares the formula of `compute.mfma_flops_f8`); a row whose
+  label names the listed id shows that id.
 - Two ids whose formulas give the same value on one arch, however written
   (`SUM(a * $cu_per_gpu)` and `SUM(a) * $cu_per_gpu`), are one metric too. The validator
   evaluates every formula with the runtime evaluator (`build_eval_string()`,
@@ -592,6 +594,10 @@ panel that shows it:
 - A per-channel metric ends with `per Channel`.
 - It is in title case; short words (`and`, `by`, `of`, `on`, `over`, `per`, `to`,
   `under`, `vs`) stay lowercase.
+- A metric that shows one raw counter is named after the counter (`TCC_BUSY`).
+- A metric shown only by panel 3000 (memory bandwidth analysis) keeps that model's block
+  words (`EA` for the L2-Fabric interface, `L1 Cache` and `TCP` for the vL1D); its
+  abbreviations are spelled out like any other name.
 - Names are unique on an arch, ignoring case; the validator rejects two metrics with the
   same name. Two quantities that panels show under one label get names that tell them
   apart (`Wavefront Occupancy`, `Wavefront Occupancy (Percent)`).

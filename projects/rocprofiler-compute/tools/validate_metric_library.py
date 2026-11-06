@@ -124,15 +124,21 @@ METRIC_OPTIONAL_FIELDS = ("peak", "peak_empirical")
 # A roofline benchmark ceiling, the measured peak in "peak_empirical".
 EMPIRICAL_PEAK_RE = re.compile(r"\$(\w+)_empirical_peak")
 # Ceilings the roofline benchmark measures that no row shows as a peak: on every arch,
-# the VALU integer rates; per arch, the rates the roofline combines or does not show.
-CEILINGS_WITHOUT_METRIC = ("I8Ops", "I32Ops", "I64Ops")
-ARCH_CEILINGS_WITHOUT_METRIC = {}
+# the VALU integer rates and MALL bandwidth (analyze skips MALL, roofline_calc.py); per
+# arch, the rates the roofline combines or does not show.
+CEILINGS_WITHOUT_METRIC = ("I8Ops", "I32Ops", "I64Ops", "MALLBw")
+ARCH_CEILINGS_WITHOUT_METRIC = {
+    # The roofline shows the combined F6F4 MFMA rate.
+    "gfx950": ("MFMAF4Flops", "MFMAF6Flops"),
+}
 VARIABLE_FIELDS = ("formula",)
 # Metric fields the runtime evaluates.
 EXPRESSION_FIELDS = ("formula", *METRIC_OPTIONAL_FIELDS)
 # Ids allowed to share another id's formula (id -> that id): the same counters bounded
-# by a different measured ceiling.
-SHARED_FORMULA_IDS = {}
+# by a different measured ceiling. gfx950 counts MXF8 matrix work in the F8 counter.
+SHARED_FORMULA_IDS = {
+    "compute.mfma_flops_mxf8": "compute.mfma_flops_f8",
+}
 # Ids that hold another id's formula on a different arch (id -> that id): one label
 # shows two equations on an arch (D8 Kind 3), and the parent arch's equation keeps
 # the id until the metric owners choose one.
@@ -180,6 +186,11 @@ _ROOFLINE_L2_BW = (
     "vl1d.l2_bw",
     _ROOFLINE_L2_BW_EQUATION.format(64),
 )
+_ROOFLINE_L2_BW_128B = (
+    "L2 Cache Bandwidth",
+    "vl1d.l2_bw",
+    _ROOFLINE_L2_BW_EQUATION.format(128),
+)
 _ROOFLINE_LDS_BW = (
     "LDS Bandwidth",
     "lds.theoretical_bw",
@@ -198,10 +209,38 @@ DISPLAY_VARIANTS = {
         "4.1.11": _ROOFLINE_LDS_BW,
         "11.2.7": _PIPELINE_MFMA_UTIL,
     },
+    "gfx942": {
+        "4.1.10": _ROOFLINE_L2_BW_128B,
+        "4.1.12": _ROOFLINE_LDS_BW,
+        "11.2.7": _PIPELINE_MFMA_UTIL,
+        # TODO(AIPROFCOMP-820): the clamp is deferred (FOLLOWUPS); the other vL1D hit
+        # rate rows have no NOISE_CLAMP.
+        "16.3.5": (
+            "Cache Hit Rate",
+            "vl1d.hit_rate",
+            "100 * SUM(NOISE_CLAMP(TCP_TOTAL_CACHE_ACCESSES_sum - (TCP_TCC_READ_REQ_sum"
+            " + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum "
+            "+ TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum), TCP_TOTAL_CACHE_ACCESSES_sum)) "
+            "/ SUM(TCP_TOTAL_CACHE_ACCESSES_sum)",
+        ),
+    },
+    "gfx950": {
+        "2.1.23": (
+            "L2-Fabric Read BW",
+            "fabric.rd_bw",
+            "SUM(128 * TCC_EA0_RDREQ_128B_sum + 64 * TCC_EA0_RDREQ_64B_sum "
+            "+ 32 * TCC_EA0_RDREQ_32B_sum) / SUM(End_Timestamp - Start_Timestamp)",
+        ),
+        "4.1.12": _ROOFLINE_L2_BW_128B,
+        "4.1.14": _ROOFLINE_LDS_BW,
+        "11.2.9": _PIPELINE_MFMA_UTIL,
+    },
 }
 # Rows whose unit differs from their metric's (positional id -> label, unit).
 _CDNA_UNIT_VARIANTS = {"7.1.8": ("LDS Allocation", "Bytes")}
-UNIT_VARIANTS = {arch: _CDNA_UNIT_VARIANTS for arch in ("gfx908", "gfx90a")}
+UNIT_VARIANTS = {
+    arch: _CDNA_UNIT_VARIANTS for arch in ("gfx908", "gfx90a", "gfx942", "gfx950")
+}
 
 
 def validate(metric_dir: Path, analysis_dir: Optional[Path] = None) -> List[str]:
