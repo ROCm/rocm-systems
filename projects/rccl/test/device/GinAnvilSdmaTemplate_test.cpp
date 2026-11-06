@@ -2165,9 +2165,8 @@ TEST_F(GinAnvilSdmaTemplateTest, Put_ThreadModeIgnoredDataLands) {
   expectSdmaModeDataLands(NCCL_GIN_RESOURCE_SHARING_THREAD);
 }
 
-// H39: the legacy C bindings (ncclGinPut/PutValue/Signal and their _v2) take no strength argument, so
-// ginStrongLegacySignals picks it, as for ncclGin_SignalInc. A strong signal drains the peer queue before the IPC
-// signal; a weak one on a clean queue does not. Either way signalPeer's release is the only system fence.
+// H39: legacy C bindings take ginStrongLegacySignals as their strength. A strong signal drains the peer queue
+// before the IPC signal; a weak one on a clean queue does not. signalPeer's release is the only system fence.
 enum class LegacyCBinding { Put, PutV2, PutValue, PutValueV2, Signal, SignalV2 };
 
 struct LegacyCBindingCase {
