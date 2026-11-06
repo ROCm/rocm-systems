@@ -108,15 +108,13 @@ public:
   /// Bits outside execMask are ignored; zero records no LDS intervals.
   /// elementBytes selects the execution granularity at the backing boundary;
   /// zero treats the whole per-lane access as one element.
-  /// allocationEnd additionally clips complete elements to a captured workgroup
-  /// allocation without reducing register or counter participation.
   void registerLdsEvent(InstructionSnapshot instruction, MemoryEventType type,
                         std::vector<uint32_t> registers, uint64_t execMask, int waveSize,
                         std::span<const uint32_t> laneBaseAddresses, int bytesPerLane,
                         uint8_t byteMask,
                         std::span<const amdgpu::MemoryCounterObligation> counterObligations,
                         MemoryOrderClass memoryOrder, uint64_t ldsLaneMask = ~uint64_t{0},
-                        int elementBytes = 0, std::optional<uint64_t> allocationEnd = std::nullopt);
+                        int elementBytes = 0);
   /// Register two LDS address sets per lane. elementBytes selects the granularity
   /// of complete elements retained at the backing boundary; zero treats the
   /// whole per-lane access in each address set as one element.
@@ -153,6 +151,15 @@ public:
                              std::span<const LdsByteRange> ranges,
                              std::span<const amdgpu::MemoryCounterObligation> counterObligations,
                              MemoryOrderClass memoryOrder);
+
+  /// Register an event with LDS intervals that the caller has finalized and
+  /// already limited to bytes the access really touches: within the LDS
+  /// backing and, for FLAT, the workgroup allocation.
+  void registerEventWithIntervals(InstructionSnapshot instruction, MemoryEventType,
+                                  std::vector<uint32_t> registers, uint64_t execMask,
+                                  uint8_t byteMask, IntervalSet ldsIntervals,
+                                  std::span<const amdgpu::MemoryCounterObligation>,
+                                  MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0);
 
   /// Register an LDS event with dual-offset intervals. Each active lane
   /// contributes two 8-byte intervals at laneBaseAddresses[lane] + offset0*8
@@ -230,11 +237,6 @@ public:
   WaveId getWaveId() const { return waveId; }
 
 private:
-  void registerEventWithIntervals(InstructionSnapshot instruction, MemoryEventType,
-                                  std::vector<uint32_t> registers, uint64_t execMask,
-                                  uint8_t byteMask, IntervalSet ldsIntervals,
-                                  std::span<const amdgpu::MemoryCounterObligation>,
-                                  MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0);
   void retireEventRegisters(EventId);
   void checkScalarAccess(RegisterRef reg, bool isWrite) const;
 
