@@ -13540,6 +13540,10 @@ class CodeGenerator:
                         ctor_body_parts.append('flags_ |= XCNT_DRAIN;')
                     if inst.name.lower().startswith('v_interp_'):
                         ctor_body_parts.append('flags_ |= EMBEDDED_MEMORY_WAIT;')
+                    # The semantic trap class marks software traps, which the
+                    # CU and CFG construction recognise by flag, not by name.
+                    if _mem_sem and _mem_sem.semantic_class == 'trap':
+                        ctor_body_parts.append('flags_ |= SOFTWARE_TRAP;')
                     # Control-flow flags drive BasicBlock splitting and CFG
                     # edge construction. Keep this metadata generated from the
                     # semantic classification so generic code does not have to
