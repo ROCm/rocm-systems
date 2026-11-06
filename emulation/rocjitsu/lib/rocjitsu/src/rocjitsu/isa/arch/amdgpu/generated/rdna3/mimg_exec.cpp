@@ -30,7 +30,7 @@ void ImageLoadMimg::execute_impl(amdgpu::Wavefront &wf) {
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
   if (amdgpu::prepare_image_access(
           wf, *d, inst_.srsrc * 4,
-          amdgpu::gfx11_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding()),
+          amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding()),
           {.dmask = inst_.dmask,
            .dim = inst_.dim,
            .a16 = bool(inst_.a16),
@@ -78,7 +78,7 @@ void ImageStoreMimg::execute_impl(amdgpu::Wavefront &wf) {
   d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
   if (amdgpu::prepare_image_access(
           wf, *d, inst_.srsrc * 4,
-          amdgpu::gfx11_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding()),
+          amdgpu::mimg_nsa_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding()),
           {.dmask = inst_.dmask,
            .dim = inst_.dim,
            .a16 = bool(inst_.a16),

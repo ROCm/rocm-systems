@@ -862,11 +862,14 @@ public:
     }
     Instruction::append_src_operand(out, operand_index);
   }
+  void capture_nsa_words(const MachineInst *inst, const Operand *vaddr);
   bool has_nsa_1();
   bool has_nsa_2();
   bool has_nsa_3();
   using OpEncoding = MimgMachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 5> raw_words_{};
+  const Operand *nsa_vaddr_operand_ = nullptr;
 };
 
 class Exp : public IsaInstruction<Isa> {

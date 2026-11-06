@@ -72,7 +72,8 @@ TEST(InstructionSnapshotTest, RejectsEmptyAndOversizedEncodings) {
 }
 
 TEST(InstructionSnapshotTest, CopiesEveryEncodingWidth) {
-  constexpr std::array<uint32_t, InstructionSnapshot::kMaxWords> expected{1, 2, 3, 4};
+  constexpr std::array<uint32_t, 5> expected{1, 2, 3, 4, 5};
+  static_assert(expected.size() == InstructionSnapshot::kMaxWords);
   for (size_t count = 1; count <= InstructionSnapshot::kMaxWords; ++count) {
     auto source = expected;
     const InstructionSnapshot instruction(0x10, std::span(source).first(count));
