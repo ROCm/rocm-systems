@@ -119,6 +119,7 @@ TEST(aql_helpers, get_query_info)
             EXPECT_TRUE(query.name != nullptr);
             EXPECT_TRUE(query.instance_count != 0);
             EXPECT_TRUE(query.id < std::numeric_limits<uint32_t>().max());
+            EXPECT_TRUE(query.event_id_max != 0);
         }
     }
 }
