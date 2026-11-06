@@ -174,8 +174,9 @@ struct snapshot_t
 
 using batch_copy_fn_t = std::function<hsa_status_t(const std::vector<blit::copy_region_t>&)>;
 
-// Plan whole-region placement against queried GPU and host budgets, materialize at most one arena
-// per tier, and capture only after every required arena exists.
+// Place regions against queried GPU and host budgets, in that order. A region that does not fit
+// what is left of the GPU budget is cut, and the rest goes to pinned host memory. Materialize at
+// most one arena per tier, and capture only after every required arena exists.
 snapshot_t
 snap(const capture_context_t&);
 

@@ -27,6 +27,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -393,5 +394,24 @@ TEST(kernel_replay_snapshot_storage, near_max_capacity_never_wraps)
     ASSERT_EQ(placements->size(), 2);
     EXPECT_EQ(placements->at(0).tier, 0);
     EXPECT_EQ(placements->at(1).tier, 1);
+}
+
+// After a snapshot, free memory is smaller by the arena it keeps and by the blit's workspace.
+// Neither may move the next budget: growing it reallocates the arena every replay until nothing is
+// left free, and shrinking it moves bytes to the next tier without freeing any.
+TEST(kernel_replay_snapshot_storage, retained_arena_keeps_the_budget_where_it_was)
+{
+    constexpr auto free_bytes = uint64_t{1000};
+    const auto     first      = plan::tier_budget(0, free_bytes, 20);
+    EXPECT_EQ(first, 950);
+    EXPECT_EQ(plan::tier_budget(first, free_bytes - first - 10, 20), first);
+
+    // Memory the application frees raises the budget; memory it allocates leaves the arena.
+    EXPECT_EQ(plan::tier_budget(first, free_bytes - first + 1000, 20), 1900);
+    EXPECT_EQ(plan::tier_budget(first, 0, 20), first);
+
+    // Half of what the host has available, counting its arena.
+    EXPECT_EQ(plan::tier_budget(0, 1000, 2), 500);
+    EXPECT_EQ(plan::tier_budget(500, 500, 2), 500);
 }
 }  // namespace
