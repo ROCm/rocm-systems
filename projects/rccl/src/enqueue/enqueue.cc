@@ -358,6 +358,8 @@ static void finishPlan(struct ncclComm* comm, struct ncclKernelPlan* plan) {
   plan->kernelArgs->comm = comm->devComm;
   plan->kernelArgs->channelMask = plan->channelMask;
   plan->kernelArgs->workStorageType = plan->workStorageType;
+  plan->kernelArgs->devFlags = (ncclProfilerPluginLoaded() ? RCCL_DEV_FLAG_PROFILER : 0) |
+                               (comm->deviceCountersBlock != nullptr ? RCCL_DEV_FLAG_PROGRESS : 0);
 #ifdef ENABLE_WARP_SPEED
   plan->kernelArgs->warpLevelComm = rcclWarpSpeedSupported(comm, plan);
 #endif
@@ -1199,7 +1201,7 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
       plan->channelMask.masks[maskIdx] |= (1ull << relativeIdx);
     }
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-    plan->threadPerBlock = std::max(task->nWarps * comm->WarpSize, 3 * comm->WarpSize);
+    plan->threadPerBlock = rcclPlanThreadsPerBlock(comm, task->nWarps);
 #else
     plan->threadPerBlock = std::max(plan->threadPerBlock, 192 /* 3*WARP_SIZE */);
 #endif
@@ -2252,10 +2254,6 @@ static void persistentDestructor(void* plans_) {
 }
 
 NCCL_PARAM(GraphStreamOrdering, "GRAPH_STREAM_ORDERING", NCCL_CONFIG_UNDEF_INT);
-
-// Biased so the default stream (nullptr) tags as 1, leaving 0 free as the "no launch yet"
-// sentinel. See ncclComm::lastStreamTag.
-static inline uintptr_t ncclStreamTag(hipStream_t s) { return (uintptr_t)s + 1; }
 
 namespace {
 enum ncclImplicitOrder {
@@ -3663,6 +3661,8 @@ static ncclResult_t calcCollChunking(struct ncclComm* comm, struct ncclTaskColl*
         }
       }
     } else if (info->algorithm == NCCL_ALGO_RING) {
+      // Use the large-step schedule only when the device can select the matching kernel specialization.
+#if NCCL_ALLGATHER_NET_OFFLOAD_SUPPORTED
       if (proxyOp->isOneRPN && info->func == ncclFuncAllGather) {
         proxyOp->chunkSize = NCCL_MAX_NET_SIZE;
         proxyOp->sliceSize = NCCL_MAX_NET_SIZE;
@@ -3672,6 +3672,7 @@ static ncclResult_t calcCollChunking(struct ncclComm* comm, struct ncclTaskColl*
         proxyOp->nsteps = DIVUP(nBytes, proxyOp->loopSize) * nstepsPerLoop;
         proxyOp->loopOffset = 0;
       }
+#endif
     } else {
       WARN("Net registration invalid algorithm %s", ncclAlgoToString(info->algorithm));
       return ncclInternalError;
@@ -4083,8 +4084,10 @@ static ncclResult_t collTaskAppend(struct ncclComm* comm, struct ncclInfo* info,
     // withdrew symk (NCCL_ALGO, or AllReduce/AllGather size windows).
     t->symkExtract = RCCL_SYMK_EXTRACT_NONE;
     if (info->decisionValid) {
-      t->symkExtract =
-        (info->decision.algo == RCCL_SYMMETRIC) ? RCCL_SYMK_EXTRACT_ALLOW : RCCL_SYMK_EXTRACT_DENY;
+      t->symkExtract = RCCL_SYMK_EXTRACT_DENY;
+      if (info->decision.algo == RCCL_SYMMETRIC) {
+        t->symkExtract = info->decision.symkTdmOnly ? RCCL_SYMK_EXTRACT_ALLOW_TDM_ONLY : RCCL_SYMK_EXTRACT_ALLOW;
+      }
     }
 
     planner->nTasksColl += 1;
@@ -4138,10 +4141,10 @@ static ncclResult_t ceCollTaskAppend(struct ncclComm* comm, struct ncclInfo* inf
     if (!comm->ceColl.initialized) {
       NEW_NOTHROW_GOTO(ceInitJob, ncclCeInitAsyncJob, ret, fail);
       ceInitJob->comm = comm;
-      NCCLCHECKGOTO(ncclMgmtTaskEnqueue((struct ncclAsyncJob*)ceInitJob, ncclCeInitJob, ncclCeInitAsyncJobFree, comm),
-                    ret, fail);
+      ret = ncclMgmtTaskEnqueue((struct ncclAsyncJob*)ceInitJob, ncclCeInitJob, ncclCeInitAsyncJobFree, comm);
+      ceInitJob = nullptr; // ncclMgmtTaskEnqueue owns the job: it enqueues it on success and frees it on failure
+      NCCLCHECKGOTO(ret, ret, fail);
       comm->ceColl.initialized = true;
-      ceInitJob = nullptr; // ceInitJob is now owned by the management task
     }
   } else if (!comm->ceColl.initialized) {
     NCCLCHECKGOTO(ncclCalloc(&ceTask, 1), ret, fail);
@@ -4216,6 +4219,38 @@ fail:
   if (ceInitJob) ncclCeInitAsyncJobFree(ceInitJob);
   if (ceTask) free(ceTask);
   goto exit;
+}
+
+// Shared by rmaTaskAppend and rawTaskAppend so both paths accept and reject the same WaitSignal arguments.
+static ncclResult_t validateWaitSignalDescs(struct ncclComm* comm, struct ncclInfo* info) {
+  if (info->nDesc <= 0 || info->signalDescs == NULL) {
+    WARN("ncclWaitSignal: invalid arguments");
+    return ncclInvalidArgument;
+  }
+  for (int i = 0; i < info->nDesc; i++) {
+    if (info->signalDescs[i].opCnt <= 0) {
+      WARN("ncclWaitSignal: descriptor %d has invalid opCnt %d", i, info->signalDescs[i].opCnt);
+      return ncclInvalidArgument;
+    }
+    if (info->signalDescs[i].sigIdx < 0 || info->signalDescs[i].sigIdx >= comm->config.numRmaSig) {
+      WARN("ncclWaitSignal: descriptor %d has invalid sigIdx %d (must be in [0, %d))", i, info->signalDescs[i].sigIdx,
+           comm->config.numRmaSig);
+      return ncclInvalidArgument;
+    }
+    if (info->signalDescs[i].ctx < 0 || info->signalDescs[i].ctx >= comm->config.numRmaCtx) {
+      WARN("ncclWaitSignal: descriptor %d has invalid context %d (must be in [0, %d))", i, info->signalDescs[i].ctx,
+           comm->config.numRmaCtx);
+      return ncclInvalidArgument;
+    }
+    // peer indexes signalsHost via ncclRmaSignalSlot(nRanks, sigIdx, peer). ArgsCheck never
+    // sees these descriptors (ncclWaitSignal passes root = 0).
+    if (info->signalDescs[i].peer < 0 || info->signalDescs[i].peer >= comm->nRanks) {
+      WARN("ncclWaitSignal: descriptor %d has invalid peer %d (must be in [0, %d))", i, info->signalDescs[i].peer,
+           comm->nRanks);
+      return ncclInvalidArgument;
+    }
+  }
+  return ncclSuccess;
 }
 
 static ncclResult_t rmaTaskAppend(struct ncclComm* comm, struct ncclInfo* info) {
@@ -4326,35 +4361,7 @@ static ncclResult_t rmaTaskAppend(struct ncclComm* comm, struct ncclInfo* info) 
       return ncclInvalidArgument;
     }
   } else if (info->coll == ncclFuncWaitSignal) {
-    // Check if signalDescs is valid
-    if (info->signalDescs == NULL || info->nDesc == 0) {
-      WARN("ncclWaitSignal: invalid arguments");
-      return ncclInvalidArgument;
-    }
-    // Validate each descriptor
-    for (int i = 0; i < info->nDesc; i++) {
-      if (info->signalDescs[i].opCnt <= 0) {
-        WARN("ncclWaitSignal: descriptor %d has invalid opCnt %d", i, info->signalDescs[i].opCnt);
-        return ncclInvalidArgument;
-      }
-      if (info->signalDescs[i].sigIdx < 0 || info->signalDescs[i].sigIdx >= comm->config.numRmaSig) {
-        WARN("ncclWaitSignal: descriptor %d has invalid sigIdx %d (must be in [0, %d))", i, info->signalDescs[i].sigIdx,
-             comm->config.numRmaSig);
-        return ncclInvalidArgument;
-      }
-      if (info->signalDescs[i].ctx < 0 || info->signalDescs[i].ctx >= comm->config.numRmaCtx) {
-        WARN("ncclWaitSignal: descriptor %d has invalid context %d (must be in [0, %d))", i, info->signalDescs[i].ctx,
-             comm->config.numRmaCtx);
-        return ncclInvalidArgument;
-      }
-      // peer indexes signalsHost via ncclRmaSignalSlot(nRanks, sigIdx, peer). ArgsCheck never
-      // sees these descriptors (ncclWaitSignal passes root = 0).
-      if (info->signalDescs[i].peer < 0 || info->signalDescs[i].peer >= comm->nRanks) {
-        WARN("ncclWaitSignal: descriptor %d has invalid peer %d (must be in [0, %d))", i, info->signalDescs[i].peer,
-             comm->nRanks);
-        return ncclInvalidArgument;
-      }
-    }
+    NCCLCHECK(validateWaitSignalDescs(comm, info));
   }
 
   // ncclSignal / ncclWaitSignal take no window, so they cannot trigger the collective RMA init that
@@ -4532,33 +4539,7 @@ static ncclResult_t rawTaskAppend(struct ncclComm* comm, struct ncclInfo* info) 
     }
     ncclIntruQueueEnqueue(&rtq->genericQueue, t);
   } else if (info->coll == ncclFuncWaitSignal) {
-    if (info->nDesc <= 0 || info->signalDescs == NULL) {
-      WARN("ncclWaitSignal: invalid arguments");
-      return ncclInvalidArgument;
-    }
-    for (int i = 0; i < info->nDesc; i++) {
-      if (info->signalDescs[i].opCnt <= 0) {
-        WARN("ncclWaitSignal: descriptor %d has invalid opCnt %d", i, info->signalDescs[i].opCnt);
-        return ncclInvalidArgument;
-      }
-      if (info->signalDescs[i].sigIdx < 0 || info->signalDescs[i].sigIdx >= comm->config.numRmaSig) {
-        WARN("ncclWaitSignal: descriptor %d has invalid sigIdx %d (must be in [0, %d))", i, info->signalDescs[i].sigIdx,
-             comm->config.numRmaSig);
-        return ncclInvalidArgument;
-      }
-      if (info->signalDescs[i].ctx < 0 || info->signalDescs[i].ctx >= comm->config.numRmaCtx) {
-        WARN("ncclWaitSignal: descriptor %d has invalid context %d (must be in [0, %d))", i, info->signalDescs[i].ctx,
-             comm->config.numRmaCtx);
-        return ncclInvalidArgument;
-      }
-      // peer indexes signalsHost via ncclRmaSignalSlot(nRanks, sigIdx, peer). ArgsCheck never
-      // sees these descriptors (ncclWaitSignal passes root = 0).
-      if (info->signalDescs[i].peer < 0 || info->signalDescs[i].peer >= comm->nRanks) {
-        WARN("ncclWaitSignal: descriptor %d has invalid peer %d (must be in [0, %d))", i, info->signalDescs[i].peer,
-             comm->nRanks);
-        return ncclInvalidArgument;
-      }
-    }
+    NCCLCHECK(validateWaitSignalDescs(comm, info));
     t = ncclMemoryPoolAlloc<struct ncclRawTask>(&comm->memPool_ncclRawTask, &comm->memPermanent);
     t->kind = ncclTaskKindRma;
     t->rma.func = ncclFuncWaitSignal;
@@ -4753,12 +4734,13 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
             (info->count % (size_t)comm->nRanks != 0) || !rcclCeAllReduceEnabled(comm)) {
           ceAvailable = false;
         } else if (ceAllReduceOpSupported) {
-          // Unregistered 2-shot: table/env cap of 0 disables it; otherwise the
-          // message must fit the 2-shot window and the allocated buffer.
+          // Unregistered 2-shot: computed via rcclCeArNonRegCap (safe before ncclCeInit);
+          // returns 0 when disabled, NCCL_CE_AR_TMPBUF_DEFAULT_BYTES under ZERO policy
+          // for placeholder arches (e.g. gfx950 ceNonRegMax[AR]=0).
           size_t totalBytes = info->count * ncclTypeSize(info->datatype);
-          const size_t twoShotMax = rcclCeAr2ShotMax(comm);
+          const size_t twoShotMax = rcclCeArNonRegCap(comm);
           const size_t twoShotMin = rcclCeAr2ShotMin(comm);
-          if (!rcclWindowFits(totalBytes, twoShotMin, twoShotMax) || totalBytes > comm->ceColl.ceArMaxBytes ||
+          if (!rcclWindowFits(totalBytes, twoShotMin, twoShotMax) ||
               !rcclForceCeAllReduceEnabled(comm) || !comm->symmetricSupport || comm->nNodes > 1 ||
               !ncclCeImplemented(info->coll, info->op, info->datatype) || !ncclDevrIsOneLsaTeam(comm)) {
             ceAllReduceFits = false;

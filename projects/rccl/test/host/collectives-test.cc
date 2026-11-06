@@ -214,6 +214,7 @@ struct Fakes {
   std::vector<uint8_t> gatheredOwnFlag;
   ncclResult_t bootstrapResult = ncclSuccess;
   std::vector<KernelLaunch> launches;
+  std::vector<rcclDdaLaunchCap> ddaCaps;  // per capped fabric AllReduce launch
 };
 Fakes fake;
 
@@ -278,6 +279,8 @@ namespace {
 
 using DdaSig = ncclResult_t(const void*, void*, size_t, ncclDataType_t, ncclComm*, hipStream_t);
 using DdaOpSig = ncclResult_t(const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, ncclComm*, hipStream_t);
+using DdaCappedOpSig =
+    ncclResult_t(const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, ncclComm*, hipStream_t, rcclDdaLaunchCap);
 #define ADDON_HOOK(hook, fn)                                                                           \
   ScopedHook<DdaSig> hook##_{g_##hook,                                                                 \
                              [](const void* s, void* r, size_t n, ncclDataType_t t, ncclComm* c,      \
@@ -286,6 +289,12 @@ using DdaOpSig = ncclResult_t(const void*, void*, size_t, ncclDataType_t, ncclRe
   ScopedHook<DdaOpSig> hook##_{g_##hook,                                                               \
                                [](const void* s, void* r, size_t n, ncclDataType_t t, ncclRedOp_t o,   \
                                   ncclComm* c, hipStream_t st) { return RecordAddon(fn, s, r, n, t, o, c, st); }};
+#define ADDON_CAPPED_HOOK(hook, fn)                                                                    \
+  ScopedHook<DdaCappedOpSig> hook##_{g_##hook, [](const void* s, void* r, size_t n, ncclDataType_t t, ncclRedOp_t o, \
+                                                  ncclComm* c, hipStream_t st, rcclDdaLaunchCap cap) {             \
+    fake.ddaCaps.push_back(cap);                                                                       \
+    return RecordAddon(fn, s, r, n, t, o, c, st);                                                      \
+  }};
 
 // The shared fakes' hooks, routed into `fake` for the life of a test.
 struct SharedHooks {
@@ -539,9 +548,9 @@ struct SharedHooks {
   ADDON_HOOK(allToAllDdaFabricLL128, "ncclAllToAllDdaFabricLL128")
   ADDON_HOOK(allToAllDdaFabric, "ncclAllToAllDdaFabric")
   ADDON_HOOK(allToAllDdaIpc, "ncclAllToAllDdaIpc")
-  ADDON_OP_HOOK(allReduceDdaFabricLL, "ncclAllReduceDdaFabricLL")
-  ADDON_OP_HOOK(allReduceDdaFabricLL128, "ncclAllReduceDdaFabricLL128")
-  ADDON_OP_HOOK(allReduceDdaFabric, "ncclAllReduceDdaFabric")
+  ADDON_CAPPED_HOOK(allReduceDdaFabricLL, "ncclAllReduceDdaFabricLL")
+  ADDON_CAPPED_HOOK(allReduceDdaFabricLL128, "ncclAllReduceDdaFabricLL128")
+  ADDON_CAPPED_HOOK(allReduceDdaFabric, "ncclAllReduceDdaFabric")
   ADDON_OP_HOOK(allReduceDdaIpc, "ncclAllReduceDdaIpc")
   ADDON_OP_HOOK(reduceScatterDdaFabricLL, "ncclReduceScatterDdaFabricLL")
   ADDON_OP_HOOK(reduceScatterDdaFabricLL128, "ncclReduceScatterDdaFabricLL128")
@@ -550,6 +559,7 @@ struct SharedHooks {
 };
 #undef ADDON_HOOK
 #undef ADDON_OP_HOOK
+#undef ADDON_CAPPED_HOOK
 
 class CollectivesMicrotest : public ::testing::Test {
  protected:
@@ -706,14 +716,7 @@ TEST_F(CollectivesMicrotest, AlltoAllPivotEnable_ReadsItsEnvWithDefaultOff) {
 
 TEST_F(CollectivesMicrotest, AllReduceDda_SymmetricEligibleNeverTakesDda) {
   fake.ddaEnabled = true;
-  EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, true, false, false));
-  EXPECT_TRUE(fake.ddaEnabledCalls.empty());
-  EXPECT_TRUE(fake.thresholdFuncs.empty());
-}
-
-TEST_F(CollectivesMicrotest, AllReduceDda_CeAllowedYieldsOffGfx1250) {
-  fake.ddaEnabled = true;
-  EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, false, true, false));
+  EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, true, false));
   EXPECT_TRUE(fake.ddaEnabledCalls.empty());
   EXPECT_TRUE(fake.thresholdFuncs.empty());
 }
@@ -722,7 +725,7 @@ TEST_F(CollectivesMicrotest, AllReduceDda_Gfx1250FabricRunsEvenWhenCeIsAllowed) 
   SetArch("gfx1250");
   fake.ddaEnabled = true;
   fake.ddaThreshold = 4096;
-  EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat16, false, true, false));
+  EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat16, false, false));
   ASSERT_EQ(1u, fake.ddaEnabledCalls.size());
   EXPECT_EQ(kCount * 2, fake.ddaEnabledCalls[0].totalBytes);
   EXPECT_EQ(4096u, fake.ddaEnabledCalls[0].threshold);
@@ -732,22 +735,22 @@ TEST_F(CollectivesMicrotest, AllReduceDda_Gfx1250FabricRunsEvenWhenCeIsAllowed) 
 
 TEST_F(CollectivesMicrotest, AllReduceDda_MessageOverTheThresholdIsRejected) {
   fake.ddaThreshold = 64;
-  EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat64, false, false, false));
+  EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat64, false, false));
   ASSERT_EQ(1u, fake.ddaEnabledCalls.size());
   EXPECT_EQ(kCount * 8, fake.ddaEnabledCalls[0].totalBytes);
   EXPECT_EQ(64u, fake.ddaEnabledCalls[0].threshold);
   EXPECT_EQ(std::vector<ncclFunc_t>{ncclFuncAllReduce}, fake.thresholdFuncs);
 }
 
-TEST_F(CollectivesMicrotest, AllReduceDda_Gfx1250WithCeAllowedStillAsksDda) {
+TEST_F(CollectivesMicrotest, AllReduceDda_Gfx1250WithoutDdaEnabledReturnsFalse) {
   SetArch("gfx1250");
-  EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, false, true, false));
+  EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, false, false));
   EXPECT_EQ(1u, fake.ddaEnabledCalls.size());
 }
 
 TEST_F(CollectivesMicrotest, AllReduceDda_TakesDdaWhenNothingElseServesTheCall) {
   fake.ddaEnabled = true;
-  EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, false, false, false));
+  EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, false, false));
   EXPECT_EQ(1u, fake.thresholdFuncs.size());
 }
 
@@ -1732,6 +1735,22 @@ TEST_F(CollectivesMicrotest, AllReduce_DdaArmsLaunchAsAddons) {
                    {RCCL_DDA_FABRIC_VMM, "ncclAllReduceDdaFabric"},
                    {RCCL_DDA_IPC, "ncclAllReduceDdaIpc"}},
                   [&] { return AllReduce(); }, ncclProd, "AllReduce");
+}
+
+// The decision's DDA cap (a re-routed call's, else none) reaches the fabric AllReduce launcher of each arm.
+TEST_F(CollectivesMicrotest, AllReduce_FabricArmsPassTheDecisionsCap) {
+  for (int algo : {RCCL_DDA_FABRIC_LL, RCCL_DDA_FABRIC_LL128, RCCL_DDA_FABRIC_VMM}) {
+    SCOPED_TRACE(algo);
+    Decide(algo);
+    for (rcclDdaLaunchCap cap : {rcclDdaLaunchCap{46, 256}, rcclDdaLaunchCap{}}) {
+      fake.ddaCaps.clear();
+      fake.decision.ddaCap = cap;
+      EXPECT_EQ(ncclSuccess, AllReduce());
+      ASSERT_EQ(1u, fake.ddaCaps.size());
+      EXPECT_EQ(cap.blocks, fake.ddaCaps[0].blocks);
+      EXPECT_EQ(cap.threads, fake.ddaCaps[0].threads);
+    }
+  }
 }
 
 TEST_F(CollectivesMicrotest, AllReduce_CheckModeDivertsAddons) {

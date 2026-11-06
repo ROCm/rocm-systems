@@ -28,6 +28,7 @@ full reference.
 | `04_user_buffer_registration` | `ncclCommRegister` to pre-register user buffers for faster collectives |
 | `05_symmetric_memory` | `ncclCommWindowRegister` symmetric memory windows |
 | `06_device_api` | Device-side API (kept as the RCCL-specific examples already present in the project) |
+| `07_kernel_fusion` | RMSNorm fused with its communication in a single kernel through the Device API: LSA, Multimem, GIN, and hybrid LSA/GIN. Multimem is not supported on AMD GPUs; the GIN examples need `NCCL_CUMEM_ENABLE=1` and an RDMA NIC (`NCCL_GIN_TYPE=2`) |
 
 ## Prerequisites
 
@@ -41,7 +42,7 @@ full reference.
 From this directory:
 
 ```bash
-make GPU_TARGETS="gfx942"            # build all 01..05 categories
+make GPU_TARGETS="gfx942"            # build all 01..07 categories
 make -C 03_collectives/01_allreduce  # build one example
 make MPI=1 -C 01_communicators/03_one_device_per_process_mpi
 ```

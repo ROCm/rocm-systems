@@ -334,11 +334,11 @@ TEST(Gfx1250CodeObjectTest, ProbeClobberPreservesConcreteTargetIdentity) {
   callable.body_words = {0xCC3B4004u, 0x1C421908u};
 
   std::string error;
-  EXPECT_TRUE(build_probe_clobber_summary(callable, &error).has_value()) << error;
+  EXPECT_TRUE(build_probe_clobber_summary(callable, /*wave_size=*/32, &error).has_value()) << error;
 
   callable.target = ROCJITSU_CODE_TARGET_GFX1250;
   error.clear();
-  EXPECT_FALSE(build_probe_clobber_summary(callable, &error).has_value());
+  EXPECT_FALSE(build_probe_clobber_summary(callable, /*wave_size=*/32, &error).has_value());
   EXPECT_FALSE(error.empty());
 }
 
@@ -1631,6 +1631,8 @@ TEST(Gfx1250DecodeTest, Vopd3ConsumesThreeDwords) {
   ASSERT_NE(inst, nullptr);
   EXPECT_EQ(inst->mnemonic(), "v_dual_lshlrev_b32 :: v_dual_lshrrev_b32");
   EXPECT_EQ(inst->size(), sizeof(words));
+  // The VOPD3 constructor path sets its block separately from two-dword VOPD.
+  EXPECT_EQ(inst->amdgpu_execution_block(), amdgpu::ExecutionBlock::VALU);
   EXPECT_NE(inst->disassemble().find("v_dual_lshlrev_b32"), std::string::npos);
   EXPECT_NE(inst->disassemble().find("v_dual_lshrrev_b32"), std::string::npos);
 }

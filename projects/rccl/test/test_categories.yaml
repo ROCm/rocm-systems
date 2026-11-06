@@ -114,6 +114,9 @@ test_categories:
       - "ProxyTraceTestFixture.*"
       - "CollTraceUtilsTest.*"
       - "GinPluginInitFail.*"
+      - "CpuAffinity.*"
+      - "DdaReduceScatterFabricLL.*"
+      - "DdaAllReduceFabricLL.*"
     exclude_windows:
       - "*"
     labels:

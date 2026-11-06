@@ -6,7 +6,6 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vopd.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
-#include "util/except.h"
 #include <format>
 #include <string>
 
@@ -125,6 +124,7 @@ Vopd::Vopd(const MachineInst *inst)
   word1_ = words[1];
 
   format_ = Format::VopdXy;
+  flags_ |= VALU;
   encoding_id_ = 0x32;
   opx_ = static_cast<uint16_t>((word0_ >> 22) & 0xF);
   opy_ = static_cast<uint16_t>((word0_ >> 17) & 0x1F);
@@ -240,8 +240,9 @@ Vopd::Vopd(const MachineInst *inst)
     flags_ |= INVALID_VOPD_OPERANDS;
   mnemonic_storage_ = std::string(op_name(opx_)) + " :: " + op_name(opy_);
   mnemonic_ = mnemonic_storage_;
-  disassembly_ = format_slot(x_) + " :: " + format_slot(y_);
 }
+
+std::string Vopd::disassemble() const { return format_slot(x_) + " :: " + format_slot(y_); }
 
 void Vopd::init_operands() {
   x_ = Slot{opx_, &dstx_, &srcx0_, &srcx1_, &srcx2_, 0, negx_, false, false, false};

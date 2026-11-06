@@ -155,9 +155,6 @@ static ncclResult_t DefaultCollnetDeregBuffer(struct ncclComm*, struct ncclProxy
 }
 std::function<ncclResult_t(struct ncclComm*, struct ncclProxyConnector*, void*)> g_ncclCollnetDeregBuffer =
   DefaultCollnetDeregBuffer;
-ncclResult_t micro_ncclCollnetDeregBuffer(struct ncclComm* comm, struct ncclProxyConnector* proxyconn, void* handle) {
-  return g_ncclCollnetDeregBuffer(comm, proxyconn, handle);
-}
 #ifndef RCCL_TRANSPORT_STUBS_OMIT_COLL_NET
 ncclResult_t ncclCollnetDeregBuffer(struct ncclComm* comm, struct ncclProxyConnector* proxyconn, void* handle) {
   return g_ncclCollnetDeregBuffer(comm, proxyconn, handle);
@@ -204,10 +201,6 @@ static ncclResult_t DefaultCollnetLocalRegisterBuffer(struct ncclComm*, const vo
 }
 std::function<ncclResult_t(struct ncclComm*, const void*, size_t, int, int*, void**)>
   g_ncclCollnetLocalRegisterBuffer = DefaultCollnetLocalRegisterBuffer;
-ncclResult_t micro_ncclCollnetLocalRegisterBuffer(struct ncclComm* comm, const void* userbuff, size_t buffSize,
-                                                  int type, int* outRegBufUsed, void** outHandle) {
-  return g_ncclCollnetLocalRegisterBuffer(comm, userbuff, buffSize, type, outRegBufUsed, outHandle);
-}
 #ifndef RCCL_TRANSPORT_STUBS_OMIT_COLL_NET
 ncclResult_t ncclCollnetLocalRegisterBuffer(struct ncclComm* comm, const void* userbuff, size_t buffSize, int type,
                                             int* outRegBufUsed, void** outHandle) {
@@ -221,12 +214,6 @@ static ncclResult_t DefaultCollnetGraphRegisterBuffer(struct ncclComm*, const vo
 }
 std::function<ncclResult_t(struct ncclComm*, const void*, size_t, int, int*, void**, ncclCommCallbackQueue*, int*)>
   g_ncclCollnetGraphRegisterBuffer = DefaultCollnetGraphRegisterBuffer;
-ncclResult_t micro_ncclCollnetGraphRegisterBuffer(struct ncclComm* comm, const void* userbuff, size_t buffSize,
-                                                  int type, int* outRegBufFlag, void** outHandle,
-                                                  ncclCommCallbackQueue* cleanupQueue, int* nCleanupQueueElts) {
-  return g_ncclCollnetGraphRegisterBuffer(comm, userbuff, buffSize, type, outRegBufFlag, outHandle, cleanupQueue,
-                                          nCleanupQueueElts);
-}
 #ifndef RCCL_TRANSPORT_STUBS_OMIT_COLL_NET
 ncclResult_t ncclCollnetGraphRegisterBuffer(struct ncclComm* comm, const void* userbuff, size_t buffSize, int type,
                                             int* outRegBufFlag, void** outHandle, ncclCommCallbackQueue* cleanupQueue,
@@ -303,7 +290,7 @@ void ResetTransportStubs() {
   g_transportCanConnect = DefaultTransportCanConnect;
 }
 
-#ifndef RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
+#if !defined(RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR) && !defined(RCCL_TRANSPORT_STUBS_OMIT_COLL_NET)
 ncclResult_t ncclCollNetChainBufferSetup(ncclComm_t comm) { ::abort(); }
 ncclResult_t ncclCollNetDirectBufferSetup(ncclComm_t comm) { ::abort(); }
 #endif
@@ -372,3 +359,29 @@ ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* 
 #include "transport.h"
 struct ncclTransport netTransport = {};
 
+// ppc64le TOC references survive --gc-sections, so plugin device-count
+// functions referenced as function pointers in topo.cc need definitions
+// even though the code path that stores them is dead.  Use weak symbols
+// so tests that supply their own strong definitions (e.g. gin-plugin-init-test)
+// win without a duplicate-symbol error.
+#if defined(__powerpc64__) || defined(__PPC64__)
+#include "gin.h"
+#include "net.h"
+extern "C" {
+__attribute__((weak)) int ncclNetIb_devices(int* ndev) { *ndev = 0; return 0; }
+__attribute__((weak)) int ncclNetGdrCopy_devices(int* ndev) { *ndev = 0; return 0; }
+__attribute__((weak)) int ncclNetSocket_devices(int* ndev) { *ndev = 0; return 0; }
+__attribute__((weak)) int ncclGinDeviceCount(void) { return 0; }
+__attribute__((weak)) int ncclGinCustomAllReduceDeviceCount(void) { return 0; }
+}
+// topo.cc stores ncclNetGetDevCount / ncclGinGetDevCount / etc. as function
+// pointers in netInfo; the TOC entry survives --gc-sections on POWER even
+// when the code path is dead.  Weak stubs let MicroGraph (which links the
+// real topo.cc but not graph_fakes.cc) resolve them.
+__attribute__((weak)) ncclResult_t ncclNetGetDevCount(int, int* p, int* v) { if (p) *p = 0; if (v) *v = 0; return ncclSuccess; }
+__attribute__((weak)) ncclResult_t ncclCollNetGetDevCount(int, int* p, int* v) { if (p) *p = 0; if (v) *v = 0; return ncclSuccess; }
+__attribute__((weak)) ncclResult_t ncclGinGetDevCount(int, int* p, int* v) { if (p) *p = 0; if (v) *v = 0; return ncclSuccess; }
+__attribute__((weak)) ncclResult_t ncclRmaGetDevCount(int, int* p, int* v) { if (p) *p = 0; if (v) *v = 0; return ncclSuccess; }
+__attribute__((weak)) ncclResult_t ncclNetSetVirtDevCount(int, int) { return ncclSuccess; }
+__attribute__((weak)) ncclResult_t ncclCollNetSetVirtDevCount(int, int) { return ncclSuccess; }
+#endif

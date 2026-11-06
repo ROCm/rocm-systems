@@ -38,13 +38,15 @@ def environment(tmp_path):
         GITHUB_RUN_ID='123',
         GITHUB_RUN_ATTEMPT='1',
         ROCJITSU_SOURCE_DIR=str(tmp_path / 'source/emulation/rocjitsu'),
+        WORKFLOW_SOURCE_DIR=str(HELPER.parents[1]),
         CORPUS_SOURCE_DIR=str(tmp_path / 'corpus'),
         TENSILE_SOURCE=str(tmp_path / 'tensile'),
         NANOBIND_SOURCE=str(tmp_path / 'nanobind'),
         TENSILE_SHA=workflow['env']['TENSILE_SHA'],
         NANOBIND_SHA=workflow['env']['NANOBIND_SHA'],
         CORPUS_SHA='a' * 40,
-        GITHUB_SHA='b' * 40,
+        GITHUB_SHA='c' * 40,
+        BENCHMARK_SHA='b' * 40,
         GITHUB_ENV=str(tmp_path / 'github-env'),
     )
 
@@ -193,7 +195,7 @@ def test_owned_paths_are_outside_runner_output_and_native_backend(tmp_path):
         assert Path(ctx.env[key]).is_relative_to(ctx.root)
         assert not Path(ctx.env[key]).is_relative_to(ctx.root / 'results')
     assert ctx.env['PYTHONDONTWRITEBYTECODE'] == '1'
-    assert ctx.env['CMAKE_BUILD_PARALLEL_LEVEL'] == '4'
+    assert 'CMAKE_BUILD_PARALLEL_LEVEL' not in ctx.env
     assert ctx.env['ROCISA_BACKEND'] == 'native'
     assert ctx.cwd.is_dir() and not list(ctx.cwd.iterdir())
 
@@ -526,7 +528,7 @@ def test_inventory_rejects_invalid_recipe_selection(tmp_path, change):
         ctx.inventory()
 
 
-@pytest.mark.parametrize('key', ['TENSILE_SHA', 'NANOBIND_SHA'])
+@pytest.mark.parametrize('key', ['TENSILE_SHA', 'NANOBIND_SHA', 'BENCHMARK_SHA'])
 def test_source_checks_consume_workflow_environment_pins(tmp_path, key):
     module, ctx = fixture_preparation(tmp_path)
     ctx.env[key] = 'c' * 40
@@ -536,6 +538,24 @@ def test_source_checks_consume_workflow_environment_pins(tmp_path, key):
     with mock.patch.object(ctx, 'run', side_effect=FictionalCommands(module, ctx)):
         with pytest.raises(ValueError, match='exact immutable source pin'):
             ctx.sources()
+
+
+@pytest.mark.parametrize('boundary', ['rocjitsu-revision', 'runtime-version'])
+def test_workflow_revision_cannot_pass_source_or_binary_attribution(tmp_path, boundary):
+    module, ctx = fixture_preparation(tmp_path)
+    commands = FictionalCommands(module, ctx)
+
+    def wrong_revision(label, argv, capture=False, env_overrides=None):
+        if label == boundary:
+            return (
+                'git revision: ' if boundary == 'runtime-version' else ''
+            ) + ctx.env['GITHUB_SHA']
+        return commands(label, argv, capture, env_overrides)
+
+    with pytest.raises(
+        ValueError, match='source revision mismatch|source attribution mismatch'
+    ):
+        phases(module, ctx, wrong_revision)
 
 
 class FictionalCommands:
@@ -561,7 +581,7 @@ class FictionalCommands:
                 'tensile': self.ctx.env['TENSILE_SHA'],
                 'nanobind': self.ctx.env['NANOBIND_SHA'],
                 'corpus': self.ctx.env['CORPUS_SHA'],
-                'rocjitsu': self.ctx.env['GITHUB_SHA'],
+                'rocjitsu': self.ctx.env['BENCHMARK_SHA'],
             }[label.removesuffix('-revision')]
         if label.endswith('-clean'):
             return ''
@@ -611,7 +631,7 @@ class FictionalCommands:
                 file.parent.mkdir(parents=True, exist_ok=True)
                 file.write_bytes(b'FICTIONAL executable - never executed')
         if label == 'runtime-version':
-            return 'git revision: ' + self.ctx.env['GITHUB_SHA']
+            return 'git revision: ' + self.ctx.env['BENCHMARK_SHA']
         if label.startswith('generate-'):
             variant = label.removeprefix('generate-')
             directory = self.ctx.artifacts / variant
@@ -702,38 +722,6 @@ def test_prepared_python_loader_smoke_is_early_and_propagates_failure(
         assert not (ctx.root / 'ready.json').exists()
 
 
-def test_build_worker_policy_reaches_both_builds_wheel_and_export(tmp_path):
-    module, ctx = fixture_preparation(tmp_path)
-    assert ctx.env['CMAKE_BUILD_PARALLEL_LEVEL'] == '4'
-    # Model changing only preparation's owned build policy, not an incoming override.
-    ctx.env['CMAKE_BUILD_PARALLEL_LEVEL'] = '2'
-    commands = FictionalCommands(module, ctx)
-    worker_env = {}
-
-    def intercept(label, argv, capture=False, env_overrides=None):
-        if label in ('build', 'adapter-build', 'wheel'):
-            worker_env[label] = ctx.env['CMAKE_BUILD_PARALLEL_LEVEL']
-        return commands(label, argv, capture, env_overrides)
-
-    phases(module, ctx, intercept)
-    builds = {
-        label: args[args.index('--parallel') + 1]
-        for label, args in commands.calls
-        if label in ('build', 'adapter-build')
-    }
-    assert builds == {'build': '2', 'adapter-build': '2'}
-    assert worker_env == {'build': '2', 'wheel': '2', 'adapter-build': '2'}
-    assert 'CMAKE_BUILD_PARALLEL_LEVEL=2\n' in Path(ctx.env['GITHUB_ENV']).read_text()
-    # Generator workers are a different policy and must remain four.
-    for variant in ctx.inventory():
-        import yaml
-
-        config = yaml.safe_load(
-            (ctx.artifacts / variant / 'candidate.yaml').read_text()
-        )
-        assert config['GlobalParameters']['CpuThreads'] == 4
-
-
 def test_intercepted_preparation_orders_exact_owned_wheel_and_four_generators(tmp_path):
     module, ctx = fixture_preparation(tmp_path)
     assert list(ctx.inventory()) == [
@@ -780,17 +768,14 @@ def test_intercepted_preparation_orders_exact_owned_wheel_and_four_generators(tm
     )
     assert '-DFETCHCONTENT_SOURCE_DIR_NANOBIND=' + ctx.env['NANOBIND_SOURCE'] in native
     assert '-DFETCHCONTENT_FULLY_DISCONNECTED=ON' in native
-    assert all(
-        args[args.index('--parallel') + 1] == '4'
-        for _, args in commands.calls
-        if '--parallel' in args
-    )
+    assert all('--parallel' not in args for _, args in commands.calls)
     assert ctx.env['LD_LIBRARY_PATH'].split(':') == [
         str(ctx.root / 'venv/sdk' / p)
         for p in ('lib', 'lib/rocm_sysdeps/lib', 'lib/llvm/lib', 'lib/host-math/lib')
     ]
     assert json.loads((ctx.root / 'ready.json').read_text()) == ctx.inventory()
     exported = Path(ctx.env['GITHUB_ENV']).read_text()
+    assert 'CMAKE_BUILD_PARALLEL_LEVEL=' not in exported
     assert (
         'ROCISA_BACKEND=native\n' in exported
         and 'TENSILE_CANDIDATE_ARTIFACTS=' + str(ctx.artifacts) in exported
@@ -1014,6 +999,8 @@ def test_diagnostics_size_limits_and_symlink_exclusion(tmp_path):
     module, ctx = fixture_preparation(tmp_path)
     ctx.start('diagnostics')
     (ctx.logs / 'large.log').write_bytes(b'x' * 300000)
+    for index in range(130):
+        (ctx.logs / f'z-{index:03}.log').write_text('diagnostic output\n')
     outside = tmp_path / 'secret.log'
     outside.write_text('must not archive')
     (ctx.logs / 'outside.log').symlink_to(outside)
@@ -1025,6 +1012,9 @@ def test_diagnostics_size_limits_and_symlink_exclusion(tmp_path):
         assert stream is not None
         inventory = json.load(stream)
         assert inventory['per_file_limit_bytes'] == 256 * 1024
+        assert inventory['file_limit'] == len(inventory['entries']) == 128
+        assert inventory['omitted_files'] == 3
+        assert len(archive.getmembers()) == 129  # Files plus inventory.
         assert inventory['entries'][0]['truncated'] is True
         assert archive.getmember('logs/large.log').size == 256 * 1024
 
