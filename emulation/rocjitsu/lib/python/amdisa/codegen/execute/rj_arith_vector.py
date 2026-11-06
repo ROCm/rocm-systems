@@ -11,7 +11,9 @@ from .rj_arith_names import wave_api
 BINARY32 = set()
 
 
-UNARY32 = set()
+UNARY32 = {'V_MOV_B32'}
+
+CONDITIONAL_NAMES = {'V_CNDMASK_B32', 'V_CNDMASK_B16'}
 
 
 TERNARY32 = set()
@@ -36,6 +38,8 @@ def gen_vector32(ctx: ExecuteContext) -> str | None:
     is_vop3 = ctx.is_vop3
     if arch not in ('rdna3', 'rdna4') or mnemonic not in VECTOR32_NAMES:
         return None
+    if mnemonic in CONDITIONAL_NAMES:
+        return gen_conditional(ctx)
     if mnemonic in UNARY32 | WIDEN16_NAMES | SATURATE_NAMES:
         kind, count = 'unary', 1
     elif mnemonic in BINARY32:
@@ -87,6 +91,8 @@ def gen_vector32(ctx: ExecuteContext) -> str | None:
         if is_vop3 and mnemonic not in UNMODIFIED_MULTIPLIES and mnemonic != 'V_MOV_B32'
         else '0u'
     )
+    if mnemonic == 'V_MOV_B32' and is_vop3:
+        modifiers = '((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u)'
     return (
         f'  amdgpu::arith::execute_{kind}32(wf, {wave_api(api, 32)}, {wave_api(api, 64)},\n'
         '      wf.cu().arithmetic_flags(),\n'
@@ -134,6 +140,95 @@ def gen_widening_integer(ctx: ExecuteContext) -> str | None:
     )
 
 
+def gen_conditional(ctx: ExecuteContext) -> str | None:
+    mnemonic = ctx.inst.name
+    dst, src, is_vop3 = ctx.dst_ops, ctx.src_ops, ctx.is_vop3
+    if len(dst) != 1 or len(src) != (3 if is_vop3 else 2):
+        return None
+    half = mnemonic.endswith('B16')
+    # A zero execution mask must not observe the scalar condition operand.
+    lines = ['  if (!wf.exec()) return;']
+    modifiers = '0'
+    if is_vop3:
+        lines += [
+            '  uint64_t modifiers = ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |',
+            '      ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |',
+            '      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |',
+            '      ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u);',
+        ]
+        if half:
+            lines += [
+                '  const uint32_t opsel = amdgpu::vop3_opsel(inst_);',
+                '  modifiers |= ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) |',
+                '      ((opsel & 2) ? RJ_ARITH_ALU_HIGH_B : 0u) |',
+                '      ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u);',
+            ]
+        modifiers = 'modifiers'
+    condition = (
+        f'amdgpu::read_wave_mask_scalar({src[2]}, wf)' if is_vop3 else 'wf.vcc_mask()'
+    )
+    api = 'rj_arith_' + mnemonic.lower()
+    lines += [
+        f'  amdgpu::arith::execute_conditional<{str(half).lower()}>(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
+        '      wf.cu().arithmetic_flags(),',
+        f'      {modifiers}, {dst[0]}, {src[0]}, {src[1]}, {condition});',
+    ]
+    return '\n'.join(lines)
+
+
+UNARY16 = {'V_MOV_B16'}
+
+
+BINARY16 = set()
+
+
+TERNARY16 = set()
+
+
+INTEGER16_NAMES = UNARY16 | BINARY16 | TERNARY16
+
+
+def gen_integer16(ctx: ExecuteContext) -> str | None:
+    arch = ctx.arch_name
+    mnemonic = ctx.inst.name
+    dst = ctx.dst_ops
+    src = ctx.src_ops
+    is_vop3 = ctx.is_vop3
+    if arch not in ('rdna3', 'rdna4') or mnemonic not in INTEGER16_NAMES:
+        return None
+    count = 1 if mnemonic in UNARY16 else 2 if mnemonic in BINARY16 else 3
+    if len(dst) != 1 or len(src) != count:
+        return None
+    lines = []
+    sign_modifiers = (
+        '((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |'
+        if mnemonic == 'V_MOV_B16' and is_vop3
+        else ''
+    )
+    if is_vop3:
+        lines += [
+            '  const uint32_t opsel = amdgpu::vop3_opsel(inst_);',
+            f'  const uint64_t modifiers = {sign_modifiers} (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u) |',
+            '      ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |',
+        ]
+        for i, selector in enumerate(('A', 'B', 'C')[:count]):
+            suffix = ';' if i + 1 == count else ' |'
+            lines.append(
+                f'      ((opsel & {1 << i}) ? RJ_ARITH_ALU_HIGH_{selector} : 0u){suffix}'
+            )
+    else:
+        # VOP1 operands already resolve their encoded source/destination halves.
+        lines.append('  const uint64_t modifiers = 0;')
+    api = 'rj_arith_' + mnemonic.lower()
+    inputs = ', '.join([src[0]] + ['&' + operand for operand in src[1:]])
+    lines += [
+        f'  amdgpu::arith::execute_integer16<{count}>(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
+        '      wf.cu().arithmetic_flags(),',
+        f'      modifiers, {dst[0]}, {inputs});',
+    ]
+    return '\n'.join(lines)
+
+
 INTEGER_DOT_NAMES = {
     'V_DOT4_I32_IU8',
     'V_DOT4_U32_U8',
@@ -175,4 +270,4 @@ def gen_integer_dot(ctx: ExecuteContext) -> str | None:
     )
 
 
-VECTOR32_NAMES = WIDEN16_NAMES | SATURATE_NAMES
+VECTOR32_NAMES = UNARY32 | CONDITIONAL_NAMES | WIDEN16_NAMES | SATURATE_NAMES

@@ -441,28 +441,14 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     };
     const uint32_t low = variable ? 0 : control(selector, 0);
     const uint32_t high = control(group, 0);
-    uint64_t read_lanes = 0, write_lanes = 0;
-    uint64_t remaining = lanes;
-    while (remaining) {
-      const unsigned lane = std::countr_zero(remaining);
-      remaining &= remaining - 1;
-      const uint32_t selection = variable ? control(selector, lane)
-                                 : row16 ? (((lane & 15) < 8 ? low : high) >> ((lane & 7) * 4)) & 15
-                                         : low;
-      const unsigned source = valu_permutation_source(kind, lane, selection, high, wf.wf_size());
-      if (source >= wf.wf_size()) {
-        if (!row16 && kind != ValuPermutation::Perm64)
-          write_lanes |= uint64_t{1} << lane;
-        continue;
-      }
-      if (row16 && !modifiers.fi && !(lanes & (uint64_t{1} << source))) {
-        if (modifiers.bound_ctrl)
-          write_lanes |= uint64_t{1} << lane;
-        continue;
-      }
-      read_lanes |= uint64_t{1} << source;
-      write_lanes |= uint64_t{1} << lane;
-    }
+    const auto permutation = valu_permutation_lanes(
+        kind, lanes, wf.wf_size(), high, row16, modifiers.fi, modifiers.bound_ctrl,
+        [&](unsigned lane) {
+          return variable ? control(selector, lane)
+                 : row16  ? (((lane & 15) < 8 ? low : high) >> ((lane & 7) * 4)) & 15
+                          : low;
+        });
+    const auto [read_lanes, write_lanes] = permutation;
     if (read_lanes)
       if (const auto reg = resolve(*inst.src_operand(0), false))
         access(*reg, reg->cls == RegClass::VGPR ? read_lanes : ~uint64_t{0}, 0xf, false);
@@ -512,8 +498,8 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
       std::optional<uint32_t> base;
       if (reg && reg->cls == RegClass::VGPR)
         base = reg->index + (wf.vgpr_msb_for_role(operand.vgpr_msb_role()) << 8);
-      const auto index =
-          relative_vgpr_index(base, offset, operand.vgpr_count(), wf.vgpr_alloc().count);
+      const auto index = relative_vgpr_index(base, offset, operand.vgpr_count(),
+                                             wf.vgpr_alloc().count, wf.cu().arch());
       if (!index)
         return std::nullopt;
       return RegisterRef{RegClass::VGPR, static_cast<uint16_t>(*index),
@@ -574,6 +560,41 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
         access(*reg, reg->cls == RegClass::VGPR ? uint64_t{1} << lane : ~uint64_t{0}, 0xf, true);
     return;
   }
+  std::optional<uint64_t> selection;
+  if (name.starts_with("v_cndmask_") && lanes &&
+      (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 || wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4)) {
+    // Check the condition dependency before using its current value to select sources.
+    const auto *condition = inst.num_src_operands() > 2 ? inst.src_operand(2) : nullptr;
+    if (!condition || condition->is_fieldless()) {
+      if (lanes & 0xffffffffu)
+        access({RegClass::VCC, 0, 1}, ~uint64_t{0}, 0xf, false);
+      if (lanes >> 32)
+        access({RegClass::VCC, 1, 1}, ~uint64_t{0}, 0xf, false);
+      selection = wf.vcc_mask();
+    } else {
+      if (auto reg = resolve(*condition, false))
+        access(*reg, ~uint64_t{0}, 0xf, false);
+      if (condition->encoding_value() == 124) {
+        // NULL denotes zero for the whole mask, not a NULL/M0 register pair.
+        selection = 0;
+      } else if (auto value = condition->const_value()) {
+        selection = *value;
+      } else if (auto lo = registers.scalar_control_value(condition->encoding_value())) {
+        selection = *lo;
+        if (wf.wf_size() == 64) {
+          const auto selector = condition->encoding_value();
+          if (selector == 251 || selector == 106)
+            selection = wf.vcc_mask();
+          else if (selector == 252 || selector == 126)
+            selection = wf.exec();
+          else if (auto hi = registers.scalar_control_value(selector + 1))
+            *selection |= uint64_t{*hi} << 32;
+          else
+            selection.reset();
+        }
+      }
+    }
+  }
   auto check_operand = [&](const Operand *op, bool write) {
     const bool mix_preservation = !write && op == inst.dst_operand(0) &&
                                   (name.find("mixlo_") != std::string_view::npos ||
@@ -606,6 +627,12 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
         accessed_lanes = quads << (p2 ? 2 : 1);
       else if (op == inst.src_operand(2) && !p2)
         accessed_lanes = quads;
+    }
+    if (selection && !write && reg->cls == RegClass::VGPR) {
+      if (op == inst.src_operand(1))
+        accessed_lanes &= *selection;
+      else if (op == inst.src_operand(0) && !modifiers.dpp && !modifiers.dpp8)
+        accessed_lanes &= ~*selection;
     }
     if (vector && !lanes && !write && !inst.is_memory_op())
       return;
