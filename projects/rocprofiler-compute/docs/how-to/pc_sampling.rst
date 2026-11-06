@@ -190,7 +190,7 @@ Each file holds one row per instruction line, ordered by code object offset:
        ``MATRIX``. Empty when the instruction is not classified.
    * - ``Total count``
      - Samples that landed on this instruction.
-   * - ``Active count``
+   * - ``Issue count``
      - Samples where the wave issued. Empty for ``host_trap``.
    * - ``Stall count``
      - Samples where the wave was stalled. Empty for ``host_trap``.
@@ -239,7 +239,7 @@ that line:
      - Source line number in the source file.
    * - ``Source line``
      - Text of the line.
-   * - ``Total count``, ``Active count``, ``Stall count``, ``Stall <REASON>``
+   * - ``Total count``, ``Issue count``, ``Stall count``, ``Stall <REASON>``
      - Sums over the instructions compiled from this line.
    * - ``Wave occupancy percent``, ``Active thread percent``
      - Averages over the samples of those instructions.

@@ -162,7 +162,7 @@ def test_write_per_source_line_files_writes_header_and_rows(tmp_path):
             "Source line number",
             "Source line",
             "Total count",
-            "Active count",
+            "Issue count",
             "Stall count",
             "Wave occupancy percent",
             "Active thread percent",
