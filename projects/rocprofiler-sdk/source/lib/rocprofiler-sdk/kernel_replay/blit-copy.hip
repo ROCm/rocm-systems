@@ -234,7 +234,7 @@ __device__ std::uint32_t
 }  // namespace
 
 // Pass 1 of 3 of the tile list: the tiles in each chunk of workgroup_size descriptors.
-extern "C" __global__ __launch_bounds__(workgroup_size) void kernel_replay_count_tiles(
+extern "C" __global__ __launch_bounds__(workgroup_size) void __kernel_replay_count_tiles(
     count_tiles_args_t args)
 {
     const auto* descriptors  = reinterpret_cast<const global_descriptor_t*>(args.descriptors);
@@ -249,7 +249,7 @@ extern "C" __global__ __launch_bounds__(workgroup_size) void kernel_replay_count
 
 // Pass 2 of 3: each chunk adds up the chunks before it, then scans its own descriptors into their
 // first tiles. The last chunk stores the total.
-extern "C" __global__ __launch_bounds__(workgroup_size) void kernel_replay_scan_tiles(
+extern "C" __global__ __launch_bounds__(workgroup_size) void __kernel_replay_scan_tiles(
     scan_tiles_args_t args)
 {
     const auto* descriptors  = reinterpret_cast<const global_descriptor_t*>(args.descriptors);
@@ -272,7 +272,7 @@ extern "C" __global__ __launch_bounds__(workgroup_size) void kernel_replay_scan_
 }
 
 // Pass 3 of 3, one thread per tile: a binary search over the first tiles finds its descriptor.
-extern "C" __global__ __launch_bounds__(workgroup_size) void kernel_replay_expand_tiles(
+extern "C" __global__ __launch_bounds__(workgroup_size) void __kernel_replay_expand_tiles(
     expand_tiles_args_t args)
 {
     const auto* descriptors = reinterpret_cast<const global_descriptor_t*>(args.descriptors);
@@ -309,7 +309,7 @@ extern "C" __global__ __launch_bounds__(workgroup_size) void kernel_replay_expan
     }
 }
 
-extern "C" __global__ __launch_bounds__(workgroup_size) void kernel_replay_copy_tiles(
+extern "C" __global__ __launch_bounds__(workgroup_size) void __kernel_replay_copy_tiles(
     copy_tiles_args_t args)
 {
     copy_tiles<false>(reinterpret_cast<const global_descriptor_t*>(args.tiles),
@@ -320,7 +320,7 @@ extern "C" __global__ __launch_bounds__(workgroup_size) void kernel_replay_copy_
 }
 
 // The capture copy, which also digests every tile it reads. expand zeroed the digests.
-extern "C" __global__ __launch_bounds__(workgroup_size) void kernel_replay_capture_tiles(
+extern "C" __global__ __launch_bounds__(workgroup_size) void __kernel_replay_capture_tiles(
     capture_tiles_args_t args)
 {
     copy_tiles<true>(reinterpret_cast<const global_descriptor_t*>(args.tiles),
@@ -334,7 +334,7 @@ extern "C" __global__ __launch_bounds__(workgroup_size) void kernel_replay_captu
 // copied back from the snapshot, flagged, and appended to the changed list in no particular order.
 // Each lane holds one pending entry, and the waves of a workgroup claim their list slots together
 // at the end: contended atomics on one count cost several ns each.
-extern "C" __global__ __launch_bounds__(workgroup_size) void kernel_replay_restore_changed_tiles(
+extern "C" __global__ __launch_bounds__(workgroup_size) void __kernel_replay_restore_changed_tiles(
     restore_changed_args_t args)
 {
     __shared__ std::uint32_t wave_pending[workgroup_size / 32];
@@ -391,7 +391,7 @@ extern "C" __global__ __launch_bounds__(workgroup_size) void kernel_replay_resto
 
 // Before each later pass, copies the tiles on a changed list back from the snapshot, in pieces
 // like the capture when the list is short.
-extern "C" __global__ __launch_bounds__(workgroup_size) void kernel_replay_restore_listed_tiles(
+extern "C" __global__ __launch_bounds__(workgroup_size) void __kernel_replay_restore_listed_tiles(
     restore_listed_args_t args)
 {
     const auto* tiles       = reinterpret_cast<const global_descriptor_t*>(args.tiles);
@@ -418,7 +418,7 @@ extern "C" __global__ __launch_bounds__(workgroup_size) void kernel_replay_resto
 
 // After the last pass, counts the captured tiles off the changed list whose digest changed anyway.
 // The restores from that list missed them.
-extern "C" __global__ __launch_bounds__(workgroup_size) void kernel_replay_check_tiles(
+extern "C" __global__ __launch_bounds__(workgroup_size) void __kernel_replay_check_tiles(
     check_tiles_args_t args)
 {
     const auto* tiles    = reinterpret_cast<const global_descriptor_t*>(args.tiles);
