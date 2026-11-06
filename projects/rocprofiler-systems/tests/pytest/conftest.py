@@ -678,6 +678,12 @@ def pytest_collection_finish(session) -> None:
                 f"CTestTestfile.cmake generation failed due to:\n{failures}",
                 returncode=1,
             )
+        if not session.items:
+            pytest.exit(
+                "CTestTestfile.cmake generation collected 0 tests; check the pytest "
+                "configuration (python_files, -m/-k filters) that applies to this directory",
+                returncode=1,
+            )
         raw_path = session.config.getoption("--ctest-output-path", default=None)
         output_path = Path(raw_path) if raw_path else None
         _ctest_generate_tests(session.items, output_path)
