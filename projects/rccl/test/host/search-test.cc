@@ -820,6 +820,22 @@ TEST_F(SearchMicrotest, Compute_GraphFileReplacesTheSearch) {
   EXPECT_TRUE(Logged("latencyinter not found in graph, using 0.0"));
 }
 
+TEST_F(SearchMicrotest, Compute_MalformedGraphFileFailsTheWholeSearch) {
+  // The import rejections only matter if ncclTopoCompute propagates them. If it
+  // swallowed the error it would return ncclSuccess with graph->nChannels
+  // already set from the nchannels attribute of the file it just rejected.
+  Use(XgmiSystem(2));
+  TempFile file("<graphs version=\"1\"><graph id=\"0\" pattern=\"4\" crossnic=\"0\" nchannels=\"1\" "
+                "speedintra=\"20\" speedinter=\"20\" typeintra=\"NVL\" typeinter=\"PIX\" samechannels=\"1\">"
+                "<channel><gpu dev=\"0\" rank=\"7\"/><gpu dev=\"1\" rank=\"1\"/></channel></graph></graphs>");
+  RcclUnitTesting::ScopedEnv graphFile("NCCL_GRAPH_FILE", file.path());
+
+  GraphPtr ring = NewGraph(0, NCCL_TOPO_PATTERN_RING, 1, MAXCHANNELS / 2);
+
+  EXPECT_EQ(ncclInvalidUsage, ncclTopoCompute(system_.get(), ring.get()));
+  EXPECT_TRUE(Logged("rank 7 not found in topology"));
+}
+
 TEST_F(SearchMicrotest, Compute_EmptyGraphFileFallsThroughToTheSearch) {
   Use(XgmiSystem(2));
   TempFile file("<graphs version=\"1\"/>");
