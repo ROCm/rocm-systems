@@ -169,9 +169,16 @@ RocJITsu sink, and the v13 tensor-DMA descriptor geometry. Tensor-DMA descriptor
 strides are converted from element units to the byte units required by the v13
 callback.
 
+The backend API accessor and all backend and host diagnostic callbacks must not
+throw. This is a semantic contract; the ABI function pointer types are unchanged.
+Configuration, loading, and negotiation failures return diagnostics before the
+adapter becomes active and release its singleton claim so creation can be retried.
+Standard-library allocation failures are fatal when exceptions are disabled.
+
 These FFM versions do not expose a table size or ABI fingerprint, and `on_init`
-returns no status. Qualify the exact Perfsim build with a known dispatch and
-require a nonempty report containing that dispatch.
+returns no status, so activation has no recoverable failure channel. Qualify the
+exact Perfsim build with a known dispatch and require a nonempty report containing
+that dispatch.
 
 ## Real-world example: GPT-OSS kernels
 
