@@ -99,6 +99,69 @@ TEST_F(TranslationStoreTest, StoredObjectComesBack) {
   EXPECT_EQ(store->hits_for_test(), 1u);
 }
 
+TEST_F(TranslationStoreTest, MalformedEntriesAreMisses) {
+  auto store = open("pair-a");
+  put(*store, kObject);
+  ASSERT_EQ(get(*store), kObject);
+
+  const std::filesystem::path entries = std::filesystem::path(root_) / "pair-a" / "v1";
+  std::filesystem::path manifest;
+  std::filesystem::path object;
+  for (const auto &item : std::filesystem::directory_iterator(entries)) {
+    if (item.path().extension() == ".man")
+      manifest = item.path();
+    if (item.path().extension() == ".obj")
+      object = item.path();
+  }
+  ASSERT_FALSE(manifest.empty());
+  ASSERT_FALSE(object.empty());
+  std::ifstream manifest_stream(manifest);
+  const std::string original((std::istreambuf_iterator<char>(manifest_stream)), {});
+
+  for (const std::string &text : {std::string{}, std::string("bad magic\n"),
+                                  std::string("rjcache1\n"), original + std::string(4096, 'x')}) {
+    std::ofstream(manifest, std::ios::trunc) << text;
+    EXPECT_TRUE(get(*store).empty());
+  }
+  // A valid manifest must still reject a missing or corrupted object.
+  std::ofstream(manifest, std::ios::trunc) << original;
+  std::ofstream(object, std::ios::trunc) << "OUTPUT";
+  EXPECT_TRUE(get(*store).empty());
+  std::filesystem::remove(object);
+  EXPECT_TRUE(get(*store).empty());
+
+  put(*store, kObject);
+  EXPECT_EQ(get(*store), kObject);
+}
+
+TEST_F(TranslationStoreTest, FailedPublicationLeavesNoTemporaryOrPartialEntry) {
+  for (const char *suffix : {".man", ".obj"}) {
+    auto store = open("pair-a");
+    put(*store, kObject);
+    ASSERT_EQ(get(*store), kObject);
+
+    const std::filesystem::path entries = std::filesystem::path(root_) / "pair-a" / "v1";
+    std::filesystem::path blocked;
+    for (const auto &item : std::filesystem::directory_iterator(entries))
+      if (item.path().extension() == suffix)
+        blocked = item.path();
+    ASSERT_FALSE(blocked.empty());
+    for (const auto &item : std::filesystem::directory_iterator(entries))
+      std::filesystem::remove(item.path());
+    // renameat() cannot publish a regular file over this directory. Blocking
+    // the object also exercises cleanup after the manifest was published.
+    ASSERT_TRUE(std::filesystem::create_directory(blocked));
+    put(*store, kObject);
+    EXPECT_TRUE(get(*store).empty());
+    for (const auto &item : std::filesystem::directory_iterator(entries))
+      EXPECT_EQ(item.path(), blocked) << "failed publication left an entry or temporary";
+
+    std::filesystem::remove(blocked);
+    put(*store, kObject);
+    EXPECT_EQ(get(*store), kObject);
+  }
+}
+
 TEST_F(TranslationStoreTest, DomainsDoNotShareEntries) {
   auto first = open("pair-a");
   auto second = open("pair-b");

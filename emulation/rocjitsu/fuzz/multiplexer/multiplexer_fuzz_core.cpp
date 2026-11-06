@@ -10,6 +10,8 @@
 #include "rocjitsu/isa/decoder.h"
 
 #include <array>
+#include <cassert>
+#include <cstdlib>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -26,8 +28,15 @@ constexpr std::array kTargets = {
 uint64_t run_decode(std::span<const uint8_t> payload) {
   if (payload.size() != decode_fuzz::kWindowSize)
     return 0;
-  thread_local std::unique_ptr<Decoder> decoder = decode_fuzz::create_decoder("gfx1250");
-  return decode_fuzz::decode_window(*decoder, payload).valid;
+  thread_local util::FailureOr<std::unique_ptr<Decoder>> decoder =
+      decode_fuzz::create_decoder("gfx1250");
+  if (decoder.failed())
+    std::abort();
+  const util::FailureOr<decode_fuzz::DecodeRecord> record =
+      decode_fuzz::decode_window(*decoder.value(), payload);
+  if (record.failed())
+    std::abort();
+  return record.value().valid;
 }
 
 uint64_t run_execution(std::span<const uint8_t> payload) {
@@ -41,7 +50,10 @@ uint64_t run_execution(std::span<const uint8_t> payload) {
 }
 
 uint64_t run_code_object(std::span<const uint8_t> payload) {
-  const code_object_fuzz::RunStats stats = code_object_fuzz::run_input(payload);
+  static_assert(kMaxInputSize - 1 <= code_object_fuzz::kMaxInputSize);
+  const util::FailureOr<code_object_fuzz::RunStats> result = code_object_fuzz::run_input(payload);
+  assert(result.succeeded());
+  const code_object_fuzz::RunStats &stats = result.value();
   return stats.code_objects_valid + stats.executables_valid;
 }
 

@@ -122,7 +122,7 @@ using util::Sha256;
   } query{static_cast<const uint8_t *>(address), {}};
 
   dl_iterate_phdr(
-      [](struct dl_phdr_info *phdr_info, size_t, void *data) -> int {
+      [](struct dl_phdr_info *phdr_info, size_t, void *data) noexcept -> int {
         auto *q = static_cast<Query *>(data);
         bool holds_self = false;
         for (int i = 0; i < phdr_info->dlpi_phnum && !holds_self; ++i) {
@@ -920,14 +920,8 @@ bool TranslationStore::available() { return impl_->available(); }
 
 TranslationStore::~TranslationStore() = default;
 
-// Every public operation is contained here rather than at each internal step.
-// The documented contract is best effort -- a caller translates instead -- but
-// these paths allocate strings, vectors and file buffers, and this component is
-// reached from an HSA load callback. A std::bad_alloc escaping key_for() fails
-// that load outright, turning a cache that could not answer into a program that
-// cannot run. Returning an invalid key, a miss, or a no-op keeps the promise.
 CacheKey TranslationStore::key_for(std::span<const uint8_t> source,
-                                   const TranslationIdentity &identity) try {
+                                   const TranslationIdentity &identity) noexcept {
   CacheKey key;
   if (source.empty())
     return key;
@@ -956,26 +950,20 @@ CacheKey TranslationStore::key_for(std::span<const uint8_t> source,
   key.digest = hash.finish();
   key.valid = true;
   return key;
-} catch (...) {
-  return CacheKey{};
 }
 
 std::vector<uint8_t> TranslationStore::lookup(const CacheKey &key,
-                                              const TranslationIdentity &identity) try {
+                                              const TranslationIdentity &identity) noexcept {
   if (!key.valid)
     return {};
   return impl_->lookup(to_hex(key.digest), identity);
-} catch (...) {
-  return {};
 }
 
 void TranslationStore::store(const CacheKey &key, std::span<const uint8_t> translated,
-                             const TranslationIdentity &identity) noexcept try {
+                             const TranslationIdentity &identity) noexcept {
   if (!key.valid || translated.empty())
     return;
   impl_->store(to_hex(key.digest), translated, identity);
-} catch (...) {
-  // Declared never to throw, and now actually is.
 }
 
 #if defined(RJ_TRANSLATION_STORE_TEST_HOOKS)
