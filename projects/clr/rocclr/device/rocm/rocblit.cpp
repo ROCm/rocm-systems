@@ -117,7 +117,8 @@ bool DmaBlitManager::readImage(device::Memory& srcMemory, void* dstHost, const a
 }
 
 // ================================================================================================
-// This path handles kSrcAccessOrderDuringApiCall for ephemeral host sources:
+// HIP snapshots DuringApiCall batch sources before enqueue. This remains a
+// defensive source-lifetime path for other callers with ephemeral host sources:
 // hsaCopyStagedOrPinned performs a synchronous memcpy into a staging buffer, consuming the
 // source data before the async DMA is queued, so the source can safely go out of scope.
 bool DmaBlitManager::writeBuffer(const void* srcHost, device::Memory& dstMemory,
@@ -1433,7 +1434,8 @@ bool KernelBlitManager::copyBufferToImage(device::Memory& srcMemory, device::Mem
     return result;
   }
   // Check if buffer is in system memory with direct access
-  else if (srcMemory.isHostMemDirectAccess() &&
+  else if (copyMetadata.copyEnginePreference_ != amd::CopyMetadata::CopyEnginePreference::BLIT &&
+           srcMemory.isHostMemDirectAccess() &&
            (((rowPitch == 0) && (slicePitch == 0)) ||
             ((rowPitch == imgRowPitch) && ((slicePitch == 0) || (slicePitch == imgSlicePitch))))) {
     // First attempt to do this all with DMA,
@@ -2134,7 +2136,8 @@ bool KernelBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory
       !dwordAlignedRect && hostDeviceRect && ((sizeIn[1] * sizeIn[2]) > kSdmaRectRowSerializeLimit);
 
   // Fall into the ROC path for rejected transfers
-  if (dev().info().pcie_atomics_ && !sdmaRectWouldSerialize &&
+  if (copyMetadata.copyEnginePreference_ != amd::CopyMetadata::CopyEnginePreference::BLIT &&
+      dev().info().pcie_atomics_ && !sdmaRectWouldSerialize &&
       (setup_.disableCopyBufferRect_ || srcMemory.isHostMemDirectAccess() ||
        dstMemory.isHostMemDirectAccess())) {
     result = DmaBlitManager::copyBufferRect(srcMemory, dstMemory, srcRectIn, dstRectIn, sizeIn,
@@ -2265,6 +2268,10 @@ bool KernelBlitManager::CopyBufferRectBatch(
   sequential_copy_ops.reserve(copy_ops.size());
 
   for (const amd::BatchCopyRectOp& op : copy_ops) {
+    if (op.metadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::BLIT) {
+      sequential_copy_ops.push_back(op);
+      continue;
+    }
     const Memory& src_memory =
         gpuMem(*op.src_memory->getDeviceMemory(*op.src_memory->getContext().devices()[0]));
     const Memory& dst_memory =
@@ -3119,7 +3126,8 @@ bool KernelBlitManager::WriteBufferBatch(
     size_t copy_offset = 0;
     size_t remaining_size = op.size;
     bool first_transfer = true;
-    // Staging captures source bytes before return; pinned host DMA may read later.
+    // Keep a defensive staging policy for callers without an enqueue-time snapshot.
+    // HIP batch sources normally arrive as retained buffer copies.
     const bool enable_pin =
         op.metadata.srcAccessOrder_ != amd::CopyMetadata::kSrcAccessOrderDuringApiCall;
 

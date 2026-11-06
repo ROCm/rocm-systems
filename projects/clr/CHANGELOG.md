@@ -6,6 +6,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 ### Resolved issues
 
+* Fixed `hipMemcpyBatchAsync`, `hipExtMemcpyBatchAsync`, and `hipMemcpy3DBatchAsync` with `hipMemcpySrcAccessOrderDuringApiCall` to preserve host source bytes through deferred execution, including pitched and pinned sources. Repeated source regions share one snapshot per batch and executing device, released on completion. Snapshot allocation failure returns `hipErrorOutOfMemory`. Extended swap and indirect operations with this access order complete before return and may wait for earlier stream work.
 * Kernels without an LDS carveout preference now dispatch with no preference instead of a 0% LDS hint, and `hipFuncSetCacheConfig(hipFuncCachePreferNone)` no longer overrides `hipDeviceSetCacheConfig`.
 * `hipDeviceGetCacheConfig` now returns the value set by `hipDeviceSetCacheConfig` on devices with a configurable LDS carveout.
 
