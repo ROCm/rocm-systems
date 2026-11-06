@@ -4,7 +4,8 @@
 """ROCTX instrumentation backend for JAX.
 
 Resolves jax.jit, jax.pmap, and jax.extend.core.Primitive handles.
-Wraps jax.jit compiled __call__ and the jax.pmap factory with ROCTX ranges.
+Wraps jax.jit compiled __call__, the jax.pmap factory, and
+Primitive.bind_with_trace with ROCTX ranges.
 """
 
 import importlib.util
@@ -27,15 +28,17 @@ class _JaxState:
         self.pmap_factory: Any = None
         self.primitive: Any = None
         self.compiled_call: Any = None
+        self.bind_with_trace: Any = None
 
 
 _STATE = _JaxState()
 
 
 def patch_jax_entry_points() -> None:
-    """Wrap JAX compiled-call entry points."""
+    """Wrap JAX compiled-call and primitive-dispatch entry points."""
     _wrap_jit_compiled_call()
     _wrap_pmap_factory()
+    _wrap_primitive_bind_with_trace()
 
 
 def _resolve_jax() -> bool:
@@ -75,6 +78,14 @@ def _compiled_function_name(compiled: object) -> str:
     return "<unknown>"
 
 
+def _primitive_name(primitive: object) -> str:
+    """Name for a jax.{name} marker from the Primitive instance."""
+    name = getattr(primitive, "name", None)
+    if isinstance(name, str) and name:
+        return name
+    return "<unknown>"
+
+
 def _roctx_compiled_call(compiled: object, *args: Any, **kwargs: Any) -> object:
     """Push jax.jit.<fn>, run the original compiled __call__, then pop."""
     marker = f"jax.jit.{_compiled_function_name(compiled)}"
@@ -111,6 +122,20 @@ def _roctx_pmap_factory(fun: object, *args: Any, **kwargs: Any) -> object:
 
 
 _roctx_pmap_factory._roctx_wrapped = True
+
+
+def _roctx_bind_with_trace(primitive: object, *args: Any, **kwargs: Any) -> object:
+    """Push jax.{name}, run the original bind_with_trace, then pop."""
+    marker = f"jax.{_primitive_name(primitive)}"
+    location = core.resolve_user_caller_location()
+    core._push_scope(marker, location, backend=_BACKEND_NAME)
+    try:
+        return _STATE.bind_with_trace(primitive, *args, **kwargs)
+    finally:
+        core._pop_scope()
+
+
+_roctx_bind_with_trace._roctx_wrapped = True
 
 
 def _wrap_jit_compiled_call() -> None:
@@ -168,11 +193,38 @@ def _wrap_pmap_factory() -> None:
     )
 
 
+def _wrap_primitive_bind_with_trace() -> None:
+    """Replace Primitive.bind_with_trace with _roctx_bind_with_trace."""
+    primitive = _STATE.primitive
+    bind_with_trace = getattr(primitive, "bind_with_trace", None)
+    if bind_with_trace is None:
+        console_warning(
+            "ml api trace",
+            "jax Primitive is not available; skipping primitive instrumentation.",
+        )
+        return
+    if getattr(bind_with_trace, "_roctx_wrapped", False):
+        return
+    try:
+        _STATE.bind_with_trace = bind_with_trace
+        primitive.bind_with_trace = _roctx_bind_with_trace
+    except Exception as exc:
+        console_warning(
+            "ml api trace",
+            f"Could not patch Primitive.bind_with_trace: {exc}",
+        )
+        return
+    console_log(
+        "ml api trace",
+        "Wrapped Primitive.bind_with_trace with ROCTX markers",
+    )
+
+
 class JaxBackend:
     name = "jax"
 
     def install(self) -> None:
-        """Resolve jax and ROCTX, then wrap compiled-call entry points."""
+        """Resolve jax and ROCTX, then wrap compiled-call and primitive entry points."""
         if not _resolve_jax():
             console_warning(
                 "ml api trace",
