@@ -101,7 +101,9 @@ class Bench_gfx1201(benchmark_gfx12_base.Bench_gfx12):
 
         src = hip.hipMalloc(buffer_bytes)
         dummy = hip.hipMalloc(MALL_ELEMENT_BYTES)
-        func = self.Program(self.mall_bw_src).get_kernel("MALL_bw")
+        # Keep the program alive: a temporary Program unloads the module before launch.
+        program = self.Program(self.mall_bw_src)
+        func = program.get_kernel("MALL_bw")
         args = [src, c_int64(num_steps), num_passes, dummy]
 
         self.launch_kernel(
