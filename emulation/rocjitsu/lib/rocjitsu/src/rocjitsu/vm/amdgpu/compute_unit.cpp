@@ -1621,8 +1621,11 @@ void ComputeUnitCore::report_routed_access(const Instruction &inst, Wavefront &w
     access.wavefront_size = 1;
     access.active_lane_mask = 1;
     access.architectural_exec_lane_mask = 1;
-    access.valid_lane_mask = 1;
-    access.request_lane_mask = 1;
+    // The pipeline skips a buffer access whose bounds mask clears every DWORD.
+    // Like an out-of-range vector lane, its lane is active but not valid.
+    const bool accessed = state.load_dword_mask != 0;
+    access.valid_lane_mask = accessed;
+    access.request_lane_mask = accessed;
     access.addresses = std::span<const uint64_t>(&state.addr, 1);
     break;
   }
