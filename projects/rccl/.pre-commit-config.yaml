@@ -1,7 +1,9 @@
 # pre-commit configuration for projects/rccl.
 #
-# Hooks are adopted one at a time; any one-time cleanup a check needs lands as
-# its own commit, recorded in .git-blame-ignore-revs.
+# Hooks are adopted one at a time, and start advisory: a hook arrives reporting
+# what it would say, and only becomes blocking once the tree is clean enough
+# that it blocks nobody. Any one-time cleanup a check needs lands as its own
+# commit, recorded in .git-blame-ignore-revs.
 #
 # Run it locally, from the repository root:
 #
@@ -26,13 +28,22 @@
 files: ^projects/rccl/
 
 repos:
-  # C/C++ formatting.
+  # C/C++ formatting, advisory only.
+  #
+  # 134 of the 769 files under src/ do not match .clang-format today, so a
+  # reformatting hook would make the first author to touch one of them commit
+  # a few hundred lines of unrelated churn. Until a sweep lands as its own
+  # commit (recorded in .git-blame-ignore-revs), --dry-run reports what would
+  # change without editing anything, and the hook does not fail: clang-format
+  # only exits non-zero on a --dry-run difference when given -Werror.
   - repo: https://github.com/pre-commit/mirrors-clang-format
     rev: v22.1.8
     hooks:
       - id: clang-format
-        name: clang-format (C/C++)
-        entry: clang-format -i -style=file
+        name: clang-format (advisory, C/C++)
+        entry: clang-format --dry-run -style=file
+        # Always show output, even when the hook passes, since it always passes.
+        verbose: true
         files: ^projects/rccl/src/.*\.(c|cc|cpp|cu|cuh|h|hpp)$
 
   # C/C++ static analysis, advisory only. Manual stage: unlike clang-format,
