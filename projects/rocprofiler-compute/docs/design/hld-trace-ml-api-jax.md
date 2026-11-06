@@ -93,16 +93,15 @@
 
 ### Where the range is marked
 
-- `jax.jit` wraps the compiled callable, not `jax.jit` itself:
-  - `jax.jit(identity)` builds a compiled callable. It does not run
-    `identity`.
-  - `type(...)` of that object is `jaxlib._jax.PjitFunction` on JAX 0.11.0.
-  - That class is shared by every `jax.jit` result. `__call__` is a C slot:
-    `train_step(w, x)` is `PjitFunction.__call__(train_step, w, x)`.
-    Replacing that one slot wraps every jitted call.
-  - JAX still returns a real `PjitFunction`, not a Python stand-in.
-  - The deprecated `pjit` alias compiles to the same `PjitFunction` as
-    `jax.jit`, so those calls show as `jax.jit.<fn>`.
+- `jax.jit` wraps how the compiled function is called, not `jax.jit` itself:
+  - `jax.jit(fn)` returns a callable. It does not run `fn`.
+  - On JAX 0.11.0 every such callable has the same type,
+    `jaxlib._jax.PjitFunction`.
+  - Calling it always goes through `PjitFunction.__call__`, so replacing
+    that one method wraps every jitted function. The object JAX returns
+    is still a `PjitFunction`.
+  - The deprecated `pjit` alias returns the same type, so those calls
+    show as `jax.jit.<fn>`.
   - Each outer call opens `jax.jit.<fn>`, runs the executable, and closes
     the range when the callable returns.
   - A direct call to an inner jitted function is its own outer call, so it
