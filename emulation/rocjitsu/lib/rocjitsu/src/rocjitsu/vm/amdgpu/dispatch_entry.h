@@ -159,7 +159,6 @@ enum class QueueIdlePublicationPhase : uint8_t {
   Inactive,
   CaptureAccess,
   ReadSignalHandle,
-  StoreIdleStatus,
   ReadMailboxPointer,
   ReadEventId,
   StoreMailbox,

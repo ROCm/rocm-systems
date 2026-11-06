@@ -8,6 +8,7 @@
 #define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_INSTRUCTION_ENCODING_H_
 
 #include "rocjitsu/base/api.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/image_address.h"
 
 #include <algorithm>
 #include <array>
@@ -143,11 +144,24 @@ struct RegisterModifiers {
   /// VADDR operand enabling coordinate tracking.
   const Operand *image_address = nullptr;
   /// Coordinate VGPR selectors, including NSA selectors.
-  std::array<uint32_t, 4> image_coordinates{};
+  ImageAddressRegisters image_coordinates{};
   /// Number of tracked coordinate components.
   uint8_t image_coordinate_count = 0;
   /// Coordinates occupy packed 16-bit halves.
   bool image_a16 = false;
+  /// VGPR words occupied by derivative inputs.
+  uint8_t image_prefix_words = 0;
+  /// GFX9 derives its actual tuple from the descriptor. The sentinel
+  /// leaves RDNA's instruction-derived coordinate metadata in effect.
+  struct Gfx9ImageTuple {
+    uint32_t resource_selector = ~0u;
+    /// Coordinates include an array layer when the descriptor is layered.
+    bool image_array = false;
+    /// A view-relative level or sample LOD follows the coordinates.
+    bool mip = false;
+    /// Explicit gradient words precede the coordinates.
+    bool derivatives = false;
+  } gfx9_image_tuple;
   uint8_t scalar_buffer_words = 0; // Zero selects a complete vector descriptor.
   bool src2_is_wave_mask = false;
   const Operand *wordwise_source0 = nullptr;
