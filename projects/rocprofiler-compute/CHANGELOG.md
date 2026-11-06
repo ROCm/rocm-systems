@@ -7,6 +7,12 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
+* Added JAX to experimental ML API tracing.
+  * Profile with `--experimental --trace-ml-api jax`.
+  * Analyze with `--list-operators jax` / `--operator jax:PATTERN`.
+  * Nested or inner JAX calls stay under the outer marker.
+
+
 ### Changed
 
 ### Removed
@@ -56,6 +62,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Added GPU metrics, the Memory Chart and the roofline for gfx1201.
   * gfx1201 support is experimental and requires the `--experimental` option.
   * Set the GPU performance level to `STABLE_STD` before profiling, as described in [Setting GPU performance level for PMC profiling](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/how-to/using-rocprofv3.html#setting-gpu-performance-level-for-pmc-profiling).
+
 
 ### Changed
 
