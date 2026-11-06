@@ -30,7 +30,7 @@ def train_step(w, x):
 
 w = jnp.ones((512, 512))
 x = jnp.ones((512, 512))
-train_step(w, x)  # line 13
+train_step(w, x)
 
 matmul_relu(w, x)
 x @ x
