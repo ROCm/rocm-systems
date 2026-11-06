@@ -169,3 +169,11 @@ def test_jax_primitive_emits_dot_general_marker(monkeypatch):
     primitive_type("dot_general").bind_with_trace(None, (), (), {})
     assert [item["marker"] for item in pushes] == ["jax.dot_general"]
     assert pushes[0]["backend"] == "jax"
+
+
+def test_jax_primitive_emits_reduce_sum_marker(monkeypatch):
+    _jax_mod, _compiled_type, primitive_type = install_jax_backend(monkeypatch)
+    pushes = record_scopes(monkeypatch)
+    primitive_type("reduce_sum").bind_with_trace(None, (), (), {})
+    assert [item["marker"] for item in pushes] == ["jax.reduce_sum"]
+    assert pushes[0]["backend"] == "jax"
