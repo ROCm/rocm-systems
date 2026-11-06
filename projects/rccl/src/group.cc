@@ -848,9 +848,18 @@ static bool ncclPlannerMayInitializeSymmetric(struct ncclComm* comm) {
   if (comm->symkState.initialized) return false;
   for (struct ncclTaskColl* task = comm->planner.collSorter.head; task != nullptr; task = task->next) {
     if (task->symkExtract == RCCL_SYMK_EXTRACT_DENY) continue;
-    // A global forced selection wins over the task mask, matching ncclMakeSymmetricTaskList.
+    // A global forced selection wins over the per-call mask, but the tuning
+    // context still records which implementations that override enabled.
     uint64_t effAlgMask = comm->tuningContext.forced[task->func] ? 0 : task->algMask;
-    if (effAlgMask != 0 && (effAlgMask & NCCL_TUNING_MASK_SYM_KERNELS) == 0) continue;
+    bool symTuningEnabled = false;
+    for (int i = NCCL_TUNING_SYM_KERNEL_ID_OFFSET; i < NCCL_TUNING_CE_METHOD_ID_OFFSET; i++) {
+      uint64_t bit = 1ULL << i;
+      if (comm->tuningContext.enabled[i][task->func] && (effAlgMask == 0 || (effAlgMask & bit))) {
+        symTuningEnabled = true;
+        break;
+      }
+    }
+    if (!symTuningEnabled) continue;
     ncclDevRedOp_t symkOp = task->opHost == ncclAvg ? ncclDevSumPostDiv : task->opDev.op;
     if (ncclSymkAvailable(comm, task->func, symkOp, task->datatype, task->count)) return true;
   }

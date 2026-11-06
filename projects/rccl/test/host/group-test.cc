@@ -385,6 +385,7 @@ TEST_F(GroupEndInternalTest, MultiRankSymmetricCommEnqueuesAsyncJob) {
   task.opDev.op = ncclDevSum;
   task.datatype = ncclFloat32;
   task.count = 1024;
+  comm->tuningContext.enabled[NCCL_TUNING_SYM_KERNEL_ID_OFFSET][task.func] = 1;
   ncclTaskCollSorterInsert(&comm->planner.collSorter, &task, task.count * sizeof(float));
   ScopedHook symkAvailable(g_symkAvailable,
                            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
@@ -422,6 +423,7 @@ TEST_F(GroupEndInternalTest, MultiRankSymmetricCommWithoutEligibleTaskAvoidsAsyn
   task.opDev.op = ncclDevSum;
   task.datatype = ncclFloat32;
   task.count = 1024;
+  comm->tuningContext.enabled[NCCL_TUNING_SYM_KERNEL_ID_OFFSET][task.func] = 1;
   ncclTaskCollSorterInsert(&comm->planner.collSorter, &task, task.count * sizeof(float));
   ScopedHook symkAvailable(g_symkAvailable,
                            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return false; });
@@ -441,6 +443,124 @@ TEST_F(GroupEndInternalTest, MultiRankSymmetricCommWithoutEligibleTaskAvoidsAsyn
   ASSERT_EQ(ncclSuccess,
             ncclPrepareTasksAndCollPreconnect(comm.get(), &simInfo, &asyncCollJobs));
   EXPECT_EQ(1, prepareCalls);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&asyncCollJobs));
+}
+
+TEST_F(GroupEndInternalTest, SymmetricExtractionAndGeneralOnlyMaskPrepareInline) {
+  constexpr int kRingSimple = NCCL_ALGO_RING * NCCL_NUM_PROTOCOLS + NCCL_PROTO_SIMPLE;
+  for (bool denyExtraction : {true, false}) {
+    auto comm = std::make_unique<ncclComm>();
+    comm->intraRanks = 2;
+    comm->symmetricSupport = 1;
+    ncclTaskColl task{};
+    task.func = ncclFuncAllReduce;
+    task.opHost = ncclSum;
+    task.opDev.op = ncclDevSum;
+    task.datatype = ncclFloat32;
+    task.count = 1024;
+    task.symkExtract = denyExtraction ? RCCL_SYMK_EXTRACT_DENY : RCCL_SYMK_EXTRACT_ALLOW;
+    task.algMask = denyExtraction ? 0 : (1ULL << kRingSimple);
+    comm->tuningContext.enabled[NCCL_TUNING_SYM_KERNEL_ID_OFFSET][task.func] = 1;
+    ncclTaskCollSorterInsert(&comm->planner.collSorter, &task, task.count * sizeof(float));
+
+    int availabilityCalls = 0;
+    ScopedHook symkAvailable(
+        g_symkAvailable,
+        [&availabilityCalls](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) {
+          availabilityCalls++;
+          return true;
+        });
+    int prepareCalls = 0;
+    ScopedHook prepareTasks(
+        g_ncclPrepareTasks,
+        [&prepareCalls](struct ncclComm*, bool* algoNeedConnect, bool* needConnect, ncclSimInfo_t*) {
+          prepareCalls++;
+          memset(algoNeedConnect, 0, sizeof(bool) * NCCL_NUM_ALGORITHMS);
+          *needConnect = false;
+          return ncclSuccess;
+        });
+    ncclIntruQueue<ncclAsyncJob, &ncclAsyncJob::next> asyncCollJobs;
+    ncclIntruQueueConstruct(&asyncCollJobs);
+    ncclSimInfo_t simInfo{};
+
+    ASSERT_EQ(ncclSuccess, ncclPrepareTasksAndCollPreconnect(comm.get(), &simInfo, &asyncCollJobs));
+    EXPECT_EQ(1, prepareCalls);
+    EXPECT_EQ(0, availabilityCalls);
+    EXPECT_TRUE(ncclIntruQueueEmpty(&asyncCollJobs));
+  }
+}
+
+TEST_F(GroupEndInternalTest, GlobalForcedSymmetricSelectionOverridesGeneralOnlyTaskMask) {
+  constexpr int kRingSimple = NCCL_ALGO_RING * NCCL_NUM_PROTOCOLS + NCCL_PROTO_SIMPLE;
+  auto comm = std::make_unique<ncclComm>();
+  comm->intraRanks = 2;
+  comm->symmetricSupport = 1;
+  ncclTaskColl task{};
+  task.func = ncclFuncAllReduce;
+  task.opHost = ncclSum;
+  task.opDev.op = ncclDevSum;
+  task.datatype = ncclFloat32;
+  task.count = 1024;
+  task.algMask = 1ULL << kRingSimple;
+  comm->tuningContext.forced[task.func] = 1;
+  comm->tuningContext.enabled[NCCL_TUNING_SYM_KERNEL_ID_OFFSET][task.func] = 1;
+  ncclTaskCollSorterInsert(&comm->planner.collSorter, &task, task.count * sizeof(float));
+  ScopedHook symkAvailable(g_symkAvailable,
+                           [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+  ScopedHook prepareTasks(
+      g_ncclPrepareTasks,
+      [](struct ncclComm*, bool*, bool*, ncclSimInfo_t*) {
+        ADD_FAILURE() << "a forced symmetric selection must prepare asynchronously";
+        return ncclInternalError;
+      });
+  ncclIntruQueue<ncclAsyncJob, &ncclAsyncJob::next> asyncCollJobs;
+  ncclIntruQueueConstruct(&asyncCollJobs);
+  ncclSimInfo_t simInfo{};
+
+  ASSERT_EQ(ncclSuccess, ncclPrepareTasksAndCollPreconnect(comm.get(), &simInfo, &asyncCollJobs));
+  ncclAsyncJob* queued = ncclIntruQueueDequeue(&asyncCollJobs);
+  ASSERT_NE(nullptr, queued);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&asyncCollJobs));
+  queued->destructor(queued);
+}
+
+TEST_F(GroupEndInternalTest, GlobalForcedGeneralSelectionWithoutSymmetricModelPreparesInline) {
+  constexpr int kRingSimple = NCCL_ALGO_RING * NCCL_NUM_PROTOCOLS + NCCL_PROTO_SIMPLE;
+  auto comm = std::make_unique<ncclComm>();
+  comm->intraRanks = 2;
+  comm->symmetricSupport = 1;
+  ncclTaskColl task{};
+  task.func = ncclFuncAllReduce;
+  task.opHost = ncclSum;
+  task.opDev.op = ncclDevSum;
+  task.datatype = ncclFloat32;
+  task.count = 1024;
+  comm->tuningContext.forced[task.func] = 1;
+  comm->tuningContext.enabled[kRingSimple][task.func] = 1;
+  ncclTaskCollSorterInsert(&comm->planner.collSorter, &task, task.count * sizeof(float));
+  int availabilityCalls = 0;
+  ScopedHook symkAvailable(
+      g_symkAvailable,
+      [&availabilityCalls](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) {
+        availabilityCalls++;
+        return true;
+      });
+  int prepareCalls = 0;
+  ScopedHook prepareTasks(
+      g_ncclPrepareTasks,
+      [&prepareCalls](struct ncclComm*, bool* algoNeedConnect, bool* needConnect, ncclSimInfo_t*) {
+        prepareCalls++;
+        memset(algoNeedConnect, 0, sizeof(bool) * NCCL_NUM_ALGORITHMS);
+        *needConnect = false;
+        return ncclSuccess;
+      });
+  ncclIntruQueue<ncclAsyncJob, &ncclAsyncJob::next> asyncCollJobs;
+  ncclIntruQueueConstruct(&asyncCollJobs);
+  ncclSimInfo_t simInfo{};
+
+  ASSERT_EQ(ncclSuccess, ncclPrepareTasksAndCollPreconnect(comm.get(), &simInfo, &asyncCollJobs));
+  EXPECT_EQ(1, prepareCalls);
+  EXPECT_EQ(0, availabilityCalls);
   EXPECT_TRUE(ncclIntruQueueEmpty(&asyncCollJobs));
 }
 
