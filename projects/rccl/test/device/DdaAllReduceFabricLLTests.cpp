@@ -285,22 +285,22 @@ class DdaAllReduceFabricLL : public DeviceTestBase {
     ref_ = recvWords();
   }
 
-  // Peer's lines in my scratch under flag_: its copy of my shard (kCopyArea) or its reduced shard (kReducedArea).
-  void publishSpread(int peer, int area) {
+  // Peer's lines below packet end in my scratch under flag_: its copy of my shard (kCopyArea) or its reduced shard.
+  void publishSpread(int peer, int area, size_t end = SIZE_MAX) {
     const int owner = area == kCopyArea ? self_ : peer;
     const std::vector<uint32_t>& words = area == kCopyArea ? in_[peer] : ref_;
-    for (size_t pk = 0; pk < shardLen(owner); ++pk) {
+    for (size_t pk = 0; pk < shardLen(owner) && pk < end; ++pk) {
       const size_t w = 2 * (owner * shardPkts() + pk);
       DdaLLHostPeers::PublishLine(spreadLine(self_, area, peer, pk), words[w], words[w + 1], flag_);
     }
   }
 
-  // Publishes every peer's lines but heldPeer()'s heldArea.
+  // Publishes every peer's lines but heldPeer()'s heldArea from packet heldFrom_ on.
   void publishSpreadAll(int heldArea = kHoldNothing) {
     for (int peer = 0; peer < nRanks_; ++peer) {
       for (int area : {kCopyArea, kReducedArea}) {
-        if (peer != self_ && (peer != heldPeer() || area != heldArea)) {
-          publishSpread(peer, area);
+        if (peer != self_) {
+          publishSpread(peer, area, peer == heldPeer() && area == heldArea ? heldFrom_ : SIZE_MAX);
         }
       }
     }
@@ -323,12 +323,13 @@ class DdaAllReduceFabricLL : public DeviceTestBase {
     ASSERT_TRUE(peers_.Finishes(stream_, [this] { publishSpreadAll(); }, kWatchdog)) << "spread kernel did not finish";
   }
 
-  // recvbuff is the one-shot's bit for bit; an abort leaves the held shard untouched (every shard for a copy).
+  // recvbuff is the one-shot's bit for bit; an abort leaves the held shard untouched, every shard for a copy but my
+  // packets below heldFrom_.
   void expectSpreadRecv(int heldArea, bool abort) {
     const std::vector<uint32_t> out = recvWords();
     for (size_t i = 0; i < out.size(); ++i) {
       const int owner = (int)(i / 2 / shardPkts());
-      if (!abort || (heldArea == kReducedArea && owner == self_)) {
+      if (!abort || (owner == self_ && (heldArea == kReducedArea || i / 2 % shardPkts() < heldFrom_))) {
         ASSERT_EQ(out[i], ref_[i]) << "word " << i << " of shard " << owner;
       } else if (owner == heldPeer() || heldArea == kCopyArea) {
         ASSERT_EQ(out[i], bitsOf(kUntouched)) << "an aborted thread wrote word " << i << " of shard " << owner;
@@ -336,7 +337,8 @@ class DdaAllReduceFabricLL : public DeviceTestBase {
     }
   }
 
-  // Every peer holds my copy of its shard, nothing past its shard's end, and my reduced shard (none if not reduced).
+  // Every peer holds my copy of its shard, nothing past its shard's end, and my reduced shard (below heldFrom_ if not
+  // reduced).
   void expectSpreadPublished(bool reduced) {
     for (int peer = 0; peer < nRanks_; ++peer) {
       if (peer == self_) {
@@ -354,8 +356,9 @@ class DdaAllReduceFabricLL : public DeviceTestBase {
         if (pk < shardLen(self_)) {
           const size_t m = 2 * (self_ * shardPkts() + pk);
           volatile uint32_t* r = spreadLine(peer, kReducedArea, self_, pk);
-          ASSERT_TRUE(reduced ? r[0] == ref_[m] && r[1] == flag_ && r[2] == ref_[m + 1] && r[3] == flag_
-                              : r[1] != flag_ && r[3] != flag_)
+          ASSERT_TRUE(reduced || pk < heldFrom_
+                          ? r[0] == ref_[m] && r[1] == flag_ && r[2] == ref_[m + 1] && r[3] == flag_
+                          : r[1] != flag_ && r[3] != flag_)
               << "reduced shard to " << peer << " pk " << pk;
         }
       }
@@ -387,6 +390,7 @@ class DdaAllReduceFabricLL : public DeviceTestBase {
   int self_ = kSelf;
   uint32_t flag_ = kFlag;
   bool spread_ = false;
+  size_t heldFrom_ = 0;  // packets of the held area published before the hold: the reduce passes that finish
   size_t bytes_ = kOneShotBytes;
   std::vector<std::vector<uint32_t>> in_;
   std::vector<uint32_t> ref_;
@@ -477,6 +481,12 @@ TEST_F(DdaAllReduceFabricLL, SpreadWaitsForLateCopiesAndLateReducedShards) {
 TEST_F(DdaAllReduceFabricLL, SpreadAbortPublishesNoPartialSumAndLeavesMissingShards) {
   spreadCase<float, 0>(6, kSelf, kOneShotBytes, 3, kCopyArea, kAbort);
   spreadCase<float, 0>(6, kSelf, kOneShotBytes, 3, kReducedArea, kAbort);
+}
+
+// One block on 4 ranks: pass 0 (packets 0 to 511) finishes, pass 1 waits on rank 0's later copies, then aborts.
+TEST_F(DdaAllReduceFabricLL, SpreadAbortInALaterPassKeepsTheFinishedPass) {
+  heldFrom_ = dda::common::ddaLLSpreadPassPkts(4);
+  spreadCase<float, 4>(4, kSelf, kBufBytes, 1, kCopyArea, kAbort);
 }
 
 // In place: the copies of the peers' shards leave before their reduced shards overwrite the same recvbuff range.
