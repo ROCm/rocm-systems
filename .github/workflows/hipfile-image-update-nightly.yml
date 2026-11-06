@@ -6,11 +6,11 @@ env:
 
 on:
   schedule:
-    # ~10:00 UTC daily. The ROCm nightly publish runs ~02:00 UTC, leaving ~8h of
+    # ~08:00 UTC daily. The ROCm nightly publish runs ~00:00 UTC, leaving ~8h of
     # buffer. This job is purely an optimization: if it is late/failed/builds
     # against an incomplete nightly, per-PR runs fall back to building the nightly
     # image on demand.
-    - cron: "0 2 * * *"
+    - cron: "0 8 * * *"
   workflow_dispatch:
   # Refresh on merge of a Dockerfile/resolver change so the published nightly
   # image + floating cache track develop. Without this, the per-PR registry

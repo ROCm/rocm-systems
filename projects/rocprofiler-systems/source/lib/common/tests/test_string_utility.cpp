@@ -3,6 +3,7 @@
 
 #include "common/string_utility.hpp"
 
+#include <fmt/format.h>
 #include <gtest/gtest.h>
 
 #include <cstdint>
@@ -274,55 +275,65 @@ TEST(has_env_key, matches_whole_key_only)
 
 TEST(safe_stoi, parses_whole_string)
 {
-    EXPECT_EQ(safe_stoi("42"), 42);
-    EXPECT_EQ(safe_stoi("-7"), -7);
+    EXPECT_EQ(safe_stoi("42").value(), 42);
+    EXPECT_EQ(safe_stoi("-7").value(), -7);
     constexpr auto k_int_max = std::numeric_limits<int>::max();
     constexpr auto k_int_min = std::numeric_limits<int>::min();
-    EXPECT_EQ(safe_stoi(std::to_string(k_int_max)), k_int_max);
-    EXPECT_EQ(safe_stoi(std::to_string(k_int_min)), k_int_min);
+    EXPECT_EQ(safe_stoi(std::to_string(k_int_max)).value(), k_int_max);
+    EXPECT_EQ(safe_stoi(std::to_string(k_int_min)).value(), k_int_min);
 }
 
-TEST(safe_stoi, rejects_invalid_input)
+TEST(safe_stoi, reports_why_input_was_rejected)
 {
-    EXPECT_FALSE(safe_stoi("").has_value());
-    EXPECT_FALSE(safe_stoi("12a").has_value());
-    EXPECT_FALSE(safe_stoi("12.5").has_value());
-    EXPECT_FALSE(safe_stoi(" 1").has_value());
-    EXPECT_FALSE(safe_stoi("99999999999").has_value());
+    EXPECT_EQ(safe_stoi("").error(), parse_error::empty);
+    EXPECT_EQ(safe_stoi("12a").error(), parse_error::not_a_number);
+    EXPECT_EQ(safe_stoi("12.5").error(), parse_error::not_a_number);
+    EXPECT_EQ(safe_stoi(" 1").error(), parse_error::not_a_number);
+    EXPECT_EQ(safe_stoi("abc").error(), parse_error::not_a_number);
+    EXPECT_EQ(safe_stoi("99999999999").error(), parse_error::out_of_range);
     constexpr auto k_int_max = static_cast<long long>(std::numeric_limits<int>::max());
     constexpr auto k_int_min = static_cast<long long>(std::numeric_limits<int>::min());
-    EXPECT_FALSE(safe_stoi(std::to_string(k_int_max + 1)).has_value());
-    EXPECT_FALSE(safe_stoi(std::to_string(k_int_min - 1)).has_value());
+    EXPECT_EQ(safe_stoi(std::to_string(k_int_max + 1)).error(),
+              parse_error::out_of_range);
+    EXPECT_EQ(safe_stoi(std::to_string(k_int_min - 1)).error(),
+              parse_error::out_of_range);
 }
 
 TEST(safe_stol, parses_whole_string)
 {
-    EXPECT_EQ(safe_stol("42"), 42L);
-    EXPECT_EQ(safe_stol("-7"), -7L);
+    EXPECT_EQ(safe_stol("42").value(), 42L);
+    EXPECT_EQ(safe_stol("-7").value(), -7L);
     constexpr auto k_long_max = std::numeric_limits<long>::max();
-    EXPECT_EQ(safe_stol(std::to_string(k_long_max)), k_long_max);
+    EXPECT_EQ(safe_stol(std::to_string(k_long_max)).value(), k_long_max);
 }
 
-TEST(safe_stol, rejects_invalid_input)
+TEST(safe_stol, reports_why_input_was_rejected)
 {
-    EXPECT_FALSE(safe_stol("").has_value());
-    EXPECT_FALSE(safe_stol("12a").has_value());
-    EXPECT_FALSE(safe_stol("12.5").has_value());
-    EXPECT_FALSE(safe_stol(" 1").has_value());
+    EXPECT_EQ(safe_stol("").error(), parse_error::empty);
+    EXPECT_EQ(safe_stol("12a").error(), parse_error::not_a_number);
+    EXPECT_EQ(safe_stol("12.5").error(), parse_error::not_a_number);
+    EXPECT_EQ(safe_stol(" 1").error(), parse_error::not_a_number);
     constexpr auto k_long_max_plus_one =
         static_cast<unsigned long>(std::numeric_limits<long>::max()) + 1UL;
-    EXPECT_FALSE(safe_stol(std::to_string(k_long_max_plus_one)).has_value());
+    EXPECT_EQ(safe_stol(std::to_string(k_long_max_plus_one)).error(),
+              parse_error::out_of_range);
 }
 
-TEST(safe_stod, parses_whole_string)
+TEST(safe_stol, value_or_substitutes_fallback_on_failure)
 {
-    EXPECT_DOUBLE_EQ(safe_stod("1.5").value_or(0.0), 1.5);
-    EXPECT_DOUBLE_EQ(safe_stod("-2").value_or(0.0), -2.0);
+    EXPECT_EQ(safe_stol("abc").value_or(-1L), -1L);
+    EXPECT_EQ(safe_stol("5").value_or(-1L), 5L);
 }
 
-TEST(safe_stod, rejects_invalid_input)
+TEST(safe_from_chars, trailing_garbage_wins_over_out_of_range)
 {
-    EXPECT_FALSE(safe_stod("").has_value());
-    EXPECT_FALSE(safe_stod("1.5x").has_value());
-    EXPECT_FALSE(safe_stod("abc").has_value());
+    EXPECT_EQ(safe_stoi("99999999999x").error(), parse_error::not_a_number);
+    EXPECT_EQ((safe_from_chars<double>("1e999x").error()), parse_error::not_a_number);
+}
+
+TEST(parse_error_formatter, describes_every_error)
+{
+    EXPECT_EQ(fmt::format("{}", parse_error::empty), "empty value");
+    EXPECT_EQ(fmt::format("{}", parse_error::not_a_number), "not a number");
+    EXPECT_EQ(fmt::format("{}", parse_error::out_of_range), "out of range");
 }

@@ -4,20 +4,11 @@
  * SPDX-License-Identifier: MIT
  *****************************************************************************/
 
-// Phase 1: Raw byte-array put tests exercising memcpy_wg_tdm via ipcCopy_wg.
-//
-// Requires 2 MPI ranks.  PE 0 fills a symmetric buffer with an iota byte
-// pattern and calls ipcCopy_wg to transfer it to PE 1.  When USE_TDM is
-// defined and the hardware is gfx1250, ipcCopy_wg internally calls
-// memcpy_wg_tdm; otherwise it falls back to memcpy_wg.
-//
-// The kernel registers its dynamic LDS buffer via rocshmem_set_tdm_lds(),
-// sized at launch via rocshmem_query_tdm_lds_bytes() -- the same public API
-// any user kernel would use to opt into the TDM fast path.
+// Phase 1: raw byte-array put tests exercising memcpy_wg_tdm via ipcCopy_wg.
+// Requires 2 MPI ranks: PE 0 sends to PE 1.
 //
 // Build: cmake -DUSE_TDM=ON -DUSE_IPC=ON -DAMDGPU_TARGETS=gfx1250 ...
-// Run:   mpirun -n 2 ./tests/unit_tests/rocshmem_unit_tests \
-//               --gtest_filter="TdmRaw*"
+// Run:   mpirun -n 2 ./rocshmem_unit_tests --gtest_filter="TdmRaw*"
 
 #ifndef ROCSHMEM_TDM_RAW_PUT_GTEST_HPP
 #define ROCSHMEM_TDM_RAW_PUT_GTEST_HPP
@@ -45,6 +36,8 @@ static constexpr uint32_t TDM_RAW_SIGNAL_OFFSET = 67108864u;  // 64 MB
 
 // Fixed TDM tile size for these tests
 static constexpr uint32_t TEST_TDM_TILE_BYTES = 16384;
+// Below this, memcpy_wg fallback; at/above, TDM is eligible.
+static constexpr size_t TEST_TDM_PUT_THRESHOLD = 16384;
 
 // ---------------------------------------------------------------------------
 // Kernels
@@ -71,8 +64,7 @@ void tdm_raw_validator(bool* error, const uint8_t* golden, const uint8_t* dest,
   }
 }
 
-// PE 0 sender: registers its dynamic LDS buffer for TDM (a no-op on builds/
-// archs where TDM isn't available) and calls the real library path.
+// PE 0 sender: calls the real library path (memcpy_wg_tdm via ipcCopy_wg).
 template <typename IpcImplT>
 __global__
 void tdm_raw_put_kernel(IpcImplT* ipc_impl, const uint8_t* src,
@@ -108,11 +100,18 @@ class TdmRawPutFixture : public ::testing::TestWithParam<size_t> {
     assert(heap_mem_);
     mpi_ = new MPI_T(heap_mem_->get_ptr(), heap_mem_->get_size(), MPI_COMM_WORLD);
     ipc_impl_.ipcHostInit(mpi_->my_pe(), mpi_->get_heap_bases(), MPI_COMM_WORLD);
-    // Force a known tile size so the parameterized byte counts below
-    // actually land on the tile boundaries their comments claim.
+    // Force a known tile size so the parameterized sizes land where intended.
     uint32_t tile_bytes = TEST_TDM_TILE_BYTES;
     CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(constmem), &tile_bytes, sizeof(tile_bytes),
                                 offsetof(constmem_t, tdm_tile_bytes)));
+    // Force SDMA off: this fixture never sets up an SDMA channel.
+    size_t sdma_threshold = SDMA_THRESHOLD_DISABLED;
+    CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(constmem), &sdma_threshold, sizeof(sdma_threshold),
+                                offsetof(constmem_t, ipc_sdma_threshold)));
+    // Force a known put threshold so the parameterized sizes land where intended.
+    size_t put_threshold = TEST_TDM_PUT_THRESHOLD;
+    CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(constmem), &put_threshold, sizeof(put_threshold),
+                                offsetof(constmem_t, tdm_put_threshold)));
     hip_allocator_->allocate((void**)&ipc_impl_dptr_, sizeof(IpcImplT));
     CHECK_HIP(hipMemcpy(ipc_impl_dptr_, &ipc_impl_, sizeof(IpcImplT),
                         hipMemcpyHostToDevice));
@@ -134,9 +133,11 @@ class TdmRawPutFixture : public ::testing::TestWithParam<size_t> {
     assert(bytes + TDM_RAW_SIGNAL_OFFSET + sizeof(uint32_t) <=
            heap_mem_->get_size());
 
-    // Build iota pattern on host, upload to a device buffer.
+    // Varies per tile, unlike plain iota, so reordered/duplicated tiles
+    // are detected.
     std::vector<uint8_t> host_gold(bytes);
-    for (size_t i = 0; i < bytes; i++) host_gold[i] = static_cast<uint8_t>(i & 0xFF);
+    for (size_t i = 0; i < bytes; i++)
+      host_gold[i] = static_cast<uint8_t>((i ^ (i >> 8) ^ (i >> 16)) & 0xFF);
     hip_allocator_->allocate((void**)&golden_dptr_, bytes);
     CHECK_HIP(hipMemcpy(golden_dptr_, host_gold.data(), bytes, hipMemcpyHostToDevice));
 
@@ -153,7 +154,8 @@ class TdmRawPutFixture : public ::testing::TestWithParam<size_t> {
 
     // Block size: full wavefront for TDM to have at least 1 wave.
     const dim3 block(WF_SIZE);
-    const size_t smem = rocshmem_query_tdm_lds_bytes();
+    // Backend-free: compute LDS size from the forced tile size directly.
+    const size_t smem = tdm::lds_bytes_for_tile(TEST_TDM_TILE_BYTES);
 
     if (my_pe == 0) {
       auto* src  = reinterpret_cast<const uint8_t*>(ipc_impl_.ipc_bases[0]);
