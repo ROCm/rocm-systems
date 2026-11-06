@@ -5,10 +5,13 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+
+if TYPE_CHECKING:
+    from utils.metrics.pass_provenance import PassLayout
 
 from utils import csv_compression, schema
 from utils.inject_roctx.constants import (
@@ -23,6 +26,7 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
+from utils.metrics.pass_provenance import natural_pass_sort_key
 from utils.ml_api_trace_errors import (
     KernelSequenceLengthMismatchError,
     LauncherThreadNotFoundError,
@@ -1882,26 +1886,42 @@ def _warn_kernels_with_incomplete_coverage(incomplete_kernel_names: set[str]) ->
 
 def process_rocpd_csv(
     df: pd.DataFrame,
+    pass_layout: Optional["PassLayout"] = None,
 ) -> tuple[pd.DataFrame, dict[tuple, int]]:
     """Merge counters across unique dispatches into one row each.
 
     The dict maps each groupby key to the new 1..N Dispatch_ID, in the
     same order as those ids are assigned.
+
+    When ``pass_layout`` is provided and the long frame has ``Pass_Key``,
+    duplicated counters keep a base column (first pass in natural order)
+    plus per-pass shadow columns ``{counter}@pass:{pass_key}``.
     """
     if df.empty:
         return df, {}
 
+    use_provenance = (
+        pass_layout is not None
+        and pass_layout.has_duplicates
+        and "Pass_Key" in df.columns
+    )
+
     data: list[dict[str, Any]] = []
     slot_to_id: dict[tuple, int] = {}
+    missing_dispatches: List[int] = []
 
     # Group by unique kernel and merge into a single row
-    for group_key, group_df in df.groupby([
+    grouped = df.groupby([
         "Dispatch_ID",
         "Kernel_Name",
         "Grid_Size",
         "Workgroup_Size",
         "LDS_Per_Workgroup",
-    ]):
+    ])
+    by_pass_tables = (
+        _pivot_counters_by_pass(df, grouped.ngroup()) if use_provenance else {}
+    )
+    for group_id, (group_key, group_df) in enumerate(grouped):
         row = {
             "GPU_ID": group_df["GPU_ID"].iloc[0],
             "Grid_Size": group_df["Grid_Size"].iloc[0],
@@ -1916,10 +1936,24 @@ def process_rocpd_csv(
             "Start_Timestamp": group_df["Start_Timestamp"].iloc[0],
             "End_Timestamp": group_df["End_Timestamp"].iloc[0],
         }
-        # Each counter will become its own column
-        row.update(dict(zip(group_df["Counter_Name"], group_df["Counter_Value"])))
+        if use_provenance:
+            row.update(
+                _merge_counters_with_pass_provenance(
+                    by_pass_tables[group_id], pass_layout, missing_dispatches
+                )
+            )
+        else:
+            # Each counter will become its own column (last write wins).
+            row.update(dict(zip(group_df["Counter_Name"], group_df["Counter_Value"])))
         data.append(row)
         slot_to_id[group_key] = len(data)
+    if missing_dispatches:
+        console_warning(
+            "pass_provenance",
+            f"{len(missing_dispatches)} dispatch(es) are missing a duplicated "
+            "counter from a profiling pass; those cells are NaN and drop out "
+            "of sums.",
+        )
     df = pd.DataFrame(data)
     # Reset dispatch IDs
     df["Dispatch_ID"] = range(1, len(df) + 1)
@@ -2001,3 +2035,75 @@ def assign_native_ids(counter_set: pd.DataFrame) -> pd.DataFrame:
         Kernel_ID=kernel_groups.ngroup(),
     )
     return numbered.loc[:, COUNTER_RESULTS_COLUMNS]
+
+
+def _merge_counters_with_pass_provenance(
+    by_pass: pd.DataFrame,
+    pass_layout: "PassLayout",
+    missing_dispatches: List[int],
+) -> Dict[str, Any]:
+    """Build base + shadow counter columns for one dispatch group.
+
+    ``by_pass`` is the group's counter by pass table. The base column is the
+    first pass in natural order that has a value. A duplicated counter also
+    gets a column for every layout pass that collects it, and a dispatch
+    missing that pass stores NaN so later dispatches still align.
+    """
+    merged: Dict[str, Any] = by_pass.bfill(axis=1).iloc[:, 0].to_dict()
+    shadow = by_pass.reindex(columns=list(pass_layout.pass_keys))
+    missing = 0
+    for name in shadow.index.intersection(list(pass_layout.duplicated)):
+        for pass_key in pass_layout.pass_keys:
+            if name not in pass_layout.counters_by_pass[pass_key]:
+                continue
+            value = shadow.at[name, pass_key]
+            merged[pass_layout.qualified_column(name, pass_key)] = value
+            missing += bool(pd.isna(value))
+    if missing:
+        missing_dispatches.append(missing)
+    return merged
+
+
+def _pivot_counters_by_pass(
+    df: pd.DataFrame, group_ids: pd.Series
+) -> Dict[int, pd.DataFrame]:
+    """Each dispatch's values as a counter by pass table, passes in natural order.
+
+    The whole frame is pivoted once and then split by ``group_ids``; a row
+    with a NaN id belongs to no dispatch and is dropped. Each table keeps only
+    the passes its dispatch has. Rows keep the order counters first appear in
+    within their dispatch. A repeated (counter, pass) row keeps its last value.
+    A table without empty cells keeps the counter value dtype, because the
+    whole-frame pivot turns integer values into floats.
+    """
+    cells = df.assign(
+        Group_ID=group_ids,
+        Counter_Name=df["Counter_Name"].astype(str),
+        Pass_Key=df["Pass_Key"].astype(str),
+    )
+    cells = (
+        cells[cells["Group_ID"].notna()]
+        .astype({"Group_ID": int})
+        .drop_duplicates(["Group_ID", "Counter_Name", "Pass_Key"], keep="last")
+    )
+    by_pass = cells.pivot(
+        index=["Group_ID", "Counter_Name"],
+        columns="Pass_Key",
+        values="Counter_Value",
+    ).reindex(
+        index=pd.MultiIndex.from_frame(
+            cells[["Group_ID", "Counter_Name"]].drop_duplicates()
+        ),
+        columns=sorted(cells["Pass_Key"].unique(), key=natural_pass_sort_key),
+    )
+    passes_by_group = cells.groupby("Group_ID")["Pass_Key"].agg(set)
+    tables: Dict[int, pd.DataFrame] = {}
+    for group_id, table in by_pass.groupby(level="Group_ID", sort=False):
+        present = passes_by_group[group_id]
+        table = table.droplevel("Group_ID").loc[
+            :, [key for key in table.columns if key in present]
+        ]
+        if not table.isna().to_numpy().any():
+            table = table.astype(df["Counter_Value"].dtype)
+        tables[group_id] = table
+    return tables
