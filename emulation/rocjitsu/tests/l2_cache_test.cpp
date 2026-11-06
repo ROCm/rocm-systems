@@ -631,6 +631,15 @@ TEST(DeviceCacheCoherenceTest, MaintenancePreservesWritebackVersusInvalidateSema
   }
   EXPECT_EQ(memory.read8(kDiscardedAddress), 0u);
 
+  memory.write8(kDiscardedAddress, 0xa5);
+  {
+    util::FailureOr<rocjitsu::amdgpu::DeviceCacheMaintenanceLease> maintenance =
+        l2.coherence_domain()->acquire_cache_maintenance(
+            rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate);
+    ASSERT_TRUE(maintenance.succeeded());
+  }
+  EXPECT_EQ(memory.read8(kDiscardedAddress), 0xa5u);
+
   l2.writeback_line(kPublishedAddress, dirty_line.data(), Mtype::RW);
   {
     util::FailureOr<rocjitsu::amdgpu::DeviceCacheMaintenanceLease> maintenance =
@@ -1101,9 +1110,7 @@ TEST(DeviceCacheCoherenceTest, FailedL2WritebackRetainsOnlyUnpublishedDirtyBytes
 
   process.unmap_pages(kGpuAddress, GpuMemory::PAGE_SIZE);
   process.map_pages(kGpuAddress + kFirstOffset, first_mapping.data(), sizeof(uint32_t));
-  process.map_pages(kGpuAddress + kSecondOffset, second_mapping.data(), sizeof(uint32_t));
 
-  ASSERT_EQ(mprotect(second_mapping.data(), GpuMemory::PAGE_SIZE, PROT_READ), 0);
   const uint64_t epoch_before_failure = coherence->current_epoch();
   util::StringDiagnostic diagnostics;
   auto report = maintenance_failure_sink(coherence, true, diagnostics);
@@ -1123,7 +1130,7 @@ TEST(DeviceCacheCoherenceTest, FailedL2WritebackRetainsOnlyUnpublishedDirtyBytes
   EXPECT_EQ(second_unpublished, 0u);
 
   std::memcpy(first_mapping.data(), &kReplacementFirstValue, sizeof(kReplacementFirstValue));
-  ASSERT_EQ(mprotect(second_mapping.data(), GpuMemory::PAGE_SIZE, PROT_READ | PROT_WRITE), 0);
+  process.map_pages(kGpuAddress + kSecondOffset, second_mapping.data(), sizeof(uint32_t));
   {
     util::FailureOr<rocjitsu::amdgpu::DeviceCacheMaintenanceLease> maintenance =
         coherence->acquire_cache_maintenance(
@@ -1251,7 +1258,7 @@ TEST(DeviceCacheCoherenceTest, FailedMemorySideWritebackRetainsDirtyLineForRetry
   dirty_line.fill(0x6d);
   rocjitsu::amdgpu::MemorySideCacheTestAccess::store_dirty_line(memory_side_cache, kGpuAddress,
                                                                 dirty_line, kVmid);
-  ASSERT_EQ(mprotect(mapping.data(), GpuMemory::PAGE_SIZE, PROT_READ), 0);
+  process.unmap_pages(kGpuAddress, GpuMemory::PAGE_SIZE);
 
   util::StringDiagnostic diagnostics;
   auto report = maintenance_failure_sink(coherence, true, diagnostics);
@@ -1264,7 +1271,7 @@ TEST(DeviceCacheCoherenceTest, FailedMemorySideWritebackRetainsDirtyLineForRetry
   EXPECT_TRUE(rocjitsu::amdgpu::MemorySideCacheTestAccess::line_is_dirty(memory_side_cache,
                                                                          kGpuAddress, kVmid));
 
-  ASSERT_EQ(mprotect(mapping.data(), GpuMemory::PAGE_SIZE, PROT_READ | PROT_WRITE), 0);
+  process.map_pages(kGpuAddress, mapping.data(), GpuMemory::PAGE_SIZE);
   {
     util::FailureOr<rocjitsu::amdgpu::DeviceCacheMaintenanceLease> maintenance =
         coherence->acquire_cache_maintenance(

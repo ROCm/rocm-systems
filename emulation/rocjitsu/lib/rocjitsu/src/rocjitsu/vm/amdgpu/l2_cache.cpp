@@ -718,6 +718,9 @@ VmAccessOutcome L2Cache::flush_dirty_locked(std::optional<uint32_t> vmid) {
 VmAccessOutcome L2Cache::flush_dirty_to_legacy_backing_locked() {
   if (!has_dirty_lines_.load(std::memory_order_relaxed))
     return VmAccessOutcome::Complete;
+  // Earlier invalidate-only maintenance may have logically discarded dirty
+  // bytes without an intervening cache access to reconcile the epoch.
+  synchronize_epoch_locked();
   assert(legacy_maintenance_memory_ != nullptr && legacy_maintenance_vm_ != nullptr);
 
   VmAccessOutcome outcome = VmAccessOutcome::Complete;
