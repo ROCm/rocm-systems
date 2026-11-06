@@ -172,6 +172,14 @@ int cpu_package_of(const std::string& path) {
   return package <= 0xFFFF ? static_cast<int>(package) : -1;
 }
 
+// A lookup that found nothing. On WSL a GPU has no identity in sysfs to find,
+// so that is "unsupported" rather than "not found".
+amdcuid_status_t not_found_status(amdcuid_device_type_t device_type) {
+  return device_type == AMDCUID_DEVICE_TYPE_GPU && CuidUtilities::is_wsl()
+             ? AMDCUID_STATUS_UNSUPPORTED
+             : AMDCUID_STATUS_DEVICE_NOT_FOUND;
+}
+
 // helper function to discover device given dev_path
 DevicePtr discover_device_by_path(const char* dev_path, amdcuid_device_type_t device_type) {
   DevicePtr device = nullptr;
@@ -383,7 +391,7 @@ amdcuid_status_t amdcuid_get_handle_by_dev_path(const char* dev_path,
   }
 
   if (!device) {
-    return AMDCUID_STATUS_DEVICE_NOT_FOUND;
+    return not_found_status(device_type);
   } else {
     return current_handle(device, handle);
   }
@@ -441,13 +449,13 @@ amdcuid_status_t amdcuid_get_handle_by_bdf(const char* bdf, amdcuid_device_type_
   }
   std::string device_path = CuidUtilities::bdf_to_device_path(bdf, device_type);
   if (device_path.empty()) {
-    return AMDCUID_STATUS_DEVICE_NOT_FOUND;
+    return not_found_status(device_type);
   }
   // bdf_to_device_path() already returns a sysfs path, not a device node.
   device = discover_device_by_path(device_path.c_str(), device_type);
 
   if (!device) {
-    return AMDCUID_STATUS_DEVICE_NOT_FOUND;
+    return not_found_status(device_type);
   } else {
     return current_handle(device, handle);
   }

@@ -94,6 +94,12 @@ inline void pack_component_type_bits(uint8_t value, uint8_t raw_bits[16]) {
 // container) is unprivileged as far as the driver is concerned.
 bool has_cap_sys_admin();
 
+// Whether this is WSL2, where the GPU is reached through /dev/dxg and sysfs
+// publishes no GPU identity to derive a CUID from.
+bool is_wsl();
+// The node is_wsl() looks for; tests point it at a file they control.
+std::string& dxg_node_path();
+
 std::string read_sysfs_file(const std::string& path);
 std::string readlink_bdf(const std::string& device_path);
 std::string bdf_to_device_path(const std::string& bdf, amdcuid_device_type_t device_type);
