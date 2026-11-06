@@ -1,6 +1,6 @@
 ---
 name: rocprof-compute-torch-trace
-description: Attributes AMD GPU kernel performance counters back to the PyTorch or Triton operators that launched them, using rocprof-compute ML API tracing. Use when the user asks which PyTorch layer or operator is slow, wants to map GPU kernels to model code, profiles a training or inference script, asks about torch.compile and Inductor kernels, or wants to select user-defined ROCTx regions from a traced Python profile. Not for CUDA tools, Windows, compiled non-Python binaries, or starting and stopping a profile at ROCTx ranges.
+description: Attributes AMD GPU kernel performance counters back to the PyTorch, Triton, or JAX operators that launched them, using rocprof-compute ML API tracing. Use when the user asks which PyTorch layer or operator is slow, wants to map GPU kernels to model code, profiles a training or inference script, asks about torch.compile and Inductor kernels, asks about JAX jit GPU time, or wants to select user-defined ROCTx regions from a traced Python profile. Not for CUDA tools, Windows, compiled non-Python binaries, or starting and stopping a profile at ROCTx ranges.
 ---
 
 # Map GPU kernels to PyTorch operators
@@ -9,7 +9,7 @@ Profiling a PyTorch model with counters alone gives kernel names, which say
 little about the model. Torch tracing annotates the run so each kernel can be
 traced back to the operator that launched it.
 
-Torch and Triton tracing are experimental. Every command needs
+Torch, Triton, and JAX tracing are experimental. Every command needs
 `--experimental`, and option names can change between releases, so run
 `rocprof-compute profile --experimental --help` first.
 
@@ -48,6 +48,14 @@ rocprof-compute profile --experimental --trace-ml-api triton --name <name> -- py
 
 `torch.compile` / Inductor fused kernels use PyTorch's static launcher, so they
 do not get `|triton` ranges. Attribute them with `--trace-ml-api torch`.
+
+For JAX (`jax.jit` / `jax.pmap` / eager primitives):
+
+```bash
+rocprof-compute profile --experimental --trace-ml-api jax --name <name> -- python <script.py>
+```
+
+A nested `jit` is one marker. The tracer does not wrap `pjit` or `shard_map`.
 
 The two combine as `--trace-ml-api torch triton`. User-defined ROCTx regions
 are included with every `--trace-ml-api` run. A bare `--trace-ml-api` traces
@@ -102,7 +110,7 @@ This prints the operators as a call tree sorted by GPU duration, with
 `file:line` on each node that recorded a source location, plus kernel
 launch statistics, so it also shows which operators are worth opening.
 
-The Triton equivalent is `--list-operators triton`.
+The Triton equivalent is `--list-operators triton`. The JAX equivalent is `--list-operators jax`.
 
 `--list-operators user` lists each user ROCTx region with everything that
 ran inside it.
