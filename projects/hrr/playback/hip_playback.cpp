@@ -1303,7 +1303,7 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
             AllocKind akind = AllocKind::Device;
             if (!live || !ctx.live_alloc_of(live, &abase, &asize, &arec, &akind))
                 continue;
-            if (akind == AllocKind::Device) continue;
+            if (akind == AllocKind::Device || akind == AllocKind::Managed) continue;
             static std::mutex mu;
             static std::set<std::string> seen;
             std::string key = kernel_name + "#" + std::to_string(idx);
@@ -1983,6 +1983,35 @@ static bool dep_array(PlaybackContext& ctx, const char* api, const uint8_t* byte
     return true;
 }
 
+// Resolve the symbol a symbol-copy record names and check that the copy stays
+// inside it. The record's offset and count are archive data: without this the
+// handlers add the offset to the live address and hand the sum to HIP, which
+// does not bound a copy against the symbol and can reach a host memcpy at an
+// address the symbol does not own. The comparison is written so offset + count
+// is never formed and cannot wrap. On success *out is the symbol's live base address.
+static hipError_t resolve_symbol_range(PlaybackContext& ctx, uint64_t rec,
+                                       uint64_t offset, uint64_t count,
+                                       const char* api, void** out) {
+    size_t size = 0;
+    void* symbol = ctx.translate_symbol(rec, &size);
+    if (!symbol) {
+        fprintf(stderr,
+                "[HRR] %s: symbol 0x%llx is not in this archive's symbol "
+                "registry.\n", api, (unsigned long long)rec);
+        return hipErrorInvalidSymbol;
+    }
+    if (offset > size || count > size - offset) {
+        fprintf(stderr,
+                "[HRR] %s: copy of %llu bytes at offset %llu does not fit "
+                "symbol 0x%llx (%zu bytes registered); refusing the call\n",
+                api, (unsigned long long)count, (unsigned long long)offset,
+                (unsigned long long)rec, size);
+        return hipErrorInvalidValue;
+    }
+    *out = symbol;
+    return hipSuccess;
+}
+
 // True, having refused the call by name, when `size` bytes of host memory a call
 // reads have no blob: capture left them out, as it does for a blob over
 // HIP_HRR_CAPTURE_MAX_BLOB_MB.
@@ -2032,15 +2061,6 @@ static const void* to_symbol_source(PlaybackContext& ctx, const A* a,
     return src;
 }
 
-static void* symbol_or_complain(PlaybackContext& ctx, uint64_t rec,
-                                const char* api) {
-    void* symbol = ctx.translate_symbol(rec);
-    if (!symbol)
-        fprintf(stderr, "[HRR] %s: symbol 0x%llx is not in this archive's "
-                "symbol registry.\n", api, (unsigned long long)rec);
-    return symbol;
-}
-
 }  // namespace
 
 hipError_t playback_hipGraphAddMemcpyNodeToSymbol(PlaybackContext& ctx,
@@ -2048,8 +2068,11 @@ hipError_t playback_hipGraphAddMemcpyNodeToSymbol(PlaybackContext& ctx,
     const auto* a =
         reinterpret_cast<const hrr_args_hipGraphAddMemcpyNodeToSymbol*>(payload);
     const auto kind = static_cast<hipMemcpyKind>(a->kind);
-    void* symbol = symbol_or_complain(ctx, a->symbol, "hipGraphAddMemcpyNodeToSymbol");
-    if (!symbol) return hipErrorInvalidSymbol;
+    void* symbol = nullptr;
+    if (hipError_t e = resolve_symbol_range(ctx, a->symbol, a->offset, a->count,
+                                            "hipGraphAddMemcpyNodeToSymbol", &symbol);
+        e != hipSuccess)
+        return e;
     const void* src = to_symbol_source(ctx, a, "hipGraphAddMemcpyNodeToSymbol");
     if (!src) return hipErrorInvalidValue;
 
@@ -2076,14 +2099,11 @@ hipError_t playback_hipGraphAddMemcpyNodeFromSymbol(PlaybackContext& ctx,
     const auto* a =
         reinterpret_cast<const hrr_args_hipGraphAddMemcpyNodeFromSymbol*>(payload);
     const auto kind = static_cast<hipMemcpyKind>(a->kind);
-    void* symbol = ctx.translate_symbol(a->symbol);
-    if (!symbol) {
-        fprintf(stderr,
-                "[HRR] hipGraphAddMemcpyNodeFromSymbol: symbol 0x%llx is not in "
-                "this archive's symbol registry.\n",
-                (unsigned long long)a->symbol);
-        return hipErrorInvalidSymbol;
-    }
+    void* symbol = nullptr;
+    if (hipError_t e = resolve_symbol_range(ctx, a->symbol, a->offset, a->count,
+                                            "hipGraphAddMemcpyNodeFromSymbol", &symbol);
+        e != hipSuccess)
+        return e;
 
     void* dst = nullptr;
     if (kind == hipMemcpyDeviceToHost || kind == hipMemcpyHostToHost) {
@@ -2134,8 +2154,11 @@ hipError_t playback_hipGraphMemcpyNodeSetParamsToSymbol(PlaybackContext& ctx,
     const char* kApi = "hipGraphMemcpyNodeSetParamsToSymbol";
     const auto* a =
         reinterpret_cast<const hrr_args_hipGraphMemcpyNodeSetParamsToSymbol*>(payload);
-    void* symbol = symbol_or_complain(ctx, a->symbol, kApi);
-    if (!symbol) return hipErrorInvalidSymbol;
+    void* symbol = nullptr;
+    if (hipError_t e = resolve_symbol_range(ctx, a->symbol, a->offset, a->count,
+                                            kApi, &symbol);
+        e != hipSuccess)
+        return e;
     const void* src = to_symbol_source(ctx, a, kApi);
     if (!src) return hipErrorInvalidValue;
     hipGraphNode_t node = ctx.translate_graph_node(a->node);
@@ -2154,8 +2177,11 @@ hipError_t playback_hipGraphMemcpyNodeSetParamsFromSymbol(PlaybackContext& ctx,
     const char* kApi = "hipGraphMemcpyNodeSetParamsFromSymbol";
     const auto* a =
         reinterpret_cast<const hrr_args_hipGraphMemcpyNodeSetParamsFromSymbol*>(payload);
-    void* symbol = symbol_or_complain(ctx, a->symbol, kApi);
-    if (!symbol) return hipErrorInvalidSymbol;
+    void* symbol = nullptr;
+    if (hipError_t e = resolve_symbol_range(ctx, a->symbol, a->offset, a->count,
+                                            kApi, &symbol);
+        e != hipSuccess)
+        return e;
     hipGraphNode_t node = ctx.translate_graph_node(a->node);
     if (!node) {
         fprintf(stderr, "[HRR] %s: node 0x%llx was never built at replay.\n",
@@ -2181,8 +2207,11 @@ hipError_t playback_hipGraphExecMemcpyNodeSetParamsToSymbol(
     const char* kApi = "hipGraphExecMemcpyNodeSetParamsToSymbol";
     const auto* a =
         reinterpret_cast<const hrr_args_hipGraphExecMemcpyNodeSetParamsToSymbol*>(payload);
-    void* symbol = symbol_or_complain(ctx, a->symbol, kApi);
-    if (!symbol) return hipErrorInvalidSymbol;
+    void* symbol = nullptr;
+    if (hipError_t e = resolve_symbol_range(ctx, a->symbol, a->offset, a->count,
+                                            kApi, &symbol);
+        e != hipSuccess)
+        return e;
     const void* src = to_symbol_source(ctx, a, kApi);
     if (!src) return hipErrorInvalidValue;
     hipGraphExec_t exec = ctx.translate_graph_exec(a->hGraphExec);
@@ -2203,8 +2232,11 @@ hipError_t playback_hipGraphExecMemcpyNodeSetParamsFromSymbol(
     const char* kApi = "hipGraphExecMemcpyNodeSetParamsFromSymbol";
     const auto* a =
         reinterpret_cast<const hrr_args_hipGraphExecMemcpyNodeSetParamsFromSymbol*>(payload);
-    void* symbol = symbol_or_complain(ctx, a->symbol, kApi);
-    if (!symbol) return hipErrorInvalidSymbol;
+    void* symbol = nullptr;
+    if (hipError_t e = resolve_symbol_range(ctx, a->symbol, a->offset, a->count,
+                                            kApi, &symbol);
+        e != hipSuccess)
+        return e;
     hipGraphExec_t exec = ctx.translate_graph_exec(a->hGraphExec);
     hipGraphNode_t node = ctx.translate_graph_node(a->node);
     if (!exec || !node) {
@@ -2612,7 +2644,10 @@ hipError_t hrr_materialize_region(PlaybackContext& ctx, uint64_t rec_base,
 }
 
 void hrr_release_region(PlaybackContext& ctx, uint64_t rec_base, void* live) {
-    ctx.remove_alloc(rec_base);
+    // Only the entry for the stand-in buffer goes: the archive may have
+    // allocated something else at this address since (a managed buffer, a host
+    // allocation), and that entry keeps its charge and its buffer.
+    (void)ctx.remove_alloc_if_live(rec_base, live);
     if (live) (void)hipFree(live);
 }
 
@@ -3145,6 +3180,8 @@ void PlaybackContext::note_d2h_fail(uint64_t seq) {
     }
 }
 
+static void free_replaced_host_alloc(PlaybackContext& ctx, uint64_t rec);
+
 static hipError_t replay_malloc(PlaybackContext& ctx, const uint8_t* pl,
                                 bool managed = false) {
     const auto* a = reinterpret_cast<const hrr_args_hipMalloc*>(pl);
@@ -3152,6 +3189,13 @@ static hipError_t replay_malloc(PlaybackContext& ctx, const uint8_t* pl,
     size_t pad_sz  = replay_padded_alloc_size(orig_sz);
     void* live = nullptr;
     hipError_t r;
+    // Managed memory can be backed by host memory (pageable system memory, or
+    // pinned host memory on a runtime without SVM), so it counts against
+    // --max-host-bytes like hipHostMalloc, charged before the call.
+    if (managed) {
+        free_replaced_host_alloc(ctx, a->ptr);
+        if (!ctx.charge_host(pad_sz, "hipMallocManaged")) return hipErrorMemoryAllocation;
+    }
     // --guard-segments: back the allocation with VMM and leave an unmapped span
     // after it, so running off the end of the segment traps here instead of
     // landing in whatever the driver placed next. Managed memory has no VMM
@@ -3175,10 +3219,13 @@ static hipError_t replay_malloc(PlaybackContext& ctx, const uint8_t* pl,
         // where the original run never issued it and an injected memset would
         // invalidate the capture (HIP 901) for every subsequent op in the graph.
         hrr_zero_init_alloc(ctx, live, pad_sz);
-        ctx.record_alloc(a->ptr, live, pad_sz);
+        ctx.record_alloc(a->ptr, live, pad_sz,
+                         managed ? AllocKind::Managed : AllocKind::Device);
         if (ctx.verbose && pad_sz > orig_sz)
             fprintf(stderr, "[HRR] hipMalloc 0x%llx: orig=%zu padded=%zu\n",
                     (unsigned long long)a->ptr, orig_sz, pad_sz);
+    } else if (managed) {
+        ctx.host_budget.release(pad_sz);
     }
     return r;
 }
@@ -3307,15 +3354,15 @@ hipError_t playback_hipMemPoolCreate(PlaybackContext& ctx, const uint8_t* pl) {
 // hipHostMalloc:  ret(4) ptr(8) size(8) flags(4)
 // hipMallocHost:  ret(4) ptr(8) size(8)
 
-// An archive can record a host allocation again at an address that still holds
-// one: a second pass replays the same events, and a crafted archive can repeat
+// An archive can record a host (or managed) allocation again at an address that
+// still holds one: a second pass replays the same events, and a crafted archive can repeat
 // the address without a free. The entry being replaced keeps a live pinned
-// buffer, so free it, and give its charge back, before the new one is charged.
-// Otherwise the old buffer would stay allocated with no charge against it.
+// buffer, so release it before the new one is charged: a hipHostMalloc buffer
+// is freed and its charge given back; a hipHostRegister block is unregistered
+// and kept in host_reg_blocks for the next registration at this address.
 // A buffer the runtime refuses to release (hipHostFree or hipHostUnregister
-// fails, as it does under a capture on another thread) is left alone, buffer
-// and charge both: the charge goes back only once the runtime has let go.
-// Freeing a registration would leave it aimed at freed heap.
+// fails, as it does under a capture on another thread) is left alone and
+// keeps its charge: the charge goes back only once the runtime has let go.
 static void free_replaced_host_alloc(PlaybackContext& ctx, uint64_t rec) {
     std::unique_lock host_free(ctx.host_free_mu);
     void* host_ptr = nullptr;
@@ -3327,7 +3374,9 @@ static void free_replaced_host_alloc(PlaybackContext& ctx, uint64_t rec) {
         auto it = ctx.alloc_map.find(rec);
         if (it == ctx.alloc_map.end()) return;
         kind = it->second.kind;
-        if (kind != AllocKind::HostMalloc && kind != AllocKind::HostRegister) return;
+        if (kind != AllocKind::HostMalloc && kind != AllocKind::HostRegister &&
+            kind != AllocKind::Managed)
+            return;
         host_ptr = it->second.live_ptr;
         size = it->second.size;
         ctx.alloc_map.erase(it);
@@ -3341,14 +3390,16 @@ static void free_replaced_host_alloc(PlaybackContext& ctx, uint64_t rec) {
         if (hipHostFree(host_ptr) == hipSuccess) ctx.host_budget.release(size);
         return;
     }
+    if (kind == AllocKind::Managed) {
+        if (hipFree(host_ptr) == hipSuccess) ctx.host_budget.release(size);
+        return;
+    }
     void* buf = reg_buf ? reg_buf : host_ptr;
-    if (hipHostUnregister(buf) != hipSuccess) return;
-    ctx.host_budget.release(size);
-#ifdef _WIN32
-    _aligned_free(buf);
-#else
-    free(buf);
-#endif
+    if (hipHostUnregister(buf) == hipSuccess) return;
+    // Still registered: the next registration here gets a new block.
+    std::unique_lock lk(ctx.map_mutex);
+    auto& block = ctx.host_reg_blocks[rec];
+    if (block.cur.get() == buf) block.retired.push_back(std::move(block.cur));
 }
 
 hipError_t playback_hipHostMalloc(PlaybackContext& ctx, const uint8_t* pl) {
@@ -3418,11 +3469,12 @@ hipError_t playback_hipFreeHost(PlaybackContext& ctx, const uint8_t* pl) {
 // Manual playback: hipHostRegister / hipHostUnregister
 // ---------------------------------------------------------------------------
 // hipHostRegister recorded a snapshot of the host memory as a blob.
-// At replay we allocate a fresh host buffer (malloc), restore the blob
-// into it, call hipHostRegister on it, and track the (recorded -> live)
+// At replay we take the recorded address's block in host_reg_blocks, restore
+// the blob into it, call hipHostRegister on it, and track the (recorded -> live)
 // mapping so kernel-arg pointer translations work. A registration recorded
 // without its blob is refused.
-// hipHostUnregister unregisters, frees the backing buffer, and removes the entry.
+// hipHostUnregister unregisters and removes the entry. The block stays until
+// the context is destroyed, since a graph node may still point into it.
 
 hipError_t playback_hipHostRegister(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipHostRegister*>(pl);
@@ -3431,20 +3483,9 @@ hipError_t playback_hipHostRegister(PlaybackContext& ctx, const uint8_t* pl) {
     free_replaced_host_alloc(ctx, a->hostPtr);
     if (host_contents_left_out("hipHostRegister", sz, a->blob_hash_lo, a->blob_hash_hi))
         return hipErrorNotFound;
-    if (!ctx.charge_host(sz, "hipHostRegister backing buffer"))
-        return hipErrorMemoryAllocation;
-
-    // Allocate backing host buffer aligned to 64 bytes (page-register friendly).
-    void* buf = nullptr;
-#ifdef _WIN32
-    buf = _aligned_malloc(sz, 64);
-#else
-    if (posix_memalign(&buf, 64, sz) != 0) buf = nullptr;
-#endif
-    if (!buf) {
-        ctx.host_budget.release(sz);
-        return hipErrorMemoryAllocation;
-    }
+    void* buf = ctx.host_block(ctx.host_reg_blocks, a->hostPtr, sz,
+                               "hipHostRegister backing buffer");
+    if (!buf) return hipErrorMemoryAllocation;
 
     // Restore snapshot into the buffer.
     size_t blob_sz = 0;
@@ -3456,11 +3497,6 @@ hipError_t playback_hipHostRegister(PlaybackContext& ctx, const uint8_t* pl) {
     if (!blob && ctx.fatal_error.load(std::memory_order_acquire)) {
         // The blob was refused (cap or allocation), not merely absent:
         // do not register zeros in its place.
-#ifdef _WIN32
-        _aligned_free(buf);
-#else
-        free(buf);
-#endif
         return hipErrorUnknown;
     }
 
@@ -3469,13 +3505,6 @@ hipError_t playback_hipHostRegister(PlaybackContext& ctx, const uint8_t* pl) {
         ctx.record_alloc(a->hostPtr, buf, sz, AllocKind::HostRegister);
         std::unique_lock lk(ctx.map_mutex);
         ctx.host_reg_bufs[a->hostPtr] = buf;
-    } else {
-        ctx.host_budget.release(sz);
-#ifdef _WIN32
-        _aligned_free(buf);
-#else
-        free(buf);
-#endif
     }
     return r;
 }
@@ -3484,9 +3513,8 @@ hipError_t playback_hipHostUnregister(PlaybackContext& ctx, const uint8_t* pl) {
     std::unique_lock host_free(ctx.host_free_mu);
     const auto* a = reinterpret_cast<const hrr_args_hipHostUnregister*>(pl);
 
-    // Leave the maps and the backing buffer alone until the runtime call
-    // succeeds. A failed unregister did not release the registration, so
-    // freeing the buffer would leave alloc_map aimed at freed heap.
+    // Leave the maps alone until the runtime call succeeds: a failed
+    // unregister did not release the registration.
     void* buf = nullptr;
     {
         std::shared_lock lk(ctx.map_mutex);
@@ -3505,13 +3533,6 @@ hipError_t playback_hipHostUnregister(PlaybackContext& ctx, const uint8_t* pl) {
         ctx.host_reg_bufs.erase(a->hostPtr);
     }
     ctx.remove_alloc(a->hostPtr);
-    if (buf) {
-#ifdef _WIN32
-        _aligned_free(buf);
-#else
-        free(buf);
-#endif
-    }
     return r;
 }
 
@@ -4391,6 +4412,43 @@ hipError_t playback_hipEventCreateWithFlags(PlaybackContext& ctx,
     hipEvent_t e  = nullptr;
     hipError_t r  = hipEventCreateWithFlags(&e, a->flags);
     if (r == hipSuccess) ctx.record_event(a->event, e);
+    return r;
+}
+
+hipError_t playback_hipEventElapsedTime(PlaybackContext& ctx,
+                                         const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipEventElapsedTime*>(pl);
+    float ms = 0.f;
+    hipEvent_t start = ctx.translate_event(a->start);
+    hipEvent_t stop  = ctx.translate_event(a->stop);
+    hipError_t r = hipEventElapsedTime(&ms, start, stop);
+    if (r == hipSuccess) return hipSuccess;
+    // HIP returns hipErrorInvalidHandle when either event has no marker.
+    // hipExtModuleLaunchKernel sets those markers inside the runtime. An
+    // archive recorded before that side effect was stored has no
+    // hipEventRecord for the pair, and the captured call still succeeded.
+    // Both handles resolving means the events are still live, so this is not
+    // a destroyed event. The milliseconds were not stored. Warn once and clear
+    // the sticky error — the next call would otherwise report it.
+    // Only such an archive gets this: one with
+    // HRR_FILE_FLAG_EXT_LAUNCH_EVENT_MARKERS stored the markers, so a missing
+    // one there is a capture or replay fault and fails the replay.
+    if (r == hipErrorInvalidHandle && a->ret == 0 && start && stop &&
+        !ctx.ext_launch_event_markers) {
+        static std::atomic<bool> warned{false};
+        if (!warned.exchange(true)) {
+            fprintf(stderr,
+                    "[HRR] hipEventElapsedTime: no marker on a live pair "
+                    "(start=0x%llx stop=0x%llx; archive predates ext-launch "
+                    "event markers, recorded success, replay returned "
+                    "hipErrorInvalidHandle); continuing\n",
+                    (unsigned long long)a->start, (unsigned long long)a->stop);
+        }
+        (void)hipGetLastError();
+        return hipSuccess;
+    }
+    if (hrr_replayed_recorded_error(ctx, "hipEventElapsedTime", a->ret, r))
+        return hipSuccess;
     return r;
 }
 
@@ -5450,12 +5508,36 @@ hipError_t playback_hipMemCreate(PlaybackContext& ctx, const uint8_t* pl) {
             return hipErrorInvalidDevice;
         }
     }
+    // A host-located handle is host-backed physical memory (pinned, GTT), so it
+    // counts against --max-host-bytes. A device-located one does not.
+    const bool host_backed = prop.location.type != hipMemLocationTypeDevice;
+    // A handle recorded again under a name still held: release the old one first
+    // so neither the handle nor its charge is left behind.
+    {
+        hipMemGenericAllocationHandle_t old{};
+        {
+            std::unique_lock lk(ctx.map_mutex);
+            auto it = ctx.vmm_handle_map.find(rec_handle);
+            if (it != ctx.vmm_handle_map.end()) {
+                old = it->second;
+                ctx.vmm_handle_map.erase(it);
+            }
+        }
+        if (old) {
+            (void)hipMemRelease(old);
+            ctx.vmm_note_release(old);  // its charge stays while a mapping holds it
+        }
+    }
+    const uint64_t charge = host_backed ? a->size : 0;
+    if (host_backed && !ctx.charge_host(charge, "hipMemCreate (host location)"))
+        return hipErrorMemoryAllocation;
     hipMemGenericAllocationHandle_t live_handle{};
     hipError_t r = hipMemCreate(&live_handle, static_cast<size_t>(a->size), &prop,
                                 static_cast<unsigned long long>(a->flags));
     if (r == hipSuccess) {
-        std::unique_lock lk(ctx.map_mutex);
-        ctx.vmm_handle_map[rec_handle] = live_handle;
+        ctx.vmm_note_create(rec_handle, live_handle, charge);
+    } else {
+        ctx.host_budget.release(charge);
     }
     return r;
 }
@@ -5466,8 +5548,11 @@ hipError_t playback_hipMemRelease(PlaybackContext& ctx, const uint8_t* pl) {
     if (!live) return hipSuccess;
     hipError_t r = hipMemRelease(live);
     if (r == hipSuccess) {
-        std::unique_lock lk(ctx.map_mutex);
-        ctx.vmm_handle_map.erase(a->handle);
+        {
+            std::unique_lock lk(ctx.map_mutex);
+            ctx.vmm_handle_map.erase(a->handle);
+        }
+        ctx.vmm_note_release(live);
     }
     return r;
 }
@@ -5484,18 +5569,22 @@ hipError_t playback_hipMemMap(PlaybackContext& ctx, const uint8_t* pl) {
     }
     hipMemGenericAllocationHandle_t live_handle = ctx.translate_vmm_handle(a->handle);
     if (!live_handle) return hipSuccess;  // handle not tracked, skip
-    return hipMemMap(live_va,
-                     static_cast<size_t>(a->size),
-                     static_cast<size_t>(a->offset),
-                     live_handle,
-                     static_cast<unsigned long long>(a->flags));
+    hipError_t r = hipMemMap(live_va,
+                             static_cast<size_t>(a->size),
+                             static_cast<size_t>(a->offset),
+                             live_handle,
+                             static_cast<unsigned long long>(a->flags));
+    if (r == hipSuccess) ctx.vmm_note_map(live_va, static_cast<size_t>(a->size), live_handle);
+    return r;
 }
 
 hipError_t playback_hipMemUnmap(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipMemUnmap*>(pl);
     void* live_va = ctx.translate_vmm_va(a->ptr);
     if (!live_va) return hipSuccess;
-    return hipMemUnmap(live_va, static_cast<size_t>(a->size));
+    hipError_t r = hipMemUnmap(live_va, static_cast<size_t>(a->size));
+    if (r == hipSuccess) ctx.vmm_note_unmap(live_va, static_cast<size_t>(a->size));
+    return r;
 }
 
 // ---------------------------------------------------------------------------

@@ -39,6 +39,7 @@
 #include "fakes/net_ib_cast_gdr_fakes.h"
 #include "fakes/net_ib_cast_init_fakes.h"
 #include "fakes/net_ib_cast_multiplane_fakes.h"
+#include "fakes/net_ib_cast_p2p_fakes.h"
 #include "fakes/net_ib_cast_p2p_resiliency_fakes.h"
 #include "fakes/os_fakes.h"
 #include "fakes/rocmwrap_fakes.h"
@@ -211,10 +212,11 @@ struct FakeSockets {
     } else {
       const std::string& in = client ? c->toClient : c->toServer;
       size_t& rd = client ? c->clientRead : c->serverRead;
-      int n = std::min<int>(want, in.size() - rd);
-      memcpy(static_cast<char*>(ptr) + *offset, in.data() + rd, n);
-      rd += n;
-      *offset += n;
+      if (rd > in.size() || want < 0) return ncclInternalError;
+      const int bytes = static_cast<int>(std::min<size_t>(want, in.size() - rd));
+      memcpy(static_cast<char*>(ptr) + *offset, in.data() + rd, bytes);
+      rd += bytes;
+      *offset += bytes;
     }
     return ncclSuccess;
   }
@@ -274,6 +276,7 @@ class NetIbCastConnectMicrotest : public ::testing::Test {
     ResetNetIbCastInitFakes();
     ResetNetIbCastGdrFakes();
     ResetNetIbCastMultiplaneFakes();
+    ResetNetIbCastP2pFakes();
     ResetNetIbCastP2pResiliencyFakes();
     ResetHipFakes();
     ResetLibcFakes();

@@ -21,6 +21,7 @@
 #include "ScopedHook.h"
 #include "fakes/ibvwrap_fakes.h"
 #include "fakes/nccl_fakes.h"
+#include "fakes/net_ib_cast_common_fakes.h"
 #include "../common/LogCapture.hpp"
 
 #include "fakes/param_redirect.h"
@@ -60,6 +61,7 @@ class NetIbCastQpSharingMicrotest : public ::testing::Test {
     ResetPool();
     ResetIbvwrapFakes();
     ResetNcclFakes();
+    ResetNetIbCastCommonFakes();
   }
 
   static void ResetPool() {

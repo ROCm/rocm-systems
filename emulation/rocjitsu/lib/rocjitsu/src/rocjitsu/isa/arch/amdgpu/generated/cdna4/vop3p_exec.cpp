@@ -301,8 +301,11 @@ void VMfmaF3216x16x128F8f6f4Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::exec_f32_mixed(cu, 16, 16, 128, 1, a_bits, b_bits, dst, s0b, s1b, s2, ea, eb,
                                const_acc);
       });
-  if (!dispatched)
-    throw util::UnimplementedInst(mnemonic());
+  if (!dispatched) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
 }
 
 void VMfmaF3232x32x64F8f6f4Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
@@ -326,8 +329,11 @@ void VMfmaF3232x32x64F8f6f4Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::exec_f32_mixed(cu, 32, 32, 64, 1, a_bits, b_bits, dst, s0b, s1b, s2, ea, eb,
                                const_acc);
       });
-  if (!dispatched)
-    throw util::UnimplementedInst(mnemonic());
+  if (!dispatched) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
 }
 
 void VMfmaF3216x16x32Bf16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
@@ -1405,8 +1411,11 @@ void VMfmaScaleF3216x16x128F8f6f4Vop3px2::execute_impl(amdgpu::Wavefront &wf) {
                                       const_acc, vb, scale_a, scale_b, scale_a_byte, scale_b_byte,
                                       c_modifier);
       });
-  if (!dispatched)
-    throw util::UnimplementedInst(mnemonic());
+  if (!dispatched) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
 }
 
 void VMfmaScaleF3232x32x64F8f6f4Vop3px2::execute_impl(amdgpu::Wavefront &wf) {
@@ -1430,8 +1439,11 @@ void VMfmaScaleF3232x32x64F8f6f4Vop3px2::execute_impl(amdgpu::Wavefront &wf) {
                                       const_acc, vb, scale_a, scale_b, scale_a_byte, scale_b_byte,
                                       c_modifier);
       });
-  if (!dispatched)
-    throw util::UnimplementedInst(mnemonic());
+  if (!dispatched) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
 }
 
 } // namespace cdna4

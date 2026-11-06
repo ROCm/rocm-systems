@@ -428,6 +428,11 @@ class IsaProfile(ABC):
     """
 
     @property
+    def uses_rj_arith_matrix(self) -> bool:
+        """Opt into rj-arith matrix execution independently of operand layout."""
+        return False
+
+    @property
     @abstractmethod
     def supported_versions(self) -> list[str]:
         """Schema versions this profile supports."""
@@ -605,12 +610,30 @@ class IsaProfile(ABC):
 
     @property
     def has_gfx11_image_address_extension(self) -> bool:
-        """Whether MIMG uses the GFX11 image-address encoding contract.
+        """Whether MIMG uses GFX11 operand rendering and fixed BVH tuple sizing.
 
-        This selects DIM-based VADDR sizing, x4 SRSRC/SSAMP tuple scaling, and
-        the optional NSA DWORD containing additional address-register selectors.
+        DIM-based sizing and NSA extension length have separate properties below.
         """
         return False
+
+    @property
+    def image_dimensions_in_resource(self) -> bool:
+        """Whether image dimensions come from T# rather than instruction DIM."""
+        return False
+
+    @property
+    def mimg_max_nsa_words(self) -> int:
+        """Maximum DWORD count of a MIMG NSA extension."""
+        return 0
+
+    @property
+    def mimg_nsa_dword_count_expr(self) -> str | None:
+        """C++ expression for the nonzero MIMG NSA extension length, or None without NSA."""
+        if self.mimg_max_nsa_words == 0:
+            return None
+        if self.mimg_max_nsa_words == 1:
+            return '1u'
+        return 'inst_.nsa'
 
     @property
     def split_ds_2addr_offsets(self) -> bool:
@@ -1834,6 +1857,10 @@ class CdnaProfile(_AmdgpuProfileBase):
     scratch_has_vaddr_expr = 'inst_.lds != 0'
 
     @property
+    def image_dimensions_in_resource(self) -> bool:
+        return True
+
+    @property
     def ds_compare_store_compare_first(self) -> bool:
         # CDNA1-4 / RDNA1-2 DS CMPST reverses the BUFFER operand order.
         return True
@@ -2214,6 +2241,10 @@ class Rdna1Profile(_AmdgpuProfileBase):
     """
 
     @property
+    def mimg_max_nsa_words(self) -> int:
+        return 3
+
+    @property
     def valu16_preserves_unwritten_half(self) -> bool:
         return True
 
@@ -2387,6 +2418,10 @@ class Rdna3Profile(_AmdgpuProfileBase):
         return True
 
     @property
+    def mimg_max_nsa_words(self) -> int:
+        return 1
+
+    @property
     def gfx11_mimg_fixed_vaddr_words(self) -> dict[str, tuple[int, int]]:
         return {
             'IMAGE_BVH_INTERSECT_RAY': (11, 8),
@@ -2543,6 +2578,10 @@ class Rdna3Profile(_AmdgpuProfileBase):
         return FloatDotAccumulation.GFX11
 
     @property
+    def uses_rj_arith_matrix(self) -> bool:
+        return True
+
+    @property
     def matrix_layout(self) -> MatrixLayout:
         return MatrixLayout.WMMA_REPLICATED_HALFWAVE
 
@@ -2617,6 +2656,11 @@ class Rdna3_5Profile(Rdna3Profile):
     class so the codegen pipeline can auto-detect RDNA3.5 XML files
     separately from RDNA3.
     """
+
+    @property
+    def uses_rj_arith_matrix(self) -> bool:
+        # RDNA3.5 retains its legacy implementation despite sharing the RDNA3 layout.
+        return False
 
     @property
     def extra_lane_selector_intervals(self) -> tuple[tuple[int, int], ...]:
@@ -2883,6 +2927,10 @@ class Rdna4Profile(_AmdgpuProfileBase):
         return True
 
     @property
+    def uses_rj_arith_matrix(self) -> bool:
+        return True
+
+    @property
     def matrix_layout(self) -> MatrixLayout:
         return MatrixLayout.WMMA_SPLIT_K
 
@@ -3009,6 +3057,11 @@ class Cdna5Profile(Rdna4Profile):
     """
 
     flat_saddr_null_aliases = ()
+
+    @property
+    def uses_rj_arith_matrix(self) -> bool:
+        # CDNA5 needs its own matrix bindings, including fixed-wave sparse forms.
+        return False
 
     @property
     def bf16_inline_uses_f32_carrier(self) -> bool:
