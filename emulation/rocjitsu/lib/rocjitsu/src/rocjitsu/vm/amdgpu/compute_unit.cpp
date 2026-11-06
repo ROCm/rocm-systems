@@ -30,7 +30,6 @@
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/plugins/memory_access_observation.h"
-#include "util/except.h"
 #include "util/log.h"
 
 #include <algorithm>
