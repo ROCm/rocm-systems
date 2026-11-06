@@ -1,0 +1,17 @@
+# zizmor configuration
+# Reference: https://docs.zizmor.sh/configuration/
+#
+# A repository that ships a zizmor config replaces the scanner default
+# wholesale, so everything this repository needs from zizmor is defined here.
+#
+# Per-rule ignore lists and tuning live under `rules:`, as
+# `<rule-id>: { ignore: [file.yml:line:col] }`, which keeps a suppression
+# reviewable in one place rather than scattered as inline comments
+# across workflows.
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        # First-party TheRock reusable workflows are referenced by release
+        # branch.
+        ROCm/TheRock/*: ref-pin
