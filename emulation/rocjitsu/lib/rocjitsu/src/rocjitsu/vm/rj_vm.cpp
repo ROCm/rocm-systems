@@ -365,25 +365,19 @@ rj_status_t rj_vm_save_checkpoint(const rj_vm_t *vm, const char *path, uint64_t 
   // opening the output file rather than silently dropping other GPU state.
   if (vm->vm && vm->vm->num_socs() > 1)
     return ROCJITSU_STATUS_UNSUPPORTED;
-  try {
-    auto engine_config = vm->engine_config;
-    if (engine_config.num_threads == vm->loaded.execution_threads.engines)
-      engine_config.num_threads = vm->loaded.requested_engine_threads;
-    util::StringDiagnostic diagnostic;
-    if (config::save_checkpoint(path, *vm->soc, tick, engine_config,
-                                vm->loaded.cpu_dispatch_threads, diagnostic.emitter(),
-                                vm->loaded.cpu_thread_budget, vm->loaded.thread_allocations,
-                                vm->loaded.legacy_auto_dispatch, vm->loaded.async_helper_threads)
-            .failed()) {
-      util::Logger::warn("rj_vm_save_checkpoint failed: ", diagnostic.message());
-      return ROCJITSU_STATUS_ERROR;
-    }
-    return ROCJITSU_STATUS_SUCCESS;
-  } catch (const std::exception &error) {
-    // Serialization still allocates and calls library code that may throw.
-    util::Logger::warn("rj_vm_save_checkpoint failed: ", error.what());
+  auto engine_config = vm->engine_config;
+  if (engine_config.num_threads == vm->loaded.execution_threads.engines)
+    engine_config.num_threads = vm->loaded.requested_engine_threads;
+  util::StringDiagnostic diagnostic;
+  if (config::save_checkpoint(path, *vm->soc, tick, engine_config,
+                              vm->loaded.cpu_dispatch_threads, diagnostic.emitter(),
+                              vm->loaded.cpu_thread_budget, vm->loaded.thread_allocations,
+                              vm->loaded.legacy_auto_dispatch, vm->loaded.async_helper_threads)
+          .failed()) {
+    util::Logger::warn("rj_vm_save_checkpoint failed: ", diagnostic.message());
     return ROCJITSU_STATUS_ERROR;
   }
+  return ROCJITSU_STATUS_SUCCESS;
 }
 
 rj_status_t rj_vm_restore_checkpoint(const char *path, rj_vm_t **vm) {
