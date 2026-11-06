@@ -1,25 +1,5 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
-#
 # SPDX-License-Identifier: MIT
-#
-# HRR region producer for PyTorch's HIP caching allocator.
-#
-# PyTorch calls hipMalloc once per segment and then carves per-tensor blocks out
-# of it with host pointer arithmetic, so HRR records the segment and never sees
-# the blocks. This writes the block layout down beside the capture, which is what
-# lets replay tell "this pointer addresses a live tensor" from "this pointer is
-# past the end of one".
-#
-# Usage: start it from the application,
-#
-#     import hrr_torch_regions; hrr_torch_regions.start()
-#
-# or import it from a sitecustomize.py on PYTHONPATH and set
-# HRR_REGIONS_AUTOSTART=1. Importing it alone starts nothing: the producer turns
-# on PyTorch's allocator history, which keeps a record of every allocation and
-# free, so it runs only when asked. Once started it waits for HRR capture to be
-# active before it records anything. The format it writes is specified in
-# ../README.md; it calls no HRR function and links against nothing.
 
 import os
 import stat
@@ -28,7 +8,6 @@ import sys
 import threading
 import time
 
-# ---- Wire format (must match hrr/hrr_regions.h) ----------------------------
 _REGION_MAGIC = 0x52525248  # "HRRR"
 _REGION_VERSION = 1
 _REGION_EVENT = 0xFFFD
@@ -37,7 +16,6 @@ _ADD, _DEL = 0, 1
 _BLOCK, _SEGMENT = 0, 1
 
 _FILE_HEADER = struct.pack("<IHH", _REGION_MAGIC, _REGION_VERSION, 0)
-# hrr_event_header: u16 type, u64 seq, u64 ts, u64 tid, u32 len, 2 pad bytes.
 _EVENT_HEADER = "<HQQQI2x"
 _REC = "<BBBBIQQq"
 _REC_SIZE = 32
@@ -47,15 +25,8 @@ _INTERVAL_S = float(os.environ.get("HRR_REGIONS_INTERVAL_S", "2.0"))
 _VERBOSE = os.environ.get("HRR_REGIONS_VERBOSE", "") not in ("", "0")
 # PyTorch's trace ring depth, per device, which bounds how much allocator
 # history the process holds. Must exceed the number of alloc/free events between
-# two polls, or events are overwritten before we read them. A workload that
-# allocates more than that in HRR_REGIONS_INTERVAL_S needs a larger value or a
-# shorter interval.
 _MAX_ENTRIES = int(os.environ.get("HRR_REGIONS_MAX_ENTRIES", "100000"))
 
-# PyTorch device_trace actions that change what is live. free_requested and
-# free_completed both map to DEL: the replayer's erase is idempotent, and
-# treating the request as the end of the block's life is the conservative
-# reading — a pointer used after free is exactly what we want reported.
 _ACTIONS = {
     "alloc":          (_ADD, _BLOCK),
     "free_requested": (_DEL, _BLOCK),
@@ -251,7 +222,6 @@ class _Stream:
             regions = os.path.join(d, "regions")
             # Private as the README asks, and never through a planted link. The
             # file is opened relative to the directory checked, so the
-            # directory cannot be swapped for a link in between.
             if os.name == "nt":
                 try:
                     os.mkdir(regions, 0o700)
@@ -276,9 +246,6 @@ class _Stream:
             self._pid = os.getpid()
             # Only on a fresh file. The stream is opened for append and can be
             # re-opened after close(), so writing unconditionally would splice
-            # a second file header into the middle of the record stream. The reader parses those 8 bytes as an
-            # event header, reads a garbage payload length, and discards every
-            # record from that point on as a torn tail.
             if self._fh.tell() == 0:
                 self._fh.write(_FILE_HEADER)
 
@@ -372,9 +339,6 @@ def _delta(snap, watermark, seen_at_mark):
 
 
 def _worker():
-    # torch dlopens the HIP runtime, and capture opens its archive at HIP init,
-    # so nothing here is available at interpreter startup. Wait for torch, then
-    # for the archive directory to appear.
     torch = None
     for _ in range(600):  # up to ~10 min, for a slow model import
         torch = sys.modules.get("torch")
@@ -396,9 +360,6 @@ def _worker():
         return
 
     stream = _Stream()
-    # os.fork() leaves this thread dead in the child while the capture writer
-    # happily reopens under the new pid, so a forked worker would record nothing
-    # at all. Restart there.
     try:
         os.register_at_fork(after_in_child=_start)
     except (AttributeError, ValueError):

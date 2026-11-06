@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
-#
 # SPDX-License-Identifier: MIT
 """Unit tests for hrr_torch_regions.py: when the producer treats capture as
 active, and what it does with the file system when it writes. POSIX only, like
@@ -103,7 +102,6 @@ class ArchiveDirTest(_ArchiveCase):
         self.assertIsNone(regions._archive_dir())
 
     def test_marker_of_an_earlier_process(self):
-        # What a process killed with SIGKILL leaves for a later one with its pid.
         self.marker.write_bytes(b"00000000-0000-0000-0000-000000000000 4241\n")
         self.assertIsNone(regions._archive_dir())
 

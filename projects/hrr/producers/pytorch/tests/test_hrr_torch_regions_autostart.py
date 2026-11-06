@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
-#
 # SPDX-License-Identifier: MIT
 """Unit tests for when hrr_torch_regions.py turns on PyTorch's allocator
 history: only when asked, and with a bounded ring. Each case imports the
@@ -22,9 +21,6 @@ from pathlib import Path
 
 PRODUCER_DIR = Path(__file__).resolve().parent.parent
 
-# Runs in the child. The archive is pid-<pid> with an active marker in it that
-# names this process by boot id and start time, as the capture writer leaves it
-# while it runs, so a started producer goes on to enable history straight away.
 CHILD = r"""
 import json, os, sys, threading, time, types
 
