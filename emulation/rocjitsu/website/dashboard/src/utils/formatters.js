@@ -9,12 +9,12 @@ const shortDateFormatter = new Intl.DateTimeFormat(undefined, {
 export const formatShortDate = (timestamp) => isValidTimestamp(timestamp) ? shortDateFormatter.format(new Date(timestamp)) : '-';
 const runTimeFormatter = new Intl.DateTimeFormat(undefined, {
   year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-  hour12: false, timeZone: 'UTC',
+  hour12: false, timeZoneName: 'short',
 });
 
 export function formatRunTime(timestamp) {
   return isValidTimestamp(timestamp)
-    ? `${runTimeFormatter.format(new Date(timestamp))} UTC` : '—';
+    ? runTimeFormatter.format(new Date(timestamp)) : '—';
 }
 
 // Same text as formatRunTime; differs only in showing '-' rather than '—' for a missing or invalid time.
@@ -22,7 +22,7 @@ export const formatFullDate = (timestamp) => (isValidTimestamp(timestamp) ? form
 
 const compactRunTimeFormatter = new Intl.DateTimeFormat(undefined, {
   month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-  hour12: false, timeZone: 'UTC',
+  hour12: false,
 });
 
 export function formatCompactRunTime(timestamp) {
@@ -30,13 +30,13 @@ export function formatCompactRunTime(timestamp) {
     ? compactRunTimeFormatter.format(new Date(timestamp)) : '-';
 }
 
-const publicationDateFormatter = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
-const publicationTimeFormatter = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'UTC' });
+const publicationDateFormatter = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' });
+const publicationTimeFormatter = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZoneName: 'short' });
 
 export function formatPublicationTime(timestamp) {
   const date = typeof timestamp === 'string' ? new Date(timestamp) : null;
   return date && Number.isFinite(date.getTime())
-    ? `${publicationDateFormatter.format(date)} · ${publicationTimeFormatter.format(date)} UTC` : null;
+    ? `${publicationDateFormatter.format(date)} · ${publicationTimeFormatter.format(date)}` : null;
 }
 
 export function formatMetadataValue(value) {
