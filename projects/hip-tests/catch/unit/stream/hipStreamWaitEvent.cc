@@ -10,10 +10,15 @@ Unit_hipStreamWaitEvent_Negative - Test unsuccessful hipStreamWaitEvent when eit
 are invalid Unit_hipStreamWaitEvent_Default - Test simple waiting for an event with
 hipStreamWaitEvent api Unit_hipStreamWaitEvent_DifferentStreams - Test waiting for an event on a
 different stream with hipStreamWaitEvent api
+Unit_hipStreamWaitEvent_PendingEventEmptyWaiter - A stream whose only work is a wait on an event
+that is still pending on another stream must complete once that event completes
 */
 
 #include <hip_test_common.hh>
 #include <utils.hh>
+
+#include <chrono>
+#include <thread>
 HIP_TEST_CASE(Unit_hipStreamWaitEvent_Negative) {
   enum class StreamTestType { NullStream = 0, StreamPerThread, CreatedStream };
 
@@ -118,4 +123,95 @@ HIP_TEST_CASE(Unit_hipStreamWaitEvent_DifferentStreams) {
   HIP_CHECK(hipStreamDestroy(streamBlockedOnStreamA));
   HIP_CHECK(hipStreamDestroy(unblockingStream));
   HIP_CHECK(hipEventDestroy(waitEvent));
+}
+
+namespace {
+__global__ void IncrementCounter(unsigned* counter) { ++*counter; }
+
+// Polls instead of calling hipStreamSynchronize, so a stream that never completes fails the
+// test instead of blocking it.
+bool StreamCompletesWithin(hipStream_t stream, std::chrono::seconds limit) {
+  const auto deadline = std::chrono::steady_clock::now() + limit;
+  while (std::chrono::steady_clock::now() < deadline) {
+    const hipError_t status = hipStreamQuery(stream);
+    if (status == hipSuccess) return true;
+    HIP_CHECK_ERROR(status, hipErrorNotReady);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  return false;
+}
+}  // namespace
+
+/**
+ * Test Description
+ * ------------------------
+ *  - A producer stream runs many small kernels, as a graph launch or as eager launches,
+ *    and records an event. The event is still pending when a second stream waits on it.
+ *    The waiting stream has no other work.
+ *  - After the event completes, the waiting stream must also complete.
+ *  - Repeats the sequence so that the runtime reuses its completion signals.
+ * Test source
+ * ------------------------
+ *  - unit/stream/hipStreamWaitEvent.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.2
+ */
+HIP_TEST_CASE(Unit_hipStreamWaitEvent_PendingEventEmptyWaiter) {
+  constexpr int kKernels = 2048;
+  constexpr int kTrials = 20;
+  const bool useGraph = GENERATE(true, false);
+  INFO("producer: " << (useGraph ? "graph launch" : "eager launches"));
+
+  hipStream_t producer{nullptr}, waiter{nullptr};
+  hipEvent_t done{nullptr};
+  unsigned* counter{nullptr};
+  HIP_CHECK(hipStreamCreateWithFlags(&producer, hipStreamNonBlocking));
+  HIP_CHECK(hipStreamCreateWithFlags(&waiter, hipStreamNonBlocking));
+  HIP_CHECK(hipEventCreate(&done));
+  HIP_CHECK(hipMalloc(&counter, sizeof(unsigned)));
+
+  hipGraphExec_t exec{nullptr};
+  if (useGraph) {
+    hipGraph_t graph{nullptr};
+    HIP_CHECK(hipStreamBeginCapture(producer, hipStreamCaptureModeGlobal));
+    for (int i = 0; i < kKernels; ++i) {
+      hipLaunchKernelGGL(IncrementCounter, dim3(1), dim3(1), 0, producer, counter);
+    }
+    HIP_CHECK(hipStreamEndCapture(producer, &graph));
+    HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphDestroy(graph));
+  }
+
+  int pendingAtWait = 0;
+  for (int trial = 0; trial < kTrials; ++trial) {
+    INFO("trial " << trial);
+    HIP_CHECK(hipMemsetAsync(counter, 0, sizeof(unsigned), producer));
+    HIP_CHECK(hipStreamSynchronize(producer));
+    if (useGraph) {
+      HIP_CHECK(hipGraphLaunch(exec, producer));
+    } else {
+      for (int i = 0; i < kKernels; ++i) {
+        hipLaunchKernelGGL(IncrementCounter, dim3(1), dim3(1), 0, producer, counter);
+      }
+    }
+    HIP_CHECK(hipEventRecord(done, producer));
+    const hipError_t query = hipEventQuery(done);
+    if (query != hipErrorNotReady) HIP_CHECK(query);
+    pendingAtWait += (query == hipErrorNotReady);
+    HIP_CHECK(hipStreamWaitEvent(waiter, done, 0));
+    HIP_CHECK(hipEventSynchronize(done));
+    REQUIRE(StreamCompletesWithin(waiter, std::chrono::seconds(10)));
+    unsigned result = 0;
+    HIP_CHECK(hipMemcpy(&result, counter, sizeof(result), hipMemcpyDeviceToHost));
+    REQUIRE(result == static_cast<unsigned>(kKernels));
+  }
+  // The scenario needs the event to be pending at the wait in at least one trial.
+  REQUIRE(pendingAtWait > 0);
+
+  if (exec != nullptr) HIP_CHECK(hipGraphExecDestroy(exec));
+  HIP_CHECK(hipFree(counter));
+  HIP_CHECK(hipEventDestroy(done));
+  HIP_CHECK(hipStreamDestroy(waiter));
+  HIP_CHECK(hipStreamDestroy(producer));
 }
