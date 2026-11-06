@@ -2,6 +2,7 @@
 #
 # See LICENCE.txt for license information
 build/
+/rccl-libs/
 *.gcov
 /coverage/
 __pycache__/
