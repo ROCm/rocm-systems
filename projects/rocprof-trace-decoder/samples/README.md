@@ -6,6 +6,9 @@ from the code objects, decode the ATT buffers, and print or plot results.
 
 Install the Python package first, or run from the source tree with
 `PYTHONPATH=python`. Plotting samples require `matplotlib` and `numpy`.
+Installed samples live in `share/rocprof-trace-decoder/samples` (the
+`rocprof-trace-decoder-samples` package); run them with the installed package's
+`site-packages` directory on `PYTHONPATH`.
 
 The plotting samples write their PNG output to the current directory by
 default. Use `-d DIR` to choose a different output directory.
@@ -15,6 +18,20 @@ scripts are command-line wrappers, so their input parser derives IDs from common
 rocprofiler capture filenames before constructing explicit `CodeObject` values.
 If exactly one code object has no inferred ID, these samples use ID `0`.
 Multiple unnamed code objects are rejected because their IDs are ambiguous.
+
+## Markers
+
+The examples under `samples/markers/` consume decoded marker records directly
+from the Python API:
+
+```bash
+PYTHONPATH=python python3 samples/markers/print_markers.py \
+  captures/*.att \
+  captures/*_code_object_id_*.out
+```
+
+See `samples/markers/README.md` for folded-stack, payload, and Perfetto
+examples.
 
 ## ISA Hotspots
 

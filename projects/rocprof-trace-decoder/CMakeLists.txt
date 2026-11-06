@@ -46,6 +46,7 @@ set(TTD_ALL_VERSIONS ON)
 
 option(BUILD_TESTS "Enable Building Tests for ROCProf Trace Decoder" OFF)
 option(BUILD_UNIT_TESTS "Enable Building Unit Tests for ROCProf Trace Decoder" ON)
+option(BUILD_BENCHMARKS "Build standalone native C API benchmarks" OFF)
 set(BUILD_PYTHON
     "AUTO"
     CACHE STRING "Install Python API: AUTO, ON, or OFF")
@@ -55,21 +56,28 @@ option(DISABLE_COMGR "Disable dependency on amd_comgr disassembly" OFF)
 
 add_subdirectory(source)
 
-# The marker producer lives in llvm-project/amd/sqtt-marker.  Keep the
-# decoder-side tools and format documentation in this package independently
-# of that plugin.  The scripts are samples, not supported commands, so they go
-# to share/ in their own component rather than bin/.  They import sqtt_data.py
-# and must stay in the same directory.
-set(TTD_MARKER_SCRIPTS
-    ${CMAKE_SOURCE_DIR}/scripts/sqtt_data.py ${CMAKE_SOURCE_DIR}/scripts/sqtt_decode_funcmap.py
-    ${CMAKE_SOURCE_DIR}/scripts/sqtt_flamegraph.py ${CMAKE_SOURCE_DIR}/scripts/sqtt_memory_trace.py
-    ${CMAKE_SOURCE_DIR}/scripts/sqtt_perfetto.py)
+if(BUILD_BENCHMARKS)
+    add_subdirectory(test/benchmarks)
+endif()
 
+# The samples, including the marker tools, are examples rather than supported
+# commands, so they go to share/ in their own component rather than bin/. Keep
+# the tree's layout: the marker samples import ../common.py, which imports
+# _code_object_paths from the source tree's python/ directory.
+set(TTD_SAMPLES_DIR ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/samples)
 install(
-    PROGRAMS ${TTD_MARKER_SCRIPTS}
-    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/samples
+    DIRECTORY ${CMAKE_SOURCE_DIR}/samples/
+    DESTINATION ${TTD_SAMPLES_DIR}
+    COMPONENT samples
+    USE_SOURCE_PERMISSIONS
+    PATTERN "__pycache__" EXCLUDE
+    PATTERN "*.pyc" EXCLUDE)
+install(
+    FILES ${CMAKE_SOURCE_DIR}/python/_code_object_paths.py
+    DESTINATION ${TTD_SAMPLES_DIR}
     COMPONENT samples)
 
+# The producer lives in llvm-project/amd/sqtt-marker; retain the format docs.
 install(
     DIRECTORY ${CMAKE_SOURCE_DIR}/docs/markers/
     DESTINATION ${CMAKE_INSTALL_DOCDIR}/markers
