@@ -481,6 +481,7 @@ struct read_statements
         initialize_pmc_kernel_track_statement();
         initialize_memory_allocation_statement();
         initialize_pmc_sample_statements();
+        initialize_pmc_kernel_sample_statements();
     }
     read_statements()                                  = delete;
     read_statements(const read_statements&)            = delete;
@@ -863,6 +864,17 @@ struct read_statements
     pmc_sample_time_filtered_statement() const
     {
         return m_pmc_sample_time_filtered_statement;
+    }
+
+    [[nodiscard]] const pmc_sample_statement_func_t& pmc_kernel_sample_statement() const
+    {
+        return m_pmc_kernel_sample_statement;
+    }
+
+    [[nodiscard]] const pmc_sample_time_filtered_statement_func_t&
+    pmc_kernel_sample_time_filtered_statement() const
+    {
+        return m_pmc_kernel_sample_time_filtered_statement;
     }
 
     // Count and time range accessors
@@ -1575,6 +1587,46 @@ private:
                 .get_query_string(),
             &pmc_sample_result::timestamp,
             &pmc_sample_result::value);
+    }
+
+    // Same joins and keys as the kernel counter catalogue statement, so a track's
+    // sample count equals its catalogued event count.
+    void initialize_pmc_kernel_sample_statements()
+    {
+        // A builder appends to one stream, so each statement gets a fresh builder.
+        auto make_query = [&](bool windowed) {
+            queries::select::table_select_query query;
+            auto&                               where =
+                query.select("K.start", "PE.value")
+                    .from(fmt::format("rocpd_pmc_event_{}", m_uuid), "PE")
+                    .inner_join(pmc_info_join_table(), "PI", "PI.id = PE.pmc_id")
+                    .inner_join(fmt::format("rocpd_kernel_dispatch_{}", m_uuid),
+                                "K",
+                                "K.event_id = PE.event_id")
+                    .where("K.nid = ?")
+                    .and_where("K.agent_id = ?")
+                    .and_where("PE.pmc_id = ?");
+            if(windowed)
+            {
+                where.and_where("K.start >= ?").and_where("K.start <= ?");
+            }
+            return where.get_query_string();
+        };
+
+        m_pmc_kernel_sample_statement =
+            m_backend->create_read_statement_executor<pmc_sample_result,
+                                                      bind_types<size_t, size_t, size_t>>(
+                make_query(false),
+                &pmc_sample_result::timestamp,
+                &pmc_sample_result::value);
+
+        m_pmc_kernel_sample_time_filtered_statement =
+            m_backend->create_read_statement_executor<
+                pmc_sample_result,
+                bind_types<size_t, size_t, size_t, size_t, size_t>>(
+                make_query(true),
+                &pmc_sample_result::timestamp,
+                &pmc_sample_result::value);
     }
 
     void initialize_kernel_symbol_info_statement()
@@ -2562,6 +2614,8 @@ private:
     std::string                               m_event_table;
     pmc_sample_statement_func_t               m_pmc_sample_statement;
     pmc_sample_time_filtered_statement_func_t m_pmc_sample_time_filtered_statement;
+    pmc_sample_statement_func_t               m_pmc_kernel_sample_statement;
+    pmc_sample_time_filtered_statement_func_t m_pmc_kernel_sample_time_filtered_statement;
 
     // Count statements
     count_func_t m_region_count;

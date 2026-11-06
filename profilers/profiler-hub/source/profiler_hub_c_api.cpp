@@ -56,10 +56,17 @@ void
 copy_probe_result(const profiler_hub::reader_types::file_probe_result_t& result,
                   ph_file_probe_t*                                       probe)
 {
-    probe->trace_schema =
-        result.trace_schema == profiler_hub::reader_types::trace_schema_t::rocpd
-            ? PH_TRACE_SCHEMA_ROCPD
-            : PH_TRACE_SCHEMA_UNKNOWN;
+    switch(result.trace_schema)
+    {
+        using profiler_hub::reader_types::trace_schema_t;
+        case trace_schema_t::unknown:
+            probe->trace_schema = PH_TRACE_SCHEMA_UNKNOWN;
+            break;
+        case trace_schema_t::rocpd: probe->trace_schema = PH_TRACE_SCHEMA_ROCPD; break;
+        case trace_schema_t::pytorch_kineto:
+            probe->trace_schema = PH_TRACE_SCHEMA_PYTORCH_KINETO;
+            break;
+    }
     probe->schema_version = { result.schema_version.major,
                               result.schema_version.minor,
                               result.schema_version.patch };

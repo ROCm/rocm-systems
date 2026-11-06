@@ -373,9 +373,9 @@ cached_track_reader::samples(const reader_types::track_info_ptr_t& track,
                              uint64_t                              start_ts,
                              uint64_t                              end_ts)
 {
-    if(!track ||
-       (track->category != reader_types::track_kind_t::pmc_agent &&
-        track->category != reader_types::track_kind_t::pmc_memory))
+    if(!track || (track->category != reader_types::track_kind_t::pmc_agent &&
+                  track->category != reader_types::track_kind_t::pmc_kernel &&
+                  track->category != reader_types::track_kind_t::pmc_memory))
     {
         return ph_sample_list_t{ .list_size = 0, .samples = nullptr };
     }

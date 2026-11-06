@@ -272,6 +272,10 @@ foreach(_target profiler-hub profiler-hub-static)
     endif()
 endforeach()
 
+# ZLIB is found in source/ for profiler-hub-objects; find it here too so
+# ZLIB::ZLIB is visible to the loop below.
+find_package(ZLIB REQUIRED)
+
 # profiler-hub-static's own link requirements no longer come from
 # target_link_libraries() above (that only supplies the $<BUILD_INTERFACE:>
 # object library), so consumers of the *installed* static package would
@@ -307,7 +311,7 @@ endforeach()
 # _FOUND variable.
 set(profiler_hub_static_iface_libs "")
 set(profiler_hub_static_find_dependencies "")
-foreach(_dep fmt spdlog)
+foreach(_dep fmt spdlog ZLIB)
     set(_profiler_hub_dep_target "${_dep}::${_dep}")
     if(TARGET ${_profiler_hub_dep_target})
         get_target_property(

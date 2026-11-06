@@ -689,6 +689,7 @@ reader_t::impl::get_counter_events_for_track(reader_types::track_info_ptr_t     
 {
     if(!track || !track->node_info) return {};
     if(track->category != reader_types::track_kind_t::pmc_agent &&
+       track->category != reader_types::track_kind_t::pmc_kernel &&
        track->category != reader_types::track_kind_t::pmc_memory)
     {
         return {};
@@ -724,22 +725,28 @@ reader_t::impl::get_counter_events_for_track(reader_types::track_info_ptr_t     
         return events;
     }
 
+    const bool kernel_counter = track->category == reader_types::track_kind_t::pmc_kernel;
+
     std::vector<data_storage::schema_v3::pmc_sample_result> results;
     if(has_time)
     {
-        results = m_read_statements
-                      ->pmc_sample_time_filtered_statement()(nid,
-                                                             track->agent_id,
-                                                             track->pmc_id,
-                                                             filter.time_window.start.value(),
-                                                             filter.time_window.end.value())
+        const auto& windowed =
+            kernel_counter
+                ? m_read_statements->pmc_kernel_sample_time_filtered_statement()
+                : m_read_statements->pmc_sample_time_filtered_statement();
+        results = windowed(nid,
+                           track->agent_id,
+                           track->pmc_id,
+                           filter.time_window.start.value(),
+                           filter.time_window.end.value())
                       .to_vector();
     }
     else
     {
-        results = m_read_statements
-                      ->pmc_sample_statement()(nid, track->agent_id, track->pmc_id)
-                      .to_vector();
+        const auto& whole = kernel_counter
+                                ? m_read_statements->pmc_kernel_sample_statement()
+                                : m_read_statements->pmc_sample_statement();
+        results           = whole(nid, track->agent_id, track->pmc_id).to_vector();
     }
 
     events.reserve(results.size());

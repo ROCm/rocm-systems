@@ -6,10 +6,14 @@
 #include "ph_future.hpp"
 #include "populate_reader_catalog.hpp"
 #include "profiler-hub/cpp/reader.hpp"
+#include "pytorch/memory_histogram.hpp"
 #include "reader_catalog.hpp"
 #include "track_read_options.hpp"
 
+#include <fmt/format.h>
+
 #include <algorithm>
+#include <cstdlib>
 #include <limits>
 #include <mutex>
 #include <numeric>
@@ -342,6 +346,27 @@ to_list_size(std::size_t size)
     return static_cast<std::uint32_t>(size);
 }
 
+void
+require_pool(const std::unique_ptr<profiler_hub::common::connection_pool>& pool)
+{
+    if(pool) return;
+    constexpr const char* message = "not available for a PyTorch Kineto source";
+    LOG_ERROR("[Profiler-Hub] {}", message);
+    throw std::runtime_error{ message };
+}
+
+// Test hook: serves track PROFILER_HUB_OMIT_TRACK with no events, so a viewer can be
+// shown to display data from this context. Unset, 0 or not a number turns it off.
+std::uint32_t
+omit_track_from_env()
+{
+    const char* omit = std::getenv("PROFILER_HUB_OMIT_TRACK");
+    if(omit == nullptr) return 0;
+    char*      end   = nullptr;
+    const auto value = std::strtoul(omit, &end, 10);
+    return end != omit && *end == '\0' ? static_cast<std::uint32_t>(value) : 0;
+}
+
 }  // namespace
 
 size_t
@@ -404,6 +429,15 @@ ph_ctx::open_sources()
         source->path    = accepted.path;
         source->uuid    = accepted.uuid;
         source->catalog = std::make_shared<profiler_hub::reader_catalog_t>();
+        if(accepted.schema == profiler_hub::reader_types::trace_schema_t::pytorch_kineto)
+        {
+            source->memory = profiler_hub::pytorch::memory_source::open(source->path,
+                                                                        *source->catalog);
+            source->reader = std::make_unique<profiler_hub::cached_track_reader>(
+                *source->memory, m_thread_pool, m_read_options);
+            m_sources.push_back(std::move(source));
+            continue;
+        }
         source->pool    = std::make_unique<profiler_hub::common::connection_pool>(
             source->path, default_connection_count(), source->catalog, source->uuid);
         source->connections =
@@ -492,6 +526,7 @@ ph_ctx::ph_ctx(std::vector<accepted_source_t> accepted)
 , m_trace_schema{ m_accepted.empty()
                       ? profiler_hub::reader_types::trace_schema_t::unknown
                       : m_accepted.front().schema }
+, m_omit_track{ omit_track_from_env() }
 {}
 
 ph_ctx::~ph_ctx()
@@ -630,6 +665,7 @@ ph_ctx::read_trace(const stop_requested_fn& stop_requested, const progress_fn& p
     if(progress) progress(0.0, "Building reader catalog");
     for(const std::unique_ptr<trace_source_t>& source : m_sources)
     {
+        if(!source->pool) continue;
         populate_reader_catalog(m_thread_pool, *source->pool, *source->catalog);
         source->catalog->publish_memory_activity_pmc_infos();
         if(stop_requested()) return false;
@@ -638,6 +674,10 @@ ph_ctx::read_trace(const stop_requested_fn& stop_requested, const progress_fn& p
     if(progress) progress(0.0, "Building track list");
     initialize_track_list();
     if(!load_all_tracks(stop_requested, progress)) return false;
+    for(const std::unique_ptr<trace_source_t>& source : m_sources)
+    {
+        if(source->memory) source->memory->release_rows();
+    }
 
     if(progress) progress(1.0, "Reading node agents");
     initialize_node_agents();
@@ -673,6 +713,10 @@ ph_ctx::trim_trace(uint64_t    start_ts,
     if(output_path == nullptr || output_path[0] == '\0') return PH_RESULT_INVALID_ARGUMENT;
     if(const ph_result_t ready = wait_until_ready(); ready != PH_RESULT_SUCCESS) return ready;
     if(m_sources.empty()) return PH_RESULT_INVALID_FILE;
+    for(const std::unique_ptr<trace_source_t>& source : m_sources)
+    {
+        require_pool(source->pool);
+    }
 
     // SaveTrimmedData adds source 0's origin when that origin is greater than
     // zero. Subtract it back, then put the same displayed range on each source.
@@ -744,9 +788,23 @@ ph_ctx::get_track_events(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
               track_id,
               start_ts,
               end_ts);
+    const auto print = [&](uint32_t count) {
+        fmt::println(
+            "[Profiler-Hub] get_track_events track={} start={} end={} -> {} events",
+            track_id,
+            start_ts,
+            end_ts,
+            count);
+    };
     const placed_track_t* place = place_of(track_id);
     if(place == nullptr)
     {
+        print(0);
+        return ph_event_list_t{ .list_size = 0, .events = nullptr };
+    }
+    if(m_omit_track != 0 && track_id == m_omit_track)
+    {
+        print(0);
         return ph_event_list_t{ .list_size = 0, .events = nullptr };
     }
 
@@ -759,6 +817,7 @@ ph_ctx::get_track_events(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
             loaded.events[index].track_id = track_id;
         }
     }
+    print(loaded.list_size);
     return loaded;
 }
 
@@ -794,6 +853,7 @@ ph_ctx::get_correlated_events(uint32_t        track_id,
     source.unique_identifier = { .id   = static_cast<size_t>(event_id),
                                  .type = type.value() };
 
+    require_pool(held.pool);
     const auto correlated = held.pool->with_connection(
         [&source](profiler_hub::common::connection& connection) {
             return connection.reader().get_correlated_events(source);
@@ -882,6 +942,7 @@ ph_ctx::get_call_stack(uint32_t track_id, uint64_t event_id, ph_event_type_t eve
         return ph_call_stack_t{ .list_size = 0, .frames = nullptr };
     }
 
+    require_pool(origin.pool);
     const auto source = detail_source(event_id, type.value());
     auto       stack  = origin.pool->with_connection(
         [&source](profiler_hub::common::connection& connection) {
@@ -920,6 +981,7 @@ ph_ctx::track_id_of(uint32_t track_id, uint64_t event_id, ph_event_type_t event_
                                  .type = type.value() };
     for(uint32_t index = 0; index < m_sources.size(); ++index)
     {
+        require_pool(source_at(index).pool);
         trace_source_t& held  = source_at(index);
         const auto      track = held.pool->with_connection(
             [&source](profiler_hub::common::connection& connection) {
@@ -937,6 +999,7 @@ ph_ctx::get_region_details(uint32_t track_id, uint64_t event_id)
 {
     const placed_track_t* place = place_of(track_id);
     if(place == nullptr) return ph_region_details_t{};
+    require_pool(source_at(place->source_index).pool);
     const auto source =
         detail_source(event_id, profiler_hub::reader_types::event_type_t::region);
     auto details = source_at(place->source_index).pool->with_connection(
@@ -980,6 +1043,7 @@ ph_ctx::get_kernel_dispatch_details(uint32_t track_id, uint64_t event_id)
 {
     const placed_track_t* place = place_of(track_id);
     if(place == nullptr) return ph_kernel_dispatch_details_t{};
+    require_pool(source_at(place->source_index).pool);
     const auto source = detail_source(
         event_id, profiler_hub::reader_types::event_type_t::kernel_dispatch);
     auto details = source_at(place->source_index).pool->with_connection(
@@ -1030,6 +1094,7 @@ ph_ctx::get_memory_copy_details(uint32_t track_id, uint64_t event_id)
 {
     const placed_track_t* place = place_of(track_id);
     if(place == nullptr) return ph_memory_copy_details_t{};
+    require_pool(source_at(place->source_index).pool);
     const auto source =
         detail_source(event_id, profiler_hub::reader_types::event_type_t::memory_copy);
     auto details = source_at(place->source_index).pool->with_connection(
@@ -1077,6 +1142,7 @@ ph_ctx::get_memory_alloc_details(uint32_t track_id, uint64_t event_id)
     {
         return ph_memory_alloc_details_t{};
     }
+    require_pool(source_at(place->source_index).pool);
     const auto source = detail_source(
         event_id, profiler_hub::reader_types::event_type_t::memory_allocate);
     auto details = source_at(place->source_index).pool->with_connection(
@@ -1164,6 +1230,7 @@ ph_ctx::read_table_events(const profiler_hub::resolved_event_query& query,
             *origin.catalog, local, local.match_substring, local.match_partial);
     }
 
+    require_pool(origin.pool);
     return origin.pool->with_connection(
         [&](profiler_hub::common::connection& connection) {
             return connection.reader().read_table_events(
@@ -1186,6 +1253,7 @@ ph_ctx::table_event_id_span(const profiler_hub::resolved_event_query& query,
     {
         return false;
     }
+    require_pool(source_at(source_index).pool);
     return source_at(source_index).pool->with_connection(
         [&](profiler_hub::common::connection& connection) {
             return connection.reader().table_event_id_span(event_type, first_id, last_id);
@@ -1228,6 +1296,12 @@ ph_ctx::build_histogram(uint32_t max_buckets, ph_histogram_t& output)
     parts.reserve(m_sources.size());
     for(const std::unique_ptr<trace_source_t>& held : m_sources)
     {
+        if(!held->pool)
+        {
+            parts.push_back(profiler_hub::pytorch::memory_histogram(
+                *held->catalog, *held->reader, max_buckets));
+            continue;
+        }
         parts.push_back(held->pool->with_connection(
             [max_buckets](profiler_hub::common::connection& connection) {
                 return connection.reader().get_histogram(max_buckets);

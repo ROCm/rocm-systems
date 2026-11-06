@@ -61,6 +61,7 @@ extern "C"
     {
         PH_TRACE_SCHEMA_UNKNOWN,
         PH_TRACE_SCHEMA_ROCPD,
+        PH_TRACE_SCHEMA_PYTORCH_KINETO,
     } ph_trace_schema_t;
 
     /**
@@ -81,7 +82,8 @@ extern "C"
         PH_TRACK_CATEGORY_THREAD_SAMPLE, /**< Same (nid,pid,tid) family, events
                                                tagged with a named track. */
         PH_TRACK_CATEGORY_PMC_AGENT,     /**< PMC/counter samples split by agent_id. */
-        PH_TRACK_CATEGORY_PMC_KERNEL,    /**< PMC values attached to kernel dispatches. */
+        PH_TRACK_CATEGORY_PMC_KERNEL,    /**< PMC values attached to kernel dispatches,
+                                               one sample per dispatch. */
         PH_TRACK_CATEGORY_PMC_MEMORY,    /**< Memory-activity counters, one per agent. */
         PH_TRACK_CATEGORY_KERNEL_DISPATCH_AGENT_QUEUE, /**< By (nid,agent_id,queue_id). */
         PH_TRACK_CATEGORY_MEMORY_ALLOCATE_AGENT_QUEUE, /**< By (nid,agent_id,queue_id). */
@@ -146,8 +148,8 @@ extern "C"
         uint64_t end_ts;              /**< Nanosecond timestamp of the track's
                                             latest event. */
         ph_value_range_t value_range; /**< Sample value range. Only valid for
-                                            PH_TRACK_CATEGORY_PMC_AGENT tracks with
-                                            at least one sample value. */
+                                            PMC tracks with at least one sample
+                                            value. */
         uint32_t nesting_depth; /**< Largest ph_event_t::nesting_depth of the track's
                                       events; 0 for PMC tracks. */
         uint64_t process_row_id; /**< rocpd_info_process.id. Not pid. 0 if this

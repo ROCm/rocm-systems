@@ -5,6 +5,7 @@
 
 #include "data_storage/backends/sqlite_api_policy.hpp"
 #include "data_storage/schema_version.hpp"
+#include "pytorch/kineto_probe.hpp"
 
 #include <array>
 #include <cstdint>
@@ -34,6 +35,7 @@ constexpr std::string_view k_metadata_prefix{ "rocpd_metadata_" };
 enum class file_kind_t
 {
     sqlite,
+    kineto_json,
 };
 
 struct schema_support_t
@@ -340,6 +342,12 @@ probe_sqlite(file_kind_t kind, const std::string& path)
     return result;
 }
 
+file_probe_result_t
+probe_kineto(file_kind_t, const std::string&)
+{
+    return pytorch::probe_kineto();
+}
+
 struct format_detector_t
 {
     file_kind_t kind;
@@ -347,11 +355,12 @@ struct format_detector_t
     file_probe_result_t (*probe)(file_kind_t kind, const std::string& path);
 };
 
-const std::array<format_detector_t, 1>&
+const std::array<format_detector_t, 2>&
 format_detectors()
 {
-    static const std::array<format_detector_t, 1> detectors{ {
+    static const std::array<format_detector_t, 2> detectors{ {
         { file_kind_t::sqlite, sqlite_magic_matches, probe_sqlite },
+        { file_kind_t::kineto_json, pytorch::kineto_prefix_matches, probe_kineto },
     } };
     return detectors;
 }
