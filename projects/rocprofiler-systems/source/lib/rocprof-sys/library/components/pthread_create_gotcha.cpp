@@ -26,7 +26,6 @@
 
 #include "logger/debug.hpp"
 
-#include <csignal>
 #include <dlfcn.h>
 #include <ostream>
 #include <pthread.h>
@@ -40,80 +39,14 @@ namespace sampling
 
 namespace component
 {
-using bundle_t          = tim::lightweight_tuple<comp::wall_clock>;
 using category_region_t = tim::lightweight_tuple<category_region<category::pthread>>;
 
 namespace
 {
+constexpr std::string_view k_pthread_create_region = "pthread_create";
+
 auto* is_shutdown   = new bool{ false };  // intentional data leak
-auto* bundles       = new std::map<std::int64_t, std::shared_ptr<bundle_t>>{};
-auto* bundles_mutex = new std::mutex{};
-auto  bundles_dtor  = scope::destructor{ []() {
-    pthread_create_gotcha::shutdown();
-    delete bundles;
-    delete bundles_mutex;
-    bundles         = nullptr;
-    bundles_mutex   = nullptr;
-} };
-
-template <typename... Args>
-inline void
-start_bundle(bundle_t& _bundle, std::int64_t _tid, Args&&... _args)
-{
-    if(!get_use_timemory())
-    {
-        return;
-    }
-    LOG_TRACE("Starting bundle '{}' in thread {}...", _bundle.key(), _tid);
-    if constexpr(sizeof...(Args) > 0)
-    {
-        if(const char* _name = nullptr;
-           tim::get_hash_identifier(_bundle.hash(), _name) && _name != nullptr)
-        {
-            category_region_t{}.audit(quirk::config<quirk::cache_only>{},
-                                      std::string_view{ _name }, _args...);
-        }
-    }
-    _bundle.push(_tid);
-    _bundle.start();
-}
-
-template <typename... Args>
-inline void
-stop_bundle(bundle_t& _bundle, std::int64_t _tid, Args&&... _args)
-{
-    if(!get_use_timemory())
-    {
-        return;
-    }
-
-    auto const _main_manager = tim::manager::master_instance();
-    auto const _this_manager = tim::manager::instance();
-    if(!_main_manager || !_this_manager || _main_manager->is_finalized() ||
-       _this_manager->is_finalized())
-    {
-        return;
-    }
-
-    LOG_TRACE("Stopping bundle '{}' in thread {}...", _bundle.key(), _tid);
-    auto _wc = *_bundle.get<comp::wall_clock>();
-    _wc.stop();
-    // update data
-    _bundle.store(std::plus<double>{}, _wc.get() * _wc.unit());
-    // stop all
-    _bundle.stop();
-    // exclude popping wall-clock
-    _bundle.pop(_tid);
-    if constexpr(sizeof...(Args) > 0)
-    {
-        if(const char* _name = nullptr;
-           tim::get_hash_identifier(_bundle.hash(), _name) && _name != nullptr)
-        {
-            category_region_t{}.audit(quirk::config<quirk::cache_only>{},
-                                      std::string_view{ _name }, _args...);
-        }
-    }
-}
+auto  shutdown_dtor = scope::destructor{ []() { pthread_create_gotcha::shutdown(); } };
 
 using native_handle_set_t = std::set<pthread_create_gotcha::native_handle_t>;
 
@@ -178,7 +111,6 @@ pthread_create_gotcha::wrapper::operator()() const
     std::int64_t _tid         = -1;
     void*        _ret         = nullptr;
     auto         _is_sampling = false;
-    auto         _bundle      = std::shared_ptr<bundle_t>{};
     auto         _signals     = std::set<int>{};
     auto const   _coverage    = (get_mode() == state::process::Mode::coverage);
     const auto&  _parent_info = thread_info::get(m_config.parent_tid, InternalTID);
@@ -209,10 +141,7 @@ pthread_create_gotcha::wrapper::operator()() const
 
         if(_tid >= 0)
         {
-            auto const _active =
-                (state::process::get() == ::rocprofsys::state::process::Active &&
-                 bundles != nullptr && bundles_mutex != nullptr);
-            if(!_active)
+            if(state::process::get() != ::rocprofsys::state::process::Active)
             {
                 return;
             }
@@ -223,19 +152,13 @@ pthread_create_gotcha::wrapper::operator()() const
             {
                 _thr_bundle->stop();
             }
-            if(_bundle)
-            {
-                stop_bundle(*_bundle, _tid);
-            }
-            pthread_create_gotcha::shutdown(_tid);
             LOG_DEBUG("[PID={}][rank={}] Thread {} (parent: {}) exited",
                       process::get_id(), dmp::rank(), _info->index_data->as_string(),
                       _parent_info->index_data->as_string());
         }
     };
 
-    auto const _active = (state::process::get() == ::rocprofsys::state::process::Active &&
-                          bundles != nullptr && bundles_mutex != nullptr);
+    auto const _active = (state::process::get() == ::rocprofsys::state::process::Active);
 
     if(m_config.offset)
     {
@@ -262,15 +185,11 @@ pthread_create_gotcha::wrapper::operator()() const
                 quirk::config<quirk::auto_start>{});
             thread_bundle_data_t::get()->at(_tid)->start();
         }
-        if(bundles && bundles_mutex)
+        // The wall_clock report times every application thread, including threads
+        // that never emit a region, so each one must be in the trace-cache metadata
+        if(get_use_timemory())
         {
-            const std::unique_lock<std::mutex> _lk{ *bundles_mutex };
-            _bundle = bundles->emplace(_tid, std::make_shared<bundle_t>("start_thread"))
-                          .first->second;
-        }
-        if(_bundle)
-        {
-            start_bundle(*_bundle, _tid);
+            utility::thread_metadata_source{}.resolve_current_thread();
         }
         get_cpu_cid_stack(_tid, m_config.parent_tid);
         if(m_config.enable_causal)
@@ -378,20 +297,6 @@ pthread_create_gotcha::wrapper::wrap(void* _arg)
     return _ret;
 }
 
-namespace
-{
-const auto shutdown_signal_v = SIGRTMAX - 1;
-
-size_t shutdown_signals_delivered = 0;
-
-void
-pthread_create_gotcha_shutdown_handler(int)
-{
-    pthread_create_gotcha::shutdown(threading::get_id());
-    ++shutdown_signals_delivered;
-}
-}  // namespace
-
 void
 pthread_create_gotcha::configure()
 {
@@ -404,168 +309,18 @@ pthread_create_gotcha::configure()
             0, int, pthread_t*, const pthread_attr_t*, void* (*) (void*), void*>(
             "pthread_create");
     };
-
-    tim::hash::add_hash_id("start_thread");
 }
 
 void
 pthread_create_gotcha::shutdown()
 {
-    if(is_shutdown)
-    {
-        if(*is_shutdown)
-        {
-            return;
-        }
-        *is_shutdown = true;
-    }
-
-    if(!bundles_mutex || !bundles)
+    if(*is_shutdown)
     {
         return;
     }
-
-    unsigned long _ndangling = 0;
-
-    for(const auto& itr : *bundles)
-    {
-        if(itr.second)
-        {
-            ++_ndangling;
-        }
-    }
+    *is_shutdown = true;
 
     tracing::copy_timemory_hash_ids();
-
-    // enable the signal handler for when the timeout is reached
-    struct sigaction _action = {};
-    struct sigaction _former = {};
-
-    memset(&_action, 0, sizeof(_action));
-    memset(&_former, 0, sizeof(_former));
-    sigemptyset(&_action.sa_mask);
-    sigemptyset(&_former.sa_mask);
-
-    _action.sa_flags   = SA_RESTART;
-    _action.sa_handler = pthread_create_gotcha_shutdown_handler;
-    // activate signal handler
-    sigaction(shutdown_signal_v, &_action, &_former);
-
-    size_t _expected_shutdown_signals_delivered = 0;
-    {
-        auto const _lk = locking::atomic_lock{ native_handles_mutex };
-        for(auto itr : native_handles)
-        {
-            // skip sending signals to internal threads
-            if(internal_native_handles.contains(itr))
-            {
-                continue;
-            }
-
-            bool                               has_bundle = false;
-            const std::unique_lock<std::mutex> _bundle_lk{ *bundles_mutex };
-            const auto&                        thread_info = thread_info::get(itr);
-            // Check if this thread has a corresponding bundle entry
-            // With the new gotcha update more external threads are tracked
-            // but we only want to send signals to threads that have bundles
-            for(const auto& bundle_itr : *bundles)
-            {
-                try
-                {
-                    if(thread_info && thread_info->index_data &&
-                       bundle_itr.first == thread_info->index_data->sequent_value)
-                    {
-                        has_bundle = true;
-                        break;
-                    }
-                } catch(...)
-                {
-                    continue;
-                }
-            }
-
-            if(has_bundle && pthread_equal(pthread_self(), itr) == 0)
-            {
-                ::pthread_kill(itr, shutdown_signal_v);
-                ++_expected_shutdown_signals_delivered;
-            }
-        }
-
-        auto           _nattempt    = 0U;
-        constexpr auto nmax_attempt = 20U;
-        while(shutdown_signals_delivered < _expected_shutdown_signals_delivered &&
-              _nattempt++ < nmax_attempt)
-        {
-            std::this_thread::yield();
-            std::this_thread::sleep_for(std::chrono::milliseconds{ 50 });
-        }
-
-        if(shutdown_signals_delivered != _expected_shutdown_signals_delivered)
-        {
-            LOG_CRITICAL("Number of signals delivered ({}) != expected number of signals "
-                         "delievered "
-                         "({})",
-                         shutdown_signals_delivered,
-                         _expected_shutdown_signals_delivered);
-            std::exit(1);
-        }
-    }
-
-    // restore existing signal handler
-    sigaction(shutdown_signal_v, &_former, nullptr);
-
-    // subtract the bundles that had signals delivered
-    _ndangling -= shutdown_signals_delivered;
-
-    // stop any remaining dangling bundles on this thread
-    const std::unique_lock<std::mutex> _lk{ *bundles_mutex };
-    for(auto itr : *bundles)
-    {
-        if(itr.second)
-        {
-            stop_bundle(*itr.second, itr.first);
-            ++_ndangling;
-        }
-        itr.second.reset();
-    }
-
-    bundles->clear();
-
-    if(_ndangling > 0)
-    {
-        LOG_DEBUG("Cleaned up {} dangling bundles", _ndangling);
-    }
-}
-
-void
-pthread_create_gotcha::shutdown(std::int64_t _tid)
-{
-    if(_tid == 0)
-    {
-        shutdown();
-    }
-
-    if(is_shutdown && *is_shutdown)
-    {
-        return;
-    }
-
-    if(!bundles_mutex || !bundles)
-    {
-        return;
-    }
-
-    const std::unique_lock<std::mutex> _lk{ *bundles_mutex };
-    auto const                         itr = bundles->find(_tid);
-    if(itr != bundles->end())
-    {
-        if(itr->second)
-        {
-            stop_bundle(*itr->second, itr->first);
-        }
-        itr->second.reset();
-        bundles->erase(itr);
-    }
 }
 
 std::atomic<bool> pthread_create_gotcha::s_is_paused = false;
@@ -647,7 +402,6 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
     auto       mode         = get_mode();
     auto const disabled     = (thr_state == state::thread::Disabled);
     auto const enabled      = (thr_state == state::thread::Enabled);
-    auto       bundle       = std::optional<bundle_t>{};
     auto const sample_child = sampling_enabled_on_child_threads();
     auto const active = (glob_state == ::rocprofsys::state::process::Active && !disabled);
     const auto& info  = thread_info::init(!active || !sample_child || disabled);
@@ -662,7 +416,8 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
     auto const use_sampling       = config::get_use_sampling();
     auto const use_causal         = config::get_use_causal();
     auto const offset             = (!enabled || !active || info->is_offset);
-    auto const use_bundle         = (active && !coverage && !offset && !is_paused());
+    auto const record_region =
+        (get_use_timemory() && active && !coverage && !offset && !is_paused());
     auto const enable_sampling =
         (use_sampling && sample_child && active && !coverage && !offset);
     auto const enable_causal =
@@ -677,12 +432,12 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
             "Creating new thread :: global_state={}, thread_state={}, mode={}, "
             "active={}, "
             "coverage={}, use_causal={}, use_sampling={}, sample_children={}, tid={}, "
-            "use_bundle={}, enable_causal={}, enable_sampling={}, thread_info={}...",
+            "record_region={}, enable_causal={}, enable_sampling={}, thread_info={}...",
             glob_state, thr_state, mode, std::to_string(active), std::to_string(coverage),
             std::to_string(use_causal), std::to_string(use_sampling),
-            std::to_string(sample_child), std::to_string(tid), std::to_string(use_bundle),
-            std::to_string(enable_causal), std::to_string(enable_sampling),
-            info->as_string());
+            std::to_string(sample_child), std::to_string(tid),
+            std::to_string(record_region), std::to_string(enable_causal),
+            std::to_string(enable_sampling), info->as_string());
 
         std::stringstream backtrace_ss;
         constexpr auto    k_demangle_backtrace_depth = 8;
@@ -725,11 +480,11 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
         tim::signals::block_signals(blocked, tim::signals::sigmask_scope::process);
     }
 
-    if(use_bundle)
+    if(record_region)
     {
-        bundle = bundle_t{ "pthread_create" };
-        start_bundle(*bundle, info->index_data->sequent_value, audit::incoming{}, thread,
-                     attr, func, arg);
+        category_region_t{}.audit(quirk::config<quirk::cache_only>{},
+                                  k_pthread_create_region, audit::incoming{}, thread,
+                                  attr, func, arg);
     }
 
     // threads must process their delays before creating a new thread
@@ -745,9 +500,10 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
         promise->get_future().wait_for(500ms);
     }
 
-    if(use_bundle)
+    if(record_region)
     {
-        stop_bundle(*bundle, info->index_data->sequent_value, audit::outgoing{}, ret);
+        category_region_t{}.audit(quirk::config<quirk::cache_only>{},
+                                  k_pthread_create_region, audit::outgoing{}, ret);
     }
 
     // unblock the signals in the entire process

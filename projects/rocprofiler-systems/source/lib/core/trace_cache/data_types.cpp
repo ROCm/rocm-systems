@@ -67,7 +67,11 @@ enabled_formats_t::enabled_formats_t()
            { .kind             = format_kind::unified_memory,
              .process_parallel = false,
              .enabled          = get_use_unified_memory_profiling(),
-             .name             = "unified_memory" } }
+             .name             = "unified_memory" },
+           { .kind             = format_kind::wall_clock,
+             .process_parallel = true,
+             .enabled          = get_use_timemory(),
+             .name             = "wall_clock" } }
 {}
 
 enabled_formats_t::enabled_formats_t(std::vector<format_t> _formats) noexcept
@@ -147,6 +151,14 @@ enabled_formats_t::is_unified_memory_enabled() const
     auto const it = std::ranges::find_if(
         formats, [](const auto& f) { return f.kind == format_kind::unified_memory; });
     return it != formats.end() && it->enabled;
+}
+
+bool
+enabled_formats_t::is_wall_clock_enabled() const
+{
+    auto const found = std::ranges::find_if(
+        formats, [](const auto& entry) { return entry.kind == format_kind::wall_clock; });
+    return found != formats.end() && found->enabled;
 }
 
 std::string

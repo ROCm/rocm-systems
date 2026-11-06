@@ -3717,25 +3717,41 @@ get_first_mpi_env_uint(const std::vector<std::string>& env_var_options,
     return std::nullopt;
 }
 
-[[nodiscard]] std::optional<std::uint64_t>
+#endif
+}  // namespace
+
+std::optional<std::uint64_t>
 get_mpi_rank_from_env()
 {
+#if ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED
     // global rank env-vars: user-provided, then runtime-specific
     auto env_var_options = std::vector<std::string>{ get_rank_filter_id() };
     env_var_options.insert(env_var_options.end(), k_mpi_rank_env_names.begin(),
                            k_mpi_rank_env_names.end());
     return get_first_mpi_env_uint(env_var_options, "MPI rank");
+#else
+    return std::nullopt;
+#endif
 }
 
-[[nodiscard]] std::optional<std::uint64_t>
+std::optional<std::uint64_t>
 get_mpi_world_size_from_env()
 {
+#if ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED
     return get_first_mpi_env_uint({ "OMPI_COMM_WORLD_SIZE", "MV2_COMM_WORLD_SIZE",
                                     "PMI_SIZE", "SLURM_NTASKS", "SLURM_NPROCS" },
                                   "MPI world size");
-}
+#else
+    return std::nullopt;
 #endif
-}  // namespace
+}
+
+std::string
+get_output_process_suffix()
+{
+    return std::visit([](const auto& value) { return fmt::format("{}", value); },
+                      settings::default_process_suffix());
+}
 
 namespace output_filtering
 {

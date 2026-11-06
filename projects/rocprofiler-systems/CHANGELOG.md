@@ -13,9 +13,25 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   bundled `install-skills.sh --agent <claude|codex|cursor>` to copy them into your AI coding
   agent's personal skills folder.
 
+### Changed
+
+- The `wall_clock` profile (`wall_clock.txt` and `wall_clock.json`) is now generated from
+  the trace cache instead of timemory. GPU kernels and memory copies are nested under the
+  API call that launched them, and each worker thread's tree starts at the top level
+  instead of under the `pthread_create` call that spawned it. The report is written
+  whenever `ROCPROFSYS_PROFILE` is enabled; `wall_clock` in
+  `ROCPROFSYS_TIMEMORY_COMPONENTS` is accepted but no longer needed.
+
+### Removed
+
+- The `--profile-diff` option of `rocprof-sys-run` and `rocprof-sys-sample`. It compared
+  timemory profiles against a previous run, and the `wall_clock` profile is no longer
+  produced by timemory. Passing `--profile-diff` is now an unknown-argument error.
+
 ### Resolved issues
 
-- Sampled PAPI hardware-counter tracks use the short description instead of the raw event symbol.
+- Sampled PAPI hardware-counter tracks use the short description instead of the raw event
+  symbol.
 - Fixed missing OpenMP (OMPT) events on non-main threads when a region was still open at
   finalization. Regions that never received their end callback are now emitted with the
   finalization timestamp and an `[incomplete]` name suffix instead of being dropped.
@@ -24,9 +40,10 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   exceptions from instrumentation setup are now caught in `main`, reported as
   `[rocprof-sys] error: ...`, and the process exits with status 1 instead of
   terminating.
-- Fixed the default `ROCPROFSYS_AMD_SMI_METRICS` value (`busy, temp, power, mem_usage`) failing
-  validation because of the spaces after the commas, which enabled all 17 GPU metrics instead of
-  the four defaults. Whitespace around `,` and `;` separators is now accepted.
+- Fixed the default `ROCPROFSYS_AMD_SMI_METRICS` value (`busy, temp, power, mem_usage`)
+  failing to parse because of the spaces after the commas, which enabled all 17 GPU
+  metrics instead of the four defaults. Whitespace around `,` and `;` separators is now
+  accepted.
 
 ## ROCm Systems Profiler 1.10.0 for ROCm 10.2 (unreleased)
 

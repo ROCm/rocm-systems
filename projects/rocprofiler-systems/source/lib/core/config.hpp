@@ -387,6 +387,15 @@ get_use_tmp_files();
 int
 get_kill_delay();
 
+[[nodiscard]] std::optional<std::uint64_t>
+get_mpi_rank_from_env();
+
+[[nodiscard]] std::optional<std::uint64_t>
+get_mpi_world_size_from_env();
+
+[[nodiscard]] std::string
+get_output_process_suffix();
+
 namespace output_filtering
 {
 bool

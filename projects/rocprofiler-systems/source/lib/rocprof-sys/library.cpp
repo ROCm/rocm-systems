@@ -7,6 +7,7 @@
 #include <fmt/ranges.h>
 #include <timemory/log/color.hpp>
 #include <timemory/tpls/cereal/cereal/cereal.hpp>
+#include <vector>
 //
 //  above should always be included first
 //
@@ -327,6 +328,24 @@ struct fini_bundle<tim::lightweight_tuple<Tp...>>
 };
 
 using fini_bundle_t = fini_bundle<main_bundle_t>::base_type;
+
+// The wall_clock report is generated from the trace cache, so timemory must not record
+// the same data again. A requested wall_clock component is still honoured by that report.
+void
+drop_wall_clock_from_timemory_components()
+{
+    auto       kept    = rocprofsys::delimit(tim::settings::global_components());
+    auto const removed = std::erase_if(kept, [](const std::string& name) {
+        return tim::runtime::enumerate(name) == TIMEMORY_WALL_CLOCK;
+    });
+    if(removed == 0)
+    {
+        return;
+    }
+    auto const remaining               = fmt::format("{}", fmt::join(kept, ","));
+    tim::settings::global_components() = remaining;
+    config::set_setting_value(std::string{ env_vars::TIMEMORY_COMPONENTS }, remaining);
+}
 }  // namespace
 
 //======================================================================================//
@@ -928,32 +947,15 @@ rocprofsys_init_tooling_hidden(void)
 
     if(get_use_timemory())
     {
+        drop_wall_clock_from_timemory_components();
         comp::user_global_bundle::global_init();
-        std::set<int> _comps{};
-        // convert string into set of enumerations
-        for(auto&& itr : rocprofsys::delimit(tim::settings::global_components()))
+        if(!rocprofsys::delimit(tim::settings::global_components()).empty())
         {
-            _comps.emplace(tim::runtime::enumerate(itr));
-        }
-        if(_comps.size() == 1 && _comps.contains(TIMEMORY_WALL_CLOCK))
-        {
-            // using wall_clock directly is lower overhead than using it via user_bundle
-            instrumentation_bundle_t::get_initializer() =
-                [](instrumentation_bundle_t& _bundle) {
-                    _bundle.initialize<comp::wall_clock>();
-                };
-        }
-        else if(!_comps.empty())
-        {
-            // use user_bundle for other than wall-clock
             instrumentation_bundle_t::get_initializer() =
                 [](instrumentation_bundle_t& _bundle) {
                     _bundle.initialize<comp::user_global_bundle>();
                 };
-        }
-        else
-        {
-            tim::trait::runtime_enabled<project::rocprofsys>::set(false);
+            tracing::has_timemory_components() = true;
         }
     }
 
