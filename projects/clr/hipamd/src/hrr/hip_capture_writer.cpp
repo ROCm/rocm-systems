@@ -696,14 +696,16 @@ static void atfork_child() {
   if ((parent_open || parent_at_limit) && !parent_finalized)
     g_reopen_after_fork.store(true, std::memory_order_relaxed);
 }
+#endif
 
-static void install_atfork_handlers_once() {
+void install_fork_handlers() {
+#ifndef _WIN32
   static std::once_flag once;
   std::call_once(once, [] {
     pthread_atfork(atfork_prepare, atfork_parent, atfork_child);
   });
-}
 #endif
+}
 
 static void write_manifest_stdio(int dir_fd, const std::string& output_dir, bool complete) {
   FILE* mf = fopen_private(dir_fd, output_dir, "manifest.json");
@@ -1213,9 +1215,6 @@ bool open(const char* output_dir) {
     clear_archive_paths();
     return false;
   }
-#ifndef _WIN32
-  install_atfork_handlers_once();
-#endif
   // The archive is prepared in locals and published below under the writer
   // mutex and g_buf_busy. A forked child opens its archive while other threads
   // may checkpoint, crash or finalize, and none of them may see the events fd
