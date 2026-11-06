@@ -56,8 +56,7 @@
 #include "hsa/hsa.h"
 
 // Kernel dispatch header used by every packet this test enqueues. Both the
-// acquire and the release fence scope are set explicitly, as they are at every
-// other kernel dispatch site in rocrtst.
+// acquire and the release fence scope are set explicitly.
 static const uint16_t kDispatchPacketHeader =
     (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |
     (HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
