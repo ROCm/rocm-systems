@@ -555,7 +555,7 @@ Examples:
         feature_label="ML API trace",
         help=(
             "\t\t\tTrace ML APIs. User ROCTx regions are always included.\n"
-            f"\t\t\tWith no arguments, traces {' and '.join(KNOWN_ML_API_BACKENDS)}.\n"
+            f"\t\t\tWith no arguments, traces {', '.join(KNOWN_ML_API_BACKENDS)}.\n"
             f"\t\t\tValues: {', '.join(KNOWN_ML_API_BACKENDS)}"
         ),
     )
