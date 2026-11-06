@@ -27,6 +27,7 @@
 #include "../common/LogCapture.hpp"
 #include "ScopedHook.h"
 #include "fakes/enqueue_test_deps.h"
+#include "fakes/strongstream_stubs.h"
 
 // alloc.h first, so its macros are visible to be #undef'd before enqueue.cc's
 // transitive includes see them.
@@ -885,6 +886,17 @@ ChunkResult RunChunking(ChunkComm& cc, ncclTaskColl& task, int nChannels, size_t
   return r;
 }
 }  // namespace
+
+// Whole warps of the comm's wave size, at least three; rccl_wrap.cc caps a DDA re-route of Ring with the same value.
+TEST_F(EnqueueMicrotest, PlanThreadsPerBlock_IsAtLeastThreeWarpsOfTheWaveSize) {
+  ChunkComm cc;
+  EXPECT_EQ(96, rcclPlanThreadsPerBlock(cc.get(), 1));
+  EXPECT_EQ(96, rcclPlanThreadsPerBlock(cc.get(), 3));
+  EXPECT_EQ(256, rcclPlanThreadsPerBlock(cc.get(), 8));
+  cc.comm.WarpSize = 64;
+  EXPECT_EQ(192, rcclPlanThreadsPerBlock(cc.get(), 2));
+  EXPECT_EQ(1024, rcclPlanThreadsPerBlock(cc.get(), 16));
+}
 
 // ---------------------------------------------------------------------------
 // 1. Pattern selection. Each arm maps (func, algorithm) -> ncclPattern_t, and
@@ -3241,6 +3253,39 @@ TEST_F(EnqueueMicrotest, FinishPlan_StampsChannelMaskAndStorageTypeIntoKernelArg
   // oversized-plan test below stamps a non-zero value and does check it.
 }
 
+namespace {
+// kernelArgs is zero-filled, so only the cases that set a bit can see a dropped
+// devFlags store; the all-off case pins that nothing else sets one.
+uint8_t devFlagsAfterFinishPlan(bool profilerLoaded, bool progressCounters) {
+  ScopedHook profiler(g_profilerPluginLoaded, [=] { return profilerLoaded; });
+  FinishComm f;
+  alignas(16) unsigned char countersBlock[16];
+  f.c()->deviceCountersBlock =
+      progressCounters ? reinterpret_cast<ncclProgressCountersBlock*>(countersBlock) : nullptr;
+  f.p()->workBytes = 64;
+  f.addBatches(0, 1, 100);
+  finishPlan(f.c(), f.p());
+  EXPECT_NE(nullptr, f.p()->kernelArgs);
+  return f.p()->kernelArgs ? f.p()->kernelArgs->devFlags : 0xff;
+}
+}  // namespace
+
+TEST_F(EnqueueMicrotest, FinishPlan_DevFlags_BothOff_IsZero) {
+  EXPECT_EQ(0, devFlagsAfterFinishPlan(false, false));
+}
+
+TEST_F(EnqueueMicrotest, FinishPlan_DevFlags_ProfilerLoaded_SetsProfilerOnly) {
+  EXPECT_EQ(RCCL_DEV_FLAG_PROFILER, devFlagsAfterFinishPlan(true, false));
+}
+
+TEST_F(EnqueueMicrotest, FinishPlan_DevFlags_CountersAllocated_SetsProgressOnly) {
+  EXPECT_EQ(RCCL_DEV_FLAG_PROGRESS, devFlagsAfterFinishPlan(false, true));
+}
+
+TEST_F(EnqueueMicrotest, FinishPlan_DevFlags_BothOn_SetsBoth) {
+  EXPECT_EQ(RCCL_DEV_FLAG_PROFILER | RCCL_DEV_FLAG_PROGRESS, devFlagsAfterFinishPlan(true, true));
+}
+
 TEST_F(EnqueueMicrotest, FinishPlan_OneBatchPerChannel_LandsAtItsOwnSlot) {
   // The core layout contract: with one batch on each of channels 0..2, the first
   // batch of channel c must be at batchZero[c]. funcId identifies which is which.
@@ -4383,6 +4428,129 @@ TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx1250Enable1AboveCap_UsesSimple) {
   auto* batch = sc.bp.tailBatch();
   ASSERT_NE(nullptr, batch);
   EXPECT_EQ(ncclDevFuncId_P2p(false), batch->funcId);
+}
+
+static int g_planCallbackEntered;
+
+ncclResult_t ncclProfilerStartGroupEvent(struct ncclKernelPlan*) {
+  g_planCallbackEntered++;
+  return ncclSuccess;
+}
+ncclResult_t ncclProfilerStopGroupEvent(struct ncclKernelPlan*) { return ncclSuccess; }
+ncclResult_t ncclProfilerStartTaskEvents(struct ncclKernelPlan*) { return ncclSuccess; }
+ncclResult_t ncclProfilerStopTaskEvents(struct ncclKernelPlan*) { return ncclSuccess; }
+ncclResult_t ncclProfilerPostPlanWork(struct ncclComm*, struct ncclKernelPlan*) { return ncclSuccess; }
+ncclResult_t ncclProfilerAddPidToProxyOp(struct ncclProxyOp*) { return ncclSuccess; }
+const char* ncclGetErrorString(ncclResult_t) { return "ncclSuccess"; }
+
+TEST_F(EnqueueMicrotest, HostStreamPlanCallback_AbortOrRevokeReturns_DestroyStillRuns) {
+  g_planCallbackEntered = 0;
+  ncclComm comm{};
+  uint32_t abortFlag = 0;
+  comm.abortFlag = &abortFlag;
+  ncclKernelPlan plan{};
+  plan.persistent = 1;
+  plan.comm = &comm;
+
+  abortFlag = 1;
+  hostStreamPlanCallback(&plan);
+  EXPECT_EQ(0, g_planCallbackEntered);
+
+  abortFlag = 0;
+  comm.revokedFlag = 1;
+  hostStreamPlanCallback(&plan);
+  EXPECT_EQ(0, g_planCallbackEntered);
+
+  comm.revokedFlag = 0;
+  comm.destroyFlag = 1;
+  hostStreamPlanCallback(&plan);
+  EXPECT_EQ(1, g_planCallbackEntered);
+
+  ncclKernelPlan eager{};
+  eager.comm = &comm;
+  abortFlag = 1;
+  hostStreamPlanCallback(&eager);
+  EXPECT_EQ(2, g_planCallbackEntered);
+}
+
+TEST_F(EnqueueMicrotest, PersistentDestructor_LiveRef_ReclaimsAndOrphanDoesNotEnqueueAgain) {
+  ncclComm comm{};
+  ncclKernelPlan plan{};
+  ncclPersistentPlanRef ref{};
+  ref.comm = &comm;
+  ref.planHead = &plan;
+  ref.state = ncclPersistentPlanRefLive;
+  ref.refCount = 2;
+  comm.persistentPlanRefs = &ref;
+
+  persistentDestructor(&ref);
+  EXPECT_EQ(ncclPersistentPlanRefReleased, ref.state);
+  EXPECT_EQ(1, ref.refCount);
+  ncclCommCallback* cb = ncclIntruQueueMpscDequeueAll(&comm.callbackQueue, false);
+  ASSERT_NE(nullptr, cb);
+  EXPECT_EQ(&plan.reclaimer, cb);
+  EXPECT_EQ(nullptr, cb->next);
+
+  ncclCommOrphanPersistentPlans(&comm);
+  EXPECT_EQ(nullptr, ncclIntruQueueMpscDequeueAll(&comm.callbackQueue, false));
+}
+
+TEST_F(EnqueueMicrotest, PersistentDestructor_OrphanedRef_StillReclaims) {
+  ncclComm comm{};
+  ncclKernelPlan plan{};
+  ncclPersistentPlanRef ref{};
+  ref.comm = &comm;
+  ref.planHead = &plan;
+  ref.state = ncclPersistentPlanRefLive;
+  ref.refCount = 2;
+  comm.persistentPlanRefs = &ref;
+
+  ncclCommOrphanPersistentPlans(&comm);
+  EXPECT_EQ(ncclPersistentPlanRefOrphaned, ref.state);
+  EXPECT_EQ(nullptr, ncclIntruQueueMpscDequeueAll(&comm.callbackQueue, false));
+
+  persistentDestructor(&ref);
+  EXPECT_EQ(ncclPersistentPlanRefOrphaned, ref.state);
+  EXPECT_EQ(1, ref.refCount);
+  ncclCommCallback* cb = ncclIntruQueueMpscDequeueAll(&comm.callbackQueue, false);
+  ASSERT_NE(nullptr, cb);
+  EXPECT_EQ(&plan.reclaimer, cb);
+}
+
+TEST_F(EnqueueMicrotest, AddPersistentPlanRef_DropsNonLiveRefsAndKeepsLiveOnes) {
+  ncclComm comm{};
+  auto* stale = static_cast<ncclPersistentPlanRef*>(calloc(1, sizeof(ncclPersistentPlanRef)));
+  auto* live = static_cast<ncclPersistentPlanRef*>(calloc(1, sizeof(ncclPersistentPlanRef)));
+  ASSERT_NE(nullptr, stale);
+  ASSERT_NE(nullptr, live);
+  stale->state = ncclPersistentPlanRefReleased;
+  stale->refCount = 2;
+  live->state = ncclPersistentPlanRefLive;
+  live->refCount = 2;
+  live->next = stale;
+  comm.persistentPlanRefs = live;
+
+  ncclPersistentPlanRef* registered = nullptr;
+  g_cudaGraphAddDestructor = [&](ncclCudaGraph, hipHostFn_t, void* arg) {
+    registered = static_cast<ncclPersistentPlanRef*>(arg);
+    return ncclSuccess;
+  };
+
+  ncclKernelPlan plan{};
+  ASSERT_EQ(ncclSuccess, addPersistentPlanRef(&comm, ncclCudaGraph{}, &plan));
+  ASSERT_EQ(registered, comm.persistentPlanRefs);
+  EXPECT_EQ(live, registered->next);
+  EXPECT_EQ(nullptr, live->next);
+  EXPECT_EQ(1, stale->refCount);
+  EXPECT_EQ(2, live->refCount);
+  EXPECT_EQ(2, registered->refCount);
+  EXPECT_EQ(ncclPersistentPlanRefLive, registered->state);
+
+  ncclPersistentPlanRefDrop(stale);
+  ncclPersistentPlanRefDrop(live);
+  ncclPersistentPlanRefDrop(live);
+  ncclPersistentPlanRefDrop(registered);
+  ncclPersistentPlanRefDrop(registered);
 }
 
 // ===========================================================================

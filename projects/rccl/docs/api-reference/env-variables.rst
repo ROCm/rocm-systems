@@ -378,6 +378,30 @@ collected in the following table.
           CTA-policy gates in ``rcclUseAllGatherDirect`` still apply.
         | Any other value: Disabled.
 
+    * - | ``RCCL_DIRECT_REDUCE_SCATTER_DISABLE``
+        | Disables the direct ReduceScatter algorithm. Unlike
+          ``RCCL_DIRECT_ALLGATHER_DISABLE`` there is no automatic mode: the
+          algorithm is eligible by default, and any non-zero value turns it off
+          outright. Read once per process on the first eligibility check, so
+          changing it afterwards has no effect.
+      - | ``0``: Enabled (default). The architecture, PXN, size and node-count
+          gates in ``rcclUseReduceScatterDirect`` still apply.
+        | Any other value: Disabled.
+
+    * - | ``RCCL_DIRECT_REDUCE_SCATTER_THRESHOLD``
+        | Sets the largest ReduceScatter, in total bytes (``recvcount`` x type
+          size x the number of ranks), that can select the direct ReduceScatter
+          algorithm. The algorithm is additionally restricted to gfx950, needs
+          PXN enabled and ``RCCL_DIRECT_REDUCE_SCATTER_DISABLE`` unset or ``0``,
+          and is only considered at 2, 4, 8 or 16 nodes. Narrower per-node-count
+          windows apply on top of this value: 128 KiB to 2 MiB at 2 nodes, and
+          up to 4 MiB at 4 nodes.
+      - | Total bytes
+        | Default: ``8388608`` (8 MiB). This is also a hard upper limit, so
+          larger values are clamped to it and only lower values change
+          behavior.
+        | Leave unset or set to ``8388608`` to use the default.
+
     * - | ``RCCL_HIERARCHICAL_ALLGATHER_MIN_BYTES_PER_RANK``
         | Sets the smallest AllGather, in bytes per rank (``sendcount`` x type
           size), that can select hierarchical AllGather, so that small startup
@@ -805,6 +829,14 @@ in the following table.
         | GinScatter incoming scratch size, in bytes.
       - | ``536870912`` (512 MiB) by default, matching the CE AllReduce pool
         | ``0``: do not allocate scratch, and do not select GinScatter
+
+    * - | ``NCCL_GIN_PROXY_POLL_BATCH``
+        | Maximum GIN operations the proxy thread issues per peer in each
+          progress iteration. Larger values cut polling overhead when queues
+          are deep.
+      - | Integer value (default: ``32``)
+        | Values below ``1`` are treated as ``1``, which issues one operation
+          per iteration and never sends the RMA aggregation hint
 
     * - | ``NCCL_RMA_PLUGIN``
         | Selects external one-sided RMA plugins, which are also the backend
@@ -1270,6 +1302,22 @@ threshold table introduced for gfx1250.
           warp of dynamic LDS. It is off by default. Other architectures are unaffected.
       - | ``0``: Cooperative writer for every launch, no dynamic LDS (default).
         | ``1``: Staged writer from 2 MiB shards on gfx1250 wave32 communicators.
+
+    * - | ``RCCL_DDA_A2A_PUSH``
+        | Selects the ``ncclAllToAll`` kernel on the DDA fabric (VMM) tier. The push
+          kernels write each rank's chunks straight into its peers' DDA scratch
+          buffers and sync all ranks before finishing.
+      - | ``1``: Push kernels (default).
+        | ``0``: The previous pull kernel, where each rank reads its chunks from its
+          peers' DDA scratch buffers.
+
+    * - | ``RCCL_DDA_A2A_TDM``
+        | Moves the data of the DDA fabric ``ncclAllToAll`` push kernels through the
+          tensor data mover (TDM) on gfx1250. In-place calls, and builds or devices
+          without TDM support, use vector loads and stores. Has no effect when
+          ``RCCL_DDA_A2A_PUSH=0``.
+      - | ``1``: Use the TDM (default).
+        | ``0``: Use vector loads and stores.
 
     * - | ``RCCL_CE_ALLREDUCE``
         | Enables the Copy Engine (CE) registered-window AllReduce path. When ``-1`` (auto),

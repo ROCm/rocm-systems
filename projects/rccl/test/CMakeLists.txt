@@ -328,6 +328,7 @@ if(BUILD_TESTS)
     common/EnvVars.cpp
     common/PrepDataFuncs.cpp
     common/PtrUnion.cpp
+    common/GpuCountProbe.cpp
     common/ProcessIsolatedTestRunner.cpp
     common/TestBed.cpp
     common/TestBedChild.cpp
@@ -434,6 +435,7 @@ if(BUILD_TESTS)
       DeviceApiTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
+      common/GpuCountProbe.cpp
       common/ProcessIsolatedTestRunner.cpp
       common/TestChecks.cpp
       ../src/misc/kernel_config.cc
@@ -535,6 +537,7 @@ if(BUILD_TESTS)
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/TestChecks.cpp
+      common/GpuCountProbe.cpp
       common/ProcessIsolatedTestRunner.cpp
     )
     target_compile_definitions(rccl-UnitTestsGinAnvilPlugin PRIVATE ENABLE_FAULT_INJECTION)
@@ -546,6 +549,7 @@ if(BUILD_TESTS)
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/TestChecks.cpp
+      common/GpuCountProbe.cpp
       common/ProcessIsolatedTestRunner.cpp
     )
 
@@ -684,6 +688,7 @@ if(BUILD_TESTS)
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/TestChecks.cpp
+      common/GpuCountProbe.cpp
       common/ProcessIsolatedTestRunner.cpp
     )
 
@@ -886,6 +891,7 @@ if(BUILD_TESTS)
       transport/Gin/GinMtuNegotiationTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
+      common/GpuCountProbe.cpp
       common/ProcessIsolatedTestRunner.cpp
     )
 
@@ -948,6 +954,7 @@ if(BUILD_TESTS)
       AltRsmiTests.cpp
       ../src/misc/alt_rsmi.cc
       common/main_altrsmi.cpp
+      common/GpuCountProbe.cpp
       common/ProcessIsolatedTestRunner.cpp
     )
 
@@ -1002,6 +1009,7 @@ if(BUILD_TESTS)
     if(CMAKE_BUILD_TYPE MATCHES "Debug")
       list(APPEND TEST_AMDSMI_SOURCE_FILES
         AmdSmiWrapTests.cpp
+        common/GpuCountProbe.cpp
         common/ProcessIsolatedTestRunner.cpp
       )
 
@@ -1175,6 +1183,22 @@ if(BUILD_TESTS)
     target_link_options(rccl-UnitTestsMPI PRIVATE
       "LINKER:--export-dynamic-symbol=ncclGinPlugin_v13"
       "LINKER:--export-dynamic-symbol=ncclRmaPlugin_v13")
+
+    # The NetIbMPI connection-setup helpers are [[nodiscard]] so that dropping
+    # their result is caught rather than reviewed for. On its own that is only a
+    # warning, and WERROR defaults to OFF, so a bare SetupConnection(...) would
+    # still build and carry on with the comms the helper just closed. Promoting
+    # the warning to an error here is the whole of the enforcement: nothing
+    # checks the call sites but the compiler, and nothing keeps the attribute on
+    # the helpers but review.
+    #
+    # Scoped to the NetIbMPI sources rather than the whole target: other MPI
+    # tests discard [[nodiscard]] results of their own, and reworking those is
+    # not this change's business.
+    set(NETIBMPI_TEST_SOURCE_FILES ${MPI_TEST_SOURCE_FILES})
+    list(FILTER NETIBMPI_TEST_SOURCE_FILES INCLUDE REGEX "transport/NetIbMPI/")
+    set_source_files_properties(${NETIBMPI_TEST_SOURCE_FILES}
+      PROPERTIES COMPILE_OPTIONS -Werror=unused-result)
 
     list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsMPI)
 

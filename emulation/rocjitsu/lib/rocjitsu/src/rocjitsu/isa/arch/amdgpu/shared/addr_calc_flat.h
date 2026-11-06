@@ -31,6 +31,20 @@ namespace addr_calc {
 // (125) for a vector address; GFX10.3 additionally uses 127 for no registers.
 enum class ScratchAddressMode { VectorEnable, LegacyCdna, Rdna1, Rdna2 };
 
+/// @brief Translate one generic private pointer and capture its memory layout.
+inline uint64_t capture_flat_private_address(Wavefront &wf, VectorMemState &d, uint64_t address,
+                                             uint32_t lane) {
+  const auto translated =
+      translate_flat_address(wf, address, lane, flat_private_layout(wf.cu().arch()));
+  if (translated.private_address && translated.swizzled) {
+    d.scratch_swizzle = true;
+    d.requires_scratch_backing = true;
+    d.scratch_addr_stride = wf.wf_size() * sizeof(uint32_t);
+    d.scratch_lane_mask |= uint64_t{1} << lane;
+  }
+  return translated.value;
+}
+
 /// @brief Compute per-lane addresses for FLAT/GLOBAL/SCRATCH encoding.
 ///
 /// @details Populates d.per_lane_addr, d.lane_mask, and d.exec_mask.
@@ -170,8 +184,6 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
     // unmapped aperture VA range, using the same dword-interleaved swizzle as
     // dedicated SCRATCH ops so the private layout is uniform (and readable by
     // rocm-dbgapi).
-    constexpr uint32_t kScratchInterleave = sizeof(uint32_t);
-    const uint32_t lane_count = wf.wf_size();
     uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
     auto vaddr_region = regs.read_vgpr_region(vbase, 2, exec);
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -179,16 +191,7 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
         continue;
       uint64_t vaddr = vaddr_region.lane64(0, lane);
       uint64_t addr = vaddr + offset;
-      const auto translated =
-          translate_flat_address(wf, addr, lane, FlatPrivateLayout::Interleaved);
-      if (translated.private_address) {
-        addr = translated.value;
-        d.scratch_swizzle = true;
-        d.requires_scratch_backing = true;
-        d.scratch_addr_stride = lane_count * kScratchInterleave;
-        d.scratch_lane_mask |= 1ULL << lane;
-      }
-      d.per_lane_addr[lane] = addr;
+      d.per_lane_addr[lane] = capture_flat_private_address(wf, d, addr, lane);
     }
   }
 }
