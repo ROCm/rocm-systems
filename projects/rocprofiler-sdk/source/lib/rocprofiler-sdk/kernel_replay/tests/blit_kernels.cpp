@@ -699,7 +699,11 @@ class capture_t
 {
 public:
     capture_t(const layout_t& layout, bool host_snapshot)
-    : m_original{pattern(layout.span)}
+    : capture_t{layout, host_snapshot, pattern(layout.span)}
+    {}
+
+    capture_t(const layout_t& layout, bool host_snapshot, std::vector<std::byte> original)
+    : m_original{std::move(original)}
     {
         auto& gpu = gpu_t::get();
         m_live    = gpu.allocate_device(layout.span);
@@ -949,6 +953,40 @@ TEST(kernel_replay_blit_kernels, restore_changed_from_a_device_snapshot)
 TEST(kernel_replay_blit_kernels, restore_changed_from_a_host_snapshot)
 {
     check_restore_changed(true);
+}
+
+// Any one changed word must change its tile's digest, including {b - 1, 0} to {0xffffffff, b}
+// (32-bit halves) at the start of a tile, which collide under swap-plus-product terms.
+static_assert(abi::digest_term(0, 0) != abi::digest_term(0x00000001ffffffffULL, 0));
+static_assert(abi::digest_term(4, 0) != abi::digest_term(0x00000005ffffffffULL, 0));
+
+TEST(kernel_replay_blit_kernels, restore_changed_catches_a_single_changed_word)
+{
+    auto& gpu = gpu_t::get();
+    if(!gpu.available()) GTEST_SKIP() << gpu.reason();
+
+    const auto layout     = make_layout({3 * abi::tile_bytes}, 16, 0, 1);
+    const auto write_word = [](std::vector<std::byte>& bytes, uint64_t offset, uint64_t word) {
+        std::memcpy(bytes.data() + offset, &word, sizeof(word));
+    };
+
+    // Zeros, but for {4, 0} at the start of the second tile. Then the first word of the first two
+    // tiles changes, and nothing else.
+    auto original = std::vector<std::byte>(layout.span);
+    write_word(original, abi::tile_bytes, 4);
+    const auto capture = capture_t{layout, false, original};
+    ASSERT_TRUE(capture.ok());
+    auto written = original;
+    write_word(written, 0, 0x00000001ffffffffULL);
+    write_word(written, abi::tile_bytes, 0x00000005ffffffffULL);
+    capture.write_live(written);
+
+    ASSERT_TRUE(gpu.run({capture.workspace().restore_changed(0)}));
+    EXPECT_EQ(count_mismatches(capture.live(), original), 0);
+    const auto count = capture.workspace().counters().at(0);
+    ASSERT_EQ(count, 2);
+    const auto listed = capture.workspace().changed(count);
+    EXPECT_EQ(std::set<uint32_t>(listed.begin(), listed.end()), (std::set<uint32_t>{0, 1}));
 }
 
 TEST(kernel_replay_blit_kernels, restore_listed_and_check_the_rest)
