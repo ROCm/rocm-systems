@@ -19,7 +19,7 @@ streamperthread:
     <<: *level_default
     tags: [stream]
   Unit_hipStreamPerThread_MemcpyAsync:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [stream]
   Unit_hipStreamPerThread_EventRecord:
     <<: *level_default

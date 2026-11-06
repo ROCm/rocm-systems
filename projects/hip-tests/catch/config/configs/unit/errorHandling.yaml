@@ -1,19 +1,21 @@
 ---
 errorHandling:
   Unit_hipGetErrorName_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [smoke, P0]
   Unit_hipGetErrorName_Negative_Parameters: *level_default
   Unit_hipGetErrorString_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [smoke, P0]
   Unit_hipGetErrorString_Negative_Parameters: *level_default
-  Unit_hipDrvGetErrorName_Positive_Basic: *level_default
+  Unit_hipDrvGetErrorName_Positive_Basic:
+    level: [*level_0, *level_default]
   Unit_hipDrvGetErrorName_Negative_Parameters: *level_default
-  Unit_hipDrvGetErrorString_Positive_Basic: *level_default
+  Unit_hipDrvGetErrorString_Positive_Basic:
+    level: [*level_0, *level_default]
   Unit_hipDrvGetErrorString_Negative_Parameters: *level_default
   Unit_hipGetLastError_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [smoke, P0]
   Unit_hipGetLastError_Positive_Threaded: *level_default
   Unit_hipGetLastError_with_hipMemcpyPeerAsync:
@@ -52,7 +54,7 @@ errorHandling:
   Unit_hipLastErrorReset_SeesCleanState: *level_default
   Unit_hipLastErrorReset_Harness: *level_default
   Unit_hipPeekAtLastError_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [smoke, P0]
   Unit_hipPeekAtLastError_Positive_Threaded: *level_default
   Unit_hipPeekAtLastError_Positive: *level_default
@@ -72,7 +74,7 @@ errorHandling:
       targets: [asan]
       reason: "AIRUNTIME-2744 - test puts the runtime in an error state, which prevents resource cleanup under asan. Needs re-triage."
   Unit_hipExtGetLastError_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [P0]
   Unit_hipExtGetLastError_Positive_Threaded: *level_default
   Unit_hipExtGetLastError_with_hipMemcpyPeerAsync:

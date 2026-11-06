@@ -1,14 +1,15 @@
 ---
 device_memory:
   Unit_Device_memcpy_Positive:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [amd_linux]
       reason: "AIRUNTIME-2744 - in the Rock_Linux_Failures_on_gfx94X set. Needs re-triage on amd_linux."
   Unit_Device_memcpy_Negative_Parameters_RTC:
     <<: *level_default
     tags: [device_lang]
-  Unit_Device_memset_Positive: *level_default
+  Unit_Device_memset_Positive:
+    level: [*level_0, *level_default]
   Unit_Device_memset_Negative_Parameters_RTC:
     <<: *level_default
     tags: [device_lang]

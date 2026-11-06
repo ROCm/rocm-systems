@@ -1,8 +1,10 @@
 ---
 callback:
-  Unit_hipApiName_Positive_Basic: *level_default
+  Unit_hipApiName_Positive_Basic:
+    level: [*level_0, *level_default]
   Unit_hipApiName_Negative_ReservedIds: *level_default
-  Unit_hipGetStreamDeviceId_Positive_Threaded_Basic: *level_default
+  Unit_hipGetStreamDeviceId_Positive_Threaded_Basic:
+    level: [*level_0, *level_default]
   Unit_hipGetStreamDeviceId_Positive_Multithreaded_Basic:
     <<: *level_default
     disabled:
@@ -11,7 +13,7 @@ callback:
     tags: [P0]
   Unit_hipGetStreamDeviceId_Negative_Parameters: *level_default
   Unit_hipKernelNameRef_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
@@ -20,6 +22,7 @@ callback:
     disabled:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
-  Unit_hipKernelNameRefByPtr_Positive_Basic: *level_default
+  Unit_hipKernelNameRefByPtr_Positive_Basic:
+    level: [*level_0, *level_default]
   Unit_hipKernelNameRefByPtr_Positive_StreamNullptr: *level_default
   Unit_hipKernelNameRefByPtr_Negative_KernelNullptr: *level_default

@@ -10,7 +10,7 @@ kernel:
     <<: *level_default
     tags: [attributes, P1]
   Unit_hipDynamicShared:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
@@ -22,7 +22,7 @@ kernel:
     <<: *level_default
     tags: [language, smoke, P0]
   Unit_hipGridLaunch:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [launch, smoke, P0]
   Unit_hipLanguageExtensions:
     <<: *level_default
@@ -34,10 +34,10 @@ kernel:
     <<: *level_default
     tags: [launch, P1]
   Unit_kernel_chkConstantViaKernel:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [memory, P0]
   Unit_kernel_chkGlobalArrAndGlobalVaribleViaKernelFn:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [memory, P0]
   Unit_kernel_MemoryOperationsViaKernels:
     <<: *level_default
@@ -55,7 +55,7 @@ kernel:
     <<: *level_default
     tags: [launch]
   Unit_hipLaunchKernelEx_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [launch, P0]
   Unit_hipLaunchKernelEx_With_Different_Kernels:
     <<: *level_default
@@ -70,13 +70,13 @@ kernel:
     <<: *level_default
     tags: [language, P0]
   Unit_hipExtLaunchKernelGGL:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [launch, P0]
   Unit_hipSetupArgument_Simple:
     <<: *level_default
     tags: [launch, P1]
   Unit_hipSetupArgument_Execute_Kernel_And_Check_Result:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [launch, P0]
   Unit_ConfigureCall:
     <<: *level_default
@@ -97,7 +97,7 @@ kernel:
     <<: *level_default
     tags: [launch, P1]
   Unit_hipExtDynDataPrefetch_SingleRegion:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [launch, P1]
   Unit_hipExtDynDataPrefetch_TemporalHints:
     <<: *level_default
@@ -123,5 +123,5 @@ kernel:
     <<: *level_default
     tags: [launch]
   Unit_kernel_BlockDim3D_Validation_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [launch]

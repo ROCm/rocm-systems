@@ -1,7 +1,7 @@
 ---
 device:
   Unit_hipChooseDevice_ValidateDevId:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [query, P0]
   Unit_hipChooseDevice_NegTst:
     <<: *level_default
@@ -16,7 +16,7 @@ device:
     <<: *level_default
     tags: [query]
   Unit_hipDeviceFlushGPUDirectRDMAWrites_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [query]
   Unit_hipDeviceFlushGPUDirectRDMAWrites_Positive_Repeated:
     <<: *level_default
@@ -52,10 +52,10 @@ device:
     <<: *level_default
     tags: [query, P0]
   Unit_hipDeviceComputeCapability_ValidateVersion:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [query, P0]
   Unit_hipDeviceGetByPCIBusId_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [query, P0]
   Unit_hipDeviceGetByPCIBusId_NegativeNullChk:
     <<: *level_default
@@ -70,7 +70,7 @@ device:
     <<: *level_default
     tags: [query, P0]
   Unit_hipDeviceGetName_CheckPropName:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [query, P0]
   Unit_hipDeviceGetName_PartialFill:
     <<: *level_default
@@ -79,7 +79,7 @@ device:
     <<: *level_default
     tags: [query, P0]
   Unit_hipDeviceGetPCIBusId_Check_PciBusID_WithAttr:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [query, P0]
   Unit_hipDeviceGetPCIBusId_Negative_PartialFill:
     <<: *level_default
@@ -100,10 +100,10 @@ device:
     <<: *level_default
     tags: [config, P0]
   Unit_hipDeviceGetCacheConfig_Positive_RoundTrip:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [config, P1]
   Unit_hipDeviceSynchronize_Positive_Empty_Streams:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [synchronization, P0]
   Unit_hipDeviceSynchronize_Positive_Nullstream:
     <<: *level_default
@@ -121,13 +121,13 @@ device:
     <<: *level_default
     tags: [query, P0]
   Unit_hipDeviceTotalMem_ValidateTotalMem:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [query, P0]
   Unit_hipDeviceTotalMem_NonSelectedDevice:
     <<: *level_default
     tags: [multigpu, query, P0]
   Unit_hipGetDeviceAttribute_CheckAttrValues:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [query, P0]
   Unit_hipDeviceGetAttribute_NegTst:
     <<: *level_default
@@ -148,7 +148,7 @@ device:
     <<: *level_default
     tags: [multigpu, query, P0]
   Unit_hipGetDeviceProperties_ArchPropertiesTst:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [query, smoke, P0]
   Unit_hipGetDeviceProperties_NegTst:
     <<: *level_default
@@ -157,7 +157,7 @@ device:
     <<: *level_default
     tags: [query, P0]
   Unit_hipRuntimeGetVersion_Positive:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [init, smoke, P0]
   Unit_hipRuntimeGetVersion_Negative:
     <<: *level_default
@@ -169,7 +169,7 @@ device:
     <<: *level_default
     tags: [config, P0]
   Unit_hipGetSetDeviceFlags_SetThenGet:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [config, smoke, P0]
   Unit_hipGetSetDeviceFlags_Threaded:
     <<: *level_default
@@ -184,7 +184,7 @@ device:
     <<: *level_default
     tags: [config, P0]
   Unit_hipSetDevice_BasicSetGet:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [query, smoke, P0]
   Unit_hipGetSetDevice_MultiThreaded:
     <<: *level_default
@@ -199,7 +199,7 @@ device:
     <<: *level_default
     tags: [query, P0]
   Unit_hipDeviceGetUuid_Positive:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
@@ -217,7 +217,7 @@ device:
     <<: *level_default
     tags: [query, P0]
   Unit_hipDeviceGetLuid_Positive:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [query]
   Unit_hipDeviceGetLuid_Negative:
     <<: *level_default
@@ -241,7 +241,7 @@ device:
     <<: *level_default
     tags: [query, P0]
   Unit_hipDeviceGetDefaultMemPool_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [query, P0]
   Unit_hipDeviceGetDefaultMemPool_Negative_Parameters:
     <<: *level_default
@@ -268,7 +268,7 @@ device:
     <<: *level_default
     tags: [query, P0]
   Unit_hipDeviceSetLimit_Positive_StackSize:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [config, P0]
   Unit_hipDeviceSetLimit_Positive_PrintfFifoSize:
     <<: *level_default
@@ -301,7 +301,7 @@ device:
     <<: *level_default
     tags: [config]
   Unit_hipDeviceGetSetLimit_Scratch_DecreaseIncrease:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [config]
   Unit_hipDeviceGetSetLimit_Scratch_SetBeforeKernelLaunch:
     <<: *level_default
@@ -344,7 +344,7 @@ device:
     <<: *level_default
     tags: [config, P0]
   Unit_hipDeviceGetSharedMemConfig_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
@@ -359,7 +359,7 @@ device:
     <<: *level_default
     tags: [config, P0]
   Unit_hipDeviceReset_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [nvidia_windows]
       reason: "AIRUNTIME-2744 - disabled because this test no longer behaves the same on the nvidia platform. Needs re-triage on nvidia_windows."
@@ -380,7 +380,7 @@ device:
     <<: *level_default
     tags: [config, P0]
   Unit_hipDeviceGetMemPool_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [config, P0]
   Unit_hipDeviceGetMemPool_Positive_Threaded:
     <<: *level_default
@@ -389,7 +389,7 @@ device:
     <<: *level_default
     tags: [config, P0]
   Unit_hipInit_Positive:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [init, smoke, P0]
   Unit_hipInit_Negative:
     <<: *level_default
@@ -398,7 +398,7 @@ device:
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [init, P0]
   Unit_hipInitDevice_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [init, smoke]
   Unit_hipInitDevice_Positive_Flags:
     <<: *level_default
@@ -416,7 +416,7 @@ device:
     <<: *level_default
     tags: [init]
   Unit_hipDriverGetVersion_Positive:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [init, smoke, P0]
   Unit_hipDriverGetVersion_Negative:
     <<: *level_default
@@ -431,7 +431,7 @@ device:
     <<: *level_default
     tags: [config, multigpu]
   Unit_hipSetValidDevices_WithAllDevicesInSystem:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [config]
   Unit_hipSetValidDevices_Positive_Cases:
     <<: *level_default
@@ -446,7 +446,7 @@ device:
     <<: *level_default
     tags: [config, multigpu]
   Unit_hipGetProcAddress_ValidateDeviceApis:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [P0]
   Unit_hipGetProcAddress_PeerDeviceAccessAPIs:
     <<: *level_default
@@ -454,7 +454,8 @@ device:
   Unit_hipGetProcAddress_SetGetMemPoolAPIs:
     <<: *level_default
     tags: [multigpu, P0]
-  Unit_hipGetDriverEntryPoint_Positive: *level_default
+  Unit_hipGetDriverEntryPoint_Positive:
+    level: [*level_0, *level_default]
   Unit_hipGetDriverEntryPoint_Negative: *level_default
   Unit_hipGetDriverEntryPoint_spt_Positive: *level_default
   Unit_hipGetDriverEntryPoint_spt_Negative: *level_default

@@ -1,5 +1,7 @@
 ---
 definitions:
+  # Combine anchors by listing them under `level:`; parse_config.py unions their levels,
+  # e.g. the level_0 smoke tests use `level: [*level_0, *level_default]` (levels 0, 1, 2).
   level_0: &level_0
     level: [0]
   level_1: &level_1
@@ -11,7 +13,7 @@ definitions:
   level_4: &level_4
     level: [4]
   level_default: &level_default
-    level: [0, 1, 2]
+    level: [1, 2]
   level_stress: &level_stress
     level: [3, 4]
   level_all: &level_all
