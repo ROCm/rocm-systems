@@ -91,8 +91,8 @@ get_output_filename(const output_config& cfg, std::string_view fname, std::strin
 
     if(auto invalid = invalid_directory(resolved))
     {
-        ROCP_FATAL << fmt::format(
-            "ROCPROFILER_OUTPUT_PATH ({}) already exists and is not a directory", *invalid);
+        ROCP_FATAL << fmt::format("ROCPROF_OUTPUT_PATH ({}) already exists and is not a directory",
+                                  *invalid);
     }
 
     for(const auto& itr : resolved.directories)

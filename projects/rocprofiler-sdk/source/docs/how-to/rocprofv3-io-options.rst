@@ -77,6 +77,8 @@ Output directory
 
 To specify the output directory, use ``--output-directory`` or ``-d`` option. If not specified, the default output path is ``%hostname%/%pid%``.
 
+For regular launches, a literal relative output directory is resolved from the working directory where ``rocprofv3`` is invoked. Runtime-expanded paths and attach-mode paths are resolved in the profiled process.
+
 .. code-block:: shell
 
    rocprofv3 --hip-trace --output-directory output_dir --output-format csv -- <application_path>

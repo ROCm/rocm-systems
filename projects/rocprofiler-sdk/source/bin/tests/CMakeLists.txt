@@ -10,7 +10,7 @@ endif()
 
 foreach(_FILE IN
         ITEMS conftest.py pytest.ini test_att_resource_mode.py test_multipass_parsing.py
-              test_preload_ordering.py test_rocprof_attach.py)
+              test_output_validation.py test_preload_ordering.py test_rocprof_attach.py)
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/${_FILE}
                    ${CMAKE_CURRENT_BINARY_DIR}/${_FILE} COPYONLY)
 endforeach()
@@ -22,7 +22,7 @@ endforeach()
 rocprofiler_sdk_pytest_discover_tests(
     rocprofv3-launcher-tests
     TEST_PATHS test_multipass_parsing.py test_att_resource_mode.py
-               test_preload_ordering.py
+               test_output_validation.py test_preload_ordering.py
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     PYTHON_EXECUTABLE ${Python3_EXECUTABLE}
     EXTRA_ARGS --rocprofv3-path ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprofv3
