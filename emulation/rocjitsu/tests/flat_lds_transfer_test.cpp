@@ -154,6 +154,23 @@ TEST_P(FlatLdsTransfer, ScratchWidthsAndAddressModesPreserveInactiveLanesAndVgpr
     }
 }
 
+TEST_P(FlatLdsTransfer, GlobalLoadsToLdsAdvertiseVmemObligation) {
+  if (!modern())
+    GTEST_SKIP() << "Tests specific to modern architectures.";
+  for (unsigned kind = 0; kind < 5; ++kind) {
+    SCOPED_TRACE(testing::Message() << "kind=" << kind);
+    const auto words = encoding(kind, 2, false, vector_saddr());
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    const auto *issue_info = inst->amdgpu_memory_issue_info();
+    ASSERT_NE(issue_info, nullptr);
+    const auto obligations = issue_info->counter_obligations();
+    ASSERT_EQ(obligations.size(), 1u);
+    EXPECT_EQ(obligations[0].wait_counter_type(), amdgpu::WaitCounterType::VMCNT);
+    EXPECT_EQ(obligations[0].completion_class(), amdgpu::MemoryCompletionClass::VMEM);
+  }
+}
+
 TEST_P(FlatLdsTransfer, GlobalLoadsToLdsPreserveInactiveLanesAndVgprs) {
   if (!modern())
     GTEST_SKIP() << "Tests specific to modern architectures.";
