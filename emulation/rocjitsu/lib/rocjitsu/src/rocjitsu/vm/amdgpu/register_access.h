@@ -1374,9 +1374,9 @@ public:
     return read_operand_pair32(op, lane_mask, ScalarPairMode::Preserve, byte_mask);
   }
 
-  [[nodiscard]] OperandReadPair32View read_operand_pair32(const Operand &op, uint64_t lane_mask,
-                                                          ScalarPairMode scalar_mode,
-                                                          uint8_t byte_mask = 0xF) const {
+  [[nodiscard, gnu::always_inline]] OperandReadPair32View
+  read_operand_pair32(const Operand &op, uint64_t lane_mask, ScalarPairMode scalar_mode,
+                      uint8_t byte_mask = 0xF) const {
     const Wavefront &wf = wavefront();
     auto base = op.simd_vgpr_base(wf);
     const bool valid = !base || cu_->owns_vgpr_range(wf, *base, 2);
@@ -1644,8 +1644,10 @@ public:
     return read_vgpr_region(*base, reg_count, lane_mask);
   }
 
-  [[nodiscard]] VgprReadRegion read_vgpr_region(uint32_t physical_base, uint32_t reg_count,
-                                                uint64_t lane_mask, uint8_t byte_mask = 0xF) const {
+  [[nodiscard, gnu::always_inline]] VgprReadRegion read_vgpr_region(uint32_t physical_base,
+                                                                    uint32_t reg_count,
+                                                                    uint64_t lane_mask,
+                                                                    uint8_t byte_mask = 0xF) const {
     const uint32_t wave_size = vgpr_region_wave_size(physical_base, reg_count);
     const Wavefront *owner = vgpr_owner_for_range(physical_base, reg_count);
     if (!owner)
