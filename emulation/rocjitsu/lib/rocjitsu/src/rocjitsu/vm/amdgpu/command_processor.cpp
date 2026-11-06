@@ -1233,7 +1233,7 @@ uint64_t CommandProcessor::register_queue(ComputeQueueConfig config, bool fanout
       queue.doorbell_mode == QueueDoorbellMode::HostPolled && !queue.fanout_replica;
   // Publish only through internal storage and peer registration.
   // Foreign VM access above can still fail through its own boundary contract;
-  // standard-library failures after publication starts must be fatal.
+  // Standard-library failures inside the publication lambda must be fatal.
   const uint64_t registration_id = [&]() noexcept -> uint64_t {
     class PeerRegistrationRollback {
     public:
