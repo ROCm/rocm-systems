@@ -38,6 +38,10 @@ hipError_t playback_hipMallocHost(PlaybackContext& ctx, const uint8_t* pl);
 hipError_t playback_hipHostRegister(PlaybackContext& ctx, const uint8_t* pl);
 hipError_t playback_hipFreeHost(PlaybackContext& ctx, const uint8_t* pl);
 
+// AddressSanitizer aborts on a failed allocation unless told to return null,
+// which the allocation-failure case below needs.
+extern "C" const char* __asan_default_options() { return "allocator_may_return_null=1"; }
+
 namespace fs = std::filesystem;
 
 namespace {
@@ -361,6 +365,40 @@ TEST_CASE("Unit_HRR_HostBudget_LandingBufferPointerSurvivesGrowth", "[hrr]") {
   // Launching graph 1 now writes through the pointer node 1 was given.
   std::memset(n1, 0x44, 16);
   CHECK(n1[15] == 0x44);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Host blocks start on a 64-byte cache line, so two small blocks never
+ *     share one (hipHostRegister's alignment advice).
+ */
+TEST_CASE("Unit_HRR_HostBudget_HostBlocksStartOnCacheLine", "[hrr]") {
+  PlaybackContext ctx;
+  for (uint64_t rec = 1; rec <= 8; ++rec) {
+    void* p = ctx.host_landing_buffer(rec, 8);
+    REQUIRE(p != nullptr);
+    CHECK(reinterpret_cast<uintptr_t>(p) % 64 == 0);
+  }
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - A hipHostRegister the budget allows but the allocator cannot back is
+ *     refused with hipErrorMemoryAllocation, and its charge is given back.
+ */
+TEST_CASE("Unit_HRR_HostBudget_HostRegisterAllocationFailureRefuses", "[hrr]") {
+  constexpr uint64_t kHuge = uint64_t{1} << 62;  // more than any address space
+  PlaybackContext ctx;
+  ctx.host_budget.set_cap(kHuge);
+
+  hrr_test::ExactRecord<hrr_args_hipHostRegister> reg;
+  reg.get()->hostPtr = 0x6000;
+  reg.get()->sizeBytes = kHuge;
+  reg.get()->blob_hash_lo = 1;
+  CHECK(playback_hipHostRegister(ctx, reg.bytes()) == hipErrorMemoryAllocation);
+  CHECK(ctx.host_budget.used() == 0);
 }
 
 /** @} */

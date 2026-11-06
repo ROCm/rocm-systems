@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <iterator>
 #include <memory>
+#include <new>
 #include <map>
 #include <set>
 #include <unordered_map>
@@ -902,19 +903,26 @@ struct PlaybackContext {
     // moved or freed before teardown.
     // Keyed by the recorded host address so the same recorded destination
     // reuses one block until a later event asks for more room.
+    // Blocks start on a 64-byte cache line, as hipHostRegister asks of
+    // registered memory, so two blocks never share one.
+    struct HostBlockFree {
+        void operator()(uint8_t* p) const { ::operator delete[](p, std::align_val_t{64}); }
+    };
+    using HostBlockPtr = std::unique_ptr<uint8_t[], HostBlockFree>;
     struct HostBlock {
-        std::unique_ptr<uint8_t[]> cur;   // the block new nodes are given
+        HostBlockPtr cur;   // the block new nodes are given
         size_t size = 0;
         // Blocks an earlier node may still point into, outgrown but not freed.
-        std::vector<std::unique_ptr<uint8_t[]>> retired;
+        std::vector<HostBlockPtr> retired;
     };
     std::unordered_map<uint64_t, HostBlock> host_landing_buffers;
     // hipHostRegister backing buffers, kept the same way: a graph node may
     // still point into one after hipHostUnregister.
     std::unordered_map<uint64_t, HostBlock> host_reg_blocks;
 
-    // The block for a recorded host address, at least sz bytes. Null, with the
-    // replay ended, when the budget refuses a new block.
+    // The block for a recorded host address, at least sz bytes, zero-filled
+    // when new. Null when the allocation fails, and with the replay ended
+    // when the budget refuses a new block.
     void* host_block(std::unordered_map<uint64_t, HostBlock>& blocks, uint64_t rec,
                      size_t sz, const char* what) {
         std::unique_lock lk(map_mutex);
@@ -922,7 +930,13 @@ struct PlaybackContext {
         if (!buf.cur || buf.size < sz) {
             // Charged whole, since the outgrown block stays resident.
             if (!charge_host(sz, what)) return nullptr;
-            auto next = std::make_unique<uint8_t[]>(sz ? sz : 1);
+            HostBlockPtr next(new (std::align_val_t{64}, std::nothrow) uint8_t[sz ? sz : 1]());
+            if (!next) {
+                host_budget.release(sz);
+                fprintf(stderr, "[HRR] no %zu-byte %s for recorded host address 0x%llx\n", sz,
+                        what, static_cast<unsigned long long>(rec));
+                return nullptr;
+            }
             if (buf.cur) buf.retired.push_back(std::move(buf.cur));
             buf.cur = std::move(next);
             buf.size = sz;

@@ -1945,7 +1945,8 @@ int main(int argc, char** argv) {
     ctx.kernel_filter.clear();
     if (!run_pass(ctx, archive, thread_events, use_mt, /*log=*/false)) {
       fprintf(stderr, "[HRR] Fatal error in warm-up pass — aborting\n");
-      return 1;
+      // As after the timed pass: queued work may still use ctx's host blocks.
+      std::exit(1);
     }
     ctx.fatal_error.store(false, std::memory_order_release);
     ctx.kernel_filter    = filter;
@@ -2034,7 +2035,9 @@ int main(int argc, char** argv) {
       return 2;
     }
     fprintf(stderr, "[HRR] Replay aborted due to fatal HIP error — exiting\n");
-    return 1;
+    // The pass ended without its device sync, so work still queued may use
+    // ctx's host blocks: exit without destroying ctx.
+    std::exit(1);
   }
 
   // ---------------------------------------------------------------------------
