@@ -186,3 +186,15 @@ def test_jax_inner_jit_skips_second_marker(monkeypatch):
     outer = compiled_type("train_step", body=lambda *args, **kwargs: inner())
     outer()
     assert [item["marker"] for item in pushes] == ["jax.jit.train_step"]
+
+
+def test_jax_primitive_skips_when_range_open(monkeypatch):
+    _jax_mod, compiled_type, primitive_type = install_jax_backend(monkeypatch)
+    pushes = record_scopes(monkeypatch)
+    primitive = primitive_type("dot_general")
+    compiled = compiled_type(
+        "train_step",
+        body=lambda *args, **kwargs: primitive.bind_with_trace(None, (), (), {}),
+    )
+    compiled()
+    assert [item["marker"] for item in pushes] == ["jax.jit.train_step"]
