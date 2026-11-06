@@ -159,7 +159,7 @@ bool SoC::set_memory(amdgpu::GpuMemory *memory) {
     iod->msc()->set_legacy_maintenance_vm(&gpu_vm_);
   }
   // Create a standalone HBM controller for the config-loader path where the
-  // parameterized constructor (which creates it) was not used.
+  // configured factory (which creates it) was not used.
   if (memory && !hbm_standalone_ && iods_.empty())
     hbm_standalone_ = std::make_unique<amdgpu::HbmController>(memory, &gpu_vm_);
   return true;
@@ -181,11 +181,16 @@ void SoC::wire_backing(simdojo::Topology &topo) {
   }
 }
 
-SoC::SoC(std::string name, const Config &config)
-    : simdojo::CompositeComponent(std::move(name)), arch_(config.arch),
-      exec_mode_(config.exec_mode),
-      sdma_queue_scheduler_(gpu_vm_, cache_coherence_, sdma_dialect(arch_)),
-      queue_registry_(gpu_vm_), mes_engine_(gpu_vm_, queue_registry_, *this) {
+std::unique_ptr<SoC> SoC::create(std::string name, const Config &config,
+                                 util::DiagnosticEmitter emit_error) {
+  auto soc = std::make_unique<SoC>(std::move(name), nullptr, config.arch);
+  if (soc->configure(config, emit_error).failed())
+    return nullptr;
+  return soc;
+}
+
+util::Result SoC::configure(const Config &config, util::DiagnosticEmitter emit_error) {
+  exec_mode_ = config.exec_mode;
   set_weight(0); // Structural container, not a work-producing component.
   auto soc_name = this->name();
 
@@ -212,8 +217,10 @@ SoC::SoC(std::string name, const Config &config)
     // Create XCDs, each assigned to its parent IOD.
     for (uint32_t i = 0; i < config.num_xcds; ++i) {
       auto xcd_ptr =
-          std::make_unique<amdgpu::Xcd>(soc_name + ".xcd" + std::to_string(i), config.xcd,
-                                        config.arch, memory_, config.exec_mode, cache_coherence_);
+          amdgpu::Xcd::create(soc_name + ".xcd" + std::to_string(i), config.xcd, config.arch,
+                              memory_, config.exec_mode, cache_coherence_, emit_error);
+      if (!xcd_ptr)
+        return util::Result::failure();
       xcd_ptr->l2_cache()->set_legacy_maintenance_vm(&gpu_vm_);
       xcd_ptr->l2_cache()->set_gpu_vm(&gpu_vm_);
       xcds_.push_back(xcd_ptr.get());
@@ -224,8 +231,10 @@ SoC::SoC(std::string name, const Config &config)
     hbm_standalone_ = std::make_unique<amdgpu::HbmController>(memory_, &gpu_vm_);
     for (uint32_t i = 0; i < config.num_xcds; ++i) {
       auto xcd_ptr =
-          std::make_unique<amdgpu::Xcd>(soc_name + ".xcd" + std::to_string(i), config.xcd,
-                                        config.arch, memory_, config.exec_mode, cache_coherence_);
+          amdgpu::Xcd::create(soc_name + ".xcd" + std::to_string(i), config.xcd, config.arch,
+                              memory_, config.exec_mode, cache_coherence_, emit_error);
+      if (!xcd_ptr)
+        return util::Result::failure();
       xcd_ptr->l2_cache()->set_legacy_maintenance_vm(&gpu_vm_);
       xcd_ptr->l2_cache()->set_gpu_vm(&gpu_vm_);
       xcds_.push_back(xcd_ptr.get());
@@ -239,6 +248,7 @@ SoC::SoC(std::string name, const Config &config)
     for_each_cp([&](amdgpu::CommandProcessor *cp) {
       cp->set_scratch_slots_per_cu(config.scratch_slots_per_cu);
     });
+  return util::Result::success();
 }
 
 util::Result SoC::set_arch(rj_code_arch_t arch, util::DiagnosticEmitter emit_error) {
@@ -355,7 +365,7 @@ util::Result SoC::initialize(util::DiagnosticEmitter emit_error) {
   if (iods_.empty()) {
     // No IOD modeling: wire each L2's req port directly to the standalone HBM controller.
     // Create the HBM controller lazily if set_memory() was called but the
-    // parameterized constructor (which creates it) was not used.
+    // configured factory (which creates it) was not used.
     if (!hbm_standalone_ && memory_)
       hbm_standalone_ = std::make_unique<amdgpu::HbmController>(memory_, &gpu_vm_);
     if (hbm_standalone_) {

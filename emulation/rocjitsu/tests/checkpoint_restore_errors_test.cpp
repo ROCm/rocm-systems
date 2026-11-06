@@ -44,6 +44,7 @@ struct InvalidCheckpoint {
   uint32_t num_xcds = 1;
   uint32_t num_shader_engines = 1;
   uint32_t num_compute_units = 1;
+  uint32_t num_wf_slots = 1;
   bool wavefront = false;
   uint32_t wf_id = 0;
   uint8_t vgpr_lane_count = 64;
@@ -54,7 +55,7 @@ struct InvalidCheckpoint {
                                                         const InvalidCheckpoint &input) {
   flatbuffers::FlatBufferBuilder builder;
   auto arch = builder.CreateString(input.arch);
-  auto cu = fb::CreateComputeUnitConfig(builder, 1, 104, 256, 64);
+  auto cu = fb::CreateComputeUnitConfig(builder, input.num_wf_slots, 104, 256, 64);
   auto se = fb::CreateShaderEngineConfig(builder, input.num_compute_units, cu);
   auto xcd = fb::CreateXcdConfig(builder, input.num_shader_engines, se);
   auto gpu = fb::CreateAmdgpuConfig(builder, input.num_xcds, 0, xcd);
@@ -135,6 +136,12 @@ TEST(CheckpointRestoreErrorsTest, TotalCapacityOverflowReturnsFailure) {
   ASSERT_TRUE(write_checkpoint(
       file, {.num_xcds = std::numeric_limits<uint32_t>::max(), .num_compute_units = 3}));
   expect_restore_failure(file.path(), "Checkpoint execution capacity exceeds uint32 range");
+}
+
+TEST(CheckpointRestoreErrorsTest, InvalidComputeUnitConfigurationReturnsFailure) {
+  test::ScopedTempFile file;
+  ASSERT_TRUE(write_checkpoint(file, {.num_wf_slots = 33}));
+  expect_restore_failure(file.path(), "num_wf_slots exceeds the ISA maximum of 32");
 }
 
 TEST(CheckpointRestoreErrorsTest, UnavailableWavefrontSlotReturnsFailure) {

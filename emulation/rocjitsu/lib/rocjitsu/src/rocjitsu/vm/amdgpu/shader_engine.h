@@ -11,6 +11,8 @@
 #include "rocjitsu/vm/amdgpu/spi.h"
 
 #include "simdojo/sim/component.h"
+#include "util/diagnostic.h"
+#include "util/result.h"
 
 #include <cassert>
 #include <cstdint>
@@ -42,9 +44,12 @@ public:
   /// @param memory Shared GPU memory (not owned).
   /// @param l2 Shared L2 cache (owned by the XCD).
   /// @param exec_mode Execution mode for CU creation.
-  /// @throws util::ConfigError if CU configuration or execution mode is rejected.
-  ShaderEngine(std::string name, const Config &config, rj_code_arch_t arch, GpuMemory *memory,
-               L2Cache *l2, simdojo::ExecMode exec_mode = simdojo::ExecMode::FUNCTIONAL);
+  /// @param emit_error Destination for failure diagnostics.
+  /// @returns Null if CU configuration or execution mode is rejected; emits the reason.
+  static std::unique_ptr<ShaderEngine>
+  create(std::string name, const Config &config, rj_code_arch_t arch, GpuMemory *memory,
+         L2Cache *l2, simdojo::ExecMode exec_mode = simdojo::ExecMode::FUNCTIONAL,
+         util::DiagnosticEmitter emit_error = {});
 
   /// @brief Construct an empty shader engine (children added externally by the config loader).
   explicit ShaderEngine(std::string name) : simdojo::CompositeComponent(std::move(name)) {
@@ -88,6 +93,9 @@ public:
   }
 
 private:
+  util::Result configure(const Config &config, rj_code_arch_t arch, GpuMemory *memory, L2Cache *l2,
+                         simdojo::ExecMode exec_mode, util::DiagnosticEmitter emit_error);
+
   std::vector<ComputeUnitCore *> cus_;
   std::unique_ptr<ShaderProcessorInput> spi_;
 };

@@ -41,10 +41,10 @@
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/soc.h"
+#include "rocjitsu/vm/virtual_machine.h"
 
 #include "rocjitsu/kmd/linux/host_mapping_lock.h"
 #include "simdojo/sim/simulation.h"
-#include "util/except.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -666,44 +666,7 @@ TEST(ComputeUnitConfigTest, DirectFactoryDiagnosesUnsupportedExecutionMode) {
   EXPECT_EQ(diagnostic.message(), "Unsupported execution mode for ComputeUnit");
 }
 
-TEST(ComputeUnitConfigTest, DirectFactoryPropagatesDiagnosticDeliveryFailures) {
-  const struct {
-    const char *name;
-    uint32_t wave_slots;
-    simdojo::ExecMode mode;
-    const char *message;
-  } cases[] = {
-      {"invalid wave slots", 33, simdojo::ExecMode::FUNCTIONAL,
-       "num_wf_slots exceeds the ISA maximum of 32"},
-      {"unsupported execution mode", 8, static_cast<simdojo::ExecMode>(255),
-       "Unsupported execution mode for ComputeUnit"},
-  };
-  for (const auto &test_case : cases) {
-    SCOPED_TRACE(test_case.name);
-    const amdgpu::ComputeUnitCore::Config config{
-        .arch = ROCJITSU_CODE_ARCH_CDNA3,
-        .num_wf_slots = test_case.wave_slots,
-        .sgprs_per_wf = 104,
-        .vgprs_per_wf = 256,
-        .lds_size_kb = 64,
-    };
-    std::string diagnostic;
-    uint32_t deliveries = 0;
-    auto sink = [&](std::string_view message) {
-      diagnostic = message;
-      ++deliveries;
-      throw std::runtime_error("diagnostic delivery failed");
-    };
-    EXPECT_THROW((void)amdgpu::ComputeUnitCore::create("rejected", config, nullptr, nullptr,
-                                                       test_case.mode,
-                                                       util::DiagnosticEmitter(sink)),
-                 std::runtime_error);
-    EXPECT_EQ(deliveries, 1u);
-    EXPECT_EQ(diagnostic, test_case.message);
-  }
-}
-
-TEST(ComputeUnitConfigTest, ShaderEngineTranslatesRejectedConfigurationToConfigError) {
+TEST(ComputeUnitConfigTest, ShaderEngineRejectsInvalidConfiguration) {
   const amdgpu::ShaderEngine::Config config{
       .num_compute_units = 1,
       .compute_unit =
@@ -715,12 +678,40 @@ TEST(ComputeUnitConfigTest, ShaderEngineTranslatesRejectedConfigurationToConfigE
               .lds_size_kb = 64,
           },
   };
-  try {
-    amdgpu::ShaderEngine shader_engine("rejected", config, ROCJITSU_CODE_ARCH_CDNA3, nullptr,
-                                       nullptr);
-    FAIL() << "Expected rejected CU configuration to throw ConfigError";
-  } catch (const util::ConfigError &error) {
-    EXPECT_STREQ(error.what(), "Config error: num_wf_slots exceeds the ISA maximum of 32");
+  util::StringDiagnostic diagnostic;
+  auto shader_engine =
+      amdgpu::ShaderEngine::create("rejected", config, ROCJITSU_CODE_ARCH_CDNA3, nullptr, nullptr,
+                                   simdojo::ExecMode::FUNCTIONAL, diagnostic.emitter());
+  EXPECT_EQ(shader_engine, nullptr);
+  EXPECT_EQ(diagnostic.message(), "num_wf_slots exceeds the ISA maximum of 32");
+}
+
+TEST(ComputeUnitConfigTest, ConfiguredTopologyRejectsInvalidChildren) {
+  VirtualMachine::Config config{};
+  config.soc.arch = ROCJITSU_CODE_ARCH_CDNA3;
+  config.soc.num_xcds = 2;
+  config.soc.xcd.num_shader_engines = 2;
+  config.soc.xcd.shader_engine.num_compute_units = 2;
+  config.soc.xcd.shader_engine.compute_unit = {
+      .arch = ROCJITSU_CODE_ARCH_CDNA3,
+      .num_wf_slots = 33,
+      .sgprs_per_wf = 104,
+      .vgprs_per_wf = 256,
+      .lds_size_kb = 64,
+  };
+  util::StringDiagnostic diagnostic;
+  auto xcd = amdgpu::Xcd::create(
+      "rejected", config.soc.xcd, config.soc.arch, nullptr, simdojo::ExecMode::FUNCTIONAL,
+      std::make_shared<amdgpu::DeviceCacheCoherence>(), diagnostic.emitter());
+  EXPECT_EQ(xcd, nullptr);
+  EXPECT_EQ(diagnostic.message(), "num_wf_slots exceeds the ISA maximum of 32");
+  for (uint32_t num_iods : {0u, 1u}) {
+    SCOPED_TRACE(num_iods);
+    config.soc.num_iods = num_iods;
+    util::StringDiagnostic topology_diagnostic;
+    auto vm = VirtualMachine::create(config, topology_diagnostic.emitter());
+    EXPECT_EQ(vm, nullptr);
+    EXPECT_EQ(topology_diagnostic.message(), "num_wf_slots exceeds the ISA maximum of 32");
   }
 }
 
