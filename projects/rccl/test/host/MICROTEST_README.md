@@ -36,16 +36,17 @@ invented per binary. For a unit at `src/<dirs>/<stem>.cc`:
 
 | Thing | Rule | `src/gin/gin_host.cc` |
 |---|---|---|
-| Path macro | `<STEM>_CC_PATH`, `<STEM>` upper-snake | `GIN_HOST_CC_PATH` |
-| Test TU | `test/host/<stem>-test.cc`, `_` → `-` | `test/host/gin-host-test.cc` |
-| Binary | `rccl-UnitTestsMicro<Stem>`, `<Stem>` UpperCamel | `rccl-UnitTestsMicroGinHost` |
+| Path macro | `<STEM>_CC_PATH`, `<STEM>` upper-snake, prefixed with the parent directory when taken (`net_ib/connect.cc` → `NET_IB_CONNECT_CC_PATH`) | `GIN_HOST_CC_PATH` |
+| Test TU | `test/host/<dirs>/<stem>-test.cc`, `_` → `-`; prefix the stem with the parent directory if the basename is taken under the same top directory (`net_ib/p2p.cc` → `net-ib-p2p-test.cc`) | `test/host/gin/gin-host-test.cc` |
+| Binary | `rccl-UnitTestsMicro<Dirs><TestStem>` UpperCamel; `<TestStem>` is the TU's basename less `-test.cc` and less leading words already in `<Dirs>` | `rccl-UnitTestsMicroGinHost` |
 | gtest suites | `<Stem>…Microtest` — every suite in the TU starts with `<Stem>` | `GinHostProxyAffinityMicrotest` |
-| CTest categories | `test/test_categories_micro_<stem>.yaml`, lowercase | `test/test_categories_micro_gin_host.yaml` |
-| JUnit XML | `host_tests_micro_<stem>.xml` (`run_host_tests.sh` derives it from the binary) | `host_tests_micro_gin_host.xml` |
+| CTest categories | `test/test_categories_micro_<top>.yaml`, `<top>` the first of `<dirs>`, shared by its binaries | `test/test_categories_micro_gin.yaml` |
+| JUnit XML | `host_tests_micro_<binary suffix, snake_case>.xml` (`run_host_tests.sh` derives it from the binary) | `host_tests_micro_gin_host.xml` |
 
-Because every suite starts with the binary's `<Stem>`, the categories yaml needs
-exactly one pattern (`GinHost*`) and a new suite in the same TU is picked up
-without editing it — gtest's `*` does not cross the `.`, so a per-suite list
+Because every suite starts with its unit's `<Stem>`, the directory's yaml needs
+one pattern per unit, and fewer when one stem prefixes another (gin's
+`GinHost*` also matches `GinHostProxy*`). A new suite in the same TU is picked
+up without editing it — gtest's `*` does not cross the `.`, so a per-suite list
 silently drops any suite someone forgets to add.
 
 A new binary is named once, in its `rccl_add_micro_binary()` call in
@@ -367,10 +368,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   deep-path symbols the tests never reach. See `test_categories_micro_init.yaml`.
 - **`rccl-UnitTestsMicroGinHostProxy`** — `gin/gin_host_proxy.cc` and the three
   `gin/proxy_gpucontext/` writers (`GIN_HOST_PROXY_CC_PATH`, `GPUCONTEXT{,_V1,_V2}_CC_PATH`,
-  from `gin-host-proxy-test.cc`); suites `GinHostProxy*`, against the scripted RMA plugin in
+  from `gin/gin-host-proxy-test.cc`); suites `GinHostProxy*`, against the scripted RMA plugin in
   `fakes/rma_vtable_fake.h`. Its own binary:
   `gin-plugin-init-test.cc` in `rccl-UnitTestsMicro` defines `ncclGinProxy` and
-  `ncclGinProxyVersion`. See `test_categories_micro_gin_host_proxy.yaml`.
+  `ncclGinProxyVersion`. See `test_categories_micro_gin.yaml`.
 - **`rccl-UnitTestsMicroWarpSpeed`** — `allgatherv_sched.cc` +
   `symmetric_sched.cc` (via `ALLGATHERV_SCHED_CC_PATH`/`SYMMETRIC_SCHED_CC_PATH`,
   both from `scheduler-test.cc`); suite `SchedulerMicrotest.*`. Its own binary,
@@ -461,7 +462,7 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   because `misc/param.cc` defines `ncclGetEnv`, `initEnv` and `ncclLoadParam`, which
   the shared fakes in `rccl-UnitTestsMicro` also define.
 - **`rccl-UnitTestsMicroGinHost`** — `gin/gin_host.cc` (`GIN_HOST_CC_PATH`, from
-  `gin-host-test.cc`); suites `GinHost<EntryPoint>Microtest`, one per entry
+  `gin/gin-host-test.cc`); suites `GinHost<EntryPoint>Microtest`, one per entry
   point. Covers every function in the file: type
   negotiation, signal-requirement validation, `ncclGinConnectOnce` (including
   NVIDIA/nccl#2279 `NCCL_GIN_PROXY_NTHREADS` progress-thread assignment and the
@@ -471,7 +472,7 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   A scripted `ncclGin_t` in the test file stands in for the plugin, so every
   failure arm is reachable by failing a chosen call. Its own binary, not
   sharing `rccl-UnitTestsMicro`: `gin-plugin-init-test.cc` already defines
-  `ncclParamGinEnable` there. See `test_categories_micro_gin_host.yaml`.
+  `ncclParamGinEnable` there. See `test_categories_micro_gin.yaml`.
   Every line and every function in `gin_host.cc` is covered (100% of both);
   branch coverage is 74%. The residue is in three groups, none of them a
   source-level decision the tests skip:
@@ -605,10 +606,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   closed backends, against `fakes/gin_vtable_fake.h` (also used by
   `gin-plugin-init-test.cc`). Separate from
   `rccl-UnitTestsMicroGinHost`: both compile `gin_host.cc`, and
-  `gin-host-test.cc` defines the same ConnectOnce seams. Also separate from
+  `gin/gin-host-test.cc` defines the same ConnectOnce seams. Also separate from
   `rccl-UnitTestsMicro`, which fakes those entry points in
   `fakes/dev_runtime_micro_fakes.cc`. See
-  `test_categories_micro_gin_host_finalize.yaml`.
+  `test_categories_micro_gin.yaml`.
 - **`rccl-UnitTestsMicroDda`** — `src/algorithms/dda/`, one binary because the
   units share the cuMem VMM and bootstrap seams; tests mirror the source tree
   under `test/host/algorithms/`. See `test_categories_micro_dda.yaml`.
