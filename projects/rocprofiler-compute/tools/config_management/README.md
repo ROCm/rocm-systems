@@ -28,10 +28,12 @@ rocprofiler-compute/
 │       ├── gfx942/
 │       ├── gfx950/
 │       ├── gfx115x/                     # RDNA 3.5 shared analysis configs
-│       ├── gfx1250/
+│       ├── gfx1201/                     # RDNA4 (validated against gfx120x)
+│       ├── gfx1250/                     # CDNA5 (validated against gfx125x)
 │       ├── gfx9_config_template.yaml    # CDNA (gfx9) panel contract
 │       ├── gfx11_config_template.yaml   # RDNA 3.5 (gfx115*) panel contract
-│       └── gfx12_config_template.yaml   # gfx12xx panel contract
+│       ├── gfx120x_config_template.yaml # RDNA4 gfx120[0-9a-f] panel contract
+│       └── gfx125x_config_template.yaml # CDNA5 gfx125[0-9a-f] panel contract
 │
 └── tools/config_management/
     ├── master_config_workflow_script.py

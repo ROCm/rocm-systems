@@ -16,6 +16,8 @@ ANALYSIS_CONFIGS = SOC_ROOT / "analysis_configs"
 
 GFX9_TEMPLATE = ANALYSIS_CONFIGS / "gfx9_config_template.yaml"
 GFX11_TEMPLATE = ANALYSIS_CONFIGS / "gfx11_config_template.yaml"
+GFX120X_TEMPLATE = ANALYSIS_CONFIGS / "gfx120x_config_template.yaml"
+GFX125X_TEMPLATE = ANALYSIS_CONFIGS / "gfx125x_config_template.yaml"
 
 PYTHON = sys.executable
 
@@ -56,6 +58,10 @@ def main():
         GFX9_TEMPLATE,
         "--gfx11-template",
         GFX11_TEMPLATE,
+        "--gfx120x-template",
+        GFX120X_TEMPLATE,
+        "--gfx125x-template",
+        GFX125X_TEMPLATE,
     ])
     if rc != 0:
         fatal("Template / architecture verification failed")

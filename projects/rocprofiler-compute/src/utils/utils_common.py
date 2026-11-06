@@ -948,17 +948,41 @@ def load_yaml(filepath: Union[str, os.PathLike]) -> Dict[str, Any]:
         return yaml.safe_load(f)
 
 
+# A trailing x (gfx120x_config_template.yaml) marks a family. It is not part
+# of the arch prefix, so gfx1201 matches gfx120 and gfx1250 matches gfx125.
+_CONFIG_TEMPLATE_FILENAME = re.compile(r"(gfx\d+)x?_config_template\.yaml$")
+
+
+def matching_config_template_name(
+    arch: str, template_names: List[str]
+) -> Optional[str]:
+    """Return the config-template filename whose arch prefix matches arch.
+
+    A trailing x in names such as gfx120x_config_template.yaml is a family
+    marker and is not part of the prefix, so gfx1201 matches that file.
+    The first filename in sorted order that matches wins. Returns None when
+    no template matches, including an unknown gfx12xx arch.
+    """
+    for name in sorted(template_names):
+        match = _CONFIG_TEMPLATE_FILENAME.match(name)
+        if match and arch.startswith(match.group(1)):
+            return name
+    return None
+
+
 def get_arch_panel_id_to_alias(arch: str) -> Dict[str, str]:
     """Return panel_id_str -> alias from the *_config_template.yaml whose
     filename prefix matches arch. Empty/None aliases stay as "".
     Returns {} when no template matches the arch."""
-    for path in sorted(config.analysis_configs_dir.glob("*_config_template.yaml")):
-        m = re.match(r"(gfx\d+)_config_template\.yaml$", path.name)
-        if m and arch.startswith(m.group(1)):
-            panel_yaml = load_yaml(path) or {}
-            panels = panel_yaml.get("panels") or []
-            return {str(p["panel_id"]): (p.get("panel_alias") or "") for p in panels}
-    return {}
+    template_names = [
+        path.name for path in config.analysis_configs_dir.glob("*_config_template.yaml")
+    ]
+    template_name = matching_config_template_name(arch, template_names)
+    if template_name is None:
+        return {}
+    panel_yaml = load_yaml(config.analysis_configs_dir / template_name) or {}
+    panels = panel_yaml.get("panels") or []
+    return {str(p["panel_id"]): (p.get("panel_alias") or "") for p in panels}
 
 
 def get_arch_alias_to_panel_id(arch: str) -> Dict[str, str]:
