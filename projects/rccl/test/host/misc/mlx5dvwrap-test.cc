@@ -262,7 +262,7 @@ TEST_F(Mlx5dvwrapMicrotest, CreateQp_SymbolNotLoaded_ReturnsNull) {
   EXPECT_EQ(wrap_mlx5dv_create_qp(kCtx, kQpAttr, kMlx5QpAttr), nullptr);
 }
 
-// Builds once per process, so runs isolated. Relies on mlx5dvsymbols-test.cc's dl_seam.h build.
+// Builds once per process, so runs isolated. Relies on the dl_seam.h-built mlx5dvsymbols.cc it links.
 TEST(Mlx5dvwrapSymbolsMicrotestIsolated, CalledTwice_BuildsOnceAndCachesResult) {
   RUN_ISOLATED_TEST("Mlx5dvwrapSymbolsMicrotestIsolated_CalledTwice_BuildsOnceAndCachesResult", []() {
     ScriptedDl dl;

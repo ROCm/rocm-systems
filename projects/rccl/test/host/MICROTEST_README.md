@@ -200,21 +200,14 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   in `fakes/nccl_stubs.cc`, which this target drops via
   `RCCL_STUBS_OMIT_ncclCeFinalize`.
 - **`rccl-UnitTestsMicroMiscCrypt`** — `misc/crypt.cc` (via `CRYPT_CC_PATH`, from
-  `misc/crypt-test.cc`); suite `Crypt*`. Its own binary keeps `crypt.cc`'s file-scope
-  state isolated. See `test_categories_micro_misc.yaml`.
+  `misc/crypt-test.cc`); suite `Crypt*`. See `test_categories_micro_misc.yaml`.
 - **`rccl-UnitTestsMicroMiscStrongstream`** — `misc/strongstream.cc` (via
-  `STRONGSTREAM_CC_PATH`, from `misc/strongstream-test.cc`); suite `Strongstream*`. Its own
-  binary because the test defines the HIP stream, event and graph calls it records, and
-  `strongstream_stubs.cc` / `nccl_fakes.cc` already define this unit's symbols. See
+  `STRONGSTREAM_CC_PATH`, from `misc/strongstream-test.cc`); suite `Strongstream*`. See
   `test_categories_micro_misc.yaml`.
 - **`rccl-UnitTestsMicroMiscUtils`** — `misc/utils.cc` (via `UTILS_CC_PATH`, from
-  `misc/utils-test.cc`); suite `Utils*`. Its own binary because the test seams HIP, env and
-  libc (allocation, hostname, boot id, `readlink`, `sysconf`) around a unit other
-  binaries link whole. See `test_categories_micro_misc.yaml`.
+  `misc/utils-test.cc`); suite `Utils*`. See `test_categories_micro_misc.yaml`.
 - **`rccl-UnitTestsMicroMiscArgcheck`** — `misc/argcheck.cc` (via `ARGCHECK_CC_PATH`, from
-  `misc/argcheck-test.cc`); suite `Argcheck*`. Its own binary because the test seams HIP,
-  `ncclDevrFindWindow` and `bootstrapAllGather` around a unit other binaries link whole.
-  See `test_categories_micro_misc.yaml`.
+  `misc/argcheck-test.cc`); suite `Argcheck*`. See `test_categories_micro_misc.yaml`.
 - **`rccl-UnitTestsMicroOs<Unit>`** and **`rccl-UnitTestsMicroMisc{Socket,Shmutils,Signals}`**:
   `os/linux.cc`, `os/linux_ipcsocket.cc`, `os/linux_socket_pair.cc` (from `os/linux*-test.cc`,
   registered in `os/host_tests.cmake`) and `misc/socket.cc`, `misc/shmutils.cc`,
@@ -502,19 +495,14 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   owns the context and its cleanup. See `test_categories_micro_rma_proxy.yaml`.
 - **`rccl-UnitTestsMicroMiscRoctxNvmlStub`** (+ **`-roctx`**) — `src/misc/roctx.cc` and
   `src/misc/nvmlwrap_stub.cc` (via `ROCTX_CC_PATH` / `NVMLWRAP_STUB_CC_PATH`,
-  from `misc/roctx-nvml-stub-test.cc`); suites `RoctxNvml*`. Its own binary because
-  `fakes/comm_fakes.cc` stubs the `roctx_scoped_range_in` this file defines. See
+  from `misc/roctx-nvml-stub-test.cc`); suites `RoctxNvml*`. See
   `test_categories_micro_misc.yaml`.
 - **`rccl-UnitTestsMicroMiscRocmwrap`** — `src/misc/rocmwrap.cc` (via
-  `ROCMWRAP_CC_PATH`, from `misc/rocmwrap-test.cc`); suite `RocmwrapMicrotest.*`. Its
-  own binary because `fakes/rocmwrap_fakes.cc` and `fakes/nccl_fakes.cc` define
-  `rocmLibraryInit`, `ncclCuMemEnable` and `ncclCuMemHandleType`. See
+  `ROCMWRAP_CC_PATH`, from `misc/rocmwrap-test.cc`); suite `RocmwrapMicrotest.*`. See
   `test_categories_micro_misc.yaml`.
 - **`rccl-UnitTestsMicroMiscAmdsmiWrap`** — `src/misc/amdsmi_wrap.cc` (via
   `AMDSMI_WRAP_CC_PATH`, from `misc/amdsmi-wrap-test.cc`); suite
-  `AmdsmiWrapMicrotest.*`. Its own binary because `fakes/amdsmi_fakes.cc`
-  defines the `amd_smi_*` wrappers this file compiles. See
-  `test_categories_micro_misc.yaml`.
+  `AmdsmiWrapMicrotest.*`. See `test_categories_micro_misc.yaml`.
 
 - **`rccl-UnitTestsMicroSearch`** — `src/graph/search.cc` (via `SEARCH_CC_PATH`, from
   `search-test.cc`); suites `Search*`. Its own binary so search.cc is the only unit under
@@ -542,21 +530,16 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `test_categories_micro_debug.yaml`.
 
 - **`rccl-UnitTestsMicroMiscApiTrace`** — `misc/api_trace.cc` (via `API_TRACE_CC_PATH`,
-  from `misc/api-trace-test.cc`); suite `ApiTrace*`. Its own binary because it defines
-  the public `NCCL_API` entry points that `fakes/api_trace_fakes.cc` supplies
-  elsewhere. Built without `RCCL_ROCPROFILER_REGISTER`, so the rocprofiler-register
-  block is not covered. See `test_categories_micro_misc.yaml`.
+  from `misc/api-trace-test.cc`); suite `ApiTrace*`. Built without
+  `RCCL_ROCPROFILER_REGISTER`, so the rocprofiler-register block is not covered. See
+  `test_categories_micro_misc.yaml`.
 
 - **`rccl-UnitTestsMicroMiscRecorder`** — `misc/recorder.cc` (via `RECORDER_CC_PATH`,
-  from `misc/recorder-test.cc`); suite `Recorder*`. Its own binary because it is the
-  real `rccl::Recorder`, which `fakes/recorder_fakes.cc` supplies elsewhere. See
-  `test_categories_micro_misc.yaml`.
+  from `misc/recorder-test.cc`); suite `Recorder*`. See `test_categories_micro_misc.yaml`.
 
 - **`rccl-UnitTestsMicroMiscLatencyProfilerCollTrace`** — `misc/latency_profiler/CollTrace{,Event,Func,Utils}.cc`
   (via `COLL_TRACE{,_EVENT,_FUNC,_UTILS}_CC_PATH`, all from `misc/latency_profiler/coll-trace-test.cc`);
-  suites `CollTrace*`. Its own binary because its `ncclDebugLog`, HIP event and
-  bootstrap seams would collide with the shared fakes. See
-  `test_categories_micro_misc.yaml`.
+  suites `CollTrace*`. See `test_categories_micro_misc.yaml`.
 
 - **`rccl-UnitTestsMicroDiagnostics`**: `src/diagnostics/p2p.cc` (via
   `DIAG_P2P_CC_PATH`, suite `DiagP2pMicrotest.*`) and `src/diagnostics/ib_write_bw.cc`
