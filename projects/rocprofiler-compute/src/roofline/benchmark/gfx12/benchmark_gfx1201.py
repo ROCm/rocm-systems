@@ -15,7 +15,13 @@
 # supported precisions to what RDNA4 actually implements.
 # -----------------------------------------------------------------------------
 
+import re
+import subprocess
+import threading
 from ctypes import c_int64
+from pathlib import Path
+from types import TracebackType
+from typing import Optional, Type
 
 import utils.hip_interface as hip
 
@@ -40,6 +46,106 @@ MALL_UNROLL = 16
 MALL_ELEMENT_BYTES = 16  # sizeof(__uint128_t)
 MALL_TRAFFIC_BYTES = 32 * 1024 * 1024 * 1024
 
+# Navi 48 cache pipes from the gfx1201 cache-hierarchy spec.
+# GL0 is 32 KB per TCP, 64 TCPs, and the read return is 128 B per clock.
+# GL2 is 8 MB across 32 banks, and the GL2-to-GL1 read return is 128 B per
+# bank per clock. GL1 is a buffer with no tags and no capacity, so a read
+# stream has no GL1-resident roof. The 8 x 128 B GL1 port is narrower than
+# the traffic a GL2 hit actually returns, and scoring a GL2-resident kernel
+# against it reports more than 100 percent.
+GL0_INSTANCES = 64
+GL0_READ_BYTES_PER_CLOCK = 128
+GL0_CAPACITY_BYTES = 32 * 1024
+GL2_BANKS = 32
+GL2_HIT_RETURN_BYTES_PER_CLOCK = 128
+GL2_CAPACITY_BYTES = 8 * 1024 * 1024
+
+# L0 stays inside one TCP. L1 and L2 both miss GL0 and still fit in GL2, so
+# both are GL2-hit roofs. L2 is the larger of the two resident sets. The full
+# 8 MB L2 does not fit: it misses into the Infinity Cache and measures the
+# fill path instead of the GL2 return.
+L0_WORKING_SET_BYTES = 16 * 1024
+L1_WORKING_SET_BYTES = 1 * 1024 * 1024
+L2_WORKING_SET_BYTES = 4 * 1024 * 1024
+CACHE_WORKGROUPS_PER_CU = 128
+# Long enough that kernel launch is a small part of the timed region.
+# 8 GB at the first reading lasted under 2 ms.
+CACHE_TRAFFIC_BYTES = 64 * 1024 * 1024 * 1024
+CACHE_ELEMENT_BYTES = 16
+
+
+def pipe_bandwidth_gbps(instances: int, bytes_per_clock: int, clock_hz: float) -> float:
+    """Aggregate pipe bandwidth in decimal GB/s. Matches the benchmark, which
+    reports bytes/s divided by 1e9."""
+    return instances * bytes_per_clock * clock_hz / 1e9
+
+
+def read_gfx_clock_hz() -> float:
+    """Current gfx clock in Hz, or 0 when neither sysfs nor amd-smi answers.
+
+    pp_dpm_sclk is the level the shader is in. amd-smi is the fallback; it is
+    too slow to sample from inside a short kernel.
+    """
+    for sclk_path in Path("/sys/class/drm").glob("card*/device/pp_dpm_sclk"):
+        try:
+            text = sclk_path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            if "*" not in line:
+                continue
+            match = re.search(r"(\d+)\s*Mhz", line, re.IGNORECASE)
+            if match is not None:
+                return float(match.group(1)) * 1e6
+    try:
+        completed = subprocess.run(
+            ["amd-smi", "metric", "--gpu", "0", "--clock"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return 0.0
+    match = re.search(r"GFX_0:\s*CLK:\s*(\d+)\s*MHz", completed.stdout)
+    if match is None:
+        return 0.0
+    return float(match.group(1)) * 1e6
+
+
+class _GfxClockSampler:
+    """Keep the highest gfx clock observed while a benchmark is running."""
+
+    def __init__(self) -> None:
+        self._samples = []
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._sample, daemon=True)
+
+    def __enter__(self) -> "_GfxClockSampler":
+        self._thread.start()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc: Optional[BaseException],
+        traceback: Optional[TracebackType],
+    ) -> None:
+        self._stop.set()
+        self._thread.join(timeout=15)
+
+    def _sample(self) -> None:
+        while not self._stop.is_set():
+            clock_hz = read_gfx_clock_hz()
+            if clock_hz > 0.0:
+                self._samples.append(clock_hz)
+            self._stop.wait(0.05)
+
+    def max_hz(self) -> float:
+        if not self._samples:
+            return 0.0
+        return max(self._samples)
+
 
 # =============================================================================
 # Bench_gfx1201 Class
@@ -59,6 +165,12 @@ class Bench_gfx1201(benchmark_gfx12_base.Bench_gfx12):
             else:
                 ordered_tests[name] = func
         self.tests = ordered_tests
+        # The gfx12 base stored the shared scalar cache benchmarks. Rebind
+        # them: those kernels use the whole reported cache and a 4-byte load,
+        # so L2 misses out of the 8 MB GL2 and L0 cannot reach the 128 B return.
+        self.tests["L0"] = self.l0_bw_bench
+        self.tests["L1"] = self.l1_bw_bench
+        self.tests["L2"] = self.l2_bw_bench
         self.tests["MALL"] = self.mall_bw_bench
         self.apply_roofline_spec(gpu_arch)
 
@@ -85,6 +197,109 @@ class Bench_gfx1201(benchmark_gfx12_base.Bench_gfx12):
     # -----------------------------------------------------------------------------
     # Infinity Cache (MALL) bandwidth benchmark
     # -----------------------------------------------------------------------------
+    def l0_bw_bench(self, device: int) -> float:
+        """GL0-resident read bandwidth. The working set fits in one 32 KB TCP."""
+        return self.cache_resident_bw(
+            device,
+            "L0",
+            L0_WORKING_SET_BYTES,
+            GL0_INSTANCES,
+            GL0_READ_BYTES_PER_CLOCK,
+            "GL0 read return",
+        )
+
+    def l1_bw_bench(self, device: int) -> float:
+        """GL2-hit read bandwidth for a set that misses GL0.
+
+        GL1 has no cache, so this is not an 8 x 128 B GL1 roof. The bytes come
+        back on the 32-bank GL2 read return.
+        """
+        return self.cache_resident_bw(
+            device,
+            "L1",
+            L1_WORKING_SET_BYTES,
+            GL2_BANKS,
+            GL2_HIT_RETURN_BYTES_PER_CLOCK,
+            "GL2 hit return",
+        )
+
+    def l2_bw_bench(self, device: int) -> float:
+        """GL2-hit read bandwidth over a larger set that still fits in 8 MB."""
+        return self.cache_resident_bw(
+            device,
+            "L2",
+            L2_WORKING_SET_BYTES,
+            GL2_BANKS,
+            GL2_HIT_RETURN_BYTES_PER_CLOCK,
+            "GL2 hit return",
+        )
+
+    def cache_resident_bw(
+        self,
+        device: int,
+        label: str,
+        working_set_bytes: int,
+        instances: int,
+        bytes_per_clock: int,
+        pipe_name: str,
+    ) -> float:
+        """Repeated 16-byte reads of one buffer, scored against one pipe."""
+        element_count = working_set_bytes // CACHE_ELEMENT_BYTES
+        if (
+            working_set_bytes % CACHE_ELEMENT_BYTES != 0
+            or element_count <= 0
+            or element_count & (element_count - 1) != 0
+        ):
+            raise ValueError(
+                "cache working set must be 16 times a power of two, "
+                f"got {working_set_bytes} bytes"
+            )
+
+        hip.hipSetDevice(device)
+        num_experiments = benchmark_base.DEFAULT_NUM_EXPERIMENTS
+        workgroup_size = benchmark_base.DEFAULT_WORKGROUP_SIZE
+        cus = hip.hipGetDeviceProperties(device).multiProcessorCount
+        workgroups = CACHE_WORKGROUPS_PER_CU * cus
+        per_pass_bytes = workgroups * working_set_bytes
+        iters = max(1, CACHE_TRAFFIC_BYTES // per_pass_bytes)
+        total_bytes = iters * per_pass_bytes
+
+        src = hip.hipMalloc(working_set_bytes)
+        dummy = hip.hipMalloc(CACHE_ELEMENT_BYTES)
+        program = self.Program(self.cache_resident_src)
+        func = program.get_kernel("cache_resident_bw")
+        args = [src, element_count, iters, dummy]
+        grid = [workgroups, 1, 1]
+        block = [workgroup_size, 1, 1]
+
+        self.launch_kernel(func, grid, block, 0, None, args)
+        hip.hipDeviceSynchronize()
+
+        with _GfxClockSampler() as clocks:
+            samples = self.run_get_samples(
+                num_experiments, total_bytes, func, grid, block, 0, None, args
+            )
+        peak = max(samples)
+        clock_hz = clocks.max_hz()
+        ceiling_text = ""
+        if clock_hz > 0.0:
+            ceiling = pipe_bandwidth_gbps(instances, bytes_per_clock, clock_hz)
+            percent = 100.0 * peak / ceiling
+            ceiling_text = (
+                f", {pipe_name} ceiling:{ceiling:.1f} GB/sec "
+                f"({percent:.1f}% at {clock_hz / 1e6:.0f} MHz)"
+            )
+
+        print(
+            f"{label} BW, GPU ID: {device}, workgroupSize:{workgroup_size}, "
+            f"workgroups:{workgroups}, experiments:{num_experiments}, "
+            f"working set:{working_set_bytes} bytes, iters:{iters}, "
+            f"traffic:{total_bytes} bytes, "
+            f"duration:{total_bytes / peak / 1e6:.1f} ms, "
+            f"peak:{peak:.1f} GB/sec{ceiling_text}"
+        )
+        return peak
+
     def mall_bw_bench(self, device: int) -> float:
         """Measure Infinity Cache bandwidth over a working set it holds but L2 does
         not."""
@@ -151,6 +366,31 @@ class Bench_gfx1201(benchmark_gfx12_base.Bench_gfx12):
     # -----------------------------------------------------------------------------
     def set_kernel_source(self) -> None:
         super().set_kernel_source()
+
+        # 16-byte reads of one buffer. count is a power of two. Adding
+        # iter * step rotates which thread reads which element, so each
+        # iteration still covers the buffer once and the address is not
+        # invariant. A fixed address lets the compiler keep a small buffer
+        # in registers after the first pass.
+        self.cache_resident_src = """
+            extern "C" __global__ void cache_resident_bw(
+                const __uint128_t *src, int count, int iters, __uint128_t *dummy)
+            {
+                const int tid = (int)threadIdx.x;
+                const int step = (int)blockDim.x;
+                __uint128_t sink = 0;
+
+                #pragma unroll 1
+                for (int iter = 0; iter < iters; ++iter) {
+                    const int base = (iter * step) & (count - 1);
+                    #pragma unroll 1
+                    for (int element = tid; element < count; element += step) {
+                        sink ^= src[(base + element) & (count - 1)];
+                    }
+                }
+                if (sink == 0) dummy[0] = sink;
+            }
+            """
 
         # DRAM bandwidth. Same streaming body as the gfx12 base (a dataset far
         # larger than the 64 MB Infinity Cache), with the entry point renamed.

@@ -22,6 +22,19 @@ import pytest
 import roofline.benchmark.benchmark_base as benchmark_base
 import utils.utils_profile as utils_profile
 from roofline import run_benchmark
+from roofline.benchmark.gfx12.benchmark_gfx1201 import (
+    GL0_CAPACITY_BYTES,
+    GL0_INSTANCES,
+    GL0_READ_BYTES_PER_CLOCK,
+    GL2_BANKS,
+    GL2_CAPACITY_BYTES,
+    GL2_HIT_RETURN_BYTES_PER_CLOCK,
+    L0_WORKING_SET_BYTES,
+    L1_WORKING_SET_BYTES,
+    L2_WORKING_SET_BYTES,
+    Bench_gfx1201,
+    pipe_bandwidth_gbps,
+)
 from utils.mi_gpu_spec import mi_gpu_specs
 
 try:
@@ -224,6 +237,45 @@ def test_gfx1201_measures_dram_in_its_own_column():
     assert bench.csv_cols_map["DRAM"] == "DRAMBw"
     assert "HBM" not in bench.csv_cols_map
     assert_source_defines(bench.hbm_bw_src, "DRAM_bw", "gfx1201 DRAM")
+
+
+def test_gfx1201_cache_roofs_stay_inside_the_cache_that_serves_them():
+    """L0 fits in one GL0. L1 and L2 miss GL0 and still fit in GL2.
+
+    GL1 is a buffer, so the L1 and L2 roofs are the 32-bank GL2 read return,
+    not the 8 x 128 B GL1 port. A GL2-resident read scored against that port
+    exceeds 100 percent.
+    """
+    bench = BENCH_CLASSES["gfx1201"](0, dict(CACHE_SIZES), "gfx1201")
+
+    assert bench.tests["L0"].__func__ is Bench_gfx1201.l0_bw_bench
+    assert bench.tests["L1"].__func__ is Bench_gfx1201.l1_bw_bench
+    assert bench.tests["L2"].__func__ is Bench_gfx1201.l2_bw_bench
+    assert_source_defines(
+        bench.cache_resident_src, "cache_resident_bw", "gfx1201 cache"
+    )
+
+    assert L0_WORKING_SET_BYTES <= GL0_CAPACITY_BYTES
+    assert GL0_CAPACITY_BYTES < L1_WORKING_SET_BYTES < L2_WORKING_SET_BYTES
+    assert L2_WORKING_SET_BYTES < GL2_CAPACITY_BYTES
+    for working_set in (
+        L0_WORKING_SET_BYTES,
+        L1_WORKING_SET_BYTES,
+        L2_WORKING_SET_BYTES,
+    ):
+        element_count = working_set // 16
+        assert working_set % 16 == 0
+        assert element_count & (element_count - 1) == 0
+
+    # 2.97 GHz, the boost the cache spec comparison used. Decimal GB/s.
+    assert pipe_bandwidth_gbps(GL0_INSTANCES, GL0_READ_BYTES_PER_CLOCK, 2.97e9) == (
+        pytest.approx(24330.24)
+    )
+    assert pipe_bandwidth_gbps(
+        GL2_BANKS, GL2_HIT_RETURN_BYTES_PER_CLOCK, 2.97e9
+    ) == pytest.approx(12165.12)
+    # The GL1 port is the ceiling these resident reads must not be scored against.
+    assert pipe_bandwidth_gbps(8, 128, 2.97e9) == pytest.approx(3041.28)
 
 
 def test_gfx1201_measures_infinity_cache_with_its_own_kernel():
