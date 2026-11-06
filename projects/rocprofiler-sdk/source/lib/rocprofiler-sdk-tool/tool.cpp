@@ -379,8 +379,13 @@ auto pause_resume_contexts = context_id_set_t{};
 // small, so this is lossless and preserves the thread id the record still carries.
 thread_local auto tl_current_replay_pass = std::optional<uint64_t>{};
 
-// Memoizes is_targeted_kernel() for the duration of one replay loop; see the comment there.
-thread_local auto tl_replay_dispatch_targeted = std::optional<bool>{};
+// Memoizes is_targeted_kernel() for one dispatch under kernel replay; see the comment there.
+struct replay_dispatch_targeted_t
+{
+    rocprofiler_dispatch_id_t dispatch_id = 0;
+    bool                      targeted    = false;
+};
+thread_local auto tl_replay_dispatch_targeted = std::optional<replay_dispatch_targeted_t>{};
 
 // Stores stream ids, graph attribution, and kernel region ids for the
 // kernel-rename, hip-stream-display, and hip-graph-display services.
@@ -409,6 +414,7 @@ add_kernel_target(uint64_t _kern_id, const std::unordered_set<size_t>& range)
 
 bool
 is_targeted_kernel(uint64_t                                        _kern_id,
+                   rocprofiler_dispatch_id_t                       _dispatch_id,
                    common::Synchronized<kernel_iteration_t, true>& _kernel_iteration)
 {
     // The iteration filter is stateful: every consultation advances the kernel's iteration count,
@@ -418,14 +424,16 @@ is_targeted_kernel(uint64_t                                        _kern_id,
     // every pass past the end of the range -- the counter groups behind those passes are then never
     // configured and their data is silently dropped.
     //
-    // The answer therefore belongs to the dispatch, not the pass. Pass 0 consults the filter, which
-    // advances the count by the one launch that actually happened, and the rest of that dispatch's
-    // passes reuse it. Memoizing here rather than in a caller keeps the "consulted once per logical
-    // dispatch" invariant with the state it protects, so every caller gets it. Passes run
-    // synchronously and in order on the enqueuing thread, and tl_replay_dispatch_targeted is reset
-    // when each replay loop begins, so the cached answer cannot outlive its dispatch.
-    if(tl_current_replay_pass.value_or(0) > 0 && tl_replay_dispatch_targeted.has_value())
-        return *tl_replay_dispatch_targeted;
+    // The answer therefore belongs to the dispatch, not the pass. Under kernel replay the first
+    // consultation is the pass-count callback during CONFIG, which decides whether the dispatch is
+    // replayed at all; it advances the count by the one launch that actually happened, and every
+    // later question about the same dispatch -- its passes, or the single run of a dispatch that is
+    // not replayed -- reuses the answer. Memoizing here rather than in a caller keeps the
+    // "consulted once per logical dispatch" invariant with the state it protects, so every caller
+    // gets it. The answer is keyed by dispatch id because graph and multi-packet dispatches skip
+    // CONFIG, so nothing resets the memo before them.
+    if(tl_replay_dispatch_targeted && tl_replay_dispatch_targeted->dispatch_id == _dispatch_id)
+        return tl_replay_dispatch_targeted->targeted;
 
     // hold target_kernels around kernel_iteration so the range stays valid; both
     // are only locked here / in add_kernel_target(), so the nesting is safe
@@ -443,7 +451,8 @@ is_targeted_kernel(uint64_t                                        _kern_id,
         },
         _kern_id);
 
-    if(tl_current_replay_pass.has_value()) tl_replay_dispatch_targeted = _is_target;
+    if(tool::get_config().kernel_replay)
+        tl_replay_dispatch_targeted = replay_dispatch_targeted_t{_dispatch_id, _is_target};
     return _is_target;
 }
 
@@ -1967,7 +1976,7 @@ att_dispatch_callback(rocprofiler_agent_id_t /* agent_id  */,
     static auto kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
     userdata_shader->value       = dispatch_id;
 
-    if(is_targeted_kernel(kernel_id, kernel_iteration))
+    if(is_targeted_kernel(kernel_id, dispatch_id, kernel_iteration))
         return ROCPROFILER_THREAD_TRACE_CONTROL_START_AND_STOP;
     return ROCPROFILER_THREAD_TRACE_CONTROL_NONE;
 }
@@ -1998,7 +2007,7 @@ att_dispatch_consecutive_kernel_callback(rocprofiler_callback_tracing_record_t r
 
     if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
     {
-        const auto is_target = is_targeted_kernel(kernel_id, kernel_iteration);
+        const auto is_target = is_targeted_kernel(kernel_id, dispatch_id, kernel_iteration);
         // Return if kernel is not targeted and we are not profiling currently
         if(!is_target && !isprofiling.load()) return;
 
@@ -2056,18 +2065,26 @@ att_dispatch_consecutive_kernel_callback(rocprofiler_callback_tracing_record_t r
         dispatch_id);
 }
 
+// Launch counts behind the counter-collection kernel filters. Kernel replay asks the same filters
+// whether a dispatch is replayed at all, so both count the same launches.
+auto&
+counter_kernel_iteration()
+{
+    static auto value = common::Synchronized<kernel_iteration_t, true>{};
+    return value;
+}
+
 void
 counter_dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                           rocprofiler_counter_config_id_t*             config,
                           rocprofiler_user_data_t*                     user_data,
                           void* /*callback_data_args*/)
 {
-    static auto kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
-
     auto kernel_id = dispatch_data.dispatch_info.kernel_id;
     auto agent_id  = dispatch_data.dispatch_info.agent_id;
 
-    if(!is_targeted_kernel(kernel_id, kernel_iteration))
+    if(!is_targeted_kernel(
+           kernel_id, dispatch_data.dispatch_info.dispatch_id, counter_kernel_iteration()))
     {
         return;
     }
@@ -2267,7 +2284,9 @@ spm_dispatch_callback(const rocprofiler_spm_dispatch_counting_service_data_t* di
 {
     static auto kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
 
-    if(!is_targeted_kernel(dispatch_data->dispatch_info.kernel_id, kernel_iteration))
+    if(!is_targeted_kernel(dispatch_data->dispatch_info.kernel_id,
+                           dispatch_data->dispatch_info.dispatch_id,
+                           kernel_iteration))
     {
         return;
     }
@@ -2578,11 +2597,16 @@ configure_pc_sampling_on_all_agents(uint64_t                        buffer_size,
 // the same per-agent profile list counter_dispatch_callback -> get_replay_profile indexes -- so
 // that pass i maps to group i with no wrap/skip on agents with a different or partial group set
 // (the global --pmc group count can differ per agent). Returning 1 (a single group, or none)
-// disables replay.
+// disables replay, as for dispatches the kernel filters do not select: those run once, without
+// counters.
 uint64_t
 kernel_replay_pass_count_callback(rocprofiler_kernel_dispatch_info_t dispatch_info,
                                   rocprofiler_user_data_t /*user_data*/)
 {
+    if(!is_targeted_kernel(
+           dispatch_info.kernel_id, dispatch_info.dispatch_id, counter_kernel_iteration()))
+        return 1;
+
     auto&      agent_profiles = get_agent_profiles();
     const auto profiles       = agent_profiles.profiles.find(dispatch_info.agent_id);
     const auto n =
@@ -2604,10 +2628,10 @@ kernel_replay_callback(rocprofiler_callback_tracing_record_t record,
     if(record.operation == ROCPROFILER_KERNEL_REPLAY_CONFIG &&
        record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
     {
-        // Tell the SDK how many passes to run for this dispatch (= counter groups for its agent).
+        // Tell the SDK how many passes to run for this dispatch (= counter groups for its agent,
+        // or 1 when the kernel filters do not select it).
         payload->replay_pass_count = kernel_replay_pass_count_callback;
-        // A new replay loop begins here, so the previous dispatch's iteration-filter decision must
-        // not carry into it; pass 0 below will record a fresh one.
+        // A new dispatch is configured here; the pass-count callback records its filter decision.
         tl_replay_dispatch_targeted.reset();
     }
     else if(record.operation == ROCPROFILER_KERNEL_REPLAY_PASS)
