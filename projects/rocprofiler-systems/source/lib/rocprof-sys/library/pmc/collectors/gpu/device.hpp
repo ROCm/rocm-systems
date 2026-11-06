@@ -85,8 +85,8 @@ public:
         return *m_bdf;
     }
 
-    [[nodiscard]] metrics get_metrics([[maybe_unused]] const enabled_metrics& enabled_cfg,
-                                      [[maybe_unused]] std::uint64_t          timestamp)
+    [[nodiscard]] metrics get_metrics(const enabled_metrics&         enabled_cfg,
+                                      [[maybe_unused]] std::uint64_t timestamp)
     {
         metrics gpu_metrics{};
 
@@ -94,51 +94,53 @@ public:
         {
             auto raw = m_backend->get_metrics();
 
-            if(m_supported_metrics.bits.current_socket_power)
+            if(enabled_cfg.bits.current_socket_power &&
+               m_supported_metrics.bits.current_socket_power)
             {
                 gpu_metrics.current_socket_power = raw.current_socket_power;
             }
-            if(m_supported_metrics.bits.average_socket_power)
+            if(enabled_cfg.bits.average_socket_power &&
+               m_supported_metrics.bits.average_socket_power)
             {
                 gpu_metrics.average_socket_power = raw.average_socket_power;
             }
-            if(m_supported_metrics.bits.gfx_activity)
+            if(enabled_cfg.bits.gfx_activity && m_supported_metrics.bits.gfx_activity)
             {
                 gpu_metrics.gfx_activity = raw.gfx_activity;
             }
-            if(m_supported_metrics.bits.umc_activity)
+            if(enabled_cfg.bits.umc_activity && m_supported_metrics.bits.umc_activity)
             {
                 gpu_metrics.umc_activity = raw.umc_activity;
             }
-            if(m_supported_metrics.bits.mm_activity)
+            if(enabled_cfg.bits.mm_activity && m_supported_metrics.bits.mm_activity)
             {
                 gpu_metrics.mm_activity = raw.mm_activity;
             }
 
-            if(m_supported_metrics.bits.vcn_busy)
+            if(enabled_cfg.bits.vcn_busy && m_supported_metrics.bits.vcn_busy)
             {
                 for(size_t i = 0; i < raw.xcp_stats.size(); ++i)
                 {
                     gpu_metrics.xcp_stats[i].vcn_busy = raw.xcp_stats[i].vcn_busy;
                 }
             }
-            if(m_supported_metrics.bits.vcn_activity)
+            if(enabled_cfg.bits.vcn_activity && m_supported_metrics.bits.vcn_activity)
             {
                 gpu_metrics.vcn_activity = raw.vcn_activity;
             }
-            if(m_supported_metrics.bits.jpeg_busy)
+            if(enabled_cfg.bits.jpeg_busy && m_supported_metrics.bits.jpeg_busy)
             {
                 for(size_t i = 0; i < raw.xcp_stats.size(); ++i)
                 {
                     gpu_metrics.xcp_stats[i].jpeg_busy = raw.xcp_stats[i].jpeg_busy;
                 }
             }
-            if(m_supported_metrics.bits.jpeg_activity)
+            if(enabled_cfg.bits.jpeg_activity && m_supported_metrics.bits.jpeg_activity)
             {
                 gpu_metrics.jpeg_activity = raw.jpeg_activity;
             }
 
-            if(m_supported_metrics.bits.xgmi)
+            if(enabled_cfg.bits.xgmi && m_supported_metrics.bits.xgmi)
             {
                 populate_if_supported(gpu_metrics.xgmi.link.width, raw.xgmi.link.width);
                 populate_if_supported(gpu_metrics.xgmi.link.speed, raw.xgmi.link.speed);
@@ -150,7 +152,7 @@ public:
                                           raw.xgmi.data_acc.write[i]);
                 }
             }
-            if(m_supported_metrics.bits.pcie)
+            if(enabled_cfg.bits.pcie && m_supported_metrics.bits.pcie)
             {
                 populate_if_supported(gpu_metrics.pcie.link.width, raw.pcie.link.width);
                 populate_if_supported(gpu_metrics.pcie.link.speed, raw.pcie.link.speed);
@@ -160,11 +162,11 @@ public:
                                       raw.pcie.bandwidth.inst);
             }
 
-            if(m_supported_metrics.bits.gfx_clock)
+            if(enabled_cfg.bits.gfx_clock && m_supported_metrics.bits.gfx_clock)
             {
                 gpu_metrics.gfx_clock_mhz = raw.gfx_clock_mhz;
             }
-            if(m_supported_metrics.bits.mem_clock)
+            if(enabled_cfg.bits.mem_clock && m_supported_metrics.bits.mem_clock)
             {
                 gpu_metrics.mem_clock_mhz = raw.mem_clock_mhz;
             }
@@ -174,7 +176,7 @@ public:
             return gpu_metrics;
         }
 
-        if(m_supported_metrics.bits.memory_usage)
+        if(enabled_cfg.bits.memory_usage && m_supported_metrics.bits.memory_usage)
         {
             try
             {
