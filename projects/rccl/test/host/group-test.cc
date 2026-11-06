@@ -576,6 +576,7 @@ TEST_F(GroupEndInternalTest, InitializedSymmetricStateAvoidsRepeatedAsyncJobs) {
   task.opDev.op = ncclDevSum;
   task.datatype = ncclFloat32;
   task.count = 1024;
+  comm->tuningContext.enabled[NCCL_TUNING_SYM_KERNEL_ID_OFFSET][task.func] = 1;
   ncclTaskCollSorterInsert(&comm->planner.collSorter, &task, task.count * sizeof(float));
   ScopedHook symkAvailable(g_symkAvailable,
                            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
