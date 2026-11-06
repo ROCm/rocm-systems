@@ -543,10 +543,13 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
   if (inst.data()->tag() == amdgpu::GLOBAL_MEM) {
     auto &d = *inst.data_as<amdgpu::VectorMemState>();
     if (d.exec_mask == 0) {
-      // A VMEM instruction with EXEC zero still issues, and counts, unless its
-      // counter is already zero (CDNA5 ISA 3.2.2.1). An async copy therefore
-      // takes its ASYNCcnt slot without touching LDS, so later partial waits
-      // complete the copies issued before it.
+      // A VMEM instruction with EXEC zero issues and counts like any other; the
+      // hardware may skip it only when LOADcnt, STOREcnt, ASYNCcnt and TENSORcnt
+      // are all zero (CDNA5 ISA 3.2.2.1). An async copy is therefore registered
+      // as an event without LDS bytes, so later partial waits complete the copies
+      // issued before it. Registering it is safe even if it was skipped: every
+      // earlier async copy had then completed, and partial waits retire the
+      // oldest copies first, so counting it never retires a later copy.
       const bool asyncCopy =
           (d.lds_src || d.lds_dst) && std::ranges::any_of(obligations, [](const auto &obligation) {
             return obligation.wait_counter_type() == amdgpu::WaitCounterType::ASYNCCNT;

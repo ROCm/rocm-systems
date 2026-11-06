@@ -237,9 +237,11 @@ races. Some examples:
   neither. A store lane reads, and is tracked for, the bytes of its source
   inside the wave's LDS allocation; bytes past it read zero. The ISA specifies
   out-of-range LDS behavior for async loads only (CDNA5 ISA 3.3.3), so this is
-  a modeling choice that tracks every byte a store may read. A copy with no active
-  lanes touches no LDS but still issues while other async copies are pending
-  (3.2.2.1). Either way, the instruction occupies its `asynccnt` slot.
+  a modeling choice that tracks every byte a store may read. A copy with no
+  active lanes touches no LDS but issues and counts on `asynccnt`; the hardware
+  may skip it only when no load, store, async or tensor operation is pending
+  (3.2.2.1), and counting it then retires no later copy early. Either way, the
+  instruction occupies its `asynccnt` slot.
 
 Detection is at byte granularity: D16 (half-register) loads only flag races on
 the affected bytes, and LDS races are tracked per byte.
