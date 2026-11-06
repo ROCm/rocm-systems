@@ -2433,6 +2433,8 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   // also requiring RCCL_LL128_FORCE_ENABLE=1.
   comm->topo->ll128Enabled = comm->topo->ll128Enabled || rcclParamLL128ForceEnable() ||
                              IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx1250");
+  // TEST ONLY (do not merge): never enable LL128, so every size that picks it falls back to LL or Simple.
+  comm->topo->ll128Enabled = false;
   allGather3Data[rank].ll128Enabled = comm->topo->ll128Enabled;
 
   if (comm->ncclNet && comm->ncclNet->devices) {
