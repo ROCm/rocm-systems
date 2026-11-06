@@ -510,7 +510,10 @@ TEST_F(InitMicrotest, ShowVersion_GethostnameFails_ReportsUnknownHost) {
 }
 
 TEST_F(InitMicrotest, ShowVersion_GethostnameFillsBufferUnterminated_LogsAMaxLengthTerminatedName) {
-  SetGethostnameFillUnterminated(true);
+  ScopedHook fill(g_gethostnameInterposer, [](char* name, size_t len) {
+    std::memset(name, 'x', len);
+    return 0;
+  });
   const std::string log = RunShowVersion(NCCL_LOG_INFO);
   const std::string expect = "Hostname     : " + std::string(HOST_NAME_MAX, 'x') + "\n";
   EXPECT_TRUE(LogHas(log, expect.c_str())) << "actual log:\n" << log;

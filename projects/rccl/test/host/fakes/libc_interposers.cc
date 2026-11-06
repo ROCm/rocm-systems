@@ -16,20 +16,19 @@
 #include <unistd.h>
 
 #include <cerrno>
-#include <cstring>
 
 // Arming gethostname failure + reaching fillInfo latches getHostName's hostHash call_once, poisoning later tests.
 namespace {
 bool g_gethostnameFail = false;
-bool g_gethostnameFillUnterminated = false;
 bool g_dladdrFail = false;
 size_t g_lastGethostnameLen = 0;
 }  // namespace
 
 void SetGethostnameFail(bool fail) { g_gethostnameFail = fail; }
-void SetGethostnameFillUnterminated(bool fill) { g_gethostnameFillUnterminated = fill; }
 void SetDladdrFail(bool fail) { g_dladdrFail = fail; }
 size_t LastGethostnameLen() { return g_lastGethostnameLen; }
+
+std::function<int(char*, size_t)> g_gethostnameInterposer;
 
 extern "C" int gethostname(char* name, size_t len) {
   using Fn = int (*)(char*, size_t);
@@ -39,10 +38,7 @@ extern "C" int gethostname(char* name, size_t len) {
     errno = ENAMETOOLONG;
     return -1;
   }
-  if (g_gethostnameFillUnterminated) {
-    memset(name, 'x', len);
-    return 0;
-  }
+  if (g_gethostnameInterposer) return g_gethostnameInterposer(name, len);
   return real ? real(name, len) : -1;
 }
 
@@ -55,7 +51,7 @@ extern "C" int dladdr(const void* addr, Dl_info* info) {
 
 void ResetLibcInterposers() {
   g_gethostnameFail = false;
-  g_gethostnameFillUnterminated = false;
+  g_gethostnameInterposer = nullptr;
   g_dladdrFail = false;
   g_lastGethostnameLen = 0;
 }
