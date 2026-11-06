@@ -13,7 +13,7 @@
 // in ncclGinIbInitType).
 //
 // ncclGinPluginInit is file-static, so this TU #includes the hipified
-// gin.cc (GIN_CC_PATH), the standard rccl-UnitTestsMicro pattern. A
+// gin.cc (GIN_CC_PATH), the standard micro-test pattern. A
 // scriptable ncclGin_t vtable stands in for the plugin; no GPU, no
 // librccl.so, no network.
 
@@ -165,10 +165,8 @@ TEST_F(GinPluginInitTest, DoesNotFinalizeWhenInitPointerIsNull) {
 // The other half of the pairing -- ncclGinHostFinalize preserving these records
 // and marking backends closed -- lives in gin-host-finalize-test.cc
 // (rccl-UnitTestsMicroGinHostFinalize). Both suites use fakes/gin_vtable_fake.h.
-// gin_host.cc cannot join this binary because
-// dev_runtime_micro_fakes.cc already defines the GIN host entry points for
-// dev-runtime-test.cc. GinMPIDeviceTests.CommDestroy_FreesAnvilInitContext
-// covers the Anvil init-context path end to end.
+// GinMPIDeviceTests.CommDestroy_FreesAnvilInitContext covers the Anvil
+// init-context path end to end.
 class GinFinalizeTest : public GinPluginInitTest {
  protected:
   std::unique_ptr<ncclSharedResources> sharedRes_ = std::make_unique<ncclSharedResources>();

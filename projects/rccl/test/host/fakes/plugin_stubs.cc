@@ -4,9 +4,9 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Fail-loud stub floor for src/plugin/: plugin_open.cc's library path table and the net/net_v*.cc version
+// Fail-loud stub floor for src/plugin/: plugin_open.cc's library registry and the net/net_v*.cc version
 // getters. These satisfy a unit-under-test's link-time symbol closure; the tests linking this floor never call
-// the getters (net.cc's getNcclNet[] tables are swapped for fakes before use).
+// them (net.cc's getNcclNet[] tables are swapped for fakes before use).
 
 #include "fail_loud.h"
 #include "nccl.h"
@@ -15,6 +15,9 @@
 
 // src/plugin/plugin_open.cc
 char* ncclPluginLibPaths[ncclPluginTypeEnv + 1] = {};
+ncclResult_t ncclClosePluginLib(void*, enum ncclPluginType) { FailLoudUnfaked("plugin_stubs", "ncclClosePluginLib"); }
+void* ncclGetNetPluginLib(enum ncclPluginType) { FailLoudUnfaked("plugin_stubs", "ncclGetNetPluginLib"); }
+const char* ncclGetPluginLibName(enum ncclPluginType) { FailLoudUnfaked("plugin_stubs", "ncclGetPluginLibName"); }
 
 // src/plugin/net/net_v6.cc .. net_v12.cc
 #define PLUGIN_NET_STUB(v)                                                                        \

@@ -4,8 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Host-only microtests for src/plugin/profiler/profiler_v8.cc: v8 is the native interface, so the plugin's own
-// vtable is used as is and no shim is involved. The plugin is a FakeLib entry (see profiler-test.cc's ncclOsDlsym).
+// Host-only microtests for src/plugin/profiler/profiler_v8.cc: v8 is the native interface, so the plugin's own vtable
+// is used as is and no shim is involved. The plugin is a FakeLib entry (see plugin/profiler/fake_lib_dlsym.cc).
 
 #include <gtest/gtest.h>
 
