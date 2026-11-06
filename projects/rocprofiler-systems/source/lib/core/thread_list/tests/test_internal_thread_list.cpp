@@ -5,12 +5,14 @@
 
 #include <atomic>
 #include <chrono>
+#include <functional>
 #include <future>
 #include <gtest/gtest.h>
 #include <stdexcept>
 #include <sys/syscall.h>
 #include <thread>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 namespace
@@ -21,10 +23,39 @@ using rocprofsys::thread_list::scoped_internal_thread;
 constexpr pid_t k_tid_a = 1001;
 constexpr pid_t k_tid_b = 1002;
 
+constexpr auto k_stress_duration = std::chrono::milliseconds{ 200 };
+constexpr int  k_stress_adders   = 4;
+
 pid_t
 this_tid()
 {
     return static_cast<pid_t>(::syscall(SYS_gettid));
+}
+
+// Registers, queries, passes the creation gate and unregisters @p tid until @p stop.
+void
+churn_entries(internal_thread_list& list, const std::atomic<bool>& stop, pid_t tid)
+{
+    while(!stop.load())
+    {
+        list.add(tid);
+        static_cast<void>(list.is_excluded(tid));
+        {
+            const auto scope = list.begin_creation();
+        }
+        list.remove(tid);
+    }
+}
+
+// Prunes and probes the rescan gate until @p stop.
+void
+churn_rescan(internal_thread_list& list, const std::atomic<bool>& stop)
+{
+    while(!stop.load())
+    {
+        list.prune_exited();
+        const auto scope = list.try_begin_rescan();
+    }
 }
 }  // namespace
 
@@ -56,12 +87,12 @@ TEST(internal_thread_list, scoped_registers_and_removes)
 TEST(internal_thread_list, scoped_removes_on_exception)
 {
     internal_thread_list list;
-    try
-    {
-        scoped_internal_thread scoped{ list };
-        throw std::runtime_error{ "unwind" };
-    } catch(const std::runtime_error&)
-    {}
+    EXPECT_THROW(
+        {
+            scoped_internal_thread scoped{ list };
+            throw std::runtime_error{ "unwind" };
+        },
+        std::runtime_error);
     EXPECT_FALSE(list.is_excluded(this_tid()));
 }
 
@@ -130,32 +161,19 @@ TEST(internal_thread_list, concurrent_operations)
     internal_thread_list     list;
     std::atomic<bool>        stop{ false };
     std::vector<std::thread> workers;
-    for(int i = 0; i < 4; ++i)
+    workers.reserve(k_stress_adders + 1);
+    for(int i = 0; i < k_stress_adders; ++i)
     {
-        workers.emplace_back([&list, &stop, i] {
-            const pid_t tid = k_tid_a + i;
-            while(!stop.load())
-            {
-                list.add(tid);
-                (void) list.is_excluded(tid);
-                {
-                    auto scope = list.begin_creation();
-                }
-                list.remove(tid);
-            }
-        });
+        workers.emplace_back(churn_entries, std::ref(list), std::cref(stop), k_tid_a + i);
     }
-    workers.emplace_back([&list, &stop] {
-        while(!stop.load())
-        {
-            list.prune_exited();
-            auto scope = list.try_begin_rescan();
-        }
-    });
-    std::this_thread::sleep_for(std::chrono::milliseconds{ 200 });
+    workers.emplace_back(churn_rescan, std::ref(list), std::cref(stop));
+
+    std::this_thread::sleep_for(k_stress_duration);
     stop.store(true);
     for(auto& worker : workers)
+    {
         worker.join();
+    }
     SUCCEED();
 }
 

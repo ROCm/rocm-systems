@@ -29,9 +29,13 @@
 
 #include <csignal>
 #include <dlfcn.h>
+#include <fmt/format.h>
+#include <future>
+#include <memory>
 #include <optional>
 #include <ostream>
 #include <pthread.h>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -155,25 +159,25 @@ pthread_create_gotcha::wrapper::operator()() const
 {
     // First thing in the child: the creator holds the thread list's creation gate until
     // this signal, so it must come before any setup that can take long.
-    auto _internal_thread = std::optional<thread_list::scoped_internal_thread>{};
+    auto internal_thread = std::optional<thread_list::scoped_internal_thread>{};
     if(m_config.exclude)
     {
-        _internal_thread.emplace(thread_list::get_internal_thread_list());
+        internal_thread.emplace(thread_list::get_internal_thread_list());
     }
     if(m_config.registered)
     {
         m_config.registered->set_value();
     }
 
-    const auto _own_tid = thread_list::current_tid();
+    const auto own_tid = thread_list::current_tid();
     if(m_config.exclude)
     {
-        LOG_DEBUG("Thread {} '{}' excluded: {}", _own_tid,
-                  thread_list::thread_name(_own_tid), m_config.origin);
+        LOG_DEBUG("Thread {} '{}' excluded: {}", own_tid,
+                  thread_list::thread_name(own_tid), m_config.origin);
     }
     else
     {
-        LOG_DEBUG("Thread {} eligible for sampling", _own_tid);
+        LOG_DEBUG("Thread {} eligible for sampling", own_tid);
     }
 
     using thread_bundle_data_t = thread_data<thread_bundle_t>;
@@ -655,11 +659,13 @@ struct rocm_thread_launch
 
 // "symbol in library" of a start routine, for diagnostics.
 std::string
-describe_start_routine(void* func_ptr)
+describe_start_routine(const void* func_ptr)
 {
     Dl_info info;
     if(func_ptr == nullptr || dladdr(func_ptr, &info) == 0)
+    {
         return "unknown start routine";
+    }
     return fmt::format("start routine {} in {}",
                        info.dli_sname != nullptr ? info.dli_sname : "?",
                        info.dli_fname != nullptr ? info.dli_fname : "?");

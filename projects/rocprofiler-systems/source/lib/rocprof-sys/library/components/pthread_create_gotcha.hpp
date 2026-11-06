@@ -11,6 +11,7 @@
 #include <atomic>
 #include <cstdint>
 #include <future>
+#include <string>
 
 namespace rocprofsys
 {

@@ -62,7 +62,7 @@ sampler::poll(std::atomic<state::process::State>* _state, nsec_t _interval,
     threading::set_thread_name("omni.sampler");
 
     auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
-    const thread_list::scoped_internal_thread _internal_thread{
+    const thread_list::scoped_internal_thread internal_thread{
         thread_list::get_internal_thread_list()
     };
 

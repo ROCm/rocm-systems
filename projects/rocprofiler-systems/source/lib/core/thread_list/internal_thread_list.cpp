@@ -7,15 +7,16 @@
 #include "core/state.hpp"
 #include "logger/debug.hpp"
 
-#include <algorithm>
 #include <charconv>
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <sys/syscall.h>
 #include <system_error>
 #include <unistd.h>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -43,9 +44,34 @@ list_live_tids(std::unordered_set<pid_t>& live)
         const auto name = entry.path().filename().string();
         pid_t      tid  = 0;
         const auto res  = std::from_chars(name.data(), name.data() + name.size(), tid);
-        if(res.ec == std::errc{}) live.insert(tid);
+        if(res.ec == std::errc{})
+        {
+            live.insert(tid);
+        }
     }
     return !error;
+}
+
+// Erases the TIDs in @p tids that are not in /proc/self/task and returns them. Erases
+// nothing when the directory cannot be listed.
+std::vector<pid_t>
+erase_exited(std::unordered_set<pid_t>& tids)
+{
+    std::unordered_set<pid_t> live;
+    if(!list_live_tids(live))
+    {
+        return {};
+    }
+    std::vector<pid_t> exited;
+    std::erase_if(tids, [&live, &exited](pid_t tid) {
+        const bool is_gone = !live.contains(tid);
+        if(is_gone)
+        {
+            exited.push_back(tid);
+        }
+        return is_gone;
+    });
+    return exited;
 }
 }  // namespace
 
@@ -55,10 +81,13 @@ internal_thread_list::add(pid_t tid)
     const auto guard    = internal_scope();
     bool       inserted = false;
     {
-        std::lock_guard lock{ m_mutex };
+        const std::lock_guard lock{ m_mutex };
         inserted = m_tids.insert(tid).second;
     }
-    if(inserted) LOG_DEBUG("Thread {} excluded from sampling", tid);
+    if(inserted)
+    {
+        LOG_DEBUG("Thread {} excluded from sampling", tid);
+    }
 }
 
 void
@@ -67,17 +96,20 @@ internal_thread_list::remove(pid_t tid)
     const auto guard   = internal_scope();
     bool       removed = false;
     {
-        std::lock_guard lock{ m_mutex };
+        const std::lock_guard lock{ m_mutex };
         removed = m_tids.erase(tid) > 0;
     }
-    if(removed) LOG_DEBUG("Thread {} included in sampling again", tid);
+    if(removed)
+    {
+        LOG_DEBUG("Thread {} included in sampling again", tid);
+    }
 }
 
 bool
 internal_thread_list::is_excluded(pid_t tid) const
 {
-    const auto      guard = internal_scope();
-    std::lock_guard lock{ m_mutex };
+    const auto            guard = internal_scope();
+    const std::lock_guard lock{ m_mutex };
     return m_tids.contains(tid);
 }
 
@@ -90,17 +122,13 @@ internal_thread_list::prune_exited()
     const auto         guard = internal_scope();
     std::vector<pid_t> pruned;
     {
-        std::lock_guard           lock{ m_mutex };
-        std::unordered_set<pid_t> live;
-        if(!list_live_tids(live)) return;
-        std::erase_if(m_tids, [&live, &pruned](pid_t tid) {
-            const bool exited = !live.contains(tid);
-            if(exited) pruned.push_back(tid);
-            return exited;
-        });
+        const std::lock_guard lock{ m_mutex };
+        pruned = erase_exited(m_tids);
     }
     for(const auto tid : pruned)
+    {
         LOG_DEBUG("Thread {} exited, dropped from the exclusion list", tid);
+    }
 }
 
 internal_thread_list::creation_scope
@@ -152,9 +180,9 @@ thread_name(pid_t tid)
 internal_thread_list&
 get_internal_thread_list()
 {
-    static auto*& list =
+    static auto*& s_list =
         common::static_object<internal_thread_list>::construct(common::do_not_destroy{});
-    return *list;
+    return *s_list;
 }
 
 scoped_internal_thread::scoped_internal_thread(internal_thread_list& list)
@@ -166,7 +194,10 @@ scoped_internal_thread::scoped_internal_thread(internal_thread_list& list)
 
 scoped_internal_thread::~scoped_internal_thread()
 {
-    if(m_list != nullptr) m_list->remove(m_tid);
+    if(m_list != nullptr)
+    {
+        m_list->remove(m_tid);
+    }
 }
 
 scoped_internal_thread::scoped_internal_thread(scoped_internal_thread&& other) noexcept
