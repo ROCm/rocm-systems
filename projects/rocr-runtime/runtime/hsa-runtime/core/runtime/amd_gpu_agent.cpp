@@ -258,8 +258,16 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
     workgroup_clusters_supported_ = true;
   }
 
-  if (workgroup_clusters_supported_) {
-    const uint64_t num_cu_per_se = properties_.NumArrays * properties_.NumCUPerArray;
+  if (workgroup_clusters_supported_ && properties_.NumShaderBanks != 0 &&
+      properties_.NumSIMDPerCU != 0) {
+    // A cluster places each workgroup on its own CU and must fit in one shader
+    // engine. NumArrays * NumCUPerArray is the pre-harvest width of the widest
+    // shader array, so it overstates the active CUs the smallest shader engine
+    // can host. The largest cluster that can launch on any shader engine is the
+    // active CU count divided by the shader-engine count.
+    const uint64_t num_cus =
+        static_cast<uint64_t>(properties_.NumFComputeCores) / properties_.NumSIMDPerCU;
+    const uint64_t num_cu_per_se = num_cus / properties_.NumShaderBanks;
     cluster_max_dim_ = { num_cu_per_se, num_cu_per_se, num_cu_per_se };
   }
 
