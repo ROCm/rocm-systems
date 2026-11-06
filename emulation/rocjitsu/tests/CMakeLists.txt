@@ -110,7 +110,7 @@ set_tests_properties(
     RocjitsuCpuThreadBudgetRejectsNonNumeric
     PROPERTIES
         PASS_REGULAR_EXPRESSION
-            "--cpu-thread-budget requires an unsigned integer"
+            "--cpu-thread-budget: expected unsigned decimal integer"
 )
 
 add_test(
@@ -405,6 +405,9 @@ add_executable(
     legacy_page_table_cache_test.cpp
     config_test.cpp
     checkpoint_restore_errors_test.cpp
+    rj_arith_bridge_test.cpp
+    rj_arith_policy_test.cpp
+    rj_arith_config_test.cpp
     gfx1251_compiled_kernel_test.cpp
     daemon_api_test.cpp
     matmul_test.cpp
@@ -443,6 +446,7 @@ add_executable(
     instruction_cache_test.cpp
     async_mma_policy_test.cpp
     matrix_coexecution_test.cpp
+    matrix_execution_error_test.cpp
     packed_fmac_constants_test.cpp
     matrix_coexecution_lifetime_test.cpp
     sparse_memory_test.cpp
@@ -463,6 +467,7 @@ add_executable(
     buffer_descriptor_vcc_test.cpp
     buffer_format_test.cpp
     image_access_test.cpp
+    image_addressing_test.cpp
     image_resource_test.cpp
     smem_sbase_operand_test.cpp
     shared_infra_test.cpp
@@ -1059,8 +1064,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         COMMAND
             ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
             -DMODEL_BINARY=$<TARGET_FILE:rocjitsu_analysis_tests>
-            -DANALYSIS_ARCHIVE=$<TARGET_FILE:rocjitsu_analysis_internal> -P
-            ${CMAKE_CURRENT_SOURCE_DIR}/check_static_analysis_symbols.cmake
+            -DANALYSIS_ARCHIVE=$<TARGET_FILE:rocjitsu_analysis_internal>
+            -DREQUIRED_MODEL_ARCHES=cdna1,cdna2,cdna3,cdna4,cdna5,rdna1,rdna2,rdna3,rdna3_5,rdna4
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/check_static_analysis_symbols.cmake
     )
 endif()
 
@@ -1145,27 +1151,129 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     rj_configure_target(file_loading_allocation_failure_test PRIVATE_INCLUDES WARNINGS)
     rj_add_gtest_tests(file_loading_allocation_failure_test)
 
-    # Exercise the model ISA contract in a decoder-only final link.
-    add_executable(rocjitsu_model_only_test model_only_isa_test.cpp)
-    target_include_directories(
-        rocjitsu_model_only_test
-        PRIVATE ${ROCJITSU_INCLUDE_DIR} ${ROCJITSU_SRC_DIR}
-    )
+    # Native dispatch must extract both the relative tables and their factories
+    # from a static archive, including when the C++ objects use LTO.
+    add_library(rocjitsu_cdna5_test_archive STATIC)
     target_link_libraries(
-        rocjitsu_model_only_test
-        PRIVATE
-            rocjitsu_dbt_internal
-            rocjitsu_cdna5_model_registry
-            simdojo_headers
-            GTest::gtest_main
+        rocjitsu_cdna5_test_archive
+        PRIVATE rocjitsu_cdna5_model_registry
     )
-    rj_configure_target(rocjitsu_model_only_test TEST)
+    function(rj_add_model_decoder_test target)
+        add_executable(${target} model_only_isa_test.cpp ${ARGN})
+        target_link_libraries(
+            ${target}
+            PRIVATE
+                rocjitsu_cdna5_test_archive
+                rocjitsu_dbt_internal
+                simdojo_headers
+                GTest::gtest_main
+        )
+        rj_configure_target(${target} PRIVATE_INCLUDES WARNINGS)
+    endfunction()
+
+    rj_add_model_decoder_test(rocjitsu_model_only_test)
     rj_add_gtest_tests(rocjitsu_model_only_test)
+    if(CMAKE_EXECUTABLE_FORMAT STREQUAL "ELF" AND CMAKE_NM AND CMAKE_READELF)
+        set(_decoder_sources
+            "${ROCJITSU_SRC_DIR}/rocjitsu/isa/arch/amdgpu/generated"
+        )
+        set(_check_decoder_layout
+            "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/check_relative_decode_table.py"
+            "${CMAKE_NM}"
+            "${CMAKE_READELF}"
+            "${_decoder_sources}"
+        )
+        add_test(
+            NAME ModelOnlyIsaTest.DecodeTableLayout
+            COMMAND
+                ${_check_decoder_layout} $<TARGET_FILE:rocjitsu_model_only_test>
+                cdna5
+                "--table-object=$<FILTER:$<TARGET_OBJECTS:rocjitsu_isa_cdna5_model>,INCLUDE,/decode_tables[.]S[.]o$>"
+        )
+        # The model-only fixture records the expected mode for this build.
+        add_dependencies(rocjitsu_analysis_tests rocjitsu_model_only_test)
+        add_test(
+            NAME StaticAnalysis.DecodeTableLayout
+            COMMAND
+                ${_check_decoder_layout} $<TARGET_FILE:rocjitsu_analysis_tests>
+                --mode-from $<TARGET_FILE:rocjitsu_model_only_test>
+        )
+
+        if(
+            CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$"
+            AND CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|Clang)$"
+            AND CMAKE_SIZEOF_VOID_P EQUAL 8
+        )
+            # GCC exercises the medium model. Clang needs the archive's LLVM
+            # code model under LTO, so expose the same fallback to its preprocessor.
+            rj_add_model_decoder_test(rocjitsu_model_switch_test "${_decoder_sources}/cdna5/decoder.cpp")
+            target_compile_options(
+                rocjitsu_model_switch_test
+                PRIVATE
+                    $<$<CXX_COMPILER_ID:GNU>:-mcmodel=medium>
+                    $<$<CXX_COMPILER_ID:Clang>:-U__code_model_small__>
+            )
+            rj_add_gtest_tests(rocjitsu_model_switch_test TEST_PREFIX Portable.)
+            add_test(
+                NAME Portable.ModelOnlyIsaTest.DecodeTableLayout
+                COMMAND
+                    ${_check_decoder_layout}
+                    $<TARGET_FILE:rocjitsu_model_switch_test> cdna5
+                    --expect-switch
+            )
+
+            # Noncanonical CFI traps a valid assembly target if the factory
+            # declaration loses its canonical jump-table attribute.
+            if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND _rj_ipo_ok)
+                set(_cfi_options
+                    -flto=thin
+                    -fsanitize=cfi-icall
+                    -fsanitize-trap=cfi-icall
+                    -fno-sanitize-cfi-canonical-jump-tables
+                )
+                add_executable(
+                    rocjitsu_decode_table_cfi_test
+                    decode_table_cfi_test.cpp
+                    decode_table_cfi_test.S
+                )
+                set_source_files_properties(
+                    decode_table_cfi_test.S
+                    PROPERTIES
+                        LANGUAGE CXX
+                        COMPILE_OPTIONS
+                            "-x;assembler-with-cpp;-Wno-unused-command-line-argument"
+                )
+                target_link_libraries(
+                    rocjitsu_decode_table_cfi_test
+                    PRIVATE util
+                )
+                target_compile_options(
+                    rocjitsu_decode_table_cfi_test
+                    PRIVATE ${_cfi_options}
+                )
+                target_link_options(
+                    rocjitsu_decode_table_cfi_test
+                    PRIVATE ${_cfi_options}
+                )
+                rj_configure_target(rocjitsu_decode_table_cfi_test PRIVATE_INCLUDES WARNINGS HIDDEN)
+                add_test(
+                    NAME DecodeTableTest.NoncanonicalCfi
+                    COMMAND rocjitsu_decode_table_cfi_test
+                )
+                set_tests_properties(
+                    DecodeTableTest.NoncanonicalCfi
+                    PROPERTIES SKIP_RETURN_CODE 77
+                )
+            endif()
+        endif()
+    endif()
     add_test(
         NAME ModelOnlyIsaTest.SymbolBoundary
         COMMAND
             ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
-            -DMODEL_BINARY=$<TARGET_FILE:rocjitsu_model_only_test> -P
+            -DMODEL_BINARY=$<TARGET_FILE:rocjitsu_model_only_test>
+            -DREQUIRED_MODEL_ARCHES=cdna5 -P
             ${CMAKE_CURRENT_SOURCE_DIR}/check_model_only_symbols.cmake
     )
 
@@ -1204,7 +1312,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         NAME Gfx1250B0ToA0Library.SymbolBoundary
         COMMAND
             ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
-            -DMODEL_BINARY=$<TARGET_FILE:rocjitsu_gfx1250_b0_to_a0> -P
+            -DMODEL_BINARY=$<TARGET_FILE:rocjitsu_gfx1250_b0_to_a0>
+            -DREQUIRED_MODEL_ARCHES=cdna5 -P
             ${CMAKE_CURRENT_SOURCE_DIR}/check_model_only_symbols.cmake
     )
 
@@ -1279,8 +1388,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         NAME IsaRegistryCompositionTest.NarrowSymbolBoundary
         COMMAND
             ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
-            -DNARROW_LIBRARY=$<TARGET_FILE:rocjitsu_narrow_isa_registry_fixture>
-            -P ${CMAKE_CURRENT_SOURCE_DIR}/check_narrow_registry_symbols.cmake
+            -DMODEL_BINARY=$<TARGET_FILE:rocjitsu_narrow_isa_registry_fixture>
+            -DREQUIRED_MODEL_ARCHES=cdna5 -P
+            ${CMAKE_CURRENT_SOURCE_DIR}/check_narrow_registry_symbols.cmake
     )
 endif()
 
@@ -1410,6 +1520,13 @@ add_dependencies(
     rj_dbt_translate
     rj_decode_benchmark
 )
+if(TARGET rj_pretranslate)
+    add_dependencies(rj_dbt_translate_smoke_test rj_pretranslate)
+    set(RJ_DBT_SMOKE_PRETRANSLATE "$<TARGET_FILE:rj_pretranslate>")
+    set(RJ_DBT_SMOKE_INSTALLED_PRETRANSLATE
+        "\${RJ_INSTALLED_BINDIR}/rj_pretranslate"
+    )
+endif()
 if(RJ_INSTALL_TESTS)
     rj_install_test_target(rj_dbt_translate_smoke_test)
     rj_install_test_target(rj_dbt_translate)
@@ -1421,11 +1538,12 @@ rj_add_test(
         rj_dbt_translate_smoke_test
         $<TARGET_FILE:rj_dbt_translate>
         $<TARGET_FILE:rj_decode_benchmark>
+        ${RJ_DBT_SMOKE_PRETRANSLATE}
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     INSTALL_COMMAND
         "bin/rj_dbt_translate_smoke_test"
         "bin/rj_dbt_translate"
-        "bin/rj_decode_benchmark"
+        "bin/rj_decode_benchmark" ${RJ_DBT_SMOKE_INSTALLED_PRETRANSLATE}
 )
 
 # --- Interposer tests run through the rocjitsu CLI launcher ---
@@ -2199,6 +2317,7 @@ endfunction()
 
 set(_rj_interposer_dup_tests
     ConstructorPreservesDescriptorLimit
+    ConstructorPreparesTopologyBeforeFileLimitDrops
     DupKeepsKfdRoutingAfterPrimaryClose
     FcntlDupfdKeepsKfdRouting
     Dup2OverPrimaryInvalidatesKfdIdentity
