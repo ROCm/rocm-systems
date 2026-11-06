@@ -4,6 +4,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ***All information listed below is for reference and subject to change.***
 
+## amd_smi_lib for ROCm 10.3.0
+
+### Added
+
+- **New link types UALOE and UALINK** — topology queries now recognize UALOE and UALINK interconnects
+
 ## amd_smi_lib for ROCm 10.2.0
 
 ### Added

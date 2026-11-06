@@ -494,7 +494,8 @@ void TestHWTopologyRead::Run(void) {
 
   std::string topology_link_type_str[] = {
       "AMDSMI_LINK_TYPE_INTERNAL",       "AMDSMI_LINK_TYPE_XGMI",    "AMDSMI_LINK_TYPE_PCIE",
-      "AMDSMI_LINK_TYPE_NOT_APPLICABLE", "AMDSMI_LINK_TYPE_UNKNOWN",
+      "AMDSMI_LINK_TYPE_NOT_APPLICABLE", "AMDSMI_LINK_TYPE_UNKNOWN", "AMDSMI_LINK_TYPE_UALOE",
+      "AMDSMI_LINK_TYPE_UALINK",
   };
 
   auto ret(amdsmi_status_t::AMDSMI_STATUS_SUCCESS);

@@ -5790,6 +5790,14 @@ rsmi_status_t rsmi_topo_get_link_type(uint32_t dv_ind_src, uint32_t dv_ind_dst, 
         // always be the same CPU node
         *hops = 2;
         return RSMI_STATUS_SUCCESS;
+      case amd::smi::IOLINK_TYPE_UALOE:
+        *type = RSMI_IOLINK_TYPE_UALOE;
+        *hops = 1;
+        return RSMI_STATUS_SUCCESS;
+      case amd::smi::IOLINK_TYPE_UALINK:
+        *type = RSMI_IOLINK_TYPE_UALINK;
+        *hops = 1;
+        return RSMI_STATUS_SUCCESS;
       default:
         return RSMI_STATUS_NOT_SUPPORTED;
     }
@@ -5960,6 +5968,10 @@ rsmi_status_t rsmi_topo_get_p2p_status(uint32_t dv_ind_src, uint32_t dv_ind_dst,
       *type = RSMI_IOLINK_TYPE_PCIEXPRESS;
     } else if (io_link_type == amd::smi::IOLINK_TYPE_XGMI) {
       *type = RSMI_IOLINK_TYPE_XGMI;
+    } else if (io_link_type == amd::smi::IOLINK_TYPE_UALOE) {
+      *type = RSMI_IOLINK_TYPE_UALOE;
+    } else if (io_link_type == amd::smi::IOLINK_TYPE_UALINK) {
+      *type = RSMI_IOLINK_TYPE_UALINK;
     } else {
       // Unexpected IO Link type read
       return RSMI_STATUS_NOT_SUPPORTED;
