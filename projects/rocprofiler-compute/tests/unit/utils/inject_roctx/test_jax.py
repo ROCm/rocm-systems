@@ -148,3 +148,16 @@ def test_jax_jit_call_emits_jit_marker(monkeypatch):
     assert compiled(1) == 1
     assert [item["marker"] for item in pushes] == ["jax.jit.train_step"]
     assert pushes[0]["backend"] == "jax"
+
+
+def test_jax_pmap_call_emits_pmap_marker(monkeypatch):
+    jax_mod, _compiled_type, _primitive_type = install_jax_backend(monkeypatch)
+    pushes = record_scopes(monkeypatch)
+
+    def pmap_square(value):
+        return value
+
+    mapped = jax_mod.pmap(pmap_square)
+    assert mapped(1) == 1
+    assert [item["marker"] for item in pushes] == ["jax.pmap.pmap_square"]
+    assert pushes[0]["backend"] == "jax"
