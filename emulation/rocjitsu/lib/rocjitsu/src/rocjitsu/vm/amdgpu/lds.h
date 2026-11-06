@@ -158,37 +158,17 @@ public:
   ///        to enable per-workgroup LDS partitioning. Defaults to 0.
   void vector_load(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
                    uint32_t num_elems, uint8_t *dst, uint32_t base_offset = 0) {
-    uint32_t stride = num_elems * elem_size;
-    for (uint32_t lane = 0; lane < 64; ++lane) {
-      if (!(lane_mask & (1ULL << lane)))
-        continue;
-      uint64_t base = static_cast<uint64_t>(static_cast<uint32_t>(addrs[lane])) + base_offset;
-      for (uint32_t e = 0; e < num_elems; ++e) {
-        uint64_t ea = base + static_cast<uint64_t>(e) * elem_size;
-        if (ea + elem_size > capacity_bytes_) {
-          std::memset(dst + lane * stride + e * elem_size, 0, elem_size);
-          continue;
-        }
-        read_backing(static_cast<uint32_t>(ea), dst + lane * stride + e * elem_size, elem_size);
-      }
-    }
+    dispatch_vector_shape(elem_size, num_elems, [&]<uint32_t Size, uint32_t Count>() {
+      vector_load_impl<Size, Count>(addrs, lane_mask, elem_size, num_elems, dst, base_offset);
+    });
   }
 
   /// @brief Per-lane vector store to LDS. OOB writes are dropped.
   void vector_store(const uint64_t *addrs, uint64_t lane_mask, uint32_t elem_size,
                     uint32_t num_elems, const uint8_t *src, uint32_t base_offset = 0) {
-    uint32_t stride = num_elems * elem_size;
-    for (uint32_t lane = 0; lane < 64; ++lane) {
-      if (!(lane_mask & (1ULL << lane)))
-        continue;
-      uint64_t base = static_cast<uint64_t>(static_cast<uint32_t>(addrs[lane])) + base_offset;
-      for (uint32_t e = 0; e < num_elems; ++e) {
-        uint64_t ea = base + static_cast<uint64_t>(e) * elem_size;
-        if (ea + elem_size > capacity_bytes_)
-          continue;
-        write_backing(static_cast<size_t>(ea), src + lane * stride + e * elem_size, elem_size);
-      }
-    }
+    dispatch_vector_shape(elem_size, num_elems, [&]<uint32_t Size, uint32_t Count>() {
+      vector_store_impl<Size, Count>(addrs, lane_mask, elem_size, num_elems, src, base_offset);
+    });
   }
 
   /// @brief Zero all LDS contents.
@@ -215,6 +195,80 @@ public:
   }
 
 private:
+  // Decode the request shape once, outside the per-lane and per-element loops.
+  // Other API shapes retain the original dynamic implementation.
+  template <typename Access>
+  static void dispatch_vector_shape(uint32_t elem_size, uint32_t num_elems, Access &&access) {
+    switch ((uint64_t{elem_size} << 32) | num_elems) {
+    case (uint64_t{1} << 32) | 1:
+      access.template operator()<1, 1>();
+      return;
+    case (uint64_t{2} << 32) | 1:
+      access.template operator()<2, 1>();
+      return;
+    case (uint64_t{4} << 32) | 1:
+      access.template operator()<4, 1>();
+      return;
+    case (uint64_t{4} << 32) | 2:
+      access.template operator()<4, 2>();
+      return;
+    case (uint64_t{4} << 32) | 3:
+      access.template operator()<4, 3>();
+      return;
+    case (uint64_t{4} << 32) | 4:
+      access.template operator()<4, 4>();
+      return;
+    case (uint64_t{8} << 32) | 1:
+      access.template operator()<8, 1>();
+      return;
+    default:
+      access.template operator()<0, 0>();
+      return;
+    }
+  }
+
+  template <uint32_t StaticElemSize, uint32_t StaticNumElems>
+  void vector_load_impl(const uint64_t *addrs, uint64_t lane_mask, uint32_t runtime_elem_size,
+                        uint32_t runtime_num_elems, uint8_t *dst, uint32_t base_offset) {
+    const uint32_t elem_size = StaticElemSize == 0 ? runtime_elem_size : StaticElemSize;
+    const uint32_t num_elems = StaticNumElems == 0 ? runtime_num_elems : StaticNumElems;
+    uint32_t stride = num_elems * elem_size;
+    for (uint32_t lane = 0; lane < 64; ++lane) {
+      if (!(lane_mask & (1ULL << lane)))
+        continue;
+      uint64_t base = static_cast<uint64_t>(static_cast<uint32_t>(addrs[lane])) + base_offset;
+      for (uint32_t element = 0; element < num_elems; ++element) {
+        uint64_t element_address = base + static_cast<uint64_t>(element) * elem_size;
+        if (element_address + elem_size > capacity_bytes_) {
+          std::memset(dst + lane * stride + element * elem_size, 0, elem_size);
+          continue;
+        }
+        read_backing(static_cast<uint32_t>(element_address),
+                     dst + lane * stride + element * elem_size, elem_size);
+      }
+    }
+  }
+
+  template <uint32_t StaticElemSize, uint32_t StaticNumElems>
+  void vector_store_impl(const uint64_t *addrs, uint64_t lane_mask, uint32_t runtime_elem_size,
+                         uint32_t runtime_num_elems, const uint8_t *src, uint32_t base_offset) {
+    const uint32_t elem_size = StaticElemSize == 0 ? runtime_elem_size : StaticElemSize;
+    const uint32_t num_elems = StaticNumElems == 0 ? runtime_num_elems : StaticNumElems;
+    uint32_t stride = num_elems * elem_size;
+    for (uint32_t lane = 0; lane < 64; ++lane) {
+      if (!(lane_mask & (1ULL << lane)))
+        continue;
+      uint64_t base = static_cast<uint64_t>(static_cast<uint32_t>(addrs[lane])) + base_offset;
+      for (uint32_t element = 0; element < num_elems; ++element) {
+        uint64_t element_address = base + static_cast<uint64_t>(element) * elem_size;
+        if (element_address + elem_size > capacity_bytes_)
+          continue;
+        write_backing(static_cast<size_t>(element_address),
+                      src + lane * stride + element * elem_size, elem_size);
+      }
+    }
+  }
+
   bool contains(uint32_t addr, uint32_t size) const {
     return static_cast<uint64_t>(addr) + size <= capacity_bytes_;
   }
