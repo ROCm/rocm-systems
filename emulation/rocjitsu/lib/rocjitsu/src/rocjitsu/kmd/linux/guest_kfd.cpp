@@ -19,11 +19,10 @@
 #include <chrono>
 #include <cstdio>
 #include <dirent.h>
-#include <exception>
 #include <fcntl.h>
 #include <filesystem>
-#include <new>
 #include <optional>
+#include <pthread.h>
 #include <sstream>
 #include <string_view>
 #include <sys/mman.h>
@@ -847,9 +846,8 @@ int GuestKfd::close() {
     // real, because readiness can be republished while the close is pending.
     if (wait_leases_ > 0) {
       close_deferred_ = true;
-      // Hand the replacement overlay over NOW. The drain runs from a destructor, which
-      // is noexcept, so an allocation there would turn a bad_alloc into a terminate on
-      // the way out of an ioctl -- and it would put an allocate/free on every wait.
+      // Prepare the replacement overlay here so draining the last wait lease
+      // does not allocate a replacement on every wait.
       deferred_overlay_ = std::move(fresh_overlay);
       ready_.store(false, std::memory_order_release);
     } else {
@@ -896,34 +894,25 @@ int GuestKfd::wait_events(unsigned long request, void *arg) {
     return -(errno != 0 ? errno : ENODEV);
 
   int rc = 0;
-  std::exception_ptr failure;
-  try {
-    // Forward a null arg unchanged rather than dereferencing it for the timeout: the
-    // kernel answers it with EFAULT/EINVAL, and the interposer must reproduce that
-    // failure instead of segfaulting inside the caller's ioctl().
-    //
-    // The simulator serves the wait itself and begin_local_shutdown() can wake it, so it
-    // takes ONE ordinary blocking forward -- slicing it would add repolling that buys
-    // nothing. Only the kernel, which nothing in this process can interrupt, needs the
-    // wait broken into cancellable slices.
-    if (!arg || execution_driver_)
-      rc = forward_ioctl(request, arg);
-    else
-      rc = forward_wait_events_bounded(request, arg);
-  } catch (...) {
-    failure = std::current_exception();
-  }
+  // Native thread exit can bypass C++ destructors in an exception-free build.
+  pthread_cleanup_push(+[](void *state) { static_cast<WaitLease *>(state)->release(); }, &lease);
+  // Forward a null arg unchanged rather than dereferencing it for the timeout: the
+  // kernel answers it with EFAULT/EINVAL, and the interposer must reproduce that
+  // failure instead of segfaulting inside the caller's ioctl().
+  //
+  // The simulator serves the wait itself and begin_local_shutdown() can wake it, so it
+  // takes ONE ordinary blocking forward -- slicing it would add repolling that buys
+  // nothing. Only the kernel, which nothing in this process can interrupt, needs the
+  // wait broken into cancellable slices.
+  if (!arg || execution_driver_)
+    rc = forward_ioctl(request, arg);
+  else
+    rc = forward_wait_events_bounded(request, arg);
+  pthread_cleanup_pop(0);
 
-  // EVERY exit drops the lease here, never on the way out through ~WaitLease -- including
-  // the exceptional one, which is why a throw is caught and held rather than allowed to
-  // unwind through it. Dropping the last lease can run a deferred final close, and tearing
-  // a backend down allocates; a destructor is implicitly noexcept, so a bad_alloc there
-  // terminates the process rather than propagating, and under unwinding it would do so
-  // with a first exception already in flight. The result is captured by now, so nothing
-  // this does can disturb it.
+  // Drop the lease after forwarding has released its locks. The last lease can
+  // complete a deferred final close without disturbing the captured result.
   lease.release();
-  if (failure)
-    std::rethrow_exception(failure);
   return rc;
 }
 
@@ -1004,7 +993,7 @@ int GuestKfd::forward_wait_events_bounded(unsigned long request, void *arg) {
   //
   // Zero-timeout requests come through here too: "non-blocking" removes the wait, not
   // the load/use race, and wait_events_poll_loop issues them unsliced anyway.
-  return wait_events_poll_loop(*wait_args, hw_closing_, [&] {
+  std::function<int()> poll = [&] {
     const int slice_fd = host_fd();
     if (slice_fd < 0 || !fd_is_expected_kfd(slice_fd))
       return -ENODEV;
@@ -1012,7 +1001,13 @@ int GuestKfd::forward_wait_events_bounded(unsigned long request, void *arg) {
     if (ret < 0)
       return -(errno != 0 ? errno : EIO);
     return ret;
-  });
+  };
+  int result;
+  pthread_cleanup_push(
+      +[](void *state) { *static_cast<std::function<int()> *>(state) = nullptr; }, &poll);
+  result = wait_events_poll_loop(*wait_args, hw_closing_, poll);
+  pthread_cleanup_pop(0);
+  return result;
 }
 
 void GuestKfd::record_kfd_identity(int kfd_fd) {

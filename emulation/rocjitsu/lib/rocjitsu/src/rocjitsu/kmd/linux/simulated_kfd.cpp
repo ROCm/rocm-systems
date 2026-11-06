@@ -25,7 +25,6 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "hsa/amd_hsa_queue.h"
 RJ_DIAGNOSTIC_POP
 #include "rocjitsu/vm/amdgpu/xcd.h"
-#include "util/except.h"
 #include "util/log.h"
 
 #include <algorithm>
@@ -43,7 +42,6 @@ RJ_DIAGNOSTIC_POP
 #include <iterator>
 #include <linux/sched.h>
 #include <linux/types.h>
-#include <new>
 #include <poll.h>
 #include <shared_mutex>
 #include <sstream>
@@ -696,13 +694,7 @@ int reap_notification_writer(pid_t writer, int pidfd, int *status, bool defer_re
       } while (result < 0 && errno == EINTR);
     }
     if (result == 0) {
-      try {
-        notification_writer_reaper().adopt(writer);
-      } catch (...) {
-        // The child remains owned by this process and will be reparented at
-        // process exit. Allocation failure must not turn a bounded engine path
-        // back into a blocking one.
-      }
+      notification_writer_reaper().adopt(writer);
     }
     return failure != 0 ? -failure : -EAGAIN;
   }
@@ -1341,13 +1333,8 @@ void *SimulatedKfd::mmap_replacing_client_doorbell_views(void *addr, size_t leng
     }
   }
   std::vector<MappedGpuTranslation> retired_gpu;
-  try {
-    reserve_split_views(proc->allocations_, start, end);
-    retired_gpu = mapped_gpu_backing_overlaps(*proc, start, end);
-  } catch (const std::exception &) {
-    errno = ENOMEM;
-    return MAP_FAILED;
-  }
+  reserve_split_views(proc->allocations_, start, end);
+  retired_gpu = mapped_gpu_backing_overlaps(*proc, start, end);
 
   struct RetiredView {
     size_t gpu_ordinal;
@@ -2522,25 +2509,15 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
       }
     }
   }
-  try {
-    const size_t extra =
-        internal_backing ? 1
-                         : remapped_backing_splits(alloc.client_views, alloc.gpu_va, mapped_bytes) +
-                               (alloc.host_ptr ? 2 : 0);
-    alloc.client_views.reserve(alloc.client_views.size() + extra);
-  } catch (const std::exception &) {
-    errno = ENOMEM;
-    return MAP_FAILED;
-  }
+  const size_t extra =
+      internal_backing ? 1
+                       : remapped_backing_splits(alloc.client_views, alloc.gpu_va, mapped_bytes) +
+                             (alloc.host_ptr ? 2 : 0);
+  alloc.client_views.reserve(alloc.client_views.size() + extra);
   std::vector<MappedGpuTranslation> retired_gpu;
   if (flags & MAP_FIXED) {
     const uintptr_t start = reinterpret_cast<uintptr_t>(addr);
-    try {
-      retired_gpu = mapped_gpu_backing_overlaps(proc, start, start + *mapped_span);
-    } catch (const std::exception &) {
-      errno = ENOMEM;
-      return MAP_FAILED;
-    }
+    retired_gpu = mapped_gpu_backing_overlaps(proc, start, start + *mapped_span);
   }
   // A fixed mapping can replace a surviving tail whose GPU VA lies beyond
   // the new BO prefix. Withdraw that translation before changing host pages.
@@ -2786,13 +2763,8 @@ int SimulatedKfd::dispatch_munmap(KfdProcess &proc, void *addr, size_t length) {
   }
   if (host_overlap || client_overlap) {
     std::vector<MappedGpuTranslation> retired_gpu;
-    try {
-      reserve_split_views(proc.allocations_, start, end);
-      retired_gpu = mapped_gpu_backing_overlaps(proc, start, end);
-    } catch (const std::exception &) {
-      errno = ENOMEM;
-      return -1;
-    }
+    reserve_split_views(proc.allocations_, start, end);
+    retired_gpu = mapped_gpu_backing_overlaps(proc, start, end);
     // Withdraw direct translations before releasing caller-owned pages. A
     // failed libc unmap leaves the old mappings intact and restores them.
     for (const auto &entry : retired_gpu)
@@ -3413,21 +3385,11 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
   }
 
   // Register with the shared queue registry OUTSIDE alloc_mutex_ (see note above).
-  amdgpu::QueueHandle queue_handle;
-  const auto rollback_published_queue = [&] {
-    if (queue_handle)
-      (void)gpu->soc->queue_registry().unregister_queue(queue_handle,
-                                                        amdgpu::QueueCloseMode::ForceCancel);
-    std::lock_guard<std::mutex> lk(proc.alloc_mutex_);
-    std::erase(proc.active_queue_ids_, queue_id);
-    proc.queue_doorbell_map_.erase(queue_id);
-    proc.queue_snapshot_map_.erase(queue_id);
-  };
-  try {
-    queue_handle = gpu->soc->queue_registry().register_queue(queue_request);
-    if (!queue_handle)
-      return -EINVAL;
+  const amdgpu::QueueHandle queue_handle = gpu->soc->queue_registry().register_queue(queue_request);
+  if (!queue_handle)
+    return -EINVAL;
 
+  {
     // Publish debug metadata only after queue binding registration. A cross-process
     // debugger does not hold the target's op_mutex_, so publishing it earlier
     // could expose a queue before its execution owner can service it.
@@ -3456,12 +3418,6 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
         .debug_notification_retained_status = KFD_EC_MASK(EC_QUEUE_NEW),
         .debug_notification_events = {KFD_EC_MASK(EC_QUEUE_NEW)},
     };
-  } catch (const std::bad_alloc &) {
-    rollback_published_queue();
-    return -ENOMEM;
-  } catch (...) {
-    rollback_published_queue();
-    return -EIO;
   }
 
   doorbell_reservation->commit();
@@ -3628,17 +3584,11 @@ int SimulatedKfd::update_queue_ioctl(KfdProcess &proc, void *arg) {
   // KFD normalizes zero ring size before updating the binding and snapshot.
   // A null base disables scheduling while retaining that ring geometry.
   const uint32_t effective_percentage = args->ring_base_address ? scheduling_percentage : 0;
-  amdgpu::QueueReconfigureResult update;
-  try {
-    update = gpus_[queue->gpu_ordinal].soc->queue_registry().reconfigure_queue(
-        queue->queue_handle, {.ring_base_address = args->ring_base_address,
-                              .ring_size_bytes = *ring_size,
-                              .scheduling_percentage = effective_percentage});
-  } catch (const std::bad_alloc &) {
-    return -ENOMEM;
-  } catch (...) {
-    return -EIO;
-  }
+  const amdgpu::QueueReconfigureResult update =
+      gpus_[queue->gpu_ordinal].soc->queue_registry().reconfigure_queue(
+          queue->queue_handle, {.ring_base_address = args->ring_base_address,
+                                .ring_size_bytes = *ring_size,
+                                .scheduling_percentage = effective_percentage});
   if (!update.found || update.status == amdgpu::QueueReconfigureStatus::Stale)
     return -EFAULT;
   if (update.status == amdgpu::QueueReconfigureStatus::Busy)
