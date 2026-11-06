@@ -103,7 +103,8 @@ ty_to_cxxtype = {
 have_tdm = "gfx1250" in gpu_targets
 
 def enumerate_kernels():
-  ag_algos = ["LL","ST","RailRing_LsaST"] + (["TmaST"] if have_tdm else []) + ["HierLsaST"]
+  ag_algos = ["LL","ST","RailRing_LsaST"] + (["TmaST"] if have_tdm else []) + ["HierLsaST"] + \
+             (["HierLsaTmaST"] if have_tdm else [])
   # AllGather_TmaSTMC and the other *MC algos need multimem, which ROCm has no
   # equivalent for, so they stay out regardless of the target.
   ar_algos = ["AGxLL_R","RSxLD_AGxST"] + (["RSxTmaLD_AGxTmaST"] if have_tdm else [])

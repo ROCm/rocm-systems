@@ -36,6 +36,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <initializer_list>
+#include <limits>
 #include <memory>
 #include <string>
 #include <utility>
@@ -1064,6 +1065,103 @@ TEST_F(SymmetricKernelCorruptionTest, AllGatherST_PositionDependentData)
             {
                 ADD_FAILURE() << "AllGather_ST mismatch, " << p.name << ", count=" << count << " index=" << errIdx
                               << " (rank " << errIdx / count << ", offset " << errIdx % count << ")"
+                              << " expected=" << static_cast<int>(expVal) << " got=" << static_cast<int>(actVal);
+            }
+            // Collective so a rank-local mismatch stops every rank instead of leaving peers in the next kernel.
+            ASSERT_MPI_TRUE(ok);
+        }
+    }
+}
+
+// The same check for AllGather_HierLsaST's TDM variant, on the placements it runs on: input and output at one offset
+// modulo 16, and in-place only with 16 B aligned slots. It needs gfx1250 in partition mode with two or more packages.
+TEST_F(SymmetricKernelCorruptionTest, AllGatherHierLsaTmaST_PositionDependentData)
+{
+    // Partition mode can put more than 8 ranks on a node, and each package needs two or more.
+    if(!validateTestPrerequisites(4, MPITestConstants::kNoProcessLimit, false, 1, 1))
+    {
+        GTEST_SKIP() << "Need 4 or more MPI ranks on a single node";
+    }
+
+    // Read at communicator init, so the guard must outlive createTestCommunicator.
+    MPIHelpers::MpiEnvGuard symKernelGuard("NCCL_SYM_KERNEL", "AllGather_HierLsaTmaST");
+    // gfx1250 gives AllGather under 128 KiB or over 2 MiB to DDA and the copy engines before NCCL_SYM_KERNEL is
+    // consulted. Both bounds are cached on first read, so lifting them takes only in a process that hasn't read
+    // them yet, and lasts for the rest of it.
+    MPIHelpers::MpiEnvGuard symkMinGuard("RCCL_SYM_K_MIN_BYTES", "0");
+    MPIHelpers::MpiEnvGuard symkMaxGuard("RCCL_SYM_K_MAX_BYTES",
+                                         std::to_string(std::numeric_limits<int64_t>::max()).c_str());
+    ASSERT_EQ(ncclSuccess, createTestCommunicator());
+
+    int rank{};
+    int nRanks{};
+    ASSERT_EQ(ncclSuccess, ncclCommUserRank(getActiveCommunicator(), &rank));
+    ASSERT_EQ(ncclSuccess, ncclCommCount(getActiveCommunicator(), &nRanks));
+
+    const std::vector<size_t> counts   = {1, 15, 16, 17, 255, 4096, 4097, 65539, (1 << 20) + 5, 4 << 20};
+    const size_t              maxCount = *std::max_element(counts.begin(), counts.end());
+
+    const std::string gated = mpiCoordinatedSkipReason(
+        rcclParamSymKMinBytes() != 0 || rcclParamSymKMaxBytes() < static_cast<int64_t>(maxCount * nRanks),
+        "RCCL_SYM_K_MIN_BYTES or RCCL_SYM_K_MAX_BYTES was read earlier in this process; run the test in its own "
+        "mpirun invocation");
+    if(!gated.empty())
+    {
+        GTEST_SKIP() << gated;
+    }
+
+    // Window registration is collective, so allocate once and agree on the outcome before any rank can skip.
+    SymBuf            sendSym;
+    SymBuf            recvSym;
+    const std::string noSym = allocSymBufsSkipReason({{maxCount, &sendSym}, {maxCount * nRanks, &recvSym}});
+    if(!noSym.empty())
+    {
+        GTEST_SKIP() << noSym;
+    }
+
+    bool first = true;
+    for(size_t count : counts)
+    {
+        for(bool inPlace : {false, true})
+        {
+            if(inPlace && count % 16 != 0)
+            {
+                continue;
+            }
+            uint8_t* recv = static_cast<uint8_t*>(recvSym.ptr);
+            uint8_t* send = inPlace ? recv + static_cast<size_t>(rank) * count : static_cast<uint8_t*>(sendSym.ptr);
+
+            ASSERT_MPI_EQ(hipSuccess, zeroInitializeBuffer<uint8_t>(recv, count * nRanks));
+            ASSERT_MPI_EQ(hipSuccess,
+                          initializeBufferWithPattern<uint8_t>(
+                              send, count, [rank](size_t i) { return agStValue(rank, i); }));
+
+            // Only the first call may skip on ncclInvalidUsage; agree collectively so diverging verdicts cannot hang.
+            ncclResult_t res = ncclAllGather(send, recv, count, ncclUint8, getActiveCommunicator(), getActiveStream());
+            // Drain before the vote so a skip never leaves a kernel writing a window that ~SymBuf deregisters and frees.
+            hipError_t syncErr = (res == ncclSuccess) ? hipStreamSynchronize(getActiveStream()) : hipSuccess;
+            const std::string ineligible
+                = mpiCoordinatedSkipReason(res == ncclInvalidUsage && first,
+                                           "AllGather_HierLsaTmaST symmetric kernel not eligible on this topology");
+            if(!ineligible.empty())
+            {
+                GTEST_SKIP() << ineligible;
+            }
+            first = false;
+            ASSERT_MPI_EQ(ncclSuccess, res);
+            ASSERT_MPI_EQ(hipSuccess, syncErr);
+
+            size_t  errIdx{};
+            uint8_t expVal{}, actVal{};
+            bool    ok = verifyBufferData<uint8_t>(
+                recv, count * nRanks,
+                [count](size_t j) { return agStValue(static_cast<int>(j / count), j % count); },
+                0, 0, &errIdx, &expVal, &actVal);
+            if(!ok)
+            {
+                ADD_FAILURE() << "AllGather_HierLsaTmaST mismatch, " << (inPlace ? "in-place" : "aligned")
+                              << ", count=" << count << " index=" << errIdx << " (rank " << errIdx / count
+                              << ", offset " << errIdx % count << ")"
                               << " expected=" << static_cast<int>(expVal) << " got=" << static_cast<int>(actVal);
             }
             // Collective so a rank-local mismatch stops every rank instead of leaving peers in the next kernel.
