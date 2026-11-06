@@ -33,7 +33,6 @@ EXPRESSION_TOKEN_RE = re.compile(r"\b[A-Z][A-Z0-9_]*\b")
 # register spec, or that the spec does not define at all.
 ABSENT_COUNTERS = [
     "SQ_WAVE_CYCLES",
-    "SQ_WAIT_INST_ANY",
     "SQ_INST_CYCLES_VALU",
     "SQC_ICACHE_MISSES",
     "SQC_DCACHE_MISSES",
