@@ -113,11 +113,35 @@ The Instrumentor knows about milestones; the TrampolineBuilder and CodeObjectPat
 
 **Files:** `code/patch/trampoline_builder.h`, `code/patch/trampoline_builder.cpp`
 
-Generic byte emitter. Takes a `TrampolinePlan` and returns `TrampolineBytes{patched_anchor_bytes, trampoline_words}`. Knows nothing about `InstrumentationPoint`s or milestones. It emits two body shapes: the inline-nop body, and the probe-call envelope wrapped around the relocated original. `plan_probe_call()` selects the link/target SGPR pairs, the SCC temp, and any special-state (EXEC/VCC/M0) and SGPR-bridge temps, and reports `builder_clobbers`; `emit_probe_call()` lowers the chosen plan to bytes.
+Generic byte emitter. Takes a `TrampolinePlan` and returns `TrampolineBytes` (see [Data Types](#data-types)). Knows nothing about `InstrumentationPoint`s or milestones. It emits two body shapes: the inline-nop body, and the probe-call envelope preceding or following the relocated original. `plan_probe_call()` selects the link/target SGPR pairs, the SCC temp, and any special-state (EXEC/VCC/M0) and SGPR-bridge temps, and reports `builder_clobbers`; `emit_probe_call()` lowers the chosen plan to bytes.
+
+The low-level `probe_after_original` plan option places the relocated instruction
+before its callable envelope. It defaults to false; the Instrumentor still
+rejects `AfterInst` requests. A caller selecting this layout must supply
+preservation requirements for the state after the instruction, including its
+definitions; the builder does not compute liveness. An emitted original must
+fall through into the envelope, so a branch or terminator is not a valid choice
+for this placement. The caller must also resolve the original's software-managed
+register hazards before the envelope reads its results (including spill stores)
+or overwrites registers with pending source reads (including dead-register temps).
+For example, an MFMA result spilled by the envelope can require instruction
+spacing that the envelope's load drain does not establish. Live-after preservation
+alone does not establish readiness. The builder neither validates these
+obligations nor inserts anchor-specific hazard spacing.
+
+The emitted call-target displacement includes the relocated instruction's four
+or eight bytes only when `emit_original` is true. With the original omitted,
+both placements emit the envelope at the trampoline start and call the same
+probe body, with identical bytes and attribution offsets. `original_byte_offset`
+then names the return branch, or the end of the trampoline if no return branch
+is requested.
+`TrampolineBytes` reports the call envelope's offset and size separately from the
+guest instruction and resume branch, allowing the Instrumentor to attribute
+emitted bytes without deriving their range from a particular layout.
 
 The caller supplies the `preserve_exec`, `preserve_vcc`, and `preserve_m0` inputs. `plan_probe_call()` reserves an EXEC temp when `preserve_exec || needs_full_mask`; VCC and M0 temps follow their respective inputs. The full-mask window is required for spills, argument writes, or `force_full_exec`. The builder allocates a dead SGPR pair for each saved EXEC/VCC and a single dead SGPR for saved M0; the caller's production decisions are described in [Special state](#special-state-preservation).
 
-The probe-call envelope, in emit order, is: an in-flight-load drain; the special-state saves (`s_mov` EXEC/VCC into dead SGPR pairs, M0 into a dead SGPR); the **spill prologue** (see below); the argument writes; the anchor-mask restore; the SCC save; the `s_getpc_b64` + 64-bit add chain that materializes the copied probe body's address; `s_swappc_b64` to it; then after the call a `build_wait_all_loads_complete()` drain (so the probe's own in-flight loads finish before the restores and host resume), the SCC restore, the **spill epilogue**, and the special-state restores, before the relocated original.
+The probe-call envelope, in emit order, is: an in-flight-load drain; the special-state saves (`s_mov` EXEC/VCC into dead SGPR pairs, M0 into a dead SGPR); the **spill prologue** (see below); the argument writes; the guest-mask restore; the SCC save; the `s_getpc_b64` + 64-bit add chain that materializes the copied probe body's address; `s_swappc_b64` to it; then after the call a `build_wait_all_loads_complete()` drain (so the probe's own in-flight loads finish before state restoration and before the guest resumes), the SCC restore, the **spill epilogue**, and the special-state restores. The default layout places this envelope before the relocated original; `probe_after_original` places it after the original. Saves and restores protect the state at the selected observation point.
 
 ### Spill bracket
 
@@ -186,8 +210,8 @@ Defense-in-depth check that the orchestrator-produced `TrampolinePlan` matches t
 | `InstrumentationPoint` | request | `anchor_offset`, `kind`, `probe_obj`, `probe_symbol`, `probe_args`, `force_full_exec`, reserved `filter_flags` |
 | `ResolvedInstrumentationSite` | post-validation | `anchor_offset`, `original_size`, `original_bytes`, `mnemonic`, `kind`, `probe_index` (set for probe calls), `probe_args` |
 | `ProbeCallable` | probe registry | resolved probe `symbol`, `arch`, `target`, verified `ProbeAbi`, `body_words`, declared `arg_sources` and `force_full_exec`, `output_text_offset` |
-| `TrampolinePlan` | builder input | `arch`, `anchor_offset`, `original_size`, `original_words`, `trampoline_offset`, `return_target`, `before_items`, `after_items`, `emit_original`, `kernel_sgpr_count`, `entry_storage_base`; probe-call: `is_probe_call`, `probe_target_offset`, `link_pair_base`, `arg_vgpr_base`, `probe_args`, `force_full_exec`, `target_pair_base`, `scc_temp`, `preserve_scc`, `preserve_exec`, `preserve_vcc`, `preserve_m0`, `special_state_saves`, `vgpr_spills`, `sgpr_spills`, `acc_spills`, `spill_bridge_vgpr`, `before_word_count`, `builder_clobbers` |
-| `TrampolineBytes` | builder output | `patched_anchor_bytes`, `trampoline_words` |
+| `TrampolinePlan` | builder input | `arch`, `anchor_offset`, `original_size`, `original_words`, `trampoline_offset`, `return_target`, `before_items`, `after_items`, `emit_original`, `kernel_sgpr_count`, `entry_storage_base`; probe-call: `is_probe_call`, `probe_after_original`, `probe_target_offset`, `link_pair_base`, `arg_vgpr_base`, `probe_args`, `force_full_exec`, `target_pair_base`, `scc_temp`, `preserve_scc`, `preserve_exec`, `preserve_vcc`, `preserve_m0`, `special_state_saves`, `vgpr_spills`, `sgpr_spills`, `acc_spills`, `spill_bridge_vgpr`, `planned_envelope_word_count`, `builder_clobbers` |
+| `TrampolineBytes` | builder output | `patched_anchor_bytes`, `trampoline_words`, `original_byte_offset`, `call_envelope_byte_offset`, `call_envelope_byte_size` |
 | `InstrumentationPatch` | per-site summary (test/debug) | `anchor_offset`, `original_size`, `trampoline_offset`, optional `return_target`, `original_bytes`, `patched_anchor_bytes`; probe-call: `is_probe_call`, `probe_symbol`, `probe_target_offset`, `link_pair_base`, `target_pair_base` |
 | `InstrumentedCodeObject` | `patch()` output | `elf_bytes`, `errors`, `warnings`, `sites`, `resources` |
 | `InstrumentedCodeObjectDebug` | `patch_with_debug_summaries()` output | `InstrumentedCodeObject` + `patches` |
@@ -406,7 +430,7 @@ Branch offsets are computed in SOPP `simm16` units; the trampoline must lie with
 
 A probe-call point sets `probe_obj` + `probe_symbol`. Resolution copies the probe's self-contained body (`rj_nop_probe`: `s_waitcnt` then `s_setpc_b64 s[30:31]`) once into the cave; sites sharing a `(probe_obj, probe_symbol)` reuse that one copy. The cave is laid out as `[probe bodies][s_nop padding][entry stub][trampolines]` after the original kernel bytes; the padding and stub are present only when the kernel has an entry prologue. The forward `s_branch` at the anchor targets the trampoline (not the body); the trampoline *calls* the body via `s_swappc_b64`.
 
-The trampoline envelope wraps the relocated original:
+The default callable layout places the envelope before the relocated original:
 
 ```
 .text:
@@ -451,24 +475,32 @@ The trampoline envelope wraps the relocated original:
     s_branch <return>                   <-- back to anchor_offset + original_size
 ```
 
+The diagram shows the default placement (`probe_after_original=false`). With
+`probe_after_original=true`, the relocated original moves to the trampoline
+start, before the first in-flight-load drain; the envelope's internal order stays
+the same, and the return branch still follows it. With `emit_original=false`,
+both placements omit the original and start with the envelope. Post placement
+requires the caller obligations described under [TrampolineBuilder](#trampolinebuilder).
+
 The diagram describes the builder's conditional emissions; production probe calls request EXEC/VCC preservation as described in [Special state](#special-state-preservation). EXEC saves and restores appear when `preserve_exec || needs_full_mask`; VCC and M0 follow `preserve_vcc` and `preserve_m0`. The remaining lines are conditional: the `v_mov_b32` block is empty when the site passes no arguments; the `[spill prologue]` / `[spill epilogue]` are empty when `spill_set` is empty (leaving the plain SCC-bracketed call). The full-mask window's `exec` toggles appear whenever the site spills, passes arguments, **or** runs the probe under a full mask. A site with nothing to spill still opens the window, and still emits the re-widen over an empty epilogue so the planner and emitter count the same toggles unconditionally. Three toggles by default; two under `force_full_exec`, which drops the pre-call restore. See [TrampolineBuilder → Spill bracket](#spill-bracket) for the bracket contents. The `s_getpc_b64` + 64-bit add chain is `.text`-relative, so the materialized target is load-base-independent; the `±simm16` branch range only constrains the forward/return `s_branch`es, not the call.
 
-The `s_nop` appears only on GFX9 (CDNA1-4), which does not interlock a VALU write of an SGPR against a later vector-memory read or lane select of it, or a SALU write of M0 against a later M0 reader (LLVM `GCNHazardRecognizer::checkVMEMHazards`, `checkRWLaneHazards`, `checkReadM0Hazards`). A restored SGPR needs 5 wait states before a vector-memory read of it (resource, `soffset`, `saddr`), which also covers a `v_readlane`/`v_writelane` lane select (4) and a gfx94x VALU read (2). A restored M0 needs 1 before `s_movrel*`, `s_sendmsg`, GDS, LDS DMA or an LDS-direct read. GFX10+ interlocks these GFX9 wait-state cases. RDNA4 uses `s_wait_alu 0xf1fc` at the envelope boundaries and after restores, before the guest resumes. `emit_probe_call` counts the instructions after the last `v_readlane` (reloads, their wait, the special-state restores) and after the M0 restore (none), and tops up the larger shortfall with one `s_nop`, so a site whose reloads already fill the gap pays nothing. The pad also covers the guest instructions the return branch reaches, which are further away still. It depends on the spill sets, which are filled after planning, so it is accounted next to the bracket rather than in `before_word_count`.
+The `s_nop` appears only on GFX9 (CDNA1-4), which does not interlock a VALU write of an SGPR against a later vector-memory read or lane select of it, or a SALU write of M0 against a later M0 reader (LLVM `GCNHazardRecognizer::checkVMEMHazards`, `checkRWLaneHazards`, `checkReadM0Hazards`). A restored SGPR needs 5 wait states before a vector-memory read of it (resource, `soffset`, `saddr`), which also covers a `v_readlane`/`v_writelane` lane select (4) and a gfx94x VALU read (2). A restored M0 needs 1 before `s_movrel*`, `s_sendmsg`, GDS, LDS DMA or an LDS-direct read. GFX10+ interlocks these GFX9 wait-state cases. RDNA4 uses `s_wait_alu 0xf1fc` at the envelope boundaries and after restores, before the guest resumes. `emit_probe_call` counts the instructions after the last `v_readlane` (reloads, their wait, the special-state restores) and after the M0 restore (none), and tops up the larger shortfall with one `s_nop`, so a site whose reloads already fill the gap pays nothing. The pad also covers the guest instructions the return branch reaches, which are further away still. It depends on the spill sets, which are filled after planning, so it is accounted next to the bracket rather than in `planned_envelope_word_count`.
 
 RDNA4 additionally requires `sa_sdst(0)` (`s_wait_alu 0xfffe`) between a SALU
 write and a later SALU/VALU read when the SGPR pair has previously been read by
 VALU (RDNA4 ISA §5.7). Boundary waits do not cover later envelope writes. The
 emitter guards the scalar-save batch before argument/mask consumers, the
 `s_getpc_b64` result before the adds, and both added address halves before
-`s_swappc_b64`. These internal waits are included in `before_word_count`; the
-boundary and final restore drains remain accounted separately. The PC-relative
+`s_swappc_b64`. These internal waits are included in
+`planned_envelope_word_count`; the boundary and final restore drains remain
+accounted separately. The PC-relative
 delta uses the instruction immediately after getpc, including its guard, so the
 inserted waits preserve the materialized call target. This handling is in the
 shared DBI envelope; it does not require an analysis-specific lowering path.
 
 ### Mask policy
 
-By default the probe runs under the mask the guest had at the anchor: the envelope restores `<exec_temp>` before the `s_swappc`, so a lane inactive at the site is inactive inside the probe. `InstrumentationPoint::force_full_exec` selects the other policy. The full-mask window the envelope already opened for the spill stores and argument writes simply stays open across the call, so the body runs with every lane enabled. The anchor mask is restored afterwards by the EXEC special-state restore that every such site already reserves.
+By default the probe runs under the guest EXEC mask observed at envelope entry: the envelope restores `<exec_temp>` before the `s_swappc`, so a lane inactive at that observation point is inactive inside the probe. When `probe_after_original && emit_original` is true, the relocated instruction executes first; if it changes EXEC, the probe sees the new mask. With the original omitted, the saved mask is the guest mask at trampoline entry regardless of the placement flag. `InstrumentationPoint::force_full_exec` selects the other policy. The full-mask window the envelope already opened for the spill stores and argument writes simply stays open across the call, so the body runs with every lane enabled. The observed guest mask is restored afterwards by the EXEC special-state restore that every such site already reserves.
 
 This permits uniform bookkeeping and probes that consume an explicitly saved guest mask as data. A probe relying on execution under the original mask uses the default; per-lane operands passed under full EXEC must be interpreted using the saved mask.
 
@@ -496,7 +528,7 @@ A point may carry `probe_args`, a list of 32-bit values handed to the probe, eac
 - It runs under `EXEC = -1`, so the argument is defined in *every* lane. Written under the anchor mask instead, the inactive lanes would keep whatever the guest left in that register, and a probe reading an argument through an EXEC-independent op — `v_readlane_b32` of a fixed lane, or anything it runs after widening EXEC itself — would see stale data.
 - `v_mov_b32` writes no SCC, so it cannot disturb the save/restore pair straddling it.
 
-Passing any argument therefore opens the full-mask window even on a site that spills nothing, which costs the EXEC save/restore pair and the window's EXEC toggles. It also makes an argument-passing plan arch-dependent: reserving the EXEC temp resolves a per-arch operand code, so unlike a bare no-argument plan it cannot be built without `plan.arch`. An immediate argument adds two words to `before_word_count` and a register-sourced one adds a single word, so the existing plan/emit drift guard covers them.
+Passing any argument therefore opens the full-mask window even on a site that spills nothing, which costs the EXEC save/restore pair and the window's EXEC toggles. It also makes an argument-passing plan arch-dependent: reserving the EXEC temp resolves a per-arch operand code, so unlike a bare no-argument plan it cannot be built without `plan.arch`. An immediate argument adds two words to `planned_envelope_word_count` and a register-sourced one adds a single word, so the existing plan/emit drift guard covers them.
 
 **The argument VGPRs are builder clobbers**, which is what routes a live one into the spill set. They are the one builder clobber not *chosen* dead — the ABI fixes them — so unlike the envelope's SGPR temps they can collide with a live value, and the site's `will_spill` decision has to account for them or a spilling site would skip the EXEC save that bracketing the stores requires.
 
