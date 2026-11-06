@@ -7,7 +7,7 @@ import math
 import shutil
 import textwrap
 from io import StringIO
-from typing import Any, List, Optional, TextIO
+from typing import Any, Optional, TextIO
 
 import pandas as pd
 from rich.console import Console as RichConsole
@@ -39,7 +39,11 @@ from utils.utils_analysis import (
     get_bw_scale_and_unit,
     simplify_kernel_name,
 )
-from utils.utils_common import convert_filter_blocks_to_panel_ids, strip_ansi
+from utils.utils_common import (
+    convert_filter_blocks_to_panel_ids,
+    format_table_id,
+    strip_ansi,
+)
 
 _GUIDANCE_PANEL_MIN_WIDTH = 100
 
@@ -127,16 +131,10 @@ def get_table_string(
     df: pd.DataFrame, transpose: bool = False, decimal: int = 2
 ) -> str:
     """
-    Convert DataFrame to a formatted table string, wrapping specified columns.
+    Convert DataFrame to a formatted table string, wrapping the Kernel_Name column.
     """
     df_to_show = df.transpose().copy() if transpose else df.copy()
 
-    if "Description" in df_to_show.columns:
-        df_to_show["Description"] = (
-            df_to_show["Description"]
-            .astype(str)
-            .apply(lambda x: textwrap.fill(x, width=40))
-        )
     if "Kernel_Name" in df_to_show.columns:
         df_to_show["Kernel_Name"] = (
             df_to_show["Kernel_Name"].astype(str).apply(wrap_kernel_name)
@@ -211,7 +209,6 @@ def is_roofline_shown(
     runs: dict[str, Any],
     output: Optional[TextIO],
     panel: dict[str, Any],
-    hidden_cols: list[str],
 ) -> bool:
     has_roofline_style = any(
         data_source.get(table_type, {}).get("cli_style") == "Roofline"
@@ -291,14 +288,8 @@ def is_roofline_shown(
 
                     print(f"{base_indent}├─ {table_name}", file=output)
 
-                    # Remove hidden columns
-                    display_df = df.copy()
-                    for col in hidden_cols:
-                        if col in display_df.columns:
-                            display_df = display_df.drop(columns=[col])
-
                     table_string = get_table_string(
-                        display_df, transpose=False, decimal=args.decimal
+                        df, transpose=False, decimal=args.decimal
                     )
                     indented_table = textwrap.indent(table_string, table_indent_prefix)
                     print(indented_table, file=output)
@@ -316,7 +307,7 @@ def list_ml_operators(
 ) -> None:
     """Display operators as a call tree sorted by GPU kernel duration.
 
-    framework_labels sets the heading text (for example PyTorch or Triton).
+    framework_labels sets the heading text (for example PyTorch, Triton, or User).
     """
     if not call_trees:
         print(f"\n{', '.join(framework_labels)} Operators in: {workload_path}")
@@ -691,7 +682,6 @@ def process_table_data(
     table_config: dict[str, Any],
     table_type: str,
     comparable_columns: list[str],
-    hidden_cols: list[str],
 ) -> pd.DataFrame:
     # take the 1st run as baseline
     base_run, base_data = next(iter(runs.items()))
@@ -703,17 +693,6 @@ def process_table_data(
     result_df = pd.DataFrame(index=base_df.index)
 
     for header in base_df.columns:
-        # Skip filtered columns
-        if (
-            table_type != "raw_csv_table"
-            and args.cols
-            and base_df.columns.get_loc(header) not in args.cols
-        ):
-            continue
-
-        if header in hidden_cols:
-            continue
-
         if header not in comparable_columns:
             # Process columns that are not comparable across runs.
             if (
@@ -740,9 +719,7 @@ def process_table_data(
                 if header not in cur_df.columns:
                     continue
 
-                if (table_type == "raw_csv_table") or (
-                    table_type == "metric_table" and header not in hidden_cols
-                ):
+                if table_type in ("raw_csv_table", "metric_table"):
                     if run_name != base_run:
                         # Calculate percent difference between current and
                         # base dataframe.
@@ -791,7 +768,7 @@ def format_table_output(
 ) -> str:
     """Format table for output, handling special cases and saving to files if needed."""
 
-    table_id_str = f"{table_config['id'] // 100}.{table_config['id'] % 100}"
+    table_id_str = format_table_id(table_config["id"])
     content = ""
 
     # Check if any column in df is empty
@@ -800,8 +777,7 @@ def format_table_output(
         for col_idx in range(len(df.columns))
     )
 
-    # Do not print the table if any column is empty. PC sampling table 21.1 is
-    # exempt: its source column is all N/A when the workload lacks debug info.
+    # Do not print the table if any column is empty.
     if is_empty_columns_exist and table_id_str != PC_SAMPLING_TABLE_ID:
         title = table_config.get("title", "")
         console_log(f"Not showing table with empty column(s): {table_id_str} {title}")
@@ -928,15 +904,6 @@ def _render_membw_guidance_panel(
     return buf.getvalue()
 
 
-def resolve_hidden_columns(args: argparse.Namespace) -> List[str]:
-    """Resolve terminal columns hidden by default and user overrides."""
-    return [
-        column
-        for column in config.HIDDEN_COLUMNS_CLI
-        if column not in (args.include_cols or [])
-    ]
-
-
 def show_all(
     args: argparse.Namespace,
     runs: dict[str, Any],
@@ -959,8 +926,6 @@ def show_all(
         profiling_config.get("filter_blocks", []), gpu_arch
     )
 
-    hidden_cols = resolve_hidden_columns(args)
-
     # Check for valid roofline data once (used to skip roofline tables in the loop)
     has_valid_roofline = any(
         hasattr(workload, "roofline_peaks") and not workload.roofline_peaks.empty
@@ -980,7 +945,7 @@ def show_all(
         # Handle roofline panel (400) with custom display logic
         # Skip if --view table is set; tables 401/402 will be rendered as normal tables
         if panel_id == 400 and not _tty_view_is_table(args):
-            _ = is_roofline_shown(args, runs, output, panel, hidden_cols)
+            _ = is_roofline_shown(args, runs, output, panel)
 
         panel_content = ""  # store content of all data_source from one panel
         # Metric -> value from every table in this panel, drawn as one chart
@@ -1016,9 +981,7 @@ def show_all(
                     and panel_id not in filter_panel_ids
                     and panel_id > 100
                 ):
-                    table_id_str = (
-                        f"{table_config['id'] // 100}.{table_config['id'] % 100}"
-                    )
+                    table_id_str = format_table_id(table_config["id"])
 
                     console_log(
                         f"Not showing table not selected during profiling: "
@@ -1061,7 +1024,6 @@ def show_all(
                     table_config,
                     table_type,
                     comparable_columns,
-                    hidden_cols,
                 )
 
                 if processed_df.empty:

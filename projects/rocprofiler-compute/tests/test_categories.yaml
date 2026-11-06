@@ -26,11 +26,14 @@ test_categories:
       - test_code_object_analysis
       - test_source_snapshot_analysis
       - test_per_kernel_isa_export
+      - test_per_source_line_export
+      - test_pc_sampling_csv_export
       - test_rocpd_data
       - test_roofline_calc
       - test_roofline_main
       - test_report_shell
       - test_profiler_base
+      - test_rocprof_compute_base
       - test_pc_sampling_profile
       - test_rocprofv3_avail_interface
       - test_specs
@@ -118,6 +121,8 @@ test_categories:
       - test_code_object_analysis
       - test_source_snapshot_analysis
       - test_per_kernel_isa_export
+      - test_per_source_line_export
+      - test_pc_sampling_csv_export
       - test_pc_sampling_analysis
       - test_pc_sampling_analyze_cli
       - test_file_io
@@ -128,6 +133,7 @@ test_categories:
       - test_inject_roctx_torch_trace_collector
       - test_inject_roctx_torch_gpu
       - test_profiler_base
+      - test_rocprof_compute_base
       - test_pc_sampling_profile
       - test_rocprofv3_avail_interface
       - test_memory_chart_loader
@@ -220,6 +226,8 @@ test_categories:
       - test_code_object_analysis
       - test_source_snapshot_analysis
       - test_per_kernel_isa_export
+      - test_per_source_line_export
+      - test_pc_sampling_csv_export
       - test_pc_sampling_analysis
       - test_pc_sampling_analyze_cli
       - test_file_io
@@ -230,6 +238,7 @@ test_categories:
       - test_inject_roctx_torch_trace_collector
       - test_inject_roctx_torch_gpu
       - test_profiler_base
+      - test_rocprof_compute_base
       - test_pc_sampling_profile
       - test_rocprofv3_avail_interface
       - test_memory_chart_loader
@@ -322,6 +331,8 @@ test_categories:
       - test_code_object_analysis
       - test_source_snapshot_analysis
       - test_per_kernel_isa_export
+      - test_per_source_line_export
+      - test_pc_sampling_csv_export
       - test_pc_sampling_analysis
       - test_pc_sampling_analyze_cli
       - test_file_io
@@ -332,6 +343,7 @@ test_categories:
       - test_inject_roctx_torch_trace_collector
       - test_inject_roctx_torch_gpu
       - test_profiler_base
+      - test_rocprof_compute_base
       - test_pc_sampling_profile
       - test_rocprofv3_avail_interface
       - test_memory_chart_loader

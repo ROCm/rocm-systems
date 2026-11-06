@@ -182,20 +182,12 @@ def test_analyze_verify_deps_needs_no_workload():
 def test_pc_sampling_analyze_options():
     """Defaults, overrides, and validation for the analyze PC sampling options."""
     defaults = build_args(["analyze"])
-    assert defaults.pc_sampling_sorting_type == "count"
     assert defaults.pc_sampling_rows == 10
 
-    overrides = build_args([
-        "analyze",
-        "--pc-sampling-sorting-type",
-        "offset",
-        "--pc-sampling-rows",
-        "25",
-    ])
-    assert overrides.pc_sampling_sorting_type == "offset"
+    overrides = build_args(["analyze", "--pc-sampling-rows", "25"])
     assert overrides.pc_sampling_rows == 25
 
-    # 0 is allowed and means "show all rows".
+    # 0 is allowed and means "show all kernels".
     assert build_args(["analyze", "--pc-sampling-rows", "0"]).pc_sampling_rows == 0
 
     # Negative row counts trigger an argparse error.
@@ -205,6 +197,55 @@ def test_pc_sampling_analyze_options():
         with pytest.raises(SystemExit):
             build_args(["analyze", "--pc-sampling-rows", "-1"])
     mock_error.assert_called_once()
+
+
+# =============================================================================
+# ML API trace options
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    "values, expected",
+    [([], []), (["torch", "triton"], ["torch", "triton"])],
+)
+def test_profile_trace_ml_api_keeps_workload_command(values, expected):
+    args = build_args(
+        ["profile", "--trace-ml-api", *values, "--", "./vcopy"], experimental=True
+    )
+    assert args.trace_ml_api == expected
+    assert args.remaining == ["--", "./vcopy"]
+
+
+def test_analyze_operator_options_take_space_separated_values():
+    args = build_args(
+        [
+            "analyze",
+            "--list-operators",
+            "torch",
+            "user",
+            "--operator",
+            "torch:*conv*",
+            "*relu*",
+        ],
+        experimental=True,
+    )
+    assert args.list_operators == ["torch", "user"]
+    assert args.operator == ["torch:*conv*", "*relu*"]
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["profile", "--trace-ml-api", "user", "--", "./vcopy"],
+        ["profile", "--trace-ml-api", "torch,triton", "--", "./vcopy"],
+        ["analyze", "--list-operators", "pytorch"],
+    ],
+)
+def test_ml_api_options_reject_unknown_values(argv, capsys):
+    with pytest.raises(SystemExit) as exc:
+        build_args(argv, experimental=True)
+    assert exc.value.code == 2
+    assert "invalid choice" in capsys.readouterr().err
 
 
 # =============================================================================

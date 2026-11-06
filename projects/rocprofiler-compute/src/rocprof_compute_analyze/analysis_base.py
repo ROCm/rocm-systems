@@ -8,13 +8,12 @@ import sys
 from abc import abstractmethod
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Optional, TextIO
+from typing import Any, Optional, Set, TextIO
 
 import pandas as pd
 
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils import file_io, parser, schema
-from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.logger import (
     console_debug,
     console_error,
@@ -29,6 +28,7 @@ from utils.utils_analysis import (
 )
 from utils.utils_common import (
     PC_SAMPLING_BLOCK_IDS,
+    ROOFLINE_PANEL_ID,
     canonical_config_arch,
     get_uuid,
     is_only_pc_sampling,
@@ -84,6 +84,27 @@ class OmniAnalyze_Base:
         return any(
             block in PC_SAMPLING_BLOCK_IDS for block in config.get("filter_blocks", [])
         )
+
+    def listable_block_ids(
+        self, arch: str, sys_info: pd.Series, workload_dir: str
+    ) -> Set[str]:
+        """Return the ids of the blocks analyze shows for this workload."""
+        args = self.get_args()
+        arch_configs = self.generate_configs(
+            arch, args.config_dir, False, None, sys_info, self.get_profiling_config()
+        )
+        # Metric tables that define no metrics have empty frames even in blocks
+        # the workload didn't profile, so only tables with rows count.
+        block_ids = {
+            str(table_id // 100)
+            for table_id, table in arch_configs[arch].dfs.items()
+            if not table.empty
+        }
+        if not validate_roofline_csv(workload_dir)[0]:
+            block_ids.discard(str(ROOFLINE_PANEL_ID // 100))
+        if not self.pc_sampling_collected():
+            block_ids.discard(PC_SAMPLING_BLOCK_IDS[0])
+        return block_ids
 
     def pc_sampling_only(self) -> bool:
         """True when every collected block is PC sampling."""
@@ -306,24 +327,6 @@ class OmniAnalyze_Base:
             args.path[0][0]
         )
         profiling_config = self.get_profiling_config()
-
-        # --ml-api-trace enables every backend.
-        ml_api_trace = profiling_config.get("ml_api_trace", False)
-        for backend in KNOWN_ML_API_BACKENDS:
-            needs_trace = getattr(
-                args, f"{backend}_operator", None
-            ) is not None or getattr(args, f"list_{backend}_operators", False)
-            if needs_trace and not (
-                profiling_config.get(f"{backend}_trace", False) or ml_api_trace
-            ):
-                console_error(
-                    "ml api trace",
-                    f'Workload was not profiled with "--{backend}-trace" or '
-                    '"--ml-api-trace". '
-                    f"Cannot use --{backend}-operator or "
-                    f"--list-{backend}-operators.",
-                )
-
         for dir_info in args.path:
             if not any([
                 profiling_config.get("iteration_multiplexing"),

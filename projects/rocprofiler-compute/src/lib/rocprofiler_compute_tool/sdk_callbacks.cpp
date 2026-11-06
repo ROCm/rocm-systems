@@ -369,9 +369,12 @@ void SdkCallbacksImpl::tool_tracing_callback(rocprofiler_callback_tracing_record
         auto symbol              = kernel_symbol_record_t{};
         symbol.kernel_name       = format_kernel_name(data->kernel_name);
         symbol.kernel_short_name = truncate_name(symbol.kernel_name);
-        symbol.arch_vgpr_count   = data->arch_vgpr_count;
-        symbol.accum_vgpr_count  = data->accum_vgpr_count;
-        symbol.sgpr_count        = data->sgpr_count;
+        if (data->kernel_name)
+            symbol.mangled_name = std::string{strip_kernel_descriptor_suffix(data->kernel_name)};
+        symbol.code_object_id   = data->code_object_id;
+        symbol.arch_vgpr_count  = data->arch_vgpr_count;
+        symbol.accum_vgpr_count = data->accum_vgpr_count;
+        symbol.sgpr_count       = data->sgpr_count;
 
         // check if regex can be found in kernel name matches regex from tool data,
         // if matches store kernel id

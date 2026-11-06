@@ -40,6 +40,7 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
+from utils.mi_gpu_spec import mi_gpu_specs
 from utils.roofline_calc import (
     CACHE_LEVELS,
     SUPPORTED_DATATYPES,
@@ -51,7 +52,6 @@ from utils.roofline_calc import (
     roofline_mem_levels,
 )
 from utils.specs import MachineSpecs
-from utils.utils_analysis import get_matrix_ops_type
 
 _KERNEL_PALETTE: list[str] = pcolors.qualitative.Dark24 + pcolors.qualitative.Light24
 DEFAULT_AXIS_BOUNDS = (XMIN, XMAX_DEFAULT, 1.0, 1000000.0)
@@ -781,7 +781,9 @@ class Roofline:
         """
         is_new_figure = fig is None
 
-        sanitized_cache_hierarchy = roofline_mem_levels(self.__mspec.gpu_model)
+        sanitized_cache_hierarchy = roofline_mem_levels(
+            self.__mspec.gpu_arch, self.__mspec.gpu_model
+        )
 
         self.__ceiling_data = self._ceiling_for_dtype(dtype)
         console_debug("roofline", f"Ceiling data:\n{self.__ceiling_data}")
@@ -918,10 +920,8 @@ class Roofline:
         return flag in SUPPORTED_DATATYPES[self.__mspec.gpu_arch][dtype]
 
     def _matrix_label(self) -> str:
-        """Matrix-op label (MFMA/WMMA) for this GPU series."""
-        return get_matrix_ops_type(
-            getattr(self.__mspec, "gpu_series", "unknown_series")
-        )
+        """Matrix-op label (MFMA/WMMA) for this GPU arch."""
+        return mi_gpu_specs.get_roofline_matrix_type(self.__mspec.gpu_arch)
 
     def _compute_paths(self, dtype: str) -> list[tuple[str, str]]:
         """The compute roofs this datatype reaches on this arch, as (ceiling

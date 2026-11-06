@@ -4,10 +4,27 @@
 import argparse
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional, Tuple
 
+from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS, OPERATOR_BACKENDS
 from utils.logger import console_warning
 from utils.utils_common import METRIC_ID_RE, resolve_rocm_library_path
+
+# Deprecated options by argparse dest: the option and what to use instead
+DEPRECATED_OPTIONS: Dict[str, Tuple[str, str]] = {
+    "list_blocks": ("--list-blocks", "--list-metrics"),
+    "list_available_metrics": ("--list-available-metrics", "--list-metrics"),
+}
+
+
+def warn_deprecated_options(args: argparse.Namespace) -> None:
+    """Warn about each deprecated option the command line uses."""
+    for dest, (option, replacement) in DEPRECATED_OPTIONS.items():
+        if getattr(args, dest, None) not in (None, False):
+            console_warning(
+                f"{option} is deprecated and will be removed in a future release. "
+                f"Use {replacement} instead."
+            )
 
 
 class ExperimentalAction(argparse.Action):
@@ -21,7 +38,7 @@ class ExperimentalAction(argparse.Action):
 
     def __init__(
         self,
-        option_strings: list[str],
+        option_strings: List[str],
         help: str,
         **kwargs,
     ) -> None:
@@ -116,18 +133,11 @@ def non_negative_int(value: str) -> int:
     return parsed
 
 
-def print_avail_arch(avail_arch: list[str], args: str) -> str:
-    ret_str = f"List all available {args} for analysis on specified arch:"
-    for arch in avail_arch:
-        ret_str += f"\n   {arch}"
-    return ret_str
-
-
 def add_general_group(
     parser: argparse.ArgumentParser,
     rocprof_compute_home: Path,
-    supported_archs: dict[str, str],
-    rocprof_compute_version: dict[str, Optional[str]],
+    supported_archs: Dict[str, str],
+    rocprof_compute_version: Dict[str, Optional[str]],
 ) -> None:
     general_group = parser.add_argument_group("General Options")
 
@@ -150,16 +160,38 @@ def add_general_group(
     general_group.add_argument(
         "--list-metrics",
         dest="list_metrics",
-        metavar="",
+        metavar="id",
+        nargs="*",
+        help=(
+            "List the blocks of the current GPU.\n"
+            "Add block or metric [id]s or aliases to list their metrics with units\n"
+            'and descriptions, or "all" to list every metric. Each id or alias adds\n'
+            "to the list: --list-metrics sol 12.1 lists all of block 2 (sol) and\n"
+            "table 12.1.\n"
+            "With analyze -p <workload>, list the workload's blocks and metrics."
+        ),
+    )
+    general_group.add_argument(
+        "--list-metrics-gfx-id",
+        dest="list_metrics_gfx_id",
+        metavar="<arch>",
         choices=supported_archs.keys(),
-        help=print_avail_arch(list(supported_archs.keys()), "metrics"),
+        help=(
+            "List the blocks of GPU <arch> instead of the current GPU.\n"
+            "Add --list-metrics [id ...] to list their metrics.\n"
+            f"Values: {', '.join(supported_archs)}"
+        ),
     )
     general_group.add_argument(
         "--list-blocks",
         dest="list_blocks",
-        metavar="",
+        metavar="<arch>",
         choices=supported_archs.keys(),
-        help=print_avail_arch(list(supported_archs.keys()), "blocks"),
+        help=(
+            "DEPRECATED: use --list-metrics instead.\n"
+            "List available blocks and their aliases for specified GPU <arch>.\n"
+            f"Values: {', '.join(supported_archs)}"
+        ),
     )
     general_group.add_argument(
         "--config-dir",
@@ -180,10 +212,7 @@ def add_general_group(
         default=False,
         help=(
             "Enable experimental feature(s):\n"
-            "   Torch trace (--torch-trace, --list-torch-operators, --torch-operator)\n"
-            "   Triton trace (--triton-trace, --list-triton-operators, "
-            "--triton-operator)\n"
-            "   ML API trace (--ml-api-trace)\n"
+            "   ML API trace (--trace-ml-api, --list-operators, --operator)\n"
             "   Memory Bandwidth Analysis (--membw-analysis)\n"
             "   PC Sampling (--pc-sampling, --pc-sampling-method, "
             "--pc-sampling-interval)\n"
@@ -194,8 +223,8 @@ def add_general_group(
 def omniarg_parser(
     parser: argparse.ArgumentParser,
     rocprof_compute_home: Path,
-    supported_archs: dict[str, str],
-    rocprof_compute_version: dict[str, Optional[str]],
+    supported_archs: Dict[str, str],
+    rocprof_compute_version: Dict[str, Optional[str]],
     experimental_enabled: bool = False,
 ) -> None:
     # -----------------------------------------
@@ -328,19 +357,6 @@ Examples:
         ),
     )
     profile_group.add_argument(
-        "--torch-trace",
-        dest="torch_trace",
-        required=False,
-        default=False,
-        const=True,
-        nargs=0,
-        base_action="store_true",
-        action=ExperimentalAction,
-        experimental_enabled=experimental_enabled,
-        feature_label="Torch trace",
-        help="\t\t\tTorch Trace, maps PyTorch operators to performance counters.",
-    )
-    profile_group.add_argument(
         "-k",
         "--kernel",
         type=str,
@@ -390,7 +406,10 @@ Examples:
     profile_group.add_argument(
         "--list-available-metrics",
         dest="list_available_metrics",
-        help="\t\t\tList all available metrics for analysis on current arch",
+        help=(
+            "\t\t\tDEPRECATED: use --list-metrics instead.\n"
+            "\t\t\tList all available metrics for analysis on current arch"
+        ),
         action="store_true",
     )
     profile_group.add_argument(
@@ -408,7 +427,7 @@ Examples:
             "\t\t\tAlternatively, specify block id(s) for filtering "
             "(e.g. 12, 13, 14).\n"
             "\t\t\tAlternatively, specify block alias(es) for filtering.\n"
-            "\t\t\tAliases are arch-specific; run --list-blocks <arch> to see\n"
+            "\t\t\tAliases are arch-specific; run --list-metrics to see\n"
             "\t\t\tall valid block ids and aliases.\n"
             "\t\t\tCan provide multiple space separated arguments.\n"
             "\t\t\tCannot be used with --set, --roof-only, or --bench-only"
@@ -523,38 +542,21 @@ Examples:
     ## ----------------------------
 
     profile_group.add_argument(
-        "--triton-trace",
-        dest="triton_trace",
+        "--trace-ml-api",
+        dest="trace_ml_api",
         required=False,
-        default=False,
-        const=True,
-        nargs=0,
-        base_action="store_true",
-        action=ExperimentalAction,
-        experimental_enabled=experimental_enabled,
-        feature_label="Triton trace",
-        help=(
-            "\t\t\tTriton Trace, maps Triton kernels to performance counters.\n"
-            "\t\t\tUse when profiling Triton kernels that your code launches.\n"
-            "\t\t\tKernels generated by torch.compile are not captured;\n"
-            "\t\t\tuse --torch-trace for them.\n"
-            "\t\t\tCan be combined with --torch-trace."
-        ),
-    )
-    profile_group.add_argument(
-        "--ml-api-trace",
-        dest="ml_api_trace",
-        required=False,
-        default=False,
-        const=True,
-        nargs=0,
-        base_action="store_true",
+        default=None,
+        nargs="*",
+        choices=KNOWN_ML_API_BACKENDS,
+        metavar="framework",
+        base_action="store",
         action=ExperimentalAction,
         experimental_enabled=experimental_enabled,
         feature_label="ML API trace",
         help=(
-            "\t\t\tML API Trace, enables tracing for all supported machine\n"
-            "\t\t\tlearning framework backends (e.g. PyTorch, Triton)."
+            "\t\t\tTrace ML APIs. User ROCTx regions are always included.\n"
+            f"\t\t\tWith no arguments, traces {' and '.join(KNOWN_ML_API_BACKENDS)}.\n"
+            f"\t\t\tValues: {', '.join(KNOWN_ML_API_BACKENDS)}"
         ),
     )
     profile_group.add_argument(
@@ -633,7 +635,7 @@ rocprof-compute analyze --path <workload_path> [analyze options]
 
 -----------------------------------------------------------------------------------
 Examples:
-\trocprof-compute analyze -p workloads/vcopy/mi200/ --list-metrics gfx90a
+\trocprof-compute analyze -p workloads/vcopy/mi200/ --list-metrics
 \trocprof-compute analyze -p workloads/mixbench/mi200/ --dispatch 12 34 --decimal 3
 -----------------------------------------------------------------------------------
         """,
@@ -676,100 +678,57 @@ Examples:
         help=(
             "\t\tList all detected kernels and kernel dispatches.\n"
             "\t\tCannot be used with --output-format csv or db.\n"
-            "\t\tWith --torch-operator or --triton-operator, lists only the\n"
-            "\t\tkernels and dispatches of the matching operators."
+            "\t\tWith --operator, lists only the kernels and dispatches\n"
+            "\t\tof the matching operators."
         ),
     )
     analyze_group.add_argument(
         "--list-available-metrics",
         dest="list_available_metrics",
-        help="\t\tList all available metrics for analysis on current arch",
+        help=(
+            "\t\tDEPRECATED: use --list-metrics instead.\n"
+            "\t\tList all available metrics for analysis on the workload arch"
+        ),
         action="store_true",
     )
     analyze_group.add_argument(
-        "--list-torch-operators",
-        dest="list_torch_operators",
-        default=False,
-        const=True,
-        nargs=0,
-        base_action="store_true",
-        action=ExperimentalAction,
-        experimental_enabled=experimental_enabled,
-        feature_label="List torch operators",
-        help=(
-            "\t\tList PyTorch operators as a unified call tree with kernel "
-            "launch stats.\n"
-            "\t\tRequires --output-format stdout. Operator filters given with it "
-            "are ignored."
-        ),
-    )
-    analyze_group.add_argument(
-        "--torch-operator",
-        metavar="",
-        type=str,
-        dest="torch_operator",
+        "--list-operators",
+        dest="list_operators",
+        default=None,
         nargs="*",
+        choices=OPERATOR_BACKENDS,
+        metavar="framework",
         base_action="store",
         action=ExperimentalAction,
         experimental_enabled=experimental_enabled,
-        feature_label="Torch operator filter",
+        feature_label="List operators",
         help=(
-            "\t\tFilter operators using shell-style glob patterns (fnmatch)\n"
-            "\t\t\tand display metrics for the kernels they launched.\n"
-            "\t\t\tWith no arguments, matches all operators.\n"
-            "\t\t\tA pattern matches an operator name or its call path,\n"
-            "\t\t\tsuch as nn.Module.Net.forward/aten::addmm.\n"
-            "\t\t\tExamples:\n"
-            "\t\t\t  *relu*              contains relu\n"
-            "\t\t\t  */aten::addmm       aten::addmm called by another operator\n"
-            "\t\t\t  all  or  '*'        match every operator\n"
-            "\t\t\tMultiple patterns (space or comma-separated):\n"
-            "\t\t\t  --torch-operator *relu*,*/aten::addmm\n"
-            "\t\t\tWith -k, use the kernel ids shown in the operator tree.\n"
-            "\t\t\tRequires --output-format stdout.\n"
-            "\t\t\t(Default: **)"
+            "\t\tList collected operators as a call tree.\n"
+            "\t\tWith no arguments, lists every collected operator.\n"
+            "\t\tIgnores --operator.\n"
+            f"\t\tValues: {', '.join(OPERATOR_BACKENDS)}"
         ),
     )
     analyze_group.add_argument(
-        "--list-triton-operators",
-        dest="list_triton_operators",
-        default=False,
-        const=True,
-        nargs=0,
-        base_action="store_true",
-        action=ExperimentalAction,
-        experimental_enabled=experimental_enabled,
-        feature_label="List triton operators",
-        help=(
-            "\t\tList Triton kernels as a unified call tree with kernel launch "
-            "stats.\n"
-            "\t\tRequires --output-format stdout. Operator filters given with it "
-            "are ignored."
-        ),
-    )
-    analyze_group.add_argument(
-        "--triton-operator",
-        metavar="",
+        "--operator",
+        metavar="pattern",
         type=str,
-        dest="triton_operator",
+        dest="operator",
         nargs="*",
+        default=None,
         base_action="store",
         action=ExperimentalAction,
         experimental_enabled=experimental_enabled,
-        feature_label="Triton operator filter",
+        feature_label="Operator filter",
         help=(
-            "\t\tFilter Triton kernels using shell-style glob patterns\n"
-            "\t\t\t(fnmatch) and display metrics for the matching kernels.\n"
-            "\t\t\tWith no arguments, matches all kernels.\n"
-            "\t\t\tExamples:\n"
-            "\t\t\t  *rmsnorm_kernel*    contains rmsnorm_kernel\n"
-            "\t\t\t  *matmul*            contains matmul\n"
-            "\t\t\t  all  or  '*'        match every kernel\n"
-            "\t\t\tMultiple patterns (space or comma-separated):\n"
-            "\t\t\t  --triton-operator *matmul*,*rmsnorm_kernel*\n"
-            "\t\t\tWith -k, use the kernel ids shown in the operator tree.\n"
-            "\t\t\tRequires --output-format stdout.\n"
-            "\t\t\t(Default: **)"
+            "\t\tFilter operators with glob patterns.\n"
+            "\t\tA pattern without a prefix uses the prefix before it.\n"
+            "\t\tBefore any prefix, a pattern matches every traced\n"
+            "\t\tframework and user regions.\n"
+            "\t\tExample: --operator 'torch:*conv*' '*relu*' 'triton:*matmul*'\n"
+            "\t\tExample: --operator 'user:*UserDefined*'\n"
+            "\t\tWith no arguments, matches every collected operator.\n"
+            f"\t\tPrefixes: {', '.join(OPERATOR_BACKENDS)}"
         ),
     )
     analyze_group.add_argument(
@@ -820,6 +779,7 @@ Examples:
         help=(
             "\t\tFormat of the analysis output. One of: stdout, txt, csv, db.\n"
             "\t\t  stdout - print report to the terminal (no file/folder created).\n"
+            "\t\t           Required by --list-operators and --operator.\n"
             "\t\t  txt    - write report to <name>.txt; disables terminal output.\n"
             "\t\t  csv    - write one CSV per analysis view into a folder <name>/.\n"
             "\t\t           Requires profiles collected in rocpd format. "
@@ -844,25 +804,14 @@ Examples:
         ),
     )
     analyze_group.add_argument(
-        "--pc-sampling-sorting-type",
-        required=False,
-        metavar="",
-        dest="pc_sampling_sorting_type",
-        default="count",
-        type=str,
-        choices=["offset", "count"],
-        help="\t\tSet the sorting type of pc sampling: "
-        "offset or count (DEFAULT: count).",
-    )
-    analyze_group.add_argument(
         "--pc-sampling-rows",
         required=False,
         metavar="",
         dest="pc_sampling_rows",
         default=10,
         type=non_negative_int,
-        help="\t\tSpecify the maximum number of rows shown in the PC "
-        "sampling table; use 0 to show all rows (DEFAULT: 10).",
+        help="\t\tMaximum number of kernels shown in the PC sampling table; "
+        "use 0 to show all kernels (Default: 10).",
     )
 
     analyze_advanced_group.add_argument(
@@ -906,29 +855,6 @@ Examples:
         metavar="",
         default=2,
         help="\t\tSpecify desired decimal precision of analysis results. (DEFAULT: 2)",
-    )
-    analyze_advanced_group.add_argument(
-        "--cols",
-        type=int,
-        dest="cols",
-        metavar="",
-        nargs="+",
-        help=(
-            "\t\tSpecify column indices to display.\n"
-            "\t\tDefaults to display all columns."
-        ),
-    )
-    analyze_advanced_group.add_argument(
-        "--include-cols",
-        dest="include_cols",
-        metavar="",
-        nargs="+",
-        help=(
-            "\t\tSpecify which hidden column names should be included in cli output.\n"
-            '\t\tFor example, to show "Description" column which is hidden by '
-            "default in cli output,\n"
-            "\t\tuse the option --include-cols Description."
-        ),
     )
     analyze_advanced_group.add_argument(
         "-g", dest="debug", action="store_true", help="\t\tDebug single metric."

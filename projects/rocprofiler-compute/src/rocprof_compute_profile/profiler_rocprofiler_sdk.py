@@ -5,7 +5,7 @@ import argparse
 import os
 import shlex
 from pathlib import Path
-from typing import Optional, Union
+from typing import Dict, List, Optional, Union
 
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from rocprof_compute_soc.soc_base import OmniSoC_Base
@@ -42,7 +42,7 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
 
     def get_profiler_options(
         self, native_tool_path: Optional[str] = None
-    ) -> dict[str, Union[str, list[str]]]:
+    ) -> Dict[str, Union[str, List[str]]]:
         args = self.get_args()
         app_cmd = shlex.split(args.remaining)
 
@@ -53,7 +53,7 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             args.rocprofiler_sdk_tool_path,  # Our rocprofiler-sdk tool
             native_tool_path,  # Native tool (if provided)
         ]
-        if getattr(self, "_selected_frameworks", set()):
+        if args.trace_ml_api is not None:
             # Without this the marker tier's ROCTX calls bind to legacy
             # libroctx64, which rocprofiler-sdk does not trace.
             ld_preload_parts.append(
@@ -78,7 +78,7 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             "ROCPROF_OUTPUT_PATH": f"{args.output_directory}/out/pmc_1",
         })
 
-        if getattr(self, "_selected_frameworks", set()):
+        if args.trace_ml_api is not None:
             options["ROCPROF_MARKER_API_TRACE"] = "1"
 
         if args.iteration_multiplexing:
@@ -157,7 +157,7 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
 
     def get_pc_sampling_profiler_options(
         self, native_tool_path: Optional[str] = None
-    ) -> dict[str, Union[str, list[str]]]:
+    ) -> Dict[str, Union[str, List[str]]]:
         args = self.get_args()
         method = args.pc_sampling_method
 

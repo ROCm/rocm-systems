@@ -21,54 +21,32 @@
 import importlib
 from pathlib import Path
 
-BENCHMARKING_SUPPORTED = [
-    "gfx90a",
-    "gfx940",
-    "gfx941",
-    "gfx942",
-    "gfx950",
-    "gfx1150",
-    "gfx1151",
-    "gfx1152",
-    "gfx1153",
-    "gfx1250",
-]
+from utils.mi_gpu_spec import mi_gpu_specs
+
+BENCHMARKING_SUPPORTED = mi_gpu_specs.get_roofline_archs()
 
 
 def run_roofline_benchmark(
-    device_id: int, roofline_csv: Path, cache_sizes: dict
+    device_id: int, roofline_csv: Path, cache_sizes: dict, gpu_arch: str
 ) -> None:
     """Load device benchmark, execute, and save results to CSV."""
-    bench = load_bench(device_id, cache_sizes)
-    benchmark_metrics = bench.run_benchmark(device_id)
+    bench = load_bench(device_id, cache_sizes, gpu_arch)
+    benchmark_metrics = bench.run_benchmark(device_id, gpu_arch)
     bench.dump_csv(benchmark_metrics, str(roofline_csv))
 
 
-def load_bench(device_id: int, cache_sizes: dict) -> object:
+def bench_class(gpu_arch: str) -> type:
+    """Return the benchmark class of gpu_arch, e.g. Bench_gfx942 for "gfx942"."""
+    family = mi_gpu_specs.get_roofline_family(gpu_arch)
+    module = importlib.import_module(
+        f"roofline.benchmark.{family}.benchmark_{gpu_arch}"
+    )
+    return getattr(module, f"Bench_{gpu_arch}")
+
+
+def load_bench(device_id: int, cache_sizes: dict, gpu_arch: str) -> object:
     try:
-        from utils.hip_interface import hipGetDeviceProperties
-
-        # Get exact LLVM target name of the device
-        gfx_device = (hipGetDeviceProperties(device_id).gcnArchName).split(":", 1)[0]
-
-        # Force gfx940 MI300A_A0 and gfx941 MI300X_A0 products
-        # to use same class as gfx942 MI300_A1
-        if gfx_device == "gfx940" or gfx_device == "gfx941":
-            gfx_device = "gfx942"
-
-        # Get the gfx architecture of the device
-        gfx_arch = gfx_device[:-2]
-
-        # Dynamically import the bench class module
-        bench_module = importlib.import_module(
-            f"roofline.benchmark.{gfx_arch}.benchmark_{gfx_device}"
-        )
-
-        # Get the bench class from the module
-        bench_class = getattr(bench_module, f"Bench_{gfx_device}")
-        # Instantiate and return the bench class
-        bench_instance = bench_class(device_id, cache_sizes)
-        return bench_instance
+        return bench_class(gpu_arch)(device_id, cache_sizes, gpu_arch)
     except Exception as e:
         # Propagate error so users do not attempt to use a non-existent bench instance
         raise RuntimeError(

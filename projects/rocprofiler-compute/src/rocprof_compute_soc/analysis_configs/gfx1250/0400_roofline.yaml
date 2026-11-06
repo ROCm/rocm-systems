@@ -9,12 +9,7 @@
 Panel Config:
   id: 400
   title: Roofline
-  description: |-
-    Roofline model metrics for gfx1250 performance analysis. Includes compute
-    performance rates and memory bandwidth at each level of the hierarchy.
-
   data source:
-
   - metric_table:
       id: 401
       title: Roofline Performance Rates

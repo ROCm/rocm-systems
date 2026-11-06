@@ -20,7 +20,6 @@ Panel Config:
         sL1D-L2 BW Utilization:
           value: 100000 * SUM(SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ) / (2 * SUM($max_sclk * $sqc_per_gpu * (End_Timestamp - Start_Timestamp)))
           unit: Percent
-      comparable: false
       cli_style: simple_bar
   - metric_table:
       id: 1402

@@ -8,6 +8,4 @@ rocprof_compute_home = Path(__file__).resolve().parent
 analysis_configs_dir = rocprof_compute_home / "rocprof_compute_soc" / "analysis_configs"
 PROJECT_NAME = "rocprofiler-compute"
 
-HIDDEN_COLUMNS_CLI = ["Description"]
-
 TIME_UNITS = {"s": 10**9, "ms": 10**6, "us": 10**3, "ns": 1}

@@ -270,11 +270,8 @@ class OmniSoC_Base:
         Applies specific adjustments for MI300 series GPU models based on architecture.
         """
 
-        if gpu_model in ["mi300a", "mi300x"]:
-            if gpu_arch in ["gfx940", "gfx941"]:
-                gpu_model += "_a0"
-            elif gpu_arch == "gfx942":
-                gpu_model += "_a1"
+        if gpu_model in ["mi300a", "mi300x"] and gpu_arch == "gfx942":
+            gpu_model += "_a1"
 
         return gpu_model
 
@@ -756,7 +753,10 @@ class OmniSoC_Base:
             if not roofline_csv.is_file():
                 try:
                     run_roofline_benchmark(
-                        self.get_args().device, roofline_csv, self._mspec.cache_sizes
+                        self.get_args().device,
+                        roofline_csv,
+                        self._mspec.cache_sizes,
+                        self._mspec.gpu_arch,
                     )
                 except Exception as e:
                     console_error(

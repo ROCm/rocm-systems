@@ -40,14 +40,14 @@ UTCL1_HBM_WORKLOAD = {
 def build_mock_dfs(metric_values):
     """Build panel 3000 DataFrames from a flat metric dict."""
     table_3001_keys = [k for k in metric_values if k.startswith("L1")]
-    table_3012_keys = [k for k in metric_values if k.startswith("L2")]
-    table_3018_keys = [k for k in metric_values if k.startswith("EA")]
+    table_3002_keys = [k for k in metric_values if k.startswith("L2")]
+    table_3003_keys = [k for k in metric_values if k.startswith("EA")]
 
     dfs = {}
     for table_id, keys in [
         (3001, table_3001_keys),
-        (3012, table_3012_keys),
-        (3018, table_3018_keys),
+        (3002, table_3002_keys),
+        (3003, table_3003_keys),
     ]:
         if keys:
             dfs[table_id] = pd.DataFrame({

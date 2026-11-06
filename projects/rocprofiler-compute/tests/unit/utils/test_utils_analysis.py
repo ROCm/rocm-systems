@@ -27,7 +27,9 @@ from utils.utils_analysis import (
     NodeRollup,
     assign_native_ids,
     attach_unlocated_trees_by_launcher_thread,
+    bind_operator_patterns,
     build_operator_summary,
+    check_backends_traced,
     copy_matched_operator_subtree,
     filter_forest_by_backends,
     find_native_artifacts,
@@ -39,7 +41,9 @@ from utils.utils_analysis import (
     parse_marker_function,
     process_ml_api_trace_output,
     rollup_node_stats,
+    split_backend_prefix,
     split_operator_args,
+    traced_frameworks_from_config,
 )
 
 ALL_NATIVE_KINDS = ("counters", "dispatch", "kernel_symbols", "agents")
@@ -126,6 +130,14 @@ def leaf_operator(
     )
     rollup_node_stats(node)
     return node
+
+
+def user_region_with_nested_addmm_and_outside_relu() -> dict[str, list[CallTreeNode]]:
+    """User region1 wraps addmm; relu is a sibling root outside the region."""
+    region = CallTreeNode(name="region1", backend="user")
+    region.children = [leaf_operator("aten::addmm", "1", 50.0, kernel="addmm_kernel")]
+    relu = leaf_operator("aten::relu", "2", 10.0, kernel="relu_kernel")
+    return {"1": [region, relu]}
 
 
 def record_console_error_and_exit(monkeypatch):
@@ -1079,6 +1091,40 @@ def test_fold_identical_sibling_subtrees_merges_nested_children():
     assert folded[0].children[0].kernels["k"].launches == 2
 
 
+def test_copy_matched_operator_subtree_keeps_ancestors_and_descendants():
+    node_c = leaf_operator("C", "2", 30.0, kernel="c_kernel")
+    node_b = leaf_operator("B", "1", 20.0, kernel="b_kernel")
+    node_d = leaf_operator("D", "3", 40.0, kernel="d_kernel")
+    node_a = leaf_operator("A", "0", 10.0, kernel="a_kernel")
+    node_b.children = [node_c]
+    node_a.children = [node_b, node_d]
+    forest = {"1": [node_a]}
+
+    copied = copy_matched_operator_subtree(forest, [node_b])
+    copied_a = copied["1"][0]
+    assert copied_a.name == "A"
+    assert copied_a.kernels == {}
+    assert [child.name for child in copied_a.children] == ["B"]
+    assert [child.name for child in copied_a.children[0].children] == ["C"]
+
+
+def test_copy_matched_user_region_keeps_nested_work_and_unions_relu():
+    forest = user_region_with_nested_addmm_and_outside_relu()
+    region1, sibling = forest["1"]
+
+    copied = copy_matched_operator_subtree(forest, [region1])
+    roots = copied["1"]
+    assert [root.name for root in roots] == ["region1"]
+    assert [child.name for child in roots[0].children] == ["aten::addmm"]
+    assert "addmm_kernel" in roots[0].children[0].kernels
+
+    unioned = copy_matched_operator_subtree(forest, [region1, sibling])
+    union_roots = unioned["1"]
+    assert [root.name for root in union_roots] == ["region1", "aten::relu"]
+    assert [child.name for child in union_roots[0].children] == ["aten::addmm"]
+    assert "relu_kernel" in union_roots[1].kernels
+
+
 def test_filter_forest_by_backends_strips_scaffolding_kernels():
     child = leaf_operator(
         "triton.JITFunction.matmul_kernel",
@@ -1105,21 +1151,100 @@ def test_filter_forest_by_backends_strips_scaffolding_kernels():
     assert "triton_matmul_kernel" in forest["1"][0].children[0].kernels
 
 
-def test_copy_matched_operator_subtree_keeps_ancestors_and_descendants():
-    node_c = leaf_operator("C", "2", 30.0, kernel="c_kernel")
-    node_b = leaf_operator("B", "1", 20.0, kernel="b_kernel")
-    node_d = leaf_operator("D", "3", 40.0, kernel="d_kernel")
-    node_a = leaf_operator("A", "0", 10.0, kernel="a_kernel")
-    node_b.children = [node_c]
-    node_a.children = [node_b, node_d]
-    forest = {"1": [node_a]}
+def test_filter_forest_by_backends_user_keeps_the_whole_region():
+    forest = user_region_with_nested_addmm_and_outside_relu()
+    filtered = filter_forest_by_backends(forest, ["user"])
+    assert [root.name for root in filtered["1"]] == ["region1"]
+    assert [child.name for child in filtered["1"][0].children] == ["aten::addmm"]
+    assert filter_forest_by_backends(forest, []) is forest
 
-    copied = copy_matched_operator_subtree(forest, [node_b])
-    copied_a = copied["1"][0]
-    assert copied_a.name == "A"
-    assert copied_a.kernels == {}
-    assert [child.name for child in copied_a.children] == ["B"]
-    assert [child.name for child in copied_a.children[0].children] == ["C"]
+
+@pytest.mark.parametrize(
+    "profiling_config, expected",
+    [
+        ({}, []),
+        ({"trace_ml_api": None}, []),
+        ({"trace_ml_api": ["torch", "triton"]}, ["torch", "triton"]),
+    ],
+)
+def test_traced_frameworks_from_config(profiling_config, expected):
+    assert traced_frameworks_from_config(profiling_config) == expected
+
+
+def test_check_backends_traced_accepts_user_regions():
+    check_backends_traced(["torch", "user"], ["torch"])
+
+
+@pytest.mark.parametrize(
+    "backends, traced_frameworks, message",
+    [
+        pytest.param(["triton"], ["torch"], "--trace-ml-api triton", id="untraced"),
+        pytest.param([], [], "Profile again with --trace-ml-api", id="no_trace"),
+    ],
+)
+def test_check_backends_traced_rejects(backends, traced_frameworks, message):
+    with pytest.raises(ValueError, match=message):
+        check_backends_traced(backends, traced_frameworks)
+
+
+@pytest.mark.parametrize(
+    "pattern, expected",
+    [
+        ("torch:*conv*", ("torch", "*conv*")),
+        ("torch:*/aten::addmm", ("torch", "*/aten::addmm")),
+        ("*/aten::addmm", (None, "*/aten::addmm")),
+        ("*relu*", (None, "*relu*")),
+        ("user:", ("user", "**")),
+    ],
+)
+def test_split_backend_prefix(pattern, expected):
+    assert split_backend_prefix(pattern) == expected
+
+
+@pytest.mark.parametrize(
+    "patterns, traced_frameworks, expected",
+    [
+        pytest.param(
+            ["torch:*conv*", "*relu*", "triton:*matmul*"],
+            ["torch", "triton"],
+            {"torch": ["*conv*", "*relu*"], "triton": ["*matmul*"]},
+            id="prefix_carries_forward",
+        ),
+        pytest.param(
+            ["*relu*"],
+            ["torch"],
+            {"torch": ["*relu*"], "user": ["*relu*"]},
+            id="no_prefix_matches_traced_and_user",
+        ),
+        pytest.param(
+            [],
+            ["triton"],
+            {"triton": ["**"], "user": ["**"]},
+            id="no_patterns_match_everything",
+        ),
+        pytest.param(
+            ["user:*UserDefined*"],
+            ["torch"],
+            {"user": ["*UserDefined*"]},
+            id="user_prefix",
+        ),
+    ],
+)
+def test_bind_operator_patterns(patterns, traced_frameworks, expected):
+    assert bind_operator_patterns(patterns, traced_frameworks) == expected
+
+
+@pytest.mark.parametrize(
+    "patterns, traced_frameworks, message",
+    [
+        pytest.param(["toch:*relu*"], ["torch"], "prefix 'toch'", id="unknown"),
+        pytest.param(["triton:*mm*"], ["torch"], "api triton", id="untraced"),
+        pytest.param(["*relu*"], [], "Profile again", id="no_trace"),
+    ],
+)
+def test_bind_operator_patterns_rejects(patterns, traced_frameworks, message):
+    with pytest.raises(ValueError, match=message):
+        bind_operator_patterns(patterns, traced_frameworks)
 
 
 def test_kernel_stats_length_mismatch_records_error():
@@ -1339,26 +1464,6 @@ def test_build_operator_summary_empty_input_returns_empty_with_full_schema():
     summary = build_operator_summary({})
     assert list(summary.columns) == _OPERATOR_SUMMARY_COLUMNS
     assert summary.empty
-
-
-# get_matrix_ops_type Tests
-##############################################################################
-
-
-def test_get_matrix_ops_type():
-    """
-    CDNA2/3/4 GPU series should return MFMA.
-    Non-CDNA GPU series should return WMMA, including unknown series or empty str.
-    """
-    from utils.utils_analysis import get_matrix_ops_type
-
-    assert get_matrix_ops_type("MI200") == "MFMA"
-    assert get_matrix_ops_type("MI300") == "MFMA"
-    assert get_matrix_ops_type("MI350") == "MFMA"
-
-    assert get_matrix_ops_type("navi3") == "WMMA"
-    assert get_matrix_ops_type("unknown_series") == "WMMA"
-    assert get_matrix_ops_type("") == "WMMA"
 
 
 # =============================================================================

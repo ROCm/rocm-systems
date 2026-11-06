@@ -1,7 +1,7 @@
 # EA Bottleneck Detection Workloads
 
 HIP workloads targeting MI350 EA (Efficiency Arbiter) memory bandwidth bottleneck
-detection metrics (tables 30.13--30.18 in `3000_mem_bw.yaml`). Each workload has a
+detection metrics (table 30.3 in `3000_mem_bw.yaml`). Each workload has a
 **baseline** (exhibits the bottleneck) and **optimized** variant (mitigates it),
 selected via the `opt` CLI argument.
 
@@ -68,14 +68,14 @@ hipcc -g ea_hbm_read_bw.hip -o ea_hbm_read_bw
 
 # Profile baseline
 src/rocprof-compute profile -n ea_test_baseline \
-    -b 30.13 30.14 30.15 30.16 30.17 30.18 \
+    -b 30.3 \
     --experimental --membw-analysis --no-roof \
     --output-directory /tmp/ea_test_baseline \
     -- ./sample/membw_analysis_test_suite/ea/ea_hbm_read_bw
 
 # Profile optimized
 src/rocprof-compute profile -n ea_test_opt \
-    -b 30.13 30.14 30.15 30.16 30.17 30.18 \
+    -b 30.3 \
     --experimental --membw-analysis --no-roof \
     --output-directory /tmp/ea_test_opt \
     -- ./sample/membw_analysis_test_suite/ea/ea_hbm_read_bw opt
@@ -88,17 +88,17 @@ Side-by-side baseline vs. optimized comparison:
 ```bash
 src/rocprof-compute analyze \
     -p /tmp/ea_test_baseline -p /tmp/ea_test_opt \
-    -b 30.13 30.14 30.15 30.16 30.17 30.18
+    -b 30.3
 ```
 
 To analyze each run independently:
 
 ```bash
 src/rocprof-compute analyze -p /tmp/ea_test_baseline \
-    -b 30.13 30.14 30.15 30.16 30.17 30.18
+    -b 30.3
 
 src/rocprof-compute analyze -p /tmp/ea_test_opt \
-    -b 30.13 30.14 30.15 30.16 30.17 30.18
+    -b 30.3
 ```
 
 ## Validation Results (MI350X)
