@@ -1059,9 +1059,7 @@ TEST(HostDispatchLcovMicrotest, EachSourceFileKeepsItsOwnRecord)
 
 TEST(HostDispatchLcovMicrotest, CountingLinesAreRecomputedNotCarriedOver)
 {
-    // llvm-cov's own FNF/LF/BRF count its internal regions, not the records beside them -- a
-    // record with 648 FN lines can be headed FNF:258 -- so summing the inputs' numbers would
-    // give totals that match neither the records nor anything lcov computes from them.
+    // Why the inputs' counting lines are ignored rather than summed: see parseLcov().
     const std::string merged = mergeLcovTracefiles({
         tracefile("/src/init.cc", "DA:10,1\nDA:11,1\nLF:999\nLH:999\n"),
     });

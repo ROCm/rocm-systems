@@ -28,9 +28,6 @@
 // not the caller's to supply. Deliberately has no default: a shared helper with one is a helper
 // every caller leaves unnamed.
 //
-//     const ScopedDir dir("rccl-csv-tuner");
-//     std::ofstream(std::filesystem::path(dir.path()) / "config.csv") << ...;
-//
 // The directory is created under std::filesystem::temp_directory_path() (honouring TMPDIR), not
 // a hardcoded /tmp, so a test run with a TMPDIR of its own keeps its files there.
 class ScopedDir {
@@ -40,11 +37,9 @@ public:
         const std::string tmpl =
             (std::filesystem::temp_directory_path() / (std::string(prefix) + "-XXXXXX")).string();
         std::string buffer = tmpl;
-        // A test that cannot get a temp directory has nothing left to prove, and handing back an
-        // empty path would put remove_all("") in the destructor and relative paths in the test
-        // body -- the working directory, silently. Die here instead, where the reason is known.
-        // Reported from the untouched template: mkdtemp leaves *buffer* undefined on failure, so
-        // the half-substituted name it holds is not a path anything actually tried to create.
+        // Dies rather than hands back an empty path, which would mean remove_all("") in the
+        // destructor and silently working-directory-relative paths in the test body. Reported
+        // from *tmpl*: mkdtemp leaves *buffer* undefined, so its name is not a path anyone tried.
         if (mkdtemp(buffer.data()) == nullptr) {
             fmt::print(stderr, "ScopedDir: mkdtemp(\"{}\") failed: {}\n", tmpl,
                        std::strerror(errno));
