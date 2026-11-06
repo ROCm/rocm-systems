@@ -577,7 +577,7 @@ std::string Sysfs::generate(const std::vector<GpuInfo> &gpus, bool publish_peer_
 }
 
 Sysfs::GpuInfo gpu_info_from_config(const config::KfdDeviceConfig &dev, uint32_t num_xcc,
-                                    const config::PciDeviceConfig &pci) {
+                                    const config::PciDeviceConfig &pci, bool publish_peer_links) {
   Sysfs::GpuInfo gpu{};
   gpu.gpu_id = dev.gpu_id;
   gpu.gfx_target_version = dev.gfx_target_version;
@@ -628,6 +628,12 @@ Sysfs::GpuInfo gpu_info_from_config(const config::KfdDeviceConfig &dev, uint32_t
   gpu.num_cp_queues = dev.num_cp_queues;
   gpu.max_engine_clk_fcompute = dev.max_engine_clk_fcompute;
   gpu.num_xcc = num_xcc;
+  if (!publish_peer_links) {
+    // Until a manifest route can execute peer accesses, keep all KFD and
+    // daemon metadata that ROCr uses to infer an XGMI peer path conservative.
+    gpu.hive_id = 0;
+    gpu.num_sdma_xgmi_engines = 0;
+  }
   return gpu;
 }
 

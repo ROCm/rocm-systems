@@ -175,7 +175,8 @@ private:
 
 /// @brief Convert a parsed KFD device config into generated sysfs GPU metadata.
 Sysfs::GpuInfo gpu_info_from_config(const config::KfdDeviceConfig &dev, uint32_t num_xcc,
-                                    const config::PciDeviceConfig &pci = {});
+                                    const config::PciDeviceConfig &pci = {},
+                                    bool publish_peer_links = true);
 
 } // namespace rocjitsu
 

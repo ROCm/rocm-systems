@@ -6,6 +6,7 @@ rj_add_object_library(rocjitsu_vm
     virtual_machine.cpp
     topology_assembly.cpp
     rj_vm.cpp
+    rj_vm_config.cpp
     amdgpu/partitioning.cpp
 )
 
