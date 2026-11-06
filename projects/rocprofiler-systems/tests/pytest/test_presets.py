@@ -266,6 +266,10 @@ _PRESET_SAMPLING_ENV = {
     "ROCPROFSYS_USE_PROCESS_SAMPLING": "ON",
 }
 
+# amd-smi-rules.json expects every amd-smi metric, but only busy, temp, power and
+# mem_usage are collected by default.
+_ALL_AMD_SMI_METRICS_ENV = {"ROCPROFSYS_AMD_SMI_METRICS": "all"}
+
 # The "Preset:" banner is only printed from -v 1.
 _VERBOSE_1 = ["-v", "1"]
 
@@ -300,7 +304,7 @@ DOMAIN_ARTIFACT_CASES = [
     pytest.param(
         ["--gpu"],
         ["ROCPROFSYS_USE_AMD_SMI=true"],
-        None,
+        _ALL_AMD_SMI_METRICS_ENV,
         ["hip_runtime_api"],
         ["baseline", "amd-smi"],
         _ALL_GPU_COUNTERS,
@@ -396,7 +400,7 @@ DOMAIN_ARTIFACT_CASES = [
             "ROCPROFSYS_USE_AMD_SMI=true",
             _ALL_ROCM,
         ],
-        None,
+        _ALL_AMD_SMI_METRICS_ENV,
         ["hip_runtime_api", "kernel_dispatch", "memory_copy"],
         ["baseline", "amd-smi"],
         _ALL_GPU_COUNTERS,

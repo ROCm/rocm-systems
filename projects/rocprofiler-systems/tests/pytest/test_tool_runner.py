@@ -1094,7 +1094,11 @@ class TestBackendFlagsGpuArtifacts(RocprofsysTest):
     def test_include_amd_smi(
         self, domain_backend_flag_env, validation_rules_dir, transpose_baseline_rules
     ):
-        env = {**domain_backend_flag_env, "ROCPROFSYS_USE_AMD_SMI": "OFF"}
+        env = {
+            **domain_backend_flag_env,
+            "ROCPROFSYS_USE_AMD_SMI": "OFF",
+            "ROCPROFSYS_AMD_SMI_METRICS": "all",
+        }
         result = self.run_transpose_sample(env, ["-I", "amd-smi", *_ROCM_KERNEL_ARGS])
         self.assert_regex(result, pass_regex=["ROCPROFSYS_USE_AMD_SMI=true"])
         assert_resolved_settings(result, {"ROCPROFSYS_USE_AMD_SMI": True})
