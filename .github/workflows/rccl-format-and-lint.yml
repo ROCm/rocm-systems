@@ -147,7 +147,13 @@ jobs:
           {
             echo "## clang-tidy (advisory)"
             echo
-            if [ ! -s "$FINDINGS" ]; then
+            # -f before -s: the step runs on failure too, and every way the
+            # script can die leaves no findings file at all. Testing only for
+            # emptiness would report a run that never happened as a clean one.
+            if [ ! -f "$FINDINGS" ]; then
+              echo ":warning: clang-tidy did not complete, so nothing was analysed."
+              echo "See the \`Run clang-tidy\` step log for the error."
+            elif [ ! -s "$FINDINGS" ]; then
               echo "No findings in RCCL-owned files."
             else
               echo "$(wc -l < "$FINDINGS") finding(s) in RCCL-owned files:"
