@@ -31,6 +31,10 @@ namespace rocjitsu {
 /// @brief Abstract plugin interface for execution hooks.
 ///
 /// Plugins receive callbacks at key points during simulation execution.
+/// Plugin callbacks, policy queries, construction and destruction must not throw.
+/// Expected instruction failures use Wavefront::report_instruction_execution_error();
+/// callbacks must still preserve issue/completion accounting and cancellation.
+/// This is a semantic contract; callback types do not impose noexcept.
 /// All hooks have empty default implementations so plugins only override
 /// what they need. The no-plugin path has near-zero overhead (the
 /// default empty group returns before locking or dispatch).

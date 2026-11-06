@@ -313,30 +313,6 @@ TEST_F(PluginLoaderTest, RejectedFileOnlyCandidateDiscardsSimulationSummary) {
   EXPECT_EQ(diagnostic.find("No races detected."), std::string::npos);
 }
 
-TEST_F(PluginLoaderTest, CApiTranslatesForeignInitializationExceptions) {
-  for (const char *failure : {"standard", "nonstandard"}) {
-    SCOPED_TRACE(failure);
-    rocjitsu::SoC soc("plugin_loader_test");
-    soc.set_plugin_group(nullptr);
-    std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(new rj_vm_t, rj_vm_destroy);
-    vm->soc = &soc;
-    const char *config = R"({"require_all_plugins":true,"plugins":{"good":{}}})";
-    ASSERT_EQ(rj_vm_load_plugins(vm.get(), config, PLUGIN_LOADER_FIXTURE_DIR),
-              ROCJITSU_STATUS_SUCCESS);
-    ASSERT_EQ(setenv("ROCJITSU_PLUGIN_TEST_THROW_INIT", failure, 1), 0);
-    testing::internal::CaptureStderr();
-    rj_status_t status = ROCJITSU_STATUS_SUCCESS;
-    EXPECT_NO_THROW(status = rj_vm_load_plugins(vm.get(), config, PLUGIN_LOADER_FIXTURE_DIR));
-    const std::string diagnostic = testing::internal::GetCapturedStderr();
-    unsetenv("ROCJITSU_PLUGIN_TEST_THROW_INIT");
-    EXPECT_EQ(status, ROCJITSU_STATUS_ERROR);
-    EXPECT_NE(diagnostic.find(std::string_view(failure) == "standard"
-                                  ? "fixture initialization failed"
-                                  : "unknown plugin exception"),
-              std::string::npos);
-  }
-}
-
 TEST_F(PluginLoaderTest, CApiEmptyInputRemovesInstalledPlugins) {
   rocjitsu::SoC soc("plugin_loader_test");
   soc.set_plugin_group(nullptr);
