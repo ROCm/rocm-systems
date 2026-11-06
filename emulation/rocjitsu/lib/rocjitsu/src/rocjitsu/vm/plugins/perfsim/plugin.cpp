@@ -626,17 +626,12 @@ struct PerfsimPlugin::Impl {
   }
 
   static void host_log(FfmLogLevel level, const char *message) noexcept {
-    try {
-      std::lock_guard lock(host_log_mutex());
-      Impl *instance = host_log_instance();
-      if (!instance)
-        return;
-      instance->owner.sink().write(
-          std::format("[perfsim:{}] {}\n", host_log_level_name(level), message ? message : ""));
-    } catch (...) {
-      // The logger is a C ABI callback and must not propagate an exception into
-      // the backend. A failed diagnostic must not abort emulation.
-    }
+    std::lock_guard lock(host_log_mutex());
+    Impl *instance = host_log_instance();
+    if (!instance)
+      return;
+    instance->owner.sink().write(
+        std::format("[perfsim:{}] {}\n", host_log_level_name(level), message ? message : ""));
   }
 
   void activate_host_log() {
@@ -663,15 +658,7 @@ struct PerfsimPlugin::Impl {
     if (supports_host_log)
       activate_host_log();
     const FfmHostApi host{negotiated_api_version, supports_host_log ? &host_log : nullptr};
-    try {
-      invoke_foreign_abi(api.on_init, &host);
-    } catch (...) {
-      if (supports_host_log)
-        deactivate_host_log();
-      shutdown_called = true;
-      instance_claim.release();
-      throw;
-    }
+    invoke_foreign_abi(api.on_init, &host);
     initialized = true;
   }
 

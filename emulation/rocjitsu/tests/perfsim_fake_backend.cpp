@@ -9,7 +9,6 @@
 #include <iomanip>
 #include <mutex>
 #include <sstream>
-#include <stdexcept>
 #include <string>
 #include <thread>
 #include <type_traits>
@@ -301,15 +300,12 @@ bool has_expected_v8_native_bitfield_layout() {
 }
 
 void trace(const std::string &line) noexcept {
-  try {
-    std::lock_guard<std::mutex> lock(trace_mutex);
-    const char *path = std::getenv("ROCJITSU_PERFSIM_FAKE_TRACE");
-    if (!path || !*path)
-      return;
-    std::ofstream output(path, std::ios::app);
-    output << line << '\n';
-  } catch (...) {
-  }
+  std::lock_guard<std::mutex> lock(trace_mutex);
+  const char *path = std::getenv("ROCJITSU_PERFSIM_FAKE_TRACE");
+  if (!path || !*path)
+    return;
+  std::ofstream output(path, std::ios::app);
+  output << line << '\n';
 }
 
 bool mode_is(const char *value) {
@@ -325,8 +321,6 @@ void on_init(const FfmHostApi *host) {
     return;
   }
   host_log = host->log;
-  if (mode_is("throw_on_init"))
-    throw std::runtime_error("injected backend on_init failure");
   if (mode_is("v12_only") || mode_is("v11_only"))
     trace(host_log ? "host_log present" : "host_log absent");
   if ((mode_is("host_log") || mode_is("v12_only")) && host_log)

@@ -2648,45 +2648,6 @@ TEST_F(PerfsimPluginTest, RejectsBackendWithoutFactorySymbol) {
   ASSERT_TRUE(plugin.initialize(plugin_config().c_str()).succeeded());
 }
 
-TEST_F(PerfsimPluginTest, FailedActivationReleasesClaimWithoutClobberingNextInstance) {
-  auto failed = std::make_unique<PerfsimPlugin>();
-  ASSERT_TRUE(failed->initialize(plugin_config().c_str()).succeeded());
-  setenv("ROCJITSU_PERFSIM_FAKE_MODE", "throw_on_init", 1);
-  EXPECT_THROW(failed->onInit(), std::runtime_error);
-
-  setenv("ROCJITSU_PERFSIM_FAKE_MODE", "host_log", 1);
-  auto active = std::make_unique<PerfsimPlugin>();
-  ASSERT_TRUE(active->initialize(plugin_config().c_str()).succeeded());
-  active->onInit();
-  const std::string before_failed_hooks = read_file(trace_.path());
-  WaveFixture fixture;
-  const KernelDispatchInfo info = dispatch_info(71);
-  failed->onAmdgpuDispatchPacketProcessed(info);
-  failed->onAmdgpuDispatchExecutionBegin(info.dispatch_id);
-  Wavefront &wave = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0);
-  failed->onAmdgpuWavefrontDispatched(wave);
-  const std::array<uint32_t, 1> end_words{0xBF810000};
-  SyntheticInstruction end("s_endpgm", end_words, PROGRAM_TERMINATOR);
-  failed->onAmdgpuBeforeExecuteInstruction(0x4000, end, wave);
-  failed->onAmdgpuWavefrontHalted(wave);
-  failed->onAmdgpuDispatchExecutionEnd(info.dispatch_id);
-  EXPECT_EQ(read_file(trace_.path()), before_failed_hooks);
-  failed.reset();
-  // A failed instance must not clear the new instance's singleton claim.
-  PerfsimPlugin extra;
-  EXPECT_TRUE(extra.initialize(plugin_config().c_str()).failed());
-  testing::internal::CaptureStderr();
-  active->onShutdown();
-  const std::string diagnostic = testing::internal::GetCapturedStderr();
-  EXPECT_NE(diagnostic.find("fake backend shutting down"), std::string::npos);
-  active.reset();
-  ASSERT_TRUE(extra.initialize(plugin_config().c_str()).succeeded());
-  extra.onInit();
-  extra.onShutdown();
-  const auto trace = lines(read_file(trace_.path()));
-  EXPECT_EQ(std::ranges::count(trace, "shutdown"), 2);
-}
-
 TEST_F(PerfsimPluginTest, SequentialInstancesShutdownOnceWithoutUnloadingBackend) {
   const std::string config = plugin_config();
   for (int i = 0; i < 2; ++i) {
