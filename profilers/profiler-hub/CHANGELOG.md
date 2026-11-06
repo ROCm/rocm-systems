@@ -166,6 +166,10 @@ downstream consumer of the library.
 
 ### Changed
 
+- `ph_trace_cache_directory()` and the cache writers name the folder
+  `<date>_<format>_<version>_<name>_<size>` instead of a 16-digit hash, for
+  example `20261106-110502_rocpd_v3.0.0_trace_70b_1024_32_1.5GB`. Folders
+  named with the old hash are no longer read and can be deleted.
 - `storage_t::get_storage_version()` uses the same schema-version rules as
   `probe_file()`. All three split tags are required, otherwise
   `schema_version` must be `major`, `major.minor`, or `major.minor.patch`.

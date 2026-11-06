@@ -173,7 +173,7 @@ Opening a schema-2 trace creates indexes inside the `.rpd` file
 (`ph_rocpd_v2_api_track`, `ph_rocpd_v2_op_track`,
 `ph_rocpd_v2_monitor_track`, `ph_rocpd_v2_api_ops_api`,
 `ph_rocpd_v2_api_ops_op`). Schema 3 creates `idx_<table>_<guid>_niptid`. The
-index step runs before the cache folder name is computed, so the hash sees the
+index step runs before the cache folder name is computed, so the name sees the
 file after the indexes exist.
 
 ## 4. Paths from the interface to the database

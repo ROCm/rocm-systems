@@ -93,8 +93,8 @@ extern "C"
      *        @p cache_directory. Null or empty leaves timeline data in memory,
      *        the same as ph_ctx_create_files().
      * @param cache_directory Application configuration folder. The cache is
-     *        created at <cache_directory>/<hex>/timeline, where the hex name
-     *        is a hash of each source path, size, and last-write time.
+     *        created at <cache_directory>/<folder>/timeline. The folder name
+     *        is built by ph_trace_cache_directory().
      *        A later open of the same files reads the timeline from that
      *        cache. Table queries still read the trace database.
      */
@@ -106,10 +106,12 @@ extern "C"
 
     /**
      * @brief Folder created by ph_ctx_create_files_cached() for these files.
-     *        It is <cache_directory>/<hex>, and holds timeline/, catalog/, and summary.bin.
-     *        The hex name uses the same path, size, and last-write time hash
-     *        as the cache writer, so @p paths must be the same files in the
-     *        same order.
+     *        It is <cache_directory>/<folder>, and holds timeline/, catalog/, and summary.bin.
+     *        The folder name is <date>_<format>_<version>_<name>_<size>: the
+     *        newest last-write time to the second, the format and schema
+     *        version from the first file, the first file's name, and the total
+     *        size. The cache writer uses the same name, so @p paths must be the
+     *        same files in the same order.
      * @param cache_root Application configuration folder. Null or empty
      *        yields an empty path.
      * @param paths Source files. Null only when @p path_count is 0.

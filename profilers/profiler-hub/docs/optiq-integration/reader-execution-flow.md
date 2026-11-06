@@ -62,10 +62,10 @@ flowchart TB
     ctr["cached_track_reader<br/>in-memory tracks"]
     tfs["track_file_store"]
     cas["catalog_aggregate_store"]
-    hashdir["cache_directory<br/>FNV-1a folder name"]
+    namedir["cache_directory<br/>date_format_version_name_size folder"]
   end
 
-  subgraph disk ["Cache folder: config/16hex/"]
+  subgraph disk ["Cache folder: config/date_format_version_name_size/"]
     d_tl[("timeline/<br/>timeline.meta, strings.bin,<br/>e_id.bin, i_id.bin, s_id.bin")]
     d_cat[("catalog/<br/>aggregates-src.bin<br/>derived-src.bin")]
     d_sum[("summary.bin")]
@@ -105,7 +105,7 @@ flowchart TB
   o_store -.->|"append"| d_sum
   o_loadall --> c_qread
   o_trim --> c_trim
-  o_clean --> c_dir --> hashdir
+  o_clean --> c_dir --> namedir
 
   c_events --> run_op
   c_hist --> run_op
@@ -125,7 +125,7 @@ flowchart TB
   readtrace --> pool
   readtrace -.->|"load or save"| cas
   readtrace -.->|"prepare, write or read"| tfs
-  readtrace --> hashdir
+  readtrace --> namedir
   cas -.-> d_cat
   tfs -.-> d_tl
 
@@ -444,7 +444,7 @@ sequenceDiagram
 
   O->>O: HubYamlFiles(path) gives the same path list as the open
   O->>C: ph_trace_cache_directory(config folder, paths)
-  C->>H: FNV-1a over path, size, mtime
-  H-->>O: config/16hex
+  C->>H: probe format and version, newest mtime, name, total size
+  H-->>O: config/date_format_version_name_size
   O->>FS: delete folder (timeline, catalog, summary.bin)
 ```

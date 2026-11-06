@@ -100,7 +100,7 @@ profiler-hub/
 
 | File | Role | Purpose |
 |---|---|---|
-| `cache_directory.hpp`, `cache_directory.cpp` | Cache | Names the per-trace cache folder: FNV-1a of each source path, size, and modification time. |
+| `cache_directory.hpp`, `cache_directory.cpp` | Cache | Names the per-trace cache folder: `<date>_<format>_<version>_<name>_<size>`. |
 | `cached_track_reader.hpp`, `cached_track_reader.cpp` | Cache | In-memory per-track cache of sorted events, nesting depth, and samples. Uses the timeline files when they are attached. |
 | `track_file_store.hpp`, `track_file_store.cpp` | Cache | The `timeline/` folder: per-track event, sample, and depth-index files, strings, and the stored histogram. |
 | `catalog_aggregate_store.hpp`, `catalog_aggregate_store.cpp` | Cache | The `catalog/` folder: schema-2 aggregates (PHC1) and schema-3 derived tracks (PHD1). |

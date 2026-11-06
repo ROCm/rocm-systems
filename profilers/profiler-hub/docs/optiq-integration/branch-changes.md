@@ -130,7 +130,7 @@ so the justification can be typed in directly.
 | Change | Files affected | Justification |
 |---|---|---|
 | Added `PROFILER_HUB_ENABLE_ROCPD_V2` and `PROFILER_HUB_ENABLE_ROCPD_V3` build switches. | `CMakeLists.txt`, `source/CMakeLists.txt`, `source/formats/trace_formats.cpp` | Each format can be left out of a build. |
-| Cache folder named by FNV-1a of each source path, size, and modification time. | `source/cache_directory.hpp`, `source/cache_directory.cpp` | One folder per trace. A changed trace gets a new folder instead of stale data. |
+| Cache folder named `<date>_<format>_<version>_<name>_<size>` from the newest source mtime, probed format and version, first file name, and total size. | `source/cache_directory.hpp`, `source/cache_directory.cpp` | One folder per trace. A changed trace gets a new folder instead of stale data. |
 | Added `ph_ctx_create_files_cached`. | `include/c/profiler_hub.h`, `source/profiler_hub_c_api.cpp`, `source/ph_ctx.hpp`, `source/ph_ctx.cpp` | The application chooses the cache root, such as its config folder. |
 | Added `ph_trace_cache_directory`. | `include/c/profiler_hub.h`, `source/profiler_hub_c_api.cpp` | The application can find the folder to delete it or to store its own files there. |
 | Timeline cache: per-track event, sample, and depth-index files, strings, and the stored histogram. | `source/track_file_store.hpp`, `source/track_file_store.cpp` | Reopening a large trace should not read every row from SQLite again, and loaded tracks should not have to stay in memory. |
