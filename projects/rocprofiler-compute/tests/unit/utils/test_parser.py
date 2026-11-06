@@ -258,6 +258,29 @@ class TestBuildDfs:
         }
         assert warning["warning"].call_count == 2
 
+    def test_saved_metric_ids_filter_rows_like_b(self, monkeypatch):
+        """A workload saved with metric ids (--set) keeps only their rows, as -b with
+        the same ids does, without the numeric id warning."""
+        warning = common.patch_console(monkeypatch, "utils.analysis_views", "warning")
+        saved, typed = schema.ArchConfig(), schema.ArchConfig()
+        for ac, tokens, config in (
+            (saved, None, {"filter_blocks": ["compute.salu_util"]}),
+            (typed, ["compute.salu_util"], {}),
+        ):
+            ac.panel_configs = arch_panel_configs("gfx942")
+            build_dfs(
+                ac,
+                filter_metrics=tokens,
+                sys_info=_sys_info(),
+                profiling_config=config,
+                arch="gfx942",
+            )
+        assert [len(saved.dfs[table]) for table in (201, 1102)] == [1, 1]
+        assert {table: df.to_dict() for table, df in saved.dfs.items()} == {
+            table: df.to_dict() for table, df in typed.dfs.items()
+        }
+        assert warning["warning"].call_count == 0
+
     def test_whole_block_filter_keeps_every_metric_in_block(self):
         ac = _two_block_config()
         build_dfs(ac, filter_metrics=["2"], sys_info=_sys_info(), profiling_config={})

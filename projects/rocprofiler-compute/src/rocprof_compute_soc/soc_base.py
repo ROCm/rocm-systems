@@ -44,7 +44,6 @@ from utils.utils_common import (
     create_temp_rocprofiler_metrics_path,
     is_only_pc_sampling,
     is_tcc_channel_counter,
-    parse_sets_yaml,
     validate_roofline_csv,
 )
 from utils.utils_counter_defs import (
@@ -463,19 +462,20 @@ class OmniSoC_Base:
         if filter_blocks and self.__arch:
             warn_numeric_metric_ids(filter_blocks, self.__arch)
         if args.set_selected and self.__arch:
-            sets_info = parse_sets_yaml(self.__arch)
-            if args.set_selected not in set(sets_info.keys()):
-                console_error(
-                    f'argument --set: invalid choice: "{args.set_selected}" '
-                    f"(choose from {sets_info.keys()})"
-                )
-            filter_blocks = [
-                next(iter(metric.keys()))
-                for metric in sets_info[args.set_selected]["metric"]
-            ]
+            filter_blocks = self._set_metric_ids(args.set_selected)
         elif args.roof_only:
             filter_blocks = ["4"]
         return self.counters_for_blocks(filter_blocks), filter_blocks
+
+    def _set_metric_ids(self, set_option: str) -> list[str]:
+        """Return the metric library ids of the --set option on the arch."""
+        sets = load_metric_library(default_metric_library_dir(), self.__arch).sets
+        if set_option not in sets:
+            console_error(
+                f'argument --set: invalid choice: "{set_option}" '
+                f"(choose from {', '.join(sets)})"
+            )
+        return list(sets[set_option]["metrics"])
 
     def counters_for_blocks(self, filter_blocks: list[str]) -> set[str]:
         """Return the counters that the -b tokens filter_blocks select; no tokens

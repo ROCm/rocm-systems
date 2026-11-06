@@ -24,6 +24,7 @@ from utils.analysis_views import (
 )
 from utils.file_io import validate_kernel_filter_ids
 from utils.logger import console_error, console_warning, demarcate
+from utils.metric_library import METRIC_LIBRARY_ID_RE
 from utils.metrics.evaluation_pipeline import eval_metric
 from utils.pattern_matching import fnmatch_glob_matches
 from utils.specs import MachineSpecs
@@ -83,6 +84,11 @@ def build_dfs(
 
     if filter_metrics and arch:
         warn_numeric_metric_ids(filter_metrics, arch)
+    saved_blocks = [str(t) for t in profiling_config.get("filter_blocks", [])]
+    if not filter_metrics and any(METRIC_LIBRARY_ID_RE.match(t) for t in saved_blocks):
+        # Saved metric ids (--set, or -b with metric ids) filter rows, as -b does.
+        filter_metrics = saved_blocks
+    if filter_metrics and arch:
         filter_metrics = expand_metric_ids(filter_metrics, arch)
     if filter_metrics:
         numeric_tokens = [t for t in filter_metrics if METRIC_ID_RE.match(str(t))]
