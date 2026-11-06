@@ -56,24 +56,36 @@ namespace blit
 {
 namespace
 {
+using kernel_abi::capture_tiles_args_t;
+using kernel_abi::changed_count_slots;
+using kernel_abi::check_tiles_args_t;
 using kernel_abi::chunks_for;
 using kernel_abi::copy_descriptor_t;
 using kernel_abi::copy_tiles_args_t;
 using kernel_abi::copy_workgroups_per_cu;
 using kernel_abi::count_tiles_args_t;
+using kernel_abi::counter_count;
 using kernel_abi::expand_tiles_args_t;
+using kernel_abi::restore_changed_args_t;
+using kernel_abi::restore_listed_args_t;
 using kernel_abi::scan_tiles_args_t;
 using kernel_abi::tiles_for;
+using kernel_abi::unlisted_counter;
 using kernel_abi::workgroup_size;
 
-// The restore runs as four dispatches, in this order: three build the tile list on the GPU from
-// the region descriptors, and the last copies it.
+// A copy runs as four dispatches, in this order: three build the tile list on the GPU from the
+// region descriptors, and the last copies it, digesting the tiles when it is a capture that keeps
+// them. The restore kernels then work from that capture's tile list, one dispatch each.
 enum kernel_index : size_t
 {
     count_tiles = 0,
     scan_tiles,
     expand_tiles,
     copy_tiles,
+    capture_tiles,
+    restore_changed_tiles,
+    restore_listed_tiles,
+    check_tiles,
     kernel_count
 };
 
@@ -82,6 +94,10 @@ constexpr auto kernel_names = std::array<const char*, kernel_count>{
     "kernel_replay_scan_tiles",
     "kernel_replay_expand_tiles",
     "kernel_replay_copy_tiles",
+    "kernel_replay_capture_tiles",
+    "kernel_replay_restore_changed_tiles",
+    "kernel_replay_restore_listed_tiles",
+    "kernel_replay_check_tiles",
 };
 
 constexpr auto kernel_arg_sizes = std::array<size_t, kernel_count>{
@@ -89,7 +105,13 @@ constexpr auto kernel_arg_sizes = std::array<size_t, kernel_count>{
     sizeof(scan_tiles_args_t),
     sizeof(expand_tiles_args_t),
     sizeof(copy_tiles_args_t),
+    sizeof(capture_tiles_args_t),
+    sizeof(restore_changed_args_t),
+    sizeof(restore_listed_args_t),
+    sizeof(check_tiles_args_t),
 };
+
+constexpr size_t max_dispatches = 4;
 
 struct kernel_info_t
 {
@@ -97,6 +119,21 @@ struct kernel_info_t
     uint32_t private_segment_size = 0;
     uint32_t group_segment_size   = 0;
     uint32_t kernarg_size         = 0;
+};
+
+// Where the tile-list kernels keep their intermediate results, and a capture that keeps digests
+// keeps them, in one device allocation.
+struct workspace_layout_t
+{
+    size_t first_tiles   = 0;
+    size_t chunk_totals  = 0;
+    size_t tile_count    = 0;
+    size_t counters      = 0;
+    size_t tiles         = 0;
+    size_t digests       = 0;
+    size_t changed_flags = 0;
+    size_t changed       = 0;
+    size_t size          = 0;
 };
 
 struct kernel_state_t
@@ -113,16 +150,22 @@ struct kernel_state_t
     void*                                   workspace          = nullptr;
     size_t                                  workspace_capacity = 0;
     std::atomic<bool>                       resource_in_use{false};
-};
 
-// Where the tile-list kernels keep their intermediate results, in one device allocation.
-struct workspace_layout_t
-{
-    size_t first_tiles  = 0;
-    size_t chunk_totals = 0;
-    size_t tile_count   = 0;
-    size_t tiles        = 0;
-    size_t size         = 0;
+    // The workspace's tile list is a capture's, kept for its restores, possibly with digests.
+    // Restores alternate between the changed-list counts, and changed_slot is the last list's.
+    bool               kept             = false;
+    bool               digests          = false;
+    uint32_t           kept_tiles       = 0;
+    workspace_layout_t kept_layout      = {};
+    uint32_t           changed_restores = 0;
+    uint32_t           changed_slot     = 0;
+
+    // The host reads the counters once per replay. Reading device memory it can map takes one
+    // PCIe round trip, where hsa_memory_copy takes tens of microseconds, so they live there when
+    // the CPU can map device memory and in the workspace otherwise.
+    void*    mapped_counters = nullptr;
+    bool     counters_placed = false;
+    uint64_t counters        = 0;
 };
 
 constexpr size_t
@@ -132,16 +175,26 @@ align_up(size_t value, size_t alignment)
 }
 
 workspace_layout_t
-workspace_layout(uint32_t descriptor_count, uint32_t tile_count)
+workspace_layout(uint32_t descriptor_count, uint32_t tile_count, bool digests)
 {
     constexpr auto alignment = size_t{256};
-    auto           layout    = workspace_layout_t{};
-    layout.chunk_totals      = align_up(size_t{descriptor_count} * sizeof(uint32_t), alignment);
+    static_assert(counter_count * sizeof(uint32_t) <= alignment);
+
+    auto layout         = workspace_layout_t{};
+    layout.chunk_totals = align_up(size_t{descriptor_count} * sizeof(uint32_t), alignment);
     layout.tile_count =
         layout.chunk_totals +
         align_up(size_t{chunks_for(descriptor_count)} * sizeof(uint32_t), alignment);
-    layout.tiles = layout.tile_count + alignment;
-    layout.size  = layout.tiles + size_t{tile_count} * sizeof(copy_descriptor_t);
+    layout.counters = layout.tile_count + alignment;
+    layout.tiles    = layout.counters + alignment;
+    layout.size     = layout.tiles + size_t{tile_count} * sizeof(copy_descriptor_t);
+    if(!digests) return layout;
+
+    layout.digests = align_up(layout.size, alignment);
+    layout.changed_flags =
+        align_up(layout.digests + size_t{tile_count} * sizeof(uint64_t), alignment);
+    layout.changed = align_up(layout.changed_flags + tile_count, alignment);
+    layout.size    = layout.changed + size_t{tile_count} * sizeof(uint32_t);
     return layout;
 }
 
@@ -302,6 +355,20 @@ host_writable(void* ptr)
 #endif
 }
 
+// Device memory the CPU can map, or null when it cannot map device memory.
+void*
+allocate_mapped(const hsa::AgentCache& agent, size_t size)
+{
+    auto* ext = hsa::get_amd_ext_table();
+    void* ptr = nullptr;
+    if(ext->hsa_amd_memory_pool_allocate_fn(
+           agent.gpu_pool(), size, HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG, &ptr) != HSA_STATUS_SUCCESS)
+        return nullptr;
+    if(host_writable(ptr)) return ptr;
+    ext->hsa_amd_memory_pool_free_fn(ptr);
+    return nullptr;
+}
+
 // Every wave reads the blit's arguments and copy descriptors, and reading them from host memory
 // makes each restore depend on PCIe read latency. Keep them in device memory the CPU can write,
 // and fall back to the host kernarg pool when it cannot. Returns the buffer and whether it is in
@@ -309,16 +376,10 @@ host_writable(void* ptr)
 std::pair<void*, bool>
 allocate_kernarg(const hsa::AgentCache& agent, size_t size)
 {
+    if(auto* mapped = allocate_mapped(agent, size)) return {mapped, true};
+
     auto* ext = hsa::get_amd_ext_table();
     void* ptr = nullptr;
-    if(ext->hsa_amd_memory_pool_allocate_fn(
-           agent.gpu_pool(), size, HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG, &ptr) == HSA_STATUS_SUCCESS)
-    {
-        if(host_writable(ptr)) return {ptr, true};
-        ext->hsa_amd_memory_pool_free_fn(ptr);
-    }
-
-    ptr = nullptr;
     if(ext->hsa_amd_memory_pool_allocate_fn(agent.kernarg_pool(), size, 0, &ptr) !=
        HSA_STATUS_SUCCESS)
         return {nullptr, false};
@@ -345,6 +406,85 @@ write_kernarg(void* dest, const std::vector<std::byte>& image, bool on_device)
     std::atomic_thread_fence(std::memory_order_seq_cst);
     [[maybe_unused]] const auto landed = *last;
 }
+
+// The dispatches of one submission, in order, and where each one's arguments start in the
+// argument buffer. Each segment is 16-byte aligned, and anything else the kernels read from the
+// buffer follows the last one.
+struct chain_t
+{
+    std::array<kernel_index, max_dispatches> kernels    = {};
+    std::array<uint32_t, max_dispatches>     workgroups = {};
+    std::array<size_t, max_dispatches>       offsets    = {};
+    size_t                                   count      = 0;
+    size_t                                   end        = 0;
+
+    void add(const kernel_state_t& state, kernel_index kernel, uint32_t workgroup_count)
+    {
+        kernels.at(count)    = kernel;
+        workgroups.at(count) = workgroup_count;
+        offsets.at(count)    = end;
+        end                  = align_up(end + state.kernels.at(kernel).kernarg_size, 16);
+        ++count;
+    }
+};
+
+// Grows the argument buffer. A packet that read the old one may still sit in the queue, so it is
+// retired rather than freed.
+bool
+reserve_arguments(const hsa::AgentCache& agent, kernel_state_t& state, size_t size)
+{
+    if(size <= state.kernarg_capacity) return true;
+    if(!hsa::get_amd_ext_table()) return false;
+
+    auto capacity = std::max(size_t{4096}, state.kernarg_capacity);
+    while(capacity < size)
+    {
+        if(capacity > std::numeric_limits<size_t>::max() / 2)
+        {
+            capacity = size;
+            break;
+        }
+        capacity *= 2;
+    }
+
+    const auto [kernarg, on_device] = allocate_kernarg(agent, capacity);
+    if(!kernarg) return false;
+    ROCP_INFO << fmt::format("kernel replay blit: {}B argument buffer in {} memory for agent '{}'",
+                             capacity,
+                             on_device ? "device" : "host",
+                             agent.name());
+
+    if(state.kernarg) state.retired_kernargs.emplace_back(state.kernarg);
+    state.kernarg           = kernarg;
+    state.kernarg_capacity  = capacity;
+    state.kernarg_on_device = on_device;
+    return true;
+}
+
+// Grows the workspace. The caller holds resource_in_use, so no earlier blit can still be reading
+// it.
+bool
+reserve_workspace(const hsa::AgentCache& agent, kernel_state_t& state, size_t size)
+{
+    if(size <= state.workspace_capacity) return true;
+
+    auto* ext = hsa::get_amd_ext_table();
+    if(!ext) return false;
+    if(state.workspace) ext->hsa_amd_memory_pool_free_fn(state.workspace);
+    state.workspace          = nullptr;
+    state.workspace_capacity = 0;
+
+    const auto capacity  = align_up(size, size_t{2} << 20);
+    void*      workspace = nullptr;
+    if(ext->hsa_amd_memory_pool_allocate_fn(agent.gpu_pool(), capacity, 0, &workspace) !=
+       HSA_STATUS_SUCCESS)
+        return false;
+    ROCP_INFO << fmt::format(
+        "kernel replay blit: {}B tile workspace for agent '{}'", capacity, agent.name());
+    state.workspace          = workspace;
+    state.workspace_capacity = capacity;
+    return true;
+}
 }  // namespace
 
 hsa_status_t
@@ -355,13 +495,14 @@ prepare(const hsa::Queue& queue)
 
 struct packet_info::implementation
 {
-    std::array<hsa::rocprofiler_packet, kernel_count + 1> packets{};
-    kernel_state_t*                                       state = nullptr;
-    hsa_signal_t                                          completion{};
-    void*                                                 kernarg   = nullptr;
-    bool                                                  submitted = false;
-    bool                                                  completed = false;
-    hsa_status_t                                          status    = HSA_STATUS_SUCCESS;
+    std::array<hsa::rocprofiler_packet, max_dispatches + 1> packets{};
+    size_t                                                  packet_count = 0;
+    kernel_state_t*                                         state        = nullptr;
+    hsa_signal_t                                            completion{};
+    void*                                                   kernarg   = nullptr;
+    bool                                                    submitted = false;
+    bool                                                    completed = false;
+    hsa_status_t                                            status    = HSA_STATUS_SUCCESS;
 
     ~implementation()
     {
@@ -403,7 +544,7 @@ packet_info::get_raw()
 uint64_t
 packet_info::packet_count() const
 {
-    return m_impl ? m_impl->packets.size() : 0;
+    return m_impl ? m_impl->packet_count : 0;
 }
 
 hsa_status_t
@@ -442,200 +583,325 @@ packet_info::retire()
     return m_impl->status;
 }
 
-std::optional<packet_info>
-create(const hsa::Queue& queue, const std::vector<copy_region_t>& regions)
+struct packet_builder
 {
-    if(regions.empty()) return std::nullopt;
-    const auto& agent = queue.get_agent();
-
-    auto* state = get_state(agent);
-    auto* core  = hsa::get_core_table();
-    auto* ext   = hsa::get_amd_ext_table();
-    if(!state || !core || !ext || !core->hsa_signal_store_screlease_fn) return std::nullopt;
-
-    const auto cu_count = agent.get_rocp_agent()->cu_count;
-    if(cu_count == 0) return std::nullopt;
-
-    // Descriptor and tile indices are 32-bit on the GPU, and the copy kernel's work items must not
-    // wrap when a wave steps past the last one.
-    constexpr auto max_count = uint64_t{std::numeric_limits<uint32_t>::max()} / 2;
-    if(regions.size() > max_count) return std::nullopt;
-
-    auto descriptor_data = std::vector<copy_descriptor_t>{};
-    descriptor_data.reserve(regions.size());
-    auto total_tiles = uint64_t{0};
-    for(const auto& region : regions)
+    // Claims the agent's blit resources: until the packet is destroyed, no other blit can reuse
+    // the argument buffer, the workspace or the completion signal.
+    static std::unique_ptr<packet_info::implementation> claim(kernel_state_t& state)
     {
-        if(region.size == 0 || !region.source || !region.dest) return std::nullopt;
-        total_tiles += tiles_for(region.size);
-        if(total_tiles > max_count) return std::nullopt;
-        descriptor_data.emplace_back(copy_descriptor_t{
-            region.size,
-            reinterpret_cast<uint64_t>(region.source),
-            reinterpret_cast<uint64_t>(region.dest),
-        });
+        auto impl     = std::make_unique<packet_info::implementation>();
+        auto expected = false;
+        if(!state.resource_in_use.compare_exchange_strong(
+               expected, true, std::memory_order_acq_rel))
+            return nullptr;
+        impl->state      = &state;
+        impl->completion = state.completion;
+        return impl;
     }
 
-    const auto descriptor_count = static_cast<uint32_t>(descriptor_data.size());
-    const auto tile_count       = static_cast<uint32_t>(total_tiles);
-    const auto chunk_count      = chunks_for(descriptor_count);
-    const auto copy_workgroups  = static_cast<uint32_t>(cu_count) * copy_workgroups_per_cu;
-    const auto expand_workgroups =
-        std::min(static_cast<uint32_t>((total_tiles + workgroup_size - 1) / workgroup_size),
-                 copy_workgroups);
-    const auto workgroups = std::array<uint32_t, kernel_count>{
-        chunk_count, chunk_count, expand_workgroups, copy_workgroups};
-
-    // One 16-byte aligned argument segment per kernel, then the descriptors.
-    auto kernarg_offsets = std::array<size_t, kernel_count>{};
-    auto kernarg_end     = size_t{0};
-    for(size_t index = 0; index < kernel_count; ++index)
+    // Writes `image` to the argument buffer and the chain's packets. Each dispatch waits for the
+    // one before it. The first acquires at system scope because the CPU wrote the arguments; the
+    // last releases at system scope, signals completion, and is followed by a barrier on it.
+    static packet_info finish(std::unique_ptr<packet_info::implementation> impl,
+                              const chain_t&                               chain,
+                              const std::vector<std::byte>&                image)
     {
-        kernarg_offsets.at(index) = kernarg_end;
-        kernarg_end = align_up(kernarg_end + state->kernels.at(index).kernarg_size, 16);
-    }
-    const auto descriptor_offset = kernarg_end;
-    const auto allocation_size =
-        descriptor_offset + size_t{descriptor_count} * sizeof(copy_descriptor_t);
-    const auto layout = workspace_layout(descriptor_count, tile_count);
+        const auto& state = *impl->state;
+        hsa::get_core_table()->hsa_signal_store_screlease_fn(impl->completion, 1);
+        write_kernarg(impl->kernarg, image, state.kernarg_on_device);
 
-    auto impl     = std::make_unique<packet_info::implementation>();
-    auto expected = false;
-    if(!state->resource_in_use.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
-        return std::nullopt;
-
-    impl->state      = state;
-    impl->completion = state->completion;
-
-    if(allocation_size > state->kernarg_capacity)
-    {
-        auto new_capacity = std::max(size_t{4096}, state->kernarg_capacity);
-        while(new_capacity < allocation_size)
+        for(size_t index = 0; index < chain.count; ++index)
         {
-            if(new_capacity > std::numeric_limits<size_t>::max() / 2)
-            {
-                new_capacity = allocation_size;
-                break;
-            }
-            new_capacity *= 2;
+            const auto& kernel = state.kernels.at(chain.kernels.at(index));
+            const auto  first  = (index == 0);
+            const auto  last   = (index + 1 == chain.count);
+
+            auto packet   = hsa_kernel_dispatch_packet_t{};
+            packet.header = HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE;
+            packet.header |= 1 << HSA_PACKET_HEADER_BARRIER;
+            packet.header |= (first ? HSA_FENCE_SCOPE_SYSTEM : HSA_FENCE_SCOPE_AGENT)
+                             << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE;
+            packet.header |= (last ? HSA_FENCE_SCOPE_SYSTEM : HSA_FENCE_SCOPE_AGENT)
+                             << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE;
+            packet.setup                = 1;
+            packet.workgroup_size_x     = static_cast<uint16_t>(workgroup_size);
+            packet.workgroup_size_y     = 1;
+            packet.workgroup_size_z     = 1;
+            packet.grid_size_x          = chain.workgroups.at(index) * workgroup_size;
+            packet.grid_size_y          = 1;
+            packet.grid_size_z          = 1;
+            packet.private_segment_size = kernel.private_segment_size;
+            packet.group_segment_size   = kernel.group_segment_size;
+            packet.kernel_object        = kernel.object;
+            packet.kernarg_address =
+                static_cast<std::byte*>(impl->kernarg) + chain.offsets.at(index);
+            packet.completion_signal = last ? impl->completion : hsa_signal_t{0};
+            impl->packets.at(index)  = hsa::rocprofiler_packet{packet};
         }
 
-        const auto [new_kernarg, on_device] = allocate_kernarg(agent, new_capacity);
-        if(!new_kernarg) return std::nullopt;
-        ROCP_INFO << fmt::format("kernel replay blit: {}B argument buffer in {} memory for agent "
-                                 "'{}'",
-                                 new_capacity,
-                                 on_device ? "device" : "host",
-                                 agent.name());
-
-        if(state->kernarg) state->retired_kernargs.emplace_back(state->kernarg);
-        state->kernarg           = new_kernarg;
-        state->kernarg_capacity  = new_capacity;
-        state->kernarg_on_device = on_device;
+        auto barrier   = hsa_barrier_and_packet_t{};
+        barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
+        barrier.header |= 1 << HSA_PACKET_HEADER_BARRIER;
+        barrier.header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE;
+        barrier.header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE;
+        barrier.dep_signal[0]         = impl->completion;
+        impl->packets.at(chain.count) = hsa::rocprofiler_packet{barrier};
+        impl->packet_count            = chain.count + 1;
+        return packet_info{std::move(impl)};
     }
-    impl->kernarg = state->kernarg;
 
-    if(layout.size > state->workspace_capacity)
+    // Cuts `regions` into tiles on the GPU and copies them. With `keep`, the tile list stays in the
+    // workspace for the restore kernels; with `digests`, the copy also digests the tiles for them.
+    static std::optional<packet_info> create_list(const hsa::Queue&                 queue,
+                                                  const std::vector<copy_region_t>& regions,
+                                                  bool                              keep,
+                                                  bool                              digests)
     {
-        // This blit holds resource_in_use, so no earlier one can still be reading the workspace.
-        if(state->workspace) ext->hsa_amd_memory_pool_free_fn(state->workspace);
-        state->workspace          = nullptr;
-        state->workspace_capacity = 0;
+        if(regions.empty()) return std::nullopt;
+        const auto& agent = queue.get_agent();
 
-        const auto capacity  = align_up(layout.size, size_t{2} << 20);
-        void*      workspace = nullptr;
-        if(ext->hsa_amd_memory_pool_allocate_fn(agent.gpu_pool(), capacity, 0, &workspace) !=
-           HSA_STATUS_SUCCESS)
+        auto* state = get_state(agent);
+        auto* core  = hsa::get_core_table();
+        if(!state || !core || !core->hsa_signal_store_screlease_fn) return std::nullopt;
+
+        const auto cu_count = agent.get_rocp_agent()->cu_count;
+        if(cu_count == 0) return std::nullopt;
+
+        // Descriptor and tile indices are 32-bit on the GPU, and the copy kernel's work items must
+        // not wrap when a wave steps past the last one.
+        constexpr auto max_count = uint64_t{std::numeric_limits<uint32_t>::max()} / 2;
+        if(regions.size() > max_count) return std::nullopt;
+
+        auto descriptor_data = std::vector<copy_descriptor_t>{};
+        descriptor_data.reserve(regions.size());
+        auto total_tiles = uint64_t{0};
+        for(const auto& region : regions)
+        {
+            if(region.size == 0 || !region.source || !region.dest) return std::nullopt;
+            total_tiles += tiles_for(region.size);
+            if(total_tiles > max_count) return std::nullopt;
+            descriptor_data.emplace_back(copy_descriptor_t{
+                region.size,
+                reinterpret_cast<uint64_t>(region.source),
+                reinterpret_cast<uint64_t>(region.dest),
+            });
+        }
+
+        const auto descriptor_count = static_cast<uint32_t>(descriptor_data.size());
+        const auto tile_count       = static_cast<uint32_t>(total_tiles);
+        const auto chunk_count      = chunks_for(descriptor_count);
+        const auto copy_workgroups  = static_cast<uint32_t>(cu_count) * copy_workgroups_per_cu;
+        const auto expand_workgroups =
+            std::min(static_cast<uint32_t>((total_tiles + workgroup_size - 1) / workgroup_size),
+                     copy_workgroups);
+
+        auto impl = claim(*state);
+        if(!impl) return std::nullopt;
+
+        // This list replaces the one a capture kept. Without room for digests, a capture keeps just
+        // its list, and its replay restores everything.
+        state->kept    = false;
+        state->digests = false;
+        auto layout    = workspace_layout(descriptor_count, tile_count, digests);
+        if(!reserve_workspace(agent, *state, layout.size))
+        {
+            if(!digests) return std::nullopt;
+            digests = false;
+            layout  = workspace_layout(descriptor_count, tile_count, false);
+            if(!reserve_workspace(agent, *state, layout.size)) return std::nullopt;
+        }
+
+        auto chain = chain_t{};
+        chain.add(*state, count_tiles, chunk_count);
+        chain.add(*state, scan_tiles, chunk_count);
+        chain.add(*state, expand_tiles, expand_workgroups);
+        chain.add(*state, digests ? capture_tiles : copy_tiles, copy_workgroups);
+        const auto descriptor_offset = chain.end;
+        const auto image_size =
+            descriptor_offset + size_t{descriptor_count} * sizeof(copy_descriptor_t);
+        if(!reserve_arguments(agent, *state, image_size)) return std::nullopt;
+        impl->kernarg = state->kernarg;
+
+        auto image = std::vector<std::byte>{};
+        try
+        {
+            image.resize(image_size);
+        } catch(const std::bad_alloc&)
+        {
             return std::nullopt;
-        ROCP_INFO << fmt::format(
-            "kernel replay blit: {}B tile workspace for agent '{}'", capacity, agent.name());
-        state->workspace          = workspace;
-        state->workspace_capacity = capacity;
+        }
+
+        const auto descriptors  = reinterpret_cast<uint64_t>(impl->kernarg) + descriptor_offset;
+        const auto workspace    = reinterpret_cast<uint64_t>(state->workspace);
+        const auto first_tiles  = workspace + layout.first_tiles;
+        const auto chunk_totals = workspace + layout.chunk_totals;
+        const auto tile_total   = workspace + layout.tile_count;
+        const auto tiles        = workspace + layout.tiles;
+        const auto digest_data  = digests ? workspace + layout.digests : 0;
+        const auto flags        = digests ? workspace + layout.changed_flags : 0;
+
+        if(digests && !state->counters_placed && hsa::get_amd_ext_table())
+        {
+            state->mapped_counters = allocate_mapped(agent, counter_count * sizeof(uint32_t));
+            state->counters_placed = true;
+            ROCP_INFO << fmt::format(
+                "kernel replay blit: restore counters in {} for agent '{}'",
+                state->mapped_counters ? "device memory the CPU reads" : "the workspace",
+                agent.name());
+        }
+        const auto counters = !digests ? 0
+                              : state->mapped_counters
+                                  ? reinterpret_cast<uint64_t>(state->mapped_counters)
+                                  : workspace + layout.counters;
+
+        const auto write_args = [&](size_t index, const auto& args) {
+            std::memcpy(image.data() + chain.offsets.at(index), &args, sizeof(args));
+        };
+        write_args(0, count_tiles_args_t{descriptors, chunk_totals, descriptor_count, 0});
+        write_args(
+            1,
+            scan_tiles_args_t{
+                descriptors, chunk_totals, first_tiles, tile_total, descriptor_count, chunk_count});
+        write_args(2,
+                   expand_tiles_args_t{descriptors,
+                                       first_tiles,
+                                       tile_total,
+                                       tiles,
+                                       digest_data,
+                                       flags,
+                                       counters,
+                                       descriptor_count,
+                                       expand_workgroups});
+        if(digests)
+            write_args(3, capture_tiles_args_t{tiles, tile_total, digest_data, copy_workgroups, 0});
+        else
+            write_args(3, copy_tiles_args_t{tiles, tile_total, copy_workgroups, 0});
+        std::memcpy(image.data() + descriptor_offset,
+                    descriptor_data.data(),
+                    descriptor_data.size() * sizeof(descriptor_data[0]));
+
+        if(keep)
+        {
+            state->kept             = true;
+            state->digests          = digests;
+            state->kept_tiles       = tile_count;
+            state->kept_layout      = layout;
+            state->changed_restores = 0;
+            state->changed_slot     = 0;
+            state->counters         = counters;
+        }
+        return finish(std::move(impl), chain, image);
     }
 
-    auto image = std::vector<std::byte>{};
-    try
+    // One restore kernel over the tiles of the capture that kept them. Only the full restore works
+    // without digests.
+    static std::optional<packet_info> create_restore(const hsa::Queue& queue, kernel_index kernel)
     {
-        image.resize(allocation_size);
-    } catch(const std::bad_alloc&)
-    {
-        return std::nullopt;
+        const auto& agent = queue.get_agent();
+        auto*       state = get_state(agent);
+        auto*       core  = hsa::get_core_table();
+        if(!state || !state->kept || !core || !core->hsa_signal_store_screlease_fn)
+            return std::nullopt;
+        if(!state->digests && kernel != copy_tiles) return std::nullopt;
+
+        const auto cu_count = agent.get_rocp_agent()->cu_count;
+        if(cu_count == 0) return std::nullopt;
+
+        auto impl = claim(*state);
+        if(!impl) return std::nullopt;
+
+        const auto workgroups = static_cast<uint32_t>(cu_count) * copy_workgroups_per_cu;
+        auto       chain      = chain_t{};
+        chain.add(*state, kernel, workgroups);
+        if(!reserve_arguments(agent, *state, chain.end)) return std::nullopt;
+        impl->kernarg = state->kernarg;
+
+        const auto& layout     = state->kept_layout;
+        const auto  workspace  = reinterpret_cast<uint64_t>(state->workspace);
+        const auto  tiles      = workspace + layout.tiles;
+        const auto  tile_total = workspace + layout.tile_count;
+        const auto  digests    = workspace + layout.digests;
+        const auto  flags      = workspace + layout.changed_flags;
+        const auto  changed    = workspace + layout.changed;
+        const auto  counters   = state->counters;
+
+        auto       image      = std::vector<std::byte>(chain.end);
+        const auto write_args = [&](const auto& args) {
+            std::memcpy(image.data(), &args, sizeof(args));
+        };
+        switch(kernel)
+        {
+            case copy_tiles: write_args(copy_tiles_args_t{tiles, tile_total, workgroups, 1}); break;
+            case restore_changed_tiles:
+            {
+                // Successive lists alternate between the two counts.
+                state->changed_slot = state->changed_restores % changed_count_slots;
+                state->changed_restores += 1;
+                write_args(restore_changed_args_t{tiles,
+                                                  tile_total,
+                                                  digests,
+                                                  flags,
+                                                  changed,
+                                                  counters,
+                                                  state->changed_slot,
+                                                  workgroups});
+                break;
+            }
+            case restore_listed_tiles:
+                write_args(restore_listed_args_t{tiles,
+                                                 changed,
+                                                 counters + state->changed_slot * sizeof(uint32_t),
+                                                 workgroups,
+                                                 0});
+                break;
+            case check_tiles:
+                write_args(
+                    check_tiles_args_t{tiles, tile_total, digests, flags, counters, workgroups, 0});
+                break;
+            default: return std::nullopt;
+        }
+        return finish(std::move(impl), chain, image);
     }
+};
 
-    const auto kernarg_base       = reinterpret_cast<uint64_t>(impl->kernarg);
-    const auto workspace_base     = reinterpret_cast<uint64_t>(state->workspace);
-    const auto descriptors        = kernarg_base + descriptor_offset;
-    const auto first_tiles        = workspace_base + layout.first_tiles;
-    const auto chunk_totals       = workspace_base + layout.chunk_totals;
-    const auto tile_count_address = workspace_base + layout.tile_count;
-    const auto tiles              = workspace_base + layout.tiles;
-
-    const auto write_args = [&](kernel_index index, const auto& args) {
-        std::memcpy(image.data() + kernarg_offsets.at(index), &args, sizeof(args));
-    };
-    write_args(count_tiles, count_tiles_args_t{descriptors, chunk_totals, descriptor_count, 0});
-    write_args(scan_tiles,
-               scan_tiles_args_t{descriptors,
-                                 chunk_totals,
-                                 first_tiles,
-                                 tile_count_address,
-                                 descriptor_count,
-                                 chunk_count});
-    write_args(expand_tiles,
-               expand_tiles_args_t{descriptors,
-                                   first_tiles,
-                                   tile_count_address,
-                                   tiles,
-                                   descriptor_count,
-                                   expand_workgroups});
-    write_args(copy_tiles, copy_tiles_args_t{tiles, tile_count_address, copy_workgroups, 0});
-    std::memcpy(image.data() + descriptor_offset,
-                descriptor_data.data(),
-                descriptor_data.size() * sizeof(descriptor_data[0]));
-
-    core->hsa_signal_store_screlease_fn(impl->completion, 1);
-    write_kernarg(impl->kernarg, image, state->kernarg_on_device);
-
-    // Each dispatch waits for the one before it. The first acquires at system scope because the
-    // CPU wrote the descriptors; the copy releases at system scope and signals completion.
-    for(size_t index = 0; index < kernel_count; ++index)
-    {
-        const auto& kernel = state->kernels.at(index);
-        const auto  first  = (index == 0);
-        const auto  last   = (index + 1 == kernel_count);
-
-        auto packet   = hsa_kernel_dispatch_packet_t{};
-        packet.header = HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE;
-        packet.header |= 1 << HSA_PACKET_HEADER_BARRIER;
-        packet.header |= (first ? HSA_FENCE_SCOPE_SYSTEM : HSA_FENCE_SCOPE_AGENT)
-                         << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE;
-        packet.header |= (last ? HSA_FENCE_SCOPE_SYSTEM : HSA_FENCE_SCOPE_AGENT)
-                         << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE;
-        packet.setup                = 1;
-        packet.workgroup_size_x     = static_cast<uint16_t>(workgroup_size);
-        packet.workgroup_size_y     = 1;
-        packet.workgroup_size_z     = 1;
-        packet.grid_size_x          = workgroups.at(index) * workgroup_size;
-        packet.grid_size_y          = 1;
-        packet.grid_size_z          = 1;
-        packet.private_segment_size = kernel.private_segment_size;
-        packet.group_segment_size   = kernel.group_segment_size;
-        packet.kernel_object        = kernel.object;
-        packet.kernarg_address = static_cast<std::byte*>(impl->kernarg) + kernarg_offsets.at(index);
-        packet.completion_signal = last ? impl->completion : hsa_signal_t{0};
-        impl->packets.at(index)  = hsa::rocprofiler_packet{packet};
-    }
-
-    auto barrier   = hsa_barrier_and_packet_t{};
-    barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
-    barrier.header |= 1 << HSA_PACKET_HEADER_BARRIER;
-    barrier.header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE;
-    barrier.header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE;
-    barrier.dep_signal[0]          = impl->completion;
-    impl->packets.at(kernel_count) = hsa::rocprofiler_packet{barrier};
-
-    return packet_info{std::move(impl)};
+namespace
+{
+hsa_status_t
+submit(hsa_amd_queue_intercept_packet_writer writer,
+       std::optional<packet_info>            packet,
+       std::vector<packet_info>&             pending)
+{
+    if(!packet) return HSA_STATUS_ERROR;
+    writer(packet->get_raw(), packet->packet_count());
+    pending.emplace_back(std::move(*packet));
+    return HSA_STATUS_SUCCESS;
 }
+
+hsa_status_t
+list_and_copy(const hsa::Queue&                     queue,
+              hsa_amd_queue_intercept_packet_writer writer,
+              const std::vector<copy_region_t>&     regions,
+              bool                                  keep,
+              bool                                  digests,
+              std::vector<packet_info>&             pending)
+{
+    if(!writer) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    if(regions.empty()) return HSA_STATUS_SUCCESS;
+    if(!pending.empty()) return HSA_STATUS_ERROR;
+    return submit(writer, packet_builder::create_list(queue, regions, keep, digests), pending);
+}
+
+hsa_status_t
+restore_kernel(const hsa::Queue&                     queue,
+               hsa_amd_queue_intercept_packet_writer writer,
+               kernel_index                          kernel,
+               std::vector<packet_info>&             pending)
+{
+    if(!writer) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    if(!pending.empty()) return HSA_STATUS_ERROR;
+    return submit(writer, packet_builder::create_restore(queue, kernel), pending);
+}
+}  // namespace
 
 hsa_status_t
 copy(const hsa::Queue&                     queue,
@@ -643,15 +909,100 @@ copy(const hsa::Queue&                     queue,
      const std::vector<copy_region_t>&     regions,
      std::vector<packet_info>&             pending)
 {
-    if(!writer) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    if(regions.empty()) return HSA_STATUS_SUCCESS;
-    if(!pending.empty()) return HSA_STATUS_ERROR;
+    return list_and_copy(queue, writer, regions, false, false, pending);
+}
 
-    auto packet = create(queue, regions);
-    if(!packet) return HSA_STATUS_ERROR;
-    writer(packet->get_raw(), packet->packet_count());
-    pending.emplace_back(std::move(*packet));
-    return HSA_STATUS_SUCCESS;
+hsa_status_t
+capture(const hsa::Queue&                     queue,
+        hsa_amd_queue_intercept_packet_writer writer,
+        const std::vector<copy_region_t>&     regions,
+        bool                                  digests,
+        std::vector<packet_info>&             pending)
+{
+    return list_and_copy(queue, writer, regions, true, digests, pending);
+}
+
+bool
+has_kept_list(const hsa::Queue& queue)
+{
+    const auto* state = get_state(queue.get_agent());
+    return state && state->kept;
+}
+
+bool
+has_digests(const hsa::Queue& queue)
+{
+    const auto* state = get_state(queue.get_agent());
+    return state && state->kept && state->digests;
+}
+
+void
+forget_kept_list(const hsa::Queue& queue)
+{
+    if(auto* state = get_state(queue.get_agent()))
+    {
+        state->kept    = false;
+        state->digests = false;
+    }
+}
+
+hsa_status_t
+restore_all(const hsa::Queue&                     queue,
+            hsa_amd_queue_intercept_packet_writer writer,
+            std::vector<packet_info>&             pending)
+{
+    return restore_kernel(queue, writer, copy_tiles, pending);
+}
+
+hsa_status_t
+restore_changed(const hsa::Queue&                     queue,
+                hsa_amd_queue_intercept_packet_writer writer,
+                std::vector<packet_info>&             pending)
+{
+    return restore_kernel(queue, writer, restore_changed_tiles, pending);
+}
+
+hsa_status_t
+restore_listed(const hsa::Queue&                     queue,
+               hsa_amd_queue_intercept_packet_writer writer,
+               std::vector<packet_info>&             pending)
+{
+    return restore_kernel(queue, writer, restore_listed_tiles, pending);
+}
+
+hsa_status_t
+check_unlisted(const hsa::Queue&                     queue,
+               hsa_amd_queue_intercept_packet_writer writer,
+               std::vector<packet_info>&             pending)
+{
+    return restore_kernel(queue, writer, check_tiles, pending);
+}
+
+std::optional<digest_counts_t>
+read_digest_counts(const hsa::Queue& queue)
+{
+    const auto* state = get_state(queue.get_agent());
+    if(!state || !state->kept || !state->digests) return std::nullopt;
+    if(state->resource_in_use.load(std::memory_order_acquire)) return std::nullopt;
+
+    auto counters = std::array<uint32_t, counter_count>{};
+    if(state->mapped_counters)
+    {
+        std::atomic_thread_fence(std::memory_order_acquire);
+        std::memcpy(counters.data(), state->mapped_counters, sizeof(counters));
+    }
+    else
+    {
+        auto*       core = hsa::get_core_table();
+        const auto* source =
+            static_cast<const std::byte*>(state->workspace) + state->kept_layout.counters;
+        if(!core || !core->hsa_memory_copy_fn ||
+           core->hsa_memory_copy_fn(counters.data(), source, sizeof(counters)) !=
+               HSA_STATUS_SUCCESS)
+            return std::nullopt;
+    }
+    return digest_counts_t{
+        state->kept_tiles, counters.at(state->changed_slot), counters.at(unlisted_counter)};
 }
 }  // namespace blit
 }  // namespace kernel_replay

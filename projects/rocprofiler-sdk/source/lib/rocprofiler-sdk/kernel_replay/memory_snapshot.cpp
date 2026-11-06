@@ -559,6 +559,17 @@ snapshot_t::footprint_bytes() const
     return total;
 }
 
+size_t
+snapshot_t::stored_bytes(storage_kind kind) const
+{
+    size_t total = 0;
+    for(const auto& extent : extents)
+        if(regions.at(extent.region_index).liveness != liveness_kind::retired &&
+           segments.at(extent.segment_index).backing.kind() == kind)
+            total += extent.size;
+    return total;
+}
+
 storage_kind
 snapshot_t::storage() const
 {
@@ -741,10 +752,10 @@ snap(const capture_context_t& ctx, storage_budgets_t budgets, const batch_copy_f
         return out;
     }
 
-    auto gpu_copies = std::vector<copy_region_t>{};
+    auto batch = std::vector<copy_region_t>{};
     try
     {
-        gpu_copies.reserve(out.extents.size());
+        batch.reserve(out.extents.size());
     } catch(const std::bad_alloc&)
     {
         out.regions.clear();
@@ -753,39 +764,40 @@ snap(const capture_context_t& ctx, storage_budgets_t budgets, const batch_copy_f
         out.status = capture_status::unavailable;
         return out;
     }
+    out.batched = static_cast<bool>(batch_copy);
 
     // One inventory read lock covers every copy, including the batch, so no tracked region can be
     // freed while it is being read.
     size_t     captured_regions = 0;
     const auto status           = memory_tracker::inventory().rlock([&](const auto& map) {
-        for(size_t region_index = 0; region_index < out.regions.size(); ++region_index)
+        out.inventory_generation = memory_tracker::inventory_generation();
+        for(auto& region : out.regions)
         {
-            auto& region = out.regions[region_index];
-            if(!region_is_live(region, map))
+            if(region_is_live(region, map))
             {
-                ROCP_INFO << fmt::format("kernel-replay snapshot: region {} ({}B) was retired "
-                                         "before capture, dropping from snapshot",
-                                         region.live_address,
-                                         region.size);
-                region.liveness = liveness_kind::retired;
+                ++captured_regions;
                 continue;
             }
-            for(const auto& extent : out.extents)
-            {
-                if(extent.region_index != region_index) continue;
-                const auto copy = capture_copy(out, extent);
-                const auto kind = out.segments.at(extent.segment_index).backing.kind();
-                if(batch_copy && kind == storage_kind::gpu_local)
-                {
-                    gpu_copies.emplace_back(copy);
-                    continue;
-                }
-                const auto copy_status = dma_copy(copy.dest, copy.source, copy.size);
-                if(copy_status != HSA_STATUS_SUCCESS) return copy_status;
-            }
-            ++captured_regions;
+            ROCP_INFO << fmt::format("kernel-replay snapshot: region {} ({}B) was retired "
+                                     "before capture, dropping from snapshot",
+                                     region.live_address,
+                                     region.size);
+            region.liveness = liveness_kind::retired;
         }
-        return gpu_copies.empty() ? HSA_STATUS_SUCCESS : batch_copy(gpu_copies);
+
+        for(const auto& extent : out.extents)
+        {
+            if(out.regions[extent.region_index].liveness == liveness_kind::retired) continue;
+            const auto copy = capture_copy(out, extent);
+            if(out.batched)
+            {
+                batch.emplace_back(copy);
+                continue;
+            }
+            const auto copy_status = dma_copy(copy.dest, copy.source, copy.size);
+            if(copy_status != HSA_STATUS_SUCCESS) return copy_status;
+        }
+        return batch.empty() ? HSA_STATUS_SUCCESS : batch_copy(batch);
     });
 
     if(status != HSA_STATUS_SUCCESS)
@@ -864,10 +876,10 @@ restore(const snapshot_t& snapshot, const batch_copy_fn_t& batch_copy)
 {
     if(!snapshot.complete()) return false;
 
-    auto gpu_regions = std::vector<blit::copy_region_t>{};
+    auto batch = std::vector<blit::copy_region_t>{};
     try
     {
-        gpu_regions.reserve(snapshot.extents.size());
+        batch.reserve(snapshot.extents.size());
     } catch(const std::bad_alloc&)
     {
         return false;
@@ -876,10 +888,15 @@ restore(const snapshot_t& snapshot, const batch_copy_fn_t& batch_copy)
     size_t skipped  = 0;
 
     const auto status = memory_tracker::inventory().rlock([&](const auto& map) {
+        // Nothing recorded or freed since the capture, so every captured region is still live.
+        const auto unchanged =
+            memory_tracker::inventory_generation() == snapshot.inventory_generation;
         for(const auto& extent : snapshot.extents)
         {
             const auto& region = snapshot.regions.at(extent.region_index);
-            if(!region_is_live(region, map))
+            const auto  live =
+                unchanged ? region.liveness != liveness_kind::retired : region_is_live(region, map);
+            if(!live)
             {
                 ROCP_WARNING << fmt::format(
                     "kernel-replay restore: skipping region {} ({}B) that is no longer live",
@@ -891,9 +908,9 @@ restore(const snapshot_t& snapshot, const batch_copy_fn_t& batch_copy)
 
             auto       copy = restore_copy(snapshot, extent);
             const auto kind = snapshot.segments.at(extent.segment_index).backing.kind();
-            if(kind == storage_kind::gpu_local)
+            if(snapshot.batched || kind == storage_kind::gpu_local)
             {
-                gpu_regions.emplace_back(copy);
+                batch.emplace_back(copy);
             }
             else
             {
@@ -903,9 +920,9 @@ restore(const snapshot_t& snapshot, const batch_copy_fn_t& batch_copy)
             }
         }
 
-        auto copy_status = batch_copy(gpu_regions);
+        auto copy_status = batch_copy(batch);
         if(copy_status != HSA_STATUS_SUCCESS) return copy_status;
-        restored += gpu_regions.size();
+        restored += batch.size();
         return HSA_STATUS_SUCCESS;
     });
 
@@ -921,6 +938,16 @@ restore(const snapshot_t& snapshot, const batch_copy_fn_t& batch_copy)
                              restored,
                              snapshot.extents.size(),
                              skipped);
+    return true;
+}
+
+bool
+captured_regions_live(const snapshot_t& snapshot, const memory_tracker::tracked_map_t& inventory)
+{
+    if(memory_tracker::inventory_generation() == snapshot.inventory_generation) return true;
+    for(const auto& region : snapshot.regions)
+        if(region.liveness != liveness_kind::retired && !region_is_live(region, inventory))
+            return false;
     return true;
 }
 }  // namespace memory_snapshot
