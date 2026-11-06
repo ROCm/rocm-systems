@@ -147,7 +147,7 @@ typedef struct {
   char type[SMI_NIC_MAX_STRING_LENGTH];
   char flavour[SMI_NIC_MAX_STRING_LENGTH];
   char netdev[SMI_NIC_MAX_STRING_LENGTH];
-  uint8_t ifindex;
+  uint32_t ifindex;
   char mac_address[SMI_NIC_MAX_STRING_LENGTH];
   uint8_t carrier;
   uint16_t mtu;

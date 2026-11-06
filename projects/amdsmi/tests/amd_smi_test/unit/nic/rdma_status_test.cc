@@ -11,14 +11,23 @@
 // which no seam exposes, so its zeroed-struct contract is unverified here.
 
 #include <gtest/gtest.h>
+#include <stdlib.h>
 
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <iterator>
+#include <limits>
+#include <optional>
+#include <string>
+#include <system_error>
 
 #include "amd_smi/impl/amd_smi_nic_testing.h"
+#include "smi_nic.h"
+#include "smi_nic_subsystem.h"
 
 namespace {
 
@@ -208,6 +217,107 @@ TEST_F(NicUnit, RestoreRebindsProductionGetters) {
   nic_set_info_getters_for_testing(nullptr);
   AMDSmiAINICDevice::AINICInfo info = {};
   EXPECT_EQ(populate_amd_ainic_device(nullptr, 0x1000, info), AMDSMI_STATUS_INVAL);
+}
+
+// Creates a unique directory and removes it however the test exits.
+class ScopedTempDir {
+ public:
+  ScopedTempDir() {
+    std::string tmpl = (std::filesystem::temp_directory_path() / "amdsmi_nic_port_XXXXXX").string();
+    if (mkdtemp(tmpl.data()) != nullptr) {
+      path_ = tmpl;
+    }
+  }
+  ~ScopedTempDir() {
+    if (!path_.empty()) {
+      std::error_code ec;
+      std::filesystem::remove_all(path_, ec);
+    }
+  }
+  ScopedTempDir(const ScopedTempDir&) = delete;
+  ScopedTempDir& operator=(const ScopedTempDir&) = delete;
+
+  const std::string& path() const { return path_; }
+
+ private:
+  std::string path_;
+};
+
+// The reader returns an empty file as 0, so a failed write has to stop the
+// test instead of surfacing as a wrong index.
+::testing::AssertionResult WriteFile(const std::string& path, const std::string& contents) {
+  std::ofstream out(path);
+  out << contents;
+  out.close();
+  if (!out) {
+    return ::testing::AssertionFailure() << "cannot write " << path;
+  }
+  return ::testing::AssertionSuccess();
+}
+
+// The kernel numbers network interfaces with an int, and hosts with many
+// interfaces, such as container hosts, hand out indexes above 255. INT_MAX, the
+// largest it assigns, fails any field narrower than 32 bits. These tests live
+// here because every NicUnit test has to share this file's fixture.
+TEST_F(NicUnit, PortIfindexIsReadAtFullWidth) {
+  ScopedTempDir dir;
+  ASSERT_FALSE(dir.path().empty()) << "mkdtemp failed";
+  constexpr auto kIfindex = static_cast<uint32_t>(std::numeric_limits<int>::max());
+  ASSERT_TRUE(WriteFile(dir.path() + "/ifindex", std::to_string(kIfindex) + "\n"));
+
+  const SmiNicPort port("eth0", "0000:01:00.0", dir.path(), dir.path());
+  EXPECT_EQ(port.ifindex(), kIfindex);
+}
+
+// A missing file must read as no value, not as a number.
+TEST_F(NicUnit, PortIfindexWithoutFileIsUnknown) {
+  ScopedTempDir dir;
+  ASSERT_FALSE(dir.path().empty()) << "mkdtemp failed";
+
+  const SmiNicPort port("eth0", "0000:01:00.0", dir.path(), dir.path());
+  EXPECT_EQ(port.ifindex(), std::nullopt);
+}
+
+// Text with no number has no value; std::stoul throws on it.
+TEST_F(NicUnit, PortIfindexThatIsNotANumberIsUnknown) {
+  ScopedTempDir dir;
+  ASSERT_FALSE(dir.path().empty()) << "mkdtemp failed";
+  ASSERT_TRUE(WriteFile(dir.path() + "/ifindex", "Unknown\n"));
+
+  const SmiNicPort port("eth0", "0000:01:00.0", dir.path(), dir.path());
+  EXPECT_EQ(port.ifindex(), std::nullopt);
+}
+
+// The kernel refuses carrier and speed reads on a port that is down; an empty
+// or blank file reads nothing the same way and must give no value, not 0 or "0".
+TEST_F(NicUnit, PortFileWithNothingToReadIsUnknown) {
+  ScopedTempDir dir;
+  ASSERT_FALSE(dir.path().empty()) << "mkdtemp failed";
+  ASSERT_TRUE(WriteFile(dir.path() + "/carrier", ""));
+  ASSERT_TRUE(WriteFile(dir.path() + "/address", " \n"));
+
+  const SmiNicPort port("eth0", "0000:01:00.0", dir.path(), dir.path());
+  EXPECT_EQ(port.carrier(), std::nullopt);
+  EXPECT_EQ(port.mac_address(), std::nullopt);
+}
+
+// Exposes the protected PCI id reader that NIC discovery uses.
+class PciIdReader : public SmiNicSubsystemPensando {
+ public:
+  using SmiNicSubsystem::read_pci_ids;
+};
+
+// A PCI id that is not a number reads as 0, so only that device goes unrecognized. std::stoul
+// threw on it, and AI NIC discovery then reported no NICs at all.
+TEST_F(NicUnit, PciIdThatIsNotANumberIsZero) {
+  ScopedTempDir dir;
+  ASSERT_FALSE(dir.path().empty()) << "mkdtemp failed";
+  ASSERT_TRUE(WriteFile(dir.path() + "/vendor", "Unknown\n"));
+  ASSERT_TRUE(WriteFile(dir.path() + "/device", "0x1002\n"));
+
+  const auto [vendor_id, device_id] = PciIdReader().read_pci_ids(dir.path());
+  EXPECT_EQ(vendor_id, 0);
+  EXPECT_EQ(device_id, 0x1002);
 }
 
 }  // namespace

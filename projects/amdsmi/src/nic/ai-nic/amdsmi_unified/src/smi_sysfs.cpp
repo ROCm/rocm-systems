@@ -63,7 +63,7 @@ SmiSysfsReader::SysfsStatus SmiSysfsReader::readLine(const std::string& filepath
     return SmiSysfsReader::SysfsStatus::IOError;
   }
 
-  if (std::getline(file, line)) {
+  if (std::getline(file, line) && line.find_first_not_of(" \t") != std::string::npos) {
     if (line.find(' ') != std::string::npos) {
       content = line;
       return SmiSysfsReader::SysfsStatus::Success;
@@ -87,7 +87,9 @@ SmiSysfsReader::SysfsStatus SmiSysfsReader::readLine(const std::string& filepath
     }
   }
 
-  return SmiSysfsReader::SysfsStatus::Success;
+  // Nothing was read: an empty or blank file, or a read the kernel refuses,
+  // as it does for carrier on a port that is down.
+  return SmiSysfsReader::SysfsStatus::ParseError;
 }
 
 bool SmiSysfsReader::exists(const std::string& filepath) {

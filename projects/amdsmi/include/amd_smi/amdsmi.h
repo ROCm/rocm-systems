@@ -3067,7 +3067,7 @@ typedef struct {
 } amdsmi_nic_stat_t;
 
 /**
- * @brief NIC asic information
+ * @brief NIC asic information. A number that cannot be read is the maximum value of its type.
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
@@ -3091,8 +3091,8 @@ typedef struct {
  */
 typedef struct {
   amdsmi_bdf_t bdf;
-  uint8_t max_pcie_width;
-  uint32_t max_pcie_speed;  //!< maximum PCIe speed in GT/s
+  uint8_t max_pcie_width;   //!< UINT8_MAX if unknown
+  uint32_t max_pcie_speed;  //!< maximum PCIe speed in GT/s; UINT32_MAX if unknown
   char pcie_interface_version[AMDSMI_MAX_STRING_LENGTH];
   char slot_type[AMDSMI_MAX_STRING_LENGTH];
 } amdsmi_nic_bus_info_t;
@@ -3103,7 +3103,7 @@ typedef struct {
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
 typedef struct {
-  uint8_t node;
+  uint8_t node;  //!< UINT8_MAX if unknown
   char affinity[AMDSMI_MAX_STRING_LENGTH];
 } amdsmi_nic_numa_info_t;
 
@@ -3151,17 +3151,17 @@ typedef struct {
  */
 typedef struct {
   amdsmi_bdf_t bdf;
-  uint32_t port_num;
+  uint32_t port_num;  //!< UINT32_MAX if unknown
   char type[AMDSMI_MAX_STRING_LENGTH];
   char flavour[AMDSMI_MAX_STRING_LENGTH];
   char netdev[AMDSMI_MAX_STRING_LENGTH];
-  uint8_t ifindex;
+  uint32_t ifindex;  //!< Network interface index; UINT32_MAX if unknown
   char mac_address[AMDSMI_MAX_STRING_LENGTH];
-  uint8_t carrier;
-  uint16_t mtu;
+  uint8_t carrier;  //!< 1 if a link is detected, 0 if not; UINT8_MAX if unknown (e.g. port down)
+  uint16_t mtu;     //!< In bytes; UINT16_MAX if unknown
   char link_state[AMDSMI_MAX_STRING_LENGTH];
-  uint32_t link_speed;
-  uint32_t active_fec;  //!< Active FEC modes bitmask (see about FEC modes in the description)
+  uint32_t link_speed;  //!< In Mb/s; UINT32_MAX if unknown (e.g. interface down)
+  uint32_t active_fec;  //!< Active FEC modes bitmask (see the description); UINT32_MAX if unknown
   char autoneg[AMDSMI_MAX_STRING_LENGTH];
   char pause_autoneg[AMDSMI_MAX_STRING_LENGTH];
   char pause_rx[AMDSMI_MAX_STRING_LENGTH];
@@ -3189,7 +3189,7 @@ typedef struct {
 } amdsmi_nic_driver_info_t;
 
 /**
- * @brief NIC RDMA port information
+ * @brief NIC RDMA port information. A number that cannot be read is the maximum value of its type.
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
