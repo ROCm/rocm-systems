@@ -22,7 +22,7 @@
 #include <string>
 #include <vector>
 
-#include "../common/LogCapture.hpp"
+#include "../../common/LogCapture.hpp"
 #include "ScopedHook.h"
 #include "fakes/dev_runtime_micro_fakes.h"
 #include "fakes/diagnostics_p2p_device_fakes.h"
