@@ -8926,7 +8926,7 @@ TEST(WrapMicrotestIsolated, DdaFabricAgLL128Shape_FromDpxTable) {
 
 // DDA LL128 AlltoAll reads its own ddaA2aLL128* window, inclusive at both ends; a synthetic table pins
 // the accessors. The real tables and no table keep 0 threads; SPX and no table keep the init cap, and DPX
-// caps the grid at 72 blocks from 256 KiB to 16 MiB.
+// caps the grid at 72 blocks from 256 KiB to 16 MiB, where DPX runs LL128 (LL stops at 128 KiB).
 TEST(WrapMicrotestIsolated, DdaFabricA2aLL128Shape_FromTable) {
   RUN_ISOLATED_TEST(
       "Wrap_DdaFabricA2aLL128Shape_FromTable",
@@ -8975,6 +8975,11 @@ TEST(WrapMicrotestIsolated, DdaFabricA2aLL128Shape_FromTable) {
         }
         comm->ddaFabricMaxBlocks = 48;
         EXPECT_EQ(48, rcclDdaFabricA2aLL128Blocks(comm, 8 * kMiB)) << "DPX cap never widens the init cap";
+        for (int n : {8, 16, 32, 64}) {
+          comm->nRanks = n;
+          EXPECT_EQ(128 * kKiB, rcclDdaLLThreshold(comm, ncclFuncAlltoAll)) << n;
+          EXPECT_EQ(16 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAlltoAll)) << n;
+        }
         DeleteCommWithArch(comm);
       });
 }
