@@ -527,9 +527,8 @@ MIN_FREE_GB=50
 PASSTHROUGH=()
 CMD=()
 
-# A flag whose value is missing used to fall off the end of `shift 2` and exit 1
-# with nothing printed, and 1 is also verify's "nothing captured" code, so a
-# scripted gate could not tell a typo from an empty archive.
+# A missing flag value must not exit 1 silently: 1 is also verify's "nothing
+# captured" code, so a scripted gate could not tell a typo from an empty archive.
 needs_value() {
   (( $2 >= 2 )) || fail "$1 needs a value"
 }

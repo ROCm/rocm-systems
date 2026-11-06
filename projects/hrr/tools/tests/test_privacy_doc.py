@@ -21,7 +21,7 @@ PRIVACY = HRR / "PRIVACY.md"
 CAPTURE_SRC = HRR.parent / "clr" / "hipamd" / "src" / "hrr"
 METADATA_CPP = CAPTURE_SRC / "hip_capture_metadata.cpp"
 
-# The tasks under AIRUNTIME-2733 that the page links, one per statement.
+# The tasks that the page links, one per statement.
 EPIC_TASKS = (
     "AIRUNTIME-2847",
     "AIRUNTIME-2857",

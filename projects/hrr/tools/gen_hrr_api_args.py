@@ -463,9 +463,8 @@ ERROR_STUB_PLAYBACK_APIS: Set[str] = {
 # launch descriptor carries a host function address for each device. Recording
 # more bytes does not help — the missing thing is not in the arguments.
 #
-# The alternative to declaring these is what HRR used to do: hand the recorded
-# value to the real API and let it fail (or crash) somewhere inside the runtime,
-# where the diagnosis is a HIP error code with no attribution. So they get a
+# Handing the recorded value to the real API would fail (or crash) inside the
+# runtime with a HIP error code and no attribution. So they get a
 # handler that says exactly which API is unreplayable and why, returns
 # hipErrorNotSupported (fatal unless --continue-on-error), and is counted in the
 # replay summary's unreplayable list. The capture shim also warns once, so the
@@ -638,9 +637,9 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipStreamGetCaptureInfo_v2_spt",
     "hipStreamUpdateCaptureDependencies",
     # Category 5: Other type mismatches (output handle params stored as void** by generator)
-    # The hipCtx* family used to live here; it now runs against ctx_map, which
-    # is what makes hipCtxPushCurrent push a context that exists in this
-    # process. hipCtxGetDevice stays: it writes a hipDevice_t the replay has no
+    # The rest of the hipCtx* family runs against ctx_map, so hipCtxPushCurrent
+    # pushes a context that exists in this process. hipCtxGetDevice stays: it
+    # writes a hipDevice_t the replay has no
     # use for, and the device it reports is the one hipSetDevice already chose.
     "hipCtxGetDevice",
     "hipDeviceGet",
@@ -814,8 +813,8 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipKernelGetAttribute",
     "hipKernelSetAttribute",
     # Category 12: Misc — stale output pointers or wrong return type
-    # hipGetProcAddress and hipGetProcAddress_spt used to be here and to crash
-    # respectively; both now carry the symbol name and look it up for real.
+    # hipGetProcAddress and hipGetProcAddress_spt carry the symbol name and
+    # look it up for real, so they are not listed here.
     "hipGetDriverEntryPoint",
     "hipGetDriverEntryPoint_spt",
     # hipOccupancyAvailableDynamicSMemPerBlock — hipFunction_t stale handle
@@ -925,9 +924,8 @@ NOOP_PLAYBACK_APIS: Set[str] = {
 # APIs that pass an opaque handle playback does not translate, but that
 # already replay through a generated call and stay on it. A new API with one
 # of those parameter types replays as a no-op until it is added here or given
-# another playback class. The APIs that used to be here with a raw cast are in
-# PLAYBACK_ONLY_UNREPLAYABLE_APIS and are refused. A hand-written handler belongs in MANUAL_PLAYBACK_APIS and
-# must not also be listed here.
+# another playback class. A hand-written handler belongs in
+# MANUAL_PLAYBACK_APIS and must not also be listed here.
 DIRECT_PLAYBACK_APIS: Set[str] = {
     "hipDevResourceGenerateDesc",
     "hipDeviceGetExecutionCtx",
@@ -1177,8 +1175,8 @@ class Deref:
 # API name -> the pointer arguments whose pointee is carried in the event.
 DEREF_FIELDS: Dict[str, List[Deref]] = {
     # The allocation property decides the memory type and, for a heap that maps
-    # cross-node peers, which device the pages come from. Playback used to
-    # hardcode Pinned/device 0, which builds the wrong topology silently.
+    # cross-node peers, which device the pages come from. Hardcoding
+    # Pinned/device 0 would build the wrong topology silently.
     "hipMemCreate": [
         Deref("prop", "hipMemAllocationProp", 32, playback="manual"),
     ],
@@ -1511,8 +1509,8 @@ def by_value_struct(raw_type: str) -> Optional[ByValueStruct]:
 
 # Maps the base name of a uint8_t inline-array field (e.g. "pool_props_bytes")
 # to the C struct type whose sizeof must match the declared array extent.
-# Used to emit static_assert(sizeof(CType) == N) immediately after each struct
-# that contains such a field, catching size mismatches at compile time.
+# Emits static_assert(sizeof(CType) == N) after each struct that contains such
+# a field, catching size mismatches at compile time.
 _INLINE_STRUCT_ASSERTS: Dict[str, str] = {
     "pool_props_bytes":   "hipMemPoolProps",
     "parms_bytes":        "hipMemcpy3DParms",
@@ -1571,10 +1569,9 @@ _ENUM_TYPES = {
     "hipTextureFilterMode", "hipTextureAddressMode", "hipTextureMipmapFilterMode",
     "hipResourcetype", "hipResourceViewFormat", "hipChannelFormatKind",
     "hipKernelAttribute",
-    # Enums the generator used to lower to `uint64_t /* T */`, which reads as a
-    # dropped by-value struct to anything inspecting the generated types (the
-    # matrix's payload-loss detector counted all eight). Every one is a 4-byte
-    # enum whose value survives intact; naming them here says so.
+    # Without this, an enum lowers to `uint64_t /* T */`, which the matrix's
+    # payload-loss detector reads as a dropped by-value struct. Every one is a
+    # 4-byte enum whose value survives intact.
     "hipArray_Format", "hipDevResourceType", "hipFunction_attribute",
     "hipGraphMemAttributeType", "hipJitInputType",
     "hipMemAllocationHandleType", "hipMemRangeHandleType",
@@ -2975,10 +2972,9 @@ _UNTRANSLATED_PLAYBACK_TYPES = {
 }
 
 # `void*` parameters that are really out buffers — the callee writes a handle
-# through them. Nothing in the type says so, so the generator used to treat the
-# recorded value as an ordinary opaque input and hand the runtime an address in
-# the capturing process; measured outcome was a SIGSEGV inside
-# hipMemExportToShareableHandle, which also cost every event recorded after it.
+# through them. Nothing in the type says so, and treating the recorded value as
+# an opaque input hands the runtime an address from the capturing process
+# (SIGSEGV inside hipMemExportToShareableHandle).
 # The value is the number of bytes the callee writes, and the handler passes a
 # zeroed local of that size.
 #
@@ -3184,8 +3180,8 @@ _POST_CALL_EXTRA: Dict[str, List[str]] = {
 # the in-tree headers; see HRR_HIP_INCLUDE_DIRS in projects/hrr/CMakeLists.txt.
 # Add an API here when its first CI build fails to link against the SDK.
 _PLAYBACK_RUNTIME_RESOLVED_APIS = frozenset({
-    "hipDeviceFlushGPUDirectRDMAWrites",   # added by #10176
-    "hipExtMemcpyBatchAsync",              # added by #9098
+    "hipDeviceFlushGPUDirectRDMAWrites",
+    "hipExtMemcpyBatchAsync",
 })
 
 _PLAYBACK_ARG_BRIDGES: Dict[str, Dict[str, object]] = {
@@ -3581,7 +3577,7 @@ def generate_playback_shim(entry: ApiEntry) -> str:
     # Unreplayable APIs: name the API and the reason, mark the replay as
     # having skipped something it cannot reproduce, and return an error. Loud
     # and attributable beats letting the real API fail somewhere inside the
-    # runtime with a bare error code, which is what these used to do.
+    # runtime with a bare error code.
     if entry.name in UNREPLAYABLE_PLAYBACK_APIS:
         return _refusing_playback_shim(entry, UNREPLAYABLE_PLAYBACK_APIS[entry.name])
     if entry.name in PLAYBACK_ONLY_UNREPLAYABLE_APIS:
