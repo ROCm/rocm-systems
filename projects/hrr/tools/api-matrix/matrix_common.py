@@ -23,23 +23,6 @@ HERE = Path(__file__).resolve().parent
 DEFAULT_MANIFEST = HERE / "api_classes.json"
 DEFAULT_OVERLAY = HERE / "api_matrix.yaml"
 
-# Observable replay classes. These are what a test can actually distinguish:
-# NOOP and ERROR_STUB each emit a one-time stderr warning naming themselves,
-# and HANDLER_ERROR names itself in the line reporting the failed event.
-#
-# HANDLER_ERROR and CRASH are not classes the generator assigns. They are what
-# happens when a real handler runs and does not come back cleanly: the API is
-# counted as faithfully replayed, and replaying it fails. HANDLER_ERROR returns
-# a HIP error — survivable, which is why the matrix runs hrr-playback with
-# --continue-on-error. CRASH takes the process down with a signal, so it also
-# costs every event recorded after it, which is why an API declared CRASH is
-# given a workload of its own.
-#
-# UNREPLAYABLE is the generator's fourth assigned class: the API is recorded,
-# and replay refuses it by name and reason rather than handing a capture-time
-# host pointer to the runtime. An API expected to be UNREPLAYABLE and observed
-# UNREPLAYABLE is a PASS — the declared behaviour is "fails loudly here", and
-# the reason is the documented scope exclusion.
 CLASS_REAL = "REAL"
 CLASS_NOOP = "NOOP"
 CLASS_ERROR_STUB = "ERROR_STUB"
@@ -62,20 +45,12 @@ class ApiRow:
     payload_loss: bool
     # False for APIs the workload does call but that never reach the archive
     # under their own name — HIP lowers them to another entry point first, or
-    # HRR has no capture wrapper for them. Declaring it turns a permanent
-    # coverage hole into an assertion that the folding still happens.
     expect_captured: bool = True
-    # Tiers where this API's real handler is known to return an error for the
-    # arguments that tier records, while working everywhere else. A whole-API
-    # class cannot express that, and without it the difference reads as two
-    # tiers disagreeing about what the API is.
     handler_error_in: List[str] = field(default_factory=list)
     skip: bool = False
     skip_reason: str = ""
     # Measured reason this API cannot be made to write an event on this stack,
     # from the unreachable: groups. Empty for every API that is expected to be
-    # exercised, which is what makes an undeclared gap a reportable problem
-    # rather than a silent one.
     unreachable_reason: str = ""
     unreachable_group: str = ""
     note: str = ""
@@ -133,14 +108,6 @@ _StrictLoader.add_constructor(
     yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _no_duplicate_keys)
 
 
-# ---------------------------------------------------------------------------
-# Overlay schema
-#
-# Every key the overlay may carry is listed here, because a misspelt key is
-# otherwise silently ignored: `payload_los: true` would drop an expectation and
-# the matrix would go on passing. Each checker returns None when the value is
-# fine, or a description of what was expected.
-# ---------------------------------------------------------------------------
 
 _Check = Callable[[Any], Optional[str]]
 _EXPECT_VALUES = ("derived",) + VALID_CLASSES
@@ -341,7 +308,6 @@ def _validate_sections(overlay: Dict[str, Any], problems: List[str]) -> None:
 
 def _check_tier_configured(where: str, tier: Any, tiers: Dict[str, Any],
                            problems: List[str]) -> None:
-    # A tier outside TIER_ORDER is already reported by the key's own checker.
     if tier is not None and _tier(tier) is None and tier not in tiers:
         problems.append(f"{where}: {tier} has no entry under tiers:")
 
@@ -402,7 +368,6 @@ def resolve(manifest: Dict[str, Any], overlay: Dict[str, Any]) -> List[ApiRow]:
     patterns = overlay.get("patterns") or []
     tiers = overlay.get("tiers") or {}
 
-    # api -> tier, from the explicit tier lists.
     explicit: Dict[str, str] = {}
     for tier, meta in tiers.items():
         for api in (meta or {}).get("apis") or []:
@@ -444,10 +409,6 @@ def resolve(manifest: Dict[str, Any], overlay: Dict[str, Any]) -> List[ApiRow]:
                 f"{api}: expect '{expect}' is not one of "
                 f"derived/{'/'.join(VALID_CLASSES)}")
 
-        # The overlay is authoritative on payload loss: the mechanical detector
-        # is a superset (it flags every const-struct pointer regardless of
-        # whether the loss is consequential) and it misses non-const shapes such
-        # as hipStreamBatchMemOp's op-list. An explicit false suppresses it.
         if "payload_loss" in ov:
             payload_loss = bool(ov["payload_loss"])
         else:
@@ -462,15 +423,11 @@ def resolve(manifest: Dict[str, Any], overlay: Dict[str, Any]) -> List[ApiRow]:
             payload_loss=payload_loss,
             # A passthrough-only capture shim writes no event at all, so the
             # API can never appear in an archive. That is derivable, so derive
-            # it; the overlay only has to declare the cases where a shim does
-            # write an event but under a different API's name.
             expect_captured=bool(
                 ov.get("captured", entry["capture_class"] != "PASSTHROUGH_ONLY")),
             handler_error_in=list(ov.get("handler_error_in") or []),
             # Only a per-API skip means "never assert this". A tier that is
             # not run by default is already expressed by whether it produced
-            # observations — folding it in here would mark every API of a
-            # deprioritised tier as skipped even when that tier was run.
             skip=bool(ov.get("skip", False)),
             skip_reason=ov.get("reason", ""),
             unreachable_reason=unreachable.get(api, {}).get("reason", ""),
@@ -504,7 +461,6 @@ def validate(rows: List[ApiRow], overlay: Dict[str, Any]) -> List[str]:
 
     # Every API named in the overlay must exist, or the overlay has rotted
     # against the generator — the same failure derive_manifest.py's baseline
-    # catches from the other direction.
     for tier, meta in (overlay.get("tiers") or {}).items():
         for api in (meta or {}).get("apis") or []:
             if api not in by_name:

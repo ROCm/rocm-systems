@@ -1,5 +1,4 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
-#
 # SPDX-License-Identifier: MIT
 """PRIVACY.md lists what capture writes into an archive.
 
@@ -21,7 +20,6 @@ PRIVACY = HRR / "PRIVACY.md"
 CAPTURE_SRC = HRR.parent / "clr" / "hipamd" / "src" / "hrr"
 METADATA_CPP = CAPTURE_SRC / "hip_capture_metadata.cpp"
 
-# The tasks that the page links, one per statement.
 EPIC_TASKS = (
     "AIRUNTIME-2847",
     "AIRUNTIME-2857",

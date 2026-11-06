@@ -78,12 +78,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
 
-# ---------------------------------------------------------------------------
-# APIs handled by hand in hip_capture.cpp — genuinely complex serialization
-# ---------------------------------------------------------------------------
 
-# These APIs get FULL hand-written shims in hip_capture.cpp that call write_event.
-# The generator produces pass-through stubs for them.
 MANUAL_CAPTURE_APIS: Set[str] = {
     # Kernel launches — kernel arg introspection, variable-length payload
     "hipModuleLaunchKernel",
@@ -100,31 +95,25 @@ MANUAL_CAPTURE_APIS: Set[str] = {
     # variable-length launch payload rather than as capture-time addresses.
     "hipDrvLaunchKernelEx",
     "hipLaunchKernelExC",
-    # Cooperative launch — void** kernelParams, same encoding as the others.
     "hipModuleLaunchCooperativeKernel",
     # <<<>>> launch config — must save grid/block/shared/stream into TLS for hipLaunchByPtr
     "__hipPushCallConfiguration",
-    # Module load — code object snapshotting to disk
     "hipModuleLoadData",
     "hipModuleLoadDataEx",
     "hipModuleLoad",
     # Module unload — drop the program's code-object hash so a recycled
     # amd::Program address cannot hit a stale g_prog_hash entry.
     "hipModuleUnload",
-    # Memcpy H2D variants — blob snapshotting of host src data to disk
     "hipMemcpy",
     "hipMemcpyAsync",
     "hipMemcpyHtoD",
     "hipMemcpyHtoDAsync",
     "hipMemcpyWithStream",
-    # Memcpy D2H variants — blob capture of host dst data after copy
     "hipMemcpyDtoH",
     "hipMemcpyDtoHAsync",
-    # Fat binary registration — blob snapshotting
     "__hipRegisterFatBinary",
     # Fat binary unregistration — must record *modules before the real call
     "__hipUnregisterFatBinary",
-    # Host memory registration — blob snapshotting of initial host mem contents
     "hipHostRegister",
     "hipHostUnregister",
     # hipMemPoolCreate — pool_props is a struct pointer; must copy it inline
@@ -142,12 +131,10 @@ MANUAL_CAPTURE_APIS: Set[str] = {
     # Array creation — need handle map (manual capture for output handle)
     "hipArrayCreate",
     "hipArray3DCreate",
-    # Struct-pointer capture: value stored inline
     "hipStreamSetAttribute",
     "hipMemGetAllocationGranularity",
     "hipMemPoolSetAccess",
     "hipMemSetAccess",
-    # hipDrv driver 3D/2D memcpy (HIP_MEMCPY3D / hip_Memcpy2D struct ptr; inline + blobs)
     "hipDrvMemcpy3D",
     "hipDrvMemcpy3DAsync",
     "hipDrvMemcpy2DUnaligned",
@@ -169,7 +156,6 @@ MANUAL_CAPTURE_APIS: Set[str] = {
     "hipGraphAddMemcpyNodeFromSymbol",
     "hipGraphMemcpyNodeSetParamsToSymbol",
     "hipGraphExecMemcpyNodeSetParamsToSymbol",
-    # JIT linker input — the image is a blob.
     "hipLinkAddData",
 }
 
@@ -204,18 +190,9 @@ PASSTHROUGH_ONLY: Set[str] = {
     "hipModuleGetFunction",
 }
 
-# ---------------------------------------------------------------------------
-# Windows exports
-#
-# amdhip.def.in is the export list the Windows amdhip64 DLL is linked with, so
-# an API missing from it has no import library entry and hrr-playback.exe fails
-# to link against it — even though the HIP headers declare it. Read the list
-# rather than hard-coding the gaps, so the guard disappears on its own once clr
-# starts exporting the symbol.
-# ---------------------------------------------------------------------------
+# amdhip.def.in is the Windows amdhip64 export list. An API missing from it has no import library entry, so hrr-playback.exe cannot link it.
+# The list is read rather than hard-coded, so the guard disappears once clr exports the symbol.
 
-# This script lives at projects/hrr/tools/; the export list stays in CLR next
-# to the amdhip64 sources it is linked into.
 _AMDHIP_DEF_IN = (Path(__file__).resolve().parent.parent.parent
                   / "clr" / "hipamd" / "src" / "amdhip.def.in")
 
@@ -236,12 +213,8 @@ def _windows_exported_symbols() -> Set[str]:
 WINDOWS_EXPORTED_APIS: Set[str] = _windows_exported_symbols()
 
 
-# ---------------------------------------------------------------------------
-# Playback manual APIs — implemented by hand in hip_playback.cpp
-# ---------------------------------------------------------------------------
 
 MANUAL_PLAYBACK_APIS: Set[str] = {
-    # Kernel launches — variable-length binary payload, kernarg buffer + function lookup
     "hipModuleLaunchKernel",
     "hipExtModuleLaunchKernel",
     "hipLaunchKernel",
@@ -258,31 +231,25 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     # Cooperative launch — must go back through the cooperative entry point, or
     # a grid-wide barrier hangs instead of running.
     "hipModuleLaunchCooperativeKernel",
-    # Memcpy H2D — must load blob from disk using hash fields appended to struct
     "hipMemcpy",
     "hipMemcpyAsync",
     "hipMemcpyHtoD",
     "hipMemcpyHtoDAsync",
     "hipMemcpyWithStream",
-    # Module load — must load code object from archive by hash, not raw image ptr
     "hipModuleLoadData",
     "hipModuleLoadDataEx",
     "hipModuleLoad",
-    # Function lookup — resolved by name at kernel launch; no handle map needed
     "hipModuleGetFunction",
-    # Alloc — need ctx.record_alloc / ctx.remove_alloc (not encodable by generator)
     "hipMalloc",
     "hipMallocAsync",
     "hipMallocFromPoolAsync",
     "hipMallocManaged",
     "hipFree",
     "hipFreeAsync",
-    # Stream lifecycle — need ctx.record_stream / ctx.remove_stream
     "hipStreamCreate",
     "hipStreamCreateWithFlags",
     "hipStreamCreateWithPriority",
     "hipStreamDestroy",
-    # Event lifecycle — need ctx.record_event / ctx.remove_event
     "hipEventCreate",
     "hipEventCreateWithFlags",
     "hipEventDestroy",
@@ -297,7 +264,6 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     "hipEventQuery",
     "hipStreamQuery",
     "hipStreamQuery_spt",
-    # Fat binary registration — load blob as module so kernel names resolve
     "__hipRegisterFatBinary",
     # Variable registration — resolve the recorded symbol name in the loaded
     # modules and map both the host shadow and the capture-time device address
@@ -314,13 +280,10 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     "hipMallocHost",
     "hipFreeHost",
     "hipHostFree",
-    # Host memory registration — need handle map + blob restore + device ptr recording
     "hipHostRegister",
     "hipHostUnregister",
     "hipHostGetDevicePointer",
-    # hipMemPoolCreate — pool_props stored inline; must reconstruct & pass by pointer
     "hipMemPoolCreate",
-    # hipMemPoolSetAttribute / hipMemPoolGetAttribute — value is void*; stored inline
     "hipMemPoolSetAttribute",
     "hipMemPoolGetAttribute",
     # Graph stream-capture flow — hipStreamEndCapture output handle must be recorded,
@@ -335,10 +298,8 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     # built via the unsupported explicit node API.
     "hipGraphInstantiateWithFlags",
     "hipGraphLaunch",
-    # DtoH driver-style copies — dst is a host pointer (not in alloc_map); need temp buffer
     "hipMemcpyDtoH",
     "hipMemcpyDtoHAsync",
-    # hipMemcpy3D family — parms struct stored inline (parms_bytes); must reconstruct
     "hipMemcpy3D",
     "hipMemcpy3DAsync",
     "hipMemcpy3D_spt",
@@ -347,12 +308,10 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     # D2H validates the device result against the captured expected blob.
     "hipMemcpy2D",
     "hipMemcpy2DAsync",
-    # Array creation — handle must be recorded in ctx.array_map
     "hipArrayCreate",
     "hipArray3DCreate",
     # hipFreeArray — skip if handle not in array_map (e.g. created by nooped hipMallocArray)
     "hipFreeArray",
-    # Struct-pointer params stored inline
     "hipStreamSetAttribute",
     "hipMemGetAllocationGranularity",
     "hipMemPoolSetAccess",
@@ -366,7 +325,6 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     # pairs with nothing.
     "hipIpcGetMemHandle",
     "hipIpcOpenMemHandle",
-    # VMM (Virtual Memory Management) — output handles / VAs must be tracked
     "hipMemAddressReserve",
     "hipMemAddressFree",
     "hipMemCreate",
@@ -376,7 +334,6 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     # Device allocation — must allocate a real buffer and record it in alloc_map
     # (with padding + zero-init parity with hipMalloc).
     "hipExtMallocWithFlags",
-    # hipDrv driver 3D/2D memcpy (reconstruct struct, translate device ptrs, blob/validate)
     "hipDrvMemcpy3D",
     "hipDrvMemcpy3DAsync",
     "hipDrvMemcpy2DUnaligned",
@@ -416,32 +373,10 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     "hipDrvGraphExecMemcpyNodeSetParams",
 }
 
-# ---------------------------------------------------------------------------
-# Graph work whose arguments the archive does not carry well enough to rebuild.
-# Most of the node API now replays for real; what is left here needs something
-# the recording does not have — a semaphore only another process can produce, a
-# device symbol the archive has no name for, a union whose active member is not
-# recoverable. Unlike the generic NOOP handlers (which emit a vague
-# once-per-process message), these emit a loud, attributable warning naming the
-# specific API, so when replay later fails the cause is traceable.
-#
-# These are intentionally NON-FATAL (they return hipSuccess) but they poison the
-# graph: ctx.mark_graph_incomplete records that the graph is now short a node,
-# and hipGraphInstantiate / hipGraphInstantiateWithFlags refuse an incomplete
-# graph with hipErrorNotSupported. That is the point at which a missing node
-# would otherwise turn into a graph launch that silently does less work than the
-# recording did, and it leaves programs that merely build graphs they never
-# instantiate free to run.
-#
-# Only calls that build or mutate graph contents belong here. Harmless queries
-# (hipGraphGetNodes/Edges, hipStreamGetCaptureInfo_v2, ...) stay in
-# NOOP_PLAYBACK_APIS. The stream-capture chain never emits these APIs, so the
-# hipStreamBeginCapture/EndCapture path is unaffected.
-# ---------------------------------------------------------------------------
+# Graph work whose arguments the archive cannot rebuild: a semaphore only another process can produce, a device symbol with no recorded name, a union with no recoverable active member.
+# Handlers return hipSuccess but call ctx.mark_graph_incomplete, so hipGraphInstantiate and hipGraphInstantiateWithFlags refuse the graph with hipErrorNotSupported.
+# Only calls that build or mutate graph contents belong here; harmless queries stay in NOOP_PLAYBACK_APIS.
 ERROR_STUB_PLAYBACK_APIS: Set[str] = {
-    # An external semaphore is imported from a handle only its owning process
-    # can produce, so a node that signals or waits on one has nothing to point
-    # at here.
     "hipGraphAddExternalSemaphoresSignalNode",
     "hipGraphAddExternalSemaphoresWaitNode",
     # hipGraphNodeParams is a union over every node kind, so reconstructing it
@@ -454,24 +389,9 @@ ERROR_STUB_PLAYBACK_APIS: Set[str] = {
     "hipGraphInstantiateWithParams",
 }
 
-# ---------------------------------------------------------------------------
-# APIs whose effect cannot be reproduced at replay by anything HRR can do, as
-# opposed to APIs that merely have not been implemented yet.
-#
-# A host callback is a function pointer into the capturing process; a fabric or
-# IPC handle names an export only its owning process can make; a multi-device
-# launch descriptor carries a host function address for each device. Recording
-# more bytes does not help — the missing thing is not in the arguments.
-#
-# Handing the recorded value to the real API would fail (or crash) inside the
-# runtime with a HIP error code and no attribution. So they get a
-# handler that says exactly which API is unreplayable and why, returns
-# hipErrorNotSupported (fatal unless --continue-on-error), and is counted in the
-# replay summary's unreplayable list. The capture shim also warns once, so the
-# gap is visible when the recording is made.
-#
-# Maps API name -> the reason, which is printed verbatim at both ends.
-# ---------------------------------------------------------------------------
+# APIs whose effect replay cannot reproduce: host callbacks, fabric/IPC handles and multi-device launch descriptors point into the capturing process.
+# Each gets a handler that returns hipErrorNotSupported (fatal unless --continue-on-error) and is listed in the replay summary; the capture shim also warns once.
+# Maps API name to the reason, printed verbatim at both ends.
 _HOST_CALLBACK_REASON = (
     "the callback is a host function pointer belonging to the capturing "
     "process, so there is no function here to enqueue"
@@ -520,13 +440,7 @@ UNREPLAYABLE_PLAYBACK_APIS: Dict[str, str] = {
 
 
 # APIs replay refuses that capture does not annotate.
-#
-# These are refused by the playback handler only. UNREPLAYABLE_PLAYBACK_APIS also
-# makes the capture shim call writer::note_unreplayable(), which changes the
-# generated capture file, and that file lives outside projects/hrr. The
-# playback-only table keeps this rule's output inside projects/hrr: the capture
-# side does not warn at record time about these, replay still refuses them by
-# name.
+# UNREPLAYABLE_PLAYBACK_APIS also makes the capture shim call writer::note_unreplayable(), which changes a file outside projects/hrr; this table keeps the change inside it.
 _UNTRANSLATED_HANDLE_REASON = (
     "the recorded argument is a handle recorded as an address from the "
     "capturing process; replay has no translation for it, so passing it to "
@@ -570,39 +484,19 @@ PLAYBACK_ONLY_UNREPLAYABLE_APIS: Dict[str, str] = {
 # RawSlotError). Keyed by API name; the value is the reason in the handler.
 AUTO_UNREPLAYABLE_PLAYBACK_APIS: Dict[str, str] = {}
 
-# Generated handlers for APIs that take a JIT/link option array. Their option
-# values are `void*`: for some options an integer, for others a pointer into the
-# capturing process. A handler for one of these refuses when any recorded option
-# carries a pointer (hrr_jit_options.h). The handler reads the arrays from the
-# locals _d_options and _d_options_n that the deref table declares. The other
-# option-array APIs are not generated: hipLinkAddData is hand-written and
-# refuses every non-null option value, hipLinkAddFile is refused outright, and
-# hipModuleLoadDataEx and the hipLibraryLoad* calls never pass the options on.
+# APIs taking a JIT/link option array. Option values are void*: an integer for some options, a pointer into the capturing process for others.
+# The handler refuses when any recorded option carries a pointer (hrr_jit_options.h), reading _d_options and _d_options_n from the deref table.
+# Other option-array APIs are hand-written, refused, or ignore the options.
 JIT_OPTION_ARRAY_APIS: Set[str] = {"hipLinkCreate"}
 
-# Generated handlers whose record carries an attribute union by value
-# (hipKernelNodeAttrValue). One member of it, the access policy window, holds a
-# device address (base_ptr) from the capturing process. The launch path
-# (hipLaunchKernelExC) already translates it with translate_ptr, and CLR only
-# stores the window and rejects num_bytes above accessPolicyMaxWindowSize, which
-# is 0 on AMD, so every recorded window has num_bytes == 0 and must replay. The
-# union cannot be translated member by member without knowing which one the
-# attribute id selects, so the handler translates base_ptr when the id selects
-# the window and passes every other attribute through. Maps the API to
-# (attribute-id field, the enumerator that selects the window).
+# Handlers whose record carries hipKernelNodeAttrValue by value. Its access policy window holds a capturing-process device address (base_ptr).
+# The handler translates base_ptr when the attribute id selects the window and passes other attributes through. CLR rejects only num_bytes above accessPolicyMaxWindowSize (0 on AMD), so recorded windows have num_bytes == 0 and replay.
+# Maps the API to (attribute-id field, enumerator that selects the window).
 ATTR_UNION_WINDOW_APIS: Dict[str, Tuple[str, str]] = {
     "hipGraphKernelNodeSetAttribute": ("attr", "hipKernelNodeAttributeAccessPolicyWindow"),
 }
 
-# ---------------------------------------------------------------------------
-# APIs that get an inline no-op playback body (return hipSuccess; immediately)
-# rather than an extern declaration.  Used for:
-#   Category 1: not present in ROCm SDK 6.4 headers
-#   Category 3: hipDeviceptr_t output param type mismatch
-#   Category 4: hipGraphNode_t* array param type mismatch
-#   Category 5: other output-handle type mismatches
-#   Category 6: misc wrong-return-type or missing struct fields
-# ---------------------------------------------------------------------------
+# APIs given an inline no-op playback body instead of an extern declaration: missing from the SDK headers, or output-parameter types the generator cannot cast.
 NOOP_PLAYBACK_APIS: Set[str] = {
     # Category 1: APIs not present in ROCm SDK 6.4 headers (C3861/LNK2019)
     "hipExtHostAlloc",
@@ -648,44 +542,32 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipGetTextureReference",
     "hipKernelGetName",
     "hipMemRetainAllocationHandle",
-    # hipMemGetAllocationPropertiesFromHandle — handle is stale at playback; query not needed
     "hipMemGetAllocationPropertiesFromHandle",
     "hipModuleGetTexRef",
     "hipStreamGetDevice",
     # Category 6: Misc — struct field issues, wrong return type casts, or missing types
-    # hipDeviceGetByPCIBusId takes a char* PCI string (stale capture-time pointer) — noop
     "hipDeviceGetByPCIBusId",
     # hipDeviceGetName / hipDeviceGetPCIBusId write into a caller-sized char buffer.
     # The generator emits `char _out{}` (1 byte) causing a stack-smash on Linux.
     # These are query-only calls with no effect on replay correctness — noop.
     "hipDeviceGetName",
     "hipDeviceGetPCIBusId",
-    # hipDeviceGetGraphMemAttribute / hipDeviceSetGraphMemAttribute — void* value ptr (stale) — noop
     "hipDeviceGetGraphMemAttribute",
     "hipDeviceSetGraphMemAttribute",
-    # hipDevicePrimaryCtxGetState — output pointers (stale) — noop
     "hipDevicePrimaryCtxGetState",
-    # hipPointerGetAttribute (singular) — void* output (stale) — noop
     "hipPointerGetAttribute",
-    # hipDrvPointerGetAttributes — void** array of outputs (stale) — noop
     "hipDrvPointerGetAttributes",
-    # hipMemPoolGetAccess — hipMemLocation* (stale) — noop
     "hipMemPoolGetAccess",
-    # hipMemPoolExportPointer / hipMemPoolImportPointer — handle data struct (stale) — noop
     "hipMemPoolExportPointer",
     "hipMemPoolImportPointer",
-    # hipMallocArray / hipMalloc3DArray — hipChannelFormatDesc* (stale); output handle not needed for D2H — noop
     "hipMallocArray",
     "hipMalloc3DArray",
-    # hipMalloc3D — pitchedDevPtr output (stale), hipExtent non-castable; output not needed for D2H — noop
     "hipMalloc3D",
     # hipMemAllocHost / hipHostAlloc — host ptr alloc; not device allocations — noop
     # (hipMallocHost / hipFreeHost are replayed by hand: see MANUAL_PLAYBACK_APIS)
     "hipMemAllocHost",
     "hipHostAlloc",
-    # hipMemAllocPitch — hipDeviceptr_t* output (type mismatch) + output not in alloc_map — noop
     "hipMemAllocPitch",
-    # hipHostGetFlags — output flag ptr (stale) — noop
     "hipHostGetFlags",
     # _spt memcpy variants with host ptrs: no blob fields; noop since H2D data handled by hipMemcpy blobs
     "hipMemcpy_spt",
@@ -701,27 +583,22 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipMemcpyToSymbol_spt",
     "hipMemcpyToSymbolAsync_spt",
     "hipMemcpyFromArray_spt",
-    # hipMemcpyToArray / hipMemcpyFromArray / hipMemcpy2DToArray / hipMemcpy2DFromArray — array handle (not in array_map for generated shim) — noop
     "hipMemcpyToArray",
     "hipMemcpyFromArray",
     "hipMemcpy2DToArray",
     "hipMemcpy2DFromArray",
     "hipMemcpy2DToArrayAsync",
     "hipMemcpy2DFromArrayAsync",
-    # hipMemcpyAtoH / hipMemcpyHtoA — hipArray_t not in array_map for generated shim — noop
     "hipMemcpyAtoH",
     "hipMemcpyHtoA",
-    # hipMemcpyToSymbol / hipMemcpyFromSymbol / Async — symbol name is host ptr (stale) — noop
     "hipMemcpyToSymbol",
     "hipMemcpyFromSymbol",
     "hipMemcpyToSymbolAsync",
     "hipMemcpyFromSymbolAsync",
-    # hipMemset3D / hipMemset3DAsync — hipPitchedPtr is non-castable (stale) — noop
     "hipMemset3D",
     "hipMemset3DAsync",
     "hipMemset3D_spt",
     "hipMemset3DAsync_spt",
-    # hipMallocPitch — already in MANUAL_PLAYBACK_APIS for the DrvMemcpy test; these are the _spt wrappers
     # NOTE: hipExtMallocWithFlags is intentionally NOT noop'd. It is a real device
     # allocation (see _ALLOC_CREATE_APIS) and is handled by a manual playback handler
     # (MANUAL_PLAYBACK_APIS) so the returned device pointer lands in alloc_map and any
@@ -744,18 +621,13 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipFuncGetAttributes",
     "hipFuncSetAttribute",
     # Category 8: Device extra — output ptr stale, dangerous context ops, or struct-ptr params
-    # hipDeviceGetUuid — output hipUUID* stale
     "hipDeviceGetUuid",
-    # Primary ctx ops that would destroy the context at playback
     "hipDevicePrimaryCtxRelease",
     "hipDevicePrimaryCtxReset",
     "hipDevicePrimaryCtxSetFlags",
     # Category 9: Stream advanced — stale void* device ptrs, stale stream handles
-    # hipExtStreamCreateWithCUMask — output handle not tracked in stream_map by generator
     "hipExtStreamCreateWithCUMask",
-    # hipExtStreamGetCUMask — uint32_t* array output (stale)
     "hipExtStreamGetCUMask",
-    # hipExtGetLinkTypeAndHopCount — output uint32_t* ptrs stale
     "hipExtGetLinkTypeAndHopCount",
     # hipStreamWaitValue32/64 stay no-op because a wait can hang on replay: the
     # condition is satisfied by whatever wrote the value at capture time, and if
@@ -767,9 +639,7 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     # An unmapped destination follows the policy in playback/hip_playback.h.
     "hipStreamWaitValue32",
     "hipStreamWaitValue64",
-    # hipStreamAttachMemAsync — void* dev_ptr stale
     "hipStreamAttachMemAsync",
-    # hipGetStreamDeviceId — returns int not hipError_t (wrong return type cast)
     "hipGetStreamDeviceId",
     # Category 10: Context APIs — stale hipCtx_t handles or stale output pointers
     "hipCtxGetFlags",
@@ -780,26 +650,18 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipCtxEnablePeerAccess",
     "hipCtxDisablePeerAccess",
     # Category 11: Module/Library/Kernel — stale handles or unsupported output types
-    # hipModuleUnload — would destroy module needed for kernel replay
     "hipModuleUnload",
-    # hipModuleGetFunctionCount — output uint* stale
     "hipModuleGetFunctionCount",
-    # hipModuleEnumerateFunctions — hipFunction_t* output buffer stale at playback
     "hipModuleEnumerateFunctions",
     # hipModuleLoadFatBinary — fat binary ptr stale at playback (code object already loaded via registered binary)
     "hipModuleLoadFatBinary",
-    # hipModule occupancy — hipFunction_t stale handle
     "hipModuleOccupancyMaxPotentialBlockSize",
     "hipModuleOccupancyMaxPotentialBlockSizeWithFlags",
     "hipModuleOccupancyMaxActiveBlocksPerMultiprocessor",
     "hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags",
-    # hipFuncGetAttribute — hipFunction_t stale handle + output int* stale
     "hipFuncGetAttribute",
-    # hipGetFuncBySymbol — symbolPtr stale + output hipFunction_t* stale
     "hipGetFuncBySymbol",
-    # hipExtLaunchKernel — function_address void* stale + void** args array stale
     "hipExtLaunchKernel",
-    # Library APIs — hipLibrary_t handles not tracked at playback
     "hipLibraryLoadData",
     "hipLibraryLoadFromFile",
     "hipLibraryUnload",
@@ -817,29 +679,21 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     # look it up for real, so they are not listed here.
     "hipGetDriverEntryPoint",
     "hipGetDriverEntryPoint_spt",
-    # hipOccupancyAvailableDynamicSMemPerBlock — hipFunction_t stale handle
     "hipOccupancyAvailableDynamicSMemPerBlock",
-    # hipSetValidDevices — device array ptr stale at playback
     "hipSetValidDevices",
-    # hipMemPtrGetInfo — void* output size ptr stale
     "hipMemPtrGetInfo",
     # hipMemRangeGetAttribute — segfaults on Linux ROCm 7.13; stale dev_ptr unsafe
     "hipMemRangeGetAttribute",
-    # hipMemRangeGetAttributes — attribute arrays stale
     "hipMemRangeGetAttributes",
     # hipMemDiscardBatchAsync — void** dev_ptrs is a stale device address array (no alloc_map translation in generated shim)
     "hipMemDiscardBatchAsync",
-    # hipDrvMemDiscardBatchAsync — hipDeviceptr_t* dptrs output param; generator emits wrong cast
     "hipDrvMemDiscardBatchAsync",
-    # hipMemDiscardAndPrefetchBatchAsync — void** dptrs stale device addresses + hipMemLocation* prefetchLocs (stale struct ptr)
     "hipMemDiscardAndPrefetchBatchAsync",
-    # hipDrvMemDiscardAndPrefetchBatchAsync — hipDeviceptr_t* dptrs output param; generator emits wrong cast
     "hipDrvMemDiscardAndPrefetchBatchAsync",
     # Category 13: Driver 3D/2D memcpy — HIP_MEMCPY3D* / hipMemcpy3DPeerParms* / hip_Memcpy2D* stale struct ptrs
     "hipMemcpy3DPeer",
     "hipMemcpy3DPeerAsync",
     "hipMemcpy2DArrayToArray",
-    # AtoD/DtoA/AtoA — hipArray_t handles not in array_map for generated shim
     "hipMemcpyAtoD",
     "hipMemcpyDtoA",
     "hipMemcpyAtoA",
@@ -894,25 +748,11 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipGraphReleaseUserObject",
     "hipGraphBatchMemOpNodeGetParams",
     "hipDrvGraphMemcpyNodeGetParams",
-    # Category 16: present in the internal dispatch table (hip_api_trace.hpp) but
-    # NOT declared in the public HIP runtime headers the playback tool builds
-    # against (hip::host / find_package(hip)). hip_playback_generated.cpp calls
-    # the real API by its bare symbol name, so a direct call to an undeclared
-    # symbol fails to compile on the affected platform (this is the same class as
-    # Category 1 above). Replaying these has no effect on replay correctness, so a
-    # symbol-free no-op stub is both buildable on Linux and semantically safe.
-    #
-    # hipDeviceGetLuid — Windows-only. The HIP header contract states the LUID is
-    #   valid only on Windows and the API returns hipErrorNotSupported on other
-    #   platforms; the Linux public headers (e.g. the ROCm 7.15 nightly this tool
-    #   builds against) do not declare it at all. It is a device-identity query
-    #   with no replay effect — the direct analog hipDeviceGetUuid is already a
-    #   no-op above.
+# Category 16: in the internal dispatch table (hip_api_trace.hpp) but not declared in the public HIP headers the playback tool builds against.
+# A direct call to an undeclared symbol fails to compile, so these get symbol-free no-op stubs with no effect on replay correctness.
+# hipDeviceGetLuid is Windows-only (Linux public headers do not declare it); it is a device-identity query, like the already-no-op hipDeviceGetUuid.
     "hipDeviceGetLuid",
-    # hipInitDevice — added to the dispatch table after the ROCm 7.15 nightly the
-    #   playback tool builds against, so it is absent from those public headers.
-    #   Device initialization is handled by the replay harness / lazy runtime
-    #   init, so replaying it is unnecessary for correctness.
+    # hipInitDevice is absent from the ROCm 7.15 nightly headers; the replay harness handles device initialization.
     "hipInitDevice",
     # hipMemGetDefaultMemPool takes a hipMemLocation* whose pointed-to value
     # cannot be safely reconstructed from the recorded payload on all playback
@@ -933,11 +773,7 @@ DIRECT_PLAYBACK_APIS: Set[str] = {
     "hipGraphicsUnmapResources",
 }
 
-# ---------------------------------------------------------------------------
-# Extra struct fields appended to certain APIs
-# ---------------------------------------------------------------------------
 
-# Maps API name -> list of (field_type, field_name, comment) to append
 EXTRA_FIELDS: Dict[str, List[Tuple[str, str, str]]] = {
     "__hipRegisterFatBinary": [
         ("uint64_t", "blob_hash_lo", "FNV-1a-128 lo of fat binary"),
@@ -959,7 +795,6 @@ EXTRA_FIELDS: Dict[str, List[Tuple[str, str, str]]] = {
         ("uint64_t", "co_hash_hi", "code object hash hi"),
         ("uint32_t", "module_id",  "sequential module handle ID"),
     ],
-    # hipHostRegister — snapshot of host memory at registration time
     "hipHostRegister":    [("uint64_t", "blob_hash_lo", "sysmem blob hash lo"),
                            ("uint64_t", "blob_hash_hi", "sysmem blob hash hi")],
     # The graph symbol copies. The to-symbol spellings read a host buffer the
@@ -987,7 +822,6 @@ EXTRA_FIELDS: Dict[str, List[Tuple[str, str, str]]] = {
     # registration this suite sees is actually recorded.
     "__hipRegisterVar":   [("uint64_t", "dev_addr",
                             "capture-time device address of the symbol, 0 if unresolved")],
-    # Memcpy 1D variants — blob hash for H2D data
     "hipMemcpy":          [("uint64_t", "blob_hash_lo", "H2D blob hash lo"),
                            ("uint64_t", "blob_hash_hi", "H2D blob hash hi")],
     "hipMemcpyAsync":     [("uint64_t", "blob_hash_lo", "H2D blob hash lo"),
@@ -1004,7 +838,6 @@ EXTRA_FIELDS: Dict[str, List[Tuple[str, str, str]]] = {
                            ("uint64_t", "blob_hash_hi", "D2H expected-output blob hash hi")],
     "hipMemcpyDtoDAsync": [("uint64_t", "blob_hash_lo", "zero (D2D)"),
                            ("uint64_t", "blob_hash_hi", "zero (D2D)")],
-    # hipMemcpyWithStream — same semantics as hipMemcpyAsync (H2D blob, D2H/D2D zero)
     "hipMemcpyWithStream": [("uint64_t", "blob_hash_lo", "H2D blob hash lo"),
                             ("uint64_t", "blob_hash_hi", "H2D blob hash hi")],
     # hipMemPoolCreate — pool_props is a struct pointer; store it inline by value.
@@ -1047,7 +880,6 @@ EXTRA_FIELDS: Dict[str, List[Tuple[str, str, str]]] = {
                          ("uint64_t", "blob_hash_hi", "H2D blob hash hi"),
                          ("uint64_t", "d2h_hash_lo",  "D2H expected-output blob hash lo (0 if not D2H)"),
                          ("uint64_t", "d2h_hash_hi",  "D2H expected-output blob hash hi")],
-    # hipArrayCreate — HIP_ARRAY_DESCRIPTOR is 24 bytes; store inline.
     "hipDrvMemcpy3D":      [("uint8_t", "drv3d_bytes[192]", "HIP_MEMCPY3D inline copy"),
                             ("uint64_t", "blob_hash_lo",    "H2D blob hash lo (0 if not H2D)"),
                             ("uint64_t", "blob_hash_hi",    "H2D blob hash hi"),
@@ -1063,8 +895,6 @@ EXTRA_FIELDS: Dict[str, List[Tuple[str, str, str]]] = {
                             ("uint64_t", "blob_hash_hi",    "H2D blob hash hi"),
                             ("uint64_t", "d2h_hash_lo",     "D2H expected-output blob hash lo (0 if not D2H)"),
                             ("uint64_t", "d2h_hash_hi",     "D2H expected-output blob hash hi")],
-    # Same descriptor, same treatment: hipMemcpyParam2D and its async spelling
-    # take the identical hip_Memcpy2D that hipDrvMemcpy2DUnaligned does.
     "hipMemcpyParam2D": [("uint8_t", "drv2d_bytes[136]", "hip_Memcpy2D inline copy"),
                             ("uint64_t", "blob_hash_lo",    "H2D blob hash lo (0 if not H2D)"),
                             ("uint64_t", "blob_hash_hi",    "H2D blob hash hi"),
@@ -1076,41 +906,17 @@ EXTRA_FIELDS: Dict[str, List[Tuple[str, str, str]]] = {
                             ("uint64_t", "d2h_hash_lo",     "D2H expected-output blob hash lo (0 if not D2H)"),
                             ("uint64_t", "d2h_hash_hi",     "D2H expected-output blob hash hi")],
     "hipArrayCreate":   [("uint8_t", "array_desc_bytes[24]", "HIP_ARRAY_DESCRIPTOR inline copy")],
-    # hipArray3DCreate — HIP_ARRAY3D_DESCRIPTOR is 40 bytes; store inline.
     "hipArray3DCreate": [("uint8_t", "array3d_desc_bytes[40]", "HIP_ARRAY3D_DESCRIPTOR inline copy")],
-    # hipStreamSetAttribute — hipStreamAttrValue is 64 bytes; store inline.
     "hipStreamSetAttribute": [("uint8_t", "stream_attr_bytes[64]", "hipStreamAttrValue inline copy")],
-    # hipMemGetAllocationGranularity — hipMemAllocationProp is 32 bytes; store inline.
     "hipMemGetAllocationGranularity": [("uint8_t", "alloc_prop_bytes[32]", "hipMemAllocationProp inline copy")],
-    # hipMemPoolSetAccess / hipMemSetAccess — hipMemAccessDesc is 12 bytes; store first entry inline.
     "hipMemPoolSetAccess": [("uint8_t", "access_desc_bytes[12]", "hipMemAccessDesc[0] inline copy")],
     "hipMemSetAccess":     [("uint8_t", "access_desc_bytes[12]", "hipMemAccessDesc[0] inline copy")],
 }
 
-# ---------------------------------------------------------------------------
-# Dereferenced pointer arguments
-#
-# normalise_field_type() lowers every pointer to a uint64_t holding the
-# capture-time address, so by default the pointee never reaches the archive.
-# For an input struct that is silent data loss: replay is handed an address
-# from a process that no longer exists. A Deref entry tells the generator to
-# carry the pointee itself.
-#
-# Capture: the generated shim memcpy's `size` bytes (or `count` elements) out of
-# the pointer into the event, and sets <param>_present.
-# Playback: the generated handler rebuilds a local copy from those bytes and
-# passes its address, instead of casting the recorded address back to a pointer.
-#
-# Use direction="in" for an argument the API reads, "out" for one it writes
-# (recorded for fidelity; replay still passes a local, since the recorded
-# address means nothing here), and "inout" for both.
-#
-# An API whose pointee contains device pointers, handles or nested pointers
-# needs those translated at replay, which no table entry can express: give it a
-# Deref for the capture side and a hand-written handler in MANUAL_PLAYBACK_APIS
-# for the replay side. `playback="manual"` says so, and suppresses the generic
-# reconstruction.
-# ---------------------------------------------------------------------------
+# Dereferenced pointer arguments. normalise_field_type() lowers every pointer to a uint64_t holding the capture-time address, so the pointee never reaches the archive.
+# A Deref entry carries the pointee: capture memcpy's `size` bytes (or `count` elements) into the event and sets <param>_present; playback rebuilds a local copy and passes its address.
+# direction is "in" (API reads), "out" (API writes; recorded for fidelity, replay passes a local) or "inout".
+# A pointee holding device pointers, handles or nested pointers needs translation no table entry can express: use `playback="manual"` with a hand-written handler in MANUAL_PLAYBACK_APIS.
 
 @dataclass(frozen=True)
 class Deref:
@@ -1133,9 +939,6 @@ class Deref:
     # (member, handle type). Same idea as ptr_members, through the handle map
     # for that type instead of alloc_map.
     handle_members: Tuple[Tuple[str, str], ...] = ()
-    # For an array argument whose elements are themselves HIP handles (a graph
-    # dependency list is an array of hipGraphNode_t): the handle type each
-    # element is translated through.
     elem_handle: str = ""
     # For an array of bare device addresses (a batch copy's dsts[] / srcs[]):
     # every element goes through translate_ptr, the way a ptr_member of a
@@ -1172,67 +975,45 @@ class Deref:
         return self.size * self.max_count if self.is_array else self.size
 
 
-# API name -> the pointer arguments whose pointee is carried in the event.
 DEREF_FIELDS: Dict[str, List[Deref]] = {
-    # The allocation property decides the memory type and, for a heap that maps
-    # cross-node peers, which device the pages come from. Hardcoding
-    # Pinned/device 0 would build the wrong topology silently.
+    # The allocation property decides the memory type and, for cross-node heaps, the source device; hardcoding Pinned/device 0 would silently build the wrong topology.
     "hipMemCreate": [
         Deref("prop", "hipMemAllocationProp", 32, playback="manual"),
     ],
-    # The op list is the whole call. Each entry's address is a device pointer,
-    # and which member holds it depends on the op type, so the reconstruction
-    # is hand-written rather than a ptr_members rewrite.
+    # Each entry's device pointer sits in an op-type-dependent member, so reconstruction is hand-written.
     "hipStreamBatchMemOp": [
         Deref("paramArray", "hipStreamBatchMemOpParams", 48, count="count",
               max_count=16, playback="manual"),
     ],
-    # The IPC handle is 64 bytes. Recorded as one uint64_t it was 56 bytes of
-    # nothing, and replay passed a null pointer for the out buffer, which is
-    # why the call came back as invalid argument. The handle lets any process
-    # on the machine open the allocation while its exporter lives, so the
-    # archive does not carry it. An importer never has its export in the same
-    # archive: a process cannot open its own handle.
+    # The IPC handle is 64 bytes and lets any process on the machine open the allocation while its exporter lives, so the archive does not carry it.
+    # An importer never has its export in the same archive.
     "hipIpcGetMemHandle": [
         Deref("handle", "hipIpcMemHandle_t", 64, direction="out",
               playback="manual", capability=True),
     ],
-    # Which device's view of the mapping is being asked about, and what the
-    # answer was. The location was a stale struct pointer, which is why this
-    # was a NOOP; carrying its eight bytes makes the query answerable, and the
-    # recorded flags make the recording self-describing.
+    # The location selects which device's view is queried; carrying its eight bytes makes the query answerable.
     "hipMemGetAccess": [
         Deref("location", "hipMemLocation", 8),
         Deref("flags", "unsigned long long", 8, direction="out"),
     ],
-    # The pre-chevron launch ABI pushes `size` bytes from a host address into
-    # the pending kernarg buffer. Recorded as a bare address, replay handed the
-    # runtime a pointer into the capturing process and the read segfaulted.
-    # 256 bytes covers any single kernel argument, struct arguments included.
+    # The pre-chevron launch ABI pushes `size` bytes from a host address into the kernarg buffer.
+    # 256 bytes covers any single argument, structs included.
     "hipSetupArgument": [
         Deref("arg", "unsigned char", 1, count="size", max_count=256),
     ],
-    # The symbol name is the entire question these two ask, and it was recorded
-    # as an address with none of the characters behind it: measured as a SIGSEGV
-    # inside hip::hipGetProcAddress_common (hip_device.cpp:880).
+    # The symbol name is the whole question; recorded as a bare address it caused a SIGSEGV in hip::hipGetProcAddress_common (hip_device.cpp:880).
     "hipGetProcAddress": [
         Deref("symbol", "char", 1, max_count=256, string=True),
     ],
     "hipGetProcAddress_spt": [
         Deref("symbol", "char", 1, max_count=256, string=True),
     ],
-    # deviceVar is the symbol's name in the code object, and it is the only
-    # part of a registration that means anything in another process: `var` is
-    # a host shadow address and `modules` a fat-binary handle. Recording the
-    # name is what lets replay resolve the same global through
-    # hipModuleGetGlobal and map the recorded device address onto it.
+    # deviceVar is the only part of a registration meaningful in another process (`var` is a host shadow address, `modules` a fat-binary handle).
+    # Replay resolves it through hipModuleGetGlobal and maps the recorded device address onto it.
     "__hipRegisterVar": [
         Deref("deviceVar", "char", 1, max_count=256, string=True),
     ],
-    # The JIT linker's option arrays. Both were recorded as addresses and then
-    # replayed as if they were out parameters, so a link was rebuilt with
-    # whatever the uninitialised locals held. Thirty-two options is more than
-    # any caller passes.
+    # The JIT linker's option arrays. Thirty-two options is more than any caller passes.
     "hipLinkCreate": [
         Deref("options", "hipJitOption", 4, count="numOptions", max_count=32),
         Deref("optionValues", "void*", 8, count="numOptions", max_count=32),
@@ -1247,10 +1028,7 @@ DEREF_FIELDS: Dict[str, List[Deref]] = {
         Deref("options", "hipJitOption", 4, count="numOptions", max_count=32),
         Deref("optionValues", "void*", 8, count="numOptions", max_count=32),
     ],
-    # The device properties being matched against are the whole question these
-    # two ask. 1472 bytes is a large event, but a program calls hipChooseDevice
-    # once at startup, not in a loop. CLR matches on numeric limits only, so
-    # the GPU's UUID, LUID and PCI location are blanked, as in the manifest.
+    # 1472 bytes is a large event, but a program calls hipChooseDevice once at startup. CLR matches on numeric limits only, so UUID, LUID and PCI location are blanked, as in the manifest.
     "hipChooseDevice": [
         Deref("prop", "hipDeviceProp_t", 1472,
               blank_members=("uuid", "luid", "pciDomainID", "pciBusID", "pciDeviceID")),
@@ -1259,29 +1037,21 @@ DEREF_FIELDS: Dict[str, List[Deref]] = {
         Deref("properties", "hipDeviceProp_tR0000", 792,
               blank_members=("pciDomainID", "pciBusID", "pciDeviceID")),
     ],
-    # The format decides the answer: the maximum width depends on the element
-    # size the caller asked about.
     "hipDeviceGetTexture1DLinearMaxWidth": [
         Deref("fmtDesc", "hipChannelFormatDesc", 20),
         Deref("maxWidthInElements", "size_t", 8, direction="out"),
     ],
-    # The attribute value is the whole call, and the union is 64 bytes of it.
     "hipGraphKernelNodeSetAttribute": [
         Deref("value", "hipKernelNodeAttrValue", 64),
     ],
-    # Which device's pool is being redirected. Recorded as a stale struct
-    # pointer this returned hipErrorInvalidValue at replay; the pool handle
-    # beside it was already translated through mempool_map.
+    # Which device's pool is redirected; the pool handle beside it translates through mempool_map.
     "hipMemSetMemPool": [
         Deref("location", "hipMemLocation", 8),
     ],
     "hipMemGetMemPool": [
         Deref("location", "hipMemLocation", 8),
     ],
-    # The batch copies are five parallel arrays and an op list. Recorded as
-    # addresses they were five stale pointers, which is why the handler
-    # returned an error rather than copying anything. Sixteen entries inline
-    # covers the batches this suite issues and warns at capture beyond that.
+    # Five parallel arrays and an op list. Sixteen entries inline covers this suite's batches; capture warns beyond that.
     "hipMemcpyBatchAsync": [
         Deref("dsts", "void*", 8, count="count", max_count=16, elem_ptr=True),
         Deref("srcs", "void*", 8, count="count", max_count=16, elem_ptr=True),
@@ -1316,24 +1086,10 @@ DEREF_FIELDS: Dict[str, List[Deref]] = {
     ],
 }
 
-# ---------------------------------------------------------------------------
-# Graph node construction and mutation
-#
-# Every hipGraphAdd*Node call takes the same two things — a dependency array of
-# hipGraphNode_t and a node-parameter struct — and until now neither reached
-# the archive: the array was recorded as one stale address and the struct not
-# at all. That is why explicit graph construction was a blanket exclusion.
-#
-# Both are ordinary Deref shapes. The dependency array is an array of handles
-# (elem_handle), the parameter structs are single pointees whose device
-# addresses and array handles are rewritten at replay (ptr_members /
-# handle_members). The node handle each call produces is registered in
-# graph_node_map by _HANDLE_CREATE_APIS, which is what makes a later
-# dependency reference or *NodeSetParams call resolvable.
-#
-# A recorded graph rarely has many roots feeding one node; 16 inline
-# dependencies covers real graphs and the overflow warns at capture.
-# ---------------------------------------------------------------------------
+# Graph node construction and mutation. Every hipGraphAdd*Node call takes a dependency array of hipGraphNode_t and a node-parameter struct.
+# The array is an elem_handle Deref; parameter structs are single pointees rewritten at replay (ptr_members / handle_members).
+# _HANDLE_CREATE_APIS registers each produced node handle in graph_node_map, so later dependency references and *NodeSetParams calls resolve.
+# 16 inline dependencies covers real graphs; overflow warns at capture.
 _MAX_DEPS = 16
 
 def _deps(param: str, count: str = "numDependencies") -> Deref:
@@ -1351,7 +1107,6 @@ _MEMCPY3D_PARAMS = dict(
 )
 
 DEREF_FIELDS.update({
-    # --- construction: dependency array only ---
     "hipGraphAddEmptyNode":       [_deps("pDependencies")],
     "hipGraphAddEventRecordNode": [_deps("pDependencies")],
     "hipGraphAddEventWaitNode":   [_deps("pDependencies")],
@@ -1364,9 +1119,7 @@ DEREF_FIELDS.update({
     "hipGraphAddMemcpyNodeFromSymbol": [_deps("pDependencies")],
     "hipGraphAddMemFreeNode":     [_deps("pDependencies")],
     "hipDrvGraphAddMemFreeNode":  [_deps("dependencies")],
-    # from[] and to[] are parallel arrays under one count.
     "hipGraphAddDependencies":    [_deps("from"), _deps("to")],
-    # --- construction: dependency array plus a node-parameter struct ---
     "hipGraphAddMemsetNode": [
         _deps("pDependencies"),
         Deref("pMemsetParams", **_MEMSET_PARAMS),
@@ -1399,12 +1152,10 @@ DEREF_FIELDS.update({
         _deps("dependencies"),
         Deref("copyParams", "HIP_MEMCPY3D", 184, playback="manual"),
     ],
-    # nodeParams.paramArray is a second pointer hop.
     "hipGraphAddBatchMemOpNode": [
         _deps("dependencies"),
         Deref("nodeParams", "hipBatchMemOpNodeParams", 32, playback="manual"),
     ],
-    # --- mutation: node parameters, no dependency array ---
     "hipGraphMemsetNodeSetParams":     [Deref("pNodeParams", **_MEMSET_PARAMS)],
     "hipGraphExecMemsetNodeSetParams": [Deref("pNodeParams", **_MEMSET_PARAMS)],
     "hipDrvGraphExecMemsetNodeSetParams": [Deref("memsetParams", **_MEMSET_PARAMS)],
@@ -1429,10 +1180,7 @@ DEREF_FIELDS.update({
     "hipGraphExecBatchMemOpNodeSetParams": [
         Deref("nodeParams", "hipBatchMemOpNodeParams", 32, playback="manual"),
     ],
-    # Beginning a capture into an explicitly named graph. As a NOOP the begin
-    # never happened at replay, so the stream was not capturing when
-    # hipStreamEndCapture arrived and that call returned 401 — a silent no-op
-    # billing a real handler two events later.
+    # As a NOOP the begin never happened at replay, so hipStreamEndCapture returned 401.
     "hipStreamBeginCaptureToGraph": [
         _deps("dependencies", count="numDependencies"),
         Deref("dependencyData", "hipGraphEdgeData", 8, count="numDependencies",
@@ -1461,29 +1209,14 @@ def deref_covered_params(api: str) -> Set[str]:
     return {d.param for d in deref_specs(api)}
 
 
-# ---------------------------------------------------------------------------
-# Structs passed BY VALUE that do not fit in a uint64_t
-#
-# normalise_field_type() lowers an unrecognised by-value type to a single
-# uint64_t and _fill_param() then records a zero for it, so a 24-byte hipExtent
-# or a 64-byte hipIpcMemHandle_t reaches the archive as nothing at all. These
-# are recorded as inline bytes instead: `uint8_t <param>_bytes[N]`, memcpy'd at
-# capture and memcpy'd back into a local at replay.
-#
-# ptr_members names the members holding recorded device addresses; replay
-# translates each through ctx.translate_ptr, because a faithfully restored
-# struct still points into the capturing process otherwise.
-#
-# The IPC handle types are the exception: they are capabilities, so their
-# fields keep their fixed size but stay zero (capability=True), and replay
-# pairs nothing on them.
-# ---------------------------------------------------------------------------
+# Structs passed by value that do not fit in a uint64_t. normalise_field_type() would lower them to a uint64_t recorded as zero.
+# They are recorded as inline bytes `uint8_t <param>_bytes[N]`; ptr_members names members holding device addresses, translated through ctx.translate_ptr at replay.
+# The IPC handle types are capabilities: fields keep their size but stay zero (capability=True).
 
 @dataclass(frozen=True)
 class ByValueStruct:
     size: int
     ptr_members: Tuple[str, ...] = ()
-    # The struct is a capability: leave its bytes zero, as Deref.capability does.
     capability: bool = False
 
 
@@ -1524,11 +1257,7 @@ _INLINE_STRUCT_ASSERTS: Dict[str, str] = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Type normalisation
-# ---------------------------------------------------------------------------
 
-# Handle / opaque types -> uint64_t
 _HANDLE_TYPES = {
     "hipStream_t", "hipEvent_t", "hipModule_t", "hipFunction_t",
     "hipCtx_t", "hipDevice_t", "hipDeviceptr_t",
@@ -1538,23 +1267,17 @@ _HANDLE_TYPES = {
     "hipUserObject_t", "hipMemGenericAllocationHandle_t",
     "hipExternalMemory_t", "hipExternalSemaphore_t",
     "hipKernel_t", "hipLibrary_t", "hipLinkState_t",
-    # HIP 7.14+ green context / device resource handles
     "hipExecutionCtx_t", "hipDevResourceDesc_t",
 }
 
-# Types that cannot be cast to uint64_t and are recorded as zero.
-# By-value structs are NOT in here: they are carried as inline bytes instead
-# (BY_VALUE_STRUCTS). What is left is genuinely unrecordable — a function
-# pointer or an opaque handle whose value means nothing outside the capturing
-# process. Anything here that an API actually depends on belongs in
-# UNREPLAYABLE_PLAYBACK_APIS, so replay says so instead of passing a null.
+# Types that cannot be cast to uint64_t and are recorded as zero: function pointers and opaque handles meaningless outside the capturing process.
+# An API that depends on one belongs in UNREPLAYABLE_PLAYBACK_APIS.
 _NON_CASTABLE_TYPES = {
     "hipGraphicsResource_t",  # opaque GL interop resource
     "hipStreamCallback_t",    # function pointer
     "hipHostFn_t",            # function pointer
 }
 
-# Enum types -> int32_t
 _ENUM_TYPES = {
     "hipError_t", "hipMemcpyKind", "hipFuncCache_t", "hipSharedMemConfig",
     "hipJitOption", "hipLimit_t", "hipDeviceAttribute_t", "hipComputeMode",
@@ -1578,7 +1301,6 @@ _ENUM_TYPES = {
     "hipPointer_attribute", "hipStreamAttrID", "hipGLDeviceList",
 }
 
-# Scalar type map: normalised type string -> C field type
 _SCALAR_MAP = [
     # order matters: longer / more specific first
     ("unsigned long long", "uint64_t"),
@@ -1613,37 +1335,29 @@ def normalise_field_type(raw_type: str) -> str:
     "__BYVAL__" for a by-value struct carried as inline bytes (BY_VALUE_STRUCTS).
     """
     t = raw_type.strip()
-    # strip const/volatile
     t_nc = re.sub(r'\b(const|volatile|restrict|struct)\b', '', t).strip()
     t_nc = re.sub(r'\s+', ' ', t_nc)
 
-    # Any pointer -> uint64_t
     if '*' in t_nc:
         return "uint64_t"
 
-    # dim3 / uint3 -> expand inline
     base = t_nc.split()[0]
     if base in ("dim3", "uint3"):
         return "__DIM3__"
 
-    # By-value struct too large for a uint64_t -> inline bytes
     if base in BY_VALUE_STRUCTS:
         return "__BYVAL__"
 
-    # Opaque handle
     if base in _HANDLE_TYPES:
         return "uint64_t"
 
-    # Enum
     if base in _ENUM_TYPES:
         return "int32_t"
 
-    # Scalar
     for key, mapped in _SCALAR_MAP:
         if t_nc == key:
             return mapped
 
-    # Unknown composite type (struct passed by value) -> comment, uint64_t placeholder
     return f"uint64_t /* {t} */"
 
 
@@ -1680,9 +1394,6 @@ class ApiEntry:
     reserved_reason: str = ""
 
 
-# ---------------------------------------------------------------------------
-# Low-level text extraction
-# ---------------------------------------------------------------------------
 
 def _strip_comments(text: str) -> str:
     text = re.sub(r'/\*.*?\*/', ' ', text, flags=re.DOTALL)
@@ -1720,22 +1431,18 @@ def find_typedef_for(text: str, typedef_name: str) -> Optional[str]:
     if idx == -1:
         return None
 
-    # Walk backward to find 'typedef'
     before = text[:idx]
     typedef_start = before.rfind('typedef')
     if typedef_start == -1:
         return None
 
-    # Now parse: after needle comes the params in parens, then optional whitespace and ';'
     after_needle = idx + len(needle)
-    # skip whitespace
     i = after_needle
     while i < len(text) and text[i].isspace():
         i += 1
     if i >= len(text) or text[i] != '(':
         return None
     end, _inner = _extract_balanced_parens(text, i)
-    # find the semicolon
     j = end
     while j < len(text) and text[j] != ';':
         j += 1
@@ -1768,25 +1475,19 @@ def _parse_param(raw: str) -> Optional[Param]:
     raw = raw.strip()
     if not raw or raw == '...':
         return None
-    # Array [] -> pointer *
     raw = re.sub(r'\[.*?\]', '*', raw)
 
-    # Collapse whitespace
     raw = re.sub(r'\s+', ' ', raw)
 
-    # If the last token is a valid identifier and not a type keyword, it's the name.
     m = re.match(r'^(.*?)\s*(\**)([a-zA-Z_]\w*)$', raw)
     if m:
         type_prefix = m.group(1).strip()
         stars        = m.group(2)
         potential_name = m.group(3)
-        # Heuristic: if the type_prefix is non-empty and not just a closing bracket,
-        # treat potential_name as the variable name.
         if type_prefix:
             full_type = (type_prefix + stars).strip()
             return Param(raw_type=full_type, name=potential_name)
         else:
-            # Only one token: it's both the type and has no name
             return Param(raw_type=raw, name='')
 
     return Param(raw_type=raw, name='')
@@ -1798,18 +1499,14 @@ def _parse_typedef_text(full_text: str, func_name: str) -> Optional[ApiEntry]:
     full_text looks like:
         typedef hipError_t (*t_hipMalloc)(void** ptr, size_t size);
     """
-    # Extract return type: everything between 'typedef' and '(*'
     m = re.match(r'typedef\s+(.+?)\s*\(\s*\*', full_text, re.DOTALL)
     if not m:
         return None
     ret_type = re.sub(r'\s+', ' ', m.group(1)).strip()
 
-    # Extract params: content of the second paren group
-    # Find '(*tname)' then the next '('
     needle = f"(*t_{func_name})"
     idx = full_text.find(needle)
     if idx == -1:
-        # compiler stubs have t___name
         needle2 = f"(*t__{func_name})"
         idx = full_text.find(needle2)
         if idx == -1:
@@ -1835,11 +1532,7 @@ def _parse_typedef_text(full_text: str, func_name: str) -> Optional[ApiEntry]:
     return ApiEntry(name=func_name, ret_type=ret_type, params=params, table=table)
 
 
-# ---------------------------------------------------------------------------
-# Main parse entry point
-# ---------------------------------------------------------------------------
 
-# Compiler API names in dispatch table order
 _COMPILER_APIS = [
     "__hipPopCallConfiguration",
     "__hipPushCallConfiguration",
@@ -1874,7 +1567,6 @@ def _dispatch_table_slots(text: str, struct_name: str) -> List[Tuple[str, bool]]
     if not m:
         return []
     slots: List[Tuple[str, bool]] = []
-    # t_hipFoo hipFoo_fn;  or  void* hipFoo_fn;  (possibly split across lines)
     for tm in re.finditer(
             r'^\s*(?:t_(\w+)\s+(\w+)|void\s*\*\s*(\w+))\s*;', m.group(1), re.M):
         if tm.group(1) is not None:
@@ -1914,12 +1606,7 @@ def parse_hip_api_trace(path: Path) -> List[ApiEntry]:
         entry.table = table
         entries.append(entry)
 
-    # Runtime first. Compiler-first put every runtime ID at a
-    # compiler-table-size offset, so one new HipCompilerDispatchTable member
-    # renumbered all 500+ runtime IDs — the opposite of the append-only scheme
-    # this function exists to implement. A new HipDispatchTable member still
-    # shifts the compiler-ID tail (playback no-ops); that is cheaper than
-    # shifting the IDs written into every captured event.
+    # Runtime first: compiler-first would renumber all runtime IDs whenever HipCompilerDispatchTable grows. A new HipDispatchTable member shifts only the compiler-ID tail (playback no-ops).
     runtime_slots = _dispatch_table_slots(text, "HipDispatchTable")
     if not runtime_slots:
         sys.exit("ERROR: HipDispatchTable missing or has no dispatch slots in "
@@ -1936,10 +1623,7 @@ def parse_hip_api_trace(path: Path) -> List[ApiEntry]:
     for func_name, reserved in compiler_slots:
         add_entry(func_name, "compiler", reserved=reserved)
 
-    # A t_hipXxx typedef with no member in HipDispatchTable has no append-only
-    # position to take an ID from. None exist today; if one appears, it is still
-    # captured rather than dropped, and it goes last so the table-ordered IDs
-    # ahead of it keep their values.
+    # A t_hipXxx typedef with no HipDispatchTable member goes last, so table-ordered IDs keep their values. None exist today.
     in_table = {n for n, _ in runtime_slots} | {n for n, _ in compiler_slots}
     stray_pattern = re.compile(r'\(\s*\*\s*t_(hip\w+)\s*\)')
     seen = set()
@@ -1988,9 +1672,6 @@ def validate_capture_coverage(entries: List[ApiEntry],
         print(f"  HRR capture coverage: {manual_count} manual shims verified")
 
 
-# ---------------------------------------------------------------------------
-# Header generation
-# ---------------------------------------------------------------------------
 
 _HEADER_PREAMBLE = """\
 /*
@@ -2192,7 +1873,6 @@ def generate_struct(entry: ApiEntry) -> str:
     lines: List[str] = []
     sname = f"hrr_args_{entry.name}"
 
-    # Comment showing original signature
     if entry.reserved:
         lines.append(f"/* retired/unparsable dispatch slot {entry.name}; ID placeholder */")
     else:
@@ -2204,7 +1884,6 @@ def generate_struct(entry: ApiEntry) -> str:
     lines.append("typedef struct {")
     lines.append("    hrr_event_header hdr;")
 
-    # Return value
     if not _is_void_return(entry.ret_type):
         if '*' in entry.ret_type:
             lines.append("    uint64_t ret;")
@@ -2222,9 +1901,7 @@ def generate_struct(entry: ApiEntry) -> str:
             if ft is not None:
                 lines.append(f"    {ft} ret;")
 
-    # Parameters — special-case __hipRegisterFatBinary raw data* -> blob fields
     if entry.name == "__hipRegisterFatBinary":
-        # Skip the normal params (just `void* data`); extra fields below replace them
         pass
     else:
         unnamed_count = 0
@@ -2247,7 +1924,6 @@ def generate_struct(entry: ApiEntry) -> str:
             else:
                 lines.append(f"    {ft} {safe};")
 
-    # Dereferenced pointer arguments — the pointee, carried inline
     for d in deref_specs(entry.name):
         what = (f"{d.ctype}[{d.max_count}] inline copy" if d.is_array
                 else f"{d.ctype} not recorded, zeros" if d.capability
@@ -2257,17 +1933,12 @@ def generate_struct(entry: ApiEntry) -> str:
         if d.is_array:
             lines.append(f"    uint32_t {d.count_field};  /* elements copied from {d.param} */")
 
-    # Extra fields
     for (ftype, fname, fcomment) in EXTRA_FIELDS.get(entry.name, []):
         lines.append(f"    {ftype} {fname};  /* {fcomment} */")
 
     lines.append(f"}} {sname};")
 
-    # Emit static_assert for every inline uint8_t array whose size is hard-coded.
-    # Guarded by HIP_INCLUDE_HIP_HIP_RUNTIME_H because the referenced types
-    # (hipMemcpy3DParms, hipMemPoolProps, etc.) are only defined when the full
-    # HIP runtime header is included.  hrr_api_args.h may be included in
-    # translation units (e.g. hrr_reader.cpp) that use only minimal headers.
+    # Guarded by HIP_INCLUDE_HIP_HIP_RUNTIME_H: the referenced types exist only with the full HIP runtime header, and hrr_api_args.h is also included by TUs with minimal headers.
     asserts = []
     for (ftype, fname, _fcomment) in EXTRA_FIELDS.get(entry.name, []):
         if not ftype.startswith("uint8_t") or '[' not in fname:
@@ -2276,15 +1947,12 @@ def generate_struct(entry: ApiEntry) -> str:
         ctype = _INLINE_STRUCT_ASSERTS.get(base)
         if not ctype:
             continue
-        # Extract the declared array size N from "name[N]"
         n = fname[fname.index('[')+1 : fname.index(']')]
         asserts.append(
             f"static_assert(sizeof({ctype}) <= {n},"
             f' "hrr_args_{entry.name}::{fname} too small for {ctype}");'
         )
-    # A Deref or by-value field that reserves fewer bytes than the value needs
-    # would truncate silently at capture, which is the failure the whole
-    # mechanism exists to remove. Catch it in the compiler instead.
+    # A field reserving fewer bytes than the value needs would truncate silently at capture; catch it in the compiler.
     for d in deref_specs(entry.name):
         asserts.append(
             f"static_assert(sizeof({d.ctype}) <= {d.size},"
@@ -2322,17 +1990,14 @@ def generate_header(entries: List[ApiEntry]) -> str:
         if e.table == "runtime":
             parts.append(generate_struct(e))
 
-    # Enum of API IDs for use by writer/reader
     parts.append("/* ---- API id enumeration ---- */")
     parts.append("typedef enum hrr_api_id {")
     for idx, e in enumerate(entries):
-        # Enum name: strip leading underscores, uppercase
         enum_name = "HRR_API_" + e.name.lstrip('_').upper()
         parts.append(f"    {enum_name} = {idx},")
     parts.append(f"    HRR_API_COUNT = {len(entries)}")
     parts.append("} hrr_api_id_t;\n")
 
-    # Name table declaration
     parts.append("/* Array of API names indexed by hrr_api_id_t */")
     parts.append("#ifdef HRR_API_ARGS_IMPLEMENTATION")
     parts.append("const char* const hrr_api_names[HRR_API_COUNT] = {")
@@ -2347,9 +2012,6 @@ def generate_header(entries: List[ApiEntry]) -> str:
     return "\n".join(parts)
 
 
-# ---------------------------------------------------------------------------
-# Capture CPP generation
-# ---------------------------------------------------------------------------
 
 _CPP_PREAMBLE = """\
 /*
@@ -2469,7 +2131,6 @@ def _is_output_ptr_param(param: Param) -> bool:
         return False
     if t.count('*') >= 2:
         return True
-    # Single pointer to any handle type → output
     _OUTPUT_HANDLE_TYPES = (
         'hipStream_t', 'hipEvent_t', 'hipModule_t', 'hipFunction_t',
         'hipMemPool_t', 'hipGraph_t', 'hipGraphExec_t', 'hipGraphNode_t',
@@ -2482,7 +2143,6 @@ def _is_output_ptr_param(param: Param) -> bool:
     for handle in _OUTPUT_HANDLE_TYPES:
         if handle + '*' in t or handle + ' *' in t:
             return True
-    # hipDevice_t is typedef'd as int — hipDevice_t* is an output int pointer
     if 'hipDevice_t' in t and '*' in t and 'hipDeviceptr_t' not in t:
         return True
     return False
@@ -2515,7 +2175,6 @@ def _fill_param(lines: List[str], p: Param, name: str, ft: str) -> None:
     elif base in _NON_CASTABLE_TYPES:
         lines.append(f"    a.{name} = 0;  // non-castable type skipped")
     elif base == 'hipDevice_t':
-        # hipDevice_t is int, not a pointer
         lines.append(f"    a.{name} = static_cast<uint64_t>(static_cast<int>({name}));")
     elif base == 'hipDeviceptr_t' or t == 'hipDeviceptr_t':
         # hipDeviceptr_t is void* — must use uintptr_t cast
@@ -2625,20 +2284,14 @@ def _fill_output_param_post(lines: List[str], p: Param, name: str,
         lines.append(f"    // {name} is not recorded, see UNRECORDED_OUTPUTS in the generator.")
         return
     t = p.raw_type.strip()
-    # hipDevice_t is int — dereference gives int, use static_cast
     if 'hipDevice_t' in t and 'hipDeviceptr_t' not in t:
         lines.append(f"    if ({name}) a.{name} = static_cast<uint64_t>(static_cast<int>(*{name}));")
     else:
-        # For output pointers, dereference to get the created handle/address.
-        # Guard with null check — some output params are optional (e.g. pErrorNode in hipGraphInstantiate).
+        # Guard with a null check: some output params are optional (e.g. pErrorNode in hipGraphInstantiate).
         lines.append(f"    if ({name}) a.{name} = reinterpret_cast<uint64_t>(*{name});")
 
 
-# Per-API custom shim/handler bodies that the default emitter cannot express.
-# Used when an API needs special in/out value handling that the generic
-# pointer-vs-value heuristics get wrong. Kept here (not in the MANUAL_* sets) so
-# the function still lives in the generated files and the dispatch tables wire it
-# automatically.
+# Per-API shim/handler bodies the default emitter cannot express. Kept here, not in the MANUAL_* sets, so the function stays in the generated files and the dispatch tables wire it automatically.
 CUSTOM_CAPTURE_SHIMS: Dict[str, str] = {
     # hipThreadExchangeStreamCaptureMode is an in/out swap: input *mode is the
     # desired thread capture mode, output *mode is the previous one. The generic
@@ -2706,17 +2359,13 @@ def generate_shim(entry: ApiEntry) -> str:
     is_passonly = entry.name in PASSTHROUGH_ONLY
     is_compiler = entry.table == "compiler"
     void_ret    = _is_void_return(entry.ret_type)
-    # const char* return (hipGetErrorName/String) — store pointer as uint64_t
     is_const_char_ret = entry.ret_type.strip() in ('const char*', 'const char *')
-    # Non-hipError_t struct/scalar return (e.g. hipCreateChannelDesc -> hipChannelFormatDesc)
-    # Cannot compare r == hipSuccess; treat as passthrough (no capture)
+    # A non-hipError_t struct/scalar return (e.g. hipCreateChannelDesc) cannot be compared with hipSuccess, so it is forwarded without capture.
     ret_base = _get_base_type(entry.ret_type)
     is_non_hiperrort_ret = (not void_ret and not is_const_char_ret
                             and ret_base not in ('hipError_t',)
                             and '*' not in entry.ret_type)
 
-    # Manual APIs are fully implemented in hip_capture.cpp (non-static).
-    # The build_table function will extern-reference them directly.
     if is_manual:
         return ""
 
@@ -2724,7 +2373,6 @@ def generate_shim(entry: ApiEntry) -> str:
     fwd_args   = _cpp_passthrough_args(entry)
     sname      = f"hrr_args_{entry.name}"
 
-    # Which table / fn ptr name
     if is_compiler:
         table_name = "g_real_compiler_table"
         fn_field   = f"{entry.name}_fn"
@@ -2737,7 +2385,6 @@ def generate_shim(entry: ApiEntry) -> str:
     lines.append(f"static {entry.ret_type} capture_{entry.name}({param_decl}) {{")
 
     if is_non_hiperrort_ret:
-        # Return type is a struct/scalar (not hipError_t) — can't capture, just forward
         lines.append(f"  return {table_name}.{fn_field}({fwd_args});")
         lines.append(f"}}")
         return '\n'.join(lines) + '\n'
@@ -2745,11 +2392,8 @@ def generate_shim(entry: ApiEntry) -> str:
     if void_ret:
         lines.append(f"  {table_name}.{fn_field}({fwd_args});")
         if not is_passonly:
-            # No hip_capture_enabled() check — shim is only installed when capture is active
-            # write_event_raw() stamps thread_id / sequence_id into hdr automatically
             lines.append(f"  {{")
             lines.append(f"    {sname} a{{}};")
-            # Pre-call params (non-output)
             unnamed = 0
             output_params = []
             for p in entry.params:
@@ -2760,7 +2404,6 @@ def generate_shim(entry: ApiEntry) -> str:
                     output_params.append((p, name, ft))
                 else:
                     _fill_param(lines, p, name, ft)
-            # Post-call output params
             for p, name, ft in output_params:
                 _fill_output_param_post(lines, p, name, entry.name)
             _fill_derefs(lines, entry)
@@ -2771,8 +2414,6 @@ def generate_shim(entry: ApiEntry) -> str:
     else:
         lines.append(f"  {entry.ret_type} r = {table_name}.{fn_field}({fwd_args});")
         if not is_passonly:
-            # No hip_capture_enabled() check — shim is only installed when capture is active
-            # For const char* return, no hipSuccess check (always valid)
             if is_const_char_ret:
                 lines.append(f"  {{")
             else:
@@ -2782,7 +2423,6 @@ def generate_shim(entry: ApiEntry) -> str:
                 lines.append(f"    a.ret = reinterpret_cast<uint64_t>(r);")
             else:
                 lines.append(f"    a.ret         = static_cast<int32_t>(r);")
-            # Fill params — separate pre/post-call
             unnamed = 0
             output_params = []
             for p in entry.params:
@@ -2793,7 +2433,6 @@ def generate_shim(entry: ApiEntry) -> str:
                     output_params.append((p, name, ft))
                 else:
                     _fill_param(lines, p, name, ft)
-            # Post-call: fill output ptr fields from dereferenced values
             for p, name, ft in output_params:
                 _fill_output_param_post(lines, p, name, entry.name)
             _fill_derefs(lines, entry)
@@ -2825,7 +2464,6 @@ def generate_build_table(entries: List[ApiEntry]) -> str:
 
     lines = []
 
-    # Forward-declare the hand-written shims from hip_capture.cpp (non-static there)
     manual_runtime  = [e for e in runtime_entries  if e.name in MANUAL_CAPTURE_APIS]
     manual_compiler = [e for e in compiler_entries if e.name in MANUAL_CAPTURE_APIS]
     if manual_runtime or manual_compiler:
@@ -2897,9 +2535,6 @@ def generate_capture_cpp(entries: List[ApiEntry]) -> str:
     return "\n".join(parts)
 
 
-# ---------------------------------------------------------------------------
-# Playback CPP generation
-# ---------------------------------------------------------------------------
 
 _PLAYBACK_CPP_PREAMBLE = """\
 /*
@@ -2929,8 +2564,6 @@ _PLAYBACK_CPP_PREAMBLE = """\
 
 """
 
-# Handle types that need translation during playback
-# Maps C handle type -> (translate method, record method, remove method)
 _PLAYBACK_HANDLE_INFO: Dict[str, Tuple[str, str, str]] = {
     'hipStream_t':          ('ctx.translate_stream',    'ctx.record_stream',    'ctx.remove_stream'),
     'hipEvent_t':           ('ctx.translate_event',     'ctx.record_event',     'ctx.remove_event'),
@@ -2948,10 +2581,8 @@ _PLAYBACK_HANDLE_INFO: Dict[str, Tuple[str, str, str]] = {
     'hipLinkState_t':       ('ctx.translate_link_state','ctx.record_link_state','ctx.remove_link_state'),
 }
 _PLAYBACK_HANDLE_TRANSLATE = {k: v[0] for k, v in _PLAYBACK_HANDLE_INFO.items()}
-# The VMM handle has its own map (PlaybackContext::vmm_handle_map, filled by the
-# hand-written hipMemCreate handler) but no record/remove pair, so it is not in
-# the table above. Generated handlers still have to translate it: passing the
-# recorded value names an allocation in the capturing process.
+# The VMM handle has its own map (vmm_handle_map, filled by the hand-written hipMemCreate handler) but no record/remove pair.
+# Generated handlers still translate it, since the recorded value names an allocation in the capturing process.
 _PLAYBACK_HANDLE_TRANSLATE['hipMemGenericAllocationHandle_t'] = \
     'ctx.translate_vmm_handle'
 
@@ -2971,17 +2602,9 @@ _UNTRANSLATED_PLAYBACK_TYPES = {
     "hipHostFn_t",
 }
 
-# `void*` parameters that are really out buffers — the callee writes a handle
-# through them. Nothing in the type says so, and treating the recorded value as
-# an opaque input hands the runtime an address from the capturing process
-# (SIGSEGV inside hipMemExportToShareableHandle).
-# The value is the number of bytes the callee writes, and the handler passes a
-# zeroed local of that size.
-#
-# What the callee writes stays local to the replay: a POSIX fd or a Win32
-# HANDLE is meaningful only in the process that received it, and the archive
-# has no way to hand it to another one. hipMemImportFromShareableHandle is a
-# NOOP for the same reason, so nothing downstream consumes it.
+# `void*` parameters that are really out buffers: the callee writes a handle through them, and passing the recorded value would hand the runtime a capturing-process address (SIGSEGV inside hipMemExportToShareableHandle).
+# The value is the number of bytes the callee writes; the handler passes a zeroed local of that size.
+# What the callee writes stays local: an fd or Win32 HANDLE is meaningful only in the receiving process.
 _OUT_BUFFER_PARAMS: Dict[str, Dict[str, int]] = {
     # An fd is an int and a Win32 HANDLE is a pointer; eight bytes covers both.
     'hipMemExportToShareableHandle':     {'shareableHandle': 8},
@@ -2995,9 +2618,6 @@ _OUT_BUFFER_PARAMS: Dict[str, Dict[str, int]] = {
     'hipDeviceGetLuid':                  {'luid': 8},
 }
 
-# APIs that create device allocations: API name -> (rec_ptr_param, size_param)
-# rec_ptr_param is the name of the output param storing the address (in the struct)
-# size_param is the name of the size param in the struct
 _ALLOC_CREATE_APIS: Dict[str, Tuple[str, str]] = {
     'hipMalloc':             ('ptr', 'size'),
     'hipMallocAsync':        ('dev_ptr', 'size'),
@@ -3023,8 +2643,7 @@ _ALLOC_FREE_APIS: Dict[str, str] = {
     'hipIpcCloseMemHandle': 'devPtr',
 }
 
-# APIs that destroy handles: API name -> (handle param name in struct, handle type)
-# Param names MUST match the actual typedef parameter names in hip_api_trace.hpp.
+# Param names must match the typedef parameter names in hip_api_trace.hpp.
 _HANDLE_DESTROY_APIS: Dict[str, Tuple[str, str]] = {
     'hipStreamDestroy':        ('stream',        'hipStream_t'),
     'hipEventDestroy':         ('event',         'hipEvent_t'),
@@ -3044,37 +2663,28 @@ _HANDLE_DESTROY_APIS: Dict[str, Tuple[str, str]] = {
 # APIs that create handles: API name -> list of (output param name, handle type)
 # The param name MUST match the actual parameter name in the hip_api_trace.hpp typedef.
 _HANDLE_CREATE_APIS: Dict[str, List[Tuple[str, str]]] = {
-    # Stream / event — in MANUAL_PLAYBACK_APIS; entries here only for completeness
     'hipStreamCreate':              [('stream',      'hipStream_t')],
     'hipStreamCreateWithFlags':     [('stream',      'hipStream_t')],
     'hipStreamCreateWithPriority':  [('stream',      'hipStream_t')],
     'hipEventCreate':               [('event',       'hipEvent_t')],
     'hipEventCreateWithFlags':      [('event',       'hipEvent_t')],
-    # Memory pools. The two query spellings hand out a pool they did not
-    # create — usually the device default — and registering it is what lets a
-    # later hipMemSetMemPool or allocation name that pool.
+    # Memory pools. The two query spellings hand out a pool they did not create, usually the device default. Registering it lets a later hipMemSetMemPool or allocation name that pool.
     'hipMemPoolCreate':             [('mem_pool',     'hipMemPool_t')],
     'hipDeviceGetMemPool':          [('mem_pool',     'hipMemPool_t')],
     'hipDeviceGetDefaultMemPool':   [('mem_pool',     'hipMemPool_t')],
     'hipMemGetMemPool':             [('pool',         'hipMemPool_t')],
-    # JIT linker state. Without this the state hipLinkCreate hands out was
-    # dropped and hipLinkComplete / hipLinkDestroy were passed the capturing
-    # process's pointer, which is why both failed however good the inputs were.
+    # Without this, hipLinkComplete and hipLinkDestroy were passed the capturing process's pointer and failed.
     'hipLinkCreate':                [('stateOut',     'hipLinkState_t')],
-    # Arrays — param names from hip_api_trace.hpp
     'hipArrayCreate':               [('pHandle',      'hipArray_t')],
     'hipArray3DCreate':             [('array',        'hipArray_t')],
     'hipMallocArray':               [('array',        'hipArray_t')],
     'hipMalloc3DArray':             [('array',        'hipArray_t')],
     'hipMallocMipmappedArray':      [('mipmappedArray', 'hipMipmappedArray_t')],
-    # Graphs
     'hipGraphCreate':               [('pGraph',       'hipGraph_t')],
     'hipGraphClone':                [('pGraphClone',  'hipGraph_t')],
     'hipGraphInstantiate':          [('pGraphExec',   'hipGraphExec_t')],
     'hipGraphInstantiateWithFlags': [('pGraphExec',   'hipGraphExec_t')],
-    # Graph nodes. Registering the node each construction call produces is
-    # what lets a later dependency list, *NodeSetParams or hipGraphDestroyNode
-    # name it; without this the node API replays as a set of unconnected calls.
+    # Registering each produced node lets a later dependency list, *NodeSetParams or hipGraphDestroyNode name it.
     'hipGraphAddEmptyNode':         [('pGraphNode',   'hipGraphNode_t')],
     'hipGraphAddEventRecordNode':   [('pGraphNode',   'hipGraphNode_t')],
     'hipGraphAddEventWaitNode':     [('pGraphNode',   'hipGraphNode_t')],
@@ -3086,13 +2696,9 @@ _HANDLE_CREATE_APIS: Dict[str, List[Tuple[str, str]]] = {
     'hipDrvGraphAddMemsetNode':     [('phGraphNode',  'hipGraphNode_t')],
     'hipDrvGraphAddMemFreeNode':    [('phGraphNode',  'hipGraphNode_t')],
     'hipGraphNodeFindInClone':      [('pNode',        'hipGraphNode_t')],
-    # Texture / surface objects
     'hipCreateSurfaceObject':       [('pSurfObject',  'hipSurfaceObject_t')],
     'hipCreateTextureObject':       [('pTexObject',   'hipTextureObject_t')],
-    # Driver contexts. Every call that hands one out registers it, including
-    # the two that only report a context they did not create: a recording
-    # pushes back what it popped, and the pop is where replay learns which
-    # live context that recorded value stands for.
+    # Every call that hands out a context registers it, including the two that only report one: a recording pushes back what it popped, and the pop is where replay learns the live context.
     'hipCtxCreate':                 [('ctx',          'hipCtx_t')],
     'hipCtxPopCurrent':             [('ctx',          'hipCtx_t')],
     'hipCtxGetCurrent':             [('ctx',          'hipCtx_t')],
@@ -3125,28 +2731,19 @@ def _graph_param(entry: ApiEntry) -> str:
     return ""
 
 
-# hipCtx_t arguments of the driver-API graph node calls. The recorded value is
-# an address in the capturing process and nothing here maps it, so passing it
-# through would hand the runtime a stale pointer. Null is not the answer
-# either: hipDrvGraphAddMemcpyNode rejects a null context outright
-# (hip_graph.cpp:1445). hrr_live_ctx substitutes the context the replaying
-# thread is on, and preserves a recorded null so a call that failed that way at
-# capture fails the same way here.
+# hipCtx_t arguments of the driver graph node calls. Nothing maps the recorded address, and hipDrvGraphAddMemcpyNode rejects a null context (hip_graph.cpp:1445).
+# hrr_live_ctx substitutes the replaying thread's context and preserves a recorded null, so a call that failed at capture fails the same way here.
 _LIVE_CTX_PLAYBACK_APIS: Set[str] = {
     "hipDrvGraphAddMemsetNode",
     "hipDrvGraphExecMemsetNodeSetParams",
 }
 
-# Lines emitted just before the handler returns, for post-call bookkeeping the
-# tables above cannot express. `_r` holds the call's result.
 _POST_CALL_EXTRA: Dict[str, List[str]] = {
-    # A clone of a graph HRR could not rebuild is equally unbuildable, and
-    # nothing about the clone call itself would reveal that.
+    # A clone of a graph HRR could not rebuild is equally unbuildable.
     "hipGraphClone": [
         "if (_r == hipSuccess && ctx.graph_is_incomplete(a->originalGraph))",
         "  ctx.mark_graph_incomplete(a->pGraphClone, \"hipGraphClone\");",
     ],
-    # Likewise a parent graph inherits whatever its child could not rebuild.
     "hipGraphAddChildGraphNode": [
         "if (_r == hipSuccess && ctx.graph_is_incomplete(a->childGraph))",
         "  ctx.mark_graph_incomplete(a->graph, \"hipGraphAddChildGraphNode\");",
@@ -3154,41 +2751,22 @@ _POST_CALL_EXTRA: Dict[str, List[str]] = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Playback argument bridges
-# ---------------------------------------------------------------------------
-# Playback calls the PUBLIC HIP API by name; capture goes through the dispatch
-# table. Those are two different declarations, and they are allowed to diverge:
-# hip_api_trace.hpp is append-only ABI, while hip_runtime_api.h re-declares an
-# API with a new signature under a HIP_TARGET_API_VERSION guard.
-#
-# validate_playback_signatures() refuses to generate when the two disagree, so
-# a divergence cannot silently produce a wrong cast. An entry here is the
-# explicit, reviewed resolution for one such API: it supplies the code that
-# converts the RECORDED (dispatch-table) field into the type the public API
-# expects, emitted under the same guard the public header uses.
+# Playback calls the PUBLIC HIP API by name; capture goes through the dispatch table. The two declarations may diverge: hip_runtime_api.h can re-declare an API with a new signature under a HIP_TARGET_API_VERSION guard.
+# validate_playback_signatures() refuses to generate when they disagree. An entry here is the reviewed resolution for one such API, emitted under the public header's guard.
 #
 #   guard : the #if expression under which the public API takes the NEW type
 #   param : dispatch-table parameter name being bridged
 #   pre   : lines emitted inside the guard ({name} -> param name)
 #   expr  : expression substituted for that argument inside the guard
-# APIs the tree declares before any SDK that CI builds playback against exports
-# them. The call is made through a symbol looked up in the loaded runtime at
-# replay time instead of a link-time reference, so hrr-playback still links
-# against an older amdhip64 and a replay on that runtime skips the call with a
-# warning. Declarations (and the enum types in the signature) must come from
-# the in-tree headers; see HRR_HIP_INCLUDE_DIRS in projects/hrr/CMakeLists.txt.
-# Add an API here when its first CI build fails to link against the SDK.
+# APIs declared before any SDK that CI builds playback against exports them. The call goes through a symbol looked up at replay time, so hrr-playback still links against an older amdhip64 and skips the call with a warning.
+# Declarations and enum types must come from the in-tree headers (HRR_HIP_INCLUDE_DIRS in projects/hrr/CMakeLists.txt). Add an API here when its first CI build fails to link.
 _PLAYBACK_RUNTIME_RESOLVED_APIS = frozenset({
     "hipDeviceFlushGPUDirectRDMAWrites",
     "hipExtMemcpyBatchAsync",
 })
 
 _PLAYBACK_ARG_BRIDGES: Dict[str, Dict[str, object]] = {
-    # HIP 8.0 replaced `int device` with a `hipMemLocation` struct. The table
-    # (and therefore the recorded field) keeps the int device ordinal, so the
-    # bridge rebuilds a hipMemLocation from it rather than passing a zeroed
-    # struct — the recorded device is preserved on both sides of the guard.
+    # HIP 8.0 replaced `int device` with a `hipMemLocation` struct. The recorded field keeps the int ordinal, so the bridge rebuilds a hipMemLocation from it.
     'hipMemAdvise': {
         'guard': 'HIP_TARGET_API_VERSION >= 800 && !defined(HIP_ABI_IMPL)',
         'param': 'device',
@@ -3206,9 +2784,6 @@ def _apply_arg_bridge(bridge: Dict[str, object],
                       entry: 'ApiEntry',
                       call_args: List[str]) -> Tuple[List[str], List[str]]:
     """Return (pre_lines, call_args) with the bridged argument substituted."""
-    # The bridge substitutes by position, so call_args must stay 1:1 with
-    # entry.params. generate_playback_shim appends exactly one argument per
-    # parameter today; assert it rather than silently bridging the wrong one.
     if len(call_args) != len(entry.params):
         sys.exit(f"ERROR: _PLAYBACK_ARG_BRIDGES[{entry.name!r}] cannot be applied: "
                  f"the generated call has {len(call_args)} arguments for "
@@ -3238,10 +2813,8 @@ class RawSlotError(Exception):
     """
 
 
-# Enumerations that are not in _ENUM_TYPES, so the struct records them as an
-# 8-byte placeholder, but are still plain numbers: casting the recorded value
-# back is a conversion. Listing them here keeps the raw-slot rule from refusing
-# their APIs without changing the generated header's layout.
+# Enumerations not in _ENUM_TYPES are recorded as an 8-byte placeholder but are plain numbers, so casting back is a conversion.
+# Listing them keeps the raw-slot rule from refusing their APIs without changing the header layout.
 _NUMERIC_ENUMS_RECORDED_AS_WIDE = {
     "hipFlushGPUDirectRDMAWritesTarget",
     "hipFlushGPUDirectRDMAWritesScope",
@@ -3268,7 +2841,6 @@ def _raw_slot_kind(raw_type: str) -> Optional[str]:
     base = t_nc.split()[0]
     if base in ("dim3", "uint3") or base in BY_VALUE_STRUCTS:
         return None
-    # Plain C arithmetic types, spelled with any of the integer keywords.
     if _C_ARITHMETIC_TYPE_RE.fullmatch(t_nc):
         return None
     if base == "hipDevice_t":  # an int ordinal, not a pointer
@@ -3297,15 +2869,13 @@ def _playback_arg(entry: ApiEntry, p: Param, name: str,
     base = _get_base_type(t)
     is_output = _is_output_ptr_param(p)
 
-    # A declared out buffer — the recorded address belongs to the capturing
-    # process, so the callee writes into a local of the right size instead.
+    # A declared out buffer: the callee writes into a local of the right size, since the recorded address belongs to the capturing process.
     out_bytes = _OUT_BUFFER_PARAMS.get(entry.name, {}).get(name)
     if out_bytes:
         pre_lines.append(f"  alignas(8) unsigned char _outbuf_{name}"
                          f"[{out_bytes}]{{}};")
         return f"({t})_outbuf_{name}"
 
-    # A by-value struct carried as inline bytes — restore it into a local.
     bv = by_value_struct(t)
     if bv is not None:
         pre_lines.append(f"  {base} _v_{name}{{}};")
@@ -3314,17 +2884,11 @@ def _playback_arg(entry: ApiEntry, p: Param, name: str,
         pre_lines.extend(_deref_translate_lines(f"_v_{name}", bv.ptr_members))
         return f"_v_{name}"
 
-    # A dereferenced pointer argument — rebuild the pointee and pass its address
-    # rather than casting the recorded capture-time address back to a pointer.
     d = deref_for_param(entry.name, name)
     if d is not None and d.playback == "auto":
         if d.string:
-            # The record holds a fixed-size character field. Nothing makes the
-            # archive's bytes end in a NUL, so the string is copied into a local
-            # buffer of the field's size and the last byte is forced to NUL:
-            # whatever the archive recorded, the callee reads inside the buffer.
-            # The local is as big as the record's field; a field of another size
-            # would make the copy below read past the record or stop short.
+            # A fixed-size character field the archive need not NUL-terminate: copy into a local the field's size and force the last byte to NUL, so the callee reads inside the buffer.
+            # The static_assert catches a field of another size, which would make the copy read past the record or stop short.
             pre_lines.append(f'  static_assert(sizeof(a->{d.bytes_field}) == {d.max_count}, '
                              f'"{entry.name}: {d.bytes_field} is not {d.max_count} bytes");')
             pre_lines.append(f"  char _str_{name}[{d.max_count}]{{}};")
@@ -3357,11 +2921,7 @@ def _playback_arg(entry: ApiEntry, p: Param, name: str,
                     pre_lines.append(f"  for (uint32_t _i = 0; _i < _d_{name}_n; ++_i)")
                     pre_lines.append(f"    _d_{name}[_i] = ctx.translate_ptr("
                                      f"reinterpret_cast<uint64_t>(_d_{name}[_i]));")
-                # An array of handles: every element is itself a recorded
-                # handle. A graph dependency list arrives as node addresses
-                # from the capturing process; passed through untranslated the
-                # runtime would either reject them or, worse, wire the node to
-                # whatever lives at that address here.
+                # An array of handles: each element is a recorded handle. A graph dependency list holds capturing-process node addresses; untranslated, the runtime would reject them or wire the node to whatever lives at that address here.
                 if d.elem_handle:
                     efn = _PLAYBACK_HANDLE_TRANSLATE[d.elem_handle]
                     gparam = _graph_param(entry)
@@ -3383,18 +2943,10 @@ def _playback_arg(entry: ApiEntry, p: Param, name: str,
                     pre_lines.append(f"    }}")
                     pre_lines.append(f"    _d_{name}[_i] = _live;")
                     pre_lines.append(f"  }}")
-            # An empty array is passed as a null pointer, not as the address of
-            # an empty local: hipDrvGraphAddMemFreeNode (hip_graph.cpp:3502)
-            # rejects a non-null dependency pointer with a zero count outright,
-            # and a zero count is what every node added without dependencies
-            # has.
+            # An empty array is passed as null: hipDrvGraphAddMemFreeNode (hip_graph.cpp:3502) rejects a non-null dependency pointer with a zero count, and nodes added without dependencies have a zero count.
             return f"({t})(_d_{name}_n ? _d_{name} : nullptr)"
         pre_lines.append(f"  {d.ctype} _d_{name}{{}};")
-        # An output pointee is written by the call, so what matters is that the
-        # buffer is the right size — the recorded value is carried for fidelity
-        # and comparison, not to be handed back to the runtime. Passing a local
-        # of the pointee's own type is also what stops the generic
-        # output-pointer path from handing a 64-byte write an 8-byte void*.
+        # An output pointee is written by the call, so only the buffer size matters; the recorded value is kept for fidelity. A local of the pointee's own type also stops the generic output-pointer path from giving a 64-byte write an 8-byte void*.
         if d.direction == "out":
             return f"({t})&_d_{name}"
         pre_lines.append(f"  if (a->{d.present_field})")
@@ -3406,9 +2958,7 @@ def _playback_arg(entry: ApiEntry, p: Param, name: str,
             return f"({t})&_d_{name}"
         return f"(a->{d.present_field} ? ({t})&_d_{name} : ({t})nullptr)"
 
-    # Output pointer — declare local, pass address of local
     if is_output:
-        # Check all known handle types
         for htype in _PLAYBACK_HANDLE_INFO:
             if htype in t:
                 null_val = '0' if htype in ('hipSurfaceObject_t', 'hipTextureObject_t') else 'nullptr'
@@ -3420,52 +2970,42 @@ def _playback_arg(entry: ApiEntry, p: Param, name: str,
         if 'hipMipmappedArray_t' in t:
             pre_lines.append(f"  hipMipmappedArray_t _out_{name} = nullptr;")
             return f"&_out_{name}"
-        # void** or other output ptr
         pre_lines.append(f"  void* _out_{name} = nullptr;")
         return f"(void**)&_out_{name}"
 
     if base == 'hipCtx_t' and entry.name in _LIVE_CTX_PLAYBACK_APIS:
         return f"hrr_live_ctx(a->{name})"
 
-    # Handle types — translate recorded handle to live handle
     if base in _PLAYBACK_HANDLE_TRANSLATE:
         fn = _PLAYBACK_HANDLE_TRANSLATE[base]
         return f"({t}){fn}(a->{name})"
-    # hipArray_const_t and hipMipmappedArray_const_t
     if 'hipArray' in base:
         return f"(hipArray_t)ctx.translate_array(a->{name})"
     if 'hipMipmappedArray' in base:
         return f"(hipMipmappedArray_t)ctx.translate_mipmapped(a->{name})"
 
-    # Device pointer types
     if base == 'hipDeviceptr_t':
         return f"(hipDeviceptr_t)ctx.translate_ptr(a->{name})"
 
-    # void* that looks like a device ptr (dst/src/devPtr naming)
     is_ptr = '*' in t
     if is_ptr and base == 'void':
         if any(kw in name.lower() for kw in ('dst', 'dev', 'ptr', 'buf', 'src')):
             return f"ctx.translate_ptr(a->{name})"
 
-    # dim3 — reconstruct from x/y/z fields
     if base in ('dim3', 'uint3'):
         pre_lines.append(f"  dim3 _dim_{name}(a->{name}_x, a->{name}_y, a->{name}_z);")
         return f"_dim_{name}"
 
-    # Non-castable struct types — pass zero-initialized local
     if base in ('hipIpcEventHandle_t', 'hipIpcMemHandle_t', 'hipPitchedPtr',
                 'hipExtent', 'hipPos', 'hipMemLocation', 'hipChannelFormatDesc'):
         pre_lines.append(f"  {t} _s_{name}{{}};")
         return f"_s_{name}"
 
-    # Function pointer types are a capture-process address: there is nothing to
-    # translate them to, so an API taking one is refused.
+    # Function pointers are capturing-process addresses with nothing to translate to, so an API taking one is refused.
     if base in ('hipStreamCallback_t', 'hipHostFn_t'):
         raise _raw_slot_error(entry, name, t, "function pointer")
 
-    # Unhandled non-const pointer to a non-void scalar type — treat as output pointer.
-    # The captured value is the original process address (invalid at replay).
-    # Use a zero-initialised local so the call succeeds without crashing.
+    # Unhandled non-const pointer to a non-void scalar: treat as an output pointer. The recorded value is an invalid address at replay, so pass a zero-initialised local.
     is_ptr = '*' in t
     is_const_ptr = 'const' in t and is_ptr
     if is_ptr and not is_const_ptr and base != 'void':
@@ -3473,9 +3013,7 @@ def _playback_arg(entry: ApiEntry, p: Param, name: str,
         pre_lines.append(f"  {inner} _out_{name}{{}};")
         return f"&_out_{name}"
 
-    # Anything left is a numeric slot (integer, float, enum) and a cast of the
-    # recorded value is a conversion. A pointer, handle or struct would be an
-    # archive integer reaching HIP as an address: refuse the API instead.
+    # Anything left is a numeric slot (integer, float, enum): the cast is a conversion. A pointer, handle or struct would reach HIP as an archive integer used as an address, so refuse the API.
     kind = _raw_slot_kind(t)
     if kind is not None:
         raise _raw_slot_error(entry, name, t, kind)
@@ -3487,11 +3025,7 @@ def _refusing_playback_shim(entry: ApiEntry, reason: str) -> str:
     sname = f"hrr_args_{entry.name}"
     fname = f"playback_{entry.name}"
     gparam = _graph_param(entry)
-    # Unlike ERROR_STUB_PLAYBACK_APIS this returns an error, so by default
-    # the replay stops right here. Under --continue-on-error it goes on,
-    # and the graph that should hold this node is now short one: marking
-    # it makes the later instantiate refuse it instead of running a graph
-    # missing work.
+    # Unlike ERROR_STUB_PLAYBACK_APIS this returns an error, so replay stops here unless --continue-on-error. Under that flag the graph is now short a node; marking it makes the later instantiate refuse it.
     mark = (f"  const auto* a = reinterpret_cast<const {sname}*>(payload);\n"
             f"  ctx.mark_graph_incomplete(a->{gparam}, \"{entry.name}\");\n"
             if gparam else "  (void)payload;\n")
@@ -3547,13 +3081,8 @@ def generate_playback_shim(entry: ApiEntry) -> str:
                 f"  return hipSuccess;\n"
                 f"}}\n")
 
-    # Error-stub playback APIs: graph work whose arguments the archive does not
-    # carry well enough to rebuild. Emit a loud, attributable (per-API) warning
-    # and poison the graph, but return hipSuccess — these are non-fatal on their
-    # own. The HARD failure is at hipGraphInstantiate /
-    # hipGraphInstantiateWithFlags, which refuse an incomplete graph (finding
-    # H1). This keeps replay alive for programs that merely create, clone or
-    # build graphs they never instantiate. Message is once/process.
+    # Error-stub APIs: graph work whose arguments the archive cannot rebuild. Warn once per API, mark the graph incomplete, return hipSuccess.
+    # The hard failure is at hipGraphInstantiate/hipGraphInstantiateWithFlags, which refuse an incomplete graph (finding H1); programs that never instantiate keep replaying.
     if entry.name in ERROR_STUB_PLAYBACK_APIS:
         gparam = _graph_param(entry)
         mark = (f"  const auto* a = reinterpret_cast<const {sname}*>(payload);\n"
@@ -3574,26 +3103,17 @@ def generate_playback_shim(entry: ApiEntry) -> str:
                 f"  return hipSuccess;\n"
                 f"}}\n")
 
-    # Unreplayable APIs: name the API and the reason, mark the replay as
-    # having skipped something it cannot reproduce, and return an error. Loud
-    # and attributable beats letting the real API fail somewhere inside the
-    # runtime with a bare error code.
     if entry.name in UNREPLAYABLE_PLAYBACK_APIS:
         return _refusing_playback_shim(entry, UNREPLAYABLE_PLAYBACK_APIS[entry.name])
     if entry.name in PLAYBACK_ONLY_UNREPLAYABLE_APIS:
         return _refusing_playback_shim(entry, PLAYBACK_ONLY_UNREPLAYABLE_APIS[entry.name])
 
-    # No-op playback APIs: emit a one-time warning then return hipSuccess.
-    # The static bool ensures the message fires once per process, not once per event,
-    # so replays with thousands of events don't spam stderr.
     if entry.name in NOOP_PLAYBACK_APIS:
         return _noop_playback_shim(entry.name)
 
-    # Per-API custom handler body (special in/out value handling).
     if entry.name in CUSTOM_PLAYBACK_BODIES:
         return CUSTOM_PLAYBACK_BODIES[entry.name]
 
-    # Manual playback APIs: emit an extern declaration only, body in hip_playback.cpp
     if entry.name in MANUAL_PLAYBACK_APIS:
         return (f"extern hipError_t {fname}"
                 f"(PlaybackContext& ctx, const uint8_t* payload);\n")
@@ -3602,35 +3122,25 @@ def generate_playback_shim(entry: ApiEntry) -> str:
     lines.append(f"{sig} {{")
 
     if entry.table == "compiler":
-        # Compiler APIs (hipRegisterFatBinary etc.) are replay no-ops
         lines.append(f"  (void)ctx; (void)payload;")
         lines.append(f"  return hipSuccess;")
         lines.append("}")
         return "\n".join(lines) + "\n"
 
-    # Arguments the generator can translate get a real call. An opaque handle
-    # with no playback translation would be passed as an address from the
-    # capturing process, so that API replays as a no-op until a reviewed
-    # handler is added. DIRECT_PLAYBACK_APIS keeps the generated call for
-    # APIs that already had one. Editing hip_playback_generated.cpp does not.
+    # An opaque handle with no playback translation would pass a capturing-process address, so that API replays as a no-op until a reviewed handler is added.
+    # DIRECT_PLAYBACK_APIS keeps the generated call for APIs that already had one; editing hip_playback_generated.cpp does not.
     if playback_defaults_to_noop(entry):
         return _noop_playback_shim(entry.name)
 
-    # payload points to the full hrr_args_* struct (header + fields).
     lines.append(f"  const auto* a = reinterpret_cast<const {sname}*>(payload);")
 
-    # Check if this API creates/destroys allocs or handles
     is_alloc_create  = entry.name in _ALLOC_CREATE_APIS
     is_alloc_free    = entry.name in _ALLOC_FREE_APIS
     is_hdl_create    = entry.name in _HANDLE_CREATE_APIS
     is_hdl_destroy   = entry.name in _HANDLE_DESTROY_APIS
 
-    # A node or executable graph that was never built here cannot be mutated.
-    # Handing the runtime a null handle would come back as an error, and
-    # dispatch treats any handler error as fatal — so a graph HRR already
-    # refused to instantiate (loudly, at the instantiate call) would take the
-    # rest of the replay down with it through its follow-up mutations. The
-    # useful complaint has already been made; skip these.
+    # A node or executable graph never built here cannot be mutated. A null handle returns an error and dispatch treats any handler error as fatal, so a graph HRR already refused at instantiate would take the replay down through its follow-up mutations.
+    # The complaint was already made; skip.
     for p in entry.params:
         pt = p.raw_type.strip()
         if '*' in pt or not p.name:
@@ -3649,12 +3159,10 @@ def generate_playback_shim(entry: ApiEntry) -> str:
         lines.append(f"    return hipSuccess;")
         lines.append(f"  }}")
 
-    # For alloc-free and handle-destroy APIs: grab the recorded key before the call
     if is_alloc_free:
         rec_param = _ALLOC_FREE_APIS[entry.name]
         lines.append(f"  uint64_t _rec_ptr = a->{rec_param};")
-        # A release of memory replay never had has nothing to do: not an
-        # unmapped pointer in the policy's sense, so lookup_ptr, no note.
+        # Releasing memory replay never had is not an unmapped pointer in the policy's sense: use lookup_ptr, no note.
         lines.append(f"  void*    _live_ptr = ctx.lookup_ptr(_rec_ptr);")
         lines.append(f"  if (_live_ptr == nullptr) return hipSuccess;")
     if is_hdl_destroy:
@@ -3663,7 +3171,6 @@ def generate_playback_shim(entry: ApiEntry) -> str:
         if translate_fn:
             lines.append(f"  uint64_t _rec_hdl = a->{rec_param};")
 
-    # Build argument list for the real call
     pre_lines: List[str] = []
     call_args: List[str] = []
     unnamed = 0
@@ -3672,11 +3179,9 @@ def generate_playback_shim(entry: ApiEntry) -> str:
             name = p.name or f"p{unnamed}"
             if not p.name: unnamed += 1
 
-            # For alloc-free: replace the pointer arg with the translated live ptr
             if is_alloc_free and name == _ALLOC_FREE_APIS[entry.name]:
                 call_args.append("_live_ptr")
                 continue
-            # For handle-destroy: replace the handle arg with the live handle
             if is_hdl_destroy and name == _HANDLE_DESTROY_APIS[entry.name][0]:
                 hdl_type = _HANDLE_DESTROY_APIS[entry.name][1]
                 translate_fn = _PLAYBACK_HANDLE_TRANSLATE.get(hdl_type, '')
@@ -3686,9 +3191,7 @@ def generate_playback_shim(entry: ApiEntry) -> str:
                     raise _raw_slot_error(entry, name, hdl_type, "handle")
                 continue
 
-            # The element count of a deref'd array is however many elements the
-            # event actually carries, which is not the recorded count when the
-            # array overflowed the inline capacity.
+            # The element count of a deref'd array is the number of elements the event carries, not the recorded count when the array overflowed inline capacity.
             array_owner = next((d for d in deref_specs(entry.name)
                                 if d.is_array and d.count == name
                                 and d.playback == "auto"), None)
@@ -3698,12 +3201,9 @@ def generate_playback_shim(entry: ApiEntry) -> str:
 
             call_args.append(_playback_arg(entry, p, name, pre_lines))
     except RawSlotError as err:
-        # An argument would reach HIP as a raw cast of an archive integer and
-        # there is no translation for it: refuse the API by name.
         AUTO_UNREPLAYABLE_PLAYBACK_APIS[entry.name] = str(err)
         return _refusing_playback_shim(entry, str(err))
 
-    # Emit pre-call locals
     for pl in pre_lines:
         lines.append(pl)
 
@@ -3714,9 +3214,7 @@ def generate_playback_shim(entry: ApiEntry) -> str:
         lines.append("        reinterpret_cast<uint64_t>(_d_value.accessPolicyWindow.base_ptr));")
         lines.append("  }")
 
-    # A JIT/link option array carries values the runtime may dereference
-    # (log buffers, symbol tables). Those are capture-process pointers with no
-    # translation, so a record that has one is refused, naming the API.
+    # A JIT/link option array may carry pointers the runtime dereferences (log buffers, symbol tables), with no translation; such a record is refused, naming the API.
     if entry.name in JIT_OPTION_ARRAY_APIS:
         lines.append("  if (hrr::jit_options_carry_pointer(_d_options, _d_options_n)) {")
         lines.append(f'    hrr_note_unreplayable(ctx, "{entry.name}",')
@@ -3727,7 +3225,6 @@ def generate_playback_shim(entry: ApiEntry) -> str:
         lines.append("    return hipErrorNotSupported;")
         lines.append("  }")
 
-    # Build the call
     args_str = ", ".join(call_args)
     void_ret = _is_void_return(entry.ret_type)
 
@@ -3758,8 +3255,6 @@ def generate_playback_shim(entry: ApiEntry) -> str:
 
     bridge = _PLAYBACK_ARG_BRIDGES.get(entry.name)
     if bridge:
-        # The public API changes signature under a version guard. Emit both
-        # forms so the generated call matches whichever declaration is visible.
         b_pre, b_args = _apply_arg_bridge(bridge, entry, call_args)
         lines.append(f"#if {bridge['guard']}")
         lines.extend(b_pre)
@@ -3771,10 +3266,8 @@ def generate_playback_shim(entry: ApiEntry) -> str:
         _emit_call(lines, args_str)
     ret_expr = "hipSuccess" if void_ret else "_r"
 
-    # A call that failed at capture and fails identically here was reproduced,
-    # not botched: return success so dispatch_event does not abort the replay
-    # over it. Only the hand-written capture shims record failing calls at all,
-    # so for everything else a->ret is 0 and this is dead weight.
+    # A call that failed at capture and fails identically here was reproduced: return success so dispatch_event does not abort.
+    # Only hand-written capture shims record failing calls, so elsewhere a->ret is 0.
     if not void_ret and _get_base_type(entry.ret_type) == 'hipError_t':
         lines.append(f"  if (_r != hipSuccess && a->ret != 0 &&"
                      f" static_cast<int32_t>(_r) == a->ret) {{")
@@ -3782,12 +3275,10 @@ def generate_playback_shim(entry: ApiEntry) -> str:
         lines.append(f"    return hipSuccess;")
         lines.append(f"  }}")
 
-    # Post-call: register/unregister allocs and handles
     success_cond = "true" if void_ret else "_r == hipSuccess"
 
     if is_alloc_create:
         rec_param, sz_param = _ALLOC_CREATE_APIS[entry.name]
-        # The output ptr is stored in a local _out_{rec_param} by _playback_arg
         kind = ("AllocKind::HostMalloc"
                 if entry.name in _HOST_ALLOC_CREATE_APIS else "AllocKind::Device")
         lines.append(f"  if ({success_cond}) {{")
@@ -3905,15 +3396,9 @@ def generate_playback_cpp(entries: List[ApiEntry]) -> str:
 # ---------------------------------------------------------------------------
 # Public API signature validation
 # ---------------------------------------------------------------------------
-# Capture goes through the dispatch table, so hip_api_trace.hpp is the correct
-# source for capture casts. Playback does NOT call the table — it calls the
-# public API by name. Deriving playback casts from the table is therefore only
-# sound while the two declarations agree, and they are not required to: the
-# table is append-only ABI, while hip_runtime_api.h may re-declare an API with
-# a different signature under a HIP_TARGET_API_VERSION guard (hipMemAdvise gained
-# a hipMemLocation parameter in HIP 8.0 this way).
-#
-# This pass parses the public header and refuses to generate when a playback
+# Capture goes through the dispatch table; playback calls the public API by name. Casts derived from the table are sound only while the two declarations agree.
+# The table is append-only ABI; hip_runtime_api.h may re-declare an API under a HIP_TARGET_API_VERSION guard (hipMemAdvise gained a hipMemLocation parameter in HIP 8.0).
+# This pass parses the public header and refuses to generate when a cast would disagree with its callee.
 # cast would disagree with the function it is passed to.
 
 
@@ -4016,8 +3501,6 @@ def parse_public_api_signatures(path: Path) -> Dict[str, List[PublicDecl]]:
                r'\s+\*?\s*(hip[A-Za-z0-9_]+)\s*\(')
     for m in re.finditer(pattern, text):
         name = m.group(1)
-        # Skip template overloads: look back to the end of the previous
-        # statement / preprocessor line for a `template` introducer.
         back = text[max(0, m.start() - 400):m.start()]
         cut  = max(back.rfind(';'), back.rfind('}'), back.rfind('#'))
         if 'template' in back[cut + 1:]:
@@ -4050,7 +3533,6 @@ def validate_playback_signatures(entries: List[ApiEntry],
     checked  = skipped = 0
 
     for e in entries:
-        # Only APIs whose call is generated from table types can be wrong here.
         if (e.reserved or e.table == "compiler"
                 or e.name in MANUAL_PLAYBACK_APIS
                 or e.name in NOOP_PLAYBACK_APIS
@@ -4059,7 +3541,6 @@ def validate_playback_signatures(entries: List[ApiEntry],
             continue
         variants = public.get(e.name)
         if not variants:
-            # Declared in another header (hip_gl_interop.h, _spt wrappers, ...).
             skipped += 1
             continue
         table_types = tuple(_norm_type(p.raw_type, aliases) for p in e.params)
@@ -4103,7 +3584,6 @@ def validate_playback_signatures(entries: List[ApiEntry],
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    # Script lives at projects/hrr/tools/ — resolve the split output layout.
     # The portable header and playback live under projects/hrr; the capture
     # shim stays inside CLR because it compiles into amdhip64.
     tools_dir       = Path(__file__).resolve().parent   # projects/hrr/tools/
@@ -4112,7 +3592,6 @@ def main() -> None:
     clr_root        = projects_dir / "clr"              # projects/clr/
     clr_hrr_dir     = clr_root / "hipamd" / "src" / "hrr"  # capture stays in CLR
     default_input    = clr_root / "hipamd/include/hip/amd_detail/hip_api_trace.hpp"
-    # Playback calls the PUBLIC API, so its declarations are validated too.
     default_public   = projects_dir / "hip/include/hip/hip_runtime_api.h"
     default_header   = hrr_project_dir / "include" / "hrr" / "hrr_api_args.h"
     default_capture  = clr_hrr_dir / "hip_capture_generated.cpp"
@@ -4167,11 +3646,7 @@ def main() -> None:
     log(f"  Found {n_compiler} compiler + {n_runtime} runtime = {len(entries)} total"
         f" ({n_reserved} reserved slots)")
 
-    # -------------------------------------------------------------------------
-    # Cross-validate classification sets against parsed API names.
-    # Entries that don't exist in hip_api_trace.hpp are silent dead weight —
-    # catch them here so a typo or removed API is flagged immediately.
-    # -------------------------------------------------------------------------
+    # Cross-validate classification sets against parsed API names: an entry absent from hip_api_trace.hpp is silent dead weight (typo or removed API).
     parsed_names: Set[str] = {e.name for e in entries}
     unknown: Dict[str, List[str]] = {}
     for set_name, api_set in [
@@ -4194,13 +3669,8 @@ def main() -> None:
                 print(f"  {set_name}: '{n}'")
         sys.exit(1)
 
-    # An API's replay class is exactly one of these sets, and
-    # generate_playback_shim() tests them in this order, so an API in two of
-    # them silently gets the earlier one's handler while the later one's is
-    # left unreachable. That is what a merge resolving a rename against an
-    # edited set literal produces when it keeps an addition but drops the
-    # matching removal, and nothing downstream notices until a replay-class
-    # test disagrees.
+    # An API's replay class is exactly one of these sets, and generate_playback_shim() tests them in this order, so an API in two gets the earlier handler and the later one is unreachable.
+    # A merge that keeps an addition but drops the matching removal produces this, and nothing downstream notices until a replay-class test disagrees.
     replay_classes = [
         ("ERROR_STUB_PLAYBACK_APIS", ERROR_STUB_PLAYBACK_APIS),
         ("UNREPLAYABLE_PLAYBACK_APIS", set(UNREPLAYABLE_PLAYBACK_APIS)),
@@ -4223,9 +3693,7 @@ def main() -> None:
             print(f"  {problem}")
         sys.exit(1)
 
-    # A Deref that names a parameter the API does not have would silently do
-    # nothing, which is indistinguishable from the payload loss it is there to
-    # fix. The same goes for an array whose count parameter does not exist.
+    # A Deref naming a parameter the API lacks does nothing, which is indistinguishable from the payload loss it exists to fix; likewise an array whose count parameter is missing.
     by_api = {e.name: e for e in entries}
     deref_problems: List[str] = []
     for api, specs in sorted(DEREF_FIELDS.items()):
@@ -4270,8 +3738,6 @@ def main() -> None:
             print(f"  '{n}'")
         sys.exit(1)
 
-    # generate_playback_shim() applies the classes in a fixed order, so an API
-    # in two of them silently gets whichever comes first.
     for a_name, a_set, b_name, b_set in [
         ("UNREPLAYABLE_PLAYBACK_APIS", set(UNREPLAYABLE_PLAYBACK_APIS),
          "ERROR_STUB_PLAYBACK_APIS", ERROR_STUB_PLAYBACK_APIS),
@@ -4295,10 +3761,7 @@ def main() -> None:
     log(f"  Generated capture shims:  {len(entries) - n_manual_cap}")
     log(f"  Generated playback shims: {len(entries) - n_manual_play - n_noop_play}")
 
-    # -------------------------------------------------------------------------
-    # Playback calls the public API, not the dispatch table. Refuse to generate
-    # if a playback cast would disagree with the declaration it is passed to.
-    # -------------------------------------------------------------------------
+    # Playback calls the public API, not the table: refuse to generate if a cast would disagree with its declaration.
     if args.skip_public_api_check:
         print("  WARNING: --skip-public-api-check — playback casts are NOT "
               "validated against the public API")
@@ -4330,7 +3793,6 @@ def main() -> None:
     playback_path.write_text(playback_cpp, encoding="utf-8", newline="\n")
     log(f"Written playback -> {playback_path}")
 
-    # Spot-check a few important structs
     if not args.silent:
         _spot_check(entries)
 

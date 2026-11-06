@@ -40,14 +40,6 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, List
 
-# ---------------------------------------------------------------------------
-# Baseline the matrix was authored against.
-#
-# api_classes_baseline.json records the counts the current tree produced when
-# api_matrix.yaml was last reviewed against it.  The tree is the source of
-# truth: when the counts drift, the delta is worth reading before you refresh
-# the baseline.
-# ---------------------------------------------------------------------------
 BASELINE_PATH_NAME = "api_classes_baseline.json"
 
 # This script ships inside rocm-systems, so the checkout it describes is by
@@ -66,10 +58,6 @@ REPLAY_GENERATED = "GENERATED"
 # whatever the generator emitted for them is dead code.
 REPLAY_SPECIAL = "SPECIAL"
 
-# What an observer of a replay can actually distinguish.  NOOP, ERROR_STUB and
-# UNREPLAYABLE each emit a one-time stderr warning of their own; everything else
-# is silent, so from the outside CUSTOM / MANUAL / GENERATED / COMPILER_NOOP are
-# one class.
 OBSERVABLE = {
     REPLAY_UNREPLAYABLE: "UNREPLAYABLE",
     REPLAY_ERROR_STUB: "ERROR_STUB",
@@ -97,15 +85,12 @@ _SCALARISH_POINTEES = {
 
 # normalise_field_type() emits `uint64_t /* <type> */` for anything it does not
 # recognise, which is mostly by-value structs but also catches spellings of
-# plain scalars and enums it has no entry for (`unsigned char`, `enum hipLimit_t`).
-# Those lose nothing — they fit in the uint64_t. Only a genuine composite does.
 _SCALAR_KEYWORDS = re.compile(
     r"\b(char|short|int|long|float|double|signed|unsigned|bool|enum|_Bool)\b")
 
 
 # What this script reads off the generator. Checked once on load so a rename
 # upstream stops the derivation with a message, rather than being papered over
-# by a default that would classify every API as if the feature did not exist.
 REQUIRED_GENERATOR_ATTRS = (
     "UNREPLAYABLE_PLAYBACK_APIS", "ERROR_STUB_PLAYBACK_APIS",
     "NOOP_PLAYBACK_APIS", "CUSTOM_PLAYBACK_BODIES", "MANUAL_PLAYBACK_APIS",

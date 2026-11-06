@@ -83,10 +83,6 @@ DEFAULT_TEST_DIR = DEFAULT_HEADER.parent
 
 # These two files exist only to supply tier workloads, so a workload defined in
 # one of them that no tier names is dead weight: it compiles, it passes when
-# invoked by name, and the APIs it calls are simply never counted. That is how
-# the _spt coverage went missing when those calls were split out of the
-# original families into their own translation unit. Workloads elsewhere are
-# driven by their own roundtrip tests and are not expected to appear in a tier.
 MATRIX_WORKLOAD_SOURCES = ("hrr_api_matrix_workload_test.cc",
                            "hrr_spt_workload_test.cc")
 
@@ -112,9 +108,6 @@ CLASS_CODE = {mc.CLASS_REAL: 0, mc.CLASS_NOOP: 1, mc.CLASS_ERROR_STUB: 2,
               mc.CLASS_UNREPLAYABLE: 5}
 
 # Classes that mean the API ran a real handler and did not come back cleanly.
-# Both are known-broken rather than misclassified, so they report as XFAIL
-# while they stay that way. Once fixed the observed class no longer matches the
-# declaration and the API reports FAIL until api_matrix.yaml is updated.
 BROKEN_CLASSES = (mc.CLASS_HANDLER_ERROR, mc.CLASS_CRASH)
 
 # Placeholder for "two tiers saw this API do different things". Not a class an
@@ -122,9 +115,6 @@ BROKEN_CLASSES = (mc.CLASS_HANDLER_ERROR, mc.CLASS_CRASH)
 CLASS_CONFLICT = "CONFLICT"
 
 
-# ---------------------------------------------------------------------------
-# C++ header generation
-# ---------------------------------------------------------------------------
 
 CXX_HEADER = '''/*
  * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
@@ -274,9 +264,6 @@ def emit_cxx(rows: List[mc.ApiRow], overlay: Dict[str, Any], path: Path) -> None
     ))
 
 
-# ---------------------------------------------------------------------------
-# Observation loading and verdicts
-# ---------------------------------------------------------------------------
 
 def _is_int(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
@@ -344,8 +331,6 @@ def load_observations(results_dir: Path,
                               "by_tier": {}}
     # Matched by tier name rather than by taking every .json and excluding the
     # ones we know about: this directory also holds the matrix report and the
-    # test-coverage sweep's output, and a new neighbour should not have to be
-    # added to an exclusion list to avoid being read as an observation.
     files = [f for f in sorted(results_dir.glob("T*.json"))
              if f.stem in mc.TIER_ORDER]
     if not files:
@@ -403,7 +388,6 @@ def verdict_for(row: mc.ApiRow, observations: Dict[str, Any]) -> Dict[str, Any]:
 
     # Declared as never reaching the archive under its own name. The assertion
     # is the absence: if it starts being captured, HIP's lowering changed and
-    # the matrix should say so rather than quietly gaining a row.
     if not row.expect_captured:
         if captured:
             result["verdict"] = VERDICT_XPASS
@@ -418,15 +402,12 @@ def verdict_for(row: mc.ApiRow, observations: Dict[str, Any]) -> Dict[str, Any]:
         result["verdict"] = VERDICT_NOT_EXERCISED
         # Being captured but unobserved is a different situation from never
         # being called: the workload did reach it, and the replay then stopped
-        # short. Saying so points at the aborting API rather than sending the
-        # reader off to add a call site that already exists.
         result["detail"] = (
             "captured, but the replay stopped before reaching it"
             if observed is None and captured
             else "no workload in this tier called it")
         # A gap the overlay has measured and explained is expected; one it has
         # not is the matrix quietly losing an API, so build_report counts it as
-        # a coverage problem and the run fails.
         if row.unreachable_reason:
             result["expected_gap"] = True
             result["unreachable_group"] = row.unreachable_group
@@ -435,8 +416,6 @@ def verdict_for(row: mc.ApiRow, observations: Dict[str, Any]) -> Dict[str, Any]:
 
     # Declared unreachable, and a tier reached it anyway. Whatever blocked it —
     # a device without image support, a missing SDK declaration, a crash
-    # earlier in the archive — no longer does, so the declaration is stale and
-    # the API now belongs in a tier's assertions.
     if row.unreachable_reason:
         result["verdict"] = VERDICT_XPASS
         result["unreachable_group"] = row.unreachable_group
@@ -448,10 +427,6 @@ def verdict_for(row: mc.ApiRow, observations: Dict[str, Any]) -> Dict[str, Any]:
 
     # A real handler can succeed on one archive's arguments and fail on
     # another's — a pointer it cannot translate, a handle that meant something
-    # only in the capturing process. That is not the API being reclassified, so
-    # the overlay names the tiers where it is known to happen and the report
-    # keeps it as a known failure rather than a contradiction. This applies
-    # whether one tier saw it or several disagreed.
     by_tier = observations["by_tier"].get(row.api, {})
     unexpected = {
         tier: klass for tier, klass in by_tier.items()
@@ -460,7 +435,6 @@ def verdict_for(row: mc.ApiRow, observations: Dict[str, Any]) -> Dict[str, Any]:
     }
     # Only when a tier actually saw the error. A run that did not include the
     # failing tier's workload must report the plain PASS it measured rather
-    # than an XFAIL for something it never observed.
     declared_error = not unexpected and any(
         klass == mc.CLASS_HANDLER_ERROR and tier in row.handler_error_in
         for tier, klass in by_tier.items())
@@ -487,9 +461,6 @@ def verdict_for(row: mc.ApiRow, observations: Dict[str, Any]) -> Dict[str, Any]:
                             f"observed {observed}")
         return result
 
-    # A declared handler error or crash is a known-broken API that is still
-    # broken, which is what XFAIL is for. Once it replays cleanly it no longer
-    # matches the declaration and reports FAIL until the overlay is updated.
     if row.expect_class in BROKEN_CLASSES:
         result["verdict"] = VERDICT_XFAIL
         result["cause"] = ("crash" if row.expect_class == mc.CLASS_CRASH
@@ -500,14 +471,6 @@ def verdict_for(row: mc.ApiRow, observations: Dict[str, Any]) -> Dict[str, Any]:
             else "handler still returns a HIP error at replay")
         return result
 
-    # Declared unreplayable and observed refusing by name. The API is excluded
-    # from replay on purpose and says so at both capture and replay, which is
-    # the contract being asserted — not a gap the matrix is tolerating.
-    #
-    # Checked ahead of payload_loss because an unreplayable API is usually also
-    # one whose arguments do not survive the process boundary — that is why it
-    # is unreplayable. The loss is what XFAIL exists to flag only while it is
-    # silent; here both ends say so out loud, so there is nothing left hidden.
     if row.expect_class == mc.CLASS_UNREPLAYABLE:
         result["verdict"] = VERDICT_PASS
         result["detail"] = ("replay refuses it by name and reason: a declared "
@@ -515,9 +478,6 @@ def verdict_for(row: mc.ApiRow, observations: Dict[str, Any]) -> Dict[str, Any]:
         return result
 
     # Class matches. For a payload-loss API that is not the end of the story:
-    # the handler runs, which is exactly why the loss is invisible. Only a REAL
-    # class has a handler that runs; a NOOP or ERROR_STUB API does nothing with
-    # whatever arguments it was given, so there is no loss to assert on.
     if row.payload_loss and row.expect_class == mc.CLASS_REAL:
         result["verdict"] = VERDICT_XFAIL
         result["cause"] = "payload_loss"
@@ -551,17 +511,10 @@ def build_report(rows: List[mc.ApiRow], overlay: Dict[str, Any],
         bucket = per_tier.setdefault(r["tier"], {v: 0 for v in VERDICT_ORDER})
         bucket[r["verdict"]] += 1
 
-    # Coverage is counted per tier from that tier's own workloads, which is the
-    # same thing the C++ roundtrip asserts and the reason both read one
-    # min_covered. An API its owning tier misses but another tier happens to
-    # reach still gets a verdict — the class is the class, whoever observed it
-    # — but it does not count towards the owner's floor, because the floor is
-    # there to catch that tier's workloads quietly reaching less than before.
     floors = {}
     problems = []
     # A tier that ran must show every workload the overlay gives it. A missing
     # one means a workload failed before it was recorded, and everything only
-    # that workload calls looks unexercised for a reason the floor can miss.
     for tier in sorted(ran_tiers):
         seen = set(observations["tiers"][tier]["workloads"])
         for workload in mc.tier_workloads(overlay, tier):
@@ -578,7 +531,6 @@ def build_report(rows: List[mc.ApiRow], overlay: Dict[str, Any],
             if r["tier"] == tier
             # An API the overlay skips is asserted on by neither side, so it
             # cannot count towards a floor. Excluding it here is what keeps
-            # this number identical to the one the C++ roundtrip prints.
             and r["verdict"] != VERDICT_SKIPPED
             and (tier in observations["by_tier"].get(r["api"], {})
                  # An API declared as never captured is asserted on by the
@@ -596,8 +548,6 @@ def build_report(rows: List[mc.ApiRow], overlay: Dict[str, Any],
 
     # An API in a tier that ran, that nothing reached, and that the overlay
     # does not explain. Left unreported this is how a matrix rots: a workload
-    # stops early, the APIs behind it quietly stop being asserted on, and the
-    # run still says PASS.
     undeclared = [r for r in results
                   if r["verdict"] == VERDICT_NOT_EXERCISED
                   and not r.get("expected_gap")]
@@ -621,9 +571,6 @@ def build_report(rows: List[mc.ApiRow], overlay: Dict[str, Any],
     }
 
 
-# ---------------------------------------------------------------------------
-# Markdown rendering
-# ---------------------------------------------------------------------------
 
 def render_markdown(report: Dict[str, Any], overlay: Dict[str, Any]) -> str:
     out: List[str] = []
@@ -738,7 +685,6 @@ def render_markdown(report: Dict[str, Any], overlay: Dict[str, Any]) -> str:
     return "\n".join(out) + "\n"
 
 
-# ---------------------------------------------------------------------------
 
 def print_summary(rows: List[mc.ApiRow], overlay: Dict[str, Any]) -> None:
     summary = mc.tier_summary(rows)

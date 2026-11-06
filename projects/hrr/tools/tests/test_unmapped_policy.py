@@ -1,5 +1,4 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
-#
 # SPDX-License-Identifier: MIT
 """Every handler leaves an unmapped pointer to the one policy.
 
@@ -24,16 +23,12 @@ TOOLS = Path(__file__).resolve().parent.parent
 GEN = TOOLS / "gen_hrr_api_args.py"
 MANUAL_PLAYBACK = TOOLS.parent / "playback" / "hip_playback.cpp"
 
-# `x = ctx.translate_ptr(...);` followed by a null test of x.
 _OWN_NULL_CHECK = re.compile(
     r"(\w+) = ctx\.translate_ptr\([^;]*\);\s*\n\s*if \(\s*(?:!\1\b|\1 == nullptr)")
-# The start of a top-level function definition in hip_playback.cpp.
 _FUNCTION = re.compile(r"^(?:static\s+)?(?:inline\s+)?[\w:<>*&]+(?:\s+[\w:<>*&]+)*\s+\**(\w+)\(")
 
 # Where a miss is an answer, not a lost pointer: kernel-argument words are
 # pointers only by shape, a guard or release has nothing to do for memory
-# replay never had, and translate_or_materialize notes the miss itself once the
-# region has had its chance.
 LOOKUP_ALLOWED = {
     "decode_kernel_args",
     "hrr_block_guard_relocate",

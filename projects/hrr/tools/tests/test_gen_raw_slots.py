@@ -1,5 +1,4 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
-#
 # SPDX-License-Identifier: MIT
 """An archive integer reaches HIP as a pointer or a handle only
 through translation.
@@ -30,9 +29,7 @@ GEN = TOOLS / "gen_hrr_api_args.py"
 COMMITTED_PLAYBACK = TOOLS.parent / "playback" / "hip_playback_generated.cpp"
 MANUAL_PLAYBACK = TOOLS.parent / "playback" / "hip_playback.cpp"
 
-# `(Type)a->field`: a cast applied directly to a field of the recorded struct.
 _CAST_OF_FIELD = re.compile(r"\((?P<type>[^()]*?)\)\s*a->(?P<field>\w+)")
-# `static_cast<Type>(a->field)` and `reinterpret_cast<Type>(a->field)`.
 _NAMED_CAST_OF_FIELD = re.compile(r"(?:static|reinterpret)_cast<(?P<type>[^<>]*?)>\(\s*a->(?P<field>\w+)\s*\)")
 # A pointer-typed cast of a recorded field in hand-written code: the archive's
 # integer used as an address. Inline `_bytes` arrays are data, not addresses.

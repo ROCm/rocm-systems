@@ -97,9 +97,6 @@ def check_compatibility(base: ApiSchema, current: ApiSchema) -> list[str]:
         if name in current.ids and current.ids[name] != old_id
     )
     current_by_id = {api_id: name for name, api_id in current.ids.items()}
-    # A name present on both sides is already in `moved` when its ID changes.
-    # This is the other direction: the old name is gone and a new name owns
-    # its ID, so an old archive decodes as the new API.
     reused = sorted(
         (name, old_id, current_by_id[old_id])
         for name, old_id in base.ids.items()
