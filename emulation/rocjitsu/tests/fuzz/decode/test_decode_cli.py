@@ -45,6 +45,35 @@ class DecodeCliTest(unittest.TestCase):
             self.assertEqual(process.returncode, 2)
             self.assertIn("exactly 16 bytes", process.stderr)
 
+    def test_rejects_missing_replay(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            process = self.run_decoder(
+                "--input", str(Path(temporary) / "missing.bin"), "--json"
+            )
+            self.assertEqual(process.returncode, 2)
+            self.assertEqual(process.stdout, "")
+            self.assertIn("rj_decode_fuzz: cannot open input:", process.stderr)
+
+    def test_rejects_seed_destination_file(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            destination = Path(temporary) / "seeds"
+            destination.write_bytes(b"keep")
+            process = self.run_decoder("--emit-seeds", str(destination))
+            self.assertEqual(process.returncode, 2)
+            self.assertEqual(process.stdout, "")
+            self.assertIn("seed destination is not a directory:", process.stderr)
+            self.assertEqual(destination.read_bytes(), b"keep")
+
+    def test_reports_seed_filesystem_failure(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary) / "file"
+            parent.write_bytes(b"keep")
+            process = self.run_decoder("--emit-seeds", str(parent / "seeds"))
+            self.assertEqual(process.returncode, 2)
+            self.assertEqual(process.stdout, "")
+            self.assertIn("seed destination:", process.stderr)
+            self.assertEqual(parent.read_bytes(), b"keep")
+
     def test_replay_preserves_concrete_target(self):
         with tempfile.TemporaryDirectory() as temporary:
             sample = Path(temporary) / "gfx1251_only.bin"
