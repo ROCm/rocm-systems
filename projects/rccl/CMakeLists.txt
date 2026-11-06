@@ -702,9 +702,19 @@ elseif (HAVE_KERNARG_PRELOAD AND DISABLE_KERNARG_PRELOAD)
   message(STATUS "Kernarg preloading to SGPR disabled by DISABLE_KERNARG_PRELOAD=ON")
 endif()
 
-check_cxx_compiler_flag("-parallel-jobs=12" HAVE_PARALLEL_JOBS)
-if (HAVE_PARALLEL_JOBS)
-  message(STATUS "Parallel jobs enabled")
+check_cxx_compiler_flag("--offload-jobs=12" HAVE_OFFLOAD_JOBS)
+if (HAVE_OFFLOAD_JOBS)
+  set(RCCL_OFFLOAD_JOBS_FLAG "--offload-jobs")
+else()
+  # ROCm 6.x amdclang only knows the downstream spelling.
+  check_cxx_compiler_flag("-parallel-jobs=12" HAVE_LEGACY_PARALLEL_JOBS)
+  if (HAVE_LEGACY_PARALLEL_JOBS)
+    set(RCCL_OFFLOAD_JOBS_FLAG "-parallel-jobs")
+  endif()
+endif()
+if (RCCL_OFFLOAD_JOBS_FLAG)
+  set(HAVE_PARALLEL_JOBS ON)
+  message(STATUS "Parallel jobs enabled (${RCCL_OFFLOAD_JOBS_FLAG})")
 endif()
 
 ## Disable WARP_SPEED if the build environment is invalid
