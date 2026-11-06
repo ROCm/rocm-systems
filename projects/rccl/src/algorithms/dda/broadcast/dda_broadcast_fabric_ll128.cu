@@ -25,6 +25,7 @@
 constexpr unsigned kDdaLL128BcDefaultThreads = 512;
 
 RCCL_PARAM(DdaLL128BcThreads, "DDA_LL128_BC_THREADS", kDdaLL128BcDefaultThreads);
+RCCL_PARAM(DdaLL128BcFanOut, "DDA_LL128_BC_FANOUT", 0);
 
 namespace {
 
@@ -120,8 +121,8 @@ ncclResult_t ncclBroadcastDdaFabricLL128(const void* sendbuff, void* recvbuff, s
 
   INFO(NCCL_COLL,
        "DDA fabric Broadcast LL128 two-shot: nRanks=%d root=%d bytes=%zu slices=%zu chunkSlices=%zu "
-       "grid=%ux%u block=%u bankSize=%zu",
-       nRanks, root, bytes, slices, cs, grid.x, grid.y, block.x, bank);
+       "grid=%ux%u block=%u bankSize=%zu fanOut=%d",
+       nRanks, root, bytes, slices, cs, grid.x, grid.y, block.x, bank, (int)rcclParamDdaLL128BcFanOut());
 
   const dda::common::DdaKernelParams params{comm->abortFlagDev};
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
@@ -136,7 +137,7 @@ ncclResult_t ncclBroadcastDdaFabricLL128(const void* sendbuff, void* recvbuff, s
     bytes,
     comm->rank, nRanks, root,
     epochDev, epochLen,
-    slices, cs, bank, params);
+    slices, cs, bank, params, (int)rcclParamDdaLL128BcFanOut());
 
   CUDACHECK(cudaGetLastError());
   return ncclSuccess;
