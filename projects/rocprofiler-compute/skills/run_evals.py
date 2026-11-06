@@ -78,15 +78,28 @@ def discover_skills(only: Optional[str]) -> list[Path]:
 
 
 def load_cases(skill: Path) -> list[dict[str, Any]]:
-    """Parse and validate one dataset, erroring on anything malformed."""
-    dataset = json.loads((skill / "evals" / "evals.json").read_text())
-    cases = dataset["evaluations"]
+    """Return the cases from both of a skill's datasets, erroring on bad ones.
 
-    positive = 0
-    negative = 0
-    judged = 0
+    The minimum applies to evals.json only, the one file amd/skills runs.
+    """
+    required = _read_evaluations(skill / "evals" / "evals.json")
+    extended = _read_evaluations(skill / "evals" / "extended_evals.json")
+    cases = required + extended
+    _check_cases(skill, cases)
+    _require_minimum(skill, required)
+    return cases
+
+
+def _read_evaluations(path: Path) -> list[dict[str, Any]]:
+    """Return the evaluations in one dataset file, or none when it is absent."""
+    if not path.is_file():
+        return []
+    return json.loads(path.read_text(encoding="utf-8"))["evaluations"]
+
+
+def _check_cases(skill: Path, cases: list[dict[str, Any]]) -> None:
+    """Exit on the first malformed case."""
     seen: set[str] = set()
-
     for case in cases:
         unknown = set(case) - KNOWN_KEYS
         if unknown:
@@ -102,24 +115,20 @@ def load_cases(skill: Path) -> list[dict[str, Any]]:
         seen.add(case["id"])
         if "workspace" in case and not workspace_dir(skill, case["workspace"]).is_dir():
             sys.exit(f"{skill.name}: {case['id']} names a missing workspace")
-
         if case["skill_should_trigger"]:
-            positive += 1
-            judged += any(case.get(key) for key in JUDGED_KEYS)
-        else:
-            negative += 1
-            extra = set(case) - {"id", "prompt", "skill_should_trigger", "note"}
-            if extra:
-                sys.exit(
-                    f"{skill.name}: {case['id']} is negative but sets {sorted(extra)}"
-                )
+            continue
+        extra = set(case) - {"id", "prompt", "skill_should_trigger", "note"}
+        if extra:
+            sys.exit(f"{skill.name}: {case['id']} is negative but sets {sorted(extra)}")
 
-    if positive < 3 or negative < 2:
+
+def _require_minimum(skill: Path, cases: list[dict[str, Any]]) -> None:
+    """Exit unless the cases meet the minimum amd/skills requires."""
+    positive = [case for case in cases if case["skill_should_trigger"]]
+    if len(positive) < 3 or len(cases) - len(positive) < 2:
         sys.exit(f"{skill.name}: needs at least 3 positive and 2 negative cases")
-    if not judged:
+    if not any(case.get(key) for case in positive for key in JUDGED_KEYS):
         sys.exit(f"{skill.name}: needs at least one positive case with judged behavior")
-
-    return cases
 
 
 def workspace_dir(skill: Path, workspace: str) -> Path:
