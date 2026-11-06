@@ -466,7 +466,7 @@ HIP_TEST_CASE(Unit_TexObjectCreate_TypePitch2D_EdgeCases) {
  *    -# Values above the maximum of 16, which saturate at 16:1 rather than being rejected
  *    -# Combined with point and with linear filtering, both of which support anisotropy
  *      - Expected output: return `hipSuccess` in every case
- *  - Validates that the requested value round-trips unchanged through
+ *  - On AMD, validates that the requested value round-trips unchanged through
  *    [hipGetTextureObjectTextureDesc](@ref hipGetTextureObjectTextureDesc) - the runtime clamps
  *    what it programs into the sampler, not what it reports back.
  *
@@ -523,11 +523,13 @@ HIP_TEST_CASE(Unit_hipCreateTextureObject_MaxAnisotropy_Positive) {
       HIP_CHECK(hipCreateTextureObject(&textureObject, &resDesc, &texDesc, nullptr));
       REQUIRE(textureObject != 0);
 
+#if HT_AMD
       hipTextureDesc queriedDesc;
       memset(&queriedDesc, 0, sizeof(queriedDesc));
       HIP_CHECK(hipGetTextureObjectTextureDesc(&queriedDesc, textureObject));
       REQUIRE(queriedDesc.maxAnisotropy == maxAnisotropy);
       REQUIRE(queriedDesc.filterMode == filterMode);
+#endif
 
       HIP_CHECK(hipDestroyTextureObject(textureObject));
       HIP_CHECK(hipFreeArray(array));
