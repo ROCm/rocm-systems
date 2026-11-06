@@ -27,8 +27,8 @@
 # asked to collect OMPT and declines it otherwise, so a user profiling with rocprofv3 can
 # still run their own OMPT tool (TAU, Score-P) by leaving --ompt-trace off. Every case
 # here runs the same workload against the same stand-in tool, built in
-# tests/bin/openmp/openmp-tools-coexist, and differs only in how that tool reaches the
-# runtime and what the rocprofv3 command line asks for:
+# tests/bin/openmp/coexist, and differs only in how that tool reaches the runtime and what
+# the rocprofv3 command line asks for:
 #
 # In the keep and defer cases the tool is offered through OMP_TOOL_LIBRARIES, which the
 # runtime consults only once no loaded library has claimed the role. rocprofv3 is asked
@@ -66,7 +66,7 @@ if("${ompt-coexist-gpu-0-gfx-info}" MATCHES "^gfx(10|11|12)[0-9][0-9]$")
 endif()
 
 # the workload and the stand-in tool are both required
-if(NOT TARGET openmp-target OR NOT TARGET openmp-tools-coexist-mock)
+if(NOT TARGET openmp-target OR NOT TARGET openmp-coexist-mock)
     set(IS_DISABLED ON)
 endif()
 
@@ -85,7 +85,7 @@ set(ompt-coexist-base-env
 # loaded library claims the role. Offering the stand-in tool through it is what makes the
 # keep and defer cases differ in outcome rather than in setup.
 set(ompt-coexist-env ${ompt-coexist-base-env}
-                     "OMP_TOOL_LIBRARIES=$<TARGET_FILE:openmp-tools-coexist-mock>")
+                     "OMP_TOOL_LIBRARIES=$<TARGET_FILE:openmp-coexist-mock>")
 
 # ---- keep: --ompt-trace, so rocprofv3 holds the OMPT tool role -----------------------
 set(ompt-coexist-keep-output-dir ${CMAKE_CURRENT_BINARY_DIR}/ompt-coexist-keep)
@@ -190,7 +190,7 @@ rocprofiler_add_integration_validate_test(
 # tests are disabled under sanitizers, so this does not contend with the sanitizer
 # ROCPROF_PRELOAD built above.)
 set(ompt-coexist-deferback-env ${ompt-coexist-base-env} "COEXIST_MOCK_MODE=defer"
-                               "ROCPROF_PRELOAD=$<TARGET_FILE:openmp-tools-coexist-mock>")
+                               "ROCPROF_PRELOAD=$<TARGET_FILE:openmp-coexist-mock>")
 
 # asked for OMPT: accepting the hand-back must collect it
 set(ompt-coexist-deferback-output-dir ${CMAKE_CURRENT_BINARY_DIR}/ompt-coexist-deferback)
