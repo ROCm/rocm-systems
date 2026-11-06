@@ -104,10 +104,8 @@ launch statistics, so it also shows which operators are worth opening.
 
 The Triton equivalent is `--list-operators triton`.
 
-`--list-operators user` lists each user-defined ROCTx region. A framework
-match keeps that backend's in-scope descendants and drops children of
-other backends. A user-defined ROCTx region match keeps the full subtree,
-including nested framework work.
+`--list-operators user` lists each user ROCTx region with everything that
+ran inside it.
 
 ## 4. Filter to an operator
 
@@ -119,17 +117,16 @@ rocprof-compute analyze \
 
 Patterns are shell-style globs, not regexes, matched against a `/`-separated
 operator hierarchy. `*relu*` contains relu, `*/aten::addmm` is an addmm leaf
-on the reconstructed path. Several patterns can be given, space-separated;
-a piece with no framework stays on the preceding one. Bare
-`--operator` or `**` matches everything.
+on the reconstructed path. Several patterns can be given. A pattern without
+a prefix uses the prefix before it. Bare `--operator` or `**` matches
+everything.
 Quote patterns so the shell does not expand them.
 
 `--operator 'triton:*rmsnorm_kernel*'` works the same way.
 
-`--operator 'user:*UserDefined*'` selects matching user-defined ROCTx regions
-and includes everything in that region. A framework pattern given with
-`user:` adds those matching operators; it does not cut work out of the
-user-defined ROCTx region.
+`--operator 'user:*UserDefined*'` selects matching user ROCTx regions with
+everything inside them. Other patterns in the same command add operators.
+They never remove anything from a selected region.
 
 Worked examples are in the PyTorch operator analysis section of
 [the analyze CLI guide](../../docs/how-to/analyze/cli.rst).

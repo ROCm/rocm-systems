@@ -787,11 +787,8 @@ PyTorch operator analysis
    use ``rocprof-compute analyze ... --experimental`` with
    ``--list-operators torch`` or ``--operator`` as needed.
 
-These options work only with the default ``--output-format stdout``. If you
-combine ``--list-operators`` with ``--operator``, rocprof-compute
-lists operators for the chosen ``--list-operators`` values and ignores the
-``--operator`` filter. ``--list-operators`` and ``--operator`` apply to
-all workload paths provided.
+If you pass both ``--list-operators`` and ``--operator``, rocprof-compute
+lists the operators and ignores ``--operator``.
 
 
 List all operators
@@ -862,12 +859,13 @@ line ``Operator summary: (no operators with recorded dispatches)``.
 Filtering by Operator
 ---------------------
 
-``--operator`` selects operators with shell-style glob patterns.
-``FW:PATTERN`` limits matching to that framework. A later piece with no
-framework stays on the preceding one. A piece before any framework matches
-all collected nodes. A pattern can match an operator's
-name or its full call path, such as ``nn.Module.Net.forward/aten::addmm``.
-Matching is case-sensitive. Spaces separate patterns.
+``--operator`` selects operators with shell-style glob patterns. Matching is
+case-sensitive. A pattern can match an operator's name or its full call path,
+such as ``nn.Module.Net.forward/aten::addmm``.
+
+A prefix limits a pattern to one framework, as in ``torch:*relu*``. A pattern
+without a prefix uses the prefix before it. If no prefix comes before it, the
+pattern matches every traced framework and user ROCTx regions.
 
 * **Wildcard** — ``*relu*`` matches any operator whose name contains ``relu``.
 * **Call path** — ``*/aten::addmm`` matches ``aten::addmm`` when another
@@ -891,17 +889,17 @@ These options do not change the printed operator tree. Kernel IDs depend on
 
 .. code-block:: shell-session
 
-   # Framework-scoped match
+   # Match PyTorch operators only
    $ rocprof-compute analyze --experimental --operator 'torch:*relu*' --path ./workload
 
-   # Path match before any framework (all collected nodes)
-   $ rocprof-compute analyze --experimental --operator "*/aten::addmm" --path ./workload
+   # Match a call path in every traced framework
+   $ rocprof-compute analyze --experimental --operator '*/aten::addmm' --path ./workload
 
-   # Match all collected operators (no arguments)
+   # Match every operator (no arguments)
    $ rocprof-compute analyze --experimental --operator --path ./workload
 
-**Filter multiple operators.** ``*relu*`` stays on torch until ``triton:``
-starts the next selector:
+**Filter multiple operators.** Here ``*relu*`` uses the ``torch:`` prefix
+before it:
 
 .. code-block:: shell-session
 
@@ -909,17 +907,18 @@ starts the next selector:
        --operator 'torch:*conv*' '*relu*' 'triton:*matmul*' --path ./workload
 
 
-User-defined ROCTx regions
---------------------------
+User ROCTx regions
+------------------
 
-``user`` selects a user-defined ROCTx region, not an ML API. A framework
-match keeps that backend's in-scope descendants and drops children of
-other backends. A user-defined ROCTx region match keeps the full subtree,
-including nested framework work. Work outside that region is ignored.
+Every ``--trace-ml-api`` run also records the ROCTx ranges that your
+application adds. The ``user`` prefix selects them.
 
-``--list-operators user`` and ``--operator user:PATTERN`` use that rule.
-A framework pattern given with ``user:`` adds those matching
-operators; it does not cut work out of the user-defined ROCTx region.
+``--list-operators user`` lists each user ROCTx region with everything that
+ran inside it. ``--operator 'user:PATTERN'`` selects the regions whose name
+matches PATTERN. The result includes all operators and kernels inside each
+region. A framework pattern such as ``torch:*relu*`` keeps only that
+framework's operators below a match. Other patterns in the same command add
+more operators. They never remove anything from a selected region.
 
 .. code-block:: shell-session
 
@@ -935,7 +934,7 @@ operators; it does not cut work out of the user-defined ROCTx region.
 Triton operator analysis
 ========================
 
-The same ``--list-operators`` and ``--operator`` flags take a ``triton``
-selector: ``--list-operators triton`` and ``--operator 'triton:*rmsnorm_kernel*'``.
 After profiling with ``--experimental --trace-ml-api triton`` (see
-:ref:`triton-trace`), those keep nodes whose backend is ``triton``.
+:ref:`triton-trace`), use ``--list-operators triton`` and
+``--operator 'triton:PATTERN'``, such as ``--operator 'triton:*rmsnorm_kernel*'``.
+They show only Triton kernels.

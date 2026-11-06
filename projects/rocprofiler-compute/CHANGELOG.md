@@ -58,15 +58,13 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * `--block` 30 metric IDs (e.g. 30.1.7) now refer to different metrics following the removal of unnecessary gfx950 Memory Bandwidth Analysis metrics.
 
-* Replaced the ML API tracing flags with `--trace-ml-api torch triton`, `--list-operators torch`, and `--operator 'torch:*conv*'`.
-
-* User-defined ROCTx regions are included with every `--trace-ml-api` run.
-
-* `--operator 'user:PATTERN'` selects a user ROCTx region with all the operators and kernels inside it.
-
-* `--trace-ml-api triton` does not capture Triton kernels from `torch.compile`; use `--trace-ml-api torch`.
-
-* Older workloads still support counter analysis; profile again with `--trace-ml-api` to use `--list-operators` or `--operator`.
+* The experimental ML API tracing now uses one set of options for all frameworks.
+  * Profile with `--trace-ml-api`, for example `--trace-ml-api torch triton`. With no values, it traces every supported framework.
+  * `--trace-ml-api` now also traces user ROCTx regions.
+  * List the traced operators and user ROCTx regions with `--list-operators`, for example `--list-operators torch user`.
+  * Filter them with `--operator`, for example `--operator 'torch:*conv*'`. A `user:` pattern selects a user ROCTx region with all the operators and kernels inside it.
+  * Operator call trees now show each operator's arguments.
+  * `--trace-ml-api triton` does not capture the Triton kernels that `torch.compile` generates. Use `--trace-ml-api torch` for those kernels.
 
 ### Removed
 
@@ -95,7 +93,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Removed support for the gfx940 and gfx941 architectures (MI300A A0 and MI300X A0). MI300A and MI300X on gfx942 remain supported.
 
-* Removed the experimental `--torch-trace`, `--triton-trace`, `--ml-api-trace`, `--list-torch-operators`, `--list-triton-operators`, `--torch-operator`, and `--triton-operator` options.
+* Removed the experimental `--torch-trace`, `--triton-trace`, `--ml-api-trace`, `--list-torch-operators`, `--list-triton-operators`, `--torch-operator`, and `--triton-operator` options. Use `--trace-ml-api`, `--list-operators`, and `--operator` instead.
 
 ### Optimized
 

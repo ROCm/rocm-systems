@@ -984,7 +984,7 @@ Limitations
 
 The Torch trace feature currently has the following limitations:
 
-* Torch trace is experimental. Use ``rocprof-compute profile ... --experimental --trace-ml-api torch`` and ``rocprof-compute analyze ... --experimental`` with ``--list-operators torch`` or ``--operator`` as needed.
+* Torch trace is experimental. Pass ``--experimental`` to both the profile and analyze commands.
 
 * The ``--trace-ml-api torch`` option requires the application to be a Python command or Python script.
 
@@ -1042,12 +1042,11 @@ Example:
            return x
 
 **Analyzing captured operators**: After profiling, use the analyze CLI (see
-:doc:`../analyze/cli`) to list and filter by operator name. Filtering
-(``--operator``) accepts shell-style glob patterns, optionally prefixed with
-a framework such as ``torch:`` or ``triton:``. A pattern can match an operator
-name or its call path (for example ``--operator 'torch:*relu*'`` or ``'*/aten::addmm'``).
-Spaces separate patterns. A piece with no framework stays on the
-preceding one. To select all operators, pass no arguments or ``**``.
+:doc:`../analyze/cli`) to list and filter operators. ``--operator`` takes
+shell-style glob patterns, such as ``--operator 'torch:*relu*'`` or
+``--operator '*/aten::addmm'``. A pattern can match an operator name or its
+call path. A ``torch:`` or ``triton:`` prefix limits a pattern to that
+framework. To select all operators, pass no arguments or ``**``.
 
 Combining Torch operator with other options
 -------------------------------------------
@@ -1085,7 +1084,7 @@ for them. They appear under the ``torch.compile`` call in the operator tree.
    Triton trace is currently an experimental feature. You must pass
    ``--experimental`` to both **profile** and **analyze** commands when using the
    Triton trace related options (``--trace-ml-api triton`` for profile;
-   ``--list-operators triton`` and ``--operator triton:PATTERN`` for analyze).
+   ``--list-operators triton`` and ``--operator 'triton:PATTERN'`` for analyze).
 
 Requirements
 ------------
@@ -1111,21 +1110,19 @@ To enable Triton kernel mapping, use ``--experimental`` with the
    $ rocprof-compute profile --experimental --trace-ml-api torch triton --name torch_triton_net -- python torch_triton_net.py
 
 Each captured operator records which framework it came from, so you can
-analyze each framework separately. To enable all supported backends at once,
-use :ref:`--trace-ml-api <ml-api-trace>`.
+analyze each framework separately. To trace every supported framework at once,
+pass :ref:`--trace-ml-api <ml-api-trace>` with no values.
 
 To analyze the captured Triton kernels, use ``--list-operators triton`` and
-``--operator triton:PATTERN`` in analyze mode (see :doc:`../analyze/cli`).
+``--operator 'triton:PATTERN'`` in analyze mode (see :doc:`../analyze/cli`).
 
 .. _ml-api-trace:
 
 ML API trace
 ============
 
-``--trace-ml-api`` with no selector traces all supported ML frameworks
-and user-defined ROCTx regions.
-User-defined ROCTx regions are included with every ``--trace-ml-api`` run.
-``--trace-ml-api user`` is not a valid value.
+``--trace-ml-api`` without values traces every supported ML framework.
+Every ``--trace-ml-api`` run also records user ROCTx regions.
 
 .. warning::
 
@@ -1136,11 +1133,12 @@ User-defined ROCTx regions are included with every ``--trace-ml-api`` run.
 
    $ rocprof-compute profile --experimental --trace-ml-api --name torch_triton_net -- python torch_triton_net.py
 
-The output is identical to enabling each named selector individually.
-Each kernel is attributed to the framework that launched it. Analyze with
-``--list-operators`` and ``--operator`` (see :doc:`../analyze/cli`).
-To select a user-defined range and the GPU work nested under it, use
-``--list-operators user`` or ``--operator user:PATTERN``.
+The output is the same as naming every framework, as in
+``--trace-ml-api torch triton``. Each kernel is attributed to the framework
+that launched it. Analyze the results with ``--list-operators`` and
+``--operator`` (see :doc:`../analyze/cli`). To select a user ROCTx region and
+the GPU work inside it, use ``--list-operators user`` or
+``--operator 'user:PATTERN'``.
 
 .. _profile-vllm-workloads:
 
