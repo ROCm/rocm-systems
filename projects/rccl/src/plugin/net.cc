@@ -297,13 +297,10 @@ static void initPluginLibsOnceFunc() {
   const char* envNetPlugin = nullptr;
   char* envNetPluginList = nullptr;
   char* savePtr = nullptr;
-  // "none" and an empty value only opt out of external plugins; they must not disable the internal AINIC path
-  bool extNetPluginRequested = false;
   envNetPlugin = ncclGetEnv("NCCL_NET_PLUGIN");
   if (envNetPlugin) {
     INFO(NCCL_ENV | NCCL_NET, "NCCL_NET_PLUGIN set by environment to %s", envNetPlugin);
     if (strcasecmp(envNetPlugin, "none") == 0) envNetPlugin = "";
-    extNetPluginRequested = (envNetPlugin[0] != '\0');
     envNetPluginList = strdup(envNetPlugin);
     // Iterate over list until the list is empty
     netPluginName = strtok_r(envNetPluginList, ",", &savePtr);
@@ -338,16 +335,12 @@ static void initPluginLibsOnceFunc() {
 
   // Add 2 internal ib and socket plugins
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  {
-    const char* envNet = rcclCanonicalNetName(ncclGetEnv("NCCL_NET"));
-    if ((envNet && strcasecmp(envNet, "IB-CAST") == 0 && !extNetPluginRequested) ||
-        (!envNet && rcclUseAinic() && !extNetPluginRequested)) {
-      ncclNetPluginRegisterInternal(&pluginCounter, &netIbCast, 0);
-    } else {
+  if (rcclInternalNetIsIbCast()) {
+    ncclNetPluginRegisterInternal(&pluginCounter, &netIbCast, 0);
+  } else {
 #endif
-      ncclNetPluginRegisterInternal(&pluginCounter, &ncclNetIb, 0);
+    ncclNetPluginRegisterInternal(&pluginCounter, &ncclNetIb, 0);
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-    }
   }
 #endif
   ncclNetPluginRegisterInternal(&pluginCounter, &ncclNetSocket, 0);
