@@ -31,7 +31,7 @@ For every arch in src/rocprof_compute_soc/metric_library/, check that:
      peak is its metric's "peak" or "peak_empirical" and each library peak is shown by
      a row, the library's counters equal detect_counters() for those panels, and the
      variables equal get_build_in_vars(); each set of profile_configs/sets is a library
-     set (except SETS_WITHOUT_METRICS) that collects the same counters as `--set`.
+     set (except SETS_WITHOUT_METRICS) that collects the same counters as its rows.
      Check 8 is temporary; see "Equivalence with analysis_configs" below.
 """
 
@@ -144,7 +144,7 @@ EXPRESSION_FIELDS = ("formula", *METRIC_OPTIONAL_FIELDS)
 SET_FIELDS = ("title", "metrics")
 SET_OPTION_RE = re.compile(r"^[a-z][a-z0-9]*(_[a-z0-9]+)*$")
 # Sets of profile_configs/sets with no library set, by arch: no row of the set shows an
-# equation on the arch, so `--set` collects only the normalization counters. gfx908 has
+# equation on the arch, so its rows select only the normalization counters. gfx908 has
 # no MFMA counters.
 SETS_WITHOUT_METRICS = {"gfx908": ("compute_thruput_flops",)}
 # Ids allowed to share another id's formula (id -> that id): the same counters bounded
@@ -1090,16 +1090,15 @@ def _make_soc(
     arch: str,
     membw_analysis: bool,
     filter_blocks: Sequence[str] = (),
-    set_selected: Optional[str] = None,
 ) -> OmniSoC_Base:
     """Return an OmniSoC_Base that reads analysis_dir without a GPU (16 L2 channels),
-    with filter_blocks as the --block option and set_selected as the --set option."""
+    with filter_blocks as the --block option."""
     args = SimpleNamespace(
         config_dir=analysis_dir,
         filter_blocks=list(filter_blocks),
         membw_analysis=membw_analysis,
         roof_only=False,
-        set_selected=set_selected,
+        set_selected=None,
     )
     machine_specs = SimpleNamespace(
         gpu_arch=arch,
@@ -1167,10 +1166,11 @@ def _counter_errors(arch: str, library: MetricLibrary, analysis_dir: Path) -> Li
 def _set_counter_errors(
     arch: str, library: MetricLibrary, analysis_dir: Path
 ) -> List[str]:
-    """Compare each library set with `--set` on profile_configs/sets."""
+    """Compare each library set with the rows of its profile_configs/sets set."""
     gpu_series = _gpu_series(arch)
     without_metrics = SETS_WITHOUT_METRICS.get(arch, ())
-    shipped = set(parse_sets_yaml(_member_arch(arch)))
+    shipped_sets = parse_sets_yaml(_member_arch(arch))
+    shipped = set(shipped_sets)
     # Every collection includes the normalization counters.
     no_metric_counters, _ = extract_counters_and_variables("", gpu_series)
     errors = []
@@ -1181,10 +1181,9 @@ def _set_counter_errors(
             f"extra {sorted(set(library.sets) - shipped)}"
         )
     for set_option in sorted(shipped & {*library.sets, *without_metrics}):
-        soc = _make_soc(
-            analysis_dir, _member_arch(arch), False, set_selected=set_option
-        )
-        expected, _ = soc.detect_counters()
+        soc = _make_soc(analysis_dir, _member_arch(arch), False)
+        rows = [next(iter(row)) for row in shipped_sets[set_option]["metric"]]
+        expected = soc.counters_for_blocks(rows)
         if set_option in without_metrics:
             if expected - no_metric_counters or set_option in library.sets:
                 errors.append(
