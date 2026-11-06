@@ -1309,7 +1309,8 @@ peer access from another process), the copy will operate on uninitialised memory
 ### `hipMallocManaged` — Unified Memory Not Validated
 
 Managed memory allocations are tracked in `alloc_map` and translated like any other
-device pointer. However the capture layer does not snapshot managed memory contents
+device pointer. Because the runtime may back them from host memory, replay charges
+their padded size to `--max-host-bytes` until `hipFree`. However the capture layer does not snapshot managed memory contents
 at any point. D2H validation blobs cover only explicitly synchronised
 `hipMemcpy`-family calls; data accessed by the CPU directly through a managed pointer
 is never captured.
@@ -1651,7 +1652,9 @@ handle-*creating* APIs — `hipHostRegister`, `hipHostGetDevicePointer`, `hipHos
 (finding H6), restoring symmetry with their already-ordered destroy/free counterparts.
 Under `--multi-thread`, a cross-thread consumer (e.g. `hipMemMap`) can no longer
 dispatch before the create populates the translation map and silently
-`return hipSuccess` while skipping the mapping.
+`return hipSuccess` while skipping the mapping. `hipMemMap` and `hipMemUnmap` are
+ordered too: a host-located handle's `--max-host-bytes` charge is held until its
+last mapping goes, so the map count must follow capture order.
 
 ### Validation-Fidelity Caveats
 
