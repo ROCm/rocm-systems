@@ -5056,11 +5056,13 @@ struct SelfPairBudgetScene {
     budget.inArgsBytes = c->workArgsBytes - sizeof(struct ncclDevKernelArgs);
     budget.outArgsBytes = c->workFifoBytes / 2;
   }
+  // Splits into one 16 KiB minimum part per channel at 256 channels; the host path never reads the buffers.
+  static constexpr size_t kBytes = 4 << 20;
   static void initTask(ncclTaskP2p* task, ncclFunc_t func, char* buf) {
     task->func = func;
     task->collAPI = func;
     task->buff = buf;
-    task->bytes = 64;
+    task->bytes = kBytes;
   }
   ncclResult_t Schedule(std::string* log) {
     int epoch = 0;
@@ -5079,8 +5081,7 @@ TEST_F(EnqueueMicrotest, ScheduleP2pTasksToPlan_SelfPair256ChannelsDefaultArgs_S
   ASSERT_EQ(ncclSuccess, sc.Schedule(&log)) << log;
   EXPECT_EQ(0, sc.bp.c()->planner.nTasksP2p) << "the pair must leave the planner in this plan";
   EXPECT_EQ(ssize_t(sizeof(struct ncclDevWorkP2p)), ssize_t(sc.bp.p()->workBytes));
-  EXPECT_GE(sc.bp.p()->nWorkBatches, 1);
-  EXPECT_LE(sc.bp.p()->nWorkBatches, 256) << "at most one batch per channel part";
+  EXPECT_EQ(256, sc.bp.p()->nWorkBatches) << "one batch per channel part";
 }
 
 TEST_F(EnqueueMicrotest, ScheduleP2pTasksToPlan_RoundDoesNotFitEmptyPlan_IsInvalidUsage) {
@@ -5098,6 +5099,7 @@ TEST_F(EnqueueMicrotest, ScheduleP2pTasksToPlan_RoundExactlyFillsEmptyPlan_Sched
   std::string log;
   ASSERT_EQ(ncclSuccess, sc.Schedule(&log)) << log;
   EXPECT_EQ(0, sc.bp.c()->planner.nTasksP2p);
+  EXPECT_EQ(256, sc.bp.p()->nWorkBatches);
 }
 
 TEST_F(EnqueueMicrotest, ScheduleP2pTasksToPlan_RoundDoesNotFitPartialPlan_DefersToNextPlan) {
