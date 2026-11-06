@@ -30,6 +30,7 @@
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/plugins/memory_access_observation.h"
+#include "util/except.h"
 #include "util/log.h"
 
 #include <algorithm>
@@ -39,7 +40,6 @@
 #include <limits>
 #include <memory>
 #include <span>
-#include <stdexcept>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -127,6 +127,8 @@ std::string_view instruction_execution_error_name(InstructionExecutionError erro
     return "instruction decode failure";
   case InstructionExecutionError::PluginFailure:
     return "plugin failure";
+  case InstructionExecutionError::GwsFailure:
+    return "GWS failure";
   }
   return "unknown instruction execution error";
 }
@@ -584,7 +586,7 @@ void ComputeUnitCore::handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome ou
   abort_dispatch(wf.dispatch_id());
 }
 
-void ComputeUnitCore::fail_gws_wait(Wavefront &wf, std::string_view reason) {
+void ComputeUnitCore::fail_gws_wait(Wavefront &wf, const char *reason) {
   util::Logger::warn(reason, ": process=", wf.process_id(), " queue=", wf.queue_id(),
                      " dispatch=", wf.dispatch_id(), " cu=", name(), " wave=", wf.wf_id(),
                      " resource=", wf.gws_wait_rid_, " pc=", std::format("{:#x}", wf.pc),
@@ -599,13 +601,19 @@ void ComputeUnitCore::fail_gws_wait(Wavefront &wf, std::string_view reason) {
   }
   if (cp_ && engine())
     pending_execution_failures_.push_back({wf.queue_id(), wf.process_id(), std::string(reason)});
+  const uint64_t failure_pc = wf.pc;
+  const auto prior_error = wf.instruction_execution_error();
+  const char *prior_detail = wf.instruction_execution_error_detail();
   abort_dispatch(dispatch_id);
-  if (!cp_ || !engine()) {
-    if (engine())
-      engine()->request_exit(std::string(reason), 1);
-    else if (!pm4_failed)
-      throw std::runtime_error(std::string(reason));
-  }
+  // Cancellation resets the slot. Retain the failure on the original wave so
+  // standalone callers can inspect it until the slot is dispatched again.
+  wf.pc = failure_pc;
+  wf.report_instruction_execution_error(
+      prior_error == InstructionExecutionError::None ? InstructionExecutionError::GwsFailure
+                                                     : prior_error,
+      prior_error == InstructionExecutionError::None ? reason : prior_detail);
+  if (!cp_ && engine())
+    engine()->request_exit(std::string(reason), 1);
 }
 
 void ComputeUnitCore::maybe_reset_lds_alloc() {
@@ -2297,7 +2305,12 @@ template <bool EnableAsync>
       execute_instruction(inst, *active, &execution_failure_detail);
 
   if (execution_result.failed()) [[unlikely]] {
-    fail_current_instruction();
+    // GWS rejection already cancels the dispatch and publishes its failure.
+    // Its retained error belongs to the halted slot, whose identity was reset.
+    if (active->is_halted())
+      return_decoded.discard();
+    else
+      fail_current_instruction();
     return IssueOutcome::Issued;
   }
 
