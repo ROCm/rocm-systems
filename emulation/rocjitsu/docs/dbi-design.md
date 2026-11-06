@@ -51,7 +51,7 @@ seven target/wave modes; hardware and simulator coverage must be distinguished.
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-The orchestrator owns the multi-stage pipeline. All per-site validation and builder output is *preflighted* before the patcher mutates anything — a late failure (e.g. branch-range overflow) cannot leak a half-built ELF.
+The orchestrator owns the multi-stage pipeline. It builds a private candidate and publishes ELF bytes and site maps only after validation, code emission, layout, and resource updates succeed. A late failure (e.g. branch-range overflow) returns diagnostics without publishing a partial image.
 
 ---
 
@@ -59,7 +59,7 @@ The orchestrator owns the multi-stage pipeline. All per-site validation and buil
 
 **Files:** `code/patch/instrumentor.h`, `code/patch/instrumentor.cpp`
 
-The Instrumentor is the top-level orchestrator. Callers queue `InstrumentationPoint`s (requests) and then invoke `patch()`. The orchestrator validates each anchor, plans and builds a trampoline per site, then applies the original-text anchor changes through a checked-edit transaction before appending the local cave.
+The Instrumentor is the top-level orchestrator. Callers queue `InstrumentationPoint`s (requests) and then invoke `patch()`. The orchestrator validates each anchor, plans and builds a trampoline per site, then checks and applies the original-text anchor batch before appending the local cave. The checked operation borrows the source, decoded boundaries, decoder, and patcher already owned by this observation call.
 
 ### Pipeline stages
 
@@ -72,7 +72,7 @@ ResolvedInstrumentationSite -- one validated anchor + snapshot of the
       |  make_trampoline_plan() + TrampolineBuilder::build()
       v
 (preflight: per-site plan + built bytes, accumulated locally)
-      |  shared checked-edit batch on original text
+      |  local checked-edit batch on original text
       |  append probes/stub/trampolines, then replace_text()
       |  (KernelEntry callbacks retarget only the entry-stub branch)
       v
@@ -87,9 +87,9 @@ ConSan uses this orchestrator for its compiled probe calls. See
 [Extending ConSan](consan.md#extending-consan) for the ownership boundary and
 current limits.
 
-- Source-derived decoding: a concrete ELF target selects its concrete decoder features; recognized legacy ELF identities retain the existing architecture policy. A conflicting caller architecture is rejected. CFG construction is lazy and uses `BasicBlock::build`. The checked-edit backend reuses its full-section instruction, clause, and direct-reference index after verifying complete coverage.
-- `validate_points()` looks up the decoded `Instruction` at each requested `anchor_offset` and runs `validate_anchor()`. All-or-nothing today: any per-site failure empties `sites` and reports diagnostics in `errors`. Full structural edit admission runs when `patch()` has constructed every anchor replacement; its failures also expose `edit_error` with a category and text-relative offset.
-- `patch()` builds trampolines, then commits their original-text anchor replacements together through the checked backend. The transaction checks expected bytes, complete instruction extents, replacement encoding, clauses, overlap, and references into edited instruction interiors before changing the private text buffer. `KernelEntry` callbacks retarget the entry-stub branch without adding original-text edits. The orchestrator appends copied probe bodies, the entry stub, and trampolines, then grows the section in one `CodeObjectPatcher::replace_text()` call. It returns ELF bytes, diagnostics, production site maps, and planned resources.
+- Source-derived decoding: a concrete ELF target selects its concrete decoder features. Without a concrete target binding, the caller's architecture supplies the decoder; a recognized conflicting ELF architecture is rejected. CFG construction is lazy and uses `BasicBlock::build`. The checked batch uses this same decoder selection and the existing full-section instruction, clause, and direct-reference index after verifying complete coverage. It does not introduce a second target-admission policy.
+- `validate_points()` looks up the decoded `Instruction` at each requested `anchor_offset` and runs `validate_anchor()`. All-or-nothing today: any per-site failure empties `sites` and reports diagnostics in `errors`. Success establishes per-site eligibility, not that the final patch will succeed: batch, reference, and layout checks still run during `patch()`. Checked-edit failures also expose `edit_error` with a category and text-relative offset; the diagnostic types do not expose the private writer.
+- `patch()` builds trampolines, then checks their original-text anchor replacements together. The local transaction checks expected bytes, complete instruction extents, replacement encoding, clauses, overlap, and the collected references described under [Checked edits](#checked-edits-codepatchchecked_text_editsh) before changing the private text buffer. Existing kernel descriptor entries are supplied by observation resolution. `KernelEntry` callbacks retarget the entry-stub branch without adding original-text edits. The orchestrator appends copied probe bodies, the entry stub, and trampolines, then grows the section in one `CodeObjectPatcher::replace_text()` call. It returns ELF bytes, diagnostics, production site maps, and planned resources.
 - `patch_with_debug_summaries()` is a test/debug entry point returning `InstrumentedCodeObjectDebug` (extends `InstrumentedCodeObject` with per-site `InstrumentationPatch` summaries — schema unstable; production callers use `patch()` and its `InstrumentedSite` maps).
 - Single-attempt: both entry points share one budget. After `patched_ = true`, subsequent calls return a fatal error. Recoverable errors require constructing a new Instrumentor.
 
@@ -259,16 +259,31 @@ layout DBT uses) rather than a separate section, so cave offsets are plain
 
 ### Checked edits (`code/patch/checked_text_edits.h`)
 
-This private backend binds structural facts to the immutable source and checks
-all original-text anchor edits before writing the orchestrator's local assembly
-buffer. It retains full-text direct branch references, symbol endpoints, and
-raw symbol-less RELATIVE64 destinations, including complete relocation records
-before a partial tail. An interior reference makes an anchor edit unsafe even
-when it comes from an unreachable instruction. References at retained boundaries
-and unrelated or nonallocated relocation storage follow the existing shared
-policy. The backend reuses the existing patcher's ELF queries and does not emit
-an intermediate ELF merely to recover edited text. It is not a second public
-context/apply API; probe admission and layout remain with Instrumentor.
+The checked operation is local to one original-text anchor batch. It requires
+the unchanged source, full-section decoded boundaries, selected decoder, and
+existing patcher; these inputs remain owned by Instrumentor for the duration of
+the call. Its edit extents are the 4/8-byte anchors supported by observation.
+It does not cache source facts, create a fallback decoder or patcher,
+or expose a reusable context. All edits are validated before writing the
+orchestrator's private text buffer. Probe admission, layout, and resource policy
+remain with Instrumentor, and CodeObjectPatcher remains the ELF writer.
+
+The reference checks cover decoded direct-branch destinations, text-symbol
+start/end offsets, raw symbol-less RELATIVE64 destinations under the existing
+allocation policy, and the kernel entries already collected by observation
+resolution. A destination strictly inside an edited instruction is rejected,
+including a direct reference from unreachable code. Exact start/end boundaries
+remain permitted by this check. ET_REL symbol values are section-relative;
+linked-image symbol values are normalized by the text address. Relocation
+admission and symbol remapping inspect complete records before a partial tail;
+unrelated and nonallocated references retain the existing patcher policy.
+
+These checks do not resolve addresses computed by instruction sequences, such
+as `s_getpc_b64` followed by arithmetic and a load or `s_setpc_b64`. They do not
+prove that no other instruction can access the edited bytes. A nonempty anchor
+batch rejects known `s_cbranch_cdbg*` forms lacking destination metadata rather
+than treating their missing metadata as an absent reference; adding full debug
+branch metadata or computed-address analysis is separate work.
 
 ### Instruction Builder (`code/builders/instruction_builder.h`) [shared with DBT]
 
@@ -418,10 +433,10 @@ ISA-independent register-file model. `RegisterRef` is `(RegClass, uint16_t index
 
 For a code object with one queued `InstrumentationPoint` at `anchor_offset`:
 
-1. **Lazy block decode:** On the first stage that needs the CFG, check source-target admission and select the concrete-target decoder (or the architecture default for a recognized legacy object). `BasicBlock::build` populates `blocks_`, and decoded instructions populate the full-text `InstructionBoundaries` index. An unsupported architecture or source mismatch surfaces as a fatal error here.
+1. **Lazy block decode:** On the first stage that needs the CFG, check source-target admission and select the concrete-target decoder, or the caller architecture's decoder when no concrete target binding exists. `BasicBlock::build` populates `blocks_`, and decoded instructions populate the full-text `InstructionBoundaries` index. An unsupported architecture or recognized source mismatch surfaces as a fatal error here. The final checked batch uses this same selection.
 2. **Validate:** `validate_points()` walks `points_`; for each, `find_instruction_at_offset()` locates the decoded `Instruction`, then `validate_anchor()` runs milestone-scoped + structural checks and produces a `ResolvedInstrumentationSite` capturing the original bytes.
 3. **Plan + build (preflight):** For each site, `make_trampoline_plan(site, arch, trampoline_offset)` produces a canonical inline-nop plan (`before_items = {{ s_nop 0 }}`, `emit_original = true`); `validate_inline_nop_plan()` rechecks shape; `TrampolineBuilder::build(plan)` lowers it to `TrampolineBytes`. The trampoline cursor begins at `patcher.text_size()` (the first byte of the local cave) and advances by each built trampoline's size. Nothing is written to the patcher yet.
-4. **Assemble + replace:** Once every site preflighted, collect the original-text anchor edits and apply them as one checked transaction to the private text buffer, using the source-bound full-text facts. Append probe bodies, the entry stub, and trampolines in their planned order. A KernelEntry callback changes the appended stub branch and does not produce an original-text anchor edit. A single `patcher.replace_text()` grows `.text` in place and fixes up the surrounding ELF (section/segment sizes, moved symbols, descriptor entries); Instrumentor retains responsibility for resource metadata.
+4. **Assemble + replace:** Once every site preflighted, collect the original-text anchor edits and apply them as one local checked transaction to the private text buffer, borrowing the source, selected decoder, full-text index, patcher, and collected kernel entries. Append probe bodies, the entry stub, and trampolines in their planned order. A KernelEntry callback changes the appended stub branch and does not produce an original-text anchor edit. A single `patcher.replace_text()` grows `.text` in place and fixes up the surrounding ELF (section/segment sizes, moved symbols, descriptor entries); Instrumentor retains responsibility for resource metadata.
 5. **Emit:** `patcher.emit()` returns the patched ELF.
 
 The trampolines live inside `.text`, immediately after the original kernel bytes (like what DBT currently does). Keeping a single executable `.text` section avoids loaders that only treat `.text` as executable, and keeps cave offsets expressible as `.text`-relative bytes. Because the original bytes do not move, no branch offsets in the original code are relocated — only the in-place `s_branch` at each anchor is rewritten. One site lays out as:
