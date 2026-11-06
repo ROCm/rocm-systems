@@ -48,6 +48,7 @@ gtest_add_tests(
     SOURCES ${_TEST_SOURCES}
     TEST_LIST @RAUT_TARGET@_TESTS
     TEST_PREFIX ${_PREFIX}
+    EXTRA_ARGS @RAUT_ARGS@
     WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR})
 
 set_tests_properties(
