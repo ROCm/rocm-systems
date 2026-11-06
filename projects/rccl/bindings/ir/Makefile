@@ -284,14 +284,10 @@ LTO_IR_CLANG_FLAGS := -c -emit-llvm -O1 -Xclang -disable-llvm-passes \
 LTO_IR_OPT_PASSES := --passes=internalize
 
 ##### Rules #####
-# check_hipify is order-only (|). It is a .PHONY target, so as a normal
-# prerequisite it would be perpetually out of date and force a recompile on
-# every single invocation. Order-only still runs the preflight before the
-# compile but does not mark the target stale. (The llvm_ir path above has
-# check_hipify as a normal prerequisite and therefore does rebuild
-# unconditionally; that is pre-existing develop behaviour and deliberately
-# left alone here.)
-$(LTO_IR_RAW): $(LLVM_SRC) $(WRAPPER_HEADER) util.h | check_hipify
+# Rebuild until all transitive headers and compiler configuration are tracked.
+# The order-only preflight cannot invalidate LTO IR when staged headers or
+# LTO_IR_ARCH change, so use the normal phony prerequisite as on llvm_ir.
+$(LTO_IR_RAW): $(LLVM_SRC) $(WRAPPER_HEADER) util.h check_hipify
 	@mkdir -p $(OBJDIR)
 	@echo "Generating LTO IR (deferred inlining) for $(LTO_IR_ARCH)..."
 	$(CLANG) $(LTO_IR_CLANG_FLAGS) $(LLVM_SRC) -o $@
