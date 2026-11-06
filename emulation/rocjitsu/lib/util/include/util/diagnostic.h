@@ -24,8 +24,8 @@ namespace util {
 /// The referenced callable must outlive the sink and every diagnostic created
 /// from it. It must be a non-volatile object; wrap a free function in an object
 /// when needed. A default-constructed sink intentionally discards messages.
-/// Explicit emission propagates callback failures, while destructor-triggered
-/// emission suppresses them.
+/// The callable must not throw. Messages are borrowed for the duration of the
+/// callback; copy them to retain them after the callback returns.
 class DiagnosticSink {
 public:
   DiagnosticSink() = default;
@@ -78,7 +78,7 @@ public:
   InFlightDiagnostic &operator=(InFlightDiagnostic &&other) noexcept {
     if (this == &other)
       return *this;
-    emit_from_destructor();
+    (void)emit();
     sink_ = other.sink_;
     stream_ = std::move(other.stream_);
     active_ = other.active_;
@@ -86,7 +86,7 @@ public:
     return *this;
   }
 
-  ~InFlightDiagnostic() { emit_from_destructor(); }
+  ~InFlightDiagnostic() { (void)emit(); }
 
   template <typename T> InFlightDiagnostic &operator<<(T &&fragment) {
     assert(active_ && "cannot append to an emitted diagnostic");
@@ -120,17 +120,6 @@ public:
   }
 
 private:
-  void emit_from_destructor() noexcept {
-    if (!active_)
-      return;
-    try {
-      (void)emit();
-    } catch (...) {
-      // A destructor cannot safely surface diagnostic delivery failures.
-      active_ = false;
-    }
-  }
-
   DiagnosticSink sink_;
   std::optional<std::ostringstream> stream_;
   bool active_ = true;
