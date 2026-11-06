@@ -1418,20 +1418,12 @@ inline PackedOutputLoc output_loc_16(uint32_t M, uint32_t N, uint32_t i, uint32_
 /// @param cbsz  A-matrix broadcast block size (0 = no broadcast).
 /// @param abid  A-matrix broadcast source block ID.
 /// @param blgp  B-matrix lane group permutation pattern.
-template <uint32_t StaticM = 0, uint32_t StaticN = 0, uint32_t StaticK = 0,
-          uint32_t StaticBatch = 0, typename ExtractA, typename ExtractB>
-void exec_f32_mixed(auto &cu, uint32_t runtime_m, uint32_t runtime_n, uint32_t runtime_k,
-                    uint32_t runtime_batch, uint32_t a_bits, uint32_t b_bits, uint32_t dst,
-                    uint32_t s0, uint32_t s1, uint32_t s2, ExtractA ea, ExtractB eb,
+template <uint32_t M, uint32_t N, uint32_t K, uint32_t B, typename ExtractA, typename ExtractB>
+void exec_f32_mixed(auto &cu, uint32_t a_bits, uint32_t b_bits, uint32_t dst, uint32_t s0,
+                    uint32_t s1, uint32_t s2, ExtractA ea, ExtractB eb,
                     uint32_t const_acc = ACC_FROM_VGPR, uint32_t cbsz = 0, uint32_t abid = 0,
                     uint32_t blgp = 0) {
-  // A zero M selects the runtime-shape entry; fixed shapes can have zero batches.
-  static_assert((StaticM == 0 && StaticN == 0 && StaticK == 0 && StaticBatch == 0) ||
-                (StaticM > 0 && StaticN > 0 && StaticK > 0));
-  const uint32_t M = StaticM == 0 ? runtime_m : StaticM;
-  const uint32_t N = StaticN == 0 ? runtime_n : StaticN;
-  const uint32_t K = StaticK == 0 ? runtime_k : StaticK;
-  const uint32_t B = StaticM == 0 ? runtime_batch : StaticBatch;
+  static_assert(M > 0 && N > 0 && K > 0);
   const uint32_t wf = cu.wf_size();
   struct Result {
     uint32_t reg;
@@ -1597,32 +1589,12 @@ void exec_f32_mixed(auto &cu, uint32_t runtime_m, uint32_t runtime_n, uint32_t r
   });
 }
 
-/// Preserve ISA shape constants even when the generic executor stays out of line.
-template <uint32_t M, uint32_t N, uint32_t K, uint32_t B, typename ExtractA, typename ExtractB>
-void exec_f32_mixed(auto &cu, uint32_t a_bits, uint32_t b_bits, uint32_t dst, uint32_t s0,
-                    uint32_t s1, uint32_t s2, ExtractA ea, ExtractB eb,
-                    uint32_t const_acc = ACC_FROM_VGPR, uint32_t cbsz = 0, uint32_t abid = 0,
-                    uint32_t blgp = 0) {
-  static_assert(M > 0 && N > 0 && K > 0);
-  exec_f32_mixed<M, N, K, B>(cu, M, N, K, B, a_bits, b_bits, dst, s0, s1, s2, ea, eb, const_acc,
-                             cbsz, abid, blgp);
-}
-
 template <uint32_t M, uint32_t N, uint32_t K, uint32_t B, typename ExtractA, typename ExtractB>
 void exec_f32(auto &cu, uint32_t in_bits, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2,
               ExtractA ea, ExtractB eb, uint32_t const_acc = ACC_FROM_VGPR, uint32_t cbsz = 0,
               uint32_t abid = 0, uint32_t blgp = 0) {
   exec_f32_mixed<M, N, K, B>(cu, in_bits, in_bits, dst, s0, s1, s2, ea, eb, const_acc, cbsz, abid,
                              blgp);
-}
-
-template <typename ExtractA, typename ExtractB>
-void exec_f32(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32_t B, uint32_t in_bits,
-              uint32_t dst, uint32_t s0, uint32_t s1, uint32_t s2, ExtractA ea, ExtractB eb,
-              uint32_t const_acc = ACC_FROM_VGPR, uint32_t cbsz = 0, uint32_t abid = 0,
-              uint32_t blgp = 0) {
-  exec_f32_mixed(cu, M, N, K, B, in_bits, in_bits, dst, s0, s1, s2, ea, eb, const_acc, cbsz, abid,
-                 blgp);
 }
 
 /// Column (N) leading-dimension pitch rounding A/B/C buffers up to a SIMD-width
