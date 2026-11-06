@@ -4,8 +4,10 @@
 # Multi-Arch CI ASAN for rocm-systems
 #
 # Presubmit and on-demand ASAN builds. This workflow requests host-asan.
-# TheRock ref below is main plus #8455 (users/dravindr/main-with-8455),
-# which runs host-asan tests on presubmit. It does not include #9511.
+# TheRock ref below is main plus the gfx90a host-asan runner
+# (users/dravindr/host-asan-gfx90a-runner). A rocm-systems pull request
+# adds gfx90a and tests it on linux-gfx90a-1gpu-ossci-rocm.
+# It does not include #9441 or #9511.
 #
 # The presubmit is scoped to a runtime-only build (compiler-runtime and
 # runtime-tests), testing the components those stages build (hip-tests,
@@ -61,7 +63,7 @@ concurrency:
 
 jobs:
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@fc434afac2ffa6064136276e353135cf2310a7db # main + TheRock#8455
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@0779fcc6728c2aac4edaba8bd301a858744102d1 # main + gfx90a host-asan runner
     with:
       build_variant: "host-asan"
       # Runtime-only build: everything outside these two stages, math-libs
@@ -78,7 +80,7 @@ jobs:
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
       baseline_repository: ${{ inputs.baseline_repository || (inputs.baseline_run_id != '' && github.repository) || '' }}
       repository: ROCm/TheRock
-      ref: fc434afac2ffa6064136276e353135cf2310a7db # main + TheRock#8455
+      ref: 0779fcc6728c2aac4edaba8bd301a858744102d1 # main + gfx90a host-asan runner
       external_repo: >-
         {
           "repository": "${{ github.repository }}",
@@ -98,7 +100,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@fc434afac2ffa6064136276e353135cf2310a7db # main + TheRock#8455
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@0779fcc6728c2aac4edaba8bd301a858744102d1 # main + gfx90a host-asan runner
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
@@ -108,7 +110,7 @@ jobs:
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       repository: ROCm/TheRock
-      ref: fc434afac2ffa6064136276e353135cf2310a7db # main + TheRock#8455
+      ref: 0779fcc6728c2aac4edaba8bd301a858744102d1 # main + gfx90a host-asan runner
     permissions:
       contents: read
       id-token: write
@@ -126,7 +128,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: fc434afac2ffa6064136276e353135cf2310a7db # main + TheRock#8455
+          ref: 0779fcc6728c2aac4edaba8bd301a858744102d1 # main + gfx90a host-asan runner
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
