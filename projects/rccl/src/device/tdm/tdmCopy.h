@@ -625,16 +625,20 @@ __device__ inline void issue(void* dst, const void* src, size_t sizeBytes, void*
   if (head < delta) head += ALIGN; // the first load must not start before src
   if (head > sizeBytes) head = sizeBytes;
 
-  if (rank == 0 && head) warpVecCopy(s, d, head, warpThread, warpThreads);
+  // The vector head is issued after the warp's first TDM load so the two overlap.
+  const bool vecHead = rank == 0 && head;
   const size_t bulk = sizeBytes - head;
-  if (bulk == 0) return;
+  if (bulk == 0) {
+    if (vecHead) warpVecCopy(s, d, head, warpThread, warpThreads);
+    return;
+  }
 
   // --- LDS: one window per issuing warp, two slots per window --------------
   const uint32_t ldsPad = (16u - (ldsBase & 15u)) & 15u; // slots must be 16B aligned
   const uint32_t ldsUsable = ldsBytes > ldsPad ? ldsBytes - ldsPad : 0;
   const uint32_t maxByLds = ldsUsable / MIN_SLOT;
   if (maxByLds == 0) { // LDS too small to stage a chunk: vector fallback
-    if (rank == 0) warpVecCopy(s + head, d + head, bulk, warpThread, warpThreads);
+    if (rank == 0) warpVecCopy(s, d, sizeBytes, warpThread, warpThreads);
     return;
   }
   const size_t units = (bulk + ALIGN - 1) / ALIGN;
@@ -675,6 +679,7 @@ __device__ inline void issue(void* dst, const void* src, size_t sizeBytes, void*
     for (size_t off = 0; off < len; off += chunkBytes) {
       const uint32_t n = len - off < chunkBytes ? static_cast<uint32_t>(len - off) : chunkBytes;
       ldsTileBytes<LdsDir::Load, cp>(sB + off, win + o - sigma, n + delta);
+      if (off == 0 && vecHead) warpVecCopy(s, d, head, warpThread, warpThreads);
       waitTensor0();
       storeChunk(win, dB + off, n);
       waitTensor0();
@@ -688,6 +693,7 @@ __device__ inline void issue(void* dst, const void* src, size_t sizeBytes, void*
     const uint32_t n = len - off < chunkBytes ? static_cast<uint32_t>(len - off) : chunkBytes;
     if (off) waitTensor0();
     ldsTileBytes<LdsDir::Load, cp>(sB + off, win + slot + o - sigma, n + delta);
+    if (off == 0 && vecHead) warpVecCopy(s, d, head, warpThread, warpThreads);
     if (off) storeChunk(win + (slot ^ slotBytes), dB + off - chunkBytes, chunkBytes);
     slot ^= slotBytes;
   }
