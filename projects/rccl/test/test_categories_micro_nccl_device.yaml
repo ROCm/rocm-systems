@@ -1,12 +1,13 @@
-# rccl-UnitTestsMicroNcclDevice — shared/ctest schema.
-# Host-only micro-tests for src/nccl_device/ requirement builders (no GPU, no librccl).
-# RCCL does not support Windows: exclude_windows matches all tests so generated suites are empty on Windows.
-
+# CTest categories for host-only src/nccl_device/ microtests.
+#
+# Suites start with their source unit's stem. The exception is the requirement
+# builders' NcclDeviceRequirements* suite, one for five units.
 test_categories:
   quick: &micro_nccl_device_quick
-    description: "Smoke — host-only device-resource requirement builder micro-tests, sub-second."
+    description: "Smoke - host-only src/nccl_device/ micro-tests, sub-second."
     test_patterns:
-      - "NcclDevice*"
+      - "Core*"
+      - "NcclDeviceRequirements*"
     exclude_windows:
       - "*"
     labels:

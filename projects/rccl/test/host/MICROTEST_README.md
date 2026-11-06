@@ -78,16 +78,14 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `GroupRegisterSymmetricCeInitTest.*`, `GroupRegisterSymmetricTest.*`,
     `GroupRegisterSymmetricDevCommTest.*`,
     `GroupCleanupTest.*`, `AsyncJobLaunchDirectTest.*`.
-  - `devcomm/devcomm_v22902.cc` + `devcomm/devcomm_v22907.cc`
-    (`DEVCOMM_V22902_CC_PATH` / `DEVCOMM_V22907_CC_PATH`, both from
-    `devcomm-test.cc`); suites `Devcomm*`. `devcomm/devcomm_v23000.cc` is not
-    covered yet.
   - `dev_runtime.cc` and `dev_runtime_segments.cc` (`DEV_RUNTIME_CC_PATH`,
     `DEV_RUNTIME_SEGMENTS_CC_PATH`, from `dev-runtime-test.cc`);
     suites `Alloc*`, `Comm*`, `Compute*`, `DeepCopy*`, `Dev*`, `Gin*`, `Nccl*`,
     `Sym*`, and `Win*`.
     Its cuMem window-import tests run the real `transport/p2p.cc`, compiled
-    here as a plain source.
+    here as a plain source. The `devcomm/devcomm_v22902.cc` and
+    `devcomm/devcomm_v22907.cc` compat tables are also compiled here, for
+    `getNcclVersionCompat`.
   - `include/nccl_device/utility.h` (header-only, from `nccl-utility-test.cc`);
     suite `NcclUtilityMicrotest.*`.
   - the generated `sym_kernels_host.cc` (`SYM_KERNELS_HOST_CC_PATH`, from
@@ -184,10 +182,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `fakes/api_trace_fakes.cc` forwards to `init.cc`. Its own binary because
   `fakes/collectives_fakes.cc`, which most targets link, defines this file's string helpers. See
   `test_categories_micro_collectives.yaml`.
-- **`rccl-UnitTestsMicroOnerank`** — `device/onerank.cu` (via `ONERANK_CC_PATH`, from
-  `onerank-test.cc`); suite `Onerank*`, driving `fakes/hip_fakes.cc`'s launch and copy hooks.
-  Its own binary because `fakes/sched_stubs.cc` fakes `ncclLaunchOneRank`. See
-  `test_categories_micro_onerank.yaml`.
+- **`rccl-UnitTestsMicroDeviceOnerank`** — `device/onerank.cu` (via `ONERANK_CC_PATH`, from
+  `device/onerank-test.cc`); suite `Onerank*`, driving `fakes/hip_fakes.cc`'s launch and copy hooks.
+  See `test_categories_micro_device.yaml`.
 - **`rccl-UnitTestsMicroEnqueueMgmtTaskEnq`** — `enqueue/mgmt_task_enq.cc` (via `MGMT_TASK_ENQ_CC_PATH`,
   from `enqueue/mgmt-task-enq-test.cc`); suite `MgmtTaskEnq*`. Its own binary because
   `fakes/mgmt_task_enq_fakes.cc`, which the other targets link, fakes `ncclMgmtTaskEnqueue`.
@@ -390,17 +387,18 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   scene, vocabulary and fake-reset fixture live in `enqueue/task_prep/TaskPrepScene.h`.
   `ENABLE_WARP_SPEED` is deliberately absent: all eleven files are free of it.
   See `test_categories_micro_enqueue.yaml`.
-- **`rccl-UnitTestsMicroNcclDevice`**: the requirement builders in
+- **`rccl-UnitTestsMicroNcclDeviceRequirements`**: the requirement builders in
   `src/nccl_device/{cft_barrier,gin_barrier,gin_scratch,ll_a2a,lsa_barrier}.cc`
-  (via `<STEM>_CC_PATH`, from `nccl-device-requirements-test.cc`); suite
-  `NcclDeviceRequirementsMicrotest.*`. Its own binary because
-  `fakes/dev_runtime_micro_fakes.cc` fakes three of these builders. See
+  (via `<STEM>_CC_PATH`, from `nccl_device/nccl-device-requirements-test.cc`); suite
+  `NcclDeviceRequirementsMicrotest.*`. See `test_categories_micro_nccl_device.yaml`.
+- **`rccl-UnitTestsMicroNcclDeviceCore`**: `src/nccl_device/core.cc` (via
+  `CORE_CC_PATH`, from `nccl_device/core-test.cc`); suite `CoreMicrotest.*`. See
   `test_categories_micro_nccl_device.yaml`.
-- **`rccl-UnitTestsMicroCore`**: `src/nccl_device/core.cc` (via
-  `CORE_CC_PATH`, from `core-test.cc`); suite `CoreMicrotest.*`. Its
-  own binary because `fakes/dev_runtime_micro_fakes.cc` and
-  `fakes/devcomm_fakes.cc` fake five of its seven functions. See
-  `test_categories_micro_core.yaml`.
+- **`rccl-UnitTestsMicroDevcomm`**: `src/devcomm/devcomm_v22902.cc` +
+  `src/devcomm/devcomm_v22907.cc` (`DEVCOMM_V22902_CC_PATH` /
+  `DEVCOMM_V22907_CC_PATH`, both from `devcomm/devcomm-test.cc`); suites
+  `Devcomm*`. `devcomm/devcomm_v23000.cc` is not covered yet. See
+  `test_categories_micro_devcomm.yaml`.
 - **`rccl-UnitTestsMicroCftDevRuntime`**: `src/cft_dev_runtime.cc` and
   `src/nccl_device/core.cc` (via `CFT_DEV_RUNTIME_CC_PATH` / `CORE_CC_PATH`,
   from `cft-dev-runtime-test.cc`); suites `CftDevRuntime*`. Its own binary because
@@ -1022,7 +1020,7 @@ These do NOT follow the TU-per-file rule, deliberately:
 - `ncclTeamLsa` stays in `fakes/devcomm_fakes.cc` rather than moving to
   `fakes/nccl_device_core_fakes.cc` with the other `src/nccl_device/core.cc`
   accessors: its default silently satisfies the `nRanks ==
-  comm->nRanks` comparison every `devcomm-test.cc` filter makes, and the trap
+  comm->nRanks` comparison every `devcomm/devcomm-test.cc` filter makes, and the trap
   comment warning about that is what keeps those tests honest. Moving the hook
   without moving the readers that depend on the warning is how it would get lost.
 
@@ -1500,7 +1498,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroBootstrap          # src/bootstrap.cc tests
 ./build/rccl-UnitTestsMicro          # broad-coverage binary, ldd shows no HIP/ROCm/HSA/RCCL
 ./build/rccl-UnitTestsMicroCollectives        # src/collectives.cc tests
-./build/rccl-UnitTestsMicroOnerank            # src/device/onerank.cu tests
+./build/rccl-UnitTestsMicroDeviceOnerank      # src/device/onerank.cu tests
 ./build/rccl-UnitTestsMicroEnqueueMgmtTaskEnq # src/enqueue/mgmt_task_enq.cc tests
 ./build/rccl-UnitTestsMicroWarpSpeed  # src/scheduler/*.cc tests
 ./build/rccl-UnitTestsMicroMiscCrypt          # misc/crypt.cc tests
@@ -1537,8 +1535,9 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroTopo               # the rest of src/graph/*.cc tests
 ./build/rccl-UnitTestsMicroGinHost            # src/gin/gin_host.cc GIN_PROXY_NTHREADS
 ./build/rccl-UnitTestsMicroGinHostFinalize    # src/gin/gin_host.cc host finalize
-./build/rccl-UnitTestsMicroNcclDevice         # nccl_device requirement builders tests
-./build/rccl-UnitTestsMicroCore               # nccl_device/core.cc tests
+./build/rccl-UnitTestsMicroNcclDeviceRequirements  # nccl_device requirement builders tests
+./build/rccl-UnitTestsMicroNcclDeviceCore     # nccl_device/core.cc tests
+./build/rccl-UnitTestsMicroDevcomm            # devcomm/devcomm_v22902.cc, devcomm_v22907.cc tests
 ./build/rccl-UnitTestsMicroCftDevRuntime      # cft_dev_runtime.cc tests
 ./build/rccl-UnitTestsMicroParam              # src/param/*.cc, src/misc/param.cc tests
 ./build/rccl-UnitTestsMicroDiagnosticsIbWriteBw  # src/diagnostics/ib_write_bw.cc tests
