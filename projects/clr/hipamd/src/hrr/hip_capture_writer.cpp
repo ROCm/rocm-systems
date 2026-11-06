@@ -125,18 +125,64 @@ namespace hrr_cap {
 namespace writer {
 
 // ---------------------------------------------------------------------------
-// FNV-1a 128-bit hash (same algorithm as out-of-tree writer)
+// 128-bit content hash of a blob or code object.
+//
+// The key only has to be unique within one archive: replay opens the file
+// named by the hash it recorded and never recomputes it, so an archive written
+// by an older runtime still replays. What it cannot be is a byte-at-a-time
+// FNV. A pinned host snapshot hashes the whole allocation on every launch that
+// reads it. A serving step can keep a multi-megabyte buffer in pinned memory
+// that its kernels read on every step. Two dependent 64-bit multiplies per
+// byte run at about 1 GB/s, so one snapshot of a large buffer was most of the
+// capture cost of a step.
+//
+// Four independent lanes, one multiply per 8 bytes, hide that multiply latency.
+// The length is mixed into the seed so a prefix of another buffer does not
+// share its hash, and the tail is accumulated whole rather than byte by byte.
 // ---------------------------------------------------------------------------
 
+static inline uint64_t hash_load64(const uint8_t* p) {
+  uint64_t v;
+  memcpy(&v, p, sizeof(v));
+  return v;
+}
+
+static inline uint64_t hash_avalanche(uint64_t x) {
+  x ^= x >> 32;
+  x *= 0x9E3779B185EBCA87ULL;
+  x ^= x >> 29;
+  x *= 0xC2B2AE3D27D4EB4FULL;
+  x ^= x >> 32;
+  return x;
+}
+
 static Hash128 hash_buffer(const void* data, size_t len) {
-  uint64_t h1 = 0xcbf29ce484222325ULL;
-  uint64_t h2 = 0x100000001b3ULL;
   const auto* p = static_cast<const uint8_t*>(data);
-  for (size_t i = 0; i < len; i++) {
-    h1 ^= p[i]; h1 *= 0x100000001b3ULL;
-    h2 ^= p[i]; h2 *= 0xcbf29ce484222325ULL;
+  const auto* end = p + len;
+  constexpr uint64_t kP = 0x9E3779B185EBCA87ULL;
+  uint64_t a = 0x243F6A8885A308D3ULL ^ len;
+  uint64_t b = 0x13198A2E03707344ULL ^ len;
+  uint64_t c = 0xA4093822299F31D0ULL;
+  uint64_t d = 0x082EFA98EC4E6C89ULL;
+
+  while (p + 32 <= end) {
+    a = (a ^ hash_load64(p)) * kP;
+    b = (b ^ hash_load64(p + 8)) * kP;
+    c = (c ^ hash_load64(p + 16)) * kP;
+    d = (d ^ hash_load64(p + 24)) * kP;
+    p += 32;
   }
-  return {h1, h2};
+  while (p + 8 <= end) {
+    a = (a ^ hash_load64(p)) * kP;
+    p += 8;
+  }
+  if (p < end) {
+    uint64_t tail = 0;
+    memcpy(&tail, p, static_cast<size_t>(end - p));
+    b = (b ^ tail) * kP;
+  }
+
+  return {hash_avalanche(a ^ (b * kP) ^ c), hash_avalanche(d ^ (c * kP) ^ b ^ len)};
 }
 
 static void hash_hex(Hash128 h, char buf[33]) {
@@ -1810,6 +1856,27 @@ class BlobClaim {
 // ---------------------------------------------------------------------------
 // write_blob
 // ---------------------------------------------------------------------------
+
+Hash128 hash_bytes(const void* data, size_t len) { return hash_buffer(data, len); }
+
+// False whenever write_blob() would not simply return `h`: an open archive
+// it has not finalized, a child that has yet to reopen, a buffer over the cap,
+// or bytes not written. A write still in flight is not trusted either: it may
+// yet fail and unpublish the key, and write_blob() waits for it.
+bool blob_written(Hash128 h, size_t len) {
+  if (g_reopen_after_fork.load(std::memory_order_acquire)) return false;
+  if (g_max_blob_bytes != 0 && len > g_max_blob_bytes) return false;
+  {
+    std::lock_guard<std::mutex> lk(g_file_mu);
+    if (g_events_fd < 0 || g_events_finalized) return false;
+  }
+  char hex[33];
+  hash_hex(h, hex);
+  const std::string key(hex);
+  std::lock_guard<std::mutex> lk(g_blob_mu);
+  if (g_events_finalized) return false;
+  return g_written_blobs.count(key) != 0 && g_blob_claims.count(key) == 0;
+}
 
 Hash128 write_blob(const void* data, size_t len, bool capped) {
   reopen_after_fork();

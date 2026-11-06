@@ -1720,6 +1720,9 @@ hipError_t playback_hipModuleLaunchCooperativeKernel(PlaybackContext& ctx,
                                 /*launch_ex=*/false, /*cooperative=*/true);
 }
 
+hipError_t playback_hipGraphLaunch(PlaybackContext& ctx, const uint8_t* payload);
+hipError_t playback_hipGraphLaunch_spt(PlaybackContext& ctx, const uint8_t* payload);
+
 bool hrr_is_launch_handler(hipError_t (*fn)(PlaybackContext&, const uint8_t*)) {
     return fn == playback_hipModuleLaunchKernel ||
            fn == playback_hipExtModuleLaunchKernel ||
@@ -1730,7 +1733,9 @@ bool hrr_is_launch_handler(hipError_t (*fn)(PlaybackContext&, const uint8_t*)) {
            fn == playback_hipLaunchCooperativeKernel_spt ||
            fn == playback_hipDrvLaunchKernelEx ||
            fn == playback_hipLaunchKernelExC ||
-           fn == playback_hipModuleLaunchCooperativeKernel;
+           fn == playback_hipModuleLaunchCooperativeKernel ||
+           fn == playback_hipGraphLaunch ||
+           fn == playback_hipGraphLaunch_spt;
 }
 
 // ---------------------------------------------------------------------------
@@ -3438,6 +3443,40 @@ hipError_t playback_hipMallocHost(PlaybackContext& ctx, const uint8_t* pl) {
     return r;
 }
 
+hipError_t playback_hipHostAlloc(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipHostAlloc*>(pl);
+    void* live = nullptr;
+    free_replaced_host_alloc(ctx, a->ptr);
+    if (!ctx.charge_host(a->size, "hipHostAlloc")) return hipErrorMemoryAllocation;
+    hipError_t r = hipHostAlloc(&live, static_cast<size_t>(a->size), a->flags);
+    if (r == hipSuccess)
+        ctx.record_alloc(a->ptr, live, static_cast<size_t>(a->size), AllocKind::HostMalloc);
+    else
+        ctx.host_budget.release(a->size);
+    if (r != hipSuccess && a->ret != 0 && static_cast<int32_t>(r) == a->ret) {
+        hrr_note_recorded_error(ctx, "hipHostAlloc", a->ret);
+        return hipSuccess;
+    }
+    return r;
+}
+
+hipError_t playback_hipMemAllocHost(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipMemAllocHost*>(pl);
+    void* live = nullptr;
+    free_replaced_host_alloc(ctx, a->ptr);
+    if (!ctx.charge_host(a->size, "hipMemAllocHost")) return hipErrorMemoryAllocation;
+    hipError_t r = hipMemAllocHost(&live, static_cast<size_t>(a->size));
+    if (r == hipSuccess)
+        ctx.record_alloc(a->ptr, live, static_cast<size_t>(a->size), AllocKind::HostMalloc);
+    else
+        ctx.host_budget.release(a->size);
+    if (r != hipSuccess && a->ret != 0 && static_cast<int32_t>(r) == a->ret) {
+        hrr_note_recorded_error(ctx, "hipMemAllocHost", a->ret);
+        return hipSuccess;
+    }
+    return r;
+}
+
 // hipHostFree and hipFreeHost differ only in the runtime call. The exclusive
 // lock keeps a launch that is queuing a pinned host snapshot for this buffer
 // from racing the free (see hrr_launch_hold).
@@ -4326,22 +4365,49 @@ hipError_t playback_hipGraphInstantiateWithFlags(PlaybackContext& ctx,
 // ---------------------------------------------------------------------------
 // Manual playback: hipGraphLaunch
 // ---------------------------------------------------------------------------
-// Payload layout (after 32-byte EventHeader):
-//   ret(4) graphExec(8) stream(8)
-hipError_t playback_hipGraphLaunch(PlaybackContext& ctx,
-                                   const uint8_t* payload) {
+// Payload: the fixed hrr_args struct, then u16 num_snapshots, then that many
+// 41-byte pinned host snapshot records. The copies are queued on the launch
+// stream ahead of the graph.
+static hipError_t playback_graph_launch(PlaybackContext& ctx, const uint8_t* payload,
+                                        const char* api, bool spt) {
+    const auto* hdr = reinterpret_cast<const hrr_event_header*>(payload);
     const auto* a = reinterpret_cast<const hrr_args_hipGraphLaunch*>(payload);
+    static_assert(sizeof(hrr_args_hipGraphLaunch) == sizeof(hrr_args_hipGraphLaunch_spt),
+                  "graph launch spellings share a prefix");
     if (a->ret != hipSuccess) return hipSuccess;  // original call failed — skip
 
     hipGraphExec_t exec = ctx.translate_graph_exec(a->graphExec);
     if (!exec) {
         if (ctx.verbose)
-            fprintf(stderr, "[HRR] hipGraphLaunch: graphExec 0x%llx not found in map\n",
-                    (unsigned long long)a->graphExec);
+            fprintf(stderr, "[HRR] %s: graphExec 0x%llx not found in map\n",
+                    api, (unsigned long long)a->graphExec);
         return hipSuccess;  // non-fatal — exec not yet created
     }
 
+    const uint8_t* end = payload + hdr->payload_length;
+    const uint8_t* rec = payload + sizeof(hrr_args_hipGraphLaunch);
+    uint16_t n = 0;
+    if (rec != end) {
+        if (end < rec + 2) {
+            fprintf(stderr, "[HRR] %s: pinned host snapshot count is truncated — refused\n", api);
+            ctx.host_snapshots_refused++;
+            return hipErrorInvalidValue;
+        }
+        memcpy(&n, rec, 2);
+        rec += 2;
+        if (!hrr_host_snapshots_fit(rec, end, n)) {
+            fprintf(stderr, "[HRR] %s: pinned host snapshot records run past the event"
+                    " — refused\n", api);
+            ctx.host_snapshots_refused += n;
+            return hipErrorInvalidValue;
+        }
+    }
+
     hipStream_t stream = ctx.translate_stream(a->stream);
+    if (n) {
+        if (hipError_t sr = restore_host_snapshots(ctx, rec, n, stream, api); sr != hipSuccess)
+            return sr;
+    }
 
     thread_local hipEvent_t tl_g_start = nullptr;
     thread_local hipEvent_t tl_g_stop  = nullptr;
@@ -4360,14 +4426,17 @@ hipError_t playback_hipGraphLaunch(PlaybackContext& ctx,
     if (timing_ok)
         timing_ok = (HRR_HIP_CHECK(hipEventRecord(tl_g_start, stream)) == hipSuccess);
 
-    hipError_t r = hipGraphLaunch(exec, stream);
+    hipError_t r = spt ? hipGraphLaunch_spt(exec, stream) : hipGraphLaunch(exec, stream);
+    // The graph and its snapshot copies are queued. Not held across the sync
+    // below, which can wait on a graph that waits for work yet to replay.
+    hrr_launch_release();
 
     if (timing_ok)
         timing_ok = (HRR_HIP_CHECK(hipEventRecord(tl_g_stop, stream)) == hipSuccess);
 
     if (r != hipSuccess) {
-        fprintf(stderr, "[HRR] hipGraphLaunch failed: %d (%s) exec=0x%llx stream=0x%llx\n",
-                r, hipGetErrorString(r),
+        fprintf(stderr, "[HRR] %s failed: %d (%s) exec=0x%llx stream=0x%llx\n",
+                api, r, hipGetErrorString(r),
                 (unsigned long long)a->graphExec, (unsigned long long)a->stream);
         return r;
     }
@@ -4385,9 +4454,17 @@ hipError_t playback_hipGraphLaunch(PlaybackContext& ctx,
     }
 
     if (ctx.verbose)
-        fprintf(stderr, "[HRR] hipGraphLaunch: exec 0x%llx on stream 0x%llx -> OK\n",
-                (unsigned long long)a->graphExec, (unsigned long long)a->stream);
+        fprintf(stderr, "[HRR] %s: exec 0x%llx on stream 0x%llx -> OK\n",
+                api, (unsigned long long)a->graphExec, (unsigned long long)a->stream);
     return r;
+}
+
+hipError_t playback_hipGraphLaunch(PlaybackContext& ctx, const uint8_t* payload) {
+    return playback_graph_launch(ctx, payload, "hipGraphLaunch", false);
+}
+
+hipError_t playback_hipGraphLaunch_spt(PlaybackContext& ctx, const uint8_t* payload) {
+    return playback_graph_launch(ctx, payload, "hipGraphLaunch_spt", true);
 }
 
 // ---------------------------------------------------------------------------
