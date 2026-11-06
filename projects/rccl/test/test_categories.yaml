@@ -117,6 +117,7 @@ test_categories:
       - "CpuAffinity.*"
       - "DdaReduceScatterFabricLL.*"
       - "DdaAllReduceFabricLL.*"
+      - "ProfilerApiEventRank.*"
     exclude_windows:
       - "*"
     labels:
