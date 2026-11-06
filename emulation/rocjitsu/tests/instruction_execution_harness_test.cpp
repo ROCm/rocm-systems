@@ -7943,6 +7943,63 @@ TEST(Cdna4CvtScaleTest, WideFp6ToF16ConsumesFp16OvflMode) {
     wf->halt();
 }
 
+TEST(Cdna4CvtScaleTest, DirectOperandRejectionsReturnBeforeDestinationWrites) {
+  amdgpu::GpuMemory gpu_mem("cdna4_cvt_direct_operand_mem");
+  amdgpu::L2Cache l2("cdna4_cvt_direct_operand_l2");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 256;
+  config.lds_size_kb = 64;
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu =
+      amdgpu::ComputeUnitCore::create("cdna4_cvt_direct_operand", config, &gpu_mem, &l2);
+  ASSERT_NE(cu, nullptr);
+  amdgpu::Wavefront *wf = cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  wf->set_exec(1);
+
+  struct RejectionCase {
+    uint32_t opcode;
+    int operand; // -1 is the destination, 0/1 are direct source operands.
+  };
+  constexpr RejectionCase kCases[] = {
+      {cdna4::kVCvtScalef32SrPkFp4F32Vop3, 0},   {cdna4::kVCvtScalef322xpk16Fp6F32Vop3, -1},
+      {cdna4::kVCvtScalef322xpk16Fp6F32Vop3, 0}, {cdna4::kVCvtScalef322xpk16Fp6F32Vop3, 1},
+      {cdna4::kVCvtScalef32Pk32F16Fp6Vop3, -1},  {cdna4::kVCvtScalef32Pk32F16Fp6Vop3, 0},
+  };
+  constexpr uint32_t kDestination = 40;
+  constexpr uint32_t kSentinel = 0x12345678;
+  const uint32_t base = wf->vgpr_alloc().base;
+  for (const RejectionCase &test : kCases) {
+    SCOPED_TRACE(testing::Message() << "opcode=" << test.opcode << " operand=" << test.operand);
+    const std::array<uint32_t, 2> words =
+        encode_cdna_vop3(test.opcode, kDestination, vgpr_src(100), vgpr_src(150), vgpr_src(200));
+    std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
+    ASSERT_NE(instruction, nullptr);
+    const Operand *selected =
+        test.operand < 0 ? instruction->dst_operand(0) : instruction->src_operand(test.operand);
+    auto *operand = const_cast<cdna4::Operand *>(dynamic_cast<const cdna4::Operand *>(selected));
+    ASSERT_NE(operand, nullptr);
+    // Mutating the decoded operand type exercises a defensive, decoder-unreachable
+    // guard: these operands always decode as OPR_VGPR or OPR_SRC_VGPR.
+    operand->opr_type_ = cdna4::OperandType::OPR_SREG;
+    operand->encoding_value_ = 0;
+    for (uint32_t offset = 0; offset < 32; ++offset)
+      cu->write_vgpr(base + kDestination + offset, 0, kSentinel);
+    wf->clear_instruction_execution_error();
+    // Execute below the CU's legacy exception boundary.
+    instruction->execute(*instruction, wf);
+    EXPECT_EQ(wf->instruction_execution_error(),
+              amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    for (uint32_t offset = 0; offset < 32; ++offset)
+      EXPECT_EQ(cu->read_vgpr_storage(base + kDestination + offset, 0), kSentinel) << offset;
+  }
+  wf->halt();
+}
+
 TEST(Cdna4GprIdxTest, WideConversionIndexesResolvedBaseBeforeDwordOffsets) {
   amdgpu::GpuMemory gpu_mem("cdna4_cvt_scale_wide_gpr_idx_mem");
   amdgpu::L2Cache l2("cdna4_cvt_scale_wide_gpr_idx_l2");
