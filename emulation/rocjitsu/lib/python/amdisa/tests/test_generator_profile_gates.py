@@ -19,6 +19,11 @@ from amdisa.__main__ import (
 from amdisa.codegen import CodeGenerator
 from amdisa.codegen.config import CodegenConfig
 from amdisa.codegen.execute import ExecuteContext
+from amdisa.codegen.execute.floating_policy import (
+    F16_TRANS_OPERATIONS,
+    FLUSH_NEAREST_F32_OPS,
+    INPUT_FLUSHED_ROUNDING,
+)
 from amdisa.codegen.execute.vector_special import (
     gen_cvt_fp8,
     gen_cvt_scalef32,
@@ -27,7 +32,8 @@ from amdisa.codegen.execute.vector_special import (
     gen_vector_movrel,
     gen_vector_cvt_pk,
 )
-from amdisa.codegen.execute.vector_alu import gen_vector_unary
+from amdisa.codegen.execute.sema_lower import LoweringContext, lower_sema_block
+from amdisa.sema_derive import derive_sema_block
 from amdisa.codegen.execute.matrix import gen_mfma as emit_mfma
 from amdisa.codegen.execute.vector_cmp import (
     gen_vector_add_co,
@@ -55,6 +61,7 @@ from amdisa.isa_profile import (
 )
 from amdisa.parser import Parser
 from amdisa.semantics import (
+    INTEGER_RESULT_OPERATIONS,
     InstructionSemantics,
     derive_all_semantics,
     derive_semantics,
@@ -68,6 +75,14 @@ def _repo_root() -> Path:
 def _mrisa_dir() -> Path:
     default = _repo_root() / 'shared' / 'machine-readable-isa' / 'isa'
     return Path(os.environ.get('MRISA_PATH', default))
+
+
+def _lower_unary(name: str, arch_name: str = '') -> str:
+    sem = derive_semantics(name, 'ENC_VOP1')
+    block = derive_sema_block(sem)
+    return lower_sema_block(
+        block, LoweringContext(exec_model=block.pragma, arch_name=arch_name)
+    )
 
 
 def _gen_mfma(
@@ -113,8 +128,10 @@ def _matrix_profile(
     wave_size: int = 64,
     wave_size_max: int | None = None,
     supports_gpr_idx: bool = False,
+    uses_rj_arith_matrix: bool = False,
 ) -> SimpleNamespace:
     return SimpleNamespace(
+        uses_rj_arith_matrix=uses_rj_arith_matrix,
         uses_vgpr_msb_indexing=uses_vgpr_msb_indexing,
         swmmac_layout=swmmac_layout,
         matrix_layout=matrix_layout,
@@ -139,6 +156,7 @@ def _matrix_profile_for_arch(
         )
     if arch_name == 'rdna4':
         return _matrix_profile(
+            uses_rj_arith_matrix=True,
             uses_vgpr_msb_indexing=uses_vgpr_msb_indexing,
             swmmac_layout=SwmmacLayout.RUNTIME_WAVE,
             matrix_layout=MatrixLayout.WMMA_SPLIT_K,
@@ -147,6 +165,7 @@ def _matrix_profile_for_arch(
         )
     if arch_name in ('rdna3', 'rdna3_5'):
         return _matrix_profile(
+            uses_rj_arith_matrix=arch_name == 'rdna3',
             uses_vgpr_msb_indexing=uses_vgpr_msb_indexing,
             matrix_layout=MatrixLayout.WMMA_REPLICATED_HALFWAVE,
             wave_size=32,
@@ -158,6 +177,17 @@ def _matrix_profile_for_arch(
 @pytest.fixture
 def rocjitsu_source_root() -> Path:
     return Path(__file__).resolve().parents[4]
+
+
+@pytest.fixture
+def runtime_api_headers_include_root(rocjitsu_source_root: Path) -> Path:
+    source = Path(
+        os.environ.get(
+            'RJ_RUNTIME_API_HEADERS_SOURCE_DIR',
+            rocjitsu_source_root / '..' / '..' / 'runtimes' / 'api-headers',
+        )
+    )
+    return source.resolve() / 'include'
 
 
 @pytest.fixture
@@ -273,6 +303,7 @@ def gen_mfma(
     profile = _profile_for_arch(arch_name)
     if supports_gpr_idx is not None:
         profile = SimpleNamespace(
+            uses_rj_arith_matrix=profile.uses_rj_arith_matrix,
             uses_vgpr_msb_indexing=profile.uses_vgpr_msb_indexing,
             swmmac_layout=profile.swmmac_layout,
             matrix_layout=profile.matrix_layout,
@@ -681,6 +712,25 @@ def test_generated_execution_helper_includes_are_scoped(
     assert fp_include in shared
 
 
+def test_generated_flush_nearest_f32_keeps_modifiers_in_nearest_environment(
+    execute_shared_path: Path,
+):
+    shared = execute_shared_path.read_text()
+    for instruction in sorted(FLUSH_NEAREST_F32_OPS):
+        for encoding in ('vop1', 'vop3'):
+            body = _generated_function_body(
+                shared,
+                f'inline void execute_{instruction.lower()}_{encoding}',
+            )
+            assert body.count('fp_mode::ScopedEnvironment environment(0);') == 1
+
+    for encoding in ('vop1', 'vop3'):
+        sin_body = _generated_function_body(
+            shared, f'inline void execute_v_sin_f32_{encoding}'
+        )
+        assert 'fp_mode::ScopedEnvironment environment(0);' not in sin_body
+
+
 def test_gfx1250_model_include_graph_does_not_reach_vm(
     rocjitsu_source_root: Path,
     gfx1250_generated_root: Path,
@@ -738,7 +788,9 @@ def _parse_cdna_specs(*names: str):
     return specs
 
 
-def test_parser_separates_logical_arch_directory_and_cpp_namespace():
+def test_decoder_tables_follow_cpp_namespace_independently_of_output_directory(
+    tmp_path: Path,
+):
     class IdentityOverrideRdna4Profile(Rdna4Profile):
         @property
         def generated_dir_name(self) -> str:
@@ -749,11 +801,23 @@ def test_parser_separates_logical_arch_directory_and_cpp_namespace():
             return 'test_rdna4_namespace'
 
     isa_xml = _mrisa_dir() / 'amdgpu_isa_rdna4.xml'
-    spec = Parser(str(isa_xml), IdentityOverrideRdna4Profile()).isa_spec
+    spec = Parser(str(isa_xml), IdentityOverrideRdna4Profile()).parse()
 
     assert spec.arch_name == 'rdna4'
     assert spec.generated_dir_name == 'test_generated_rdna4'
     assert spec.cpp_namespace == 'test_rdna4_namespace'
+
+    semantics = derive_all_semantics(spec)
+    for namespace in ('test_rdna4_namespace', 'other_rdna4_namespace'):
+        spec.cpp_namespace = namespace
+        CodeGenerator(spec, str(tmp_path), semantics).gen_decoder()
+        root = tmp_path / spec.generated_dir_name
+        decoder = (root / 'decoder.cpp').read_text()
+        assembly = (root / 'decode_tables.S').read_text()
+        assert f'namespace {namespace} {{' in decoder
+        symbol = f'rj_{namespace}_table_primary_decode_table'
+        assert f'RJ_DECODE_SYMBOL({symbol})' in decoder
+        assert f'rj_table_begin {symbol}' in assembly
 
 
 @pytest.mark.parametrize(
@@ -1158,20 +1222,79 @@ def test_rdna4_parser_injects_s_waitcnt_compat():
     assert dte.sub_decode_funcs[9] == 'decodeSWaitcntSopp'
 
 
+def _decode_targets(arch_root: Path, table: str) -> list[str]:
+    tables_inc = (arch_root / 'decode_tables.inc').read_text()
+    macro = f'RJ_{table.upper()}_ROWS'
+    definitions = dict(
+        re.findall(
+            rf'^#define ({macro}(?:_\d+)?)\s+(.+)$',
+            tables_inc.replace('\\\n', ''),
+            re.MULTILINE,
+        )
+    )
+    rows = definitions[macro].strip()
+    if len(definitions) > 1:
+        chunks = rows.split()
+        assert [*chunks, macro] == list(definitions)
+        rows = ' '.join(definitions[chunk] for chunk in chunks)
+    cases, scope, name, gaps = re.split(r'RJ_DECODE_DEFAULT\((\w+),\s*(\w+)\)', rows)
+    default = f'{scope}::{name}'
+    assert 'RJ_DECODE_GAP(' not in cases
+    assert not re.search(r'RJ_DECODE_(?:CASE|ALIAS)\(', gaps)
+    targets = {}
+    alias = None
+    for kind, first, count, scope, name in re.findall(
+        r'RJ_DECODE_(CASE|ALIAS|GAP)\((\d+),\s*(?:(\d+),\s*)?(\w+),\s*(\w+)\)', rows
+    ):
+        target = f'{scope}::{name}'
+        assert bool(count) == (kind == 'GAP')
+        if kind == 'GAP':
+            assert target == default
+        # A portable alias falls through to the next returning case.
+        assert alias is None or alias == target
+        alias = target if kind == 'ALIAS' else None
+        first_slot = int(first)
+        slot_count = int(count) if count else 1
+        for slot in range(first_slot, first_slot + slot_count):
+            assert slot not in targets
+            targets[slot] = '&' + target
+    assert alias is None
+    return [targets[i] for i in range(len(targets))]
+
+
+def test_decode_rows_cover_each_declared_table(amdgpu_generated_root: Path):
+    for source in sorted(amdgpu_generated_root.glob('*/decoder.cpp')):
+        decoder = source.read_text()
+        assembly = source.with_name('decode_tables.S').read_text()
+        tables = re.findall(
+            r'DecodeTable<DecodeFactory \*, (\d+)>\s+(\w+)\s+RJ_DECODE_SYMBOL\((\w+)\)',
+            decoder,
+        )
+        assert tables, source
+        for size, table, symbol in tables:
+            macro = f'RJ_{table.upper()}_ROWS'
+            switch = decoder.split(f'return {table}[', 1)[1].split('#endif', 1)[0]
+            assert re.search(rf'\b{macro}\b', switch)
+            assert (
+                f'rj_table_begin {symbol}\n{macro}\nrj_table_end {symbol}, {size}'
+                in assembly
+            )
+            assert len(_decode_targets(source.parent, table)) == int(size), (
+                source,
+                table,
+            )
+
+
 def test_gfx1250_generated_inventory_omits_legacy_s_waitcnt(
     gfx1250_generated_root: Path,
 ):
     opcodes = (gfx1250_generated_root / 'opcodes.h').read_text()
-    decoder = (gfx1250_generated_root / 'decoder.cpp').read_text()
 
     assert 'kSWaitcntSopp' not in opcodes
-    table_start = decoder.index('DecoderImpl::sub_decode_sopp = {')
-    table_end = decoder.index('\n};', table_start)
-    decode_targets = re.findall(
-        r'&(detail|DecoderImpl)::([A-Za-z0-9_]+)',
-        decoder[table_start:table_end],
+    assert (
+        _decode_targets(gfx1250_generated_root, 'sub_decode_sopp')[9]
+        == '&DecoderImpl::decodeInvalid'
     )
-    assert decode_targets[9] == ('DecoderImpl', 'decodeInvalid')
 
 
 def _fake_sopp_parser(arch_name: str, *, sub_decode_funcs: list[str | None] | None):
@@ -2005,10 +2128,10 @@ def test_matrix_resolved_dense_operands_support_vgpr_and_inline_accumulators():
         uses_vgpr_msb_indexing=True,
         matrix_layout=MatrixLayout.WMMA_SPLIT_K,
         wave_size=32,
-        wave_size_max=64,
+        wave_size_max=32,
     )
 
-    body = _gen_mfma(inst, 'rdna4', profile)
+    body = _gen_mfma(inst, 'cdna5', profile)
 
     for operand in ('vdst', 'src0', 'src1'):
         assert (
@@ -2019,12 +2142,14 @@ def test_matrix_resolved_dense_operands_support_vgpr_and_inline_accumulators():
         'auto src2_off = Isa::resolved_vgpr_offset(wf, src2.opr_type_, '
         'src2.encoding_value_, src2.vgpr_msb_role());'
     ) in body
+    for base in ('dst', 'src0_base', 'src1_base'):
+        assert body.index(f'if (!{base}_off)') < body.index(f'vb + *{base}_off')
+    assert 'InstructionExecutionError::UnsupportedOperandValue' in body
     assert 'const_acc = amdgpu::ACC_FROM_VGPR;' in body
     assert 's2 = vb + *src2_off;' in body
     assert 'const_acc = amdgpu::RegisterAccess(wf).read_scalar(src2);' in body
     assert (
-        'amdgpu::exec_wmma_f32(cu, 16, 16, 32, 16, dst, src0_base, '
-        'src1_base, s2,' in body
+        'amdgpu::exec_wmma_f32_16x16x32_f16(cu, dst, src0_base, src1_base, s2,' in body
     )
 
 
@@ -2044,17 +2169,21 @@ def test_matrix_resolved_sparse_index_rejects_missing_vgpr_offset():
         'auto index_off = Isa::resolved_vgpr_offset(wf, src2.opr_type_, '
         'src2.encoding_value_, src2.vgpr_msb_role());'
     ) in body
-    assert 'if (!index_off)\n    throw util::UnimplementedInst(mnemonic());' in body
+    assert 'if (!index_off) {' in body
+    assert 'InstructionExecutionError::UnsupportedOperandValue' in body
+    assert 'throw util::UnimplementedInst' not in body
+    assert body.index('if (!index_off)') < body.index('uint32_t index_base')
     assert 'uint32_t index_base = vb + *index_off;' in body
     assert (
-        'amdgpu::exec_swmmac_f32(cu, 16, 16, 32, 16, dst, src0_base, '
-        'src1_base, s2, index_base, 16, index_key,' in body
+        'amdgpu::exec_gfx12_swmmac_dot4<false>(cu, wf.wf_size(), dst, src0_base, '
+        'src1_base, index_base, index_key,' in body
     )
 
 
 def test_matrix_direct_offsets_do_not_use_resolved_operand_setup():
     inst = Instruction('V_WMMA_F32_16X16X16_F16', 'ENC_VOP3P', 0, [])
     profile = _matrix_profile(
+        uses_rj_arith_matrix=True,
         matrix_layout=MatrixLayout.WMMA_SPLIT_K,
         wave_size=32,
         wave_size_max=64,
@@ -2065,10 +2194,8 @@ def test_matrix_direct_offsets_do_not_use_resolved_operand_setup():
     assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
     assert 'Isa::resolved_vgpr_offset' not in body
     assert 'rdna4::resolve_acc(vb, dst,' in body
-    assert (
-        'amdgpu::exec_gfx12_wmma_dot4<false>(cu, wf.wf_size(), dst, '
-        'src0_base, src1_base, s2,' in body
-    )
+    assert 'amdgpu::arith::exec_wmma(wf,' in body
+    assert 'flags, modifiers, dst, src0_base, src1_base, s2,' in body
 
 
 def test_matrix_direct_sparse_operands_reach_final_call():
@@ -2229,13 +2356,13 @@ def test_runtime_wave_swmmac_layout_does_not_depend_on_arch_name(
 
     if uses_vgpr_msb_indexing:
         assert (
-            'uint32_t dst = vb + *Isa::resolved_vgpr_offset('
+            'auto dst_off = Isa::resolved_vgpr_offset('
             'wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());'
         ) in body
     else:
         assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
-    assert 'uint32_t index_key = inst_.opsel & 0x1u;' in body
-    assert 'amdgpu::exec_swmmac_f32(' in body
+    assert 'uint32_t index_key = inst_.opsel & 0x3u;' in body
+    assert 'amdgpu::exec_gfx12_swmmac_dot4<false>(' in body
 
 
 def test_matrix_i32_final_call_sources_follow_profile_gate():
@@ -2243,12 +2370,12 @@ def test_matrix_i32_final_call_sources_follow_profile_gate():
 
     resolved = _gen_mfma(
         inst,
-        'rdna4',
+        'cdna5',
         _matrix_profile(
             uses_vgpr_msb_indexing=True,
             matrix_layout=MatrixLayout.WMMA_SPLIT_K,
             wave_size=32,
-            wave_size_max=64,
+            wave_size_max=32,
         ),
     )
     direct = _gen_mfma(
@@ -2262,8 +2389,8 @@ def test_matrix_i32_final_call_sources_follow_profile_gate():
     )
 
     assert (
-        'amdgpu::exec_wmma_i32(cu, 16, 16, 16, 8, dst, src0_base, '
-        'src1_base, s2,' in resolved
+        'amdgpu::exec_wmma_i32(cu, 16, 16, 16, 8, dst, src0_base, src1_base, s2,'
+        in resolved
     )
     assert (
         'amdgpu::exec_wmma_i32(cu, 16, 16, 16, 8, dst, src0_base, '
@@ -2278,124 +2405,225 @@ def _generated_matrix_call(body: str, callee: str) -> str:
 
 
 @pytest.mark.parametrize(
-    ('mnemonic', 'arch', 'callee', 'is_sparse'),
+    ('mnemonic', 'arch', 'callee', 'is_sparse', 'uses_vgpr_msb_indexing'),
     [
-        # Fixed-wave I32: sparse, specialized dense, and generic dense.
-        ('V_SWMMAC_I32_16X16X32_IU8', 'cdna5', 'exec_swmmac_i32', True),
-        (
-            'V_WMMA_I32_16X16X64_IU8',
-            'cdna5',
-            'exec_wmma_i32_16x16x64_iu8',
-            False,
-        ),
-        ('V_WMMA_I32_16X16X16_IU4', 'cdna5', 'exec_wmma_i32', False),
-        # Runtime-wave and replicated-half-wave I32.
-        ('V_SWMMAC_I32_16X16X32_IU8', 'rdna4', 'exec_swmmac_i32', True),
-        ('V_WMMA_I32_16X16X16_IU8', 'rdna3', 'exec_gfx11_wmma_i32', False),
-        ('V_WMMA_I32_16X16X16_IU8', 'rdna4', 'exec_wmma_i32', False),
-        # I32 MFMA-style fallback dispatches.
-        ('V_WMMA_I32_16X16X16_IU8', 'test_arch', 'exec_i32_mixed', False),
-        ('V_MFMA_I32_16X16X16_IU4', 'cdna3', 'exec_i32_mixed', False),
-        ('V_MFMA_I32_16X16X16_I8', 'cdna3', 'exec_i32_i8', False),
-        # Dynamic matrix-format WMMA.
-        (
-            'V_WMMA_F32_16X16X128_F8F6F4',
-            'cdna5',
-            'exec_wmma_f32_mixed',
-            False,
-        ),
-        # Standalone structured-sparse SMFMAC variants.
-        (
-            'V_SMFMAC_F32_16X16X32_F16',
-            'cdna3',
-            'exec_smfmac_f32_16x16x32_f16',
-            True,
-        ),
-        (
-            'V_SMFMAC_F32_16X16X64_FP8_BF8',
-            'cdna3',
-            'exec_smfmac_f32_16x16x64_fp8',
-            True,
-        ),
-        # Fixed-wave sparse float result variants.
-        ('V_SWMMAC_F32_16X16X32_F16', 'cdna5', 'exec_swmmac_f32', True),
-        ('V_SWMMAC_F16_16X16X32_F16', 'cdna5', 'exec_swmmac_f16', True),
-        ('V_SWMMAC_BF16_16X16X32_BF16', 'cdna5', 'exec_swmmac_bf16', True),
-        (
-            'V_SWMMAC_BF16F32_16X16X64_BF16',
-            'cdna5',
-            'exec_swmmac_bf16f32',
-            True,
-        ),
-        # Runtime-wave sparse float result variants.
-        ('V_SWMMAC_F32_16X16X32_F16', 'rdna4', 'exec_swmmac_f32', True),
-        ('V_SWMMAC_F16_16X16X32_F16', 'rdna4', 'exec_swmmac_f16', True),
-        ('V_SWMMAC_BF16_16X16X32_BF16', 'rdna4', 'exec_swmmac_bf16', True),
-        # Fixed-wave specialized dense result variants.
-        (
-            'V_WMMA_F32_16X16X32_F16',
-            'cdna5',
-            'exec_wmma_f32_16x16x32_f16',
-            False,
-        ),
-        (
-            'V_WMMA_BF16F32_16X16X32_BF16',
-            'cdna5',
-            'exec_wmma_bf16f32_16x16x32_bf16',
-            False,
-        ),
-        ('V_WMMA_F16_16X16X32_F16', 'cdna5', 'exec_wmma_f16_spec', False),
-        ('V_WMMA_BF16_16X16X32_BF16', 'cdna5', 'exec_wmma_bf16_spec', False),
-        (
-            'V_WMMA_F16_16X16X64_FP8_BF8',
-            'cdna5',
-            'exec_wmma_f16_f8_spec',
-            False,
-        ),
-        # Fixed-wave generic dense result variants.
-        ('V_WMMA_F32_16X16X16_F16', 'cdna5', 'exec_wmma_f32', False),
-        ('V_WMMA_F16_16X16X16_F16', 'cdna5', 'exec_wmma_f16', False),
-        ('V_WMMA_BF16_16X16X16_BF16', 'cdna5', 'exec_wmma_bf16', False),
-        # Replicated-half-wave and runtime-wave float dispatches.
-        ('V_WMMA_F32_16X16X16_F16', 'rdna3', 'exec_gfx11_wmma_dot2<false>', False),
-        (
-            'V_WMMA_F16_16X16X16_F16',
-            'rdna3',
-            'exec_gfx11_wmma_dot2<false, true>',
-            False,
-        ),
-        (
-            'V_WMMA_BF16_16X16X16_BF16',
-            'rdna3',
-            'exec_gfx11_wmma_dot2<true, true>',
-            False,
-        ),
-        ('V_WMMA_F32_16X16X16_F16', 'rdna4', 'exec_gfx12_wmma_dot4<false>', False),
-        (
-            'V_WMMA_F16_16X16X16_F16',
-            'rdna4',
-            'exec_gfx12_wmma_dot4<false, true>',
-            False,
-        ),
-        (
-            'V_WMMA_BF16_16X16X16_BF16',
-            'rdna4',
-            'exec_gfx12_wmma_dot4<true, true>',
-            False,
-        ),
-        # MFMA specialized and generic float dispatches.
-        (
-            'V_MFMA_F32_16X16X32_FP8_FP8',
-            'cdna3',
-            'exec_f32_mfma_f8_spec',
-            False,
-        ),
-        ('V_MFMA_F32_16X16X16_F16', 'cdna3', 'exec_f32_mfma_f16_spec', False),
-        ('V_MFMA_F32_16X16X16_F4', 'cdna3', 'exec_f32', False),
-        ('V_MFMA_F32_16X16X16_F16', 'test_arch', 'exec_f32', False),
+        (*case, indexed)
+        for case in [
+            # Fixed-wave I32: sparse, specialized dense, and generic dense.
+            ('V_SWMMAC_I32_16X16X32_IU8', 'cdna5', 'exec_swmmac_i32', True),
+            (
+                'V_WMMA_I32_16X16X64_IU8',
+                'cdna5',
+                'exec_wmma_i32_16x16x64_iu8',
+                False,
+            ),
+            ('V_WMMA_I32_16X16X16_IU4', 'cdna5', 'exec_wmma_i32', False),
+            # Runtime-wave and replicated-half-wave I32.
+            ('V_WMMA_I32_16X16X16_IU4', 'rdna3', 'arith::exec_wmma', False),
+            ('V_WMMA_I32_16X16X16_IU4', 'rdna4', 'arith::exec_wmma', False),
+            (
+                'V_WMMA_I32_16X16X32_IU4',
+                'rdna4',
+                'arith::exec_wmma',
+                False,
+            ),
+            (
+                'V_SWMMAC_I32_16X16X32_IU8',
+                'rdna4',
+                'arith::exec_swmmac',
+                True,
+            ),
+            (
+                'V_SWMMAC_I32_16X16X32_IU4',
+                'rdna4',
+                'arith::exec_swmmac',
+                True,
+            ),
+            (
+                'V_SWMMAC_I32_16X16X64_IU4',
+                'rdna4',
+                'arith::exec_swmmac',
+                True,
+            ),
+            ('V_WMMA_I32_16X16X16_IU8', 'rdna3', 'arith::exec_wmma', False),
+            ('V_WMMA_I32_16X16X16_IU8', 'rdna4', 'arith::exec_wmma', False),
+            # I32 MFMA-style fallback dispatches.
+            ('V_WMMA_I32_16X16X16_IU8', 'test_arch', 'exec_i32_mixed', False),
+            ('V_MFMA_I32_16X16X16_IU4', 'cdna3', 'exec_i32_mixed', False),
+            ('V_MFMA_I32_16X16X16_I8', 'cdna3', 'exec_i32_i8', False),
+            # Dynamic matrix-format WMMA.
+            (
+                'V_WMMA_F32_16X16X128_F8F6F4',
+                'cdna5',
+                'exec_wmma_f32_mixed',
+                False,
+            ),
+            # Standalone structured-sparse SMFMAC variants.
+            (
+                'V_SMFMAC_F32_16X16X32_F16',
+                'cdna3',
+                'exec_smfmac_f32_16x16x32_f16',
+                True,
+            ),
+            (
+                'V_SMFMAC_F32_16X16X64_FP8_BF8',
+                'cdna3',
+                'exec_smfmac_f32_16x16x64_fp8',
+                True,
+            ),
+            ('V_SMFMAC_I32_16X16X64_I8', 'cdna3', 'exec_smfmac_i32_i8', True),
+            ('V_SMFMAC_I32_32X32X32_I8', 'cdna3', 'exec_smfmac_i32_i8', True),
+            ('V_SMFMAC_I32_16X16X128_I8', 'cdna4', 'exec_smfmac_i32_i8', True),
+            ('V_SMFMAC_I32_32X32X64_I8', 'cdna4', 'exec_smfmac_i32_i8', True),
+            # Fixed-wave sparse float result variants.
+            ('V_SWMMAC_F32_16X16X32_F16', 'cdna5', 'exec_swmmac_f32', True),
+            ('V_SWMMAC_F16_16X16X32_F16', 'cdna5', 'exec_swmmac_f16', True),
+            ('V_SWMMAC_BF16_16X16X32_BF16', 'cdna5', 'exec_swmmac_bf16', True),
+            (
+                'V_SWMMAC_BF16F32_16X16X64_BF16',
+                'cdna5',
+                'exec_swmmac_bf16f32',
+                True,
+            ),
+            # Runtime-wave sparse float result variants.
+            (
+                'V_SWMMAC_F32_16X16X32_F16',
+                'rdna4',
+                'arith::exec_swmmac',
+                True,
+            ),
+            (
+                'V_SWMMAC_F32_16X16X32_BF16',
+                'rdna4',
+                'arith::exec_swmmac',
+                True,
+            ),
+            (
+                'V_SWMMAC_F16_16X16X32_F16',
+                'rdna4',
+                'arith::exec_swmmac',
+                True,
+            ),
+            (
+                'V_SWMMAC_BF16_16X16X32_BF16',
+                'rdna4',
+                'arith::exec_swmmac',
+                True,
+            ),
+            (
+                'V_SWMMAC_F32_16X16X32_FP8_FP8',
+                'rdna4',
+                'arith::exec_swmmac',
+                True,
+            ),
+            (
+                'V_SWMMAC_F32_16X16X32_FP8_BF8',
+                'rdna4',
+                'arith::exec_swmmac',
+                True,
+            ),
+            (
+                'V_SWMMAC_F32_16X16X32_BF8_FP8',
+                'rdna4',
+                'arith::exec_swmmac',
+                True,
+            ),
+            (
+                'V_SWMMAC_F32_16X16X32_BF8_BF8',
+                'rdna4',
+                'arith::exec_swmmac',
+                True,
+            ),
+            # Fixed-wave specialized dense result variants.
+            (
+                'V_WMMA_F32_16X16X32_F16',
+                'cdna5',
+                'exec_wmma_f32_16x16x32_f16',
+                False,
+            ),
+            (
+                'V_WMMA_BF16F32_16X16X32_BF16',
+                'cdna5',
+                'exec_wmma_bf16f32_16x16x32_bf16',
+                False,
+            ),
+            ('V_WMMA_F16_16X16X32_F16', 'cdna5', 'exec_wmma_f16_spec', False),
+            ('V_WMMA_BF16_16X16X32_BF16', 'cdna5', 'exec_wmma_bf16_spec', False),
+            (
+                'V_WMMA_F16_16X16X64_FP8_BF8',
+                'cdna5',
+                'exec_wmma_f16_f8_spec',
+                False,
+            ),
+            # Fixed-wave generic dense result variants.
+            ('V_WMMA_F32_16X16X16_F16', 'cdna5', 'exec_wmma_f32', False),
+            ('V_WMMA_F16_16X16X16_F16', 'cdna5', 'exec_wmma_f16', False),
+            ('V_WMMA_BF16_16X16X16_BF16', 'cdna5', 'exec_wmma_bf16', False),
+            # Replicated-half-wave and runtime-wave float dispatches.
+            ('V_WMMA_F32_16X16X16_F16', 'rdna3', 'arith::exec_wmma', False),
+            (
+                'V_WMMA_F16_16X16X16_F16',
+                'rdna3',
+                'arith::exec_wmma',
+                False,
+            ),
+            (
+                'V_WMMA_BF16_16X16X16_BF16',
+                'rdna3',
+                'arith::exec_wmma',
+                False,
+            ),
+            ('V_WMMA_F32_16X16X16_F16', 'rdna4', 'arith::exec_wmma', False),
+            (
+                'V_WMMA_F16_16X16X16_F16',
+                'rdna4',
+                'arith::exec_wmma',
+                False,
+            ),
+            (
+                'V_WMMA_BF16_16X16X16_BF16',
+                'rdna4',
+                'arith::exec_wmma',
+                False,
+            ),
+            (
+                'V_WMMA_F32_16X16X16_FP8_FP8',
+                'rdna4',
+                'arith::exec_wmma',
+                False,
+            ),
+            (
+                'V_WMMA_F32_16X16X16_FP8_BF8',
+                'rdna4',
+                'arith::exec_wmma',
+                False,
+            ),
+            (
+                'V_WMMA_F32_16X16X16_BF8_FP8',
+                'rdna4',
+                'arith::exec_wmma',
+                False,
+            ),
+            (
+                'V_WMMA_F32_16X16X16_BF8_BF8',
+                'rdna4',
+                'arith::exec_wmma',
+                False,
+            ),
+            # MFMA specialized and generic float dispatches.
+            (
+                'V_MFMA_F32_16X16X32_FP8_FP8',
+                'cdna3',
+                'exec_f32_mfma_f8_spec',
+                False,
+            ),
+            ('V_MFMA_F32_16X16X16_F16', 'cdna3', 'exec_f32_mfma_f16_spec', False),
+            ('V_MFMA_F32_16X16X16_F4', 'cdna3', 'exec_f32', False),
+            ('V_MFMA_F32_16X16X16_F16', 'test_arch', 'exec_f32', False),
+        ]
+        for indexed in ([False] if case[1] in ('rdna3', 'rdna4') else [False, True])
     ],
 )
-@pytest.mark.parametrize('uses_vgpr_msb_indexing', [False, True])
 def test_every_matrix_executor_uses_profile_selected_operand_bases(
     mnemonic, arch, callee, is_sparse, uses_vgpr_msb_indexing
 ):
@@ -2407,14 +2635,26 @@ def test_every_matrix_executor_uses_profile_selected_operand_bases(
             uses_vgpr_msb_indexing=uses_vgpr_msb_indexing,
         ),
     )
+    if arch in ('rdna3', 'rdna4') and mnemonic.startswith('V_WMMA_'):
+        assert 'rj_arith_' + mnemonic.lower() in body
+    if arch == 'rdna4' and mnemonic.startswith('V_SWMMAC_'):
+        assert 'rj_arith_' + mnemonic.lower() in body
     call = _generated_matrix_call(body, callee)
     is_standalone_smfmac = mnemonic.startswith('V_SMFMAC_')
+    is_rdna_sparse = is_sparse and callee.startswith(
+        (
+            'exec_rdna_swmmac_i32',
+            'exec_gfx12_swmmac_dot4',
+            'exec_gfx12_swmmac_dot8',
+            'arith::exec_swmmac',
+        )
+    )
 
     if is_standalone_smfmac:
         expected_operands = 'dst, s0b, s1b, idx'
         if uses_vgpr_msb_indexing:
-            assert 'uint32_t s0b = vb + *Isa::resolved_vgpr_offset' in body
-            assert 'uint32_t s1b = vb + *Isa::resolved_vgpr_offset' in body
+            assert 'uint32_t s0b = vb + *s0b_off;' in body
+            assert 'uint32_t s1b = vb + *s1b_off;' in body
             assert 'uint32_t idx = vb + *index_off;' in body
         else:
             assert 'uint32_t s0b = amdgpu::src_base(vb, src0.encoding_value_);' in body
@@ -2424,8 +2664,8 @@ def test_every_matrix_executor_uses_profile_selected_operand_bases(
     else:
         if uses_vgpr_msb_indexing:
             expected_operands = 'dst, src0_base, src1_base, s2'
-            assert 'uint32_t src0_base = vb + *Isa::resolved_vgpr_offset' in body
-            assert 'uint32_t src1_base = vb + *Isa::resolved_vgpr_offset' in body
+            assert 'uint32_t src0_base = vb + *src0_base_off;' in body
+            assert 'uint32_t src1_base = vb + *src1_base_off;' in body
         else:
             expected_operands = 'dst, src0_base, src1_base, s2'
             assert (
@@ -2438,9 +2678,17 @@ def test_every_matrix_executor_uses_profile_selected_operand_bases(
             )
             assert 'Isa::resolved_vgpr_offset' not in body
 
+    if is_rdna_sparse:
+        expected_operands = 'dst, src0_base, src1_base, index_base'
     assert expected_operands in call
     if is_sparse and not is_standalone_smfmac:
-        assert f'{expected_operands}, index_base,' in call
+        if is_rdna_sparse:
+            if callee == 'arith::exec_swmmac':
+                assert 'uint64_t(index_key) << 7' in body
+            else:
+                assert 'index_base, index_key' in call
+        else:
+            assert f'{expected_operands}, index_base,' in call
         if uses_vgpr_msb_indexing:
             assert 'uint32_t index_base = vb + *index_off;' in body
         else:
@@ -2479,11 +2727,11 @@ def test_matrix_f64_resolved_sources_use_normalized_base_expressions():
     body = _gen_mfma(inst, 'rdna4', profile)
 
     assert (
-        'uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, '
+        'auto src0_base_off = Isa::resolved_vgpr_offset(wf, '
         'src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());'
     ) in body
     assert (
-        'uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, '
+        'auto src1_base_off = Isa::resolved_vgpr_offset(wf, '
         'src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());'
     ) in body
     assert '                 src0_base,\n                 src1_base,' in body
@@ -2556,14 +2804,15 @@ def test_unimplemented_execute_stub_requires_unconditional_failure(body, expecte
         ('cdna4', 'VSmfmacI3232x32x32I8Vop3pMfma'),
     ],
 )
-def test_generated_sparse_integer_mma_stubs_report_failure(
+def test_generated_sparse_integer_mma_dispatches_cross_lane_helper(
     amdgpu_generated_root: Path, arch: str, class_name: str
 ):
     source = (amdgpu_generated_root / arch / 'vop3p_exec.cpp').read_text()
     body = _generated_function_body(source, f'void {class_name}::execute_impl')
-    assert 'wf.report_instruction_execution_error(' in body
-    assert 'InstructionExecutionError::UnimplementedInstruction' in body
-    assert 'throw ' not in body
+    assert 'amdgpu::exec_smfmac_i32_i8<' in body
+    assert 'idx, inst_.cbsz, inst_.abid);' in body
+    assert 'inst_.acc_cd' in body
+    assert 'InstructionExecutionError::UnimplementedInstruction' not in body
 
 
 def test_cdna3_real_spec_mfma_destination_uses_acc_cd(tmp_path):
@@ -2672,49 +2921,143 @@ def test_rdna_wmma_uses_arch_specific_wave32_operand_layout():
         body = _gen_mfma(inst, arch)
 
         assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
-        assert 'amdgpu::exec_gfx11_wmma_dot2<false>(cu, wf.wf_size(), dst,' in body
+        if arch == 'rdna3':
+            assert 'rj_arith_v_wmma_f32_16x16x16_f16_w32' in body
+        else:
+            assert 'amdgpu::exec_gfx11_wmma_dot2<false>(cu, wf.wf_size(), dst,' in body
         assert 'amdgpu::exec_f32(cu, 16, 16, 16' not in body
 
     body = _gen_mfma(inst, 'rdna4')
     assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
-    assert 'amdgpu::exec_gfx12_wmma_dot4<false>(cu, wf.wf_size(), dst,' in body
+    assert 'rj_arith_v_wmma_f32_16x16x16_f16_w32_gfx12' in body
     assert 'amdgpu::exec_f32(cu, 16, 16, 16' not in body
 
 
-def test_rdna_wmma_i32_iu8_uses_arch_specific_wave32_operand_layout():
-    operands = [
-        Operand('vdst', 256, 'OPR_VGPR', False, True, False, False, 0),
-        Operand('src0', 128, 'OPR_SRC_VGPR', True, False, False, False, 1),
-        Operand('src1', 128, 'OPR_SRC_VGPR', True, False, False, False, 2),
-        Operand('src2', 256, 'OPR_SRC_VGPR_OR_INLINE', True, False, False, False, 3),
-    ]
-    inst = Instruction('V_WMMA_I32_16X16X16_IU8', 'ENC_VOP3P', 0, operands)
-
-    for arch in ('rdna3', 'rdna3_5'):
-        body = _gen_mfma(inst, arch)
-
-        assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
+@pytest.mark.parametrize('bits', [4, 8])
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna3_5', 'rdna4'])
+def test_rdna_wmma_i32_uses_measured_accumulation_policy(bits, arch):
+    inst = Instruction(f'V_WMMA_I32_16X16X16_IU{bits}', 'ENC_VOP3P', 0, [])
+    body = _gen_mfma(inst, arch)
+    assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
+    assert 'src2.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc)' in body
+    if arch == 'rdna3_5':
         assert (
-            'auto extract_a = [&](auto &cu, uint32_t base, const amdgpu::InputLoc &loc)'
+            f'amdgpu::exec_rdna_wmma_i32<false, {bits}>(cu, wf.wf_size(), dst,' in body
+        )
+        assert (
+            '/*a_signed=*/(inst_.neg & 0x1u) != 0, /*b_signed=*/(inst_.neg & 0x2u) != 0, inst_.clamp'
             in body
         )
-        assert '(inst_.neg & 0x1u) ? amdgpu::extract_i8(cu, base, loc)' in body
-        assert '(inst_.neg & 0x2u) ? amdgpu::extract_i8(cu, base, loc)' in body
-        assert (
-            'amdgpu::exec_gfx11_wmma_i32(cu, wf.wf_size(), 16, 16, 16, 8, dst,' in body
-        )
-        assert 'amdgpu::exec_i32_mixed(cu, 16, 16, 16' not in body
-
-    body = _gen_mfma(inst, 'rdna4')
-    assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
-    assert (
-        'auto extract_a = [&](auto &cu, uint32_t base, const amdgpu::InputLoc &loc)'
-        in body
-    )
-    assert '(inst_.neg & 0x1u) ? amdgpu::extract_i8(cu, base, loc)' in body
-    assert '(inst_.neg & 0x2u) ? amdgpu::extract_i8(cu, base, loc)' in body
-    assert 'amdgpu::exec_wmma_i32(cu, 16, 16, 16, 8, dst,' in body
+    else:
+        suffix = '_w32_gfx12' if arch == 'rdna4' else ''
+        assert f'rj_arith_v_wmma_i32_16x16x16_iu{bits}{suffix}' in body
+        assert '(inst_.neg & 3u) | (inst_.clamp ? RJ_ARITH_WMMA_CLAMP : 0u)' in body
     assert 'amdgpu::exec_i32_mixed(cu, 16, 16, 16' not in body
+    # CDNA5 shares a split-K layout but has independent numerical behavior.
+    assert 'amdgpu::exec_wmma_i32(' in _gen_mfma(inst, 'cdna5')
+
+
+@pytest.mark.parametrize(
+    'arch, dtype', [('rdna3', 'IU4'), ('rdna3_5', 'IU4'), ('rdna4', 'IU8')]
+)
+def test_rdna_unmeasured_integer_shape_is_not_approximated(arch, dtype):
+    inst = Instruction(f'V_WMMA_I32_16X16X32_{dtype}', 'ENC_VOP3P', 0, [])
+    if arch in ('rdna3', 'rdna4'):
+        with pytest.raises(ValueError, match='Missing rj-arith matrix binding'):
+            _gen_mfma(inst, arch)
+        return
+    body = _gen_mfma(inst, arch)
+    assert 'throw util::UnimplementedInst(mnemonic());' in body
+    assert 'exec_wmma_i32(' not in body
+    assert 'exec_rdna_wmma_i32' not in body
+
+
+@pytest.mark.parametrize('dtype, k', [('IU8', 64), ('IU4', 128)])
+def test_rdna4_unmeasured_sparse_integer_shape_is_not_approximated(dtype, k):
+    inst = Instruction(f'V_SWMMAC_I32_16X16X{k}_{dtype}', 'ENC_VOP3P', 0, [])
+    with pytest.raises(ValueError, match='Missing rj-arith matrix binding'):
+        _gen_mfma(inst, 'rdna4')
+
+
+def test_rdna4_iu4_k32_uses_measured_saturation():
+    inst = Instruction('V_WMMA_I32_16X16X32_IU4', 'ENC_VOP3P', 0, [])
+    body = _gen_mfma(inst, 'rdna4')
+    assert 'rj_arith_v_wmma_i32_16x16x32_iu4_w32_gfx12' in body
+    assert 'RJ_ARITH_WMMA_CLAMP' in body
+    assert 'src2.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc)' in body
+    assert 'exec_wmma_i32(' not in body
+    assert 'amdgpu::exec_wmma_i32(' in _gen_mfma(inst, 'cdna5')
+
+
+@pytest.mark.parametrize('bits, k', [(8, 32), (4, 32), (4, 64)])
+def test_rdna4_sparse_integers_use_full_index_key_and_measured_groups(bits, k):
+    inst = Instruction(f'V_SWMMAC_I32_16X16X{k}_IU{bits}', 'ENC_VOP3P', 0, [])
+    body = _gen_mfma(inst, 'rdna4')
+    assert f'rj_arith_v_swmmac_i32_16x16x{k}_iu{bits}' in body
+    key_mask = (
+        'lanes == 32 ? 0u : 1u'
+        if k == 64
+        else '1u' if bits == 4 else 'lanes == 32 ? 1u : 3u'
+    )
+    assert f'uint32_t index_key = inst_.opsel & ({key_mask});' in body
+    assert 'uint64_t(index_key) << 7' in body
+    assert '(inst_.neg & 3u) | (inst_.clamp ? RJ_ARITH_WMMA_CLAMP : 0u)' in body
+    assert 'const_acc' not in body
+    assert 'amdgpu::exec_swmmac_i32(' in _gen_mfma(inst, 'cdna5')
+
+
+@pytest.mark.parametrize('input_type', ['FP8_FP8', 'FP8_BF8', 'BF8_FP8', 'BF8_BF8'])
+def test_rdna_wmma_f8_uses_native_eight_product_steps(input_type):
+    inst = Instruction(f'V_WMMA_F32_16X16X16_{input_type}', 'ENC_VOP3P', 0, [])
+    body = _gen_mfma(inst, 'rdna4')
+    assert f'rj_arith_v_wmma_f32_16x16x16_{input_type.lower()}' in body
+    assert 'uint64_t modifiers = 0;' in body
+    assert 'src2.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc)' in body
+    assert 'wmma_c_modifier' not in body
+    assert 'amdgpu::exec_wmma_f32_f8_spec<' in _gen_mfma(inst, 'cdna5')
+
+
+@pytest.mark.parametrize('input_type', ['FP8_FP8', 'FP8_BF8', 'BF8_FP8', 'BF8_BF8'])
+def test_rdna_unmeasured_f8_shape_is_not_approximated(input_type):
+    inst = Instruction(f'V_WMMA_F32_16X16X32_{input_type}', 'ENC_VOP3P', 0, [])
+    with pytest.raises(ValueError, match='Missing rj-arith matrix binding'):
+        _gen_mfma(inst, 'rdna4')
+
+
+@pytest.mark.parametrize(
+    'result_type, input_type',
+    [
+        ('F32', 'F16'),
+        ('F32', 'BF16'),
+        ('F16', 'F16'),
+        ('BF16', 'BF16'),
+        ('F32', 'FP8_FP8'),
+        ('F32', 'FP8_BF8'),
+        ('F32', 'BF8_FP8'),
+        ('F32', 'BF8_BF8'),
+    ],
+)
+def test_rdna4_sparse_float_uses_measured_arithmetic(result_type, input_type):
+    inst = Instruction(
+        f'V_SWMMAC_{result_type}_16X16X32_{input_type}', 'ENC_VOP3P', 0, []
+    )
+    body = _gen_mfma(inst, 'rdna4')
+    assert (
+        f'rj_arith_v_swmmac_{result_type.lower()}_16x16x32_{input_type.lower()}' in body
+    )
+    assert ('wf.fp16_ovfl()' in body) == (result_type != 'F32')
+    assert 'uint64_t(index_key) << 7' in body
+    assert 'uint32_t index_key = inst_.opsel & (lanes == 32 ? 1u : 3u);' in body
+    if input_type in ('F16', 'BF16'):
+        assert '(inst_.neg & 7u) | (uint64_t(inst_.neg_hi & 7u) << 3)' in body
+    assert 'const_acc' not in body
+    assert f'amdgpu::exec_swmmac_{result_type.lower()}(' in _gen_mfma(inst, 'cdna5')
+
+
+def test_rdna4_unmeasured_sparse_float_shape_is_not_approximated():
+    inst = Instruction('V_SWMMAC_F32_16X16X64_F16', 'ENC_VOP3P', 0, [])
+    with pytest.raises(ValueError, match='Missing rj-arith matrix binding'):
+        _gen_mfma(inst, 'rdna4')
 
 
 def test_rdna_wmma_f16_bf16_use_arch_specific_wave32_dispatch():
@@ -2738,21 +3081,31 @@ def test_rdna_wmma_f16_bf16_use_arch_specific_wave32_dispatch():
             body = _gen_mfma(inst, arch)
 
             assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
-            assert (
-                f'amdgpu::exec_gfx11_wmma_dot2<{bf16}, true>(cu, wf.wf_size(), dst,'
-                in body
-            )
-            assert '(inst_.op_sel >> 2) & 1u' in body
-            assert 'inst_.neg, inst_.neg_hi' in body
+            if arch == 'rdna3':
+                assert (
+                    f'rj_arith_v_wmma_{dtype.lower()}_16x16x16_{dtype.lower()}' in body
+                )
+                assert '(inst_.op_sel & 4u) != 0' in body
+                assert 'RJ_ARITH_WMMA_HIGH_C_D' in body
+                assert 'inst_.neg | (uint64_t(inst_.neg_hi) << 3)' in body
+            else:
+                assert (
+                    f'amdgpu::exec_gfx11_wmma_dot2<{bf16}, true>(cu, wf.wf_size(), dst,'
+                    in body
+                )
+                assert '(inst_.op_sel >> 2) & 1u' in body
+                assert 'inst_.neg, inst_.neg_hi' in body
             assert 'wf.fp16_ovfl()' in body
             assert f'dot_packed16::inline_word<{bf16}>' in body
 
         body = _gen_mfma(inst, 'rdna4')
         assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
         assert (
-            f'amdgpu::exec_gfx12_wmma_dot4<{bf16}, true>(cu, wf.wf_size(), dst,' in body
+            f'rj_arith_v_wmma_{dtype.lower()}_16x16x16_{dtype.lower()}_w32_gfx12'
+            in body
         )
-        assert 'inst_.neg, inst_.neg_hi, wf.fp16_ovfl());' in body
+        assert 'inst_.neg | (uint64_t(inst_.neg_hi) << 3)' in body
+        assert 'wf.fp16_ovfl()' in body
         assert f'dot_packed16::inline_word<{bf16}>' in body
         assert 'exec_gfx11_wmma' not in body
 
@@ -2908,13 +3261,7 @@ def test_cdna3_fp8_cvt_uses_fnuz_helper_variant():
     assert 'util::bf8_e5m2_fnuz_to_f32' in packed
     assert 'util::bf8_e5m2_to_f32' not in packed
 
-    unary = gen_vector_unary(
-        ['vdst'],
-        ['src0'],
-        'cvt_f32_fp8',
-        None,
-        arch_name='cdna3',
-    )
+    unary = _lower_unary('V_CVT_F32_FP8', 'cdna3')
     assert 'util::fp8_e4m3_fnuz_to_f32' in unary
     assert 'util::fp8_e4m3_to_f32' not in unary
 
@@ -2930,46 +3277,47 @@ def test_cdna4_fp8_cvt_keeps_ocp_helper_variant():
         encoding_map=None,
     )
 
-    widen = gen_cvt_fp8(SimpleNamespace(**ctx.__dict__, op='pk_f32_fp8'))
+    # CDNA4 keeps util's OCP helpers and its manual's FP16_OVFL rule; see
+    # fp8_formats.fp8_policy.
+    widen = gen_cvt_fp8(SimpleNamespace(**ctx.__dict__, op='pk_f32_fp8', has_abs=True))
     assert 'util::fp8_e4m3_to_f32' in widen
-    assert 'util::fp8_e4m3_fnuz_to_f32' not in widen
+    assert 'amdgpu::conversion::decode_fp8' not in widen
+    assert 'fnuz' not in widen
 
-    narrow = gen_cvt_fp8(SimpleNamespace(**ctx.__dict__, op='pk_fp8_f32'))
+    narrow = gen_cvt_fp8(SimpleNamespace(**ctx.__dict__, op='pk_fp8_f32', has_abs=True))
     assert 'util::f32_to_fp8_e4m3_rne_mode' in narrow
-    assert 'util::f32_to_fp8_e4m3_fnuz_rne_mode' not in narrow
     assert 'wf.fp16_ovfl()' in narrow
+    assert 'amdgpu::conversion_to_fp8' not in narrow
+    assert 'fnuz' not in narrow
 
-    unary = gen_vector_unary(
-        ['vdst'],
-        ['src0'],
-        'cvt_f32_fp8',
-        None,
-        arch_name='cdna4',
-    )
+    unary = _lower_unary('V_CVT_F32_FP8', 'cdna4')
     assert 'util::fp8_e4m3_to_f32' in unary
-    assert 'util::fp8_e4m3_fnuz_to_f32' not in unary
+    assert 'fnuz' not in unary
 
 
-def test_f32_to_f16_vector_conversion_threads_fp16_ovfl():
-    unary = gen_vector_unary(['vdst'], ['src0'], 'cvt', 'f16_f32')
+def test_f32_to_f16_vector_conversion_resolves_mode_once():
+    # conversion_to_float reads FP16_OVFL and the rounding fields from MODE.
+    unary = _lower_unary('V_CVT_F16_F32')
 
-    assert 'util::f32_to_f16_mode(s, wf.fp16_ovfl())' in unary
+    declaration = 'const auto conversion = amdgpu::sdwa_conversion_to_f16<amdgpu::fp_format::F32>('
+    assert declaration in unary
+    assert unary.index(declaration) < unary.index('for (uint32_t lane')
+    assert 'util::f32_to_f16' not in unary
 
 
 def test_fp16_ovfl_sensitive_f16_simd_probes_stay_vectorized():
+    # The scalar body's stage object reads FP16_OVFL when it is resolved.
     cvt_probe = simd_probe_line('v_cvt_f16_f32_vop1')
-    assert cvt_probe is not None
-    assert 'if (wf.fp16_ovfl())' in cvt_probe
-    assert 'util::f32_to_f16_ovfl_simd' in cvt_probe
-    assert 'util::f32_to_f16_simd' in cvt_probe
-    assert 'ROCJITSU_TRY_SIMD_VOP1_UNARY' in cvt_probe
+    assert (
+        cvt_probe == '  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, conversion);'
+    )
 
     add_probe = simd_probe_line('v_add_f16_vop3', true16_vop3=True)
     assert add_probe is not None
-    assert 'if (wf.fp16_ovfl())' in add_probe
-    assert 'util::f32_to_f16_ovfl_simd' in add_probe
-    assert 'util::f32_to_f16_simd' in add_probe
-    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16' in add_probe
+    # The MODE-aware helper now owns both FP16_OVFL narrowing variants.
+    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(true,' in add_probe
+    assert 'amdgpu::fp_mode::Arithmetic::ADD' in add_probe
+    assert 'native_arithmetic_matches' not in add_probe
 
 
 def test_cdna_f64_mfma_uses_blgp_as_neg_immediate():
@@ -2985,9 +3333,13 @@ def test_cdna_f64_mfma_uses_blgp_as_neg_immediate():
         body = _gen_mfma(inst, arch)
         assert 's2, const_acc, inst_.blgp);' in body
 
-    for arch in ('rdna3', 'rdna4', 'cdna5'):
+    for arch in ('rdna3_5', 'cdna5'):
         body = _gen_mfma(inst, arch)
         assert 's2, const_acc, 0u);' in body
+
+    for arch in ('rdna3', 'rdna4'):
+        with pytest.raises(ValueError, match='Missing rj-arith matrix binding'):
+            _gen_mfma(inst, arch)
 
 
 def test_gfx1251_f64_wmma_uses_wave32_mode_independent_executor():
@@ -3448,6 +3800,7 @@ def test_generated_special_vop3_true16_paths_use_selected_halves(
         execute_shared, 'v_div_fixup_f16_vop3', 'v_div_fixup_f32_vop3'
     )
     assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16' in div_fixup
+    assert 'F16TernaryOutputOrder::MODIFY_THEN_ROUND' in div_fixup
     assert 'read_vop3_true16_src(inst.src0, wf, lane, opsel, 0)' in div_fixup
     assert 'read_vop3_true16_src(inst.src1, wf, lane, opsel, 1)' in div_fixup
     assert 'read_vop3_true16_src(inst.src2, wf, lane, opsel, 2)' in div_fixup
@@ -3501,6 +3854,29 @@ def test_generated_classified_alu_latches_trapsts_before_simd_return(
     assert body.count('wf.set_trapsts(wf.trapsts() | alu_causes);') == 1
 
 
+def test_generated_f32_to_f64_conversion_applies_vop3_modifiers(
+    execute_shared_path: Path,
+):
+    execute_shared = execute_shared_path.read_text()
+    body = _shared_execute_body(
+        execute_shared, 'v_cvt_f64_f32_vop3', 'v_cvt_f64_i32_vop1'
+    )
+
+    # One stage object takes all four fields; the SIMD probe and the scalar
+    # loop both use it, so a modified encoding stays on the SIMD path.
+    declaration = (
+        'const auto conversion =\n'
+        '      amdgpu::conversion_to_float<amdgpu::fp_format::F32, amdgpu::fp_format::F64>(\n'
+        '          wf, inst.inst_.abs, inst.inst_.neg, inst.inst_.omod, inst.inst_.clamp);'
+    )
+    probe = 'ROCJITSU_TRY_SIMD_CONVERSION_TO_F64(conversion);'
+    assert body.count('amdgpu::conversion_to_float<') == 1
+    assert (
+        body.index(declaration) < body.index(probe) < body.index('for (uint32_t lane')
+    )
+    assert '!inst.inst_.abs' not in body
+
+
 def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
     execute_shared_path: Path,
     gfx1250_generated_root: Path,
@@ -3518,8 +3894,7 @@ def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
     assert 'write_vop3_true16_dst' not in unary
 
     binary = _shared_execute_body(execute_shared, 'v_add_f16_vop3', 'v_add_f32_vop2')
-    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_F16' in binary
-    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16' not in binary
+    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(false,' in binary
     assert 'read_vop3_true16_src' not in binary
     assert 'write_vop3_true16_dst' not in binary
 
@@ -3543,7 +3918,7 @@ def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
     true16_binary = _generated_method_body(
         gfx1250_vop3_alu, 'VAddF16Vop3', 'VSubF16Vop3'
     )
-    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16' in true16_binary
+    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(true,' in true16_binary
     assert (
         '[[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);' in true16_binary
     )
@@ -3568,6 +3943,238 @@ def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
     assert 'read_vop3_true16_src(src2, wf, lane, opsel, 2)' in true16_ternary
     assert 'write_vop3_true16_dst(vdst, wf, lane, opsel,' in true16_ternary
     assert 'inst.vdst.write_lane' not in true16_ternary
+
+
+@pytest.mark.parametrize('arch_name', ['rdna3_5', 'rdna4', 'cdna5'])
+def test_scalar_f16_source_lowering_uses_numeric_operand_format(arch_name):
+    spec = Parser(
+        str(_mrisa_dir() / f'amdgpu_isa_{arch_name}.xml'),
+        _profile_for_arch(arch_name),
+    ).parse()
+    semantics = derive_all_semantics(spec)
+    generator = CodeGenerator(spec, '', semantics)
+    arithmetic = 'S_MIN_F16' if arch_name == 'rdna3_5' else 'S_ADD_F16'
+    cases = [
+        (arithmetic, ('ssrc0', 'ssrc1'), False),
+        ('S_CVT_F32_F16', ('ssrc0',), False),
+        ('S_CVT_HI_F32_F16', ('ssrc0',), True),
+        ('S_SEXT_I32_I16', (), False),
+        ('S_PACK_LL_B32_B16', (), False),
+        ('S_PACK_LH_B32_B16', (), False),
+        ('S_PACK_HH_B32_B16', (), False),
+        ('S_PACK_HL_B32_B16', (), False),
+    ]
+    for name, numeric_sources, high in cases:
+        enc, inst = next(
+            (enc, inst)
+            for enc in spec.inst_encodings
+            for inst in enc.insts
+            if inst.name == name
+        )
+        generator._current_inst_fields = {field.name for field in enc.ucode_fields}
+        generator._current_operand_names = {operand.name for operand in inst.operands}
+        generator._current_enc = enc
+        body = generator._gen_execute_body(
+            inst, semantics.instructions[name], enc.enc_name
+        )
+
+        for operand in inst.src_operands:
+            if operand.name in numeric_sources:
+                assert operand.data_format_name == 'FMT_NUM_F16', name
+                suffix = ', true' if high else ''
+                assert (
+                    f'amdgpu::read_scalar_f16_carrier({operand.name}, wf{suffix})'
+                    in body
+                ), name
+                assert f'.read_scalar({operand.name})' not in body, name
+            else:
+                assert operand.data_format_name != 'FMT_NUM_F16', name
+                assert f'.read_scalar({operand.name})' in body, name
+        if not numeric_sources:
+            assert 'read_scalar_f16_carrier' not in body, name
+        assert ('>> 16' in body) or not high, name
+
+
+@pytest.mark.parametrize('arch_name', ['rdna3', 'rdna4', 'cdna4', 'cdna5'])
+def test_generated_16bit_valu_inline_format_follows_each_source(
+    arch_name, amdgpu_generated_root: Path
+):
+    spec = Parser(
+        str(_mrisa_dir() / f'amdgpu_isa_{arch_name}.xml'),
+        _profile_for_arch(arch_name),
+    ).parse()
+    generated_root = amdgpu_generated_root / _generated_dir_name(arch_name)
+    source = '\n'.join(
+        path.read_text()
+        for path in sorted(generated_root.glob('vop*.cpp'))
+        if '_exec' not in path.stem
+    )
+    cases = [
+        ('ENC_VOP1', 'V_CVT_F16_I16', {'src0'}),
+        ('ENC_VOP1', 'V_CVT_F16_U16', {'src0'}),
+        ('ENC_VOP3', 'V_CVT_F16_I16', {'src0'}),
+        ('ENC_VOP3', 'V_CVT_F16_U16', {'src0'}),
+        ('ENC_VOP3', 'V_MAX_I16', {'src0', 'src1'}),
+        ('ENC_VOP3', 'V_LSHLREV_B16', {'src0', 'src1'}),
+        ('ENC_VOP2', 'V_ADD_F16', set()),
+        ('ENC_VOP3', 'V_ADD_F16', set()),
+        ('ENC_VOP2', 'V_LDEXP_F16', set()),
+        ('ENC_VOP3', 'V_LDEXP_F16', set()),
+        ('ENC_VOP3P', 'V_PK_ADD_F16', set()),
+    ]
+    if arch_name != 'cdna4':
+        cases.extend(
+            [
+                ('ENC_VOP1', 'V_MOV_B16', {'src0'}),
+                ('ENC_VOP3', 'V_CNDMASK_B16', {'src0', 'src1'}),
+            ]
+        )
+    cases = [
+        (encoding, name, dict.fromkeys(sources, 'F32'))
+        for encoding, name, sources in cases
+    ]
+    bf16 = {
+        'rdna3': ('ENC_VOP3', 'V_DOT2_BF16_BF16', {'src2': 'BF16'}),
+        'rdna4': ('ENC_VOP3', 'V_DOT2_BF16_BF16', {'src2': 'BF16'}),
+        'cdna4': ('ENC_VOP1', 'V_CVT_F32_BF16', {'src0': 'BF16'}),
+        'cdna5': ('ENC_VOP1', 'V_TANH_BF16', {'src0': 'F32'}),
+    }
+    cases.append(bf16[arch_name])
+    if arch_name in ('cdna4', 'cdna5'):
+        cases.append(
+            (
+                'ENC_VOP3',
+                'V_CVT_F32_BF16',
+                {'src0': 'F32' if arch_name == 'cdna5' else 'BF16'},
+            )
+        )
+
+    for encoding, name, expected_formats in cases:
+        inst = next(
+            inst
+            for enc in spec.inst_encodings
+            if enc.enc_name == encoding
+            for inst in enc.insts
+            if inst.name == name
+        )
+        constructor = _generated_constructor_body(source, inst.fmt_name)
+        flagged = re.findall(
+            r'(\w+)\.set_lane_inline_float_format\(Operand::LaneInlineFloatFormat::(\w+)\);',
+            ''.join(constructor.split()),
+        )
+        assert dict(flagged) == expected_formats, inst.fmt_name
+        assert len(flagged) == len(expected_formats), inst.fmt_name
+        for operand in expected_formats:
+            setter = constructor.index(f'{operand}.set_lane_inline_float_format(')
+            assert setter > constructor.rfind(f'{operand} = '), inst.fmt_name
+
+    operand_exec = (generated_root / 'operand_exec.cpp').read_text()
+    assert 'uses_fp32_inline_constants' not in operand_exec
+    chunk = operand_exec[operand_exec.index('void Operand::read_lane_chunk_exec(') :]
+    chunk = chunk[: chunk.index('\n}')]
+    assert 'out,count,read_lane_exec(wf,lane_base)' in ''.join(chunk.split())
+
+
+@pytest.mark.parametrize(
+    'arch_name',
+    [
+        'rdna1',
+        'rdna2',
+        'rdna3',
+        'rdna3_5',
+        'rdna4',
+        'cdna1',
+        'cdna2',
+        'cdna3',
+        'cdna4',
+        'cdna5',
+    ],
+)
+def test_generated_legacy_16bit_alu_destinations_preserve_the_other_half(
+    arch_name, amdgpu_generated_root: Path
+):
+    spec = Parser(
+        str(_mrisa_dir() / f'amdgpu_isa_{arch_name}.xml'),
+        _profile_for_arch(arch_name),
+    ).parse()
+    generated_root = amdgpu_generated_root / _generated_dir_name(arch_name)
+    source = '\n'.join(
+        path.read_text()
+        for path in sorted(generated_root.glob('*.cpp'))
+        if '_exec' not in path.stem
+    )
+
+    def constructor(encoding, name):
+        inst = next(
+            inst
+            for enc in spec.inst_encodings
+            if enc.enc_name == encoding
+            for inst in enc.insts
+            if inst.name == name
+        )
+        return inst, _generated_constructor_body(source, inst.fmt_name)
+
+    legacy = arch_name in ('rdna1', 'rdna2')
+    statement = 'vdst.set_register_byte_mask(0x3);'
+    preserve = 'vdst.set_preserve_unwritten_bytes();'
+    guard = (
+        'if (reinterpret_cast<const OpEncoding*>(inst)->src0 != '
+        f'amdgpu::SRC_SDWA) {{ {statement} {preserve} }}'
+    )
+    for encoding, name in [
+        ('ENC_VOP1', 'V_CVT_F16_U16'),
+        ('ENC_VOP2', 'V_ADD_F16'),
+        ('ENC_VOP3', 'V_ADD_F16'),
+        ('ENC_VOP3', 'V_MAX_I16'),
+    ]:
+        inst, body = constructor(encoding, name)
+        destination = next(op for op in inst.dst_operands if op.name == 'vdst')
+        assert destination.size == 16, inst.fmt_name
+        assert body.count(statement) == int(legacy), inst.fmt_name
+        assert body.count(preserve) == int(legacy), inst.fmt_name
+        if legacy:
+            guarded = ''.join(guard.split()) in ''.join(body.split())
+            assert guarded == (encoding in ('ENC_VOP1', 'ENC_VOP2')), inst.fmt_name
+            assert body.index(statement) > body.rfind('vdst = '), inst.fmt_name
+
+    exclusions = [
+        ('ENC_SOP1', 'S_SEXT_I32_I16'),
+        ('ENC_SOP2', 'S_PACK_LL_B32_B16'),
+        ('ENC_VOP3P', 'V_PK_ADD_F16'),
+    ]
+    if legacy:
+        exclusions.extend(
+            [
+                ('ENC_DS', 'DS_READ_I8_D16'),
+                ('ENC_MUBUF', 'BUFFER_LOAD_UBYTE_D16'),
+                ('ENC_FLAT', 'FLAT_LOAD_UBYTE_D16'),
+                ('ENC_VOP1', 'V_SAT_PK_U8_I16'),
+                ('ENC_VOP3', 'V_SAT_PK_U8_I16'),
+            ]
+        )
+        for name, mask in [('V_FMA_MIXLO_F16', '0x3'), ('V_FMA_MIXHI_F16', '0xc')]:
+            inst, body = constructor('ENC_VOP3P', name)
+            masks = re.findall(r'vdst\.set_register_byte_mask\(([^)]+)\);', body)
+            assert masks == [mask], inst.fmt_name
+            assert 'amdgpu::SRC_SDWA' not in body, inst.fmt_name
+            assert '.set_preserve_unwritten_bytes();' not in body, inst.fmt_name
+    if arch_name in ('rdna3_5', 'rdna4', 'cdna5'):
+        scalar = 'S_MIN_F16' if arch_name == 'rdna3_5' else 'S_ADD_F16'
+        exclusions.append(('ENC_SOP2', scalar))
+    for encoding, name in exclusions:
+        inst, body = constructor(encoding, name)
+        assert '.set_register_byte_mask(0x3);' not in body, inst.fmt_name
+        assert '.set_preserve_unwritten_bytes();' not in body, inst.fmt_name
+        if name == 'V_SAT_PK_U8_I16':
+            assert next(op for op in inst.dst_operands if op.name == 'vdst').size == 16
+            generator = CodeGenerator(spec, '', derive_all_semantics(spec))
+            generator._current_inst_fields = set()
+            execution = generator._gen_execute_body(
+                inst, generator.semantics.instructions[name], encoding
+            )
+            assert 'uint32_t result =' in execution
+            assert 'write_lane(vdst, lane, result)' in execution
+            assert 'write_vop3_true16_dst' not in execution
 
 
 def test_generated_pseudo_scalar_vop3_paths_ignore_exec_and_f16_opsel(
@@ -3618,10 +4225,12 @@ def test_generated_pseudo_scalar_vop3_paths_ignore_exec_and_f16_opsel(
             assert 'vop3_opsel' not in body
             assert 'read_vop3_true16_src' not in body
             assert '>> 16' not in body
-            assert (
-                'static_cast<uint16_t>('
-                'amdgpu::RegisterAccess(wf).read_scalar(src0))' in body
-            )
+            # The source half is flushed under MODE before it is widened.
+            flush = 'amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>('
+            assert flush in body
+            assert 'amdgpu::RegisterAccess(wf).read_scalar(src0)' in body
+            assert 'read_scalar_f16_carrier' not in body
+            assert body.index('util::f16_to_f32(') < body.index(flush)
             assert 'amdgpu::RegisterAccess(wf).write_scalar(' in body
             assert 'amdgpu::transcendental::execute_pseudo_f16(' in body
             assert 'wf.fp_round_mode_f16_f64()' in body
@@ -3630,6 +4239,10 @@ def test_generated_pseudo_scalar_vop3_paths_ignore_exec_and_f16_opsel(
             constructor = _generated_constructor_body(constructor_source, class_name)
             assert 'vop3_opsel' not in constructor
             assert 'simm32 & 0xFFFFu' in constructor
+            assert (
+                'src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);'
+                in constructor
+            )
 
         pseudo_scalar_constructors = [
             'VSExpF32Vop3',
@@ -3687,14 +4300,101 @@ def test_generated_vector_f16_arithmetic_consumes_fp16_ovfl(
     vop2 = _shared_execute_body(execute_shared, 'v_add_f16_vop2', 'v_add_f16_vop3')
     vop3 = _shared_execute_body(execute_shared, 'v_add_f16_vop3', 'v_add_f32_vop2')
 
-    assert 'if (wf.fp16_ovfl())' in vop2
-    assert 'f32_to_f16_ovfl_simd' in vop2
+    # Both encodings delegate FP16_OVFL narrowing to the shared arithmetic helper,
+    # so neither selects a narrowing helper by branching on the bit. VOP2 takes the
+    # unscoped core under one per-instruction environment rather than one per chunk.
+    assert 'binary_f16_simd_unscoped<amdgpu::fp_mode::Arithmetic::ADD>' in vop2
+    assert 'ROCJITSU_TRY_SIMD_VOP2_BINARY_SCOPED(' in vop2
+    assert 'if (wf.fp16_ovfl())' not in vop2
+    assert 'f32_to_f16_ovfl_simd' not in vop2
     assert 'sdwa::finish_arithmetic_f16' in vop2
     assert 'wf.fp16_ovfl()' in vop2
-    assert 'if (wf.fp16_ovfl())' in vop3
-    assert 'f32_to_f16_ovfl_simd' in vop3
+    assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(false,' in vop3
     assert 'sdwa::finish_arithmetic_f16' in vop3
     assert 'wf.fp16_ovfl()' in vop3
+
+
+@pytest.fixture(scope='module', params=['local', 'shared'])
+def generated_f16_sdwa_consumers(request, tmp_path_factory):
+    output = tmp_path_factory.mktemp(f'f16_sdwa_{request.param}')
+    architectures = ['rdna2'] if request.param == 'local' else ['rdna1', 'rdna2']
+    _run(
+        SimpleNamespace(
+            isafiles=[
+                f'{arch}:{_mrisa_dir() / f"amdgpu_isa_{arch}.xml"}'
+                for arch in architectures
+            ],
+            gen_isas=True,
+            gen_dbt=False,
+            isa_output=str(output),
+            dbt_output=None,
+        )
+    )
+    return request.param, output
+
+
+@pytest.mark.parametrize(
+    'instruction,helper',
+    [(op.instruction, 'finish_rounded_f16') for op in F16_TRANS_OPERATIONS]
+    + [
+        (f'V_{op.upper()}_F16', 'round_f16_result')
+        for op in sorted(INPUT_FLUSHED_ROUNDING)
+    ]
+    + [('V_ADD_F16', 'finish_arithmetic_f16')],
+)
+def test_generated_f16_sdwa_keeps_unmigrated_ordering(
+    generated_f16_sdwa_consumers, instruction, helper
+):
+    """Pin current helper selection, not hardware order.
+
+    gfx1030 SDWA captures contradict the arithmetic order (MUL_F16, ADD_F16);
+    no SDWA captures cover TRANS or integral rounding.
+    """
+    route, output = generated_f16_sdwa_consumers
+    encoding = 'vop2' if instruction == 'V_ADD_F16' else 'vop1'
+    if route == 'shared':
+        source = (output / 'shared' / 'execute_shared.h').read_text()
+        signature = f'inline void execute_{instruction.lower()}_{encoding}('
+    else:
+        source = (output / 'rdna2' / f'{encoding}_exec.cpp').read_text()
+        class_name = ''.join(word.title() for word in instruction.split('_'))
+        signature = f'void {class_name}{encoding.title()}::execute_modifier_impl('
+    body = _generated_function_body(source, signature)
+    assert f'amdgpu::sdwa::{helper}(' in body
+    for other in {'finish_rounded_f16', 'round_f16_result', 'finish_arithmetic_f16'} - {
+        helper
+    }:
+        assert f'amdgpu::sdwa::{other}(' not in body
+
+
+@pytest.mark.parametrize(
+    'instruction,encoding',
+    [
+        ('V_FRACT_F16', 'vop1'),
+        ('V_LDEXP_F16', 'vop2'),
+        ('V_MIN_F16', 'vop2'),
+        ('V_MAX_F16', 'vop2'),
+    ],
+)
+def test_generated_f16_sdwa_rounds_before_omod(
+    generated_f16_sdwa_consumers, instruction, encoding
+):
+    """FRACT/LDEXP round and MIN/MAX select; the SDWA store applies OMOD."""
+    route, output = generated_f16_sdwa_consumers
+    if route == 'shared':
+        source = (output / 'shared' / 'execute_shared.h').read_text()
+        signature = f'inline void execute_{instruction.lower()}_{encoding}('
+    else:
+        source = (output / 'rdna2' / f'{encoding}_exec.cpp').read_text()
+        class_name = ''.join(word.title() for word in instruction.split('_'))
+        signature = f'void {class_name}{encoding.title()}::execute_modifier_impl('
+    body = _generated_function_body(source, signature)
+    assert 'ResultFormat::F16, amdgpu::sdwa::OutputPolicy::ROUNDED>' in body
+    # The body applies no OMOD; LDEXP reads it only to flush tiny results.
+    assert 'floating_operation::apply' not in body
+    assert ('amdgpu::sdwa::output_modifier<' in body) == (instruction == 'V_LDEXP_F16')
+    for helper in ('finish_rounded_f16', 'round_f16_result', 'finish_arithmetic_f16'):
+        assert f'amdgpu::sdwa::{helper}(' not in body
 
 
 def test_local_true16_vop3_probe_uses_scoped_dpp_binding(tmp_path):
@@ -3731,7 +4431,10 @@ def test_local_true16_vop3_probe_uses_scoped_dpp_binding(tmp_path):
 
 
 def test_single_isa_cdna1_sources_preprocess_with_source_includes(
-    tmp_path, monkeypatch, rocjitsu_source_root: Path
+    tmp_path,
+    monkeypatch,
+    rocjitsu_source_root: Path,
+    runtime_api_headers_include_root: Path,
 ):
     compiler = shutil.which('c++')
     if compiler is None:
@@ -3763,7 +4466,7 @@ def test_single_isa_cdna1_sources_preprocess_with_source_includes(
     include_roots = (
         rocjitsu_source_root / 'lib' / 'rocjitsu' / 'src',
         rocjitsu_source_root / 'lib' / 'rocjitsu' / 'include',
-        rocjitsu_source_root / 'lib' / 'rocjitsu' / 'external_headers' / 'hsa_headers',
+        runtime_api_headers_include_root,
         rocjitsu_source_root / 'lib' / 'util' / 'include',
         rocjitsu_source_root / 'lib' / 'simdojo' / 'include',
     )
@@ -3783,7 +4486,7 @@ def test_single_isa_cdna1_sources_preprocess_with_source_includes(
 
 
 def test_custom_identity_preprocesses_with_profile_handwritten_includes(
-    tmp_path, rocjitsu_source_root: Path
+    tmp_path, rocjitsu_source_root: Path, runtime_api_headers_include_root: Path
 ):
     compiler = shutil.which('c++')
     if compiler is None:
@@ -3810,7 +4513,7 @@ def test_custom_identity_preprocesses_with_profile_handwritten_includes(
     include_roots = (
         rocjitsu_source_root / 'lib' / 'rocjitsu' / 'src',
         rocjitsu_source_root / 'lib' / 'rocjitsu' / 'include',
-        rocjitsu_source_root / 'lib' / 'rocjitsu' / 'external_headers' / 'hsa_headers',
+        runtime_api_headers_include_root,
         rocjitsu_source_root / 'lib' / 'util' / 'include',
         rocjitsu_source_root / 'lib' / 'simdojo' / 'include',
     )
@@ -4585,10 +5288,12 @@ def test_rdna3_5_disassembly_overrides_do_not_change_rdna3():
         'IMAGE_BVH_INTERSECT_RAY': 4,
         'IMAGE_BVH64_INTERSECT_RAY': 4,
     }
-    assert rdna3_5.gfx11_mimg_fixed_vaddr_words == {
+    fixed_bvh_vaddr_words = {
         'IMAGE_BVH_INTERSECT_RAY': (11, 8),
         'IMAGE_BVH64_INTERSECT_RAY': (12, 9),
     }
+    assert rdna3.gfx11_mimg_fixed_vaddr_words == fixed_bvh_vaddr_words
+    assert rdna3_5.gfx11_mimg_fixed_vaddr_words == fixed_bvh_vaddr_words
     assert rdna3_5.gfx11_mimg_nsa_group_words == {
         'IMAGE_BVH_INTERSECT_RAY': ((1, 1, 3, 3, 3), (1, 1, 3, 3)),
         'IMAGE_BVH64_INTERSECT_RAY': ((2, 1, 3, 3, 3), (2, 1, 3, 3)),
@@ -4650,6 +5355,114 @@ def test_generated_rdna3_5_fuzz_disassembly_rules(amdgpu_generated_root: Path):
         and 'true, true);' in v_swap_ctor
         and '& 0x7fu' not in v_swap_ctor
     )
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna3_5'])
+def test_generated_gfx11_image_address_width_uses_dim_and_preserves_fixed_bvh(
+    amdgpu_generated_root: Path, arch: str
+):
+    mimg = (amdgpu_generated_root / _generated_dir_name(arch) / 'mimg.cpp').read_text()
+    assert 'amdgpu::image_coordinate_count(dim)' in mimg
+    assert 'static constexpr uint8_t coords[]' not in mimg
+    for class_name in ('ImageLoadMimg', 'ImageStoreMimg'):
+        constructor = _generated_constructor_body(mimg, class_name)
+        assert (
+            'mimg_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)' in constructor
+        )
+        assert '(reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)' in constructor
+        assert '(reinterpret_cast<const OpEncoding *>(inst)->a16 ? 64 : 96)' not in (
+            constructor
+        )
+    image_sample = _generated_constructor_body(mimg, 'ImageSampleMimg')
+    assert '(reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)' in image_sample
+    assert '(reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)' in image_sample
+    assert '(reinterpret_cast<const OpEncoding *>(inst)->a16 ? 256 : 352)' in (
+        _generated_constructor_body(mimg, 'ImageBvhIntersectRayMimg')
+    )
+    assert '(reinterpret_cast<const OpEncoding *>(inst)->a16 ? 288 : 384)' in (
+        _generated_constructor_body(mimg, 'ImageBvh64IntersectRayMimg')
+    )
+
+
+@pytest.mark.parametrize(
+    ('arch', 'stem', 'suffix'),
+    [
+        ('rdna3', 'mimg', 'Mimg'),
+        ('rdna3_5', 'mimg', 'Mimg'),
+        ('rdna4', 'vimage', 'Vimage'),
+    ],
+)
+def test_generated_rdna_image_load_tracks_d16_destination_preservation(
+    amdgpu_generated_root: Path, arch: str, stem: str, suffix: str
+):
+    source = (
+        amdgpu_generated_root / _generated_dir_name(arch) / f'{stem}.cpp'
+    ).read_text()
+    assert '#include "rocjitsu/isa/arch/amdgpu/shared/image_address.h"' in source
+    assert '#include "rocjitsu/isa/arch/amdgpu/shared/image_access.h"' not in source
+    image_load_uses = _generated_function_body(
+        source, f'void ImageLoad{suffix}::implicit_uses'
+    )
+    assert 'implicit_preservation_uses(uses)' in image_load_uses
+    preservation_uses = _generated_function_body(
+        source, f'bool ImageLoad{suffix}::implicit_preservation_uses'
+    )
+    assert 'std::popcount(uint32_t{inst_.dmask})' in preservation_uses
+    assert 'inst_.d16 && (components & 1u)' in preservation_uses
+    assert 'r->index + components / 2' in preservation_uses
+    assert 'image_coordinate_register_count' in preservation_uses
+    assert 'registers[index] == preserved.index' in preservation_uses
+    assert 'return true' in preservation_uses
+    image_store_uses = _generated_function_body(
+        source, f'void ImageStore{suffix}::implicit_uses'
+    )
+    assert 'implicit_preservation_uses(uses)' not in image_store_uses
+
+    header = (
+        amdgpu_generated_root / _generated_dir_name(arch) / f'{stem}.h'
+    ).read_text()
+    modifiers = _generated_inline_method_body(
+        header, f'ImageLoad{suffix}', 'void amdgpu_register_modifiers'
+    )
+    assert 'std::popcount(uint32_t{inst_.dmask}) & 1u' in modifiers
+    assert 'modifiers.memory_result_last_bytes = 0x3' in modifiers
+
+
+@pytest.mark.parametrize(
+    ('arch', 'stem', 'suffix'),
+    [
+        ('rdna3', 'mimg', 'Mimg'),
+        ('rdna3_5', 'mimg', 'Mimg'),
+        ('rdna4', 'vimage', 'Vimage'),
+    ],
+)
+def test_generated_rdna_image_execution_passes_dim_and_tfe(
+    amdgpu_generated_root: Path, arch: str, stem: str, suffix: str
+):
+    execution = (
+        amdgpu_generated_root / _generated_dir_name(arch) / f'{stem}_exec.cpp'
+    ).read_text()
+    image_load = _generated_function_body(
+        execution, f'void ImageLoad{suffix}::execute_impl'
+    )
+    assert '.dim = inst_.dim' in image_load
+    assert '.tfe = bool(inst_.tfe)' in image_load
+
+
+def test_gfx11_image_metadata_does_not_leak_when_derived_semantics_are_missing(
+    tmp_path: Path,
+) -> None:
+    spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_rdna3.xml'), Rdna3Profile()).parse()
+    semantics = derive_all_semantics(spec)
+    semantics.instructions.pop('IMAGE_STORE_MIP')
+
+    CodeGenerator(spec, str(tmp_path), semantics).gen_insts()
+
+    mimg = (tmp_path / 'rdna3' / 'mimg.cpp').read_text()
+    assert 'void ImageStoreMimg::implicit_uses' in mimg
+    assert 'bool ImageStoreMimg::tracks_explicit_source' in mimg
+    assert 'void ImageStoreMipMimg::implicit_uses' not in mimg
+    assert 'bool ImageStoreMipMimg::tracks_explicit_source' not in mimg
 
 
 def test_gfx1250_compact_literal_policy_precedes_extension_sizing(
@@ -4753,13 +5566,35 @@ def test_generated_encoding_rendering_overrides_are_inline(
 
     if 'amdgpu::sdwa::append_' in encodings_h:
         assert (
-            '#include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"' in encodings_h
+            '#include "rocjitsu/isa/arch/amdgpu/shared/sdwa_disassembly.h"'
+            in encodings_h
         )
     if 'amdgpu::append_gfx12_cache_policy' in encodings_h:
         assert (
             '#include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"'
             in encodings_h
         )
+
+
+@pytest.mark.parametrize('split_execution_sources', [False, True])
+def test_generated_sdwa_formatting_has_direct_header_dependency(
+    tmp_path: Path,
+    split_execution_sources: bool,
+) -> None:
+    class Profile(Cdna4Profile):
+        @property
+        def split_execution_sources(self) -> bool:
+            return split_execution_sources
+
+    spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_cdna4.xml'), Profile()).parse()
+    CodeGenerator(spec, str(tmp_path), derive_all_semantics(spec)).gen_encodings()
+    header = (tmp_path / 'cdna4' / 'encodings.h').read_text()
+    source = (tmp_path / 'cdna4' / 'encodings.cpp').read_text()
+    include = '#include "rocjitsu/isa/arch/amdgpu/shared/sdwa_disassembly.h"'
+
+    assert 'amdgpu::sdwa::append_' in header
+    assert include in header
+    assert include not in source
 
 
 @pytest.mark.parametrize('arch', ['cdna4', 'rdna4', 'gfx1250'])
@@ -4905,8 +5740,10 @@ def test_generated_sdwa_uses_shared_source_staging(
             assert 'amdgpu::sdwa::stage_source(' in generated
             assert 'sdwa_src_select(' not in generated
             assert 'std::make_unique<DppOperand>' not in generated
-        encodings = (amdgpu_generated_root / arch / 'encodings.cpp').read_text()
-        assert '#include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"' in encodings
+        encodings = (amdgpu_generated_root / arch / 'encodings.h').read_text()
+        assert (
+            '#include "rocjitsu/isa/arch/amdgpu/shared/sdwa_disassembly.h"' in encodings
+        )
     assert checked_sdwa_files > 0
 
 
@@ -5822,23 +6659,23 @@ def test_generated_dpp_commit_separates_modern_source_and_destination_masks(
         assert 'amdgpu::dpp::dpp_compare_result(' in body
 
 
-def test_rdna1_2_generated_vopc_dpp_is_explicitly_unsupported(
-    amdgpu_generated_root: Path,
+@pytest.mark.parametrize('arch', ('cdna1', 'cdna2', 'cdna3', 'cdna4', 'rdna1', 'rdna2'))
+def test_generated_vopc_dpp_is_explicitly_unsupported(
+    amdgpu_generated_root: Path, arch
 ):
-    for arch in ('rdna1', 'rdna2'):
-        vopc_model = (amdgpu_generated_root / arch / 'vopc.cpp').read_text()
-        vopc_exec = (amdgpu_generated_root / arch / 'vopc_exec.cpp').read_text()
-        assert 'amdgpu::dpp::apply_dpp' not in vopc_exec, arch
-        assert 'dpp_write_mask' not in vopc_exec, arch
-
-        ctor = _generated_decode_body(vopc_model, 'VCmpEqU32Vopc')
-        assert 'emit_error.emit() << "V_CMP_EQ_U32 does not support DPP"' in ctor, arch
-        assert 'amdgpu::dpp::is_src_dpp8(' in ctor, arch
-        assert 'reinterpret_cast<const Vop1VopDpp16MachineInst *>' not in ctor, arch
-
-        body = _generated_method_body(vopc_exec, 'VCmpEqU32Vopc', 'VCmpLeU32Vopc')
-        assert 'throw util::UnimplementedInst(mnemonic());' in body, arch
-        assert 'amdgpu::dpp::is_src_dpp8(inst_.src0)' in body, arch
+    vopc_model = (amdgpu_generated_root / arch / 'vopc.cpp').read_text()
+    vopc_exec = (amdgpu_generated_root / arch / 'vopc_exec.cpp').read_text()
+    assert 'SRC_SDWA' in vopc_exec
+    assert 'SRC_DPP' not in vopc_exec
+    assert 'is_src_dpp8' not in vopc_exec
+    assert 'amdgpu::dpp::apply_dpp' not in vopc_exec
+    assert 'dpp_write_mask' not in vopc_exec
+    assert 'throw util::UnimplementedInst' not in vopc_exec
+    ctor = _generated_decode_body(vopc_model, 'VCmpEqU32Vopc')
+    assert 'emit_error.emit() << "V_CMP_EQ_U32 does not support DPP"' in ctor
+    if arch in ('rdna1', 'rdna2'):
+        assert 'amdgpu::dpp::is_src_dpp8(' in ctor
+        assert 'reinterpret_cast<const Vop1VopDpp16MachineInst *>' not in ctor
 
 
 def test_generated_cmpx_dpp_cleanup_applies_arch_compare_rules(
@@ -6406,6 +7243,7 @@ def test_cdna4_generated_cvt_keeps_ocp_format(
     assert 'inline void execute_v_cvt_f32_bf8_vop1' not in shared
     assert 'inline void execute_v_cvt_f32_fp8_vop3' not in shared
     assert 'inline void execute_v_cvt_f32_bf8_vop3' not in shared
+    # CDNA4 keeps util's OCP helpers; see fp8_formats.fp8_policy.
     assert 'util::fp8_e4m3_to_f32' in cdna4_vop1
     assert 'util::bf8_e5m2_to_f32' in cdna4_vop1
     assert 'util::fp8_e4m3_to_f32' in cdna4_vop3
@@ -6414,6 +7252,8 @@ def test_cdna4_generated_cvt_keeps_ocp_format(
     assert 'util::f32_to_bf8_e5m2_rne_mode' in cdna4_vop3
     assert 'util::f32_to_fp8_e4m3_sr_mode' in cdna4_vop3
     assert 'util::f32_to_bf8_e5m2_sr_mode' in cdna4_vop3
+    assert 'amdgpu::conversion::decode_fp8' not in cdna4_vop1 + cdna4_vop3
+    assert 'amdgpu::conversion_to_fp8' not in cdna4_vop3
     assert 'util::fp8_e4m3_fnuz_to_f32' not in shared
     assert 'util::fp8_e4m3_fnuz_to_f32' not in cdna4_vop1
     assert 'util::fp8_e4m3_fnuz_to_f32' not in cdna4_vop3
@@ -6430,20 +7270,26 @@ def test_generated_pseudo_scalar_users_include_dependency(
         assert (include in text) == ('pseudo_scalar::' in text), source
 
 
-def test_generated_vop3_dot2_true16_uses_true16_helpers(
+def test_generated_vop3_dot2_true16_uses_rj_arith_true16_adapter(
     rdna4_generated_root: Path,
 ):
     vop3 = (rdna4_generated_root / 'vop3_exec.cpp').read_text()
-
-    body = _generated_method_body(vop3, 'VDot2F16F16Vop3', 'VDot2Bf16Bf16Vop3')
-
-    assert 'uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);' in body
-    assert 'uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);' in body
-    assert 'uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);' in body
-    assert 'read_vop3_true16_src(src2, wf, lane, opsel, 2)' in body
-    assert 'util::f16_to_f32' in body
-    assert 'amdgpu::fp_mode::dot2_f16(a0, b0, a1, b1, acc, wf.fp16_ovfl())' in body
-    assert 'write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits, true)' in body
+    body = ' '.join(
+        _generated_method_body(vop3, 'VDot2F16F16Vop3', 'VDot2Bf16Bf16Vop3').split()
+    )
+    assert 'const uint32_t opsel = amdgpu::vop3_opsel(inst_);' in body
+    assert 'pk16_src_needs_narrowing(inst_.src0, src0.size_bits())' in body
+    assert 'pk16_src_needs_narrowing(inst_.src1, src1.size_bits())' in body
+    assert 'dot2_src_needs_half_replication(inst_.src0)' in body
+    assert 'dot2_src_needs_half_replication(inst_.src2) ? 4u : 0u' in body
+    assert '((opsel & 4) ? RJ_ARITH_ALU_HIGH_C : 0u)' in body
+    assert '((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u)' in body
+    assert 'RJ_ARITH_ALU_HIGH_A' not in body and 'RJ_ARITH_ALU_HIGH_B' not in body
+    assert (
+        'arith::execute_dot2_f16(wf, rj_arith_v_dot2_f16_f16_w32_gfx12, rj_arith_v_dot2_f16_f16_w64_gfx12'
+        in body
+    )
+    assert 'modifiers, vdst, src0, src1, src2' in body
     assert 'throw util::UnimplementedInst' not in body
 
 
@@ -6453,8 +7299,13 @@ def test_generated_rdna4_vop3_cvt_f32_f16_applies_true16_source_modifiers(
     vop3 = (rdna4_generated_root / 'vop3_exec.cpp').read_text()
     body = _generated_method_body(vop3, 'VCvtF32F16Vop3', 'VCvtU16F16Vop3')
     assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in body
-    assert 'util::f16_to_f32' in body
-    assert 'source_modifier::apply_to_float(sv, 0, inst_.abs, inst_.neg)' in body
+    # The raw half is flushed, widened, then given ABS/NEG.
+    flush = 'amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>('
+    assert body.index('source_modifier::apply_to_float(') < body.index(
+        'util::f16_to_f32'
+    )
+    assert body.index('util::f16_to_f32') < body.index(flush)
+    assert '0, inst_.abs, inst_.neg)' in body
     assert 'amdgpu::fp_mode::cvt_f32_f16' in body
     assert 'wf.fp_denorm_mode_f16_f64()' in body
     assert 'wf.ieee_mode()' in body
@@ -6505,6 +7356,19 @@ def test_gfx1250_swmmac_reuse_hint_does_not_select_sparse_index_set():
     )
 
 
+@pytest.mark.parametrize('result_type', ['F32', 'F16'])
+@pytest.mark.parametrize('input_type', ['FP8_FP8', 'FP8_BF8', 'BF8_FP8', 'BF8_BF8'])
+def test_gfx1250_float_swmmac_uses_32_index_entries_for_k128(result_type, input_type):
+    inst = Instruction(
+        f'V_SWMMAC_{result_type}_16X16X128_{input_type}', 'ENC_VOP3P', 0, []
+    )
+    body = _gen_mfma(inst, 'cdna5')
+    assert f'amdgpu::exec_swmmac_{result_type.lower()}(' in body
+    assert 'index_base, 32, index_key,' in body
+    assert 'uint32_t index_key = 0u;' in body
+    assert 'index_key = inst_.opsel' not in body
+
+
 def test_rdna4_swmmac_uses_src2_as_sparse_index_vgpr():
     inst = Instruction(
         'V_SWMMAC_F32_16X16X32_FP8_FP8',
@@ -6521,70 +7385,13 @@ def test_rdna4_swmmac_uses_src2_as_sparse_index_vgpr():
     body = _gen_mfma(inst, 'rdna4')
 
     assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
-    assert 'uint32_t const_acc = amdgpu::ACC_FROM_VGPR;' in body
-    assert 'uint32_t s2 = dst;' in body
+    assert 'const_acc' not in body
+    assert 'uint32_t s2' not in body
     assert 'uint32_t index_base = amdgpu::src_base(vb, src2.encoding_value_);' in body
-    assert 'uint32_t index_key = inst_.opsel & 0x1u;' in body
-    assert (
-        'amdgpu::exec_swmmac_f32(cu, 16, 16, 32, 8, dst, src0_base, '
-        'src1_base, s2, index_base, 16, '
-        'index_key, amdgpu::extract_fp8, amdgpu::extract_fp8, const_acc, wf.wf_size());'
-    ) in body
+    assert 'index_key = inst_.opsel & (lanes == 32 ? 1u : 3u);' in body
+    assert 'rj_arith_v_swmmac_f32_16x16x32_fp8_fp8_w32' in body
+    assert 'flags, modifiers, dst, src0_base, src1_base, index_base,' in body
     assert 'resolve_acc' not in body
-
-
-def test_rdna4_f16_bf16_swmmac_dispatch_wiring_is_generated():
-    operands = [
-        Operand('vdst', 256, 'OPR_VGPR', True, True, False, False, 0),
-        Operand('src0', 64, 'OPR_SRC_VGPR', True, False, False, False, 1),
-        Operand('src1', 128, 'OPR_SRC_VGPR', True, False, False, False, 2),
-        Operand('src2', 32, 'OPR_SRC_VGPR', True, False, False, False, 3),
-    ]
-
-    cases = [
-        ('F16', 'FP8_FP8', 'exec_swmmac_f16', 'extract_fp8', 'extract_fp8'),
-        ('BF16', 'BF8_BF8', 'exec_swmmac_bf16', 'extract_bf8', 'extract_bf8'),
-    ]
-    for result_type, input_type, exec_fn, extract_a, extract_b in cases:
-        inst = Instruction(
-            f'V_SWMMAC_{result_type}_16X16X32_{input_type}',
-            'ENC_VOP3P',
-            0,
-            operands,
-        )
-
-        body = _gen_mfma(inst, 'rdna4')
-
-        assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
-        assert 'uint32_t const_acc = amdgpu::ACC_FROM_VGPR;' in body
-        assert 'uint32_t s2 = dst;' in body
-        assert (
-            'uint32_t index_base = amdgpu::src_base(vb, src2.encoding_value_);' in body
-        )
-        assert 'uint32_t index_key = inst_.opsel & 0x1u;' in body
-        assert (
-            f'amdgpu::{exec_fn}(cu, 16, 16, 32, 8, dst, src0_base, '
-            'src1_base, s2, index_base, 16, '
-            f'index_key, amdgpu::{extract_a}, amdgpu::{extract_b}, const_acc, wf.wf_size());'
-        ) in body
-
-
-def test_rdna4_swmmac_uses_32_index_entries_for_wide_8bit_k():
-    inst = Instruction(
-        'V_SWMMAC_F32_16X16X128_FP8_FP8',
-        'ENC_VOP3P',
-        0,
-        [
-            Operand('vdst', 256, 'OPR_VGPR', True, True, False, False, 0),
-            Operand('src0', 256, 'OPR_SRC_VGPR', True, False, False, False, 1),
-            Operand('src1', 256, 'OPR_SRC_VGPR', True, False, False, False, 2),
-            Operand('src2', 32, 'OPR_SRC_VGPR', True, False, False, False, 3),
-        ],
-    )
-
-    body = _gen_mfma(inst, 'rdna4')
-
-    assert 'index_base, 32, index_key, amdgpu::extract_fp8, amdgpu::extract_fp8' in body
 
 
 def test_gfx1250_generated_fp8_vop3_byte_select_uses_local_inst_member(
@@ -6716,12 +7523,19 @@ def test_gfx1250_helper_blocks_emit_scaled_wmma_table_decoder(
     assert 'scale0_inline_zero ? 0u : matrix_a_scale_fmt' in execution_impl
 
     decoder = (gfx1250_generated_root / 'decoder.cpp').read_text()
-    decode_body = decoder.split(
-        'DecodeResult DecoderImpl::decode(const MachineInst *opcode, '
-        'const DecodeErrorEmitter &emit_error) {'
+    decode_body = re.split(
+        r'DecodeResult DecoderImpl::decode\(const MachineInst \*opcode,\s+'
+        r'const DecodeErrorEmitter &emit_error\) \{',
+        decoder,
+        maxsplit=1,
     )[1].split('DecodeResult DecoderImpl::decodeInvalid', 1)[0]
     assert 'isWmmaScaleF32Vop3px2' not in decode_body
-    assert decoder.count('&DecoderImpl::decodeVWmmaScaleF32Vop3px2,') == 2
+    assert (
+        _decode_targets(gfx1250_generated_root, 'sub_decode_vop3p').count(
+            '&DecoderImpl::decodeVWmmaScaleF32Vop3px2'
+        )
+        == 2
+    )
     assert 'if (!isVop3pOp(opcode[2], 0x33)' in decoder
     assert 'if (!isGfx1250WmmaScalePairValid(opcode))' in decoder
 
@@ -6870,18 +7684,15 @@ def test_vopd_dispatch_uses_primary_decode_table(
 ):
     arch_root = amdgpu_generated_root / _generated_dir_name(arch_name)
     decoder = (arch_root / 'decoder.cpp').read_text()
-    decode_body = decoder.split(
-        'DecodeResult DecoderImpl::decode(const MachineInst *opcode, '
-        'const DecodeErrorEmitter &emit_error) {'
+    decode_body = re.split(
+        r'DecodeResult DecoderImpl::decode\(const MachineInst \*opcode,\s+'
+        r'const DecodeErrorEmitter &emit_error\) \{',
+        decoder,
+        maxsplit=1,
     )[1].split('DecodeResult DecoderImpl::decodeInvalid', 1)[0]
 
     assert 'Vopd::is_vopd' not in decode_body
-    primary_table = decoder.split('DecoderImpl::primary_decode_table = {', 1)[1].split(
-        '\n};', 1
-    )[0]
-    primary_entries = re.findall(
-        r'&(?:DecoderImpl|detail)::[A-Za-z0-9_]+', primary_table
-    )
+    primary_entries = _decode_targets(arch_root, 'primary_decode_table')
     assert len(primary_entries) == 512
     actual_vopd_indices = {
         index
@@ -6916,7 +7727,7 @@ def test_decoder_header_keeps_dispatch_details_private(
     ):
         arch_root = amdgpu_generated_root / _generated_dir_name(arch_name)
         decoder_header = (arch_root / 'decoder.h').read_text()
-        assert 'DecodeFunc' not in decoder_header
+        assert 'DecodeFactory' not in decoder_header
         assert 'decodeInvalid' not in decoder_header
         assert 'primary_decode_table' not in decoder_header
         assert decoder_header.count('static DecodeResult decode(') == 1
@@ -7148,6 +7959,58 @@ def test_hwreg_descriptor_tables_cover_checked_in_xml(
         assert cpp_values.get(value) == name
 
 
+@pytest.mark.parametrize(
+    ('arch_name', 'profile'),
+    [
+        ('rdna3', Rdna3Profile()),
+        ('rdna3_5', Rdna3_5Profile()),
+        ('rdna4', Rdna4Profile()),
+        ('cdna5', Cdna5Profile()),
+    ],
+)
+def test_vopd_execution_failure_stops_before_either_slot_commits(
+    tmp_path, arch_name, profile
+):
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name=arch_name,
+        generated_dir_name=arch_name,
+        cpp_namespace=arch_name,
+        profile=profile,
+        operand_types={'OPR_SRC'},
+    )
+    codegen.out_path = str(tmp_path)
+    codegen.config = CodegenConfig()
+    codegen.gen_vopd()
+    cpp = (tmp_path / arch_name / 'vopd_exec.cpp').read_text()
+    assert 'throw ' not in cpp
+    helpers, body = cpp.split('void Vopd::execute_impl', 1)
+    # Each defensive non-void failure reports the reason and returns a placeholder.
+    failures = helpers.split('wf.report_instruction_execution_error(')[1:]
+    assert len(failures) == (2 if arch_name == 'cdna5' else 1)
+    for failure in failures:
+        assert failure.lstrip().startswith(
+            'amdgpu::InstructionExecutionError::UnimplementedInstruction);'
+        )
+        assert failure.split(';', 2)[1].strip() == 'return 0'
+    wave_check, probes = body.split('try_execute_vopd_integer_pair_simd', 1)
+    assert 'if (wf.wf_size() != 32)' in wave_check
+    if arch_name in ('rdna3', 'rdna3_5'):
+        assert 'report_instruction_execution_error' not in wave_check
+    else:
+        assert 'InvalidInstructionEncoding' in wave_check
+    assert 'return;' in wave_check
+    evaluations = list(
+        re.finditer(r'uint(?:32|64)_t \w+_result\w* = [^;]*execute_slot[^;]*;', probes)
+    )
+    assert len(evaluations) == (4 if arch_name == 'cdna5' else 2)
+    first_store = probes.index('amdgpu::RegisterAccess(wf).write_lane')
+    for evaluation in evaluations:
+        following = probes[evaluation.end() :].lstrip()
+        assert following.startswith('if (wf.instruction_execution_failed()) return;')
+        assert evaluation.end() < first_store
+
+
 def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
@@ -7246,6 +8109,40 @@ def test_vopd_integer_simd_probe_requires_available_opcodes(tmp_path, missing_op
     execute_slot = exec_cpp[exec_cpp.index('uint32_t Vopd::execute_slot') :]
     assert execute_slot.index('src0 = apply_neg(') < execute_slot.index('return src0;')
     assert execute_slot.index('return src0;') < execute_slot.index('uint32_t src1 =')
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+def test_vopd_subtraction_adds_negated_subtrahend(tmp_path, arch):
+    profile = Rdna3Profile() if arch == 'rdna3' else Rdna4Profile()
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name=arch,
+        generated_dir_name=arch,
+        cpp_namespace=arch,
+        profile=profile,
+        operand_types={'OPR_SRC'},
+    )
+    codegen.out_path = str(tmp_path)
+    codegen.config = CodegenConfig()
+    codegen.gen_vopd()
+    exec_cpp = (tmp_path / arch / 'vopd_exec.cpp').read_text()
+
+    def body(case):
+        # The last label is the execute_slot body; earlier ones list modifier support.
+        start = exec_cpp.rindex(f'case {case}:')
+        return exec_cpp[start : exec_cpp.index('case ', start + 1)]
+
+    # As VOP2: ADD of the negated subtrahend, in operand order, with the
+    # architectural NaN policy. Host subtraction would keep a NaN subtrahend's sign.
+    sub, subrev = body('kVopdSubF32'), body('kVopdSubrevF32')
+    for text in (sub, subrev):
+        assert 'Arithmetic::ADD>' in text
+        assert 'Arithmetic::SUB>' not in text
+        assert 'wf.cu().arch(), wf.ieee_mode()' in text
+    assert 'std::bit_cast<float>(src0), std::bit_cast<float>(src1 ^ 0x80000000u)' in sub
+    assert (
+        'std::bit_cast<float>(src0 ^ 0x80000000u), std::bit_cast<float>(src1)' in subrev
+    )
 
 
 def test_rdna4_profile_enables_generated_vopd():
@@ -7430,6 +8327,78 @@ def test_memory_issue_metadata_covers_every_memory_semantic(arch_name, profile):
         codegen._wait_counter_type('buffer_load')
 
 
+@pytest.mark.parametrize('has_gds', [True, False], ids=['gds-field', 'fieldless'])
+@pytest.mark.parametrize(
+    ('name', 'semantic_class', 'arch_name', 'profile'),
+    [
+        ('DS_READ_B32', 'ds_read', 'cdna4', Cdna4Profile()),
+        ('DS_WRITE_B32', 'ds_write', 'cdna4', Cdna4Profile()),
+        ('DS_BVH_STACK_RTN_B32', 'ds_stack', 'rdna3', Rdna3Profile()),
+        ('DS_BVH_STACK_PUSH4_POP1_RTN_B32', 'ds_stack', 'rdna4', Rdna4Profile()),
+        ('DS_ADD_U32', 'ds_atomic', 'cdna4', Cdna4Profile()),
+        ('DS_WRXCHG2_RTN_B32', 'ds_atomic2', 'cdna4', Cdna4Profile()),
+        ('DS_MSKOR_B32', 'ds_mskor', 'cdna4', Cdna4Profile()),
+        ('DS_APPEND', 'ds_append_consume', 'cdna4', Cdna4Profile()),
+        (
+            'DS_ATOMIC_BARRIER_ARRIVE_RTN_B64',
+            'ds_barrier_arrive',
+            'cdna5',
+            Cdna5Profile(),
+        ),
+        ('DS_GWS_INIT', 'ds_gws', 'rdna3', Rdna3Profile()),
+    ],
+)
+def test_ds_mode_rejection_precedes_execution(
+    name, semantic_class, arch_name, profile, has_gds
+):
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name=arch_name, profile=profile, inst_encodings=[], encoding_map={}
+    )
+    # VDS has no GDS mode bit. Vary field presence independently of the stack
+    # layout so guard generation cannot accidentally depend on the architecture.
+    enc_name = 'ENC_DS' if has_gds else 'ENC_VDS'
+    codegen._current_enc = SimpleNamespace(enc_name=enc_name)
+    codegen._current_inst_fields = {'gds'} if has_gds else set()
+    inst = Instruction(
+        name,
+        enc_name,
+        0,
+        [
+            Operand('vdst', 32, 'OPR_VGPR', False, True, False, False, 0),
+            Operand('addr', 32, 'OPR_VGPR', True, False, False, False, 1),
+            Operand('data0', 32, 'OPR_VGPR', True, False, False, False, 2),
+            Operand('data1', 32, 'OPR_VGPR', True, False, False, False, 3),
+        ],
+    )
+    sem = derive_semantics(name, enc_name)
+    assert sem.semantic_class == semantic_class
+
+    body = codegen._gen_execute_body(inst, sem, enc_name)
+
+    assert 'throw ' not in body
+    assert 'std::make_unique<amdgpu::VectorMemState>' in body
+    if not has_gds:
+        assert 'inst_.gds' not in body
+        assert 'report_instruction_execution_error' not in body
+        return
+
+    requires_gds = semantic_class == 'ds_gws'
+    condition = '!inst_.gds' if requires_gds else 'inst_.gds'
+    error = 'InvalidInstructionEncoding' if requires_gds else 'UnimplementedInstruction'
+    # A complete guard at the start ensures no allocation, register read, stack
+    # preparation or GWS state change can happen before rejection returns.
+    guard = (
+        f'  if ({condition}) {{\n'
+        '    wf.report_instruction_execution_error(\n'
+        f'        amdgpu::InstructionExecutionError::{error});\n'
+        '    return;\n'
+        '  }\n'
+    )
+    assert body.startswith(guard)
+    assert body.count('report_instruction_execution_error') == 1
+
+
 def test_memory_execution_sets_resolved_counter_before_operand_reads():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(arch_name='cdna4', profile=Cdna4Profile())
@@ -7566,26 +8535,86 @@ def test_vmem_store_issue_metadata_follows_arch_profile(
     assert completion in issue
 
 
-def test_pre_gfx12_stores_and_gds_preserve_expcnt_obligations():
-    codegen = object.__new__(CodeGenerator)
-    store = InstructionSemantics(
-        'BUFFER_STORE_DWORD', 'buffer_store', elem_size=4, num_elems=1
-    )
-    ds = InstructionSemantics('DS_READ_B32', 'ds_read', elem_size=4, num_elems=1)
-
-    for arch_name, profile in (
+@pytest.mark.parametrize(
+    'arch_name,profile',
+    [
+        ('cdna1', Cdna1Profile()),
         ('cdna2', Cdna2Profile()),
+        ('cdna3', CdnaProfile()),
+        ('cdna4', Cdna4Profile()),
+        ('rdna1', Rdna1Profile()),
         ('rdna2', Rdna2Profile()),
         ('rdna3', Rdna3Profile()),
+        ('rdna3_5', Rdna3_5Profile()),
+        ('rdna4', Rdna4Profile()),
+        ('cdna5', Cdna5Profile()),
+    ],
+)
+def test_supported_vmem_writes_do_not_use_expcnt(arch_name, profile):
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(arch_name=arch_name, profile=profile)
+    for name, semantic_class, fields in (
+        ('BUFFER_STORE_DWORD', 'buffer_store', set()),
+        ('TBUFFER_STORE_FORMAT_X', 'tbuffer_store', set()),
+        ('IMAGE_STORE', 'image_store', set()),
+        ('BUFFER_ATOMIC_ADD', 'buffer_atomic', set()),
+        ('FLAT_STORE_DWORD', 'flat_store', {'seg'}),
+        ('FLAT_ATOMIC_ADD', 'flat_atomic', {'seg'}),
+        ('GLOBAL_STORE_DWORD', 'flat_store', set()),
+        ('GLOBAL_ATOMIC_ADD', 'flat_atomic', set()),
     ):
-        codegen.isa_spec = SimpleNamespace(arch_name=arch_name, profile=profile)
-        store_info = codegen._memory_issue_initializer(store, set())
-        assert 'amdgpu::WaitCounterType::EXPCNT' in store_info
+        sem = InstructionSemantics(name, semantic_class, elem_size=4, num_elems=1)
+        issue = codegen._memory_issue_initializer(sem, fields)
+        assert 'amdgpu::WaitCounterType::EXPCNT' not in issue, name
 
-        ds_info = codegen._memory_issue_initializer(ds, {'gds'})
-        assert 'inst_.gds != 0' in ds_info
-        assert 'amdgpu::MemoryCompletionClass::GDS' in ds_info
-        assert 'amdgpu::WaitCounterType::EXPCNT' in ds_info
+
+@pytest.mark.parametrize(
+    'arch_name,profile',
+    [
+        ('cdna1', Cdna1Profile()),
+        ('cdna2', Cdna2Profile()),
+        ('cdna3', CdnaProfile()),
+        ('rdna1', Rdna1Profile()),
+        ('rdna2', Rdna2Profile()),
+        ('rdna3', Rdna3Profile()),
+        ('rdna3_5', Rdna3_5Profile()),
+    ],
+)
+def test_legacy_gds_preserves_expcnt_obligations(arch_name, profile):
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(arch_name=arch_name, profile=profile)
+    ds = InstructionSemantics('DS_READ_B32', 'ds_read', elem_size=4, num_elems=1)
+
+    ds_info = codegen._memory_issue_initializer(ds, {'gds'})
+    assert 'inst_.gds != 0' in ds_info
+    assert 'amdgpu::MemoryCompletionClass::GDS' in ds_info
+    assert 'amdgpu::WaitCounterType::EXPCNT' in ds_info
+
+
+@pytest.mark.parametrize(
+    'name,semantic_class,fields,counter',
+    [
+        ('BUFFER_STORE_DWORD', 'buffer_store', set(), 'VMCNT'),
+        ('BUFFER_ATOMIC_ADD', 'buffer_atomic', set(), 'VMCNT'),
+        ('FLAT_STORE_DWORD', 'flat_store', {'seg'}, 'VMCNT'),
+        ('FLAT_ATOMIC_ADD', 'flat_atomic', {'seg'}, 'VMCNT'),
+        ('GLOBAL_STORE_DWORD', 'flat_store', set(), 'VMCNT'),
+        ('GLOBAL_ATOMIC_ADD', 'flat_atomic', set(), 'VMCNT'),
+        ('DS_READ_B32', 'ds_read', {'gds'}, 'LGKMCNT'),
+        ('DS_WRITE_B32', 'ds_write', {'gds'}, 'LGKMCNT'),
+    ],
+)
+def test_cdna4_memory_issue_omits_unused_expcnt(name, semantic_class, fields, counter):
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(arch_name='cdna4', profile=Cdna4Profile())
+    sem = InstructionSemantics(name, semantic_class, elem_size=4, num_elems=1)
+
+    issue = codegen._memory_issue_initializer(sem, fields)
+
+    assert f'amdgpu::WaitCounterType::{counter}' in issue
+    assert 'amdgpu::WaitCounterType::EXPCNT' not in issue
+    if 'seg' in fields:
+        assert 'amdgpu::WaitCounterType::LGKMCNT' in issue
 
 
 def test_cdna5_async_completion_domains_are_explicit():
@@ -7624,6 +8653,32 @@ def test_wide_scalar_load_contributes_two_counter_tokens():
     assert 'MemoryCompletionClass::UNORDERED, 2}' in codegen._memory_issue_initializer(
         wide, set()
     )
+
+
+@pytest.mark.parametrize(
+    ('name', 'operation', 'elem_size', 'num_elems', 'tokens'),
+    [
+        ('S_ATOMIC_DEC', 'dec', 4, 1, 1),
+        ('S_ATOMIC_DEC_X2', 'dec', 8, 2, 2),
+        ('S_ATOMIC_CMPSWAP', 'cmpswap', 4, 2, 1),
+        ('S_ATOMIC_CMPSWAP_X2', 'cmpswap', 8, 4, 2),
+    ],
+)
+def test_scalar_atomic_counter_tokens_follow_access_width(
+    name, operation, elem_size, num_elems, tokens
+):
+    # The access width sets the count, so an X2 atomic with GLC=0 still takes two.
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(arch_name='cdna4', profile=Cdna4Profile())
+    sem = InstructionSemantics(
+        name,
+        'smem_atomic',
+        operation=operation,
+        elem_size=elem_size,
+        num_elems=num_elems,
+    )
+
+    assert codegen._memory_issue_counter_increment(sem, 'smem_atomic') == tokens
 
 
 @pytest.mark.parametrize(
@@ -7713,6 +8768,20 @@ def test_generated_memory_paths_use_decoded_issue_metadata(
         issue_descriptors += source.count('set_memory_issue_info(')
         assert 'flags_ |= MEMORY_OP;' not in source, path
         assert 'MemoryCompletionClass::UNCLASSIFIED' not in source, path
+        # Check every VMEM model, including instructions without an execution
+        # body, so partial regeneration cannot leave stale EXP obligations.
+        # DS and LDS-direct models have separate EXP policies.
+        if path.stem in {
+            'mubuf',
+            'mtbuf',
+            'flat',
+            'mimg',
+            'vbuffer',
+            'vflat',
+            'vglobal',
+            'vscratch',
+        }:
+            assert 'WaitCounterType::EXPCNT' not in source, path
     assert issue_descriptors > 0
 
 
@@ -7833,7 +8902,7 @@ def test_gfx1250_flat_u64_atomic_payload_width_uses_two_dwords():
             4,
             4,
             False,
-            'data.copy_dwords_lane_major(d->store_data, exec);',
+            'if (data.copy_dwords_lane_major(d->store_data, exec).failed()) return;',
         ),
         (
             'GLOBAL_STORE_BYTE',
@@ -7888,6 +8957,7 @@ def test_gfx1250_cluster_load_generators_force_request_l1_bypass():
 
     cluster = SimpleNamespace(
         name='CLUSTER_LOAD_B32',
+        semantic_class='flat_load',
         elem_size=4,
         num_elems=1,
         sign_extend=False,
@@ -7896,6 +8966,7 @@ def test_gfx1250_cluster_load_generators_force_request_l1_bypass():
     )
     ordinary = SimpleNamespace(
         name='GLOBAL_LOAD_B32',
+        semantic_class='flat_load',
         elem_size=4,
         num_elems=1,
         sign_extend=False,
@@ -8364,6 +9435,30 @@ def test_generated_atomic_def_use_follows_return_control(
         assert 'dst_operands_[num_dst_++] = &vdata_return;' in cmpswap
 
 
+@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'cdna3', 'cdna4'])
+def test_generated_smem_cmpswap_defines_only_return_width(
+    amdgpu_generated_root: Path, arch: str
+):
+    smem = (amdgpu_generated_root / arch / 'smem.cpp').read_text()
+    for mnemonic, payload_bits, return_bits in (
+        ('SAtomicCmpswapSmem', 64, 32),
+        ('SAtomicCmpswapX2Smem', 128, 64),
+    ):
+        cmpswap = smem.split(f'{mnemonic}::{mnemonic}')[1]
+        cmpswap = cmpswap.split('namespace detail')[0]
+        assert f'sdata({payload_bits}, OperandType::OPR_SREG' in cmpswap
+        assert f'sdata_return({return_bits}, OperandType::OPR_SREG' in cmpswap
+        assert 'src_operands_[0] = &sdata;' in cmpswap
+        assert 'if (inst_.glc != 0)' in cmpswap
+        assert 'dst_operands_[num_dst_++] = &sdata_return;' in cmpswap
+        assert 'dst_operands_[num_dst_++] = &sdata;' not in cmpswap
+
+    add = smem.split('SAtomicAddSmem::SAtomicAddSmem')[1]
+    add = add.split('namespace detail')[0]
+    assert 'dst_operands_[num_dst_++] = &sdata;' in add
+    assert 'sdata_return' not in add
+
+
 def test_generated_cdna5_swmmac_tied_destination_metadata(
     amdgpu_generated_root: Path,
 ):
@@ -8713,13 +9808,41 @@ def test_ds_subtraction_keeps_underflow_policy(profile_type, returning):
         assert sem.operation == operation
 
 
-@pytest.mark.parametrize(
-    'operation',
-    ['frexp_exp_f32', 'frexp_exp_f16', 'cvt_norm_i16_f16', 'cvt_norm_u16_f16'],
-)
+@pytest.mark.parametrize('operation', sorted(INTEGER_RESULT_OPERATIONS))
 def test_sdwa_integer_results_ignore_float_modifiers(operation):
     sem = SimpleNamespace(name='V_INTEGER_RESULT', operation=operation, data_type='f16')
     assert CodeGenerator._sdwa_result_format(sem) == 'amdgpu::sdwa::ResultFormat::NONE'
+
+
+@pytest.mark.parametrize('arch_name', ['cdna3', 'rdna4'])
+@pytest.mark.parametrize(
+    'name',
+    [
+        'V_FREXP_EXP_I16_F16',
+        'V_FREXP_EXP_I32_F32',
+        'V_FREXP_EXP_I32_F64',
+        'V_CVT_NORM_I16_F16',
+        'V_CVT_NORM_U16_F16',
+    ],
+)
+def test_vop3_integer_results_ignore_output_modifiers(
+    amdgpu_generated_root, execute_shared_path, arch_name, name
+):
+    sem = derive_semantics(name, 'ENC_VOP3', _profile_for_arch(arch_name))
+    assert sem is not None and sem.operation in INTEGER_RESULT_OPERATIONS
+    class_name = ''.join(part.title() for part in name.split('_')) + 'Vop3'
+    vop3 = (amdgpu_generated_root / arch_name / 'vop3_exec.cpp').read_text()
+    start = vop3.index(f'void {class_name}::execute_impl(')
+    body = vop3[start : vop3.index('\n}\n', start)]
+    shared = f'execute_{name.lower()}_vop3('
+    if shared in body:
+        source = execute_shared_path.read_text()
+        start = source.index(f'inline void {shared}')
+        body = source[start : source.index('\n}\n', start)]
+    assert 'inst_.omod' not in body
+    assert 'inst_.clamp' not in body
+    assert 'output_modifier' not in body
+    assert 'f32_to_f16' not in body
 
 
 def test_sdwa_conversion_result_formats():
@@ -8741,3 +9864,42 @@ def test_sdwa_conversion_result_formats():
         assert CodeGenerator._sdwa_result_format(semantics) == (
             f'amdgpu::sdwa::ResultFormat::{expected}'
         )
+
+
+@pytest.mark.parametrize(
+    'arch,profile_type', [('cdna3', CdnaProfile), ('cdna4', Cdna4Profile)]
+)
+def test_scratch_lds_and_global_lds_share_opcode_dispatch(arch, profile_type):
+    spec = Parser(str(_mrisa_dir() / f'amdgpu_isa_{arch}.xml'), profile_type()).parse()
+    semantics = derive_all_semantics(spec)
+    flat = spec.encoding_map['ENC_FLAT']
+    for opcode in range(38, 43):
+        instructions = [inst for inst in flat.insts if inst.opcode == opcode]
+        assert {inst.required_flat_segment for inst in instructions} == {1, 2}
+        scratch = next(inst for inst in instructions if inst.required_flat_segment == 1)
+        assert semantics.instructions[scratch.name].semantic_class == 'scratch_load_lds'
+        assert any(
+            entry and f'decodeFlatSegment{opcode}' in (entry.sub_decode_funcs or [])
+            for entry in spec.primary_decode_table
+        )
+
+
+@pytest.mark.parametrize(
+    'name',
+    ['V_WMMA_F32_16X16X16_F16', 'V_WMMA_I32_16X16X64_IU8', 'V_SWMMAC_F32_16X16X32_F16'],
+)
+def test_opted_in_fixed_wave_matrix_layout_is_rejected(name):
+    profile = _matrix_profile(
+        matrix_layout=MatrixLayout.WMMA_SPLIT_K,
+        swmmac_layout=SwmmacLayout.FIXED_WAVE,
+        wave_size=32,
+        wave_size_max=32,
+        uses_rj_arith_matrix=True,
+    )
+    message = (
+        'Unsupported rj-arith sparse layout'
+        if name.startswith('V_SWMMAC_')
+        else f'Missing rj-arith matrix binding.*{name}'
+    )
+    with pytest.raises(ValueError, match=message):
+        _gen_mfma(Instruction(name, 'ENC_VOP3P', 0, []), 'fixed_wave', profile)

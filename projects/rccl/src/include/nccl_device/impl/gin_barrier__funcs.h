@@ -95,10 +95,22 @@ NCCL_DEVICE_INLINE ncclResult_t ncclGinBarrierSession_internal<Coop>::syncIntern
       this->net.flush(this->coop, order);
     }
   };
+  // The barrier relies on its signals to order earlier puts only when the Put
+  // fence skips fenceFlush, i.e. on a backend with strong signals. Everywhere
+  // else a weak signal is enough, and on Anvil SDMA a strong one would drain
+  // every queue to every peer on each barrier.
+  const bool strongBarrierSignal = (fence & ncclGinFenceLevel::Put) && this->net._supportsStrongSignal();
   auto signalPeer = [&](ncclGin& net, int peer) {
-    net.signal(this->team, peer, ncclGin_SignalInc{this->signal + this->team.rank}, ncclCoopThread(), ncclGin_None(),
-               nccl::utility::releaseOrderOf(ord) != cuda::memory_order_relaxed ? cuda::thread_scope_thread :
-                                                                                  cuda::thread_scope_system);
+    const cuda::thread_scope given = nccl::utility::releaseOrderOf(ord) != cuda::memory_order_relaxed ?
+                                       cuda::thread_scope_thread :
+                                       cuda::thread_scope_system;
+    if (strongBarrierSignal) {
+      net.signal(this->team, peer, ncclGin_StrongSignalInc{this->signal + this->team.rank}, ncclCoopThread(),
+                 ncclGin_None(), given);
+    } else {
+      net.signal(this->team, peer, ncclGin_WeakSignalInc{this->signal + this->team.rank}, ncclCoopThread(),
+                 ncclGin_None(), given);
+    }
   };
 
   auto waitForPeer = [&](ncclGin& net, int peer) -> ncclResult_t {

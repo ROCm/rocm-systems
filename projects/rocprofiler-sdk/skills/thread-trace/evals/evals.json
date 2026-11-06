@@ -8,7 +8,7 @@
       "expected_behavior": [
         "Captures the kernel with rocprofv3 --att and reads the stats CSV or the skill's att_mine.py output",
         "Identifies that the s_waitcnt vmcnt(0) that follows the loop's global load holds most of the time and that wait instructions hold the largest share of the waves' time: the next iteration's load cannot issue until that wait ends",
-        "Names the responsible source line (the planted defect is at row_sums.hip:29)"
+        "Names the responsible source line (the planted defect is at row_sums.hip:51)"
       ],
       "unexpected_behavior": [
         "Blames a cause without evidence from the trace",

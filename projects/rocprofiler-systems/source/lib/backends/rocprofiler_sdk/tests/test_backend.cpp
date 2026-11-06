@@ -3,6 +3,7 @@
 
 #include "backends/rocprofiler_sdk/backend.hpp"
 #include "backends/rocprofiler_sdk/tests/mock_sdk.hpp"
+#include "common/clocks.hpp"
 #include <cstdint>
 
 #include <gmock/gmock.h>
@@ -341,6 +342,12 @@ TEST_F(backend_test, context_is_valid_returns_false_on_sdk_error)
 }
 
 // ─── get_timestamp ────────────────────────────────────────────────────────────
+
+// rocprofiler_get_timestamp() reads CLOCK_BOOTTIME (default_clock_id in the SDK's
+// internal common/utility.hpp). CPU events are stamped with clocks::timeline, so
+// both must read the same clock for CPU and SDK events to line up in the trace.
+static_assert(clocks::timeline::k_timeline_clock_id == CLOCK_BOOTTIME,
+              "clocks::timeline must match the rocprofiler-sdk host clock");
 
 TEST_F(backend_test, get_timestamp_returns_value_written_by_sdk)
 {

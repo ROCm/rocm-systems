@@ -371,7 +371,8 @@ TEST_P(FastpathSupportedHipMemoryParam, Score)
               SCORE_ACCEPT);
 }
 
-INSTANTIATE_TEST_SUITE_P(FastpathTest, FastpathSupportedHipMemoryParam, ValuesIn(SupportedHipMemoryTypes));
+INSTANTIATE_TEST_SUITE_P(FastpathTest, FastpathSupportedHipMemoryParam,
+                         ValuesIn(SupportedFastpathMemoryTypes));
 
 struct FastpathUnsupportedHipMemoryParam : public FastpathTestBase, public TestWithParam<hipMemoryType> {};
 
@@ -387,7 +388,7 @@ TEST_P(FastpathUnsupportedHipMemoryParam, Score)
 }
 
 INSTANTIATE_TEST_SUITE_P(FastpathTest, FastpathUnsupportedHipMemoryParam,
-                         ValuesIn(UnsupportedHipMemoryTypes));
+                         ValuesIn(set_difference(KnownHipMemoryTypes, SupportedFastpathMemoryTypes)));
 
 struct FastpathAlignedIoSizesParam : public FastpathTestBase, public TestWithParam<size_t> {};
 
@@ -489,6 +490,11 @@ INSTANTIATE_TEST_SUITE_P(FastpathTest, FastpathUnalignedBufferOffsetsParam,
 struct FastpathIoParam : public FastpathTestBase, public TestWithParam<IoType> {
 
     StrictMock<MHip> mhip;
+
+    void SetUp() override
+    {
+        EXPECT_CALL(*mbuffer, getGpuId).WillRepeatedly(Return(0));
+    }
 
     // Setup expectations on the mocks called to validate IO arguments
     void expect_validate()
@@ -668,6 +674,50 @@ TEST_P(FastpathIoParam, IoReturnsBytesTransferredShort)
     ASSERT_EQ(Fastpath().io(GetParam(), mfile, mbuffer, DEFAULT_IO_SIZE, DEFAULT_FILE_OFFSET,
                             DEFAULT_BUFFER_OFFSET),
               nbytes);
+}
+
+TEST_P(FastpathIoParam, IoRecordsAddIoForBufferGpu)
+{
+    constexpr int BUFFER_GPU{5};
+    expect_io();
+    EXPECT_CALL(*mbuffer, getGpuId).WillRepeatedly(Return(BUFFER_GPU));
+    EXPECT_CALL(mstats, addIo(_, _, _, _, _, BUFFER_GPU)).Times(1);
+    switch (GetParam()) {
+        case IoType::Read:
+            EXPECT_CALL(mhip, hipAmdFileRead(_, _, _, _)).WillOnce(Return(DEFAULT_IO_SIZE));
+            break;
+        case IoType::Write:
+            EXPECT_CALL(mhip, hipAmdFileWrite(_, _, _, _)).WillOnce(Return(DEFAULT_IO_SIZE));
+            break;
+        default:
+            FAIL() << "Invalid IoType";
+    }
+
+    ASSERT_EQ(Fastpath().io(GetParam(), mfile, mbuffer, DEFAULT_IO_SIZE, DEFAULT_FILE_OFFSET,
+                            DEFAULT_BUFFER_OFFSET),
+              DEFAULT_IO_SIZE);
+}
+
+TEST_P(FastpathIoParam, IoRecordsErrorForBufferGpu)
+{
+    constexpr int BUFFER_GPU{5};
+    expect_io();
+    EXPECT_CALL(*mbuffer, getGpuId).WillRepeatedly(Return(BUFFER_GPU));
+    EXPECT_CALL(mstats, error(_, _, _, BUFFER_GPU)).Times(1);
+    switch (GetParam()) {
+        case IoType::Read:
+            EXPECT_CALL(mhip, hipAmdFileRead).WillOnce(Throw(Hip::RuntimeError(hipErrorUnknown)));
+            break;
+        case IoType::Write:
+            EXPECT_CALL(mhip, hipAmdFileWrite).WillOnce(Throw(Hip::RuntimeError(hipErrorUnknown)));
+            break;
+        default:
+            FAIL() << "Invalid IoType";
+    }
+
+    EXPECT_THROW(Fastpath().io(GetParam(), mfile, mbuffer, DEFAULT_IO_SIZE, DEFAULT_FILE_OFFSET,
+                               DEFAULT_BUFFER_OFFSET),
+                 Hip::RuntimeError);
 }
 
 // Ensure hip errors thrown by Hip::hipAmdFileRead/Hip::hipAmdFileWrite are not masked

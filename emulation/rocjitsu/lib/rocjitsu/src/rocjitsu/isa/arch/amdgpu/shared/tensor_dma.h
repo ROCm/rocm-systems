@@ -4,11 +4,14 @@
 #pragma once
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/lds_barrier_cell.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "rocjitsu/vm/plugins/tensor_dma_issue_observation.h"
 #include "rocjitsu/vm/plugins/tensor_dma_memory_access_observation.h"
 #include "util/bit.h"
+#include "util/log.h"
 #include "util/result.h"
 
 #include <algorithm>
@@ -16,6 +19,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <format>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -305,6 +309,36 @@ private:
   bool empty_ = false;
 };
 
+/// @brief Count the elements materialized by a tensor DMA instruction.
+/// @details Gather mode uses valid_indices * tile_dims[0]. Dense mode includes
+/// every iteration. A zero tile_dims[0] makes the instruction a NOP whatever the
+/// higher tile dimensions (CDNA5 ISA 10.11.4, D# field tile_dim0). Arithmetic
+/// overflow and a zero higher dimension below the rank return std::nullopt.
+///
+/// A NOP tile and a gather with no valid indices are still active descriptors:
+/// with atomic_barrier set, they validate the barrier address and send exactly
+/// one barrier arrival. Only a NULL tensor skips both, as the ISA specifies
+/// (CDNA5 ISA 10.11.4, D# field count). The published ISA does not state the
+/// barrier behavior of a NOP tile; this is the emulator's chosen semantics, not
+/// established hardware behavior.
+inline std::optional<uint64_t> tensor_element_count(const TensorDmaDescriptor &desc,
+                                                    const TensorDmaLayout &layout) {
+  if (layout.rank() == 0 || desc.tile_dims[0] == 0)
+    return uint64_t{0};
+  if (desc.gather)
+    return util::checked_mul(uint64_t{desc.valid_indices}, uint64_t{desc.tile_dims[0]});
+
+  uint64_t elements_per_iteration = 1;
+  for (uint32_t dim = 0; dim < layout.rank(); ++dim) {
+    const auto product = util::checked_mul(elements_per_iteration, uint64_t{desc.tile_dims[dim]});
+    if (!product || *product == 0) [[unlikely]]
+      return std::nullopt;
+    elements_per_iteration = *product;
+  }
+  const uint64_t iterations = desc.iterate ? desc.iteration_count : 1;
+  return util::checked_mul(elements_per_iteration, iterations);
+}
+
 inline util::Result validate_supported_descriptor(const TensorDmaDescriptor &desc,
                                                   const TensorDmaLayout &layout) {
   // The in-tree HIP descriptor API and LLVM lowering only produce the boolean
@@ -320,28 +354,25 @@ inline util::Result validate_supported_descriptor(const TensorDmaDescriptor &des
   if (desc.gather) {
     if (rank != 2) [[unlikely]]
       return util::Result::failure();
-    if (desc.tile_dims[0] == 0) [[unlikely]]
-      return util::Result::failure();
-    if (desc.valid_indices == 0) [[unlikely]]
-      return util::Result::failure();
+    // Zero valid indices or a zero tile_dims[0] is a NOP; see tensor_element_count.
     const uint32_t max_indices = desc.gather_indices_32bit ? 8 : 16;
     if (desc.valid_indices > max_indices) [[unlikely]]
       return util::Result::failure();
-    return util::Result::success();
+    return tensor_element_count(desc, layout) ? util::Result::success() : util::Result::failure();
   }
+  // A dense tile with no elements is a NOP (see tensor_element_count). It
+  // visits no iteration origins, so its iteration fields need not describe a
+  // valid walk; pipelines drain an iterating prefetch this way.
+  if (rank == 0 || desc.tile_dims[0] == 0)
+    return util::Result::success();
   if (desc.iterate && (rank < 2 || rank > 3)) [[unlikely]]
     return util::Result::failure();
   if (desc.iterate && desc.iteration_count > 1 && desc.global_increment != 0) {
     if (layout.validate_iteration_inverse().failed()) [[unlikely]]
       return util::Result::failure();
   }
-  uint64_t element_count = 1;
-  for (uint32_t dim = 0; dim < rank; ++dim) {
-    const auto product = util::checked_mul(element_count, uint64_t{desc.tile_dims[dim]});
-    if (!product || *product == 0) [[unlikely]]
-      return util::Result::failure();
-    element_count = *product;
-  }
+  if (!tensor_element_count(desc, layout)) [[unlikely]]
+    return util::Result::failure();
   return util::Result::success();
 }
 
@@ -351,6 +382,9 @@ public:
   uint32_t lds_address = 0;
   std::array<uint8_t, 8> bytes{};
   std::size_t completed_bytes = 0;
+  /// Trailing bytes outside the wave's LDS allocation. Loads drop them; stores
+  /// read zero. Both are simulator modeling choices; see append_copy.
+  uint8_t lds_dropped_bytes = 0;
   bool in_bounds = false;
 };
 
@@ -365,31 +399,233 @@ public:
   std::optional<GpuVmAccess> access;
   std::vector<TensorDmaTransferElement> elements;
   std::size_t next_element = 0;
+  /// PC of the tensor DMA instruction. A deferred transfer completes after the
+  /// wave's PC has advanced past it.
+  uint64_t pc = 0;
   VmAccessOutcome outcome = VmAccessOutcome::Complete;
   bool store_from_lds = false;
   bool completion_committed = false;
   bool observation_reported = false;
 };
 
-inline void append_copy(TensorDmaState &state, Wavefront &wf, uint64_t global_element,
-                        uint64_t lds_element, bool in_bounds) {
-  const TensorDmaDescriptor &desc = state.desc;
-  const uint64_t global_addr = desc.global_base + global_element * desc.elem_size;
-  uint64_t lds_byte = lds_element * desc.elem_size;
-  // The ISA applies descriptor padding only to memory-to-LDS transfers.
-  // Stores read the ordinary dense LDS stream and ignore the padding fields.
-  if (desc.pad && !state.store_from_lds) {
-    const uint32_t pad_interval_bytes = desc.pad_interval * sizeof(uint32_t);
-    const uint32_t pad_amount_bytes = desc.pad_amount * sizeof(uint32_t);
-    lds_byte += (lds_byte / pad_interval_bytes) * pad_amount_bytes;
+// Bound one in-flight instruction to roughly 40 MiB of host transfer metadata.
+inline constexpr uint64_t kMaxMaterializedElements = 1u << 20;
+
+/// @brief Prove that every reachable in-bounds global byte address is representable.
+/// @details A fully masked transfer is valid because it forms no global address.
+inline bool validate_global_address_range(const TensorDmaDescriptor &desc,
+                                          const TensorDmaLayout &layout) {
+  std::optional<uint64_t> max_global_element;
+  auto include_element = [&](uint64_t element) {
+    max_global_element = std::max(max_global_element.value_or(0), element);
+  };
+
+  if (desc.gather) {
+    if (!layout.empty()) {
+      const uint64_t extent0 = std::min<uint64_t>(desc.tile_dims[0], desc.tensor_dims[0]);
+      for (uint32_t idx = 0; idx < desc.valid_indices; ++idx) {
+        const uint32_t gather_index = desc.gather_indices[idx];
+        if (extent0 == 0 || gather_index >= desc.tensor_dims[1])
+          continue;
+        const auto row = util::checked_mul(uint64_t{gather_index}, desc.global_strides[0]);
+        const auto last = row ? util::checked_add(*row, extent0 - 1) : std::nullopt;
+        if (!last) [[unlikely]]
+          return false;
+        include_element(*last);
+      }
+    }
+  } else {
+    const uint32_t iterations = desc.iterate ? desc.iteration_count : 1;
+    for (uint32_t iter = 0; iter < iterations; ++iter) {
+      const auto iteration_offset = util::checked_mul(uint64_t{iter}, desc.global_increment);
+      if (!iteration_offset) [[unlikely]]
+        return false;
+      const auto origin = desc.iterate && !layout.empty()
+                              ? layout.origin_from_linear_offset(*iteration_offset)
+                              : std::array<uint64_t, 5>{};
+      bool in_bounds = !layout.empty();
+      uint64_t last = *iteration_offset;
+      for (uint32_t dim = 0; dim < layout.rank() && in_bounds; ++dim) {
+        if (origin[dim] >= desc.tensor_dims[dim]) {
+          in_bounds = false;
+          break;
+        }
+        const uint64_t extent =
+            std::min<uint64_t>(desc.tile_dims[dim], uint64_t{desc.tensor_dims[dim]} - origin[dim]);
+        if (extent == 0) {
+          in_bounds = false;
+          break;
+        }
+        const uint64_t stride = dim == 0 ? 1 : desc.global_strides[dim - 1];
+        const auto delta = util::checked_mul(extent - 1, stride);
+        const auto next = delta ? util::checked_add(last, *delta) : std::nullopt;
+        if (!next) [[unlikely]]
+          return false;
+        last = *next;
+      }
+      if (in_bounds)
+        include_element(last);
+    }
   }
 
-  const uint32_t lds_addr = wf.lds_base() + desc.lds_base + static_cast<uint32_t>(lds_byte);
+  if (!max_global_element)
+    return true;
+  const auto max_global_byte = util::checked_mul(*max_global_element, uint64_t{desc.elem_size});
+  const auto max_global_address =
+      max_global_byte ? util::checked_add(desc.global_base, *max_global_byte) : std::nullopt;
+  return max_global_address &&
+         util::checked_add(*max_global_address, uint64_t{desc.elem_size - 1}).has_value();
+}
+
+/// @brief Tensor DMA LDS padding fields converted from descriptor dwords to bytes.
+struct TensorDmaLdsPadding {
+  uint64_t interval_bytes = 0;
+  uint64_t amount_bytes = 0;
+};
+
+/// @brief Convert the descriptor's dword padding units to bytes.
+/// @details The ISA applies padding only to memory-to-LDS transfers. Stores read the ordinary
+/// dense LDS stream and ignore these fields.
+inline TensorDmaLdsPadding tensor_dma_lds_padding(const TensorDmaDescriptor &desc) {
+  return {.interval_bytes = uint64_t{desc.pad_interval} * sizeof(uint32_t),
+          .amount_bytes = uint64_t{desc.pad_amount} * sizeof(uint32_t)};
+}
+
+/// @brief Byte offset, from the descriptor's LDS base, of one tile element.
+/// @details Each iterated tile starts lds_increment elements after the previous
+/// one (CDNA5 ISA 10.11.3.1), and padding applies within a tile (10.11.2). The
+/// ISA leaves the padding counter's state between tiles unspecified; rocjitsu
+/// restarts it with each tile (issue #14661), so padding applies to the
+/// element's offset within its tile only. Stores ignore padding. Address
+/// formation is proven safe by
+/// validate_materialization_address_ranges, so the arithmetic is unchecked.
+inline uint64_t tensor_dma_lds_byte(const TensorDmaDescriptor &desc, bool store_from_lds,
+                                    uint64_t iteration_lds_element, uint64_t tile_element) {
+  uint64_t tile_byte = tile_element * desc.elem_size;
+  if (desc.pad && !store_from_lds) {
+    const TensorDmaLdsPadding padding = tensor_dma_lds_padding(desc);
+    tile_byte += (tile_byte / padding.interval_bytes) * padding.amount_bytes;
+  }
+  return iteration_lds_element * desc.elem_size + tile_byte;
+}
+
+/// @brief Exclusive absolute CU byte address at which the wave's LDS
+/// allocation ends, clamped to the CU's LDS backing size. The allocation can
+/// end before the CU's LDS does; transfer bytes at or past it are dropped.
+inline uint64_t tensor_dma_lds_allocation_end(const Wavefront &wf) {
+  return std::min<uint64_t>(wf.lds().size_bytes(),
+                            uint64_t{wf.lds_base()} + uint64_t{wf.lds_size()});
+}
+
+/// @brief Prove that global and LDS address formation is safe before materialization.
+/// @details The proof includes load padding, allowing the element walker and append_copy to use
+/// unchecked 64-bit arithmetic. An out-of-range LDS address does not abort the transfer (CDNA5 ISA
+/// 10.11.6, "Xnack, Memviol and Out-of-Bounds Behavior"); append_copy drops the out-of-range
+/// bytes silently. That section also reports the LDS violation as a MEMVIOL after the descriptor
+/// is processed when LDS_CONFIG.ADDR_OUT_OF_RANGE_REPORTING == 1; that reporting is not modeled.
+/// The bound is the allocation rocjitsu dispatches, wf.lds_size(), which the dispatcher rounds up
+/// to 256 bytes. CDNA5 ISA 3.3.4 specifies a 2048-byte allocation granularity, so hardware likely
+/// owns bytes past this bound that are dropped here; this is inferred from the ISA, not measured on
+/// hardware. The same dispatch granularity also bounds DS and FLAT accesses and is tracked
+/// separately.
+/// Requiring the atomic-barrier cell to lie within the allocation is simulator validation, not a
+/// rule of that section. allocation_end is tensor_dma_lds_allocation_end(wf).
+inline bool validate_materialization_address_ranges(const TensorDmaDescriptor &desc,
+                                                    const TensorDmaLayout &layout,
+                                                    const Wavefront &wf, bool store_from_lds,
+                                                    uint64_t allocation_end) {
+  // Barrier completion writes eight bytes even when the transfer has no elements.
+  if (desc.atomic_barrier) {
+    const auto barrier_address =
+        util::checked_add(uint64_t{wf.lds_base()}, uint64_t{desc.atomic_barrier_addr});
+    const auto barrier_end =
+        barrier_address ? util::checked_add(*barrier_address, uint64_t{8}) : std::nullopt;
+    if (!barrier_end || *barrier_end > allocation_end) [[unlikely]]
+      return false;
+  }
+  const auto total_elements = tensor_element_count(desc, layout);
+  if (!total_elements)
+    return false;
+  if (*total_elements == 0)
+    return true;
+
+  const uint64_t iterations = desc.gather ? 1 : (desc.iterate ? desc.iteration_count : 1);
+  if (!validate_global_address_range(desc, layout)) [[unlikely]]
+    return false;
+
+  // Padding restarts with each iterated tile, so pad the last element's offset
+  // within a tile, then add the final iteration's start (see tensor_dma_lds_byte).
+  const uint64_t elements_per_iteration = *total_elements / iterations;
+  auto max_tile_byte = util::checked_mul(elements_per_iteration - 1, uint64_t{desc.elem_size});
+  if (!max_tile_byte) [[unlikely]]
+    return false;
+  if (desc.pad && !store_from_lds) {
+    const TensorDmaLdsPadding padding = tensor_dma_lds_padding(desc);
+    if (padding.interval_bytes == 0) [[unlikely]]
+      return false;
+    const auto extra =
+        util::checked_mul(*max_tile_byte / padding.interval_bytes, padding.amount_bytes);
+    max_tile_byte = extra ? util::checked_add(*max_tile_byte, *extra) : std::nullopt;
+    if (!max_tile_byte) [[unlikely]]
+      return false;
+  }
+  const auto final_iteration_lds = util::checked_mul(iterations - 1, uint64_t{desc.lds_increment});
+  const auto final_iteration_byte =
+      final_iteration_lds ? util::checked_mul(*final_iteration_lds, uint64_t{desc.elem_size})
+                          : std::nullopt;
+  const auto max_lds_byte = final_iteration_byte
+                                ? util::checked_add(*final_iteration_byte, *max_tile_byte)
+                                : std::nullopt;
+  if (!max_lds_byte) [[unlikely]]
+    return false;
+
+  const auto descriptor_base = util::checked_add(uint64_t{wf.lds_base()}, uint64_t{desc.lds_base});
+  const auto last_address =
+      descriptor_base ? util::checked_add(*descriptor_base, *max_lds_byte) : std::nullopt;
+  const auto transfer_end =
+      last_address ? util::checked_add(*last_address, uint64_t{desc.elem_size}) : std::nullopt;
+  return descriptor_base && transfer_end;
+}
+
+/// @brief Append one transfer element after the descriptor-wide address proof.
+/// @details LDS bytes at or past lds_allocation_end, tensor_dma_lds_allocation_end(wf), are
+/// dropped.
+/// @pre The descriptor and wave passed validate_supported_descriptor and
+/// validate_materialization_address_ranges.
+inline void append_copy(TensorDmaState &state, Wavefront &wf, uint64_t lds_allocation_end,
+                        uint64_t global_element, uint64_t iteration_lds_element,
+                        uint64_t tile_element, bool in_bounds) {
+  const TensorDmaDescriptor &desc = state.desc;
+  const uint64_t global_address =
+      in_bounds ? desc.global_base + global_element * desc.elem_size : 0;
+  const uint64_t lds_byte =
+      tensor_dma_lds_byte(desc, state.store_from_lds, iteration_lds_element, tile_element);
+
+  // The tensor DMA section (CDNA5 ISA 10.11.6) specifies that processing of the descriptor
+  // continues past an out-of-range LDS address. It does not establish the width of the LDS
+  // address calculation, how an element that straddles the end of the allocation is handled, or
+  // what a store reads from out-of-range LDS. rocjitsu uses a byte-prefix model: it forms the
+  // address in 64 bits, so it never wraps back into LDS; keeps a straddling element's in-range
+  // leading bytes and drops the rest; and has a store read the dropped bytes as zero. An i32
+  // store at offset 254 of a 256-byte allocation therefore stores two bytes from LDS and two zero
+  // bytes.
+  //
+  // Ordinary LDS instructions follow a different rule (CDNA5 ISA 3.3.4.1): the range check is per
+  // byte in UNALIGNED mode and per DWORD in DWORD mode, and a multi-DWORD load returns zero for
+  // any DWORD that is partly out of range. The byte-prefix model is not derived from that rule.
+  const uint64_t lds_address = uint64_t{wf.lds_base()} + uint64_t{desc.lds_base} + lds_byte;
+  const uint64_t lds_bytes =
+      lds_address < lds_allocation_end
+          ? std::min<uint64_t>(desc.elem_size, lds_allocation_end - lds_address)
+          : 0;
   TensorDmaTransferElement element{
-      .global_address = global_addr, .lds_address = lds_addr, .in_bounds = in_bounds};
+      .global_address = global_address,
+      .lds_address = lds_bytes ? static_cast<uint32_t>(lds_address) : kInvalidLdsAddress,
+      .lds_dropped_bytes = static_cast<uint8_t>(desc.elem_size - lds_bytes),
+      .in_bounds = in_bounds};
   if (state.store_from_lds && in_bounds) {
-    for (uint32_t byte = 0; byte < desc.elem_size; ++byte)
-      element.bytes[byte] = wf.lds().read8(lds_addr + byte);
+    for (uint32_t byte = 0; byte < lds_bytes; ++byte)
+      element.bytes[byte] = wf.lds().read8(element.lds_address + byte);
   }
   state.elements.push_back(element);
 }
@@ -400,17 +636,14 @@ inline void for_each_gather_tensor_element(const TensorDmaDescriptor &desc,
   for (uint32_t idx = 0; idx < desc.valid_indices; ++idx) {
     const uint32_t gather_index = desc.gather_indices[idx];
     for (uint32_t coord0 = 0; coord0 < desc.tile_dims[0]; ++coord0) {
-      bool in_bounds = !layout.empty();
-      const uint64_t global_element =
-          coord0 + static_cast<uint64_t>(gather_index) * desc.global_strides[0];
-      if (coord0 >= desc.tensor_dims[0])
-        in_bounds = false;
-      if (gather_index >= desc.tensor_dims[1])
-        in_bounds = false;
+      const bool in_bounds =
+          !layout.empty() && coord0 < desc.tensor_dims[0] && gather_index < desc.tensor_dims[1];
+      uint64_t global_element = 0;
+      if (in_bounds)
+        global_element = coord0 + uint64_t{gather_index} * desc.global_strides[0];
 
-      const uint64_t lds_element =
-          static_cast<uint64_t>(idx) * desc.tile_dims[0] + static_cast<uint64_t>(coord0);
-      visit(global_element, lds_element, in_bounds);
+      const uint64_t tile_element = uint64_t{idx} * desc.tile_dims[0] + coord0;
+      visit(global_element, /*iteration_lds_element=*/0, tile_element, in_bounds);
     }
   }
 }
@@ -425,37 +658,54 @@ inline void for_each_dense_tensor_element(const TensorDmaDescriptor &desc,
   uint64_t element_count = 1;
   for (uint32_t dim = 0; dim < rank; ++dim)
     element_count *= desc.tile_dims[dim];
+  // Without elements there is nothing to visit, so reconstruct no origins.
+  // validate_supported_descriptor accepts an empty tile without validating its
+  // iteration inverse, so its layout may hold a zero stride, which
+  // origin_from_linear_offset would divide by.
+  if (element_count == 0)
+    return;
 
   const uint32_t iteration_count = desc.iterate ? desc.iteration_count : 1;
   for (uint32_t iter = 0; iter < iteration_count; ++iter) {
-    const uint64_t iteration_offset = static_cast<uint64_t>(iter) * desc.global_increment;
-    const std::array<uint64_t, 5> iteration_origin =
-        desc.iterate && !layout.empty() ? layout.origin_from_linear_offset(iteration_offset)
-                                        : std::array<uint64_t, 5>{};
+    const uint64_t iteration_offset = uint64_t{iter} * desc.global_increment;
+    const uint64_t iteration_lds = uint64_t{iter} * desc.lds_increment;
+    const std::array<uint64_t, 5> origin = desc.iterate && !layout.empty()
+                                               ? layout.origin_from_linear_offset(iteration_offset)
+                                               : std::array<uint64_t, 5>{};
+    bool origin_in_bounds = !layout.empty();
+    for (uint32_t dim = 0; dim < rank; ++dim) {
+      if (origin[dim] >= desc.tensor_dims[dim]) {
+        origin_in_bounds = false;
+        break;
+      }
+    }
     for (uint64_t linear = 0; linear < element_count; ++linear) {
       uint64_t remaining = linear;
+      bool in_bounds = origin_in_bounds;
       uint64_t global_element = iteration_offset;
-      uint64_t lds_element = static_cast<uint64_t>(iter) * desc.lds_increment;
-      uint64_t lds_stride = 1;
-      bool in_bounds = !layout.empty();
 
       for (uint32_t dim = 0; dim < rank; ++dim) {
         const uint32_t tile_dim = desc.tile_dims[dim];
         const uint32_t coord = static_cast<uint32_t>(remaining % tile_dim);
         remaining /= tile_dim;
-        const uint64_t tensor_coord = iteration_origin[dim] + coord;
-        if (tensor_coord >= desc.tensor_dims[dim])
-          in_bounds = false;
-        global_element += coord * (dim == 0 ? 1 : desc.global_strides[dim - 1]);
-        lds_element += coord * lds_stride;
-        lds_stride *= tile_dim;
+        if (in_bounds) {
+          if (coord >= uint64_t{desc.tensor_dims[dim]} - origin[dim]) {
+            in_bounds = false;
+          } else {
+            global_element +=
+                uint64_t{coord} * (dim == 0 ? uint64_t{1} : desc.global_strides[dim - 1]);
+          }
+        }
       }
 
-      visit(global_element, lds_element, in_bounds);
+      visit(in_bounds ? global_element : 0, iteration_lds, linear, in_bounds);
     }
   }
 }
 
+/// @brief Visit every transfer element using the descriptor-wide address proof.
+/// @pre The descriptor passed validate_supported_descriptor and
+/// validate_materialization_address_ranges for the wave that will consume the addresses.
 template <typename Visitor>
 inline void for_each_tensor_element(const TensorDmaDescriptor &desc, const TensorDmaLayout &layout,
                                     Visitor &&visit) {
@@ -470,14 +720,37 @@ inline util::Result prepare_tensor(TensorDmaState &state, Wavefront &wf) {
   const TensorDmaLayout layout(desc);
   if (validate_supported_descriptor(desc, layout).failed()) [[unlikely]]
     return util::Result::failure();
-  if (layout.rank() != 0 && !wf.has_gpu_memory()) [[unlikely]]
+  const auto element_count = tensor_element_count(desc, layout);
+  if (!element_count) [[unlikely]]
     return util::Result::failure();
-  auto append_element = [&](uint64_t global_element, uint64_t lds_element, bool in_bounds) {
-    append_copy(state, wf, global_element, lds_element, in_bounds);
+  // A transfer with zero elements needs no GPU memory.
+  if (*element_count != 0 && !wf.has_gpu_memory()) [[unlikely]]
+    return util::Result::failure();
+  // Iterations may legally reuse LDS through a zero or overlapping increment.
+  // This separate simulator limit bounds the eager host representation.
+  if (*element_count > kMaxMaterializedElements) [[unlikely]] {
+    util::Logger::warn(
+        std::format("tensor DMA materialization limit exceeded: {} elements requested, limit is {}",
+                    *element_count, kMaxMaterializedElements));
+    return util::Result::failure();
+  }
+  // The allocation bound is used only while materializing elements; resume,
+  // completion and observation work from the elements it produced.
+  const uint64_t lds_allocation_end = tensor_dma_lds_allocation_end(wf);
+  if (!validate_materialization_address_ranges(desc, layout, wf, state.store_from_lds,
+                                               lds_allocation_end)) [[unlikely]]
+    return util::Result::failure();
+  state.elements.reserve(static_cast<size_t>(*element_count));
+  auto append_element = [&](uint64_t global_element, uint64_t iteration_lds_element,
+                            uint64_t tile_element, bool in_bounds) {
+    append_copy(state, wf, lds_allocation_end, global_element, iteration_lds_element, tile_element,
+                in_bounds);
   };
   for_each_tensor_element(desc, layout, append_element);
 
-  if (wf.address_space()) {
+  // A transfer with zero elements makes no global request, so it needs no VM
+  // binding either.
+  if (*element_count != 0 && wf.address_space()) {
     state.access = wf.snapshot_vm_access();
     if (!state.access)
       state.outcome = VmAccessOutcome::Faulted;
@@ -485,6 +758,10 @@ inline util::Result prepare_tensor(TensorDmaState &state, Wavefront &wf) {
   return util::Result::success();
 }
 
+/// @brief Fill deferred observed addresses using the descriptor-wide address proof.
+/// @details Address formation matches append_copy and therefore avoids per-element overflow checks.
+/// @pre context points to a descriptor that passed validate_supported_descriptor and
+/// validate_materialization_address_ranges during prepare_tensor.
 inline bool materialize_observed_addresses(const void *context, std::span<uint64_t> addresses) {
   if (!context)
     return false;
@@ -492,7 +769,7 @@ inline bool materialize_observed_addresses(const void *context, std::span<uint64
   const TensorDmaLayout layout(desc);
   size_t next_address = 0;
   bool fits = true;
-  auto collect_address = [&](uint64_t global_element, uint64_t, bool in_bounds) {
+  auto collect_address = [&](uint64_t global_element, uint64_t, uint64_t, bool in_bounds) {
     if (!in_bounds)
       return;
     if (next_address == addresses.size()) {
@@ -503,6 +780,41 @@ inline bool materialize_observed_addresses(const void *context, std::span<uint64
   };
   for_each_tensor_element(desc, layout, collect_address);
   return fits && next_address == addresses.size();
+}
+
+/// @brief Merge the LDS bytes a transfer touches into runs, in element order.
+/// @details Loads write every element; out-of-tensor elements are zero-filled.
+/// Stores read only in-bounds elements. Bytes outside the wave's LDS allocation
+/// are omitted.
+inline std::vector<TensorDmaLdsRange> tensor_dma_lds_ranges(const TensorDmaState &state) {
+  std::vector<TensorDmaLdsRange> ranges;
+  ranges.reserve(state.elements.size());
+  for (const TensorDmaTransferElement &element : state.elements) {
+    const uint32_t lds_bytes = state.desc.elem_size - element.lds_dropped_bytes;
+    if (lds_bytes == 0 || (state.store_from_lds && !element.in_bounds))
+      continue;
+    if (!ranges.empty() && ranges.back().address + ranges.back().bytes == element.lds_address)
+      ranges.back().bytes += lds_bytes;
+    else
+      ranges.push_back({.address = element.lds_address, .bytes = lds_bytes});
+  }
+  return ranges;
+}
+
+/// @brief Report a tensor DMA instruction as it issues, before its global
+/// requests and LDS writes.
+/// @details Called once per instruction, after prepare_tensor has sampled a
+/// store's LDS source bytes. A NULL descriptor has no elements and
+/// reports no LDS ranges; the emulator still counts it on TENSORcnt, which is an
+/// assumption rather than established hardware behavior.
+inline void report_issued_tensor_dma(Wavefront &wf, const TensorDmaState &state) {
+  if (!wf.cu().observes_tensor_dma_issue())
+    return;
+  const std::vector<TensorDmaLdsRange> lds_ranges = tensor_dma_lds_ranges(state);
+  wf.cu().report_tensor_dma_issue({
+      .is_load = !state.store_from_lds,
+      .lds_ranges = lds_ranges,
+  });
 }
 
 inline void report_completed_tensor_dma(const Instruction &inst, Wavefront &wf,
@@ -521,7 +833,7 @@ inline void report_completed_tensor_dma(const Instruction &inst, Wavefront &wf,
 
   const TensorDmaMemoryAccessObservation access{
       .mnemonic = inst.mnemonic(),
-      .pc = wf.pc,
+      .pc = state.pc,
       .compute_unit_id = wf.cu().id(),
       .dispatch_id = wf.dispatch_id(),
       .queue_id = wf.queue_id(),
@@ -658,7 +970,8 @@ inline VmAccessOutcome resume_tensor_dma_state(TensorDmaState &state, Wavefront 
   if (!state.completion_committed) {
     if (!state.store_from_lds) {
       for (const TensorDmaTransferElement &element : state.elements) {
-        for (uint32_t byte = 0; byte < state.desc.elem_size; ++byte)
+        const uint32_t lds_bytes = state.desc.elem_size - element.lds_dropped_bytes;
+        for (uint32_t byte = 0; byte < lds_bytes; ++byte)
           wf.lds().write8(element.lds_address + byte, element.bytes[byte]);
       }
     }
@@ -724,8 +1037,12 @@ util::Result execute_tensor_dma(Inst &inst, Wavefront &wf, bool store_from_lds) 
       return util::Result::failure();
     std::unique_ptr<TensorDmaState> state =
         std::make_unique<TensorDmaState>(desc.value(), store_from_lds);
+    state->pc = wf.pc;
     if (desc.value().active() && prepare_tensor(*state, wf).failed()) [[unlikely]]
       return util::Result::failure();
+    // Only a fresh instruction reaches this block: a deferred transfer resumes
+    // from its retained state, so each instruction is reported once.
+    report_issued_tensor_dma(wf, *state);
     inst.set_data(std::move(state));
   }
   TensorDmaState &state = *inst.template data_as<TensorDmaState>();

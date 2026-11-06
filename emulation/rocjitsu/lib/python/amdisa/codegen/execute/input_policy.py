@@ -3,8 +3,8 @@
 
 """Emit the shared/input_denormal.h policy used by floating-point stages.
 
-Comparisons and min/max read the same MODE input-denormal field for each
-format, so they declare the policy once per instruction under one name.
+The source format selects the MODE field. Consumers decide which operations
+flush and apply the policy before widening F16 inputs.
 """
 
 # Floating formats with an input policy -> shared/fp_format.h layout.
@@ -21,12 +21,23 @@ _MODE_FIELDS: dict[str, str] = {
 NAME = 'input_policy'
 
 
-def policy_expr(dtype: str) -> str:
-    """Return the input policy from MODE, rejecting unsupported source types."""
+def mode_field(dtype: str) -> str:
+    """Return the MODE field suffix of ``dtype``, rejecting unsupported types."""
     try:
-        mode = _MODE_FIELDS[dtype]
+        return _MODE_FIELDS[dtype]
     except KeyError as error:
         raise ValueError(f'Unsupported input-policy dtype: {dtype!r}') from error
+
+
+def fp_format(dtype: str) -> str:
+    """Return the shared/fp_format.h layout of ``dtype``."""
+    mode_field(dtype)
+    return f'amdgpu::fp_format::{FORMATS[dtype]}'
+
+
+def policy_expr(dtype: str) -> str:
+    """Return the input policy from MODE, rejecting unsupported source types."""
+    mode = mode_field(dtype)
     return f'amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_{mode}())'
 
 

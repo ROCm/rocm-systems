@@ -16,7 +16,7 @@ use super::errno;
 use std::ffi::{c_int, c_ulong, c_void};
 use std::fs::File;
 use std::io;
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsRawFd, FromRawFd};
 use std::ptr;
 
 unsafe extern "C" {
@@ -33,6 +33,7 @@ const AMDGPU_GEM_USERPTR: u64 = request(3, 0x51, 24);
 const AMDGPU_INFO: u64 = request(1, 0x45, 32);
 const AMDGPU_GEM_OP: u64 = request(3, 0x50, 24);
 const AMDGPU_GEM_LIST_HANDLES: u64 = request(3, 0x59, 16);
+const AMDGPU_UALINK_HANDLE: u64 = request(3, 0x5b, 24);
 const AMDGPU_GEM_VA: u64 = request(1, 0x48, 64);
 const AMDGPU_CTX: u64 = request(3, 0x42, 16);
 const AMDGPU_CS: u64 = request(3, 0x44, 24);
@@ -83,6 +84,7 @@ pub(super) struct CommandEngine {
     pub(super) ring: u32,
 }
 
+/// DRM request to release a GEM handle.
 #[repr(C)]
 #[derive(Default)]
 struct GemClose {
@@ -90,6 +92,7 @@ struct GemClose {
     pad: u32,
 }
 
+/// DRM PRIME conversion between a descriptor and GEM handle.
 #[repr(C)]
 #[derive(Default)]
 struct PrimeHandle {
@@ -98,6 +101,62 @@ struct PrimeHandle {
     descriptor: i32,
 }
 
+/// `UALink` fabric handle import or export request.
+#[repr(C)]
+#[derive(Default)]
+struct UalinkHandle {
+    operation: u32,
+    flags: u32,
+    handle: [u64; 2],
+}
+
+const _: () = assert!(std::mem::size_of::<UalinkHandle>() == 24);
+
+/// Exports a process-local GEM handle as a 128-bit `UALink` fabric handle.
+pub(super) fn export_fabric_handle(file: &File, gem: u32) -> io::Result<[u8; 16]> {
+    if gem == 0 {
+        return Err(io::Error::from(io::ErrorKind::InvalidInput));
+    }
+    let mut body = UalinkHandle {
+        handle: [u64::from(gem), 0],
+        ..UalinkHandle::default()
+    };
+    call(file, AMDGPU_UALINK_HANDLE, &mut body)?;
+    // The ioctl overlays its 16-byte output on the start of the input union.
+    let mut result = [0; 16];
+    result[..4].copy_from_slice(&body.operation.to_ne_bytes());
+    result[4..8].copy_from_slice(&body.flags.to_ne_bytes());
+    result[8..].copy_from_slice(&body.handle[0].to_ne_bytes());
+    Ok(result)
+}
+
+/// Imports a fabric handle and owns the DMA-BUF descriptor returned by DRM.
+pub(super) fn import_fabric_handle(file: &File, fabric: [u8; 16]) -> io::Result<File> {
+    let mut body = UalinkHandle {
+        operation: 1,
+        handle: [
+            u64::from_ne_bytes(
+                fabric[..8]
+                    .try_into()
+                    .map_err(|_| io::ErrorKind::InvalidData)?,
+            ),
+            u64::from_ne_bytes(
+                fabric[8..]
+                    .try_into()
+                    .map_err(|_| io::ErrorKind::InvalidData)?,
+            ),
+        ],
+        ..UalinkHandle::default()
+    };
+    call(file, AMDGPU_UALINK_HANDLE, &mut body)?;
+    // The output union's first u32 is an owned DMA-BUF file descriptor.
+    let descriptor =
+        i32::try_from(body.operation).map_err(|_| io::Error::from(io::ErrorKind::InvalidData))?;
+    // SAFETY: A successful ioctl transferred a new descriptor to this process.
+    Ok(unsafe { File::from_raw_fd(descriptor) })
+}
+
+/// DRM registration of caller-owned host pages as a GEM object.
 #[repr(C)]
 #[derive(Default)]
 struct GemUserptr {
@@ -107,6 +166,7 @@ struct GemUserptr {
     handle: u32,
 }
 
+/// DRM VM operation and its persisting L2 size argument.
 #[repr(C)]
 #[derive(Default)]
 struct VmControl {
@@ -127,6 +187,7 @@ pub(super) fn set_persisting_l2_cache_size(file: &File, size_bytes: u32) -> io::
     )
 }
 
+/// DRM information query with a caller-owned result buffer.
 #[repr(C)]
 #[derive(Default)]
 struct AmdgpuInfoQuery {
@@ -136,6 +197,7 @@ struct AmdgpuInfoQuery {
     payload: [u32; 4],
 }
 
+/// DRM hardware IP capabilities and available ring mask.
 #[repr(C)]
 #[derive(Default)]
 struct HwIpInfo {
@@ -191,6 +253,7 @@ pub(super) fn device_info_prefix(file: &File) -> io::Result<DeviceInfoPrefix> {
     Ok(info)
 }
 
+/// Original GEM creation parameters reported by DRM.
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub(super) struct GemCreateInfo {
@@ -200,6 +263,7 @@ pub(super) struct GemCreateInfo {
     pub(super) flags: u64,
 }
 
+/// Operation on one GEM handle with a caller-owned result buffer.
 #[repr(C)]
 #[derive(Default)]
 struct GemOp {
@@ -210,6 +274,7 @@ struct GemOp {
     padding: u32,
 }
 
+/// GEM handle metadata returned by the DRM handle list.
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub(super) struct GemHandleInfo {
@@ -227,6 +292,7 @@ impl GemHandleInfo {
     }
 }
 
+/// DRM handle list request with a caller-owned output array.
 #[repr(C)]
 #[derive(Default)]
 struct GemListHandles {
@@ -235,6 +301,7 @@ struct GemListHandles {
     padding: u32,
 }
 
+/// DRM GPU virtual-address map or unmap request.
 #[repr(C)]
 #[derive(Default)]
 struct GemVa {
@@ -251,6 +318,7 @@ struct GemVa {
     input_syncobjs: u64,
 }
 
+/// DRM synchronization object creation request.
 #[repr(C)]
 #[derive(Default)]
 struct SyncobjCreate {
@@ -258,6 +326,7 @@ struct SyncobjCreate {
     flags: u32,
 }
 
+/// DRM synchronization object destruction request.
 #[repr(C)]
 #[derive(Default)]
 struct SyncobjDestroy {
@@ -265,6 +334,7 @@ struct SyncobjDestroy {
     pad: u32,
 }
 
+/// DRM timeline wait request and first signaled index.
 #[repr(C)]
 struct SyncobjTimelineWait {
     handles: u64,
@@ -277,6 +347,7 @@ struct SyncobjTimelineWait {
     deadline_nanoseconds: u64,
 }
 
+/// Request half of DRM command context creation or release.
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 struct ContextInput {
@@ -286,6 +357,7 @@ struct ContextInput {
     priority: i32,
 }
 
+/// Result half of DRM command context creation or release.
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 struct ContextOutput {
@@ -293,12 +365,14 @@ struct ContextOutput {
     pad: u32,
 }
 
+/// Overlapping input and output halves of the DRM context ioctl.
 #[repr(C)]
 union Context {
     input: ContextInput,
     output: ContextOutput,
 }
 
+/// Request half of a DRM command-stream submission.
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 struct CommandStreamInput {
@@ -309,12 +383,14 @@ struct CommandStreamInput {
     chunks: u64,
 }
 
+/// Overlapping submission request and returned sequence number.
 #[repr(C)]
 union CommandStream {
     input: CommandStreamInput,
     sequence: u64,
 }
 
+/// One typed chunk in a DRM command-stream submission.
 #[repr(C)]
 struct CommandChunk {
     kind: u32,
@@ -322,6 +398,7 @@ struct CommandChunk {
     data: u64,
 }
 
+/// Command buffer location and hardware engine selection.
 #[repr(C)]
 struct IndirectBuffer {
     pad: u32,
@@ -333,6 +410,7 @@ struct IndirectBuffer {
     ring: u32,
 }
 
+/// Timeline point signaled by a command-stream submission.
 #[repr(C)]
 struct TimelineSignal {
     handle: u32,
@@ -340,6 +418,7 @@ struct TimelineSignal {
     point: u64,
 }
 
+/// DRM command completion wait by context and sequence.
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 struct CommandWaitInput {
@@ -351,6 +430,7 @@ struct CommandWaitInput {
     context_id: u32,
 }
 
+/// Overlapping command wait request and busy result.
 #[repr(C)]
 union CommandWait {
     input: CommandWaitInput,

@@ -16,12 +16,14 @@
 #include <vector>
 #include <sched.h>
 
+#include "fakes/fail_loud.h"
 #include "fakes/signature-drift.h"
 #include "graph.h"  // PATH_DIS
 #include "nccl.h"
 #include "os.h"   // ncclAffinity
 #include "plugin/nccl_tuner.h"  // NCCL_NUM_ALGORITHMS, the width of initTransportsRank's graphs[]
 
+#include "topo_net_stubs.h"
 #include "topo_stubs.h"
 
 // src/graph/topo.cc, AMD arm; test/host/CMakeLists.txt pins this line to it.
@@ -126,6 +128,60 @@ std::function<ncclResult_t(struct ncclTopoSystem*, int, int, int64_t*, int*)> g_
 ASSERT_HOOK_MATCHES_PROD(g_ncclTopoGetLocalNet, ncclTopoGetLocalNet);
 ncclResult_t ncclTopoGetLocalNet(struct ncclTopoSystem* system, int rank, int channelId, int64_t* id, int* dev) {
   return g_ncclTopoGetLocalNet(system, rank, channelId, id, dev);
+}
+// src/graph/topo.cc:2589. Reached only from gin_host.cc's ncclGinConnectOnce, so this stays a
+// fail-loud default: rccl-UnitTestsMicroGinHost is the only binary that compiles a caller, and it
+// installs the behaviour it needs. A seam rather than a plain abort because that test has to drive
+// both the device count (it sizes ginCommCount) and the failure arm.
+static ncclResult_t DefaultTopoGetLocalGinDevs(struct ncclComm*, int*, int*) { ::abort(); }
+std::function<ncclResult_t(struct ncclComm*, int*, int*)> g_ncclTopoGetLocalGinDevs =
+    DefaultTopoGetLocalGinDevs;
+ASSERT_HOOK_MATCHES_PROD(g_ncclTopoGetLocalGinDevs, ncclTopoGetLocalGinDevs);
+ncclResult_t ncclTopoGetLocalGinDevs(struct ncclComm* comm, int* localGinDevs, int* localGinCount) {
+  return g_ncclTopoGetLocalGinDevs(comm, localGinDevs, localGinCount);
+}
+
+static ncclResult_t DefaultTopoGetNetDev(struct ncclComm*, int, struct ncclTopoGraph*, int, int, int64_t*, int*,
+                                         int*) {
+  FailLoudUnfaked("topo_stubs", "ncclTopoGetNetDev");
+}
+std::function<ncclResult_t(struct ncclComm*, int, struct ncclTopoGraph*, int, int, int64_t*, int*, int*)>
+    g_ncclTopoGetNetDev = DefaultTopoGetNetDev;
+ASSERT_HOOK_MATCHES_PROD(g_ncclTopoGetNetDev, ncclTopoGetNetDev);
+ncclResult_t ncclTopoGetNetDev(struct ncclComm* comm, int rank, struct ncclTopoGraph* graph, int channelId,
+                               int peerRank, int64_t* id, int* dev, int* proxyRank) {
+  return g_ncclTopoGetNetDev(comm, rank, graph, channelId, peerRank, id, dev, proxyRank);
+}
+static ncclResult_t DefaultTopoGetIntraNetDev(struct ncclTopoSystem*, int, struct ncclTopoGraph*, int, int, int64_t*,
+                                              int*) {
+  FailLoudUnfaked("topo_stubs", "ncclTopoGetIntraNetDev");
+}
+std::function<ncclResult_t(struct ncclTopoSystem*, int, struct ncclTopoGraph*, int, int, int64_t*, int*)>
+    g_ncclTopoGetIntraNetDev = DefaultTopoGetIntraNetDev;
+ASSERT_HOOK_MATCHES_PROD(g_ncclTopoGetIntraNetDev, ncclTopoGetIntraNetDev);
+ncclResult_t ncclTopoGetIntraNetDev(struct ncclTopoSystem* system, int rank, struct ncclTopoGraph* graph,
+                                    int channelId, int type, int64_t* id, int* dev) {
+  return g_ncclTopoGetIntraNetDev(system, rank, graph, channelId, type, id, dev);
+}
+static ncclResult_t DefaultTopoCheckGdr(struct ncclTopoSystem*, int, int64_t, int, enum ncclTopoGdrMode*) {
+  FailLoudUnfaked("topo_stubs", "ncclTopoCheckGdr");
+}
+std::function<ncclResult_t(struct ncclTopoSystem*, int, int64_t, int, enum ncclTopoGdrMode*)> g_ncclTopoCheckGdr =
+    DefaultTopoCheckGdr;
+ASSERT_HOOK_MATCHES_PROD(g_ncclTopoCheckGdr, ncclTopoCheckGdr);
+ncclResult_t ncclTopoCheckGdr(struct ncclTopoSystem* topo, int rank, int64_t netId, int read,
+                              enum ncclTopoGdrMode* gdrMode) {
+  return g_ncclTopoCheckGdr(topo, rank, netId, read, gdrMode);
+}
+static ncclResult_t DefaultTopoNeedFlush(struct ncclComm*, int64_t, int, int, bool, enum ncclTopoFlushType*) {
+  FailLoudUnfaked("topo_stubs", "ncclTopoNeedFlush");
+}
+std::function<ncclResult_t(struct ncclComm*, int64_t, int, int, bool, enum ncclTopoFlushType*)> g_ncclTopoNeedFlush =
+    DefaultTopoNeedFlush;
+ASSERT_HOOK_MATCHES_PROD(g_ncclTopoNeedFlush, ncclTopoNeedFlush);
+ncclResult_t ncclTopoNeedFlush(struct ncclComm* comm, int64_t netId, int netDev, int rank, bool netManaged,
+                               enum ncclTopoFlushType* flush) {
+  return g_ncclTopoNeedFlush(comm, netId, netDev, rank, netManaged, flush);
 }
 ncclResult_t ncclTopoGetNvbGpus(struct ncclTopoSystem* system, int rank, int* nranks, int** ranks) { ::abort(); }
 ncclResult_t ncclTopoGetPxnRanks(struct ncclComm* comm, int** intermediateRanks, int* nranks) { ::abort(); }
@@ -244,6 +300,7 @@ void ResetTopoStubs() {
     return ncclSuccess;
   };
   g_ncclTopoGetLocalNet = DefaultTopoGetLocalNet;
+  g_ncclTopoGetLocalGinDevs = DefaultTopoGetLocalGinDevs;
   g_ncclTopoPathAllNVLink = [](struct ncclTopoSystem*, int* allNvLink) { *allNvLink = 0; return ncclSuccess; };
   g_ncclTopoPreset = [](struct ncclComm*, struct ncclTopoRanks*) { return ncclSuccess; };
   g_rcclCheckRomeTopoModelIdxConsensusResult = ncclSuccess;
@@ -258,4 +315,8 @@ void ResetTopoStubs() {
   g_ncclTopoPostsetCalls = 0;
   g_ncclTopoPostsetGraphs.clear();
   g_ncclTopoPostsetNc = -1;
+  g_ncclTopoGetNetDev = DefaultTopoGetNetDev;
+  g_ncclTopoGetIntraNetDev = DefaultTopoGetIntraNetDev;
+  g_ncclTopoCheckGdr = DefaultTopoCheckGdr;
+  g_ncclTopoNeedFlush = DefaultTopoNeedFlush;
 }

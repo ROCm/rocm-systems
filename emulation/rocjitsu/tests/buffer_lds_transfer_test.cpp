@@ -17,6 +17,8 @@
 
 namespace rocjitsu {
 namespace {
+constexpr uint32_t kGfx9DataFormat32 = 4u << 15;
+
 class BufferLdsTransfer : public testing::TestWithParam<rj_code_arch_t> {
 protected:
   void SetUp() override {
@@ -78,7 +80,7 @@ TEST_P(BufferLdsTransfer, BufferNarrowAndX3TransfersUseDwordLaneLayout) {
     scalar(0, 0x4000);
     scalar(1, 0);
     scalar(2, 4096);
-    scalar(3, 0);
+    scalar(3, kGfx9DataFormat32);
     for (unsigned lane = 0; lane < 64; ++lane) {
       vector(2, lane, lane * 16);
       for (unsigned component = 0; component < 4; ++component)
@@ -132,6 +134,62 @@ TEST_P(BufferLdsTransfer, RawAndFormatBufferLoadsShareM0WidthAndAllocationBounds
         EXPECT_EQ(wave_->lds().read32(128 + 64), 0xccccccccu);
       }
     }
+}
+
+TEST_P(BufferLdsTransfer, UnboundRawLoadsStoresAndAtomicsDoNotAccessMemory) {
+  constexpr uint32_t sentinel = 0x76543210;
+  // A nonzero mapped base and permissive bounds distinguish unbound behavior
+  // from null-pointer handling and the ordinary range check.
+  for (bool bound : {false, true}) {
+    SCOPED_TRACE(bound);
+    for (auto opcode : {cdna4::kBufferLoadDwordMubuf, cdna4::kBufferStoreDwordMubuf,
+                        cdna4::kBufferAtomicAddMubuf}) {
+      SCOPED_TRACE(opcode);
+      wave_->set_exec(1);
+      scalar(0, 0x4000);
+      scalar(1, 0);
+      scalar(2, ~0u);
+      scalar(3, bound ? kGfx9DataFormat32 : 0);
+      memory_.write32(0x4000, sentinel);
+      cu_->l1_vector().invalidate_all();
+      l2_.invalidate_all();
+      vector(8, 0, 3);
+      const auto words =
+          cdna4::build_mubuf(opcode, {.sc0 = 1, .vdata = 8, .srsrc = 0, .soffset = 128});
+      ASSERT_NO_FATAL_FAILURE(issue(words));
+      const bool store = opcode == cdna4::kBufferStoreDwordMubuf;
+      const bool atomic = opcode == cdna4::kBufferAtomicAddMubuf;
+      EXPECT_EQ(cu_->read_vgpr(wave_->vgpr_alloc().base + 8, 0),
+                store ? 3u : (bound ? sentinel : 0u));
+      EXPECT_EQ(memory_.read32(0x4000), bound && store    ? 3u
+                                        : bound && atomic ? sentinel + 3
+                                                          : sentinel);
+    }
+  }
+}
+
+TEST_P(BufferLdsTransfer, UnboundRawLdsLoadsWriteZerosWithoutReadingMemory) {
+  constexpr uint32_t sentinel = 0x76543210;
+  for (bool bound : {false, true}) {
+    SCOPED_TRACE(bound);
+    clear_lds();
+    wave_->set_exec(1);
+    wave_->set_m0(64);
+    scalar(0, 0x4000);
+    scalar(1, 0);
+    scalar(2, ~0u);
+    scalar(3, bound ? kGfx9DataFormat32 : 0);
+    memory_.write32(0x4000, sentinel);
+    cu_->l1_vector().invalidate_all();
+    l2_.invalidate_all();
+    vector(8, 0, 3);
+    const auto words = cdna4::build_mubuf(cdna4::kBufferLoadDwordMubuf,
+                                          {.lds = 1, .vdata = 8, .srsrc = 0, .soffset = 128});
+    ASSERT_NO_FATAL_FAILURE(issue(words));
+    EXPECT_EQ(wave_->lds().read32(128 + 64), bound ? sentinel : 0u);
+    EXPECT_EQ(wave_->lds().read32(128 + 68), 0xccccccccu);
+    EXPECT_EQ(cu_->read_vgpr(wave_->vgpr_alloc().base + 8, 0), 3u);
+  }
 }
 
 INSTANTIATE_TEST_SUITE_P(Cdna, BufferLdsTransfer,

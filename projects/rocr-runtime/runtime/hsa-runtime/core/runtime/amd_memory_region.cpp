@@ -152,7 +152,9 @@ hsa_status_t MemoryRegion::AllocateImpl(size_t& size, AllocateFlags alloc_flags,
   // Skip the per-region cap on Windows/DXG so over-commit requests can
   // reach WDDM; system memory still enforces the cap.
   const bool is_windxg = core::Runtime::runtime_singleton_->thunkLoader()->IsDXG();
-  if (IsSystem() && (size > max_sysmem_alloc_size_)) {
+  const size_t max_alloc_size =
+      IsDeviceSVM() ? max_single_alloc_size_ : max_sysmem_alloc_size_;
+  if (IsSystem() && (size > max_alloc_size)) {
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
   if (!IsSystem() && !is_windxg && (size > max_single_alloc_size_)) {
@@ -231,9 +233,9 @@ hsa_status_t MemoryRegion::GetInfo(hsa_region_info_t attribute,
     case HSA_REGION_INFO_ALLOC_MAX_SIZE:
       switch (mem_props_.HeapType) {
         case HSA_HEAPTYPE_SYSTEM:
-        case HSA_HEAPTYPE_DEVICE_SVM:
           *((size_t*)value) = max_sysmem_alloc_size_;
           break;
+        case HSA_HEAPTYPE_DEVICE_SVM:
         case HSA_HEAPTYPE_FRAME_BUFFER_PRIVATE:
         case HSA_HEAPTYPE_FRAME_BUFFER_PUBLIC:
         case HSA_HEAPTYPE_GPU_SCRATCH:
@@ -306,6 +308,27 @@ hsa_status_t MemoryRegion::GetInfo(hsa_region_info_t attribute,
   return HSA_STATUS_SUCCESS;
 }
 
+bool MemoryRegion::SignalCapable() const {
+  switch (owner()->device_type()) {
+    case core::Agent::DeviceType::kAmdCpuDevice:
+      return fine_grain();
+    case core::Agent::DeviceType::kAmdGpuDevice: {
+      if (!IsPublic()) return false;
+      // The uncached (extended-scope fine-grained) pool on gfx94x/gfx95x, where the other pools
+      // are MTYPE RW and a binary completion store is not seen by another queue's CP; the
+      // coarse-grained pool on gfx125x.
+      const core::Isa* isa = owner()->supported_isas()[0];
+      const int32_t major = isa->GetMajorVersion();
+      const int32_t minor = isa->GetMinorVersion();
+      if ((major == 9) && ((minor == 4) || (minor == 5))) return extended_scope_fine_grain();
+      if ((major == 12) && (minor >= 5)) return !fine_grain() && !extended_scope_fine_grain();
+      return false;
+    }
+    default:
+      return false;
+  }
+}
+
 hsa_status_t MemoryRegion::GetPoolInfo(hsa_amd_memory_pool_info_t attribute,
                                        void* value) const {
   switch (attribute) {
@@ -344,6 +367,9 @@ hsa_status_t MemoryRegion::GetPoolInfo(hsa_amd_memory_pool_info_t attribute,
           *((size_t*)value) = 0;
           break;
       }
+      break;
+    case HSA_AMD_MEMORY_POOL_INFO_SIGNAL_CAPABLE:
+      *((bool*)value) = SignalCapable();
       break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;

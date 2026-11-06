@@ -3,11 +3,7 @@
 
 #include "rocjitsu/vm/amdgpu/aql/aql_packet_processor.h"
 
-#include "rocjitsu/base/rj_compiler.h"
-RJ_DIAGNOSTIC_PUSH
-RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/amd_ext_aql_packet.h"
-RJ_DIAGNOSTIC_POP
+#include "rocjitsu/vm/amdgpu/aql/amd_vendor_packets.h"
 
 #include <array>
 #include <bit>
@@ -148,7 +144,7 @@ AqlPacketProcessor::process_vendor(const Request &request,
       const int64_t signal_value = std::bit_cast<int64_t>(loaded.value);
       const int64_t masked_value = signal_value & barrier.mask;
       bool satisfied = false;
-      switch (barrier.condition) {
+      switch (barrier.cond) {
       case HSA_SIGNAL_CONDITION_EQ:
         satisfied = masked_value == barrier.value;
         break;
@@ -168,10 +164,11 @@ AqlPacketProcessor::process_vendor(const Request &request,
       if (!satisfied)
         return blocked(AqlBlockedReason::DependencyUnsatisfied);
     }
-    return admit(request, {.kind = AqlPreparedPacketKind::NonKernel,
-                           .completion_signal = barrier.completion_signal.handle,
-                           .barrier_bit = ((barrier.header >> HSA_PACKET_HEADER_BARRIER) & 1) != 0,
-                           .blocks_following = true});
+    return admit(request,
+                 {.kind = AqlPreparedPacketKind::NonKernel,
+                  .completion_signal = barrier.completion_signal.handle,
+                  .barrier_bit = ((barrier.header.header >> HSA_PACKET_HEADER_BARRIER) & 1) != 0,
+                  .blocks_following = true});
   }
 
   if (extension.amd_format == kHsaAmdPacketTypeExtKernelDispatch) {

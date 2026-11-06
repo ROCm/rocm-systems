@@ -9,6 +9,8 @@
 #include "rocjitsu/vm/amdgpu/hsa_clock.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4.h"
 
+#include <algorithm>
+
 namespace rocjitsu {
 namespace amdgpu {
 
@@ -25,6 +27,18 @@ void Wavefront::update_activity_counts(bool was_active, bool was_runnable) {
     return;
   const bool active = !is_halted();
   const bool runnable = active && !debug_paused();
+  if (active != was_active) {
+    if (active) {
+      cu_.active_slot_limit_ = std::max(cu_.active_slot_limit_, wf_id_ + 1);
+    } else if (wf_id_ + 1 == cu_.active_slot_limit_) {
+      while (cu_.active_slot_limit_ != 0) {
+        const auto &last = cu_.wfs_[cu_.active_slot_limit_ - 1];
+        if (last && !last->is_halted())
+          break;
+        --cu_.active_slot_limit_;
+      }
+    }
+  }
   const uint64_t delta = (uint64_t(active) - uint64_t(was_active)) +
                          ((uint64_t(runnable) - uint64_t(was_runnable)) << 32);
   const uint64_t previous = cu_.wave_activity_.fetch_add(delta, std::memory_order_release);
@@ -33,10 +47,6 @@ void Wavefront::update_activity_counts(bool was_active, bool was_runnable) {
   assert((runnable || !was_runnable || (previous >> 32) != 0) && "runnable wave count underflow");
   (void)previous;
 }
-
-Lds &Wavefront::lds() { return lds_ ? *lds_ : cu_.lds(); }
-
-const Lds &Wavefront::lds() const { return lds_ ? *lds_ : cu_.lds(); }
 
 bool Wavefront::uses_separate_trap_ctrl() const {
   return isa_properties(cu_.arch()).wave_state_layout != WaveStateLayout::Legacy;
@@ -53,7 +63,7 @@ uint64_t Wavefront::realtime_timestamp() const {
 
 std::optional<GpuVmAccess> Wavefront::snapshot_vm_access() const {
   if (vm_access_)
-    return *vm_access_;
+    return vm_access_->value;
   GpuVm *gpu_vm = cu_.gpu_vm();
   if (gpu_vm == nullptr)
     return std::nullopt;
@@ -64,7 +74,7 @@ VmAccessOutcome Wavefront::read_gpu_memory(uint64_t addr, std::span<uint8_t> dst
   assert(has_gpu_memory());
   if (address_space_ || process_id_ != 0) {
     if (vm_access_)
-      return vm_access_->read(
+      return vm_access_->value.read(
           addr, std::span<std::byte>(reinterpret_cast<std::byte *>(dst.data()), dst.size()));
     const std::optional<GpuVmAccess> access = snapshot_vm_access();
     if (!access)
@@ -80,7 +90,7 @@ VmAccessOutcome Wavefront::write_gpu_memory(uint64_t addr, std::span<const uint8
   assert(has_gpu_memory());
   if (address_space_ || process_id_ != 0) {
     if (vm_access_)
-      return vm_access_->write(
+      return vm_access_->value.write(
           addr,
           std::span<const std::byte>(reinterpret_cast<const std::byte *>(src.data()), src.size()));
     const std::optional<GpuVmAccess> access = snapshot_vm_access();
