@@ -35,8 +35,10 @@
 
 Dispatch::Dispatch(const HsaMemoryBuffer& isaBuf, const bool eventAutoReset)
     :m_IsaBuf(isaBuf), m_IndirectBuf(PACKETTYPE_PM4, PAGE_SIZE / sizeof(unsigned int), isaBuf.Node()),
-    m_DimX(1), m_DimY(1), m_DimZ(1), m_pArg1(NULL), m_pArg2(NULL), m_pEop(NULL), m_ScratchEn(false),
-    m_ComputeTmpringSize(0), m_scratch_base(0ll), m_SpiPriority(0) {
+    m_DimX(1), m_DimY(1), m_DimZ(1), m_ThreadsX(1), m_ThreadsY(1), m_ThreadsZ(1),
+    m_pArg1(NULL), m_pArg2(NULL), m_pEop(NULL), m_ScratchEn(false),
+    m_ComputeTmpringSize(0), m_scratch_base(0ll), m_SpiPriority(0),
+    m_VgprGranules(DEFAULT_VGPR_GRANULES) {
     HsaEventDescriptor eventDesc;
     eventDesc.EventType = HSA_EVENTTYPE_SIGNAL;
     eventDesc.NodeId = isaBuf.Node();
@@ -63,6 +65,16 @@ void Dispatch::SetDim(unsigned int x, unsigned int y, unsigned int z) {
     m_DimX = x;
     m_DimY = y;
     m_DimZ = z;
+}
+
+void Dispatch::SetWorkgroupSize(unsigned int x, unsigned int y, unsigned int z) {
+    m_ThreadsX = x;
+    m_ThreadsY = y;
+    m_ThreadsZ = z;
+}
+
+void Dispatch::SetVgprGranules(unsigned int granules) {
+    m_VgprGranules = granules;
 }
 
 void Dispatch::SetScratch(int numWaves, int waveSize, HSAuint64 scratch_base) {
@@ -99,6 +111,11 @@ void Dispatch::Submit(BaseQueue& queue) {
         queue.Wait4PacketConsumption();
 }
 
+IndirectBuffer *Dispatch::PrepareIb() {
+    BuildIb();
+    return &m_IndirectBuf;
+}
+
 void Dispatch::Sync(unsigned int timeout) {
     ASSERT_SUCCESS(HSAKMT_CALL(hsaKmtWaitOnEvent, g_baseTest->m_hsakmt_current_ctx, m_pEop, timeout));
 }
@@ -121,9 +138,9 @@ void Dispatch::BuildIb() {
         0,      // START_X
         0,      // START_Y
         0,      // START_Z
-        1,      // NUM_THREADS_X - this is actually the number of threads in a thread group
-        1,      // NUM_THREADS_Y
-        1,      // NUM_THREADS_Z
+        m_ThreadsX,  // NUM_THREADS_X - this is actually the number of threads in a thread group
+        m_ThreadsY,  // NUM_THREADS_Y
+        m_ThreadsZ,  // NUM_THREADS_Z
         0,      // COMPUTE_PIPELINESTAT_ENABLE
         0,      // COMPUTE_PERFCOUNT_ENABLE
     };
@@ -139,7 +156,7 @@ void Dispatch::BuildIb() {
         ((m_SpiPriority & 3) << COMPUTE_PGM_RSRC1__PRIORITY__SHIFT) |
         (priv << COMPUTE_PGM_RSRC1__PRIV__SHIFT) |
         ((m_FamilyId < FAMILY_GFX12) ? (0x2 << COMPUTE_PGM_RSRC1__SGPRS__SHIFT) : 0) |
-        (0x4 << COMPUTE_PGM_RSRC1__VGPRS__SHIFT);  // 4 * 8 = 32 VGPRs
+        (m_VgprGranules << COMPUTE_PGM_RSRC1__VGPRS__SHIFT);
 
     unsigned int pgmRsrc2 = 0;
     pgmRsrc2 |= (m_ScratchEn << COMPUTE_PGM_RSRC2__SCRATCH_EN__SHIFT)
