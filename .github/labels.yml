@@ -52,6 +52,9 @@
 - name: ci:profiling
   color: 006b75
   description: ''
+- name: ci:rocjitsu
+  color: 1D76DB
+  description: Run the rocJITsu hip-tests and rocrtst PoC on a CPU build runner
 - name: ci:smoke
   color: 13E349
   description: ''
