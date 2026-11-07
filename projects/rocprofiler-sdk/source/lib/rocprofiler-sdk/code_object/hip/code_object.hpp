@@ -40,6 +40,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -60,6 +61,20 @@ using kernel_symbol_hip_device_map_t = std::unordered_map<std::string, std::stri
 using comgr_code_object_vec_t        = std::vector<amd_comgr_code_object_info_t>;
 
 using kernel_symbol_kernarg_map_t = std::unordered_map<std::string, std::vector<kernarg_region_t>>;
+
+namespace detail
+{
+struct kernarg_arg_metadata_t
+{
+    std::optional<std::string> value_kind;
+    std::optional<uint64_t>    offset;
+    std::optional<uint64_t>    size;
+};
+
+std::optional<std::vector<kernarg_region_t>>
+parse_kernel_pointer_regions(uint64_t                                   segment_size,
+                             const std::vector<kernarg_arg_metadata_t>& args);
+}  // namespace detail
 
 // What one code object's amdhsa metadata says, read in a single pass over its kernel list. Kernels
 // are keyed by both their symbol name and their metadata name, which differ between code object
