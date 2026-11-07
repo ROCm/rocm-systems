@@ -1,7 +1,7 @@
 ---
 rtc:
   Unit_hiprtc_saxpy:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [compile]
   Unit_hiprtc_ProfileRuntimeLink:
     <<: *level_2
@@ -37,7 +37,7 @@ rtc:
       reason: "AIRUNTIME-2410 - fails on asan; needs to be re-triaged on asan"
     tags: [compile]
   Unit_hiprtc_getloweredname:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [asan]
       reason: "AIRUNTIME-2410 - fails on asan; needs to be re-triaged on asan"
@@ -58,7 +58,7 @@ rtc:
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [link]
   Unit_RTC_LinkerAPI:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [link]
   Unit_RTC_LinkAddFile_Negative:
     <<: *level_default

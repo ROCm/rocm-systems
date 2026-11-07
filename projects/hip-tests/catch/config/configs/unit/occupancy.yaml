@@ -6,12 +6,12 @@ occupancy:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
   Unit_hipOccupancyMaxActiveBlocksPerMultiprocessor_Positive_RangeValidation:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [P0]
   Unit_hipOccupancyMaxActiveBlocksPerMultiprocessor_Positive_TemplateInvocation: *level_default
   Unit_hipOccupancyMaxPotentialBlockSize_Negative_Parameters: *level_default
   Unit_hipOccupancyMaxPotentialBlockSize_Positive_RangeValidation:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [P0]
   Unit_hipOccupancyMaxPotentialBlockSize_Positive_TemplateInvocation: *level_default
   Unit_hipModuleOccupancyMaxPotentialBlockSize_Negative_Parameters:
@@ -20,7 +20,7 @@ occupancy:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
   Unit_hipModuleOccupancyMaxPotentialBlockSize_Positive_RangeValidation:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
@@ -40,7 +40,7 @@ occupancy:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
   Unit_hipModuleOccupancyMaxActiveBlocksPerMultiprocessor_Positive_RangeValidation:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
@@ -64,19 +64,22 @@ occupancy:
   Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_Lambda: *level_default
   Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_NegTst: *level_default
   Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
-  Unit_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_ValidArgs: *level_default
+  Unit_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_ValidArgs:
+    level: [*level_0, *level_default]
   Unit_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags_InvalidArgs: *level_default
   Unit_hipOccupancyAvailableDynamicSMemPerBlock_Negative: *level_default
-  Unit_hipOccupancyAvailableDynamicSMemPerBlock_Positive: *level_default
+  Unit_hipOccupancyAvailableDynamicSMemPerBlock_Positive:
+    level: [*level_0, *level_default]
   Unit_hipOccupancyMaxActiveClusters_Negative_Parameters: *level_default
   Unit_hipOccupancyMaxActiveClusters_Negative_Zero_Cluster: *level_default
   Unit_hipOccupancyMaxActiveClusters_Positive_RangeValidation: *level_default
   Unit_hipOccupancyMaxPotentialClusterSize_Negative_Parameters: *level_default
-  Unit_hipOccupancyMaxPotentialClusterSize_Positive_RangeValidation: *level_default
+  Unit_hipOccupancyMaxPotentialClusterSize_Positive_RangeValidation:
+    level: [*level_0, *level_default]
   Unit_hipOccupancyMaxPotentialClusterSize_Verify_Launch: *level_default
   Unit_hipOccupancy_Positive_SharedMemPerMultiprocessorConsistency:
     <<: *level_default

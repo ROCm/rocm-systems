@@ -4,7 +4,7 @@ library:
     <<: *level_default
     tags: [module]
   Unit_hip_library_load_co:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [module]
   Unit_hipKernelGetParamInfo_Negative:
     <<: *level_default
@@ -16,7 +16,7 @@ library:
       targets: [asan]
       reason: "AIRUNTIME-2410 - RTC library load fails under asan. Needs re-triage."
   Unit_hipKernelGetAttribute_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [module]
   Unit_hipKernelSetCacheConfig_Positive:
     <<: *level_2
@@ -28,7 +28,7 @@ library:
     <<: *level_default
     tags: [module]
   Unit_hipKernelSetAttribute_Positive_LaunchAfterSet:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [module]
   Unit_hipKernelSetAttribute_Positive_FunctionOverride:
     <<: *level_2
@@ -61,7 +61,7 @@ library:
     <<: *level_default
     tags: [module]
   Unit_hipLibraryGetGlobal_Positive:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [module]
   Unit_hipLibraryGetGlobal_OneNullParam:
     <<: *level_default
@@ -73,13 +73,13 @@ library:
     <<: *level_default
     tags: [module, managed_memory]
   Unit_hipLibraryGetManaged_Positive:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [module, managed_memory]
   Unit_hipLibraryGetManaged_HipMemcpyInterop:
     <<: *level_default
     tags: [module, managed_memory]
   Unit_hipLibraryGetKernel_CountAndEnumerate:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [module]
   Unit_hipLibraryGetKernel_OrderingWithGetGlobal:
     <<: *level_default
