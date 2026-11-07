@@ -28,7 +28,7 @@ workgroup fields and rotated by-value pattern payloads before requiring a unique
 capture-time parameter match. It never dereferences the runtime pattern pointer.
 The private runtime ABI must be revalidated for other ROCm builds.
 
-Successful graph-exec memset changes invalidate the whole capture plan; failed
+Successful runtime or driver graph-exec memset changes invalidate the whole capture plan; failed
 changes preserve it. Source-graph memset changes, duplicate matches, unrecorded
 nodes, child graphs and unsupported fill shapes refuse fill attribution. A zero
 ID is a coverage gap, not permission to infer a source from kernel name or order.

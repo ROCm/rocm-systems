@@ -36,12 +36,14 @@ for x in sorted(api, key=lambda x: x['start_timestamp']):
         active.append(cid(x))
 assert list(map(len, caps)) == [3, 2, 2, 1, 2, 7], list(map(len, caps))
 launches = sorted(r['hip_graph'], key=lambda x: x['start_timestamp'])
-assert len(launches) == 30, len(launches)
+assert len(launches) == 36, len(launches)
 # Launch sequence is fixed by the probe; source IDs come from actual capture APIs.
 expected = (
     [caps[0]] * 6       # original, including a failed exec mutation
     + [[0] * 3] * 3    # successful exec mutation invalidates the plan
     + [caps[0]] * 3    # a fresh exec from unchanged source recovers attribution
+    + [caps[0]] * 3    # failed driver API mutation preserves the plan
+    + [[0] * 3] * 3    # successful driver API mutation invalidates it
     + [[0] * 3] * 3    # source parameters changed since capture
     + [[0] * 2] * 3    # identical captured fills are ambiguous
     + [caps[2]] * 3    # same address and length, distinct values
@@ -49,9 +51,9 @@ expected = (
     + [[0] * 2] * 3    # unsupported captured 2D fill
     + [caps[5]] * 3    # tiny, unaligned, large and typed patterns
 )
-assert len(expected) == 30
+assert len(expected) == 36
 ks = [x for x in r['kernel_dispatch'] if x['graph_exec_id']]
-assert len(ks) == 90, len(ks)
+assert len(ks) == 108, len(ks)
 groups = collections.defaultdict(list)
 for x in ks:
     i = x['dispatch_info']
@@ -72,5 +74,5 @@ for (launch, want) in zip(launches, expected):
         assert c in apis and apis[c]['end_timestamp'] < launch['start_timestamp']
         resolved += 1
 assert not groups
-assert resolved == (0 if a.disabled else 54), resolved
-print(json.dumps({'status': 'PASS', 'graph_launches': 30, 'graph_dispatches': 90, 'resolved': resolved, 'expected_refused': 90 - resolved, 'flag_disabled': a.disabled}))
+assert resolved == (0 if a.disabled else 63), resolved
+print(json.dumps({'status': 'PASS', 'graph_launches': 36, 'graph_dispatches': 108, 'resolved': resolved, 'expected_refused': 108 - resolved, 'flag_disabled': a.disabled}))

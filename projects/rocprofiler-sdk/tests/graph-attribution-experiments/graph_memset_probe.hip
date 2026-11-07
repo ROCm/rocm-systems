@@ -97,6 +97,14 @@ main()
     run(fresh, fs);
     CHECK(hipGraphExecDestroy(fresh));
     CHECK(hipGraphExecDestroy(ex));
+    // The driver API must use the same success-only invalidation contract.
+    auto driver = instantiate(g);
+    if(hipDrvGraphExecMemsetNodeSetParams(driver, nullptr, &params, nullptr) == hipSuccess)
+        return 5;
+    run(driver, fs);
+    CHECK(hipDrvGraphExecMemsetNodeSetParams(driver, target, &params, nullptr));
+    run(driver, changed);
+    CHECK(hipGraphExecDestroy(driver));
     CHECK(hipGraphMemsetNodeSetParams(target, &params));
     fresh = instantiate(g);
     run(fresh, changed);

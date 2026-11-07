@@ -83,6 +83,7 @@ struct hipGraphExecMemcpyNodeSetParams1D;
 struct hipGraphExecMemcpyNodeSetParamsFromSymbol;
 struct hipGraphExecMemcpyNodeSetParamsToSymbol;
 struct hipGraphExecMemsetNodeSetParams;
+struct hipDrvGraphExecMemsetNodeSetParams;
 struct hipGraphExecUpdate;
 struct hipGraphExecKernelNodeSetParams;
 struct hipGraphExecChildGraphNodeSetParams;
@@ -1120,6 +1121,11 @@ update_table(::HipDispatchTable* table)
         table->hipGraphExecMemsetNodeSetParams_fn =
             graph_mutate<api::hipGraphExecMemsetNodeSetParams>(
                 table->hipGraphExecMemsetNodeSetParams_fn);
+
+    if(table->hipDrvGraphExecMemsetNodeSetParams_fn)
+        table->hipDrvGraphExecMemsetNodeSetParams_fn =
+            graph_mutate<api::hipDrvGraphExecMemsetNodeSetParams>(
+                table->hipDrvGraphExecMemsetNodeSetParams_fn);
 
     if(table->hipGraphExecMemcpyNodeSetParams_fn)
         table->hipGraphExecMemcpyNodeSetParams_fn =
