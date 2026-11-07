@@ -144,7 +144,8 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
       int spins = 0;
       while (sendConnHeadCache + NCCL_STEPS < sendConnHead + 1) {
         __builtin_amdgcn_s_sleep(1);
-        sendConnHeadCache = atomicAdd((unsigned long long*)sendConnHeadPtr, 0);
+        sendConnHeadCache = __scoped_atomic_load_n((__attribute__((address_space(1))) uint64_t*)sendConnHeadPtr,
+                                                   __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
         if (checkAbort(abort, 1, spins)) break;
       }
       if (sendConnFifo) {
