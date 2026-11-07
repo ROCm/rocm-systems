@@ -142,16 +142,21 @@ __device__ __forceinline__ void ddaLL128Store16B(uint64_t* dst, uint64_t lo, uin
 #endif
 }
 
+// One 16B load: the dwordx4 builtin where the device pass has it, else a nontemporal load.
+__device__ __forceinline__ void ddaLL128Load16BRaw(v4u& dst, const void* src) {
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+  dst = __builtin_amdgcn_global_load_b128((v4u_gptr)src, RCCL_SYSTEM_SYNCSCOPE);
+#else
+  dst = __builtin_nontemporal_load((v4u_gptr)src);
+#endif
+}
+
 __device__ __forceinline__ void ddaLL128Load16B(const uint64_t* src, uint64_t& lo, uint64_t& hi) {
   union {
     v4u v;
     uint64_t w[2];
   } u;
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-  u.v = __builtin_amdgcn_global_load_b128((v4u_gptr)src, RCCL_SYSTEM_SYNCSCOPE);
-#else
-  u.v = __builtin_nontemporal_load((v4u_gptr)src);
-#endif
+  ddaLL128Load16BRaw(u.v, src);
   lo = u.w[0];
   hi = u.w[1];
 }
@@ -259,12 +264,7 @@ __device__ __forceinline__ void ddaLL128LoadRaw(DdaLL128Raw& raw, const T* src, 
 #pragma unroll
   for (int g = 0; g < kDdaLL128Pairs; g++) {
     const int ix = ddaLL128LoadChunkIx(g, wid, flag);
-    const v4u* p = reinterpret_cast<const v4u*>(src + (ix * EltPer16B < eltN ? ix : 0) * EltPer16B);
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-    raw.v[g] = __builtin_amdgcn_global_load_b128((v4u_gptr)p, RCCL_SYSTEM_SYNCSCOPE);
-#else
-    raw.v[g] = __builtin_nontemporal_load((v4u_gptr)p);
-#endif
+    ddaLL128Load16BRaw(raw.v[g], src + (ix * EltPer16B < eltN ? ix : 0) * EltPer16B);
   }
 }
 
