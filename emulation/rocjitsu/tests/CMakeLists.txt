@@ -174,6 +174,31 @@ add_dependencies(rj_execution_fuzz_test rj_execution_fuzz)
 rj_add_gtest_tests(rj_execution_fuzz_test)
 
 add_executable(
+    rj_concurrent_dispatch_fuzz_test
+    fuzz/concurrent_dispatch/concurrent_dispatch_fuzz_test.cpp
+)
+target_link_libraries(
+    rj_concurrent_dispatch_fuzz_test
+    PRIVATE
+        rj_concurrent_dispatch_fuzz_core
+        rocjitsu_isa_registry
+        GTest::gtest_main
+)
+rj_configure_target(rj_concurrent_dispatch_fuzz_test PRIVATE_INCLUDES WARNINGS)
+add_dependencies(rj_concurrent_dispatch_fuzz_test rj_concurrent_dispatch_fuzz)
+rj_add_gtest_tests(rj_concurrent_dispatch_fuzz_test)
+add_test(
+    NAME ConcurrentDispatchFuzzCliTest
+    COMMAND
+        ${CMAKE_COMMAND}
+        -DFUZZ_EXECUTABLE=$<TARGET_FILE:rj_concurrent_dispatch_fuzz>
+        -DWORK_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/concurrent-dispatch-fuzz-cli
+        -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/concurrent_dispatch/test_concurrent_dispatch_fuzz_cli.cmake
+)
+set_tests_properties(ConcurrentDispatchFuzzCliTest PROPERTIES TIMEOUT 120)
+
+add_executable(
     rj_multiplexer_fuzz_test
     fuzz/multiplexer/multiplexer_fuzz_test.cpp
 )
