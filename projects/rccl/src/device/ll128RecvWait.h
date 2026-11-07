@@ -10,7 +10,7 @@
 #include <hip/hip_runtime.h>
 #include <stdint.h>
 
-// Windowed LL128 receive wait, used by Primitives<ProtoLL128>::recvWaitLoad when
+// LL128 receive wait, used by Primitives<ProtoLL128>::recvWaitLoad when
 // RCCL_LL128_RECV_WINDOW_ENABLE is set. One peer's slice is Rows rows; each row is
 // one 16-byte load per lane, and the flag lanes hold a line's flag in that row's
 // odd word.
@@ -50,33 +50,19 @@ __host__ __device__ __forceinline__ uint32_t ll128ValidRows(const uint64_t (&ok)
   return rows;
 }
 
-// Sets [lo, hi) to span the lowest to the highest row not in skip, so skipped rows
-// inside it are reloaded too. Returns false, leaving lo and hi unset, when every
-// row is skipped.
-template <int Rows>
-__host__ __device__ __forceinline__ bool ll128ReloadWindow(uint32_t skip, int& lo, int& hi) {
-  uint32_t pending = ll128AllRows<Rows>() & ~skip;
-  if (pending == 0) return false;
-  lo = __builtin_ctz(pending);
-  hi = 32 - __builtin_clz(pending);
-  return true;
-}
-
-// Calls loadRow(r) for every row in skip's reload window, lowest first.
+// Calls loadRow(r) for every row not in skip, lowest first.
 template <int Rows, typename LoadRow>
 __host__ __device__ __forceinline__ void ll128LoadRows(uint32_t skip, LoadRow&& loadRow) {
-  int lo, hi;
-  if (!ll128ReloadWindow<Rows>(skip, lo, hi)) return;
 #pragma unroll
   for (int r = 0; r < Rows; r++) {
-    if (r >= lo && r < hi) loadRow(r);
+    if (!((skip >> r) & 1)) loadRow(r);
   }
 }
 
 // Spins until every flag of the slice is valid, leaving the slice in the registers
-// loadRow fills. Each spin reloads only the window of rows not all valid at the
-// previous vote. keepWaiting(needReload) returns whether the warp spins again; it
-// is where the caller checks abort.
+// loadRow fills. Each spin reloads only the rows not all valid at the previous
+// vote. keepWaiting(needReload) returns whether the warp spins again; it is where
+// the caller checks abort.
 //
 // Confirm = false: a row's data is taken from the load that returned its valid
 // flags. Confirm = true: every row is reloaded once after a vote saw it valid.
