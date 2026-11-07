@@ -444,7 +444,7 @@ __device__ __forceinline__ QueuePairMLX5::sq_idx_t QueuePairMLX5::cq_complete_id
   return __scoped_atomic_load_n(&sq.complete_idx, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
 }
 
-/* precondition: called with all active lanes using different QPs
+/* precondition: called with all active lanes using different QPs and holding the CQ poll locks
  * update sq.complete_idx with new value derived from complete_idx argument + cqe->wqe_counter
  * and return the updated complete_idx value
  * TODO: apply PostOpts to cq_complete_idx(sq_idx_t) */
@@ -484,23 +484,15 @@ __device__ __forceinline__ QueuePairMLX5::sq_idx_t QueuePairMLX5::cq_complete_id
    * need to add one to get *count* of completed WQEs */
   uint16_t complete_idx16 = wqe_counter + 1;
 
-  /* complete_idx16_diff <= sq_depth
-   * except when many more WQEs get committed & executed while inside cq_complete_idx(sq_idx_t)
-   * but in that case complete_idx is necessarily updated since we need to call poll_cq_until
-   * to ensure that the SQ slots are free and we catch it */
+  /* complete_idx16_diff <= sq_depth: no one can update sq.complete_idx while we hold the lock
+   * and you can't post more WQEs than sq_depth without calling poll_cq_until */
   uint16_t complete_idx16_diff = complete_idx16 - static_cast<uint16_t>(complete_idx);
-  sq_idx_t next_complete_idx   = complete_idx   + static_cast<sq_idx_t>(complete_idx16_diff);
-
-  /* accumulate the newly-complete indices into sq.complete_idx,
-   * if some other thread didn't get there first
-   * assumes that cq_complete_idx(sq_idx_t) will be called from a loop *somewhere*,
-   * so uses atomic_compare_exchange_weak
-   *
-   * NOTE: cannot use fetch_max, otherwise can never wrap around (when sq_idx_t is uint32_t) */
-  if (__scoped_atomic_compare_exchange_n(&sq.complete_idx, &complete_idx, next_complete_idx,
-                                         /* weak */ true, __ATOMIC_RELAXED, __ATOMIC_RELAXED,
-                                         __MEMORY_SCOPE_DEVICE)) {
-    complete_idx = next_complete_idx;
+  if (complete_idx16_diff > 0) {
+    complete_idx += static_cast<sq_idx_t>(complete_idx16_diff);
+    /* accumulate the newly-complete indices into sq.complete_idx;
+     * we hold the lock so we can just do a store */
+    __scoped_atomic_store_n(&sq.complete_idx, complete_idx,
+                            __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
     LOGD_TRACE("QP[%d] CQ: polled completed = %zu", qp_num, static_cast<size_t>(complete_idx));
   }
 
@@ -518,9 +510,19 @@ __device__ __forceinline__ bool QueuePairMLX5::poll_cq_once(
   // check if we've already reached target
   bool reached_target = cq_reached_target(target, complete_idx);
 
-  if (!reached_target) {
+  // try to acquire CQ poll lock only if we haven't already reached the target
+  if (!reached_target &&
+      !__scoped_atomic_exchange_n(&sq.poll_cq_lock, 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE)) {
     // check CQE and update sq.complete_idx
     complete_idx = cq_complete_idx(complete_idx);
+    // lowered to s_waitcnt vmcnt(0) : order st sq.complete_idx -> st sq.poll_cq_lock
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
+    // release CQ poll lock
+    __scoped_atomic_store_n(&sq.poll_cq_lock, 0, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+#if GDA_MLX5_LOCK_USE_S_WAKEUP
+    // wake up any other sleeping waves (in the same workgroup)
+    amdgcn_s_wakeup();
+#endif
     // check whether we've reached target now
     reached_target = cq_reached_target(target, complete_idx);
   }
@@ -542,9 +544,39 @@ __device__ __forceinline__ void QueuePairMLX5::poll_cq_until(
   // load cached sq.complete_idx value
   sq_idx_t complete_idx = cq_complete_idx();
 
+  bool holds_lock = false;
+
   // poll until complete_idx reaches target
   while (!cq_reached_target(target, complete_idx)) {
-    complete_idx = cq_complete_idx(complete_idx);
+    // try to acquire CQ poll lock if we don't already hold it
+    if (!holds_lock) {
+      holds_lock = !__scoped_atomic_exchange_n(&sq.poll_cq_lock, 1,
+                                               __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+    }
+
+    if (holds_lock) {
+      // we hold the lock, so check CQE and update sq.complete_idx
+      complete_idx = cq_complete_idx(complete_idx);
+    } else {
+      // someone else holds the lock and is polling the CQ on our behalf
+#if GDA_MLX5_LOCK_USE_S_SLEEP
+      // sleep so we don't hammer the memory
+      __builtin_amdgcn_s_sleep(LOCK_S_SLEEP_DELAY);
+#endif
+      // reload sq.complete_idx
+      complete_idx = cq_complete_idx();
+    }
+  }
+
+  if (holds_lock) {
+    // lowered to s_waitcnt vmcnt(0) : order st sq.complete_idx -> st sq.poll_cq_lock
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
+    // release CQ poll lock
+    __scoped_atomic_store_n(&sq.poll_cq_lock, 0, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+#if GDA_MLX5_LOCK_USE_S_WAKEUP
+    // wake up any other sleeping waves (in the same workgroup)
+    amdgcn_s_wakeup();
+#endif
   }
 
   LOGD_TRACE("QP[%d] CQ: completed %zu >= target %zu",
