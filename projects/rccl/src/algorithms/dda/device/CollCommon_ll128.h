@@ -210,6 +210,11 @@ __device__ __forceinline__ void ddaLL128LoadRegs(
     if (flag) regs[2 * g] = regs[2 * g - 1];
 }
 
+// Chunk pair g of lane wid loads without a branch; a flag lane's odd pair, whose data is unused, loads lane wid - 1's.
+__device__ __forceinline__ int ddaLL128LoadChunkIx(int g, int wid, bool flag) {
+  return ddaLL128ChunkIx(g, (flag && g % 2 == 1) ? wid - 1 : wid);
+}
+
 // ddaLL128LoadRegs without per-lane branches. Loads a lane does not need are in bounds and discarded.
 template <typename T>
 __device__ __forceinline__ void ddaLL128LoadRegsBatched(
@@ -217,7 +222,7 @@ __device__ __forceinline__ void ddaLL128LoadRegsBatched(
   constexpr int EltPer16B = 16 / sizeof(T);
 #pragma unroll
   for (int g = 0; g < kDdaLL128Pairs; g++) {
-    const int ix = ddaLL128ChunkIx(g, (flag && g % 2 == 1) ? wid - 1 : wid);
+    const int ix = ddaLL128LoadChunkIx(g, wid, flag);
     const int elt = ix * EltPer16B < eltN ? ix * EltPer16B : 0;
     ddaLL128Load16B(reinterpret_cast<const uint64_t*>(src + elt), regs[2 * g], regs[2 * g + 1]);
   }
@@ -241,7 +246,8 @@ __device__ __forceinline__ void ddaLL128ForEachWirePair(const uint64_t (&regs)[k
   }
 }
 
-// Branch-free slice load kept in flight for a look-ahead; chunks past eltN load chunk 0 and RawToRegs zeroes them.
+// ddaLL128LoadRegsBatched in two steps, so the loads stay in flight for a look-ahead: chunks past eltN load chunk 0,
+// and ddaLL128RawToRegs zeroes them.
 struct DdaLL128Raw {
   v4u v[kDdaLL128Pairs];
 };
@@ -249,10 +255,11 @@ struct DdaLL128Raw {
 template <typename T>
 __device__ __forceinline__ void ddaLL128LoadRaw(DdaLL128Raw& raw, const T* src, int eltN, int wid, bool flag) {
   constexpr int EltPer16B = 16 / sizeof(T);
+  // Compiler barrier: each call's loads issue here, so a look-ahead reload is not folded into an earlier load.
   asm volatile("" ::: "memory");
 #pragma unroll
   for (int g = 0; g < kDdaLL128Pairs; g++) {
-    const int ix = ddaLL128ChunkIx((flag && (g & 1)) ? g - 1 : g, wid);
+    const int ix = ddaLL128LoadChunkIx(g, wid, flag);
     const v4u* p = reinterpret_cast<const v4u*>(src + (ix * EltPer16B < eltN ? ix : 0) * EltPer16B);
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
     raw.v[g] = __builtin_amdgcn_global_load_b128((v4u_gptr)p, RCCL_SYSTEM_SYNCSCOPE);
@@ -262,19 +269,22 @@ __device__ __forceinline__ void ddaLL128LoadRaw(DdaLL128Raw& raw, const T* src, 
   }
 }
 
-// ddaLL128LoadRegs's wire layout from a raw load (flag lanes: odd pairs take the even chunk's second word).
+// ddaLL128LoadRegs's registers from a raw load.
 template <typename T>
 __device__ __forceinline__ void ddaLL128RawToRegs(const DdaLL128Raw& raw, uint64_t (&regs)[kDdaLL128WordsPerThread],
                                                   int eltN, int wid, bool flag) {
   constexpr int EltPer16B = 16 / sizeof(T);
 #pragma unroll
   for (int g = 0; g < kDdaLL128Pairs; g++) {
-    const bool odd = flag && (g & 1);
-    const bool valid = ddaLL128ChunkIx(odd ? g - 1 : g, wid) * EltPer16B < eltN;
-    const uint64_t lo = valid ? (uint64_t)raw.v[g][0] | ((uint64_t)raw.v[g][1] << 32) : 0;
-    const uint64_t hi = valid ? (uint64_t)raw.v[g][2] | ((uint64_t)raw.v[g][3] << 32) : 0;
-    regs[2 * g] = odd ? hi : lo;
-    regs[2 * g + 1] = hi;
+    const bool valid = ddaLL128LoadChunkIx(g, wid, flag) * EltPer16B < eltN;
+    regs[2 * g] = valid ? (uint64_t)raw.v[g][0] | ((uint64_t)raw.v[g][1] << 32) : 0;
+    regs[2 * g + 1] = valid ? (uint64_t)raw.v[g][2] | ((uint64_t)raw.v[g][3] << 32) : 0;
+  }
+#pragma unroll
+  for (int g = 1; g < kDdaLL128Pairs; g += 2) {  // move flag-lane data out of odd regs
+    if (flag) {
+      regs[2 * g] = regs[2 * g - 1];
+    }
   }
 }
 
