@@ -299,6 +299,34 @@ def test_real_candidate_value_is_an_overflow_improvement() -> None:
     assert [(c.workload, c.key) for c in data.improvements] == [("vcopy", PERCENT_KEY)]
 
 
+def test_one_value_delta_is_rendered(tmp_path: Path) -> None:
+    """A single regression still gets the value-delta section."""
+    data = report.compute_report(
+        {"vcopy": make_log({"2.1.0|VALU FLOPs": 5.0})},
+        {"vcopy": make_log({"2.1.0|VALU FLOPs": 10.0})},
+        {},
+    )
+
+    page = render(data, tmp_path)
+
+    assert len(data.deltas) == 1
+    assert "Value deltas vs rocprofiler-compute-develop" in page
+
+
+def test_empty_deltas_omit_the_section(tmp_path: Path) -> None:
+    """Equal values leave the value-delta section out."""
+    data = report.compute_report(
+        {"vcopy": make_log({"2.1.0|VALU FLOPs": 5.0})},
+        {"vcopy": make_log({"2.1.0|VALU FLOPs": 5.0})},
+        {},
+    )
+
+    page = render(data, tmp_path)
+
+    assert data.deltas == []
+    assert "Value deltas vs" not in page
+
+
 def test_delta_fraction_counts_unique_metrics(tmp_path: Path) -> None:
     """One metric changing in three workloads is one changed metric."""
     workloads = ["vcopy", "nbody", "mega_kernel"]
@@ -338,6 +366,27 @@ def test_sum_ratio_uses_per_dispatch_median_and_std() -> None:
 
     assert report.per_dispatch_stat_expr(expression, "median") == "to_median((a) / (b))"
     assert report.per_dispatch_stat_expr(expression, "stddev") == "to_std((a) / (b))"
+
+
+def test_avg_formula_uses_per_dispatch_median_and_std() -> None:
+    """AVG(SQC_LDS_BANK_CONFLICT) becomes to_avg(...) and still reduces."""
+    expression = "to_avg(raw_pmc_df['SQC_LDS_BANK_CONFLICT'])"
+
+    assert report.per_dispatch_stat_expr(expression, "median") == (
+        "to_median((raw_pmc_df['SQC_LDS_BANK_CONFLICT']))"
+    )
+    assert report.per_dispatch_stat_expr(expression, "stddev") == (
+        "to_std((raw_pmc_df['SQC_LDS_BANK_CONFLICT']))"
+    )
+
+
+def test_max_and_collect_sum_stay_without_per_dispatch_stats() -> None:
+    """Max and COLLECT_SUM are not rewritten; Min still is."""
+    assert report.per_dispatch_stat_expr("MAX(SQ_INSTS)", "median") is None
+    assert report.per_dispatch_stat_expr("COLLECT_SUM(a)", "stddev") is None
+    assert report.per_dispatch_stat_expr("MIN(SQ_INSTS)", "median") == (
+        "to_median(SQ_INSTS)"
+    )
 
 
 def test_mixed_sum_and_min_has_no_per_dispatch_std() -> None:
