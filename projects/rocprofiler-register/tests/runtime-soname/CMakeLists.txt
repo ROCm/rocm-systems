@@ -120,3 +120,13 @@ rocprofiler_register_add_runtime_library_layout_test(
     test-runtime-attach-register-dir-fallback attach-register-dir-fallback)
 rocprofiler_register_add_runtime_library_layout_test(
     test-runtime-attach-core-follows-attach-library attach-core-follows-attach-library)
+
+set_tests_properties(
+    test-runtime-attach-core-follows-attach-library
+    PROPERTIES
+        ENVIRONMENT
+        "${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV};ROCPROFILER_REGISTER_LOG_LEVEL=info"
+        PASS_REGULAR_EXPRESSION
+        "ROCPROF_EXTRA_COUNTERS_CONTENTS \\([0-9]+ bytes, redacted\\)"
+        FAIL_REGULAR_EXPRESSION
+        "Test FAILED|rocprofiler-register-sensitive-extra-counter-contents")

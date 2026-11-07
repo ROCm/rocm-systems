@@ -9,6 +9,7 @@ set(TOOL_HEADERS
     att_no_intercept_impl.hpp
     config.hpp
     execution_profile.hpp
+    extra_counters.hpp
     graph_stack.hpp
     helper.hpp
     kernel_filter_range.hpp

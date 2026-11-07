@@ -36,6 +36,7 @@ rocprofiler_add_integration_execute_test(
         ${CMAKE_CURRENT_SOURCE_DIR}/run_attachment_test_unified.sh
         $<TARGET_FILE:attachment-test> $<TARGET_FILE:rocprofiler-sdk::rocprofv3>
         ${CMAKE_CURRENT_BINARY_DIR} ${LOG_LEVEL} out
+        ${CMAKE_CURRENT_LIST_DIR}/../../counter-collection/extra_counters/extra_counters.yaml
     DEPENDS rocprofiler-sdk::rocprofv3
     TIMEOUT 90
     LABELS "attachment"
