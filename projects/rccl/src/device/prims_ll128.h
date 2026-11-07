@@ -32,15 +32,12 @@
 // Opt in per arch; when 0 each falls back to the code from before it was added.
 // RECV_WINDOW: wait on a peer's flags with recvWaitLoad (ll128RecvWait.h), which reloads only the rows still pending.
 // CLAMPED_LOAD: load the aligned user source unconditionally, so no vmcnt wait is forced right after the load.
-// STATIC_PEER_IX: index the per-peer arrays with compile-time indices, which keeps Primitives out of scratch.
 #if defined(__gfx950__)
 #define RCCL_LL128_RECV_WINDOW_ENABLE 1
 #define RCCL_LL128_CLAMPED_LOAD_ENABLE 1
-#define RCCL_LL128_STATIC_PEER_IX_ENABLE 1
 #else
 #define RCCL_LL128_RECV_WINDOW_ENABLE 0
 #define RCCL_LL128_CLAMPED_LOAD_ENABLE 0
-#define RCCL_LL128_STATIC_PEER_IX_ENABLE 0
 #endif
 
 // With RCCL_LL128_RECV_WINDOW_ENABLE:
@@ -723,22 +720,6 @@ public:
 #endif
     barriers = &ncclShmem.groups[group].barrier;
     int nrecv = 0, nsend = 0;
-#if RCCL_LL128_STATIC_PEER_IX_ENABLE
-#pragma unroll
-    for (int i = 0; i < MaxRecv; i++) {
-      if (nrecv == i && recvPeers[i] >= 0) {
-        loadRecvConn(&channel->peers[recvPeers[i]]->recv[connIndexRecv], i);
-        nrecv++;
-      }
-    }
-#pragma unroll
-    for (int i = 0; i < MaxSend; i++) {
-      if (nsend == i && sendPeers[i] >= 0) {
-        loadSendConn(&channel->peers[sendPeers[i]]->send[connIndexSend], i);
-        nsend++;
-      }
-    }
-#else
     while (nrecv < MaxRecv && recvPeers[nrecv] >= 0) {
       loadRecvConn(&channel->peers[recvPeers[nrecv]]->recv[connIndexRecv], nrecv);
       nrecv++;
@@ -747,7 +728,6 @@ public:
       loadSendConn(&channel->peers[sendPeers[nsend]]->send[connIndexSend], nsend);
       nsend++;
     }
-#endif
     this->fan = Fan(nrecv, nsend);
     // Coverity reports recvConn and sendConn being possibly NULL at this point but that won't actually
     // happen given the two "while" loops just above.
