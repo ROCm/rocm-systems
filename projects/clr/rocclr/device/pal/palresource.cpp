@@ -53,6 +53,8 @@ GpuMemoryReference* GpuMemoryReference::Create(const Device& dev,
 
   GpuMemoryReference* memRef = new (gpuMemSize) GpuMemoryReference(dev);
   if (memRef != nullptr) {
+    // ~GpuMemoryReference() reads va_range_ to decide whether to update the free memory counters
+    memRef->va_range_ = createInfo.flags.virtualAlloc;
     result = dev.iDev()->CreateGpuMemory(createInfo, &memRef[1], &memRef->gpuMem_);
     if ((result != Pal::Result::Success) &&
         // Free cache if PAL failed allocation
@@ -61,17 +63,17 @@ GpuMemoryReference* GpuMemoryReference::Create(const Device& dev,
       result = dev.iDev()->CreateGpuMemory(createInfo, &memRef[1], &memRef->gpuMem_);
     }
     if (result == Pal::Result::Success) {
+      // Update free memory size counters before MakeResident(): if it fails, release() runs
+      // ~GpuMemoryReference(), which subtracts this size again
+      if (!createInfo.flags.sdiExternal && !createInfo.flags.virtualAlloc) {
+        dev.updateAllocedMemory(memRef->gpuMem_->Desc().heaps[0], memRef->gpuMem_->Desc().size, false);
+      }
       result = memRef->MakeResident();
     }
     if (result != Pal::Result::Success) {
       memRef->release();
       return nullptr;
     }
-  }
-  memRef->va_range_ = createInfo.flags.virtualAlloc;
-  if (!createInfo.flags.sdiExternal && !createInfo.flags.virtualAlloc) {
-    // Update free memory size counters
-    dev.updateAllocedMemory(memRef->gpuMem_->Desc().heaps[0], memRef->gpuMem_->Desc().size, false);
   }
   return memRef;
 }
@@ -90,6 +92,8 @@ GpuMemoryReference* GpuMemoryReference::Create(const Device& dev,
   if (memRef != nullptr) {
     result = dev.iDev()->CreatePinnedGpuMemory(createInfo, &memRef[1], &memRef->gpuMem_);
     if (result == Pal::Result::Success) {
+      // Update free memory size counters before MakeResident(), see the GpuMemoryCreateInfo overload
+      dev.updateAllocedMemory(memRef->gpuMem_->Desc().heaps[0], memRef->gpuMem_->Desc().size, false);
       result = memRef->MakeResident();
     }
     if (result != Pal::Result::Success) {
@@ -97,8 +101,6 @@ GpuMemoryReference* GpuMemoryReference::Create(const Device& dev,
       return nullptr;
     }
   }
-  // Update free memory size counters
-  dev.updateAllocedMemory(memRef->gpuMem_->Desc().heaps[0], memRef->gpuMem_->Desc().size, false);
   return memRef;
 }
 
@@ -115,6 +117,8 @@ GpuMemoryReference* GpuMemoryReference::Create(const Device& dev,
   if (memRef != nullptr) {
     result = dev.iDev()->CreateSvmGpuMemory(createInfo, &memRef[1], &memRef->gpuMem_);
     if (result == Pal::Result::Success) {
+      // Update free memory size counters before MakeResident(), see the GpuMemoryCreateInfo overload
+      dev.updateAllocedMemory(memRef->gpuMem_->Desc().heaps[0], memRef->gpuMem_->Desc().size, false);
       result = memRef->MakeResident();
     }
     if (result != Pal::Result::Success) {
@@ -122,8 +126,6 @@ GpuMemoryReference* GpuMemoryReference::Create(const Device& dev,
       return nullptr;
     }
   }
-  // Update free memory size counters
-  dev.updateAllocedMemory(memRef->gpuMem_->Desc().heaps[0], memRef->gpuMem_->Desc().size, false);
   return memRef;
 }
 

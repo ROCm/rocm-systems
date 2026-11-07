@@ -2265,6 +2265,24 @@ memory:
       targets: [amd_linux]
       reason: "AIRUNTIME-2744 - needs to be re-triaged."
     tags: [query, P0]
+  Unit_hipMalloc_Negative_FailureKeepsFreeMemory:
+    <<: *level_default
+    disabled:
+      targets: [amd_linux, amd_wsl, nvidia_windows, nvidia_linux]
+      reason: "ROCM-33212 - regression test for the Windows runtime"
+    tags: [alloc, query]
+  Unit_hipHostMalloc_Negative_FailureKeepsFreeMemory:
+    <<: *level_default
+    disabled:
+      targets: [amd_linux, amd_wsl, nvidia_windows, nvidia_linux]
+      reason: "ROCM-33212 - regression test for the Windows runtime"
+    tags: [alloc, query]
+  Unit_hipHostRegister_Negative_FailureKeepsFreeMemory:
+    <<: *level_default
+    disabled:
+      targets: [amd_linux, amd_wsl, nvidia_windows, nvidia_linux]
+      reason: "ROCM-33212 - regression test for the Windows runtime"
+    tags: [alloc, query]
   Unit_hipFreeImplicitSyncDev:
     <<: *level_default
     tags: [alloc, P0]
