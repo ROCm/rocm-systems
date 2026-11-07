@@ -22,6 +22,7 @@ static size_t DefaultDdaLLThreshold(const ncclComm*, ncclFunc_t) { return kDdaLL
 static size_t DefaultDdaLL128Threshold(const ncclComm*, ncclFunc_t) { return 0; }  // DDA_LL128 unset, no table: off
 static size_t DefaultDdaLLTwoShotThreshold(const ncclComm*) { return (size_t)(2) * 1024 * 1024; }
 static size_t DefaultDdaLL128TwoShotThreshold(const ncclComm*) { return (size_t)(64) * 1024 * 1024; }
+static bool DefaultNotPinnedByEnv() { return false; }  // no DDA AllReduce threshold env set
 static int DefaultDdaFabricVmmBlocks(const ncclComm* comm) { return comm != nullptr ? comm->ddaFabricMaxBlocks : 0; }
 static int DefaultDdaFabricAgLL128Threads(const ncclComm*, size_t) { return 0; }  // no table: 512 threads
 static int DefaultDdaFabricAgLL128Blocks(const ncclComm* comm, size_t) {
@@ -45,8 +46,8 @@ std::function<size_t(const ncclComm*, ncclFunc_t)> g_rcclDdaLLThreshold = Defaul
 std::function<size_t(const ncclComm*, ncclFunc_t)> g_rcclDdaLL128Threshold = DefaultDdaLL128Threshold;
 std::function<size_t(const ncclComm*)> g_rcclDdaLLTwoShotThreshold = DefaultDdaLLTwoShotThreshold;
 std::function<size_t(const ncclComm*)> g_rcclDdaLL128TwoShotThreshold = DefaultDdaLL128TwoShotThreshold;
-std::function<bool()> g_rcclDdaArLLTierPinnedByEnv = [] { return false; };
-std::function<bool()> g_rcclDdaArLL128OneShotPinnedByEnv = [] { return false; };
+std::function<bool()> g_rcclDdaArLLTierPinnedByEnv = DefaultNotPinnedByEnv;
+std::function<bool()> g_rcclDdaArLL128OneShotPinnedByEnv = DefaultNotPinnedByEnv;
 std::function<int(const ncclComm*)> g_rcclDdaFabricVmmBlocks = DefaultDdaFabricVmmBlocks;
 std::function<int(const ncclComm*, size_t)> g_rcclDdaFabricAgLL128Threads = DefaultDdaFabricAgLL128Threads;
 std::function<int(const ncclComm*, size_t)> g_rcclDdaFabricAgLL128Blocks = DefaultDdaFabricAgLL128Blocks;
@@ -75,8 +76,8 @@ void ResetDdaCollSeams() {
   g_rcclDdaLL128Threshold = DefaultDdaLL128Threshold;
   g_rcclDdaLLTwoShotThreshold = DefaultDdaLLTwoShotThreshold;
   g_rcclDdaLL128TwoShotThreshold = DefaultDdaLL128TwoShotThreshold;
-  g_rcclDdaArLLTierPinnedByEnv = [] { return false; };
-  g_rcclDdaArLL128OneShotPinnedByEnv = [] { return false; };
+  g_rcclDdaArLLTierPinnedByEnv = DefaultNotPinnedByEnv;
+  g_rcclDdaArLL128OneShotPinnedByEnv = DefaultNotPinnedByEnv;
   g_rcclDdaFabricVmmBlocks = DefaultDdaFabricVmmBlocks;
   g_rcclDdaFabricAgLL128Threads = DefaultDdaFabricAgLL128Threads;
   g_rcclDdaFabricAgLL128Blocks = DefaultDdaFabricAgLL128Blocks;

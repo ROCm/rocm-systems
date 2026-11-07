@@ -390,7 +390,7 @@ size_t rcclDdaLLTwoShotThreshold(const ncclComm* comm);
 size_t rcclDdaArRegCaptureMaxBytes(const ncclComm* comm);
 // Whether an eager registered AllReduce of `bytes` has a shard the DDA LL128 two-shot takes over from CE-registered.
 bool rcclDdaArRegEagerShardFits(const ncclComm* comm, size_t bytes);
-// True when the user sets an AllReduce LL tier threshold; table rules then leave the LL tiers' reach alone.
+// True when the user sets RCCL_DDA_LL_THRESHOLD, _ONESHOT_ or _TWOSHOT_; the DDA AllReduce peer-split then leaves them.
 bool rcclDdaArLLTierPinnedByEnv();
 // True when the user sets RCCL_DDA_LL128_ONESHOT_THRESHOLD; the DDA AllReduce peer-split window then leaves its reach.
 bool rcclDdaArLL128OneShotPinnedByEnv();

@@ -58,7 +58,7 @@ using dda::common::kDdaLL128WireWordsPerSlice;
 // Block width of each tier when uncapped.
 constexpr unsigned kDdaArLLOneShotThreads = 512;
 constexpr unsigned kDdaArLLTwoShotThreads = 1024;
-constexpr unsigned kDdaArLL128Threads = 512;
+constexpr unsigned kDdaArLL128Threads = dda::common::kDdaLL128Threads;
 
 // Single source of the LL and LL128 launch geometry: a 1-D grid over `units` of work, `unitThreads` threads each,
 // in blocks of `threads`, capped low (LL serves small messages where latency, not occupancy, dominates). `cap` lowers
@@ -166,7 +166,6 @@ static ncclResult_t ncclAllReduceDdaFabricLLTyped(const void* sendbuff, void* re
 constexpr size_t kDdaArLL128AsyncMinShardBytes = 2 * 1024 * 1024;
 
 // Writer of an LL128 two-shot launch: staged from kDdaArLL128AsyncMinShardBytes where ddaArLL128StagedWireOk.
-// With RCCL_DDA_LL128_ASYNC_WIRE at 0 (default) every launch takes the cooperative writer and no dynamic LDS.
 static int ddaArLL128Wire(const ncclComm* comm, size_t bytes) {
   const size_t shard = bytes / (size_t)std::max(comm->nRanks, 1);
   return ddaArLL128StagedWireOk(comm) && shard >= kDdaArLL128AsyncMinShardBytes ? dda::common::kDdaLL128WireAsync
@@ -193,9 +192,8 @@ static DdaArLL128Kernel<T> ddaArLL128TwoShotKernel(int nRanks, int wire) {
   });
 }
 
-// Peer-split window (measured crossovers): from 2 MiB on the LL128 tier, more than two ranks, staged writer on.
+// Smallest message the peer-split takes: below it the staged stores of n - 1 units per slice cost more than they hide.
 constexpr size_t kDdaArLL128SplitMinBytes = 2 * 1024 * 1024;
-constexpr unsigned kDdaArSplitThreads = 512;
 
 template <typename T>
 static DdaArLL128Kernel<T> ddaArLL128SplitKernel(int nRanks) {
@@ -204,13 +202,10 @@ static DdaArLL128Kernel<T> ddaArLL128SplitKernel(int nRanks) {
   });
 }
 
-// Peer-split grid: one warp per (slice, peer) unit, 512-thread blocks, within the blocks and threads of `bound`.
+// Peer-split: one warp per (slice, peer) unit of one shard, within the blocks and threads of `bound`.
 static std::pair<dim3, dim3> ddaArLL128SplitGrid(const ncclComm* comm, size_t bytes, rcclDdaLaunchCap bound) {
   const size_t n = (size_t)std::max(comm->nRanks, 2);
-  const unsigned threads = dda::common::ddaCapThreads(kDdaArSplitThreads, bound.threads);
-  const size_t need = std::max<size_t>(ddaLL128Slices(bytes / n) * (n - 1), 1) * (size_t)kDdaLL128Warp;
-  const size_t blocks = dda::common::ddaCapBlocks((need + threads - 1) / threads, bound.blocks);
-  return std::make_pair(dim3((unsigned)std::max<size_t>(blocks, 1)), dim3(threads));
+  return ddaArFabricLLGrid(comm, ddaLL128Slices(bytes / n) * (n - 1), kDdaArLL128Threads, kDdaLL128Warp, bound);
 }
 
 // One warp carries one slice, so the grid is sized in slices rather than in
@@ -363,46 +358,6 @@ static ncclResult_t ncclAllReduceDdaFabricLLTwoShotTyped(const void* sendbuff, v
 
 } // namespace
 
-static bool ddaLLArTwoShotShapeEligible(ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op);
-static bool ddaLL128ArOneShotShapeEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
-                                           ncclDataType_t datatype, ncclRedOp_t op);
-
-// Messages the split takes (the window above) unless a user-pinned tier can: an LL shot or the LL128 one-shot.
-static bool ddaArLL128SplitWindow(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
-                                  ncclDataType_t datatype, ncclRedOp_t op) {
-  const size_t bytes = count * ncclTypeSize(datatype);
-  return comm != nullptr && comm->nRanks > 2 && ddaArLL128StagedWireOk(comm) && bytes >= kDdaArLL128SplitMinBytes &&
-         !(rcclDdaArLLTierPinnedByEnv() && (ddaLLArOneShotEligible(comm, sendbuff, recvbuff, count, datatype, op) ||
-                                            ddaLLArTwoShotShapeEligible(comm, count, datatype, op))) &&
-         !(rcclDdaArLL128OneShotPinnedByEnv() &&
-           ddaLL128ArOneShotShapeEligible(comm, sendbuff, recvbuff, count, datatype, op)) &&
-         bytes <= rcclDdaLL128Threshold(comm, ncclFuncAllReduce) &&
-         ddaLL128ArTwoShotEligible(comm, sendbuff, recvbuff, count, datatype, op);
-}
-
-bool ncclAllReduceDdaFabricLL128Split(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
-                                      ncclDataType_t datatype, ncclRedOp_t op, rcclDdaLaunchCap cap, bool vmmFirst,
-                                      rcclDdaLaunchCap* bound) {
-  if (!ddaArLL128SplitWindow(comm, sendbuff, recvbuff, count, datatype, op)) {
-    return false;
-  }
-  if (vmmFirst && ncclAllReduceDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
-    *bound = ncclAllReduceDdaFabricGrid(comm, count, datatype, cap);
-    return true;
-  }
-  const size_t bytes = count * ncclTypeSize(datatype);
-  std::pair<dim3, dim3> geom;
-  if (bytes <= rcclDdaLLThreshold(comm, ncclFuncAllReduce) && ddaLLArTwoShotShapeEligible(comm, count, datatype, op)) {
-    geom = ddaArLLTwoShotGeom(comm, bytes, cap);
-  } else if (ddaLL128ArOneShotShapeEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
-    geom = ddaArLL128OneShotGeom(comm, bytes, cap);
-  } else {
-    geom = ddaArLL128TwoShotGeom(comm, bytes, cap);
-  }
-  *bound = {geom.first.x, geom.second.x};
-  return true;
-}
-
 // Shape/resource eligibility for the one-shot variant, independent of whether
 // the tier is switched on for this size.
 bool ddaLLArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
@@ -448,13 +403,7 @@ bool ddaLLArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff
   return true;
 }
 
-// Shape/resource eligibility for the two-shot variant; messages in the peer-split window run the split.
-bool ddaLLArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
-                            ncclDataType_t datatype, ncclRedOp_t op) {
-  return ddaLLArTwoShotShapeEligible(comm, count, datatype, op) &&
-         !ddaArLL128SplitWindow(comm, sendbuff, recvbuff, count, datatype, op);
-}
-
+// Shape/resource eligibility for the two-shot variant.
 static bool ddaLLArTwoShotShapeEligible(ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op) {
   if (count * ncclTypeSize(datatype) > rcclDdaLLTwoShotThreshold(comm)) {
       return false;
@@ -501,13 +450,7 @@ static bool ddaLLArTwoShotShapeEligible(ncclComm* comm, size_t count, ncclDataTy
   return true;
 }
 
-// Shape/resource eligibility for the LL128 one-shot variant; messages in the peer-split window run the split.
-bool ddaLL128ArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
-                               ncclDataType_t datatype, ncclRedOp_t op) {
-  return ddaLL128ArOneShotShapeEligible(comm, sendbuff, recvbuff, count, datatype, op) &&
-         !ddaArLL128SplitWindow(comm, sendbuff, recvbuff, count, datatype, op);
-}
-
+// Shape/resource eligibility for the LL128 one-shot variant.
 static bool ddaLL128ArOneShotShapeEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                            ncclDataType_t datatype, ncclRedOp_t op) {
   if (count * ncclTypeSize(datatype) > (size_t)rcclParamDdaLL128OneShotThreshold()) {
@@ -611,6 +554,56 @@ bool ddaLL128ArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvb
   }
 
   return true;
+}
+
+// Messages the peer-split takes, unless a user-pinned tier can: an LL shot or the LL128 one-shot.
+static bool ddaArLL128SplitWindow(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                  ncclDataType_t datatype, ncclRedOp_t op) {
+  const size_t bytes = count * ncclTypeSize(datatype);
+  return comm != nullptr && comm->nRanks > 2 && ddaArLL128StagedWireOk(comm) && bytes >= kDdaArLL128SplitMinBytes &&
+         !(rcclDdaArLLTierPinnedByEnv() && (ddaLLArOneShotEligible(comm, sendbuff, recvbuff, count, datatype, op) ||
+                                            ddaLLArTwoShotShapeEligible(comm, count, datatype, op))) &&
+         !(rcclDdaArLL128OneShotPinnedByEnv() &&
+           ddaLL128ArOneShotShapeEligible(comm, sendbuff, recvbuff, count, datatype, op)) &&
+         bytes <= rcclDdaLL128Threshold(comm, ncclFuncAllReduce) &&
+         ddaLL128ArTwoShotEligible(comm, sendbuff, recvbuff, count, datatype, op);
+}
+
+bool ncclAllReduceDdaFabricLL128Split(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                      ncclDataType_t datatype, ncclRedOp_t op, rcclDdaLaunchCap cap, bool vmmFirst,
+                                      rcclDdaLaunchCap* bound) {
+  if (!ddaArLL128SplitWindow(comm, sendbuff, recvbuff, count, datatype, op)) {
+    return false;
+  }
+  if (vmmFirst && ncclAllReduceDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
+    *bound = ncclAllReduceDdaFabricGrid(comm, count, datatype, cap);
+    return true;
+  }
+  const size_t bytes = count * ncclTypeSize(datatype);
+  std::pair<dim3, dim3> geom;
+  if (bytes <= rcclDdaLLThreshold(comm, ncclFuncAllReduce) && ddaLLArTwoShotShapeEligible(comm, count, datatype, op)) {
+    geom = ddaArLLTwoShotGeom(comm, bytes, cap);
+  } else if (ddaLL128ArOneShotShapeEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
+    geom = ddaArLL128OneShotGeom(comm, bytes, cap);
+  } else {
+    geom = ddaArLL128TwoShotGeom(comm, bytes, cap);
+  }
+  *bound = {geom.first.x, geom.second.x};
+  return true;
+}
+
+// Shape/resource eligibility for the two-shot variant; messages in the peer-split window run the split.
+bool ddaLLArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                            ncclDataType_t datatype, ncclRedOp_t op) {
+  return ddaLLArTwoShotShapeEligible(comm, count, datatype, op) &&
+         !ddaArLL128SplitWindow(comm, sendbuff, recvbuff, count, datatype, op);
+}
+
+// Shape/resource eligibility for the LL128 one-shot variant; messages in the peer-split window run the split.
+bool ddaLL128ArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                               ncclDataType_t datatype, ncclRedOp_t op) {
+  return ddaLL128ArOneShotShapeEligible(comm, sendbuff, recvbuff, count, datatype, op) &&
+         !ddaArLL128SplitWindow(comm, sendbuff, recvbuff, count, datatype, op);
 }
 
 // Tier selection: enabled, within this tier's threshold, and shape-eligible.

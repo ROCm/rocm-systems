@@ -67,8 +67,7 @@ ncclResult_t ncclAllReduceDdaFabricLL(const void* sendbuff, void* recvbuff, size
 bool ncclAllReduceDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                          ncclDataType_t datatype, ncclRedOp_t op);
 
-// True when the LL128 peer-split two-shot takes the message (rcclCollDecision::ddaLL128Split). *bound is then the grid
-// of the launch it replaces under `cap`: VMM's in the VMM-first window, else the LL two-shot's or an LL128 shot's.
+// Whether the LL128 peer-split takes the message; *bound is then the grid under `cap` of the launch it replaces.
 bool ncclAllReduceDdaFabricLL128Split(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                       ncclDataType_t datatype, ncclRedOp_t op, rcclDdaLaunchCap cap, bool vmmFirst,
                                       rcclDdaLaunchCap* bound);
