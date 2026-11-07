@@ -41,6 +41,7 @@
 // HIP runtime internals
 #include "../hip_global.hpp"       // hip::asKernel()
 #include "../hip_internal.hpp"
+#include "../hip_graph_internal.hpp"
 #include "hip/amd_detail/hip_api_trace.hpp"
 #include "utils/flags.hpp"         // HIP_HRR_CAPTURE_OUTPUT flag
 
@@ -199,9 +200,10 @@ struct HostSnap {
   hrr_cap::Hash128 hash{}, last{};
   hipStream_t      last_stream = nullptr;
   bool             record = false;  // contents or stream differ from the last record
+  bool             cached = false;  // the archive already holds the blob
   std::unique_ptr<uint8_t[]> copy;  // the bytes, until hashed and written
 };
-std::mutex                       g_pinned_mu;  // also held while a snapshot copies
+std::mutex                       g_pinned_mu;  // also held while a snapshot hashes
 std::map<uintptr_t, PinnedAlloc> g_pinned;
 std::atomic<size_t>              g_pinned_count{0};
 // The pinned allocations the launch this thread is making points into.
@@ -278,13 +280,23 @@ static void pinned_scan_locked(const uint8_t* bytes, size_t sz) {
           "pinned host snapshot",
           "a pinned allocation larger than HIP_HRR_HOST_SNAPSHOT_MAX_MB was not recorded");
     } else {
-      // Hashed and written from the copy, after the lock, so the blob holds
-      // the bytes its hash names.
+      s.last        = it->second.last;
+      s.last_stream = it->second.last_stream;
+      // Most launches find bytes the archive already holds. Hash them in
+      // place under the lock, which saves a copy.
+      const auto* src = reinterpret_cast<const void*>(s.base);
+      const hrr_cap::Hash128 h = hrr_cap::writer::hash_bytes(src, s.size);
+      if (hrr_cap::writer::blob_written(h, s.size)) {
+        s.hash   = h;
+        s.cached = true;
+        t_snaps.push_back(std::move(s));
+        continue;
+      }
+      // New bytes are copied and written after the lock. The host may change
+      // the buffer meanwhile, so the blob must come from the copy.
       s.copy.reset(new (std::nothrow) uint8_t[s.size]);
       if (s.copy) {
-        std::memcpy(s.copy.get(), reinterpret_cast<const void*>(s.base), s.size);
-        s.last        = it->second.last;
-        s.last_stream = it->second.last_stream;
+        std::memcpy(s.copy.get(), src, s.size);
       } else {
         hrr_cap::writer::note_unreplayable("pinned host snapshot",
                                            "no memory to copy a pinned allocation");
@@ -294,42 +306,151 @@ static void pinned_scan_locked(const uint8_t* bytes, size_t sz) {
   }
 }
 
+static bool pinned_snapshots_active() {
+  return hrr_host_snapshots_enabled() &&
+         g_pinned_count.load(std::memory_order_relaxed) != 0;
+}
+
+// Caller holds g_pinned_mu. `kbuf` is a packed argument buffer; otherwise each
+// parameter is a separate allocation named by `params`.
+static void pinned_scan_function_locked(hipFunction_t f, void** params, void** extra,
+                                        const void* kbuf = nullptr, size_t ksz = 0) {
+  if (!f || !hip::asKernel(f)) return;
+  if (!params && !kbuf && extra) parse_kernel_extra(extra, kbuf, ksz);
+  const amd::KernelSignature& sig = hip::asKernel(f)->signature();
+  uint32_t param_idx = 0;
+  for (uint32_t i = 0; i < sig.numParametersAll(); i++) {
+    const auto& d = sig.at(i);
+    if (d.info_.hidden_) continue;
+    const uint8_t* bytes = nullptr;
+    if (kbuf && d.offset_ + d.size_ <= ksz)
+      bytes = static_cast<const uint8_t*>(kbuf) + d.offset_;
+    else if (!kbuf && params)
+      bytes = static_cast<const uint8_t*>(params[param_idx]);
+    param_idx++;
+    if (d.offset_ % sizeof(uint64_t) == 0) pinned_scan_locked(bytes, d.size_);
+  }
+}
+
+static void pinned_finish_snapshots() {
+  for (HostSnap& s : t_snaps) {
+    if (s.copy) {
+      s.hash = hrr_cap::writer::write_blob(s.copy.get(), s.size);
+      s.copy.reset();
+    } else if (!s.cached) {
+      continue;
+    }
+    // A snapshot write_blob() leaves out, as over HIP_HRR_CAPTURE_MAX_BLOB_MB, is
+    // recorded with hash {0,0} on every launch. Replay refuses such a launch
+    // unless it goes into a stream capture, where it restores nothing.
+    s.record = !(s.hash.lo || s.hash.hi) || s.hash.lo != s.last.lo || s.hash.hi != s.last.hi;
+  }
+}
+
+// One kernel of a graph, resolved before the tracking lock is taken. The
+// exec's GetNodes() is empty until the first launch, so this walks the cloned
+// vertices. The parameter pointers stay valid through the launch.
+struct PinnedGraphKernel {
+  hipFunction_t f = nullptr;
+  void** params = nullptr;
+  void** extra = nullptr;
+};
+
+static void pinned_collect_graph(hip::Graph* graph, std::vector<hip::Graph*>& seen,
+                                 std::vector<PinnedGraphKernel>& out) {
+  if (!graph || std::find(seen.begin(), seen.end(), graph) != seen.end()) return;
+  seen.push_back(graph);
+  for (hip::GraphNode* node : graph->GetNodes()) {
+    if (!node) continue;
+    if (node->GetType() == hipGraphNodeTypeKernel) {
+      auto* kn = static_cast<hip::GraphKernelNode*>(node);
+      hipKernelNodeParams kp{};
+      kn->GetParams(&kp);
+      PinnedGraphKernel k;
+      k.f = hip::GraphKernelNode::getFunc(kp, static_cast<unsigned>(kn->GetDeviceId()));
+      k.params = kp.kernelParams;
+      k.extra = kp.extra;
+      out.push_back(k);
+    } else if (node->GetType() == hipGraphNodeTypeGraph) {
+      pinned_collect_graph(static_cast<hip::ChildGraphNode*>(node), seen, out);
+    }
+  }
+}
+
 // Takes the snapshot of one launch before the real call and drops it after,
-// whether or not the launch was recorded.
+// whether or not the launch was recorded. A graph exec is snapshotted the same
+// way, at hipGraphLaunch.
 struct PinnedSnapshot {
   PinnedSnapshot(hipFunction_t f, void** params, void** extra,
                  const void* kbuf = nullptr, size_t ksz = 0) {
     t_snaps.clear();
-    if (!f || !hrr_host_snapshots_enabled() || g_pinned_count.load(std::memory_order_relaxed) == 0)
-      return;
-    if (!params && !kbuf && extra) parse_kernel_extra(extra, kbuf, ksz);
-    const amd::KernelSignature& sig = hip::asKernel(f)->signature();
+    if (!f || !pinned_snapshots_active()) return;
     std::unique_lock<std::mutex> lk(g_pinned_mu);
-    uint32_t param_idx = 0;
-    for (uint32_t i = 0; i < sig.numParametersAll(); i++) {
-      const auto& d = sig.at(i);
-      if (d.info_.hidden_) continue;
-      const uint8_t* bytes = nullptr;
-      if (kbuf && d.offset_ + d.size_ <= ksz)
-        bytes = static_cast<const uint8_t*>(kbuf) + d.offset_;
-      else if (!kbuf && params)
-        bytes = static_cast<const uint8_t*>(params[param_idx]);
-      param_idx++;
-      if (d.offset_ % sizeof(uint64_t) == 0) pinned_scan_locked(bytes, d.size_);
-    }
+    pinned_scan_function_locked(f, params, extra, kbuf, ksz);
     lk.unlock();
-    for (HostSnap& s : t_snaps) {
-      if (!s.copy) continue;
-      s.hash = hrr_cap::writer::write_blob(s.copy.get(), s.size);
-      s.copy.reset();
-      // A snapshot write_blob() leaves out, as over HIP_HRR_CAPTURE_MAX_BLOB_MB, is
-      // recorded with hash {0,0} on every launch. Replay refuses such a launch
-      // unless it goes into a stream capture, where it restores nothing.
-      s.record = !(s.hash.lo || s.hash.hi) || s.hash.lo != s.last.lo || s.hash.hi != s.last.hi;
-    }
+    pinned_finish_snapshots();
+  }
+  explicit PinnedSnapshot(hipGraphExec_t exec) {
+    t_snaps.clear();
+    if (!exec || !pinned_snapshots_active()) return;
+    auto* gexec = reinterpret_cast<hip::GraphExecBase*>(exec);
+    if (!hip::GraphExecBase::isGraphExecValid(gexec)) return;
+    std::vector<hip::Graph*> seen;
+    std::vector<PinnedGraphKernel> kernels;
+    pinned_collect_graph(gexec, seen, kernels);
+    std::unique_lock<std::mutex> lk(g_pinned_mu);
+    for (const PinnedGraphKernel& k : kernels)
+      pinned_scan_function_locked(k.f, k.params, k.extra);
+    lk.unlock();
+    pinned_finish_snapshots();
   }
   ~PinnedSnapshot() { t_snaps.clear(); }
 };
+
+// The stream a launch ran on. The null stream of an _spt call and
+// hipStreamPerThread both mean this thread's default stream.
+static hipStream_t pinned_stream(hipStream_t stream, bool spt) {
+  if (spt && !stream) stream = hipStreamPerThread;
+  hip::getStreamPerThread(stream);
+  return stream;
+}
+
+// Replay restores a record on its launch's stream, so a launch on another
+// stream needs its own record.
+static void pinned_mark_stream(hipStream_t stream) {
+  for (HostSnap& s : t_snaps)
+    if (s.last_stream != stream && (s.hash.lo || s.hash.hi)) s.record = true;
+}
+
+static uint16_t pinned_record_count() {
+  return static_cast<uint16_t>(std::count_if(
+      t_snaps.begin(), t_snaps.end(), [](const HostSnap& s) { return s.record; }));
+}
+
+static bool pinned_stream_is_capturing(hipStream_t stream) {
+  hipStream_t cs = stream;
+  hip::getStreamPerThread(cs);
+  return cs && cs != hipStreamLegacy &&
+         reinterpret_cast<hip::Stream*>(cs)->GetCaptureStatus() != hipStreamCaptureStatusNone;
+}
+
+// Writes the event and updates each allocation's last record under the same
+// lock, so both happen in one order. A launch under stream capture updates
+// nothing: replay restores nothing for it, and the graph launch records the bytes.
+static void pinned_write_event(uint16_t api, void* payload, uint32_t size,
+                               hipStream_t stream) {
+  const bool capturing = pinned_stream_is_capturing(stream);
+  std::unique_lock<std::mutex> lk(g_pinned_mu, std::defer_lock);
+  if (!t_snaps.empty()) lk.lock();
+  hrr_cap::writer::write_event_raw(api, reinterpret_cast<hrr_event_header*>(payload), size);
+  for (const HostSnap& s : t_snaps) {
+    auto it = g_pinned.find(s.base);
+    if (s.record && !capturing && it != g_pinned.end()) {
+      it->second.last        = s.hash;
+      it->second.last_stream = stream;
+    }
+  }
+}
 
 // The kernel behind a host stub, looked up before the launch only when there
 // is pinned memory to snapshot, without changing the application's last error.
@@ -567,12 +688,11 @@ static void serialize_kernel_launch(
       if (!sig.at(i).info_.hidden_) num_args++;
   }
   push_u16(num_args);
-  // Replay restores a record on its launch's stream, so a launch on another
-  // stream than the last record's needs its own.
-  for (HostSnap& s : t_snaps)
-    if (s.last_stream != stream && (s.hash.lo || s.hash.hi)) s.record = true;
-  push_u16(static_cast<uint16_t>(std::count_if(
-      t_snaps.begin(), t_snaps.end(), [](const HostSnap& s) { return s.record; })));
+  const hipStream_t pin_stream =
+      pinned_stream(stream, api_id == HRR_API_HIPLAUNCHKERNEL_SPT ||
+                                api_id == HRR_API_HIPLAUNCHCOOPERATIVEKERNEL_SPT);
+  pinned_mark_stream(pin_stream);
+  push_u16(pinned_record_count());
 
   // HIP_HRR_DEBUG_ARGS dumps every captured arg (kind, size, full bytes,
   // detected embedded-pointer offsets) — used to confirm pointer layout. Use the
@@ -710,22 +830,7 @@ static void serialize_kernel_launch(
   // A record becomes the allocation's last only once its event is written, in
   // the same order as the events. Replay restores nothing for a launch into a
   // stream capture, so a record written for one does not become the last.
-  hipStream_t cs = stream;
-  hip::getStreamPerThread(cs);
-  const bool capturing = cs && cs != hipStreamLegacy &&
-      reinterpret_cast<hip::Stream*>(cs)->GetCaptureStatus() != hipStreamCaptureStatusNone;
-  std::unique_lock<std::mutex> lk(g_pinned_mu, std::defer_lock);
-  if (!t_snaps.empty()) lk.lock();
-  hrr_cap::writer::write_event_raw(api_id,
-                                   reinterpret_cast<hrr_event_header*>(payload.data()),
-                                   static_cast<uint32_t>(payload.size()));
-  for (const HostSnap& s : t_snaps) {
-    auto it = g_pinned.find(s.base);
-    if (s.record && !capturing && it != g_pinned.end()) {
-      it->second.last        = s.hash;
-      it->second.last_stream = stream;
-    }
-  }
+  pinned_write_event(api_id, payload.data(), static_cast<uint32_t>(payload.size()), pin_stream);
 }
 
 static hrr_cap::Hash128 kernel_code_object_hash(amd::Kernel* kernel);
@@ -1806,16 +1911,59 @@ hipError_t capture_hipHostUnregister(void* hostPtr) {
   return r;
 }
 
-// hipHostMalloc, hipMallocHost and the frees are recorded by generated shims.
-// These wrappers sit in front of them in g_cap_table and keep g_pinned current;
-// hipFree can release pinned memory too. hipHostAlloc and hipMemAllocHost are
-// not tracked: replay makes no buffer for them.
+// A graph launch event is the fixed hrr_args struct, u16 num_snapshots, then
+// one 41-byte record per snapshot, in the kernel-launch layout.
+template <typename Args>
+static hipError_t capture_graph_launch(uint16_t api, hipGraphExec_t graphExec, hipStream_t stream,
+                                      hipError_t (*real)(hipGraphExec_t, hipStream_t)) {
+  PinnedSnapshot snap(graphExec);
+  hipError_t r = real(graphExec, stream);
+  if (r != hipSuccess) return r;
+  Args a{};
+  a.ret       = static_cast<int32_t>(r);
+  a.graphExec = reinterpret_cast<uint64_t>(graphExec);
+  a.stream    = reinterpret_cast<uint64_t>(stream);
+  const hipStream_t pin_stream = pinned_stream(stream, api == HRR_API_HIPGRAPHLAUNCH_SPT);
+  pinned_mark_stream(pin_stream);
+  const uint16_t n = pinned_record_count();
+  std::vector<uint8_t> payload(sizeof(a));
+  std::memcpy(payload.data(), &a, sizeof(a));
+  payload.push_back(static_cast<uint8_t>(n));
+  payload.push_back(static_cast<uint8_t>(n >> 8));
+  for (const HostSnap& s : t_snaps) {
+    if (!s.record) continue;
+    auto push_u64 = [&](uint64_t v) {
+      for (int i = 0; i < 8; i++) payload.push_back(static_cast<uint8_t>(v >> (i * 8)));
+    };
+    push_u64(s.base); push_u64(0); push_u64(s.size);
+    push_u64(s.hash.lo); push_u64(s.hash.hi);
+    payload.push_back(0);
+  }
+  pinned_write_event(api, payload.data(), static_cast<uint32_t>(payload.size()), pin_stream);
+  return r;
+}
+
+hipError_t capture_hipGraphLaunch(hipGraphExec_t graphExec, hipStream_t stream) {
+  return capture_graph_launch<hrr_args_hipGraphLaunch>(
+      HRR_API_HIPGRAPHLAUNCH, graphExec, stream, g_real_table.hipGraphLaunch_fn);
+}
+
+hipError_t capture_hipGraphLaunch_spt(hipGraphExec_t graphExec, hipStream_t stream) {
+  return capture_graph_launch<hrr_args_hipGraphLaunch_spt>(
+      HRR_API_HIPGRAPHLAUNCH_SPT, graphExec, stream, g_real_table.hipGraphLaunch_spt_fn);
+}
+
+// hipHostMalloc, hipMallocHost, hipHostAlloc, hipMemAllocHost and the frees are
+// recorded by generated shims. These wrappers sit in front of them in
+// g_cap_table and keep g_pinned current; hipFree can release pinned memory too.
 namespace {
-decltype(HipDispatchTable::hipHostMalloc_fn) g_next_hipHostMalloc = nullptr;
-decltype(HipDispatchTable::hipMallocHost_fn) g_next_hipMallocHost = nullptr;
-decltype(HipDispatchTable::hipHostFree_fn)   g_next_hipHostFree   = nullptr;
-decltype(HipDispatchTable::hipFreeHost_fn)   g_next_hipFreeHost   = nullptr;
-decltype(HipDispatchTable::hipFree_fn)       g_next_hipFree       = nullptr;
+decltype(HipDispatchTable::hipHostMalloc_fn)  g_next_hipHostMalloc  = nullptr;
+decltype(HipDispatchTable::hipMallocHost_fn)  g_next_hipMallocHost  = nullptr;
+decltype(HipDispatchTable::hipHostAlloc_fn)   g_next_hipHostAlloc   = nullptr;
+decltype(HipDispatchTable::hipMemAllocHost_fn) g_next_hipMemAllocHost = nullptr;
+decltype(HipDispatchTable::hipHostFree_fn)    g_next_hipHostFree    = nullptr;
+decltype(HipDispatchTable::hipFreeHost_fn)    g_next_hipFreeHost    = nullptr;
+decltype(HipDispatchTable::hipFree_fn)        g_next_hipFree        = nullptr;
 }  // namespace
 
 static hipError_t pinned_hipHostMalloc(void** ptr, size_t size, unsigned int flags) {
@@ -1825,6 +1973,16 @@ static hipError_t pinned_hipHostMalloc(void** ptr, size_t size, unsigned int fla
 }
 static hipError_t pinned_hipMallocHost(void** ptr, size_t size) {
   hipError_t r = g_next_hipMallocHost(ptr, size);
+  if (r == hipSuccess && ptr) pinned_track(*ptr, size);
+  return r;
+}
+static hipError_t pinned_hipHostAlloc(void** ptr, size_t size, unsigned int flags) {
+  hipError_t r = g_next_hipHostAlloc(ptr, size, flags);
+  if (r == hipSuccess && ptr) pinned_track(*ptr, size);
+  return r;
+}
+static hipError_t pinned_hipMemAllocHost(void** ptr, size_t size) {
+  hipError_t r = g_next_hipMemAllocHost(ptr, size);
   if (r == hipSuccess && ptr) pinned_track(*ptr, size);
   return r;
 }
@@ -1841,6 +1999,8 @@ static void pinned_wrap_table() {
   g_cap_table.api##_fn = pinned_##api;
   HRR_PINNED_WRAP(hipHostMalloc)
   HRR_PINNED_WRAP(hipMallocHost)
+  HRR_PINNED_WRAP(hipHostAlloc)
+  HRR_PINNED_WRAP(hipMemAllocHost)
   HRR_PINNED_WRAP(hipHostFree)
   HRR_PINNED_WRAP(hipFreeHost)
   HRR_PINNED_WRAP(hipFree)

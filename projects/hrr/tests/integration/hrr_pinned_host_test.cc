@@ -153,6 +153,76 @@ TEST_CASE("Unit_HRR_PinnedHostMalloc_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipHostFree(in));
 }
 
+TEST_CASE("Unit_HRR_PinnedHostAlloc_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  int* in = nullptr;
+  HRR_HIP_CHECK(hipHostAlloc(reinterpret_cast<void**>(&in), kPinnedN * sizeof(int),
+                            hipHostAllocMapped));
+  hrr_pinned_workload(in);
+  HRR_HIP_CHECK(hipHostFree(in));
+}
+
+TEST_CASE("Unit_HRR_PinnedMemAllocHost_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  int* in = nullptr;
+  HRR_HIP_CHECK(hipMemAllocHost(reinterpret_cast<void**>(&in), kPinnedN * sizeof(int)));
+  hrr_pinned_workload(in);
+  HRR_HIP_CHECK(hipHostFree(in));
+}
+
+// The host changes the buffer between two launches of a recorded graph. The
+// kernel reads the bytes present at each hipGraphLaunch.
+TEST_CASE("Unit_HRR_PinnedHostGraph_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  int *in = nullptr, *dev_in = nullptr, *dout = nullptr;
+  HRR_HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&in), kPinnedN * sizeof(int), 0));
+  HRR_HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&dev_in), in, 0));
+  HRR_HIP_CHECK(hipMalloc(&dout, kPinnedN * sizeof(int)));
+  for (int i = 0; i < kPinnedN; ++i) in[i] = 1;
+  hipStream_t s = nullptr;
+  hipGraph_t g = nullptr;
+  hipGraphExec_t exec = nullptr;
+  HRR_HIP_CHECK(hipStreamCreate(&s));
+  HRR_HIP_CHECK(hipStreamBeginCapture(s, hipStreamCaptureModeGlobal));
+  hipLaunchKernelGGL(hrr_pinned_triple, dim3(1), dim3(kPinnedN), 0, s, dout, dev_in, kPinnedN);
+  HRR_HIP_CHECK(hipGetLastError());
+  HRR_HIP_CHECK(hipStreamEndCapture(s, &g));
+  HRR_HIP_CHECK(hipGraphInstantiate(&exec, g, nullptr, nullptr, 0));
+  std::vector<int> hout(kPinnedN);
+  for (int it = 0; it < 2; ++it) {
+    for (int i = 0; i < kPinnedN; ++i) in[i] = (it + 1) * 1000 + i;
+    HRR_HIP_CHECK(hipGraphLaunch(exec, s));
+    HRR_HIP_CHECK(hipStreamSynchronize(s));
+    HRR_HIP_CHECK(hipMemcpy(hout.data(), dout, kPinnedN * sizeof(int), hipMemcpyDeviceToHost));
+    for (int i = 0; i < kPinnedN; ++i) REQUIRE(hout[i] == ((it + 1) * 1000 + i) * 3 + 1);
+  }
+  HRR_HIP_CHECK(hipGraphExecDestroy(exec));
+  HRR_HIP_CHECK(hipGraphDestroy(g));
+  HRR_HIP_CHECK(hipStreamDestroy(s));
+  HRR_HIP_CHECK(hipFree(dout));
+  HRR_HIP_CHECK(hipHostFree(in));
+}
+
+// The input alternates A, B, A, B. Capture already holds the third and fourth
+// blobs but must still record them, since each differs from the record before.
+TEST_CASE("Unit_HRR_PinnedHostRevisit_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  int *in = nullptr, *dev_in = nullptr, *dout = nullptr;
+  HRR_HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&in), kPinnedN * sizeof(int), 0));
+  HRR_HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&dev_in), in, 0));
+  HRR_HIP_CHECK(hipMalloc(&dout, kPinnedN * sizeof(int)));
+  std::vector<int> hout(kPinnedN);
+  for (int it = 0; it < kPinnedIters; ++it) {
+    for (int i = 0; i < kPinnedN; ++i) in[i] = (it % 2) * 1000 + i;
+    hipLaunchKernelGGL(hrr_pinned_triple, dim3(1), dim3(kPinnedN), 0, 0, dout, dev_in, kPinnedN);
+    HRR_HIP_CHECK(hipGetLastError());
+    HRR_HIP_CHECK(hipMemcpy(hout.data(), dout, kPinnedN * sizeof(int), hipMemcpyDeviceToHost));
+    for (int i = 0; i < kPinnedN; ++i) REQUIRE(hout[i] == ((it % 2) * 1000 + i) * 3 + 1);
+  }
+  HRR_HIP_CHECK(hipFree(dout));
+  HRR_HIP_CHECK(hipHostFree(in));
+}
+
 TEST_CASE("Unit_HRR_PinnedHostStruct_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
   int* in = nullptr;
@@ -303,6 +373,8 @@ TEST_CASE("Unit_HRR_PinnedHostFork_Direct", "[.][hrr-direct]") {
 // is nothing to write back and the checks fail.
 HRR_TEST_CASE(Unit_HRR_PinnedHostRoundtrip) {
   for (const char* direct : {"Unit_HRR_PinnedHostMalloc_Direct",
+                             "Unit_HRR_PinnedHostAlloc_Direct",
+                             "Unit_HRR_PinnedMemAllocHost_Direct",
                              "Unit_HRR_PinnedMallocHost_Direct",
                              "Unit_HRR_PinnedHostModule_Direct",
                              "Unit_HRR_PinnedHostRegister_Direct",
@@ -335,6 +407,36 @@ HRR_TEST_CASE(Unit_HRR_PinnedHostRoundtrip) {
       }
     }
   }
+}
+
+// Replay restores both graph launches, not the launch that only recorded the node.
+HRR_TEST_CASE(Unit_HRR_PinnedHostGraphRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_pinned_host_graph"};
+  hrr_capture_direct("Unit_HRR_PinnedHostGraph_Direct", cap.path, 5);
+  auto [ret, out] = hrr_playback_env(cap.path, {});
+  INFO("Playback exit " << ret << ", stdout:\n" << out);
+  int pass = 0, fail = 0;
+  REQUIRE(hrr_parse_d2h_summary(out, pass, fail));
+  CHECK(ret == 0);
+  CHECK(pass == 2);
+  CHECK(fail == 0);
+  CHECK(out.find("Pinned host snapshots: 2 restored, 0 refused, 1 skipped (graph capture)") !=
+        std::string::npos);
+}
+
+// Replay restores every launch. Without the third and fourth records it
+// would leave B in the buffer for the third launch.
+HRR_TEST_CASE(Unit_HRR_PinnedHostRevisitRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_pinned_host_revisit"};
+  hrr_capture_direct("Unit_HRR_PinnedHostRevisit_Direct", cap.path, 5);
+  auto [ret, out] = hrr_playback_env(cap.path, {});
+  INFO("Playback exit " << ret << ", stdout:\n" << out);
+  int pass = 0, fail = 0;
+  REQUIRE(hrr_parse_d2h_summary(out, pass, fail));
+  CHECK(ret == 0);
+  CHECK(pass == kPinnedIters);
+  CHECK(fail == 0);
+  CHECK(out.find("Pinned host snapshots: 4 restored, 0 refused, 0 skipped") != std::string::npos);
 }
 
 // Replay queues each restore on its launch's stream rather than waiting for
