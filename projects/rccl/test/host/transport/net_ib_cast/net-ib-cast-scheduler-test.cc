@@ -148,7 +148,7 @@ TEST_F(NetIbCastSchedulerMicrotest, InitParms_Disabled_KeepsDefaultsAndIgnoresTh
   SetMicroEnv("RCCL_IB_QP_SCHED_WEIGHT", "0.5");
   const ncclIbQpSchedParms p = Init();
   EXPECT_FALSE(p.enable);
-  EXPECT_TRUE(p.doWrr);
+  EXPECT_FALSE(p.doWrr);
   EXPECT_EQ(p.updateInterval, QP_SCHED_UPDATE_DEF);
   EXPECT_EQ(p.splitDataMin, (uint32_t)QP_SCHED_SPLIT_DATA_MIN_DEF);
   EXPECT_EQ(p.weightNew, (double)QP_SCHED_WEIGHT_DEF);
@@ -220,14 +220,24 @@ TEST_F(NetIbCastSchedulerMicrotest, InitParms_SplitData_KeepsWrrWhenTheKnobIsOn)
   EXPECT_TRUE(p.doWrr);
 }
 
-// Pins AICOMRCCL-3077; a fix flips this pin.
-TEST_F(NetIbCastSchedulerMicrotest, InitParms_KnownBug_WrrEnableZeroCannotTurnWrrOff) {
-  params_["IB_SPLIT_DATA_ON_QPS"] = 1;
-  params_["RCCL_IB_QP_SCHED_WRR_ENABLE"] = 0;
-  const ncclIbQpSchedParms p = Init();
-  EXPECT_TRUE(p.splitData);
-  EXPECT_TRUE(p.wrrEnable);
-  EXPECT_TRUE(p.doWrr);
+TEST_F(NetIbCastSchedulerMicrotest, InitParms_WrrHonoursTheEffectiveSchedulingMode) {
+  for (int enabled : {0, 1}) {
+    for (int splitData : {0, 1}) {
+      for (int wrrEnabled : {0, 1}) {
+        SCOPED_TRACE(enabled);
+        SCOPED_TRACE(splitData);
+        SCOPED_TRACE(wrrEnabled);
+        params_["RCCL_IB_QP_SCHED_ENABLE"] = enabled;
+        params_["IB_SPLIT_DATA_ON_QPS"] = splitData;
+        params_["RCCL_IB_QP_SCHED_WRR_ENABLE"] = wrrEnabled;
+        const ncclIbQpSchedParms parms = Init();
+        EXPECT_EQ(parms.enable, enabled != 0);
+        EXPECT_EQ(parms.splitData, splitData != 0);
+        EXPECT_EQ(parms.wrrEnable, wrrEnabled != 0);
+        EXPECT_EQ(parms.doWrr, enabled && (!splitData || wrrEnabled));
+      }
+    }
+  }
 }
 
 class NetIbCastSchedulerLogMicrotest : public NetIbCastSchedulerMicrotest {
