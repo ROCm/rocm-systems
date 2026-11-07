@@ -38,6 +38,25 @@ void ncclTopoFree(struct ncclTopoSystem* system);
 ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* comm);
 ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm);
 ncclResult_t ncclTopoComputeP2pChannelsPerPeer(struct ncclComm* comm);
+int rcclP2pCeChannelsPerPeerCap(int current, int pool, bool isGfx1250, bool useMemcpy, int configuredCap);
+// Collective graphs keep the kernel P2P transport even when NCCL_P2P_USE_CUDA_MEMCPY is set.
+inline bool rcclP2pUseCeForConnection(bool useMemcpy, bool collectiveGraph) {
+  return useMemcpy && !collectiveGraph;
+}
+// Copy Engine steps must keep the int step and buffer sizes of the connectors and the proxy, and the
+// planner's 32-step part bound, from overflowing.
+constexpr int64_t kRcclP2pCeMaxStepSize = 32 << 20;
+inline size_t rcclP2pCeStepSizePolicy(int cudaArch, bool useMemcpy, int64_t configured, size_t fallback) {
+  if (cudaArch != 1250 || !useMemcpy || configured <= (int64_t)fallback) return fallback;
+  return configured < kRcclP2pCeMaxStepSize ? configured : kRcclP2pCeMaxStepSize;
+}
+inline bool rcclP2pCeSharesProxyStream(int cudaArch) {
+  return cudaArch == 1250;
+}
+// Only Copy Engine connectors have steps above the default SIMPLE step. connStepSize <= 0 means unknown.
+inline int rcclP2pSimpleStepSize(int p2pChunkSize, int defaultStepSize, int connStepSize) {
+  return connStepSize > defaultStepSize ? connStepSize : p2pChunkSize;
+}
 // Resolved NCCL_MAX_P2P_NCHANNELS (MAXCHANNELS when unset, else clamped user value).
 int ncclMaxP2pNchannels();
 // Upper bound for p2pnChannels: 64, MAXCHANNELS on single-node gfx1250, or the
