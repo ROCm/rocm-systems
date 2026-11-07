@@ -37,8 +37,10 @@
 #include <cstdint>
 #include <future>
 #include <mutex>
+#include <random>
 #include <shared_mutex>
 #include <thread>
+#include <vector>
 
 namespace range_replay = ::rocprofiler::range_replay;
 
@@ -245,6 +247,45 @@ TEST(range_replay_host, overlapping_regions_restore_the_earliest_capture)
     wide.fill(0);
     range_replay::host::restore_regions(regions);
     EXPECT_EQ(wide, (std::array<uint32_t, 4>{1, 2, 30, 4}));
+}
+
+// Random registrations over a buffer the range keeps writing: every byte a region covers is
+// restored to its value at the earliest registration covering it, and bytes no region covers are
+// untouched.
+TEST(range_replay_host, random_overlapping_regions_restore_every_byte_from_its_earliest_capture)
+{
+    constexpr size_t width = 96;
+    auto             rng   = std::mt19937{7};
+    for(int trial = 0; trial < 500; ++trial)
+    {
+        auto buffer   = std::vector<uint8_t>(width);
+        auto earliest = std::vector<int>(width, -1);
+        for(auto& byte : buffer)
+            byte = static_cast<uint8_t>(rng());
+
+        auto regions = std::vector<range_replay::host_region_t>{};
+        auto expect  = std::vector<uint8_t>(width);
+        for(auto count = 1 + rng() % 6; count > 0; --count)
+        {
+            const auto begin = rng() % width;
+            const auto size  = 1 + rng() % (width - begin);
+            regions.emplace_back(range_replay::host::capture_region(buffer.data() + begin, size));
+            for(size_t i = begin; i < begin + size; ++i)
+            {
+                if(earliest[i] >= 0) continue;
+                earliest[i] = static_cast<int>(regions.size());
+                expect[i]   = buffer[i];
+            }
+            for(auto& byte : buffer)
+                byte = static_cast<uint8_t>(rng());
+        }
+
+        const auto untouched = buffer;
+        range_replay::host::restore_regions(regions);
+        for(size_t i = 0; i < width; ++i)
+            ASSERT_EQ(buffer[i], earliest[i] >= 0 ? expect[i] : untouched[i])
+                << "trial " << trial << " byte " << i;
+    }
 }
 
 TEST(range_replay_host, regions_tracked_inside_a_range_are_captured_on_the_first_pass_only)
