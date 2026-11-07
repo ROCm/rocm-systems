@@ -122,7 +122,9 @@ class MemoryRegion : public core::MemoryRegion {
 
   void Trim() const;
 
-  HSAuint64 GetCacheSize() const { return fragment_allocator_.cache_size(); }
+  HSAuint64 GetCacheSize() const {
+    return fragment_allocator_.cache_size() + executable_fragment_allocator_.cache_size();
+  }
 
   __forceinline bool IsLocalMemory() const {
     return ((mem_props_.HeapType == HSA_HEAPTYPE_FRAME_BUFFER_PRIVATE) ||
@@ -170,10 +172,19 @@ class MemoryRegion : public core::MemoryRegion {
 
   __forceinline const HsaMemFlags &mem_flags() const { return mem_flag_; }
 
-  void *fragment_alloc(size_t size) const {
-    return fragment_allocator_.alloc(size);
+  bool fragment_alloc_supported(size_t size, AllocateFlags flags) const {
+    if ((flags & ~(AllocateRestrict | AllocateExecutable)) != 0) return false;
+    // Large executable allocations keep their direct allocation/free behavior;
+    // do not retain a large code/command buffer in the fragment cache.
+    return !(flags & AllocateExecutable) ||
+           (IsLocalMemory() && size <= fragment_allocator_.default_block_size());
   }
-  bool fragment_free(void *mem) const { return fragment_allocator_.free(mem); }
+  void* fragment_alloc(size_t size, bool executable = false) const {
+    return executable ? executable_fragment_allocator_.alloc(size) : fragment_allocator_.alloc(size);
+  }
+  bool fragment_free(void* mem) const {
+    return fragment_allocator_.free(mem) || executable_fragment_allocator_.free(mem);
+  }
 
 private:
   const HsaMemoryProperties mem_props_;
@@ -207,22 +218,20 @@ private:
   class BlockAllocator {
    private:
     MemoryRegion& region_;
+    AllocateFlags flags_;
     static const size_t block_size_ = 2 * 1024 * 1024;  // 2MB blocks.
    public:
-    explicit BlockAllocator(MemoryRegion& region) : region_(region) {}
+    explicit BlockAllocator(MemoryRegion& region, AllocateFlags flags = AllocateNoFlags)
+        : region_(region), flags_(flags) {}
     void* alloc(size_t request_size, size_t& allocated_size) const;
-    void free(void* ptr, size_t length) const {
-      // Fragment blocks are KFD/virtio-only; for those backends the driver handle
-      // word is the block's virtual address, which routes the fragment-allocator probe.
-      core::DriverMemoryHandle handle{};
-      handle.handle = reinterpret_cast<uint64_t>(ptr);
-      handle.size = length;
-      region_.FreeImpl(handle);
-    }
+    void free(void* ptr, size_t length) const;
     size_t block_size() const { return block_size_; }
   };
 
   mutable SimpleHeap<BlockAllocator> fragment_allocator_;
+  // Never give an ordinary allocation executable permissions by sharing its
+  // backing block. Both heaps use the owning agent's existing memory lock.
+  mutable SimpleHeap<BlockAllocator> executable_fragment_allocator_;
 };
 
 }  // namespace amd

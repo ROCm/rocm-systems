@@ -344,13 +344,18 @@ hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
   if (!kmt_alloc_flags.ui32.NoAddress) {
     bool subAllocEnabled =
         !core::Runtime::runtime_singleton_->flag().disable_fragment_alloc();
-    // Avoid modifying executable or queue allocations.
+    // Other special allocations (queues, code objects, ASAN, direct allocations,
+    // etc.) retain their original allocation path and requirements.
     bool useSubAlloc = subAllocEnabled;
-    useSubAlloc &=
-        ((alloc_flags & (~core::MemoryRegion::AllocateRestrict)) == 0);
+    useSubAlloc &= m_region.fragment_alloc_supported(size, alloc_flags);
+    // Keep the existing DXG executable-buffer allocation contract.
+    if ((alloc_flags & core::MemoryRegion::AllocateExecutable) &&
+        core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
+      useSubAlloc = false;
+    }
 
     if (useSubAlloc) {
-      mem = m_region.fragment_alloc(size);
+      mem = m_region.fragment_alloc(size, alloc_flags & core::MemoryRegion::AllocateExecutable);
 
       // Suballocated fragments may hold stale data from previously freed
       // fragments, unlike dedicated BOs which are backed by fresh (zeroed)
