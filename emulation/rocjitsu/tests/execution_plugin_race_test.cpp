@@ -27,7 +27,17 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand_types.h"
 
+#include <gtest/gtest.h>
+
+#include <algorithm>
+#include <array>
+#include <cstdint>
+#include <functional>
 #include <map>
+#include <memory>
+#include <span>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -70,6 +80,7 @@ uint32_t legacy_wait_word(rj_code_arch_t arch, uint8_t vmcnt, uint8_t lgkmcnt) {
   return 0xbf8c0070u | (vmcnt & 0xfu) | ((vmcnt & 0x30u) << 10) | (uint32_t{lgkmcnt} << 8);
 }
 
+/// Applies the race detector's register checks to the VGPR reads and writes of one wave.
 class MfmaRacePlugin : public ExecutionPlugin {
 public:
   MfmaRacePlugin() : ExecutionPlugin("mfma_race_probe") {}
@@ -95,10 +106,24 @@ public:
     state_->checkVgprReadLanes(static_cast<int>(logical_reg), lane_mask, byte_mask);
   }
 
+  void onAmdgpuWriteVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg,
+                              uint64_t lane_mask, uint8_t byte_mask) override {
+    if (wf != wf_ || !state_)
+      return;
+    uint32_t logical_reg = physical_reg - wf->vgpr_alloc().base;
+    state_->checkVgprWriteLanes(static_cast<int>(logical_reg), lane_mask, byte_mask);
+  }
+
   void registerOutstandingLoad(uint32_t logical_reg, uint64_t exec_mask, uint8_t byte_mask = 0xF) {
     ASSERT_NE(state_, nullptr);
     state_->registerEvent(testInstruction(/*pc=*/0x1000), MemoryEventType::GLOBAL_TO_VGPR,
                           {logical_reg}, exec_mask, byte_mask);
+  }
+
+  [[nodiscard]] bool raced_on(uint32_t logical_reg) const {
+    return std::ranges::any_of(violations, [&](const RaceViolation &v) {
+      return v.space == RaceViolation::Space::VGPR && v.index == static_cast<int>(logical_reg);
+    });
   }
 
   std::vector<RaceViolation> violations;
@@ -2957,6 +2982,108 @@ TEST(ExecutionPluginTest, MfmaFastPathReadHookReportsRace) {
     EXPECT_EQ(violation.space, RaceViolation::Space::VGPR);
     EXPECT_EQ(violation.index, static_cast<int>(S0));
     EXPECT_EQ(violation.lane, 0);
+  }
+}
+
+namespace mfma_race {
+
+constexpr uint32_t A = 0, B = 16, C = 32, D = 64;
+using Run = std::function<void(ComputeUnitCore &, uint32_t vb, uint32_t acc)>;
+
+/// Runs @p run after an outstanding load to one lane of @p reg and reports whether the race
+/// detector flagged that register.
+bool races_on(const Run &run, uint32_t reg, uint32_t lane, uint32_t acc, bool force_scalar) {
+  PluginFixture f;
+  f.initialize(/*num_wf_slots=*/1);
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto plugin = std::make_unique<MfmaRacePlugin>();
+  auto *race_plugin = plugin.get();
+  f.plugin_group_->add(std::move(plugin));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+  auto *wf = f.cu()->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  EXPECT_NE(wf, nullptr);
+  if (!wf)
+    return false;
+  std::array<amdgpu::Wavefront *, 1> waves{wf};
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(/*dispatch_id=*/1, /*wg_id=*/0, 256, 104, waves);
+  race_plugin->registerOutstandingLoad(reg, /*exec_mask=*/uint64_t{1} << lane);
+  util::set_force_scalar_for_testing(force_scalar);
+  run(*f.cu(), wf->vgpr_alloc().base, acc);
+  util::set_force_scalar_for_testing(false);
+  return race_plugin->raced_on(reg);
+}
+
+} // namespace mfma_race
+
+// Each operand range is observed through its last register and lane, so a pending load into
+// A, B or a VGPR accumulator, or under the destination, is a race on both MFMA paths.
+TEST(ExecutionPluginTest, MfmaSnapshotsReportRacesOnEveryOperandRegister) {
+  using namespace mfma_race;
+  struct ForceScalarGuard {
+    bool old = util::force_scalar();
+    ~ForceScalarGuard() { util::set_force_scalar_for_testing(old); }
+  } guard;
+  struct Case {
+    const char *name;
+    uint32_t a_regs, b_regs, d_regs;
+    mfma_race::Run run;
+  };
+  const Case cases[] = {
+      {"f64 16x16x4", 2, 2, 8,
+       [](ComputeUnitCore &cu, uint32_t vb, uint32_t acc) {
+         exec_f64(cu, 16, 16, 4, 1, vb + D, vb + A, vb + B, vb + C, acc);
+       }},
+      {"i8 16x16x64", 4, 4, 4,
+       [](ComputeUnitCore &cu, uint32_t vb, uint32_t acc) {
+         exec_i32_i8(cu, 16, 16, 64, 1, vb + D, vb + A, vb + B, vb + C, acc);
+       }},
+      {"fp8 x fp4 16x16x128", 8, 4, 4,
+       [](ComputeUnitCore &cu, uint32_t vb, uint32_t acc) {
+         dispatch_matrix_fmt_pair(0, 4, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
+           exec_f32_mixed(cu, 16, 16, 128, 1, a_bits, b_bits, vb + D, vb + A, vb + B, vb + C, ea,
+                          eb, acc);
+         });
+       }},
+      {"f32 4x4x1x16", 1, 1, 4,
+       [](ComputeUnitCore &cu, uint32_t vb, uint32_t acc) {
+         exec_f32(cu, 4, 4, 1, 16, 32, vb + D, vb + A, vb + B, vb + C, extract_f32, extract_f32,
+                  acc);
+       }},
+  };
+  for (const Case &test : cases)
+    for (bool force_scalar : {false, true}) {
+      SCOPED_TRACE(testing::Message() << test.name << " force_scalar=" << force_scalar);
+      const auto races = [&](uint32_t reg, uint32_t acc = ACC_FROM_VGPR) {
+        return races_on(test.run, reg, /*lane=*/63, acc, force_scalar);
+      };
+      EXPECT_TRUE(races(A + test.a_regs - 1)) << "A";
+      EXPECT_TRUE(races(B + test.b_regs - 1)) << "B";
+      EXPECT_TRUE(races(C + test.d_regs - 1)) << "accumulator";
+      EXPECT_FALSE(races(C + test.d_regs - 1, /*acc=*/0u)) << "constant accumulator";
+      EXPECT_TRUE(races(D + test.d_regs - 1)) << "destination";
+      EXPECT_FALSE(races(A + test.a_regs)) << "register after A";
+    }
+}
+
+// cbsz/abid and blgp broadcast part of a register; only the lanes they select are read.
+TEST(ExecutionPluginTest, MfmaSnapshotsReportRacesOnlyOnBroadcastLanes) {
+  using namespace mfma_race;
+  struct ForceScalarGuard {
+    bool old = util::force_scalar();
+    ~ForceScalarGuard() { util::set_force_scalar_for_testing(old); }
+  } guard;
+  // cbsz=2 broadcasts A's 16-lane block abid=1 (lanes 16-31); blgp=4 broadcasts B lanes 0-15.
+  const mfma_race::Run run = [](ComputeUnitCore &cu, uint32_t vb, uint32_t acc) {
+    exec_i32_i8(cu, 4, 4, 4, 16, vb + D, vb + A, vb + B, vb + C, acc, /*cbsz=*/2, /*abid=*/1,
+                /*blgp=*/4);
+  };
+  for (bool force_scalar : {false, true}) {
+    SCOPED_TRACE(testing::Message() << "force_scalar=" << force_scalar);
+    EXPECT_TRUE(races_on(run, A, /*lane=*/16, ACC_FROM_VGPR, force_scalar));
+    EXPECT_FALSE(races_on(run, A, /*lane=*/0, ACC_FROM_VGPR, force_scalar));
+    EXPECT_TRUE(races_on(run, B, /*lane=*/15, ACC_FROM_VGPR, force_scalar));
+    EXPECT_FALSE(races_on(run, B, /*lane=*/63, ACC_FROM_VGPR, force_scalar));
   }
 }
 
