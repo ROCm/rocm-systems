@@ -290,31 +290,40 @@ lookup_ipaddr_entry(uintptr_t _addr, unw_context_t* _context_p,
         return std::optional<tim::unwind::processed_entry>{};
     }
 
-    auto _v    = tim::unwind::processed_entry{};
-    _v.address = _entry.address();
-    _v.name    = _entry.template get_name<4096, true>(*_context_p, &_v.offset, &_v.error);
+    auto processed    = tim::unwind::processed_entry{};
+    processed.address = _entry.address();
+#if TIMEMORY_LIBUNWIND_HAS_PROC_NAME_BY_IP == 1
+    constexpr size_t k_name_buffer_size = 4096;
+    processed.name = _entry.template get_name<k_name_buffer_size, true>(
+        *_context_p, &processed.offset, &processed.error);
+#else
+    // unw_get_proc_name requires a cursor, which an address-only entry does not have
+    (void) _context_p;
+    processed.error = -UNW_ENOINFO;
+#endif
 
-    tim::unwind::processed_entry::construct(_v, &_cache_p->files);
+    tim::unwind::processed_entry::construct(processed, &_cache_p->files);
 
-    if(_v.error != 0 && _v.lineinfo)
+    if(processed.error != 0 && processed.lineinfo)
     {
-        auto const _lineinfo = _v.lineinfo.get();
-        if(_lineinfo)
+        auto const lineinfo = processed.lineinfo.get();
+        if(lineinfo)
         {
-            _v.name  = _lineinfo.name;
-            _v.error = 0;
+            processed.name  = lineinfo.name;
+            processed.error = 0;
         }
     }
-    else if(_v.info && _v.info.symbol)
+    else if(processed.info && processed.info.symbol)
     {
-        _v.name  = _v.info.symbol.name;
-        _v.error = 0;
+        processed.name  = processed.info.symbol.name;
+        processed.error = 0;
     }
 
-    _cache_p->entries.emplace(_entry, _v);
+    _cache_p->entries.emplace(_entry, processed);
 
-    return (_v.error == 0) ? std::optional<tim::unwind::processed_entry>{ _v }
-                           : std::optional<tim::unwind::processed_entry>{};
+    return (processed.error == 0)
+               ? std::optional<tim::unwind::processed_entry>{ processed }
+               : std::optional<tim::unwind::processed_entry>{};
 }
 
 template std::optional<tim::unwind::processed_entry>
