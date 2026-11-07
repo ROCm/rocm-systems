@@ -59,6 +59,7 @@
 #include <atomic>
 #include <cctype>
 #include <climits>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -194,16 +195,20 @@ struct PinnedAlloc {
   size_t           size = 0;
   hrr_cap::Hash128 last{};  // blob of the last record, {0,0} before the first
   hipStream_t      last_stream = nullptr;  // and its launch stream
+  unsigned         readers = 0;     // snapshots reading the bytes; a free waits for 0
+  bool             changed = false;  // the last snapshot found bytes not in the archive
 };
 struct HostSnap {
   uint64_t         base = 0, size = 0;
   hrr_cap::Hash128 hash{}, last{};
   hipStream_t      last_stream = nullptr;
-  bool             record = false;  // contents or stream differ from the last record
-  bool             cached = false;  // the archive already holds the blob
-  std::unique_ptr<uint8_t[]> copy;  // the bytes, until hashed and written
+  bool             record = false;   // contents or stream differ from the last record
+  bool             reading = false;  // counted in the allocation's readers
+  bool             changed = false;  // in: the last snapshot's flag; out: this one's
+  bool             taken = false;    // hash names the bytes
 };
-std::mutex                       g_pinned_mu;  // also held while a snapshot hashes
+std::mutex                       g_pinned_mu;
+std::condition_variable          g_pinned_cv;  // signalled when readers drops
 std::map<uintptr_t, PinnedAlloc> g_pinned;
 std::atomic<size_t>              g_pinned_count{0};
 // The pinned allocations the launch this thread is making points into.
@@ -213,28 +218,43 @@ thread_local std::vector<HostSnap> t_snaps;
 static void pinned_track(void* p, size_t size) {
   if (!p || size == 0) return;
   std::lock_guard<std::mutex> lk(g_pinned_mu);
-  g_pinned[reinterpret_cast<uintptr_t>(p)] = PinnedAlloc{size, {}};
+  PinnedAlloc& a = g_pinned[reinterpret_cast<uintptr_t>(p)];
+  const unsigned readers = a.readers;
+  a = PinnedAlloc{};
+  a.size = size;
+  a.readers = readers;
   g_pinned_count.store(g_pinned.size(), std::memory_order_relaxed);
 }
 
-// Called before the memory is released, so no snapshot reads it afterwards.
+// Called before the memory is released. A snapshot reads an allocation
+// without g_pinned_mu, so this waits until no snapshot reads it.
 static void pinned_untrack(void* p) {
   if (!p || g_pinned_count.load(std::memory_order_relaxed) == 0) return;
-  std::lock_guard<std::mutex> lk(g_pinned_mu);
-  g_pinned.erase(reinterpret_cast<uintptr_t>(p));
+  const auto key = reinterpret_cast<uintptr_t>(p);
+  std::unique_lock<std::mutex> lk(g_pinned_mu);
+  g_pinned_cv.wait(lk, [&] {
+    auto it = g_pinned.find(key);
+    return it == g_pinned.end() || it->second.readers == 0;
+  });
+  g_pinned.erase(key);
   g_pinned_count.store(g_pinned.size(), std::memory_order_relaxed);
 }
 
 // fork() takes g_pinned_mu before the writer's locks, the order a launch takes
-// them in, so a child never inherits it held by a snapshot on a thread it does
-// not have. Registered after writer::open() registers the writer's handlers:
-// prepare handlers run in reverse order of registration.
+// them in, so a child never inherits it held by a thread it does not have.
+// The child has none of the threads that were reading allocations, so it
+// clears their counts, or its frees would wait forever. Registered after
+// writer::open() registers the writer's handlers: prepare handlers run in
+// reverse order of registration.
 static void pinned_install_atfork() {
 #ifndef _WIN32
   static std::once_flag once;
   std::call_once(once, [] {
     pthread_atfork([] { g_pinned_mu.lock(); }, [] { g_pinned_mu.unlock(); },
-                   [] { g_pinned_mu.unlock(); });
+                   [] {
+                     for (auto& e : g_pinned) e.second.readers = 0;
+                     g_pinned_mu.unlock();
+                   });
   });
 #endif
 }
@@ -280,29 +300,15 @@ static void pinned_scan_locked(const uint8_t* bytes, size_t sz) {
           "pinned host snapshot",
           "a pinned allocation larger than HIP_HRR_HOST_SNAPSHOT_MAX_MB was not recorded");
     } else {
+      // Read after the lock is released. The count keeps a free from
+      // releasing the memory meanwhile.
       s.last        = it->second.last;
       s.last_stream = it->second.last_stream;
-      // Most launches find bytes the archive already holds. Hash them in
-      // place under the lock, which saves a copy.
-      const auto* src = reinterpret_cast<const void*>(s.base);
-      const hrr_cap::Hash128 h = hrr_cap::writer::hash_bytes(src, s.size);
-      if (hrr_cap::writer::blob_written(h, s.size)) {
-        s.hash   = h;
-        s.cached = true;
-        t_snaps.push_back(std::move(s));
-        continue;
-      }
-      // New bytes are copied and written after the lock. The host may change
-      // the buffer meanwhile, so the blob must come from the copy.
-      s.copy.reset(new (std::nothrow) uint8_t[s.size]);
-      if (s.copy) {
-        std::memcpy(s.copy.get(), src, s.size);
-      } else {
-        hrr_cap::writer::note_unreplayable("pinned host snapshot",
-                                           "no memory to copy a pinned allocation");
-      }
+      s.changed     = it->second.changed;
+      s.reading     = true;
+      ++it->second.readers;
     }
-    t_snaps.push_back(std::move(s));
+    t_snaps.push_back(s);
   }
 }
 
@@ -332,18 +338,67 @@ static void pinned_scan_function_locked(hipFunction_t f, void** params, void** e
   }
 }
 
-static void pinned_finish_snapshots() {
-  for (HostSnap& s : t_snaps) {
-    if (s.copy) {
-      s.hash = hrr_cap::writer::write_blob(s.copy.get(), s.size);
-      s.copy.reset();
-    } else if (!s.cached) {
-      continue;
+// Ends this thread's read of an allocation and wakes a free waiting for it.
+static void pinned_end_read(HostSnap& s) {
+  {
+    std::lock_guard<std::mutex> lk(g_pinned_mu);
+    auto it = g_pinned.find(s.base);
+    if (it != g_pinned.end() && it->second.readers != 0) --it->second.readers;
+  }
+  s.reading = false;
+  g_pinned_cv.notify_all();
+}
+
+// Names the bytes of one allocation by a blob, without g_pinned_mu. Most
+// launches find bytes the archive already holds, so they are hashed in place,
+// which saves a copy. Bytes the last snapshot found new are likely new again,
+// so they are copied without that first pass. The read ends before the blob is
+// written, so a free does not wait for the file.
+static void pinned_snapshot_one(HostSnap& s) {
+  const auto* src = reinterpret_cast<const void*>(s.base);
+  if (!s.changed) {
+    const hrr_cap::Hash128 h = hrr_cap::writer::hash_bytes(src, s.size);
+    if (hrr_cap::writer::blob_written(h, s.size)) {
+      pinned_end_read(s);
+      s.hash  = h;
+      s.taken = true;
+      return;
     }
+  }
+  // The host may change the buffer while it is read, so the blob is written
+  // from a copy and named by the copy's hash.
+  std::unique_ptr<uint8_t[]> copy(new (std::nothrow) uint8_t[s.size]);
+  if (copy) std::memcpy(copy.get(), src, s.size);
+  pinned_end_read(s);
+  if (!copy) {
+    s.changed = false;
+    hrr_cap::writer::note_unreplayable("pinned host snapshot",
+                                       "no memory to copy a pinned allocation");
+    return;
+  }
+  const hrr_cap::Hash128 h = hrr_cap::writer::hash_bytes(copy.get(), s.size);
+  s.changed = !hrr_cap::writer::blob_written(h, s.size);
+  s.hash    = s.changed ? hrr_cap::writer::write_blob_hashed(copy.get(), s.size, h) : h;
+  s.taken   = true;
+}
+
+static void pinned_finish_snapshots() {
+  bool any = false;
+  for (HostSnap& s : t_snaps) {
+    if (!s.reading) continue;
+    any = true;
+    pinned_snapshot_one(s);
+    if (!s.taken) continue;
     // A snapshot write_blob() leaves out, as over HIP_HRR_CAPTURE_MAX_BLOB_MB, is
     // recorded with hash {0,0} on every launch. Replay refuses such a launch
     // unless it goes into a stream capture, where it restores nothing.
     s.record = !(s.hash.lo || s.hash.hi) || s.hash.lo != s.last.lo || s.hash.hi != s.last.hi;
+  }
+  if (!any) return;
+  std::lock_guard<std::mutex> lk(g_pinned_mu);
+  for (const HostSnap& s : t_snaps) {
+    auto it = g_pinned.find(s.base);
+    if (s.size != 0 && it != g_pinned.end()) it->second.changed = s.changed;
   }
 }
 

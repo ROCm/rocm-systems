@@ -1880,7 +1880,7 @@ bool blob_written(Hash128 h, size_t len) {
   return g_written_blobs.count(key) != 0 && g_blob_claims.count(key) == 0;
 }
 
-Hash128 write_blob(const void* data, size_t len, bool capped) {
+static Hash128 write_blob_impl(const void* data, size_t len, bool capped, const Hash128* known) {
   reopen_after_fork();
   {
     std::lock_guard<std::mutex> lk(g_file_mu);
@@ -1891,7 +1891,7 @@ Hash128 write_blob(const void* data, size_t len, bool capped) {
     return {};
   }
 
-  Hash128 h = hash_buffer(data, len);
+  const Hash128 h = known ? *known : hash_buffer(data, len);
 
   char hex[33];
   hash_hex(h, hex);
@@ -1939,6 +1939,14 @@ Hash128 write_blob(const void* data, size_t len, bool capped) {
   if (!ok) LogPrintfWarning("[HRR capture] Failed to write blob %s", hex);
   claim.done(ok);
   return h;
+}
+
+Hash128 write_blob(const void* data, size_t len, bool capped) {
+  return write_blob_impl(data, len, capped, nullptr);
+}
+
+Hash128 write_blob_hashed(const void* data, size_t len, Hash128 h, bool capped) {
+  return write_blob_impl(data, len, capped, &h);
 }
 
 // ---------------------------------------------------------------------------

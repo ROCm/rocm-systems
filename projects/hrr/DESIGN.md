@@ -569,11 +569,14 @@ ranges of `hipHostMalloc`, `hipHostAlloc`, `hipMallocHost`, `hipMemAllocHost` an
 `hipHostRegister` (dropped on `hipHostFree`, `hipFreeHost`,
 `hipFree` and `hipHostUnregister`). Before each direct launch, and before each
 `hipGraphLaunch`, it reads the 8-byte-aligned words of
-the arguments, by-value structs included; for each tracked allocation a word points into,
-it hashes the whole allocation in place under the tracking lock. If the archive already
-holds a blob with that hash, that blob is the snapshot. Otherwise it copies the allocation,
-still under the lock, and writes the copy as a blob named by the copy's own hash, so a host
-store between the two reads cannot leave a blob that differs from its name. Either way it adds a
+the arguments, by-value structs included. Under the tracking lock it only resolves each
+tracked allocation a word points into and counts itself as a reader of it; a free of that
+allocation waits until no snapshot reads it. After the lock it hashes the whole allocation in
+place. If the archive already holds a blob with that hash, that blob is the snapshot. Otherwise
+it copies the allocation and writes the copy as a blob named by the copy's own hash, so a host
+store between the two reads cannot leave a blob that differs from its name. An allocation
+whose last snapshot found new bytes is copied without the in-place hash. The read ends before
+the blob is written. Either way it adds a
 record (base, offset 0, length, blob hash, direction 0) to the launch event, unless the hash
 and the launch stream equal those of the allocation's last record. Struct words pointing into such an allocation
 are flagged for translation like
