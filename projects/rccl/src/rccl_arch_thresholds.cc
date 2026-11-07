@@ -187,6 +187,12 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     kThreshUnlimited,     // [7] Recv            -- not used on gfx1250
     kThreshUnlimited,     // [8] AlltoAll        -- not used on gfx1250
   },
+  // symTdm*: [2] AllGather -- TDM beats DDA LL128 from 64M; eagerly CE-registered wins past 128M.
+  // Under graph capture TDM beats Ring to 4G in one tray and to 512M across trays.
+  .symTdmMinR2 = {0, 0, 64ULL*1024*1024, 0, 0, 0, 0, 0, 0},
+  .symTdmMaxR2 = {0, 0, 128ULL*1024*1024, 0, 0, 0, 0, 0, 0},
+  .symTdmMaxR2Graph = {0, 0, 4096ULL*1024*1024, 0, 0, 0, 0, 0, 0},
+  .symTdmCrossTrayMaxR2 = {0, 0, 512ULL*1024*1024, 0, 0, 0, 0, 0, 0},
   // Rank-scaled caps from the 8-64 rank H13 sweep, AICOMRCCL-1756. The
   // crossovers move with the per-rank share, so on 8+ rank comms these replace the
   // totals above (which stay in force for smaller comms).
@@ -248,6 +254,9 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   // CE-Scratch trails the DDA / Ring / Direct kernels it displaces between the DDA
   // ceiling and the scratch size (nRanks x 64 MiB) (AICOMRCCL-2876).
   .forceCeScratch = false,
+  // Zero: keep tuning_model_11's per-rank broadcast ranges.
+  .bcRingLLMaxBytes = 0,
+  .bcRingLL128MaxBytes = 0,
 };
 
 // gfx1250 in DPX mode (each GPU split into two partitions), picked by
@@ -460,6 +469,13 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   .ddaVmmBlockBudget = 2048,
   .ddaVmmMinBlocks = 32,
   .ddaVmmMaxBlocks = 128,
+  // AllGather LL128 block size and block cap (DPX).
+  .ddaAgLL128Threads = 256,
+  .ddaAgLL128ThreadsMinBytes = 4ULL*1024*1024,
+  .ddaAgLL128ThreadsMaxBytes = 32ULL*1024*1024,
+  .ddaAgLL128MaxBlocks = 75,
+  .ddaAgLL128MaxBlocksMinBytes = 1ULL*1024*1024,
+  .ddaAgLL128MaxBlocksMaxBytes = 32ULL*1024*1024,
   // Ring / Tree crossovers, same sweep (AllReduce LL128: AICOMRCCL-2874/2875).
   .arRingLL128MaxPerRank = 16ULL*1024*1024,       // Ring Simple beats LL128 1.1-1.3x from 256M/512M/1G
                                                   // at 8/16/32 (DPX)
@@ -479,6 +495,9 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   // CE-Scratch trails the DDA / Ring / Direct kernels it displaces between the DDA
   // ceiling and the scratch size (nRanks x 64 MiB) (AICOMRCCL-2876).
   .forceCeScratch = false,
+  // Total message bytes at every node count. See rcclArchThresholds.
+  .bcRingLLMaxBytes = 16ULL*1024,
+  .bcRingLL128MaxBytes = 512ULL*1024*1024,
 };
 
 // gfx950: DDA-IPC cap is 64 MiB for AG, 128 MiB for AR/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
@@ -629,6 +648,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx950 = {
     0,                    // [8] AlltoAll        -- not used
   },
   .forceCeScratch = true,
+  .bcRingLLMaxBytes = 0,
+  .bcRingLL128MaxBytes = 0,
 };
 
 // gfx942: DDA-IPC cap is 8 MiB for AR/AG/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
@@ -779,6 +800,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx942 = {
     0,                    // [8] AlltoAll        -- not used
   },
   .forceCeScratch = true,
+  .bcRingLLMaxBytes = 0,
+  .bcRingLL128MaxBytes = 0,
 };
 
 bool rcclWindowFits(size_t totalBytes, size_t minBytes, size_t maxBytes) {

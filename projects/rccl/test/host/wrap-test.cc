@@ -202,6 +202,29 @@ auto OnlyKernelIsTma(ncclSymkKernelId id) {
   return [id](int kernelId) { return kernelId == (int)id; };
 }
 
+// The hook pair every TDM-window test installs: symk is requested and available.
+struct SymkRequestedHooks {
+  ScopedHook<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t, const void*, void*, bool)> requested{
+      g_isSymmetricKernelRequested,
+      [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t, const void*, void*, bool) { return true; }};
+  ScopedHook<bool(struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t)> available{
+      g_symkAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; }};
+};
+
+// gfx1250 4-rank comm in one UALink domain, every tray fully linked; spansTrays puts it on more than one tray.
+// Caller must DeleteCommWithArch.
+ncclComm* MakeGfx1250TdmComm(const rcclArchThresholds* table, bool spansTrays) {
+  ncclComm* comm = MakeCommWithArch("gfx1250");
+  comm->archThresholds = table;
+  comm->symmetricSupport = 1;
+  comm->isAllDirectNvlink = true;
+  comm->spansTrays = spansTrays;
+  comm->MNNVL = 1;
+  comm->nRanks = 4;
+  comm->nvlDomainSize = 4;
+  return comm;
+}
+
 }  // namespace
 
 // ===========================================================================
@@ -355,12 +378,9 @@ ncclTaskColl MakeTask(int protocol, bool hasAcc) {
 }
 }  // namespace
 
-// ENABLE_LL128's state depends on the build configuration; both arms are
-// written so whichever compiles in is exercised. The OCI cluster build has
-// ENABLE_LL128 defined, so *_LL128_AccGatesOutGfx90a and its siblings are the
-// ones that compile and run there; a local ROCm-7.0.0 build does not define
-// it, which is what compiles and runs *_LL128_DisabledAtCompileTime instead --
-// both arms are now verified, one per build.
+// rccl-UnitTestsMicro always compiles this file with ENABLE_LL128
+// (test/host/CMakeLists.txt), matching production librccl. The
+// *_LL128_DisabledAtCompileTime arms are not part of that binary.
 #if defined(ENABLE_LL128)
 TEST(WrapMicrotest, IsArchSupportedForFunc_LL128_AccGatesOutGfx90a) {
   // With acc set, gfx90a is EXCLUDED from the LL128+acc allow-list (only
@@ -1777,6 +1797,10 @@ rcclArchThresholds MakeRankScaledTable() {
   t.rsRingSimpleCappedMaxPerRank = 32 * kMiB;
   t.rsRingSimpleCappedChannels = 128;
   t.rsDdaLL128NarrowMaxPerRank = 1 * kMiB;
+  t.symTdmMinR2[ncclFuncAllGather] = 64 * kMiB;
+  t.symTdmMaxR2[ncclFuncAllGather] = 128 * kMiB;
+  t.symTdmMaxR2Graph[ncclFuncAllGather] = 4096 * kMiB;
+  t.symTdmCrossTrayMaxR2[ncclFuncAllGather] = 512 * kMiB;
   return t;
 }
 
@@ -2000,6 +2024,116 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250AllReduceLL128_Disab
       });
 }
 #endif  // ENABLE_LL128
+
+namespace {
+// DPX broadcast ceilings. Gfx1250Table() leaves both at 0, which is the SPX case.
+rcclArchThresholds MakeDpxBroadcastTable() {
+  rcclArchThresholds t{};
+  t.bcRingLLMaxBytes = 16 * kKiB;
+  t.bcRingLL128MaxBytes = 512 * kMiB;
+  return t;
+}
+
+// tuning_model_11 broadcast ranges. AllReduce / AllGather / ReduceScatter come
+// from MakeGfx1250ProtocolComm.
+void SetModelBroadcastRanges(ncclComm* comm) {
+  comm->minMaxLLRange[RCCL_BR_TUNABLE][NCCL_PROTO_LL][RCCL_PROTOCOL_MIN_IDX] = 0;
+  comm->minMaxLLRange[RCCL_BR_TUNABLE][NCCL_PROTO_LL][RCCL_PROTOCOL_MAX_IDX] = 2048;
+  comm->minMaxLLRange[RCCL_BR_TUNABLE][NCCL_PROTO_LL128][RCCL_PROTOCOL_MIN_IDX] = 2048;
+  comm->minMaxLLRange[RCCL_BR_TUNABLE][NCCL_PROTO_LL128][RCCL_PROTOCOL_MAX_IDX] = 16 * kMiB;
+}
+
+int ProtocolOf(ncclComm* comm, ncclFunc_t func, size_t nBytes) {
+  ncclTaskColl info{};
+  info.func = func;
+  info.algorithm = NCCL_ALGO_RING;
+  info.protocol = NCCL_PROTO_UNDEF;
+  rcclUpdateCollectiveProtocol(comm, nBytes, &info);
+  return info.protocol;
+}
+}  // namespace
+
+// gfx1250 DPX broadcast uses the arch table's total-byte ceilings at every node
+// count, including 12. SPX is Gfx1250Table(), whose ceilings are 0, so it keeps
+// tuning_model_11's per-rank ranges.
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250DpxBroadcastUsesTotalBytes) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_Gfx1250DpxBroadcastUsesTotalBytes",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        const rcclArchThresholds dpx = MakeDpxBroadcastTable();
+        const size_t llMax = 16 * kKiB;
+        const size_t ll128Max = 512 * kMiB;
+        const struct {
+          int nNodes;
+          int nRanks;
+        } scales[] = {{1, 8}, {2, 16}, {4, 32}, {8, 64}, {12, 96}};
+        for (const auto& scale : scales) {
+          ncclComm* comm = MakeGfx1250ProtocolComm(scale.nRanks);
+          comm->nNodes = scale.nNodes;
+          comm->archThresholds = &dpx;
+          SetModelBroadcastRanges(comm);
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 0)) << scale.nNodes;
+          EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, llMax)) << scale.nNodes;
+          EXPECT_EQ(NCCL_PROTO_LL128, ProtocolOf(comm, ncclFuncBroadcast, llMax + 1)) << scale.nNodes;
+          EXPECT_EQ(NCCL_PROTO_LL128, ProtocolOf(comm, ncclFuncBroadcast, ll128Max)) << scale.nNodes;
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, ll128Max + 1)) << scale.nNodes;
+          EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, (size_t)16 << 30)) << scale.nNodes;
+          // The broadcast ceilings must not move AllReduce off its per-rank model.
+          EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncAllReduce, 100 * kKiB)) << scale.nNodes;
+          DeleteCommWithArch(comm);
+        }
+
+        // SPX table is installed, with a zero LL128 ceiling, so the guard in
+        // rcclBroadcastTotalByteTable is what keeps the per-rank model. 16 KiB + 1
+        // on 8 ranks is still 2048 B/rank (LL). 256 MiB is 32 MiB/rank, past the
+        // model's 16 MiB LL128 ceiling (Simple).
+        ncclComm* spx = MakeGfx1250ProtocolComm(8);
+        SetModelBroadcastRanges(spx);
+        ASSERT_NE(spx->archThresholds, nullptr);
+        EXPECT_EQ((size_t)0, spx->archThresholds->bcRingLLMaxBytes);
+        EXPECT_EQ((size_t)0, spx->archThresholds->bcRingLL128MaxBytes);
+        EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(spx, ncclFuncBroadcast, llMax + 1));
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(spx, ncclFuncBroadcast, 256 * kMiB));
+        DeleteCommWithArch(spx);
+      });
+}
+
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250DpxBroadcastHonorsUserProto) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_Gfx1250DpxBroadcastHonorsUserProto",
+      []() {
+        SetMicroEnv("NCCL_PROTO", "LL128");
+        const rcclArchThresholds dpx = MakeDpxBroadcastTable();
+        ncclComm* comm = MakeGfx1250ProtocolComm(8);
+        comm->archThresholds = &dpx;
+        ncclTaskColl info{};
+        info.func = ncclFuncBroadcast;
+        info.protocol = NCCL_PROTO_SIMPLE;
+        rcclUpdateCollectiveProtocol(comm, 1024, &info);
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, info.protocol);
+        DeleteCommWithArch(comm);
+      });
+}
+
+#if defined(ENABLE_LL128)
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx1250DpxBroadcastWithoutLl128FallsToSimple) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_Gfx1250DpxBroadcastWithoutLl128FallsToSimple",
+      []() {
+        SetMicroEnvAbsent("NCCL_PROTO");
+        const rcclArchThresholds dpx = MakeDpxBroadcastTable();
+        ncclComm* comm = MakeGfx1250ProtocolComm(64);
+        comm->nNodes = 8;
+        comm->archThresholds = &dpx;
+        comm->topo->ll128Enabled = false;
+        EXPECT_EQ(NCCL_PROTO_LL, ProtocolOf(comm, ncclFuncBroadcast, 16 * kKiB));
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 16 * kKiB + 1));
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, ProtocolOf(comm, ncclFuncBroadcast, 512 * kMiB));
+        DeleteCommWithArch(comm);
+      });
+}
+#endif
 
 TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_UndefinedTuningWarnsOnceForSupportedArch) {
   RUN_ISOLATED_TEST(
@@ -6322,6 +6456,214 @@ TEST(WrapMicrotestIsolated, SelectAllGather_DdaGatedOnNotSymEligible) {
       });
 }
 
+namespace {
+// Runs the AllGather selector on a gfx1250 TDM comm with the model picking modelPick.
+rcclCollDecision Gfx1250AllGatherDecision(const rcclArchThresholds* table, size_t totalBytes,
+                                          ncclSymkKernelId modelPick, bool spansTrays, bool graph) {
+  ScopedHook tuningCompute(g_tuningCompute, SelectSymkTuning(ncclFuncAllGather, modelPick, /*maxChannels=*/64));
+  ncclComm* comm = MakeGfx1250TdmComm(table, spansTrays);
+  rcclCollDecision decision{};
+  EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, totalBytes / comm->nRanks / sizeof(float),
+                                             ncclFloat32, /*stream=*/nullptr, /*query=*/graph,
+                                             /*graphCapturingHint=*/graph, &decision));
+  DeleteCommWithArch(comm);
+  return decision;
+}
+
+// True when the selector takes symk. A query reports the TDM kernel as RCCL_SYMMETRIC_TDM.
+bool Gfx1250AllGatherPicksSymk(const rcclArchThresholds* table, size_t totalBytes, ncclSymkKernelId modelPick,
+                               bool spansTrays, bool graph) {
+  const int algo = Gfx1250AllGatherDecision(table, totalBytes, modelPick, spansTrays, graph).algo;
+  return algo == (int)rcclAddonAlgos_t::RCCL_SYMMETRIC || algo == (int)rcclAddonAlgos_t::RCCL_SYMMETRIC_TDM;
+}
+}  // namespace
+
+// The TDM window admits symk past symMaxR2, but only when the model picks a TDM kernel.
+TEST(WrapMicrotestIsolated, SelectAllGather_TdmWindowAdmitsSymkOnlyForTdmKernel) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_TdmWindowAdmitsSymkOnlyForTdmKernel",
+      []() {
+        SymkRequestedHooks symk;
+        ScopedHook kernelIsTma(g_symkKernelIdIsTma, OnlyKernelIsTma(ncclSymkKernelId_AllGather_TmaST));
+        rcclArchThresholds table{};
+        table.symMinR2[ncclFuncAllGather] = 128 * kKiB;
+        table.symMaxR2[ncclFuncAllGather] = 2 * kMiB;
+        table.symMaxR2Graph[ncclFuncAllGather] = 2 * kMiB;
+        table.symTdmMinR2[ncclFuncAllGather] = 64 * kMiB;
+        table.symTdmMaxR2[ncclFuncAllGather] = 1024 * kMiB;
+        table.symTdmMaxR2Graph[ncclFuncAllGather] = 2048 * kMiB;
+        table.symTdmCrossTrayMaxR2[ncclFuncAllGather] = 512 * kMiB;
+        auto picksSymk = [&table](size_t totalBytes, ncclSymkKernelId modelPick, bool spansTrays = false,
+                                  bool graph = false) {
+          return Gfx1250AllGatherPicksSymk(&table, totalBytes, modelPick, spansTrays, graph);
+        };
+        const ncclSymkKernelId tdm = ncclSymkKernelId_AllGather_TmaST, st = ncclSymkKernelId_AllGather_ST;
+        EXPECT_TRUE(picksSymk(1 * kMiB, st)) << "symMinR2..symMaxR2 window";
+        EXPECT_FALSE(picksSymk(32 * kMiB, tdm)) << "between the two windows";
+        EXPECT_FALSE(picksSymk(64 * kMiB - 64, tdm)) << "just below the TDM window";
+        EXPECT_TRUE(picksSymk(64 * kMiB, tdm)) << "TDM window floor";
+        EXPECT_TRUE(picksSymk(1024 * kMiB, tdm)) << "TDM window ceiling";
+        EXPECT_FALSE(picksSymk(1024 * kMiB + 64, tdm)) << "just past the TDM window";
+        EXPECT_FALSE(picksSymk(128 * kMiB, st)) << "model picks the non-TDM kernel";
+        EXPECT_FALSE(picksSymk(1 * kMiB, st, /*spansTrays=*/true)) << "cross-tray, symMinR2..symMaxR2 window";
+        EXPECT_TRUE(picksSymk(128 * kMiB, tdm, /*spansTrays=*/true)) << "cross-tray, TDM window";
+        EXPECT_TRUE(picksSymk(512 * kMiB, tdm, /*spansTrays=*/true)) << "cross-tray TDM window ceiling";
+        EXPECT_FALSE(picksSymk(512 * kMiB + 64, tdm, /*spansTrays=*/true)) << "cross-tray, just past it";
+        table.symTdmCrossTrayMaxR2[ncclFuncAllGather] = 2048 * kMiB;
+        EXPECT_FALSE(picksSymk(1024 * kMiB + 64, tdm, /*spansTrays=*/true)) << "a cross-tray cap only lowers";
+        table.symTdmCrossTrayMaxR2[ncclFuncAllGather] = 0;
+        EXPECT_TRUE(picksSymk(1024 * kMiB, tdm, /*spansTrays=*/true)) << "no cross-tray cap";
+        table.symTdmCrossTrayMaxR2[ncclFuncAllGather] = 512 * kMiB;
+        EXPECT_TRUE(picksSymk(1 * kMiB, st)) << "within one tray the symMinR2..symMaxR2 window stays";
+        EXPECT_TRUE(picksSymk(2048 * kMiB, tdm, false, /*graph=*/true)) << "graph ceiling";
+        EXPECT_FALSE(picksSymk(2048 * kMiB + 64, tdm, false, /*graph=*/true)) << "past the graph ceiling";
+        EXPECT_FALSE(picksSymk(512 * kMiB + 64, tdm, /*spansTrays=*/true, /*graph=*/true))
+          << "the cross-tray cap holds under capture";
+      });
+}
+
+// RCCL_SYM_K_MIN_BYTES / RCCL_SYM_K_MAX_BYTES narrow the TDM window (64 MiB..1 GiB here). The comm spans
+// trays, so only the window can admit symk. Returns whether each size goes to symk with param set to value.
+namespace {
+std::vector<bool> TdmWindowWith(const char* param, int64_t value, std::initializer_list<size_t> totalBytes) {
+  g_loadParam = ForceParam(param, value);
+  SymkRequestedHooks symk;
+  ScopedHook kernelIsTma(g_symkKernelIdIsTma, OnlyKernelIsTma(ncclSymkKernelId_AllGather_TmaST));
+  rcclArchThresholds table{};
+  table.symTdmMinR2[ncclFuncAllGather] = 64 * kMiB;
+  table.symTdmMaxR2[ncclFuncAllGather] = 1024 * kMiB;
+  std::vector<bool> picks;
+  for (size_t bytes : totalBytes) {
+    picks.push_back(Gfx1250AllGatherPicksSymk(&table, bytes, ncclSymkKernelId_AllGather_TmaST,
+                                              /*spansTrays=*/true, /*graph=*/false));
+  }
+  return picks;
+}
+}  // namespace
+
+TEST(WrapMicrotestIsolated, SelectAllGather_SymKMaxBytesLowersTheTdmWindowCeiling) {
+  RUN_ISOLATED_TEST("Wrap_SelectAllGather_SymKMaxBytesLowersTheTdmWindowCeiling", []() {
+    EXPECT_EQ(TdmWindowWith("RCCL_SYM_K_MAX_BYTES", 96 * kMiB, {64 * kMiB, 96 * kMiB, 96 * kMiB + 64}),
+              (std::vector<bool>{true, true, false}));
+  });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllGather_SymKMaxBytesAboveTheTableKeepsTheCeiling) {
+  RUN_ISOLATED_TEST("Wrap_SelectAllGather_SymKMaxBytesAboveTheTableKeepsTheCeiling", []() {
+    EXPECT_EQ(TdmWindowWith("RCCL_SYM_K_MAX_BYTES", 2048 * kMiB, {1024 * kMiB, 1024 * kMiB + 64}),
+              (std::vector<bool>{true, false}));
+  });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllGather_SymKMaxBytesZeroClosesTheTdmWindow) {
+  RUN_ISOLATED_TEST("Wrap_SelectAllGather_SymKMaxBytesZeroClosesTheTdmWindow", []() {
+    EXPECT_EQ(TdmWindowWith("RCCL_SYM_K_MAX_BYTES", 0, {64 * kMiB, 128 * kMiB}), (std::vector<bool>{false, false}));
+  });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllGather_SymKMinBytesRaisesTheTdmWindowFloor) {
+  RUN_ISOLATED_TEST("Wrap_SelectAllGather_SymKMinBytesRaisesTheTdmWindowFloor", []() {
+    EXPECT_EQ(TdmWindowWith("RCCL_SYM_K_MIN_BYTES", 96 * kMiB, {96 * kMiB - 64, 96 * kMiB, 1024 * kMiB}),
+              (std::vector<bool>{false, true, true}));
+  });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllGather_SymKMinBytesBelowTheTableKeepsTheFloor) {
+  RUN_ISOLATED_TEST("Wrap_SelectAllGather_SymKMinBytesBelowTheTableKeepsTheFloor", []() {
+    EXPECT_EQ(TdmWindowWith("RCCL_SYM_K_MIN_BYTES", 32 * kMiB, {48 * kMiB, 64 * kMiB}),
+              (std::vector<bool>{false, true}));
+  });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllGather_SymKMinBytesZeroKeepsTheTdmWindow) {
+  RUN_ISOLATED_TEST("Wrap_SelectAllGather_SymKMinBytesZeroKeepsTheTdmWindow", []() {
+    EXPECT_EQ(TdmWindowWith("RCCL_SYM_K_MIN_BYTES", 0, {64 * kMiB - 64, 64 * kMiB, 1024 * kMiB}),
+              (std::vector<bool>{false, true, true}));
+  });
+}
+
+// The decision says when symk came in through the TDM window, so extraction keeps a TDM kernel.
+TEST(WrapMicrotestIsolated, SelectAllGather_TdmWindowMarksTheDecisionTdmOnly) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_TdmWindowMarksTheDecisionTdmOnly",
+      []() {
+        SymkRequestedHooks symk;
+        ScopedHook kernelIsTma(g_symkKernelIdIsTma, OnlyKernelIsTma(ncclSymkKernelId_AllGather_TmaST));
+        rcclArchThresholds table{};
+        table.symMinR2[ncclFuncAllGather] = 128 * kKiB;
+        table.symMaxR2[ncclFuncAllGather] = 2 * kMiB;
+        table.symTdmMinR2[ncclFuncAllGather] = 64 * kMiB;
+        table.symTdmMaxR2[ncclFuncAllGather] = 1024 * kMiB;
+        auto decide = [&table](size_t totalBytes, ncclSymkKernelId modelPick) {
+          return Gfx1250AllGatherDecision(&table, totalBytes, modelPick, /*spansTrays=*/false, /*graph=*/false);
+        };
+        const rcclCollDecision inWindow = decide(128 * kMiB, ncclSymkKernelId_AllGather_TmaST);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, inWindow.algo);
+        EXPECT_TRUE(inWindow.symkTdmOnly);
+        const rcclCollDecision small = decide(1 * kMiB, ncclSymkKernelId_AllGather_ST);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, small.algo);
+        EXPECT_FALSE(small.symkTdmOnly) << "symMinR2..symMaxR2 takes any symk kernel";
+      });
+}
+
+// The window query passes the operands' alignment to the cost model.
+TEST(WrapMicrotestIsolated, SelectAllGather_TdmWindowQueryPassesAlignment) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_TdmWindowQueryPassesAlignment",
+      []() {
+        SymkRequestedHooks symk;
+        ScopedHook kernelIsTma(g_symkKernelIdIsTma, OnlyKernelIsTma(ncclSymkKernelId_AllGather_TmaST));
+        bool aligned = false;
+        int calls = 0;
+        ScopedHook tuningCompute(g_tuningCompute, RecordAlignedTuning(ncclSymkKernelId_AllGather_TmaST,
+                                                                      /*maxChannels=*/64, &aligned, &calls));
+        rcclArchThresholds table{};
+        table.symTdmMinR2[ncclFuncAllGather] = 64 * kMiB;
+        table.symTdmMaxR2[ncclFuncAllGather] = 1024 * kMiB;
+        ncclComm* comm = MakeGfx1250TdmComm(&table, /*spansTrays=*/false);
+        static char send[64], recv[64];
+        SymmetricTestWindows windows(comm, send, size_t{1} << 40, recv, size_t{1} << 40);
+        for (int offset : {0, 8}) {
+          calls = 0;
+          rcclCollDecision decision{};
+          EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, send + offset, recv, 128 * kMiB / 4 / sizeof(float),
+                                                     ncclFloat32, /*stream=*/nullptr, /*query=*/false,
+                                                     /*graphCapturingHint=*/false, &decision));
+          EXPECT_GT(calls, 0) << "offset " << offset;
+          EXPECT_EQ(aligned, offset == 0) << "offset " << offset;
+        }
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The selector at the gfx1250 table's TDM-window edges, just inside and just outside each one.
+TEST(WrapMicrotestIsolated, SelectAllGather_TdmWindowAtGfx1250Edges) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_TdmWindowAtGfx1250Edges",
+      []() {
+        SymkRequestedHooks symk;
+        ScopedHook kernelIsTma(g_symkKernelIdIsTma, OnlyKernelIsTma(ncclSymkKernelId_AllGather_TmaST));
+        auto picksSymk = [](size_t totalBytes, bool spansTrays, bool graph) {
+          return Gfx1250AllGatherPicksSymk(Gfx1250Table(), totalBytes, ncclSymkKernelId_AllGather_TmaST, spansTrays,
+                                           graph);
+        };
+        EXPECT_FALSE(picksSymk(64 * kMiB - 64, false, false)) << "just below symTdmMinR2";
+        EXPECT_TRUE(picksSymk(64 * kMiB, false, false)) << "symTdmMinR2";
+        EXPECT_TRUE(picksSymk(128 * kMiB, false, false)) << "symTdmMaxR2";
+        EXPECT_FALSE(picksSymk(128 * kMiB + 64, false, false)) << "just past symTdmMaxR2";
+        EXPECT_FALSE(picksSymk(64 * kMiB - 64, true, false)) << "cross-tray, just below symTdmMinR2";
+        EXPECT_TRUE(picksSymk(64 * kMiB, true, false)) << "cross-tray, symTdmMinR2";
+        EXPECT_TRUE(picksSymk(128 * kMiB, true, false)) << "cross-tray, symTdmMaxR2";
+        EXPECT_FALSE(picksSymk(128 * kMiB + 64, true, false)) << "cross-tray, just past symTdmMaxR2";
+        EXPECT_FALSE(picksSymk(64 * kMiB - 64, false, true)) << "graph, just below symTdmMinR2";
+        EXPECT_TRUE(picksSymk(64 * kMiB, false, true)) << "graph, symTdmMinR2";
+        EXPECT_TRUE(picksSymk(4096 * kMiB, false, true)) << "graph, symTdmMaxR2Graph";
+        EXPECT_FALSE(picksSymk(4096 * kMiB + 64, false, true)) << "graph, just past symTdmMaxR2Graph";
+        EXPECT_TRUE(picksSymk(512 * kMiB, true, true)) << "graph cross-tray, symTdmCrossTrayMaxR2";
+        EXPECT_FALSE(picksSymk(512 * kMiB + 64, true, true)) << "graph cross-tray, just past symTdmCrossTrayMaxR2";
+      });
+}
+
 // Hierarchical, live mode: the inner (query-only) inter/intra-comm
 // dereferencing never runs, so no sub-comms need to be set up here --
 // just the eligibility gates (outside a group, 8+ nodes, param enabled,
@@ -7930,6 +8272,38 @@ namespace real_arch_thresholds {
 // The real tables, namespaced so they do not collide with fakes/rccl_arch_thresholds_fakes.cc.
 #include "rccl_arch_thresholds.cc"
 }  // namespace real_arch_thresholds
+
+// Only the DPX table sets the AllGather LL128 block size and block cap.
+TEST(WrapMicrotestIsolated, DdaFabricAgLL128Shape_FromDpxTable) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaFabricAgLL128Shape_FromDpxTable",
+      []() {
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->ddaFabricMaxBlocks = 96;
+        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+        ASSERT_NE(nullptr, comm->archThresholds);
+        const std::pair<size_t, int> threads[] = {
+            {4 * kMiB - 1, 0}, {4 * kMiB, 256}, {32 * kMiB, 256}, {32 * kMiB + 1, 0}};
+        for (const auto& c : threads) {
+          EXPECT_EQ(c.second, rcclDdaFabricAgLL128Threads(comm, c.first)) << c.first;
+        }
+        const std::pair<size_t, int> blocks[] = {{kMiB - 1, 96}, {kMiB, 75}, {32 * kMiB, 75}, {32 * kMiB + 1, 96}};
+        for (const auto& c : blocks) {
+          EXPECT_EQ(c.second, rcclDdaFabricAgLL128Blocks(comm, c.first)) << c.first;
+        }
+        comm->ddaFabricMaxBlocks = 48;
+        EXPECT_EQ(48, rcclDdaFabricAgLL128Blocks(comm, 8 * kMiB)) << "init cap still bounds it";
+        comm->ddaFabricMaxBlocks = 96;
+        for (const rcclArchThresholds* table :
+             {real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX),
+              static_cast<const rcclArchThresholds*>(nullptr)}) {
+          comm->archThresholds = table;
+          EXPECT_EQ(0, rcclDdaFabricAgLL128Threads(comm, 8 * kMiB));
+          EXPECT_EQ(96, rcclDdaFabricAgLL128Blocks(comm, 8 * kMiB));
+        }
+        DeleteCommWithArch(comm);
+      });
+}
 
 // gfx1250 SPX symMaxR2[ReduceScatter] is 0: at and above symMinR2 (2 MiB) symk stays withdrawn even when requested.
 TEST(WrapMicrotestIsolated, SelectReduceScatter_Gfx1250NeverPicksSymmetric) {
@@ -9971,6 +10345,40 @@ TEST(WrapMicrotestIsolated, SymKGetInfo_FallsThroughToGetCollImplInfoWhenSymkNot
         // Falls all the way to rcclSelectAllReduce's plain-kernel fallback (every
         // seam at its default), reported via getAlgoInfo's own default (RING/SIMPLE).
         EXPECT_EQ(NCCL_ALGO_RING, algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Across trays rcclSymKGetInfo reports AllGather symk only for a TDM pick inside the eager TDM window, and
+// otherwise falls back to the selector. Other collectives are unchanged.
+TEST(WrapMicrotestIsolated, SymKGetInfo_CrossTrayAllGatherReportsSymkOnlyInTheTdmWindow) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SymKGetInfo_CrossTrayAllGatherReportsSymkOnlyInTheTdmWindow",
+      []() {
+        ScopedHook symkAvailable(g_symkAvailable,
+                                 [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+        ScopedHook kernelIsTma(g_symkKernelIdIsTma, OnlyKernelIsTma(ncclSymkKernelId_AllGather_TmaST));
+        ncclComm* comm = MakeGfx1250TdmComm(Gfx1250Table(), /*spansTrays=*/true);
+        int algo, protocol, maxChannels;
+        auto report = [&](ncclFunc_t func, ncclSymkKernelId pick, size_t totalBytes) {
+          ScopedHook tuningCompute(g_tuningCompute, SelectSymkTuning(func, pick, /*maxChannels=*/6));
+          EXPECT_EQ(ncclSuccess, rcclSymKGetInfo(comm, func, totalBytes / comm->nRanks / sizeof(float), ncclFloat32,
+                                                 ncclSum, &algo, &protocol, &maxChannels));
+          return algo;
+        };
+        const int sym = (int)rcclAddonAlgos_t::RCCL_SYMMETRIC, tdm = (int)rcclAddonAlgos_t::RCCL_SYMMETRIC_TDM;
+        auto notSymk = [&](int a) { return a != sym && a != tdm; };
+        const ncclSymkKernelId tma = ncclSymkKernelId_AllGather_TmaST, st = ncclSymkKernelId_AllGather_ST;
+        EXPECT_EQ(tdm, report(ncclFuncAllGather, tma, 64 * kMiB)) << "window floor";
+        EXPECT_EQ(tdm, report(ncclFuncAllGather, tma, 128 * kMiB)) << "eager window ceiling";
+        EXPECT_TRUE(notSymk(report(ncclFuncAllGather, tma, 64 * kMiB - 64))) << "just below the window";
+        EXPECT_TRUE(notSymk(report(ncclFuncAllGather, tma, 128 * kMiB + 64))) << "just past the eager window";
+        EXPECT_TRUE(notSymk(report(ncclFuncAllGather, st, 96 * kMiB))) << "a non-TDM pick inside the window";
+        EXPECT_TRUE(notSymk(report(ncclFuncAllGather, st, 1 * kMiB))) << "below the window";
+        EXPECT_EQ(sym, report(ncclFuncAllReduce, ncclSymkKernelId_AllReduce_RSxLD_AGxST, 1 * kMiB))
+          << "AllReduce unchanged";
+        comm->spansTrays = false;
+        EXPECT_EQ(sym, report(ncclFuncAllGather, st, 1 * kMiB)) << "one tray reports the pick";
         DeleteCommWithArch(comm);
       });
 }
