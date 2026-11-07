@@ -975,6 +975,28 @@ TEST_F(DdaAllReduceFabricLLMicrotest, Split_TakesVmmFirstSizes) {
   EXPECT_TRUE(TakesSplitBytes(4 * kMiB, /*vmmFirst=*/true)) << "32r 4 MiB, a VMM-first size";
   EXPECT_TRUE(TakesSplitBytes(16 * kMiB, /*vmmFirst=*/true));
   EXPECT_FALSE(TakesSplitBytes(kMiB, /*vmmFirst=*/true)) << "below 2 MiB";
+  params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 0;
+  EXPECT_FALSE(TakesSplitBytes(4 * kMiB, /*vmmFirst=*/true)) << "staged writer off: the VMM-first window keeps it";
+  params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 1;
+  comm().WarpSize = 2 * kDdaLL128Warp;
+  EXPECT_FALSE(TakesSplitBytes(4 * kMiB, /*vmmFirst=*/true)) << "an LL128 warp must be one wave";
+}
+
+// Declining, the predicate leaves the bound at the cap, so the LL128 launch it leads to stays within the cap.
+TEST_F(DdaAllReduceFabricLLMicrotest, Split_DeclinedBoundIsTheCap) {
+  SplitTiersOn(comm(), params_);
+  const size_t count = kMiB / 4;  // 8 ranks, below the 2 MiB window
+  const rcclDdaLaunchCap cap = {3, 256};
+  const DdaLaunch uncapped = RunOneLL128(count);
+  ASSERT_TRUE(uncapped.grid.x > cap.blocks || uncapped.block.x > cap.threads) << "the cap binds";
+  rcclDdaLaunchCap bound = {};
+  EXPECT_FALSE(TakesSplit(count, ncclFloat32, cap, /*vmmFirst=*/false, &bound));
+  EXPECT_EQ(bound.blocks, 3u);
+  EXPECT_EQ(bound.threads, 256u);
+  const DdaLaunch& l = RunSelectedLL128(count, ncclFloat32, cap);
+  EXPECT_NE(l.kernel, (LL128Split<float>()));
+  EXPECT_LE(l.grid.x, cap.blocks);
+  EXPECT_LE(l.block.x, cap.threads);
 }
 
 // In the VMM-first window the split replaces the VMM launch, so its bound is the VMM grid: its blocks and threads.
