@@ -120,8 +120,7 @@ private:
   using signed_sq_idx_t = std::make_signed_t<sq_idx_t>;
 
   __device__ bool cq_reached_target(sq_idx_t target, sq_idx_t complete_idx);
-  __device__ sq_idx_t cq_complete_idx();
-  __device__ sq_idx_t cq_complete_idx(sq_idx_t complete_idx);
+  __device__ sq_idx_t cq_complete_idx(sq_idx_t commit_idx);
 
   __device__ void ring_doorbell(sq_idx_t next_commit_idx, const gda_mlx5_wqe& wqe);
 
@@ -436,20 +435,11 @@ __device__ __forceinline__ bool QueuePairMLX5::cq_reached_target(
 }
 
 /* precondition: called with all active lanes using different QPs
- * return current value of sq.complete_idx
- * TODO: apply PostOpts to cq_complete_idx() */
-__device__ __forceinline__ QueuePairMLX5::sq_idx_t QueuePairMLX5::cq_complete_idx() {
-  /* must be device scope, so that we don't miss 16-bit rollovers
-   * if one workgroup runs far ahead of another */
-  return __scoped_atomic_load_n(&sq.complete_idx, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
-}
-
-/* precondition: called with all active lanes using different QPs
- * update sq.complete_idx with new value derived from complete_idx argument + cqe->wqe_counter
+ * compute current complete_idx value, derived from commit_idx argument and cqe->wqe_counter
  * and return the updated complete_idx value
  * TODO: apply PostOpts to cq_complete_idx(sq_idx_t) */
 __device__ __forceinline__ QueuePairMLX5::sq_idx_t QueuePairMLX5::cq_complete_idx(
-    QueuePairMLX5::sq_idx_t complete_idx) {
+    QueuePairMLX5::sq_idx_t commit_idx) {
   struct mlx5_cqe64* cqe = cq.buf;
 
   /* read wqe_counter and sig_op_own from CQE
@@ -461,11 +451,11 @@ __device__ __forceinline__ QueuePairMLX5::sq_idx_t QueuePairMLX5::cq_complete_id
    * opcode is the top 4 bits of op_own */
   uint8_t opcode = static_cast<uint8_t>(wqecnt_sig_op_own >> 28);
 
-  // CQEs are initially invalid, so just return input complete_idx
+  // CQEs are initially invalid, so just return 0
   if (opcode == MLX5_CQE_INVALID) {
     LOGD_TRACE("QP[%d] CQ: invalid completion (%x)", qp_num, opcode);
-    // complete_idx should always be zero here
-    return complete_idx;
+    // TODO: fix cq_complete_idx(sq_idx_t) for when no WQEs have been posted
+    return 0;
   }
 
 #if defined(BUILD_DEBUG_DEVICE)
@@ -484,27 +474,11 @@ __device__ __forceinline__ QueuePairMLX5::sq_idx_t QueuePairMLX5::cq_complete_id
    * need to add one to get *count* of completed WQEs */
   uint16_t complete_idx16 = wqe_counter + 1;
 
-  /* complete_idx16_diff <= sq_depth
+  /* commit_idx16_diff <= sq_depth
    * except when many more WQEs get committed & executed while inside cq_complete_idx(sq_idx_t)
-   * but in that case complete_idx is necessarily updated since we need to call poll_cq_until
-   * to ensure that the SQ slots are free and we catch it */
-  uint16_t complete_idx16_diff = complete_idx16 - static_cast<uint16_t>(complete_idx);
-  sq_idx_t next_complete_idx   = complete_idx   + static_cast<sq_idx_t>(complete_idx16_diff);
-
-  /* accumulate the newly-complete indices into sq.complete_idx,
-   * if some other thread didn't get there first
-   * assumes that cq_complete_idx(sq_idx_t) will be called from a loop *somewhere*,
-   * so uses atomic_compare_exchange_weak
-   *
-   * NOTE: cannot use fetch_max, otherwise can never wrap around (when sq_idx_t is uint32_t) */
-  if (__scoped_atomic_compare_exchange_n(&sq.complete_idx, &complete_idx, next_complete_idx,
-                                         /* weak */ true, __ATOMIC_RELAXED, __ATOMIC_RELAXED,
-                                         __MEMORY_SCOPE_DEVICE)) {
-    complete_idx = next_complete_idx;
-    LOGD_TRACE("QP[%d] CQ: polled completed = %zu", qp_num, static_cast<size_t>(complete_idx));
-  }
-
-  return complete_idx;
+   * but in that case commit_idx is necessarily updated and we catch it */
+  uint16_t commit_idx16_diff = static_cast<uint16_t>(commit_idx) - complete_idx16;
+  return commit_idx - static_cast<sq_idx_t>(commit_idx16_diff);
 }
 
 /* precondition: called with all active lanes using different QPs
@@ -512,26 +486,27 @@ __device__ __forceinline__ QueuePairMLX5::sq_idx_t QueuePairMLX5::cq_complete_id
  * TODO: apply PostOpts to poll_cq_once */
 __device__ __forceinline__ bool QueuePairMLX5::poll_cq_once(
     QueuePairMLX5::sq_idx_t target) {
-  // load cached sq.complete_idx value
-  sq_idx_t complete_idx = cq_complete_idx();
+  /* must be device scope, so that we don't miss 16-bit rollovers
+   * if one workgroup runs far ahead of another */
+  sq_idx_t commit_idx = __scoped_atomic_load_n(&sq.commit_idx,
+                                               __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+  // save prior commit_idx value
+  sq_idx_t prior_commit_idx = commit_idx;
+  // compute complete_idx from commit_idx and current CQE value
+  sq_idx_t complete_idx = cq_complete_idx(commit_idx);
+  // reload sq.commit_idx
+  commit_idx = __scoped_atomic_load_n(&sq.commit_idx, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
 
-  // check if we've already reached target
-  bool reached_target = cq_reached_target(target, complete_idx);
-
-  if (!reached_target) {
-    // check CQE and update sq.complete_idx
-    complete_idx = cq_complete_idx(complete_idx);
-    // check whether we've reached target now
-    reached_target = cq_reached_target(target, complete_idx);
-  }
-
-  // output trace only when complete_idx reaches target
-  if (reached_target) {
+  /* return true if both:
+   *   - no additional WQEs have been committed, so we know complete_idx must be correct
+   *   - we have reached the target */
+  if (commit_idx == prior_commit_idx && cq_reached_target(target, complete_idx)) {
     LOGD_TRACE("QP[%d] CQ: completed %zu >= target %zu",
                qp_num, static_cast<size_t>(complete_idx), static_cast<size_t>(target));
+    return true;
   }
 
-  return reached_target;
+  return false;
 }
 
 /* precondition: called with all active lanes using different QPs
@@ -539,16 +514,28 @@ __device__ __forceinline__ bool QueuePairMLX5::poll_cq_once(
  * TODO: apply PostOpts to poll_cq_until */
 __device__ __forceinline__ void QueuePairMLX5::poll_cq_until(
     QueuePairMLX5::sq_idx_t target) {
-  // load cached sq.complete_idx value
-  sq_idx_t complete_idx = cq_complete_idx();
+  /* must be device scope, so that we don't miss 16-bit rollovers
+   * if one workgroup runs far ahead of another */
+  sq_idx_t commit_idx = __scoped_atomic_load_n(&sq.commit_idx,
+                                               __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
 
-  // poll until complete_idx reaches target
-  while (!cq_reached_target(target, complete_idx)) {
-    complete_idx = cq_complete_idx(complete_idx);
+  while (true) {
+    // save prior commit_idx value
+    sq_idx_t prior_commit_idx = commit_idx;
+    // compute complete_idx from commit_idx and current CQE value
+    sq_idx_t complete_idx = cq_complete_idx(commit_idx);
+    // reload sq.commit_idx
+    commit_idx = __scoped_atomic_load_n(&sq.commit_idx, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+
+    /* continue until both:
+     *   - no additional WQEs have been committed, so we know complete_idx must be correct
+     *   - we have reached the target */
+    if (commit_idx == prior_commit_idx && cq_reached_target(target, complete_idx)) {
+      LOGD_TRACE("QP[%d] CQ: completed %zu >= target %zu",
+                 qp_num, static_cast<size_t>(complete_idx), static_cast<size_t>(target));
+      return;
+    }
   }
-
-  LOGD_TRACE("QP[%d] CQ: completed %zu >= target %zu",
-             qp_num, static_cast<size_t>(complete_idx), static_cast<size_t>(target));
 }
 
 __device__ __forceinline__ void QueuePairMLX5::ring_doorbell(
