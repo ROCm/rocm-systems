@@ -27,7 +27,10 @@ from utils.metrics.pass_provenance import (
 )
 from utils.utils_common import (
     canonical_config_arch,
+    load_collectable_formulas,
+    load_panel_file,
     normalize_filter_to_str_list,
+    panel_config_paths,
 )
 
 KERNEL_SYMBOLS_CSV_GLOB = f"rocpd_kernel_symbols_*.csv{csv_compression.GZIP_SUFFIX}"
@@ -48,18 +51,18 @@ def load_panel_configs(
     """
     configs: dict[int, dict[str, Any]] = {}
     for dir_path in dirs:
-        for yaml_file in Path(dir_path).glob("*.yaml"):
-            with open(yaml_file, encoding="utf-8") as file:
-                config_yml = yaml.safe_load(file)
-                # metric key can be None due to some metric-
-                # tables not having any metrics
-                # metric key should be empty dict instead of None
-                panel_config = config_yml["Panel Config"]
-                for data_source in panel_config["data source"]:
-                    metric_table = data_source.get("metric_table")
-                    if metric_table and metric_table["metric"] is None:
-                        metric_table["metric"] = {}
-                configs[panel_config["id"]] = panel_config
+        collectable_formulas = load_collectable_formulas(Path(dir_path))
+        for yaml_file in panel_config_paths(Path(dir_path)):
+            config_yml = load_panel_file(yaml_file, collectable_formulas)
+            # metric key can be None due to some metric-
+            # tables not having any metrics
+            # metric key should be empty dict instead of None
+            panel_config = config_yml["Panel Config"]
+            for data_source in panel_config["data source"]:
+                metric_table = data_source.get("metric_table")
+                if metric_table and metric_table["metric"] is None:
+                    metric_table["metric"] = {}
+            configs[panel_config["id"]] = panel_config
 
     # TODO: sort metrics as the header order in case they-
     # are not defined in the same order

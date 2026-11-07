@@ -87,14 +87,13 @@ A **single-pass metric** is a metric whose counters all fit in one pass. Analyze
 
 A **multi-pass metric** is a metric whose counters can't fit in one pass. It is split into parts that each fit, then recombined.
 
-`COLLECT_SUM`, `COLLECT_RATIO`, and `WEIGHTED_AVG` are functions Phase 2 adds to panel YAML. A split parent metric uses them to combine its parts. Phase 2 below states the rules.
+`COLLECT_SUM` and `COLLECT_RATIO` are the functions Phase 2 adds to panel YAML. A split parent metric uses them to combine its parts. Phase 2 below states the rules.
 
 | Term | Example |
 |------|---------|
 | single-pass metric | `CPC Utilization` |
 | multi-pass metric | `VALU FLOPs` (F16/F32/F64 rates) |
 | Collectable | A single-pass sub-expression of a multi-pass metric. The metric is rewritten as a combination of collectables, and each collectable is collected in its own pass. `hbm_read_sub` (HBM Bandwidth read fragment) |
-| `WEIGHTED_AVG` | One ratio whose weight was split: \((M_0 C_0 + M_1 C_1)/(C_0 + C_1)\), e.g. `WEIGHTED_AVG(read_ratio_sub, write_ratio_sub)` weighted by `TCC_EA0_RDREQ_sum` and `TCC_EA0_WRREQ_sum` |
 | `COLLECT_SUM` / `COLLECT_RATIO` | A sum of those parts, and a ratio of summed parts. HBM Bandwidth is `COLLECT_SUM(hbm_read_sub, hbm_write_sub)` |
 
 A PMC set that mixes GRBM with another block still belongs to a single-pass metric when each block has room. None of the 16 multi-pass metrics on gfx942 include GRBM.
@@ -128,19 +127,19 @@ Priority is the order of delivery. Phase 1 handles single-pass metrics. Phase 2 
 | ID | Priority | Requirement |
 |----|----------|-------------|
 | FR-1 | Phase 1 | For every single-pass metric, one perfmon pass holds that metric’s full PMC set. |
-| FR-2 | Phase 1 | Analyze reads each single-pass metric expression from that pass. A ratio is not evaluated on values merged across replays. If the selected pass does not hold every counter the expression needs, the metric stays unset. `$denom` follows `--normal-unit`: `per_wave` stays unset unless that pass holds `SQ_WAVES`, and `per_cycle` stays unset unless it holds `GRBM_GUI_ACTIVE`. Analyze does not fall back to a value taken from another pass. |
+| FR-2 | Phase 1 | Analyze reads each single-pass metric expression from that pass. A ratio is not evaluated on values merged across replays. If the selected pass does not hold every counter the expression needs, the metric stays unset when the profile copied a counter. A profile that copied no counters keeps the merged values and warns once to profile again. `$denom` follows `--normal-unit`. Packing places `SQ_WAVES` and the GRBM GUI-active counter on each `$denom` set, so that pass holds them. A profile that did not place them still leaves `per_wave` unset unless the pass holds `SQ_WAVES`, and `per_cycle` unset unless it holds `GRBM_GUI_ACTIVE`. Analyze does not fall back to a value taken from another pass. |
 | FR-3 | Phase 1 | When two PMC sets cannot share a pass, the same counter may be copied into another pass. |
 | FR-4 | Phase 1 | A PMC set that mixes blocks (GRBM and SQ, for example) stays part of a single-pass metric when every block it touches still has room. |
 | FR-5 | Phase 1 | The 75 metrics the old allocator split are fixed by FR-1 and FR-2. They stay one expression. They are not split into parts. |
 | FR-6 | Phase 2 | Each multi-pass metric is split into parts whose counters each fit one pass. `COLLECT_SUM` adds those finished parts, including a negative part. `COLLECT_RATIO` divides the pooled numerator by the pooled denominator. The parts may come from different passes. A part whose own counters fit no pass leaves the parent unset. |
-| FR-7 | Phase 2 | `WEIGHTED_AVG` is only for a ratio whose weight was split: \(M = (M_0 C_0 + M_1 C_1)/(C_0 + C_1)\). Each weight comes from the same pass as its sub-ratio, so \(M_i C_i\) is that pass's absolute piece. Adding those pieces, and adding the weights, may cross passes. The division is of those two sums. If a weight is not on its sub-ratio's pass, the parent stays unset. Sums use `COLLECT_SUM`. A ratio of summed pieces uses `COLLECT_RATIO`: the pooled numerator divided by the pooled denominator. Those pieces may come from different passes. |
-| FR-8 | Phase 2 | A multi-pass metric leaves its YAML `min` and `max` empty. If they named counters, the allocator would have to place the parent's full PMC set in one pass, which cannot be done. A parent whose `min`, `max`, or `peak` names a counter is rejected when the config loads. |
+| FR-7 | Phase 2 | A split-weight ratio, \((M_0 C_0 + M_1 C_1)/(C_0 + C_1)\), is not in this change. No shipped metric uses it, so it lands with the first metric that needs it. Sums use `COLLECT_SUM`. A ratio of summed pieces uses `COLLECT_RATIO`. |
+| FR-8 | Phase 2 | A multi-pass metric leaves its YAML `min` and `max` empty when they would name the parent's raw counters. If they named those counters, the allocator would have to place the parent's full PMC set in one pass, which cannot be done. A parent whose `min`, `max`, or `peak` names a raw counter is rejected when the config loads. A `min` or `max` that only names `_collect` pieces stays. It is the extremum over dispatches of the summed pieces. Those pieces are already packed, so the parent does not pull its full PMC set into one pass. |
 
 ### Non-functional
 
 | ID | Requirement |
 |----|-------------|
-| NFR-1 | The single-pass packer places the gfx942 default profile in **14** passes, against 13 in the shipping layout. The cost is extra replays of some counters, not a new counter set (still 274 PMCs). |
+| NFR-1 | The single-pass packer places the gfx942 default profile in **16** passes. Two of those passes, over the 14-pass layout, co-locate `SQ_WAVES` and `GRBM_GUI_ACTIVE` with `$denom` sets. Those counters are already collected, so this is not a new counter set. The other measured layouts, not gates, are gfx908 14, gfx90a 16, gfx950 23, gfx1151 12, and gfx1250 24. |
 | NFR-2 | Placing the counters that the 16 multi-pass metrics still need adds **0** passes on gfx942. Those counters are already in the Phase 1 layout. |
 | NFR-3 | After this change, the code has one allocator, single-pass metric packing, and analyze reads each single-pass metric and each Phase 2 part from one pass. |
 | NFR-4 | No silent analyze-time cap. A value above 100% is intentional or a hardware defect. |
@@ -148,7 +147,7 @@ Priority is the order of delivery. Phase 1 handles single-pass metrics. Phase 2 
 ### Guidelines
 
 - The placement steps, including which TCC counters must share a pass, are in the grouping note. This document records the decision those steps implement.
-- `WEIGHTED_AVG` does not repair a metric whose PMC set fits one pass. Packing does.
+- A split-weight ratio does not repair a metric whose PMC set fits one pass. Packing does. That ratio is not shipped until a metric needs it.
 
 ---
 
@@ -157,7 +156,7 @@ Priority is the order of delivery. Phase 1 handles single-pass metrics. Phase 2 
 ```
 408 YAML metrics (gfx942 default)
 ├── 374 with profile PMCs
-│   ├── 358 single-pass metrics   ← Phase 1 (14 passes, each metric read from one pass)
+│   ├── 358 single-pass metrics   ← Phase 1 (16 passes, each metric read from one pass)
 │   └── 16 multi-pass metrics     ← Phase 2, split into parts that each fit one pass
 └── 34 with no profile PMCs   ← out of packing scope
 ```
@@ -166,36 +165,28 @@ Priority is the order of delivery. Phase 1 handles single-pass metrics. Phase 2 
 
 **Collection.** Replace the shipping allocator. Place each single-pass metric PMC set into one pass. The grouping note calls that pass a bucket. The normative steps are in the grouping note: prefer a pass that already holds some of the set, and extend it only when every hardware block the new counters touch still has room.
 
-**Analyze.** When a counter is copied across passes, analyze keeps one column per pass, named from that pass's result file, and reads each single-pass metric expression from one pass that holds its whole PMC set. If that pass does not hold every counter the expression needs, the metric stays unset. Analyze does not fall back to a value taken from another pass. A duration in a bound expression (`End_Timestamp - Start_Timestamp`) is the duration of that expression's pass. Timestamps do not choose the pass. The column naming and pass selection are in [Reading each metric from one pass](lld-metrics-grouping-algorithm.md#3-reading-each-metric-from-one-pass).
+**Analyze.** When a counter is copied across passes, analyze keeps one column per pass, named from that pass's result file, and reads each single-pass metric expression from one pass that holds its whole PMC set. If that pass does not hold every counter the expression needs, the metric stays unset. A profile that copied no counters keeps the merged values and warns once to profile again. Analyze does not fall back to a value taken from another pass when a counter was copied. A duration in a bound expression (`End_Timestamp - Start_Timestamp`) is the duration of that expression's pass. Timestamps do not choose the pass. The column naming and pass selection are in [Reading each metric from one pass](lld-metrics-grouping-algorithm.md#3-reading-each-metric-from-one-pass).
 
 In an ordinary profile the workload runs once per pass, and each pass writes its own result file. The pass label is that file's stem. `--iteration-multiplexing` runs the workload once. The collector rotates passes across kernel launches and writes one result file, so the file name is not a pass label and the counter rows do not carry a pass field. Each dispatch row has the counters from the pass collected on that launch and empty cells for the rest. When `iteration_multiplexing` is set in `profiling_config.yaml`, file analyze and database analyze do not build per-pass columns and do not run same-pass bind. The existing imputer fills those empty cells from other launches of the same kernel. Same-pass bind applies only when each pass has its own result file.
 
-`$denom` is replaced at analyze time from `--normal-unit`, before the pass is chosen. `per_kernel` (the default) uses a per-dispatch unit column, and `per_second` uses that pass's duration. Neither adds a hardware counter. `per_wave` uses `SQ_WAVES`, and `per_cycle` uses `GRBM_GUI_ACTIVE`. Packing does not add those counters because an expression contains `$denom`. `per_wave` and `per_cycle` stay unset unless the selected pass already holds the counter. Kernel-launch fields — grid size, workgroup size, LDS and scratch allocation, and VGPR, AGPR, and SGPR counts — are dispatch-record columns, not perfmon counters, and do not select or reject a pass.
+`$denom` is replaced at analyze time from `--normal-unit`, before the pass is chosen. `per_kernel` (the default) uses a per-dispatch unit column, and `per_second` uses that pass's duration. Neither adds a hardware counter. `per_wave` uses `SQ_WAVES`, and `per_cycle` uses `GRBM_GUI_ACTIVE` (`GRBM_GUI_ACTIVE_sum` on gfx1250). Profile time does not know the later unit, so packing adds `DENOM_COLOCATED_COUNTERS` to every formula that contains `$denom`: `SQ_WAVES`, `GRBM_GUI_ACTIVE`, and `GRBM_GUI_ACTIVE_sum`. A name the profile does not collect is dropped. Clearing that tuple stops adding them. Analyze still does not take `SQ_WAVES` or `GRBM` from another pass. `per_wave` and `per_cycle` stay unset unless the selected pass holds the counter. Kernel-launch fields — grid size, workgroup size, LDS and scratch allocation, and VGPR, AGPR, and SGPR counts — are dispatch-record columns, not perfmon counters, and do not select or reject a pass.
 
-TCC needs a short-term extra rule. An L2 channel map can change between replays, so counters one expression joins share a pass. A `_LEVEL` counter adds up the outstanding requests every cycle. Dividing it by the request count gives latency, so each `_LEVEL` counter must share a pass with its request counter. Table 1805 (L2-Fabric Requests), in the L2 Cache per Channel panel, reads read, write, and atomic request counts in one row. Analyze uses the lowest-numbered pass that holds all three. That pass is not chosen because it holds `ATOMIC_LEVEL`. Extra `RDREQ` and `WRREQ` copies may remain on passes that hold a `_LEVEL` counter but not `ATOMIC`. gfx942 stays at 14 passes. Details are in the grouping note.
+TCC needs a short-term extra rule. An L2 channel map can change between replays, so counters one expression joins share a pass. A `_LEVEL` counter adds up the outstanding requests every cycle. Dividing it by the request count gives latency, so each `_LEVEL` counter must share a pass with its request counter. Table 1805 (L2-Fabric Requests), in the L2 Cache per Channel panel, reads read, write, and atomic request counts in one row. Analyze uses the lowest-numbered pass that holds all three. That pass is not chosen because it holds `ATOMIC_LEVEL`. Extra `RDREQ` and `WRREQ` copies may remain on passes that hold a `_LEVEL` counter but not `ATOMIC`. The TCC rule does not open a pass of its own. gfx942's full layout is 16 passes after the `$denom` counters are co-located. Details are in the grouping note.
 
 ### Phase 2 — splitting multi-pass metrics into single-pass parts
 
 A multi-pass metric cannot fit one pass. Split it. Each part is an ordinary single-pass metric row read from its own pass. `COLLECT_SUM` adds the finished parts, including a negative part. `COLLECT_RATIO` divides the pooled numerator by the pooled denominator. The parts may come from different passes. A part whose own counters fit no pass leaves the parent unset.
 
 - `COLLECT_SUM` adds parts, including a negative part. The parts may come from different passes. That covers VALU FLOPs, HBM bandwidth rates, IPC issued ratios, Performance GFLOPs, vL1D hit (non-RW hit plus the atom correction), and Read Instructions (load plus −store−atomic).
-- `WEIGHTED_AVG` rebuilds one ratio whose weights were split: \(M = (M_0 C_0 + M_1 C_1)/(C_0 + C_1)\). Each weight comes from the same pass as its sub-ratio, so \(M_i C_i\) is that pass's absolute piece. Adding those pieces, and adding the weights, may cross passes. The division is of those two sums. If a weight is not on its sub-ratio's pass, the parent stays unset.
-- `COLLECT_RATIO` divides the pooled numerator by the pooled denominator. The pieces may come from different passes. A missing piece, or a zero denominator, leaves the parent unset.
+- `COLLECT_RATIO` divides the pooled numerator by the pooled denominator. The pieces may come from different passes. A dispatch whose denominator is zero still adds its numerator. A missing piece, or a pooled denominator of zero, leaves the parent unset.
 
 ```yaml
 value: COLLECT_SUM(hbm_read_sub, hbm_write_sub)
 ```
 
-```yaml
-avg: WEIGHTED_AVG(read_ratio_sub, write_ratio_sub)
-_weighted_avg:
-  read_ratio_sub:
-    weight_counter: TCC_EA0_RDREQ_sum
-  write_ratio_sub:
-    weight_counter: TCC_EA0_WRREQ_sum
-```
-
 Runtime Python generation of these parents was considered and is not a runtime path; explicit YAML is the only runtime source of truth.
+
+Each part is defined once per architecture, in `analysis_configs/<arch>/collectables.yaml`, under its collectable id. Panel YAMLs keep only the parents, which name parts as `_collect.<name>` in `COLLECT_SUM`, `COLLECT_RATIO`, `MIN`, and `MAX`. When a panel is read, the loader appends each part the table names as a `_collect.<name>` row, after the table's own metrics and in first-reference order. The row stores its formula under the `value` or `avg` key that the table header uses. Loaded tables, counter packing, and visible metrics are the same as when every table carried its own copy of the rows.
 
 gfx942 has **16** multi-pass metrics and **10** unique PMC sets. Some metrics appear in more than one panel and share a set. Each part is single-pass. Under the rule above:
 
@@ -205,11 +196,11 @@ gfx942 has **16** multi-pass metrics and **10** unique PMC sets. Some metrics ap
 | HBM Bandwidth | `COLLECT_SUM` read and write rates | Shown. Each piece is `SUM(bytes) / SUM(duration)` from its own pass, and the parent adds those rates. That matches the shipping GB/s when both passes have the same summed duration over the same dispatch filter. A missing or zero duration leaves the parent unset |
 | Performance GFLOPs | `COLLECT_SUM` VALU+MFMA rates | Shown |
 | IPC Issued | `COLLECT_SUM` two issued ratios | Shown. Each piece is `SUM(instructions) / SUM(cycles)`, and the parent adds those ratios. That matches the shipping value when both pieces use the same cycle total over the same dispatch filter. A missing or zero cycle count leaves the parent unset |
-| AI HBM/L2/L1/LDS | `COLLECT_RATIO` FLOP pieces over bytes | Shown. Per-dispatch pooled FLOPs over pooled bytes. The pieces may sit on different passes. A missing piece or a zero byte total leaves the parent unset |
+| AI HBM/L2/L1/LDS | `COLLECT_RATIO` FLOP pieces over bytes | Shown. Per-dispatch pooled FLOPs over pooled bytes. The pieces may sit on different passes. A dispatch with zero bytes still adds its FLOPs. A missing piece or a zero pooled byte total leaves the parent unset |
 | vL1D hit | `COLLECT_SUM` non-RW hit + atom correction | Shown. The non-RW hit and the atom correction are each one pass, and the parent adds them, including the negative atom term |
 | Read Instructions | `COLLECT_SUM` load + (−store−atomic) | Shown. Load plus (−store−atomic). The pieces may sit on different passes |
 
-After Phase 2 YAML, the gfx942 allocator gate is `single_pass_metric_sets_without_pass == 0`, passes == **14**, `multi_pass_additional_passes == 0`, and `multi_pass_metric_count == 0`. `single_pass_metric_sets_without_pass` counts single-pass metric counter sets that still have no single pass holding every counter. `multi_pass_additional_passes` counts buckets `fill_multi_pass_metrics_into_existing_passes` opens after first-fit; it stays 0 when first-fit already placed those counters. `multi_pass_metric_count` counts metrics whose counters do not fit one pass. The 16 parents are then `COLLECT_*` expressions over parts, so they are not counted there. A validation run on code that does not yet have the Phase 2 YAML still reports `multi_pass_metric_count == 16`, because those 16 parents are still single expressions. Offline check: `tools/eval_single_pass_metrics.py --arch gfx942`.
+After Phase 2 YAML, the gfx942 allocator gate is `single_pass_metric_sets_without_pass == 0`, passes == **16**, `multi_pass_additional_passes == 0`, and `multi_pass_metric_count == 0`. `single_pass_metric_sets_without_pass` counts single-pass metric counter sets that still have no single pass holding every counter. `multi_pass_additional_passes` counts buckets `fill_multi_pass_metrics_into_existing_passes` opens after first-fit; it stays 0 when first-fit already placed those counters. `multi_pass_metric_count` counts metrics whose counters do not fit one pass. The 16 parents are then `COLLECT_*` expressions over parts, so they are not counted there. A validation run on code that does not yet have the Phase 2 YAML still reports `multi_pass_metric_count == 16`, because those 16 parents are still single expressions. Offline check: `tools/eval_single_pass_metrics.py --arch gfx942`.
 
 ### Decisions and alternatives
 
@@ -217,13 +208,13 @@ After Phase 2 YAML, the gfx942 allocator gate is `single_pass_metric_sets_withou
 |----------|-----|-------------|
 | single-pass metric packing replaces the shipping allocator | The shipping pack minimizes passes for all 274 counters, so 75 metrics whose sets fit one pass stay split | The shipping allocator's hand-kept list of a few metric IDs. It visits those IDs first. The greedy pass still visits every metric |
 | On gfx1250, `SP_VALU_*` and `SQ_VMEM_*` do not share a pass | Both charge SQ, and the SP FLOP counters return zero when they share a pass. Free SQ slots do not prevent that. The check runs before a set is called a single-pass metric set, and during placement, merge, and leftover fill. An extra pass is acceptable | Treating free SQ slots as enough to share a pass |
-| Copy a counter into another pass when two PMC sets cannot share a pass | Keeping each counter in only one pass cannot place all 358 single-pass metric sets, and gfx942 stays at 14 passes | One dedicated pass per metric |
+| Copy a counter into another pass when two PMC sets cannot share a pass | Keeping each counter in only one pass cannot place all 358 single-pass metric sets, and gfx942 stays at 16 passes | One dedicated pass per metric |
 | Reading each metric from one pass ships with packing | A copied counter has several values. Merging them evaluates the ratio on different replays. `CPC Utilization` averages can sit far above 100% | Packing alone, or reading from one pass alone |
-| A metric that cannot be read from one pass stays unset | Values merged across passes are the error this design removes | Falling back to columns merged from several passes |
-| Phase 2 only for the 16 multi-pass metrics | Those sets do not fit one pass after placement. None of them include GRBM | `WEIGHTED_AVG` for metrics whose set fits one pass |
+| A metric that cannot be read from one pass stays unset when the profile copied a counter | Merging a copied counter reads different replays. A profile that copied no counters keeps the merged values and warns once to profile again | Unsetting every metric on a capture that copied nothing |
+| Phase 2 only for the 16 multi-pass metrics | Those sets do not fit one pass after placement. None of them include GRBM | Splitting a metric whose PMC set already fits one pass |
 | A Phase 2 parent adds finished parts, including a negative part, or divides the pooled numerator by the pooled denominator | Each part is still one pass. The parts may come from different passes | Leaving a subtracted sum, or a ratio of parts, unset |
-| Largest-first greedy placement | It meets the gfx942 gates (`single_pass_metric_sets_without_pass == 0`, 14 passes). A solver on the allocate path is harder to explain when a metric is split | Using an optimization solver (OR-Tools CP-SAT) to allocate. That solver is no longer on the allocate path |
-| Table 1805's read, write, and atomic counters stay one PMC set | Those three request columns are one execution. Analyze uses the lowest-numbered pass that holds all three. That pass is not chosen because it holds `ATOMIC_LEVEL`. gfx942 stays at 14 passes | Giving read, write, and atomic each their own PMC set |
+| Largest-first greedy placement | It meets the gfx942 gates (`single_pass_metric_sets_without_pass == 0`, 16 passes). A solver on the allocate path is harder to explain when a metric is split | Using an optimization solver (OR-Tools CP-SAT) to allocate. That solver is no longer on the allocate path |
+| Table 1805's read, write, and atomic counters stay one PMC set | Those three request columns are one execution. Analyze uses the lowest-numbered pass that holds all three. That pass is not chosen because it holds `ATOMIC_LEVEL`. The TCC rule does not open a pass of its own; gfx942's full layout is 16 passes | Giving read, write, and atomic each their own PMC set |
 
 ---
 
@@ -235,16 +226,16 @@ On gfx942, single-pass metric coverage is `single_pass_metric_sets_without_pass 
 
 | Layer | What it shows | Tied to |
 |-------|----------------|---------|
-| Unit | Packing (`test_counter_grouping_single_pass`, buckets, `soc_base`), reading each metric from one pass (`test_pass_provenance`, database analyze), multi-pass metrics (`test_collectable`, `test_weighted_avg*`, `test_collect_ratio`) | FR-1, FR-2, FR-6, FR-7 |
-| Offline | After Phase 2 YAML, `tools/eval_single_pass_metrics.py --arch gfx942`: `single_pass_metric_sets_without_pass == 0`, **14** passes, `multi_pass_additional_passes == 0`, `multi_pass_metric_count == 0`. Those fields are defined under Design. A run before that YAML still reports `multi_pass_metric_count == 16` | FR-1, FR-5, NFR-1, NFR-2 |
+| Unit | Packing (`test_counter_grouping_single_pass`, buckets, `soc_base`), reading each metric from one pass (`test_pass_provenance`, database analyze), multi-pass metrics (`test_collectable`, `test_collect_ratio`) | FR-1, FR-2, FR-6 |
+| Offline | After Phase 2 YAML, `tools/eval_single_pass_metrics.py --arch gfx942`: `single_pass_metric_sets_without_pass == 0`, **16** passes, `multi_pass_additional_passes == 0`, `multi_pass_metric_count == 0`. Those fields are defined under Design. A run before that YAML still reports `multi_pass_metric_count == 16` | FR-1, FR-5, NFR-1, NFR-2 |
 | End to end | Three workloads — `vcopy`, `nbody` (`mini-nbody`), `mega_kernel` — on gfx908, gfx90a, gfx942, gfx950, and gfx115x, including gfx1151. Not gfx1250. CPX is a host precondition for the gfx942 run. The baseline is a separate run of `rocprofiler-compute-develop` on the same workloads | FR-2, NFR-4, the tickets in System Context |
-| Phase 2 only | The 16 multi-pass metrics: each part fits one pass, and the parent adds those parts or divides the pooled numerator by the pooled denominator | FR-6, FR-7, FR-8 |
+| Phase 2 only | The 16 multi-pass metrics: each part fits one pass, and the parent adds those parts or divides the pooled numerator by the pooled denominator | FR-6, FR-8 |
 
 A script runs this build and a separate `rocprofiler-compute-develop` checkout on the same workloads. The health test report compares the two runs' artifact directories. It checks that there are no unexpected negative values and that percents stay in 0–100% except documented exceptions. Re-check the tickets listed under System Context and generate a summary report. The report is not part of the packing algorithm.
 
 ### Debugging a bad ratio
 
-The failure mode is a wrong ratio, not a crash. Loaded frames keep one column per pass for a copied counter, so the pass an expression used is visible in the data. A metric that cannot be read from one pass is unset with a warning. A Phase 2 parent stays unset when a part is missing or a denominator is zero. `eval_single_pass_metrics.py` prints the offline gates without a GPU. Compare against a `rocprofiler-compute-develop` run to tell a layout change from a change in which pass analyze reads.
+The failure mode is a wrong ratio, not a crash. Loaded frames keep one column per pass for a copied counter, so the pass an expression used is visible in the data. A metric that cannot be read from one pass is unset with a warning when the profile copied a counter. A profile that copied no counters keeps the merged values and warns once to profile again. A Phase 2 parent stays unset when a part is missing or the pooled denominator is zero. `eval_single_pass_metrics.py` prints the offline gates without a GPU. Compare against a `rocprofiler-compute-develop` run to tell a layout change from a change in which pass analyze reads.
 
 ### Security
 
@@ -255,5 +246,4 @@ No new privilege, network, or credential surface. Profile still launches the exi
 ## Open questions
 
 - Filtered `--block` / `--set` profiles allocate only the counters that were requested. There is no separate acceptance count for those subsets.
-- A multi-pass metric leaves its YAML `min` and `max` empty (FR-8). A parent whose `min`, `max`, or `peak` names a counter is rejected when the config loads. A later definition of min and max for a split parent is deferred.
 - One replay can still be split into time slices. This design does not cover that. Reading each metric from one pass is about which replay the counters come from.
