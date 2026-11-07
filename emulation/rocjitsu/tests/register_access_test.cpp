@@ -36,7 +36,9 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/operand.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
@@ -47,6 +49,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/instruction_compute_unit_view.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
@@ -55,6 +58,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
@@ -1312,6 +1316,51 @@ TEST(RegisterAccessTest, Vgpr64AccessRequiresOneOwnerForCompleteRange) {
   EXPECT_EQ(fx.cu->read_vgpr_storage(boundary, kLane), kLowSentinel);
   EXPECT_EQ(fx.cu->read_vgpr_storage(adjacent_wave->vgpr_alloc().base, kLane), kAdjacentSentinel);
   EXPECT_TRUE(fx.plugin->writes.empty());
+  EXPECT_TRUE(fx.plugin->reads.empty());
+}
+
+TEST(RegisterAccessTest, D16XyzStoreRequiresOneOwnerForBothVgprs) {
+  constexpr uint32_t vgprs = 32;
+  Fixture fx(ROCJITSU_CODE_ARCH_RDNA4, kSgprsPerWave, /*wavefront_slots=*/2, vgprs);
+  ASSERT_NE(fx.wf, nullptr);
+  auto *neighbor = fx.cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0, kSgprsPerWave, vgprs);
+  ASSERT_NE(neighbor, nullptr);
+  ASSERT_EQ(neighbor->vgpr_alloc().base, fx.vgpr_base() + vgprs);
+  fx.wf->set_exec(1);
+  constexpr uint8_t format = 46;                   // 8_8_8_8_UINT.
+  fx.cu->write_sgpr(fx.sgpr_base() + 5, 4u << 16); // Four-byte stride.
+  fx.cu->write_sgpr(fx.sgpr_base() + 6, 1);        // One record.
+  fx.cu->write_sgpr(fx.sgpr_base() + 7, format << 12);
+  fx.cu->write_vgpr(fx.vgpr_base() + 30, 0, 0x00220011);
+  fx.cu->write_vgpr(fx.vgpr_base() + 31, 0, 0x00440033);
+  fx.cu->write_vgpr(neighbor->vgpr_alloc().base, 0, 0x00660055);
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_NE(decoder, nullptr);
+  auto store = [&](uint8_t vdata, std::array<uint8_t, 3> xyz) {
+    const auto words = rdna4::build_vbuffer(
+        rdna4::kTbufferStoreD16FormatXyzVbuffer,
+        {.soffset = rdna4::OPR_SREG_M0_NULL, .vdata = vdata, .rsrc = 4, .format = format});
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
+    const auto *state = inst->data_as<VectorMemState>();
+    ASSERT_NE(state, nullptr);
+    ASSERT_EQ(state->lane_mask, 1u);
+    ASSERT_GE(state->store_data.size(), xyz.size());
+    for (size_t i = 0; i < xyz.size(); ++i)
+      EXPECT_EQ(state->store_data[i], xyz[i]);
+  };
+
+  store(30, {0x11, 0x22, 0x33});
+  ASSERT_EQ(fx.plugin->reads.size(), 2u);
+  EXPECT_EQ(fx.plugin->reads[0].physical_reg, fx.vgpr_base() + 30);
+  EXPECT_EQ(fx.plugin->reads[0].byte_mask, ExecutionPlugin::kFullByteMask);
+  EXPECT_EQ(fx.plugin->reads[1].physical_reg, fx.vgpr_base() + 31);
+  EXPECT_EQ(fx.plugin->reads[1].byte_mask, ExecutionPlugin::kLowHalfByteMask);
+
+  fx.plugin->reads.clear();
+  store(31, {0, 0, 0});
   EXPECT_TRUE(fx.plugin->reads.empty());
 }
 
