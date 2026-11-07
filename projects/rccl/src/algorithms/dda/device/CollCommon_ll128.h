@@ -436,7 +436,9 @@ __device__ __forceinline__ bool ddaLL128PollWire2(const uint64_t* wireA, const u
   int spins = 0;
   bool needReload;
   do {
-    if (params.abortSpinTick(spins)) return false;
+    if (params.abortSpinTick(spins)) {
+      return false;
+    }
     needReload = false;
 #pragma unroll
     for (int u = 0; u < kDdaLL128WordsPerThread; u += 2) {
@@ -480,6 +482,12 @@ __device__ __forceinline__ void ddaLL128StoreRegs(
 // Slices needed to carry bytes of payload.
 constexpr size_t ddaLL128Slices(size_t bytes) {
   return (bytes + kDdaLL128DataBytesPerSlice - 1) / kDdaLL128DataBytesPerSlice;
+}
+
+// Payload bytes of slice s of a `bytes`-long range: a whole slice, or what is left for the last one.
+constexpr int ddaLL128SliceBytes(size_t bytes, size_t s) {
+  const size_t rem = bytes - s * (size_t)kDdaLL128DataBytesPerSlice;
+  return rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
 }
 
 } // namespace dda::common
