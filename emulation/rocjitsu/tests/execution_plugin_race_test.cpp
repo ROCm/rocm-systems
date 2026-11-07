@@ -832,7 +832,7 @@ TEST_F(TensorDmaRaceTest, TransferWithoutLdsBytesLeavesTheLoadPendingUntilTheWai
   EXPECT_TRUE(ds_read(0, 4));
 }
 
-// Wave 1 writes LDS and ends; wave 0 then passes a barrier and reads the
+// Wave 1 writes LDS and may end; wave 0 then passes a barrier and reads the
 // bytes. The fixture's DS helpers are not specific to tensor DMA.
 class ExitedWaveRaceTest : public TensorDmaRaceTest {
 protected:
@@ -863,11 +863,10 @@ TEST_F(ExitedWaveRaceTest, UnwaitedWriteStillRacesAfterWorkgroupBarrier) {
   EXPECT_TRUE(ds_read(0, 64));
 }
 
-TEST_F(ExitedWaveRaceTest, WorkgroupBarrierDoesNotFlushAnOmittedLiveWave) {
+TEST_F(ExitedWaveRaceTest, NamedBarrierDoesNotRetireAnUnjoinedLiveWave) {
   EXPECT_FALSE(ds_write(1, 64));
   wait_dscnt(1);
-  barrier_without_wave_1(BarrierKind::Workgroup);
-  fixture.plugin_group_->onAmdgpuWavefrontHalted(*waves[1]);
+  barrier_without_wave_1(BarrierKind::Named);
   EXPECT_TRUE(ds_read(0, 64));
 }
 

@@ -355,7 +355,8 @@ public:
   virtual void onAmdgpuWriteScalarRegister(const amdgpu::Wavefront * /*wf*/, RegisterRef /*reg*/) {}
 
   /// Called with the waves synchronized by a completed barrier domain.
-  /// Waves that ended before the barrier resolved are not members.
+  /// Workgroup callbacks include all surviving waves of one workgroup.
+  /// Waves that ended before the barrier resolved are not included.
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> /*wavefronts*/,
                                        BarrierKind /*kind*/) {}
