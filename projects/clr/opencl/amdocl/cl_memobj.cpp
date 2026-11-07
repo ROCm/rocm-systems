@@ -9,7 +9,10 @@
 #include "platform/context.hpp"
 #include "platform/command.hpp"
 #include "platform/memory.hpp"
+#include "platform/external_memory.hpp"
+#include <algorithm>
 #include <cmath>
+#include <vector>
 
 #ifdef _WIN32
 #include <d3d10_1.h>
@@ -4715,5 +4718,360 @@ RUNTIME_EXIT
 
 /*! @}
  *  @}
+ *
+ *  \addtogroup cl_khr_external_memory
+ *  @{
+ */
+
+namespace {
+
+//! Everything clCreate{Buffer,Image}WithProperties can learn from a cl_mem_properties list.
+struct MemProperties {
+  bool hasHandle = false;
+  amd::ExternalMemory::HandleType handleType = amd::ExternalMemory::HandleType::OpaqueFd;
+  amd::Os::FileDesc handle = amd::Os::FDescInit();
+  std::vector<amd::Device*> devices;
+};
+
+//! Unpacks a property-list slot into an amd::Os::FileDesc. The list is cl_ulong-wide,
+//! while FileDesc is void* on Windows and int on POSIX.
+inline amd::Os::FileDesc ToFileDesc(cl_mem_properties value) {
+#if defined(_WIN32)
+  return reinterpret_cast<amd::Os::FileDesc>(static_cast<uintptr_t>(value));
+#else
+  return static_cast<amd::Os::FileDesc>(value);
+#endif
+}
+
+//! Rejects handle values that cannot name an external allocation, so a bad handle is
+//! reported as CL_INVALID_VALUE up front instead of surfacing as an import failure.
+inline bool IsValidExternalHandle(amd::Os::FileDesc handle) {
+#if defined(_WIN32)
+  return handle != nullptr;
+#else
+  return handle >= 0;
+#endif
+}
+
+bool MapMemoryHandleType(cl_mem_properties token, amd::ExternalMemory::HandleType* type) {
+  switch (token) {
+    case CL_EXTERNAL_MEMORY_HANDLE_OPAQUE_FD_KHR:
+    case CL_EXTERNAL_MEMORY_HANDLE_DMA_BUF_KHR:
+      *type = amd::ExternalMemory::HandleType::OpaqueFd;
+      return true;
+    case CL_EXTERNAL_MEMORY_HANDLE_OPAQUE_WIN32_KHR:
+      *type = amd::ExternalMemory::HandleType::OpaqueWin32;
+      return true;
+    case CL_EXTERNAL_MEMORY_HANDLE_OPAQUE_WIN32_KMT_KHR:
+      *type = amd::ExternalMemory::HandleType::OpaqueWin32Kmt;
+      return true;
+    case CL_EXTERNAL_MEMORY_HANDLE_D3D11_TEXTURE_KHR:
+      *type = amd::ExternalMemory::HandleType::D3D11Resource;
+      return true;
+    case CL_EXTERNAL_MEMORY_HANDLE_D3D11_TEXTURE_KMT_KHR:
+      *type = amd::ExternalMemory::HandleType::D3D11ResourceKmt;
+      return true;
+    case CL_EXTERNAL_MEMORY_HANDLE_D3D12_HEAP_KHR:
+      *type = amd::ExternalMemory::HandleType::D3D12Heap;
+      return true;
+    case CL_EXTERNAL_MEMORY_HANDLE_D3D12_RESOURCE_KHR:
+      *type = amd::ExternalMemory::HandleType::D3D12Resource;
+      return true;
+    default:
+      return false;
+  }
+}
+
+//! Parses a cl_mem_properties list. Returns CL_SUCCESS, or CL_INVALID_PROPERTY for an
+//! unrecognised/duplicated property and CL_INVALID_DEVICE for a bad device handle list.
+cl_int ParseMemProperties(amd::Context& amdContext, const cl_mem_properties* properties,
+                          MemProperties* out) {
+  if (properties == nullptr) {
+    return CL_SUCCESS;
+  }
+
+  bool deviceListSeen = false;
+
+  for (const cl_mem_properties* p = properties; *p != 0;) {
+    const cl_mem_properties name = *p++;
+
+    if (MapMemoryHandleType(name, &out->handleType)) {
+      if (out->hasHandle) {
+        // At most one external handle may be specified.
+        return CL_INVALID_PROPERTY;
+      }
+      out->hasHandle = true;
+      out->handle = ToFileDesc(*p++);
+      continue;
+    }
+
+    if (name == CL_MEM_DEVICE_HANDLE_LIST_KHR) {
+      if (deviceListSeen) {
+        return CL_INVALID_PROPERTY;
+      }
+      deviceListSeen = true;
+      while (*p != CL_MEM_DEVICE_HANDLE_LIST_END_KHR) {
+        cl_device_id device = reinterpret_cast<cl_device_id>(static_cast<uintptr_t>(*p++));
+        if (!is_valid(device) || !amdContext.containsDevice(as_amd(device))) {
+          return CL_INVALID_DEVICE;
+        }
+        out->devices.push_back(as_amd(device));
+      }
+      ++p;  // skip the LIST_END sentinel
+      continue;
+    }
+
+    return CL_INVALID_PROPERTY;
+  }
+
+  return CL_SUCCESS;
+}
+
+//! Enforces CL_MEM_DEVICE_HANDLE_LIST_KHR as far as the import path can.
+//!
+//! The list names the devices the imported allocation is for, but the import runs through
+//! amd::Memory::create(), which registers the allocation on every device in the context. A list
+//! that leaves a context device out therefore cannot be honoured. Accept one that covers the
+//! whole context - the case that actually occurs, and what the CTS passes - and reject a genuine
+//! restriction instead of silently importing on a device the caller excluded.
+cl_int ValidateMemDeviceList(const amd::Context& amdContext, const MemProperties& memProps) {
+  if (memProps.devices.empty()) {
+    return CL_SUCCESS;
+  }
+  for (auto* device : amdContext.devices()) {
+    if (std::find(memProps.devices.begin(), memProps.devices.end(), device) ==
+        memProps.devices.end()) {
+      return CL_INVALID_PROPERTY;
+    }
+  }
+  return CL_SUCCESS;
+}
+
+}  // namespace
+
+/*! \brief Creates a buffer object, optionally importing external memory.
+ *
+ *  With no properties this behaves exactly like clCreateBuffer. With an external
+ *  memory handle property the buffer wraps the imported allocation instead of
+ *  allocating; \a host_ptr must then be NULL.
+ */
+RUNTIME_ENTRY_RET(cl_mem, clCreateBufferWithProperties,
+                  (cl_context context, const cl_mem_properties* properties, cl_mem_flags flags,
+                   size_t size, void* host_ptr, cl_int* errcode_ret)) {
+  if (!is_valid(context)) {
+    *not_null(errcode_ret) = CL_INVALID_CONTEXT;
+    return (cl_mem)0;
+  }
+
+  amd::Context& amdContext = *as_amd(context);
+  MemProperties memProps;
+  cl_int err = ParseMemProperties(amdContext, properties, &memProps);
+  if (err == CL_SUCCESS) {
+    err = ValidateMemDeviceList(amdContext, memProps);
+  }
+  if (err != CL_SUCCESS) {
+    *not_null(errcode_ret) = err;
+    return (cl_mem)0;
+  }
+
+  if (!memProps.hasHandle) {
+    // No external memory requested: plain OpenCL 3.0 behaviour.
+    return clCreateBuffer(context, flags, size, host_ptr, errcode_ret);
+  }
+
+  if (!IsValidExternalHandle(memProps.handle)) {
+    *not_null(errcode_ret) = CL_INVALID_VALUE;
+    LogWarning("invalid external memory handle");
+    return (cl_mem)0;
+  }
+  if (!validateFlags(flags)) {
+    *not_null(errcode_ret) = CL_INVALID_VALUE;
+    LogWarning("invalid parameter \"flags\"");
+    return (cl_mem)0;
+  }
+  if (size == 0) {
+    *not_null(errcode_ret) = CL_INVALID_BUFFER_SIZE;
+    return (cl_mem)0;
+  }
+  if (host_ptr != nullptr ||
+      (flags & (CL_MEM_USE_HOST_PTR | CL_MEM_COPY_HOST_PTR | CL_MEM_ALLOC_HOST_PTR))) {
+    // The imported allocation is the storage; host pointers make no sense here.
+    *not_null(errcode_ret) = CL_INVALID_HOST_PTR;
+    return (cl_mem)0;
+  }
+
+  auto* extBuffer = new (amdContext) amd::ExternalBuffer(amdContext, size, memProps.handle,
+                                                         memProps.handleType, flags);
+  if (extBuffer == nullptr) {
+    *not_null(errcode_ret) = CL_OUT_OF_HOST_MEMORY;
+    return (cl_mem)0;
+  }
+
+  if (!extBuffer->create()) {
+    extBuffer->release();
+    *not_null(errcode_ret) = CL_OUT_OF_RESOURCES;
+    return (cl_mem)0;
+  }
+
+  *not_null(errcode_ret) = CL_SUCCESS;
+  return as_cl<amd::Memory>(extBuffer);
+}
+RUNTIME_EXIT
+
+/*! \brief Creates an image object, optionally importing external memory.
+ *
+ *  With no properties this behaves exactly like clCreateImage. With an external
+ *  memory handle property the image is created as a view over an imported
+ *  allocation: the handle is wrapped in an amd::ExternalBuffer and the image is
+ *  built on top of it, which is the same shape HIP uses for Vulkan image interop.
+ *  The tiling layout is recovered by the ROCr backend from the surface metadata
+ *  returned at map time, not from the row/slice pitch computed here.
+ */
+RUNTIME_ENTRY_RET(cl_mem, clCreateImageWithProperties,
+                  (cl_context context, const cl_mem_properties* properties, cl_mem_flags flags,
+                   const cl_image_format* image_format, const cl_image_desc* image_desc,
+                   void* host_ptr, cl_int* errcode_ret)) {
+  if (!is_valid(context)) {
+    *not_null(errcode_ret) = CL_INVALID_CONTEXT;
+    return (cl_mem)0;
+  }
+
+  amd::Context& amdContext = *as_amd(context);
+  MemProperties memProps;
+  cl_int err = ParseMemProperties(amdContext, properties, &memProps);
+  if (err == CL_SUCCESS) {
+    err = ValidateMemDeviceList(amdContext, memProps);
+  }
+  if (err != CL_SUCCESS) {
+    *not_null(errcode_ret) = err;
+    return (cl_mem)0;
+  }
+
+  // Checked ahead of the clCreateImage delegation below, for two reasons: that path
+  // dereferences image_desc without a NULL check of its own, and when both pointers
+  // are NULL the descriptor error is the one to report - without a descriptor there
+  // is no image for a format to describe.
+  if (image_desc == nullptr) {
+    *not_null(errcode_ret) = CL_INVALID_IMAGE_DESCRIPTOR;
+    return (cl_mem)0;
+  }
+  if (image_format == nullptr) {
+    *not_null(errcode_ret) = CL_INVALID_IMAGE_FORMAT_DESCRIPTOR;
+    return (cl_mem)0;
+  }
+
+  if (!memProps.hasHandle) {
+    // No external memory requested: plain OpenCL 3.0 behaviour.
+    return clCreateImage(context, flags, image_format, image_desc, host_ptr, errcode_ret);
+  }
+
+  if (!IsValidExternalHandle(memProps.handle)) {
+    *not_null(errcode_ret) = CL_INVALID_VALUE;
+    LogWarning("invalid external memory handle");
+    return (cl_mem)0;
+  }
+  if (!validateFlags(flags)) {
+    *not_null(errcode_ret) = CL_INVALID_VALUE;
+    return (cl_mem)0;
+  }
+  if (host_ptr != nullptr ||
+      (flags & (CL_MEM_USE_HOST_PTR | CL_MEM_COPY_HOST_PTR | CL_MEM_ALLOC_HOST_PTR))) {
+    *not_null(errcode_ret) = CL_INVALID_HOST_PTR;
+    return (cl_mem)0;
+  }
+
+  const amd::Image::Format imageFormat(*image_format);
+  if (!imageFormat.isValid()) {
+    *not_null(errcode_ret) = CL_INVALID_IMAGE_FORMAT_DESCRIPTOR;
+    return (cl_mem)0;
+  }
+  if (!imageFormat.isSupported(amdContext, image_desc->image_type)) {
+    *not_null(errcode_ret) = CL_IMAGE_FORMAT_NOT_SUPPORTED;
+    return (cl_mem)0;
+  }
+
+  const std::vector<amd::Device*>& devices = amdContext.devices();
+  if (!amd::Image::validateDimensions(devices, image_desc->image_type, image_desc->image_width,
+                                      image_desc->image_height, image_desc->image_depth,
+                                      image_desc->image_array_size)) {
+    *not_null(errcode_ret) = CL_INVALID_IMAGE_SIZE;
+    return (cl_mem)0;
+  }
+
+  const size_t width = image_desc->image_width;
+  const size_t height = (image_desc->image_height == 0) ? 1 : image_desc->image_height;
+  const size_t depth = (image_desc->image_depth == 0) ? 1 : image_desc->image_depth;
+
+  // Linear fallback pitches. The imported surface may well be tiled, in which case the
+  // backend overrides these from the surface metadata; they only size the wrapper buffer.
+  const size_t rowPitch = (image_desc->image_row_pitch != 0)
+      ? image_desc->image_row_pitch
+      : width * imageFormat.getElementSize();
+  const size_t slicePitch =
+      (image_desc->image_slice_pitch != 0) ? image_desc->image_slice_pitch : rowPitch * height;
+  const size_t bufferSize = slicePitch * depth;
+
+  switch (image_desc->image_type) {
+    case CL_MEM_OBJECT_IMAGE1D:
+    case CL_MEM_OBJECT_IMAGE2D:
+    case CL_MEM_OBJECT_IMAGE3D:
+      break;
+    default:
+      // Array and buffer-backed image types have no external-memory import path.
+      *not_null(errcode_ret) = CL_INVALID_IMAGE_DESCRIPTOR;
+      return (cl_mem)0;
+  }
+
+  // This path does not run validateImageDescriptor(), so the two descriptor fields it would
+  // have rejected are checked here. Neither is plumbed into the amd::Image built below, so
+  // accepting them would hand back an image that does not match what was asked for.
+  if (image_desc->num_mip_levels != 0 || image_desc->num_samples != 0) {
+    *not_null(errcode_ret) = CL_INVALID_IMAGE_DESCRIPTOR;
+    return (cl_mem)0;
+  }
+  if (image_desc->mem_object != nullptr) {
+    // An imported allocation is the storage; it cannot also be a view over another object.
+    *not_null(errcode_ret) = CL_INVALID_IMAGE_DESCRIPTOR;
+    return (cl_mem)0;
+  }
+
+  auto* extBuffer = new (amdContext) amd::ExternalBuffer(amdContext, bufferSize, memProps.handle,
+                                                         memProps.handleType, flags);
+  if (extBuffer == nullptr) {
+    *not_null(errcode_ret) = CL_OUT_OF_HOST_MEMORY;
+    return (cl_mem)0;
+  }
+  if (!extBuffer->create()) {
+    extBuffer->release();
+    *not_null(errcode_ret) = CL_OUT_OF_RESOURCES;
+    return (cl_mem)0;
+  }
+
+  auto* image = new (amdContext)
+      amd::Image(*extBuffer, image_desc->image_type, flags, imageFormat, width, height, depth,
+                 rowPitch, slicePitch);
+  if (image == nullptr) {
+    extBuffer->release();
+    *not_null(errcode_ret) = CL_OUT_OF_HOST_MEMORY;
+    return (cl_mem)0;
+  }
+
+  if (!image->create()) {
+    image->release();
+    extBuffer->release();
+    *not_null(errcode_ret) = CL_MEM_OBJECT_ALLOCATION_FAILURE;
+    return (cl_mem)0;
+  }
+
+  // The image view retains the wrapper buffer, so drop our reference to it: releasing
+  // the image is then enough to tear the whole thing down.
+  extBuffer->release();
+
+  *not_null(errcode_ret) = CL_SUCCESS;
+  return as_cl<amd::Memory>(image);
+}
+RUNTIME_EXIT
+
+/*! @}
  *  @}
  */

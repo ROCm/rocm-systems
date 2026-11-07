@@ -251,18 +251,27 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMallocFree) {
     }
   }
 
+  // A pitched row is rounded up to the device's reported texturePitchAlignment, which is not the
+  // same on every ASIC (128 bytes from gfx12 on, 256 before it). Derive the expected pitch and
+  // size from that rather than hard-coding one generation's value.
+  hipDeviceProp_t pitchProps;
+  HIP_CHECK(hipGetDeviceProperties(&pitchProps, 0));
+  const size_t pitchAlign = pitchProps.texturePitchAlignment ? pitchProps.texturePitchAlignment : 1;
+
   // Validating hipMallocPitch API
   {
     void* pitchedMem_ptr = nullptr;
     size_t pitch_ptr = -1;
     int width1 = 260;
     int height1 = 2;
+    const size_t expectedPitch = ((width1 + pitchAlign - 1) / pitchAlign) * pitchAlign;
 
     HIP_CHECK(dyn_hipMallocPitch_ptr(&pitchedMem_ptr, &pitch_ptr, width1, height1));
 
+    REQUIRE(pitch_ptr == expectedPitch);
     size_t pitchedMem_sizeptr = -1;
     HIP_CHECK(hipMemPtrGetInfo(pitchedMem_ptr, &pitchedMem_sizeptr));
-    REQUIRE(pitchedMem_sizeptr == 1024);
+    REQUIRE(pitchedMem_sizeptr == expectedPitch * height1);
 
     HIP_CHECK(hipFree(pitchedMem_ptr));
   }
@@ -275,6 +284,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMallocFree) {
     int height = 2;
     unsigned int groupOfElementSizeBytes[] = {4, 8, 16};
     size_t pitchedMem_sizeptr = -1;
+    const size_t expectedPitch = ((width + pitchAlign - 1) / pitchAlign) * pitchAlign;
 
     for (auto elementSizeBytes : groupOfElementSizeBytes) {
       pitchedMem_ptr = nullptr;
@@ -283,10 +293,10 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMallocFree) {
       HIP_CHECK(
           dyn_hipMemAllocPitch_ptr(&pitchedMem_ptr, &pitch_ptr, width, height, elementSizeBytes));
 
-      REQUIRE(pitch_ptr == 512);
+      REQUIRE(pitch_ptr == expectedPitch);
       pitchedMem_sizeptr = -1;
       HIP_CHECK(hipMemPtrGetInfo(pitchedMem_ptr, &pitchedMem_sizeptr));
-      REQUIRE(pitchedMem_sizeptr == 1024);
+      REQUIRE(pitchedMem_sizeptr == expectedPitch * height);
 
       HIP_CHECK(hipFree(pitchedMem_ptr));
     }
@@ -777,19 +787,28 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisArrayRelated) {
   HIP_CHECK(hipMalloc3D(&p_array3d, p_extent3d));
   HIP_CHECK(dyn_hipMalloc3D_ptr(&p_array3d_ptr, p_extent3d));
 
+  // The row pitch follows the device's texturePitchAlignment, which differs per ASIC (128 bytes
+  // from gfx12 on, 256 before it), so derive the expected pitch and size instead of hard-coding.
+  hipDeviceProp_t pitchProps;
+  HIP_CHECK(hipGetDeviceProperties(&pitchProps, 0));
+  const size_t pitchAlign = pitchProps.texturePitchAlignment ? pitchProps.texturePitchAlignment : 1;
+  const size_t expectedPitch =
+      ((p_extent3d.width + pitchAlign - 1) / pitchAlign) * pitchAlign;
+  const size_t expectedSize = expectedPitch * p_extent3d.height * p_extent3d.depth;
+
   REQUIRE(p_array3d.ptr != nullptr);
   size_t p_size = -1;
   HIP_CHECK(hipMemPtrGetInfo(p_array3d.ptr, &p_size));
-  REQUIRE(p_size == 65536);
-  REQUIRE(p_array3d.pitch == 512);
+  REQUIRE(p_size == expectedSize);
+  REQUIRE(p_array3d.pitch == expectedPitch);
   REQUIRE(p_array3d.xsize == 260);
   REQUIRE(p_array3d.ysize == 16);
 
   REQUIRE(p_array3d_ptr.ptr != nullptr);
   size_t p_size_ptr = -1;
   HIP_CHECK(hipMemPtrGetInfo(p_array3d_ptr.ptr, &p_size_ptr));
-  REQUIRE(p_size_ptr == 65536);
-  REQUIRE(p_array3d_ptr.pitch == 512);
+  REQUIRE(p_size_ptr == expectedSize);
+  REQUIRE(p_array3d_ptr.pitch == expectedPitch);
   REQUIRE(p_array3d_ptr.xsize == 260);
   REQUIRE(p_array3d_ptr.ysize == 16);
 

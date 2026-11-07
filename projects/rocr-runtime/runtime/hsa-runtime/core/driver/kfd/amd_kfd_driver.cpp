@@ -883,6 +883,46 @@ hsa_status_t KfdDriver::ImportExternalSemaphore(uint32_t node_id, void* nt_handl
   return HSA_STATUS_SUCCESS;
 }
 
+hsa_status_t KfdDriver::CreateExternalSemaphore(uint32_t node_id,
+                                                hsa_amd_external_semaphore_handle_type_t type,
+                                                uint64_t initial_value, bool timeline,
+                                                hsa_amd_external_semaphore_t* out_sem,
+                                                void** out_os_handle) const {
+  // Same 1:1 enum mapping as the import path above.
+  HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE kmt_type =
+      static_cast<HSA_EXTERNAL_SEMAPHORE_HANDLE_TYPE>(type);
+
+  HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = {};
+  void* os_handle = nullptr;
+  // Require destroy alongside create for the same reason import does: a
+  // created semaphore we cannot release is a leak.
+  auto* thunk_loader = core::Runtime::runtime_singleton_->thunkLoader();
+  const bool loaded =
+      thunk_loader->HSAKMT_PFN(hsaKmtCreateExternalSemaphore) != nullptr &&
+      thunk_loader->HSAKMT_PFN(hsaKmtDestroyExternalSemaphore) != nullptr;
+  HSAKMT_STATUS s = loaded
+      ? HSAKMT_CALL(hsaKmtCreateExternalSemaphore(node_id, kmt_type, initial_value,
+                                                  timeline ? 1u : 0u, &kmt_handle, &os_handle))
+      : HSAKMT_STATUS_NOT_SUPPORTED;
+
+  switch (s) {
+    case HSAKMT_STATUS_SUCCESS:
+      break;
+    case HSAKMT_STATUS_INVALID_PARAMETER:
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    case HSAKMT_STATUS_NOT_SUPPORTED:  // missing thunk / KMT type / Linux stub
+      return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
+    case HSAKMT_STATUS_INVALID_NODE_UNIT:
+      return HSA_STATUS_ERROR_INVALID_AGENT;
+    default:
+      return HSA_STATUS_ERROR;
+  }
+
+  out_sem->handle = kmt_handle.handle;
+  *out_os_handle = os_handle;
+  return HSA_STATUS_SUCCESS;
+}
+
 hsa_status_t KfdDriver::DestroyExternalSemaphore(hsa_amd_external_semaphore_t sem) const {
   HSA_EXTERNAL_SEMAPHORE_HANDLE kmt_handle = {sem.handle};
   // No export -> not this driver's handle. INVALID_AGENT (base-class

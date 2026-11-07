@@ -642,6 +642,83 @@ bool WDDMDevice::CreateSyncobj(D3DKMT_HANDLE *handle, uint64_t **addr) {
   return false;
 }
 
+bool WDDMDevice::CreateSharedSyncobj(D3DKMT_HANDLE *handle,
+                                     uint64_t initial_value, bool timeline,
+                                     bool nt_sharing,
+                                     D3DKMT_HANDLE *shared_handle) {
+  if (handle == nullptr || shared_handle == nullptr) return false;
+
+  D3DKMT_CREATESYNCHRONIZATIONOBJECT2 args = {0};
+  args.hDevice = device_;
+  // Shared alone yields a global KMT handle in Info.SharedHandle. Adding
+  // NtSecuritySharing switches the object to NT security, which is what makes
+  // it eligible for D3DKMTShareObjects; without it ExportSyncobjToNtHandle
+  // fails with STATUS_INVALID_PARAMETER rather than anything descriptive.
+  args.Info.Flags.Shared = 1;
+  args.Info.Flags.NtSecuritySharing = nt_sharing ? 1 : 0;
+
+  if (timeline) {
+    args.Info.Type = D3DDDI_MONITORED_FENCE;
+    args.Info.MonitoredFence.InitialFenceValue = initial_value;
+    args.Info.MonitoredFence.EngineAffinity = 1 << 0;
+  } else {
+    // A Vulkan BINARY semaphore is a legacy sync object, not a monitored
+    // fence - measured on the import side, where opening one returns null
+    // for both MonitoredFence CPU and GPU virtual addresses and
+    // D3DKMTOpenNativeFenceFromNtHandle rejects it outright. Exporting a
+    // monitored fence here gets "Failed to import semaphore in Vulkan".
+    // MaxCount 1 is the legacy spelling of "binary", matching PAL's
+    // QueueSemaphoreCreateInfo::maxCount.
+    args.Info.Type = D3DDDI_SEMAPHORE;
+    args.Info.Semaphore.MaxCount = 1;
+    // MaxCount bounds this at 1, so reject anything larger rather than letting the cast to
+    // UINT silently truncate a 64-bit value into a legal-looking count.
+    if (initial_value > 1) {
+      pr_err("binary semaphore initial value %" PRIu64 " exceeds MaxCount 1\n", initial_value);
+      return false;
+    }
+    args.Info.Semaphore.InitialCount = static_cast<UINT>(initial_value);
+  }
+
+  NTSTATUS ret = DXCORE_CALL(D3DKMTCreateSynchronizationObject2(&args));
+  if (ret != STATUS_SUCCESS) {
+    pr_err("fail %x\n", ret);
+    return false;
+  }
+
+  *handle = args.hSyncObject;
+  // Only meaningful for the non-NT flavour; zero otherwise.
+  *shared_handle = args.Info.SharedHandle;
+  pr_debug("create shared syncobj=%x cpu addr=%p gpu addr=%" PRIx64 "\n",
+           args.hSyncObject,
+           args.Info.MonitoredFence.FenceValueCPUVirtualAddress,
+           args.Info.MonitoredFence.FenceValueGPUVirtualAddress);
+  return true;
+}
+
+bool WDDMDevice::ExportSyncobjToNtHandle(D3DKMT_HANDLE syncobj,
+                                         void **nt_handle) {
+  if (syncobj == 0 || nt_handle == nullptr) return false;
+
+  OBJECT_ATTRIBUTES obj_attr;
+  InitializeObjectAttributes(&obj_attr, nullptr, OBJ_INHERIT, nullptr, nullptr);
+
+  // GENERIC_READ | GENERIC_WRITE, not GENERIC_ALL: the mask is validated
+  // against what the object actually supports, and an over-broad request
+  // creates a handle Vulkan then refuses with "Failed to import semaphore".
+  // Same value PAL's QueueSemaphoreExportInfo::accessFlags uses.
+  HANDLE out = nullptr;
+  NTSTATUS ret = DXCORE_CALL(D3DKMTShareObjects(1, &syncobj, &obj_attr,
+                                                GENERIC_READ | GENERIC_WRITE, &out));
+  if (ret != STATUS_SUCCESS) {
+    pr_err("fail %x\n", ret);
+    return false;
+  }
+
+  *nt_handle = out;
+  return true;
+}
+
 bool WDDMDevice::DestroySyncobj(D3DKMT_HANDLE handle) {
   D3DKMT_DESTROYSYNCHRONIZATIONOBJECT args = {0};
   args.hSyncObject = handle;
@@ -767,6 +844,23 @@ bool WDDMDevice::DestroyEvent(uint32_t event_id, int efd, D3DKMT_HANDLE syncobj)
   return ret;
 }
 #endif
+
+bool WDDMDevice::OpenSyncobjFromKmtHandle(D3DKMT_HANDLE kmt_handle,
+                                          D3DKMT_HANDLE *out_handle) {
+  if (kmt_handle == 0 || out_handle == nullptr) return false;
+
+  D3DKMT_OPENSYNCHRONIZATIONOBJECT args = {0};
+  args.hSharedHandle = kmt_handle;
+
+  NTSTATUS ret = DXCORE_CALL(D3DKMTOpenSynchronizationObject(&args));
+  if (ret != STATUS_SUCCESS) {
+    pr_err("D3DKMTOpenSynchronizationObject failed: 0x%x\n", ret);
+    return false;
+  }
+
+  *out_handle = args.hSyncObject;
+  return true;
+}
 
 void WDDMDevice::InitCmdbufInfo(void) {
   if (device_info_.major == 9) {

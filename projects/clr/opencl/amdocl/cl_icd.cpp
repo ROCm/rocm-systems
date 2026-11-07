@@ -15,6 +15,25 @@
 
 #include <mutex>
 
+//! Stub for the OpenCL 3.0 clSetContextDestructorCallback slot.
+//!
+//! Context destructor callbacks are not implemented, but the slot cannot simply be left NULL:
+//! the Khronos loader forwards the call straight through context->dispatch with no NULL check,
+//! so an application calling it would make a null function-pointer call instead of getting an
+//! error back. Validate the arguments the way the loader's caller expects and report that the
+//! operation is unavailable.
+static cl_int CL_API_CALL icdSetContextDestructorCallback(
+    cl_context context, void(CL_CALLBACK* pfn_notify)(cl_context context, void* user_data),
+    void* user_data) {
+  if (!is_valid(context)) {
+    return CL_INVALID_CONTEXT;
+  }
+  if (pfn_notify == nullptr) {
+    return CL_INVALID_VALUE;
+  }
+  return CL_INVALID_OPERATION;
+}
+
 static cl_int CL_API_CALL icdGetPlatformInfo(cl_platform_id platform, cl_platform_info param_name,
                                              size_t param_value_size, void* param_value,
                                              size_t* param_value_size_ret) {
@@ -106,7 +125,12 @@ cl_icd_dispatch amd::ICDDispatchedObject::icdVendorDispatch_[] = {
      clGetDeviceAndHostTimer, clGetHostTimer, clGetKernelSubGroupInfo,
      clSetDefaultDeviceCommandQueue,
 
-     clSetProgramReleaseCallback, clSetProgramSpecializationConstant}};
+     clSetProgramReleaseCallback, clSetProgramSpecializationConstant,
+
+     // OpenCL 3.0. The destructor-callback slot is a stub rather than NULL - see
+     // icdSetContextDestructorCallback above.
+     clCreateBufferWithProperties, clCreateImageWithProperties,
+     icdSetContextDestructorCallback}};
 
 CL_API_ENTRY cl_int CL_API_CALL clIcdGetPlatformIDsKHR(cl_uint num_entries,
                                                        cl_platform_id* platforms,

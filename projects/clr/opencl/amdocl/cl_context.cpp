@@ -470,6 +470,7 @@ CL_API_ENTRY void* CL_API_CALL clGetExtensionFunctionAddress(const char* func_na
 #endif  //_WIN32
       CL_EXTENSION_ENTRYPOINT_CHECK(clConvertImageAMD);
       CL_EXTENSION_ENTRYPOINT_CHECK(clCreateBufferFromImageAMD);
+      CL_EXTENSION_ENTRYPOINT_CHECK(clCreateSemaphoreWithPropertiesKHR);
 #if defined(cl_khr_il_program) || defined(CL_VERSION_2_1)
       CL_EXTENSION_ENTRYPOINT_CHECK2(clCreateProgramWithILKHR, clCreateProgramWithIL);
 #endif  // defined(cl_khr_il_program) || defined(CL_VERSION_2_1)
@@ -498,6 +499,10 @@ CL_API_ENTRY void* CL_API_CALL clGetExtensionFunctionAddress(const char* func_na
 #if cl_amd_copy_buffer_p2p
       CL_EXTENSION_ENTRYPOINT_CHECK(clEnqueueCopyBufferP2PAMD);
 #endif  // cl_amd_copy_buffer_p2p
+      CL_EXTENSION_ENTRYPOINT_CHECK(clEnqueueAcquireExternalMemObjectsKHR);
+      CL_EXTENSION_ENTRYPOINT_CHECK(clEnqueueReleaseExternalMemObjectsKHR);
+      CL_EXTENSION_ENTRYPOINT_CHECK(clEnqueueWaitSemaphoresKHR);
+      CL_EXTENSION_ENTRYPOINT_CHECK(clEnqueueSignalSemaphoresKHR);
       break;
     case 'G':
       CL_EXTENSION_ENTRYPOINT_CHECK(clGetKernelInfoAMD);
@@ -514,6 +519,8 @@ CL_API_ENTRY void* CL_API_CALL clGetExtensionFunctionAddress(const char* func_na
 #if defined(cl_khr_sub_groups) || defined(CL_VERSION_2_1)
       CL_EXTENSION_ENTRYPOINT_CHECK2(clGetKernelSubGroupInfoKHR, clGetKernelSubGroupInfo);
 #endif  // defined(cl_khr_sub_groups) || defined(CL_VERSION_2_1)
+      CL_EXTENSION_ENTRYPOINT_CHECK(clGetSemaphoreInfoKHR);
+      CL_EXTENSION_ENTRYPOINT_CHECK(clGetSemaphoreHandleForTypeKHR);
       break;
     case 'I':
       CL_EXTENSION_ENTRYPOINT_CHECK(clIcdGetPlatformIDsKHR);
@@ -523,6 +530,8 @@ CL_API_ENTRY void* CL_API_CALL clGetExtensionFunctionAddress(const char* func_na
       CL_EXTENSION_ENTRYPOINT_CHECK(clRetainPerfCounterAMD);
       CL_EXTENSION_ENTRYPOINT_CHECK(clReleaseThreadTraceAMD);
       CL_EXTENSION_ENTRYPOINT_CHECK(clRetainThreadTraceAMD);
+      CL_EXTENSION_ENTRYPOINT_CHECK(clReleaseSemaphoreKHR);
+      CL_EXTENSION_ENTRYPOINT_CHECK(clRetainSemaphoreKHR);
       break;
     case 'S':
       CL_EXTENSION_ENTRYPOINT_CHECK(clSetThreadTraceParamAMD);
@@ -530,6 +539,7 @@ CL_API_ENTRY void* CL_API_CALL clGetExtensionFunctionAddress(const char* func_na
       break;
     case 'U':
       CL_EXTENSION_ENTRYPOINT_CHECK(clUnloadPlatformAMD);
+      break;
     default:
       break;
   }

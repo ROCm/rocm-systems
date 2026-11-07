@@ -45,6 +45,7 @@ DxcoreLoader::DxcoreLoader()
     , pfn_D3DKMTQueryResourceInfoFromNtHandle(nullptr)
     , pfn_D3DKMTOpenResourceFromNtHandle(nullptr)
     , pfn_D3DKMTOpenSyncObjectFromNtHandle2(nullptr)
+    , pfn_D3DKMTOpenSynchronizationObject(nullptr)
     , pfn_D3DKMTCreateHwQueue(nullptr)
     , pfn_D3DKMTDestroyHwQueue(nullptr)
     , pfn_D3DKMTSubmitCommandToHwQueue(nullptr)
@@ -146,6 +147,7 @@ bool DxcoreLoader::LoadDxcoreApis() {
     LOAD_DXCORE_API(D3DKMTQueryResourceInfo);
     LOAD_DXCORE_API(D3DKMTOpenResourceFromNtHandle);
     LOAD_DXCORE_API(D3DKMTOpenSyncObjectFromNtHandle2);
+    LOAD_DXCORE_API(D3DKMTOpenSynchronizationObject);
     LOAD_DXCORE_API(D3DKMTOpenResource);
     LOAD_DXCORE_API(D3DKMTCreateHwQueue);
     LOAD_DXCORE_API(D3DKMTDestroyHwQueue);
