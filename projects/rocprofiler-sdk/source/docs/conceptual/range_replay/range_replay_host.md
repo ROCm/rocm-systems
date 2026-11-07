@@ -19,7 +19,7 @@ between begin and end *is* the program, and each extra pass runs it again:
        malloc/free pairs, host computation, several streams ...      |
                                                                      |
  rocprofiler_range_replay_end()                                      |
-   fence every GPU queue, PASS exit                                  |
+   fence compute queues, PASS exit                                  |
    more passes?  yes -> restore device memory + registered host      |
                         memory, PASS enter, siglongjmp  -------------+
                  no  -> CLOSE, return
@@ -47,6 +47,7 @@ valid: a `sigsetjmp` inside `begin()` would be dead as soon as `begin()` returne
 #include <setjmp.h>
 
 rocprofiler_status_t status;
+hipDeviceSynchronize();             // on every participating device
 rocprofiler_range_replay_host_track_memory(&host_state, sizeof(host_state));
 ROCPROFILER_RANGE_REPLAY_HOST_BEGIN(range_id, status);
 
@@ -109,7 +110,8 @@ Any difference is reported as `divergence_count` on CLOSE.
 | Tool asked for host replay, application did not arm the jump | `HOST_JMP_NOT_SET` |
 | Another thread dispatches to any GPU while the range is open | `CONCURRENT_DISPATCH` |
 | Another thread copies into device memory while the range is open | `MEMORY_COPY_IN_RANGE` |
-| The set of tracked device allocations differs at the end of a pass (a leak, or a free of pre-existing memory) | `ALLOCATION_CHANGED_IN_RANGE` |
+| Tracked device allocation addresses, sizes, or lifetimes differ at the end of a pass (a leak, or freeing/replacing pre-existing memory) | `ALLOCATION_CHANGED_IN_RANGE` |
+| A code object is unloaded while the range is open | `CODE_OBJECT_CHANGED_IN_RANGE` |
 | The entry snapshot could not be captured (host memory pressure) | `SNAPSHOT_FAILED` |
 | No dispatch in the application's own run | `NO_DISPATCH` |
 | Queue interposition (write-pointer virtualization) is in use | `UNSUPPORTED_QUEUE_PATH` |
@@ -142,8 +144,12 @@ locals. The code between the macro and `end` must follow these rules:
    the range is fine.
 4. **Register host state the range reads and writes** with
    `rocprofiler_range_replay_host_track_memory`.
-5. **Synchronize before `end`.** `end` fences every GPU queue anyway, but work submitted from other
-   threads would decline the range.
+5. **Synchronize all GPU work before begin and before `end` on every pass.** This includes
+   asynchronous copies and non-compute queues on every participating device. Use their supported
+   completion mechanisms (for example, `hipDeviceSynchronize` on each participating device).
+   The SDK additionally fences compute queues and drains dispatch handlers, but these do not wait
+   for untracked asynchronous copies or non-compute work. No other thread may submit GPU work or
+   copy into device memory while the range is open.
 6. **Keep once-only side effects out of re-executed passes.** `rocprofiler_range_replay_get_host_pass`
    returns 0 on the application's own run and 1..N-1 after that.
 7. **Balanced allocations only.** `hipMalloc` / `hipFree` pairs inside the range are fine. So is
@@ -163,7 +169,7 @@ rather than only around a submit, because the dispatches that must honor it are 
 
 ## Cost
 
-Per range, host replay pays one fence of every GPU queue and one snapshot of all tracked device
+Per range, host replay pays one fence of every compute queue and one snapshot of all tracked device
 memory on every GPU agent (held in host memory until CLOSE). Per extra pass it pays one fence and one
 restore of that snapshot, plus a `memcpy` of each registered host region. The passes themselves run
 at the application's own speed. Size ranges so the snapshot is small relative to the range's

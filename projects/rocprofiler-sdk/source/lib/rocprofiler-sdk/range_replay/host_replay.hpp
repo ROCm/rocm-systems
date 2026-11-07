@@ -34,8 +34,8 @@
 //
 // What has to hold for the passes to be repeatable, and how each part is enforced:
 //  - Device memory on every GPU agent is snapshotted at begin and restored before every extra pass.
-//    The tracked allocations must be the same set at each restore: a balanced allocate/free inside
-//    the range is fine, anything else declines ALLOCATION_CHANGED_IN_RANGE.
+//    The tracked allocations must have the same bases, sizes and lifetimes at each restore: a
+//    balanced allocate/free of temporary memory is fine; replacing an entry allocation declines.
 //  - Host memory is rewound only where the application registered it
 //    (rocprofiler_range_replay_host_track_memory). The divergence check reports a final pass that
 //    ended in a different state from the application's own run.
@@ -72,9 +72,10 @@ struct step_result_t
     uint64_t                          divergence_count = 0;
 };
 
-// Called from begin() after CONFIG. Marks the range as host replay and, when the tool asked for
-// extra passes, fences every GPU agent and captures its device memory plus the pending host
-// regions.
+// Called from begin() after CONFIG. The caller must first synchronize all GPU work, including
+// copies and non-compute queues. Marks the range as host replay and, when the tool asked for extra
+// passes, fences intercepted compute queues on every GPU agent and captures its device memory plus
+// the pending host regions.
 void
 enter_range(range_context_t& ctx, std::vector<pending_host_region_t>&& pending_regions);
 
@@ -83,8 +84,9 @@ enter_range(range_context_t& ctx, std::vector<pending_host_region_t>&& pending_r
 void
 track_region(range_context_t& ctx, void* ptr, size_t size);
 
-// Called from end(): finish the pass that just ran and either set up the next one (restore, PASS
-// enter) or conclude the range.
+// Called from end() after the caller synchronizes all GPU work, including copies and non-compute
+// queues: finish the pass and either set up the next one (restore, PASS enter) or conclude the
+// range.
 step_result_t
 finish_pass(range_context_t& ctx);
 

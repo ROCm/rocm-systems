@@ -103,6 +103,7 @@ bool
 replay_ring_submit(const Queue& queue, const rocprofiler_packet* packets, size_t count)
 {
     if(count == 0) return true;
+    if(queue.get_engine_type() != Queue::engine_type::compute) return false;
 
     const auto* hsa_queue = queue.intercept_queue();
     if(hsa_queue == nullptr || hsa_queue->base_address == nullptr) return false;

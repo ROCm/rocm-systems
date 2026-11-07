@@ -119,6 +119,9 @@ typedef enum rocprofiler_range_replay_status_t  // NOLINT(performance-enum-size)
  * pass. Another thread dispatching or copying to a device inside the range, or a device allocation
  * left allocated or freed across the range, still declines. Module variables of a code object
  * first loaded inside the range are not rewound, so launch each kernel once before the range.
+ * The application must synchronize all GPU work on every participating device before begin and
+ * before end on every pass, including asynchronous copies and non-compute queues. The SDK's
+ * compute-queue barriers and dispatch-handler drains do not wait for untracked copy completions.
  *
  * @see `source/docs/conceptual/range_replay/index.md`
  */
@@ -250,6 +253,9 @@ rocprofiler_range_replay_host_jmpbuf(void) ROCPROFILER_API;
  *  - Host memory the range reads and writes must be registered with
  *    @ref rocprofiler_range_replay_host_track_memory to be rewound between passes.
  *  - No other thread may submit GPU work or copy into device memory while the range is open.
+ *  - Synchronize all GPU work, including asynchronous copies and non-compute queues, before this
+ *    macro and before end on every pass, using the runtime's supported completion mechanisms
+ *    (for example, HIP device synchronization on every participating device).
  */
 #define ROCPROFILER_RANGE_REPLAY_HOST_BEGIN(range_id, status_out)                                  \
     do                                                                                             \

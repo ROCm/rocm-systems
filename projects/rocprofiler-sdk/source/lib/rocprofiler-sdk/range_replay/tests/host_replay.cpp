@@ -25,6 +25,7 @@
 // snapshot and the pass loop proper need a GPU and are covered by tests/range-replay-host.
 
 #include "lib/rocprofiler-sdk/range_replay/host_replay.hpp"
+#include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/range_replay/range_state.hpp"
 
 #include <rocprofiler-sdk/experimental/range_replay.h>
@@ -34,6 +35,9 @@
 #include <array>
 #include <csetjmp>
 #include <cstdint>
+#include <future>
+#include <mutex>
+#include <shared_mutex>
 #include <thread>
 
 namespace range_replay = ::rocprofiler::range_replay;
@@ -67,9 +71,10 @@ TEST(range_replay_host, arming_is_consumed_exactly_once)
 
     auto* buffer = range_replay::host_jmpbuf();
     ASSERT_NE(buffer, nullptr);
-    EXPECT_EQ(buffer, range_replay::host_jmp_target());
+    EXPECT_NE(buffer, range_replay::host_jmp_target()) << "arming writes a staged target";
 
     EXPECT_TRUE(range_replay::take_host_jmp_armed());
+    EXPECT_EQ(buffer, range_replay::host_jmp_target());
     EXPECT_FALSE(range_replay::take_host_jmp_armed())
         << "a second begin must not inherit the first begin's jump target";
 }
@@ -123,6 +128,43 @@ TEST(range_replay_host, begin_macro_calls_begin_once_and_reports_success_on_reen
     EXPECT_EQ(first_status, ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND)
         << "the first entry reports begin's own status";
     EXPECT_EQ(status, ROCPROFILER_STATUS_SUCCESS) << "a re-entry must not call begin again";
+}
+
+namespace
+{
+rocprofiler_status_t
+attempt_nested_host_begin()
+{
+    auto status = ROCPROFILER_STATUS_SUCCESS;
+    ROCPROFILER_RANGE_REPLAY_HOST_BEGIN(2, status);
+    return status;
+}
+}  // namespace
+
+TEST(range_replay_host, rejected_nested_begin_preserves_active_jump_target)
+{
+    volatile bool reentered = false;
+    auto*         target    = static_cast<sigjmp_buf*>(range_replay::host_jmpbuf());
+    if(sigsetjmp(*target, 1) == 0)
+    {
+        ASSERT_TRUE(range_replay::take_host_jmp_armed());
+        ASSERT_NE(open_host_range(1), nullptr);
+
+        auto* staged = range_replay::host_jmpbuf();
+        EXPECT_NE(staged, target);
+        EXPECT_NE(attempt_nested_host_begin(), ROCPROFILER_STATUS_SUCCESS);
+        EXPECT_FALSE(range_replay::take_host_jmp_armed());
+        EXPECT_EQ(range_replay::host_jmp_target(), target);
+        // Do not jump to the returned nested frame if staging or promotion was broken.
+        if(staged != target && range_replay::host_jmp_target() == target) siglongjmp(*target, 1);
+    }
+    else
+    {
+        reentered = true;
+    }
+
+    EXPECT_TRUE(reentered);
+    EXPECT_EQ(close_status(), ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED);
 }
 
 TEST(range_replay_host, track_memory_and_get_host_pass_validate_arguments)
@@ -235,6 +277,20 @@ TEST(range_replay_host, another_threads_dispatch_on_any_agent_declines_a_host_ra
     EXPECT_EQ(close_status(), ROCPROFILER_RANGE_REPLAY_STATUS_CONCURRENT_DISPATCH);
 }
 
+TEST(range_replay_host, dispatch_from_another_range_owner_declines_a_host_range)
+{
+    ASSERT_NE(open_host_range(1), nullptr);
+
+    std::thread{[]() {
+        ASSERT_NE(open_host_range(2), nullptr);
+        range_replay::note_foreign_dispatch(agent_b);
+        EXPECT_EQ(close_status(), ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED)
+            << "a submission does not interfere with its own range";
+    }}.join();
+
+    EXPECT_EQ(close_status(), ROCPROFILER_RANGE_REPLAY_STATUS_CONCURRENT_DISPATCH);
+}
+
 TEST(range_replay_host, an_unbound_packet_range_ignores_other_threads)
 {
     ASSERT_TRUE(range_replay::open_range(1));
@@ -248,14 +304,43 @@ TEST(range_replay_host, an_unbound_packet_range_ignores_other_threads)
     EXPECT_EQ(close_status(), ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED);
 }
 
-TEST(range_replay_host, code_object_unload_does_not_decline_a_host_range)
+TEST(range_replay_host, code_object_unload_declines_a_host_range)
 {
-    ASSERT_NE(open_host_range(1), nullptr);
+    auto* ctx = open_host_range(1);
+    ASSERT_NE(ctx, nullptr);
+    ctx->host.snapshot_taken = true;
 
-    // Nothing is recorded, so no packet can point at the unloaded code.
+    // Executable globals in the entry snapshot must not be restored after their owner unloads.
     range_replay::note_code_object_unload();
 
-    EXPECT_EQ(close_status(), ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED);
+    EXPECT_EQ(close_status(), ROCPROFILER_RANGE_REPLAY_STATUS_CODE_OBJECT_CHANGED_IN_RANGE);
+}
+
+TEST(range_replay_host, executable_retirement_waits_for_snapshot_restore_guard)
+{
+    auto* ctx = open_host_range(1);
+    ASSERT_NE(ctx, nullptr);
+    ctx->host.snapshot_taken = true;
+
+    auto restore_guard = std::shared_lock{rocprofiler::code_object::executable_lifetime_mutex()};
+    auto attempted     = std::promise<bool>{};
+    auto blocked       = attempted.get_future();
+    auto unload        = std::thread{[&]() {
+        auto retirement_guard = std::unique_lock{
+            rocprofiler::code_object::executable_lifetime_mutex(), std::defer_lock};
+        const bool must_wait = !retirement_guard.try_lock();
+        attempted.set_value(must_wait);
+        if(must_wait) retirement_guard.lock();
+        range_replay::note_code_object_unload();
+    }};
+
+    EXPECT_TRUE(blocked.get());
+    range_replay::fold_external_decline(*ctx);
+    EXPECT_TRUE(ctx->record.eligible()) << "the executable cannot retire during restoration";
+    restore_guard.unlock();
+    unload.join();
+
+    EXPECT_EQ(close_status(), ROCPROFILER_RANGE_REPLAY_STATUS_CODE_OBJECT_CHANGED_IN_RANGE);
 }
 
 TEST(range_replay_host, dispatch_counting_stops_at_a_decline)
@@ -310,4 +395,146 @@ TEST(range_replay_host, a_jump_re_executes_the_range_over_restored_host_state)
 
     EXPECT_EQ(jump_passes, 3);
     EXPECT_EQ(jump_sums, (std::array<int, 3>{20, 20, 20}));
+}
+
+TEST(range_replay_host, pending_region_capture_failures_decline_without_throwing)
+{
+    auto value                = 7;
+    auto ctx                  = range_replay::range_context_t{};
+    ctx.plan.replay_requested = true;
+    auto pending              = std::vector<range_replay::pending_host_region_t>{
+        {&value, sizeof(value)}, {&value, std::vector<uint8_t>{}.max_size() + 1}};
+
+    EXPECT_NO_THROW(range_replay::host::enter_range(ctx, std::move(pending)));
+    EXPECT_EQ(ctx.record.status(), ROCPROFILER_RANGE_REPLAY_STATUS_SNAPSHOT_FAILED);
+    EXPECT_FALSE(ctx.host.snapshot_taken);
+    EXPECT_TRUE(ctx.host.regions.empty());
+    EXPECT_EQ(value, 7);
+}
+
+TEST(range_replay_host, in_range_region_capture_failures_decline_without_throwing)
+{
+    auto value              = 7;
+    auto ctx                = range_replay::range_context_t{};
+    ctx.host.enabled        = true;
+    ctx.host.snapshot_taken = true;
+    range_replay::host::track_region(ctx, &value, sizeof(value));
+    ASSERT_EQ(ctx.host.regions.size(), 1U);
+
+    EXPECT_NO_THROW(
+        range_replay::host::track_region(ctx, &value, std::vector<uint8_t>{}.max_size() + 1));
+    EXPECT_EQ(ctx.record.status(), ROCPROFILER_RANGE_REPLAY_STATUS_SNAPSHOT_FAILED);
+    EXPECT_TRUE(ctx.host.regions.empty());
+    range_replay::host::track_region(ctx, &value, sizeof(value));
+    EXPECT_TRUE(ctx.host.regions.empty()) << "a declined range must not keep capturing";
+    EXPECT_EQ(value, 7);
+}
+
+TEST(range_replay_host, replacing_or_resizing_an_entry_allocation_declines_before_restore)
+{
+    namespace mt     = ::rocprofiler::kernel_replay::memory_tracker;
+    auto       value = 7;
+    const auto agent = hsa_agent_t{.handle = agent_a};
+    for(const auto replacement :
+        {mt::alloc_info_t{sizeof(value) + 1, agent, 1}, mt::alloc_info_t{sizeof(value), agent, 2}})
+    {
+        auto ctx                  = range_replay::range_context_t{};
+        ctx.plan.replay_requested = true;
+        ctx.record.count_dispatches(1);
+        ctx.host.snapshot_taken     = true;
+        auto agent_state            = range_replay::host_agent_state_t{};
+        agent_state.hsa_agent       = agent;
+        agent_state.agent_id.handle = agent_a;
+        mt::inventory().wlock(
+            [&](auto& map) { map[&value] = mt::alloc_info_t{sizeof(value), agent, 1}; });
+        agent_state.tracked = mt::snap_allocation_identity(agent);
+        EXPECT_TRUE(mt::allocations_match(agent, agent_state.tracked));
+        ctx.host.agents.emplace_back(std::move(agent_state));
+        ctx.host.regions.emplace_back(range_replay::host::capture_region(&value, sizeof(value)));
+        ++value;
+        mt::inventory().wlock([&](auto& map) { map[&value] = replacement; });
+
+        const auto result = range_replay::host::finish_pass(ctx);
+        EXPECT_EQ(result.next_pass, 0U);
+        EXPECT_EQ(result.status, ROCPROFILER_RANGE_REPLAY_STATUS_ALLOCATION_CHANGED_IN_RANGE);
+        EXPECT_EQ(value, 8) << "the host snapshot must not be restored after an identity change";
+        mt::record_free(&value);
+        value = 7;
+    }
+}
+
+TEST(range_replay_host, allocation_change_after_initial_checks_declines_before_any_agent_restore)
+{
+    namespace mt                = ::rocprofiler::kernel_replay::memory_tracker;
+    auto first                  = 7;
+    auto second                 = 11;
+    auto ctx                    = range_replay::range_context_t{};
+    ctx.plan.replay_requested   = true;
+    ctx.plan.indefinite         = true;
+    ctx.plan.user_data.ptr      = &second;
+    ctx.plan.replay_continue_cb = [](uint64_t, uint64_t, uint64_t, rocprofiler_user_data_t data) {
+        mt::inventory().wlock([&](auto& map) { ++map.at(data.ptr).lifetime_id; });
+        return 1;
+    };
+    ctx.host.pass           = 1;
+    ctx.host.snapshot_taken = true;
+
+    for(const auto item : {std::pair<void*, uint64_t>{&first, agent_a}, {&second, agent_b}})
+    {
+        auto state             = range_replay::host_agent_state_t{};
+        state.hsa_agent.handle = item.second;
+        state.agent_id.handle  = item.second;
+        mt::inventory().wlock([&](auto& map) {
+            map[item.first] = mt::alloc_info_t{sizeof(int), state.hsa_agent, 1};
+        });
+        state.tracked = mt::snap_allocation_identity(state.hsa_agent);
+        state.snapshot.blocks.push_back({item.first, std::vector<char>(sizeof(int), 0), true});
+        ctx.host.agents.emplace_back(std::move(state));
+        ctx.host.regions.emplace_back(range_replay::host::capture_region(item.first, sizeof(int)));
+    }
+    ++first;
+    ++second;
+
+    // The callback changes the second agent's identity after the initial allocation check. No
+    // device copy may start on the first agent before the second agent's identity is validated.
+    const auto result = range_replay::host::finish_pass(ctx);
+    EXPECT_EQ(result.next_pass, 0U);
+    EXPECT_EQ(result.status, ROCPROFILER_RANGE_REPLAY_STATUS_ALLOCATION_CHANGED_IN_RANGE);
+    EXPECT_EQ(first, 8);
+    EXPECT_EQ(second, 12);
+    mt::record_free(&first);
+    mt::record_free(&second);
+}
+
+TEST(range_replay_host, continuation_unload_is_folded_after_reacquiring_executable_lifetime)
+{
+    auto value                  = 7;
+    auto ctx                    = range_replay::range_context_t{};
+    ctx.external                = std::make_shared<range_replay::external_decline_t>();
+    ctx.plan.replay_requested   = true;
+    ctx.plan.indefinite         = true;
+    ctx.plan.user_data.ptr      = &ctx;
+    ctx.plan.replay_continue_cb = [](uint64_t, uint64_t, uint64_t, rocprofiler_user_data_t data) {
+        auto& range    = *static_cast<range_replay::range_context_t*>(data.ptr);
+        auto  acquired = false;
+        std::thread{[&] {
+            auto guard = std::unique_lock{::rocprofiler::code_object::executable_lifetime_mutex(),
+                                          std::try_to_lock};
+            acquired   = guard.owns_lock();
+            if(acquired)
+                range_replay::publish_external_decline(
+                    *range.external, ROCPROFILER_RANGE_REPLAY_STATUS_CODE_OBJECT_CHANGED_IN_RANGE);
+        }}.join();
+        EXPECT_TRUE(acquired) << "continuation callbacks must not hold executable lifetime locks";
+        return 1;
+    };
+    ctx.host.pass           = 1;
+    ctx.host.snapshot_taken = true;
+    ctx.host.regions.emplace_back(range_replay::host::capture_region(&value, sizeof(value)));
+    ++value;
+
+    const auto result = range_replay::host::finish_pass(ctx);
+    EXPECT_EQ(result.next_pass, 0U);
+    EXPECT_EQ(result.status, ROCPROFILER_RANGE_REPLAY_STATUS_CODE_OBJECT_CHANGED_IN_RANGE);
+    EXPECT_EQ(value, 8);
 }

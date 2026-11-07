@@ -86,7 +86,9 @@ registry()
 thread_local std::unique_ptr<range_context_t> tl_range     = {};
 thread_local bool                             tl_replaying = false;
 
-thread_local sigjmp_buf                         tl_host_jmp             = {};
+thread_local sigjmp_buf                         tl_host_jmp_buffers[2]  = {};
+thread_local sigjmp_buf*                        tl_host_jmp_staged      = &tl_host_jmp_buffers[0];
+thread_local sigjmp_buf*                        tl_host_jmp_active      = &tl_host_jmp_buffers[1];
 thread_local bool                               tl_host_jmp_armed       = false;
 thread_local std::vector<pending_host_region_t> tl_pending_host_regions = {};
 
@@ -307,19 +309,23 @@ void*
 host_jmpbuf()
 {
     tl_host_jmp_armed = true;
-    return &tl_host_jmp;
+    return tl_host_jmp_staged;
 }
 
 bool
 take_host_jmp_armed()
 {
-    return std::exchange(tl_host_jmp_armed, false);
+    const bool armed = std::exchange(tl_host_jmp_armed, false);
+    // A nested HOST_BEGIN writes only the staged buffer; consuming its rejected begin must not
+    // replace the enclosing range's live siglongjmp target.
+    if(armed && !tl_range) std::swap(tl_host_jmp_staged, tl_host_jmp_active);
+    return armed;
 }
 
 void*
 host_jmp_target()
 {
-    return &tl_host_jmp;
+    return tl_host_jmp_active;
 }
 
 void
@@ -547,8 +553,10 @@ note_code_object_unload()
     registry().rlock([](const registry_t& entries) {
         for(const auto& entry : entries)
         {
-            // An unbound range has recorded nothing, so no packet of it can point at this code.
-            if(entry.agent_key == 0 || !entry.external) continue;
+            // Host snapshots also contain executable globals, whose addresses an unload
+            // invalidates. Only an unbound packet range has no saved state referring to the
+            // unloaded code.
+            if((!entry.host && entry.agent_key == 0) || !entry.external) continue;
             publish_external_decline(*entry.external,
                                      ROCPROFILER_RANGE_REPLAY_STATUS_CODE_OBJECT_CHANGED_IN_RANGE);
         }

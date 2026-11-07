@@ -44,6 +44,7 @@
 #include "lib/rocprofiler-sdk/hsa/rocprofiler_packet.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
 #include "lib/rocprofiler-sdk/range_replay/digest.hpp"
 #include "lib/rocprofiler-sdk/range_replay/replay_callbacks.hpp"
 
@@ -165,10 +166,9 @@ struct host_agent_state_t
     hsa_agent_t                                       hsa_agent = {.handle = 0};
     rocprofiler_agent_id_t                            agent_id  = {.handle = 0};
     kernel_replay::memory_snapshot::device_snapshot_t snapshot  = {};
-    // Sorted base pointers of the tracked allocations at entry. Re-checked before each restore: a
-    // balanced allocate/free inside the range leaves this unchanged, anything else declines.
-    std::vector<void*>       tracked      = {};
-    digest::region_digests_t exit_digests = {};
+    // Base, size and lifetime of each entry allocation. Reusing a freed address is not unchanged.
+    kernel_replay::memory_tracker::tracked_map_t tracked      = {};
+    digest::region_digests_t                     exit_digests = {};
 };
 
 // Host memory the application registered with rocprofiler_range_replay_host_track_memory.
@@ -230,8 +230,9 @@ struct range_context_t
     host_range_state_t host = {};
 };
 
-// Thread-local sigjmp_buf behind rocprofiler_range_replay_host_jmpbuf(). host_jmpbuf() arms it;
-// take_host_jmp_armed() reports and clears the arming, so each begin() consumes it exactly once.
+// Staged thread-local sigjmp_buf behind rocprofiler_range_replay_host_jmpbuf(). host_jmpbuf() arms
+// it; take_host_jmp_armed() consumes the arming and promotes the staged target only without an open
+// range, so a rejected nested begin cannot replace the active range's target.
 void*
 host_jmpbuf();
 
@@ -312,8 +313,8 @@ note_submission(const hsa::Queue&              queue,
                 size_t                         packet_count,
                 bool                           graph_launch_active);
 
-// Called from the queue path for a submission made by a thread *without* an open range: if some
-// other thread has a range open on the same agent, that range's isolation assumption is broken.
+// Called from the queue path independently of this thread's own range: if another thread has a
+// range open on the same agent, that range's isolation assumption is broken.
 void
 note_foreign_dispatch(uint64_t agent_key);
 
@@ -324,9 +325,10 @@ note_foreign_dispatch(uint64_t agent_key);
 void
 note_device_write(uint64_t agent_key);
 
-// Called when a code object is about to be unloaded. Every bound range is declined, because its
-// recorded packets may point at the code being freed, and the kernarg layouts cached by kernel
-// object address are dropped, because a later load may reuse those addresses for other kernels.
+// Called when a code object is about to be unloaded. Every bound packet range and host range is
+// declined, because saved packets or executable globals may refer to freed code, and layouts cached
+// by kernel object address are dropped, because a later load may reuse those addresses for other
+// kernels.
 void
 note_code_object_unload();
 }  // namespace range_replay

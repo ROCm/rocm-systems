@@ -24,6 +24,7 @@
 #include "lib/common/logging.hpp"
 #include "lib/common/scope_destructor.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
+#include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
@@ -46,7 +47,9 @@
 #include <cstring>
 #include <memory>
 #include <mutex>
+#include <new>
 #include <shared_mutex>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -91,6 +94,7 @@ gpu_agents()
 void
 fence_queue(const hsa::Queue& queue)
 {
+    if(queue.get_engine_type() != hsa::Queue::engine_type::compute) return;
     auto       signal        = hsa_signal_t{.handle = 0};
     auto*      pooled_signal = hsa::Queue::create_signal(0, &signal, /*use_pool=*/true);
     const auto _release      = common::scope_destructor{[&]() {
@@ -105,22 +109,18 @@ fence_queue(const hsa::Queue& queue)
                         "relying on the application having synchronized the device";
 }
 
-// Wait for every GPU command submitted to `agent` and for the completion handlers behind it. The
-// queues are collected under the queue-map lock and fenced after it is released: the barrier goes
-// through the interceptor, which must not run under that lock.
+// Fence compute queues while excluding destruction, but without holding the queue-map lock.
+// Copies and non-compute work must already have been synchronized by the application.
 void
 fence_agent(hsa_agent_t agent)
 {
-    auto queues = std::vector<const hsa::Queue*>{};
     if(auto* controller = hsa::get_queue_controller(); controller != nullptr)
     {
-        controller->iterate_queues([&](const hsa::Queue* queue) {
+        controller->iterate_queues_with_lifetime([&](const hsa::Queue* queue) {
             if(queue != nullptr && queue->get_agent().get_hsa_agent().handle == agent.handle)
-                queues.emplace_back(queue);
+                fence_queue(*queue);
         });
     }
-    for(const auto* queue : queues)
-        fence_queue(*queue);
     hsa::replay_drain_agent_or_fatal(agent);
 }
 
@@ -181,28 +181,47 @@ bool
 allocations_unchanged(const host_range_state_t& host)
 {
     return std::all_of(host.agents.begin(), host.agents.end(), [](const auto& agent) {
-        return tracked_pointers(agent.hsa_agent) == agent.tracked;
+        return kernel_replay::memory_tracker::allocations_match(agent.hsa_agent, agent.tracked);
     });
 }
 
-void
-restore_devices(const host_range_state_t& host)
+std::vector<std::unique_lock<std::shared_mutex>>
+lock_agents(const host_range_state_t& host)
 {
-    // Writer locks in agent-id order (gpu_agents() sorted them), so a packet replay or kernel
-    // replay on any of these agents cannot interleave with the restore.
     auto guards = std::vector<std::unique_lock<std::shared_mutex>>{};
     guards.reserve(host.agents.size());
     for(const auto& agent : host.agents)
         guards.emplace_back(hsa::agent_replay_mutex(agent.agent_id));
+    return guards;
+}
 
-    for(const auto& agent : host.agents)
-    {
-        ROCP_FATAL_IF(!kernel_replay::memory_snapshot::restore(agent.snapshot)) << fmt::format(
-            "range replay: host replay could not restore the range-entry snapshot of agent {} "
-            "(partial host->device copy); aborting rather than re-running the range over "
-            "corrupted device memory",
-            agent.agent_id.handle);
-    }
+rocprofiler_range_replay_status_t
+restore_entry_state(range_context_t& ctx)
+{
+    const auto& host = ctx.host;
+    // The caller holds every agent's writer lock from its final fence through this restore.
+    // Frees do not take those locks. Validate every agent before the first copy and keep the
+    // inventory read-locked across all copies so a free/reallocation cannot reuse an entry address.
+    return kernel_replay::memory_tracker::inventory().rlock([&](const auto& inventory) {
+        fold_external_decline(ctx);
+        if(!ctx.record.eligible()) return ctx.record.status();
+        for(const auto& agent : host.agents)
+            if(!kernel_replay::memory_tracker::allocations_match(
+                   agent.hsa_agent, agent.tracked, inventory))
+                return ROCPROFILER_RANGE_REPLAY_STATUS_ALLOCATION_CHANGED_IN_RANGE;
+
+        for(const auto& agent : host.agents)
+        {
+            ROCP_FATAL_IF(!kernel_replay::memory_snapshot::restore(agent.snapshot, inventory))
+                << fmt::format(
+                       "range replay: host replay could not restore the range-entry snapshot of "
+                       "agent {} (partial host->device copy); aborting rather than re-running the "
+                       "range over corrupted device memory",
+                       agent.agent_id.handle);
+        }
+        restore_regions(host.regions);
+        return ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED;
+    });
 }
 }  // namespace
 
@@ -225,6 +244,7 @@ restore_regions(const std::vector<host_region_t>& regions)
 
 void
 enter_range(range_context_t& ctx, std::vector<pending_host_region_t>&& pending_regions)
+try
 {
     set_host_mode(ctx);
     auto& host = ctx.host;
@@ -235,19 +255,23 @@ enter_range(range_context_t& ctx, std::vector<pending_host_region_t>&& pending_r
 
     const auto start = phase_clock::now();
 
-    // Taken before the snapshot, so every code object at or below it has its module variables in
-    // the snapshot.
-    host.code_object_watermark = newest_code_object_id();
-    host.agents                = gpu_agents();
+    host.agents = gpu_agents();
 
+    const auto guards = lock_agents(host);
     fence_all(host.agents);
     const auto fenced_at = phase_clock::now();
+
+    // Drain callbacks before taking executable lifetime protection: a callback can unload a module.
+    const auto executable_guard = std::shared_lock{code_object::executable_lifetime_mutex()};
+    host.code_object_watermark  = newest_code_object_id();
 
     auto device_bytes = size_t{0};
     for(auto& agent : host.agents)
     {
+        agent.tracked  = kernel_replay::memory_tracker::snap_allocation_identity(agent.hsa_agent);
         agent.snapshot = kernel_replay::memory_snapshot::snap(agent.hsa_agent);
-        if(!agent.snapshot.ok)
+        if(!agent.snapshot.ok ||
+           !kernel_replay::memory_tracker::allocations_match(agent.hsa_agent, agent.tracked))
         {
             ROCP_WARNING << fmt::format(
                 "range replay: host replay snapshot of agent {} failed (memory pressure or copy "
@@ -258,7 +282,6 @@ enter_range(range_context_t& ctx, std::vector<pending_host_region_t>&& pending_r
             host.agents.clear();
             return;
         }
-        agent.tracked = tracked_pointers(agent.hsa_agent);
         device_bytes += snapshot_bytes(agent.snapshot);
     }
 
@@ -279,14 +302,37 @@ enter_range(range_context_t& ctx, std::vector<pending_host_region_t>&& pending_r
                              host.agents.size(),
                              host_bytes,
                              host.regions.size());
+} catch(const std::bad_alloc&)
+{
+    ctx.record.decline(ROCPROFILER_RANGE_REPLAY_STATUS_SNAPSHOT_FAILED);
+    ctx.host.snapshot_taken = false;
+    ctx.host.agents.clear();
+    ctx.host.regions.clear();
+} catch(const std::length_error&)
+{
+    ctx.record.decline(ROCPROFILER_RANGE_REPLAY_STATUS_SNAPSHOT_FAILED);
+    ctx.host.snapshot_taken = false;
+    ctx.host.agents.clear();
+    ctx.host.regions.clear();
 }
 
 void
 track_region(range_context_t& ctx, void* ptr, size_t size)
 {
     auto& host = ctx.host;
-    if(!host.enabled || host.pass != 0 || !host.snapshot_taken) return;
-    host.regions.emplace_back(capture_region(ptr, size));
+    if(!host.enabled || host.pass != 0 || !host.snapshot_taken || !ctx.record.eligible()) return;
+    try
+    {
+        host.regions.emplace_back(capture_region(ptr, size));
+    } catch(const std::bad_alloc&)
+    {
+        ctx.record.decline(ROCPROFILER_RANGE_REPLAY_STATUS_SNAPSHOT_FAILED);
+        host.regions.clear();
+    } catch(const std::length_error&)
+    {
+        ctx.record.decline(ROCPROFILER_RANGE_REPLAY_STATUS_SNAPSHOT_FAILED);
+        host.regions.clear();
+    }
 }
 
 step_result_t
@@ -296,12 +342,20 @@ finish_pass(range_context_t& ctx)
     const auto pass           = host.pass;
     const auto dispatch_count = static_cast<uint64_t>(ctx.record.observed_dispatch_count());
 
+    // Acquire in gpu_agents() order before observing settled state or the decline channel.
+    // Otherwise a writer can change device memory between the final checks and the restore.
+    auto guards = host.snapshot_taken ? lock_agents(host)
+                                      : std::vector<std::unique_lock<std::shared_mutex>>{};
     // The pass's GPU tail belongs to the pass: its records are emitted before PASS exit, and the
     // checks below see settled memory.
     if(host.snapshot_taken) fence_all(host.agents);
 
     if(pass > 0)
         execute_pass_phase_exit(ctx.plan, pass, ctx.agent_id, dispatch_count, host.pass_state);
+
+    // Unload publishes declines before retiring metadata under exclusive lifetime ownership.
+    // Hold shared ownership from the final decline check through globals capture/restore.
+    auto executable_guard = std::shared_lock{code_object::executable_lifetime_mutex()};
 
     auto finish = [&](rocprofiler_range_replay_status_t status, uint64_t divergence = 0) {
         host.local_context.reset();
@@ -338,8 +392,20 @@ finish_pass(range_context_t& ctx)
     // The application's own run always gets at least one re-execution once the tool asked for
     // replay, matching packet replay, which never consults replay_continue_cb before pass 1.
     const bool is_final = !ctx.plan.indefinite && (pass + 1 >= ctx.plan.total_passes);
-    if(pass > 0 && !should_continue_replay(ctx.plan, pass, is_final))
-        return finish(ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED, count_divergence(host));
+    if(pass > 0)
+    {
+        // A continuation callback may unload an executable. Never call it under lifetime
+        // protection.
+        executable_guard.unlock();
+        const bool continue_replay = should_continue_replay(ctx.plan, pass, is_final);
+        executable_guard.lock();
+        fold_external_decline(ctx);
+        if(!ctx.record.eligible()) return finish(ctx.record.status());
+        if(!allocations_unchanged(host))
+            return finish(ROCPROFILER_RANGE_REPLAY_STATUS_ALLOCATION_CHANGED_IN_RANGE);
+        if(!continue_replay)
+            return finish(ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED, count_divergence(host));
+    }
 
     const auto next = pass + 1;
     if(next > static_cast<uint64_t>(INT_MAX))
@@ -349,9 +415,11 @@ finish_pass(range_context_t& ctx)
         return finish(ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED, count_divergence(host));
     }
 
-    const auto restore_start = phase_clock::now();
-    restore_devices(host);
-    restore_regions(host.regions);
+    const auto restore_start  = phase_clock::now();
+    const auto restore_status = restore_entry_state(ctx);
+    if(restore_status != ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED) return finish(restore_status);
+    executable_guard.unlock();
+    guards.clear();
     ROCP_TRACE << fmt::format("range replay: host range {} restore before pass {}: {:.3f} ms",
                               ctx.record.range_id(),
                               next,

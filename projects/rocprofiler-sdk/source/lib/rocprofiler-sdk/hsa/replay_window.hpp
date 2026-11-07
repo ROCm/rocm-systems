@@ -118,7 +118,7 @@ replay_drain_agent_or_fatal(hsa_agent_t agent);
 // application itself performs, so whichever interception mechanism is installed sees them. Used to
 // re-submit recorded packets from outside a WriteInterceptor call (range replay), where no
 // interceptor-provided writer is in scope. Blocks while the ring is full. Returns false if the
-// queue's packet buffer is unavailable.
+// queue's packet buffer is unavailable or its engine does not accept AQL packets.
 //
 // Callers submitting *recorded* packets must clear their completion signals first: re-firing a
 // signal the application has already consumed corrupts its synchronization.
