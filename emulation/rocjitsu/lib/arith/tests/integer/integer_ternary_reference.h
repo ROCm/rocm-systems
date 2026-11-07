@@ -12,10 +12,13 @@
 namespace rocjitsu::arith::test {
 
 // Computed references are exact for these integer ISA operations.
-enum class Ternary { LshlAdd, AddLshl, LshlOr, AndOr, Or3, Xor3, Xad, Lerp };
+enum class Ternary { LshlAdd, AddLshl, LshlOr, AndOr, Or3, Xor3, Xad, Lerp, Mad };
 
 // Compute the selected combined shift/boolean or three-input integer operation.
 inline uint32_t integer_ternary_reference(Ternary operation, uint32_t a, uint32_t b, uint32_t c) {
+  if (operation == Ternary::Mad) {
+    return uint32_t(uint64_t(a) * b + c);
+  }
   int op = int(operation);
   if (op == 0) {
     return uint32_t(uint64_t(a) * (1ULL << (b % 32)) + c);
