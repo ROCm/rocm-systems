@@ -37,6 +37,7 @@ class GraphExecClassic;
 class GraphExecSegmented;
 class UserObject;
 class GraphKernelNode;
+class GraphMemAllocNode;
 typedef GraphNode* Node;
 enum class GraphMemcpyNodeKind {
   None,
@@ -1166,9 +1167,9 @@ class GraphExecBase : public amd::ReferenceCountedObject, public Graph {
     return (it != clonedNodes_.end()) ? it->second : nullptr;
   }
 
-  std::vector<Node>& GetNodes() { return topoOrder_; }
+  const std::vector<Node>& GetNodes() const { return topoOrder_; }
   uint64_t GetFlags() const { return flags_; }
-  bool TopologicalOrder() { return Graph::TopologicalOrder(topoOrder_); }
+  bool TopologicalOrder();
 
   virtual hipError_t Init() = 0;
   virtual hipError_t Run(hip::Stream* stream) = 0;
@@ -1185,6 +1186,8 @@ class GraphExecBase : public amd::ReferenceCountedObject, public Graph {
  protected:
   uint64_t flags_ = 0;
   bool repeatLaunch_ = false;
+  //! MemAlloc nodes of topoOrder_, in order. Filled by TopologicalOrder() at Init time.
+  std::vector<GraphMemAllocNode*> memAllocNodes_;
   //! parallel streams per device
   std::unordered_map<int, std::vector<hip::Stream*>> parallel_streams_;
   //! Extra capture-device stream created on first cross-device launch, covering
