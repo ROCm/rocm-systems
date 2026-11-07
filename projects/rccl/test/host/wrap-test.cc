@@ -6282,8 +6282,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredEagerShardsTakeLL128Within
       });
 }
 
-// The LL128 peer-split runs a re-routed eager call within the bound it gives under CE's grid; it is asked once, without
-// the VMM-first window (unregistered calls only), and the decision carries the split, its bound and its grid.
+// A re-routed eager call asks the LL128 peer-split once, under CE's grid without the VMM-first window, and keeps it.
 TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredEagerPeerSplitWithinCeGrid) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllReduce_RegisteredEagerPeerSplitWithinCeGrid",
@@ -8157,8 +8156,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250VmmFirstWindow) {
       });
 }
 
-// Messages the LL128 peer-split two-shot takes leave the VMM-first window to the LL128 tier. The selector asks once,
-// with the VMM-first window; the LL128 decision carries the split, its bound as the cap, and the split's grid.
+// The VMM-first window yields to the LL128 peer-split, asked once with it; the decision carries the split and bound.
 TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250VmmFirstYieldsToThePeerSplit) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllReduce_Gfx1250VmmFirstYieldsToThePeerSplit",

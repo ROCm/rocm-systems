@@ -246,8 +246,7 @@ __device__ __forceinline__ void ddaLL128ForEachWirePair(const uint64_t (&regs)[k
   }
 }
 
-// ddaLL128LoadRegsBatched in two steps, so the loads stay in flight for a look-ahead: chunks past eltN load chunk 0,
-// and ddaLL128RawToRegs zeroes them.
+// ddaLL128LoadRegsBatched in two steps, so loads stay in flight; chunks past eltN load chunk 0, RawToRegs zeroes them.
 struct DdaLL128Raw {
   v4u v[kDdaLL128Pairs];
 };
@@ -437,8 +436,7 @@ __device__ __forceinline__ bool ddaLL128PollWireBatched(const uint64_t* wire, ui
   return true;
 }
 
-// ddaLL128PollWire for up to kN slices at once: wire[i] is polled when bit i of the wave-uniform mask is set, and every
-// load goes out before any flag test, so the slices share each round trip. Returns false if aborted.
+// ddaLL128PollWire on wire[i] for each bit i of the wave-uniform mask, loads before any flag test; false if aborted.
 template <int kN>
 __device__ __forceinline__ bool ddaLL128PollWireN(const uint64_t* const (&wire)[kN], uint32_t mask,
                                                   uint64_t (&vr)[kN][kDdaLL128WordsPerThread], uint64_t flag, int wid,

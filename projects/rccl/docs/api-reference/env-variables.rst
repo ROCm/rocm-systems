@@ -1305,8 +1305,7 @@ threshold table introduced for gfx1250.
           user-set LL or LL128 one-shot threshold keeps the messages that tier can
           take. It is off by default. Other architectures are unaffected.
       - | ``0``: Cooperative writer for every launch, no dynamic LDS (default).
-        | ``1``: Staged writer from 2 MiB shards, and the peer-split from 2 MiB
-          messages above two ranks, on gfx1250 wave32 communicators.
+        | ``1``: Staged writer and peer-split on gfx1250 wave32 communicators.
 
     * - | ``RCCL_DDA_A2A_PUSH``
         | Selects the ``ncclAllToAll`` kernel on the DDA fabric (VMM) tier. The push

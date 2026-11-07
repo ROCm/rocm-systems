@@ -284,16 +284,9 @@ struct DdaLL128SplitUnit {
 };
 
 // Peer-split LL128 two-shot: the two-shot's layout, wire and fold order over (slice, peer) units.
-//
-// Block b owns slices [s0, s0 + nSlices) of every shard, the same range on every rank, and only its own warps produce
-// and consume that range's units: A sends my copy of slice s of each peer's shard, B folds the copies of my slice s
-// that block b of each peer sent, C publishes it, and D gathers what block b of each peer published. So every wait,
-// on a peer or on this rank, is on block b: a block finishes once block b runs on every rank, whatever else is
-// resident, and with in-order dispatch the lowest unfinished block always does, so a partly resident grid drains.
-// Inside a block, warps wait on each other only in C (on B's slices), and a block is resident as a whole.
-//
-// An aborted wait leaves only that warp, before anything that depends on it is stored: B folds in registers and
-// stores or publishes a slice only whole, C publishes only B's stores, and D stores only what a peer published.
+// Block b owns the same slices of every shard on every rank and waits only on block b, here or on a peer (a block is
+// resident whole), so with in-order dispatch the lowest unfinished block always runs and a partly resident grid drains.
+// An aborted wait leaves only its warp, before anything that depends on it is stored.
 // In place is safe: A reads only the peers' shards and D writes (peer, slice) only after the peer folded my copy of it.
 template <typename T, int NRANKS_CT>
 __launch_bounds__(kDdaLL128Threads) __global__
@@ -412,7 +405,6 @@ __launch_bounds__(kDdaLL128Threads) __global__
   for (uint32_t s = s0 + warp; s < s0 + nSlices; s += nwarps) {
     uint64_t acc[kDdaLL128WordsPerThread] = {};
     ddaLL128LoadRegs<int8_t>(acc, shardAt(srcBytes, selfRank, s), eltIn(s), lane, flagLane);
-    // Two copies per round trip, folded in peer order.
 #pragma unroll 1
     for (uint32_t pi = 0; pi < peers; pi += kDdaLL128SplitPollSlices) {
       const uint32_t mask = pi + 1 < peers ? kPairMask : 1u;
@@ -437,8 +429,7 @@ __launch_bounds__(kDdaLL128Threads) __global__
     ddaLL128StoreRegs<int8_t>(shardAt(dstBytes, selfRank, s), acc, eltIn(s), lane, flagLane);
   }
 
-  // C. push my reduced slices to every peer: each warp takes an equal run of the block's units, slice major, and polls
-  // and fills each slice of its run once.
+  // C. push my reduced slices to every peer, each warp an equal run of the units, polling and filling each slice once.
   const uint32_t runLen = units / nwarps;
   const uint32_t runExtra = units % nwarps;
   const uint32_t lo = warp * runLen + (warp < runExtra ? warp : runExtra);
@@ -467,8 +458,7 @@ __launch_bounds__(kDdaLL128Threads) __global__
     }
   }
 
-  // D. gather the peers' reduced slices, two units one warp stride apart per round trip; in place is safe, as D
-  // writes a slice only after A read it.
+  // D. gather the peers' reduced slices, two units one warp stride apart per round trip.
   if (warp < units) {
 #pragma unroll 1
     for (DdaLL128SplitUnit a = unitAt(warp); a.u < units;) {

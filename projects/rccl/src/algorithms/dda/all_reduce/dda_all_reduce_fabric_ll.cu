@@ -406,7 +406,7 @@ bool ddaLLArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff
   return true;
 }
 
-// Shape/resource eligibility for the two-shot variant.
+// ddaLLArTwoShotEligible without the peer-split window.
 static bool ddaLLArTwoShotShapeEligible(ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op) {
   if (count * ncclTypeSize(datatype) > rcclDdaLLTwoShotThreshold(comm)) {
       return false;
@@ -453,7 +453,7 @@ static bool ddaLLArTwoShotShapeEligible(ncclComm* comm, size_t count, ncclDataTy
   return true;
 }
 
-// Shape/resource eligibility for the LL128 one-shot variant.
+// ddaLL128ArOneShotEligible without the peer-split window.
 static bool ddaLL128ArOneShotShapeEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                            ncclDataType_t datatype, ncclRedOp_t op) {
   if (count * ncclTypeSize(datatype) > (size_t)rcclParamDdaLL128OneShotThreshold()) {
@@ -603,14 +603,14 @@ bool ncclAllReduceDdaFabricLL128SplitEligible(ncclComm* comm, const void* sendbu
   return true;
 }
 
-// Shape/resource eligibility for the two-shot variant; messages in the peer-split window run the split.
+// The LL two-shot's shape eligibility, minus the peer-split window, whose messages run the split.
 bool ddaLLArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                             ncclRedOp_t op) {
   return ddaLLArTwoShotShapeEligible(comm, count, datatype, op) &&
          !ddaArLL128SplitWindow(comm, sendbuff, recvbuff, count, datatype, op);
 }
 
-// Shape/resource eligibility for the LL128 one-shot variant; messages in the peer-split window run the split.
+// The LL128 one-shot's shape eligibility, minus the peer-split window, whose messages run the split.
 bool ddaLL128ArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                ncclDataType_t datatype, ncclRedOp_t op) {
   return ddaLL128ArOneShotShapeEligible(comm, sendbuff, recvbuff, count, datatype, op) &&
