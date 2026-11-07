@@ -96,6 +96,57 @@ FLOAT16_CONVERSION_NAMES = {
     'V_CVT_SR_PK_F16_F32',
 }
 
+SCALED_FP6_NARROW_NAMES = {
+    f'V_CVT_SCALEF32_{prefix}{dst}_{src}'
+    for dst in ('FP6', 'BF6')
+    for src in ('F32', 'F16', 'BF16')
+    for prefix in (('2XPK16_' if src == 'F32' else 'PK32_'), 'SR_PK32_')
+}
+
+
+WIDE_SCALED_NARROW_GFX1250_NAMES = {
+    f'V_CVT_SCALEF32_{prefix}{dst}_{src}'
+    for dst in ('FP6', 'BF6', 'FP4', 'FP8', 'BF8')
+    for src in ('F32', 'F16', 'BF16')
+    for prefix in (
+        ('PK16_', 'SR_PK16_') if dst in ('FP6', 'BF6') else ('PK8_', 'SR_PK8_')
+    )
+}
+
+
+SCALED_NARROW_NAMES = {
+    f'V_CVT_SCALEF32_{rounding}_{dst}_{src}'
+    for rounding in ('PK', 'SR')
+    for dst in ('FP8', 'BF8')
+    for src in ('F32', 'F16', 'BF16')
+} | {
+    f'V_CVT_SCALEF32_{rounding}_FP4_{src}'
+    for rounding in ('PK', 'SR_PK')
+    for src in ('F32', 'F16', 'BF16')
+}
+
+
+WIDE_SCALED_WIDEN_GFX1250_NAMES = {
+    f'V_CVT_SCALE_{"PK16" if src in ("FP6", "BF6") else "PK8"}_{dst}_{src}'
+    for src in ('FP4', 'FP8', 'BF8', 'FP6', 'BF6')
+    for dst in ('F32', 'F16', 'BF16')
+}
+
+
+SCALED_FP6_WIDEN_NAMES = {
+    f'V_CVT_SCALEF32_PK32_{dst}_{src}'
+    for dst in ('F32', 'F16', 'BF16')
+    for src in ('FP6', 'BF6')
+}
+
+
+SCALED_WIDEN_NAMES = {
+    f'V_CVT_SCALEF32_PK_{dst}_{src}'
+    for dst in ('F32', 'F16', 'BF16')
+    for src in ('FP4', 'FP8', 'BF8')
+} | {f'V_CVT_SCALEF32_{dst}_{src}' for dst in ('F32', 'F16') for src in ('FP8', 'BF8')}
+
+
 FP8_NARROW_NAMES = {
     'V_CVT_PK_FP8_F32',
     'V_CVT_PK_BF8_F32',
@@ -837,6 +888,202 @@ def gen_float16_conversion(ctx: ExecuteContext) -> str | None:
     lines += [
         f'  amdgpu::arith::{adapter}(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
         f'      flags, modifiers, {operands}{extra});',
+    ]
+    return '\n'.join(lines)
+
+
+def gen_wide_scaled_narrow(ctx: ExecuteContext) -> str | None:
+    """Bind gfx950/gfx1250 narrowing with architecture-specific tuple resolution."""
+    name = ctx.inst.name
+    full_scale = ctx.arch_name == 'cdna5'
+    names = WIDE_SCALED_NARROW_GFX1250_NAMES if full_scale else SCALED_FP6_NARROW_NAMES
+    if ctx.arch_name not in ('cdna4', 'cdna5') or name not in names or not ctx.is_vop3:
+        return None
+    stochastic = '_SR_' in name
+    f32 = name.endswith('_F32')
+    interleaved = f32 and not stochastic and not full_scale
+    ternary = stochastic or interleaved
+    if len(ctx.dst_ops) != 1 or len(ctx.src_ops) != (3 if ternary else 2):
+        return None
+    api = 'rj_arith_' + name.lower() + ('_gfx1250' if full_scale else '_gfx950')
+    registers = [('destination', ctx.dst_ops[0]), ('source_a', ctx.src_ops[0])]
+    if interleaved:
+        registers.append(('source_b', ctx.src_ops[1]))
+    lines = []
+    for label, operand in registers:
+        if full_scale:
+            lines += [
+                f'  auto {label}_offset = Isa::resolved_vgpr_offset(wf, {operand}.opr_type_, {operand}.encoding_value_, {operand}.vgpr_msb_role());',
+                f'  if (!{label}_offset) {{ wf.report_instruction_execution_error(amdgpu::InstructionExecutionError::UnsupportedOperandValue); return; }}',
+                f'  const uint32_t {label}_base = wf.vgpr_alloc().base + *{label}_offset;',
+            ]
+            continue
+        lines += [
+            f'  auto {label}_offset = Isa::resolved_vgpr_offset({operand}.opr_type_, {operand}.encoding_value_);',
+            f'  if (!{label}_offset) {{ wf.report_instruction_execution_error(amdgpu::InstructionExecutionError::UnsupportedOperandValue); return; }}',
+            f'  const uint32_t {label}_base = wf.vgpr_alloc().base + amdgpu::apply_gpr_idx(wf, *{label}_offset, {operand}.vgpr_msb_role());',
+        ]
+    source_b = 'source_b_base' if interleaved else '0'
+    pk8 = full_scale and '_PK8_' in name
+    words = (
+        (8 if f32 else 4)
+        if pk8
+        else ((16 if f32 else 8) if full_scale else (32 if f32 and stochastic else 16))
+    )
+    seed = '&' + ctx.src_ops[1] if stochastic else 'nullptr'
+    policy = ', true' if full_scale else ''
+    if pk8:
+        policy += ', 1' if '_FP4_' in name else ', 2'
+    flags = 'wf.cu().arithmetic_flags()'
+    if pk8 and '_FP4_' not in name:
+        flags += ' | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0)'
+    if f32 and not full_scale:
+        flags += ' | (!(wf.fp_denorm_mode_f32() & 1) ? RJ_ARITH_FP_FLUSH_INPUT_DENORMALS : 0)'
+    wave64 = 'nullptr' if full_scale else wave_api(api, 64)
+    lines += [
+        f'  amdgpu::arith::execute_wide_scaled_narrow<{str(ternary).lower()}{policy}>(wf, {wave_api(api, 32)}, {wave64},',
+        f'      {flags}, destination_base, source_a_base, {source_b}, {words},',
+        f'      {str(interleaved).lower()}, {seed}, {ctx.src_ops[-1]});',
+    ]
+    return '\n'.join(lines)
+
+
+def gen_scaled_narrow(ctx: ExecuteContext) -> str | None:
+    """Bind gfx950 scaled narrowing without adding numerical source modifiers."""
+    name = ctx.inst.name
+    if ctx.arch_name != 'cdna4' or name not in SCALED_NARROW_NAMES or not ctx.is_vop3:
+        return None
+    fp4 = '_FP4_' in name
+    stochastic = '_SR_' in name
+    f32 = name.endswith('_F32')
+    operands = 3 if stochastic or f32 else 2
+    if len(ctx.dst_ops) != 1 or len(ctx.src_ops) != operands:
+        return None
+    api = 'rj_arith_' + name.lower() + '_gfx950'
+    lines = [
+        '  uint64_t flags = wf.cu().arithmetic_flags();',
+        '  if (wf.fp16_ovfl()) flags |= RJ_ARITH_FP16_OVFL;',
+    ]
+    if f32:
+        lines += [
+            '  if (!(wf.fp_denorm_mode_f32() & 1)) flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;'
+        ]
+    if stochastic or fp4:
+        lines += [
+            '  const unsigned byte = (inst_.op_sel >> 2) & 3;',
+            '  const uint64_t modifiers = uint64_t(byte) << 16;',
+            '  const uint8_t destination_bytes = uint8_t(1u << byte);',
+        ]
+    else:
+        lines += [
+            '  const uint64_t modifiers = (inst_.op_sel & 8) ? RJ_ARITH_ALU_HIGH_D : 0;',
+            '  const uint8_t destination_bytes = (inst_.op_sel & 8) ? 0xC : 0x3;',
+        ]
+    source_bytes = '0x3' if stochastic and not f32 and not fp4 else '0xF'
+    if fp4 and stochastic and f32:
+        # This encoding names a VGPR pair, not a numeric 64-bit immediate.
+        lines += [
+            f'  if (!Isa::resolved_vgpr_offset({ctx.src_ops[0]}.opr_type_, {ctx.src_ops[0]}.encoding_value_))',
+            '    { wf.report_instruction_execution_error(amdgpu::InstructionExecutionError::UnsupportedOperandValue); return; }',
+        ]
+        source_bytes = None
+    ternary = operands == 3
+    pair_a = fp4 and stochastic and f32
+    second = f'&{ctx.src_ops[1]}' if ternary else 'nullptr'
+    lines += [
+        f'  amdgpu::arith::execute_scaled_conversion<true, {str(ternary).lower()}, {str(pair_a).lower()}>(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
+        f'      flags, modifiers, {ctx.dst_ops[0]}, {ctx.src_ops[0]}, {second}, {ctx.src_ops[-1]}, {source_bytes or "0xF"}, destination_bytes);',
+    ]
+    return '\n'.join(lines)
+
+
+def gen_wide_scaled_widen(ctx: ExecuteContext) -> str | None:
+    """Bind wide gfx950 conversions after resolving multi-VGPR operands."""
+    gfx1250 = ctx.arch_name == 'cdna5'
+    names = WIDE_SCALED_WIDEN_GFX1250_NAMES if gfx1250 else SCALED_FP6_WIDEN_NAMES
+    if (
+        ctx.arch_name not in ('cdna4', 'cdna5')
+        or ctx.inst.name not in names
+        or not ctx.is_vop3
+        or len(ctx.dst_ops) != 1
+        or len(ctx.src_ops) != 2
+    ):
+        return None
+    dst, source, scale = ctx.dst_ops[0], ctx.src_ops[0], ctx.src_ops[1]
+    api = 'rj_arith_' + ctx.inst.name.lower() + ('_gfx1250' if gfx1250 else '_gfx950')
+    lines = ['  auto &cu = wf.cu();']
+    for label, operand in (('destination', dst), ('source', source)):
+        resolver_args = f'{operand}.opr_type_, {operand}.encoding_value_'
+        if gfx1250:
+            # This overload applies gfx1250 VGPR bank selection before preflight.
+            resolver_args = f'wf, {resolver_args}, {operand}.vgpr_msb_role()'
+        offset = (
+            f'*{label}_offset'
+            if gfx1250
+            else f'amdgpu::apply_gpr_idx(wf, *{label}_offset, {operand}.vgpr_msb_role())'
+        )
+        lines += [
+            f'  auto {label}_offset = Isa::resolved_vgpr_offset({resolver_args});',
+            f'  if (!{label}_offset) {{ wf.report_instruction_execution_error(amdgpu::InstructionExecutionError::UnsupportedOperandValue); return; }}',
+            f'  const uint32_t {label}_base = wf.vgpr_alloc().base + {offset};',
+        ]
+    pk8 = '_PK8_' in ctx.inst.name
+    elements = (8 if pk8 else 16) if gfx1250 else 32
+    input_words = (
+        (1 if ctx.inst.name.endswith('_FP4') else 2) if pk8 else (3 if gfx1250 else 6)
+    )
+    words = elements if '_F32_' in ctx.inst.name else elements // 2
+    mode = 'uint64_t(inst_.opsel & 3) << 16' if gfx1250 else '0'
+    wave64 = 'nullptr' if gfx1250 else wave_api(api, 64)
+    lines += [
+        '  uint64_t flags = cu.arithmetic_flags();',
+        '  if (wf.fp16_ovfl()) flags |= RJ_ARITH_FP16_OVFL;',
+        f'  amdgpu::arith::execute_wide_scaled_widen<{str(gfx1250).lower()}>(wf, {wave_api(api, 32)}, {wave64},',
+        f'      flags, destination_base, source_base, {scale}, {words}, {mode}, {input_words});',
+    ]
+    return '\n'.join(lines)
+
+
+def gen_scaled_widen(ctx: ExecuteContext) -> str | None:
+    """Bind gfx950 single/pair scale conversions, preserving their OPSEL layout."""
+    if (
+        ctx.arch_name != 'cdna4'
+        or ctx.inst.name not in SCALED_WIDEN_NAMES
+        or not ctx.is_vop3
+        or len(ctx.dst_ops) != 1
+        or len(ctx.src_ops) != 2
+    ):
+        return None
+    name = ctx.inst.name
+    packed = '_PK_' in name
+    fp4 = name.endswith('_FP4')
+    pair = '_PK_F32_' in name
+    half = not packed and '_F16_' in name
+    api = 'rj_arith_' + name.lower() + '_gfx950'
+    lines = [
+        '  uint64_t flags = wf.cu().arithmetic_flags();',
+        '  if (wf.fp16_ovfl()) flags |= RJ_ARITH_FP16_OVFL;',
+    ]
+    if packed and not fp4:
+        lines += [
+            '  uint64_t modifiers = (inst_.op_sel & 1) ? RJ_ARITH_ALU_HIGH_A : 0;',
+            '  const uint8_t source_bytes = (inst_.op_sel & 1) ? 0xC : 0x3;',
+        ]
+    else:
+        lines += [
+            '  uint64_t modifiers = uint64_t(inst_.op_sel & 3) << 16;',
+            '  const uint8_t source_bytes = uint8_t(1u << (inst_.op_sel & 3));',
+        ]
+    if half:
+        lines += [
+            '  modifiers |= (inst_.op_sel & 8) ? RJ_ARITH_ALU_HIGH_D : 0;',
+            '  const uint8_t destination_bytes = (inst_.op_sel & 8) ? 0xC : 0x3;',
+        ]
+    elif not pair:
+        lines += ['  const uint8_t destination_bytes = 0xF;']
+    lines += [
+        f'  amdgpu::arith::execute_scaled_conversion<false, false, false, {str(pair).lower()}>(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
+        f'      flags, modifiers, {ctx.dst_ops[0]}, {ctx.src_ops[0]}, nullptr, {ctx.src_ops[1]}, source_bytes, {"0xF" if pair else "destination_bytes"});',
     ]
     return '\n'.join(lines)
 

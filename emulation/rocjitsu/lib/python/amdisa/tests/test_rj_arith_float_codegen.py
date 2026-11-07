@@ -1740,3 +1740,250 @@ def test_cdna_integer_conversion_bindings(arch):
             assert f'rj_arith_{name.lower()}_w32,' in body
             assert 'e32_word_operand(a)' in body
             assert 'RJ_ARITH_ALU_HIGH_A' in body
+
+
+def test_scaled_widen_gfx950_bindings_and_gates():
+    from amdisa.codegen.execute.rj_arith_float import (
+        SCALED_WIDEN_NAMES,
+        gen_scaled_widen,
+    )
+
+    generated = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/cdna4/vop3_exec.cpp'
+    ).read_text()
+    assert (
+        sum(
+            generated.count('rj_arith_' + name.lower() + '_w')
+            for name in SCALED_WIDEN_NAMES
+        )
+        == 26
+    )
+    assert len(SCALED_WIDEN_NAMES) == 13
+    for name in sorted(SCALED_WIDEN_NAMES):
+        body = gen_scaled_widen(
+            context('cdna4', name, ['dst'], ['a', 'b'], is_vop3=True)
+        )
+        assert 'rj_arith_' + name.lower() + '_w64_gfx950' in body
+        assert 'rj_arith_' + name.lower() + '_w64_gfx950' in generated
+        pair = '_PK_F32_' in name
+        assert (
+            f'execute_scaled_conversion<false, false, false, {str(pair).lower()}>'
+            in body
+        )
+        assert (
+            'uint64_t(inst_.op_sel & 3) << 16' in body
+            if '_PK_' not in name or name.endswith('_FP4')
+            else 'RJ_ARITH_ALU_HIGH_A' in body
+        )
+        if '_PK_' not in name and '_F16_' in name:
+            assert 'RJ_ARITH_ALU_HIGH_D' in body
+            assert '? 0xC : 0x3' in body
+        for arch in ('rdna4', 'cdna3', 'cdna5'):
+            assert (
+                gen_scaled_widen(context(arch, name, ['dst'], ['a', 'b'], is_vop3=True))
+                is None
+            )
+        assert (
+            gen_scaled_widen(context('cdna4', name, ['dst'], ['a'], is_vop3=True))
+            is None
+        )
+        assert gen_scaled_widen(context('cdna4', name, ['dst'], ['a', 'b'])) is None
+
+
+def test_scaled_fp6_widen_bindings_and_gates():
+    from amdisa.codegen.execute.rj_arith_float import (
+        SCALED_FP6_WIDEN_NAMES,
+        gen_wide_scaled_widen,
+    )
+
+    generated = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/cdna4/vop3_exec.cpp'
+    ).read_text()
+    assert len(SCALED_FP6_WIDEN_NAMES) == 6
+    for name in SCALED_FP6_WIDEN_NAMES:
+        body = gen_wide_scaled_widen(
+            context('cdna4', name, ['d'], ['a', 'b'], is_vop3=True)
+        )
+        assert 'rj_arith_' + name.lower() + '_w64_gfx950' in body
+        assert 'rj_arith_' + name.lower() + '_w64_gfx950' in generated
+        assert 'execute_wide_scaled_widen' in body
+        assert 'source_base, b, ' + ('32' if '_F32_' in name else '16') in body
+        assert 'inst_.op_sel' not in body and 'inst_.neg' not in body
+        assert body.count('resolved_vgpr_offset') == 2
+        for arch in ('cdna3', 'cdna5', 'rdna4'):
+            assert (
+                gen_wide_scaled_widen(
+                    context(arch, name, ['d'], ['a', 'b'], is_vop3=True)
+                )
+                is None
+            )
+        assert (
+            gen_wide_scaled_widen(context('cdna4', name, ['d'], ['a'], is_vop3=True))
+            is None
+        )
+        assert gen_wide_scaled_widen(context('cdna4', name, ['d'], ['a', 'b'])) is None
+
+
+def test_scaled_fp6_widen_gfx1250_bindings_and_gates():
+    from amdisa.codegen.execute.rj_arith_float import (
+        WIDE_SCALED_WIDEN_GFX1250_NAMES,
+        gen_wide_scaled_widen,
+    )
+
+    generated = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/cdna5/vop3_exec_cvt.cpp'
+    ).read_text()
+    assert len(WIDE_SCALED_WIDEN_GFX1250_NAMES) == 15
+    for name in WIDE_SCALED_WIDEN_GFX1250_NAMES:
+        body = gen_wide_scaled_widen(
+            context('cdna5', name, ['d'], ['a', 'b'], is_vop3=True)
+        )
+        assert 'execute_wide_scaled_widen<true>' in body
+        assert (
+            'resolved_vgpr_offset(wf, a.opr_type_, a.encoding_value_, a.vgpr_msb_role())'
+            in body
+        )
+        assert 'apply_gpr_idx' not in body
+        assert 'uint64_t(inst_.opsel & 3) << 16' in body
+        assert 'rj_arith_' + name.lower() + '_w32_gfx1250' in generated
+        elements = 8 if '_PK8_' in name else 16
+        assert (
+            'source_base, b, ' + str(elements if '_F32_' in name else elements // 2)
+            in body
+        )
+        for arch in ('cdna3', 'cdna4', 'rdna4'):
+            assert (
+                gen_wide_scaled_widen(
+                    context(arch, name, ['d'], ['a', 'b'], is_vop3=True)
+                )
+                is None
+            )
+
+
+def test_scaled_narrow_gfx950_bindings_and_gates():
+    from amdisa.codegen.execute.rj_arith_float import (
+        SCALED_NARROW_NAMES,
+        gen_scaled_narrow,
+    )
+
+    generated = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/cdna4/vop3_exec.cpp'
+    ).read_text()
+    assert (
+        sum(
+            generated.count('rj_arith_' + name.lower() + '_w')
+            for name in SCALED_NARROW_NAMES
+        )
+        == 36
+    )
+    assert len(SCALED_NARROW_NAMES) == 18
+    for name in sorted(SCALED_NARROW_NAMES):
+        fp4 = '_FP4_' in name
+        stochastic = '_SR_' in name
+        f32 = name.endswith('_F32')
+        sources = ['a', 'b', 'c'] if stochastic or f32 else ['a', 'b']
+        body = gen_scaled_narrow(context('cdna4', name, ['dst'], sources, is_vop3=True))
+        assert 'rj_arith_' + name.lower() + '_w64_gfx950' in body
+        assert 'rj_arith_' + name.lower() + '_w64_gfx950' in generated
+        ternary = len(sources) == 3
+        pair_a = fp4 and stochastic and f32
+        assert (
+            f'execute_scaled_conversion<true, {str(ternary).lower()}, {str(pair_a).lower()}>'
+            in body
+        )
+        source_bytes = '0x3' if stochastic and not f32 and not fp4 else '0xF'
+        assert f'{source_bytes}, destination_bytes' in body
+        assert (
+            '(inst_.op_sel >> 2) & 3' in body
+            if stochastic or fp4
+            else 'RJ_ARITH_ALU_HIGH_D' in body
+        )
+        for arch in ('rdna4', 'cdna3', 'cdna5'):
+            assert (
+                gen_scaled_narrow(context(arch, name, ['dst'], sources, is_vop3=True))
+                is None
+            )
+        assert (
+            gen_scaled_narrow(
+                context('cdna4', name, ['dst'], sources[:-1], is_vop3=True)
+            )
+            is None
+        )
+        assert gen_scaled_narrow(context('cdna4', name, ['dst'], sources)) is None
+
+
+def test_scaled_fp6_narrow_bindings_and_gates():
+    from amdisa.codegen.execute.rj_arith_float import (
+        SCALED_FP6_NARROW_NAMES,
+        gen_wide_scaled_narrow,
+    )
+
+    generated = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/cdna4/vop3_exec.cpp'
+    ).read_text()
+    assert len(SCALED_FP6_NARROW_NAMES) == 12
+    for name in SCALED_FP6_NARROW_NAMES:
+        ternary = '_SR_' in name or name.endswith('_F32')
+        sources = ['a', 'b', 'c'] if ternary else ['a', 'b']
+        body = gen_wide_scaled_narrow(
+            context('cdna4', name, ['d'], sources, is_vop3=True)
+        )
+        assert f'execute_wide_scaled_narrow<{str(ternary).lower()}>' in body
+        assert 'rj_arith_' + name.lower() + '_w64_gfx950' in generated
+        assert 'resolved_vgpr_offset' in body
+        for arch in ('rdna3', 'rdna4', 'cdna3', 'cdna5'):
+            assert (
+                gen_wide_scaled_narrow(
+                    context(arch, name, ['d'], sources, is_vop3=True)
+                )
+                is None
+            )
+        assert gen_wide_scaled_narrow(context('cdna4', name, ['d'], sources)) is None
+        assert (
+            gen_wide_scaled_narrow(context('cdna4', name, ['d'], [], is_vop3=True))
+            is None
+        )
+
+
+def test_gfx1250_scaled_fp6_narrow_bindings():
+    from amdisa.codegen.execute.rj_arith_float import (
+        WIDE_SCALED_NARROW_GFX1250_NAMES,
+        gen_wide_scaled_narrow,
+    )
+
+    generated = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/cdna5/vop3_exec_cvt.cpp'
+    ).read_text()
+    assert len(WIDE_SCALED_NARROW_GFX1250_NAMES) == 30
+    for name in WIDE_SCALED_NARROW_GFX1250_NAMES:
+        sr = '_SR_' in name
+        sources = ['a', 'b', 'c'] if sr else ['a', 'b']
+        body = gen_wide_scaled_narrow(
+            context('cdna5', name, ['d'], sources, is_vop3=True)
+        )
+        policy = ', 1' if '_PK8_FP4_' in name else ', 2' if '_PK8_' in name else ''
+        assert f'execute_wide_scaled_narrow<{str(sr).lower()}, true{policy}>' in body
+        assert ('RJ_ARITH_FP16_OVFL' in body) == (
+            '_PK8_' in name and '_FP4_' not in name
+        )
+        assert 'resolved_vgpr_offset(wf,' in body
+        assert 'nullptr' in body
+        assert 'rj_arith_' + name.lower() + '_w32_gfx1250' in generated
+        for arch in ('rdna3', 'rdna4', 'cdna3', 'cdna4'):
+            assert (
+                gen_wide_scaled_narrow(
+                    context(arch, name, ['d'], sources, is_vop3=True)
+                )
+                is None
+            )
+        assert gen_wide_scaled_narrow(context('cdna5', name, ['d'], sources)) is None
+        assert (
+            gen_wide_scaled_narrow(context('cdna5', name, ['d'], [], is_vop3=True))
+            is None
+        )

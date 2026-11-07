@@ -157,6 +157,11 @@ foreach(
         packed
         fp8_widen
         fp8_narrow
+        scaled_widen
+        wide_scaled_widen
+        scaled_fp8_narrow
+        scaled_fp4_narrow
+        wide_scaled_narrow
 )
     set(target "rj_arith_conversion_${family}_test")
     rj_arith_add_test(${target} conversion/${family}_test.cpp)
