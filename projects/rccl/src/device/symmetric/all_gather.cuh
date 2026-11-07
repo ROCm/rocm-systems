@@ -217,6 +217,21 @@ static __device__ void bcast(ncclSymkArgsHandler const& handler, int tn, int t, 
         cursor = cursorAfter;
         waitNeeded = false;
       }
+    } else if (alignment % 16 == 0) {
+      // The 16 B tier below stages 2 KB tiles, which leaves the mover latency-bound. Take the bulk in
+      // the 256 B tier's 16 KB tiles; they are only 16 B-aligned, so the peel stays.
+      constexpr int BytePerPack = ncclSymkBytePerPack, UnrollPacks = ncclSymkAlign256BDeepUnrollPacks, UnrollPeers = 2;
+      constexpr int BytePerChunk = ncclSymkAlign256BDeepBytePerChunk;
+      uint32_t chunks = (nBytes - cursor) / BytePerChunk;
+      chunks -= imodFast32(chunks, nBlocks, nBlocks_rcp32);
+      if (chunks != 0) {
+        uintptr_t cursorAfter = cursor + uintptr_t(chunks) * BytePerChunk;
+        bcastDeep<BytePerPack, UnrollPacks, UnrollPeers, EnableTma>(
+          handler, tn, t, waitNeeded, bar, (ncclSymPtr<char>)input + cursor,
+          (ncclSymPtr<char>)output + cursor, inPlace, chunks * ncclSymkMinWarpsPerBlock, team, slot0);
+        cursor = cursorAfter;
+        waitNeeded = false;
+      }
     }
   }
 #endif
