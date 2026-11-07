@@ -341,6 +341,8 @@ TEST(range_replay_state, collective_kernels_are_classified_by_name)
                             "_ZN4meta6kernelEv",
                             "_ZN4metaE",
                             "_Z99ncclDevKernel",
+                            "_ZN18446744073709551615ncclDevKernel",
+                            "_Z18446744073709551617ncclDevKernel",
                             "_ZN",
                             "_Z",
                             "",

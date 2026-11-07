@@ -115,9 +115,11 @@ qualified_kernel_name(std::string_view name)
     auto take_source_name = [&name](std::string& out) {
         auto len = size_t{0};
         auto pos = size_t{0};
-        while(pos < name.size() && name[pos] >= '0' && name[pos] <= '9')
+        // Stopping once the length exceeds the name keeps the accumulation and pos + len from
+        // wrapping.
+        while(pos < name.size() && name[pos] >= '0' && name[pos] <= '9' && len <= name.size())
             len = len * 10 + static_cast<size_t>(name[pos++] - '0');
-        if(pos == 0 || len == 0 || pos + len > name.size()) return false;
+        if(pos == 0 || len == 0 || len > name.size() || pos + len > name.size()) return false;
         if(!out.empty()) out += "::";
         out.append(name.substr(pos, len));
         name.remove_prefix(pos + len);
