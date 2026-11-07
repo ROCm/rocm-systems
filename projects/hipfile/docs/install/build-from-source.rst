@@ -18,7 +18,7 @@ Prerequisites
 hipFile targets Linux with ROCm HIP. For supported GPUs and stack components,
 see :ref:`ROCm Core SDK components <rocm:release-components>`.
 
-- CMake 3.21 or later
+- CMake 3.21 or later (3.30 or later to build with C++26)
 - A C++ compiler that matches the ``HIPFILE_CXX_STANDARD`` value you select. The
   default is C++20.
 - HIP and HSA packages from ROCm so CMake can locate ``hip`` and ``hsa-runtime64``
@@ -104,7 +104,9 @@ exist for sanitizers, clang-tidy, and documentation generation. Inspect
      - Builds shared libraries when ``ON`` and static libraries when ``OFF``.
    * - ``HIPFILE_CXX_STANDARD``
      - ``20``
-     - C++ dialect. Allowed values are ``20``, ``23``, and ``26``.
+     - C++ standard that hipFile is built with, regardless of the compiler's
+       default. Allowed values are ``20``, ``23``, and ``26``; any other value
+       is a configuration error. ``26`` requires CMake 3.30 or later.
    * - ``HIPFILE_INSTALL_EXAMPLES``
      - ``ON``
      - Installs sample binaries such as ``aiscp`` when enabled.
