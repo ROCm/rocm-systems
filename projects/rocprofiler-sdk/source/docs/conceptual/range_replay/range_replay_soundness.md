@@ -112,16 +112,22 @@ the application's own synchronization. Replayed passes get their signals from th
 
 A replay pass submits its packets by handing them to `Queue::invoke_write_interceptor`, which
 transforms them (minting completion signals, creating records) and then calls a writer to put them on
-the ring. Writing to the ring re-enters the interception path — on the same thread. Without a guard,
-each packet is transformed a second time, producing two completion signals and two dispatch records
-per dispatch.
+a ring. Writing them to the application's queue would re-enter the interception path and transform
+each packet a second time, producing two completion signals and two dispatch records per dispatch.
+It would also deadlock: ROCr holds a queue's intercept lock while it runs the SDK's interceptor, and
+the interceptor takes the per-agent replay lock as a reader, so a thread holding that lock as a
+writer must never ring an intercepted doorbell.
 
-The guard is a thread-local passthrough flag, set around the ring write and checked at the top of
-`WriteInterceptor`, which forwards packets untouched while it is set.
+So the writer puts the packets on a replay queue the SDK owns, one per agent, created lazily through
+the unwrapped HSA table. ROCr does not intercept it, so the packets are transformed exactly once and
+the doorbell takes no lock. The queue lives for the rest of the process. Kernels replayed on it do not
+inherit the application queue's CU mask or priority; a cooperative launch replays correctly, since
+the grid barrier lives in memory.
 
 The same thread-local reasoning applies to the per-agent replay lock. A replaying thread holds it as
-a writer for the whole window, so the reader-lock acquisition on the ordinary dispatch path is
-skipped when `this_thread_replaying()` is true — otherwise the thread would deadlock against itself.
+a writer for the whole window, so the reader-lock acquisition on the ordinary dispatch and copy paths
+is skipped when `this_thread_replaying()` is true — otherwise the thread would deadlock against
+itself.
 
 ## The replay window
 
@@ -129,8 +135,8 @@ skipped when `this_thread_replaying()` is true — otherwise the thread would de
 duration:
 
 ```text
-take per-agent WRITER lock
-  drain this queue's async handlers, then every queue on the agent
+take per-agent WRITER lock (before the range is taken, so no dispatch or copy can slip in)
+  drain this queue's async handlers, then every queue on the agent and its device-writing copies
   verify the tracked allocation set still matches the entry snapshot's
   snap()  -> the EXIT snapshot: the state the application must resume with
   reserve the kernarg staging block (the agent's retained block when it fits)
@@ -138,7 +144,7 @@ take per-agent WRITER lock
   for pass = 1 ..:
       restore(entry snapshot)
       PASS PHASE_ENTER
-      fill staging, submit the recorded packets (serialized)
+      fill staging, submit the recorded packets (serialized) to the agent's replay queue
       drain this pass's async completion handlers
       PASS PHASE_EXIT
       ask the tool whether to continue; break if not
@@ -162,6 +168,34 @@ Each dispatch in a pass has its AQL barrier bit forced on, so the passes are ser
 dispatch-by-dispatch. This is stricter than the application, whose packets may have been free to
 overlap, and it is the reason replayed passes are not a faithful source of concurrency-sensitive
 timings.
+
+## Other threads during the window
+
+While a window runs, other threads keep running. A dispatch or a device-writing copy from one of them
+must either land before the window's drain, and so be part of the state the exit snapshot captures,
+or wait until the window ends. Otherwise the final restore overwrites its result. Three rules hold
+this together:
+
+- Every dispatch on the instrumented path takes the per-agent replay lock as a reader, and re-reports
+  itself to any open range on that agent once it holds the lock. A dispatch that waited out a window
+  therefore still declines the next range it overlaps.
+- An async copy that writes device memory takes the reader lock of every agent it writes, in agent-id
+  order (the order host replay takes the writer locks), from reporting itself until it is submitted.
+  It also registers a ticket that its completion handler retires. The agent drain waits for every
+  ticket issued before the drain started, so a steady stream of new copies cannot stall it. The
+  application's completion signal and its timestamps are forwarded from the SDK's own signal.
+- Host replay fences every queue before taking the writer locks, because the fence goes through the
+  intercepted doorbells, and drains under the locks, where the drain is bounded because new work is
+  blocked.
+
+The lock order these rules guarantee, and the absence of lost writes, are checked by a TLA+ model of
+the window, the dispatch path, and the copy path in both modes, with application threads that share a
+HIP queue or have their own. The `test-range-replay-concurrency-*` tests exercise the same races on
+hardware: a second thread writes, by copy or by kernel, into memory a range covers shortly after each
+`end()`, and every write must survive.
+
+Tracking costs every device-writing copy one completion-handler hop whenever a tool has configured
+range replay, open range or not. On MI300-class hardware that is about 0.2–0.5 µs per copy.
 
 ## The divergence check
 
@@ -275,11 +309,12 @@ All paths are relative to `projects/rocprofiler-sdk/`.
 | Code object watermark | `source/lib/rocprofiler-sdk/range_replay/range_state.cpp` | `range_record_t::admit_code_object()` |
 | Unload hook | `source/lib/rocprofiler-sdk/code_object/code_object.cpp` | `executable_destroy_internal()` |
 | Open-range fast gate | `source/lib/rocprofiler-sdk/range_replay/range_state.cpp` | `any_range_open()` |
-| Replay window and pass loop | `source/lib/rocprofiler-sdk/range_replay/executor.cpp` | `execute_range()` |
+| Replay window and pass loop | `source/lib/rocprofiler-sdk/range_replay/executor.cpp` | `lock_for_window()`, `execute_range()` |
 | Entry snapshot | `source/lib/rocprofiler-sdk/range_replay/executor.cpp` | `ensure_entry_snapshot()` |
 | Kernarg staging | `source/lib/rocprofiler-sdk/range_replay/executor.cpp` | `kernarg_staging` |
 | Kernarg block retention | `source/lib/rocprofiler-sdk/range_replay/retained_kernarg.cpp` | `kernarg_block_fits()`, `take_retained_kernarg_block()`, `retain_kernarg_block()` |
 | Divergence hashing | `source/lib/rocprofiler-sdk/range_replay/digest.cpp` | `hash_bytes()`, `count_divergent()` |
-| Passthrough gate | `source/lib/rocprofiler-sdk/hsa/replay_window.cpp` | `set_interceptor_passthrough()` |
-| Ring re-submission | `source/lib/rocprofiler-sdk/hsa/replay_window.cpp` | `replay_ring_submit()` |
+| Pass submission | `source/lib/rocprofiler-sdk/hsa/replay_window.cpp` | `replay_private_submit()` |
+| Agent drain and copy tickets | `source/lib/rocprofiler-sdk/hsa/replay_window.cpp` | `replay_drain_agent_or_fatal()`, `replay_copy_submitted()`, `replay_copy_retired()` |
+| Copy lock and tracking | `source/lib/rocprofiler-sdk/hsa/async_copy.cpp` | `async_copy_impl()`, `track_replay_copy()` |
 | Snapshot and restore | `source/lib/rocprofiler-sdk/kernel_replay/memory_snapshot.cpp` | `snap()`, `restore()` |

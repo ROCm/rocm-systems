@@ -51,7 +51,7 @@ rocprofiler_range_replay_end()
     for pass = 1 .. N-1:
         restore the entry snapshot
         PASS PHASE_ENTER          ->  tool may toggle its contexts for this pass
-        re-submit the recorded dispatches, serialized
+        re-submit the recorded dispatches, serialized, on the SDK's replay queue
         PASS PHASE_EXIT
         ask the tool whether to continue
     CLOSE callback                ->  status, dispatch count, divergence count
@@ -108,9 +108,9 @@ experimental/range_replay.h           public payload struct, status enum, begin/
         |     retained_kernarg.cpp    the kernarg block kept for each agent's next range
         |     digest.cpp              region hashing and divergence counting
         |
-        +-- hsa/replay_window.cpp     per-agent lock, drains, ring submit, passthrough gate
+        +-- hsa/replay_window.cpp     per-agent lock, drains, copy tickets, replay queue
         +-- hsa/queue.cpp             recording hook, foreign-dispatch detection
-        +-- hsa/async_copy.cpp        device-write detection
+        +-- hsa/async_copy.cpp        device-write detection, copy lock and tracking
         |
         +-- kernel_replay/            reused unchanged: memory_tracker, memory_snapshot,
                                       local_context
@@ -196,7 +196,8 @@ modes and leaves every counter at 4 instead of 1; that is the case the warning i
   pass-count semantics, the localized context toggles, and how a tool configures range replay.
 - **[Soundness and declining](range_replay_soundness.md)** — what makes a range replayable, the
   decline decision table and why each condition is checked, the cross-thread decline channel, the
-  kernarg-recycling problem, the interceptor passthrough gate, and the optional divergence check.
+  kernarg-recycling problem, the replay queue, how other threads' work is kept out of the replay
+  window, and the optional divergence check.
 - **[Host range replay](range_replay_host.md)** — the `sigsetjmp` / `siglongjmp` path that re-runs
   the application's own code per pass: the begin macro, registered host memory, the application's
   contract, and the time-stepping integration test.
