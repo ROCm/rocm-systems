@@ -48,6 +48,7 @@ set(SRC_LIST
     "${SRC_DIR}/amd_smi.cc"
     "${SRC_DIR}/fwupd_carveout.cc"
     "${SRC_DIR}/fwupd_carveout_parse.cc"
+    "${SRC_DIR}/topology_nearest.cc"
     "${SRC_DIR}/amd_smi_cper.cc"
     "${SRC_DIR}/amd_smi_common.cc"
     "${SRC_DIR}/amd_smi_drm.cc"

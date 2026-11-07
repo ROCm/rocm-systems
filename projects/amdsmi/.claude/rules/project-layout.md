@@ -10,6 +10,7 @@ description: "Use when: reviewing API changes, adding/modifying amdsmi_* functio
 | Public C headers | `include/amd_smi/` | `amdsmi.h` (public API) |
 | Python bindings | `py-interface/` | `amdsmi_interface.py`, `amdsmi_wrapper.py` (auto-generated), `amdsmi_exception.py` |
 | Python CLI | `amdsmi_cli/` | `amdsmi_commands.py`, `amdsmi_parser.py`, `amdsmi_helpers.py` |
+| Read-only Go bindings | `go/amdsmi/` | `amdsmi_interface.go` (single production file matching the Host source layout) |
 | Go shim | `goamdsmi_shim/` | |
 | Rust bindings | `rust-interface/` | |
 | Legacy compat | `rocm_smi/` | ROCm SMI compatibility layer |
@@ -30,7 +31,7 @@ Non-function public-API edits do **not** all cascade the same way:
 | Change | Cascade path |
 |--------|--------------|
 | New / changed `amdsmi_*` **function** | Full path below (name is grep-able in every name-bearing layer) |
-| New **enum value / struct field / macro** in `amdsmi.h` | Header + impl + regenerate wrapper; interface/CLI only if user-facing. Not name-grep-able per layer |
+| New **enum value / struct field / macro** in `amdsmi.h` | Header + impl + regenerate wrapper; review handwritten Go constants, fields, conversions, and tests within its supported GPU scope; interface/CLI only if user-facing. Not name-grep-able per layer |
 | Bug fix or behavior change inside an existing function | Impl + tests; docs/changelog if user-visible. No new wrapper/CLI entry |
 | Doxygen / comment-only edit | Header (or docs) only |
 
@@ -44,12 +45,13 @@ Changes to a **function** propagate through all layers in order:
 6. `amdsmi_cli/amdsmi_commands.py` — CLI commands (if user-facing)
 7. `docs/` — documentation
 8. `rust-interface/` and `goamdsmi_shim/` — bind `amdsmi_*` directly; update if the new function must reach Rust/Go consumers
+9. `go/amdsmi/amdsmi_interface.go`: direct CGO bindings for the read-only GPU module; update functions and types within its supported scope
 
 Regenerate the wrapper with `tools/update_wrapper.sh`
 
 ## Quick Check
 
-Greps only the five **name-bearing** layers. Layer 3 (`generator.py`) is a
+Greps the **name-bearing** code paths. Layer 3 (`generator.py`) is a
 generic parser with no per-function entry (verify it instead by regenerating the
 wrapper), and layer 7 (`docs/`) is prose — check both separately, they are NOT
 covered by this grep.
@@ -58,10 +60,11 @@ covered by this grep.
 FUNC="amdsmi_get_gpu_new_feature"
 grep -n "$FUNC" include/amd_smi/amdsmi.h src/amd_smi/*.cc \
   py-interface/amdsmi_wrapper.py py-interface/amdsmi_interface.py amdsmi_cli/*.py \
-  rust-interface/src/*.rs goamdsmi_shim/smiwrapper/*
+  rust-interface/src/*.rs goamdsmi_shim/smiwrapper/* go/amdsmi/*.go
 ```
 
-Missing results in a name-bearing layer = cascade gap. A clean grep does **not**
+Missing results in an applicable name-bearing layer = cascade gap. The read-only
+Go module does not expose CPU, NIC, setters, or events. A clean grep does **not**
 prove layers 3 and 7 are done.
 
 ## Per-Layer Checklist
@@ -77,6 +80,14 @@ prove layers 3 and 7 are done.
 | `docs/` | API reference updated |
 | `rust-interface/` | `pub fn amdsmi_*` binding added if the function must reach Rust consumers |
 | `goamdsmi_shim/` | `amdsmi_*` call added if the function must reach the Go shim |
+| `go/amdsmi/` | Read-only GPU CGO binding, Go-owned results, native units/availability, and `StatusError`; keep common Host spellings and conventional Go initialisms for BM-only names |
+
+The Go binding is handwritten. Its enum contract check covers 14 mirrored enums;
+the separate coverage inventory detects declaration and bound C type changes.
+A new C field can compile without becoming
+a Go field; review supported results and conversions explicitly, then update
+fixtures, tests, and API documentation. Keep unsupported fields documented rather
+than inferring values, including the unavailable BM clock Booleans.
 
 # Tools (`tools/`)
 
@@ -99,6 +110,7 @@ Python runner details: [tests/python/README.md](../../tests/python/README.md).
 | Python unit | `tests/python/unit/` | `tests/python/unit_tests.py` | No |
 | Python functional | `tests/python/functional/` | `tests/python/integration_test.py` | Yes |
 | Python CLI | `tests/python/cli/` | `tests/python/cli_unit_test.py` | Yes (installed `amd-smi`) |
+| Go/CGO | `go/amdsmi/`, `tests/go/` | `python3 -B tests/go/run_tests.py`; tooling tests via `unittest discover` | No |
 | Packaging guards | `tests/python/test_*_guard.py`, `test_packaging_scriptlets.py`, `test_abi_compat.py` | `python3` (stdlib only) | No |
 | Package-manager harnesses | `tests/run_amdsmi_*.py` | `sudo python3` | No |
 | Build driver | `tests/amdsmi_build/` | `sudo python3 tests/amdsmi_build/run_amdsmi_build.py` | No |
@@ -121,6 +133,19 @@ historical installed path still works.
 
 Pre-commit gates: `tests/amd_smi_test/check_test_conventions.py` (layout/naming),
 `tests/check_license_headers.py`.
+
+Go's runner owns the `amdsmi_mock` tag and fixture linking. Commands live in
+[go/README.md](../../go/README.md#repository-tests). Python runner tests cover
+parsing, environment/cache safety, and real default/ASAN/vet/example subprocesses;
+contract guards retain partial-enum, explicit-exclusion, and module checks.
+Go 1.18 is the toolchain floor, separate from `Init`'s native header/library
+version check; preserve both requirements.
+
+The repository-root `.github/workflows/amdsmi-go.yml` configures CPU-only Go
+1.18.10/1.24.1 fixture and native/staged checks. Go 1.24.1 adds explicit cgocheck2
+and `--asan` runs (GCC, incompatible with `--race`); this is not a Go 1.18 ASAN
+exclusion. `.github/workflows/amdsmi-build.yml` retains the GPU build/test jobs.
+The pinned actionlint hook checks both workflows, including Actions expressions.
 
 # Build & Packaging
 

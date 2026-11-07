@@ -17,13 +17,9 @@
 #   SKIP=ruff-format git commit
 #   SKIP=gersemi git commit
 
-# Scope every hook to this project, the way shared/cuid's config does.
-# Without this, a commit touching two projects hands these hooks the other
-# project's files as well. That is not hypothetical: it reformats
-# shared/cuid/tests/vectors/cuid_vectors.py.
-# pre-commit ANDs this with each hook's own `files`, so the per-hook patterns
-# below still apply on top of it.
-files: '^projects/amdsmi/'
+minimum_pre_commit_version: '3.0.0'
+# Keep other projects out without excluding the actionlint workflow inputs.
+files: '^(projects/amdsmi/|\.github/workflows/(amdsmi-(build|go)|lstt-formatting)\.yml$)'
 
 exclude: |
   (?x)
@@ -76,6 +72,14 @@ repos:
     rev: 0.26.0
     hooks:
     -   id: gersemi
+
+-   repo: https://github.com/rhysd/actionlint
+    rev: 914e7df21a07ef503a81201c76d2b11c789d3fca  # v1.7.12
+    hooks:
+    -   id: actionlint
+        language_version: '1.25.0'
+        files: ^\.github/workflows/(amdsmi-(build|go)|lstt-formatting)\.yml$
+        args: ['-shellcheck=']
 
 -   repo: local
     hooks:

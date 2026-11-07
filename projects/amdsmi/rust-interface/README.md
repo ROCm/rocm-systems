@@ -5,6 +5,7 @@ This rust crate provides Rust bindings for the AMD System Management Interface (
 ## Table of Contents
 
 - [Overview](#overview)
+- [Nearest-GPU topology](#nearest-gpu-topology)
 - [Hello World Example](#hello-world-example)
 - [Directory Structure](#directory-structure)
 - [Building](#building)
@@ -23,6 +24,25 @@ The AMD SMI Rust binding crate automates the generation of bindings and ensures 
 
 2. **Implementing Safe Rust Wrappers**:
    - The generated bindings are then wrapped in safe Rust functions. These safe wrappers handle error checking, resource management, and provide a more idiomatic Rust interface. This ensures that users of the library can interact with the AMD SMI functions without dealing with unsafe code directly.
+
+## Nearest-GPU topology
+
+On bare-metal Linux, `amdsmi_get_link_topology_nearest` returns
+`AmdsmiTopologyNearestT` with accessible peers matching `link_type`, excluding
+the source handle. Peers are ordered by ascending hop count, then ascending
+link weight; order among equal-hop, equal-weight peers is unspecified.
+Peers whose accessibility, link-type, or link-weight query fails are skipped,
+so success does not guarantee a complete list.
+
+Only `processor_list[..count as usize]` contains returned handles. The native
+`count` is bounded by `AMDSMI_MAX_DEVICES * AMDSMI_MAX_NUM_XCP`; if more peers
+match, only the nearest that fit are stored. A count equal to capacity does not
+reveal whether peers were omitted; there is no separate total count or
+truncation flag. Unused array slots and reserved fields are zeroed on success.
+
+Socket and processor discovery errors propagate. A returned discovery count
+exceeding its buffer capacity produces the native `AMDSMI_STATUS_UNEXPECTED_SIZE`
+error rather than a partial result.
 
 ## Hello World Example
 Here is a simple "Hello World" example to get you started with the AMD SMI Rust bindings. This example initializes the AMD SMI library, retrieves the GPU information, and prints it to the console.
