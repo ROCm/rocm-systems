@@ -4,19 +4,18 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Host-only tests for device/ll128RecvWait.h, the windowed LL128 receive wait that
+// Host-only tests for device/ll128RecvWait.h, the LL128 receive wait that
 // Primitives<ProtoLL128>::recvWaitLoad runs when RCCL_LL128_RECV_WINDOW_ENABLE is set.
 // No GPU needed: the wait is driven against a simulated wire whose rows turn valid
 // at chosen times.
 //
-//   AllRows* / ReloadWindow* / LoadRows* / VoteRows* / ValidRows* - each helper alone
+//   AllRows* / LoadRows* / VoteRows* / ValidRows* - each helper alone
 //   FastPath*         - a slice valid on the first load is loaded once (twice with confirm)
-//   NoConfirm*        - rows valid at a vote are not reloaded unless the window spans them
+//   NoConfirm*        - rows valid at a vote are not reloaded
 //   Confirm*          - every row's final load is issued after a vote saw it valid
 //   RandomSchedules*  - both modes end with every row valid, over many arrival orders
 //   KeepWaitingFalse* - a false keepWaiting (abort) ends the wait
 
-#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <random>
@@ -85,20 +84,11 @@ struct FakeSlice
 };
 
 template <int Rows>
-std::vector<int> windowRows(uint32_t skip)
+std::vector<int> loadedRows(uint32_t skip)
 {
   std::vector<int> rows;
   ll128LoadRows<Rows>(skip, [&](int r) { rows.push_back(r); });
   return rows;
-}
-
-// The reload window of skip, or (-1, -1) when it is empty.
-template <int Rows>
-std::pair<int, int> window(uint32_t skip)
-{
-  int lo = -1, hi = -1;
-  if (!ll128ReloadWindow<Rows>(skip, lo, hi)) return {-1, -1};
-  return {lo, hi};
 }
 
 }  // namespace
@@ -112,38 +102,15 @@ TEST(Ll128RecvWait, AllRowsHasOneBitPerRow)
   EXPECT_EQ(ll128AllRows<32>(), 0xffffffffu);
 }
 
-TEST(Ll128RecvWait, ReloadWindowSpansLowestToHighestPendingRow)
+TEST(Ll128RecvWait, LoadRowsLoadsExactlyThePendingRowsLowestFirst)
 {
-  EXPECT_EQ(window<8>(0x00), std::make_pair(0, 8));
-  EXPECT_EQ(window<8>(0x0f), std::make_pair(4, 8));
-  EXPECT_EQ(window<8>(0xf0), std::make_pair(0, 4));
-  // Pending rows 2 and 5: the skipped rows between them are inside the window.
-  EXPECT_EQ(window<8>(0xdb), std::make_pair(2, 6));
-  // Pending rows 0 and 7 make the window the whole slice.
-  EXPECT_EQ(window<8>(0x7e), std::make_pair(0, 8));
-  EXPECT_EQ(window<8>(0xef), std::make_pair(4, 5));
-}
-
-TEST(Ll128RecvWait, ReloadWindowEmptyWhenEveryRowSkipped)
-{
-  EXPECT_EQ(window<8>(0xff), std::make_pair(-1, -1));
-  // Bits above the slice do not count as pending rows.
-  EXPECT_EQ(window<4>(0xffffffffu), std::make_pair(-1, -1));
-  EXPECT_EQ(window<4>(0xfffffff0u), std::make_pair(0, 4));
-}
-
-TEST(Ll128RecvWait, ReloadWindowHandlesRow31)
-{
-  EXPECT_EQ(window<32>(0x7fffffffu), std::make_pair(31, 32));
-  EXPECT_EQ(window<32>(0x0u), std::make_pair(0, 32));
-  EXPECT_EQ(window<32>(0xfffffffeu), std::make_pair(0, 1));
-}
-
-TEST(Ll128RecvWait, LoadRowsLoadsTheWindowLowestFirst)
-{
-  EXPECT_EQ(windowRows<8>(0xdb), (std::vector<int>{2, 3, 4, 5}));
-  EXPECT_EQ(windowRows<8>(0x00), (std::vector<int>{0, 1, 2, 3, 4, 5, 6, 7}));
-  EXPECT_TRUE(windowRows<8>(0xff).empty());
+  EXPECT_EQ(loadedRows<8>(0xdb), (std::vector<int>{2, 5}));
+  EXPECT_EQ(loadedRows<8>(0x00), (std::vector<int>{0, 1, 2, 3, 4, 5, 6, 7}));
+  EXPECT_TRUE(loadedRows<8>(0xff).empty());
+  // Bits above the slice are ignored.
+  EXPECT_TRUE(loadedRows<4>(0xffffffffu).empty());
+  EXPECT_EQ(loadedRows<4>(0xfffffff0u), (std::vector<int>{0, 1, 2, 3}));
+  EXPECT_EQ(loadedRows<32>(0x7fffffffu), (std::vector<int>{31}));
 }
 
 TEST(Ll128RecvWait, VoteRowsTrueOnlyWhenEveryRowVotesTheWholeWarp)
@@ -218,15 +185,15 @@ TEST(Ll128RecvWait, NoConfirmReloadsJustTheOneLateRow)
   EXPECT_GT(s.loadsOf(3), 1);
 }
 
-TEST(Ll128RecvWait, NoConfirmWindowSpansValidRowsBetweenLateOnes)
+TEST(Ll128RecvWait, NoConfirmSkipsValidRowsBetweenLateOnes)
 {
-  // Rows 1 and 6 late: rows 2-5 are valid but inside the window, so they are reloaded with them.
+  // Rows 1 and 6 late: rows 2-5 are valid on the first load and are not reloaded.
   FakeSlice<8> s;
   s.validAt[1] = s.validAt[6] = 30;
   s.wait<false>();
-  EXPECT_EQ(s.loadsOf(0), 1);
-  EXPECT_EQ(s.loadsOf(7), 1);
-  for (int r = 2; r < 6; r++) EXPECT_GT(s.loadsOf(r), 1) << "row " << r;
+  for (int r : {0, 2, 3, 4, 5, 7}) EXPECT_EQ(s.loadsOf(r), 1) << "row " << r;
+  EXPECT_GT(s.loadsOf(1), 1);
+  EXPECT_GT(s.loadsOf(6), 1);
   for (int r = 0; r < 8; r++) EXPECT_TRUE(s.regValid[r]) << "row " << r;
 }
 
@@ -255,18 +222,10 @@ void checkRandomSchedules()
       ASSERT_TRUE(s.regValid[r]) << "trial " << trial << " row " << r;
       if (Confirm) ASSERT_GE(s.regLoadedAt[r], s.seenValidAt[r]) << "trial " << trial << " row " << r;
     }
-    // Without confirm, windows only shrink, so rows outside the first one are loaded once.
-    // The first pass loads row r at tick r.
+    // Without confirm, a row valid on the first pass, which loads row r at tick r, is loaded once.
     if (!Confirm) {
-      int lo = Rows, hi = -1;
       for (int r = 0; r < Rows; r++) {
-        if (s.validAt[r] > r) {
-          lo = std::min(lo, r);
-          hi = std::max(hi, r);
-        }
-      }
-      for (int r = 0; r < Rows; r++) {
-        if (r < lo || r > hi) ASSERT_EQ(s.loadsOf(r), 1) << "trial " << trial << " row " << r;
+        if (s.validAt[r] <= r) ASSERT_EQ(s.loadsOf(r), 1) << "trial " << trial << " row " << r;
       }
     }
   }
