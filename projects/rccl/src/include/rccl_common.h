@@ -392,8 +392,6 @@ size_t rcclDdaArRegCaptureMaxBytes(const ncclComm* comm);
 bool rcclDdaArRegEagerShardFits(const ncclComm* comm, size_t bytes);
 // True when the user sets an AllReduce LL tier threshold; table rules then leave the LL tiers' reach alone.
 bool rcclDdaArLLTierPinnedByEnv();
-// True when an AllReduce of msgBytes on these buffers falls in the unregistered DDA VMM-first window.
-bool rcclDdaArVmmFirstFor(ncclComm* comm, const void* sendbuff, const void* recvbuff, size_t msgBytes);
 // True when the user sets RCCL_DDA_LL128_ONESHOT_THRESHOLD; the DDA AllReduce peer-split window then leaves its reach.
 bool rcclDdaArLL128OneShotPinnedByEnv();
 // Blocks the DDA VMM AllReduce / ReduceScatter kernels launch: the init cap,

@@ -188,6 +188,12 @@ uint32_t ncclAllReduceDdaFabricBlocks(ncclComm* comm, size_t count, ncclDataType
   return grid.x * grid.y;
 }
 
+rcclDdaLaunchCap ncclAllReduceDdaFabricGrid(ncclComm* comm, size_t count, ncclDataType_t datatype,
+                                            rcclDdaLaunchCap cap) {
+  const auto geom = ddaAllReduceFabricGeom(comm, count, ncclTypeSize(datatype), cap);
+  return {geom.first.x * geom.first.y, geom.second.x};
+}
+
 ncclResult_t ncclAllReduceDdaFabric(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                     ncclRedOp_t op, ncclComm* comm, cudaStream_t stream, rcclDdaLaunchCap cap) {
   (void)op;

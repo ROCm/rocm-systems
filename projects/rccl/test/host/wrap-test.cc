@@ -6166,6 +6166,7 @@ class RegisteredAr {
     EXPECT_EQ(0u, d.ddaCap.threads);
   }
 
+  bool reportedSplit_ = false;
   bool capturing_ = false;
   bool symkRequested_ = true;
   bool ceAvailable_ = true;
@@ -6217,7 +6218,12 @@ class RegisteredAr {
       [this](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t op) {
         return vmmEligible_ && op == ncclSum;
       }};
-  HookFor<decltype(g_allReduceDdaFabricLL128Blocks)> ll128Blocks_{g_allReduceDdaFabricLL128Blocks, CappedReport(114u)};
+  HookFor<decltype(g_allReduceDdaFabricLL128Blocks)> ll128Blocks_{
+      g_allReduceDdaFabricLL128Blocks,
+      [this](ncclComm* c, size_t n, ncclDataType_t t, rcclDdaLaunchCap cap, bool split) {
+        reportedSplit_ = split;
+        return CappedReport(114u)(c, n, t, cap);
+      }};
   HookFor<decltype(g_allReduceDdaFabricLLBlocks)> llBlocks_{g_allReduceDdaFabricLLBlocks, CappedReport(113u)};
   HookFor<decltype(g_allReduceDdaFabricBlocks)> vmmBlocks_{g_allReduceDdaFabricBlocks, CappedReport(112u)};
   HookFor<decltype(g_getAlgoInfo)> ringInfo_{
@@ -6273,6 +6279,37 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredEagerShardsTakeLL128Within
         ar.SetRanks(32);
         EXPECT_EQ(ll128, ar.Select(32 * kMiB, false).algo) << "1M shards";
         EXPECT_EQ(ceReg, ar.Select(64 * kMiB, false).algo) << "2M shards";
+      });
+}
+
+// The LL128 peer-split runs a re-routed eager call within the bound it gives under CE's grid; it is asked once, without
+// the VMM-first window (unregistered calls only), and the decision carries the split, its bound and its grid.
+TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredEagerPeerSplitWithinCeGrid) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_RegisteredEagerPeerSplitWithinCeGrid",
+      []() {
+        RegisteredAr ar(8);
+        std::vector<rcclDdaLaunchCap> caps;
+        std::vector<bool> vmmFirst;
+        ScopedHook split(g_allReduceDdaFabricLL128Split,
+                         [&](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, rcclDdaLaunchCap cap,
+                             bool inVmmFirst, rcclDdaLaunchCap* bound) {
+                           caps.push_back(cap);
+                           vmmFirst.push_back(inVmmFirst);
+                           *bound = {20, 192};
+                           return true;
+                         });
+        const rcclCollDecision d = ar.Select(8 * kMiB, /*capturing=*/false);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, d.algo);
+        ASSERT_EQ(1u, caps.size());
+        EXPECT_EQ(46u, caps[0].blocks) << "asked under CE's grid";
+        EXPECT_EQ(256u, caps[0].threads);
+        EXPECT_FALSE(vmmFirst[0]);
+        EXPECT_TRUE(d.ddaLL128Split);
+        EXPECT_EQ(20u, d.ddaCap.blocks);
+        EXPECT_EQ(192u, d.ddaCap.threads);
+        EXPECT_TRUE(ar.reportedSplit_);
+        EXPECT_EQ(20u, d.nMaxChannels);
       });
 }
 
@@ -8120,39 +8157,59 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250VmmFirstWindow) {
       });
 }
 
-// Messages the LL128 peer-split two-shot takes leave the VMM-first window to the LL128 tier.
+// Messages the LL128 peer-split two-shot takes leave the VMM-first window to the LL128 tier. The selector asks once,
+// with the VMM-first window; the LL128 decision carries the split, its bound as the cap, and the split's grid.
 TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250VmmFirstYieldsToThePeerSplit) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllReduce_Gfx1250VmmFirstYieldsToThePeerSplit",
       []() {
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          return std::strcmp(env, "RCCL_DDA_LL128_THRESHOLD") == 0 ? INT64_MAX : def;
+        };
         ArDdaHooks hooks;
         ArVmmEligible vmmHook;
+        ScopedHook llOff(g_allReduceDdaFabricLLEligible,
+                         [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return false; });
+        ScopedHook ll128On(g_allReduceDdaFabricLL128Eligible,
+                           [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
+        ScopedHook blocks(g_allReduceDdaFabricLL128Blocks,
+                          [](ncclComm*, size_t, ncclDataType_t, rcclDdaLaunchCap cap, bool split) {
+                            return split ? cap.blocks : 114u;
+                          });
         ncclComm* comm = MakeArDdaComm(32);
+        auto select = [comm](size_t bytes) {
+          rcclCollDecision d{};
+          EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, bytes / sizeof(float), ncclFloat32,
+                                                      ncclSum, /*stream=*/nullptr, /*query=*/true,
+                                                      /*graphCapturingHint=*/false, &d));
+          return d;
+        };
         const int vmm = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_VMM;
-        EXPECT_EQ(vmm, SelectAllReduceDdaAlgo(comm, 8 * kMiB));
-        ScopedHook split(g_allReduceDdaFabricLL128SplitTakes,
-                         [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
-        EXPECT_NE(vmm, SelectAllReduceDdaAlgo(comm, 8 * kMiB));
-        EXPECT_NE(vmm, SelectAllReduceDdaAlgo(comm, 16 * kMiB));
-        DeleteCommWithArch(comm);
-      });
-}
+        const int ll128 = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128;
+        rcclCollDecision d = select(8 * kMiB);
+        EXPECT_EQ(vmm, d.algo);
+        EXPECT_FALSE(d.ddaLL128Split);
 
-// rcclDdaArVmmFirstFor: the VMM-first window for these buffers, which the LL128 peer-split reads for its block cap.
-TEST(WrapMicrotestIsolated, DdaArVmmFirstFor_UnregisteredWindowOnly) {
-  RUN_ISOLATED_TEST(
-      "Wrap_DdaArVmmFirstFor_UnregisteredWindowOnly",
-      []() {
-        ArDdaHooks hooks;
-        ncclComm* comm = MakeArDdaComm(32);
-        EXPECT_TRUE(rcclDdaArVmmFirstFor(comm, nullptr, nullptr, 8 * kMiB));
-        EXPECT_FALSE(rcclDdaArVmmFirstFor(comm, nullptr, nullptr, 2 * kMiB)) << "the window starts above 2 MiB";
-        EXPECT_FALSE(rcclDdaArVmmFirstFor(nullptr, nullptr, nullptr, 8 * kMiB));
-        ScopedHook regType(g_getSymRegType, [](struct ncclDevrWindow*, struct ncclDevrWindow*, ncclSymRegType_t* out) {
-          *out = ncclSymSendNonregRecvReg;
-          return ncclSuccess;
-        });
-        EXPECT_FALSE(rcclDdaArVmmFirstFor(comm, nullptr, nullptr, 8 * kMiB)) << "registered receive";
+        std::vector<bool> asked;
+        ScopedHook split(g_allReduceDdaFabricLL128Split,
+                         [&asked](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t,
+                                  rcclDdaLaunchCap cap, bool vmmFirst, rcclDdaLaunchCap* bound) {
+                           EXPECT_EQ(0u, cap.blocks) << "an eager unregistered call is not re-routed";
+                           asked.push_back(vmmFirst);
+                           *bound = {40, 512};
+                           return true;
+                         });
+        for (const size_t bytes : {8 * kMiB, 2 * kMiB}) {
+          SCOPED_TRACE(bytes);
+          asked.clear();
+          d = select(bytes);
+          EXPECT_EQ(ll128, d.algo);
+          EXPECT_TRUE(d.ddaLL128Split);
+          EXPECT_EQ(40u, d.ddaCap.blocks) << "the bound is the launch cap";
+          EXPECT_EQ(512u, d.ddaCap.threads);
+          EXPECT_EQ(40u, d.nMaxChannels) << "the reporter reports the split's grid";
+          EXPECT_EQ(std::vector<bool>{bytes > 2 * kMiB}, asked) << "asked once, with the VMM-first window";
+        }
         DeleteCommWithArch(comm);
       });
 }

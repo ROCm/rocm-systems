@@ -267,54 +267,42 @@ static ncclResult_t ncclAllReduceDdaFabricLL128OneShotTyped(const void* sendbuff
 }
 
 // The LL128 two-shot kernel transports one shard per rank, so the grid is sized
-// on the shard's slices rather than the whole message's.
-// split.blocks > 0 runs the peer-split kernel within that bound (ddaArLL128SplitBound).
+// on the shard's slices rather than the whole message's. `split` runs the peer-split kernel within `cap`.
 template <typename T>
 static ncclResult_t ncclAllReduceDdaFabricLL128TwoShotTyped(const void* sendbuff, void* recvbuff, size_t count,
                                                             ncclComm* comm, cudaStream_t stream, rcclDdaLaunchCap cap,
-                                                            rcclDdaLaunchCap split) {
+                                                            bool split) {
   const int nRanks = comm->nRanks;
   const size_t bytes = count * sizeof(T);
   const size_t shardBytes = bytes / (size_t)nRanks;
   const size_t slices = ddaLL128Slices(shardBytes);
   const size_t bankSize = ddaBankSize(comm->ddaScratchBytes);
 
-  const auto geom = ddaArLL128TwoShotGeom(comm, bytes, cap);
+  const auto geom = split ? ddaArLL128SplitGrid(comm, bytes, cap) : ddaArLL128TwoShotGeom(comm, bytes, cap);
   const dim3 grid = geom.first;
   const dim3 block = geom.second;
+  const int wire = split ? dda::common::kDdaLL128WireAsync : ddaArLL128Wire(comm, bytes);
+  const size_t lds =
+    split ? dda::common::ddaLL128ArSplitSharedBytes(block.x, nRanks) : ddaArLL128SharedBytes(wire, block.x);
+  const DdaArLL128Kernel<T> kernel =
+    split ? ddaArLL128SplitKernel<T>(nRanks) : ddaArLL128TwoShotKernel<T>(nRanks, wire);
 
   T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
   // Same epoch counter every other LL/LL128 tier uses.
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
 
-  const dda::common::DdaKernelParams params{comm->abortFlagDev};
-  const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
-  if (split.blocks > 0) {
-    const auto splitGeom = ddaArLL128SplitGrid(comm, bytes, split);
-    const size_t splitLds = dda::common::ddaLL128ArSplitSharedBytes(splitGeom.second.x, nRanks);
-    INFO(NCCL_COLL,
-         "DDA fabric AllReduce LL128 two-shot: nRanks=%d bytes=%zu shardBytes=%zu slices=%zu grid=%u block=%u lds=%zu "
-         "(peer-split, bankSize=%zu)",
-         nRanks, bytes, shardBytes, slices, splitGeom.first.x, splitGeom.second.x, splitLds, bankSize);
-    hipExtLaunchKernelGGL(ddaArLL128SplitKernel<T>(nRanks), splitGeom.first, splitGeom.second, splitLds, stream,
-                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff),
-                          static_cast<const T*>(sendbuff), shardBytes, comm->rank, nRanks, epochDev, epochLen, slices,
-                          bankSize, params);
-    CUDACHECK(cudaGetLastError());
-    return ncclSuccess;
-  }
-
-  const int wire = ddaArLL128Wire(comm, bytes);
-  const size_t lds = ddaArLL128SharedBytes(wire, block.x);
-
   INFO(NCCL_COLL,
        "DDA fabric AllReduce LL128 two-shot: nRanks=%d bytes=%zu shardBytes=%zu slices=%zu grid=%u block=%u wire=%d "
-       "lds=%zu (warp-per-slice, bankSize=%zu)",
-       nRanks, bytes, shardBytes, slices, grid.x, block.x, wire, lds, bankSize);
-  hipExtLaunchKernelGGL(ddaArLL128TwoShotKernel<T>(nRanks, wire), grid, block, lds, stream, /*startEvent=*/nullptr,
-                        stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                        shardBytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize, params);
+       "lds=%zu (%s, bankSize=%zu)",
+       nRanks, bytes, shardBytes, slices, grid.x, block.x, wire, lds, split ? "peer-split" : "warp-per-slice",
+       bankSize);
+
+  const dda::common::DdaKernelParams params{comm->abortFlagDev};
+  const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
+  hipExtLaunchKernelGGL(kernel, grid, block, lds, stream, /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers,
+                        static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), shardBytes, comm->rank, nRanks,
+                        epochDev, epochLen, slices, bankSize, params);
 
   CUDACHECK(cudaGetLastError());
 
@@ -392,17 +380,15 @@ static bool ddaArLL128SplitWindow(ncclComm* comm, const void* sendbuff, void* re
          ddaLL128ArTwoShotEligible(comm, sendbuff, recvbuff, count, datatype, op);
 }
 
-bool ncclAllReduceDdaFabricLL128SplitTakes(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
-                                           ncclDataType_t datatype, ncclRedOp_t op) {
-  return ddaArLL128SplitWindow(comm, sendbuff, recvbuff, count, datatype, op);
-}
-
-// Blocks and threads of the launch the split replaces under `cap` (LL two-shot, else LL128 one-shot or two-shot);
-// {0, 0} outside the window.
-static rcclDdaLaunchCap ddaArLL128SplitBound(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
-                                             ncclDataType_t datatype, ncclRedOp_t op, rcclDdaLaunchCap cap) {
+bool ncclAllReduceDdaFabricLL128Split(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                      ncclDataType_t datatype, ncclRedOp_t op, rcclDdaLaunchCap cap, bool vmmFirst,
+                                      rcclDdaLaunchCap* bound) {
   if (!ddaArLL128SplitWindow(comm, sendbuff, recvbuff, count, datatype, op)) {
-    return {};
+    return false;
+  }
+  if (vmmFirst && ncclAllReduceDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
+    *bound = ncclAllReduceDdaFabricGrid(comm, count, datatype, cap);
+    return true;
   }
   const size_t bytes = count * ncclTypeSize(datatype);
   std::pair<dim3, dim3> geom;
@@ -413,14 +399,8 @@ static rcclDdaLaunchCap ddaArLL128SplitBound(ncclComm* comm, const void* sendbuf
   } else {
     geom = ddaArLL128TwoShotGeom(comm, bytes, cap);
   }
-  rcclDdaLaunchCap bound = {geom.first.x, geom.second.x};
-  // In the VMM-first window the split replaces the VMM launch the selector would have made, so it takes that grid:
-  // its blocks, and at these sizes its 512-thread blocks, both under the cap.
-  if (rcclDdaArVmmFirstFor(comm, sendbuff, recvbuff, bytes) &&
-      ncclAllReduceDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
-    bound = {ncclAllReduceDdaFabricBlocks(comm, count, datatype, cap), cap.threads};
-  }
-  return bound;
+  *bound = {geom.first.x, geom.second.x};
+  return true;
 }
 
 // Shape/resource eligibility for the one-shot variant, independent of whether
@@ -700,10 +680,11 @@ ncclResult_t ncclAllReduceDdaFabricLL(const void* sendbuff, void* recvbuff, size
 }
 
 ncclResult_t ncclAllReduceDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
-                                         ncclRedOp_t op, ncclComm* comm, cudaStream_t stream, rcclDdaLaunchCap cap) {
+                                         ncclRedOp_t op, ncclComm* comm, cudaStream_t stream, rcclDdaLaunchCap cap,
+                                         bool split) {
   const size_t bytes = count * ncclTypeSize(datatype);
 
-  if (ddaLL128ArOneShotEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
+  if (!split && ddaLL128ArOneShotEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
     INFO(NCCL_COLL,
          "AllReduce: taking DDA fabric LL128 one-shot path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
          comm->nRanks, comm->nNodes, count, (int)datatype, bytes);
@@ -725,11 +706,10 @@ ncclResult_t ncclAllReduceDdaFabricLL128(const void* sendbuff, void* recvbuff, s
     }
   }
 
-  if (ddaLL128ArTwoShotEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
+  if (split || ddaLL128ArTwoShotEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
     INFO(NCCL_COLL,
          "AllReduce: taking DDA fabric LL128 two-shot path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
          comm->nRanks, comm->nNodes, count, (int)datatype, bytes);
-    const rcclDdaLaunchCap split = ddaArLL128SplitBound(comm, sendbuff, recvbuff, count, datatype, op, cap);
     switch (datatype) {
     case ncclFloat32:
       return ncclAllReduceDdaFabricLL128TwoShotTyped<float>(sendbuff, recvbuff, count, comm, stream, cap, split);
@@ -761,10 +741,13 @@ uint32_t ncclAllReduceDdaFabricLLBlocks(ncclComm* comm, size_t count, ncclDataTy
   return grid.x * grid.y;
 }
 
-// Reports the grid of the tier ncclAllReduceDdaFabricLL128 launches: one-shot when eligible, else two-shot.
-uint32_t ncclAllReduceDdaFabricLL128Blocks(ncclComm* comm, size_t count, ncclDataType_t datatype,
-                                           rcclDdaLaunchCap cap) {
+// Reports the grid ncclAllReduceDdaFabricLL128 launches: the split, else the one-shot when eligible, else the two-shot.
+uint32_t ncclAllReduceDdaFabricLL128Blocks(ncclComm* comm, size_t count, ncclDataType_t datatype, rcclDdaLaunchCap cap,
+                                           bool split) {
   const size_t bytes = count * ncclTypeSize(datatype);
+  if (split) {
+    return ddaArLL128SplitGrid(comm, bytes, cap).first.x;
+  }
   const bool oneShot = ddaLL128ArOneShotEligible(comm, nullptr, nullptr, count, datatype, ncclSum);
   const dim3 grid =
       (oneShot ? ddaArLL128OneShotGeom(comm, bytes, cap) : ddaArLL128TwoShotGeom(comm, bytes, cap)).first;
