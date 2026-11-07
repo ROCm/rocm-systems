@@ -368,7 +368,8 @@ void MemObjMap::RemoveMemObj(const void* k) {
 MemObjMap::LookupResult MemObjMap::findMemObjNoLock(const void* ptr, Device* dev) {
   uintptr_t key = reinterpret_cast<uintptr_t>(ptr);
 
-  // First search the global map using upper_bound
+  // Global (non-overlapping) map: upper_bound - 1 is the only candidate. A hit
+  // returns the allocation size, which marks the result as cacheable.
   auto it = MemObjMap_.upper_bound(key);
   if (it != MemObjMap_.begin()) {
     --it;
@@ -377,18 +378,19 @@ MemObjMap::LookupResult MemObjMap::findMemObjNoLock(const void* ptr, Device* dev
                           ? sizeof(mem->getUserData().hsa_handle)
                           : mem->getSize();
     if (key >= it->first && key < (it->first + mem_size)) {
-      return {it->second, key - it->first};
+      return {mem, key - it->first, mem_size};
     }
   }
 
-  // Search per-device va maps on Windows (due to overlapping ranges)
+  // Per-device VA maps on Windows have overlapping ranges, so their results are
+  // not cacheable (size 0).
   if (IS_WINDOWS && dev != nullptr) {
     size_t offset = 0;
     amd::Memory* mem = dev->FindDevMemObj(ptr, &offset);
-    return {mem, offset};
+    return {mem, offset, 0};
   }
 
-  return {nullptr, 0};
+  return {nullptr, 0, 0};
 }
 
 amd::Memory* MemObjMap::FindMemObj(const void* k, size_t* offset, Device* dev) {
@@ -486,14 +488,77 @@ void MemObjMap::FindMemObjBatchPairs(const void* const* srcs, const void* const*
 
   std::shared_lock lock(AllocatedLock_);
 
-  for (size_t i = 0; i < count; ++i) {
-    auto src_result = findMemObjNoLock(srcs[i], dev);
+  constexpr int kRangeCacheSize = 16;  // src + dst base pointers across up to 8 GPUs
+  constexpr int kWarmupProbes = 64;
+  constexpr int kMinHitPercent = 25;   // give up below this hit rate after warmup
+  struct RangeEntry {
+    uintptr_t base;
+    uintptr_t end;
+    amd::Memory* memory;
+  };
+  RangeEntry range_cache[kRangeCacheSize];
+  int cache_count = 0;
+  int cache_next = 0;
+  int probes = 0;
+  int hits = 0;
+  bool cache_active = !DEBUG_CLR_DISABLE_MEMOBJ_CACHE;
+
+  auto resolve = [&](const void* ptr) -> LookupResult {
+    const uintptr_t key = reinterpret_cast<uintptr_t>(ptr);
+    LookupResult result{nullptr, 0, 0};
+    bool resolved = false;
+
+    if (cache_active) {
+      ++probes;
+      for (int c = 0; c < cache_count; ++c) {
+        if (key >= range_cache[c].base && key < range_cache[c].end) {
+          result = {range_cache[c].memory, key - range_cache[c].base, 0};
+          ++hits;
+          resolved = true;
+          break;
+        }
+      }
+    }
+
+    if (!resolved) {
+      result = findMemObjNoLock(ptr, dev);
+      // size != 0 marks a non-overlapping global-map hit, which is safe to cache
+      // (the range base is key - offset); Windows VA-map hits report size 0.
+      if (cache_active && result.size != 0) {
+        const uintptr_t base = key - result.offset;
+        range_cache[cache_next] = {base, base + result.size, result.memory};
+        cache_next = (cache_next + 1) % kRangeCacheSize;
+        if (cache_count < kRangeCacheSize) {
+          ++cache_count;
+        }
+      }
+    }
+
+    // Give up if the batch doesn't reuse allocations after the warmup.
+    if (cache_active && probes >= kWarmupProbes && (hits * (100 / kMinHitPercent) < probes)) {
+      cache_active = false;
+    }
+    return result;
+  };
+
+  size_t i = 0;
+  for (; i < count && cache_active; ++i) {
+    auto src_result = resolve(srcs[i]);
     src_memories[i] = src_result.memory;
     src_offsets[i] = src_result.offset;
 
-    auto dst_result = findMemObjNoLock(dsts[i], dev);
+    auto dst_result = resolve(dsts[i]);
     dst_memories[i] = dst_result.memory;
     dst_offsets[i] = dst_result.offset;
+  }
+  // Once the cache self-disables, finish on the plain path (no probe overhead).
+  for (; i < count; ++i) {
+    auto s = findMemObjNoLock(srcs[i], dev);
+    src_memories[i] = s.memory;
+    src_offsets[i] = s.offset;
+    auto d = findMemObjNoLock(dsts[i], dev);
+    dst_memories[i] = d.memory;
+    dst_offsets[i] = d.offset;
   }
 }
 
