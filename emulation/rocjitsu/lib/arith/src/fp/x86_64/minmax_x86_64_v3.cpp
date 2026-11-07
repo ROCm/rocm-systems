@@ -24,7 +24,7 @@ void run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d, const u
   constexpr bool FirstMaximum = Policy::first_maximum;
   constexpr bool SecondMaximum = Policy::second_maximum;
   constexpr bool PropagateNaN = Policy::propagate_nan;
-  constexpr bool Rdna3 = Policy::rdna3;
+  constexpr bool Legacy = Policy::legacy;
   constexpr bool Median = Policy::median;
 
   // Dispatch the guest input-denormal policy once, outside the four SIMD chunks.
@@ -54,9 +54,9 @@ void run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d, const u
       z = flush_denorm_f32(z);
     }
     __m256 value;
-    if constexpr (Rdna3) {
-      value = minmax3_rdna3<FirstMaximum, SecondMaximum, Median>(x, y, z,
-                                                                 flags & RJ_ARITH_FP_IEEE_MODE);
+    if constexpr (Legacy) {
+      value = minmax3_legacy<FirstMaximum, SecondMaximum, Median, !Policy::cdna>(
+          x, y, z, flags & RJ_ARITH_FP_IEEE_MODE);
     } else {
       value = minmax3_value<FirstMaximum, SecondMaximum, PropagateNaN, Median>(x, y, z);
     }
@@ -66,7 +66,7 @@ void run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d, const u
     }
     if (mode & RJ_ARITH_ALU_CLAMP) {
       auto clamped = _mm256_min_ps(_mm256_max_ps(value, _mm256_setzero_ps()), _mm256_set1_ps(1));
-      value = Rdna3 && (flags & RJ_ARITH_FP_DX10_CLAMP_OFF)
+      value = (flags & RJ_ARITH_FP_DX10_CLAMP_OFF)
                   ? _mm256_blendv_ps(clamped, value, _mm256_cmp_ps(value, value, _CMP_UNORD_Q))
                   : clamped;
     }
@@ -84,6 +84,12 @@ void run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d, const u
 void minmax3_x86_64_v3(Minmax3 op, uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d,
                        const uint32_t *a, const uint32_t *b, const uint32_t *c) {
   switch (op) {
+  case Minmax3::Min3Cdna:
+    return run<Minmax3::Min3Cdna>(flags, exec_mask, mode, d, a, b, c);
+  case Minmax3::Max3Cdna:
+    return run<Minmax3::Max3Cdna>(flags, exec_mask, mode, d, a, b, c);
+  case Minmax3::MedianCdna:
+    return run<Minmax3::MedianCdna>(flags, exec_mask, mode, d, a, b, c);
   case Minmax3::Min3Legacy:
     return run<Minmax3::Min3Legacy>(flags, exec_mask, mode, d, a, b, c);
   case Minmax3::Max3Legacy:
