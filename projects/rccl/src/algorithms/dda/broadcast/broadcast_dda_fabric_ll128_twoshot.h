@@ -192,7 +192,7 @@ __global__ void ddaBroadcastFabricLL128TwoShot(
           ddaLL128StoreWire(tgtGather + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane,
                             vr, flag, flagLane);
         }
-        if (fRound == 0) {
+        if (nFanRounds > 1 ? (fRound == 0) : (col == (int)(s % (size_t)nPeers))) {
           const size_t dOff = chunkOff(selfRank) + s * (size_t)kDdaLL128DataBytesPerSlice;
           const size_t rem = totalBytes > dOff ? totalBytes - dOff : 0;
           const int elt = rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
