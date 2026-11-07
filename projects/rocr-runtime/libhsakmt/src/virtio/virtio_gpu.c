@@ -179,7 +179,7 @@ static int virtio_gpu_execbuffer_locked(struct virtio_gpu_device* vgdev, void* c
       .command = (uintptr_t)cmd,
       .bo_handles = (uintptr_t)handles,
       .num_bo_handles = num_handles,
-      .fence_fd = *fence_fd,
+      .fence_fd = (in_fence && fence_fd) ? *fence_fd : -1,
       .ring_idx = ring_idx,
       .syncobj_stride = sizeof(struct drm_virtgpu_execbuffer_syncobj),
       .num_in_syncobjs = num_in_syncobjs,
