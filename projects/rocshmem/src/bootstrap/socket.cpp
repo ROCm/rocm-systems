@@ -544,6 +544,45 @@ void Socket::accept(const Socket* listenSocket, int64_t timeout) {
   }
 
   do {
+    /* Wait for the listening fd to become readable before progressing, when a
+     * timeout was requested on a blocking socket.
+     *
+     * Without this gate the timeout below is unreachable: a bootstrap Socket is
+     * left blocking unless asyncFlag_ or abortFlag_ is set (see the ctor), so
+     * progressState() -> tryAccept() -> ::accept() parks indefinitely and
+     * timer.elapsed() is never evaluated. Any peer turned away by
+     * discardAccept() returns the socket to SocketStateAccepting and re-enters
+     * that blocking call, so a single rejected connection -- wrong magic, wrong
+     * socket type, or a peer that closed mid-handshake -- strands the listener
+     * for the lifetime of the job instead of timing out.
+     *
+     * Only the waiting is gated. ::accept() is still invoked exactly as before,
+     * and sockets that are already non-blocking or were given no timeout keep
+     * their previous behaviour.
+     */
+    if (timeout > 0 && asyncFlag_ == 0 && state_ == SocketStateAccepting && acceptFd_ >= 0) {
+      int64_t left = timeout - timer.elapsed();
+      if (left <= 0) {
+        ERROR("accept timeout\n");
+        return;
+      }
+      /* Cap each wait so abortFlag_ is still observed promptly. */
+      int64_t waitMs = left / 1000;
+      if (waitMs > ACCEPT_POLL_INTERVAL_MS) waitMs = ACCEPT_POLL_INTERVAL_MS;
+      if (waitMs < 1) waitMs = 1;
+      struct pollfd pfd;
+      memset(&pfd, 0, sizeof(struct pollfd));
+      pfd.fd = acceptFd_;
+      pfd.events = POLLIN;
+      int pret = ::poll(&pfd, 1, static_cast<int>(waitMs));
+      if (pret == 0) continue; /* nothing pending; re-check timeout and abortFlag_ */
+      if (pret < 0) {
+        if (errno == EINTR) continue;
+        state_ = SocketStateError;
+        ERROR("poll on accept fd failed errno %d\n", errno);
+        return;
+      }
+    }
     progressState();
     if (timeout > 0 && timer.elapsed() > timeout) {
       ERROR("accept timeout\n");
