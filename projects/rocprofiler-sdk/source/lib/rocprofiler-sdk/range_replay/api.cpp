@@ -87,11 +87,13 @@ end_range()
         return 0;
     }
 
-    auto ctx = range_context_t{};
+    auto ctx         = range_context_t{};
+    auto window_lock = lock_for_window(*live);
     if(!take_range(ctx)) return -1;
 
     auto       divergence_count = uint64_t{0};
     const auto status           = execute_range(ctx, divergence_count);
+    window_lock                 = {};
     close_range(ctx, status, divergence_count);
     return 0;
 }

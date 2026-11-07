@@ -30,6 +30,7 @@
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+#include "lib/rocprofiler-sdk/hsa/replay_window.hpp"
 #include "lib/rocprofiler-sdk/hsa/signal_pool.hpp"
 #include "lib/rocprofiler-sdk/range_replay/range_state.hpp"
 #include "lib/rocprofiler-sdk/range_replay/replay_callbacks.hpp"
@@ -48,8 +49,11 @@
 #include <hsa/amd_hsa_signal.h>
 #include <hsa/hsa.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
+#include <shared_mutex>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -358,6 +362,8 @@ convert_hsa_handle(Up _hsa_object)
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     return reinterpret_cast<Tp*>(_hsa_object.handle);
 }
+
+using replay_agents_t = common::container::small_vector<rocprofiler_agent_id_t, 2>;
 
 struct copy_metadata
 {
@@ -1055,30 +1061,170 @@ populate_batch_traced_copy_data(traced_copy_data_vec_t&         _traced_copies,
  * the descriptor, and declining a range that would have replayed correctly costs one replay
  * while missing a device write corrupts every replayed pass.
  */
-void
-note_range_replay_batch_device_writes(const hsa_amd_memory_copy_op_t& _copy_op)
+replay_agents_t
+batch_gpu_agents(const hsa_amd_memory_copy_op_t& _copy_op)
 {
-    if(!range_replay::any_range_open()) return;
-
-    const auto _note = [](hsa_agent_t _hsa_agent) {
+    auto       _agents = replay_agents_t{};
+    const auto _add    = [&_agents](hsa_agent_t _hsa_agent) {
         const auto* _rocp_agent = agent::get_rocprofiler_agent(_hsa_agent);
         if(_rocp_agent != nullptr && _rocp_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
-            range_replay::note_device_write(_rocp_agent->id.handle);
+            _agents.emplace_back(_rocp_agent->id);
     };
 
-    _note(_copy_op.src_agent);
+    _add(_copy_op.src_agent);
 
     // BROADCAST always, and every other type in its multi-entry form, names its destinations
     // through dst_agent_list rather than dst_agent; the two share storage.
     const bool _multi_entry =
         _copy_op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST || _copy_op.num_entries > 0;
     if(!_multi_entry)
-        _note(_copy_op.dst_agent);
+        _add(_copy_op.dst_agent);
     else if(_copy_op.dst_agent_list != nullptr)
     {
         for(uint32_t i = 0; i < _copy_op.num_entries; ++i)
-            _note(_copy_op.dst_agent_list[i]);
+            _add(_copy_op.dst_agent_list[i]);
     }
+    return _agents;
+}
+
+void
+note_range_replay_batch_device_writes(const replay_agents_t& _agents)
+{
+    if(!range_replay::any_range_open()) return;
+    for(const auto& _agent : _agents)
+        range_replay::note_device_write(_agent.handle);
+}
+
+/**
+ * @brief Range replay's hold on async copies that write device memory.
+ *
+ * A replay window must neither start while such a copy is being submitted nor snapshot or restore
+ * while one is still running: the restore would revert what the copy wrote, and nothing in the
+ * window's barriers or handler counts sees the copy engine. While a range replay context is
+ * configured, every such copy is submitted under the replay reader lock of each agent it can write,
+ * the lock a dispatch holds across its submit, so the range's decline is published before the
+ * window can begin. The copy also carries a ticket on those agents until the copy engine completes
+ * it, which replay_drain_agent_or_fatal waits for.
+ */
+bool&
+range_replay_holds_copies()
+{
+    static bool _v = false;
+    return _v;
+}
+
+struct replay_copy_track
+{
+    using pooled_signal_t = common::container::pool_object<signal_t>;
+    using ticket_t        = std::pair<rocprofiler_agent_id_t, uint64_t>;
+
+    hsa_signal_t                                 forward = {};
+    hsa_signal_t                                 signal  = {};
+    pooled_signal_t*                             pooled  = nullptr;
+    common::container::small_vector<ticket_t, 2> tickets = {};
+};
+
+using replay_locks_t = common::container::small_vector<std::shared_lock<std::shared_mutex>, 2>;
+
+replay_agents_t
+sorted_unique(replay_agents_t _agents)
+{
+    std::sort(
+        _agents.begin(), _agents.end(), [](auto lhs, auto rhs) { return lhs.handle < rhs.handle; });
+    _agents.erase(std::unique(_agents.begin(),
+                              _agents.end(),
+                              [](auto lhs, auto rhs) { return lhs.handle == rhs.handle; }),
+                  _agents.end());
+    return _agents;
+}
+
+// Taken in agent-id order, the order host replay takes the writer locks in. A thread replaying a
+// range already holds its agent's lock as a writer.
+replay_locks_t
+lock_replay_agents(const replay_agents_t& _agents)
+{
+    auto _locks = replay_locks_t{};
+    if(range_replay::this_thread_replaying()) return _locks;
+    for(const auto& _agent : _agents)
+        _locks.emplace_back(hsa::agent_replay_mutex(_agent));
+    return _locks;
+}
+
+bool
+replay_copy_handler(hsa_signal_value_t, void* arg)
+{
+    auto* _track = static_cast<replay_copy_track*>(arg);
+    if(registration::get_fini_status() > 0)
+    {
+        delete _track;
+        return false;
+    }
+
+    if(_track->forward.handle != 0)
+    {
+        auto* _orig = convert_hsa_handle<amd_signal_t>(_track->forward);
+        auto* _ours = convert_hsa_handle<amd_signal_t>(_track->signal);
+        std::tie(_orig->start_ts, _orig->end_ts) = std::tie(_ours->start_ts, _ours->end_ts);
+        get_core_table()->hsa_signal_subtract_screlease_fn(_track->forward, 1);
+    }
+
+    for(const auto& [_agent, _ticket] : _track->tickets)
+        hsa::replay_copy_retired(_agent, _ticket);
+
+    ROCP_WARNING_IF(!_track->pooled->release()) << "failed to release pooled replay copy signal";
+    delete _track;
+    if(get_active_signals()) get_active_signals()->fetch_sub(1);
+    return false;
+}
+
+// Gives the copy a signal whose handler retires its tickets and then completes `_completion`.
+// Returns nullptr, leaving `_completion` alone, if the signal could not be set up.
+replay_copy_track*
+track_replay_copy(const replay_agents_t& _agents, hsa_signal_t& _completion)
+{
+    if(_agents.empty()) return nullptr;
+
+    auto* _signal_pool = get_signal_pool();
+    if(_signal_pool == nullptr) return nullptr;
+
+    auto& _pooled = _signal_pool->acquire();
+    if(_pooled.get().value.handle == 0) construct_hsa_signal(_pooled.get(), 0, 0, nullptr, 0);
+
+    auto* _track    = new replay_copy_track{};
+    _track->forward = _completion;
+    _track->signal  = _pooled.get().value;
+    _track->pooled  = &_pooled;
+    for(const auto& _agent : _agents)
+        _track->tickets.emplace_back(_agent, hsa::replay_copy_submitted(_agent));
+
+    get_core_table()->hsa_signal_store_screlease_fn(_track->signal, 1);
+    CHECK_NOTNULL(get_active_signals())->fetch_add(1);
+    if(get_amd_ext_table()->hsa_amd_signal_async_handler_fn(
+           _track->signal, HSA_SIGNAL_CONDITION_LT, 1, replay_copy_handler, _track) !=
+       HSA_STATUS_SUCCESS)
+    {
+        ROCP_WARNING << "range replay: could not watch an async copy's completion; a replay "
+                        "window will not wait for it";
+        for(const auto& [_agent, _ticket] : _track->tickets)
+            hsa::replay_copy_retired(_agent, _ticket);
+        ROCP_WARNING_IF(!_pooled.release()) << "failed to release pooled replay copy signal";
+        delete _track;
+        get_active_signals()->fetch_sub(1);
+        return nullptr;
+    }
+
+    _completion = _track->signal;
+    return _track;
+}
+
+// The submission failed, so the copy engine will never complete our signal: complete it here
+// without passing completion on to the application's signal.
+void
+abandon_replay_copy(replay_copy_track* _track)
+{
+    if(_track == nullptr) return;
+    _track->forward = {};
+    get_core_table()->hsa_signal_store_screlease_fn(_track->signal, 0);
 }
 
 /**
@@ -1086,10 +1232,10 @@ note_range_replay_batch_device_writes(const hsa_amd_memory_copy_op_t& _copy_op)
  */
 template <size_t TableIdx, size_t OpIdx>
 hsa_status_t
-async_batch_copy_impl(const hsa_amd_memory_copy_op_t* copy_ops,
-                      uint32_t                        num_copy_ops,
-                      uint32_t                        num_dep_signals,
-                      const hsa_signal_t*             dep_signals)
+traced_async_batch_copy_impl(const hsa_amd_memory_copy_op_t* copy_ops,
+                             uint32_t                        num_copy_ops,
+                             uint32_t                        num_dep_signals,
+                             const hsa_signal_t*             dep_signals)
 {
     using meta_type        = hsa_api_meta<TableIdx, OpIdx>;
     using intercept_data_t = std::pair<uint32_t, async_copy_data*>;
@@ -1108,8 +1254,6 @@ async_batch_copy_impl(const hsa_amd_memory_copy_op_t* copy_ops,
 
     for(uint32_t i = 0; i < num_copy_ops; ++i)
     {
-        note_range_replay_batch_device_writes(copy_ops[i]);
-
         auto _traced_copies = traced_copy_data_vec_t{};
         populate_batch_traced_copy_data(_traced_copies, copy_ops[i], meta_type::name);
 
@@ -1210,11 +1354,96 @@ async_batch_copy_impl(const hsa_amd_memory_copy_op_t* copy_ops,
 
     return _status;
 }
+
+template <size_t TableIdx, size_t OpIdx>
+hsa_status_t
+async_batch_copy_impl(const hsa_amd_memory_copy_op_t* copy_ops,
+                      uint32_t                        num_copy_ops,
+                      uint32_t                        num_dep_signals,
+                      const hsa_signal_t*             dep_signals)
+{
+    if(!range_replay_holds_copies() || copy_ops == nullptr || num_copy_ops == 0)
+    {
+        if(copy_ops != nullptr)
+            for(uint32_t i = 0; i < num_copy_ops; ++i)
+                note_range_replay_batch_device_writes(batch_gpu_agents(copy_ops[i]));
+        return traced_async_batch_copy_impl<TableIdx, OpIdx>(
+            copy_ops, num_copy_ops, num_dep_signals, dep_signals);
+    }
+
+    auto _ops       = std::vector<hsa_amd_memory_copy_op_t>{copy_ops, copy_ops + num_copy_ops};
+    auto _op_agents = std::vector<replay_agents_t>{};
+    auto _all       = replay_agents_t{};
+    _op_agents.reserve(num_copy_ops);
+    for(const auto& _op : _ops)
+    {
+        _op_agents.emplace_back(sorted_unique(batch_gpu_agents(_op)));
+        for(const auto& _agent : _op_agents.back())
+            _all.emplace_back(_agent);
+    }
+
+    const auto _locks = lock_replay_agents(sorted_unique(std::move(_all)));
+
+    auto _tracks = std::vector<replay_copy_track*>{};
+    _tracks.reserve(num_copy_ops);
+    for(uint32_t i = 0; i < num_copy_ops; ++i)
+    {
+        note_range_replay_batch_device_writes(_op_agents[i]);
+        _tracks.emplace_back(track_replay_copy(_op_agents[i], _ops[i].completion_signal));
+    }
+
+    const auto _status = traced_async_batch_copy_impl<TableIdx, OpIdx>(
+        _ops.data(), num_copy_ops, num_dep_signals, dep_signals);
+    if(_status != HSA_STATUS_SUCCESS)
+        for(auto* _track : _tracks)
+            abandon_replay_copy(_track);
+    return _status;
+}
 #endif
 
 template <size_t TableIdx, size_t OpIdx, typename... Args>
 hsa_status_t
+traced_async_copy_impl(Args... args);
+
+template <size_t TableIdx, size_t OpIdx, typename... Args>
+hsa_status_t
 async_copy_impl(Args... args)
+{
+    using meta_type = hsa_api_meta<TableIdx, OpIdx>;
+
+    constexpr auto dst_addr_idx          = arg_indices<OpIdx>::dst_address_idx;
+    constexpr auto src_addr_idx          = arg_indices<OpIdx>::src_address_idx;
+    constexpr auto dst_agent_idx         = arg_indices<OpIdx>::dst_agent_idx;
+    constexpr auto src_agent_idx         = arg_indices<OpIdx>::src_agent_idx;
+    constexpr auto completion_signal_idx = arg_indices<OpIdx>::completion_signal_idx;
+
+    auto _args = std::make_tuple(args...);
+
+    const auto _copy_meta = get_copy_metadata(std::get<dst_agent_idx>(_args),
+                                              std::get<src_agent_idx>(_args),
+                                              compute_address(std::get<dst_addr_idx>(_args)).ptr,
+                                              compute_address(std::get<src_addr_idx>(_args)).ptr,
+                                              OpIdx != async_copy_rect_id,
+                                              meta_type::name);
+
+    const bool _writes_device = _copy_meta.direction == ROCPROFILER_MEMORY_COPY_HOST_TO_DEVICE ||
+                                _copy_meta.direction == ROCPROFILER_MEMORY_COPY_DEVICE_TO_DEVICE;
+    auto _agents = replay_agents_t{};
+    if(range_replay_holds_copies() && _writes_device) _agents.emplace_back(_copy_meta.dst_agent);
+
+    const auto _locks = lock_replay_agents(_agents);
+    note_range_replay_device_write(_copy_meta);
+    auto* _track = track_replay_copy(_agents, std::get<completion_signal_idx>(_args));
+
+    const auto _status = std::apply(
+        [](auto... _a) { return traced_async_copy_impl<TableIdx, OpIdx, Args...>(_a...); }, _args);
+    if(_status != HSA_STATUS_SUCCESS) abandon_replay_copy(_track);
+    return _status;
+}
+
+template <size_t TableIdx, size_t OpIdx, typename... Args>
+hsa_status_t
+traced_async_copy_impl(Args... args)
 {
     using meta_type = hsa_api_meta<TableIdx, OpIdx>;
 
@@ -1237,8 +1466,6 @@ async_copy_impl(Args... args)
                                             compute_address(std::get<src_addr_idx>(_tied_args)).ptr,
                                             OpIdx != async_copy_rect_id,
                                             meta_type::name);
-
-        note_range_replay_device_write(_copy_meta);
 
         if(!populate_traced_copy_data(_traced_copy,
                                       _copy_meta,
@@ -1465,6 +1692,8 @@ async_copy_init(hsa_api_table_t* _orig, uint64_t _tbl_instance)
         const bool range_replay_configured = range_replay::has_registered_range_replay_context();
 
         if(!ctxs.empty()) _orig->amd_ext_->hsa_amd_profiling_async_copy_enable_fn(true);
+
+        async_copy::range_replay_holds_copies() = range_replay_configured;
 
         if(!ctxs.empty() || range_replay_configured)
         {

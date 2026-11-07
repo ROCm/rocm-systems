@@ -111,33 +111,47 @@ replay_drain_or_fatal(const Queue& queue);
 // per-agent writer lock held by the replay window blocks new dispatches on the agent, so in-flight
 // work only decreases and the poll converges; fatal on a genuinely stuck queue (beta feature),
 // matching replay_drain_or_fatal.
+//
+// Also waits for every device-writing async copy to `agent` that was registered (see
+// replay_copy_submitted) before the call. Copies registered later are not waited for, so a
+// stream of new copies cannot keep the drain from finishing.
 void
 replay_drain_agent_or_fatal(hsa_agent_t agent);
 
+// Async copies that write an agent's device memory and have not completed. The copy engine does
+// not go through any AQL queue, so neither a barrier packet nor a queue's async-handler count
+// orders a replay window against them. The copy wrappers register a copy before submitting it and
+// retire the returned ticket from its completion handler; replay_drain_agent_or_fatal waits for
+// the tickets issued before it started.
+uint64_t
+replay_copy_submitted(rocprofiler_agent_id_t agent_id);
+
+void
+replay_copy_retired(rocprofiler_agent_id_t agent_id, uint64_t ticket);
+
+// Write `count` packets to an SDK-owned queue on `agent`, created on first use, and ring its
+// hardware doorbell. Range replay submits its re-executed passes here rather than through the
+// application's queue: ringing an intercepted queue's doorbell takes ROCr's per-queue intercept
+// lock, which another thread can hold while it waits in WriteInterceptor for the per-agent replay
+// lock the pass loop holds as a writer. Blocks while the ring is full. Returns false if the queue
+// cannot be created.
+bool
+replay_private_submit(hsa_agent_t agent, const rocprofiler_packet* packets, size_t count);
+
 // Write `count` packets into `queue`'s ring buffer and ring its doorbell -- the same submission the
-// application itself performs, so whichever interception mechanism is installed sees them. Used to
-// re-submit recorded packets from outside a WriteInterceptor call (range replay), where no
-// interceptor-provided writer is in scope. Blocks while the ring is full. Returns false if the
-// queue's packet buffer is unavailable or its engine does not accept AQL packets.
+// application itself performs, so whichever interception mechanism is installed sees them.
+// Blocks while the ring is full. Returns false if the queue's packet buffer is unavailable or its
+// engine does not accept AQL packets.
 //
-// Callers submitting *recorded* packets must clear their completion signals first: re-firing a
-// signal the application has already consumed corrupts its synchronization.
+// Ringing an intercepted queue's doorbell takes ROCr's intercept lock for that queue, so a caller
+// must not hold a per-agent replay lock as a writer (see replay_private_submit).
 bool
 replay_ring_submit(const Queue& queue, const rocprofiler_packet* packets, size_t count);
 
 // Submit a barrier packet carrying `completion` and wait for it, fencing the CPU against all GPU
-// work previously submitted to `queue`. Returns false if the submission itself failed.
+// work previously submitted to `queue`. Returns false if the submission itself failed. Goes
+// through replay_ring_submit, with the same restriction on the caller.
 bool
 replay_barrier_and_wait(const Queue& queue, hsa_signal_t completion);
-
-// While set on this thread, WriteInterceptor forwards packets untouched. Range replay's re-submit
-// path transforms the recorded packets once (via Queue::invoke_write_interceptor) and then writes
-// the result to the ring, which re-enters interception on this same thread; without this flag the
-// packets would be transformed twice (two pooled signals and two records per dispatch).
-void
-set_interceptor_passthrough(bool enabled);
-
-bool
-interceptor_passthrough();
 }  // namespace hsa
 }  // namespace rocprofiler

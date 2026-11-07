@@ -369,16 +369,6 @@ WriteInterceptor(const void* packets,
 
     auto& queue = *static_cast<Queue*>(data);
 
-    // A range replay pass writes its already-transformed packets to the same ring the application
-    // submits through, which lands back here on this thread. Forward them untouched: transforming
-    // them a second time would mint a second dispatch record and a second completion signal for
-    // each packet.
-    if(interceptor_passthrough())
-    {
-        writer(packets, pkt_count);
-        return;
-    }
-
     auto*      gls                 = ::rocprofiler::hip::graph::current_launch_state();
     const bool graph_launch_active = (gls != nullptr);
     // SPM no longer registers a queue-controller callback, so it does not count toward
@@ -1213,7 +1203,14 @@ WriteInterceptor(const void* packets,
     // replay window's agent-wide drain, not by this lock.)
     std::optional<std::shared_lock<std::shared_mutex>> replay_reader_guard{};
     if((has_kernel_replay || has_range_replay) && !range_replay::this_thread_replaying())
+    {
         replay_reader_guard.emplace(agent_replay_mutex(queue.get_agent().get_rocp_agent()->id));
+        // submission_hook published before this lock was taken, when a packet range on this agent
+        // may not have been bound yet. That range snapshots under the writer lock, so publishing
+        // again here reaches every range whose snapshot this dispatch can land after.
+        if(has_range_replay)
+            range_replay::note_foreign_dispatch(queue.get_agent().get_rocp_agent()->id.handle);
+    }
 
     bool should_batch_packets = true;
     queue.signal_callback([&should_batch_packets](const auto& map) {

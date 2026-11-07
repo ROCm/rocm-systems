@@ -63,19 +63,19 @@ using snapshot_t = kernel_replay::memory_snapshot::device_snapshot_t;
 // the target queue is passed through thread-local state for the duration of one submission.
 thread_local const hsa::Queue* tl_submit_queue = nullptr;
 
-// Interceptor packet writer for replayed passes: puts the *transformed* packets on the ring the
-// application submits through. Writing to that ring re-enters interception on this thread, so the
-// passthrough flag is held across the write to keep the packets from being transformed twice.
+// Interceptor packet writer for replayed passes: puts the *transformed* packets on the SDK's own
+// queue for the range's agent. The application's queue cannot be used: its doorbell takes ROCr's
+// intercept lock, which another thread may hold while it waits for the replay lock this window
+// holds as a writer.
 void
 ring_writer(const void* packets, uint64_t count)
 {
     if(tl_submit_queue == nullptr) return;
 
-    hsa::set_interceptor_passthrough(true);
-    const auto _clear = common::scope_destructor{[]() { hsa::set_interceptor_passthrough(false); }};
-
-    hsa::replay_ring_submit(
-        *tl_submit_queue, static_cast<const hsa::rocprofiler_packet*>(packets), count);
+    ROCP_FATAL_IF(!hsa::replay_private_submit(tl_submit_queue->get_agent().get_hsa_agent(),
+                                              static_cast<const hsa::rocprofiler_packet*>(packets),
+                                              count))
+        << "range replay: could not create a queue to submit replayed passes on";
 }
 
 // A kernarg block for one replay pass: every recorded dispatch's arguments, laid out back to back
@@ -272,6 +272,15 @@ ensure_entry_snapshot(range_context_t&                      ctx,
 
     const auto entry_start = phase_clock::now();
 
+    // Exclude submissions in progress on other threads, as the kernel-replay window does from the
+    // same place. One that took the reader lock before this finishes submitting first, so the
+    // drain below waits for it; one that takes it afterwards finds this range bound and declines it
+    // (WriteInterceptor publishes again under the reader lock). This thread holds the queue's
+    // intercept lock but no replay lock, and no writer of the replay lock waits for an intercept
+    // lock.
+    const auto replay_guard =
+        std::unique_lock<std::shared_mutex>{hsa::agent_replay_mutex(ctx.agent_id)};
+
     // Fence against work already in flight so the snapshot sees settled memory: first this queue
     // (a barrier packet through the interceptor's writer, exactly as the kernel-replay window
     // does), then every other queue on the agent. The signal comes from the SDK's pool because
@@ -336,6 +345,15 @@ ensure_entry_snapshot(range_context_t&                      ctx,
                              ctx.snapshot.blocks.size());
 }
 
+std::unique_lock<std::shared_mutex>
+lock_for_window(const range_context_t& ctx)
+{
+    if(!ctx.record.eligible() || !ctx.plan.replay_requested || ctx.queue == nullptr ||
+       !ctx.snapshot_taken || !ctx.snapshot.ok)
+        return {};
+    return std::unique_lock<std::shared_mutex>{hsa::agent_replay_mutex(ctx.agent_id)};
+}
+
 rocprofiler_range_replay_status_t
 execute_range(range_context_t& ctx, uint64_t& divergence_count)
 {
@@ -353,10 +371,6 @@ execute_range(range_context_t& ctx, uint64_t& divergence_count)
     // Wall time of each phase of the window, reported at INFO once the window closes, so the lock
     // and drain waits, the exit snapshot, the passes and the restores can be told apart.
     const auto window_start = phase_clock::now();
-
-    // Exclude every other replay and every non-replay dispatch on this agent for the whole window.
-    const auto replay_guard =
-        std::unique_lock<std::shared_mutex>{hsa::agent_replay_mutex(ctx.agent_id)};
 
     // The application's own execution of the range is complete as far as the host is concerned, but
     // its GPU tail may not be. Drain before touching device memory.
@@ -393,8 +407,9 @@ execute_range(range_context_t& ctx, uint64_t& divergence_count)
     auto local_ctx_tls_guard =
         kernel_replay::scoped_local_context_control{context::get_active_contexts()};
 
-    // Mark the thread as replaying for the duration: the queue path uses it to skip re-recording
-    // the packets we submit and to skip the per-agent reader lock we already hold as a writer.
+    // Mark the thread as replaying for the duration: the queue and copy paths use it to skip
+    // re-recording the packets we submit and to skip the per-agent reader lock we already hold as a
+    // writer.
     set_this_thread_replaying(true);
     tl_submit_queue     = &queue;
     const auto _restore = common::scope_destructor{[]() {

@@ -111,25 +111,34 @@ fence_queue(const hsa::Queue& queue)
 }
 
 // Fence compute queues while excluding destruction, but without holding the queue-map lock.
-// Copies and non-compute work must already have been synchronized by the application.
-void
-fence_agent(hsa_agent_t agent)
-{
-    if(auto* controller = hsa::get_queue_controller(); controller != nullptr)
-    {
-        controller->iterate_queues_with_lifetime([&](const hsa::Queue* queue) {
-            if(queue != nullptr && queue->get_agent().get_hsa_agent().handle == agent.handle)
-                fence_queue(*queue);
-        });
-    }
-    hsa::replay_drain_agent_or_fatal(agent);
-}
-
+// Non-compute queues must already have been synchronized by the application.
+//
+// Must run before lock_agents(): the barrier goes through the queue's intercept doorbell, which
+// takes ROCr's per-queue intercept lock, and another thread can hold that lock while it waits in
+// WriteInterceptor for the replay lock. Work submitted between this fence and lock_agents()
+// published a decline into the range, which the checks under the lock see.
 void
 fence_all(const std::vector<host_agent_state_t>& agents)
 {
+    auto* controller = hsa::get_queue_controller();
+    if(controller == nullptr) return;
     for(const auto& agent : agents)
-        fence_agent(agent.hsa_agent);
+    {
+        controller->iterate_queues_with_lifetime([&](const hsa::Queue* queue) {
+            if(queue != nullptr &&
+               queue->get_agent().get_hsa_agent().handle == agent.hsa_agent.handle)
+                fence_queue(*queue);
+        });
+    }
+}
+
+// Wait for completion handlers and device-writing copies. Runs under lock_agents(), which stops
+// new ones from starting, so the wait is bounded.
+void
+drain_all(const std::vector<host_agent_state_t>& agents)
+{
+    for(const auto& agent : agents)
+        hsa::replay_drain_agent_or_fatal(agent.hsa_agent);
 }
 
 // Device digests of every agent followed by the host regions', so two points in time compare
@@ -258,8 +267,9 @@ try
 
     host.agents = gpu_agents();
 
-    const auto guards = lock_agents(host);
     fence_all(host.agents);
+    const auto guards = lock_agents(host);
+    drain_all(host.agents);
     const auto fenced_at = phase_clock::now();
 
     // Drain callbacks before taking executable lifetime protection: a callback can unload a module.
@@ -343,14 +353,17 @@ finish_pass(range_context_t& ctx)
     const auto pass           = host.pass;
     const auto dispatch_count = static_cast<uint64_t>(ctx.record.observed_dispatch_count());
 
-    // Acquire in gpu_agents() order before observing settled state or the decline channel.
-    // Otherwise a writer can change device memory between the final checks and the restore.
+    // The pass's GPU tail belongs to the pass: its records are emitted before PASS exit, and the
+    // checks below see settled memory. drain_all waits for the HSA completion handler, which only
+    // queues the counter record onto its consumer thread, so flush that thread before PASS exit.
+    //
+    // The locks are acquired in gpu_agents() order before observing settled state or the decline
+    // channel. Otherwise a writer can change device memory between the final checks and the
+    // restore.
+    if(host.snapshot_taken) fence_all(host.agents);
     auto guards = host.snapshot_taken ? lock_agents(host)
                                       : std::vector<std::unique_lock<std::shared_mutex>>{};
-    // The pass's GPU tail belongs to the pass: its records are emitted before PASS exit, and the
-    // checks below see settled memory. fence_all waits for the HSA completion handler, which only
-    // queues the counter record onto its consumer thread, so flush that thread before PASS exit.
-    if(host.snapshot_taken) fence_all(host.agents);
+    if(host.snapshot_taken) drain_all(host.agents);
     counters::flush_callback_thread();
 
     if(pass > 0)

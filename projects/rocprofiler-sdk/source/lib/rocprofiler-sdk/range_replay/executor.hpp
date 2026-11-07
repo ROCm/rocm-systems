@@ -48,6 +48,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
+#include <shared_mutex>
 #include <vector>
 
 namespace rocprofiler
@@ -99,9 +101,17 @@ ensure_entry_snapshot(range_context_t&                      ctx,
 
 // Re-execute the recorded range. Returns the outcome to report at CLOSE, and writes the number of
 // divergent snapshot regions to `divergence_count` (0 unless divergence checking is enabled).
-// Blocks the calling thread; holds the range's agent replay lock for the whole window.
+// Blocks the calling thread. The caller must hold the range's agent replay lock as a writer, taken
+// before the range was unregistered (see lock_for_window), and keep it until this returns.
 rocprofiler_range_replay_status_t
 execute_range(range_context_t& ctx, uint64_t& divergence_count);
+
+// The writer lock execute_range() runs under, or an empty lock when the range will not reach its
+// window. It is taken while the range is still registered: a dispatch or copy that another thread
+// submits before then has published its decline into the range, and one submitted afterwards
+// waits for the lock, so none can land unnoticed between end() and the window's snapshot.
+std::unique_lock<std::shared_mutex>
+lock_for_window(const range_context_t& ctx);
 
 // Sorted base pointers of the allocations the memory tracker holds for `agent`: the set an agent
 // snapshot covers, compared before a restore to detect allocations made or freed since the
