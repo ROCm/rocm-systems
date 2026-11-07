@@ -243,6 +243,9 @@ apply_driver_profile() {
   ROCR_DEFAULT=0
   POLL_SLEEP=120
   REPORT_MISSING=error
+  # gfx90a sets this so a skipped mega_kernel (profile=SKIP, no analyze log)
+  # warns instead of failing the report. Other missing logs stay errors.
+  REPORT_SKIPPED_MEGA=""
   REPORT_HOST_KIND=host
   SITE_ROCM_IN_LAUNCH=0
   TAG_SUFFIX=500
@@ -311,6 +314,10 @@ apply_driver_profile() {
       THEROCK=${THEROCK_ARG:-/opt/rocm-7.2.0}
       REMOTE_ROOT=${REMOTE_ROOT:-${SLURM_DEFAULT_ROOT}}
       NODE_ROOT=${NODE_ROOT:-${SLURM_DEFAULT_ROOT}}
+      # A failed mega_kernel build writes WORKLOAD_DONE profile=SKIP and no
+      # analyze log. That skip is a warning. Workloads that were supposed to
+      # run still fail the report when their log is missing.
+      REPORT_SKIPPED_MEGA=warn
       ;;
     *)
       echo "Unknown ARCH: ${ARCH}" >&2
@@ -503,8 +510,11 @@ write_sbatch() {
 #SBATCH -o ${SBATCH_OUT}
 #SBATCH -e ${SBATCH_OUT}
 set -euo pipefail
-export ROCR_VISIBLE_DEVICES=0
-export HIP_VISIBLE_DEVICES=0
+# Keep a device Slurm or the caller already set. Default only when unset.
+: "\${ROCR_VISIBLE_DEVICES:=0}"
+: "\${HIP_VISIBLE_DEVICES:=0}"
+export ROCR_VISIBLE_DEVICES
+export HIP_VISIBLE_DEVICES
 chmod +x '${root_path}/scripts/run_metric_health_test_report.sh'
 ${remote_command}
 SBATCH
@@ -567,7 +577,11 @@ on_log_host() {
     ssh-pass|ssh-key) ssh_cmd "$1" ;;
     slurm-home) ssh_login "$1" ;;
     slurm-remote)
-      ssh_login "srun -p '${PARTITION}' -w '${NODE}' --gres='${GRES}' -t 00:05:00 -J metric-poll \
+      # Job state is polled with squeue on the login node (worker_state).
+      # This step only reads the log. It must not request the workload's
+      # GPUs: a step queued behind those GPUs would not start until the
+      # worker finished, so -t would not enforce WAIT_TIMEOUT.
+      ssh_login "srun -p '${PARTITION}' -w '${NODE}' --gres=none -t 00:05:00 -J metric-poll \
         bash -lc $(printf '%q' "$1")"
       ;;
     *)
@@ -672,7 +686,53 @@ fetch_slurm_home() {
     "${ARTIFACTS}/metric_health_${TAG}.log" || true
 }
 
+# Remote bash that archives workload dirs named *_<tag>_*.
+# The remote shell expands the stars. The tag is printf %q'd so a space or
+# glob in the tag cannot widen the match. No match exits 0 and writes
+# nothing. A missing directory or a tar failure exits non-zero.
+workload_dir_archive_script() {
+  local root_q tag_q
+  root_q=$(printf '%q' "$1")
+  tag_q=$(printf '%q' "$2")
+  cat <<EOF
+set -euo pipefail
+cd ${root_q}
+shopt -s nullglob
+matches=(*_${tag_q}_*)
+if (( \${#matches[@]} == 0 )); then
+  exit 0
+fi
+tar czf - -- "\${matches[@]}"
+EOF
+}
+
+# Install a workload archive. An empty file is a non-fatal no-match.
+# A real archive must list a path whose name contains _<tag>_.
+extract_tagged_workload_archive() {
+  local archive=$1 dest=$2 tag=$3 listing
+  if [[ ! -s "$archive" ]]; then
+    return 0
+  fi
+  listing=$(mktemp)
+  if ! tar tzf "$archive" >"$listing"; then
+    rm -f "$listing"
+    echo "ERROR: workload archive for tag ${tag} is not a valid archive" >&2
+    return 1
+  fi
+  if ! grep -F -q -- "_${tag}_" "$listing"; then
+    rm -f "$listing"
+    echo "ERROR: workload archive for tag ${tag} has no matching directory" >&2
+    return 1
+  fi
+  rm -f "$listing"
+  if ! tar xzf "$archive" -C "$dest"; then
+    echo "ERROR: failed to extract workload archive for tag ${tag}" >&2
+    return 1
+  fi
+}
+
 fetch_slurm_remote() {
+  local archive script
   mkdir -p "${ARTIFACTS}/${ARCH}" "${ARTIFACTS}/logs/${ARCH}"
   echo "=== fetch via node home on ${NODE} ==="
   ssh_login "srun -p '${PARTITION}' -w '${NODE}' --gres='${GRES}' -t 00:30:00 -J metric-fetch-${ARCH} \
@@ -680,9 +740,19 @@ fetch_slurm_remote() {
     | tar xzf - -C "${ARTIFACTS}/logs/" 2>/dev/null \
     && mv "${ARTIFACTS}/logs/logs_${ARCH}_${TAG}"/* "${ARTIFACTS}/logs/${ARCH}/" 2>/dev/null || true
   rmdir "${ARTIFACTS}/logs/logs_${ARCH}_${TAG}" 2>/dev/null || true
-  ssh_login "srun -p '${PARTITION}' -w '${NODE}' --gres='${GRES}' -t 00:45:00 -J metric-fetch-wl \
-    bash -lc 'cd \"${NODE_ROOT}/workloads\" && tar czf - --wildcards \"*_${TAG}_*\" 2>/dev/null'" \
-    | tar xzf - -C "${ARTIFACTS}/${ARCH}/" 2>/dev/null || true
+  archive=$(mktemp)
+  script=$(workload_dir_archive_script "${NODE_ROOT}/workloads" "$TAG")
+  if ! ssh_login "srun -p '${PARTITION}' -w '${NODE}' --gres='${GRES}' -t 00:45:00 -J metric-fetch-wl \
+      bash -lc $(printf '%q' "$script")" >"$archive"; then
+    rm -f "$archive"
+    echo "ERROR: failed to archive workload directories for tag ${TAG}" >&2
+    return 1
+  fi
+  if ! extract_tagged_workload_archive "$archive" "${ARTIFACTS}/${ARCH}" "$TAG"; then
+    rm -f "$archive"
+    return 1
+  fi
+  rm -f "$archive"
   ssh_login "srun -p '${PARTITION}' -w '${NODE}' --gres='${GRES}' -t 00:10:00 \
     bash -lc 'cat \"${REMOTE_LOG}\"'" > "${ARTIFACTS}/metric_health_${TAG}.log" 2>/dev/null || true
 }
@@ -727,6 +797,13 @@ require_distinct_profilers() {
   fi
 }
 
+# True when this run's health log recorded a mega_kernel build skip.
+mega_kernel_profile_skipped() {
+  local health_log="${ARTIFACTS}/metric_health_${TAG}.log"
+  [[ -f "$health_log" ]] && grep -F -q \
+    "WORKLOAD_DONE name=mega_kernel mode=${RUN} profile=SKIP" "$health_log"
+}
+
 generate_report() {
   local logs="${ARTIFACTS}/logs/${ARCH}"
   local reports="${ARTIFACTS}/reports"
@@ -743,6 +820,11 @@ generate_report() {
     if [[ ! -f "${logs}/${name}_${RUN}.log" ]]; then
       if [[ "$REPORT_MISSING" == "warn" ]]; then
         echo "WARN: missing ${logs}/${name}_${RUN}.log — skipping that workload in report" >&2
+        continue
+      fi
+      if [[ "$name" == "mega_kernel" && "$REPORT_SKIPPED_MEGA" == "warn" ]] \
+        && mega_kernel_profile_skipped; then
+        echo "WARN: mega_kernel profile=SKIP — missing ${logs}/${name}_${RUN}.log — skipping that workload in report" >&2
         continue
       fi
       echo "ERROR: missing ${logs}/${name}_${RUN}.log" >&2

@@ -26,9 +26,9 @@ per-dispatch sample standard deviation (analyze `STD` / `to_std`).
 CV is Std Dev / |Median|, shown as a percent:
 
 * Prefer the Median column when present in `--view table` output.
-* Else recompute Median from the run's per-dispatch data. `SUM / SUM` and
-  Value-only formulas are reduced per dispatch, then aggregated. Both runs are
-  recomputed with the evaluator in this tree.
+* Else recompute Median from the run's per-dispatch data. `SUM / SUM`, `AVG`,
+  and other value-only formulas are reduced per dispatch, then aggregated.
+  Both runs are recomputed with the evaluator in this tree.
 * Else, if Min==Max, treat that value as the Median.
 * Value-only panels (no Avg/Min/Max/Median) use the single Value column.
 * A Median or Std Dev already printed by the analyze log is kept.
@@ -490,16 +490,22 @@ def min_formula_to_median_expr(min_formula: str) -> Optional[str]:
     return None
 
 
-def _replace_to_sum_calls(expression: str) -> str:
-    """Replace every ``to_sum(x)`` call with its per-dispatch operand ``(x)``."""
+def _replace_reducible_aggregates(expression: str) -> str:
+    """Replace every ``to_sum(x)`` or ``to_avg(x)`` with its operand ``(x)``."""
     pieces: List[str] = []
     index = 0
     while index < len(expression):
-        if not expression.startswith("to_sum(", index):
+        matched = ""
+        for name in ("to_sum", "to_avg"):
+            prefix = f"{name}("
+            if expression.startswith(prefix, index):
+                matched = prefix
+                break
+        if not matched:
             pieces.append(expression[index])
             index += 1
             continue
-        operand_start = index + len("to_sum(")
+        operand_start = index + len(matched)
         depth = 1
         operand_end = operand_start
         while operand_end < len(expression) and depth:
@@ -511,7 +517,7 @@ def _replace_to_sum_calls(expression: str) -> str:
         if depth:
             return expression
         operand = expression[operand_start : operand_end - 1]
-        pieces.append(f"({_replace_to_sum_calls(operand)})")
+        pieces.append(f"({_replace_reducible_aggregates(operand)})")
         index = operand_end
     return "".join(pieces)
 
@@ -530,7 +536,12 @@ def aggregator_to_stat(expression: str, replacement: str) -> Optional[str]:
 
 
 def per_dispatch_stat_expr(expression: object, statistic: str) -> Optional[str]:
-    """Build Median or Std Dev over values from individual dispatches."""
+    """Build Median or Std Dev over values from individual dispatches.
+
+    ``to_sum`` and ``to_avg`` (from ``SUM`` and ``AVG`` formulas) are replaced
+    with the per-dispatch operand. A single Min or Median aggregation is
+    renamed. Max and ``COLLECT_SUM`` stay unset.
+    """
     if not isinstance(expression, str):
         return None
     text = expression.strip()
@@ -548,11 +559,11 @@ def per_dispatch_stat_expr(expression: object, statistic: str) -> Optional[str]:
         reducer = "to_std"
     else:
         raise ValueError(f"Unsupported statistic: {statistic}")
-    if "to_sum(" not in text:
+    if "to_sum(" not in text and "to_avg(" not in text:
         return None
-    if re.search(r"\bto_(?:avg|median|min|max|std|quantile)\(", text):
+    if re.search(r"\bto_(?:median|min|max|std|quantile)\(", text):
         return None
-    return f"{reducer}({_replace_to_sum_calls(text)})"
+    return f"{reducer}({_replace_reducible_aggregates(text)})"
 
 
 def _attach_stat_column(dfs: dict, dfs_type: dict, statistic: str) -> None:
@@ -1627,7 +1638,7 @@ def _render_comparison_sections(
             + "".join(improve_rows)
             + "</tbody></table>"
         )
-    if len(data.deltas) > 2:
+    if data.deltas:
         sections += _render_delta_section(data, formulas, baseline_label, stat_label)
     if data.missing:
         missing_rows = [

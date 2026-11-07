@@ -5,6 +5,7 @@
 
 import os
 import re
+import shlex
 import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -35,6 +36,11 @@ SLURM_REMOTE_HOME=/home/user
 GFX908_NODE=node1
 GFX908_GRES=gpu:1
 """
+GFX90A_SITE = SLURM_SITE + "GFX90A_NODE=node90a\nGFX90A_GRES=gpu:1\n"
+MEGA_SKIP_LINE = (
+    "WORKLOAD_DONE name=mega_kernel mode=single-pass profile=SKIP "
+    "analyze=SKIP duration_s=0 iters=500\n"
+)
 
 # Site and override variables the driver reads from the environment. A host
 # that exports any of them must not change what these tests see.
@@ -190,6 +196,46 @@ def check_profilers(
     )
 
 
+def gfx90a_report(
+    tmp_path: Path, log_names: List[str], health_log: str
+) -> subprocess.CompletedProcess:
+    """Run generate_report for gfx90a with these analyze logs and health log."""
+    artifacts = tmp_path / "artifacts"
+    log_dir = artifacts / "logs" / "gfx90a"
+    log_dir.mkdir(parents=True)
+    for name in log_names:
+        (log_dir / f"{name}_single-pass.log").write_text("", encoding="utf-8")
+    (artifacts / "metric_health_t.log").write_text(health_log, encoding="utf-8")
+    return run_sourced_driver(
+        ["--arch", "gfx90a", "--tag", "t"],
+        "python3() { echo REPORT_RAN; }\ngenerate_report\n",
+        driver_env(GFX90A_SITE, tmp_path, {"ARTIFACTS": str(artifacts)}),
+    )
+
+
+def pack_workload_dirs(
+    root: Path, tag: str, tmp_path: Path
+) -> subprocess.CompletedProcess:
+    """Run the remote workload-archive script against a local directory."""
+    script_path = tmp_path / "archive.sh"
+    sourced = run_sourced_driver(
+        ["--arch", "gfx908", "--tag", "t"],
+        "workload_dir_archive_script "
+        + shlex.quote(str(root))
+        + " "
+        + shlex.quote(tag)
+        + " > "
+        + shlex.quote(str(script_path)),
+        driver_env(SLURM_SITE, tmp_path),
+    )
+    assert sourced.returncode == 0, sourced.stderr
+    return subprocess.run(
+        ["bash", str(script_path)],
+        check=False,
+        capture_output=True,
+    )
+
+
 def test_gfx942_device_id_comes_from_site_config(tmp_path: Path) -> None:
     """gfx942 uses the site-config device id."""
     site_text = GFX942_SITE_BASE + "GFX942_ROCR_VISIBLE_DEVICES=17\n"
@@ -338,3 +384,166 @@ def test_report_compares_runs_from_different_profilers(tmp_path: Path) -> None:
         completed.stdout
     )
     assert "REPORT_RAN" in completed.stdout
+
+
+def test_sbatch_keeps_a_preset_visible_device(tmp_path: Path) -> None:
+    """The sbatch snippet defaults devices only when they are unset."""
+    sbatch = tmp_path / "job.sbatch"
+    completed = run_sourced_driver(
+        ["--arch", "gfx908", "--tag", "t1"],
+        f'write_sbatch /remote/root "{sbatch}"',
+        driver_env(SLURM_SITE, tmp_path),
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    text = sbatch.read_text(encoding="utf-8")
+    assert "#SBATCH --gres=gpu:1" in text
+    assert ': "${ROCR_VISIBLE_DEVICES:=0}"' in text
+    assert ': "${HIP_VISIBLE_DEVICES:=0}"' in text
+    assert "export ROCR_VISIBLE_DEVICES=0" not in text
+    assert "export HIP_VISIBLE_DEVICES=0" not in text
+    snippet = "\n".join(line for line in text.splitlines() if "VISIBLE_DEVICES" in line)
+    show = 'printf "%s %s\\n" "$ROCR_VISIBLE_DEVICES" "$HIP_VISIBLE_DEVICES"'
+    preset = subprocess.run(
+        ["bash", "-c", f"{snippet}\n{show}"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env={
+            "PATH": os.environ["PATH"],
+            "ROCR_VISIBLE_DEVICES": "2",
+            "HIP_VISIBLE_DEVICES": "3",
+        },
+    )
+    assert preset.returncode == 0, preset.stderr
+    assert preset.stdout.strip() == "2 3"
+    defaulted = subprocess.run(
+        ["bash", "-c", f"{snippet}\n{show}"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env={"PATH": os.environ["PATH"]},
+    )
+    assert defaulted.returncode == 0, defaulted.stderr
+    assert defaulted.stdout.strip() == "0 0"
+
+
+def test_gfx90a_log_poll_does_not_request_gpus(tmp_path: Path) -> None:
+    """A gfx90a poll reads the log without the workload's GPU request."""
+    completed = run_sourced_driver(
+        ["--arch", "gfx90a", "--tag", "t"],
+        'ssh_login() { printf "%s\\n" "$1"; }\non_log_host "grep -q ALL_DONE /log"\n',
+        driver_env(GFX90A_SITE, tmp_path),
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    command = completed.stdout
+    assert "--gres=none" in command
+    assert "gpu:1" not in command
+    assert "--overlap" not in command
+
+
+def test_gfx90a_skipped_mega_kernel_does_not_fail_the_report(tmp_path: Path) -> None:
+    """profile=SKIP for mega_kernel warns and still generates the report."""
+    completed = gfx90a_report(tmp_path, ["vcopy", "nbody"], MEGA_SKIP_LINE)
+
+    assert completed.returncode == 0, completed.stderr
+    assert "profile=SKIP" in completed.stderr
+    assert "REPORT_RAN" in completed.stdout
+
+
+def test_gfx90a_missing_vcopy_still_fails_the_report(tmp_path: Path) -> None:
+    """A workload that was supposed to run still fails when its log is missing."""
+    completed = gfx90a_report(tmp_path, ["nbody"], MEGA_SKIP_LINE)
+
+    assert completed.returncode == 1
+    assert "vcopy_single-pass.log" in completed.stderr
+    assert "REPORT_RAN" not in completed.stdout
+
+
+def test_gfx90a_missing_mega_without_skip_fails_the_report(tmp_path: Path) -> None:
+    """A missing mega_kernel log without profile=SKIP is still an error."""
+    completed = gfx90a_report(tmp_path, ["vcopy", "nbody"], "ALL_DONE\n")
+
+    assert completed.returncode == 1
+    assert "mega_kernel_single-pass.log" in completed.stderr
+    assert "REPORT_RAN" not in completed.stdout
+
+
+def test_workload_archive_fetches_dirs_whose_names_contain_the_tag(
+    tmp_path: Path,
+) -> None:
+    """A quoted tag packs that directory and does not expand a glob in the tag."""
+    tag = "a*b"
+    root = tmp_path / "workloads"
+    matched = root / f"vcopy_{tag}_single-pass"
+    matched.mkdir(parents=True)
+    (matched / "marker.txt").write_text("ok", encoding="utf-8")
+    (root / "vcopy_aXb_single-pass").mkdir()
+    packed = pack_workload_dirs(root, tag, tmp_path)
+
+    assert packed.returncode == 0, packed.stderr
+    archive = tmp_path / "wl.tar.gz"
+    archive.write_bytes(packed.stdout)
+    dest = tmp_path / "out"
+    dest.mkdir()
+    extracted = run_sourced_driver(
+        ["--arch", "gfx908", "--tag", "t"],
+        "extract_tagged_workload_archive "
+        + shlex.quote(str(archive))
+        + " "
+        + shlex.quote(str(dest))
+        + " "
+        + shlex.quote(tag),
+        driver_env(SLURM_SITE, tmp_path),
+    )
+
+    assert extracted.returncode == 0, extracted.stderr
+    assert (dest / matched.name / "marker.txt").read_text(encoding="utf-8") == "ok"
+    assert not (dest / "vcopy_aXb_single-pass").exists()
+
+
+def test_workload_archive_with_no_match_is_empty(tmp_path: Path) -> None:
+    """No matching directory is a successful empty archive."""
+    root = tmp_path / "workloads"
+    root.mkdir()
+    (root / "vcopy_other_single-pass").mkdir()
+    packed = pack_workload_dirs(root, "a*b", tmp_path)
+
+    assert packed.returncode == 0, packed.stderr
+    assert packed.stdout == b""
+
+
+def test_workload_archive_reports_a_missing_directory(tmp_path: Path) -> None:
+    """A missing workload root is a real tar/cd failure, not an empty match."""
+    packed = pack_workload_dirs(tmp_path / "missing", "tag", tmp_path)
+
+    assert packed.returncode != 0
+
+
+def test_extract_rejects_an_archive_without_the_tag(tmp_path: Path) -> None:
+    """A valid archive that does not contain the tag is not installed."""
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    (plain / "file.txt").write_text("x", encoding="utf-8")
+    archive = tmp_path / "plain.tar.gz"
+    subprocess.run(
+        ["tar", "czf", str(archive), "-C", str(tmp_path), "plain"],
+        check=True,
+    )
+    dest = tmp_path / "out"
+    dest.mkdir()
+    extracted = run_sourced_driver(
+        ["--arch", "gfx908", "--tag", "t"],
+        "extract_tagged_workload_archive "
+        + shlex.quote(str(archive))
+        + " "
+        + shlex.quote(str(dest))
+        + " "
+        + shlex.quote("wanted"),
+        driver_env(SLURM_SITE, tmp_path),
+    )
+
+    assert extracted.returncode == 1
+    assert "no matching directory" in extracted.stderr
+    assert not (dest / "plain").exists()
