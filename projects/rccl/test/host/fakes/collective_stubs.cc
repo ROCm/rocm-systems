@@ -58,19 +58,24 @@ ncclResult_t ncclLaunchFinish(struct ncclComm*) { ::abort(); }
 // job branch's failure arm.
 ncclResult_t ncclTaskPrepare(struct ncclComm*, ncclSimInfo_t*) { ::abort(); }
 int64_t ncclParamEnqueueRearchEnable() { return g_loadParam("ENQUEUE_REARCH_ENABLE", 0); }
+#ifndef RCCL_COLLECTIVE_STUBS_OMIT_P2P
+// transport/p2p.cc. group.cc sets up the CE P2P connectors only when it is true;
+// false matches the NCCL_P2P_USE_CUDA_MEMCPY default.
+bool ncclP2pUsesMemcpy() { return false; }
+#endif
 
 // ce_coll.h
 ncclResult_t ncclLaunchCeColl(struct ncclComm*, struct ncclKernelPlan*) { ::abort(); }
 
-// rma/rma.h, rma/rma_ce.h
+// rma/rma.h, rma/rma_ce.h: omitted where the target compiles the real rma.cc and rma_ce.cc.
+#ifndef RCCL_COLLECTIVE_STUBS_OMIT_RMA
+ncclResult_t ncclLaunchRma(struct ncclComm*, struct ncclKernelPlan*) { ::abort(); }
+#endif
+#ifndef RCCL_COLLECTIVE_STUBS_OMIT_RMA_CE
+ncclResult_t ncclRmaCeInit(struct ncclComm*) { ::abort(); }
+#endif
 
-// dev_runtime.h
-// ncclDevrCommCreateInternal, ncclDevrWindowRegisterInGroup and
-// freeDevCommRequirements used to be ::abort() stubs here. dev_runtime.cc is
-// now compiled into this binary (dev-runtime-test.cc) and defines all three for
-// real, so the stubs would be duplicate symbols. Nothing regressed by dropping
-// them: an ::abort() stub is only ever reached by a test that should not have
-// called it, and no suite in this binary did.
+// dev_runtime.h: fakes/dev_runtime_fakes.cc, or the real dev_runtime.cc.
 
 // mem_manager.h
 ncclResult_t ncclCommMemSuspend(struct ncclComm*) { ::abort(); }

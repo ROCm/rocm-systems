@@ -150,6 +150,12 @@ ncclResult_t ncclCommWindowDeregister(ncclComm_t comm, ncclWindow_t win) {
 // Group state machine.
 // ---------------------------------------------------------------------------
 
+// group.cc's thread-local group state, which group.h's inline helpers read, for binaries without group.cc.
+#ifndef RCCL_DEV_RUNTIME_MICRO_FAKES_OMIT_GROUP_STATE
+thread_local int ncclGroupDepth = 0;
+thread_local ncclResult_t ncclGroupError = ncclSuccess;
+#endif
+
 // Emitted by init.cc, which this binary does not link, so the redirected
 // NCCL_PARAM in dev_runtime.cc does not cover it. Routed through g_loadParam
 // like the params dev_runtime.cc owns, so a test can drive the NCCL_WIN_ENABLE=0

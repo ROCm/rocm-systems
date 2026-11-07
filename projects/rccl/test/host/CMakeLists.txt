@@ -371,74 +371,6 @@ unset(_rccl_src_root)
 
 # Define the per-target micro-test source lists shared by BOTH build paths.
 function(rccl_define_micro_source_lists)
-  # rccl-UnitTestsMicro -- the broad-coverage micro binary.
-  set(TEST_MICRO_SOURCE_FILES
-    param-utils-test.cc                  # src/include/param/utils.h, src/include/param/parser_common.h
-    param-parsers-test.cc                # src/include/param/parser_{default,enum,bitset,list}.h
-    group-test.cc
-    comm-dump-test.cc                    # src/commDump.cc
-    timer-test.cc                        # src/include/timer.h
-    wrap-test.cc
-    dev-runtime-test.cc
-    nccl-utility-test.cc                 # src/include/nccl_device/utility.h (header-only, no fakes)
-    # sym-kernels-index-test.cc: added conditionally below, only when GENERATE_SYM_KERNELS is ON.
-    process-isolated-runner-test.cc
-    # real IsArchMatch, for wrap-test.cc (path is build-directory-relative).
-    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
-    # real ncclP2pImportShareableBuffer, for dev-runtime-test.cc's cuMem window import.
-    ${RCCL_HOST_HIPIFY_DIR}/src/transport/p2p_tmp.cc
-    # real devcomm compat tables, for dev_runtime.cc's getNcclVersionCompat.
-    ${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v22902.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v22907.cc
-    # real ncclRmaProxyEnabled / ncclLaunchRma / ncclRmaCeInit, for dev_runtime.cc and group.cc
-    # (rma_tmp.cc: see RMA_CC_PATH in rma/host_tests.cmake).
-    ${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_tmp.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_ce.cc
-    fakes/amdsmi_fakes.cc
-    fakes/channel_fakes.cc
-    fakes/argcheck_fakes.cc
-    fakes/dev_runtime_micro_fakes.cc
-    fakes/mgmt_task_enq_fakes.cc         # src/enqueue/mgmt_task_enq.cc
-    fakes/nccl_device_core_fakes.cc      # src/nccl_device/core.cc ncclTeam* accessors
-    fakes/nccl_fakes.cc
-    fakes/search_fakes.cc
-    fakes/libc_fakes.cc
-    fakes/ras_fakes.cc
-    fakes/ras_net_fakes.cc
-    fakes/ras_client_support_fakes.cc
-    fakes/ras_message_fakes.cc
-    fakes/ras_param_fakes.cc
-    fakes/rma_fakes.cc
-    fakes/comm_fakes.cc
-    fakes/recorder_fakes.cc
-    fakes/profiler_fakes.cc
-    fakes/roctx_fakes.cc
-    fakes/hsa_fakes.cc                   # hsa_status_string (rocmwrap.h's HSACHECK)
-    fakes/rocmwrap_fakes.cc
-    fakes/topo_stubs.cc
-    fakes/utils_fakes.cc
-    fakes/collective_stubs.cc
-    fakes/os_fakes.cc
-    fakes/socket_fakes.cc
-    fakes/devcomm_fakes.cc
-    fakes/hip_fakes.cc
-    fakes/env_fakes.cc
-    fakes/ce_fakes.cc
-    fakes/collectives_fakes.cc
-    fakes/dda_fakes.cc
-    fakes/rccl_arch_thresholds_fakes.cc
-    fakes/strongstream_stubs.cc
-    fakes/sym_kernels_fakes.cc
-    fakes/transport_stubs.cc
-    fakes/enqueue_fakes.cc               # ncclParamGraphRegister
-    fakes/transport_p2p_reg_fakes.cc     # p2p.cc registration, renamed in by transport_p2p_reg_seam.h
-    fakes/tuning_fakes.cc
-    fakes/wrap_fakes.cc
-    ../common/main_altrsmi.cpp
-    ../common/GpuCountProbe.cpp
-    ../common/ProcessIsolatedTestRunner.cpp
-    PARENT_SCOPE)
-
   # rccl-UnitTestsMicroInit(+-uncached,-faultinj) -- src/init.cc.
   set(TEST_MICRO_INIT_SOURCE_FILES
     init-test.cc
@@ -483,31 +415,6 @@ function(rccl_define_micro_source_lists)
     ../common/ProcessIsolatedTestRunner.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroSymKernels -- REAL src/sym_kernels.cc + generated host TU.
-  set(TEST_MICRO_SYM_KERNELS_SOURCE_FILES
-    sym-kernels-test.cc
-    fakes/bootstrap_stubs.cc
-    fakes/topo_stubs.cc
-    fakes/search_fakes.cc
-    fakes/transport_stubs.cc
-    fakes/nccl_stubs.cc
-    fakes/channel_fakes.cc
-    fakes/nccl_fakes.cc
-    fakes/hip_fakes.cc
-    fakes/env_fakes.cc
-    fakes/devcomm_fakes.cc
-    fakes/gin_fakes.cc                   # ncclGetRailedGinType, read by sym_kernels.cc
-    fakes/nccl_device_core_fakes.cc      # ncclTeamRail, read by sym_kernels.cc
-    fakes/mgmt_task_enq_fakes.cc
-    fakes/os_fakes.cc
-    fakes/profiler_fakes.cc
-    fakes/strongstream_stubs.cc
-    fakes/recorder_fakes.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/misc/argcheck.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
-    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
-    ../common/main_altrsmi.cpp
-    PARENT_SCOPE)
 endfunction()
 
 # Create one host-only micro-test binary and apply all the boilerplate that
@@ -1084,36 +991,146 @@ rccl_add_unit_micro_binary(rccl-UnitTestsMicroBootstrap bootstrap-test.cc
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_bootstrap.yaml")
 
 # ---------------------------------------------------------------------------
-# rccl-UnitTestsMicro
+# Root tests (src/*.cc, src/include/ headers, the test harness): one binary per test file.
 # ---------------------------------------------------------------------------
 set_source_files_properties(
-  ${RCCL_HOST_HIPIFY_DIR}/src/transport/p2p_tmp.cc
   ${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v22902.cc
   ${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v22907.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_ce.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/transport/p2p_tmp.cc
   PROPERTIES GENERATED TRUE)
-# fakes/rma_fakes.cc defines these two as seams; rename the real ones.
-set_source_files_properties(${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_ce.cc PROPERTIES
-  GENERATED TRUE
-  COMPILE_DEFINITIONS "ncclRmaCePutLaunch=ncclRmaCePutLaunchUut;ncclRmaCeWaitLaunch=ncclRmaCeWaitLaunchUut")
-rccl_add_micro_binary(rccl-UnitTestsMicro
-  SOURCES ${TEST_MICRO_SOURCE_FILES}
-  EXTRA_INCLUDES
-    ${RCCL_HOST_HIPIFY_DIR}/src/devcomm              # devcomm_v22902.h, included unqualified
-    ${RCCL_HOST_HIPIFY_DIR}/src/include/nccl_device  # device.h includes rccl_ptr.h unqualified
-  EXTRA_DEFS
-    ${_MICRO_MODE_DEFS}
-    COMM_DUMP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/commDump.cc"
-    GROUP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/group.cc"
-    WRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rccl_wrap.cc"
-    RCCL_RMA_FAKES_OMIT_ncclRmaInitialized  # rma_tmp.cc defines it
-    RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
-    DEV_RUNTIME_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/dev_runtime.cc"
-    DEV_RUNTIME_SEGMENTS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/dev_runtime_segments.cc"
-    RCCL_DEV_RUNTIME_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rccl_dev_runtime.cc"
+set(_MICRO_ROOT_TEST_INCLUDES
+  ${RCCL_HOST_HIPIFY_DIR}/src/devcomm              # devcomm_v22902.h, included unqualified
+  ${RCCL_HOST_HIPIFY_DIR}/src/include/nccl_device) # device.h includes rccl_ptr.h unqualified
+set(_MICRO_ROOT_TEST_DEFS
+  COMM_DUMP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/commDump.cc"
+  DEV_RUNTIME_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/dev_runtime.cc"
+  DEV_RUNTIME_SEGMENTS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/dev_runtime_segments.cc"
+  GROUP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/group.cc"
+  RCCL_DEV_RUNTIME_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rccl_dev_runtime.cc"
+  SYM_KERNELS_HOST_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/gensrc/symmetric/sym_kernels_host.cc"
+  WRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rccl_wrap.cc")
+# Not rccl-root-obj: these share COMMON_DEFS/COMMON_INCLUDES, so their objects need their own prefix.
+set(_MICRO_ROOT_TEST_ARGS
+  OBJECT_PREFIX rccl-root-tests-obj
+  COMMON_INCLUDES ${_MICRO_ROOT_TEST_INCLUDES}
+  COMMON_DEFS ${_MICRO_ROOT_TEST_DEFS}
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+
+rccl_add_unit_micro_binary(rccl-UnitTestsMicroCommDump comm-dump-test.cc ${_MICRO_ROOT_TEST_ARGS}
+  SOURCES
+    fakes/nccl_fakes.cc
+    fakes/profiler_fakes.cc)
+
+rccl_add_unit_micro_binary(rccl-UnitTestsMicroDevRuntime dev-runtime-test.cc ${_MICRO_ROOT_TEST_ARGS}
+  SOURCES
+    fakes/argcheck_fakes.cc
+    fakes/collective_stubs.cc
+    fakes/comm_fakes.cc
+    fakes/dev_runtime_micro_fakes.cc
+    fakes/devcomm_fakes.cc
+    fakes/group_fakes.cc
+    fakes/hip_fakes.cc
+    fakes/mgmt_task_enq_fakes.cc
+    fakes/nccl_device_core_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/rocmwrap_fakes.cc
+    fakes/sym_kernels_fakes.cc
+    fakes/utils_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v22902.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v22907.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_ce.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_tmp.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/p2p_tmp.cc
+  EXTRA_DEFS
+    RCCL_COLLECTIVE_STUBS_OMIT_P2P     # p2p_tmp.cc is compiled real
+    RCCL_COLLECTIVE_STUBS_OMIT_RMA     # rma.cc is compiled real
+    RCCL_COLLECTIVE_STUBS_OMIT_RMA_CE) # and rma_ce.cc
+
+rccl_add_unit_micro_binary(rccl-UnitTestsMicroGroup group-test.cc ${_MICRO_ROOT_TEST_ARGS}
+  SOURCES
+    fakes/argcheck_fakes.cc
+    fakes/ce_fakes.cc
+    fakes/collective_stubs.cc
+    fakes/comm_fakes.cc
+    fakes/dev_runtime_micro_fakes.cc
+    fakes/devcomm_fakes.cc
+    fakes/env_fakes.cc
+    fakes/hip_fakes.cc
+    fakes/mgmt_task_enq_fakes.cc
+    fakes/nccl_device_core_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/os_fakes.cc
+    fakes/recorder_fakes.cc
+    fakes/rma_fakes.cc
+    fakes/rocmwrap_fakes.cc
+    fakes/search_fakes.cc
+    fakes/sym_kernels_fakes.cc
+    fakes/transport_stubs.cc
+    fakes/utils_fakes.cc
+    # The register-symmetric devComm tests run the real dev_runtime.cc, with the siblings
+    # rccl-UnitTestsMicroDevRuntime compiles for it.
+    ${RCCL_HOST_HIPIFY_DIR}/src/dev_runtime.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/rccl_dev_runtime.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v22902.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v22907.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_tmp.cc     # ncclRmaProxyEnabled; rma_fakes.cc fakes the rest of src/rma
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/p2p_tmp.cc
+  EXTRA_DEFS
+    RCCL_COLLECTIVE_STUBS_OMIT_P2P                 # p2p_tmp.cc is compiled real
+    RCCL_COLLECTIVE_STUBS_OMIT_RMA                 # rma.cc is compiled real
+    RCCL_RMA_FAKES_OMIT_ncclRmaInitialized         # rma.cc defines it
+    RCCL_DEV_RUNTIME_MICRO_FAKES_OMIT_GROUP_STATE  # group.cc defines it
+    RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR)    # collective_stubs.cc defines them
+
+rccl_add_unit_micro_binary(rccl-UnitTestsMicroNcclUtility nccl-utility-test.cc ${_MICRO_ROOT_TEST_ARGS})
+
+rccl_add_unit_micro_binary(rccl-UnitTestsMicroParamParsers param-parsers-test.cc ${_MICRO_ROOT_TEST_ARGS}
+  SOURCES
+    fakes/nccl_fakes.cc)
+
+rccl_add_unit_micro_binary(rccl-UnitTestsMicroParamUtils param-utils-test.cc ${_MICRO_ROOT_TEST_ARGS}
+  SOURCES
+    fakes/nccl_fakes.cc)
+
+rccl_add_unit_micro_binary(rccl-UnitTestsMicroProcessIsolatedRunner process-isolated-runner-test.cc
+  ${_MICRO_ROOT_TEST_ARGS} PROCESS_ISOLATED
+  SOURCES
+    fakes/hip_fakes.cc)
+
+rccl_add_unit_micro_binary(rccl-UnitTestsMicroTimer timer-test.cc ${_MICRO_ROOT_TEST_ARGS})
+
 # wrap-test.cc includes rccl_wrap.cc. Production librccl always compiles the LL128
 # arm; without this the broadcast protocol tests exercise the compiled-out fallback.
 set_source_files_properties(wrap-test.cc PROPERTIES COMPILE_DEFINITIONS ENABLE_LL128)
+rccl_add_unit_micro_binary(rccl-UnitTestsMicroWrap wrap-test.cc ${_MICRO_ROOT_TEST_ARGS}
+  PROCESS_ISOLATED
+  SOURCES
+    fakes/ce_fakes.cc
+    fakes/collectives_fakes.cc
+    fakes/comm_fakes.cc
+    fakes/dda_fakes.cc
+    fakes/dev_runtime_micro_fakes.cc
+    fakes/env_fakes.cc
+    fakes/hip_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/rccl_arch_thresholds_fakes.cc
+    fakes/strongstream_stubs.cc
+    fakes/sym_kernels_fakes.cc
+    fakes/transport_stubs.cc
+    fakes/tuning_fakes.cc
+    fakes/wrap_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/dev_runtime.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc)
+
+# sym_kernels_host.cc only exists when sym kernels are generated (GENERATE_SYM_KERNELS
+# in-build / present on disk standalone).
+if(_MICRO_BUILD_SYM_KERNELS)
+  rccl_add_unit_micro_binary(rccl-UnitTestsMicroSymKernelsIndex sym-kernels-index-test.cc ${_MICRO_ROOT_TEST_ARGS})
+elseif(NOT BUILD_TESTS)
+  message(WARNING "Skipping sym-kernels-index-test.cc: missing ${RCCL_HOST_HIPIFY_DIR}/gensrc/symmetric/sym_kernels_host.cc")
+endif()
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroCollectives -- src/collectives.cc
@@ -1154,16 +1171,6 @@ include("${CMAKE_CURRENT_LIST_DIR}/device/host_tests.cmake")
 rccl_add_unit_micro_binary(rccl-UnitTestsMicroCpuset cpuset-test.cc
   OBJECT_PREFIX rccl-root-obj
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_cpuset.yaml")
-
-# sym_kernels_host.cc only exists when sym kernels are generated (GENERATE_SYM_KERNELS
-# in-build / present on disk standalone).
-if(_MICRO_BUILD_SYM_KERNELS)
-  target_sources(rccl-UnitTestsMicro PRIVATE sym-kernels-index-test.cc)
-  target_compile_definitions(rccl-UnitTestsMicro PRIVATE
-    SYM_KERNELS_HOST_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/gensrc/symmetric/sym_kernels_host.cc")
-elseif(NOT BUILD_TESTS)
-  message(WARNING "Skipping sym-kernels-index-test.cc for rccl-UnitTestsMicro: missing ${RCCL_HOST_HIPIFY_DIR}/gensrc/symmetric/sym_kernels_host.cc")
-endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/algorithms/dda/host_tests.cmake")
 
@@ -1338,15 +1345,20 @@ include("${CMAKE_CURRENT_LIST_DIR}/ras/host_tests.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/plugin/host_tests.cmake")
 
 # ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroSymKernels
+# rccl-UnitTestsMicroSymKernels -- src/sym_kernels.cc + the generated host TU
 # ---------------------------------------------------------------------------
 if(_MICRO_BUILD_SYM_KERNELS)
-  rccl_add_micro_binary(rccl-UnitTestsMicroSymKernels
-    SOURCES ${TEST_MICRO_SYM_KERNELS_SOURCE_FILES}
-    EXTRA_INCLUDES
+  # With EXTRA_DEFS it compiles its own sources, so the prefix names no shared objects.
+  rccl_add_unit_micro_binary(rccl-UnitTestsMicroSymKernels sym-kernels-test.cc
+    OBJECT_PREFIX rccl-root-tests-obj
+    COMMON_INCLUDES
       ${RCCL_HOST_HIPIFY_DIR}/src/device               # sym_kernels.cc includes "tdm/tdmCopy.h"
+    SOURCES
+      fakes/devcomm_fakes.cc
+      fakes/gin_fakes.cc
+      fakes/nccl_fakes.cc
+      ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     EXTRA_DEFS
-      ${_MICRO_MODE_DEFS}
       ${_MICRO_AMDSMI_DEF}
       GENERATE_SYM_KERNELS
       SYM_KERNELS_HOST_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/gensrc/symmetric/sym_kernels_host.cc"
