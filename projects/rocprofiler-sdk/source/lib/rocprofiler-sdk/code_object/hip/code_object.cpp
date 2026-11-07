@@ -190,17 +190,6 @@ constexpr auto kernel_arg_offset_metadata_lookup     = ".offset";
 constexpr auto kernel_arg_size_metadata_lookup       = ".size";
 constexpr auto kernel_arg_value_kind_metadata_lookup = ".value_kind";
 constexpr auto kernel_arg_segment_metadata_lookup    = ".kernarg_segment_size";
-constexpr auto hidden_arg_value_kind_prefix          = "hidden";
-constexpr auto global_buffer_arg_value_kind          = "global_buffer";
-constexpr auto global_buffer_static_arg_value_kind   = "global_buffer_static";
-constexpr auto by_value_arg_value_kind               = "by_value";
-
-// A by-value argument this small cannot be told apart from an integer or floating-point scalar, and
-// a scalar whose bits happen to look like an address must not be mistaken for one.
-constexpr uint64_t by_value_struct_min_size = 16;
-
-// The size of an argument holding an address.
-constexpr uint64_t pointer_arg_size = 8;
 
 // The value of a metadata key. COMGR renders numeric metadata as text, so this reads strings and
 // numbers alike; nullopt when the key is absent or does not hold text.
@@ -271,46 +260,6 @@ get_kernel_pointer_regions(amd_comgr_metadata_node_t kernel_node)
     return detail::parse_kernel_pointer_regions(*segment_size, parsed_args);
 }
 }  // namespace
-
-namespace detail
-{
-std::optional<std::vector<kernarg_region_t>>
-parse_kernel_pointer_regions(uint64_t segment_size, const std::vector<kernarg_arg_metadata_t>& args)
-{
-    if(segment_size > std::numeric_limits<uint32_t>::max()) return std::nullopt;
-
-    auto regions      = std::vector<kernarg_region_t>{};
-    auto hidden_start = segment_size;
-    auto described    = true;
-    for(const auto& arg : args)
-    {
-        if(!arg.value_kind || !arg.offset || !arg.size || *arg.offset > segment_size ||
-           *arg.size > segment_size - *arg.offset)
-        {
-            described = false;
-            continue;
-        }
-
-        if(arg.value_kind->rfind(hidden_arg_value_kind_prefix, 0) == 0)
-            hidden_start = std::min(hidden_start, *arg.offset);
-        else if(*arg.value_kind == global_buffer_arg_value_kind ||
-                *arg.value_kind == global_buffer_static_arg_value_kind)
-            regions.push_back(kernarg_region_t{static_cast<uint32_t>(*arg.offset),
-                                               static_cast<uint32_t>(pointer_arg_size)});
-        else if(*arg.value_kind == by_value_arg_value_kind)
-        {
-            if(*arg.size >= by_value_struct_min_size)
-                regions.push_back(kernarg_region_t{static_cast<uint32_t>(*arg.offset),
-                                                   static_cast<uint32_t>(*arg.size)});
-        }
-        else
-            described = false;
-    }
-
-    if(!described) regions.push_back(kernarg_region_t{0u, static_cast<uint32_t>(hidden_start)});
-    return regions;
-}
-}  // namespace detail
 
 // Everything this library derives from the amdhsa.kernels list of one code object, read in a
 // single pass: the kernel-symbol-to-device-function map, and which kernarg bytes of each kernel can
@@ -395,6 +344,63 @@ get_kernels_meta_node(const amd_comgr_code_object_info_t& isa_offset,
     return AMD_COMGR_STATUS_SUCCESS;
 }
 }  // namespace
+
+namespace detail
+{
+namespace
+{
+constexpr auto hidden_arg_value_kind_prefix        = "hidden";
+constexpr auto global_buffer_arg_value_kind        = "global_buffer";
+constexpr auto global_buffer_static_arg_value_kind = "global_buffer_static";
+constexpr auto by_value_arg_value_kind             = "by_value";
+
+// A by-value argument this small cannot be told apart from an integer or floating-point scalar, and
+// a scalar whose bits happen to look like an address must not be mistaken for one.
+constexpr uint64_t by_value_struct_min_size = 16;
+
+// The size of an argument holding an address.
+constexpr uint64_t pointer_arg_size = 8;
+}  // namespace
+
+// Defined out here, in hip::detail, so it matches the header. The anonymous namespace above is a
+// different scope, and a definition nested there does not see kernarg_arg_metadata_t.
+std::optional<std::vector<kernarg_region_t>>
+parse_kernel_pointer_regions(uint64_t segment_size, const std::vector<kernarg_arg_metadata_t>& args)
+{
+    if(segment_size > std::numeric_limits<uint32_t>::max()) return std::nullopt;
+
+    auto regions      = std::vector<kernarg_region_t>{};
+    auto hidden_start = segment_size;
+    auto described    = true;
+    for(const auto& arg : args)
+    {
+        if(!arg.value_kind || !arg.offset || !arg.size || *arg.offset > segment_size ||
+           *arg.size > segment_size - *arg.offset)
+        {
+            described = false;
+            continue;
+        }
+
+        if(arg.value_kind->rfind(hidden_arg_value_kind_prefix, 0) == 0)
+            hidden_start = std::min(hidden_start, *arg.offset);
+        else if(*arg.value_kind == global_buffer_arg_value_kind ||
+                *arg.value_kind == global_buffer_static_arg_value_kind)
+            regions.push_back(kernarg_region_t{static_cast<uint32_t>(*arg.offset),
+                                               static_cast<uint32_t>(pointer_arg_size)});
+        else if(*arg.value_kind == by_value_arg_value_kind)
+        {
+            if(*arg.size >= by_value_struct_min_size)
+                regions.push_back(kernarg_region_t{static_cast<uint32_t>(*arg.offset),
+                                                   static_cast<uint32_t>(*arg.size)});
+        }
+        else
+            described = false;
+    }
+
+    if(!described) regions.push_back(kernarg_region_t{0u, static_cast<uint32_t>(hidden_start)});
+    return regions;
+}
+}  // namespace detail
 
 comgr_code_object_vec_t
 get_isa_offsets(hsa_agent_t hsa_agent, const void* fat_bin)
