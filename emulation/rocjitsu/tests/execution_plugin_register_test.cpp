@@ -3200,23 +3200,8 @@ TEST(ExecutionPluginTest, F64SourceReadObservationReportsBothHalves) {
     delete inst;
 
     const auto reads = vgpr_read_events(*plugin);
-    if constexpr (RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS) {
-      // The Clang/AVX-512 workaround executes F64 one lane at a time, so
-      // require both halves of every source once per active lane.
-      ASSERT_EQ(reads.size(), 6u * std::popcount(kPartialExecMask));
-      for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
-        const uint64_t lane_mask = uint64_t{1} << lane;
-        if (!(kPartialExecMask & lane_mask))
-          continue;
-        std::vector<HookEvent> lane_reads;
-        for (const auto &read : reads)
-          if (read.lane_mask == lane_mask)
-            lane_reads.push_back(read);
-        expect_vgpr_read_set(lane_reads, vb, {0, 1, 2, 3, 4, 5}, lane_mask);
-      }
-    } else {
-      expect_vgpr_read_set(reads, vb, {0, 1, 2, 3, 4, 5}, kPartialExecMask);
-    }
+    // rj-arith acquires whole register views independently of stdx SIMD masks.
+    expect_vgpr_read_set(reads, vb, {0, 1, 2, 3, 4, 5}, kPartialExecMask);
   }
 }
 

@@ -902,3 +902,26 @@ TEST(FpFmaF64Gfx11, CapturedNans) {
   check_captured_gfx11<32, 64>(rj_arith_v_fma_f64_w32, fma_f64_lanes);
   check_captured_gfx11<64, 64>(rj_arith_v_fma_f64_w64, fma_f64_lanes);
 }
+
+// Every CPU path rounds CDNA OMOD underflow before deciding whether to flush the output.
+TEST(FpFmaF64Cdna, ScaledMinimumNormal) {
+  using namespace rocjitsu::arith::test;
+  for (auto cpu : supported_cpu_levels()) {
+    for (auto call : {rj_arith_v_fma_f64_w32_gfx942, rj_arith_v_fma_f64_w32_gfx1250}) {
+      for (unsigned rounding = 0; rounding < 4; ++rounding) {
+        Registers<8, 32> r;
+        r.v[0][0] = 0xffffffffU;
+        r.v[1][0] = 0x001fffffU;
+        r.v[2][0] = 0;
+        r.v[3][0] = 0x3ff00000U;
+        r.v[4][0] = r.v[5][0] = 0;
+        const uint64_t flags = cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY |
+                               RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | (uint64_t(rounding) << 24);
+        ASSERT_EQ(call(flags, 1, RJ_ARITH_ALU_OMOD_HALF, r.v + 6, r.v, r.v + 2, r.v + 4, nullptr),
+                  RJ_ARITH_SUCCESS);
+        EXPECT_EQ(r.v[6][0], 0U);
+        EXPECT_EQ(r.v[7][0], rounding <= 1 ? 0x00100000U : 0U);
+      }
+    }
+  }
+}

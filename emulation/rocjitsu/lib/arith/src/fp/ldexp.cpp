@@ -120,14 +120,14 @@ int ldexp_rounded(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags
 }
 
 // Evaluate LDEXP with guest rounding/denormal controls, preserving inactive destinations.
-template <bool Fp64, bool Rdna3>
+template <bool Fp64, bool Rdna3, bool Cdna>
 [[gnu::noinline]] int ldexp_guest(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   const uint32_t *const *b);
 
 // Scale FP32/FP64 by powers of two for the selected lanes. Reject invalid controls before changing
 // outputs.
-template <bool Fp64, bool GuestDenormals = false, bool Rdna3 = false>
+template <bool Fp64, bool GuestDenormals = false, bool Rdna3 = false, bool Cdna = false>
 int ldexp(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_t *const *d,
           const uint32_t *const *a, const uint32_t *const *b) {
   const uint32_t known =
@@ -149,13 +149,13 @@ int ldexp(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32
       (flags & RJ_ARITH_FP_ROUND_MASK)) {
     // gfx11 exact semantics keep signaling NaNs when IEEE is clear.
     const bool quiet_snan =
-        !Rdna3 || (flags & RJ_ARITH_FP_IEEE_MODE) || !rocjitsu::arith::is_exact(flags);
+        Cdna || !Rdna3 || (flags & RJ_ARITH_FP_IEEE_MODE) || !rocjitsu::arith::is_exact(flags);
     return ldexp_rounded<Fp64>(flags, exec_mask, instruction_flags, d, a, b, quiet_snan);
   }
   if constexpr (!GuestDenormals) {
     if (flags & (RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS |
                  RJ_ARITH_FP_DX10_CLAMP_OFF)) {
-      return ldexp_guest<Fp64, Rdna3>(flags, exec_mask, instruction_flags, d, a, b);
+      return ldexp_guest<Fp64, Rdna3, Cdna>(flags, exec_mask, instruction_flags, d, a, b);
     }
   }
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
@@ -252,20 +252,21 @@ int ldexp(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32
 
 // Keep guest denormal handling out of the default scalar loop. Inlining it
 // allows the compiler to merge both loops and reintroduce per-lane flag checks.
-template <bool Fp64, bool Rdna3>
+template <bool Fp64, bool Rdna3, bool Cdna>
 [[gnu::noinline]] int ldexp_guest(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   const uint32_t *const *b) {
-  return ldexp<Fp64, true, Rdna3>(flags, exec_mask, instruction_flags, d, a, b);
+  return ldexp<Fp64, true, Rdna3, Cdna>(flags, exec_mask, instruction_flags, d, a, b);
 }
 
 // Scale FP32/FP64 by powers of two for Wave64. Reject invalid controls before changing outputs.
-template <bool Fp64, bool Rdna3 = false>
+template <bool Fp64, bool Rdna3 = false, bool Cdna = false>
 int ldexp_wave64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags, uint32_t *const *d,
                  const uint32_t *const *a, const uint32_t *const *b, uint32_t *excp_flag_user) {
   constexpr auto instruction =
-      Fp64 ? (Rdna3 ? rj_arith_v_ldexp_f64_w32 : rj_arith_v_ldexp_f64_w32_gfx12)
-           : (Rdna3 ? rj_arith_v_ldexp_f32_w32 : rj_arith_v_ldexp_f32_w32_gfx12);
+      Cdna   ? (Fp64 ? rj_arith_v_ldexp_f64_w32_gfx942 : rj_arith_v_ldexp_f32_w32_gfx942)
+      : Fp64 ? (Rdna3 ? rj_arith_v_ldexp_f64_w32 : rj_arith_v_ldexp_f64_w32_gfx12)
+             : (Rdna3 ? rj_arith_v_ldexp_f32_w32 : rj_arith_v_ldexp_f32_w32_gfx12);
 
   // Validate before either Wave64 half can modify outputs, even when EXEC is empty.
   if (int error =
@@ -445,4 +446,76 @@ int rj_arith_v_ldexp_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instru
   }
 
   return ldexp_wave64<true, true>(flags, exec_mask, instruction_flags, d, a, b, trapsts);
+}
+
+// CDNA retains inherited signaling-NaN quieting; gfx942 also serves gfx950.
+int rj_arith_v_ldexp_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return ldexp<false, false, true, true>(flags, exec_mask, instruction_flags, d, a, b);
+}
+
+// CDNA retains inherited signaling-NaN quieting; gfx942 also serves gfx950.
+int rj_arith_v_ldexp_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return ldexp_wave64<false, true, true>(flags, exec_mask, instruction_flags, d, a, b, trapsts);
+}
+
+// CDNA retains inherited signaling-NaN quieting; gfx942 also serves gfx950.
+int rj_arith_v_ldexp_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return ldexp<true, false, true, true>(flags, exec_mask, instruction_flags, d, a, b);
+}
+
+// CDNA retains inherited signaling-NaN quieting; gfx942 also serves gfx950.
+int rj_arith_v_ldexp_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return ldexp_wave64<true, true, true>(flags, exec_mask, instruction_flags, d, a, b, trapsts);
 }

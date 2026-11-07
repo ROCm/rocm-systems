@@ -6,6 +6,7 @@
 
 #include "common/validation.h"
 #include "fp/fp64.h"
+#include "fp/fp64_round.h"
 #include "rj_arith/detail/rj_arith_common.h"
 
 namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
@@ -106,11 +107,17 @@ inline double fp64_input(const uint32_t *const *v, int lane, uint32_t mode) {
 }
 
 // Apply FP64 output modifiers by encoding arithmetic, including guest overflow rounding.
-inline double fp64_output(double value, uint32_t instruction_flags, unsigned rounding = 0) {
+inline double fp64_output(double value, uint32_t instruction_flags, unsigned rounding = 0,
+                          bool cdna_fma = false) {
   uint64_t raw = double_bits(value), magnitude = raw & 0x7fffffffffffffffULL;
   const uint64_t sign = raw & 0x8000000000000000ULL;
   unsigned omod = (instruction_flags >> 6) & 3;
-  if (omod && magnitude < 0x7ff0000000000000ULL) {
+  // CDNA fused arithmetic rounds during scaling; ADD/MUL keep exponent-step scaling.
+  if (cdna_fma && omod && magnitude < (omod == 3 ? 0x0020000000000000ULL : 0x0010000000000000ULL)) {
+    const uint64_t scales[] = {0x3ff0000000000000ULL, 0x4000000000000000ULL, 0x4010000000000000ULL,
+                               0x3fe0000000000000ULL};
+    raw = fma_finite_f64(raw, scales[omod], sign, rounding);
+  } else if (omod && magnitude < 0x7ff0000000000000ULL) {
     int exponent = int(magnitude >> 52);
     if (!exponent) {
       raw = 0;
@@ -125,6 +132,10 @@ inline double fp64_output(double value, uint32_t instruction_flags, unsigned rou
         raw = sign | (uint64_t(exponent) << 52) | (raw & 0x000fffffffffffffULL);
       }
     }
+  }
+  // The inherited fused OMOD stage canonicalizes both zero and subnormal results.
+  if (cdna_fma && omod && (raw & 0x7ff0000000000000ULL) == 0) {
+    raw = 0;
   }
   value = as_double(raw);
   if (instruction_flags & RJ_ARITH_ALU_CLAMP) {

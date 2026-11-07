@@ -124,6 +124,50 @@ private:
 };
 #endif
 
+TEST(Gfx1250ExecutionTest, FmaMixBf16AliasingAndExec) {
+  for (const uint16_t opcode :
+       {cdna5::kVFmaMixF32Bf16Vop3p, cdna5::kVFmaMixloBf16Vop3p, cdna5::kVFmaMixhiBf16Vop3p}) {
+    for (bool clamp : {false, true}) {
+      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+      const auto words = cdna5::build_vop3p(opcode, {.vdst = 0,
+                                                     .neg_hi = 1,
+                                                     .opsel = 5,
+                                                     .opsel_hi_2 = 1,
+                                                     .clamp = uint8_t(clamp),
+                                                     .src0 = 256,
+                                                     .src1 = 257,
+                                                     .src2 = 258,
+                                                     .opsel_hi = 3,
+                                                     .neg = 1});
+      std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
+      ASSERT_NE(instruction, nullptr);
+      Gfx1250Sim sim;
+      ASSERT_NO_FATAL_FAILURE(sim.initialize());
+      auto *cu = sim.cu();
+      auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+      ASSERT_NE(wf, nullptr);
+      wf->set_exec(0x80000001U);
+      wf->set_trapsts(0x80000000U);
+      const auto base = wf->vgpr_alloc().base;
+      for (unsigned lane = 0; lane < 32; ++lane) {
+        cu->write_vgpr(base, lane, 0xc0003f80U);
+        cu->write_vgpr(base + 1, lane, 0x40404000U);
+        cu->write_vgpr(base + 2, lane, 0x3f803f00U);
+      }
+      ASSERT_TRUE(cu->execute_instruction(instruction.get(), *wf).succeeded());
+      // -abs(-2) * 2 + 1 = -3; CLAMP instead writes +0.
+      const uint32_t half = clamp ? 0 : 0xc040U;
+      const uint32_t result = opcode == cdna5::kVFmaMixF32Bf16Vop3p  ? half << 16
+                              : opcode == cdna5::kVFmaMixloBf16Vop3p ? 0xc0000000U | half
+                                                                     : (half << 16) | 0x3f80U;
+      for (unsigned lane = 0; lane < 32; ++lane) {
+        EXPECT_EQ(cu->read_vgpr(base, lane), lane == 0 || lane == 31 ? result : 0xc0003f80U);
+      }
+      EXPECT_EQ(wf->trapsts(), 0x80000000U);
+    }
+  }
+}
+
 TEST(Gfx1250ExecutionTest, GlobalTransposePromotesNonzeroExecToAllWave32Lanes) {
   amdgpu::GpuMemory memory("gfx1250_transpose_memory");
   amdgpu::L2Cache l2("gfx1250_transpose_l2");
@@ -5743,49 +5787,32 @@ TEST(Gfx1250ExecutionTest, PkFmaF32SimdMatchesScalarWithPartialExec) {
   }
 }
 
-// Selected BF16 halves and source modifiers survive overlapping destination storage.
-TEST(Gfx1250ExecutionTest, FmaMixBf16AliasingAndExec) {
-  for (const uint16_t opcode :
-       {cdna5::kVFmaMixF32Bf16Vop3p, cdna5::kVFmaMixloBf16Vop3p, cdna5::kVFmaMixhiBf16Vop3p}) {
-    for (bool clamp : {false, true}) {
-      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
-      const auto words = cdna5::build_vop3p(opcode, {.vdst = 0,
-                                                     .neg_hi = 1,
-                                                     .opsel = 5,
-                                                     .opsel_hi_2 = 1,
-                                                     .clamp = uint8_t(clamp),
-                                                     .src0 = 256,
-                                                     .src1 = 257,
-                                                     .src2 = 258,
-                                                     .opsel_hi = 3,
-                                                     .neg = 1});
-      std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
-      ASSERT_NE(instruction, nullptr);
-      Gfx1250Sim sim;
-      ASSERT_NO_FATAL_FAILURE(sim.initialize());
-      auto *cu = sim.cu();
-      auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
-      ASSERT_NE(wf, nullptr);
-      wf->set_exec(0x80000001U);
-      wf->set_trapsts(0x80000000U);
-      const auto base = wf->vgpr_alloc().base;
-      for (unsigned lane = 0; lane < 32; ++lane) {
-        cu->write_vgpr(base, lane, 0xc0003f80U);
-        cu->write_vgpr(base + 1, lane, 0x40404000U);
-        cu->write_vgpr(base + 2, lane, 0x3f803f00U);
-      }
-      ASSERT_TRUE(cu->execute_instruction(instruction.get(), *wf).succeeded());
-      // -abs(-2) * 2 + 1 = -3; CLAMP instead writes +0.
-      const uint32_t half = clamp ? 0 : 0xc040U;
-      const uint32_t result = opcode == cdna5::kVFmaMixF32Bf16Vop3p  ? half << 16
-                              : opcode == cdna5::kVFmaMixloBf16Vop3p ? 0xc0000000U | half
-                                                                     : (half << 16) | 0x3f80U;
-      for (unsigned lane = 0; lane < 32; ++lane) {
-        EXPECT_EQ(cu->read_vgpr(base, lane), lane == 0 || lane == 31 ? result : 0xc0003f80U);
-      }
-      EXPECT_EQ(wf->trapsts(), 0x80000000U);
-    }
+// DX9 zero-product handling retains EXEC and overlapping source/destination storage.
+TEST(Gfx1250ExecutionTest, FmaDx9ZeroAliasingAndExec) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  const auto words = cdna5::build_vop3(
+      cdna5::kVFmaDx9ZeroF32Vop3, {.vdst = 0, .src0 = 256, .src1 = 257, .src2 = 258, .omod = 1});
+  std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
+  ASSERT_NE(instruction, nullptr);
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0x80000001U);
+  wf->set_mode_raw(0x230U); // IEEE and preserved denormals do not disable DX9/OMOD.
+  wf->set_trapsts(0x80000000U);
+  const auto base = wf->vgpr_alloc().base;
+  for (unsigned lane = 0; lane < 32; ++lane) {
+    cu->write_vgpr(base, lane, 0x80000001U);
+    cu->write_vgpr(base + 1, lane, 0x7f800000U);
+    cu->write_vgpr(base + 2, lane, 0x3f800000U);
   }
+  ASSERT_TRUE(cu->execute_instruction(instruction.get(), *wf).succeeded());
+  for (unsigned lane = 0; lane < 32; ++lane) {
+    EXPECT_EQ(cu->read_vgpr(base, lane), lane == 0 || lane == 31 ? 0x40000000U : 0x80000001U);
+  }
+  EXPECT_EQ(wf->trapsts(), 0x80000000U);
 }
 
 TEST(Gfx1250ExecutionTest, FmaMixBf16ResultsHonorRoundModeAndClamp) {

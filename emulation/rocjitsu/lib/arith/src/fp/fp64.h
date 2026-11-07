@@ -38,17 +38,15 @@ enum class Fp64 {
 // in source order; NaN sources are quieted unless quiet_snan is clear.
 void fp64_x86_64_v3(Fp64 op, uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
                     const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c,
-                    bool quiet_snan);
+                    bool quiet_snan, bool cdna = false);
 #endif
 
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
-// Evaluate FP64 ADD/MUL/FMA with instruction-local guest rounding and masked destination stores.
-// Requires validated flags and a nonzero guest rounding mode. NaNs are selected in source
-// order and quieted unless quiet_snan is clear.
-void fp64_directed_x86_64_v4(Fp64 op, uint64_t flags, uint32_t exec_mask,
-                             uint32_t instruction_flags, uint32_t *const *d,
-                             const uint32_t *const *a, const uint32_t *const *b,
-                             const uint32_t *const *c, bool quiet_snan);
+// Evaluate FP64 ADD/MUL/FMA or TRUNC/CEIL/RNDNE/FLOOR/FRACT/FREXP_MANT.
+// Requires validated controls; guest rounding is instruction-local, writes are EXEC-masked.
+void fp64_x86_64_v4(Fp64 op, uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags,
+                    uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                    const uint32_t *const *c, bool quiet_snan = true, bool cdna = false);
 #endif
 
 } // namespace rocjitsu::arith
