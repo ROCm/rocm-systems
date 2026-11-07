@@ -8,11 +8,17 @@ readme = "README.md"
 keywords = ["amdsmi", "rust binding"]
 license = "Copyright (c) 2019-2024 Advanced Micro Devices, Inc"
 
+[features]
+dynamic-loading = ["dep:libloading", "dep:quote", "dep:syn"]
+
 [dependencies]
 libc = "0.2"
+libloading = { version = "0.8", optional = true }
 
 [build-dependencies]
 bindgen = "0.70.1"
+quote = { version = "1", optional = true }
+syn = { version = "2", features = ["full"], optional = true }
 
 [lib]
 name = "amdsmi"
@@ -32,3 +38,4 @@ axum = "0.5"
 hyper = "0.14"
 clap = "3.0"
 tokio = { version = "1", features = ["full"] }
+tempfile = "3"
