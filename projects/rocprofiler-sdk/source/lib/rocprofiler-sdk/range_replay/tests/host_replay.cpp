@@ -445,8 +445,9 @@ TEST(range_replay_host, replacing_or_resizing_an_entry_allocation_declines_befor
         auto agent_state            = range_replay::host_agent_state_t{};
         agent_state.hsa_agent       = agent;
         agent_state.agent_id.handle = agent_a;
-        mt::inventory().wlock(
-            [&](auto& map) { map[&value] = mt::alloc_info_t{sizeof(value), agent, 1}; });
+        mt::inventory().wlock([&](auto& map) {
+            map[&value] = mt::alloc_info_t{sizeof(value), agent, 1};
+        });
         agent_state.tracked = mt::snap_allocation_identity(agent);
         EXPECT_TRUE(mt::allocations_match(agent, agent_state.tracked));
         ctx.host.agents.emplace_back(std::move(agent_state));
@@ -479,7 +480,7 @@ TEST(range_replay_host, allocation_change_after_initial_checks_declines_before_a
     ctx.host.pass           = 1;
     ctx.host.snapshot_taken = true;
 
-    for(const auto item : {std::pair<void*, uint64_t>{&first, agent_a}, {&second, agent_b}})
+    for(const auto& item : {std::pair<void*, uint64_t>{&first, agent_a}, {&second, agent_b}})
     {
         auto state             = range_replay::host_agent_state_t{};
         state.hsa_agent.handle = item.second;

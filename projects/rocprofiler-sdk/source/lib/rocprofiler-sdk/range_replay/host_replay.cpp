@@ -199,9 +199,10 @@ rocprofiler_range_replay_status_t
 restore_entry_state(range_context_t& ctx)
 {
     const auto& host = ctx.host;
-    // The caller holds every agent's writer lock from its final fence through this restore.
-    // Frees do not take those locks. Validate every agent before the first copy and keep the
-    // inventory read-locked across all copies so a free/reallocation cannot reuse an entry address.
+    // The caller holds every agent's writer lock, taken after its final fence, through this
+    // restore. Frees do not take those locks. Validate every agent before the first copy and keep
+    // the inventory read-locked across all copies so a free/reallocation cannot reuse an entry
+    // address.
     return kernel_replay::memory_tracker::inventory().rlock([&](const auto& inventory) {
         fold_external_decline(ctx);
         if(!ctx.record.eligible()) return ctx.record.status();
@@ -257,9 +258,21 @@ try
 
     host.agents = gpu_agents();
 
-    const auto guards = lock_agents(host);
+    // Fence before taking the writer locks: the barrier rings the intercept queue's doorbell, which
+    // needs that queue's ROCr intercept lock. Another thread can hold that lock while it waits in
+    // WriteInterceptor for this agent's reader lock.
     fence_all(host.agents);
     const auto fenced_at = phase_clock::now();
+
+    // A foreign dispatch publishes its decline before it takes the reader lock, so after the
+    // writer locks are held, any dispatch that slipped in after the fence is visible here.
+    const auto guards = lock_agents(host);
+    fold_external_decline(ctx);
+    if(!ctx.record.eligible())
+    {
+        host.agents.clear();
+        return;
+    }
 
     // Drain callbacks before taking executable lifetime protection: a callback can unload a module.
     const auto executable_guard = std::shared_lock{code_object::executable_lifetime_mutex()};
@@ -342,12 +355,8 @@ finish_pass(range_context_t& ctx)
     const auto pass           = host.pass;
     const auto dispatch_count = static_cast<uint64_t>(ctx.record.observed_dispatch_count());
 
-    // Acquire in gpu_agents() order before observing settled state or the decline channel.
-    // Otherwise a writer can change device memory between the final checks and the restore.
-    auto guards = host.snapshot_taken ? lock_agents(host)
-                                      : std::vector<std::unique_lock<std::shared_mutex>>{};
     // The pass's GPU tail belongs to the pass: its records are emitted before PASS exit, and the
-    // checks below see settled memory.
+    // checks below see settled memory. The writer locks are taken just before the restore.
     if(host.snapshot_taken) fence_all(host.agents);
 
     if(pass > 0)
@@ -414,6 +423,16 @@ finish_pass(range_context_t& ctx)
                         "stopping";
         return finish(ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED, count_divergence(host));
     }
+
+    // Writer locks in gpu_agents() order, taken without the lifetime lock held. They are not held
+    // across the fence or the tool callbacks above: the fence barrier needs the queue's ROCr
+    // intercept lock, which a foreign submitter can hold while it waits for the reader lock, and a
+    // tool callback that submits on this thread would wait for its own writer lock.
+    // restore_entry_state re-reads the decline channel under them, and a foreign dispatch publishes
+    // its decline before taking the reader lock, so none can be in flight during the restore.
+    if(executable_guard.owns_lock()) executable_guard.unlock();
+    auto guards = lock_agents(host);
+    executable_guard.lock();
 
     const auto restore_start  = phase_clock::now();
     const auto restore_status = restore_entry_state(ctx);
