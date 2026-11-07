@@ -688,7 +688,16 @@ void RaceDetectorPlugin::onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/, const 
     s->race_state->dispatch(wait);
 }
 
-void RaceDetectorPlugin::onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts) {
+void RaceDetectorPlugin::onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts,
+                                                 BarrierKind kind) {
+  if (wavefronts.empty())
+    return;
+  if (kind == BarrierKind::Workgroup) {
+    auto *s = get_state(wavefronts.front());
+    assert(s && s->race_state);
+    s->race_state->getDetector()->flushWorkgroupBarrierEvents();
+    return;
+  }
   for (auto *wf : wavefronts) {
     auto *s = get_state(wf);
     assert(s && s->race_state);

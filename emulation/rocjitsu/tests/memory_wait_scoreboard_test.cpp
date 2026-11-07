@@ -33,6 +33,7 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
+#include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 
 #include "gfx11_mimg_test_common.h"
@@ -2418,7 +2419,7 @@ TEST(MemoryWaitExecutionTest, BarrierObserversPreservePendingResults) {
   class BarrierSnapshot final : public ExecutionPlugin {
   public:
     BarrierSnapshot() : ExecutionPlugin("barrier_snapshot") {}
-    void onAmdgpuBarrierResolved(std::span<Wavefront *> members) override {
+    void onAmdgpuBarrierResolved(std::span<Wavefront *> members, BarrierKind) override {
       for (auto *wf : members) {
         EXPECT_EQ(RegisterAccess(*wf).read_sgpr(wf->sgpr_alloc().base + 4), 0x12345678u);
         ++snapshots;
