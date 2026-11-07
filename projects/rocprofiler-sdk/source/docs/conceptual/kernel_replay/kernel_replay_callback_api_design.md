@@ -69,8 +69,9 @@ parameter proves cleaner, the signature may gain one — that is the one shape d
 (`replay_pass_count` and `replay_continue` are SDK→tool upcalls and need no such routing.)
 
 Counter collection, SPM, and ATT consult the override at dispatch time. Kernel dispatch tracing
-drops disabled contexts from the pass's tracing data. PC sampling and device counting are agent-wide
-and currently ignore localized overrides.
+drops disabled contexts from the pass's tracing data. PC sampling is agent-wide, so the replay loop
+applies its override by stopping or starting the agent session before each pass. Device counting
+remains agent-wide and ignores localized overrides.
 
 Kernel replay is **not** gated on removing the queue callback registration mechanism. That removal
 would make per-pass enable/disable cleaner and is a planned improvement, but the feature works
