@@ -143,10 +143,13 @@ What is snapshotted
 ===================
 
 Snapshot and restore are implemented in the SDK. Between passes, kernel replay restores
-coarse-grained device VRAM and module-scope ``__device__`` / ``__constant__`` variables. Unified,
-managed, ``hipMallocAsync``, host, fine-grained, kernarg, and executable allocations are not
-restored. Capture is a full in-memory copy; cost is ``O(tracked_bytes × passes)``. See
-:ref:`kernel-replay-memory-snapshot` and :ref:`using-kernel-replay`.
+coarse-grained device VRAM and module-scope ``__device__`` / ``__constant__`` variables. When
+argument-memory checks identify memory outside that snapshot, including fine-grained device,
+unified, managed, ``hipMallocAsync``, host or another GPU's memory, the dispatch runs once without
+replay. Unavailable pointer information or required host mappings also decline replay. Capture
+is a full in-memory copy; cost is
+``O(tracked_bytes × passes)``. See :ref:`kernel-replay-memory-snapshot` and
+:ref:`using-kernel-replay`.
 
 The last executed pass is **not** restored, so the application sees the memory the kernel actually
 produced.
