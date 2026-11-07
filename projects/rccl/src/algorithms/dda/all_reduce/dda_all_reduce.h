@@ -67,12 +67,12 @@ ncclResult_t ncclAllReduceDdaFabricLL(const void* sendbuff, void* recvbuff, size
 bool ncclAllReduceDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                          ncclDataType_t datatype, ncclRedOp_t op);
 
-// Whether the LL128 peer-split takes the message; *bound is then the grid under `cap` of the launch it replaces.
-bool ncclAllReduceDdaFabricLL128Split(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
-                                      ncclDataType_t datatype, ncclRedOp_t op, rcclDdaLaunchCap cap, bool vmmFirst,
-                                      rcclDdaLaunchCap* bound);
+// Whether the LL128 peer-split takes the message. *bound is the grid under `cap` of the launch it replaces, else `cap`.
+bool ncclAllReduceDdaFabricLL128SplitEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                              ncclDataType_t datatype, ncclRedOp_t op, rcclDdaLaunchCap cap,
+                                              bool vmmFirst, rcclDdaLaunchCap* bound);
 
-// `split` runs the peer-split two-shot within `cap`, the bound ncclAllReduceDdaFabricLL128Split gave.
+// `split` runs the peer-split two-shot within `cap`, the bound ncclAllReduceDdaFabricLL128SplitEligible gave.
 ncclResult_t ncclAllReduceDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                          ncclRedOp_t op, ncclComm* comm, cudaStream_t stream, rcclDdaLaunchCap cap = {},
                                          bool split = false);

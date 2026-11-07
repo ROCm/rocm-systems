@@ -51,13 +51,17 @@ DEFINE_DDA_REDUCTION_ELIGIBLE(allReduceDdaFabricLLEligible, ncclAllReduceDdaFabr
 DEFINE_DDA_REDUCTION_ELIGIBLE(allReduceDdaFabricLL128Eligible, ncclAllReduceDdaFabricLL128Eligible)
 std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, rcclDdaLaunchCap, bool,
                    rcclDdaLaunchCap*)>
-    g_allReduceDdaFabricLL128Split = [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t,
-                                        rcclDdaLaunchCap, bool, rcclDdaLaunchCap*) { return false; };
-bool ncclAllReduceDdaFabricLL128Split(ncclComm* comm, const void* send, void* recv, size_t count, ncclDataType_t type,
-                                      ncclRedOp_t op, rcclDdaLaunchCap cap, bool vmmFirst, rcclDdaLaunchCap* bound) {
-  return g_allReduceDdaFabricLL128Split(comm, send, recv, count, type, op, cap, vmmFirst, bound);
+    g_allReduceDdaFabricLL128SplitEligible = [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t,
+                                                rcclDdaLaunchCap cap, bool, rcclDdaLaunchCap* bound) {
+      *bound = cap;
+      return false;
+    };
+bool ncclAllReduceDdaFabricLL128SplitEligible(ncclComm* comm, const void* send, void* recv, size_t count,
+                                              ncclDataType_t type, ncclRedOp_t op, rcclDdaLaunchCap cap, bool vmmFirst,
+                                              rcclDdaLaunchCap* bound) {
+  return g_allReduceDdaFabricLL128SplitEligible(comm, send, recv, count, type, op, cap, vmmFirst, bound);
 }
-ASSERT_HOOK_MATCHES_PROD(g_allReduceDdaFabricLL128Split, ncclAllReduceDdaFabricLL128Split);
+ASSERT_HOOK_MATCHES_PROD(g_allReduceDdaFabricLL128SplitEligible, ncclAllReduceDdaFabricLL128SplitEligible);
 DEFINE_DDA_BLOCKS(allReduceDdaIpcBlocks, ncclAllReduceDdaIpcBlocks, 111)
 DEFINE_DDA_CAPPED_BLOCKS(allReduceDdaFabricBlocks, ncclAllReduceDdaFabricBlocks, 112)
 DEFINE_DDA_CAPPED_BLOCKS(allReduceDdaFabricLLBlocks, ncclAllReduceDdaFabricLLBlocks, 113)

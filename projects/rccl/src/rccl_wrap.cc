@@ -1247,15 +1247,15 @@ size_t rcclDdaLLThreshold(const ncclComm* comm, ncclFunc_t func) {
   return rcclDdaLLThresholdTab(extAlgoArchTable(comm), func, comm != nullptr ? comm->nRanks : 0);
 }
 
-// RCCL_DDA_LL_TWOSHOT_THRESHOLD wins when the user sets it. On rank-scaled comms
-// whose table scales the AllReduce LL tier, two-shot runs to that tier's cap;
-// otherwise the env var's default applies.
 // Whether the user sets RCCL_DDA_LL_TWOSHOT_THRESHOLD, read once.
 static bool rcclDdaLLTwoShotThresholdSet() {
   static const bool set = rcclEnvIsSet("RCCL_DDA_LL_TWOSHOT_THRESHOLD");
   return set;
 }
 
+// RCCL_DDA_LL_TWOSHOT_THRESHOLD wins when the user sets it. On rank-scaled comms
+// whose table scales the AllReduce LL tier, two-shot runs to that tier's cap;
+// otherwise the env var's default applies.
 inline size_t rcclDdaLLTwoShotThresholdTab(const rcclArchThresholds* table, int nRanks) {
   if (!rcclDdaLLTwoShotThresholdSet() && rcclDdaRankScaled(table, nRanks) &&
       funcThresholdFromTable(table->ddaLLMaxPerRank, ncclFuncAllReduce) != 0) {
@@ -2086,10 +2086,8 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
         rcclCollDecision cand = *decision;
         cand.algo = RCCL_DDA_FABRIC_LL128;
         cand.protocol = NCCL_PROTO_LL128;
-        rcclDdaLaunchCap splitBound = {};
-        cand.ddaLL128Split = ncclAllReduceDdaFabricLL128Split(comm, sendbuff, recvbuff, count, datatype, op, ddaCap,
-                                                              /*vmmFirst=*/false, &splitBound);
-        cand.ddaCap = cand.ddaLL128Split ? splitBound : ddaCap;
+        cand.ddaLL128Split = ncclAllReduceDdaFabricLL128SplitEligible(comm, sendbuff, recvbuff, count, datatype, op,
+                                                                      ddaCap, /*vmmFirst=*/false, &cand.ddaCap);
         cand.nMaxChannels = ncclAllReduceDdaFabricLL128Blocks(comm, count, datatype, cand.ddaCap, cand.ddaLL128Split);
         rcclCandSearchRecord(cs, RCCL_BACKEND_DDA, cand);
         if (!query) {
@@ -2107,9 +2105,9 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
         // bypass the preferred/fallback warning when CE 2-shot is not yet ready.
         // The VMM-first window leaves messages the LL128 peer-split two-shot takes to the LL128 tier.
         const bool vmmFirst = rcclDdaArVmmFirstTab(archTable, comm->nRanks, msgBytes, winRegType);
-        rcclDdaLaunchCap splitBound = {};
-        const bool split = ncclAllReduceDdaFabricLL128Split(comm, sendbuff, recvbuff, count, datatype, op, ddaCap,
-                                                            vmmFirst, &splitBound);
+        rcclDdaLaunchCap splitBound;
+        const bool split = ncclAllReduceDdaFabricLL128SplitEligible(comm, sendbuff, recvbuff, count, datatype, op,
+                                                                    ddaCap, vmmFirst, &splitBound);
         if (vmmFirst && !split && ncclAllReduceDdaFabricEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
           rcclCollDecision cand = *decision;
           cand.algo = RCCL_DDA_FABRIC_VMM;
@@ -2132,7 +2130,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
             ncclAllReduceDdaFabricLL128Eligible(comm, sendbuff, recvbuff, count, datatype, op)) {
           rcclCollDecision cand = *decision;
           cand.algo = RCCL_DDA_FABRIC_LL128; cand.protocol = NCCL_PROTO_LL128;
-          cand.ddaCap = split ? splitBound : ddaCap;
+          cand.ddaCap = splitBound;
           cand.ddaLL128Split = split;
           cand.nMaxChannels = ncclAllReduceDdaFabricLL128Blocks(comm, count, datatype, cand.ddaCap, split);
           rcclCandSearchRecord(cs, RCCL_BACKEND_DDA, cand, msgBytes <= arDdaLL128Max);

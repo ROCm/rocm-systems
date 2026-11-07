@@ -185,8 +185,8 @@ class DdaAllReduceFabricLLMicrotest : public ::testing::Test {
   bool TakesSplit(size_t count, rcclDdaLaunchCap* bound = nullptr, rcclDdaLaunchCap cap = {}, bool vmmFirst = false,
                   ncclDataType_t datatype = ncclFloat32) {
     rcclDdaLaunchCap unused = {};
-    return ncclAllReduceDdaFabricLL128Split(mock_.get(), kSendbuff, kRecvbuff, count, datatype, ncclSum, cap, vmmFirst,
-                                            bound != nullptr ? bound : &unused);
+    return ncclAllReduceDdaFabricLL128SplitEligible(mock_.get(), kSendbuff, kRecvbuff, count, datatype, ncclSum, cap,
+                                                    vmmFirst, bound != nullptr ? bound : &unused);
   }
 
   // The LL128 launch of the selector's decision: the peer-split within its bound where it takes the message.
@@ -195,8 +195,8 @@ class DdaAllReduceFabricLLMicrotest : public ::testing::Test {
     rcclDdaLaunchCap bound = {};
     const bool split = TakesSplit(count, &bound, cap, vmmFirst, datatype);
     g_ddaLaunches.clear();
-    EXPECT_EQ(ncclAllReduceDdaFabricLL128(kSendbuff, kRecvbuff, count, datatype, ncclSum, mock_.get(), kStream,
-                                          split ? bound : cap, split),
+    EXPECT_EQ(ncclAllReduceDdaFabricLL128(kSendbuff, kRecvbuff, count, datatype, ncclSum, mock_.get(), kStream, bound,
+                                          split),
               ncclSuccess);
     return Only();
   }

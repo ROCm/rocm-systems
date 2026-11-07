@@ -560,18 +560,25 @@ bool ddaLL128ArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvb
 static bool ddaArLL128SplitWindow(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                   ncclDataType_t datatype, ncclRedOp_t op) {
   const size_t bytes = count * ncclTypeSize(datatype);
-  return comm != nullptr && comm->nRanks > 2 && ddaArLL128StagedWireOk(comm) && bytes >= kDdaArLL128SplitMinBytes &&
-         !(rcclDdaArLLTierPinnedByEnv() && (ddaLLArOneShotEligible(comm, sendbuff, recvbuff, count, datatype, op) ||
-                                            ddaLLArTwoShotShapeEligible(comm, count, datatype, op))) &&
-         !(rcclDdaArLL128OneShotPinnedByEnv() &&
-           ddaLL128ArOneShotShapeEligible(comm, sendbuff, recvbuff, count, datatype, op)) &&
-         bytes <= rcclDdaLL128Threshold(comm, ncclFuncAllReduce) &&
-         ddaLL128ArTwoShotEligible(comm, sendbuff, recvbuff, count, datatype, op);
+  if (comm == nullptr || comm->nRanks <= 2 || !ddaArLL128StagedWireOk(comm) || bytes < kDdaArLL128SplitMinBytes ||
+      bytes > rcclDdaLL128Threshold(comm, ncclFuncAllReduce)) {
+    return false;
+  }
+  if (rcclDdaArLLTierPinnedByEnv() && (ddaLLArOneShotEligible(comm, sendbuff, recvbuff, count, datatype, op) ||
+                                       ddaLLArTwoShotShapeEligible(comm, count, datatype, op))) {
+    return false;
+  }
+  if (rcclDdaArLL128OneShotPinnedByEnv() &&
+      ddaLL128ArOneShotShapeEligible(comm, sendbuff, recvbuff, count, datatype, op)) {
+    return false;
+  }
+  return ddaLL128ArTwoShotEligible(comm, sendbuff, recvbuff, count, datatype, op);
 }
 
-bool ncclAllReduceDdaFabricLL128Split(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
-                                      ncclDataType_t datatype, ncclRedOp_t op, rcclDdaLaunchCap cap, bool vmmFirst,
-                                      rcclDdaLaunchCap* bound) {
+bool ncclAllReduceDdaFabricLL128SplitEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                              ncclDataType_t datatype, ncclRedOp_t op, rcclDdaLaunchCap cap,
+                                              bool vmmFirst, rcclDdaLaunchCap* bound) {
+  *bound = cap;
   if (!ddaArLL128SplitWindow(comm, sendbuff, recvbuff, count, datatype, op)) {
     return false;
   }
@@ -593,8 +600,8 @@ bool ncclAllReduceDdaFabricLL128Split(ncclComm* comm, const void* sendbuff, void
 }
 
 // Shape/resource eligibility for the two-shot variant; messages in the peer-split window run the split.
-bool ddaLLArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
-                            ncclDataType_t datatype, ncclRedOp_t op) {
+bool ddaLLArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+                            ncclRedOp_t op) {
   return ddaLLArTwoShotShapeEligible(comm, count, datatype, op) &&
          !ddaArLL128SplitWindow(comm, sendbuff, recvbuff, count, datatype, op);
 }
@@ -711,11 +718,11 @@ ncclResult_t ncclAllReduceDdaFabricLL128(const void* sendbuff, void* recvbuff, s
     case ncclBfloat16:
       return ncclAllReduceDdaFabricLL128TwoShotTyped<bf16>(sendbuff, recvbuff, count, comm, stream, cap, split);
     case ncclFloat8e4m3:
-      return ncclAllReduceDdaFabricLL128TwoShotTyped<dda::common::fp8e4m3>(sendbuff, recvbuff, count, comm, stream,
-                                                                           cap, split);
+      return ncclAllReduceDdaFabricLL128TwoShotTyped<dda::common::fp8e4m3>(sendbuff, recvbuff, count, comm, stream, cap,
+                                                                           split);
     case ncclFloat8e5m2:
-      return ncclAllReduceDdaFabricLL128TwoShotTyped<dda::common::fp8e5m2>(sendbuff, recvbuff, count, comm, stream,
-                                                                           cap, split);
+      return ncclAllReduceDdaFabricLL128TwoShotTyped<dda::common::fp8e5m2>(sendbuff, recvbuff, count, comm, stream, cap,
+                                                                           split);
     default:
       return ncclInvalidArgument;
     }

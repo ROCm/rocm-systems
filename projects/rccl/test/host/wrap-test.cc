@@ -6291,7 +6291,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredEagerPeerSplitWithinCeGrid
         RegisteredAr ar(8);
         std::vector<rcclDdaLaunchCap> caps;
         std::vector<bool> vmmFirst;
-        ScopedHook split(g_allReduceDdaFabricLL128Split,
+        ScopedHook split(g_allReduceDdaFabricLL128SplitEligible,
                          [&](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, rcclDdaLaunchCap cap,
                              bool inVmmFirst, rcclDdaLaunchCap* bound) {
                            caps.push_back(cap);
@@ -8191,7 +8191,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250VmmFirstYieldsToThePeerSplit)
         EXPECT_FALSE(d.ddaLL128Split);
 
         std::vector<bool> asked;
-        ScopedHook split(g_allReduceDdaFabricLL128Split,
+        ScopedHook split(g_allReduceDdaFabricLL128SplitEligible,
                          [&asked](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t,
                                   rcclDdaLaunchCap cap, bool vmmFirst, rcclDdaLaunchCap* bound) {
                            EXPECT_EQ(0u, cap.blocks) << "an eager unregistered call is not re-routed";
