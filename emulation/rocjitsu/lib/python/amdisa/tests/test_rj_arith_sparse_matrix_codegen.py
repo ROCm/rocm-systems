@@ -6,7 +6,6 @@
 import re
 from types import SimpleNamespace
 
-
 import pytest
 
 from rj_arith_headers import public_headers
