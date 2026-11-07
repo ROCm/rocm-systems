@@ -129,9 +129,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `param-parsers-test.cc`); suite `ParamParsersMicrotest.*`.
 - **`rccl-UnitTestsMicroBootstrap`**: `bootstrap.cc` (via `BOOTSTRAP_CC_PATH`, from
   `bootstrap-test.cc`); suites `Bootstrap*Microtest.*`. Ranks run as threads over the
-  in-memory socket layer and net plugin in `fakes/bootstrap_micro_fakes.cc`. Its own binary
-  because those seams replace `misc/socket.cc` wholesale, and other binaries link
-  `bootstrap_stubs.cc` for this unit's symbols. See `test_categories_micro_bootstrap.yaml`.
+  in-memory socket layer and net plugin in `fakes/bootstrap_micro_fakes.cc`, which replace
+  `misc/socket.cc` wholesale. See `test_categories_micro_bootstrap.yaml`.
 - **`rccl-UnitTestsMicroEnqueue`** — `enqueue.cc` (via `ENQUEUE_CC_PATH`); suite
   `EnqueueMicrotest.*`. All tests live in `enqueue/enqueue-test.cc`, grouped by unit under
   test; several fixtures are reused by later groups, so the order within the file
@@ -146,9 +145,7 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `collectives-test.cc`), with the `include/collectives.h` ring/PAT generators and
   `include/alltoallv_meta.h`; suite `Collectives*`. Its externals are hooks in their owners' fakes
   files; the test defines `ncclSend`, `ncclRecv` and `ncclBroadcast` itself because
-  `fakes/api_trace_fakes.cc` forwards to `init.cc`. Its own binary because
-  `fakes/collectives_fakes.cc`, which most targets link, defines this file's string helpers. See
-  `test_categories_micro_collectives.yaml`.
+  `fakes/api_trace_fakes.cc` forwards to `init.cc`. See `test_categories_micro_collectives.yaml`.
 - **`rccl-UnitTestsMicroDeviceOnerank`** — `device/onerank.cu` (via `ONERANK_CC_PATH`, from
   `device/onerank-test.cc`); suite `Onerank*`, driving `fakes/hip_fakes.cc`'s launch and copy hooks.
   See `test_categories_micro_device.yaml`.
@@ -158,10 +155,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   See `test_categories_micro_enqueue.yaml`.
 - **`rccl-UnitTestsMicroCeColl`**: `ce_coll.cc` (via `CE_COLL_CC_PATH`); suites
   `CeCollMicrotest.*`, `CeInitMicrotest.*` and `LaunchPaths/CeAlltoAllvSyncMicrotest.*`,
-  all in `ce-coll-test.cc`. Its own binary because every other target links
-  `fakes/ce_fakes.cc`, which fakes the symbols this file defines, and the
-  `rccl-UnitTestsMicroInit` cleanup-order oracle needs the fake `ncclCeFinalize`
-  in `fakes/nccl_stubs.cc`, which this target drops via
+  all in `ce-coll-test.cc`. The `rccl-UnitTestsMicroInit` cleanup-order oracle needs the
+  fake `ncclCeFinalize` in `fakes/nccl_stubs.cc`, which this target drops via
   `RCCL_STUBS_OMIT_ncclCeFinalize`.
 - **`rccl-UnitTestsMicroMiscCrypt`** — `misc/crypt.cc` (via `CRYPT_CC_PATH`, from
   `misc/crypt-test.cc`); suite `Crypt*`. See `test_categories_micro_misc.yaml`.
@@ -183,9 +178,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   own test puts around it. `linux-test-common.h` holds their shared fixture.
 
 - **`rccl-UnitTestsMicroCpuset`** — header-only `include/cpuset.h` (from `cpuset-test.cc`);
-  suite `Cpuset*`. Its own binary because the test defines `os/linux.cc`'s
-  `ncclOsCpuZero` / `ncclOsCpuSet` / `ncclOsCpuIsSet` one-liners, which would
-  otherwise sit in `rccl-UnitTestsMicro` as test-TU definitions. See
+  suite `Cpuset*`. The test defines `os/linux.cc`'s `ncclOsCpuZero` /
+  `ncclOsCpuSet` / `ncclOsCpuIsSet` one-liners itself. See
   `test_categories_micro_cpuset.yaml`.
 - **`rccl-UnitTestsMicroRas<Unit>`** — `src/ras/`, one binary per test file under
   `test/host/ras/`, registered in `ras/host_tests.cmake`; `<Unit>` is the test's stem in
@@ -392,8 +386,7 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `test_categories_micro_devcomm.yaml`.
 - **`rccl-UnitTestsMicroCftDevRuntime`**: `src/cft_dev_runtime.cc` and
   `src/nccl_device/core.cc` (via `CFT_DEV_RUNTIME_CC_PATH` / `CORE_CC_PATH`,
-  from `cft-dev-runtime-test.cc`); suites `CftDevRuntime*`. Its own binary because
-  `rccl-UnitTestsMicro` fakes most of `core.cc`, which the LE-info queries call. See
+  from `cft-dev-runtime-test.cc`); suites `CftDevRuntime*`. See
   `test_categories_micro_cft_dev_runtime.yaml`.
 - **`rccl-UnitTestsMicroParam<Unit>`** — `src/param/`, one binary per test file under
   `test/host/param/` (`param/host_tests.cmake`); see `test_categories_micro_param.yaml`.
@@ -470,9 +463,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `CsvTunerMicrotest.*`.
 - **`rccl-UnitTestsMicroProxy`**: `proxy.cc` (via `PROXY_CC_PATH`, from
   `proxy-test.cc`); suites `Proxy*`. Its externals are in
-  `fakes/proxy_micro_fakes.cc` (sockets are socketpair-backed). Its own binary:
-  it compiles the real `proxy.cc`, which `fakes/proxy_fakes.cc` fakes for the
-  other binaries. See `test_categories_micro_proxy.yaml`.
+  `fakes/proxy_micro_fakes.cc` (sockets are socketpair-backed). See
+  `test_categories_micro_proxy.yaml`.
 
 - **`rccl-UnitTestsMicroRma<Unit>`** — `src/rma/`, one binary per test file under
   `test/host/rma/`, registered in `rma/host_tests.cmake`; `<Unit>` is the test's stem in
@@ -537,9 +529,7 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     driven through the heap half of `fakes/libc_seam.h`.
 
 - **`rccl-UnitTestsMicroDebug`** — `debug.cc` (via `DEBUG_CC_PATH`, from
-  `debug-test.cc`); suite `Debug*`. Its own binary because it is the real
-  `ncclDebugLog`, which every shared fake set also defines. See
-  `test_categories_micro_debug.yaml`.
+  `debug-test.cc`); suite `Debug*`. See `test_categories_micro_debug.yaml`.
 
 - **`rccl-UnitTestsMicroMiscApiTrace`** — `misc/api_trace.cc` (via `API_TRACE_CC_PATH`,
   from `misc/api-trace-test.cc`); suite `ApiTrace*`. Built without
