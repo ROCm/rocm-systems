@@ -69,6 +69,9 @@ struct range_plan_t
     // True when the tool asked for more than the application's own execution. A range with
     // replay_requested == false is still recorded-and-declined so the tool gets a CLOSE status.
     bool replay_requested = false;
+    // Tool set host_replay during CONFIG. Extra passes re-enter the caller's frame via siglongjmp
+    // instead of re-submitting the recorded packets.
+    bool host_replay = false;
 };
 
 // Per-pass callback state, populated during PASS PHASE_ENTER and reused for PASS PHASE_EXIT so the

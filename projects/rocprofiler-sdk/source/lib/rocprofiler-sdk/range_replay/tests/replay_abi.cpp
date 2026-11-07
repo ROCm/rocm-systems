@@ -73,6 +73,8 @@ size_t
 rocprofiler_test_c_range_offset_status(void);
 size_t
 rocprofiler_test_c_range_offset_divergence_count(void);
+size_t
+rocprofiler_test_c_range_offset_host_replay(void);
 int
 rocprofiler_test_c_range_operation_last(void);
 int
@@ -148,7 +150,8 @@ TEST(range_replay_abi, members_are_in_declaration_order)
     EXPECT_LT(offsetof(range_data_t, agent_id), offsetof(range_data_t, dispatch_count));
     EXPECT_LT(offsetof(range_data_t, dispatch_count), offsetof(range_data_t, status));
     EXPECT_LT(offsetof(range_data_t, status), offsetof(range_data_t, divergence_count));
-    EXPECT_LT(offsetof(range_data_t, divergence_count), sizeof(range_data_t));
+    EXPECT_LT(offsetof(range_data_t, divergence_count), offsetof(range_data_t, host_replay));
+    EXPECT_LT(offsetof(range_data_t, host_replay), sizeof(range_data_t));
 }
 
 // No member may overlap the one after it, and the last member must fit inside the struct. This
@@ -180,8 +183,10 @@ TEST(range_replay_abi, members_do_not_overlap_and_fit)
               offsetof(range_data_t, dispatch_count) + sizeof(range_data_t{}.dispatch_count));
     EXPECT_GE(offsetof(range_data_t, divergence_count),
               offsetof(range_data_t, status) + sizeof(range_data_t{}.status));
-    EXPECT_GE(sizeof(range_data_t),
+    EXPECT_GE(offsetof(range_data_t, host_replay),
               offsetof(range_data_t, divergence_count) + sizeof(range_data_t{}.divergence_count));
+    EXPECT_GE(sizeof(range_data_t),
+              offsetof(range_data_t, host_replay) + sizeof(range_data_t{}.host_replay));
 }
 
 // Pass counters and the counts reported at CLOSE are documented as uint64_t. A tool reading them
@@ -230,6 +235,7 @@ TEST(range_replay_abi, zero_initialized_record_opts_out_of_replay)
     EXPECT_EQ(rec.total_passes, 0u);
     EXPECT_EQ(rec.dispatch_count, 0u);
     EXPECT_EQ(rec.divergence_count, 0u);
+    EXPECT_EQ(rec.host_replay, 0);
     EXPECT_EQ(rec.size, 0u);
 }
 
@@ -320,7 +326,8 @@ TEST(range_replay_abi, status_enum_values_are_stable)
     EXPECT_EQ(static_cast<int>(ROCPROFILER_RANGE_REPLAY_STATUS_ALLOCATION_CHANGED_IN_RANGE), 12);
     EXPECT_EQ(static_cast<int>(ROCPROFILER_RANGE_REPLAY_STATUS_UNSUPPORTED_QUEUE_PATH), 13);
     EXPECT_EQ(static_cast<int>(ROCPROFILER_RANGE_REPLAY_STATUS_CODE_OBJECT_CHANGED_IN_RANGE), 14);
-    EXPECT_EQ(static_cast<int>(ROCPROFILER_RANGE_REPLAY_STATUS_LAST), 15);
+    EXPECT_EQ(static_cast<int>(ROCPROFILER_RANGE_REPLAY_STATUS_HOST_JMP_NOT_SET), 15);
+    EXPECT_EQ(static_cast<int>(ROCPROFILER_RANGE_REPLAY_STATUS_LAST), 16);
 }
 
 // Every decline reason must be distinguishable from REPLAYED, since that is the single comparison
@@ -472,6 +479,7 @@ TEST(range_replay_abi, c_and_cxx_agree_on_every_field_offset)
     EXPECT_EQ(rocprofiler_test_c_range_offset_status(), offsetof(range_data_t, status));
     EXPECT_EQ(rocprofiler_test_c_range_offset_divergence_count(),
               offsetof(range_data_t, divergence_count));
+    EXPECT_EQ(rocprofiler_test_c_range_offset_host_replay(), offsetof(range_data_t, host_replay));
 }
 
 // `status` is the record's only enum-typed member. If the two languages pick different underlying
