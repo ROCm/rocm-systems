@@ -67,8 +67,14 @@ template <typename T> class lazy_ptr {
   }
 
   lazy_ptr& operator=(lazy_ptr&& rhs) {
+    // Guard against self move-assignment. Without this, p = std::move(p) would
+    // reduce to obj/func self-move-assignment; std::function self-move leaves it
+    // in a valid-but-unspecified state ([res.on.arguments]), so created()/empty()
+    // could then report garbage. The guard keeps self-assignment a no-op.
+    if (&rhs == this) return *this;
     obj = std::move(rhs.obj);
     func = std::move(rhs.func);
+    return *this;
   }
 
   lazy_ptr(lazy_ptr&) = delete;
