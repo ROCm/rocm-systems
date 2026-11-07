@@ -370,7 +370,7 @@ ncclTaskColl MakeTask(int protocol, bool hasAcc) {
 }
 }  // namespace
 
-// rccl-UnitTestsMicro always compiles this file with ENABLE_LL128
+// rccl-UnitTestsMicroWrap always compiles this file with ENABLE_LL128
 // (test/host/CMakeLists.txt), matching production librccl. The
 // *_LL128_DisabledAtCompileTime arms are not part of that binary.
 #if defined(ENABLE_LL128)
@@ -854,11 +854,8 @@ TEST(WrapMicrotest, SetP2pNetChunkSize_AlreadyCachedReturnsStoredValueUnchanged)
 // both arms as reached; NCCL_PROTO_LL's assignment is arch-independent and
 // IS a real oracle either way.
 //
-// The divergence tripwire is a RUNTIME check, not a static_assert: this is a
-// shared binary (rma and group link it too), and a
-// compile-time assert here would break every one of those builds over a
-// constant none of them read. One failing test names the problem without
-// taking the rest of the suite down with it.
+// The divergence tripwire is a RUNTIME check, not a static_assert: one failing
+// test names the problem without taking the rest of the suite down with it.
 TEST(WrapMicrotest, GetMaxNthreads_ConstantsStillEquivalent) {
   EXPECT_EQ(RCCL_GFX950_MAX_NTHREADS, RCCL_DEFAULT_MAX_NTHREADS)
       << "constants diverged -- GetMaxNthreads_Gfx950Arch/NonGfx950Arch below can now "
@@ -1753,7 +1750,7 @@ namespace {
 constexpr size_t kKiB = 1024, kMiB = 1024 * 1024;
 
 // The gfx1250 arch-table entries this change reads (rccl_arch_thresholds.cc).
-// rccl-UnitTestsMicro links no real tables (the fake rcclGetArchThresholds returns
+// rccl-UnitTestsMicroWrap links no real tables (the fake rcclGetArchThresholds returns
 // null), so tests hand this copy to the comm; RcclDdaTierThresholds.* (GPU) checks
 // that the real table resolves to the same caps.
 rcclArchThresholds MakeRankScaledTable() {
@@ -4370,9 +4367,9 @@ TEST(WrapMicrotest, DdaEnabled_ImplicitLaunchOrderReturnsFalse) {
 }
 
 // Closes gap 2 of 3: proves the third disjunct, ncclGroupDepth != 0,
-// independently. ncclGroupDepth is the real thread_local global from
-// group.cc (already linked, see wrap-test.cc's file header comment) -- no
-// seam needed, just set and restore it directly around the call.
+// independently. ncclGroupDepth is a plain thread_local global
+// (fakes/dev_runtime_micro_fakes.cc) -- no seam needed, just set and
+// restore it directly around the call.
 TEST(WrapMicrotest, DdaEnabled_InsideGroupReturnsFalse) {
   ncclComm* comm = MakeCommWithArch("gfx942");
   comm->nRanks = 8;
@@ -7746,7 +7743,7 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CeForceScratchNotChosenWhenProbeSays
 }
 
 namespace {
-// rccl-UnitTestsMicro links no real arch tables (the host fake rcclGetArchThresholds
+// rccl-UnitTestsMicroWrap links no real arch tables (the host fake rcclGetArchThresholds
 // returns null), so each case hands the comm the table it wants to exercise.
 // Every other CE-Scratch gate is armed: scratch probe true, unregistered windows,
 // no sysmem, receive fits ddaScratch, and ceNonRegMax[AG] = 0 so the window
@@ -8434,7 +8431,7 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CeRegisteredViaSymmetricWindowsChose
         comm->nRanks = 1;
         comm->nNodes = 1;
         // rccl_arch_thresholds_fakes.cc returns nullptr from rcclGetArchThresholds
-        // (the real .cc is not linked into rccl-UnitTestsMicro).  When the table is
+        // (the real .cc is not linked into rccl-UnitTestsMicroWrap).  When the table is
         // nullptr rcclCeRegMaxTab() returns 0, which makes rcclAllGatherCeRegisteredWindowTab
         // return false and prevents Branch #3 from firing.  Supply a minimal table
         // directly so extAlgoArchTable() short-circuits to comm->archThresholds.
@@ -9372,9 +9369,9 @@ void EnableCeReduceScatterForSelectTest() {
   g_ceImplemented = true;
 }
 
-// UnitTestsMicro links real computeLsaSize (dev_runtime.cc via
-// #include in dev-runtime-test.cc). Without a cached spanning team,
-// ncclDevrIsOneLsaTeam walks null rankToNode when nRanks > 1 (SIGSEGV).
+// This binary links the real computeLsaSize (dev_runtime.cc, compiled as a
+// source). Without a cached spanning team, ncclDevrIsOneLsaTeam walks null
+// rankToNode when nRanks > 1 (SIGSEGV).
 // Call after the final nRanks assignment, matching the AllReduce CE select tests.
 void ArmSpanningLsaTeam(ncclComm* comm) {
   comm->devrState.bigSize = 1;
