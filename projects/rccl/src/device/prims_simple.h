@@ -67,9 +67,9 @@ class Primitives<T, RedOp, Fan, Direct,
       // device-wide and doesn't add system-scope ordering here.
       // To be revisited for correctness on gfx1250
 #if defined(__gfx942__) || defined(__gfx950__) || (defined(__gfx1250__) || defined(__gfx1250_strict__))
-      barrier_generic(__threadfence_block(), nworkers, barrier_next, barriers);
+      barrier_generic(__threadfence_block(), nworkers, barrier_next, barriers, group);
 #else
-      barrier_generic(__threadfence(), nworkers, barrier_next, barriers);
+      barrier_generic(__threadfence(), nworkers, barrier_next, barriers, group);
 #endif
   }
   inline __device__ void subBarrier() {
@@ -83,9 +83,9 @@ class Primitives<T, RedOp, Fan, Direct,
     constexpr int nPatWorkers = isHierarchical ? NCCL_PAT_MULTI_RPN_NWORKERS : NCCL_PAT_NWORKERS;
     // To be revisited for correctness on gfx1250
 #if defined(__gfx942__) || defined(__gfx950__) || (defined(__gfx1250__) || defined(__gfx1250_strict__))
-    barrier_generic(__threadfence_block(), nPatWorkers, barrier_next_pat, barriers_pat);
+    barrier_generic(__threadfence_block(), nPatWorkers, barrier_next_pat, barriers_pat, NCCL_PAT_NAMED_BARRIER);
 #else
-    barrier_generic(__threadfence(), nPatWorkers, barrier_next_pat, barriers_pat);
+    barrier_generic(__threadfence(), nPatWorkers, barrier_next_pat, barriers_pat, NCCL_PAT_NAMED_BARRIER);
 #endif
   }
 
@@ -233,9 +233,10 @@ class Primitives<T, RedOp, Fan, Direct,
       __atomic_signal_fence(__ATOMIC_SEQ_CST);
 #if (defined(__gfx1250__) || defined(__gfx1250_strict__))
       // To be revisited for correctness and performance on gfx1250
-      barrier_generic(asm volatile("s_wait_loadcnt 0x0\n\ts_wait_storecnt 0x0"), nworkers, barrier_next, barriers);
+      barrier_generic(asm volatile("s_wait_loadcnt 0x0\n\ts_wait_storecnt 0x0"), nworkers, barrier_next, barriers,
+                      group);
 #else
-      barrier_generic(asm volatile("s_waitcnt lgkmcnt(0) vmcnt(0)"), nworkers, barrier_next, barriers);
+      barrier_generic(asm volatile("s_waitcnt lgkmcnt(0) vmcnt(0)"), nworkers, barrier_next, barriers, group);
 #endif
       __atomic_signal_fence(__ATOMIC_SEQ_CST);
     } else if ((flags & RolePostSend) && dataStored) {
