@@ -37,7 +37,7 @@ class Settings : public device::Settings {
       uint dynamic_queues_ : 2;        //!< Dynamic queues: 0=off, 1=Depth, 2=1+dedicated null
       uint blocking_blit_ : 1;         //!< Blit ops can be blocking on CPU
       uint queue_pipe_dist_ : 1;       //!< gfx94x queue pipe distribution
-      uint ext_dispatch_packet_ : 1;   //!< Uses new ext dispatch packet for all launches
+      uint ext_dispatch_packet_ : 1;      //!< Uses ext dispatch packet (format 3/4) for all launches
       uint aql_barrier_opt_ : 1;       //!< Per-stream barrier-bit optimization
       uint reserved_ : 17;
     };

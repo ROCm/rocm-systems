@@ -145,6 +145,12 @@ typedef enum {
    */
   HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH = 3,
 
+  /**
+   * Extended kernel dispatch packet with launch descriptor support.
+   * Supports clusters, launch descriptor for advanced scheduling, and L2 prefetch.
+   */
+  HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD = 4,
+
   /* Reserved for a packet that is not yet released */
   HSA_AMD_PACKET_TYPE_RESERVED200 = 200,
 } hsa_amd_packet_type_t;

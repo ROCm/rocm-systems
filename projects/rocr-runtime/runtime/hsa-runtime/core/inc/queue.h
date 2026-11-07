@@ -97,7 +97,8 @@ struct AqlPacket {
 
   bool __forceinline isExtDispatch() const {
     return (type(packet.header) == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
-            amd_vendor.format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH);
+            (amd_vendor.format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH ||
+             amd_vendor.format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD));
   }
 
   bool __forceinline IsDispatchAndNeedsScratch() const {
@@ -182,7 +183,8 @@ struct AqlPacket {
                << "\nsignal: " << dispatch.completion_signal.handle;
         break;
       case HSA_PACKET_TYPE_VENDOR_SPECIFIC:
-        if (amd_vendor.format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH) {
+        if (amd_vendor.format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH ||
+            amd_vendor.format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD) {
           string << "\nDim: " << ext_dispatch.setup
                  << "\nworkgroup_size: " << ext_dispatch.workgroup_size_x << ", "
                  << ext_dispatch.workgroup_size_y << ", " << ext_dispatch.workgroup_size_z

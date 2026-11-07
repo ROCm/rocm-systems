@@ -50,7 +50,6 @@
 #include <cinttypes>
 #include <cstring>
 #include <fstream>
-#include <iostream>
 #include <iomanip>
 #include <memory>
 #include <sstream>
@@ -699,6 +698,7 @@ bool Device::create() {
                    pciDeviceId_);
     return false;
   }
+
 
   if (!ValidateComgr()) {
     LogPrintfError("Code object manager initialization failed for HSA device %s (PCI ID %x)",
