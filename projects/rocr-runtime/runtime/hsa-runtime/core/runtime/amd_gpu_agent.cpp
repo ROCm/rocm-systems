@@ -171,6 +171,7 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
   t1_ = t0_;
   historical_clock_ratio_ = 0.0;
   gpu_clock_offset_ = 0;
+  is_wsl_dxg_ = core::Runtime::runtime_singleton_->thunkLoader()->IsWslDxg();
   assert(err == HSA_STATUS_SUCCESS && "hsaGetClockCounters error");
 
   num_h2d_d2h_engines_ = properties_.NumSdmaEngines > 2 ? 2 : properties_.NumSdmaEngines;
@@ -3327,7 +3328,7 @@ void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_dispatch_ti
   uint64_t start, end;
   signal->GetRawTs(start, end);
 
-  if ((start == 0) || (end == 0) || (start < t0_.GPUClockCounter) || (end < t0_.GPUClockCounter)) {
+  if (!RawTsValid(start, end)) {
     debug_print("Signal %p time stamps may be invalid (start=%" PRIu64 ", end=%" PRIu64 ", t0=%" PRIu64 ").\n",
                 &signal->signal_, start, end, t0_.GPUClockCounter);
     time.start = 0;
@@ -3345,7 +3346,7 @@ void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_async_copy_
   uint64_t start, end;
   signal->GetRawTs(start, end);
 
-  if ((start == 0) || (end == 0) || (start < t0_.GPUClockCounter) || (end < t0_.GPUClockCounter)) {
+  if (!RawTsValid(start, end)) {
     debug_print("Signal %p async copy time stamps may be invalid (start=%" PRIu64 ", end=%" PRIu64 ", t0=%" PRIu64 ").\n",
                 &signal->signal_, start, end, t0_.GPUClockCounter);
     time.start = 0;
@@ -3374,12 +3375,22 @@ uint64_t GpuAgent::TranslateTime(uint64_t tick) {
 
   std::lock_guard<std::mutex> lock(t1_lock_);
 
+  // On Windows and WSL (DXG), AQL dispatch timestamps may have a fixed epoch
+  // offset from D3DKMTQueryClockCalibration's GPUClockCounter (same clock domain,
+  // different base).  Subtract the offset before interpolation (0 until first
+  // detection).  gpu_clock_offset_ is read and written under t1_lock_ to avoid
+  // data races.  On native Linux (KFD) the clocks match, so no offset applies.
 #ifdef _WIN32
-  // On Windows, AQL dispatch timestamps may have a fixed epoch offset from
-  // D3DKMTQueryClockCalibration's GPUClockCounter (same clock domain, different
-  // base).  Subtract the offset before interpolation (0 until first detection).
-  // gpu_clock_offset_ is read and written under t1_lock_ to avoid data races.
   tick -= gpu_clock_offset_;
+#else
+  // Detect the offset here as well as in RawTsValid, so scalar conversions through
+  // hsa_amd_profiling_convert_tick_to_system_domain (e.g. CLR's batched
+  // CacheTimingFromTicks, which reads raw start_ts/end_ts and converts them
+  // directly) latch it without depending on an earlier signal-based profiling
+  // query.  t1_lock_ is already held, so call the locked detector directly; it is
+  // a no-op once latched.  Detecting before the tick < t0_ branch below also keeps
+  // a WSL epoch-offset tick from seeding historical_clock_ratio_.
+  if (is_wsl_dxg_) tick -= DetectWslOffsetLocked(tick);
 #endif
   // Limit errors due to correlated pair certainty to ~0.5us.
   // extrapolated time < (0.5us / half clock read certainty) * delay between clock measures
@@ -3456,6 +3467,51 @@ uint16_t GpuAgent::GetSdmaMicrocodeVersion() const {
 void GpuAgent::SyncClocks() {
   [[maybe_unused]] hsa_status_t sync_err = driver().GetClockCounters(node_id(), &t1_);
   assert(sync_err == HSA_STATUS_SUCCESS && "hsaGetClockCounters error");
+}
+
+bool GpuAgent::RawTsValid(uint64_t start, uint64_t end) {
+  if ((start == 0) || (end == 0)) return false;
+  // Native Linux (KFD): the AQL timestamp clock and D3DKMT's calibration share an
+  // epoch, so this is the upstream check - a packet is valid iff it does not
+  // predate t0_.
+  if (!is_wsl_dxg_)
+    return (start >= t0_.GPUClockCounter) && (end >= t0_.GPUClockCounter);
+  // WSL (DXG): raw AQL ticks lag the calibration epoch by a fixed offset, so
+  // compare against t0_ after removing it.  off is a negative int64_t reinterpreted
+  // as uint64_t, so "start - off" wraps to "start + |offset|" - intentional modular
+  // arithmetic, not underflow.
+  const uint64_t off = uint64_t(WslEpochOffset(end));
+  return (start - off >= t0_.GPUClockCounter) && (end - off >= t0_.GPUClockCounter);
+}
+
+int64_t GpuAgent::WslEpochOffset(uint64_t end) {
+  std::lock_guard<std::mutex> lock(t1_lock_);
+  return DetectWslOffsetLocked(end);
+}
+
+// WSL only; the caller must hold t1_lock_.  The AQL timestamp clock can lag
+// D3DKMT's GPUClockCounter by hours, so every completed packet looks older than
+// t0_ and was reported as invalid (zero duration).  An end tick that predates t0_
+// by more than the process uptime is an epoch offset, not an early timestamp;
+// latch it once, taking the just-completed end as "now".  Durations are always
+// exact (start and end shift together).  Absolute times are biased late by the
+// delay between the packet completing and the first translation that reaches this
+// - microseconds for an immediate read, up to seconds for a deferred batch -
+// because the offset is anchored to t1_ sampled then, not at completion.  If the
+// process runs longer than the lag before its first translated packet, that packet
+// already has end >= t0_, is indistinguishable from a native tick, and the offset
+// is never latched (absolute times then run ~lag early; durations stay exact).
+// These are accepted limitations of this workaround.  The robust fix - reporting a
+// GPUClockCounter in the CP epoch (as PAL does on native Windows) or exposing a
+// contemporaneous CP-clock/calibration pair - belongs in librocdxg/KMD, where the
+// epoch is known, rather than being reconstructed heuristically here.
+int64_t GpuAgent::DetectWslOffsetLocked(uint64_t end) {
+  if (gpu_clock_offset_ != 0 || end == 0 || end >= t0_.GPUClockCounter)
+    return gpu_clock_offset_;
+  SyncClocks();
+  if (t0_.GPUClockCounter - end > t1_.GPUClockCounter - t0_.GPUClockCounter)
+    gpu_clock_offset_ = int64_t(end) - int64_t(t1_.GPUClockCounter);
+  return gpu_clock_offset_;
 }
 
 hsa_status_t GpuAgent::UpdateTrapHandlerWithPCS(pcs_sampling_data_t* pcs_hosttrap_buffers,
