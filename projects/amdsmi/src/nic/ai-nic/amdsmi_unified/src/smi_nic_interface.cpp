@@ -4,7 +4,6 @@
 #include "smi_nic_interface.h"
 
 #include <algorithm>
-#include <array>
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
@@ -1075,9 +1074,6 @@ void smi_nic_telemetry_from_snapshot_for_testing(
     const amd::smi::nic::telemetry::NicTelemetrySnapshot& snapshot,
     smi_nic_telemetry_t* telemetry) {
   *telemetry = {};
-  telemetry->temperature.asic_temp_c = snapshot.temperature.asic_temp_c;
-  telemetry->temperature.transceiver_temp_c = snapshot.temperature.transceiver_temp_c;
-  telemetry->temperature.board_temp_c = snapshot.temperature.board_temp_c;
   telemetry->health.state = snapshot.health.state;
   telemetry->health.error_count = snapshot.health.error_count;
   std::snprintf(telemetry->health.reporter, sizeof(telemetry->health.reporter), "%s",
@@ -1090,27 +1086,13 @@ static DevlinkFactory_t g_devlink_factory;
 
 namespace {
 
-// What a telemetry read needs from a SmiNic, copied under the context lock. The constructor still
-// calls hwmon_temp_path() (directory scan and label reads); only the tempN_input read runs
-// unlocked.
+// What a telemetry read needs from a SmiNic, copied under the context lock so the devlink round
+// trips run without it.
 class TelemetryNic_t : public SmiNic {
  public:
   explicit TelemetryNic_t(const SmiNic& nic) : SmiNic("", nic.telemetry_bdf()) {
     set_mgmt_bdf(nic.mgmt_bdf());
-    for (size_t i = 0; i < m_temp_paths.size(); ++i) {
-      m_temp_paths.at(i) = nic.hwmon_temp_path(static_cast<NicTempSensor>(i));
-    }
   }
-
-  std::optional<std::string> hwmon_temp_path(NicTempSensor sensor) const override {
-    return m_temp_paths.at(static_cast<size_t>(sensor));
-  }
-
- private:
-  // Board is the last NicTempSensor enumerator, so the array holds every sensor.
-  static_assert(static_cast<size_t>(NicTempSensor::Board) == 2, "NicTempSensor grew; resize");
-  std::array<std::optional<std::string>, static_cast<size_t>(NicTempSensor::Board) + 1>
-      m_temp_paths;
 };
 
 }  // namespace
@@ -1134,8 +1116,8 @@ smi_nic_status_t smi_get_nic_telemetry(smi_nic_ctx_t ctx, uint64_t device,
   // as a failure, so there is no unsuccessful result to branch on here.
   // The devlink client allocates netlink messages that throw; keep that off the C ABI boundary.
   try {
-    // The hwmon reads and devlink round trips can block on firmware, so they run without the
-    // context lock, on a copy of the addresses; the devlink client is a fresh, unshared socket.
+    // The devlink round trips can block on firmware, so they run without the context lock, on a
+    // copy of the addresses; the devlink client is a fresh, unshared socket.
     auto snapshot_nic = std::unique_ptr<TelemetryNic_t>{};
     {
       std::lock_guard<std::mutex> lock(ctx->ctx_mutex);

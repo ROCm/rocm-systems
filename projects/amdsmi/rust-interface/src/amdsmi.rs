@@ -5392,7 +5392,7 @@ pub fn amdsmi_get_nic_fw_info(
     Ok(info)
 }
 
-/// Get live telemetry (temperature, health, port-split) for the NIC with the specified processor handle.
+/// Get live telemetry (health, port-split) for the NIC with the specified processor handle.
 ///
 /// # Arguments
 ///

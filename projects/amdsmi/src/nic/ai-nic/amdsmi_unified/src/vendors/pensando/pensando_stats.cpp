@@ -110,10 +110,8 @@ const StatTable_t kPensandoStatTable = {
     {"uncorrectable_blocks", StatTier_t::Extended},
     {"corrected_bits", StatTier_t::Extended},
 
-    // Extended: FEC symbol-error histogram (16), kernel 6.18+ only. Present in
-    // the table so they surface automatically once the netlink handler grows
-    // histogram support (see netlink_ethtool.cpp fec_stats_handler comment);
-    // absent (not "N/A") on every kernel tested so far.
+    // Extended: FEC symbol-error histogram (16), from netlink FEC stats on kernel 6.18+ (some
+    // vendor kernels earlier). Absent, not "N/A", on a kernel that does not report it.
     {"fec_symbols_err_0", StatTier_t::Extended},
     {"fec_symbols_err_1", StatTier_t::Extended},
     {"fec_symbols_err_2", StatTier_t::Extended},

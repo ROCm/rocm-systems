@@ -731,38 +731,6 @@ auto test_vpd_missing_logged() -> void {
   check("FAIL present", has_substr(all, "FAIL"), all);
 }
 
-auto test_hwmon_scan_logged() -> void {
-  std::cout << "\nHwmon scan: logs the directory and the chosen temp file\n";
-  const auto fx = LogFixture_t{};
-  const auto dev = fs::path(fx.path_of("dev"));
-  fs::create_directories(dev / "hwmon" / "hwmon3");
-  std::ofstream(dev / "hwmon" / "hwmon3" / "temp1_input") << kTempMilliC << "\n";
-  const auto nic = SmiNic{kIface, "0000:03:00.0", NicType::Ethernet, "", dev.string()};
-
-  const auto path = nic.hwmon_temp_path(NicTempSensor::Asic);
-
-  check("path resolved", path.has_value());
-  const auto all = joined();
-  check("hwmon dir present", has_substr(all, (dev / "hwmon").string()), all);
-  check("chosen file present", has_substr(all, "temp1_input"), all);
-  check("line names the hwmon function",
-        has_substr(all, "hwmon_temp_path") && has_substr(all, " | hwmon scan "), all);
-  check("SUCCESS present", has_substr(all, "SUCCESS"), all);
-}
-
-auto test_hwmon_scan_missing_logged() -> void {
-  std::cout << "\nHwmon scan: absent hwmon directory logs the path and FAIL\n";
-  const auto fx = LogFixture_t{};
-  const auto dev = fs::path(fx.path_of("nohwmon"));
-  fs::create_directories(dev);
-  const auto nic = SmiNic{kIface, "0000:03:00.0", NicType::Ethernet, "", dev.string()};
-
-  check("no path", !nic.hwmon_temp_path(NicTempSensor::Asic).has_value());
-  const auto all = joined();
-  check("hwmon dir present", has_substr(all, (dev / "hwmon").string()), all);
-  check("FAIL present", has_substr(all, "FAIL"), all);
-}
-
 }  // namespace
 
 int main() {
@@ -789,8 +757,6 @@ int main() {
   test_transport_log_silent_without_sink();
   test_vpd_read_logged_and_serial_masked();
   test_vpd_missing_logged();
-  test_hwmon_scan_logged();
-  test_hwmon_scan_missing_logged();
 #ifdef HAVE_LIBNL3
   test_netlink_errors_map_to_errno();
   test_netlink_query_success_logged();

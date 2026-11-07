@@ -2,7 +2,7 @@
 /*
  * Copyright Advanced Micro Devices, Inc.
  *
- * Unit tests for the NIC telemetry facade (temperature / health / port-split).
+ * Unit tests for the NIC telemetry facade (health / port-split).
  *
  * These tests need no hardware and no root: devlink is exercised through a fake
  * IDevlinkClient, and sysfs/hwmon through fake files written to a temp dir. They
@@ -24,9 +24,7 @@
 #include <fstream>
 #include <future>
 #include <iostream>
-#include <map>
 #include <memory>
-#include <optional>
 #include <string>
 #include <system_error>
 #include <thread>
@@ -51,10 +49,9 @@ namespace hw = amd::smi::nic::hwmon;
 // copy is complete (a field added inside existing padding is invisible here). If a field
 // is added and a size below changes, update the public copy and its field-population test
 // before touching these numbers.
-static_assert(sizeof(tel::NicTemperature) == 6, "NicTemperature grew; revisit public C2 copy");
 static_assert(sizeof(tel::NicHealth) == 72, "NicHealth grew; revisit public C2 copy");
 static_assert(sizeof(tel::NicPortSplit) == 2, "NicPortSplit grew; revisit public C2 copy");
-static_assert(sizeof(tel::NicTelemetrySnapshot) == 84,
+static_assert(sizeof(tel::NicTelemetrySnapshot) == 76,
               "NicTelemetrySnapshot grew; revisit public C2 copy");
 
 using nic_test::check;
@@ -108,33 +105,12 @@ static void add_version(dl::DevlinkDeviceInfo& info, dl::DevlinkVersionType type
   std::snprintf(v.value, sizeof(v.value), "%s", value.c_str());
 }
 
-// NIC whose sensor mapping is driven by the test. hwmon_temp_path remains a
-// virtual override point, which is what lets these tests inject temp files
-// without touching real sysfs.
 class FakeNic : public SmiNic {
  public:
   FakeNic() : SmiNic("eth0", "0000:03:00.0") {}
-
-  std::map<NicTempSensor, std::string> temp_paths;
-
-  std::optional<std::string> hwmon_temp_path(NicTempSensor sensor) const override {
-    auto it = temp_paths.find(sensor);
-    if (it == temp_paths.end()) {
-      return std::nullopt;
-    }
-    return it->second;
-  }
 };
 
 static std::string g_tmpdir;
-
-static std::string write_temp_file(const std::string& name, const std::string& content) {
-  const std::string path = g_tmpdir + "/" + name;
-  std::ofstream f(path);
-  f << content;
-  f.close();
-  return path;
-}
 
 // Writes `content` to g_tmpdir/<rel>, creating the parent directories.
 static void write_sysfs_file(const std::string& rel, const std::string& content) {
@@ -168,43 +144,6 @@ static std::string write_ionic_hwmon(const std::string& root_rel) {
 }
 
 // Test cases
-
-static void test_temperature_partial() {
-  std::cout << "\nTemperature: asic supported, others absent\n";
-  FakeNic nic;
-  nic.temp_paths[NicTempSensor::Asic] = write_temp_file("temp1_input", "45000\n");
-
-  tel::NicTelemetry telemetry(std::make_shared<FakeDevlinkClient>());
-  auto r = telemetry.get_temperature(nic);
-
-  check("call succeeds", r.success, "errno=" + std::to_string(r.error_code));
-  check("asic = 45C", r.value.asic_temp_c == 45, "got " + std::to_string(r.value.asic_temp_c));
-  check("transceiver = reserved value", r.value.transceiver_temp_c == tel::kTempUnsupported);
-  check("board = reserved value", r.value.board_temp_c == tel::kTempUnsupported);
-}
-
-static void test_temperature_unsupported() {
-  std::cout << "\nTemperature: vendor exposes no sensor\n";
-  FakeNic nic;  // no temp_paths
-
-  tel::NicTelemetry telemetry(std::make_shared<FakeDevlinkClient>());
-  auto r = telemetry.get_temperature(nic);
-
-  check("call reports unsupported", !r.success);
-  check("errno = ENOTSUP", r.error_code == ENOTSUP, "got " + std::to_string(r.error_code));
-}
-
-static void test_temperature_present_but_unreadable() {
-  std::cout << "\nTemperature: sensor mapped but file missing\n";
-  FakeNic nic;
-  nic.temp_paths[NicTempSensor::Asic] = g_tmpdir + "/does_not_exist";
-
-  tel::NicTelemetry telemetry(std::make_shared<FakeDevlinkClient>());
-  auto r = telemetry.get_temperature(nic);
-
-  check("call still succeeds (sensor is supported)", r.success);
-  check("asic = reserved value (unreadable)", r.value.asic_temp_c == tel::kTempUnsupported);
-}
 
 static void test_health_supported() {
   std::cout << "\nHealth: single healthy reporter (bnxt 'fw')\n";
@@ -392,7 +331,6 @@ static void test_port_split_unsupported() {
 static void test_snapshot_all_supported() {
   std::cout << "\nSnapshot: all three metrics supported (bnxt-like)\n";
   FakeNic nic;
-  nic.temp_paths[NicTempSensor::Asic] = write_temp_file("temp1_input", "45000\n");
 
   auto fake = std::make_shared<FakeDevlinkClient>();
   fake->reporters = {true, {make_reporter("fw", /*healthy=*/1, /*errors=*/0)}, 0};
@@ -402,8 +340,6 @@ static void test_snapshot_all_supported() {
   auto r = telemetry.get_snapshot(nic);
 
   check("snapshot succeeds", r.success, "errno=" + std::to_string(r.error_code));
-  check("temp asic = 45C", r.value.temperature.asic_temp_c == 45,
-        "got " + std::to_string(r.value.temperature.asic_temp_c));
   check("health = Healthy",
         r.value.health.state == static_cast<uint8_t>(tel::HealthState::Healthy));
   check("health reporter = fw", std::strcmp(r.value.health.reporter, "fw") == 0);
@@ -412,7 +348,7 @@ static void test_snapshot_all_supported() {
 
 static void test_snapshot_mixed() {
   std::cout << "\nSnapshot: health only, temp and port-split absent (pds_core)\n";
-  FakeNic nic;  // no temp sensors
+  FakeNic nic;
 
   auto fake = std::make_shared<FakeDevlinkClient>();
   fake->reporters = {true, {make_reporter("fw", /*healthy=*/1, /*errors=*/0)}, 0};
@@ -422,8 +358,6 @@ static void test_snapshot_mixed() {
   auto r = telemetry.get_snapshot(nic);
 
   check("snapshot still succeeds", r.success);
-  check("temp asic = reserved value", r.value.temperature.asic_temp_c == tel::kTempUnsupported);
-  check("temp board = reserved value", r.value.temperature.board_temp_c == tel::kTempUnsupported);
   check("health present = Healthy",
         r.value.health.state == static_cast<uint8_t>(tel::HealthState::Healthy));
   check("port splittable = reserved value",
@@ -434,7 +368,7 @@ static void test_snapshot_mixed() {
 
 static void test_snapshot_all_unsupported() {
   std::cout << "\nSnapshot: nothing exposed (ionic)\n";
-  FakeNic nic;  // no temp sensors
+  FakeNic nic;
 
   auto fake = std::make_shared<FakeDevlinkClient>();
   fake->reporters = {true, {}, 0};  // enumeration succeeded but empty -> unsupported
@@ -444,7 +378,6 @@ static void test_snapshot_all_unsupported() {
   auto r = telemetry.get_snapshot(nic);
 
   check("snapshot still succeeds (per-field reserved values, not whole failure)", r.success);
-  check("temp asic = reserved value", r.value.temperature.asic_temp_c == tel::kTempUnsupported);
   check("health state = Unsupported (distinct from Unknown)",
         r.value.health.state == static_cast<uint8_t>(tel::HealthState::Unsupported));
   check("health error_count = reserved value",
@@ -535,7 +468,6 @@ static void test_fw_info_of_a_device_without_versions_is_empty() {
 static void test_telemetry_shim_struct_copies_every_snapshot_field() {
   std::cout << "\nTelemetry: snapshot maps to the shim struct\n";
   auto snapshot = tel::NicTelemetrySnapshot{};
-  snapshot.temperature = {52, tel::kTempUnsupported, 40};
   snapshot.health.state = static_cast<uint8_t>(tel::HealthState::Healthy);
   snapshot.health.error_count = 7;
   std::snprintf(snapshot.health.reporter, sizeof(snapshot.health.reporter), "%s", "fw");
@@ -544,10 +476,6 @@ static void test_telemetry_shim_struct_copies_every_snapshot_field() {
   auto telemetry = smi_nic_telemetry_t{};
   smi_nic_telemetry_from_snapshot_for_testing(snapshot, &telemetry);
 
-  check("asic temperature", telemetry.temperature.asic_temp_c == 52);
-  check("an unexposed transceiver temperature keeps the reserved value",
-        telemetry.temperature.transceiver_temp_c == tel::kTempUnsupported);
-  check("board temperature", telemetry.temperature.board_temp_c == 40);
   check("health state", telemetry.health.state == static_cast<uint8_t>(tel::HealthState::Healthy));
   check("error count", telemetry.health.error_count == 7);
   check("reporter name", std::string(telemetry.health.reporter) == "fw");
@@ -706,23 +634,6 @@ class OneNicSubsystem : public SmiNicSubsystem {
   std::vector<std::unique_ptr<SmiNic>> m_nics;
 };
 
-// Reports one temperature file per sensor, so each snapshot field can be traced to its source.
-class FixedHwmonNic : public SmiNic {
- public:
-  FixedHwmonNic(const std::string& bdf, std::map<NicTempSensor, std::string> paths)
-      : SmiNic("", bdf, NicType::Ethernet), m_paths(std::move(paths)) {}
-  std::optional<std::string> hwmon_temp_path(NicTempSensor sensor) const override {
-    const auto it = m_paths.find(sensor);
-    if (it == m_paths.end()) {
-      return std::nullopt;
-    }
-    return it->second;
-  }
-
- private:
-  std::map<NicTempSensor, std::string> m_paths;
-};
-
 class DevlinkFactoryGuard_t {
  public:
   explicit DevlinkFactoryGuard_t(DevlinkFactory_t factory) {
@@ -773,24 +684,10 @@ static void test_telemetry_does_not_hold_the_context_lock_across_devlink() {
   smi_nic_destroy_context(ctx);
 }
 
-static void test_telemetry_carries_hwmon_and_devlink_addresses_through_the_context() {
-  std::cout << "\nTelemetry: context read keeps hwmon value and devlink addresses\n";
+static void test_telemetry_carries_devlink_addresses_through_the_context() {
+  std::cout << "\nTelemetry: context read keeps the devlink addresses\n";
   constexpr auto kNicBdf = uint64_t{0x300};
-  const auto write_temp = [](const std::string& name, int millidegrees) {
-    const auto path = g_tmpdir + "/" + name;
-    auto file = std::ofstream(path);
-    file << millidegrees << "\n";
-    return path;
-  };
-  const auto asic_path = write_temp("ctx_asic_input", 41000);
-  const auto transceiver_path = write_temp("ctx_transceiver_input", 52000);
-  const auto board_path = write_temp("ctx_board_input", 63000);
-
-  auto nic = std::make_unique<FixedHwmonNic>(
-      "0000:03:00.0",
-      std::map<NicTempSensor, std::string>{{NicTempSensor::Asic, asic_path},
-                                           {NicTempSensor::Transceiver, transceiver_path},
-                                           {NicTempSensor::Board, board_path}});
+  auto nic = std::make_unique<SmiNic>("", "0000:03:00.0", NicType::Ethernet);
   nic->set_mgmt_bdf("0000:09:00.0");
   auto ctx = make_context_with_nic(std::move(nic));
 
@@ -802,13 +699,6 @@ static void test_telemetry_carries_hwmon_and_devlink_addresses_through_the_conte
   const auto status = smi_get_nic_telemetry(ctx, kNicBdf, &telemetry);
 
   check("telemetry succeeds", status == SMI_NIC_STATUS_SUCCESS);
-  check("asic temperature reaches the asic field", telemetry.temperature.asic_temp_c == 41,
-        std::to_string(telemetry.temperature.asic_temp_c));
-  check("transceiver temperature reaches the transceiver field",
-        telemetry.temperature.transceiver_temp_c == 52,
-        std::to_string(telemetry.temperature.transceiver_temp_c));
-  check("board temperature reaches the board field", telemetry.temperature.board_temp_c == 63,
-        std::to_string(telemetry.temperature.board_temp_c));
   check("health is read from the management function", fake->reporters_dev == "0000:09:00.0",
         "got " + fake->reporters_dev);
   check("port split is read from the telemetry function", fake->port_split_dev == "0000:03:00.0",
@@ -1036,85 +926,6 @@ static void test_hwmon_scan_absent_root_is_empty() {
   check("no records", hw::scan_sensors(g_tmpdir + "/does_not_exist").empty());
 }
 
-static void test_temperature_role_ionic() {
-  std::cout << "\nTemperature role: labelled ionic node\n";
-  const auto root = write_ionic_hwmon("role_ionic");
-  const auto asic = hw::find_temperature_input(root, hw::TempRole_t::Asic);
-  const auto board = hw::find_temperature_input(root, hw::TempRole_t::Board);
-
-  check("asic is the die channel",
-        asic.has_value() && (asic.value() == root + "/hwmon3/temp2_input"));
-  check("board is the board channel",
-        board.has_value() && (board.value() == root + "/hwmon3/temp1_input"));
-}
-
-static void test_temperature_role_unlabelled_driver() {
-  std::cout << "\nTemperature role: driver that labels nothing\n";
-  write_sysfs_file("role_plain/hwmon0/temp1_input", "46000\n");
-  const auto root = g_tmpdir + "/role_plain";
-
-  const auto asic = hw::find_temperature_input(root, hw::TempRole_t::Asic);
-  check("asic falls back to temp1",
-        asic.has_value() && (asic.value() == root + "/hwmon0/temp1_input"));
-  check("board is absent", !hw::find_temperature_input(root, hw::TempRole_t::Board).has_value());
-}
-
-static void test_temperature_role_board_only_is_not_asic() {
-  std::cout << "\nTemperature role: only a board channel exists\n";
-  write_sysfs_file("role_boardonly/hwmon0/temp1_input", "39000\n");
-  write_sysfs_file("role_boardonly/hwmon0/temp1_label", "board temperature\n");
-  const auto root = g_tmpdir + "/role_boardonly";
-
-  check("asic must not borrow the board channel",
-        !hw::find_temperature_input(root, hw::TempRole_t::Asic).has_value());
-  check("board still found", hw::find_temperature_input(root, hw::TempRole_t::Board).has_value());
-}
-
-static void test_temperature_role_unlabeled_non_first_channel() {
-  std::cout << "\nTemperature role: unlabelled driver with only temp2\n";
-  write_sysfs_file("role_temp2only/hwmon0/temp2_input", "46000\n");
-  const auto root = g_tmpdir + "/role_temp2only";
-
-  check("asic does not fall back to temp2",
-        !hw::find_temperature_input(root, hw::TempRole_t::Asic).has_value());
-}
-
-static void test_temperature_role_mixed_labels_skip_fallback() {
-  std::cout << "\nTemperature role: unlabelled temp1 beside a labelled die channel\n";
-  write_sysfs_file("role_mixed/hwmon0/temp1_input", "39000\n");
-  write_sysfs_file("role_mixed/hwmon0/temp2_input", "59000\n");
-  write_sysfs_file("role_mixed/hwmon0/temp2_label", "die temperature\n");
-  const auto root = g_tmpdir + "/role_mixed";
-
-  const auto asic = hw::find_temperature_input(root, hw::TempRole_t::Asic);
-  check("asic is the labelled die channel, not temp1",
-        asic.has_value() && (asic.value() == root + "/hwmon0/temp2_input"));
-  check("board is absent", !hw::find_temperature_input(root, hw::TempRole_t::Board).has_value());
-}
-
-static void test_temperature_role_label_case_insensitive() {
-  std::cout << "\nTemperature role: labels in upper and mixed case\n";
-  write_sysfs_file("role_case/hwmon0/temp1_input", "39000\n");
-  write_sysfs_file("role_case/hwmon0/temp1_label", "BOARD Temperature\n");
-  write_sysfs_file("role_case/hwmon0/temp2_input", "59000\n");
-  write_sysfs_file("role_case/hwmon0/temp2_label", "Die Temperature\n");
-  const auto root = g_tmpdir + "/role_case";
-
-  const auto asic = hw::find_temperature_input(root, hw::TempRole_t::Asic);
-  const auto board = hw::find_temperature_input(root, hw::TempRole_t::Board);
-  check("asic matches 'Die Temperature'",
-        asic.has_value() && (asic.value() == root + "/hwmon0/temp2_input"));
-  check("board matches 'BOARD Temperature'",
-        board.has_value() && (board.value() == root + "/hwmon0/temp1_input"));
-}
-
-static void test_temperature_role_absent_root() {
-  std::cout << "\nTemperature role: directory missing\n";
-  const auto root = g_tmpdir + "/does_not_exist";
-  check("asic absent", !hw::find_temperature_input(root, hw::TempRole_t::Asic).has_value());
-  check("board absent", !hw::find_temperature_input(root, hw::TempRole_t::Board).has_value());
-}
-
 int main() {
   char tmpl[] = "/tmp/amdsmi_telemetry_testXXXXXX";
   if (mkdtemp(tmpl) == nullptr) {
@@ -1126,9 +937,6 @@ int main() {
   std::cout << "NIC telemetry facade tests\n";
   std::cout << "temp dir: " << g_tmpdir << "\n";
 
-  test_temperature_partial();
-  test_temperature_unsupported();
-  test_temperature_present_but_unreadable();
   test_health_supported();
   test_health_reporter_name_varies();
   test_health_unhealthy();
@@ -1151,7 +959,7 @@ int main() {
   test_sensor_shim_struct_of_a_nic_without_hwmon_is_empty();
   test_context_entry_points_reject_bad_input();
   test_telemetry_does_not_hold_the_context_lock_across_devlink();
-  test_telemetry_carries_hwmon_and_devlink_addresses_through_the_context();
+  test_telemetry_carries_devlink_addresses_through_the_context();
   test_devlink_addresses_the_port_function();
   test_devlink_health_addresses_the_management_function();
   test_devlink_addresses_a_portless_nic_itself();
@@ -1165,13 +973,6 @@ int main() {
   test_hwmon_scan_skips_unreadable_and_unknown_files();
   test_hwmon_scan_negative_and_wide_values();
   test_hwmon_scan_absent_root_is_empty();
-  test_temperature_role_ionic();
-  test_temperature_role_unlabelled_driver();
-  test_temperature_role_board_only_is_not_asic();
-  test_temperature_role_unlabeled_non_first_channel();
-  test_temperature_role_mixed_labels_skip_fallback();
-  test_temperature_role_label_case_insensitive();
-  test_temperature_role_absent_root();
 
   auto ec = std::error_code{};
   std::filesystem::remove_all(g_tmpdir, ec);

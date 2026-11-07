@@ -751,33 +751,6 @@ std::optional<std::string> SmiNic::vendor_name() const {
   return std::nullopt;
 }
 
-/**
- * Generic hwmon discovery: standard NIC drivers (bnxt_en, ionic) register a hwmon node under
- * the PCI device. The ASIC die temperature is the channel labelled "die", or temp1 for a driver
- * that labels nothing; the board temperature is the channel labelled "board". A device without
- * a matching channel returns nullopt and reports unsupported. Transceiver temperatures need a
- * vendor override.
- */
-std::optional<std::string> SmiNic::hwmon_temp_path(NicTempSensor sensor) const {
-  namespace hw = amd::smi::nic::hwmon;
-
-  hw::TempRole_t role = hw::TempRole_t::Asic;
-  if (sensor == NicTempSensor::Board) {
-    role = hw::TempRole_t::Board;
-  } else if (sensor != NicTempSensor::Asic) {
-    return std::nullopt;
-  }
-
-  const std::string hwmon_root = telemetry_sysfs_bus_path() + "/hwmon";
-  const auto path = hw::find_temperature_input(hwmon_root, role);
-  if (path.has_value()) {
-    NIC_LOG_DEBUG("hwmon scan " + hwmon_root + " -> SUCCESS " + path.value());
-  } else {
-    NIC_LOG_DEBUG("hwmon scan " + hwmon_root + " -> FAIL no matching temperature input");
-  }
-  return path;
-}
-
 std::vector<amd::smi::nic::hwmon::SensorRecord_t> SmiNic::hwmon_sensors() const {
   return amd::smi::nic::hwmon::scan_sensors(telemetry_sysfs_bus_path() + "/hwmon");
 }

@@ -22,15 +22,8 @@ namespace {
 namespace fs = std::filesystem;
 
 constexpr auto kHwmonDirPrefix = std::string_view{"hwmon"};
-constexpr auto kTempPrefix = std::string_view{"temp"};
-constexpr auto kInputSuffix = std::string_view{"input"};
 constexpr auto kLabelSuffix = std::string_view{"label"};
 constexpr auto kDigits = std::string_view{"0123456789"};
-constexpr auto kDieLabelKey = std::string_view{"die"};
-constexpr auto kBoardLabelKey = std::string_view{"board"};
-
-// A driver that labels none of its channels exposes the ASIC die temperature as temp1.
-constexpr auto kUnlabeledAsicChannel = uint32_t{1};
 
 struct KindSpec_t {
   std::string_view prefix;
@@ -134,24 +127,6 @@ auto read_int64(const fs::path& path) -> std::optional<int64_t> {
   return value;
 }
 
-auto is_label_containing(const std::string& label, std::string_view key) -> bool {
-  auto lowered = label;
-  std::transform(lowered.begin(), lowered.end(), lowered.begin(),
-                 [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-  return (lowered.find(key) != std::string::npos);
-}
-
-auto is_role_match(TempRole_t role, const std::optional<std::string>& label, uint32_t channel,
-                   bool is_any_channel_labeled) -> bool {
-  if (role == TempRole_t::Board) {
-    return (label.has_value() && is_label_containing(label.value(), kBoardLabelKey));
-  }
-  if (is_any_channel_labeled) {
-    return (label.has_value() && is_label_containing(label.value(), kDieLabelKey));
-  }
-  return (channel == kUnlabeledAsicChannel);
-}
-
 struct Instance_t {
   uint32_t index;
   fs::path path;
@@ -242,41 +217,6 @@ auto scan_sensors(const std::string& hwmon_root) -> std::vector<SensorRecord_t> 
                       std::tie(rhs.instance, rhs.category, rhs.channel, rhs.attribute));
             });
   return records;
-}
-
-auto find_temperature_input(const std::string& hwmon_root, TempRole_t role)
-    -> std::optional<std::string> {
-  for (const auto& instance : list_instances(hwmon_root)) {
-    auto channels = std::vector<uint32_t>{};
-    auto ec = std::error_code{};
-    for (auto it = fs::directory_iterator(instance.path, ec);
-         (!ec && (it != fs::directory_iterator{})); it.increment(ec)) {
-      const auto name = it->path().filename().string();
-      const auto parsed = parse_name(name);
-      if (parsed.has_value() && (parsed->kind->category == Category_t::Temperature) &&
-          (parsed->suffix == kInputSuffix)) {
-        channels.push_back(parsed->channel);
-      }
-    }
-    std::sort(channels.begin(), channels.end());
-
-    auto labels = std::vector<std::optional<std::string>>{};
-    for (const auto channel : channels) {
-      const auto stem = std::string{kTempPrefix} + std::to_string(channel);
-      labels.push_back(read_first_line(instance.path / (stem + "_" + std::string{kLabelSuffix})));
-    }
-    const auto is_any_channel_labeled =
-        std::any_of(labels.begin(), labels.end(),
-                    [](const std::optional<std::string>& label) { return label.has_value(); });
-
-    for (size_t i = 0; i < channels.size(); ++i) {
-      if (is_role_match(role, labels[i], channels[i], is_any_channel_labeled)) {
-        const auto stem = std::string{kTempPrefix} + std::to_string(channels[i]);
-        return (instance.path / (stem + "_" + std::string{kInputSuffix})).string();
-      }
-    }
-  }
-  return std::nullopt;
 }
 
 }  // namespace amd::smi::nic::hwmon

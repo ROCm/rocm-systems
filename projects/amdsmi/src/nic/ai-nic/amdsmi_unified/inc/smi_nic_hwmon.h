@@ -47,22 +47,11 @@ struct SensorRecord_t {
   int64_t value;
 };
 
-/** Which temperature channel find_temperature_input() looks for. */
-enum class TempRole_t : uint8_t { Asic, Board };
-
 /**
  * Every recognised attribute of every hwmon<N> directory under `hwmon_root`, ordered by
  * instance, category, channel, attribute. Empty when the directory is absent or unreadable.
  */
 auto scan_sensors(const std::string& hwmon_root) -> std::vector<SensorRecord_t>;
-
-/**
- * Path of the tempN_input that plays `role`. Asic is the channel labelled "die", or temp1 for a
- * driver that labels none of its channels; Board is the channel labelled "board". Returns
- * nullopt when no channel matches.
- */
-auto find_temperature_input(const std::string& hwmon_root, TempRole_t role)
-    -> std::optional<std::string>;
 
 }  // namespace amd::smi::nic::hwmon
 
