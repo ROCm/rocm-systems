@@ -831,14 +831,30 @@ TEST_F(AmdsmiWrapMicrotest, IndexByPciBusId_LibPassesTheBdfFieldsAndReturnsTheHi
   EXPECT_EQ(g_smi.lastBdf.domain_number, 0x2au);
 }
 
-// `(busid & 0xff) >> 4` keeps only the device number's low hex digit (0x1b becomes 0x0b); a fix flips this pin.
-TEST_F(AmdsmiWrapMicrotest, IndexByPciBusId_KnownBug_LibDropsDeviceHighDigit) {
-  InitFor(/*lib=*/true);
-  g_smi.fromBdfStatus = AMDSMI_STATUS_NOT_FOUND;
-  uint32_t idx = 0;
-  EXPECT_EQ(amd_smi_getDeviceIndexByPciBusId("002a:c3:1b.3", &idx), ncclInternalError);
-  EXPECT_EQ(g_smi.lastBdf.device_number, 0x0bu);
-  EXPECT_EQ(g_smi.lastBdf.bus_number, 0xc3u);
+TEST_F(AmdsmiWrapMicrotest, IndexByPciBusId_LibKeepsAllDeviceNumberBits) {
+  InitFor(true);
+  g_smi.sockets = {std::vector<FakeProc>(32)};
+  for (unsigned device = 0; device < 32; ++device) {
+    amdsmi_bdf_t expected{};
+    expected.function_number = 3;
+    expected.device_number = device;
+    expected.bus_number = 0xc3;
+    expected.domain_number = 0x2a;
+    g_smi.sockets[0][device].bdfId = expected.as_uint;
+    g_smi.sockets[0][device].hipId = device + 100;
+  }
+  for (unsigned device = 0; device < 32; ++device) {
+    SCOPED_TRACE(device);
+    char pciBusId[32];
+    std::snprintf(pciBusId, sizeof(pciBusId), "002a:c3:%02x.3", device);
+    uint32_t index = 0;
+    ASSERT_EQ(amd_smi_getDeviceIndexByPciBusId(pciBusId, &index), ncclSuccess);
+    EXPECT_EQ(index, device + 100);
+    EXPECT_EQ(g_smi.lastBdf.device_number, device);
+    EXPECT_EQ(g_smi.lastBdf.function_number, 3u);
+    EXPECT_EQ(g_smi.lastBdf.bus_number, 0xc3u);
+    EXPECT_EQ(g_smi.lastBdf.domain_number, 0x2au);
+  }
 }
 
 TEST_F(AmdsmiWrapMicrotest, IndexByPciBusId_LibNonGpuIsInternalError) {
