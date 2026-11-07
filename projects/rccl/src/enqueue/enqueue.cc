@@ -1421,6 +1421,34 @@ static int rcclP2pChannelStride(struct ncclComm* comm, const struct ncclTaskP2p*
                                     ncclP2pUsesMemcpy());
 }
 
+struct rcclP2pConnectorSummary {
+  bool hasLL;
+  bool hasLL128;
+  bool network;
+  bool proxied;
+  bool proxySameProcess;
+};
+
+static struct rcclP2pConnectorSummary rcclP2pScanConnectors(struct ncclComm* comm, int peer, uint8_t base,
+                                                            int nParts, int channelStride, bool isSendNotRecv,
+                                                            int connIndex) {
+  struct rcclP2pConnectorSummary out = {/*hasLL=*/true, /*hasLL128=*/true, /*network=*/false,
+                                         /*proxied=*/false, /*proxySameProcess=*/true};
+  for (int part = 0; part < nParts; part++) {
+    int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, part, channelStride, comm->nNodes,
+                                          comm->p2pChannelShiftSize);
+    struct ncclConnector* conn = isSendNotRecv ? &comm->channels[channelId].peers[peer]->send[connIndex] :
+                                                &comm->channels[channelId].peers[peer]->recv[connIndex];
+    out.hasLL &= conn->conn.buffs[NCCL_PROTO_LL] != nullptr;
+    out.hasLL128 &= conn->conn.buffs[NCCL_PROTO_LL128] != nullptr;
+    bool isNet = conn->transportComm == (isSendNotRecv ? &netTransport.send : &netTransport.recv);
+    out.network |= isNet;
+    out.proxied |= conn->proxyConn.proxyProgress != nullptr;
+    if (isNet) out.proxySameProcess &= conn->proxyConn.sameProcess;
+  }
+  return out;
+}
+
 // Match addP2pToPlan's transport check before reserving the round. A direct task can be local by
 // peer identity yet use a NET connector, in which case addP2pToPlan keeps it on the per-peer tile.
 static bool rcclP2pTaskUsesNetwork(struct ncclComm* comm, const struct ncclTaskP2p* task, int p2pRound,
@@ -1428,14 +1456,9 @@ static bool rcclP2pTaskUsesNetwork(struct ncclComm* comm, const struct ncclTaskP
   if (task == nullptr || task->root == comm->rank) return false;
   int connIndex = comm->p2pNet && task->bytes > rcclParamP2pNetThreshold() ? NCCL_CONN_IDX_P2P_NET : 1;
   uint8_t base = ncclP2pChannelBaseForRound(comm, p2pRound, rcclEffectiveP2pBatchEnable(comm));
-  for (int part = 0; part < comm->p2pnChannelsPerPeer; part++) {
-    int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, part, comm->p2pnChannelsPerPeer, comm->nNodes,
-                                          comm->p2pChannelShiftSize);
-    struct ncclConnector* conn = isSendNotRecv ? &comm->channels[channelId].peers[task->root]->send[connIndex] :
-                                                &comm->channels[channelId].peers[task->root]->recv[connIndex];
-    if (conn->transportComm == (isSendNotRecv ? &netTransport.send : &netTransport.recv)) return true;
-  }
-  return false;
+  return rcclP2pScanConnectors(comm, task->root, base, comm->p2pnChannelsPerPeer, comm->p2pnChannelsPerPeer,
+                               isSendNotRecv, connIndex)
+    .network;
 }
 
 // Put p2p op in plan assuming there is sizeof(ncclDevWorkBatch) in batch budget
@@ -1523,27 +1546,20 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   }
 
   if (!selfSend) {
-    for (int part = 0; part < nChannelsMax; part++) {
-      int channelId =
-        ncclP2pChannelForPart(comm->p2pnChannels, base, part, nChannelsMax, comm->nNodes, comm->p2pChannelShiftSize);
-      struct ncclChannelPeer** channelPeers = comm->channels[channelId].peers;
-      for (int dir = 0; dir <= 1; dir++) {
-        if (part >= taskParts[dir]) continue;
-        int peerRank = dir ? sendRank : recvRank;
-        struct ncclConnector* conn =
-          dir ? &channelPeers[peerRank]->send[connIndex[dir]] : &channelPeers[peerRank]->recv[connIndex[dir]];
-        // Record which latency staging buffers exist. Protocol selection below picks LL, LL128,
-        // or SIMPLE per dir; missing buffers drop that protocol, not the other LL-family one.
-        hasLL[dir] &= conn->conn.buffs[NCCL_PROTO_LL] != nullptr;
-        hasLL128[dir] &= conn->conn.buffs[NCCL_PROTO_LL128] != nullptr;
-        bool isNet = conn->transportComm == (dir ? &netTransport.send : &netTransport.recv);
-        network[dir] |= isNet;
-        proxied[dir] |= conn->proxyConn.proxyProgress != nullptr;
-        // Only AND sameProcess on NET connectors. Unused/unconnected P2P parts
-        // leave sameProcess=0 (calloc), which previously blocked NET UBR for
-        // Direct AllGather even when the live IB proxy was in-process.
-        if (isNet) proxySameProcess[dir] &= conn->proxyConn.sameProcess;
-      }
+    for (int dir = 0; dir <= 1; dir++) {
+      int peerRank = dir ? sendRank : recvRank;
+      struct rcclP2pConnectorSummary summary =
+        rcclP2pScanConnectors(comm, peerRank, base, taskParts[dir], nChannelsMax, /*isSendNotRecv=*/dir,
+                              connIndex[dir]);
+      // Record which latency staging buffers exist. Protocol selection below picks LL, LL128,
+      // or SIMPLE per dir; missing buffers drop that protocol, not the other LL-family one.
+      hasLL[dir] = summary.hasLL;
+      hasLL128[dir] = summary.hasLL128;
+      network[dir] = summary.network;
+      proxied[dir] = summary.proxied;
+      // Only NET connectors contribute to sameProcess; unused P2P connectors
+      // leave it zero-initialized and must not disable NET UBR.
+      proxySameProcess[dir] = summary.proxySameProcess;
     }
   }
 
@@ -4085,16 +4101,15 @@ static ncclResult_t p2pTaskAppend(struct ncclComm* comm, struct ncclInfo* info, 
   // transfers and the widened tile for larger ones, so it connects both.
   if (comm->rank != peer) {
     int normalParts = rcclP2pTaskParts(comm, collAPI);
-    bool directApi = collAPI == ncclFuncSend || collAPI == ncclFuncRecv || collAPI == ncclFuncSendRecv;
-    int wideStride = directApi ? rcclP2pChannelStride(comm, p2p) : comm->p2pnChannelsPerPeer;
-    int partCounts[2] = {normalParts, wideStride};
-    int mappingStrides[2] = {comm->p2pnChannelsPerPeer, wideStride};
-    for (int t = 0; t < (wideStride > comm->p2pnChannelsPerPeer ? 2 : 1); t++) {
+    int directStride = rcclP2pChannelStride(comm, p2p);
+    struct rcclP2pPreconnectPolicy policy =
+      rcclP2pPreconnectPolicyForTask(comm->p2pnChannelsPerPeer, normalParts, directStride);
+    for (int t = 0; t < policy.nTiles; t++) {
       uint8_t& seen = isSendNotRecv ? planner->peers[peer].sendSeen : planner->peers[peer].recvSeen;
       // A partial policy tile, such as multi-node AINIC Scatter, does not cover
       // the normal per-peer tile. Leave it unmarked so a later direct task can
       // connect the remaining channels.
-      bool completeTile = t != 0 || normalParts == comm->p2pnChannelsPerPeer;
+      bool completeTile = policy.completeMask & (1 << t);
       if (completeTile && (seen & (1 << t))) continue;
       if (completeTile) seen |= 1 << t;
       int round = 0;
@@ -4102,8 +4117,8 @@ static ncclResult_t p2pTaskAppend(struct ncclComm* comm, struct ncclInfo* info, 
         round += 1;
       }
       uint8_t base = ncclP2pChannelBaseForRound(comm, round, rcclEffectiveP2pBatchEnable(comm));
-      for (int c = 0; c < partCounts[t]; c++) {
-          int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, c, mappingStrides[t], comm->nNodes,
+      for (int c = 0; c < policy.partCounts[t]; c++) {
+          int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, c, policy.mappingStrides[t], comm->nNodes,
                                                 comm->p2pChannelShiftSize);
           if (isSendNotRecv) {
             if (comm->channels[channelId].peers[peer]->send[1].hasSeen == 0) {

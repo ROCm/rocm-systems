@@ -161,28 +161,26 @@ static ncclResult_t postTuneP2pRecordPreconnect(struct ncclComm* comm, int peer,
   // A widened direct task uses the per-peer tile for smaller transfers and the widened tile for
   // larger ones, so it connects both.
   int normalParts = rcclP2pTaskParts(comm, collAPI);
-  bool directApi = collAPI == ncclFuncSend || collAPI == ncclFuncRecv || collAPI == ncclFuncSendRecv;
-  int wideStride = directApi ? rcclP2pChannelStrideForApi(comm, collAPI, peer, rcclParamP2pDirectMaxChannels(),
-                                                           ncclP2pUsesMemcpy()) :
-                               comm->p2pnChannelsPerPeer;
-  int partCounts[2] = {normalParts, wideStride};
-  int mappingStrides[2] = {comm->p2pnChannelsPerPeer, wideStride};
-  uint8_t tileMask = wideStride > comm->p2pnChannelsPerPeer ? 3 : 1;
+  int directStride =
+    rcclP2pChannelStrideForApi(comm, collAPI, peer, rcclParamP2pDirectMaxChannels(), ncclP2pUsesMemcpy());
+  struct rcclP2pPreconnectPolicy policy =
+    rcclP2pPreconnectPolicyForTask(comm->p2pnChannelsPerPeer, normalParts, directStride);
+  uint8_t tileMask = policy.nTiles == 2 ? 3 : 1;
   uint8_t* seen = isSendNotRecv ? &planner->peers[peer].sendSeen : &planner->peers[peer].recvSeen;
-  bool partialNormalTile = normalParts < comm->p2pnChannelsPerPeer;
+  bool partialNormalTile = !(policy.completeMask & 1);
   if (!partialNormalTile && (*seen & tileMask) == tileMask) return ncclSuccess;
 
   NCCLCHECK(postTuneP2pChannelBase(comm, peer, isSendNotRecv, &base));
 
   // Mark channels that need pre-connect. planner->peers[peer].send/recvSeen is
   // private to each comm, so we need to set it anyway.
-  for (int t = 0; t < 2; t++) {
+  for (int t = 0; t < policy.nTiles; t++) {
     if (!(tileMask & (1 << t))) continue;
-    bool completeTile = t != 0 || !partialNormalTile;
+    bool completeTile = policy.completeMask & (1 << t);
     if (completeTile && (*seen & (1 << t))) continue;
     if (completeTile) *seen |= 1 << t;
-    for (int c = 0; c < partCounts[t]; c++) {
-      int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, c, mappingStrides[t], comm->nNodes,
+    for (int c = 0; c < policy.partCounts[t]; c++) {
+      int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, c, policy.mappingStrides[t], comm->nNodes,
                                             comm->p2pChannelShiftSize);
 
       // P2P uses only 1 connector. The send/recv connector is shared among split

@@ -41,6 +41,26 @@ inline int rcclP2pDirectTileChannels(int nChannels, int defaultStride, int direc
   return nChannels < directStride ? defaultStride : directStride;
 }
 
+struct rcclP2pPreconnectPolicy {
+  int nTiles;
+  int partCounts[2];
+  int mappingStrides[2];
+  uint8_t completeMask;
+};
+
+inline struct rcclP2pPreconnectPolicy rcclP2pPreconnectPolicyForTask(int channelsPerPeer, int normalParts,
+                                                                     int directStride) {
+  struct rcclP2pPreconnectPolicy policy = {};
+  policy.nTiles = directStride > channelsPerPeer ? 2 : 1;
+  policy.partCounts[0] = normalParts;
+  policy.partCounts[1] = directStride;
+  policy.mappingStrides[0] = channelsPerPeer;
+  policy.mappingStrides[1] = directStride;
+  if (normalParts == channelsPerPeer) policy.completeMask |= 1;
+  if (policy.nTiles == 2) policy.completeMask |= 2;
+  return policy;
+}
+
 ncclResult_t ncclGroupJobLaunch(struct ncclIntruQueue<struct ncclAsyncJob, &ncclAsyncJob::next>* asyncJobsMain,
                                 volatile bool* groupAbortFlag);
 
