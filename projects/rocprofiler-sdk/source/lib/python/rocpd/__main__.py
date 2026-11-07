@@ -38,6 +38,7 @@ def main(argv=None, config=None):
 
     """
     import argparse
+    from . import bindings
     from . import csv
     from . import merge
     from . import otf2
@@ -260,6 +261,16 @@ Example usage:
 
     # if the user requested converter, process the conversion
     if args.command == "convert":
+        # pftrace output requires the compiled bindings (libpyrocpd)
+        if "pftrace" in args.output_format and not bindings.supported():
+            import sys
+
+            sys.stderr.write(
+                "Error: pftrace output requires the rocpd Python bindings (libpyrocpd); "
+                "rebuild with the bindings\n"
+            )
+            sys.exit(1)
+
         # construct the rocpd import data object
         input = RocpdImportData(
             args.input,

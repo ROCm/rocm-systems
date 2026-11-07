@@ -25,7 +25,7 @@
 
 from typing import Dict, NamedTuple, Optional
 
-from . import libpyrocpd
+from . import bindings
 
 
 class FeatureVersionRange(NamedTuple):
@@ -37,8 +37,8 @@ class FeatureVersionRange(NamedTuple):
                      or None if the feature has no known upper bound.
     """
 
-    min_version: libpyrocpd.schema_version
-    max_version: Optional[libpyrocpd.schema_version] = None
+    min_version: bindings.schema_version
+    max_version: Optional[bindings.schema_version] = None
 
 
 # Single source of truth for feature availability by schema version.
@@ -53,19 +53,19 @@ class FeatureVersionRange(NamedTuple):
 # this table — no changes are needed in any backend.
 FEATURE_SCHEMA_VERSIONS: Dict[str, FeatureVersionRange] = {
     "graph_launch": FeatureVersionRange(
-        min_version=libpyrocpd.schema_version(3, 0, 2),
+        min_version=bindings.schema_version(3, 0, 2),
         max_version=None,
     ),
     "spm_counters": FeatureVersionRange(
-        min_version=libpyrocpd.schema_version(3, 0, 3),
+        min_version=bindings.schema_version(3, 0, 3),
         max_version=None,
     ),
     "hip_event": FeatureVersionRange(
-        min_version=libpyrocpd.schema_version(3, 0, 4),
+        min_version=bindings.schema_version(3, 0, 4),
         max_version=None,
     ),
     "spm_counter_location": FeatureVersionRange(
-        min_version=libpyrocpd.schema_version(3, 0, 5),
+        min_version=bindings.schema_version(3, 0, 5),
         max_version=None,
     ),
 }
