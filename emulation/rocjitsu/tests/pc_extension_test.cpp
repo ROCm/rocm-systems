@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/isa/decoder.h"
@@ -82,9 +83,9 @@ protected:
     config.sgprs_per_wf = 102;
     config.vgprs_per_wf = 16;
     config.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("pc_extension", config, &memory, &cache);
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "pc_extension", config, &memory, &cache));
     decoder = Decoder::create(GetParam().arch);
-    ASSERT_NE(cu, nullptr);
     ASSERT_NE(decoder, nullptr);
     wave = cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
     ASSERT_NE(wave, nullptr);
