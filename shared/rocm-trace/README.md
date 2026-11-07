@@ -97,9 +97,16 @@ cmake --build build && ctest --test-dir build
 The tests check that every GUID is ETW's hash of its provider name, that keywords
 are distinct single bits, and that `values.h` compiles as C99. With a TraceLogging
 header available, they also compile `trace.h` as C11 and C++ and check the level
-mapping.
+mapping. When Python has the generator's requirements, CTest also runs the
+generator's tests.
 
 | Option | Default | |
 |---|---|---|
 | `ROCM_TRACE_BUILD_TESTS` | `OFF` | build the tests |
 | `ROCM_TRACE_INSTALL` | `ON` at top level, `OFF` as a subdirectory | install the headers and the CMake package |
+
+## Probe generator
+
+`scripts/rocm_trace_gen.py` generates a TraceLogging probe, with an enter and an exit
+event, for every entry of a runtime's dispatch tables, and the function that installs
+them. The runtimes check its output in. See [scripts/README.md](scripts/README.md).
