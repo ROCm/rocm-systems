@@ -34,6 +34,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <vector>
 
 // The owned payload the hub carries for each pending dispatch, plus the
 // process-wide hub instance. Flag and eligibility live in signal_less_gate.hpp.
@@ -63,7 +64,8 @@ struct pending_payload
     uint64_t                 enqueue_ts      = 0;
 };
 
-using signal_less_hub_t = DispatchHub<pending_payload>;
+using signal_less_hub_t   = DispatchHub<pending_payload>;
+using signal_less_batch_t = std::vector<signal_less_hub_t::proven>;
 
 // Process-wide hub. Backed by common::static_object for ordered teardown.
 signal_less_hub_t&
@@ -113,6 +115,9 @@ close_drain_budget_ns();
 bool
 submit_complete_signal_less_dispatch(signal_less_hub_t::proven& p);
 
+bool
+submit_complete_signal_less_dispatch(signal_less_batch_t& batch);
+
 // Run the finalizer on the CALLING thread. Only the deferred flush uses this,
 // and only from the teardown thread -- never the reader or processor.
 void
@@ -136,6 +141,9 @@ join_signal_less_tasks();
 // callback on the caller's thread.
 void
 hand_off_proven(signal_less_hub_t::proven&& p);
+
+void
+hand_off_proven(signal_less_batch_t&& batch);
 
 // Finalize every deferred completion on the CALLING thread. Returns how many.
 size_t

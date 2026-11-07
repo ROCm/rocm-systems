@@ -26,6 +26,7 @@
 #include "lib/rocprofiler-sdk/kfd/correlation_types.hpp"
 
 #include <cstdint>
+#include <exception>
 #include <optional>
 #include <utility>
 
@@ -240,6 +241,24 @@ run_complete_signal_less_dispatch(const std::optional<uint64_t>& start_ticks,
     // has no record to produce, so there is deliberately no branch for it.
     if(_outcome == finalize_outcome::result_ready) emit(_start_ns, _end_ns);
     return _outcome;
+}
+
+template <typename BatchT, typename CompleteFn>
+void
+run_complete_signal_less_batch(BatchT& batch, CompleteFn&& complete)
+{
+    std::exception_ptr first_error = {};
+    for(auto& record : batch)
+    {
+        try
+        {
+            complete(std::move(record));
+        } catch(...)
+        {
+            if(!first_error) first_error = std::current_exception();
+        }
+    }
+    if(first_error) std::rethrow_exception(first_error);
 }
 
 }  // namespace kfd

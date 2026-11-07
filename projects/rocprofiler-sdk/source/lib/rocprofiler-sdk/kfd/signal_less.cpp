@@ -39,6 +39,7 @@
 #include <atomic>
 #include <chrono>
 #include <functional>
+#include <iterator>
 #include <mutex>
 #include <shared_mutex>
 #include <string>
@@ -178,6 +179,7 @@ signal_less_counter_name(signal_less_counter which)
         case signal_less_counter::finalizer_no_timing: return "no-timing";
         case signal_less_counter::register_refused: return "register-refused";
         case signal_less_counter::cap_evicted: return "cap-evicted";
+        case signal_less_counter::stale_reaped: return "stale-reaped";
         case signal_less_counter::kCount: break;
     }
     return "?";
@@ -210,6 +212,16 @@ void
 hand_off_proven(signal_less_hub_t::proven&& p)
 {
     if(g_child_stale.load(std::memory_order_acquire)) return;
+    auto batch = signal_less_batch_t{};
+    batch.emplace_back(std::move(p));
+    hand_off_proven(std::move(batch));
+}
+
+void
+hand_off_proven(signal_less_batch_t&& batch)
+{
+    if(batch.empty()) return;
+    if(g_child_stale.load(std::memory_order_acquire)) return;
 
     // the g_abandoned check, the submit, and the failed-submit deferred
     // append are all inside ONE shared acquisition, so the abandoner's exclusive
@@ -224,18 +236,21 @@ hand_off_proven(signal_less_hub_t::proven&& p)
         // here, and mark losses so correlation_id_finalize skips it instead of
         // force-retiring it as a dangling id. Lock order: g_submit_gate (shared) then
         // the hub's m_mu, the only place they nest and never the reverse.
-        signal_less_hub().ledger_abandoned(p.correlation_id);
+        for(const auto& record : batch)
+            signal_less_hub().ledger_abandoned(record.correlation_id);
         note_signal_less_losses();
         return;
     }
 
-    if(submit_complete_signal_less_dispatch(p)) return;
+    if(submit_complete_signal_less_dispatch(batch)) return;
 
     // Deliberately NOT finalized here: this is the processor thread, which must
     // never run a client callback.
     auto& _d = deferred();
     auto  lk = std::lock_guard<std::mutex>{_d.mu};
-    _d.held.emplace_back(std::move(p));
+    _d.held.insert(_d.held.end(),
+                   std::make_move_iterator(batch.begin()),
+                   std::make_move_iterator(batch.end()));
 }
 
 size_t
@@ -256,8 +271,7 @@ flush_deferred_completions()
     }
     // Outside the deferred() lock (still under the shared gate): the finalizer runs
     // client callbacks.
-    for(auto& _p : _taken)
-        finalize_complete_signal_less_dispatch(std::move(_p));
+    run_complete_signal_less_batch(_taken, finalize_complete_signal_less_dispatch);
     return _taken.size();
 }
 
@@ -339,7 +353,6 @@ signal_less_prime_env()
     // application is dispatching -- makes the cached value deterministic and takes
     // the environ scan off every concurrent thread.
     signal_less_feature_enabled();
-    hub_max_pending_per_gpu();
     close_drain_budget_ns();
     quiesce_budget_ns();
 }
@@ -497,6 +510,8 @@ signal_less_teardown()
                               i == 0 ? "" : " ",
                               signal_less_counter_name(static_cast<signal_less_counter>(i)),
                               _c[i]);
+    // Not a counter: the most entries the pending map ever held at once.
+    _chain += fmt::format(" pending-peak={}", signal_less_hub().pending_peak());
 
     ROCP_WARNING << fmt::format(
         "KFD dispatch-log signal-less summary: {}; teardown finalized {} deferred and stranded {}",
