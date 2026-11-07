@@ -264,18 +264,6 @@ constexpr size_t ddaLL128ArSplitSharedBytes(unsigned threads, int nRanks) {
   return ddaLL128StageBytes(threads) + (((size_t)nRanks * sizeof(void*) + 15) & ~(size_t)15);
 }
 
-// ddaLL128ArTwoShotSlotWords in 32-bit divides: bankSize / 16 / nRanks a 32-, a 16- and a 16-bit digit at a time (each
-// remainder is below nRanks < 2^16), so a runtime rank count costs no 64-bit divide.
-__device__ __forceinline__ size_t ddaLL128ArSplitSlotWords(size_t bankSize, int nRanks) {
-  const uint64_t x = bankSize / (sizeof(uint64_t) * 2);
-  const uint32_t n = (uint32_t)nRanks;
-  const uint32_t hi = (uint32_t)(x >> 32);
-  const uint32_t mid = ((hi % n) << 16) | ((uint32_t)x >> 16);
-  const uint32_t lo = ((mid % n) << 16) | ((uint32_t)x & 0xffffu);
-  const uint64_t q = ((uint64_t)(hi / n) << 32) | ((uint64_t)(mid / n) << 16) | (uint64_t)(lo / n);
-  return (size_t)(q & ~(uint64_t)(kDdaLL128WireWordsPerSlice - 1));
-}
-
 // Unit u of a block's (slice, peer) units, slice major: slice s0 + u / (n - 1) to peer selfRank + 1 + u % (n - 1).
 struct DdaLL128SplitUnit {
   uint32_t u;   // index in the block's units
@@ -313,8 +301,7 @@ __launch_bounds__(kDdaLL128Threads) __global__
   }
   const uint32_t flag32 = ddaGetLLEpochInc(epochDev, blockIdx.x, 1);
   const uint64_t flag = ((uint64_t)flag32 << 32) | (uint64_t)flag32;
-  const size_t slotWords =
-    NRANKS_CT ? ddaLL128ArTwoShotSlotWords(bankSize, nRanks) : ddaLL128ArSplitSlotWords(bankSize, nRanks);
+  const size_t slotWords = ddaLL128ArTwoShotSlotWords(bankSize, nRanks);
   const uint64_t bankWords = (uint64_t)(flag32 & 1u) * (uint64_t)(bankSize / sizeof(uint64_t));
   const uint64_t bankWordsNext = bankWords + (uint64_t)nRanks * (uint64_t)slotWords;
   DdaLL128Stage stage = ddaLL128StageInit(ddaLL128ArStageLds, warp);
