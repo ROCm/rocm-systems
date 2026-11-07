@@ -370,3 +370,7 @@ install(
     DESTINATION
     ${CONFIG_LANG_PACKAGE_INSTALL_DIR}/
     )
+
+if(COMMAND clr_require_asan_instrumentation)
+  clr_require_asan_instrumentation(amdhip64)
+endif()
