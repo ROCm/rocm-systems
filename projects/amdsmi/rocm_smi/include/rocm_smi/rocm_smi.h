@@ -664,6 +664,92 @@ typedef struct {
   uint32_t reserved[4];
 } rsmi_ampp_profile_t;
 
+//! The types/struct below mirror amdsmi_value_type_t/amdsmi_value_data_t/
+//! amdsmi_value_t, amdsmi_hawk_insertion_priority_t,
+//! amdsmi_power_stabilization_param_id_t, and
+//! amdsmi_power_stabilization_info_t (amd_smi/amdsmi.h) byte-for-byte so
+//! amd_smi.cc can translate between them with a single
+//! sizeof/offsetof-guarded reinterpret_cast.
+
+/**
+ * @brief Self-describing value type used by rsmi_value_t
+ */
+typedef enum {
+  RSMI_VALUE_TYPE_INT64 = 0,  //!< Value is held in rsmi_value_data_t.int64_value
+  RSMI_VALUE_TYPE_DOUBLE      //!< Value is held in rsmi_value_data_t.double_value
+} rsmi_value_type_t;
+
+/**
+ * @brief Data payload for rsmi_value_t
+ */
+typedef union {
+  int64_t int64_value;  //!< Valid when type == ::RSMI_VALUE_TYPE_INT64
+  double double_value;  //!< Valid when type == ::RSMI_VALUE_TYPE_DOUBLE
+} rsmi_value_data_t;
+
+/**
+ * @brief Tagged union used to pass typed parameter values generically
+ */
+typedef struct {
+  rsmi_value_type_t type;  //!< Which member of data is valid
+  rsmi_value_data_t data;  //!< Value payload
+} rsmi_value_t;
+
+/**
+ * @brief HAWK dummy-compute insertion priority
+ */
+typedef enum {
+  RSMI_HAWK_INSERTION_PRIORITY_OPPORTUNISTIC = 0,  //!< Insert only when otherwise idle
+  RSMI_HAWK_INSERTION_PRIORITY_GUARANTEED = 1,     //!< Always insert to hold the Power Floor
+  RSMI_HAWK_INSERTION_PRIORITY_DYNAMIC = 2         //!< Firmware chooses based on conditions
+} rsmi_hawk_insertion_priority_t;
+
+/**
+ * @brief Identifies a single Power Stabilization parameter for
+ * rsmi_dev_power_stabilization_param_set(). Every parameter takes an
+ * ::RSMI_VALUE_TYPE_INT64 rsmi_value_t, except
+ * ::RSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_UP_RATE and
+ * ::RSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_DOWN_RATE, which take
+ * ::RSMI_VALUE_TYPE_DOUBLE.
+ */
+typedef enum {
+  RSMI_POWER_STABILIZATION_PARAM_ENABLE = 0,          //!< Enable/disable Power Stabilization (0/1)
+  RSMI_POWER_STABILIZATION_PARAM_POWER_FLOOR,         //!< Power Floor, % of power limit (0-100;
+                                                      //!< 0 disables Power Stabilization)
+  RSMI_POWER_STABILIZATION_PARAM_DELAY,               //!< Insertion delay, milliseconds
+  RSMI_POWER_STABILIZATION_PARAM_INSERTION_PRIORITY,  //!< ::rsmi_hawk_insertion_priority_t value
+  RSMI_POWER_STABILIZATION_PARAM_RAMP_ENABLE,         //!< Enable/disable Ramp Management (0/1)
+  RSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_UP_RATE,    //!< Max ramp-up rate, %PL/sec
+                                                           //!< (100 disables ramp-up management)
+  RSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_DOWN_RATE,  //!< Max ramp-down rate, %PL/sec
+                                                           //!< (100 disables ramp-down
+                                                           //!< management)
+  RSMI_POWER_STABILIZATION_PARAM_RAMP_MIN_TIME_AT_POWER_FLOOR,  //!< Minimum time at Power Floor,
+                                                                //!< seconds
+  RSMI_POWER_STABILIZATION_PARAM_RAMP_STOP_DELAY,               //!< Ramp stop delay, seconds
+  RSMI_POWER_STABILIZATION_PARAM_LAST =
+      RSMI_POWER_STABILIZATION_PARAM_RAMP_STOP_DELAY  //!< Sentinel for range validation
+} rsmi_power_stabilization_param_id_t;
+
+/**
+ * @brief Snapshot of all Power Stabilization and Ramp Management state for
+ * a device, as returned by rsmi_dev_power_stabilization_info_get().
+ */
+typedef struct {
+  bool host_control_enabled;                          //!< Read-only: true if host has control of
+                                                      //!< Power Stabilization
+  bool enabled;                                       //!< Power Stabilization enabled
+  uint32_t power_floor;                               //!< Power Floor, % of power limit (0-100)
+  uint32_t delay;                                     //!< Insertion delay, milliseconds
+  rsmi_hawk_insertion_priority_t insertion_priority;  //!< HAWK insertion priority
+  bool ramp_enabled;                                  //!< Ramp Management enabled
+  double ramp_max_ramp_up_rate;                       //!< Max ramp-up rate, %PL/sec
+  double ramp_max_ramp_down_rate;                     //!< Max ramp-down rate, %PL/sec
+  uint32_t ramp_min_time_at_power_floor;              //!< Minimum time at Power Floor, seconds
+  uint32_t ramp_stop_delay;                           //!< Ramp stop delay, seconds
+  uint64_t reserved[10];
+} rsmi_power_stabilization_info_t;
+
 /**
  * @brief NPM balancing mode
  *
@@ -3316,6 +3402,37 @@ rsmi_status_t rsmi_dev_ampp_profile_activate(uint32_t dv_ind, const char* profil
  */
 rsmi_status_t rsmi_dev_ampp_profile_configure(uint32_t dv_ind, const char* profile_name,
                                               const rsmi_ampp_field_t* fields, uint32_t num_fields);
+
+/**
+ *  @brief Get Power Stabilization info
+ *
+ *  @param[in] dv_ind a device index
+ *  @param[out] info Pointer to receive the Power Stabilization info
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED Power Stabilization is not implemented
+ *  on this device, or the device is multi-VF
+ *  @retval ::RSMI_STATUS_INVALID_ARGS info is nullptr
+ */
+rsmi_status_t rsmi_dev_power_stabilization_info_get(uint32_t dv_ind,
+                                                    rsmi_power_stabilization_info_t* info);
+
+/**
+ *  @brief Set a single Power Stabilization parameter
+ *
+ *  @param[in] dv_ind a device index
+ *  @param[in] param_id parameter to set
+ *  @param[in] value pointer to the typed value to write
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED Power Stabilization is not implemented
+ *  on this device, the device is multi-VF, or the driver rejects the write
+ *  due to an unmet dependency
+ *  @retval ::RSMI_STATUS_INVALID_ARGS value is nullptr, or param_id is invalid
+ */
+rsmi_status_t rsmi_dev_power_stabilization_param_set(uint32_t dv_ind,
+                                                     rsmi_power_stabilization_param_id_t param_id,
+                                                     const rsmi_value_t* value);
 
 /**
  *  @brief Get the temperature metric value for the specified metric, from the

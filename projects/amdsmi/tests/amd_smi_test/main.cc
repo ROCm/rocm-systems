@@ -41,6 +41,7 @@
 #include "functional/gpu/power/power_cap_read_write.h"
 #include "functional/gpu/power/power_read.h"
 #include "functional/gpu/power/power_read_write.h"
+#include "functional/gpu/power/power_stabilization_read_write.h"
 #include "functional/gpu/ras/err_cnt_read.h"
 #include "functional/gpu/thermal/fan_read.h"
 #include "functional/gpu/thermal/fan_read_write.h"
@@ -203,6 +204,13 @@ TEST(GpuFunctionalReadWrite, TestPowerCapReadWrite) {
   if (amd::smi::is_vm_guest()) GTEST_SKIP();
   if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
   TestPowerCapReadWrite tst;
+  RunGenericTest(&tst);
+}
+TEST(GpuFunctionalReadWrite, TestPowerStabilizationReadWrite) {
+  if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
+  if (amd::smi::is_vm_guest()) GTEST_SKIP();
+  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
+  TestPowerStabilizationReadWrite tst;
   RunGenericTest(&tst);
 }
 TEST(GpuFunctionalReadWrite, TestAmppReadWrite) {

@@ -311,7 +311,8 @@ class AMDSMILogger:
         # Increase tabbing for device arguments by pulling them out of the main dictionary and assigning them to an empty string
         tabbed_dictionary = {}
         for key, value in capitalized_json.items():
-            if key not in ["GPU", "CPU", "CORE", "BRCM_NIC", "BRCM_SWITCH", "AI_NIC"]:
+            is_header_key = key in ["GPU", "CPU", "CORE", "BRCM_NIC", "BRCM_SWITCH", "AI_NIC"]
+            if not is_header_key:
                 tabbed_dictionary[key] = value
             # Filter out N/A values under clock
             if key == "CLOCK":

@@ -1717,6 +1717,16 @@ def _build_set_specs(set_value):
             "amdsmi_get_ampp_profiles": _raise_not_supported,
         }
 
+    def power_stabilization_configure(cmd, mode):
+        PowerStabilizationConfigureArgs = collections.namedtuple(
+            "power_stabilization_configure_args", ["tokens", "file_path"]
+        )
+        arg = PowerStabilizationConfigureArgs(
+            [(ai.AmdSmiPowerStabilizationParamId.ENABLE, 1)], None
+        )
+        setfn = _raise_not_supported if mode == "fail" else _noop
+        return arg, {"amdsmi_set_power_stabilization_param": setfn}
+
     return {
         "fan": fan,
         "perf_level": perf_level,
@@ -1736,6 +1746,7 @@ def _build_set_specs(set_value):
         "compute_partition_mem_alloc_mode": compute_partition_mem_alloc_mode,
         "ampp_activate": ampp_activate,
         "ampp_configure": ampp_configure,
+        "power_stabilization_configure": power_stabilization_configure,
     }
 
 

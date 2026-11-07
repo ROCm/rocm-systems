@@ -109,6 +109,105 @@ class TestStatic(TestCliBase):
         self.common.print(msg)
         return
 
+    def test_power_stabilization(self):
+        """Test static --power-stabilization (display mode only, human/json/csv)."""
+        self.common.print_func_name("")
+        msg = f"{self.tab}### amd-smi static --power-stabilization"
+        self.common.print(msg)
+
+        ps_fields = (
+            "host_control_enabled",
+            "enabled",
+            "power_floor",
+            "delay",
+            "insertion_priority",
+            "ramp_enabled",
+            "ramp_max_ramp_up_rate",
+            "ramp_max_ramp_down_rate",
+            "ramp_min_time_at_power_floor",
+            "ramp_stop_delay",
+        )
+
+        ps_baseline = self.static_data["gpu_data"][0]["power_stabilization"]
+        if ps_baseline == "N/A":
+            self.skipTest("Power Stabilization not supported on gpu 0")
+
+        cmd = "amd-smi static --gpu 0 --power-stabilization"
+        (rc, data, std_err) = self.util.RunCmdSync(cmd)
+        self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
+        self.assertIn("POWER_STABILIZATION", data)
+
+        cmd = "amd-smi static --gpu 0 --power-stabilization --json"
+        (rc, data, std_err) = self.util.RunCmdSync(cmd)
+        self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
+        payload = json.loads(data)
+        gpus = payload["gpu_data"] if isinstance(payload, dict) else payload
+        self.assertTrue(gpus, f"no GPU entries in '{cmd}'")
+        ps = gpus[0]["power_stabilization"]
+        self.assertIsInstance(ps, dict, f"unexpected power_stabilization value: {ps!r}")
+        for field in ps_fields:
+            self.assertIn(field, ps)
+
+        cmd = "amd-smi static --gpu 0 --power-stabilization --csv"
+        (rc, data, std_err) = self.util.RunCmdSync(cmd)
+        self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
+        reader = csv.DictReader(io.StringIO(data))
+        rows = [row for row in reader]
+        self.assertTrue(rows, f"no CSV rows for '{cmd}'")
+        for field in ps_fields:
+            self.assertIn(f"power_stabilization_{field}", reader.fieldnames)
+
+        # A GPU without power_stabilization support (if any exists on this
+        # node) exercises the AMDSMI_STATUS_NOT_SUPPORTED path: distinct text
+        # in human output, bare "N/A" in json/csv. Discovered dynamically
+        # rather than assumed at a fixed index: which GPU (if any) lacks
+        # support is topology-dependent (e.g. an APU, or none on a
+        # homogeneous multi-MI4XX node).
+        unsupported_gpu = next(
+            (
+                i
+                for i, gpu in enumerate(self.static_data["gpu_data"])
+                if gpu.get("power_stabilization") == "N/A"
+            ),
+            None,
+        )
+        if unsupported_gpu is None:
+            msg = (
+                f"{self.tab}Every GPU on this node supports Power Stabilization; "
+                "skipping N/A-path checks"
+            )
+            self.common.print(msg)
+        else:
+            cmd = f"amd-smi static --gpu {unsupported_gpu} --power-stabilization"
+            (rc, data, std_err) = self.util.RunCmdSync(cmd)
+            self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
+            self.assertIn(
+                "POWER_STABILIZATION: N/A (Power Stabilization is not supported on this ASIC/platform)",
+                data,
+            )
+
+            cmd = f"amd-smi static --gpu {unsupported_gpu} --power-stabilization --json"
+            (rc, data, std_err) = self.util.RunCmdSync(cmd)
+            self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
+            payload = json.loads(data)
+            gpus = payload["gpu_data"] if isinstance(payload, dict) else payload
+            self.assertEqual(gpus[0]["power_stabilization"], "N/A")
+
+            cmd = f"amd-smi static --gpu {unsupported_gpu} --power-stabilization --csv"
+            (rc, data, std_err) = self.util.RunCmdSync(cmd)
+            self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
+            reader = csv.DictReader(io.StringIO(data))
+            rows = [row for row in reader]
+            # CSV emits the full column set (not a single bare "power_stabilization"
+            # column) even when unsupported, so a mixed node doesn't produce a
+            # ragged header.
+            for field in ps_fields:
+                self.assertEqual(rows[0][f"power_stabilization_{field}"], "N/A")
+
+        msg = f"{self.tab}Static power-stabilization tests passed"
+        self.common.print(msg)
+        return
+
     def test_tray(self):
         """Test node --tray flag (display/--json/--csv)"""
         self.common.print_func_name("")
