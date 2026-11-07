@@ -20,6 +20,21 @@ HIP_TEST_CASE(Unit_hipStreamDestroy_Negative_NullStream) {
   HIP_CHECK_ERROR(hipStreamDestroy(nullptr), hipErrorInvalidResourceHandle);
 }
 
+// Behavior check of the AMD runtime, not pertinent for asan
+#if HT_AMD && !defined(ENABLE_ADDRESS_SANITIZER)
+HIP_TEST_CASE(Unit_hipStreamDestroy_Negative_StaleAfterDeviceReset) {
+  hipStream_t stream{};
+  HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipDeviceReset());
+  HIP_CHECK_ERROR(hipStreamDestroy(stream), hipErrorInvalidHandle);
+
+  hipStream_t fresh{};
+  HIP_CHECK(hipStreamCreate(&fresh));
+  HIP_CHECK(hipStreamSynchronize(fresh));
+  HIP_CHECK(hipStreamDestroy(fresh));
+}
+#endif
+
 template <size_t numDataPoints> void checkDataSet(int* deviceData) {
   HIP_CHECK(hipStreamSynchronize(nullptr));
   std::array<int, numDataPoints> hostData{};
