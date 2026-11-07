@@ -126,84 +126,6 @@ foreach(
     rj_arith_add_test(${target} fp/${mnemonic}_test.cpp)
 endforeach()
 
-# Conversion layouts share contract checks; family references remain independent.
-foreach(
-    family
-    IN
-    ITEMS
-        integer_pack
-        byte
-        float16
-        float32
-        float64
-        normalized
-        packed
-        fp8_widen
-        fp8_narrow
-)
-    set(target "rj_arith_conversion_${family}_test")
-    rj_arith_add_test(${target} conversion/${family}_test.cpp)
-endforeach()
-
-# Dot-product formats retain family-specific arithmetic and status expectations.
-foreach(family IN ITEMS integer fp8 half dot2)
-    set(target "rj_arith_dot_${family}_test")
-    rj_arith_add_test(${target} dot/${family}_test.cpp)
-endforeach()
-
-# Graphics families retain their independent interpolation and selection references.
-foreach(family IN ITEMS cube interp mullit)
-    set(target "rj_arith_graphics_${family}_test")
-    rj_arith_add_test(${target} graphics/${family}_test.cpp)
-endforeach()
-
-# Register-only operations share routing and preservation checks.
-foreach(
-    family
-    IN
-    ITEMS move_cndmask swap ds permlane relative lane
-)
-    set(target "rj_arith_register_${family}_test")
-    rj_arith_add_test(${target} register/${family}_test.cpp)
-endforeach()
-
-# Math families share unary layouts, with independent loose and exact references.
-foreach(
-    family
-    IN
-    ITEMS round root_reciprocal log_exp decompose trig rcp_iflag preop
-)
-    set(target "rj_arith_math_${family}_test")
-    rj_arith_add_test(${target} math/${family}_test.cpp)
-endforeach()
-
-# Infrastructure has no all-entry-point registry; contracts live in family helpers.
-rj_arith_add_test(rj_arith_cpu_test common/cpu_test.cpp)
-target_compile_definitions(
-    rj_arith_cpu_test
-    PRIVATE RJ_ARITH_IMPL_NAMESPACE=test_cpu
-)
-add_subdirectory(headers)
-
-# Standalone utilities.
-add_subdirectory(cpuinfo)
-
-if(UNIX AND CMAKE_NM AND RJ_ARITH_ENABLE_X86_64)
-    add_test(
-        NAME rj_arith.baseline_linkage_regression
-        COMMAND
-            ${CMAKE_COMMAND} -DNM=${CMAKE_NM} -DCXX=${CMAKE_CXX_COMPILER}
-            -DWORK=${CMAKE_CURRENT_BINARY_DIR}/linkage-fixtures -P
-            ${CMAKE_CURRENT_SOURCE_DIR}/common/baseline_linkage_test.cmake
-    )
-    add_test(
-        NAME rj_arith.baseline_linkage
-        COMMAND
-            ${CMAKE_COMMAND} -DNM=${CMAKE_NM} -DARCHIVE=$<TARGET_FILE:rj_arith>
-            -P ${CMAKE_CURRENT_SOURCE_DIR}/common/baseline_linkage.cmake
-    )
-endif()
-
 # Related comparison predicates share a binary; every entry point has its own test.
 foreach(
     family
@@ -247,6 +169,31 @@ foreach(
     rj_arith_add_test(${target} integer/${family}_test.cpp)
 endforeach()
 
+# Conversion layouts share contract checks; family references remain independent.
+foreach(
+    family
+    IN
+    ITEMS
+        integer_pack
+        byte
+        float16
+        float32
+        float64
+        normalized
+        packed
+        fp8_widen
+        fp8_narrow
+)
+    set(target "rj_arith_conversion_${family}_test")
+    rj_arith_add_test(${target} conversion/${family}_test.cpp)
+endforeach()
+
+# Dot-product formats retain family-specific arithmetic and status expectations.
+foreach(family IN ITEMS integer fp8 half dot2)
+    set(target "rj_arith_dot_${family}_test")
+    rj_arith_add_test(${target} dot/${family}_test.cpp)
+endforeach()
+
 # Scalar families keep required SCC/EXEC results distinct from FP status.
 foreach(
     family
@@ -271,4 +218,64 @@ foreach(
 )
     set(target "rj_arith_scalar_${family}_test")
     rj_arith_add_test(${target} scalar/${family}_test.cpp)
+endforeach()
+
+# Math families share unary layouts, with independent loose and exact references.
+foreach(
+    family
+    IN
+    ITEMS round root_reciprocal log_exp decompose trig rcp_iflag preop
+)
+    set(target "rj_arith_math_${family}_test")
+    rj_arith_add_test(${target} math/${family}_test.cpp)
+endforeach()
+
+# Graphics families retain their independent interpolation and selection references.
+foreach(family IN ITEMS cube interp mullit)
+    set(target "rj_arith_graphics_${family}_test")
+    rj_arith_add_test(${target} graphics/${family}_test.cpp)
+endforeach()
+
+# Infrastructure has no all-entry-point registry; contracts live in family helpers.
+rj_arith_add_test(rj_arith_cpu_test common/cpu_test.cpp)
+target_compile_definitions(
+    rj_arith_cpu_test
+    PRIVATE RJ_ARITH_IMPL_NAMESPACE=test_cpu
+)
+add_subdirectory(headers)
+
+# Standalone utilities.
+add_subdirectory(benchmark)
+add_subdirectory(cpuinfo)
+
+if(UNIX AND CMAKE_NM AND RJ_ARITH_ENABLE_X86_64)
+    add_test(
+        NAME rj_arith.baseline_linkage_regression
+        COMMAND
+            ${CMAKE_COMMAND} -DNM=${CMAKE_NM} -DCXX=${CMAKE_CXX_COMPILER}
+            -DWORK=${CMAKE_CURRENT_BINARY_DIR}/linkage-fixtures -P
+            ${CMAKE_CURRENT_SOURCE_DIR}/common/baseline_linkage_test.cmake
+    )
+    add_test(
+        NAME rj_arith.baseline_linkage
+        COMMAND
+            ${CMAKE_COMMAND} -DNM=${CMAKE_NM} -DARCHIVE=$<TARGET_FILE:rj_arith>
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/common/baseline_linkage.cmake
+    )
+endif()
+
+# Register-only operations share routing and preservation checks.
+foreach(
+    family
+    IN
+    ITEMS move_cndmask swap ds permlane relative lane
+)
+    set(target "rj_arith_register_${family}_test")
+    rj_arith_add_test(${target} register/${family}_test.cpp)
+endforeach()
+
+# VOPD wrappers retain the ordinary instructions' arithmetic and status contracts.
+foreach(family IN ITEMS alu fused dot)
+    set(target "rj_arith_dual_${family}_test")
+    rj_arith_add_test(${target} dual/${family}_test.cpp)
 endforeach()
