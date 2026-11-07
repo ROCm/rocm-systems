@@ -94,18 +94,6 @@ private:
     std::unordered_set<counter_definition, counter_definition_hash> m_counters;
 };
 
-inline enabled_metrics
-to_enabled_metrics(enabled_metrics enabled)
-{
-    return enabled;
-}
-
-inline enabled_metrics
-to_enabled_metrics(gpu_perf_counter_settings settings)
-{
-    return enabled_metrics{ std::move(settings.explicit_counters) };
-}
-
 }  // namespace rocprofsys::pmc::collectors::gpu_perf_counter
 
 template <>

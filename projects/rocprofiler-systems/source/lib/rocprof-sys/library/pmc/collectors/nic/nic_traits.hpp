@@ -30,7 +30,7 @@ using ::rocprofsys::pmc::nic_device_filter;
  * Defines types, constants, and customization points for the base collector template
  * to work with NIC devices via AMD SMI.
  *
- * @note This traits class bridges the NIC-specific requirements to the base::collector:
+ * @note This traits class provides the NIC-specific requirements of the NIC source:
  * - Name-based device filtering (vs GPU's index-based filtering)
  * - Device context storage for NIC-specific API signatures (device_name, product_name)
  * - Agent registration during device enumeration
@@ -42,12 +42,9 @@ using ::rocprofsys::pmc::nic_device_filter;
 template <typename BackendProvider, typename DeviceType>
 struct nic_traits
 {
-    using metrics_t         = pmc::collectors::nic::metrics;
     using enabled_metrics_t = pmc::collectors::nic::enabled_metrics;
-    using backend_t         = DeviceType::backend_type;
     using device_t          = DeviceType;
     using device_ptr_t      = std::shared_ptr<device_t>;
-    using container_t       = std::vector<device_ptr_t>;
 
     static constexpr const char* device_name = "NIC";
     struct device_entry
@@ -66,19 +63,6 @@ struct nic_traits
     [[nodiscard]] static enabled_metrics_t get_enabled_metrics()
     {
         return Settings::get_nic_enabled_metrics();
-    }
-
-    template <typename Cache>
-    static void init_pmc_metadata(const device_ptr_t& device)
-    {
-        Cache::initialize_pmc_metadata(device->get_index(), device->get_product_name());
-    }
-
-    [[nodiscard]] static metrics_t get_metrics(
-        const device_ptr_t& device, [[maybe_unused]] const enabled_metrics_t& enabled,
-        [[maybe_unused]] std::uint64_t timestamp)
-    {
-        return device->get_nic_metrics();
     }
 
     template <typename Settings, typename Provider>

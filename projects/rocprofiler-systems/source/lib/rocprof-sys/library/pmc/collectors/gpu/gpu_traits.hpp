@@ -56,13 +56,9 @@ is_runtime_visible(const std::string& bdf, const std::set<std::string>& visible_
 template <typename BackendProvider, typename DeviceType>
 struct gpu_traits
 {
-    // Required type aliases for base::collector
-    using metrics_t         = pmc::collectors::gpu::metrics;
     using enabled_metrics_t = pmc::collectors::gpu::enabled_metrics;
-    using backend_t         = DeviceType::backend_type;
     using device_t          = DeviceType;
     using device_ptr_t      = std::shared_ptr<device_t>;
-    using container_t       = std::vector<device_ptr_t>;
 
     // Required constants
     static constexpr const char* device_name = "GPU";
@@ -105,21 +101,6 @@ struct gpu_traits
     /**
      * @brief Initialize PMC metadata for a specific device.
      */
-    template <typename Cache>
-    static void init_pmc_metadata(const device_ptr_t& device)
-    {
-        Cache::initialize_pmc_metadata(device->get_index());
-    }
-
-    /**
-     * @brief Get metrics from a device.
-     */
-    [[nodiscard]] static metrics_t get_metrics(const device_ptr_t&      device,
-                                               const enabled_metrics_t& enabled,
-                                               std::uint64_t            timestamp)
-    {
-        return device->get_metrics(enabled, timestamp);
-    }
 
     // Device enumeration
 
@@ -208,9 +189,9 @@ struct gpu_traits
     /**
      * @brief Emit the runtime-visibility report once per process.
      *
-     * enumerate_devices() re-runs on sampler-thread reinit after fork, but the masks (env
-     * vars) and the device/agent set are fixed for the process, so every run produces the
-     * same report. A single flag emits it once and stays quiet thereafter.
+     * The masks (env vars) and the device/agent set are fixed for the process, so every
+     * run of enumerate_devices() produces the same report. A single flag emits it once
+     * and stays quiet thereafter.
      */
     static void report_visibility(
         const device_filter& filter, const std::optional<std::set<std::string>>& visible,

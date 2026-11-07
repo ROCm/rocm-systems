@@ -1,8 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 
-// Pins the trait::name values that the sampler (rocpd_processor.cpp) and
-// the registration site (cache_policy.hpp) both look up. Renaming a category
+// Pins the trait::name values that the rocpd output and the
+// cpu_source columns both look up. Renaming a category
 // trait without updating both sides will fail this test.
 
 #include "core/categories.hpp"
