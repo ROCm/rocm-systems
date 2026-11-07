@@ -8,7 +8,7 @@
 #include <hip_test_common.hh>
 
 
-#if CUDA_VERSION < CUDA_12000
+#if HT_AMD || CUDA_VERSION < CUDA_12000
 
 #define SIZE 10
 #define EPSILON 0.00001
@@ -139,4 +139,4 @@ HIP_TEST_CASE(Unit_hipNormalizedFloatValueTex_CheckModes) {
   }
 }
 
-#endif  // CUDA_VERSION < CUDA_12000
+#endif  // HT_AMD || CUDA_VERSION < CUDA_12000

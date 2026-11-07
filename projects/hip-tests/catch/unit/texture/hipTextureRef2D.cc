@@ -8,7 +8,7 @@
 #include <hip_test_common.hh>
 
 
-#if CUDA_VERSION < CUDA_12000
+#if HT_AMD || CUDA_VERSION < CUDA_12000
 
 texture<float, 2, hipReadModeElementType> tex;
 
@@ -80,4 +80,4 @@ HIP_TEST_CASE(Unit_hipTextureRef2D_Check) {
 }
 
 
-#endif  // CUDA_VERSION < CUDA_12000
+#endif  // HT_AMD || CUDA_VERSION < CUDA_12000

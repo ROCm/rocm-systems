@@ -8,7 +8,7 @@
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
 
-#if CUDA_VERSION < CUDA_12000
+#if HT_AMD || CUDA_VERSION < CUDA_12000
 
 // Texture reference for 3D texture
 texture<float, hipTextureType3D, hipReadModeElementType> texf;
@@ -111,4 +111,4 @@ HIP_TEST_CASE(Unit_hipSimpleTexture3D_Check_DataTypes) {
 }
 
 
-#endif  // CUDA_VERSION < CUDA_12000
+#endif  // HT_AMD || CUDA_VERSION < CUDA_12000
