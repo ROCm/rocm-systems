@@ -80,13 +80,14 @@ main()
     const bool  second_queue = (mode == "multi-queue");
     const bool  host_replay  = (mode == "host");
 
-    using jmpbuf_fn_t = sigjmp_buf* (*)();
-    auto* jmp_fn      = host_replay ? reinterpret_cast<jmpbuf_fn_t>(dlsym(
-                                     RTLD_DEFAULT, "rocprofiler_range_replay_host_jmpbuf"))
+    using jmpbuf_fn_t = void* (*) ();
+    auto* jmp_fn      = host_replay ? reinterpret_cast<jmpbuf_fn_t>(
+                                     dlsym(RTLD_DEFAULT, "rocprofiler_range_replay_host_jmpbuf"))
                                     : nullptr;
     if(host_replay && jmp_fn == nullptr)
     {
-        fprintf(stderr, "[app] FAIL: rocprofiler_range_replay_host_jmpbuf is not in this process\n");
+        fprintf(stderr,
+                "[app] FAIL: rocprofiler_range_replay_host_jmpbuf is not in this process\n");
         return EXIT_FAILURE;
     }
 
@@ -109,16 +110,27 @@ main()
 
     // Host replay's sigsetjmp has to be in this frame. end() longjmps back to it, and a setjmp
     // inside begin() would be invalid the moment begin() returned. The first return calls begin;
-    // every later return is a replay pass and must not open the range again.
-    if(!host_replay || sigsetjmp(*jmp_fn(), 1) == 0)
+    // every later return is a replay pass and must not open the range again. sigsetjmp may only be
+    // the whole controlling expression of the if (or compared with a constant there), so the two
+    // modes open the range in separate branches rather than through one combined condition.
+    // begin_status is written after the sigsetjmp and read after the siglongjmp, so it is volatile.
+    volatile auto begin_status = ROCPROFILER_STATUS_SUCCESS;
+    if(host_replay)
     {
-        if(const auto status = begin_fn(kRangeId); status != ROCPROFILER_STATUS_SUCCESS)
-        {
-            fprintf(stderr,
-                    "[app] FAIL: rocprofiler_range_replay_begin returned status %d\n",
-                    static_cast<int>(status));
-            return EXIT_FAILURE;
-        }
+        if(sigsetjmp(*static_cast<sigjmp_buf*>(jmp_fn()), 1) == 0)
+            begin_status = begin_fn(kRangeId);
+    }
+    else
+    {
+        begin_status = begin_fn(kRangeId);
+    }
+
+    if(begin_status != ROCPROFILER_STATUS_SUCCESS)
+    {
+        fprintf(stderr,
+                "[app] FAIL: rocprofiler_range_replay_begin returned status %d\n",
+                static_cast<int>(begin_status));
+        return EXIT_FAILURE;
     }
 
     // 0 -> 1 -> 5 -> 18
