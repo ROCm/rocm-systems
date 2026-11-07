@@ -71,6 +71,7 @@
 #include <rocprofiler-sdk/dispatch_counting_service.h>
 #include <rocprofiler-sdk/experimental/counters.h>
 #include <rocprofiler-sdk/experimental/kernel_replay.h>
+#include <rocprofiler-sdk/experimental/range_replay.h>
 #include <rocprofiler-sdk/experimental/registration.h>
 #include <rocprofiler-sdk/experimental/spm.h>
 #include <rocprofiler-sdk/experimental/thread_trace.h>
@@ -2071,7 +2072,7 @@ counter_dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_
     {
         return;
     }
-    else if(tool::get_config().kernel_replay)
+    else if(tool::get_config().kernel_replay || tool::get_config().range_replay)
     {
         // Under kernel replay every targeted dispatch selects its group deterministically by pass
         // index: inside a replay pass the SDK publishes current_pass (tl_current_replay_pass); a
@@ -2120,7 +2121,7 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
     counter_record.stream_id     = get_ext_attribution(&dispatch_data).stream_id;
     counter_record.dispatch_data = dispatch_data;
 
-    if(tool::get_config().kernel_replay)
+    if(tool::get_config().kernel_replay || tool::get_config().range_replay)
     {
         // user_data was packed in counter_dispatch_callback (synchronous, pass-ordered), so
         // replay_pass stays tied to the counter group actually collected for this pass rather than
@@ -2637,6 +2638,59 @@ kernel_replay_callback(rocprofiler_callback_tracing_record_t record,
     }
 }
 
+// Range replay has no agent at CONFIG: begin() runs before the range's first dispatch binds it.
+// The pass count is therefore the most counter groups any GPU can collect. Where every agent
+// implements the same counters, that is exactly the range's agent, and pass i collects group i.
+// Pass 0 is the application's own execution and raises no PASS callback, so the counter callback
+// takes group 0; each re-executed pass publishes its 1-based current_pass. Returning 1 (a single
+// group, or none) opts the range out of replay.
+uint64_t range_replay_pass_count_callback(uint64_t /*range_id*/,
+                                          rocprofiler_user_data_t /*user_data*/)
+{
+    size_t n = 0;
+    for(const auto& agent_profiles : get_agent_profiles().profiles)
+        n = std::max(n, agent_profiles.second.size());
+    return (n == 0) ? 1 : n;
+}
+
+// Range replay CONFIG supplies the pass count and, when requested, host re-execution. PASS
+// publishes the same per-thread pass index kernel replay does, so counter collection selects the
+// group for this pass of the range.
+void
+range_replay_callback(rocprofiler_callback_tracing_record_t record,
+                      rocprofiler_user_data_t* /*user_data*/,
+                      void* /*data*/)
+{
+    if(record.kind != ROCPROFILER_CALLBACK_TRACING_RANGE_REPLAY) return;
+
+    auto* payload = static_cast<rocprofiler_callback_tracing_range_replay_data_t*>(record.payload);
+
+    if(record.operation == ROCPROFILER_RANGE_REPLAY_CONFIG &&
+       record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+    {
+        payload->pass_count_cb = range_replay_pass_count_callback;
+        payload->host_replay   = tool::get_config().range_replay_host ? 1 : 0;
+    }
+    else if(record.operation == ROCPROFILER_RANGE_REPLAY_PASS)
+    {
+        if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+        {
+            // Re-executed passes are numbered from 1. Pass 0 is the application's own run.
+            ROCP_CI_LOG_IF(
+                ERROR, payload->total_passes != 0 && payload->current_pass >= payload->total_passes)
+                << "range replay: SDK published current_pass=" << payload->current_pass
+                << " out of range for total_passes=" << payload->total_passes;
+            tl_current_replay_pass = payload->current_pass;
+        }
+        else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
+        {
+            ROCP_CI_LOG_IF(ERROR, !tl_current_replay_pass)
+                << "range replay: PASS exit without a matching enter on this thread";
+            tl_current_replay_pass.reset();
+        }
+    }
+}
+
 struct real_callbacks_t
 {};
 
@@ -2665,6 +2719,7 @@ struct tracing_callbacks_t
     , counter_record{counter_record_callback}
     , att_dispatch_consecutive_kernel{att_dispatch_consecutive_kernel_callback}
     , kernel_replay{kernel_replay_callback}
+    , range_replay{range_replay_callback}
     {}
 
     explicit tracing_callbacks_t(dummy_callbacks_t)
@@ -2679,6 +2734,7 @@ struct tracing_callbacks_t
     , counter_dispatch{dummy_counter_dispatch_callback}
     , counter_record{dummy_counter_record_callback}
     , kernel_replay{dummy_callback_tracing_callback}
+    , range_replay{dummy_callback_tracing_callback}
     {}
 
     const rocprofiler_callback_tracing_cb_t               code_object_tracing             = nullptr;
@@ -2695,6 +2751,7 @@ struct tracing_callbacks_t
     const rocprofiler_dispatch_counting_record_cb_t       counter_record                  = nullptr;
     const rocprofiler_callback_tracing_cb_t               att_dispatch_consecutive_kernel = nullptr;
     const rocprofiler_callback_tracing_cb_t               kernel_replay                   = nullptr;
+    const rocprofiler_callback_tracing_cb_t               range_replay                    = nullptr;
 };
 
 auto
@@ -3119,6 +3176,29 @@ apply_core_capability_gates(tool::config& cfg)
     // before counter collection starts when the library cannot replay
     if(cfg.kernel_replay && !core_supports_kind(ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY))
         cfg.kernel_replay = false;
+
+    // The two replay modes publish one pass index between them. Running both would replay a
+    // dispatch inside a range that is itself being replayed, and the pass index would describe
+    // whichever callback wrote it last.
+    if(cfg.kernel_replay && cfg.range_replay)
+    {
+        ROCP_ERROR << "kernel replay and range replay cannot both be enabled; "
+                      "continuing with kernel replay";
+        cfg.range_replay = false;
+    }
+
+    if(cfg.range_replay && !cfg.counter_collection)
+    {
+        if(!replay_counters_reported.test_and_set())
+        {
+            ROCP_ERROR << "ROCPROF_RANGE_REPLAY requires counter collection "
+                          "(ROCPROF_COUNTER_COLLECTION); continuing without range replay";
+        }
+        cfg.range_replay = false;
+    }
+
+    if(cfg.range_replay && !core_supports_kind(ROCPROFILER_CALLBACK_TRACING_RANGE_REPLAY))
+        cfg.range_replay = false;
 }
 }  // namespace
 
@@ -3840,6 +3920,29 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                          "kernel replay tracing configure failed");
 
         start_context(kernel_replay_ctx, "kernel replay");
+    }
+
+    // Range replay: the application marks the range. Pass 0 is that execution and collects the
+    // first counter group; each extra pass collects the next group. --range-replay-host makes the
+    // extra passes re-run the application's code instead of the recorded packets.
+    if(tool::get_config().range_replay)
+    {
+        auto range_replay_ctx = rocprofiler_context_id_t{0};
+
+        ROCPROFILER_CALL(rocprofiler_create_context(&range_replay_ctx),
+                         "failed to create range replay context");
+
+        ROCPROFILER_CALL(skip_if_unsupported(rocprofiler_configure_callback_tracing_service(
+                                                 range_replay_ctx,
+                                                 ROCPROFILER_CALLBACK_TRACING_RANGE_REPLAY,
+                                                 nullptr,
+                                                 0,
+                                                 callbacks.range_replay,
+                                                 nullptr),
+                                             ROCPROFILER_CALLBACK_TRACING_RANGE_REPLAY),
+                         "range replay tracing configure failed");
+
+        start_context(range_replay_ctx, "range replay");
     }
 
     if(tool::get_config().benchmark_mode != tool::config::benchmark::execution_profile)

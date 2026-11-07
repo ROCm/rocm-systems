@@ -162,6 +162,12 @@ struct config : output_config
     // snapshot/restore between passes). The pass count is the number of counter groups.
     bool kernel_replay = get_env("ROCPROF_KERNEL_REPLAY", false);
 
+    // Range replay: the application marks the range, and each counter group is one pass over it.
+    // Pass 0 is the application's own execution. host asks the SDK to re-run that code instead of
+    // re-submitting the recorded packets.
+    bool range_replay      = get_env("ROCPROF_RANGE_REPLAY", false);
+    bool range_replay_host = get_env("ROCPROF_RANGE_REPLAY_HOST", false);
+
     int         mpi_size              = get_mpi_size();
     int         mpi_rank              = get_mpi_rank();
     std::string mpi_rank_env_variable = get_env(mpi_rank_env_var_name, "");
@@ -357,6 +363,8 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(pc_sampling_unit_value);
 
     CFG_SERIALIZE_MEMBER(kernel_replay);
+    CFG_SERIALIZE_MEMBER(range_replay);
+    CFG_SERIALIZE_MEMBER(range_replay_host);
 
     CFG_SERIALIZE_MEMBER(advanced_thread_trace);
     CFG_SERIALIZE_MEMBER(att_no_intercept);

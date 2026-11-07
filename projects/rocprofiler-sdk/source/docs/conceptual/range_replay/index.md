@@ -26,6 +26,11 @@ Range replay is **experimental**. The public header is
 its per-agent replay window, and its pass-count and localized-context-toggle semantics, so a tool
 that already drives kernel replay reuses most of its pass logic unchanged.
 
+rocprofv3 drives it the same way it drives kernel replay. ``--replay-mode range``
+(with ``--range-replay-beta-enabled``) collects one ``--pmc`` group per pass of a range the
+application marks, in a single run. ``--range-replay-host`` selects host re-execution. ``kernel``
+remains the per-dispatch strategy, and the two are not combined. See the rocprofv3 how-to.
+
 ## Record live, then replay
 
 The essential difference from kernel replay is *when* the SDK gets control. Kernel replay intercepts

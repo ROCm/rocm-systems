@@ -1196,6 +1196,23 @@ The preceding command collects both counter groups in a single run of ``<applica
 
 For usage, limitations, and when to prefer application replay, see :ref:`using-kernel-replay-rocprofv3`. Tool authors should see :ref:`using-kernel-replay` and :ref:`kernel-replay-sdk-api`.
 
+Range replay (beta)
++++++++++++++++++++
+
+``--replay-mode range`` is the same idea applied to a *range* instead of a single dispatch. The application marks the range with ``rocprofiler_range_replay_begin`` / ``rocprofiler_range_replay_end`` (packet replay) or ``ROCPROFILER_RANGE_REPLAY_HOST_BEGIN`` (host replay). The application's own execution of the range is pass 0 and collects the first ``--pmc`` group. Each extra pass collects the next group, from the same run. ``--range-replay-host`` asks for host replay, which re-runs the application's code between the markers instead of re-submitting the recorded packets; the application must open the range with the host-begin macro.
+
+.. code-block:: shell
+
+   rocprofv3 --pmc SQ_WAVES --pmc GRBM_COUNT --replay-mode range --range-replay-beta-enabled -- <application_path>
+
+   rocprofv3 --pmc SQ_WAVES --pmc GRBM_COUNT --replay-mode range --range-replay-beta-enabled --range-replay-host -- <application_path>
+
+``--replay-mode`` takes one strategy. ``kernel`` and ``range`` are the two in-process strategies; ``application`` (the default) re-runs the whole application once per counter group. A range replay run has the same counter-only restriction as kernel replay: it cannot be combined with ``--att``, PC sampling, or ``--spm``.
+
+The application has to mark the range. rocprofv3 does not choose where the range is. An application that never calls the range API runs once and collects the first counter group.
+
+For what a range covers and when it declines, see :ref:`range-replay-conceptual`.
+
 .. _extra-counters:
 
 Extra counters
