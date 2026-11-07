@@ -933,21 +933,42 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_PeerSplitInTheVmmFirstWindowTakes
   }
 }
 
-// A user-set LL or LL128 one-shot threshold keeps the window's messages on that tier.
-TEST_F(DdaAllReduceFabricLLMicrotest, Eligible_PeerSplitWindowLeavesAPinnedLLTier) {
+// A user-set LL or LL128 one-shot threshold keeps the window's messages wherever that tier can take them.
+TEST_F(DdaAllReduceFabricLLMicrotest, Eligible_PeerSplitWindowLeavesAPinnedTier) {
   SplitTiersOn(comm(), params_);
   const size_t count = 2 * kMiB / 4;
+  auto takes = [&] {
+    return ncclAllReduceDdaFabricLL128SplitTakes(mock_.get(), kSendbuff, kRecvbuff, count, ncclFloat32, ncclSum);
+  };
   g_rcclDdaArLL128OneShotPinnedByEnv = [] { return true; };
+  EXPECT_FALSE(takes()) << "LL128 one-shot pinned";
   EXPECT_TRUE(Eligible(&ddaLLArTwoShotEligible, count)) << "LL unpinned, LL128 one-shot pinned: as on develop";
   EXPECT_TRUE(Eligible(&ddaLL128ArOneShotEligible, count));
   g_rcclDdaArLL128OneShotPinnedByEnv = [] { return false; };
   g_rcclDdaArLLTierPinnedByEnv = [] { return true; };
+  EXPECT_FALSE(takes()) << "LL pinned, the LL two-shot can take it";
   EXPECT_TRUE(Eligible(&ddaLLArTwoShotEligible, count));
+  EXPECT_TRUE(Eligible(&ddaLL128ArOneShotEligible, count));
+  g_rcclDdaLLTwoShotThreshold = [](const ncclComm*) { return kMiB; };
+  EXPECT_TRUE(takes()) << "past both pinned LL shots the split still runs";
   EXPECT_FALSE(Eligible(&ddaLL128ArOneShotEligible, count));
-  g_rcclDdaLLThreshold = [](const ncclComm*, ncclFunc_t) { return kMiB; };
-  const DdaLaunch& l = RunOneLL128(count);
-  EXPECT_EQ(l.kernel, (LL128Split<float, 8>())) << "past the pinned LL reach the split still runs";
-  EXPECT_EQ(l.grid.x, 60u) << "within the LL128 one-shot's 69 blocks";
+  params_["RCCL_DDA_LL_ONESHOT_THRESHOLD"] = 2 * kMiB;
+  ASSERT_TRUE(Eligible(&ddaLLArOneShotEligible, count));
+  EXPECT_FALSE(takes()) << "the pinned LL one-shot can take it";
+}
+
+// RCCL_DDA_LL_TWOSHOT_THRESHOLD set at 32 ranks: the split leaves the VMM-first window, so the selector runs VMM there.
+TEST_F(DdaAllReduceFabricLLMicrotest, Eligible_PinnedLLTwoShotLeavesTheVmmFirstWindowToVmm) {
+  SplitTiersOn(comm(), params_);
+  comm().nRanks = 32;
+  const size_t count = 4 * kMiB / 4;
+  auto takes = [&] {
+    return ncclAllReduceDdaFabricLL128SplitTakes(mock_.get(), kSendbuff, kRecvbuff, count, ncclFloat32, ncclSum);
+  };
+  EXPECT_TRUE(takes()) << "unpinned: the split takes the VMM-first size";
+  g_rcclDdaArLLTierPinnedByEnv = [] { return true; };
+  EXPECT_FALSE(takes()) << "pinned: the VMM-first window keeps it";
+  EXPECT_TRUE(Eligible(&ddaLLArTwoShotEligible, count)) << "the LL entry agrees with the selector";
 }
 
 // The LL two-shot and the LL128 one-shot hand window messages to the LL128 two-shot, so the selector and the LL entry

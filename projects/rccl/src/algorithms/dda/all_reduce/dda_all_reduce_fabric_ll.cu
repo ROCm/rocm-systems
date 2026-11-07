@@ -379,11 +379,13 @@ static bool ddaLLArTwoShotShapeEligible(ncclComm* comm, size_t count, ncclDataTy
 static bool ddaLL128ArOneShotShapeEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                            ncclDataType_t datatype, ncclRedOp_t op);
 
-// Messages the split takes (the window above) unless a user-pinned LL128 one-shot can: then the tiers stay as before.
+// Messages the split takes (the window above) unless a user-pinned tier can: an LL shot or the LL128 one-shot.
 static bool ddaArLL128SplitWindow(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                   ncclDataType_t datatype, ncclRedOp_t op) {
   const size_t bytes = count * ncclTypeSize(datatype);
   return comm != nullptr && comm->nRanks > 2 && ddaArLL128StagedWireOk(comm) && bytes >= kDdaArLL128SplitMinBytes &&
+         !(rcclDdaArLLTierPinnedByEnv() && (ddaLLArOneShotEligible(comm, sendbuff, recvbuff, count, datatype, op) ||
+                                            ddaLLArTwoShotShapeEligible(comm, count, datatype, op))) &&
          !(rcclDdaArLL128OneShotPinnedByEnv() &&
            ddaLL128ArOneShotShapeEligible(comm, sendbuff, recvbuff, count, datatype, op)) &&
          bytes <= rcclDdaLL128Threshold(comm, ncclFuncAllReduce) &&
@@ -466,11 +468,11 @@ bool ddaLLArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff
   return true;
 }
 
-// Shape/resource eligibility for the two-shot variant; window messages go to the split unless the LL tier is pinned.
+// Shape/resource eligibility for the two-shot variant; messages in the peer-split window run the split.
 bool ddaLLArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                             ncclDataType_t datatype, ncclRedOp_t op) {
   return ddaLLArTwoShotShapeEligible(comm, count, datatype, op) &&
-         (rcclDdaArLLTierPinnedByEnv() || !ddaArLL128SplitWindow(comm, sendbuff, recvbuff, count, datatype, op));
+         !ddaArLL128SplitWindow(comm, sendbuff, recvbuff, count, datatype, op);
 }
 
 static bool ddaLLArTwoShotShapeEligible(ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op) {
