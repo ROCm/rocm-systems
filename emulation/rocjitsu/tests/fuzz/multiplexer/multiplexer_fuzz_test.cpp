@@ -26,8 +26,17 @@ namespace {
 uint64_t focused_work_units(FuzzTarget target, std::span<const uint8_t> payload) {
   switch (target) {
   case FuzzTarget::Decode: {
-    std::unique_ptr<Decoder> decoder = decode_fuzz::create_decoder("gfx1250");
-    return decode_fuzz::decode_window(*decoder, payload).valid;
+    const util::FailureOr<std::unique_ptr<Decoder>> decoder =
+        decode_fuzz::create_decoder("gfx1250");
+    EXPECT_TRUE(decoder.succeeded());
+    if (decoder.failed())
+      return 0;
+    const util::FailureOr<decode_fuzz::DecodeRecord> record =
+        decode_fuzz::decode_window(*decoder.value(), payload);
+    EXPECT_TRUE(record.succeeded());
+    if (record.failed())
+      return 0;
+    return record.value().valid;
   }
   case FuzzTarget::Execution: {
     const auto resources = execution_fuzz::make_async_execution_resources(1);
