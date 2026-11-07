@@ -3859,7 +3859,7 @@ def test_gfx1250_generated_high_vgpr_paths_use_logical_operands(
     for name, next_name in (
         ('ds_bpermute_b32_vds', 'ds_bpermute_fi_b32_vds'),
         ('ds_permute_b32_vds', 'ds_swizzle_b32_ds'),
-        ('ds_swizzle_b32_vds', 'image_bvh_intersect_ray_mimg'),
+        ('ds_swizzle_b32_vds', 'lds_param_load_ldsdir'),
     ):
         body = _shared_execute_body(shared, name, next_name)
         assert 'regs.read_lane(inst.addr' in body
@@ -5253,22 +5253,25 @@ def test_rdna4_generator_uses_instruction_policy_for_integer_clamp():
 
     add3 = generated_body('V_ADD3_U32')
     assert 'vop3_integer_' not in add3
-    assert 'inst_.clamp' not in add3
+    # rj-arith accepts CLAMP but ignores it for ADD3 and OR3. The adapter forwards
+    # the bit; each instruction API owns whether it saturates or ignores it.
+    assert 'rj_arith_v_add3_u32_w32' in add3
+    assert 'inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u' in add3
 
     expected_helpers = {
-        'V_MUL_I32_I24': 'vop3_integer_mul<int32_t, 24>',
-        'V_MUL_U32_U24': 'vop3_integer_mul<uint32_t, 24>',
-        'V_MAD_I32_I24': 'vop3_integer_mad<int32_t, 24>',
-        'V_MAD_U32_U24': 'vop3_integer_mad<uint32_t, 24>',
-        'V_MAD_I16': 'vop3_integer_mad<int16_t, 16>',
-        'V_MAD_U16': 'vop3_integer_mad<uint16_t, 16>',
-        'V_MAD_I32_I16': 'vop3_integer_mad<int32_t, 16>',
-        'V_MAD_U32_U16': 'vop3_integer_mad<uint32_t, 16>',
-        'V_SAD_HI_U8': 'vop3_integer_sad_hi_u8',
-        'V_SAD_U8': 'vop3_integer_sad_u8',
-        'V_SAD_U16': 'vop3_integer_sad_u16',
-        'V_SAD_U32': 'vop3_integer_sad_u32',
-        'V_MSAD_U8': 'vop3_integer_msad_u8',
+        'V_MUL_I32_I24': 'rj_arith_v_mul_i32_i24_w32',
+        'V_MUL_U32_U24': 'rj_arith_v_mul_u32_u24_w32',
+        'V_MAD_I32_I24': 'rj_arith_v_mad_i32_i24_w32',
+        'V_MAD_U32_U24': 'rj_arith_v_mad_u32_u24_w32',
+        'V_MAD_I16': 'rj_arith_v_mad_i16_w32',
+        'V_MAD_U16': 'rj_arith_v_mad_u16_w32',
+        'V_MAD_I32_I16': 'rj_arith_v_mad_i32_i16_w32',
+        'V_MAD_U32_U16': 'rj_arith_v_mad_u32_u16_w32',
+        'V_SAD_HI_U8': 'rj_arith_v_sad_hi_u8_w32',
+        'V_SAD_U8': 'rj_arith_v_sad_u8_w32',
+        'V_SAD_U16': 'rj_arith_v_sad_u16_w32',
+        'V_SAD_U32': 'rj_arith_v_sad_u32_w32',
+        'V_MSAD_U8': 'rj_arith_v_msad_u8_w32',
     }
     for name, helper in expected_helpers.items():
         body = generated_body(name)
@@ -5277,7 +5280,8 @@ def test_rdna4_generator_uses_instruction_policy_for_integer_clamp():
 
     or3 = generated_body('V_OR3_B32')
     assert 'vop3_integer_add3' not in or3
-    assert 'inst_.clamp' not in or3
+    assert 'rj_arith_v_or3_b32_w32' in or3
+    assert 'inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u' in or3
 
 
 def test_noop_format_validation_is_inherited(amdgpu_generated_root: Path):
@@ -7033,14 +7037,20 @@ def test_generated_modern_dpp_source_policy_covers_non_vop1_families(
     sdst_body = _generated_method_body(
         vop3_exec, 'VAddCoCiU32Vop3SdstEnc', 'VSubCoCiU32Vop3SdstEnc'
     )
-    assert sdst_body.count('read_wave_mask_scalar(sdst, wf)') == 1
+    assert 'read_wave_mask_scalar(sdst, wf)' not in sdst_body
     assert sdst_body.count('write_wave_mask_scalar(sdst, wf, final_result)') == 1
     assert sdst_body.count('amdgpu::dpp::make_dpp_plan(') == 1
     assert 'dpp_secondary_source_write_mask_' not in sdst_body
     assert 'commit_result' in sdst_body
-    assert 'amdgpu::dpp::dpp_source_suppressed_result(' in sdst_body
+    # Migrated gfx11/gfx12 carry outputs clear suppressed bits, as on hardware.
+    assert 'amdgpu::dpp::dpp_source_suppressed_result(' not in sdst_body
     assert 'dpp_secondary_preserve_mask' not in sdst_body
-    assert 'execute_v_add_co_ci_u32_vop3(*this, wf, commit_result)' in sdst_body
+    assert re.search(
+        r'arith::execute_carry32<true>\(\s*wf,\s*rj_arith_v_add_co_ci_u32_w32,',
+        sdst_body,
+    )
+    assert 'input_carry, commit_result);' in sdst_body
+    assert 'read_wave_mask_scalar(src2, wf)' in sdst_body
     assert 'apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf)' in sdst_body
     assert 'ScopedVgprWriteMask' in sdst_body
     assert 'dpp_write_mask_scope_.restore();' in sdst_body
@@ -7149,7 +7159,8 @@ def test_generated_vop2_carry_dpp_preserves_only_source_suppressed_vcc(
         )
         if 'amdgpu::dpp::dpp_source_suppressed_result(' in body:
             classified.add(class_name)
-    assert classified == set(class_names)
+    migrated = arch in ('rdna3', 'rdna4')
+    assert classified == (set() if migrated else set(class_names))
 
     for class_name in class_names:
         ordinary_body = _generated_function_body(
@@ -7160,6 +7171,18 @@ def test_generated_vop2_carry_dpp_preserves_only_source_suppressed_vcc(
         )
 
         assert 'auto commit_result = [&](uint64_t raw_result)' in ordinary_body
+        if migrated:
+            # rj-arith receives the filtered destination mask; old carry bits
+            # must not be restored for lanes suppressed by DPP.
+            assert 'arith::execute_carry32<true>' in body
+            assert (
+                'wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask'
+                in body
+            )
+            assert 'ScopedVgprWriteMask' in body
+            assert 'wf.set_vcc_mask(final_result);' in body
+            assert 'dpp_old_vcc_' not in body
+            continue
         assert 'uint64_t dpp_old_exec_ = wf.exec();' in body
         assert 'uint64_t dpp_old_vcc_ = wf.vcc();' in body
         assert 'dpp_source_write_mask_ = dpp_plan_.source_write_mask;' in body
