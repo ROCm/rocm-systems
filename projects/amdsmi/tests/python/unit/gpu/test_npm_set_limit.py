@@ -30,7 +30,9 @@ import ctypes
 import unittest
 from unittest import mock
 
-from common.common import amdsmi
+from common.common import Common, amdsmi
+
+_common = Common.for_unit_tests()
 
 
 def _make_node_handle() -> "amdsmi.amdsmi_wrapper.amdsmi_node_handle":
@@ -42,21 +44,32 @@ def _make_node_handle() -> "amdsmi.amdsmi_wrapper.amdsmi_node_handle":
 
 class TestAmdSmiSetNpmLimitParameterValidation(unittest.TestCase):
     def test_rejects_non_node_handle(self):
-        with self.assertRaises(amdsmi.AmdSmiParameterException):
+        with _common.expect_status(
+            '\t### amdsmi_set_npm_limit("not-a-node-handle", 100):',
+            raises=amdsmi.AmdSmiParameterException,
+        ):
             amdsmi.amdsmi_set_npm_limit("not-a-node-handle", 100)
 
     def test_rejects_non_int_limit(self):
         node_handle = _make_node_handle()
-        with self.assertRaises(amdsmi.AmdSmiParameterException):
+        with _common.expect_status(
+            '\t### amdsmi_set_npm_limit(node_handle, "100"):',
+            raises=amdsmi.AmdSmiParameterException,
+        ):
             amdsmi.amdsmi_set_npm_limit(node_handle, "100")
 
     def test_rejects_none_node_handle(self):
-        with self.assertRaises(amdsmi.AmdSmiParameterException):
+        with _common.expect_status(
+            "\t### amdsmi_set_npm_limit(None, 100):", raises=amdsmi.AmdSmiParameterException
+        ):
             amdsmi.amdsmi_set_npm_limit(None, 100)
 
     def test_rejects_float_limit(self):
         node_handle = _make_node_handle()
-        with self.assertRaises(amdsmi.AmdSmiParameterException):
+        with _common.expect_status(
+            "\t### amdsmi_set_npm_limit(node_handle, 100.5):",
+            raises=amdsmi.AmdSmiParameterException,
+        ):
             amdsmi.amdsmi_set_npm_limit(node_handle, 100.5)
 
     def test_rejects_negative_limit(self):
@@ -64,12 +77,17 @@ class TestAmdSmiSetNpmLimitParameterValidation(unittest.TestCase):
         # cannot (it would silently wrap modulo 2**64); the explicit range
         # check must reject this before ever reaching ctypes.
         node_handle = _make_node_handle()
-        with self.assertRaises(amdsmi.AmdSmiParameterException):
+        with _common.expect_status(
+            "\t### amdsmi_set_npm_limit(node_handle, -1):", raises=amdsmi.AmdSmiParameterException
+        ):
             amdsmi.amdsmi_set_npm_limit(node_handle, -1)
 
     def test_rejects_limit_over_uint64_max(self):
         node_handle = _make_node_handle()
-        with self.assertRaises(amdsmi.AmdSmiParameterException):
+        with _common.expect_status(
+            "\t### amdsmi_set_npm_limit(node_handle, 0xFFFFFFFFFFFFFFFF + 1):",
+            raises=amdsmi.AmdSmiParameterException,
+        ):
             amdsmi.amdsmi_set_npm_limit(node_handle, 0xFFFFFFFFFFFFFFFF + 1)
 
 
@@ -81,7 +99,11 @@ class TestAmdSmiSetNpmLimitStatusMapping(unittest.TestCase):
             "amdsmi_set_npm_limit",
             return_value=amdsmi.amdsmi_wrapper.AMDSMI_STATUS_SUCCESS,
         ) as mocked_call:
-            result = amdsmi.amdsmi_set_npm_limit(node_handle, 250)
+            with _common.expect_status(
+                "\t### amdsmi_set_npm_limit(node_handle, 250) [mocked C call]:",
+                amdsmi.AmdSmiStatus.SUCCESS,
+            ):
+                result = amdsmi.amdsmi_set_npm_limit(node_handle, 250)
 
         self.assertIsNone(result)
         mocked_call.assert_called_once()
@@ -90,39 +112,22 @@ class TestAmdSmiSetNpmLimitStatusMapping(unittest.TestCase):
         self.assertIsInstance(called_limit, ctypes.c_uint64)
         self.assertEqual(called_limit.value, 250)
 
-    def test_no_perm_status_raises_library_exception_with_code(self):
+    def _assert_status_raises(self, mocked_status):
         node_handle = _make_node_handle()
         with mock.patch.object(
-            amdsmi.amdsmi_wrapper,
-            "amdsmi_set_npm_limit",
-            return_value=amdsmi.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM,
+            amdsmi.amdsmi_wrapper, "amdsmi_set_npm_limit", return_value=mocked_status
         ):
-            with self.assertRaises(amdsmi.AmdSmiLibraryException) as ctx:
+            with _common.expect_status(
+                "\t### amdsmi_set_npm_limit(node_handle, 250) [mocked C call]:",
+                amdsmi.AmdSmiStatus(mocked_status),
+            ):
                 amdsmi.amdsmi_set_npm_limit(node_handle, 250)
-        self.assertEqual(
-            ctx.exception.get_error_code(), amdsmi.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM
-        )
+
+    def test_no_perm_status_raises_library_exception_with_code(self):
+        self._assert_status_raises(amdsmi.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM)
 
     def test_not_supported_status_raises_library_exception_with_code(self):
-        node_handle = _make_node_handle()
-        with mock.patch.object(
-            amdsmi.amdsmi_wrapper,
-            "amdsmi_set_npm_limit",
-            return_value=amdsmi.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED,
-        ):
-            with self.assertRaises(amdsmi.AmdSmiLibraryException) as ctx:
-                amdsmi.amdsmi_set_npm_limit(node_handle, 250)
-        self.assertEqual(
-            ctx.exception.get_error_code(), amdsmi.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
-        )
+        self._assert_status_raises(amdsmi.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED)
 
     def test_inval_status_raises_library_exception_with_code(self):
-        node_handle = _make_node_handle()
-        with mock.patch.object(
-            amdsmi.amdsmi_wrapper,
-            "amdsmi_set_npm_limit",
-            return_value=amdsmi.amdsmi_wrapper.AMDSMI_STATUS_INVAL,
-        ):
-            with self.assertRaises(amdsmi.AmdSmiLibraryException) as ctx:
-                amdsmi.amdsmi_set_npm_limit(node_handle, 250)
-        self.assertEqual(ctx.exception.get_error_code(), amdsmi.amdsmi_wrapper.AMDSMI_STATUS_INVAL)
+        self._assert_status_raises(amdsmi.amdsmi_wrapper.AMDSMI_STATUS_INVAL)

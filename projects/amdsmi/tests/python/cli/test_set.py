@@ -9,15 +9,6 @@ from common.common import amdsmi
 from cli.base import TestCliBase
 
 
-def _strip_prefix(value, prefix):
-    # Backport of str.removeprefix() (added in Python 3.9) because the test suite
-    # still supports Python 3.8. Strips a leading enum-name prefix (e.g.
-    # "AMDSMI_DEV_PERF_LEVEL_") when present, otherwise returns value unchanged.
-    if value.startswith(prefix):
-        return value[len(prefix) :]
-    return value
-
-
 class TestSet(TestCliBase):
     def test_command(self):
         self.common.print_func_name("")
@@ -171,13 +162,6 @@ class TestSet(TestCliBase):
                 )
             )
 
-            # set --perf-level defaults
-            # Last of the clock writes: the reset above forces AUTO, and --clk-limit and
-            # --perf-determinism each leave the device on a level of their own.
-            perf_level = self.metric_data["gpu_data"][index]["perf_level"]
-            if perf_level not in ("N/A", "AMDSMI_DEV_PERF_LEVEL_UNKNOWN"):
-                perf_level = _strip_prefix(perf_level, "AMDSMI_DEV_PERF_LEVEL_")
-                cmds.append((f"amd-smi set --perf-level {perf_level} --gpu {index}", self.PASS))
             # set --process-isolation defaults
             process_isolation = self.static_data["gpu_data"][index]["process_isolation"]
             # Put back whatever value the sweep left; "N/A" means unreadable, so
@@ -191,6 +175,9 @@ class TestSet(TestCliBase):
                     )
                 )
 
+        # Last of the clock writes: the reset above forces AUTO, and --clk-limit and
+        # --perf-determinism each leave the device on a level of their own.
+        cmds.extend(self.PerfLevelRestoreCmds())
         self.common.print("Restore Starting Values")
         self.RunCmds(cmds)
 

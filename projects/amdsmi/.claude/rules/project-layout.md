@@ -105,6 +105,8 @@ Python runner details: [tests/python/README.md](../../tests/python/README.md).
 | ABI checks | `tests/abi_check/` | `abi_check.py` (CI workflow) | No |
 | DME integration | `tests/dme_integration/` | `PYTHONPATH=tests python3 -m dme_integration` | No |
 | API summary | `tests/api_summary.py` | `python3` | No |
+| API coverage (KPI) | `tests/run_api_coverage.sh` | `sudo bash` | Yes |
+| CLI surface count | `tests/cli_surface.py` | `python3` | No |
 
 The three Python runners require root and resolve the `amdsmi` package via
 `AMDSMI_PATH` → `ROCM_HOME` → `ROCM_PATH` → `/opt/rocm`. Each discovers only its

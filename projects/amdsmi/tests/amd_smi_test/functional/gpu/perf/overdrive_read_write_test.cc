@@ -22,7 +22,9 @@ TestOverdriveReadWrite::~TestOverdriveReadWrite(void) {}
 
 void TestOverdriveReadWrite::SetUp(void) {
   TestBase::SetUp();
-
+  // Capture the per-device performance level so Close() can restore it and
+  // avoid leaking a changed perf level to later tests.
+  SavePerfLevels();
   return;
 }
 
@@ -34,6 +36,9 @@ void TestOverdriveReadWrite::DisplayResults(void) const {
 }
 
 void TestOverdriveReadWrite::Close() {
+  // Restore the performance level captured in SetUp() before amdsmi is shut
+  // down. Runs even if Run() aborted on a failed assertion.
+  RestorePerfLevels();
   // This will close handles opened within rsmitst utility calls and call
   // amdsmi_shut_down(), so it should be done after other hsa cleanup
   TestBase::Close();

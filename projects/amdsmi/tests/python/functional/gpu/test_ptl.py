@@ -82,7 +82,7 @@ class TestGpuPtl(unittest.TestCase):
 
             # Restore the original state; a genuine failure (not merely
             # not-supported) fails the test instead of being swallowed.
-            restore_msg = f"\t### restore amdsmi_set_gpu_ptl_state(gpu={i}):"
+            restore_msg = f"\t### amdsmi_set_gpu_ptl_state(gpu={i}, restore):"
             try:
                 amdsmi.amdsmi_set_gpu_ptl_state(gpu, int(original))
                 self.common.check_ret("", "", self.common.PASS)

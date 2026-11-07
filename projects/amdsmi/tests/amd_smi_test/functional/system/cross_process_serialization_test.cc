@@ -121,7 +121,7 @@ void TestCrossProcessSerialization::SetUp(void) {
     close(waiter_ready_pipe_[1]);
     close(run_pipe_[0]);
 
-    DISPLAY_AMDSMI_API("[holder] amdsmi_init", "", VERB(STANDARD));
+    DISPLAY_AMDSMI_API("amdsmi_init", "[holder]", VERB(STANDARD));
     ret = amdsmi_init(AMDSMI_INIT_AMD_GPUS);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     if (ret != AMDSMI_STATUS_SUCCESS) {
@@ -163,7 +163,7 @@ void TestCrossProcessSerialization::SetUp(void) {
     }
     close(init_pipe_[0]);
 
-    DISPLAY_AMDSMI_API("[waiter] amdsmi_init", "", VERB(STANDARD));
+    DISPLAY_AMDSMI_API("amdsmi_init", "[waiter]", VERB(STANDARD));
     ret = amdsmi_init(AMDSMI_INIT_AMD_GPUS);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
     if (ret != AMDSMI_STATUS_SUCCESS) {
@@ -325,7 +325,7 @@ void TestCrossProcessSerialization::Run(void) {
     uint16_t gpu_id = 0;
     auto t0 = std::chrono::steady_clock::now();
 
-    DISPLAY_AMDSMI_API("[waiter] amdsmi_get_gpu_id(processor_handles_[0], &gpu_id)", "",
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_id(processor_handles_[0], &gpu_id)", "[waiter]",
                        VERB(STANDARD));
     // This call must wait for the holder's rsmi_test_sleep to finish.
     amdsmi_status_t ret = amdsmi_get_gpu_id(processor_handles_[0], &gpu_id);

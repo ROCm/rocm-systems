@@ -25,7 +25,9 @@ TestPciReadWrite::~TestPciReadWrite(void) {}
 
 void TestPciReadWrite::SetUp(void) {
   TestBase::SetUp();
-
+  // Capture the per-device performance level so Close() can restore it and
+  // avoid leaking a changed perf level to later tests.
+  SavePerfLevels();
   return;
 }
 
@@ -37,6 +39,9 @@ void TestPciReadWrite::DisplayResults(void) const {
 }
 
 void TestPciReadWrite::Close() {
+  // Restore the performance level captured in SetUp() before amdsmi is shut
+  // down. Runs even if Run() aborted on a failed assertion.
+  RestorePerfLevels();
   // This will close handles opened within rsmitst utility calls and call
   // amdsmi_shut_down(), so it should be done after other hsa cleanup
   TestBase::Close();
@@ -178,6 +183,8 @@ void TestPciReadWrite::Run(void) {
         ret == amdsmi_status_t::AMDSMI_STATUS_NO_PERM) {
       // NOT_SUPPORTED: pp_dpm_pcie absent. NO_PERM: sysfs read-only (EROFS).
       auto status_string("");
+      DISPLAY_AMDSMI_API("amdsmi_status_code_to_string", "gpu=" + std::to_string(dv_ind),
+                         VERB(STANDARD));
       amdsmi_status_code_to_string(ret, &status_string);
       std::cout << "\t\t** amdsmi_set_gpu_pci_bandwidth(): " << status_string << "\n";
       continue;

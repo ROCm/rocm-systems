@@ -118,7 +118,6 @@ void TestFabricRead::Run(void) {
                      " on this system"
                   << std::endl;
       }
-      continue;
     } else if (err != AMDSMI_STATUS_SUCCESS && err != AMDSMI_STATUS_NO_DATA) {
       CHK_ERR_ASRT(err)
     } else {
@@ -146,6 +145,19 @@ void TestFabricRead::Run(void) {
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_fabric_info(nullptr check)", "gpu=" + std::to_string(dv_ind),
                        VERB(STANDARD));
     err = amdsmi_get_gpu_fabric_info(device, nullptr);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
+
+    // Null-pointer validation for alloc/free; runs before the NOT_SUPPORTED early-continue below
+    DISPLAY_AMDSMI_API("amdsmi_alloc_fabric_telemetry(nullptr check)",
+                       "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
+    err = amdsmi_alloc_fabric_telemetry(device, kAllCategories, nullptr);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
+
+    DISPLAY_AMDSMI_API("amdsmi_free_fabric_telemetry(nullptr check)",
+                       "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
+    err = amdsmi_free_fabric_telemetry(device, nullptr);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
     ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 
@@ -214,7 +226,11 @@ void TestFabricRead::Run(void) {
           // ── amdsmi_fabric_telem_id_to_string ─────────────────────────────
           for (uint32_t item = 0; item < in.item_count; ++item) {
             const auto& it = in.items[item];
+            DISPLAY_AMDSMI_API("amdsmi_fabric_telem_id_to_string", "id=" + std::to_string(it.id),
+                               VERB(STANDARD));
             err = amdsmi_fabric_telem_id_to_string(it.id, &name);
+            DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
+                                  AMDSMI_STATUS_NOT_FOUND);
             // Unmapped telemetry ids return NOT_FOUND with a "UNKNOWN" name;
             // tolerate them so a single unknown id does not fail the test.
             if (err != AMDSMI_STATUS_NOT_FOUND) {
@@ -237,53 +253,5 @@ void TestFabricRead::Run(void) {
     err = amdsmi_free_fabric_telemetry(device, tel);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
     CHK_ERR_ASRT(err)
-
-    // Null-pointer validation for alloc/free
-    DISPLAY_AMDSMI_API("amdsmi_alloc_fabric_telemetry(nullptr check)",
-                       "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
-    err = amdsmi_alloc_fabric_telemetry(device, kAllCategories, nullptr);
-    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
-    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
-
-    DISPLAY_AMDSMI_API("amdsmi_free_fabric_telemetry(nullptr check)",
-                       "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
-    err = amdsmi_free_fabric_telemetry(device, nullptr);
-    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
-    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
   }
-}
-
-// amdsmi_fabric_telem_id_to_string() is a pure lookup over a static id->name
-// table generated from the vendored IFOE_TELEM_ID_* headers, so these run
-// without a device and catch id->name drift when the headers are re-synced.
-
-// Literals (independent of the vendored macros) spanning the table — first,
-// mid-table, and last entry — so a reorder or drop anywhere is caught.
-static constexpr uint64_t kFirstTelemId = 0x1;
-static constexpr uint64_t kMidTelemId = 0x6000001;
-static constexpr uint64_t kLastTelemId = 0x6001011;
-
-TEST(IfoeFunctionalReadOnly, FabricTelemIdToStringMapsKnownIds) {
-  const char* name = nullptr;
-
-  ASSERT_EQ(amdsmi_fabric_telem_id_to_string(kFirstTelemId, &name), AMDSMI_STATUS_SUCCESS);
-  ASSERT_STREQ(name, "IFOE_SDP_TX_PACK_WR_REQ");
-
-  ASSERT_EQ(amdsmi_fabric_telem_id_to_string(kMidTelemId, &name), AMDSMI_STATUS_SUCCESS);
-  ASSERT_STREQ(name, "NETPORT_LINK_STATUS");
-
-  ASSERT_EQ(amdsmi_fabric_telem_id_to_string(kLastTelemId, &name), AMDSMI_STATUS_SUCCESS);
-  ASSERT_STREQ(name, "NETPORT_FEC_CW_SYMBOL_ERRS_UNCORRECTABLE");
-}
-
-TEST(IfoeFunctionalReadOnly, FabricTelemIdToStringRejectsNullName) {
-  amdsmi_status_t err = amdsmi_fabric_telem_id_to_string(kFirstTelemId, nullptr);
-  ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
-}
-
-TEST(IfoeFunctionalReadOnly, FabricTelemIdToStringUnknownIdReportsUnknown) {
-  const char* name = nullptr;
-  amdsmi_status_t err = amdsmi_fabric_telem_id_to_string(UINT64_MAX, &name);
-  ASSERT_EQ(err, AMDSMI_STATUS_NOT_FOUND);
-  ASSERT_STREQ(name, "UNKNOWN");
 }

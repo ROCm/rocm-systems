@@ -38,16 +38,15 @@ class TestGpuThermal(unittest.TestCase):
 
             found_error = False
 
-            # Set invalid fan speed
+            # Set invalid fan speed: -1 reaches the library as UINT64_MAX, above any valid range
             fan_speed = -1
             msg = f"\t### amdsmi_set_gpu_fan_speed(gpu={i}, index=0, fan_speed={fan_speed}):"
-            try:
-                ret = amdsmi.amdsmi_set_gpu_fan_speed(gpu, 0, fan_speed)
-                self.common.print(msg, ret)
-                self.common.check_ret("", "", self.common.PASS)
-            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                if self.common.check_ret(msg, e, self.common.ANY_FAIL):
-                    self.raise_exception = e
+            refused = [
+                amdsmi.AmdSmiStatus.INPUT_OUT_OF_BOUNDS,  # speed outside the fan range
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,  # eg. guest devices, or no fan sensor
+            ]
+            with self.common.expect_status(msg, refused):
+                amdsmi.amdsmi_set_gpu_fan_speed(gpu, 0, fan_speed)
 
             # Get current fan speed
             msg = f"\t### amdsmi_get_gpu_fan_speed(gpu={i}, index=0):"

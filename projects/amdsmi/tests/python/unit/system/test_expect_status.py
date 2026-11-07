@@ -13,20 +13,17 @@ from __future__ import annotations
 
 import unittest
 
-from common.common import ERROR_MAP, PASS, VERBOSITY_QUIET, Common, amdsmi
+from common.common import PASS, VERBOSITY_QUIET, Common, amdsmi
 
 SUCCESS = amdsmi.AmdSmiStatus.SUCCESS
 INVAL = amdsmi.AmdSmiStatus.INVAL
 NOT_SUPPORTED = amdsmi.AmdSmiStatus.NOT_SUPPORTED
+ParameterError = amdsmi.AmdSmiParameterException
 
 
 def _harness():
     """A Common carrying only what the status helpers read, so no device is touched."""
-    common = object.__new__(Common)
-    common.error_map = ERROR_MAP
-    common.verbose = VERBOSITY_QUIET
-    common._status_failures = None
-    return common
+    return Common.for_unit_tests(VERBOSITY_QUIET)
 
 
 def _raise(status):
@@ -139,4 +136,104 @@ class TestExpectStatusInSweep(unittest.TestCase):
                 # Stands in for a bug in a test body, which wins over what was collected.
                 raise KeyError("not an amdsmi failure")
         self.assertIsNone(self.common._status_failures)
+        return
+
+
+class TestExpectStatusNeedsAJudgement(unittest.TestCase):
+    """A call must say what it is judged against: a status, or an exception type."""
+
+    def setUp(self):
+        self.common = _harness()
+
+    def test_neither_accept_nor_raises_is_rejected_before_the_call(self):
+        with self.assertRaises(ValueError):
+            with self.common.expect_status("msg"):
+                self.fail("the block must not run")
+        return
+
+    def test_success_has_to_be_asked_for(self):
+        with self.common.expect_status("msg", SUCCESS):
+            pass
+        with self.assertRaises(AssertionError) as ctx:
+            with self.common.expect_status("msg", SUCCESS):
+                _raise(INVAL)
+        self.assertIn(PASS, str(ctx.exception))
+        return
+
+
+class TestExpectStatusRaises(unittest.TestCase):
+    """A call rejected before it has a status is judged by the exception type it raises."""
+
+    def setUp(self):
+        self.common = _harness()
+
+    def test_expected_exception_is_not_a_failure(self):
+        with self.common.expect_status("msg", raises=ParameterError):
+            raise ParameterError("bad", "arg")
+        return
+
+    def test_any_type_in_a_tuple_is_accepted(self):
+        for exc in (ParameterError("bad", "arg"), amdsmi.AmdSmiLibraryException(INVAL.value)):
+            with self.subTest(exc=type(exc).__name__):
+                with self.common.expect_status(
+                    "msg", raises=(ParameterError, amdsmi.AmdSmiLibraryException)
+                ):
+                    raise exc
+        return
+
+    def test_call_that_returns_fails(self):
+        with self.assertRaises(AssertionError) as ctx:
+            with self.common.expect_status("msg", raises=ParameterError):
+                pass
+        message = str(ctx.exception)
+        self.assertIn("returned without raising", message)
+        self.assertIn("AmdSmiParameterException", message)
+        return
+
+    def test_wrong_exception_type_fails_and_is_chained(self):
+        with self.assertRaises(AssertionError) as ctx:
+            with self.common.expect_status("msg", raises=ParameterError):
+                _raise(INVAL)
+        self.assertIn("raised AmdSmiLibraryException", str(ctx.exception))
+        self.assertIsInstance(ctx.exception.__cause__, amdsmi.AmdSmiLibraryException)
+        return
+
+    def test_a_library_status_is_not_enough_when_a_type_is_declared(self):
+        # raises= judges the type alone, so a status that accept= would take is still a failure.
+        with self.assertRaises(AssertionError):
+            with self.common.expect_status("msg", raises=ParameterError):
+                _raise(NOT_SUPPORTED)
+        return
+
+    def test_accept_and_raises_together_are_rejected(self):
+        with self.assertRaises(ValueError):
+            with self.common.expect_status("msg", SUCCESS, raises=ParameterError):
+                self.fail("the block must not run")
+        return
+
+    def test_sweep_collects_failures_by_type(self):
+        with self.assertRaises(AssertionError) as ctx:
+            with self.common.status_sweep():
+                for name in ("first", "second"):
+                    with self.common.expect_status(name, raises=ParameterError):
+                        pass
+        message = str(ctx.exception)
+        self.assertIn("2 calls", message)
+        self.assertIn("first -> returned without raising", message)
+        self.assertIn("second -> returned without raising", message)
+        return
+
+
+class TestForUnitTests(unittest.TestCase):
+    def test_carries_only_what_the_status_helpers_read(self):
+        common = Common.for_unit_tests(VERBOSITY_QUIET)
+        self.assertEqual(common.verbose, VERBOSITY_QUIET)
+        self.assertIsNone(common._status_failures)
+        self.assertFalse(hasattr(common, "processors"))
+        return
+
+    def test_instances_do_not_share_sweep_state(self):
+        first, second = Common.for_unit_tests(), Common.for_unit_tests()
+        with first.status_sweep():
+            self.assertIsNone(second._status_failures)
         return
