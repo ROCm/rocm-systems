@@ -117,6 +117,28 @@ extern "C" ncclResult_t ncclIbGidGetProbingGidIndex(void* comm, int devIndex, in
   return ncclInvalidArgument;
 }
 
+extern "C" ncclResult_t ncclIbGidUcSupported(int ibDev, int* supported) {
+  if (supported == NULL || ibDev < 0 || ibDev >= ncclNIbDevs) return ncclInvalidArgument;
+  struct ibv_context* context = ncclIbDevs[ibDev].context;
+  struct ibv_pd* pd = NULL;
+  struct ibv_cq* cq = NULL;
+  struct ncclIbQp qp{};
+  *supported = 0;
+  if (wrap_ibv_alloc_pd(&pd, context) == ncclSuccess && wrap_ibv_create_cq(&cq, context, 1, NULL, NULL, 0) == ncclSuccess) {
+    struct ncclIbQpCreateAttr attr{};
+    attr.type = IBV_QPT_UC;
+    attr.cq = cq;
+    attr.pd = pd;
+    attr.maxRecvWorkRequest = 1;
+    attr.maxSendWorkRequest = 1;
+    if (ncclIbQpCreate(&qp, &attr) == ncclSuccess && qp.qp != NULL) *supported = 1;
+  }
+  if (qp.qp) (void)wrap_ibv_destroy_qp(qp.qp);
+  if (cq) (void)wrap_ibv_destroy_cq(cq);
+  if (pd) (void)wrap_ibv_dealloc_pd(pd);
+  return ncclSuccess;
+}
+
 extern "C" ncclResult_t ncclIbGidDriveQpToError(void* comm, int qpIdx) {
   struct ncclIbNetCommBase* base = ncclIbGidCommBase(comm);
   if (base == NULL || qpIdx < 0 || qpIdx >= base->nqps || base->qps[qpIdx].qp == NULL) return ncclInvalidArgument;
