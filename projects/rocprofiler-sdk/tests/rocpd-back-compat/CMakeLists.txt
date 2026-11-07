@@ -71,7 +71,7 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 # ships, append it here and add the corresponding validate assertions in validate.py. Add
 # appropriate changes to make_db.py to insert dummy data into a fake DB to simulate the
 # new schema changes.
-set(ROCPD_COMPAT_TESTED_SCHEMAS "3.0.0" "3.0.1" "3.0.2" "3.0.3" "3.0.4" "3.0.5")
+set(ROCPD_COMPAT_TESTED_SCHEMAS "3.0.0" "3.0.1" "3.0.2" "3.0.3" "3.0.4" "3.0.5" "3.0.6")
 
 # Derive old schemas (all except the latest) and the latest schema.
 list(LENGTH ROCPD_COMPAT_TESTED_SCHEMAS _num_schemas)
@@ -102,12 +102,24 @@ endif()
 # ---------------------------------------------------------------------------
 
 set(rocpd-back-compat-schema-path "${CMAKE_BINARY_DIR}/share/rocprofiler-sdk-rocpd")
+# Prefer the configure-time Python's site-packages, but also put every
+# python*/site-packages under the build lib dir on PYTHONPATH. A mismatch between
+# Python3_EXECUTABLE and the directory that received the rocpd package (seen when the
+# build tree has python3.10 packages but tests were configured against python3.12)
+# otherwise makes make_db import a system rocpd and write the wrong schema views into the
+# fixture databases.
 set(rocpd-back-compat-site-packages
     "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
     )
+file(GLOB _rocpd_back_compat_all_site_packages
+     "${rocprofiler-sdk_LIB_DIR}/python*/site-packages")
+list(INSERT _rocpd_back_compat_all_site_packages 0 "${rocpd-back-compat-site-packages}")
+list(REMOVE_DUPLICATES _rocpd_back_compat_all_site_packages)
+string(REPLACE ";" ":" rocpd-back-compat-site-packages-path
+               "${_rocpd_back_compat_all_site_packages}")
 set(rocpd-back-compat-env
     "ROCPD_SCHEMA_PATH=${rocpd-back-compat-schema-path}"
-    "PYTHONPATH=${ROCPROFILER_SDK_TESTS_BINARY_DIR}/pytest-packages:${rocpd-back-compat-site-packages}"
+    "PYTHONPATH=${ROCPROFILER_SDK_TESTS_BINARY_DIR}/pytest-packages:${rocpd-back-compat-site-packages-path}"
     )
 
 # Root directory under which per-version output subdirectories are created:
@@ -211,7 +223,7 @@ rocprofiler_add_integration_validate_test(
     LABELS "integration-tests;rocpd"
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     ENVIRONMENT "ROCPD_SCHEMA_PATH=${rocpd-back-compat-schema-path}"
-    PYTHON_PATH "${rocpd-back-compat-site-packages}"
+    PYTHON_PATH "${rocpd-back-compat-site-packages-path}"
     FIXTURES_REQUIRED ${_gen_fixtures}
     DEPENDS rocprofiler-sdk::rocprofv3
     ARGS --output-root ${ROCPD_BACK_COMPAT_OUTPUT_DIR} --tested-schemas
