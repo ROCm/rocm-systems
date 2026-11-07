@@ -75,10 +75,29 @@ config_store::set(std::string_view param_id, std::string_view value, config_sour
     const auto  parsed        = parse_value(param, value);
     if(!parsed)
     {
-        throw std::runtime_error(
-            fmt::format("invalid value '{}' for parameter '{}'", value, param_id));
+        throw std::runtime_error(invalid_value_message(value, param_id));
     }
+    store_parsed(param_id, *parsed, source);
+}
 
+void
+config_store::set_value(std::string_view param_id, config_value_t value,
+                        config_source source)
+{
+    const auto  config_schema = locked_schema();
+    const auto& param         = require_param(*config_schema, param_id);
+    if(!accepts_value(param, value))
+    {
+        throw std::runtime_error(invalid_value_message(format_value(value), param_id));
+    }
+    store_parsed(param_id, std::move(value), source);
+}
+
+void
+config_store::store_parsed(std::string_view param_id, config_value_t value,
+                           config_source source)
+{
+    const auto                     text = format_value(value);
     std::vector<change_callback_t> callbacks;
     {
         const std::unique_lock<std::shared_mutex> lock{ m_mutex };
@@ -86,8 +105,8 @@ config_store::set(std::string_view param_id, std::string_view value, config_sour
 
         const auto key           = std::string{ param_id };
         auto [entry, inserted]   = m_values.try_emplace(key);
-        const bool value_changed = inserted || entry->second.value != *parsed;
-        entry->second.value      = *parsed;
+        const bool value_changed = inserted || entry->second.value != value;
+        entry->second.value      = std::move(value);
         entry->second.source     = source;
         const auto registered    = m_callbacks.find(key);
         if(value_changed && registered != m_callbacks.end())
@@ -96,7 +115,7 @@ config_store::set(std::string_view param_id, std::string_view value, config_sour
         }
     }
 
-    notify(param_id, format_value(*parsed), callbacks);
+    notify(param_id, text, callbacks);
 }
 
 std::optional<config_store::stored_value>

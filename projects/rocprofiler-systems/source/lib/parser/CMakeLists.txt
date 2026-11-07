@@ -23,6 +23,9 @@ target_sources(
         ${CMAKE_CURRENT_SOURCE_DIR}/default_parser.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/env_parser.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/cli_parser.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/file_parser.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/preset_parser.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/precedence.cpp
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/schema.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/schema_validator.hpp
@@ -32,6 +35,9 @@ target_sources(
         ${CMAKE_CURRENT_SOURCE_DIR}/default_parser.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/env_parser.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/cli_parser.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/file_parser.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/preset_parser.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/precedence.hpp
 )
 
 get_filename_component(PARSER_SOURCE_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}" DIRECTORY)
@@ -43,6 +49,7 @@ target_include_directories(
 
 target_link_libraries(
     rocprofiler-systems-parser
+    PUBLIC $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-json>
     PRIVATE
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-common-library>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-compile-options>
