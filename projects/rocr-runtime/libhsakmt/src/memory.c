@@ -324,6 +324,46 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtSetPersistingCacheSizeCtx(HsaKFDContext *ctx,
 	return HSAKMT_STATUS_SUCCESS;
 }
 
+// Read back the persisting GL2 (L2) cache size currently requested for a GPU
+// node. Like the setter, this is served by the amdgpu render-node ioctl
+// DRM_IOCTL_AMDGPU_VM (AMDGPU_VM_OP_GL2_PERSISTING_L2_CACHE_GET) and must be
+// issued on the per-node DRM render fd. Lets user mode (e.g. CRIU checkpoint)
+// save a request that was configured through the render node so it can be
+// restored later through the same interface.
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetPersistingCacheSizeCtx(HsaKFDContext *ctx,
+												HSAuint32 Node,
+												HSAuint64 *CacheSize) {
+	union drm_amdgpu_vm args = {0};
+	int drm_fd;
+	int ret;
+
+	CHECK_KFD_OPEN();
+
+	if (!CacheSize)
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+
+	/* Get the amdgpu render-node fd for this KFD node */
+	drm_fd = hsakmt_fmm_get_drm_render_fd(ctx, Node);
+	if (drm_fd < 0) {
+		pr_err("[%s] invalid node ID: %d\n", __func__, Node);
+		return HSAKMT_STATUS_INVALID_PARAMETER;
+	}
+
+	args.in.op = AMDGPU_VM_OP_GL2_PERSISTING_L2_CACHE_GET;
+
+	ret = drmIoctl(drm_fd, DRM_IOCTL_AMDGPU_VM, &args);
+	if (ret) {
+		pr_err("[%s] DRM_IOCTL_AMDGPU_VM GL2 persisting get failed: %d\n", __func__, ret);
+		return HSAKMT_STATUS_ERROR;
+	}
+
+	*CacheSize = args.out.size;
+
+	pr_debug("[%s] node %d size %lu\n", __func__, Node, (unsigned long)*CacheSize);
+
+	return HSAKMT_STATUS_SUCCESS;
+}
+
 HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterMemoryToNodesCtx(HsaKFDContext *ctx,
 						    void *MemoryAddress,
 						    HSAuint64 MemorySizeInBytes,
@@ -979,6 +1019,12 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtSetPersistingCacheSize(HSAuint32 Node,
 												HSAuint64 CacheSize)
 {
 	return hsaKmtSetPersistingCacheSizeCtx(&hsakmt_primary_kfd_ctx, Node, CacheSize);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtGetPersistingCacheSize(HSAuint32 Node,
+												HSAuint64 *CacheSize)
+{
+	return hsaKmtGetPersistingCacheSizeCtx(&hsakmt_primary_kfd_ctx, Node, CacheSize);
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtHandleExport(const HsaHandleExportDesc* desc,

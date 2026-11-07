@@ -649,6 +649,7 @@ union drm_amdgpu_sem {
 #define AMDGPU_VM_OP_RESERVE_VMID	1
 #define AMDGPU_VM_OP_UNRESERVE_VMID	2
 #define AMDGPU_VM_OP_GL2_PERSISTING_L2_CACHE 3
+#define AMDGPU_VM_OP_GL2_PERSISTING_L2_CACHE_GET 4
 
 struct drm_amdgpu_vm_in {
 	/** AMDGPU_VM_OP_* */
@@ -660,8 +661,15 @@ struct drm_amdgpu_vm_in {
 };
 
 struct drm_amdgpu_vm_out {
-	/** For future use, no flags defined so far */
-	__u64	flags;
+	union {
+		/** For future use, no flags defined so far */
+		__u64	flags;
+		/** Current persisting GL2 cache size in bytes requested by
+		 *  this VM. Returned by
+		 *  AMDGPU_VM_OP_GL2_PERSISTING_L2_CACHE_GET.
+		 */
+		__u64	size;
+	};
 };
 
 union drm_amdgpu_vm {

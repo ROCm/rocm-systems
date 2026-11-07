@@ -537,6 +537,12 @@ public:
   /// @return HSA_STATUS_SUCCESS if the driver successfully sets the persisting cache size.
   virtual hsa_status_t SetPersistingCacheSize(uint32_t node_id, uint64_t cache_size) = 0;
 
+  /// @brief Reads back the persisting GL2 cache size currently requested for a GPU node.
+  /// @param[in] node_id Node ID of the agent.
+  /// @param[out] cache_size The current requested cache size in bytes.
+  /// @return HSA_STATUS_SUCCESS if the driver successfully returns the persisting cache size.
+  virtual hsa_status_t GetPersistingCacheSize(uint32_t node_id, uint64_t* cache_size) const = 0;
+
   /// @brief Checks if the accelerator is ready to be used.
   /// @param[in] agent Agent to check the readiness of.
   /// @param[out] ready True if the accelerator is ready, false otherwise.
