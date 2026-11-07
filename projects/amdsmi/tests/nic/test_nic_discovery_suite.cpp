@@ -886,25 +886,22 @@ int main() {
                   "sys/devices/pci0000:00/0000:01:00.0/0000:02:01.0/0000:04:00.0/hwmon/"
                   "hwmon3/temp1_input")
         << "46000\n";
-    // hwmon_temp_path builds from the port's sys/bus/pci/devices path, so the
-    // node it reports is reached through that symlink, not the resolved one.
-    const fs::path expected = hw_root / "sys/bus/pci/devices/0000:04:00.0/hwmon/hwmon3/temp1_input";
+    // hwmon_sensors() builds from the port's sys/bus/pci/devices path, so the node it reads is
+    // reached through that symlink, not the resolved one.
 
     SmiNicSubsystemPensando hw_disc;
     hw_disc.discover((hw_root / "sys/bus/pci/devices").string(),
                      (hw_root / "sys/class/net").string(), nullptr);
     const auto& hnics = hw_disc.get_nics();
-    std::optional<std::string> asic_path;
+    auto records = std::vector<amd::smi::nic::hwmon::SensorRecord_t>{};
     if (hnics.size() == 1) {
-      asic_path = hnics[0]->hwmon_temp_path(NicTempSensor::Asic);
+      records = hnics[0]->hwmon_sensors();
     }
-    check("asic hwmon path resolves through the port",
-          asic_path.has_value() && (asic_path.value() == expected.string()));
+    check("hwmon sensors resolve through the port",
+          (records.size() == 1) && (records.front().value == 46000));
   }
 
-  // ---- a labelled ionic hwmon splits the die from the board ----
-  // The ionic driver labels its channels; the die channel is the ASIC temperature and the board
-  // channel is BOARD. Taking temp1 blindly reports the board temperature as ASIC.
+  // ---- a labelled ionic hwmon keeps each channel's label ----
   {
     fs::path lbl_root = make_tmp_root();
     TmpRootGuard_t lbl_root_guard(lbl_root);
@@ -919,7 +916,6 @@ int main() {
     std::ofstream(lbl_hwmon / "temp2_input") << "59000\n";
     std::ofstream(lbl_hwmon / "temp2_label") << "die temperature\n";
     std::ofstream(lbl_hwmon / "temp2_crit") << "105000\n";
-    const fs::path lbl_node = lbl_root / "sys/bus/pci/devices/0000:04:00.0/hwmon/hwmon3";
 
     SmiNicSubsystemPensando lbl_disc;
     lbl_disc.discover((lbl_root / "sys/bus/pci/devices").string(),
@@ -927,15 +923,6 @@ int main() {
     const auto& lnics = lbl_disc.get_nics();
     check("labelled fixture discovers one NIC", lnics.size() == 1);
     if (lnics.size() == 1) {
-      const auto lbl_asic = lnics[0]->hwmon_temp_path(NicTempSensor::Asic);
-      const auto lbl_board = lnics[0]->hwmon_temp_path(NicTempSensor::Board);
-      check("asic path is the die channel",
-            lbl_asic.has_value() && (lbl_asic.value() == (lbl_node / "temp2_input").string()));
-      check("board path is the board channel",
-            lbl_board.has_value() && (lbl_board.value() == (lbl_node / "temp1_input").string()));
-      check("transceiver stays unsupported",
-            !lnics[0]->hwmon_temp_path(NicTempSensor::Transceiver).has_value());
-
       const auto records = lnics[0]->hwmon_sensors();
       check("hwmon_sensors reports four attributes", records.size() == 4,
             "got " + std::to_string(records.size()));
@@ -1051,10 +1038,9 @@ int main() {
     std::ofstream(own_dev / "hwmon/hwmon7/temp1_input") << "51000\n";
 
     SmiNic portless("", "0000:c1:00.0", NicType::Ethernet, "", own_dev.string());
-    const auto own_path = portless.hwmon_temp_path(NicTempSensor::Asic);
-    check("portless NIC resolves its own hwmon node",
-          own_path.has_value() &&
-              (own_path.value() == (own_dev / "hwmon/hwmon7/temp1_input").string()));
+    const auto own_records = portless.hwmon_sensors();
+    check("portless NIC reads its own hwmon node",
+          (own_records.size() == 1) && (own_records.front().value == 51000));
   }
 
   // ---- SmiNicSystem discovery filter: ALL vs AINIC-only over a mixed tree ----

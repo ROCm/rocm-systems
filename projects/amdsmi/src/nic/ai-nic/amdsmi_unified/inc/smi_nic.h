@@ -59,12 +59,6 @@ enum SmiNicKind : uint8_t {
   SMI_NIC_KIND_OTHER = 3,  // any other vendor
 };
 
-/**
- * Board temperature sensors a NIC may expose. A vendor that lacks a given
- * sensor reports it as unsupported (reserved value) rather than fabricating a value.
- */
-enum class NicTempSensor : uint8_t { Asic, Transceiver, Board };
-
 class SmiInfiniBandPort {
  public:
   SmiInfiniBandPort(std::string& netdev, std::string& name, const std::string& sysfs_path_);
@@ -250,17 +244,6 @@ class SmiNic {
   // True once the NIC's own vpd, or its port 0's, was opened and parsed; false
   // when neither could be opened at all (permission denied or no vpd node).
   bool is_vpd_readable() const;
-
-  /**
-   * Absolute path of the hwmon `tempN_input` file (millidegrees C) backing
-   * `sensor`, or nullopt if this NIC has no such sensor. The base performs
-   * generic hwmon discovery under the PCI device: Asic is the channel labelled
-   * "die" (temp1 for a driver that labels nothing, e.g. bnxt_en) and Board is the
-   * channel labelled "board"; a vendor whose sensors live elsewhere overrides
-   * this. (Health reporters are enumerated over devlink and need no per-vendor
-   * mapping, so there is no reporter-name resolver here.)
-   */
-  virtual std::optional<std::string> hwmon_temp_path(NicTempSensor sensor) const;
 
   /**
    * One record per readable hwmon attribute under the telemetry function (see

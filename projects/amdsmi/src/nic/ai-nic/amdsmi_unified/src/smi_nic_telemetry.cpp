@@ -6,13 +6,9 @@
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
-#include <iterator>
 #include <memory>
 #include <utility>
-#include <variant>
 #include <vector>
-
-#include "smi_sysfs.h"
 
 /**
  * The devlink client factory lives here (always compiled) rather than in
@@ -54,49 +50,8 @@ std::shared_ptr<IDevlinkClient> create_devlink_client() {
 
 namespace amd::smi::nic::telemetry {
 
-namespace {
-constexpr int kMilliDegreesPerDegree = 1000;
-}  // namespace
-
 NicTelemetry::NicTelemetry(std::shared_ptr<::amd::nic::netlink::IDevlinkClient> devlink)
     : devlink_(std::move(devlink)) {}
-
-transport::Result<NicTemperature> NicTelemetry::get_temperature(const ::SmiNic& nic) const {
-  NicTemperature temp{kTempUnsupported, kTempUnsupported, kTempUnsupported};
-
-  const NicTempSensor sensors[] = {NicTempSensor::Asic, NicTempSensor::Transceiver,
-                                   NicTempSensor::Board};
-  uint16_t* const fields[] = {&temp.asic_temp_c, &temp.transceiver_temp_c, &temp.board_temp_c};
-
-  static_assert(std::size(sensors) == std::size(fields), "one field per sensor");
-
-  bool has_supported_sensor = false;
-  for (size_t i = 0; i < std::size(sensors); ++i) {
-    const auto path = nic.hwmon_temp_path(sensors[i]);
-    if (!path.has_value()) {
-      continue;  // this vendor does not expose this sensor
-    }
-    has_supported_sensor = true;
-
-    SmiSysfsReader::SysfsValue value;
-    if (SmiSysfsReader::readLine(path.value(), value) != SmiSysfsReader::SysfsStatus::Success) {
-      continue;  // present but unreadable: leave the reserved value
-    }
-    if (!std::holds_alternative<int>(value)) {
-      continue;
-    }
-    const int millidegrees = std::get<int>(value);  // hwmon tempN_input units
-    if (millidegrees < 0) {
-      continue;
-    }
-    *fields[i] = static_cast<uint16_t>(millidegrees / kMilliDegreesPerDegree);
-  }
-
-  if (!has_supported_sensor) {
-    return {false, {}, ENOTSUP};
-  }
-  return {true, temp, 0};
-}
 
 transport::Result<NicHealth> NicTelemetry::get_health(const ::SmiNic& nic) const {
   const auto reporters = devlink_->get_health_reporters(nic.mgmt_bdf());
@@ -157,11 +112,6 @@ transport::Result<::amd::nic::netlink::DevlinkDeviceInfo> NicTelemetry::get_devi
 
 transport::Result<NicTelemetrySnapshot> NicTelemetry::get_snapshot(const ::SmiNic& nic) const {
   NicTelemetrySnapshot snap{};
-
-  const auto temp = get_temperature(nic);
-  snap.temperature = temp.success
-                         ? temp.value
-                         : NicTemperature{kTempUnsupported, kTempUnsupported, kTempUnsupported};
 
   const auto health = get_health(nic);
   if (health.success) {

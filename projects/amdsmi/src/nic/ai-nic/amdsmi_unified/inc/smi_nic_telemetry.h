@@ -17,7 +17,6 @@ namespace amd::smi::nic::telemetry {
  * Reserved values: a field a NIC does not expose is reported with these rather than a
  * fabricated value, so a caller can distinguish "unsupported" from a real read.
  */
-constexpr uint16_t kTempUnsupported = UINT16_MAX;
 constexpr uint32_t kErrorCountUnsupported = UINT32_MAX;
 constexpr uint8_t kCountUnsupported = UINT8_MAX;
 
@@ -42,13 +41,6 @@ enum class HealthState : uint8_t {
  * pattern. Keep them free of std::string/std::vector.
  */
 
-/** Board temperatures in whole degrees Celsius; kTempUnsupported if not exposed. */
-struct NicTemperature {
-  uint16_t asic_temp_c;
-  uint16_t transceiver_temp_c;
-  uint16_t board_temp_c;
-};
-
 struct NicHealth {
   uint8_t state;         // a HealthState value
   uint32_t error_count;  // kErrorCountUnsupported if not exposed
@@ -61,22 +53,21 @@ struct NicPortSplit {
 };
 
 /**
- * All live telemetry in one read. Standard-layout (three standard-layout PODs),
+ * All live telemetry in one read. Standard-layout (two standard-layout PODs),
  * so a future public bridge can map it field-for-field. A metric the NIC does
- * not expose is written as reserved values in its sub-struct (asic/transceiver/board =
- * kTempUnsupported; health state Unknown + error_count kErrorCountUnsupported +
- * empty reporter; splittable/split_count = kCountUnsupported), so the snapshot
- * always populates for a valid NIC rather than failing whole.
+ * not expose is written as reserved values in its sub-struct (health state
+ * Unsupported + error_count kErrorCountUnsupported + empty reporter;
+ * splittable/split_count = kCountUnsupported), so the snapshot always populates
+ * for a valid NIC rather than failing whole.
  */
 struct NicTelemetrySnapshot {
-  NicTemperature temperature;
   NicHealth health;
   NicPortSplit port_split;
 };
 
 /**
  * Live, on-demand NIC telemetry. Every getter reads at call time (no init-time
- * caching): temperature via sysfs/hwmon, health and port-split via devlink.
+ * caching): health and port-split via devlink.
  *
  * A metric a vendor does not expose at all yields Result.success == false with
  * error_code == ENOTSUP. A partially-supported metric yields success with the
@@ -86,7 +77,6 @@ class NicTelemetry {
  public:
   explicit NicTelemetry(std::shared_ptr<::amd::nic::netlink::IDevlinkClient> devlink);
 
-  transport::Result<NicTemperature> get_temperature(const ::SmiNic& nic) const;
   transport::Result<NicHealth> get_health(const ::SmiNic& nic) const;
   transport::Result<NicPortSplit> get_port_split(const ::SmiNic& nic) const;
 
@@ -101,7 +91,7 @@ class NicTelemetry {
       const ::SmiNic& nic) const;
 
   /**
-   * One-shot read of all three metrics. Always succeeds for a valid NIC; a
+   * One-shot read of health and port split. Always succeeds for a valid NIC; a
    * metric the NIC does not expose is reported via its sub-struct reserved values
    * (see NicTelemetrySnapshot). This is the seam a future public bridge forwards
    * to, keeping the reserved-value fallback policy next to the code that produces it.

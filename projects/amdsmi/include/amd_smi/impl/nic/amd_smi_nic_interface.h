@@ -82,13 +82,6 @@ smi_nic_status_t smi_get_nic_rdma_mtu(smi_nic_ctx_t ctx, uint64_t device,
 smi_nic_status_t smi_get_nic_port_ifindex(smi_nic_ctx_t ctx, uint64_t device, uint32_t port_index,
                                           uint32_t* ifindex);
 
-/** Board temperatures in whole degrees Celsius; UINT16_MAX when the NIC does not expose one. */
-typedef struct {
-  uint16_t asic_temp_c;
-  uint16_t transceiver_temp_c;
-  uint16_t board_temp_c;
-} smi_nic_temperature_t;
-
 /** Health of the NIC's devlink reporter. */
 typedef struct {
   uint8_t state;        /**< a health state value, 0 when unknown */
@@ -104,7 +97,6 @@ typedef struct {
 
 /** All live telemetry in one read. A metric the NIC does not expose holds its reserved value. */
 typedef struct {
-  smi_nic_temperature_t temperature;
   smi_nic_health_t health;
   smi_nic_port_split_t port_split;
 } smi_nic_telemetry_t;

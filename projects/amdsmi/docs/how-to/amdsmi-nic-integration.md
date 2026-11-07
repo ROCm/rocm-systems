@@ -1241,8 +1241,8 @@ projects/amdsmi/
 │       │   ├── smi_nic_system.h              # SmiNicSystem
 │       │   ├── smi_nic_transport.h           # NicTransport + create_transport() factory
 │       │   ├── smi_nic_stats.h               # StatTier_t and StatTable_t (per-vendor counter tables)
-│       │   ├── smi_nic_telemetry.h           # NicTelemetry: temperature (hwmon), health and port split (devlink)
-│       │   ├── smi_nic_hwmon.h               # hwmon sensor scan: scan_sensors(), find_temperature_input()
+│       │   ├── smi_nic_telemetry.h           # NicTelemetry: health and port split (devlink)
+│       │   ├── smi_nic_hwmon.h               # hwmon sensor scan: scan_sensors()
 │       │   ├── smi_nic_log.h                 # Debug-log sink used by the library (RSMI_LOGGING)
 │       │   ├── smi_pci_topology.h            # PCI link type: same switch, same NUMA node or different NUMA nodes
 │       │   ├── smi_ibverbs.h                 # libibverbs MTU query, run in an isolated child process
