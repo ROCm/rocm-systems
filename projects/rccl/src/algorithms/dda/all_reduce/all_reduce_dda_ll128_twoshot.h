@@ -72,7 +72,7 @@ constexpr size_t ddaLL128ArTwoShotSlotWords(size_t bankSize, int nRanks) {
 // WIRE (DdaLL128Wire) picks the phase-1 and phase-2 writer; staged, it takes ddaLL128StageBytes(blockDim.x) of LDS.
 template <typename T, int NRANKS_CT, int WIRE = kDdaLL128WireCoop>
 #if defined(USE_ROCM)
-__launch_bounds__(kDdaLL128Threads)
+__launch_bounds__(kDdaLL128ArThreads)
 #endif
   __global__ void ddaAllReduceTwoShotLL128(T* const* __restrict__ peerScratch, // ddaPeerPtrsDev: nRanks scratch bases
                                            T* __restrict__ recvbuff, // local user output
@@ -278,7 +278,7 @@ struct DdaLL128SplitUnit {
 // In place is safe: A reads only the peers' shards and D writes (peer, slice) only after the peer folded my copy of it.
 // The rank count is runtime only: the peer loops do not unroll, and a compile-time count adds no resident block.
 template <typename T>
-__launch_bounds__(kDdaLL128Threads) __global__
+__launch_bounds__(kDdaLL128ArThreads) __global__
   void ddaAllReduceTwoShotLL128Split(T* const* __restrict__ peerScratch, T* __restrict__ recvbuff,
                                      const T* __restrict__ sendbuff, size_t shardBytes, int selfRank, int nRanks,
                                      uint32_t* __restrict__ epochDev, int epochLen, size_t slicesTotal, size_t bankSize,
@@ -461,7 +461,7 @@ __launch_bounds__(kDdaLL128Threads) __global__
         return;
       }
       ddaLL128StoreRegs<int8_t>(shardAt(dstBytes, peerOf(a.pi), a.s), v[0], eltIn(a.s), lane, flagLane);
-      if (mask & 2u) {
+      if ((mask >> 1) & 1u) {
         ddaLL128StoreRegs<int8_t>(shardAt(dstBytes, peerOf(b.pi), b.s), v[1], eltIn(b.s), lane, flagLane);
       }
       a = next(b);

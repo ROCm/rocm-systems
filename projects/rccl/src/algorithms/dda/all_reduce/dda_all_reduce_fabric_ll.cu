@@ -58,7 +58,7 @@ using dda::common::kDdaLL128WireWordsPerSlice;
 // Block width of each tier when uncapped.
 constexpr unsigned kDdaArLLOneShotThreads = 512;
 constexpr unsigned kDdaArLLTwoShotThreads = 1024;
-constexpr unsigned kDdaArLL128Threads = dda::common::kDdaLL128Threads;
+constexpr unsigned kDdaArLL128Threads = dda::common::kDdaLL128ArThreads;
 
 // Single source of the LL and LL128 launch geometry: a 1-D grid over `units` of work, `unitThreads` threads each,
 // in blocks of `threads`, capped low (LL serves small messages where latency, not occupancy, dominates). `cap` lowers
@@ -195,7 +195,7 @@ static DdaArLL128Kernel<T> ddaArLL128TwoShotKernel(int nRanks, int wire) {
 // Smallest message the peer-split takes: below it the tiers it replaces are faster.
 constexpr size_t kDdaArLL128SplitMinBytes = 2 * 1024 * 1024;
 
-// Peer-split: a warp per (slice, peer) unit of one shard within `bound`, and blocks own whole slices: none without one.
+// Peer-split: a warp per (slice, peer) unit within `bound`, and no more blocks than slices (a block owns whole slices).
 static std::pair<dim3, dim3> ddaArLL128SplitGrid(const ncclComm* comm, size_t bytes, rcclDdaLaunchCap bound) {
   const size_t n = (size_t)std::max(comm->nRanks, 2);
   const size_t slices = ddaLL128Slices(bytes / n);

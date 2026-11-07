@@ -27,7 +27,7 @@
 namespace dda::common {
 
 // Block width of the LL128 AllReduce launches: 16 LL128 warps.
-constexpr unsigned kDdaLL128Threads = 512;
+constexpr unsigned kDdaLL128ArThreads = 512;
 
 // Slot geometry, derived from the scratch bank the host picked. The bank splits
 // evenly across ranks and the per-rank stride is floored to a whole number of
@@ -51,7 +51,7 @@ constexpr size_t ddaLL128ArSlotWords(size_t bankSize, int nRanks) {
 // from sendbuff. Scratch is double buffered: bank = flag & 1.
 template <typename T, int NRANKS_CT>
 #if defined(USE_ROCM)
-__launch_bounds__(kDdaLL128Threads)
+__launch_bounds__(kDdaLL128ArThreads)
 #endif
   __global__ void ddaAllReduceFlatLL128(T* const* __restrict__ peerScratch, // ddaPeerPtrsDev: nRanks scratch bases
                                         T* __restrict__ recvbuff, // local user output
