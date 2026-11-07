@@ -157,7 +157,15 @@ commit_across_ranks(uint64_t range_id, rocprofiler_range_replay_status_t status,
 
 Without it, a range declined on one rank and replayed on the others re-executes a host collective
 on some ranks only; under Open MPI that aborts with `MPI_ERR_TRUNCATE` at the next collective. The
-range's device locks are held during the call, so it must not submit GPU work. See
+range's device locks are held during the call, so it must not submit GPU work.
+
+Agreement covers every reason known at the commit. A host-replay range is checked again before each
+extra pass, and another thread of the process can still cause a decline there -- by dispatching,
+copying, or allocating -- after every rank has committed. That rank then runs fewer passes than the
+others. A tool that commits across ranks should therefore treat a `CLOSE` status other than
+`REPLAYED`, after it committed, as a lost agreement and abort the job (for example with
+`MPI_Abort`) rather than reach the next collective. Packet replay re-checks nothing after the
+commit, so it cannot lose an agreement. See
 [Multi-GPU and collectives](index.md#multi-gpu-and-collectives) for what agreement does and does
 not make replayable.
 
