@@ -8,6 +8,7 @@
 // with, so one job per width covers each flag-lane layout; the default 8-byte build runs them as a baseline.
 //
 //   FlagEncoding, CleanSchedule  host only: the flag macros shared by device code and the net proxy.
+//   StepSizing                   host only: LL128 wire <-> data sizes count the data a line carries with the flag.
 //   Layout                       host only, every width on every line geometry: each user word of a slice is stored
 //                                by exactly one lane, and a flag lane's words survive pack, wire and unpack.
 //   Collectives{P2p,Net}         LL128 Ring collectives on 1-, 2-, 4- and 8-byte types at odd, power-of-two and
@@ -483,6 +484,30 @@ TEST(LL128NarrowFlag, CleanSchedule)
     ASSERT_NE(stale[step % NCCL_STEPS], flag) << "step " << step;
     if (RCCL_LL128_CLEAN_STEP(step)) stale[step % NCCL_STEPS] = flag;
   }
+}
+
+TEST(LL128NarrowFlag, StepSizing)
+{
+  for (int lineElems : {8, 16}) {
+    const int lineBytes = lineElems * 8;
+    const int dataBytes = lineBytes - (RCCL_LL128_NARROW_FLAG ? RCCL_LL128_FLAG_BYTES : 8);
+    EXPECT_EQ(RCCL_LL128_LINE_DATA_BYTES(lineElems), dataBytes) << "lineElems " << lineElems;
+    for (int lines : {1, 7, 64, 896, 3584}) {
+      EXPECT_EQ(RCCL_LL128_WIRE_TO_DATA(lines * lineBytes, lineElems), lines * dataBytes) << "lines " << lines;
+      EXPECT_EQ(RCCL_LL128_DATA_TO_WIRE(lines * dataBytes, lineElems), lines * lineBytes) << "lines " << lines;
+    }
+    if (!RCCL_LL128_NARROW_FLAG) {
+      for (int wire : {0, 8, 56, 63, 65, 1000, 57344, 57352}) {
+        EXPECT_EQ(RCCL_LL128_WIRE_TO_DATA(wire, lineElems), wire / lineElems * (lineElems - 1)) << "wire " << wire;
+      }
+    }
+  }
+  // A step of the default gfx950 buffer (28 elements per thread, 256 threads) is a whole number of grains (one
+  // warp's slice: 64 lanes x 8 words).
+  const int stepWire = 28 * 256 * 8;
+  const int grain = RCCL_LL128_WIRE_TO_DATA(64 * 8 * 8, 8);
+  EXPECT_EQ(RCCL_LL128_WIRE_TO_DATA(stepWire, 8) % grain, 0);
+  EXPECT_EQ(RCCL_LL128_WIRE_TO_DATA(stepWire, 8) / grain, stepWire / (64 * 8 * 8));
 }
 
 TEST(LL128NarrowFlag, CollectivesP2p)
