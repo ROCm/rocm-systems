@@ -32,6 +32,7 @@
 #include <unistd.h>
 
 #include <atomic>
+#include <functional>
 #include <mutex>
 #include <stack>
 #include <type_traits>

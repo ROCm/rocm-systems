@@ -26,11 +26,11 @@
 #include <hip/hip_runtime_api.h>
 
 #include <dlfcn.h>
-#include <experimental/filesystem>
+#include <filesystem>
 #include <link.h>
 #include <unistd.h>
 
-namespace fs = std::experimental::filesystem;
+namespace fs = std::filesystem;
 
 namespace roctracer {
 

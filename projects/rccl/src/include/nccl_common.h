@@ -10,7 +10,8 @@
 
 #ifdef NCCL_OS_LINUX
 // Workaround for libstdc++ trying to force public visibility of std:: symbols.  We don't want to do that in libnccl.so.
-#include <bits/c++config.h>
+// <cstddef> includes <bits/c++config.h> with libstdc++; other standard libraries have no such header.
+#include <cstddef>
 #undef _GLIBCXX_VISIBILITY
 #define _GLIBCXX_VISIBILITY(V)
 #endif

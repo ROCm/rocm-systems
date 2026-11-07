@@ -22,13 +22,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#ifdef __cplusplus
-#include <cstdlib>
-using namespace std;
-#else
-#include <stdlib.h>
-#endif
-
 // roctx header file
 #include <roctx.h>
 // roctracer extension API
