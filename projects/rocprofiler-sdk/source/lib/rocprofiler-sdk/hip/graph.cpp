@@ -40,6 +40,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -81,6 +82,7 @@ struct hipGraphExecMemcpyNodeSetParams;
 struct hipGraphExecMemcpyNodeSetParams1D;
 struct hipGraphExecMemcpyNodeSetParamsFromSymbol;
 struct hipGraphExecMemcpyNodeSetParamsToSymbol;
+struct hipGraphExecMemsetNodeSetParams;
 struct hipGraphExecUpdate;
 struct hipGraphExecKernelNodeSetParams;
 struct hipGraphExecChildGraphNodeSetParams;
@@ -101,7 +103,13 @@ struct capture_plan
     {
         uint64_t src = 0, dst = 0, bytes = 0, correlation_id = 0;
     };
+    struct fill_node
+    {
+        uint64_t dst = 0, bytes = 0, correlation_id = 0;
+        uint32_t value = 0, element_size = 0;
+    };
     std::vector<copy_node>  copies;
+    std::vector<fill_node>  fills;
     std::deque<kernel_node> kernels = {};  // the graph's captured kernel nodes, in enqueue order
 };
 
@@ -125,6 +133,7 @@ struct capture_api_t
     decltype(::HipDispatchTable::hipGraphKernelNodeGetParams_fn) kernel_node_params = nullptr;
     decltype(::HipDispatchTable::hipKernelNameRefByPtr_fn)       kernel_name        = nullptr;
     decltype(::HipDispatchTable::hipGraphMemcpyNodeGetParams_fn) memcpy_node_params = nullptr;
+    decltype(::HipDispatchTable::hipGraphMemsetNodeGetParams_fn) memset_node_params = nullptr;
     decltype(::HipDispatchTable::hipKernelNameRef_fn)            module_kernel_name = nullptr;
 };
 
@@ -134,7 +143,20 @@ struct captured_node
 {
     ::hipGraphNode_t node           = nullptr;
     uint64_t         correlation_id = 0;
+    // Capture-time parameters, so a later source-graph update cannot silently
+    // relabel a changed memset. Exec updates separately invalidate the plan.
+    std::shared_ptr<const ::hipMemsetParams> memset_params = {};
 };
+
+bool
+experimental_fillbuffer_enabled()
+{
+    static const bool enabled = [] {
+        auto* v = std::getenv("ROCPROFILER_EXPERIMENTAL_GRAPH_FILLBUFFER");
+        return v && std::strcmp(v, "1") == 0;
+    }();
+    return enabled;
+}
 
 // A stream capture begun on this thread.
 struct capture_session
@@ -229,7 +251,22 @@ attribute_new_nodes(capture_session& session, uint64_t correlation_id)
     auto nodes = std::vector<::hipGraphNode_t>(count);
     if(g_capture_api.get_nodes(session.graph, nodes.data(), &count) != hipSuccess) return;
     for(size_t i = session.known; i < count && i < nodes.size(); ++i)
-        session.nodes.emplace_back(captured_node{nodes.at(i), correlation_id});
+    {
+        auto node = captured_node{nodes.at(i), correlation_id};
+        if(experimental_fillbuffer_enabled() && g_capture_api.node_get_type &&
+           g_capture_api.memset_node_params)
+        {
+            auto type = hipGraphNodeTypeEmpty;
+            if(g_capture_api.node_get_type(node.node, &type) == hipSuccess &&
+               type == hipGraphNodeTypeMemset)
+            {
+                auto p = std::make_shared<::hipMemsetParams>();
+                if(g_capture_api.memset_node_params(node.node, p.get()) == hipSuccess)
+                    node.memset_params = std::move(p);
+            }
+        }
+        session.nodes.emplace_back(std::move(node));
+    }
     session.known = count;
 }
 
@@ -371,10 +408,38 @@ plan_capture(::hipGraphExec_t exec, ::hipGraph_t graph)
     }
 
     auto plan = std::make_shared<capture_plan>();
+    bool fills_supported = true;
     for(const auto& itr : nodes)
     {
         auto type = hipGraphNodeTypeEmpty;
-        if(g_capture_api.node_get_type(itr.node, &type) != hipSuccess) continue;
+        if(g_capture_api.node_get_type(itr.node, &type) != hipSuccess)
+        {
+            fills_supported = false;
+            continue;
+        }
+        if(type == hipGraphNodeTypeMemset)
+        {
+            auto        p   = ::hipMemsetParams{};
+            const auto* old = itr.memset_params.get();
+            if(!g_capture_api.memset_node_params || !old ||
+               g_capture_api.memset_node_params(itr.node, &p) != hipSuccess || !p.dst ||
+               p.height != 1 || (p.elementSize != 1 && p.elementSize != 2 && p.elementSize != 4) ||
+               !p.width || p.width > std::numeric_limits<uint64_t>::max() / p.elementSize ||
+               p.dst != old->dst || p.width != old->width || p.height != old->height ||
+               p.elementSize != old->elementSize || p.value != old->value)
+            {
+                // An unmodeled fill can produce the same runtime dispatch as a
+                // modeled one. Refuse all fill matching in that graph.
+                fills_supported = false;
+            }
+            else
+                plan->fills.push_back({reinterpret_cast<uint64_t>(p.dst),
+                                       p.width * p.elementSize,
+                                       itr.correlation_id,
+                                       p.value,
+                                       p.elementSize});
+            continue;
+        }
         if(type == hipGraphNodeTypeMemcpy && g_capture_api.memcpy_node_params)
         {
             auto p = hipMemcpy3DParms{};
@@ -392,7 +457,15 @@ plan_capture(::hipGraphExec_t exec, ::hipGraph_t graph)
             }
             continue;
         }
-        if(type != hipGraphNodeTypeKernel) continue;
+        if(type != hipGraphNodeTypeKernel)
+        {
+            // In particular, a child graph or host callback can hide another
+            // fill dispatch. Do not match against an incomplete inventory.
+            if(type != hipGraphNodeTypeEmpty && type != hipGraphNodeTypeEventRecord &&
+               type != hipGraphNodeTypeWaitEvent)
+                fills_supported = false;
+            continue;
+        }
 
         auto params = hipKernelNodeParams{};
         if(g_capture_api.kernel_node_params(itr.node, &params) != hipSuccess) continue;
@@ -419,9 +492,13 @@ plan_capture(::hipGraphExec_t exec, ::hipGraph_t graph)
                return captured.node == node;
            });
        }))
+    {
         plan->copies.clear();
+        fills_supported = false;
+    }
+    if(!fills_supported) plan->fills.clear();
 
-    if(plan->kernels.empty() && plan->copies.empty()) return;
+    if(plan->kernels.empty() && plan->copies.empty() && plan->fills.empty()) return;
 
     std::unique_lock lock{g_map_mutex};
     g_exec_capture[exec] = std::move(plan);
@@ -496,6 +573,96 @@ match_captured_copy(const launch_state& state, uint64_t kernel_id, const void* k
             if(match) return 0;  // identical copy nodes have no stable identity here
             match = &node;
         }
+    }
+    return match ? match->correlation_id : 0;
+}
+
+// ROCclr's gfx950 fillBuffer1D ABI in the tested ROCm 10 runtime. The
+// 128-byte explicit argument block is followed by 256 bytes of hidden args.
+// Validate the layout/geometry and value payloads, then require a unique
+// captured (destination, byte count, pattern) match. Never read the pattern
+// pointer: it is a GPU/runtime-owned address, not necessarily CPU-readable.
+uint64_t
+match_captured_fill(const launch_state& state, uint64_t kernel_id, const void* kernarg)
+{
+    if(!experimental_fillbuffer_enabled() || !state.capture || !kernarg ||
+       state.capture->fills.empty())
+        return 0;
+    const auto* name = code_object::get_kernel_name(kernel_id);
+    if(!name ||
+       (*name != "__amd_rocclr_fillBufferUnAligned.kd" &&
+        *name != "__amd_rocclr_fillBufferUnAligned") ||
+       code_object::get_kernel_kernarg_size(kernel_id) != 384)
+        return 0;
+
+    struct args_t
+    {
+        uint64_t dst, pattern;
+        uint64_t tile_pattern[2];
+        uint64_t body_pattern, body_tail_pattern;
+        uint64_t tiles, passes, stride, pattern_size, tail_offset;
+        uint64_t body_dst, body_tail_dst, tail_dst, tile_dst;
+        uint16_t head, body, body_tail, tail;
+    };
+    static_assert(sizeof(args_t) == 128);
+    static_assert(offsetof(args_t, pattern_size) == 72);
+    static_assert(offsetof(args_t, head) == 120);
+    auto a = args_t{};
+    std::memcpy(&a, kernarg, sizeof(a));
+    if(!a.dst || !a.pattern ||
+       (a.pattern_size != 1 && a.pattern_size != 2 && a.pattern_size != 4 && a.pattern_size != 8 &&
+        a.pattern_size != 16) ||
+       a.head > 14 || a.body > 1 || a.body_tail > 1 || a.tail > 7 ||
+       a.head + a.body + a.body_tail + a.tail > 16 || a.stride < 256 || a.stride % 256)
+        return 0;
+    const uint64_t cleanup_bytes = a.head + 8 * a.body + 8 * a.body_tail + a.tail;
+    constexpr auto max           = std::numeric_limits<uint64_t>::max();
+    if(a.tiles > (max - cleanup_bytes) / 16) return 0;
+    const uint64_t bytes = cleanup_bytes + 16 * a.tiles;
+    if(!bytes || bytes > max - a.dst || a.dst > max - 7) return 0;
+    const uint64_t end        = a.dst + bytes;
+    const uint64_t body_start = (a.dst + 7) & ~uint64_t{7};
+    const uint64_t body_end   = end & ~uint64_t{7};
+    uint64_t       head = bytes, body = 0, tiles = 0, body_tail = 0, tail = 0;
+    uint64_t       tile_start = a.dst;
+    if(body_end > body_start)
+    {
+        if(body_start > max - 15) return 0;
+        tile_start          = (body_start + 15) & ~uint64_t{15};
+        const auto tile_end = body_end & ~uint64_t{15};
+        head                = body_start - a.dst;
+        tiles               = tile_end > tile_start ? (tile_end - tile_start) / 16 : 0;
+        body                = (tile_start - body_start) / 8;
+        body_tail           = (body_end - tile_end) / 8;
+        tail                = end - body_end;
+    }
+    const auto body_tail_offset = head + body * 8 + tiles * 16;
+    const auto tail_offset      = body_tail_offset + body_tail * 8;
+    if(a.head != head || a.body != body || a.tiles != tiles || a.body_tail != body_tail ||
+       a.tail != tail || a.tail_offset != tail_offset || a.body_dst != a.dst + head ||
+       a.body_tail_dst != a.dst + body_tail_offset || a.tail_dst != a.dst + tail_offset ||
+       a.tile_dst != tile_start || a.passes != tiles / a.stride + (tiles % a.stride != 0))
+        return 0;
+
+    const capture_plan::fill_node* match = nullptr;
+    for(const auto& node : state.capture->fills)
+    {
+        if(node.dst != a.dst || node.bytes != bytes) continue;
+        auto matches_pattern = [&node](uint64_t payload, uint64_t offset, size_t n) {
+            for(size_t i = 0; i < n; ++i)
+                if(((payload >> (8 * i)) & 0xff) !=
+                   ((node.value >> (8 * ((offset + i) % node.element_size))) & 0xff))
+                    return false;
+            return true;
+        };
+        const auto tile_offset = tile_start - a.dst;
+        if(!matches_pattern(a.tile_pattern[0], tile_offset, 8) ||
+           !matches_pattern(a.tile_pattern[1], tile_offset + 8, 8) ||
+           !matches_pattern(a.body_pattern, head, 8) ||
+           !matches_pattern(a.body_tail_pattern, body_tail_offset, 8))
+            continue;
+        if(match) return 0;
+        match = &node;
     }
     return match ? match->correlation_id : 0;
 }
@@ -878,6 +1045,7 @@ next_enqueue_identity(uint64_t kernel_id, const void* kernarg)
 
     auto capture_id = kernel_id ? match_captured_kernel(*state, kernel_id) : 0;
     if(!capture_id && kernel_id) capture_id = match_captured_copy(*state, kernel_id, kernarg);
+    if(!capture_id && kernel_id) capture_id = match_captured_fill(*state, kernel_id, kernarg);
     return enqueue_identity{.graph_exec_id          = {.handle = state->graph_exec_id},
                             .graph_node_id          = {.handle = state->node_counter++},
                             .capture_correlation_id = capture_id};
@@ -945,7 +1113,13 @@ update_table(::HipDispatchTable* table)
                                   .kernel_node_params = table->hipGraphKernelNodeGetParams_fn,
                                   .kernel_name        = table->hipKernelNameRefByPtr_fn,
                                   .memcpy_node_params = table->hipGraphMemcpyNodeGetParams_fn,
+                                  .memset_node_params = table->hipGraphMemsetNodeGetParams_fn,
                                   .module_kernel_name = table->hipKernelNameRef_fn};
+
+    if(table->hipGraphExecMemsetNodeSetParams_fn)
+        table->hipGraphExecMemsetNodeSetParams_fn =
+            graph_mutate<api::hipGraphExecMemsetNodeSetParams>(
+                table->hipGraphExecMemsetNodeSetParams_fn);
 
     if(table->hipGraphExecMemcpyNodeSetParams_fn)
         table->hipGraphExecMemcpyNodeSetParams_fn =
