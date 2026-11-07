@@ -205,6 +205,30 @@ if ( UNDEFINED_SANITIZER OR THEROCK_SANITIZER STREQUAL "UBSAN" OR DEFINED ENV{UN
   message(STATUS "hsa-runtime64: UndefinedBehaviorSanitizer (UBSAN) enabled")
 endif()
 
+## AddressSanitizer flags
+## This target compiles its ASan-specific memory handling only when the compiler
+## reports __has_feature(address_sanitizer) (SANITIZER_AMDGPU, core/inc/runtime.h).
+## Add the instrumentation flag to this target directly rather than relying on it
+## arriving through CMAKE_CXX_FLAGS, which a compiler launcher may rewrite.
+set ( HSA_ASAN_REQUESTED FALSE )
+if ( ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN" )
+  set ( HSA_ASAN_REQUESTED TRUE )
+endif()
+
+if ( HSA_ASAN_REQUESTED )
+  set ( HSA_CXX_FLAGS ${HSA_CXX_FLAGS} -fsanitize=address -fno-omit-frame-pointer )
+  set ( HSA_SHARED_LINK_FLAGS "${HSA_SHARED_LINK_FLAGS} -fsanitize=address" )
+  ## A shared library cannot carry the static sanitizer runtime, so select the shared
+  ## one -- but only when the caller has not already made that choice, so that a build
+  ## selecting its own sanitizer runtime is not overridden into an incompatible pair.
+  if ( CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND BUILD_SHARED_LIBS )
+    if ( NOT "${CMAKE_CXX_FLAGS} ${CMAKE_SHARED_LINKER_FLAGS} ${CMAKE_EXE_LINKER_FLAGS}" MATCHES "-(shared|static)-libsan" )
+      set ( HSA_SHARED_LINK_FLAGS "${HSA_SHARED_LINK_FLAGS} -shared-libsan" )
+    endif()
+  endif()
+  message(STATUS "hsa-runtime64: AddressSanitizer (ASAN) enabled")
+endif()
+
 if (UNIX)
   set ( LNKSCR "hsacore.so.link" )
   set ( DRVDEF "${CMAKE_CURRENT_SOURCE_DIR}/hsacore.so.def" )
@@ -214,6 +238,19 @@ else()
 endif()
 
 target_compile_options(${CORE_RUNTIME_TARGET} PRIVATE ${HSA_CXX_FLAGS})
+
+## Tell the sources that ASan was asked for, so that a build which asked for it but
+## did not get instrumented fails instead of silently dropping the ASan paths.
+## Only meaningful where SANITIZER_AMDGPU can be defined at all, which is Clang.
+if ( HSA_ASAN_REQUESTED )
+  if ( CMAKE_CXX_COMPILER_ID MATCHES "Clang" )
+    target_compile_definitions(${CORE_RUNTIME_TARGET} PRIVATE HSA_ASAN_REQUESTED=1)
+  else()
+    message(WARNING "hsa-runtime64: AddressSanitizer was requested but the ASan-specific "
+                    "allocation handling is only available with Clang. Building without it.")
+  endif()
+endif()
+
 #target_link_options not available prior to CMake 3.13
 set_property(TARGET ${CORE_RUNTIME_TARGET} PROPERTY LINK_FLAGS ${HSA_SHARED_LINK_FLAGS})
 ##  -------------------------  End Compiler and Linker options ----------------------------
@@ -449,6 +486,12 @@ if( NOT ${BUILD_SHARED_LIBS} )
 
   ## Add external link requirements.
   target_link_libraries ( ${CORE_RUNTIME_NAME} INTERFACE hsakmt-staticdrm::hsakmt-staticdrm )
+  ## The archive's objects are instrumented, but LINK_FLAGS do not apply to a static
+  ## archive and are not exported. Carry the sanitizer link requirement on the public
+  ## interface so consumers do not fail on unresolved __asan_* symbols.
+  if ( HSA_ASAN_REQUESTED )
+    target_link_libraries ( ${CORE_RUNTIME_NAME} INTERFACE -fsanitize=address )
+  endif()
   if (UNIX)
     target_link_libraries ( ${CORE_RUNTIME_NAME} INTERFACE elf::elf dl pthread rt )
   else()
