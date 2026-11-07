@@ -1854,6 +1854,131 @@ TEST_F(GinProxyPutTest, StandaloneVASignalPostsOnlySignalGfd) {
 }
 
 // ---------------------------------------------------------------------------
+// Legacy C bindings: ncclGinPut/PutValue/Signal and their _v2 take no signal strength, so the GFD each one posts
+// must carry ginStrongLegacySignals, as ncclGin_SignalInc/SignalAdd do in the C++ API.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+enum class LegacyCBinding { Put, PutV2, PutValue, PutValueV2, Signal, SignalV2 };
+
+struct LegacyCBindingCase {
+  LegacyCBinding binding;
+  const char* name;
+  uint64_t gfdOp;
+};
+
+constexpr uint64_t kLegacyPutSignalOp = ncclGinProxyOpPut | ncclGinProxyOpWithSignalInc;
+
+// A signal-only call still posts a put GFD, with no source and size 0.
+constexpr LegacyCBindingCase kLegacyCBindings[] = {
+    {LegacyCBinding::Put, "ncclGinPut", kLegacyPutSignalOp},
+    {LegacyCBinding::PutV2, "ncclGinPut_v2", kLegacyPutSignalOp},
+    {LegacyCBinding::PutValue, "ncclGinPutValue", kLegacyPutSignalOp | ncclGinProxyOpWithInline},
+    {LegacyCBinding::PutValueV2, "ncclGinPutValue_v2", kLegacyPutSignalOp | ncclGinProxyOpWithInline},
+    {LegacyCBinding::Signal, "ncclGinSignal", kLegacyPutSignalOp},
+    {LegacyCBinding::SignalV2, "ncclGinSignal_v2", kLegacyPutSignalOp},
+};
+
+constexpr int kLegacyPeer = 1;
+constexpr int kLegacySignalCount = 4;
+constexpr ncclGinSignal_t kLegacySignal = 3;
+constexpr size_t kLegacyPutBytes = 256;
+constexpr uint64_t kLegacyPutValue = 0x0123456789ABCDEFULL;
+
+}  // namespace
+
+__global__ void kernelLegacyCBinding(ncclDevComm comm, ncclWindow_t dstWin, ncclWindow_t srcWin,
+                                     LegacyCBinding binding) {
+  if (threadIdx.x != 0 || blockIdx.x != 0) return;
+  ncclGin_C net(comm, 1u << NCCL_NET_DEVICE_GIN_PROXY, /*contextIndex=*/0);
+  const ncclTeam world = ncclTeamWorld(comm);
+  const cuda::thread_scope sys = cuda::thread_scope_system;
+  switch (binding) {
+  case LegacyCBinding::Put:
+    ncclGinPut(&net, world, kLegacyPeer, dstWin, 0, srcWin, 0, kLegacyPutBytes, /*isSignal=*/true, kLegacySignal,
+               ncclGinSignalInc, 0, /*isCounter=*/false, 0, ncclCoopThread{}, false, nullptr, sys, sys);
+    break;
+  case LegacyCBinding::PutV2:
+    ncclGinPut_v2(&net, world, kLegacyPeer, dstWin, 0, srcWin, 0, kLegacyPutBytes, /*isSignal=*/true, kLegacySignal,
+                  ncclGinSignalInc, 0, /*isCounter=*/false, 0, ncclCoopThread{}, false, nullptr, sys, sys,
+                  ncclGinOptFlagsDefault);
+    break;
+  case LegacyCBinding::PutValue:
+    ncclGinPutValue(&net, world, kLegacyPeer, dstWin, 0, kLegacyPutValue, sizeof(uint64_t), /*isSignal=*/true,
+                    kLegacySignal, ncclGinSignalInc, 0, ncclCoopThread{}, false, nullptr, sys, sys);
+    break;
+  case LegacyCBinding::PutValueV2:
+    ncclGinPutValue_v2(&net, world, kLegacyPeer, dstWin, 0, kLegacyPutValue, sizeof(uint64_t), /*isSignal=*/true,
+                       kLegacySignal, ncclGinSignalInc, 0, ncclCoopThread{}, false, nullptr, sys, sys,
+                       ncclGinOptFlagsDefault);
+    break;
+  case LegacyCBinding::Signal:
+    ncclGinSignal(&net, world, kLegacyPeer, /*isSignal=*/true, kLegacySignal, ncclGinSignalInc, 0, ncclCoopThread{},
+                  false, nullptr, sys, sys);
+    break;
+  case LegacyCBinding::SignalV2:
+    ncclGinSignal_v2(&net, world, kLegacyPeer, /*isSignal=*/true, kLegacySignal, ncclGinSignalInc, 0,
+                     ncclCoopThread{}, false, nullptr, sys, sys, ncclGinOptFlagsDefault);
+    break;
+  }
+}
+
+TEST_F(GinProxyPutTest, LegacyCBindingSignalsFollowGinStrongLegacySignals) {
+  ncclWindow_vidmem dstWin{};
+  dstWin.ginWinsDefaultBackend[0] = reinterpret_cast<ncclGinWindow_t>(0x0000D5D500002000ULL);
+  dstWin.numSegments = 1;
+  ncclWindow_vidmem srcWin = dstWin;
+  srcWin.ginWinsDefaultBackend[0] = reinterpret_cast<ncclGinWindow_t>(0x00005A5A00001000ULL);
+  DeviceBuffer<ncclWindow_vidmem> d_dstWin(1);
+  DeviceBuffer<ncclWindow_vidmem> d_srcWin(1);
+  d_dstWin.upload(dstWin);
+  d_srcWin.upload(srcWin);
+
+  DeviceBuffer<ncclGinProxyGfd_t> d_queues(kNranks * kQueueSize);
+  DeviceBuffer<uint32_t> d_pis(kNranks);
+  DeviceBuffer<uint32_t> d_cis(kNranks);
+  DeviceBuffer<ncclGinProxyGpuCtx_t> d_ctx(1);
+  DeviceBuffer<uint64_t> d_signalShadows(kLegacySignalCount);
+  ASSERT_NO_FATAL_FAILURE(d_cis.zero());
+  ASSERT_NO_FATAL_FAILURE(d_signalShadows.zero());
+  ASSERT_NO_FATAL_FAILURE(uploadProxyGpuCtxs(d_ctx, static_cast<int>(kNranks), kQueueSize, d_queues.ptr, d_pis.ptr,
+                                             d_cis.ptr, /*lastIssuedGet=*/nullptr, /*lastVisibleGet=*/nullptr));
+
+  for (const LegacyCBindingCase& c : kLegacyCBindings) {
+    for (const bool strong : {false, true}) {
+      SCOPED_TRACE(::testing::Message() << c.name << " ginStrongLegacySignals=" << strong);
+      ASSERT_NO_FATAL_FAILURE(d_queues.zero());
+      ASSERT_NO_FATAL_FAILURE(d_pis.zero());
+
+      ncclDevComm comm{};
+      comm.rank = 0;
+      comm.nRanks = static_cast<int>(kNranks);
+      comm.ginConnectionCount = 1;
+      comm.ginConnectionStride = 1;
+      comm.ginNetDeviceTypes[0] = NCCL_NET_DEVICE_GIN_PROXY;
+      comm.ginHandles[0] = d_ctx.ptr;
+      comm.ginSignalCount = kLegacySignalCount;
+      comm.ginSignalShadows = d_signalShadows.ptr;
+      comm.ginStrongLegacySignals = strong;
+
+      kernelLegacyCBinding<<<1, 1>>>(comm, d_dstWin.ptr, d_srcWin.ptr, c.binding);
+      ASSERT_NO_FATAL_FAILURE(syncAndCheck());
+
+      const std::vector<uint32_t> pis = d_pis.copyTo();
+      const std::vector<ncclGinProxyGfd_t> queues = d_queues.copyTo();
+      expectOnlyPeer1Posted(pis, queues, 1);
+      const ncclGinProxyGfd_t& gfd = queues[kQueueSize];
+      EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdHeaderExt].headerExt.op), c.gfdOp);
+      EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdCompletion].completion.signalId),
+                static_cast<uint64_t>(kLegacySignal));
+      EXPECT_EQ(static_cast<uint64_t>(gfd.qword[ncclGinProxyGfdSignalVal].signalVal.isStrongSignal),
+                strong ? 1ULL : 0ULL);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // ResetSignal: proxy signals use an offset/baseline model. The effective value
 //   of an indexed signal is signals[id] measured against a baseline held in
 //   signalOffsets[id] (see ncclGinApi_GetSignalPtr, which returns
