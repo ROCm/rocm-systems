@@ -627,8 +627,62 @@ class CodeGenerator:
         """Require an explicit operand form when generating a memory instruction."""
         return cls._IMAGE_INSTRUCTION_FORMS[name.upper()]
 
-    def _image_coordinate_register_count(self, name: str) -> str:
-        form = self._image_instruction_form(name)
+    def _decoded_opcode(self, encoding, operand: str) -> str:
+        fields = {field.name: field for field in encoding.ucode_fields}
+        op = f'{operand}.op'
+        # GFX10 buffers and MIMG store the high opcode bit separately in OPM.
+        split = encoding.enc_name in ('ENC_MUBUF', 'ENC_MTBUF') or (
+            self.isa_spec.profile.mimg_max_nsa_words > 1
+            and encoding.enc_name.startswith('ENC_MIMG')
+        )
+        if split and 'opm' in fields:
+            op += f' | ({operand}.opm << {fields["op"].bit_cnt})'
+        return op
+
+    def _image_address_base(self, inst: Instruction) -> str | None:
+        """Address-only forms share their encoding, static uses and wait metadata."""
+        name = inst.name
+        if self.isa_spec.arch_name not in self._IMAGE_MEMORY_ARCHITECTURES:
+            return None
+        if self._issues_image_memory(name):
+            return None
+        fields = []
+        if name == 'IMAGE_GET_RESINFO':
+            fields.append('.kind = amdgpu::ImageAddressKind::ResourceInfo')
+        elif self.isa_spec.profile.image_dimensions_in_resource:
+            return None
+        elif name in ('IMAGE_BVH_INTERSECT_RAY', 'IMAGE_BVH64_INTERSECT_RAY'):
+            kind = 'Bvh64' if 'BVH64' in name else 'Bvh'
+            fields.append(f'.kind = amdgpu::ImageAddressKind::{kind}')
+        elif name.startswith(('IMAGE_SAMPLE_', 'IMAGE_GATHER4_')):
+            tokens = set(name.split('_')[2:])
+            prefix = len(tokens & {'O', 'B', 'C'})
+            if prefix:
+                fields.append(f'.extra_words = {prefix}')
+            if tokens & {'L', 'CL'}:
+                fields.append('.lod = true')
+            if tokens & {'D', 'CD'}:
+                fields.append('.gradients = true')
+            if 'G16' in tokens:
+                fields.append('.g16 = true')
+            if name.startswith('IMAGE_SAMPLE_'):
+                fields.append('.sample_result = true')
+        elif name not in (
+            'IMAGE_GET_LOD',
+            'IMAGE_MSAA_LOAD',
+            'IMAGE_GATHER4',
+            'IMAGE_GATHER4H',
+        ):
+            return None
+        gfx10 = str(self.isa_spec.profile.mimg_max_nsa_words > 1).lower()
+        return (
+            f'amdgpu::ImageAddressInstruction<{inst.fmt_true_enc_name}, {gfx10}, '
+            + 'amdgpu::ImageAddressForm{'
+            + ', '.join(fields)
+            + '}>'
+        )
+
+    def _image_coordinate_register_count(self, form: _ImageInstructionForm) -> str:
         mip = int(form.mip)
         gfx9 = self.isa_spec.profile.image_dimensions_in_resource
         if not mip and not form.derivatives:
@@ -4349,7 +4403,9 @@ class CodeGenerator:
             validation_body = ' const auto &inst_ = *inst;'
             has_encoding_validation = False
             if has_op:
-                size_line += '\n  opcode_ = inst_.op;'
+                size_line += (
+                    '\n  opcode_ = ' + self._decoded_opcode(inst_enc, 'inst_') + ';'
+                )
             literal64_conds = self._literal64_condition_names(inst_enc)
             explicit_literal64_conds = [
                 name for name, _ in inst_enc.enc_conds if name.startswith('has_lit64')
@@ -5898,6 +5954,15 @@ class CodeGenerator:
     def _mimg_operand_size_expr(
         self, enc_name: str, inst_name: str, opnd_name: str
     ) -> str | None:
+        if (
+            inst_name == 'IMAGE_GET_RESINFO'
+            and opnd_name in ('rsrc', 'srsrc')
+            and any(
+                f.name == 'r128'
+                for f in self.isa_spec.encoding_map[enc_name].ucode_fields
+            )
+        ):
+            return '(reinterpret_cast<const OpEncoding *>(inst)->r128 ? 128 : 256)'
         if inst_name in ('IMAGE_LOAD_BY2', 'IMAGE_LOAD_BY4'):
             # These multi-pixel operations do not use ordinary DMASK sizing.
             # Keep the XML tuple until their result layout is qualified.
@@ -5952,10 +6017,10 @@ class CodeGenerator:
             )
         if enc_name.upper() != 'ENC_MIMG':
             return None
-        if self._issues_image_memory(inst_name) and opnd_name == 'vaddr':
-            count = self._image_coordinate_register_count(inst_name).replace(
-                'inst_.', 'reinterpret_cast<const OpEncoding *>(inst)->'
-            )
+        if opnd_name == 'vaddr' and self._issues_image_memory(inst_name):
+            count = self._image_coordinate_register_count(
+                self._image_instruction_form(inst_name)
+            ).replace('inst_.', 'reinterpret_cast<const OpEncoding *>(inst)->')
             return f'32 * {count}'
         if not self.isa_spec.profile.has_gfx11_image_address_extension:
             return None
@@ -11330,13 +11395,16 @@ class CodeGenerator:
                         if self.semantics
                         else None
                     )
-                    _image_address_metadata = bool(
-                        inst_sem
-                    ) and self._issues_image_memory(inst.name)
+                    address_base = self._image_address_base(inst) if inst_sem else None
+                    image_address_form = (
+                        self._image_instruction_form(inst.name)
+                        if inst_sem and self._issues_image_memory(inst.name)
+                        else None
+                    )
                     _image_d16_preserves_destination = (
-                        _image_address_metadata
+                        image_address_form is not None
                         and inst_sem.semantic_class in ('image_load', 'image_sample')
-                        and not self._image_instruction_form(inst.name).gather
+                        and not image_address_form.gather
                         and not self.isa_spec.profile.d16_loads_zero_unselected_half
                     )
                     # Resolve the instruction's own encoding field names.
@@ -11896,8 +11964,8 @@ class CodeGenerator:
                         )
                     if inst_sem:
                         access_conditions = []
-                        if self._issues_image_memory(inst.name):
-                            form = self._image_instruction_form(inst.name)
+                        if image_address_form is not None:
+                            form = image_address_form
                             access_conditions += [
                                 'modifiers.image_address = &vaddr;',
                                 f'modifiers.image_coordinates = {self._image_coordinates()};',
@@ -12090,6 +12158,23 @@ class CodeGenerator:
                                 access_conditions.append(
                                     'modifiers.exec_all_if_nonzero = true;'
                                 )
+                        if (
+                            inst.name.startswith(('BUFFER_STORE_', 'TBUFFER_STORE_'))
+                            and 'FORMAT' in inst.name
+                            and 'D16' in inst.name
+                            and inst.name.endswith('_XYZ')
+                        ):
+                            access_conditions.append(
+                                'modifiers.packed_store_data = &vdata;'
+                            )
+                        if (
+                            self._issues_image_memory(inst.name)
+                            and inst_sem.semantic_class == 'image_store'
+                        ):
+                            access_conditions.append(
+                                'if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u)) '
+                                'modifiers.packed_store_data = &vdata;'
+                            )
                         result_bytes = last_result_bytes = 0xF
                         if (
                             'load' in inst_sem.semantic_class
@@ -12129,9 +12214,8 @@ class CodeGenerator:
                             )
                         if _image_d16_preserves_destination:
                             access_conditions.append(
-                                'if (inst_.d16 && '
-                                '(std::popcount(uint32_t{inst_.dmask}) & 1u)) '
-                                'modifiers.memory_result_last_bytes = 0x3;'
+                                'if (inst_.d16) modifiers.set_packed_image_result('
+                                'std::popcount(uint32_t{inst_.dmask}), vdata.size_bits() / 32);'
                             )
                         if access_conditions:
                             if self._supports_dpp_for_instruction(
@@ -12211,7 +12295,22 @@ class CodeGenerator:
                         and self._supports_dpp_for_instruction(inst, inst_dpp_enc_name)
                         and any(o.name == 'sdst' and o.is_output for o in inst.operands)
                     )
-                    if _image_address_metadata:
+                    if (
+                        address_base
+                        and inst.name == 'IMAGE_GET_RESINFO'
+                        and 'r128' in inst_field_names
+                    ):
+                        # Assembly spells the full resource tuple even when R128 reads half.
+                        public_members.append(
+                            cgen.Line(
+                                'void append_src_operand(std::string &out, uint8_t index) const override {\n'
+                                '  if (index == 1 && inst_.r128) {\n'
+                                '    out += Operand(256, OperandType::OPR_SREG, src_operand(1)->encoding_value()).name();\n'
+                                '    return;\n  }\n'
+                                '  ImageAddressInstruction::append_src_operand(out, index);\n}'
+                            )
+                        )
+                    if image_address_form is not None:
                         if self.isa_spec.arch_name == 'rdna4':
                             public_members.append(
                                 cgen.Statement(
@@ -12416,7 +12515,7 @@ class CodeGenerator:
                         if len(active_selector_fields) != len(_base_literal_fields):
                             literal_policy_args += f', {len(active_selector_fields)}'
                     init_list_parts = [
-                        f'{inst.fmt_true_enc_name}({mnemonic_expr}, '
+                        f'{"ImageAddressInstruction" if address_base else inst.fmt_true_enc_name}({mnemonic_expr}, '
                         f'reinterpret_cast<const OpEncoding*>(inst), '
                         f'{exec_fn_expr})'
                     ] + opnd_ctor_init
@@ -13660,6 +13759,17 @@ class CodeGenerator:
                                 f'{store_data}.set_register_byte_mask(0x{mask:x});'
                             )
 
+                    if (
+                        inst.name.startswith(('BUFFER_STORE_', 'TBUFFER_STORE_'))
+                        and 'FORMAT' in inst.name
+                        and 'D16' in inst.name
+                        and inst.name.endswith('_X')
+                    ):
+                        mask = 0xC if '_HI_' in inst.name else 0x3
+                        ctor_body_parts.append(
+                            f'vdata.set_register_byte_mask({hex(mask)});'
+                        )
+
                     if inst_sem and inst_sem.semantic_class.startswith('mad_mix'):
                         opsel, opsel_hi = self.isa_spec.profile.vop3p_opsel_fields
                         for i in range(3):
@@ -14755,15 +14865,15 @@ class CodeGenerator:
                         )
 
                     s = cgen.Struct(
-                        f'{inst.fmt_name} : public {inst.fmt_true_enc_name}',
+                        f'{inst.fmt_name} : public {address_base or inst.fmt_true_enc_name}',
                         class_members,
                     )
                     inst_classes.append(s)
                     inst_impls = [class_ctor_impl]
-                    if _image_address_metadata:
+                    if image_address_form is not None:
                         address_registers = self._image_coordinates()
                         coordinate_count = self._image_coordinate_register_count(
-                            inst.name
+                            image_address_form
                         )
                         image_d16_preservation = (
                             '  const uint32_t components = '
@@ -15480,6 +15590,13 @@ class CodeGenerator:
                         False,
                     ),
                 ]
+                if any(self._image_address_base(i) for i in all_insts):
+                    h_includes.append(
+                        (
+                            'rocjitsu/isa/arch/amdgpu/shared/image_address_instruction.h',
+                            False,
+                        )
+                    )
                 if any(self._issues_image_memory(i.name) for i in all_insts):
                     h_includes.append(
                         ('rocjitsu/isa/arch/amdgpu/shared/image_address.h', False)
@@ -19087,15 +19204,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                             )
                         )
                     else:
-                        opcode_expr = 'op.op'
-                        fields = {field.name: field for field in dte.enc.ucode_fields}
-                        if 'opm' in fields and dte.enc.enc_name in (
-                            'ENC_MUBUF',
-                            'ENC_MTBUF',
-                        ):
-                            # GFX10 buffer encodings split the high opcode bit
-                            # into OPM (in word 1 for MTBUF).
-                            opcode_expr += f' | (op.opm << {fields["op"].bit_cnt})'
+                        opcode_expr = self._decoded_opcode(dte.enc, 'op')
                         sub_decode_body = cgen.Block(
                             [
                                 cgen.Value(
