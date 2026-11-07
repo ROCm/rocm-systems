@@ -6,6 +6,10 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Added
 
+**API:**
+
+  - `rocprofiler_kernel_dispatch_info_t` carries the dispatch's HIP graph launch: `graph_exec_id` (as in the `ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH` records; 0 outside a graph launch) and `graph_node_id` (its ordinal among the kernel dispatches and memory copies of that launch, the numbering of rocprofv3's `graph_node_id`). Any tool can now attribute kernel dispatch tracing records to graph nodes; before, only rocprofv3's tool computed this. Taken from the reserved bytes, so the struct stays 128 bytes; check `size` before reading the fields.
+
 ### Changed
 
 ### Resolved issues
