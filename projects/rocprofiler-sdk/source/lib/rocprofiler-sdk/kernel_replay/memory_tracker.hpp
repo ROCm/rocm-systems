@@ -48,8 +48,15 @@ namespace memory_tracker
 // snapshots so a replay only saves/restores its own agent's device memory.
 struct alloc_info_t
 {
-    size_t      size  = 0;
-    hsa_agent_t agent = {.handle = 0};
+    size_t      size        = 0;
+    hsa_agent_t agent       = {.handle = 0};
+    uint64_t    lifetime_id = 0;
+
+    bool operator==(const alloc_info_t& rhs) const
+    {
+        return size == rhs.size && agent.handle == rhs.agent.handle &&
+               lifetime_id == rhs.lifetime_id;
+    }
 };
 
 // ptr -> allocation size in bytes.
@@ -74,6 +81,19 @@ record_free(void* ptr);
 // own agent's device memory.
 alloc_map_t
 snap_inventory(hsa_agent_t agent);
+
+// Unlike the ptr->size snapshot, this view distinguishes allocations that reused a freed address.
+tracked_map_t
+snap_allocation_identity(hsa_agent_t agent);
+
+bool
+allocations_match(hsa_agent_t agent, const tracked_map_t& expected);
+
+// For callers already holding inventory()'s read lock through validation and restore.
+bool
+allocations_match(hsa_agent_t          agent,
+                  const tracked_map_t& expected,
+                  const tracked_map_t& locked_inventory);
 
 // Side inventory of live pool allocations that carried HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG and are
 // otherwise trackable (coarse device VRAM). The main inventory never records those pointers -- the

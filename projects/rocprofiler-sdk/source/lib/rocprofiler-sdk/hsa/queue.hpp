@@ -102,6 +102,12 @@ struct queue_callbacks_t
 class Queue
 {
 public:
+    enum class engine_type
+    {
+        compute,
+        non_compute
+    };
+
     using context_t       = context::context;
     using context_array_t = common::container::small_vector<const context_t*>;
     using callback_t      = void (*)(hsa_status_t status, hsa_queue_t* source, void* data);
@@ -144,6 +150,7 @@ public:
 
     const hsa_queue_t*        intercept_queue() const { return _intercept_queue; };
     virtual const AgentCache& get_agent() const { return _agent; }
+    engine_type               get_engine_type() const { return _engine_type; }
 
     void signal_async_handler(pooled_signal_t* _signal, hsa_signal_t raw_signal, void* data) const;
     static pooled_signal_t* create_signal(uint32_t attribute, hsa_signal_t* _signal, bool use_pool);
@@ -196,6 +203,8 @@ public:
     hsa_signal_t                    ready_signal    = {.handle = 0};
 
 private:
+    friend class QueueController;
+    engine_type                          _engine_type          = engine_type::compute;
     std::atomic<int>                     _notifiers            = {0};
     std::atomic<int64_t>                 _active_async_packets = {0};
     CoreApiTable                         _core_api             = {};

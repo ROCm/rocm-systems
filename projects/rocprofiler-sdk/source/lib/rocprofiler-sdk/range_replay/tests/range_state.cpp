@@ -28,7 +28,12 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <atomic>
 #include <cstdint>
+#include <random>
+#include <thread>
+#include <vector>
 
 namespace range_replay = ::rocprofiler::range_replay;
 
@@ -293,5 +298,252 @@ TEST(range_replay_state, code_object_unload_with_no_range_open_is_harmless)
 {
     ASSERT_FALSE(range_replay::any_range_open());
     range_replay::note_code_object_unload();
+    EXPECT_FALSE(range_replay::any_range_open());
+}
+
+// Random operation sequences against an independent model of the decision table: the first decline
+// wins and drops the recording, the first bind fixes queue and agent, a later agent or queue
+// mismatch declines, the budget declines the dispatch that overruns it, and code objects newer than
+// a nonzero watermark decline.
+TEST(range_replay_state, record_matches_a_reference_model_under_random_operations)
+{
+    struct model_t
+    {
+        rocprofiler_range_replay_status_t status    = ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED;
+        uint64_t                          queue     = 0;
+        uint64_t                          agent     = 0;
+        size_t                            recorded  = 0;
+        size_t                            observed  = 0;
+        uint64_t                          watermark = 0;
+
+        bool eligible() const { return status == ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED; }
+        void decline(rocprofiler_range_replay_status_t reason)
+        {
+            if(reason == ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED || !eligible()) return;
+            status   = reason;
+            recorded = 0;
+        }
+    };
+
+    constexpr rocprofiler_range_replay_status_t reasons[] = {
+        ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED,
+        ROCPROFILER_RANGE_REPLAY_STATUS_CONCURRENT_DISPATCH,
+        ROCPROFILER_RANGE_REPLAY_STATUS_MEMORY_COPY_IN_RANGE,
+        ROCPROFILER_RANGE_REPLAY_STATUS_SNAPSHOT_FAILED};
+    constexpr uint64_t queues[] = {queue_a, queue_b};
+    constexpr uint64_t agents[] = {agent_a, agent_b};
+
+    auto rng = std::mt19937_64{0x5eed};
+    for(int sequence = 0; sequence < 2000; ++sequence)
+    {
+        auto record = range_replay::range_record_t{static_cast<uint64_t>(sequence)};
+        auto model  = model_t{};
+        // Some sequences run the recording up to the budget.
+        const bool fill = (sequence % 50) == 0;
+        for(int step = 0; step < (fill ? 5000 : 64); ++step)
+        {
+            switch(fill ? 1 : rng() % 6)
+            {
+                case 0:
+                {
+                    const auto queue = queues[rng() % 2];
+                    const auto agent = agents[rng() % 2];
+                    auto       ok    = false;
+                    if(model.eligible())
+                    {
+                        if(model.queue == 0 && model.agent == 0)
+                        {
+                            model.queue = queue;
+                            model.agent = agent;
+                            ok          = true;
+                        }
+                        else if(model.agent != agent)
+                            model.decline(ROCPROFILER_RANGE_REPLAY_STATUS_MULTI_AGENT);
+                        else if(model.queue != queue)
+                            model.decline(ROCPROFILER_RANGE_REPLAY_STATUS_MULTI_QUEUE);
+                        else
+                            ok = true;
+                    }
+                    ASSERT_EQ(record.bind(queue, agent), ok);
+                    break;
+                }
+                case 1:
+                {
+                    auto ok = false;
+                    if(model.eligible())
+                    {
+                        ++model.observed;
+                        if(model.recorded >= range_replay::kMaxRecordedDispatches)
+                            model.decline(ROCPROFILER_RANGE_REPLAY_STATUS_PROGRAM_TOO_LARGE);
+                        else
+                        {
+                            ++model.recorded;
+                            ok = true;
+                        }
+                    }
+                    ASSERT_EQ(record.add_dispatch(make_dispatch(rng() % 7 + 1)), ok);
+                    break;
+                }
+                case 2:
+                {
+                    const auto count = static_cast<size_t>(rng() % 4);
+                    if(model.eligible()) model.observed += count;
+                    record.count_dispatches(count);
+                    break;
+                }
+                case 3:
+                {
+                    const auto reason = reasons[rng() % 4];
+                    model.decline(reason);
+                    record.decline(reason);
+                    break;
+                }
+                case 4:
+                {
+                    model.watermark = rng() % 4;
+                    record.set_code_object_watermark(model.watermark);
+                    break;
+                }
+                default:
+                {
+                    const auto id = rng() % 6;
+                    auto       ok = model.eligible();
+                    if(ok && model.watermark != 0 && id > model.watermark)
+                    {
+                        model.decline(ROCPROFILER_RANGE_REPLAY_STATUS_CODE_OBJECT_CHANGED_IN_RANGE);
+                        ok = false;
+                    }
+                    ASSERT_EQ(record.admit_code_object(id), ok);
+                    break;
+                }
+            }
+            ASSERT_EQ(record.status(), model.status) << "sequence " << sequence << " step " << step;
+            ASSERT_EQ(record.eligible(), model.eligible());
+            ASSERT_EQ(record.dispatch_count(), model.recorded);
+            ASSERT_EQ(record.observed_dispatch_count(), model.observed);
+        }
+    }
+}
+
+// Owners open host ranges while other threads dispatch. Every operation is stamped on one global
+// sequence counter. A dispatch whose foreign-dispatch check ran entirely inside a range's open
+// window must decline that range; a range whose window no dispatch overlapped must stay eligible.
+TEST(range_replay_state, foreign_dispatches_decline_exactly_the_ranges_they_overlap)
+{
+    struct span_t
+    {
+        uint64_t begin = 0;
+        uint64_t end   = 0;
+    };
+    struct range_window_t
+    {
+        span_t inner    = {};  // after open returned .. before take began
+        span_t outer    = {};  // before open began .. after take returned
+        bool   declined = false;
+    };
+
+    constexpr int owners           = 4;
+    constexpr int foreigners       = 3;
+    constexpr int ranges_per_owner = 400;
+
+    auto seq        = std::atomic<uint64_t>{1};
+    auto owners_out = std::atomic<int>{owners};
+    auto windows    = std::vector<std::vector<range_window_t>>(owners);
+    auto dispatches = std::vector<std::vector<span_t>>(foreigners);
+
+    auto threads = std::vector<std::thread>{};
+    for(int i = 0; i < owners; ++i)
+    {
+        threads.emplace_back([&, i]() {
+            auto rng = std::mt19937{static_cast<uint32_t>(i + 1)};
+            for(int r = 0; r < ranges_per_owner; ++r)
+            {
+                auto window        = range_window_t{};
+                window.outer.begin = seq.fetch_add(1);
+                if(!range_replay::open_range(static_cast<uint64_t>(r))) return;
+                range_replay::set_host_mode(*range_replay::current_range());
+                window.inner.begin = seq.fetch_add(1);
+                for(auto spin = rng() % 64; spin > 0; --spin)
+                    std::this_thread::yield();
+                window.inner.end = seq.fetch_add(1);
+                auto taken       = range_replay::range_context_t{};
+                if(!range_replay::take_range(taken)) return;
+                window.outer.end = seq.fetch_add(1);
+                window.declined  = !taken.record.eligible();
+                if(window.declined)
+                {
+                    EXPECT_EQ(taken.record.status(),
+                              ROCPROFILER_RANGE_REPLAY_STATUS_CONCURRENT_DISPATCH);
+                }
+                windows[i].emplace_back(window);
+                // Leave gaps so that some windows see no dispatch at all.
+                for(auto spin = rng() % 256; spin > 0; --spin)
+                    std::this_thread::yield();
+            }
+            owners_out.fetch_sub(1);
+        });
+    }
+    for(int i = 0; i < foreigners; ++i)
+    {
+        threads.emplace_back([&, i]() {
+            auto rng = std::mt19937{static_cast<uint32_t>(100 + i)};
+            while(owners_out.load() > 0)
+            {
+                auto span  = span_t{};
+                span.begin = seq.fetch_add(1);
+                range_replay::note_foreign_dispatch((rng() % 2) != 0 ? agent_a : agent_b);
+                span.end = seq.fetch_add(1);
+                dispatches[i].emplace_back(span);
+                for(auto spin = rng() % 512; spin > 0; --spin)
+                    std::this_thread::yield();
+            }
+        });
+    }
+    for(auto& thread : threads)
+        thread.join();
+
+    auto all = std::vector<span_t>{};
+    for(const auto& list : dispatches)
+        all.insert(all.end(), list.begin(), list.end());
+    std::sort(all.begin(), all.end(), [](auto lhs, auto rhs) { return lhs.begin < rhs.begin; });
+    // min_end_after[k]: smallest end among dispatches k..; max_end_before[k]: largest end among
+    // dispatches ..k-1.
+    auto min_end_after  = std::vector<uint64_t>(all.size() + 1, UINT64_MAX);
+    auto max_end_before = std::vector<uint64_t>(all.size() + 1, 0);
+    for(size_t k = all.size(); k > 0; --k)
+        min_end_after[k - 1] = std::min(min_end_after[k], all[k - 1].end);
+    for(size_t k = 0; k < all.size(); ++k)
+        max_end_before[k + 1] = std::max(max_end_before[k], all[k].end);
+    auto first_beginning_after = [&](uint64_t stamp) {
+        return static_cast<size_t>(std::upper_bound(all.begin(),
+                                                    all.end(),
+                                                    stamp,
+                                                    [](uint64_t value, const span_t& span) {
+                                                        return value < span.begin;
+                                                    }) -
+                                   all.begin());
+    };
+
+    size_t must_decline = 0;
+    size_t must_keep    = 0;
+    for(const auto& list : windows)
+    {
+        ASSERT_EQ(list.size(), static_cast<size_t>(ranges_per_owner));
+        for(const auto& window : list)
+        {
+            if(min_end_after[first_beginning_after(window.inner.begin)] < window.inner.end)
+            {
+                ++must_decline;
+                EXPECT_TRUE(window.declined) << "a dispatch inside the window was missed";
+            }
+            if(max_end_before[first_beginning_after(window.outer.end - 1)] <= window.outer.begin)
+            {
+                ++must_keep;
+                EXPECT_FALSE(window.declined) << "declined without an overlapping dispatch";
+            }
+        }
+    }
+    EXPECT_GT(must_decline, 0U) << "the stress run never placed a dispatch inside a window";
+    EXPECT_GT(must_keep, 0U) << "the stress run never left a window undisturbed";
     EXPECT_FALSE(range_replay::any_range_open());
 }

@@ -76,6 +76,13 @@ endfunction()
 # count at CLOSE. Without it the range-exit restore would hide both.
 add_range_replay_sample(range-replay-basic basic_client.cpp ENVIRONMENT
                         "ROCPROF_RANGE_REPLAY_VERIFY=1")
+
+# Same checks as range-replay-basic, but the extra passes re-enter main() through
+# siglongjmp instead of re-submitting the recorded packets. RR_APP_MODE=host is what arms
+# the sigsetjmp; RR_HOST_REPLAY is what tells the tool to request that mode.
+add_range_replay_sample(
+    range-replay-host basic_client.cpp ENVIRONMENT "ROCPROF_RANGE_REPLAY_VERIFY=1"
+    "RR_APP_MODE=host" "RR_HOST_REPLAY=1")
 add_range_replay_sample(range-replay-opt-out opt_out_client.cpp)
 
 # GPU_MAX_HW_QUEUES is what makes the decline deterministic. HIP pools hardware queues and

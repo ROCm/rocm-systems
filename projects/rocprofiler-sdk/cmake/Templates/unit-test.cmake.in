@@ -37,6 +37,17 @@ rocprofiler_sdk_update_unit_test_environment(_ENVIRONMENT "LD_LIBRARY_PATH"
 rocprofiler_sdk_update_unit_test_environment(_ENVIRONMENT "ROCPROFILER_METRICS_PATH"
                                              "$ENV{ROCPROFILER_METRICS_PATH}")
 
+# This file is installed at
+# <prefix>/share/rocprofiler-sdk/tests/unit-tests/<target>.cmake. The baked
+# ROCPROFILER_METRICS_PATH points at the build tree, which is not there when the installed
+# tests run. config.yaml lives two directories above this file.
+get_filename_component(_ROCPROF_UNIT_TEST_SHARE "${CMAKE_CURRENT_LIST_DIR}/../.."
+                       ABSOLUTE)
+if(EXISTS "${_ROCPROF_UNIT_TEST_SHARE}/config.yaml")
+    rocprofiler_sdk_update_unit_test_environment(_ENVIRONMENT "ROCPROFILER_METRICS_PATH"
+                                                 "${_ROCPROF_UNIT_TEST_SHARE}")
+endif()
+
 # test sources are in a subfolder
 set(_TEST_SOURCES)
 foreach(_FILE ${_SOURCES})
