@@ -1131,7 +1131,7 @@ TEST_F(ProfilerPlanMicrotest, StartTaskEvents_P2pDescriptorAdvertisesItsChannels
   pt->datatype = ncclFloat32;
   pt->root = 4;
   pt->nChannels = 2;
-  pt->channelMask = 0x7;
+  pt->channelMask = {{0x7}};
   pt->profilerTag = 12;
   pt->p2pApiEventHandle = H(0x32);
   ASSERT_EQ(ncclSuccess, ncclProfilerStartTaskEvents(plan_.get()));
@@ -1845,11 +1845,11 @@ TEST_F(ProfilerThreadMicrotest, PostPlanWork_P2pPair_SharesOneCounterBumpPerChan
   }
   ncclTaskP2p* send = AddP2p(ncclProfileKernelCh);
   send->p2pPairId = 1;
-  send->channelMask = 0x3;
+  send->channelMask = {{0x3}};
   send->eventHandle = H(0x61);
   ncclTaskP2p* recv = AddP2p(ncclProfileKernelCh);
   recv->p2pPairId = 1;
-  recv->channelMask = 0x6;
+  recv->channelMask = {{0x6}};
   recv->eventHandle = H(0x62);
   ASSERT_EQ(ncclSuccess, ncclProfilerPostPlanWork(comm_.get(), plan_.get()));
   for (int ch : {0, 1, 2}) EXPECT_EQ(comm_->profiler.workCounter[ch], 1u) << ch;
@@ -1869,31 +1869,55 @@ TEST_F(ProfilerThreadMicrotest, PostPlanWork_P2pOutsideAPair_BumpsPerTask) {
   for (uint16_t pid : {0, 0, 3, 4}) {
     ncclTaskP2p* t = AddP2p(ncclProfileKernelCh);
     t->p2pPairId = pid;
-    t->channelMask = 0x1;
+    t->channelMask = {{0x1}};
   }
   ncclTaskP2p* lone = AddP2p(ncclProfileKernelCh);  // pair partner without KernelCh still shares the bump
   lone->p2pPairId = 5;
-  lone->channelMask = 0x1;
+  lone->channelMask = {{0x1}};
   ncclTaskP2p* partner = AddP2p(ncclProfileP2p);
   partner->p2pPairId = 5;
-  partner->channelMask = 0x1;
-  AddP2p(ncclProfileP2p)->channelMask = 0x1;  // no KernelCh at all
+  partner->channelMask = {{0x1}};
+  AddP2p(ncclProfileP2p)->channelMask = {{0x1}};  // no event, but the device still advances this work
   ASSERT_EQ(ncclSuccess, ncclProfilerPostPlanWork(comm_.get(), plan_.get()));
-  EXPECT_EQ(comm_->profiler.workCounter[0], 5u);
+  EXPECT_EQ(comm_->profiler.workCounter[0], 6u);
   EXPECT_EQ(OpsOn(comm_.get(), 0), 5u);
 }
 
-// Only channels below 64 are asserted: the post loop runs to MAXCHANNELS but shifts a 64-bit mask, which is
-// undefined for channels >= 64.
-TEST_F(ProfilerThreadMicrotest, PostPlanWork_P2pOnChannels0And63_BumpsExactlyThose) {
+TEST_F(ProfilerThreadMicrotest, PostPlanWork_MixedActivationSplitWorksKeepTheDeviceCounterAligned) {
+  Load(ncclProfileKernelCh);
+  CreateThread(comm_.get());
+  Stamp(started_, 0, 2, 10);
+  Stamp(completed_, 0, 2, 20);
+
+  ncclTaskP2p* unprofiled = AddP2p(ncclProfileP2p);
+  unprofiled->p2pPairId = 1;
+  unprofiled->channelMask = {{0x1}};
+  ncclTaskP2p* profiled = AddP2p(ncclProfileKernelCh);
+  profiled->p2pPairId = 2;
+  profiled->channelMask = {{0x1}};
+  profiled->eventHandle = H(0x63);
+
+  ASSERT_EQ(ncclSuccess, ncclProfilerPostPlanWork(comm_.get(), plan_.get()));
+  EXPECT_EQ(comm_->profiler.workCounter[0], 2u);
+  ASSERT_TRUE(waitUntil([this] { return fake_.NumStops() == 1; }));
+  auto starts = fake_.StartsOf(ncclProfileKernelCh);
+  ASSERT_EQ(starts.size(), 1u);
+  EXPECT_EQ(starts[0].d.parentObj, H(0x63));
+  EXPECT_EQ(starts[0].d.kernelCh.pTimer, 10u);
+}
+
+TEST_F(ProfilerThreadMicrotest, PostPlanWork_P2pMultiwordMaskBumpsExactlyThoseChannels) {
   Load(ncclProfileKernelCh);
   CreateThread(comm_.get());
   ncclTaskP2p* t = AddP2p(ncclProfileKernelCh);
-  t->channelMask = 0x1 | (1ull << 63);
+  t->channelMask.masks[0] = 0x1 | (1ull << 63);
+  t->channelMask.masks[2] = 0x1;
   ASSERT_EQ(ncclSuccess, ncclProfilerPostPlanWork(comm_.get(), plan_.get()));
-  for (int c = 0; c < 64; c++) EXPECT_EQ(comm_->profiler.workCounter[c], c == 0 || c == 63 ? 1u : 0u) << c;
+  for (int c = 0; c < MAXCHANNELS; c++)
+    EXPECT_EQ(comm_->profiler.workCounter[c], c == 0 || c == 63 || c == 128 ? 1u : 0u) << c;
   EXPECT_EQ(OpsOn(comm_.get(), 0), 1u);
   EXPECT_EQ(OpsOn(comm_.get(), 63), 1u);
+  EXPECT_EQ(OpsOn(comm_.get(), 128), 1u);
 }
 
 TEST_F(ProfilerThreadMicrotest, ReserveSymCounters_WritesTheNextSymCounterPerPlanChannel) {

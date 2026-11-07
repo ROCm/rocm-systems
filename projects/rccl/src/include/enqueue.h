@@ -31,6 +31,35 @@ int64_t ncclParamAllgathervEnable();
 int64_t ncclParamP2pLLThreshold();
 int64_t ncclParamChunkSize();
 int64_t ncclParamLaunchOrderImplicit();
+bool rcclP2pPeerIsLocal(struct ncclComm* comm, int peer);
+int rcclP2pChannelStrideForApi(struct ncclComm* comm, ncclFunc_t collAPI, int peer, int directMaxChannels,
+                               bool useMemcpy = false);
+// A widened direction uses either the per-peer tile (up to defaultStride channels) or the whole
+// widened tile, so the channel set of a transfer follows from its own size on both ends.
+inline int rcclP2pDirectTileChannels(int nChannels, int defaultStride, int directStride) {
+  if (directStride <= defaultStride || nChannels <= defaultStride) return nChannels;
+  return nChannels < directStride ? defaultStride : directStride;
+}
+
+struct rcclP2pPreconnectPolicy {
+  int nTiles;
+  int partCounts[2];
+  int mappingStrides[2];
+  uint8_t completeMask;
+};
+
+inline struct rcclP2pPreconnectPolicy rcclP2pPreconnectPolicyForTask(int channelsPerPeer, int normalParts,
+                                                                     int directStride) {
+  struct rcclP2pPreconnectPolicy policy = {};
+  policy.nTiles = directStride > channelsPerPeer ? 2 : 1;
+  policy.partCounts[0] = normalParts;
+  policy.partCounts[1] = directStride;
+  policy.mappingStrides[0] = channelsPerPeer;
+  policy.mappingStrides[1] = directStride;
+  if (normalParts == channelsPerPeer) policy.completeMask |= 1;
+  if (policy.nTiles == 2) policy.completeMask |= 2;
+  return policy;
+}
 
 ncclResult_t ncclGroupJobLaunch(struct ncclIntruQueue<struct ncclAsyncJob, &ncclAsyncJob::next>* asyncJobsMain,
                                 volatile bool* groupAbortFlag);
