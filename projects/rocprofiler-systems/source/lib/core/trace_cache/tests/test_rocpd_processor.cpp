@@ -1780,21 +1780,22 @@ TEST_F(rocpd_write_read_test_interface, handle_in_time_sample_pathway)
 {
     // Prepare: seed metadata/agents/samples and run rocpd_processor_t (opens reader).
     run_processor_and_open_reader(
-        { managed_gpu_agent() },
+        { managed_cpu_agent() },
         [](const std::shared_ptr<metadata_registry>& metadata) {
-            metadata->add_pmc_info(make_agent_pmc_row({ .type        = agent_type::gpu,
+            metadata->add_pmc_info(make_agent_pmc_row({ .type        = agent_type::cpu,
                                                         .name        = "my_track",
-                                                        .target_arch = "GPU",
+                                                        .target_arch = "CPU",
                                                         .description = "IN_TIME" }));
             add_process_scoped_track(metadata, "my_track");
         },
         [](rocpd_processor_t& processor) {
             constexpr std::uint64_t k_timestamp = 9500;
             constexpr std::uint64_t k_event_id  = 5;
-            const in_time_sample    its{
-                0, "my_track", k_timestamp, R"({"metadata": "test"})", k_event_id, 3,
-                0, "",         ""
-            };
+            const in_time_sample    its{ 0,           "my_track",
+                                      k_timestamp, R"({"metadata": "test"})",
+                                      k_event_id,  3,
+                                      0,           "",
+                                      "",          0 };
             processor.handle(its);
         });
 
@@ -1802,8 +1803,8 @@ TEST_F(rocpd_write_read_test_interface, handle_in_time_sample_pathway)
     const auto pmc_infos = m_reader->get_all_pmc_info();
     ASSERT_EQ(pmc_infos.size(), 1U);
     expect_named_pmc_arch(pmc_infos, { .name                 = "my_track",
-                                       .expected_arch        = "GPU",
-                                       .expected_agent_type  = "GPU",
+                                       .expected_arch        = "CPU",
+                                       .expected_agent_type  = "CPU",
                                        .expected_symbol      = "my_track",
                                        .expected_units       = "",
                                        .expected_description = "IN_TIME" });
