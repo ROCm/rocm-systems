@@ -41,9 +41,9 @@ test_categories:
       # rccl_wrap.cc
       - "WrapMicrotest.*"
       - "WrapMicrotestIsolated.*"
-      # ce_coll.cc (rccl-UnitTestsMicroCe)
-      - "CeCollMicrotest.*"
-      - "CeInitMicrotest.*"
+      # ce_coll.cc (rccl-UnitTestsMicroCeColl)
+      - "CeColl*"
+      - "CeInit*"
       - "LaunchPaths/CeAlltoAllvSyncMicrotest.*"
       # dev_runtime.cc
       - "Alloc*"
@@ -57,7 +57,7 @@ test_categories:
       - "Win*"
       # test/common/ProcessIsolatedTestRunner.cpp
       - "ProcessIsolatedRunnerMicrotest.*"
-      # test/host/host_test_dispatch.cc (rccl-UnitTestsMicroHostDispatch)
+      # test/host/host_test_dispatch.cc (rccl-UnitTestsMicroHostTestDispatch)
       - "HostDispatch*"
     exclude_windows:
       - "*"
