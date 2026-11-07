@@ -453,6 +453,12 @@ class IPCContext : public Context {
 
   __device__ void internal_get_broadcastmem_wave(void *dst, const void *src, int nelems, int pe_root);
 
+  __device__ void broadcastmem_linear_thread_puts_wave(rocshmem_team_t team, void *dst,
+                                                       const void *src, int nelems, int PE_root);
+
+  __device__ void broadcastmem_wg_linear_thread_puts(rocshmem_team_t team, void *dst,
+                                                      const void *src, int nelems, int PE_root);
+
   template <typename T>
   __device__ void internal_broadcast_wave(T *dst, const T *src, int nelems,
                                       int pe_root, int pe_start,
@@ -491,6 +497,23 @@ class IPCContext : public Context {
 
   __device__ void fcollectmem_linear_wave(rocshmem_team_t team, void *dest,
                                   const void *source, int nelems);
+
+  __device__ void fcollectmem_linear_thread_puts_wave(rocshmem_team_t team,
+      void *dst, const void *src, int nelems);
+
+  __device__ void fcollectmem_wg_linear(rocshmem_team_t team, void *dest,
+                                        const void *source, int nelems);
+
+  __device__ void fcollectmem_wg_linear_thread_puts(rocshmem_team_t team,
+                                                    void *dest,
+                                                    const void *source,
+                                                    int nelems);
+
+  __device__ void internal_fcollectmem_wave(rocshmem_team_t team, void *dst,
+                                            const void *src, int nelems);
+
+  __device__ void internal_fcollectmem_wg(rocshmem_team_t team, void *dst,
+                                          const void *src, int nelems);
 
   __device__ void internal_sync(int pe, int PE_start, int stride, int PE_size,
                                 int64_t *pSync);
