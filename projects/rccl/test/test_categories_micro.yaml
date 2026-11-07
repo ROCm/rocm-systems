@@ -68,6 +68,7 @@ test_categories:
       - "TuningGeneralMicrotest.*"
       # tuning/tuning.cc
       - "TuningMicrotest.*"
+      - "SymmetricLsaTuningMicrotest.*"
       # plugin/tuner/csv_tuner.cc
       - "CsvTunerMicrotest.*"
       # commDump.cc
