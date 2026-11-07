@@ -46,6 +46,10 @@ struct tmp_file
     bool remove();
     bool exists() const;
 
+    // Stop using the current file without writing to or removing it, and use _filename from now
+    // on. A fork() child calls this: its open file belongs to the parent.
+    void detach(std::string _filename);
+
     explicit operator bool() const;
 
     template <typename Tp>

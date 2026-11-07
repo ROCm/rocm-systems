@@ -189,3 +189,154 @@ add_signal_handler_test(
     VALIDATE_EXPECT clean-exit
     PASS_REGEX "clean exit"
     NO_TIMEOUT_SIGNAL)
+
+# Records made before fork() must be reported by the parent only, not again by each child.
+set(_inherited_name app-fork-after-work)
+set(_inherited_outdir ${BASE_OUT_DIR}/fork-after-work)
+
+rocprofiler_add_integration_cleanup_test(
+    ${_inherited_name}
+    DIRECTORIES ${_inherited_outdir}
+    LABELS "integration-tests;signal-handler"
+    FIXTURES_SETUP ${_inherited_name}-clean)
+
+rocprofiler_add_integration_execute_test(
+    ${_inherited_name}
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-trace --marker-trace
+        --output-format json rocpd -d ${_inherited_outdir} -o out_%pid% --
+        $<TARGET_FILE:signal-handler-test> --fork-after-work
+    DEPENDS signal-handler-test
+    TIMEOUT ${CTEST_TIMEOUT}
+    LABELS "integration-tests;signal-handler"
+    PRELOAD "${PRELOAD_ENV}"
+    PASS_REGULAR_EXPRESSION "clean exit"
+    FIXTURES_REQUIRED ${_inherited_name}-clean
+    FIXTURES_SETUP ${_inherited_name})
+
+rocprofiler_add_integration_validate_test(
+    ${_inherited_name}
+    TEST_PATHS validate_fork_inherited.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    TIMEOUT ${CTEST_TIMEOUT}
+    LABELS "integration-tests;signal-handler"
+    FIXTURES_REQUIRED ${_inherited_name}
+    ARGS --output-dir ${_inherited_outdir} --expect clean-exit --process-type fork)
+
+# Hook-driven regressions run only against non-installed variants in the build tree. The
+# ordinary installed-package signal/fork cases above use production libraries.
+if(NOT TARGET rocprofiler-sdk-fork-test-runtime)
+    return()
+endif()
+set(_fork_test_root "$<TARGET_FILE_DIR:rocprofiler-sdk-fork-test-shared>/..")
+add_dependencies(signal-handler-test rocprofiler-sdk-fork-test-runtime)
+
+# Model an application atfork prepare handler registered before rocprofv3 writing the
+# first marker record after the tool has locked its output registry. The record is
+# deliberately omitted instead of re-entering the registry and deadlocking fork().
+set(_prepare_name app-fork-prepare-marker)
+set(_prepare_outdir ${BASE_OUT_DIR}/fork-prepare-marker)
+
+rocprofiler_add_integration_cleanup_test(
+    ${_prepare_name}
+    DIRECTORIES ${_prepare_outdir}
+    LABELS "integration-tests;signal-handler"
+    FIXTURES_SETUP ${_prepare_name}-clean)
+
+rocprofiler_add_integration_execute_test(
+    ${_prepare_name}
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --rocm-root ${_fork_test_root}
+        --marker-trace --output-format json -d ${_prepare_outdir} -o out_%pid% --
+        $<TARGET_FILE:signal-handler-test> --fork-prepare-marker
+    DEPENDS signal-handler-test
+    TIMEOUT ${CTEST_TIMEOUT}
+    LABELS "integration-tests;signal-handler"
+    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "ROCPROF_INTERNAL_TEST_ATFORK_PREPARE_WRITE=1"
+    PASS_REGULAR_EXPRESSION "clean exit"
+    FIXTURES_REQUIRED ${_prepare_name}-clean
+    FIXTURES_SETUP ${_prepare_name})
+
+rocprofiler_add_integration_validate_test(
+    ${_prepare_name}
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini
+    TIMEOUT ${CTEST_TIMEOUT}
+    LABELS "integration-tests;signal-handler"
+    FIXTURES_REQUIRED ${_prepare_name}
+    ARGS --output-dir ${_prepare_outdir} --expect clean-exit --process-type
+         fork-prepare-marker)
+
+# Real production-handler regressions. Pipe rendezvous in the application/tool establish
+# the incomplete lifecycle; TIMEOUT diagnoses deadlocks and does not establish the race.
+foreach(
+    _case
+    main-startup-fork
+    tool-configure-fork
+    tool-logging-fork
+    fork-child-transition-abort
+    detach-output-retry
+    detach-output-retry-reattach
+    fork-prepare-detach
+    fork-during-finalization
+    fork-during-sdk-finalization
+    fork-during-tool-finalization
+    fork-during-detach
+    fork-during-detach-sync
+    detach-finalization-handoff
+    detach-finalization-handoff-sync)
+    set(_name app-${_case})
+    set(_outdir ${BASE_OUT_DIR}/${_case})
+    set(_mode ${_case})
+    set(_env "ROCPROF_ATTACH_OUTPUT_GENERATION_SYNC=0")
+    if(_case MATCHES "-sync$")
+        set(_env "ROCPROF_ATTACH_OUTPUT_GENERATION_SYNC=1")
+    endif()
+    if(_case STREQUAL "fork-prepare-detach")
+        set(_env "ROCPROF_ATTACH_OUTPUT_GENERATION_SYNC=1"
+                 "ROCPROF_INTERNAL_TEST_ATFORK_PREPARE_DETACH=1")
+    endif()
+    if(_case MATCHES "^(main-startup|tool-configure|tool-logging)-fork$")
+        string(REGEX REPLACE "-fork$" "" _phase "${_case}")
+        set(_mode startup-fork-check)
+        list(APPEND _env "ROCPROF_INTERNAL_TEST_INITIALIZATION_FORK=${_phase}")
+    endif()
+    if(_case STREQUAL "fork-child-transition-abort")
+        list(APPEND _env "ROCPROF_INTERNAL_TEST_CHILD_TRANSITION_ABORT=1")
+    endif()
+    if(_case MATCHES "^detach-output-retry")
+        list(APPEND _env "ROCPROF_INTERNAL_TEST_DETACH_OUTPUT_FAIL_ONCE=1")
+    endif()
+    rocprofiler_add_integration_cleanup_test(
+        ${_name}
+        DIRECTORIES ${_outdir}
+        LABELS "integration-tests;signal-handler"
+        FIXTURES_SETUP ${_name}-clean)
+
+    rocprofiler_add_integration_execute_test(
+        ${_name}
+        COMMAND
+            $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --rocm-root ${_fork_test_root}
+            --marker-trace --output-format json -d ${_outdir} -o out_%pid% --
+            $<TARGET_FILE:signal-handler-test> --${_mode}
+        DEPENDS signal-handler-test
+        TIMEOUT ${CTEST_TIMEOUT}
+        LABELS "integration-tests;signal-handler"
+        PRELOAD "${PRELOAD_ENV}"
+        ENVIRONMENT "${_env}"
+        FIXTURES_REQUIRED ${_name}-clean
+        FIXTURES_SETUP ${_name})
+
+    rocprofiler_add_integration_validate_test(
+        ${_name}
+        TEST_PATHS validate_fork_lifecycle.py
+        COPY conftest.py
+        CONFIG pytest.ini
+        TIMEOUT ${CTEST_TIMEOUT}
+        LABELS "integration-tests;signal-handler"
+        FIXTURES_REQUIRED ${_name}
+        ARGS --output-dir ${_outdir} --process-type ${_mode})
+endforeach()

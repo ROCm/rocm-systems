@@ -40,6 +40,13 @@ using static_dtor_func_t = void (*)();
 void
 destroy_static_objects();
 
+// Per-DSO: an abandoned child must not even acquire the destructor registry's mutex.
+void
+abandon_static_objects_after_fork() noexcept;
+
+bool
+static_objects_abandoned() noexcept;
+
 void
 register_static_dtor(static_dtor_func_t&&);
 

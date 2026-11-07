@@ -62,6 +62,7 @@ struct buffered_output
     void flush();
     void read();
     void clear();
+    void preserve();
     void reset();
     void destroy();
 
@@ -131,6 +132,21 @@ void
 buffered_output<Tp, DomainT>::clear()
 {
     if(!enabled) return;
+}
+
+template <typename Tp, domain_type DomainT>
+void
+buffered_output<Tp, DomainT>::preserve()
+{
+    if(!enabled) return;
+
+    if(auto*& filebuf = get_tmp_file_buffer<type>(buffer_type_v); filebuf)
+    {
+        auto lock = std::lock_guard<std::mutex>{filebuf->file.file_mutex};
+        // read_tmp_file() leaves this stream open with std::ios::in. Close it without clearing or
+        // removing any input so a later offload reopens it read/write and appends safely.
+        filebuf->file.close();
+    }
 }
 
 template <typename Tp, domain_type DomainT>

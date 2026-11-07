@@ -43,6 +43,7 @@
 
 #include <fmt/format.h>
 
+#include <pthread.h>
 #include <sys/poll.h>
 #include <unistd.h>
 #include <atomic>
@@ -1676,12 +1677,10 @@ init()
 
     if(!init_done)
     {
-        pthread_atfork(nullptr, nullptr, []() {
-            // null out child's copy on fork and reinitialize
-            // otherwise all children wait on the same thread to join
-            config::reset_on_fork();
-            init(std::make_index_sequence<KFD_EVENT_LAST>{});
-        });
+        if(!internal_threading::register_fork_child_hooks(
+               []() noexcept { config::reset_on_fork(); },
+               []() { init(std::make_index_sequence<KFD_EVENT_LAST>{}); }))
+            return ROCPROFILER_STATUS_ERROR;
 
         retcode   = init(std::make_index_sequence<KFD_EVENT_LAST>{});
         init_done = true;

@@ -25,12 +25,16 @@ set(common_headers
     elf_utils.hpp
     environment.hpp
     filesystem.hpp
+    fork_control.hpp
+    fork_lifecycle.hpp
+    fork_signal_state.hpp
     hasher.hpp
     logging.hpp
     md5sum.hpp
     mpl.hpp
     regex.hpp
     scope_destructor.hpp
+    session_lifecycle.hpp
     sha256.hpp
     simple_timer.hpp
     static_object.hpp

@@ -22,6 +22,7 @@
 
 #include "lib/common/defines.hpp"
 #include "lib/common/static_object.hpp"
+#include "lib/common/static_tl_object.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -104,16 +105,17 @@ struct range_data_t : public tracing::tracing_data
 auto&
 get_range_thread_stack()
 {
-    static thread_local auto push_op_stack = common::container::small_vector<range_data_t, 8>{};
-    return push_op_stack;
+    using stack_type                 = common::container::small_vector<range_data_t, 8>;
+    static thread_local auto*& stack = common::static_tl_object<stack_type>::construct();
+    return *stack;
 }
 
 auto&
 get_range_process_stack()
 {
-    static auto push_op_stack =
-        common::Synchronized<std::unordered_map<roctx_range_id_t, range_data_t>>{};
-    return push_op_stack;
+    using stack_type    = common::Synchronized<std::unordered_map<roctx_range_id_t, range_data_t>>;
+    static auto*& stack = common::static_object<stack_type>::construct();
+    return *stack;
 }
 }  // namespace
 
@@ -163,7 +165,17 @@ template <typename RetT, typename... Args>
 RetT
 roctx_api_impl<TableIdx, OpIdx>::functor(Args... args)
 {
-    using info_type           = roctx_api_info<TableIdx, OpIdx>;
+    using info_type = roctx_api_info<TableIdx, OpIdx>;
+
+    if(registration::get_fini_status() != 0)
+    {
+        [[maybe_unused]] auto result =
+            exec(info_type::get_table_func(), std::forward<Args>(args)...);
+        if constexpr(!std::is_void<RetT>::value)
+            return result;
+        else
+            return;
+    }
     using callback_api_data_t = typename roctx_domain_info<TableIdx>::callback_data_type;
     using buffered_api_data_t = typename roctx_domain_info<TableIdx>::buffer_data_type;
 
@@ -283,6 +295,16 @@ roctx_api_impl<TableIdx, OpIdx>::push_functor(Args... args)
 {
     using info_type = roctx_api_info<TableIdx, OpIdx>;
 
+    if(registration::get_fini_status() != 0)
+    {
+        [[maybe_unused]] auto result =
+            exec(info_type::get_push_table_func(), std::forward<Args>(args)...);
+        if constexpr(!std::is_void<RetT>::value)
+            return result;
+        else
+            return;
+    }
+
     constexpr auto external_corr_id_domain_idx =
         roctx_domain_info<TableIdx>::external_correlation_id_domain_idx;
 
@@ -381,6 +403,16 @@ RetT
 roctx_api_impl<TableIdx, OpIdx>::pop_functor(Args... args)
 {
     using info_type = roctx_api_info<TableIdx, OpIdx>;
+
+    if(registration::get_fini_status() != 0)
+    {
+        [[maybe_unused]] auto result =
+            exec(info_type::get_pop_table_func(), std::forward<Args>(args)...);
+        if constexpr(!std::is_void<RetT>::value)
+            return result;
+        else
+            return;
+    }
 
     auto range_data = range_data_t{};
 

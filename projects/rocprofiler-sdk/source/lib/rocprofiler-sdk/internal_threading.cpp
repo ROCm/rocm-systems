@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/common/container/stable_vector.hpp"
+#include "lib/common/fork_control.hpp"
 #include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/common/utility.hpp"
@@ -33,12 +34,16 @@
 #include <rocprofiler-sdk/internal_threading.h>
 
 #include <pthread.h>
+#include <signal.h>
 
 #include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <mutex>
+#include <new>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -48,9 +53,10 @@ namespace rocprofiler
 {
 namespace internal_threading
 {
-// Constant-initialised so no lazy init hides behind the atfork child handler,
-// which must be async-signal-safe (one atomic RMW, no lock/alloc/join).
+// Constant-initialized so checking the generation never needs lazy child initialization.
+// The generation bump is lock-free; eligible idle sessions still recreate workers below.
 std::atomic<uint64_t> g_fork_generation{0};
+std::atomic<bool>     task_groups_initialized{false};
 static_assert(std::atomic<uint64_t>::is_always_lock_free,
               "g_fork_generation must be lock-free for async-signal-safe atfork bump");
 
@@ -264,8 +270,11 @@ auto*&
 get_task_groups()
 {
     static auto* _v = new task_group_vec_t{};
+    task_groups_initialized.store(true, std::memory_order_release);
     return _v;
 }
+
+common::fork_dispatcher fork_participants{};
 
 void
 create_forked_callback_threads()
@@ -276,7 +285,19 @@ create_forked_callback_threads()
     // it. Release pairs with fork_stale()/the destructor guard's acquire.
     g_fork_generation.fetch_add(1, std::memory_order_release);
 
-    if(get_task_groups())
+    // Abandon auxiliary inherited SDK state before decisions, reconstruction, or signal delivery.
+    fork_participants.begin_child();
+    // All SDK/tool decisions precede every callback-pool or tool-worker reconstruction.
+    registration::fork_child();
+    if(registration::fork_child_abandoned() || !fork_participants.eligible())
+    {
+        registration::abandon_fork_child();
+        fork_participants.abandon();
+        return;
+    }
+
+    common::reset_tid_after_fork();
+    if(task_groups_initialized.load(std::memory_order_acquire))
     {
         for(auto& itr : *get_task_groups())
         {
@@ -285,13 +306,88 @@ create_forked_callback_threads()
             notify_post_internal_thread_create(ROCPROFILER_LIBRARY);
         }
     }
+    // Core state must be detached from inherited parent resources before any auxiliary
+    // reconstruction can publish a worker which may call back into the tool.
+    fork_participants.rebuild();
 }
 }  // namespace
+
+void
+prepare_fork_participants(bool sdk_admitted)
+{
+    fork_participants.prepare(sdk_admitted);
+}
+
+void
+parent_fork_participants() noexcept
+{
+    fork_participants.parent();
+}
+
+bool
+register_fork_child_hooks(void (*begin_child)() noexcept, void (*rebuild)())
+{
+    register_fork_handler();
+    auto* node = new(std::nothrow) common::fork_participant{[](bool) {},
+                                                            []() noexcept {},
+                                                            []() noexcept { return true; },
+                                                            []() noexcept {},
+                                                            rebuild ? rebuild : +[]() {},
+                                                            nullptr,
+                                                            begin_child,
+                                                            common::fork_rebuild_phase::auxiliary};
+    if(!node) return false;
+    fork_participants.add(*node);
+    return true;
+}
+
+void
+register_fork_handler()
+{
+    static auto once = std::once_flag{};
+    std::call_once(once, []() {
+        // Create the always-valid status/session state before publishing the atfork callback.
+        // An idle, never-configured SDK must have the same child policy whether or not a caller
+        // happened to make an observational status query before fork.
+        registration::initialize_fork_state();
+
+#if defined(ROCPROFILER_SDK_TEST_HOOKS)
+        // Earlier registration makes this application-like prepare run after our snapshot.
+        const char* detach_test = std::getenv("ROCPROF_INTERNAL_TEST_ATFORK_PREPARE_DETACH");
+        if(detach_test && std::strcmp(detach_test, "1") == 0)
+        {
+            const int test_status = ::pthread_atfork(
+                []() {
+                    ROCP_FATAL_IF(registration::detach() != ROCPROFILER_STATUS_SUCCESS)
+                        << "prepare-detach regression failed";
+                },
+                nullptr,
+                nullptr);
+            ROCP_FATAL_IF(test_status != 0) << "failed to register prepare-detach regression";
+        }
+
+        // Registered before the coordinator: abort() unblocks SIGABRT and reaches the tool's
+        // PID guard before any child decision/reconstruction can mark the session abandoned.
+        if(std::getenv("ROCPROF_INTERNAL_TEST_CHILD_TRANSITION_ABORT"))
+        {
+            const int test_status = ::pthread_atfork(nullptr, nullptr, []() { std::abort(); });
+            ROCP_FATAL_IF(test_status != 0) << "failed to register pre-rebuild signal test";
+        }
+#endif
+
+        const int status = ::pthread_atfork(
+            registration::fork_prepare, registration::fork_parent, create_forked_callback_threads);
+        ROCP_FATAL_IF(status != 0) << "failed to register SDK fork handler: " << status;
+    });
+}
 
 // initialize the default thread pool
 void
 initialize()
 {
+    if(registration::fork_child_abandoned()) return;
+    register_fork_handler();
+
     static auto _once = std::once_flag{};
     std::call_once(_once, []() {
         // assume a task group per buffer so 1024 * 16 / 64 = 256 task group chunks
@@ -305,8 +401,6 @@ initialize()
         // will be destroyed before finalize is invoked.
         create_callback_thread();
         ::atexit(&registration::finalize);
-        // ensure the callback threads are created on the forked process
-        ::pthread_atfork(nullptr, nullptr, create_forked_callback_threads);
     });
 }
 
@@ -361,6 +455,7 @@ create_callback_thread()
 task_group_t*
 get_task_group(rocprofiler_callback_thread_t cb_tid)
 {
+    if(registration::fork_child_abandoned()) return nullptr;
     if(!get_task_groups() || get_task_groups()->empty()) return nullptr;
     return get_task_groups()->at(cb_tid.handle);
 }
@@ -398,6 +493,15 @@ create_task_group(void* addr, size_t pool_size)
 }  // namespace rocprofiler
 
 extern "C" {
+// Private, versioned coordination between the shipped SDK and rocprofv3 tool. It is not part of
+// the installed client API. Registration happens before tool callbacks/threads become visible.
+ROCPROFILER_PUBLIC_API void
+rocprofiler_sdk_register_fork_participant_v2(rocprofiler::common::fork_participant* participant)
+{
+    rocprofiler::internal_threading::register_fork_handler();
+    rocprofiler::internal_threading::fork_participants.add(*participant);
+}
+
 rocprofiler_status_t
 rocprofiler_at_internal_thread_create(rocprofiler_internal_thread_library_cb_t precreate,
                                       rocprofiler_internal_thread_library_cb_t postcreate,
@@ -416,6 +520,7 @@ rocprofiler_at_internal_thread_create(rocprofiler_internal_thread_library_cb_t p
 rocprofiler_status_t
 rocprofiler_create_callback_thread(rocprofiler_callback_thread_t* cb_thread_id)
 {
+    if(rocprofiler::registration::fork_child_abandoned()) return ROCPROFILER_STATUS_ERROR_FINALIZED;
     if(rocprofiler::registration::get_init_status() > 0)
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
 

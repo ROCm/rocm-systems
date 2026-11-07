@@ -23,6 +23,7 @@
 #include "lib/common/static_object.hpp"
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <functional>
 #include <mutex>
@@ -34,6 +35,9 @@ namespace common
 {
 namespace
 {
+std::atomic<bool> abandoned_after_fork{false};
+static_assert(std::atomic<bool>::is_always_lock_free);
+
 auto*&
 get_static_object_stack()
 {
@@ -43,8 +47,22 @@ get_static_object_stack()
 }  // namespace
 
 void
+abandon_static_objects_after_fork() noexcept
+{
+    abandoned_after_fork.store(true, std::memory_order_release);
+}
+
+bool
+static_objects_abandoned() noexcept
+{
+    return abandoned_after_fork.load(std::memory_order_acquire);
+}
+
+void
 destroy_static_objects()
 {
+    if(static_objects_abandoned()) return;
+
     static auto _sync = std::mutex{};
     auto        _lk   = std::unique_lock<std::mutex>{_sync};
 

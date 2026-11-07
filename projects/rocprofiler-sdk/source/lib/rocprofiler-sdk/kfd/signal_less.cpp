@@ -25,6 +25,7 @@
 #include "lib/common/environment.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
+#include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/kfd/env_parse.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_correlation.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
@@ -32,8 +33,6 @@
 #include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <fmt/core.h>
-
-#include <pthread.h>
 
 #include <algorithm>
 #include <atomic>
@@ -73,16 +72,13 @@ signal_less_feature_enabled()
         // Strict opt-in, fail-closed: only an explicit true value activates a
         // feature that changes completion semantics process-wide.
         if(!env_bool_opt_in("ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS")) return false;
-        // register the fork-child abandon handler HERE, where the feature
-        // is decided -- every path that creates signal-less state passes this gate
-        // first, so "state exists => a handler is registered" is a property of the
-        // gate, not of the reader lifecycle (which may never start). If
-        // pthread_atfork fails, the feature stays OFF: no state can then exist
-        // without a handler to abandon it in a child.
-        if(int _rc = pthread_atfork(nullptr, nullptr, signal_less_abandon_in_child); _rc != 0)
+        // Register before any state is visible; abandonment runs in the coordinator's first
+        // child phase, before worker reconstruction or restoration of handled signals.
+        if(!internal_threading::register_fork_child_hooks(
+               []() noexcept { signal_less_abandon_in_child(); }, nullptr))
         {
-            ROCP_WARNING << "KFD dispatch-log: pthread_atfork failed (" << _rc
-                         << "), signal-less kernel-dispatch completion stays DISABLED";
+            ROCP_WARNING << "KFD dispatch-log: child policy registration failed; "
+                            "signal-less completion stays DISABLED";
             return false;
         }
         ROCP_WARNING << "KFD dispatch-log: signal-less kernel-dispatch completion is ACTIVE "

@@ -23,6 +23,7 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/counters/sample_processing.hpp"
+#include "lib/rocprofiler-sdk/internal_threading.hpp"
 
 #include "lib/common/container/small_vector.hpp"
 #include "lib/common/synchronized.hpp"
@@ -35,8 +36,6 @@
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
-
-#include <pthread.h>
 
 namespace rocprofiler
 {
@@ -189,10 +188,13 @@ callback_thread_get()
     auto&                 consumer = *CHECK_NOTNULL(callback_thread_slot());
     static std::once_flag once;
     std::call_once(once, []() {
-        ::pthread_atfork(nullptr, nullptr, []() {
-            if(auto* v = callback_thread_slot())
-                ::new(v) callback_consumer_t{&process_completed_cb};
-        });
+        ROCP_FATAL_IF(!internal_threading::register_fork_child_hooks(
+            []() noexcept {
+                if(auto* v = callback_thread_slot())
+                    ::new(v) callback_consumer_t{&process_completed_cb};
+            },
+            nullptr))
+            << "failed to register counter child reset";
     });
     return consumer;
 }
