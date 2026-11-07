@@ -6,8 +6,8 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/mimg.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx9_cache_flags.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/image_access.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/image_resource.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/image_sample.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
@@ -35,7 +35,9 @@ void ImageLoadMimg::execute_impl(amdgpu::Wavefront &wf) {
                                     .tfe = bool(inst_.tfe),
                                     .lwe = bool(inst_.lwe),
                                     .da = bool(inst_.da),
-                                    .unorm = bool(inst_.unorm)})
+                                    .unorm = bool(inst_.unorm),
+                                    .mip = false,
+                                    .gather = false})
           .failed()) {
     return;
   }
@@ -43,8 +45,26 @@ void ImageLoadMimg::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageLoadMipMimg::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  if (amdgpu::prepare_image_access(wf, *d, inst_.srsrc * 4,
+                                   amdgpu::contiguous_image_address_registers(inst_.vaddr),
+                                   {.dmask = inst_.dmask,
+                                    .a16 = bool(inst_.a16),
+                                    .d16 = bool(inst_.d16),
+                                    .tfe = bool(inst_.tfe),
+                                    .lwe = bool(inst_.lwe),
+                                    .da = bool(inst_.da),
+                                    .unorm = bool(inst_.unorm),
+                                    .mip = true,
+                                    .gather = false})
+          .failed()) {
+    return;
+  }
+  set_data(std::move(d));
 }
 
 void ImageLoadPckMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -80,7 +100,9 @@ void ImageStoreMimg::execute_impl(amdgpu::Wavefront &wf) {
                                     .tfe = bool(inst_.tfe),
                                     .lwe = bool(inst_.lwe),
                                     .da = bool(inst_.da),
-                                    .unorm = bool(inst_.unorm)})
+                                    .unorm = bool(inst_.unorm),
+                                    .mip = false,
+                                    .gather = false})
           .failed()) {
     return;
   }
@@ -89,8 +111,26 @@ void ImageStoreMimg::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageStoreMipMimg::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = false;
+  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  if (amdgpu::prepare_image_access(wf, *d, inst_.srsrc * 4,
+                                   amdgpu::contiguous_image_address_registers(inst_.vaddr),
+                                   {.dmask = inst_.dmask,
+                                    .a16 = bool(inst_.a16),
+                                    .d16 = bool(inst_.d16),
+                                    .tfe = bool(inst_.tfe),
+                                    .lwe = bool(inst_.lwe),
+                                    .da = bool(inst_.da),
+                                    .unorm = bool(inst_.unorm),
+                                    .mip = true,
+                                    .gather = false})
+          .failed()) {
+    return;
+  }
+  amdgpu::capture_buffer_format_store(wf, *d, wf.vgpr_alloc().base + 0u + inst_.vdata);
+  set_data(std::move(d));
 }
 
 void ImageStorePckMimg::execute_impl(amdgpu::Wavefront &wf) {
@@ -110,327 +150,503 @@ void ImageGetResinfoMimg::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageAtomicSwapMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageAtomicCmpswapMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageAtomicAddMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageAtomicSubMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageAtomicSminMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageAtomicUminMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageAtomicSmaxMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageAtomicUmaxMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageAtomicAndMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageAtomicOrMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageAtomicXorMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageAtomicIncMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageAtomicDecMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  if (amdgpu::prepare_image_sample(wf, *d, inst_.srsrc * 4, inst_.ssamp * 4,
+                                   amdgpu::contiguous_image_address_registers(inst_.vaddr),
+                                   {.dmask = inst_.dmask,
+                                    .a16 = bool(inst_.a16),
+                                    .d16 = bool(inst_.d16),
+                                    .tfe = bool(inst_.tfe),
+                                    .lwe = bool(inst_.lwe),
+                                    .da = bool(inst_.da),
+                                    .unorm = bool(inst_.unorm),
+                                    .mip = false,
+                                    .gather = false},
+                                   amdgpu::ImageSampleMode::Implicit)
+          .failed()) {
+    return;
+  }
+  set_data(std::move(d));
 }
 
 void ImageSampleClMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleDMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  if (amdgpu::prepare_image_sample(wf, *d, inst_.srsrc * 4, inst_.ssamp * 4,
+                                   amdgpu::contiguous_image_address_registers(inst_.vaddr),
+                                   {.dmask = inst_.dmask,
+                                    .a16 = bool(inst_.a16),
+                                    .d16 = bool(inst_.d16),
+                                    .tfe = bool(inst_.tfe),
+                                    .lwe = bool(inst_.lwe),
+                                    .da = bool(inst_.da),
+                                    .unorm = bool(inst_.unorm),
+                                    .mip = false,
+                                    .gather = false},
+                                   amdgpu::ImageSampleMode::Derivatives)
+          .failed()) {
+    return;
+  }
+  set_data(std::move(d));
 }
 
 void ImageSampleDClMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleLMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  if (amdgpu::prepare_image_sample(wf, *d, inst_.srsrc * 4, inst_.ssamp * 4,
+                                   amdgpu::contiguous_image_address_registers(inst_.vaddr),
+                                   {.dmask = inst_.dmask,
+                                    .a16 = bool(inst_.a16),
+                                    .d16 = bool(inst_.d16),
+                                    .tfe = bool(inst_.tfe),
+                                    .lwe = bool(inst_.lwe),
+                                    .da = bool(inst_.da),
+                                    .unorm = bool(inst_.unorm),
+                                    .mip = false,
+                                    .gather = false},
+                                   amdgpu::ImageSampleMode::Explicit)
+          .failed()) {
+    return;
+  }
+  set_data(std::move(d));
 }
 
 void ImageSampleBMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleBClMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleLzMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  if (amdgpu::prepare_image_sample(wf, *d, inst_.srsrc * 4, inst_.ssamp * 4,
+                                   amdgpu::contiguous_image_address_registers(inst_.vaddr),
+                                   {.dmask = inst_.dmask,
+                                    .a16 = bool(inst_.a16),
+                                    .d16 = bool(inst_.d16),
+                                    .tfe = bool(inst_.tfe),
+                                    .lwe = bool(inst_.lwe),
+                                    .da = bool(inst_.da),
+                                    .unorm = bool(inst_.unorm),
+                                    .mip = false,
+                                    .gather = false},
+                                   amdgpu::ImageSampleMode::Zero)
+          .failed()) {
+    return;
+  }
+  set_data(std::move(d));
 }
 
 void ImageSampleCMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleCClMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleCDMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleCDClMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleCLMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleCBMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleCBClMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleCLzMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleClOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleDOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleDClOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleLOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleBOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleBClOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleLzOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleCOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleCClOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleCDOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleCDClOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleCLOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleCBOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleCBClOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleCLzOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageGather4Mimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageGather4ClMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageGather4hMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageGather4LMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageGather4BMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageGather4BClMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageGather4LzMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  if (amdgpu::prepare_image_sample(wf, *d, inst_.srsrc * 4, inst_.ssamp * 4,
+                                   amdgpu::contiguous_image_address_registers(inst_.vaddr),
+                                   {.dmask = inst_.dmask,
+                                    .a16 = bool(inst_.a16),
+                                    .d16 = bool(inst_.d16),
+                                    .tfe = bool(inst_.tfe),
+                                    .lwe = bool(inst_.lwe),
+                                    .da = bool(inst_.da),
+                                    .unorm = bool(inst_.unorm),
+                                    .mip = false,
+                                    .gather = true},
+                                   amdgpu::ImageSampleMode::Zero)
+          .failed()) {
+    return;
+  }
+  set_data(std::move(d));
 }
 
 void ImageGather4CMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageGather4CClMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageGather4hPckMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageGather8hPckMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageGather4CLMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageGather4CBMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageGather4CBClMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageGather4CLzMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageGather4OMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageGather4ClOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageGather4LOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageGather4BOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageGather4BClOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageGather4LzOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageGather4COMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageGather4CClOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageGather4CLOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageGather4CBOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageGather4CBClOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageGather4CLzOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageGetLodMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleCdMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleCdClMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleCCdMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleCCdClMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleCdOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleCdClOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleCCdOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageSampleCCdClOMimg::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Image pipeline not yet implemented.
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 } // namespace cdna1
