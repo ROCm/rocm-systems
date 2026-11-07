@@ -1299,9 +1299,14 @@ threshold table introduced for gfx1250.
           on gfx1250 communicators with one LL128 warp per wavefront (wave32). When
           enabled, launches whose per-rank shard is at least 2 MiB stage their wire
           stores in LDS through gfx1250 async LDS stores, using two 2 KiB windows per
-          warp of dynamic LDS. It is off by default. Other architectures are unaffected.
+          warp of dynamic LDS. Above two ranks it also runs the peer-split two-shot for
+          messages from 2 MiB up to the LL128 cap, which takes them from the LL
+          two-shot and the LL128 one-shot; the VMM-first window then yields to it. A
+          user-set LL or LL128 one-shot threshold keeps the messages that tier can
+          take. It is off by default. Other architectures are unaffected.
       - | ``0``: Cooperative writer for every launch, no dynamic LDS (default).
-        | ``1``: Staged writer from 2 MiB shards on gfx1250 wave32 communicators.
+        | ``1``: Staged writer from 2 MiB shards, and the peer-split from 2 MiB
+          messages above two ranks, on gfx1250 wave32 communicators.
 
     * - | ``RCCL_DDA_A2A_PUSH``
         | Selects the ``ncclAllToAll`` kernel on the DDA fabric (VMM) tier. The push
