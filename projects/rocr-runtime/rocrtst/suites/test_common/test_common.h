@@ -50,6 +50,20 @@
 #include <string>
 #include <vector>
 
+// Macro to conditionally run test code only when not in emulator mode.
+// In emulator mode, tests that require real hardware are skipped.
+#ifdef ROCRTST_EMULATOR_BUILD
+#define RUN_IF_NOT_EMU_MODE(...)                                                                   \
+  do {                                                                                             \
+    GTEST_SKIP() << "Skipped in emulator mode";                                                    \
+  } while (0)
+#else
+#define RUN_IF_NOT_EMU_MODE(...)                                                                   \
+  do {                                                                                             \
+    __VA_ARGS__;                                                                                   \
+  } while (0)
+#endif
+
 struct RocrTstGlobals {
   uint32_t verbosity;
   uint32_t monitor_verbosity;
