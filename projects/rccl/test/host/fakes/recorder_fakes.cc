@@ -36,6 +36,7 @@ void ResetRecorderFakes() {
   g_recorderLastRank = -12345;
   g_recorderLastNranks = -12345;
   g_recorderCall = DefaultRecorderCall;
+  rccl::Recorder::instance().skip(false);
   g_recorderSkips.clear();
 }
 
@@ -49,7 +50,10 @@ Recorder& Recorder::instance() {
   return inst;
 }
 
-void Recorder::skip(bool b) { g_recorderSkips.push_back(b); }
+void Recorder::skip(bool enabled) {
+  skipped = enabled;
+  g_recorderSkips.push_back(enabled);
+}
 ncclResult_t Recorder::record(rcclCall_t type, const ncclInfo& info) {  // collective
   return g_recorderCall({type, info.sendbuff, info.recvbuff, info.count, info.root, nullptr, nullptr});
 }

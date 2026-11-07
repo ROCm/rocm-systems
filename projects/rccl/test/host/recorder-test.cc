@@ -273,7 +273,7 @@ TEST_F(RecorderMicrotest, Disabled_WithoutReplayFileNothingIsWritten) {
   rcclApiCall raw(rccl::rrBroadcast);
   EXPECT_EQ(r.record(raw), ncclSuccess);
   r.skip(true);
-  EXPECT_FALSE(r.skipped);
+  EXPECT_FALSE(r.isSkipped());
   EXPECT_FALSE(r.outputFile.is_open());
   EXPECT_EQ(r.logLevel, -1);
 }
@@ -660,11 +660,14 @@ TEST_F(RecorderMicrotest, Skip_HidesCollectivesAndGroupsOnly) {
   Recorder& r = StartBinary();
   ncclInfo info = Info(send_, recv_);
 
+  EXPECT_FALSE(r.isSkipped());
   r.skip(true);
+  EXPECT_TRUE(r.isSkipped());
   r.record(rccl::rrAllGather, info);
   r.record(rccl::rrGroupStart, 1);
   r.record(rccl::rrSend, send_, nullptr, 5, ncclInt32, comm_.get(), stream_);
   r.skip(false);
+  EXPECT_FALSE(r.isSkipped());
   r.record(rccl::rrAllGather, info);
 
   std::vector<rcclApiCall> c = BinaryCalls();
