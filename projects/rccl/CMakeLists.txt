@@ -133,6 +133,7 @@ endif()
 if(ENABLE_TDM_PRIM_LL128)
   add_compile_definitions(ENABLE_TDM_PRIM_LL128=1)
 endif()
+include(cmake/Ll128FlagOptions.cmake)
 # rocSHMEM integration (mutually exclusive — enabling both causes duplicate
 # rocshmem state between librccl.so and the executable at runtime):
 #   ENABLE_ROCSHMEM: alltoall_wg offload.  Links librocshmem.a into librccl.so

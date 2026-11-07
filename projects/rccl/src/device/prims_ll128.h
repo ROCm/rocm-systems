@@ -9,6 +9,10 @@
 #include "tdm/tdmCopy.h"
 #include "ll128Layout.h"
 #include "ll128RecvWait.h"
+#include "rccl_ll128_flag.h"
+#if RCCL_LL128_NARROW_FLAG
+#include "ll128NarrowFlag.h"
+#endif
 
 #define NCCL_LL128_FLAGTHREAD (NCCL_LL128_LINEELEMS - 1)
 
@@ -19,6 +23,9 @@
 #endif
 
 #define TDM_LL128_ON (TDM_SUPPORTED && ENABLE_TDM_PRIM_LL128)
+#if TDM_LL128_ON && RCCL_LL128_NARROW_FLAG
+#error "The TDM LL128 path assumes 8-byte LL128 flags (RCCL_LL128_FLAG_BYTES=8)"
+#endif
 
 // Keep lane id, flag-lane test and peer 0's FIFO pointer and flag in registers instead of reloading them
 // from the Primitives object, which lives in scratch.
@@ -182,10 +189,10 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     return sendBuff[i] + sendOffset(i);
   }
   inline __device__ uint64_t recvFlag(int i) {
-    return recvStep[i] + 1;
+    return RCCL_LL128_FLAG_OF(recvStep[i] + 1);
   }
   inline __device__ uint64_t sendFlag(int i) {
-    return sendStep[i] + 1;
+    return RCCL_LL128_FLAG_OF(sendStep[i] + 1);
   }
 
   uint64_t* barriers;
@@ -232,6 +239,9 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
         if (checkAbort(abort, 1, spins)) break;
       }
       if (sendConnFifo) {
+#if RCCL_LL128_NARROW_FLAG
+        if (RCCL_LL128_CLEAN_STEP(sendConnHead)) nbytes = cleanStepBytes();
+#endif
         // == sendStep[wid]; indexing by wid would keep Primitives in scratch.
         sendConnFifo[sendConnHead % NCCL_STEPS].size = nbytes;
       }
@@ -309,6 +319,9 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
 #include "tdm/ll128Tdm.h"  // member functions; included inside the class body on purpose
 #endif
 
+#if RCCL_LL128_NARROW_FLAG
+#include "ll128NarrowFlagPrims.h"  // member functions; included inside the class body on purpose
+#else
   template <int WordPerThread>
   __device__ __forceinline__ void loadRegsBegin(uint64_t (&regs)[WordPerThread], T const* src, int eltN) {
     constexpr int EltPer16B = 16 / sizeof(T);
@@ -426,6 +439,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     int skip = misalignment == 0 ? eltN & -EltPer16B : 0;
     for (int i = skip + wid; i < eltN; i += WARP_SIZE) dst[i] = shm[i];
   }
+#endif // RCCL_LL128_NARROW_FLAG
 
 #define WARP_MASK 0xffffffff
 
@@ -437,7 +451,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     int spins = 0;
     ll128RecvWaitRows<ELEMS_PER_THREAD / 2, RCCL_LL128_CONFIRM_RELOAD>(
       WarpMask, [&](int r) { load128NT(ptr + 2 * r * WARP_SIZE, vr[2 * r], vr[2 * r + 1]); },
-      [&](int r) -> uint64_t { return __ballot(!flagThread || vr[2 * r + 1] == flag); },
+      [&](int r) -> uint64_t { return __ballot(!flagThread || RCCL_LL128_FLAG_MATCH(vr[2 * r + 1], flag)); },
       [&](bool needReload) {
         needReload &= (0 == checkAbort(abort, 1, spins));
         return __any(needReload);
@@ -474,12 +488,15 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
 #pragma unroll
         for (int u = 0; u < ELEMS_PER_THREAD; u += 2) {
           load128NT(ptr + u * WARP_SIZE, vr[u], vr[u + 1]);
-          needReload |= flagThread && (vr[u + 1] != flag);
+          needReload |= flagThread && !RCCL_LL128_FLAG_MATCH(vr[u + 1], flag);
         }
         needReload &= (0 == checkAbort(abort, 1, spins));
       } while (__any(needReload));
 #pragma unroll
       for (int u = 0; u < ELEMS_PER_THREAD; u += 2) load128NT(ptr + u * WARP_SIZE, vr[u], vr[u + 1]);
+#endif
+#if RCCL_LL128_NARROW_FLAG
+      unpackWire(vr);
 #endif
     }
 
@@ -492,7 +509,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
 #pragma unroll
         for (int u = 0; u < ELEMS_PER_THREAD; u += 2) {
           v[u] = applyPreOp(redOp, v[u]);
-          if (!flagThread) v[u + 1] = applyPreOp(redOp, v[u + 1]);
+          if (RCCL_LL128_NARROW_FLAG || !flagThread) v[u + 1] = applyPreOp(redOp, v[u + 1]);
         }
       }
     }
@@ -522,13 +539,16 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
 #pragma unroll
           for (int u = 0; u < ELEMS_PER_THREAD; u += 2) {
             load128NT(ptr + u * WARP_SIZE, vr[u], vr[u + 1]);
-            needReload |= flagThread && (vr[u + 1] != flag);
+            needReload |= flagThread && !RCCL_LL128_FLAG_MATCH(vr[u + 1], flag);
           }
           needReload &= (0 == checkAbort(abort, 1, spins));
         } while (__any(needReload));
 
 #pragma unroll
         for (int u = 0; u < ELEMS_PER_THREAD; u += 2) load128NT(ptr + u * WARP_SIZE, vr[u], vr[u + 1]);
+#endif
+#if RCCL_LL128_NARROW_FLAG
+        unpackWire(vr);
 #endif
 
 #pragma unroll
@@ -560,7 +580,11 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
         uint64_t* ptr = sendPtr(i) + ll128Offset;
 #pragma unroll
         for (int u = 0; u < ELEMS_PER_THREAD; u += 2) {
+#if RCCL_LL128_NARROW_FLAG
+          storeWire(ptr + u * WARP_SIZE, v, u, flag);
+#else
           store128Fifo(ptr + u * WARP_SIZE, v[u], flagThread ? flag : v[u + 1]);
+#endif
         }
       }
 #if RCCL_LL128_HW_LANE_ENABLE
@@ -572,15 +596,24 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
 #endif
 #pragma unroll
       for (int u = 0; u < ELEMS_PER_THREAD; u += 2) {
+#if RCCL_LL128_NARROW_FLAG
+        storeWire(ptr + u * WARP_SIZE, v, u, flag);
+#else
         store128Fifo(ptr + u * WARP_SIZE, v[u], flagThread ? flag : v[u + 1]);
+#endif
       }
     }
     /********************** End Send ************************/
   }
 
   static constexpr int WireWordPerSlice = WARP_SIZE * NCCL_LL128_SHMEM_ELEMS_PER_THREAD;
+#if RCCL_LL128_NARROW_FLAG
+  static constexpr int DataEltPerSlice =
+    (WireWordPerSlice / NCCL_LL128_LINEELEMS) * (NCCL_LL128_LINESIZE - RCCL_LL128_FLAG_BYTES) / sizeof(T);
+#else
   static constexpr int DataEltPerSlice =
     (WireWordPerSlice - WireWordPerSlice / NCCL_LL128_LINEELEMS) * (sizeof(uint64_t) / sizeof(T));
+#endif
 
   template <int RECV, int SEND, int SrcBuf, int DstBuf>
   __device__ __forceinline__ void GenericOp(intptr_t srcIx, intptr_t dstIx, int nelem, bool postOp) {
@@ -592,6 +625,9 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     int wireOffset = WireWordPerSlice * warp + 2 * wid;
     const int nwarps = nthreads / WARP_SIZE;
     nelem = nelem < 0 ? 0 : nelem;
+#if RCCL_LL128_NARROW_FLAG
+    [[maybe_unused]] const int slicesSent = divUp(nelem, DataEltPerSlice);
+#endif
 
     if (SEND) waitSend(divUp(nelem, DataEltPerSlice) * WireWordPerSlice * sizeof(uint64_t));
     barrier();
@@ -639,6 +675,9 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     }
 #if TDM_LL128_ON
     tdmDrain();
+#endif
+#if RCCL_LL128_NARROW_FLAG
+    if (SEND) stampCleanStep(slicesSent);
 #endif
 
     barrier();

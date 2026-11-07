@@ -219,6 +219,18 @@ static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK 
 #define NCCL_LL128_LINEELEMS (NCCL_LL128_LINESIZE / sizeof(uint64_t))
 #define NCCL_LL128_DATAELEMS (NCCL_LL128_LINEELEMS - 1)
 
+// LL128 wire bytes <-> data bytes for lines of lineElems 64-bit words. A narrow flag (RCCL_LL128_FLAG_BYTES, see
+// rccl_ll128_flag.h) leaves lineElems * 8 - RCCL_LL128_FLAG_BYTES data bytes per line instead of lineElems - 1 words.
+#if defined(RCCL_LL128_FLAG_BYTES) && RCCL_LL128_FLAG_BYTES < 8
+#define RCCL_LL128_LINE_DATA_BYTES(lineElems) ((lineElems) * 8 - RCCL_LL128_FLAG_BYTES)
+#define RCCL_LL128_WIRE_TO_DATA(wire, lineElems) ((wire) / ((lineElems) * 8) * RCCL_LL128_LINE_DATA_BYTES(lineElems))
+#define RCCL_LL128_DATA_TO_WIRE(data, lineElems) ((data) / RCCL_LL128_LINE_DATA_BYTES(lineElems) * ((lineElems) * 8))
+#else
+#define RCCL_LL128_LINE_DATA_BYTES(lineElems) (((lineElems) - 1) * 8)
+#define RCCL_LL128_WIRE_TO_DATA(wire, lineElems) ((wire) / (lineElems) * ((lineElems) - 1))
+#define RCCL_LL128_DATA_TO_WIRE(data, lineElems) ((data) / ((lineElems) - 1) * (lineElems))
+#endif
+
 #define NCCL_LL128_MAX_NTHREADS 256
 #if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
 // Upstream NCCL value (120 = 8 lines * 15 dataElems for 128-byte lines).
@@ -557,8 +569,8 @@ struct alignas(16) ncclDevWorkBcast {
 
 __device__ constexpr int ncclProtoGrainSize(int proto) {
   return proto == NCCL_PROTO_LL     ? 16 :
-         proto == NCCL_PROTO_LL128  ? WARP_SIZE * NCCL_LL128_SHMEM_ELEMS_PER_THREAD / NCCL_LL128_LINEELEMS *
-                                        NCCL_LL128_DATAELEMS * sizeof(uint64_t) :
+         proto == NCCL_PROTO_LL128  ? RCCL_LL128_WIRE_TO_DATA(WARP_SIZE * NCCL_LL128_SHMEM_ELEMS_PER_THREAD *
+                                                                (int)sizeof(uint64_t), (int)NCCL_LL128_LINEELEMS) :
          proto == NCCL_PROTO_SIMPLE ? 512 :
                                       -1;
 }
