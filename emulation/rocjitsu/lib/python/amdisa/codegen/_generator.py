@@ -9231,6 +9231,8 @@ class CodeGenerator:
         lines.append(
             f'{indent}const int32_t offset = static_cast<int32_t>({raw} << {32-width}) >> {32-width};'
         )
+        # GLOBAL LDS X3 uses the 16-byte lane stride specified for MUBUF X3 in CDNA4 ISA §9.1.9.
+        # This is only an inference; the GLOBAL LDS addressing rules in §10.3 do not specify an X3 stride.
         lines.append(
             f'{indent}amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),'
             f' static_cast<int64_t>(wf.m0() & {mask}) + offset,'
