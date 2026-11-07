@@ -49,6 +49,8 @@ class Primitives<T, RedOp, Fan, Direct,
   uint64_t* gdrFlushFlag = nullptr;
   uint64_t* gdrFlushSeq;
   int connStepSize; // Connection step size
+  uint8_t nearRecvMode = ncclNetNearRecvOff;
+  uint8_t nearRecvPhaseMask = 0;
   void* netDeviceHandle;
   uint64_t accSize;
   uint32_t* next_hdp_reg;
@@ -219,6 +221,14 @@ class Primitives<T, RedOp, Fan, Direct,
         // coverity[dead_error_line]
         ptrs[index] = connEltsFifo + (step % NCCL_STEPS) * connStepSize;
       }
+      if (!isSendNotRecv && index == 0) {
+        // Workers read this after the subBarrier that follows waitPeer.
+        int slot = step % NCCL_STEPS;
+        bool fifoSlot = ptrs[index] == connEltsFifo + slot * connStepSize;
+        uint8_t phases = (uint8_t)((nearRecvPhaseMask >> slot) | (nearRecvPhaseMask << (NCCL_STEPS - slot)));
+        bool nearRecvSlot = nearRecvMode != ncclNetNearRecvOff && fifoSlot;
+        ncclShmem.groups[group].nearRecv = nearRecvSlot ? (nearRecvMode | (uint32_t)phases << 8) : 0;
+      }
       if (flags & NetDeviceUnpack) {
         ncclNetDeviceIncrementHead(group, index);
       }
@@ -247,6 +257,38 @@ class Primitives<T, RedOp, Fan, Direct,
     if (flags & (Recv * RolePostRecv | Send * RolePostSend)) {
       step += StepPerSlice;
       STORE(connStepPtr, step);
+    }
+  }
+
+  // reduceCopy of a slice whose one recv source (srcs[Src]) is laid out in near-recv pieces: each
+  // warp takes whole 16 KiB pieces and reads the recv source from the piece's block.
+  template <int Recv, int Send, int Src, int Dst, int PreOpSrcs>
+  __device__ __forceinline__ void nearRecvReduceCopy(int workSize, bool postOp) {
+    constexpr int pieceElts = NCCL_NET_NEAR_RECV_PIECE_SIZE / sizeof(T);
+    uint32_t nearRecv = ncclShmem.groups[group].nearRecv;
+    int mode = nearRecv & 0xff;
+    uint8_t phases = nearRecv >> 8;
+
+    void** srcs = ncclShmem.groups[group].srcs;
+    void** dsts = ncclShmem.groups[group].dsts;
+    void* acc = ncclShmem.groups[group].acc;
+
+    int warp = tid / WARP_SIZE;
+    int nWarps = nworkers / WARP_SIZE;
+    if (warp >= nWarps) return;
+
+    int nPieces = divUp(workSize, pieceElts);
+    for (int piece = warp; piece < nPieces; piece += nWarps) {
+      int pieceStart = piece * pieceElts;
+      int pieceSize = min(pieceElts, workSize - pieceStart);
+      T* recvPiece = (T*)srcs[Src] + ncclNearRecvPieceOffset(piece, mode, phases) / sizeof(T);
+
+      reduceCopy<Unroll, useAcc && Dst, RedOp, T, MultimemSrcs, Recv + Src, Recv * MaxRecv + Src, MultimemDsts,
+                 Send + Dst, Send * MaxSend + Dst, PreOpSrcs, int, Pipeline>(
+        tid % WARP_SIZE, WARP_SIZE, ncclShmem.groups[group].redOpArgs, postOp, Recv * fan.nrecv() + Src,
+        [=] __device__(int i) -> void* { return i == Src ? (void*)recvPiece : (void*)((T*)srcs[i] + pieceStart); },
+        Send * fan.nsend() + Dst, [=] __device__(int i) -> void* { return (void*)((T*)dsts[i] + pieceStart); },
+        pieceSize, [=] __device__() -> void* { return acc ? (void*)((T*)acc + pieceStart) : nullptr; });
     }
   }
 
@@ -339,6 +381,8 @@ class Primitives<T, RedOp, Fan, Direct,
                        Pipeline, /*EnableTdmReduce=*/1>(tid, nworkers, ncclShmem.groups[group].redOpArgs, postOp,
                                                         Recv * fan.nrecv() + Src, ncclShmem.groups[group].srcs, 1,
                                                         ncclShmem.groups[group].dsts, workSize);
+          } else if (Recv && fan.nrecv() == 1 && ncclShmem.groups[group].nearRecv != 0) {
+            nearRecvReduceCopy<Recv, Send, Src, Dst, PreOpSrcs>(workSize, postOp);
           } else {
             reduceCopy<Unroll, useAcc && Dst, RedOp, T, MultimemSrcs, Recv + Src, Recv * MaxRecv + Src, MultimemDsts,
                        Send + Dst, Send * MaxSend + Dst, PreOpSrcs, Pipeline, /*EnableTdmReduce=*/1>(
@@ -584,7 +628,10 @@ private:
       }
       connStepPtr = conn->tail;
       connStepCache = loadStepValue(connStepPtr, (flags & SysAcquireStep) != 0);
-      connStepSize = conn->stepSize / sizeof(T);
+      nearRecvMode = conn->nearRecvMode;
+      nearRecvPhaseMask = conn->nearRecvPhaseMask;
+      // A near-recv buffer holds one region, twice the step, per step.
+      connStepSize = conn->stepSize / sizeof(T) * (nearRecvMode != ncclNetNearRecvOff ? 2 : 1);
       connEltsFifo = (T*)conn->buffs[NCCL_PROTO_SIMPLE];
       if (conn->connFifo != nullptr) {
         flags |= ConnFifoEnabled;
