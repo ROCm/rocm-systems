@@ -12,6 +12,8 @@
 // launch grids that never meet at the LSA barrier, which shows up here as the isolated child timing
 // out. NCCL_SYM_TMA_ENABLE=2 narrows the choice to the Tensor Data Mover kernels wherever they are
 // valid, so on gfx1250 a 4 MiB slice reaches them. Elsewhere the cases still check in-place results.
+//
+// AllGather.SymmetricTmaStSkewedHead forces AllGather_TmaST on skewed buffers; it runs only on gfx1250.
 
 #include <gtest/gtest.h>
 #include <rccl/rccl.h>
@@ -25,7 +27,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "common/EnvVars.hpp"
@@ -68,13 +72,13 @@ namespace RcclUnitTesting
     }
 
     // EnvVars reports 0 GPUs in a re-exec'd child, and a skipped child scores as a pass, so gate in the parent.
-    bool TooFewGpus()
+    bool TooFewGpus(int minGpus = 2)
     {
       if (std::getenv(ProcessIsolatedTestRunner::kReexecMarkerEnvVar) != nullptr)
       {
         return false;
       }
-      return EnvVars().GetNumDetectedGpus() < 2;
+      return EnvVars().GetNumDetectedGpus() < minGpus;
     }
 
     bool IsGfx1250()
@@ -88,6 +92,94 @@ namespace RcclUnitTesting
     {
       std::ifstream f(path);
       return LastSymmetricKernel(f, func);
+    }
+
+    // A /tmp file made by mkstemp, so another local user cannot plant it first; "" if mkstemp fails.
+    std::string MakeTempFile(const std::string& prefix)
+    {
+      std::string path = "/tmp/" + prefix + "_XXXXXX";
+      const int   fd   = mkstemp(&path[0]);
+      if (fd < 0) return "";
+      close(fd);
+      return path;
+    }
+
+    // Rank in the high bits, the kPeriod pattern in the low ones.
+    float TaggedValue(int rank, size_t idx)
+    {
+      return static_cast<float>((rank + 1) * 4096 + static_cast<int>(idx % kPeriod));
+    }
+
+    // Comms, streams and the rank 0 TUNING log of a child that forces one symmetric kernel.
+    struct ForcedRun
+    {
+      std::string              logPath;
+      std::vector<ncclComm_t>  comms;
+      std::vector<hipStream_t> streams;
+      int                      nCalls = 0;
+    };
+
+    void StartForcedRun(ForcedRun& run, int nRanks)
+    {
+      run.logPath = MakeTempFile("rccl_sym_forced");
+      ASSERT_FALSE(run.logPath.empty()) << "mkstemp failed";
+      setenv("NCCL_DEBUG_FILE", run.logPath.c_str(), 1);
+      ncclResetDebugInitInternal();
+      run.comms.resize(nRanks);
+      ASSERT_EQ(ncclSuccess, ncclCommInitAll(run.comms.data(), nRanks, nullptr));
+      run.streams.resize(nRanks);
+      for (int i = 0; i < nRanks; i++)
+      {
+        HIP_CHECK(hipSetDevice(i));
+        HIP_CHECK(hipStreamCreate(&run.streams[i]));
+      }
+    }
+
+    // Checks the log, then tears down; release the windows first.
+    void FinishForcedRun(ForcedRun& run, const std::string& func, const std::string& kernel, int ctas)
+    {
+      // Rank 0 logs one line per launch; each must be the forced kernel on the pinned block count.
+      int           logged = 0;
+      std::ifstream log(run.logPath);
+      for (std::string line; std::getline(log, line);)
+      {
+        const std::string onLine = SymmetricKernelOnLine(line, func);
+        if (onLine.empty()) continue;
+        logged++;
+        EXPECT_EQ(kernel, onLine) << line;
+        EXPECT_EQ(std::to_string(ctas), TokenAfter(line, "nchannels ")) << line;
+      }
+      EXPECT_EQ(run.nCalls, logged) << "symmetric " << func << " lines in " << run.logPath;
+
+      for (int i = 0; i < static_cast<int>(run.streams.size()); i++)
+      {
+        HIP_CHECK(hipSetDevice(i));
+        HIP_CHECK(hipStreamDestroy(run.streams[i]));
+      }
+      for (auto& c : run.comms) ASSERT_EQ(ncclSuccess, ncclCommDestroy(c));
+      unsetenv("NCCL_DEBUG_FILE");
+      ncclResetDebugInitInternal();
+      if (!::testing::Test::HasFailure())
+      {
+        remove(run.logPath.c_str());
+      }
+    }
+
+    // Child that forces kernel on ctas blocks past the arch table, logging TUNING for FinishForcedRun.
+    ProcessIsolatedTestRunner::TestConfig ForcedKernelCase(const std::string& name, std::function<void()> logic,
+                                                           const std::string& kernel, int ctas,
+                                                           const char* skipFileEnv, const std::string& skipFile)
+    {
+      return ProcessIsolatedTestRunner::TestConfig(name, std::move(logic))
+        .withEnvironment({{"NCCL_SYM_KERNEL", kernel},
+                          {"NCCL_SYM_CTAS", std::to_string(ctas)},
+                          {"RCCL_IGNORE_ARCH_TABLE", "1"},
+                          {"NCCL_DEBUG", "INFO"},
+                          {"NCCL_DEBUG_SUBSYS", "TUNING"},
+                          {skipFileEnv, skipFile}})
+        .clearVariable("NCCL_ALGO")
+        .clearVariable("NCCL_SYM_TMA_ENABLE")
+        .withTimeout(kTimeout);
     }
 
     void RunInPlace(ncclFunc_t coll, size_t sliceCount)
@@ -263,6 +355,148 @@ namespace RcclUnitTesting
         GTEST_SKIP() << reason;
       }
     }
+
+    // AllGather_TmaST with send and recv both skewed by one head, so the 256 B tier peels a nonzero head
+    // and starts its tiles mid-slice. Out of place at an odd rank count and in place at an even one leave
+    // a partial peer pass for any UnrollPeers of 2 or 4.
+    constexpr int    kTmaCtas  = 4;
+    constexpr size_t kTmaSpan  = kTmaCtas * static_cast<size_t>(ncclSymkAlign256BDeepBytePerChunk);
+    constexpr size_t kMaxSkew  = 256;
+    constexpr size_t kGuard    = 64 << 10;
+    constexpr float  kSentinel = -7.0f;
+    constexpr float  kSendPad  = -3.0f;  // send-window bytes outside the slice, so an over-read shows up
+    // Per-rank bytes, all multiples of 256 so the tier engages on every rank: an exact span multiple
+    // (the head pushes one wave to the lower tiers), just under one, and one past it by 43 KiB.
+    constexpr size_t kTmaSlices[] = {3 * kTmaSpan, 4 * kTmaSpan - 256, 3 * kTmaSpan + (43 << 10)};
+    constexpr size_t kTmaSkews[]  = {16, 112, 240};
+
+    constexpr char kTmaSkipFileEnv[] = "RCCL_UT_SYM_TMAST_SKIP_FILE";
+
+    enum class TmaRanks
+    {
+      kAll,
+      kOdd,
+      kEven
+    };
+
+    void RunTmaStSkewed(TmaRanks ranks, bool inPlace)
+    {
+      if (!IsGfx1250() || !TDM_TOOLCHAIN_AVAILABLE)
+      {
+        SkipOrHandToParent(kTmaSkipFileEnv, "AllGather_TmaST needs gfx1250 and a TDM-capable build");
+        return;
+      }
+      int numDevices = 0;
+      HIP_CHECK(hipGetDeviceCount(&numDevices));
+      ASSERT_GE(numDevices, 3) << "the parent gate saw at least 3 GPUs";
+      const int all    = std::min(numDevices, kMaxRanks);
+      const int nRanks = ranks == TmaRanks::kAll ? all : ranks == TmaRanks::kOdd ? all - 1 + all % 2 : all - all % 2;
+
+      const size_t maxSlice = *std::max_element(std::begin(kTmaSlices), std::end(kTmaSlices));
+      const size_t recvBytes = kMaxSkew + maxSlice * nRanks + kGuard;
+      const size_t sendBytes = kMaxSkew + maxSlice + kGuard;
+
+      ForcedRun run;
+      ASSERT_NO_FATAL_FAILURE(StartForcedRun(run, nRanks));
+      std::vector<ncclComm_t>& comms = run.comms;
+
+      std::vector<RCCLTestHelpers::SymBuf> recv, send;
+      ncclResult_t regRes = RCCLTestHelpers::ncclSymBufAllocPerRank(comms, recvBytes, recv);
+      if (regRes == ncclSuccess && !inPlace)
+      {
+        regRes = RCCLTestHelpers::ncclSymBufAllocPerRank(comms, sendBytes, send);
+      }
+      // cuMem is on by default on gfx1250, so a failed registration is a failure, not a skip.
+      EXPECT_EQ(ncclSuccess, regRes) << ncclGetErrorString(regRes);
+
+      for (size_t sliceBytes : kTmaSlices)
+      {
+        for (size_t skew : kTmaSkews)
+        {
+          if (regRes != ncclSuccess || ::testing::Test::HasFailure()) break;
+          SCOPED_TRACE("slice " + std::to_string(sliceBytes) + " B, skew " + std::to_string(skew) + " B");
+          const size_t sliceCount = sliceBytes / sizeof(float);
+          const size_t skewCount  = skew / sizeof(float);
+          const size_t totalCount = sliceCount * nRanks;
+          auto sendOf = [&](int i) {
+            return inPlace ? static_cast<float*>(recv[i].ptr) + skewCount + i * sliceCount
+                           : static_cast<float*>(send[i].ptr) + skewCount;
+          };
+
+          for (int i = 0; i < nRanks; i++)
+          {
+            int algo = -1, protocol = 0, channels = 0;
+            ASSERT_EQ(ncclSuccess, rcclGetCollImplInfo(comms[i], ncclFuncAllGather, sliceCount, ncclFloat32, ncclSum,
+                                                       sendOf(i), static_cast<float*>(recv[i].ptr) + skewCount,
+                                                       /*graphCapturing=*/0, &algo, &protocol, &channels));
+            EXPECT_EQ(static_cast<int>(rcclAddonAlgos_t::RCCL_SYMMETRIC_TDM), algo) << "rank " << i;
+            EXPECT_EQ(kTmaCtas, channels) << "rank " << i;
+          }
+
+          std::vector<float> host(recvBytes / sizeof(float));
+          for (int i = 0; i < nRanks; i++)
+          {
+            HIP_CHECK(hipSetDevice(i));
+            std::fill(host.begin(), host.end(), inPlace ? kSentinel : kSendPad);
+            float* own = inPlace ? host.data() + skewCount + i * sliceCount : host.data() + skewCount;
+            for (size_t k = 0; k < sliceCount; k++) own[k] = TaggedValue(i, k);
+            if (inPlace)
+            {
+              HIP_CHECK(hipMemcpy(recv[i].ptr, host.data(), recvBytes, hipMemcpyHostToDevice));
+            }
+            else
+            {
+              HIP_CHECK(hipMemcpy(send[i].ptr, host.data(), sendBytes, hipMemcpyHostToDevice));
+              std::fill(host.begin(), host.end(), kSentinel);
+              HIP_CHECK(hipMemcpy(recv[i].ptr, host.data(), recvBytes, hipMemcpyHostToDevice));
+            }
+          }
+
+          ASSERT_EQ(ncclSuccess, ncclGroupStart());
+          for (int i = 0; i < nRanks; i++)
+          {
+            HIP_CHECK(hipSetDevice(i));
+            ASSERT_EQ(ncclSuccess, ncclAllGather(sendOf(i), static_cast<float*>(recv[i].ptr) + skewCount, sliceCount,
+                                                 ncclFloat32, comms[i], run.streams[i]));
+          }
+          ASSERT_EQ(ncclSuccess, ncclGroupEnd());
+          run.nCalls++;
+          for (int i = 0; i < nRanks; i++)
+          {
+            HIP_CHECK(hipSetDevice(i));
+            HIP_CHECK(hipStreamSynchronize(run.streams[i]));
+          }
+
+          // The whole window: sentinel before the skewed base and after the gathered span, data between.
+          for (int i = 0; i < nRanks; i++)
+          {
+            HIP_CHECK(hipSetDevice(i));
+            HIP_CHECK(hipMemcpy(host.data(), recv[i].ptr, recvBytes, hipMemcpyDeviceToHost));
+            size_t wrong = 0, firstWrong = 0;
+            for (size_t k = 0; k < host.size(); k++)
+            {
+              const bool  inData   = k >= skewCount && k < skewCount + totalCount;
+              const size_t d       = k - skewCount;
+              const float expected = inData ? TaggedValue(static_cast<int>(d / sliceCount), d % sliceCount) : kSentinel;
+              if (host[k] != expected && wrong++ == 0) firstWrong = k;
+            }
+            EXPECT_EQ(0u, wrong) << "rank " << i << ": " << wrong << " wrong floats, first at window float "
+                                 << firstWrong << " (data starts at " << skewCount << ")";
+          }
+        }
+      }
+
+      recv.clear();
+      send.clear();
+      FinishForcedRun(run, "AllGather", "AllGather_TmaST", kTmaCtas);
+    }
+
+    ProcessIsolatedTestRunner::TestConfig TmaStCase(const std::string& name, TmaRanks ranks, bool inPlace,
+                                                    const std::string& skipFile)
+    {
+      return ForcedKernelCase(name, [ranks, inPlace]() { RunTmaStSkewed(ranks, inPlace); }, "AllGather_TmaST",
+                              kTmaCtas, kTmaSkipFileEnv, skipFile);
+    }
   }  // namespace
 
   TEST(ReduceScatter, SymmetricInPlaceSlices)
@@ -273,5 +507,23 @@ namespace RcclUnitTesting
   TEST(AllGather, SymmetricInPlaceSlices)
   {
     RunBothSlices("AllGather", ncclFuncAllGather);
+  }
+
+  TEST(AllGather, SymmetricTmaStSkewedHead)
+  {
+    if (TooFewGpus(3))
+    {
+      GTEST_SKIP() << "This test requires at least 3 GPUs.";
+    }
+    const std::string skipFile = MakeTempFile("rccl_sym_tmast_skip");
+    ASSERT_FALSE(skipFile.empty()) << "mkstemp failed";
+    RUN_ISOLATED_TESTS(TmaStCase("OutOfPlaceAllRanks", TmaRanks::kAll, false, skipFile),
+                       TmaStCase("OutOfPlaceOddRanks", TmaRanks::kOdd, false, skipFile),
+                       TmaStCase("InPlaceEvenRanks", TmaRanks::kEven, true, skipFile));
+    const std::string reason = TakeHandedSkip(skipFile);
+    if (!reason.empty())
+    {
+      GTEST_SKIP() << reason;
+    }
   }
 }  // namespace RcclUnitTesting
