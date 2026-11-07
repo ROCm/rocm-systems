@@ -540,7 +540,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   compiles for real. Also `src/diagnostics.cc` (`DIAGNOSTICS_CC_PATH`, suite
   `DiagnosticsMicrotest.*`) and `src/diagnostics/device/p2p.cu` (`DIAG_P2P_DEVICE_CU_PATH`,
   suite `DiagP2pDeviceMicrotest.*`), each with its symbols renamed so the fakes of
-  both stay linked. See `test_categories_micro_diagnostics.yaml`.
+  both stay linked. It builds with `__HIP_PLATFORM_AMD__`, so it pins the AMD
+  remediation advice and the HIP wording of the report lines; the NVIDIA arm of
+  `p2p.cc` is not compiled here. See `test_categories_micro_diagnostics.yaml`.
 - **`rccl-UnitTestsMicroGraph`**: the real `src/graph/{xml,topo,paths,search,rome_models}.cc`,
   compiled as sources; suite `TopoGpuDevMicrotest.*` in `graph-dev-test.cc`. Its own binary:
   every other target links fakes for the graph symbols these files define. See
