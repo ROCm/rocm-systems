@@ -279,6 +279,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed `amd-smi` using the `amdsmi` Python library of another ROCm install**.  
   - When `ROCM_PATH` or `ROCM_HOME` named a different ROCm install, `amd-smi` loaded that install's library, so it either failed with an `AttributeError` or reported the other install's library and ROCm versions. `ROCM_PATH` and `ROCM_HOME` no longer redirect which `amdsmi` Python package `amd-smi` loads.
 
+- **Fixed `amd-smi partition` showing a crash or a wrong partition ID when a GPU's profile query fails**.  
+  - With `--current`, a failure on the first GPU stopped the command with a Python error, and a failure on a later GPU showed the previous GPU's partition ID. With `--accelerator`, the failing GPU was shown as partition `0`. The failing GPU's row now shows `N/A` in both tables.
+
 ## amd_smi_lib for ROCm 10.1.0
 
 ### Added
