@@ -43,6 +43,7 @@
 #include "enqueue.h"
 #include "group.h"
 #include "nccl.h"
+#include "nccl_fakes.h"  // g_loadParam
 #include "rccl_common.h"
 #ifdef ENABLE_ROCSHMEM_GIN
 #include "algorithms/gin/gin_all_reduce.h"
@@ -106,6 +107,9 @@ int64_t rcclParamForceCe() { return g_paramForceCe(); }
 static int64_t DefaultParamP2pDisable() { return 0; }  // init.cc:137
 std::function<int64_t()> g_paramP2pDisable = DefaultParamP2pDisable;
 int64_t ncclParamP2pDisable() { return g_paramP2pDisable(); }
+
+// enqueue.cc owns NCCL_PARAM(EnqueueRearchEnable); rccl_wrap.cc reads it to skip warp speed.
+int64_t ncclParamEnqueueRearchEnable() { return g_loadParam("ENQUEUE_REARCH_ENABLE", 0); }
 
 // The settable env-var fake (SetMicroEnv/SetMicroEnvAbsent/ClearMicroEnv,
 // the bare-getenv() link-level interposer, and ncclGetEnv) is NOT defined
