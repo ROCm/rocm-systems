@@ -25,6 +25,7 @@
 
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue.hpp"
 
 #include <gtest/gtest.h>
 
@@ -107,6 +108,62 @@ TEST(hsa, tables)
     EXPECT_EQ(table.amd_ext_, amd_ext);
     EXPECT_EQ(table.finalizer_ext_, fini_ext);
     EXPECT_EQ(table.image_ext_, img_ext);
+}
+
+TEST(hsa, dispatch_time_signal_lifecycle)
+{
+    auto cache   = ::rocprofiler::hsa::dispatch_time_cache{};
+    auto signal  = hsa_signal_t{64};
+    auto pending = hsa_signal_t{128};
+    auto agent   = hsa_agent_t{1};
+    auto time    = hsa_amd_profiling_dispatch_time_t{};
+    auto query   = +[](hsa_agent_t, hsa_signal_t value, hsa_amd_profiling_dispatch_time_t* result) {
+        *result = {value.handle, value.handle + 10};
+        return HSA_STATUS_SUCCESS;
+    };
+    cache.create(signal);
+    EXPECT_FALSE(cache.query(agent, signal, &time, query));
+    cache.track(signal, pending, agent);
+    EXPECT_FALSE(cache.query({2}, signal, &time, query));
+    EXPECT_FALSE(cache.query(agent, signal, nullptr, query));
+    ASSERT_EQ(cache.query(agent, signal, &time, query), HSA_STATUS_SUCCESS);
+    EXPECT_EQ(time.start, 128);
+    cache.store(signal, pending, query);
+    EXPECT_FALSE(cache.query({2}, signal, &time, query));
+
+    cache.retain(signal);
+    cache.release(signal);
+    ASSERT_EQ(cache.query(agent, signal, &time, query), HSA_STATUS_SUCCESS);
+    EXPECT_EQ(time.end, 138);
+    cache.forget(signal);
+    cache.store(signal, pending, query);
+    EXPECT_FALSE(cache.query(agent, signal, &time, query));
+    cache.track(signal, {256}, agent);
+    cache.store(signal, pending, query);
+    ASSERT_EQ(cache.query(agent, signal, &time, query), HSA_STATUS_SUCCESS);
+    EXPECT_EQ(time.end, 266);
+    cache.store(signal, {256}, query);
+    cache.release(signal);
+    EXPECT_FALSE(cache.query(agent, signal, &time, query));
+
+    cache.retain(signal);
+    cache.track(signal, pending, agent);
+    cache.create(signal);
+    EXPECT_FALSE(cache.query(agent, signal, &time, query));
+#if defined(AMD_SIGNAL_HINT_MASK)
+    auto hinted = hsa_amd_signal_set_hints(signal, AMD_SIGNAL_HINT_TS_ON);
+    cache.track(hinted, pending, agent);
+    cache.store(hinted, pending, query);
+    ASSERT_EQ(cache.query(agent, signal, &time, query), HSA_STATUS_SUCCESS);
+    cache.forget(signal);
+    EXPECT_FALSE(cache.query(agent, hinted, &time, query));
+    cache.track(hinted, pending, agent);
+    cache.release(signal);
+    EXPECT_FALSE(cache.query(agent, hinted, &time, query));
+#endif
+    cache.track(signal, pending, agent);
+    cache.clear();
+    EXPECT_FALSE(cache.query(agent, signal, &time, query));
 }
 
 TEST(hsa, high_precision_timestamp_contexts)
