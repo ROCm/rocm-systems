@@ -45,8 +45,8 @@
 cmake_minimum_required ( VERSION 3.7 )
 
 # Find Clang package and LLVM package
-find_package(Clang REQUIRED HINTS ${CMAKE_PREFIX_PATH}/llvm PATHS /opt/rocm/llvm )
-find_package(LLVM REQUIRED HINTS ${CMAKE_PREFIX_PATH}/llvm PATHS /opt/rocm/llvm )
+find_package(Clang REQUIRED CONFIG HINTS ${ROCM_PATH}/llvm PATHS /opt/rocm/llvm )
+find_package(LLVM REQUIRED CONFIG HINTS ${ROCM_PATH}/llvm PATHS /opt/rocm/llvm )
 
 # Set the target devices
 set (TARGET_DEVS "gfx900;gfx1010;gfx1030;gfx1100;gfx1200;gfx1250")
