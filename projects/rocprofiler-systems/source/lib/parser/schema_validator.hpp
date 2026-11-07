@@ -4,6 +4,7 @@
 #pragma once
 
 #include "parser/schema.hpp"
+#include "parser/value_text.hpp"
 
 #include <string>
 #include <string_view>
@@ -26,6 +27,10 @@ namespace rocprofsys::parser
 [[nodiscard]] bool
 is_valid_value(const schema_param& param, std::string_view value);
 
+/// Shared wording for a value the catalog refuses.
+[[nodiscard]] std::string
+invalid_value_message(std::string_view value, std::string_view param_id);
+
 struct violation
 {
     std::string              message;
@@ -33,14 +38,15 @@ struct violation
 };
 
 /**
- * Validate a set of explicitly provided parameter values against @p config_schema.
+ * Validate explicitly provided parameter values against @p config_schema.
  *
- * Reports unknown parameters and invalid values, then evaluates inline constraints.
- * A parameter is enabled only when a value was provided for it: non-empty, and true
- * for a boolean.
+ * @p values are already parsed. Reports an unknown parameter id, then evaluates
+ * inline constraints. It does not parse the values again. A parameter is enabled
+ * when a value was provided for it: a true boolean, a non-empty string or list, or
+ * any number.
  */
 [[nodiscard]] std::vector<violation>
-validate_values(const schema& config_schema, const value_map_t& values);
+validate_values(const schema& config_schema, const typed_values_t& values);
 
 /**
  * Check the catalog itself, before any user input.

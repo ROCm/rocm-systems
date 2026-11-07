@@ -3,6 +3,7 @@
 
 #include "parser/schema.hpp"
 #include "parser/schema_validator.hpp"
+#include "parser/value_text.hpp"
 
 #include <gtest/gtest.h>
 
@@ -104,11 +105,11 @@ make_profiler_schema()
 }
 
 std::vector<violation>
-validate(const value_map_t& values)
+validate(const typed_values_t& values)
 {
     static const auto k_config_schema = make_profiler_schema();
     auto              with_output     = values;
-    with_output.try_emplace("output", "/tmp/out");
+    with_output.try_emplace("output", std::string{ "/tmp/out" });
     return validate_values(k_config_schema, with_output);
 }
 
@@ -227,24 +228,23 @@ TEST(parser_schema_validator, enumeration_list_values)
 TEST(parser_schema_validator, accepts_defaults_and_valid_values)
 {
     EXPECT_TRUE(validate({}).empty());
-    EXPECT_TRUE(validate({ { "sampling_freq", "100" }, { "mode", "fast" } }).empty());
+    EXPECT_TRUE(
+        validate({ { "sampling_freq", 100.0 }, { "mode", std::string{ "fast" } } })
+            .empty());
 }
 
-TEST(parser_schema_validator, reports_unknown_and_invalid_values)
+TEST(parser_schema_validator, reports_an_unknown_parameter)
 {
-    const auto violations =
-        validate({ { "bogus", "1" }, { "sampling_freq", "nan" }, { "mode", "medium" } });
+    const auto violations = validate({ { "bogus", std::string{ "1" } } });
 
-    EXPECT_EQ(violations.size(), 3U);
+    EXPECT_EQ(violations.size(), 1U);
     EXPECT_TRUE(has_violation(violations, "unknown parameter 'bogus'"));
-    EXPECT_TRUE(has_violation(violations, "'nan'"));
-    EXPECT_TRUE(has_violation(violations, "'medium'"));
 }
 
 TEST(parser_schema_validator, reports_mutually_exclusive_params_once)
 {
-    const auto violations = validate(
-        { { "trace", "true" }, { "flat_profile", "true" }, { "profile", "true" } });
+    const auto violations =
+        validate({ { "trace", true }, { "flat_profile", true }, { "profile", true } });
 
     const auto count = std::ranges::count_if(violations, [](const violation& item) {
         return item.message.find("mutually exclusive") != std::string::npos;
@@ -256,21 +256,19 @@ TEST(parser_schema_validator, reports_mutually_exclusive_params_once)
 TEST(parser_schema_validator, exclusion_uses_boolean_value)
 {
     EXPECT_TRUE(
-        validate({ { "trace", "off" }, { "flat_profile", "on" }, { "profile", "yes" } })
+        validate({ { "trace", false }, { "flat_profile", true }, { "profile", true } })
             .empty());
 }
 
 TEST(parser_schema_validator, reports_missing_requirement)
 {
-    const auto violations =
-        validate({ { "trace", "false" }, { "flat_profile", "true" } });
+    const auto violations = validate({ { "trace", false }, { "flat_profile", true } });
     EXPECT_TRUE(has_violation(violations, "'flat_profile' requires 'profile'"));
 }
 
 TEST(parser_schema_validator, a_default_does_not_enable_mutual_exclusion)
 {
-    const auto violations =
-        validate({ { "flat_profile", "true" }, { "profile", "true" } });
+    const auto violations = validate({ { "flat_profile", true }, { "profile", true } });
     EXPECT_FALSE(has_violation(violations, "mutually exclusive"));
 }
 
@@ -291,7 +289,7 @@ TEST(parser_schema_validator, reports_a_two_sided_exclusion_once)
                        });
 
     const auto violations =
-        validate_values(value, { { "left", "true" }, { "right", "true" } });
+        validate_values(value, { { "left", true }, { "right", true } });
     const auto count = std::ranges::count_if(violations, [](const violation& item) {
         return item.message.find("mutually exclusive") != std::string::npos;
     });

@@ -11,15 +11,17 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 #if !defined(__cpp_lib_to_chars) || __cpp_lib_to_chars < 201611L
 #    include <cctype>
 #    include <cstddef>
+#    include <cstdio>
 #    include <stdexcept>
-#    include <string>
 #endif
 
 namespace rocprofsys::parser
@@ -181,31 +183,85 @@ choice_accepted(const schema_param& param, std::string_view value)
 {
     return choice_listed(param, value) || (param.allow_custom && !value.empty());
 }
+
+[[nodiscard]] std::string
+format_integer(std::int64_t value)
+{
+    std::array<char, 32> buffer{};
+    const auto           result =
+        std::to_chars(buffer.data(), buffer.data() + buffer.size(), value);
+    return std::string{ buffer.data(), result.ptr };
+}
+
+[[nodiscard]] std::string
+format_number(double value)
+{
+#if defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L
+    std::array<char, 64> buffer{};
+    const auto result = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value,
+                                      std::chars_format::general);
+    if(result.ec == std::errc{})
+    {
+        return std::string{ buffer.data(), result.ptr };
+    }
+#else
+    std::array<char, 64> buffer{};
+    const auto written = std::snprintf(buffer.data(), buffer.size(), "%g", value);
+    if(written > 0)
+    {
+        return std::string{ buffer.data() };
+    }
+#endif
+    return {};
+}
+
+[[nodiscard]] std::string
+format_list(const std::vector<std::string>& parts)
+{
+    std::string joined;
+    for(std::size_t index = 0; index < parts.size(); ++index)
+    {
+        if(index != 0)
+        {
+            joined.push_back(',');
+        }
+        joined.append(parts[index]);
+    }
+    return joined;
+}
 }  // namespace
 
 bool
-accepts_text(const schema_param& param, std::string_view value)
+accepts_value(const schema_param& param, const config_value_t& value)
 {
     switch(param.type)
     {
-        case param_type::boolean: return parse_boolean(value).has_value();
+        case param_type::boolean: return std::holds_alternative<bool>(value);
         case param_type::integer:
         {
-            const auto parsed = parse_integer(value);
-            return parsed && integer_in_range(*parsed, param);
+            const auto* integer = std::get_if<std::int64_t>(&value);
+            return integer != nullptr && integer_in_range(*integer, param);
         }
         case param_type::number:
         {
-            const auto parsed = parse_number(value);
-            return parsed && number_in_range(*parsed, param);
+            const auto* number = std::get_if<double>(&value);
+            return number != nullptr && number_in_range(*number, param);
         }
-        case param_type::string: return true;
-        case param_type::path: return !value.empty();
-        case param_type::enumeration: return choice_accepted(param, value);
+        case param_type::string: return std::holds_alternative<std::string>(value);
+        case param_type::path:
+        {
+            const auto* text = std::get_if<std::string>(&value);
+            return text != nullptr && !text->empty();
+        }
+        case param_type::enumeration:
+        {
+            const auto* text = std::get_if<std::string>(&value);
+            return text != nullptr && choice_accepted(param, *text);
+        }
         case param_type::enumeration_list:
         {
-            const auto parts = split_list(value, list_separator(param));
-            if(!parts)
+            const auto* parts = std::get_if<std::vector<std::string>>(&value);
+            if(parts == nullptr)
             {
                 return false;
             }
@@ -220,6 +276,77 @@ accepts_text(const schema_param& param, std::string_view value)
         }
     }
     return false;
+}
+
+std::optional<config_value_t>
+parse_value(const schema_param& param, std::string_view text)
+{
+    std::optional<config_value_t> candidate;
+    switch(param.type)
+    {
+        case param_type::boolean:
+            if(const auto parsed = parse_boolean(text))
+            {
+                candidate = config_value_t{ *parsed };
+            }
+            break;
+        case param_type::integer:
+            if(const auto parsed = parse_integer(text))
+            {
+                candidate = config_value_t{ *parsed };
+            }
+            break;
+        case param_type::number:
+            if(const auto parsed = parse_number(text))
+            {
+                candidate = config_value_t{ *parsed };
+            }
+            break;
+        case param_type::string:
+        case param_type::path:
+        case param_type::enumeration:
+            candidate = config_value_t{ std::string{ text } };
+            break;
+        case param_type::enumeration_list:
+            if(auto parts = split_list(text, list_separator(param)))
+            {
+                candidate = config_value_t{ std::move(*parts) };
+            }
+            break;
+    }
+    if(!candidate || !accepts_value(param, *candidate))
+    {
+        return std::nullopt;
+    }
+    return candidate;
+}
+
+std::string
+format_value(const config_value_t& value)
+{
+    if(const auto* flag = std::get_if<bool>(&value))
+    {
+        return *flag ? "true" : "false";
+    }
+    if(const auto* integer = std::get_if<std::int64_t>(&value))
+    {
+        return format_integer(*integer);
+    }
+    if(const auto* number = std::get_if<double>(&value))
+    {
+        return format_number(*number);
+    }
+    if(const auto* text = std::get_if<std::string>(&value))
+    {
+        return *text;
+    }
+    return format_list(std::get<std::vector<std::string>>(value));
+}
+
+bool
+accepts_text(const schema_param& param, std::string_view value)
+{
+    return parse_value(param, value).has_value();
 }
 
 }  // namespace rocprofsys::parser
