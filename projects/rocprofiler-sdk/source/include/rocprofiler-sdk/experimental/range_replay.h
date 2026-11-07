@@ -107,9 +107,18 @@ typedef enum rocprofiler_range_replay_status_t  // NOLINT(performance-enum-size)
  * plus module-scope @c __device__ / @c __constant__ variables), so unified/managed memory, host and
  * fine-grained memory, and virtual-memory-mapped allocations are not restored between passes.
  * Replayed passes are serialized dispatch-by-dispatch, so concurrency-sensitive measurements differ
- * from pass 0. Host state is not rewound unless the tool sets @c host_replay and the application
- * arms @ref ROCPROFILER_RANGE_REPLAY_HOST_BEGIN. Without that opt-in, a range whose kernels consume
- * values the host recomputed inside the range is not a candidate for replay.
+ * from pass 0. A range whose kernels consume values the host recomputed inside the range is not a
+ * candidate for packet replay.
+ *
+ * Host replay (@c host_replay set during CONFIG, range opened with
+ * @ref ROCPROFILER_RANGE_REPLAY_HOST_BEGIN) lifts the packet restrictions: nothing is recorded, and
+ * each extra pass re-runs the application's own code between begin and end, so memory copies,
+ * memsets, multiple queues and agents, HIP graphs, balanced allocate/free pairs, and host
+ * computation all take part in every pass. Device memory on every GPU agent and the host regions
+ * registered with @ref rocprofiler_range_replay_host_track_memory are restored before each extra
+ * pass. Another thread dispatching or copying to a device inside the range, or a device allocation
+ * left allocated or freed across the range, still declines. Module variables of a code object
+ * first loaded inside the range are not rewound, so launch each kernel once before the range.
  *
  * @see `source/docs/conceptual/range_replay/index.md`
  */
@@ -165,10 +174,11 @@ typedef struct rocprofiler_callback_tracing_range_replay_data_t
     ///
     /// @var agent_id
     /// @brief [PASS, CLOSE] Agent the range was bound to, or a zero handle when no dispatch was
-    /// recorded.
+    /// recorded. For host replay, the agent of the first dispatch (the range may span several).
     ///
     /// @var dispatch_count
-    /// @brief [PASS, CLOSE] Number of dispatches recorded in the range.
+    /// @brief [PASS, CLOSE] Number of dispatches recorded in the range. For host replay, the number
+    /// of dispatches the application's own execution of the range submitted.
     ///
     /// @var status
     /// @brief [CLOSE] Replay outcome. @ref ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED when at least
@@ -183,9 +193,9 @@ typedef struct rocprofiler_callback_tracing_range_replay_data_t
     /// @var host_replay
     /// @brief [CONFIG] Set non-zero during CONFIG @ref ROCPROFILER_CALLBACK_PHASE_ENTER to re-run
     /// the host code inside the range instead of re-submitting recorded packets. Requires the
-    /// application to open the range with @ref ROCPROFILER_RANGE_REPLAY_HOST_BEGIN. Zero (the
-    /// default) keeps packet replay. @c siglongjmp does not run C++ destructors for automatic
-    /// objects created inside the range.
+    /// application to open the range with @ref ROCPROFILER_RANGE_REPLAY_HOST_BEGIN; otherwise the
+    /// range declines with @ref ROCPROFILER_RANGE_REPLAY_STATUS_HOST_JMP_NOT_SET. Zero (the
+    /// default) keeps packet replay.
 } rocprofiler_callback_tracing_range_replay_data_t;
 
 /**
@@ -208,27 +218,82 @@ rocprofiler_status_t
 rocprofiler_range_replay_begin(uint64_t range_id) ROCPROFILER_API;
 
 /**
- * @brief Thread-local sigjmp_buf used by @ref ROCPROFILER_RANGE_REPLAY_HOST_BEGIN.
+ * @brief Jump buffer used by @ref ROCPROFILER_RANGE_REPLAY_HOST_BEGIN.
  *
- * Calling this arms host replay on this thread. The buffer is only a valid longjmp target when
- * @c sigsetjmp has been called on it from a frame that is still live, which is what the macro does.
- * A tool that sets @c host_replay without the application using the macro declines the range with
- * @ref ROCPROFILER_RANGE_REPLAY_STATUS_HOST_JMP_NOT_SET.
+ * Returns a pointer to a thread-local @c sigjmp_buf, typed @c void* so that this header does not
+ * require POSIX declarations from a strict ISO C translation unit. Calling this function arms host
+ * replay for the next @ref rocprofiler_range_replay_begin on this thread, which consumes the arming
+ * whether or not host replay is then used, so a buffer from an earlier range is never a jump
+ * target. The buffer is only a valid target when @c sigsetjmp was called on it from a frame that
+ * is still live at @ref rocprofiler_range_replay_end, which is what the macro guarantees.
  */
-sigjmp_buf*
+void*
 rocprofiler_range_replay_host_jmpbuf(void) ROCPROFILER_API;
 
 /**
- * @brief Open a host-replay range. @p range_id is evaluated only on the first entry.
+ * @brief Open a replay range that re-runs the host code between it and
+ * @ref rocprofiler_range_replay_end.
  *
- * The sigsetjmp is in the caller's frame, so it is still live when @ref rocprofiler_range_replay_end
- * longjmps back here for passes 1..N-1. On those returns this macro does not call begin again, so
- * CONFIG runs once. Packet replay does not use this macro.
+ * Expands to a statement, not an expression: ISO C only allows @c sigsetjmp as the whole
+ * controlling expression of a selection statement (or compared against a constant there), so the
+ * jump target is taken in an @c if inside the caller's frame. @p status_out receives the status of
+ * @ref rocprofiler_range_replay_begin on the first entry and @ref ROCPROFILER_STATUS_SUCCESS on
+ * every re-entry, so CONFIG is delivered once per range. Requires @c <setjmp.h> with POSIX
+ * declarations (@c sigsetjmp) in the calling translation unit.
+ *
+ * Contract for the code between this macro and @ref rocprofiler_range_replay_end:
+ *  - Same thread, same function: the frame that expanded this macro must still be live at end.
+ *  - No C++ automatic object with a non-trivial destructor may be live across the jump (declare
+ *    such objects inside a nested block that closes before end, or outside the range).
+ *  - Locals of the enclosing function that the range modifies must be @c volatile, or must be
+ *    re-initialized inside the range; their values after the jump are otherwise indeterminate.
+ *  - Host memory the range reads and writes must be registered with
+ *    @ref rocprofiler_range_replay_host_track_memory to be rewound between passes.
+ *  - No other thread may submit GPU work or copy into device memory while the range is open.
  */
-#define ROCPROFILER_RANGE_REPLAY_HOST_BEGIN(range_id)                                              \
-    (sigsetjmp(*rocprofiler_range_replay_host_jmpbuf(), 1) == 0                                    \
-         ? rocprofiler_range_replay_begin(range_id)                                                \
-         : ROCPROFILER_STATUS_SUCCESS)
+#define ROCPROFILER_RANGE_REPLAY_HOST_BEGIN(range_id, status_out)                                  \
+    do                                                                                             \
+    {                                                                                              \
+        if(sigsetjmp(*(sigjmp_buf*) rocprofiler_range_replay_host_jmpbuf(), 1) == 0)               \
+            (status_out) = rocprofiler_range_replay_begin(range_id);                               \
+        else                                                                                       \
+            (status_out) = ROCPROFILER_STATUS_SUCCESS;                                             \
+    } while(0)
+
+/**
+ * @brief Register host memory that a host-replay range reads and writes.
+ *
+ * The contents of [@p ptr, @p ptr + @p size) are captured and copied back before each re-executed
+ * pass of a host-replay range, and are hashed for the divergence check. Registration made while no
+ * range is open applies to the next range opened on this thread (captured at its
+ * @ref rocprofiler_range_replay_begin). Registration made during the application's own execution
+ * of a host-replay range captures the region at the call. Calls made during re-executed passes, and
+ * calls made in a packet-replay range, are accepted and ignored. Registrations last until the range
+ * closes. The memory must stay valid until then.
+ *
+ * @param [in] ptr  Start of the region
+ * @param [in] size Size of the region in bytes
+ * @return ::rocprofiler_status_t
+ * @retval ::ROCPROFILER_STATUS_SUCCESS The region is registered (or the call was ignored)
+ * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT @p ptr is NULL or @p size is 0
+ */
+rocprofiler_status_t
+rocprofiler_range_replay_host_track_memory(void* ptr, uint64_t size) ROCPROFILER_API;
+
+/**
+ * @brief Pass of the open range that the calling thread is executing.
+ *
+ * 0 during the application's own execution of the range and outside a range, 1..N-1 during the
+ * re-executed passes of a host-replay range. Host code inside the range uses this to keep side
+ * effects that must happen once (file output, logging, network I/O) out of the re-executed passes.
+ *
+ * @param [out] pass Pass index
+ * @return ::rocprofiler_status_t
+ * @retval ::ROCPROFILER_STATUS_SUCCESS @p pass was written
+ * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT @p pass is NULL
+ */
+rocprofiler_status_t
+rocprofiler_range_replay_get_host_pass(uint64_t* pass) ROCPROFILER_API;
 
 /**
  * @brief Close the replay range open on the calling thread and run its extra passes.
@@ -236,10 +301,13 @@ rocprofiler_range_replay_host_jmpbuf(void) ROCPROFILER_API;
  * Drains the agent, then re-executes the recorded dispatches from the snapshot taken at
  * @ref rocprofiler_range_replay_begin, raising @ref ROCPROFILER_RANGE_REPLAY_PASS around each pass
  * and @ref ROCPROFILER_RANGE_REPLAY_CLOSE once at the end. Blocks the calling thread for the
- * duration of the replay. When the tool set @c host_replay, the extra passes are the caller's own
- * code: this function restores the entry snapshot and calls @c siglongjmp to
- * @ref ROCPROFILER_RANGE_REPLAY_HOST_BEGIN instead of re-submitting packets, and CLOSE runs only
- * after the last pass returns here.
+ * duration of the replay.
+ *
+ * For a host-replay range this function does not return after passes 0..N-2: it waits for every
+ * GPU queue to go idle, restores device memory and the registered host regions, raises
+ * @ref ROCPROFILER_RANGE_REPLAY_PASS, and calls @c siglongjmp back to
+ * @ref ROCPROFILER_RANGE_REPLAY_HOST_BEGIN. It returns once, after the last pass, having raised
+ * CLOSE. The final pass's device and host state is what the application continues with.
  *
  * @return ::rocprofiler_status_t
  * @retval ::ROCPROFILER_STATUS_SUCCESS The range was closed (replayed or declined; see the CLOSE
