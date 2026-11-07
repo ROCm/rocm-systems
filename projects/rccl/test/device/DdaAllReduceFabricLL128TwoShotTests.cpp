@@ -330,8 +330,9 @@ class DdaAllReduceFabricLL128TwoShot : public DeviceTestBase {
     HIP_CHECK(hipDeviceSynchronize());
   }
 
-  // Waits for every stream; past kDrainTimeout it raises the abort, so the spinning kernels leave, and returns false.
-  bool drain(const std::vector<hipStream_t>& streams) { return drainOrAbort(streams, kDrainTimeout, abortHost_); }
+  bool drain(const std::vector<hipStream_t>& streams) {
+    return drainOrAbort(streams, kDrainTimeout, abortHost_);
+  }
 
   template <typename T>
   void run(const Case& c) {
