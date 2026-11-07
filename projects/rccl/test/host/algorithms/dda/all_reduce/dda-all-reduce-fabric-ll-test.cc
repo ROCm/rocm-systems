@@ -866,6 +866,48 @@ TEST_F(DdaAllReduceFabricLLMicrotest, Split_StaysInsideItsWindow) {
   EXPECT_FALSE(takes(2 * kMiB)) << "LL128 tier off";
 }
 
+// The window's edges: more than two ranks, from 2 MiB, up to the LL128 tier's cap, and past a pinned LL128 one-shot.
+TEST_F(DdaAllReduceFabricLLMicrotest, Split_WindowEdges) {
+  SplitTiersOn(comm(), params_);
+  auto takes = [&](size_t bytes) { return TakesSplit(bytes / 4); };
+  comm().nRanks = 3;
+  EXPECT_TRUE(takes(3 * kMiB)) << "3 ranks: two peers";
+  comm().nRanks = 2;
+  EXPECT_FALSE(takes(3 * kMiB)) << "2 ranks";
+  comm().nRanks = 8;
+  EXPECT_TRUE(takes(2 * kMiB)) << "the 2 MiB cutoff";
+  EXPECT_FALSE(takes(2 * kMiB - 8 * 16));
+  g_rcclDdaLL128Threshold = [](const ncclComm*, ncclFunc_t) { return 8 * kMiB; };
+  EXPECT_TRUE(takes(8 * kMiB)) << "at the LL128 cap";
+  EXPECT_FALSE(takes(8 * kMiB + 8 * 16)) << "past the LL128 cap";
+  g_rcclDdaArLL128OneShotPinnedByEnv = [] { return true; };
+  params_["RCCL_DDA_LL128_ONESHOT_THRESHOLD"] = 3 * kMiB;
+  EXPECT_FALSE(takes(3 * kMiB)) << "the pinned LL128 one-shot's cap";
+  EXPECT_TRUE(Eligible(&ddaLL128ArOneShotEligible, 3 * kMiB / 4)) << "the pinned LL128 one-shot keeps it";
+  EXPECT_TRUE(takes(3 * kMiB + 8 * 16)) << "past the pinned LL128 one-shot's cap";
+}
+
+// The split launch passes the two-shot's arguments: peers, buffers, shard bytes and slices, rank, epoch and bank.
+TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_PeerSplitPassesTheTwoShotsArguments) {
+  SplitTiersOn(comm(), params_);
+  const DdaLaunch& launch = RunSelectedLL128(2 * kMiB / 2, ncclBfloat16);
+  EXPECT_EQ(launch.kernel, (LL128Split<bf16, 8>()));
+  EXPECT_EQ(launch.stopEvent, kStopEvent);
+  EXPECT_EQ(launch.sharedMemBytes, dda::common::ddaLL128ArSplitSharedBytes(launch.block.x, 8));
+  ASSERT_EQ(launch.args.size(), 11u);
+  EXPECT_EQ(launch.Arg<bf16**>(0), comm().ddaPeerPtrsDev);
+  EXPECT_EQ(launch.Arg<bf16*>(1), kRecvbuff);
+  EXPECT_EQ(launch.Arg<const bf16*>(2), kSendbuff);
+  EXPECT_EQ(launch.Arg<size_t>(3), 2 * kMiB / 8);
+  EXPECT_EQ(launch.Arg<int>(4), 5);
+  EXPECT_EQ(launch.Arg<int>(5), 8);
+  EXPECT_EQ(launch.Arg<uint32_t*>(6), comm().ddaLLEpochDev);
+  EXPECT_EQ(launch.Arg<int>(7), comm().ddaLLEpochLen);
+  EXPECT_EQ(launch.Arg<size_t>(8), (2 * kMiB / 8 + kSliceData - 1) / kSliceData);
+  EXPECT_EQ(launch.Arg<size_t>(9), dda::common::ddaBankSize(comm().ddaScratchBytes));
+  EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(10).flag, comm().abortFlagDev);
+}
+
 // The split's bound is the grid of the launch it replaces: the LL two-shot where the LL tier takes the message, else
 // the LL128 one-shot, else (past the one-shot threshold) the LL128 two-shot.
 TEST_F(DdaAllReduceFabricLLMicrotest, Split_BoundIsTheReplacedLaunchersGrid) {

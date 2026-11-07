@@ -545,7 +545,7 @@ TEST_F(DdaMPI_AllReduce, LL128StagedWireTwoShotMultiRank)
     EXPECT_TRUE(logContainsNeedle(kLL128TwoShotLogNeedle)) << "Rank " << rank << ": no LL128 two-shot launch";
     if(nRanks > 2)
     {
-        EXPECT_TRUE(logContainsNeedle("(peer-split")) << "Rank " << rank << ": the peer-split missed its window";
+        EXPECT_GE(countLogNeedle("(peer-split"), 2u) << "Rank " << rank << ": a message missed the peer-split";
     }
     else
     {
