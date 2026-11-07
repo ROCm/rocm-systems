@@ -215,6 +215,7 @@ struct Fakes {
   ncclResult_t bootstrapResult = ncclSuccess;
   std::vector<KernelLaunch> launches;
   std::vector<rcclDdaLaunchCap> ddaCaps;  // per capped fabric AllReduce launch
+  std::vector<bool> ddaLL128Splits;       // per LL128 fabric AllReduce launch
 };
 Fakes fake;
 
@@ -281,6 +282,8 @@ using DdaSig = ncclResult_t(const void*, void*, size_t, ncclDataType_t, ncclComm
 using DdaOpSig = ncclResult_t(const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, ncclComm*, hipStream_t);
 using DdaCappedOpSig =
     ncclResult_t(const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, ncclComm*, hipStream_t, rcclDdaLaunchCap);
+using DdaLL128OpSig = ncclResult_t(const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, ncclComm*, hipStream_t,
+                                   rcclDdaLaunchCap, bool);
 #define ADDON_HOOK(hook, fn)                                                                           \
   ScopedHook<DdaSig> hook##_{g_##hook,                                                                 \
                              [](const void* s, void* r, size_t n, ncclDataType_t t, ncclComm* c,      \
@@ -293,6 +296,13 @@ using DdaCappedOpSig =
   ScopedHook<DdaCappedOpSig> hook##_{g_##hook, [](const void* s, void* r, size_t n, ncclDataType_t t, ncclRedOp_t o, \
                                                   ncclComm* c, hipStream_t st, rcclDdaLaunchCap cap) {             \
     fake.ddaCaps.push_back(cap);                                                                       \
+    return RecordAddon(fn, s, r, n, t, o, c, st);                                                      \
+  }};
+#define ADDON_LL128_HOOK(hook, fn)                                                                     \
+  ScopedHook<DdaLL128OpSig> hook##_{g_##hook, [](const void* s, void* r, size_t n, ncclDataType_t t, ncclRedOp_t o, \
+                                                 ncclComm* c, hipStream_t st, rcclDdaLaunchCap cap, bool split) {  \
+    fake.ddaCaps.push_back(cap);                                                                       \
+    fake.ddaLL128Splits.push_back(split);                                                              \
     return RecordAddon(fn, s, r, n, t, o, c, st);                                                      \
   }};
 
@@ -549,7 +559,7 @@ struct SharedHooks {
   ADDON_HOOK(allToAllDdaFabric, "ncclAllToAllDdaFabric")
   ADDON_HOOK(allToAllDdaIpc, "ncclAllToAllDdaIpc")
   ADDON_CAPPED_HOOK(allReduceDdaFabricLL, "ncclAllReduceDdaFabricLL")
-  ADDON_CAPPED_HOOK(allReduceDdaFabricLL128, "ncclAllReduceDdaFabricLL128")
+  ADDON_LL128_HOOK(allReduceDdaFabricLL128, "ncclAllReduceDdaFabricLL128")
   ADDON_CAPPED_HOOK(allReduceDdaFabric, "ncclAllReduceDdaFabric")
   ADDON_OP_HOOK(allReduceDdaIpc, "ncclAllReduceDdaIpc")
   ADDON_OP_HOOK(reduceScatterDdaFabricLL, "ncclReduceScatterDdaFabricLL")
@@ -560,6 +570,7 @@ struct SharedHooks {
 #undef ADDON_HOOK
 #undef ADDON_OP_HOOK
 #undef ADDON_CAPPED_HOOK
+#undef ADDON_LL128_HOOK
 
 class CollectivesMicrotest : public ::testing::Test {
  protected:
@@ -1750,6 +1761,18 @@ TEST_F(CollectivesMicrotest, AllReduce_FabricArmsPassTheDecisionsCap) {
       EXPECT_EQ(cap.blocks, fake.ddaCaps[0].blocks);
       EXPECT_EQ(cap.threads, fake.ddaCaps[0].threads);
     }
+  }
+}
+
+// The decision's LL128 peer-split flag reaches the LL128 launcher with its cap.
+TEST_F(CollectivesMicrotest, AllReduce_LL128ArmPassesTheDecisionsSplit) {
+  Decide(RCCL_DDA_FABRIC_LL128);
+  for (bool split : {true, false}) {
+    fake.ddaLL128Splits.clear();
+    fake.decision.ddaLL128Split = split;
+    EXPECT_EQ(ncclSuccess, AllReduce());
+    ASSERT_EQ(1u, fake.ddaLL128Splits.size());
+    EXPECT_EQ(split, fake.ddaLL128Splits[0]);
   }
 }
 
