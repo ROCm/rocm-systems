@@ -77,11 +77,19 @@ def test_csv_data(csv_data, json_data):
 def test_counter_collection_fields_match_across_rocpd_csv_json(
     csv_data, json_data, db_input
 ):
+    def combine(values):
+        # Same rule as counters_collection: identical readings are one measurement
+        # (a counter repeated across kernel replay passes). Readings that differ
+        # are hardware instances and still sum.
+        if min(values) == max(values):
+            return values[0]
+        return sum(values)
+
     def aggregate(records):
-        result = defaultdict(float)
+        grouped = defaultdict(list)
         for dispatch_id, counter_name, value in records:
-            result[(int(dispatch_id), counter_name)] += float(value)
-        return dict(result)
+            grouped[(int(dispatch_id), counter_name)].append(float(value))
+        return {key: combine(values) for key, values in grouped.items()}
 
     data = json_data["rocprofiler-sdk-tool"]
     counter_names = {

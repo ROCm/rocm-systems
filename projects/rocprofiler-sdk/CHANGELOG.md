@@ -10,6 +10,10 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Resolved issues
 
+**rocpd:**
+
+  - `counters_collection` no longer sums a counter that kernel replay collects once per `--pmc` group when every pass reports the same value. Three readings of 512 report 512. Readings that differ, such as hardware instances of one counter, are still summed. The individual readings remain in `rocpd_pmc_event`.
+
 ### Known issues
 
 ### Removed
