@@ -49,6 +49,7 @@ endif()
 
 # AMD only tests
 set(AMD_TEST_SRC
+    deviceHeapAlignment_test.cc
     unsafeAtomicAddDevice.cc
     mbcnt.cc
     bitExtract.cc
