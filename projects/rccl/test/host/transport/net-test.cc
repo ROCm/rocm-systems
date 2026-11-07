@@ -11,6 +11,7 @@
 #include <gtest/gtest.h>
 
 #include <fcntl.h>
+#include <sys/mman.h>
 #include <unistd.h>
 
 #include <cstdint>
@@ -1057,6 +1058,181 @@ TEST_F(NetSharedBuffersMicrotest, ProxySharedInit_ReservesSendPoolForConnectionR
   bool wsl = access("/dev/dxg", F_OK) == 0;
   EXPECT_EQ(State(2, 0).hostBuff != nullptr, wsl);
   EXPECT_EQ(State(2, 0).cudaBuff != nullptr, !wsl);
+}
+
+// ---------------------------------------------------------------------------
+// Huge-page host pool (sharedHostBuffAllocHuge / sharedHostBuffFreeHuge): a 2 MiB-aligned anonymous mmap pinned with
+// hipHostRegister. mmap, madvise and munmap are real; only the HIP registration calls are faked.
+// ---------------------------------------------------------------------------
+
+class NetSharedHostHugePagesMicrotest : public NetSharedBuffersMicrotest {
+ protected:
+  static constexpr size_t kHugePage = 2UL << 20;
+  // One channel of 128 KiB chunks over NCCL_SHARED_STEPS (16) makes the pool exactly one huge page.
+  static constexpr int kHugeChunk = 1 << 17;
+
+  void* devAlias_ = reinterpret_cast<void*>(0x7f0000200000UL);
+  hipError_t registerResult_ = hipSuccess;
+  hipError_t devPtrResult_ = hipSuccess;
+  int registers_ = 0, unregisters_ = 0;
+  void* registeredPtr_ = nullptr;
+  void* unregisteredPtr_ = nullptr;
+  size_t registeredSize_ = 0;
+  unsigned registeredFlags_ = 0;
+
+  void SetUp() override {
+    NetSharedBuffersMicrotest::SetUp();
+    proxyState_.p2pChunkSize = kHugeChunk;
+    g_hipHostRegister = [this](void* p, size_t n, unsigned flags) {
+      ++registers_;
+      registeredPtr_ = p;
+      registeredSize_ = n;
+      registeredFlags_ = flags;
+      return registerResult_;
+    };
+    g_hipHostUnregister = [this](void* p) {
+      ++unregisters_;
+      unregisteredPtr_ = p;
+      return hipSuccess;
+    };
+    g_hipHostGetDevicePointer = [this](void** dev, void*, unsigned) {
+      *dev = devAlias_;
+      return devPtrResult_;
+    };
+  }
+
+  // msync fails with ENOMEM on a range that is not mapped.
+  static bool IsMapped(void* p, size_t n) { return msync(p, n, MS_ASYNC) == 0; }
+};
+
+TEST_F(NetSharedHostHugePagesMicrotest, Init_PoolIsOneHugePage_RegistersAlignedMappingAndExposesDevicePointer) {
+  char *gpu = nullptr, *cpu = nullptr;
+  ssize_t size = 0;
+
+  ASSERT_EQ(Init(/*cuda=*/0, 1, 0, 1, /*nChannels=*/1, &gpu, &cpu, &size), ncclSuccess);
+
+  ASSERT_NE(cpu, nullptr);
+  EXPECT_EQ(size, (ssize_t)kHugePage);
+  EXPECT_EQ(hostAllocs_, 0);
+  EXPECT_EQ(registers_, 1);
+  EXPECT_EQ(registeredPtr_, cpu);
+  EXPECT_EQ(registeredSize_, kHugePage);
+  unsigned expectedFlags = hipHostRegisterPortable | hipHostRegisterMapped;
+#if defined(HIP_HOST_UNCACHED_MEMORY)
+  expectedFlags |= hipExtHostRegisterUncached;
+#endif
+  EXPECT_EQ(registeredFlags_, expectedFlags);
+  EXPECT_EQ((uintptr_t)cpu % kHugePage, 0u);
+  EXPECT_EQ(cpu[0], 0);
+  EXPECT_EQ(cpu[kHugePage - 1], 0);
+  EXPECT_EQ(State(1, 0).hostBuff, cpu);
+  EXPECT_EQ(State(1, 0).hostBuffMapSize, kHugePage);
+  EXPECT_EQ((void*)State(1, 0).hostBuffDev, devAlias_);
+  EXPECT_EQ((void*)gpu, devAlias_);  // the GPU gets the registered alias, the NIC keeps the host pointer
+  EXPECT_NE((void*)gpu, (void*)cpu);
+
+  ASSERT_EQ(Destroy(1, 0), ncclSuccess);
+}
+
+TEST_F(NetSharedHostHugePagesMicrotest, Init_SecondUser_ReusesRegisteredPoolUntilLastRelease) {
+  char *first = nullptr, *second = nullptr;
+  ASSERT_EQ(Init(0, 1, 0, 1, 1, nullptr, &first), ncclSuccess);
+  ASSERT_EQ(Init(0, 1, 0, 1, 1, nullptr, &second), ncclSuccess);
+
+  EXPECT_EQ(second, first);
+  EXPECT_EQ(registers_, 1);
+
+  ASSERT_EQ(Destroy(1, 0), ncclSuccess);
+  EXPECT_EQ(unregisters_, 0);
+  EXPECT_TRUE(IsMapped(first, kHugePage));
+  ASSERT_EQ(Destroy(1, 0), ncclSuccess);
+  EXPECT_EQ(unregisters_, 1);
+  EXPECT_FALSE(IsMapped(first, kHugePage));
+}
+
+TEST_F(NetSharedHostHugePagesMicrotest, Destroy_HugePool_UnregistersAndUnmapsWithoutHostFree) {
+  char* cpu = nullptr;
+  ASSERT_EQ(Init(0, 1, 0, 1, 1, nullptr, &cpu), ncclSuccess);
+  ASSERT_EQ(registers_, 1);
+
+  ASSERT_EQ(Destroy(1, 0), ncclSuccess);
+
+  EXPECT_EQ(unregisters_, 1);
+  EXPECT_EQ(unregisteredPtr_, cpu);
+  EXPECT_EQ(hostFrees_, 0);
+  EXPECT_FALSE(IsMapped(cpu, kHugePage));
+}
+
+TEST_F(NetSharedHostHugePagesMicrotest, Destroy_ProcessShutdown_LeavesMappingToOs) {
+  char* cpu = nullptr;
+  ASSERT_EQ(Init(0, 1, 0, 1, 1, nullptr, &cpu), ncclSuccess);
+  rcclShutdownFlag().store(true, std::memory_order_release);
+
+  ncclResult_t res = Destroy(1, 0);
+  rcclShutdownFlag().store(false, std::memory_order_release);
+
+  ASSERT_EQ(res, ncclSuccess);
+  EXPECT_EQ(unregisters_, 0);
+  EXPECT_TRUE(IsMapped(cpu, kHugePage));
+  EXPECT_EQ(munmap(cpu, kHugePage), 0);  // production leaves this to process exit; the test must not leak it
+}
+
+TEST_F(NetSharedHostHugePagesMicrotest, Init_HugePagesDisabled_UsesHostMalloc) {
+  ScopedHook param(g_loadParam, ParamOverride({{"RCCL_NET_SHARED_HOST_HUGEPAGES", 0}}));
+  char *gpu = nullptr, *cpu = nullptr;
+
+  ASSERT_EQ(Init(0, 1, 0, 1, 1, &gpu, &cpu), ncclSuccess);
+
+  EXPECT_EQ(hostAllocs_, 1);
+  EXPECT_EQ(registers_, 0);
+  EXPECT_EQ(State(1, 0).hostBuffMapSize, 0u);
+  EXPECT_EQ(gpu, cpu);
+
+  ASSERT_EQ(Destroy(1, 0), ncclSuccess);
+  EXPECT_EQ(hostFrees_, 1);
+  EXPECT_EQ(unregisters_, 0);
+}
+
+TEST_F(NetSharedHostHugePagesMicrotest, Init_PoolSmallerThanHugePage_UsesHostMalloc) {
+  proxyState_.p2pChunkSize = kChunk;  // 1 channel * 16 steps * 4 KiB = 64 KiB
+  char *gpu = nullptr, *cpu = nullptr;
+
+  ASSERT_EQ(Init(0, 1, 0, 1, 1, &gpu, &cpu), ncclSuccess);
+
+  EXPECT_EQ(hostAllocs_, 1);
+  EXPECT_EQ(registers_, 0);
+  EXPECT_EQ(State(1, 0).hostBuffMapSize, 0u);
+  EXPECT_EQ(gpu, cpu);
+}
+
+TEST_F(NetSharedHostHugePagesMicrotest, Init_RegisterFails_FallsBackToHostMallocAndReleasesMapping) {
+  registerResult_ = hipErrorInvalidValue;
+  char *gpu = nullptr, *cpu = nullptr;
+
+  ASSERT_EQ(Init(0, 1, 0, 1, 1, &gpu, &cpu), ncclSuccess);
+
+  ASSERT_EQ(registers_, 1);
+  EXPECT_EQ(unregisters_, 0);  // nothing was registered, so nothing to unregister
+  EXPECT_FALSE(IsMapped(registeredPtr_, kHugePage));
+  EXPECT_EQ(hostAllocs_, 1);
+  EXPECT_EQ(State(1, 0).hostBuffMapSize, 0u);
+  EXPECT_EQ(State(1, 0).hostBuffDev, State(1, 0).hostBuff);
+  EXPECT_EQ(gpu, cpu);
+}
+
+TEST_F(NetSharedHostHugePagesMicrotest, Init_DevicePointerFails_UnregistersAndFallsBackToHostMalloc) {
+  devPtrResult_ = hipErrorInvalidValue;
+  char *gpu = nullptr, *cpu = nullptr;
+
+  ASSERT_EQ(Init(0, 1, 0, 1, 1, &gpu, &cpu), ncclSuccess);
+
+  ASSERT_EQ(registers_, 1);
+  EXPECT_EQ(unregisters_, 1);
+  EXPECT_EQ(unregisteredPtr_, registeredPtr_);
+  EXPECT_FALSE(IsMapped(registeredPtr_, kHugePage));
+  EXPECT_EQ(hostAllocs_, 1);
+  EXPECT_EQ(State(1, 0).hostBuffMapSize, 0u);
+  EXPECT_EQ(gpu, cpu);
 }
 
 // ---------------------------------------------------------------------------
