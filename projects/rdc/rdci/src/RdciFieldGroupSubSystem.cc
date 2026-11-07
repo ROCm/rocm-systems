@@ -187,8 +187,9 @@ void RdciFieldGroupSubSystem::process() {
             throw RdcException(RDC_ST_BAD_PARAMETER,
                                "The field name " + fields[i] + " is not valid");
           }
-        } else {
-          field_id = static_cast<rdc_field_t>(std::stoi(fields[i]));
+        } else if (!get_field_id_from_number(fields[i], &field_id)) {
+          // Checked as a number: an ID that RDC does not know is not a value of rdc_field_t.
+          throw RdcException(RDC_ST_BAD_PARAMETER, "Field " + fields[i] + " is not supported");
         }
 
         // Validate field compatibility with available devices
@@ -229,8 +230,9 @@ void RdciFieldGroupSubSystem::process() {
             throw RdcException(RDC_ST_BAD_PARAMETER,
                                "The field name " + fields[i] + " is not valid");
           }
-        } else {
-          field_ids[i] = static_cast<rdc_field_t>(std::stoi(fields[i]));
+        } else if (!get_field_id_from_number(fields[i], &field_ids[i])) {
+          // Checked as a number: an ID that RDC does not know is not a value of rdc_field_t.
+          throw RdcException(RDC_ST_BAD_PARAMETER, "Field " + fields[i] + " is not supported");
         }
 
         // Validate field compatibility with available devices

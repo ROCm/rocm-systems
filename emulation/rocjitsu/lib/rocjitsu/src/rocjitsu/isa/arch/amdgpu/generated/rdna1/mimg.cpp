@@ -5,7 +5,9 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/mimg.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/decode_factories.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/image_address.h"
 #include <algorithm>
 #include <bit>
 #include <memory>
@@ -39,14 +41,68 @@ ImageLoadMimg::ImageLoadMimg(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::ImageLoadMimg)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, false),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      vaddr(32 * amdgpu::image_coordinate_register_count(
+                     reinterpret_cast<const OpEncoding *>(inst)->dim,
+                     bool(reinterpret_cast<const OpEncoding *>(inst)->a16)),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+void ImageLoadMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
+  if (src_operands_[operand_index] != &vaddr || !inst_.nsa) {
+    Mimg::append_src_operand(out, operand_index);
+    return;
+  }
+  const auto registers =
+      amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
+  const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
+  out += "[";
+  for (uint32_t index = 0; index < count; ++index) {
+    if (index != 0)
+      out += ", ";
+    out += "v" + std::to_string(registers[index]);
+  }
+  out += "]";
+}
+
+void ImageLoadMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
+  const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageLoadMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = std::popcount(uint32_t{inst_.dmask});
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
+      const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageLoadMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -64,14 +120,77 @@ ImageLoadMipMimg::ImageLoadMipMimg(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::ImageLoadMipMimg)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, false),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      vaddr(32 * (0u + (reinterpret_cast<const OpEncoding *>(inst)->a16
+                            ? (amdgpu::image_coordinate_count(
+                                   reinterpret_cast<const OpEncoding *>(inst)->dim) +
+                               1u + 1) /
+                                  2
+                            : amdgpu::image_coordinate_count(
+                                  reinterpret_cast<const OpEncoding *>(inst)->dim) +
+                                  1u)),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+void ImageLoadMipMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
+  if (src_operands_[operand_index] != &vaddr || !inst_.nsa) {
+    Mimg::append_src_operand(out, operand_index);
+    return;
+  }
+  const auto registers =
+      amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
+  const uint32_t count = (0u + (inst_.a16 ? (amdgpu::image_coordinate_count(inst_.dim) + 1u + 1) / 2
+                                          : amdgpu::image_coordinate_count(inst_.dim) + 1u));
+  out += "[";
+  for (uint32_t index = 0; index < count; ++index) {
+    if (index != 0)
+      out += ", ";
+    out += "v" + std::to_string(registers[index]);
+  }
+  out += "]";
+}
+
+void ImageLoadMipMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
+  const uint32_t count = (0u + (inst_.a16 ? (amdgpu::image_coordinate_count(inst_.dim) + 1u + 1) / 2
+                                          : amdgpu::image_coordinate_count(inst_.dim) + 1u));
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageLoadMipMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = std::popcount(uint32_t{inst_.dmask});
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
+      const uint32_t count =
+          (0u + (inst_.a16 ? (amdgpu::image_coordinate_count(inst_.dim) + 1u + 1) / 2
+                           : amdgpu::image_coordinate_count(inst_.dim) + 1u));
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageLoadMipMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -91,12 +210,14 @@ ImageLoadPckMimg::ImageLoadPckMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, false, true, false),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -117,12 +238,14 @@ ImageLoadPckSgnMimg::ImageLoadPckSgnMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, false, true, false),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -143,12 +266,14 @@ ImageLoadMipPckMimg::ImageLoadMipPckMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, false, true, false),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -169,12 +294,14 @@ ImageLoadMipPckSgnMimg::ImageLoadMipPckSgnMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, false, true, false),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -194,14 +321,51 @@ ImageStoreMimg::ImageStoreMimg(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::ImageStoreMimg)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, false, false),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      vaddr(32 * amdgpu::image_coordinate_register_count(
+                     reinterpret_cast<const OpEncoding *>(inst)->dim,
+                     bool(reinterpret_cast<const OpEncoding *>(inst)->a16)),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  capture_nsa_words(inst, &vaddr);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      amdgpu::WaitCounterType::VSCNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+void ImageStoreMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
+  if (src_operands_[operand_index] != &vaddr || !inst_.nsa) {
+    Mimg::append_src_operand(out, operand_index);
+    return;
+  }
+  const auto registers =
+      amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
+  const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
+  out += "[";
+  for (uint32_t index = 0; index < count; ++index) {
+    if (index != 0)
+      out += ", ";
+    out += "v" + std::to_string(registers[index]);
+  }
+  out += "]";
+}
+
+void ImageStoreMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
+  const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageStoreMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -219,14 +383,58 @@ ImageStoreMipMimg::ImageStoreMipMimg(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::ImageStoreMipMimg)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, false, false),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      vaddr(32 * (0u + (reinterpret_cast<const OpEncoding *>(inst)->a16
+                            ? (amdgpu::image_coordinate_count(
+                                   reinterpret_cast<const OpEncoding *>(inst)->dim) +
+                               1u + 1) /
+                                  2
+                            : amdgpu::image_coordinate_count(
+                                  reinterpret_cast<const OpEncoding *>(inst)->dim) +
+                                  1u)),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  capture_nsa_words(inst, &vaddr);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{
+      amdgpu::WaitCounterType::VSCNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+void ImageStoreMipMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
+  if (src_operands_[operand_index] != &vaddr || !inst_.nsa) {
+    Mimg::append_src_operand(out, operand_index);
+    return;
+  }
+  const auto registers =
+      amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
+  const uint32_t count = (0u + (inst_.a16 ? (amdgpu::image_coordinate_count(inst_.dim) + 1u + 1) / 2
+                                          : amdgpu::image_coordinate_count(inst_.dim) + 1u));
+  out += "[";
+  for (uint32_t index = 0; index < count; ++index) {
+    if (index != 0)
+      out += ", ";
+    out += "v" + std::to_string(registers[index]);
+  }
+  out += "]";
+}
+
+void ImageStoreMipMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
+  const uint32_t count = (0u + (inst_.a16 ? (amdgpu::image_coordinate_count(inst_.dim) + 1u + 1) / 2
+                                          : amdgpu::image_coordinate_count(inst_.dim) + 1u));
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageStoreMipMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -246,12 +454,14 @@ ImageStorePckMimg::ImageStorePckMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, false, false, false),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -272,12 +482,14 @@ ImageStoreMipPckMimg::ImageStoreMipPckMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, false, false, false),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -298,12 +510,14 @@ ImageGetResinfoMimg::ImageGetResinfoMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, false, false, false),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -328,7 +542,8 @@ ImageAtomicSwapMimg::ImageAtomicSwapMimg(const MachineInst *inst)
               32u * inst_.tfe,
           OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
@@ -339,6 +554,7 @@ ImageAtomicSwapMimg::ImageAtomicSwapMimg(const MachineInst *inst)
   num_dst_ = 1;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdata_return;
+  capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -365,7 +581,8 @@ ImageAtomicCmpswapMimg::ImageAtomicCmpswapMimg(const MachineInst *inst)
               32u * inst_.tfe,
           OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
@@ -376,6 +593,7 @@ ImageAtomicCmpswapMimg::ImageAtomicCmpswapMimg(const MachineInst *inst)
   num_dst_ = 1;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdata_return;
+  capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -402,7 +620,8 @@ ImageAtomicAddMimg::ImageAtomicAddMimg(const MachineInst *inst)
               32u * inst_.tfe,
           OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
@@ -413,6 +632,7 @@ ImageAtomicAddMimg::ImageAtomicAddMimg(const MachineInst *inst)
   num_dst_ = 1;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdata_return;
+  capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -439,7 +659,8 @@ ImageAtomicSubMimg::ImageAtomicSubMimg(const MachineInst *inst)
               32u * inst_.tfe,
           OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
@@ -450,6 +671,7 @@ ImageAtomicSubMimg::ImageAtomicSubMimg(const MachineInst *inst)
   num_dst_ = 1;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdata_return;
+  capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -476,7 +698,8 @@ ImageAtomicSminMimg::ImageAtomicSminMimg(const MachineInst *inst)
               32u * inst_.tfe,
           OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
@@ -487,6 +710,7 @@ ImageAtomicSminMimg::ImageAtomicSminMimg(const MachineInst *inst)
   num_dst_ = 1;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdata_return;
+  capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -513,7 +737,8 @@ ImageAtomicUminMimg::ImageAtomicUminMimg(const MachineInst *inst)
               32u * inst_.tfe,
           OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
@@ -524,6 +749,7 @@ ImageAtomicUminMimg::ImageAtomicUminMimg(const MachineInst *inst)
   num_dst_ = 1;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdata_return;
+  capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -550,7 +776,8 @@ ImageAtomicSmaxMimg::ImageAtomicSmaxMimg(const MachineInst *inst)
               32u * inst_.tfe,
           OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
@@ -561,6 +788,7 @@ ImageAtomicSmaxMimg::ImageAtomicSmaxMimg(const MachineInst *inst)
   num_dst_ = 1;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdata_return;
+  capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -587,7 +815,8 @@ ImageAtomicUmaxMimg::ImageAtomicUmaxMimg(const MachineInst *inst)
               32u * inst_.tfe,
           OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
@@ -598,6 +827,7 @@ ImageAtomicUmaxMimg::ImageAtomicUmaxMimg(const MachineInst *inst)
   num_dst_ = 1;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdata_return;
+  capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -624,7 +854,8 @@ ImageAtomicAndMimg::ImageAtomicAndMimg(const MachineInst *inst)
               32u * inst_.tfe,
           OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
@@ -635,6 +866,7 @@ ImageAtomicAndMimg::ImageAtomicAndMimg(const MachineInst *inst)
   num_dst_ = 1;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdata_return;
+  capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -661,7 +893,8 @@ ImageAtomicOrMimg::ImageAtomicOrMimg(const MachineInst *inst)
               32u * inst_.tfe,
           OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
@@ -672,6 +905,7 @@ ImageAtomicOrMimg::ImageAtomicOrMimg(const MachineInst *inst)
   num_dst_ = 1;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdata_return;
+  capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -698,7 +932,8 @@ ImageAtomicXorMimg::ImageAtomicXorMimg(const MachineInst *inst)
               32u * inst_.tfe,
           OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
@@ -709,6 +944,7 @@ ImageAtomicXorMimg::ImageAtomicXorMimg(const MachineInst *inst)
   num_dst_ = 1;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdata_return;
+  capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -735,7 +971,8 @@ ImageAtomicIncMimg::ImageAtomicIncMimg(const MachineInst *inst)
               32u * inst_.tfe,
           OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
@@ -746,6 +983,7 @@ ImageAtomicIncMimg::ImageAtomicIncMimg(const MachineInst *inst)
   num_dst_ = 1;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdata_return;
+  capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -772,7 +1010,8 @@ ImageAtomicDecMimg::ImageAtomicDecMimg(const MachineInst *inst)
               32u * inst_.tfe,
           OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
@@ -783,6 +1022,7 @@ ImageAtomicDecMimg::ImageAtomicDecMimg(const MachineInst *inst)
   num_dst_ = 1;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdata_return;
+  capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -809,7 +1049,8 @@ ImageAtomicFcmpswapMimg::ImageAtomicFcmpswapMimg(const MachineInst *inst)
               32u * inst_.tfe,
           OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
@@ -820,6 +1061,7 @@ ImageAtomicFcmpswapMimg::ImageAtomicFcmpswapMimg(const MachineInst *inst)
   num_dst_ = 1;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdata_return;
+  capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -846,7 +1088,8 @@ ImageAtomicFminMimg::ImageAtomicFminMimg(const MachineInst *inst)
               32u * inst_.tfe,
           OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
@@ -857,6 +1100,7 @@ ImageAtomicFminMimg::ImageAtomicFminMimg(const MachineInst *inst)
   num_dst_ = 1;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdata_return;
+  capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -883,7 +1127,8 @@ ImageAtomicFmaxMimg::ImageAtomicFmaxMimg(const MachineInst *inst)
               32u * inst_.tfe,
           OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
@@ -894,6 +1139,7 @@ ImageAtomicFmaxMimg::ImageAtomicFmaxMimg(const MachineInst *inst)
   num_dst_ = 1;
   if ((inst_.glc != 0))
     dst_operands_[num_dst_++] = &vdata_return;
+  capture_nsa_words(inst, &vaddr);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -915,16 +1161,71 @@ ImageSampleMimg::ImageSampleMimg(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::ImageSampleMimg)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      vaddr(32 * amdgpu::image_coordinate_register_count(
+                     reinterpret_cast<const OpEncoding *>(inst)->dim,
+                     bool(reinterpret_cast<const OpEncoding *>(inst)->a16)),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+void ImageSampleMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
+  if (src_operands_[operand_index] != &vaddr || !inst_.nsa) {
+    Mimg::append_src_operand(out, operand_index);
+    return;
+  }
+  const auto registers =
+      amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
+  const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
+  out += "[";
+  for (uint32_t index = 0; index < count; ++index) {
+    if (index != 0)
+      out += ", ";
+    out += "v" + std::to_string(registers[index]);
+  }
+  out += "]";
+}
+
+void ImageSampleMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
+  const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = std::popcount(uint32_t{inst_.dmask});
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
+      const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -944,14 +1245,17 @@ ImageSampleClMimg::ImageSampleClMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -971,16 +1275,84 @@ ImageSampleDMimg::ImageSampleDMimg(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::ImageSampleDMimg)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(288, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      vaddr(32 * (2 * amdgpu::image_derivative_component_count(
+                          reinterpret_cast<const OpEncoding *>(inst)->dim) +
+                  (reinterpret_cast<const OpEncoding *>(inst)->a16
+                       ? (amdgpu::image_coordinate_count(
+                              reinterpret_cast<const OpEncoding *>(inst)->dim) +
+                          0u + 1) /
+                             2
+                       : amdgpu::image_coordinate_count(
+                             reinterpret_cast<const OpEncoding *>(inst)->dim) +
+                             0u)),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+void ImageSampleDMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
+  if (src_operands_[operand_index] != &vaddr || !inst_.nsa) {
+    Mimg::append_src_operand(out, operand_index);
+    return;
+  }
+  const auto registers =
+      amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
+  const uint32_t count = (2 * amdgpu::image_derivative_component_count(inst_.dim) +
+                          (inst_.a16 ? (amdgpu::image_coordinate_count(inst_.dim) + 0u + 1) / 2
+                                     : amdgpu::image_coordinate_count(inst_.dim) + 0u));
+  out += "[";
+  for (uint32_t index = 0; index < count; ++index) {
+    if (index != 0)
+      out += ", ";
+    out += "v" + std::to_string(registers[index]);
+  }
+  out += "]";
+}
+
+void ImageSampleDMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
+  const uint32_t count = (2 * amdgpu::image_derivative_component_count(inst_.dim) +
+                          (inst_.a16 ? (amdgpu::image_coordinate_count(inst_.dim) + 0u + 1) / 2
+                                     : amdgpu::image_coordinate_count(inst_.dim) + 0u));
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleDMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = std::popcount(uint32_t{inst_.dmask});
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
+      const uint32_t count = (2 * amdgpu::image_derivative_component_count(inst_.dim) +
+                              (inst_.a16 ? (amdgpu::image_coordinate_count(inst_.dim) + 0u + 1) / 2
+                                         : amdgpu::image_coordinate_count(inst_.dim) + 0u));
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleDMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -1000,14 +1372,17 @@ ImageSampleDClMimg::ImageSampleDClMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(320, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1027,16 +1402,80 @@ ImageSampleLMimg::ImageSampleLMimg(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::ImageSampleLMimg)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      vaddr(32 * (0u + (reinterpret_cast<const OpEncoding *>(inst)->a16
+                            ? (amdgpu::image_coordinate_count(
+                                   reinterpret_cast<const OpEncoding *>(inst)->dim) +
+                               1u + 1) /
+                                  2
+                            : amdgpu::image_coordinate_count(
+                                  reinterpret_cast<const OpEncoding *>(inst)->dim) +
+                                  1u)),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+void ImageSampleLMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
+  if (src_operands_[operand_index] != &vaddr || !inst_.nsa) {
+    Mimg::append_src_operand(out, operand_index);
+    return;
+  }
+  const auto registers =
+      amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
+  const uint32_t count = (0u + (inst_.a16 ? (amdgpu::image_coordinate_count(inst_.dim) + 1u + 1) / 2
+                                          : amdgpu::image_coordinate_count(inst_.dim) + 1u));
+  out += "[";
+  for (uint32_t index = 0; index < count; ++index) {
+    if (index != 0)
+      out += ", ";
+    out += "v" + std::to_string(registers[index]);
+  }
+  out += "]";
+}
+
+void ImageSampleLMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
+  const uint32_t count = (0u + (inst_.a16 ? (amdgpu::image_coordinate_count(inst_.dim) + 1u + 1) / 2
+                                          : amdgpu::image_coordinate_count(inst_.dim) + 1u));
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleLMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = std::popcount(uint32_t{inst_.dmask});
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
+      const uint32_t count =
+          (0u + (inst_.a16 ? (amdgpu::image_coordinate_count(inst_.dim) + 1u + 1) / 2
+                           : amdgpu::image_coordinate_count(inst_.dim) + 1u));
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleLMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -1056,14 +1495,17 @@ ImageSampleBMimg::ImageSampleBMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1084,14 +1526,17 @@ ImageSampleBClMimg::ImageSampleBClMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1111,16 +1556,71 @@ ImageSampleLzMimg::ImageSampleLzMimg(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::ImageSampleLzMimg)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      vaddr(32 * amdgpu::image_coordinate_register_count(
+                     reinterpret_cast<const OpEncoding *>(inst)->dim,
+                     bool(reinterpret_cast<const OpEncoding *>(inst)->a16)),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+void ImageSampleLzMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
+  if (src_operands_[operand_index] != &vaddr || !inst_.nsa) {
+    Mimg::append_src_operand(out, operand_index);
+    return;
+  }
+  const auto registers =
+      amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
+  const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
+  out += "[";
+  for (uint32_t index = 0; index < count; ++index) {
+    if (index != 0)
+      out += ", ";
+    out += "v" + std::to_string(registers[index]);
+  }
+  out += "]";
+}
+
+void ImageSampleLzMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
+  const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  implicit_preservation_uses(uses);
+}
+
+bool ImageSampleLzMimg::implicit_preservation_uses(RegisterSet &preservation_uses) const {
+  const uint32_t components = std::popcount(uint32_t{inst_.dmask});
+  if (inst_.d16 && (components & 1u))
+    if (auto r = vdata.to_register_ref()) {
+      const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
+      const auto registers =
+          amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
+      const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
+      for (uint32_t index = 0; index < count; ++index)
+        if (registers[index] == preserved.index)
+          return true;
+      preservation_uses.expand(preserved);
+    }
+  return true;
+}
+
+bool ImageSampleLzMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -1140,14 +1640,17 @@ ImageSampleCMimg::ImageSampleCMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1168,14 +1671,17 @@ ImageSampleCClMimg::ImageSampleCClMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1196,14 +1702,17 @@ ImageSampleCDMimg::ImageSampleCDMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(320, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1224,14 +1733,17 @@ ImageSampleCDClMimg::ImageSampleCDClMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(352, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1252,14 +1764,17 @@ ImageSampleCLMimg::ImageSampleCLMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1280,14 +1795,17 @@ ImageSampleCBMimg::ImageSampleCBMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1308,14 +1826,17 @@ ImageSampleCBClMimg::ImageSampleCBClMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(192, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1336,14 +1857,17 @@ ImageSampleCLzMimg::ImageSampleCLzMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1364,14 +1888,17 @@ ImageSampleOMimg::ImageSampleOMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1392,14 +1919,17 @@ ImageSampleClOMimg::ImageSampleClOMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1420,14 +1950,17 @@ ImageSampleDOMimg::ImageSampleDOMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(320, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1448,14 +1981,17 @@ ImageSampleDClOMimg::ImageSampleDClOMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(352, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1476,14 +2012,17 @@ ImageSampleLOMimg::ImageSampleLOMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1504,14 +2043,17 @@ ImageSampleBOMimg::ImageSampleBOMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1532,14 +2074,17 @@ ImageSampleBClOMimg::ImageSampleBClOMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(192, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1560,14 +2105,17 @@ ImageSampleLzOMimg::ImageSampleLzOMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1588,14 +2136,17 @@ ImageSampleCOMimg::ImageSampleCOMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1616,14 +2167,17 @@ ImageSampleCClOMimg::ImageSampleCClOMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(192, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1644,14 +2198,17 @@ ImageSampleCDOMimg::ImageSampleCDOMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(352, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1672,14 +2229,17 @@ ImageSampleCDClOMimg::ImageSampleCDClOMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(384, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1700,14 +2260,17 @@ ImageSampleCLOMimg::ImageSampleCLOMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(192, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1728,14 +2291,17 @@ ImageSampleCBOMimg::ImageSampleCBOMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(192, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1756,14 +2322,17 @@ ImageSampleCBClOMimg::ImageSampleCBClOMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(224, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1784,14 +2353,17 @@ ImageSampleCLzOMimg::ImageSampleCLzOMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1812,14 +2384,17 @@ ImageGather4Mimg::ImageGather4Mimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1840,14 +2415,17 @@ ImageGather4ClMimg::ImageGather4ClMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1867,12 +2445,14 @@ ImageLoadBy2Mimg::ImageLoadBy2Mimg(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::ImageLoadBy2Mimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1892,12 +2472,14 @@ ImageLoadBy4Mimg::ImageLoadBy4Mimg(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::ImageLoadBy4Mimg)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1918,14 +2500,17 @@ ImageGather4LMimg::ImageGather4LMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1946,14 +2531,17 @@ ImageGather4BMimg::ImageGather4BMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1974,14 +2562,17 @@ ImageGather4BClMimg::ImageGather4BClMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2001,16 +2592,54 @@ ImageGather4LzMimg::ImageGather4LzMimg(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::ImageGather4LzMimg)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      vaddr(32 * amdgpu::image_coordinate_register_count(
+                     reinterpret_cast<const OpEncoding *>(inst)->dim,
+                     bool(reinterpret_cast<const OpEncoding *>(inst)->a16)),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+void ImageGather4LzMimg::append_src_operand(std::string &out, uint8_t operand_index) const {
+  if (src_operands_[operand_index] != &vaddr || !inst_.nsa) {
+    Mimg::append_src_operand(out, operand_index);
+    return;
+  }
+  const auto registers =
+      amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
+  const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
+  out += "[";
+  for (uint32_t index = 0; index < count; ++index) {
+    if (index != 0)
+      out += ", ";
+    out += "v" + std::to_string(registers[index]);
+  }
+  out += "]";
+}
+
+void ImageGather4LzMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers =
+      amdgpu::mimg_image_address_registers(inst_.nsa, false, inst_.vaddr, raw_encoding());
+  const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageGather4LzMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -2030,14 +2659,17 @@ ImageGather4CMimg::ImageGather4CMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2058,14 +2690,17 @@ ImageGather4CClMimg::ImageGather4CClMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2086,12 +2721,14 @@ ImageLoadMipBy2Mimg::ImageLoadMipBy2Mimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, false),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2112,12 +2749,14 @@ ImageLoadMipBy4Mimg::ImageLoadMipBy4Mimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, false),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2138,14 +2777,17 @@ ImageGather4CLMimg::ImageGather4CLMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2166,14 +2808,17 @@ ImageGather4CBMimg::ImageGather4CBMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2194,14 +2839,17 @@ ImageGather4CBClMimg::ImageGather4CBClMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(192, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2222,14 +2870,17 @@ ImageGather4CLzMimg::ImageGather4CLzMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2250,14 +2901,17 @@ ImageGather4OMimg::ImageGather4OMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2278,14 +2932,17 @@ ImageGather4ClOMimg::ImageGather4ClOMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2306,12 +2963,14 @@ ImageStoreBy2Mimg::ImageStoreBy2Mimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, false, false),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2332,12 +2991,14 @@ ImageStoreBy4Mimg::ImageStoreBy4Mimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, false, false),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2358,14 +3019,17 @@ ImageGather4LOMimg::ImageGather4LOMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2386,14 +3050,17 @@ ImageGather4BOMimg::ImageGather4BOMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2414,14 +3081,17 @@ ImageGather4BClOMimg::ImageGather4BClOMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(192, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2442,14 +3112,17 @@ ImageGather4LzOMimg::ImageGather4LzOMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2470,14 +3143,17 @@ ImageGather4COMimg::ImageGather4COMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2498,14 +3174,17 @@ ImageGather4CClOMimg::ImageGather4CClOMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(192, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2526,12 +3205,14 @@ ImageStoreMipBy2Mimg::ImageStoreMipBy2Mimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, false, false),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2552,12 +3233,14 @@ ImageStoreMipBy4Mimg::ImageStoreMipBy4Mimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, false, false),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2578,14 +3261,17 @@ ImageGather4CLOMimg::ImageGather4CLOMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(192, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2606,14 +3292,17 @@ ImageGather4CBOMimg::ImageGather4CBOMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(192, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2634,14 +3323,17 @@ ImageGather4CBClOMimg::ImageGather4CBClOMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(224, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2662,14 +3354,17 @@ ImageGather4CLzOMimg::ImageGather4CLzOMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2690,14 +3385,17 @@ ImageGetLodMimg::ImageGetLodMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, false, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2718,14 +3416,17 @@ ImageGather4hMimg::ImageGather4hMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2746,14 +3447,17 @@ ImageGather4hPckMimg::ImageGather4hPckMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, false, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2774,14 +3478,17 @@ ImageGather8hPckMimg::ImageGather8hPckMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, false, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2802,14 +3509,17 @@ ImageSampleCdMimg::ImageSampleCdMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(288, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2830,14 +3540,17 @@ ImageSampleCdClMimg::ImageSampleCdClMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(320, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2858,14 +3571,17 @@ ImageSampleCCdMimg::ImageSampleCCdMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(320, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2886,14 +3602,17 @@ ImageSampleCCdClMimg::ImageSampleCCdClMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(352, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2914,14 +3633,17 @@ ImageSampleCdOMimg::ImageSampleCdOMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(320, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2942,14 +3664,17 @@ ImageSampleCdClOMimg::ImageSampleCdClOMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(352, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2970,14 +3695,17 @@ ImageSampleCCdOMimg::ImageSampleCCdOMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(352, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2998,14 +3726,17 @@ ImageSampleCCdClOMimg::ImageSampleCCdClOMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(384, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3026,12 +3757,14 @@ ImageLoadPck2Mimg::ImageLoadPck2Mimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, false, true, false),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3052,12 +3785,14 @@ ImageLoadPck4Mimg::ImageLoadPck4Mimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, false, true, false),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3078,12 +3813,14 @@ ImageLoadMipPck2Mimg::ImageLoadMipPck2Mimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, false, true, false),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3104,12 +3841,14 @@ ImageLoadMipPck4Mimg::ImageLoadMipPck4Mimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, false, true, false),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3130,12 +3869,14 @@ ImageStorePck2Mimg::ImageStorePck2Mimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, false, false, false),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3156,12 +3897,14 @@ ImageStorePck4Mimg::ImageStorePck4Mimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, false, false, false),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3182,12 +3925,14 @@ ImageStoreMipPck2Mimg::ImageStoreMipPck2Mimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, false, false, false),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3208,12 +3953,14 @@ ImageStoreMipPck4Mimg::ImageStoreMipPck4Mimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, false, false, false),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3234,12 +3981,14 @@ ImageMsaaLoadMimg::ImageMsaaLoadMimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, false),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3260,14 +4009,17 @@ ImageSampleDG16Mimg::ImageSampleDG16Mimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(224, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3288,14 +4040,17 @@ ImageSampleDClG16Mimg::ImageSampleDClG16Mimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(256, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3316,14 +4071,17 @@ ImageSampleCDG16Mimg::ImageSampleCDG16Mimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(256, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3344,14 +4102,17 @@ ImageSampleCDClG16Mimg::ImageSampleCDClG16Mimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(288, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3372,14 +4133,17 @@ ImageSampleDOG16Mimg::ImageSampleDOG16Mimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(256, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3400,14 +4164,17 @@ ImageSampleDClOG16Mimg::ImageSampleDClOG16Mimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(288, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3428,14 +4195,17 @@ ImageSampleCDOG16Mimg::ImageSampleCDOG16Mimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(288, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3456,14 +4226,17 @@ ImageSampleCDClOG16Mimg::ImageSampleCDClOG16Mimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(320, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3484,14 +4257,17 @@ ImageSampleCdG16Mimg::ImageSampleCdG16Mimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(224, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3512,14 +4288,17 @@ ImageSampleCdClG16Mimg::ImageSampleCdClG16Mimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(256, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3540,14 +4319,17 @@ ImageSampleCCdG16Mimg::ImageSampleCCdG16Mimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(256, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3568,14 +4350,17 @@ ImageSampleCCdClG16Mimg::ImageSampleCCdClG16Mimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(288, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3596,14 +4381,17 @@ ImageSampleCdOG16Mimg::ImageSampleCdOG16Mimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(256, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3624,14 +4412,17 @@ ImageSampleCdClOG16Mimg::ImageSampleCdClOG16Mimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(288, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3652,14 +4443,17 @@ ImageSampleCCdOG16Mimg::ImageSampleCCdOG16Mimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(288, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3680,14 +4474,17 @@ ImageSampleCCdClOG16Mimg::ImageSampleCCdClOG16Mimg(const MachineInst *inst)
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(320, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      srsrc(256, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->srsrc),
-      ssamp(128, OperandType::OPR_SREG_NONULL, reinterpret_cast<const OpEncoding *>(inst)->ssamp) {
+      srsrc(256, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
+      ssamp(128, OperandType::OPR_SREG_NONULL,
+            (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  capture_nsa_words(inst, &vaddr);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 

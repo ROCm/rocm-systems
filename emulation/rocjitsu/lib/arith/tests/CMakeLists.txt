@@ -126,10 +126,45 @@ foreach(
     rj_arith_add_test(${target} fp/${mnemonic}_test.cpp)
 endforeach()
 
+# Conversion layouts share contract checks; family references remain independent.
+foreach(
+    family
+    IN
+    ITEMS
+        integer_pack
+        byte
+        float16
+        float32
+        float64
+        normalized
+        packed
+        fp8_widen
+        fp8_narrow
+)
+    set(target "rj_arith_conversion_${family}_test")
+    rj_arith_add_test(${target} conversion/${family}_test.cpp)
+endforeach()
+
 # Dot-product formats retain family-specific arithmetic and status expectations.
 foreach(family IN ITEMS integer fp8 half dot2)
     set(target "rj_arith_dot_${family}_test")
     rj_arith_add_test(${target} dot/${family}_test.cpp)
+endforeach()
+
+# Graphics families retain their independent interpolation and selection references.
+foreach(family IN ITEMS cube interp mullit)
+    set(target "rj_arith_graphics_${family}_test")
+    rj_arith_add_test(${target} graphics/${family}_test.cpp)
+endforeach()
+
+# Register-only operations share routing and preservation checks.
+foreach(
+    family
+    IN
+    ITEMS move_cndmask swap ds permlane relative lane
+)
+    set(target "rj_arith_register_${family}_test")
+    rj_arith_add_test(${target} register/${family}_test.cpp)
 endforeach()
 
 # Infrastructure has no all-entry-point registry; contracts live in family helpers.

@@ -1452,6 +1452,92 @@ run_two_spi_dispatch(util::DiagnosticEmitter emit_error) {
                    dispatch_count->for_cu(xcd->shader_engine(1)->compute_unit(0))};
 }
 
+TEST(ConfigLoaderTest, ImageAddressingUsesEachDeviceIdentity) {
+  // These devices share one ISA but KMD reports different tiling registers.
+  for (uint32_t version : {100300u, 100301u}) {
+    SCOPED_TRACE(version);
+    const std::string json = std::string(R"({
+      "num_threads": 1,
+      "vm": {"arch": "rdna2", "gpu": {"device": {
+        "gfx_target_version": )") +
+                             std::to_string(version) + R"(,
+        "family_id": 143, "num_sdma_engines": 0
+      }}},
+      "topology": {"root": {"name": "soc", "type": "soc", "children": [
+        {"name": "vram", "type": "gpu_memory"},
+        {"name": "cp", "type": "command_processor"},
+        {"name": "cu", "type": "compute_unit"}
+      ]}}
+    })";
+    config::LoadedConfig loaded;
+    ASSERT_TRUE(test::load_valid_config_from_string(json, loaded, 1));
+    std::vector<simdojo::Component *> components;
+    loaded.build_result.root->collect_components(components);
+    size_t checked = 0;
+    for (auto *component : components) {
+      auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(component);
+      if (!cu)
+        continue;
+      const amdgpu::ImageAddressConfig identity = cu->image_address_config();
+      EXPECT_EQ(identity.arch, ROCJITSU_CODE_ARCH_RDNA2);
+      EXPECT_EQ(identity.gb_addr_config,
+                kmd::gb_addr_config_for_gfx_target_version(loaded.device.gfx_target_version));
+      EXPECT_EQ(identity.gb_addr_config, version == 100300 ? 0x444u : 0u);
+      ++checked;
+    }
+    EXPECT_EQ(checked, 1u);
+  }
+}
+
+TEST(ConfigLoaderTest, PartialDeviceIdentityRetainsWorkingImageDefaults) {
+  for (std::string_view architecture : {"cdna2", "rdna2", "rdna3"}) {
+    SCOPED_TRACE(architecture);
+    std::string json = R"({
+      "num_threads": 1,
+      "vm": {"arch": "cdna2", "gpu": {"device": {"num_sdma_engines": 0}}},
+      "topology": {"root": {"name": "soc", "type": "soc", "children": [
+        {"name": "vram", "type": "gpu_memory"},
+        {"name": "cp", "type": "command_processor"},
+        {"name": "cu", "type": "compute_unit"}
+      ]}}
+    })";
+    json.replace(json.find("cdna2"), 5, architecture);
+    config::LoadedConfig loaded;
+    ASSERT_TRUE(test::load_valid_config_from_string(json, loaded, 1));
+    ASSERT_TRUE(loaded.device.present);
+    ASSERT_EQ(loaded.device.family_id, 0u);
+    std::vector<simdojo::Component *> components;
+    loaded.build_result.root->collect_components(components);
+    size_t checked = 0;
+    for (auto *component : components) {
+      auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(component);
+      if (!cu)
+        continue;
+      const amdgpu::ImageAddressConfig identity = cu->image_address_config();
+      EXPECT_EQ(identity.gb_addr_config, 0u)
+          << "GET_TILE_CONFIG reports zero for an omitted target";
+      const amdgpu::ImageLayout linear{.width = 64, .height = 32, .pitch = 64, .element_bytes = 4};
+      const std::optional<amdgpu::ImageAddressing> linear_addressing =
+          amdgpu::ImageAddressing::prepare(identity, linear);
+      ASSERT_TRUE(linear_addressing);
+      EXPECT_EQ(linear_addressing->byte_offset(5, 3, 0), 788u);
+      if (architecture != "cdna2") {
+        // KFD reports a zero tiling register for an omitted device version;
+        // the native evaluator must use the same zero-register equations.
+        const amdgpu::ImageLayout tiled{
+            .width = 256, .height = 128, .pitch = 256, .element_bytes = 4, .swizzle_mode = 27};
+        const std::optional<amdgpu::ImageAddressing> tiled_addressing =
+            amdgpu::ImageAddressing::prepare(identity, tiled);
+        ASSERT_TRUE(tiled_addressing);
+        EXPECT_EQ(tiled_addressing->byte_offset(200, 100, 0),
+                  architecture == "rdna2" ? 90496u : 121216u);
+      }
+      ++checked;
+    }
+    EXPECT_EQ(checked, 1u);
+  }
+}
+
 TEST(ConfigLoaderTest, LoadCdna4Config) {
   std::string json = CONFIG_DIR_PATH + "/gfx950_mi350x.json";
   config::LoadedConfig loaded;
@@ -3792,6 +3878,45 @@ void expect_config_target_failure(const std::string &json, const char *message) 
   EXPECT_EQ(validation_diagnostic.message(), message);
 }
 
+TEST(ConfigLoaderTest, PropagatesRootComputeUnitFailure) {
+  const std::string json = R"({"vm":{"arch":"cdna3"},"topology":{
+    "root":{"name":"rejected","type":"compute_unit","config":[
+      {"key":"num_wf_slots","value":"33"}]}}})";
+  EXPECT_NO_THROW(expect_config_target_failure(json, "num_wf_slots exceeds the ISA maximum of 32"));
+}
+
+TEST(ConfigLoaderTest, RejectsInvalidCuAfterConstructingSibling) {
+  const struct {
+    const char *key;
+    const char *value;
+    const char *message;
+  } cases[] = {
+      {"num_wf_slots", "33", "num_wf_slots exceeds the ISA maximum of 32"},
+      {"vgprs_per_wf", "513", "effective VGPRs per wavefront exceeds the ISA maximum of 512"},
+  };
+  for (const auto &test_case : cases) {
+    SCOPED_TRACE(test_case.key);
+    const std::string json = std::string(R"({"num_threads":1,"vm":{"arch":"cdna3"},
+      "topology":{"root":{"name":"soc","type":"soc","children":[
+        {"name":"vram","type":"gpu_memory"},
+        {"name":"accepted","type":"compute_unit"},
+        {"name":"rejected","type":"compute_unit","config":[{"key":")") +
+                             test_case.key + R"(","value":")" + test_case.value + R"("}]}]}}})";
+    EXPECT_NO_THROW(expect_config_target_failure(json, test_case.message));
+
+    rj_vm_t sentinel;
+    rj_vm_t *output = &sentinel;
+    EXPECT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &output),
+              ROCJITSU_STATUS_INVALID_ARGUMENT);
+    EXPECT_EQ(output, &sentinel);
+    test::ScopedTempFile file;
+    ASSERT_TRUE(write_temp_config(file, json));
+    EXPECT_EQ(rj_vm_create(file.path().c_str(), RJ_VM_MODE_DEFAULT, &output),
+              ROCJITSU_STATUS_INVALID_FILE);
+    EXPECT_EQ(output, &sentinel);
+  }
+}
+
 TEST(ConfigLoaderTest, RejectsMissingOrInvalidArchitecture) {
   const std::array<const char *, 3> configs{R"({})", R"({"vm":{}})",
                                             R"({"vm":{"arch":"invalid"}})"};
@@ -3835,6 +3960,23 @@ TEST(ConfigLoaderTest, RejectsTargetVersionMismatch) {
   ASSERT_TRUE(replace_exactly_once(mismatches[1], "120501", "120500"));
   for (const std::string &json : mismatches)
     expect_config_target_failure(json, "vm target does not match device.gfx_target_version");
+
+  std::ifstream rdna3_base(test::config_path("gfx1100_w7900.json"));
+  ASSERT_TRUE(rdna3_base.is_open());
+  std::string gfx1100_config((std::istreambuf_iterator<char>(rdna3_base)),
+                             std::istreambuf_iterator<char>());
+  ASSERT_TRUE(replace_exactly_once(gfx1100_config, R"("arch": "rdna3",)",
+                                   R"("arch": "rdna3", "target": "gfx1100",)"));
+  const util::FailureOr<config::LoadedConfig> loaded_gfx1100 = config::load_config_from_string(
+      gfx1100_config, rocjitsu::kEmbeddedSchema, config_diagnostic.emitter());
+  ASSERT_TRUE(loaded_gfx1100.succeeded()) << config_diagnostic.message();
+  EXPECT_EQ(loaded_gfx1100.value().target, ROCJITSU_CODE_TARGET_GFX1100);
+  EXPECT_EQ(loaded_gfx1100.value().device.gfx_target_version, 110000u);
+
+  std::string gfx1100_mismatch = gfx1100_config;
+  ASSERT_TRUE(replace_exactly_once(gfx1100_mismatch, "110000", "120001"));
+  expect_config_target_failure(gfx1100_mismatch,
+                               "vm target does not match device.gfx_target_version");
 }
 
 TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {

@@ -37,6 +37,9 @@ namespace {
 
 std::filesystem::path g_translate_tool;
 std::filesystem::path g_decode_benchmark;
+#if defined(__linux__)
+std::filesystem::path g_pretranslate_tool;
+#endif
 
 rocjitsu::tools::ToolResult<rocjitsu::tools::TranslateOutput>
 capture_gfx1251_targets(const rocjitsu::tools::TranslateOptions &options) {
@@ -673,6 +676,64 @@ TEST(RjDbtTranslate, RequiresRevisionsOnlyForGfx1250) {
   EXPECT_TRUE(contains(read_text_file(error), "gfx1250 A0-to-B0 translation is not supported"));
 }
 
+#if defined(__linux__)
+TEST(RjPretranslate, SharedParserWritesReusesAndForcesTranslationStore) {
+  const auto &tool = g_pretranslate_tool;
+  ASSERT_TRUE(std::filesystem::exists(tool));
+  rocjitsu::test::ScopedTempDirectory temp_dir;
+  ASSERT_TRUE(temp_dir.initialize("rj_pretranslate_cli_"));
+  const std::filesystem::path temp_path = std::filesystem::canonical(temp_dir.path());
+  const auto input = temp_path / "gfx1250.co";
+  const auto output = temp_path / "stdout.txt";
+  const auto error = temp_path / "stderr.txt";
+  const auto store = temp_path / "store";
+  {
+    const auto image = make_gfx1250_smoke_code_object();
+    std::ofstream out(input, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(image.data()),
+              static_cast<std::streamsize>(image.size()));
+  }
+  for (int pass = 0; pass < 3; ++pass) {
+    const std::string command =
+        shell_quote(tool.string()) +
+        " --store-root /unused/previous-value --store-root=" + shell_quote(store.string()) +
+        " --portable" + (pass == 2 ? " --force" : "") + " -- " + shell_quote(input.string()) +
+        " > " + shell_quote(output.string()) + " 2> " + shell_quote(error.string());
+    ASSERT_TRUE(command_succeeded(std::system(command.c_str()))) << read_text_file(error);
+    EXPECT_TRUE(
+        contains(read_text_file(output), pass == 1 ? "written=0 held=1" : "written=1 held=0"))
+        << read_text_file(output);
+  }
+}
+#endif
+
+TEST(RjDbtTranslate, SharedParserPreservesHexBoundsOmissionAndLastValue) {
+  for (bool explicit_vgpr : {false, true}) {
+    std::vector<std::string> arguments{"rj_dbt_translate",        "--input-target=gfx1251",
+                                       "--output-target=gfx1251", "--output-mode=code-object",
+                                       "--output-mode=disasm",    "--code-object-index=0X2a"};
+    if (explicit_vgpr)
+      arguments.push_back("--debug-conservative-liveness=0xffff");
+    arguments.insert(arguments.end(), {"--", explicit_vgpr ? "explicit.co" : "omitted.co"});
+    std::vector<char *> argv;
+    for (auto &argument : arguments)
+      argv.push_back(argument.data());
+    auto check = [](const rocjitsu::tools::TranslateOptions &options)
+        -> rocjitsu::tools::ToolResult<rocjitsu::tools::TranslateOutput> {
+      EXPECT_EQ(options.code_object_index, 42u);
+      EXPECT_EQ(options.disassembly, rocjitsu::tools::DisassemblyMode::Translated);
+      if (options.input_path == "explicit.co")
+        EXPECT_EQ(options.debug_min_free_vgpr, UINT16_MAX);
+      else
+        EXPECT_FALSE(options.debug_min_free_vgpr);
+      return {};
+    };
+    EXPECT_EQ(rocjitsu::tools::detail::run_dbt_translate_cli(static_cast<int>(argv.size()),
+                                                             argv.data(), check),
+              0);
+  }
+}
+
 TEST(RjDbtTranslate, AcceptsGfx1251WithoutGfx1250Revisions) {
   std::array arguments = {
       std::string("rj_dbt_translate"), std::string("synthetic.co"),
@@ -729,6 +790,36 @@ TEST(RjDbtTranslate, AppliesGfx1250RevisionContractToDefaultCdna5OutputMachine) 
   EXPECT_EQ(*error, "--output-revision is required when --output-target is gfx1250");
 }
 
+TEST(RjDecodeBenchmark, RejectsInputBeforeMeasurement) {
+  ASSERT_FALSE(g_decode_benchmark.empty());
+  rocjitsu::test::ScopedTempDirectory temp_dir;
+  ASSERT_TRUE(temp_dir.initialize("rj_decode_benchmark_rejection_"));
+  const std::filesystem::path temp_path(temp_dir.path());
+  const std::filesystem::path input = temp_path / "input.co";
+  const std::filesystem::path output = temp_path / "stdout.txt";
+  const std::filesystem::path error = temp_path / "stderr.txt";
+  const std::string command = shell_quote(g_decode_benchmark.string()) + " " +
+                              shell_quote(input.string()) + " > " + shell_quote(output.string()) +
+                              " 2> " + shell_quote(error.string());
+
+  EXPECT_TRUE(command_exited_with(std::system(command.c_str()), 2));
+  EXPECT_TRUE(contains(read_text_file(error), "Failed to parse input code object"));
+  EXPECT_TRUE(read_text_file(output).empty());
+
+  const std::array<uint32_t, 1> truncated_instruction = {0xBE8000FFu};
+  const std::vector<uint8_t> image =
+      make_smoke_code_object(rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1251, truncated_instruction);
+  {
+    std::ofstream out(input, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(image.data()),
+              static_cast<std::streamsize>(image.size()));
+  }
+  EXPECT_TRUE(command_exited_with(std::system(command.c_str()), 2));
+  EXPECT_TRUE(contains(read_text_file(error), "crosses a text-section boundary"))
+      << read_text_file(error);
+  EXPECT_TRUE(read_text_file(output).empty());
+}
+
 TEST(RjDecodeBenchmark, PreservesConcreteGfx1251Identity) {
   ASSERT_FALSE(g_decode_benchmark.empty());
   rocjitsu::test::ScopedTempDirectory temp_dir;
@@ -768,6 +859,51 @@ TEST(RjDecodeBenchmark, PreservesConcreteGfx1251Identity) {
   const std::string mismatch_command =
       shell_quote(g_decode_benchmark.string()) + " " + shell_quote(input.string()) +
       " --target gfx1250 --iterations 1 --invalid-limit 0 > " + shell_quote(output.string()) +
+      " 2> " + shell_quote(error.string());
+  status = std::system(mismatch_command.c_str());
+  EXPECT_TRUE(command_exited_with(status, 2));
+  EXPECT_TRUE(contains(read_text_file(error), "does not match code-object target"))
+      << read_text_file(error);
+}
+
+TEST(RjDecodeBenchmark, AcceptsGfx1100TargetAndChecksElfIdentity) {
+  ASSERT_FALSE(g_decode_benchmark.empty());
+  rocjitsu::test::ScopedTempDirectory temp_dir;
+  ASSERT_TRUE(temp_dir.initialize("rj_decode_benchmark_gfx1100_"));
+  const std::filesystem::path temp_path(temp_dir.path());
+  const std::filesystem::path input = temp_path / "gfx1100.co";
+  const std::filesystem::path output = temp_path / "stdout.txt";
+  const std::filesystem::path error = temp_path / "stderr.txt";
+
+  constexpr std::array<uint32_t, 1> kNop = {0xBF800000u};
+  {
+    const std::vector<uint8_t> image =
+        make_smoke_code_object(rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1100, kNop);
+    std::ofstream out(input, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(image.data()),
+              static_cast<std::streamsize>(image.size()));
+  }
+
+  const std::string help_command = shell_quote(g_decode_benchmark.string()) + " --help > " +
+                                   shell_quote(output.string()) + " 2> " +
+                                   shell_quote(error.string());
+  int status = std::system(help_command.c_str());
+  EXPECT_TRUE(command_succeeded(status)) << read_text_file(error);
+  EXPECT_TRUE(contains(read_text_file(output),
+                       "Target: auto, gfx942, gfx950, gfx1100, gfx1200, gfx1201, gfx1250, gfx1251"))
+      << read_text_file(output);
+
+  const std::string explicit_command =
+      shell_quote(g_decode_benchmark.string()) + " " + shell_quote(input.string()) +
+      " --target gfx1100 --iterations 1 --invalid-limit 0 > " + shell_quote(output.string()) +
+      " 2> " + shell_quote(error.string());
+  status = std::system(explicit_command.c_str());
+  EXPECT_TRUE(command_succeeded(status)) << read_text_file(error);
+  EXPECT_TRUE(contains(read_text_file(output), "1 valid instructions")) << read_text_file(output);
+
+  const std::string mismatch_command =
+      shell_quote(g_decode_benchmark.string()) + " " + shell_quote(input.string()) +
+      " --target gfx1201 --iterations 1 --invalid-limit 0 > " + shell_quote(output.string()) +
       " 2> " + shell_quote(error.string());
   status = std::system(mismatch_command.c_str());
   EXPECT_TRUE(command_exited_with(status, 2));
@@ -1132,6 +1268,13 @@ int main(int argc, char **argv) {
 
   g_translate_tool = argv[1];
   g_decode_benchmark = argv[2];
+#if defined(__linux__)
+  if (argc < 4) {
+    std::cerr << "Linux smoke tests also require the rj_pretranslate path\n";
+    return 2;
+  }
+  g_pretranslate_tool = argv[3];
+#endif
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }
