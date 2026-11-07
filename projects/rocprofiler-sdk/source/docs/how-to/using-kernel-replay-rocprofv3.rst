@@ -204,9 +204,11 @@ Limitations (CLI)
   honor the SDK's per-pass toggles at all, so even a custom tool cannot confine it to one pass
   (see :ref:`using-kernel-replay`).
 * **Thread trace runs on its own pass**, never alongside counter collection, and only in dispatch
-  mode. Device-mode thread trace options are rejected with ``--replay-mode kernel`` (see
-  `Thread trace and counters on the same dispatch`_). ``--att-perfcounters`` and
-  ``--att-activity`` remain rejected together with ``--pmc``, as they are without replay.
+  mode. Device-mode thread trace options and ``--att-serialize-all`` are rejected with
+  ``--replay-mode kernel`` (see `Thread trace and counters on the same dispatch`_). A disabled
+  thread-trace pass still returns ``bSerialize``, so ``--att-serialize-all`` would serialize the
+  counter passes. ``--att-perfcounters`` and ``--att-activity`` remain rejected together with
+  ``--pmc``, as they are without replay.
 * **HIP graph launches are not replayed.** A graph seen while replay is active warns once and
   runs un-replayed (not a hard error).
 * **Only single-packet, single-dispatch submissions** are replayed.
