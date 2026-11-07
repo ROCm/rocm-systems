@@ -54,7 +54,6 @@ EXCLUDE_PREFIX = (
     "docs/",
     "include/libdrm/",  # vendored DRM headers, other owners
     "src/nic/brcm-nic/",  # Broadcom-owned NIC implementation
-    "include/ras-decode/",  # vendored RAS decode headers, not maintained here
     # Vendored UALoE library, not maintained here -- both halves are replaced
     # wholesale by the periodic "sync UALoE lib" drops, so a header rewritten
     # here is reverted by the next sync. Matches the `ualoe_lib/` entry that
