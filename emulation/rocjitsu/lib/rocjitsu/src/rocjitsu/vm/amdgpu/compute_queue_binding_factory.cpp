@@ -6,6 +6,7 @@
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 
 #include <memory>
+#include <utility>
 namespace rocjitsu::amdgpu {
 namespace {
 
@@ -101,15 +102,14 @@ public:
     });
     if (registration_id == 0)
       return {};
-    try {
+    // The processor attachment is live. A failed ownership allocation must not
+    // reach a recovering frontend without a binding that owns that attachment.
+    return [&]() noexcept -> QueueBindingCreateResult {
       return {.status = QueueBindingCreateStatus::Bound,
               .binding = std::make_unique<ComputeQueueBinding>(
                   command_processor_, registration_id, request.packet_format,
                   request.ring.base_address, request.ring.size_bytes)};
-    } catch (...) {
-      (void)command_processor_.unregister_queue_registration(registration_id);
-      throw;
-    }
+    }();
   }
 
 private:
