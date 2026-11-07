@@ -1140,7 +1140,8 @@ TEST(InstructionMixPluginTest, CancellationKeepsAttemptedInstructionsWithoutComp
   f.soc->set_plugin_group(f.plugin_group_);
   f.plugin_group_->onInit();
 
-  const uint32_t code[] = {S_NOP, test::kUnimplementedInstruction, S_ENDPGM};
+  const uint32_t code[] = {S_NOP, test::kUnimplementedInstruction[0],
+                           test::kUnimplementedInstruction[1], S_ENDPGM};
   f.run_kernel(code, std::size(code));
   ASSERT_EQ(f.engine->last_exit().code, 1);
   EXPECT_TRUE(f.cu()->is_idle());

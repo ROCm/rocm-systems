@@ -2579,7 +2579,8 @@ TEST_P(KfdInstructionRejectionTest, RoutesFailureToQueueOwner) {
     words = {0xd0710001u, 0x7c000000u, 0x7c7c0c00u};
     expected_error = rocjitsu::amdgpu::InstructionExecutionError::UnsupportedOperandValue;
   } else if (GetParam().kind == RejectionKind::Unimplemented) {
-    words = {rocjitsu::test::kUnimplementedInstruction, 0, 0};
+    words = {rocjitsu::test::kUnimplementedInstruction[0],
+             rocjitsu::test::kUnimplementedInstruction[1], 0};
     expected_error = rocjitsu::amdgpu::InstructionExecutionError::UnimplementedInstruction;
   }
   using namespace rocjitsu::amdhsa;
