@@ -1279,28 +1279,35 @@ HSAKMT_STATUS HSAKMTAPI vhsaKmtSVMGetAttr(void* start_addr, HSAuint64 size, unsi
   vhsakmt_bo_handle bo;
   size_t req_len = sizeof(struct vhsakmt_ccmd_memory_req) + nattr * sizeof(HSA_SVM_ATTRIBUTE);
   size_t rsp_len = sizeof(struct vhsakmt_ccmd_memory_rsp) + nattr * sizeof(HSA_SVM_ATTRIBUTE);
-  struct vhsakmt_ccmd_memory_req req = {
-      .hdr = VHSAKMT_CCMD(MEMORY, req_len),
-      .type = VHSAKMT_CCMD_MEMORY_SVM_GET_ATTR,
-      .svm_attr_args =
-          {
-              .start_addr = (uint64_t)start_addr,
-              .size = size,
-              .nattr = nattr,
-          },
-  };
+  struct vhsakmt_ccmd_memory_req* req;
+  int r;
 
   bo = vhsakmt_find_bo_by_addr(dev, start_addr);
   if (!bo) return HSAKMT_STATUS_INVALID_HANDLE;
-  req.res_id = bo->real.res_id;
 
-  rsp = vhsakmt_alloc_rsp(dev, &req.hdr, rsp_len);
-  if (!rsp) return -ENOMEM;
+  req = calloc(1, req_len);
+  if (!req) return -ENOMEM;
+  req->hdr = VHSAKMT_CCMD(MEMORY, req_len);
+  req->type = VHSAKMT_CCMD_MEMORY_SVM_GET_ATTR;
+  req->svm_attr_args.start_addr = (uint64_t)start_addr;
+  req->svm_attr_args.size = size;
+  req->svm_attr_args.nattr = nattr;
+  req->res_id = bo->real.res_id;
 
-  vhsakmt_execbuf_cpu(dev, &req.hdr, __FUNCTION__);
+  rsp = vhsakmt_alloc_rsp(dev, &req->hdr, rsp_len);
+  if (!rsp) {
+    free(req);
+    return -ENOMEM;
+  }
+
+  memcpy(req->payload, attrs, nattr * sizeof(HSA_SVM_ATTRIBUTE));
+
+  r = vhsakmt_execbuf_cpu(dev, &req->hdr, __FUNCTION__);
+  free(req);
+  if (r) return r;
   if (rsp->ret) return rsp->ret;
 
-  memcpy(req.payload, attrs, nattr * sizeof(HSA_SVM_ATTRIBUTE));
+  memcpy(attrs, rsp->payload, nattr * sizeof(HSA_SVM_ATTRIBUTE));
 
   return rsp->ret;
 }
