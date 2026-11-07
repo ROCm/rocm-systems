@@ -93,6 +93,7 @@ void HsaApiTable::Init() {
   constexpr size_t expected_finalizer_ext_table_size = 64;
   constexpr size_t expected_tools_table_size = 64;
   constexpr size_t expected_pc_sampling_ext_table_size = 72;
+  constexpr size_t expected_launch_descriptor_ext_table_size = 48;
 
   static_assert(sizeof(CoreApiTable) == expected_core_api_table_size,
                 "HSA core API table size changed, bump HSA_CORE_API_TABLE_STEP_VERSION and set "
@@ -111,8 +112,12 @@ void HsaApiTable::Init() {
                 "HSA tools table size changed, bump HSA_TOOLS_API_TABLE_STEP_VERSION "
                 "and set expected_tools_table_size to the new size of the struct");
   static_assert(sizeof(PcSamplingExtTable) == expected_pc_sampling_ext_table_size,
-                "HSA finalizer ext table size changed, bump HSA_PC_SAMPLING_API_TABLE_STEP_VERSION "
+                "HSA PC sampling ext table size changed, bump HSA_PC_SAMPLING_API_TABLE_STEP_VERSION "
                 "and set expected_pc_sampling_ext_table_size to the new size of the struct");
+  static_assert(sizeof(LaunchDescriptorExtTable) == expected_launch_descriptor_ext_table_size,
+                "HSA launch descriptor ext table size changed, bump "
+                "HSA_LAUNCH_DESCRIPTOR_API_TABLE_STEP_VERSION and set "
+                "expected_launch_descriptor_ext_table_size to the new size of the struct");
 
   // Initialize Version of Api Table
   hsa_api.version.major_id = HSA_API_TABLE_MAJOR_VERSION;
@@ -133,6 +138,7 @@ void HsaApiTable::Init() {
   hsa_api.finalizer_ext_ = NULL;
   hsa_api.image_ext_ = NULL;
   hsa_api.pc_sampling_ext_ = NULL;
+  hsa_api.launch_descriptor_ext_ = NULL;
 
   UpdateTools();
   hsa_api.tools_ = &tools_api;
@@ -166,6 +172,13 @@ void HsaApiTable::CloneExts(void* ext_table, uint32_t table_id) {
     hsa_api.pc_sampling_ext_ = &pcs_api;
     return;
   }
+
+  // Update HSA Launch Descriptor Extension Api table
+  if (table_id == HSA_EXT_LAUNCH_DESCRIPTOR_API_TABLE_ID) {
+    launch_descriptor_api = *reinterpret_cast<LaunchDescriptorExtTable*>(ext_table);
+    hsa_api.launch_descriptor_ext_ = &launch_descriptor_api;
+    return;
+  }
 }
 
 void HsaApiTable::LinkExts(void* ext_table, uint32_t table_id) {
@@ -190,6 +203,13 @@ void HsaApiTable::LinkExts(void* ext_table, uint32_t table_id) {
   if (table_id == HSA_EXT_PC_SAMPLING_API_TABLE_ID) {
     pcs_api = *reinterpret_cast<PcSamplingExtTable*>(ext_table);
     hsa_api.pc_sampling_ext_ = &pcs_api;
+    return;
+  }
+
+  // Update HSA Launch Descriptor Extension Api table
+  if (table_id == HSA_EXT_LAUNCH_DESCRIPTOR_API_TABLE_ID) {
+    launch_descriptor_api = *reinterpret_cast<LaunchDescriptorExtTable*>(ext_table);
+    hsa_api.launch_descriptor_ext_ = &launch_descriptor_api;
     return;
   }
 }

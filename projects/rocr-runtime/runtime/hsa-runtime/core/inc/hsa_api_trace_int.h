@@ -54,6 +54,7 @@ namespace core {
     static const uint32_t HSA_EXT_IMAGE_API_TABLE_ID = 1;
     static const uint32_t HSA_EXT_AQLPROFILE_API_TABLE_ID = 2;
     static const uint32_t HSA_EXT_PC_SAMPLING_API_TABLE_ID = 3;
+    static const uint32_t HSA_EXT_LAUNCH_DESCRIPTOR_API_TABLE_ID = 4;
 
     ::HsaApiTable hsa_api;
     ::CoreApiTable core_api;
@@ -62,6 +63,7 @@ namespace core {
     ::ImageExtTable image_api;
     ::ToolsApiTable tools_api;
     ::PcSamplingExtTable pcs_api;
+    ::LaunchDescriptorExtTable launch_descriptor_api;
 
     HsaApiTable();
     void Init();
