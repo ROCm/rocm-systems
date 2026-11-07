@@ -26,6 +26,7 @@
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/counters/sample_processing.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/hsa/replay_window.hpp"
@@ -347,8 +348,10 @@ finish_pass(range_context_t& ctx)
     auto guards = host.snapshot_taken ? lock_agents(host)
                                       : std::vector<std::unique_lock<std::shared_mutex>>{};
     // The pass's GPU tail belongs to the pass: its records are emitted before PASS exit, and the
-    // checks below see settled memory.
+    // checks below see settled memory. fence_all waits for the HSA completion handler, which only
+    // queues the counter record onto its consumer thread, so flush that thread before PASS exit.
     if(host.snapshot_taken) fence_all(host.agents);
+    counters::flush_callback_thread();
 
     if(pass > 0)
         execute_pass_phase_exit(ctx.plan, pass, ctx.agent_id, dispatch_count, host.pass_state);

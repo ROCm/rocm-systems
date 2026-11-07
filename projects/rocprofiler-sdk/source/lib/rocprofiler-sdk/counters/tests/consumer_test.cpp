@@ -163,6 +163,40 @@ TEST(consumer, fork_handler_resets_callback_consumer)
     callback_thread_stop();
 }
 
+// flush() must not return while consume_fn is still running the item add() queued.
+TEST(consumer, flush_waits_for_in_flight_consume)
+{
+    std::atomic<int> started{0};
+    std::atomic<int> release{0};
+    std::atomic<int> consumed{0};
+
+    consumer_thread_t<int> consumer([&](int&& value) {
+        started.fetch_add(1);
+        while(release.load() == 0)
+            std::this_thread::yield();
+        consumed.fetch_add(value);
+    });
+    consumer.start();
+    consumer.add(7);
+    while(started.load() == 0)
+        std::this_thread::yield();
+
+    std::atomic<int> flushed{0};
+    auto             waiter = std::thread([&] {
+        consumer.flush();
+        flushed.store(1);
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    EXPECT_EQ(flushed.load(), 0);
+    EXPECT_EQ(consumed.load(), 0);
+
+    release.store(1);
+    waiter.join();
+    EXPECT_EQ(flushed.load(), 1);
+    EXPECT_EQ(consumed.load(), 7);
+    consumer.exit();
+}
+
 // Verifies that calling add() after exit() does not lose work: the
 // item must be processed synchronously on the calling thread via the
 // fallback path (`!valid` clause in add()).

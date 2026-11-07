@@ -259,5 +259,11 @@ process_callback_data(completed_cb_params_t&& params)
 {
     callback_thread_get().add(std::move(params));
 }
+
+void
+flush_callback_thread()
+{
+    callback_thread_get().flush();
+}
 }  // namespace counters
 }  // namespace rocprofiler

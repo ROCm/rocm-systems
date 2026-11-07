@@ -25,6 +25,7 @@
 #include "lib/common/logging.hpp"
 #include "lib/common/scope_destructor.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/counters/sample_processing.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/replay_window.hpp"
@@ -433,10 +434,11 @@ execute_range(range_context_t& ctx, uint64_t& divergence_count)
         staging.fill(ctx.record.dispatches(), packets);
         queue.invoke_write_interceptor(packets.data(), packets.size(), ring_writer);
 
-        // Drain this pass's async completion handlers (a separate HSA thread reads counters, emits
-        // records, and releases signals) before the continue-decision, the next restore, and the
-        // next submit.
+        // Drain this pass's async completion handlers (a separate HSA thread reads counters and
+        // releases signals) and then the counter-record consumer, which is what actually emits the
+        // record, before the continue-decision, the next restore, and the next submit.
         hsa::replay_drain_or_fatal(queue);
+        counters::flush_callback_thread();
 
         execute_pass_phase_exit(ctx.plan, pass, agent_id, dispatch_count, pass_state);
         passes_time += phase_clock::now() - pass_start;

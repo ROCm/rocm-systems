@@ -147,8 +147,9 @@ locals. The code between the macro and `end` must follow these rules:
 5. **Synchronize all GPU work before begin and before `end` on every pass.** This includes
    asynchronous copies and non-compute queues on every participating device. Use their supported
    completion mechanisms (for example, `hipDeviceSynchronize` on each participating device).
-   The SDK additionally fences compute queues and drains dispatch handlers, but these do not wait
-   for untracked asynchronous copies or non-compute work. No other thread may submit GPU work or
+   The SDK additionally fences compute queues, drains dispatch handlers, and waits for the
+   counter-record consumer, so a pass's counter records are delivered before PASS exit. These do
+   not wait for untracked asynchronous copies or non-compute work. No other thread may submit GPU work or
    copy into device memory while the range is open.
 6. **Keep once-only side effects out of re-executed passes.** `rocprofiler_range_replay_get_host_pass`
    returns 0 on the application's own run and 1..N-1 after that.

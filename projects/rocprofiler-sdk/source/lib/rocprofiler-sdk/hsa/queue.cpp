@@ -30,6 +30,7 @@
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/counters/queue_hooks.hpp"
+#include "lib/rocprofiler-sdk/counters/sample_processing.hpp"
 #include "lib/rocprofiler-sdk/hip/event.hpp"
 #include "lib/rocprofiler-sdk/hip/graph.hpp"
 #include "lib/rocprofiler-sdk/hsa/details/fmt.hpp"
@@ -1152,14 +1153,16 @@ WriteInterceptor(const void* packets,
                                      /*is_replay_pass=*/true,
                                      replay_dispatch_id);
 
-                // Drain this pass's async handler (separate HSA thread: reads counters, emits
-                // records, releases signals/corr-id refs) before PASS EXIT / continue-decision /
+                // Drain this pass's async handler (separate HSA thread: reads counters, queues the
+                // record, releases signals/corr-id refs) and then the counter-record consumer,
+                // which is what delivers the record, before PASS EXIT / continue-decision /
                 // restore() / next submit, else we race its record delivery and reuse buffers and
                 // signals it still holds. This also implies GPU drain. Exactly one handler is in
                 // flight per pass (we drain before each submit, under the agent writer lock).
                 ROCP_FATAL_IF(queue.active_async_packets() > 1) << fmt::format(
                     "kernel replay: more than one async handler in flight during a replay pass");
                 replay_drain_or_fatal(queue);
+                counters::flush_callback_thread();
 
                 kernel_replay::execute_pass_phase_exit(replay_plan, pass, pass_state);
 

@@ -49,5 +49,11 @@ callback_thread_stop();
 
 void
 process_callback_data(completed_cb_params_t&& params);
+
+// Block until the counter-record consumer has delivered every record queued so far. Replay calls
+// this after the HSA completion handler has drained and before PASS exit, so a tool that reads its
+// records at PASS exit or CLOSE sees this pass's records. A no-op when the consumer is idle.
+void
+flush_callback_thread();
 }  // namespace counters
 }  // namespace rocprofiler

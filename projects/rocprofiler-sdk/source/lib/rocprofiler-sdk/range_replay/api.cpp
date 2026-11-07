@@ -23,6 +23,7 @@
 #include "lib/common/logging.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/counters/sample_processing.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
 #include "lib/rocprofiler-sdk/range_replay/executor.hpp"
 #include "lib/rocprofiler-sdk/range_replay/host_replay.hpp"
@@ -49,6 +50,9 @@ close_range(range_context_t&                  ctx,
             rocprofiler_range_replay_status_t status,
             uint64_t                          divergence_count)
 {
+    // A declined range never enters the pass loop, so its pass-0 counter record is still on the
+    // consumer thread here. Deliver it before CLOSE on every outcome.
+    counters::flush_callback_thread();
     execute_close_callback(ctx.plan,
                            status,
                            ctx.agent_id,

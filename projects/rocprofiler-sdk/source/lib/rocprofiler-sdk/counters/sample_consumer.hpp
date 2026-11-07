@@ -88,11 +88,22 @@ public:
             cv.notify_all();
     }
 
+    // Wait until every item add() has queued has been consumed. The HSA completion handler
+    // returns as soon as it hands a counter record to this thread, and replay drains only that
+    // handler; without this wait the record callback lands after PASS exit and CLOSE.
+    // Must not be called from consume_fn: that runs on this thread while an item is in flight.
+    void flush()
+    {
+        auto lk = std::unique_lock{mut};
+        cv.wait(lk, [&] { return read_ptr.load() == write_ptr.load() && inflight.load() == 0; });
+    }
+
 protected:
     void consumer_loop()
     {
         while(true)
         {
+            DataType retrieved{};
             {
                 auto lk = std::unique_lock{mut};
                 cv.wait(lk, [&] { return read_ptr != write_ptr || !valid; });
@@ -102,11 +113,20 @@ protected:
                     cv.notify_all();
                     return;
                 }
+                // Claim the item and the in-flight count under the lock flush() waits on, so a
+                // waiter cannot observe an empty ring while consume_fn is still running.
+                retrieved = std::move(buffer.at(read_ptr % buffer.size()));
+                read_ptr.fetch_add(1);
+                inflight.fetch_add(1);
             }
 
-            auto retrieved = std::move(buffer.at(read_ptr % buffer.size()));
-            read_ptr.fetch_add(1);
             consume_fn(std::move(retrieved));
+
+            {
+                auto lk = std::unique_lock{mut};
+                inflight.fetch_sub(1);
+                cv.notify_all();
+            }
         }
     }
 
@@ -116,6 +136,7 @@ protected:
     std::mutex                 mut;
     std::atomic<size_t>        write_ptr{0};
     std::atomic<size_t>        read_ptr{0};
+    std::atomic<size_t>        inflight{0};
     std::array<DataType, SIZE> buffer;
     std::thread                consumer{};
     std::condition_variable    cv;
