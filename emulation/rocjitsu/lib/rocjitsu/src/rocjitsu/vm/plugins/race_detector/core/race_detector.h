@@ -120,12 +120,11 @@ public:
 
   WaveRaceState &getWaveRaceState(int waveIndex);
 
-  /// Retire events that ended waves completed before they ended. Call when a
-  /// workgroup barrier among the remaining waves resolves.
-  void flushExitedWaves() {
+  /// A workgroup barrier covers all waves, including those that ended before
+  /// it resolved. Retire their WAVE_COMPLETE events; ACTIVE events stay pending.
+  void flushWorkgroupBarrierEvents() {
     for (auto &wave : waveRaceStates)
-      if (wave.hasExited())
-        wave.flushBarrierPendingEvents();
+      wave.flushBarrierPendingEvents();
   }
 
 private:
