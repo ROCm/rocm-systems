@@ -59,22 +59,18 @@ to change what is collected on the *re-executed* passes.
 
 ## Host replay (`sigsetjmp` / `siglongjmp`)
 
-Packet replay does not run the host code inside the range again. A tool that needs that sets
-`host_replay` on the CONFIG record. The application opens the range with
-`ROCPROFILER_RANGE_REPLAY_HOST_BEGIN` instead of `rocprofiler_range_replay_begin`. The macro's
-`sigsetjmp` is in the caller's frame, which is the only place it stays valid: `begin` returns
-before `end` runs, so a `setjmp` inside `begin` would be undefined the moment `begin` returned.
+Packet replay re-submits the recorded packets and never runs the host code inside the range again,
+which is why it declines ranges with copies, several streams, graphs, or host computation that feeds
+the kernels. Host replay is the alternate path for those ranges. The tool sets `host_replay` on the
+CONFIG record. The application opens the range with `ROCPROFILER_RANGE_REPLAY_HOST_BEGIN`, which
+takes a `sigsetjmp` in the caller's frame. `rocprofiler_range_replay_end` then fences every GPU queue,
+restores device memory on every GPU agent plus the host regions registered with
+`rocprofiler_range_replay_host_track_memory`, and `siglongjmp`s back. The application's own code runs
+again for every pass, so copies, memsets, multiple streams, graph launches, balanced allocations and
+host calls are all part of each pass.
 
-`rocprofiler_range_replay_end` then restores the entry snapshot and `siglongjmp`s back to that
-macro. The host code between the macro and `end` runs again, and its launches go through the normal
-HIP path, so counter collection sees them. CLOSE runs only when `end` is not going to jump. The
-exit snapshot taken after pass 0 is restored before `end` returns, so the application still observes
-its own result.
-
-`siglongjmp` does not run C++ destructors for automatic objects created inside the range. A tool
-that sets `host_replay` when the application did not arm the macro gets `HOST_JMP_NOT_SET` and no
-extra pass. Leaving `host_replay` at zero keeps packet replay, which is what
-`rocprofiler_range_replay_begin` always does.
+See [Host range replay](range_replay_host.md) for the protocol, the application's contract, what is
+restored, and what still declines.
 
 ## Soundness is checked, not enforced
 
@@ -103,6 +99,7 @@ experimental/range_replay.h           public payload struct, status enum, begin/
         |     range_state.cpp         eligibility bookkeeping, the recorder, decline channels
         |     replay_callbacks.cpp    CONFIG / PASS / CLOSE delivery, pass-count decisions
         |     executor.cpp            snapshot, kernarg staging, the pass loop, restore
+        |     host_replay.cpp         host replay: all-agent fence/snapshot/restore, host regions
         |     retained_kernarg.cpp    the kernarg block kept for each agent's next range
         |     digest.cpp              region hashing and divergence counting
         |
@@ -121,14 +118,16 @@ hardware integration tests; the executor consumes an already-decided record.
 
 ## Carve-outs
 
-Range replay v1 is scoped to what the existing snapshot can restore correctly.
+Packet range replay is scoped to what the existing snapshot can restore correctly. Host replay
+lifts the rows marked *(packet only)*; see [Host range replay](range_replay_host.md).
 
 | Not supported in v1 | Consequence |
 |---|---|
-| More than one queue or agent per range | declined (`MULTI_QUEUE` / `MULTI_AGENT`) |
+| More than one queue or agent per range *(packet only)* | declined (`MULTI_QUEUE` / `MULTI_AGENT`) |
 | Unified / managed memory, host memory, fine-grained memory, VM-mapped allocations | not restored between passes; not detected — see the divergence check |
-| Host state | never rewound; a range whose kernels consume values the host recomputed inside it is not a replay candidate |
-| HIP graph launches inside a range | declined (`GRAPH_LAUNCH`) |
+| Host state *(packet only)* | never rewound; a range whose kernels consume values the host recomputed inside it is not a replay candidate |
+| HIP graph launches inside a range *(packet only)* | declined (`GRAPH_LAUNCH`) |
+| Async copies into device memory inside a range *(packet only)* | declined (`MEMORY_COPY_IN_RANGE`) |
 | Code objects loaded or unloaded inside a range (lazy module loading, JIT, `hipModuleUnload`) | declined (`CODE_OBJECT_CHANGED_IN_RANGE`); run a range once before measuring it |
 | Kernels that call `printf` | replayed output is printed again (hostcall `printf`, HIP's default) or lost (`-mprintf-kind=buffered`); see [Soundness and declining](range_replay_soundness.md) |
 | Concurrency within a pass | passes are serialized dispatch-by-dispatch, so concurrency-sensitive measurements differ from pass 0 |
@@ -179,6 +178,9 @@ interesting counters are.
 - **[Soundness and declining](range_replay_soundness.md)** — what makes a range replayable, the
   decline decision table and why each condition is checked, the cross-thread decline channel, the
   kernarg-recycling problem, the interceptor passthrough gate, and the optional divergence check.
+- **[Host range replay](range_replay_host.md)** — the `sigsetjmp` / `siglongjmp` path that re-runs
+  the application's own code per pass: the begin macro, registered host memory, the application's
+  contract, and the time-stepping integration test.
 - **[Performance](range_replay_performance.md)** — the two-term cost model, why the fixed window
   cost is paid once per range rather than once per dispatch, what the two nightly perf tests
   measure, and why a declined range must never be timed.
