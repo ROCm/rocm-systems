@@ -32,6 +32,8 @@ if(GPU_TARGETS)
 endif()
 enable_language(HIP)
 
+string(APPEND CMAKE_HIP_FLAGS " -g0")
+
 find_package(Clang REQUIRED CONFIG
              PATHS "${ROCM_PATH}"
              PATH_SUFFIXES "llvm/lib/cmake/clang")
