@@ -91,7 +91,7 @@ Six nouns. Learn these and you know the tool.
 
 | Concept | What it is |
 | ------- | ---------- |
-| **Emulator** | A backend that runs GPU code: `rocjitsu`, `rocjitsu-dbt`, `hotswap`. |
+| **Emulator** | A backend that runs GPU code: `rocjitsu`. |
 | **Agent** | A hardware GPU definition — `MI300X`, `MI350X`, `MI450X`. |
 | **Topology** | A rack / node / GPU layout that references an agent. |
 | **Profile** | A reusable preset: emulator + topology + options. |
@@ -109,8 +109,6 @@ Six nouns. Learn these and you know the tool.
 $ mirage emulators
 NAME          INSTALLED  SUPPORTED  DESCRIPTION
 rocjitsu*     yes        yes        ROCm just-in-time GPU emulator
-rocjitsu-dbt  yes        no         dynamic binary translation (needs real GPU)
-hotswap       no         yes        load-time ISA-rewriting backend
 * = default emulator for new profiles
 
 $ mirage profile create cdna4 --emulator rocjitsu --agent MI350X
@@ -198,8 +196,7 @@ flowchart TB
     ctl --> sup["mirage_supervisor<br/>session/exec/process engine"]
     ctl --> builtin["mirage_builtin<br/>embedded agents/topologies<br/>generated profiles"]
     sup --> cont["mirage_container<br/>podman/docker provider"]
-    root -.link-only.-> rj["mirage_rocjitsu (+ dbt)"]
-    root -.link-only.-> hot["mirage_hotswap"]
+    root -.link-only.-> rj["mirage_rocjitsu"]
     rj --> sys["rocjitsu_sys (FFI)"]
 ```
 
@@ -218,13 +215,9 @@ $ cargo build --no-default-features --features rocjitsu
 | Backend | How it runs GPU code | When to use |
 | ------- | -------------------- | ----------- |
 | **rocjitsu** | Pure software emulation. Synthesizes `/dev/kfd`, runs the ISA in `rj_vm`. | Debug anywhere — no GPU needed. **The headline.** |
-| **rocjitsu-dbt** | Dynamic Binary Translation: translates guest ISA → host GPU ISA, runs on real HW. | You *have* a GPU but want a *different* arch. |
-| **hotswap** | Load-time ISA rewriting. | Quick arch retargeting on real HW. |
-
-All three share the **same** mirage UX. Switching is one flag:
 
 ```console
-$ mirage run --profile cdna4 --emulator rocjitsu-dbt -- ./app
+$ mirage run --profile cdna4 -- ./app
 ```
 
 ---
@@ -693,7 +686,7 @@ mirage ships an E2E matrix that is the full cross-product of how teams debug:
 
 | Dimension | Values |
 | --------- | ------ |
-| **Emulator** | `rocjitsu`, `rocjitsu-dbt` |
+| **Emulator** | `rocjitsu` |
 | **Containerization** | `node`, `podman`, `docker` |
 | **Hardware** | `mi350x`, `mi450x` |
 | **Payload** | `tiny_torch` (1 node), `rccl` (2 nodes), `crash` (1 node) |
@@ -701,13 +694,12 @@ mirage ships an E2E matrix that is the full cross-product of how teams debug:
 
 ```console
 $ cargo test --test matrix_e2e -- --nocapture
-mirage testing matrix — 72 combinations
+mirage testing matrix — 36 combinations
 
   COMBINATION (emulator+container+hw+payload+plugin)          RESULT
   rocjitsu+node+mi350x+tiny_torch+none                        RAN
   rocjitsu+podman+mi450x+rccl+none                            RAN
-  rocjitsu-dbt+node+mi350x+tiny_torch+none                    SKIP (no translation GPU)
-matrix summary: 36 ran, 36 skipped, 72 total
+matrix summary: 36 ran, 0 skipped, 36 total
 ```
 
 Every row runs the same lifecycle — **create → run → ensure nothing survived the

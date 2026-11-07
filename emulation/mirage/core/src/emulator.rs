@@ -78,7 +78,7 @@ impl EmulatorDef {
     /// the shared `EmulatorDef`, dropping `deny_unknown_fields` to make
     /// that promise possible also stopped every *other* backend
     /// rejecting a key it will never act on — a misspelled or
-    /// unsupported field under a HotSwap or rocjitsu-dbt emulator would
+    /// unsupported field under another emulator would
     /// parse, and the session would come up with the defaults it was
     /// meant to change, silently.
     ///
@@ -182,8 +182,7 @@ impl Serialize for EmulatorDef {
 
 /// Whether the host's hardware/environment can actually run an
 /// emulator. This is distinct from [`EmulatorBackend::installed`]:
-/// an emulator can be installed yet unsupported (e.g. HotSwap installed
-/// on a machine with no compatible physical GPU), or supported yet not
+/// an emulator can be installed yet unsupported, or supported yet not
 /// installed. Both signals are surfaced so the UX/CLI can explain
 /// exactly what a user needs to do.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -226,8 +225,7 @@ impl SupportStatus {
 /// questions would do that walk twice on the way to printing one line.
 ///
 /// `installed` is not simply "the library exists": a backend may need
-/// more than one artifact co-located (HotSwap needs its intercept, a
-/// patched ROCR and COMGR in one directory), so it is reported
+/// more than one artifact co-located, so it is reported
 /// separately rather than derived from `location`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuntimeStatus {
@@ -274,8 +272,7 @@ pub struct EmulatorDescription {
 
 /// A backend integration mirage can drive to emulate a workload.
 ///
-/// Every emulator (`rocjitsu`, `rocjitsu-dbt`, `hotswap`, …)
-/// lives in its own crate and registers a single stateless
+/// The rocjitsu integration lives in its own crate and registers a single stateless
 /// implementation of this trait into the global registry via
 /// [`inventory`]. The core and control-plane crates never name a
 /// concrete backend: they look one up by its [`EmulatorKind`] with
@@ -347,7 +344,7 @@ pub trait EmulatorBackend: Sync + Send + std::fmt::Debug {
         self.runtime().installed
     }
 
-    /// check if the emulator is supported on this host, i.e. meets the hardware/environment requirements to run. This is a stronger condition than `installed`: an emulator can be installed but unsupported (e.g. HotSwap installed on a machine with no compatible physical GPU), or supported but not installed.
+    /// check if the emulator is supported on this host, i.e. meets the hardware/environment requirements to run. This is a stronger condition than `installed`: an emulator can be installed but unsupported, or supported but not installed.
     fn supported(&self) -> SupportStatus;
 
     /// Discovers available plugins for the emulator.
@@ -437,8 +434,7 @@ pub trait EmulatorBackend: Sync + Send + std::fmt::Debug {
     /// workload process has exited.
     ///
     /// Returns `Ok(None)` — the default — for backends that need no
-    /// daemon (`hotswap`, or rocjitsu when its runtime library
-    /// is not installed and the exec will fail loudly anyway).
+    /// daemon.
     ///
     /// # Errors
     ///

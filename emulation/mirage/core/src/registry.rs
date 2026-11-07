@@ -327,7 +327,7 @@ mod tests {
 
     #[test]
     fn default_prefers_an_installed_backend() {
-        let specs = [info("hotswap", false), info("rocjitsu", true)];
+        let specs = [info("test", false), info("rocjitsu", true)];
         assert_eq!(default_emulator(&specs).unwrap().name, "rocjitsu");
     }
 
@@ -335,8 +335,8 @@ mod tests {
     fn default_falls_back_to_an_uninstalled_backend() {
         // Naming one still produces an actionable error at bring-up
         // ("rocjitsu runtime not found"); naming none does not.
-        let specs = [info("hotswap", false), info("rocjitsu", false)];
-        assert_eq!(default_emulator(&specs).unwrap().name, "hotswap");
+        let specs = [info("test", false), info("rocjitsu", false)];
+        assert_eq!(default_emulator(&specs).unwrap().name, "test");
     }
 
     #[test]

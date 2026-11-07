@@ -1,5 +1,4 @@
-//! Performance + accuracy benchmark across the mirage emulator
-//! backends (`rocjitsu`, `hotswap`).
+//! Performance + accuracy benchmark for mirage with rocjitsu.
 //!
 //! This is an *integration benchmark*: it drives the real `mirage`
 //! CLI exactly as a user would (`profile create` → `run`), executing a
@@ -12,8 +11,7 @@
 //!   correct. A run counts as *correct* iff exit code is `0` **and**
 //!   the sentinel is present. This is a genuine functional-accuracy
 //!   check: under rocjitsu's software simulator a wrong answer means
-//!   the simulator mis-modelled the GPU; under hotswap a wrong answer
-//!   means the load-time ISA rewrite produced incorrect code.
+//!   the simulator mis-modelled the GPU.
 //! * **Performance** — wall-clock latency of the end-to-end
 //!   `mirage run`, sampled over N iterations (after one warm-up), with
 //!   min / mean / median / max / stddev reported. A `/bin/true` run is
@@ -65,12 +63,10 @@ use harness::Env;
 const ENV_RUN_BENCH: &str = "MIRAGE_BENCH";
 
 /// Emulator backends to compare, in report order.
-const EMULATORS: &[&str] = &["rocjitsu", "hotswap"];
+const EMULATORS: &[&str] = &["rocjitsu"];
 
-/// GPU architectures baked into the benchmark fat binary, so the same
-/// executable runs under the software simulator (`rocjitsu`) and after a
-/// load-time rewrite (`hotswap`, which retargets `gfx1250` code onto the
-/// physical card).
+/// GPU architectures baked into the benchmark fat binary for rocjitsu
+/// and the native GPU baseline.
 const OFFLOAD_ARCHS: &[&str] = &["gfx942", "gfx950", "gfx1250"];
 
 // ----- capability detection --------------------------------------------------
@@ -367,8 +363,8 @@ fn benchmark_emulators_and_write_report() {
     //
     // If *nothing* was runnable, skip rather than fail. Each backend here
     // needs hardware or an install this machine may not have — the GPU
-    // baseline needs a physical GPU, rocjitsu needs its runtime library,
-    // hotswap needs to be compiled in — and every other prerequisite in
+    // baseline needs a physical GPU, rocjitsu needs its runtime library
+    // — and every other prerequisite in
     // this file already skips when it is missing. Failing instead would
     // mean a clean checkout on a GPU-less machine (CI, a laptop) reports
     // a red suite for hardware it was never going to have, which trains
@@ -484,12 +480,6 @@ fn render_report(results: &[EmulatorResult], n: usize) -> String {
         s,
         "| `rocjitsu` | Software GPU emulator — executes the workload against a \
          simulated AMD GPU (no physical GPU required). |"
-    )
-    .unwrap();
-    writeln!(
-        s,
-        "| `hotswap` | Load-time ISA rewriter — retargets device code built for \
-         another GPU (e.g. `gfx1250`) onto the physical card at load time. |"
     )
     .unwrap();
     writeln!(s).unwrap();

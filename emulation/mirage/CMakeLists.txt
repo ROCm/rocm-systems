@@ -37,13 +37,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(mirage NONE)
 
-# HotSwap is a full LLVM + COMGR + ROCR source build, so it is opt-in. When ON,
-# cmake/Hotswap.cmake builds and stages the HotSwap artifacts mirage discovers.
-option(
-    MIRAGE_BUILD_HOTSWAP
-    "Build HotSwap (COMGR + patched ROCR + intercept) from source"
-    OFF
-)
 option(
     MIRAGE_ALLOW_TEST_SKIP
     "Pass MIRAGE_E2E_ALLOW_SKIP=1 so the e2e suites may skip without a \
@@ -86,8 +79,7 @@ endif()
 
 # Cargo features. The only optional things left are the emulator
 # backends, and the default (`rocjitsu`) is what the suites run on, so a
-# plain build selects nothing here. Enable another backend with
-# `-DMIRAGE_CARGO_FEATURES=hotswap`.
+# plain build selects nothing here.
 set(MIRAGE_CARGO_FEATURES
     ""
     CACHE STRING
@@ -129,12 +121,6 @@ add_custom_target(
     VERBATIM
 )
 
-# HotSwap source build (opt-in). Kept in its own module since it pulls in
-# ExternalProject and a multi-stage LLVM/COMGR/ROCR build.
-if(MIRAGE_BUILD_HOTSWAP)
-    include(${CMAKE_CURRENT_SOURCE_DIR}/hotswap/cmake/Hotswap.cmake)
-endif()
-
 install(PROGRAMS ${_mirage_bin} DESTINATION bin RENAME mirage)
 
 enable_testing()
@@ -161,10 +147,9 @@ set_tests_properties(cargo_test PROPERTIES TIMEOUT 1800)
 # a `#[allow]` widened to cover a whole module, or an `unwrap` added to
 # shipping code, lands green.
 #
-# Both flags on the clippy line are load-bearing. `--all-targets` reaches
+# `--all-targets` reaches
 # the test and bench targets, where the unwrap/expect opt-outs live and
-# could otherwise spread unnoticed; `--all-features` reaches the
-# `hotswap` backend, which the default feature set leaves uncompiled.
+# could otherwise spread unnoticed.
 # `-D warnings` is what promotes the warn-level entries in the policy
 # (`unreachable_pub`, `unused_qualifications`,
 # `missing_debug_implementations`) into failures — without it they scroll
@@ -223,7 +208,7 @@ add_custom_target(
     VERBATIM
 )
 
-# rocjitsu-corpus gfx1250 regression, run through mirage + an emulator
-# (HotSwap by default). Opt-in via MIRAGE_RUN_CORPUS; tests SKIP when the
+# rocjitsu-corpus gfx1250 regression, run through mirage + rocjitsu.
+# Opt-in via MIRAGE_RUN_CORPUS; tests SKIP when the
 # corpus, IREE tools, or emulator install are unavailable.
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/RocjitsuCorpus.cmake)

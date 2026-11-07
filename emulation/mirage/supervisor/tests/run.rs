@@ -3,7 +3,7 @@
 //! These drive the real [`Run`], the real control socket and the real
 //! process supervisor. What they do *not* need is a GPU emulator: a stub
 //! backend registers itself into the emulator registry the same way
-//! `rocjitsu` and `hotswap` do, so the whole path from `Run::start` to a
+//! `rocjitsu` does, so the whole path from `Run::start` to a
 //! reaped process is exercised on any machine.
 //!
 //! That matters because the properties under test are ownership

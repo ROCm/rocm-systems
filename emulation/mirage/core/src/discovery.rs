@@ -71,7 +71,7 @@ pub struct LibSearch<'a> {
     /// Env vars whose value is a directory containing the `.so`.
     pub dir_env: &'a [&'a str],
     /// Env vars whose value is an install *root*, with the library
-    /// expected under `<root>/lib` (e.g. `$HOTSWAP_HOME`). Checked
+    /// expected under `<root>/lib`. Checked
     /// after [`Self::dir_env`] and before the fixed directory search.
     pub home_env: &'a [&'a str],
     /// The library file name, e.g. `"libemulator.so"`.
@@ -84,7 +84,7 @@ pub struct LibSearch<'a> {
     /// `$LD_LIBRARY_PATH`, the install prefix beside the binary, the
     /// ROCm roots and the standard system dirs. See the module docs for
     /// the order; it is written down once, there. Backends with a
-    /// tightly-scoped discovery contract (e.g. HotSwap) set this `false`
+    /// tightly-scoped discovery contract set this `false`
     /// so discovery is limited to their explicit overrides and build
     /// outputs.
     pub system_fallbacks: bool,
@@ -401,10 +401,8 @@ impl RuntimeLocation {
     ///
     /// Returns `None` when there is nothing missing to explain.
     ///
-    /// Backends used to write this text out by hand, and both copies had
-    /// drifted from the search they described: rocjitsu's listed six of
-    /// the nine places it looks, and the DBT translator's named no
-    /// environment variable at all. Deriving it from the same
+    /// Hand-written guidance can drift from the search it describes.
+    /// Deriving it from the same
     /// [`RuntimeLocation`] the search produced is what stops that
     /// happening again — a message about a search should come from the
     /// search.

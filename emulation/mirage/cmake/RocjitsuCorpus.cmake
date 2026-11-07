@@ -1,5 +1,5 @@
 # RocjitsuCorpus.cmake — run the rocjitsu-corpus gfx1250 regression through
-# mirage + an emulator (HotSwap by default) as part of `ctest`.
+# mirage + rocjitsu as part of `ctest`.
 #
 # The corpus (https://github.com/kuhar/rocjitsu-corpus) packages gfx1250 VMFB
 # and TensileLite kernels plus a runner. This module:
@@ -24,8 +24,8 @@ set(MIRAGE_CORPUS_REPO "git@github.com:kuhar/rocjitsu-corpus.git"
 set(MIRAGE_CORPUS_REF "" CACHE STRING "rocjitsu-corpus git ref (branch/tag/sha); empty = default branch")
 set(MIRAGE_CORPUS_SRC "${CMAKE_BINARY_DIR}/rocjitsu-corpus"
     CACHE PATH "rocjitsu-corpus checkout (cloned here if absent)")
-set(MIRAGE_CORPUS_EMULATOR "hotswap"
-    CACHE STRING "Emulator the corpus runs under (hotswap or rocjitsu)")
+set(MIRAGE_CORPUS_EMULATOR "rocjitsu"
+    CACHE STRING "Emulator the corpus runs under (rocjitsu)")
 set(MIRAGE_CORPUS_PROFILE ""
     CACHE STRING "mirage profile name to run the corpus under (default: corpus-<emulator>)")
 
