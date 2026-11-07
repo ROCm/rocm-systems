@@ -5,7 +5,6 @@
  */
 
 #include "hip_global.hpp"
-
 #include "hip/hip_runtime.h"
 #include "hip_internal.hpp"
 #include "hip_code_object.hpp"
