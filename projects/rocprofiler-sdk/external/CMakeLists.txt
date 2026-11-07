@@ -215,15 +215,60 @@ if(ROCPROFILER_BUILD_ELFIO)
         RELATIVE_PATH external/elfio
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
         REPO_URL https://github.com/serge1/ELFIO.git
-        REPO_BRANCH "Release_3.12")
+        # keep in sync with the external/elfio submodule commit
+        REPO_BRANCH "660e90514a2e80fba1c55f2cee07bbeda3d1c601")
 
-    set(ELFIO_BUILD_EXAMPLES OFF)
-    set(ELFIO_BUILD_TESTS OFF)
-    add_subdirectory(elfio EXCLUDE_FROM_ALL)
+    # ELFIO is header-only. Fixes that are not yet in upstream ELFIO are applied from
+    # patches/elfio to a copy of the headers in the build tree, so the submodule stays
+    # unmodified. Each patch names its upstream PR and is removed once the submodule moves
+    # to a commit that includes it.
+    set(_ELFIO_SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR}/elfio)
+    set(_ELFIO_STAGING_DIR ${PROJECT_BINARY_DIR}/external/elfio-staging)
+    set(_ELFIO_INCLUDE_DIR ${PROJECT_BINARY_DIR}/external/elfio-patched)
+
+    file(GLOB _ELFIO_PATCHES CONFIGURE_DEPENDS
+         ${CMAKE_CURRENT_LIST_DIR}/patches/elfio/*.patch)
+    file(GLOB _ELFIO_HEADERS CONFIGURE_DEPENDS ${_ELFIO_SOURCE_DIR}/elfio/*.hpp)
+    list(SORT _ELFIO_PATCHES)
+    set_property(
+        DIRECTORY
+        APPEND
+        PROPERTY CMAKE_CONFIGURE_DEPENDS ${_ELFIO_PATCHES} ${_ELFIO_HEADERS})
+
+    find_program(PATCH_EXECUTABLE NAMES patch REQUIRED)
+    file(REMOVE_RECURSE ${_ELFIO_STAGING_DIR})
+    file(COPY ${_ELFIO_SOURCE_DIR}/elfio DESTINATION ${_ELFIO_STAGING_DIR})
+    foreach(_PATCH ${_ELFIO_PATCHES})
+        execute_process(
+            COMMAND ${PATCH_EXECUTABLE} -p1 --forward --batch -i ${_PATCH}
+            WORKING_DIRECTORY ${_ELFIO_STAGING_DIR}
+            RESULT_VARIABLE _PATCH_RESULT
+            OUTPUT_VARIABLE _PATCH_OUTPUT
+            ERROR_VARIABLE _PATCH_OUTPUT)
+        if(NOT _PATCH_RESULT EQUAL 0)
+            message(FATAL_ERROR "Failed to apply ${_PATCH} to ELFIO:\n${_PATCH_OUTPUT}")
+        endif()
+    endforeach()
+
+    # Update the include tree only where files changed, to avoid needless rebuilds
+    file(
+        GLOB_RECURSE _ELFIO_STAGED_FILES
+        RELATIVE ${_ELFIO_STAGING_DIR}
+        ${_ELFIO_STAGING_DIR}/*)
+    file(MAKE_DIRECTORY ${_ELFIO_INCLUDE_DIR}/elfio)
+    foreach(_FILE ${_ELFIO_STAGED_FILES})
+        file(COPY_FILE ${_ELFIO_STAGING_DIR}/${_FILE} ${_ELFIO_INCLUDE_DIR}/${_FILE}
+             ONLY_IF_DIFFERENT)
+    endforeach()
+
+    # Same header-only target that ELFIO's own CMakeLists.txt provides
+    add_library(rocprofiler-sdk-elfio-headers INTERFACE)
+    add_library(elfio::elfio ALIAS rocprofiler-sdk-elfio-headers)
+    target_include_directories(rocprofiler-sdk-elfio-headers SYSTEM
+                               INTERFACE $<BUILD_INTERFACE:${_ELFIO_INCLUDE_DIR}>)
     if(TARGET rocprofiler-sdk-elfio)
-        get_target_property(ELFIO_INCLUDE_DIR elfio::elfio INTERFACE_INCLUDE_DIRECTORIES)
         target_include_directories(rocprofiler-sdk-elfio SYSTEM
-                                   INTERFACE ${ELFIO_INCLUDE_DIR})
+                                   INTERFACE $<BUILD_INTERFACE:${_ELFIO_INCLUDE_DIR}>)
     endif()
 else()
     find_package(elfio REQUIRED GLOBAL)
