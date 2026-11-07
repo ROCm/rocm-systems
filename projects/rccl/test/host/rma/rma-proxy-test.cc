@@ -22,7 +22,7 @@
 //
 // ncclRmaProxyCtxAllocGraph is file-static, so this TU reaches it by
 // #include-ing the production .cc directly (via RMA_PROXY_CC_PATH), the
-// standard rccl-UnitTestsMicro pattern (see MICROTEST_README.md).
+// standard microtest pattern (see MICROTEST_README.md).
 //
 // Two seams make these real tests of the fix rather than argument assertions:
 //
