@@ -191,7 +191,7 @@ class CollTraceMicrotest : public ::testing::Test {
     comm_->rank = 0;
     comm_->cudaDev = 0;
     comm_->localRank = 1;
-    comm_->localRanks = 8;  // CollTrace aggregates exactly eight local ranks
+    comm_->localRanks = 8;
     comm_->localRankToRank = localRankToRank_;
     comm_->bootstrap = reinterpret_cast<void*>(0xb0);
   }
@@ -556,9 +556,7 @@ TEST_F(CollTraceMicrotest, Trace_AggregationErrorIsLogged) {
   EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "Aggregating error: CollTrace: latency value cannot be zero"));
 }
 
-// Aggregation reads eight ranks' slices, so the unfilled ones count as a failed all-gather. Pins AICOMRCCL-2968; a
-// fix flips this pin.
-TEST_F(CollTraceMicrotest, Trace_KnownBug_FewerThanEightLocalRanksReportNothing) {
+TEST_F(CollTraceMicrotest, Trace_FewerThanEightLocalRanksReportResults) {
   SetParam("NCCL_COLLTRACE_RECORD_MAX", 1);
   comm_->localRanks = 2;
   auto trace = std::make_unique<CollTrace>(comm_.get());
@@ -568,8 +566,42 @@ TEST_F(CollTraceMicrotest, Trace_KnownBug_FewerThanEightLocalRanksReportNothing)
 
   ASSERT_EQ(g_allGathers.size(), 1u);
   EXPECT_EQ(g_allGathers[0].nranks, 2);
-  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "Aggregating error: CollTrace: latency value cannot be zero"));
-  EXPECT_TRUE(DebugLogMatching("coll_id").empty());
+  EXPECT_FALSE(DebugLogged(NCCL_LOG_WARN, "Aggregating error"));
+  ASSERT_EQ(DebugLogMatching("coll_id").size(), 1u);
+}
+
+TEST_F(CollTraceMicrotest, Trace_AllGatherUsesEveryLocalRank) {
+  SetParam("NCCL_COLLTRACE_RECORD_MAX", 2);
+  SetParam("NCCL_COLLTRACE_MAX_DUMP_SIZE", 1);
+  for (int localRanks : {2, 8, 16}) {
+    std::vector<int> rankMap(localRanks);
+    for (int localRank = 0; localRank < localRanks; ++localRank) rankMap[localRank] = localRank;
+    for (int localRank : {0, localRanks - 1}) {
+      SCOPED_TRACE(localRanks);
+      SCOPED_TRACE(localRank);
+      ResetDebugLog();
+      g_allGathers.clear();
+      comm_->rank = localRank;
+      comm_->localRank = localRank;
+      comm_->localRanks = localRanks;
+      comm_->localRankToRank = rankMap.data();
+      auto trace = std::make_unique<CollTrace>(comm_.get());
+      Enqueue(trace.get(), 2.0f);
+      Enqueue(trace.get(), 10.0f);
+      trace.reset();
+
+      ASSERT_EQ(g_allGathers.size(), 1u);
+      EXPECT_EQ(g_allGathers[0].ranks, rankMap.data());
+      EXPECT_EQ(g_allGathers[0].rank, localRank);
+      EXPECT_EQ(g_allGathers[0].nranks, localRanks);
+      EXPECT_EQ(g_allGathers[0].mine, (std::vector<float>{2.0f, 10.0f}));
+      EXPECT_FALSE(DebugLogged(NCCL_LOG_WARN, "Aggregating error"));
+      auto lines = DebugLogMatching("coll_id");
+      ASSERT_EQ(lines.size(), 2u);
+      EXPECT_NE(lines[0].find("min_latency_us 2000.000000, max_latency_us 5000.000000"), std::string::npos);
+      EXPECT_NE(lines[1].find("min_latency_us 5000.000000, max_latency_us 10000.000000"), std::string::npos);
+    }
+  }
 }
 
 TEST_F(CollTraceMicrotest, Trace_ReportErrorAtDestroyIsLogged) {
