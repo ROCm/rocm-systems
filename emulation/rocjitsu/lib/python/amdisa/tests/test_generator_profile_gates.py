@@ -3859,7 +3859,7 @@ def test_gfx1250_generated_high_vgpr_paths_use_logical_operands(
     for name, next_name in (
         ('ds_bpermute_b32_vds', 'ds_bpermute_fi_b32_vds'),
         ('ds_permute_b32_vds', 'ds_swizzle_b32_ds'),
-        ('ds_swizzle_b32_vds', 'image_bvh_intersect_ray_mimg'),
+        ('ds_swizzle_b32_vds', 'lds_param_load_ldsdir'),
     ):
         body = _shared_execute_body(shared, name, next_name)
         assert 'regs.read_lane(inst.addr' in body
