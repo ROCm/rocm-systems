@@ -8260,7 +8260,9 @@ def test_gfx1250_vopd_template_uses_dx9_zero_and_fma(tmp_path):
     cpp = (tmp_path / 'cdna5' / 'vopd.cpp').read_text()
     exec_cpp = (tmp_path / 'cdna5' / 'vopd_exec.cpp').read_text()
 
-    assert '(word0_ >> 24) == 0xCF' in cpp
+    # validate_encoding() tests the same prefix; only the constructor decodes VOPD3.
+    constructor = _generated_function_body(cpp, 'Vopd::Vopd(const MachineInst *inst)')
+    assert '(word0 >> 24) == 0xCF' in constructor
     assert '[[maybe_unused]] bool vopd3' not in cpp
     assert 'vopd3 ? OperandType::OPR_SRC_SIMPLE : OperandType::OPR_SRC' in cpp
     assert 'literal_uses_f64_high_bits' not in cpp
@@ -8408,7 +8410,7 @@ def test_rdna4_vopd_template_uses_available_src_operand_type(tmp_path):
     assert 'OperandType::OPR_SRC_SIMPLE' not in cpp
     assert 'vopd3 ? OperandType::OPR_SRC : OperandType::OPR_SRC' not in cpp
     assert 'return Operand(bits, OperandType::OPR_SRC, encoded);' in cpp
-    assert '(word0_ >> 24) == 0xCF' not in cpp
+    assert '(word0 >> 24) == 0xCF' not in cpp
     assert 'Format::Vopd3' not in cpp
     assert 'literal_uses_f64_high_bits' not in cpp
     assert 'is_float64_op' not in cpp
@@ -8481,6 +8483,41 @@ def test_gfx1250_vopd_uses_plain_src_when_simple_src_operand_is_absent(tmp_path)
     assert '[[maybe_unused]] bool vopd3' in cpp
     assert 'OperandType::OPR_SRC_SIMPLE' not in cpp
     assert 'return Operand(bits, OperandType::OPR_SRC, encoded);' in cpp
+
+
+@pytest.mark.parametrize(
+    ('arch', 'profile', 'operand_type'),
+    [
+        ('cdna5', Cdna5Profile(), 'OPR_SRC_SIMPLE'),
+        ('rdna4', Rdna4Profile(), 'OPR_SRC'),
+    ],
+)
+def test_generated_vopd_owns_its_encoding_words(tmp_path, arch, profile, operand_type):
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name=arch,
+        generated_dir_name=arch,
+        cpp_namespace=arch,
+        profile=profile,
+        operand_types={operand_type},
+    )
+    codegen.out_path = str(tmp_path)
+    codegen.config = CodegenConfig()
+
+    codegen.gen_vopd()
+    header = (tmp_path / arch / 'vopd.h').read_text()
+    cpp = (tmp_path / arch / 'vopd.cpp').read_text()
+
+    # Room for a literal, or for gfx1250 VOPD3's register word.
+    assert 'std::array<uint32_t, 3> raw_words_{};' in header
+    constructor = _generated_function_body(cpp, 'Vopd::Vopd(const MachineInst *inst)')
+    copy = 'std::memcpy(raw_words_.data(), words, size_);'
+    assert copy in constructor
+    # Every size_ assignment precedes the copy, so it covers VOPD3's third word too.
+    assert constructor.rfind('size_ = ') < constructor.index(copy)
+    assert (
+        'raw_encoding_ = raw_words_.data();' in constructor[constructor.index(copy) :]
+    )
 
 
 def test_bf16_mad_mix_half_updates_read_destination_operand():

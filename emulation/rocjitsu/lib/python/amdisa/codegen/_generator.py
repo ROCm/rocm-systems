@@ -2828,23 +2828,23 @@ class CodeGenerator:
             }
             ''')
             vopd3_constructor_branch = cpp_block('''
-              if ((word0_ >> @VOPD3_PREFIX_SHIFT@) == @VOPD3_PREFIX@) {
+              if ((word0 >> @VOPD3_PREFIX_SHIFT@) == @VOPD3_PREFIX@) {
                 format_ = Format::Vopd3;@VOPD3_EXECUTION_BLOCK@
                 size_ = 12;
                 encoding_id_ = @VOPD3_PREFIX@;
-                word2_ = words[2];
-                opx_ = static_cast<uint16_t>((word0_ >> 18) & 0x3F);
-                opy_ = static_cast<uint16_t>((word0_ >> 12) & 0x3F);
-                uint16_t srcx0 = static_cast<uint16_t>(word0_ & 0x1FF);
-                uint16_t srcy0 = static_cast<uint16_t>(word1_ & 0x1FF);
-                negx_ = static_cast<uint8_t>((word1_ >> 9) & 0x7);
-                negy_ = static_cast<uint8_t>((word1_ >> 12) & 0x7);
-                uint16_t vsrcx1 = static_cast<uint16_t>((word1_ >> 16) & 0xFF);
-                uint16_t vsrcx2 = static_cast<uint16_t>((word1_ >> 24) & 0xFF);
-                uint16_t vdstx = static_cast<uint16_t>(word2_ & 0xFF);
-                uint16_t vsrcy1 = static_cast<uint16_t>((word2_ >> 8) & 0xFF);
-                uint16_t vsrcy2 = static_cast<uint16_t>((word2_ >> 16) & 0xFF);
-                uint16_t vdsty = static_cast<uint16_t>((word2_ >> 24) & 0xFF);
+                word2 = words[2];
+                opx_ = static_cast<uint16_t>((word0 >> 18) & 0x3F);
+                opy_ = static_cast<uint16_t>((word0 >> 12) & 0x3F);
+                uint16_t srcx0 = static_cast<uint16_t>(word0 & 0x1FF);
+                uint16_t srcy0 = static_cast<uint16_t>(word1 & 0x1FF);
+                negx_ = static_cast<uint8_t>((word1 >> 9) & 0x7);
+                negy_ = static_cast<uint8_t>((word1 >> 12) & 0x7);
+                uint16_t vsrcx1 = static_cast<uint16_t>((word1 >> 16) & 0xFF);
+                uint16_t vsrcx2 = static_cast<uint16_t>((word1 >> 24) & 0xFF);
+                uint16_t vdstx = static_cast<uint16_t>(word2 & 0xFF);
+                uint16_t vsrcy1 = static_cast<uint16_t>((word2 >> 8) & 0xFF);
+                uint16_t vsrcy2 = static_cast<uint16_t>((word2 >> 16) & 0xFF);
+                uint16_t vdsty = static_cast<uint16_t>((word2 >> 24) & 0xFF);
 
                 uint32_t x_bits = is_float64_op(opx_) ? 64 : 32;
                 uint32_t y_bits = is_float64_op(opy_) ? 64 : 32;
@@ -2960,6 +2960,7 @@ class CodeGenerator:
             #include <algorithm>
             #include <bit>
             #include <cmath>
+            #include <cstring>
             #include <format>
             #include <string>
             ''')
@@ -2967,6 +2968,7 @@ class CodeGenerator:
             vopd_impl_includes = textwrap.dedent('''\
                 #include "@GENERATED_ARCH@/vopd.h"
                 #include "@GENERATED_ARCH@/execution_backend.h"
+                #include <cstring>
                 #include <format>
                 #include <string>
                 ''')
@@ -2992,6 +2994,7 @@ class CodeGenerator:
             #include "@GENERATED_ARCH@/encodings.h"
             #include "@GENERATED_ARCH@/operand.h"
             #include "rocjitsu/isa/decode_result.h"
+            #include <array>
             #include <cstdint>
             #include <string>
 
@@ -3034,9 +3037,7 @@ class CodeGenerator:
               void init_operands();
 
               Format format_ = Format::VopdXy;
-              uint32_t word0_ = 0;
-              uint32_t word1_ = 0;
-              uint32_t word2_ = 0;
+              std::array<uint32_t, 3> raw_words_{};
               uint32_t literal_ = 0;
               bool has_literal_ = false;
               uint16_t opx_ = 0;
@@ -3328,29 +3329,29 @@ class CodeGenerator:
                   srcy1_(32, OperandType::OPR_VGPR, 0),
                   srcy2_(32, OperandType::OPR_VGPR, 0) {
               const auto *words = reinterpret_cast<const uint32_t *>(inst);
-              raw_encoding_ = words;
-              word0_ = words[0];
-              word1_ = words[1];
+              const uint32_t word0 = words[0];
+              const uint32_t word1 = words[1];
+              uint32_t word2 = 0;
 
             @VOPD3_CONSTRUCTOR_BRANCH@
                 format_ = Format::VopdXy;@VOPD_EXECUTION_BLOCK@
                 encoding_id_ = @VOPD_PREFIX@;
-                opx_ = static_cast<uint16_t>((word0_ >> 22) & 0xF);
-                opy_ = static_cast<uint16_t>((word0_ >> 17) & 0x1F);
-                uint16_t srcx0 = static_cast<uint16_t>(word0_ & 0x1FF);
-                uint16_t vsrcx1 = static_cast<uint16_t>((word0_ >> 9) & 0xFF);
-                uint16_t srcy0 = static_cast<uint16_t>(word1_ & 0x1FF);
-                uint16_t vsrcy1 = static_cast<uint16_t>((word1_ >> 9) & 0xFF);
-                uint16_t vdstx = static_cast<uint16_t>((word1_ >> 24) & 0xFF);
-                uint16_t vdsty_hi = static_cast<uint16_t>((word1_ >> 17) & 0x7F);
+                opx_ = static_cast<uint16_t>((word0 >> 22) & 0xF);
+                opy_ = static_cast<uint16_t>((word0 >> 17) & 0x1F);
+                uint16_t srcx0 = static_cast<uint16_t>(word0 & 0x1FF);
+                uint16_t vsrcx1 = static_cast<uint16_t>((word0 >> 9) & 0xFF);
+                uint16_t srcy0 = static_cast<uint16_t>(word1 & 0x1FF);
+                uint16_t vsrcy1 = static_cast<uint16_t>((word1 >> 9) & 0xFF);
+                uint16_t vdstx = static_cast<uint16_t>((word1 >> 24) & 0xFF);
+                uint16_t vdsty_hi = static_cast<uint16_t>((word1 >> 17) & 0x7F);
                 uint16_t vdsty = static_cast<uint16_t>((vdsty_hi << 1) | ((~vdstx) & 1u));
                 has_literal_ = srcx0 == 255 || srcy0 == 255 || opx_ == kVopdFmaakF32 ||
                                opx_ == kVopdFmamkF32 || opy_ == kVopdFmaakF32 ||
                                opy_ == kVopdFmamkF32;
                 size_ = has_literal_ ? 12 : 8;
                 if (has_literal_) {
-                  word2_ = words[2];
-                  literal_ = word2_;
+                  word2 = words[2];
+                  literal_ = word2;
                 }
 
             @VOPDXY_BITS_DECL@
@@ -3376,6 +3377,10 @@ class CodeGenerator:
               srcy2_.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
 
               opcode_ = static_cast<uint16_t>((opx_ << 8) | opy_);
+              // Own the encoding so the decoded-instruction cache can keep this
+              // instruction after the fetch window it was decoded from is gone.
+              std::memcpy(raw_words_.data(), words, size_);
+              raw_encoding_ = raw_words_.data();
               init_operands();
             @VOPD_ISA_DIAGNOSTICS@
               mnemonic_storage_ = std::string(op_name(opx_)) + " :: " + op_name(opy_);
