@@ -52,6 +52,9 @@ public:
 
   VmAccessOutcome write(VmMemoryDomain, uint64_t address,
                         std::span<const std::byte> bytes) override {
+    if (const VmAccessOutcome outcome = next(write_outcomes_, address);
+        outcome != VmAccessOutcome::Complete)
+      return outcome;
     if (address > bytes_.size() || bytes.size() > bytes_.size() - address)
       return VmAccessOutcome::Faulted;
     std::ranges::copy(bytes, bytes_.begin() + static_cast<std::ptrdiff_t>(address));
@@ -109,6 +112,9 @@ public:
   void return_next_read(uint64_t address, VmAccessOutcome outcome) {
     read_outcomes_[address].push_back(outcome);
   }
+  void return_next_write(uint64_t address, VmAccessOutcome outcome) {
+    write_outcomes_[address].push_back(outcome);
+  }
   void return_next_atomic_load(uint64_t address, VmAccessOutcome outcome) {
     atomic_load_outcomes_[address].push_back(outcome);
   }
@@ -149,6 +155,7 @@ private:
 
   std::vector<std::byte> bytes_;
   std::map<uint64_t, std::deque<VmAccessOutcome>> read_outcomes_;
+  std::map<uint64_t, std::deque<VmAccessOutcome>> write_outcomes_;
   std::map<uint64_t, std::deque<VmAccessOutcome>> atomic_load_outcomes_;
   std::map<uint64_t, std::deque<VmAccessOutcome>> atomic_store_outcomes_;
   std::map<uint64_t, uint32_t> read_attempts_;
@@ -644,6 +651,50 @@ TEST(SdmaRingConsumerTest, RevokedTransactionBecomesTerminalInsteadOfBlocked) {
   ASSERT_TRUE(consumer.terminal());
   EXPECT_EQ(*consumer.terminal(), SdmaRingStatus::Faulted);
   EXPECT_FALSE(consumer.in_flight());
+}
+
+TEST(SdmaRingConsumerTest, CacheMaintenanceFailureIsTerminalAndRetiresOnlyCommittedPrefixes) {
+  for (bool committed_prefix : {false, true}) {
+    SCOPED_TRACE(committed_prefix);
+    RingConsumerFixture fixture;
+    constexpr uint64_t kSource = 0x400;
+    constexpr uint64_t kDestination = 0x500;
+    for (uint32_t index = 0; index < 32; ++index)
+      fixture.memory->store<uint8_t>(kSource + index, static_cast<uint8_t>(index + 1));
+    const std::array<uint32_t, 7> copy = {
+        1, 31, 0, static_cast<uint32_t>(kSource), 0, static_cast<uint32_t>(kDestination), 0};
+    fixture.memory->store(RingConsumerFixture::kRing, copy);
+    uint32_t maintenance_calls = 0;
+    SdmaPacketCallbacks callbacks;
+    callbacks.acquire_cache_maintenance =
+        [&](SdmaCacheOperation) -> util::FailureOr<SdmaCacheLease> {
+      ++maintenance_calls;
+      if (!committed_prefix || maintenance_calls == 2)
+        return util::Result::failure();
+      return SdmaCacheLease{};
+    };
+    if (committed_prefix)
+      fixture.memory->return_next_write(kDestination + 16, VmAccessOutcome::Unavailable);
+    SdmaRingConsumer consumer = fixture.make_consumer(0, 64, std::move(callbacks));
+    if (committed_prefix) {
+      ASSERT_EQ(consumer.service(sizeof(copy)), SdmaRingStatus::Blocked);
+      EXPECT_TRUE(consumer.in_flight());
+      EXPECT_EQ(consumer.cursor(), 0u);
+      EXPECT_EQ(fixture.memory->load<uint64_t>(RingConsumerFixture::kReadPointer), 0u);
+    }
+    EXPECT_EQ(consumer.service(sizeof(copy)), SdmaRingStatus::Faulted);
+    EXPECT_EQ(consumer.cursor(), committed_prefix ? sizeof(copy) : 0u);
+    EXPECT_EQ(fixture.memory->load<uint64_t>(RingConsumerFixture::kReadPointer),
+              committed_prefix ? sizeof(copy) : 0u);
+    EXPECT_FALSE(consumer.in_flight());
+    ASSERT_TRUE(consumer.terminal());
+    EXPECT_EQ(*consumer.terminal(), SdmaRingStatus::Faulted);
+    EXPECT_EQ(consumer.service(sizeof(copy)), SdmaRingStatus::Faulted);
+    EXPECT_EQ(maintenance_calls, committed_prefix ? 2u : 1u);
+    for (uint32_t index = 0; index < 32; ++index)
+      EXPECT_EQ(fixture.memory->load<uint8_t>(kDestination + index),
+                committed_prefix && index < 16 ? static_cast<uint8_t>(index + 1) : 0);
+  }
 }
 
 TEST(SdmaRingConsumerTest, PublishesRetiredPacketBeforeLatchingTerminalOutcome) {
