@@ -414,7 +414,6 @@ if(BUILD_TESTS)
       device/TestFp8Reduce.cpp
       device/RcclEpTests.cpp
       device/LlFifoSysScopeTests.cpp
-      device/DdaAllReduceFabricLL128SplitTests.cpp
       device/DdaIpcGpuBarrierOrderingTests.cpp
       device/DdaReduceScatterFabricLLTests.cpp
       device/DdaAllReduceFabricLLTests.cpp
