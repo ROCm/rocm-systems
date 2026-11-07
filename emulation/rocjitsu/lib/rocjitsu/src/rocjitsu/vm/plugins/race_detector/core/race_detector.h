@@ -92,6 +92,12 @@ public:
   void validateWrite(int addr, WaveId, int lane, int nBytes,
                      MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS) const;
 
+  /// Check an LDS atomic, which both reads and writes its bytes, against
+  /// pending plain LDS reads and writes. Pending atomics do not conflict
+  /// with it.
+  void validateAtomic(int addr, WaveId, int lane, int nBytes,
+                      MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS) const;
+
   /// True only when the complete access lies in the CU's logical LDS backing.
   bool validLdsRange(uint64_t address, uint64_t bytes) const {
     return bytes != 0 && address < ldsSizeBytes_ && bytes <= ldsSizeBytes_ - address;
@@ -137,6 +143,13 @@ private:
   static bool hasPotentialLdsConflict(int addr, int nBytes,
                                       const std::vector<LdsChunkCounts> &counts, WaveId wave,
                                       MemoryOrderClass currentMemoryOrder);
+
+  /// Shared bodies of the validate functions. When atomic is set, pending LDS
+  /// atomics are skipped.
+  void checkPendingLdsWrites(int addr, WaveId, int lane, int nBytes,
+                             MemoryOrderClass currentMemoryOrder, bool atomic) const;
+  void checkPendingLdsReads(int addr, WaveId, int lane, int nBytes,
+                            MemoryOrderClass currentMemoryOrder, bool atomic) const;
 
   /// Active LDS write events (for scanning during read validation).
   std::vector<EventId> ldsWriteEvents;

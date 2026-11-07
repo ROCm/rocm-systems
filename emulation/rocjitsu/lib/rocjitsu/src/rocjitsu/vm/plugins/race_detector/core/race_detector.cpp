@@ -62,7 +62,8 @@ RaceDetector::allocateEventId(WaveId waveId, InstructionSnapshot instruction, Me
     if (isToLds(type)) {
       ldsWriteEvents.push_back(eid);
       adjustByteCounts(ivs, byteWriteCounts, +1, orderedWave);
-    } else if (isFromLds(type)) {
+    }
+    if (isFromLds(type)) {
       ldsReadEvents.push_back(eid);
       adjustByteCounts(ivs, byteReadCounts, +1, orderedWave);
     }
@@ -81,7 +82,8 @@ void RaceDetector::retireEvent(EventId eventId) {
   if (isToLds(type)) {
     removeFromUnorderedList(ldsWriteEvents, eventId);
     adjustByteCounts(events_.ldsIntervals(eventId), byteWriteCounts, -1);
-  } else if (isFromLds(type)) {
+  }
+  if (isFromLds(type)) {
     removeFromUnorderedList(ldsReadEvents, eventId);
     adjustByteCounts(events_.ldsIntervals(eventId), byteReadCounts, -1);
   }
@@ -90,6 +92,22 @@ void RaceDetector::retireEvent(EventId eventId) {
 
 void RaceDetector::validateRead(int addr, WaveId wave, int lane, int nBytes,
                                 MemoryOrderClass currentMemoryOrder) const {
+  checkPendingLdsWrites(addr, wave, lane, nBytes, currentMemoryOrder, /*atomic=*/false);
+}
+
+void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
+                                 MemoryOrderClass currentMemoryOrder) const {
+  checkPendingLdsReads(addr, wave, lane, nBytes, currentMemoryOrder, /*atomic=*/false);
+}
+
+void RaceDetector::validateAtomic(int addr, WaveId wave, int lane, int nBytes,
+                                  MemoryOrderClass currentMemoryOrder) const {
+  checkPendingLdsWrites(addr, wave, lane, nBytes, currentMemoryOrder, /*atomic=*/true);
+  checkPendingLdsReads(addr, wave, lane, nBytes, currentMemoryOrder, /*atomic=*/true);
+}
+
+void RaceDetector::checkPendingLdsWrites(int addr, WaveId wave, int lane, int nBytes,
+                                         MemoryOrderClass currentMemoryOrder, bool atomic) const {
   if (addr < 0 || nBytes <= 0 || !validLdsRange(addr, nBytes))
     return;
   if (!hasPotentialLdsConflict(addr, nBytes, byteWriteCounts, wave, currentMemoryOrder)) {
@@ -97,6 +115,8 @@ void RaceDetector::validateRead(int addr, WaveId wave, int lane, int nBytes,
   }
 
   for (EventId eventId : ldsWriteEvents) {
+    if (atomic && isLdsAtomic(events_.type(eventId)))
+      continue;
     if (wave == events_.waveId(eventId)) {
       // Operations in the same non-UNORDERED class complete in issue order.
       // A completed event is safe for its owning wave regardless of class, but
@@ -116,8 +136,8 @@ void RaceDetector::validateRead(int addr, WaveId wave, int lane, int nBytes,
   }
 }
 
-void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
-                                 MemoryOrderClass currentMemoryOrder) const {
+void RaceDetector::checkPendingLdsReads(int addr, WaveId wave, int lane, int nBytes,
+                                        MemoryOrderClass currentMemoryOrder, bool atomic) const {
   if (addr < 0 || nBytes <= 0 || !validLdsRange(addr, nBytes))
     return;
   if (!hasPotentialLdsConflict(addr, nBytes, byteReadCounts, wave, currentMemoryOrder)) {
@@ -125,6 +145,8 @@ void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
   }
 
   for (EventId eventId : ldsReadEvents) {
+    if (atomic && isLdsAtomic(events_.type(eventId)))
+      continue;
     if (wave == events_.waveId(eventId)) {
       // The LDS bytes are safe only when the two operations share a proven
       // FIFO completion class, or an explicit wait completed the older event.
