@@ -11,6 +11,7 @@ set(TEST_SRC
     includepath.cc
     hipRTCDeviceMalloc.cc
     hiprtcGetLoweredName.cc
+    hiprtcThreadSafeInit.cc
 )
 
 # AMD only tests
