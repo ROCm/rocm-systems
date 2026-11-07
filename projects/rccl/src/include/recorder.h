@@ -124,6 +124,7 @@ private:
 public:
   static Recorder& instance();
   void skip(bool b);
+  bool isSkipped() const { return skipped; }
   void record(const char* name); // non-replayable calls
   ncclResult_t record(rcclApiCall& call);
   ncclResult_t record(rcclCall_t type, const ncclInfo& info); // collective
