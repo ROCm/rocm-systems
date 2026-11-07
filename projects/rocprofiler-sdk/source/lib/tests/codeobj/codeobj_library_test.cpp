@@ -26,6 +26,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <limits>
 #include <rocprofiler-sdk/cxx/codeobj/code_printing.hpp>
 #include <sstream>
 #include <string_view>
@@ -589,6 +590,53 @@ TEST(codeobj_library, memory_loaded_code_object_symbol_map)
     auto symbol = symbol_map.find("_Z18syncthreads_kernelPi.kd");
     ASSERT_NE(symbol, symbol_map.end());
     EXPECT_EQ(symbol->second, "_Z18syncthreads_kernelPi");
+}
+
+TEST(codeobj_library, kernarg_pointer_regions_parse_aggregate_and_unaligned_pointer)
+{
+    using rocprofiler::code_object::kernarg_region_t;
+    using rocprofiler::code_object::hip::detail::parse_kernel_pointer_regions;
+
+    const auto regions =
+        parse_kernel_pointer_regions(32, {{"by_value", 0, 16}, {"global_buffer", 20, 8}});
+
+    ASSERT_TRUE(regions);
+    EXPECT_EQ(*regions, (std::vector<kernarg_region_t>{{0, 16}, {20, 8}}));
+}
+
+TEST(codeobj_library, kernarg_pointer_regions_exclude_small_by_value_scalars)
+{
+    using rocprofiler::code_object::kernarg_region_t;
+    using rocprofiler::code_object::hip::detail::parse_kernel_pointer_regions;
+
+    const auto regions = parse_kernel_pointer_regions(16, {{"by_value", 0, 15}});
+
+    ASSERT_TRUE(regions);
+    EXPECT_TRUE(regions->empty());
+}
+
+TEST(codeobj_library, kernarg_pointer_regions_validate_extents_without_overflow)
+{
+    using rocprofiler::code_object::kernarg_region_t;
+    using rocprofiler::code_object::hip::detail::parse_kernel_pointer_regions;
+
+    const auto regions =
+        parse_kernel_pointer_regions(16, {{"by_value", 8, std::numeric_limits<uint64_t>::max()}});
+
+    ASSERT_TRUE(regions);
+    EXPECT_EQ(*regions, (std::vector<kernarg_region_t>{{0, 16}}));
+}
+
+TEST(codeobj_library, kernarg_pointer_regions_preserve_known_regions_and_hidden_boundary)
+{
+    using rocprofiler::code_object::kernarg_region_t;
+    using rocprofiler::code_object::hip::detail::parse_kernel_pointer_regions;
+
+    const auto regions = parse_kernel_pointer_regions(
+        32, {{"global_buffer", 8, 8}, {std::nullopt, 16, 8}, {"hidden_block", 24, 8}});
+
+    ASSERT_TRUE(regions);
+    EXPECT_EQ(*regions, (std::vector<kernarg_region_t>{{8, 8}, {0, 24}}));
 }
 
 // One pass over a code object's amdhsa metadata yields both maps: the symbol-to-device names the
