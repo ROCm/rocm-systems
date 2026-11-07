@@ -39,6 +39,9 @@ event:
   Unit_hipEventElapsedTime_Verify_Capture:
     <<: *level_default
     tags: [synchronization]
+  Unit_hipEventElapsedTime_DeferredCollection:
+    <<: *level_default
+    tags: [synchronization, P1]
   Unit_hipEventRecord:
     <<: *level_default
     disabled:
