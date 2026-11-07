@@ -298,8 +298,10 @@ __launch_bounds__(kDdaLL128Threads) __global__
   constexpr uint32_t kPairMask = (1u << kDdaLL128SplitPollSlices) - 1;  // both slices of a poll pair
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const int lane = threadIdx.x % kDdaLL128Warp;
-  // Wave uniform, so the unit bookkeeping below stays in scalar registers.
-  const uint32_t warp = __builtin_amdgcn_readfirstlane(threadIdx.x / kDdaLL128Warp);
+  // Wave uniform where an LL128 warp is a wave (wave32), so the unit bookkeeping below stays in scalar registers.
+  const uint32_t warp = __builtin_amdgcn_wavefrontsize() == kDdaLL128Warp ?
+                          __builtin_amdgcn_readfirstlane(threadIdx.x / kDdaLL128Warp) :
+                          threadIdx.x / kDdaLL128Warp;
   const uint32_t nwarps = blockDim.x / kDdaLL128Warp;
   const bool flagLane = ddaLL128IsFlagLane(lane);
 
