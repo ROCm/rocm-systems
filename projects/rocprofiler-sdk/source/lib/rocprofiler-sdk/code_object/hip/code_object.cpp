@@ -238,7 +238,7 @@ std::optional<std::vector<kernarg_region_t>>
 get_kernel_pointer_regions(amd_comgr_metadata_node_t kernel_node)
 {
     const auto segment_size = metadata_uint64(kernel_node, kernel_arg_segment_metadata_lookup);
-    if(!segment_size || *segment_size > std::numeric_limits<uint32_t>::max()) return std::nullopt;
+    if(!segment_size) return std::nullopt;
 
     auto args = amd_comgr_metadata_node_t{};
     if(amd_comgr_metadata_lookup(kernel_node, kernel_args_metadata_lookup, &args) !=
@@ -250,39 +250,58 @@ get_kernel_pointer_regions(amd_comgr_metadata_node_t kernel_node)
     if(amd_comgr_get_metadata_list_size(args, &num_args) != AMD_COMGR_STATUS_SUCCESS)
         return std::nullopt;
 
-    auto regions      = std::vector<kernarg_region_t>{};
-    auto hidden_start = *segment_size;
-    auto described    = true;
+    auto parsed_args = std::vector<detail::kernarg_arg_metadata_t>{};
+    parsed_args.reserve(num_args);
     for(size_t i = 0; i < num_args; i++)
     {
         auto arg = amd_comgr_metadata_node_t{};
         if(amd_comgr_index_list_metadata(args, i, &arg) != AMD_COMGR_STATUS_SUCCESS)
         {
-            described = false;
+            parsed_args.emplace_back();
             continue;
         }
         auto arg_fini = common::scope_destructor{[arg]() { destroy_metadata(arg); }};
 
-        const auto value_kind = metadata_string(arg, kernel_arg_value_kind_metadata_lookup);
-        const auto offset     = metadata_uint64(arg, kernel_arg_offset_metadata_lookup);
-        const auto size       = metadata_uint64(arg, kernel_arg_size_metadata_lookup);
-        if(!value_kind || !offset || !size || *offset + *size > *segment_size)
+        parsed_args.emplace_back(detail::kernarg_arg_metadata_t{
+            metadata_string(arg, kernel_arg_value_kind_metadata_lookup),
+            metadata_uint64(arg, kernel_arg_offset_metadata_lookup),
+            metadata_uint64(arg, kernel_arg_size_metadata_lookup)});
+    }
+
+    return detail::parse_kernel_pointer_regions(*segment_size, parsed_args);
+}
+}  // namespace
+
+namespace detail
+{
+std::optional<std::vector<kernarg_region_t>>
+parse_kernel_pointer_regions(uint64_t segment_size, const std::vector<kernarg_arg_metadata_t>& args)
+{
+    if(segment_size > std::numeric_limits<uint32_t>::max()) return std::nullopt;
+
+    auto regions      = std::vector<kernarg_region_t>{};
+    auto hidden_start = segment_size;
+    auto described    = true;
+    for(const auto& arg : args)
+    {
+        if(!arg.value_kind || !arg.offset || !arg.size || *arg.offset > segment_size ||
+           *arg.size > segment_size - *arg.offset)
         {
             described = false;
             continue;
         }
 
-        if(value_kind->rfind(hidden_arg_value_kind_prefix, 0) == 0)
-            hidden_start = std::min(hidden_start, *offset);
-        else if(*value_kind == global_buffer_arg_value_kind ||
-                *value_kind == global_buffer_static_arg_value_kind)
-            regions.push_back(kernarg_region_t{static_cast<uint32_t>(*offset),
+        if(arg.value_kind->rfind(hidden_arg_value_kind_prefix, 0) == 0)
+            hidden_start = std::min(hidden_start, *arg.offset);
+        else if(*arg.value_kind == global_buffer_arg_value_kind ||
+                *arg.value_kind == global_buffer_static_arg_value_kind)
+            regions.push_back(kernarg_region_t{static_cast<uint32_t>(*arg.offset),
                                                static_cast<uint32_t>(pointer_arg_size)});
-        else if(*value_kind == by_value_arg_value_kind)
+        else if(*arg.value_kind == by_value_arg_value_kind)
         {
-            if(*size >= by_value_struct_min_size)
-                regions.push_back(
-                    kernarg_region_t{static_cast<uint32_t>(*offset), static_cast<uint32_t>(*size)});
+            if(*arg.size >= by_value_struct_min_size)
+                regions.push_back(kernarg_region_t{static_cast<uint32_t>(*arg.offset),
+                                                   static_cast<uint32_t>(*arg.size)});
         }
         else
             described = false;
@@ -291,7 +310,7 @@ get_kernel_pointer_regions(amd_comgr_metadata_node_t kernel_node)
     if(!described) regions.push_back(kernarg_region_t{0u, static_cast<uint32_t>(hidden_start)});
     return regions;
 }
-}  // namespace
+}  // namespace detail
 
 // Everything this library derives from the amdhsa.kernels list of one code object, read in a
 // single pass: the kernel-symbol-to-device-function map, and which kernarg bytes of each kernel can
