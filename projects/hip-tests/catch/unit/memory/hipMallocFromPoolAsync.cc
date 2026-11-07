@@ -988,6 +988,97 @@ HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_ReuseAllowInternalDependencies) {
 }
 
 /**
+ * Test Description
+ * ------------------------
+ *  - Verify that hipMallocFromPoolAsync returns hipErrorInvalidValue when
+ *    given a destroyed pool handle or a bogus (never-valid) handle.
+ *    Regression test for a crash where an invalid pool was dereferenced
+ *    before validation.
+ * Test source
+ * ------------------------
+ *  - /unit/memory/hipMallocFromPoolAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.4
+ */
+HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_InvalidPool) {
+  checkMempoolSupported(0)
+
+  StreamGuard stream_guard(Streams::created);
+  void* ptr = nullptr;
+
+  SECTION("Destroyed pool handle") {
+    hipMemPoolProps pool_props{};
+    pool_props.allocType = hipMemAllocationTypePinned;
+    pool_props.handleTypes = hipMemHandleTypeNone;
+    pool_props.location.type = hipMemLocationTypeDevice;
+    pool_props.location.id = 0;
+
+    hipMemPool_t pool = nullptr;
+    HIP_CHECK(hipMemPoolCreate(&pool, &pool_props));
+    HIP_CHECK(hipMemPoolDestroy(pool));
+
+    // Pool has been destroyed — must return an error, not crash.
+    hipError_t err = hipMallocFromPoolAsync(&ptr, 256, pool, stream_guard.stream());
+    REQUIRE(err == hipErrorInvalidValue);
+    REQUIRE(ptr == nullptr);
+    (void)hipGetLastError();
+  }
+
+  SECTION("Bogus pool handle") {
+    // A fabricated handle that was never a valid pool.
+    hipMemPool_t bogus = reinterpret_cast<hipMemPool_t>(0xDEADBEEF);
+    hipError_t err = hipMallocFromPoolAsync(&ptr, 256, bogus, stream_guard.stream());
+    REQUIRE(err == hipErrorInvalidValue);
+    REQUIRE(ptr == nullptr);
+    (void)hipGetLastError();
+  }
+
+  SECTION("Destroyed pool handle during stream capture") {
+    hipMemPoolProps pool_props{};
+    pool_props.allocType = hipMemAllocationTypePinned;
+    pool_props.handleTypes = hipMemHandleTypeNone;
+    pool_props.location.type = hipMemLocationTypeDevice;
+    pool_props.location.id = 0;
+
+    hipMemPool_t pool = nullptr;
+    HIP_CHECK(hipMemPoolCreate(&pool, &pool_props));
+    HIP_CHECK(hipMemPoolDestroy(pool));
+
+    HIP_CHECK(hipStreamBeginCapture(stream_guard.stream(), hipStreamCaptureModeGlobal));
+
+    hipError_t err = hipMallocFromPoolAsync(&ptr, 256, pool, stream_guard.stream());
+    REQUIRE(err == hipErrorInvalidValue);
+    REQUIRE(ptr == nullptr);
+    (void)hipGetLastError();
+
+    // End capture — the stream may be in an invalidated capture state after
+    // the error, so accept hipErrorStreamCaptureInvalidated from EndCapture.
+    hipGraph_t graph = nullptr;
+    hipError_t end_err = hipStreamEndCapture(stream_guard.stream(), &graph);
+    if (end_err == hipSuccess && graph != nullptr) {
+      HIP_CHECK(hipGraphDestroy(graph));
+    }
+  }
+
+  SECTION("Bogus pool handle during stream capture") {
+    HIP_CHECK(hipStreamBeginCapture(stream_guard.stream(), hipStreamCaptureModeGlobal));
+
+    hipMemPool_t bogus = reinterpret_cast<hipMemPool_t>(0xDEADBEEF);
+    hipError_t err = hipMallocFromPoolAsync(&ptr, 256, bogus, stream_guard.stream());
+    REQUIRE(err == hipErrorInvalidValue);
+    REQUIRE(ptr == nullptr);
+    (void)hipGetLastError();
+
+    hipGraph_t graph = nullptr;
+    hipError_t end_err = hipStreamEndCapture(stream_guard.stream(), &graph);
+    if (end_err == hipSuccess && graph != nullptr) {
+      HIP_CHECK(hipGraphDestroy(graph));
+    }
+  }
+}
+
+/**
  * End doxygen group StreamOTest.
  * @}
  */
