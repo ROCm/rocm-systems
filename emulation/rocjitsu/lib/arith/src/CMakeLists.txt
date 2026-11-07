@@ -49,6 +49,12 @@ add_library(
     graphics/interp32.cpp
     graphics/mullit.cpp
     register/cndmask.cpp
+    math/half_trig.cpp
+    math/half_unary.cpp
+    math/rcp_iflag.cpp
+    math/trig.cpp
+    math/trig_preop.cpp
+    math/unary.cpp
     register/dpp.cpp
     register/ds_permute.cpp
     register/ds_swizzle.cpp
