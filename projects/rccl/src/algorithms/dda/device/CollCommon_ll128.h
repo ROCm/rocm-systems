@@ -444,13 +444,7 @@ __device__ __forceinline__ bool ddaLL128PollWireN(const uint64_t* const (&wire)[
                                                   uint64_t (&vr)[kN][kDdaLL128WordsPerThread], uint64_t flag, int wid,
                                                   DdaKernelParams params) {
   const bool flagLane = ddaLL128IsFlagLane(wid);
-  int spins = 0;
-  bool needReload;
-  do {
-    if (params.abortSpinTick(spins)) {
-      return false;
-    }
-    needReload = false;
+  auto loadAll = [&]() {
 #pragma unroll
     for (int u = 0; u < kDdaLL128WordsPerThread; u += 2) {
 #pragma unroll
@@ -460,6 +454,15 @@ __device__ __forceinline__ bool ddaLL128PollWireN(const uint64_t* const (&wire)[
         }
       }
     }
+  };
+  int spins = 0;
+  bool needReload;
+  do {
+    if (params.abortSpinTick(spins)) {
+      return false;
+    }
+    needReload = false;
+    loadAll();
 #pragma unroll
     for (int i = 0; i < kN; ++i) {
       if ((mask >> i) & 1u) {
@@ -471,15 +474,7 @@ __device__ __forceinline__ bool ddaLL128PollWireN(const uint64_t* const (&wire)[
     }
   } while (__any(needReload));
 #if !RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS
-#pragma unroll
-  for (int u = 0; u < kDdaLL128WordsPerThread; u += 2) {
-#pragma unroll
-    for (int i = 0; i < kN; ++i) {
-      if ((mask >> i) & 1u) {
-        ddaLL128LoadAtomic16B(wire[i] + u * kDdaLL128Warp, vr[i][u], vr[i][u + 1]);
-      }
-    }
-  }
+  loadAll();
 #endif
   return true;
 }
