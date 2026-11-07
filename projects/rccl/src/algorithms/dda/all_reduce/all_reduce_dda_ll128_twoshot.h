@@ -276,15 +276,15 @@ struct DdaLL128SplitUnit {
 // resident whole), so with in-order dispatch the lowest unfinished block always runs and a partly resident grid drains.
 // An aborted wait leaves only its warp, before anything that depends on it is stored.
 // In place is safe: A reads only the peers' shards and D writes (peer, slice) only after the peer folded my copy of it.
-template <typename T, int NRANKS_CT>
+// The rank count is runtime only: the peer loops do not unroll, and a compile-time count adds no resident block.
+template <typename T>
 __launch_bounds__(kDdaLL128Threads) __global__
   void ddaAllReduceTwoShotLL128Split(T* const* __restrict__ peerScratch, T* __restrict__ recvbuff,
-                                     const T* __restrict__ sendbuff, size_t shardBytes, int selfRank, int nRanksRt,
+                                     const T* __restrict__ sendbuff, size_t shardBytes, int selfRank, int nRanks,
                                      uint32_t* __restrict__ epochDev, int epochLen, size_t slicesTotal, size_t bankSize,
                                      DdaKernelParams params) {
   constexpr int kWire = kDdaLL128WireAsync;
   constexpr uint32_t kPairMask = (1u << kDdaLL128SplitPollSlices) - 1;  // both slices of a poll pair
-  const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const int lane = threadIdx.x % kDdaLL128Warp;
   // Wave uniform where an LL128 warp is a wave (wave32), so the unit bookkeeping below stays in scalar registers.
   const uint32_t warp = __builtin_amdgcn_wavefrontsize() == kDdaLL128Warp ?

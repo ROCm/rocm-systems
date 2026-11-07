@@ -45,7 +45,7 @@ enum class Kind { kCoop, kStaged, kSplit };
 struct Case {
   int nRanks;
   int self;
-  int ct;  // NRANKS_CT of the instance: 4, 8 or 0
+  int ct;  // NRANKS_CT of the cooperative and staged instances: 4, 8 or 0
   Kind kind;
   unsigned grid;
   unsigned block;
@@ -144,7 +144,7 @@ void launch(const Case& c, T** scratch, T* recv, const T* send, uint32_t* epoch,
                          c.nRanks, epoch, epochLen(c), n, bank, params);
       break;
     case Kind::kSplit:
-      hipLaunchKernelGGL((dda::common::ddaAllReduceTwoShotLL128Split<T, N>), grid, block,
+      hipLaunchKernelGGL((dda::common::ddaAllReduceTwoShotLL128Split<T>), grid, block,
                          dda::common::ddaLL128ArSplitSharedBytes(c.block, c.nRanks), stream, scratch, recv, send,
                          c.shardBytes, c.self, c.nRanks, epoch, epochLen(c), n, bank, params);
       break;

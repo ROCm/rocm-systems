@@ -195,13 +195,6 @@ static DdaArLL128Kernel<T> ddaArLL128TwoShotKernel(int nRanks, int wire) {
 // Smallest message the peer-split takes: below it the tiers it replaces are faster.
 constexpr size_t kDdaArLL128SplitMinBytes = 2 * 1024 * 1024;
 
-template <typename T>
-static DdaArLL128Kernel<T> ddaArLL128SplitKernel(int nRanks) {
-  return ddaArPickRanksCt(nRanks, [](auto n) -> DdaArLL128Kernel<T> {
-    return &dda::common::ddaAllReduceTwoShotLL128Split<T, decltype(n)::value>;
-  });
-}
-
 // Peer-split: a warp per (slice, peer) unit of one shard within `bound`, and blocks own whole slices: none without one.
 static std::pair<dim3, dim3> ddaArLL128SplitGrid(const ncclComm* comm, size_t bytes, rcclDdaLaunchCap bound) {
   const size_t n = (size_t)std::max(comm->nRanks, 2);
@@ -283,7 +276,7 @@ static ncclResult_t ncclAllReduceDdaFabricLL128TwoShotTyped(const void* sendbuff
   const size_t lds =
     split ? dda::common::ddaLL128ArSplitSharedBytes(block.x, nRanks) : ddaArLL128SharedBytes(wire, block.x);
   const DdaArLL128Kernel<T> kernel =
-    split ? ddaArLL128SplitKernel<T>(nRanks) : ddaArLL128TwoShotKernel<T>(nRanks, wire);
+    split ? &dda::common::ddaAllReduceTwoShotLL128Split<T> : ddaArLL128TwoShotKernel<T>(nRanks, wire);
 
   T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
   // Same epoch counter every other LL/LL128 tier uses.
