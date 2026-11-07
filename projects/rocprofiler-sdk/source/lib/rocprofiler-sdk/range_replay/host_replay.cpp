@@ -271,10 +271,10 @@ restore_entry_state(range_context_t& ctx)
 host_region_t
 capture_region(void* ptr, size_t size)
 {
-    auto region = host_region_t{};
-    region.ptr  = ptr;
-    region.saved.resize(size);
-    if(size > 0) std::memcpy(region.saved.data(), ptr, size);
+    auto        region = host_region_t{};
+    const auto* bytes  = static_cast<const uint8_t*>(ptr);
+    region.ptr         = ptr;
+    if(size > 0) region.saved.assign(bytes, bytes + size);
     return region;
 }
 

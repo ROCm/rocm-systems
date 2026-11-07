@@ -64,8 +64,26 @@ agent_replay_state(rocprofiler_agent_id_t agent_id)
     using state_map_t    = std::unordered_map<rocprofiler_agent_id_t, agent_replay_state_t>;
     static auto*& states = common::static_object<common::Synchronized<state_map_t>>::construct();
 
-    return states->wlock(
-        [](state_map_t& _map, auto _id) -> agent_replay_state_t& { return _map[_id]; }, agent_id);
+    // Every submit looks its agent up. Nodes are never erased and unordered_map references survive
+    // rehashing, so a reference stays valid without the lock and a thread can cache its last one.
+    thread_local auto                  tl_agent_id = rocprofiler_agent_id_t{.handle = UINT64_MAX};
+    thread_local agent_replay_state_t* tl_state    = nullptr;
+    if(tl_state != nullptr && tl_agent_id.handle == agent_id.handle) return *tl_state;
+
+    auto* state = const_cast<agent_replay_state_t*>(states->rlock(
+        [](const state_map_t& _map, auto _id) -> const agent_replay_state_t* {
+            const auto itr = _map.find(_id);
+            return (itr == _map.end()) ? nullptr : &itr->second;
+        },
+        agent_id));
+    if(state == nullptr)
+        state = &states->wlock(
+            [](state_map_t& _map, auto _id) -> agent_replay_state_t& { return _map[_id]; },
+            agent_id);
+
+    tl_agent_id = agent_id;
+    tl_state    = state;
+    return *state;
 }
 }  // namespace
 
