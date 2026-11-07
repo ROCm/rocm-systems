@@ -3448,11 +3448,11 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated) {
 
           REQUIRE(validateCharDeviceArray(dDevMem, N, value) == true);
 
-          HIP_CHECK(hipStreamDestroy(stream));
           HIP_CHECK(hipFree(sDevMem));
           HIP_CHECK(hipFree(dDevMem));
         }
       }
+      HIP_CHECK(hipStreamDestroy(stream));
     }
   }
 
