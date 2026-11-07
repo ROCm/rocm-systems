@@ -105,6 +105,11 @@ SdmaQueueBindingFactory::create_binding(const QueueRegistrationRequest &request)
           std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
     };
   }
+  SdmaQueueProgressObserver progress_observer = progress_observer_factory_
+                                                    ? progress_observer_factory_(context)
+                                                    : SdmaQueueProgressObserver{};
+  // Worker startup can fail before attach publishes the queue. Let the KFD
+  // boundary translate that error after the local queue state unwinds.
   const SdmaQueueScheduler::Handle handle = scheduler_->attach(
       {.ring = std::move(ring),
        .context = context,
@@ -113,18 +118,14 @@ SdmaQueueBindingFactory::create_binding(const QueueRegistrationRequest &request)
        .doorbell_base = request.doorbell.host_base,
        .last_doorbell = request.doorbell.last_value,
        .host_accessible = request.doorbell.mode == QueueDoorbellMode::HostPolled},
-      std::move(callbacks),
-      progress_observer_factory_ ? progress_observer_factory_(context)
-                                 : SdmaQueueProgressObserver{});
+      std::move(callbacks), std::move(progress_observer));
   if (!handle)
     return {};
-  try {
+  // Once attached, allocation failure must not strand a live scheduler slot.
+  return [&]() noexcept -> QueueBindingCreateResult {
     return {.status = QueueBindingCreateStatus::Bound,
             .binding = std::make_unique<SdmaQueueBinding>(*scheduler_, handle)};
-  } catch (...) {
-    (void)scheduler_->detach(handle);
-    throw;
-  }
+  }();
 }
 
 std::shared_ptr<SdmaQueueBindingFactory>
