@@ -255,7 +255,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
             const char* label = "")
       : type_(type),
         visited_(false),
-        id_(nextID.fetch_add(1, std::memory_order_relaxed)),
+        id_(0),
         parentGraph_(nullptr),
         isEnabled_(1),
         dev_id_(ihipGetDevice()),
@@ -389,7 +389,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
     stream_ = stream;
     return hipSuccess;
   }
-  /// Return node unique ID
+  /// Return the node ID local to its containing graph
   int GetID() const { return id_; }
   /// Returns command for graph node
   virtual std::vector<amd::Command*>& GetCommands() { return commands_; }
@@ -573,7 +573,6 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   int hw_queue_id_ = -1; //! Hardware queue ID on which this node will be executed
   int32_t segment_id_ = -1;  //! Segment ID on which this node will be executed
   int32_t launch_id_ = -1;  //! Launch ID of this node in the entire graph execution sequence
-  static std::atomic<int> nextID;
   Graph* parentGraph_;
   static std::unordered_set<GraphNode*> nodeSet_;
   static amd::Monitor nodeSetLock_;
@@ -1057,6 +1056,7 @@ class Graph {
   std::unordered_map<UserObject*, int> graphUserObj_;
   unsigned int id_;
   static std::atomic<int> nextID;
+  unsigned int nextNodeID_ = 0;
   uint32_t memalloc_nodes_ = 0;  //!< Count of unreleased Memalloc nodes
   std::vector<Node> roots_;      //!< Root nodes, used in parallel launches
   std::vector<Node> leafs_;      //!< The list of leaf nodes on every parallel stream

@@ -13,8 +13,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Tier | Cases | Tagged | Missing `@asserts` |
 |---|---:|---:|---:|
-| `contract` | 631 | 631 | 0 |
-| **total** | **631** | **631** | **0** |
+| `contract` | 639 | 639 | 0 |
+| **total** | **639** | **639** | **0** |
 
 ## Tier: `contract`
 
@@ -474,6 +474,19 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_GraphHost_HipGraphAddHostNode_Default_InvokesCallbackOnLaunch` | hipGraphAddHostNode | a host node's callback runs exactly once when the instantiated graph is launched |
 | `Contract_GraphHost_HipGraphHostNodeGetParams_Default_RoundTripsFnAndUserData` | hipGraphHostNodeGetParams | retrieved host-node params round-trip the callback fn and userData pointers |
 | `Contract_GraphHost_HipGraphNodeGetType_NodeType_ReportsHost` | hipGraphNodeGetType | a node added via hipGraphAddHostNode reports type hipGraphNodeTypeHost |
+
+### `graph_id` (8 cases)
+
+| Case | API | Asserts |
+|---|---|---|
+| `Contract_GraphId_HipGraphExecGetId_NullArguments_ReturnInvalidValue` | hipGraphExecGetId | returns hipErrorInvalidValue when either argument is null |
+| `Contract_GraphId_HipGraphExecGetId_SameExecSameId_OtherExecOtherId` | hipGraphExecGetId | repeated calls return the same ID and different executable graphs have different IDs |
+| `Contract_GraphId_HipGraphGetId_NullArguments_ReturnInvalidValue` | hipGraphGetId | returns hipErrorInvalidValue when either argument is null |
+| `Contract_GraphId_HipGraphGetId_SameGraphSameId_OtherGraphOtherId` | hipGraphGetId | repeated calls return the same ID and different graphs have different IDs |
+| `Contract_GraphId_HipGraphNodeGetLocalId_NullArguments_ReturnInvalidValue` | hipGraphNodeGetLocalId | returns hipErrorInvalidValue when either argument is null |
+| `Contract_GraphId_HipGraphNodeGetLocalId_SameNodeSameId_OtherNodeOtherId` | hipGraphNodeGetLocalId | repeated calls return the same ID and different nodes have different IDs |
+| `Contract_GraphId_HipGraphNodeGetToolsId_NullArguments_ReturnInvalidValue` | hipGraphNodeGetToolsId | returns hipErrorInvalidValue when either argument is null |
+| `Contract_GraphId_HipGraphNodeGetToolsId_SameNodeSameId_OtherNodeOtherId` | hipGraphNodeGetToolsId | repeated calls return the same ID and different nodes have different IDs |
 
 ### `graph_instantiate_params` (2 cases)
 

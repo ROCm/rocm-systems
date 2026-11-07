@@ -709,6 +709,10 @@ global:
     hipDeviceFlushGPUDirectRDMAWrites;
     hipKernelSetCacheConfig;
     hipExtMemcpyBatchAsync;
+    hipGraphNodeGetLocalId;
+    hipGraphNodeGetToolsId;
+    hipGraphGetId;
+    hipGraphExecGetId;
 local:
     *;
 } hip_7.17;

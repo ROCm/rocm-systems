@@ -2484,6 +2484,49 @@ hipError_t hipGraphNodeGetType(hipGraphNode_t node, hipGraphNodeType* pType) {
   HIP_RETURN(hipSuccess);
 }
 
+hipError_t hipGraphNodeGetLocalId(hipGraphNode_t node, unsigned int* nodeId) {
+  HIP_INIT_API(hipGraphNodeGetLocalId, node, nodeId);
+  auto* graphNode = reinterpret_cast<hip::GraphNode*>(node);
+  if (nodeId == nullptr || !hip::GraphNode::isNodeValid(graphNode)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  *nodeId = static_cast<unsigned int>(graphNode->GetID());
+  HIP_RETURN(hipSuccess);
+}
+
+hipError_t hipGraphNodeGetToolsId(hipGraphNode_t node, unsigned long long* toolsId) {
+  HIP_INIT_API(hipGraphNodeGetToolsId, node, toolsId);
+  auto* graphNode = reinterpret_cast<hip::GraphNode*>(node);
+  if (toolsId == nullptr || !hip::GraphNode::isNodeValid(graphNode)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  constexpr unsigned int kGraphIdShift = 32;
+  const auto graphId = static_cast<unsigned int>(graphNode->GetParentGraph()->GetID());
+  const auto nodeId = static_cast<unsigned int>(graphNode->GetID());
+  *toolsId = (static_cast<unsigned long long>(graphId) << kGraphIdShift) | nodeId;
+  HIP_RETURN(hipSuccess);
+}
+
+hipError_t hipGraphGetId(hipGraph_t graph, unsigned int* graphId) {
+  HIP_INIT_API(hipGraphGetId, graph, graphId);
+  auto* hipGraph = reinterpret_cast<hip::Graph*>(graph);
+  if (graphId == nullptr || !hip::Graph::isGraphValid(hipGraph)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  *graphId = static_cast<unsigned int>(hipGraph->GetID());
+  HIP_RETURN(hipSuccess);
+}
+
+hipError_t hipGraphExecGetId(hipGraphExec_t graphExec, unsigned int* graphId) {
+  HIP_INIT_API(hipGraphExecGetId, graphExec, graphId);
+  auto* hipGraphExec = reinterpret_cast<hip::GraphExecBase*>(graphExec);
+  if (graphId == nullptr || !hip::GraphExecBase::isGraphExecValid(hipGraphExec)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  *graphId = static_cast<unsigned int>(hipGraphExec->GetID());
+  HIP_RETURN(hipSuccess);
+}
+
 hipError_t hipGraphDestroyNode(hipGraphNode_t node) {
   HIP_INIT_API(hipGraphDestroyNode, node);
   hip::GraphNode* n = reinterpret_cast<hip::GraphNode*>(node);
@@ -2535,7 +2578,7 @@ hipError_t hipGraphNodeFindInClone(hipGraphNode_t* pNode, hipGraphNode_t origina
   }
 
   for (auto node : iClonedGraph->GetNodes()) {
-    if (node->GetID() == iGraphnode->GetID()) {
+    if (node->GetOriginalNode() == iGraphnode) {
       *pNode = reinterpret_cast<hipGraphNode_t>(node);
       HIP_RETURN(hipSuccess);
     }

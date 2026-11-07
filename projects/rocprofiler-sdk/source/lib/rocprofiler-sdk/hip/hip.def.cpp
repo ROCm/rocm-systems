@@ -741,6 +741,12 @@ HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNT
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 39
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipExtMemcpyBatchAsync, hipExtMemcpyBatchAsync, hipExtMemcpyBatchAsync_fn, dsts, srcs, sizes, sizesDst, waits, signals, count, attrs, attrsIdxs, numAttrs, stream);
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 40
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphNodeGetLocalId, hipGraphNodeGetLocalId, hipGraphNodeGetLocalId_fn, node, nodeId);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphNodeGetToolsId, hipGraphNodeGetToolsId, hipGraphNodeGetToolsId_fn, node, toolsId);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphGetId, hipGraphGetId, hipGraphGetId_fn, graph, graphId);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphExecGetId, hipGraphExecGetId, hipGraphExecGetId_fn, graphExec, graphId);
+#endif
 // clang-format on
 
 #else

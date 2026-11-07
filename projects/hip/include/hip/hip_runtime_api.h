@@ -9232,6 +9232,54 @@ hipError_t hipGraphNodeGetDependentNodes(hipGraphNode_t node, hipGraphNode_t* pD
 hipError_t hipGraphNodeGetType(hipGraphNode_t node, hipGraphNodeType* pType);
 
 /**
+ * @brief Returns the local node ID of a graph node.
+ *
+ * @param [in] node - Node to query.
+ * @param [out] nodeId - Returns the node ID.
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ * Returns the node ID of @p node in @p nodeId. The value matches the node ID reported by
+ * #hipGraphDebugDotPrint. The local node ID and graph ID together uniquely identify the node.
+ *
+ */
+hipError_t hipGraphNodeGetLocalId(hipGraphNode_t node, unsigned int* nodeId);
+
+/**
+ * @brief Returns an ID used by tools to identify a graph node.
+ *
+ * @param [in] node - Node to query.
+ * @param [out] toolsId - Returns the ID used by tools.
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ */
+hipError_t hipGraphNodeGetToolsId(hipGraphNode_t node, unsigned long long* toolsId);
+
+/**
+ * @brief Returns the ID of a graph.
+ *
+ * @param [in] graph - Graph to query.
+ * @param [out] graphId - Returns the graph ID.
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ * Returns the ID of @p graph in @p graphId. The value matches the graph ID reported by
+ * #hipGraphDebugDotPrint.
+ *
+ */
+hipError_t hipGraphGetId(hipGraph_t graph, unsigned int* graphId);
+
+/**
+ * @brief Returns the ID of an executable graph.
+ *
+ * @param [in] graphExec - Executable graph to query.
+ * @param [out] graphId - Returns the executable graph ID.
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ * Returns the ID of @p graphExec in @p graphId.
+ *
+ */
+hipError_t hipGraphExecGetId(hipGraphExec_t graphExec, unsigned int* graphId);
+
+/**
  * @brief Remove a node from the graph.
  *
  * @param [in] node - graph node to remove

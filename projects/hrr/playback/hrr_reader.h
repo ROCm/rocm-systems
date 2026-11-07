@@ -20,7 +20,7 @@
 // HRR Archive Reader — reads .hrr trace archives produced by the in-tree
 // capture layer (HIP_HRR_CAPTURE_OUTPUT).
 //
-// Binary format (v5):
+// Binary format (v13):
 //   events.bin:
 //     [0..7]   hrr_file_header  { HRR_MAGIC, HRR_VERSION, reserved }
 //     [8..]    hrr_event_header (32 bytes) + payload bytes, repeated per event

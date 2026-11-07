@@ -15,7 +15,7 @@ graph:
   Unit_hipGraph_ConcurrentCreate_GraphIDRace:
     <<: *level_default
     tags: [node]
-  Unit_hipGraph_ConcurrentConstruct_NextIDRace:
+  Unit_hipGraph_ConcurrentConstruct_LocalIDSequence:
     <<: *level_default
     tags: [node]
   Unit_hipGraph_ConcurrentConstruct_LaunchDropSmoke:
@@ -2005,3 +2005,54 @@ graph:
   Unit_hipGraph_SimpleGraphWithKernel_kernel_arg_prefetch:
     <<: *level_default
     tags: [exec]
+  Unit_hipGraphGetId_Positive_UniqueAcrossGraphs:
+    <<: *level_2
+    tags: [query]
+  Unit_hipGraphGetId_Positive_ClonedGraphHasDifferentId:
+    <<: *level_2
+    tags: [query]
+  Unit_hipGraphGetId_Positive_StableAfterNodeRemoval:
+    <<: *level_2
+    tags: [query]
+  Unit_hipGraphGetId_Positive_EmbeddedChildGraphHasDifferentId:
+    <<: *level_2
+    tags: [query]
+  Unit_hipGraphGetId_Positive_NoReuseAfterDestroy:
+    <<: *level_2
+    tags: [query]
+  Unit_hipGraphExecGetId_Positive_SharesCounterWithGraphId:
+    <<: *level_2
+    tags: [query, exec]
+  Unit_hipGraphExecGetId_Positive_StableAfterUpdateAndLaunch:
+    <<: *level_2
+    tags: [query, exec]
+  Unit_hipGraphExecGetId_Positive_NoReuseAfterDestroy:
+    <<: *level_2
+    tags: [query, exec]
+  Unit_hipGraphNodeGetLocalId_Positive_StartsAtZeroAndIncrements:
+    <<: *level_2
+    tags: [query, node]
+  Unit_hipGraphNodeGetLocalId_Positive_ChildGraphNode:
+    <<: *level_2
+    tags: [query, node]
+  Unit_hipGraphNodeGetLocalId_Positive_CapturedStream:
+    <<: *level_2
+    tags: [query, node]
+  Unit_hipGraphNodeGetLocalId_Positive_ClonedGraphPreservesIds:
+    <<: *level_2
+    tags: [query, node]
+  Unit_hipGraphNodeGetLocalId_Positive_RestartsForEachGraph:
+    <<: *level_2
+    tags: [query, node]
+  Unit_hipGraphNodeGetLocalId_Positive_RemovalPreservesAndAdvancesIds:
+    <<: *level_2
+    tags: [query, node]
+  Unit_hipGraphNodeGetToolsId_Positive_EncodesGraphIdAndLocalId:
+    <<: *level_2
+    tags: [query, node]
+  Unit_hipGraphNodeGetToolsId_Positive_EncodingHoldsForClonedGraph:
+    <<: *level_2
+    tags: [query, node]
+  Unit_hipGraphNodeGetToolsId_Positive_ChildGraphNodeUsesParentGraphId:
+    <<: *level_2
+    tags: [query, node]

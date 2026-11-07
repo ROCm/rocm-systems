@@ -39,8 +39,7 @@ namespace hip {
 
 hipError_t ihipGraphDebugDotPrint(hip::Graph* graph, const char* path, unsigned int flags);
 
-std::atomic<int> GraphNode::nextID{0};
-std::atomic<int> Graph::nextID{0};
+std::atomic<int> Graph::nextID{1};
 std::unordered_set<GraphNode*> GraphNode::nodeSet_;
 // Guards global node set
 amd::Monitor GraphNode::nodeSetLock_{};
@@ -136,6 +135,7 @@ bool Graph::isGraphValid(Graph* pGraph) {
 
 // ================================================================================================
 void Graph::AddNode(const Node& node) {
+  node->id_ = nextNodeID_++;
   vertices_.emplace_back(node);
   MarkTopologyChanged();
   ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE, "[hipGraph] Add %s(%p)",
@@ -1142,6 +1142,7 @@ void Graph::clone(Graph* newGraph, bool cloneNodes) const {
   newGraph->topologyVersion_ = topologyVersion_;
   newGraph->originalTopologyVersion_ = topologyVersion_;
   newGraph->originalGraphId_ = id_;
+  newGraph->nextNodeID_ = nextNodeID_;
   for (hip::GraphNode* entry : vertices_) {
     GraphNode* node = entry->clone();
     node->originalNode_ = entry;
