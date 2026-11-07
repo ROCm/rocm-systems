@@ -292,7 +292,9 @@ static void pinned_scan_locked(const uint8_t* bytes, size_t sz) {
         std::any_of(t_snaps.begin(), t_snaps.end(),
                     [&](const HostSnap& s) { return s.base == it->first; }))
       continue;
-    HostSnap s;
+    // Push before taking a reader count: if push_back throws, no count leaks.
+    t_snaps.emplace_back();
+    HostSnap& s = t_snaps.back();
     s.base = it->first;
     s.size = it->second.size;
     if (s.size > cap) {
@@ -308,7 +310,6 @@ static void pinned_scan_locked(const uint8_t* bytes, size_t sz) {
       s.reading     = true;
       ++it->second.readers;
     }
-    t_snaps.push_back(s);
   }
 }
 
@@ -346,6 +347,18 @@ static void pinned_end_read(HostSnap& s) {
     if (it != g_pinned.end() && it->second.readers != 0) --it->second.readers;
   }
   s.reading = false;
+  g_pinned_cv.notify_all();
+}
+
+// Drops every count a scan took. A scan that throws, e.g. bad_alloc in
+// push_back, calls this so a later free does not wait forever.
+static void pinned_drop_reads_locked() {
+  for (HostSnap& s : t_snaps) {
+    if (!s.reading) continue;
+    auto it = g_pinned.find(s.base);
+    if (it != g_pinned.end() && it->second.readers != 0) --it->second.readers;
+    s.reading = false;
+  }
   g_pinned_cv.notify_all();
 }
 
@@ -441,7 +454,12 @@ struct PinnedSnapshot {
     t_snaps.clear();
     if (!f || !pinned_snapshots_active()) return;
     std::unique_lock<std::mutex> lk(g_pinned_mu);
-    pinned_scan_function_locked(f, params, extra, kbuf, ksz);
+    try {
+      pinned_scan_function_locked(f, params, extra, kbuf, ksz);
+    } catch (...) {
+      pinned_drop_reads_locked();
+      throw;
+    }
     lk.unlock();
     pinned_finish_snapshots();
   }
@@ -454,8 +472,13 @@ struct PinnedSnapshot {
     std::vector<PinnedGraphKernel> kernels;
     pinned_collect_graph(gexec, seen, kernels);
     std::unique_lock<std::mutex> lk(g_pinned_mu);
-    for (const PinnedGraphKernel& k : kernels)
-      pinned_scan_function_locked(k.f, k.params, k.extra);
+    try {
+      for (const PinnedGraphKernel& k : kernels)
+        pinned_scan_function_locked(k.f, k.params, k.extra);
+    } catch (...) {
+      pinned_drop_reads_locked();
+      throw;
+    }
     lk.unlock();
     pinned_finish_snapshots();
   }
