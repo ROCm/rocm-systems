@@ -24,6 +24,7 @@
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 
 #include <gtest/gtest.h>
@@ -107,6 +108,46 @@ TEST(hsa, tables)
     EXPECT_EQ(table.amd_ext_, amd_ext);
     EXPECT_EQ(table.finalizer_ext_, fini_ext);
     EXPECT_EQ(table.image_ext_, img_ext);
+}
+
+TEST(hsa, async_copy_signal_lifecycle)
+{
+    auto cache  = ::rocprofiler::hsa::async_copy::copy_time_cache{};
+    auto signal = hsa_signal_t{1};
+    cache.create(signal);
+    EXPECT_FALSE(cache.find(signal));
+
+    cache.record(signal, HSA_STATUS_SUCCESS, {90, 100});
+    cache.retain(signal);
+    cache.retain(signal);
+    cache.release(signal);
+    cache.release(signal);
+    auto value = cache.find(signal);
+    ASSERT_TRUE(value);
+    EXPECT_EQ(value->first, HSA_STATUS_SUCCESS);
+    EXPECT_EQ(value->second.start, 90);
+    EXPECT_EQ(value->second.end, 100);
+
+    cache.record(signal, HSA_STATUS_SUCCESS, {190, 200});
+    cache.record(signal, HSA_STATUS_SUCCESS, {140, 150});
+    cache.record(signal, HSA_STATUS_ERROR, {});
+    value = cache.find(signal);
+    ASSERT_TRUE(value);
+    EXPECT_EQ(value->second.end, 200);
+    cache.release(signal);
+    EXPECT_FALSE(cache.find(signal));
+
+    cache.retain(signal);
+    cache.record(signal, HSA_STATUS_SUCCESS, {290, 300});
+    cache.create(signal);
+    EXPECT_FALSE(cache.find(signal));
+    cache.record(signal, HSA_STATUS_SUCCESS, {390, 400});
+    cache.record({2}, HSA_STATUS_ERROR, {});
+    cache.clear();
+    EXPECT_FALSE(cache.find(signal));
+    EXPECT_FALSE(cache.find({2}));
+    cache.create(signal);
+    EXPECT_FALSE(cache.find(signal));
 }
 
 TEST(hsa, high_precision_timestamp_contexts)
