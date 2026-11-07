@@ -28,6 +28,7 @@ add_library(
     dot/fp8_dot.cpp
     dot/half_dot.cpp
     dot/integer_dot.cpp
+    dual/dual.cpp
     fp/scalar_repair.cpp
     fp/fma.cpp
     fp/binary.cpp
