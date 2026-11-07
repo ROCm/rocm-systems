@@ -326,6 +326,10 @@ struct Info : public amd::EmbeddedObject {
   //! Maximum grid dimensions (from HSA_AGENT_INFO_GRID_MAX_DIM). Work-items per dimension.
   uint32_t maxGridDim_[3];
 
+  //! Maximum number of work-groups per dimension a kernel can address, limited by the
+  //  width of the HW workgroup ID. 0 means no limit beyond the grid size checks.
+  uint32_t maxWorkGroupCount_[3];
+
   //! Preferred number of work-items in a work-group executing a kernel
   //  using the data-parallel execution model.
   size_t preferredWorkGroupSize_;
