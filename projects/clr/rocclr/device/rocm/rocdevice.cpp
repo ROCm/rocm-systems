@@ -30,8 +30,10 @@
 #include "platform/sampler.hpp"
 
 #ifdef _WIN32
+#include "device/rocm/rocd3d9interop.hpp"
 #include "device/rocm/rocd3d10interop.hpp"
 #include "device/rocm/rocd3d11interop.hpp"
+#include "platform/interop_d3d9.hpp"
 #include "platform/interop_d3d10.hpp"
 #include "platform/interop_d3d11.hpp"
 #endif
@@ -2067,6 +2069,34 @@ bool Device::bindExternalDevice(uint flags, void* const gfxDevice[], void* gfxCo
       success = false;
     }
   }
+
+  // Handle D3D9 adapter binding. The three cl_dx9_media_adapter_type_khr values occupy
+  // separate context slots and carry unrelated object types, so each is bound on its own.
+  constexpr struct {
+    amd::Context::Flags flag;
+    amd::Context::DeviceFlagIdx idx;
+    D3D9Interop::AdapterKind kind;
+  } kD3D9Slots[] = {
+      {amd::Context::Flags::D3D9DeviceKhr, amd::Context::DeviceFlagIdx::D3D9DeviceKhrIdx,
+       D3D9Interop::AdapterKind::D3D9},
+      {amd::Context::Flags::D3D9DeviceEXKhr, amd::Context::DeviceFlagIdx::D3D9DeviceEXKhrIdx,
+       D3D9Interop::AdapterKind::D3D9Ex},
+      {amd::Context::Flags::D3D9DeviceVAKhr, amd::Context::DeviceFlagIdx::D3D9DeviceVAKhrIdx,
+       D3D9Interop::AdapterKind::DXVA},
+  };
+
+  for (const auto& slot : kD3D9Slots) {
+    if (!(flags & slot.flag)) {
+      continue;
+    }
+    if (!D3D9Interop::associateD3D9Device(this, gfxDevice[slot.idx], slot.kind, gfxContext,
+                                          validateOnly)) {
+      if (!validateOnly) {
+        LogError("Failed D3D9Interop::associateD3D9Device()");
+      }
+      success = false;
+    }
+  }
 #endif  // _WIN32
 
   // Handle GL device binding (existing code)
@@ -2097,6 +2127,13 @@ bool Device::unbindExternalDevice(uint flags, void* const gfxDevice[], void* gfx
   // Handle D3D11 device cleanup
   if (flags & amd::Context::Flags::D3D11DeviceKhr) {
     D3D11Interop::dissociateD3D11Device(this, gfxDevice, gfxContext);
+  }
+
+  // Handle D3D9 cleanup. The cache is keyed by the surfaces' owning devices rather than
+  // by context slot, so one drain covers all three adapter types.
+  if (flags & (amd::Context::Flags::D3D9DeviceKhr | amd::Context::Flags::D3D9DeviceEXKhr |
+               amd::Context::Flags::D3D9DeviceVAKhr)) {
+    D3D9Interop::dissociateD3D9Device(this, gfxDevice, gfxContext);
   }
 #endif  // _WIN32
 
