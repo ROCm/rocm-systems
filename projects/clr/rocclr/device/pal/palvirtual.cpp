@@ -548,7 +548,33 @@ bool VirtualGPU::Queue::waitForEvent(uint id) {
   constexpr bool IbReuse = true;
   bool result = waitForFence<!IbReuse>(slotId);
   cmbBufIdRetired_ = id;
-  return result;
+  return checkExecutionState() && result;
+}
+
+// ================================================================================================
+bool VirtualGPU::Queue::checkExecutionState() {
+  if (amd::Device::IsGPUInError()) {
+    return false;
+  }
+  // A fence still signals after the KMD faults or resets the context (e.g. a wave executed
+  // s_trap for a device-side assert), so query the device state explicitly. Otherwise the
+  // error is reported only by the next submission and a sync returns success.
+  Pal::PageFaultStatus pageFault = {};
+  Pal::Result result = iDev_->CheckExecutionState(&pageFault);
+  // Only report states where the context is known to be dead; ignore unsupported queries
+  if ((Pal::Result::ErrorDeviceLost != result) &&
+      (Pal::Result::ErrorGpuPageFaultDetected != result)) {
+    return true;
+  }
+  if (pageFault.flags.pageFault) {
+    LogPrintfError("GPU page fault detected at address 0x%llx (%s)! result:%d",
+                   static_cast<unsigned long long>(pageFault.faultAddress),
+                   pageFault.flags.readFault ? "read" : "write", result);
+  } else {
+    LogPrintfError("GPU execution error detected! result:%d", result);
+  }
+  gpu_.dev().gpu_error_.store(CL_INVALID_OPERATION, std::memory_order_relaxed);
+  return false;
 }
 
 // ================================================================================================
@@ -570,7 +596,7 @@ bool VirtualGPU::Queue::isDone(uint id) {
     return false;
   }
   cmbBufIdRetired_ = id;
-  return true;
+  return checkExecutionState();
 }
 
 // ================================================================================================
