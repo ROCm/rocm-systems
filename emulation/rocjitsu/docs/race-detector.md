@@ -245,15 +245,6 @@ following lifecycle:
    retired and, from the perspective of all threads in all wavefronts, the
    operation is complete.
 
-A workgroup barrier retires WAVE_COMPLETE events from every wave state owned
-by the workgroup's detector, including waves that have ended. Those states
-outlive the waves' execution: a wave that ends no longer arrives at barriers,
-but a workgroup barrier among the remaining waves resolves only after it has
-ended. Events that were still ACTIVE when the wave ended stay pending. Named
-and cluster barriers only retire events from the waves supplied by the barrier
-callback. They do not retire an ended wave's events, because they can resolve
-without waiting for that wave.
-
 Generic `FLAT_*` instructions select counter domains from their resolved memory
 requests. Global and scratch requests use the vector-memory counter; LDS
 requests use the LDS counter. An instruction with requests in both domains uses
