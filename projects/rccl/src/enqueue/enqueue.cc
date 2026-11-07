@@ -1355,6 +1355,19 @@ static int rcclP2pPolicyChannels(struct ncclComm* comm, struct ncclTaskP2p* task
   // The policies below target direct P2P/IPC traffic only. When P2P is disabled,
   // preserve the normal channel selection for the fallback transport.
   if (ncclParamP2pDisable()) return -1;
+  // gfx942 multi-node alltoall shares one NIC across every remote peer, so the
+  // count sized for a lone peer (4 on a 400G NIC) oversubscribes it. 2x8 MI300X,
+  // 4M-256M, runs 64.5 GB/s at 4 channels per peer and 70.9 at 2. Send and
+  // sendrecv keep p2pnChannelsPerPeer: lowering it for the whole communicator
+  // drops a 16-rank ring from 35.6 GB/s to 24.1. Skip when the nRanks fit loop
+  // has already brought the count to 2 or below, and when the user set it.
+  if (comm->nNodes > 1 && task->collAPI == ncclFuncAlltoAll &&
+      comm->config.nChannelsPerNetPeer == NCCL_CONFIG_UNDEF_INT &&
+      IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942")) {
+    int fitted = comm->p2pnChannelsPerPeer;
+    while (fitted * comm->nRanks > comm->p2pnChannels && fitted > 1) fitted /= 2;
+    if (fitted > 2) return 2;
+  }
   constexpr Policy policies[] = {
     // Two-channel full-mesh traffic has high variance on gfx110x. Keep the
     // workaround specific to AllToAll so Gather, SendRecv and Scatter (outside the
