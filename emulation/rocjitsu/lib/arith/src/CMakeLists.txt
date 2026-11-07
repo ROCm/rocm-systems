@@ -48,6 +48,20 @@ add_library(
     graphics/interp16.cpp
     graphics/interp32.cpp
     graphics/mullit.cpp
+    integer/bit_count.cpp
+    integer/bitfield.cpp
+    integer/boolean.cpp
+    integer/carry.cpp
+    integer/integer16.cpp
+    integer/integer16_ternary.cpp
+    integer/integer_add.cpp
+    integer/integer_mad.cpp
+    integer/integer_minmax.cpp
+    integer/integer_mul.cpp
+    integer/integer_ternary.cpp
+    integer/mad64.cpp
+    integer/sad.cpp
+    integer/shift.cpp
     register/cndmask.cpp
     register/dpp.cpp
     register/ds_permute.cpp
