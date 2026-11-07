@@ -954,6 +954,7 @@ class Device : public NullDevice {
   //! Read and Write mask for device<->host
   uint32_t maxSdmaReadMask_;
   uint32_t maxSdmaWriteMask_;
+  uint32_t maxSdmaD2DMask_ = 0;  //!< Engine mask for same-device D2D copies
   bool isXgmi_;  //!< Flag to indicate if there is XGMI between CPU<->GPU
   bool isAPU_ = false;  //!< Flag to indicate the agent shares physical memory with the CPU
   bool pm4_emulation_ = false;  //!< Flag to indicate if PM4 emulation is enabled
@@ -992,7 +993,9 @@ class Device : public NullDevice {
 
   //! Returns the valid SDMA engine bitmask for the given operation type.
   uint32_t GetSdmaValidMask(HwQueueEngine engine_type) const {
-    return (engine_type == HwQueueEngine::SdmaD2H) ? maxSdmaReadMask_ : maxSdmaWriteMask_;
+    if (engine_type == HwQueueEngine::SdmaD2H) return maxSdmaReadMask_;
+    if (engine_type == HwQueueEngine::SdmaD2D && maxSdmaD2DMask_ != 0) return maxSdmaD2DMask_;
+    return maxSdmaWriteMask_;
   }
 
 #if DEVICE_ADDRESS_SANITIZER
