@@ -294,7 +294,11 @@ def gen_pseudo_scalar(ctx: ExecuteContext) -> str | None:
     dst = ctx.dst_ops
     src = ctx.src_ops
     is_vop3 = ctx.is_vop3
-    if arch != 'rdna4' or mnemonic not in PSEUDO_SCALAR_NAMES or not is_vop3:
+    if (
+        arch not in ('rdna4', 'cdna5')
+        or mnemonic not in PSEUDO_SCALAR_NAMES
+        or not is_vop3
+    ):
         return None
     if len(dst) != 1 or len(src) != 1:
         return None
@@ -305,7 +309,8 @@ def gen_pseudo_scalar(ctx: ExecuteContext) -> str | None:
             '      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |',
             '      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) |',
             '      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);',
-            f'  amdgpu::arith::execute_pseudo_scalar(wf, rj_arith_{mnemonic.lower()},',
+            f'  amdgpu::arith::execute_pseudo_scalar(wf, rj_arith_{mnemonic.lower()}'
+            f'{"_gfx1250" if arch == "cdna5" else ""},',
             f'      wf.cu().arithmetic_flags(),',
             f'      modifiers, {dst[0]}, {src[0]}, {str(half).lower()});',
         ]

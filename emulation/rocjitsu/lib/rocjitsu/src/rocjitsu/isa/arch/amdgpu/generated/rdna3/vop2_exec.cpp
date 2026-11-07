@@ -31,7 +31,7 @@ void VCndmaskB32Vop2::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (!wf.exec())
     return;
-  amdgpu::arith::execute_conditional<false>(wf, rj_arith_v_cndmask_b32_w32,
+  amdgpu::arith::execute_conditional<false>(*this, wf, rj_arith_v_cndmask_b32_w32,
                                             rj_arith_v_cndmask_b32_w64, wf.cu().arithmetic_flags(),
                                             0, vdst, src0, vsrc1, wf.vcc_mask());
 }
@@ -59,7 +59,7 @@ RJ_NOINLINE void VCndmaskB32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   if (!wf.exec())
     return;
-  amdgpu::arith::execute_conditional<false>(wf, rj_arith_v_cndmask_b32_w32,
+  amdgpu::arith::execute_conditional<false>(*this, wf, rj_arith_v_cndmask_b32_w32,
                                             rj_arith_v_cndmask_b32_w64, wf.cu().arithmetic_flags(),
                                             0, vdst, src0, vsrc1, wf.vcc_mask());
   dpp_write_mask_scope_.restore();
