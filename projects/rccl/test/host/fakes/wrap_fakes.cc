@@ -168,10 +168,18 @@ ncclResult_t rcclReserveHierarchicalTempBuffer(struct ncclComm* comm) { return g
 // ---------------------------------------------------------------------------
 
 #ifdef ENABLE_ROCSHMEM_GIN
-// The real definitions live in gin_alltoall_sdma.cu / gin_all_reduce_sdma.cu,
-// which this host-only binary intentionally does not compile. Keep GIN-SDMA
-// out of the selector by default so ENABLE_ROCSHMEM_GIN builds retain the
-// non-GIN test behaviour.
+// The real definitions live in gin_all_gather_sdma.cu / gin_alltoall_sdma.cu /
+// gin_all_reduce_sdma.cu, which this host-only binary intentionally does not
+// compile. Keep GIN-SDMA out of the selector by default so ENABLE_ROCSHMEM_GIN
+// builds retain the non-GIN test behaviour.
+bool ncclAllGatherGinSdmaEligible(ncclComm*, const void*, void*, size_t, ncclDataType_t) {
+  return false;
+}
+
+// rcclSelectAllGather calls this whenever eligibility is true. The fake above
+// stays false, so the value is only here to satisfy the link.
+int ncclAllGatherGinSdmaCtaCount(int, size_t) { return 0; }
+
 bool ncclAllToAllGinSdmaEligible(ncclComm*, const void*, void*, size_t, ncclDataType_t) {
   return false;
 }

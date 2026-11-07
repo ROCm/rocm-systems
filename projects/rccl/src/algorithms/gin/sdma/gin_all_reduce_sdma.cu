@@ -382,6 +382,17 @@ static bool ginAllReduceBaseEligible(ncclComm* comm, const void* sendbuff, void*
   if (ginType != (ncclGinType_t)NCCL_NET_DEVICE_GIN_ANVIL_SDMA) return false;
   // After cheaper ginType: ncclTeamLsa() can initialize the device runtime.
   if (ncclTeamLsa(comm).nRanks != comm->nRanks) return false;
+  // HIP leaves GPU-only multi-segment windows unregistered with GIN.
+  struct ncclDevrWindow* sendWin = nullptr;
+  struct ncclDevrWindow* recvWin = nullptr;
+  if (ncclDevrFindWindow(comm, sendbuff, &sendWin) != ncclSuccess || sendWin == nullptr ||
+      ncclDevrFindWindow(comm, recvbuff, &recvWin) != ncclSuccess || recvWin == nullptr) {
+    return false;
+  }
+  if ((ncclDevrWindowIsMultiSegment(sendWin) && !ncclDevrWindowHasSysmemSegment(sendWin)) ||
+      (ncclDevrWindowIsMultiSegment(recvWin) && !ncclDevrWindowHasSysmemSegment(recvWin))) {
+    return false;
+  }
   return true;
 }
 

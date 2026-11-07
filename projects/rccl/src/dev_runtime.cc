@@ -123,12 +123,6 @@ static ncclIntruAddressMap<ncclDevrWindow, struct ncclWindow_vidmem*, &ncclDevrW
   ncclWindowMap;
 static ncclResult_t symWindowDestroy(struct ncclComm* comm, struct ncclWindow_vidmem* winDev, cudaStream_t stream);
 
-struct ncclDevrWindowSorted {
-  uintptr_t userAddr;
-  size_t size;
-  struct ncclDevrWindow* win;
-};
-
 ////////////////////////////////////////////////////////////////////////////////
 // Helpers at the bottom:
 
@@ -819,12 +813,15 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
     return ncclSuccess;
   }
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  // RCCL: one HIP DMA-BUF covers only the first segment; fail closed instead of registering a partial MR.
+  // One HIP DMA-BUF covers only the first segment. Leave a GPU-only multi-segment
+  // window on the LSA path instead of failing registration: enabling GIN for a
+  // single-segment collective must not reject an unrelated window, and GIN
+  // collectives refuse these windows in their eligibility checks.
   if (mem->maxGlobalNumSegments > 1 && !mem->globalHasSysmemSegment) {
-    WARN("Window %p spans %d device-memory segments; GIN cannot register it on HIP", mem->primaryAddr,
+    INFO(NCCL_INIT, "Window %p spans %d device-memory segments; leaving it unregistered with GIN", mem->primaryAddr,
          mem->maxGlobalNumSegments);
-    ret = ncclInvalidUsage;
-    goto fail;
+    mem->numGinSegments = 0;
+    return ncclSuccess;
   }
 #endif
 
@@ -1275,6 +1272,12 @@ static ncclResult_t symWindowInitGin(struct ncclDevrState* devr, struct ncclDevr
                                      struct ncclWindow_vidmem* winDevHost, cudaStream_t stream) {
   ncclResult_t ret = ncclSuccess;
   if (!ncclDevrWinRegEnabled(mem->winFlags, ncclDevrRegisterGin)) return ret;
+  // Skipped HIP registration (GPU-only multi-segment) leaves no segment infos.
+  if (mem->ginSegmentInfos == nullptr || mem->numGinSegments <= 0) {
+    winDevHost->numSegments = 0;
+    winDevHost->ginMultiSegmentWins = nullptr;
+    return ncclSuccess;
+  }
   struct ncclSegmentWindow* segmentWindowsDev;
   NCCLCHECK(ncclDevrAllocAndPopulateSegmentWindows(devr, mem, stream, &segmentWindowsDev));
   winDevHost->ginMultiSegmentWins = segmentWindowsDev;

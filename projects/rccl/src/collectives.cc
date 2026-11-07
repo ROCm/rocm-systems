@@ -19,6 +19,7 @@
 #include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
 #include "algorithms/dda/all_gather/dda_all_gather.h"
 #include "algorithms/dda/alltoall/dda_alltoall.h"
+#include "algorithms/gin/gin_all_gather.h"
 #include "algorithms/gin/gin_alltoall.h"
 #include "algorithms/gin/gin_all_reduce.h"
 #include "sym_kernels.h"
@@ -479,6 +480,15 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
     return rcclAddonLaunch(info, [&] {
       return ncclHierarchicalAllGather_Impl(sendbuff, recvbuff, sendcount, datatype, comm, stream);
     });
+#if defined(ENABLE_ROCSHMEM_GIN)
+  case RCCL_AG_GIN_SDMA:
+    INFO(NCCL_COLL, "AllGather: taking GIN-SDMA path: nRanks=%d count=%zu datatype=%d bytes=%zu inPlace=%d",
+         comm->nRanks, sendcount, (int)datatype, sendcount * ncclTypeSize(datatype),
+         sendbuff == (const char*)recvbuff + comm->rank * sendcount * ncclTypeSize(datatype) ? 1 : 0);
+    return rcclAddonLaunch(info, [&] {
+      return ncclAllGatherGinSdma(sendbuff, recvbuff, sendcount, datatype, comm, stream);
+    });
+#endif
   case RCCL_DIRECT_ALLGATHER:
     INFO(NCCL_TUNING,
          "RCCL DIRECT ALLGATHER count = %zu, msgSize = %zu, comm = %p, stream = %p, rank = %d, sendbuff = %p, recvbuff "
