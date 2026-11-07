@@ -8,6 +8,10 @@
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/operand_types.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/operand_types.h"
 
 #include <gtest/gtest.h>
 
@@ -173,6 +177,12 @@ std::vector<uint8_t> with_text_symbol(uint64_t start, uint64_t size, bool reloca
     header.e_type = ET_REL;
     header.e_phoff = 0;
     header.e_phnum = 0;
+    // Drop linked addresses along with the load segments. Otherwise growing
+    // .text shifts .rodata without a segment alignment to preserve its layout.
+    for (Elf64_Shdr &section : sections) {
+      if ((section.sh_flags & SHF_ALLOC) != 0)
+        section.sh_addr = 0;
+    }
     // A nonzero section address makes erroneous subtraction observable: the
     // interior label at section offset 12 must not be normalized to offset 4.
     sections[*text.sectionHeaderIndex()].sh_addr = 8;
@@ -463,6 +473,44 @@ TEST(CheckedTextEdits, RejectsDebugBranchesWhoseDestinationsAreUnavailable) {
   const std::vector<uint8_t> control =
       test::make_gfx942_kernel_elf({branch.value(), 0xbe8000ffu, 0x12345678u, endpgm.value()}, 0);
   expect_reference_result(control, 4, std::nullopt, kCdna3);
+}
+
+TEST(CheckedTextEdits, RejectsSubvectorLoopsWhoseDestinationsAreUnavailable) {
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+    SCOPED_TRACE(arch);
+    const uint32_t machine = arch == ROCJITSU_CODE_ARCH_RDNA1 ? EF_AMDGPU_MACH_AMDGCN_GFX1010
+                                                              : EF_AMDGPU_MACH_AMDGCN_GFX1030;
+    const std::array<uint16_t, 2> opcodes =
+        arch == ROCJITSU_CODE_ARCH_RDNA1
+            ? std::array{rdna1::kSSubvectorLoopBeginSopk, rdna1::kSSubvectorLoopEndSopk}
+            : std::array{rdna2::kSSubvectorLoopBeginSopk, rdna2::kSSubvectorLoopEndSopk};
+    const uint16_t literal_operand = arch == ROCJITSU_CODE_ARCH_RDNA1
+                                         ? static_cast<uint16_t>(rdna1::OPR_SRC_SRC_LITERAL)
+                                         : static_cast<uint16_t>(rdna2::OPR_SRC_SRC_LITERAL);
+    const util::FailureOr<uint32_t> move = build_s_mov_b32(0, literal_operand, arch);
+    ASSERT_TRUE(move.succeeded());
+    const util::FailureOr<uint32_t> endpgm = build_s_endpgm(arch);
+    ASSERT_TRUE(endpgm.succeeded());
+    for (const uint16_t opcode : opcodes) {
+      SCOPED_TRACE(opcode);
+      // Both loop forms have label operands but no displacement metadata. At
+      // offset zero, simm16=1 refers to the literal at offset 8 of [4,12).
+      const util::FailureOr<uint32_t> loop = build_sopk_encoding(arch, opcode, 0, 1);
+      ASSERT_TRUE(loop.succeeded());
+      const std::vector<uint8_t> image = test::make_amdgpu_kernel_elf(
+          {loop.value(), move.value(), 0x12345678u, endpgm.value()}, 0, 3, machine);
+      expect_reference_result(image, 4, 0, arch);
+    }
+    // Ordinary branches with known destinations at either boundary still pass.
+    for (const int16_t displacement : {0, 2}) {
+      SCOPED_TRACE(displacement);
+      const util::FailureOr<uint32_t> branch = build_s_branch(displacement, arch);
+      ASSERT_TRUE(branch.succeeded());
+      const std::vector<uint8_t> control = test::make_amdgpu_kernel_elf(
+          {branch.value(), move.value(), 0x12345678u, endpgm.value()}, 0, 3, machine);
+      expect_reference_result(control, 4, std::nullopt, arch);
+    }
+  }
 }
 
 } // namespace

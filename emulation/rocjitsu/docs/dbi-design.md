@@ -281,9 +281,10 @@ unrelated and nonallocated references retain the existing patcher policy.
 These checks do not resolve addresses computed by instruction sequences, such
 as `s_getpc_b64` followed by arithmetic and a load or `s_setpc_b64`. They do not
 prove that no other instruction can access the edited bytes. A nonempty anchor
-batch rejects known `s_cbranch_cdbg*` forms lacking destination metadata rather
-than treating their missing metadata as an absent reference; adding full debug
-branch metadata or computed-address analysis is separate work.
+batch rejects known `s_cbranch_cdbg*`, `s_subvector_loop_begin`, and
+`s_subvector_loop_end` forms lacking destination metadata rather than treating
+their missing metadata as an absent reference; adding full branch metadata or
+computed-address analysis is separate work.
 
 ### Instruction Builder (`code/builders/instruction_builder.h`) [shared with DBT]
 
