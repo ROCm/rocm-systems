@@ -451,8 +451,7 @@ race_detector/
     ├── interval_set.h        half-open byte range tracking for LDS
     ├── types.h               core enum types and structs
     ├── common_register.h     SGPR/VGPR classification helpers
-    ├── dim3d.h               3D coordinate helpers
-    └── profiler_interface.h  optional hook profiling
+    └── dim3d.h               3D coordinate helpers
 ```
 
 Explicit wait decoding is shared with the core checker in

@@ -11,8 +11,6 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
-#include <string>
-#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -37,8 +35,6 @@ namespace rocjitsu::plugins::race_detector {
 ///   - Slow path: when a chunk may contain a conflict, scans live event intervals
 ///     with binary search (IntervalSet::overlapsRange).
 class RaceDetector {
-  friend class Workgroup;
-
 public:
   /// ldsSizeBytes is the CU backing capacity, independent of workgroup
   /// allocation metadata and the lazily materialized byte count.
@@ -113,16 +109,9 @@ public:
   Dim3d getWorkgroupId() const { return workgroupId; }
   const std::function<void(RaceViolation)> &getRaceHandler() const { return raceHandler; }
 
-  /// Format a RaceViolation with assembly context for diagnostics.
-  /// getSourceLine(i) returns the original source text for line index i.
-  std::string decorateException(const RaceViolation &, uint64_t wavePc, int numSourceLines,
-                                std::function<std::string_view(int)> getSourceLine) const;
-
   WaveRaceState &getWaveRaceState(int waveIndex);
 
 private:
-  void setProfiler(ProfilerInterface &);
-
   struct LdsChunkCounts {
     int bytes = 0;
     /// When bytes > 0, a nonnegative owner proves that every counted event
