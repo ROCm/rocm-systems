@@ -429,7 +429,8 @@ QueueController::add_queue(hsa_queue_t*           id,
 {
     CHECK(queue);
     const auto lifetime_lock = std::unique_lock<std::shared_mutex>{_queue_lifetime_mutex};
-    queue->_engine_type = is_compute ? Queue::engine_type::compute : Queue::engine_type::non_compute;
+    queue->_engine_type =
+        is_compute ? Queue::engine_type::compute : Queue::engine_type::non_compute;
     const auto agent_id = queue->get_agent().get_rocp_agent()->id;
 
     _callback_cache.wlock([&](auto& callbacks) {
@@ -507,8 +508,8 @@ QueueController::destroy_queue(hsa_queue_t* id)
 {
     if(!id) return;
 
-    const auto lifetime_lock = std::unique_lock<std::shared_mutex>{_queue_lifetime_mutex};
-    const auto* queue = get_queue(*id);
+    const auto  lifetime_lock = std::unique_lock<std::shared_mutex>{_queue_lifetime_mutex};
+    const auto* queue         = get_queue(*id);
 
     // return if queue does not exist
     if(!queue) return;
@@ -887,7 +888,7 @@ void
 QueueController::iterate_queues_with_lifetime(const queue_iterator_cb_t& cb) const
 {
     const auto lifetime_lock = std::shared_lock<std::shared_mutex>{_queue_lifetime_mutex};
-    auto queues = std::vector<const Queue*>{};
+    auto       queues        = std::vector<const Queue*>{};
     iterate_queues([&](const Queue* queue) { queues.emplace_back(queue); });
     for(const auto* queue : queues)
         cb(queue);

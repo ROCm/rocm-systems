@@ -79,10 +79,10 @@ public:
     explicit scoped_local_context_control(const context::context_array_t& active_contexts);
     ~scoped_local_context_control();
 
-    scoped_local_context_control(const scoped_local_context_control&)            = delete;
+    scoped_local_context_control(const scoped_local_context_control&) = delete;
     scoped_local_context_control& operator=(const scoped_local_context_control&) = delete;
     scoped_local_context_control(scoped_local_context_control&&)                 = delete;
-    scoped_local_context_control& operator=(scoped_local_context_control&&)      = delete;
+    scoped_local_context_control& operator=(scoped_local_context_control&&) = delete;
 
 private:
     local_context_control_t  m_control{};  // this loop's overrides (owned)

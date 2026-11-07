@@ -106,8 +106,9 @@ record_unsupported_executable(void* ptr, size_t size)
     // Only ordinary coarse device VRAM. HIP kernarg pools / fine-grained regions fail trackable and
     // stay out of both inventories (silent omit is correct for those).
     if(!q.trackable) return;
-    unsupported_executable_inventory().wlock(
-        [&](auto& _map) { _map[ptr] = alloc_info_t{size, q.agent, next_allocation_lifetime()}; });
+    unsupported_executable_inventory().wlock([&](auto& _map) {
+        _map[ptr] = alloc_info_t{size, q.agent, next_allocation_lifetime()};
+    });
 }
 
 // Inventory entries pulled out ahead of an HSA free. snap() copies from every address the
@@ -242,8 +243,9 @@ record_alloc(void* ptr, size_t size)
 
     const auto q = query_alloc(ptr);
     if(!q.trackable) return;  // skip kernarg / host / fine-grained memory
-    inventory().wlock(
-        [&](auto& _map) { _map[ptr] = alloc_info_t{size, q.agent, next_allocation_lifetime()}; });
+    inventory().wlock([&](auto& _map) {
+        _map[ptr] = alloc_info_t{size, q.agent, next_allocation_lifetime()};
+    });
 }
 
 void
