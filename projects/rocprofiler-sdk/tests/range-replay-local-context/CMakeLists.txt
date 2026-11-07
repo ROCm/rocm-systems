@@ -132,8 +132,8 @@ add_rr_lc_test(test-range-replay-local-context-att-all-passes ENVIRONMENT
 add_rr_lc_test(test-range-replay-local-context-att-stop-after-0 ENVIRONMENT
                "RR_LC_SERVICES=att;RR_LC_PASSES=4;RR_LC_STOP_PASS=1")
 
-# SPM: the same dispatch-scoped contract as counters. These two replay tests abort during KFD
-# acquisition on gfx120x CI runners. Tracking issue:
+# SPM: the same dispatch-scoped contract as counters. These two replay tests abort during
+# KFD acquisition on gfx120x CI runners. Tracking issue:
 # https://github.com/ROCm/rocm-systems/issues/13606
 foreach(_gfx IN LISTS rocprofiler-sdk-tests-gfx-info)
     if(_gfx MATCHES "^gfx120[0-9](-strict)?$")

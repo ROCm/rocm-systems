@@ -10,8 +10,8 @@
 #include <rocprofiler-sdk/registration.h>
 
 #include <atomic>
-#include <cstdlib>
 #include <cstdint>
+#include <cstdlib>
 
 namespace
 {
