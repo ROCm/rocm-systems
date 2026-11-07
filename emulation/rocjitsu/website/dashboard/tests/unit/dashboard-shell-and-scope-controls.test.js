@@ -10,6 +10,7 @@ import SectionCard from '../../src/components/shared/SectionCard.jsx';
 import CategoryTag from '../../src/components/shared/CategoryTag.jsx';
 import { createDashboardTheme } from '../../src/theme/theme.js';
 import { adaptPublishedDashboardData } from '../../src/data/dashboardDataAdapter.js';
+import { formatPublicationTime } from '../../src/utils/formatters.js';
 import { createMaintainedPublication } from '../fixtures/maintainedDataset.js';
 
 it.each([
@@ -125,13 +126,14 @@ describe('v1 publication header', () => {
     }
   });
 
-  it('shows actual publication time in UTC with only the timestamp bold', () => {
+  it('shows local publication time with only the timestamp bold', () => {
     const generatedAt = '2026-10-05T16:02:00+02:00';
+    const formatted = formatPublicationTime(generatedAt);
     const html = markup(DashboardHeader, { data: { ...data, generatedAt }, mode: 'light', tab: 'overview' });
-    expect(html.includes('Oct 5 · 14:02 UTC')).toBe(true);
+    expect(html.includes(formatted)).toBe(true);
     expect(html.match(/<strong\b/g)).toHaveLength(1);
     const strong = html.match(/<strong\b[^>]*>([\s\S]*?)<\/strong>/)[1];
-    expect(strong.includes('Oct 5 · 14:02 UTC')).toBe(true);
+    expect(strong.includes(formatted)).toBe(true);
     expect(strong.includes('Data as of')).toBe(false);
     expect(html.includes(`dateTime="${generatedAt}"`)).toBe(true);
     expect(html.includes('font-size:24px')).toBe(true);
