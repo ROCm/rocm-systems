@@ -101,6 +101,7 @@ static_assert(sizeof(ihipIpcEventHandle_t) <= sizeof(hipIpcEventHandle_t),
               "ihipIpcEventHandle_t exceeds hipIpcEventHandle_t storage");
 
 const char* ihipGetErrorName(hipError_t hip_error);
+const char* ihipGetErrorString(hipError_t hip_error);
 
 } // namespace hip
 
@@ -208,8 +209,8 @@ HIP_PUBLIC_API void __hipOnError(const void *err_info);
     } err_info = {                                                                                 \
       1,                                                                                           \
       hip::tls.last_command_error_,                                                                \
-      hipGetErrorName(hip::tls.last_command_error_),                                               \
-      hipGetErrorString(hip::tls.last_command_error_)                                              \
+      hip::ihipGetErrorName(hip::tls.last_command_error_),                                         \
+      hip::ihipGetErrorString(hip::tls.last_command_error_)                                        \
     };                                                                                             \
     /* The debugger may place a breakpoint at __hipOnError to catch failed API calls. */           \
     __hipOnError((void *) &err_info);                                                              \
