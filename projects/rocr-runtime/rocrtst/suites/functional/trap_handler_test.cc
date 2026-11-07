@@ -205,8 +205,21 @@ bool TrapHandlerTest::RunTrapTest(hsa_agent_t cpuAgent, hsa_agent_t gpuAgent,
     memset(ptr_buffer, 0x42, kNumWorkItems * sizeof(int));
   }
 
-  // Kernel arguments - allocate max needed size and zero-initialize
-  // Different kernels have different argument layouts:
+  // Load the kernel before allocating kernarg memory. The kernarg segment
+  // size is a property of the loaded kernel and is not known until the
+  // symbol has been resolved.
+  set_kernel_name(kernel_name);
+  err = rocrtst::LoadKernelFromObjFile(this, &gpuAgent);
+  if (err != HSA_STATUS_SUCCESS) {
+    if (ptr_buffer) hsa_memory_free(ptr_buffer);
+    hsa_memory_free(out_buffer);
+    hsa_queue_destroy(queue);
+    std::cout << "FAILED (kernel not found: " << kernel_name << ")" << std::endl;
+    return false;  // Kernel loading failure is a test failure
+  }
+
+  // Kernel arguments - allocate the kernel's kernarg segment and zero-initialize.
+  // The explicit arguments these kernels declare are at most 16 bytes:
   //   - Single pointer kernels: trap_abort, trap_debugger, trap_generic,
   //                             trap_illegal_instruction, trap_aperture_violation, trap_none
   //     ABI: [ptr (8 bytes)]
@@ -214,7 +227,13 @@ bool TrapHandlerTest::RunTrapTest(hsa_agent_t cpuAgent, hsa_agent_t gpuAgent,
   //     ABI: [ptr (8 bytes), out (8 bytes)]
   //   - Math exception kernel: trap_math_exception(__global int *out, int divisor)
   //     ABI: [out (8 bytes), divisor (4 bytes), pad (4 bytes)]
-  const size_t max_kernarg_size = 32;  // Enough for any kernel layout
+  // The allocation has to cover the whole kernarg segment rather than just
+  // those explicit arguments, because the segment also carries the hidden
+  // arguments the compiler appends. Sizing it from the explicit layout alone
+  // leaves the kernel reading past the end of the allocation.
+  const size_t kExplicitKernargSize = 32;
+  const size_t max_kernarg_size =
+      std::max(static_cast<size_t>(kernarg_size()), kExplicitKernargSize);
 
   void* kern_args = nullptr;
   err = hsa_amd_memory_pool_allocate(kernarg_pool, max_kernarg_size, 0, &kern_args);
@@ -264,18 +283,6 @@ bool TrapHandlerTest::RunTrapTest(hsa_agent_t cpuAgent, hsa_agent_t gpuAgent,
     // ABI layout: [out at offset 0]
     void** args = reinterpret_cast<void**>(kern_args);
     args[0] = out_buffer;
-  }
-
-  // Load kernel
-  set_kernel_name(kernel_name);
-  err = rocrtst::LoadKernelFromObjFile(this, &gpuAgent);
-  if (err != HSA_STATUS_SUCCESS) {
-    hsa_memory_free(kern_args);
-    if (ptr_buffer) hsa_memory_free(ptr_buffer);
-    hsa_memory_free(out_buffer);
-    hsa_queue_destroy(queue);
-    std::cout << "FAILED (kernel not found: " << kernel_name << ")" << std::endl;
-    return false;  // Kernel loading failure is a test failure
   }
 
   // Create completion signal
