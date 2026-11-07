@@ -195,6 +195,48 @@ lock_agents(const host_range_state_t& host)
     return guards;
 }
 
+std::vector<uint64_t>
+submit_epochs(const host_range_state_t& host)
+{
+    auto epochs = std::vector<uint64_t>{};
+    epochs.reserve(host.agents.size());
+    for(const auto& agent : host.agents)
+        epochs.emplace_back(
+            hsa::agent_submit_epoch(agent.agent_id).load(std::memory_order_acquire));
+    return epochs;
+}
+
+// Fences without re-running anything between: a tool's PASS exit or continue callback, which runs
+// after the pass's fence, can itself submit GPU work. Bounded so a thread that never stops
+// submitting declines the range instead of starving it.
+constexpr int max_refences = 8;
+
+// Writer locks over a fence that no dispatch overtook. `fenced_epochs` were read before that
+// fence. A dispatch whose epoch advance is visible under the writer locks wrote its packets after
+// the read, so the fence may not cover it: release, fence again, and re-check. Every submit
+// advances the epoch under the reader lock, so with the writer locks held nothing is mid-submit.
+std::vector<std::unique_lock<std::shared_mutex>>
+lock_after_fence(range_context_t& ctx, std::vector<uint64_t> fenced_epochs)
+{
+    for(int refences = 0;; ++refences)
+    {
+        auto guards = lock_agents(ctx.host);
+        if(submit_epochs(ctx.host) == fenced_epochs) return guards;
+        if(refences == max_refences)
+        {
+            ROCP_WARNING << fmt::format("range replay: host range {} kept seeing new dispatches "
+                                        "after {} fences; it will not be replayed",
+                                        ctx.record.range_id(),
+                                        refences + 1);
+            ctx.record.decline(ROCPROFILER_RANGE_REPLAY_STATUS_CONCURRENT_DISPATCH);
+            return guards;
+        }
+        guards.clear();
+        fenced_epochs = submit_epochs(ctx.host);
+        fence_all(ctx.host.agents);
+    }
+}
+
 rocprofiler_range_replay_status_t
 restore_entry_state(range_context_t& ctx)
 {
@@ -261,12 +303,13 @@ try
     // Fence before taking the writer locks: the barrier rings the intercept queue's doorbell, which
     // needs that queue's ROCr intercept lock. Another thread can hold that lock while it waits in
     // WriteInterceptor for this agent's reader lock.
+    const auto epochs = submit_epochs(host);
     fence_all(host.agents);
     const auto fenced_at = phase_clock::now();
 
     // A foreign dispatch publishes its decline before it takes the reader lock, so after the
     // writer locks are held, any dispatch that slipped in after the fence is visible here.
-    const auto guards = lock_agents(host);
+    const auto guards = lock_after_fence(ctx, epochs);
     fold_external_decline(ctx);
     if(!ctx.record.eligible())
     {
@@ -357,6 +400,7 @@ finish_pass(range_context_t& ctx)
 
     // The pass's GPU tail belongs to the pass: its records are emitted before PASS exit, and the
     // checks below see settled memory. The writer locks are taken just before the restore.
+    const auto epochs = submit_epochs(host);
     if(host.snapshot_taken) fence_all(host.agents);
 
     if(pass > 0)
@@ -429,9 +473,10 @@ finish_pass(range_context_t& ctx)
     // intercept lock, which a foreign submitter can hold while it waits for the reader lock, and a
     // tool callback that submits on this thread would wait for its own writer lock.
     // restore_entry_state re-reads the decline channel under them, and a foreign dispatch publishes
-    // its decline before taking the reader lock, so none can be in flight during the restore.
+    // its decline before taking the reader lock, so none can be in flight during the restore. GPU
+    // work the callbacks submitted after the fence is caught by the epoch check and fenced again.
     if(executable_guard.owns_lock()) executable_guard.unlock();
-    auto guards = lock_agents(host);
+    auto guards = lock_after_fence(ctx, epochs);
     executable_guard.lock();
 
     const auto restore_start  = phase_clock::now();

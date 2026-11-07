@@ -38,8 +38,10 @@
 #include <fmt/format.h>
 #include <hsa/hsa.h>
 
+#include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <shared_mutex>
 #include <string_view>
 
@@ -63,6 +65,14 @@ union rocprofiler_packet;
 // tail is drained by the replay window before it snapshots.
 std::shared_mutex&
 agent_replay_mutex(rocprofiler_agent_id_t agent_id);
+
+// Count of dispatch submissions on the agent, advanced under the reader lock after the packets
+// are written. A fence only covers work submitted before it, and a host range releases the agent
+// between its fence and its writer lock (the fence needs the queue's ROCr intercept lock, which a
+// waiting submitter can hold). Reading this before the fence and again under the writer lock tells
+// the range whether any dispatch slipped into that gap.
+std::atomic<uint64_t>&
+agent_submit_epoch(rocprofiler_agent_id_t agent_id);
 
 // A single blocking wait -- Queue::sync(), or the replay drain barrier -- gives up after one slice
 // and reports whether it drained. The replay drain helpers retry for at most max_slices slices and
