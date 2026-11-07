@@ -3407,74 +3407,48 @@ static void free_replaced_host_alloc(PlaybackContext& ctx, uint64_t rec) {
     if (block.cur.get() == buf) block.retired.push_back(std::move(block.cur));
 }
 
-hipError_t playback_hipHostMalloc(PlaybackContext& ctx, const uint8_t* pl) {
-    const auto* a = reinterpret_cast<const hrr_args_hipHostMalloc*>(pl);
+// The four pinned host allocators differ only in the runtime call. A call that
+// failed the same way at capture is not a replay failure.
+template <typename Alloc>
+static hipError_t alloc_host_memory(PlaybackContext& ctx, uint64_t rec_ptr, uint64_t size,
+                                    int32_t recorded_ret, const char* api, Alloc alloc) {
     void* live = nullptr;
-    free_replaced_host_alloc(ctx, a->ptr);
-    if (!ctx.charge_host(a->size, "hipHostMalloc")) return hipErrorMemoryAllocation;
-    hipError_t r = hipHostMalloc(&live, static_cast<size_t>(a->size), a->flags);
+    free_replaced_host_alloc(ctx, rec_ptr);
+    if (!ctx.charge_host(size, api)) return hipErrorMemoryAllocation;
+    hipError_t r = alloc(&live, static_cast<size_t>(size));
     if (r == hipSuccess)
-        ctx.record_alloc(a->ptr, live, static_cast<size_t>(a->size), AllocKind::HostMalloc);
+        ctx.record_alloc(rec_ptr, live, static_cast<size_t>(size), AllocKind::HostMalloc);
     else
-        ctx.host_budget.release(a->size);
-    // A call that failed the same way at capture is not a replay failure.
-    if (r != hipSuccess && a->ret != 0 && static_cast<int32_t>(r) == a->ret) {
-        hrr_note_recorded_error(ctx, "hipHostMalloc", a->ret);
+        ctx.host_budget.release(size);
+    if (r != hipSuccess && recorded_ret != 0 && static_cast<int32_t>(r) == recorded_ret) {
+        hrr_note_recorded_error(ctx, api, recorded_ret);
         return hipSuccess;
     }
     return r;
+}
+
+hipError_t playback_hipHostMalloc(PlaybackContext& ctx, const uint8_t* pl) {
+    const auto* a = reinterpret_cast<const hrr_args_hipHostMalloc*>(pl);
+    return alloc_host_memory(ctx, a->ptr, a->size, a->ret, "hipHostMalloc",
+                             [a](void** p, size_t n) { return hipHostMalloc(p, n, a->flags); });
 }
 
 hipError_t playback_hipMallocHost(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipMallocHost*>(pl);
-    void* live = nullptr;
-    free_replaced_host_alloc(ctx, a->ptr);
-    if (!ctx.charge_host(a->size, "hipMallocHost")) return hipErrorMemoryAllocation;
-    hipError_t r = hipMallocHost(&live, static_cast<size_t>(a->size));
-    if (r == hipSuccess)
-        ctx.record_alloc(a->ptr, live, static_cast<size_t>(a->size), AllocKind::HostMalloc);
-    else
-        ctx.host_budget.release(a->size);
-    // A call that failed the same way at capture is not a replay failure.
-    if (r != hipSuccess && a->ret != 0 && static_cast<int32_t>(r) == a->ret) {
-        hrr_note_recorded_error(ctx, "hipMallocHost", a->ret);
-        return hipSuccess;
-    }
-    return r;
+    return alloc_host_memory(ctx, a->ptr, a->size, a->ret, "hipMallocHost",
+                             [](void** p, size_t n) { return hipMallocHost(p, n); });
 }
 
 hipError_t playback_hipHostAlloc(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipHostAlloc*>(pl);
-    void* live = nullptr;
-    free_replaced_host_alloc(ctx, a->ptr);
-    if (!ctx.charge_host(a->size, "hipHostAlloc")) return hipErrorMemoryAllocation;
-    hipError_t r = hipHostAlloc(&live, static_cast<size_t>(a->size), a->flags);
-    if (r == hipSuccess)
-        ctx.record_alloc(a->ptr, live, static_cast<size_t>(a->size), AllocKind::HostMalloc);
-    else
-        ctx.host_budget.release(a->size);
-    if (r != hipSuccess && a->ret != 0 && static_cast<int32_t>(r) == a->ret) {
-        hrr_note_recorded_error(ctx, "hipHostAlloc", a->ret);
-        return hipSuccess;
-    }
-    return r;
+    return alloc_host_memory(ctx, a->ptr, a->size, a->ret, "hipHostAlloc",
+                             [a](void** p, size_t n) { return hipHostAlloc(p, n, a->flags); });
 }
 
 hipError_t playback_hipMemAllocHost(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipMemAllocHost*>(pl);
-    void* live = nullptr;
-    free_replaced_host_alloc(ctx, a->ptr);
-    if (!ctx.charge_host(a->size, "hipMemAllocHost")) return hipErrorMemoryAllocation;
-    hipError_t r = hipMemAllocHost(&live, static_cast<size_t>(a->size));
-    if (r == hipSuccess)
-        ctx.record_alloc(a->ptr, live, static_cast<size_t>(a->size), AllocKind::HostMalloc);
-    else
-        ctx.host_budget.release(a->size);
-    if (r != hipSuccess && a->ret != 0 && static_cast<int32_t>(r) == a->ret) {
-        hrr_note_recorded_error(ctx, "hipMemAllocHost", a->ret);
-        return hipSuccess;
-    }
-    return r;
+    return alloc_host_memory(ctx, a->ptr, a->size, a->ret, "hipMemAllocHost",
+                             [](void** p, size_t n) { return hipMemAllocHost(p, n); });
 }
 
 // hipHostFree and hipFreeHost differ only in the runtime call. The exclusive
