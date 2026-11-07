@@ -120,11 +120,12 @@ class Memory : public device::Memory {
     return owningAgentIndex_.load(std::memory_order_acquire);
   }
 
-  //! Recompute and cache the owning agent by querying pointer_info on the (already-backed)
-  //! device memory. Needed for VMM-mapped / VMM-imported (interprocess) memory: the true
-  //! owner is only known after hsa_amd_vmem_map backs the virtual address, which happens
-  //! after create() runs, so the agent cannot be resolved at create() time.
-  void refreshOwningAgentFromPointerInfo();
+  //! Recompute and cache the owning agent: from the physical handle for a mapped VMM range,
+  //! whose backing pages may live on a peer device, and from pointer_info for IPC memory.
+  //! Called after hsa_amd_vmem_map backs the virtual address, since the owner of an imported
+  //! range is not knowable at create() time, and from computeAndSetOwningAgent() for views
+  //! created after the map.
+  void refreshOwningAgent();
 
   //! Validates allocated memory for possible workarounds
   virtual bool ValidateMemory() { return true; }
