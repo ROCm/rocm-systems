@@ -72,7 +72,7 @@ jobs:
 
       # rocm-systems is a large monorepo; only the amdsmi project and this
       # workflow are needed, so sparse-checkout keeps the fetch cheap.
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: |
             projects/amdsmi
@@ -111,7 +111,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: amdsmi-asan-unit-results
           path: ${{ env.RESULTS_DIR }}
@@ -145,7 +145,7 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends git ca-certificates
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: |
             projects/amdsmi
@@ -232,7 +232,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: amdsmi-asan-gpu-results
           path: ${{ env.RESULTS_DIR }}
