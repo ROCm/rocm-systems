@@ -190,6 +190,13 @@ int binary(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags, uint3
     }
   }
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if constexpr (rocjitsu::arith::is_arithmetic(Op)) {
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+      rocjitsu::arith::binary_x86_64_v4(Op, flags, exec_mask, uint32_t(instruction_flags), d[0],
+                                        a[0], b[0]);
+      return RJ_ARITH_SUCCESS;
+    }
+  }
   if constexpr (rocjitsu::arith::is_selection(Op)) {
     if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
       rocjitsu::arith::selection_f32_x86_64_v4(Op, flags, exec_mask, instruction_flags, d, a, b);
@@ -927,4 +934,24 @@ int rj_arith_v_max_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t i
   }
   return binary_wave64<rocjitsu::arith::Binary::MaxLegacyCdna, true>(flags, exec_mask,
                                                                      instruction_flags, d, a, b);
+}
+
+// Preserve inherited multiplication without advertising gfx1201 status as CDNA status.
+int rj_arith_v_mul_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, uint32_t *excp_flag_user) {
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return rj_arith_v_mul_f32_w32_gfx12(flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
+}
+
+// Preserve inherited multiplication without advertising gfx1201 status as CDNA status.
+int rj_arith_v_mul_f32_w64_gfx1250(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, uint32_t *excp_flag_user) {
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  return rj_arith_v_mul_f32_w64_gfx12(flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }

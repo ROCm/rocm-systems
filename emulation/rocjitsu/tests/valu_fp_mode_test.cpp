@@ -88,10 +88,12 @@ struct ArithmeticCase {
 
 void PrintTo(const ArithmeticCase &test, std::ostream *stream) { *stream << test.name; }
 
-// RDNA arithmetic uses rj-arith's default-host contract. Other architectures
+// Migrated arithmetic uses rj-arith's default-host contract. Other architectures
 // retain their explicit legacy host-isolation cases.
 bool uses_default_host_controls(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA4;
+  return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA4 ||
+         arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
+         arch == ROCJITSU_CODE_ARCH_CDNA5;
 }
 
 // Encodings assembled with llvm-mc; expected values follow GPU MODE, independently of host MODE.
@@ -1356,15 +1358,39 @@ std::vector<ArithmeticCase> modifier_environment_cases() {
     rj_code_arch_t arch;
     uint32_t word;
   };
-  // V_MUL_LEGACY_F32 on CDNA4, V_MUL_DX9_ZERO_F32 on RDNA3/4 and CDNA5.
-  for (const MulArch &architecture : {MulArch{ROCJITSU_CODE_ARCH_CDNA4, 0xd2a10006u},
+  // V_MUL_LEGACY_F32 on CDNA3/4, V_MUL_DX9_ZERO_F32 on RDNA3/4 and CDNA5.
+  for (const MulArch &architecture : {MulArch{ROCJITSU_CODE_ARCH_CDNA3, 0xd2a10006u},
+                                      MulArch{ROCJITSU_CODE_ARCH_CDNA4, 0xd2a10006u},
                                       MulArch{ROCJITSU_CODE_ARCH_RDNA3, 0xd5070006u},
                                       MulArch{ROCJITSU_CODE_ARCH_RDNA4, 0xd5070006u},
                                       MulArch{ROCJITSU_CODE_ARCH_CDNA5, 0xd5070006u}}) {
+    if (architecture.arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+        architecture.arch == ROCJITSU_CODE_ARCH_CDNA4 ||
+        architecture.arch == ROCJITSU_CODE_ARCH_CDNA5) {
+      struct Sample {
+        const char *name;
+        uint32_t a, b, expected;
+      };
+      // Inherited legacy MUL quiets NaNs even without IEEE mode and flushes
+      // after rounding, so promotion to minimum normal survives output flushing.
+      for (const auto &sample :
+           {Sample{"ZeroInfinity", 0, 0x7f800000U, 0},
+            Sample{"QuietNan", 0x7f812345U, 0x3f800000U, 0x7fc12345U},
+            Sample{"NormalPromotion", 0x00800000U, 0x3f7fffffU, 0x00800000U}}) {
+        cases.push_back({"MulArch" + std::to_string(architecture.arch) + sample.name,
+                         architecture.arch,
+                         {architecture.word, 0x00020300U},
+                         {{0, sample.a}, {1, sample.b}},
+                         {{6, sample.expected}},
+                         0,
+                         FE_TONEAREST});
+      }
+    }
     for (uint32_t rounding = 0; rounding < 4; ++rounding) {
       for (bool negative : {false, true}) {
         for (bool clamp : {false, true}) {
-          for (int host_rounding : {FE_TONEAREST, FE_TOWARDZERO}) {
+          // Migrated arithmetic assumes the default host FP environment.
+          for (int host_rounding : {FE_TONEAREST}) {
             const uint32_t sign = negative ? 0x80000000u : 0u;
             const bool infinity =
                 rounding == 0 || (rounding == 1 && !negative) || (rounding == 2 && negative);
@@ -1379,10 +1405,7 @@ std::vector<ArithmeticCase> modifier_environment_cases() {
                              {{0, sign | 0x7f7fffffu}, {1, 0x3f800000u}},
                              {{6, expected}},
                              rounding,
-                             (architecture.arch == ROCJITSU_CODE_ARCH_RDNA3 ||
-                              architecture.arch == ROCJITSU_CODE_ARCH_RDNA4)
-                                 ? FE_TONEAREST
-                                 : (host_rounding)});
+                             host_rounding});
           }
         }
       }
@@ -5399,12 +5422,10 @@ SimdPathExpectation simd_expectation_for_run(const ArithmeticCase &test, bool fo
 
 void expect_arithmetic_case(const ArithmeticCase &test, SimdPathExpectation simd = {},
                             bool uses_arith = false, amdgpu::ArithmeticPolicy policy = {}) {
-  uses_arith &= test.arch == ROCJITSU_CODE_ARCH_RDNA3 || test.arch == ROCJITSU_CODE_ARCH_RDNA4;
-  const int host_rounding = test.host_rounding;
-  if (uses_arith) {
-    ASSERT_EQ(host_rounding, FE_TONEAREST) << test.name;
-    ASSERT_EQ(test.mxcsr_bits & test.mxcsr_mask & ~0x3fu, 0x1f80u & test.mxcsr_mask) << test.name;
-  }
+  uses_arith &= uses_default_host_controls(test.arch);
+  // Migrated handlers assume default host controls. Keep each case's guest MODE
+  // and expected result; host-isolation variants only apply to legacy handlers.
+  const int host_rounding = uses_arith ? FE_TONEAREST : test.host_rounding;
   amdgpu::GpuMemory memory("mode_memory");
   amdgpu::L2Cache cache("mode_cache");
   cache.set_backing_memory(&memory);
@@ -5446,7 +5467,8 @@ void expect_arithmetic_case(const ArithmeticCase &test, SimdPathExpectation simd
 #if RJ_HOST_ARCH_X86
     // Sticky flags from earlier tests must not hide exception-state leaks.
     const uint32_t host_mxcsr =
-        (_mm_getcsr() & ~(test.mxcsr_mask | _MM_EXCEPT_MASK)) | test.mxcsr_bits;
+        uses_arith ? 0x1f80u | (test.mxcsr_bits & _MM_EXCEPT_MASK)
+                   : (_mm_getcsr() & ~(test.mxcsr_mask | _MM_EXCEPT_MASK)) | test.mxcsr_bits;
     _mm_setcsr(host_mxcsr);
 #endif
     const int initial_rounding = std::fegetround();
@@ -5462,6 +5484,7 @@ void expect_arithmetic_case(const ArithmeticCase &test, SimdPathExpectation simd
     if (uses_arith) {
       // Arithmetic may raise sticky flags, but must leave host controls unchanged.
       EXPECT_EQ(restored_mxcsr & ~_MM_EXCEPT_MASK, host_mxcsr & ~_MM_EXCEPT_MASK);
+      EXPECT_EQ(restored_mxcsr & host_mxcsr & _MM_EXCEPT_MASK, host_mxcsr & _MM_EXCEPT_MASK);
     } else if (test.mxcsr_mask != 0) {
       EXPECT_EQ(restored_mxcsr, host_mxcsr);
     }

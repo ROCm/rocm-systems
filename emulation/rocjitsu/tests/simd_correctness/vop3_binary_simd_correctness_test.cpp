@@ -392,17 +392,14 @@ TEST(Vop3BinarySimdCorrectness, SubtractionModesAndHostStateAcrossTargets) {
           }
           observer->events.clear();
           {
-            SubtractionHostEnvironment host(rdna);
+            SubtractionHostEnvironment host(/*uses_arith=*/true);
             const auto before = SubtractionHostEnvironment::snapshot();
             const bool succeeded = fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded();
             const auto after = SubtractionHostEnvironment::snapshot();
             EXPECT_TRUE(succeeded);
-            if (rdna) {
-              EXPECT_EQ(after[0], before[0]);
-              EXPECT_EQ(after[2] & ~0x3f, before[2] & ~0x3f);
-            } else {
-              EXPECT_EQ(after, before);
-            }
+            EXPECT_EQ(after[0], before[0]);
+            EXPECT_EQ(after[1] & before[1], before[1]);
+            EXPECT_EQ(after[2] & ~0x3f, before[2] & ~0x3f);
           }
           // Snapshotting storage must not add events to the observed execution.
           const auto events = observer->events;
@@ -419,8 +416,8 @@ TEST(Vop3BinarySimdCorrectness, SubtractionModesAndHostStateAcrossTargets) {
         // Scalar execution reports each lane, SIMD each register view. Both must
         // cover the same registers and lanes, and every callback must see the
         // caller's FP environment.
-        EXPECT_EQ(observed_coverage(actual.second, rdna),
-                  observed_coverage(reference.second, rdna));
+        EXPECT_EQ(observed_coverage(actual.second, true),
+                  observed_coverage(reference.second, true));
         if (!e64 && (exec & 1u)) {
           // 1 - 2^-25 is exactly halfway below 1. This independent rounding
           // witness also catches GCC moving the SIMD subtraction across MODE.

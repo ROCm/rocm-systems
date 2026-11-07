@@ -463,3 +463,20 @@ TEST(FpMulF64Gfx11, CapturedNans) {
   check_captured_gfx11<32, 64>(rj_arith_v_mul_f64_w32, mul_f64_lanes);
   check_captured_gfx11<64, 64>(rj_arith_v_mul_f64_w64, mul_f64_lanes);
 }
+
+// Strict FP-status requests cannot borrow a classifier qualified on another GPU target.
+TEST(FpMulF32Gfx1250, FpStatusQualification) {
+  for (auto cpu : rocjitsu::arith::test::supported_cpu_levels()) {
+    uint32_t a[64] = {0x7f800001}, b[64] = {0x3f800000}, out[64] = {};
+    const uint32_t *x = a, *y = b;
+    uint32_t *d = out, status = 0x80;
+    const uint64_t flags = cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL;
+    out[0] = 0xdeadbeef;
+    EXPECT_EQ(rj_arith_v_mul_f32_w32_gfx1250(flags, 1, 0, &d, &x, &y, &status),
+              RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS);
+    EXPECT_EQ(rj_arith_v_mul_f32_w64_gfx1250(flags, 1, 0, &d, &x, &y, &status),
+              RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS);
+    EXPECT_EQ(out[0], 0xdeadbeefU);
+    EXPECT_EQ(status, 0x80U);
+  }
+}

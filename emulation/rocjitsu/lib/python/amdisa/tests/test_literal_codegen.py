@@ -710,11 +710,8 @@ def test_vector_fmaak_execute_uses_fieldless_simm32_operand(arch):
 
     body = codegen._gen_execute_body(inst, sem, 'ENC_VOP2')
 
-    if arch == 'rdna4':
-        assert 'amdgpu::arith::execute_float_fma32' in body
-        assert 'vdst, src0, vsrc1, simm32,' in body
-    else:
-        assert 'std::bit_cast<float>(simm32.encoding_value_)' in body
+    assert 'amdgpu::arith::execute_float_fma32' in body
+    assert 'vdst, src0, vsrc1, simm32,' in body
     assert 'simm32_' not in body
 
 
