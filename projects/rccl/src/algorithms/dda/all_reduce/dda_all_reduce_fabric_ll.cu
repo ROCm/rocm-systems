@@ -192,7 +192,7 @@ static DdaArLL128Kernel<T> ddaArLL128TwoShotKernel(int nRanks, int wire) {
   });
 }
 
-// Smallest message the peer-split takes: below it the staged stores of n - 1 units per slice cost more than they hide.
+// Smallest message the peer-split takes: below it the tiers it replaces are faster.
 constexpr size_t kDdaArLL128SplitMinBytes = 2 * 1024 * 1024;
 
 template <typename T>
