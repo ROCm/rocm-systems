@@ -798,10 +798,10 @@ __device__ __forceinline__ bool canUseTdm(int thread, int nThreads, bool postOp,
   // One source, one or two destinations, no postOp.
   if (nSrcs != 1 || (nDsts != 1 && nDsts != 2) || postOp) return false;
 
-  // Every global address must reach the mover's direct path.
-  if (srcPtrs[0] == nullptr || ((uintptr_t)srcPtrs[0] & (RCCL_TDM_ALIGN - 1))) return false;
+  // Any alignment: the copy aligns both global legs itself and absorbs the offset in LDS.
+  if (srcPtrs[0] == nullptr) return false;
   for (int dst = 0; dst < nDsts; dst++) {
-    if (dstPtrs[dst] == nullptr || ((uintptr_t)dstPtrs[dst] & (RCCL_TDM_ALIGN - 1))) return false;
+    if (dstPtrs[dst] == nullptr) return false;
   }
 
   // The team entry point takes block warp indices, and the tensor op needs a converged wave.
