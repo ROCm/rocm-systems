@@ -382,6 +382,11 @@ execute_range(range_context_t& ctx, uint64_t& divergence_count)
 
     auto packets = build_pass_packets(ctx.record.dispatches());
 
+    // Every check that can decline the range has run, and nothing has been rewound yet.
+    if(!execute_commit_callback(ctx.plan, ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED))
+        return ROCPROFILER_RANGE_REPLAY_STATUS_VETOED;
+    warn_if_peer_memory_mapped(ctx.record.range_id());
+
     // Localized context control for this range's replay loop (shared with kernel replay): connects
     // the tool's PASS toggles to the services that read them at dispatch, without touching global
     // context state.

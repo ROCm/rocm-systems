@@ -131,6 +131,12 @@ rocprofiler_test_c_range_offset_host_replay(void)
     return offsetof(range_data_c_t, host_replay);
 }
 
+size_t
+rocprofiler_test_c_range_offset_replay_commit_cb(void)
+{
+    return offsetof(range_data_c_t, replay_commit_cb);
+}
+
 // The host-begin macro has to compile as a C statement: ISO C only allows sigsetjmp in a few
 // syntactic positions, and a macro that put it anywhere else would compile but be undefined
 // behaviour. Never called (the test does not link the SDK), and static inline so it is not

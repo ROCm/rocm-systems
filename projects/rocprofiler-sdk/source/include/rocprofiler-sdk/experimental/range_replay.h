@@ -72,6 +72,11 @@ typedef enum rocprofiler_range_replay_status_t  // NOLINT(performance-enum-size)
     ROCPROFILER_RANGE_REPLAY_STATUS_HOST_JMP_NOT_SET,  ///< Tool asked for host replay, but the
                                                        ///< application did not arm a sigsetjmp in
                                                        ///< the caller's frame
+    ROCPROFILER_RANGE_REPLAY_STATUS_VETOED,            ///< The range was replayable, but the tool's
+                                                       ///< replay_commit_cb returned zero
+    ROCPROFILER_RANGE_REPLAY_STATUS_COLLECTIVE_IN_RANGE,  ///< A communication-library kernel (an
+                                                          ///< RCCL collective or point-to-point
+                                                          ///< operation) ran inside the range
     ROCPROFILER_RANGE_REPLAY_STATUS_LAST,
 } rocprofiler_range_replay_status_t;
 
@@ -149,6 +154,10 @@ typedef struct rocprofiler_callback_tracing_range_replay_data_t
     uint64_t                          divergence_count;
     int                               host_replay;
 
+    int (*replay_commit_cb)(uint64_t                          range_id,
+                            rocprofiler_range_replay_status_t status,
+                            rocprofiler_user_data_t           user_data);
+
     /// @var pass_count_cb
     /// @brief [CONFIG] Tool-provided callback returning the total number of passes for this range,
     /// counting the application's own execution as pass 0. The tool sets this during CONFIG
@@ -199,6 +208,23 @@ typedef struct rocprofiler_callback_tracing_range_replay_data_t
     /// application to open the range with @ref ROCPROFILER_RANGE_REPLAY_HOST_BEGIN; otherwise the
     /// range declines with @ref ROCPROFILER_RANGE_REPLAY_STATUS_HOST_JMP_NOT_SET. Zero (the
     /// default) keeps packet replay.
+    ///
+    /// @var replay_commit_cb
+    /// @brief [CONFIG] Optional callback that lets ranges in several processes replay together.
+    /// When set, the SDK calls it exactly once per range from
+    /// @ref rocprofiler_range_replay_end, on the thread that opened the range, after the
+    /// application's own execution and before the first extra pass, whatever the outcome.
+    /// @p status is @ref ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED when the range is about to be
+    /// replayed and is otherwise the reason it will close declined. For a replayable range,
+    /// return non-zero to replay it or zero to abandon it, which closes it with
+    /// @ref ROCPROFILER_RANGE_REPLAY_STATUS_VETOED; for a declined range the return value is
+    /// ignored. Because it is also called for declined ranges, a tool can reduce the status over a
+    /// communicator here (an MPI allreduce, for example) and replay only when every participant
+    /// is replayable, so host-side communication inside a host-replay range (an MPI collective on
+    /// host buffers) is re-executed by all of them or by none. Device-side collectives are not
+    /// made replayable by agreement: a range that dispatches one declines with
+    /// @ref ROCPROFILER_RANGE_REPLAY_STATUS_COLLECTIVE_IN_RANGE.
+    /// The range's device locks are held during the call: it must not submit GPU work.
 } rocprofiler_callback_tracing_range_replay_data_t;
 
 /**

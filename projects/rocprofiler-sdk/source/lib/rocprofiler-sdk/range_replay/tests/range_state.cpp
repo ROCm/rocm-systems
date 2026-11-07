@@ -295,3 +295,55 @@ TEST(range_replay_state, code_object_unload_with_no_range_open_is_harmless)
     range_replay::note_code_object_unload();
     EXPECT_FALSE(range_replay::any_range_open());
 }
+
+TEST(range_replay_state, runtime_copy_kernels_are_classified_by_name)
+{
+    for(const auto* name : {"__amd_rocclr_copyBuffer",
+                            "__amd_rocclr_copyBufferAligned",
+                            "__amd_rocclr_copyBufferRect",
+                            "__amd_rocclr_copyImageToBuffer",
+                            "__amd_rocclr_streamOpsWrite",
+                            "__amd_rocclr_streamOpsWait",
+                            "__amd_rocclr_batchMemOp"})
+        EXPECT_TRUE(range_replay::is_runtime_copy_kernel(name)) << name;
+
+    for(const auto* name : {"__amd_rocclr_fillBufferAligned",
+                            "__amd_rocclr_fillImage",
+                            "copyBuffer",
+                            "my_copy_kernel",
+                            "",
+                            static_cast<const char*>(nullptr)})
+        EXPECT_FALSE(range_replay::is_runtime_copy_kernel(name)) << (name ? name : "(null)");
+}
+
+TEST(range_replay_state, collective_kernels_are_classified_by_name)
+{
+    for(const auto* name :
+        {"_Z23ncclDevKernel_Generic_224ncclDevKernelArgsStorageILm4096EE",
+         "_Z23ncclDevKernel_Generic_224ncclDevKernelArgsStorageILm4096EE.kd",
+         "ncclDevKernel_Generic_2(ncclDevKernelArgsStorage<4096ul>)",
+         "ncclDevKernel_AllReduce_Sum_f32_RING_LL",
+         "ncclKernel_SendRecv_RING_SIMPLE_Sum_int8_t",
+         "mscclKernel_Sum_float_LL",
+         "_Z43ncclSymkDevKernel_AllReduce_AGxLL_R_sum_f3221ncclSymkDevWorkArgs4K.kd",
+         "_ZN4meta5comms19ddaAllReduceFlatIpcIfLi8ELb0EEEvPKPT_S3_mPKS2_iNS0_"
+         "13IpcGpuBarrierES7_.kd",
+         "_ZN4meta5comms15ddaAllGatherIpcIaLi8ELb0EEEvPKPT_S3_mPKS2_iNS0_"
+         "13IpcGpuBarrierE.kd"})
+        EXPECT_TRUE(range_replay::is_collective_kernel(name)) << name;
+
+    for(const auto* name : {"__amd_rocclr_copyBuffer",
+                            "my_nccl_like_kernel",
+                            "_Z6jacobiPKfPfi",
+                            "_ZN12_GLOBAL__N_16jacobiEPKfPfi",
+                            "_ZN12_GLOBAL__N_113oneRankReduceI7FuncSumIfEEEvPvS3_S3_mmb.kd",
+                            "_ZL21hierarchicalAGShufflePKcPcmii.kd",
+                            "_ZN4meta6kernelEv",
+                            "_ZN4metaE",
+                            "_Z99ncclDevKernel",
+                            "_ZN",
+                            "_Z",
+                            "",
+                            static_cast<const char*>(nullptr)})
+        EXPECT_FALSE(range_replay::is_collective_kernel(name)) << (name ? name : "(null)");
+}

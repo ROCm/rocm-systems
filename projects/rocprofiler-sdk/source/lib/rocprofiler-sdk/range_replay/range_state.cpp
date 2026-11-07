@@ -42,6 +42,8 @@
 #include <cstring>
 #include <memory>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -100,7 +102,57 @@ struct kernarg_layout_t
     uint32_t size           = 0;
     uint32_t alignment      = 0;
     uint64_t code_object_id = 0;
+    bool     runtime_copy   = false;
+    bool     collective     = false;
 };
+
+// Kernel symbol names are as the code object stores them, so a C++ kernel's is mangled. Rebuilds
+// the leading qualified name -- "ns::kernel" for "_ZN2ns6kernel...", "kernel" for "_Z6kernel..."
+// or "_ZL6kernel..." -- which is all the matching below needs. Anything else is returned as is.
+std::string
+qualified_kernel_name(std::string_view name)
+{
+    auto take_source_name = [&name](std::string& out) {
+        auto len = size_t{0};
+        auto pos = size_t{0};
+        while(pos < name.size() && name[pos] >= '0' && name[pos] <= '9')
+            len = len * 10 + static_cast<size_t>(name[pos++] - '0');
+        if(pos == 0 || len == 0 || pos + len > name.size()) return false;
+        if(!out.empty()) out += "::";
+        out.append(name.substr(pos, len));
+        name.remove_prefix(pos + len);
+        return true;
+    };
+
+    if(name.substr(0, 2) != "_Z") return std::string{name};
+    name.remove_prefix(2);
+    if(name.substr(0, 1) == "L") name.remove_prefix(1);
+
+    auto out = std::string{};
+    if(name.substr(0, 1) == "N")
+    {
+        name.remove_prefix(1);
+        while(!name.empty() && (name[0] == 'K' || name[0] == 'V' || name[0] == 'r'))
+            name.remove_prefix(1);
+        while(take_source_name(out))
+        {}
+    }
+    else
+    {
+        take_source_name(out);
+    }
+    return out;
+}
+
+bool
+has_any_prefix(const char* kernel_name, std::initializer_list<std::string_view> prefixes)
+{
+    if(kernel_name == nullptr) return false;
+    const auto name = qualified_kernel_name(kernel_name);
+    for(auto prefix : prefixes)
+        if(std::string_view{name}.substr(0, prefix.size()) == prefix) return true;
+    return false;
+}
 
 using kernarg_cache_t = std::unordered_map<uint64_t, kernarg_layout_t>;
 
@@ -142,8 +194,11 @@ kernarg_layout(uint64_t kernel_object)
             if(!symbol) continue;
             const auto& data = symbol->rocp_data;
             if(data.kernel_object != kernel_object) continue;
-            found = kernarg_layout_t{
-                data.kernarg_segment_size, data.kernarg_segment_alignment, data.code_object_id};
+            found = kernarg_layout_t{data.kernarg_segment_size,
+                                     data.kernarg_segment_alignment,
+                                     data.code_object_id,
+                                     is_runtime_copy_kernel(data.kernel_name),
+                                     is_collective_kernel(data.kernel_name)};
             break;
         }
     });
@@ -430,7 +485,17 @@ note_submission(const hsa::Queue&              queue,
 
         auto dispatches = size_t{0};
         for(size_t i = 0; i < packet_count; ++i)
-            if(is_dispatch_packet(packets[i])) ++dispatches;
+        {
+            if(!is_dispatch_packet(packets[i])) continue;
+            ++dispatches;
+            const auto layout = kernarg_layout(packets[i].kernel_dispatch.kernel_object);
+            if(layout && layout->collective)
+            {
+                ctx->record.count_dispatches(dispatches);
+                ctx->record.decline(ROCPROFILER_RANGE_REPLAY_STATUS_COLLECTIVE_IN_RANGE);
+                return;
+            }
+        }
         ctx->record.count_dispatches(dispatches);
         return;
     }
@@ -483,6 +548,16 @@ note_submission(const hsa::Queue&              queue,
             return;
         }
         if(!ctx->record.admit_code_object(layout->code_object_id)) return;
+        if(layout->collective)
+        {
+            ctx->record.decline(ROCPROFILER_RANGE_REPLAY_STATUS_COLLECTIVE_IN_RANGE);
+            return;
+        }
+        if(layout->runtime_copy)
+        {
+            ctx->record.decline(ROCPROFILER_RANGE_REPLAY_STATUS_MEMORY_COPY_IN_RANGE);
+            return;
+        }
 
         // The application's completion signal must never be re-fired: it has already been consumed
         // (and may have been reused or destroyed) by the time the range closes. Replayed passes get
@@ -506,6 +581,40 @@ note_submission(const hsa::Queue&              queue,
 
         if(!ctx->record.add_dispatch(std::move(dispatch))) return;
     }
+}
+
+bool
+is_runtime_copy_kernel(const char* kernel_name)
+{
+    return has_any_prefix(kernel_name,
+                          {std::string_view{"__amd_rocclr_copy"},
+                           std::string_view{"__amd_rocclr_streamOps"},
+                           std::string_view{"__amd_rocclr_batchMemOp"}});
+}
+
+bool
+is_collective_kernel(const char* kernel_name)
+{
+    return has_any_prefix(kernel_name,
+                          {std::string_view{"ncclDevKernel"},
+                           std::string_view{"ncclSymkDevKernel"},
+                           std::string_view{"ncclKernel"},
+                           std::string_view{"mscclKernel"},
+                           std::string_view{"meta::comms::"}});
+}
+
+void
+warn_if_peer_memory_mapped(uint64_t range_id)
+{
+    if(!kernel_replay::memory_tracker::peer_memory_mapped()) return;
+    static std::atomic<bool> warned{false};
+    if(warned.exchange(true, std::memory_order_relaxed)) return;
+    ROCP_WARNING << fmt::format(
+        "range replay: range {} is replayed in a process that maps another process's device memory "
+        "(IPC). A kernel in the range that writes that memory -- a device-initiated put or atomic "
+        "such as rocSHMEM's -- is re-executed by every pass, and the other process does not rewind "
+        "it. Bracket compute between communication steps",
+        range_id);
 }
 
 void

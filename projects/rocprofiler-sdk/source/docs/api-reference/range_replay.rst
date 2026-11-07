@@ -97,7 +97,8 @@ Cast ``record.payload`` to ``rocprofiler_callback_tracing_range_replay_data_t*``
      - Tool responsibility
    * - ``ROCPROFILER_RANGE_REPLAY_CONFIG``
      - ``PHASE_ENTER``
-     - Set ``pass_count_cb``. Optionally set ``replay_continue_cb``. May stash per-range state in
+     - Set ``pass_count_cb``. Optionally set ``replay_continue_cb``, ``host_replay``, and
+       ``replay_commit_cb``. May stash per-range state in
        ``user_data``, which every later callback for this range receives.
    * - ``ROCPROFILER_RANGE_REPLAY_CONFIG``
      - ``PHASE_EXIT``
@@ -147,6 +148,15 @@ The statuses a tool is most likely to see in practice are ``MULTI_QUEUE`` and ``
 phase spans more than one HIP stream or device), ``CONCURRENT_DISPATCH`` (another thread was
 submitting to the same device), and ``MEMORY_COPY_IN_RANGE`` (the phase contains an ``hipMemcpy`` to
 device memory). See :ref:`range-replay-soundness` for the complete table.
+
+Replaying across processes
+--------------------------
+
+``replay_commit_cb`` is called exactly once per range, before the first extra pass, on every
+outcome, with the status the range would close with. Returning zero for a replayable range closes it
+with ``VETOED``. An MPI tool allreduces the status in it so that all ranks replay a range or none
+do. Ranges that dispatch RCCL kernels decline with ``COLLECTIVE_IN_RANGE`` whatever the tool
+decides; bracket the compute between communication steps.
 
 Verifying a range once
 ----------------------

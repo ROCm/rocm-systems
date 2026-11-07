@@ -538,3 +538,94 @@ TEST(range_replay_host, continuation_unload_is_folded_after_reacquiring_executab
     EXPECT_EQ(result.status, ROCPROFILER_RANGE_REPLAY_STATUS_CODE_OBJECT_CHANGED_IN_RANGE);
     EXPECT_EQ(value, 8);
 }
+
+namespace
+{
+struct commit_probe_t
+{
+    int                               calls  = 0;
+    int                               answer = 1;
+    rocprofiler_range_replay_status_t status = ROCPROFILER_RANGE_REPLAY_STATUS_LAST;
+};
+
+int
+probe_commit(uint64_t, rocprofiler_range_replay_status_t status, rocprofiler_user_data_t data)
+{
+    auto& probe = *static_cast<commit_probe_t*>(data.ptr);
+    ++probe.calls;
+    probe.status = status;
+    return probe.answer;
+}
+
+range_replay::range_context_t
+host_range_at_pass_zero(commit_probe_t& probe, int& value)
+{
+    auto ctx                  = range_replay::range_context_t{};
+    ctx.plan.replay_requested = true;
+    ctx.plan.total_passes     = 2;
+    ctx.plan.user_data.ptr    = &probe;
+    ctx.plan.replay_commit_cb = probe_commit;
+    ctx.record.count_dispatches(1);
+    ctx.host.snapshot_taken = true;
+    ctx.host.regions.emplace_back(range_replay::host::capture_region(&value, sizeof(value)));
+    return ctx;
+}
+}  // namespace
+
+TEST(range_replay_host, commit_veto_closes_the_range_before_any_restore)
+{
+    auto probe   = commit_probe_t{};
+    probe.answer = 0;
+    auto value   = 7;
+    auto ctx     = host_range_at_pass_zero(probe, value);
+    ++value;
+
+    const auto result = range_replay::host::finish_pass(ctx);
+    EXPECT_EQ(result.next_pass, 0U);
+    EXPECT_EQ(result.status, ROCPROFILER_RANGE_REPLAY_STATUS_VETOED);
+    EXPECT_EQ(probe.calls, 1);
+    EXPECT_EQ(probe.status, ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED);
+    EXPECT_EQ(value, 8) << "a vetoed range keeps the application's own result";
+}
+
+TEST(range_replay_host, commit_is_asked_once_before_the_first_extra_pass)
+{
+    auto probe = commit_probe_t{};
+    auto value = 7;
+    auto ctx   = host_range_at_pass_zero(probe, value);
+    ++value;
+
+    const auto first = range_replay::host::finish_pass(ctx);
+    EXPECT_EQ(first.next_pass, 1U);
+    EXPECT_EQ(probe.calls, 1);
+    EXPECT_EQ(value, 7) << "the entry state is restored after the commit";
+
+    ++value;
+    const auto last = range_replay::host::finish_pass(ctx);
+    EXPECT_EQ(last.next_pass, 0U);
+    EXPECT_EQ(last.status, ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED);
+    EXPECT_EQ(probe.calls, 1) << "later passes must not ask again";
+}
+
+TEST(range_replay_host, a_declined_range_is_committed_once_with_its_reason)
+{
+    auto probe            = commit_probe_t{};
+    probe.answer          = 1;
+    auto plan             = range_replay::range_plan_t{};
+    plan.user_data.ptr    = &probe;
+    plan.replay_commit_cb = probe_commit;
+
+    EXPECT_TRUE(range_replay::execute_commit_callback(
+        plan, ROCPROFILER_RANGE_REPLAY_STATUS_HOST_JMP_NOT_SET));
+    EXPECT_TRUE(
+        range_replay::execute_commit_callback(plan, ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED));
+    EXPECT_EQ(probe.calls, 1);
+    EXPECT_EQ(probe.status, ROCPROFILER_RANGE_REPLAY_STATUS_HOST_JMP_NOT_SET);
+}
+
+TEST(range_replay_host, no_commit_callback_means_replay)
+{
+    auto plan = range_replay::range_plan_t{};
+    EXPECT_TRUE(
+        range_replay::execute_commit_callback(plan, ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED));
+}

@@ -92,6 +92,36 @@ decltype(AmdExtTable{}.hsa_amd_memory_pool_allocate_fn) next_pool_allocate   = n
 decltype(AmdExtTable{}.hsa_amd_memory_pool_free_fn)     next_pool_free       = nullptr;
 decltype(CoreApiTable{}.hsa_memory_allocate_fn)         next_memory_allocate = nullptr;
 decltype(CoreApiTable{}.hsa_memory_free_fn)             next_memory_free     = nullptr;
+decltype(AmdExtTable{}.hsa_amd_ipc_memory_attach_fn)    next_ipc_attach      = nullptr;
+decltype(AmdExtTable{}.hsa_amd_ipc_memory_detach_fn)    next_ipc_detach      = nullptr;
+
+// Trivially destructible, so the wrappers may still update it during finalization.
+std::atomic<int64_t>&
+peer_mapping_count()
+{
+    static auto count = std::atomic<int64_t>{0};
+    return count;
+}
+
+hsa_status_t
+ipc_attach_wrapper(const hsa_amd_ipc_memory_t* handle,
+                   size_t                      len,
+                   uint32_t                    num_agents,
+                   const hsa_agent_t*          mapping_agents,
+                   void**                      mapped_ptr)
+{
+    const auto st = next_ipc_attach(handle, len, num_agents, mapping_agents, mapped_ptr);
+    if(st == HSA_STATUS_SUCCESS) peer_mapping_count().fetch_add(1, std::memory_order_relaxed);
+    return st;
+}
+
+hsa_status_t
+ipc_detach_wrapper(void* mapped_ptr)
+{
+    const auto st = next_ipc_detach(mapped_ptr);
+    if(st == HSA_STATUS_SUCCESS) peer_mapping_count().fetch_sub(1, std::memory_order_relaxed);
+    return st;
+}
 
 // HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG is absent from older HSA headers
 constexpr uint32_t memory_pool_executable_flag = (1U << 2);
@@ -231,6 +261,12 @@ bool
 tracking_enabled()
 {
     return tracking_flag().load(std::memory_order_relaxed);
+}
+
+bool
+peer_memory_mapped()
+{
+    return peer_mapping_count().load(std::memory_order_relaxed) > 0;
 }
 
 void
@@ -392,6 +428,16 @@ memory_tracker_init(hsa::hsa_amd_ext_table_t* table, uint64_t lib_instance)
     memory_tracker::next_pool_free         = table->hsa_amd_memory_pool_free_fn;
     table->hsa_amd_memory_pool_allocate_fn = memory_tracker::pool_allocate_wrapper;
     table->hsa_amd_memory_pool_free_fn     = memory_tracker::pool_free_wrapper;
+
+    if(table->hsa_amd_ipc_memory_attach_fn != nullptr &&
+       table->hsa_amd_ipc_memory_detach_fn != nullptr &&
+       table->hsa_amd_ipc_memory_attach_fn != memory_tracker::ipc_attach_wrapper)
+    {
+        memory_tracker::next_ipc_attach     = table->hsa_amd_ipc_memory_attach_fn;
+        memory_tracker::next_ipc_detach     = table->hsa_amd_ipc_memory_detach_fn;
+        table->hsa_amd_ipc_memory_attach_fn = memory_tracker::ipc_attach_wrapper;
+        table->hsa_amd_ipc_memory_detach_fn = memory_tracker::ipc_detach_wrapper;
+    }
 }
 }  // namespace kernel_replay
 }  // namespace rocprofiler

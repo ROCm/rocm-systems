@@ -75,6 +75,8 @@ size_t
 rocprofiler_test_c_range_offset_divergence_count(void);
 size_t
 rocprofiler_test_c_range_offset_host_replay(void);
+size_t
+rocprofiler_test_c_range_offset_replay_commit_cb(void);
 int
 rocprofiler_test_c_range_operation_last(void);
 int
@@ -151,7 +153,8 @@ TEST(range_replay_abi, members_are_in_declaration_order)
     EXPECT_LT(offsetof(range_data_t, dispatch_count), offsetof(range_data_t, status));
     EXPECT_LT(offsetof(range_data_t, status), offsetof(range_data_t, divergence_count));
     EXPECT_LT(offsetof(range_data_t, divergence_count), offsetof(range_data_t, host_replay));
-    EXPECT_LT(offsetof(range_data_t, host_replay), sizeof(range_data_t));
+    EXPECT_LT(offsetof(range_data_t, host_replay), offsetof(range_data_t, replay_commit_cb));
+    EXPECT_LT(offsetof(range_data_t, replay_commit_cb), sizeof(range_data_t));
 }
 
 // No member may overlap the one after it, and the last member must fit inside the struct. This
@@ -185,8 +188,10 @@ TEST(range_replay_abi, members_do_not_overlap_and_fit)
               offsetof(range_data_t, status) + sizeof(range_data_t{}.status));
     EXPECT_GE(offsetof(range_data_t, host_replay),
               offsetof(range_data_t, divergence_count) + sizeof(range_data_t{}.divergence_count));
-    EXPECT_GE(sizeof(range_data_t),
+    EXPECT_GE(offsetof(range_data_t, replay_commit_cb),
               offsetof(range_data_t, host_replay) + sizeof(range_data_t{}.host_replay));
+    EXPECT_GE(sizeof(range_data_t),
+              offsetof(range_data_t, replay_commit_cb) + sizeof(range_data_t{}.replay_commit_cb));
 }
 
 // Pass counters and the counts reported at CLOSE are documented as uint64_t. A tool reading them
@@ -212,6 +217,7 @@ TEST(range_replay_abi, callback_signatures_are_pinned)
     using pass_count_fn = uint64_t (*)(uint64_t, rocprofiler_user_data_t);
     using continue_fn   = int (*)(uint64_t, uint64_t, uint64_t, rocprofiler_user_data_t);
     using toggle_fn     = rocprofiler_status_t (*)(rocprofiler_context_id_t);
+    using commit_fn = int (*)(uint64_t, rocprofiler_range_replay_status_t, rocprofiler_user_data_t);
 
     EXPECT_TRUE((std::is_same<decltype(range_data_t{}.pass_count_cb), pass_count_fn>::value));
     EXPECT_TRUE((std::is_same<decltype(range_data_t{}.replay_continue_cb), continue_fn>::value));
@@ -219,6 +225,7 @@ TEST(range_replay_abi, callback_signatures_are_pinned)
         (std::is_same<decltype(range_data_t{}.replay_local_start_context_cb), toggle_fn>::value));
     EXPECT_TRUE(
         (std::is_same<decltype(range_data_t{}.replay_local_stop_context_cb), toggle_fn>::value));
+    EXPECT_TRUE((std::is_same<decltype(range_data_t{}.replay_commit_cb), commit_fn>::value));
 }
 
 // A zeroed record must mean "do not replay this range". The header documents a NULL pass_count_cb
@@ -236,6 +243,7 @@ TEST(range_replay_abi, zero_initialized_record_opts_out_of_replay)
     EXPECT_EQ(rec.dispatch_count, 0u);
     EXPECT_EQ(rec.divergence_count, 0u);
     EXPECT_EQ(rec.host_replay, 0);
+    EXPECT_EQ(rec.replay_commit_cb, nullptr);
     EXPECT_EQ(rec.size, 0u);
 }
 
@@ -327,7 +335,9 @@ TEST(range_replay_abi, status_enum_values_are_stable)
     EXPECT_EQ(static_cast<int>(ROCPROFILER_RANGE_REPLAY_STATUS_UNSUPPORTED_QUEUE_PATH), 13);
     EXPECT_EQ(static_cast<int>(ROCPROFILER_RANGE_REPLAY_STATUS_CODE_OBJECT_CHANGED_IN_RANGE), 14);
     EXPECT_EQ(static_cast<int>(ROCPROFILER_RANGE_REPLAY_STATUS_HOST_JMP_NOT_SET), 15);
-    EXPECT_EQ(static_cast<int>(ROCPROFILER_RANGE_REPLAY_STATUS_LAST), 16);
+    EXPECT_EQ(static_cast<int>(ROCPROFILER_RANGE_REPLAY_STATUS_VETOED), 16);
+    EXPECT_EQ(static_cast<int>(ROCPROFILER_RANGE_REPLAY_STATUS_COLLECTIVE_IN_RANGE), 17);
+    EXPECT_EQ(static_cast<int>(ROCPROFILER_RANGE_REPLAY_STATUS_LAST), 18);
 }
 
 // Every decline reason must be distinguishable from REPLAYED, since that is the single comparison
@@ -480,6 +490,8 @@ TEST(range_replay_abi, c_and_cxx_agree_on_every_field_offset)
     EXPECT_EQ(rocprofiler_test_c_range_offset_divergence_count(),
               offsetof(range_data_t, divergence_count));
     EXPECT_EQ(rocprofiler_test_c_range_offset_host_replay(), offsetof(range_data_t, host_replay));
+    EXPECT_EQ(rocprofiler_test_c_range_offset_replay_commit_cb(),
+              offsetof(range_data_t, replay_commit_cb));
 }
 
 // `status` is the record's only enum-typed member. If the two languages pick different underlying

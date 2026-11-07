@@ -50,6 +50,10 @@ close_range(range_context_t&                  ctx,
             rocprofiler_range_replay_status_t status,
             uint64_t                          divergence_count)
 {
+    // A range declined before either replay path asked still gets its one commit call, so a tool
+    // reducing the decision across processes sees every rank.
+    execute_commit_callback(ctx.plan, status);
+
     // A declined range never enters the pass loop, so its pass-0 counter record is still on the
     // consumer thread here. Deliver it before CLOSE on every outcome.
     counters::flush_callback_thread();

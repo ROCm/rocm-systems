@@ -26,6 +26,7 @@ are skipped, and the reason arrives as the `CLOSE` callback's `status`.
 | Recorded code stays loaded, and its module variables are in the snapshot | An unload frees code a recorded packet points at; a code object loaded after the entry snapshot has `__device__` / `__constant__` globals the snapshot never saw | declined |
 | Dispatch packets re-submittable | The recorded packets must reach the GPU through the same path the application used | requires the interception path; queue interposition declines |
 | Everything read is in the snapshot | Unified memory, host memory, and host-side state are not captured | **not checkable** — see the divergence check |
+| No kernel writes another process's memory | A device-initiated put or atomic (rocSHMEM) lands in a peer's fine-grained heap, which no snapshot covers and the peer does not rewind | **not checkable** — warned when the process maps peer memory over IPC |
 
 ## The decline decision table
 
@@ -42,6 +43,9 @@ GPU dependencies so the table below can be unit tested directly.
 | Recorded dispatches exceed the budget (4096) | `PROGRAM_TOO_LARGE` | record time |
 | Another thread dispatches to the bound agent | `CONCURRENT_DISPATCH` | cross-thread, folded in |
 | Async copy writes memory owned by the bound agent | `MEMORY_COPY_IN_RANGE` | cross-thread, folded in |
+| A HIP runtime copy or stream-memory kernel (`__amd_rocclr_copy*`, `__amd_rocclr_streamOps*`, `__amd_rocclr_batchMemOp*`) is recorded | `MEMORY_COPY_IN_RANGE` | record time |
+| An RCCL kernel (`ncclDevKernel*`, `ncclSymkDevKernel*`, `ncclKernel*`, `mscclKernel*`, `meta::comms::*`) is dispatched, in either replay mode | `COLLECTIVE_IN_RANGE` | record time |
+| The tool's `replay_commit_cb` returned zero for a replayable range | `VETOED` | before the first extra pass |
 | Any code object is unloaded while the range is bound | `CODE_OBJECT_CHANGED_IN_RANGE` | cross-thread, folded in |
 | Device allocation created or freed inside the range | `ALLOCATION_CHANGED_IN_RANGE` | close time |
 | Snapshot capture or a later snapshot failed | `SNAPSHOT_FAILED` | snapshot time |
@@ -188,6 +192,45 @@ byte-exact, and some kernels produce different bytes from identical inputs: floa
 summation order follows wave scheduling. For such a range, divergence is expected even when the
 range is self-contained, so validate with deterministic kernels, or with the non-deterministic ones
 configured to be deterministic, before trusting the check.
+
+### Runtime copy kernels
+
+HIP performs small and host-staged copies with its own blit kernels on the application's queue
+rather than on an SDMA engine, so they arrive at the recorder as ordinary dispatches. Re-submitting
+one is not the same as re-running the copy: a device-to-host blit overwrites pinned host memory the
+application has since modified, and a host-to-device blit reads whatever that host memory holds by
+then. A staged `hipMemcpyAsync` D2H, host `MPI_Allreduce`, H2D sequence -- the usual pattern for
+MPI without GPU awareness -- replayed with `divergence_count` 2 before these kernels declined. The
+decline matches the SDMA path's. Fill kernels are kept: they write a value carried in their
+kernarg bytes, so they replay like any recorded kernel.
+
+### Communication kernels
+
+RCCL keeps each connection's step counters in device memory, which the snapshot rewinds, and
+compares them against flags its peers write into fine-grained and peer-mapped memory, which it does
+not. A replayed collective then sees flags that already satisfy its waits and completes against
+stale buffers without its peers, or waits for a peer that has moved on. Both were observed on four
+MI325X ranks: three ranks finished three replayed `ncclAllReduce` passes before the fourth had
+started its first, and the fourth then hung. Agreement between ranks does not help, since the state
+is inconsistent within each rank, so a range that dispatches an RCCL kernel declines in both replay
+modes.
+
+RCCL chooses the kernel per call, so the match covers every cross-rank family it ships: the generic
+`ncclDevKernel` and symmetric-memory `ncclSymkDevKernel` kernels, MSCCL's `mscclKernel`, and the IPC
+kernels in the `meta::comms` namespace. The last matter in practice: on a full node of eight MI325X
+GPUs a small `ncclAllReduce` runs as `meta::comms::ddaAllReduceFlatIpc`, which spins on barriers in
+its peers' memory. Kernel names are matched on their leading qualified name after demangling the
+`_Z`, `_ZL` and `_ZN...E` prefixes. RCCL loads its code objects from memory, so the code-object URI
+does not identify them. Its single-rank kernels (`oneRankReduce`) touch only local memory and are
+not matched.
+
+User kernels that communicate on the device -- rocSHMEM puts and atomics, or hand-written kernels on
+IPC-mapped buffers -- cannot be recognized by name. Their writes land in another process's memory,
+so a replayed pass repeats them and nothing rewinds them: in a four-PE test where each kernel adds 1
+to its neighbour's symmetric-heap counter, both replay modes reported `REPLAYED` with
+`divergence_count` 0 and every counter ended at 4 instead of 1. When a process has peer memory
+mapped through HSA IPC, the SDK warns once on the first replayed range. It does not decline: every
+RCCL application maps peer memory, and the compute phases between its collectives replay soundly.
 
 ## What the compiler and runtime add
 

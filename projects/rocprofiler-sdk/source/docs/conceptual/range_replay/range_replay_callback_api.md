@@ -82,6 +82,10 @@ typedef struct rocprofiler_callback_tracing_range_replay_data_t
     uint64_t                          dispatch_count;
     rocprofiler_range_replay_status_t status;
     uint64_t                          divergence_count;
+    int                               host_replay;
+
+    int (*replay_commit_cb)(uint64_t range_id, rocprofiler_range_replay_status_t status,
+                            rocprofiler_user_data_t user_data);
 } rocprofiler_callback_tracing_range_replay_data_t;
 ```
 
@@ -97,6 +101,8 @@ typedef struct rocprofiler_callback_tracing_range_replay_data_t
 | `dispatch_count` | `PASS`, `CLOSE` | dispatches observed in the range |
 | `status` | `CLOSE` | `REPLAYED`, or why the range was declined |
 | `divergence_count` | `CLOSE` | snapshot regions that differed between pass 0 and the final pass |
+| `host_replay` | `CONFIG` | **tool writes, optional.** Re-run the host code instead of re-submitting packets |
+| `replay_commit_cb` | `CONFIG` | **tool writes, optional.** Last say on replaying, once per range, before any extra pass |
 
 `dispatch_count` at `CLOSE` reports the dispatches *observed*, not the dispatches retained. A
 declined range drops its recorded packets immediately (they hold a kernarg copy each), but "how many
@@ -123,6 +129,37 @@ this range" from "the SDK could not".
 
 `replay_continue_cb` returns non-zero to keep going and zero to stop. It is consulted after each
 re-executed pass, and is required when `pass_count_cb` returns 0.
+
+## Committing to a replay
+
+`replay_commit_cb` is called exactly once per range, from `rocprofiler_range_replay_end()` on the
+thread that opened it, after the application's own execution and before the first extra pass, on
+every outcome. Its `status` is `REPLAYED` when every check has passed and nothing has been rewound
+yet, and otherwise the reason the range will close declined. For a replayable range, returning zero
+abandons it: the range closes with `ROCPROFILER_RANGE_REPLAY_STATUS_VETOED` and the application's
+own result is kept. For a declined range the return value is ignored.
+
+Because declined ranges are reported too, every participant of a multi-process job reaches the call
+once per range, which is what a tool needs to agree on the decision. A tool that profiles an MPI
+job reduces the status across the communicator and replays only when every rank can:
+
+```c
+static int
+commit_across_ranks(uint64_t range_id, rocprofiler_range_replay_status_t status,
+                    rocprofiler_user_data_t user_data)
+{
+    int local = (status == ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED);
+    int all   = local;
+    MPI_Allreduce(&local, &all, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+    return all;
+}
+```
+
+Without it, a range declined on one rank and replayed on the others re-executes a host collective
+on some ranks only; under Open MPI that aborts with `MPI_ERR_TRUNCATE` at the next collective. The
+range's device locks are held during the call, so it must not submit GPU work. See
+[Multi-GPU and collectives](index.md#multi-gpu-and-collectives) for what agreement does and does
+not make replayable.
 
 ## Localized context control
 

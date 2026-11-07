@@ -63,6 +63,11 @@ struct range_plan_t
 
     uint64_t (*pass_count_cb)(uint64_t, rocprofiler_user_data_t)                     = nullptr;
     int (*replay_continue_cb)(uint64_t, uint64_t, uint64_t, rocprofiler_user_data_t) = nullptr;
+    int (*replay_commit_cb)(uint64_t,
+                            rocprofiler_range_replay_status_t,
+                            rocprofiler_user_data_t)                                 = nullptr;
+    // replay_commit_cb is delivered once per range; set when it has been, or would have been.
+    bool commit_delivered = false;
 
     uint64_t total_passes = 0;
     bool     indefinite   = false;
@@ -142,6 +147,12 @@ execute_close_callback(const range_plan_t&               plan,
                        rocprofiler_thread_id_t           thr_id,
                        uint64_t                          internal_corr_id,
                        uint64_t                          ancestor_corr_id);
+
+// Deliver replay_commit_cb with the status the range would close with, once per range. Returns
+// whether a range whose `status` is REPLAYED should go ahead; later calls return true without
+// calling the tool, so the fallback in close() never re-asks after a replay path already did.
+bool
+execute_commit_callback(range_plan_t& plan, rocprofiler_range_replay_status_t status);
 
 // Whether another pass should run after `current_pass`.
 bool

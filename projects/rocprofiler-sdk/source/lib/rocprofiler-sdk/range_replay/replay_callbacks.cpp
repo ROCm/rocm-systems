@@ -132,6 +132,7 @@ execute_config_callback(uint64_t                range_id,
 
     plan.pass_count_cb            = plan.config_data.pass_count_cb;
     plan.replay_continue_cb       = plan.config_data.replay_continue_cb;
+    plan.replay_commit_cb         = plan.config_data.replay_commit_cb;
     plan.host_replay              = (plan.config_data.host_replay != 0);
     plan.config_contexts          = std::move(config_contexts);
     plan.external_correlation_ids = std::move(extern_corr_ids);
@@ -273,6 +274,18 @@ execute_close_callback(const range_plan_t&               plan,
                                           ROCPROFILER_CALLBACK_TRACING_RANGE_REPLAY,
                                           ROCPROFILER_RANGE_REPLAY_CLOSE,
                                           close_data);
+}
+
+bool
+execute_commit_callback(range_plan_t& plan, rocprofiler_range_replay_status_t status)
+{
+    if(plan.commit_delivered) return true;
+    plan.commit_delivered = true;
+    if(!plan.replay_commit_cb) return true;
+
+    const bool replay =
+        plan.replay_commit_cb(plan.config_data.range_id, status, plan.user_data) != 0;
+    return status != ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED || replay;
 }
 
 bool

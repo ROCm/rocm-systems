@@ -392,6 +392,22 @@ finish_pass(range_context_t& ctx)
 
     if(pass == 0 && divergence_check_enabled()) store_exit_digests(host);
 
+    if(pass == 0)
+    {
+        // The tool may block here on other processes, so lifetime protection is not held, as for
+        // replay_continue_cb. What it could have changed is re-checked before the restore.
+        executable_guard.unlock();
+        const bool commit =
+            execute_commit_callback(ctx.plan, ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED);
+        executable_guard.lock();
+        fold_external_decline(ctx);
+        if(!ctx.record.eligible()) return finish(ctx.record.status());
+        if(!allocations_unchanged(host))
+            return finish(ROCPROFILER_RANGE_REPLAY_STATUS_ALLOCATION_CHANGED_IN_RANGE);
+        if(!commit) return finish(ROCPROFILER_RANGE_REPLAY_STATUS_VETOED);
+        warn_if_peer_memory_mapped(ctx.record.range_id());
+    }
+
     // The application's own run always gets at least one re-execution once the tool asked for
     // replay, matching packet replay, which never consults replay_continue_cb before pass 1.
     const bool is_final = !ctx.plan.indefinite && (pass + 1 >= ctx.plan.total_passes);

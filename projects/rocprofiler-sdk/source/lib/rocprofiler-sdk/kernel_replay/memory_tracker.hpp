@@ -70,6 +70,12 @@ set_tracking_enabled(bool enabled);
 bool
 tracking_enabled();
 
+// True while this process has device memory of another process mapped through HSA IPC (HIP's
+// hipIpcOpenMemHandle, which RCCL and rocSHMEM use for intra-node peers). A kernel can then write
+// memory that no snapshot in this process covers and that the owning process does not rewind.
+bool
+peer_memory_mapped();
+
 void
 record_alloc(void* ptr, size_t size);
 

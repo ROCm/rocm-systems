@@ -132,48 +132,62 @@ lifts the rows marked *(packet only)*; see [Host range replay](range_replay_host
 | Unified / managed memory, host memory, fine-grained memory, VM-mapped allocations | not restored between passes; not detected — see the divergence check |
 | Host state *(packet only)* | never rewound; a range whose kernels consume values the host recomputed inside it is not a replay candidate |
 | HIP graph launches inside a range *(packet only)* | declined (`GRAPH_LAUNCH`) |
-| Async copies into device memory inside a range *(packet only)* | declined (`MEMORY_COPY_IN_RANGE`) |
+| Async copies into device memory inside a range, including HIP's blit-kernel copies *(packet only)* | declined (`MEMORY_COPY_IN_RANGE`) |
+| RCCL collectives or point-to-point operations inside a range | declined (`COLLECTIVE_IN_RANGE`) |
+| Device-initiated writes to another process's memory (rocSHMEM, IPC kernels) | **not handled**: repeated on every pass; warned when peer memory is mapped |
 | Code objects loaded or unloaded inside a range (lazy module loading, JIT, `hipModuleUnload`) | declined (`CODE_OBJECT_CHANGED_IN_RANGE`); run a range once before measuring it |
 | Kernels that call `printf` | replayed output is printed again (hostcall `printf`, HIP's default) or lost (`-mprintf-kind=buffered`); see [Soundness and declining](range_replay_soundness.md) |
 | Concurrency within a pass | passes are serialized dispatch-by-dispatch, so concurrency-sensitive measurements differ from pass 0 |
 
 ## Multi-GPU and collectives
 
-Multi-GPU ranges — the case that matters for RCCL and MPI, where a range's dispatches on one agent
-are causally tied to dispatches and transfers on another — are follow-on work. Two parts of the
-existing design already point the right way, and one piece is missing.
+Each MPI rank runs its own range in its own process. Snapshots are agent-scoped and per-process,
+so ranks replay independently; what they have to share is the decision.
 
-What works in favor: snapshots are agent-scoped and the replay lock is per-agent, so per-rank
-snapshots *compose*. A collective's kernels write into peer device memory, and those writes land in
-the destination rank's own allocations — so if every rank snapshots its own agent and every rank
-restores before every pass, the union covers the peer writes too. Nothing about the snapshot needs
-to become distributed.
+**Agreement.** A rank that declines runs its range once, while one that replays runs it again.
+Anything in the range that talks to other ranks -- a host `MPI_Allreduce` in a host-replay range,
+for example -- then runs a different number of times on different ranks. `replay_commit_cb` closes
+that gap: it is delivered once per range on every rank, declined or not, after eligibility is final
+and before anything is rewound, so a tool can allreduce the status and veto unless every rank can
+replay. Vetoed ranges close with `VETOED`. See
+[Committing to a replay](range_replay_callback_api.md#committing-to-a-replay).
 
-What is missing is agreement. A collective's kernels rendezvous: they spin on flags in peer memory.
-If one rank replays a collective and another does not, the replaying rank's kernel waits for a peer
-that never arrives. So participating ranks must replay in lockstep — same pass count, entering each
-pass together — and, critically, **a range declined on one rank must be abandoned on all of them**.
+**What agreement makes replayable.** Host-side communication on host buffers inside a host-replay
+range (staged D2H copy, `MPI_Allreduce`, H2D copy), because every pass re-runs it on every rank in
+the same order. Pass counts must also agree; a fixed `pass_count_cb` does that, and an open-ended
+`replay_continue_cb` must reduce its decision across ranks the same way.
 
-A tool can arrange the lockstep part with the existing API, because `pass_count_cb` and
-`replay_continue_cb` are tool callbacks: it can allreduce the pass count and the continue-decision
-inside them. It cannot arrange the abandonment part. Eligibility is not known at `CONFIG` (the range
-has not run yet), and by `CLOSE` the passes have already happened. There is no point in the current
-API where a tool learns that its range is replayable and can still veto it.
+**What it does not.** Device-side communication. RCCL kernels keep protocol state in device memory
+the snapshot rewinds and read flags in peer and fine-grained memory it does not, so replaying them is
+unsound on every rank, and ranges that dispatch them decline with `COLLECTIVE_IN_RANGE`. User
+kernels that write another process's memory (rocSHMEM puts and atomics) are not recognizable and
+are re-executed by every pass; the SDK warns once when the process maps peer memory. See
+[Communication kernels](range_replay_soundness.md#communication-kernels).
 
-That argues for one addition before the API stabilizes: a **vetoable pre-replay notification**,
-delivered from `rocprofiler_range_replay_end()` after eligibility is fully determined — after the
-drain, the allocation-stability check, and kernarg staging — but before the first pass rewinds device
-memory. A tool would allreduce the status across the communicator and veto unless every rank is
-eligible. It is a small change (the executor already computes everything in that order; the callback
-slots in before the pass loop) and it is the enabler for the entire distributed case, so it is worth
-doing deliberately rather than discovering later that the API cannot express it.
+**What to bracket.** The compute between communication steps. A range around Jacobi sweeps and a
+matmul in an RCCL or MPI job replays on every rank, and the communicator keeps working afterwards.
+Inter-node collectives add host proxy threads and NIC state that no device snapshot rewinds, which
+is another reason to keep communication outside the range.
 
-Host-side and network state is the harder limit. Intra-node collectives over xGMI are
-peer-to-peer device writes, which the snapshot covers. Inter-node collectives involve a host proxy
-thread and NIC queue-pair state that no device snapshot rewinds, so those ranges are outside what
-this mechanism can reproduce. For GPU-aware MPI the practical guidance is to bracket the *compute*
-phases between communication rather than the communication itself — which is also where the
-interesting counters are.
+**Measured** on one node with eight MI325X GPUs, Open MPI 4.1.2 (not GPU-aware) and RCCL, one GPU
+per rank, four passes with `SQ_WAVES`, verification on, and five full iterations after the range to
+check that the communicator still works:
+
+| Range contents | Mode | All ranks eligible | One rank declines, no agreement | One rank declines, with agreement |
+|---|---|---|---|---|
+| Jacobi + matmul, `MPI_Allreduce` after the range | packet | `REPLAYED` | others `REPLAYED` | others `VETOED` |
+| same | host | `REPLAYED` | others `REPLAYED` | others `VETOED` |
+| + D2H copy, host `MPI_Allreduce`, H2D copy | packet | `MEMORY_COPY_IN_RANGE` | `MEMORY_COPY_IN_RANGE` | `MEMORY_COPY_IN_RANGE` |
+| same | host | `REPLAYED` | `MPI_ERR_TRUNCATE` abort | others `VETOED` |
+| + `ncclAllReduce` on device buffers | packet, host | `COLLECTIVE_IN_RANGE` | others `COLLECTIVE_IN_RANGE` | others `COLLECTIVE_IN_RANGE` |
+| Jacobi + matmul, `ncclAllReduce` right after the range | packet | `REPLAYED` | others `REPLAYED` | others `VETOED` |
+| same | host | `REPLAYED` | others `REPLAYED` | others `VETOED` |
+
+Every run produced the application's own result on every rank, on 2, 4 and 8 ranks, except the
+one marked as an abort. The declining rank reports its own reason. RCCL runs a different kernel on
+eight ranks (`meta::comms::ddaAllReduceFlatIpc`) than on four (`ncclDevKernel_Generic`); both
+decline. A rocSHMEM range whose kernel adds to a neighbour's counter replays in both
+modes and leaves every counter at 4 instead of 1; that is the case the warning is for.
 
 ## Documentation in this section
 

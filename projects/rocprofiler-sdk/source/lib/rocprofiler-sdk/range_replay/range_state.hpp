@@ -313,6 +313,35 @@ note_submission(const hsa::Queue&              queue,
                 size_t                         packet_count,
                 bool                           graph_launch_active);
 
+// True for the HIP runtime's own kernels that move data or touch stream memory on the
+// application's queue: buffer and image copies (which HIP uses instead of SDMA for small and
+// host-staged transfers), stream write/wait value operations, and batched memory operations.
+// Re-submitting one replays a host read or write against memory the application has since
+// changed, or a wait on a value already consumed, so a packet range that records one declines with
+// MEMORY_COPY_IN_RANGE, as it would for the same copy on an SDMA engine. Fills are not included:
+// they write a value carried in their kernarg bytes, so they replay like any recorded kernel.
+bool
+is_runtime_copy_kernel(const char* kernel_name);
+
+// True for RCCL's cross-rank device kernels: the ncclDevKernel and ncclSymkDevKernel families, the
+// MSCCL kernels, and the IPC kernels under meta::comms (the DDA all-reduce RCCL picks on a full
+// node). They keep protocol state (connection step counters) in device memory the snapshot rewinds,
+// and compare it against flags and barriers peers write into fine-grained and peer-mapped memory
+// the snapshot does not rewind. A replayed pass therefore either completes
+// against stale flags without its peers or waits for a peer that has moved on, in either replay
+// mode and even when every rank replays. A range that dispatches one declines with
+// COLLECTIVE_IN_RANGE.
+bool
+is_collective_kernel(const char* kernel_name);
+
+// Called once a range is about to replay. A kernel that writes another process's memory -- a
+// device-initiated put or atomic (rocSHMEM), or a hand-written IPC kernel -- is re-executed by
+// every pass, and that memory is outside every snapshot in this process. Which kernels do so is not
+// visible to the SDK, so when this process maps peer memory it warns once instead of declining:
+// declining would also refuse the compute phases of every RCCL application, which replay soundly.
+void
+warn_if_peer_memory_mapped(uint64_t range_id);
+
 // Called from the queue path independently of this thread's own range: if another thread has a
 // range open on the same agent, that range's isolation assumption is broken.
 void
