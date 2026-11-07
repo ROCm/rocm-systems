@@ -1039,9 +1039,16 @@ WriteInterceptor(const void* packets,
             hsa_signal_t app_completion_signal = dispatch_pkt.kernel_dispatch.completion_signal;
 
             // Drain barrier: fence the CPU against all prior in-flight GPU work on this queue so
-            // device memory is stable before snapshotting.
+            // device memory is stable before snapshotting. The signal comes from the pool because
+            // creating an interrupt signal costs a KFD event allocation on every replayed dispatch.
             hsa_signal_t drain_signal = null_hsa_signal;
-            Queue::create_signal(0, &drain_signal, /*use_pool=*/false);
+            auto* pooled_drain_signal = Queue::create_signal(0, &drain_signal, /*use_pool=*/true);
+            const auto release_drain_signal = [&]() {
+                if(pooled_drain_signal != nullptr)
+                    Queue::release_signal(pooled_drain_signal);
+                else if(drain_signal != null_hsa_signal)
+                    get_core_table()->hsa_signal_destroy_fn(drain_signal);
+            };
             {
                 auto drain_pkts = packet_vector_t{};
                 CreateBarrierPacket(nullptr, &drain_signal, drain_pkts);
@@ -1086,8 +1093,7 @@ WriteInterceptor(const void* packets,
                                            "this dispatch once without replay";
                 kernel_replay::execute_config_phase_exit(
                     replay_plan, thr_id, internal_corr_id, ancestor_corr_id);
-                if(drain_signal != null_hsa_signal)
-                    get_core_table()->hsa_signal_destroy_fn(drain_signal);
+                release_drain_signal();
                 process_packet_batch(packets_arr,
                                      1,
                                      forward_to_writer,
@@ -1166,8 +1172,7 @@ WriteInterceptor(const void* packets,
             }
 
             // Clean up our private signals (never the app's completion signal).
-            if(drain_signal != null_hsa_signal)
-                get_core_table()->hsa_signal_destroy_fn(drain_signal);
+            release_drain_signal();
             return;
         }
     }
