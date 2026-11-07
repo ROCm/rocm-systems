@@ -1815,17 +1815,19 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   const std::span<const uint8_t> original_text = patcher.text_bytes();
   std::vector<uint8_t> new_text(original_text.begin(), original_text.end());
   if (!anchor_edits.empty()) {
-    // The conditional-debug forms do not yet expose branch metadata. Do not
-    // mistake their missing displacement for proof that an anchor has no
-    // incoming reference. Keep this admission guard out of generic analysis.
+    // Conditional-debug branches and subvector loops do not yet expose their
+    // destination metadata. Missing displacement does not prove an anchor has
+    // no incoming reference. Keep this admission guard out of generic analysis.
     for (const std::unique_ptr<BasicBlock> &block : blocks_) {
       for (const Instruction &instruction : block->instructions()) {
-        if (instruction.mnemonic().starts_with("s_cbranch_cdbg") &&
+        const std::string_view mnemonic = instruction.mnemonic();
+        if ((mnemonic.starts_with("s_cbranch_cdbg") || mnemonic == "s_subvector_loop_begin" ||
+             mnemonic == "s_subvector_loop_end") &&
             !instruction.branch_offset_bytes()) {
           result.edit_error = TextEditError{
               .code = TextEditErrorCode::UnsupportedReferences,
               .offset = instruction.src_loc(),
-              .message = "conditional-debug branch destination metadata is unavailable"};
+              .message = "branch destination metadata is unavailable for " + std::string(mnemonic)};
           result.errors.push_back("anchor edit transaction: " + result.edit_error->message);
           return result;
         }
