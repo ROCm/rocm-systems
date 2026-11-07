@@ -389,7 +389,7 @@ HRR_TEST_CASE(Unit_HRR_PinnedHostRoundtrip) {
       if (std::string(direct).find("Struct") != std::string::npos && *snapshots == '0')
         continue;
       INFO(direct << " HIP_HRR_HOST_SNAPSHOTS=" << snapshots);
-      ScopedDir cap{fs::temp_directory_path() / "hrr_pinned_host"};
+      ScopedDir cap{hrr_temp_dir("hrr_pinned_host")};
       hrr_capture_direct(direct, cap.path, 5, {{"HIP_HRR_HOST_SNAPSHOTS", snapshots}});
       auto [ret, out] = hrr_playback_env(cap.path, {});
       INFO("Playback exit " << ret << ", stdout:\n" << out);
@@ -411,7 +411,7 @@ HRR_TEST_CASE(Unit_HRR_PinnedHostRoundtrip) {
 
 // Replay restores both graph launches, not the launch that only recorded the node.
 HRR_TEST_CASE(Unit_HRR_PinnedHostGraphRoundtrip) {
-  ScopedDir cap{fs::temp_directory_path() / "hrr_pinned_host_graph"};
+  ScopedDir cap{hrr_temp_dir("hrr_pinned_host_graph")};
   hrr_capture_direct("Unit_HRR_PinnedHostGraph_Direct", cap.path, 5);
   auto [ret, out] = hrr_playback_env(cap.path, {});
   INFO("Playback exit " << ret << ", stdout:\n" << out);
@@ -427,7 +427,7 @@ HRR_TEST_CASE(Unit_HRR_PinnedHostGraphRoundtrip) {
 // Replay restores every launch. Without the third and fourth records it
 // would leave B in the buffer for the third launch.
 HRR_TEST_CASE(Unit_HRR_PinnedHostRevisitRoundtrip) {
-  ScopedDir cap{fs::temp_directory_path() / "hrr_pinned_host_revisit"};
+  ScopedDir cap{hrr_temp_dir("hrr_pinned_host_revisit")};
   hrr_capture_direct("Unit_HRR_PinnedHostRevisit_Direct", cap.path, 5);
   auto [ret, out] = hrr_playback_env(cap.path, {});
   INFO("Playback exit " << ret << ", stdout:\n" << out);
@@ -443,7 +443,7 @@ HRR_TEST_CASE(Unit_HRR_PinnedHostRevisitRoundtrip) {
 // the stream, here held by a kernel that waits for one replay submits later.
 // The launch on b records the input too, since replay restores it on a.
 HRR_TEST_CASE(Unit_HRR_PinnedHostStreamsRoundtrip) {
-  ScopedDir cap{fs::temp_directory_path() / "hrr_pinned_host_streams"};
+  ScopedDir cap{hrr_temp_dir("hrr_pinned_host_streams")};
   hrr_capture_direct("Unit_HRR_PinnedHostStreams_Direct", cap.path, 5);
   auto [ret, out] = hrr_playback_watchdog(cap.path, 120);
   INFO("Playback exit " << ret << ", output:\n" << out);
@@ -462,7 +462,7 @@ HRR_TEST_CASE(Unit_HRR_PinnedHostSnapshotCap) {
   for (const char* max_mb : {"2", "1"}) {
     const bool over = *max_mb == '1';
     INFO("HIP_HRR_HOST_SNAPSHOT_MAX_MB=" << max_mb);
-    ScopedDir cap{fs::temp_directory_path() / "hrr_pinned_host_cap"};
+    ScopedDir cap{hrr_temp_dir("hrr_pinned_host_cap")};
     hrr_capture_direct("Unit_HRR_PinnedHostLarge_Direct", cap.path, 5,
                        {{"HIP_HRR_HOST_SNAPSHOT_MAX_MB", max_mb}});
     const std::string manifest =
@@ -492,7 +492,7 @@ HRR_TEST_CASE(Unit_HRR_PinnedHostSnapshotCap) {
 // HIP_HRR_CAPTURE_MAX_BLOB_MB, ends the replay before the kernel that reads it
 // is launched on input replay never restored.
 HRR_TEST_CASE(Unit_HRR_PinnedHostBlobRefused) {
-  ScopedDir cap{fs::temp_directory_path() / "hrr_pinned_host_refused"};
+  ScopedDir cap{hrr_temp_dir("hrr_pinned_host_refused")};
   hrr_capture_direct("Unit_HRR_PinnedHostLarge_Direct", cap.path, 5);
   auto [ret, out] = hrr_playback_merged(cap.path, "--trace-kernels --max-file-bytes 2097151");
   INFO("Playback exit " << ret << ", output:\n" << out);
@@ -515,7 +515,7 @@ HRR_TEST_CASE(Unit_HRR_PinnedHostBlobRefused) {
 // hipHostUnregister: had it snapshotted the stale address, replay would refuse
 // the record for an allocation it released.
 HRR_TEST_CASE(Unit_HRR_PinnedHostFreedRoundtrip) {
-  ScopedDir cap{fs::temp_directory_path() / "hrr_pinned_host_freed"};
+  ScopedDir cap{hrr_temp_dir("hrr_pinned_host_freed")};
   hrr_capture_direct("Unit_HRR_PinnedHostFreed_Direct", cap.path, 3);
   auto [ret, out] = hrr_playback_env(cap.path, {});
   INFO("Playback exit " << ret << ", stdout:\n" << out);
@@ -526,7 +526,7 @@ HRR_TEST_CASE(Unit_HRR_PinnedHostFreedRoundtrip) {
 #ifndef _WIN32
 // The pinned tracking lock is held across fork(), so no child inherits it locked.
 HRR_TEST_CASE(Unit_HRR_PinnedHostFork) {
-  ScopedDir cap{fs::temp_directory_path() / "hrr_pinned_host_fork"};
+  ScopedDir cap{hrr_temp_dir("hrr_pinned_host_fork")};
   hrr::test::SpawnProc proc(hrr_self_exe());
   proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
   set_proc_search_path(proc);
