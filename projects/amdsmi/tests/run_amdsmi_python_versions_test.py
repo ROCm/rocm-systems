@@ -67,6 +67,17 @@ def _run_unit_tests(interp: str) -> None:
         "test_packaging_scriptlets.py",
     ):
         subprocess.run([interp, str(TEST_DIR / test)], check=True)
+    subprocess.run(
+        [
+            str(Path(shutil.which(interp) or interp).absolute()),
+            "-m",
+            "unittest",
+            "-v",
+            "test_python_package_staging",
+        ],
+        cwd=str(TEST_DIR),
+        check=True,
+    )
 
 
 def main() -> int:

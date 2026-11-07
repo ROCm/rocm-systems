@@ -51,6 +51,8 @@ amdsmi_status_t smi_amdgpu_plx_temp_from_metrics(const amdsmi_gpu_metrics_t& met
                                                  int64_t* temperature);
 amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice* device,
                                                        char* market_name);
+// ids_flags must come from a successful native DRM query; zero is valid.
+amdsmi_status_t smi_amdgpu_is_apu(uint64_t ids_flags, bool* is_apu);
 amdsmi_status_t smi_amdgpu_is_gpu_power_management_enabled(amd::smi::AMDSmiGPUDevice* device,
                                                            bool* enabled);
 amdsmi_status_t smi_amdgpu_get_vcn_busy_percent(amd::smi::AMDSmiGPUDevice* device,

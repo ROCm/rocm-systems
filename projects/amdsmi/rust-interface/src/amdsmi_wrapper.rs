@@ -3840,6 +3840,12 @@ extern "C" {
     ) -> AmdsmiStatusT;
 }
 extern "C" {
+    pub fn amdsmi_is_gpu_apu(
+        processor_handle: AmdsmiProcessorHandle,
+        is_apu: *mut bool,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
     pub fn amdsmi_get_processor_info(
         processor_handle: AmdsmiProcessorHandle,
         len: usize,
