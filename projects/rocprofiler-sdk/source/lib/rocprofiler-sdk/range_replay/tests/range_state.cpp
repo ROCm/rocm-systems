@@ -471,8 +471,10 @@ TEST(range_replay_state, foreign_dispatches_decline_exactly_the_ranges_they_over
                 window.outer.end = seq.fetch_add(1);
                 window.declined  = !taken.record.eligible();
                 if(window.declined)
+                {
                     EXPECT_EQ(taken.record.status(),
                               ROCPROFILER_RANGE_REPLAY_STATUS_CONCURRENT_DISPATCH);
+                }
                 windows[i].emplace_back(window);
                 // Leave gaps so that some windows see no dispatch at all.
                 for(auto spin = rng() % 256; spin > 0; --spin)
