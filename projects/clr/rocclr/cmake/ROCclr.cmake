@@ -99,6 +99,7 @@ if(WIN32)
   ${ROCCLR_SRC_DIR}/platform/interop_d3d11.cpp)
   if(ROCCLR_ENABLE_HSA)
     target_sources(rocclr PRIVATE
+    ${ROCCLR_SRC_DIR}/device/rocm/rocd3d9interop.cpp
     ${ROCCLR_SRC_DIR}/device/rocm/rocd3d10interop.cpp
     ${ROCCLR_SRC_DIR}/device/rocm/rocd3d11interop.cpp)
   endif()
