@@ -816,6 +816,20 @@ namespace hip {
   extern int ihipGetDevice();
 
   extern hipError_t ihipMalloc(void** ptr, size_t sizeBytes, unsigned int flags);
+
+  //! Who owns the storage behind a managed allocation. A module-scope __managed__ variable's
+  //! storage is part of the program image: it has to outlive a device reset, and there is no
+  //! API to re-register one afterwards. A hipMallocManaged() allocation belongs to the
+  //! application and a reset releases it, as documented.
+  enum class ManagedMemOwner {
+    kApplication,
+    kModuleVariable,
+  };
+
+  extern hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0,
+                                       bool use_host_ptr = false,
+                                       ManagedMemOwner owner = ManagedMemOwner::kApplication);
+
   extern hipError_t ihipHostMalloc(void** ptr, size_t sizeBytes, unsigned int flags);
   extern hipError_t ihipMemGetInfo(size_t* free, size_t* total);
   extern amd::Memory* getMemoryObject(hip::Device* device, const void* ptr, size_t& offset,
