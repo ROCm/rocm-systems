@@ -30,11 +30,11 @@ int rj_arith_v_perm_b32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruc
 int rj_arith_v_xnor_b32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                             uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b);
 
-// Extract the low 32 bits of the concatenation A:B shifted right by C & 31
-// bits (ALIGNBIT), or (C & 3) bytes (ALIGNBYTE). Each operand uses one VGPR.
-// Supports DPP8/DPP16 on A. CLAMP is accepted and ignored; other low flags
-// are invalid. All supported semantics produce exact integer results; host FP state
-// is preserved.
+// Extract the low 32 bits of the concatenation A:B shifted right by (count & 31)
+// bits (ALIGNBIT), or (count & 3) bytes (ALIGNBYTE). The count comes from the low
+// half of C, or the high half with RJ_ARITH_ALU_HIGH_C. Each operand uses one VGPR.
+// Supports DPP8/DPP16 on A and accepts CLAMP. All supported semantics produce
+// exact integer results and preserve host FP state.
 int rj_arith_v_alignbit_b32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                 uint32_t *const *d, const uint32_t *const *a,
                                 const uint32_t *const *b, const uint32_t *const *c);

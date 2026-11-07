@@ -91,16 +91,17 @@ void dfs_reverse_post_order(const BasicBlock &start,
   return word;
 }
 
+[[nodiscard]] bool is_sgpr_movrel(const Instruction &inst) {
+  return inst.mnemonic().starts_with("s_movrel");
+}
+
 // True if inst may reach VGPRs through M0-relative or GPR-index addressing,
 // which explicit operands do not show.
 [[nodiscard]] bool may_access_vgprs_indirectly(const Instruction &inst,
                                                std::span<const uint8_t> text, rj_code_arch_t arch) {
   const std::string_view mnemonic = inst.mnemonic();
   // TODO: Move indirect-access properties into decoded instruction metadata so
-  // future ISA variants cannot bypass this completeness gate. The scalar
-  // s_movrel* family displaces an SGPR index through M0 the same way and has no
-  // equivalent gate here; consumers needing one call
-  // accesses_sgprs_indirectly_via_movrel().
+  // future ISA variants cannot bypass this completeness gate.
   if (mnemonic.starts_with("v_movrel") || mnemonic.starts_with("v_swaprel")) {
     return true;
   }
@@ -205,7 +206,7 @@ bool accesses_sgprs_indirectly_via_movrel(KernelBlockScope blocks) {
     if (block == nullptr)
       continue;
     for (const Instruction &inst : block->instructions()) {
-      if (inst.mnemonic().starts_with("s_movrel"))
+      if (is_sgpr_movrel(inst))
         return true;
     }
   }
@@ -290,6 +291,8 @@ void LivenessAnalysis::collect_global_register_usage(KernelBlockScope blocks,
     if (block == nullptr)
       continue;
     for (const Instruction &inst : block->instructions()) {
+      if (is_sgpr_movrel(inst))
+        global_sgpr_usage_is_complete_ = false;
       if (may_access_vgprs_indirectly(inst, text, arch))
         global_vgpr_usage_is_complete_ = false;
 
@@ -494,6 +497,21 @@ FailureOr<bool> LivenessAnalysis::global_vgpr_usage_is_complete() const {
   if (require_available().failed())
     return Result::failure();
   return global_vgpr_usage_is_complete_;
+}
+
+FailureOr<bool> LivenessAnalysis::global_sgpr_usage_is_complete() const {
+  if (require_available().failed())
+    return Result::failure();
+  return global_sgpr_usage_is_complete_;
+}
+
+FailureOr<std::optional<uint16_t>>
+LivenessAnalysis::find_globally_unused_sgpr_pair(const Instruction *inst) const {
+  if (require_available().failed())
+    return Result::failure();
+  if (!global_sgpr_usage_is_complete_ || !inst || !scoped_blocks_.contains(inst->parent()))
+    return std::optional<uint16_t>{};
+  return rocjitsu::find_free_sgpr_pair(globally_used_registers_, REGISTER_SET_ALLOCATABLE_SGPRS);
 }
 
 FailureOr<std::optional<uint16_t>>
