@@ -19,6 +19,7 @@ import pytest
 from conftest import (
     RocprofsysTest,
     assert_resolved_settings,
+    host_counters_expected,
     parse_metadata_settings,
 )
 
@@ -903,7 +904,7 @@ class TestCpuMetrics(RocprofsysTest):
         self.assert_perfetto(
             result,
             subtest_name="host frequency and load counters",
-            counter_names_present=["Frequency (S)", "Load (S)"],
+            counter_names_present=host_counters_expected(["Frequency (S)", "Load (S)"]),
         )
 
 
