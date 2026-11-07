@@ -55,9 +55,10 @@ A GPU split into `n >= 2` compute partitions has one component per partition.
 Partition `k` has UnitID `n*(n-1)/2 + 1 + k` (DPX 2–3, QPX 7–10, CPX on 8 XCCs
 29–36); the whole GPU keeps UnitID 0, and a GPU in SPX has no separate
 partition. The UnitID comes from the partition's `cuid_unit_id` where amdgpu
-publishes one, and otherwise from the world-readable KFD topology, so a stock
-kernel gives the same values. A partition whose UnitID cannot be determined
-has no CUID.
+publishes one, and otherwise from the KFD topology, so a stock kernel gives
+the same values. A partition whose UnitID cannot be determined, such as one
+in a container whose device cgroup hides some of the GPU's KFD nodes, has no
+CUID.
 
 Temporary CUIDs depend on the host's machine-id, so they are node-local.
 See [Temporary CUIDs](docs/conceptual/what_is_cuid.rst) for the construction

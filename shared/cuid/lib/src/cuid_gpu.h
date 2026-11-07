@@ -23,10 +23,10 @@ struct amdcuid_gpu_info {
   // DRM device node: /sys/class/drm/renderDXXX or /sys/class/drm/cardN
   std::string render_node;
   std::string bdf;
-  // An SR-IOV virtual function whose index could not be determined, which is
-  // what a guest sees: there is no physfn link there, so nothing says which
-  // share of the card this is. Everything else reachable belongs to the card,
-  // so this device has no serial of its own and takes the auxiliary path.
+  // An SR-IOV virtual function with a physfn link but no index among its
+  // PF's virtfn links. Nothing says which share of the card it is, so it has
+  // neither a serial nor a temporary CUID of its own. A guest's VF has no
+  // physfn link and is not one of these.
   bool unnamed_vf = false;
   // Set only for a spatial partition, which is named by its own node
   // (/sys/class/drm/cardN/device/xcp) because its BDF names the whole GPU.

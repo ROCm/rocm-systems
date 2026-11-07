@@ -12,6 +12,7 @@
 
 /// Size of a PCIe extended configuration space, in bytes.
 constexpr size_t kPciConfigSpaceSize = 4096;
+constexpr size_t kPciWorldReadableConfigSize = 64;
 
 class PciUtil {
  public:

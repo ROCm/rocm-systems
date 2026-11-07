@@ -108,10 +108,18 @@ struct KfdNode {
   long long location_id = -1;
 };
 
-std::vector<KfdNode> kfd_nodes_under(const std::string& root) {
+// The GPU nodes whose properties can be read. KFD refuses a node's properties
+// to a caller whose device cgroup excludes that GPU, so `complete` is false
+// when any node, of any GPU, could not be read.
+struct KfdSnapshot {
   std::vector<KfdNode> nodes;
+  bool complete = true;
+};
+
+KfdSnapshot kfd_nodes_under(const std::string& root) {
+  KfdSnapshot snapshot;
   DIR* dir = opendir(root.c_str());
-  if (!dir) return nodes;
+  if (!dir) return snapshot;
   // NOLINTNEXTLINE(concurrency-mt-unsafe)
   while (const auto* entry = readdir(dir)) {
     if (entry->d_name[0] == '.') continue;
@@ -119,10 +127,12 @@ std::vector<KfdNode> kfd_nodes_under(const std::string& root) {
     KfdNode node;
     std::string key;
     std::string text;
+    bool any = false;
     // Values are read as text: unique_id is a 64-bit serial that exceeds a
     // signed long long for half of all parts, and a failed numeric read would
     // stop the scan.
     while (properties >> key >> text) {
+      any = true;
       long long* field = key == "drm_render_minor" ? &node.render_minor
                          : key == "domain"         ? &node.domain
                          : key == "location_id"    ? &node.location_id
@@ -133,22 +143,24 @@ std::vector<KfdNode> kfd_nodes_under(const std::string& root) {
       const long long value = std::strtoll(text.c_str(), &end, 10);
       if (errno != ERANGE && end != text.c_str() && *end == '\0') *field = value;
     }
-    if (node.render_minor > 0 && node.domain >= 0 && node.location_id >= 0) nodes.push_back(node);
+    if (!any) snapshot.complete = false;
+    if (node.render_minor > 0 && node.domain >= 0 && node.location_id >= 0)
+      snapshot.nodes.push_back(node);
   }
   closedir(dir);
-  return nodes;
+  return snapshot;
 }
 
 // KFD renumbers a GPU's nodes when its partition mode changes; a read that
 // straddles the change is retried rather than mixed.
-std::vector<KfdNode> kfd_snapshot(const std::string& nodes_dir) {
+KfdSnapshot kfd_snapshot(const std::string& nodes_dir) {
   const std::string generation = parent_dir(nodes_dir) + "/generation_id";
   for (int attempt = 0; attempt < 3; ++attempt) {
     const std::string before = CuidUtilities::read_sysfs_file(generation);
-    auto nodes = kfd_nodes_under(nodes_dir);
-    if (CuidUtilities::read_sysfs_file(generation) == before) return nodes;
+    auto snapshot = kfd_nodes_under(nodes_dir);
+    if (CuidUtilities::read_sysfs_file(generation) == before) return snapshot;
   }
-  return {};
+  return {{}, false};
 }
 
 std::string bdf_of(long long domain, long long pci_dev_id) {
@@ -161,20 +173,21 @@ std::string bdf_of(long long domain, long long pci_dev_id) {
   return text;
 }
 
-// What KFD says of the partition whose render node has `minor`: the PCI
-// function it belongs to, and, when that GPU has more than one partition, its
-// UnitID. KFD puts the parent's bus<<8|devfn in location_id with the
-// partition index k ORed into the function bits, so the parent is function 0
-// of that device and n is the number of GPU nodes that share it. Partition k
-// of n has UnitID n*(n-1)/2 + 1 + k.
+// What KFD says of the partition whose render node has `minor`. KFD puts the
+// parent's bus<<8|devfn in location_id with the partition index k ORed into
+// the function bits, so the parent is function 0 of that device and its
+// visible GPU nodes are the partitions this caller can see.
 struct KfdPartition {
   std::string parent_bdf;
-  uint16_t unit_id = 0;  // 0 when the GPU has a single partition
+  unsigned k = 0;
+  unsigned visible = 0;     // GPU nodes sharing the parent
+  bool contiguous = false;  // their indices are exactly 0..visible-1
+  bool complete = false;    // no node of any GPU was hidden
 };
 
-bool kfd_partition(const std::vector<KfdNode>& nodes, long long minor, KfdPartition& out) {
+bool kfd_partition(const KfdSnapshot& snapshot, long long minor, KfdPartition& out) {
   const KfdNode* self = nullptr;
-  for (const auto& node : nodes)
+  for (const auto& node : snapshot.nodes)
     if (node.render_minor == minor) {
       if (self) return false;
       self = &node;
@@ -185,19 +198,26 @@ bool kfd_partition(const std::vector<KfdNode>& nodes, long long minor, KfdPartit
   out.parent_bdf = bdf_of(self->domain, parent);
   if (out.parent_bdf.empty()) return false;
   std::set<long long> indices;
-  for (const auto& node : nodes) {
+  for (const auto& node : snapshot.nodes) {
     if (node.domain != self->domain || (node.location_id & ~0x7LL) != parent) continue;
     // Two nodes with one index are not a partition layout this rule knows.
     if (!indices.insert(node.location_id & 0x7).second) return false;
   }
-  // The indices must be exactly 0..n-1; a gap means a node is missing.
-  const long long n = static_cast<long long>(indices.size());
-  if (*indices.rbegin() != n - 1) return false;
-  if (n < 2) return true;
-  const long long k = self->location_id & 0x7;
-  out.unit_id =
-      CuidUtilities::partition_unit_id(static_cast<unsigned>(n), static_cast<unsigned>(k));
-  return true;
+  out.k = static_cast<unsigned>(self->location_id & 0x7);
+  out.visible = static_cast<unsigned>(indices.size());
+  out.contiguous = *indices.rbegin() == static_cast<long long>(indices.size()) - 1;
+  out.complete = snapshot.complete;
+  // With every node visible, a gap is a layout this rule does not know.
+  return !out.complete || out.contiguous;
+}
+
+// The partition count DPX, TPX and QPX fix. 0 for CPX, whose count depends on
+// the part, and for a mode that cannot be read.
+unsigned mode_partition_count(const std::string& mode) {
+  if (mode == "DPX") return 2;
+  if (mode == "TPX") return 3;
+  if (mode == "QPX") return 4;
+  return 0;
 }
 
 constexpr const char kKfdNodes[] = "/sys/class/kfd/kfd/topology/nodes";
@@ -206,16 +226,34 @@ constexpr const char kPciDevices[] = "/sys/bus/pci/devices";
 // The UnitID KFD gives the partition rendered by `device` (a PCI GPU for
 // partition 0, an amdgpu_xcp_<n> platform device for the rest), or 0 where
 // its GPU is not partitioned, has no KFD node, or is not the parent KFD names.
+//
+// Partition k of n has UnitID n*(n-1)/2 + 1 + k. In DPX, TPX and QPX the mode
+// fixes n, so a hidden node elsewhere does not matter, a visible count must
+// agree with it, and more nodes than n are never a partial view. In CPX, or
+// while amdgpu cannot report the mode (during a reset), n is the count of the
+// parent's nodes, which needs every node.
 uint16_t kfd_unit_id(const std::string& device, const std::string& pci_root,
                      const std::string& kfd_nodes) {
   const int minor = render_minor_of(device);
   if (minor <= 0) return 0;
   KfdPartition partition;
-  if (!kfd_partition(kfd_snapshot(kfd_nodes), minor, partition) || partition.unit_id == 0) return 0;
+  if (!kfd_partition(kfd_snapshot(kfd_nodes), minor, partition)) return 0;
   const std::string name = device.substr(device.find_last_of('/') + 1);
   if (pci_bdf(name) && name != partition.parent_bdf) return 0;
-  if (access((pci_root + "/" + partition.parent_bdf).c_str(), F_OK) != 0) return 0;
-  return partition.unit_id;
+  const std::string parent = pci_root + "/" + partition.parent_bdf;
+  if (access(parent.c_str(), F_OK) != 0) return 0;
+  const auto mode = CuidUtilities::read_sysfs_file(parent + "/current_compute_partition");
+  if (mode == "SPX") return 0;
+  unsigned n = mode_partition_count(mode);
+  if (n == 0) {
+    if (!partition.complete || !partition.contiguous) return 0;
+    n = partition.visible;
+  } else if (partition.visible > n ||
+             (partition.complete && (partition.visible != n || !partition.contiguous))) {
+    return 0;
+  }
+  if (n < 2 || partition.k >= n) return 0;
+  return CuidUtilities::partition_unit_id(n, partition.k);
 }
 
 // A PCI GPU in a mode with more than one partition. Its own render node then
@@ -226,8 +264,9 @@ bool partitioned_gpu(const std::string& device) {
   if (access((device + "/xcp/" + CuidUtilities::kDriverUnitIdAttribute).c_str(), F_OK) == 0)
     return true;
   if (kfd_unit_id(device, kPciDevices, kKfdNodes) != 0) return true;
-  const auto mode = CuidUtilities::read_sysfs_file(device + "/current_compute_partition");
-  return mode != "SPX";
+  // An unreadable mode, as during a reset, counts as split: partition 0 must
+  // never be reported as the GPU as a whole.
+  return CuidUtilities::read_sysfs_file(device + "/current_compute_partition") != "SPX";
 }
 
 // The UnitID amdgpu publishes in `dir`'s cuid_unit_id. False when there is no
@@ -495,18 +534,23 @@ amdcuid_status_t CuidGpu::discover(std::vector<DevicePtr>& gpus) {
         // leaves `info` untouched in that case, so emplacing it would add a
         // zero-filled GPU entry.
         const auto status = discover_single(&info, device_path, gim_client.get());
-        if (status == AMDCUID_STATUS_UNSUPPORTED) {
+        std::vector<std::pair<amdcuid_gpu_info, std::string>> found;
+        if (status == AMDCUID_STATUS_SUCCESS) {
+          found.emplace_back(info, device_path);
+        } else if (status != AMDCUID_STATUS_UNSUPPORTED) {
+          LOG(DEBUG, "CUID discovery: skipping " << device_path << " ("
+                                                 << amdcuid_status_to_string(status) << ")");
           continue;
         }
-        if (status != AMDCUID_STATUS_SUCCESS) {
-          closedir(dir);
-          return status;
-        }
-        std::vector<std::pair<amdcuid_gpu_info, std::string>> found{{info, device_path}};
         // A partitioned GPU's card is its partition 0's; the GPU as a whole is
-        // named by its PCI directory.
-        if (!info.partition_attr_dir.empty()) {
-          const auto real = resolved_path(info.partition_attr_dir);
+        // named by its PCI directory, also when partition 0 cannot be named.
+        const auto card_device = resolved_path(device_path);
+        if (!info.partition_attr_dir.empty() ||
+            (status == AMDCUID_STATUS_UNSUPPORTED && !card_device.empty() &&
+             partitioned_gpu(card_device))) {
+          const auto real = info.partition_attr_dir.empty()
+                                ? card_device + "/xcp"
+                                : resolved_path(info.partition_attr_dir);
           const auto device = parent_dir(real.empty() ? info.partition_attr_dir : real);
           const auto bdf = device.substr(device.find_last_of('/') + 1);
           amdcuid_gpu_info whole = {};
@@ -599,7 +643,7 @@ amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info* gpu_info, const std:
   // A VF we could not name is recorded as such rather than rounded to unit_id 0,
   // which would say "the whole card". See CuidUtilities::VfIdentity.
   const CuidUtilities::VfIdentity vf = CuidUtilities::get_gpu_vf_identity(
-      resolved == AMDCUID_STATUS_SUCCESS ? route.node + "/device" : device_path);
+      resolved == AMDCUID_STATUS_SUCCESS ? route.device : device_path);
   info.header.fields.gpu.unit_id = vf.unit_id;
   info.unnamed_vf = vf.is_vf && !vf.index_known;
 
@@ -791,7 +835,9 @@ amdcuid_status_t CuidGpu::get_hardware_fingerprint(uint64_t& fingerprint) const 
     return AMDCUID_STATUS_PERMISSION_DENIED;
   }
   // Neither PCI nor partition attributes can supply this VF's own serial.
-  if (m_info.unnamed_vf) {
+  const bool render_node = m_info.render_node.find("/sys/class/drm/") == 0;
+  if (m_info.unnamed_vf || (render_node && m_info.header.fields.gpu.unit_id == 0 &&
+                            CuidUtilities::gpu_reports_vf_mode(m_info.render_node + "/device"))) {
     fingerprint = 0;
     return AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND;
   }
