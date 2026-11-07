@@ -115,6 +115,7 @@ groups:
     - rocrtstFunc.GL2_PersistingCache_SetAndReadBack
     - rocrtstFunc.GL2_PersistingCache_NegativeInvalidSize
     - rocrtstFunc.GL2_PersistingCache_NegativeCPUAgent
+    - rocrtstFunc.GL2_PersistingCache_QueryStatusConsistency
 
   SignalBatch:
     - rocrtstFunc.Signal_Batch_Host_Pool
@@ -204,6 +205,7 @@ platforms:
       - rocrtstFunc.GL2_PersistingCache_SetAndReadBack
       - rocrtstFunc.GL2_PersistingCache_NegativeInvalidSize
       - rocrtstFunc.GL2_PersistingCache_NegativeCPUAgent
+      - rocrtstFunc.GL2_PersistingCache_QueryStatusConsistency
       - rocrtstPerf.Memory_Async_Copy_On_Engine
       - rocrtstNeg.Memory_Negative_Tests
       - rocrtstNeg.Queue_Validation_InvalidDimension
