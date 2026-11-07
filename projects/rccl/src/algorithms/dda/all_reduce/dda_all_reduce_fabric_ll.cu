@@ -567,8 +567,9 @@ static bool ddaArLL128SplitWindow(ncclComm* comm, const void* sendbuff, void* re
       bytes > rcclDdaLL128Threshold(comm, ncclFuncAllReduce)) {
     return false;
   }
-  if (rcclDdaArLLTierPinnedByEnv() && (ddaLLArOneShotEligible(comm, sendbuff, recvbuff, count, datatype, op) ||
-                                       ddaLLArTwoShotShapeEligible(comm, count, datatype, op))) {
+  if (rcclDdaArLLTierPinnedByEnv() && bytes <= rcclDdaLLThreshold(comm, ncclFuncAllReduce) &&
+      (ddaLLArOneShotEligible(comm, sendbuff, recvbuff, count, datatype, op) ||
+       ddaLLArTwoShotShapeEligible(comm, count, datatype, op))) {
     return false;
   }
   if (rcclDdaArLL128OneShotPinnedByEnv() &&

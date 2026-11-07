@@ -1044,6 +1044,17 @@ TEST_F(DdaAllReduceFabricLLMicrotest, Eligible_PeerSplitWindowLeavesAPinnedTier)
   EXPECT_FALSE(TakesSplit(count)) << "the pinned LL one-shot can take it";
 }
 
+// A pinned LL tier keeps only the messages within its threshold: past it the split still takes them.
+TEST_F(DdaAllReduceFabricLLMicrotest, Eligible_PinnedLLTierBelowTheMessageLeavesItToTheSplit) {
+  SplitTiersOn(comm(), params_);
+  comm().nRanks = 4;
+  const size_t count = 2 * kMiB / 4;
+  g_rcclDdaArLLTierPinnedByEnv = [] { return true; };
+  EXPECT_FALSE(TakesSplit(count)) << "the pinned LL tier takes 2 MiB";
+  g_rcclDdaLLThreshold = [](const ncclComm*, ncclFunc_t) { return kMiB / 2; };
+  EXPECT_TRUE(TakesSplit(count)) << "RCCL_DDA_LL_THRESHOLD=512K: the LL tier cannot take 2 MiB";
+}
+
 // RCCL_DDA_LL_TWOSHOT_THRESHOLD set at 32 ranks: the split leaves the VMM-first window, so the selector runs VMM there.
 TEST_F(DdaAllReduceFabricLLMicrotest, Eligible_PinnedLLTwoShotLeavesTheVmmFirstWindowToVmm) {
   SplitTiersOn(comm(), params_);
