@@ -43,6 +43,9 @@ set(rj_arith_x86_64_v3_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/conversion/x86_64/normalized_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/conversion/x86_64/pack_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/conversion/x86_64/packed_conversion_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/compare/x86_64/class_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/compare/x86_64/float_compare_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/compare/x86_64/integer_compare_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/dot2_exact_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/dot2_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/fp8_dot_x86_64_v3.cpp
@@ -93,6 +96,9 @@ set(rj_arith_x86_64_v4_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/conversion/x86_64/normalized_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/conversion/x86_64/pack_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/conversion/x86_64/packed_conversion_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/compare/x86_64/class_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/compare/x86_64/float_compare_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/compare/x86_64/integer_compare_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/dot2_bf16_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/dot2_exact_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/fp8_dot_x86_64_v4.cpp
