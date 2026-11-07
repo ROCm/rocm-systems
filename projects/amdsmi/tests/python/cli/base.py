@@ -236,13 +236,14 @@ class TestCliBase(unittest.TestCase):
         baseline["gpus"] = gpus
 
         # When parsing, expand each arg with its value(s).
-        # CPU/Core are given default values because their sub-arguments require a value.
+        # CPU/Core/NIC are given default values because their sub-arguments require a value.
         # Otherwise, tests will populate the args incorrectly on CPU/APU-capable systems.
         baseline["sub_args"] = {
             "CLOCK": ["SYS", "DF", "DCEF", "SOC", "MEM", "VCLK0", "VCLK1", "DCLK0", "DCLK1", "ALL"],
             "PID": [123],
             "NAME": ["AMD"],
             "GPU": gpus,
+            "NIC": ["all", "0"],
             "CPU": ["all", "0"],
             "CORE": ["all", "0"],
             "FILE": [
@@ -544,14 +545,6 @@ class TestCliBase(unittest.TestCase):
                                     f"{self.tab}Untested (no sweep values for {sub_arg}): "
                                     f"amd-smi {cmd.split()[1]} {items[item_index]}"
                                 )
-                        elif "Device" in match_str and sub_arg.isupper():
-                            # A selector with no sweep IDs, bare, only reaches the missing-value
-                            # error; --nic is listed once a NIC driver loads, even with no NIC.
-                            sub_found = True
-                            self.common.print(
-                                f"{self.tab}Untested (no sweep values for {sub_arg}): "
-                                f"amd-smi {cmd.split()[1]} {items[item_index]}"
-                            )
                     if not sub_found:
                         # Put in sub_arg if it was not found
                         if "Set" in match_str:
@@ -806,6 +799,10 @@ class TestCliBase(unittest.TestCase):
                             cmd = ""
                     else:
                         cmd = ""
+            # The NIC path prints once and never loops, so the parser rejects --watch with --nic
+            words = cmd.split()
+            if "--nic" in words and ("--watch" in words):
+                cond = [AmdSmiExitCode.INVALID_PARAMETER]
             cmds[index] = (cmd, cond)
 
         # Pare down commands
