@@ -104,6 +104,7 @@ option(ENABLE_IFC                              "Enable indirect function call"  
 option(ENABLE_NET_PROFILING                    "Emit NET_IB/NET_SOCK profiler events"          OFF)
 option(ENABLE_DEVICE_LINKER                    "Build with assembly-extract device linker"     ON)
 option(EMIT_LLVM_IR                            "Emit LLVM IR/bitcode for nccl_device APIs"     OFF)
+option(NCCL_EMIT_LTO_IR                        "Emit LTO IR for nccl_device APIs"              OFF)
 option(DISABLE_KERNARG_PRELOAD                 "Disable amdgpu-kernarg-preload-count compile/link flag" OFF)
 option(BUILD_NCCL4PY                           "Build the nccl4py Python bindings wheel"       OFF)
 # Move .hip_fatbin to the end of librccl.so so that small-code-model host
@@ -857,8 +858,15 @@ endif()
 # plus a C wrapper header (nccl_device_wrapper.h) from src/include/nccl_device/.
 # The bitcode is generated from the hipify-staged headers that librccl.so itself
 # is compiled from, so the IR is guaranteed to match the host library.
-if(EMIT_LLVM_IR)
+#
+# When NCCL_EMIT_LTO_IR=ON, build librccl_device.ltoir from the same sources:
+# the same public surface, but with the optimizer not yet run, so inlining is
+# deferred to the consumer's device link. The two knobs are independent; either,
+# both, or neither may be set.
+if(EMIT_LLVM_IR OR NCCL_EMIT_LTO_IR)
   add_subdirectory(bindings/ir)
+endif()
+if(EMIT_LLVM_IR)
   # bindings/ir/ reads headers out of ${PROJECT_BINARY_DIR}/hipify, which is
   # populated by the copy_nccl_device_headers target defined in src/CMakeLists.txt.
   # nccl_device_header_symlinks provides the un-suffixed core.h/comm.h/gin.h
@@ -866,6 +874,13 @@ if(EMIT_LLVM_IR)
   add_dependencies(llvm_ir copy_nccl_device_headers nccl_device_header_symlinks)
   # Convenience aggregate target: builds librccl.so together with the bitcode.
   add_custom_target(rccl_with_ir ALL DEPENDS rccl llvm_ir)
+endif()
+if(NCCL_EMIT_LTO_IR)
+  # Same staged-header dependency as llvm_ir: the LTO IR is compiled from the
+  # identical translation unit, so it needs the hipify pass to have run too.
+  add_dependencies(ltoir copy_nccl_device_headers nccl_device_header_symlinks)
+  # Convenience aggregate target: builds librccl.so together with the LTO IR.
+  add_custom_target(rccl_with_ltoir ALL DEPENDS rccl ltoir)
 endif()
 
 # nccl4py Python bindings (opt-in)
@@ -906,19 +921,27 @@ if(ENABLE_ROCSHMEM_GIN AND ROCSHMEM_SOURCE_DIR)
     ${ROCSHMEM_SOURCE_DIR}/src/sdma/sdma_pkt_struct_mi4.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/nccl_device/gin/anvil_sdma/sdma)
 endif()
-## Optional: install LLVM bitcode artifacts when EMIT_LLVM_IR is enabled.
-## librccl_device.bc, nccl_device_wrapper.h, hipified nccl_device headers,
-## and nccl.h (same as rccl.h; nccl_device #includes <nccl.h>) are produced
-## before install because rccl_with_ir is part of ALL.
-if(EMIT_LLVM_IR)
-  rocm_install(FILES       ${PROJECT_BINARY_DIR}/lib/librccl_device.bc
-               DESTINATION ${CMAKE_INSTALL_LIBDIR}/rccl)
+## Optional: install device IR artifacts when EMIT_LLVM_IR and/or
+## NCCL_EMIT_LTO_IR is enabled. librccl_device.bc, librccl_device.ltoir,
+## nccl_device_wrapper.h, hipified nccl_device headers, and nccl.h (same as
+## rccl.h; nccl_device #includes <nccl.h>) are produced before install because
+## rccl_with_ir / rccl_with_ltoir are part of ALL.
+if(EMIT_LLVM_IR OR NCCL_EMIT_LTO_IR)
+  ## Header surface is identical for both artifacts, so install it once.
   rocm_install(FILES       ${PROJECT_BINARY_DIR}/include/nccl_device_wrapper.h
                            ${PROJECT_BINARY_DIR}/include/nccl_device.h
                            ${PROJECT_BINARY_DIR}/include/nccl.h
                DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl)
   rocm_install(DIRECTORY   ${PROJECT_BINARY_DIR}/include/nccl_device
                DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl)
+endif()
+if(EMIT_LLVM_IR)
+  rocm_install(FILES       ${PROJECT_BINARY_DIR}/lib/librccl_device.bc
+               DESTINATION ${CMAKE_INSTALL_LIBDIR}/rccl)
+endif()
+if(NCCL_EMIT_LTO_IR)
+  rocm_install(FILES       ${PROJECT_BINARY_DIR}/lib/librccl_device.ltoir
+               DESTINATION ${CMAKE_INSTALL_LIBDIR}/rccl)
 endif()
 ## tuner/*.csv is compiled into librccl.so (see rccl_embedded_tuner_configs above),
 ## so nothing is copied to the build tree or installed. A CSV placed in
