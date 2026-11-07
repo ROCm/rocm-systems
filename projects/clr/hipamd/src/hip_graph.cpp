@@ -3545,6 +3545,10 @@ hipError_t hipGraphAddExternalSemaphoresSignalNode(
     size_t numDependencies, const hipExternalSemaphoreSignalNodeParams* nodeParams) {
   HIP_INIT_API(hipGraphAddExternalSemaphoresSignalNode, pGraphNode, graph, pDependencies,
                numDependencies, nodeParams);
+  if (pGraphNode == nullptr || graph == nullptr ||
+      (numDependencies > 0 && pDependencies == nullptr) || nodeParams == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
   hip::GraphNode* node = new hip::hipGraphExternalSemSignalNode(nodeParams);
   hipError_t status =
       ihipGraphAddNode(node, reinterpret_cast<hip::Graph*>(graph),
