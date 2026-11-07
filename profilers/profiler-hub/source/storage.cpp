@@ -13,7 +13,13 @@ namespace profiler_hub
 {
 
 storage_t::storage_t(const std::string& database_path, const std::string& uuid)
-: m_impl(std::make_unique<impl>(database_path, uuid))
+: storage_t(database_path, uuid, profiler_hub::version_t{ 3, 0, 1 })
+{}
+
+storage_t::storage_t(const std::string&      database_path,
+                     const std::string&      uuid,
+                     profiler_hub::version_t schema_version)
+: m_impl(std::make_unique<impl>(database_path, uuid, schema_version))
 {}
 
 storage_t::~storage_t() { m_impl.reset(); }
