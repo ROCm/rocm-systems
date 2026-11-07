@@ -42,6 +42,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <climits>
 #include <cstring>
 #include <mutex>
 #include <shared_mutex>
@@ -485,6 +486,111 @@ execute_range(range_context_t& ctx, uint64_t& divergence_count)
         elapsed_ms(window_end - window_start));
 
     return ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED;
+}
+
+bool
+continue_host_replay(range_context_t& ctx, sigjmp_buf jump_to, int& hop)
+{
+    fold_external_decline(ctx);
+
+    if(ctx.host_pass > 0)
+    {
+        execute_pass_phase_exit(ctx.plan,
+                                ctx.host_pass,
+                                ctx.agent_id,
+                                static_cast<uint64_t>(ctx.record.dispatch_count()),
+                                ctx.host_pass_state);
+    }
+
+    auto stop = [&](rocprofiler_range_replay_status_t status) {
+        ctx.host_outcome = status;
+        set_this_thread_replaying(false);
+        return false;
+    };
+
+    if(!ctx.record.eligible()) return stop(ctx.record.status());
+    if(!ctx.plan.replay_requested) return stop(ROCPROFILER_RANGE_REPLAY_STATUS_NO_PASS_COUNT);
+    if(ctx.record.dispatch_count() == 0 || ctx.queue == nullptr)
+        return stop(ROCPROFILER_RANGE_REPLAY_STATUS_NO_DISPATCH);
+    if(!ctx.snapshot_taken || !ctx.snapshot.ok)
+        return stop(ROCPROFILER_RANGE_REPLAY_STATUS_SNAPSHOT_FAILED);
+
+    // The lock covers the snapshot and the restores only. Holding it across the siglongjmp would
+    // deadlock the host pass: that pass submits on this same thread, and the interceptor takes the
+    // matching shared lock unless this thread is marked replaying. A foreign dispatch during the
+    // host pass is still reported through the decline channel.
+    const auto replay_guard =
+        std::unique_lock<std::shared_mutex>{hsa::agent_replay_mutex(ctx.agent_id)};
+
+    hsa::replay_drain_or_fatal(*ctx.queue);
+    hsa::replay_drain_agent_or_fatal(ctx.hsa_agent);
+
+    auto restore_exit = [&]() {
+        if(!ctx.exit_snapshot_taken) return;
+        ROCP_FATAL_IF(!kernel_replay::memory_snapshot::restore(ctx.exit_snapshot)) << fmt::format(
+            "range replay: restore of the range-exit snapshot failed during host replay; "
+            "aborting rather than returning corrupted device memory to the application");
+    };
+
+    if(tracked_pointers(ctx.hsa_agent) != ctx.snapshot_ptrs)
+    {
+        restore_exit();
+        return stop(ROCPROFILER_RANGE_REPLAY_STATUS_ALLOCATION_CHANGED_IN_RANGE);
+    }
+
+    if(!ctx.exit_snapshot_taken)
+    {
+        ctx.exit_snapshot = kernel_replay::memory_snapshot::snap(ctx.hsa_agent);
+        if(!ctx.exit_snapshot.ok) return stop(ROCPROFILER_RANGE_REPLAY_STATUS_SNAPSHOT_FAILED);
+        ctx.exit_snapshot_taken = true;
+    }
+
+    const bool is_final = !ctx.plan.indefinite && (ctx.host_pass == ctx.plan.total_passes - 1);
+    if(!should_continue_replay(ctx.plan, ctx.host_pass, is_final))
+    {
+        if(divergence_check_enabled())
+        {
+            const auto post_snapshot = kernel_replay::memory_snapshot::snap(ctx.hsa_agent);
+            if(post_snapshot.ok)
+                ctx.host_divergence = digest::count_divergent(snapshot_digests(ctx.exit_snapshot),
+                                                              snapshot_digests(post_snapshot));
+        }
+        restore_exit();
+        return stop(ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED);
+    }
+
+    if(!host_jmp_armed())
+    {
+        restore_exit();
+        return stop(ROCPROFILER_RANGE_REPLAY_STATUS_HOST_JMP_NOT_SET);
+    }
+
+    const auto next = ctx.host_pass + 1;
+    ROCP_FATAL_IF(next > static_cast<uint64_t>(INT_MAX))
+        << "range replay: host replay pass does not fit in the siglongjmp return value";
+
+    ROCP_FATAL_IF(!kernel_replay::memory_snapshot::restore(ctx.snapshot)) << fmt::format(
+        "range replay: restore of the range-entry snapshot failed during host replay; aborting "
+        "rather than continuing with corrupted device memory");
+
+    // Before the tool callback: a PASS enter that submits must not take this thread's reader lock
+    // while replay_guard still holds the writer lock.
+    set_this_thread_replaying(true);
+
+    execute_pass_phase_enter(ctx.plan,
+                             next,
+                             ctx.agent_id,
+                             static_cast<uint64_t>(ctx.record.dispatch_count()),
+                             ctx.thread_id,
+                             ctx.internal_corr_id,
+                             ctx.ancestor_corr_id,
+                             ctx.host_pass_state);
+    ctx.host_pass = next;
+
+    // Copy the jmp_buf before releasing the lock. host_jmpbuf() does not modify the saved context.
+    std::memcpy(jump_to, host_jmpbuf(), sizeof(sigjmp_buf));
+    hop = static_cast<int>(next);
+    return true;
 }
 }  // namespace range_replay
 }  // namespace rocprofiler

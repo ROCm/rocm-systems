@@ -289,6 +289,22 @@ set_this_thread_replaying(bool replaying)
     tl_replaying = replaying;
 }
 
+thread_local sigjmp_buf tl_host_jmp    = {};
+thread_local bool       tl_host_jmp_armed = false;
+
+sigjmp_buf*
+host_jmpbuf()
+{
+    tl_host_jmp_armed = true;
+    return &tl_host_jmp;
+}
+
+bool
+host_jmp_armed()
+{
+    return tl_host_jmp_armed;
+}
+
 range_context_t*
 current_range()
 {

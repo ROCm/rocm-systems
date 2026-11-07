@@ -46,6 +46,7 @@
 
 #include <hsa/hsa_ext_amd.h>
 
+#include <csetjmp>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -102,6 +103,14 @@ ensure_entry_snapshot(range_context_t&                      ctx,
 // Blocks the calling thread; holds the range's agent replay lock for the whole window.
 rocprofiler_range_replay_status_t
 execute_range(range_context_t& ctx, uint64_t& divergence_count);
+
+// One step of host replay, called from rocprofiler_range_replay_end while the range is still open.
+// Returns true when the caller must siglongjmp(jump_to, hop) after every C++ local in that frame
+// has been destroyed. The agent writer lock is released before that return. Returns false when the
+// range is finished or declined: ctx.host_outcome and ctx.host_divergence are then what CLOSE
+// should report, and the exit snapshot has been restored when one was taken.
+bool
+continue_host_replay(range_context_t& ctx, sigjmp_buf jump_to, int& hop);
 
 // True when divergence checking is enabled (ROCPROF_RANGE_REPLAY_VERIFY). Reads the environment
 // once.

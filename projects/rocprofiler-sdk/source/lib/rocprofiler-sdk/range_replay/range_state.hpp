@@ -47,6 +47,7 @@
 #include <hsa/hsa.h>
 
 #include <atomic>
+#include <csetjmp>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -176,7 +177,25 @@ struct range_context_t
     uint64_t thread_id        = 0;
     uint64_t internal_corr_id = 0;
     uint64_t ancestor_corr_id = 0;
+
+    // Host replay. host_pass is the pass that just finished (0 after the application's own run).
+    // The exit snapshot is taken once, at the end of that run, and restored when the last host
+    // pass returns. host_pass_state carries the PASS callback context across the siglongjmp.
+    uint64_t                          host_pass            = 0;
+    bool                              exit_snapshot_taken  = false;
+    kernel_replay::memory_snapshot::device_snapshot_t exit_snapshot = {};
+    pass_context_state_t              host_pass_state      = {};
+    rocprofiler_range_replay_status_t host_outcome = ROCPROFILER_RANGE_REPLAY_STATUS_REPLAYED;
+    uint64_t                          host_divergence = 0;
 };
+
+// Thread-local sigjmp_buf for host replay. host_jmpbuf() arms it; the buffer is a valid longjmp
+// target only after sigsetjmp has been called on the returned pointer from a live frame.
+sigjmp_buf*
+host_jmpbuf();
+
+bool
+host_jmp_armed();
 
 // Publish a decline reason from a thread that does not own the range.
 void

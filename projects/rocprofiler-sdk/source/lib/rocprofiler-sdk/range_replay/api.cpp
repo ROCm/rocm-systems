@@ -32,6 +32,7 @@
 #include <rocprofiler-sdk/fwd.h>
 
 #include <atomic>
+#include <csetjmp>
 #include <cstdint>
 
 extern "C" {
@@ -75,26 +76,65 @@ rocprofiler_range_replay_begin(uint64_t range_id)
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
+sigjmp_buf*
+rocprofiler_range_replay_host_jmpbuf(void)
+{
+    return ::rocprofiler::range_replay::host_jmpbuf();
+}
+
 rocprofiler_status_t
 rocprofiler_range_replay_end(void)
 {
-    namespace range_replay = ::rocprofiler::range_replay;
+    // sigjmp_buf is a POD. The longjmp below has to happen after every C++ local in this frame is
+    // gone: siglongjmp does not run destructors.
+    sigjmp_buf jump_to = {};
+    int        hop      = 0;
+    bool       jump     = false;
 
-    auto ctx = range_replay::range_context_t{};
-    if(!range_replay::take_range(ctx)) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    {
+        namespace range_replay = ::rocprofiler::range_replay;
 
-    auto       divergence_count = uint64_t{0};
-    const auto status           = range_replay::execute_range(ctx, divergence_count);
+        auto* live = range_replay::current_range();
+        if(live == nullptr) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
-    range_replay::execute_close_callback(ctx.plan,
-                                         status,
-                                         ctx.agent_id,
-                                         ctx.record.observed_dispatch_count(),
-                                         divergence_count,
-                                         ctx.thread_id,
-                                         ctx.internal_corr_id,
-                                         ctx.ancestor_corr_id);
+        if(!live->plan.host_replay)
+        {
+            auto ctx = range_replay::range_context_t{};
+            if(!range_replay::take_range(ctx)) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
+            auto       divergence_count = uint64_t{0};
+            const auto status           = range_replay::execute_range(ctx, divergence_count);
+
+            range_replay::execute_close_callback(ctx.plan,
+                                                 status,
+                                                 ctx.agent_id,
+                                                 ctx.record.observed_dispatch_count(),
+                                                 divergence_count,
+                                                 ctx.thread_id,
+                                                 ctx.internal_corr_id,
+                                                 ctx.ancestor_corr_id);
+            return ROCPROFILER_STATUS_SUCCESS;
+        }
+
+        jump = range_replay::continue_host_replay(*live, jump_to, hop);
+        if(!jump)
+        {
+            auto ctx = range_replay::range_context_t{};
+            if(!range_replay::take_range(ctx)) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
+            range_replay::execute_close_callback(ctx.plan,
+                                                 ctx.host_outcome,
+                                                 ctx.agent_id,
+                                                 ctx.record.observed_dispatch_count(),
+                                                 ctx.host_divergence,
+                                                 ctx.thread_id,
+                                                 ctx.internal_corr_id,
+                                                 ctx.ancestor_corr_id);
+            return ROCPROFILER_STATUS_SUCCESS;
+        }
+    }
+
+    siglongjmp(jump_to, hop);
     return ROCPROFILER_STATUS_SUCCESS;
 }
 }

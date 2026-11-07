@@ -57,6 +57,25 @@ tool to configure, since the dispatches have already been submitted by the time 
 A tool that wants pass 0 measured configures its services normally and uses the `PASS` toggles only
 to change what is collected on the *re-executed* passes.
 
+## Host replay (`sigsetjmp` / `siglongjmp`)
+
+Packet replay does not run the host code inside the range again. A tool that needs that sets
+`host_replay` on the CONFIG record. The application opens the range with
+`ROCPROFILER_RANGE_REPLAY_HOST_BEGIN` instead of `rocprofiler_range_replay_begin`. The macro's
+`sigsetjmp` is in the caller's frame, which is the only place it stays valid: `begin` returns
+before `end` runs, so a `setjmp` inside `begin` would be undefined the moment `begin` returned.
+
+`rocprofiler_range_replay_end` then restores the entry snapshot and `siglongjmp`s back to that
+macro. The host code between the macro and `end` runs again, and its launches go through the normal
+HIP path, so counter collection sees them. CLOSE runs only when `end` is not going to jump. The
+exit snapshot taken after pass 0 is restored before `end` returns, so the application still observes
+its own result.
+
+`siglongjmp` does not run C++ destructors for automatic objects created inside the range. A tool
+that sets `host_replay` when the application did not arm the macro gets `HOST_JMP_NOT_SET` and no
+extra pass. Leaving `host_replay` at zero keeps packet replay, which is what
+`rocprofiler_range_replay_begin` always does.
+
 ## Soundness is checked, not enforced
 
 Replaying a range is only meaningful if re-running the recorded dispatches from the restored

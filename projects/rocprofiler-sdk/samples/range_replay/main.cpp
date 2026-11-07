@@ -17,6 +17,8 @@
 //
 //   plain        (default) three dispatches on one stream -- a replayable range
 //   multi-queue  the same, plus a dispatch on a second stream, which the SDK declines
+//   host         the same as plain, but the range is armed with sigsetjmp so a tool that sets
+//                host_replay can siglongjmp back to the top of the range
 
 #include "range.hpp"
 
@@ -26,6 +28,7 @@
 
 #include <dlfcn.h>
 
+#include <csetjmp>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -75,6 +78,17 @@ main()
     const auto* mode_env     = getenv("RR_APP_MODE");
     const auto  mode         = std::string{mode_env != nullptr ? mode_env : "plain"};
     const bool  second_queue = (mode == "multi-queue");
+    const bool  host_replay  = (mode == "host");
+
+    using jmpbuf_fn_t = sigjmp_buf* (*)();
+    auto* jmp_fn      = host_replay ? reinterpret_cast<jmpbuf_fn_t>(dlsym(
+                                     RTLD_DEFAULT, "rocprofiler_range_replay_host_jmpbuf"))
+                                    : nullptr;
+    if(host_replay && jmp_fn == nullptr)
+    {
+        fprintf(stderr, "[app] FAIL: rocprofiler_range_replay_host_jmpbuf is not in this process\n");
+        return EXIT_FAILURE;
+    }
 
     int* acc     = nullptr;
     int* scratch = nullptr;
@@ -93,12 +107,18 @@ main()
     // allocation inside a range is itself a decline reason.
     HIP_CHECK(hipDeviceSynchronize());
 
-    if(const auto status = begin_fn(kRangeId); status != ROCPROFILER_STATUS_SUCCESS)
+    // Host replay's sigsetjmp has to be in this frame. end() longjmps back to it, and a setjmp
+    // inside begin() would be invalid the moment begin() returned. The first return calls begin;
+    // every later return is a replay pass and must not open the range again.
+    if(!host_replay || sigsetjmp(*jmp_fn(), 1) == 0)
     {
-        fprintf(stderr,
-                "[app] FAIL: rocprofiler_range_replay_begin returned status %d\n",
-                static_cast<int>(status));
-        return EXIT_FAILURE;
+        if(const auto status = begin_fn(kRangeId); status != ROCPROFILER_STATUS_SUCCESS)
+        {
+            fprintf(stderr,
+                    "[app] FAIL: rocprofiler_range_replay_begin returned status %d\n",
+                    static_cast<int>(status));
+            return EXIT_FAILURE;
+        }
     }
 
     // 0 -> 1 -> 5 -> 18
