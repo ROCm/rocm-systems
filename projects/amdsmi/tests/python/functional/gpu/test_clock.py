@@ -2,7 +2,7 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""GPU clock: set clock frequency, set PCI bandwidth."""
+"""GPU clock: SoC P-state policy, set clock frequency, set PCI bandwidth."""
 
 import unittest
 
@@ -29,6 +29,122 @@ class TestGpuClock(unittest.TestCase):
 
     def tearDown(self):
         amdsmi.amdsmi_shut_down()
+
+    def test_soc_pstate(self):
+        self.common.print_func_name("")
+
+        # Run every check even if an earlier one fails, then report all failures,
+        # each labelled with the check that produced it.
+        checks = [
+            ("None handle", self._check_none_handle_is_rejected),
+            ("null handle", self._check_null_handle_is_rejected),
+            ("unregistered handle", self._check_unregistered_handle_is_rejected),
+            ("non-int policy id", self._check_non_int_policy_id_is_rejected),
+            ("real GPU handles", self._check_every_gpu_policy_round_trips),
+        ]
+        failures = []
+        for name, check in checks:
+            try:
+                check()
+            except Exception as exc:
+                failures.append(f"[{name}] {common.failure_text(exc)}")
+
+        if failures:
+            raise AssertionError("\n\n".join(failures))
+
+    @staticmethod
+    def _soc_pstate_apis():
+        """(name, call) for each SoC P-state API, called with only a handle."""
+        return [
+            ("amdsmi_get_soc_pstate", amdsmi.amdsmi_get_soc_pstate),
+            ("amdsmi_set_soc_pstate", lambda handle: amdsmi.amdsmi_set_soc_pstate(handle, 0)),
+        ]
+
+    def _check_none_handle_is_rejected(self):
+        # The Python wrapper rejects a non-handle before any native call.
+        for name, call in self._soc_pstate_apis():
+            with self.assertRaises(amdsmi.AmdSmiParameterException):
+                call(None)
+            self.common.print(
+                f"\t### {name}(gpu=None):\n"
+                "\tTEST SUCCESS, raised AmdSmiParameterException as expected"
+            )
+
+    def _check_null_handle_is_rejected(self):
+        null_handle = amdsmi.amdsmi_wrapper.amdsmi_processor_handle()
+        with self.common.status_sweep():
+            for name, call in self._soc_pstate_apis():
+                msg = f"\t### {name}(gpu=null handle):"
+                with self.common.expect_status(msg, [amdsmi.AmdSmiStatus.INVAL]):
+                    call(null_handle)
+
+    def _check_unregistered_handle_is_rejected(self):
+        # A non-null pointer the library never issued.
+        unregistered_handle = amdsmi.amdsmi_wrapper.amdsmi_processor_handle(0xDEADBEEF)
+        with self.common.status_sweep():
+            for name, call in self._soc_pstate_apis():
+                msg = f"\t### {name}(gpu=unregistered handle):"
+                with self.common.expect_status(msg, [amdsmi.AmdSmiStatus.NOT_FOUND]):
+                    call(unregistered_handle)
+
+    def _check_non_int_policy_id_is_rejected(self):
+        # Checked by the wrapper before any native call, so it needs no real GPU.
+        null_handle = amdsmi.amdsmi_wrapper.amdsmi_processor_handle()
+        with self.assertRaises(amdsmi.AmdSmiParameterException):
+            amdsmi.amdsmi_set_soc_pstate(null_handle, "0")
+        self.common.print(
+            "\t### amdsmi_set_soc_pstate(policy_id='0'):\n"
+            "\tTEST SUCCESS, raised AmdSmiParameterException as expected"
+        )
+
+    def _check_every_gpu_policy_round_trips(self):
+        failures = []
+        for i, gpu in enumerate(self.common.processors):
+            try:
+                self._exercise_gpu_policies(i, gpu)
+            except AssertionError as exc:
+                failures.append(f"gpu={i}: {exc}")
+        if failures:
+            raise AssertionError("\n".join(failures))
+
+    def _exercise_gpu_policies(self, i, gpu):
+        """Set every supported policy on one GPU, check each took effect, then restore."""
+        # Not every ASIC exposes SoC P-state policies, so NOT_SUPPORTED just means
+        # there is nothing to exercise on this GPU. Anything else is a failure.
+        info = self._read_policy_info(
+            i, gpu, [amdsmi.AmdSmiStatus.SUCCESS, amdsmi.AmdSmiStatus.NOT_SUPPORTED]
+        )
+        if info is None:
+            return
+
+        original_id = info["current_id"]
+        try:
+            for policy in info["policies"]:
+                self._set_policy(i, gpu, policy["policy_id"])
+                self._check_current_policy(i, gpu, expected_id=policy["policy_id"])
+        finally:
+            self._set_policy(i, gpu, original_id)
+
+    def _read_policy_info(self, i, gpu, accept):
+        """Returns the policy info, or None if the call raised one of the *accept* statuses."""
+        msg = f"\t### amdsmi_get_soc_pstate(gpu={i}):"
+        info = None
+        with self.common.expect_status(msg, accept):
+            info = amdsmi.amdsmi_get_soc_pstate(gpu)
+        self.common.print(f"\t    data: {'N/A' if info is None else info}")
+        return info
+
+    def _set_policy(self, i, gpu, policy_id):
+        msg = f"\t### amdsmi_set_soc_pstate(gpu={i}, policy_id={policy_id}):"
+        with self.common.expect_status(msg, [amdsmi.AmdSmiStatus.SUCCESS]):
+            amdsmi.amdsmi_set_soc_pstate(gpu, policy_id)
+
+    def _check_current_policy(self, i, gpu, expected_id):
+        info = self._read_policy_info(i, gpu, [amdsmi.AmdSmiStatus.SUCCESS])
+        if info["current_id"] != expected_id:
+            raise AssertionError(
+                f"set policy {expected_id}, but the current policy is {info['current_id']}"
+            )
 
     def test_set_clk_freq(self):
         self.common.print_func_name("")
