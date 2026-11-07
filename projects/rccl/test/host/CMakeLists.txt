@@ -2,6 +2,10 @@ cmake_minimum_required(VERSION 3.16)
 
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/RcclAssertSourceLine.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/RcclTargetHelpers.cmake")
+include(GNUInstallDirs)
+
+# Where the binaries rccl-UnitTestsHostAll runs live, relative to its location
+set(RCCL_MICRO_SUBDIR "micro")
 
 # Checked against the original sources because hipify output does not exist yet
 # at configure time. Paths are relative to this file, so the same checks cover
@@ -1088,11 +1092,10 @@ endfunction()
 #   SOURCES         the target's source list
 #   EXTRA_INCLUDES  include dirs appended after the mode's include-dir var
 #   EXTRA_DEFS      compile definitions appended after the mode's define baseline
-#   CATEGORIES_YAML CTest category yaml (in-build only; ignored standalone)
 #   REMOVE_DEFS     defines to drop from the in-build baseline before EXTRA_DEFS are
 #                   added; ignored standalone, whose baseline is fixed
 function(rccl_add_micro_binary _name)
-  cmake_parse_arguments(_ramb "OBJECT" "CATEGORIES_YAML"
+  cmake_parse_arguments(_ramb "OBJECT" ""
     "SOURCES;EXTRA_INCLUDES;EXTRA_DEFS;REMOVE_DEFS" ${ARGN})
   # OBJECT builds an object library with the same compile settings, for sources several binaries share.
   if(_ramb_OBJECT)
@@ -1122,10 +1125,9 @@ function(rccl_add_micro_binary _name)
     endif()
     rccl_apply_host_only_flags(${_name})
     if(NOT _ramb_OBJECT)
-      rocm_install(TARGETS ${_name} COMPONENT tests)
-      if(_ramb_CATEGORIES_YAML)
-        rccl_register_test_categories(${_name} "${_ramb_CATEGORIES_YAML}")
-      endif()
+      install(TARGETS ${_name}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}/${RCCL_MICRO_SUBDIR} COMPONENT tests)
+      set_property(TARGET ${_name} APPEND PROPERTY INSTALL_RPATH "$ORIGIN/../../lib")
     endif()
   else()
     # Mirror add_test_executable(): record for the standalone coverage loop.
@@ -1153,6 +1155,8 @@ function(rccl_add_micro_binary _name)
       GTest::GTest Threads::Threads fmt::fmt-header-only)
   endif()
   target_link_libraries(${_name} PRIVATE nlohmann_json::nlohmann_json)
+  set_target_properties(${_name} PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/${RCCL_MICRO_SUBDIR}")
 endfunction()
 
 # =====================================================================
@@ -1595,7 +1599,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroBootstrap
     ${_MICRO_MODE_DEFS}
     BOOTSTRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/bootstrap.cc"
     RCCL_OS_FAKES_OMIT_ncclSocketClose   # fakes/bootstrap_micro_fakes.cc defines it
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_bootstrap.yaml")
+  )
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicro
@@ -1660,8 +1664,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     DV_PROVIDER_FAKE_IONIC_NO_GDA_NAME="$<TARGET_FILE_NAME:rccl-micro-dv-provider-fake-ionic-no-gda>"
     DV_PROVIDER_FAKE_MLX5_NAME="$<TARGET_FILE_NAME:rccl-micro-dv-provider-fake-mlx5>"
     RCCL_GRAPH_GEN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/rccl_graph_gen.cc"
-    PARAM_REGISTRY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/param/param_registry.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+    PARAM_REGISTRY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/param/param_registry.cc")
 # wrap-test.cc includes rccl_wrap.cc. Production librccl always compiles the LL128
 # arm; without this the broadcast protocol tests exercise the compiled-out fallback.
 set_source_files_properties(wrap-test.cc PROPERTIES COMPILE_DEFINITIONS ENABLE_LL128)
@@ -1671,13 +1674,15 @@ set_source_files_properties(wrap-test.cc PROPERTIES COMPILE_DEFINITIONS ENABLE_L
 foreach(_fake ionic ionic-no-gda mlx5)
   string(REGEX REPLACE "-.*" "" _dv "${_fake}")
   add_library(rccl-micro-dv-provider-fake-${_fake} SHARED fakes/dv_provider_fake.cc)
-  set_target_properties(rccl-micro-dv-provider-fake-${_fake} PROPERTIES NO_SONAME ON)
+  set_target_properties(rccl-micro-dv-provider-fake-${_fake} PROPERTIES NO_SONAME ON
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/${RCCL_MICRO_SUBDIR}")
+  if(BUILD_TESTS)
+    install(TARGETS rccl-micro-dv-provider-fake-${_fake}
+      LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR}/${RCCL_MICRO_SUBDIR} COMPONENT tests)
+  endif()
   target_compile_options(rccl-micro-dv-provider-fake-${_fake} PRIVATE --offload-host-only)
   target_link_options(rccl-micro-dv-provider-fake-${_fake} PRIVATE -no-hip-rt -Wl,-soname,lib${_dv}.so)
   add_dependencies(rccl-UnitTestsMicro rccl-micro-dv-provider-fake-${_fake})
-  if(BUILD_TESTS)
-    install(TARGETS rccl-micro-dv-provider-fake-${_fake} LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT tests)
-  endif()
 endforeach()
 target_compile_definitions(rccl-micro-dv-provider-fake-ionic-no-gda PRIVATE DV_PROVIDER_FAKE_IONIC_NO_GDA)
 target_link_options(rccl-micro-dv-provider-fake-ionic-no-gda PRIVATE
@@ -1692,8 +1697,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroCollectives
   SOURCES ${TEST_MICRO_COLLECTIVES_SOURCE_FILES}
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
-    COLLECTIVES_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/collectives.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_collectives.yaml")
+    COLLECTIVES_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/collectives.cc")
 # collectives.cc defines a kernel. An empty embedded device binary stands in for the device pass, so the
 # host-only object registers it without referencing a fatbin symbol nothing provides.
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/empty_gpubinary" "")
@@ -1710,8 +1714,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroOnerank
     ${RCCL_HOST_HIPIFY_DIR}/src/device               # common_kernel.h includes "tdm/tdmCopy.h"
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
-    ONERANK_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/device/onerank.cu.cpp"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_onerank.yaml")
+    ONERANK_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/device/onerank.cu.cpp")
 # onerank.cu defines kernels too; see rccl-UnitTestsMicroCollectives.
 target_compile_options(rccl-UnitTestsMicroOnerank PRIVATE
   "SHELL:-Xclang -fcuda-include-gpubinary -Xclang ${CMAKE_CURRENT_BINARY_DIR}/empty_gpubinary")
@@ -1723,8 +1726,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroMgmtTaskEnq
   SOURCES ${TEST_MICRO_MGMT_TASK_ENQ_SOURCE_FILES}
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
-    MGMT_TASK_ENQ_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/enqueue/mgmt_task_enq.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_mgmt_task_enq.yaml")
+    MGMT_TASK_ENQ_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/enqueue/mgmt_task_enq.cc")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroGinHost -- src/gin/gin_host.cc (GIN_PROXY_NTHREADS, proxy affinity)
@@ -1736,8 +1738,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroGinHost
     ${RCCL_HOST_HIPIFY_DIR}/src/include/nccl_device
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
-    GIN_HOST_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/gin/gin_host.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_gin_host.yaml")
+    GIN_HOST_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/gin/gin_host.cc")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroCrypt
@@ -1746,8 +1747,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroCrypt
   SOURCES ${TEST_MICRO_CRYPT_SOURCE_FILES}
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
-    CRYPT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/crypt.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_crypt.yaml")
+    CRYPT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/crypt.cc")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroStrongstream
@@ -1756,8 +1756,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroStrongstream
   SOURCES ${TEST_MICRO_STRONGSTREAM_SOURCE_FILES}
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
-    STRONGSTREAM_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/strongstream.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_strongstream.yaml")
+    STRONGSTREAM_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/strongstream.cc")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroUtils
@@ -1766,8 +1765,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroUtils
   SOURCES ${TEST_MICRO_UTILS_SOURCE_FILES}
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
-    UTILS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_utils.yaml")
+    UTILS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroArgcheck
@@ -1776,8 +1774,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroArgcheck
   SOURCES ${TEST_MICRO_ARGCHECK_SOURCE_FILES}
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
-    ARGCHECK_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/argcheck.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_argcheck.yaml")
+    ARGCHECK_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/argcheck.cc")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroCpuset
@@ -1785,8 +1782,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroArgcheck
 rccl_add_micro_binary(rccl-UnitTestsMicroCpuset
   SOURCES ${TEST_MICRO_CPUSET_SOURCE_FILES}
   EXTRA_DEFS
-    ${_MICRO_MODE_DEFS}
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_cpuset.yaml")
+    ${_MICRO_MODE_DEFS})
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroDdaIpc -- src/algorithms/dda/all_reduce/dda_all_reduce_ipc.cu
@@ -1795,8 +1791,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDdaIpc
   SOURCES ${TEST_MICRO_DDA_IPC_SOURCE_FILES}
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
-    DDA_ALL_REDUCE_IPC_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_ipc.cu.cpp"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_dda_ipc.yaml")
+    DDA_ALL_REDUCE_IPC_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_ipc.cu.cpp")
 # The TU defines __global__ kernels; an embedded (empty) GPU binary keeps clang from referencing an
 # external __hip_fatbin_<cuid>. Registration itself is faked in fakes/hip_fakes.cc.
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/empty_gpubinary" "")
@@ -1834,8 +1829,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDdaColl
     DDA_REDUCE_SCATTER_FABRIC_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric.cu.cpp"
     DDA_REDUCE_SCATTER_FABRIC_LL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll.cu.cpp"
     DDA_REDUCE_SCATTER_FABRIC_LL128_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll128.cu.cpp"
-    DDA_REDUCE_SCATTER_IPC_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_ipc.cu.cpp"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_dda_coll.yaml")
+    DDA_REDUCE_SCATTER_IPC_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_ipc.cu.cpp")
 # The launchers define __global__ kernels; an embedded empty GPU binary keeps clang from referencing an
 # undefined __hip_fatbin_<cuid>. Registration is faked in dda-coll-seams.cc.
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/empty_gpubinary" "")
@@ -1852,8 +1846,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroRmaProxy
   SOURCES ${TEST_MICRO_RMA_PROXY_SOURCE_FILES}
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
-    RMA_PROXY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_proxy.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_rma_proxy.yaml")
+    RMA_PROXY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_proxy.cc")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroDebug
@@ -1862,8 +1855,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDebug
   SOURCES ${TEST_MICRO_DEBUG_SOURCE_FILES}
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
-    DEBUG_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/debug.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_debug.yaml")
+    DEBUG_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/debug.cc")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroApiTrace
@@ -1875,8 +1867,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroApiTrace
   REMOVE_DEFS RCCL_ROCPROFILER_REGISTER=1
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
-    API_TRACE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/api_trace.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_api_trace.yaml")
+    API_TRACE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/api_trace.cc")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroRecorder
@@ -1885,8 +1876,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroRecorder
   SOURCES ${TEST_MICRO_RECORDER_SOURCE_FILES}
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
-    RECORDER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/recorder.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_recorder.yaml")
+    RECORDER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/recorder.cc")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroCollTrace
@@ -1898,8 +1888,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroCollTrace
     COLL_TRACE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/latency_profiler/CollTrace.cc"
     COLL_TRACE_EVENT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/latency_profiler/CollTraceEvent.cc"
     COLL_TRACE_FUNC_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/latency_profiler/CollTraceFunc.cc"
-    COLL_TRACE_UTILS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/latency_profiler/CollTraceUtils.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_coll_trace.yaml")
+    COLL_TRACE_UTILS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/latency_profiler/CollTraceUtils.cc")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroWarpSpeed -- tests for ENABLE_WARP_SPEED
@@ -1913,8 +1902,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroWarpSpeed
     GENERATE_SYM_KERNELS
     # Hipify renames this to *_tmp.cc: src/enqueue/task_sched/allgatherv_sched.cc keeps the basename instead.
     ALLGATHERV_SCHED_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/scheduler/allgatherv_sched_tmp.cc"
-    SYMMETRIC_SCHED_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/scheduler/symmetric_sched.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_scheduler.yaml")
+    SYMMETRIC_SCHED_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/scheduler/symmetric_sched.cc")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroGinHostProxy
@@ -1949,8 +1937,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroGinHostProxy
     GIN_HOST_PROXY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/gin/gin_host_proxy.cc"
     GPUCONTEXT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/gin/proxy_gpucontext/gpucontext.cc"
     GPUCONTEXT_V1_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/gin/proxy_gpucontext/gpucontext_v1.cc"
-    GPUCONTEXT_V2_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/gin/proxy_gpucontext/gpucontext_v2.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_gin_host_proxy.yaml")
+    GPUCONTEXT_V2_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/gin/proxy_gpucontext/gpucontext_v2.cc")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroInit and variants
@@ -1960,8 +1947,7 @@ foreach(_variant "" "-uncached" "-faultinj")
   rccl_add_micro_binary(${_init_tgt}
     SOURCES ${TEST_MICRO_INIT_SOURCE_FILES}
     REMOVE_DEFS ENABLE_FAULT_INJECTION HIP_HOST_UNCACHED_MEMORY HIP_UNCACHED_MEMORY
-    EXTRA_DEFS ${_MICRO_MODE_DEFS} ${_MICRO_AMDSMI_DEF} INIT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/init.cc"
-    CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_init.yaml")
+    EXTRA_DEFS ${_MICRO_MODE_DEFS} ${_MICRO_AMDSMI_DEF} INIT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/init.cc")
   if(_variant STREQUAL "-uncached")
     target_compile_definitions(${_init_tgt} PRIVATE HIP_HOST_UNCACHED_MEMORY HIP_UNCACHED_MEMORY)
   elseif(_variant STREQUAL "-faultinj")
@@ -1982,8 +1968,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroConnect
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     ${_MICRO_AMDSMI_DEF}
-    CONNECT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/connect.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_connect.yaml")
+    CONNECT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/connect.cc")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroEnqueue (+ shipping -devlinker arm standalone)
@@ -2004,8 +1989,7 @@ set(_enq_common_args
     # Standalone host CI otherwise compiles enqueue.cc without it, so addP2pToPlan's
     # gfx1250 ENABLE=1 window is unreachable there.
     ENABLE_LL128
-    ENQUEUE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/enqueue/enqueue.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_enqueue.yaml")
+    ENQUEUE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/enqueue/enqueue.cc")
 
 rccl_add_micro_binary(rccl-UnitTestsMicroEnqueue ${_enq_common_args})
 if(_ENQ_BUILD_DEVLINKER)
@@ -2024,8 +2008,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroNcclDevice
     GIN_BARRIER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/nccl_device/gin_barrier.cc"
     GIN_SCRATCH_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/nccl_device/gin_scratch.cc"
     LL_A2A_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/nccl_device/ll_a2a.cc"
-    LSA_BARRIER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/nccl_device/lsa_barrier.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_nccl_device.yaml")
+    LSA_BARRIER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/nccl_device/lsa_barrier.cc")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroCore
@@ -2034,8 +2017,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroCore
   SOURCES ${TEST_MICRO_CORE_SOURCE_FILES}
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
-    CORE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/nccl_device/core.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_core.yaml")
+    CORE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/nccl_device/core.cc")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroCftDevRuntime
@@ -2045,8 +2027,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroCftDevRuntime
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     CORE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/nccl_device/core.cc"
-    CFT_DEV_RUNTIME_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/cft_dev_runtime.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_cft_dev_runtime.yaml")
+    CFT_DEV_RUNTIME_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/cft_dev_runtime.cc")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroCe
@@ -2071,8 +2052,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroCe
     ${_MICRO_AMDSMI_DEF}
     ${_MICRO_CE_BATCH_DEF}
     RCCL_STUBS_OMIT_ncclCeFinalize       # ce_coll.cc defines it
-    CE_COLL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ce_coll.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+    CE_COLL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ce_coll.cc")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroParam
@@ -2086,8 +2066,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroParam
     PARAM_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/param/param_tmp.cc"
     C_API_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/param/c_api.cc"
     MISC_PARAM_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/param.cc"
-    PARAM_REGISTRY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/param/param_registry.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_param.yaml")
+    PARAM_REGISTRY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/param/param_registry.cc")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroClientSupport
@@ -2096,8 +2075,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroClientSupport
   SOURCES ${TEST_MICRO_CLIENT_SUPPORT_SOURCE_FILES}
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
-    CLIENT_SUPPORT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/client_support.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+    CLIENT_SUPPORT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/client_support.cc")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroPlugin
@@ -2116,7 +2094,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroPlugin
     NET_V11_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/net/net_v11.cc"
     NET_V12_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/net/net_v12.cc"
     RCCL_TRANSPORT_STUBS_OMIT_ncclGpuGdrSupport  # net.cc defines it
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_plugin.yaml")
+  )
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroSymKernels
@@ -2137,8 +2115,7 @@ if(_MICRO_BUILD_SYM_KERNELS)
       SYM_MODEL_GIN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/sym_model/gin_tmp.cc"
       SYM_MODEL_LSA_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/sym_model/lsa.cc"
       SYM_MODEL_LSA_BASE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/sym_model/lsa_base.cc"
-      SYM_MODEL_LSA_A2A_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/sym_model/lsa_a2a.cc"
-    CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+      SYM_MODEL_LSA_A2A_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/sym_model/lsa_a2a.cc")
 endif()
 
 # ---------------------------------------------------------------------------
@@ -2155,8 +2132,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroProfiler
     PROFILER_V4_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/profiler/profiler_v4.cc"
     PROFILER_V5_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/profiler/profiler_v5.cc"
     PROFILER_V6_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/profiler/profiler_v6.cc"
-    PROFILER_V7_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/profiler/profiler_v7.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_profiler.yaml")
+    PROFILER_V7_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/profiler/profiler_v7.cc")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroTaskPrep -- host-only microtests for src/enqueue/task_prep/.
@@ -2193,8 +2169,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroTaskPrep
     TASK_SCHED_ALLGATHERV_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/enqueue/task_sched/allgatherv_sched.cc"
     TASK_SCHED_P2P_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/enqueue/task_sched/p2p_sched.cc"
     TASK_SCHED_RMA_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/enqueue/task_sched/rma_sched.cc"
-    TASK_SCHED_CE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/enqueue/task_sched/ce_sched.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_taskprep.yaml")
+    TASK_SCHED_CE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/enqueue/task_sched/ce_sched.cc")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroProxy
@@ -2205,7 +2180,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroProxy
     ${_MICRO_MODE_DEFS}
     PROXY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/proxy.cc"
     RCCL_OS_FAKES_OMIT_ncclSocketClose   # fakes/proxy_micro_fakes.cc defines it
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_proxy.yaml")
+  )
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroRomeModels
@@ -2214,8 +2189,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroRomeModels
   SOURCES ${TEST_MICRO_ROME_MODELS_SOURCE_FILES}
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
-    ROME_MODELS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/rome_models.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_rome_models.yaml")
+    ROME_MODELS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/rome_models.cc")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroRoctxNvml
@@ -2225,8 +2199,7 @@ set(_roctx_nvml_common_args
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     ROCTX_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/roctx.cc"
-    NVMLWRAP_STUB_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/nvmlwrap_stub.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_roctx_nvml.yaml")
+    NVMLWRAP_STUB_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/nvmlwrap_stub.cc")
 
 rccl_add_micro_binary(rccl-UnitTestsMicroRoctxNvml ${_roctx_nvml_common_args})
 # -roctx builds roctx.cc's ROCTX_ENABLE arm against the stand-in fakes/roctx_include.
@@ -2245,8 +2218,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroRocmwrap
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     ${_MICRO_DMABUF_EXPORT_DEF}
-    ROCMWRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/rocmwrap.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_rocmwrap.yaml")
+    ROCMWRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/rocmwrap.cc")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroAmdsmiWrap
@@ -2255,8 +2227,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroAmdsmiWrap
   SOURCES ${TEST_MICRO_AMDSMI_WRAP_SOURCE_FILES}
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
-    AMDSMI_WRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/amdsmi_wrap.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_amdsmi_wrap.yaml")
+    AMDSMI_WRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/amdsmi_wrap.cc")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroGraph is its own binary because the others link fakes for the graph symbols these TUs define.
@@ -2275,8 +2246,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroGraph
     ${_MICRO_MODE_DEFS}
     ${_MICRO_AMDSMI_DEF}
     RCCL_NCCL_FAKES_OMIT_GRAPH
-    RCCL_TRANSPORT_STUBS_OMIT_ncclPxnDisable
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_graph.yaml")
+    RCCL_TRANSPORT_STUBS_OMIT_ncclPxnDisable)
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroTopo
@@ -2296,8 +2266,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroTopo
     CONNECT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/connect.cc"
     RINGS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/rings.cc"
     TREES_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/trees.cc"
-    TOPO_EXPL_MODELS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../tools/topo_expl/models"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_topo.yaml")
+    TOPO_EXPL_MODELS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../tools/topo_expl/models")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroDiagnostics
@@ -2312,8 +2281,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDiagnostics
     DIAG_P2P_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/diagnostics/p2p.cc"
     DIAG_IB_WRITE_BW_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/diagnostics/ib_write_bw.cc"
     DIAGNOSTICS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/diagnostics.cc"
-    DIAG_P2P_DEVICE_CU_PATH="${RCCL_HOST_HIPIFY_DIR}/src/diagnostics/device/p2p.cu.cpp"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_diagnostics.yaml")
+    DIAG_P2P_DEVICE_CU_PATH="${RCCL_HOST_HIPIFY_DIR}/src/diagnostics/device/p2p.cu.cpp")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroGinHostFinalize -- host finalize for src/gin/gin_host.cc.
@@ -2325,8 +2293,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroGinHostFinalize
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     # Hipify keeps gin/gin_host.cc (no basename collision with another gin_host.cc).
-    GIN_HOST_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/gin/gin_host.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_gin_host_finalize.yaml")
+    GIN_HOST_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/gin/gin_host.cc")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroDda
@@ -2341,8 +2308,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDda
     FABRIC_MEM_HANDLER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/fabric/fabric_mem_handler.cc"
     # hipify renames .cu to .cu.cpp
     FABRIC_GPU_BARRIER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/fabric/fabric_gpu_barrier.cu.cpp"
-    FABRIC_INIT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/fabric/fabric_init.cu.cpp"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_dda.yaml")
+    FABRIC_INIT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/fabric/fabric_init.cu.cpp")
 
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
@@ -2359,8 +2325,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroP2pResiliency
     # add_file_unique() renames these. Re-check after any source-list reorder.
     P2P_RESILIENCY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/p2p_resiliency_tmp.cc"
     P2P_RESILIENCY_RECOVERY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/p2p_resiliency_recovery_tmp.cc"
-    P2P_RESILIENCY_RECOVERY_AINIC_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/p2p_resiliency_recovery_ainic.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_p2p_resiliency.yaml")
+    P2P_RESILIENCY_RECOVERY_AINIC_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/p2p_resiliency_recovery_ainic.cc")
 
 # ---------------------------------------------------------------------------
 # src/transport/: one binary per test file, each linking only the fakes its unit needs.
@@ -2480,8 +2445,7 @@ function(rccl_add_transport_micro_binary _name _test)
   endif()
   rccl_add_micro_binary(${_name}
     SOURCES ${_ratmb_sources}
-    ${_ratmb_args}
-    CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_transport.yaml")
+    ${_ratmb_args})
   set(HOST_TEST_BINARIES "${HOST_TEST_BINARIES}" PARENT_SCOPE)
   set(HOST_TEST_OBJECT_LIBS "${HOST_TEST_OBJECT_LIBS}" PARENT_SCOPE)
 endfunction()
@@ -3066,16 +3030,14 @@ rccl_add_micro_binary(rccl-UnitTestsMicroMisc
     IONICDVSYMBOLS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/ionicdvsymbols.cc"
     IONICDVWRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/ionicdvwrap.cc"
     MLX5DVSYMBOLS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/mlx5dvsymbols.cc"
-    MLX5DVWRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/mlx5dvwrap.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_misc.yaml")
+    MLX5DVWRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/mlx5dvwrap.cc")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroHostDispatch
 # ---------------------------------------------------------------------------
 rccl_add_micro_binary(rccl-UnitTestsMicroHostDispatch
   SOURCES ${TEST_MICRO_HOST_DISPATCH_SOURCE_FILES}
-  EXTRA_DEFS ${_MICRO_MODE_DEFS}
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+  EXTRA_DEFS ${_MICRO_MODE_DEFS})
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroDdaIpcLifecycle -- host-only DDA IPC init/teardown lifecycle
@@ -3086,22 +3048,32 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDdaIpcLifecycle
     ${_MICRO_MODE_DEFS}
     DDA_IPC_INIT_CU_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/ipc/ipc_init.cu.cpp"
     DDA_IPC_MEM_HANDLER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/ipc/ipc_mem_handler.cc"
-    DDA_IPC_GPU_BARRIER_CU_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/ipc/ipc_gpu_barrier.cu.cpp"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_dda_ipc_lifecycle.yaml")
+    DDA_IPC_GPU_BARRIER_CU_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/ipc/ipc_gpu_barrier.cu.cpp")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsHostAll
 # ---------------------------------------------------------------------------
-# The single gtest-shaped front door for every rccl-UnitTestsMicro* binary above: it discovers
-# them at run time, so a test harness integrates with this one target and never needs a copy of
-# the binary list. Deliberately NOT named rccl-UnitTestsMicro*, so it cannot front itself.
-#
-# Defined through the same helper as the binaries it runs purely so the two build modes, the
-# install rule and the host-only flags stay in one place; it compiles no production source and
-# links no fakes.
-rccl_add_micro_binary(rccl-UnitTestsHostAll
-  SOURCES host_test_dispatch.cc
-  EXTRA_DEFS ${_MICRO_MODE_DEFS})
+add_executable(rccl-UnitTestsHostAll host_test_dispatch.cc)
+target_include_directories(rccl-UnitTestsHostAll PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(rccl-UnitTestsHostAll PRIVATE nlohmann_json::nlohmann_json)
+if(BUILD_TESTS)
+  target_include_directories(rccl-UnitTestsHostAll PRIVATE ${RCCL_COMMON_INCLUDE_DIRS})
+  target_link_libraries(rccl-UnitTestsHostAll PRIVATE ${MICRO_TEST_LINK_LIBS})
+  rccl_apply_host_only_flags(rccl-UnitTestsHostAll)
+  rocm_install(TARGETS rccl-UnitTestsHostAll COMPONENT tests)
+  rccl_register_test_categories(rccl-UnitTestsHostAll
+    "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_host_all.yaml")
+else()
+  list(APPEND HOST_TEST_BINARIES rccl-UnitTestsHostAll)
+  target_compile_options(rccl-UnitTestsHostAll PRIVATE -ffunction-sections)
+  set(_front_door_link_opts -no-hip-rt -Wl,--gc-sections)
+  if(_MICRO_LINK_NO_PIE)
+    list(APPEND _front_door_link_opts -no-pie)
+  endif()
+  target_link_options(rccl-UnitTestsHostAll PRIVATE ${_front_door_link_opts})
+  target_link_libraries(rccl-UnitTestsHostAll PRIVATE
+    GTest::GTest Threads::Threads fmt::fmt-header-only)
+endif()
 
 # =====================================================================
 # Standalone-only tail: coverage, the runner's binary list, no CTest registration.

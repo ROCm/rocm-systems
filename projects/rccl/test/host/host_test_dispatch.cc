@@ -23,14 +23,19 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <limits>
+#include <map>
 #include <memory>
 #include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <system_error>
+#include <tuple>
 #include <unordered_set>
 #include <vector>
 
@@ -50,12 +55,35 @@ namespace fs = std::filesystem;
 // host tree's own naming convention is the registry; nothing enumerates the binaries by hand.
 constexpr std::string_view kBinaryPrefix = "rccl-UnitTestsMicro";
 
+// The subdirectory holding every binary this dispatcher fronts, in the build tree and in an
+// install alike. See binaryDirectory(), and RCCL_MICRO_SUBDIR in test/host/CMakeLists.txt.
+constexpr std::string_view kMicroSubdirectory = "micro";
+
 // Dropped from a binary's name to form the case-name qualifier, leaving e.g. "Micro",
 // "MicroInit-uncached". Kept distinct from kBinaryPrefix so the qualifier stays short.
 constexpr std::string_view kQualifierStrip = "rccl-UnitTests";
 
-// Written beside the .profraw files, naming every binary that contributed profile data.
-constexpr std::string_view kCoverageManifest = "coverage-objects.txt";
+// The merged lcov tracefile written beside the .profraw files: the whole host tree's coverage
+// in one object-free, hash-agnostic file, so no consumer has to pair profiles with binaries.
+constexpr std::string_view kCoverageTracefile = "host-coverage.lcov";
+
+// Appended to the merged report's own name to form the directory the children's console output
+// is written into, one <Qualifier>.log per fronted binary.
+constexpr std::string_view kLogDirectorySuffix = ".logs";
+
+// Used when the caller asked for no report at all, so there is no name to derive one from.
+constexpr std::string_view kDefaultLogDirectory = "host-test-dispatch.logs";
+
+// Overrides that directory; "-" turns the redirection off and lets the children inherit this
+// process's stdout and stderr.
+constexpr std::string_view kLogDirectoryEnv = "RCCL_HOST_DISPATCH_LOG_DIR";
+
+// How many fronted binaries may run at once. Defaults to half the machine's processors.
+constexpr std::string_view kParallelismEnv = "NUM_PARALLEL_HOST_TEST_BINARIES";
+
+// Source files kept out of the exported coverage. The tests' own code is not the thing under
+// test, and nvtx is vendored. Overridable for a consumer that wants a different view.
+constexpr std::string_view kCoverageIgnoreRegex = "(/test/|nvtx)";
 
 // Longest --gtest_filter handed to one child. The kernel caps a single argv entry at
 // MAX_ARG_STRLEN (32 pages, 128KiB on Linux) and rejects the exec outright with E2BIG, which the
@@ -763,6 +791,12 @@ std::vector<std::string> discoverBinaries(const std::string &directory, const st
     return binaries;
 }
 
+// Where the fronted binaries live, given the directory holding this executable.
+std::string binaryDirectory(const std::string &selfDir)
+{
+    return (fs::path(selfDir) / kMicroSubdirectory).string();
+}
+
 // ── the gtest environment the children are given ────────────────────
 //
 // gtest configures itself from GTEST_* variables as well as from flags, and a dispatcher sits in
@@ -903,6 +937,26 @@ std::string shellQuote(const std::string &argument)
     return quoted + "'";
 }
 
+// LLVM_PROFILE_FILE for the child at *path*, given the *pattern* this process inherited.
+std::string childProfileFile(std::string_view pattern, std::string_view path)
+{
+    if (pattern.empty()) {
+        return "";
+    }
+    const fs::path profile{std::string(pattern)};
+    const std::string binary = fs::path(std::string(path)).filename().string();
+    return (profile.parent_path() / binary / profile.filename()).string();
+}
+
+// The LLVM_PROFILE_FILE the child at *path* should run under, read from this process's
+// environment. Empty when coverage is not being collected.
+std::string childProfileFile(const std::string &path)
+{
+    const char *pattern = std::getenv("LLVM_PROFILE_FILE");
+    return childProfileFile(pattern == nullptr ? std::string_view() : std::string_view(pattern),
+                            path);
+}
+
 // *path*'s --gtest_list_tests output, or nullopt when the binary failed to produce one.
 //
 // The two are deliberately distinguishable: a healthy binary that holds no cases lists nothing
@@ -914,12 +968,17 @@ std::optional<std::string> listTestsOutput(const std::string &path)
     // The listing children are fork sites like any other, so they get the same stripped
     // environment. popen() hands them this process's one, which must keep its originals, so the
     // strip is expressed to the shell instead -- same list, same guarantee.
-    std::string unset;
+    std::string environment;
     for (const std::string &name : gtestVariablesToStrip()) {
-        unset += fmt::format("-u {} ", shellQuote(name));
+        environment += fmt::format("-u {} ", shellQuote(name));
+    }
+
+    const std::string profile = childProfileFile(path);
+    if (!profile.empty()) {
+        environment += fmt::format("LLVM_PROFILE_FILE={} ", shellQuote(profile));
     }
     const std::string command =
-        fmt::format("env {}{} --gtest_list_tests 2>/dev/null", unset, shellQuote(path));
+        fmt::format("env {}{} --gtest_list_tests 2>/dev/null", environment, shellQuote(path));
     std::unique_ptr<FILE, int (*)(FILE *)> pipe(popen(command.c_str(), "r"), pclose);
     if (pipe == nullptr) {
         return std::nullopt;
@@ -975,8 +1034,66 @@ Enumeration enumerate(const std::string &directory, const std::vector<std::strin
     return enumeration;
 }
 
-// Run *path* with *args*, inheriting stdio, and return its exit status (128+signal if killed).
-int runChild(const std::string &path, const std::vector<std::string> &args)
+// The directory the children's logs belong in for a run whose merged report is *outputPath*.
+std::string childLogDirectory(std::string_view outputPath)
+{
+    if (outputPath.empty()) {
+        return std::string(kDefaultLogDirectory);
+    }
+    const fs::path report{std::string(outputPath)};
+    const fs::path parent = report.parent_path();
+    const std::string name = report.stem().string() + std::string(kLogDirectorySuffix);
+    return (parent.empty() ? fs::path(name) : parent / name).string();
+}
+
+// Where *qualifier*'s console output goes within *directory*.
+std::string childLogPath(std::string_view directory, std::string_view qualifier)
+{
+    return (fs::path(std::string(directory)) / fmt::format("{}.log", qualifier)).string();
+}
+
+// The log directory this run should use, given the merged report at *outputPath* and the
+// environment. Empty when the caller asked for the children's output on the console instead.
+std::string resolveLogDirectory(std::string_view outputPath, const char *override_)
+{
+    if (override_ == nullptr || *override_ == '\0') {
+        return childLogDirectory(outputPath);
+    }
+    return std::string_view(override_) == "-" ? std::string() : std::string(override_);
+}
+
+// How many binaries run at once.
+size_t resolveParallelism(const char *request, size_t fallbackJobs)
+{
+    const size_t fallback = fallbackJobs < 1 ? 1 : fallbackJobs;
+    if (request == nullptr || *request == '\0') {
+        return fallback;
+    }
+    const long requested = toLong(std::string_view(request), 0);
+    return requested >= 1 ? static_cast<size_t>(requested) : fallback;
+}
+
+// The number of processors available to this process, or 1 when that cannot be determined.
+size_t detectedParallelism()
+{
+    const long online = sysconf(_SC_NPROCESSORS_ONLN);
+    return online > 0 ? static_cast<size_t>(online) : 1;
+}
+
+// How many binaries an unconfigured run puts in flight on a machine with *processors* of them.
+//
+// Half, so the run leaves the machine usable for whatever else is on it.
+size_t defaultParallelism(size_t processors)
+{
+    return processors / 2 < 1 ? 1 : processors / 2;
+}
+
+// Start *path* with *args* and return its pid, or -1 when it could not be forked.
+//
+// *logPath*, when set, is the file the child's stdout and stderr are redirected to.
+// Empty means inherit this process's stdio.
+pid_t spawnChild(const std::string &path, const std::vector<std::string> &args,
+                 const std::string &logPath = "")
 {
     std::vector<char *> argv;
     argv.push_back(const_cast<char *>(path.c_str()));
@@ -988,28 +1105,57 @@ int runChild(const std::string &path, const std::vector<std::string> &args)
     // Collected before the fork: it reads the environment, which is cheaper and simpler to do
     // here than in the narrow async-signal-safe window after it.
     const std::vector<std::string> strip = gtestVariablesToStrip();
+    const std::string profile = childProfileFile(path);
 
     const pid_t pid = fork();
     if (pid < 0) {
         fmt::print(stderr, "host-test-dispatch: fork failed: {}\n", std::strerror(errno));
-        return 1;
+        return -1;
     }
     if (pid == 0) {
         // In the child, on its own copy of the environment: what the dispatcher has already
         // decided must not be decided again over the case list this child was handed.
         stripGtestVariablesInChild(strip);
+        if (!profile.empty()) {
+            setenv("LLVM_PROFILE_FILE", profile.c_str(), 1);
+        }
+        if (!logPath.empty()) {
+            const int fd = open(logPath.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0644);
+            if (fd < 0) {
+                fmt::print(stderr, "host-test-dispatch: cannot write {}: {} -- {} will print to"
+                                   " the console instead\n",
+                           logPath, std::strerror(errno), path);
+            } else {
+                dup2(fd, STDOUT_FILENO);
+                dup2(fd, STDERR_FILENO);
+                if (fd > STDERR_FILENO) {
+                    close(fd);
+                }
+            }
+        }
         execv(path.c_str(), argv.data());
         fmt::print(stderr, "host-test-dispatch: exec {} failed: {}\n", path,
                    std::strerror(errno));
         _exit(127);
     }
+    return pid;
+}
+
+// Wait for whichever spawned child finishes first, setting *exitStatus* to its status (128+signal
+// if killed) and returning its pid; -1 when there is nothing left to wait for.
+pid_t reapAnyChild(int &exitStatus)
+{
     int status = 0;
-    while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+    pid_t pid = 0;
+    while ((pid = waitpid(-1, &status, 0)) < 0 && errno == EINTR) {
     }
-    if (WIFEXITED(status)) {
-        return WEXITSTATUS(status);
+    if (pid < 0) {
+        exitStatus = 1;
+        return -1;
     }
-    return WIFSIGNALED(status) ? 128 + WTERMSIG(status) : 1;
+    exitStatus = WIFEXITED(status) ? WEXITSTATUS(status)
+                                   : (WIFSIGNALED(status) ? 128 + WTERMSIG(status) : 1);
+    return pid;
 }
 
 // Read *path* whole, or return an empty string.
@@ -1038,32 +1184,482 @@ std::string coverageDirectory()
     return parent.empty() ? std::string(".") : parent.string();
 }
 
-// Record *binaries* as llvm-cov --object candidates next to the profile data.
+// ── coverage merge ──────────────────────────────────────────────────
+
+// One source file's coverage, as an lcov tracefile records it.
 //
-// Appended, never rewritten, and deliberately not deduplicated: several dispatcher invocations
-// (one per lane) write here concurrently, and an append of one short line is the only write that
-// is atomic between them. The reader dedupes.
-void recordCoverageObjects(const std::string &directory, const std::vector<std::string> &binaries)
+// Every container is keyed rather than appended to, because the merge is a union and because
+// llvm-cov emits the same entity more than once within a single record (a line covered by two
+// regions, a function instantiated twice). Ordered maps, so the output of a merge depends only
+// on its inputs and two runs produce byte-identical tracefiles.
+struct LcovSource {
+    std::map<std::string, long> functionLines;        // FN: mangled name -> declaration line
+    std::map<std::string, long long> functionHits;    // FNDA: mangled name -> execution count
+    std::map<long, long long> lines;                  // DA: line -> execution count
+    // BRDA: (line, block, branch) -> taken count; nullopt for llvm-cov's '-', "not evaluated".
+    std::map<std::tuple<long, long, long>, std::optional<long long>> branches;
+};
+
+// A coverage counter from an lcov record, saturated rather than wrapped or rejected.
+//
+// llvm-cov prints its counters as unsigned 64-bit and does sometimes print one that has wrapped
+// -- a counter expression evaluating below zero comes out as 18446744073709551591 -- which does
+// not fit a signed long and would parse as a failure. Reading that as 0 turns a covered line
+// into an uncovered one in the merged view, which is the one failure this file must not have,
+// so it saturates instead. Only the non-zeroness of a count is ever read downstream.
+long long toCount(std::string_view text)
+{
+    unsigned long long value = 0;
+    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+    if (error == std::errc::result_out_of_range) {
+        return std::numeric_limits<long long>::max();
+    }
+    if (error != std::errc()) {
+        return 0;
+    }
+    return static_cast<long long>(
+        std::min<unsigned long long>(value, std::numeric_limits<long long>::max()));
+}
+
+// *left* + *right*, saturating. Two counters that each nearly fill the type are summed when the
+// same line is reached by several binaries, and a wrapped total would read as uncovered.
+long long addCounts(long long left, long long right)
+{
+    constexpr long long kMax = std::numeric_limits<long long>::max();
+    return left > kMax - right ? kMax : left + right;
+}
+
+// A whole tracefile: its source files, keyed by path.
+using LcovData = std::map<std::string, LcovSource>;
+
+// Split *text* on *separator*, keeping empty fields. Used for the comma-separated bodies of the
+// lcov record lines, where an empty field is a parse failure rather than something to skip.
+std::vector<std::string_view> splitOn(std::string_view text, char separator)
+{
+    std::vector<std::string_view> fields;
+    size_t start = 0;
+    for (size_t i = 0; i <= text.size(); ++i) {
+        if (i == text.size() || text[i] == separator) {
+            fields.push_back(text.substr(start, i - start));
+            start = i + 1;
+        }
+    }
+    return fields;
+}
+
+// Accumulate the lcov tracefile in *text* into *into*.
+//
+// The counting lines an input carries -- FNF/FNH/LF/LH/BRF/BRH -- are deliberately ignored and
+// recomputed by formatLcov(). They are not summaries OF the records beside them: llvm-cov counts
+// its own internal regions there, so a record with 648 FN lines can be headed FNF:258, and
+// summing those numbers across binaries would give totals matching neither the records nor
+// anything lcov would compute from them.
+void parseLcov(std::string_view text, LcovData &into)
+{
+    LcovSource *current = nullptr;
+    size_t start = 0;
+    while (start <= text.size()) {
+        const size_t end = std::min(text.find('\n', start), text.size());
+        const std::string_view line = text.substr(start, end - start);
+        start = end + 1;
+
+        if (startsWith(line, "SF:")) {
+            current = &into[std::string(line.substr(3))];
+        } else if (line == "end_of_record") {
+            current = nullptr;
+        } else if (current == nullptr) {
+            continue;   // a record line outside any SF: block has no file to belong to
+        } else if (startsWith(line, "FN:")) {
+            // FN:<line>,<name>. The name may itself contain commas (a template parameter list),
+            // so the split is on the FIRST comma only.
+            const std::string_view body = line.substr(3);
+            const size_t comma = body.find(',');
+            if (comma != std::string_view::npos) {
+                const std::string name(body.substr(comma + 1));
+                const long declaration = toLong(body.substr(0, comma), -1);
+                // Lowest line wins, so a name seen at several lines lands somewhere real.
+                const auto [entry, inserted] = current->functionLines.emplace(name, declaration);
+                if (!inserted && declaration >= 0 && declaration < entry->second) {
+                    entry->second = declaration;
+                }
+            }
+        } else if (startsWith(line, "FNDA:")) {
+            const std::string_view body = line.substr(5);
+            const size_t comma = body.find(',');
+            if (comma != std::string_view::npos) {
+                long long &hits = current->functionHits[std::string(body.substr(comma + 1))];
+                hits = addCounts(hits, toCount(body.substr(0, comma)));
+            }
+        } else if (startsWith(line, "DA:")) {
+            const std::vector<std::string_view> fields = splitOn(line.substr(3), ',');
+            if (fields.size() >= 2) {
+                long long &count = current->lines[toLong(fields[0], 0)];
+                count = addCounts(count, toCount(fields[1]));
+            }
+        } else if (startsWith(line, "BRDA:")) {
+            const std::vector<std::string_view> fields = splitOn(line.substr(5), ',');
+            if (fields.size() >= 4) {
+                const auto key = std::make_tuple(toLong(fields[0], 0), toLong(fields[1], 0),
+                                                 toLong(fields[2], 0));
+                std::optional<long long> &taken = current->branches[key];
+                if (fields[3] != "-") {
+                    // A branch one binary never evaluated and another took is taken: '-' is the
+                    // absence of information, so any count at all displaces it.
+                    taken = addCounts(taken.value_or(0), toCount(fields[3]));
+                }
+            }
+        }
+    }
+}
+
+// *data* as an lcov tracefile.
+//
+// The FNF/FNH/LF/LH/BRF/BRH lines are computed here from the records themselves, which is also
+// how lcov and genhtml treat the ones they read, so the totals a consumer reports are the ones
+// implied by the merged records.
+std::string formatLcov(const LcovData &data)
+{
+    std::string out;
+    for (const auto &[path, source] : data) {
+        out += fmt::format("SF:{}\n", path);
+        long functionsHit = 0;
+        for (const auto &[name, line] : source.functionLines) {
+            out += fmt::format("FN:{},{}\n", line, name);
+        }
+        for (const auto &[name, hits] : source.functionHits) {
+            out += fmt::format("FNDA:{},{}\n", hits, name);
+            if (hits > 0) {
+                ++functionsHit;
+            }
+        }
+        out += fmt::format("FNF:{}\n", source.functionLines.size());
+        out += fmt::format("FNH:{}\n", functionsHit);
+
+        long branchesHit = 0;
+        for (const auto &[key, taken] : source.branches) {
+            const auto [line, block, branch] = key;
+            out += fmt::format("BRDA:{},{},{},{}\n", line, block, branch,
+                               taken ? std::to_string(*taken) : std::string("-"));
+            if (taken && *taken > 0) {
+                ++branchesHit;
+            }
+        }
+        if (!source.branches.empty()) {
+            out += fmt::format("BRF:{}\n", source.branches.size());
+            out += fmt::format("BRH:{}\n", branchesHit);
+        }
+
+        long linesHit = 0;
+        for (const auto &[line, count] : source.lines) {
+            out += fmt::format("DA:{},{}\n", line, count);
+            if (count > 0) {
+                ++linesHit;
+            }
+        }
+        out += fmt::format("LF:{}\n", source.lines.size());
+        out += fmt::format("LH:{}\n", linesHit);
+        out += "end_of_record\n";
+    }
+    return out;
+}
+
+// *contents* (whole lcov tracefiles) merged into one.
+//
+// The union is per line and per branch: a line is covered if ANY input covered it. That is what
+// makes this the right merge for the host tree, where several binaries compile the same source
+// under different #defines -- their coverage-mapping hashes differ, so the profiles themselves
+// cannot be pooled, but the lines they each reached can be.
+std::string mergeLcovTracefiles(const std::vector<std::string> &contents)
+{
+    LcovData merged;
+    for (const std::string &tracefile : contents) {
+        parseLcov(tracefile, merged);
+    }
+    return formatLcov(merged);
+}
+
+// How a shell command is run, returning its exit status. A seam, so the export can be driven in
+// a test without llvm-profdata and llvm-cov on the machine.
+using CommandFn = std::function<int(const std::string &)>;
+
+// Run *command* through /bin/sh and return its exit status.
+int runShell(const std::string &command)
+{
+    const int status = std::system(command.c_str());
+    if (status < 0) {
+        return 1;
+    }
+    return WIFEXITED(status) ? WEXITSTATUS(status) : 1;
+}
+
+// The llvm tool named *name*, preferring the ROCm toolchain's own.
+//
+// The tools have to match the clang that built the binaries -- a newer llvm-profdata rejects an
+// older profile format outright -- and the one beside the compiler matches by construction.
+// Falls back to the bare name, i.e. to PATH, which is also what a non-ROCm toolchain wants.
+std::string llvmTool(std::string_view name)
+{
+    const char *rocm = std::getenv("ROCM_PATH");
+    const fs::path candidate =
+        fs::path(rocm == nullptr || *rocm == '\0' ? "/opt/rocm" : rocm) / "llvm" / "bin" / name;
+    std::error_code ec;
+    return fs::is_regular_file(candidate, ec) ? candidate.string() : std::string(name);
+}
+
+// The command that merges *profiles* into the single .profdata at *output*.
+std::string profdataMergeCommand(const std::string &tool, const std::vector<std::string> &profiles,
+                                 const std::string &output)
+{
+    std::string command = fmt::format("{} merge -sparse", shellQuote(tool));
+    for (const std::string &profile : profiles) {
+        command += fmt::format(" {}", shellQuote(profile));
+    }
+    return command + fmt::format(" -o {}", shellQuote(output));
+}
+
+// The command that exports *binary*'s coverage, under *profdata*, as the lcov tracefile *output*.
+//
+// *binary* is the only --object: it is the only one its profiles were produced by, and llvm-cov
+// rejects a profile read against an object it was not built from as mismatched data. Pairing the
+// two is the whole reason this runs here rather than in a harness downstream, which would have to
+// reconstruct the pairing from the directory layout.
+std::string lcovExportCommand(const std::string &tool, const std::string &binary,
+                              const std::string &profdata, std::string_view ignoreRegex,
+                              const std::string &output)
+{
+    return fmt::format("{} export {} -instr-profile={} --ignore-filename-regex={} -format=lcov"
+                       " > {}",
+                       shellQuote(tool), shellQuote(binary), shellQuote(profdata),
+                       shellQuote(std::string(ignoreRegex)), shellQuote(output));
+}
+
+// Every .profraw directly under *directory*, sorted.
+std::vector<std::string> profilesIn(const std::string &directory)
+{
+    std::vector<std::string> profiles;
+    std::error_code ec;
+    for (const fs::directory_entry &entry : fs::directory_iterator(directory, ec)) {
+        if (entry.path().extension() == ".profraw") {
+            profiles.push_back(entry.path().string());
+        }
+    }
+    std::sort(profiles.begin(), profiles.end());
+    return profiles;
+}
+
+// Turn the children's profiles into one merged lcov tracefile beside them.
+//
+// Best effort throughout: a run whose tests all passed must not fail because llvm-cov is not
+// installed, so every problem is a warning and the tracefile is simply whatever could be
+// exported. Silence would be worse than either -- a missing tracefile reads downstream as "this
+// code is not covered" -- so each skipped binary says so by name.
+void writeMergedCoverage(const std::string &directory, const std::vector<std::string> &binaries,
+                         const CommandFn &run)
 {
     if (directory.empty() || binaries.empty()) {
         return;
     }
-    const std::string path = (fs::path(directory) / kCoverageManifest).string();
-    const int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_APPEND, 0644);
-    if (fd < 0) {
-        fmt::print(stderr, "host-test-dispatch: cannot record coverage objects in {}: {}\n", path,
+    const char *ignore = std::getenv("RCCL_HOST_COVERAGE_IGNORE_REGEX");
+    const std::string ignoreRegex =
+        ignore == nullptr ? std::string(kCoverageIgnoreRegex) : std::string(ignore);
+    const std::string profdataTool = llvmTool("llvm-profdata");
+    const std::string covTool = llvmTool("llvm-cov");
+
+    // Each binary costs an llvm-profdata merge and an llvm-cov export over the whole hipified
+    // tree, so this phase runs for a while after the last test has printed its result. It says
+    // what it is doing, and how far through it is, rather than leave the run looking hung.
+    fmt::print("----- coverage: exporting {} binaries into {} -----\n", binaries.size(),
+               (fs::path(directory) / kCoverageTracefile).string());
+    std::fflush(stdout);
+
+    std::vector<std::string> tracefiles;
+    size_t exported = 0;
+    for (const std::string &binary : binaries) {
+        fmt::print("[{}/{}] {}\n", ++exported, binaries.size(),
+                   fs::path(binary).filename().string());
+        std::fflush(stdout);
+        const fs::path binaryDir = fs::path(directory) / fs::path(binary).filename();
+        const std::vector<std::string> profiles = profilesIn(binaryDir.string());
+        if (profiles.empty()) {
+            continue;   // never ran, or ran uninstrumented; either way there is nothing to export
+        }
+        const std::string profdata = (binaryDir / "merged.profdata").string();
+        const std::string tracefile = (binaryDir / "coverage.lcov").string();
+        if (run(profdataMergeCommand(profdataTool, profiles, profdata)) != 0) {
+            fmt::print(stderr, "host-test-dispatch: llvm-profdata failed for {} -- its coverage"
+                               " is missing from {}\n",
+                       binary, kCoverageTracefile);
+            continue;
+        }
+        if (run(lcovExportCommand(covTool, binary, profdata, ignoreRegex, tracefile)) != 0) {
+            fmt::print(stderr, "host-test-dispatch: llvm-cov export failed for {} -- its coverage"
+                               " is missing from {}\n",
+                       binary, kCoverageTracefile);
+            // The redirect created the tracefile before llvm-cov ran; leaving the empty file
+            // behind would make run_host_tests.sh treat the export as done and skip its fallback.
+            std::error_code ec;
+            fs::remove(tracefile, ec);
+            continue;
+        }
+        tracefiles.push_back(readFile(tracefile));
+    }
+
+    if (tracefiles.empty()) {
+        return;
+    }
+    const std::string path = (fs::path(directory) / kCoverageTracefile).string();
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    if (!out) {
+        fmt::print(stderr, "host-test-dispatch: cannot write {}: {}\n", path,
                    std::strerror(errno));
         return;
     }
-    for (const std::string &binary : binaries) {
-        const std::string line = fmt::format("{}\n", binary);
-        if (write(fd, line.c_str(), line.size()) < 0) {
-            fmt::print(stderr, "host-test-dispatch: short write to {}: {}\n", path,
-                       std::strerror(errno));
+    out << mergeLcovTracefiles(tracefiles);
+    out.close();
+    fmt::print("----- coverage: merged {} tracefiles into {} -----\n", tracefiles.size(), path);
+    std::fflush(stdout);
+}
+
+// The seams runSelections() is driven through: starting a child, reaping whichever finishes
+// first, and naming the file a part writes its report to.
+using SpawnFn = std::function<pid_t(const std::string &path, const std::vector<std::string> &args,
+                                    const std::string &logPath)>;
+using ReapFn = std::function<pid_t(int &exitStatus)>;
+using ReportPathFn = std::function<std::string(const std::string &qualifier, size_t part)>;
+
+struct ScheduleOptions {
+    size_t jobs = 1;                                 // children allowed to run at once
+    ReportFormat outputFormat = ReportFormat::Xml;   // asked of the children, so no report is
+                                                     // ever transcoded between the two formats
+    std::vector<std::string> passthrough;            // the caller's own flags, handed to each child
+    std::string logDirectory;                        // empty means the children inherit our stdio
+};
+
+// Run every part of every selection, at most *schedule.jobs* at a time, and return their
+// fragments in selection order. *failures* is incremented once per failing or missing report.
+//
+// Parts of one selection are never in flight together: each writes the same per-binary log, and
+// the next part is only made ready again once the previous one has been reaped.
+std::vector<SuiteFragment> runSelections(const std::vector<Selection> &selections,
+                                         const std::vector<std::vector<std::string>> &filters,
+                                         const ScheduleOptions &schedule, const SpawnFn &spawn,
+                                         const ReapFn &reap, const ReportPathFn &reportPathFor,
+                                         int &failures)
+{
+    std::vector<size_t> nextPart(selections.size(), 0);
+    std::vector<std::vector<SuiteFragment>> perSelection(selections.size());
+
+    struct RunningChild {
+        pid_t pid;
+        size_t selection;
+        std::string reportPath;
+        std::string logPath;
+    };
+    std::deque<size_t> ready;   // selections with a part still to start
+    for (size_t index = 0; index < selections.size(); ++index) {
+        ready.push_back(index);
+    }
+    std::vector<RunningChild> running;
+
+    while (!ready.empty() || !running.empty()) {
+        while (!ready.empty() && running.size() < schedule.jobs) {
+            const size_t index = ready.front();
+            ready.pop_front();
+            const Selection &selection = selections[index];
+            const size_t part = nextPart[index]++;
+            const std::string reportPath = reportPathFor(selection.qualifier, part);
+            std::vector<std::string> childArgs = {
+                fmt::format("--gtest_filter={}", filters[index][part]),
+                fmt::format("--gtest_output={}:{}", formatName(schedule.outputFormat), reportPath),
+            };
+            childArgs.insert(childArgs.end(), schedule.passthrough.begin(),
+                             schedule.passthrough.end());
+
+            const std::string part_note =
+                filters[index].size() > 1
+                    ? fmt::format(", part {}/{}", part + 1, filters[index].size())
+                    : std::string();
+            const std::string logPath =
+                schedule.logDirectory.empty()
+                    ? std::string()
+                    : childLogPath(schedule.logDirectory, selection.qualifier);
+            if (part == 0 && !logPath.empty()) {
+                std::ofstream truncate(logPath, std::ios::binary | std::ios::trunc);
+            }
+            fmt::print("----- {} ({} cases{}){} -----\n", selection.qualifier,
+                       selection.cases.size(), part_note,
+                       logPath.empty() ? std::string() : fmt::format(" -> {}", logPath));
+            std::fflush(stdout);
+
+            const pid_t pid = spawn(selection.path, childArgs, logPath);
+            if (pid < 0) {
+                perSelection[index].push_back(crashFragment(
+                    selection.qualifier, "binary could not be started -- fork failed"));
+                ++failures;
+                nextPart[index] = filters[index].size();
+                continue;
+            }
+            running.push_back({pid, index, reportPath, logPath});
+        }
+
+        int status = 0;
+        const pid_t finished = reap(status);
+        const auto slot = std::find_if(running.begin(), running.end(),
+                                       [finished](const RunningChild &child) {
+                                           return child.pid == finished;
+                                       });
+        if (slot == running.end()) {
+            for (const RunningChild &child : running) {
+                perSelection[child.selection].push_back(
+                    crashFragment(selections[child.selection].qualifier,
+                                  "binary disappeared before its result could be collected"));
+                ++failures;
+            }
+            running.clear();
             break;
         }
+
+        const size_t index = slot->selection;
+        const Selection &selection = selections[index];
+        bool cleanReport = false;
+        if (std::optional<SuiteFragment> fragment =
+                parseChildReport(readFile(slot->reportPath), selection.qualifier,
+                                 schedule.outputFormat)) {
+            cleanReport = fragment->failures == 0 && fragment->errors == 0;
+            perSelection[index].push_back(std::move(*fragment));
+        } else {
+            perSelection[index].push_back(crashFragment(
+                selection.qualifier,
+                fmt::format("binary wrote no gtest report (exit status {}){}", status,
+                            slot->logPath.empty() ? std::string()
+                                                  : fmt::format("; output in {}", slot->logPath))));
+            ++failures;
+        }
+        if (status != 0) {
+            if (cleanReport) {
+                perSelection[index].push_back(crashFragment(
+                    selection.qualifier,
+                    fmt::format("binary exited {} after writing a passing report", status)));
+            }
+            ++failures;
+        }
+        std::error_code ec;
+        fs::remove(slot->reportPath, ec);
+        running.erase(slot);
+        if (nextPart[index] < filters[index].size()) {
+            ready.push_back(index);   // this binary's next part, now that its log is free again
+        }
     }
-    close(fd);
+
+    // Selection order, not completion order: the merged report must not depend on how the
+    // children happened to be scheduled.
+    std::vector<SuiteFragment> fragments;
+    for (std::vector<SuiteFragment> &selectionFragments : perSelection) {
+        for (SuiteFragment &fragment : selectionFragments) {
+            fragments.push_back(std::move(fragment));
+        }
+    }
+    return fragments;
 }
 
 }  // namespace rccl_host_dispatch
@@ -1128,7 +1724,7 @@ int main(int argc, char **argv)
                                          : std::optional<std::string_view>(disabledEnv));
     warnAboutUnknownGtestVariables(gtestVariablesToStrip());
 
-    const std::string directory = selfDirectory(argv[0]);
+    const std::string directory = binaryDirectory(selfDirectory(argv[0]));
 
     if (options.help) {
         // Answered before anything is enumerated: listing the cases costs a fork per binary,
@@ -1164,7 +1760,8 @@ int main(int argc, char **argv)
 
     const std::vector<std::string> binaries = discoverBinaries(directory, selfPath());
     if (binaries.empty()) {
-        fmt::print(stderr, "host-test-dispatch: no {}* binaries next to {} -- nothing to run\n",
+        fmt::print(stderr,
+                   "host-test-dispatch: no {}* binaries in {} -- nothing to run\n",
                    kBinaryPrefix, directory);
         return 1;
     }
@@ -1208,6 +1805,22 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    // The children's console output, one file per binary. Created up front so a directory that
+    // cannot be made is said once, here, rather than once per child; failing to make it turns
+    // the redirection off, because a missing transcript must not cost a passing run.
+    std::string logDir =
+        resolveLogDirectory(options.outputPath, std::getenv(std::string(kLogDirectoryEnv).c_str()));
+    if (!logDir.empty()) {
+        std::error_code ec;
+        fs::create_directories(logDir, ec);
+        if (ec && !fs::is_directory(logDir)) {
+            fmt::print(stderr, "host-test-dispatch: cannot create {}: {} -- the binaries will"
+                               " print to the console instead\n",
+                       logDir, ec.message());
+            logDir.clear();
+        }
+    }
+
     std::vector<SuiteFragment> fragments;
     std::vector<std::string> ran;
     int failures = 0;
@@ -1220,59 +1833,36 @@ int main(int argc, char **argv)
                                           "to start"));
         ++failures;
     }
+
+    const size_t jobs = resolveParallelism(std::getenv(std::string(kParallelismEnv).c_str()),
+                                           defaultParallelism(detectedParallelism()));
+
+    std::vector<std::vector<std::string>> filters;
+    filters.reserve(selections.size());
     for (const Selection &selection : selections) {
-        const std::vector<std::string> filters = childFilters(selection);
+        filters.push_back(childFilters(selection));
         ran.push_back(selection.path);
-        for (size_t part = 0; part < filters.size(); ++part) {
-            const std::string reportPath =
-                reportDir.reportPath(selection.qualifier, part, options.outputFormat);
-            // The child is asked for the format the caller wants, so the merge is always of
-            // like with like and no report is ever transcoded between the two.
-            std::vector<std::string> childArgs = {
-                fmt::format("--gtest_filter={}", filters[part]),
-                fmt::format("--gtest_output={}:{}", formatName(options.outputFormat), reportPath),
-            };
-            childArgs.insert(childArgs.end(), options.passthrough.begin(),
-                             options.passthrough.end());
-
-            const std::string part_note =
-                filters.size() > 1 ? fmt::format(", part {}/{}", part + 1, filters.size())
-                                   : std::string();
-            fmt::print("----- {} ({} cases{}) -----\n", selection.qualifier,
-                       selection.cases.size(), part_note);
-            std::fflush(stdout);
-            const int status = runChild(selection.path, childArgs);
-
-            bool cleanReport = false;
-            if (std::optional<SuiteFragment> fragment =
-                    parseChildReport(readFile(reportPath), selection.qualifier,
-                                     options.outputFormat)) {
-                cleanReport = fragment->failures == 0 && fragment->errors == 0;
-                fragments.push_back(std::move(*fragment));
-            } else {
-                // No report: the binary died or never started. Its cases are unaccounted for, so
-                // the run has to fail even if the exit status somehow did not say so.
-                fragments.push_back(crashFragment(
-                    selection.qualifier,
-                    fmt::format("binary wrote no gtest report (exit status {})", status)));
-                ++failures;
-            }
-            if (status != 0) {
-                if (cleanReport) {
-                    fragments.push_back(crashFragment(
-                        selection.qualifier,
-                        fmt::format("binary exited {} after writing a passing report", status)));
-                }
-                ++failures;
-            }
-            std::error_code ec;
-            fs::remove(reportPath, ec);
-        }
+    }
+    const ScheduleOptions schedule{jobs, options.outputFormat, options.passthrough, logDir};
+    std::vector<SuiteFragment> ranFragments = runSelections(
+        selections, filters, schedule,
+        [](const std::string &path, const std::vector<std::string> &args,
+           const std::string &logPath) { return spawnChild(path, args, logPath); },
+        reapAnyChild,
+        [&reportDir, &options](const std::string &qualifier, size_t part) {
+            return reportDir.reportPath(qualifier, part, options.outputFormat);
+        },
+        failures);
+    for (SuiteFragment &fragment : ranFragments) {
+        fragments.push_back(std::move(fragment));
     }
 
-    recordCoverageObjects(coverageDirectory(), ran);
-
     if (!options.outputPath.empty()) {
+        // Merging the children's reports walks every case in the tree, which is tens of
+        // thousands of them, so this too is a pause the caller would otherwise see unexplained.
+        fmt::print("----- report: merging {} suites into {} -----\n", fragments.size(),
+                   options.outputPath);
+        std::fflush(stdout);
         std::ofstream report(options.outputPath, std::ios::binary | std::ios::trunc);
         if (!report) {
             fmt::print(stderr, "host-test-dispatch: cannot write {}: {}\n", options.outputPath,
@@ -1280,7 +1870,14 @@ int main(int argc, char **argv)
             return 1;
         }
         report << mergeReports(fragments, options.outputFormat);
+        report.close();
+        fmt::print("----- report: wrote {} -----\n", options.outputPath);
+        std::fflush(stdout);
     }
+
+    // After the report: every test has already run by this point, and the per-binary llvm
+    // invocations below are long enough that a category timeout can land in the middle of them.
+    writeMergedCoverage(coverageDirectory(), ran, runShell);
 
     return failures == 0 ? 0 : 1;
 }
