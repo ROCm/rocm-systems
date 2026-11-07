@@ -328,3 +328,29 @@ The AI NIC tracks look like this:
 .. image:: ../data/rocprof-sys-ai-nic-optiq.png
    :alt: Visualization of a performance graph in Perfetto with AI NIC network tracks
    :width: 800
+
+Identifying NIC devices in the ROCpd database
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Each AI NIC device is registered as a row in the ``rocpd_info_agent`` table with
+``type = 'NIC'``. The ``name`` column stores the OS-visible network interface name
+(for example, ``enp229s0``), which lets you map the agent row back to the device
+visible in ``ip link`` or ``amd-smi``.
+
+To find all NIC agents and their interface names, query the database:
+
+.. code-block:: shell
+
+   sqlite3 rocpd.db \
+     "SELECT id, type, logical_index, name FROM rocpd_info_agent WHERE type = 'NIC';"
+
+Example output on a system with one Pensando Pollara card:
+
+.. code-block:: text
+
+   1|NIC|0|enp229s0
+
+On a system with multiple NIC devices, the ``logical_index`` column (0, 1, ...) acts
+as a secondary numeric identifier. The ``name`` column always contains the interface
+name, making it the primary way to correlate a ``rocpd_info_agent`` row with a
+specific NIC visible in ``ip link`` or ``amd-smi static``.
