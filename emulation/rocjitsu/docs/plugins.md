@@ -708,3 +708,15 @@ Throughput, instruction mix, and kernel logging support this contract. The
 its dependency-event access and diagnostic context support concurrent register
 hooks within one wave. Plugins and the host
 must be rebuilt together, as for other execution-plugin interface changes.
+
+Sampler instructions, regardless of filter mode, report one `onAmdgpuMemoryAccessRouted` callback per
+instruction. Samples with a prepared footprint use `image_sample_footprints`
+and leave `addresses` empty. A null resource or unbacked sampler completes as
+an empty request: the callback carries the ordinary per-lane `addresses` span,
+an empty footprint span and a zero `request_lane_mask`. Its counter obligation
+still identifies the sampled request on targets with SAMPLECNT. Each footprint has
+`wavefront_size` entries and its lane mask is a subset of `request_lane_mask`.
+Border-only and zero-weight taps remain present with those lanes cleared.
+`bytes_per_lane()` is the size of one texel per footprint, including gather
+instructions that return four selected components. Consumers must visit every
+footprint without counting another issued instruction or wait-counter event.
