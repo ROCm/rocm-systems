@@ -725,7 +725,7 @@ amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice
   std::ostringstream ss;
   std::string render_name = device->get_gpu_path();
   std::string path = "/dev/dri/" + render_name;
-  if (render_name.empty()) {
+  if (render_name.empty() || !device->has_libdrm()) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
 
