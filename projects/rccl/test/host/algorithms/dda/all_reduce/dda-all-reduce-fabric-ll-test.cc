@@ -797,13 +797,16 @@ size_t ShardSlices(size_t bytes, int nRanks) {
   return dda::common::ddaLL128Slices(bytes / (size_t)nRanks);
 }
 
-// The split's grid: within the replaced launch's blocks, none past the units, and a warp per unit unless at that bound.
+// The split's grid: within the replaced launch's blocks and the shard's slices, none past the units, else a warp each.
 void ExpectSplitGrid(const DdaLaunch& split, unsigned replacedBlocks, size_t bytes, int nRanks) {
-  const size_t units = ShardSlices(bytes, nRanks) * (size_t)(nRanks - 1);
+  const size_t slices = ShardSlices(bytes, nRanks);
+  const size_t units = slices * (size_t)(nRanks - 1);
   const size_t warps = split.block.x / kDdaLL128Warp;
   EXPECT_LE(split.grid.x, replacedBlocks) << "within the replaced launch's blocks";
+  EXPECT_LE(split.grid.x, slices) << "a block owns whole slices";
   EXPECT_LT((split.grid.x - 1) * warps, units) << "a block past the units";
-  EXPECT_TRUE(split.grid.x == replacedBlocks || split.grid.x * warps >= units) << "fewer warps than units";
+  EXPECT_TRUE(split.grid.x == std::min<size_t>(replacedBlocks, slices) || split.grid.x * warps >= units)
+      << "fewer warps than units";
 }
 
 // The gfx1250 tables' tiers (LL128 to 256 MiB, LL to nRanks x 2 MiB) on wave32 with RCCL_DDA_LL128_ASYNC_WIRE=1.
@@ -945,6 +948,27 @@ TEST_F(DdaAllReduceFabricLLMicrotest, Split_PastTheLLTierFillsTheLL128TwoShotGri
   const DdaLaunch& l = RunSelectedLL128(bytes / 4);
   EXPECT_EQ(l.kernel, (LL128Split<float, 8>()));
   EXPECT_EQ(l.grid.x, replaced.grid.x) << "units fill every replaced block";
+}
+
+// A block owns whole slices, so a bound with more blocks than the shard has slices launches one block per slice.
+TEST_F(DdaAllReduceFabricLLMicrotest, Split_NoMoreBlocksThanShardSlices) {
+  SplitTiersOn(comm(), params_);
+  const size_t count = 2 * kMiB / 4;
+  for (const int nRanks : {32, 64}) {
+    SCOPED_TRACE(testing::Message() << nRanks << "r 2 MiB");
+    comm().nRanks = nRanks;
+    const size_t slices = ShardSlices(2 * kMiB, nRanks);
+    const unsigned vmm = ncclAllReduceDdaFabricBlocks(mock_.get(), count, ncclFloat32);
+    ASSERT_GT(vmm, slices) << "the VMM grid the split replaces has more blocks than slices";
+    ASSERT_GT(slices * (nRanks - 1), slices * (kDdaArLL128Threads / kDdaLL128Warp)) << "and so do the units";
+    const DdaLaunch& l = RunSelectedLL128(count, ncclFloat32, {}, /*vmmFirst=*/true);
+    EXPECT_EQ(l.kernel, (LL128Split<float, 0>()));
+    EXPECT_EQ(l.grid.x, slices);
+    ExpectSplitGrid(l, vmm, 2 * kMiB, nRanks);
+    rcclDdaLaunchCap bound = {};
+    ASSERT_TRUE(TakesSplit(count, ncclFloat32, {}, /*vmmFirst=*/true, &bound));
+    EXPECT_EQ(ncclAllReduceDdaFabricLL128Blocks(mock_.get(), count, ncclFloat32, bound, /*split=*/true), slices);
+  }
 }
 
 // The VMM-first window's sizes stay in the split's window, so the selector leaves them to the LL128 tier.

@@ -485,13 +485,14 @@ const Case kStagedCases[] = {
   {8, 5, 8, Kind::kStaged, 8, 512, kLargeShardBytes},
 };
 
-// The split on 3 and 5 ranks (pairs only) and 4 to 16 (an odd last peer), 1 x 64 (look-ahead past the end) to 16 x 512.
+// The split on 3 and 5 ranks (pairs only) and 4 to 32 (an odd last peer), 1 x 64 (look-ahead past the end) to 16 x 512.
 const Case kSplitCases[] = {
   {3, 1, 0, Kind::kSplit, 2, 512, kSmallShardBytes},
   {5, 2, 0, Kind::kSplit, 1, 64, kSmallShardBytes},
   {4, 1, 4, Kind::kSplit, 1, 64, kSmallShardBytes},
   {6, 5, 0, Kind::kSplit, 2, 512, kSmallShardBytes},
   {8, 5, 8, Kind::kSplit, 2, 512, kSmallShardBytes},
+  {32, 17, 0, Kind::kSplit, 4, 512, kSmallShardBytes},  // 3 slices on 4 blocks: one block owns no slice
   {5, 3, 0, Kind::kSplit, 4, 512, kMediumShardBytes},
   {16, 9, 0, Kind::kSplit, 16, 512, kMediumShardBytes},
   {4, 1, 4, Kind::kSplit, 8, 512, kLargeShardBytes},

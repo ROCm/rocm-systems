@@ -202,10 +202,13 @@ static DdaArLL128Kernel<T> ddaArLL128SplitKernel(int nRanks) {
   });
 }
 
-// Peer-split: one warp per (slice, peer) unit of one shard, within the blocks and threads of `bound`.
+// Peer-split: a warp per (slice, peer) unit of one shard within `bound`, and blocks own whole slices: none without one.
 static std::pair<dim3, dim3> ddaArLL128SplitGrid(const ncclComm* comm, size_t bytes, rcclDdaLaunchCap bound) {
   const size_t n = (size_t)std::max(comm->nRanks, 2);
-  return ddaArFabricLLGrid(comm, ddaLL128Slices(bytes / n) * (n - 1), kDdaArLL128Threads, kDdaLL128Warp, bound);
+  const size_t slices = ddaLL128Slices(bytes / n);
+  auto geom = ddaArFabricLLGrid(comm, slices * (n - 1), kDdaArLL128Threads, kDdaLL128Warp, bound);
+  geom.first.x = (unsigned)std::min<size_t>(geom.first.x, slices);
+  return geom;
 }
 
 // One warp carries one slice, so the grid is sized in slices rather than in
