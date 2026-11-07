@@ -245,7 +245,7 @@ def test_packed_binary_routes_modes_inline_sources_and_policy(arch, name):
     assert (
         gen_packed_binary16(
             context(
-                'cdna4',
+                'cdna2',
                 name,
                 ['d'],
                 ['a', 'b'],
@@ -1740,3 +1740,174 @@ def test_cdna_integer_conversion_bindings(arch):
             assert f'rj_arith_{name.lower()}_w32,' in body
             assert 'e32_word_operand(a)' in body
             assert 'RJ_ARITH_ALU_HIGH_A' in body
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
+def test_cdna_half_arithmetic_modes_and_destination(arch):
+    from amdisa.codegen.execute.rj_arith_float import (
+        gen_float_binary16,
+        BINARY_ARITHMETIC_F16,
+    )
+
+    for name in sorted(BINARY_ARITHMETIC_F16):
+        body = gen_float_binary16(context(arch, name, ['d'], ['a', 'b'], is_vop3=True))
+        suffix = '_gfx12' if arch == 'cdna5' else '_gfx942'
+        if arch == 'cdna5' and name == 'V_MUL_F16':
+            suffix = '_gfx1250'
+        for lanes in (32, 64):
+            assert f'rj_arith_{name.lower()}_w{lanes}{suffix},' in body
+        assert (
+            'd, a, b, false);' if arch == 'cdna5' else 'd, a, b, true, true);'
+        ) in body
+        assert ('RJ_ARITH_ALU_NEG_B' in body) == (name != 'V_LDEXP_F16')
+        assert 'RJ_ARITH_ALU_HIGH_B' in body
+        body = gen_float_binary16(context(arch, name, ['d'], ['a', 'b']))
+        assert (', true, true);' in body) == (arch != 'cdna5')
+        assert ('execute_float_binary16_sdwa' in body) == (arch != 'cdna5')
+    assert gen_float_binary16(context(arch, 'V_MIN_F16', ['d'], ['a', 'b'])) is None
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
+@pytest.mark.parametrize('vop3', [False, True])
+def test_cdna_half_exponent_bindings(arch, vop3):
+    from amdisa.codegen.execute.rj_arith_float import gen_float_unary16
+
+    body = gen_float_unary16(
+        context(arch, 'V_FREXP_EXP_I16_F16', ['d'], ['a'], is_vop3=vop3)
+    )
+    suffix = '_gfx12' if arch == 'cdna5' else ''
+    assert 'rj_arith_v_frexp_exp_i16_f16_w64' + suffix in body
+    assert ('execute_half_exponent_sdwa' in body) == (arch != 'cdna5' and not vop3)
+    assert (
+        'd, a, true, /*guest_rounding=*/false, /*zero_extend_low=*/true'
+        if arch != 'cdna5'
+        else 'd, a, false, /*guest_rounding=*/false, /*zero_extend_low=*/false'
+    ) in body
+    assert 'RJ_ARITH_ALU_OMOD' not in body
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
+def test_cdna_half_fma_policy_and_destination(arch):
+    from amdisa.codegen.execute.rj_arith_float import gen_float_fma16
+
+    body = gen_float_fma16(
+        context(arch, 'V_FMA_F16', ['d'], ['a', 'b', 'c'], is_vop3=True)
+    )
+    suffix = '_gfx12' if arch == 'cdna5' else ''
+    for lanes in (32, 64):
+        assert f'rj_arith_v_fma_f16_w{lanes}{suffix},' in body
+    assert (
+        'd, a, b, c, false);' if arch == 'cdna5' else 'd, a, b, c, true, true);'
+    ) in body
+    assert 'RJ_ARITH_ALU_HIGH_C' in body
+    # Legacy MAD has a different intermediate rounding contract.
+    assert gen_float_fma16(context(arch, 'V_MAD_F16', ['d'], ['a', 'b', 'c'])) is None
+    if arch == 'cdna5':
+        body = gen_float_fma16(
+            context(arch, 'V_FMAC_F16', ['d'], ['a', 'b'], is_vop3=True)
+        )
+        assert 'd, a, b, d, false);' in body
+        assert 'RJ_ARITH_ALU_HIGH_C' in body
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4'])
+@pytest.mark.parametrize('name', ['V_FMA_LEGACY_F16', 'V_MAC_F16'])
+def test_cdna_legacy_half_fma_reuses_architectural_model(arch, name):
+    from amdisa.codegen.execute.rj_arith_float import gen_float_fma16
+
+    inputs = ['a', 'b'] if name == 'V_MAC_F16' else ['a', 'b', 'c']
+    body = gen_float_fma16(context(arch, name, ['d'], inputs, is_vop3=True))
+    assert 'rj_arith_v_fma_f16_w32' in body
+    assert 'rj_arith_v_fma_f16_w64' in body
+    assert ('d, a, b, d' if name == 'V_MAC_F16' else 'd, a, b, c') in body
+    assert 'true, true' in body
+    if name == 'V_MAC_F16':
+        body = gen_float_fma16(context(arch, name, ['d'], inputs, enc_name='ENC_VOP2'))
+        assert 'd, a, b, d' in body
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4'])
+@pytest.mark.parametrize('name', ['V_MAD_F16', 'V_MAD_LEGACY_F16'])
+def test_cdna_half_mad_preserves_its_distinct_intermediate(arch, name):
+    from amdisa.codegen.execute.rj_arith_float import gen_float_fma16
+
+    body = gen_float_fma16(context(arch, name, ['d'], ['a', 'b', 'c'], is_vop3=True))
+    assert 'rj_arith_' + name.lower() + '_w64' in body
+    assert 'rj_arith_v_fma_f16' not in body
+    assert 'RJ_ARITH_ALU_HIGH_D' in body and 'RJ_ARITH_ALU_ABS_C' in body
+    assert 'RJ_ARITH_ALU_OMOD_2' in body
+    assert 'd, a, b, c, true, true' in body
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4'])
+@pytest.mark.parametrize('name', ['V_MADMK_F16', 'V_MADAK_F16'])
+def test_cdna_literal_half_mad_reuses_mad_arithmetic(arch, name):
+    from amdisa.codegen.execute.rj_arith_float import gen_float_fma16
+
+    sources = ['a', 'literal', 'b'] if name == 'V_MADMK_F16' else ['a', 'b', 'literal']
+    body = gen_float_fma16(context(arch, name, ['d'], sources))
+    assert 'rj_arith_v_mad_f16_w64' in body
+    assert 'arithmetic_flags(), 0,' in body
+    assert 'd, ' + ', '.join(sources) + ', true, true' in body
+    assert gen_float_fma16(context(arch, name, ['d'], sources, is_vop3=True)) is None
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
+@pytest.mark.parametrize('encoding', ['ENC_VOP2', 'ENC_VOP3'])
+def test_cdna_packed_fmac_retains_modifiers_and_omod(arch, encoding):
+    from amdisa.codegen.execute.rj_arith_float import gen_packed_fma16
+
+    body = gen_packed_fma16(
+        context(arch, 'V_PK_FMAC_F16', ['d'], ['a', 'b'], enc_name=encoding)
+    )
+    suffix = '_gfx12' if arch == 'cdna5' else '_gfx942'
+    for wave in (32, 64):
+        assert f'rj_arith_v_pk_fmac_f16_w{wave}{suffix},' in body
+    assert 'execute_packed_fma16<true>' in body
+    assert 'd, a, b, d' in body
+    assert ('RJ_ARITH_ALU_OMOD_2' in body) == (arch != 'cdna5')
+    assert ('RJ_ARITH_ALU_ABS_A' in body) == (encoding == 'ENC_VOP3')
+    if encoding == 'ENC_VOP2':
+        assert 'inst_.src1' not in body
+        assert ('sdwa::output_modifier' in body) == (arch != 'cdna5')
+    assert 'dot2_src_needs_half_replication(inst_.src0)' in body
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
+def test_cdna_packed_half_arithmetic(arch):
+    from amdisa.codegen.execute.rj_arith_float import (
+        gen_packed_binary16,
+        gen_packed_fma16,
+    )
+
+    for name in ('V_PK_ADD_F16', 'V_PK_MUL_F16', 'V_PK_FMA_F16'):
+        fma = name == 'V_PK_FMA_F16'
+        emit = gen_packed_fma16 if fma else gen_packed_binary16
+        body = emit(
+            context(
+                arch,
+                name,
+                ['d'],
+                ['a', 'b', 'c'] if fma else ['a', 'b'],
+                enc_name='ENC_VOP3P',
+                opsel_exprs=('inst_.lo', 'inst_.hi'),
+                op_sel_hi_2_expr='inst_.hi_c',
+            )
+        )
+        suffix = (
+            ('_gfx1250' if arch == 'cdna5' else '_gfx942')
+            if name == 'V_PK_MUL_F16' or (name == 'V_PK_ADD_F16' and arch != 'cdna5')
+            else ('_gfx12' if arch == 'cdna5' else '')
+        )
+        for lanes in (32, 64):
+            assert f'rj_arith_{name.lower()}_w{lanes}{suffix},' in body
+        assert 'pk16_src_needs_narrowing' in body
+        assert 'RJ_ARITH_PK_HI_A_LOW' in body
+        assert 'RJ_ARITH_PK_NEG_HI_B' in body
+    # Promoted FMAC has a separate modifier policy from VOP3P FMA.
+    assert (
+        gen_packed_fma16(
+            context(arch, 'V_PK_FMAC_F16', ['d'], ['a', 'b'], enc_name='ENC_VOP3')
+        )
+        is not None
+    )

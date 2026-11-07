@@ -5,6 +5,7 @@
 // Owns public entry points and their validation/dispatch policy.
 
 #include "fp/packed_fma.h"
+#include "common/alu.h"
 #include "common/packed_alu.h"
 #include "common/validation.h"
 #include "fp/half_fma_scalar.h"
@@ -18,21 +19,29 @@ static const uint64_t fp_flags = rocjitsu::arith::kFmaGuestFpFlags;
 
 // Evaluate paired FP16 fused multiply-adds for the selected lanes. Reject invalid controls
 // before changing outputs.
-template <bool Rdna3, bool Accumulate = false>
+template <bool Rdna3, bool Accumulate = false, bool Cdna = false>
 int run(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_t *const *d,
         const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c,
         uint32_t *excp_flag_user) {
   bool report = rocjitsu::arith::reports_fp_status(flags);
-  // V_PK_FMAC_F16 has only e32 encodings, without source or output modifiers.
+  // Promoted FMAC applies ordinary ABS/NEG/CLAMP to both halves; packed FMA
+  // instead has independent per-half negation and selectors.
   constexpr uint32_t packed_modifiers =
       RJ_ARITH_PK_NEG_LO_A | RJ_ARITH_PK_NEG_LO_B | RJ_ARITH_PK_NEG_LO_C | RJ_ARITH_PK_NEG_HI_A |
       RJ_ARITH_PK_NEG_HI_B | RJ_ARITH_PK_NEG_HI_C | RJ_ARITH_PK_CLAMP | RJ_ARITH_PK_LO_A_HIGH |
       RJ_ARITH_PK_LO_B_HIGH | RJ_ARITH_PK_LO_C_HIGH | RJ_ARITH_PK_HI_A_LOW | RJ_ARITH_PK_HI_B_LOW |
       RJ_ARITH_PK_HI_C_LOW;
-  constexpr uint32_t allowed = Accumulate ? 0 : packed_modifiers;
+  constexpr uint32_t fmac_modifiers = RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_ABS_B | RJ_ARITH_ALU_NEG_A |
+                                      RJ_ARITH_ALU_NEG_B | RJ_ARITH_ALU_CLAMP;
+  constexpr uint32_t allowed =
+      (Accumulate ? fmac_modifiers : packed_modifiers) | (Cdna ? RJ_ARITH_ALU_OMOD_MASK : 0);
   if (int error = rocjitsu::arith::validate(flags, instruction_flags & ~allowed,
                                             fp_flags | (Rdna3 ? RJ_ARITH_FP_DX10_CLAMP_OFF : 0))) {
     return error;
+  }
+  if constexpr (Cdna) {
+    static_assert(Rdna3 && Accumulate);
+    instruction_flags = rocjitsu::arith::rdna3_output_modifiers(flags, instruction_flags);
   }
   if (report && rocjitsu::arith::half_fma_reporting_unsupported(flags, Rdna3)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
@@ -42,7 +51,7 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_t
   }
   uint32_t modes[2];
   if constexpr (Accumulate) {
-    modes[0] = 0;
+    modes[0] = instruction_flags;
     modes[1] = modes[0] | RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B | RJ_ARITH_ALU_HIGH_C;
   } else {
     modes[0] = rocjitsu::arith::packed_half_instruction_flags(instruction_flags, false);
@@ -66,9 +75,7 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_t
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   bool exact = rocjitsu::arith::is_exact(flags);
-  const bool clamp = !Accumulate && (instruction_flags & RJ_ARITH_PK_CLAMP);
   if (!exact && !(flags & RJ_ARITH_FP_ROUND_MASK) &&
-      !(clamp && (flags & RJ_ARITH_FP_DX10_CLAMP_OFF)) &&
       rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
     rocjitsu::arith::packed_fma_x86_64_v3<Accumulate>(flags, exec_mask, instruction_flags, d[0],
                                                       a[0], b[0], c[0]);
@@ -103,13 +110,13 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_t
 
 // Evaluate paired FP16 fused multiply-adds for Wave64. Reject invalid controls before changing
 // outputs.
-template <bool Rdna3, bool Accumulate = false>
+template <bool Rdna3, bool Accumulate = false, bool Cdna = false>
 int run_wave64(uint64_t flags, uint64_t exec_mask, uint32_t instruction_flags, uint32_t *const *d,
                const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c,
                uint32_t *excp_flag_user) {
   // Validate before either Wave64 half can modify outputs, even when EXEC is empty.
-  if (int error = run<Rdna3, Accumulate>(flags, 0, instruction_flags, nullptr, nullptr, nullptr,
-                                         nullptr, excp_flag_user)) {
+  if (int error = run<Rdna3, Accumulate, Cdna>(flags, 0, instruction_flags, nullptr, nullptr,
+                                               nullptr, nullptr, excp_flag_user)) {
     return error;
   }
   if (!exec_mask) {
@@ -120,9 +127,9 @@ int run_wave64(uint64_t flags, uint64_t exec_mask, uint32_t instruction_flags, u
   for (int half = 0; half < 2; ++half) {
     uint32_t *dest = d[0] + half * 32;
     const uint32_t *x = a[0] + half * 32, *y = b[0] + half * 32, *z = c[0] + half * 32;
-    if (int error =
-            run<Rdna3, Accumulate>(flags, uint32_t(exec_mask >> (half * 32)), instruction_flags,
-                                   &dest, &x, &y, &z, report ? &exceptions : nullptr)) {
+    if (int error = run<Rdna3, Accumulate, Cdna>(flags, uint32_t(exec_mask >> (half * 32)),
+                                                 instruction_flags, &dest, &x, &y, &z,
+                                                 report ? &exceptions : nullptr)) {
       return error;
     }
   }
@@ -269,4 +276,38 @@ int rj_arith_v_pk_fmac_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t inst
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
   return run_wave64<true, true>(flags, exec_mask, instruction_flags, d, a, b, d, trapsts);
+}
+
+// Accumulate packed halves with gfx942/gfx950 MODE-gated OMOD.
+// Required FP-status reporting is unsupported; errors preserve all outputs.
+int rj_arith_v_pk_fmac_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return run<true, true, true>(flags, exec_mask, instruction_flags, d, a, b, d, trapsts);
+}
+
+// Accumulate packed halves with gfx942/gfx950 MODE-gated OMOD.
+// Required FP-status reporting is unsupported; errors preserve all outputs.
+int rj_arith_v_pk_fmac_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return run_wave64<true, true, true>(flags, exec_mask, instruction_flags, d, a, b, d, trapsts);
 }

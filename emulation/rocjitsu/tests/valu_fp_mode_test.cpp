@@ -2806,6 +2806,7 @@ std::vector<ArithmeticCase> f16_binary_modifier_cases() {
                              uint32_t result, uint8_t opsel) {
     const auto words = cdna4::build_vop3(multiply ? cdna4::kVMulF16Vop3 : cdna4::kVAddF16Vop3,
                                          {.vdst = 6, .op_sel = opsel, .src0 = V0, .src1 = V1});
+    // These migrated handlers dispatch inside rj-arith, outside the legacy tracker.
     cases.push_back({name,
                      ROCJITSU_CODE_ARCH_CDNA4,
                      {words[0], words[1], 0},
@@ -2815,7 +2816,7 @@ std::vector<ArithmeticCase> f16_binary_modifier_cases() {
                      FE_TONEAREST,
                      0,
                      0,
-                     expect_simd_path(amdgpu::SimdFastPath::VOP3_BINARY_MODE_FP16)});
+                     {}});
   };
   // CDNA true16 low-half writes zero the destination's high half; high-half
   // writes preserve the low half. Exercise both ADD and MUL with high sources.

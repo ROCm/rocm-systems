@@ -84,9 +84,9 @@ struct Case {
 
 const std::array<Case, 10> kCases = {{
     {"v_fma_f32_vop3", 459, Kind::F32},
-    {"v_fma_f16_vop3", 518, Kind::F16, amdgpu::SimdFastPath::VOP3_FMA_FP16},
+    {"v_fma_f16_vop3", 518, Kind::F16},
     {"v_fma_f64_vop3", 460, Kind::F64},
-    {"v_mad_f16_vop3", 515, Kind::F16, amdgpu::SimdFastPath::VOP3_TERNARY_FP16},
+    {"v_mad_f16_vop3", 515, Kind::F16},
     // Selection uses raw encodings in both scalar and SIMD execution.
     {"v_max3_f32_vop3", 467, Kind::F32},
     {"v_min3_f32_vop3", 464, Kind::F32},
@@ -598,8 +598,11 @@ TEST_P(Vop3F16TernaryOutputOrderTest, MatchesScalarOutputContractWithSimdEnabled
         if (force_scalar) {
           EXPECT_TRUE(tracker.no_tracked_path_executed())
               << test.name << ": forced-scalar execution used SIMD";
-        } else if (test.arch != ROCJITSU_CODE_ARCH_RDNA3) {
-          // RDNA3 uses rj-arith, whose SIMD paths do not use the legacy tracker.
+        } else if (test.arch != ROCJITSU_CODE_ARCH_RDNA3 &&
+                   !(test.arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+                     (test.opcode == cdna4::kVMadF16Vop3 ||
+                      test.opcode == cdna4::kVMadLegacyF16Vop3))) {
+          // Migrated FMA/MAD use rj-arith, whose SIMD paths do not use this tracker.
           EXPECT_TRUE(tracker.only_tracked_path_executed(test.expected_simd_path))
               << test.name << ": eligible execution did not use the ternary F16 SIMD path";
         }
