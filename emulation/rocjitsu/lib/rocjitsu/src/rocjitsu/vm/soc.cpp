@@ -63,7 +63,8 @@ void SoC::release_vm_resources() {
 util::Result SoC::add_xcd(amdgpu::Xcd *xcd, util::DiagnosticEmitter emit_error) {
   if (xcd == nullptr)
     return emit_error.emit() << "cannot add a null XCD";
-  xcd->set_coherence_domain(cache_coherence_);
+  // The domain is non-null by construction; null is the setter's only failure.
+  (void)xcd->set_coherence_domain(cache_coherence_);
   if (xcd->l2_cache()) {
     xcd->l2_cache()->set_legacy_maintenance_memory(memory_);
     xcd->l2_cache()->set_legacy_maintenance_vm(&gpu_vm_);
@@ -91,7 +92,8 @@ void SoC::wire_gws_to_xcds() {
 util::Result SoC::add_iod(amdgpu::Iod *iod, util::DiagnosticEmitter emit_error) {
   if (iod == nullptr)
     return emit_error.emit() << "cannot add a null IOD";
-  iod->set_coherence_domain(cache_coherence_);
+  // The domain is non-null by construction; null is the setter's only failure.
+  (void)iod->set_coherence_domain(cache_coherence_);
   iod->set_gpu_vm(&gpu_vm_);
   iod->set_legacy_maintenance_memory(memory_);
   iod->msc()->set_legacy_maintenance_vm(&gpu_vm_);
