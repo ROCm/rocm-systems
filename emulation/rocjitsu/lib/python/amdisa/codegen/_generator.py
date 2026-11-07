@@ -8471,7 +8471,7 @@ class CodeGenerator:
                 f'  amdgpu::prepare_lds_stack(wf, *d, inst_.addr, inst_.data0, inst_.data1, '
                 f'inst_.vdst, {push}, {sem.num_elems}, {size}, {flags});'
             )
-            L.append('  set_data(std::move(d));')
+            L.extend(self._ds_complete_or_route('  '))
             return self._gen_ds_gds_guard() + '\n'.join(L)
 
         if cls in ('ds_atomic', 'ds_atomic2'):
@@ -9790,7 +9790,7 @@ class CodeGenerator:
             )
         L.append('  }')
         # Counter increment handled by MemoryPipeline::issue().
-        L.append('  set_data(std::move(d));')
+        L.extend(self._ds_complete_or_route('  '))
         return '\n'.join(L)
 
     def _gen_ds_atomic2(
@@ -9864,7 +9864,7 @@ class CodeGenerator:
                 f'&val1_{i}, 4);'
             )
         L.append('  }')
-        L.append('  set_data(std::move(d));')
+        L.extend(self._ds_complete_or_route('  '))
         return '\n'.join(L)
 
     def _gen_ds_mskor(
@@ -9913,8 +9913,98 @@ class CodeGenerator:
                 f'    std::memcpy(&d->store_data[lane * {stride} + {esz + i * 4}], &src{i}, 4);'
             )
         L.append('  }')
-        L.append('  set_data(std::move(d));')
+        L.extend(self._ds_complete_or_route('  '))
         return '\n'.join(L)
+
+    @staticmethod
+    def _ds_complete_or_route(indent: str) -> list[str]:
+        """Hand a DS instruction's LDS state to its access.
+
+        The CU may complete the access inside execute_impl(); otherwise the state
+        is set on the instruction and routed to the local memory pipeline.
+        """
+        return [
+            f'{indent}if (!amdgpu::LdsInlineAccess::complete(*this, *d, wf))',
+            f'{indent}  set_data(std::move(d));',
+        ]
+
+    def _ds_inline_request(self, sem: InstructionSemantics, is_load: bool) -> list[str]:
+        """Complete a plain single-address DS load or store without building state.
+
+        Emitted before the VectorMemState is constructed; the handler continues
+        to its routed body only when the CU keeps the routed order.
+        """
+        fields = [
+            f"  .addr_vgpr = {self._vgpr_base_expr('addr', use_acc=False, role='Src0')},",
+            '  .offset = (static_cast<uint32_t>(inst_.offset1) << 8) | inst_.offset0,',
+        ]
+        if is_load:
+            fields.append(f"  .dst_vgpr = {self._vgpr_base_expr('vdst')},")
+        else:
+            fields.append(f"  .data_vgpr = {self._vgpr_base_expr('data0')},")
+        fields += [
+            f'  .elem_size = {sem.elem_size},',
+            f'  .num_elems = {sem.num_elems},',
+        ]
+        # Load or store is fixed by the entry point, and each names its data
+        # format, so the writeback (lds_writeback.h) and the store writers
+        # (lds_store_plans.h) are specialized per opcode. Sign extension and
+        # d16 live only in that format, not in the request.
+        fmt = [f'.elem_size = {sem.elem_size}', f'.num_elems = {sem.num_elems}']
+        if is_load and sem.sign_extend:
+            fmt.append('.sign_extend = true')
+        if sem.d16_hi:
+            fmt.append('.d16_hi = true')
+        if is_load and sem.d16_lo:
+            fmt.append('.d16_lo = true')
+        if is_load:
+            entry = f"amdgpu::LdsInlineAccess::load<amdgpu::lds_writeback::DstFormat{{{', '.join(fmt)}}}>"
+        else:
+            entry = f"amdgpu::LdsInlineAccess::store<amdgpu::lds_store::StoreFormat{{{', '.join(fmt)}}}>"
+        return [
+            f'  if ({entry}(*this, amdgpu::LdsAccessRequest{{',
+            *('  ' + f for f in fields),
+            '      }, wf))',
+            '    return;',
+        ]
+
+    def _ds_inline_request2(
+        self, sem: InstructionSemantics, is_load: bool, stride_scale: str
+    ) -> list[str]:
+        """Complete a two-address DS load or store without building state.
+
+        The two accesses share the address lanes; the offsets are pre-scaled
+        exactly as the state-based body below scales them, and the registers
+        use the same expressions, so both paths address the same bytes.
+        """
+        esz = sem.elem_size
+        fields = [
+            f"  .addr_vgpr = {self._vgpr_base_expr('addr', use_acc=False)},",
+            f'  .offset = static_cast<uint32_t>(inst_.offset0) * {stride_scale},',
+            f'  .offset2 = static_cast<uint32_t>(inst_.offset1) * {stride_scale},',
+        ]
+        if is_load:
+            fields.append(f"  .dst_vgpr = {self._vgpr_base_expr('vdst')},")
+            entry = (
+                'amdgpu::LdsInlineAccess::load2<amdgpu::lds_writeback::DstFormat'
+                f'{{.elem_size = {esz}, .num_elems = 1}}>'
+            )
+        else:
+            fields[3:3] = [
+                f"  .data_vgpr = {self._vgpr_base_expr('data0')},",
+                f"  .data2_vgpr = {self._vgpr_base_expr('data1')},",
+            ]
+            entry = (
+                'amdgpu::LdsInlineAccess::store2<amdgpu::lds_store::StoreFormat'
+                f'{{.elem_size = {esz}, .num_elems = 1}}>'
+            )
+        fields += [f'  .elem_size = {esz},', '  .num_elems = 1,']
+        return [
+            f'  if ({entry}(*this, amdgpu::LdsAccessRequest{{',
+            *('  ' + f for f in fields),
+            '      }, wf))',
+            '    return;',
+        ]
 
     def _gen_ds_append_consume(
         self, dst: list[str], src: list[str], sem: InstructionSemantics
@@ -9948,7 +10038,7 @@ class CodeGenerator:
         L.append('    if (exec & (1ULL << lane))')
         L.append('      d->per_lane_addr[lane] = addr;')
         L.append('  }')
-        L.append('  set_data(std::move(d));')
+        L.extend(self._ds_complete_or_route('  '))
         return '\n'.join(L)
 
     def _gen_ds_barrier_arrive(
@@ -10302,6 +10392,7 @@ class CodeGenerator:
         L = []
         esz, ne = sem.elem_size, sem.num_elems
         acc = self._acc_vgpr_expr
+        L.extend(self._ds_inline_request(sem, is_load=True))
         L.append(
             '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )
@@ -10317,7 +10408,7 @@ class CodeGenerator:
         if sem.d16_lo:
             L.append('  d->d16_lo = true;')
         L.append('  ds_calculate_addresses(inst_, wf, *d);')
-        L.append('  set_data(std::move(d));')
+        L.extend(self._ds_complete_or_route('  '))
         return '\n'.join(L)
 
     def _append_ds_addtid_addresses(self, lines: list[str]) -> None:
@@ -10360,7 +10451,7 @@ class CodeGenerator:
         L.append('  d->is_load = true;')
         self._append_wait_counter_type(L, sem, 'ds_read_addtid')
         self._append_ds_addtid_addresses(L)
-        L.append('  set_data(std::move(d));')
+        L.extend(self._ds_complete_or_route('  '))
         return '\n'.join(L)
 
     def _gen_ds_write_addtid(
@@ -10386,7 +10477,7 @@ class CodeGenerator:
                 '    auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec);',
                 '    if (data.valid()) {',
                 '      if (data.copy_dwords_lane_major(d->store_data, exec).failed()) return;',
-                '      set_data(std::move(d));',
+                *self._ds_complete_or_route('      '),
                 '      return;',
                 '    }',
                 '  }',
@@ -10401,7 +10492,7 @@ class CodeGenerator:
             f'    std::memcpy(&d->store_data[lane * {sem.elem_size}], &val0, {sem.elem_size});'
         )
         L.append('  }')
-        L.append('  set_data(std::move(d));')
+        L.extend(self._ds_complete_or_route('  '))
         return '\n'.join(L)
 
     def _gen_ds_read_tr(
@@ -10444,7 +10535,7 @@ class CodeGenerator:
             else 'ds_calculate_addresses'
         )
         L.append(f'  {address_helper}(inst_, wf, *d);')
-        L.append('  set_data(std::move(d));')
+        L.extend(self._ds_complete_or_route('  '))
         return '\n'.join(L)
 
     def _gen_ds_write(
@@ -10453,6 +10544,7 @@ class CodeGenerator:
         L = []
         esz, ne = sem.elem_size, sem.num_elems
         acc = self._acc_vgpr_expr
+        L.extend(self._ds_inline_request(sem, is_load=False))
         L.append(
             '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )
@@ -10477,7 +10569,7 @@ class CodeGenerator:
             L.append(
                 '      if (data.copy_dwords_lane_major(d->store_data, exec).failed()) return;'
             )
-            L.append('      set_data(std::move(d));')
+            L.extend(self._ds_complete_or_route('      '))
             L.append('      return;')
             L.append('    }')
             L.append('  }')
@@ -10526,7 +10618,7 @@ class CodeGenerator:
                 )
         L.append('  }')
         # Counter increment handled by MemoryPipeline::issue().
-        L.append('  set_data(std::move(d));')
+        L.extend(self._ds_complete_or_route('  '))
         return '\n'.join(L)
 
     def _gen_ds_read2(
@@ -10550,6 +10642,7 @@ class CodeGenerator:
         else:
             stride_scale = f'{esz}U'
         acc = self._acc_vgpr_expr
+        L.extend(self._ds_inline_request2(sem, is_load=True, stride_scale=stride_scale))
         L.append('  auto &cu = wf.cu();')
         L.append('  uint64_t exec = wf.exec();')
         L.append(
@@ -10599,7 +10692,7 @@ class CodeGenerator:
             '    calculate_addresses([&](uint32_t lane) { return addresses[lane]; });'
         )
         L.append('  }')
-        L.append('  set_data(std::move(d));')
+        L.extend(self._ds_complete_or_route('  '))
         return '\n'.join(L)
 
     def _gen_ds_write2(
@@ -10623,6 +10716,9 @@ class CodeGenerator:
         else:
             stride_scale = f'{esz}U'
         acc = self._acc_vgpr_expr
+        L.extend(
+            self._ds_inline_request2(sem, is_load=False, stride_scale=stride_scale)
+        )
         L.append('  auto &cu = wf.cu();')
         L.append('  uint64_t exec = wf.exec();')
         L.append(
@@ -10682,7 +10778,7 @@ class CodeGenerator:
                 f'    std::memcpy(&d->ds2_store_data[lane * {esz} + {i * 4}], &v1_{i}, 4);'
             )
         L.append('  }')
-        L.append('  set_data(std::move(d));')
+        L.extend(self._ds_complete_or_route('  '))
         return '\n'.join(L)
 
     def _enc_has_field(self, field_name: str) -> bool:
@@ -16368,6 +16464,7 @@ class CodeGenerator:
             '',
             '#include "rocjitsu/vm/amdgpu/wavefront.h"',
             '#include "rocjitsu/vm/amdgpu/compute_unit.h"',
+            '#include "rocjitsu/vm/amdgpu/lds_inline_access.h"',
             '#include "rocjitsu/vm/amdgpu/mem_state.h"',
             '#include "rocjitsu/vm/amdgpu/register_access.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"',

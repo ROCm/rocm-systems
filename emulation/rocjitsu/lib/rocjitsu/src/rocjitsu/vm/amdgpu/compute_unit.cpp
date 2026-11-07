@@ -36,10 +36,12 @@
 #include <array>
 #include <bit>
 #include <cassert>
+#include <cstdlib>
 #include <limits>
 #include <memory>
 #include <span>
 #include <stdexcept>
+#include <string_view>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -1035,6 +1037,15 @@ void ComputeUnitCore::tick_pipelines() {
     local_mem_pipeline_.tick();
   if (!tensor_dma_pipeline_.empty())
     tensor_dma_pipeline_.tick();
+}
+
+bool ComputeUnitCore::lds_inline_enabled_by_env() {
+  // Read once per process. RJ_DS_INLINE=0 keeps every DS access on the routed path.
+  static const bool enabled = [] {
+    const char *value = std::getenv("RJ_DS_INLINE");
+    return value == nullptr || std::string_view(value) != "0";
+  }();
+  return enabled;
 }
 
 VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
@@ -2289,8 +2300,18 @@ template <bool EnableAsync>
   const bool was_in_trap_handler = active->in_trap_handler();
 
   const uint32_t executing_process = active->process_id();
-  const util::Result execution_result =
-      execute_instruction(inst, *active, &execution_failure_detail);
+  lds_inline_completed_ = nullptr;
+  const util::Result execution_result = [&] {
+    // Inline LDS completion applies to this execution only, even if it throws.
+    // Whether plugins or a debugger forbid it is asked by the DS access itself,
+    // so other instructions only set and clear this flag.
+    struct EndLdsInlineIssue {
+      bool &issue;
+      ~EndLdsInlineIssue() { issue = false; }
+    } end_lds_inline_issue{lds_inline_issue_};
+    lds_inline_issue_ = true;
+    return execute_instruction(inst, *active, &execution_failure_detail);
+  }();
 
   if (execution_result.failed()) [[unlikely]] {
     fail_current_instruction();
@@ -2474,17 +2495,33 @@ template <bool EnableAsync>
   }
   if (inst->is_memory_op()) {
     if (!inst->data()) {
-      // A memory execute path can intentionally reject an invalid complete
-      // register operand before constructing pipeline state. Treat that as a
-      // fully suppressed instruction: no route callback, wait-counter update,
-      // or memory transaction is permitted.
-      decoded.value().reset();
+      if (lds_inline_completed_ == inst) {
+        // The access already completed inside execute_impl(). The instruction
+        // holds no state, so it keeps its decode like a recycled routed access.
+        if (reuse_decoded)
+          decoded_inst_cache_.put_completed(issue_pc, vmid, words, decoded.value());
+      } else {
+        // A memory execute path can intentionally reject an invalid complete
+        // register operand before constructing pipeline state. Treat that as a
+        // fully suppressed instruction: no route callback, wait-counter update,
+        // or memory transaction is permitted.
+        decoded.value().reset();
+      }
     } else {
       if (inst->data()->tag() == GLOBAL_MEM) {
         auto *d = inst->data_as<VectorMemState>();
         d->issue_pc = active->pc;
       }
       const VmAccessOutcome memory_outcome = route_memory_inst(decoded.value().release(), *active);
+      // An LDS access that completed inside its own issue keeps its decode. The
+      // pipeline state is destroyed first, so only the stateless instruction is
+      // cached, exactly like a completed ALU instruction.
+      if (std::unique_ptr<Instruction> done{local_mem_pipeline_.take_recyclable()}) {
+        if (reuse_decoded) {
+          done->set_data({});
+          decoded_inst_cache_.put_completed(issue_pc, vmid, words, done);
+        }
+      }
       if (memory_outcome != VmAccessOutcome::Complete) {
         if (memory_outcome == VmAccessOutcome::Unavailable) {
           request_functional_yield();

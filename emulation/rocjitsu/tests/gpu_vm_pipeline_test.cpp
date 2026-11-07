@@ -2510,6 +2510,56 @@ TEST(GpuVmPipeline, MixedFlatAtomicRetryPreservesLdsAndCompletedGlobalLanes) {
   EXPECT_EQ(context.external->compare_exchange_calls, 2u);
 }
 
+TEST(GpuVmPipeline, MixedFlatLoadKeepsGlobalLanesBesideManyLdsLanes) {
+  // More than four LDS lanes take the LDS reader's whole-span copies. The global
+  // lanes in between already hold their results, and their addresses also fall
+  // inside the LDS backing, where a span copy would find bytes to write.
+  TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
+  ASSERT_TRUE(context.address_space);
+  ASSERT_NE(context.wf, nullptr);
+  auto &wf = *context.wf;
+  constexpr uint32_t lanes = 16;
+  constexpr uint64_t mask = (uint64_t{1} << lanes) - 1;
+  constexpr uint64_t local_lanes = 0xAAAA;
+  constexpr uint64_t global_base = 0x100;
+  wf.set_exec(mask);
+  wf.set_lds_base(context.cu->allocate_lds(256));
+
+  auto state = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  state->elem_size = sizeof(uint32_t);
+  state->num_elems = 1;
+  state->is_load = true;
+  state->wf_size = wf.wf_size();
+  state->exec_mask = state->lane_mask = mask;
+  state->flat_local_lane_mask = local_lanes;
+  state->dst_reg_base = wf.vgpr_alloc().base + 4;
+  std::array<uint32_t, lanes> expected{};
+  for (uint32_t lane = 0; lane < lanes; ++lane) {
+    const uint64_t global_address = global_base + 4 * lane;
+    // What a span copy would read for this lane if it treated it as LDS.
+    wf.lds().write32(static_cast<uint32_t>(global_address), 0xDEAD0000u | lane);
+    if (local_lanes & (uint64_t{1} << lane)) {
+      state->per_lane_addr[lane] = wf.lds_base() + 4 * lane;
+      expected[lane] = 0x10000u | lane;
+      wf.lds().write32(static_cast<uint32_t>(state->per_lane_addr[lane]), expected[lane]);
+    } else {
+      state->per_lane_addr[lane] = global_address;
+      expected[lane] = 0x20000u | lane;
+      context.external->store(global_address, expected[lane]);
+    }
+  }
+
+  amdgpu::GlobalMemPipeline pipeline(&context.cu->l1_vector(), context.cu->l2());
+  ASSERT_EQ(pipeline.issue_deferred(new TestMemoryInstruction(std::move(state)), wf),
+            amdgpu::VmAccessOutcome::Complete);
+  for (int tick = 0; tick < 16 && !wf.wait_counters().empty(); ++tick)
+    pipeline.tick();
+  ASSERT_TRUE(wf.wait_counters().empty());
+  for (uint32_t lane = 0; lane < lanes; ++lane)
+    EXPECT_EQ(context.cu->read_vgpr(wf.vgpr_alloc().base + 4, lane), expected[lane]) << lane;
+}
+
 TEST(GpuVmPipeline, MixedFlatLegacyAtomicRetryRefreshesVmSnapshot) {
   for (uint32_t local_lane : {0u, 1u}) {
     SCOPED_TRACE(local_lane);
