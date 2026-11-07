@@ -6,6 +6,7 @@
 
 #include "elf.hpp"
 
+#include <cinttypes>
 #include <cstring>
 #include <cassert>
 #include <string>
@@ -24,31 +25,33 @@
 
 // #define DEBUG_DETAIL // For detailed debug log
 
+// Thread ids are printed as their hash, like the rest of the runtime's logging.
+#define ElfThreadId() std::hash<std::thread::id>{}(std::this_thread::get_id())
+
 #ifdef DEBUG_DETAIL
 
 #define ElfTrace(level)                                                                            \
-  ClPrint(level, amd::LOG_CODE, "%-5d: [%zx] %p %s: ", getpid(), std::this_thread::get_id(), this, \
-          __func__)
+  ClPrint(level, amd::LOG_CODE, "%-5d: [%zx] %p %s: ", getpid(), ElfThreadId(), this, __func__)
 
 #define logElfInfo(msg)                                                                            \
-  ClPrint(amd::LOG_INFO, amd::LOG_CODE, "%-5d: [%zx] %p %s: " msg, getpid(),                       \
-          std::this_thread::get_id(), this, __func__)
+  ClPrint(amd::LOG_INFO, amd::LOG_CODE, "%-5d: [%zx] %p %s: " msg, getpid(), ElfThreadId(), this,  \
+          __func__)
 
 #define logElfWarning(msg)                                                                         \
-  ClPrint(amd::LOG_WARNING, amd::LOG_CODE, "%-5d: [%zx] %p %s: " msg, getpid(),                    \
-          std::this_thread::get_id(), this, __func__)
+  ClPrint(amd::LOG_WARNING, amd::LOG_CODE, "%-5d: [%zx] %p %s: " msg, getpid(), ElfThreadId(),     \
+          this, __func__)
 
 #define LogElfDebug(format, ...)                                                                   \
-  ClPrint(amd::LOG_DEBUG, amd::LOG_CODE, "%-5d: [%zx] %p %s: " format, getpid(),                   \
-          std::this_thread::get_id(), this, __func__, __VA_ARGS__)
+  ClPrint(amd::LOG_DEBUG, amd::LOG_CODE, "%-5d: [%zx] %p %s: " format, getpid(), ElfThreadId(),    \
+          this, __func__, __VA_ARGS__)
 
 #define LogElfWarning(format, ...)                                                                 \
-  ClPrint(amd::LOG_WARNING, amd::LOG_CODE, "%-5d: [%zx] %p %s: " format, getpid(),                 \
-          std::this_thread::get_id(), this, __func__, __VA_ARGS__)
+  ClPrint(amd::LOG_WARNING, amd::LOG_CODE, "%-5d: [%zx] %p %s: " format, getpid(), ElfThreadId(),  \
+          this, __func__, __VA_ARGS__)
 
 #define LogElfInfo(format, ...)                                                                    \
-  ClPrint(amd::LOG_INFO, amd::LOG_CODE, "%-5d: [%zx] %p %s: " format, getpid(),                    \
-          std::this_thread::get_id(), this, __func__, __VA_ARGS__)
+  ClPrint(amd::LOG_INFO, amd::LOG_CODE, "%-5d: [%zx] %p %s: " format, getpid(), ElfThreadId(),     \
+          this, __func__, __VA_ARGS__)
 #else
 #define ElfTrace(level)
 #define logElfInfo(msg)
@@ -59,15 +62,31 @@
 #endif
 
 #define logElfError(msg)                                                                           \
-  ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "%-5d: [%zx] %p %s: " msg, getpid(),                      \
-          std::this_thread::get_id(), this, __func__)
+  ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "%-5d: [%zx] %p %s: " msg, getpid(), ElfThreadId(), this, \
+          __func__)
 
 #define LogElfError(format, ...)                                                                   \
-  ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "%-5d: [%zx] %p %s: " format, getpid(),                   \
-          std::this_thread::get_id(), this, __func__, __VA_ARGS__)
+  ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "%-5d: [%zx] %p %s: " format, getpid(), ElfThreadId(),    \
+          this, __func__, __VA_ARGS__)
 
 namespace amd {
 using namespace amd::ELFIO;
+
+namespace {
+// A symbol's data must lie within a section that has data. A zero-size symbol may
+// sit at the end of its section, and an empty section may have no data at all.
+bool isSymbolInSection(const section* sec, Elf_Half sec_ndx, Elf64_Addr value, Elf_Xword size) {
+  if (sec == nullptr || sec_ndx == SHN_UNDEF || sec_ndx >= SHN_LORESERVE ||
+      sec->get_type() == SHT_NOBITS) {
+    return false;
+  }
+  const Elf_Xword sec_size = sec->get_size();
+  if (value > sec_size || size > sec_size - value) {
+    return false;
+  }
+  return sec->get_data() != nullptr || sec_size == 0;
+}
+}  // namespace
 
 #if !defined(ELFMAG)
 #define ELFMAG "\177ELF"
@@ -137,8 +156,8 @@ Elf::Elf(unsigned char eclass, const char* rawElfBytes, uint64_t rawElfSize,
       _strtab_ndx(SHN_UNDEF),
       _symtab_ndx(SHN_UNDEF),
       _successful(false) {
-  LogElfInfo("fname=%s, rawElfSize=%lu, elfcmd=%d, %s", _fname.c_str(), _rawElfSize, _elfCmd,
-             _elfCmd == ELF_C_WRITE ? "writer" : "reader");
+  LogElfInfo("fname=%s, rawElfSize=%" PRIu64 ", elfcmd=%d, %s", _fname.c_str(), _rawElfSize,
+             _elfCmd, _elfCmd == ELF_C_WRITE ? "writer" : "reader");
 
   if (rawElfBytes != NULL) {
     /*
@@ -154,7 +173,7 @@ Elf::Elf(unsigned char eclass, const char* rawElfBytes, uint64_t rawElfSize,
 }
 
 Elf::~Elf() {
-  LogElfInfo("fname=%s, rawElfSize=%lu, elfcmd=%d", _fname.c_str(), _rawElfSize, _elfCmd);
+  LogElfInfo("fname=%s, rawElfSize=%" PRIu64 ", elfcmd=%d", _fname.c_str(), _rawElfSize, _elfCmd);
   elfMemoryRelease();
 }
 
@@ -189,7 +208,7 @@ bool Elf::Init() {
       {
         std::istringstream is{std::string(_rawElfBytes, _rawElfSize)};
         if (!_elfio.load(is)) {
-          LogElfError("failed in _elfio.load(%p, %lu)", _rawElfBytes, _rawElfSize);
+          LogElfError("failed in _elfio.load(%p, %" PRIu64 ")", _rawElfBytes, _rawElfSize);
           return false;
         }
       }
@@ -405,8 +424,13 @@ unsigned int Elf::getSymbolNum() const {
     return 0;  // No SYMTAB
   }
   symbol_section_accessor symbol_reader(_elfio, _elfio.sections[_symtab_ndx]);
-  auto num = symbol_reader.get_symbols_num() - 1;  // Exclude the first dummy symbol
-  LogElfInfo(": num=%lu", num);
+  auto total = symbol_reader.get_symbols_num();
+  if (total == 0) {
+    logElfError(" failed: empty or malformed SYMTAB");
+    return 0;
+  }
+  auto num = total - 1;  // Exclude the first dummy symbol
+  LogElfInfo(": num=%" PRIu64, num);
   return num;
 }
 
@@ -431,7 +455,7 @@ bool Elf::getSymbolInfo(unsigned int index, SymbolInfo* symInfo) const {
   auto num = getSymbolNum();
 
   if (index >= num) {
-    LogElfError(" failed: wrong index %u >= symbols num %lu", index, num);
+    LogElfError(" failed: wrong index %u >= symbols num %u", index, num);
     return false;
   }
 
@@ -454,18 +478,23 @@ bool Elf::getSymbolInfo(unsigned int index, SymbolInfo* symInfo) const {
     LogElfError("failed: null section at %u", sec_index);
     return false;
   }
+  if (!isSymbolInSection(sec, sec_index, value, size)) {
+    LogElfError("failed: symbol %u data is outside section %u", index, sec_index);
+    return false;
+  }
 
   symInfo->sec_addr = sec->get_data();
   symInfo->sec_size = sec->get_size();
-  symInfo->address = symInfo->sec_addr + (size_t)value;
+  symInfo->address =
+      symInfo->sec_addr != nullptr ? symInfo->sec_addr + static_cast<size_t>(value) : nullptr;
   symInfo->size = (uint64_t)size;
 
   symInfo->sec_name = sec->get_name();
   symInfo->sym_name = sym_name;
 #if 0
   // For debug purpose
-  LogElfDebug("succeeded at index=%u: sec_addr=%p, sec_size=%lu, address=%p,"
-              " size=%lu, sec_name=%s, sym_name=%s",
+  LogElfDebug("succeeded at index=%u: sec_addr=%p, sec_size=%" PRIu64 ", address=%p,"
+              " size=%" PRIu64 ", sec_name=%s, sym_name=%s",
               index, symInfo->sec_addr, symInfo->sec_size, symInfo->address, symInfo->size,
               symInfo->sec_name.c_str(), symInfo->sym_name.c_str());
 #endif
@@ -503,11 +532,11 @@ bool Elf::getShstrtabNdx(Elf64_Word& outNdx, const char* name) {
   auto idx = section->get_name_string_offset();
 
   if (idx <= 0) {
-    LogElfError("failed: idx=%d", idx);
+    LogElfError("failed: idx=%u", idx);
     return false;
   }
   outNdx = idx;
-  LogElfDebug("Succeeded: name=%s, idx=%d", name, idx);
+  LogElfDebug("Succeeded: name=%s, idx=%u", name, idx);
   return true;
 }
 
@@ -612,11 +641,10 @@ bool Elf::addSymbol(ElfSections id, const char* symbolName, const void* buffer, 
   auto ret = symbol_writter.add_symbol(strtab_offset, sec_offset, size, 0,
                                        (isFunction) ? STT_FUNC : STT_OBJECT, 0, sec_ndx);
 
-  LogElfDebug(
-      "%s: sectionName=%s symbolName=%s strtab_offset=%lu, sec_offset=%lu, "
-      "size=%zu, sec_ndx=%zu, ret=%d",
-      ret >= 1 ? "succeeded" : "failed", sectionName, symbolName, strtab_offset, sec_offset, size,
-      sec_ndx, ret);
+  LogElfDebug("%s: sectionName=%s symbolName=%s strtab_offset=%" PRIu64 ", sec_offset=%" PRIu64
+              ", size=%zu, sec_ndx=%zu, ret=%u",
+              ret >= 1 ? "succeeded" : "failed", sectionName, symbolName, strtab_offset, sec_offset,
+              size, sec_ndx, ret);
   return ret >= 1;
 }
 
@@ -648,12 +676,19 @@ bool Elf::getSymbol(ElfSections id, const char* symbolName, char** buffer, size_
                                       sec_ndx, other);
 
   if (ret) {
-    *buffer = const_cast<char*>(_elfio.sections[sec_ndx]->get_data() + value);
+    const section* sec = _elfio.sections[sec_ndx];
+    if (!isSymbolInSection(sec, sec_ndx, value, size0)) {
+      LogElfError("failed: symbol %s data is outside section %u", symbolName, sec_ndx);
+      return false;
+    }
+    if (sec->get_data() != nullptr) {
+      *buffer = const_cast<char*>(sec->get_data() + value);
+    }
     *size = static_cast<size_t>(size0);
   }
 #if 0
   // For debug purpose
-  LogElfDebug("%s: sectionName=%s symbolName=%s value=%lu, buffer=%p, size=%zu, sec_ndx=%u",
+  LogElfDebug("%s: sectionName=%s symbolName=%s value=%" PRIu64 ", buffer=%p, size=%zu, sec_ndx=%u",
               ret ? "succeeded" : "failed",
               ElfSecDesc[id].name, symbolName, value, *buffer, *size, sec_ndx);
 #endif
