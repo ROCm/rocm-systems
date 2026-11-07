@@ -150,7 +150,7 @@ RJ_NOINLINE bool for_each_reordered_lane_run(const uint64_t *addrs, uint64_t lan
                       ((lanes[i].address + stride - 1) & transaction_mask);
   }
   if (overlap)
-    return for_each_lane_ordered_run(addrs, lane_mask, wf_size, stride, fn);
+    return detail::for_each_lane_ordered_run(addrs, lane_mask, wf_size, stride, fn);
 
   if (split_operands) {
     // A lane may contribute to two transactions. Partition contiguous bytes
@@ -249,28 +249,54 @@ RJ_NOINLINE bool for_each_reordered_lane_run(const uint64_t *addrs, uint64_t lan
 
 } // namespace detail
 
+/// @brief How a lane-run scan ended.
+enum class ScanEnd {
+  Completed, ///< Every run was visited.
+  Stopped,   ///< The callback returned false.
+};
+
+namespace detail {
+inline ScanEnd scan_end(bool completed) {
+  return completed ? ScanEnd::Completed : ScanEnd::Stopped;
+}
+} // namespace detail
+
+/// @brief Visit maximal runs of adjacent active lanes whose addresses are contiguous.
+/// @details Runs follow lane order and never sort, so lanes contiguous only out of lane
+/// order remain separate runs. Use this where a per-lane access costs less than sorting
+/// the operands. The callback returns false to stop.
+/// @returns ScanEnd::Stopped when the callback stopped the scan.
+template <typename F>
+ScanEnd for_each_lane_ordered_run(const uint64_t *addrs, uint64_t lane_mask, uint32_t wf_size,
+                                  uint32_t stride, F &&fn) {
+  // Only a request without lanes, such as GWS sends to LDS, may have no stride.
+  assert(wf_size <= 64 && (stride != 0 || lane_mask == 0));
+  return detail::scan_end(detail::for_each_lane_ordered_run(addrs, lane_mask, wf_size, stride, fn));
+}
+
 /// @brief Visit contiguous lane runs independently of the lanes' address order.
 /// @details Lane-ordered runs may span transaction boundaries; their caller must
 /// split them using the policy. Reordered multi-lane runs fit one transaction.
 /// Overlapping or wrapping operands retain the original lane sequence;
 /// they do not receive the contiguous, non-overlapping snapshot guarantee.
 /// The callback returns false to stop after an unavailable or failed transfer.
+/// @returns ScanEnd::Stopped when the callback stopped the scan.
 template <typename F>
-bool for_each_coalesced_lane_run(const uint64_t *addrs, uint64_t lane_mask, uint32_t wf_size,
-                                 uint32_t stride, MemoryTransactionPolicy transactions, F &&fn) {
+ScanEnd for_each_coalesced_lane_run(const uint64_t *addrs, uint64_t lane_mask, uint32_t wf_size,
+                                    uint32_t stride, MemoryTransactionPolicy transactions, F &&fn) {
   assert(wf_size <= 64 && stride != 0);
   if (!lane_mask)
-    return true;
+    return ScanEnd::Completed;
   if constexpr (detail::kVectorizedStrideCheck) {
     // Keep the SIMD precheck on full Wave32 accesses. Other masks and Wave64
     // retain the existing scan; extending the policy needs separate qualification.
     if (wf_size == 32 && lane_mask == UINT32_MAX) {
       if (detail::is_strided_lane_addresses(addrs, 32, stride)) {
-        return fn(CoalescedLaneRun{.address = addrs[0],
-                                   .lane_mask = lane_mask,
-                                   .first_lane = 0,
-                                   .size = 32 * stride,
-                                   .lane_ordered = true});
+        return detail::scan_end(fn(CoalescedLaneRun{.address = addrs[0],
+                                                    .lane_mask = lane_mask,
+                                                    .first_lane = 0,
+                                                    .size = 32 * stride,
+                                                    .lane_ordered = true}));
       }
     }
   }
@@ -284,11 +310,11 @@ bool for_each_coalesced_lane_run(const uint64_t *addrs, uint64_t lane_mask, uint
     remaining &= ~(uint64_t{1} << last);
   }
   if (!remaining)
-    return fn(CoalescedLaneRun{.address = addrs[first],
-                               .lane_mask = lane_mask,
-                               .first_lane = first,
-                               .size = (last - first + 1) * stride,
-                               .lane_ordered = true});
+    return detail::scan_end(fn(CoalescedLaneRun{.address = addrs[first],
+                                                .lane_mask = lane_mask,
+                                                .first_lane = first,
+                                                .size = (last - first + 1) * stride,
+                                                .lane_ordered = true}));
   // Ordinary strided instructions also stay inline: validating monotonic,
   // non-overlapping operands needs no lane/run arrays or gather buffers. A
   // contiguous address across an inactive lane still needs the reordered path.
@@ -300,13 +326,13 @@ bool for_each_coalesced_lane_run(const uint64_t *addrs, uint64_t lane_mask, uint
         addrs[lane] < addrs[previous] + stride ||
         (lane != previous + 1 && addrs[lane] == addrs[previous] + stride)) {
       if (!detail::proves_lane_overlap(addrs, lane_mask, previous, lane, stride))
-        return detail::for_each_reordered_lane_run(addrs, lane_mask, wf_size, stride, transactions,
-                                                   fn);
+        return detail::scan_end(detail::for_each_reordered_lane_run(addrs, lane_mask, wf_size,
+                                                                    stride, transactions, fn));
       break;
     }
     previous = lane;
   }
-  return detail::for_each_lane_ordered_run(addrs, lane_mask, wf_size, stride, fn);
+  return detail::scan_end(detail::for_each_lane_ordered_run(addrs, lane_mask, wf_size, stride, fn));
 }
 
 } // namespace rocjitsu::amdgpu
