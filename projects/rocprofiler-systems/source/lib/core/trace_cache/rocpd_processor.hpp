@@ -4,10 +4,10 @@
 #pragma once
 #include "agent_manager.hpp"
 #include "core/node_info.hpp"
+#include "core/trace_cache/counter_samples.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_processor_interface.hpp"
 
-#include "library/pmc/collectors/hipfile/sample.hpp"
 #include "trace_cache/sample_type.hpp"
 
 #include <profiler-hub/storage.hpp>
@@ -15,10 +15,13 @@
 #include <profiler-hub/writer_types.hpp>
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <sys/types.h>
+#include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 namespace rocprofsys::trace_cache
 {
@@ -41,12 +44,10 @@ public:
     void handle(const in_time_sample& sample) override;
     void handle(const pmc_event_with_sample& sample) override;
     void handle(const backtrace_region_sample& sample) override;
-    void handle(const gpu_pmc_sample& sample) override;
-    void handle(const ainic_pmc_sample& sample) override;
-    void handle(const cpu_pmc_sample& sample) override;
-    void handle(const gpu_perf_counter_sample& sample) override;
-    void handle(const hipfile_pmc_sample& sample) override;
     void handle(const kfd_sample& sample) override;
+    void handle(const counter_column& column) override;
+    void handle(const counter_batch& batch) override;
+    void handle(const gap_marker& gap) override;
 
 private:
     void post_process_metadata();
@@ -67,6 +68,8 @@ private:
         const profiler_hub::writer_types::pmc_event_data_t&     event_data,
         const profiler_hub::writer_types::pmc_info_unique_id_t& unique_id,
         std::string_view                                        context);
+
+    std::unordered_map<std::uint32_t, std::vector<counter_column>> m_counter_columns;
 
     std::shared_ptr<metadata_registry>      m_metadata;
     std::shared_ptr<agent_manager>          m_agent_manager;

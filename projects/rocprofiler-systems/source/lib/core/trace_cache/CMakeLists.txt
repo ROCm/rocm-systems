@@ -24,6 +24,8 @@ set(trace_cache_headers
     ${CMAKE_CURRENT_LIST_DIR}/cacheable.hpp
     ${CMAKE_CURRENT_LIST_DIR}/type_registry.hpp
     ${CMAKE_CURRENT_LIST_DIR}/cache_type_traits.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/collection_sink.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/counter_samples.hpp
     ${CMAKE_CURRENT_LIST_DIR}/metadata_registry.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rocpd_helpers.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rocpd_processor.hpp

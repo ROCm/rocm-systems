@@ -23,14 +23,12 @@ enum class type_identifier_t : std::uint32_t
     kernel_dispatch         = 0x0003,
     memory_copy             = 0x0004,
     memory_alloc            = 0x0005,
-    gpu_pmc_sample          = 0x0006,
-    cpu_pmc_sample          = 0x0007,
     backtrace_region_sample = 0x0008,
     scratch_memory          = 0x0009,
-    ainic_pmc_sample        = 0x000A,
     kfd_sample              = 0x000B,
-    gpu_perf_counter_sample = 0x000C,
-    hipfile_pmc_sample      = 0x000D,
+    counter_batch           = 0x000E,
+    counter_column          = 0x000F,
+    gap_marker              = 0x0010,
     fragmented_space        = 0xFFFF
 };
 
