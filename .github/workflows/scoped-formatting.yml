@@ -1,0 +1,110 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+name: Scoped Formatting
+# Identify the exact PR comparison, including retargets with an unchanged head.
+run-name: >-
+  ${{ github.event_name == 'pull_request' && format('PR #{0}: {1}@{2}', github.event.number, github.base_ref, github.event.pull_request.base.sha) || format('Push {0}', github.sha) }}
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+  push:
+    branches: [develop]
+    paths:
+      - 'shared/cuid/**'
+      - 'projects/rocprofiler-compute/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  # Metadata edits get an isolated group and cannot cancel validation.
+  group: ${{ github.workflow }}-${{ github.event.action == 'edited' && !github.event.changes.base && format('metadata-{0}', github.run_id) || github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  pre-commit:
+    # Skipped metadata jobs have a separate name, preserving required results.
+    if: github.event.action != 'edited' || github.event.changes.base
+    name: ${{ github.event.action == 'edited' && !github.event.changes.base && 'metadata-only / pre-commit' || matrix.check-name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: ${{ matrix.timeout-minutes || 15 }}
+    strategy:
+      # Every named check must report its own result, even if another fails.
+      fail-fast: false
+      matrix:
+        include:
+          - scope: runtimes
+            check-name: pre-commit / runtimes
+            timeout-minutes: 10
+            include: '^(runtimes/|\.pre-commit-config\.yaml\Z)'
+            sparse-checkout: runtimes
+
+          - scope: rocjitsu
+            # The base-branch PR bot still requires this name during rollout.
+            check-name: pre-commit
+            include: '^(emulation/(mirage|rocjitsu)/|\.github/scripts/(tests/test_)?(collect_rocjitsu_afl_results\.py|rocjitsu_fuzz_report\.js|run_rocjitsu_afl_campaign\.py)\Z|\.github/workflows/rocjitsu-[^/]*\.yml\Z|\.pre-commit-config\.yaml\Z)'
+            sparse-checkout: |
+              emulation/mirage
+              emulation/rocjitsu
+              .github
+
+          - scope: cuid
+            check-name: pre-commit / cuid
+            include: '^shared/cuid/'
+            exclude: '(\.(md|rst|rtf)\Z|(^|/)\.readthedocs\.yaml\Z|^shared/cuid/docs/)'
+            config: shared/cuid/.pre-commit-config.yaml
+            sparse-checkout: shared/cuid
+
+          - scope: rocprofiler-compute
+            check-name: pre-commit / rocprofiler-compute
+            include: '^projects/rocprofiler-compute/'
+            exclude: '(\.(md|rst|rtf)\Z|(^|/)\.(readthedocs|markdownlint-ci2|spellcheck\.local)\.yaml\Z|(^|/)\.wordlist\.txt\Z|^docs/|^projects/[^/]+/docs/)'
+            config: projects/rocprofiler-compute/.pre-commit-config.yaml
+            sparse-checkout: projects/rocprofiler-compute
+            submodules: recursive
+    steps:
+      # Every scope inspects the complete diff, on every target branch.
+      - name: Checkout scope inspector
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          filter: blob:none
+          sparse-checkout: .github/actions/changed-files
+
+      - name: Inspect the complete change scope
+        id: scope
+        uses: ./.github/actions/changed-files
+        with:
+          include: ${{ matrix.include }}
+          # Documentation exclusions apply only to presubmit formatting.
+          exclude: ${{ github.event_name == 'pull_request' && matrix.exclude || '' }}
+          always-include: '^\.github/(actions/changed-files/|workflows/scoped-formatting\.yml\Z)'
+
+      - name: Checkout formatting inputs
+        if: steps.scope.outputs.affected == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
+          sparse-checkout: ${{ matrix.sparse-checkout }}
+          submodules: ${{ matrix.submodules || 'false' }}
+
+      - name: Set up Python
+        if: steps.scope.outputs.affected == 'true'
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Run pre-commit on the complete change scope
+        if: steps.scope.outputs.affected == 'true'
+        uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
+        with:
+          extra_args: >-
+            --show-diff-on-failure
+            --config ${{ matrix.config || '.pre-commit-config.yaml' }}
+            --from-ref ${{ steps.scope.outputs.base }}
+            --to-ref ${{ steps.scope.outputs.head }}

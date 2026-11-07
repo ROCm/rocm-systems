@@ -1,0 +1,13 @@
+{
+  "name": "rocm-systems-workflow-tests",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "test": "node --test workflow_events_test.mjs"
+  },
+  "devDependencies": {
+    "@actions/expressions": "0.3.61",
+    "yaml": "2.9.1"
+  }
+}
