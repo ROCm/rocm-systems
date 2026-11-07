@@ -11,6 +11,9 @@
 namespace rocjitsu::arith {
 
 enum class Minmax3 {
+  Min3Cdna,
+  Max3Cdna,
+  MedianCdna,
   Min3Legacy,
   Max3Legacy,
   MinmaxLegacy,
@@ -29,20 +32,31 @@ enum class Minmax3 {
 
 // Decode each ternary instruction once for scalar and SIMD implementations.
 template <Minmax3 Op> struct MinmaxPolicy {
-  static constexpr bool first_maximum = Op == Minmax3::Max3Legacy || Op == Minmax3::MaxminLegacy ||
-                                        Op == Minmax3::Max3Num || Op == Minmax3::MaxminNum ||
-                                        Op == Minmax3::Maximum3 || Op == Minmax3::MaximumMinimum;
-  static constexpr bool second_maximum = Op == Minmax3::Max3Legacy || Op == Minmax3::MinmaxLegacy ||
-                                         Op == Minmax3::Max3Num || Op == Minmax3::MinmaxNum ||
-                                         Op == Minmax3::Maximum3 || Op == Minmax3::MinimumMaximum;
+  static constexpr bool first_maximum = Op == Minmax3::Max3Cdna || Op == Minmax3::Max3Legacy ||
+                                        Op == Minmax3::MaxminLegacy || Op == Minmax3::Max3Num ||
+                                        Op == Minmax3::MaxminNum || Op == Minmax3::Maximum3 ||
+                                        Op == Minmax3::MaximumMinimum;
+  static constexpr bool second_maximum = Op == Minmax3::Max3Cdna || Op == Minmax3::Max3Legacy ||
+                                         Op == Minmax3::MinmaxLegacy || Op == Minmax3::Max3Num ||
+                                         Op == Minmax3::MinmaxNum || Op == Minmax3::Maximum3 ||
+                                         Op == Minmax3::MinimumMaximum;
   static constexpr bool propagate_nan = Op == Minmax3::Minimum3 || Op == Minmax3::Maximum3 ||
                                         Op == Minmax3::MinimumMaximum ||
                                         Op == Minmax3::MaximumMinimum;
-  static constexpr bool median = Op == Minmax3::MedianLegacy || Op == Minmax3::MedianNum;
-  static constexpr bool rdna3 = Op == Minmax3::Min3Legacy || Op == Minmax3::Max3Legacy ||
-                                Op == Minmax3::MinmaxLegacy || Op == Minmax3::MaxminLegacy ||
-                                Op == Minmax3::MedianLegacy;
+  static constexpr bool median =
+      Op == Minmax3::MedianCdna || Op == Minmax3::MedianLegacy || Op == Minmax3::MedianNum;
+  static constexpr bool cdna =
+      Op == Minmax3::Min3Cdna || Op == Minmax3::Max3Cdna || Op == Minmax3::MedianCdna;
+  static constexpr bool legacy = cdna || Op == Minmax3::Min3Legacy || Op == Minmax3::Max3Legacy ||
+                                 Op == Minmax3::MinmaxLegacy || Op == Minmax3::MaxminLegacy ||
+                                 Op == Minmax3::MedianLegacy;
 };
+
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+// Evaluate a validated FP16 or FP32 ternary selection, preserving inactive lanes and aliases.
+void minmax3_x86_64_v4(Minmax3 op, bool half, uint64_t flags, uint32_t exec_mask, uint32_t mode,
+                       uint32_t *d, const uint32_t *a, const uint32_t *b, const uint32_t *c);
+#endif
 
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
 // Select FP32 minima, maxima, or medians. Preserve destination lanes outside exec_mask.

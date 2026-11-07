@@ -24,7 +24,8 @@ void half_binary_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instruct
                            uint32_t *d, const uint32_t *a, const uint32_t *b, bool compatibility,
                            bool preserve_input_snan) {
   constexpr bool arithmetic = rocjitsu::arith::is_arithmetic(Op);
-  constexpr bool legacy = Op == Binary::MinLegacy || Op == Binary::MaxLegacy;
+  constexpr bool legacy = Op == Binary::MinLegacy || Op == Binary::MaxLegacy ||
+                          Op == Binary::MinLegacyCdna || Op == Binary::MaxLegacyCdna;
   constexpr bool preserve_nan_inputs = legacy || Op == Binary::Minimum || Op == Binary::Maximum;
   uint32_t instruction_flag_cases[] = {
       Packed ? packed_half_instruction_flags(instruction_flags, false) : instruction_flags,
@@ -68,8 +69,10 @@ void half_binary_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instruct
       if constexpr (Op == Binary::Mul) {
         value = _mm256_mul_ps(x, y);
       }
-      if constexpr (Op == Binary::MinLegacy || Op == Binary::MaxLegacy) {
-        value = minmax_rdna3<Op == Binary::MaxLegacy>(x, y, flags & RJ_ARITH_FP_IEEE_MODE);
+      if constexpr (legacy) {
+        constexpr bool maximum = Op == Binary::MaxLegacy || Op == Binary::MaxLegacyCdna;
+        constexpr bool first_nan = Op != Binary::MinLegacyCdna && Op != Binary::MaxLegacyCdna;
+        value = minmax_legacy<maximum, first_nan>(x, y, flags & RJ_ARITH_FP_IEEE_MODE);
       }
       if constexpr (Op == Binary::MinNum) {
         value = minmax<false, false>(x, y);
@@ -223,5 +226,18 @@ template void half_binary_x86_64_v3<Binary::MinLegacy, true>(uint64_t, uint32_t,
 template void half_binary_x86_64_v3<Binary::MaxLegacy, true>(uint64_t, uint32_t, uint32_t,
                                                              uint32_t *, const uint32_t *,
                                                              const uint32_t *, bool, bool);
+
+template void half_binary_x86_64_v3<Binary::MinLegacyCdna, false>(uint64_t, uint32_t, uint32_t,
+                                                                  uint32_t *, const uint32_t *,
+                                                                  const uint32_t *, bool, bool);
+template void half_binary_x86_64_v3<Binary::MaxLegacyCdna, false>(uint64_t, uint32_t, uint32_t,
+                                                                  uint32_t *, const uint32_t *,
+                                                                  const uint32_t *, bool, bool);
+template void half_binary_x86_64_v3<Binary::MinLegacyCdna, true>(uint64_t, uint32_t, uint32_t,
+                                                                 uint32_t *, const uint32_t *,
+                                                                 const uint32_t *, bool, bool);
+template void half_binary_x86_64_v3<Binary::MaxLegacyCdna, true>(uint64_t, uint32_t, uint32_t,
+                                                                 uint32_t *, const uint32_t *,
+                                                                 const uint32_t *, bool, bool);
 
 } // namespace rocjitsu::arith

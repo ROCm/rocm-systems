@@ -681,7 +681,7 @@ def test_ternary_selection_routes_all_encodings_and_modifiers(arch, count):
             assert 'RJ_ARITH_ALU_HIGH' not in body
         assert (
             gen_float_ternary_selection(
-                context('cdna4', name, ['d'], ['a', 'b', 'c'], is_vop3=True)
+                context('cdna2', name, ['d'], ['a', 'b', 'c'], is_vop3=True)
             )
             is None
         )
@@ -750,7 +750,7 @@ def test_fp64_selection_pair_adapter(arch):
             assert 'RJ_ARITH_ALU_' + modifier in body
         assert (
             gen_float_binary64(
-                context('cdna4', name, ['dst'], ['a', 'b'], is_vop3=True)
+                context('cdna2', name, ['dst'], ['a', 'b'], is_vop3=True)
             )
             is None
         )
@@ -1740,3 +1740,160 @@ def test_cdna_integer_conversion_bindings(arch):
             assert f'rj_arith_{name.lower()}_w32,' in body
             assert 'e32_word_operand(a)' in body
             assert 'RJ_ARITH_ALU_HIGH_A' in body
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
+def test_cdna_binary_selection_policy_mapping(arch):
+    from amdisa.codegen.execute.rj_arith_float import (
+        SELECTION_F32,
+        SELECTION_F64,
+        gen_float_binary64,
+    )
+
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+    )
+    generated = '\n'.join(p.read_text() for p in root.glob('vop*_exec*.cpp'))
+    for names, emitter in [
+        (SELECTION_F32[arch], gen_float_binary32),
+        (SELECTION_F64[arch], gen_float_binary64),
+    ]:
+        for name in names:
+            body = emitter(context(arch, name, ['d'], ['a', 'b'], is_vop3=True))
+            suffix = '_gfx942' if arch != 'cdna5' else ''
+            for wave in (32, 64):
+                api = 'rj_arith_' + name.lower() + '_w' + str(wave) + suffix
+                assert api in body
+                assert api in generated
+            assert 'RJ_ARITH_ALU_OMOD_2' in body
+            assert 'RJ_ARITH_ALU_CLAMP' in body
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
+def test_cdna_ternary_selection_mapping(arch):
+    from amdisa.codegen.execute.rj_arith_float import (
+        CDNA_TERNARY_SELECTION,
+        TERNARY_SELECTION_RDNA4,
+        gen_float_ternary_selection,
+    )
+
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+    )
+    generated = '\n'.join(p.read_text() for p in root.glob('vop3_exec*.cpp'))
+    for name in (
+        TERNARY_SELECTION_RDNA4 if arch == 'cdna5' else CDNA_TERNARY_SELECTION
+    ):
+        body = gen_float_ternary_selection(
+            context(arch, name, ['d'], ['a', 'b', 'c'], is_vop3=True)
+        )
+        for wave in (32, 64):
+            api = (
+                'rj_arith_'
+                + name.lower()
+                + '_w'
+                + str(wave)
+                + ('_gfx942' if arch != 'cdna5' else '')
+            )
+            assert api in body
+            assert api in generated
+        assert 'RJ_ARITH_ALU_NEG_C' in body
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4'])
+def test_cdna_half_selection_vop2_clears_upper_half(arch):
+    from amdisa.codegen.execute.rj_arith_float import gen_float_binary16
+
+    for name in ('V_MIN_F16', 'V_MAX_F16'):
+        body = gen_float_binary16(context(arch, name, ['d'], ['a', 'b']))
+        assert 'd, a, b, true, true);' in body
+
+
+@pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
+def test_cdna_half_selection_policy_mapping(arch):
+    from amdisa.codegen.execute.rj_arith_float import (
+        gen_float_binary16,
+        gen_packed_binary16,
+    )
+
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+    )
+    generated = '\n'.join(p.read_text() for p in root.glob('vop*_exec*.cpp'))
+    for packed, emitter in [(False, gen_float_binary16), (True, gen_packed_binary16)]:
+        for op in (
+            ('MIN_NUM', 'MAX_NUM', 'MINIMUM', 'MAXIMUM')
+            if arch == 'cdna5'
+            else ('MIN', 'MAX')
+        ):
+            name = 'V_' + ('PK_' if packed else '') + op + '_F16'
+            body = emitter(
+                context(
+                    arch,
+                    name,
+                    ['d'],
+                    ['a', 'b'],
+                    is_vop3=not packed,
+                    enc_name='ENC_VOP3P' if packed else 'ENC_VOP3',
+                    opsel_exprs=('low', 'high'),
+                )
+            )
+            suffix = '_gfx942' if arch != 'cdna5' else ''
+            for wave in (32, 64):
+                api = 'rj_arith_' + name.lower() + '_w' + str(wave) + suffix
+                assert api in body
+                assert api in generated
+            assert 'CLAMP' in body
+
+
+@pytest.mark.parametrize('arch', ['cdna4', 'cdna5'])
+@pytest.mark.parametrize('op', ['MINIMUM3', 'MAXIMUM3', 'MIN3_NUM', 'MAX3_NUM'])
+def test_cdna_packed_ternary_selection(arch, op):
+    from amdisa.codegen.execute.rj_arith_float import gen_packed_fma16
+
+    name = f'V_PK_{op}_F16'
+    body = gen_packed_fma16(
+        context(
+            arch,
+            name,
+            ['d'],
+            ['a', 'b', 'c'],
+            enc_name='ENC_VOP3P',
+            opsel_exprs=('low', 'high'),
+            op_sel_hi_2_expr='high_c',
+        )
+    )
+    if arch == 'cdna4' and '_NUM' in op:
+        assert body is None
+        return
+    for wave in (32, 64):
+        assert f'rj_arith_{name.lower()}_w{wave}' in body
+    for operand in 'ABC':
+        assert f'RJ_ARITH_PK_NEG_HI_{operand}' in body
+        assert f'RJ_ARITH_PK_LO_{operand}_HIGH' in body
+    assert 'high_c ? 0u : RJ_ARITH_PK_HI_C_LOW' in body
+    assert 'narrow_sources, replicate_sources' in body
+
+
+@pytest.mark.parametrize('name', ['V_MINIMUM3_F32', 'V_MAXIMUM3_F32'])
+def test_cdna4_propagating_selection(name):
+    from amdisa.codegen.execute.rj_arith_float import gen_float_ternary_selection
+
+    body = gen_float_ternary_selection(
+        context('cdna4', name, ['d'], ['a', 'b', 'c'], is_vop3=True)
+    )
+    for wave in (32, 64):
+        assert f'rj_arith_{name.lower()}_w{wave}_gfx950' in body
+    assert 'a, b, c, true);' in body
+    assert (
+        gen_float_ternary_selection(
+            context('cdna3', name, ['d'], ['a', 'b', 'c'], is_vop3=True)
+        )
+        is None
+    )
