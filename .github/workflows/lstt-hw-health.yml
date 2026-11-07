@@ -1,0 +1,153 @@
+# Reports the BIOS, BMC and GPU state of each LSTT lab machine and compares it
+# with a checked-in baseline, so an undocumented firmware or driver change on a
+# CI host shows up as a red job naming the host and the layer.
+#
+# This repository is public. System BIOS and BMC firmware are public releases,
+# but the amdgpu driver on the lab hosts is an internal build, so nothing here
+# may print a version unless it is listed in .github/lstt/public-releases.txt.
+# Everything else is reported as "withheld", and failures say that a value
+# differs without saying what it is.
+#
+# Baselines live in .github/lstt/baselines/<host>.env and may hold only public
+# release versions, so EXPECT_AMDGPU stays empty. An empty EXPECT_* value is
+# reported but not enforced, which is how a host is onboarded.
+name: LSTT hardware health
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/lstt-hw-health.yml'
+      - '.github/lstt/**'
+  workflow_dispatch:
+  schedule:
+    # Nightly drift check. Schedules only run from the default branch, so this
+    # starts firing after merge, not on the PR.
+    - cron: '17 6 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  health:
+    name: ${{ matrix.host }}
+    # Self-hosted lab hardware: never auto-run untrusted fork-PR code on it.
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - host: lsttstrix
+            label: lstt-gfx1151
+            gfx: gfx1151
+            bmc: false
+    runs-on:
+      - self-hosted
+      - ${{ matrix.label }}
+    timeout-minutes: 20
+    env:
+      BASELINE: .github/lstt/baselines/${{ matrix.host }}.env
+
+    steps:
+      # Every workflow on a runner shares one $GITHUB_WORKSPACE, and the other
+      # CI jobs here run their containers as root, so the leftovers they
+      # abandon are root-owned. These steps run bare as the `runner` user,
+      # which cannot delete them, and checkout's clean step would die with
+      # EACCES. Borrow root from a container to clear the directory first.
+      - name: Clean workspace
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE":/workspace -w /workspace \
+            alpine:3 find . -mindepth 1 -delete
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/lstt
+          sparse-checkout-cone-mode: false
+
+      # Host-level, so no container: /sys/class/dmi is what the firmware
+      # exposes to the booted kernel.
+      - name: BIOS
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$BASELINE"
+          . .github/lstt/lib.sh
+          # A baseline that omits a key must behave like an empty one, not
+          # trip `set -u`.
+          : "${EXPECT_BIOS:=}"
+          got="$(cat /sys/class/dmi/id/bios_version)"
+          echo "### ${{ matrix.host }}" >> "$GITHUB_STEP_SUMMARY"
+          if [ -z "${EXPECT_BIOS}" ]; then
+            echo "- BIOS: $(show bios "$got") (no baseline recorded)" >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$got" = "${EXPECT_BIOS}" ]; then
+            echo "- BIOS: $(show bios "$got") (matches baseline)" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- BIOS: differs from the baseline" >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::BIOS differs from the baseline in $BASELINE. Read the version on the host; update the baseline if the change was intended."
+            exit 1
+          fi
+
+      # In-band IPMI through the host's own BMC device, so no network
+      # credentials are needed. Requires ipmitool and /dev/ipmi0 on the host.
+      - name: BMC
+        if: ${{ matrix.bmc }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$BASELINE"
+          . .github/lstt/lib.sh
+          : "${EXPECT_BMC:=}"
+          got="$(sudo ipmitool mc info | awk -F': *' '/Firmware Revision/ {print $2; exit}')"
+          if [ -z "${EXPECT_BMC}" ]; then
+            echo "- BMC: $(show bmc "$got") (no baseline recorded)" >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$got" = "${EXPECT_BMC}" ]; then
+            echo "- BMC: $(show bmc "$got") (matches baseline)" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- BMC: differs from the baseline" >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::BMC firmware differs from the baseline in $BASELINE."
+            exit 1
+          fi
+
+      # The driver version the host booted, which is what the GPU step below
+      # depends on. Checked outside the container for the same reason as BIOS.
+      - name: amdgpu driver
+        shell: bash
+        run: |
+          set -euo pipefail
+          . "$BASELINE"
+          . .github/lstt/lib.sh
+          : "${EXPECT_AMDGPU:=}"
+          got="$(cat /sys/module/amdgpu/version 2>/dev/null || echo not-loaded)"
+          if [ "$got" = not-loaded ]; then
+            echo "- amdgpu: not loaded" >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::The amdgpu module is not loaded, so no GPU test can run on this host."
+            exit 1
+          fi
+          if [ -n "${EXPECT_AMDGPU}" ] && [ "$got" != "${EXPECT_AMDGPU}" ]; then
+            echo "- amdgpu: differs from the baseline" >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::amdgpu differs from the baseline in $BASELINE."
+            exit 1
+          fi
+          echo "- amdgpu: $(show amdgpu "$got")" >> "$GITHUB_STEP_SUMMARY"
+
+      # The same container shape the real CI jobs use, so this proves what they
+      # need: the devices are passed through and ROCm sees the right ASIC.
+      # Nothing from rocminfo or docker is printed: its output includes the
+      # kernel driver version, and a log of a failure would too.
+      - name: GPU
+        shell: bash
+        run: |
+          set -euo pipefail
+          if docker run --rm \
+              --device=/dev/kfd --device=/dev/dri --group-add video \
+              rocm/dev-ubuntu-22.04:7.2 \
+              bash -c 'rocminfo | grep -q ${{ matrix.gfx }}' > /dev/null 2>&1; then
+            echo "- GPU: ${{ matrix.gfx }} visible" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- GPU: ${{ matrix.gfx }} not visible" >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::${{ matrix.gfx }} was not visible inside the container. Run the same docker command on the host for details."
+            exit 1
+          fi

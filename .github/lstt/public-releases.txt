@@ -1,0 +1,13 @@
+# Versions confirmed to be public releases, one "<component>: <version>" per line.
+#
+# lstt-hw-health.yml prints a host's version only when its exact line is listed
+# here; anything else is reported as "withheld". Workflow logs and summaries on
+# this repo are world-readable and the lab runs internal builds, so an unlisted
+# version must never be printed. Add a line only after confirming the version
+# is a public release.
+#
+# Confirmed public by the lab team: system BIOS and BMC firmware.
+# Not public, never list: the amdgpu driver, ROCm and amd-smi builds on the
+# lab hosts (they carry internal, pre-release versions).
+
+bios: X53 Ver. 01.08.00
