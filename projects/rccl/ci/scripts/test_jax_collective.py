@@ -4,7 +4,7 @@
 This script handles:
   1. Discovering the CI-built librccl.so in the artifact directory
   2. Prepending its directory to LD_LIBRARY_PATH so JAX loads it
-  3. Cloning the matching JAX test sources (sparse checkout)
+  3. Cloning tests/ from the matching ROCm/jax release tag (sparse checkout)
   4. Running pytest on pmap_test.py and shard_map_test.py
 
 Usage from GitHub Actions:
@@ -17,6 +17,7 @@ Usage from GitHub Actions:
 import argparse
 import logging
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -37,6 +38,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
 
 JAX_REPO = "https://github.com/ROCm/jax.git"
+JAX_TAG_PREFIX = "rocm-jax-v"
 
 SMOKE_TEST_FILES = [
     "tests/pmap_test.py",
@@ -133,45 +135,85 @@ def setup_xla_environment() -> None:
         log.info("Set %s=%s", key, value)
 
 
-def clone_jax_test_sources(jax_src: Path) -> None:
-    """Sparse-clone ROCm/jax to get test sources matching the installed version.
+def resolve_jax_test_tag(jax_version: str) -> str:
+    """Return the ROCm/jax release tag whose tests/ match the installed JAX.
 
-    Tries to find a tag matching the installed JAX version (e.g. jax-v0.5.3).
-    Falls back to the default branch HEAD for nightly/dev builds.
+    ROCm/jax tags its releases rocm-jax-v<X.Y.Z> and does not tag every
+    upstream patch release. Use the exact tag when it exists, otherwise the
+    newest earlier patch tag in the same X.Y series. Exit if there is none:
+    tests from an unrelated release do not reliably run against this JAX.
     """
+    match = re.match(r"(\d+)\.(\d+)\.(\d+)", jax_version)
+    if not match:
+        log.error("Cannot parse installed JAX version %r", jax_version)
+        sys.exit(1)
+    installed = tuple(int(x) for x in match.groups())
+
+    result = subprocess.run(
+        ["git", "ls-remote", "--tags", "--refs", JAX_REPO, f"{JAX_TAG_PREFIX}*"],
+        capture_output=True, text=True, check=True,
+    )
+    tag_re = re.compile(rf"refs/tags/({re.escape(JAX_TAG_PREFIX)}(\d+)\.(\d+)\.(\d+))$")
+    candidates = []
+    for line in result.stdout.splitlines():
+        tag_match = tag_re.search(line)
+        if not tag_match:
+            continue
+        version = tuple(int(x) for x in tag_match.groups()[1:])
+        if version[:2] == installed[:2] and version <= installed:
+            candidates.append((version, tag_match.group(1)))
+
+    if not candidates:
+        log.error(
+            "No %s%d.%d.x tag at or below JAX %s in %s; refusing to run "
+            "tests from a mismatched JAX source tree",
+            JAX_TAG_PREFIX, installed[0], installed[1], jax_version, JAX_REPO,
+        )
+        sys.exit(1)
+
+    version, tag = max(candidates)
+    if version == installed:
+        log.info("Using JAX test sources from tag %s", tag)
+    else:
+        log.warning(
+            "No tag for JAX %s; using nearest earlier release tag %s",
+            jax_version, tag,
+        )
+    return tag
+
+
+def clone_jax_test_sources(jax_src: Path) -> None:
+    """Sparse-clone the tests/ directory of ROCm/jax for the installed version.
+
+    Only tests/ is checked out. pytest puts the clone root on sys.path, so a
+    checked-out jax/ package would shadow the installed jax wheel.
+    """
+    if (jax_src / "jax").exists():
+        log.error(
+            "%s contains a jax/ source tree that would shadow the installed "
+            "jax; remove it and rerun", jax_src,
+        )
+        sys.exit(1)
     if jax_src.exists() and (jax_src / "tests" / "pmap_test.py").exists():
         log.info("JAX test sources already present at %s, skipping clone", jax_src)
         return
 
     import jax
-    jax_version = jax.__version__
-    base_version = jax_version.split(".dev")[0].split("+")[0]
-    git_ref = f"jax-v{base_version}"
-    log.info("JAX version: %s, trying tag: %s", jax_version, git_ref)
-
-    result = subprocess.run(
-        ["git", "ls-remote", "--tags", JAX_REPO, git_ref],
-        capture_output=True, text=True,
-    )
-    if not result.stdout.strip():
-        log.info("Tag %s not found, using default branch HEAD", git_ref)
-        git_ref = None
+    git_ref = resolve_jax_test_tag(jax.__version__)
 
     clone_cmd = [
         "git", "clone",
         "--depth=1",
         "--filter=blob:none",
         "--sparse",
+        f"--branch={git_ref}",
         JAX_REPO,
         str(jax_src),
     ]
-    if git_ref:
-        clone_cmd.insert(-1, f"--branch={git_ref}")
-
-    log.info("Cloning ROCm/jax (ref=%s, sparse) into %s", git_ref or "HEAD", jax_src)
+    log.info("Cloning ROCm/jax (ref=%s, sparse) into %s", git_ref, jax_src)
     subprocess.run(clone_cmd, check=True)
     subprocess.run(
-        ["git", "sparse-checkout", "set", "tests/", "build/", "jax/"],
+        ["git", "sparse-checkout", "set", "tests/"],
         cwd=jax_src,
         check=True,
     )
