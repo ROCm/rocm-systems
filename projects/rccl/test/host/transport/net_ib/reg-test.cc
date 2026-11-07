@@ -211,20 +211,22 @@ TEST_F(NetIbRegMicrotest, RegMrInternal_DmaBufSelectsProviderSpecificRegistratio
   std::vector<unsigned char> storage(page * 3);
   auto base = MakeDevBase();
   ibv_mr verbsMr{};
-  ibv_mr mlx5Mr{};
-  ScopedHook verbs(g_ibvRegDmabufMr,
-                   [&verbsMr](ibv_mr** out, ibv_pd*, uint64_t offset, size_t, uint64_t, int fd, int) {
-                     EXPECT_EQ(offset, 7u);
-                     EXPECT_EQ(fd, 11);
-                     *out = &verbsMr;
-                     return ncclSuccess;
-                   });
-  ScopedHook mlx5(g_mlx5dvRegDmabufMr,
-                  [&mlx5Mr](ibv_mr** out, ibv_pd*, uint64_t, size_t, uint64_t, int, int, int mlx5Access) {
-                    EXPECT_EQ(mlx5Access, MLX5DV_REG_DMABUF_ACCESS_DATA_DIRECT);
-                    *out = &mlx5Mr;
-                    return ncclSuccess;
-                  });
+  ibv_mr directMr{};
+  // reg.cc passes data-direct into wrap_reg_dmabuf_mr. The mlx5-then-ibv choice inside
+  // that wrapper is covered by Mlx5dvwrapRegDmabufMicrotest.
+  ScopedHook dmabuf(g_regDmabufMr, [&](ibv_mr** out, ibv_pd*, uint64_t offset, size_t, uint64_t, int fd, int,
+                                       bool dataDirect) {
+    if (dataDirect) {
+      EXPECT_EQ(offset, 8u);
+      EXPECT_EQ(fd, 12);
+      *out = &directMr;
+    } else {
+      EXPECT_EQ(offset, 7u);
+      EXPECT_EQ(fd, 11);
+      *out = &verbsMr;
+    }
+    return ncclSuccess;
+  });
   ibv_mr* first = nullptr;
   ibv_mr* second = nullptr;
 
@@ -235,9 +237,8 @@ TEST_F(NetIbRegMicrotest, RegMrInternal_DmaBufSelectsProviderSpecificRegistratio
             ncclSuccess);
 
   EXPECT_EQ(first, &verbsMr);
-  EXPECT_EQ(second, &mlx5Mr);
-  EXPECT_EQ(verbs.calls, 1);
-  EXPECT_EQ(mlx5.calls, 1);
+  EXPECT_EQ(second, &directMr);
+  EXPECT_EQ(dmabuf.calls, 2);
 }
 
 TEST_F(NetIbRegMicrotest, RegAndDeregMr_MultiDeviceCommUsesEveryDevice) {
