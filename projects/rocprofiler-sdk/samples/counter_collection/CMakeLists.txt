@@ -65,6 +65,8 @@ set_tests_properties(
                120
                LABELS
                "samples"
+               RUN_SERIAL
+               ON
                ENVIRONMENT
                "${counter-collection-buffer-env}"
                FAIL_REGULAR_EXPRESSION
@@ -90,9 +92,16 @@ add_test(NAME counter-collection-buffer-device-serialization
 
 set_tests_properties(
     counter-collection-buffer-device-serialization
-    PROPERTIES TIMEOUT 120 LABELS "samples" ENVIRONMENT
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "samples"
+               RUN_SERIAL
+               ON
+               ENVIRONMENT
                "${counter-collection-buffer-device-serialization-env}"
-               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 set(counter-collection-buffer-finalize-at-exit-env
     ${counter-collection-buffer-device-serialization-env}
@@ -103,9 +112,16 @@ add_test(NAME counter-collection-buffer-finalize-at-exit
 
 set_tests_properties(
     counter-collection-buffer-finalize-at-exit
-    PROPERTIES TIMEOUT 120 LABELS "samples;repro" ENVIRONMENT
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "samples;repro"
+               RUN_SERIAL
+               ON
+               ENVIRONMENT
                "${counter-collection-buffer-finalize-at-exit-env}"
-               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 set(counter-collection-buffer-finalize-at-exit-forced-inline-env
     ${counter-collection-buffer-device-serialization-env}
@@ -116,9 +132,16 @@ add_test(NAME counter-collection-buffer-finalize-at-exit-forced-inline
 
 set_tests_properties(
     counter-collection-buffer-finalize-at-exit-forced-inline
-    PROPERTIES TIMEOUT 120 LABELS "samples;repro" ENVIRONMENT
+    PROPERTIES TIMEOUT
+               120
+               LABELS
+               "samples;repro"
+               RUN_SERIAL
+               ON
+               ENVIRONMENT
                "${counter-collection-buffer-finalize-at-exit-forced-inline-env}"
-               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 add_library(counter-collection-callback-client SHARED)
 target_sources(counter-collection-callback-client PRIVATE callback_client.cpp client.hpp)
@@ -146,6 +169,8 @@ set_tests_properties(
                120
                LABELS
                "samples"
+               RUN_SERIAL
+               ON
                ENVIRONMENT
                "${counter-collection-callback-env}"
                FAIL_REGULAR_EXPRESSION
@@ -230,8 +255,8 @@ set_tests_properties(
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                FIXTURES_SETUP
                "counter-collection-device-profiling-async"
-               RESOURCE_LOCK
-               "rocprofiler_device_counting_pmc"
+               RUN_SERIAL
+               ON
                ATTACHED_FILES_ON_FAIL
                "${counter-collection-device-profiling-output}"
                DISABLED
@@ -280,8 +305,8 @@ set_tests_properties(
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                FIXTURES_SETUP
                "counter-collection-device-profiling-sync"
-               RESOURCE_LOCK
-               "rocprofiler_device_counting_pmc"
+               RUN_SERIAL
+               ON
                ATTACHED_FILES_ON_FAIL
                "${counter-collection-device-profiling-sync-output}"
                DISABLED
