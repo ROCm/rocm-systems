@@ -407,9 +407,7 @@ VOID Gfx12Lib::GetMipOffset(
         {
             const UINT_32 pitch  = UseCustomPitch(pIn)
                                         ? pOut->pitch
-                                        : ((mipIdx == 0) && CanTrimLinearPadding(pIn))
-                                          ? PowTwoAlign(mipExtents.width,  128u / bytesPerPixel)
-                                          : PowTwoAlign(mipExtents.width,  pOut->blockExtent.width);
+                                        : PowTwoAlign(mipExtents.width,  pOut->blockExtent.width);
             const UINT_32 height = UseCustomHeight(pIn)
                                         ? pOut->height
                                         : PowTwoAlign(mipExtents.height, pOut->blockExtent.height);
@@ -430,9 +428,9 @@ VOID Gfx12Lib::GetMipOffset(
                 pOut->pMipInfo[mipIdx].height = height;
                 pOut->pMipInfo[mipIdx].depth  = depth;
 
-                // The slice size of a linear image was calculated above as if the "pitch" is 256 byte aligned.
-                // However, the rendering pitch is aligned to 128 bytes, and that is what needs to be reported
-                // to our clients.
+                // A linear surface that cannot be trimmed is still sized on the 256 byte block above.
+                // The rendering pitch is aligned to 128 bytes, and that is what needs to be reported to
+                // our clients. (For a trimmable one blockExtent already carries this, so it is a no-op.)
                 if (IsLinear(pIn->swizzleMode))
                 {
                     pOut->pMipInfo[mipIdx].pitch = PowTwoAlign(mipExtents.width,  128u / bytesPerPixel);
@@ -514,10 +512,13 @@ ADDR_E_RETURNCODE Gfx12Lib::HwlComputeSurfaceInfo(
      ADDR3_COMPUTE_SURFACE_INFO_OUTPUT*      pOut    ///< [out] output structure
      ) const
 {
+    // A trimmable linear surface is laid out on the 128B pitch block, not the 256B block the
+    // slice size is otherwise padded to - the same distinction the surfSize assert below makes.
     ComputeBlockDimensionForSurf(&pOut->blockExtent,
                                  pIn->bpp,
                                  pIn->numSamples,
-                                 pIn->swizzleMode);
+                                 pIn->swizzleMode,
+                                 CanTrimLinearPadding(pIn));
 
     ADDR_E_RETURNCODE  returnCode = ApplyCustomizedPitchHeight(pIn, pOut);
 
