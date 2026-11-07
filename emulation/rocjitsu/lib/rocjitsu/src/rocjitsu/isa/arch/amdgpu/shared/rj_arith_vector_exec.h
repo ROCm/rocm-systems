@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rj_arith/rj_arith.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -558,6 +559,37 @@ inline void execute_unary32(Wavefront &wave, Unary32Function wave32, Unary64Func
                                     : wave64(flags, write_mask, modifiers, d, &a.data);
       },
       /*allow_direct=*/destination_bytes == 0xF, destination_bytes);
+}
+
+// Pack a staged SDWA source before applying integer destination placement.
+// All source lanes are captured before any potentially aliased destination write.
+template <typename Inst>
+inline void execute_saturating_pack_sdwa(Inst &inst, Wavefront &wave, Unary32Function wave32,
+                                         Unary64Function wave64, const Operand &destination,
+                                         const Operand &source) {
+  if (!wave.exec()) {
+    return;
+  }
+  const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
+  RegisterAccess registers(wave);
+  VectorInput32 a(registers, wave, source, wave.exec());
+  if (wave.instruction_execution_failed()) {
+    return;
+  }
+  uint32_t result[64]{};
+  uint32_t *d = result;
+  uint64_t flags = wave.cu().arithmetic_flags();
+  const int error = wave.wf_size() == 32 ? wave32(flags, uint32_t(exec_mask), 0, &d, &a.data)
+                                         : wave64(flags, exec_mask, 0, &d, &a.data);
+  if (error != RJ_ARITH_SUCCESS) {
+    wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
+    if (exec_mask & (1ULL << lane)) {
+      sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
+    }
+  }
 }
 
 // Convert selected source bytes into two full VGPR results, reading the source
