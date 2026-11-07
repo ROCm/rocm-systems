@@ -6,9 +6,11 @@
 
 // DDA LL128 AllReduce two-shots (cooperative, LDS-staged writer, peer-split) on one GPU; helper kernels play the peers.
 
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <thread>
 #include <vector>
 
 #include "DeviceTestBase.hpp"
@@ -107,8 +109,21 @@ __global__ void ReportStaged(int* out) {
   *out = dda::common::ddaLL128Staged<kDdaLL128WireAsync>() ? 1 : 0;
 }
 
+// Most blocks of one launch resident at once: each block holds its slot for `ticks` of wall clock.
+__global__ void CountResident(int* live, int* most, long long ticks) {
+  if (threadIdx.x == 0) {
+    atomicMax(most, atomicAdd(live, 1) + 1);
+    const long long start = wall_clock64();
+    while (wall_clock64() - start < ticks) {
+    }
+    atomicSub(live, 1);
+  }
+  __syncthreads();
+}
+
 template <typename T, int N>
-void launch(const Case& c, T** scratch, T* recv, const T* send, uint32_t* epoch, uint32_t* abortFlag) {
+void launch(const Case& c, T** scratch, T* recv, const T* send, uint32_t* epoch, uint32_t* abortFlag,
+            hipStream_t stream = 0) {
   const DdaKernelParams params{abortFlag};
   const dim3 grid(c.grid);
   const dim3 block(c.block);
@@ -126,7 +141,7 @@ void launch(const Case& c, T** scratch, T* recv, const T* send, uint32_t* epoch,
       break;
     case Kind::kSplit:
       hipLaunchKernelGGL((dda::common::ddaAllReduceTwoShotLL128Split<T, N>), grid, block,
-                         dda::common::ddaLL128ArSplitSharedBytes(c.block, c.nRanks), 0, scratch, recv, send,
+                         dda::common::ddaLL128ArSplitSharedBytes(c.block, c.nRanks), stream, scratch, recv, send,
                          c.shardBytes, c.self, c.nRanks, epoch, epochLen(c), n, bank, params);
       break;
   }
@@ -568,6 +583,115 @@ TEST_F(DdaAllReduceFabricLL128TwoShot, SplitAbortInTheGatherKeepsMyReducedShard)
       ASSERT_EQ(recv[(size_t)missing * c.shardBytes + i], kUntouched) << "byte " << i;
     }
     expectEpochAdvanced(c);
+  }
+}
+
+// Every rank's split at once, each rank's launch on a stream masked to two CUs so far fewer blocks are resident than
+// the grid has. Every wait is on the same block index on the peers, so the grid drains; waits across block indices
+// would hang until the abort below.
+TEST_F(DdaAllReduceFabricLL128TwoShot, SplitDrainsWhenTheGridIsNotCoResident) {
+  if (!stagedBuilt()) {
+    GTEST_SKIP() << "this device pass has no async LDS stores";
+  }
+  constexpr int kRanks = 4;
+  constexpr int kCusPerRank = 2;
+  const Case c{kRanks, 0, 4, Kind::kSplit, 16, 512, kLargeShardBytes};
+  int cus = 0;
+  int clockKhz = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&cus, hipDeviceAttributeMultiprocessorCount, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&clockKhz, hipDeviceAttributeWallClockRate, 0));
+  if (cus < kRanks * kCusPerRank) {
+    GTEST_SKIP() << "needs " << kRanks * kCusPerRank << " CUs";
+  }
+
+  const auto send = FloatMessages(kRanks, c.shardBytes);
+  std::vector<uint8_t> expected;
+  for (const std::vector<uint8_t>& shard : FloatReduced(send, kRanks, c.shardBytes)) {
+    expected.insert(expected.end(), shard.begin(), shard.end());
+  }
+  std::vector<DeviceBuffer<uint8_t>> scratch;
+  std::vector<DeviceBuffer<uint8_t>> sendBufs;
+  std::vector<DeviceBuffer<uint8_t>> recvBufs;
+  std::vector<DeviceBuffer<uint32_t>> epochs;
+  std::vector<uint8_t*> ptrs;
+  for (int r = 0; r < kRanks; ++r) {
+    scratch.emplace_back(2 * bankBytes(kRanks, c.shardBytes));
+    scratch.back().zero();
+    ptrs.push_back(scratch.back().ptr);
+    sendBufs.emplace_back(send[(size_t)r].size());
+    sendBufs.back().copyFrom(send[(size_t)r]);
+    recvBufs.emplace_back(send[(size_t)r].size());
+    epochs.emplace_back(kEpochCells);
+    epochs.back().copyFrom(std::vector<uint32_t>(kEpochCells, c.flag - 1));
+  }
+  DeviceBuffer<uint8_t*> peerTable(ptrs.size());
+  peerTable.copyFrom(ptrs);
+  // Host mapped, so a hung grid can be told to leave.
+  uint32_t* abortFlag = nullptr;
+  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&abortFlag), sizeof(uint32_t),
+                          hipHostMallocMapped | hipHostMallocCoherent));
+  *abortFlag = 0;
+  uint32_t* abortDev = nullptr;
+  HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&abortDev), abortFlag, 0));
+
+  std::vector<hipStream_t> streams((size_t)kRanks, nullptr);
+  for (int r = 0; r < kRanks; ++r) {
+    std::vector<uint32_t> mask(((size_t)cus + 31) / 32, 0u);
+    for (int cu = r * kCusPerRank; cu < (r + 1) * kCusPerRank; ++cu) {
+      mask[(size_t)cu / 32] |= 1u << (cu % 32);
+    }
+    HIP_CHECK(hipExtStreamCreateWithCUMask(&streams[(size_t)r], (uint32_t)mask.size(), mask.data()));
+  }
+
+  // The masks must hold fewer blocks than the grid, or this run proves nothing.
+  DeviceBuffer<int> counts(2);
+  counts.zero();
+  hipLaunchKernelGGL(CountResident, dim3(c.grid), dim3(c.block),
+                     dda::common::ddaLL128ArSplitSharedBytes(c.block, kRanks), streams[0], counts.ptr, counts.ptr + 1,
+                     (long long)clockKhz);
+  HIP_CHECK(hipStreamSynchronize(streams[0]));
+  const int mostResident = counts.copyTo()[1];
+
+  if (mostResident < (int)c.grid) {
+    float** table = reinterpret_cast<float**>(peerTable.ptr);
+    for (int r = 0; r < kRanks; ++r) {
+      Case rank = c;
+      rank.self = r;
+      launch<float, 4>(rank, table, reinterpret_cast<float*>(recvBufs[(size_t)r].ptr),
+                       reinterpret_cast<const float*>(sendBufs[(size_t)r].ptr), epochs[(size_t)r].ptr, abortDev,
+                       streams[(size_t)r]);
+      HIP_CHECK(hipGetLastError());
+    }
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+    bool drained = false;
+    while (!drained && std::chrono::steady_clock::now() < deadline) {
+      drained = true;
+      for (hipStream_t st : streams) {
+        drained = drained && hipStreamQuery(st) == hipSuccess;
+      }
+      if (!drained) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      }
+    }
+    if (!drained) {
+      *abortFlag = 1;
+    }
+    for (hipStream_t st : streams) {
+      HIP_CHECK(hipStreamSynchronize(st));
+    }
+    EXPECT_TRUE(drained) << "the split did not drain with at most " << mostResident << " of " << c.grid
+                         << " blocks resident per rank";
+    for (int r = 0; drained && r < kRanks; ++r) {
+      EXPECT_TRUE(recvBufs[(size_t)r].copyTo() == expected) << "rank " << r << " recvbuff is not the host fold";
+    }
+  }
+
+  for (hipStream_t st : streams) {
+    HIP_EXPECT(hipStreamDestroy(st));
+  }
+  HIP_EXPECT(hipHostFree(abortFlag));
+  if (mostResident >= (int)c.grid) {
+    GTEST_SKIP() << "the CU masks left all " << c.grid << " blocks resident";
   }
 }
 
