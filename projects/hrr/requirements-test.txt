@@ -1,0 +1,3 @@
+# Adds what the HRR script tests (projects/hrr/tests/scripts, projects/hrr/tools/tests) need.
+-r requirements.txt
+pytest==8.4.2

@@ -675,6 +675,7 @@ inline constexpr const char* const kHrrWorkloadsT4[] = {
     "Unit_HRR_StreamCaptureQuerySpt_Direct",
     "Unit_HRR_ApiMatrix_MemPoolShare_Direct",
     "Unit_HRR_AllApis_Direct",
+    "Unit_HRR_AllApisArrays_Direct",
     "Unit_HRR_StressApis_Direct",
     "Unit_HRR_DeviceInfo_Direct",
     "Unit_HRR_DeviceExtra_Direct",
