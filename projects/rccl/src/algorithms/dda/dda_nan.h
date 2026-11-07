@@ -155,7 +155,21 @@ static inline bool rcclDdaNanRecvAddrs(ncclComm* comm, void* recvbuff, size_t by
   struct ncclReg* reg = nullptr;
   bool valid = false;
   if (ncclRegFind(comm, recvbuff, bytes, &reg) != ncclSuccess || reg == nullptr) return false;
-  if (ncclRegLocalIsValid(reg, &valid) != ncclSuccess || !valid) return false;
+  if (ncclRegLocalIsValid(reg, &valid) != ncclSuccess || !valid || (reg->state & IPC_REG_NO_SUPPORT)) return false;
+  // A failed IPC export is not retried: each attempt costs every call a proxy
+  // round trip, and the buffer cannot become exportable later.
+  auto noSupport = [&] {
+    reg->state |= IPC_REG_NO_SUPPORT;
+    static bool logged = false;
+    if (!logged) {
+      logged = true;
+      INFO(NCCL_INIT | NCCL_REG,
+           "NaN DDA: recv buffer %p is registered but its IPC export failed, so it takes the scratch kernels. "
+           "cudaMalloc'd buffers need NCCL_LEGACY_CUDA_REGISTER=1; ncclMemAlloc'd ones export as is.",
+           recvbuff);
+    }
+    return false;
+  };
   int peerRanks[dda::nan::kRanks];
   int nPeers = 0;
   for (int r = 0; r < comm->nRanks; r++)
@@ -166,14 +180,14 @@ static inline bool rcclDdaNanRecvAddrs(ncclComm* comm, void* recvbuff, size_t by
   if (ncclIpcLocalRegisterBuffer(comm, recvbuff, bytes, peerRanks, nPeers, NCCL_IPC_COLLECTIVE, &regFlag, &offset,
                                  &devAddrs) != ncclSuccess ||
       !regFlag || reg->regIpcAddrs.hostPeerRmtAddrs == nullptr)
-    return false;
+    return noSupport();
   for (int r = 0; r < dda::nan::kRanks; r++) {
     if (r == comm->rank) {
       out->p[r] = static_cast<v4u*>(recvbuff);
       continue;
     }
     const uintptr_t base = reg->regIpcAddrs.hostPeerRmtAddrs[comm->p2pCrossClique ? r : comm->rankToLocalRank[r]];
-    if (base == 0) return false;
+    if (base == 0) return noSupport();
     out->p[r] = reinterpret_cast<v4u*>(base + offset);
   }
   return true;

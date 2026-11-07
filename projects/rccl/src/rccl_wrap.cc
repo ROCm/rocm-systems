@@ -1043,7 +1043,8 @@ static size_t rcclDdaNanCap(ncclComm* comm, ncclFunc_t func, size_t cap, bool na
   struct ncclReg* reg = nullptr;
   bool regValid = false;
   if (rcclDdaNanRegMin() > 0 && recvbuff != nullptr && ncclRegFind(comm, recvbuff, recvBytes, &reg) == ncclSuccess &&
-      reg != nullptr && ncclRegLocalIsValid(reg, &regValid) == ncclSuccess && regValid)
+      reg != nullptr && ncclRegLocalIsValid(reg, &regValid) == ncclSuccess && regValid &&
+      !(reg->state & IPC_REG_NO_SUPPORT))
     nanMax = (size_t)1 << 30;
   return std::max(cap, nanMax);
 }
