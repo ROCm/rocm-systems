@@ -246,3 +246,29 @@ foreach(
     set(target "rj_arith_integer_${family}_test")
     rj_arith_add_test(${target} integer/${family}_test.cpp)
 endforeach()
+
+# Scalar families keep required SCC/EXEC results distinct from FP status.
+foreach(
+    family
+    IN
+    ITEMS
+        boolean
+        shift
+        move
+        field
+        count
+        pack
+        arithmetic
+        compare_integer
+        compare_float
+        exec
+        fp
+        round
+        conversion
+        state
+        relative
+        pseudo
+)
+    set(target "rj_arith_scalar_${family}_test")
+    rj_arith_add_test(${target} scalar/${family}_test.cpp)
+endforeach()
