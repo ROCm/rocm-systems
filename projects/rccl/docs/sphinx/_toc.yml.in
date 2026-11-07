@@ -34,6 +34,8 @@ subtrees:
     title: Fault tolerance in RCCL
   - file: how-to/troubleshooting-rccl
     title: Troubleshoot RCCL
+  - file: how-to/using-rccl-diagnostics
+    title: Verify GPU P2P paths with diagnostics
   - file: how-to/rccl-usage-tips
   - file: how-to/network-telemetry
     title: RCCL network telemetry
