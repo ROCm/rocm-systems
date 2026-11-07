@@ -150,6 +150,8 @@ public:
     bool IsConcurrent() const { return concurrent_mode_; }
     // Is getting SPM data using driver public API?
     bool SpmKfdMode() const { return spm_kfd_mode_; }
+    bool SqSpm32BitEnabled() const { return sq_spm_enable_32bit_; }
+    bool SqSpmEvenLaneEnabled() const { return sq_spm_enable_even_lane_; }
 
     // Return PM4 command builder
     pm4_builder::CmdBuilder* GetCmdBuilder() const { return cmd_builder_; }
@@ -299,6 +301,8 @@ protected:
     static bool concurrent_create_mode_;
     static bool spm_kfd_mode_;
     bool        concurrent_mode_ = false;
+    bool        sq_spm_enable_32bit_ = true;
+    bool        sq_spm_enable_even_lane_ = true;
 
 private:
     // PM4 factory instance map type
@@ -340,6 +344,24 @@ private:
     static Pm4Factory* Mi350Create(const AgentInfo* agent_info);
     // Create MI450 factory
     static Pm4Factory* Mi450Create(const AgentInfo* agent_info);
+
+    void InitSqSpmPolicy()
+    {
+        const bool is_gfx12xx = gpu_id_ == GFX12_GPU_ID || gpu_id_ == MI450_GPU_ID;
+
+        sq_spm_enable_32bit_     = !is_gfx12xx;
+        sq_spm_enable_even_lane_ = !is_gfx12xx;
+
+        auto enable_sq_32bit =
+            rocprofiler::common::get_env_optional("AQLPROFILE_SPM_ENABLE_SQ_32BIT");
+        if(enable_sq_32bit && !enable_sq_32bit->empty())
+            sq_spm_enable_32bit_ = enable_sq_32bit->front() != '0';
+
+        auto enable_sq_even_lane =
+            rocprofiler::common::get_env_optional("AQLPROFILE_SPM_ENABLE_SQ_EVEN_LANE");
+        if(enable_sq_even_lane && !enable_sq_even_lane->empty())
+            sq_spm_enable_even_lane_ = enable_sq_even_lane->front() != '0';
+    }
 
     static bool CheckConcurrent(const profile_t* profile);
 
@@ -395,6 +417,8 @@ Pm4Factory::Create(const AgentInfo* agent_info, gpu_id_t gpu_id, bool concurrent
 
     if(it->second == nullptr) throw aql_profile_exc_msg("Pm4Factory::Create() failed");
     it->second->gpu_id_ = gpu_id;
+    it->second->InitSqSpmPolicy();
+
     return it->second;
 }
 
