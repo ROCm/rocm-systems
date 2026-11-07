@@ -275,13 +275,15 @@ rocprofiler_range_replay_host_jmpbuf(void) ROCPROFILER_API;
  * @ref rocprofiler_range_replay_begin). Registration made during the application's own execution
  * of a host-replay range captures the region at the call. Calls made during re-executed passes, and
  * calls made in a packet-replay range, are accepted and ignored. Registrations last until the range
- * closes. The memory must stay valid until then.
+ * closes. The memory must stay valid until then. Where registered regions overlap, each byte is
+ * restored from the earliest capture that covers it.
  *
  * @param [in] ptr  Start of the region
  * @param [in] size Size of the region in bytes
  * @return ::rocprofiler_status_t
  * @retval ::ROCPROFILER_STATUS_SUCCESS The region is registered (or the call was ignored)
- * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT @p ptr is NULL or @p size is 0
+ * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT @p ptr is NULL, @p size is 0, or the region
+ * wraps past the end of the address space
  */
 rocprofiler_status_t
 rocprofiler_range_replay_host_track_memory(void* ptr, uint64_t size) ROCPROFILER_API;

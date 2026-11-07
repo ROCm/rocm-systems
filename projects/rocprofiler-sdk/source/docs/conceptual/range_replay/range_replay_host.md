@@ -91,7 +91,8 @@ never a jump target.
   `rocprofiler_range_replay_host_track_memory(ptr, size)`. A region registered while no range is
   open is captured when the next range opens on the thread. A region registered during the
   application's own run of the range is captured at the call. Registrations made during re-executed
-  passes are ignored. Registrations last until the range closes.
+  passes are ignored. Registrations last until the range closes. Where registered regions overlap,
+  each byte is restored from the earliest capture that covers it.
 
 Nothing else is rewound. That includes unregistered host memory, files, sockets, HIP's own host-side
 state, random-number generators, and the clock. The application decides what the range depends on,

@@ -174,6 +174,10 @@ TEST(range_replay_host, track_memory_and_get_host_pass_validate_arguments)
               ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT);
     EXPECT_EQ(rocprofiler_range_replay_host_track_memory(&value, 0),
               ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT);
+    EXPECT_EQ(rocprofiler_range_replay_host_track_memory(&value, UINT64_MAX),
+              ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT)
+        << "a region that wraps past the end of the address space";
+    EXPECT_TRUE(range_replay::take_pending_host_regions().empty());
     EXPECT_EQ(rocprofiler_range_replay_get_host_pass(nullptr),
               ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT);
 
@@ -214,6 +218,33 @@ TEST(range_replay_host, captured_regions_restore_their_entry_contents)
 
     EXPECT_EQ(data, (std::array<uint32_t, 8>{1, 2, 3, 4, 5, 6, 7, 8}));
     EXPECT_EQ(other, 42U);
+}
+
+TEST(range_replay_host, overlapping_regions_restore_the_earliest_capture)
+{
+    auto data = std::array<uint32_t, 4>{1, 2, 3, 4};
+
+    auto regions = std::vector<range_replay::host_region_t>{};
+    regions.emplace_back(range_replay::host::capture_region(data.data(), sizeof(data)));
+    // The range modifies part of the buffer, then registers that part again.
+    data[1] = 20;
+    data[2] = 30;
+    regions.emplace_back(range_replay::host::capture_region(&data[1], 2 * sizeof(uint32_t)));
+
+    data.fill(0);
+    range_replay::host::restore_regions(regions);
+    EXPECT_EQ(data, (std::array<uint32_t, 4>{1, 2, 3, 4}));
+
+    // A later region extending past an earlier one still restores its own bytes.
+    auto wide = std::array<uint32_t, 4>{1, 2, 3, 4};
+    regions.clear();
+    regions.emplace_back(range_replay::host::capture_region(wide.data(), 2 * sizeof(uint32_t)));
+    wide[1] = 20;
+    wide[2] = 30;
+    regions.emplace_back(range_replay::host::capture_region(&wide[1], 3 * sizeof(uint32_t)));
+    wide.fill(0);
+    range_replay::host::restore_regions(regions);
+    EXPECT_EQ(wide, (std::array<uint32_t, 4>{1, 2, 30, 4}));
 }
 
 TEST(range_replay_host, regions_tracked_inside_a_range_are_captured_on_the_first_pass_only)

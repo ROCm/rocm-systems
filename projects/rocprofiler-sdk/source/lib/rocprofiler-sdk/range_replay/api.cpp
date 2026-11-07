@@ -37,6 +37,7 @@
 #include <climits>
 #include <csetjmp>
 #include <cstdint>
+#include <limits>
 
 namespace rocprofiler
 {
@@ -158,6 +159,8 @@ rocprofiler_range_replay_host_track_memory(void* ptr, uint64_t size)
     namespace range_replay = ::rocprofiler::range_replay;
 
     if(ptr == nullptr || size == 0) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    if(size > std::numeric_limits<uintptr_t>::max() - reinterpret_cast<uintptr_t>(ptr))
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
     if(auto* ctx = range_replay::current_range(); ctx != nullptr)
         range_replay::host::track_region(*ctx, ptr, static_cast<size_t>(size));

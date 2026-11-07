@@ -278,11 +278,13 @@ capture_region(void* ptr, size_t size)
     return region;
 }
 
+// Newest first, so a byte covered by several regions ends with its earliest capture, the one
+// closest to range entry.
 void
 restore_regions(const std::vector<host_region_t>& regions)
 {
-    for(const auto& region : regions)
-        if(!region.saved.empty()) std::memcpy(region.ptr, region.saved.data(), region.saved.size());
+    for(auto itr = regions.rbegin(); itr != regions.rend(); ++itr)
+        if(!itr->saved.empty()) std::memcpy(itr->ptr, itr->saved.data(), itr->saved.size());
 }
 
 void
