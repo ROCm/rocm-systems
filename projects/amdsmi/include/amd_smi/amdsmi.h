@@ -1359,7 +1359,8 @@ typedef struct {
 /**
  * @brief Power Information
  *
- * @note Unsupported struct members are set to UINT32_MAX
+ * @note Unsupported struct members are set to UINT32_MAX in uint32_t members, and to
+ *       UINT64_MAX or UINT32_MAX (depending on the platform) in uint64_t members.
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @tag{guest_windows} @endcond
  */
@@ -8321,7 +8322,8 @@ amdsmi_status_t amdsmi_get_gpu_activity(amdsmi_processor_handle processor_handle
  *
  *  @note amdsmi_power_info_t::socket_power metric can rarely spike above the socket power limit in
  * some cases
- *  @note unsupported struct members are set to UINT32_MAX
+ *  @note unsupported struct members are set to UINT32_MAX in uint32_t members, and to
+ *  UINT64_MAX or UINT32_MAX (depending on the platform) in uint64_t members.
  *
  *  @param[in] processor_handle PF of a processor for which  to query
  *
