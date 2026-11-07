@@ -21,6 +21,7 @@
 #include "algorithms/dda/all_reduce/all_reduce_dda_ll_twoshot.h"
 #include "algorithms/dda/all_reduce/all_reduce_dda_ll128.h"
 #include "algorithms/dda/all_reduce/all_reduce_dda_ll128_twoshot.h"
+#include "archinfo.h"
 #include "checks.h"
 #include "comm.h"
 #include "debug.h"
@@ -34,11 +35,13 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <type_traits>
 #include <utility>
 
 RCCL_PARAM_DECLARE(DdaLL);
 RCCL_PARAM_DECLARE(DdaLLOneShotThreshold);
 RCCL_PARAM_DECLARE(DdaLL128OneShotThreshold);
+RCCL_PARAM_DECLARE(DdaLL128AsyncWire);
 
 namespace {
 
@@ -91,6 +94,24 @@ static inline std::pair<dim3, dim3> ddaArLL128TwoShotGeom(const ncclComm* comm, 
   return ddaArFabricLLGrid(comm, ddaLL128Slices(shardBytes), kDdaArLL128Threads, kDdaLL128Warp, cap);
 }
 
+// The LDS-staged writers need gfx1250's async LDS stores (ASYNC_COPY_SUPPORTED) and one LL128 warp per wave.
+static bool ddaArLL128StagedWireOk(const ncclComm* comm) {
+  return comm->archName != nullptr && IsArchMatch(comm->archName, "gfx1250") && comm->WarpSize == kDdaLL128Warp;
+}
+
+// Calls pick(std::integral_constant<int, N>{}): NRANKS_CT 4/8 unroll the peer loops, 0 is the runtime fallback.
+template <typename Pick>
+static auto ddaArPickRanksCt(int nRanks, Pick pick) {
+  switch (nRanks) {
+  case 4:
+    return pick(std::integral_constant<int, 4>{});
+  case 8:
+    return pick(std::integral_constant<int, 8>{});
+  default:
+    return pick(std::integral_constant<int, 0>{});
+  }
+}
+
 template <typename T>
 static ncclResult_t ncclAllReduceDdaFabricLLTyped(const void* sendbuff, void* recvbuff, size_t count, ncclComm* comm,
                                                   cudaStream_t stream, rcclDdaLaunchCap cap) {
@@ -137,6 +158,40 @@ static ncclResult_t ncclAllReduceDdaFabricLLTyped(const void* sendbuff, void* re
   CUDACHECK(cudaGetLastError());
 
   return ncclSuccess;
+}
+
+// Smallest per-rank shard whose LL128 two-shot takes the staged writer: enough slices per warp to pay off.
+constexpr size_t kDdaArLL128AsyncMinShardBytes = 2 * 1024 * 1024;
+
+// Writer of an LL128 two-shot launch: staged from kDdaArLL128AsyncMinShardBytes where ddaArLL128StagedWireOk.
+// Opt-in with RCCL_DDA_LL128_ASYNC_WIRE=1; at 0 (default) every launch takes the cooperative writer and no dynamic LDS.
+static int ddaArLL128Wire(const ncclComm* comm, size_t bytes) {
+  if (rcclParamDdaLL128AsyncWire() == 0) {
+    return dda::common::kDdaLL128WireCoop;
+  }
+  const size_t shard = bytes / (size_t)std::max(comm->nRanks, 1);
+  return ddaArLL128StagedWireOk(comm) && shard >= kDdaArLL128AsyncMinShardBytes ? dda::common::kDdaLL128WireAsync
+                                                                                  : dda::common::kDdaLL128WireCoop;
+}
+
+// Dynamic LDS of an LL128 launch: the staged writer's two windows per warp.
+static size_t ddaArLL128SharedBytes(int wire, unsigned threads) {
+  return wire == dda::common::kDdaLL128WireCoop ? 0 : dda::common::ddaLL128StageBytes(threads);
+}
+
+// Signature of the LL128 one-shot and two-shot kernels.
+template <typename T>
+using DdaArLL128Kernel = void (*)(T* const*, T*, const T*, size_t, int, int, uint32_t*, int, size_t, size_t,
+                                  dda::common::DdaKernelParams);
+
+template <typename T>
+static DdaArLL128Kernel<T> ddaArLL128TwoShotKernel(int nRanks, int wire) {
+  return ddaArPickRanksCt(nRanks, [wire](auto n) -> DdaArLL128Kernel<T> {
+    constexpr int kN = decltype(n)::value;
+    return wire == dda::common::kDdaLL128WireAsync
+             ? &dda::common::ddaAllReduceTwoShotLL128<T, kN, dda::common::kDdaLL128WireAsync>
+             : &dda::common::ddaAllReduceTwoShotLL128<T, kN, dda::common::kDdaLL128WireCoop>;
+  });
 }
 
 // One warp carries one slice, so the grid is sized in slices rather than in
@@ -212,34 +267,19 @@ static ncclResult_t ncclAllReduceDdaFabricLL128TwoShotTyped(const void* sendbuff
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
 
+  const int wire = ddaArLL128Wire(comm, bytes);
+  const size_t lds = ddaArLL128SharedBytes(wire, block.x);
+
   INFO(NCCL_COLL,
-       "DDA fabric AllReduce LL128 two-shot: nRanks=%d bytes=%zu shardBytes=%zu slices=%zu grid=%u block=%u "
-       "(warp-per-slice, bankSize=%zu)",
-       nRanks, bytes, shardBytes, slices, grid.x, block.x, bankSize);
+       "DDA fabric AllReduce LL128 two-shot: nRanks=%d bytes=%zu shardBytes=%zu slices=%zu grid=%u block=%u wire=%d "
+       "lds=%zu (warp-per-slice, bankSize=%zu)",
+       nRanks, bytes, shardBytes, slices, grid.x, block.x, wire, lds, bankSize);
 
   const dda::common::DdaKernelParams params{comm->abortFlagDev};
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
-  // NRANKS_CT 4/8: unrolled peer loops; 0: runtime fallback.
-  switch (nRanks) {
-  case 4:
-    hipExtLaunchKernelGGL((dda::common::ddaAllReduceTwoShotLL128<T, 4>), grid, block, 0, stream,
-                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff),
-                          static_cast<const T*>(sendbuff), shardBytes, comm->rank, nRanks, epochDev, epochLen, slices,
-                          bankSize, params);
-    break;
-  case 8:
-    hipExtLaunchKernelGGL((dda::common::ddaAllReduceTwoShotLL128<T, 8>), grid, block, 0, stream,
-                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff),
-                          static_cast<const T*>(sendbuff), shardBytes, comm->rank, nRanks, epochDev, epochLen, slices,
-                          bankSize, params);
-    break;
-  default:
-    hipExtLaunchKernelGGL((dda::common::ddaAllReduceTwoShotLL128<T, 0>), grid, block, 0, stream,
-                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff),
-                          static_cast<const T*>(sendbuff), shardBytes, comm->rank, nRanks, epochDev, epochLen, slices,
-                          bankSize, params);
-    break;
-  }
+  hipExtLaunchKernelGGL(ddaArLL128TwoShotKernel<T>(nRanks, wire), grid, block, lds, stream, /*startEvent=*/nullptr,
+                        stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
+                        shardBytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize, params);
 
   CUDACHECK(cudaGetLastError());
 

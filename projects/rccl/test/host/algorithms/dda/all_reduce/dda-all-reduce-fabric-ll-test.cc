@@ -658,4 +658,96 @@ TEST_F(DdaAllReduceFabricLLMicrotest, Run_LaunchErrorIsReportedFromEveryTier) {
   EXPECT_EQ(g_ddaLaunches.size(), 4u);
 }
 
+// ---- LDS-staged LL128 wire writer ----
+
+template <typename T, int N, int W>
+const void* LL128TwoShotW() {
+  return KernelPtr(&dda::common::ddaAllReduceTwoShotLL128<T, N, W>);
+}
+
+constexpr int kAsync = dda::common::kDdaLL128WireAsync;
+constexpr size_t kMiB = 1024 * 1024;
+
+// RCCL_DDA_LL128_ASYNC_WIRE unset or 0: a gfx1250 wave32 comm keeps the cooperative writer and no LDS at every shard.
+TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_StagedWriterOffByDefault) {
+  comm().WarpSize = 32;
+  for (const bool unset : {true, false}) {
+    if (!unset) {
+      params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 0;
+    }
+    for (const size_t count : {16 * kMiB / 4, 32 * kMiB / 4}) {  // 8 ranks: 2 and 4 MiB shards, two-shot
+      const DdaLaunch& launch = RunOneLL128(count);
+      EXPECT_EQ(launch.kernel, (LL128TwoShot<float, 8>())) << "unset " << unset << " count " << count;
+      EXPECT_EQ(launch.sharedMemBytes, 0u) << "unset " << unset << " count " << count;
+    }
+  }
+  params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 1;
+  EXPECT_EQ(RunOneLL128(16 * kMiB / 4).kernel, (LL128TwoShotW<float, 8, kAsync>())) << "1 opts in";
+}
+
+// With RCCL_DDA_LL128_ASYNC_WIRE=1, from a 2 MiB shard a gfx1250 wave32 comm takes the staged writer on the same grid.
+TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_StagedWriterFromTwoMegShardsOnTheSameGrid) {
+  params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 1;
+  const size_t big = 16 * kMiB / 4;  // 8 ranks: a 2 MiB shard, two-shot
+  const DdaLaunch coop = RunOneLL128(big);
+  EXPECT_EQ(coop.kernel, (LL128TwoShot<float, 8>())) << "WarpSize 0: the cooperative writer";
+  EXPECT_EQ(coop.sharedMemBytes, 0u);
+  comm().WarpSize = 32;
+  const DdaLaunch staged = RunOneLL128(big);
+  EXPECT_EQ(staged.kernel, (LL128TwoShotW<float, 8, kAsync>()));
+  EXPECT_EQ(staged.grid.x, coop.grid.x);
+  EXPECT_EQ(staged.block.x, coop.block.x);
+  EXPECT_EQ(staged.sharedMemBytes, staged.block.x / 32 * 2 * 2048);
+  EXPECT_EQ(staged.Arg<size_t>(3), coop.Arg<size_t>(3)) << "same shard bytes";
+  EXPECT_EQ(staged.Arg<size_t>(8), coop.Arg<size_t>(8)) << "same slices";
+
+  const DdaLaunch& below = RunOneLL128(16 * kMiB / 4 - 8 * 4);  // one 16 B chunk short of a 2 MiB shard
+  EXPECT_EQ(below.kernel, (LL128TwoShot<float, 8>()));
+  EXPECT_EQ(below.sharedMemBytes, 0u);
+  EXPECT_EQ(RunOneLL128(8 * kMiB / 4).kernel, (LL128TwoShot<float, 8>())) << "1 MiB shard";
+
+  comm().WarpSize = 64;
+  const DdaLaunch& wave64 = RunOneLL128(big);
+  EXPECT_EQ(wave64.kernel, (LL128TwoShot<float, 8>())) << "an LL128 warp must be one wave";
+  EXPECT_EQ(wave64.sharedMemBytes, 0u);
+
+  comm().WarpSize = 32;
+  comm().archName = const_cast<char*>("gfx1201");
+  const DdaLaunch& noAsync = RunOneLL128(big);
+  EXPECT_EQ(noAsync.kernel, (LL128TwoShot<float, 8>())) << "the async LDS stores are gfx1250 only";
+  EXPECT_EQ(noAsync.sharedMemBytes, 0u);
+}
+
+// The one-shot keeps the cooperative writer at every size: it sends the whole message to each peer.
+TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_OneShotKeepsTheCooperativeWriter) {
+  params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 1;
+  comm().WarpSize = 32;
+  comm().nRanks = 2;
+  const DdaLaunch& two = RunOneLL128(4 * kMiB / 4);
+  EXPECT_EQ(two.kernel, (LL128OneShot<float, 0>()));
+  EXPECT_EQ(two.sharedMemBytes, 0u);
+}
+
+// Every rank count and datatype gets its own staged instantiation.
+TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_StagedKernelsPerRankCountAndDatatype) {
+  params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 1;
+  comm().WarpSize = 32;
+  const struct {
+    int nRanks;
+    const void* two;
+  } cases[] = {{4, LL128TwoShotW<float, 4, kAsync>()},
+               {8, LL128TwoShotW<float, 8, kAsync>()},
+               {16, LL128TwoShotW<float, 0, kAsync>()},
+               {32, LL128TwoShotW<float, 0, kAsync>()}};
+  for (const auto& c : cases) {
+    comm().nRanks = c.nRanks;
+    EXPECT_EQ(RunOneLL128(c.nRanks * 2 * kMiB / 4).kernel, c.two) << c.nRanks;
+  }
+  comm().nRanks = 8;
+  EXPECT_EQ(RunOneLL128(16 * kMiB / 2, ncclBfloat16).kernel, (LL128TwoShotW<bf16, 8, kAsync>()));
+  EXPECT_EQ(RunOneLL128(16 * kMiB / 2, ncclFloat16).kernel, (LL128TwoShotW<half, 8, kAsync>()));
+  EXPECT_EQ(RunOneLL128(16 * kMiB, ncclFloat8e4m3).kernel, (LL128TwoShotW<dda::common::fp8e4m3, 8, kAsync>()));
+  EXPECT_EQ(RunOneLL128(16 * kMiB, ncclFloat8e5m2).kernel, (LL128TwoShotW<dda::common::fp8e5m2, 8, kAsync>()));
+}
+
 }  // namespace
