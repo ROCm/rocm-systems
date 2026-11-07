@@ -13,6 +13,15 @@ There are two modes of counter collection service:
 
 - **Device counting**: In this mode, counters are collected on a device level. This mode is useful for collecting device level counters not tied to a specific kernel execution, which encompasses collecting counter values for a specific time range.
 
+Device counting is not scoped to a single kernel dispatch, so anything else running on the
+GPU during the sampling window -- including another process's kernels -- contributes to the
+values read back. To guarantee an accurate, isolated reading, device counting acquires an
+exclusive device lock, which requires the ``CAP_PERFMON`` capability. Without it, the lock
+cannot be acquired and device counting is degraded (see :ref:`using-rocprofv3-doctor` for how
+this is reported). Dispatch counting does not require ``CAP_PERFMON``: it already serializes
+hardware execution to one kernel at a time, so no additional exclusivity is needed to isolate
+its counters.
+
 This topic explains how to setup dispatch and device counting and use common counter collection APIs. For details on the APIs including the less commonly used counter collection APIs, see the API library. For fully functional examples of both dispatch and device counting, see `Samples <https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-sdk/samples>`_.
 
 When a tool needs more counters than fit in one hardware pass, it can collect groups across

@@ -24,6 +24,7 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/counters/ioctl.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/spm/dispatch_handlers.hpp"
@@ -271,6 +272,21 @@ start_context(const context::context* ctx)
         if(enabled) return;
         enabled = true;
     });
+
+    // Request the dispatch-mode perfmon enable (no-op on older Linux kernels that don't support
+    // it); stop_context() doesn't need a release to match: there is no unprivileged "off" ioctl,
+    // and the KFD only clears this when this process's KFD device context is torn down. Mirrors
+    // counters/core.cpp: SPM reads the same hardware counter blocks as PMC, so it needs the same
+    // perfmon clock forced on, and dispatch-scoped SPM is just as exclusivity-free as dispatch-
+    // scoped PMC counting. Scoped to this context's configured agents (collects_on(), empty set
+    // == every GPU agent) to match enable_serialization() above.
+    for(const auto& agent : agent::get_agents())
+    {
+        if(agent->type == ROCPROFILER_AGENT_TYPE_GPU && ctx->dispatch_spm->collects_on(agent->id))
+        {
+            counters::counter_collection_dispatch_perfmon_enable(agent);
+        }
+    }
 
     // SPM no longer registers a per-queue callback with the queue controller; the HSA write
     // interceptor calls spm::kernel_dispatch_phase_enter_hook / kernel_dispatch_phase_exit_hook
