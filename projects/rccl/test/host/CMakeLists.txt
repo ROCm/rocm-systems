@@ -184,7 +184,8 @@ endforeach()
 foreach(_dda_param
     "RCCL_PARAM(DdaLL, \"DDA_LL\", 1)"
     "RCCL_PARAM(DdaLLOneShotThreshold, \"DDA_LL_ONESHOT_THRESHOLD\", (size_t)(1) * 1024 * 1024)"
-    "RCCL_PARAM(DdaLL128OneShotThreshold, \"DDA_LL128_ONESHOT_THRESHOLD\", (size_t)(4) * 1024 * 1024)")
+    "RCCL_PARAM(DdaLL128OneShotThreshold, \"DDA_LL128_ONESHOT_THRESHOLD\", (size_t)(4) * 1024 * 1024)"
+    "RCCL_PARAM(DdaLL128AsyncWire, \"DDA_LL128_ASYNC_WIRE\", 0)")
   rccl_assert_source_line("${_rccl_src_root}/rccl_wrap.cc" "${_dda_param}" "algorithms/dda/dda-coll-seams.cc")
   rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/algorithms/dda/dda-coll-seams.cc" "${_dda_param}"
     "the rccl_wrap.cc DDA param")
@@ -525,6 +526,7 @@ function(rccl_define_micro_source_lists)
     algorithms/dda/reduce_scatter/dda-reduce-scatter-fabric-ll128-test.cc
     algorithms/dda/reduce_scatter/dda-reduce-scatter-ipc-test.cc
     algorithms/dda/dda-coll-seams.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     fakes/hip_fakes.cc
     fakes/nccl_fakes.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
