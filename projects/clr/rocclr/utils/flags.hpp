@@ -141,6 +141,10 @@ release(uint, GPU_MAX_HW_QUEUES, 4,                                           \
          "The maximum number of HW queues allocated per device")              \
 release(bool, DEBUG_CLR_AQL_BARRIER_OPT, true,                                \
         "Enable per-stream AQL barrier-bit optimization on shared HW queues") \
+release(bool, DEBUG_CLR_COOP_CONCURRENT, true,                                \
+        "Run independent cooperative grids concurrently, 0 = one at a time")  \
+release(uint, DEBUG_CLR_COOP_ADMIT_PCT, 99,                                   \
+        "Cooperative admission ceiling, percent of device coop capacity, capped at 100")\
 release(bool, GPU_IMAGE_BUFFER_WAR, true,                                     \
         "Enables image buffer workaround")                                    \
 release(cstring, HIP_VISIBLE_DEVICES, "",                                     \
