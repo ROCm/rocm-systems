@@ -156,7 +156,7 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   from `enqueue/mgmt-task-enq-test.cc`); suite `MgmtTaskEnq*`. Its own binary because
   `fakes/mgmt_task_enq_fakes.cc`, which the other targets link, fakes `ncclMgmtTaskEnqueue`.
   See `test_categories_micro_enqueue.yaml`.
-- **`rccl-UnitTestsMicroCe`**: `ce_coll.cc` (via `CE_COLL_CC_PATH`); suites
+- **`rccl-UnitTestsMicroCeColl`**: `ce_coll.cc` (via `CE_COLL_CC_PATH`); suites
   `CeCollMicrotest.*`, `CeInitMicrotest.*` and `LaunchPaths/CeAlltoAllvSyncMicrotest.*`,
   all in `ce-coll-test.cc`. Its own binary because every other target links
   `fakes/ce_fakes.cc`, which fakes the symbols this file defines, and the
@@ -1466,7 +1466,7 @@ above (`./install.sh -t`, wired via `add_subdirectory(host)`), the same file
 can be configured **directly** to build every host binary — `rccl-HostUnitTests`,
 `rccl-UnitTestsMicro`, `rccl-UnitTestsMicroScheduler`,
 `rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker|-warpspeed]`,
-`rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroGinHostFinalize`, `rccl-UnitTestsMicroCe`,
+`rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroGinHostFinalize`, `rccl-UnitTestsMicroCeColl`,
 `rccl-UnitTestsMicroDiagnostics`, `rccl-UnitTestsMicroDiagnostics<Unit>` (one per `src/diagnostics/` test file),
 `rccl-UnitTestsMicroGraph<Unit>` (one per `src/graph/` test file),
 `rccl-UnitTestsMicroDda<SubDir><Unit>` (one per `src/algorithms/dda/` test file),
@@ -1555,7 +1555,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroDiagnosticsP2p     # src/diagnostics/p2p.cc tests
 ./build/rccl-UnitTestsMicroDiagnosticsP2pDevice  # src/diagnostics/device/p2p.cu launchers
 ./build/rccl-UnitTestsMicroPluginNet          # src/plugin/net.cc; one binary per src/plugin/ test file
-./build/rccl-UnitTestsMicroCe                 # src/ce_coll.cc tests
+./build/rccl-UnitTestsMicroCeColl             # src/ce_coll.cc tests
 ./build/rccl-UnitTestsMicroRmaProxy           # src/rma/rma_proxy.cc; one binary per src/rma/ test file
 ./build/rccl-UnitTestsMicroProxy              # src/proxy.cc tests
 ./build/rccl-UnitTestsMicroDdaFabricInit      # src/algorithms/dda/fabric/fabric_init.cu; one binary per src/algorithms/dda/ test file
