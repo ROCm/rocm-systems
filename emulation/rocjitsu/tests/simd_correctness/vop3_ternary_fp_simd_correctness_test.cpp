@@ -509,10 +509,10 @@ std::vector<F16OutputCase> f16_output_cases() {
                             std::pair{"Med3", rdna3::kVMed3F16Vop3},
                             std::pair{"Minmax", rdna3::kVMinmaxF16Vop3},
                             std::pair{"Maxmin", rdna3::kVMaxminF16Vop3}});
-  // DIV_FIXUP still uses the pre-migration scalar ordering on CDNA4. gfx950 is
+  // DIV_FIXUP preserves the pre-migration output ordering on CDNA4. gfx950 is
   // unmeasured; gfx1201 captures on nearby boundary vectors instead round to
   // F16 before applying OMOD. These cases pin the current emulator behavior,
-  // not an architectural result, until the measured DIV_FIXUP fix is stacked.
+  // not an architectural result for gfx950.
   for (const auto &[name, opcode] : {std::pair{"DivFixup", cdna4::kVDivFixupF16Vop3},
                                      std::pair{"DivFixupLegacy", cdna4::kVDivFixupLegacyF16Vop3}}) {
     cases.push_back({std::string("Gfx950") + name + "PinsCurrentDiv2UnderflowOrdering",
@@ -598,8 +598,11 @@ TEST_P(Vop3F16TernaryOutputOrderTest, MatchesScalarOutputContractWithSimdEnabled
         if (force_scalar) {
           EXPECT_TRUE(tracker.no_tracked_path_executed())
               << test.name << ": forced-scalar execution used SIMD";
-        } else if (test.arch != ROCJITSU_CODE_ARCH_RDNA3) {
-          // RDNA3 uses rj-arith, whose SIMD paths do not use the legacy tracker.
+        } else if (test.arch != ROCJITSU_CODE_ARCH_RDNA3 &&
+                   !(test.arch == ROCJITSU_CODE_ARCH_CDNA4 &&
+                     (test.opcode == cdna4::kVDivFixupF16Vop3 ||
+                      test.opcode == cdna4::kVDivFixupLegacyF16Vop3))) {
+          // Migrated operations use rj-arith, which does not use the legacy tracker.
           EXPECT_TRUE(tracker.only_tracked_path_executed(test.expected_simd_path))
               << test.name << ": eligible execution did not use the ternary F16 SIMD path";
         }

@@ -14,6 +14,7 @@
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cstdint>
 #include <optional>
@@ -453,13 +454,14 @@ inline void execute_float_binary64(Wavefront &wave, FloatBinary32Function wave32
 inline void execute_float64_word(Wavefront &wave, FloatBinary32Function wave32,
                                  FloatBinary64Function wave64, uint64_t flags, uint64_t modifiers,
                                  const Operand &destination, const Operand &source,
-                                 const Operand &integer, bool rdna3, bool ldexp) {
+                                 const Operand &integer, bool rdna3, bool ldexp,
+                                 bool preop_rounding = false) {
   const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
   if (!wave.exec())
     return;
   flags = float16_f64_flags(wave, flags, rdna3);
-  // TRIG_PREOP uses a fixed table policy; LDEXP rounds and clamps by MODE.
-  if (!ldexp)
+  // RDNA TRIG_PREOP ignores rounding; CDNA still uses it for OMOD scaling.
+  if (!ldexp && !preop_rounding)
     flags &= ~(RJ_ARITH_FP_ROUND_MASK | RJ_ARITH_FP_DX10_CLAMP_OFF);
   RegisterAccess registers(wave);
   VectorInput64 a(registers, wave, source, wave.exec());
@@ -888,13 +890,50 @@ inline void execute_dot2_f16(Wavefront &wave, FloatTernaryWave32Function wave32,
   }
 }
 
+// gfx942/gfx950 low-half writes clear the high half; high-half writes preserve the low half.
+struct HalfUnaryWriter {
+  bool low_zeroes_high = false;
+  template <typename Invoke>
+  bool operator()(Wavefront &wave, RegisterAccess &registers, const Operand &destination,
+                  uint64_t exec_mask, Invoke invoke, uint8_t byte_mask) const {
+    if (low_zeroes_high && byte_mask == 0x3)
+      byte_mask = 0xf;
+    return write_vector32_result(wave, registers, destination, exec_mask, invoke,
+                                 /*allow_direct=*/false, byte_mask);
+  }
+};
+
+// SDWA receives an already scaled half result. Its writer only finalizes OMOD,
+// applies clamp and places bytes; it does not multiply the result again.
+template <typename Inst> inline auto sdwa_half_math_writer(Inst &inst) {
+  return [&inst](Wavefront &wave, RegisterAccess &registers, const Operand &destination,
+                 uint64_t exec_mask, auto invoke, uint8_t byte_mask) {
+    if (inst.inst_.src0 != SRC_SDWA)
+      return HalfUnaryWriter{true}(wave, registers, destination, exec_mask, invoke, byte_mask);
+    if (wave.instruction_execution_failed())
+      return false;
+    std::array<uint32_t, 64> result{};
+    uint32_t *d = result.data();
+    if (invoke(&d, exec_mask) != RJ_ARITH_SUCCESS) {
+      wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+      return false;
+    }
+    for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
+      if (exec_mask & (uint64_t{1} << lane))
+        sdwa::write_lane<sdwa::ResultFormat::F16>(inst, wave, destination, lane, result[lane]);
+    }
+    return !wave.instruction_execution_failed();
+  };
+}
+
 // Fixed-rounding cores can still use guest rounding for FRACT or output scaling.
 // Routed VOP1 halves and explicit VOP3 selectors both
 // preserve the destination's other half, including when source and destination alias.
+template <typename Writer = HalfUnaryWriter>
 inline void execute_float_unary16(Wavefront &wave, FloatUnary32Function wave32,
                                   FloatUnary64Function wave64, uint64_t flags, uint64_t modifiers,
                                   const Operand &destination, const Operand &source, bool rdna3,
-                                  bool guest_rounding = false) {
+                                  bool guest_rounding = false, Writer write = {}) {
   const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
   if (!wave.exec())
     return;
@@ -905,7 +944,7 @@ inline void execute_float_unary16(Wavefront &wave, FloatUnary32Function wave32,
   VectorInput32 a(registers, wave, source, wave.exec(),
                   modifiers & RJ_ARITH_ALU_HIGH_A ? 0xC : 0x3);
   uint32_t causes = 0;
-  const bool success = write_vector32_result(
+  const bool success = write(
       wave, registers, destination, exec_mask,
       [&](uint32_t *const *d, uint64_t write_mask) {
         uint32_t *state = &causes;
@@ -913,7 +952,7 @@ inline void execute_float_unary16(Wavefront &wave, FloatUnary32Function wave32,
                    ? wave32(flags, uint32_t(write_mask), modifiers, d, &a.data, state)
                    : wave64(flags, write_mask, modifiers, d, &a.data, state);
       },
-      /*allow_direct=*/false, modifiers & RJ_ARITH_ALU_HIGH_D ? 0xC : 0x3);
+      modifiers & RJ_ARITH_ALU_HIGH_D ? 0xC : 0x3);
   if (success) {
     wave.set_trapsts(wave.trapsts() | causes);
     wave.raise_alu_causes(causes);
@@ -1123,11 +1162,12 @@ inline void execute_float_ternary32(Wavefront &wave, FloatTernaryWave32Function 
 
 // Execute an FP16 operation with three explicit inputs. All selected source
 // halves are acquired before committing destination bytes or optional state.
+// Older CDNA low-half destinations may request a whole-word write that clears the high half.
 inline void execute_float_ternary16(Wavefront &wave, FloatTernaryWave32Function wave32,
                                     FloatTernaryWave64Function wave64, uint64_t flags,
                                     uint64_t modifiers, const Operand &destination,
                                     const Operand &lhs, const Operand &rhs, const Operand &third,
-                                    bool rdna3) {
+                                    bool rdna3, bool low_dst_zeroes_high = false) {
   const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
   if (!wave.exec())
     return;
@@ -1146,7 +1186,10 @@ inline void execute_float_ternary16(Wavefront &wave, FloatTernaryWave32Function 
                             state)
                    : wave64(flags, write_mask, modifiers, d, &a.data, &b.data, &c.data, state);
       },
-      /*allow_direct=*/false, modifiers & RJ_ARITH_ALU_HIGH_D ? 0xC : 0x3);
+      /*allow_direct=*/false,
+      modifiers & RJ_ARITH_ALU_HIGH_D ? 0xC
+      : low_dst_zeroes_high           ? 0xF
+                                      : 0x3);
   if (success) {
     wave.set_trapsts(wave.trapsts() | causes);
     wave.raise_alu_causes(causes);

@@ -120,6 +120,33 @@ int run_wave64(uint64_t flags, uint64_t exec_mask, uint32_t mode, uint32_t *cons
   return RJ_ARITH_SUCCESS;
 }
 
+// CDNA inherits the quiet-NaN scale model but ignores encoded OMOD and CLAMP.
+// Strict empirical modes are not established for these architectures.
+template <int Width, int Lanes, typename Mask>
+int run_cdna(uint64_t flags, Mask exec_mask, uint64_t mode, uint32_t *const *d, Mask *condition,
+             const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c) {
+  using namespace rocjitsu::arith;
+  flags = resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  constexpr uint64_t controls = RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_NEG_B | RJ_ARITH_ALU_NEG_C |
+                                RJ_ARITH_ALU_OMOD_MASK | RJ_ARITH_ALU_CLAMP;
+  constexpr uint64_t fp = RJ_ARITH_FP_ROUND_MASK | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
+                          RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | RJ_ARITH_FP_IEEE_MODE |
+                          RJ_ARITH_FP_DX10_CLAMP_OFF;
+  if (int error = validate(flags, mode & ~controls, fp)) {
+    return error;
+  }
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  mode &= ~(RJ_ARITH_ALU_OMOD_MASK | RJ_ARITH_ALU_CLAMP);
+  flags &= ~RJ_ARITH_FP_DX10_CLAMP_OFF;
+  if constexpr (Lanes == 32) {
+    return run<Width>(flags, exec_mask, uint32_t(mode), d, condition, a, b, c);
+  } else {
+    return run_wave64<Width>(flags, exec_mask, uint32_t(mode), d, condition, a, b, c);
+  }
+}
+
 } // namespace
 
 // Execute DIV_SCALE_F32 for the selected lanes.
@@ -264,4 +291,36 @@ int rj_arith_v_div_scale_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t in
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
   return run_wave64<32, true>(flags, exec_mask, instruction_flags, d, condition, a, b, c);
+}
+
+// Rescale CDNA operands and return active condition bits; preserve inactive VGPR lanes.
+int rj_arith_v_div_scale_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        uint32_t *condition, const uint32_t *const *a,
+                                        const uint32_t *const *b, const uint32_t *const *c) {
+  return run_cdna<32, 32>(flags, exec_mask, instruction_flags, d, condition, a, b, c);
+}
+
+// Rescale CDNA operands and return active condition bits; preserve inactive VGPR lanes.
+int rj_arith_v_div_scale_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        uint64_t *condition, const uint32_t *const *a,
+                                        const uint32_t *const *b, const uint32_t *const *c) {
+  return run_cdna<32, 64>(flags, exec_mask, instruction_flags, d, condition, a, b, c);
+}
+
+// Rescale CDNA operands and return active condition bits; preserve inactive VGPR lanes.
+int rj_arith_v_div_scale_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        uint32_t *condition, const uint32_t *const *a,
+                                        const uint32_t *const *b, const uint32_t *const *c) {
+  return run_cdna<64, 32>(flags, exec_mask, instruction_flags, d, condition, a, b, c);
+}
+
+// Rescale CDNA operands and return active condition bits; preserve inactive VGPR lanes.
+int rj_arith_v_div_scale_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        uint64_t *condition, const uint32_t *const *a,
+                                        const uint32_t *const *b, const uint32_t *const *c) {
+  return run_cdna<64, 64>(flags, exec_mask, instruction_flags, d, condition, a, b, c);
 }

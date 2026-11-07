@@ -106,6 +106,23 @@ inline double fp64_input(const uint32_t *const *v, int lane, uint32_t mode) {
   return as_double(bits);
 }
 
+// Preserve the legacy CDNA native-math stages: scale in the default host mode,
+// then flush a subnormal OMOD result and canonicalize either signed zero.
+inline double fp64_native_math_output(double value, uint32_t mode) {
+  const unsigned omod = (mode >> 6) & 3;
+  if (omod) {
+    const double scales[] = {1, 2, 4, 0.5};
+    value *= scales[omod];
+    if ((double_bits(value) & 0x7ff0000000000000ULL) == 0) {
+      value = 0;
+    }
+  }
+  if (mode & RJ_ARITH_ALU_CLAMP) {
+    value = !(value > 0) ? 0 : value > 1 ? 1 : value;
+  }
+  return value;
+}
+
 // Apply FP64 output modifiers by encoding arithmetic, including guest overflow rounding.
 inline double fp64_output(double value, uint32_t instruction_flags, unsigned rounding = 0,
                           bool cdna_fma = false) {

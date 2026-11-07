@@ -86,10 +86,15 @@ add_library(
     integer/sad.cpp
     integer/shift.cpp
     register/cndmask.cpp
+    math/cdna_half.cpp
+    math/cdna_unary.cpp
+    math/bf16_gfx1250.cpp
     math/half_trig.cpp
     math/half_unary.cpp
     math/rcp_iflag.cpp
+    math/tanh_gfx1250.cpp
     math/trig.cpp
+    math/cdna_trig_preop.cpp
     math/trig_preop.cpp
     math/unary.cpp
     register/dpp.cpp

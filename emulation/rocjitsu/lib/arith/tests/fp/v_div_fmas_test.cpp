@@ -220,3 +220,101 @@ TEST(FpDivFmas, TininessAfterRounding) {
   check_tiny<64, 32>(rj_arith_v_div_fmas_f64_w32, tiny_cases_f64);
   check_tiny<64, 64>(rj_arith_v_div_fmas_f64_w64, tiny_cases_f64);
 }
+
+// Compare backend policies on deterministic full-range operands and inherited gradual rounding.
+template <int Width, int Lanes, bool Older, typename Call> static void check_cdna_fmas(Call call) {
+  using namespace rocjitsu::arith::test;
+  using Mask = std::conditional_t<Lanes == 32, uint32_t, uint64_t>;
+  const auto input = make_fp_inputs<Width, Lanes>();
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (int sample = 0; sample < 64; ++sample) {
+      constexpr uint64_t semantics[] = {RJ_ARITH_SEMANTICS_LOOSE,
+                                        RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE,
+                                        RJ_ARITH_SEMANTICS_COMPATIBILITY};
+      uint64_t flags = semantics[sample % 3] | (uint64_t(sample & 3) << 24) |
+                       (sample & 4 ? RJ_ARITH_FP_FLUSH_INPUT_DENORMALS : 0) |
+                       (sample & 8 ? RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS : 0) |
+                       (sample & 16 ? RJ_ARITH_FP_IEEE_MODE : 0);
+      if (Older && (sample & 32)) {
+        flags |= RJ_ARITH_FP_DX10_CLAMP_OFF;
+      }
+      const uint64_t mode = uint64_t((sample >> 2) & 3) * RJ_ARITH_ALU_OMOD_2 |
+                            (sample & 32 ? RJ_ARITH_ALU_CLAMP : 0) |
+                            (sample & 16 ? RJ_ARITH_ALU_NEG_B | RJ_ARITH_ALU_ABS_C : 0);
+      const Mask exec_mask = Mask(0xaaaaaaaaaaaaaaaaULL) | 1;
+      const Mask condition = Mask(0xccccccccccccccccULL);
+      const int destination = sample & 1 ? 0 : 6;
+      auto expected = input, actual = input;
+      uint32_t status = 0x55;
+      ASSERT_EQ(call(flags, exec_mask, mode, expected.v + destination, expected.v, expected.v + 2,
+                     expected.v + 4, condition, nullptr),
+                0);
+      ASSERT_EQ(call(flags | cpu, exec_mask, mode, actual.v + destination, actual.v, actual.v + 2,
+                     actual.v + 4, condition, &status),
+                0);
+      EXPECT_EQ(status, 0x55U);
+      actual.expect_preserved(input, destination, Width / 32);
+      for (int reg = 0; reg < Width / 32; ++reg) {
+        for (int lane = 0; lane < Lanes; ++lane) {
+          EXPECT_EQ(actual.v[destination + reg][lane], expected.v[destination + reg][lane]);
+        }
+      }
+    }
+    // Cancellation and overflow expose the directed-rounding choices independently
+    // of the pseudorandom scalar/SIMD comparisons above.
+    constexpr uint64_t sign = 1ULL << (Width - 1);
+    constexpr uint64_t one = Width == 32 ? 0x3f800000ULL : 0x3ff0000000000000ULL;
+    constexpr uint64_t infinity = Width == 32 ? 0x7f800000ULL : 0x7ff0000000000000ULL;
+    for (unsigned rounding = 0; rounding < 4; ++rounding) {
+      for (int scenario = 0; scenario < 3; ++scenario) {
+        Registers<8, Lanes> boundary;
+        const uint64_t mode = scenario == 2 ? RJ_ARITH_ALU_OMOD_2 : 0;
+        for (int lane = 0; lane < Lanes; ++lane) {
+          const uint64_t negative = lane & 1 ? sign : 0;
+          write_fp(boundary.v, lane, Width, (scenario ? infinity - 1 : one) | negative);
+          write_fp(boundary.v + 2, lane, Width,
+                   scenario == 1 ? one + (1ULL << (Width == 32 ? 23 : 52)) : one);
+          write_fp(boundary.v + 4, lane, Width, scenario ? negative : one | (negative ^ sign));
+        }
+        ASSERT_EQ(call(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS |
+                           (uint64_t(rounding) << 24),
+                       Mask(~Mask(0)), mode, boundary.v + 6, boundary.v, boundary.v + 2,
+                       boundary.v + 4, Mask(0), nullptr),
+                  0);
+        for (int lane = 0; lane < Lanes; ++lane) {
+          const uint64_t negative = lane & 1 ? sign : 0;
+          const bool to_infinity = rounding == 0 || rounding == (negative ? 2U : 1U);
+          const uint64_t expected = scenario ? negative | (to_infinity ? infinity : infinity - 1)
+                                    : rounding == 2 ? sign
+                                                    : 0;
+          EXPECT_EQ(read_fp(boundary.v + 6, lane, Width), expected);
+        }
+      }
+    }
+    // Half a minimum subnormal plus maximum subnormal rounds to minimum normal
+    // before OMOD. Rounding at normal precision and flushing first would return zero.
+    Registers<8, Lanes> boundary;
+    constexpr uint64_t hidden = 1ULL << (Width == 32 ? 23 : 52);
+    constexpr uint64_t half = Width == 32 ? 0x3f000000ULL : 0x3fe0000000000000ULL;
+    write_fp(boundary.v, 0, Width, half);
+    write_fp(boundary.v + 2, 0, Width, 1);
+    write_fp(boundary.v + 4, 0, Width, hidden - 1);
+    ASSERT_EQ(call(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+                   Mask(1), RJ_ARITH_ALU_OMOD_2, boundary.v + 6, boundary.v, boundary.v + 2,
+                   boundary.v + 4, Mask(0), nullptr),
+              0);
+    EXPECT_EQ(read_fp(boundary.v + 6, 0, Width), 2 * hidden);
+  }
+  EXPECT_EQ(call(RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL, Mask(0), 0, nullptr, nullptr, nullptr,
+                 nullptr, Mask(0), nullptr),
+            RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
+}
+
+TEST(CdnaDivFmas, Arithmetic) {
+  check_cdna_fmas<32, 32, true>(rj_arith_v_div_fmas_f32_w32_gfx942);
+  check_cdna_fmas<32, 64, true>(rj_arith_v_div_fmas_f32_w64_gfx942);
+  check_cdna_fmas<64, 32, true>(rj_arith_v_div_fmas_f64_w32_gfx942);
+  check_cdna_fmas<64, 64, true>(rj_arith_v_div_fmas_f64_w64_gfx942);
+  check_cdna_fmas<32, 32, false>(rj_arith_v_div_fmas_f32_w32_gfx1250);
+  check_cdna_fmas<64, 32, false>(rj_arith_v_div_fmas_f64_w32_gfx1250);
+}

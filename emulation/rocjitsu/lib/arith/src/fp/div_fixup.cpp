@@ -16,7 +16,7 @@ namespace {
 
 // Fix up division results and special values for the selected lanes. Requires validated
 // controls; preserve inactive destination lanes.
-template <int Width, bool Rdna3 = false>
+template <int Width, bool Rdna3 = false, bool Cdna = false>
 int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
         const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c,
         uint32_t *excp_flag_user);
@@ -26,7 +26,7 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
 // rocjitsu's classify_div_fixup applies this same flush before classifying
 // exceptional arithmetic, with input-denormal causes suppressed. Classifying
 // these already-flushed operands implements that rule without a second model.
-template <int Width, bool Rdna3>
+template <int Width, bool Rdna3, bool Cdna>
 [[gnu::noinline]] int run_flushed(uint64_t flags, uint32_t exec_mask, uint32_t mode,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   const uint32_t *const *b, const uint32_t *const *c,
@@ -61,8 +61,8 @@ template <int Width, bool Rdna3>
       sources[operand][reg] = words[operand][reg];
     }
   }
-  return run<Width, Rdna3>(flags & ~RJ_ARITH_FP_FLUSH_INPUT_DENORMALS, exec_mask, mode, d, a,
-                           sources[0], sources[1], excp_flag_user);
+  return run<Width, Rdna3, Cdna>(flags & ~RJ_ARITH_FP_FLUSH_INPUT_DENORMALS, exec_mask, mode, d, a,
+                                 sources[0], sources[1], excp_flag_user);
 }
 
 // Validate controls independently of the requested numerical/reporting policy.
@@ -81,7 +81,7 @@ template <int Width, bool Rdna3> int validate_controls(uint64_t flags, uint32_t 
 
 // Fix up division results and special values for the selected lanes. Reject invalid controls
 // before changing outputs.
-template <int Width, bool Rdna3>
+template <int Width, bool Rdna3, bool Cdna>
 int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
         const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c,
         uint32_t *excp_flag_user) {
@@ -95,13 +95,20 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
   }
-  if (flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) {
-    return run_flushed<Width, Rdna3>(flags, exec_mask, mode, d, a, b, c, excp_flag_user);
+  bool cdna_vector = false;
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+  cdna_vector = Cdna && rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3);
+#elif defined(RJ_ARITH_HAVE_X86_64_V4)
+  cdna_vector = Cdna && rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4);
+#endif
+  cdna_vector &= Width != 16 || !(flags & RJ_ARITH_FP_ROUND_MASK);
+  if ((flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) && !cdna_vector) {
+    return run_flushed<Width, Rdna3, Cdna>(flags, exec_mask, mode, d, a, b, c, excp_flag_user);
   }
   bool report = rocjitsu::arith::reports_fp_status(flags);
   uint32_t exceptions = 0;
   if constexpr (Rdna3 && Width != 16) {
-    if (report) {
+    if (report && !cdna_vector) {
       for (int lane = 0; lane < 32; ++lane) {
         if (!((exec_mask >> lane) & 1)) {
           continue;
@@ -113,19 +120,44 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
           bv |= T(b[1][lane]) << 32;
           cv |= T(c[1][lane]) << 32;
         }
-        exceptions |= rocjitsu::arith::fixup_rdna3_exceptions<Width>(av, bv, cv, mode, flags);
+        if constexpr (Cdna) {
+          // Legacy CDNA classifies modified sources regardless of CLAMP/DX10.
+          T values[] = {av, bv, cv};
+          using F = rocjitsu::arith::IeeeFormat<Width>;
+          for (int i = 0; i < 3; ++i) {
+            if (mode & (RJ_ARITH_ALU_ABS_A << i)) {
+              values[i] &= F::sign - 1;
+            }
+            if (mode & (RJ_ARITH_ALU_NEG_A << i)) {
+              values[i] ^= F::sign;
+            }
+          }
+          exceptions |= rocjitsu::arith::fixup_legacy_exceptions<Width>(
+              values[0], values[1], values[2],
+              mode & ~(RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_ABS_B | RJ_ARITH_ALU_ABS_C |
+                       RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_NEG_B | RJ_ARITH_ALU_NEG_C),
+              flags);
+        } else {
+          exceptions |= rocjitsu::arith::fixup_rdna3_exceptions<Width>(av, bv, cv, mode, flags);
+        }
       }
     }
   }
   bool saturate = flags & RJ_ARITH_FP16_OVFL;
+  // CDNA always quiets selected NaNs. In the shared backend IEEE selects only
+  // this numeric policy; architecture-specific OMOD gating happens before run.
+  // FP16 SIMD final packing uses nearest rounding; directed modes use the scalar packer.
+  const uint64_t numeric_flags = flags | (Cdna ? RJ_ARITH_FP_IEEE_MODE : 0);
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
-  if (!(flags & RJ_ARITH_FP_ROUND_MASK) &&
+  if ((Width != 16 || !(flags & RJ_ARITH_FP_ROUND_MASK)) &&
       rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
     // Read status operands before the numeric stores, which may alias sources.
-    if (report && !Rdna3) {
-      exceptions = rocjitsu::arith::fixup_exceptions_x86_64_v4<Width>(exec_mask, mode, a, b, c);
+    if (report && (!Rdna3 || Cdna)) {
+      exceptions =
+          rocjitsu::arith::fixup_exceptions_x86_64_v4<Width>(exec_mask, mode, a, b, c, flags, Cdna);
     }
-    rocjitsu::arith::fixup_x86_64_v4<Width, Rdna3>(exec_mask, mode, flags, d, a, b, c);
+    rocjitsu::arith::fixup_x86_64_v4<Width, Rdna3>(exec_mask, mode, numeric_flags, d, a, b, c,
+                                                   Cdna);
     if (report) {
       *excp_flag_user |= exceptions;
     }
@@ -133,12 +165,14 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
-  if (!(flags & RJ_ARITH_FP_ROUND_MASK) &&
+  if ((Width != 16 || !(flags & RJ_ARITH_FP_ROUND_MASK)) &&
       rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
-    if (report && !Rdna3) {
-      exceptions = rocjitsu::arith::fixup_exceptions_x86_64_v3<Width>(exec_mask, mode, a, b, c);
+    if (report && (!Rdna3 || Cdna)) {
+      exceptions =
+          rocjitsu::arith::fixup_exceptions_x86_64_v3<Width>(exec_mask, mode, a, b, c, flags, Cdna);
     }
-    rocjitsu::arith::fixup_x86_64_v3<Width, Rdna3>(exec_mask, mode, flags, d, a, b, c);
+    rocjitsu::arith::fixup_x86_64_v3<Width, Rdna3>(exec_mask, mode, numeric_flags, d, a, b, c,
+                                                   Cdna);
     if (report) {
       *excp_flag_user |= exceptions;
     }
@@ -162,7 +196,7 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
     result[lane] = rocjitsu::arith::fixup_value<Width, Rdna3>(
         av, bv, cv, mode, saturate, unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24),
         flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS, flags & RJ_ARITH_FP_DX10_CLAMP_OFF,
-        flags & RJ_ARITH_FP_IEEE_MODE);
+        Cdna || (flags & RJ_ARITH_FP_IEEE_MODE), Cdna);
     if (report && !Rdna3 && ((exec_mask >> lane) & 1)) {
       exceptions |= rocjitsu::arith::fixup_exceptions<Width>(av, bv, cv, mode);
     }
@@ -187,12 +221,15 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
 
 // Fix up division results and special values for Wave64. Reject invalid controls before
 // changing outputs.
-template <int Width, bool Rdna3 = false>
+template <int Width, bool Rdna3 = false, bool Cdna = false>
 int run_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *d,
                const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c,
                uint32_t *excp_flag_user) {
   constexpr auto instruction =
-      Width == 16   ? (Rdna3 ? rj_arith_v_div_fixup_f16_w32 : rj_arith_v_div_fixup_f16_w32_gfx12)
+      Cdna          ? (Width == 16   ? rj_arith_v_div_fixup_f16_w32_gfx942
+                       : Width == 32 ? rj_arith_v_div_fixup_f32_w32_gfx942
+                                     : rj_arith_v_div_fixup_f64_w32_gfx942)
+      : Width == 16 ? (Rdna3 ? rj_arith_v_div_fixup_f16_w32 : rj_arith_v_div_fixup_f16_w32_gfx12)
       : Width == 32 ? (Rdna3 ? rj_arith_v_div_fixup_f32_w32 : rj_arith_v_div_fixup_f32_w32_gfx12)
                     : (Rdna3 ? rj_arith_v_div_fixup_f64_w32 : rj_arith_v_div_fixup_f64_w32_gfx12);
 
@@ -234,6 +271,34 @@ int run_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *cons
     *excp_flag_user |= exceptions;
   }
   return RJ_ARITH_SUCCESS;
+}
+
+// Resolve inherited CDNA behavior without advertising a new hardware-qualified model.
+// Older CDNA gates OMOD; all CDNA quiets NaNs. Only wide Compatibility reports status.
+template <int Width, bool Older>
+int run_cdna(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
+             const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c,
+             uint32_t *status) {
+  const auto semantics = flags & RJ_ARITH_SEMANTICS_MASK;
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, Width == 16 ? RJ_ARITH_SEMANTICS_LOOSE : RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (mode >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  if (int error = validate_controls<Width, Older>(flags, uint32_t(mode))) {
+    return error;
+  }
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  if (Older && (!(flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) || (flags & RJ_ARITH_FP_IEEE_MODE))) {
+    mode &= ~uint64_t(RJ_ARITH_ALU_OMOD_MASK);
+  }
+  return run<Width, true, true>(flags, exec_mask, uint32_t(mode), d, a, b, c, status);
 }
 
 } // namespace
@@ -478,4 +543,94 @@ int rj_arith_v_div_fixup_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t in
                                  uint32_t *trapsts) {
   // Wave32 resolves Compatibility after guest MODE masks OMOD.
   return run_wave64<16, true>(flags, exec_mask, instruction_flags, d, a, b, c, trapsts);
+}
+
+// Repair provisional quotients using the inherited CDNA policy.
+int rj_arith_v_div_fixup_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c, uint32_t *fp_status) {
+  return run_cdna<16, true>(flags, exec_mask, instruction_flags, d, a, b, c, fp_status);
+}
+
+// Repair provisional quotients using the inherited CDNA policy.
+int rj_arith_v_div_fixup_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c, uint32_t *fp_status) {
+  return run_wave64<16, true, true>(flags, exec_mask, instruction_flags, d, a, b, c, fp_status);
+}
+
+// Repair provisional quotients using the inherited CDNA policy.
+int rj_arith_v_div_fixup_f16_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a, const uint32_t *const *b,
+                                         const uint32_t *const *c, uint32_t *fp_status) {
+  return run_cdna<16, false>(flags, exec_mask, instruction_flags, d, a, b, c, fp_status);
+}
+
+// Repair provisional quotients using the inherited CDNA policy.
+int rj_arith_v_div_fixup_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c, uint32_t *fp_status) {
+  return run_cdna<32, true>(flags, exec_mask, instruction_flags, d, a, b, c, fp_status);
+}
+
+// Repair provisional quotients using the inherited CDNA policy.
+int rj_arith_v_div_fixup_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c, uint32_t *fp_status) {
+  return run_wave64<32, true, true>(flags, exec_mask, instruction_flags, d, a, b, c, fp_status);
+}
+
+// Repair provisional quotients using the inherited CDNA policy.
+int rj_arith_v_div_fixup_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a, const uint32_t *const *b,
+                                         const uint32_t *const *c, uint32_t *fp_status) {
+  return run_cdna<32, false>(flags, exec_mask, instruction_flags, d, a, b, c, fp_status);
+}
+
+// Repair provisional quotients using the inherited CDNA policy.
+int rj_arith_v_div_fixup_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c, uint32_t *fp_status) {
+  return run_cdna<64, true>(flags, exec_mask, instruction_flags, d, a, b, c, fp_status);
+}
+
+// Repair provisional quotients using the inherited CDNA policy.
+int rj_arith_v_div_fixup_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c, uint32_t *fp_status) {
+  return run_wave64<64, true, true>(flags, exec_mask, instruction_flags, d, a, b, c, fp_status);
+}
+
+// Repair provisional quotients using the inherited CDNA policy.
+int rj_arith_v_div_fixup_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a, const uint32_t *const *b,
+                                         const uint32_t *const *c, uint32_t *fp_status) {
+  return run_cdna<64, false>(flags, exec_mask, instruction_flags, d, a, b, c, fp_status);
+}
+
+// The inherited legacy and ordinary CDNA half FIXUP paths use identical arithmetic.
+int rj_arith_v_div_fixup_legacy_f16_w32(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c, uint32_t *trapsts) {
+  return rj_arith_v_div_fixup_f16_w32_gfx942(flags, exec_mask, instruction_flags, d, a, b, c,
+                                             trapsts);
+}
+
+// The inherited legacy and ordinary CDNA half FIXUP paths use identical arithmetic.
+int rj_arith_v_div_fixup_legacy_f16_w64(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c, uint32_t *trapsts) {
+  return rj_arith_v_div_fixup_f16_w64_gfx942(flags, exec_mask, instruction_flags, d, a, b, c,
+                                             trapsts);
 }

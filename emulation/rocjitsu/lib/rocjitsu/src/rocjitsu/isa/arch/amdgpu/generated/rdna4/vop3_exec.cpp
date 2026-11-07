@@ -6672,9 +6672,10 @@ void VDivFixupF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) | ((inst_.abs & 4) ? RJ_ARITH_ALU_ABS_C : 0u) |
       ((opsel & 4) ? RJ_ARITH_ALU_HIGH_C : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |
       (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_ternary16(
-      wf, rj_arith_v_div_fixup_f16_w32_gfx12, rj_arith_v_div_fixup_f16_w64_gfx12,
-      wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, src2, /*rdna3=*/false);
+  amdgpu::arith::execute_float_ternary16(wf, rj_arith_v_div_fixup_f16_w32_gfx12,
+                                         rj_arith_v_div_fixup_f16_w64_gfx12,
+                                         wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1,
+                                         src2, /*rdna3=*/false, /*low_dst_zeroes_high=*/false);
 }
 
 RJ_NOINLINE void VDivFixupF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -6703,9 +6704,10 @@ RJ_NOINLINE void VDivFixupF16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) 
       ((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u) | ((inst_.abs & 4) ? RJ_ARITH_ALU_ABS_C : 0u) |
       ((opsel & 4) ? RJ_ARITH_ALU_HIGH_C : 0u) | ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |
       (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) | (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);
-  amdgpu::arith::execute_float_ternary16(
-      wf, rj_arith_v_div_fixup_f16_w32_gfx12, rj_arith_v_div_fixup_f16_w64_gfx12,
-      wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, src2, /*rdna3=*/false);
+  amdgpu::arith::execute_float_ternary16(wf, rj_arith_v_div_fixup_f16_w32_gfx12,
+                                         rj_arith_v_div_fixup_f16_w64_gfx12,
+                                         wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1,
+                                         src2, /*rdna3=*/false, /*low_dst_zeroes_high=*/false);
   dpp_write_mask_scope_.restore();
 }
 
