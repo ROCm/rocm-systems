@@ -14,6 +14,9 @@ This script handles:
 Usage from GitHub Actions (on ruby-linux-slurm-scale-runner):
   python3 rocm-systems/projects/rccl/ci/scripts/test_madengine.py \
       --artifact-dir ./build \
+      --candidate-sha "$CANDIDATE_SHA" \
+      --artifact-provenance "$WORK_DIR/candidate-artifact-run.json" \
+      --candidate-tuner-config rocm-systems/projects/rccl/tuner/rccl_tuner_gfx950.csv \
       --workload llama-3.1-70b-training \
       --cluster ruby \
       --nodes 2 \
@@ -26,19 +29,24 @@ import argparse
 import copy
 import csv
 import fcntl
-import filecmp
 import hashlib
 import json
 import logging
 import math
 import os
+import pwd
 import re
+import secrets
 import shlex
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
+import urllib.error
+import urllib.parse
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -80,6 +88,14 @@ OVERLAY_DOCKERFILE = "Dockerfile.rccl-overlay"
 # The maxtext family needs a second image: its A/B baseline cannot be the stock
 # registry tag, which carries no Primus. See stage_maxtext_baseline().
 MAXTEXT_BASELINE_DOCKERFILE = "Dockerfile.maxtext-baseline"
+# Likewise for sglang-disagg, whose baseline is MAD's Dockerfile.
+SGLANG_BASELINE_DOCKERFILE = "Dockerfile.sglang-baseline"
+SGLANG_MAD_DOCKERFILE = "docker/sglang_disagg_inference_full_overlay.ubuntu.amd.Dockerfile"
+# Families whose baseline is built here rather than pulled as the stock tag.
+LOCAL_BASELINE_DOCKERFILES = {
+    "maxtext": MAXTEXT_BASELINE_DOCKERFILE,
+    "sglang-disagg": SGLANG_BASELINE_DOCKERFILE,
+}
 
 # Must not predate ROCm/madengine#213: the A/B runs madengine inside salloc.
 MADENGINE_REPO = "https://github.com/ROCm/madengine.git"
@@ -273,6 +289,123 @@ WORKLOAD_CONFIGS = {
             "--ulimit memlock=-1 --ulimit nofile=1048576 "
             "-v /sys:/sys:ro -v /run/udev:/run/udev:ro",
     },
+    # The first inference workload: DeepSeek-R1 served disaggregated, two
+    # prefill and two decode nodes, KV cache moved by nixl. MoE all-to-all is
+    # left to RCCL (MOE_A2A_BACKEND=none) rather than MoRI, so expert traffic
+    # is what the candidate library carries.
+    #
+    # Both A/B images are MAD's sglang Dockerfile; see
+    # stage_sglang_baseline().
+    "deepseek-r1-sglang-disagg": {
+        "type": "inference",
+        "family": "sglang-disagg",
+        # madengine names each result row <this>_2p2d_isl<I>_osl<O>_con<C>.
+        "model_repo": "sglang-disagg-deepseek-r1",
+        # A ROCm SDK (TheRock) base, not a rocm7xx one: the candidate librccl
+        # is kpack-split, and a pre-kpack HIP runtime segfaults on it in
+        # ncclInitKernelsForDevice. No newer than sglang 0.5.18: 0.5.19 split
+        # --cuda-graph-bs into -decode/-prefill, and argparse rejects the
+        # plain flag MAD's models.yaml passes as ambiguous.
+        "base_image": "rocm/sgl-dev:v0.5.18-rocm10-mi35x-20260904",
+        "gpu_target": "gfx950",
+        "metric_key": "output_token_throughput_tok_s",
+        "metric_unit": "output tok/s of the whole 2P+2D deployment",
+        "multiple_results": "perf_sglang-disagg-DeepSeek-R1.csv",
+        # The sweep points that are scored, in place of precisions; the rest of
+        # the sweep is run and ignored. Only the highest concurrency: the lower
+        # ones are latency-bound and say little about the collectives.
+        "precisions": ["isl1024_osl1024_con64", "isl8192_osl1024_con64"],
+        "tags": ["pyt", "sglang", "disagg", "inference", "deepseek-r1"],
+        "model_args": "--model-name DeepSeek-R1 --model-path /models/DeepSeek-R1-0528 "
+            "--run-mori 1 --dp-mode 1 --xp 2 --yd 2 --gpus-per-node 8 "
+            "--kv-transfer-backend nixl",
+        "disagg": {"prefill_nodes": 2, "decode_nodes": 2},
+        "env_vars": {
+            "MODEL_NAME": "DeepSeek-R1",
+            "MODEL_PATH": "/models/DeepSeek-R1-0528",
+            "RUN_MORI": "1",
+            "DP_MODE": "1",
+            "MOE_A2A_BACKEND": "none",
+            "xP": "2",
+            "yD": "2",
+            "GPUS_PER_NODE": "8",
+            "KV_TRANSFER_BACKEND": "nixl",
+            # INFO for the same reason as the MaxText entry: at WARN only a
+            # communicator's rank 0 prints the version banner, and a server
+            # spanning two nodes has it on one of them.
+            "NCCL_DEBUG": "INFO",
+            # TUNING records the effective CSV source. The candidate gate
+            # requires its SHA-pinned gfx950 table and rejects a stale stock CSV.
+            "NCCL_DEBUG_SUBSYS": "INIT,NET,TUNING",
+            # Thor2 settings the sglang stack runs with, over the cluster's.
+            "NCCL_IB_QPS_PER_CONNECTION": "1",
+            "NCCL_IB_USE_INLINE": "0",
+            "NCCL_IB_MERGE_NICS": "0",
+            "NCCL_IB_SPLIT_DATA_ON_QPS": "0",
+            "NCCL_IB_ADAPTIVE_ROUTING": "0",
+            "NCCL_GDR_FLUSH_DISABLE": "1",
+            "NCCL_DMABUF_ENABLE": "0",
+            "NCCL_IB_ROCE_VERSION_NUM": "2",
+            "IB_DEVICES": "bnxt_re0,bnxt_re1,bnxt_re2,bnxt_re3,"
+                "bnxt_re4,bnxt_re5,bnxt_re6,bnxt_re7",
+            "MORI_RDMA_DEVICES": "bnxt_re0,bnxt_re1,bnxt_re2,bnxt_re3,"
+                "bnxt_re4,bnxt_re5,bnxt_re6,bnxt_re7",
+            "MORI_SOCKET_IFNAME": "fenic0",
+            "MORI_IB_GID_INDEX": "3",
+            "MORI_JIT_CACHE_DIR": "/tmp/mori_jit",
+            "MORI_SHMEM_HEAP_SIZE": "17179869184",
+            "RDMAV_DRIVERS": "bnxt_re",
+            "IBV_DRIVERS": "bnxt_re",
+            "GPU_MAX_HW_QUEUES": "2",
+            "HSA_ENABLE_SDMA": "0",
+            "HSA_FORCE_FINE_GRAIN_PCIE": "1",
+            # The common OMP/TORCH_NCCL settings reach only the deployment
+            # env, not the container, and without OMP_NUM_THREADS each of the
+            # eight server processes per node sizes its pool to every core.
+            "OMP_NUM_THREADS": "8",
+            "TORCH_NCCL_HIGH_PRIORITY": "1",
+            "TORCH_NCCL_ASYNC_ERROR_HANDLING": "1",
+            # Part of meta64 has less VRAM per GPU, and sglang refuses a TP
+            # group spanning both kinds ("The memory capacity is unbalanced").
+            # Off, it warns and sizes the KV pool by the smaller GPU; both A/B
+            # phases share the nodes, so the ratio is unaffected.
+            "SGLANG_ENABLE_TP_MEMORY_INBALANCE_CHECK": "0",
+            # A hang otherwise holds four nodes for two hours before failing.
+            "BARRIER_TIMEOUT_SECONDS": "1800",
+            "IP_SYNC_TIMEOUT": "1800",
+            "SMOKE": "0",
+            # A point is only 2 x concurrency requests, and one pass at
+            # isl1024 con64 moved 6.8% between two A/A phases on the same
+            # nodes. The parser keeps each point's best iteration, so three
+            # passes of just the gated points cost about what the full sweep
+            # did.
+            "BENCHMARK_ITR": "3",
+            "BENCHMARK_COMBINATIONS": "1024/1024 8192/1024",
+            "BENCHMARK_CONCURRENCY_LEVELS": "64",
+            "BENCHMARK_PRECHECK": "0",
+            "BENCHMARK_FAIL_FAST": "1",
+        },
+        # The image builds its own rdma-core 63 for Thor2; the host's 61
+        # mounted over it would put nixl and MoRI on a stack never run here.
+        "mount_host_ib_libs": False,
+        "required_nodes": 4,
+        "slurm_partition": "meta64",
+        "gpus_per_node": 8,
+        # One phase took 31 min by hand with the image cached; each phase here
+        # also builds, saves and loads it.
+        "time_limit": "03:00:00",
+        "docker_mounts": {
+            "/dev/infiniband": "/dev/infiniband",
+            "/sys/class/infiniband": "/sys/class/infiniband",
+        },
+        # --init: the launcher polls its servers with `kill -0`, which succeeds
+        # on a zombie, and without a reaping PID 1 every node exits 1 after a
+        # complete sweep.
+        "docker_run_options": "--init --privileged --group-add render --shm-size 64G "
+            "--device=/dev/infiniband --cap-add IPC_LOCK --ulimit memlock=-1 "
+            "--ulimit nofile=1048576:1048576 "
+            "-v /sys:/sys:ro -v /run/udev:/run/udev:ro -e SLURM_JOB_ID",
+    },
 }
 
 CLUSTER_CONFIGS = {
@@ -293,6 +426,8 @@ CLUSTER_CONFIGS = {
             "NCCL_DEBUG": "WARN",
         },
         "results_base": "/apps/rccl-ci/madengine/perf",
+        # Mounted read-only at /models for the inference workloads.
+        "models_dir": "/apps/data/models",
     },
 }
 
@@ -316,6 +451,24 @@ def check_mad_knobs(work_dir: Path, workload_config: dict) -> None:
         raise RuntimeError(
             f"MAD pin {MAD_REF[:12]} does not read {', '.join(missing)} "
             f"({script}) -- the run would ignore it"
+        )
+
+
+def check_sglang_knobs(work_dir: Path, workload_config: dict) -> None:
+    """Fail if the pinned SGLang launcher cannot consume its timeout knob."""
+    if workload_config.get("family") != "sglang-disagg":
+        return
+    env = workload_config.get("env_vars", {})
+    knob = "BARRIER_TIMEOUT_SECONDS"
+    if env.get(knob) != "1800" or "BARRIER_TIMEOUT_S" in env:
+        raise RuntimeError(f"{workload_config['model_repo']} must set {knob}=1800")
+    script = (
+        work_dir / "scripts" / "sglang_disagg" / "sglang_disagg_mori_io_ep.sh"
+    )
+    text = script.read_text(errors="replace") if script.is_file() else ""
+    if not re.search(rf"(?<![A-Za-z0-9_]){knob}(?![A-Za-z0-9_])", text):
+        raise RuntimeError(
+            f"MAD pin {MAD_REF[:12]} does not read {knob} ({script})"
         )
 
 
@@ -420,6 +573,9 @@ def install_madengine(work_dir: Path, family: str = "megatron") -> Path:
     if family == "maxtext":
         scripts_src = mad_dir / "scripts" / "jax-maxtext"
         scripts_name = "jax-maxtext"
+    elif family == "sglang-disagg":
+        scripts_src = mad_dir / "scripts" / "sglang_disagg"
+        scripts_name = "sglang_disagg"
     else:
         scripts_src = mad_dir / "scripts" / "primus_megatron-lm"
         if not scripts_src.is_dir():
@@ -432,18 +588,28 @@ def install_madengine(work_dir: Path, family: str = "megatron") -> Path:
         subprocess.run(["cp", "-r", str(scripts_src), str(scripts_dst)], check=True)
         log.info("Copied MAD %s scripts to %s", scripts_name, scripts_dst)
     elif not scripts_src.is_dir():
-        # Fatal for maxtext: the manifest points `scripts` at run.sh, and a
-        # missing one surfaces as a container-side "no such file" on every
-        # node instead of here. The megatron path keeps its historical warning.
+        # Fatal for maxtext and sglang: the manifest points `scripts` at
+        # run.sh, and a missing one surfaces as a container-side "no such
+        # file" on every node instead of here. The megatron path keeps its
+        # historical warning.
         if family == "maxtext":
             raise RuntimeError(
                 f"MAD jax-maxtext scripts not found at {scripts_src} -- "
                 f"MAD pin {MAD_REF[:12]} predates ROCm/MAD#228"
             )
+        if family == "sglang-disagg":
+            raise RuntimeError(
+                f"MAD sglang_disagg scripts not found at {scripts_src} -- "
+                f"MAD pin {MAD_REF[:12]} does not carry them"
+            )
         log.error("MAD primus scripts not found — expected at %s", scripts_src)
 
     if family == "maxtext":
         fetch_primus(mad_dir)
+    if family == "sglang-disagg" and not (mad_dir / SGLANG_MAD_DOCKERFILE).is_file():
+        raise RuntimeError(
+            f"MAD pin {MAD_REF[:12]} has no {SGLANG_MAD_DOCKERFILE}"
+        )
 
     result = subprocess.run(
         ["madengine", "--version"],
@@ -460,11 +626,15 @@ def install_madengine(work_dir: Path, family: str = "megatron") -> Path:
 def get_rccl_commit(rccl_lib: Path | None = None) -> str:
     """Derive a unique identifier for the RCCL build.
 
-    Checks, in order: RCCL_COMMIT_HASH env, GITHUB_RUN_ID env, sha256 of
-    the librccl.so binary.  Does NOT fall back to ``git rev-parse HEAD``
+    Checks, in order: exact CANDIDATE_SHA, RCCL_COMMIT_HASH, GITHUB_RUN_ID,
+    sha256 of the librccl.so binary. Does NOT fall back to ``git rev-parse HEAD``
     because in CI the checkout is TheRock (not RCCL), which would produce
     a constant tag and cause stale cache hits on persistent runners.
     """
+    commit = os.environ.get("CANDIDATE_SHA", "")
+    if commit:
+        return commit[:12]
+
     commit = os.environ.get("RCCL_COMMIT_HASH", "")
     if commit:
         return commit[:12]
@@ -498,18 +668,366 @@ def _rccl_uses_kpack(rccl_lib: Path) -> bool:
         return False
 
 
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def rccl_kpack_files(rccl_lib: Path) -> list[Path]:
+    """The kpack archives belonging to *rccl_lib*, in stable name order."""
+    files = list(rccl_lib.parent.rglob("*.kpack"))
+    if not files:
+        files = list(rccl_lib.parent.parent.rglob("rccl*.kpack"))
+    return sorted(set(p.resolve() for p in files), key=lambda p: p.name)
+
+
+def expected_overlay_asset_sources(
+    rccl_lib: Path, tuner_config: Path
+) -> dict[str, Path]:
+    """Exact relative file set the candidate overlay must contain."""
+    sources: dict[str, Path] = {}
+
+    def add(relative: str, source: Path) -> None:
+        if relative in sources:
+            raise RuntimeError(f"duplicate candidate overlay asset name: {relative}")
+        sources[relative] = source.resolve()
+
+    for source in sorted(rccl_lib.parent.glob("librccl*"), key=lambda path: path.name):
+        if source.is_file():
+            add(source.name, source)
+    for source in rccl_kpack_files(rccl_lib):
+        add(f".kpack/{source.name}", source)
+    add(f"tuner/{tuner_config.name}", tuner_config)
+    return sources
+
+
+def overlay_asset_identity(hashes: dict[str, str]) -> str:
+    """Stable identity of an exact staged relative-path/hash mapping."""
+    digest = hashlib.sha256()
+    for relative, sha256 in sorted(hashes.items()):
+        digest.update(relative.encode())
+        digest.update(b"\0")
+        digest.update(sha256.encode())
+        digest.update(b"\0")
+    return digest.hexdigest()[:16]
+
+
+def build_context_tree_identity(root: Path) -> str:
+    """Full digest of names, regular bytes and symlink targets under *root*."""
+    digest = hashlib.sha256()
+    for path in sorted(root.rglob("*")):
+        relative = path.relative_to(root).as_posix()
+        details = path.lstat()
+        mode = f"{stat.S_IMODE(details.st_mode):04o}".encode()
+        if path.is_symlink():
+            kind = b"symlink"
+            contents = os.readlink(path).encode()
+        elif path.is_dir():
+            kind = b"directory"
+            contents = b""
+        elif path.is_file():
+            kind = b"file"
+            contents = sha256_file(path).encode()
+        else:
+            raise RuntimeError(f"unsupported build-context entry: {path}")
+        digest.update(relative.encode())
+        digest.update(b"\0")
+        digest.update(kind)
+        digest.update(b"\0")
+        digest.update(mode)
+        digest.update(b"\0")
+        digest.update(contents)
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def candidate_overlay_identity(
+    candidate_asset_id: str, base_digest: str, recipe_sha256: str
+) -> str:
+    """Identity of candidate assets, immutable base and exact build recipe."""
+    digest = hashlib.sha256()
+    digest.update(candidate_asset_id.encode())
+    digest.update(b"\0")
+    digest.update(base_digest.encode())
+    digest.update(b"\0")
+    digest.update(recipe_sha256.encode())
+    return digest.hexdigest()[:16]
+
+
+def candidate_recipe_identity(
+    dockerfile_content: str, context_tree_sha256: str = ""
+) -> str:
+    """Digest of the generated recipe and any copied non-RCCL context."""
+    digest = hashlib.sha256()
+    digest.update(dockerfile_content.encode())
+    digest.update(b"\0")
+    digest.update(context_tree_sha256.encode())
+    return digest.hexdigest()
+
+
+def rccl_asset_identity(rccl_lib: Path, tuner_config: Path) -> str:
+    """Short identity of every version-coupled candidate overlay asset."""
+    sources = expected_overlay_asset_sources(rccl_lib, tuner_config)
+    return overlay_asset_identity({
+        relative: sha256_file(source) for relative, source in sources.items()
+    })
+
+
+def _staged_overlay_asset_provenance_fd(
+    staging_fd: int, prefix: str = ""
+) -> dict:
+    """Hashes the exact staged tree through no-follow directory descriptors."""
+    files = []
+    hashes: dict[str, str] = {}
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    with os.scandir(staging_fd) as entries:
+        names = sorted(entry.name for entry in entries)
+    for name in names:
+        relative = f"{prefix}/{name}" if prefix else name
+        try:
+            entry_fd = os.open(
+                name,
+                os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | cloexec,
+                dir_fd=staging_fd,
+            )
+        except OSError as exc:
+            raise RuntimeError(
+                f"cannot open staged candidate overlay asset: {relative}"
+            ) from exc
+        try:
+            details = os.fstat(entry_fd)
+            if details.st_uid != os.geteuid():
+                raise RuntimeError(
+                    f"foreign-owned candidate overlay asset: {relative}"
+                )
+            if stat.S_ISDIR(details.st_mode):
+                nested = _staged_overlay_asset_provenance_fd(entry_fd, relative)
+                files.extend(nested["files"])
+                hashes.update({
+                    item["path"]: item["sha256"] for item in nested["files"]
+                })
+                continue
+            if not stat.S_ISREG(details.st_mode) or details.st_nlink != 1:
+                raise RuntimeError(
+                    f"non-regular candidate overlay asset: {relative}"
+                )
+            digest = hashlib.sha256()
+            with os.fdopen(os.dup(entry_fd), "rb") as stream:
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            sha256 = digest.hexdigest()
+            hashes[relative] = sha256
+            files.append({
+                "path": relative,
+                "sha256": sha256,
+                "size": details.st_size,
+            })
+        finally:
+            os.close(entry_fd)
+    return {"asset_id": overlay_asset_identity(hashes), "files": files}
+
+
+def staged_overlay_asset_provenance(staging_dir: Path) -> dict:
+    """Hashes and identity of a safely opened exact staged file set."""
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    staging_fd = os.open(
+        staging_dir,
+        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | cloexec,
+    )
+    try:
+        details = os.fstat(staging_fd)
+        if details.st_uid != os.geteuid():
+            raise RuntimeError(
+                f"foreign-owned candidate overlay staging path: {staging_dir}"
+            )
+        return _staged_overlay_asset_provenance_fd(staging_fd)
+    finally:
+        os.close(staging_fd)
+
+
+def _remove_owned_directory_contents(directory_fd: int, display: Path) -> None:
+    """Remove a runner-owned tree through directory-relative no-follow opens."""
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | cloexec
+    with os.scandir(directory_fd) as entries:
+        names = [entry.name for entry in entries]
+    for name in names:
+        details = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+        if details.st_uid != os.geteuid():
+            raise RuntimeError(f"foreign-owned candidate overlay path: {display / name}")
+        if stat.S_ISDIR(details.st_mode):
+            child_fd = os.open(name, directory_flags, dir_fd=directory_fd)
+            try:
+                _remove_owned_directory_contents(child_fd, display / name)
+            finally:
+                os.close(child_fd)
+            os.rmdir(name, dir_fd=directory_fd)
+        else:
+            os.unlink(name, dir_fd=directory_fd)
+
+
+def recreate_overlay_staging_dir(ctx_dir: Path) -> tuple[Path, int, int]:
+    """Recreate only rccl_libs, rejecting unsafe reused-workdir paths."""
+    ctx_dir.mkdir(parents=True, exist_ok=True)
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | cloexec
+    try:
+        ctx_fd = os.open(ctx_dir, directory_flags)
+    except OSError as exc:
+        raise RuntimeError(f"untrusted candidate overlay context: {ctx_dir}") from exc
+    staging_dir = ctx_dir / "rccl_libs"
+    staging_fd = -1
+    try:
+        ctx_stat = os.fstat(ctx_fd)
+        if ctx_stat.st_uid != os.geteuid():
+            raise RuntimeError(f"untrusted candidate overlay context: {ctx_dir}")
+        os.fchmod(ctx_fd, 0o755)
+        try:
+            staging_fd = os.open("rccl_libs", directory_flags, dir_fd=ctx_fd)
+        except FileNotFoundError:
+            staging_fd = -1
+        except OSError as exc:
+            raise RuntimeError(
+                f"untrusted candidate overlay staging path: {staging_dir}"
+            ) from exc
+        if staging_fd >= 0:
+            try:
+                staging_stat = os.fstat(staging_fd)
+                if staging_stat.st_uid != os.geteuid():
+                    raise RuntimeError(
+                        f"untrusted candidate overlay staging path: {staging_dir}"
+                    )
+                _remove_owned_directory_contents(staging_fd, staging_dir)
+            finally:
+                os.close(staging_fd)
+                staging_fd = -1
+            os.rmdir("rccl_libs", dir_fd=ctx_fd)
+        os.mkdir("rccl_libs", mode=0o755, dir_fd=ctx_fd)
+        staging_fd = os.open("rccl_libs", directory_flags, dir_fd=ctx_fd)
+        os.fchmod(staging_fd, 0o755)
+        current_ctx_stat = ctx_dir.stat(follow_symlinks=False)
+        if (
+            current_ctx_stat.st_dev != ctx_stat.st_dev
+            or current_ctx_stat.st_ino != ctx_stat.st_ino
+        ):
+            os.close(staging_fd)
+            staging_fd = -1
+            raise RuntimeError(f"candidate overlay context changed: {ctx_dir}")
+        opened_stat = os.fstat(staging_fd)
+        current_stat = staging_dir.stat(follow_symlinks=False)
+        if (
+            opened_stat.st_uid != os.geteuid()
+            or opened_stat.st_dev != current_stat.st_dev
+            or opened_stat.st_ino != current_stat.st_ino
+        ):
+            raise RuntimeError(f"candidate overlay staging path changed: {staging_dir}")
+        return staging_dir, staging_fd, ctx_fd
+    except BaseException:
+        if staging_fd >= 0:
+            os.close(staging_fd)
+        os.close(ctx_fd)
+        raise
+
+
+def copy_overlay_asset(staging_fd: int, relative: str, source: Path) -> None:
+    """Copy one source into staging using only no-follow relative opens."""
+    parts = relative.split("/")
+    if not parts or any(part in ("", ".", "..") for part in parts):
+        raise RuntimeError(f"invalid candidate overlay asset path: {relative}")
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    parent_fd = os.dup(staging_fd)
+    try:
+        for part in parts[:-1]:
+            try:
+                os.mkdir(part, mode=0o755, dir_fd=parent_fd)
+            except FileExistsError:
+                pass
+            child_fd = os.open(
+                part,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | cloexec,
+                dir_fd=parent_fd,
+            )
+            child_stat = os.fstat(child_fd)
+            if child_stat.st_uid != os.geteuid():
+                os.close(child_fd)
+                raise RuntimeError(
+                    f"foreign-owned candidate overlay directory: {relative}"
+                )
+            os.close(parent_fd)
+            parent_fd = child_fd
+        source_fd = os.open(
+            source,
+            os.O_RDONLY | os.O_NOFOLLOW | cloexec,
+        )
+        try:
+            source_stat = os.fstat(source_fd)
+            if not stat.S_ISREG(source_stat.st_mode):
+                raise RuntimeError(f"non-regular candidate source asset: {source}")
+            destination_fd = os.open(
+                parts[-1],
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | cloexec,
+                0o600,
+                dir_fd=parent_fd,
+            )
+            try:
+                with os.fdopen(os.dup(source_fd), "rb") as src, \
+                        os.fdopen(os.dup(destination_fd), "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+                # Docker root is NFS root-squashed on the compute nodes, so
+                # publish completed build-context assets read-only to others.
+                os.fchmod(destination_fd, 0o644)
+            finally:
+                os.close(destination_fd)
+        finally:
+            os.close(source_fd)
+    finally:
+        os.close(parent_fd)
+
+
+def verify_staged_overlay_assets(
+    staging_dir: Path, expected_sources: dict[str, Path]
+) -> dict:
+    """Fail unless staged names and bytes exactly match current source inputs."""
+    expected_hashes = {
+        relative: sha256_file(source)
+        for relative, source in expected_sources.items()
+    }
+    staged = staged_overlay_asset_provenance(staging_dir)
+    staged_hashes = {
+        item["path"]: item["sha256"] for item in staged["files"]
+    }
+    if staged_hashes != expected_hashes:
+        missing = sorted(set(expected_hashes) - set(staged_hashes))
+        stale = sorted(set(staged_hashes) - set(expected_hashes))
+        mismatched = sorted(
+            relative for relative in set(staged_hashes) & set(expected_hashes)
+            if staged_hashes[relative] != expected_hashes[relative]
+        )
+        raise RuntimeError(
+            "candidate overlay staging mismatch: "
+            f"missing={missing}, stale={stale}, hash_mismatch={mismatched}"
+        )
+    if staged["asset_id"] != overlay_asset_identity(expected_hashes):
+        raise RuntimeError("candidate overlay staged identity mismatch")
+    return staged
+
+
 def get_rccl_fingerprint(rccl_lib: Path) -> dict:
     """Extract identifying information from a librccl.so artifact.
 
-    Returns a dict with ``md5``, ``version`` (e.g. ``2.30.4-HEAD:e711c9e``),
-    and ``size`` that can be compared against runtime output.
+    Returns hashes, ``version`` (e.g. ``2.30.4-HEAD:e711c9e``), and ``size``
+    that can be compared against runtime output.
     """
-    fp: dict = {"md5": "", "version": "", "size": 0}
+    fp: dict = {"md5": "", "sha256": "", "version": "", "size": 0}
     if not rccl_lib or not rccl_lib.exists():
         return fp
     resolved = rccl_lib.resolve()
     fp["size"] = resolved.stat().st_size
     fp["md5"] = hashlib.md5(resolved.read_bytes()).hexdigest()
+    fp["sha256"] = sha256_file(resolved)
     try:
         result = subprocess.run(
             ["strings", str(resolved)],
@@ -557,13 +1075,188 @@ def _split_rccl_version(version: str) -> tuple[str, str, bool]:
     return m.group(1), (m.group(2) or "").lower(), m.group(3) == "+"
 
 
+CANDIDATE_TUNER_PATH = "/opt/rccl-candidate/tuner/rccl_tuner_gfx950.csv"
+BIND_MOUNT_TUNER_PATH = "/tmp/rccl-candidate-tuner-gfx950.csv"
+FULL_COMMIT_SHA = re.compile(r"^[0-9a-f]{40}$")
+CANDIDATE_PROVENANCE = "candidate-provenance.json"
+
+
+def candidate_provenance(
+    candidate_sha: str,
+    artifact_provenance_path: Path,
+    tuner_config: Path,
+    rccl_lib: Path,
+    rccl_fingerprint: dict,
+) -> dict:
+    """Validate all pre-run candidate assets and return their manifest."""
+    candidate_sha = candidate_sha.strip().lower()
+    if not FULL_COMMIT_SHA.fullmatch(candidate_sha):
+        raise RuntimeError(
+            f"candidate SHA must be a full 40-character commit, got {candidate_sha!r}"
+        )
+    try:
+        artifact = json.loads(artifact_provenance_path.read_text())
+    except (OSError, ValueError) as exc:
+        raise RuntimeError(
+            f"cannot read candidate artifact provenance {artifact_provenance_path}: {exc}"
+        ) from exc
+    for key in ("candidate_sha", "artifact_source_sha"):
+        actual = str(artifact.get(key, "")).lower()
+        if actual != candidate_sha:
+            raise RuntimeError(
+                f"candidate artifact provenance mismatch: {key}={actual!r}, "
+                f"expected {candidate_sha}"
+            )
+
+    build_sha = str(artifact.get("artifact_build_sha") or candidate_sha).lower()
+    if not FULL_COMMIT_SHA.fullmatch(build_sha):
+        raise RuntimeError(f"candidate artifact build SHA is invalid: {build_sha!r}")
+    _, lib_commit, dirty = _split_rccl_version(rccl_fingerprint.get("version", ""))
+    if dirty or not lib_commit or not build_sha.startswith(lib_commit):
+        raise RuntimeError(
+            "candidate librccl version does not match the exact artifact build SHA: "
+            f"version={rccl_fingerprint.get('version')!r}, build={build_sha}, "
+            f"source={candidate_sha}"
+        )
+    if not tuner_config.is_file():
+        raise RuntimeError(f"candidate tuner source is missing: {tuner_config}")
+
+    uses_kpack = _rccl_uses_kpack(rccl_lib)
+    kpack_files = rccl_kpack_files(rccl_lib)
+    if uses_kpack and not kpack_files:
+        raise RuntimeError(
+            f"{rccl_lib} references kpack kernels but its exact artifact has no .kpack files"
+        )
+
+    return {
+        "schema_version": 1,
+        "candidate_sha": candidate_sha,
+        "candidate_asset_id": rccl_asset_identity(rccl_lib, tuner_config),
+        "overlay_asset_id": "",
+        "artifact": artifact,
+        "librccl": {
+            "path": os.fspath(rccl_lib),
+            **rccl_fingerprint,
+        },
+        "kpack": [
+            {"path": os.fspath(path), "sha256": sha256_file(path), "size": path.stat().st_size}
+            for path in kpack_files
+        ],
+        "tuner": {
+            "policy": "remove stock disk overrides and install the exact candidate CSV",
+            "source": "artifact build source tree",
+            "source_sha": build_sha,
+            "source_path": os.fspath(tuner_config),
+            "source_sha256": sha256_file(tuner_config),
+            "expected_runtime_source": CANDIDATE_TUNER_PATH,
+        },
+    }
+
+
+def write_candidate_provenance(work_dir: Path, manifest: dict) -> None:
+    """Write the live manifest and keep the repro copy in sync when present."""
+    text = json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+    (work_dir / CANDIDATE_PROVENANCE).write_text(text)
+    repro = work_dir / REPRO_DIR / CANDIDATE_PROVENANCE
+    if repro.parent.is_dir():
+        repro.write_text(text)
+
+
 # RCCL prints this on EVERY call of a deprecated API name (src/misc/api_trace.cc),
 # at WARN, so NCCL_DEBUG=WARN keeps it. GPT-OSS-120B's MoE all-to-all makes it
 # 97% of each node log, which madengine keeps three copies of.
 _LOG_SPAM_RE = re.compile(rb"NCCL WARN Please note that (\w+) is deprecated")
 
 
-def squash_log_spam(run_dir: Path) -> int:
+def _trusted_container_uids() -> set[int]:
+    """UIDs under which container root can appear on local/NFS storage."""
+    trusted = {0, (1 << 32) - 2}
+    for account in ("nobody", "nfsnobody"):
+        try:
+            trusted.add(pwd.getpwnam(account).pw_uid)
+        except KeyError:
+            pass
+    return trusted
+
+
+def _open_trusted_server_log_dir(
+    run_dir: Path, slurm_job_id: str
+) -> tuple[Path, int] | None:
+    """Open the exact job directory through no-follow directory descriptors."""
+    if not re.fullmatch(r"[1-9][0-9]*", slurm_job_id):
+        return None
+    run_logs = run_dir / "slurm_output" / "run_logs"
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | cloexec
+    try:
+        run_logs_fd = os.open(run_logs, directory_flags)
+    except OSError:
+        return None
+    mount_root_fd = -1
+    private_root_fds: list[tuple[str, int]] = []
+    try:
+        with os.scandir(run_logs_fd) as entries:
+            private_names = sorted(
+                entry.name for entry in entries
+                if re.fullmatch(r"run-[0-9a-f]{32}", entry.name)
+            )
+        for name in private_names:
+            try:
+                private_root_fds.append(
+                    (name, os.open(name, directory_flags, dir_fd=run_logs_fd))
+                )
+            except OSError:
+                continue
+        # Unit/local fixtures from before the private mount root use run_logs
+        # directly. CI always has exactly one random root created by the runner.
+        if len(private_root_fds) > 1:
+            return None
+        private_layout = bool(private_root_fds)
+        if private_layout:
+            mount_name, mount_root_fd = private_root_fds.pop()
+            job_logs = run_logs / mount_name / slurm_job_id
+        else:
+            mount_root_fd = os.dup(run_logs_fd)
+            job_logs = run_logs / slurm_job_id
+        try:
+            job_logs_fd = os.open(
+                slurm_job_id, directory_flags, dir_fd=mount_root_fd
+            )
+        except OSError:
+            return None
+        try:
+            job_stat = os.fstat(job_logs_fd)
+            if private_layout and job_stat.st_uid not in _trusted_container_uids():
+                log.warning(
+                    "Rejecting server log directory %s owned by untrusted uid %d",
+                    job_logs,
+                    job_stat.st_uid,
+                )
+                os.close(job_logs_fd)
+                return None
+        except BaseException:
+            os.close(job_logs_fd)
+            raise
+        return job_logs, job_logs_fd
+    finally:
+        for _, fd in private_root_fds:
+            os.close(fd)
+        if mount_root_fd >= 0:
+            os.close(mount_root_fd)
+        os.close(run_logs_fd)
+
+
+def _trusted_server_log_dir(run_dir: Path, slurm_job_id: str) -> Path | None:
+    """The launcher's exact job directory, never a symlink or wildcard match."""
+    opened = _open_trusted_server_log_dir(run_dir, slurm_job_id)
+    if opened is None:
+        return None
+    path, fd = opened
+    os.close(fd)
+    return path
+
+
+def squash_log_spam(run_dir: Path, slurm_job_id: str = "") -> int:
     """Drop the repeats of _LOG_SPAM_RE lines from one phase's logs, in place.
 
     The first occurrence of each stays where it was, and one line at the end
@@ -574,15 +1267,33 @@ def squash_log_spam(run_dir: Path) -> int:
     if not log_dir.is_dir():
         return 0
     saved = 0
-    for path in sorted(
-        p for p in log_dir.rglob("*")
-        if p.suffix in (".out", ".err", ".log") and p.is_file()
-    ):
+    paths = []
+    for path in log_dir.rglob("*"):
+        if path.suffix not in (".out", ".err", ".log"):
+            continue
+        if path.is_symlink() or not path.is_file():
+            continue
+        try:
+            under_run_logs = path.is_relative_to(log_dir / "run_logs")
+        except AttributeError:  # pragma: no cover - Python < 3.9 compatibility
+            under_run_logs = (log_dir / "run_logs") in path.parents
+        # Container-owned shared logs are copied with O_NOFOLLOW first; only
+        # the runner-owned snapshot is rewritten.
+        if under_run_logs:
+            continue
+        paths.append(path)
+    verified = run_dir / "verified_run_logs"
+    if verified.is_dir() and not verified.is_symlink():
+        paths.extend(
+            path for path in verified.rglob("*")
+            if path.suffix == ".log" and path.is_file() and not path.is_symlink()
+        )
+    for path in sorted(paths):
         dropped: dict[bytes, int] = {}
         tmp = path.with_name(path.name + ".squash")
         try:
             before = path.stat().st_size
-            with path.open("rb") as src, tmp.open("wb") as dst:
+            with path.open("rb") as src, tmp.open("xb") as dst:
                 for line in src:
                     m = _LOG_SPAM_RE.search(line)
                     if m:
@@ -609,15 +1320,180 @@ def squash_log_spam(run_dir: Path) -> int:
     return saved
 
 
-def runtime_rccl_versions(work_dir: Path) -> list[str]:
-    """Distinct ``RCCL version :`` banners across one phase's node logs."""
+def snapshot_server_logs(run_dir: Path, slurm_job_id: str) -> Path | None:
+    """Copy regular logs from the exact Slurm job into a runner-owned artifact dir."""
+    opened_source = _open_trusted_server_log_dir(run_dir, slurm_job_id)
+    if opened_source is None:
+        return None
+    source, source_fd = opened_source
+    try:
+        destination = run_dir / "verified_run_logs"
+        if destination.exists():
+            shutil.rmtree(destination)
+        destination.mkdir(mode=0o700)
+        cloexec = getattr(os, "O_CLOEXEC", 0)
+        source_stat = os.fstat(source_fd)
+        if not stat.S_ISDIR(source_stat.st_mode):
+            return None
+        allowed_source_uids = _trusted_container_uids()
+        # Flat layout is retained for local/manual compatibility.
+        if source.parent.name == "run_logs":
+            allowed_source_uids.add(os.geteuid())
+        if source_stat.st_uid not in allowed_source_uids:
+            return None
+        with os.scandir(source_fd) as entries:
+            names = sorted(
+                entry.name for entry in entries
+                if entry.name.endswith(".log") and "/" not in entry.name
+            )
+        for name in names:
+            try:
+                src_fd = os.open(
+                    name,
+                    os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | cloexec,
+                    dir_fd=source_fd,
+                )
+            except OSError:
+                continue
+            try:
+                source_file_stat = os.fstat(src_fd)
+                if (
+                    not stat.S_ISREG(source_file_stat.st_mode)
+                    or source_file_stat.st_uid != source_stat.st_uid
+                    or source_file_stat.st_nlink != 1
+                ):
+                    continue
+                target = destination / name
+                dst_fd = os.open(
+                    target,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | cloexec,
+                    0o600,
+                )
+                try:
+                    with os.fdopen(src_fd, "rb", closefd=False) as src, \
+                            os.fdopen(dst_fd, "wb", closefd=False) as dst:
+                        shutil.copyfileobj(src, dst)
+                finally:
+                    os.close(dst_fd)
+            finally:
+                os.close(src_fd)
+        return destination
+    finally:
+        os.close(source_fd)
+
+
+def rccl_banner_logs(work_dir: Path, slurm_job_id: str = "") -> list[Path]:
+    """One log per node of a phase, the one its RCCL version banner lands in.
+
+    madengine's per-node logs, unless the phase has sglang server logs: that
+    launcher sends the servers' output, and with it the banner, to /run_logs
+    (one prefill or decode log per node) instead.
+    """
     log_dir = work_dir / "slurm_output"
+    if not log_dir.is_dir():
+        return []
+    snapshot = work_dir / "verified_run_logs"
+    if (
+        slurm_job_id
+        and snapshot.is_dir()
+        and not snapshot.is_symlink()
+    ):
+        candidates = snapshot.rglob("*_NODE*.log")
+    elif slurm_job_id:
+        candidates = ()
+    else:
+        # Local/unit callers without an allocation ID retain the old discovery
+        # behavior, but symlinks are never trusted.
+        candidates = log_dir.glob("run_logs/*/*_NODE*.log")
+    server_logs = sorted(
+        p for p in candidates
+        if p.name.startswith(("prefill_", "decode_"))
+        and p.is_file() and not p.is_symlink()
+    )
+    if server_logs:
+        return server_logs
+    if re.fullmatch(r"[1-9][0-9]*", slurm_job_id):
+        # Pinned madengine adds a per-run discriminator inside an existing
+        # allocation: <job>_<YYYYmmddHHMMSS>_<6 lowercase hex>. Runs that own
+        # their sbatch keep the legacy bare job ID. Anchor the whole basename
+        # so adjacent/substring job IDs and malformed discriminators cannot
+        # satisfy provenance verification.
+        node_out_name = re.compile(
+            rf"^madengine-.+_{re.escape(slurm_job_id)}"
+            r"(?:_[0-9]{14}_[0-9a-f]{6})?_node_[0-9]+\.out$"
+        )
+        node_outs = (
+            path for path in log_dir.glob("*.out")
+            if node_out_name.fullmatch(path.name)
+        )
+    elif not slurm_job_id:
+        node_outs = log_dir.glob("*node_*.out")
+    else:
+        return []
+    return sorted(
+        p for p in node_outs
+        if p.is_file() and not p.is_symlink()
+    )
+
+
+def runtime_rccl_versions(work_dir: Path, slurm_job_id: str = "") -> list[str]:
+    """Distinct ``RCCL version :`` banners across one phase's node logs."""
     versions: list[str] = []
-    for log_file in sorted(log_dir.glob("*node_*.out")) if log_dir.is_dir() else []:
+    for log_file in rccl_banner_logs(work_dir, slurm_job_id):
         for v in re.findall(r"RCCL version\s*:\s*(\S+)", log_file.read_text(errors="replace")):
             if v not in versions:
                 versions.append(v)
     return versions
+
+
+def runtime_tuner_sources(work_dir: Path, slurm_job_id: str = "") -> list[str]:
+    """Distinct CSV tuner sources reported by RCCL in this phase."""
+    sources: list[str] = []
+    pattern = re.compile(r"TUNER/CsvTuner: Loaded \d+ tuning configurations from (\S+)")
+    for log_file in rccl_banner_logs(work_dir, slurm_job_id):
+        for source in pattern.findall(log_file.read_text(errors="replace")):
+            if source not in sources:
+                sources.append(source)
+    return sources
+
+
+def verify_candidate_tuner(
+    work_dir: Path,
+    nodes: int,
+    expected_source: str = CANDIDATE_TUNER_PATH,
+    slurm_job_id: str = "",
+) -> tuple[bool, str]:
+    """Require every candidate node to report only the SHA-pinned candidate CSV."""
+    node_logs = rccl_banner_logs(work_dir, slurm_job_id)
+    if not node_logs:
+        return False, "No node logs found — cannot verify tuner source"
+    by_node: dict[int, list[str]] = {}
+    pattern = re.compile(r"TUNER/CsvTuner: Loaded \d+ tuning configurations from (\S+)")
+    for log_file in node_logs:
+        match = re.search(r"_(?:node_|NODE)(\d+)\.(?:out|log)$", log_file.name)
+        if not match:
+            continue
+        node = int(match.group(1))
+        sources = pattern.findall(log_file.read_text(errors="replace"))
+        by_node.setdefault(node, []).extend(sources)
+
+    missing = sorted(node for node in range(nodes) if not by_node.get(node))
+    if missing:
+        return False, (
+            f"no loaded CSV tuner source in node log(s) {missing}; "
+            "NCCL_DEBUG_SUBSYS must include TUNING"
+        )
+    wrong = {
+        node: sorted(set(sources))
+        for node, sources in by_node.items()
+        if any(source != expected_source for source in sources)
+    }
+    if wrong:
+        return False, (
+            f"candidate tuner source mismatch: expected {expected_source}, got {wrong}; "
+            "a stock disk CSV may be shadowing the candidate"
+        )
+    return True, f"tuner verified on {nodes} node(s): source={expected_source}"
 
 
 def verify_rccl_replacement(
@@ -628,8 +1504,8 @@ def verify_rccl_replacement(
 ) -> tuple[bool, str]:
     """Verify that every node used the CI-built RCCL, not its bundled copy.
 
-    Requires a ``*_node_<i>.out`` log from each of the *nodes* nodes; a library
-    that reached only some of them fails.
+    Requires a banner log (rccl_banner_logs) from each of the *nodes* nodes;
+    a library that reached only some of them fails.
 
     Returns (ok, message).  Generic across frameworks — any RCCL-based
     application prints the version string during init.
@@ -637,14 +1513,13 @@ def verify_rccl_replacement(
     if not expected.get("version"):
         return True, "No RCCL version to verify"
 
-    log_dir = work_dir / "slurm_output"
-    node_logs = sorted(log_dir.glob("*node_*.out")) if log_dir.is_dir() else []
+    node_logs = rccl_banner_logs(work_dir, slurm_job_id)
     if not node_logs:
         return False, "No node logs found — cannot verify RCCL"
     logged = {
         int(m.group(1))
         for log_file in node_logs
-        if (m := re.search(r"_node_(\d+)\.out$", log_file.name))
+        if (m := re.search(r"_(?:node_|NODE)(\d+)\.(?:out|log)$", log_file.name))
     }
     missing = sorted(set(range(nodes)) - logged)
     if missing:
@@ -786,6 +1661,14 @@ def _librccl_swap_snippet(bridge: str = "", kpack: bool = False) -> str:
       matters for the same reason in reverse: that destination resolves through
       the loader's search path, and leaving ours behind would silently change
       where its dependencies come from.
+
+      The tag is kept too: patchelf writes DT_RUNPATH unless told otherwise,
+      and DT_RPATH, which the SDK wheels' librccl carries, outranks
+      LD_LIBRARY_PATH while DT_RUNPATH does not. In the rocm10 sgl-dev image,
+      LD_LIBRARY_PATH names _rocm_sdk_devel/lib, which holds its own copy of
+      libamd_smi.so.27. As a RUNPATH the swapped library loads that copy next
+      to the _rocm_sdk_core one amdsmi uses. The two interpose on each other,
+      amdsmi then reports no GPUs, and so does torch.cuda.device_count().
     * **The gate compares unresolved sonames by LIBRARY, not by exact name**,
       per target, before and after. Counts alone are not enough -- dropping one
       missing soname while introducing another leaves the count unchanged. An
@@ -808,7 +1691,15 @@ def _librccl_swap_snippet(bridge: str = "", kpack: bool = False) -> str:
     soname the artifact needs and the base predates (libamd_smi .27 against
     .26) is reconciled rather than tripping the gate it would otherwise fail.
     """
-    kpack_block = ""
+    # A librccl swap is one version-coupled unit: binary, device archives and
+    # tuner policy. Remove archives left by the stock image before optionally
+    # installing the candidate's exact set.
+    kpack_block = (
+        '    for d in $(cut -f2 /opt/RCCL_PRESWAP.txt | xargs -r -n1 dirname \\\n'
+        '               | xargs -r -n1 dirname | sort -u); do \\\n'
+        '      rm -f "$d/.kpack"/rccl*.kpack; \\\n'
+        '    done; \\\n'
+    )
     if kpack:
         # Generalises what the SDK-venv branch does for two known directories:
         # every directory that received a library gets the archives too, since
@@ -823,16 +1714,42 @@ def _librccl_swap_snippet(bridge: str = "", kpack: bool = False) -> str:
         # looks in `rccl_lib.parent.parent`. Writing `$d/.kpack` instead leaves
         # the device code where nothing looks for it, and nothing fails until
         # the library is actually loaded.
-        kpack_block = (
-            '    if ls /tmp/rccl_ci/.kpack/*.kpack >/dev/null 2>&1; then \\\n'
-            '      for d in $(cut -f2 /opt/RCCL_PRESWAP.txt | xargs -r -n1 dirname \\\n'
-            '                 | xargs -r -n1 dirname | sort -u); do \\\n'
-            '        mkdir -p "$d/.kpack" && cp /tmp/rccl_ci/.kpack/*.kpack "$d/.kpack/"; \\\n'
+        kpack_block += (
+            '    ls /tmp/rccl_ci/.kpack/*.kpack >/dev/null 2>&1 || \\\n'
+            '      { echo "GATE FAIL: candidate librccl requires kpack but none was staged"; exit 1; }; \\\n'
+            '    sha256sum /tmp/rccl_ci/.kpack/*.kpack > /opt/RCCL_KPACK_SHA256S.txt; \\\n'
+            '    for d in $(cut -f2 /opt/RCCL_PRESWAP.txt | xargs -r -n1 dirname \\\n'
+            '               | xargs -r -n1 dirname | sort -u); do \\\n'
+            '      mkdir -p "$d/.kpack"; \\\n'
+            '      for src in /tmp/rccl_ci/.kpack/*.kpack; do \\\n'
+            '        cp "$src" "$d/.kpack/"; cmp -s "$src" "$d/.kpack/$(basename "$src")" || \\\n'
+            '          { echo "GATE FAIL: kpack copy mismatch in $d/.kpack"; exit 1; }; \\\n'
             '      done; \\\n'
-            '      echo "kpack staged into: $(cut -f2 /opt/RCCL_PRESWAP.txt \\\n'
-            '            | xargs -r -n1 dirname | xargs -r -n1 dirname | sort -u | tr "\\\\n" " ")"; \\\n'
-            '    fi; \\\n'
+            '    done; \\\n'
+            '    echo "kpack staged atomically into: $(cut -f2 /opt/RCCL_PRESWAP.txt \\\n'
+            '          | xargs -r -n1 dirname | xargs -r -n1 dirname | sort -u | tr "\\\\n" " ")"; \\\n'
         )
+    tuner_block = (
+        '    : > /opt/RCCL_TUNER_REMOVED.txt; \\\n'
+        '    for t in $(cut -f2 /opt/RCCL_PRESWAP.txt); do \\\n'
+        '      d=$(dirname "$t"); \\\n'
+        '      for td in "$d/tuner" "$d/../share/rccl/tuner"; do \\\n'
+        '        [ -d "$td" ] || continue; \\\n'
+        '        find "$td" -maxdepth 1 -name "rccl_tuner*.csv" \\\n'
+        '          -print -delete >> /opt/RCCL_TUNER_REMOVED.txt; \\\n'
+        '      done; \\\n'
+        '    done; \\\n'
+        '    for td in /opt/rocm*/share/rccl/tuner; do \\\n'
+        '      [ -d "$td" ] || continue; \\\n'
+        '      find "$td" -maxdepth 1 -name "rccl_tuner*.csv" \\\n'
+        '        -print -delete >> /opt/RCCL_TUNER_REMOVED.txt; \\\n'
+        '    done; \\\n'
+        f'    install -D -m 0444 /tmp/rccl_ci/tuner/rccl_tuner_gfx950.csv '
+        f'{CANDIDATE_TUNER_PATH}; \\\n'
+        f'    sha256sum {CANDIDATE_TUNER_PATH} > /opt/RCCL_TUNER_SHA256.txt; \\\n'
+        '    echo "tuner policy: removed $(sort -u /opt/RCCL_TUNER_REMOVED.txt | wc -l) '
+        f'disk override(s); installed {CANDIDATE_TUNER_PATH}"; \\\n'
+    )
     return f"""\
 RUN set -e; \\
     SRC=/tmp/rccl_ci/librccl.so; \\
@@ -851,14 +1768,15 @@ RUN set -e; \\
     while read -r t; do \\
       [ "$(readlink -f "$t")" = "$canon_src" ] && continue; \\
       rp="$(patchelf --print-rpath "$t" 2>/dev/null || true)"; \\
-      echo "  overwrite: $t (rpath: ${{rp:-none}})"; \\
+      if readelf -d "$t" 2>/dev/null | grep -qF '(RPATH)'; then tag=--force-rpath; else tag=; fi; \\
+      echo "  overwrite: $t (rpath: ${{rp:-none}}${{tag:+, kept as DT_RPATH}})"; \\
       cp -fL --remove-destination "$SRC" "$t"; \\
-      if [ -n "$rp" ]; then patchelf --set-rpath "$rp" "$t" || \\
+      if [ -n "$rp" ]; then patchelf $tag --set-rpath "$rp" "$t" || \\
         {{ echo "GATE FAIL: could not restore RUNPATH on $t"; exit 1; }}; \\
       else patchelf --remove-rpath "$t" || \\
         {{ echo "GATE FAIL: could not clear RUNPATH on $t"; exit 1; }}; fi; \\
     done < /opt/RCCL_TARGETS.txt; \\
-{kpack_block}{bridge}    ldconfig || true; \\
+{kpack_block}{tuner_block}{bridge}    ldconfig || true; \\
     while IFS="$(printf '\\t')" read -r n t; do \\
       if ldd "$t" > /tmp/rcclswap/ldd.$n 2>/dev/null; then lddok=yes; else lddok=NO; fi; \\
       awk '/not found/ {{print $1}}' /tmp/rcclswap/ldd.$n | sort -u > "/tmp/rcclswap/post.$n"; \\
@@ -954,53 +1872,82 @@ def _stage_primus_context(ctx_dir: Path, primus_dir: Path) -> None:
         raise RuntimeError(f"failed to stage Primus from {primus_dir}")
 
 
+# What `docker pull` accepts, so the digest is the one a pull by tag would
+# record in RepoDigests: the index for a multi-arch tag, else the manifest.
+_MANIFEST_MEDIA_TYPES = ", ".join((
+    "application/vnd.oci.image.index.v1+json",
+    "application/vnd.docker.distribution.manifest.list.v2+json",
+    "application/vnd.oci.image.manifest.v1+json",
+    "application/vnd.docker.distribution.manifest.v2+json",
+))
+
+
+def registry_digest(image: str, timeout: int = 60) -> str:
+    """*image* pinned by digest as its registry serves it now, or "" on failure.
+
+    Asks the registry for the manifest digest and downloads no layer: the
+    runner host's disk is shared by every runner on it and has no room for a
+    base image (the sgl-dev one is 27 GB compressed), and nothing there would
+    use it.
+    """
+    if "@sha256:" in image:
+        return image
+    name, _, tag = image.rpartition(":")
+    if not name or "/" in tag:
+        name, tag = image, "latest"
+    first, _, rest = name.partition("/")
+    if rest and ("." in first or ":" in first or first == "localhost"):
+        host, path = first, rest
+    else:
+        host, path = "registry-1.docker.io", name if rest else f"library/{name}"
+    url = f"https://{host}/v2/{path}/manifests/{tag}"
+    headers = {"Accept": _MANIFEST_MEDIA_TYPES}
+    try:
+        try:
+            req = urllib.request.Request(url, headers=headers, method="HEAD")
+            resp = urllib.request.urlopen(req, timeout=timeout)
+        except urllib.error.HTTPError as exc:
+            challenge = exc.headers.get("WWW-Authenticate", "")
+            if exc.code != 401 or not challenge.startswith("Bearer "):
+                raise
+            params = dict(re.findall(r'(\w+)="([^"]*)"', challenge))
+            realm = params.pop("realm")
+            params.setdefault("scope", f"repository:{path}:pull")
+            token_url = f"{realm}?{urllib.parse.urlencode(params)}"
+            with urllib.request.urlopen(token_url, timeout=timeout) as tok:
+                body = json.load(tok)
+            headers["Authorization"] = (
+                f"Bearer {body.get('token') or body.get('access_token')}"
+            )
+            req = urllib.request.Request(url, headers=headers, method="HEAD")
+            resp = urllib.request.urlopen(req, timeout=timeout)
+        with resp:
+            digest = resp.headers.get("Docker-Content-Digest", "")
+    except (OSError, ValueError, KeyError) as exc:
+        log.warning("Could not get the registry digest of %s: %s", image, exc)
+        return ""
+    return f"{name}@{digest}" if digest.startswith("sha256:") else ""
+
+
 def resolve_base_digest(base_image: str) -> str:
-    """Return *base_image* pinned by digest, without pulling it.
+    """*base_image* pinned by digest, for both A/B Dockerfiles.
 
     Both A/B images must come from the same base, and a tag cannot promise
-    that: the baseline and the candidate are separate `docker build`
-    invocations, and `rocm/jax-training:maxtext-v26.6` is mutable. Adding
-    `--pull` to both would only narrow the window, not close it -- a push
-    between the two builds still splits the pair. A digest is immutable, so
+    that: each phase builds its own image on the compute nodes, and
+    `rocm/jax-training:maxtext-v26.6` is mutable. A digest is immutable, so
     resolving it once and writing it into both Dockerfiles closes it.
 
-    The query goes to the registry, not to a local copy: this host builds no
-    images and has no use for a multi-GB base, and every runner on it shares
-    one Docker disk. The nodes do the pulling, once each, as part of their
-    own build.
-
-    Falls back to the tag when the digest cannot be resolved -- a locally
-    built base has nothing remote to pin to, and an unreachable registry is
-    not worth failing the run over this far ahead of the allocation.
+    Fails closed when the registry cannot tell: silently using a mutable tag
+    would make the candidate image irreproducible and could split the A/B pair.
     """
-    repo = base_image.split("@", 1)[0].rsplit(":", 1)[0]
-    probes = (
-        ["docker", "buildx", "imagetools", "inspect",
-         "--format", "{{.Manifest.Digest}}", base_image],
-        # Already-pulled bases still resolve, so a host that happens to carry
-        # one does not depend on the registry being reachable.
-        ["docker", "image", "inspect",
-         "--format", "{{index .RepoDigests 0}}", base_image],
-    )
-    for probe in probes:
-        try:
-            result = subprocess.run(probe, capture_output=True, text=True, timeout=120)
-        except (OSError, subprocess.SubprocessError) as exc:
-            log.debug("%s failed: %s", probe[1], exc)
-            continue
-        out = result.stdout.strip()
-        if result.returncode != 0 or "sha256:" not in out:
-            continue
-        digest = out if "@sha256:" in out else f"{repo}@{out}"
-        log.info("Base pinned for both A/B images: %s", digest)
-        return digest
-
-    log.warning(
-        "Could not resolve a digest for %s; both A/B images will use the tag. "
-        "They are built minutes apart, so a push in between would split the pair.",
-        base_image,
-    )
-    return base_image
+    digest = registry_digest(base_image)
+    if not digest:
+        raise RuntimeError(
+            f"could not resolve immutable registry digest for {base_image}; "
+            "refusing to build either A/B image from a mutable tag"
+        )
+    log.info("Base pinned for both A/B images: %s", digest)
+    return digest
 
 
 def base_identity(from_ref: str) -> str:
@@ -1027,11 +1974,6 @@ def stage_maxtext_baseline(
 ) -> str:
     """Stage the A/B baseline for the MaxText family: Primus, stock RCCL.
 
-    Writes the Dockerfile and its build context under ``overlay_ctx`` and
-    returns the tag, exactly as stage_rccl_overlay() does for the candidate.
-    Nothing is built here: the baseline manifest advertises this Dockerfile,
-    so node 0 of the allocation builds it and the others load it.
-
     The Megatron workloads use the stock registry image as their baseline, but
     that cannot work here: ``rocm/jax-training:maxtext-*`` ships MaxText and no
     Primus, so ``scripts/jax-maxtext/run.sh`` would not find ``primus-cli`` and
@@ -1041,6 +1983,9 @@ def stage_maxtext_baseline(
     That makes the pair *tighter* than the Megatron A/B rather than looser: the
     two images differ by the librccl swap alone, which is exactly the variable
     the ratio is supposed to isolate.
+
+    Only the Dockerfile and its context are written here; node 0 of the
+    allocation builds the image and the other nodes load it.
     """
     ctx_dir = work_dir / OVERLAY_CTX
     ctx_dir.mkdir(exist_ok=True)
@@ -1048,29 +1993,82 @@ def stage_maxtext_baseline(
 
     dockerfile = ctx_dir / MAXTEXT_BASELINE_DOCKERFILE
     dockerfile.write_text(f"FROM {from_ref}\n\n{MAXTEXT_PRIMUS_PAYLOAD}")
+    primus_tree_sha256 = build_context_tree_identity(ctx_dir / "Primus")
 
-    # Tagged per A/B run, with the same token the candidate carries: the nodes
-    # rebuild on a tag they cannot find, and a tag shared with an earlier run
-    # would let one of them skip that build and pair a fresh candidate with a
-    # stale baseline -- breaking the one invariant this pair exists to hold,
-    # that the two differ by the RCCL swap alone.
-    tag = f"{base_image}-primus-{PRIMUS_REF}-{run_token}-{base_identity(from_ref)}"
-    log.info("MaxText baseline staged for the nodes to build: %s", tag)
+    # A per-run tag, with the same token the candidate uses: a node holding an
+    # image under a reused tag would skip the build and could pair a fresh
+    # candidate with a stale baseline, breaking the one invariant this pair
+    # exists to hold -- that the two differ by the RCCL swap alone.
+    tag = (
+        f"{base_image}-primus-{PRIMUS_REF}-{run_token}-"
+        f"{base_identity(from_ref)}-{primus_tree_sha256[:10]}"
+    )
+    log.info("MaxText baseline (Primus, stock RCCL), built on the nodes: %s", tag)
+    return tag
+
+
+# MAD's Dockerfile ends with `dpkg -r --force-all` on the distro rdma-core,
+# which leaves apt unusable, so the swap's patchelf has to come from pip.
+# Pinned to the version the MaxText swap gets from apt: the 0.19.1 the
+# rocm10 sgl-dev venv ships refuses to set a RUNPATH on the kpack-split
+# librccl ("section content is not naturally aligned").
+SGLANG_SWAP_TOOLS = "RUN pip install --no-cache-dir patchelf==0.18.0.0\n"
+
+
+def sglang_recipe(mad_dir: Path, from_ref: str) -> str:
+    """MAD's sglang Dockerfile on *from_ref*, plus what the RCCL swap needs.
+
+    The base becomes a literal FROM rather than the ARG default, so no build
+    argument can move it off the digest both A/B images were pinned to.
+    """
+    text = (mad_dir / SGLANG_MAD_DOCKERFILE).read_text()
+    pinned, count = re.subn(
+        r"(?m)^FROM \$\{?BASE_DOCKER\}?\s*$", f"FROM {from_ref}", text
+    )
+    if count != 1:
+        raise RuntimeError(
+            f"{SGLANG_MAD_DOCKERFILE} at MAD {MAD_REF[:12]} has {count} "
+            f"`FROM $BASE_DOCKER` lines, expected 1"
+        )
+    return f"{pinned}\n{SGLANG_SWAP_TOOLS}"
+
+
+def stage_sglang_baseline(
+    base_image: str,
+    work_dir: Path,
+    run_token: str,
+    from_ref: str,
+) -> str:
+    """Stage the A/B baseline for sglang-disagg: MAD's image, stock RCCL.
+
+    The base alone is not what MAD runs: its Dockerfile adds rdma-core 63,
+    without which queue-pair creation fails on Thor2. Built on the nodes and
+    tagged like the MaxText baseline, for the same reasons.
+    """
+    ctx_dir = work_dir / OVERLAY_CTX
+    ctx_dir.mkdir(exist_ok=True)
+    dockerfile = ctx_dir / SGLANG_BASELINE_DOCKERFILE
+    dockerfile.write_text(sglang_recipe(work_dir / "MAD", from_ref))
+
+    tag = f"{base_image}-mad-{MAD_REF[:8]}-{run_token}-{base_identity(from_ref)}"
+    log.info("sglang baseline (MAD recipe, stock RCCL), built on the nodes: %s", tag)
     return tag
 
 
 def stage_rccl_overlay(
     rccl_lib: Path,
+    tuner_config: Path,
     base_image: str,
     gpu_target: str,
     work_dir: Path,
     family: str = "megatron",
     primus_dir: Path | None = None,
     from_ref: str = "",
-) -> str:
+) -> tuple[str, dict]:
     """Stage the candidate image (base + CI-built RCCL) under ``overlay_ctx``.
 
-    Returns the tag. Nothing is built here; the allocation's nodes build it.
+    Returns the tag and exact staged-asset provenance. Nothing is built here;
+    the allocation's nodes build it.
 
     *family* selects the recipe. ``megatron`` keeps the two layout-specific
     branches that target the Primus image; ``maxtext`` layers the same Primus
@@ -1078,26 +2076,42 @@ def stage_rccl_overlay(
     has neither Primus nor the SDK venv paths those branches write to.
     """
     rccl_commit = get_rccl_commit(rccl_lib)
-    tag = f"{base_image}-rccl-{gpu_target}-{rccl_commit}"
-    if family == "maxtext" and from_ref:
-        # Same identity the baseline carries, for the same reason: the run id
-        # alone survives a re-run, so without this the candidate could hit the
-        # previous attempt's image and skip its build while the baseline was
-        # rebuilt on a base that had moved.
-        tag = f"{tag}-{base_identity(from_ref)}"
-
     ctx_dir = work_dir / OVERLAY_CTX
-    ctx_dir.mkdir(exist_ok=True)
     dockerfile = ctx_dir / OVERLAY_DOCKERFILE
-    rccl_lib_dir = rccl_lib.parent
     uses_kpack = _rccl_uses_kpack(rccl_lib)
-
-    staging_dir = ctx_dir / "rccl_libs"
-    staging_dir.mkdir(exist_ok=True)
-    for so_file in rccl_lib_dir.glob("librccl*"):
-        dest = staging_dir / so_file.name
-        if not dest.exists():
-            subprocess.run(["cp", "-L", str(so_file), str(dest)], check=True)
+    expected_sources = expected_overlay_asset_sources(rccl_lib, tuner_config)
+    staging_dir, staging_fd, ctx_fd = recreate_overlay_staging_dir(ctx_dir)
+    try:
+        for relative, source in expected_sources.items():
+            copy_overlay_asset(staging_fd, relative, source)
+        staged_assets = _staged_overlay_asset_provenance_fd(staging_fd)
+        expected_hashes = {
+            relative: sha256_file(source)
+            for relative, source in expected_sources.items()
+        }
+        if {
+            item["path"]: item["sha256"] for item in staged_assets["files"]
+        } != expected_hashes:
+            raise RuntimeError("candidate overlay staged bytes differ from sources")
+        opened_ctx_stat = os.fstat(ctx_fd)
+        current_ctx_stat = ctx_dir.stat(follow_symlinks=False)
+        if (
+            opened_ctx_stat.st_dev != current_ctx_stat.st_dev
+            or opened_ctx_stat.st_ino != current_ctx_stat.st_ino
+        ):
+            raise RuntimeError(f"candidate overlay context changed: {ctx_dir}")
+        opened_staging_stat = os.fstat(staging_fd)
+        current_staging_stat = staging_dir.stat(follow_symlinks=False)
+        if (
+            opened_staging_stat.st_dev != current_staging_stat.st_dev
+            or opened_staging_stat.st_ino != current_staging_stat.st_ino
+        ):
+            raise RuntimeError(f"candidate overlay staging path changed: {staging_dir}")
+    finally:
+        os.close(staging_fd)
+        os.close(ctx_fd)
+    candidate_asset_id = staged_assets["asset_id"]
+    base_reference = from_ref or base_image
 
     # The CI RCCL is built against a newer ROCm than the base image, so it can
     # name a soname the image predates -- `libamd_smi.so.27` against its `.26` --
@@ -1113,30 +2127,26 @@ def stage_rccl_overlay(
 
     # Staged for every family: the maxtext swap places them next to each
     # target it discovers rather than into two known directories.
-    has_kpack_files = False
-    if uses_kpack:
-        kpack_files = list(rccl_lib_dir.rglob("*.kpack"))
-        if not kpack_files:
-            kpack_files = list(rccl_lib.parent.parent.rglob("rccl*.kpack"))
-        has_kpack_files = len(kpack_files) > 0
-        if has_kpack_files:
-            kpack_staging = staging_dir / ".kpack"
-            kpack_staging.mkdir(exist_ok=True)
-            for kp in kpack_files:
-                dest = kpack_staging / kp.name
-                if not dest.exists():
-                    subprocess.run(["cp", "-L", str(kp), str(dest)], check=True)
-            log.info("Found %d kpack file(s): %s",
-                     len(kpack_files), [f.name for f in kpack_files])
-        else:
-            log.warning("RCCL .so has kpack references but no .kpack files found in artifacts")
+    kpack_names = sorted(
+        relative.removeprefix(".kpack/")
+        for relative in expected_sources if relative.startswith(".kpack/")
+    )
+    has_kpack_files = bool(kpack_names)
+    if uses_kpack and not has_kpack_files:
+        raise RuntimeError(
+            f"{rccl_lib} has kpack references but its artifact contains no .kpack files"
+        )
+    if has_kpack_files:
+        log.info("Found %d kpack file(s): %s", len(kpack_names), kpack_names)
 
+    primus_tree_sha256 = ""
     if family == "maxtext":
         if primus_dir is None or not (primus_dir / "primus-cli").is_file():
             raise RuntimeError(
                 f"maxtext overlay needs a Primus checkout with primus-cli; got {primus_dir!r}"
             )
         _stage_primus_context(ctx_dir, primus_dir)
+        primus_tree_sha256 = build_context_tree_identity(ctx_dir / "Primus")
         # Bridge beside every copy of the library itself, not beside librccl --
         # the directory an RPATH reaches for it is usually neither.
         swap = _librccl_swap_snippet(
@@ -1150,9 +2160,25 @@ def stage_rccl_overlay(
         # The same pinned digest the baseline used. A tag here would let the
         # two images build from different versions of a mutable base and the
         # ratio would then be measuring more than RCCL.
-        dockerfile.write_text(
+        dockerfile_content = (
             f"FROM {from_ref or base_image}\n\n{MAXTEXT_PRIMUS_PAYLOAD}\n"
-            f"COPY rccl_libs/ /tmp/rccl_ci/\n{swap}\nENV NCCL_DEBUG=WARN\n"
+            f"COPY rccl_libs/ /tmp/rccl_ci/\n{swap}\n"
+            f"ENV NCCL_TUNER_CONFIG_FILE={CANDIDATE_TUNER_PATH}\n"
+            "ENV NCCL_DEBUG=WARN\n"
+        )
+    elif family == "sglang-disagg":
+        # The baseline's recipe plus the swap, as for MaxText: the sgl-dev
+        # base does not have the Primus image's layout, so the targets are
+        # discovered rather than assumed.
+        swap = _librccl_swap_snippet(
+            bridge=_soname_bridge_discovered(rccl_needed),
+            kpack=has_kpack_files,
+        )
+        dockerfile_content = (
+            f"{sglang_recipe(work_dir / 'MAD', from_ref or base_image)}\n"
+            f"COPY rccl_libs/ /tmp/rccl_ci/\n{swap}\n"
+            f"ENV NCCL_TUNER_CONFIG_FILE={CANDIDATE_TUNER_PATH}\n"
+            "ENV NCCL_DEBUG=WARN\n"
         )
     elif uses_kpack:
         log.info(
@@ -1161,43 +2187,88 @@ def stage_rccl_overlay(
             rccl_lib.stat().st_size / 1e6,
             base_image,
         )
-        dockerfile.write_text(f"""\
-FROM {base_image}
+        dockerfile_content = f"""\
+FROM {base_reference}
 COPY rccl_libs/ /tmp/rccl_ci/
 RUN set -e; \\
     SDK_LIB="/opt/venv/lib/python3.12/site-packages/_rocm_sdk_libraries/lib"; \\
     SDK_DEV="/opt/venv/lib/python3.12/site-packages/_rocm_sdk_devel/lib"; \\
-    SDK_KPACK="/opt/venv/lib/python3.12/site-packages/_rocm_sdk_libraries/.kpack"; \\
+    SDK_KPACK_LIB="/opt/venv/lib/python3.12/site-packages/_rocm_sdk_libraries/.kpack"; \\
+    SDK_KPACK_DEV="/opt/venv/lib/python3.12/site-packages/_rocm_sdk_devel/.kpack"; \\
     cp /tmp/rccl_ci/librccl.so "$SDK_LIB/librccl.so.1"; \\
     cp /tmp/rccl_ci/librccl.so "$SDK_LIB/librccl.so.1.0" 2>/dev/null || true; \\
     cp /tmp/rccl_ci/librccl.so "$SDK_DEV/librccl.so.1"; \\
     cp /tmp/rccl_ci/librccl.so "$SDK_DEV/librccl.so.1.0"; \\
-    if [ -d /tmp/rccl_ci/.kpack ] && ls /tmp/rccl_ci/.kpack/*.kpack >/dev/null 2>&1; then \\
-        mkdir -p "$SDK_KPACK"; \\
-        cp /tmp/rccl_ci/.kpack/*.kpack "$SDK_KPACK/"; \\
-    fi; \\
+    ls /tmp/rccl_ci/.kpack/*.kpack >/dev/null 2>&1 || \\
+      {{ echo "GATE FAIL: candidate librccl requires kpack but none was staged"; exit 1; }}; \\
+    for d in "$SDK_KPACK_LIB" "$SDK_KPACK_DEV"; do \\
+      mkdir -p "$d"; rm -f "$d"/rccl*.kpack; \\
+      cp /tmp/rccl_ci/.kpack/*.kpack "$d/"; \\
+      for src in /tmp/rccl_ci/.kpack/*.kpack; do \\
+        cmp -s "$src" "$d/$(basename "$src")" || \\
+          {{ echo "GATE FAIL: kpack copy mismatch in $d"; exit 1; }}; \\
+      done; \\
+    done; \\
+    sha256sum /tmp/rccl_ci/.kpack/*.kpack > /opt/RCCL_KPACK_SHA256S.txt; \\
+    find "$SDK_LIB/tuner" "$SDK_DEV/tuner" /opt/rocm*/share/rccl/tuner \\
+      -maxdepth 1 -name 'rccl_tuner*.csv' -print -delete \\
+      2>/dev/null > /opt/RCCL_TUNER_REMOVED.txt || true; \\
+    install -D -m 0444 /tmp/rccl_ci/tuner/rccl_tuner_gfx950.csv {CANDIDATE_TUNER_PATH}; \\
+    sha256sum {CANDIDATE_TUNER_PATH} > /opt/RCCL_TUNER_SHA256.txt; \\
+    echo "tuner policy: disk overrides removed; installed {CANDIDATE_TUNER_PATH}"; \\
 {bridge_sdk}    rm -rf /tmp/rccl_ci
+ENV NCCL_TUNER_CONFIG_FILE={CANDIDATE_TUNER_PATH}
 ENV NCCL_DEBUG=WARN
-""")
+"""
     else:
         log.info(
             "CI-built librccl.so has embedded GPU kernels (%.1f MB)",
             rccl_lib.stat().st_size / 1e6,
         )
-        dockerfile.write_text(f"""\
-FROM {base_image}
+        dockerfile_content = f"""\
+FROM {base_reference}
 COPY rccl_libs/ /tmp/rccl_ci/
 RUN set -e; \\
     RCCL_REAL=$(readlink -f /opt/rocm/lib/librccl.so 2>/dev/null || \\
                 find /opt/rocm*/lib -name 'librccl.so.*.*' -not -type l 2>/dev/null | head -1); \\
     cp /tmp/rccl_ci/librccl.so "$RCCL_REAL"; \\
     DEP_DIR=$(dirname "$RCCL_REAL"); \\
+    find "$DEP_DIR/tuner" "$DEP_DIR/../share/rccl/tuner" /opt/rocm*/share/rccl/tuner \\
+      -maxdepth 1 -name 'rccl_tuner*.csv' -print -delete \\
+      2>/dev/null > /opt/RCCL_TUNER_REMOVED.txt || true; \\
+    install -D -m 0444 /tmp/rccl_ci/tuner/rccl_tuner_gfx950.csv {CANDIDATE_TUNER_PATH}; \\
+    sha256sum {CANDIDATE_TUNER_PATH} > /opt/RCCL_TUNER_SHA256.txt; \\
+    echo "tuner policy: disk overrides removed; installed {CANDIDATE_TUNER_PATH}"; \\
 {bridge_dep}    rm -rf /tmp/rccl_ci
+ENV NCCL_TUNER_CONFIG_FILE={CANDIDATE_TUNER_PATH}
 ENV NCCL_DEBUG=WARN
-""")
+"""
 
+    recipe_sha256 = candidate_recipe_identity(
+        dockerfile_content, primus_tree_sha256
+    )
+    overlay_id = candidate_overlay_identity(
+        candidate_asset_id, base_reference, recipe_sha256
+    )
+    identity_labels = (
+        f'LABEL rccl.candidate.base-digest="{base_reference}"\n'
+        f'LABEL rccl.candidate.overlay-id="{overlay_id}"\n'
+        f'LABEL rccl.candidate.recipe-sha256="{recipe_sha256}"\n'
+    )
+    dockerfile.write_text(f"{dockerfile_content}{identity_labels}")
+    staged_assets.update({
+        "candidate_asset_id": candidate_asset_id,
+        "base_digest": base_reference,
+        "recipe_sha256": recipe_sha256,
+        "primus_tree_sha256": primus_tree_sha256,
+        "overlay_asset_id": overlay_id,
+    })
+    tag = (
+        f"{base_image}-rccl-{gpu_target}-{rccl_commit}-{overlay_id}-"
+        f"{base_identity(base_reference)}"
+    )
     log.info("Candidate (CI RCCL), built on the nodes: %s", tag)
-    return tag
+    return tag, staged_assets
 
 
 def slurm_time_seconds(limit: str) -> int:
@@ -1214,6 +2285,7 @@ def generate_manifest(
     nodes: int,
     work_dir: Path,
     rccl_lib: Path | None = None,
+    candidate_tuner_config: Path | None = None,
     run_dir: Path | None = None,
     pull_only: bool = False,
     dockerfile_name: str = OVERLAY_DOCKERFILE,
@@ -1251,6 +2323,8 @@ def generate_manifest(
     family = workload_config.get("family", "megatron")
     if family == "maxtext":
         scripts_dir = work_dir / "scripts" / "jax-maxtext"
+    elif family == "sglang-disagg":
+        scripts_dir = work_dir / "scripts" / "sglang_disagg"
     else:
         scripts_dir = work_dir / "scripts" / "primus_megatron-lm"
         if not scripts_dir.is_dir():
@@ -1264,6 +2338,8 @@ def generate_manifest(
         extra_args = workload_config.get("model_args_extra", "")
         if extra_args:
             model_args += f" {extra_args}"
+    elif family == "sglang-disagg":
+        model_args = workload_config["model_args"]
     else:
         model_args = f"--model_repo {model_repo}"
 
@@ -1290,7 +2366,9 @@ def generate_manifest(
     # /usr/lib64/libibverbs/ so the providers must appear there.
     # The library itself replaces the container's copy so the linker
     # picks it up from the standard search path.
-    if cluster_config.get("mount_host_ib_libs"):
+    if cluster_config.get("mount_host_ib_libs") and workload_config.get(
+        "mount_host_ib_libs", True
+    ):
         docker_run_opts += (
             " -v /usr/lib64/libibverbs.so.1"
             ":/usr/lib/x86_64-linux-gnu/libibverbs.so.1:ro"
@@ -1298,6 +2376,26 @@ def generate_manifest(
             " -v /usr/lib64/libibumad.so.3"
             ":/usr/lib/x86_64-linux-gnu/libibumad.so.3:ro"
         )
+
+    if family == "sglang-disagg":
+        # The launcher writes its server logs, and the RCCL banner the
+        # candidate is verified by, to /run_logs/$SLURM_JOB_ID. Both phases
+        # share one job id, so each gets its own directory. It must be shared
+        # storage and world-writable: Docker runs as root, which a
+        # root-squashed NFS maps to nobody. Keep the runner-owned parent
+        # unlistable, then mount a random sticky child: host root can traverse
+        # 0711, container nobody can write the child, and another cluster user
+        # cannot discover/pre-create its $SLURM_JOB_ID directory.
+        run_logs_parent = (run_dir or work_dir) / "slurm_output" / "run_logs"
+        run_logs_parent.mkdir(parents=True, exist_ok=True)
+        run_logs_parent.chmod(0o711)
+        run_logs = run_logs_parent / f"run-{secrets.token_hex(16)}"
+        run_logs.mkdir()
+        run_logs.chmod(0o1777)
+        docker_run_opts += f" -v {run_logs}:/run_logs"
+        # Read-only: run.sh downloads the weights into MODEL_PATH when they
+        # look incomplete, and that must fail rather than fill shared storage.
+        docker_run_opts += f" -v {cluster_config['models_dir']}:/models:ro"
 
     # When --skip-overlay-build is used the base image still has its
     # bundled RCCL.  Bind-mount the CI-built librccl.so (and kpack
@@ -1308,14 +2406,19 @@ def generate_manifest(
         # do not exist, and `docker run -v` CREATES a missing source as an empty
         # root-owned directory rather than refusing -- so the run would look
         # healthy while measuring the image's own RCCL. Refuse instead.
-        if family == "maxtext":
+        if family in ("maxtext", "sglang-disagg"):
             raise RuntimeError(
-                "--skip-overlay-build is not supported for the maxtext family: "
+                f"--skip-overlay-build is not supported for the {family} family: "
                 "the bind-mount targets are Primus-image paths absent from "
                 + workload_config["base_image"] + ", and Docker would silently "
                 "mount empty directories over nothing. Build the overlay."
             )
+        if candidate_tuner_config is None or not candidate_tuner_config.is_file():
+            raise RuntimeError(
+                "--skip-overlay-build requires the exact candidate tuner config"
+            )
         host_so = str(rccl_lib.resolve())
+        host_tuner = str(candidate_tuner_config.resolve())
         sdk_lib = "/opt/venv/lib/python3.12/site-packages/_rocm_sdk_libraries/lib"
         sdk_dev = "/opt/venv/lib/python3.12/site-packages/_rocm_sdk_devel/lib"
         docker_run_opts += (
@@ -1328,10 +2431,24 @@ def generate_manifest(
         if not kpack_dir.is_dir():
             kpack_dir = rccl_lib.resolve().parent / ".kpack"
         if kpack_dir.is_dir():
-            sdk_kpack = "/opt/venv/lib/python3.12/site-packages/_rocm_sdk_libraries/.kpack"
+            sdk_kpack_lib = (
+                "/opt/venv/lib/python3.12/site-packages/_rocm_sdk_libraries/.kpack"
+            )
+            sdk_kpack_dev = (
+                "/opt/venv/lib/python3.12/site-packages/_rocm_sdk_devel/.kpack"
+            )
             for kp in kpack_dir.glob("rccl*.kpack"):
-                docker_run_opts += f" -v {kp}:{sdk_kpack}/{kp.name}:ro"
+                docker_run_opts += (
+                    f" -v {kp}:{sdk_kpack_lib}/{kp.name}:ro"
+                    f" -v {kp}:{sdk_kpack_dev}/{kp.name}:ro"
+                )
             log.info("Bind-mounting RCCL kpack from %s", kpack_dir)
+        docker_run_opts += f" -v {host_tuner}:{BIND_MOUNT_TUNER_PATH}:ro"
+        docker_env_vars.update({
+            "NCCL_DEBUG": "INFO",
+            "NCCL_DEBUG_SUBSYS": "INIT,NET,TUNING",
+            "NCCL_TUNER_CONFIG_FILE": BIND_MOUNT_TUNER_PATH,
+        })
         log.info("Bind-mounting CI-built RCCL: %s", host_so)
 
     slurm_config = {
@@ -1416,7 +2533,7 @@ def generate_manifest(
             "target": "slurm",
             "slurm": slurm_config,
             "distributed": {
-                "launcher": "primus",
+                "launcher": "sglang-disagg" if family == "sglang-disagg" else "primus",
                 "backend": "nccl",
                 "port": 29500,
                 "nnodes": nodes,
@@ -1434,6 +2551,11 @@ def generate_manifest(
                         }
                     }
                     if family == "maxtext"
+                    else {}
+                ),
+                **(
+                    {"sglang_disagg": workload_config["disagg"]}
+                    if family == "sglang-disagg"
                     else {}
                 ),
             },
@@ -1458,7 +2580,14 @@ def generate_manifest(
     }
 
     manifest_path = (run_dir or work_dir) / "manifest.json"
-    manifest_path.write_text(json.dumps(manifest, indent=2))
+    manifest_fd = os.open(
+        manifest_path,
+        os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW,
+        0o600,
+    )
+    os.fchmod(manifest_fd, 0o600)
+    with os.fdopen(manifest_fd, "w") as stream:
+        json.dump(manifest, stream, indent=2)
     log.info("Manifest written to: %s", manifest_path)
     return manifest_path
 
@@ -1504,21 +2633,6 @@ REPRO_MANIFESTS = {
 THEROCK_ARTIFACT_BUCKET = "therock-ci-artifacts-external"
 
 
-def local_repo_digest(image: str) -> str:
-    """*image* pinned by digest as the local daemon knows it, or "" if it cannot tell.
-
-    Never pulls: this only records what the head node built from.
-    """
-    if "@sha256:" in image:
-        return image
-    result = subprocess.run(
-        ["docker", "image", "inspect", "--format", "{{index .RepoDigests 0}}", image],
-        capture_output=True, text=True,
-    )
-    digest = result.stdout.strip()
-    return digest if result.returncode == 0 and "@sha256:" in digest else ""
-
-
 def repro_manifest(manifest: dict, work_dir: Path) -> dict:
     """*manifest* with its build paths made relative to the bundle root.
 
@@ -1543,29 +2657,20 @@ def repro_manifest(manifest: dict, work_dir: Path) -> dict:
         model = out.get("built_models", {}).get(key)
         if model is not None:
             model["dockercontext"] = OVERLAY_CTX
+    # The CI phase directory is gone by then; a rerun salloc's from its copy.
+    for model in out.get("built_models", {}).values():
+        if "additional_docker_run_options" in model:
+            model["additional_docker_run_options"] = re.sub(
+                r"-v \S+/slurm_output/run_logs(?:/run-[0-9a-f]{32})?:/run_logs",
+                "-v ${SLURM_SUBMIT_DIR}/slurm_output/run_logs:/run_logs",
+                model["additional_docker_run_options"],
+            )
     return out
 
 
 def copy_overlay_ctx(src: Path, dst: Path) -> None:
-    """Copy the build context without the duplicate librccl names.
-
-    stage_rccl_overlay() stages every ``librccl*`` the artifact carries,
-    but each recipe reads only ``rccl_libs/librccl.so`` and ``rccl_libs/.kpack``,
-    and the other names are byte-identical copies of the same library.
-    """
-    lib = src / "rccl_libs" / "librccl.so"
-
-    def ignore(dirpath: str, names: list[str]) -> list[str]:
-        if Path(dirpath) != lib.parent or not lib.is_file():
-            return []
-        return [
-            n for n in names
-            if n.startswith("librccl") and n != lib.name
-            and (lib.parent / n).is_file()
-            and filecmp.cmp(lib, lib.parent / n, shallow=False)
-        ]
-
-    shutil.copytree(src, dst, symlinks=True, ignore=ignore)
+    """Copy the exact build context so its recorded asset identity remains true."""
+    shutil.copytree(src, dst, symlinks=True)
 
 
 def repro_env(
@@ -1598,6 +2703,7 @@ def repro_env(
         "CI_RUN_ID": run_id,
         "CI_RUN_ATTEMPT": env.get("GITHUB_RUN_ATTEMPT", ""),
         "CI_SHA": env.get("GITHUB_SHA", ""),
+        "CANDIDATE_SHA": env.get("CANDIDATE_SHA", ""),
         "THEROCK_ARTIFACT_RUN_ID": artifact_run_id,
         # Provenance only: the library itself is in overlay_ctx/rccl_libs.
         "RCCL_ARTIFACTS_S3": f"s3://{THEROCK_ARTIFACT_BUCKET}/{s3_prefix}" if s3_prefix else "",
@@ -1605,6 +2711,7 @@ def repro_env(
             f"https://{THEROCK_ARTIFACT_BUCKET}.s3.amazonaws.com/{s3_prefix}" if s3_prefix else ""
         ),
         "RCCL_MD5": rccl_fingerprint.get("md5", ""),
+        "RCCL_SHA256": rccl_fingerprint.get("sha256", ""),
         "RCCL_VERSION": rccl_fingerprint.get("version", ""),
         "CANDIDATE_IMAGE": images.get(CANDIDATE, ""),
         "BASELINE_IMAGE": images.get(BASELINE, ""),
@@ -1653,10 +2760,13 @@ the refs, image digests and cluster settings. The run's own numbers are in the
 
 - The baseline phase is `manifest.baseline.repro.json`. Run it from a second copy
   of this directory: each phase writes `perf.csv` and `slurm_output/` to its cwd.
+- An sglang-disagg run also needs `mkdir -m 1777 -p slurm_output/run_logs` in
+  each copy before `salloc`, and the weights under `/models` as the manifest
+  mounts them.
 - To shorten a Megatron run, add `"PRIMUS_TRAIN_ITERS": "15"` to both
   `context.docker_env_vars` and `deployment_config.env_vars`.
-- `BASE_DIGEST` is the base the CI head node built from. The nodes build from
-  `BASE_IMAGE` by tag; if the base has moved since, the image differs.
+- `BASE_DIGEST` is what `BASE_IMAGE` pointed to when CI ran. Every built A/B
+  image uses that immutable digest, including the Megatron baseline.
 """
 
 
@@ -1696,6 +2806,9 @@ def write_repro_bundle(
         copy_overlay_ctx(ctx, bundle / OVERLAY_CTX)
     if (work_dir / "scripts").is_dir():
         shutil.copytree(work_dir / "scripts", bundle / "scripts", symlinks=True)
+    for name in (CANDIDATE_PROVENANCE, "candidate-artifact-run.json"):
+        if (work_dir / name).is_file():
+            shutil.copy2(work_dir / name, bundle / name)
 
     for phase, run_dir in phase_dirs.items():
         manifest = json.loads((run_dir / "manifest.json").read_text())
@@ -1717,6 +2830,38 @@ def write_repro_bundle(
     log.info("Repro bundle written to: %s", bundle)
     return bundle
 
+
+# The sglang launcher reaches every node at the address DNS gives its name and
+# binds its barrier to the node's own one, so a stale record leaves rank 0
+# waiting out BARRIER_TIMEOUT_SECONDS for a node that is up and never answers.
+PREFLIGHT_DNS = """\
+#!/bin/bash
+h=$(hostname -s)
+ip=$(getent ahostsv4 "$h" | awk 'NR==1 {print $1}')
+if [ -n "$ip" ] && hostname -I | tr ' ' '\\n' | grep -qxF "$ip"; then
+    echo "  ok   $h -> $ip"
+else
+    echo "  BAD  $h -> ${ip:-unresolved}, not an address of this node"
+    exit 1
+fi
+"""
+
+# sglang's nixl backend registers every KV-cache buffer with every RDMA NIC,
+# and each bnxt_re registration needs physically contiguous host memory (an
+# order-9 allocation). On a node whose RAM is nearly all page cache those fail
+# -- "bnxt_re3: Failed to register user MR - rc = -12" in dmesg -- and the
+# server that hits one dies at startup with NIXL_ERR_BACKEND. The nodes are
+# held exclusively, so drop the clean page cache and compact before each phase.
+# Best effort: without passwordless sudo the phase runs as before.
+RELEASE_HOST_MEMORY = """\
+#!/bin/bash
+if sudo -n sh -c 'sync; echo 1 > /proc/sys/vm/drop_caches; echo 1 > /proc/sys/vm/compact_memory'; then
+    echo "  ok   $(hostname -s) free=$(free -g | awk '/^Mem:/ {print $4}')G"
+else
+    echo "  skip $(hostname -s): no passwordless sudo"
+fi
+exit 0
+"""
 
 # Run on every node after both phases. Container output is root-owned, so the
 # workspace is removed from inside a local image (never pulled); $1 is kept.
@@ -1752,6 +2897,189 @@ done
 exit 0
 """
 
+CANDIDATE_IMAGE_ID = """\
+#!/bin/bash
+image="$1"
+out="$2"
+expected_tuner_sha="$3"
+expected_base_digest="$4"
+expected_overlay_id="$5"
+host=$(hostname -s)
+id=$(docker image inspect --format '{{.Id}}' "$image" 2>/dev/null \\
+  || sudo -n docker image inspect --format '{{.Id}}' "$image" 2>/dev/null) || {
+  echo "GATE FAIL: cannot inspect candidate image $image on $host"
+  exit 1
+}
+case "$id" in
+  sha256:[0-9a-f][0-9a-f]*) ;;
+  *) echo "GATE FAIL: invalid candidate image id '$id' on $host"; exit 1 ;;
+esac
+tuner_sha=$(docker run --rm --pull never --entrypoint sha256sum "$image" \\
+  /opt/rccl-candidate/tuner/rccl_tuner_gfx950.csv 2>/dev/null \\
+  || sudo -n docker run --rm --pull never --entrypoint sha256sum "$image" \\
+     /opt/rccl-candidate/tuner/rccl_tuner_gfx950.csv 2>/dev/null) || {
+  echo "GATE FAIL: cannot hash candidate tuner config on $host"
+  exit 1
+}
+tuner_sha=${tuner_sha%% *}
+if [ "$tuner_sha" != "$expected_tuner_sha" ]; then
+  echo "GATE FAIL: candidate tuner hash mismatch on $host: $tuner_sha != $expected_tuner_sha"
+  exit 1
+fi
+identity=$(docker image inspect \\
+  --format '{{ index .Config.Labels "rccl.candidate.base-digest" }}|{{ index .Config.Labels "rccl.candidate.overlay-id" }}' \\
+  "$image" 2>/dev/null \\
+  || sudo -n docker image inspect \\
+     --format '{{ index .Config.Labels "rccl.candidate.base-digest" }}|{{ index .Config.Labels "rccl.candidate.overlay-id" }}' \\
+     "$image" 2>/dev/null) || {
+  echo "GATE FAIL: cannot inspect candidate identity labels on $host"
+  exit 1
+}
+base_digest=${identity%%|*}
+overlay_id=${identity#*|}
+if [ "$base_digest" != "$expected_base_digest" ]; then
+  echo "GATE FAIL: candidate base digest mismatch on $host: $base_digest != $expected_base_digest"
+  exit 1
+fi
+if [ "$overlay_id" != "$expected_overlay_id" ]; then
+  echo "GATE FAIL: candidate overlay identity mismatch on $host: $overlay_id != $expected_overlay_id"
+  exit 1
+fi
+printf '%s\\t%s\\t%s\\t%s\\t%s\\n' \\
+  "$host" "$id" "$tuner_sha" "$base_digest" "$overlay_id" > "$out/$host"
+echo "  $host candidate image $id tuner_sha256=$tuner_sha base=$base_digest overlay=$overlay_id"
+"""
+
+
+def verify_image_identities(
+    identity_dir: Path,
+    nodes: int,
+    expected_tuner_sha: str,
+    expected_base_digest: str,
+    expected_overlay_id: str,
+) -> tuple[bool, str, str]:
+    """Require one identical immutable candidate image ID from every node."""
+    rows = []
+    for path in sorted(identity_dir.glob("*")) if identity_dir.is_dir() else []:
+        try:
+            host, image_id, tuner_sha, base_digest, overlay_id = (
+                path.read_text().strip().split("\t", 4)
+            )
+        except (OSError, ValueError):
+            return False, f"unreadable candidate image identity {path}", ""
+        if not re.fullmatch(r"sha256:[0-9a-f]{64}", image_id):
+            return False, f"invalid candidate image identity from {host}: {image_id!r}", ""
+        if tuner_sha != expected_tuner_sha:
+            return False, f"candidate tuner hash mismatch from {host}: {tuner_sha!r}", ""
+        if base_digest != expected_base_digest:
+            return False, f"candidate base digest mismatch from {host}: {base_digest!r}", ""
+        if overlay_id != expected_overlay_id:
+            return False, f"candidate overlay identity mismatch from {host}: {overlay_id!r}", ""
+        rows.append((host, image_id))
+    if len(rows) != nodes:
+        return False, f"candidate image identity found on {len(rows)}/{nodes} node(s)", ""
+    ids = {image_id for _, image_id in rows}
+    if len(ids) != 1:
+        return False, f"candidate image mismatch across nodes: {rows}", ""
+    image_id = ids.pop()
+    return True, f"candidate image verified on {nodes} node(s): {image_id}", image_id
+
+
+def candidate_image_verification_target(overlay_image: str, skip_overlay_build: bool) -> str:
+    """Image to inspect, or empty when exact candidate assets are bind-mounted."""
+    return "" if skip_overlay_build else overlay_image
+
+
+def reset_candidate_image_identity_dir(work_dir: Path) -> Path:
+    """Recreate this allocation's identity directory without following links."""
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | cloexec
+    try:
+        work_fd = os.open(work_dir, directory_flags)
+    except OSError as exc:
+        raise RuntimeError(f"untrusted work directory: {work_dir}") from exc
+    parent = work_dir / "ab"
+    identity_dir = parent / "candidate-image-ids"
+    parent_fd = -1
+    try:
+        work_stat = os.fstat(work_fd)
+        if (
+            not stat.S_ISDIR(work_stat.st_mode)
+            or work_stat.st_uid != os.geteuid()
+        ):
+            raise RuntimeError(f"untrusted work directory owner: {work_dir}")
+        try:
+            os.mkdir("ab", mode=0o755, dir_fd=work_fd)
+        except FileExistsError:
+            pass
+        try:
+            parent_fd = os.open("ab", directory_flags, dir_fd=work_fd)
+        except OSError as exc:
+            raise RuntimeError(
+                f"untrusted candidate image identity parent: {parent}"
+            ) from exc
+        parent_stat = os.fstat(parent_fd)
+        if (
+            not stat.S_ISDIR(parent_stat.st_mode)
+            or parent_stat.st_uid != os.geteuid()
+        ):
+            raise RuntimeError(f"untrusted candidate image identity parent: {parent}")
+        os.fchmod(parent_fd, 0o755)
+
+        try:
+            identity_fd = os.open(
+                "candidate-image-ids", directory_flags, dir_fd=parent_fd
+            )
+        except FileNotFoundError:
+            identity_fd = -1
+        except OSError as exc:
+            raise RuntimeError(
+                f"untrusted candidate image identity path: {identity_dir}"
+            ) from exc
+        if identity_fd >= 0:
+            try:
+                opened_stat = os.fstat(identity_fd)
+                if (
+                    not stat.S_ISDIR(opened_stat.st_mode)
+                    or opened_stat.st_uid != os.geteuid()
+                ):
+                    raise RuntimeError(
+                        f"untrusted opened candidate image identity path: {identity_dir}"
+                    )
+                with os.scandir(identity_fd) as entries:
+                    names = [entry.name for entry in entries]
+                for name in names:
+                    entry_stat = os.stat(
+                        name, dir_fd=identity_fd, follow_symlinks=False
+                    )
+                    if stat.S_ISDIR(entry_stat.st_mode):
+                        raise RuntimeError(
+                            f"unexpected directory in candidate image identities: "
+                            f"{identity_dir / name}"
+                        )
+                    os.unlink(name, dir_fd=identity_fd)
+            finally:
+                os.close(identity_fd)
+            os.rmdir("candidate-image-ids", dir_fd=parent_fd)
+        os.mkdir("candidate-image-ids", mode=0o700, dir_fd=parent_fd)
+        identity_fd = os.open(
+            "candidate-image-ids", directory_flags, dir_fd=parent_fd
+        )
+        try:
+            os.fchmod(identity_fd, 0o700)
+            created_stat = os.fstat(identity_fd)
+            if created_stat.st_uid != os.geteuid():
+                raise RuntimeError(
+                    f"foreign-owned candidate image identity path: {identity_dir}"
+                )
+        finally:
+            os.close(identity_fd)
+        return identity_dir
+    finally:
+        if parent_fd >= 0:
+            os.close(parent_fd)
+        os.close(work_fd)
+
 
 def _raise_on_term(signum, frame):  # noqa: ARG001 - signal handler signature
     """Make SIGTERM unwind the stack the way SIGINT already does."""
@@ -1767,6 +3095,10 @@ def run_ab_in_one_allocation(
     cluster_config: dict,
     timeout_minutes: int,
     built_images: list[str] | None = None,
+    candidate_image: str = "",
+    candidate_tuner_sha256: str = "",
+    candidate_base_digest: str = "",
+    candidate_overlay_id: str = "",
 ) -> dict:
     """Run every phase back to back inside one SLURM allocation, on the same nodes.
 
@@ -1814,14 +3146,48 @@ def run_ab_in_one_allocation(
         "  exit 3",
         "}",
     ]
-    for phase, run_dir in phases:
+    if workload_config.get("family") == "sglang-disagg":
+        dns_check = work_dir / "ab" / "preflight_dns.sh"
+        dns_check.parent.mkdir(parents=True, exist_ok=True)
+        dns_check.write_text(PREFLIGHT_DNS)
         script_lines += [
-            "",
-            f'echo "===== phase: {phase} ====="',
+            'echo "===== preflight: every node resolves to an address it owns ====="',
+            'srun --ntasks="${SLURM_JOB_NUM_NODES}" --ntasks-per-node=1 '
+            f"--overlap bash {shlex.quote(str(dns_check))} || {{",
+            '  echo "::error::At least one allocated node resolves to an address '
+            'it does not have (see BAD above); the sglang barrier would wait for '
+            'it until timeout. Exclude it via MADENGINE_SLURM_EXCLUDE."',
+            "  exit 3",
+            "}",
+        ]
+        release_memory = work_dir / "ab" / "release_host_memory.sh"
+        release_memory.write_text(RELEASE_HOST_MEMORY)
+    image_id_dir = reset_candidate_image_identity_dir(work_dir)
+    image_id_script = work_dir / "ab" / "candidate_image_id.sh"
+    image_id_script.write_text(CANDIDATE_IMAGE_ID)
+    for phase, run_dir in phases:
+        script_lines += ["", f'echo "===== phase: {phase} ====="']
+        if workload_config.get("family") == "sglang-disagg":
+            script_lines.append(
+                'srun --ntasks="${SLURM_JOB_NUM_NODES}" --ntasks-per-node=1 '
+                f"--overlap bash {shlex.quote(str(release_memory))}"
+            )
+        script_lines += [
             f"cd {shlex.quote(str(run_dir))} || exit 1",
             "madengine run -m manifest.json -o perf.csv --live-output --verbose",
             "echo $? > " + shlex.quote(str(run_dir / "exit_code")),
         ]
+        if phase == CANDIDATE and candidate_image:
+            script_lines += [
+                'echo "===== verify: immutable candidate image on every node ====="',
+                'srun --ntasks="${SLURM_JOB_NUM_NODES}" --ntasks-per-node=1 '
+                f"--overlap bash {shlex.quote(str(image_id_script))} "
+                f"{shlex.quote(candidate_image)} {shlex.quote(str(image_id_dir))} "
+                f"{shlex.quote(candidate_tuner_sha256)} "
+                f"{shlex.quote(candidate_base_digest)} "
+                f"{shlex.quote(candidate_overlay_id)} "
+                "|| echo 1 > " + shlex.quote(str(image_id_dir / "FAILED")),
+            ]
     cleanup = work_dir / "ab" / "cleanup_images.sh"
     cleanup.parent.mkdir(parents=True, exist_ok=True)
     cleanup.write_text(CLEANUP_IMAGES)
@@ -1865,6 +3231,15 @@ def run_ab_in_one_allocation(
     qos = cluster_config.get("slurm_qos", "")
     if qos:
         cmd += ["--qos", qos]
+    # Set from a repository variable by the workflow: the nodes to avoid are
+    # the cluster's business and their names do not belong in this file.
+    exclude = os.environ.get("MADENGINE_SLURM_EXCLUDE", "").strip()
+    if exclude:
+        if not re.fullmatch(r"[A-Za-z0-9_.,\[\]-]+", exclude):
+            raise RuntimeError(
+                f"MADENGINE_SLURM_EXCLUDE is not a SLURM hostlist: {exclude!r}"
+            )
+        cmd += ["--exclude", exclude]
     cmd += ["bash", str(script_path)]
 
     log.info("Running: %s", " ".join(cmd))
@@ -1951,7 +3326,25 @@ def run_ab_in_one_allocation(
     else:
         log.info("Allocation: job=%s nodes=%s", job_id, granted_nodes)
 
-    return {"exit_codes": exit_codes, "job_id": job_id, "nodelist": granted_nodes}
+    if candidate_image:
+        image_ok, image_msg, image_id = verify_image_identities(
+            image_id_dir,
+            nodes,
+            candidate_tuner_sha256,
+            candidate_base_digest,
+            candidate_overlay_id,
+        )
+    else:
+        image_ok, image_msg, image_id = True, "candidate image verification not requested", ""
+    log.info("Candidate image verification: %s", image_msg)
+    return {
+        "exit_codes": exit_codes,
+        "job_id": job_id,
+        "nodelist": granted_nodes,
+        "candidate_image_ok": image_ok,
+        "candidate_image_message": image_msg,
+        "candidate_image_id": image_id,
+    }
 
 
 def parse_perf_results(work_dir: Path) -> list[dict]:
@@ -2062,6 +3455,24 @@ def parse_live_log_metrics(work_dir: Path) -> list[dict]:
     return runs
 
 
+_SWEEP_POINT_RE = re.compile(r"_(isl\d+_osl\d+_con\d+)$")
+
+
+def _row_precision(row: dict) -> str:
+    """The key a result row is paired on: its precision, or its sweep point.
+
+    An inference sweep has no precision; its rows are named
+    ``<model>_<xPyD>_isl<I>_osl<O>_con<C>``, and the point is what the two
+    phases have in common.
+    """
+    precision = (row.get("training_precision")
+                 or row.get("multi_results", {}).get("precision", ""))
+    if precision:
+        return precision
+    point = _SWEEP_POINT_RE.search(row.get("model", ""))
+    return point.group(1) if point else ""
+
+
 def _usable_metric(val: float) -> bool:
     """Whether a throughput can be scored; NaN would pass any threshold."""
     return math.isfinite(val) and val > 0
@@ -2072,8 +3483,12 @@ def collect_phase_results(
     metric_key: str,
     extra_aliases: set[str] | None = None,
     extra_tflops_aliases: set[str] | None = None,
+    only: list[str] | None = None,
 ) -> list[dict]:
-    """Per-precision metrics for one phase: structured output, else the live log."""
+    """Per-precision metrics for one phase: structured output, else the live log.
+
+    *only* keeps the rows of those precisions (sweep points) and drops the rest.
+    """
     perf_results = parse_perf_results(run_dir)
     results: list[dict] = []
 
@@ -2095,8 +3510,9 @@ def collect_phase_results(
             if row.get("metric") not in accepted_metrics:
                 continue
             perf_val = row.get("performance", "")
-            precision = (row.get("training_precision")
-                         or row.get("multi_results", {}).get("precision", ""))
+            precision = _row_precision(row)
+            if only is not None and precision not in only:
+                continue
             row_status = row.get("status", "")
             if not perf_val:
                 continue
@@ -2128,8 +3544,7 @@ def collect_phase_results(
         for row in perf_results:
             if row.get("metric") not in accepted_tflops:
                 continue
-            prec = (row.get("training_precision")
-                    or row.get("multi_results", {}).get("precision", ""))
+            prec = _row_precision(row)
             try:
                 tflops_by_precision[prec] = float(row["performance"])
             except (KeyError, ValueError, TypeError):
@@ -2390,6 +3805,7 @@ def generate_summary_report(
     nodelist: str = "",
     job_id: str = "",
     phase_rccl: dict[str, str] | None = None,
+    unit: str = "tok/s/GPU",
 ) -> str:
     """Generate a plain-text summary report."""
     status = "PASSED" if exit_code == 0 else "FAILED"
@@ -2410,7 +3826,7 @@ def generate_summary_report(
         "Both numbers below were measured on those same nodes, back to back,",
         "inside one allocation. Baseline is the stock image; candidate is the",
         "same image with the CI-built RCCL laid over it. Throughput in",
-        "tok/s/GPU.",
+        f"{unit}.",
         "",
     ]
 
@@ -2443,6 +3859,22 @@ def generate_summary_report(
     return "\n".join(lines)
 
 
+def prepare_work_directory(work_dir: Path) -> None:
+    """Create a trusted, traversable work directory before any artifact write."""
+    work_dir.mkdir(mode=0o755, parents=True, exist_ok=True)
+    if work_dir.is_symlink() or not work_dir.is_dir():
+        raise RuntimeError(f"work directory must be a real directory: {work_dir}")
+    details = work_dir.stat(follow_symlinks=False)
+    if details.st_uid != os.geteuid():
+        raise RuntimeError(
+            f"work directory must be owned by uid {os.geteuid()}: {work_dir} "
+            f"(owner {details.st_uid})"
+        )
+    # Docker root needs to traverse this shared path; manifests and random log
+    # tokens themselves are separately created 0600.
+    work_dir.chmod(0o755)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -2451,6 +3883,23 @@ def main() -> None:
         type=Path,
         required=True,
         help="Directory containing CI-built RCCL artifacts",
+    )
+    parser.add_argument(
+        "--candidate-sha",
+        required=True,
+        help="Exact 40-character source SHA the RCCL artifact was built from",
+    )
+    parser.add_argument(
+        "--artifact-provenance",
+        type=Path,
+        required=True,
+        help="Verified artifact-run provenance JSON",
+    )
+    parser.add_argument(
+        "--candidate-tuner-config",
+        type=Path,
+        required=True,
+        help="gfx950 tuner CSV from the exact candidate source checkout",
     )
     parser.add_argument(
         "--workload",
@@ -2542,6 +3991,7 @@ def main() -> None:
 
     results_dir = args.results_dir or Path(cluster_config["results_base"])
     work_dir = args.work_dir or Path(tempfile.mkdtemp(prefix="madengine_ci_"))
+    prepare_work_directory(work_dir)
     log.info("Work directory: %s", work_dir)
     log.info("Results directory: %s", results_dir)
 
@@ -2552,21 +4002,46 @@ def main() -> None:
     log.info("RCCL commit/tag: %s", rccl_commit)
     rccl_fingerprint = get_rccl_fingerprint(rccl_lib)
     if rccl_fingerprint["md5"]:
-        log.info("RCCL fingerprint: md5=%s version=%s size=%d",
-                 rccl_fingerprint["md5"], rccl_fingerprint["version"],
+        log.info("RCCL fingerprint: sha256=%s md5=%s version=%s size=%d",
+                 rccl_fingerprint["sha256"], rccl_fingerprint["md5"],
+                 rccl_fingerprint["version"],
                  rccl_fingerprint["size"])
+    try:
+        candidate_manifest = candidate_provenance(
+            args.candidate_sha,
+            args.artifact_provenance,
+            args.candidate_tuner_config,
+            rccl_lib,
+            rccl_fingerprint,
+        )
+    except RuntimeError as exc:
+        log.error("Candidate provenance verification FAILED: %s", exc)
+        sys.exit(1)
+    write_candidate_provenance(work_dir, candidate_manifest)
+    log.info(
+        "Candidate provenance verified: source=%s build=%s artifact_run=%s "
+        "tuner=%s sha256=%s",
+        candidate_manifest["candidate_sha"],
+        candidate_manifest["artifact"].get(
+            "artifact_build_sha", candidate_manifest["candidate_sha"]
+        ),
+        candidate_manifest["artifact"].get("artifact_run_id"),
+        candidate_manifest["tuner"]["expected_runtime_source"],
+        candidate_manifest["tuner"]["source_sha256"],
+    )
 
     # Step 2: Install madengine
     family = workload_config.get("family", "megatron")
     install_madengine(work_dir, family=family)
     check_mad_knobs(work_dir, workload_config)
+    check_sglang_knobs(work_dir, workload_config)
 
     primus_dir = work_dir / "MAD" / "scripts" / "Primus" if family == "maxtext" else None
 
     # Resolved once and written into both A/B Dockerfiles, so the pair cannot
     # straddle a push to the mutable base tag between the two builds.
     base_ref = ""
-    if family == "maxtext" and not args.skip_overlay_build:
+    if not args.skip_overlay_build:
         base_ref = resolve_base_digest(workload_config["base_image"])
 
     # Step 3: Stage the candidate image (or use pre-built). Images are built on
@@ -2576,9 +4051,11 @@ def main() -> None:
             log.error("--skip-overlay-build requires --overlay-image")
             sys.exit(1)
         overlay_image = args.overlay_image
+        staged_overlay = None
     else:
-        overlay_image = stage_rccl_overlay(
+        overlay_image, staged_overlay = stage_rccl_overlay(
             rccl_lib,
+            args.candidate_tuner_config,
             workload_config["base_image"],
             cluster_config["gpu_target"],
             work_dir,
@@ -2586,6 +4063,12 @@ def main() -> None:
             primus_dir=primus_dir,
             from_ref=base_ref,
         )
+        if staged_overlay["candidate_asset_id"] != candidate_manifest["candidate_asset_id"]:
+            raise RuntimeError(
+                "staged candidate asset identity differs from provenance: "
+                f"{staged_overlay['candidate_asset_id']} != "
+                f"{candidate_manifest['candidate_asset_id']}"
+            )
 
     # The maxtext baseline cannot be the stock tag: that image ships MaxText
     # but no Primus, so run.sh would not find primus-cli and the baseline
@@ -2601,9 +4084,38 @@ def main() -> None:
             from_ref=base_ref or workload_config["base_image"],
         )
         baseline_pull_only = False
+    elif family == "sglang-disagg":
+        baseline_image = stage_sglang_baseline(
+            workload_config["base_image"], work_dir,
+            run_token=rccl_commit,
+            from_ref=base_ref or workload_config["base_image"],
+        )
+        baseline_pull_only = False
     else:
-        baseline_image = workload_config["base_image"]
+        baseline_image = base_ref or workload_config["base_image"]
         baseline_pull_only = True
+
+    candidate_manifest.update({
+        "candidate_image": {
+            "reference": overlay_image,
+            "base_reference": base_ref or workload_config["base_image"],
+            "digest": "",
+        },
+        "baseline": {
+            "reference": baseline_image,
+            "policy": "stock/previous-good image, independent of candidate develop tip",
+        },
+    })
+    if args.skip_overlay_build:
+        candidate_manifest["candidate_image"]["verification"] = (
+            "not applicable: exact candidate assets are read-only bind mounts"
+        )
+        candidate_manifest["tuner"]["expected_runtime_source"] = BIND_MOUNT_TUNER_PATH
+    else:
+        candidate_manifest["base_digest"] = base_ref
+        candidate_manifest["overlay_asset_id"] = staged_overlay["overlay_asset_id"]
+        candidate_manifest["staged_overlay"] = staged_overlay
+    write_candidate_provenance(work_dir, candidate_manifest)
 
     # Step 4: Generate one manifest per A/B phase
     phases: list[tuple[str, Path]] = []
@@ -2624,16 +4136,21 @@ def main() -> None:
             rccl_lib=(
                 rccl_lib if args.skip_overlay_build and phase == CANDIDATE else None
             ),
+            candidate_tuner_config=(
+                args.candidate_tuner_config
+                if args.skip_overlay_build and phase == CANDIDATE
+                else None
+            ),
             run_dir=run_dir,
             pull_only=pull_only,
-            # A maxtext baseline is a locally built image, so its manifest is
-            # on the build-capable path and must advertise ITS OWN dockerfile.
-            # Left at the default it would hand a node the candidate recipe
-            # and have it rebuild the swapped image under the baseline tag --
-            # an A/B comparing the CI RCCL against itself.
+            # A maxtext baseline is built on the nodes, so its manifest must
+            # advertise ITS OWN dockerfile. Left at the default it would hand
+            # a node the candidate recipe and have it build the swapped image
+            # under the baseline tag -- an A/B comparing the CI RCCL against
+            # itself.
             dockerfile_name=(
-                MAXTEXT_BASELINE_DOCKERFILE
-                if family == "maxtext" and phase == BASELINE
+                LOCAL_BASELINE_DOCKERFILES.get(family, OVERLAY_DOCKERFILE)
+                if phase == BASELINE
                 else OVERLAY_DOCKERFILE
             ),
         )
@@ -2649,7 +4166,7 @@ def main() -> None:
             work_dir, phase_dirs, args.workload, workload_config, cluster_config,
             args.nodes, rccl_fingerprint,
             images={BASELINE: baseline_image, CANDIDATE: overlay_image},
-            base_digest=base_ref or local_repo_digest(workload_config["base_image"]),
+            base_digest=base_ref or registry_digest(workload_config["base_image"]),
         )
     except Exception:
         log.exception("Could not write the repro bundle; continuing without it")
@@ -2668,12 +4185,32 @@ def main() -> None:
             ([] if args.skip_overlay_build else [overlay_image])
             + ([] if baseline_pull_only else [baseline_image])
         ),
+        # In skip mode the candidate assets are read-only bind mounts over a
+        # helper image, so that image neither contains nor identifies them.
+        candidate_image=candidate_image_verification_target(
+            overlay_image, args.skip_overlay_build
+        ),
+        candidate_tuner_sha256=candidate_manifest["tuner"]["source_sha256"],
+        candidate_base_digest=(
+            candidate_manifest.get("base_digest", "") if not args.skip_overlay_build else ""
+        ),
+        candidate_overlay_id=(
+            candidate_manifest.get("overlay_asset_id", "")
+            if not args.skip_overlay_build else ""
+        ),
     )
     exit_code = max(allocation["exit_codes"].values(), default=1)
+    # Non-empty invalid value makes server-log selection fail closed if the
+    # allocation did not record its Slurm ID; an empty value enables only the
+    # local/unit-test discovery fallback.
+    log_job_id = allocation["job_id"] or "invalid"
 
     # Step 5a: Shrink the node logs before anything reads or uploads them.
     for phase, run_dir in phases:
-        saved = squash_log_spam(run_dir)
+        # Snapshot container-owned logs without following links. Verification,
+        # squashing and upload all consume this runner-owned copy.
+        snapshot_server_logs(run_dir, log_job_id)
+        saved = squash_log_spam(run_dir, log_job_id)
         if saved:
             log.info("%s: dropped %.1f MB of repeated RCCL warnings from the node logs",
                      phase, saved / 1e6)
@@ -2681,9 +4218,17 @@ def main() -> None:
     # Step 5b: Verify RCCL replacement. Only the candidate is meant to carry the
     # CI library — the baseline runs the image's bundled copy by design.
     rccl_verification_failed = False
+    if not allocation["candidate_image_ok"]:
+        log.error(
+            "Candidate image verification FAILED: %s",
+            allocation["candidate_image_message"],
+        )
+        rccl_verification_failed = True
+        exit_code = max(exit_code, 1)
     if rccl_fingerprint.get("version"):
         rccl_ok, rccl_msg = verify_rccl_replacement(
             phase_dirs[CANDIDATE], rccl_fingerprint, args.nodes,
+            slurm_job_id=log_job_id,
         )
         if rccl_ok:
             log.info("RCCL verification: %s", rccl_msg)
@@ -2691,6 +4236,45 @@ def main() -> None:
             log.error("RCCL verification FAILED: %s", rccl_msg)
             rccl_verification_failed = True
             exit_code = max(exit_code, 1)
+
+    expected_tuner_source = (
+        BIND_MOUNT_TUNER_PATH if args.skip_overlay_build else CANDIDATE_TUNER_PATH
+    )
+    tuner_sources = runtime_tuner_sources(
+        phase_dirs[CANDIDATE], log_job_id
+    )
+    if family == "sglang-disagg" or args.skip_overlay_build:
+        tuner_ok, tuner_msg = verify_candidate_tuner(
+            phase_dirs[CANDIDATE], args.nodes,
+            expected_source=expected_tuner_source,
+            slurm_job_id=log_job_id,
+        )
+        if tuner_ok:
+            log.info("RCCL tuner verification: %s", tuner_msg)
+        else:
+            log.error("RCCL tuner verification FAILED: %s", tuner_msg)
+            rccl_verification_failed = True
+            exit_code = max(exit_code, 1)
+
+    candidate_manifest["candidate_image"].update({
+        "digest": allocation["candidate_image_id"],
+        "verification": allocation["candidate_image_message"],
+    })
+    candidate_manifest["runtime"] = {
+        "rccl_versions": runtime_rccl_versions(
+            phase_dirs[CANDIDATE], log_job_id
+        ),
+        "baseline_rccl_versions": runtime_rccl_versions(
+            phase_dirs[BASELINE], log_job_id
+        ),
+        "tuner_sources": tuner_sources,
+        "tuner_expected": (
+            expected_tuner_source
+            if family == "sglang-disagg" or args.skip_overlay_build
+            else "not asserted"
+        ),
+    }
+    write_candidate_provenance(work_dir, candidate_manifest)
 
     # Step 6: Parse each phase's results and save its artifacts
     metric_key = workload_config["metric_key"]
@@ -2702,6 +4286,9 @@ def main() -> None:
             run_dir, metric_key,
             extra_aliases=workload_config.get("metric_aliases"),
             extra_tflops_aliases=workload_config.get("tflops_aliases"),
+            # A sweep reports many points; only the configured ones are scored.
+            only=(workload_config["precisions"]
+                  if workload_config["type"] == "inference" else None),
         )
 
         # Matrix legs share GITHUB_RUN_ID, so the workload keeps them apart.
@@ -2801,7 +4388,19 @@ def main() -> None:
         "slurm_job_id": allocation["job_id"],
         # run_id names this test run; these name the RCCL binary it tested.
         "artifact_run_id": os.environ.get("ARTIFACT_RUN_ID", ""),
+        "candidate_sha": candidate_manifest["candidate_sha"],
+        "artifact_source_sha": candidate_manifest["artifact"]["artifact_source_sha"],
+        "artifact_build_sha": candidate_manifest["artifact"].get(
+            "artifact_build_sha", candidate_manifest["candidate_sha"]
+        ),
         "rccl_md5": rccl_fingerprint["md5"],
+        "rccl_sha256": rccl_fingerprint["sha256"],
+        "candidate_image_digest": allocation["candidate_image_id"],
+        "candidate_tuner_source": ",".join(tuner_sources),
+        "candidate_tuner_sha256": candidate_manifest["tuner"]["source_sha256"],
+        "candidate_kpack_sha256": ",".join(
+            item["sha256"] for item in candidate_manifest["kpack"]
+        ),
     }
     # baseline_image, not workload_config["base_image"]: for maxtext the
     # baseline is a locally built Primus image, and recording the stock tag
@@ -2832,7 +4431,10 @@ def main() -> None:
                     extra=phase_extra,
                     precision=c["precision"],
                     tflops=row.get("tflops_avg"),
-                    tokens_per_sec=row.get("metric_value"),
+                    # Per GPU for training only; inference scores the whole
+                    # deployment, and metric_value already carries that.
+                    tokens_per_sec=(row.get("metric_value")
+                                    if workload_config["type"] == "training" else None),
                 )
     else:
         append_result(
@@ -2854,9 +4456,10 @@ def main() -> None:
         nodelist=allocation["nodelist"],
         job_id=allocation["job_id"],
         phase_rccl={
-            phase: ", ".join(runtime_rccl_versions(run_dir))
+            phase: ", ".join(runtime_rccl_versions(run_dir, log_job_id))
             for phase, run_dir in phases
         },
+        unit=workload_config.get("metric_unit", "tok/s/GPU"),
     )
     log.info("\n%s", report)
     write_github_summary(report)
