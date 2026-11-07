@@ -122,6 +122,7 @@ private:
   __device__ bool cq_reached_target(sq_idx_t target, sq_idx_t complete_idx);
   __device__ sq_idx_t cq_complete_idx();
   __device__ sq_idx_t cq_complete_idx(sq_idx_t complete_idx);
+  __device__ sq_idx_t cq_update_complete_idx(sq_idx_t complete_idx, sq_idx_t next_complete_idx);
 
   __device__ void ring_doorbell(sq_idx_t next_commit_idx, const gda_mlx5_wqe& wqe);
 
@@ -445,8 +446,7 @@ __device__ __forceinline__ QueuePairMLX5::sq_idx_t QueuePairMLX5::cq_complete_id
 }
 
 /* precondition: called with all active lanes using different QPs
- * update sq.complete_idx with new value derived from complete_idx argument + cqe->wqe_counter
- * and return the updated complete_idx value
+ * return updated complete_idx value derived from complete_idx argument + cqe->wqe_counter
  * TODO: apply PostOpts to cq_complete_idx(sq_idx_t) */
 __device__ __forceinline__ QueuePairMLX5::sq_idx_t QueuePairMLX5::cq_complete_idx(
     QueuePairMLX5::sq_idx_t complete_idx) {
@@ -489,11 +489,18 @@ __device__ __forceinline__ QueuePairMLX5::sq_idx_t QueuePairMLX5::cq_complete_id
    * but in that case complete_idx is necessarily updated since we need to call poll_cq_until
    * to ensure that the SQ slots are free and we catch it */
   uint16_t complete_idx16_diff = complete_idx16 - static_cast<uint16_t>(complete_idx);
-  sq_idx_t next_complete_idx   = complete_idx   + static_cast<sq_idx_t>(complete_idx16_diff);
 
+  return complete_idx + static_cast<sq_idx_t>(complete_idx16_diff);
+}
+
+/* precondition: called with all active lanes using different QPs
+ * try to update sq.complete_idx with next_complete_idx and return current complete_idx value
+ * TODO: apply PostOpts to cq_update_complete_idx */
+__device__ __forceinline__ QueuePairMLX5::sq_idx_t QueuePairMLX5::cq_update_complete_idx(
+    QueuePairMLX5::sq_idx_t complete_idx, QueuePairMLX5::sq_idx_t next_complete_idx) {
   /* accumulate the newly-complete indices into sq.complete_idx,
    * if some other thread didn't get there first
-   * assumes that cq_complete_idx(sq_idx_t) will be called from a loop *somewhere*,
+   * assumes that cq_update_complete_idx will be called from a loop *somewhere*,
    * so uses atomic_compare_exchange_weak
    *
    * NOTE: cannot use fetch_max, otherwise can never wrap around (when sq_idx_t is uint32_t) */
@@ -503,7 +510,6 @@ __device__ __forceinline__ QueuePairMLX5::sq_idx_t QueuePairMLX5::cq_complete_id
     complete_idx = next_complete_idx;
     LOGD_TRACE("QP[%d] CQ: polled completed = %zu", qp_num, static_cast<size_t>(complete_idx));
   }
-
   return complete_idx;
 }
 
@@ -515,14 +521,19 @@ __device__ __forceinline__ bool QueuePairMLX5::poll_cq_once(
   // load cached sq.complete_idx value
   sq_idx_t complete_idx = cq_complete_idx();
 
-  // check if we've already reached target
+  // check whether sq.complete_idx has reached target
   bool reached_target = cq_reached_target(target, complete_idx);
 
   if (!reached_target) {
-    // check CQE and update sq.complete_idx
-    complete_idx = cq_complete_idx(complete_idx);
-    // check whether we've reached target now
-    reached_target = cq_reached_target(target, complete_idx);
+    // check CQE and save into local copy of complete_idx
+    sq_idx_t local_complete_idx = cq_complete_idx(complete_idx);
+    // try to update sq.complete_idx if local copy of complete_idx reaches target
+    if (cq_reached_target(target, local_complete_idx)) {
+      // update sq.complete_idx if no one else has, else return its current value
+      complete_idx = cq_update_complete_idx(complete_idx, local_complete_idx);
+      // check whether sq.complete_idx has now reached target
+      reached_target = cq_reached_target(target, complete_idx);
+    }
   }
 
   // output trace only when complete_idx reaches target
@@ -542,9 +553,16 @@ __device__ __forceinline__ void QueuePairMLX5::poll_cq_until(
   // load cached sq.complete_idx value
   sq_idx_t complete_idx = cq_complete_idx();
 
-  // poll until complete_idx reaches target
+  // poll until sq.complete_idx reaches target
   while (!cq_reached_target(target, complete_idx)) {
-    complete_idx = cq_complete_idx(complete_idx);
+    /* poll CQE until local copy of complete_idx reaches target
+     * cq_complete_idx doesn't update sq.complete_idx */
+    sq_idx_t local_complete_idx = cq_complete_idx(complete_idx);
+    while (!cq_reached_target(target, local_complete_idx)) {
+      local_complete_idx = cq_complete_idx(local_complete_idx);
+    }
+    // update sq.complete_idx if no one else has, else return its current value
+    complete_idx = cq_update_complete_idx(complete_idx, local_complete_idx);
   }
 
   LOGD_TRACE("QP[%d] CQ: completed %zu >= target %zu",
