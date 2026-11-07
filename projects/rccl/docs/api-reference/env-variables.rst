@@ -656,6 +656,24 @@ in the following table.
       - | Integer value in bytes (default: ``128``)
         | ``N``: Split only when message size >= N bytes
 
+    * - | ``RCCL_IB_MAX_MSG_SIZE``
+        | Largest data payload, in bytes, of one work request posted by the
+          ``IB-CAST`` transport. A GIN ``iput``, ``iget``, or ``iputSignal``, or
+          a point-to-point send, that is larger than the cap is posted as
+          several work requests on the same queue pair. Only the last data work
+          request is signaled. For ``iputSignal`` the atomic remains the
+          signaled tail, and for a point-to-point send the tail keeps the
+          write-with-immediate.
+      - | Integer bytes. Default: ``-1`` (unset).
+        | A positive value sets the cap. On gfx1250 it is also limited to
+          256 MiB, and a smaller non-zero port ``max_msg_sz`` limits it further.
+          The smallest such port across devices wins. A port that reports 0 does
+          not. The result is raised to at least 1 MiB and rounded down to a
+          multiple of 128 bytes.
+        | When unset, gfx1250 uses 256 MiB and every other architecture uses the
+          port limit, with the same 1 MiB floor and 128-byte rounding. ``0`` is
+          treated as unset.
+
     * - | ``RCCL_IB_GDR_FLUSH_FLAG``
         | Replaces the GPUDirect RDMA flush of Simple-protocol receives in the
           ``IB`` network transport (``net_ib``). By default, the proxy fences

@@ -2824,6 +2824,7 @@ rccl_add_transport_micro_binary(rccl-UnitTestsMicroTransportNetIbCastCommon net_
     fakes/rocmwrap_fakes.cc
     fakes/socket_fakes.cc
     fakes/transport_stubs.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/capability.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/gdr_tmp.cc
@@ -2854,6 +2855,7 @@ rccl_add_transport_micro_binary(rccl-UnitTestsMicroTransportNetIbCastGdr net_ib_
     fakes/rocmwrap_fakes.cc
     fakes/socket_fakes.cc
     fakes/transport_stubs.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/capability.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/init_tmp.cc
@@ -2892,6 +2894,7 @@ rccl_add_transport_micro_binary(rccl-UnitTestsMicroTransportNetIbCastGin net_ib_
     fakes/rocmwrap_fakes.cc
     fakes/socket_fakes.cc
     fakes/transport_stubs.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/capability.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/common_tmp.cc
@@ -2920,6 +2923,7 @@ rccl_add_transport_micro_binary(rccl-UnitTestsMicroTransportNetIbCastInit net_ib
     fakes/rocmwrap_fakes.cc
     fakes/socket_fakes.cc
     fakes/transport_stubs.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/capability.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/common_tmp.cc

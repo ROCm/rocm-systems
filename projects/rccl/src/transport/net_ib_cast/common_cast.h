@@ -216,13 +216,13 @@ extern bool IbCastUseInline;
  *
  *   31       24 23  22                           0
  *  +----------+----+-----------------------------+
- *  |  reqIdx  | SD |       size (23 bits)        |
+ *  |  reqIdx  | SD |           unused            |
  *  | (8 bits) |    |                             |
  *  +----------+----+-----------------------------+
  *
  *  reqIdx : receiver-side request index
  *  SD     : split-data flag (set when data spans >1 QPs)
- *  size   : transfer size in bytes
+ *  The receiver takes a one-request size from the completion byte count.
  */
 #define WR_IMM_RX_REQ_IDX_BITS  8
 #define WR_IMM_RX_REQ_IDX_BIT_POS 24
@@ -260,6 +260,10 @@ int64_t ncclParamIbCastOooRq();
 
 #define NCCL_IB_LLSTR(ll) \
   (((ll) == IBV_LINK_LAYER_INFINIBAND) ? "IB" : (((ll) == IBV_LINK_LAYER_ETHERNET) ? "RoCE" : "UNSPECIFIED"))
+
+// The alignment for IB writes that is required to make LL and LL128 protocols work
+#define IB_WRITE_CHUNK_ALIGNMENT 128
+#define IB_CAST_MAX_STACK_WRS 16
 
 // Per-Dev connection metadata
 struct ncclIbDevInfo {
@@ -542,6 +546,15 @@ struct ncclIbQp {
 #define NET_IB_MAX_REQUESTS (NCCL_NET_MAX_REQUESTS * NCCL_NET_IB_MAX_RECVS)
 static_assert(NET_IB_MAX_REQUESTS <= 256,
               "request id are encoded in wr_id and we need up to 8 requests ids per completion");
+
+// A data send is two WRs unless the payload is split under the post cap. One
+// request may then post this many WRs, a 1 GiB payload at the 1 MiB floor. The
+// queue keeps two WRs for every other in-flight request so that one split still
+// fits beside them. A longer chain fails in ibv_post_send.
+#define IB_CAST_MAX_SPLIT_WRS 1024
+static inline uint32_t IbCastDataSendQueueDepth() {
+  return 2u * (NET_IB_MAX_REQUESTS - 1) + IB_CAST_MAX_SPLIT_WRS;
+}
 
 // Structure to describe the completion records on the sender side.
 struct ncclIbRemCompletionsRecords {
@@ -896,6 +909,8 @@ ncclResult_t IbCastInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config
 ncclResult_t IbCastDevices(int* ndev);
 ncclResult_t IbCastGetProperties(int dev, ncclNetProperties_t* props);
 ncclResult_t IbCastGetPhysProperties(int dev, ncclNetProperties_t* props);
+
+extern uint32_t IbCastMaxPostSendBytes;
 ncclResult_t IbCastListen(void* ctx, int dev, void* opaqueHandle, void** listenComm);
 ncclResult_t IbCastConnect(void* ctx, int dev, void* opaqueHandle, void** sendComm,
                            ncclNetDeviceHandle_t** /*sendDevComm*/);
