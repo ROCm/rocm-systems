@@ -409,6 +409,7 @@ def test_csv_data(
             "Grid_Size_X": ("dispatch_info.grid_size.x", None),
             "Grid_Size_Y": ("dispatch_info.grid_size.y", None),
             "Grid_Size_Z": ("dispatch_info.grid_size.z", None),
+            "Pipe_Id": ("pipe_id", None),
         },
         "memory_allocation": {
             "Operation": (),  # Special case

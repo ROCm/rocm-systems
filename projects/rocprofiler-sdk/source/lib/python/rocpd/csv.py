@@ -226,6 +226,10 @@ def get_kernel_csv_query(importData, config) -> str:
     if "graph_launch" in importData.supported_features:
         hip_graph_fields = ("graph_exec_id", "graph_node_id")
 
+    pipe_id_fields = ()
+    if "pipe_id" in importData.supported_features:
+        pipe_id_fields = ("pipe_id AS Pipe_Id",)
+
     select_columns = [
         "guid",
         "'KERNEL_DISPATCH' AS Kind",
@@ -252,6 +256,7 @@ def get_kernel_csv_query(importData, config) -> str:
         "grid_x AS Grid_Size_X",
         "grid_y AS Grid_Size_Y",
         "grid_z AS Grid_Size_Z",
+        *pipe_id_fields,
     ]
 
     select_clause = ",\n".join(select_columns)
