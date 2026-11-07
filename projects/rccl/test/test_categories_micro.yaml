@@ -14,25 +14,6 @@ test_categories:
     # A trailing '.*' anchors the end of the suite name. Dropping the dot widens instead
     # ("Devcomm*" matches all five Devcomm suites).
     test_patterns:
-      # transport/p2p.cc
-      - "P2pMicrotest.*"
-      - "P2pMicrotestIsolated.*"
-      - "P2pCanConnectMicrotest.*"
-      - "P2pCanConnectMicrotestIsolated.*"
-      - "P2pSetupMicrotest.*"
-      - "P2pFreeMicrotest.*"
-      - "P2pShareableBufferMicrotest.*"
-      - "P2pRegisterFamilyMicrotest.*"
-      - "P2pMultiSegmentMicrotest.*"
-      - "P2pProxyRegisterMicrotest.*"
-      - "P2pProxyDeregisterMicrotest.*"
-      - "P2pProxyLifecycleMicrotest.*"
-      - "P2pProxyCeMicrotestIsolated.*"
-      - "GuardOperands/P2pAllocateSkipMarkExport.*"
-      - "MappingStages/P2pImportMapStageFails.*"
-      - "FreshRegistrationMicrotest.*"
-      - "FreshRegistrationLegacyIpcSucceedsFixture.*"
-      - "ConnStepAcquireMicrotest.*"
       # ras/ras.cc
       - "RasMicrotest.*"
       # ras/diagnostics_checks_common.cc
@@ -56,23 +37,6 @@ test_categories:
       - "Commands/RasClientSupportEnqueueFailureMicrotest.*"
       # ras/ras_param.cc
       - "RasParamMicrotest.*"
-      # transport/net_telemetry.cc, include/net_telemetry.h
-      - "NetTelemetryInitMicrotest.*"
-      - "NetTelemetryRegisterMicrotest.*"
-      - "NetTelemetryChannelMicrotest.*"
-      - "NetTelemetryHooksMicrotest.*"
-      - "NetTelemetryQpHooksMicrotest.*"
-      - "NetTelemetryDeviceHooksMicrotest.*"
-      - "NetTelemetryCaptureMicrotest.*"
-      - "NetTelemetryCountersMicrotest.*"
-      - "NetTelemetryEthtoolMicrotest.*"
-      - "NetTelemetryDebugfsMicrotest.*"
-      - "NetTelemetryReadCountersMicrotest.*"
-      - "NetTelemetrySnapshotMicrotest.*"
-      - "NetTelemetryCollectMicrotest.*"
-      - "NetTelemetrySamplerMicrotest.*"
-      - "NetTelemetryJsonMicrotest.*"
-      - "NetTelemetryFlushMicrotest.*"
       # rma/rma_proxy_launch.cc
       - "RmaProxyBatchMemOpTest.*"
       - "RmaProxyDescriptorTest.*"
@@ -98,6 +62,8 @@ test_categories:
       - "RmaDebugLoggingTest.*"
       - "RmaProxyGatingTest.*"
       - "RmaProxyReadyTest.*"
+      # plugin/rma.cc
+      - "RmaPluginInitTest.*"
       # tuning/tuning_general.cc
       - "TuningGeneralMicrotest.*"
       # tuning/tuning.cc
@@ -134,8 +100,6 @@ test_categories:
       - "WrapMicrotestIsolated.*"
       # misc/gdr_probe.cc
       - "GdrProbeTest.*"
-      # transport/nvls.cc (rccl-UnitTestsMicroNvls)
-      - "NvlsHipStubTest.*"
       # misc/ionicdvsymbols.cc, misc/mlx5dvsymbols.cc
       - "DvSymbolsTestIsolated.*"
       # ce_coll.cc (rccl-UnitTestsMicroCe)
@@ -166,6 +130,10 @@ test_categories:
       - "Win*"
       # test/common/ProcessIsolatedTestRunner.cpp
       - "ProcessIsolatedRunnerMicrotest.*"
+      # register/*.cc
+      - "Register*"
+      # test/host/host_test_dispatch.cc (rccl-UnitTestsMicroHostDispatch)
+      - "HostDispatch*"
     exclude_windows:
       - "*"
     labels:

@@ -35,6 +35,19 @@ static bool multiplyOverflow(__hip_uint32_t operand,
 #endif
 }
 
+static hipError_t ihipValidateClusterSize(const dim3& clusterDim, size_t clusterMaxSize) {
+  __hip_uint32_t clusterSize;
+  if (multiplyOverflow(clusterDim.x, clusterDim.y, clusterSize) ||
+      multiplyOverflow(clusterSize, clusterDim.z, clusterSize)) {
+    return hipErrorInvalidClusterSize;
+  }
+  if ((clusterSize > 1 && clusterMaxSize == 0) ||
+      (clusterMaxSize > 0 && clusterSize > clusterMaxSize)) {
+    return hipErrorInvalidClusterSize;
+  }
+  return hipSuccess;
+}
+
 namespace hip {
 
 hipError_t ihipModuleLoadData(hipModule_t* module, const void* mmap_ptr, size_t mmap_size);
@@ -515,17 +528,11 @@ hipError_t ihipResolveGraphClusterDimensions(hipFunction_t f, int deviceId, dim3
     }
   }
 
-  // Setter values can be very large, so reject a cluster product that cannot fit in uint32_t.
-  __hip_uint32_t cluster_size;
-  if (multiplyOverflow(clusterDim->x, clusterDim->y, cluster_size) ||
-      multiplyOverflow(cluster_size, clusterDim->z, cluster_size)) {
-    return hipErrorInvalidClusterSize;
-  }
-
-  // The resolved cluster cannot exceed the physical number of workgroups supported by AMD.
-  if ((cluster_size > 1 && device.info().clusterMaxSize_ == 0) ||
-      (device.info().clusterMaxSize_ > 0 && cluster_size > device.info().clusterMaxSize_)) {
-    return hipErrorInvalidClusterSize;
+  {
+    hipError_t err = ihipValidateClusterSize(*clusterDim, device.info().clusterMaxSize_);
+    if (err != hipSuccess) {
+      return err;
+    }
   }
 
   // Every cluster dimension must divide the corresponding graph grid dimension.
@@ -586,18 +593,14 @@ hipError_t UpdateNumClustersFromKernel(const hip::Stream* stream, const amd::Ker
     return hipErrorInvalidClusterSize;
   }
 
-  __hip_uint32_t requested_cluster_size;
-  if (multiplyOverflow(static_cast<__hip_uint32_t>(selected_cluster[0]),
-                       static_cast<__hip_uint32_t>(selected_cluster[1]), requested_cluster_size) ||
-      multiplyOverflow(requested_cluster_size, static_cast<__hip_uint32_t>(selected_cluster[2]),
-                       requested_cluster_size)) {
-    return hipErrorInvalidClusterSize;
-  }
-
-  if ((requested_cluster_size > 1 && device.info().clusterMaxSize_ == 0) ||
-      (device.info().clusterMaxSize_ > 0 &&
-       requested_cluster_size > device.info().clusterMaxSize_)) {
-    return hipErrorInvalidClusterSize;
+  {
+    dim3 clusterDimForValidation(static_cast<__hip_uint32_t>(selected_cluster[0]),
+                                 static_cast<__hip_uint32_t>(selected_cluster[1]),
+                                 static_cast<__hip_uint32_t>(selected_cluster[2]));
+    hipError_t err = ihipValidateClusterSize(clusterDimForValidation, device.info().clusterMaxSize_);
+    if (err != hipSuccess) {
+      return err;
+    }
   }
 
   if (selected_cluster[0] > 1 || selected_cluster[1] > 1 || selected_cluster[2] > 1) {
@@ -1112,7 +1115,8 @@ hipError_t hipLaunchKernel_common(
     return hipErrorInvalidValue;
   }
   CHECK_STREAM_DETACHED(stream);
-  STREAM_CAPTURE(hipLaunchKernel, stream, hostFunction, gridDim, blockDim, args, sharedMemBytes);
+  STREAM_CAPTURE(hipLaunchKernelCommon, stream, hostFunction, gridDim, blockDim, args,
+                 sharedMemBytes, clusterDim, clusterDimsSpecified);
   return ihipLaunchKernel(hostFunction, gridDim, blockDim, args, sharedMemBytes, stream, nullptr,
                           nullptr, 0, clusterDim, clusterDimsSpecified, dynDataPrefetchConfig);
 }
@@ -1603,25 +1607,11 @@ hipError_t hipLaunchKernelExC(const hipLaunchConfig_t* config, const void* fPtr,
     }
   }
 
-  const auto& deviceInfo = hip::getCurrentDevice()->devices()[0]->info();
-  __hip_uint32_t requestedClusterSize;
-
-  if (multiplyOverflow(clusterDims.x,
-                       clusterDims.y,
-                       requestedClusterSize)) {
-    HIP_RETURN(hipErrorInvalidClusterSize);
-  }
-
-  if (multiplyOverflow(requestedClusterSize,
-                       clusterDims.z,
-                       requestedClusterSize)) {
-    HIP_RETURN(hipErrorInvalidClusterSize);
-  }
-
-  // Check cluster size against device maximum
-  if (deviceInfo.clusterMaxSize_ > 0 &&
-      requestedClusterSize > deviceInfo.clusterMaxSize_) {
-    HIP_RETURN(hipErrorInvalidClusterSize);
+  {
+    hipError_t err = ihipValidateClusterSize(clusterDims, devInfo.clusterMaxSize_);
+    if (err != hipSuccess) {
+      HIP_RETURN(err);
+    }
   }
 
   HIP_RETURN_DURATION(hipLaunchKernel_common(
@@ -1707,6 +1697,13 @@ hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f
 
   if (clusterDim.x == 0 || clusterDim.y == 0 || clusterDim.z == 0) {
     HIP_RETURN(hipErrorInvalidConfiguration);
+  }
+
+  {
+    hipError_t err = ihipValidateClusterSize(clusterDim, devInfo.clusterMaxSize_);
+    if (err != hipSuccess) {
+      HIP_RETURN(err);
+    }
   }
 
   amd::HIPLaunchParams launch_params_cluster(

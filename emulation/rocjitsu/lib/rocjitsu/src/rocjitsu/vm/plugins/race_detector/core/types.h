@@ -46,6 +46,13 @@ struct EventId {
   bool operator<(EventId o) const { return value < o.value; }
 };
 
+/// A contiguous run of LDS bytes, for events described by byte ranges rather
+/// than per-lane addresses.
+struct LdsByteRange {
+  uint32_t address = 0; ///< Absolute CU LDS byte address.
+  uint32_t bytes = 0;
+};
+
 inline void removeFromUnorderedList(std::vector<EventId> &list, EventId eventId) {
   auto it = std::ranges::find(list, eventId);
   if (it != list.end()) {
@@ -68,7 +75,7 @@ struct RaceViolation {
   Space space;
   int index;    ///< Register index (VGPR/SGPR) or byte address (LDS).
   int wave;     ///< Wave that triggered the violation.
-  int lane;     ///< Lane within the wave, or -1 for scalar.
+  int lane;     ///< Lane within the wave, or -1 for no lane (scalar or tensor DMA).
   bool isWrite; ///< True if the violating access was a write.
   Dim3d workgroupId;
   EventId conflictingEvent; ///< Exact pending memory event that caused the violation.

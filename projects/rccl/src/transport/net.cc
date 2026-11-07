@@ -265,7 +265,9 @@ static void rcclDetectIBNics() {
   int _NicsRate[rcclIBNicTypeMax]{};
   int totalNnics = 0;
 
-  /* NCCL_NET=ROCM-IB forces AINIC mode regardless of detected hardware */
+  /* NCCL_NET=ROCM-IB forces AINIC mode regardless of detected hardware.
+     Keep the literal: rcclCanonicalNetName() folds ROCM-IB into IB-CAST, which
+     must not force AINIC mode (see its comment in net.h). */
   const char* envNet = ncclGetEnv("NCCL_NET");
   if (envNet && strcasecmp(envNet, "ROCM-IB") == 0) {
     INFO(NCCL_NET | NCCL_INIT, "RCCL: AINIC mode forced by NCCL_NET=ROCM-IB");
@@ -502,7 +504,8 @@ static ncclResult_t sendSetup(struct ncclComm* comm, struct ncclTopoGraph* graph
   if (proxyRank != myInfo->rank && connIndex == 0) comm->useNetPXN = true;
   if (req.useGdr && !IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx90a") &&
       !IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") &&
-      !IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950")) {
+      !IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") &&
+      !IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250")) {
     CUDACHECK(hipDeviceGetAttribute((int*)&req.curr_hdp_reg, hipDeviceAttributeHdpMemFlushCntl, myInfo->cudaDev));
     send->conn.curr_hdp_reg = req.curr_hdp_reg;
   }

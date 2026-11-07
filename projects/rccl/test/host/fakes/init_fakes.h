@@ -23,6 +23,7 @@
 #include "mem_manager_fakes.h"   // src/mem_manager.cc
 #include "nccl_fakes.h"
 #include "nccl_stubs.h"          // core/lifecycle stubs + data symbols
+#include "channel_fakes.h"       // src/channel.cc seams
 #include "os_fakes.h"            // src/os/linux.cc
 #include "rccl_arch_thresholds_fakes.h"  // src/rccl_arch_thresholds.cc
 #include "rccl_wrap_fakes.h"     // src/rccl_wrap.cc

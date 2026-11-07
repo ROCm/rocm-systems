@@ -84,6 +84,7 @@ add_subdirectory(bin)
 # validation tests
 add_subdirectory(kernel-tracing)
 add_subdirectory(async-copy-tracing)
+add_subdirectory(async-copy-peer-tracing)
 add_subdirectory(rocshmem-trace)
 add_subdirectory(hsa-memory-allocation)
 add_subdirectory(scratch-memory-tracing)

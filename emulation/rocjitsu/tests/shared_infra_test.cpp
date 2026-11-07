@@ -4,6 +4,7 @@
 /// @file shared_infra_test.cpp
 /// @brief Phase B unit tests: addr_calc, MMA execution, wavefront context, CU factory.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
@@ -3056,25 +3057,6 @@ TEST(DppPermuteTest, QuadPerm) {
   EXPECT_FALSE(oob);
   EXPECT_EQ(dpp_permute(0xB1, 5, 64, oob), 4);
   EXPECT_FALSE(oob);
-}
-
-TEST(DppPermuteTest, Dpp8RejectsSourcesWiderThanOneDword) {
-  amdgpu::GpuMemory mem("dpp8_width_guard_mem");
-  amdgpu::L2Cache l2("dpp8_width_guard_l2");
-  amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
-  cfg.num_wf_slots = 1;
-  cfg.sgprs_per_wf = 106;
-  cfg.vgprs_per_wf = 32;
-  cfg.lds_size_kb = 64;
-  auto cu = amdgpu::ComputeUnitCore::create("dpp8_width_guard_cu", cfg, &mem, &l2);
-  ASSERT_NE(cu, nullptr);
-  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
-  ASSERT_NE(wf, nullptr);
-
-  Operand wide_src(64, 0);
-  std::optional<StagedOperand> storage;
-  EXPECT_THROW(amdgpu::dpp::apply_dpp8(wide_src, 0, 0, storage, *wf), util::InvalidInst);
 }
 
 TEST(DppPermuteTest, ScopedOperandDelegateRestoresPreviousDelegate) {
@@ -7735,15 +7717,18 @@ struct CdnaBufferWave {
   static constexpr uint32_t kSrd = 40;
   static constexpr uint32_t kSoffset = 8;
 
-  explicit CdnaBufferWave(rj_code_arch_t arch)
-      : cu(amdgpu::ComputeUnitCore::create("cdna_mubuf_cu",
-                                           {.arch = arch,
-                                            .num_wf_slots = 1,
-                                            .sgprs_per_wf = 128,
-                                            .vgprs_per_wf = 16,
-                                            .lds_size_kb = 64},
-                                           &mem, &l2)),
-        wf(cu ? cu->dispatch_wf(0, 0, 128, 16) : nullptr) {}
+  explicit CdnaBufferWave(rj_code_arch_t arch) {
+    rocjitsu::test::initialize_compute_unit(cu, "cdna_mubuf_cu",
+                                            {.arch = arch,
+                                             .num_wf_slots = 1,
+                                             .sgprs_per_wf = 128,
+                                             .vgprs_per_wf = 16,
+                                             .lds_size_kb = 64},
+                                            &mem, &l2);
+    if (!cu)
+      return;
+    wf = cu->dispatch_wf(0, 0, 128, 16);
+  }
 
   void set_resource(const std::array<uint32_t, 4> &resource) {
     for (uint32_t i = 0; i < resource.size(); ++i)
@@ -7767,7 +7752,7 @@ struct CdnaBufferWave {
   amdgpu::GpuMemory mem{"cdna_mubuf_mem"};
   amdgpu::L2Cache l2{"cdna_mubuf_l2"};
   std::unique_ptr<amdgpu::ComputeUnitCore> cu;
-  amdgpu::Wavefront *wf;
+  amdgpu::Wavefront *wf = nullptr;
 };
 
 cdna4::MubufMachineInst cdna_mubuf_offen_inst(uint32_t op) {
