@@ -10,9 +10,11 @@
 
 #include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <csignal>
 #include <cstdint>
 #include <cstdio>
+#include <dirent.h>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
@@ -21,10 +23,6 @@
 #include <memory>
 #include <new>
 #include <string>
-#if defined(__linux__)
-#include <sys/prctl.h>
-#endif
-#include <sys/resource.h>
 #include <tuple>
 #include <utility>
 #include <atomic>
@@ -32,7 +30,9 @@
 #include <vector>
 
 #include "fakes/init_fakes.h"
+#include "fakes/amdsmi_fakes.h"                      // g_amdSmiFabricTelemetry{Acquire,Release}
 #include "fakes/sym_kernels_fakes.h"                 // g_symkFinalize
+#include "fakes/rccl_wrap_fakes.h"                   // g_rcclScaleCollLl128BuffSize{Calls,Factor}
 #include "../common/LogCapture.hpp"                 // CaptureLog: assert on WARN/INFO text
 #include "../common/ProcessIsolatedTestRunner.hpp"  // fork+execv process isolation
 
@@ -85,6 +85,7 @@ static inline int __get_cpuid(unsigned int __leaf, unsigned int* __eax,
 #include "kernel_config.h"
 #include "os.h"
 
+#include "ExpectedCrash.h"
 #include "ScopedHook.h"
 
 // Each default forwards to what the UUT would otherwise call, so an uninstalled redirect is a no-op.
@@ -189,33 +190,6 @@ class DeleteWatch {
   }
   int hits() const { return g_deleteWatchHits; }
 };
-
-// ASan turns a SIGSEGV into a report plus exit(1), so KilledBySignal never matches under it; match the exit instead.
-#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
-#define DEATH_BY_SEGV ::testing::ExitedWithCode(1)
-#else
-#define DEATH_BY_SEGV ::testing::KilledBySignal(SIGSEGV)
-#endif
-
-// These tests deliberately raise fatal signals. Some CI environments enable core dumps, and a
-// shuffled death test can inherit a large address space from an earlier test. Dumping that address
-// space turns a millisecond assertion into a multi-second test. PR_SET_DUMPABLE covers both regular
-// core files and piped collectors (for which Linux ignores RLIMIT_CORE); retain the limit as defense
-// in depth. Apply both inside the death statement so only gtest's child is affected and unexpected
-// parent-process crashes remain dumpable.
-static void DisableCoreDumpsForExpectedCrash() {
-#if defined(__linux__)
-  if (prctl(PR_SET_DUMPABLE, 0) != 0) {
-    std::perror("prctl(PR_SET_DUMPABLE) failed");
-    _exit(1);
-  }
-#endif
-  const struct rlimit noCore = {0, 0};
-  if (setrlimit(RLIMIT_CORE, &noCore) != 0) {
-    std::perror("setrlimit(RLIMIT_CORE) failed");
-    _exit(1);
-  }
-}
 
 class InitMicrotest : public ::testing::Test {
  protected:
@@ -363,6 +337,31 @@ TEST(ScopedHookMicrotest, CallsCounterIsExactUnderConcurrentInvocation) {
   for (auto& w : workers) w.join();
 
   EXPECT_EQ(hook.calls, kThreads * kPerThread);
+}
+
+// Cross-tray AllGather rules need UALink, one LSA team over 2+ hosts, and an AllGather TDM window. One clique
+// per tray (NCCL_MNNVL_CROSS_CLIQUE=0) gives one LSA team per tray; gfx1250 DPX has no window.
+TEST_F(InitMicrotest, CommSpansTrays_NeedsUalinkOneLsaTeamTwoHostsAndATdmWindow) {
+  auto topo = std::make_unique<ncclTopoSystem>();
+  auto comm = std::make_unique<ncclComm>();
+  rcclArchThresholds table{};
+  table.symTdmMinR2[ncclFuncAllGather] = 64 * 1024 * 1024;
+  comm->archThresholds = &table;
+  comm->topo = topo.get();
+  comm->MNNVL = 1;
+  topo->nHosts = 2;
+  EXPECT_TRUE(commSpansTrays(comm.get(), /*isOneLsaTeam=*/true));
+  EXPECT_FALSE(commSpansTrays(comm.get(), /*isOneLsaTeam=*/false)) << "one LSA team per tray";
+  topo->nHosts = 1;
+  EXPECT_FALSE(commSpansTrays(comm.get(), /*isOneLsaTeam=*/true)) << "one host";
+  topo->nHosts = 2;
+  comm->MNNVL = 0;
+  EXPECT_FALSE(commSpansTrays(comm.get(), /*isOneLsaTeam=*/true)) << "no UALink";
+  comm->MNNVL = 1;
+  table.symTdmMinR2[ncclFuncAllGather] = 0;
+  EXPECT_FALSE(commSpansTrays(comm.get(), /*isOneLsaTeam=*/true)) << "no AllGather TDM window";
+  comm->archThresholds = nullptr;
+  EXPECT_FALSE(commSpansTrays(comm.get(), /*isOneLsaTeam=*/true)) << "no arch table";
 }
 
 TEST_F(InitMicrotest, UniformRanksPerHost_TwoHostsTwoRanksEach_ReturnsTrue) {
@@ -1648,6 +1647,65 @@ TEST_F(InitMicrotest, GetAsyncError_GroupJobCompletes_AndClears) {
   EXPECT_EQ(nullptr, rc.get()->groupJob);  // completed -> cleared
 }
 
+// The shape that hung under NCCL_COMM_BLOCKING=0: a PyTorch watchdog and the application thread
+// both polling the same comm. Reading comm->groupJob and clearing it afterwards let both see the
+// same pointer and both reap it -- a second std::thread::join plus a second reference drop, which
+// freed the job under the thread still inside the first join. Claiming it with one exchange makes
+// the reap single-owner, so a link published N times is completed exactly N times. The link is
+// republished per round rather than once so a single run covers many interleavings.
+TEST_F(InitMicrotest, GetAsyncError_ConcurrentPollers_CompleteEachGroupJobLinkExactlyOnce) {
+  constexpr int kRounds = 2000;
+  ReadyComm rc;
+  auto gj = std::make_unique<ncclGroupJob>();
+
+  std::atomic<int> completions{0};
+  ScopedHook complete(g_ncclGroupJobComplete, [&](struct ncclGroupJob*) {
+    completions.fetch_add(1, std::memory_order_relaxed);
+    return ncclSuccess;
+  });
+
+  // Both pollers are released by the same round bump, so they enter the claim together. One call
+  // per release rather than a free-running loop keeps the recorder's label log bounded.
+  std::atomic<int> round{0};
+  std::atomic<bool> publishing{true};
+  auto poll = [&] {
+    int seen = 0;
+    while (true) {
+      while (round.load(std::memory_order_acquire) == seen) {
+        if (!publishing.load(std::memory_order_acquire)) return;
+      }
+      seen = round.load(std::memory_order_acquire);
+      ncclResult_t e = ncclInProgress;
+      (void)ncclCommGetAsyncError_impl(rc.get(), &e);
+    }
+  };
+  std::thread watchdog(poll);
+  std::thread application(poll);
+
+  // A lost claim shows up as a completion count above kRounds, not as a stall, but bound the wait
+  // anyway so a regression that stops clearing the link reports instead of hanging the suite.
+  int published = 0;
+  for (; published < kRounds; ++published) {
+    COMPILER_ATOMIC_STORE(&rc.get()->groupJob, gj.get(), std::memory_order_release);
+    round.fetch_add(1, std::memory_order_acq_rel);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (COMPILER_ATOMIC_LOAD(&rc.get()->groupJob, std::memory_order_acquire) != nullptr &&
+           std::chrono::steady_clock::now() < deadline) {
+    }
+    if (COMPILER_ATOMIC_LOAD(&rc.get()->groupJob, std::memory_order_acquire) != nullptr) break;
+  }
+  publishing.store(false, std::memory_order_release);
+  round.fetch_add(1, std::memory_order_acq_rel);  // release a poller parked on the round check
+  watchdog.join();
+  application.join();
+
+  ASSERT_EQ(kRounds, published) << "a published link was never claimed";
+  EXPECT_EQ(kRounds, completions.load(std::memory_order_acquire))
+    << "every published link must be reaped by exactly one poller";
+  EXPECT_EQ(nullptr, rc.get()->groupJob);
+  g_recorderLabels.clear();  // this test records thousands of labels; don't carry them forward
+}
+
 TEST_F(InitMicrotest, CheckHsaEnvSetting_AllSucceed_ReturnsSuccess) {
   ncclResult_t res = ncclUnhandledCudaError;
   const std::string log = RcclUnitTesting::CaptureLog([&] { res = checkHsaEnvSetting(); });
@@ -1727,7 +1785,7 @@ class FillInfoComm {
   std::unique_ptr<ncclNet_t> net_;
 };
 
-hsa_status_t FakeExportDmaBuf(const void*, size_t, int*, uint64_t*) {
+hsa_status_t FakeInitExportDmaBuf(const void*, size_t, int*, uint64_t*) {
   return hsa_status_t(0);
 }
 }  // namespace
@@ -1755,12 +1813,38 @@ TEST_F(InitMicrotest, FillInfo_AllocOk_DmaBufSupported_EnablesGdrDirectly) {
   // AMD dmaBufSupported arm: regMrDmaBuf present + pfn_hsa non-null -> ncclSuccess.
   c.net()->regMrDmaBuf =
       reinterpret_cast<decltype(c.net()->regMrDmaBuf)>(static_cast<uintptr_t>(0x1));
-  pfn_hsa_amd_portable_export_dmabuf = &FakeExportDmaBuf;
+  pfn_hsa_amd_portable_export_dmabuf = &FakeInitExportDmaBuf;
   ncclPeerInfo info{};
   EXPECT_EQ(ncclSuccess, fillInfo(c.get(), &info, 0));
   EXPECT_TRUE(info.hasFineGrain);
   EXPECT_EQ(1, info.gdrSupport);
   EXPECT_EQ(0, g_gdrSupportCalls);   // GDR fallback NOT called
+}
+
+// supportedGinTypeBitMask is what a new split's AllGather ANDs into
+// globalGinTypeBitMask, so it decides whether ncclGinSetDefaultBackend runs.
+TEST_F(InitMicrotest, FillInfo_LiveGinBackend_AdvertisesItsType) {
+  FillInfoComm c;
+  struct ncclGinState* ginState = &c.get()->sharedRes->ginState;
+  ginState->numActiveBackends = 1;
+  ginState->backends[0].ginType = NCCL_GIN_TYPE_PROXY;
+  ncclPeerInfo info{};
+  EXPECT_EQ(ncclSuccess, fillInfo(c.get(), &info, 0));
+  EXPECT_EQ(info.supportedGinTypeBitMask, BIT(NCCL_GIN_TYPE_PROXY));
+}
+
+// AICOMRCCL-2739: a sibling's host finalize keeps the backend records for
+// ncclGinFinalize. Advertising them would let a new shared split reconnect
+// through a ginInstance whose owning comm may already be freed.
+TEST_F(InitMicrotest, FillInfo_FinalizedGinBackends_AdvertiseNoType) {
+  FillInfoComm c;
+  struct ncclGinState* ginState = &c.get()->sharedRes->ginState;
+  ginState->numActiveBackends = 1;
+  ginState->backends[0].ginType = NCCL_GIN_TYPE_PROXY;
+  ginState->finalized = true;
+  ncclPeerInfo info{};
+  EXPECT_EQ(ncclSuccess, fillInfo(c.get(), &info, 0));
+  EXPECT_EQ(info.supportedGinTypeBitMask, 0u);
 }
 
 // MLOPart detection in fillInfo(). It exists for DPX/XCP/CPX, where HIP exposes each logical GPU as
@@ -2058,6 +2142,166 @@ TEST_F(InitMicrotest, SetTuningPartition_OnlyRankZeroOfGfx1250Logs) {
     EXPECT_EQ(&kFakeSpxTable, t.comm.get()->archThresholds);
     EXPECT_FALSE(LogHas(log, "tuning")) << "actual log:\n" << log;
   }
+}
+
+namespace {
+hipError_t FakeDevicePropsWithArch(hipDeviceProp_t* prop, const char* arch) {
+  *prop = hipDeviceProp_t{};
+  std::snprintf(prop->gcnArchName, sizeof(prop->gcnArchName), "%s:sramecc+:xnack-", arch);
+  return hipSuccess;
+}
+}  // namespace
+
+// A rank can use RCCL_IB_GDR_FLUSH_FLAG only on the internal IB net, with net_ib's own conditions met, on a
+// GPU whose fine-grained VRAM the proxy can write (gfx942/gfx950).
+TEST_F(InitMicrotest, FillInfo_IbGdrFlushFlagNeedsNetIbLocalSupportAndArch) {
+  FillInfoComm c;
+  auto run = [&](ncclNet_t* net, bool localSupport, const char* arch) {
+    c.get()->ncclNet = net;
+    g_ibGdrFlushFlagLocalSupport = localSupport;
+    g_hipGetDeviceProperties = [arch](hipDeviceProp_t* prop, int) { return FakeDevicePropsWithArch(prop, arch); };
+    ncclPeerInfo info{};
+    EXPECT_EQ(ncclSuccess, fillInfo(c.get(), &info, 0));
+    return info.ibGdrFlushFlag;
+  };
+  EXPECT_TRUE(run(&ncclNetIb, true, "gfx950"));
+  EXPECT_TRUE(run(&ncclNetIb, true, "gfx942"));
+  EXPECT_FALSE(run(c.net(), true, "gfx950")) << "another net";
+  EXPECT_FALSE(run(&ncclNetIb, false, "gfx950")) << "net_ib rules it out (or the flag is off)";
+  EXPECT_FALSE(run(&ncclNetIb, true, "gfx90a")) << "no CPU-writable fine-grained VRAM";
+  EXPECT_FALSE(run(&ncclNetIb, true, "gfx1250")) << "no CPU-writable fine-grained VRAM";
+}
+
+namespace {
+// A comm on `net` whose ranks reported `capable` in AllGather1, as rcclSetIbGdrFlushFlag sees it.
+struct IbGdrFlushFlagComm {
+  IbGdrFlushFlagComm(std::initializer_list<bool> capable, ncclNet_t* net = &ncclNetIb, int rank = 0)
+      : peers(capable.size()) {
+    size_t i = 0;
+    for (bool c : capable) peers[i++].ibGdrFlushFlag = c;
+    comm.get()->peerInfo = peers.data();
+    comm.get()->nRanks = static_cast<int>(peers.size());
+    comm.get()->rank = rank;
+    comm.get()->ncclNet = net;
+    comm.get()->netContext = &ctx;
+  }
+  ~IbGdrFlushFlagComm() { comm.get()->peerInfo = nullptr; }
+  std::string Run(ncclComm* parent = nullptr) {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    return RcclUnitTesting::CaptureLog([&] { rcclSetIbGdrFlushFlag(comm.get(), parent); });
+  }
+  FillInfoComm comm;
+  std::vector<ncclPeerInfo> peers;
+  int ctx = 0;
+};
+}  // namespace
+
+// Ranks set up net receives and pick algorithms on their own, so the comm uses the flag only when all can.
+TEST_F(InitMicrotest, SetIbGdrFlushFlag_OnOnlyWhenEveryRankCan) {
+  {
+    IbGdrFlushFlagComm t({true, true, true});
+    const std::string log = t.Run();
+    EXPECT_TRUE(t.comm.get()->ibGdrFlushFlag);
+    ASSERT_EQ(1u, g_ibSetGdrFlushFlagCalls.size());
+    EXPECT_EQ(std::make_pair((void*)&t.ctx, 1), g_ibSetGdrFlushFlagCalls[0]);
+    EXPECT_TRUE(LogHas(log, "RCCL_IB_GDR_FLUSH_FLAG enabled for this comm")) << "actual log:\n" << log;
+  }
+  g_ibSetGdrFlushFlagCalls.clear();
+  {
+    IbGdrFlushFlagComm t({true, false, true});
+    const std::string log = t.Run();
+    EXPECT_FALSE(t.comm.get()->ibGdrFlushFlag);
+    ASSERT_EQ(1u, g_ibSetGdrFlushFlagCalls.size());
+    EXPECT_EQ(std::make_pair((void*)&t.ctx, 0), g_ibSetGdrFlushFlagCalls[0]);
+    EXPECT_TRUE(LogHas(log, "2 of 3 ranks can use it")) << "actual log:\n" << log;
+  }
+  g_ibSetGdrFlushFlagCalls.clear();
+  {
+    IbGdrFlushFlagComm t({false, false});
+    const std::string log = t.Run();
+    EXPECT_FALSE(t.comm.get()->ibGdrFlushFlag);
+    EXPECT_FALSE(LogHas(log, "ranks can use it")) << "nobody asked for it, nothing to report:\n" << log;
+  }
+}
+
+// Only rank 0 reports a mixed comm; other nets have no context to set.
+TEST_F(InitMicrotest, SetIbGdrFlushFlag_MixedReportedByRankZeroAndOtherNetsUntouched) {
+  {
+    IbGdrFlushFlagComm t({true, false}, &ncclNetIb, /*rank=*/1);
+    const std::string log = t.Run();
+    EXPECT_FALSE(t.comm.get()->ibGdrFlushFlag);
+    EXPECT_FALSE(LogHas(log, "ranks can use it")) << "actual log:\n" << log;
+  }
+  g_ibSetGdrFlushFlagCalls.clear();
+  ncclNet_t otherNet{};
+  IbGdrFlushFlagComm t({false, false}, &otherNet);
+  t.Run();
+  EXPECT_FALSE(t.comm.get()->ibGdrFlushFlag);
+  EXPECT_TRUE(g_ibSetGdrFlushFlagCalls.empty()) << "only an ncclNetIb context holds the decision";
+}
+
+// A net context shared with the parent keeps the parent's decision; the votes, which carry the parent's
+// decision (rcclFillSharedParentInfo), decide for the comm.
+TEST_F(InitMicrotest, SetIbGdrFlushFlag_SharedNetContextKeepsTheParentsDecision) {
+  for (bool vote : {false, true}) {
+    g_ibSetGdrFlushFlagCalls.clear();
+    IbGdrFlushFlagComm t({true, vote});
+    FillInfoComm parent;
+    parent.get()->netContext = &t.ctx;
+    parent.get()->ibGdrFlushFlag = true;
+    t.Run(parent.get());
+    EXPECT_EQ(vote, t.comm.get()->ibGdrFlushFlag) << "vote " << vote;
+    EXPECT_TRUE(g_ibSetGdrFlushFlagCalls.empty()) << "the shared context belongs to the parent";
+  }
+  g_ibSetGdrFlushFlagCalls.clear();
+  IbGdrFlushFlagComm t({true, true});
+  FillInfoComm parent;
+  int parentCtx = 0;
+  parent.get()->netContext = &parentCtx;
+  parent.get()->ibGdrFlushFlag = false;
+  t.Run(parent.get());
+  EXPECT_TRUE(t.comm.get()->ibGdrFlushFlag) << "a comm with its own context decides alone";
+  EXPECT_EQ(1u, g_ibSetGdrFlushFlagCalls.size());
+}
+
+// A rank sharing its parent's resources votes the parent's flag decision and LL128 sizes, so the new ranks of an
+// ncclCommGrow, which have no parent, reach the same decision as the existing ones.
+TEST_F(InitMicrotest, FillSharedParentInfo_SharingRankVotesTheParentsDecision) {
+  FillInfoComm parent;
+  parent.get()->buffSizes[NCCL_PROTO_LL128] = 4 << 20;
+  parent.get()->p2pLl128BuffSize = 1 << 20;
+  for (bool share : {false, true}) {
+    for (bool parentOn : {false, true}) {
+      parent.get()->shareResources = share;
+      parent.get()->ibGdrFlushFlag = parentOn;
+      ncclPeerInfo info{};
+      info.ibGdrFlushFlag = true;
+      rcclFillSharedParentInfo(&info, parent.get());
+      EXPECT_EQ(!share || parentOn, info.ibGdrFlushFlag) << "share " << share << " parent " << parentOn;
+      EXPECT_EQ(share ? 4 << 20 : 0, info.sharedLl128BuffSize) << "share " << share;
+      EXPECT_EQ(share ? 1 << 20 : 0, info.sharedP2pLl128BuffSize) << "share " << share;
+    }
+  }
+  {
+    ncclPeerInfo info{};
+    rcclFillSharedParentInfo(&info, parent.get());
+    EXPECT_FALSE(info.ibGdrFlushFlag) << "the parent's decision cannot make an incapable rank capable";
+  }
+  {
+    ncclPeerInfo info{};
+    info.ibGdrFlushFlag = true;
+    rcclFillSharedParentInfo(&info, nullptr);
+    EXPECT_TRUE(info.ibGdrFlushFlag);
+    EXPECT_EQ(0, info.sharedLl128BuffSize);
+  }
+
+  // Existing ranks 0 and 1 share a parent that decided 0; new ranks 2 and 3 are capable and have no parent.
+  IbGdrFlushFlagComm grown({true, true, true, true}, &ncclNetIb, /*rank=*/2);
+  parent.get()->shareResources = true;
+  parent.get()->ibGdrFlushFlag = false;
+  for (int r = 0; r < 2; r++) rcclFillSharedParentInfo(&grown.peers[r], parent.get());
+  grown.Run();
+  EXPECT_FALSE(grown.comm.get()->ibGdrFlushFlag) << "a new rank counts the existing ranks' parent decision";
 }
 
 TEST_F(InitMicrotest, CommInitAll_GetDeviceFault_StopsBeforeCount) {
@@ -2525,6 +2769,40 @@ TEST_F(InitMicrotest, CommCleanup_CommFreeFails_PropagatesError) {
   ASSERT_NO_FATAL_FAILURE(ReleaseUncleanedComm(c));
 }
 
+#ifdef USE_AMDSMI
+// --- fabric telemetry release sits ahead of every fallible step of teardown ---
+// Teardown is expected to fail on abort, and cudaSetDevice is the earliest step that
+// can bail. A release behind it would leave the sampler polling a GPU whose comm is
+// gone, so this pins it ahead of even that one.
+TEST_F(InitMicrotest, CommCleanup_TelemetryAcquired_ReleasesEvenWhenTeardownFails) {
+  ScopedHook acquire(g_amdSmiFabricTelemetryAcquire,
+                     [](uint32_t, uint64_t, int, bool* acquired) {
+                       *acquired = true;
+                       return ncclSuccess;
+                     });
+  ScopedHook release(g_amdSmiFabricTelemetryRelease, [](uint32_t) { return ncclSuccess; });
+  CleanupComm c;
+  ASSERT_NO_FATAL_FAILURE(MakeCleanupComm(c, /*withTuner=*/false));
+  ASSERT_TRUE(c.comm->fabricTelemetryAcquired) << "commAlloc never recorded the session ref";
+
+  ncclResult_t res = ncclSuccess;
+  std::string log;
+  {
+    // Scoped so the hook is back to normal before ReleaseUncleanedComm runs.
+    ScopedHook setDevice(g_hipSetDevice, [](int) { return hipErrorInvalidDevice; });
+    log = RcclUnitTesting::CaptureLog([&] { res = commCleanup(c.comm); });
+  }
+
+  EXPECT_EQ(ncclUnhandledCudaError, res);
+  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "HIP failure:"));  // the step really did fail
+  EXPECT_EQ(1, release.calls) << "a failing teardown stranded the device in the sampler's device list";
+  EXPECT_FALSE(c.comm->fabricTelemetryAcquired) << "a retried teardown would double-release";
+
+  ASSERT_NO_FATAL_FAILURE(ReleaseUncleanedComm(c));
+  EXPECT_EQ(1, release.calls) << "the retry released the same device twice";
+}
+#endif  // USE_AMDSMI
+
 // ===========================================================================
 // initTransportsRank's supporting cast: four helpers it calls that are already
 // compiled into this TU and need no seams. Every one computes a result, so the
@@ -2894,6 +3172,109 @@ TEST_F(InitMicrotest, InitTransportsRank_HipOverlayMloPart0Fn0_LeavesHasMloPartU
   EXPECT_FALSE(c.get()->hasMloPart);
 }
 #endif
+
+// The GIN gate itself (:2593). initTransportsRank cannot be driven to that line from any rung here
+// -- it is ~380 lines past the rung-4 terminator, with ncclTopoComputeP2pChannels,
+// rcclCommSetP2pShiftSize, ncclProfilerPluginInit, ncclTransportCheckP2pType and ncclProxyCreate
+// still fail-loud in between -- so the condition is lifted into ginGateAllows() and asserted
+// directly. These are what make NCCL_GIN_MLOPART's effect detectable: without them, flipping the
+// parameter's meaning or dropping the hasMloPart term leaves the whole suite green. The helper
+// takes the communicator so the production call site cannot transpose cuMemGdrSupport and
+// hasMloPart; the fields below are the only ones it reads.
+
+// Heap-allocated: ncclComm's copy is deleted, and one value is already ~3.7 MiB, so two
+// locals in the veto case below blow an 8 MiB stack. Same shape as FreshComm.
+static std::unique_ptr<ncclComm> GinGateComm(bool cuMemGdrSupport, bool hasMloPart, int nNodes = 1) {
+  auto c = std::make_unique<ncclComm>();
+  c->cuMemGdrSupport = cuMemGdrSupport;
+  c->hasMloPart = hasMloPart;
+  c->nNodes = nNodes;
+  return c;
+}
+
+// The AICOMRCCL-2387 regression itself: a CPX partition carries mloPart, so with the parameter off
+// every partitioned rank loses GIN, on any shape.
+TEST_F(InitMicrotest, GinGate_PartitionedCommWithMloPartDisabled_RefusesGin) {
+  SetParams({{"GIN_MLOPART", 0}});
+  auto oneNode = GinGateComm(/*cuMemGdrSupport=*/true, /*hasMloPart=*/true, /*nNodes=*/1);
+  auto twoNode = GinGateComm(/*cuMemGdrSupport=*/true, /*hasMloPart=*/true, /*nNodes=*/2);
+  EXPECT_FALSE(ginGateAllows(/*ginTypeBitMask=*/UINT64_MAX, oneNode.get()));
+  EXPECT_FALSE(ginGateAllows(UINT64_MAX, twoNode.get()));
+}
+
+// The fix: an explicit 1 readmits them on any number of nodes. This is the opt-in a multi-node
+// partitioned deployment needs, since the default below stops at one node.
+TEST_F(InitMicrotest, GinGate_PartitionedCommWithMloPartEnabled_AllowsGin) {
+  SetParams({{"GIN_MLOPART", 1}});
+  auto oneNode = GinGateComm(/*cuMemGdrSupport=*/true, /*hasMloPart=*/true, /*nNodes=*/1);
+  auto twoNode = GinGateComm(/*cuMemGdrSupport=*/true, /*hasMloPart=*/true, /*nNodes=*/2);
+  EXPECT_TRUE(ginGateAllows(UINT64_MAX, oneNode.get()));
+  EXPECT_TRUE(ginGateAllows(UINT64_MAX, twoNode.get()));
+}
+
+// The parameter governs partitioned communicators only. An unpartitioned one keeps GIN even with
+// the parameter off, so a regression that widened the carve-out would show up here.
+TEST_F(InitMicrotest, GinGate_UnpartitionedCommIgnoresMloPartParam) {
+  SetParams({{"GIN_MLOPART", 0}});
+  auto c = GinGateComm(/*cuMemGdrSupport=*/true, /*hasMloPart=*/false, /*nNodes=*/2);
+  EXPECT_TRUE(ginGateAllows(UINT64_MAX, c.get()));
+}
+
+// The default, with no override installed: a partition on one node is admitted. This is the
+// verified shape -- 8 ranks across two OAMs of one host -- and it is the case the fix exists for,
+// so a default that refused it would put the AICOMRCCL-2387 failure back.
+TEST_F(InitMicrotest, GinGate_MloPartDefaultAllowsPartitionOnOneNode) {
+  auto c = GinGateComm(/*cuMemGdrSupport=*/true, /*hasMloPart=*/true, /*nNodes=*/1);
+  EXPECT_TRUE(ginGateAllows(UINT64_MAX, c.get()));
+}
+
+// The other half of the default, and the reason it is not a plain 1: past one node, admitting a
+// partition also reaches the hierarchical CE path, which nothing has run on partitioned hardware.
+// Deleting the node term leaves every other case in this suite green.
+TEST_F(InitMicrotest, GinGate_MloPartDefaultRefusesPartitionAcrossNodes) {
+  auto c = GinGateComm(/*cuMemGdrSupport=*/true, /*hasMloPart=*/true, /*nNodes=*/2);
+  EXPECT_FALSE(ginGateAllows(UINT64_MAX, c.get()));
+}
+
+// The node term is scoped to partitioned communicators: an ordinary multi-node comm is the case GIN
+// exists for and must keep it under the default.
+TEST_F(InitMicrotest, GinGate_MloPartDefaultIgnoresNodeCountWhenUnpartitioned) {
+  auto c = GinGateComm(/*cuMemGdrSupport=*/true, /*hasMloPart=*/false, /*nNodes=*/8);
+  EXPECT_TRUE(ginGateAllows(UINT64_MAX, c.get()));
+}
+
+// The other two terms still veto, with the parameter on, so the carve-out did not swallow them.
+TEST_F(InitMicrotest, GinGate_NoSupportedGinTypeOrNoCuMemGdr_RefusesGin) {
+  SetParams({{"GIN_MLOPART", 1}});
+  auto noType = GinGateComm(/*cuMemGdrSupport=*/true, /*hasMloPart=*/false);
+  auto noGdr = GinGateComm(/*cuMemGdrSupport=*/false, /*hasMloPart=*/false);
+  EXPECT_FALSE(ginGateAllows(/*ginTypeBitMask=*/0, noType.get()));
+  EXPECT_FALSE(ginGateAllows(UINT64_MAX, noGdr.get()));
+}
+
+// The connection type chosen after ncclGinSetDefaultBackend. AICOMRCCL-3417: dropping Anvil SDMA on
+// a multi-host communicator can leave no backend, and that communicator must stay NONE.
+TEST_F(InitMicrotest, GinConnectionType_NoBackendLeft_StaysNone) {
+  auto comm = std::make_unique<ncclComm>();
+  auto sr = std::make_unique<ncclSharedResources>();
+  comm->sharedRes = sr.get();
+  comm->contiguousRanksPerHost = 8;
+  sr->ginState.supported = false;
+  EXPECT_EQ(ginConnectionType(comm.get(), /*globalCrossNicSupport=*/true), NCCL_GIN_CONNECTION_NONE);
+  EXPECT_EQ(ginConnectionType(comm.get(), /*globalCrossNicSupport=*/false), NCCL_GIN_CONNECTION_NONE);
+}
+
+TEST_F(InitMicrotest, GinConnectionType_BackendLeft_FullOrRail) {
+  auto comm = std::make_unique<ncclComm>();
+  auto sr = std::make_unique<ncclSharedResources>();
+  comm->sharedRes = sr.get();
+  sr->ginState.supported = true;
+  comm->contiguousRanksPerHost = 8;
+  EXPECT_EQ(ginConnectionType(comm.get(), /*globalCrossNicSupport=*/true), NCCL_GIN_CONNECTION_FULL);
+  EXPECT_EQ(ginConnectionType(comm.get(), /*globalCrossNicSupport=*/false), NCCL_GIN_CONNECTION_RAIL);
+  comm->contiguousRanksPerHost = INT_MAX;
+  EXPECT_EQ(ginConnectionType(comm.get(), /*globalCrossNicSupport=*/false), NCCL_GIN_CONNECTION_NONE);
+}
 
 // NOT ASSERTABLE FROM THIS RUNG, deliberately: the four `global*Support` accumulators at :1491-1494 are
 // function-locals first read at :2347-2363, ~700 lines past the terminator. They execute (so they count
@@ -4565,7 +4946,9 @@ TEST_F(InitMicrotest, CommEnsureReady_AbortFlagSet_AbortsAndSkipsTheAsyncErrorQu
   EXPECT_EQ(ncclSuccess, ncclCommEnsureReady(rc.get()));
   EXPECT_EQ(1, abort.calls);
   EXPECT_EQ(gj.get(), aborted);
-  EXPECT_EQ(gj.get(), rc.get()->groupJob);
+  // The link is claimed, not merely read: abort consumes the reference it carries, so leaving the
+  // pointer behind would let a concurrent GetAsyncError reap the same link a second time.
+  EXPECT_EQ(nullptr, rc.get()->groupJob);
   // asyncResult is only ever read out (init.cc:4497), so it holds on both arms; the label is the discriminator.
   EXPECT_EQ(0, std::count(g_recorderLabels.begin(), g_recorderLabels.end(), "GetAsyncError"));
 }
@@ -5268,6 +5651,110 @@ TEST_F(InitMicrotest, ComputeBuffSizes_NotSharedResOwnerWithLargerShared_KeepsIt
   EXPECT_EQ(1 << 20, s.shared()->tpP2pChunkSize);
 }
 
+// --- computeBuffSizes: the collective LL128 scaling (rcclScaleCollLl128BuffSize) and its shared-parent override ---
+
+namespace {
+// The rcclScaleCollLl128BuffSize fake multiplies buffSizes[NCCL_PROTO_LL128] by this factor.
+struct ScopedLl128ScaleFake {
+  explicit ScopedLl128ScaleFake(int factor) {
+    g_rcclScaleCollLl128BuffSizeCalls = 0;
+    g_rcclScaleCollLl128BuffSizeFactor = factor;
+  }
+  ~ScopedLl128ScaleFake() {
+    g_rcclScaleCollLl128BuffSizeCalls = 0;
+    g_rcclScaleCollLl128BuffSizeFactor = 1;
+  }
+};
+}  // namespace
+
+TEST_F(InitMicrotest, ComputeBuffSizes_DefaultLl128_ScalesTheCollectiveBufferOnly) {
+  ScopedLl128ScaleFake scale(4);
+  BuffSizes_Scene s;
+  s.comm()->nNodes = 2;
+  EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+  EXPECT_EQ(1, g_rcclScaleCollLl128BuffSizeCalls);
+  ASSERT_GT(s.comm()->p2pLl128BuffSize, 0);
+  EXPECT_EQ(4 * s.comm()->p2pLl128BuffSize, s.comm()->buffSizes[NCCL_PROTO_LL128])
+      << "send/recv must keep the unscaled size: it is read before the scaling";
+}
+TEST_F(InitMicrotest, ComputeBuffSizes_UserLl128BuffSize_SkipsTheScaling) {
+  ScopedLl128ScaleFake scale(4);
+  BuffSizes_Scene s;
+  s.comm()->nNodes = 2;
+  SetParams({{"LL128_BUFFSIZE", 1 << 20}});
+  EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+  EXPECT_EQ(0, g_rcclScaleCollLl128BuffSizeCalls) << "NCCL_LL128_BUFFSIZE turns the scaling off";
+  EXPECT_EQ(1 << 20, s.comm()->buffSizes[NCCL_PROTO_LL128]);
+  EXPECT_EQ(1 << 20, s.comm()->p2pLl128BuffSize);
+}
+namespace {
+// peerInfo for nRanks ranks; shared[r] is rank r's sharedLl128BuffSize (send/recv size: 448 KiB when nonzero).
+std::vector<ncclPeerInfo> SharedLl128Peers(const std::vector<int>& shared) {
+  std::vector<ncclPeerInfo> peers(shared.size() + 1);  // + the CollNet root slot, as in initTransportsRank
+  for (size_t r = 0; r < shared.size(); r++) {
+    peers[r].sharedLl128BuffSize = shared[r];
+    peers[r].sharedP2pLl128BuffSize = shared[r] > 0 ? 448 << 10 : 0;
+  }
+  return peers;
+}
+}  // namespace
+
+TEST_F(InitMicrotest, ComputeBuffSizes_RankSharingAProxy_TakesItsLl128Sizes) {
+  // The rank's proxy, shared with its parent, sized and strides its LL128 net buffers with the parent's sizes.
+  for (int ownFactor : {1, 4}) {
+    for (int sharedFactor : {1, 4}) {
+      ScopedLl128ScaleFake scale(ownFactor);
+      BuffSizes_Scene s;
+      s.comm()->nNodes = 2;
+      s.comm()->nRanks = 2;
+      s.comm()->rank = 0;
+      auto peers = SharedLl128Peers({sharedFactor * (448 << 10), sharedFactor * (448 << 10)});
+      s.comm()->peerInfo = peers.data();
+      EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+      EXPECT_EQ(sharedFactor * (448 << 10), s.comm()->buffSizes[NCCL_PROTO_LL128])
+          << "shared x" << sharedFactor << ", own x" << ownFactor;
+      EXPECT_EQ(448 << 10, s.comm()->p2pLl128BuffSize) << "shared x" << sharedFactor << ", own x" << ownFactor;
+    }
+  }
+}
+TEST_F(InitMicrotest, ComputeBuffSizes_GrowNewRank_AdoptsTheExistingRanksLl128Sizes) {
+  // ncclCommGrow 1x8 -> 2x8: existing ranks share the old comm's unscaled proxy, new ranks have no parent and would
+  // scale; they must match or the ranks pick different algorithms (rcclUpdateRemoteFlushAlgoProto reads buffSizes).
+  ScopedLl128ScaleFake scale(4);
+  BuffSizes_Scene s;
+  s.comm()->nNodes = 2;
+  s.comm()->nRanks = 4;
+  s.comm()->rank = 3;
+  auto peers = SharedLl128Peers({0, 448 << 10, 448 << 10, 0});
+  s.comm()->peerInfo = peers.data();
+  EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+  EXPECT_EQ(448 << 10, s.comm()->buffSizes[NCCL_PROTO_LL128]);
+  EXPECT_EQ(448 << 10, s.comm()->p2pLl128BuffSize);
+}
+TEST_F(InitMicrotest, ComputeBuffSizes_OwnSharedSizeWinsOverLowerRanks) {
+  ScopedLl128ScaleFake scale(1);
+  BuffSizes_Scene s;
+  s.comm()->nNodes = 2;
+  s.comm()->nRanks = 2;
+  s.comm()->rank = 1;
+  auto peers = SharedLl128Peers({448 << 10, 4 * (448 << 10)});
+  s.comm()->peerInfo = peers.data();
+  EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+  EXPECT_EQ(4 * (448 << 10), s.comm()->buffSizes[NCCL_PROTO_LL128]) << "this rank's own proxy sizes";
+}
+TEST_F(InitMicrotest, ComputeBuffSizes_NoRankShares_KeepsItsOwnLl128Sizes) {
+  ScopedLl128ScaleFake scale(4);
+  BuffSizes_Scene s;
+  s.comm()->nNodes = 2;
+  s.comm()->nRanks = 2;
+  s.comm()->rank = 0;
+  auto peers = SharedLl128Peers({0, 0});
+  s.comm()->peerInfo = peers.data();
+  EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+  ASSERT_GT(s.comm()->p2pLl128BuffSize, 0);
+  EXPECT_EQ(4 * s.comm()->p2pLl128BuffSize, s.comm()->buffSizes[NCCL_PROTO_LL128]);
+}
+
 // --- fillInfo: the AMD SMI UALoE/MNNVL fabric probe (init.cc:1200-1219) ---
 
 namespace {
@@ -5691,6 +6178,40 @@ TEST_F(InitMicrotest, CommDestroySync_InitStateSuccess_SetsDeviceStopsProxyAndDe
   EXPECT_EQ(1, proxyStop.calls);
 }
 
+TEST_F(InitMicrotest, CommDestroySync_ClosesDdaIpcPeerMappingsBeforeProxyStop) {
+  Teardown_LifecycleComm c;
+  Teardown_AllowStreamCaptureExchange();
+  std::vector<std::string> callOrder;
+  ScopedHook collTrace(g_collTraceDestroy, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook closeMappings(g_ncclDdaIpcCommClosePeerMappings, [&](ncclComm*) {
+    callOrder.push_back("closeMappings");
+    return ncclSuccess;
+  });
+  ScopedHook barrier(g_bootstrapIntraNodeBarrier, [&](void*, int*, int, int, int) {
+    callOrder.push_back("intraNodeBarrier");
+    return ncclSuccess;
+  });
+  ScopedHook proxyStop(g_ncclProxyStop, [&](ncclComm*) {
+    callOrder.push_back("proxyStop");
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(ncclSuccess, Teardown_RunDestroySync(c.get()));
+  EXPECT_EQ((std::vector<std::string>{"closeMappings", "intraNodeBarrier", "proxyStop"}), callOrder);
+}
+
+TEST_F(InitMicrotest, CommDestroySync_AbortedCommStillClosesDdaIpcPeerMappingsLocally) {
+  Teardown_LifecycleComm c;
+  *c.get()->abortFlag = 1;
+  Teardown_AllowStreamCaptureExchange();
+  ScopedHook collTrace(g_collTraceDestroy, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook closeMappings(g_ncclDdaIpcCommClosePeerMappings, [](ncclComm*) { return ncclSuccess; });
+
+  EXPECT_EQ(ncclSuccess, Teardown_RunDestroySync(c.get()));
+  EXPECT_EQ(1, closeMappings.calls);
+}
+
 TEST_F(InitMicrotest, CommDestroySync_SetDeviceFails_ReturnsErrorWithoutDestroyingCollTrace) {
   Teardown_LifecycleComm c;
   ScopedHook setDevice(g_hipSetDevice, [](int) { return hipErrorInvalidDevice; });
@@ -5780,6 +6301,109 @@ TEST_F(InitMicrotest, CommDestroySync_PersistentRefsOutstanding_PollsUntilCallba
   EXPECT_EQ(0, c.get()->localPersistentRefs);
 }
 
+namespace {
+struct Teardown_HeldGraph {
+  ncclKernelPlan plan{};
+  ncclPersistentPlanRef* ref = nullptr;
+  int reclaimed = 0;
+
+  void Attach(ncclComm* comm, int state) {
+    plan.reclaimer.fn = [](ncclComm* c, ncclCommCallback* cb) {
+      reinterpret_cast<Teardown_HeldGraph*>(cb)->reclaimed++;
+      c->localPersistentRefs -= 1;
+      return ncclSuccess;
+    };
+    ref = static_cast<ncclPersistentPlanRef*>(::calloc(1, sizeof(ncclPersistentPlanRef)));
+    ref->comm = comm;
+    ref->planHead = &plan;
+    ref->state = state;
+    ref->refCount = 2;
+    ref->next = comm->persistentPlanRefs;
+    comm->persistentPlanRefs = ref;
+    if (state == ncclPersistentPlanRefLive) comm->localPersistentRefs += 1;
+  }
+};
+static_assert(offsetof(Teardown_HeldGraph, plan) == 0, "the reclaimer cast relies on plan being first");
+}  // namespace
+
+TEST_F(InitMicrotest, CommDestroySync_AbortWithGraphStillHeld_OrphansPlansWithoutReclaiming) {
+  Teardown_LifecycleComm c;
+  Teardown_AllowStreamCaptureExchange();
+  ScopedHook collTrace(g_collTraceDestroy, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+  Teardown_HeldGraph graph;
+  graph.Attach(c.get(), ncclPersistentPlanRefLive);
+  *c.get()->abortFlag = 1;
+
+  EXPECT_EQ(ncclSuccess, Teardown_RunDestroySync(c.get()));
+  EXPECT_EQ(0, graph.reclaimed);
+  EXPECT_EQ(1, c.get()->localPersistentRefs);
+  EXPECT_EQ(graph.ref, c.get()->persistentPlanRefs);
+  EXPECT_EQ(ncclPersistentPlanRefOrphaned, graph.ref->state);
+  EXPECT_EQ(2, graph.ref->refCount);
+  c.get()->persistentPlanRefs = nullptr;
+  ncclPersistentPlanRefDrop(graph.ref);
+  ncclPersistentPlanRefDrop(graph.ref);
+}
+
+TEST_F(InitMicrotest, CommDestroySync_AbortCallbackError_StillStopsProxy) {
+  Teardown_LifecycleComm c;
+  Teardown_AllowStreamCaptureExchange();
+  ScopedHook collTrace(g_collTraceDestroy, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+  *c.get()->abortFlag = 1;
+
+  static Teardown_CommCallback bad;
+  bad = {};
+  bad.base.fn = [](ncclComm*, ncclCommCallback*) { return ncclSystemError; };
+  ncclIntruQueueMpscEnqueue(&c.get()->callbackQueue, &bad.base);
+
+  EXPECT_EQ(ncclSystemError, Teardown_RunDestroySync(c.get()));
+  EXPECT_EQ(1, proxyStop.calls);
+}
+
+TEST_F(InitMicrotest, CommDestroySync_LiveGraphOnDestroy_WaitsAndDoesNotReclaim) {
+  Teardown_LifecycleComm c;
+  Teardown_AllowStreamCaptureExchange();
+  ScopedHook collTrace(g_collTraceDestroy, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+  Teardown_HeldGraph graph;
+  graph.Attach(c.get(), ncclPersistentPlanRefLive);
+
+  static Teardown_CommCallback done;
+  done = {};
+  done.base.fn = [](ncclComm* comm, ncclCommCallback*) {
+    comm->localPersistentRefs = 0;
+    return ncclSuccess;
+  };
+  ncclIntruQueueMpscEnqueue(&c.get()->callbackQueue, &done.base);
+
+  EXPECT_EQ(ncclSuccess, Teardown_RunDestroySync(c.get()));
+  EXPECT_EQ(0, graph.reclaimed);
+  EXPECT_EQ(ncclPersistentPlanRefLive, graph.ref->state);
+  EXPECT_EQ(0, c.get()->localPersistentRefs);
+  EXPECT_EQ(nullptr, c.get()->persistentPlanRefs);
+  EXPECT_EQ(1, graph.ref->refCount);
+  ncclPersistentPlanRefDrop(graph.ref);
+}
+
+TEST_F(InitMicrotest, CommDestroySync_GraphAlreadyDestroyed_DropsTheRefWithoutReclaimingAgain) {
+  Teardown_LifecycleComm c;
+  Teardown_AllowStreamCaptureExchange();
+  ScopedHook collTrace(g_collTraceDestroy, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+  Teardown_HeldGraph graph;
+  graph.Attach(c.get(), ncclPersistentPlanRefReleased);
+  *c.get()->abortFlag = 1;
+
+  EXPECT_EQ(ncclSuccess, Teardown_RunDestroySync(c.get()));
+  EXPECT_EQ(0, graph.reclaimed);
+  EXPECT_EQ(nullptr, c.get()->persistentPlanRefs);
+  EXPECT_EQ(ncclPersistentPlanRefReleased, graph.ref->state);
+  EXPECT_EQ(1, graph.ref->refCount);
+  ncclPersistentPlanRefDrop(graph.ref);
+}
+
 TEST_F(InitMicrotest, CommDestroySync_LegacyCleanupCallbackFails_WarnsAndDrainsRemainder) {
   Teardown_LifecycleComm c;
   Teardown_AllowStreamCaptureExchange();
@@ -5815,6 +6439,9 @@ constexpr uint64_t Teardown_kTunerMagic = 0xC0FFEE01u;
 struct Teardown_TunerRecord {
   uint64_t magic = Teardown_kTunerMagic;
   int finalizeCalls = 0;
+  std::atomic<int>* ddaCloseCalls = nullptr;
+  int expectedDdaCloseCalls = 0;
+  bool allDdaMappingsClosedBeforeCleanup = false;
 };
 
 // Returning an error unless the magic survives is what makes "passed the wrong context" a failing test.
@@ -5822,6 +6449,10 @@ ncclResult_t Teardown_TunerFinalize(void* context) {
   auto* rec = static_cast<Teardown_TunerRecord*>(context);
   if (rec == nullptr || rec->magic != Teardown_kTunerMagic) return ncclInternalError;
   rec->finalizeCalls++;
+  if (rec->ddaCloseCalls != nullptr) {
+    rec->allDdaMappingsClosedBeforeCleanup =
+        rec->ddaCloseCalls->load(std::memory_order_acquire) == rec->expectedDdaCloseCalls;
+  }
   return ncclSuccess;
 }
 
@@ -5908,6 +6539,59 @@ TEST_F(InitMicrotest, CommReclaim_LastIntraRank_SyncsAndCleansEveryCommInTheChai
   }
 }
 
+TEST_F(InitMicrotest, CommReclaim_ClosesAllDdaMappingsBeforeSerialCommCleanup) {
+  Teardown_AllowStreamCaptureExchange();
+  constexpr int kChainLength = 3;
+  Teardown_ChainMember members[kChainLength];
+  ASSERT_NO_FATAL_FAILURE(BuildCommChain(members, kChainLength));
+  members[0].comm->finalizeRankCnt = kChainLength - 1;
+
+  std::atomic<int> ddaCloseCalls{0};
+  for (auto& member : members) {
+    member.rec.ddaCloseCalls = &ddaCloseCalls;
+    member.rec.expectedDdaCloseCalls = kChainLength;
+  }
+  ScopedHook closeMappings(g_ncclDdaIpcCommClosePeerMappings, [&](ncclComm*) {
+    ddaCloseCalls.fetch_add(1, std::memory_order_release);
+    return ncclSuccess;
+  });
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+
+  EXPECT_EQ(ncclSuccess, Teardown_RunReclaim(members[kChainLength - 1].comm));
+  EXPECT_EQ(kChainLength, closeMappings.calls);
+  for (int i = 0; i < kChainLength; ++i) {
+    EXPECT_TRUE(members[i].rec.allDdaMappingsClosedBeforeCleanup) << "chain member " << i;
+  }
+}
+
+TEST_F(InitMicrotest, CommReclaim_RevokedChain_ClosesAllDdaMappingsBeforeSerialCommCleanup) {
+  constexpr int kChainLength = 3;
+  Teardown_ChainMember members[kChainLength];
+  ASSERT_NO_FATAL_FAILURE(BuildCommChain(members, kChainLength));
+  members[0].comm->finalizeRankCnt = kChainLength - 1;
+
+  std::atomic<int> ddaCloseCalls{0};
+  for (auto& member : members) {
+    member.comm->finalizeCalled = true;
+    member.comm->revokedFlag = 1;
+    member.rec.ddaCloseCalls = &ddaCloseCalls;
+    member.rec.expectedDdaCloseCalls = kChainLength;
+  }
+  ScopedHook closeMappings(g_ncclDdaIpcCommClosePeerMappings, [&](ncclComm*) {
+    ddaCloseCalls.fetch_add(1, std::memory_order_release);
+    return ncclSuccess;
+  });
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+
+  EXPECT_EQ(ncclSuccess, Teardown_RunReclaim(members[kChainLength - 1].comm));
+  EXPECT_EQ(kChainLength, closeMappings.calls);
+  EXPECT_EQ(0, proxyStop.calls);
+  for (int i = 0; i < kChainLength; ++i) {
+    EXPECT_TRUE(members[i].rec.allDdaMappingsClosedBeforeCleanup) << "chain member " << i;
+    EXPECT_EQ(1, members[i].rec.finalizeCalls) << "chain member " << i;
+  }
+}
+
 TEST_F(InitMicrotest, CommReclaim_DestroySyncFails_WarnsAndStillCleansTheChain) {
   const int kChainLength = 2;
   Teardown_ChainMember members[kChainLength];
@@ -5982,6 +6666,20 @@ TEST_F(InitMicrotest, CommRevokeAsync_ValidComm_StopsProxyAndLowersEveryAbortFla
   EXPECT_EQ(c.get(), stoppedComm);
   EXPECT_EQ(0u, c.abortFlag());
   EXPECT_EQ(0u, c.abortFlagDev());
+  EXPECT_EQ(0u, c.childAbortFlag());
+  EXPECT_EQ(0u, c.childAbortFlagDev());
+}
+
+TEST_F(InitMicrotest, CommRevokeAsync_HeldGraph_ClearsHostAbortFlags) {
+  Teardown_AllowStreamCaptureExchange();
+  Teardown_LifecycleComm c;
+  ASSERT_EQ(ncclSuccess, setCommAbortFlags(c.get(), 1));
+  c.get()->localPersistentRefs = 1;
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+
+  EXPECT_EQ(ncclSuccess, Teardown_RunRevokeAsync(c.get()));
+  EXPECT_EQ(0u, c.abortFlag());
+  EXPECT_EQ(1u, c.abortFlagDev());
   EXPECT_EQ(0u, c.childAbortFlag());
   EXPECT_EQ(0u, c.childAbortFlagDev());
 }
@@ -6608,6 +7306,58 @@ TEST_F(InitMicrotest, CommFree_NoSymmetricSupport_SkipsSymmetricFinalize) {
   EXPECT_EQ(0, symk.calls);
 }
 
+// AICOMRCCL-2739: a plugin finalize error is returned after the sharedRes frees.
+// Host finalize's error wins when both fail. RMA proxy finalize still aborts.
+TEST_F(InitMicrotest, CommFree_GinPluginFinalizeError_ReturnedAfterTeardown) {
+  ncclComm* comm = nullptr;
+  uint32_t abortFlag = 0;
+  int abortRef = 2;
+  ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
+  g_ncclGinFinalizeResult = ncclSystemError;
+
+  std::vector<int> ran;
+  Teardown_DtorNode node{};
+  node.base.fn = Teardown_RecordingDtor;
+  node.id = 1;
+  node.log = &ran;
+  node.result = ncclSuccess;
+  comm->destructorHead = &node.base;
+
+  EXPECT_EQ(ncclSystemError, commFree(comm));
+  EXPECT_EQ(1, g_ncclGinHostFinalizeCalls);
+  EXPECT_EQ(1, g_ncclGinFinalizeCalls);
+  EXPECT_EQ(std::vector<int>({1}), ran);
+}
+
+TEST_F(InitMicrotest, CommFree_GinHostFinalizeError_WinsOverPluginFinalizeError) {
+  ncclComm* comm = nullptr;
+  uint32_t abortFlag = 0;
+  int abortRef = 2;
+  ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
+  g_ncclGinHostFinalizeResult = ncclSystemError;
+  g_ncclGinFinalizeResult = ncclInternalError;
+
+  EXPECT_EQ(ncclSystemError, commFree(comm));
+  EXPECT_EQ(1, g_ncclGinHostFinalizeCalls);
+  EXPECT_EQ(1, g_ncclGinFinalizeCalls);
+}
+
+TEST_F(InitMicrotest, CommFree_RmaProxyFinalizeError_AbortsBeforePluginFinalize) {
+  ncclComm* comm = nullptr;
+  uint32_t abortFlag = 0;
+  int abortRef = 2;
+  ASSERT_NO_FATAL_FAILURE(Teardown_MakeFreeableComm(&comm, &abortFlag, &abortRef));
+  g_ncclGinHostFinalizeResult = ncclSystemError;
+  g_ncclRmaProxyFinalizeResult = ncclInternalError;
+
+  EXPECT_EQ(ncclInternalError, commFree(comm));
+  EXPECT_EQ(1, g_ncclGinHostFinalizeCalls);
+  EXPECT_EQ(1, g_ncclRmaProxyFinalizeCalls);
+  EXPECT_EQ(0, g_ncclGinFinalizeCalls);
+  EXPECT_EQ(2, abortRef);
+  free(comm);
+}
+
 TEST_F(InitMicrotest, CommFree_SymmetricFinalizeFails_PropagatesAndStopsTeardown) {
   ncclComm* comm = nullptr;
   uint32_t abortFlag = 0;
@@ -6704,6 +7454,114 @@ TEST_F(InitMicrotest, CommReclaim_RevokedCommWithPersistentRefs_PollsUntilTheyCl
 
   EXPECT_EQ(ncclSuccess, Teardown_RunReclaim(comm));
   EXPECT_EQ(1, members[0].rec.finalizeCalls);
+}
+
+TEST_F(InitMicrotest, CommReclaim_RevokedCommWithGraphStillHeld_DefersCleanupUntilThePlanIsReleased) {
+  const int kChainLength = 1;
+  Teardown_ChainMember members[kChainLength];
+  ASSERT_NO_FATAL_FAILURE(BuildCommChain(members, kChainLength));
+  ncclComm* comm = members[0].comm;
+  comm->finalizeCalled = true;
+  comm->revokedFlag = 1;
+  Teardown_HeldGraph graph;
+  graph.Attach(comm, ncclPersistentPlanRefLive);
+
+  auto snapshotTasks = [] {
+    std::vector<int> tids;
+    DIR* dir = opendir("/proc/self/task");
+    if (dir == nullptr) return tids;
+    while (dirent* ent = readdir(dir)) {
+      if (ent->d_name[0] == '.') continue;
+      tids.push_back(std::atoi(ent->d_name));
+    }
+    closedir(dir);
+    return tids;
+  };
+  std::vector<int> tasksBefore = snapshotTasks();
+  EXPECT_EQ(ncclSuccess, Teardown_RunReclaim(comm));
+  EXPECT_EQ(0, graph.reclaimed);
+  EXPECT_EQ(0, members[0].rec.finalizeCalls);
+  int reaperTid = -1;
+  for (int i = 0; i < 100 && reaperTid < 0; ++i) {
+    for (int tid : snapshotTasks()) {
+      if (std::find(tasksBefore.begin(), tasksBefore.end(), tid) == tasksBefore.end()) {
+        reaperTid = tid;
+        break;
+      }
+    }
+    if (reaperTid < 0) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_GE(reaperTid, 0);
+  ncclIntruQueueMpscEnqueue(&comm->callbackQueue, &graph.plan.reclaimer);
+  for (int i = 0; i < 400; ++i) {
+    std::string taskPath = "/proc/self/task/" + std::to_string(reaperTid);
+    DIR* task = opendir(taskPath.c_str());
+    bool alive = task != nullptr;
+    if (task != nullptr) closedir(task);
+    if (members[0].rec.finalizeCalls != 0 && !alive) break;
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  EXPECT_EQ(1, graph.reclaimed);
+  EXPECT_EQ(1, members[0].rec.finalizeCalls);
+  EXPECT_EQ(ncclPersistentPlanRefOrphaned, graph.ref->state);
+  EXPECT_EQ(1, graph.ref->refCount);
+  ncclPersistentPlanRefDrop(graph.ref);
+}
+
+TEST_F(InitMicrotest, CommReclaim_AbortWithGraphStillHeld_DefersCleanupUntilThePlanIsReleased) {
+  Teardown_AllowStreamCaptureExchange();
+  const int kChainLength = 1;
+  Teardown_ChainMember members[kChainLength];
+  ASSERT_NO_FATAL_FAILURE(BuildCommChain(members, kChainLength));
+  ncclComm* comm = members[0].comm;
+  comm->initState = ncclSuccess;
+  members[0].abortFlag = 1;
+  Teardown_HeldGraph graph;
+  graph.Attach(comm, ncclPersistentPlanRefLive);
+  ScopedHook collTrace(g_collTraceDestroy, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook proxyStop(g_ncclProxyStop, [](ncclComm*) { return ncclSuccess; });
+
+  auto snapshotTasks = [] {
+    std::vector<int> tids;
+    DIR* dir = opendir("/proc/self/task");
+    if (dir == nullptr) return tids;
+    while (dirent* ent = readdir(dir)) {
+      if (ent->d_name[0] == '.') continue;
+      tids.push_back(std::atoi(ent->d_name));
+    }
+    closedir(dir);
+    return tids;
+  };
+  std::vector<int> tasksBefore = snapshotTasks();
+  EXPECT_EQ(ncclSuccess, Teardown_RunReclaim(comm));
+  EXPECT_EQ(0, graph.reclaimed);
+  EXPECT_EQ(0, members[0].rec.finalizeCalls);
+  EXPECT_EQ(1, proxyStop.calls);
+  int reaperTid = -1;
+  for (int i = 0; i < 100 && reaperTid < 0; ++i) {
+    for (int tid : snapshotTasks()) {
+      if (std::find(tasksBefore.begin(), tasksBefore.end(), tid) == tasksBefore.end()) {
+        reaperTid = tid;
+        break;
+      }
+    }
+    if (reaperTid < 0) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_GE(reaperTid, 0);
+  ncclIntruQueueMpscEnqueue(&comm->callbackQueue, &graph.plan.reclaimer);
+  for (int i = 0; i < 400; ++i) {
+    std::string taskPath = "/proc/self/task/" + std::to_string(reaperTid);
+    DIR* task = opendir(taskPath.c_str());
+    bool alive = task != nullptr;
+    if (task != nullptr) closedir(task);
+    if (members[0].rec.finalizeCalls != 0 && !alive) break;
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  EXPECT_EQ(1, graph.reclaimed);
+  EXPECT_EQ(1, members[0].rec.finalizeCalls);
+  EXPECT_EQ(ncclPersistentPlanRefOrphaned, graph.ref->state);
+  EXPECT_EQ(1, graph.ref->refCount);
+  ncclPersistentPlanRefDrop(graph.ref);
 }
 
 TEST_F(InitMicrotest, CommReclaim_RevokedCommLegacyCallbackFails_WarnsAndKeepsDraining) {
@@ -8290,6 +9148,30 @@ TEST_F(InitMicrotest, CommShrink_AbortRequestedAndStreamSyncSucceeds_LowersTheAb
   EXPECT_EQ(0u, c.abortFlagDev());
 }
 
+TEST_F(InitMicrotest, CommShrink_RevokedHeldGraph_KeepsDeviceAbortFlag) {
+  Teardown_LifecycleComm c(/*cudaDev=*/1, /*rank=*/1);
+  c.get()->revokedFlag = 1;
+  c.get()->localPersistentRefs = 1;
+  ncclComm_t out = nullptr;
+  int exclude[1] = {0};
+  uint32_t flagAtEntry = 0xFFFFFFFFu;
+  uint32_t flagDevAtEntry = 0xFFFFFFFFu;
+  ScopedHook getDevice(g_hipGetDevice, [&](int* dev) {
+    flagAtEntry = c.abortFlag();
+    flagDevAtEntry = c.abortFlagDev();
+    if (dev) *dev = g_currentDevice;
+    return hipSuccess;
+  });
+
+  EXPECT_EQ(ncclInvalidArgument, ncclCommShrink_impl(c.get(), exclude, /*excludeRanksCount=*/0, &out,
+                                                     /*config=*/nullptr, NCCL_SHRINK_ABORT));
+  ASSERT_EQ(1, getDevice.calls);
+  EXPECT_EQ(0u, flagAtEntry);
+  EXPECT_EQ(1u, flagDevAtEntry);
+  EXPECT_EQ(0u, c.abortFlag());
+  EXPECT_EQ(1u, c.abortFlagDev());
+}
+
 TEST_F(InitMicrotest, CommShrink_NoAbortFlag_NeverSynchronisesTheDeviceStream) {
   Teardown_LifecycleComm c(/*cudaDev=*/1, /*rank=*/1);
   g_ncclStrongStreamResult = ncclSystemError;
@@ -9309,6 +10191,7 @@ struct Tr_AllGatherInfo {
   int localRanks;
   int nc;
   int romeTopoModelIdx;
+  int treeCompact;
   bool pivotA2AEnabled;
   bool ll128Enabled;
   char hostname[128];

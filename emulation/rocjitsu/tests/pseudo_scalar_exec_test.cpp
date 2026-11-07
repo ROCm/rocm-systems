@@ -4,6 +4,7 @@
 /// @file pseudo_scalar_exec_test.cpp
 /// @brief Cross-architecture pseudo-scalar transcendental execution tests.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
@@ -36,6 +37,13 @@
 namespace {
 
 using namespace rocjitsu;
+
+// Generated bodies flush the source half under MODE before widening it.
+float flushed_f16_source(uint16_t half, uint32_t denorm_mode) {
+  return util::f16_to_f32(
+      static_cast<uint16_t>(amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
+          uint32_t{half}, amdgpu::input_denormal::Policy::make(denorm_mode))));
+}
 
 using BaseEncodingWords = std::array<uint32_t, 2>;
 using InstructionWords = std::array<uint32_t, 3>;
@@ -669,8 +677,10 @@ public:
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 256;
     config.lds_size_kb = 64;
-    compute_unit =
-        amdgpu::ComputeUnitCore::create(std::string(profile.name), config, &gpu_memory, &l2);
+    rocjitsu::test::initialize_compute_unit(compute_unit, std::string(profile.name), config,
+                                            &gpu_memory, &l2);
+    if (!compute_unit)
+      return;
     decoder = Decoder::create(profile.arch);
     if (compute_unit)
       wavefront = compute_unit->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
@@ -938,8 +948,9 @@ TEST(PseudoScalarHelperTest, HalfReciprocalSquareRootMatchesPhysicalModesAndModi
                           false, round_mode, denorm_mode, omod, false, false),
                       test[omod + 1]);
         EXPECT_EQ(amdgpu::transcendental::execute_pseudo_f16(
-                      amdgpu::pseudo_scalar::Operation::RSQ, util::f16_to_f32(0x0001), false, false,
-                      round_mode, denorm_mode, 0, false, false),
+                      amdgpu::pseudo_scalar::Operation::RSQ,
+                      flushed_f16_source(0x0001, denorm_mode), false, false, round_mode,
+                      denorm_mode, 0, false, false),
                   (denorm_mode & 1u) ? 0x6c00u : 0x7c00u);
       }
   }
@@ -1000,13 +1011,13 @@ TEST(PseudoScalarHelperTest, PreservesAndFlushesSignedDenormals) {
                                                0, 0, 0, false),
             0x80000000u);
 
-  const float f16_negative_minimum = util::f16_to_f32(0x8001u);
   const float f16_negative_maximum = util::f16_to_f32(0xFBFFu);
-  EXPECT_EQ(amdgpu::transcendental::execute_pseudo_f16(Operation::SQRT, f16_negative_minimum, false,
-                                                       false, 0, 0, 0, false, false),
+  EXPECT_EQ(amdgpu::transcendental::execute_pseudo_f16(Operation::SQRT,
+                                                       flushed_f16_source(0x8001u, 0), false, false,
+                                                       0, 0, 0, false, false),
             0x00008000u);
   const uint32_t f16_allowed_negative_input = amdgpu::transcendental::execute_pseudo_f16(
-      Operation::SQRT, f16_negative_minimum, false, false, 0, 1, 0, false, false);
+      Operation::SQRT, flushed_f16_source(0x8001u, 1), false, false, 0, 1, 0, false, false);
   EXPECT_EQ(f16_allowed_negative_input & 0x7C00u, 0x7C00u);
   EXPECT_NE(f16_allowed_negative_input & 0x03FFu, 0u);
   EXPECT_EQ(amdgpu::transcendental::execute_pseudo_f16(Operation::RCP, f16_negative_maximum, false,
@@ -1014,6 +1025,11 @@ TEST(PseudoScalarHelperTest, PreservesAndFlushesSignedDenormals) {
             0x00008100u);
   EXPECT_EQ(amdgpu::transcendental::execute_pseudo_f16(Operation::RCP, f16_negative_maximum, false,
                                                        false, 0, 0, 0, false, false),
+            0x00008000u);
+  // gfx1201 V_S_RCP_F16 div:2: halving a result in the lowest normal binade
+  // keeps its sign, as for the vector forms.
+  EXPECT_EQ(amdgpu::transcendental::execute_pseudo_f16(Operation::RCP, util::f16_to_f32(0xF037u),
+                                                       false, false, 0, 3, 3, false, false),
             0x00008000u);
 }
 

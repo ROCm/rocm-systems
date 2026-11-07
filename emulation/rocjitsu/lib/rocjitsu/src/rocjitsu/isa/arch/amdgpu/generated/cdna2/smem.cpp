@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/smem.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/decode_factories.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx9_cache_flags.h"
 #include <memory>
@@ -904,6 +905,9 @@ SDcacheDiscardSmem::SDcacheDiscardSmem(const MachineInst *inst)
   src_operands_[1] = &soffset;
   num_src_ = 2;
   num_dst_ = 0;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -927,6 +931,10 @@ SDcacheDiscardX2Smem::SDcacheDiscardX2Smem(const MachineInst *inst)
   src_operands_[1] = &soffset;
   num_src_ = 2;
   num_dst_ = 0;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -948,11 +956,15 @@ SBufferAtomicSwapSmem::SBufferAtomicSwapSmem(const MachineInst *inst)
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -971,14 +983,19 @@ SBufferAtomicCmpswapSmem::SBufferAtomicCmpswapSmem(const MachineInst *inst)
     : Smem("s_buffer_atomic_cmpswap", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SBufferAtomicCmpswapSmem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
+      sdata_return(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata_return;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1000,11 +1017,15 @@ SBufferAtomicAddSmem::SBufferAtomicAddSmem(const MachineInst *inst)
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1026,11 +1047,15 @@ SBufferAtomicSubSmem::SBufferAtomicSubSmem(const MachineInst *inst)
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1052,11 +1077,15 @@ SBufferAtomicSminSmem::SBufferAtomicSminSmem(const MachineInst *inst)
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1078,11 +1107,15 @@ SBufferAtomicUminSmem::SBufferAtomicUminSmem(const MachineInst *inst)
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1104,11 +1137,15 @@ SBufferAtomicSmaxSmem::SBufferAtomicSmaxSmem(const MachineInst *inst)
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1130,11 +1167,15 @@ SBufferAtomicUmaxSmem::SBufferAtomicUmaxSmem(const MachineInst *inst)
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1156,11 +1197,15 @@ SBufferAtomicAndSmem::SBufferAtomicAndSmem(const MachineInst *inst)
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1182,11 +1227,15 @@ SBufferAtomicOrSmem::SBufferAtomicOrSmem(const MachineInst *inst)
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1208,11 +1257,15 @@ SBufferAtomicXorSmem::SBufferAtomicXorSmem(const MachineInst *inst)
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1234,11 +1287,15 @@ SBufferAtomicIncSmem::SBufferAtomicIncSmem(const MachineInst *inst)
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1260,11 +1317,15 @@ SBufferAtomicDecSmem::SBufferAtomicDecSmem(const MachineInst *inst)
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1286,11 +1347,16 @@ SBufferAtomicSwapX2Smem::SBufferAtomicSwapX2Smem(const MachineInst *inst)
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1309,14 +1375,20 @@ SBufferAtomicCmpswapX2Smem::SBufferAtomicCmpswapX2Smem(const MachineInst *inst)
     : Smem("s_buffer_atomic_cmpswap_x2", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SBufferAtomicCmpswapX2Smem)),
       sdata(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
+      sdata_return(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata_return;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1338,11 +1410,16 @@ SBufferAtomicAddX2Smem::SBufferAtomicAddX2Smem(const MachineInst *inst)
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1364,11 +1441,16 @@ SBufferAtomicSubX2Smem::SBufferAtomicSubX2Smem(const MachineInst *inst)
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1390,11 +1472,16 @@ SBufferAtomicSminX2Smem::SBufferAtomicSminX2Smem(const MachineInst *inst)
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1416,11 +1503,16 @@ SBufferAtomicUminX2Smem::SBufferAtomicUminX2Smem(const MachineInst *inst)
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1442,11 +1534,16 @@ SBufferAtomicSmaxX2Smem::SBufferAtomicSmaxX2Smem(const MachineInst *inst)
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1468,11 +1565,16 @@ SBufferAtomicUmaxX2Smem::SBufferAtomicUmaxX2Smem(const MachineInst *inst)
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1494,11 +1596,16 @@ SBufferAtomicAndX2Smem::SBufferAtomicAndX2Smem(const MachineInst *inst)
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1520,11 +1627,16 @@ SBufferAtomicOrX2Smem::SBufferAtomicOrX2Smem(const MachineInst *inst)
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1546,11 +1658,16 @@ SBufferAtomicXorX2Smem::SBufferAtomicXorX2Smem(const MachineInst *inst)
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1572,11 +1689,16 @@ SBufferAtomicIncX2Smem::SBufferAtomicIncX2Smem(const MachineInst *inst)
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1598,11 +1720,16 @@ SBufferAtomicDecX2Smem::SBufferAtomicDecX2Smem(const MachineInst *inst)
       sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1624,11 +1751,15 @@ SAtomicSwapSmem::SAtomicSwapSmem(const MachineInst *inst)
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1647,14 +1778,19 @@ SAtomicCmpswapSmem::SAtomicCmpswapSmem(const MachineInst *inst)
     : Smem("s_atomic_cmpswap", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SAtomicCmpswapSmem)),
       sdata(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
+      sdata_return(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata_return;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1676,11 +1812,15 @@ SAtomicAddSmem::SAtomicAddSmem(const MachineInst *inst)
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1701,11 +1841,15 @@ SAtomicSubSmem::SAtomicSubSmem(const MachineInst *inst)
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1726,11 +1870,15 @@ SAtomicSminSmem::SAtomicSminSmem(const MachineInst *inst)
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1752,11 +1900,15 @@ SAtomicUminSmem::SAtomicUminSmem(const MachineInst *inst)
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1778,11 +1930,15 @@ SAtomicSmaxSmem::SAtomicSmaxSmem(const MachineInst *inst)
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1804,11 +1960,15 @@ SAtomicUmaxSmem::SAtomicUmaxSmem(const MachineInst *inst)
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1830,11 +1990,15 @@ SAtomicAndSmem::SAtomicAndSmem(const MachineInst *inst)
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1855,11 +2019,15 @@ SAtomicOrSmem::SAtomicOrSmem(const MachineInst *inst)
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1880,11 +2048,15 @@ SAtomicXorSmem::SAtomicXorSmem(const MachineInst *inst)
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1905,11 +2077,15 @@ SAtomicIncSmem::SAtomicIncSmem(const MachineInst *inst)
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                        false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1959,11 +2135,16 @@ SAtomicSwapX2Smem::SAtomicSwapX2Smem(const MachineInst *inst)
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1982,14 +2163,20 @@ SAtomicCmpswapX2Smem::SAtomicCmpswapX2Smem(const MachineInst *inst)
     : Smem("s_atomic_cmpswap_x2", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SAtomicCmpswapX2Smem)),
       sdata(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
+      sdata_return(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdata),
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata_return;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2011,11 +2198,16 @@ SAtomicAddX2Smem::SAtomicAddX2Smem(const MachineInst *inst)
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2037,11 +2229,16 @@ SAtomicSubX2Smem::SAtomicSubX2Smem(const MachineInst *inst)
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2063,11 +2260,16 @@ SAtomicSminX2Smem::SAtomicSminX2Smem(const MachineInst *inst)
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2089,11 +2291,16 @@ SAtomicUminX2Smem::SAtomicUminX2Smem(const MachineInst *inst)
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2115,11 +2322,16 @@ SAtomicSmaxX2Smem::SAtomicSmaxX2Smem(const MachineInst *inst)
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2141,11 +2353,16 @@ SAtomicUmaxX2Smem::SAtomicUmaxX2Smem(const MachineInst *inst)
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2167,11 +2384,16 @@ SAtomicAndX2Smem::SAtomicAndX2Smem(const MachineInst *inst)
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2193,11 +2415,16 @@ SAtomicOrX2Smem::SAtomicOrX2Smem(const MachineInst *inst)
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2219,11 +2446,16 @@ SAtomicXorX2Smem::SAtomicXorX2Smem(const MachineInst *inst)
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2245,11 +2477,16 @@ SAtomicIncX2Smem::SAtomicIncX2Smem(const MachineInst *inst)
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2271,11 +2508,16 @@ SAtomicDecX2Smem::SAtomicDecX2Smem(const MachineInst *inst)
       sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
       soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
   src_operands_[0] = &sdata;
-  dst_operands_[0] = &sdata;
   src_operands_[1] = &sbase;
   src_operands_[2] = &soffset;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
+  if (inst_.glc != 0)
+    dst_operands_[num_dst_++] = &sdata;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       amdgpu::MemoryCompletionClass::UNORDERED, 2}},
+      false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 

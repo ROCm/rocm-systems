@@ -8,11 +8,13 @@
 #include "core/config.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 
 #include <fstream>
 
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -77,8 +79,8 @@ from_json_process(const nlohmann::json& _json)
     p.pid     = _json["pid"].get<pid_t>();
     p.ppid    = _json["ppid"].get<pid_t>();
     p.command = _json["command"].get<std::string>();
-    p.start   = _json["start"].get<std::int32_t>();
-    p.end     = _json["end"].get<std::int32_t>();
+    p.start   = _json["start"].get<std::uint64_t>();
+    p.end     = _json["end"].get<std::uint64_t>();
     return p;
 }
 
@@ -136,7 +138,7 @@ to_json(const info::thread& thread)
     nlohmann::json result;
     result["parent_process_id"] = thread.parent_process_id;
     result["process_id"]        = thread.process_id;
-    result["thread_id"]         = static_cast<std::int32_t>(thread.thread_id);
+    result["thread_id"]         = thread.thread_id;
     result["start"]             = thread.start;
     result["end"]               = thread.end;
     result["extdata"]           = thread.extdata;
@@ -149,9 +151,9 @@ from_json_thread(const nlohmann::json& _json)
     info::thread t;
     t.parent_process_id = _json["parent_process_id"].get<std::int32_t>();
     t.process_id        = _json["process_id"].get<std::int32_t>();
-    t.thread_id         = _json["thread_id"].get<std::int32_t>();
-    t.start             = _json["start"].get<std::int32_t>();
-    t.end               = _json["end"].get<std::int32_t>();
+    t.thread_id         = _json["thread_id"].get<std::uint64_t>();
+    t.start             = _json["start"].get<std::uint64_t>();
+    t.end               = _json["end"].get<std::uint64_t>();
     t.extdata           = _json["extdata"].get<std::string>();
     return t;
 }
@@ -163,7 +165,7 @@ to_json(const info::track& track)
     result["track_name"] = track.track_name;
     if(track.thread_id.has_value())
     {
-        result["thread_id"] = static_cast<std::int32_t>(track.thread_id.value());
+        result["thread_id"] = track.thread_id.value();
     }
     else
     {
@@ -184,7 +186,7 @@ from_json_track(const nlohmann::json& _json)
     }
     else
     {
-        t.thread_id = _json["thread_id"].get<std::int32_t>();
+        t.thread_id = _json["thread_id"].get<std::uint64_t>();
     }
     t.extdata = _json["extdata"].get<std::string>();
     return t;
@@ -408,12 +410,12 @@ from_json(metadata_registry& _registry, std::vector<std::shared_ptr<agent>>& _ag
 
     fill_from_json("threads", [&_registry](const auto& item) {
         auto const thread = from_json_thread(item);
-        _registry.add_thread_info(thread);
+        _registry.ensure_thread(thread.thread_id, [&thread] { return thread; });
     });
 
     fill_from_json("tracks", [&_registry](const auto& item) {
         auto const track = from_json_track(item);
-        _registry.add_track(track);
+        _registry.ensure_track(track.track_name, track.thread_id, track.extdata);
     });
 
     fill_from_json("queues", [&_registry](const auto& item) {
@@ -463,73 +465,37 @@ metadata_registry::set_process(const info::process& process)
 void
 metadata_registry::add_pmc_info(const info::pmc& pmc_info)
 {
-    m_pmc_infos.wlock([&pmc_info](auto& _data) {
-        if(_data.count(pmc_info) > 0)
-        {
-            return;
-        }
-        _data.emplace(pmc_info);
-    });
+    detail::insert_if_absent(m_pmc_infos, pmc_info);
 }
 
 void
-metadata_registry::add_thread_info(const info::thread& thread_info)
+metadata_registry::ensure_track(std::string_view           name,
+                                std::optional<std::size_t> thread_id,
+                                std::string_view           extdata)
 {
-    m_threads.wlock([&thread_info](auto& _data) {
-        if(_data.count(thread_info) > 0)
-        {
-            return;
-        }
-        _data.emplace(thread_info);
-    });
-}
-
-void
-metadata_registry::add_track(const info::track& track_info)
-{
-    m_tracks.wlock([&track_info](auto& _data) {
-        if(_data.count(track_info) > 0)
-        {
-            return;
-        }
-        _data.emplace(track_info);
+    detail::insert_if_absent(m_tracks, name, [&] {
+        return info::track{ .track_name = std::string{ name },
+                            .thread_id  = thread_id,
+                            .extdata    = std::string{ extdata } };
     });
 }
 
 void
 metadata_registry::add_queue(const std::uint64_t& queue_handle)
 {
-    m_queues.wlock([&queue_handle](auto& _data) {
-        if(_data.count(queue_handle) > 0)
-        {
-            return;
-        }
-        _data.emplace(queue_handle);
-    });
+    detail::insert_if_absent(m_queues, queue_handle);
 }
 
 void
 metadata_registry::add_stream(const std::uint64_t& stream_handle)
 {
-    m_streams.wlock([&stream_handle](auto& _data) {
-        if(_data.count(stream_handle) > 0)
-        {
-            return;
-        }
-        _data.emplace(stream_handle);
-    });
+    detail::insert_if_absent(m_streams, stream_handle);
 }
 
 void
 metadata_registry::add_string(const std::string_view string_value)
 {
-    m_strings.wlock([&string_value](auto& _data) {
-        std::string str{ string_value };
-        if(_data.count(str) == 0)
-        {
-            _data.emplace(std::move(str));
-        }
-    });
+    detail::insert_if_absent(m_strings, string_value);
 }
 
 info::process
@@ -545,14 +511,6 @@ metadata_registry::get_pmc_info(const std::string_view& unique_name) const
 {
     return get_type_info<info::pmc>(m_pmc_infos, [&unique_name](const info::pmc& val) {
         return val.name == unique_name;
-    });
-}
-
-std::optional<info::thread>
-metadata_registry::get_thread_info(const std::uint32_t& thread_id) const
-{
-    return get_type_info<info::thread>(m_threads, [&thread_id](const info::thread& val) {
-        return val.thread_id == thread_id;
     });
 }
 
@@ -649,13 +607,7 @@ void
 metadata_registry::add_code_object(
     const rocprofiler_callback_tracing_code_object_load_data_t& code_object)
 {
-    m_code_objects.wlock([&code_object](auto& _data) {
-        if(_data.count(code_object) > 0)
-        {
-            return;
-        }
-        _data.emplace(code_object);
-    });
+    detail::insert_if_absent(m_code_objects, code_object);
 }
 
 void
@@ -663,13 +615,7 @@ metadata_registry::add_kernel_symbol(
     const rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t&
         kernel_symbol)
 {
-    m_kernel_symbols.wlock([&kernel_symbol](auto& _data) {
-        if(_data.count(kernel_symbol) > 0)
-        {
-            return;
-        }
-        _data.emplace(kernel_symbol);
-    });
+    detail::insert_if_absent(m_kernel_symbols, kernel_symbol);
 }
 
 std::optional<rocprofiler_callback_tracing_code_object_load_data_t>

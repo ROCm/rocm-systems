@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx11_cache_flags.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_ds_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -28,8 +29,11 @@ namespace rocjitsu {
 namespace rdna3 {
 
 void DsAddU32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 4;
   d->num_elems = 1;
@@ -51,8 +55,11 @@ void DsAddU32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsSubU32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 4;
   d->num_elems = 1;
@@ -74,8 +81,11 @@ void DsSubU32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsRsubU32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 4;
   d->num_elems = 1;
@@ -97,8 +107,11 @@ void DsRsubU32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsIncU32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 4;
   d->num_elems = 1;
@@ -120,8 +133,11 @@ void DsIncU32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsDecU32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 4;
   d->num_elems = 1;
@@ -143,8 +159,11 @@ void DsDecU32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsMinI32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 4;
   d->num_elems = 1;
@@ -166,8 +185,11 @@ void DsMinI32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsMaxI32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 4;
   d->num_elems = 1;
@@ -189,8 +211,11 @@ void DsMaxI32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsMinU32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 4;
   d->num_elems = 1;
@@ -212,8 +237,11 @@ void DsMinU32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsMaxU32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 4;
   d->num_elems = 1;
@@ -235,8 +263,11 @@ void DsMaxU32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsAndB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 4;
   d->num_elems = 1;
@@ -258,8 +289,11 @@ void DsAndB32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsOrB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 4;
   d->num_elems = 1;
@@ -281,8 +315,11 @@ void DsOrB32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsXorB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 4;
   d->num_elems = 1;
@@ -304,8 +341,11 @@ void DsXorB32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsMskorB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 4;
   d->num_elems = 1;
@@ -330,8 +370,11 @@ void DsMskorB32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsStoreB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 4;
   d->num_elems = 1;
@@ -345,7 +388,8 @@ void DsStoreB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (exec) {
     auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec);
     if (data.valid()) {
-      data.copy_dwords_lane_major(d->store_data, exec);
+      if (data.copy_dwords_lane_major(d->store_data, exec).failed())
+        return;
       set_data(std::move(d));
       return;
     }
@@ -360,8 +404,11 @@ void DsStoreB32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsStore2addrB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
@@ -377,9 +424,18 @@ void DsStore2addrB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t addr_base = wf.vgpr_alloc().base + inst_.addr;
   uint32_t data0_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   uint32_t data1_base = wf.vgpr_alloc().base + 0u + inst_.data1;
-  auto addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
-  auto data0_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 0, 1, exec).lanes();
-  auto data1_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 0, 1, exec).lanes();
+  auto maybe_addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
+  if (maybe_addresses.failed())
+    return;
+  const std::span<const uint32_t> addresses = maybe_addresses.value();
+  auto maybe_data0_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 0, 1, exec).lanes();
+  if (maybe_data0_0.failed())
+    return;
+  const std::span<const uint32_t> data0_0 = maybe_data0_0.value();
+  auto maybe_data1_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 0, 1, exec).lanes();
+  if (maybe_data1_0.failed())
+    return;
+  const std::span<const uint32_t> data1_0 = maybe_data1_0.value();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -395,8 +451,11 @@ void DsStore2addrB32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsStore2addrStride64B32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
@@ -412,9 +471,18 @@ void DsStore2addrStride64B32Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t addr_base = wf.vgpr_alloc().base + inst_.addr;
   uint32_t data0_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   uint32_t data1_base = wf.vgpr_alloc().base + 0u + inst_.data1;
-  auto addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
-  auto data0_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 0, 1, exec).lanes();
-  auto data1_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 0, 1, exec).lanes();
+  auto maybe_addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
+  if (maybe_addresses.failed())
+    return;
+  const std::span<const uint32_t> addresses = maybe_addresses.value();
+  auto maybe_data0_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 0, 1, exec).lanes();
+  if (maybe_data0_0.failed())
+    return;
+  const std::span<const uint32_t> data0_0 = maybe_data0_0.value();
+  auto maybe_data1_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 0, 1, exec).lanes();
+  if (maybe_data1_0.failed())
+    return;
+  const std::span<const uint32_t> data1_0 = maybe_data1_0.value();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -430,8 +498,11 @@ void DsStore2addrStride64B32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsCmpstoreB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 4;
   d->num_elems = 1;
@@ -456,8 +527,11 @@ void DsCmpstoreB32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsCmpstoreF32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 4;
   d->num_elems = 1;
@@ -485,8 +559,11 @@ void DsCmpstoreF32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsMinF32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 4;
   d->num_elems = 1;
@@ -511,8 +588,11 @@ void DsMinF32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsMaxF32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 4;
   d->num_elems = 1;
@@ -539,8 +619,11 @@ void DsMaxF32Ds::execute_impl(amdgpu::Wavefront &wf) {
 void DsNopDs::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_ds_nop_ds(*this, wf); }
 
 void DsAddF32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 4;
   d->num_elems = 1;
@@ -565,35 +648,143 @@ void DsAddF32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsGwsSemaReleaseAllDs::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  if (!inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::InvalidInstructionEncoding);
+    return;
+  }
+  uint64_t exec = wf.exec();
+  if (exec) {
+    uint32_t rid =
+        (((wf.m0() >> 16) & 0x3fu) + (static_cast<uint32_t>(inst_.offset0) & 0x3fu)) & 0x3fu;
+    wf.gws_sema_release_all(rid);
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 0;
+  d->is_load = false;
+  d->lane_mask = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
+  set_data(std::move(d));
 }
 
-void DsGwsInitDs::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_ds_gws_init_ds(*this, wf); }
+void DsGwsInitDs::execute_impl(amdgpu::Wavefront &wf) {
+  if (!inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::InvalidInstructionEncoding);
+    return;
+  }
+  uint64_t exec = wf.exec();
+  uint32_t rid =
+      (((wf.m0() >> 16) & 0x3fu) + (static_cast<uint32_t>(inst_.offset0) & 0x3fu)) & 0x3fu;
+  uint32_t lane = exec ? static_cast<uint32_t>(std::countr_zero(exec)) : 0u;
+  auto &cu = wf.cu();
+  uint32_t gws_base = wf.vgpr_alloc().base + 0u + inst_.addr;
+  uint32_t gws_count = amdgpu::RegisterAccess(cu).read_vgpr(gws_base, lane);
+  wf.gws_init(rid, gws_count);
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 0;
+  d->is_load = false;
+  d->lane_mask = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
+  set_data(std::move(d));
+}
 
 void DsGwsSemaVDs::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  if (!inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::InvalidInstructionEncoding);
+    return;
+  }
+  uint64_t exec = wf.exec();
+  if (exec) {
+    uint32_t rid =
+        (((wf.m0() >> 16) & 0x3fu) + (static_cast<uint32_t>(inst_.offset0) & 0x3fu)) & 0x3fu;
+    wf.gws_sema_v(rid);
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 0;
+  d->is_load = false;
+  d->lane_mask = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
+  set_data(std::move(d));
 }
 
 void DsGwsSemaBrDs::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  if (!inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::InvalidInstructionEncoding);
+    return;
+  }
+  uint64_t exec = wf.exec();
+  uint32_t rid =
+      (((wf.m0() >> 16) & 0x3fu) + (static_cast<uint32_t>(inst_.offset0) & 0x3fu)) & 0x3fu;
+  uint32_t lane = exec ? static_cast<uint32_t>(std::countr_zero(exec)) : 0u;
+  auto &cu = wf.cu();
+  uint32_t gws_base = wf.vgpr_alloc().base + 0u + inst_.addr;
+  uint32_t gws_count = amdgpu::RegisterAccess(cu).read_vgpr(gws_base, lane);
+  wf.gws_sema_br(rid, gws_count);
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 0;
+  d->is_load = false;
+  d->lane_mask = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
+  set_data(std::move(d));
 }
 
 void DsGwsSemaPDs::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  if (!inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::InvalidInstructionEncoding);
+    return;
+  }
+  uint64_t exec = wf.exec();
+  if (exec) {
+    uint32_t rid =
+        (((wf.m0() >> 16) & 0x3fu) + (static_cast<uint32_t>(inst_.offset0) & 0x3fu)) & 0x3fu;
+    wf.gws_sema_p(rid);
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 0;
+  d->is_load = false;
+  d->lane_mask = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
+  set_data(std::move(d));
 }
 
 void DsGwsBarrierDs::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  if (!inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::InvalidInstructionEncoding);
+    return;
+  }
+  uint64_t exec = wf.exec();
+  uint32_t rid =
+      (((wf.m0() >> 16) & 0x3fu) + (static_cast<uint32_t>(inst_.offset0) & 0x3fu)) & 0x3fu;
+  uint32_t lane = exec ? static_cast<uint32_t>(std::countr_zero(exec)) : 0u;
+  auto &cu = wf.cu();
+  uint32_t gws_base = wf.vgpr_alloc().base + 0u + inst_.addr;
+  uint32_t gws_count = amdgpu::RegisterAccess(cu).read_vgpr(gws_base, lane);
+  wf.gws_barrier_arrive(rid, gws_count);
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 0;
+  d->is_load = false;
+  d->lane_mask = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
+  set_data(std::move(d));
 }
 
 void DsStoreB8Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 1;
   d->num_elems = 1;
@@ -614,8 +805,11 @@ void DsStoreB8Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsStoreB16Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 2;
   d->num_elems = 1;
@@ -636,8 +830,11 @@ void DsStoreB16Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsAddRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
@@ -660,8 +857,11 @@ void DsAddRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsSubRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
@@ -684,8 +884,11 @@ void DsSubRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsRsubRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
@@ -708,8 +911,11 @@ void DsRsubRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsIncRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
@@ -732,8 +938,11 @@ void DsIncRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsDecRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
@@ -756,8 +965,11 @@ void DsDecRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsMinRtnI32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
@@ -780,8 +992,11 @@ void DsMinRtnI32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsMaxRtnI32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
@@ -804,8 +1019,11 @@ void DsMaxRtnI32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsMinRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
@@ -828,8 +1046,11 @@ void DsMinRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsMaxRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
@@ -852,8 +1073,11 @@ void DsMaxRtnU32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsAndRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
@@ -876,8 +1100,11 @@ void DsAndRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsOrRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
@@ -900,8 +1127,11 @@ void DsOrRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsXorRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
@@ -924,8 +1154,11 @@ void DsXorRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsMskorRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
@@ -951,8 +1184,11 @@ void DsMskorRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsStorexchgRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
@@ -975,8 +1211,11 @@ void DsStorexchgRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsStorexchg2addrRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
@@ -1011,8 +1250,11 @@ void DsStorexchg2addrRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsStorexchg2addrStride64RtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
@@ -1047,8 +1289,11 @@ void DsStorexchg2addrStride64RtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsCmpstoreRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
@@ -1074,8 +1319,11 @@ void DsCmpstoreRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsCmpstoreRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
@@ -1104,8 +1352,11 @@ void DsCmpstoreRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsMinRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
@@ -1131,8 +1382,11 @@ void DsMinRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsMaxRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
@@ -1158,8 +1412,11 @@ void DsMaxRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsWrapRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
@@ -1185,12 +1442,16 @@ void DsWrapRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsSwizzleB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_ds_swizzle_b32_ds(*this, wf);
+  const uint16_t offset = inst_.offset0 | (inst_.offset1 << 8);
+  amdgpu::arith::execute_ds_swizzle(wf, wf.cu().arithmetic_flags(), vdst, addr, offset);
 }
 
 void DsLoadB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
@@ -1202,8 +1463,11 @@ void DsLoadB32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsLoad2addrB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
@@ -1230,15 +1494,21 @@ void DsLoad2addrB32Ds::execute_impl(amdgpu::Wavefront &wf) {
     calculate_addresses(
         [&](uint32_t lane) { return amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane); });
   } else {
-    const auto addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
+    auto maybe_addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
+    if (maybe_addresses.failed())
+      return;
+    const std::span<const uint32_t> addresses = maybe_addresses.value();
     calculate_addresses([&](uint32_t lane) { return addresses[lane]; });
   }
   set_data(std::move(d));
 }
 
 void DsLoad2addrStride64B32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
@@ -1266,15 +1536,21 @@ void DsLoad2addrStride64B32Ds::execute_impl(amdgpu::Wavefront &wf) {
     calculate_addresses(
         [&](uint32_t lane) { return amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane); });
   } else {
-    const auto addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
+    auto maybe_addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
+    if (maybe_addresses.failed())
+      return;
+    const std::span<const uint32_t> addresses = maybe_addresses.value();
     calculate_addresses([&](uint32_t lane) { return addresses[lane]; });
   }
   set_data(std::move(d));
 }
 
 void DsLoadI8Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 1;
@@ -1287,8 +1563,11 @@ void DsLoadI8Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsLoadU8Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 1;
@@ -1300,8 +1579,11 @@ void DsLoadU8Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsLoadI16Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 2;
@@ -1314,8 +1596,11 @@ void DsLoadI16Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsLoadU16Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 2;
@@ -1327,8 +1612,11 @@ void DsLoadU16Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsConsumeDs::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
@@ -1351,8 +1639,11 @@ void DsConsumeDs::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsAppendDs::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
@@ -1380,8 +1671,11 @@ void DsOrderedCountDs::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsAddU64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 8;
   d->num_elems = 1;
@@ -1405,8 +1699,11 @@ void DsAddU64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsSubU64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 8;
   d->num_elems = 1;
@@ -1430,8 +1727,11 @@ void DsSubU64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsRsubU64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 8;
   d->num_elems = 1;
@@ -1455,8 +1755,11 @@ void DsRsubU64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsIncU64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 8;
   d->num_elems = 1;
@@ -1480,8 +1783,11 @@ void DsIncU64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsDecU64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 8;
   d->num_elems = 1;
@@ -1505,8 +1811,11 @@ void DsDecU64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsMinI64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 8;
   d->num_elems = 1;
@@ -1530,8 +1839,11 @@ void DsMinI64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsMaxI64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 8;
   d->num_elems = 1;
@@ -1555,8 +1867,11 @@ void DsMaxI64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsMinU64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 8;
   d->num_elems = 1;
@@ -1580,8 +1895,11 @@ void DsMinU64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsMaxU64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 8;
   d->num_elems = 1;
@@ -1605,8 +1923,11 @@ void DsMaxU64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsAndB64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 8;
   d->num_elems = 1;
@@ -1630,8 +1951,11 @@ void DsAndB64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsOrB64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 8;
   d->num_elems = 1;
@@ -1655,8 +1979,11 @@ void DsOrB64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsXorB64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 8;
   d->num_elems = 1;
@@ -1680,8 +2007,11 @@ void DsXorB64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsMskorB64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 8;
   d->num_elems = 1;
@@ -1710,8 +2040,11 @@ void DsMskorB64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsStoreB64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 8;
   d->num_elems = 1;
@@ -1725,7 +2058,8 @@ void DsStoreB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (exec) {
     auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 2, exec);
     if (data.valid()) {
-      data.copy_dwords_lane_major(d->store_data, exec);
+      if (data.copy_dwords_lane_major(d->store_data, exec).failed())
+        return;
       set_data(std::move(d));
       return;
     }
@@ -1742,8 +2076,11 @@ void DsStoreB64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsStore2addrB64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
@@ -1759,11 +2096,26 @@ void DsStore2addrB64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t addr_base = wf.vgpr_alloc().base + inst_.addr;
   uint32_t data0_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   uint32_t data1_base = wf.vgpr_alloc().base + 0u + inst_.data1;
-  auto addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
-  auto data0_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 0, 1, exec).lanes();
-  auto data0_1 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 1, 1, exec).lanes();
-  auto data1_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 0, 1, exec).lanes();
-  auto data1_1 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 1, 1, exec).lanes();
+  auto maybe_addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
+  if (maybe_addresses.failed())
+    return;
+  const std::span<const uint32_t> addresses = maybe_addresses.value();
+  auto maybe_data0_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 0, 1, exec).lanes();
+  if (maybe_data0_0.failed())
+    return;
+  const std::span<const uint32_t> data0_0 = maybe_data0_0.value();
+  auto maybe_data0_1 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 1, 1, exec).lanes();
+  if (maybe_data0_1.failed())
+    return;
+  const std::span<const uint32_t> data0_1 = maybe_data0_1.value();
+  auto maybe_data1_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 0, 1, exec).lanes();
+  if (maybe_data1_0.failed())
+    return;
+  const std::span<const uint32_t> data1_0 = maybe_data1_0.value();
+  auto maybe_data1_1 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 1, 1, exec).lanes();
+  if (maybe_data1_1.failed())
+    return;
+  const std::span<const uint32_t> data1_1 = maybe_data1_1.value();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -1783,8 +2135,11 @@ void DsStore2addrB64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsStore2addrStride64B64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
@@ -1800,11 +2155,26 @@ void DsStore2addrStride64B64Ds::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t addr_base = wf.vgpr_alloc().base + inst_.addr;
   uint32_t data0_base = wf.vgpr_alloc().base + 0u + inst_.data0;
   uint32_t data1_base = wf.vgpr_alloc().base + 0u + inst_.data1;
-  auto addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
-  auto data0_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 0, 1, exec).lanes();
-  auto data0_1 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 1, 1, exec).lanes();
-  auto data1_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 0, 1, exec).lanes();
-  auto data1_1 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 1, 1, exec).lanes();
+  auto maybe_addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
+  if (maybe_addresses.failed())
+    return;
+  const std::span<const uint32_t> addresses = maybe_addresses.value();
+  auto maybe_data0_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 0, 1, exec).lanes();
+  if (maybe_data0_0.failed())
+    return;
+  const std::span<const uint32_t> data0_0 = maybe_data0_0.value();
+  auto maybe_data0_1 = amdgpu::RegisterAccess(cu).read_vgpr_region(data0_base + 1, 1, exec).lanes();
+  if (maybe_data0_1.failed())
+    return;
+  const std::span<const uint32_t> data0_1 = maybe_data0_1.value();
+  auto maybe_data1_0 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 0, 1, exec).lanes();
+  if (maybe_data1_0.failed())
+    return;
+  const std::span<const uint32_t> data1_0 = maybe_data1_0.value();
+  auto maybe_data1_1 = amdgpu::RegisterAccess(cu).read_vgpr_region(data1_base + 1, 1, exec).lanes();
+  if (maybe_data1_1.failed())
+    return;
+  const std::span<const uint32_t> data1_1 = maybe_data1_1.value();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -1824,8 +2194,11 @@ void DsStore2addrStride64B64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsCmpstoreB64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 8;
   d->num_elems = 1;
@@ -1854,8 +2227,11 @@ void DsCmpstoreB64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsCmpstoreF64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 8;
   d->num_elems = 1;
@@ -1887,8 +2263,11 @@ void DsCmpstoreF64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsMinF64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 8;
   d->num_elems = 1;
@@ -1915,8 +2294,11 @@ void DsMinF64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsMaxF64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 8;
   d->num_elems = 1;
@@ -1943,8 +2325,11 @@ void DsMaxF64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsAddRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
@@ -1969,8 +2354,11 @@ void DsAddRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsSubRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
@@ -1995,8 +2383,11 @@ void DsSubRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsRsubRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
@@ -2021,8 +2412,11 @@ void DsRsubRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsIncRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
@@ -2047,8 +2441,11 @@ void DsIncRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsDecRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
@@ -2073,8 +2470,11 @@ void DsDecRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsMinRtnI64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
@@ -2099,8 +2499,11 @@ void DsMinRtnI64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsMaxRtnI64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
@@ -2125,8 +2528,11 @@ void DsMaxRtnI64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsMinRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
@@ -2151,8 +2557,11 @@ void DsMinRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsMaxRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
@@ -2177,8 +2586,11 @@ void DsMaxRtnU64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsAndRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
@@ -2203,8 +2615,11 @@ void DsAndRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsOrRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
@@ -2229,8 +2644,11 @@ void DsOrRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsXorRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
@@ -2255,8 +2673,11 @@ void DsXorRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsMskorRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
@@ -2286,8 +2707,11 @@ void DsMskorRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsStorexchgRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
@@ -2312,8 +2736,11 @@ void DsStorexchgRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsStorexchg2addrRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
@@ -2352,8 +2779,11 @@ void DsStorexchg2addrRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsStorexchg2addrStride64RtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
@@ -2392,8 +2822,11 @@ void DsStorexchg2addrStride64RtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsCmpstoreRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
@@ -2423,8 +2856,11 @@ void DsCmpstoreRtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsCmpstoreRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
@@ -2457,8 +2893,11 @@ void DsCmpstoreRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsMinRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
@@ -2486,8 +2925,11 @@ void DsMinRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsMaxRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
@@ -2515,8 +2957,11 @@ void DsMaxRtnF64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsLoadB64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
@@ -2528,8 +2973,11 @@ void DsLoadB64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsLoad2addrB64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
@@ -2556,15 +3004,21 @@ void DsLoad2addrB64Ds::execute_impl(amdgpu::Wavefront &wf) {
     calculate_addresses(
         [&](uint32_t lane) { return amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane); });
   } else {
-    const auto addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
+    auto maybe_addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
+    if (maybe_addresses.failed())
+      return;
+    const std::span<const uint32_t> addresses = maybe_addresses.value();
     calculate_addresses([&](uint32_t lane) { return addresses[lane]; });
   }
   set_data(std::move(d));
 }
 
 void DsLoad2addrStride64B64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
@@ -2592,15 +3046,21 @@ void DsLoad2addrStride64B64Ds::execute_impl(amdgpu::Wavefront &wf) {
     calculate_addresses(
         [&](uint32_t lane) { return amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane); });
   } else {
-    const auto addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
+    auto maybe_addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();
+    if (maybe_addresses.failed())
+      return;
+    const std::span<const uint32_t> addresses = maybe_addresses.value();
     calculate_addresses([&](uint32_t lane) { return addresses[lane]; });
   }
   set_data(std::move(d));
 }
 
 void DsAddRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
@@ -2636,8 +3096,11 @@ void DsSubGsRegRtnDs::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsCondxchg32RtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 8;
@@ -2665,8 +3128,11 @@ void DsCondxchg32RtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsStoreB8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 1;
   d->num_elems = 1;
@@ -2688,8 +3154,11 @@ void DsStoreB8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsStoreB16D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 2;
   d->num_elems = 1;
@@ -2711,8 +3180,11 @@ void DsStoreB16D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsLoadU8D16Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 1;
@@ -2725,8 +3197,11 @@ void DsLoadU8D16Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsLoadU8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 1;
@@ -2739,8 +3214,11 @@ void DsLoadU8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsLoadI8D16Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 1;
@@ -2754,8 +3232,11 @@ void DsLoadI8D16Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsLoadI8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 1;
@@ -2769,8 +3250,11 @@ void DsLoadI8D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsLoadU16D16Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 2;
@@ -2783,8 +3267,11 @@ void DsLoadU16D16Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsLoadU16D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 2;
@@ -2797,8 +3284,11 @@ void DsLoadU16D16HiDs::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsBvhStackRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
   amdgpu::prepare_lds_stack(wf, *d, inst_.addr, inst_.data0, inst_.data1, inst_.vdst, 4, 1,
@@ -2807,8 +3297,11 @@ void DsBvhStackRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsStoreAddtidB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 4;
   d->num_elems = 1;
@@ -2836,7 +3329,8 @@ void DsStoreAddtidB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (exec) {
     auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec);
     if (data.valid()) {
-      data.copy_dwords_lane_major(d->store_data, exec);
+      if (data.copy_dwords_lane_major(d->store_data, exec).failed())
+        return;
       set_data(std::move(d));
       return;
     }
@@ -2851,8 +3345,11 @@ void DsStoreAddtidB32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsLoadAddtidB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
@@ -2878,16 +3375,25 @@ void DsLoadAddtidB32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsPermuteB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_ds_permute_b32_ds(*this, wf);
+  const uint16_t offset = inst_.offset0 | (inst_.offset1 << 8);
+  amdgpu::arith::execute_ds_permute<false, false>(
+      wf, rj_arith_ds_permute_b32_w32, rj_arith_ds_permute_b32_w64, wf.cu().arithmetic_flags(),
+      vdst, addr, data0, offset);
 }
 
 void DsBpermuteB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_ds_bpermute_b32_ds(*this, wf);
+  const uint16_t offset = inst_.offset0 | (inst_.offset1 << 8);
+  amdgpu::arith::execute_ds_permute<true, false>(
+      wf, rj_arith_ds_bpermute_b32_w32, rj_arith_ds_bpermute_b32_w64, wf.cu().arithmetic_flags(),
+      vdst, addr, data0, offset);
 }
 
 void DsStoreB96Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 4;
   d->num_elems = 3;
@@ -2901,7 +3407,8 @@ void DsStoreB96Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (exec) {
     auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 3, exec);
     if (data.valid()) {
-      data.copy_dwords_lane_major(d->store_data, exec);
+      if (data.copy_dwords_lane_major(d->store_data, exec).failed())
+        return;
       set_data(std::move(d));
       return;
     }
@@ -2920,8 +3427,11 @@ void DsStoreB96Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsStoreB128Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->elem_size = 4;
   d->num_elems = 4;
@@ -2935,7 +3445,8 @@ void DsStoreB128Ds::execute_impl(amdgpu::Wavefront &wf) {
   if (exec) {
     auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 4, exec);
     if (data.valid()) {
-      data.copy_dwords_lane_major(d->store_data, exec);
+      if (data.copy_dwords_lane_major(d->store_data, exec).failed())
+        return;
       set_data(std::move(d));
       return;
     }
@@ -2956,8 +3467,11 @@ void DsStoreB128Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsLoadB96Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;
@@ -2969,8 +3483,11 @@ void DsLoadB96Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsLoadB128Ds::execute_impl(amdgpu::Wavefront &wf) {
-  if (inst_.gds)
-    throw util::UnimplementedInst(mnemonic());
+  if (inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdst;
   d->elem_size = 4;

@@ -101,6 +101,8 @@ function(add_kernel_replay_sample NAME CLIENT_SRC)
                    "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                    SKIP_REGULAR_EXPRESSION
                    "PC sampling unavailable|SPM unavailable|ATT unavailable"
+                   RUN_SERIAL
+                   ON
                    DISABLED
                    "${_disabled}")
 endfunction()
@@ -112,6 +114,16 @@ add_kernel_replay_sample(kernel-replay-counters-then-pc-sampling
                          counters_then_pc_sampling_client.cpp PC_SAMPLING)
 add_kernel_replay_sample(kernel-replay-att att_client.cpp ATT)
 add_kernel_replay_sample(kernel-replay-spm spm_client.cpp SPM)
+
+# This replay sample aborts during KFD acquisition on gfx120x CI runners. Tracking issue:
+# https://github.com/ROCm/rocm-systems/issues/13606
+foreach(_gfx IN LISTS rocprofiler-sdk-samples-gfx-info)
+    if(_gfx MATCHES "^gfx120[0-9](-strict)?$")
+        set_tests_properties(kernel-replay-spm PROPERTIES DISABLED ON)
+        break()
+    endif()
+endforeach()
+
 add_kernel_replay_sample(
     kernel-replay-services-first service_sequence_client.cpp PC_SAMPLING SPM ATT
     ENVIRONMENT "KR_SERVICE_ORDER=services-first")

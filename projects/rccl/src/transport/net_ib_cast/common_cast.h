@@ -70,6 +70,39 @@ enum ncclIbRequestMatchingScheme {
   BY_ORDER = 2, // completions matched by posted WR identity (CTS offload, or software CTS with on-demand recvs)
 };
 
+// Values of RCCL_IB_UDMA_POLICY (AINIC QP-to-uDMA pipeline assignment). With QP
+// sharing enabled, the sharing-group alternation replaces the channel affinity
+// of ChannelAffinity, and of collective QPs under P2pRoundRobin.
+enum struct ncclIbCastUDMAPolicy : int {
+  // Pin each channel's send QPs, and separately its receive QPs, to one pipeline
+  // per device, chosen alternately as each is first seen
+  ChannelAffinity = 0,
+  // Round-robin P2P QPs in creation order; collective QPs keep channel affinity
+  P2pRoundRobin = 1,
+  // Leave the PD mask unchanged so the driver picks the pipeline
+  DriverDefault = 2,
+  // Split each connection across both pipelines: channel-id popcount parity picks the
+  // starting pipeline and consecutive per-device QP indexes alternate. The default
+  // NCCL_IB_QPS_PER_CONNECTION of 2 is enough. With one QP per device per connection
+  // (NCCL_IB_QPS_PER_CONNECTION=1, or RCCL_IB_QPS_PER_P2P=1 for P2P) every QP has
+  // qpIdx 0 and this reduces to channel-id popcount parity. RMA comms also use one QP.
+  SplitConnection = 3,
+  // New values go before Count; First/Last bound the RCCL_IB_UDMA_POLICY range
+  // check, so update the static_asserts below when adding one.
+  Count,
+  First = ChannelAffinity,
+  Last = Count - 1,
+};
+static_assert(ncclIbCastUDMAPolicy::First == ncclIbCastUDMAPolicy::ChannelAffinity &&
+                (int)ncclIbCastUDMAPolicy::First == 0,
+              "ncclIbCastUDMAPolicy must start at ChannelAffinity = 0");
+static_assert(ncclIbCastUDMAPolicy::Last == ncclIbCastUDMAPolicy::SplitConnection,
+              "ncclIbCastUDMAPolicy::Last must be the last policy; update this assert when adding one");
+
+static inline bool ncclIbCastUDMAPolicyIsValid(int64_t policy) {
+  return policy >= (int64_t)ncclIbCastUDMAPolicy::First && policy <= (int64_t)ncclIbCastUDMAPolicy::Last;
+}
+
 struct ncclIbMr {
   uintptr_t addr;
   size_t pages;
@@ -135,6 +168,7 @@ struct alignas(64) ncclIbDev {
   int dmaBufSupported;
   int8_t udSupported;  // -1 not probed yet, 0 no, 1 yes
   int8_t rdmaReadSupported;  // -1 not probed yet, 0 no, 1 yes
+  bool speedFromQuery;  // test-only: true if speed came from ibv_query_port_speed()
   int16_t railId;
   int16_t planeId;
   int16_t planeIdx;
@@ -143,6 +177,9 @@ struct alignas(64) ncclIbDev {
     struct {
       int dataDirect;
     } mlx5;
+    struct {
+      uint8_t udmaCount;
+    } ionic;
   } capsProvider;
   struct ncclIbGidInfo gidInfo;
 };

@@ -4,29 +4,94 @@
 #pragma once
 
 /// @file output_modifier.h
-/// @brief VOP3 output modifiers applied to a result already in its destination format.
+/// @brief Apply OMOD, then CLAMP, to destination-format results.
+/// @details Disabled stages preserve the input. Callers resolve effective OMOD
+/// and MODE through output_modifier_policy in simd_glue.h.
 ///
-/// Apply OMOD first, then CLAMP. Each stage passes the result through unchanged
-/// when disabled. The policy contains the effective OMOD and the result format's
-/// MODE settings; output_modifier_policy in simd_glue.h resolves these for callers.
-/// The decision tables below describe the rules when each stage is enabled.
+/// Scope:
+/// - Shared scalar/SIMD stage for migrated VOP3 results on every target, and
+///   for SDWA FRACT_F16/LDEXP_F16: their SDWA store scales the rounded half
+///   (sdwa::OutputPolicy::ROUNDED).
+/// - The emulator's older-target gate enables OMOD only with IEEE=0 and output
+///   denormals flushed. RDNA1/2/3 IEEE=0 captures cover both flushed and
+///   preserved output denormals.
 ///
-/// gfx1201 captures of every min/max instruction match these rules bit for
-/// bit, in F16, F32 and F64, under every MODE setting probed. OMOD overflow
-/// was checked for both signs under all four rounding modes, with FP16_OVFL
-/// disabled and enabled.
+/// Migrated callers reach the stage through one of these; prefer them over a new
+/// OMOD implementation:
+/// - Generated VOP3 scalar bodies: output_modifier::apply on the result, with the
+///   policy from output_modifier_policy in simd_glue.h.
+/// - fp_mode::apply_omod_f32 -> scale: the F32 scalar OMOD finalizer, also used by
+///   the SDWA FLUSH_NEAREST path.
+/// - apply_vop3_dst_mod_f32 -> apply: every F32 SIMD destination helper, including
+///   the clamp-only VOP3P paths.
 ///
-/// Other uses apply the same stage without hardware verification: min/max on
-/// CDNA4 and CDNA5, and VOP3 CEIL/FLOOR/TRUNC/RNDNE F32/F64 on every target
-/// (CDNA1-5, RDNA1-4).
+/// Paths outside the shared stage:
+/// - Not yet migrated:
+///   - F64 destinations: scalar and SIMD keep finalize_omod_f64, plus the
+///     per-operation exceptions below.
+///   - SDWA F32 (dpp_sdwa_ops.h): scale_f32 under OutputPolicy::MODE is a separate
+///     OMOD implementation. It rounds overflow by MODE for SIN and RCP_IFLAG,
+///     where VOP3 rounds to nearest even, because the SDWA output policy keys off
+///     FLUSH_NEAREST_F32_OPS and the VOP3 rounding off TRANS_F32_OPS. On RDNA2
+///     with IEEE=0, MODE=0x003, source 0x00800000 and mul:4, RCP_IFLAG gives
+///     0x7f800000 through VOP3 and 0x7f7fffff through SDWA. Only the VOP3 rounding
+///     is capture-backed; see floating_policy.py for the migration constraint.
+///   - Specialized generators using vop3_dst_mod: F32 intermediate modifiers,
+///     including the current pre-narrowing F16 DIV_FIXUP implementation.
+///   - F64 FMA/FMAC: scalar and SIMD retain finish_f64, unlike migrated ADD/MUL.
+///     finish_f64 scales first and flushes only a subnormal scaled result;
+///     V_FMA_F64 captures match this stage instead. On gfx1201 with MODE 0xff
+///     (RTZ, denormals kept), mul:4 of the FMA result 0x800fffffffffffff gives
+///     +0, where finish_f64 gives 0x802ffffffffffffe. With MODE 0x00, div:2 of a
+///     negative normal with the smallest exponent gives -0 on gfx1201, gfx1100,
+///     gfx1030 and gfx1010, where finish_f64 gives +0. Migrating them must also
+///     apply FMA tininess before rounding.
+///   - Other SDWA F16 producers (dpp_sdwa_ops.h):
+///     - Arithmetic keeps the emulator's scaling before rounding. gfx1030 SDWA
+///       captures contradict it: with div:2, MODE=0 and IEEE=0, MUL_F16
+///       0x3e00 * 0x7bff and ADD_F16 0x7bff + 0x7bff give 0x7c00 through SDWA
+///       and VOP3, where the emulator's SDWA path returns 0x79ff and 0x7bff.
+///     - TRANS scales its rounded half through a separate helper, and other
+///       producers scale before narrowing; no SDWA captures cover either.
+///     Migrating these producers needs SDWA captures of each.
+/// - Intentional exception:
+///   - Pseudo-scalar F32 transcendentals: scale the exact value before one F32
+///     rounding; match gfx1201 captures.
+///
+/// Note: Migration must preserve each operation's rounding and flushing:
+/// - F16 arithmetic, TRANS, MODE-aware binary SIMD, and SDWA F16 arithmetic
+///   flush outputs via output_denormal.h.
+/// - FMA tininess and OMOD zero/subnormal rules keep their own handling.
+/// - F32 arithmetic with effective OMOD flushes output denormals before scaling.
+/// - LDEXP takes effective OMOD in its policy and flushes a tiny result before
+///   this stage, since a tiny value that rounds to the smallest normal is not
+///   recognizable afterward.
+///
+/// Hardware evidence:
+/// - gfx1201 (RDNA4): every F16/F32/F64 min/max matches under all probed MODEs.
+///   OMOD overflow checked both signs, four rounding modes, FP16_OVFL off/on.
+///   Captures also establish round-before-modifiers for the probed F16 ADD/MUL,
+///   unary/TRANS, LDEXP, and DIV_FIXUP forms. F16 DIV_FIXUP migration is separate.
+/// - gfx1100 (RDNA3, W7900): IEEE=0 F16 MUL/ADD div:2 captures match gfx1201
+///   for overflow before scaling and the sign of a halved negative normal. With
+///   preserved F16 output denormals (MODE 0xf0/0xa0) they ignore OMOD, matching
+///   gfx1030 bit for bit.
+/// - gfx1030 (RDNA2, RX 6800 XT): the same F16 MUL/ADD div:2 lanes, plus IEEE=0
+///   lanes showing that preserved F16 output denormals (MODE 0xf0/0xa0) disable OMOD.
+///   SDWA FRACT_F16/LDEXP_F16 match VOP3 bit for bit under every OMOD.
+/// - gfx1010 (RDNA1, RX 5700 XT): an out-of-tree VALU probe matches gfx1030 bit
+///   for bit with IEEE=1 and IEEE=0.
+/// - RDNA3.5 / CDNA1-5: extrapolated; no captures, hardware verification required.
 ///
 /// CDNA4 V_MINIMUM3_F32/V_MAXIMUM3_F32 retain the emulator's wave-IEEE-based
 /// OMOD policy. The ISA specifies forced IEEE=1 for these instructions and
 /// disables OMOD under IEEE=1; whether that override also suppresses their
 /// OMOD needs hardware verification and a separate instruction-policy follow-up.
 ///
-/// Scalar and SIMD callers use the same implementation on unsigned encodings.
-/// F16 occupies the low half of a 32-bit lane; F32 and F64 use 32 and 64 bits.
+/// legacy_rounded_result_modifier_cases in valu_fp_mode_test.cpp decodes the
+/// gfx1100/gfx1030/gfx1010 ADD/MUL captures, including IEEE=1 controls and the
+/// output-keep lanes.
+/// Encodings: F16 in the low half of uint32; F32/F64 in uint32/uint64.
 
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_format.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/lane_select.h"

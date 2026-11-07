@@ -93,9 +93,26 @@ version used to compile the application.
 
 GIN contexts and their signal, counter, and queue resources are allocated per
 device communicator. Two device communicators backed by the same host
-communicator therefore don't alias those resources. ``ginContextCount`` is a
-request; use the value returned in ``devComm.ginContextCount`` when assigning
-work to contexts.
+communicator therefore don't alias those resources. ``reqs.ginContextCount`` is
+a request. After ``ncclDevCommCreate`` returns, ``devComm.ginContextCount`` is
+the number of contexts actually allocated. Size context loops, per-context
+signal tables, and ``ncclGin`` context indexes from that returned value.
+
+RCCL rounds the request up to a multiple of the GIN connection count
+(``devComm.ginConnectionCount``). That count follows the local GIN NICs, or
+``NCCL_GIN_NCONNECTIONS`` when set, and is raised to ``NCCL_GIN_PROXY_NTHREADS``
+when the proxy thread count is larger. It is capped at 4, then reduced to the
+minimum across ranks so every rank uses the same connection count. A request of 1
+context on 4 connections allocates 4 contexts; a request of 4 contexts on 3
+connections allocates 6. Each connection then owns
+``devComm.ginContextCount / devComm.ginConnectionCount`` contexts. The returned
+count can be larger than the request and is never smaller. The signal-shadow
+region is sized from this allocated count, so a context index below
+``devComm.ginContextCount`` stays inside that region on every backend, including
+Anvil SDMA. Kernels that cycle with ``blockIdx.x % devComm.ginContextCount``,
+and barriers built with ``ncclGinAllContexts``, cover every allocated context
+only when they use this returned count. This matches NCCL 2.31.2
+(NVIDIA/nccl#2301).
 
 ``ginTrafficClass`` overrides the host communicator traffic class for this
 device communicator. The service level of the GIN connections comes from
@@ -109,6 +126,49 @@ traffic class while the collective and point-to-point connections keep
 through the service level, by setting ``ginTrafficClass`` and leaving
 ``NCCL_IB_SL`` unset. Set these values only when the fabric administrator
 provides appropriate values.
+
+Connect GIN at a custom stride
+==============================
+
+``NCCL_GIN_CONNECTION_FULL`` connects every rank. ``NCCL_GIN_CONNECTION_RAIL``
+connects only the rail team. ``NCCL_GIN_CONNECTION_CUSTOM_STRIDE`` connects each
+rank to the ranks a fixed number of communicator ranks away, which is denser
+than a rail when the stride is smaller than the rail-team stride. The stride
+is ``ginCustomStride``.
+
+Query ``ginMinStride`` before choosing it. That value is ``1`` when the
+communicator has full GIN connectivity. Otherwise it is the number of
+contiguous ranks on each host, or ``INT_MAX`` when that count is not the same
+on every host. ``INT_MAX`` means a custom stride cannot be used. A usable
+stride is positive, a multiple of ``ginMinStride``, and no larger than the
+rail-team stride from ``ncclTeamRail``. Stride ``1`` is full connectivity. The
+rail stride is railed connectivity. ``NCCL_CROSS_NIC=0`` keeps GIN on the rail,
+so ``ginMinStride`` rises to the rail stride and a stride that would cross
+rails is rejected.
+
+.. code-block:: cpp
+
+   ncclCommProperties properties = NCCL_COMM_PROPERTIES_INITIALIZER;
+   NCCLCHECK(ncclCommQueryProperties(comm, &properties));
+   if (properties.ginMinStride == INT_MAX) {
+     // This communicator has no uniform GIN stride.
+     return;
+   }
+   int stride = properties.ginMinStride;  // or another legal multiple
+
+   ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
+   reqs.ginConnectionType = NCCL_GIN_CONNECTION_CUSTOM_STRIDE;
+   reqs.ginCustomStride = stride;
+   reqs.ginSignalCount = 1;
+   reqs.barrierCount = 1;
+
+A stride of ``0`` fails device-communicator creation with ``ncclInvalidUsage``.
+A stride larger than the rail team, or a stride that is not a multiple of
+``ginMinStride``, fails creation with ``ncclInternalError``. Puts and gets are
+valid only for peers on that stride.
+A generic ``ncclBarrierSession`` on the world team, with a fence that includes
+``ncclGinFenceLevel::Put``, synchronizes the local team and then the ranks
+connected at ``ginCustomStride``.
 
 Device code creates an ``ncclGin`` object for one returned context:
 
@@ -199,6 +259,16 @@ Do not issue a strong action from a device communicator created with
 deprecated. Their strength is selected globally by
 ``ginStrongSignalsRequired``; new code should use an explicit type.
 
+Stream capture
+==============
+
+``ncclDevCommCreate`` switches the calling thread to relaxed stream-capture
+mode while it builds the device communicator, then restores the mode the
+application had set. That restore also runs when GIN setup fails, so a failed
+create does not leave the thread's HIP stream-capture mode changed. On failure
+the device communicator was not created; check the returned ``ncclResult_t``
+and leave the capture mode alone.
+
 Use world-team barriers and timeouts
 ====================================
 
@@ -258,10 +328,13 @@ indexed GIN resources.
 ``NCCL_GIN_IB_TC``, added in upstream NCCL 2.30.7, applies to the connections
 of the IB proxy backend (``NCCL_GIN_TYPE=2``). The one-sided host RMA
 operations run on the same backend and use the same traffic class. The
-rocSHMEM GDA backend (``NCCL_GIN_TYPE=6``) doesn't read ``NCCL_GIN_IB_TC``,
-``NCCL_IB_TC``, or ``ginTrafficClass``; its queue pairs take their traffic
-class from ``ROCSHMEM_GDA_TRAFFIC_CLASS``. Anvil SDMA (``NCCL_GIN_TYPE=7``)
-moves data within a node without a NIC, so traffic class doesn't apply to it.
+rocSHMEM GDA backend (``NCCL_GIN_TYPE=6``) also honors it: its RoCE queue
+pairs take their traffic class from ``NCCL_GIN_IB_TC`` when set, then from
+``NCCL_IB_TC``, and only then from the host communicator traffic class.
+Unlike the IB proxy backend, the GDA backend does not consult the
+device-communicator ``ginTrafficClass``, because its queue pairs are created
+before that value is available. The ``ROCSHMEM_GDA_TRAFFIC_CLASS`` environment
+variable no longer affects RCCL-driven GIN-GDA queue pairs.
 
 The 128-byte, versioned GIN proxy descriptor and per-context proxy progress are
 internal implementation details and require no application configuration.

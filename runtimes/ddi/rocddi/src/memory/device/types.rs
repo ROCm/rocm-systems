@@ -3,13 +3,58 @@
 
 //! Native allocation requests and limits, independent of kernel handle formats.
 
-/// One native memory allocation request with explicit size and alignment.
+/// One native memory request with explicit size and alignment.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct AllocationDesc {
-    /// Requested bytes, satisfying the native allocator's size granularity.
+    /// Requested bytes. Host registration measures this extent from its exact
+    /// address; owned allocations satisfy the allocator's size granularity.
     pub size: u64,
     /// Required base alignment in bytes, expressed as a nonzero power of two.
     pub alignment: u64,
+}
+
+/// Policy for detached physical backing created for virtual-memory mappings.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct VirtualMemoryOptions {
+    /// Prevent substitution of the native backing after creation.
+    pub pinned: bool,
+    /// Request an uncached backing where the selected placement supports it.
+    pub uncached: bool,
+}
+
+/// Returns the aligned base and page cover for `size` bytes starting at the
+/// exact registered host address. Both KFD and DRM registration use this rule.
+pub(crate) fn registered_host_page_cover(
+    address: usize,
+    size: usize,
+    page: usize,
+) -> Option<(usize, usize)> {
+    if address == 0 || size == 0 || !page.is_power_of_two() {
+        return None;
+    }
+    let offset = address & (page - 1);
+    let base = address - offset;
+    let cover = offset.checked_add(size)?.checked_add(page - 1)? & !(page - 1);
+    base.checked_add(cover)?;
+    Some((base, cover))
+}
+
+#[cfg(test)]
+mod registration_tests {
+    use super::registered_host_page_cover;
+
+    #[test]
+    fn exact_unaligned_extent_covers_the_page_after_its_end() {
+        assert_eq!(
+            registered_host_page_cover(0x1001, 4096, 4096),
+            Some((0x1000, 8192))
+        );
+        assert_eq!(
+            registered_host_page_cover(0x1001, 4095, 4096),
+            Some((0x1000, 4096))
+        );
+        assert_eq!(registered_host_page_cover(0x1001, 0, 4096), None);
+    }
 }
 
 /// Native allocation limits for one backing kind. A successful query describes support,
@@ -102,6 +147,8 @@ pub enum MemoryKind {
         host_visible: bool,
         /// Request coherent device mappings for fine-grained access.
         coherent: bool,
+        /// Promote device-scope atomic coherence to extended system scope.
+        extended_coherent: bool,
         /// Bypass device caches for this allocation.
         uncached: bool,
         /// Request physically contiguous backing.
@@ -114,11 +161,17 @@ pub enum MemoryKind {
 /// retains it with a live registration, and quarantines it when cleanup cannot
 /// prove that native access has ended.
 pub(crate) struct HostRegistration {
+    /// First caller-owned or runtime-owned host byte.
     pub(crate) address: usize,
+    /// Native cache behavior requested for the registered pages.
     pub(crate) policy: HostMappingPolicy,
+    /// Exact byte extent to expose to the device.
     pub(crate) size: u64,
+    /// Required device address alignment.
     pub(crate) alignment: u64,
+    /// Device access established at registration.
     pub(crate) permissions: DeviceAccess,
+    /// Retained owner for runtime-allocated backing, when present.
     pub(crate) backing: Option<HostBackingLease>,
 }
 
@@ -146,6 +199,17 @@ pub struct VirtualMemoryInfo {
     pub mapping_granularity: u64,
     /// Stable native identity shared by equivalent handles for this backing.
     pub physical_backing_id: [u64; 2],
+    /// Native placement, if the driver could describe the backing.
+    pub placement: Option<VirtualMemoryPlacement>,
+}
+
+/// Placement class of a detached virtual-memory backing.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum VirtualMemoryPlacement {
+    /// System memory visible through a CPU agent.
+    System,
+    /// Device memory owned by the endpoint with this stable identity.
+    Device([u8; 16]),
 }
 
 /// Cached facts for one reserved process virtual-address range.
@@ -162,8 +226,12 @@ pub struct VirtualAddressInfo {
 /// One checked placement request for a driver virtual-memory mapping.
 #[derive(Clone, Copy)]
 pub(crate) struct VirtualMapRequest {
+    /// First virtual byte to map inside the reservation.
     pub(crate) address: u64,
+    /// Byte offset into physical backing.
     pub(crate) offset: u64,
+    /// Byte extent of the mapping.
     pub(crate) size: u64,
+    /// Access granted to the selected address space.
     pub(crate) permissions: DeviceAccess,
 }

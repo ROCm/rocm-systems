@@ -8,9 +8,11 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <future>
 #include <memory>
 #include <optional>
 #include <string>
+#include <thread>
 
 namespace rocprofsys::domains::callback::ompt
 {
@@ -65,8 +67,8 @@ protected:
         g_metadata_registry_mock =
             std::make_unique<StrictMock<gmock_metadata_registry>>();
         g_buffer_storage_mock = std::make_unique<StrictMock<gmock_buffer_storage>>();
-        detail::open_regions<sdk>::s_standard.clear();
-        detail::open_regions<sdk>::s_parallel.clear();
+        detail::open_regions<sdk>::current().standard.clear();
+        detail::open_regions<sdk>::current().parallel.clear();
     }
 
     void TearDown() override
@@ -75,8 +77,8 @@ protected:
         g_externals_mock.reset();
         g_metadata_registry_mock.reset();
         g_buffer_storage_mock.reset();
-        detail::open_regions<sdk>::s_standard.clear();
-        detail::open_regions<sdk>::s_parallel.clear();
+        detail::open_regions<sdk>::current().standard.clear();
+        detail::open_regions<sdk>::current().parallel.clear();
     }
 };
 
@@ -472,7 +474,7 @@ TEST_F(ompt_test, emit_region_builds_expected_region_sample)
     EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(2));
     EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(3));
     EXPECT_CALL(*g_metadata_registry_mock,
-                add_thread_info(Eq(thread_info_data_t{ 2, 3, 7, 0, 0, "{}" })));
+                ensure_thread(Eq(thread_info_data_t{ 2, 3, 7, 0, 0, "{}" })));
     EXPECT_CALL(*g_buffer_storage_mock,
                 store_region_sample(7, std::string{ "operation" }, 9, 55, 10, 20,
                                     std::string{}, std::string{ "rocm_ompt_api" }));
@@ -497,7 +499,7 @@ TEST_F(ompt_test, instant_region_uses_same_begin_and_end_timestamp)
     EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
     EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
     EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread(_));
     EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, 15, 15, _, _));
 
     auto payload   = sdk::callback_tracing_ompt_data_t{};
@@ -521,7 +523,7 @@ TEST_F(ompt_test, instant_region_pushes_and_pops_timemory_when_enabled)
     EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
     EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
     EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread(_));
     EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, _, _, _, _));
 
     auto payload   = sdk::callback_tracing_ompt_data_t{};
@@ -553,13 +555,13 @@ TEST_F(ompt_test, begin_then_end_standard_region_uses_stored_begin_timestamp)
     EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
     EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
     EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread(_));
     EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, 100, 200, _, _));
 
     auto backtrace_data = std::optional<int>{};
     detail::end_region<sdk, ext, ompt_api_category>(record, 200, backtrace_data);
 
-    EXPECT_TRUE(detail::open_regions<sdk>::s_standard.empty());
+    EXPECT_TRUE(detail::open_regions<sdk>::current().standard.empty());
 }
 
 TEST_F(ompt_test, end_region_without_matching_begin_emits_orphan_instant_event)
@@ -572,7 +574,7 @@ TEST_F(ompt_test, end_region_without_matching_begin_emits_orphan_instant_event)
     EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
     EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
     EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread(_));
     EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, 300, 300, _, _));
 
     auto payload = sdk::callback_tracing_ompt_data_t{};
@@ -608,7 +610,7 @@ TEST_F(ompt_test, begin_then_end_parallel_region_matches_by_parallel_data)
     EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
     EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
     EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread(_));
     EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, 10, 20, _, _));
 
     auto pop_payload                            = sdk::callback_tracing_ompt_data_t{};
@@ -620,7 +622,7 @@ TEST_F(ompt_test, begin_then_end_parallel_region_matches_by_parallel_data)
     auto backtrace_data = std::optional<int>{};
     detail::end_region<sdk, ext, ompt_api_category>(pop_record, 20, backtrace_data);
 
-    EXPECT_TRUE(detail::open_regions<sdk>::s_parallel.empty());
+    EXPECT_TRUE(detail::open_regions<sdk>::current().parallel.empty());
 }
 
 TEST_F(ompt_test, end_region_parallel_without_matching_begin_emits_orphan)
@@ -633,7 +635,7 @@ TEST_F(ompt_test, end_region_parallel_without_matching_begin_emits_orphan)
     EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
     EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
     EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread(_));
     EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, 50, 50, _, _));
 
     int  unmatched                          = 0;
@@ -652,15 +654,16 @@ TEST_F(ompt_test, on_ompt_finalize_emits_and_clears_both_maps)
 {
     const auto record1 =
         make_record(sdk::OMPT_ID_task_create, sdk::CALLBACK_PHASE_ENTER, 1, 11);
-    detail::open_regions<sdk>::s_standard.emplace(
+    detail::open_regions<sdk>::current().standard.emplace(
         11U, detail::pending_region<sdk>{ record1, 5, function_args_t{} });
 
     const auto record2 =
         make_record(sdk::OMPT_ID_parallel_begin, sdk::CALLBACK_PHASE_NONE, 1, 1);
-    detail::open_regions<sdk>::s_parallel.emplace(
+    detail::open_regions<sdk>::current().parallel.emplace(
         std::uint64_t{ 0x1234 },
         detail::pending_region<sdk>{ record2, 6, function_args_t{} });
 
+    EXPECT_CALL(*g_externals_mock, is_finalized()).WillOnce(Return(true));
     EXPECT_CALL(*g_externals_mock, get_backtrace_data(false))
         .WillOnce(Return(std::nullopt));
     EXPECT_CALL(*g_tracing_backend_mock, get_callback_tracing_names())
@@ -672,23 +675,29 @@ TEST_F(ompt_test, on_ompt_finalize_emits_and_clears_both_maps)
     EXPECT_CALL(*g_metadata_registry_mock, add_string(_)).Times(2);
     EXPECT_CALL(*g_externals_mock, get_ppid()).Times(2).WillRepeatedly(Return(0));
     EXPECT_CALL(*g_externals_mock, get_pid()).Times(2).WillRepeatedly(Return(0));
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_)).Times(2);
-    EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, _, _, _, _))
-        .Times(2);
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread(_)).Times(2);
+    EXPECT_CALL(*g_tracing_backend_mock, get_timestamp()).WillOnce(Return(100));
+    EXPECT_CALL(*g_buffer_storage_mock,
+                store_region_sample(_, std::string{ "operation [incomplete]" }, _, _, 5,
+                                    100, _, _));
+    EXPECT_CALL(*g_buffer_storage_mock,
+                store_region_sample(_, std::string{ "omp_parallel [incomplete]" }, _, _,
+                                    6, 100, _, _));
 
     on_ompt_finalize<sdk, ext, ompt_api_category>();
 
-    EXPECT_TRUE(detail::open_regions<sdk>::s_standard.empty());
-    EXPECT_TRUE(detail::open_regions<sdk>::s_parallel.empty());
+    EXPECT_TRUE(detail::open_regions<sdk>::current().standard.empty());
+    EXPECT_TRUE(detail::open_regions<sdk>::current().parallel.empty());
 }
 
 TEST_F(ompt_test, on_ompt_finalize_flushes_orphan_standard_callback)
 {
     const auto record =
         make_record(sdk::OMPT_ID_task_create, sdk::CALLBACK_PHASE_ENTER, 1, 11);
-    detail::open_regions<sdk>::s_standard.emplace(
+    detail::open_regions<sdk>::current().standard.emplace(
         11U, detail::pending_region<sdk>{ record, 5, function_args_t{} });
 
+    EXPECT_CALL(*g_externals_mock, is_finalized()).WillOnce(Return(true));
     EXPECT_CALL(*g_externals_mock, get_backtrace_data(false))
         .WillOnce(Return(std::nullopt));
     EXPECT_CALL(*g_tracing_backend_mock, get_callback_tracing_names())
@@ -697,24 +706,80 @@ TEST_F(ompt_test, on_ompt_finalize_flushes_orphan_standard_callback)
     EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
     EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
     EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
-    EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, _, _, _, _));
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread(_));
+    EXPECT_CALL(*g_tracing_backend_mock, get_timestamp()).WillOnce(Return(100));
+    EXPECT_CALL(*g_buffer_storage_mock,
+                store_region_sample(_, std::string{ "operation [incomplete]" }, _, _, 5,
+                                    100, _, _));
 
     on_ompt_finalize<sdk, ext, ompt_api_category>();
 
-    EXPECT_TRUE(detail::open_regions<sdk>::s_standard.empty());
-    EXPECT_TRUE(detail::open_regions<sdk>::s_parallel.empty());
+    EXPECT_TRUE(detail::open_regions<sdk>::current().standard.empty());
+    EXPECT_TRUE(detail::open_regions<sdk>::current().parallel.empty());
 }
 
 TEST_F(ompt_test, on_ompt_finalize_is_noop_when_no_pending_events)
 {
+    EXPECT_CALL(*g_externals_mock, is_finalized()).WillOnce(Return(true));
     EXPECT_CALL(*g_externals_mock, get_backtrace_data(false))
         .WillOnce(Return(std::nullopt));
+    EXPECT_CALL(*g_tracing_backend_mock, get_timestamp()).WillOnce(Return(100));
 
     on_ompt_finalize<sdk, ext, ompt_api_category>();
 
-    EXPECT_TRUE(detail::open_regions<sdk>::s_standard.empty());
-    EXPECT_TRUE(detail::open_regions<sdk>::s_parallel.empty());
+    EXPECT_TRUE(detail::open_regions<sdk>::current().standard.empty());
+    EXPECT_TRUE(detail::open_regions<sdk>::current().parallel.empty());
+}
+
+TEST_F(ompt_test, on_ompt_finalize_drains_regions_left_open_by_other_threads)
+{
+    const auto record =
+        make_record(sdk::OMPT_ID_task_create, sdk::CALLBACK_PHASE_ENTER, 1, 11);
+    // The worker exits (releasing its slot) only after finalize has run
+    std::promise<void> worker_registered;
+    std::promise<void> finalize_done;
+    std::thread        worker{ [&] {
+        detail::open_regions<sdk>::current().standard.emplace(
+            11U, detail::pending_region<sdk>{ record, 5, function_args_t{} });
+        worker_registered.set_value();
+        finalize_done.get_future().wait();
+    } };
+    worker_registered.get_future().wait();
+
+    EXPECT_CALL(*g_externals_mock, is_finalized()).WillOnce(Return(true));
+    EXPECT_CALL(*g_externals_mock, get_backtrace_data(false))
+        .WillOnce(Return(std::nullopt));
+    EXPECT_CALL(*g_tracing_backend_mock, get_timestamp()).WillOnce(Return(100));
+    EXPECT_CALL(*g_tracing_backend_mock, get_callback_tracing_names())
+        .WillOnce(Return(tracing_names_t{}));
+    EXPECT_CALL(*g_tracing_backend_mock, get_parent_stack_id(_)).WillOnce(Return(0));
+    EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
+    EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
+    EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread(_));
+    EXPECT_CALL(*g_buffer_storage_mock,
+                store_region_sample(_, std::string{ "operation [incomplete]" }, _, _, 5,
+                                    100, _, _));
+
+    on_ompt_finalize<sdk, ext, ompt_api_category>();
+
+    finalize_done.set_value();
+    worker.join();
+}
+
+TEST_F(ompt_test, on_ompt_finalize_skips_drain_when_not_finalized)
+{
+    const auto record =
+        make_record(sdk::OMPT_ID_task_create, sdk::CALLBACK_PHASE_ENTER, 1, 11);
+    detail::open_regions<sdk>::current().standard.emplace(
+        11U, detail::pending_region<sdk>{ record, 5, function_args_t{} });
+
+    EXPECT_CALL(*g_externals_mock, is_finalized()).WillOnce(Return(false));
+
+    on_ompt_finalize<sdk, ext, ompt_api_category>();
+
+    EXPECT_EQ(detail::open_regions<sdk>::current().standard.size(), 1U);
+    detail::open_regions<sdk>::current().standard.clear();
 }
 
 // ─── begin_region / end_region timemory ──────────────────────────────────────
@@ -745,7 +810,7 @@ TEST_F(ompt_test, end_region_pops_timemory_when_enabled)
     EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
     EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
     EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread(_));
     EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, _, _, _, _));
 
     auto payload   = sdk::callback_tracing_ompt_data_t{};
@@ -784,7 +849,7 @@ TEST_F(ompt_test, enter_starts_tracing_and_pushes_standard_callback_when_not_ski
     sdk::user_data_t user_data{};
     on_ompt_enter<sdk, ext, ompt_api_category>(record, &user_data, nullptr, 123);
 
-    EXPECT_TRUE(detail::open_regions<sdk>::s_standard.contains(55U));
+    EXPECT_TRUE(detail::open_regions<sdk>::current().standard.contains(55U));
 }
 
 // ─── on_ompt_exit ────────────────────────────────────────────────────────────
@@ -826,7 +891,7 @@ TEST_F(ompt_test, exit_pops_found_standard_callback_and_emits_span)
     EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
     EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
     EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread(_));
     EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, 10, 20, _, _));
 
     auto exit_record =
@@ -851,7 +916,7 @@ TEST_F(ompt_test, exit_without_matching_enter_emits_orphan_event)
     EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
     EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
     EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread(_));
     EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, 60, 60, _, _));
 
     auto payload = sdk::callback_tracing_ompt_data_t{};
@@ -920,7 +985,7 @@ TEST_F(ompt_test, none_dispatches_parallel_begin_and_pushes_parallel_callback)
     sdk::user_data_t user_data{};
     on_ompt_none<sdk, ext, ompt_api_category>(record, &user_data, nullptr, 40);
 
-    EXPECT_TRUE(detail::open_regions<sdk>::s_parallel.contains(
+    EXPECT_TRUE(detail::open_regions<sdk>::current().parallel.contains(
         reinterpret_cast<uintptr_t>(&fake_parallel_data)));
 }
 
@@ -949,7 +1014,7 @@ TEST_F(ompt_test, none_dispatches_parallel_end_and_pops_parallel_callback)
     EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
     EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
     EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread(_));
     EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, 5, 15, _, _));
 
     auto pop_payload                            = sdk::callback_tracing_ompt_data_t{};
@@ -976,7 +1041,7 @@ TEST_F(ompt_test, none_dispatches_instant_event_for_lock_init)
     EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
     EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
     EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread(_));
     EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, 30, 30, _, _));
 
     auto payload   = sdk::callback_tracing_ompt_data_t{};
@@ -1002,7 +1067,7 @@ TEST_F(ompt_test, none_dispatches_instant_event_for_thread_begin)
     EXPECT_CALL(*g_metadata_registry_mock, add_string(_));
     EXPECT_CALL(*g_externals_mock, get_ppid()).WillOnce(Return(0));
     EXPECT_CALL(*g_externals_mock, get_pid()).WillOnce(Return(0));
-    EXPECT_CALL(*g_metadata_registry_mock, add_thread_info(_));
+    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread(_));
     EXPECT_CALL(*g_buffer_storage_mock, store_region_sample(_, _, _, _, 12, 12, _, _));
 
     auto payload                          = sdk::callback_tracing_ompt_data_t{};
