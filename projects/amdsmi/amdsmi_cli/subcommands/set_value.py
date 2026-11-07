@@ -1487,12 +1487,13 @@ class SetValueCommands:
                         args.gpu, memory_partition
                     )
                     if memory_dict["current"] == args.memory_partition:
-                        # The driver keeps a different mode set earlier staged: a
-                        # request for the current mode does not cancel it.
+                        # Only some drivers cancel a different mode set earlier when the
+                        # current mode is requested, and the CLI cannot tell which it has.
                         out = (
-                            f"Memory partition is already {args.memory_partition}; nothing changed. "
-                            "If a different memory partition was set since the driver was loaded, "
-                            "the next driver reload still applies it."
+                            f"Memory partition is already {args.memory_partition}. "
+                            "Any different memory partition set since the driver was loaded is "
+                            "canceled if the driver supports it; otherwise the next driver reload "
+                            "still applies it."
                         )
                     else:
                         out = f"Successfully set memory partition to {args.memory_partition}, use `sudo modprobe -r amdgpu && sudo modprobe amdgpu` to reload driver"

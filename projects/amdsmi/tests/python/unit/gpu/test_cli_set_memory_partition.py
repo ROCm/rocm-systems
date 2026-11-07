@@ -4,11 +4,11 @@
 
 """Mock-based unit tests for the ``amd-smi set --memory-partition`` result message.
 
-A memory partition change takes effect on the next driver reload, and asking for
-the mode that is already current does not cancel a different mode set earlier.
-These tests stub the C library so they run without GPU hardware, and check that
-the CLI tells the user to reload only when the requested mode differs from the
-current one.
+A memory partition change takes effect on the next driver reload. Asking for the
+mode that is already current cancels a different mode set earlier only on drivers
+that support it. These tests stub the C library so they run without GPU hardware,
+and check that the CLI tells the user to reload only when the requested mode
+differs from the current one.
 """
 
 import os
@@ -180,11 +180,12 @@ class TestSetMemoryPartitionMessage(unittest.TestCase):
         cmd.set_gpu(_Args(gpu="gpu0", memory_partition=requested))
         return set_calls, logger.last_output("memory_partition")
 
-    def test_current_mode_reports_no_change_without_reload_advice(self):
-        # Reloading here would apply any mode set earlier, not the requested one.
+    def test_current_mode_explains_cancel_without_reload_advice(self):
+        # With a driver that cannot cancel, a reload here applies a mode set earlier.
         set_calls, message = self._set("NPS1", "NPS1")
         self.assertEqual(set_calls, [_MODES["NPS1"]])
         self.assertIn("already NPS1", message)
+        self.assertIn("canceled if the driver supports it", message)
         self.assertIn("next driver reload still applies it", message)
         self.assertNotIn("modprobe", message)
 

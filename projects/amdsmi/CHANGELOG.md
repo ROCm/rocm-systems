@@ -253,7 +253,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - A buffer too small for the partition name had the byte after its end overwritten. The name is now truncated inside the buffer, and the call still reports that the buffer is too small.
 
 - **`amd-smi set --memory-partition` no longer advises a driver reload when the partition is already current**.  
-  - Requesting the current partition does not cancel a different partition set earlier, so a reload would apply that one. amd-smi now reports that nothing changed and notes that an earlier request still applies at the next reload.
+  - The request is still sent to the driver. Current amdgpu releases ignore it, so a different partition requested earlier still applies at the next reload; drivers that support cancelling drop that request. If the driver or a read-only `/sys` (for example, in a container) refuses the write, the request now fails instead of reporting success.
 
 - **Fixed `amd-smi event` hanging when GPU event notifications can't start**.  
   - The command now reports GPUs whose event notifications can't start and keeps listening on the others, or exits with the error when none can, for example on WSL or without access to `/dev/kfd`.
