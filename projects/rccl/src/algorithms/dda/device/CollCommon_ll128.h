@@ -437,10 +437,11 @@ __device__ __forceinline__ bool ddaLL128PollWireBatched(const uint64_t* wire, ui
   return true;
 }
 
-// ddaLL128PollWire for two slices at once: both slices' loads share each round trip. Returns false if aborted.
-__device__ __forceinline__ bool ddaLL128PollWire2(const uint64_t* wireA, const uint64_t* wireB,
-                                                  uint64_t (&va)[kDdaLL128WordsPerThread],
-                                                  uint64_t (&vb)[kDdaLL128WordsPerThread], uint64_t flag, int wid,
+// ddaLL128PollWire for up to kN slices at once: wire[i] is polled when bit i of the wave-uniform mask is set, and every
+// load goes out before any flag test, so the slices share each round trip. Returns false if aborted.
+template <int kN>
+__device__ __forceinline__ bool ddaLL128PollWireN(const uint64_t* const (&wire)[kN], uint32_t mask,
+                                                  uint64_t (&vr)[kN][kDdaLL128WordsPerThread], uint64_t flag, int wid,
                                                   DdaKernelParams params) {
   const bool flagLane = ddaLL128IsFlagLane(wid);
   int spins = 0;
@@ -452,19 +453,32 @@ __device__ __forceinline__ bool ddaLL128PollWire2(const uint64_t* wireA, const u
     needReload = false;
 #pragma unroll
     for (int u = 0; u < kDdaLL128WordsPerThread; u += 2) {
-      ddaLL128LoadAtomic16B(wireA + u * kDdaLL128Warp, va[u], va[u + 1]);
-      ddaLL128LoadAtomic16B(wireB + u * kDdaLL128Warp, vb[u], vb[u + 1]);
+#pragma unroll
+      for (int i = 0; i < kN; ++i) {
+        if ((mask >> i) & 1u) {
+          ddaLL128LoadAtomic16B(wire[i] + u * kDdaLL128Warp, vr[i][u], vr[i][u + 1]);
+        }
+      }
     }
 #pragma unroll
-    for (int u = 0; u < kDdaLL128WordsPerThread; u += 2) {
-      needReload |= flagLane && (va[u + 1] != flag || vb[u + 1] != flag);
+    for (int i = 0; i < kN; ++i) {
+      if ((mask >> i) & 1u) {
+#pragma unroll
+        for (int u = 0; u < kDdaLL128WordsPerThread; u += 2) {
+          needReload |= flagLane && vr[i][u + 1] != flag;
+        }
+      }
     }
   } while (__any(needReload));
 #if !RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS
 #pragma unroll
   for (int u = 0; u < kDdaLL128WordsPerThread; u += 2) {
-    ddaLL128LoadAtomic16B(wireA + u * kDdaLL128Warp, va[u], va[u + 1]);
-    ddaLL128LoadAtomic16B(wireB + u * kDdaLL128Warp, vb[u], vb[u + 1]);
+#pragma unroll
+    for (int i = 0; i < kN; ++i) {
+      if ((mask >> i) & 1u) {
+        ddaLL128LoadAtomic16B(wire[i] + u * kDdaLL128Warp, vr[i][u], vr[i][u + 1]);
+      }
+    }
   }
 #endif
   return true;
