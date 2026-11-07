@@ -4328,6 +4328,16 @@ TEST(MemoryWaitFootprintTest, DppUsesPhysicalSourceLanesAndMaskedDestinations) {
     check_vector_footprints(arch, arch == ROCJITSU_CODE_ARCH_CDNA4 ? 64 : 32, 256, cases);
   }
 
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4}) {
+    std::vector<std::vector<uint32_t>> cases;
+    for (auto opcode : {rdna4::kVSubrevNcU32Vop2, rdna4::kVSubrevCoCiU32Vop2}) {
+      const uint32_t first = (uint32_t(opcode) << 25) | (5u << 17) | (1u << 9);
+      cases.push_back({first | 250u, 2u | (0x55u << 8) | (0xffu << 24)});
+      cases.push_back({first | 233u, 2u | (0x249249u << 8)});
+    }
+    check_vector_footprints(arch, 32, 256, cases);
+  }
+
   for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_CDNA5}) {
     std::vector<std::vector<uint32_t>> cases;
     if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
@@ -4357,6 +4367,40 @@ TEST(MemoryWaitFootprintTest, DppUsesPhysicalSourceLanesAndMaskedDestinations) {
     }
     check_vector_footprints(arch, 32, 256, cases);
   }
+}
+
+// Keep DOT4 source observations and memory-wait preflight consistent under DPP masks.
+TEST(MemoryWaitFootprintTest, Dot4DppFiltersSourceHazards) {
+  rdna4::Vop3pVopDpp16MachineInst raw{};
+  raw.encoding = 0xcc;
+  raw.op = rdna4::kVDot4F32Fp8Fp8Vop3p;
+  raw.vdst = 2;
+  raw.src0 = amdgpu::SRC_DPP;
+  raw.src1 = 257;
+  raw.src2 = 258;
+  raw.opsel_hi = 3;
+  raw.vsrc0 = 0;
+  raw.dpp_ctrl = amdgpu::dpp::ROW_SHR1;
+  raw.fi = 1;
+  raw.row_mask = 1;
+  raw.bank_mask = 0xe;
+  std::vector<uint32_t> words(sizeof(raw) / sizeof(uint32_t));
+  std::memcpy(words.data(), &raw, sizeof(raw));
+  for (unsigned lanes : {32u, 64u})
+    check_vector_footprints(ROCJITSU_CODE_ARCH_RDNA4, lanes, 16, {words});
+}
+
+TEST(MemoryWaitFootprintTest, ReverseSubtractDpp8IgnoresScalarSource) {
+  rdna4::Vop3SdstEncVopDpp8MachineInst raw{};
+  raw.encoding = 0x35;
+  raw.op = rdna4::kVSubrevCoU32Vop3SdstEnc;
+  raw.vdst = 4;
+  raw.src0 = SRC_DPP8_FI_0;
+  raw.src1 = 1;
+  raw.lane_sel_0 = raw.lane_sel_1 = raw.lane_sel_2 = raw.lane_sel_3 = 1;
+  raw.lane_sel_4 = raw.lane_sel_5 = raw.lane_sel_6 = raw.lane_sel_7 = 1;
+  const auto words = std::bit_cast<std::array<uint32_t, 3>>(raw);
+  check_vector_footprints(ROCJITSU_CODE_ARCH_RDNA4, 32, 16, {{words.begin(), words.end()}});
 }
 
 TEST(MemoryWaitFootprintTest, Dpp8InactiveFetchDoesNotUseDestinationExecAsSourceMask) {
