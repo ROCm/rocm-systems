@@ -448,6 +448,9 @@ memory:
   Unit_hipHostGetDevicePointer_Capture:
     <<: *level_default
     tags: [query]
+  Unit_hipHostGetDevicePointer_InteriorPointer:
+    <<: *level_default
+    tags: [query]
   Unit_hipMallocHost_Positive:
     <<: *level_default
     tags: [alloc]
