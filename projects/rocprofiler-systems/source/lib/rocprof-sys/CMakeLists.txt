@@ -31,6 +31,15 @@ target_link_libraries(
     PRIVATE rocprofiler-systems::rocprofiler-systems-interface-library
 )
 
+# library/pmc/sources.hpp names the hipFile provider, so every file of the object library
+# that includes it needs the backend's headers and compile definitions.
+if(ROCPROFSYS_HIPFILE_SUPPORT)
+    target_link_libraries(
+        rocprofiler-systems-object-library
+        PRIVATE rocprofiler-systems::rocprofiler-systems-hipfile-backend
+    )
+endif()
+
 # Preserve frame pointers so that libunwind can reliably unwind through
 # this code when the causal profiling sampling signal fires.
 target_compile_options(
