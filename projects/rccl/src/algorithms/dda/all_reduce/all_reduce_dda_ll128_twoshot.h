@@ -72,7 +72,7 @@ constexpr size_t ddaLL128ArTwoShotSlotWords(size_t bankSize, int nRanks) {
 // WIRE (DdaLL128Wire) picks the phase-1 and phase-2 writer; staged, it takes ddaLL128StageBytes(blockDim.x) of LDS.
 template <typename T, int NRANKS_CT, int WIRE = kDdaLL128WireCoop>
 #if defined(USE_ROCM)
-__launch_bounds__(512)
+__launch_bounds__(kDdaLL128Threads)
 #endif
   __global__ void ddaAllReduceTwoShotLL128(T* const* __restrict__ peerScratch, // ddaPeerPtrsDev: nRanks scratch bases
                                            T* __restrict__ recvbuff, // local user output
@@ -255,8 +255,6 @@ __launch_bounds__(512)
   ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag32);
 }
 
-// Block width of the LL128 AllReduce launches: 16 LL128 warps.
-constexpr unsigned kDdaLL128Threads = 512;
 // Slices phases B and D poll per round trip (ddaLL128PollWireN): the slices' loads share each wait.
 constexpr int kDdaLL128SplitPollSlices = 2;
 static_assert(kDdaLL128SplitPollSlices == 2, "phase D polls unit u and the unit one warp stride on");
