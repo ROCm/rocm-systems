@@ -591,28 +591,36 @@ def insert_minimal_data(
             "VALUES (?,?,?,?,?,?)",
             (_EVT_HIP_EVENT_1, guid, _STR_CATEGORY, _EVT_HIP_EVENT_1, 0, 1),
         )
+        hip_event_columns = (
+            "id, guid, nid, pid, tid, start, end, name_id, agent_id, queue_id, stream_id, "
+            "hip_event_handle, source_queue_id, event_id, extdata"
+        )
+        hip_event_values = (
+            1,
+            guid,
+            _NID,
+            _PID,
+            _TID,
+            _T_START,
+            _T_START + 50_000,
+            _STR_HIP_EVENT_RECORD,
+            _AGENT_ID,
+            _QUEUE_ID,
+            _STREAM_ID,
+            123456789,  # dummy hip_event_handle pointer value
+            _QUEUE_ID,  # source_queue_id == queue_id for a RECORD operation
+            _EVT_HIP_EVENT_1,
+            "{}",
+        )
+        # The recording operation's stack id was added in schema 3.0.6; a RECORD reports
+        # its own.
+        if ver >= (3, 0, 6):
+            hip_event_columns += ", source_stack_id"
+            hip_event_values += (_EVT_HIP_EVENT_1,)
         conn.execute(
-            f"INSERT INTO {tbl('rocpd_hip_event')} "
-            "(id, guid, nid, pid, tid, start, end, name_id, agent_id, queue_id, stream_id, "
-            "hip_event_handle, source_queue_id, event_id, extdata) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (
-                1,
-                guid,
-                _NID,
-                _PID,
-                _TID,
-                _T_START,
-                _T_START + 50_000,
-                _STR_HIP_EVENT_RECORD,
-                _AGENT_ID,
-                _QUEUE_ID,
-                _STREAM_ID,
-                123456789,  # dummy hip_event_handle pointer value
-                _QUEUE_ID,  # source_queue_id == queue_id for a RECORD operation
-                _EVT_HIP_EVENT_1,
-                "{}",
-            ),
+            f"INSERT INTO {tbl('rocpd_hip_event')} ({hip_event_columns}) "
+            f"VALUES ({','.join('?' * len(hip_event_values))})",
+            hip_event_values,
         )
 
 

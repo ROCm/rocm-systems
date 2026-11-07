@@ -37,6 +37,13 @@ rocprofiler-sdk-rocpd:
       rocpd_data_views: versions/3.0.4/data_views.sql
       rocpd_summary_views: versions/3.0.4/summary_views.sql
     - version: "3.0.5"
+      rocpd_metadata: versions/3.0.5/rocpd_metadata.sql
+      rocpd_tables: versions/3.0.5/rocpd_tables.sql
+      rocpd_views: versions/3.0.5/rocpd_views.sql
+      rocpd_indexes: versions/3.0.5/rocpd_indexes.sql
+      rocpd_data_views: versions/3.0.5/data_views.sql
+      rocpd_summary_views: versions/3.0.5/summary_views.sql
+    - version: "3.0.6"
       rocpd_metadata: rocpd_metadata.sql
       rocpd_tables: rocpd_tables.sql
       rocpd_views: rocpd_views.sql
@@ -74,3 +81,9 @@ rocprofiler-sdk-rocpd:
 # - SPM location dimensions not provided for a counter are stored as NULL.
 #   instance is always set on a location row
 # - spm_counters view reads those fields from rocpd_info_pmc
+
+# Version 3.0.6
+# - rocpd_hip_event: added source_stack_id. For a hipStreamWaitEvent row it is the stack_id of
+#   the hipEventRecord the wait depends on (NULL when that record was not seen); for a
+#   hipEventRecord row it equals the row's own stack_id
+# - hip_events view: added source_stack_id

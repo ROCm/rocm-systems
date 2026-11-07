@@ -6,9 +6,31 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Added
 
+**API:**
+
+  - HIP event tracing: `source_correlation_id` field appended to `rocprofiler_buffer_tracing_hip_event_record_t` and `rocprofiler_callback_tracing_hip_event_data_t` (gated by the record `size`). For a RECORD it is the record's own internal correlation ID; for a WAIT it is the internal correlation ID of the RECORD being waited on, or 0 when that RECORD was not observed.
+    - rocpd schema bumped to 3.0.6 with a new nullable `source_stack_id` column in `rocpd_hip_event` and the `hip_events` view.
+    - `rocpd convert` CSV output adds a `Source_Correlation_Id` column to the HIP event CSV when the database provides it.
+
+**Tool:**
+
+  - `rocpd convert` Perfetto output: HIP events carry correlation, stream, queue, and agent arguments, a flow from their HIP API call, and a flow from each RECORD to the WAITs that wait on it.
+  - `rocpd convert` OTF2 output: kernel dispatches, HIP events, and HIP API regions carry a `correlation_id` attribute; HIP events also carry `source_correlation_id`.
+
 ### Changed
 
+**Tool:**
+
+  - `rocpd convert` Perfetto output: HIP events are placed on the same track as kernels from the same stream, or from the same queue with `--group-by-queue`.
+  - `rocpd convert` OTF2 output: HIP events are written to the same location as kernels dispatched from the same thread on the same queue (one location per thread, agent, and queue), instead of a separate `HIP Event on` location.
+
+**API:**
+
+  - HIP event tracing: `HIP_EVENT` RECORD and WAIT start and end timestamps now come from the GPU, as the times the event's barrier packet started and retired. Previously they were host times taken when the barrier was enqueued and when its completion was observed. If the GPU did not write the barrier's timestamps, an error is logged and the operation is not reported.
+
 ### Resolved issues
+
+  - HIP event tracing: a `hipEventRecord` or `hipStreamWaitEvent` is timed by the event's own barrier instead of a synchronization marker that HIP submits ahead of it, such as a blocking stream's implicit wait on the null stream. A `hipStreamWaitEvent` that creates no GPU dependency (for example, its event is already complete) is no longer reported with the times of such a marker.
 
 ### Known issues
 
