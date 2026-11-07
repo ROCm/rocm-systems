@@ -466,10 +466,8 @@ TEST_F(DdaMPI_AllReduce, LL128TwoShotMultiRank)
     runAllReduce(count, kLL128TwoShotLogNeedle, "DdaMPI_AllReduce/LL128TwoShotMultiRank");
 }
 
-// RCCL_DDA_LL128_ASYNC_WIRE=1 gives LL128 two-shot shards from 2 MiB the LDS-staged writer on two ranks, and runs
-// every message here on the peer-split two-shot from three ranks. Same thresholds as LL128TwoShotMultiRank, so it
-// needs its own process. Integer sums are exact in any fold order, hence bit for bit what the cooperative writer
-// returns; the COLL log names the writer of each launch.
+// RCCL_DDA_LL128_ASYNC_WIRE=1: staged writer for 2 MiB+ shards on two ranks, peer-split from three; own process.
+// Integer sums are exact in any fold order, so bit for bit the cooperative writer's; the COLL log names each writer.
 TEST_F(DdaMPI_AllReduce, LL128StagedWireTwoShotMultiRank)
 {
     if(!validateTestPrerequisites(kMinProcessesForMPI))

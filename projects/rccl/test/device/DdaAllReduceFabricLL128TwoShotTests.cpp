@@ -331,19 +331,7 @@ class DdaAllReduceFabricLL128TwoShot : public DeviceTestBase {
   }
 
   // Waits for every stream; past kDrainTimeout it raises the abort, so the spinning kernels leave, and returns false.
-  bool drain(const std::vector<hipStream_t>& streams) {
-    bool drained = true;
-    for (hipStream_t st : streams) {
-      drained = drained && waitStreamBounded(st, kDrainTimeout) == hipSuccess;
-    }
-    if (!drained) {
-      *abortHost_ = 1;
-    }
-    for (hipStream_t st : streams) {
-      HIP_EXPECT(hipStreamSynchronize(st));
-    }
-    return drained;
-  }
+  bool drain(const std::vector<hipStream_t>& streams) { return drainOrAbort(streams, kDrainTimeout, abortHost_); }
 
   template <typename T>
   void run(const Case& c) {
