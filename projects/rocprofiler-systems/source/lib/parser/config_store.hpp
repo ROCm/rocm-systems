@@ -41,6 +41,14 @@ enum class config_source : std::uint8_t
     command_line,
 };
 
+/// One stored parameter, already parsed.
+struct config_slot
+{
+    std::string    id;
+    config_value_t value;
+    config_source  source = config_source::default_value;
+};
+
 /**
  * Values for the parameters of one schema.
  *
@@ -95,6 +103,9 @@ public:
         std::string_view category_id) const;
 
     [[nodiscard]] value_map_t values() const;
+
+    /// Stored slots, including the parsed value and its source.
+    [[nodiscard]] std::vector<config_slot> slots() const;
 
     /// @throws std::runtime_error if the id is unknown.
     void on_change(std::string_view param_id, change_callback_t callback);
