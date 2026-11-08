@@ -290,6 +290,27 @@ TEST_F(FabricMemHandlerMicrotest, ExchangeMemPtrs_ExportFails_StillGathersThenRe
   EXPECT_TRUE(importedDescs_.empty());
 }
 
+// A peer that publishes a zero-size entry failed to export. This rank must
+// reject the exchange before importing, the same way the failing rank does.
+TEST_F(FabricMemHandlerMicrotest, ExchangeMemPtrs_PeerPublishesEmptyEntry_ReturnsCudaErrorWithoutImporting) {
+  ncclFabricMemHandler* h = MakeRegisteredHandler();
+  auto fillPeers = g_bootstrapAllGather;
+  constexpr int kEmptyPeer = 2;
+  ScopedHook gather(g_bootstrapAllGather, [fillPeers](void* state, void* allData, int size) {
+    ncclResult_t res = fillPeers(state, allData, size);
+    if (res != ncclSuccess) return res;
+    static_cast<FabricExchEntry*>(allData)[kEmptyPeer] = {};
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(h->exchangeMemPtrs(), ncclUnhandledCudaError);
+
+  EXPECT_EQ(gather.calls, 1);
+  EXPECT_TRUE(importedDescs_.empty());
+  void* p = nullptr;
+  EXPECT_EQ(h->getPeerDeviceMemPtr(kEmptyPeer, &p), ncclInvalidUsage);
+}
+
 TEST_F(FabricMemHandlerMicrotest, ExchangeMemPtrs_AllGatherFails_PropagatesErrorWithoutImporting) {
   ncclFabricMemHandler* h = MakeRegisteredHandler();
   ScopedHook gather(g_bootstrapAllGather, [](void*, void*, int) { return ncclRemoteError; });

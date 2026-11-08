@@ -77,7 +77,16 @@ ncclResult_t ncclFabricMemHandler::exchangeMemPtrs() {
   }
 
   NCCLCHECK(bootstrapAllGather(bootstrap_, entries.data(), static_cast<int>(sizeof(FabricExchEntry))));
-  if (exp != hipSuccess) return ncclUnhandledCudaError;
+  // Size 0 is the empty entry a failed export publishes. Every rank rejects
+  // it before import, so peers do not map that handle and continue while the
+  // failing rank has already returned.
+  for (int i = 0; i < nranks_; ++i) {
+    if (entries[static_cast<size_t>(i)].size != 0) continue;
+    if (i != rank_ || exp == hipSuccess) {
+      WARN("ncclFabricMemHandler::exchangeMemPtrs: rank %d published an empty fabric entry", i);
+    }
+    return ncclUnhandledCudaError;
+  }
 
   for (int i = 0; i < nranks_; ++i) {
     if (i == rank_) {
