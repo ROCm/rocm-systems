@@ -20,4 +20,7 @@ bool ginAnvilFabricMemCapable(struct ncclComm* comm);
 // The opt-in can differ between ranks, so the plugin agrees on it at connect.
 bool ginAnvilUseFabricMem(struct ncclComm* comm);
 
+// True when peer user windows are reachable via LSA-flat fabric mapping for this comm.
+bool ginFabricLsaA2ACapable(struct ncclComm* comm, int ginNranks);
+
 #endif  // _GIN_ANVIL_REACH_H_

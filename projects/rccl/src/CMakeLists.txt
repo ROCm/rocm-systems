@@ -285,7 +285,11 @@ set(SRC_FILES
   include/nccl_device/gin/proxy/gin_proxy.h
   include/nccl_device/gin/proxy/gin_proxy_device_host_common.h
   # rocshmem GDA + Anvil SDMA device headers are GIN-only: appended in the
-  # ENABLE_ROCSHMEM_GIN block below, not shipped by a non-GIN build.
+  # ENABLE_ROCSHMEM_GIN block below, not shipped by a non-GIN build. The fabric
+  # LSA policy headers are dependency-free and gin_anvil_reach.cc needs them in
+  # every build.
+  include/nccl_device/gin/anvil_sdma/gin_fabric_lsa_policy.h
+  include/nccl_device/gin/anvil_sdma/gin_fabric_lsa_a2a_device.h
   include/nccl_device/gin_barrier.h
   include/nccl_device/host.h
   include/nccl_device/impl/barrier__funcs.h

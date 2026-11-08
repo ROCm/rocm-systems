@@ -750,6 +750,17 @@ if(BUILD_TESTS)
   add_test(NAME rccl-UnitTestsGinScatterReduceGpu COMMAND rccl-UnitTestsGinScatterReduceGpu)
   set_tests_properties(rccl-UnitTestsGinScatterReduceGpu PROPERTIES LABELS "unit;gpu")
 
+  add_executable(rccl-UnitTestsGinFabricLsaPolicy gin/gin_fabric_lsa_policy_test.cpp)
+  set_source_files_properties(gin/gin_fabric_lsa_policy_test.cpp PROPERTIES LANGUAGE CXX)
+  target_include_directories(rccl-UnitTestsGinFabricLsaPolicy PRIVATE
+    ${PROJECT_SOURCE_DIR}/src/include)
+  target_link_libraries(rccl-UnitTestsGinFabricLsaPolicy PRIVATE
+    ${GTEST_BOTH_LIBRARIES} Threads::Threads)
+  set_target_properties(rccl-UnitTestsGinFabricLsaPolicy PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
+  add_test(NAME rccl-UnitTestsGinFabricLsaPolicy COMMAND rccl-UnitTestsGinFabricLsaPolicy)
+  set_tests_properties(rccl-UnitTestsGinFabricLsaPolicy PROPERTIES LABELS "unit")
+
   # utility.h as plain C++ for its !NCCL_DEVICE_COMPILE branches; not with CXX=hipcc, which defines __HIPCC__ and fails strict CI.
   add_executable(rccl-UnitTestsUtilityHostOnly NcclUtilityHostOnlyTests.cpp)
   set_source_files_properties(NcclUtilityHostOnlyTests.cpp PROPERTIES LANGUAGE CXX)
