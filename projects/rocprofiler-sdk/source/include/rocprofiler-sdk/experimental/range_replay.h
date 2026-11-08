@@ -267,6 +267,70 @@ rocprofiler_range_replay_host_jmpbuf(void) ROCPROFILER_API;
     } while(0)
 
 /**
+ * @brief First entry of a scoped host-replay range: arm @p env, drain, and take the entry snapshot.
+ *
+ * @p env is the caller's @c sigjmp_buf, already filled by @c sigsetjmp in a frame that is still
+ * live at @ref rocprofiler_range_replay_end. @ref ROCPROFILER_REPLAY_RANGE_BEGIN passes the buffer
+ * in the scope that stays open until @ref ROCPROFILER_REPLAY_RANGE_END. This function arms that
+ * buffer and calls @ref rocprofiler_range_replay_begin, which drains the GPU and captures the
+ * entry snapshot when the tool requested host replay. A null @p env is rejected and does not arm
+ * a jump. Re-entry does not call this function.
+ *
+ * @param [in] range_id Tool-defined identifier echoed back in every callback for this range.
+ * @param [in] env      Pointer to the caller's @c sigjmp_buf.
+ * @return ::rocprofiler_status_t
+ * @retval ::ROCPROFILER_STATUS_SUCCESS A range was opened
+ * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT @p env is NULL, or a range is already open
+ * @retval ::ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND No context configured a range replay service
+ * @retval ::ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED No such context is active
+ */
+rocprofiler_status_t
+rocprofiler_range_replay_host_first_entry(uint64_t range_id, void* env) ROCPROFILER_API;
+
+/**
+ * @brief Open a host-replay range. The range is the code up to @ref ROCPROFILER_REPLAY_RANGE_END.
+ *
+ * Opens a block with a scope-local @c sigjmp_buf. @c sigsetjmp is the controlling expression of
+ * the @c if, which is the context ISO C allows for it (the same rule as @c setjmp). The jump
+ * saves the signal mask, so the buffer is a @c sigjmp_buf and the call is @c sigsetjmp; end jumps
+ * back with @c siglongjmp. On the first entry @ref rocprofiler_range_replay_host_first_entry
+ * drains the GPU and takes the entry snapshot. On re-entry the @c if is skipped and the body runs
+ * again, so CONFIG is delivered once.
+ *
+ * @c rocp_begin_status_ is a volatile @c rocprofiler_status_t in this scope. It holds the status
+ * of that first entry. The names @c rocp_env_, @c rocp_id_, and @c rocp_begin_status_ belong to
+ * the scope.
+ *
+ * @ref ROCPROFILER_REPLAY_RANGE_END must run in this same function. It calls
+ * @ref rocprofiler_range_replay_end while @c rocp_env_ is still in scope, then closes the block.
+ * The contract on the body is the one on @ref ROCPROFILER_RANGE_REPLAY_HOST_BEGIN.
+ *
+ * @param range_id Tool-defined identifier echoed back in every callback for this range.
+ */
+#define ROCPROFILER_REPLAY_RANGE_BEGIN(range_id)                                                   \
+    {                                                                                              \
+        sigjmp_buf                    rocp_env_;                                                   \
+        const uint64_t                rocp_id_            = (uint64_t) (range_id);                 \
+        volatile rocprofiler_status_t rocp_begin_status_ = ROCPROFILER_STATUS_SUCCESS;             \
+        if(sigsetjmp(rocp_env_, 1) == 0) /* allowed setjmp context */                              \
+            rocp_begin_status_ = rocprofiler_range_replay_host_first_entry(                        \
+                rocp_id_, &rocp_env_); /* drain + entry snapshot */
+
+/**
+ * @brief Drain, leave the pass, and if another pass remains restore the entry snapshot and jump.
+ *
+ * Calls @ref rocprofiler_range_replay_end while the @c sigjmp_buf from
+ * @ref ROCPROFILER_REPLAY_RANGE_BEGIN is still in scope, then closes that block. End drains the
+ * GPU, raises @ref ROCPROFILER_RANGE_REPLAY_PASS on the way out of the pass, and, when another
+ * pass remains, restores the entry snapshot and siglongjmps back to the begin. It returns only
+ * after the last pass, having raised @ref ROCPROFILER_RANGE_REPLAY_CLOSE.
+ */
+#define ROCPROFILER_REPLAY_RANGE_END()                                                             \
+        rocprofiler_range_replay_end(); /* drain, PASS exit, continue?, and if so                  \
+                                           restore the entry snapshot */                           \
+    }
+
+/**
  * @brief Register host memory that a host-replay range reads and writes.
  *
  * The contents of [@p ptr, @p ptr + @p size) are captured and copied back before each re-executed
@@ -314,8 +378,10 @@ rocprofiler_range_replay_get_host_pass(uint64_t* pass) ROCPROFILER_API;
  * For a host-replay range this function does not return after passes 0..N-2: it waits for every
  * GPU queue to go idle, restores device memory and the registered host regions, raises
  * @ref ROCPROFILER_RANGE_REPLAY_PASS, and calls @c siglongjmp back to
- * @ref ROCPROFILER_RANGE_REPLAY_HOST_BEGIN. It returns once, after the last pass, having raised
- * CLOSE. The final pass's device and host state is what the application continues with.
+ * @ref ROCPROFILER_REPLAY_RANGE_BEGIN or @ref ROCPROFILER_RANGE_REPLAY_HOST_BEGIN. It returns
+ * once, after the last pass, having raised CLOSE. The final pass's device and host state is what
+ * the application continues with. @ref ROCPROFILER_REPLAY_RANGE_END calls this while its
+ * scope-local jump buffer is still live.
  *
  * @return ::rocprofiler_status_t
  * @retval ::ROCPROFILER_STATUS_SUCCESS The range was closed (replayed or declined; see the CLOSE

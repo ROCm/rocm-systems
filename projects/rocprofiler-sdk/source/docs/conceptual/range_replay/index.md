@@ -62,12 +62,12 @@ to change what is collected on the *re-executed* passes.
 Packet replay re-submits the recorded packets and never runs the host code inside the range again,
 which is why it declines ranges with copies, several streams, graphs, or host computation that feeds
 the kernels. Host replay is the alternate path for those ranges. The tool sets `host_replay` on the
-CONFIG record. The application opens the range with `ROCPROFILER_RANGE_REPLAY_HOST_BEGIN`, which
-takes a `sigsetjmp` in the caller's frame. `rocprofiler_range_replay_end` then fences every GPU queue,
-restores device memory on every GPU agent plus the host regions registered with
-`rocprofiler_range_replay_host_track_memory`, and `siglongjmp`s back. The application's own code runs
-again for every pass, so copies, memsets, multiple streams, graph launches, balanced allocations and
-host calls are all part of each pass.
+CONFIG record. The application opens the range with `ROCPROFILER_REPLAY_RANGE_BEGIN` /
+`ROCPROFILER_REPLAY_RANGE_END`. The begin macro takes a `sigsetjmp` in that scope. End fences every
+GPU queue, restores device memory on every GPU agent plus the host regions registered with
+`rocprofiler_range_replay_host_track_memory`, and `siglongjmp`s back while that jump buffer is still
+live. The application's own code runs again for every pass, so copies, memsets, multiple streams,
+graph launches, balanced allocations and host calls are all part of each pass.
 
 See [Host range replay](range_replay_host.md) for the protocol, the application's contract, what is
 restored, and what still declines.

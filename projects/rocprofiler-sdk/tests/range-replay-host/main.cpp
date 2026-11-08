@@ -29,8 +29,9 @@
 // launch (RR_HOST_GRAPH=1) and a scratch allocation made and freed inside every step
 // (RR_HOST_SCRATCH=1).
 //
-// The range is opened with ROCPROFILER_RANGE_REPLAY_HOST_BEGIN, so each extra pass re-runs this
-// host code from the restored entry state. The checks: every pass ends with the same device
+// The range is opened with ROCPROFILER_REPLAY_RANGE_BEGIN / ROCPROFILER_REPLAY_RANGE_END, so each
+// extra pass re-runs this host code from the restored entry state. The checks: every pass ends
+// with the same device
 // checksum and the same host state, the host state registered with
 // rocprofiler_range_replay_host_track_memory reflects one execution of the range rather than one
 // per pass, and the number of passes is the one expected (RR_HOST_EXPECT_PASSES).
@@ -40,9 +41,6 @@
 #include <rocprofiler-sdk/experimental/range_replay.h>
 
 #include <hip/hip_runtime.h>
-
-#include <dlfcn.h>
-#include <setjmp.h>
 
 #include <cmath>
 #include <cstdio>
@@ -243,15 +241,14 @@ struct resources_t
     float*                                            h_partials = nullptr;  // pinned
     float*                                            h_boundary = nullptr;  // pinned
     float*                                            h_field    = nullptr;  // pinned
-    bool                                              scratch    = false;
-    decltype(&rocprofiler_range_replay_get_host_pass) get_pass   = nullptr;
+    bool scratch = false;
 };
 
 uint64_t
-current_pass(const resources_t& r)
+current_pass(const resources_t&)
 {
     auto pass = uint64_t{0};
-    if(r.get_pass != nullptr) r.get_pass(&pass);
+    rocprofiler_range_replay_get_host_pass(&pass);
     return pass;
 }
 
@@ -390,26 +387,7 @@ build_graph(resources_t& r)
 int
 main()
 {
-    auto* begin_fn = reinterpret_cast<decltype(&rocprofiler_range_replay_begin)>(
-        dlsym(RTLD_DEFAULT, "rocprofiler_range_replay_begin"));
-    auto* end_fn = reinterpret_cast<decltype(&rocprofiler_range_replay_end)>(
-        dlsym(RTLD_DEFAULT, "rocprofiler_range_replay_end"));
-    auto* jmpbuf_fn = reinterpret_cast<decltype(&rocprofiler_range_replay_host_jmpbuf)>(
-        dlsym(RTLD_DEFAULT, "rocprofiler_range_replay_host_jmpbuf"));
-    auto* track_fn = reinterpret_cast<decltype(&rocprofiler_range_replay_host_track_memory)>(
-        dlsym(RTLD_DEFAULT, "rocprofiler_range_replay_host_track_memory"));
-
-    auto r     = resources_t{};
-    r.get_pass = reinterpret_cast<decltype(&rocprofiler_range_replay_get_host_pass)>(
-        dlsym(RTLD_DEFAULT, "rocprofiler_range_replay_get_host_pass"));
-
-    if(begin_fn == nullptr || end_fn == nullptr || jmpbuf_fn == nullptr || track_fn == nullptr ||
-       r.get_pass == nullptr)
-    {
-        fprintf(stderr, "[app] FAIL: the range replay host API is not in this process\n");
-        return EXIT_FAILURE;
-    }
-
+    auto       r             = resources_t{};
     const bool arm           = env_int("RR_HOST_APP_ARM", 1) != 0;
     const int  expect_passes = env_int("RR_HOST_EXPECT_PASSES", 4);
     r.scratch                = env_int("RR_HOST_SCRATCH", 0) != 0;
@@ -449,36 +427,48 @@ main()
     g_host            = host_state_t{};
     g_pass0_log_lines = 0;
 
-    if(track_fn(&g_host, sizeof(g_host)) != ROCPROFILER_STATUS_SUCCESS)
+    if(rocprofiler_range_replay_host_track_memory(&g_host, sizeof(g_host)) !=
+       ROCPROFILER_STATUS_SUCCESS)
     {
         fprintf(stderr, "[app] FAIL: rocprofiler_range_replay_host_track_memory failed\n");
         return EXIT_FAILURE;
     }
 
-    // Written after the sigsetjmp and read after a siglongjmp, so volatile.
-    volatile auto begin_status = ROCPROFILER_STATUS_SUCCESS;
+    // The armed path is the public range: BEGIN drains and snapshots, the body is the range, and
+    // END drains, leaves the pass, and restores the entry snapshot before jumping back. The
+    // unarmed path calls begin with no jump buffer, which is the decline the tool expects.
     if(arm)
     {
-        // ROCPROFILER_RANGE_REPLAY_HOST_BEGIN, spelled out because the SDK is resolved via dlsym.
-        if(sigsetjmp(*static_cast<sigjmp_buf*>(jmpbuf_fn()), 1) == 0)
-            begin_status = begin_fn(kRangeId);
+        ROCPROFILER_REPLAY_RANGE_BEGIN(kRangeId)
+        {
+            const auto begin_status = rocp_begin_status_;
+            if(begin_status != ROCPROFILER_STATUS_SUCCESS)
+            {
+                fprintf(stderr,
+                        "[app] FAIL: begin returned status %d\n",
+                        static_cast<int>(begin_status));
+                return EXIT_FAILURE;
+            }
+            if(range_body(r) != EXIT_SUCCESS) return EXIT_FAILURE;
+        }
+        ROCPROFILER_REPLAY_RANGE_END()
     }
     else
     {
-        begin_status = begin_fn(kRangeId);
-    }
-    if(begin_status != ROCPROFILER_STATUS_SUCCESS)
-    {
-        fprintf(stderr, "[app] FAIL: begin returned status %d\n", static_cast<int>(begin_status));
-        return EXIT_FAILURE;
-    }
-
-    if(range_body(r) != EXIT_SUCCESS) return EXIT_FAILURE;
-
-    if(const auto status = end_fn(); status != ROCPROFILER_STATUS_SUCCESS)
-    {
-        fprintf(stderr, "[app] FAIL: end returned status %d\n", static_cast<int>(status));
-        return EXIT_FAILURE;
+        if(const auto status = rocprofiler_range_replay_begin(kRangeId);
+           status != ROCPROFILER_STATUS_SUCCESS)
+        {
+            fprintf(stderr,
+                    "[app] FAIL: begin returned status %d\n",
+                    static_cast<int>(status));
+            return EXIT_FAILURE;
+        }
+        if(range_body(r) != EXIT_SUCCESS) return EXIT_FAILURE;
+        if(const auto status = rocprofiler_range_replay_end(); status != ROCPROFILER_STATUS_SUCCESS)
+        {
+            fprintf(stderr, "[app] FAIL: end returned status %d\n", static_cast<int>(status));
+            return EXIT_FAILURE;
+        }
     }
 
     // From here on the range is closed and runs exactly once.
