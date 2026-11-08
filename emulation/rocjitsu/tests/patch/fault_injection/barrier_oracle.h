@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "replacement_test_util.h"
+#include "../replacement_test_util.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/fault_injection/drop_barrier.h"
