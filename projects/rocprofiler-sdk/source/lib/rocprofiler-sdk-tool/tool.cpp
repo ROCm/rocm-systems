@@ -2574,6 +2574,19 @@ configure_pc_sampling_on_all_agents(uint64_t                        buffer_size,
     }
 }
 
+// A replay drains the queue, holds the agent's replay lock and snapshots device memory before the
+// first pass. While roctxProfilerPause (--selected-regions) has stopped counter collection, no
+// pass would collect anything, so the pass-count callbacks request one pass and none of that is
+// paid.
+bool
+counter_collection_is_active()
+{
+    auto active = 0;
+    return rocprofiler_context_is_active(counter_collection_ctx, &active) ==
+               ROCPROFILER_STATUS_SUCCESS &&
+           active != 0;
+}
+
 // Kernel replay: the SDK calls this during CONFIG to learn how many passes to run for a dispatch.
 // The pass count must match the number of counter groups collectable on THIS dispatch's agent --
 // the same per-agent profile list counter_dispatch_callback -> get_replay_profile indexes -- so
@@ -2584,6 +2597,8 @@ uint64_t
 kernel_replay_pass_count_callback(rocprofiler_kernel_dispatch_info_t dispatch_info,
                                   rocprofiler_user_data_t /*user_data*/)
 {
+    if(!counter_collection_is_active()) return 1;
+
     auto&      agent_profiles = get_agent_profiles();
     const auto profiles       = agent_profiles.profiles.find(dispatch_info.agent_id);
     const auto n =
@@ -2644,6 +2659,8 @@ kernel_replay_callback(rocprofiler_callback_tracing_record_t record,
 uint64_t range_replay_pass_count_callback(uint64_t /*range_id*/,
                                           rocprofiler_user_data_t /*user_data*/)
 {
+    if(!counter_collection_is_active()) return 1;
+
     auto n = size_t{0};
     for(const auto& entry : get_agent_profiles().profiles)
         n = std::max(n, entry.second.size());
