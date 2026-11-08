@@ -10,12 +10,16 @@
 #include "gin_anvil_plugin_test_stubs.h"
 
 #include "gin/gin_anvil_sdma_factory.h"
+#include "gin/gin_anvil_reach.h"
 
+#include "alloc.h"
+#include "algorithms/dda/fabric/fabric_mem_handler.h"
 #include "bootstrap.h"
 #include "debug.h"
 #include "dev_runtime.h"
 #include <dlfcn.h>
 #include <hip/hip_runtime.h>
+#include <hip/hip_runtime_api.h>
 #include <malloc.h>
 #include <cstdlib>
 #include <cstring>
@@ -50,6 +54,17 @@ struct State {
   int wideAllGatherOverruns = 0;
   int intraNodeAllGatherCalls = 0;
   void* lsaSelfAddr = reinterpret_cast<void*>(0x70001000ULL);
+  bool useFabricMem = false;
+  // Topology allows fabric memory even where this rank did not opt in.
+  bool fabricMemCapable = false;
+  bool fabricAddSelfFail = false;
+  bool fabricExchangeFail = false;
+  void* fabricPeerBase = reinterpret_cast<void*>(0x80000000ULL);
+  size_t fabricPeerStride = 0x1000;
+  bool fabricVmmQueryOk = true;
+  bool fabricRetainOk = true;
+  // Constructed minus destroyed ncclFabricMemHandler instances.
+  int liveFabricHandlers = 0;
   // First input address resolved since the last Reset/SetLsaSelfAddr. Later
   // inputs map to lsaSelfAddr plus their offset from it. A flag marks it latched,
   // so an input of 0 is not mistaken for "unset".
@@ -80,6 +95,15 @@ void SetBootstrapIntResult(const int* values, int count) {
 void SetFactoryCreateFail(bool fail) { g.factoryCreateFail = fail; }
 void SetFactoryNullHandles(bool nullHandles) { g.factoryNullHandles = nullHandles; }
 void SetLsaAddrFail(bool fail) { g.lsaAddrFail = fail; }
+void SetUseFabricMem(bool use) { g.useFabricMem = use; }
+void SetFabricMemCapable(bool capable) { g.fabricMemCapable = capable; }
+void SetFabricAddSelfFail(bool fail) { g.fabricAddSelfFail = fail; }
+void SetFabricExchangeFail(bool fail) { g.fabricExchangeFail = fail; }
+void SetFabricPeerBase(void* ptr) { g.fabricPeerBase = ptr; }
+void SetFabricPeerStride(size_t stride) { g.fabricPeerStride = stride; }
+void SetFabricVmmQueryOk(bool ok) { g.fabricVmmQueryOk = ok; }
+void SetFabricRetainOk(bool ok) { g.fabricRetainOk = ok; }
+int LiveFabricHandlers() { return g.liveFabricHandlers; }
 void SetLsaSelfAddr(void* addr) {
   g.lsaSelfAddr = addr;
   // Drop the latched input base so the next resolve is relative to this address,
@@ -110,6 +134,29 @@ int GetLiveHipAllocationCount() { return static_cast<int>(g.liveHipAllocs.size()
 void SetFailNextExtMalloc(bool fail) { g.failNextExtMalloc = fail; }
 
 }  // namespace GinAnvilPluginStubs
+
+namespace GinAnvilPluginTestHooks {
+
+// HIP names: these definitions must match the hipified plugin declarations.
+ncclResult_t queryVmmRange(void* data, size_t size, hipDeviceptr_t* base, size_t* memSize, int* numSegments) {
+  if (!GinAnvilPluginStubs::g.fabricVmmQueryOk) return ncclSystemError;
+  if (base == nullptr || memSize == nullptr || numSegments == nullptr) return ncclInvalidArgument;
+  *base = reinterpret_cast<hipDeviceptr_t>(GinAnvilPluginStubs::g.fabricPeerBase);
+  *memSize = size + 0x1000;
+  *numSegments = 1;
+  (void)data;
+  return ncclSuccess;
+}
+
+hipError_t retainAllocationHandle(hipMemGenericAllocationHandle_t* handle, void* addr) {
+  if (!GinAnvilPluginStubs::g.fabricRetainOk) return hipErrorUnknown;
+  if (handle == nullptr) return hipErrorInvalidValue;
+  *handle = hipMemGenericAllocationHandle_t{};
+  (void)addr;
+  return hipSuccess;
+}
+
+}  // namespace GinAnvilPluginTestHooks
 
 extern "C" hipError_t hipMalloc(void** ptr, size_t size) {
   using Fn = hipError_t (*)(void**, size_t);
@@ -197,12 +244,22 @@ static ncclResult_t stubWideAllGather(void* allData, int nranks, int size) {
     GinAnvilPluginStubs::g.wideAllGatherOverruns++;
     return ncclInternalError;
   }
-  // Single-process sim: keep the caller's own slot, give every empty slot peer data.
+  // Single-process sim: keep the caller's own slot and give every empty slot
+  // peer data. Peers report what the caller did, so agreement votes (fabric
+  // opt-in, setup status) see matching ranks. An all-zero buffer means the
+  // caller voted all zeros, so peers do too; filling it with 0xA5 would turn
+  // that into a nonzero "yes" vote.
   unsigned char* bytes = static_cast<unsigned char*>(allData);
   std::vector<unsigned char> zero(slot, 0);
-  for (int i = 0; i < nranks; ++i) {
+  const unsigned char* src = nullptr;
+  for (int i = 0; i < nranks && src == nullptr; ++i) {
+    const unsigned char* p = bytes + static_cast<size_t>(i) * slot;
+    if (memcmp(p, zero.data(), slot) != 0) src = p;
+  }
+  for (int i = 0; src != nullptr && i < nranks; ++i) {
     unsigned char* p = bytes + static_cast<size_t>(i) * slot;
-    if (memcmp(p, zero.data(), slot) == 0) memset(p, 0xA5, slot);
+    if (p == src || memcmp(p, zero.data(), slot) != 0) continue;
+    memcpy(p, src, slot);
   }
   return ncclSuccess;
 }
@@ -339,6 +396,48 @@ extern "C" int gin_anvil_sdma_get_num_channels(gin_anvil_sdma_handle_t handle) {
 
 extern "C" int gin_anvil_sdma_get_channel_stride(gin_anvil_sdma_handle_t handle) {
   return handle ? reinterpret_cast<GinAnvilPluginStubs::FakeSdmaOpaque*>(handle)->sdmaChannelStride : 0;
+}
+
+// Fakes for src/gin/gin_anvil_reach.cc (declared in gin/gin_anvil_reach.h).
+bool ginAnvilFabricMemCapable(struct ncclComm* comm) {
+  (void)comm;
+  return GinAnvilPluginStubs::g.useFabricMem || GinAnvilPluginStubs::g.fabricMemCapable;
+}
+
+bool ginAnvilUseFabricMem(struct ncclComm* comm) {
+  (void)comm;
+  return GinAnvilPluginStubs::g.useFabricMem;
+}
+
+ncclFabricMemHandler::ncclFabricMemHandler(void* bootstrap, int rank, int nranks, struct ncclMemManager* manager)
+  : bootstrap_(bootstrap), rank_(rank), nranks_(nranks), manager_(manager), selfPtr_(nullptr), selfHandle_{},
+    selfSize_(0), memPtrs_(static_cast<size_t>(nranks), nullptr), exchanged_(false) {
+  ++GinAnvilPluginStubs::g.liveFabricHandlers;
+}
+
+ncclFabricMemHandler::~ncclFabricMemHandler() { --GinAnvilPluginStubs::g.liveFabricHandlers; }
+
+ncclResult_t ncclFabricMemHandler::addSelfDeviceMem(void* deviceMemPtr, hipMemGenericAllocationHandle_t handle,
+                                                    size_t size) {
+  if (GinAnvilPluginStubs::g.fabricAddSelfFail) return ncclSystemError;
+  selfPtr_ = deviceMemPtr;
+  selfHandle_ = handle;
+  selfSize_ = size;
+  if (rank_ >= 0 && rank_ < nranks_) memPtrs_[static_cast<size_t>(rank_)] = deviceMemPtr;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclFabricMemHandler::exchangeMemPtrs() {
+  if (GinAnvilPluginStubs::g.fabricExchangeFail) return ncclSystemError;
+  exchanged_ = true;
+  return ncclSuccess;
+}
+
+ncclResult_t ncclFabricMemHandler::getPeerDeviceMemPtr(int peerRank, void** outPeerPtr) const {
+  if (!outPeerPtr || peerRank < 0 || peerRank >= nranks_) return ncclInvalidArgument;
+  uintptr_t base = reinterpret_cast<uintptr_t>(GinAnvilPluginStubs::g.fabricPeerBase);
+  *outPeerPtr = reinterpret_cast<void*>(base + static_cast<uintptr_t>(peerRank) * GinAnvilPluginStubs::g.fabricPeerStride);
+  return ncclSuccess;
 }
 
 // [GIN-CONN-CHECK] Host stubs for gin_plugin_anvil_sdma.cc when this TU is linked
