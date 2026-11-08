@@ -18,6 +18,7 @@
 #include <array>
 #include <cstring>
 #include <limits>
+#include <unordered_map>
 #include <utility>
 
 namespace rocjitsu::consan {
@@ -97,15 +98,21 @@ Result validate_entry_abi(const kd::kernel_descriptor_t &descriptor, const Targe
 Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
                              InputProgram &program, RegisterSet &used, const InputLimits &limits,
                              InputError &error) {
+  const FailureOr<std::vector<const BasicBlock *>> ordered = qualify_lds_race_cfg(blocks, error);
+  if (ordered.failed())
+    return Result::failure();
+  std::unordered_map<const BasicBlock *, std::optional<uint64_t>> latest_access;
+  latest_access.reserve(ordered.value().size());
+  for (const BasicBlock *block : ordered.value())
+    latest_access.emplace(block, std::nullopt);
   size_t instruction_count = 0;
-  for (const std::unique_ptr<BasicBlock> &block : blocks) {
+  for (const BasicBlock *block : ordered.value()) {
     if (block->has_implicit_terminator() ||
         block->successor_issue() != BasicBlock::SuccessorIssue::None ||
         !block->call_edges().empty())
       return reject(error, InputErrorCode::UnsupportedFlow, "original control flow is not closed",
                     block->start_offset());
-    if (qualify_lds_race_block(*block, error).failed())
-      return Result::failure();
+    std::optional<uint64_t> latest = latest_access.find(block)->second;
     for (const Instruction &instruction : block->instructions()) {
       if (instruction_count++ >= limits.instructions)
         return reject(error, InputErrorCode::ResourceLimit, "instruction analysis budget exceeded");
@@ -113,10 +120,21 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
       if ((instruction.flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0)
         return reject(error, InputErrorCode::UnsupportedFlow, "indirect transfer is outside MVP",
                       offset);
+      const size_t previous_accesses = program.accesses.size();
       if (classify_lds_race_instruction(instruction, program.target->arch, program.original_vgprs,
                                         program.accesses, error)
               .failed())
         return Result::failure();
+      // The analyzer's site IDs follow source-PC order. Acyclic control flow
+      // may return from a cave, but native accesses must retain that same order
+      // on every path; a larger predecessor PC would invert valid record sequences.
+      for (size_t index = previous_accesses; index < program.accesses.size(); ++index) {
+        const uint64_t access = program.accesses[index].original_offset;
+        if (latest && access <= *latest)
+          return reject(error, InputErrorCode::UnsupportedFlow,
+                        "MVP requires increasing LDS access order along every CFG path", access);
+        latest = access;
+      }
       const InstDefUse effects(instruction, program.wave_size);
       used |= effects.uses;
       used |= effects.defs;
@@ -129,6 +147,11 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
       }
       if ((instruction.flags() & PROGRAM_TERMINATOR) != 0)
         program.exit_offsets.push_back(offset);
+    }
+    for (const BasicBlock *successor : block->successors()) {
+      std::optional<uint64_t> &incoming = latest_access.find(successor)->second;
+      if (latest && (!incoming || *latest > *incoming))
+        incoming = latest;
     }
   }
   if (program.accesses.empty())

@@ -3,8 +3,12 @@
 
 #include "target_fixture.h"
 
+#include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/code/patch/code_object_patcher.h"
+#include "rocjitsu/code/patch/instrumentor.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/target_registry.h"
@@ -19,6 +23,7 @@
 #include <fstream>
 #include <iterator>
 #include <limits>
+#include <utility>
 
 namespace rocjitsu::consan {
 namespace {
@@ -161,6 +166,57 @@ protected:
     std::memcpy(image_.data() + file_offset, &word, sizeof(word));
   }
 
+  void make_instruction_detour(uint64_t anchor, bool returns_to_anchor,
+                               std::vector<uint8_t> &image) {
+    const AmdGpuCodeObject source(image_.data(), image_.size());
+    const Section &text = *source.text_sections().front();
+    const std::span<const uint32_t> source_words(reinterpret_cast<const uint32_t *>(text.data()),
+                                                 text.size() / sizeof(uint32_t));
+    std::unique_ptr<Decoder> decoder =
+        Decoder::create(default_isa_target_registry(), kTarget.public_id);
+    ASSERT_NE(decoder, nullptr);
+    ASSERT_LT(anchor / 4, source_words.size());
+    const DecodeResult first = decoder->decode_window(source_words.subspan(anchor / 4), anchor);
+    ASSERT_TRUE(first.succeeded());
+    ASSERT_FALSE(first.value()->branch_offset_bytes());
+    ASSERT_EQ(first.value()->flags() & (INDIRECT_BRANCH | INDIRECT_CALL | PROGRAM_TERMINATOR), 0u);
+    const uint32_t first_size = first.value()->size();
+    ASSERT_GE(first_size, 4u);
+    ASSERT_LT(anchor + first_size, text.size());
+    const uint64_t cave = text.size();
+    const std::optional<int16_t> forward = compute_sopp_branch_simm16(anchor, cave);
+    const uint64_t continuation = returns_to_anchor ? anchor : anchor + first_size;
+    const std::optional<int16_t> backward =
+        compute_sopp_branch_simm16(cave + first_size, continuation);
+    ASSERT_TRUE(forward);
+    ASSERT_TRUE(backward);
+    std::vector<uint8_t> patched(text.data(), text.data() + text.size());
+    patched.insert(patched.end(), text.data() + anchor, text.data() + anchor + first_size);
+    const util::FailureOr<uint32_t> maybe_return_branch = build_s_branch(*backward, kTarget.arch);
+    ASSERT_TRUE(maybe_return_branch.succeeded());
+    const uint32_t return_branch = maybe_return_branch.value();
+    const uint8_t *return_bytes = reinterpret_cast<const uint8_t *>(&return_branch);
+    patched.insert(patched.end(), return_bytes, return_bytes + sizeof(return_branch));
+    const util::FailureOr<uint32_t> maybe_anchor_branch = build_s_branch(*forward, kTarget.arch);
+    ASSERT_TRUE(maybe_anchor_branch.succeeded());
+    const uint32_t anchor_branch = maybe_anchor_branch.value();
+    std::memcpy(patched.data() + anchor, &anchor_branch, sizeof(anchor_branch));
+    const util::FailureOr<uint32_t> maybe_nop = build_s_nop(0, kTarget.arch);
+    ASSERT_TRUE(maybe_nop.succeeded());
+    const uint32_t nop = maybe_nop.value();
+    for (uint32_t offset = sizeof(uint32_t); offset < first_size; offset += sizeof(uint32_t))
+      std::memcpy(patched.data() + anchor + offset, &nop, sizeof(nop));
+    CodeObjectPatcher patcher(source);
+    ASSERT_TRUE(patcher.replace_text(patched));
+    image = std::move(patcher).emit();
+  }
+
+  void make_entry_detour(bool returns_to_entry, std::vector<uint8_t> &image) {
+    const FailureOr<InputProgram> pristine = inspect(image_);
+    ASSERT_TRUE(pristine.succeeded()) << error_.message;
+    make_instruction_detour(pristine.value().kernel.entry_text_offset, returns_to_entry, image);
+  }
+
   InputError error_;
   std::vector<uint8_t> image_;
   size_t descriptor_offset_ = 0;
@@ -186,6 +242,139 @@ TEST_F(ConSanInputFixture, DecoderFindsTheTwoPhysicalSitesAndRuntimeOperands) {
   EXPECT_EQ(program.value().identity.sha256, digest(image_));
   EXPECT_EQ(program.value().original_vgprs, 8u);
   EXPECT_EQ(program.value().image, image_);
+}
+
+TEST_F(ConSanInputFixture, ReplacementMutantReceivesFreshInputAnalysis) {
+  const std::vector<uint8_t> pristine_image = image_;
+  std::vector<uint8_t> mutant;
+  Digest pristine_digest = {};
+  NativeLdsAccess original_read = {};
+  uint32_t pristine_sgprs = 0;
+  uint32_t pristine_vgprs = 0;
+  uint64_t pristine_entry = 0;
+  {
+    const FailureOr<InputProgram> original =
+        build_input_program(pristine_image, kTarget, "lds_producer_consumer", error_);
+    ASSERT_TRUE(original.succeeded()) << error_.message;
+    ASSERT_EQ(original.value().accesses.size(), 2u);
+    const NativeLdsAccess &write = original.value().accesses[0];
+    original_read = original.value().accesses[1];
+    ASSERT_EQ(write.kind, AccessKind::Write);
+    ASSERT_EQ(original_read.kind, AccessKind::Read);
+    pristine_digest = original.value().identity.sha256;
+    pristine_sgprs = original.value().original_sgprs;
+    pristine_vgprs = original.value().original_vgprs;
+    pristine_entry = original.value().kernel.entry_text_offset;
+
+    const AmdGpuCodeObject source(original.value().image.data(), original.value().image.size());
+    ASSERT_TRUE(source.is_valid());
+    const uint64_t write_file_offset = original.value().text_file_offset + write.original_offset;
+    std::array<uint32_t, 2> words = {};
+    ASSERT_LE(write_file_offset + sizeof(words), original.value().image.size());
+    std::memcpy(words.data(), original.value().image.data() + write_file_offset, sizeof(words));
+    std::unique_ptr<Decoder> decoder =
+        Decoder::create(default_isa_target_registry(), kTarget.public_id);
+    ASSERT_NE(decoder, nullptr);
+    const DecodeResult decoded = decoder->decode_window(words, write.original_offset);
+    ASSERT_TRUE(decoded.succeeded());
+    ASSERT_EQ(decoded.value()->size(), 8u);
+
+    const util::FailureOr<uint32_t> maybe_nop = build_s_nop(0, kTarget.arch);
+    ASSERT_TRUE(maybe_nop.succeeded());
+    const uint32_t nop = maybe_nop.value();
+    const std::array<uint32_t, 2> nops = {nop, nop};
+    InstructionReplacement replacement = {.expected_bytes = std::vector<uint8_t>(sizeof(words)),
+                                          .replacement_bytes = std::vector<uint8_t>(sizeof(nops))};
+    std::memcpy(replacement.expected_bytes.data(), words.data(), sizeof(words));
+    std::memcpy(replacement.replacement_bytes.data(), nops.data(), sizeof(nops));
+    Instrumentor instrumentor(source, kTarget.arch);
+    instrumentor.add_point({.anchor_offset = write.original_offset,
+                            .kind = InstrumentationKind::ReplaceWithInst,
+                            .probe_symbol = {},
+                            .probe_args = {},
+                            .replacement = std::move(replacement)});
+    InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+    ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+    ASSERT_EQ(result.sites.size(), 1u);
+    ASSERT_EQ(result.patches.size(), 1u);
+    const InstrumentedSite &site = result.sites.front();
+    EXPECT_EQ(site.kind, InstrumentationKind::ReplaceWithInst);
+    EXPECT_EQ(site.original_offset, write.original_offset);
+    EXPECT_EQ(site.original_size, 8u);
+    EXPECT_EQ(site.guest_size, sizeof(nops));
+    EXPECT_EQ(site.instrumentation_size, 0u);
+    const AmdGpuCodeObject emitted(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(emitted.is_valid());
+    EXPECT_EQ(emitted.target_id(), source.target_id());
+    const Section &source_text = *source.text_sections().front();
+    const Section &emitted_text = *emitted.text_sections().front();
+    ASSERT_GT(emitted_text.size(), source_text.size());
+    const std::span<const uint32_t> emitted_words(
+        reinterpret_cast<const uint32_t *>(emitted_text.data()), emitted_text.size() / 4);
+    const DecodeResult forward = decoder->decode_window(
+        emitted_words.subspan(write.original_offset / 4), write.original_offset);
+    ASSERT_TRUE(forward.succeeded());
+    ASSERT_EQ(forward.value()->mnemonic(), "s_branch");
+    ASSERT_TRUE(forward.value()->branch_offset_bytes());
+    const int64_t destination = static_cast<int64_t>(write.original_offset) +
+                                forward.value()->size() + *forward.value()->branch_offset_bytes();
+    ASSERT_GE(destination, 0);
+    const uint64_t replacement_offset = static_cast<uint64_t>(destination);
+    ASSERT_GE(replacement_offset, source_text.size());
+    ASSERT_LE(replacement_offset + sizeof(nops) + 4, emitted_text.size());
+    EXPECT_EQ(site.guest_offset, replacement_offset);
+    EXPECT_EQ(site.instrumentation_offset, replacement_offset);
+    EXPECT_EQ(result.patches.front().trampoline_offset, replacement_offset);
+    EXPECT_EQ(emitted_words[write.original_offset / 4 + 1], nop);
+    EXPECT_EQ(std::memcmp(emitted_text.data() + replacement_offset, nops.data(), sizeof(nops)), 0);
+    for (size_t index = 0; index < nops.size(); ++index) {
+      const uint64_t offset = replacement_offset + index * sizeof(uint32_t);
+      const DecodeResult replaced =
+          decoder->decode_window(emitted_words.subspan(offset / 4), offset);
+      ASSERT_TRUE(replaced.succeeded());
+      EXPECT_EQ(replaced.value()->mnemonic(), "s_nop");
+      EXPECT_EQ(replaced.value()->size(), 4u);
+    }
+    const uint64_t return_offset = replacement_offset + sizeof(nops);
+    const DecodeResult returned =
+        decoder->decode_window(emitted_words.subspan(return_offset / 4), return_offset);
+    ASSERT_TRUE(returned.succeeded());
+    ASSERT_EQ(returned.value()->mnemonic(), "s_branch");
+    ASSERT_TRUE(returned.value()->branch_offset_bytes());
+    EXPECT_EQ(static_cast<int64_t>(return_offset) + returned.value()->size() +
+                  *returned.value()->branch_offset_bytes(),
+              static_cast<int64_t>(write.original_offset + sizeof(words)));
+    EXPECT_EQ(std::memcmp(source_text.data(), emitted_text.data(), write.original_offset), 0);
+    const uint64_t unchanged = write.original_offset + sizeof(words);
+    EXPECT_EQ(std::memcmp(source_text.data() + unchanged, emitted_text.data() + unchanged,
+                          source_text.size() - unchanged),
+              0);
+    EXPECT_EQ(original.value().image, pristine_image);
+    EXPECT_EQ(std::memcmp(source.image_data(), pristine_image.data(), pristine_image.size()), 0);
+    mutant = std::move(result.elf_bytes);
+  }
+
+  // The original program, decoder, code object, and Instrumentor are gone. ConSan
+  // must discover the remaining read from the mutant's bytes and new identity.
+  const FailureOr<InputProgram> fresh =
+      build_input_program(mutant, kTarget, "lds_producer_consumer", error_);
+  ASSERT_TRUE(fresh.succeeded()) << error_.message;
+  ASSERT_EQ(fresh.value().accesses.size(), 1u);
+  const NativeLdsAccess &remaining = fresh.value().accesses.front();
+  EXPECT_EQ(remaining.site, 0u);
+  EXPECT_EQ(remaining.kind, AccessKind::Read);
+  EXPECT_EQ(remaining.original_offset, original_read.original_offset);
+  EXPECT_EQ(remaining.address_vgpr, original_read.address_vgpr);
+  EXPECT_EQ(remaining.immediate_bytes, original_read.immediate_bytes);
+  expect_value_operand(fresh.value(), remaining, 3);
+  EXPECT_NE(fresh.value().identity.sha256, pristine_digest);
+  EXPECT_EQ(fresh.value().identity.sha256, digest(mutant));
+  EXPECT_GT(fresh.value().identity.bytes, pristine_image.size());
+  EXPECT_EQ(fresh.value().image, mutant);
+  EXPECT_EQ(fresh.value().original_sgprs, pristine_sgprs);
+  EXPECT_EQ(fresh.value().original_vgprs, pristine_vgprs);
+  EXPECT_EQ(fresh.value().kernel.entry_text_offset, pristine_entry);
+  EXPECT_EQ(image_, pristine_image);
 }
 
 TEST_F(ConSanInputFixture, TemporaryProfileAndNameDoNotEscapeInputConstruction) {
@@ -327,6 +516,135 @@ TEST_F(ConSanInputFixture, PrivateFrameAndMissingKernargCannotUseBootstrap) {
   mutate_descriptor([](auto &descriptor) { descriptor.kernel_code_properties = 0; });
   EXPECT_TRUE(inspect(image_).failed());
   EXPECT_EQ(error_.code, InputErrorCode::UnsupportedEntry);
+}
+
+TEST_F(ConSanInputFixture, AcyclicBackwardEdgeIsAccepted) {
+  const std::vector<uint8_t> pristine = image_;
+  const FailureOr<InputProgram> original = inspect(image_);
+  ASSERT_TRUE(original.succeeded()) << error_.message;
+  std::vector<uint8_t> detour;
+  make_entry_detour(false, detour);
+  ASSERT_FALSE(detour.empty());
+  const FailureOr<InputProgram> program = inspect(detour);
+  ASSERT_TRUE(program.succeeded()) << error_.message;
+  ASSERT_EQ(program.value().accesses.size(), original.value().accesses.size());
+  for (size_t index = 0; index < program.value().accesses.size(); ++index) {
+    const NativeLdsAccess &actual = program.value().accesses[index];
+    const NativeLdsAccess &expected = original.value().accesses[index];
+    EXPECT_EQ(actual.original_offset, expected.original_offset);
+    EXPECT_EQ(actual.kind, expected.kind);
+    EXPECT_EQ(actual.address_vgpr, expected.address_vgpr);
+    EXPECT_EQ(actual.immediate_bytes, expected.immediate_bytes);
+  }
+  EXPECT_EQ(program.value().identity.sha256, digest(detour));
+  EXPECT_NE(program.value().identity.sha256, original.value().identity.sha256);
+  EXPECT_EQ(image_, pristine);
+}
+
+TEST_F(ConSanInputFixture, AcyclicBackwardLdsAccessOrderFailsClosed) {
+  const std::vector<uint8_t> pristine = image_;
+  const FailureOr<InputProgram> original = inspect(image_);
+  ASSERT_TRUE(original.succeeded()) << error_.message;
+  ASSERT_EQ(original.value().accesses.size(), 2u);
+  const NativeLdsAccess &write = original.value().accesses[0];
+  const NativeLdsAccess &read = original.value().accesses[1];
+  ASSERT_EQ(write.kind, AccessKind::Write);
+  ASSERT_EQ(read.kind, AccessKind::Read);
+  ASSERT_LT(write.original_offset, read.original_offset);
+  std::vector<uint8_t> detour;
+  // Move the write to the cave, then return after its original source extent.
+  // This graph is acyclic, but executes the high-PC write before a low-PC read.
+  ASSERT_NO_FATAL_FAILURE(make_instruction_detour(write.original_offset, false, detour));
+  ASSERT_FALSE(detour.empty());
+  const AmdGpuCodeObject output(detour.data(), detour.size());
+  ASSERT_TRUE(output.is_valid());
+  const Section &text = *output.text_sections().front();
+  const uint64_t cave = original.value().text_bytes;
+  ASSERT_LE(cave + 12, text.size());
+  EXPECT_EQ(std::memcmp(text.data() + cave,
+                        pristine.data() + original.value().text_file_offset + write.original_offset,
+                        8),
+            0);
+  EXPECT_TRUE(inspect(detour).failed());
+  EXPECT_EQ(error_.code, InputErrorCode::UnsupportedFlow);
+  EXPECT_NE(error_.message.find("LDS access order"), std::string::npos);
+  EXPECT_EQ(error_.text_offset, read.original_offset);
+  EXPECT_EQ(image_, pristine);
+}
+
+TEST_F(ConSanInputFixture, LdsAccessOrderAtAJoinIncludesEveryPredecessor) {
+  const std::vector<uint8_t> pristine = image_;
+  const FailureOr<InputProgram> original = inspect(image_);
+  ASSERT_TRUE(original.succeeded()) << error_.message;
+  ASSERT_EQ(original.value().accesses.size(), 2u);
+  ASSERT_EQ(original.value().accesses[0].kind, AccessKind::Write);
+  ASSERT_EQ(original.value().accesses[1].kind, AccessKind::Read);
+  ASSERT_EQ(kTarget.arch, ROCJITSU_CODE_ARCH_RDNA3);
+  const AmdGpuCodeObject source(image_.data(), image_.size());
+  const Section &text = *source.text_sections().front();
+  const uint64_t entry = original.value().kernel.entry_text_offset;
+  ASSERT_EQ(entry % 4, 0u);
+  const util::FailureOr<uint32_t> conditional =
+      build_sopp_encoding(kTarget.arch, rdna3::kSCbranchScc1Sopp, 9);
+  ASSERT_TRUE(conditional.succeeded());
+  const util::FailureOr<uint32_t> nop = build_s_nop(0, kTarget.arch);
+  const util::FailureOr<uint32_t> low_branch = build_s_branch(0, kTarget.arch);
+  const util::FailureOr<uint32_t> join_branch = build_s_branch(1, kTarget.arch);
+  const util::FailureOr<uint32_t> backward_branch = build_s_branch(-7, kTarget.arch);
+  const util::FailureOr<uint32_t> terminator = build_s_endpgm(kTarget.arch);
+  ASSERT_TRUE(nop.succeeded());
+  ASSERT_TRUE(low_branch.succeeded());
+  ASSERT_TRUE(join_branch.succeeded());
+  ASSERT_TRUE(backward_branch.succeeded());
+  ASSERT_TRUE(terminator.succeeded());
+  for (const bool high_access : {false, true}) {
+    SCOPED_TRACE(high_access);
+    // Relative layout: branch at 0 chooses low write at 8 or high arm at 40.
+    // Both arms join at read 24. The high arm's backward edge is harmless only
+    // when that arm has no LDS access; the low arm's write 8 cannot erase it.
+    std::vector<uint32_t> words(std::max(text.size() / 4, entry / 4 + 13), nop.value());
+    const size_t first = entry / 4;
+    words[first] = conditional.value();
+    words[first + 1] = low_branch.value();
+    const uint64_t write = original.value().accesses[0].original_offset;
+    const uint64_t read = original.value().accesses[1].original_offset;
+    ASSERT_LE(write + 8, text.size());
+    ASSERT_LE(read + 8, text.size());
+    std::memcpy(words.data() + first + 2, text.data() + write, 8);
+    words[first + 4] = join_branch.value();
+    std::memcpy(words.data() + first + 6, text.data() + read, 8);
+    words[first + 8] = terminator.value();
+    if (high_access)
+      std::memcpy(words.data() + first + 10, text.data() + write, 8);
+    words[first + 12] = backward_branch.value();
+    CodeObjectPatcher patcher(source);
+    ASSERT_TRUE(patcher.replace_text(
+        {reinterpret_cast<const uint8_t *>(words.data()), words.size() * sizeof(uint32_t)}));
+    const std::vector<uint8_t> joined = std::move(patcher).emit();
+    const FailureOr<InputProgram> program = inspect(joined);
+    if (high_access) {
+      EXPECT_TRUE(program.failed());
+      EXPECT_EQ(error_.code, InputErrorCode::UnsupportedFlow);
+      EXPECT_NE(error_.message.find("LDS access order"), std::string::npos);
+      EXPECT_EQ(error_.text_offset, entry + 24);
+    } else {
+      ASSERT_TRUE(program.succeeded()) << error_.message;
+      ASSERT_EQ(program.value().accesses.size(), 2u);
+      EXPECT_EQ(program.value().accesses[0].original_offset, entry + 8);
+      EXPECT_EQ(program.value().accesses[1].original_offset, entry + 24);
+    }
+  }
+  EXPECT_EQ(image_, pristine);
+}
+
+TEST_F(ConSanInputFixture, MultiBlockCycleFailsClosed) {
+  const std::vector<uint8_t> pristine = image_;
+  std::vector<uint8_t> cycle;
+  make_entry_detour(true, cycle);
+  ASSERT_FALSE(cycle.empty());
+  EXPECT_TRUE(inspect(cycle).failed());
+  EXPECT_EQ(error_.code, InputErrorCode::UnsupportedFlow);
+  EXPECT_EQ(image_, pristine);
 }
 
 TEST_F(ConSanInputFixture, BackedgeFailsClosed) {

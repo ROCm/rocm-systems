@@ -6,6 +6,7 @@
 #include "rocjitsu/code/consan/contract.h"
 #include "rocjitsu/code/rj_code.h"
 
+#include <memory>
 #include <span>
 #include <vector>
 
@@ -30,7 +31,11 @@ struct NativeLdsAccess {
 
 /// @brief Qualify LDS scope and select sites without owning binary/CFG machinery.
 [[nodiscard]] Result qualify_lds_race_entry(const InputProgram &program, InputError &error);
-[[nodiscard]] Result qualify_lds_race_block(const BasicBlock &block, InputError &error);
+/// @brief Require an acyclic reachable CFG and return its topological block order.
+/// @details The input collector uses this order to preserve increasing native LDS
+/// access PCs along every path, including paths with backward trampoline edges.
+[[nodiscard]] FailureOr<std::vector<const BasicBlock *>>
+qualify_lds_race_cfg(std::span<const std::unique_ptr<BasicBlock>> blocks, InputError &error);
 [[nodiscard]] Result classify_lds_race_instruction(const Instruction &instruction,
                                                    rj_code_arch_t arch, uint32_t allocated_vgprs,
                                                    std::vector<NativeLdsAccess> &accesses,
