@@ -55,9 +55,9 @@ add_rr_v3_replay_test(range)
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-range-replay-range-host-generate
     COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES SQ_INSTS_VALU --pmc SQ_WAVES
-        GRBM_COUNT --replay-mode range-host --kernel-replay-beta-enabled --output-format
-        json -d ${CMAKE_CURRENT_BINARY_DIR}/range-host -o out --
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc SQ_WAVES SQ_INSTS_VALU --pmc
+        SQ_WAVES GRBM_COUNT --replay-mode range-host --kernel-replay-beta-enabled
+        --output-format json -d ${CMAKE_CURRENT_BINARY_DIR}/range-host -o out --
         $<TARGET_FILE:range-replay-rocprofv3-app>
     DEPENDS range-replay-rocprofv3-app
     TIMEOUT 180

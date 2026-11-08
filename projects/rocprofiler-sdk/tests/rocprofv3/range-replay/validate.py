@@ -26,8 +26,6 @@
 
 import collections
 
-import pytest
-
 _PASS_KEYS = ("replay_pass", "n")
 _KERNEL = "rr_v3_step"
 
@@ -97,7 +95,9 @@ def _range_dispatches(json_data):
         if _KERNEL not in name:
             continue
         did = int(info["dispatch_id"])
-        entry = table.setdefault(did, {"passes": set(), "counters": collections.defaultdict(set)})
+        entry = table.setdefault(
+            did, {"passes": set(), "counters": collections.defaultdict(set)}
+        )
         index = _pass_index(record)
         entry["passes"].add(index)
         for sub in record.get("records", []):
@@ -109,15 +109,15 @@ def _range_dispatches(json_data):
 
 def test_range_replays_each_dispatch(json_data, expected_passes, expected_dispatches):
     table = _range_dispatches(json_data)
-    assert len(table) == expected_dispatches, (
-        f"expected {expected_dispatches} {_KERNEL} dispatches, found {len(table)}"
-    )
+    assert (
+        len(table) == expected_dispatches
+    ), f"expected {expected_dispatches} {_KERNEL} dispatches, found {len(table)}"
     want = set(range(expected_passes))
     for did, entry in table.items():
-        assert entry["passes"] == want, (
-            f"dispatch {did} passes {sorted(entry['passes'])} != {sorted(want)}"
-        )
+        assert (
+            entry["passes"] == want
+        ), f"dispatch {did} passes {sorted(entry['passes'])} != {sorted(want)}"
         for index in want:
-            assert "SQ_WAVES" in entry["counters"][index], (
-                f"dispatch {did} pass {index} has no SQ_WAVES ({sorted(entry['counters'][index])})"
-            )
+            assert (
+                "SQ_WAVES" in entry["counters"][index]
+            ), f"dispatch {did} pass {index} has no SQ_WAVES ({sorted(entry['counters'][index])})"
