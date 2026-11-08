@@ -223,6 +223,16 @@ static hipError_t DefaultHipHostFree(void* ptr)
 }
 std::function<hipError_t(void*)> g_hipHostFree = DefaultHipHostFree;
 
+static hipError_t DefaultHipHostRegister(void*, std::size_t, unsigned) { return hipErrorInvalidValue; }
+std::function<hipError_t(void*, std::size_t, unsigned)> g_hipHostRegister = DefaultHipHostRegister;
+
+static hipError_t DefaultHipHostUnregister(void*) { return hipSuccess; }
+std::function<hipError_t(void*)> g_hipHostUnregister = DefaultHipHostUnregister;
+
+// Same as the plain stub it replaces: fails without touching *devPtr.
+static hipError_t DefaultHipHostGetDevicePointer(void**, void*, unsigned) { return hipErrorInvalidValue; }
+std::function<hipError_t(void**, void*, unsigned)> g_hipHostGetDevicePointer = DefaultHipHostGetDevicePointer;
+
 // --- device inventory + current-device state ----------------------------
 int g_deviceCount = 8;
 int g_currentDevice = 0;
@@ -667,6 +677,9 @@ void ResetHipFakes()
     g_hipMallocManaged              = DefaultHipMallocManaged;
     g_hipFree                       = DefaultHipFree;
     g_hipHostFree                   = DefaultHipHostFree;
+    g_hipHostRegister               = DefaultHipHostRegister;
+    g_hipHostUnregister             = DefaultHipHostUnregister;
+    g_hipHostGetDevicePointer       = DefaultHipHostGetDevicePointer;
     g_hipGetDevice                  = DefaultHipGetDevice;
     g_hipSetDevice                  = DefaultHipSetDevice;
     g_hipGetDeviceCount             = DefaultHipGetDeviceCount;
@@ -901,6 +914,13 @@ hipError_t hipHostMalloc(void** ptr, size_t size, unsigned int flags)
     return g_hipHostMalloc(ptr, size, flags);
 }
 
+hipError_t hipHostRegister(void* ptr, size_t size, unsigned int flags)
+{
+    return g_hipHostRegister(ptr, size, flags);
+}
+
+hipError_t hipHostUnregister(void* ptr) { return g_hipHostUnregister(ptr); }
+
 hipError_t hipIpcCloseMemHandle(void* ptr) { return g_hipIpcCloseMemHandle(ptr); }
 
 hipError_t hipIpcOpenMemHandle(void** devPtr, hipIpcMemHandle_t handle, unsigned int flags)
@@ -1085,7 +1105,10 @@ hipError_t hipStreamCreate(hipStream_t*) { return hipErrorInvalidValue; }
 // hipStreamCreateWithPriority / hipDeviceGetStreamPriorityRange are defined
 // above (seam-routed) -- the develop merge added plainer duplicates here.
 hipError_t hipPointerGetAttributes(hipPointerAttribute_t*, const void*) { return hipErrorInvalidValue; }
-hipError_t hipHostGetDevicePointer(void**, void*, unsigned int) { return hipErrorInvalidValue; }
+hipError_t hipHostGetDevicePointer(void** devPtr, void* hostPtr, unsigned int flags)
+{
+    return g_hipHostGetDevicePointer(devPtr, hostPtr, flags);
+}
 hipError_t hipIpcGetEventHandle(hipIpcEventHandle_t*, hipEvent_t) { return hipErrorInvalidValue; }
 hipError_t hipEventSynchronize(hipEvent_t event) { return g_hipEventSynchronize(event); }
 
