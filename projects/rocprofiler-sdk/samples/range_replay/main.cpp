@@ -134,8 +134,7 @@ main()
             return EXIT_FAILURE;
         }
         if(launch() != EXIT_SUCCESS) return EXIT_FAILURE;
-        if(const auto status = rocprofiler_range_replay_end();
-           status != ROCPROFILER_STATUS_SUCCESS)
+        if(const auto status = rocprofiler_range_replay_end(); status != ROCPROFILER_STATUS_SUCCESS)
         {
             fprintf(stderr,
                     "[app] FAIL: rocprofiler_range_replay_end returned status %d\n",

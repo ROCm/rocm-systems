@@ -310,7 +310,7 @@ rocprofiler_range_replay_host_first_entry(uint64_t range_id, void* env) ROCPROFI
 #define ROCPROFILER_REPLAY_RANGE_BEGIN(range_id)                                                   \
     {                                                                                              \
         sigjmp_buf                    rocp_env_;                                                   \
-        const uint64_t                rocp_id_            = (uint64_t) (range_id);                 \
+        const uint64_t                rocp_id_           = (uint64_t)(range_id);                   \
         volatile rocprofiler_status_t rocp_begin_status_ = ROCPROFILER_STATUS_SUCCESS;             \
         if(sigsetjmp(rocp_env_, 1) == 0) /* allowed setjmp context */                              \
             rocp_begin_status_ = rocprofiler_range_replay_host_first_entry(                        \
@@ -326,8 +326,8 @@ rocprofiler_range_replay_host_first_entry(uint64_t range_id, void* env) ROCPROFI
  * after the last pass, having raised @ref ROCPROFILER_RANGE_REPLAY_CLOSE.
  */
 #define ROCPROFILER_REPLAY_RANGE_END()                                                             \
-        rocprofiler_range_replay_end(); /* drain, PASS exit, continue?, and if so                  \
-                                           restore the entry snapshot */                           \
+    rocprofiler_range_replay_end(); /* drain, PASS exit, continue?, and if so                      \
+                                       restore the entry snapshot */                               \
     }
 
 /**
