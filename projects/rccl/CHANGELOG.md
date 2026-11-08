@@ -68,7 +68,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * `RCCL_DDA_LL128_RS_THREADS` removed (was default `1024`): reduce-scatter LL128 now launches a fixed 512-thread block, one warp per slice, so the thread count is no longer a tuning knob.
 
 ### Resolved issues
-* Fixed replay output paths containing dotted directories, relative path components or multiple filename dots. Failed output-file opens now produce a warning.
+* Fixed `RCCL_REPLAY_FILE` output paths containing dotted directories, relative path components or multiple filename dots. Failed output-file opens now produce a warning.
 * Fixed `ncclDevrFinalize` freeing the LSA flat virtual-address reservation on gfx1250 while peer maps can still be live. That `cuMemAddressFree` can hang or double-free. gfx1250, and `NCCL_CUMEM_SKIP_FREE=1`, skip the free until process exit again. gfx950 still frees the reservation when skip-free is left on automatic. `NCCL_CUMEM_SKIP_FREE=0` forces the free on every architecture.
 * Fixed the calling thread's HIP stream-capture mode remaining relaxed when device-communicator GIN setup fails. `ncclDevCommCreate` still switches to relaxed mode while it builds the device communicator, and a failed `ncclGinDevCommSetup` now returns through the same cleanup path that restores the mode the application had set. Matches upstream NCCL 2.31.2 (PR 2229).
 * Fixed the device linker dropping feature suffixes such as `xnack+` from `GPU_TARGETS`, which left address sanitizer builds without instrumented device code.
