@@ -1081,17 +1081,18 @@ bool CodeObjectPatcher::has_relocations_within_text() const {
   if (image_.size() < sizeof(Elf64_Ehdr))
     return false;
 
-  auto header = *reinterpret_cast<const Elf64_Ehdr *>(image_.data());
-  const auto shdrs = read_section_headers(image_, header);
-  const auto text_index =
+  Elf64_Ehdr header = {};
+  std::memcpy(&header, image_.data(), sizeof(header));
+  const std::vector<Elf64_Shdr> shdrs = read_section_headers(image_, header);
+  const std::optional<size_t> text_index =
       validated_text_section(shdrs, text_section_index_, text_offset_, text_size_);
   if (!text_index)
     return false;
 
   // A relocation's place (r_offset) is interpreted differently by ELF type:
   //   - ET_DYN/ET_EXEC: r_offset is a virtual address. An in-.text place is one
-  //     inside [text.sh_addr, text.sh_addr + size). The reloc section applies
-  //     across the whole image, so every record must be range-checked.
+  //     inside [text.sh_addr, text.sh_addr + size). A supported ROCr dynamic
+  //     write can also start before that interval and extend into it.
   //   - ET_REL: r_offset is relative to the section the reloc section applies to,
   //     named by the reloc section's sh_info. Only records whose sh_info is the
   //     text section can land in .text, and there any r_offset < text.sh_size is
@@ -1107,6 +1108,8 @@ bool CodeObjectPatcher::has_relocations_within_text() const {
       continue;
     if (is_rel_object && relocs.sh_info != *text_index)
       continue; // ET_REL: only relocations that apply to .text matter.
+    const bool rocr_dynamic = classify_rocr_relocation_section(header, shdrs, relocs) ==
+                              RocrRelocationSectionMode::Dynamic;
     const bool is_rela = relocs.sh_type == SHT_RELA;
     const size_t entsize = is_rela ? sizeof(Elf64_Rela) : sizeof(Elf64_Rel);
     if (relocs.sh_entsize != entsize)
@@ -1131,9 +1134,16 @@ bool CodeObjectPatcher::has_relocations_within_text() const {
         continue;
       const bool in_text = is_rel_object
                                ? r_offset < text_size_
-                               : (r_offset >= text.sh_addr && r_offset < text.sh_addr + text_size_);
+                               : (r_offset >= text.sh_addr && r_offset - text.sh_addr < text_size_);
       if (in_text)
         return true;
+      if (rocr_dynamic) {
+        const std::optional<uint64_t> write_size =
+            rocr_dynamic_relocation_write_size(elf_reloc_type(r_info));
+        if (write_size && (*write_size > std::numeric_limits<uint64_t>::max() - r_offset ||
+                           (r_offset < text.sh_addr && text.sh_addr - r_offset < *write_size)))
+          return true;
+      }
     }
   }
   return false;

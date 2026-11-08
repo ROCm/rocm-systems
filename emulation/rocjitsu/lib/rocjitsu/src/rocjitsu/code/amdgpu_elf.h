@@ -416,6 +416,25 @@ inline constexpr bool rocr_dynamic_relocation_uses_symbol_value(uint32_t relocat
   }
 }
 
+/// @brief Write size of a relocation supported by ROCr's modern dynamic path.
+/// @details Callers classify the relocation section separately. An absent size
+/// means unsupported, including NONE; it never means an inert zero-byte write.
+/// Explicit-target/static records retain their separate dispatch and policy.
+[[nodiscard]] inline constexpr std::optional<uint64_t>
+rocr_dynamic_relocation_write_size(uint32_t relocation_type) {
+  switch (relocation_type) {
+  case R_AMDGPU_ABS32_LO:
+  case R_AMDGPU_ABS32_HI:
+  case R_AMDGPU_ABS32:
+    return sizeof(uint32_t);
+  case R_AMDGPU_ABS64:
+  case R_AMDGPU_RELATIVE64:
+    return sizeof(uint64_t);
+  default:
+    return std::nullopt;
+  }
+}
+
 /// @brief Whether ROCr derives this dynamic symbol's runtime address from st_value.
 inline constexpr bool rocr_dynamic_symbol_address_follows_st_value(uint8_t symbol_type) {
   switch (symbol_type) {
