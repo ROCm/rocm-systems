@@ -148,7 +148,7 @@ TEST_F(NetIbCastSchedulerMicrotest, InitParms_Disabled_KeepsDefaultsAndIgnoresTh
   SetMicroEnv("RCCL_IB_QP_SCHED_WEIGHT", "0.5");
   const ncclIbQpSchedParms p = Init();
   EXPECT_FALSE(p.enable);
-  EXPECT_FALSE(p.doWrr);
+  EXPECT_TRUE(p.doWrr);
   EXPECT_EQ(p.updateInterval, QP_SCHED_UPDATE_DEF);
   EXPECT_EQ(p.splitDataMin, (uint32_t)QP_SCHED_SPLIT_DATA_MIN_DEF);
   EXPECT_EQ(p.weightNew, (double)QP_SCHED_WEIGHT_DEF);
@@ -213,7 +213,7 @@ TEST_F(NetIbCastSchedulerMicrotest, InitParms_SplitDataMin_OnlyPositiveValuesApp
   EXPECT_EQ(Init().splitDataMin, (uint32_t)QP_SCHED_SPLIT_DATA_MIN_DEF);
 }
 
-TEST_F(NetIbCastSchedulerMicrotest, InitParms_SplitData_KeepsWrrWhenTheKnobIsOn) {
+TEST_F(NetIbCastSchedulerMicrotest, InitParms_SplitData_KeepsWrrByDefault) {
   params_["IB_SPLIT_DATA_ON_QPS"] = 1;
   const ncclIbQpSchedParms p = Init();
   EXPECT_TRUE(p.splitData);
@@ -224,9 +224,8 @@ TEST_F(NetIbCastSchedulerMicrotest, InitParms_WrrHonoursTheEffectiveSchedulingMo
   for (int enabled : {0, 1}) {
     for (int splitData : {0, 1}) {
       for (int wrrEnabled : {0, 1}) {
-        SCOPED_TRACE(enabled);
-        SCOPED_TRACE(splitData);
-        SCOPED_TRACE(wrrEnabled);
+        SCOPED_TRACE(testing::Message() << "enabled=" << enabled << " splitData=" << splitData
+                                       << " wrrEnabled=" << wrrEnabled);
         params_["RCCL_IB_QP_SCHED_ENABLE"] = enabled;
         params_["IB_SPLIT_DATA_ON_QPS"] = splitData;
         params_["RCCL_IB_QP_SCHED_WRR_ENABLE"] = wrrEnabled;
@@ -234,7 +233,7 @@ TEST_F(NetIbCastSchedulerMicrotest, InitParms_WrrHonoursTheEffectiveSchedulingMo
         EXPECT_EQ(parms.enable, enabled != 0);
         EXPECT_EQ(parms.splitData, splitData != 0);
         EXPECT_EQ(parms.wrrEnable, wrrEnabled != 0);
-        EXPECT_EQ(parms.doWrr, enabled && (!splitData || wrrEnabled));
+        EXPECT_EQ(parms.doWrr, !splitData || wrrEnabled);
       }
     }
   }
@@ -600,6 +599,35 @@ TEST_F(NetIbCastSchedulerNqpsMicrotest, EffectiveNqps_SchedulerOff_RotatesByRequ
   EXPECT_EQ(Pick(&start, &wrr), 3);
   EXPECT_EQ(start, 7 % 3);
   EXPECT_FALSE(wrr);
+}
+
+TEST_F(NetIbCastSchedulerNqpsMicrotest, EffectiveNqps_DisabledSchedulerKeepsEveryQpInFailoverAccounting) {
+  for (bool ainicDefault : {false, true}) {
+    g_rcclUseAinicValue = ainicDefault;
+    if (ainicDefault) {
+      params_.erase("RCCL_IB_QP_SCHED_ENABLE");
+    } else {
+      params_["RCCL_IB_QP_SCHED_ENABLE"] = 0;
+    }
+    for (int splitData : {0, 1}) {
+      for (int wrrEnabled : {0, 1}) {
+        SCOPED_TRACE(testing::Message() << "ainicDefault=" << ainicDefault << " splitData=" << splitData
+                                       << " wrrEnabled=" << wrrEnabled);
+        params_["IB_SPLIT_DATA_ON_QPS"] = splitData;
+        params_["RCCL_IB_QP_SCHED_WRR_ENABLE"] = wrrEnabled;
+        base().schedParms = Init();
+        ASSERT_FALSE(base().schedParms.enable);
+        req_.desc.parms = base().schedParms;
+        req_.id = 7;
+        int start = -1;
+        bool wrr = true;
+        EXPECT_EQ(Pick(&start, &wrr), base().nqps);
+        EXPECT_EQ(start, 7 % base().nqps);
+        EXPECT_FALSE(wrr);
+        EXPECT_EQ(IbCastCommBaseGetNqpsPerRequest(&base()), base().nqps);
+      }
+    }
+  }
 }
 
 TEST_F(NetIbCastSchedulerNqpsMicrotest, EffectiveNqps_SingleQpComm_UsesIt) {

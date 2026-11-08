@@ -81,7 +81,7 @@ ncclResult_t IbCastQpSchedInitParms(struct ncclIbQpSchedParms* parms) {
   parms->splitDataMin = QP_SCHED_SPLIT_DATA_MIN_DEF;
   parms->logInterval = QP_SCHED_LOG_DEF;
   parms->logEnable = false;
-  parms->doWrr = false;
+  parms->doWrr = !parms->splitData || parms->wrrEnable;
 
   if (rcclUseIbCastQpSched()) {
     parms->enable = true;
@@ -92,7 +92,6 @@ ncclResult_t IbCastQpSchedInitParms(struct ncclIbQpSchedParms* parms) {
     goto exit;
   }
 
-  parms->doWrr = !parms->splitData || parms->wrrEnable;
   if (parms->splitData) {
     INFO(NCCL_NET | NCCL_ENV, "(IB-CAST) RCCL_IB_QP_SCHED_WRR_ENABLE set to %s",
          parms->wrrEnable ? "enabled" : "disabled");
