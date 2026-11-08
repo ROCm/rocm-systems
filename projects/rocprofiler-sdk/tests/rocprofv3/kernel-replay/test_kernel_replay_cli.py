@@ -268,7 +268,9 @@ def test_range_without_beta_acknowledgement_is_rejected():
     except SystemExit as exc:
         assert exc.code != 0
     else:
-        raise AssertionError("range replay without the beta acknowledgement should be rejected")
+        raise AssertionError(
+            "range replay without the beta acknowledgement should be rejected"
+        )
 
 
 def test_replay_without_counter_collection_is_rejected():
