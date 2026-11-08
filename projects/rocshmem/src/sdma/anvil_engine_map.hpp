@@ -129,6 +129,23 @@ inline int leastLoadedUsableEngine(const std::vector<uint32_t>& queuesPerEngine)
   return best;
 }
 
+// The usable engine of an HSA preferred-copy-engine mask carrying the fewest queues, lowest id on a
+// tie. MI450 reports every engine as preferred for every GPU pair, and taking the lowest one stacks
+// every local-peer queue on engine 0 past its KFD queue limit. Falls back to preferredUsableEngine
+// when the load is unknown (empty vector) or no even engine of the mask is counted in it.
+inline int leastLoadedPreferredEngine(uint32_t preferredMask,
+                                      const std::vector<uint32_t>& queuesPerEngine) {
+  const uint32_t evenMask = preferredMask & 0x55555555u;
+  int best = -1;
+  for (size_t e = 0; e < queuesPerEngine.size() && e < 32; e += 2) {
+    if ((evenMask & (1u << e)) == 0) continue;
+    if (best < 0 || queuesPerEngine[e] < queuesPerEngine[static_cast<size_t>(best)]) {
+      best = static_cast<int>(e);
+    }
+  }
+  return best >= 0 ? best : preferredUsableEngine(preferredMask);
+}
+
 }  // namespace sdma_anvil
 
 #endif  // LIBRARY_SRC_SDMA_ANVIL_ENGINE_MAP_HPP_

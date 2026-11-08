@@ -545,16 +545,6 @@ bool AnvilLib::connect(int srcDeviceId, int dstDeviceId, int numChannels) {
               dstDeviceId, gpuAgentsByHipDev_.size(), srcDeviceId);
     return false;
   }
-  const EngineSelection selection = getSdmaEngineId(srcDeviceId, dstDeviceId);
-  if (!isUsableSdmaEngine(selection.engineId)) {
-    LOG_ERROR("anvil: no usable even SDMA engine for %d -> %d (selected %d)", srcDeviceId,
-              dstDeviceId, selection.engineId);
-    return false;
-  }
-  const uint32_t engineId = static_cast<uint32_t>(selection.engineId);
-  LOG_TRACE("SDMA: Connect from %d to %d with %d channels using engine %d",
-            srcDeviceId, dstDeviceId, numChannels, engineId);
-
   // KFD does not report how many queues ROCr already holds, so this only predicts gross
   // over-subscription; a NO_MEMORY from queue creation below is reported against the same budget.
   const uint32_t usableEngines = usableSdmaEngines(numSdmaEnginesTotal_);
@@ -580,6 +570,18 @@ bool AnvilLib::connect(int srcDeviceId, int dstDeviceId, int numChannels) {
   auto& vec = sdma_channels_[dstDeviceId];
   const size_t already = vec.size();
   for (int c = 0; c < numChannels; ++c) {
+    // Selected per channel: the preferred mask can name several engines, and the least loaded one
+    // changes as each queue is added.
+    const EngineSelection selection = getSdmaEngineId(srcDeviceId, dstDeviceId);
+    if (!isUsableSdmaEngine(selection.engineId)) {
+      LOG_ERROR("anvil: no usable even SDMA engine for %d -> %d (selected %d)", srcDeviceId,
+                dstDeviceId, selection.engineId);
+      releaseQueues(vec, already);
+      return false;
+    }
+    const uint32_t engineId = static_cast<uint32_t>(selection.engineId);
+    LOG_TRACE("SDMA: Connect from %d to %d channel %d using engine %d", srcDeviceId, dstDeviceId, c,
+              engineId);
     SdmaQueue* queue = createSdmaQueue(srcDeviceId, dstDeviceId, engineId, selection);
     if (queue == nullptr) {
       if (lastQueueStatus_ == HSAKMT_STATUS_NO_MEMORY) {
@@ -797,7 +799,7 @@ EngineSelection AnvilLib::getSdmaEngineId(int srcDeviceId, int dstDeviceId) {
         hsa_amd_memory_get_preferred_copy_engine(dstAgent, srcAgent, &selection_.preferredMask);
     selection_.preferredQueried = true;
     if (selection_.preferredStatus == HSA_STATUS_SUCCESS && selection_.preferredMask != 0) {
-      const int engineId = preferredUsableEngine(selection_.preferredMask);
+      const int engineId = leastLoadedPreferredEngine(selection_.preferredMask, queuesPerEngine());
       if (engineId >= 0 && (numSdmaEnginesTotal_ == 0 ||
                             static_cast<uint32_t>(engineId) < numSdmaEnginesTotal_)) {
         selection_.usedPreferred = true;

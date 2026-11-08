@@ -402,6 +402,28 @@ TEST(AnvilEngineLoad, LeastLoadedWithUnknownEngineCountUsesEngineZero) {
   EXPECT_EQ(sdma_anvil::leastLoadedUsableEngine({}), 0);
 }
 
+// Local-peer queues: MI450 reports every engine as preferred (mask 0xfff), so taking the lowest
+// preferred engine put every local queue of a 4P16G pod rank on engine 0 and exhausted its KFD
+// queues. The least loaded preferred engine spreads them.
+TEST(AnvilEngineLoad, PreferredPicksTheLeastLoadedEngineOfTheMask) {
+  EXPECT_EQ(sdma_anvil::leastLoadedPreferredEngine(0xfff, {2, 0, 2, 0, 1, 0, 2, 0, 2, 0, 2, 0}), 4);
+  EXPECT_EQ(sdma_anvil::leastLoadedPreferredEngine(0xfff, {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}), 0);
+  // Engines outside the mask are not picked even when idle.
+  EXPECT_EQ(sdma_anvil::leastLoadedPreferredEngine(0x0014, {0, 0, 3, 0, 1, 0, 0, 0}), 4);
+}
+
+TEST(AnvilEngineLoad, PreferredSingleEngineMaskIsUnchanged) {
+  EXPECT_EQ(sdma_anvil::leastLoadedPreferredEngine(0x0004, {0, 0, 5, 0, 0, 0}), 2);
+  // Only an odd engine preferred: the paired even engine, as preferredUsableEngine picks.
+  EXPECT_EQ(sdma_anvil::leastLoadedPreferredEngine(0x0008, {0, 0, 5, 0, 0, 0}), 2);
+}
+
+TEST(AnvilEngineLoad, PreferredWithUnknownLoadUsesTheLowestPreferredEngine) {
+  EXPECT_EQ(sdma_anvil::leastLoadedPreferredEngine(0xfff, {}), 0);
+  EXPECT_EQ(sdma_anvil::leastLoadedPreferredEngine(0x0010, {}), 4);
+  EXPECT_EQ(sdma_anvil::leastLoadedPreferredEngine(0, {}), -1);
+}
+
 // Outside a fabric pod (MI300, MI350, or MI450 without one) SDMA cannot reach
 // another host, so a remote peer fails creation rather than aliasing a local GPU.
 TEST_F(GinAnvilSdmaFactoryTest, Create_RemoteHostPeerRejectedOutsidePod) {
