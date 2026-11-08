@@ -411,10 +411,11 @@ See :ref:`core-install-rocprof-var` for details on backend selection.
 Choosing what to profile
 ------------------------
 
-A profile run collects one of the following. Options from different groups can't
-be used together:
+A profile run collects one of the following. Options in the same group can be
+combined; options from different groups can't be used together, and
+rocprof-compute exits with an error:
 
-* **Blocks:** ``-b`` and its short forms ``--speed-of-light``, ``--memory-chart``,
+* **Blocks:** ``-b`` and its aliases ``--speed-of-light``, ``--memory-chart``,
   and ``--roofline``, in any combination.
 * **A metric set:** ``--set``. See :ref:`profiling-metric-sets`.
 * **Only the roofline benchmark:** ``--roofline-bench-only``. It also can't be used
@@ -435,7 +436,7 @@ Filtering options
    See :ref:`profile-selection-options` for the options it can be combined with.
 
 ``--speed-of-light``, ``--memory-chart``, ``--roofline``
-   Short forms of ``-b 2``, ``-b 3``, and ``-b 4``. They profile the
+   Aliases of ``-b 2``, ``-b 3``, and ``-b 4``. They profile the
    Speed-of-Light, Memory Chart, and Roofline blocks.
    See :ref:`profile-selection-options` for the options they can be combined with.
 
