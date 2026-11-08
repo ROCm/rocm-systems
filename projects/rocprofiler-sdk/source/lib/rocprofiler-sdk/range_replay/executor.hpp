@@ -83,10 +83,10 @@ plan_kernarg_layout(const std::vector<recorded_dispatch_t>& dispatches);
 std::vector<hsa::rocprofiler_packet>
 build_pass_packets(const std::vector<recorded_dispatch_t>& dispatches);
 
-// Per-region digests of a snapshot's host copies, ordered by device address so two snapshots of the
-// same regions compare positionally (the inventory itself is unordered).
-digest::region_digests_t
-snapshot_digests(const kernel_replay::memory_snapshot::device_snapshot_t& snapshot);
+// Per-region digests of a snapshot's storage, reading GPU-backed regions back to host memory as
+// needed. The optional is empty when a readback or allocation fails.
+std::optional<digest::region_digests_t>
+snapshot_digests(const kernel_replay::memory_snapshot::snapshot_t& snapshot);
 
 // Capture the range-entry snapshot, if this range is bound and does not have one yet. Called from
 // the queue path while recording the range's first submission, before that submission reaches the

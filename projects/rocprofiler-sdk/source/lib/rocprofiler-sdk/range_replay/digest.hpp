@@ -49,13 +49,26 @@ namespace range_replay
 {
 namespace digest
 {
-// FNV-1a over `size` bytes at `data`. Chosen for being trivially auditable and dependency-free;
-// this detects divergence, it does not defend against anything.
+// Hashes `size` bytes at `data` with the SSE4.2 CRC32 instruction when available and with FNV-1a
+// otherwise. Both are trivially auditable and dependency-free; this detects divergence, it does
+// not defend against anything.
 uint64_t
 hash_bytes(const void* data, size_t size);
 
 // Per-region digests of one point in time, positionally aligned with the snapshot's block list.
 using region_digests_t = std::vector<uint64_t>;
+
+struct region_data_t
+{
+    const void* address = nullptr;
+    const void* data    = nullptr;
+    size_t      size    = 0;
+};
+
+// Hash regions in ascending device-address order so snapshots with different inventory enumeration
+// orders can be compared positionally.
+region_digests_t
+hash_regions(const std::vector<region_data_t>& regions);
 
 // Number of regions whose digest differs. Mismatched lengths count as fully divergent: the two
 // digests do not describe the same set of regions, so nothing can be concluded region by region.

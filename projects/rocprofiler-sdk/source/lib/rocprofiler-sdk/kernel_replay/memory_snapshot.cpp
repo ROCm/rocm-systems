@@ -23,18 +23,32 @@
 #include "lib/rocprofiler-sdk/kernel_replay/memory_snapshot.hpp"
 
 #include "lib/common/logging.hpp"
+#include "lib/common/synchronized.hpp"
+#include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/code_object/hsa/code_object.hpp"
+#include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/memory_tracker.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/snapshot-plan.hpp"
+#include "lib/rocprofiler-sdk/kernel_replay/snapshot-storage.hpp"
 
 #include <fmt/format.h>
 #include <hsa/hsa.h>
 
+#include <algorithm>
+#include <array>
+#include <cstddef>
 #include <cstdint>
+#include <fstream>
+#include <functional>
+#include <limits>
 #include <new>
 #include <optional>
+#include <string>
 #include <string_view>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace rocprofiler
@@ -45,29 +59,14 @@ namespace memory_snapshot
 {
 namespace
 {
+using blit::copy_region_t;
+
 hsa_status_t
 dma_copy(void* dst, const void* src, size_t n)
 {
     auto* core = hsa::get_core_table();
     if(!core || !core->hsa_memory_copy_fn) return HSA_STATUS_ERROR;
     return core->hsa_memory_copy_fn(dst, src, n);
-}
-
-/// @brief Run @p copy under the tracker read lock, but only while [@p gpu_addr, +@p size) is still
-/// a live tracked allocation of >= @p size bytes, so a concurrent free (write lock) can't retire it
-/// mid-copy. Direction is caller-supplied: snap reads device->host, restore writes host->device.
-/// @return @p copy's status, or @c std::nullopt if the region was freed/shrunk since it was
-/// recorded.
-template <typename CopyFn>
-std::optional<hsa_status_t>
-with_inventory_check(void* gpu_addr, size_t size, CopyFn&& copy)
-{
-    return memory_tracker::inventory().rlock(
-        [&](const memory_tracker::tracked_map_t& map) -> std::optional<hsa_status_t> {
-            auto itr = map.find(gpu_addr);
-            if(itr == map.end() || itr->second.size < size) return std::nullopt;
-            return copy();
-        });
 }
 
 // A module-scope variable (__device__ / __constant__ global) discovered in a loaded executable.
@@ -128,6 +127,26 @@ collect_module_variable(hsa_executable_t, hsa_agent_t, hsa_executable_symbol_t s
         return HSA_STATUS_SUCCESS;
     }
 
+    // HIP emits a one-byte compilation-unit marker into every code object. It is linker/runtime
+    // metadata rather than application state, and snapshotting it would make the replay-owned blit
+    // code object recursively add another restore region.
+    if(size == 1)
+    {
+        constexpr auto hip_cuid_prefix = std::string_view{"__hip_cuid_"};
+        uint32_t       name_length     = 0;
+        if(core->hsa_executable_symbol_get_info_fn(symbol,
+                                                   HSA_EXECUTABLE_SYMBOL_INFO_NAME_LENGTH,
+                                                   &name_length) == HSA_STATUS_SUCCESS &&
+           name_length >= hip_cuid_prefix.size())
+        {
+            auto name = std::vector<char>(name_length + 1, '\0');
+            if(core->hsa_executable_symbol_get_info_fn(
+                   symbol, HSA_EXECUTABLE_SYMBOL_INFO_NAME, name.data()) == HSA_STATUS_SUCCESS &&
+               std::string_view{name.data()}.substr(0, hip_cuid_prefix.size()) == hip_cuid_prefix)
+                return HSA_STATUS_SUCCESS;
+        }
+    }
+
     if(addr == 0 || size == 0) return HSA_STATUS_SUCCESS;
 
     // A variable above the cap is skipped, which means a kernel's writes to it leak across replay
@@ -178,12 +197,415 @@ discover_module_variables(hsa_agent_t agent)
     });
     return scan;
 }
+
+// At most one retained high-water arena per pool. A larger returned arena replaces and frees the
+// old one, and smaller returns are freed. A snapshot that needs more than the retained arena frees
+// it before allocating, so retained memory never exceeds the largest snapshot so far.
+using retained_backing_t = std::unordered_map<uint64_t, block_t>;
+
+common::Synchronized<retained_backing_t>&
+retained_backing()
+{
+    // Keep backing allocations for process lifetime. HSA may already be unavailable during static
+    // destruction, so do not attempt to free them there.
+    static auto* value = new common::Synchronized<retained_backing_t>{};
+    return *value;
+}
+
+void
+free_pool_block(block_t block) noexcept
+{
+    if(!block) return;
+    if(auto* ext = hsa::get_amd_ext_table(); ext && ext->hsa_amd_memory_pool_free_fn)
+        ext->hsa_amd_memory_pool_free_fn(block.data);
+}
+
+// Returns the pool's retained arena when it can hold `size`. One that is too small is freed
+// instead, so the larger allocation that follows can use its memory.
+block_t
+take_retained_block(hsa_amd_memory_pool_t pool, size_t size) noexcept
+{
+    if(pool.handle == 0 || size == 0) return {};
+    auto taken   = block_t{};
+    auto evicted = block_t{};
+    try
+    {
+        retained_backing().wlock([&](auto& retained) {
+            auto itr = retained.find(pool.handle);
+            if(itr == retained.end() || !itr->second) return;
+            auto& out = itr->second.size >= size ? taken : evicted;
+            out       = std::exchange(itr->second, block_t{});
+        });
+    } catch(...)
+    {
+        return {};
+    }
+    free_pool_block(evicted);
+    return taken;
+}
+
+size_t
+retained_capacity(hsa_amd_memory_pool_t pool) noexcept
+{
+    if(pool.handle == 0) return 0;
+    try
+    {
+        return retained_backing().rlock([&](const auto& retained) {
+            auto itr = retained.find(pool.handle);
+            return itr == retained.end() ? size_t{0} : itr->second.size;
+        });
+    } catch(...)
+    {
+        return 0;
+    }
+}
+
+void
+retain_block(hsa_amd_memory_pool_t pool, block_t block) noexcept
+{
+    if(pool.handle == 0 || !block)
+    {
+        free_pool_block(block);
+        return;
+    }
+
+    // Map insertion may allocate. Destruction must remain noexcept, so retain nothing if the map
+    // cannot grow and release the arena directly.
+    try
+    {
+        retained_backing().wlock([&](auto& retained) {
+            auto& current = retained[pool.handle];
+            if(!current || block.size > current.size) std::swap(current, block);
+        });
+    } catch(...)
+    {}
+    free_pool_block(block);
+}
+
+constexpr size_t arena_alignment = 16;
+
+std::optional<size_t>
+pool_allocation_max(hsa_amd_memory_pool_t pool)
+{
+    auto* ext = hsa::get_amd_ext_table();
+    if(pool.handle == 0 || !ext || !ext->hsa_amd_memory_pool_get_info_fn) return std::nullopt;
+
+    bool allowed = false;
+    if(ext->hsa_amd_memory_pool_get_info_fn(
+           pool, HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED, &allowed) != HSA_STATUS_SUCCESS ||
+       !allowed)
+        return std::nullopt;
+
+    size_t maximum = 0;
+    if(ext->hsa_amd_memory_pool_get_info_fn(
+           pool, HSA_AMD_MEMORY_POOL_INFO_ALLOC_MAX_SIZE, &maximum) != HSA_STATUS_SUCCESS)
+        return std::nullopt;
+    return maximum;
+}
+
+bool
+pool_accepts(hsa_amd_memory_pool_t pool, size_t size)
+{
+    auto maximum = pool_allocation_max(pool);
+    return maximum && size <= *maximum;
+}
+
+std::optional<size_t>
+pool_size(hsa_amd_memory_pool_t pool)
+{
+    auto* ext = hsa::get_amd_ext_table();
+    if(pool.handle == 0 || !ext || !ext->hsa_amd_memory_pool_get_info_fn) return std::nullopt;
+
+    size_t total = 0;
+    if(ext->hsa_amd_memory_pool_get_info_fn(pool, HSA_AMD_MEMORY_POOL_INFO_SIZE, &total) !=
+       HSA_STATUS_SUCCESS)
+        return std::nullopt;
+    return total;
+}
+
+std::optional<uint64_t>
+gpu_available_bytes(hsa_agent_t agent)
+{
+    auto* core = hsa::get_core_table();
+    if(!core || !core->hsa_agent_get_info_fn) return std::nullopt;
+
+    uint64_t   available = 0;
+    const auto status    = core->hsa_agent_get_info_fn(
+        agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MEMORY_AVAIL), &available);
+    if(status != HSA_STATUS_SUCCESS) return std::nullopt;
+    return available;
+}
+
+std::optional<uint64_t>
+host_available_bytes()
+{
+    auto input = std::ifstream{"/proc/meminfo"};
+    if(!input) return std::nullopt;
+
+    auto     key       = std::string{};
+    auto     unit      = std::string{};
+    uint64_t value_kib = 0;
+    while(input >> key >> value_kib >> unit)
+    {
+        if(key != "MemAvailable:") continue;
+        if(unit != "kB" || value_kib > std::numeric_limits<uint64_t>::max() / 1024)
+            return std::nullopt;
+        return value_kib * 1024;
+    }
+    return std::nullopt;
+}
+
+size_t
+gpu_plan_budget(const capture_context_t& ctx)
+{
+    if(ctx.mode == capture_mode::force_pinned || !ctx.gpu_backend_available) return 0;
+    auto maximum = pool_allocation_max(ctx.gpu_pool);
+    if(!maximum) return 0;
+
+    // Hold at most half of the device's memory, and leave the application at least 5% of what is
+    // free. The retained arena counts as available because a larger snapshot frees it first.
+    auto budget = static_cast<uint64_t>(*maximum);
+    if(auto total = pool_size(ctx.gpu_pool)) budget = std::min<uint64_t>(budget, *total / 2);
+    if(auto available = gpu_available_bytes(ctx.agent))
+    {
+        const auto retained = static_cast<uint64_t>(retained_capacity(ctx.gpu_pool));
+        budget              = std::min(budget, retained + (*available - *available / 20));
+    }
+    return static_cast<size_t>(budget);
+}
+
+size_t
+host_plan_budget(const capture_context_t& ctx)
+{
+    if(ctx.mode == capture_mode::force_gpu) return 0;
+    auto maximum = pool_allocation_max(ctx.pinned_pool);
+    if(!maximum) return 0;
+    // Pinned memory cannot be swapped out, so use at most half of what the host has available. The
+    // retained arena counts as available, as on the GPU.
+    if(auto available = host_available_bytes())
+        return std::min(*maximum,
+                        retained_capacity(ctx.pinned_pool) + static_cast<size_t>(*available / 2));
+    return *maximum;
+}
+
+// Allocates one tier's backing from an HSA pool. The returned block releases itself according to
+// its retain mode.
+struct hsa_pool_allocator
+{
+    using handle_type = owned_block_t;
+
+    storage_kind          kind       = storage_kind::none;
+    retain_mode           retain     = retain_mode::per_replay;
+    hsa_amd_memory_pool_t pool       = {};
+    hsa_agent_t           agent      = {};
+    hsa_agent_t           peer_agent = {};
+    bool                  available  = false;
+
+    std::optional<owned_block_t> allocate(size_t size) const
+    {
+        if(!available || pool.handle == 0 || size == 0) return std::nullopt;
+
+        // A retained arena that is large enough consumes no fresh capacity. Consult it before
+        // asking whether a new allocation of this size is currently possible.
+        if(retain == retain_mode::across_replays)
+        {
+            if(auto retained = take_retained_block(pool, size); retained)
+                return owned_block_t{retained, kind, pool, retain};
+        }
+
+        if(!pool_accepts(pool, size)) return std::nullopt;
+
+        auto* ext = hsa::get_amd_ext_table();
+        if(!ext || !ext->hsa_amd_memory_pool_allocate_fn || !ext->hsa_amd_agents_allow_access_fn ||
+           !ext->hsa_amd_memory_pool_free_fn)
+            return std::nullopt;
+
+        void* ptr    = nullptr;
+        auto  status = ext->hsa_amd_memory_pool_allocate_fn(pool, size, 0, &ptr);
+        if(status != HSA_STATUS_SUCCESS || !ptr) return std::nullopt;
+
+        if(peer_agent.handle != 0)
+        {
+            status = ext->hsa_amd_agents_allow_access_fn(1, &peer_agent, nullptr, ptr);
+            if(status != HSA_STATUS_SUCCESS)
+            {
+                ext->hsa_amd_memory_pool_free_fn(ptr);
+                return std::nullopt;
+            }
+        }
+
+        status = ext->hsa_amd_agents_allow_access_fn(1, &agent, nullptr, ptr);
+        if(status == HSA_STATUS_SUCCESS)
+            return owned_block_t{block_t{size, ptr}, kind, pool, retain};
+
+        ext->hsa_amd_memory_pool_free_fn(ptr);
+        return std::nullopt;
+    }
+};
+
+using hsa_tier =
+    storage::arena<planning::whole_region, storage::bump_suballocator<hsa_pool_allocator>>;
+using snapshot_storage = storage::fallback<hsa_tier, hsa_tier, storage::null_tier>;
+
+snapshot_storage
+make_snapshot_storage(const capture_context_t& ctx, storage_budgets_t budgets)
+{
+    const auto gpu    = hsa_pool_allocator{.kind      = storage_kind::gpu_local,
+                                        .retain    = retain_mode::across_replays,
+                                        .pool      = ctx.gpu_pool,
+                                        .agent     = ctx.agent,
+                                        .available = ctx.gpu_backend_available};
+    const auto pinned = hsa_pool_allocator{.kind       = storage_kind::pinned_host,
+                                           .retain     = retain_mode::across_replays,
+                                           .pool       = ctx.pinned_pool,
+                                           .agent      = ctx.agent,
+                                           .peer_agent = ctx.cpu_agent,
+                                           .available  = true};
+    return snapshot_storage{
+        hsa_tier{{}, {budgets.gpu_bytes, arena_alignment, gpu}},
+        hsa_tier{{}, {budgets.host_bytes, arena_alignment, pinned}},
+        storage::null_tier{},
+    };
+}
+
+bool
+region_is_live(const snapshot_region_t& region, const memory_tracker::tracked_map_t& inventory)
+{
+    if(region.liveness == liveness_kind::module_variable) return true;
+    if(region.liveness == liveness_kind::retired) return false;
+    auto itr = inventory.find(region.live_address);
+    return itr != inventory.end() && itr->second.size >= region.size;
+}
+
+copy_region_t
+capture_copy(const snapshot_t& snapshot, const snapshot_extent_t& extent)
+{
+    const auto& region  = snapshot.regions.at(extent.region_index);
+    const auto& segment = snapshot.segments.at(extent.segment_index);
+    auto*       backing = static_cast<std::byte*>(segment.backing.block().data);
+    return copy_region_t{
+        extent.size,
+        static_cast<std::byte*>(region.live_address) + extent.region_offset,
+        backing + extent.segment_offset,
+    };
+}
+
+copy_region_t
+restore_copy(const snapshot_t& snapshot, const snapshot_extent_t& extent)
+{
+    const auto& region  = snapshot.regions.at(extent.region_index);
+    const auto& segment = snapshot.segments.at(extent.segment_index);
+    auto*       backing = static_cast<std::byte*>(segment.backing.block().data);
+    return copy_region_t{
+        extent.size,
+        backing + extent.segment_offset,
+        static_cast<std::byte*>(region.live_address) + extent.region_offset,
+    };
+}
 }  // namespace
 
-device_snapshot_t
+owned_block_t::owned_block_t(block_t               block,
+                             storage_kind          kind,
+                             hsa_amd_memory_pool_t pool,
+                             retain_mode           retain)
+: m_block{block}
+, m_kind{kind}
+, m_pool{pool}
+, m_retain{retain}
+{}
+
+owned_block_t::~owned_block_t() { reset(); }
+
+owned_block_t::owned_block_t(owned_block_t&& rhs) noexcept
+: m_block{std::exchange(rhs.m_block, block_t{})}
+, m_kind{std::exchange(rhs.m_kind, storage_kind::none)}
+, m_pool{std::exchange(rhs.m_pool, hsa_amd_memory_pool_t{.handle = 0})}
+, m_retain{std::exchange(rhs.m_retain, retain_mode::per_replay)}
+{}
+
+owned_block_t&
+owned_block_t::operator=(owned_block_t&& rhs) noexcept
+{
+    if(this == &rhs) return *this;
+    reset();
+    m_block  = std::exchange(rhs.m_block, block_t{});
+    m_kind   = std::exchange(rhs.m_kind, storage_kind::none);
+    m_pool   = std::exchange(rhs.m_pool, hsa_amd_memory_pool_t{.handle = 0});
+    m_retain = std::exchange(rhs.m_retain, retain_mode::per_replay);
+    return *this;
+}
+
+void
+owned_block_t::reset() noexcept
+{
+    if(!m_block) return;
+    if(m_retain == retain_mode::across_replays)
+        retain_block(m_pool, m_block);
+    else if(auto* ext = hsa::get_amd_ext_table(); ext && ext->hsa_amd_memory_pool_free_fn)
+        ext->hsa_amd_memory_pool_free_fn(m_block.data);
+
+    m_block  = {};
+    m_kind   = storage_kind::none;
+    m_pool   = hsa_amd_memory_pool_t{.handle = 0};
+    m_retain = retain_mode::per_replay;
+}
+
+size_t
+snapshot_t::footprint_bytes() const
+{
+    size_t total = 0;
+    for(const auto& region : regions)
+        if(region.liveness != liveness_kind::retired) total += region.size;
+    return total;
+}
+
+storage_kind
+snapshot_t::storage() const
+{
+    if(segments.empty()) return storage_kind::none;
+    const auto first = segments.front().backing.kind();
+    for(const auto& segment : segments)
+        if(segment.backing.kind() != first) return storage_kind::mixed;
+    return first;
+}
+
+snapshot_t
 snap(hsa_agent_t agent)
 {
-    device_snapshot_t out{};
+    auto cache = agent::get_agent_cache(agent);
+    if(!cache)
+    {
+        auto out   = snapshot_t{};
+        out.status = capture_status::unavailable;
+        return out;
+    }
+
+    return snap(capture_context_t{
+        agent,
+        cache->near_cpu(),
+        cache->gpu_pool(),
+        cache->cpu_pool(),
+        capture_mode::force_pinned,
+        false,
+    });
+}
+
+snapshot_t
+snap(const capture_context_t& ctx)
+{
+    return snap(ctx, storage_budgets_t{gpu_plan_budget(ctx), host_plan_budget(ctx)});
+}
+
+snapshot_t
+snap(const capture_context_t& ctx, const batch_copy_fn_t& batch_copy)
+{
+    return snap(ctx, storage_budgets_t{gpu_plan_budget(ctx), host_plan_budget(ctx)}, batch_copy);
+}
+
+snapshot_t
+snap(const capture_context_t& ctx, storage_budgets_t budgets, const batch_copy_fn_t& batch_copy)
+{
+    auto out = snapshot_t{};
 
     // Note: trackable allocations carrying HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG are recorded in
     // memory_tracker::unsupported_executable() and omitted from the main inventory. Declining
@@ -200,15 +622,14 @@ snap(hsa_agent_t agent)
     auto scan      = module_variable_scan_t{};
     try
     {
-        inventory = memory_tracker::snap_inventory(agent);
-        scan      = discover_module_variables(agent);
-
-        out.blocks.reserve(inventory.size() + scan.found.size());
+        inventory = memory_tracker::snap_inventory(ctx.agent);
+        scan      = discover_module_variables(ctx.agent);
+        out.regions.reserve(inventory.size() + scan.found.size());
     } catch(const std::bad_alloc&)
     {
         LOG_FIRST_N(WARNING, 1) << "kernel-replay snapshot: out of memory reserving metadata; "
                                    "declining replay for this dispatch";
-        out.ok = false;
+        out.status = capture_status::unavailable;
         return out;
     }
 
@@ -219,159 +640,287 @@ snap(hsa_agent_t agent)
         LOG_FIRST_N(WARNING, 1) << "kernel-replay snapshot: could not enumerate module-scope "
                                    "variables for every loaded executable; declining replay for "
                                    "this dispatch";
-        out.ok = false;
+        out.status = capture_status::invalid_plan;
         return out;
     }
 
-    const auto& module_vars = scan.found;
-
-    /// @brief Capture one region (device->host) into the snapshot.
-    /// @retval false The snapshot is incomplete because a host allocation or the DMA copy failed.
-    /// The caller must decline replay rather than restore partial state.
-    /// @retval true The region was captured. For tracker regions it may instead have been dropped
-    /// after being freed or shrunk since snap_inventory(). That drop is safe because restore() runs
-    /// the same liveness check, so a region gone now could not have been restored anyway.
-    auto capture =
-        [&](void* gpu_addr, size_t size, std::string_view what, bool from_tracker) -> bool {
-        if(size == 0) return true;
-
-        auto blk         = mem_block_t{};
-        blk.gpu_addr     = gpu_addr;
-        blk.from_tracker = from_tracker;
-        try
-        {
-            blk.host_copy.resize(size);
-        } catch(const std::bad_alloc&)
-        {
-            ROCP_WARNING << fmt::format("kernel-replay snapshot: host allocation of {} bytes "
-                                        "failed for {} {} (memory pressure)",
-                                        size,
-                                        what,
-                                        gpu_addr);
-            return false;
-        }
-
-        // snap_inventory() released the tracker lock before returning. A host thread calling
-        // hsa_amd_memory_pool_free / hsa_memory_free can retire this allocation while we
-        // read it, because the alloc/free wrappers are not covered by the per-agent replay lock.
-        // The with_inventory_check helper re-checks liveness and copies under the read lock, the
-        // same guard restore() applies to the write direction. A nullopt result means the region
-        // was freed or shrunk after snap_inventory(), so we drop it rather than read retired device
-        // memory. Module variables live in the loaded executable, not the tracker. They are always
-        // present, so we copy them directly.
-        const auto st =
-            from_tracker
-                ? with_inventory_check(
-                      gpu_addr,
-                      size,
-                      [&] { return dma_copy(blk.host_copy.data(), gpu_addr, size); })
-                : std::optional<hsa_status_t>{dma_copy(blk.host_copy.data(), gpu_addr, size)};
-
-        if(!st)
-        {
-            ROCP_INFO << fmt::format("kernel-replay snapshot: {} {} ({}B) was retired before "
-                                     "capture, dropping from snapshot",
-                                     what,
-                                     gpu_addr,
-                                     size);
-            return true;
-        }
-
-        if(*st != HSA_STATUS_SUCCESS)
-        {
-            ROCP_WARNING << fmt::format(
-                "kernel-replay snapshot: device->host copy failed for {} {} ({}B)",
-                what,
-                gpu_addr,
-                size);
-            return false;
-        }
-
-        out.blocks.push_back(std::move(blk));
-        return true;
-    };
-
     for(const auto& [ptr, size] : inventory)
     {
-        if(!capture(ptr, size, "region", /*from_tracker=*/true))
-        {
-            out.ok = false;
-            return out;
-        }
+        if(size == 0) continue;
+        out.regions.emplace_back(snapshot_region_t{size, ptr, liveness_kind::tracked_allocation});
     }
 
-    // Module-scope variables (__device__ / __constant__ globals) live in the loaded executable's
-    // data segment, not in the allocation tracker, so capture them here too. Restored via the same
-    // per-block host->device copy as tracked allocations (see restore()).
-    for(const auto& var : module_vars)
+    for(const auto& var : scan.found)
     {
-        if(!capture(var.gpu_addr, var.size, "module variable", /*from_tracker=*/false))
-        {
-            out.ok = false;
-            return out;
-        }
+        if(var.size == 0) continue;
+        out.regions.emplace_back(
+            snapshot_region_t{var.size, var.gpu_addr, liveness_kind::module_variable});
     }
 
-    ROCP_INFO << fmt::format("kernel-replay snapshot: captured {} regions (tracked allocations + "
-                             "module variables) for agent {}",
-                             out.blocks.size(),
-                             agent.handle);
+    if(out.regions.empty())
+    {
+        out.status = capture_status::complete;
+        return out;
+    }
+
+    // Address order makes placement under memory pressure reproducible from run to run.
+    std::sort(out.regions.begin(), out.regions.end(), [](const auto& lhs, const auto& rhs) {
+        return std::less<>{}(lhs.live_address, rhs.live_address);
+    });
+
+    auto chain      = make_snapshot_storage(ctx, budgets);
+    auto placements = std::optional<std::vector<planning::placement_t>>{};
+    try
+    {
+        auto requests = std::vector<planning::request_t>{};
+        requests.reserve(out.regions.size());
+        for(size_t i = 0; i < out.regions.size(); ++i)
+            requests.push_back(planning::request_t{i, 0, out.regions[i].size});
+
+        out.segments.reserve(snapshot_storage::tier_count);
+        placements = planning::plan_and_commit(chain, requests);
+        if(placements)
+        {
+            chain.release_backings([&](size_t tier, size_t size, owned_block_t backing) {
+                out.segments.push_back(storage_segment_t{size, tier, std::move(backing)});
+            });
+        }
+    } catch(const std::bad_alloc&)
+    {
+        LOG_FIRST_N(WARNING, 1) << "kernel-replay snapshot: out of memory planning snapshot "
+                                   "storage; declining replay for this dispatch";
+        out.regions.clear();
+        out.segments.clear();
+        out.status = capture_status::unavailable;
+        return out;
+    }
+
+    if(!placements)
+    {
+        ROCP_WARNING << fmt::format(
+            "kernel-replay snapshot: could not place {} bytes within {} GPU "
+            "and {} pinned-host bytes on agent {}; declining replay",
+            out.footprint_bytes(),
+            budgets.gpu_bytes,
+            budgets.host_bytes,
+            ctx.agent.handle);
+        out.regions.clear();
+        out.status = capture_status::unavailable;
+        return out;
+    }
+
+    try
+    {
+        auto segment_for_tier = std::array<std::optional<size_t>, snapshot_storage::tier_count>{};
+        for(size_t i = 0; i < out.segments.size(); ++i)
+            segment_for_tier[out.segments[i].tier] = i;
+
+        out.extents.reserve(placements->size());
+        for(const auto& placement : *placements)
+        {
+            const auto segment = segment_for_tier[placement.tier];
+            if(!segment)
+            {
+                out.regions.clear();
+                out.segments.clear();
+                out.status = capture_status::invalid_plan;
+                return out;
+            }
+            out.extents.push_back(snapshot_extent_t{placement.size,
+                                                    placement.region_index,
+                                                    placement.region_offset,
+                                                    *segment,
+                                                    placement.backing_offset});
+        }
+    } catch(const std::bad_alloc&)
+    {
+        out.regions.clear();
+        out.segments.clear();
+        out.extents.clear();
+        out.status = capture_status::unavailable;
+        return out;
+    }
+
+    auto gpu_copies = std::vector<copy_region_t>{};
+    try
+    {
+        gpu_copies.reserve(out.extents.size());
+    } catch(const std::bad_alloc&)
+    {
+        out.regions.clear();
+        out.segments.clear();
+        out.extents.clear();
+        out.status = capture_status::unavailable;
+        return out;
+    }
+
+    // One inventory read lock covers every copy, including the batch, so no tracked region can be
+    // freed while it is being read.
+    size_t     captured_regions = 0;
+    const auto status           = memory_tracker::inventory().rlock([&](const auto& map) {
+        for(size_t region_index = 0; region_index < out.regions.size(); ++region_index)
+        {
+            auto& region = out.regions[region_index];
+            if(!region_is_live(region, map))
+            {
+                ROCP_INFO << fmt::format("kernel-replay snapshot: region {} ({}B) was retired "
+                                         "before capture, dropping from snapshot",
+                                         region.live_address,
+                                         region.size);
+                region.liveness = liveness_kind::retired;
+                continue;
+            }
+            for(const auto& extent : out.extents)
+            {
+                if(extent.region_index != region_index) continue;
+                const auto copy = capture_copy(out, extent);
+                const auto kind = out.segments.at(extent.segment_index).backing.kind();
+                if(batch_copy && kind == storage_kind::gpu_local)
+                {
+                    gpu_copies.emplace_back(copy);
+                    continue;
+                }
+                const auto copy_status = dma_copy(copy.dest, copy.source, copy.size);
+                if(copy_status != HSA_STATUS_SUCCESS) return copy_status;
+            }
+            ++captured_regions;
+        }
+        return gpu_copies.empty() ? HSA_STATUS_SUCCESS : batch_copy(gpu_copies);
+    });
+
+    if(status != HSA_STATUS_SUCCESS)
+    {
+        ROCP_WARNING << fmt::format("kernel-replay snapshot: capture copy failed for agent {}",
+                                    ctx.agent.handle);
+        out.regions.clear();
+        out.extents.clear();
+        out.segments.clear();
+        out.status = capture_status::copy_failed;
+        return out;
+    }
+
+    out.status = capture_status::complete;
+
+    size_t gpu_bytes  = 0;
+    size_t host_bytes = 0;
+    for(const auto& segment : out.segments)
+    {
+        if(segment.backing.kind() == storage_kind::gpu_local)
+            gpu_bytes += segment.size;
+        else if(segment.backing.kind() == storage_kind::pinned_host)
+            host_bytes += segment.size;
+    }
+    ROCP_INFO << fmt::format("kernel-replay snapshot: captured {} regions using {} GPU bytes and "
+                             "{} pinned-host bytes for agent {}",
+                             captured_regions,
+                             gpu_bytes,
+                             host_bytes,
+                             ctx.agent.handle);
     return out;
 }
 
 bool
-restore(const device_snapshot_t& snapshot)
+restore(const snapshot_t& snapshot)
 {
-    size_t restored = 0;
-    for(const auto& blk : snapshot.blocks)
-    {
-        hsa_status_t status = HSA_STATUS_SUCCESS;
+    if(!snapshot.complete()) return false;
+    if(snapshot.extents.empty()) return true;
 
-        if(blk.from_tracker)
+    size_t     restored = 0;
+    const auto status   = memory_tracker::inventory().rlock([&](const auto& inventory) {
+        for(const auto& extent : snapshot.extents)
         {
-            // Re-check liveness and copy under the read lock so a concurrent free cannot race the
-            // check and the write (see with_inventory_check). A nullopt result means the region is
-            // no longer a live allocation of at least its size. It was freed or reallocated after
-            // snap, so skip it (benign -- not a restore failure).
-            const auto st = with_inventory_check(blk.gpu_addr, blk.host_copy.size(), [&] {
-                return dma_copy(blk.gpu_addr, blk.host_copy.data(), blk.host_copy.size());
-            });
-
-            if(!st)
+            const auto& region = snapshot.regions.at(extent.region_index);
+            if(!region_is_live(region, inventory))
             {
                 ROCP_WARNING << fmt::format(
                     "kernel-replay restore: skipping region {} ({}B) that is no longer live",
-                    blk.gpu_addr,
-                    blk.host_copy.size());
+                    region.live_address,
+                    region.size);
                 continue;
             }
-            status = *st;
+
+            const auto copy = restore_copy(snapshot, extent);
+            const auto st   = dma_copy(copy.dest, copy.source, copy.size);
+            if(st != HSA_STATUS_SUCCESS) return st;
+            ++restored;
         }
-        else
+        return HSA_STATUS_SUCCESS;
+    });
+
+    if(status != HSA_STATUS_SUCCESS)
+    {
+        ROCP_ERROR << fmt::format("kernel-replay restore: copy failed after {}/{} extents",
+                                  restored,
+                                  snapshot.extents.size());
+        return false;
+    }
+    ROCP_INFO << fmt::format(
+        "kernel-replay restore: restored {}/{} extents", restored, snapshot.extents.size());
+    return true;
+}
+
+bool
+restore(const snapshot_t& snapshot, const batch_copy_fn_t& batch_copy)
+{
+    if(!snapshot.complete()) return false;
+
+    auto gpu_regions = std::vector<blit::copy_region_t>{};
+    try
+    {
+        gpu_regions.reserve(snapshot.extents.size());
+    } catch(const std::bad_alloc&)
+    {
+        return false;
+    }
+    size_t restored = 0;
+    size_t skipped  = 0;
+
+    const auto status = memory_tracker::inventory().rlock([&](const auto& map) {
+        for(const auto& extent : snapshot.extents)
         {
-            // Module variable: lives in the loaded executable, always present, so restore directly.
-            status = dma_copy(blk.gpu_addr, blk.host_copy.data(), blk.host_copy.size());
+            const auto& region = snapshot.regions.at(extent.region_index);
+            if(!region_is_live(region, map))
+            {
+                ROCP_WARNING << fmt::format(
+                    "kernel-replay restore: skipping region {} ({}B) that is no longer live",
+                    region.live_address,
+                    region.size);
+                ++skipped;
+                continue;
+            }
+
+            auto       copy = restore_copy(snapshot, extent);
+            const auto kind = snapshot.segments.at(extent.segment_index).backing.kind();
+            if(kind == storage_kind::gpu_local)
+            {
+                gpu_regions.emplace_back(copy);
+            }
+            else
+            {
+                auto copy_status = dma_copy(copy.dest, copy.source, copy.size);
+                if(copy_status != HSA_STATUS_SUCCESS) return copy_status;
+                ++restored;
+            }
         }
 
-        if(status != HSA_STATUS_SUCCESS)
-        {
-            // A live region failed to copy. Further passes would observe mutated state, and the
-            // final pass (which deliberately skips restore) would leave that corruption visible to
-            // the application. Abort: a partial restore cannot be undone.
-            ROCP_ERROR << fmt::format(
-                "kernel-replay restore: host->device copy failed for region {} ({}B); aborting "
-                "restore after {}/{} regions",
-                blk.gpu_addr,
-                blk.host_copy.size(),
-                restored,
-                snapshot.blocks.size());
-            return false;
-        }
-        ++restored;
+        auto copy_status = batch_copy(gpu_regions);
+        if(copy_status != HSA_STATUS_SUCCESS) return copy_status;
+        restored += gpu_regions.size();
+        return HSA_STATUS_SUCCESS;
+    });
+
+    if(status != HSA_STATUS_SUCCESS)
+    {
+        ROCP_ERROR << fmt::format("kernel-replay restore: batch copy failed after {}/{} regions",
+                                  restored,
+                                  snapshot.extents.size());
+        return false;
     }
 
-    ROCP_INFO << fmt::format(
-        "kernel-replay restore: restored {}/{} regions", restored, snapshot.blocks.size());
+    ROCP_INFO << fmt::format("kernel-replay restore: restored {}/{} regions ({} skipped)",
+                             restored,
+                             snapshot.extents.size(),
+                             skipped);
     return true;
 }
 }  // namespace memory_snapshot
