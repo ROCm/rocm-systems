@@ -205,6 +205,41 @@ make_minimal_amdgpu_elf_with_text_words_and_rodata(std::span<const uint32_t> tex
       reinterpret_cast<const uint8_t *>(text_words.data()), text_words.size_bytes()));
 }
 
+std::vector<uint8_t> make_section_alignment_elf(bool with_loads) {
+  const std::vector<uint32_t> words(16, 0xBF800000u);
+  std::vector<uint8_t> image = make_minimal_amdgpu_elf_with_text_words_and_rodata(words);
+  Elf64_Ehdr header = read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+  std::vector<Elf64_Shdr> sections =
+      read_elf_array_for_test<Elf64_Shdr>(image, header.e_shoff, header.e_shnum);
+  header.e_ident[EI_DATA] = ELFDATA2LSB;
+  header.e_ident[EI_VERSION] = 1;
+  header.e_type = ET_DYN;
+  header.e_phoff = with_loads ? sizeof(header) : 0;
+  header.e_phentsize = sizeof(Elf64_Phdr);
+  header.e_phnum = with_loads ? 2 : 0;
+  sections[1].sh_addr = 0x1100;
+  sections[2].sh_addr = 0x2140;
+  sections[2].sh_addralign = 64;
+  write_elf_struct_for_test(image, 0, header);
+  write_bytes_for_test(image, header.e_shoff, sections.data(),
+                       sections.size() * sizeof(Elf64_Shdr));
+  if (with_loads) {
+    for (size_t index = 0; index < 2; ++index) {
+      const Elf64_Shdr &section = sections[index + 1];
+      const Elf64_Phdr segment = {.p_type = PT_LOAD,
+                                  .p_flags = index == 0 ? 5u : 4u,
+                                  .p_offset = section.sh_offset,
+                                  .p_vaddr = section.sh_addr,
+                                  .p_paddr = section.sh_addr,
+                                  .p_filesz = section.sh_size,
+                                  .p_memsz = section.sh_size,
+                                  .p_align = 16};
+      write_elf_struct_for_test(image, header.e_phoff + index * sizeof(segment), segment);
+    }
+  }
+  return image;
+}
+
 std::vector<uint8_t> make_minimal_gfx1250_elf_with_empty_text_and_rodata() {
   auto image = make_minimal_amdgpu_elf_with_text_and_rodata();
   auto ehdr = read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
@@ -2966,6 +3001,120 @@ TEST(CodeObjectPatcher, PreservesPrivateEnableForZeroFixedDynamicStack) {
   EXPECT_EQ(RJ_AMDHSA_BITS_GET(patched_descriptor.compute_pgm_rsrc2,
                                COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT),
             1u);
+}
+
+TEST(CodeObjectPatcher, ReplaceTextPreservesSectionAlignmentWithOrWithoutLoads) {
+  for (const bool with_loads : {false, true}) {
+    SCOPED_TRACE(with_loads);
+    for (const uint64_t growth : {0u, 4u, 64u}) {
+      SCOPED_TRACE(growth);
+      const std::vector<uint8_t> image = make_section_alignment_elf(with_loads);
+      const Elf64_Ehdr original_header = read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+      const std::vector<Elf64_Shdr> original_sections = read_elf_array_for_test<Elf64_Shdr>(
+          image, original_header.e_shoff, original_header.e_shnum);
+      ASSERT_EQ(original_sections[1].sh_size, 64u);
+      ASSERT_EQ(original_sections[2].sh_offset, 0x140u);
+      ASSERT_EQ(original_sections[2].sh_offset % original_sections[2].sh_addralign, 0u);
+      ASSERT_EQ(original_sections[2].sh_addr % original_sections[2].sh_addralign, 0u);
+      const AmdGpuCodeObject source(image.data(), image.size());
+      ASSERT_TRUE(source.is_valid());
+      CodeObjectPatcher patcher(source);
+      std::vector<uint8_t> replacement(patcher.text_bytes().begin(), patcher.text_bytes().end());
+      replacement.resize(replacement.size() + growth, 0);
+      ASSERT_TRUE(patcher.replace_text(replacement));
+      const std::vector<uint8_t> output = patcher.emit();
+      const Elf64_Ehdr header = read_elf_struct_for_test<Elf64_Ehdr>(output, 0);
+      const std::vector<Elf64_Shdr> sections =
+          read_elf_array_for_test<Elf64_Shdr>(output, header.e_shoff, header.e_shnum);
+      const uint64_t delta = growth == 0 ? 0 : 64;
+      EXPECT_EQ(sections[1].sh_size, replacement.size());
+      EXPECT_EQ(sections[2].sh_offset, original_sections[2].sh_offset + delta);
+      EXPECT_EQ(sections[2].sh_addr, original_sections[2].sh_addr + delta);
+      EXPECT_EQ(sections[2].sh_offset % sections[2].sh_addralign, 0u);
+      EXPECT_EQ(sections[2].sh_addr % sections[2].sh_addralign, 0u);
+      EXPECT_EQ(std::memcmp(output.data() + sections[1].sh_offset, replacement.data(),
+                            replacement.size()),
+                0);
+      EXPECT_EQ(std::memcmp(output.data() + sections[2].sh_offset,
+                            image.data() + original_sections[2].sh_offset,
+                            original_sections[2].sh_size),
+                0);
+      std::vector<Elf64_Phdr> segments;
+      if (header.e_phnum != 0)
+        segments = read_elf_array_for_test<Elf64_Phdr>(output, header.e_phoff, header.e_phnum);
+      EXPECT_EQ(segments.size(), with_loads ? 2u : 0u);
+      for (const Elf64_Phdr &segment : segments)
+        EXPECT_EQ(segment.p_offset % segment.p_align, segment.p_vaddr % segment.p_align);
+      EXPECT_EQ(std::memcmp(source.image_data(), image.data(), image.size()), 0);
+    }
+  }
+}
+
+TEST(CodeObjectPatcher, ReplaceTextPreservesIndependentFileAndVirtualSectionAlignment) {
+  for (const bool file_backed : {false, true}) {
+    SCOPED_TRACE(file_backed);
+    std::vector<uint8_t> image = make_section_alignment_elf(false);
+    const Elf64_Ehdr original_header = read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+    std::vector<Elf64_Shdr> original_sections = read_elf_array_for_test<Elf64_Shdr>(
+        image, original_header.e_shoff, original_header.e_shnum);
+    if (file_backed) {
+      original_sections[2].sh_flags = 0;
+      original_sections[2].sh_addr = 0;
+    } else {
+      original_sections[2].sh_type = SHT_NOBITS;
+      original_sections[2].sh_offset = original_sections[1].sh_offset;
+    }
+    write_bytes_for_test(image, original_header.e_shoff, original_sections.data(),
+                         original_sections.size() * sizeof(Elf64_Shdr));
+    const AmdGpuCodeObject source(image.data(), image.size());
+    ASSERT_TRUE(source.is_valid());
+    CodeObjectPatcher patcher(source);
+    std::vector<uint8_t> replacement(patcher.text_bytes().begin(), patcher.text_bytes().end());
+    replacement.resize(replacement.size() + 4, 0);
+    ASSERT_TRUE(patcher.replace_text(replacement));
+    const std::vector<uint8_t> output = patcher.emit();
+    const Elf64_Ehdr header = read_elf_struct_for_test<Elf64_Ehdr>(output, 0);
+    const std::vector<Elf64_Shdr> sections =
+        read_elf_array_for_test<Elf64_Shdr>(output, header.e_shoff, header.e_shnum);
+    EXPECT_EQ(sections[2].sh_offset, original_sections[2].sh_offset + (file_backed ? 64 : 0));
+    EXPECT_EQ(sections[2].sh_addr, original_sections[2].sh_addr + (file_backed ? 0 : 64));
+    EXPECT_EQ(file_backed ? sections[2].sh_offset % 64 : sections[2].sh_addr % 64, 0u);
+    EXPECT_EQ(std::memcmp(source.image_data(), image.data(), image.size()), 0);
+  }
+}
+
+TEST(CodeObjectPatcher, ReplaceTextRejectsUnrepresentableSectionShiftWithoutMutation) {
+  struct AlignmentCase {
+    bool with_loads;
+    uint64_t alignment;
+    uint64_t address;
+  };
+  constexpr uint64_t kMax = std::numeric_limits<uint64_t>::max();
+  const std::array<AlignmentCase, 3> cases = {{
+      {.with_loads = true, .alignment = kMax, .address = 0x2140},
+      {.with_loads = false, .alignment = uint64_t{1} << 63, .address = 0x2140},
+      {.with_loads = false, .alignment = 64, .address = kMax - 63},
+  }};
+  for (const AlignmentCase &test_case : cases) {
+    SCOPED_TRACE(test_case.alignment);
+    SCOPED_TRACE(test_case.address);
+    std::vector<uint8_t> image = make_section_alignment_elf(test_case.with_loads);
+    const Elf64_Ehdr header = read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+    std::vector<Elf64_Shdr> sections =
+        read_elf_array_for_test<Elf64_Shdr>(image, header.e_shoff, header.e_shnum);
+    sections[2].sh_addralign = test_case.alignment;
+    sections[2].sh_addr = test_case.address;
+    write_bytes_for_test(image, header.e_shoff, sections.data(),
+                         sections.size() * sizeof(Elf64_Shdr));
+    const AmdGpuCodeObject source(image.data(), image.size());
+    ASSERT_TRUE(source.is_valid());
+    CodeObjectPatcher patcher(source);
+    std::vector<uint8_t> replacement(patcher.text_bytes().begin(), patcher.text_bytes().end());
+    replacement.resize(replacement.size() + 4, 0);
+    EXPECT_FALSE(patcher.replace_text(replacement));
+    EXPECT_TRUE(std::ranges::equal(patcher.image_bytes(), image));
+    EXPECT_EQ(std::memcmp(source.image_data(), image.data(), image.size()), 0);
+  }
 }
 
 TEST(CodeObjectPatcher, ReplaceTextPreservesLoadSegmentAlignment) {
