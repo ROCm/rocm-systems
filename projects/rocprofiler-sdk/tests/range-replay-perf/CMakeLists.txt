@@ -36,18 +36,18 @@ target_sources(range-replay-perf-client PRIVATE client.cpp)
 target_include_directories(range-replay-perf-client PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(range-replay-perf-client PRIVATE rocprofiler-sdk::rocprofiler-sdk)
 
-# The application resolves the range replay entry points with dlsym instead of linking the
-# SDK: linking rocprofiler-sdk into a HIP executable makes HIP report
-# hipErrorInvalidDeviceFunction on the first launch on gfx942, the same reason the range
-# replay samples do it that way. It still needs the SDK headers for the declarations, so
-# it takes the headers target only.
+# The application calls rocprofiler_range_replay_begin / _end. It does not link
+# librocprofiler-sdk: that link makes the first kernel launch fail on gfx942. The preloaded
+# tool brings the SDK in, and the link leaves the API references unresolved so that library
+# satisfies them.
 set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
 add_executable(range-replay-perf-testapp)
 target_sources(range-replay-perf-testapp PRIVATE main.cpp)
 target_include_directories(range-replay-perf-testapp PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(
-    range-replay-perf-testapp PRIVATE rocprofiler-sdk::rocprofiler-sdk-headers
-                                      Threads::Threads ${CMAKE_DL_LIBS})
+    range-replay-perf-testapp PRIVATE rocprofiler-sdk::rocprofiler-sdk-headers Threads::Threads)
+target_link_options(range-replay-perf-testapp PRIVATE
+                    "LINKER:--unresolved-symbols=ignore-in-object-files")
 add_dependencies(range-replay-perf-testapp range-replay-perf-client)
 
 # Pass-count scaling: 32 MB footprint, 4 dispatches per range, P=2 vs P=5.

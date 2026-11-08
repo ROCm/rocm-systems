@@ -61,10 +61,10 @@ target_link_libraries(
     range-replay-local-context-client PRIVATE rocprofiler-sdk::rocprofiler-sdk
                                               rocprofiler-sdk::tests-build-flags)
 
-# The application resolves the range replay entry points with dlsym instead of linking the
-# SDK: linking rocprofiler-sdk into a HIP executable makes HIP report
-# hipErrorInvalidDeviceFunction on the first launch on gfx942, the same reason the range
-# replay samples do it that way.
+# The application calls rocprofiler_range_replay_begin / _end around the dispatches, the same
+# range a user writes. It does not link librocprofiler-sdk: that link makes the first kernel
+# launch fail on gfx942. The preloaded tool brings the SDK in, and the link leaves the API
+# references unresolved so that library satisfies them.
 set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
 add_executable(range-replay-local-context-testapp)
 target_sources(range-replay-local-context-testapp PRIVATE main.cpp range.hpp)
@@ -73,7 +73,9 @@ target_include_directories(range-replay-local-context-testapp
 target_link_libraries(
     range-replay-local-context-testapp
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-headers rocprofiler-sdk::tests-build-flags
-            Threads::Threads ${CMAKE_DL_LIBS})
+            Threads::Threads)
+target_link_options(range-replay-local-context-testapp
+                    PRIVATE "LINKER:--unresolved-symbols=ignore-in-object-files")
 add_dependencies(range-replay-local-context-testapp range-replay-local-context-client)
 
 if(ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE)

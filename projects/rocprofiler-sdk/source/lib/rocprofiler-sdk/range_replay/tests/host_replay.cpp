@@ -132,6 +132,36 @@ TEST(range_replay_host, begin_macro_calls_begin_once_and_reports_success_on_reen
     EXPECT_EQ(status, ROCPROFILER_STATUS_SUCCESS) << "a re-entry must not call begin again";
 }
 
+TEST(range_replay_host, scoped_range_macro_reenters_the_body_and_jumps_to_its_buffer)
+{
+    // The range is the statements between the macros. The jump buffer is the one in that scope.
+    volatile int entries = 0;
+
+    ROCPROFILER_REPLAY_RANGE_BEGIN(7)
+    ++entries;
+    if(entries == 1)
+    {
+        const auto first_status = rocp_begin_status_;
+        EXPECT_EQ(first_status, ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND);
+        EXPECT_EQ(range_replay::host_jmp_target(), static_cast<void*>(&rocp_env_))
+            << "end jumps to the scope-local buffer, which is still live here";
+        siglongjmp(*static_cast<sigjmp_buf*>(range_replay::host_jmp_target()), 1);
+    }
+    ROCPROFILER_REPLAY_RANGE_END()
+
+    EXPECT_EQ(entries, 2);
+    EXPECT_FALSE(range_replay::take_host_jmp_armed());
+}
+
+TEST(range_replay_host, first_entry_rejects_a_null_jump_buffer_without_arming)
+{
+    // A rejected call must not arm, whatever a previous test left staged.
+    (void) range_replay::take_host_jmp_armed();
+    EXPECT_EQ(rocprofiler_range_replay_host_first_entry(1, nullptr),
+              ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT);
+    EXPECT_FALSE(range_replay::take_host_jmp_armed());
+}
+
 namespace
 {
 rocprofiler_status_t

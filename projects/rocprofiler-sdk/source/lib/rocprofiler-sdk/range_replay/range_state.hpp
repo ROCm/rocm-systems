@@ -230,9 +230,19 @@ struct range_context_t
     host_range_state_t host = {};
 };
 
-// Staged thread-local sigjmp_buf behind rocprofiler_range_replay_host_jmpbuf(). host_jmpbuf() arms
-// it; take_host_jmp_armed() consumes the arming and promotes the staged target only without an open
-// range, so a rejected nested begin cannot replace the active range's target.
+// Jump target for host replay. host_jmpbuf() arms the staged thread-local sigjmp_buf behind
+// rocprofiler_range_replay_host_jmpbuf(). arm_caller_jmp() arms a sigjmp_buf the caller owns, which
+// is what ROCPROFILER_REPLAY_RANGE_BEGIN passes (the buffer lives in the range's scope).
+// take_host_jmp_armed() consumes the arming and promotes that pending target only when no range is
+// open, so a rejected nested begin cannot replace the active range's target.
+void
+arm_caller_jmp(void* env);
+
+// Drop a caller-owned jump target. end() does this on every path that returns, because the
+// scoped macro closes the block that owns the buffer immediately afterwards.
+void
+release_caller_jmp();
+
 void*
 host_jmpbuf();
 
