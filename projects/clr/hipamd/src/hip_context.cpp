@@ -164,7 +164,7 @@ hipError_t hipCtxCreate(hipCtx_t* ctx, unsigned int flags, hipDevice_t device) {
 
   *ctx = reinterpret_cast<hipCtx_t>(g_devices[device]);
 
-  g_devices[device]->explicitCtxCount_++;
+  g_devices[device]->RetainExplicitCtx();
   g_devices[device]->setFlags(flags);
   tls.ctxt_stack_.push(g_devices[device]);
 
@@ -237,10 +237,9 @@ hipError_t hipCtxDestroy(hipCtx_t ctx) {
     HIP_RETURN(hipErrorInvalidContext);
   }
 
-  if (dev->explicitCtxCount_ == 0) {
+  if (!dev->ReleaseExplicitCtx()) {
     HIP_RETURN(hipErrorInvalidContext);
   }
-  dev->explicitCtxCount_--;
 
   // Need to remove the ctx of calling thread if its the top one
   if (!tls.ctxt_stack_.empty() && tls.ctxt_stack_.top() == dev) {
@@ -367,10 +366,9 @@ hipError_t hipDevicePrimaryCtxRelease(hipDevice_t dev) {
     HIP_RETURN(hipErrorInvalidDevice);
   }
 
-  if (g_devices[dev]->primaryCtxCount_ == 0) {
+  if (!g_devices[dev]->ReleasePrimaryCtx()) {
     HIP_RETURN(hipErrorInvalidContext);
   }
-  g_devices[dev]->primaryCtxCount_--;
 
   HIP_RETURN(hipSuccess);
 }
@@ -387,7 +385,7 @@ hipError_t hipDevicePrimaryCtxRetain(hipCtx_t* pctx, hipDevice_t dev) {
 
   *pctx = reinterpret_cast<hipCtx_t>(g_devices[dev]);
 
-  g_devices[dev]->primaryCtxCount_++;
+  g_devices[dev]->RetainPrimaryCtx();
 
   HIP_RETURN(hipSuccess);
 }
