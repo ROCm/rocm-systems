@@ -637,11 +637,6 @@ def selects_roofline(filter_blocks: Optional[List[str]]) -> bool:
     return not filter_blocks or any(is_roofline_block(b) for b in filter_blocks)
 
 
-def is_roofline_only(filter_blocks: Optional[List[str]]) -> bool:
-    """Return True if blocks are selected and all of them are roofline."""
-    return bool(filter_blocks) and all(is_roofline_block(b) for b in filter_blocks)
-
-
 def is_only_pc_sampling(filter_blocks: List[str]) -> bool:
     """Return True if all requested blocks are PC sampling (block 21 or the
     ``pc_sampling`` alias)."""

@@ -29,7 +29,6 @@ from utils.utils_common import (
     format_time,
     get_job_rank_and_size,
     is_only_pc_sampling,
-    is_roofline_only,
     print_status,
     selects_roofline,
 )
@@ -468,10 +467,7 @@ class RocProfCompute_Base:
                 "No performance counters to collect -- PC sampling only mode",
             )
 
-        msg = "Collecting Performance Counters"
-        roofline_only = is_roofline_only(self.__args.filter_blocks)
-        status_msg = f"{msg} (Roofline Only)" if roofline_only else msg
-        print_status(status_msg)
+        print_status("Collecting Performance Counters")
 
         if total_runs:
             # Warn once per profile run, not once per counter collection pass.

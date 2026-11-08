@@ -36,8 +36,8 @@ class gfx908_soc(OmniSoC_Base):
         # A full profile skips the unsupported benchmark without a warning
         if filter_blocks and selects_roofline(filter_blocks):
             console_warning(
-                f"{self.get_arch()} does not support the roofline benchmark. "
-                "Only the roofline counters are collected."
+                f"{self.get_arch()} does not support the roofline benchmark, so it "
+                "is skipped. The roofline counters are still collected."
             )
         return filter_blocks
 

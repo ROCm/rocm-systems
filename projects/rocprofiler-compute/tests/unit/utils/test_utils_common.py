@@ -1304,17 +1304,16 @@ def test_is_gfx1250_matches_only_the_supported_architecture():
 
 
 @pytest.mark.parametrize(
-    ("filter_blocks", "selects", "only"),
+    ("filter_blocks", "selects"),
     [
-        (None, True, False),
-        ([], True, False),
-        (["4"], True, True),
-        (["roofline"], True, True),
-        (["4.1.1"], True, True),
-        (["4", "4"], True, True),
-        (["2", "4"], True, False),
-        (["2", "sol"], False, False),
-        (["40"], False, False),
+        (None, True),
+        ([], True),
+        (["4"], True),
+        (["roofline"], True),
+        (["4.1.1"], True),
+        (["2", "4"], True),
+        (["2", "sol"], False),
+        (["40"], False),
     ],
     ids=[
         "none",
@@ -1322,13 +1321,11 @@ def test_is_gfx1250_matches_only_the_supported_architecture():
         "block_4",
         "alias",
         "roofline_metric",
-        "duplicate",
         "with_other_block",
         "no_roofline",
         "block_40",
     ],
 )
-def test_roofline_selection(filter_blocks, selects, only):
+def test_roofline_selection(filter_blocks, selects):
     """4, 4.x and the roofline alias all count as roofline."""
     assert utils_common.selects_roofline(filter_blocks) is selects
-    assert utils_common.is_roofline_only(filter_blocks) is only

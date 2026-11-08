@@ -12,7 +12,6 @@ from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.logger import console_debug, console_error, console_log, demarcate
 from utils.utils_common import (
     PROFILE_OUTPUT_FORMAT,
-    is_roofline_only,
     resolve_rocm_library_path,
 )
 from utils.utils_profile import pc_sampling_unit
@@ -189,9 +188,6 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
     @demarcate
     def run_profiling(self, version: str, prog: str) -> None:
         """Run profiling."""
-        if is_roofline_only(self.get_args().filter_blocks):
-            console_log("roofline", "Profiling roofline counters only.")
-
         # Log profiling options and setup filtering
         super().run_profiling(version, prog)
 
