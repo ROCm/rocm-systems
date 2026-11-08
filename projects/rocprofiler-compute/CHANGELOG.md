@@ -25,6 +25,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * The analysis database stores the per-source-line counts in `compute_pc_sample_state`, next to the per-instruction counts.
   * If some instructions of a source file have no source line number, the file's CSV starts with an `Unattributable instructions` row. It counts the samples lost because the compiler wrote no source line number for those instructions.
 
+* Added `--debug`, which lists the debug options in the help, for example `rocprof-compute analyze --debug --help`.
+
 ### Changed
 
 * Improved the standalone roofline HTML kernel hover tooltip: it now shows the limiting roof, percent of roofline, achieved and peak bandwidth per memory level, dispatch count and share of total application dispatches, and kernel duration and share of total application time. Kernel names longer than 200 characters are truncated in the sidebar, with the full name shown on hover.
@@ -68,6 +70,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Operator call trees now show each operator's arguments.
   * `--trace-ml-api triton` does not capture the Triton kernels that `torch.compile` generates. Use `--trace-ml-api torch` for those kernels.
 
+* `--list-metrics-gfx-id` is renamed `--debug-list-metrics-gfx-id`, for example `rocprof-compute --debug-list-metrics-gfx-id gfx90a`.
+
 ### Removed
 
 * Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or `--output-format db` to explore results in ROCm Optiq.
@@ -96,6 +100,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Removed support for the gfx940 and gfx941 architectures (MI300A A0 and MI300X A0). MI300A and MI300X on gfx942 remain supported.
 
 * Removed the experimental `--torch-trace`, `--triton-trace`, `--ml-api-trace`, `--list-torch-operators`, `--list-triton-operators`, `--torch-operator`, and `--triton-operator` options. Use `--trace-ml-api`, `--list-operators`, and `--operator` instead.
+
+* Removed the `-g`, `--view table`, and `--verify-deps` analyze options. Use `--debug-single-metric`, `--debug-table-view`, and `--debug-verify-deps` instead.
 
 ### Optimized
 

@@ -75,8 +75,7 @@ rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b 
 ```
 
 Aliases are stable; numeric block ids are architecture-specific. List what this
-workload actually has with `--list-metrics`, and the aliases for an
-architecture with `rocprof-compute --list-metrics-gfx-id <arch>`.
+workload actually has with `--list-metrics`.
 
 ## 3. Interpret
 
