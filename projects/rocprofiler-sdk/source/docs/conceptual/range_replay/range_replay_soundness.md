@@ -11,6 +11,8 @@ the conditions it is able to observe, and *decline* a range that fails one. This
 checked and why, what the checks cannot see, and the optional verification that catches the
 remainder.
 
+This page is the packet path. Host replay does not record packets, so the one-queue, one-agent, graph, and own-thread-copy rows do not apply to it. Its decline table is on [Host range replay](range_replay_host.md).
+
 A decline is not an error and not a warning the tool has to hunt for. The application's own
 execution of the range is forwarded unmodified in every case; a decline only means the extra passes
 are skipped, and the reason arrives as the `CLOSE` callback's `status`.

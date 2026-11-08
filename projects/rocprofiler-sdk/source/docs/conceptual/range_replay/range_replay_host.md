@@ -172,9 +172,20 @@ rather than only around a submit, because the dispatches that must honor it are 
 
 Per range, host replay pays one fence of every compute queue and one snapshot of all tracked device
 memory on every GPU agent (held in host memory until CLOSE). Per extra pass it pays one fence and one
-restore of that snapshot, plus a `memcpy` of each registered host region. The passes themselves run
-at the application's own speed. Size ranges so the snapshot is small relative to the range's
-runtime, just as for packet replay. See [Performance](range_replay_performance.md).
+restore of that snapshot, plus a `memcpy` of each registered host region. Overlapping regions are
+copied once per registration (newest first), so the bytes moved are the sum of the sizes, and each
+byte lands on the capture closest to range entry. The passes themselves run at the application's own
+speed. Size ranges so the snapshot is small relative to the range's runtime, just as for packet
+replay.
+
+A callback that submits GPU work after the pass fence is not invisible. Each agent has a submit
+epoch, advanced after the packets are written. Host replay reads the epochs before the fence and
+compares them again under the writer locks. If they moved, the locks are dropped, the queues are
+fenced again, and the check repeats, at most 8 times. Past that the range declines
+`CONCURRENT_DISPATCH` instead of restoring over in-flight work.
+
+The closed form, and a CPU measurement of the host-region copies, is in
+[Performance](range_replay_performance.md).
 
 ## Tests
 
