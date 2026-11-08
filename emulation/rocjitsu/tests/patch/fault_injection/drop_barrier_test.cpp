@@ -3,8 +3,9 @@
 
 #include "rocjitsu/code/patch/fault_injection/drop_barrier.h"
 
-#include "../dbi_test_util.h"
-#include "replacement_test_util.h"
+#include "../../analysis/static_barrier_test_targets.h"
+#include "../../dbi_test_util.h"
+#include "../replacement_test_util.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/analysis/instruction_boundaries.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
@@ -289,69 +290,9 @@ std::vector<uint8_t> make_gfx1250_two_kernel_barrier_elf(
   return image;
 }
 
-struct DropTargetRow {
-  const char *name;
-  rj_code_target_id_t target;
-  rj_code_arch_t arch;
-  uint32_t wave_size;
-  bool split;
-};
-constexpr DropTargetRow kRdna3DropRows[] = {
-    {.name = "Gfx1100Wave32",
-     .target = ROCJITSU_CODE_TARGET_GFX1100,
-     .arch = ROCJITSU_CODE_ARCH_RDNA3,
-     .wave_size = 32,
-     .split = false},
-    {.name = "Gfx1100Wave64",
-     .target = ROCJITSU_CODE_TARGET_GFX1100,
-     .arch = ROCJITSU_CODE_ARCH_RDNA3,
-     .wave_size = 64,
-     .split = false},
-};
-constexpr DropTargetRow kDropRows[] = {
-    {.name = "Gfx1200Wave32",
-     .target = ROCJITSU_CODE_TARGET_GFX1200,
-     .arch = ROCJITSU_CODE_ARCH_RDNA4,
-     .wave_size = 32,
-     .split = true},
-    {.name = "Gfx1200Wave64",
-     .target = ROCJITSU_CODE_TARGET_GFX1200,
-     .arch = ROCJITSU_CODE_ARCH_RDNA4,
-     .wave_size = 64,
-     .split = true},
-    {.name = "Gfx1201Wave32",
-     .target = ROCJITSU_CODE_TARGET_GFX1201,
-     .arch = ROCJITSU_CODE_ARCH_RDNA4,
-     .wave_size = 32,
-     .split = true},
-    {.name = "Gfx1201Wave64",
-     .target = ROCJITSU_CODE_TARGET_GFX1201,
-     .arch = ROCJITSU_CODE_ARCH_RDNA4,
-     .wave_size = 64,
-     .split = true},
-    {.name = "Gfx1250Wave32",
-     .target = ROCJITSU_CODE_TARGET_GFX1250,
-     .arch = ROCJITSU_CODE_ARCH_CDNA5,
-     .wave_size = 32,
-     .split = true},
-    {.name = "Gfx1251Wave32",
-     .target = ROCJITSU_CODE_TARGET_GFX1251,
-     .arch = ROCJITSU_CODE_ARCH_CDNA5,
-     .wave_size = 32,
-     .split = true},
-    {.name = "Gfx942Wave64",
-     .target = ROCJITSU_CODE_TARGET_GFX942,
-     .arch = ROCJITSU_CODE_ARCH_CDNA3,
-     .wave_size = 64,
-     .split = false},
-    {.name = "Gfx950Wave64",
-     .target = ROCJITSU_CODE_TARGET_GFX950,
-     .arch = ROCJITSU_CODE_ARCH_CDNA4,
-     .wave_size = 64,
-     .split = false},
-    kRdna3DropRows[0],
-    kRdna3DropRows[1],
-};
+using test::DropTargetRow;
+using test::kDropRows;
+using test::kRdna3DropRows;
 
 std::vector<uint32_t> make_barrier_words(const DropTargetRow &row) {
   // RDNA3 generated test_encodings.h: s_waitcnt and full s_barrier differ
@@ -2019,24 +1960,6 @@ TEST(FaultDropBarrier, ExactSecondPairSelectionLeavesRedundantFirstBarrier) {
   EXPECT_EQ(result.value().detector_qualification, FaultQualification::Unverified);
 }
 
-TEST(FaultDropBarrier, RejectsPartialInterleavedDynamicAndNamedLifecycle) {
-  const std::vector<std::vector<uint32_t>> cases = {{kSignal, kEnd},
-                                                    {kWait, kEnd},
-                                                    {kSignal, kSignal, kWait, kEnd},
-                                                    {kSignal, 0xbf94fffeu, kEnd},
-                                                    {0xbe804e7du, kWait, kEnd},
-                                                    {0xbe804e81u, 0xbf940001u, kEnd},
-                                                    {0xbe804fc1u, kWait, kEnd},
-                                                    {kSignal, 0xbe8050c1u, kWait, kEnd}};
-  for (const std::vector<uint32_t> &words : cases) {
-    const std::vector<uint8_t> image = make_gfx1250_barrier_elf(words);
-    const FaultMutationContext context(image);
-    FaultMutationError error;
-    EXPECT_TRUE(discover_drop_barriers(context, "test_kernel", error).failed());
-    EXPECT_NE(error.code, FaultMutationErrorCode::None);
-  }
-}
-
 TEST(FaultDropBarrier, SameBlockStaticPairInCycleAffectsAllOccurrences) {
   const std::vector<uint8_t> image =
       make_gfx1250_barrier_elf({kSignal, kMov, kWait, 0xbfa1fffcu, kEnd});
@@ -2214,69 +2137,6 @@ TEST(FaultDropBarrier, UserBuiltinIdsKeepDistinctStaticScopes) {
   }
 }
 
-TEST(FaultDropBarrier, TrapFormsCannotConsumeDefaultUserBarrierSelection) {
-  for (const DropTargetRow &row : kDropRows) {
-    if (!row.split)
-      continue;
-    SCOPED_TRACE(row.name);
-    for (const int32_t id : {-2, -4}) {
-      SCOPED_TRACE(id);
-      const uint32_t signal = 0xbe804e00u | static_cast<uint32_t>(192 - id);
-      const uint32_t wait = 0xbf940000u | static_cast<uint16_t>(id);
-      const FaultMutationContext context(make_barrier_elf_for_target(
-          row, {signal, wait, kSignal, kWait, checked_encoding(build_s_endpgm(row.arch))}));
-      FaultMutationError error;
-      // Reject the unsupported form before an inert pair can take ordinal zero.
-      EXPECT_TRUE(discover_drop_barriers(context, "test_kernel", error).failed());
-      EXPECT_EQ(error.code, FaultMutationErrorCode::UnsupportedForm);
-      EXPECT_EQ(error.offset, 0u);
-      // RDNA4 has no -4 signal operand; decoding rejects it before qualification.
-      const std::string_view diagnostic = row.arch == ROCJITSU_CODE_ARCH_RDNA4 && id == -4
-                                              ? "invalid scalar source selector"
-                                              : "trap-only";
-      EXPECT_NE(error.message.find(diagnostic), std::string::npos) << error.message;
-    }
-  }
-}
-
-TEST(FaultDropBarrier, RejectsStandaloneAndMismatchedTrapWaits) {
-  for (const DropTargetRow &row : kDropRows) {
-    if (!row.split)
-      continue;
-    SCOPED_TRACE(row.name);
-    for (const int32_t id : {-2, -4}) {
-      SCOPED_TRACE(id);
-      const uint32_t wait = 0xbf940000u | static_cast<uint16_t>(id);
-      for (const bool with_signal : {false, true}) {
-        SCOPED_TRACE(with_signal);
-        std::vector<uint32_t> words = {wait, checked_encoding(build_s_endpgm(row.arch))};
-        if (with_signal)
-          words.insert(words.begin(), kSignal);
-        const FaultMutationContext context(make_barrier_elf_for_target(row, words));
-        FaultMutationError error;
-        EXPECT_TRUE(discover_drop_barriers(context, "test_kernel", error).failed());
-        EXPECT_EQ(error.code, FaultMutationErrorCode::UnsupportedForm);
-        EXPECT_EQ(error.offset, with_signal ? 4u : 0u);
-        EXPECT_NE(error.message.find("trap-only"), std::string::npos);
-      }
-    }
-  }
-}
-
-TEST(FaultDropBarrier, RejectsMismatchedAdmittedWorkgroupAndClusterPairs) {
-  for (const int32_t signal_id : {-1, -3}) {
-    SCOPED_TRACE(signal_id);
-    const int32_t wait_id = signal_id == -1 ? -3 : -1;
-    const uint32_t signal = 0xbe804e00u | static_cast<uint32_t>(192 - signal_id);
-    const uint32_t wait = 0xbf940000u | static_cast<uint16_t>(wait_id);
-    const FaultMutationContext context(make_gfx1250_barrier_elf({signal, wait, kEnd}));
-    FaultMutationError error;
-    EXPECT_TRUE(discover_drop_barriers(context, "test_kernel", error).failed());
-    EXPECT_EQ(error.code, FaultMutationErrorCode::IncompleteSelection);
-    EXPECT_EQ(error.offset, 4u);
-  }
-}
-
 TEST(FaultDropBarrier, RejectsAliasedEntryOwnersAndMalformedOmittedDescriptor) {
   for (const bool malformed : {false, true}) {
     std::vector<uint8_t> image = test::make_gfx950_two_kernel_elf({kSignal, kWait, kEnd}, 0);
@@ -2348,15 +2208,6 @@ TEST(FaultDropBarrier, Gfx1250WaveModeComesFromTargetDespiteMissingLegacyBit) {
   EXPECT_EQ(updated.front().descriptor.kernel_code_properties &
                 amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
             0u);
-}
-
-TEST(FaultDropBarrier, RejectsBarrierInsideClause) {
-  FaultMutationError error;
-  EXPECT_TRUE(discover_drop_barriers(FaultMutationContext(make_gfx1250_barrier_elf(
-                                         {0xbf850001u, kSignal, kWait, kEnd})),
-                                     "test_kernel", error)
-                  .failed());
-  EXPECT_EQ(error.code, FaultMutationErrorCode::UnsupportedForm);
 }
 
 TEST(FaultDropBarrier, DiscoveryUsesFullTextClauseFactsAcrossUnreachableGap) {

@@ -15,6 +15,7 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/target_registry.h"
+#include "util/diagnostic.h"
 
 #include <algorithm>
 #include <cassert>
@@ -109,25 +110,18 @@ Result validate_descriptor_relocation_writes(std::span<const uint8_t> image,
       return reject(error, FaultMutationErrorCode::UnsupportedForm,
                     "unreadable dynamic relocations for kernel descriptors");
     for (const Elf64_Rela &relocation : *relocations) {
-      uint64_t write_size = 0;
-      switch (elf_reloc_type(relocation.r_info)) {
-      case R_AMDGPU_ABS32_LO:
-      case R_AMDGPU_ABS32_HI:
-      case R_AMDGPU_ABS32:
-        write_size = sizeof(uint32_t);
-        break;
-      case R_AMDGPU_ABS64:
-      case R_AMDGPU_RELATIVE64:
-        write_size = sizeof(uint64_t);
-        break;
-      default:
-        continue; // Other forms are not writes supported by the current dynamic loader.
+      const std::optional<uint64_t> write_size =
+          rocr_dynamic_relocation_write_size(elf_reloc_type(relocation.r_info));
+      if (!write_size) {
+        // Unsupported forms retain the shared admission/emission policy; no
+        // supported descriptor-write interval can be inferred for them here.
+        continue;
       }
       for (const uint64_t address : descriptor_addresses) {
         const bool overlaps =
             relocation.r_offset >= address
                 ? relocation.r_offset - address < sizeof(amdhsa::kernel_descriptor_t)
-                : write_size > address - relocation.r_offset;
+                : *write_size > address - relocation.r_offset;
         if (overlaps)
           return reject(error, FaultMutationErrorCode::UnsupportedForm,
                         "dynamic relocation writes a kernel descriptor");
@@ -184,9 +178,7 @@ FailureOr<DropBarrierSelection> select_drop_barrier(const FaultBarrierInventory 
   if (!record || record->source.expired())
     return reject(error, FaultMutationErrorCode::BadIdentity, "expired or unbound inventory");
   // TODO(hanchung): Add a better barrier-selection heuristic while preserving explicit selection
-  // and reproducibility. Currently, an exact selection takes precedence; otherwise we use the
-  // requested zero-based logical ordinal in first-member source order, defaulting to zero. Repeated
-  // default requests choose the same barrier; no race scoring is used.
+  // and reproducibility.
   if (selector.exact) {
     if (selector.exact->record_.lock() != record)
       return reject(error, FaultMutationErrorCode::BadIdentity,
