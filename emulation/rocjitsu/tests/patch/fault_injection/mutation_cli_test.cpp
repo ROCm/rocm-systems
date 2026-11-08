@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "fault_barrier_fixture.h"
-#include "fault_barrier_oracle.h"
+#include "barrier_fixture.h"
+#include "barrier_oracle.h"
 #include "rocjitsu/code/file_io.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/fault_injection/drop_barrier.h"
