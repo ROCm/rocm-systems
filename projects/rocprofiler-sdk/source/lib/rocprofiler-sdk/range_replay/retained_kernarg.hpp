@@ -25,7 +25,7 @@
 // Kernarg memory that outlives the range it was allocated for.
 //
 // Every replayed pass reads its dispatches' arguments from a kernarg block the executor fills. The
-// block comes from the agent's kernarg pool, so allocating it costs a pool allocation and a GPU
+// block comes from a memory pool of the agent, so allocating it costs a pool allocation and a GPU
 // mapping, and freeing it another runtime call. A tool that closes one range per iteration would
 // pay both every iteration, so the executor keeps the block when its range finishes and the next
 // range on the same agent reuses it.
@@ -51,6 +51,7 @@ struct kernarg_block_t
     void*  base                    = nullptr;
     size_t capacity                = 0;
     hsa_status_t (*free_fn)(void*) = nullptr;
+    bool device                    = false;  // device memory of the agent, else the kernarg pool
 };
 
 // Whether a block of `capacity` bytes may serve a range needing `request` bytes. A smaller block

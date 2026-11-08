@@ -166,6 +166,11 @@ struct range_context_t
     // restore, so it is declined rather than replayed against partially-restored inputs.
     std::vector<void*> snapshot_ptrs = {};
 
+    // Whether the application's kernarg blocks are device memory of the range's agent, from the
+    // first recorded dispatch with arguments. Replay stages its copies in the same kind of memory.
+    bool device_kernargs         = false;
+    bool kernarg_placement_known = false;
+
     std::shared_ptr<external_decline_t> external = {};
 
     // What the tool asked for at CONFIG, and the contexts this range's PASS/CLOSE callbacks go to.
