@@ -1943,6 +1943,7 @@ class CollectivesAlltoAllvMicrotest : public CollectivesMicrotest {
   void SetUp() override {
     CollectivesMicrotest::SetUp();
     comm_->config.blocking = 1;
+    comm_->allRanksBlocking = true;
     fake.windows[send_.data()] = &sendWin_;
     fake.windows[recv_.data()] = &recvWin_;
     fake.regType = ncclSymSendRegRecvReg;
@@ -2133,28 +2134,32 @@ TEST_F(CollectivesAlltoAllvMicrotest, PeerToPeer_NestedCallsPreserveTheOuterGrou
   }
 }
 
-TEST_F(CollectivesAlltoAllvMicrotest, Nonblocking_UsesPayloadP2pInsteadOfCeMetadata) {
-  comm_->config.blocking = 0;
+TEST_F(CollectivesAlltoAllvMicrotest, NonblockingPeer_UsesPayloadP2pRegardlessOfLocalBlockingMode) {
+  comm_->allRanksBlocking = false;
   for (bool hierarchical : {false, true}) {
     fake.ceElig = !hierarchical;
     fake.hierElig = hierarchical;
-    for (ncclResult_t result : {ncclSuccess, ncclInProgress}) {
-      SCOPED_TRACE(hierarchical);
-      SCOPED_TRACE(result);
-      fake.p2ps.clear();
-      fake.groupEndResult = result;
-      EXPECT_EQ(result, AlltoAllv());
-      EXPECT_TRUE(fake.memAllocSizes.empty());
-      EXPECT_TRUE(g_hipMemcpyAsyncArgs.empty());
-      EXPECT_TRUE(fake.enqueued.empty());
-      EXPECT_EQ(ncclGroupDepth, 0);
-      ASSERT_EQ(2u * kNRanks, fake.p2ps.size());
-      for (int peer = 0; peer < kNRanks; ++peer) {
-        EXPECT_EQ(fake.p2ps[2 * peer].buff, send_.data() + sdispls_[peer]);
-        EXPECT_EQ(fake.p2ps[2 * peer].count, sendcounts_[peer]);
-        EXPECT_EQ(fake.p2ps[2 * peer].datatype, ncclFloat32);
-        EXPECT_EQ(fake.p2ps[2 * peer + 1].buff, recv_.data() + rdispls_[peer]);
-        EXPECT_EQ(fake.p2ps[2 * peer + 1].count, recvcounts_[peer]);
+    for (int blocking : {0, 1}) {
+      comm_->config.blocking = blocking;
+      SCOPED_TRACE(testing::Message() << "blocking=" << blocking);
+      for (ncclResult_t result : {ncclSuccess, ncclInProgress}) {
+        SCOPED_TRACE(hierarchical);
+        SCOPED_TRACE(result);
+        fake.p2ps.clear();
+        fake.groupEndResult = result;
+        EXPECT_EQ(result, AlltoAllv());
+        EXPECT_TRUE(fake.memAllocSizes.empty());
+        EXPECT_TRUE(g_hipMemcpyAsyncArgs.empty());
+        EXPECT_TRUE(fake.enqueued.empty());
+        EXPECT_EQ(ncclGroupDepth, 0);
+        ASSERT_EQ(2u * kNRanks, fake.p2ps.size());
+        for (int peer = 0; peer < kNRanks; ++peer) {
+          EXPECT_EQ(fake.p2ps[2 * peer].buff, send_.data() + sdispls_[peer]);
+          EXPECT_EQ(fake.p2ps[2 * peer].count, sendcounts_[peer]);
+          EXPECT_EQ(fake.p2ps[2 * peer].datatype, ncclFloat32);
+          EXPECT_EQ(fake.p2ps[2 * peer + 1].buff, recv_.data() + rdispls_[peer]);
+          EXPECT_EQ(fake.p2ps[2 * peer + 1].count, recvcounts_[peer]);
+        }
       }
     }
   }

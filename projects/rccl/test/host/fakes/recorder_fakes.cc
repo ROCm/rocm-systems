@@ -43,6 +43,7 @@ void ResetRecorderFakes() {
 // The overloads the microtest units reach today, not all 12 declared in
 // recorder.h. Add one here when a unit needs it; do not re-add it locally.
 namespace rccl {
+thread_local bool Recorder::skipped = false;
 Recorder::Recorder() {}
 Recorder::~Recorder() {}
 Recorder& Recorder::instance() {

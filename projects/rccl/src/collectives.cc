@@ -701,7 +701,7 @@ ncclResult_t ncclAlltoAllv_impl(const void* sendbuff, const size_t sendcounts[],
     ncclCeAlltoAllvEligible(comm, datatype, winRegType, hasSysmemSegment, ceCapturing);
   const bool hierElig =
     ncclHierCeAlltoAllvEligible(comm, datatype, winRegType, sendWin, recvWin, hasSysmemSegment, ceCapturing);
-  if ((ceElig || hierElig) && comm->config.blocking) {
+  if ((ceElig || hierElig) && comm->allRanksBlocking) {
     const size_t nLocal = 4 * (size_t)nRanks;
     const size_t nGather = nLocal * (size_t)nRanks;
     // First call allocates. Doing it here, rather than at init, keeps the
@@ -735,8 +735,8 @@ ncclResult_t ncclAlltoAllv_impl(const void* sendbuff, const size_t sendcounts[],
     }
     ncclGroupErrCheck(result);
     ncclResult_t endResult = ncclGroupEnd();
+    if (result == ncclSuccess) result = endResult;
     if (result != ncclSuccess) return result;
-    if (endResult != ncclSuccess) return endResult;
     // The CE and hier CE planners walk this matrix on the host (global maxSend,
     // per-peer chunk counts, RMA put offsets, wait signal counts). The device
     // copy cannot feed that plan. The exchange is on the user's stream, so the
