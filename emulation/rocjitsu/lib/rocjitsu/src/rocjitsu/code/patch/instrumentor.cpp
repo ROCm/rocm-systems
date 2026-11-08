@@ -932,7 +932,7 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
   for (const auto &block : blocks_) {
     for (const Instruction &inst : block->instructions()) {
       offset_to_inst_.emplace(inst.src_loc(), &inst);
-      instruction_boundaries_.record(inst);
+      instruction_boundaries_.record(inst, obj_.text_sections().front()->vaddr());
     }
   }
   blocks_built_ = true;

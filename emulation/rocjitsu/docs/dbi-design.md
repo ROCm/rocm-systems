@@ -273,7 +273,11 @@ start/end offsets, raw symbol-less RELATIVE64 destinations under the existing
 allocation policy, and the kernel entries already collected by observation
 resolution. A destination strictly inside an edited instruction is rejected,
 including a direct reference from unreachable code. Exact start/end boundaries
-remain permitted by this check. ET_REL symbol values are section-relative;
+remain permitted by this check. Direct branches are resolved with checked
+arithmetic in source virtual-address coordinates before comparison with text
+offsets. A valid backward branch into an earlier unchanged executable section
+is not an address underflow; genuinely unrepresentable addresses are rejected.
+ET_REL symbol values are section-relative;
 linked-image symbol values are normalized by the text address. Relocation
 admission and symbol remapping inspect complete records before a partial tail;
 unrelated and nonallocated references retain the existing patcher policy.

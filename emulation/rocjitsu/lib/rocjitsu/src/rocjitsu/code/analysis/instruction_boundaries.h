@@ -12,9 +12,9 @@ class Instruction;
 
 /// @brief Linear instruction boundaries and clause/reference facts, without CFG ownership.
 /// @details Record instructions in increasing src_loc() order, retaining clause state across
-/// block boundaries. Offsets and branch destinations use src_loc() byte coordinates
-/// (.text-relative for checked edits). This index alone is not a source identity or a
-/// trusted edit capability.
+/// block boundaries. Entries retain src_loc() byte offsets; branch destinations use
+/// the supplied address origin so valid backward references can precede offset zero.
+/// This index alone is not a source identity or a trusted edit capability.
 class InstructionBoundaries {
 public:
   struct Entry {
@@ -24,15 +24,17 @@ public:
     bool clause;        // This instruction is s_clause.
   };
 
-  void record(const Instruction &instruction);
+  /// @param address_base Source address corresponding to src_loc() offset zero.
+  void record(const Instruction &instruction, uint64_t address_base);
   const Entry *find(uint64_t offset) const;
   std::span<const Entry> entries() const { return entries_; }
-  std::span<const uint64_t> references() const { return references_; }
+  std::span<const uint64_t> reference_addresses() const { return reference_addresses_; }
   bool reference_overflow() const { return reference_overflow_; }
 
 private:
   std::vector<Entry> entries_;
-  std::vector<uint64_t> references_; // Direct branch destinations, including outside the index.
+  std::vector<uint64_t>
+      reference_addresses_; // Direct destination addresses, including outside the index.
   uint32_t clause_remaining_ = 0;
   bool reference_overflow_ = false; // A branch destination could not be represented as uint64_t.
 };

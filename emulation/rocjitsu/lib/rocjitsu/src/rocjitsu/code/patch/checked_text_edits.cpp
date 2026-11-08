@@ -206,7 +206,11 @@ Result CheckedTextEdits::apply(std::span<const CheckedTextEdit> edits,
     if (decode_replacement(decoder_, edit.replacement, edit.offset, error).failed())
       return Result::failure();
   }
-  for (const uint64_t reference : boundaries_.references()) {
+  for (const uint64_t address : boundaries_.reference_addresses()) {
+    // A valid target before .text cannot enter an original-text anchor.
+    if (address < text.vaddr())
+      continue;
+    const uint64_t reference = address - text.vaddr();
     if (reference_enters_edit(reference, edits))
       return reject(error, TextEditErrorCode::UnsupportedReferences,
                     "branch reference enters an edited instruction", reference);

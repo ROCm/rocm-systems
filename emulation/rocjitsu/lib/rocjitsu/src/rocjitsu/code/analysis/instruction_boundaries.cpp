@@ -5,12 +5,13 @@
 
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/isa/instruction.h"
+#include "util/bit.h"
 
 #include <algorithm>
 #include <optional>
 
 namespace rocjitsu {
-void InstructionBoundaries::record(const Instruction &instruction) {
+void InstructionBoundaries::record(const Instruction &instruction, uint64_t address_base) {
   const bool clause = instruction.mnemonic() == "s_clause";
   entries_.push_back({.offset = instruction.src_loc(),
                       .size = static_cast<uint32_t>(instruction.size()),
@@ -26,10 +27,14 @@ void InstructionBoundaries::record(const Instruction &instruction) {
     clause_remaining_ = std::max(clause_remaining_, count);
   }
   if (const std::optional<int64_t> displacement = instruction.branch_offset_bytes()) {
+    const std::optional<uint64_t> address = util::checked_add(address_base, instruction.src_loc());
+    const std::optional<uint64_t> next_address =
+        address ? util::checked_add(*address, static_cast<uint64_t>(instruction.size()))
+                : std::nullopt;
     const std::optional<uint64_t> destination =
-        add_signed_offset(instruction.src_loc() + instruction.size(), *displacement);
+        next_address ? add_signed_offset(*next_address, *displacement) : std::nullopt;
     if (destination)
-      references_.push_back(*destination);
+      reference_addresses_.push_back(*destination);
     else
       reference_overflow_ = true;
   }

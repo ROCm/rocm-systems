@@ -4,7 +4,9 @@
 #include "rocjitsu/code/patch/instrumentor.h"
 
 #include "../dbi_test_util.h"
+#include "../elf_test_support.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
+#include "rocjitsu/code/analysis/instruction_boundaries.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
@@ -12,6 +14,8 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/operand_types.h"
+#include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/instruction.h"
 
 #include <gtest/gtest.h>
 
@@ -53,6 +57,87 @@ std::vector<uint8_t> make_mixed_width_kernel_elf() {
                                         kNop3.value(), 0xee068002u, 0x00800000u, 0,
                                         kEndpgm.value()},
                                        0);
+}
+
+// Keep both executable sections loaded while only the exact .text name is
+// indexed by Instrumentor. The branch at 0x304 may legally leave that section.
+std::vector<uint8_t> make_branch_to_earlier_section_elf(uint32_t branch) {
+  constexpr uint64_t kEarlyAddress = 0x200;
+  constexpr uint64_t kTextAddress = 0x300;
+  constexpr util::FailureOr<uint32_t> kNop = build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA2);
+  constexpr util::FailureOr<uint32_t> kEndpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA2);
+  static_assert(kNop.succeeded() && kEndpgm.succeeded());
+  const std::array<uint32_t, 2> words = {kNop.value(), branch};
+  std::vector<uint8_t> names = {'\0'};
+  const uint32_t early_name = test::add_elf_name(names, ".text.early");
+  const uint32_t text_name = test::add_elf_name(names, ".text");
+  const uint32_t names_name = test::add_elf_name(names, ".shstrtab");
+  const uint64_t names_offset = kTextAddress + sizeof(words);
+  const uint64_t section_offset = test::align_up_for_test(names_offset + names.size(), 8);
+  std::array<Elf64_Shdr, 4> sections = {};
+  sections[1] = {.sh_name = early_name,
+                 .sh_type = SHT_PROGBITS,
+                 .sh_flags = SHF_ALLOC | SHF_EXECINSTR,
+                 .sh_addr = kEarlyAddress,
+                 .sh_offset = kEarlyAddress,
+                 .sh_size = sizeof(uint32_t),
+                 .sh_link = 0,
+                 .sh_info = 0,
+                 .sh_addralign = sizeof(uint32_t),
+                 .sh_entsize = 0};
+  sections[2] = {.sh_name = text_name,
+                 .sh_type = SHT_PROGBITS,
+                 .sh_flags = SHF_ALLOC | SHF_EXECINSTR,
+                 .sh_addr = kTextAddress,
+                 .sh_offset = kTextAddress,
+                 .sh_size = sizeof(words),
+                 .sh_link = 0,
+                 .sh_info = 0,
+                 .sh_addralign = sizeof(uint32_t),
+                 .sh_entsize = 0};
+  sections[3] = {.sh_name = names_name,
+                 .sh_type = SHT_STRTAB,
+                 .sh_flags = 0,
+                 .sh_addr = 0,
+                 .sh_offset = names_offset,
+                 .sh_size = names.size(),
+                 .sh_link = 0,
+                 .sh_info = 0,
+                 .sh_addralign = 1,
+                 .sh_entsize = 0};
+  Elf64_Ehdr header = {};
+  std::memcpy(header.e_ident, EI_MAGIC, EI_MAGIC_SIZE);
+  header.e_ident[EI_CLASS] = ELFCLASS64;
+  header.e_ident[EI_DATA] = ELFDATA2LSB;
+  header.e_ident[EI_OSABI] = ELFOSABI_AMDGPU_HSA;
+  header.e_type = ET_DYN;
+  header.e_machine = EM_AMDGPU;
+  header.e_version = 1;
+  header.e_phoff = sizeof(header);
+  header.e_shoff = section_offset;
+  header.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX1030;
+  header.e_ehsize = sizeof(header);
+  header.e_phentsize = sizeof(Elf64_Phdr);
+  header.e_phnum = 1;
+  header.e_shentsize = sizeof(Elf64_Shdr);
+  header.e_shnum = sections.size();
+  header.e_shstrndx = 3;
+  const Elf64_Phdr segment = {.p_type = PT_LOAD,
+                              .p_flags = 0x5, // PF_R | PF_X
+                              .p_offset = kEarlyAddress,
+                              .p_vaddr = kEarlyAddress,
+                              .p_paddr = kEarlyAddress,
+                              .p_filesz = names_offset - kEarlyAddress,
+                              .p_memsz = names_offset - kEarlyAddress,
+                              .p_align = sizeof(uint32_t)};
+  std::vector<uint8_t> image(section_offset + sizeof(sections), 0);
+  test_support::write_elf_struct_for_test(image, 0, header);
+  test_support::write_elf_struct_for_test(image, header.e_phoff, segment);
+  test_support::write_elf_struct_for_test(image, kEarlyAddress, kEndpgm.value());
+  std::memcpy(image.data() + kTextAddress, words.data(), sizeof(words));
+  std::memcpy(image.data() + names_offset, names.data(), names.size());
+  std::memcpy(image.data() + section_offset, sections.data(), sizeof(sections));
+  return image;
 }
 
 // Keep the kernel descriptor intact and put a symbol-less pointer in separate
@@ -313,6 +398,149 @@ TEST(CheckedTextEdits, InstrumentorChecksDirectReferencesIncludingUnreachableBra
       std::memcpy(image.data() + text_file_offset + branch_offset, &branch, sizeof(branch));
       expect_reference_result(image, 8,
                               destination == 12 ? std::optional<uint64_t>(12) : std::nullopt);
+    }
+  }
+}
+
+TEST(CheckedTextEdits, PreservesBranchToEarlierExecutableSection) {
+  constexpr rj_code_arch_t kRdna2 = ROCJITSU_CODE_ARCH_RDNA2;
+  // The branch at 0x304 uses next PC 0x308: (0x200 - 0x308) / 4 = -66.
+  const util::FailureOr<uint32_t> branch = build_s_branch(-66, kRdna2);
+  ASSERT_TRUE(branch.succeeded());
+  const std::vector<uint8_t> image = make_branch_to_earlier_section_elf(branch.value());
+  const std::vector<uint8_t> pristine = image;
+  const AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+  ASSERT_EQ(object.text_sections().size(), 1u);
+  ASSERT_EQ(object.allocated_executable_sections().size(), 2u);
+  const Section &text = *object.text_sections().front();
+  ASSERT_EQ(text.vaddr(), 0x300u);
+  const Section *early = test_support::find_section(object, ".text.early");
+  ASSERT_NE(early, nullptr);
+  ASSERT_EQ(early->vaddr(), 0x200u);
+  ASSERT_EQ(early->flags() & (SHF_ALLOC | SHF_EXECINSTR), SHF_ALLOC | SHF_EXECINSTR);
+  Instrumentor instrumentor(object, kRdna2);
+  instrumentor.add_point_by_offset(0);
+  const Instrumentor::ValidationResult validated = instrumentor.validate_points();
+  ASSERT_TRUE(validated.errors.empty()) << validated.errors.front();
+  ASSERT_EQ(validated.sites.size(), 1u);
+  ASSERT_EQ(validated.sites.front().anchor_offset, 0u);
+  const InstrumentedCodeObject result = instrumentor.patch();
+  ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+  ASSERT_FALSE(result.elf_bytes.empty());
+  ASSERT_EQ(result.sites.size(), 1u);
+  const AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  ASSERT_EQ(patched.text_sections().size(), 1u);
+  ASSERT_EQ(patched.allocated_executable_sections().size(), 2u);
+  const Section &patched_text = *patched.text_sections().front();
+  EXPECT_EQ(patched_text.vaddr(), text.vaddr());
+  ASSERT_GE(patched_text.size(), text.size());
+  EXPECT_EQ(std::memcmp(patched_text.data() + 4, text.data() + 4, sizeof(uint32_t)), 0);
+  const Section *patched_early = test_support::find_section(patched, ".text.early");
+  ASSERT_NE(patched_early, nullptr);
+  EXPECT_EQ(patched_early->vaddr(), early->vaddr());
+  ASSERT_EQ(patched_early->size(), early->size());
+  EXPECT_EQ(std::memcmp(patched_early->data(), early->data(), early->size()), 0);
+  const std::unique_ptr<Decoder> decoder = Decoder::create(kRdna2);
+  ASSERT_NE(decoder, nullptr);
+  uint32_t patched_branch = 0;
+  std::memcpy(&patched_branch, patched_text.data() + 4, sizeof(patched_branch));
+  DecodeResult decoded = decoder->decode_window(std::span(&patched_branch, 1), 0x304);
+  ASSERT_TRUE(decoded.succeeded());
+  EXPECT_EQ(decoded.value()->mnemonic(), "s_branch");
+  ASSERT_TRUE(decoded.value()->branch_offset_bytes());
+  const std::optional<uint64_t> destination =
+      add_signed_offset(decoded.value()->src_loc() + decoded.value()->size(),
+                        *decoded.value()->branch_offset_bytes());
+  ASSERT_TRUE(destination);
+  EXPECT_EQ(*destination, 0x200u);
+  EXPECT_EQ(image, pristine);
+  EXPECT_EQ(std::memcmp(object.image_data(), pristine.data(), pristine.size()), 0);
+}
+
+TEST(CheckedTextEdits, RejectsBranchWhoseVirtualAddressUnderflows) {
+  // Unlike an address before .text, (0x308 + -195 * 4) = -4 cannot be a VA.
+  const util::FailureOr<uint32_t> branch = build_s_branch(-195, ROCJITSU_CODE_ARCH_RDNA2);
+  ASSERT_TRUE(branch.succeeded());
+  const std::vector<uint8_t> image = make_branch_to_earlier_section_elf(branch.value());
+  expect_reference_result(image, 0, 0, ROCJITSU_CODE_ARCH_RDNA2);
+}
+
+TEST(CheckedTextEdits, BranchReferencesCheckEachVirtualAddressAddition) {
+  struct AddressCase {
+    const char *name;
+    uint64_t address_base;
+    uint64_t source_offset;
+    int16_t displacement_dwords;
+    std::optional<uint64_t> destination;
+  };
+  constexpr uint64_t kMax = std::numeric_limits<uint64_t>::max();
+  constexpr uint64_t kHighBase = uint64_t{1} << 63;
+  const std::array<AddressCase, 8> cases = {{
+      {.name = "before section",
+       .address_base = 0x300,
+       .source_offset = 4,
+       .displacement_dwords = -66,
+       .destination = 0x200},
+      {.name = "zero address",
+       .address_base = 0x300,
+       .source_offset = 4,
+       .displacement_dwords = -194,
+       .destination = 0},
+      {.name = "negative destination",
+       .address_base = 0x300,
+       .source_offset = 4,
+       .displacement_dwords = -195,
+       .destination = std::nullopt},
+      {.name = "base above signed range",
+       .address_base = kHighBase,
+       .source_offset = 4,
+       .displacement_dwords = -3,
+       .destination = kHighBase - 4},
+      {.name = "upper aligned address",
+       .address_base = kMax - 7,
+       .source_offset = 0,
+       .displacement_dwords = 0,
+       .destination = kMax - 3},
+      {.name = "destination overflow",
+       .address_base = kMax - 7,
+       .source_offset = 0,
+       .displacement_dwords = 1,
+       .destination = std::nullopt},
+      {.name = "next PC overflow",
+       .address_base = kMax - 3,
+       .source_offset = 0,
+       .displacement_dwords = 0,
+       .destination = std::nullopt},
+      {.name = "instruction address overflow",
+       .address_base = kMax - 3,
+       .source_offset = 4,
+       .displacement_dwords = 0,
+       .destination = std::nullopt},
+  }};
+  const std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA2);
+  ASSERT_NE(decoder, nullptr);
+  for (const AddressCase &test_case : cases) {
+    SCOPED_TRACE(test_case.name);
+    const util::FailureOr<uint32_t> branch =
+        build_s_branch(test_case.displacement_dwords, ROCJITSU_CODE_ARCH_RDNA2);
+    ASSERT_TRUE(branch.succeeded());
+    const uint32_t word = branch.value();
+    DecodeResult decoded = decoder->decode_window(std::span(&word, 1), test_case.source_offset);
+    ASSERT_TRUE(decoded.succeeded());
+    ASSERT_TRUE(decoded.value()->branch_offset_bytes());
+    InstructionBoundaries boundaries;
+    boundaries.record(*decoded.value(), test_case.address_base);
+    ASSERT_EQ(boundaries.entries().size(), 1u);
+    EXPECT_EQ(boundaries.entries().front().offset, test_case.source_offset);
+    EXPECT_EQ(boundaries.entries().front().size, sizeof(uint32_t));
+    EXPECT_EQ(boundaries.reference_overflow(), !test_case.destination.has_value());
+    if (test_case.destination) {
+      ASSERT_EQ(boundaries.reference_addresses().size(), 1u);
+      EXPECT_EQ(boundaries.reference_addresses().front(), *test_case.destination);
+    } else {
+      EXPECT_TRUE(boundaries.reference_addresses().empty());
     }
   }
 }
