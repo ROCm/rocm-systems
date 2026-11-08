@@ -4031,7 +4031,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         ROCP_INFO << "range replay: counter groups are collected once per marked phase. "
                   << (tool::get_config().range_replay_host
                           ? "The application must open the range with "
-                            "ROCPROFILER_RANGE_REPLAY_HOST_BEGIN."
+                            "ROCPROFILER_REPLAY_RANGE_BEGIN."
                           : "An outermost roctx range, or rocprofiler_range_replay_begin and "
                             "rocprofiler_range_replay_end, marks the phase.");
     }
