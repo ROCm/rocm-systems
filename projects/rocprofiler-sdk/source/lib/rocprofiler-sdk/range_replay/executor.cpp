@@ -182,6 +182,9 @@ elapsed_ms(phase_clock::duration elapsed)
 }
 }  // namespace
 
+// Sorted base pointers of the allocations the entry snapshot covers. Equality with a later
+// snapshot is the packet path's "did the set change?" check: a new allocation or a free shows up
+// as a different list. Host replay uses the stricter address, size, and lifetime compare.
 std::vector<void*>
 tracked_pointers(hsa_agent_t agent)
 {
@@ -203,6 +206,8 @@ snapshot_bytes(const snapshot_t& snapshot)
     return total;
 }
 
+// One kernarg block for the whole pass. Each kernel's arguments are padded out to the alignment
+// the next kernel requires, so a later dispatch never starts mid-argument.
 kernarg_placement_t
 plan_kernarg_layout(const std::vector<recorded_dispatch_t>& dispatches)
 {
@@ -219,6 +224,9 @@ plan_kernarg_layout(const std::vector<recorded_dispatch_t>& dispatches)
     return out;
 }
 
+// The application's queues may have overlapped. The recording is one queue, so each replayed
+// dispatch waits for the one before it. Without that barrier, launch N could read memory launch
+// N-1 has not written yet.
 std::vector<hsa::rocprofiler_packet>
 build_pass_packets(const std::vector<recorded_dispatch_t>& dispatches)
 {
@@ -233,6 +241,8 @@ build_pass_packets(const std::vector<recorded_dispatch_t>& dispatches)
     return packets;
 }
 
+// Hashes in device-address order. Two snapshots of the same memory must line up even when the
+// inventory handed the blocks back in a different order.
 digest::region_digests_t
 snapshot_digests(const snapshot_t& snapshot)
 {

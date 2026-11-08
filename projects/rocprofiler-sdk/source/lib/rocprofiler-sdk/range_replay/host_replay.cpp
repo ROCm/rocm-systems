@@ -94,6 +94,8 @@ gpu_agents()
 void
 fence_queue(const hsa::Queue& queue)
 {
+    // Copy engines and other non-compute queues are the application's job. The barrier below only
+    // waits for compute.
     if(queue.get_engine_type() != hsa::Queue::engine_type::compute) return;
     auto       signal        = hsa_signal_t{.handle = 0};
     auto*      pooled_signal = hsa::Queue::create_signal(0, &signal, /*use_pool=*/true);
@@ -177,6 +179,8 @@ count_divergence(const host_range_state_t& host)
     return divergent;
 }
 
+// Address, size, and lifetime together. A free that hands the same address to a new allocation
+// is a different lifetime, and restoring the entry bytes there would overwrite the new owner.
 bool
 allocations_unchanged(const host_range_state_t& host)
 {
@@ -268,6 +272,8 @@ restore_entry_state(range_context_t& ctx)
 }
 }  // namespace
 
+// assign copies the bytes straight into the buffer. resize would zero-fill it first and then
+// overwrite those zeros, which doubles the traffic for a large region.
 host_region_t
 capture_region(void* ptr, size_t size)
 {
@@ -378,6 +384,9 @@ void
 track_region(range_context_t& ctx, void* ptr, size_t size)
 {
     auto& host = ctx.host;
+    // Pass 0 is the only capture. A re-executed pass runs the same registration again; capturing
+    // then would save mid-pass bytes and the next restore would put those back instead of the
+    // entry value. A declined range has nothing to restore into.
     if(!host.enabled || host.pass != 0 || !host.snapshot_taken || !ctx.record.eligible()) return;
     try
     {

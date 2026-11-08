@@ -16,8 +16,10 @@ measured one at a time.
 .. warning::
 
    This API is experimental. The public header is
-   ``<rocprofiler-sdk/experimental/range_replay.h>``. The domain, the payload, and the two entry
-   points are expected to change before a stable release.
+   ``<rocprofiler-sdk/experimental/range_replay.h>``. The domain, the payload, and the entry
+   points are expected to change before a stable release. The current header already covers host
+   replay, overlapping host regions, and a region that wraps the address space. Those do not need
+   another public symbol.
 
 For the model, the carve-outs, and the source map, see :ref:`range-replay-conceptual`. For the full
 API contract see :ref:`range-replay-callback-api`; for what makes a range replayable and why one gets
@@ -80,8 +82,12 @@ memory and registered host memory, then ``siglongjmp``\ s back for each extra pa
     rocprofiler_range_replay_end();  // jumps back for passes 1..N-1, then CLOSE and return
 
 ``rocprofiler_range_replay_get_host_pass()`` tells host code which pass it is on, so once-only side
-effects stay on pass 0. See :ref:`range-replay-host` for the contract (no C++ objects with
-destructors live across the jump, ``volatile`` for modified locals, balanced allocations).
+effects stay on pass 0. A registration lasts until the range closes. Where registered regions
+overlap, each byte is restored from the earliest capture that covers it. ``NULL``, a zero size, or
+a region that wraps past the end of the address space returns
+``ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT``. See :ref:`range-replay-host` for the contract (no C++
+objects with destructors live across the jump, ``volatile`` for modified locals, balanced
+allocations, synchronize every participating device before begin and before end).
 
 Operations and payload
 ----------------------
@@ -172,4 +178,5 @@ See also
 * :ref:`range-replay-callback-api` — API contract
 * :ref:`range-replay-soundness` — what makes a range replayable
 * :ref:`range-replay-host` — host replay with ``sigsetjmp`` / ``siglongjmp``
+* :ref:`range-replay-performance` — cost model
 * :ref:`kernel-replay-sdk-api` — the single-dispatch counterpart
