@@ -16,12 +16,6 @@
 
 namespace rocjitsu {
 namespace {
-// SSRC inline-negative encodings start at 193 (-1), as named by the RDNA4
-// and CDNA5 OpSelSsrcBarrierId enums. Family policy admits semantic IDs, not
-// encodings: sharing this first selector does not admit CDNA5's IDs on RDNA4.
-constexpr uint32_t kFirstInlineNegativeIntegerSelector = 193;
-constexpr uint32_t kLastInlineNegativeIntegerSelector = 208;
-
 Result reject(StaticBarrierError &error, StaticBarrierErrorCode code, uint64_t offset,
               std::string message) {
   error = {.code = code, .offset = offset, .message = std::move(message)};
@@ -110,17 +104,24 @@ qualify_static_barriers(std::span<BasicBlock *const> blocks, rj_code_target_id_t
       if (name != "s_barrier_signal" && name != "s_barrier_wait")
         return reject(error, StaticBarrierErrorCode::UnsupportedForm, offset,
                       "only builtin immediate signal/wait pairs are qualified");
-      const uint32_t word = instruction.raw_encoding()[0];
-      int32_t id;
+      const Operand *operand = instruction.src_operand(0);
+      if (!operand)
+        return reject(error, StaticBarrierErrorCode::UnsupportedForm, offset,
+                      "barrier instruction has no decoded source operand");
+      int32_t id = 0;
       if (name == "s_barrier_signal") {
-        const uint32_t selector = word & 0xffu;
-        if (selector < kFirstInlineNegativeIntegerSelector ||
-            selector > kLastInlineNegativeIntegerSelector)
+        const std::optional<uint64_t> value = operand->const_value();
+        if (!value)
           return reject(error, StaticBarrierErrorCode::UnsupportedForm, offset,
                         "named, dynamic and literal barrier operands are outside this profile");
-        id = -static_cast<int32_t>(selector - kFirstInlineNegativeIntegerSelector + 1);
+        // The decoder sign-extends inline integer constants in its scalar carrier.
+        const int64_t constant = static_cast<int64_t>(*value);
+        if (constant >= 0 || !std::in_range<int32_t>(constant))
+          return reject(error, StaticBarrierErrorCode::UnsupportedForm, offset,
+                        "named, dynamic and literal barrier operands are outside this profile");
+        id = static_cast<int32_t>(constant);
       } else {
-        id = static_cast<int16_t>(word & 0xffffu);
+        id = static_cast<int16_t>(operand->encoding_value());
       }
       if (id == -2 || id == -4)
         return reject(error, StaticBarrierErrorCode::UnsupportedForm, offset,
