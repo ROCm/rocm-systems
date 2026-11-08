@@ -174,7 +174,7 @@ T_host(P, B, B_h, A) = T_entry + (P - 1) * (T_fence + T_restore(B) + T_restore_h
 T_entry = T_fence + T_snapshot(B) + T_capture_host(B_h)
 ```
 
-`T_fence` is a barrier on every GPU queue. A tool callback that submits after that barrier is caught
+`T_fence` is a barrier on every compute queue, plus the dispatch-handler drain. Asynchronous copies and non-compute queues are not waited on here; the application synchronizes those before begin and before end. A tool callback that submits after that barrier is caught
 by the per-agent submit epoch: the writer locks are dropped, the queues are fenced again, and the
 epochs are re-checked, at most 8 times, then the range declines `CONCURRENT_DISPATCH`. A range whose
 application has already synchronized pays one fence. The passes run at the application's own speed,
