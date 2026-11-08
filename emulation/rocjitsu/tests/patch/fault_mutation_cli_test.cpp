@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "fault_barrier_fixture.h"
+#include "fault_barrier_oracle.h"
 #include "rocjitsu/code/file_io.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/fault_injection/drop_barrier.h"
@@ -34,6 +35,7 @@
 
 namespace rocjitsu {
 namespace {
+using test::checked_encoding;
 
 class FaultMutationCli : public ::testing::Test {
 protected:
@@ -128,6 +130,25 @@ protected:
     result.insert(result.end(), extra.begin(), extra.end());
     return result;
   }
+  static void expect_complete_output(std::span<const uint8_t> image,
+                                     const std::vector<uint8_t> &candidate,
+                                     std::string_view entry = "test_kernel") {
+    const FaultMutationContext context(image);
+    FaultMutationError error;
+    const FailureOr<FaultBarrierInventory> inventory =
+        discover_drop_barriers(context, entry, error);
+    ASSERT_TRUE(inventory.succeeded()) << error.message;
+    const FailureOr<DropBarrierSelection> selection =
+        select_drop_barrier(inventory.value(), {}, error);
+    ASSERT_TRUE(selection.succeeded()) << error.message;
+    const std::optional<std::vector<uint8_t>> expected =
+        test::expected_drop_image(context, selection.value());
+    ASSERT_TRUE(expected);
+    ASSERT_EQ(candidate.size(), expected->size());
+    EXPECT_EQ(candidate, *expected);
+    EXPECT_TRUE(test::matches_drop_output(context, selection.value(), candidate, error).succeeded())
+        << error.message;
+  }
   void expect_rejected(std::vector<std::string> arguments, int status = 2) {
     EXPECT_EQ(invoke(std::move(arguments)), status) << stderr_;
     EXPECT_FALSE(stderr_.empty());
@@ -181,7 +202,6 @@ TEST_P(FaultMutationCliFamily, ListsSelectsAndEmitsExactLibraryBytes) {
                       "18446744073709551615"});
     ASSERT_EQ(invoke(args(options)), 0) << stderr_;
     const std::vector<uint8_t> mutant = read(output_);
-    ASSERT_EQ(mutant.size(), image.size());
     const FailureOr<DropBarrierSelection> selection =
         select_drop_barrier(inventory.value(), {.exact = std::nullopt, .ordinal = ordinal}, error);
     ASSERT_TRUE(selection.succeeded());
@@ -193,30 +213,21 @@ TEST_P(FaultMutationCliFamily, ListsSelectsAndEmitsExactLibraryBytes) {
       expected_stderr += "rj_code_mutate: assumption: " + assumption + '\n';
     EXPECT_EQ(stderr_, expected_stderr);
     EXPECT_EQ(mutant, library.value().image);
-    // Independent full-image oracle: only the selected complete members become
-    // concrete-target s_nop 0 instructions. Headers, descriptors and waits stay exact.
-    std::vector<uint8_t> expected = image;
-    const uint32_t nop = build_s_nop(0, row.arch);
-    std::unique_ptr<Decoder> decoder = Decoder::create(default_isa_target_registry(), row.target);
-    for (const StaticBarrierMember &member : barrier.members) {
-      const size_t file_offset = inventory.value().section().file_offset + member.offset;
-      std::memcpy(expected.data() + file_offset, &nop, 4);
-      uint32_t word = 0;
-      std::memcpy(&word, mutant.data() + file_offset, 4);
-      const DecodeResult decoded = decoder->decode_window(std::span(&word, 1), member.offset);
-      ASSERT_TRUE(decoded.succeeded());
-      EXPECT_EQ(decoded.value()->mnemonic(), "s_nop");
-      EXPECT_EQ(decoded.value()->size(), 4u);
-      EXPECT_EQ(decoded.value()->src_operand(0)->encoding_value(), 0u);
-    }
-    EXPECT_EQ(mutant, expected);
+    const std::optional<std::vector<uint8_t>> expected =
+        test::expected_drop_image(context, selection.value());
+    ASSERT_TRUE(expected);
+    ASSERT_EQ(mutant.size(), expected->size());
+    EXPECT_EQ(mutant, *expected);
+    EXPECT_TRUE(test::matches_drop_output(context, selection.value(), mutant, error).succeeded())
+        << error.message;
     const FaultMutationContext fresh(mutant);
     EXPECT_EQ(fresh.source().target_id(), row.target);
     const FailureOr<FaultBarrierInventory> remaining =
         discover_drop_barriers(fresh, "test_kernel", error);
     ASSERT_TRUE(remaining.succeeded()) << error.message;
     ASSERT_EQ(remaining.value().barriers().size(), 1u);
-    EXPECT_EQ(remaining.value().barriers()[0], inventory.value().barriers()[1 - ordinal]);
+    EXPECT_TRUE(test::same_barrier_members(remaining.value().barriers()[0],
+                                           inventory.value().barriers()[1 - ordinal]));
     std::filesystem::remove(output_);
     ASSERT_EQ(invoke(args(options)), 0) << stderr_;
     EXPECT_EQ(read(output_), mutant);
@@ -292,9 +303,9 @@ TEST_F(FaultMutationCli, SelectionAndMalformedInputsFailWithoutPublication) {
   }
   // Empty inventories and a corrupt final physical member must not become half-drops.
   for (const std::vector<uint32_t> &words : std::vector<std::vector<uint32_t>>{
-           {build_s_endpgm(row.arch)},
-           {test::kSignal, test::kMov, 0xffffffffu, build_s_endpgm(row.arch)},
-           {test::kSignal, test::kMov, build_s_endpgm(row.arch)}}) {
+           {checked_encoding(build_s_endpgm(row.arch))},
+           {test::kSignal, test::kMov, 0xffffffffu, checked_encoding(build_s_endpgm(row.arch))},
+           {test::kSignal, test::kMov, checked_encoding(build_s_endpgm(row.arch))}}) {
     write(input_, test::make_barrier_elf_for_target(row, words));
     expect_rejected(args());
   }
@@ -369,7 +380,8 @@ TEST_F(FaultMutationCli, PreservesTypedDiscoveryAndSelectionErrors) {
   write(input_, image);
   expect_rejected(args());
   EXPECT_NE(stderr_.find("discovery failed: code=UnsupportedTarget"), std::string::npos) << stderr_;
-  write(input_, test::make_barrier_elf_for_target(row, {build_s_endpgm(row.arch)}));
+  write(input_,
+        test::make_barrier_elf_for_target(row, {checked_encoding(build_s_endpgm(row.arch))}));
   expect_rejected(args());
   EXPECT_NE(stderr_.find("selection failed: code=NoCandidates"), std::string::npos) << stderr_;
   EXPECT_EQ(stderr_.find("offset="), std::string::npos) << stderr_;
@@ -406,7 +418,7 @@ TEST_F(FaultMutationCli, FailedAssumptionOutputDoesNotReportSuccess) {
   write(input_, image);
   EXPECT_EQ(invoke(args(), {.stderr_failure = StreamFailure::FullDevice}), 3);
   EXPECT_TRUE(stdout_.empty());
-  EXPECT_EQ(read(output_).size(), image.size());
+  expect_complete_output(image, read(output_));
   EXPECT_EQ(read(input_), image);
 }
 
@@ -426,7 +438,7 @@ TEST_F(FaultMutationCli, ClosedOutputPipesReturnOutputIoError) {
   }
   // A summary failure preserves the same complete mutant as an assumption failure.
   const std::vector<uint8_t> mutant = read(output_);
-  ASSERT_EQ(mutant.size(), image.size());
+  expect_complete_output(image, mutant);
   std::filesystem::remove(output_);
   EXPECT_EQ(invoke(args(), {.stderr_failure = StreamFailure::ClosedPipe}), 3);
   EXPECT_TRUE(stdout_.empty());
@@ -443,7 +455,7 @@ TEST_F(FaultMutationCli, RejectsIllegalWavesAndForms) {
   const test::DropTargetRow &row = test::kDropRows[4];
   // Named signal/wait cannot be admitted by the CLI as builtin complete Drop.
   write(input_, test::make_barrier_elf_for_target(
-                    row, {0xbe804e80u, 0xbf940000u, build_s_endpgm(row.arch)}));
+                    row, {0xbe804e80u, 0xbf940000u, checked_encoding(build_s_endpgm(row.arch))}));
   expect_rejected(args());
 }
 
@@ -456,8 +468,9 @@ TEST_F(FaultMutationCli, RejectsTrapBarriersBeforeSelectingUserBarrier) {
       SCOPED_TRACE(id);
       const uint32_t signal = 0xbe804e00u | static_cast<uint32_t>(192 - id);
       const uint32_t wait = 0xbf940000u | static_cast<uint16_t>(id);
-      const std::vector<uint8_t> image = test::make_barrier_elf_for_target(
-          row, {signal, wait, test::kSignal, test::kWait, build_s_endpgm(row.arch)});
+      const std::vector<uint8_t> image =
+          test::make_barrier_elf_for_target(row, {signal, wait, test::kSignal, test::kWait,
+                                                  checked_encoding(build_s_endpgm(row.arch))});
       const std::string_view diagnostic = row.arch == ROCJITSU_CODE_ARCH_RDNA4 && id == -4
                                               ? "invalid scalar source selector"
                                               : "trap-only";
@@ -474,8 +487,11 @@ TEST_F(FaultMutationCli, RejectsTrapBarriersBeforeSelectingUserBarrier) {
 TEST_F(FaultMutationCli, EmitsAdmittedClusterBarrierAtExactOffsetZero) {
   for (const test::DropTargetRow &row : {test::kDropRows[4], test::kDropRows[5]}) {
     SCOPED_TRACE(row.name);
+    const int32_t id = -3;
+    const uint32_t signal = 0xbe804e00u | static_cast<uint32_t>(192 - id);
+    const uint32_t wait = 0xbf940000u | static_cast<uint16_t>(id);
     const std::vector<uint8_t> image = test::make_barrier_elf_for_target(
-        row, {0xbe804ec3u, 0xbf94fffdu, build_s_endpgm(row.arch)});
+        row, {signal, wait, checked_encoding(build_s_endpgm(row.arch))});
     write(input_, image);
     ASSERT_EQ(invoke({"--input", input_.string(), "--kernel", "test_kernel", "--list"}), 0)
         << stderr_;
@@ -495,15 +511,7 @@ TEST_F(FaultMutationCli, EmitsAdmittedClusterBarrierAtExactOffsetZero) {
           "does not verify workgroup size or this protocol"}) {
       EXPECT_NE(stderr_.find(required_fact), std::string::npos) << required_fact << '\n' << stderr_;
     }
-    const AmdGpuCodeObject source(image.data(), image.size());
-    ASSERT_TRUE(source.is_valid());
-    ASSERT_EQ(source.text_sections().size(), 1u);
-    const size_t text_offset = source.text_sections().front()->sectionOffset();
-    std::vector<uint8_t> expected = image;
-    const uint32_t nop = build_s_nop(0, row.arch);
-    std::memcpy(expected.data() + text_offset, &nop, 4);
-    std::memcpy(expected.data() + text_offset + 4, &nop, 4);
-    EXPECT_EQ(read(output_), expected);
+    expect_complete_output(image, read(output_));
     EXPECT_EQ(read(input_), image);
     std::filesystem::remove(output_);
   }
@@ -519,7 +527,8 @@ TEST_F(FaultMutationCli, SharedAbiAndFixedCdna5WaveAdmission) {
   write(input_, image);
   ASSERT_EQ(invoke(args()), 0) << stderr_;
   const std::vector<uint8_t> mutant = read(output_);
-  ASSERT_EQ(mutant.size(), image.size());
+  expect_complete_output(image, mutant);
+  ASSERT_GT(mutant.size(), static_cast<size_t>(EI_ABIVERSION));
   EXPECT_EQ(mutant[EI_ABIVERSION], ELFABIVERSION_AMDGPU_HSA_V4);
   EXPECT_EQ(read(input_), image);
 }
@@ -546,6 +555,7 @@ TEST_F(FaultMutationCli, ExactSiblingEntryPreservesUnselectedKernel) {
   const FailureOr<DropBarrierResult> mutant = apply_drop_barrier(context, selected.value(), error);
   ASSERT_TRUE(mutant.succeeded());
   EXPECT_EQ(read(output_), mutant.value().image);
+  expect_complete_output(image, read(output_), "test_kernel1");
   const FaultMutationContext fresh(read(output_));
   const FailureOr<FaultBarrierInventory> sibling =
       discover_drop_barriers(fresh, "test_kernel0", error);

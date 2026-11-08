@@ -338,6 +338,10 @@ relative to `.text`, concrete target, section index, form, ID, scope, and ordere
 Coordinates describe only this input and exact entry. They are not reusable
 handles for another image or legacy physical instruction indices.
 
+Emission redirects each selected member through a NOP trampoline. The mutant's
+text and ELF layout can grow, and descriptor-relative entry fields can change.
+Reparse the output and list its sites again before selecting another mutation.
+
 Discovery rejects trap-handler forms (-2 on RDNA4/CDNA5 and -4 on CDNA5)
 instead of assigning them a logical ordinal, including when an admitted user
 barrier follows them. CDNA5 cluster ID -3 remains admitted subject to the

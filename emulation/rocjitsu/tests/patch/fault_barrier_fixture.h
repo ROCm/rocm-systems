@@ -9,11 +9,21 @@
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/isa/target_registry.h"
 
+#include <gtest/gtest.h>
+
 #include <cstdint>
 #include <cstring>
 #include <vector>
 
 namespace rocjitsu::test {
+
+inline uint32_t checked_encoding(const FailureOr<uint32_t> &encoding) {
+  EXPECT_TRUE(encoding.succeeded());
+  if (encoding.failed())
+    return 0;
+  return encoding.value();
+}
+
 constexpr uint32_t kSignal = 0xbe804ec1u;
 constexpr uint32_t kWait = 0xbf94ffffu;
 constexpr uint32_t kWaitDscnt = 0xbfc60000u;
@@ -27,20 +37,58 @@ struct DropTargetRow {
   bool split;
 };
 constexpr DropTargetRow kRdna3DropRows[] = {
-    {"Gfx1100Wave32", ROCJITSU_CODE_TARGET_GFX1100, ROCJITSU_CODE_ARCH_RDNA3, 32, false},
-    {"Gfx1100Wave64", ROCJITSU_CODE_TARGET_GFX1100, ROCJITSU_CODE_ARCH_RDNA3, 64, false},
+    {.name = "Gfx1100Wave32",
+     .target = ROCJITSU_CODE_TARGET_GFX1100,
+     .arch = ROCJITSU_CODE_ARCH_RDNA3,
+     .wave_size = 32,
+     .split = false},
+    {.name = "Gfx1100Wave64",
+     .target = ROCJITSU_CODE_TARGET_GFX1100,
+     .arch = ROCJITSU_CODE_ARCH_RDNA3,
+     .wave_size = 64,
+     .split = false},
 };
-// Columns: name, concrete target, architecture, wave size, split form. Keep rows
-// positional so the supported combinations can be compared column by column.
 constexpr DropTargetRow kDropRows[] = {
-    {"Gfx1200Wave32", ROCJITSU_CODE_TARGET_GFX1200, ROCJITSU_CODE_ARCH_RDNA4, 32, true},
-    {"Gfx1200Wave64", ROCJITSU_CODE_TARGET_GFX1200, ROCJITSU_CODE_ARCH_RDNA4, 64, true},
-    {"Gfx1201Wave32", ROCJITSU_CODE_TARGET_GFX1201, ROCJITSU_CODE_ARCH_RDNA4, 32, true},
-    {"Gfx1201Wave64", ROCJITSU_CODE_TARGET_GFX1201, ROCJITSU_CODE_ARCH_RDNA4, 64, true},
-    {"Gfx1250Wave32", ROCJITSU_CODE_TARGET_GFX1250, ROCJITSU_CODE_ARCH_CDNA5, 32, true},
-    {"Gfx1251Wave32", ROCJITSU_CODE_TARGET_GFX1251, ROCJITSU_CODE_ARCH_CDNA5, 32, true},
-    {"Gfx942Wave64", ROCJITSU_CODE_TARGET_GFX942, ROCJITSU_CODE_ARCH_CDNA3, 64, false},
-    {"Gfx950Wave64", ROCJITSU_CODE_TARGET_GFX950, ROCJITSU_CODE_ARCH_CDNA4, 64, false},
+    {.name = "Gfx1200Wave32",
+     .target = ROCJITSU_CODE_TARGET_GFX1200,
+     .arch = ROCJITSU_CODE_ARCH_RDNA4,
+     .wave_size = 32,
+     .split = true},
+    {.name = "Gfx1200Wave64",
+     .target = ROCJITSU_CODE_TARGET_GFX1200,
+     .arch = ROCJITSU_CODE_ARCH_RDNA4,
+     .wave_size = 64,
+     .split = true},
+    {.name = "Gfx1201Wave32",
+     .target = ROCJITSU_CODE_TARGET_GFX1201,
+     .arch = ROCJITSU_CODE_ARCH_RDNA4,
+     .wave_size = 32,
+     .split = true},
+    {.name = "Gfx1201Wave64",
+     .target = ROCJITSU_CODE_TARGET_GFX1201,
+     .arch = ROCJITSU_CODE_ARCH_RDNA4,
+     .wave_size = 64,
+     .split = true},
+    {.name = "Gfx1250Wave32",
+     .target = ROCJITSU_CODE_TARGET_GFX1250,
+     .arch = ROCJITSU_CODE_ARCH_CDNA5,
+     .wave_size = 32,
+     .split = true},
+    {.name = "Gfx1251Wave32",
+     .target = ROCJITSU_CODE_TARGET_GFX1251,
+     .arch = ROCJITSU_CODE_ARCH_CDNA5,
+     .wave_size = 32,
+     .split = true},
+    {.name = "Gfx942Wave64",
+     .target = ROCJITSU_CODE_TARGET_GFX942,
+     .arch = ROCJITSU_CODE_ARCH_CDNA3,
+     .wave_size = 64,
+     .split = false},
+    {.name = "Gfx950Wave64",
+     .target = ROCJITSU_CODE_TARGET_GFX950,
+     .arch = ROCJITSU_CODE_ARCH_CDNA4,
+     .wave_size = 64,
+     .split = false},
     kRdna3DropRows[0],
     kRdna3DropRows[1],
 };
@@ -49,11 +97,14 @@ inline std::vector<uint32_t> make_barrier_words(const DropTargetRow &row) {
   // RDNA3 generated test_encodings.h: s_waitcnt and full s_barrier differ
   // from CDNA. Offset 4/16 barriers surround unchanged waits and s_mov_b32.
   if (row.arch == ROCJITSU_CODE_ARCH_RDNA3)
-    return {0xbf890000u, 0xbfbd0000u, kMov, 0xbf890000u, 0xbfbd0000u, build_s_endpgm(row.arch)};
+    return {0xbf890000u, 0xbfbd0000u, kMov,
+            0xbf890000u, 0xbfbd0000u, checked_encoding(build_s_endpgm(row.arch))};
   const uint32_t wait = row.split ? kWaitDscnt : 0xbf8c0000u;
   if (row.split)
-    return {wait, kSignal, kMov, kWait, wait, kSignal, kMov, kWait, build_s_endpgm(row.arch)};
-  return {wait, 0xbf8a0000u, kMov, wait, 0xbf8a0000u, build_s_endpgm(row.arch)};
+    return {wait,  kSignal, kMov,
+            kWait, wait,    kSignal,
+            kMov,  kWait,   checked_encoding(build_s_endpgm(row.arch))};
+  return {wait, 0xbf8a0000u, kMov, wait, 0xbf8a0000u, checked_encoding(build_s_endpgm(row.arch))};
 }
 
 inline std::vector<uint8_t> make_barrier_elf_for_target(const DropTargetRow &row,
@@ -66,7 +117,8 @@ inline std::vector<uint8_t> make_barrier_elf_for_target(const DropTargetRow &row
     return {};
   if (siblings) {
     const std::vector<uint32_t> body = words;
-    words.resize(kSecondEntryByteOffset / sizeof(uint32_t), build_s_nop(0, row.arch));
+    words.resize(kSecondEntryByteOffset / sizeof(uint32_t),
+                 checked_encoding(build_s_nop(0, row.arch)));
     words.insert(words.end(), body.begin(), body.end());
   }
   std::vector<uint8_t> image =
