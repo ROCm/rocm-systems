@@ -23,7 +23,7 @@ are skipped, and the reason arrives as the `CLOSE` callback's `status`.
 |---|---|---|
 | One queue, one agent | The snapshot is agent-scoped, and the replay window's lock is per-agent. A range spanning two agents would restore half its state | declined |
 | No device write from outside the recording | A copy or a foreign kernel writes state no recorded dispatch produces, so a replayed pass runs without it | declined |
-| Allocation set unchanged | The snapshot names specific base pointers. If one was freed and its address reused, restoring writes into memory the application has repurposed | declined |
+| Free device memory you allocate inside the range, and leave pre-existing tracked allocations in place | The snapshot names specific base pointers, sizes, and lifetimes. A leak, a free of an entry allocation, or a reused address means a restore would write into memory the application has repurposed. See [Free the device memory you allocate](#free-the-device-memory-you-allocate) | declined |
 | Kernarg bytes available at replay time | HIP recycles a kernarg block as soon as its kernel completes | bytes copied at record time |
 | Recorded code stays loaded, and its module variables are in the snapshot | An unload frees code a recorded packet points at; a code object loaded after the entry snapshot has `__device__` / `__constant__` globals the snapshot never saw | declined |
 | Dispatch packets re-submittable | The recorded packets must reach the GPU through the same path the application used | requires the interception path; queue interposition declines |
@@ -45,7 +45,7 @@ GPU dependencies so the table below can be unit tested directly.
 | Another thread dispatches to the bound agent | `CONCURRENT_DISPATCH` | cross-thread, folded in |
 | Async copy writes memory owned by the bound agent | `MEMORY_COPY_IN_RANGE` | cross-thread, folded in |
 | Any code object is unloaded while the range is bound | `CODE_OBJECT_CHANGED_IN_RANGE` | cross-thread, folded in |
-| Device allocation created or freed inside the range | `ALLOCATION_CHANGED_IN_RANGE` | close time |
+| Device memory allocated inside the range is still live at the end, or a pre-existing tracked allocation was freed, resized, or replaced | `ALLOCATION_CHANGED_IN_RANGE` | close time |
 | Snapshot capture or a later snapshot failed | `SNAPSHOT_FAILED` | snapshot time |
 | Kernarg staging allocation failed | `STAGING_FAILED` | close time |
 | Queue interposition is enabled | `UNSUPPORTED_QUEUE_PATH` | `begin` |
@@ -60,6 +60,24 @@ snapshot is agent-scoped.
 Declining releases the recorded packets immediately — each holds a copy of its kernarg segment — but
 the observed dispatch count is kept, because "how many dispatches were in this phase" is still what
 the tool wants to report.
+
+## Free the device memory you allocate
+
+This rule is the same for packet replay and host replay. Device memory allocated inside a pass must
+be freed before that pass ends. A tracked device allocation that already existed when the range
+opened must still be allocated at the end of the pass, at the same address, size, and lifetime.
+`allocations_match` compares the live inventory with the entry snapshot. A leak, a free of a
+pre-existing buffer, or a reallocation of the same pointer declines
+`ALLOCATION_CHANGED_IN_RANGE`. CLOSE carries that status. The application's own run is left as it
+finished, and the restore does not run.
+
+A `hipMalloc` / `hipFree` pair inside the pass meets the rule, because the allocation is gone when
+the check runs. A pool that keeps the block after free, such as `hipMallocAsync`, does not.
+
+Registered host memory is a different lifetime. A region passed to
+`rocprofiler_range_replay_host_track_memory` must stay valid until the range closes. Host replay's
+contract for that, and for host memory that was never registered, is on
+[Host range replay](range_replay_host.md#free-the-device-memory-you-allocate).
 
 ## Cross-thread declines
 
