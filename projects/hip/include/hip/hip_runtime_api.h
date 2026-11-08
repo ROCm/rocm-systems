@@ -651,6 +651,8 @@ typedef enum hipDeviceAttribute_t {
                                                  ///< '0' otherwise.
   hipDeviceAttributeMaxDynDataPrefetchRegions,   ///< Maximum number of dynamic data prefetch regions
                                                  ///< per kernel launch (0 if unsupported).
+  hipDeviceAttributeL3CacheSize,                 ///< Size of L3 cache in bytes, capped at INT_MAX.
+                                                 ///< 0 if no cache information is available.
 
   hipDeviceAttributeAmdSpecificEnd = 19999,
   hipDeviceAttributeVendorSpecificBegin = 20000,
