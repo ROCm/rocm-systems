@@ -316,6 +316,7 @@ TEST_F(NetIbGinMicrotest, InitType_UnsetTypeSkipsVerbsOnlyUnderIbCastOnGfx1250) 
       {"gfx1250 NCCL_NET=IB-CAST", -1, "gfx1250", "IB-CAST", nullptr, false, true},
       {"gfx1250 NCCL_NET=ROCM-IB", -1, "gfx1250", "ROCM-IB", nullptr, false, true},
       {"gfx1250 NCCL_NET_PLUGIN=none", -1, "gfx1250", nullptr, "none", true, true},
+      {"gfx1250 empty NCCL_NET_PLUGIN", -1, "gfx1250", nullptr, "", true, true},
       {"gfx1250 non-AINIC default", -1, "gfx1250", nullptr, nullptr, false, false},
       {"gfx1250 NCCL_NET=IB on AINIC", -1, "gfx1250", "IB", nullptr, true, false},
       {"gfx1250 external net plugin", -1, "gfx1250", nullptr, "librccl-net.so", true, false},
@@ -343,6 +344,42 @@ TEST_F(NetIbGinMicrotest, InitType_UnsetTypeSkipsVerbsOnlyUnderIbCastOnGfx1250) 
 
     EXPECT_EQ(ncclGinIbInitType(&context, 0, nullptr, c.type), ncclInternalError);
     EXPECT_EQ(init.calls, c.skip ? 0 : 1);
+    EXPECT_EQ(context, nullptr);
+  }
+}
+
+// If the arch cannot be read, gfx1250 is not assumed and the IB RMA proxy starts.
+TEST_F(NetIbGinMicrotest, InitType_ArchLookupFailureKeepsVerbsInitUnderIbCast) {
+  SetMicroEnvAbsent("NCCL_NET");
+  SetMicroEnvAbsent("NCCL_NET_PLUGIN");
+  ScopedHook ainic(g_useAinic, [] { return true; });
+  ScopedHook props(g_hipGetDeviceProperties, [](hipDeviceProp_t* prop, int) {
+    *prop = hipDeviceProp_t{};
+    std::snprintf(prop->gcnArchName, sizeof(prop->gcnArchName), "%s", "gfx1250");
+    return hipSuccess;
+  });
+  {
+    SCOPED_TRACE("hipGetDevice fails");
+    ScopedHook getDevice(g_hipGetDevice, [](int*) { return hipErrorNoDevice; });
+    ScopedHook init(g_ginInitDevices, [](ncclDebugLogger_t, ncclProfilerCallback_t) {
+      ncclNIbDevs = 0;
+      return ncclSuccess;
+    });
+    void* context = nullptr;
+    EXPECT_EQ(ncclGinIbInitType(&context, 0, nullptr, -1), ncclInternalError);
+    EXPECT_EQ(init.calls, 1);
+    EXPECT_EQ(context, nullptr);
+  }
+  {
+    SCOPED_TRACE("hipGetDeviceProperties fails");
+    ScopedHook failProps(g_hipGetDeviceProperties, [](hipDeviceProp_t*, int) { return hipErrorInvalidDevice; });
+    ScopedHook init(g_ginInitDevices, [](ncclDebugLogger_t, ncclProfilerCallback_t) {
+      ncclNIbDevs = 0;
+      return ncclSuccess;
+    });
+    void* context = nullptr;
+    EXPECT_EQ(ncclGinIbInitType(&context, 0, nullptr, -1), ncclInternalError);
+    EXPECT_EQ(init.calls, 1);
     EXPECT_EQ(context, nullptr);
   }
 }
