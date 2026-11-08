@@ -162,6 +162,13 @@ struct config : output_config
     // snapshot/restore between passes). The pass count is the number of counter groups.
     bool kernel_replay = get_env("ROCPROF_KERNEL_REPLAY", false);
 
+    // Range replay collects the same groups once per marked phase instead of once per dispatch.
+    // range_replay_host re-runs the application's own code (it must open the range with the
+    // sigsetjmp macro). Packet range replay is the default and also brackets an outermost roctx
+    // range.
+    bool range_replay      = get_env("ROCPROF_RANGE_REPLAY", false);
+    bool range_replay_host = get_env("ROCPROF_RANGE_REPLAY_HOST", false);
+
     int         mpi_size              = get_mpi_size();
     int         mpi_rank              = get_mpi_rank();
     std::string mpi_rank_env_variable = get_env(mpi_rank_env_var_name, "");
