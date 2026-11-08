@@ -251,9 +251,9 @@ TEST(WmmaSimdBenchmark, F32_16x16x16_f16) {
   fx.seed(S0_OFF, 16, bits, mma_test::SmallGen(1));
   fx.seed(S1_OFF, 16, bits, mma_test::SmallGen(2));
   auto run = [&] {
-    amdgpu::exec_wmma_f32(*fx.cu, M, N, K, bits, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
-                          fx.vbase + S1_OFF, fx.vbase + S2_OFF, amdgpu::extract_f16,
-                          amdgpu::extract_f16, /*const_acc=*/0);
+    amdgpu::exec_wmma_f32<M, N, K>(*fx.cu, bits, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
+                                   fx.vbase + S1_OFF, fx.vbase + S2_OFF, amdgpu::extract_f16,
+                                   amdgpu::extract_f16, /*const_acc=*/0);
   };
   bench("v_wmma_f32_16x16x16_f16", fx, run, double(M) * N * K, Cmp::F32Tol);
 }
@@ -267,9 +267,9 @@ TEST(WmmaSimdBenchmark, F16_16x16x16_f16) {
   fx.seed(S0_OFF, 16, bits, mma_test::SmallGen(3));
   fx.seed(S1_OFF, 16, bits, mma_test::SmallGen(4));
   auto run = [&] {
-    amdgpu::exec_wmma_f16(*fx.cu, M, N, K, bits, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
-                          fx.vbase + S1_OFF, fx.vbase + S2_OFF, amdgpu::extract_f16,
-                          amdgpu::extract_f16, /*const_acc=*/0);
+    amdgpu::exec_wmma_f16<M, N, K>(*fx.cu, bits, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
+                                   fx.vbase + S1_OFF, fx.vbase + S2_OFF, amdgpu::extract_f16,
+                                   amdgpu::extract_f16, /*const_acc=*/0);
   };
   bench("v_wmma_f16_16x16x16_f16", fx, run, double(M) * N * K, Cmp::F16Tol);
 }
@@ -283,9 +283,9 @@ TEST(WmmaSimdBenchmark, Bf16_16x16x16_bf16) {
   fx.seed(S0_OFF, 16, bits, mma_test::SmallGen(5));
   fx.seed(S1_OFF, 16, bits, mma_test::SmallGen(6));
   auto run = [&] {
-    amdgpu::exec_wmma_bf16(*fx.cu, M, N, K, bits, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
-                           fx.vbase + S1_OFF, fx.vbase + S2_OFF, amdgpu::extract_bf16,
-                           amdgpu::extract_bf16, /*const_acc=*/0);
+    amdgpu::exec_wmma_bf16<M, N, K>(*fx.cu, bits, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
+                                    fx.vbase + S1_OFF, fx.vbase + S2_OFF, amdgpu::extract_bf16,
+                                    amdgpu::extract_bf16, /*const_acc=*/0);
   };
   bench("v_wmma_bf16_16x16x16_bf16", fx, run, double(M) * N * K, Cmp::Bf16Tol);
 }
@@ -299,8 +299,8 @@ TEST(WmmaSimdBenchmark, I32_16x16x16_i8) {
   fx.seed_i8(S0_OFF, 16, mma_test::SmallI8Gen(7));
   fx.seed_i8(S1_OFF, 16, mma_test::SmallI8Gen(8));
   auto run = [&] {
-    amdgpu::exec_wmma_i32_i8(*fx.cu, M, N, K, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
-                             fx.vbase + S1_OFF, fx.vbase + S2_OFF, /*const_acc=*/0);
+    amdgpu::exec_wmma_i32_i8<M, N, K>(*fx.cu, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
+                                      fx.vbase + S1_OFF, fx.vbase + S2_OFF, /*const_acc=*/0);
   };
   bench("v_wmma_i32_16x16x16_i8", fx, run, double(M) * N * K, Cmp::IntExact);
 }
@@ -315,10 +315,10 @@ TEST(WmmaSimdBenchmark, SwmmacF32_16x16x32_f16) {
   fx.seed(S1_OFF, 16, bits, mma_test::SmallGen(10));
   fx.seed_words(INDEX_OFF, 2, 0xE4E4E4E4u); // arbitrary but valid 2-bit index set
   auto run = [&] {
-    amdgpu::exec_swmmac_f32(*fx.cu, M, N, K, bits, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
-                            fx.vbase + S1_OFF, fx.vbase + S2_OFF, fx.vbase + INDEX_OFF,
-                            INDEX_ENTRIES, INDEX_KEY, amdgpu::extract_f16, amdgpu::extract_f16,
-                            /*const_acc=*/0);
+    amdgpu::exec_swmmac_f32<M, N, K>(
+        *fx.cu, bits, fx.vbase + S2_OFF, fx.vbase + S0_OFF, fx.vbase + S1_OFF, fx.vbase + S2_OFF,
+        fx.vbase + INDEX_OFF, INDEX_ENTRIES, INDEX_KEY, amdgpu::extract_f16, amdgpu::extract_f16,
+        /*const_acc=*/0);
   };
   bench("v_swmmac_f32_16x16x32_f16", fx, run, double(M) * N * (K / 2), Cmp::F32Tol);
 }
@@ -333,9 +333,9 @@ TEST(WmmaSimdBenchmark, SwmmacI32_16x16x32_i8) {
   fx.seed_i8(S1_OFF, 16, mma_test::SmallI8Gen(12));
   fx.seed_words(INDEX_OFF, 2, 0xE4E4E4E4u);
   auto run = [&] {
-    amdgpu::exec_swmmac_i32_i8(*fx.cu, M, N, K, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
-                               fx.vbase + S1_OFF, fx.vbase + S2_OFF, fx.vbase + INDEX_OFF,
-                               INDEX_ENTRIES, INDEX_KEY, /*const_acc=*/0);
+    amdgpu::exec_swmmac_i32_i8<M, N, K>(*fx.cu, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
+                                        fx.vbase + S1_OFF, fx.vbase + S2_OFF, fx.vbase + INDEX_OFF,
+                                        INDEX_ENTRIES, INDEX_KEY, /*const_acc=*/0);
   };
   bench("v_swmmac_i32_16x16x32_i8", fx, run, double(M) * N * (K / 2), Cmp::IntExact);
 }
@@ -349,9 +349,9 @@ TEST(WmmaSimdBenchmark, F32_16x16x32_f16) {
   fx.seed(S0_OFF, 16, bits, mma_test::SmallGen(13));
   fx.seed(S1_OFF, 16, bits, mma_test::SmallGen(14));
   auto run = [&] {
-    amdgpu::exec_wmma_f32(*fx.cu, M, N, K, bits, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
-                          fx.vbase + S1_OFF, fx.vbase + S2_OFF, amdgpu::extract_f16,
-                          amdgpu::extract_f16, /*const_acc=*/0);
+    amdgpu::exec_wmma_f32<M, N, K>(*fx.cu, bits, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
+                                   fx.vbase + S1_OFF, fx.vbase + S2_OFF, amdgpu::extract_f16,
+                                   amdgpu::extract_f16, /*const_acc=*/0);
   };
   bench("v_wmma_f32_16x16x32_f16", fx, run, double(M) * N * K, Cmp::F32Tol);
 }
@@ -397,9 +397,9 @@ TEST(WmmaSimdBenchmark, F32_16x16x32_bf16) {
   fx.seed_bf16(S0_OFF, 16, mma_test::SmallGen(61));
   fx.seed_bf16(S1_OFF, 16, mma_test::SmallGen(62));
   auto run = [&] {
-    amdgpu::exec_wmma_f32(*fx.cu, M, N, K, bits, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
-                          fx.vbase + S1_OFF, fx.vbase + S2_OFF, amdgpu::extract_bf16,
-                          amdgpu::extract_bf16, /*const_acc=*/0);
+    amdgpu::exec_wmma_f32<M, N, K>(*fx.cu, bits, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
+                                   fx.vbase + S1_OFF, fx.vbase + S2_OFF, amdgpu::extract_bf16,
+                                   amdgpu::extract_bf16, /*const_acc=*/0);
   };
   bench("v_wmma_f32_16x16x32_bf16", fx, run, double(M) * N * K, Cmp::F32Tol);
 }
@@ -496,9 +496,9 @@ TEST(WmmaSimdBenchmark, I32_16x16x64_iu8) {
   fx.seed_i8(S0_OFF, 16, mma_test::SmallI8Gen(71));
   fx.seed_i8(S1_OFF, 16, mma_test::SmallI8Gen(72));
   auto run = [&] {
-    amdgpu::exec_wmma_i32(*fx.cu, M, N, K, 8, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
-                          fx.vbase + S1_OFF, fx.vbase + S2_OFF, amdgpu::extract_i8,
-                          amdgpu::extract_u8, /*clamp=*/false, /*const_acc=*/0);
+    amdgpu::exec_wmma_i32<M, N, K>(*fx.cu, 8, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
+                                   fx.vbase + S1_OFF, fx.vbase + S2_OFF, amdgpu::extract_i8,
+                                   amdgpu::extract_u8, /*clamp=*/false, /*const_acc=*/0);
   };
   bench("v_wmma_i32_16x16x64_iu8", fx, run, double(M) * N * K, Cmp::IntExact);
 }
@@ -528,9 +528,9 @@ TEST(WmmaSimdBenchmark, F32_16x16x64_fp8) {
   fx.seed_f8(S0_OFF, 16, mma_test::SmallGen(81));
   fx.seed_f8(S1_OFF, 16, mma_test::SmallGen(82));
   auto run = [&] {
-    amdgpu::exec_wmma_f32(*fx.cu, M, N, K, 8, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
-                          fx.vbase + S1_OFF, fx.vbase + S2_OFF, amdgpu::extract_fp8,
-                          amdgpu::extract_fp8, /*const_acc=*/0);
+    amdgpu::exec_wmma_f32<M, N, K>(*fx.cu, 8, fx.vbase + S2_OFF, fx.vbase + S0_OFF,
+                                   fx.vbase + S1_OFF, fx.vbase + S2_OFF, amdgpu::extract_fp8,
+                                   amdgpu::extract_fp8, /*const_acc=*/0);
   };
   bench("v_wmma_f32_16x16x64_fp8_fp8", fx, run, double(M) * N * K, Cmp::F32Tol);
 }
