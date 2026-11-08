@@ -61,8 +61,12 @@ typedef enum rocprofiler_range_replay_status_t  // NOLINT(performance-enum-size)
     ROCPROFILER_RANGE_REPLAY_STATUS_PROGRAM_TOO_LARGE,    ///< Range exceeded the record budget
     ROCPROFILER_RANGE_REPLAY_STATUS_SNAPSHOT_FAILED,      ///< Device-memory snapshot was incomplete
     ROCPROFILER_RANGE_REPLAY_STATUS_STAGING_FAILED,  ///< Kernarg staging or signal setup failed
-    ROCPROFILER_RANGE_REPLAY_STATUS_ALLOCATION_CHANGED_IN_RANGE,  ///< A device allocation was made
-                                                                  ///< or freed inside the range
+    ROCPROFILER_RANGE_REPLAY_STATUS_ALLOCATION_CHANGED_IN_RANGE,  ///< Device memory allocated
+                                                                  ///< inside the range was still
+                                                                  ///< live at the end, or a
+                                                                  ///< pre-existing tracked
+                                                                  ///< allocation was freed,
+                                                                  ///< resized, or replaced
     ROCPROFILER_RANGE_REPLAY_STATUS_UNSUPPORTED_QUEUE_PATH,  ///< The queue submission path in use
                                                              ///< cannot re-submit recorded packets
     ROCPROFILER_RANGE_REPLAY_STATUS_CODE_OBJECT_CHANGED_IN_RANGE,  ///< A code object was unloaded,
@@ -100,9 +104,9 @@ typedef enum rocprofiler_range_replay_status_t  // NOLINT(performance-enum-size)
  * SDK-driven re-executions of the recorded dispatches from the range-entry memory state.
  *
  * @warning Beta. A range is replayed only when every recorded dispatch targets one queue on one
- * agent, no HIP graph launch occurs inside it, no async copy writes device memory inside it, no
- * device allocation is made or freed inside it, and no other thread dispatches to the same agent
- * while it is open. Repeatability rests on the same
+ * agent, no HIP graph launch occurs inside it, no async copy writes device memory inside it, the
+ * device-allocation rule below holds, and no other thread dispatches to the same agent while it is
+ * open. Repeatability rests on the same
  * device-memory snapshot kernel replay uses (coarse-grained device allocations owned by the agent
  * plus module-scope @c __device__ / @c __constant__ variables), so unified/managed memory, host and
  * fine-grained memory, and virtual-memory-mapped allocations are not restored between passes.
@@ -116,12 +120,22 @@ typedef enum rocprofiler_range_replay_status_t  // NOLINT(performance-enum-size)
  * memsets, multiple queues and agents, HIP graphs, balanced allocate/free pairs, and host
  * computation all take part in every pass. Device memory on every GPU agent and the host regions
  * registered with @ref rocprofiler_range_replay_host_track_memory are restored before each extra
- * pass. Another thread dispatching or copying to a device inside the range, or a device allocation
- * left allocated or freed across the range, still declines. Module variables of a code object
- * first loaded inside the range are not rewound, so launch each kernel once before the range.
- * The application must synchronize all GPU work on every participating device before begin and
- * before end on every pass, including asynchronous copies and non-compute queues. The SDK's
- * compute-queue barriers and dispatch-handler drains do not wait for untracked copy completions.
+ * pass. Another thread dispatching or copying to a device inside the range still declines. Module
+ * variables of a code object first loaded inside the range are not rewound, so launch each kernel
+ * once before the range. The application must synchronize all GPU work on every participating
+ * device before begin and before end on every pass, including asynchronous copies and non-compute
+ * queues. The SDK's compute-queue barriers and dispatch-handler drains do not wait for untracked
+ * copy completions.
+ *
+ * Device memory allocated inside a pass must be freed before that pass ends. A tracked device
+ * allocation that already existed when the range opened must still be allocated at the end of the
+ * pass, at the same address, size, and lifetime. A leak, a free of a pre-existing buffer, or a
+ * reallocation of the same pointer is
+ * @ref ROCPROFILER_RANGE_REPLAY_STATUS_ALLOCATION_CHANGED_IN_RANGE on CLOSE. The application's own
+ * run is left as it finished, and the restore does not run. A @c hipMalloc / @c hipFree pair inside
+ * the pass meets the rule. A pool that keeps the block after free, such as @c hipMallocAsync, does
+ * not. Host memory registered with @ref rocprofiler_range_replay_host_track_memory must stay valid
+ * until the range closes. Host memory that was never registered is not rewound.
  *
  * @see `source/docs/conceptual/range_replay/index.md`
  */
@@ -251,7 +265,14 @@ rocprofiler_range_replay_host_jmpbuf(void) ROCPROFILER_API;
  *  - Locals of the enclosing function that the range modifies must be @c volatile, or must be
  *    re-initialized inside the range; their values after the jump are otherwise indeterminate.
  *  - Host memory the range reads and writes must be registered with
- *    @ref rocprofiler_range_replay_host_track_memory to be rewound between passes.
+ *    @ref rocprofiler_range_replay_host_track_memory to be rewound between passes. That memory
+ *    must stay valid until the range closes. Host memory that was never registered is not rewound.
+ *  - Free device memory allocated inside the pass before the pass ends. A tracked device
+ *    allocation that existed when the range opened must still be allocated at the end, at the same
+ *    address, size, and lifetime. A mismatch declines with
+ *    @ref ROCPROFILER_RANGE_REPLAY_STATUS_ALLOCATION_CHANGED_IN_RANGE and the restore does not run.
+ *    A @c hipMalloc / @c hipFree pair inside the pass meets the rule. A pool that keeps the block
+ *    after free, such as @c hipMallocAsync, does not.
  *  - No other thread may submit GPU work or copy into device memory while the range is open.
  *  - Synchronize all GPU work, including asynchronous copies and non-compute queues, before this
  *    macro and before end on every pass, using the runtime's supported completion mechanisms
