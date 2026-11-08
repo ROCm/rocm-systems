@@ -21,9 +21,10 @@ afterwards:
 
 That is also why the application is a participant here and not just a subject: only it knows where
 its range boundaries are. `main.cpp` calls `rocprofiler_range_replay_begin` / `_end` around the
-dispatches it wants replayed. It resolves those two entry points with `dlsym` out of the preloaded
-client rather than linking the SDK, because linking the SDK into the HIP executable makes HIP
-report `hipErrorInvalidDeviceFunction` on the first kernel launch on gfx942.
+dispatches it wants replayed. Host replay opens that same range with
+`ROCPROFILER_REPLAY_RANGE_BEGIN` / `ROCPROFILER_REPLAY_RANGE_END`. The executable does not link
+librocprofiler-sdk, because that link makes HIP report `hipErrorInvalidDeviceFunction` on the
+first kernel launch on gfx942; the preloaded tool provides the API.
 
 ## The application
 
