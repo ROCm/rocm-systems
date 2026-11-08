@@ -11296,6 +11296,17 @@ class CodeGenerator:
                         return False
         return True
 
+    # Only these CDNA5 kinds have dedicated out-of-line constructors when unpacked.
+    _UNPACKED_OPERAND_TAGS = {
+        'cdna5': {'OPR_VGPR': 'UnpackedVgpr', 'OPR_SRC': 'UnpackedSource'},
+    }
+
+    def _unpacked_operand_type(self, operand_type: str) -> str:
+        tags = self._UNPACKED_OPERAND_TAGS.get(self.isa_spec.arch_name, {})
+        if tag := tags.get(operand_type):
+            return f'Operand::{tag}{{}}'
+        return f'OperandType::{operand_type}'
+
     def gen_insts(self) -> None:
         """Generate instruction classes deriving from encoding classes.
 
@@ -11808,9 +11819,14 @@ class CodeGenerator:
                                 'ssamp',
                             ):
                                 operand_value = f'({operand_value} * 4)'
+                            constructor_type = (
+                                f'OperandType::{opr_type}'
+                                if packed_16bit_source or packed_16bit_dst
+                                else self._unpacked_operand_type(opr_type)
+                            )
                             opnd_ctor_init.append(
                                 f'{opnd.name}({opnd_size_expr}, '
-                                f'OperandType::{opr_type}, '
+                                f'{constructor_type}, '
                                 f'{operand_value}{packed_16bit_args})'
                             )
                             if _needs_tied_destination_result_view:
@@ -11819,7 +11835,7 @@ class CodeGenerator:
                                 )
                                 opnd_ctor_init.append(
                                     f'{opnd.name}_result({tied_destination_def_width}, '
-                                    f'OperandType::{opr_type}, {operand_value})'
+                                    f'{self._unpacked_operand_type(opr_type)}, {operand_value})'
                                 )
                                 if _uses_vgpr_msb_roles or _uses_gpr_idx_roles:
                                     vgpr_msb_role_body.append(
@@ -11840,7 +11856,7 @@ class CodeGenerator:
                                     return_size = str((inst_sem.elem_size or 4) * 8)
                                 opnd_ctor_init.append(
                                     f'{atomic_return_operand}({return_size}, '
-                                    f'OperandType::{opr_type}, {operand_value})'
+                                    f'{self._unpacked_operand_type(opr_type)}, {operand_value})'
                                 )
                                 if _uses_vgpr_msb_roles or _uses_gpr_idx_roles:
                                     vgpr_msb_role_body.append(
@@ -11858,12 +11874,12 @@ class CodeGenerator:
                             )
                             opnd_ctor_init.append(
                                 f'{opnd.name}({opnd_size_expr}, '
-                                f'OperandType::{opnd.operand_type}, {canonical})'
+                                f'{self._unpacked_operand_type(opnd.operand_type)}, {canonical})'
                             )
                         else:
                             opnd_ctor_init.append(
                                 f'{opnd.name}({opnd.size}, '
-                                f'OperandType::{opnd.operand_type}, 0)'
+                                f'{self._unpacked_operand_type(opnd.operand_type)}, 0)'
                             )
                     for opnd_name in readwrite_output_sources:
                         opnd_body.append(f'src_operands_[{src_idx}] = &{opnd_name};')
@@ -17238,8 +17254,9 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         )
 
         operand_ctor_decl = (
+            '  Operand(int size_bits, OperandType opr_type, int encoding_value);\n'
             '  Operand(int size_bits, OperandType opr_type, int encoding_value,\n'
-            '          bool packed_16bit_source = false, bool packed_16bit_dst = false);\n'
+            '          bool packed_16bit_source, bool packed_16bit_dst = false);\n'
             '  Operand(int size_bits, OperandType opr_type, unsigned short encoding_value,\n'
             '          bool packed_16bit_source, bool packed_16bit_dst = false);\n'
             if uses_packed_16bit_sources
@@ -17306,7 +17323,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             execution_backend_ctor_init = (
                 ',\n'
                 '      execution_backend_(static_cast<const ExecutionBackend *>(\n'
-                '          current_isa_operand_backend()))'
+                '          detail::current_isa_operand_backend_inline()))'
             )
             execution_decls += (
                 '  std::optional<uint32_t> simd_vgpr_base_impl(const amdgpu::Wavefront &wf) const override;\n'
@@ -17374,12 +17391,26 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
                 '  void simd_notify_write64_mut_exec(amdgpu::Wavefront &, uint64_t, uint8_t) const;\n'
             )
 
+        unpacked_tags = {
+            kind: tag
+            for kind, tag in self._UNPACKED_OPERAND_TAGS.get(
+                self.isa_spec.arch_name, {}
+            ).items()
+            if kind in self.isa_spec.operand_types
+        }
+        typed_operand_ctor_decl = ''.join(
+            f'  struct {tag} {{}};\n' for tag in unpacked_tags.values()
+        ) + ''.join(
+            f'  Operand(int size_bits, {tag}, int encoding_value);\n'
+            for tag in unpacked_tags.values()
+        )
         class_def = [
             cgen.Line(
                 f'{operand_base_decl}'
                 'public:\n'
                 '  enum class Literal32Widening : uint8_t { ZeroExtend, SignExtend, Replicate32, F64HighBits };\n'
                 '  static constexpr bool kStaticRegisterAccess = true;\n'
+                f'{typed_operand_ctor_decl}'
                 f'{operand_ctor_decl}'
                 '  Operand(int size_bits, OperandType opr_type, int encoding_value,\n'
                 '          uint16_t literal16_display_value, bool has_literal16_display);\n'
@@ -17499,8 +17530,38 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             + '    break;\n'
             + '  }\n'
         )
+
+        def selector_ctor(signature, kind='opr_type', fields='', constants=''):
+            return cgen.Line(
+                f'Operand::Operand({signature})\n'
+                f'    : {operand_base_init}(size_bits, {kind}, encoding_value)'
+                f'{execution_backend_ctor_init}{fields} {{\n'
+                f'{constants}{selector_validation}'
+                '  is_vgpr_ = is_vgpr_operand_type(opr_type);\n'
+                '}'
+            )
+
+        unpacked_flags = (
+            '  constexpr bool packed_16bit_source = false;\n'
+            '  constexpr bool packed_16bit_dst = false;\n'
+        )
+        unpacked_ctor_impl = [
+            selector_ctor(
+                f'int size_bits, {tag}, int encoding_value',
+                kind=f'OperandType::{kind}',
+                constants=f'  constexpr OperandType opr_type = OperandType::{kind};\n'
+                + unpacked_flags,
+            )
+            for kind, tag in unpacked_tags.items()
+        ]
         packed_16bit_ctor_impl = []
         if uses_packed_16bit_sources:
+            unpacked_ctor_impl.append(
+                selector_ctor(
+                    'int size_bits, OperandType opr_type, int encoding_value',
+                    constants=unpacked_flags,
+                )
+            )
             packed_16bit_ctor_impl.append(
                 cgen.Line(
                     'Operand::Operand(int size_bits, OperandType opr_type, unsigned short encoding_value,\n'
@@ -17535,15 +17596,8 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         )
         class_impl = _ImplOutputs(
             model=[
-                cgen.Line(
-                    f'Operand::Operand({operand_ctor_args})\n'
-                    f'    : {operand_base_init}(size_bits, opr_type, encoding_value)'
-                    f'{execution_backend_ctor_init}'
-                    f'{operand_ctor_init} {{\n'
-                    f'{selector_validation}'
-                    '  is_vgpr_ = is_vgpr_operand_type(opr_type);\n'
-                    '}'
-                ),
+                *unpacked_ctor_impl,
+                selector_ctor(operand_ctor_args, fields=operand_ctor_init),
                 *packed_16bit_ctor_impl,
                 cgen.Line(
                     'Operand::Operand(int size_bits, OperandType opr_type, int encoding_value,\n'
