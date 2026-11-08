@@ -96,7 +96,7 @@ Generic mechanics and recipe semantics have separate responsibilities:
 | Exact and logical-ordinal selection | Implemented. Exact kernel name chooses one inventory; an exact context-bound handle takes precedence over the zero-based logical ordinal. Invalid exact requests fail without fallback. Default ordinal zero deterministically chooses the first barrier in first-member source order; there is no race ranking or legacy physical-index adapter. | [`DropBarrierSelector`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.h), [`select_drop_barrier`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.cpp), [selection regressions](../tests/patch/fault_injection/drop_barrier_test.cpp) |
 | Multiple kernels in one text section | Limited support for independent sibling kernels. Discovery checks all entries before exposing one exact kernel's inventory; shared blocks, calls, aliased entries, and unresolved owners are rejected. | [`FaultMutationContext`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.h), [ownership analysis](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.cpp), [sibling preservation tests](../tests/patch/fault_injection/drop_barrier_test.cpp) |
 | Shared DBI instruction replacement | Consumed through `InstrumentationKind::ReplaceWithInst`. One transaction replaces complete source instructions through trampolines. Drop supplies one 4-byte NOP body for each qualified 4-byte barrier member. This does not widen observational trampoline-anchor admission. | [Instrumentor contract](../lib/rocjitsu/src/rocjitsu/code/patch/instrumentor.h), [DBI design](dbi-design.md), [transaction tests](../tests/patch/checked_text_edits_test.cpp), [replacement tests](../tests/patch/instrumentor_replacement_test.cpp) |
-| Offline CLI | Implemented: list current-input sites and emit one complete Drop using the same selector and library. | [usage](#command-line-usage), [frontend](../tools/rj_code_mutate.cpp), [integration tests](../tests/patch/fault_mutation_cli_test.cpp) |
+| Offline CLI | Implemented: list current-input sites and emit one complete Drop using the same selector and library. | [usage](#command-line-usage), [frontend](../tools/rj_code_mutate.cpp), [integration tests](../tests/patch/fault_injection/mutation_cli_test.cpp) |
 | Persistent selection files and replay bundles | Not provided; no durable replay format is committed. | — |
 | Helper, indirect-flow and firmware-preload ownership | Planned extensions; these inputs are not admitted by the current ownership profile. | — |
 | Other mutation recipes and composition | Planned. Barrier movement, address/order/scope changes, grouped or destructive partial Drop, and multi-mutation composition are not implemented here. | — |
@@ -394,7 +394,7 @@ returns status 3 before printing a success summary. The CLI emits only the
 mutant file and does not load HSA or a capture plugin. Mutation success and the
 capability listing make no execution or detector qualification claim.
 
-The [CLI tests](../tests/patch/fault_mutation_cli_test.cpp) exercise all ten
+The [CLI tests](../tests/patch/fault_injection/mutation_cli_test.cpp) exercise all ten
 rows above using the built executable, compare library and CLI bytes, decode
 selected members independently, reparse the mutant and check unchanged bytes,
 sibling kernels, deterministic repeat output and rejection/I/O paths. The

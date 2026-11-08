@@ -1135,7 +1135,7 @@ rj_add_gtest_tests(rocjitsu_fault_injection_tests)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(
         rocjitsu_fault_mutation_cli_tests
-        patch/fault_mutation_cli_test.cpp
+        patch/fault_injection/mutation_cli_test.cpp
     )
     target_include_directories(
         rocjitsu_fault_mutation_cli_tests
@@ -1160,7 +1160,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             -DMODEL_BINARY=$<TARGET_FILE:rj_code_mutate>
             -DREQUIRED_MODEL_ARCHES=cdna1,cdna2,cdna3,cdna4,cdna5,rdna1,rdna2,rdna3,rdna3_5,rdna4
             -P
-            ${CMAKE_CURRENT_SOURCE_DIR}/patch/check_fault_injection_symbols.cmake
+            ${CMAKE_CURRENT_SOURCE_DIR}/patch/fault_injection/check_fault_injection_symbols.cmake
     )
     add_test(
         NAME FaultDropBarrier.SymbolBoundary
