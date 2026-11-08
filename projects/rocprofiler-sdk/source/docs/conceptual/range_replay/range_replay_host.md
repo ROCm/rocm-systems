@@ -12,17 +12,17 @@ Host replay is the alternate path for those ranges. Nothing is recorded. The app
 between begin and end *is* the program, and each extra pass runs it again:
 
 ```text
- ROCPROFILER_RANGE_REPLAY_HOST_BEGIN  <-----------------------------+
-   (sigsetjmp in the caller's frame; begin + CONFIG on first entry)  |
+ ROCPROFILER_REPLAY_RANGE_BEGIN(range_id)  <------------------------+
+   sigsetjmp in the range's scope                                    |
+   first entry: drain + entry snapshot                               |
                                                                      |
    ... application code: kernels, copies, memsets, graphs,           |
        malloc/free pairs, host computation, several streams ...      |
                                                                      |
- rocprofiler_range_replay_end()                                      |
-   fence compute queues, PASS exit                                  |
-   more passes?  yes -> restore device memory + registered host      |
-                        memory, PASS enter, siglongjmp  -------------+
-                 no  -> CLOSE, return
+ ROCPROFILER_REPLAY_RANGE_END()                                      |
+   drain, PASS exit                                                  |
+   more passes?  yes -> restore the entry snapshot, siglongjmp  -----+
+                 no  -> CLOSE, return, then the scope closes
 ```
 
 ## Opting in
@@ -44,36 +44,33 @@ valid: a `sigsetjmp` inside `begin()` would be dead as soon as `begin()` returne
 
 ```cpp
 #include <rocprofiler-sdk/experimental/range_replay.h>
-#include <setjmp.h>
 
-rocprofiler_status_t status;
 hipDeviceSynchronize();             // on every participating device
 rocprofiler_range_replay_host_track_memory(&host_state, sizeof(host_state));
-ROCPROFILER_RANGE_REPLAY_HOST_BEGIN(range_id, status);
 
-for(int step = 0; step < n_steps; ++step)
-    time_step(step);                  // kernels, copies, host computation, ...
-hipDeviceSynchronize();
-
-rocprofiler_range_replay_end();       // jumps back to the macro N-1 times, then returns
+ROCPROFILER_REPLAY_RANGE_BEGIN(range_id)
+    for(int step = 0; step < n_steps; ++step)
+        time_step(step);              // kernels, copies, host computation, ...
+    hipDeviceSynchronize();
+ROCPROFILER_REPLAY_RANGE_END()
 ```
 
-The macro expands to a statement. ISO C only allows `sigsetjmp` as the entire controlling
-expression of an `if`, `switch`, or loop, or compared against a constant there. So the jump target is
-taken in an `if`, never in a ternary or behind `||`. CONFIG is delivered once. On re-entry the macro
-writes `ROCPROFILER_STATUS_SUCCESS` to `status` without calling begin again.
+`BEGIN` opens a scope and puts a `sigjmp_buf` in it. `sigsetjmp` is the controlling expression of
+the `if` inside the macro, which is the context ISO C allows (the same rule as `setjmp`). The jump
+saves the signal mask, so the call is `sigsetjmp` and end returns with `siglongjmp`. The first
+entry drains the GPU and takes the entry snapshot. Re-entry skips that call and runs the body
+again, so CONFIG is delivered once. `rocp_begin_status_` in the scope is the status of the first
+entry.
 
-An application that resolves the SDK with `dlsym` cannot use the macro, because the macro names the
-SDK functions directly. It spells the same thing out:
+`END` runs while that buffer is still in scope. It drains, raises PASS on the way out of the pass,
+and, when another pass remains, restores the entry snapshot and jumps back to `BEGIN`. After the
+last pass it raises CLOSE, returns, and the scope closes. The buffer is not a jump target once
+that scope has ended.
 
-```cpp
-if(sigsetjmp(*static_cast<sigjmp_buf*>(jmpbuf_fn()), 1) == 0)
-    begin_status = begin_fn(range_id);
-```
-
-`rocprofiler_range_replay_host_jmpbuf()` arms the jump for the next begin on the thread. Begin
-consumes the arming whether or not host replay is then used, so a buffer from an earlier range is
-never a jump target.
+`ROCPROFILER_RANGE_REPLAY_HOST_BEGIN(range_id, status_out)` is the statement form. It uses a
+thread-local buffer and writes `status_out`. The code between it and `rocprofiler_range_replay_end`
+is the range, in the same function. Begin consumes the arming whether or not host replay is then
+used, so a buffer from an earlier range is never a jump target.
 
 | Tool sets `host_replay` | Application armed the jump | Result |
 |---|---|---|

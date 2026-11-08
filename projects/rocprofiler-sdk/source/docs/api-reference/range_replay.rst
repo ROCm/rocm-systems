@@ -71,13 +71,12 @@ memory and registered host memory, then ``siglongjmp``\ s back for each extra pa
 
 .. code-block:: cpp
 
-    rocprofiler_status_t status;
     rocprofiler_range_replay_host_track_memory(&host_state, sizeof(host_state));
-    ROCPROFILER_RANGE_REPLAY_HOST_BEGIN(iteration_index, status);  // CONFIG on first entry only
+    ROCPROFILER_REPLAY_RANGE_BEGIN(iteration_index)  // drain + entry snapshot; CONFIG once
 
-    // ... time steps: kernels, copies, memsets, graphs, host computation ...
+        // ... time steps: kernels, copies, memsets, graphs, host computation ...
 
-    rocprofiler_range_replay_end();  // jumps back for passes 1..N-1, then CLOSE and return
+    ROCPROFILER_REPLAY_RANGE_END()  // drain, PASS exit; restore and jump, or CLOSE and return
 
 ``rocprofiler_range_replay_get_host_pass()`` tells host code which pass it is on, so once-only side
 effects stay on pass 0. See :ref:`range-replay-host` for the contract (no C++ objects with

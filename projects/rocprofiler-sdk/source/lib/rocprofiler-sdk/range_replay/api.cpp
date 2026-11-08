@@ -154,6 +154,18 @@ rocprofiler_range_replay_host_jmpbuf(void)
 }
 
 rocprofiler_status_t
+rocprofiler_range_replay_host_first_entry(uint64_t range_id, void* env)
+{
+    // The scoped macro's sigjmp_buf dies with its block, so end() has to jump at that buffer and
+    // not at a copy. A null pointer is not a target; leave any previous arming alone.
+    if(env == nullptr) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    ::rocprofiler::range_replay::arm_caller_jmp(env);
+    // begin consumes the arming, drains, and takes the entry snapshot when host replay is on.
+    return rocprofiler_range_replay_begin(range_id);
+}
+
+rocprofiler_status_t
 rocprofiler_range_replay_host_track_memory(void* ptr, uint64_t size)
 {
     namespace range_replay = ::rocprofiler::range_replay;
@@ -183,16 +195,24 @@ rocprofiler_status_t
 rocprofiler_range_replay_end(void)
 {
     const auto next = ::rocprofiler::range_replay::end_range();
-    if(next < 0) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    if(next < 0)
+    {
+        // The scoped macro closes its block as soon as this returns, and that block owns the
+        // jump buffer. Do not leave it as a target.
+        ::rocprofiler::range_replay::release_caller_jmp();
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    }
 
     if(next > 0)
     {
-        // Only PODs are live in this frame: siglongjmp does not run C++ destructors.
+        // Only PODs are live in this frame: siglongjmp does not run C++ destructors. The buffer
+        // is still in the range's scope; the macro closes that scope only after this returns.
         const int value = static_cast<int>(std::min<int64_t>(next, INT_MAX));
         siglongjmp(  // NOLINT(cert-err52-cpp)
             *static_cast<sigjmp_buf*>(::rocprofiler::range_replay::host_jmp_target()),
             value);
     }
+    ::rocprofiler::range_replay::release_caller_jmp();
     return ROCPROFILER_STATUS_SUCCESS;
 }
 }
