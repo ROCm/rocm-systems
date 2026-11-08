@@ -2554,9 +2554,9 @@ TEST(ExecutionPluginTest, WmmaReadObservationUsesWave32RegisterSet) {
   const uint32_t vb = wf->vgpr_alloc().base;
   constexpr uint32_t S0 = 0, S1 = 16, ACC = 32;
 
-  amdgpu::observe_wmma_fast_path_reads(*f.cu, vb + S0, vb + S1, vb + ACC, /*M=*/16, /*N=*/16,
-                                       /*K=*/32, /*data_bits=*/16, /*acc_bits=*/32,
-                                       amdgpu::ACC_FROM_VGPR, wf->wf_size());
+  amdgpu::observe_wmma_fast_path_reads</*M=*/16, /*N=*/16, /*K=*/32>(
+      *f.cu, vb + S0, vb + S1, vb + ACC, /*data_bits=*/16, /*acc_bits=*/32, amdgpu::ACC_FROM_VGPR,
+      wf->wf_size());
 
   expect_vgpr_read_set(vgpr_read_events(*plugin), vb,
                        {S0 + 0,  S0 + 1,  S0 + 2,  S0 + 3,  S0 + 4,  S0 + 5,  S0 + 6,  S0 + 7,
@@ -2576,9 +2576,9 @@ TEST(ExecutionPluginTest, WmmaReadObservationSkipsConstantAccumulator) {
   const uint32_t vb = wf->vgpr_alloc().base;
   constexpr uint32_t S0 = 0, S1 = 16, ACC = 32;
 
-  amdgpu::observe_wmma_fast_path_reads(*f.cu, vb + S0, vb + S1, vb + ACC, /*M=*/16, /*N=*/16,
-                                       /*K=*/32, /*data_bits=*/16, /*acc_bits=*/32,
-                                       /*const_acc=*/0, wf->wf_size());
+  amdgpu::observe_wmma_fast_path_reads</*M=*/16, /*N=*/16, /*K=*/32>(
+      *f.cu, vb + S0, vb + S1, vb + ACC, /*data_bits=*/16, /*acc_bits=*/32,
+      /*const_acc=*/0, wf->wf_size());
 
   expect_vgpr_read_set(vgpr_read_events(*plugin), vb,
                        {S0 + 0, S0 + 1, S0 + 2, S0 + 3, S0 + 4, S0 + 5, S0 + 6, S0 + 7, S1 + 0,
