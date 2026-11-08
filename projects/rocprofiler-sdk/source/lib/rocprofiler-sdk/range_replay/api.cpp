@@ -159,9 +159,14 @@ rocprofiler_range_replay_host_track_memory(void* ptr, uint64_t size)
     namespace range_replay = ::rocprofiler::range_replay;
 
     if(ptr == nullptr || size == 0) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    // A size that walks off the end of the address space would make the capture read past the
+    // region the caller named.
     if(size > std::numeric_limits<uintptr_t>::max() - reinterpret_cast<uintptr_t>(ptr))
         return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
+    // An open range captures now, during the application's own run. A registration made before
+    // any range is open waits for the next begin on this thread, which is when those bytes are
+    // still the entry value.
     if(auto* ctx = range_replay::current_range(); ctx != nullptr)
         range_replay::host::track_region(*ctx, ptr, static_cast<size_t>(size));
     else
@@ -175,7 +180,9 @@ rocprofiler_range_replay_get_host_pass(uint64_t* pass)
     if(pass == nullptr) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
     const auto* ctx = ::rocprofiler::range_replay::current_range();
-    *pass           = (ctx != nullptr && ctx->host.enabled) ? ctx->host.pass : 0;
+    // 0 outside a host range, including during packet replay and when no range is open, so a check
+    // for "the application's own run" stays true for code that is not being re-executed.
+    *pass = (ctx != nullptr && ctx->host.enabled) ? ctx->host.pass : 0;
     return ROCPROFILER_STATUS_SUCCESS;
 }
 

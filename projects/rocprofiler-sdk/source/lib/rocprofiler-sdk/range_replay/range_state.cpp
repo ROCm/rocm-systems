@@ -517,6 +517,9 @@ note_foreign_dispatch(uint64_t agent_key)
     registry().rlock([&](const registry_t& entries) {
         for(const auto& entry : entries)
         {
+            // A packet range is one agent, so a dispatch elsewhere is not its problem. A host range
+            // snapshotted every agent, so every dispatch is. The range's own thread is running the
+            // program, not racing it.
             if((!entry.host && entry.agent_key != agent_key) || entry.thread_id == tid) continue;
             if(entry.external)
                 publish_external_decline(*entry.external,
@@ -534,6 +537,9 @@ note_device_write(uint64_t agent_key)
     registry().rlock([&](const registry_t& entries) {
         for(const auto& entry : entries)
         {
+            // A host range re-runs its own copies, so only another thread's copy declines it, and
+            // that copy can land on any agent. A packet range did not record the copy, so a device
+            // write on its agent declines it even when the range's own thread made the copy.
             if(entry.host ? entry.thread_id == tid : entry.agent_key != agent_key) continue;
             if(entry.external)
                 publish_external_decline(*entry.external,
