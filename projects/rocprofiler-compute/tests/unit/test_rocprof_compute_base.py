@@ -4,6 +4,7 @@
 """Unit tests for rocprof_compute_base.py."""
 
 import argparse
+import sys
 from unittest.mock import Mock
 
 import common
@@ -38,6 +39,32 @@ def rocprof_compute_with_args(args: argparse.Namespace) -> RocProfCompute:
     instance._RocProfCompute__args = args
     instance._RocProfCompute__mode = args.mode
     return instance
+
+
+def print_startup_help(monkeypatch, argv) -> None:
+    """Run RocProfCompute.parse_args on argv, which prints the help and exits."""
+    instance = RocProfCompute.__new__(RocProfCompute)
+    instance._RocProfCompute__supported_archs = common.SUPPORTED_ARCHS
+    instance._RocProfCompute__version = {"ver_pretty": "unit test"}
+    monkeypatch.setattr(sys, "argv", ["rocprof-compute", *argv])
+    with pytest.raises(SystemExit):
+        instance.parse_args()
+
+
+@pytest.mark.parametrize(
+    "argv, debug_option, shown",
+    [
+        (["analyze", "--help"], "--debug-single-metric", False),
+        (["analyze", "--debug", "--help"], "--debug-single-metric", True),
+        (["analyze", "--help", "--debug"], "--debug-single-metric", True),
+    ],
+)
+def test_parse_args_shows_debug_options_with_debug(
+    monkeypatch, capsys, argv, debug_option, shown
+):
+    """--debug, before or after --help, lists the debug options of the mode."""
+    print_startup_help(monkeypatch, argv)
+    assert (debug_option in capsys.readouterr().out) is shown
 
 
 @pytest.mark.parametrize(

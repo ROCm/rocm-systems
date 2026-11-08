@@ -914,7 +914,7 @@ def test_show_operator_summary_empty_prints_no_dispatches_message(capsys):
 
 
 # ---------------------------------------------------------------------------
-# --view table
+# --debug-table-view
 # ---------------------------------------------------------------------------
 
 
@@ -932,8 +932,8 @@ def test_show_all_view_table_replaces_memory_chart_panel(
     gpu_arch: str,
     expect_chart: bool,
 ) -> None:
-    """A mem-chart-only panel emits the merged chart, or tables under --view table
-    or on an architecture without a chart layout."""
+    """A mem-chart-only panel emits the merged chart, or tables under
+    --debug-table-view or on an architecture without a chart layout."""
     mem_chart_marker = "rendered memory chart"
     df = pd.DataFrame({"Metric": ["Metric A"], "Value": [1]})
     monkeypatch.setattr("utils.tty.process_table_data", lambda *_a, **_k: df)
@@ -999,7 +999,7 @@ def test_show_all_view_table_skips_per_kernel_roofline_layout(
     view,
     expect_roofline_called: bool,
 ) -> None:
-    """--view table prints the roofline tables as plain tables instead of the
+    """--debug-table-view prints the roofline tables as plain tables instead of the
     per-kernel layout."""
     roofline_called = False
 

@@ -166,17 +166,26 @@ def test_profile_kernel_iteration_range():
 
 
 # =============================================================================
-# analyze --verify-deps
+# analyze debug options
 # =============================================================================
 
 
-def test_analyze_verify_deps_defaults_off():
-    assert build_args(["analyze", "-p", "/tmp/workload"]).verify_deps is False
+def test_analyze_debug_options():
+    """Debug options work without --debug, and without -p."""
+    defaults = build_args(["analyze", "-p", "/tmp/workload"])
+    assert defaults.debug_single_metric is False
+    assert defaults.view is None
+    assert defaults.verify_deps is False
 
-
-def test_analyze_verify_deps_needs_no_workload():
-    """The flag is a standalone environment check, so -p stays optional."""
-    assert build_args(["analyze", "--verify-deps"]).verify_deps is True
+    args = build_args([
+        "analyze",
+        "--debug-single-metric",
+        "--debug-table-view",
+        "--debug-verify-deps",
+    ])
+    assert args.debug_single_metric is True
+    assert args.view == "table"
+    assert args.verify_deps is True
 
 
 def test_pc_sampling_analyze_options():

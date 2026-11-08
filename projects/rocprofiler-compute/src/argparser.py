@@ -134,6 +134,31 @@ class ExperimentalAction(_DelegatingAction):
         super().__call__(parser, namespace, values, option_string)
 
 
+class DebugAction(_DelegatingAction):
+    """
+    Custom action for debug options.
+    - Suppresses help text unless --debug is given
+    - Delegates to inner action for proper value storage
+    """
+
+    def __init__(
+        self,
+        option_strings: Sequence[str],
+        dest: str,
+        base_action: str,
+        debug_enabled: bool,
+        help: str,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(
+            option_strings,
+            dest,
+            base_action,
+            help=help if debug_enabled else argparse.SUPPRESS,
+            **kwargs,
+        )
+
+
 def validate_block(value: str) -> str:
     if METRIC_ID_RE.match(value):
         return value
@@ -247,6 +272,11 @@ def add_general_group(
             "--pc-sampling-interval)\n"
         ),
     )
+    general_group.add_argument(
+        "--debug",
+        action="store_true",
+        help="Show the debug options in --help.",
+    )
 
 
 def omniarg_parser(
@@ -255,6 +285,7 @@ def omniarg_parser(
     supported_archs: Dict[str, str],
     rocprof_compute_version: Dict[str, Optional[str]],
     experimental_enabled: bool = False,
+    debug_enabled: bool = False,
 ) -> None:
     # -----------------------------------------
     # Parse arguments (dependent on mode)
@@ -678,6 +709,7 @@ Examples:
         supported_archs,
         rocprof_compute_version,
     )
+    analyze_debug_group = analyze_parser.add_argument_group("Debug Options")
     analyze_group = analyze_parser.add_argument_group("Analyze Options")
     analyze_advanced_group = analyze_parser.add_argument_group("Advanced Options")
 
@@ -690,12 +722,6 @@ Examples:
         nargs="+",
         action="append",
         help="\t\tSpecify the raw data root dirs or desired results directory.",
-    )
-    analyze_group.add_argument(
-        "--verify-deps",
-        dest="verify_deps",
-        action="store_true",
-        help="\t\tCheck the Python dependencies analyze mode needs, then exit.",
     )
     analyze_group.add_argument(
         "--list-stats",
@@ -881,21 +907,32 @@ Examples:
         default=2,
         help="\t\tSpecify desired decimal precision of analysis results. (DEFAULT: 2)",
     )
-    analyze_advanced_group.add_argument(
-        "-g", dest="debug", action="store_true", help="\t\tDebug single metric."
-    )
-    analyze_advanced_group.add_argument(
-        "--view",
-        dest="view",
-        metavar="NAME",
-        choices=["table"],  # future: e.g. "bar" for additional TTY views
-        default=None,
+    analyze_debug_group.add_argument(
+        "--debug-single-metric",
+        action=DebugAction,
+        base_action="store_true",
+        debug_enabled=debug_enabled,
         help=(
-            "\t\tTTY output view. "
-            "table: force plain tables and ignore cli_style from YAML "
-            "(e.g. mem_chart, per-kernel Roofline layout as tables). "
-            "Additional views may be added in future releases."
+            "Print the counter data, and each metric's expression and inputs.\n"
+            "Add --block <id> to print one metric."
         ),
+    )
+    analyze_debug_group.add_argument(
+        "--debug-table-view",
+        dest="view",
+        action=DebugAction,
+        base_action="store_const",
+        debug_enabled=debug_enabled,
+        const="table",
+        help="Force plain tables and ignore cli_style from YAML.",
+    )
+    analyze_debug_group.add_argument(
+        "--debug-verify-deps",
+        dest="verify_deps",
+        action=DebugAction,
+        base_action="store_true",
+        debug_enabled=debug_enabled,
+        help="Check the Python dependencies analyze mode needs, then exit.",
     )
     analyze_advanced_group.add_argument(
         "--specs-correction",

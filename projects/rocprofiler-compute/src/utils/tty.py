@@ -49,7 +49,7 @@ _GUIDANCE_PANEL_MIN_WIDTH = 100
 
 
 def _tty_view_is_table(args: argparse.Namespace) -> bool:
-    """True when ``--view table`` was given (plain tables; ignore cli_style)."""
+    """Return True when --debug-table-view asks for plain tables over cli_style."""
     return getattr(args, "view", None) == "table"
 
 
@@ -943,7 +943,7 @@ def show_all(
 
     for panel_id, panel in arch_configs.panel_configs.items():
         # Handle roofline panel (400) with custom display logic
-        # Skip if --view table is set; tables 401/402 will be rendered as normal tables
+        # With --debug-table-view, tables 401/402 render as normal tables.
         if panel_id == 400 and not _tty_view_is_table(args):
             _ = is_roofline_shown(args, runs, output, panel)
 
@@ -1079,7 +1079,7 @@ def show_all(
                 )
 
         # Roofline printing is handled separately above in is_roofline_shown.
-        # With --view table, roofline tables (401/402) render as normal tables.
+        # With --debug-table-view, roofline tables (401/402) render as normal tables.
         if panel_content and (
             table_config["id"] not in [401, 402] or _tty_view_is_table(args)
         ):
