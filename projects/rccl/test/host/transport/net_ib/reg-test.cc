@@ -369,15 +369,15 @@ TEST_F(NetIbRegMicrotest, DeregMrInternal_ReferenceThenFinalReleaseUpdatesCacheA
 
 TEST_F(NetIbRegMicrotest, DeregMrInternal_FinalReleaseOfMiddleEntryPreservesRemainingEntries) {
   auto base = MakeDevBase();
-  ibv_mr mrs[3]{};
+  ibv_mr mrs[4]{};
   auto& cache = ncclIbDevs[0].mrCache;
   cache.capacity = 32;
-  cache.population = 3;
+  cache.population = 4;
   cache.slots = static_cast<ncclIbMr*>(std::calloc(cache.capacity, sizeof(ncclIbMr)));
   ASSERT_NE(cache.slots, nullptr);
-  for (int i = 0; i < 3; ++i) {
-    cache.slots[i].mr = &mrs[i];
-    cache.slots[i].refs = 1;
+  for (int index = 0; index < 4; ++index) {
+    cache.slots[index].mr = &mrs[index];
+    cache.slots[index].refs = 1;
   }
   ScopedHook dereg(g_ibvDeregMr, [&mrs](ibv_mr* value) {
     EXPECT_EQ(value, &mrs[1]);
@@ -386,9 +386,10 @@ TEST_F(NetIbRegMicrotest, DeregMrInternal_FinalReleaseOfMiddleEntryPreservesRema
 
   EXPECT_EQ(ncclIbDeregMrInternal(&base, &mrs[1]), ncclSuccess);
 
-  ASSERT_EQ(cache.population, 2);
+  ASSERT_EQ(cache.population, 3);
   EXPECT_EQ(cache.slots[0].mr, &mrs[0]);
   EXPECT_EQ(cache.slots[1].mr, &mrs[2]);
+  EXPECT_EQ(cache.slots[2].mr, &mrs[3]);
   EXPECT_EQ(dereg.calls, 1);
 }
 
@@ -414,13 +415,19 @@ TEST_F(NetIbRegMicrotest, DeregMrInternal_RemovalPreservesOrderAndCacheHits) {
       *out = &registrations.at(nextRegistration++);
       return ncclSuccess;
     });
-    ScopedHook dereg(g_ibvDeregMr, [](ibv_mr*) { return ncclSuccess; });
+    std::vector<ibv_mr*> released;
+    ScopedHook dereg(g_ibvDeregMr, [&](ibv_mr* mr) {
+      released.push_back(mr);
+      return ncclSuccess;
+    });
     ibv_mr* handles[4] = {};
     for (int index = 0; index < 4; ++index) {
       ASSERT_EQ(ncclIbRegMrDmaBufInternal2(&base, storage.get() + 2 * index * pageSize, 8, NCCL_PTR_HOST,
-                                          0, -1, 0, &handles[index]), ncclSuccess);
+                                           0, -1, 0, &handles[index]), ncclSuccess);
     }
     ASSERT_EQ(ncclIbDeregMrInternal(&base, handles[removed]), ncclSuccess);
+    ASSERT_EQ(released.size(), 1u);
+    EXPECT_EQ(released.back(), handles[removed]);
     ASSERT_EQ(cache.population, 3);
     for (int slot = 1; slot < cache.population; ++slot) {
       EXPECT_LT(cache.slots[slot - 1].addr, cache.slots[slot].addr);
@@ -429,7 +436,7 @@ TEST_F(NetIbRegMicrotest, DeregMrInternal_RemovalPreservesOrderAndCacheHits) {
       if (index == removed) continue;
       ibv_mr* again = nullptr;
       ASSERT_EQ(ncclIbRegMrDmaBufInternal2(&base, storage.get() + 2 * index * pageSize, 8, NCCL_PTR_HOST,
-                                          0, -1, 0, &again), ncclSuccess);
+                                           0, -1, 0, &again), ncclSuccess);
       EXPECT_EQ(again, handles[index]);
       EXPECT_EQ(reg.calls, 4);
       ASSERT_EQ(ncclIbDeregMrInternal(&base, again), ncclSuccess);
@@ -437,7 +444,9 @@ TEST_F(NetIbRegMicrotest, DeregMrInternal_RemovalPreservesOrderAndCacheHits) {
     }
     for (int slot = 0; slot < cache.population; ++slot) EXPECT_EQ(cache.slots[slot].refs, 1);
     for (int index = 0; index < 4; ++index) {
-      if (index != removed) ASSERT_EQ(ncclIbDeregMrInternal(&base, handles[index]), ncclSuccess);
+      if (index == removed) continue;
+      ASSERT_EQ(ncclIbDeregMrInternal(&base, handles[index]), ncclSuccess);
+      EXPECT_EQ(released.back(), handles[index]);
     }
     EXPECT_EQ(dereg.calls, 4);
     EXPECT_EQ(cache.population, 0);
