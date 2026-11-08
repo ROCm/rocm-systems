@@ -12,10 +12,10 @@
 
 struct ncclGinAnvilIpcBufEntry;
 
-#define NCCL_GIN_ANVIL_SDMA_NET_VERSION 115
+#define NCCL_GIN_ANVIL_SDMA_NET_VERSION 118
 
 /** Must match host plugin and device kernel build; checked on device. */
-#define NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC 0xA6E17112u
+#define NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC 0xA6E17116u
 
 /** Default SDMA threshold (bytes). Transfers of at most this size use inlined IPC flat stores;
  *  larger transfers use direct Anvil SDMA. */
@@ -46,7 +46,25 @@ struct ncclGinAnvilSdmaGPUContext {
   int ipcTableCount;
   uintptr_t* signal_remote_addrs;  // [nRanks] peer signal region bases (GDA signal_raddrs pattern)
   uint32_t ipcSignalPeer;          // 1=shader IPC atomic signalPeer, 0=SDMA ATOMIC packet (default)
+
+  // Opt-in direct LSA-flat-from-fabric AllToAll (peer recv windows via fabric LSA map).
+  // Unlike ncclDevComm, this backend-owned context can evolve without changing
+  // the public device-communicator ABI.
+  uint32_t fabricA2ALsaEnabled;
+  size_t fabricA2ALsaThreshold;
 };
+
+/** Size of the context above on LP64. A layout change must bump
+ *  NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC and this constant together. */
+#define NCCL_GIN_ANVIL_SDMA_GPU_CONTEXT_BYTES 120
+
+#if defined(__cplusplus)
+static_assert(sizeof(struct ncclGinAnvilSdmaGPUContext) == NCCL_GIN_ANVIL_SDMA_GPU_CONTEXT_BYTES,
+              "ncclGinAnvilSdmaGPUContext layout changed: bump NCCL_GIN_ANVIL_SDMA_LAYOUT_MAGIC and "
+              "NCCL_GIN_ANVIL_SDMA_GPU_CONTEXT_BYTES together");
+static_assert(offsetof(struct ncclGinAnvilSdmaGPUContext, layoutMagic) == 0,
+              "layoutMagic must stay first so a consumer can version-check before reading the rest");
+#endif
 
 struct ncclGinAnvilSdmaMemHandle {
   uintptr_t baseAddr;     // Symmetric LSA flat VA for this rank
