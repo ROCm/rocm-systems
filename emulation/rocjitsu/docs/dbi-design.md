@@ -268,6 +268,18 @@ or expose a reusable context. All edits are validated before writing the
 orchestrator's private text buffer. Probe admission, layout, and resource policy
 remain with Instrumentor, and CodeObjectPatcher remains the ELF writer.
 
+Shared admission checks the complete write interval of supported ROCr dynamic
+relocations, including writes that start before `.text` and extend into it.
+Overflowing write ends reject; an interval ending exactly at `.text` only
+touches it. Existing static, inert and unsupported-form policies remain separate.
+
+Each edit batch also checks PT_LOAD file ranges. Edited bytes shared by mappings
+to different virtual addresses reject, while touching ranges, empty file ranges,
+and aliases outside the edited anchors remain eligible. Equivalent mappings to
+the same address retain the modern loader's shared-allocation semantics. This
+check does not establish descriptor ownership or require a unique executable
+mapping for an entire kernel; those qualification decisions remain with consumers.
+
 The reference checks cover decoded direct-branch destinations, text-symbol
 start/end offsets, raw symbol-less RELATIVE64 destinations under the existing
 allocation policy, and the kernel entries already collected by observation
