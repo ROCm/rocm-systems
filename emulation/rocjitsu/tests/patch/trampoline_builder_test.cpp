@@ -36,7 +36,7 @@ uint64_t resolve_sopp_target(uint64_t branch_pc, uint32_t branch_word) {
   return branch_pc + 4 + static_cast<int64_t>(decode_sopp_simm16(branch_word)) * 4;
 }
 
-TrampolinePlan make_omitted_original_plan(rj_code_arch_t arch,
+TrampolinePlan make_omitted_original_plan(rocjitsu::IsaFamily arch,
                                           const std::vector<uint32_t> &original,
                                           uint64_t anchor = 0x100, uint64_t trampoline = 0x200) {
   TrampolinePlan plan;
@@ -140,7 +140,7 @@ TEST(TrampolineBuilder, Emits8ByteRelocationAnchorPatchWithNopTail) {
 }
 
 TEST(TrampolineBuilder, OmittedOriginalEmptyBodySplicesCompleteInstructionExtents) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Rdna4;
   constexpr uint64_t kAnchor = 0x100;
   constexpr uint64_t kTrampoline = 0x200;
   const util::FailureOr<uint32_t> forward_branch = build_s_branch(63, kArch);
@@ -174,7 +174,7 @@ TEST(TrampolineBuilder, OmittedOriginalEmptyBodySplicesCompleteInstructionExtent
 }
 
 TEST(TrampolineBuilder, OmittedOriginalReplacementBodyContainsNoReplayedGuestWords) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Rdna4;
   constexpr uint64_t kAnchor = 0x100;
   constexpr uint64_t kTrampoline = 0x200;
   const util::FailureOr<uint32_t> padding = build_s_nop(0, kArch);
@@ -218,7 +218,7 @@ TEST(TrampolineBuilder, OmittedOriginalReplacementBodyContainsNoReplayedGuestWor
 }
 
 TEST(TrampolineBuilder, OmittedOriginalRejectsMalformedAnchorExtentsAndWords) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Rdna4;
   for (const uint32_t original_size : {0u, 2u, 6u, 16u}) {
     SCOPED_TRACE(original_size);
     TrampolinePlan plan =
@@ -238,7 +238,7 @@ TEST(TrampolineBuilder, OmittedOriginalRejectsMalformedAnchorExtentsAndWords) {
 }
 
 TEST(TrampolineBuilder, OmittedOriginalChecksBothBranchRangesForTwelveByteAnchors) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Rdna4;
   const util::FailureOr<uint32_t> nop = build_s_nop(0, kArch);
   ASSERT_TRUE(nop.succeeded());
   for (const bool forward_overflow : {false, true}) {
@@ -256,7 +256,7 @@ TEST(TrampolineBuilder, OmittedOriginalDoesNotRelaxTheRelocatedOriginalSizeLimit
   for (const bool patch_anchor : {false, true}) {
     SCOPED_TRACE(patch_anchor);
     TrampolinePlan plan =
-        make_omitted_original_plan(ROCJITSU_CODE_ARCH_RDNA4, {0xee068002u, 0x00800000u, 0});
+        make_omitted_original_plan(rocjitsu::IsaFamily::Rdna4, {0xee068002u, 0x00800000u, 0});
     plan.emit_original = true;
     plan.patch_anchor = patch_anchor;
     std::string error;
@@ -266,7 +266,7 @@ TEST(TrampolineBuilder, OmittedOriginalDoesNotRelaxTheRelocatedOriginalSizeLimit
 }
 
 TEST(TrampolineBuilder, OmittedOriginalEntryWithoutAnchorSpliceKeepsTwelveByteSupport) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Rdna4;
   const util::FailureOr<uint32_t> maybe_nop = build_s_nop(1, kArch);
   ASSERT_TRUE(maybe_nop.succeeded());
   const uint32_t nop = maybe_nop.value();
@@ -1165,7 +1165,7 @@ TrampolinePlan make_probe_plan(rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::C
 }
 
 TEST(TrampolineBuilderEmit, OmittedOriginalProbePreservesReplacementAfterRestoredEnvelope) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Rdna4;
   const util::FailureOr<uint32_t> move = build_s_mov_b32(8, 128, kArch);
   ASSERT_TRUE(move.succeeded());
   const util::FailureOr<uint32_t> end = build_s_endpgm(kArch);

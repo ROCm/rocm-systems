@@ -27,6 +27,7 @@
 #include "rocjitsu/code/patch/probe_symbol.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
 #include "rocjitsu/code/scoped_cfg_edges.h"
+#include "rocjitsu/code/text_padding.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/sgpr_layout.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
@@ -43,6 +44,7 @@
 #include <bit>
 #include <cassert>
 #include <cstring>
+#include <limits>
 #include <optional>
 #include <span>
 #include <string>
@@ -53,6 +55,25 @@
 #include <vector>
 
 namespace rocjitsu {
+
+// The immutable source/profile binding is enforced by Instrumentor: only its
+// own source initializes these facts, and fork() retains that exact binding.
+// Storage owns the index/references, never the borrowed ELF, decoder or CFG.
+struct SourceTextFacts {
+  InstructionBoundaries boundaries;
+  TextEditReferences references;
+};
+
+struct Instrumentor::ResolvedPoints {
+  std::vector<ResolvedInstrumentationSite> sites;
+  std::vector<ProbeCallable> probes;
+  std::vector<std::string> errors;
+  std::optional<TextEditError> edit_error;
+  // The object's kernel descriptors and the wave size they share. A probe-call
+  // site is resolved only when there is at least one kernel and one wave size.
+  std::vector<KernelDescriptorInfo> kernels;
+  std::optional<uint8_t> wave_size;
+};
 
 namespace {
 
@@ -110,6 +131,27 @@ bool has_callable_state(rocjitsu::IsaFamily arch, CallableState state) {
            arch == rocjitsu::IsaFamily::Rdna3_5 || arch == rocjitsu::IsaFamily::Rdna4;
   }
   return false;
+}
+
+bool has_unavailable_branch_reference(const Instruction &instruction) {
+  const amdgpu::Operation operation = instruction.amdgpu_operation();
+  return !instruction.branch_offset_bytes() &&
+         (operation == amdgpu::Operation::S_CBRANCH_CDBGSYS ||
+          operation == amdgpu::Operation::S_CBRANCH_CDBGUSER ||
+          operation == amdgpu::Operation::S_CBRANCH_CDBGSYS_AND_USER ||
+          operation == amdgpu::Operation::S_CBRANCH_CDBGSYS_OR_USER ||
+          operation == amdgpu::Operation::S_SUBVECTOR_LOOP_BEGIN ||
+          operation == amdgpu::Operation::S_SUBVECTOR_LOOP_END);
+}
+
+bool reject_unavailable_branch_reference(const Instruction &instruction, TextEditError &error) {
+  if (!has_unavailable_branch_reference(instruction))
+    return false;
+  error = {.code = TextEditErrorCode::UnsupportedReferences,
+           .offset = instruction.src_loc(),
+           .message = "branch destination metadata is unavailable for " +
+                      std::string(instruction.mnemonic())};
+  return true;
 }
 
 StateWrite
@@ -606,6 +648,10 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
     fail("InstrumentationPoint::kind must be BeforeInst, AfterInst, KernelEntry, or KernelExit");
     return std::nullopt;
   }
+  if (pt.replacement) {
+    fail("replacement payload requires ReplaceWithInst");
+    return std::nullopt;
+  }
   // A probe call needs both halves of the request: the object to resolve the
   // symbol in, and the symbol name
   if ((pt.probe_obj != nullptr) != (!pt.probe_symbol.empty())) {
@@ -972,6 +1018,12 @@ TrampolinePlan make_base_plan(const ResolvedInstrumentationSite &site, rocjitsu:
   const size_t num_words = site.original_size / sizeof(uint32_t);
   plan.original_words.resize(num_words);
   std::memcpy(plan.original_words.data(), site.original_bytes.data(), site.original_size);
+  if (site.kind == InstrumentationKind::ReplaceWithInst) {
+    plan.emit_original = false;
+    plan.returns_to_kernel = !site.replacement_terminates;
+    if (!site.replacement_words.empty())
+      plan.after_items.push_back({.words = site.replacement_words});
+  }
   return plan;
 }
 
@@ -1032,6 +1084,8 @@ std::optional<TrampolinePlan> make_trampoline_plan(const ResolvedInstrumentation
   if (nop.failed())
     return std::nullopt;
   TrampolinePlan plan = make_base_plan(site, arch, trampoline_offset);
+  if (site.kind == InstrumentationKind::ReplaceWithInst)
+    return plan;
   plan.before_items = {InlineAsmItem{{nop.value()}}};
   plan.after_items = {};
   plan.emit_original = true;
@@ -1541,18 +1595,98 @@ void Instrumentor::add_point_by_offset(uint64_t anchor_offset, InstrumentationKi
   points_.push_back(std::move(pt));
 }
 
-bool Instrumentor::ensure_blocks_built(std::string *error_out) {
+bool Instrumentor::ensure_source_facts(TextEditError &error) {
+  error = {};
+  if (source_facts_)
+    return true;
+  if (CheckedTextEdits::validate_source_extent(obj_, error).failed())
+    return false;
+  std::string decoder_error;
+  if (!ensure_decoder(&decoder_error)) {
+    error = {.code = TextEditErrorCode::UnsupportedTarget,
+             .offset = 0,
+             .message = std::move(decoder_error)};
+    return false;
+  }
+  auto facts = std::make_shared<SourceTextFacts>();
+  const Section &text = *obj_.text_sections().front();
+  if (blocks_built_ && !analysis_object_) {
+    // Own the index rather than borrowing storage from the parent Instrumentor.
+    for (const std::unique_ptr<BasicBlock> &block : blocks_) {
+      for (const Instruction &instruction : block->instructions()) {
+        if (reject_unavailable_branch_reference(instruction, error))
+          return false;
+      }
+    }
+    facts->boundaries = instruction_boundaries_;
+  } else {
+    const std::span<const uint32_t> words(reinterpret_cast<const uint32_t *>(text.data()),
+                                          text.size() / sizeof(uint32_t));
+    size_t cursor = 0;
+    while (cursor < words.size()) {
+      if (is_text_padding_word(arch_, words[cursor])) {
+        ++cursor;
+        continue;
+      }
+      util::StringDiagnostic diagnostic;
+      DecodeResult decoded =
+          decoder_->decode_window(words.subspan(cursor), cursor * 4, diagnostic.emitter());
+      if (decoded.failed() || decoded.value()->size() == 0) {
+        error = {.code = TextEditErrorCode::InvalidInstruction,
+                 .offset = cursor * 4,
+                 .message = "invalid source instruction: " + diagnostic.message()};
+        return false;
+      }
+      if (reject_unavailable_branch_reference(*decoded.value(), error))
+        return false;
+      facts->boundaries.record(*decoded.value(), text.vaddr());
+      cursor += static_cast<size_t>(decoded.value()->size()) / sizeof(uint32_t);
+    }
+  }
+  // Replacement bypasses observation resolution. Collect descriptor entries
+  // explicitly, without imposing probe, owner, liveness or loader policy.
+  const std::span<const uint8_t> image(reinterpret_cast<const uint8_t *>(obj_.image_data()),
+                                       obj_.image_size());
+  const std::vector<KernelDescriptorInfo> kernels =
+      scan_kernel_descriptors(image, text.sectionOffset(), text.size(), text.sectionHeaderIndex());
+  std::vector<uint64_t> kernel_entries;
+  kernel_entries.reserve(kernels.size());
+  for (const KernelDescriptorInfo &kernel : kernels)
+    kernel_entries.push_back(kernel.entry_text_offset);
+  const CodeObjectPatcher patcher(obj_);
+  FailureOr<TextEditReferences> references = CheckedTextEdits::collect_references(
+      obj_, arch_, facts->boundaries, patcher, kernel_entries, error);
+  if (references.failed())
+    return false;
+  facts->references = std::move(references).value();
+  source_facts_ = std::move(facts);
+  return true;
+}
+
+const InstructionBoundaries *Instrumentor::instruction_boundaries(TextEditError &error) {
+  return ensure_source_facts(error) ? &source_facts_->boundaries : nullptr;
+}
+
+FailureOr<std::unique_ptr<Instrumentor>> Instrumentor::fork(TextEditError &error) {
+  if (!ensure_source_facts(error))
+    return Result::failure();
+  std::unique_ptr<Instrumentor> child = std::make_unique<Instrumentor>(obj_, arch_, options_);
+  child->source_facts_ = source_facts_;
+  return child;
+}
+
+bool Instrumentor::ensure_decoder(std::string *error_out) {
   if (!obj_.is_valid()) {
     report(error_out, "cannot instrument an invalid code object");
     return false;
   }
-  if (blocks_built_)
+  if (decoder_)
     return true;
   if (arch_ == rocjitsu::IsaFamily::Rv32i || arch_ == rocjitsu::IsaFamily::Rv64i) {
     report(error_out, "AMDGPU instrumentation does not support RISC-V architectures");
     return false;
   }
-  const auto &registry = default_isa_target_registry();
+  const IsaTargetRegistry &registry = default_isa_target_registry();
   const rj_code_target_id_t target = obj_.target_id();
   if (target != ROCJITSU_CODE_TARGET_INVALID) {
     const IsaTargetDescriptor *descriptor = registry.find(target);
@@ -1569,25 +1703,36 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
       return false;
     }
   }
-  auto decoder = target == ROCJITSU_CODE_TARGET_INVALID ? Decoder::create(arch_)
-                                                        : Decoder::create(registry, target);
+  std::unique_ptr<Decoder> decoder = target == ROCJITSU_CODE_TARGET_INVALID
+                                         ? Decoder::create(arch_)
+                                         : Decoder::create(registry, target);
   if (!decoder) {
     report(error_out, "no decoder available for the requested architecture");
     return false;
   }
   decoder_ = std::move(decoder);
+  return true;
+}
+
+bool Instrumentor::ensure_blocks_built(std::string *error_out) {
+  if (blocks_built_)
+    return true;
+  if (!ensure_decoder(error_out))
+    return false;
   util::StringDiagnostic decode_error;
+  const AmdGpuCodeObject &analysis = analysis_object_ ? *analysis_object_ : obj_;
   std::vector<uint64_t> kernel_entries;
-  if (obj_.text_sections().size() == 1) {
-    const Section *text = obj_.text_sections().front();
-    const std::span<const uint8_t> image(reinterpret_cast<const uint8_t *>(obj_.image_data()),
-                                         obj_.image_size());
+  if (analysis.text_sections().size() == 1) {
+    const Section *text = analysis.text_sections().front();
+    const std::span<const uint8_t> image(reinterpret_cast<const uint8_t *>(analysis.image_data()),
+                                         analysis.image_size());
     const std::vector<KernelDescriptorInfo> kernels =
         scan_kernel_descriptors(image, text->sectionOffset(), text->size());
     for (const KernelDescriptorInfo &kernel : kernels)
       kernel_entries.push_back(kernel.entry_text_offset);
   }
-  auto blocks = BasicBlock::build(obj_, *decoder_, arch_, decode_error.emitter(), kernel_entries);
+  FailureOr<std::vector<std::unique_ptr<BasicBlock>>> blocks =
+      BasicBlock::build(analysis, *decoder_, arch_, decode_error.emitter(), kernel_entries);
   if (blocks.failed()) {
     report(error_out, decode_error.message().c_str());
     return false;
@@ -1596,7 +1741,7 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
   for (const auto &block : blocks_) {
     for (const Instruction &inst : block->instructions()) {
       offset_to_inst_.emplace(inst.src_loc(), &inst);
-      instruction_boundaries_.record(inst, obj_.text_sections().front()->vaddr());
+      instruction_boundaries_.record(inst, analysis.text_sections().front()->vaddr());
     }
   }
   blocks_built_ = true;
@@ -1617,11 +1762,12 @@ bool Instrumentor::ensure_liveness_built(uint8_t wave_size,
     report(error_out, "liveness requires one decodable text section");
     return false;
   }
-  const Section *text = obj_.text_sections().front();
+  const AmdGpuCodeObject &analysis = analysis_object_ ? *analysis_object_ : obj_;
+  const Section *text = analysis.text_sections().front();
   std::vector<BasicBlock *> scope;
   LivenessAnalysisOptions options;
   options.arch = arch_;
-  options.target = effective_target(obj_, arch_);
+  options.target = effective_target(analysis, arch_);
   options.text = {reinterpret_cast<const uint8_t *>(text->data()), text->size()};
   for (const std::unique_ptr<BasicBlock> &block : blocks_) {
     scope.push_back(block.get());
@@ -1657,11 +1803,246 @@ bool Instrumentor::ensure_liveness_built(uint8_t wave_size,
   return true;
 }
 
+bool Instrumentor::prepare_mutation_analysis(
+    std::span<const ResolvedInstrumentationSite> replacements, TextEditError &error) {
+  CodeObjectPatcher patcher(obj_);
+  const size_t original_size = patcher.text_bytes().size();
+  std::vector<uint8_t> text(patcher.text_bytes().begin(), patcher.text_bytes().end());
+  std::vector<CheckedTextEdit> edits;
+  for (const ResolvedInstrumentationSite &site : replacements) {
+    const TrampolinePlan plan = make_base_plan(site, arch_, text.size());
+    std::string message;
+    const std::optional<TrampolineBytes> bytes = TrampolineBuilder::build(plan, &message);
+    if (!bytes) {
+      error = {.code = TextEditErrorCode::InvalidRange,
+               .offset = site.anchor_offset,
+               .message = std::move(message)};
+      return false;
+    }
+    edits.push_back({.offset = site.anchor_offset,
+                     .expected = site.original_bytes,
+                     .replacement = bytes->patched_anchor_bytes});
+    append_words(text, bytes->trampoline_words);
+  }
+  const CheckedTextEdits transaction(obj_, *decoder_, source_facts_->boundaries,
+                                     source_facts_->references);
+  if (transaction.apply(edits, std::span(text).first(original_size), error).failed())
+    return false;
+  if (!patcher.replace_text(text)) {
+    error = {.code = TextEditErrorCode::InvalidImage,
+             .offset = 0,
+             .message = "cannot construct the private replacement analysis layout"};
+    return false;
+  }
+  const std::span<const uint8_t> image = patcher.image_bytes();
+  auto object = std::make_unique<AmdGpuCodeObject>(image.data(), image.size());
+  if (!object->is_valid()) {
+    error = {.code = TextEditErrorCode::InvalidImage,
+             .offset = 0,
+             .message = "cannot parse the private replacement analysis layout"};
+    return false;
+  }
+  // Rebuild dataflow from all effective replacement bodies, including deleted
+  // definitions at other sites. PC-independent bodies make this layout
+  // semantically equivalent to the final probe-bearing layout. Pristine
+  // live-before sets are not a safe union.
+  liveness_.reset();
+  callable_state_analysis_.reset();
+  blocks_.clear();
+  offset_to_inst_.clear();
+  instruction_boundaries_ = {};
+  blocks_built_ = false;
+  analysis_object_ = std::move(object);
+  return true;
+}
+
 Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   ResolvedPoints out;
-
+  const bool has_replacements = std::ranges::any_of(points_, [](const InstrumentationPoint &point) {
+    return point.kind == InstrumentationKind::ReplaceWithInst;
+  });
+  std::vector<InstrumentationPoint> requests = points_;
+  std::vector<ResolvedInstrumentationSite> replacements;
+  std::unordered_map<uint64_t, size_t> replacement_indices;
   std::string err;
-  if (!ensure_blocks_built(&err)) {
+  if (has_replacements) {
+    TextEditError error;
+    if (!ensure_source_facts(error)) {
+      out.errors.push_back(error.message);
+      out.edit_error = std::move(error);
+      return out;
+    }
+    if (!ensure_decoder(&err)) {
+      out.errors.push_back(std::move(err));
+      return out;
+    }
+    std::vector<CheckedTextEdit> source_edits;
+    for (const InstrumentationPoint &point : requests) {
+      if (point.kind != InstrumentationKind::ReplaceWithInst)
+        continue;
+      if (!point.replacement) {
+        out.errors.emplace_back("ReplaceWithInst requires expected and replacement bytes");
+        return out;
+      }
+      if (point.filter_flags != 0 || (point.probe_obj == nullptr) != point.probe_symbol.empty() ||
+          (!point.probe_obj && (!point.probe_args.empty() || point.force_full_exec))) {
+        out.errors.emplace_back(
+            "replacement probe fields are inconsistent or filters are unsupported");
+        return out;
+      }
+      const std::vector<uint8_t> &expected = point.replacement->expected_bytes;
+      if (expected.size() != 4 && expected.size() != 8 && expected.size() != 12) {
+        out.errors.emplace_back("replacement requires one complete 4/8/12-byte source instruction");
+        out.edit_error = TextEditError{.code = TextEditErrorCode::InvalidRange,
+                                       .offset = point.anchor_offset,
+                                       .message = out.errors.back()};
+        return out;
+      }
+      source_edits.push_back(
+          {.offset = point.anchor_offset, .expected = expected, .replacement = {}});
+      replacement_indices.emplace(point.anchor_offset, replacements.size());
+      replacements.push_back({.kind = InstrumentationKind::ReplaceWithInst,
+                              .anchor_offset = point.anchor_offset,
+                              .original_size = static_cast<uint32_t>(expected.size()),
+                              .original_bytes = expected,
+                              .mnemonic = {},
+                              .probe_index = std::nullopt,
+                              .probe_args = {}});
+    }
+    const CheckedTextEdits transaction(obj_, *decoder_, source_facts_->boundaries,
+                                       source_facts_->references);
+    if (transaction.validate_source_edits(source_edits, error).failed()) {
+      out.errors.push_back(error.message);
+      out.edit_error = std::move(error);
+      return out;
+    }
+    for (const InstrumentationPoint &point : requests) {
+      if (point.kind != InstrumentationKind::ReplaceWithInst)
+        continue;
+      ResolvedInstrumentationSite &site = replacements[replacement_indices.at(point.anchor_offset)];
+      const std::vector<uint8_t> &bytes = point.replacement->replacement_bytes;
+      if (bytes.size() % sizeof(uint32_t) != 0 ||
+          bytes.size() > std::numeric_limits<uint32_t>::max()) {
+        out.errors.emplace_back("replacement body must contain complete instruction dwords");
+        out.edit_error = TextEditError{.code = TextEditErrorCode::InvalidInstruction,
+                                       .offset = point.anchor_offset,
+                                       .message = out.errors.back()};
+        return out;
+      }
+      site.replacement_words.resize(bytes.size() / sizeof(uint32_t));
+      if (!bytes.empty())
+        std::memcpy(site.replacement_words.data(), bytes.data(), bytes.size());
+      size_t cursor = 0;
+      while (cursor < site.replacement_words.size()) {
+        const DecodeResult decoded = decoder_->decode_window(
+            std::span(site.replacement_words).subspan(cursor), point.anchor_offset + cursor * 4);
+        if (decoded.failed() || decoded.value()->size() == 0) {
+          out.errors.emplace_back("replacement contains an invalid or truncated instruction");
+          out.edit_error = TextEditError{.code = TextEditErrorCode::InvalidInstruction,
+                                         .offset = point.anchor_offset,
+                                         .message = out.errors.back()};
+          return out;
+        }
+        const Instruction &instruction = *decoded.value();
+        if (is_s_clause(instruction)) {
+          out.errors.emplace_back("replacement may not introduce a clause");
+          out.edit_error = TextEditError{.code = TextEditErrorCode::Clause,
+                                         .offset = point.anchor_offset,
+                                         .message = out.errors.back()};
+          return out;
+        }
+        if ((instruction.flags() &
+             (BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL | BRANCH_STACK)) != 0 ||
+            instruction.branch_offset_bytes() || is_pc_relative_anchor(instruction) ||
+            has_unavailable_branch_reference(instruction)) {
+          out.errors.emplace_back(
+              "replacement body contains unsupported PC-dependent control flow: " +
+              std::string(instruction.mnemonic()));
+          out.edit_error = TextEditError{.code = TextEditErrorCode::InvalidInstruction,
+                                         .offset = point.anchor_offset,
+                                         .message = out.errors.back()};
+          return out;
+        }
+        cursor += static_cast<size_t>(instruction.size()) / sizeof(uint32_t);
+        if ((instruction.flags() & PROGRAM_TERMINATOR) != 0) {
+          if (instruction.mnemonic() != "s_endpgm" || cursor != site.replacement_words.size()) {
+            out.errors.emplace_back("only a final s_endpgm may terminate a replacement body");
+            out.edit_error = TextEditError{.code = TextEditErrorCode::InvalidInstruction,
+                                           .offset = point.anchor_offset,
+                                           .message = out.errors.back()};
+            return out;
+          }
+          site.replacement_terminates = true;
+        }
+      }
+      if (!site.replacement_terminates &&
+          !source_facts_->boundaries.find(site.anchor_offset + site.original_size)) {
+        out.errors.emplace_back(
+            "replacement has no instruction to continue to after the source extent");
+        out.edit_error = TextEditError{.code = TextEditErrorCode::InvalidInstruction,
+                                       .offset = point.anchor_offset,
+                                       .message = out.errors.back()};
+        return out;
+      }
+    }
+    // A single replacement point can carry a probe directly. Also coalesce the
+    // explicit BeforeInst+Replace pair independently of request order. Other
+    // duplicates retain their existing all-or-nothing rejection.
+    for (const InstrumentationPoint &point : requests) {
+      const std::unordered_map<uint64_t, size_t>::const_iterator replacement =
+          replacement_indices.find(point.anchor_offset);
+      if (point.kind != InstrumentationKind::BeforeInst || replacement == replacement_indices.end())
+        continue;
+      if (point.replacement || !point.probe_obj || point.probe_symbol.empty() ||
+          point.filter_flags) {
+        out.errors.emplace_back("same-site observation composition requires a callable BeforeInst");
+        return out;
+      }
+      InstrumentationPoint *destination = nullptr;
+      for (InstrumentationPoint &candidate : requests) {
+        if (candidate.kind == InstrumentationKind::ReplaceWithInst &&
+            candidate.anchor_offset == point.anchor_offset) {
+          destination = &candidate;
+          break;
+        }
+      }
+      if (!destination || destination->probe_obj || !destination->probe_symbol.empty() ||
+          !destination->probe_args.empty() || destination->force_full_exec) {
+        out.errors.emplace_back("multiple probes requested the same replacement site");
+        return out;
+      }
+      destination->probe_obj = point.probe_obj;
+      destination->probe_symbol = point.probe_symbol;
+      destination->probe_args = point.probe_args;
+      destination->force_full_exec = point.force_full_exec;
+    }
+    // Copy from requests after coalescing, so a replacement preceding its probe
+    // sees the same merged fields as the opposite queue order.
+    std::vector<InstrumentationPoint> merged;
+    for (const InstrumentationPoint &point : requests) {
+      if (point.kind == InstrumentationKind::BeforeInst &&
+          replacement_indices.contains(point.anchor_offset))
+        continue;
+      merged.push_back(point);
+    }
+    requests = std::move(merged);
+  }
+  const bool needs_graph =
+      std::ranges::any_of(requests,
+                          [](const InstrumentationPoint &point) {
+                            return point.kind != InstrumentationKind::ReplaceWithInst ||
+                                   point.probe_obj != nullptr;
+                          }) ||
+      options_.register_growth.has_value();
+  if (has_replacements && needs_graph) {
+    TextEditError error;
+    if (!prepare_mutation_analysis(replacements, error)) {
+      out.errors.push_back(error.message);
+      out.edit_error = std::move(error);
+      return out;
+    }
+  }
+  if (needs_graph && !ensure_blocks_built(&err)) {
     out.errors.push_back(std::move(err));
     return out;
   }
@@ -1705,6 +2086,10 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   const Section *text = obj_.text_sections().front();
   const std::span<const uint8_t> text_bytes(reinterpret_cast<const uint8_t *>(text->data()),
                                             text->size());
+  const Section *analysis_text =
+      analysis_object_ ? analysis_object_->text_sections().front() : text;
+  const std::span<const uint8_t> analysis_text_bytes(
+      reinterpret_cast<const uint8_t *>(analysis_text->data()), analysis_text->size());
   // A probe call is analyzed and planned at the wave size the object's kernels
   // share, with temps bounded by their SGPR allocation. The point loop refuses a
   // probe call before any of that when either is missing.
@@ -1713,13 +2098,15 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   out.kernels = scan_kernel_descriptors(image, text->sectionOffset(), text->size());
   out.wave_size = common_wavefront_size(arch_, out.kernels);
 
-  const auto &registry = default_isa_target_registry();
+  const IsaTargetRegistry &registry = default_isa_target_registry();
   const rj_code_target_id_t destination_target = effective_target(obj_, arch_);
   const IsaTargetBinding *gpu_target = registry.find_target(destination_target);
   const bool setreg_vgpr_msb_fixup =
       gpu_target == nullptr || gpu_target->capabilities.setreg_vgpr_msb_fixup;
   ProbeEntryState probe_entry_state = ProbeEntryState::Unknown;
-  if (arch_ == rocjitsu::IsaFamily::Cdna5 && out.wave_size) {
+  const bool has_probe_requests = std::ranges::any_of(
+      requests, [](const InstrumentationPoint &point) { return point.probe_obj != nullptr; });
+  if (has_probe_requests && arch_ == rocjitsu::IsaFamily::Cdna5 && out.wave_size) {
     if (!ensure_liveness_built(*out.wave_size, out.kernels, &err)) {
       out.errors.push_back(err);
       return out;
@@ -1732,7 +2119,9 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
       }
       if (!has_call) {
         bool bank_analysis_failed = false;
-        const bool zero = std::ranges::all_of(points_, [&](const auto &point) {
+        const bool zero = std::ranges::all_of(requests, [&](const InstrumentationPoint &point) {
+          if (!point.probe_obj)
+            return true;
           const Instruction *anchor = find_instruction_at_offset(point.anchor_offset);
           if (!anchor)
             return false;
@@ -1861,10 +2250,38 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   std::vector<ResolvedInstrumentationSite> sites;
   std::unordered_set<uint64_t> site_offsets;
   std::unordered_set<uint64_t> entry_offsets;
-  sites.reserve(points_.size());
-  for (const auto &pt : points_) {
+  sites.reserve(requests.size());
+  for (const InstrumentationPoint &pt : requests) {
     const Instruction *anchor = find_instruction_at_offset(pt.anchor_offset);
-    if (anchor == nullptr) {
+    std::unique_ptr<Instruction> source_anchor;
+    if (analysis_object_ && pt.kind != InstrumentationKind::ReplaceWithInst) {
+      // Validate and capture the pristine instruction. The effective CFG has a
+      // replacement branch at an entry shared with a replacement request.
+      anchor = nullptr;
+      const InstructionBoundaries::Entry *boundary =
+          source_facts_->boundaries.find(pt.anchor_offset);
+      if (boundary != nullptr) {
+        if (pt.anchor_offset > text_bytes.size() ||
+            boundary->size > text_bytes.size() - pt.anchor_offset) {
+          out.errors.emplace_back("source anchor extends past end of .text");
+          continue;
+        }
+        const std::span<const uint32_t> words(
+            reinterpret_cast<const uint32_t *>(text_bytes.data() + pt.anchor_offset),
+            boundary->size / sizeof(uint32_t));
+        util::StringDiagnostic diagnostic;
+        DecodeResult decoded =
+            decoder_->decode_window(words, pt.anchor_offset, diagnostic.emitter());
+        if (decoded.failed() || static_cast<uint32_t>(decoded.value()->size()) != boundary->size) {
+          out.errors.push_back("cannot decode source anchor at .text offset " +
+                               std::to_string(pt.anchor_offset) + ": " + diagnostic.message());
+          continue;
+        }
+        source_anchor = std::move(decoded).value();
+        anchor = source_anchor.get();
+      }
+    }
+    if (anchor == nullptr && pt.kind != InstrumentationKind::ReplaceWithInst) {
       out.errors.emplace_back("no decoded instruction starts at the requested anchor_offset = " +
                               std::to_string(pt.anchor_offset));
       continue;
@@ -1879,14 +2296,20 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
     }
 
     std::string perr;
-    std::optional<ResolvedInstrumentationSite> site = validate_anchor(
-        *anchor, pt.anchor_offset, text_bytes, pt, arch_, &perr, setreg_vgpr_msb_fixup);
+    std::optional<ResolvedInstrumentationSite> site;
+    if (pt.kind == InstrumentationKind::ReplaceWithInst)
+      site = replacements[replacement_indices.at(pt.anchor_offset)];
+    else
+      site = validate_anchor(*anchor, pt.anchor_offset, text_bytes, pt, arch_, &perr,
+                               setreg_vgpr_msb_fixup);
     if (!site) {
       out.errors.push_back(std::move(perr));
       continue;
     }
 
-    const InstructionBoundaries::Entry *boundary = instruction_boundaries_.find(pt.anchor_offset);
+    const InstructionBoundaries &source_boundaries =
+        source_facts_ ? source_facts_->boundaries : instruction_boundaries_;
+    const InstructionBoundaries::Entry *boundary = source_boundaries.find(pt.anchor_offset);
     if (boundary && boundary->clause_member) {
       out.errors.emplace_back("anchor is inside an s_clause run, anchor_offset = " +
                               std::to_string(pt.anchor_offset));
@@ -1916,9 +2339,14 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
       // Dispatch enters a separate stub once. Guest backedges to the original
       // entry do not revisit this callback and cannot change its initial state.
       if (pt.kind != InstrumentationKind::KernelEntry) {
+        const Instruction *state_anchor = find_instruction_at_offset(pt.anchor_offset);
+        if (state_anchor == nullptr) {
+          out.errors.emplace_back("effective anchor is unavailable for callable-state analysis");
+          continue;
+        }
         if (!callable_state_analysis_)
           callable_state_analysis_ =
-              std::make_unique<CallableStateAnalysis>(blocks_, out.kernels, text_bytes, arch_);
+              std::make_unique<CallableStateAnalysis>(blocks_, out.kernels, analysis_text_bytes, arch_);
         // A scalar anchor does not discharge dependencies left by earlier VALUs.
         // Until spacing is proven, exclude the entire decoded object, including
         // unreachable producers and helper bodies rather than guessing ownership.
@@ -1945,7 +2373,7 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
         for (const CallableState state : {CallableState::GprIndexing, CallableState::Vskip,
                                           CallableState::UnavailableStorage}) {
           if (callable_state_analysis_->may_be_unsafe(
-                  *anchor, pt.kind == InstrumentationKind::AfterInst, state)) {
+                  *state_anchor, pt.kind == InstrumentationKind::AfterInst, state)) {
             const std::string reason =
                 state == CallableState::UnavailableStorage
                     ? "cannot prove the VGPR allocation and scratch storage"
@@ -1984,6 +2412,7 @@ Instrumentor::ValidationResult Instrumentor::validate_points() {
   ResolvedPoints resolved = resolve_points();
   ValidationResult result;
   result.errors = std::move(resolved.errors);
+  result.edit_error = std::move(resolved.edit_error);
   result.sites = std::move(resolved.sites);
   return result;
 }
@@ -2042,6 +2471,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   ResolvedPoints resolved = resolve_points();
   if (!resolved.errors.empty()) {
     result.errors = std::move(resolved.errors);
+    result.edit_error = std::move(resolved.edit_error);
     return result;
   }
 
@@ -2055,11 +2485,11 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   // Reuse the bank proof from resolution when present, and otherwise build
   // liveness only for probe calls or register growth.
   // resolve_points() built blocks_ and resolved those probes only because the
-  // kernels share a wave size. obj_ owns the Instructions live_before() is keyed
-  // on.
+  // kernels share a wave size. blocks_ owns the Instructions live_before() is
+  // keyed on; their encoding bytes belong to obj_ or the owned analysis_object_.
   // TODO: scope this to the kernel containing each anchor, like the DBT path,
-  // rather than treating every decoded block as one CFG. Safe here: kernels end
-  // in s_endpgm, so there are no false cross-kernel fallthrough edges.
+  // rather than treating every decoded block as one CFG. Replacement analysis
+  // must retain any new edges caused by an omitted terminator.
   std::vector<BasicBlock *> liveness_scope;
   liveness_scope.reserve(blocks_.size());
   for (const auto &block : blocks_)
@@ -2518,9 +2948,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       record.probe_target_offset = probe.output_text_offset;
       record.link_pair_base = plan.link_pair_base;
       record.target_pair_base = plan.target_pair_base;
-      // If this site does not call a probe
-      // Currently, this means that the plan is to put a nop which means we do
-      // not need to mess with spills
+      // Sites without a probe need no call-envelope registers or spills.
     } else {
       std::optional<TrampolinePlan> maybe_plan =
           make_trampoline_plan(site, arch_, trampoline_offset, &err);
@@ -2529,8 +2957,10 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
         continue;
       }
       const TrampolinePlan &plan = *maybe_plan;
-      // The only assembly we currently allow is an inlined nop
-      if (!validate_inline_nop_plan(plan, &err)) {
+      // Observation retains its inline-nop guard. Replacement bodies have
+      // already passed concrete decoding and PC-independence admission.
+      if (site.kind != InstrumentationKind::ReplaceWithInst &&
+          !validate_inline_nop_plan(plan, &err)) {
         result.errors.push_back(std::move(err));
         continue;
       }
@@ -2599,25 +3029,14 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   const std::span<const uint8_t> original_text = patcher.text_bytes();
   std::vector<uint8_t> new_text(original_text.begin(), original_text.end());
   if (!anchor_edits.empty()) {
-    // Conditional-debug branches and subvector loops do not yet expose their
-    // destination metadata. Missing displacement does not prove an anchor has
-    // no incoming reference. Keep this admission guard out of generic analysis.
+    TextEditError edit_error;
+    // Retain B1's guard for known conditional-debug and subvector-loop forms
+    // whose missing destination metadata cannot establish reference safety.
     for (const std::unique_ptr<BasicBlock> &block : blocks_) {
       for (const Instruction &instruction : block->instructions()) {
-        const std::string_view mnemonic = instruction.mnemonic();
-        const amdgpu::Operation operation = instruction.amdgpu_operation();
-        if (((operation == amdgpu::Operation::S_CBRANCH_CDBGSYS ||
-              operation == amdgpu::Operation::S_CBRANCH_CDBGUSER ||
-              operation == amdgpu::Operation::S_CBRANCH_CDBGSYS_AND_USER ||
-              operation == amdgpu::Operation::S_CBRANCH_CDBGSYS_OR_USER) ||
-             operation == amdgpu::Operation::S_SUBVECTOR_LOOP_BEGIN ||
-             operation == amdgpu::Operation::S_SUBVECTOR_LOOP_END) &&
-            !instruction.branch_offset_bytes()) {
-          result.edit_error = TextEditError{
-              .code = TextEditErrorCode::UnsupportedReferences,
-              .offset = instruction.src_loc(),
-              .message = "branch destination metadata is unavailable for " + std::string(mnemonic)};
-          result.errors.push_back("anchor edit transaction: " + result.edit_error->message);
+        if (reject_unavailable_branch_reference(instruction, edit_error)) {
+          result.errors.push_back("anchor edit transaction: " + edit_error.message);
+          result.edit_error = std::move(edit_error);
           return result;
         }
       }
@@ -2626,9 +3045,22 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     kernel_entries.reserve(kernels.size());
     for (const KernelDescriptorInfo &kernel : kernels)
       kernel_entries.push_back(kernel.entry_text_offset);
-    const CheckedTextEdits transaction(obj_, arch_, *decoder_, instruction_boundaries_, patcher,
-                                       kernel_entries);
-    TextEditError edit_error;
+    const InstructionBoundaries &source_boundaries =
+        source_facts_ ? source_facts_->boundaries : instruction_boundaries_;
+    std::optional<TextEditReferences> local_references;
+    if (!source_facts_) {
+      FailureOr<TextEditReferences> collected = CheckedTextEdits::collect_references(
+          obj_, arch_, source_boundaries, patcher, kernel_entries, edit_error);
+      if (collected.failed()) {
+        result.errors.push_back("anchor edit transaction: " + edit_error.message);
+        result.edit_error = std::move(edit_error);
+        return result;
+      }
+      local_references = std::move(collected).value();
+    }
+    const TextEditReferences &references =
+        source_facts_ ? source_facts_->references : *local_references;
+    const CheckedTextEdits transaction(obj_, *decoder_, source_boundaries, references);
     if (transaction.apply(anchor_edits, new_text, edit_error).failed()) {
       result.errors.emplace_back("anchor edit transaction: " + edit_error.message);
       result.edit_error = std::move(edit_error);
@@ -2766,9 +3198,12 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     result.sites.push_back(
         {.kind = a.site->kind,
          .original_offset = a.site->anchor_offset,
+         .original_size = a.site->original_size,
          .guest_offset = a.trampoline_offset + a.bytes.original_byte_offset,
-         .guest_size =
-             a.site->kind == InstrumentationKind::KernelEntry ? 0u : a.site->original_size,
+         .guest_size = a.site->kind == InstrumentationKind::KernelEntry ? 0u
+                       : a.site->kind == InstrumentationKind::ReplaceWithInst
+                           ? static_cast<uint32_t>(a.site->replacement_words.size() * 4)
+                           : a.site->original_size,
          .instrumentation_offset =
              a.trampoline_offset + (a.is_probe_call ? a.bytes.call_envelope_byte_offset : 0),
          .instrumentation_size =
