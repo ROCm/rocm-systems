@@ -1006,6 +1006,17 @@ in the following table.
         | Values below ``1`` are treated as ``1``, which issues one operation
           per iteration and never sends the RMA aggregation hint
 
+    * - | ``RCCL_GIN_ANVIL_FABRIC_MEM``
+        | Opts into fabric memory registration on the Anvil SDMA GIN backend
+          (``NCCL_GIN_TYPE=7``): symmetric windows are registered through
+          exported fabric VMM handles instead of the LSA window. Applies to
+          gfx1250 + MNNVL communicators with one clique covering every rank
+          and cuMem enabled, and only when the GIN team spans every rank.
+          Every rank must opt in; otherwise every rank keeps LSA
+          registration and the ranks that opted in log a warning.
+      - | Unset or ``0``: off (default). Windows are registered through LSA.
+        | ``1``: on.
+
     * - | ``NCCL_RMA_PLUGIN``
         | Selects external one-sided RMA plugins, which are also the backend
           the built-in GIN proxy forwards to.

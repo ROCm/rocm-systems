@@ -1085,11 +1085,14 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroGinHost -- src/gin/gin_host.cc (GIN_PROXY_NTHREADS, proxy affinity). Own
-  # binary: gin-plugin-init-test.cc already defines ncclParamGinEnable in
-  # rccl-UnitTestsMicro, and gin_fakes.cc supplies ncclGinQueryLastError to Init.
+  # rccl-UnitTestsMicroGinHost -- src/gin/gin_host.cc (GIN_PROXY_NTHREADS, proxy affinity) and
+  # src/gin/gin_anvil_reach.cc (Anvil SDMA fabric memory). Own binary:
+  # gin-plugin-init-test.cc already defines ncclParamGinEnable in rccl-UnitTestsMicro, and
+  # gin_fakes.cc supplies ncclGinQueryLastError to Init.
   set(TEST_MICRO_GIN_HOST_SOURCE_FILES
     gin-host-test.cc
+    gin-anvil-reach-test.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc  # real IsArchMatch
     fakes/nccl_fakes.cc
     fakes/search_fakes.cc
     fakes/hip_fakes.cc
@@ -2023,6 +2026,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroGinHost
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     GIN_HOST_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/gin/gin_host.cc"
+    GIN_ANVIL_REACH_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/gin/gin_anvil_reach.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_gin_host.yaml")
 
 # ---------------------------------------------------------------------------
