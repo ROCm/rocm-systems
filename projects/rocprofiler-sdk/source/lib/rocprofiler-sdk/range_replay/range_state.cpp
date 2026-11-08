@@ -86,10 +86,10 @@ registry()
 thread_local std::unique_ptr<range_context_t> tl_range     = {};
 thread_local bool                             tl_replaying = false;
 
-thread_local sigjmp_buf                         tl_host_jmp_buffers[2]             = {};
-thread_local sigjmp_buf*                        tl_host_jmp_staged                 = &tl_host_jmp_buffers[0];
-thread_local sigjmp_buf*                        tl_host_jmp_active                 = &tl_host_jmp_buffers[1];
-thread_local bool                               tl_host_jmp_armed                  = false;
+thread_local sigjmp_buf                         tl_host_jmp_buffers[2] = {};
+thread_local sigjmp_buf*                        tl_host_jmp_staged     = &tl_host_jmp_buffers[0];
+thread_local sigjmp_buf*                        tl_host_jmp_active     = &tl_host_jmp_buffers[1];
+thread_local bool                               tl_host_jmp_armed      = false;
 thread_local sigjmp_buf*                        tl_host_jmp_pending_external       = nullptr;
 thread_local sigjmp_buf*                        tl_host_jmp_active_external        = nullptr;
 thread_local bool                               tl_host_jmp_pending_external_valid = false;

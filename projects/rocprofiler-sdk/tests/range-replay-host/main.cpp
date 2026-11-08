@@ -227,21 +227,21 @@ int      g_pass0_log_lines      = 0;
 
 struct resources_t
 {
-    hipStream_t                                       a          = nullptr;
-    hipStream_t                                       b          = nullptr;
-    hipEvent_t                                        fft_done   = nullptr;
-    hipEvent_t                                        halo_done  = nullptr;
-    hipGraphExec_t                                    graph_exec = nullptr;
-    float*                                            u          = nullptr;
-    float*                                            tmp        = nullptr;
-    float*                                            rhs        = nullptr;
-    float2*                                           spec       = nullptr;
-    float*                                            boundary   = nullptr;
-    float*                                            partials   = nullptr;
-    float*                                            h_partials = nullptr;  // pinned
-    float*                                            h_boundary = nullptr;  // pinned
-    float*                                            h_field    = nullptr;  // pinned
-    bool scratch = false;
+    hipStream_t    a          = nullptr;
+    hipStream_t    b          = nullptr;
+    hipEvent_t     fft_done   = nullptr;
+    hipEvent_t     halo_done  = nullptr;
+    hipGraphExec_t graph_exec = nullptr;
+    float*         u          = nullptr;
+    float*         tmp        = nullptr;
+    float*         rhs        = nullptr;
+    float2*        spec       = nullptr;
+    float*         boundary   = nullptr;
+    float*         partials   = nullptr;
+    float*         h_partials = nullptr;  // pinned
+    float*         h_boundary = nullptr;  // pinned
+    float*         h_field    = nullptr;  // pinned
+    bool           scratch    = false;
 };
 
 uint64_t
@@ -458,9 +458,7 @@ main()
         if(const auto status = rocprofiler_range_replay_begin(kRangeId);
            status != ROCPROFILER_STATUS_SUCCESS)
         {
-            fprintf(stderr,
-                    "[app] FAIL: begin returned status %d\n",
-                    static_cast<int>(status));
+            fprintf(stderr, "[app] FAIL: begin returned status %d\n", static_cast<int>(status));
             return EXIT_FAILURE;
         }
         if(range_body(r) != EXIT_SUCCESS) return EXIT_FAILURE;
