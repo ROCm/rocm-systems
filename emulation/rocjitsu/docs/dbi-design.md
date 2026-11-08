@@ -2,8 +2,8 @@
 
 ## Overview
 
-The Dynamic Binary Instrumentation (DBI) system patches AMDGPU HSA code objects
-in-place, before they are loaded into device memory, to inject code at chosen
+The Dynamic Binary Instrumentation (DBI) system rewrites AMDGPU HSA code objects
+before they are loaded into device memory, to inject code at chosen
 anchor instructions. ConSan loads DBI-patched objects through its HSA tools
 plugin (`HSA_TOOLS_LIB=libhsa_consan.so`) in simulator and physical-GPU runs.
 DBI itself is target-agnostic at the layer boundary; most per-ISA differences
@@ -12,7 +12,8 @@ predicates (`max_scratch_offset_bytes`, `arch_has_accvgpr`,
 `arch_has_unified_vgpr_allocation`) live in the orchestrator.
 
 This document describes the DBI subsystem as implemented. The instrumentor can
-insert an inline nop or call a verified, copied probe body. Calls pass explicit
+replace a complete instruction through a trampoline, insert an inline nop through a
+trampoline, or call a verified, copied probe body. Calls pass explicit
 arguments, preserve guest state, and share one body across sites. Before-placement
 and callable kernel entry/exit observations are supported; after-placement and
 block boundaries remain reserved. Existing scratch spills coexist with an
@@ -26,29 +27,19 @@ seven target/wave modes; hardware and simulator coverage must be distinguished.
 
 ## Architecture
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│  Instrumentor                                                    │
-│  Orchestration: collect points, validate, plan, build, splice    │
-│                                                                  │
-│  ┌────────────────────────┐  ┌─────────────────────────────────┐ │
-│  │  Validators            │  │  Trampoline planning            │ │
-│  │  - is_relocatable_     │  │  - make_trampoline_plan()       │ │
-│  │    anchor() (structural│  │  - validate_inline_nop_plan()   │ │
-│  │  - validate_anchor()   │  │    (milestone guardrail)        │ │
-│  │    (+ milestone rules) │  │                                 │ │
-│  └────────────────────────┘  └─────────────────────────────────┘ │
-│                                                                  │
-│  ┌──────────────────────────────────────────────────────────────┐│
-│  │  TrampolineBuilder                                           ││
-│  │  Plan → bytes: patched anchor word + trampoline body words   ││
-│  └──────────────────────────────────────────────────────────────┘│
-│                                                                  │
-│  ┌──────────────────────────────────────────────────────────────┐│
-│  │  CodeObjectPatcher                                           ││
-│  │  ELF mutation: grow .text, fix ELF references, emit          ││
-│  └──────────────────────────────────────────────────────────────┘│
-└──────────────────────────────────────────────────────────────────┘
+```text
+InstrumentationPoint: observation / replacement / probe + replacement
+          |
+source-bound admission and operation resolution
+          |
+private effective-guest layout + fresh CFG/liveness when probes need it
+          |
+shared trampoline planning / TrampolineBuilder
+  emit original for observation; emit replacement body for replacement
+          |
+checked atomic source-anchor edits + appended local cave
+          |
+CodeObjectPatcher::replace_text() / resource updates / final ELF
 ```
 
 The orchestrator owns the multi-stage pipeline. It builds a private candidate and publishes ELF bytes and site maps only after validation, code emission, layout, and resource updates succeed. A late failure (e.g. branch-range overflow) returns diagnostics without publishing a partial image.
@@ -59,20 +50,21 @@ The orchestrator owns the multi-stage pipeline. It builds a private candidate an
 
 **Files:** `code/patch/instrumentor.h`, `code/patch/instrumentor.cpp`
 
-The Instrumentor is the top-level orchestrator. Callers queue `InstrumentationPoint`s (requests) and then invoke `patch()`. The orchestrator validates each anchor, plans and builds a trampoline per site, then checks and applies the original-text anchor batch before appending the local cave. The checked operation borrows the source, decoded boundaries, decoder, and patcher already owned by this observation call.
+The Instrumentor is the top-level orchestrator. Callers queue `InstrumentationPoint`s and invoke `patch()`. Observations and replacements share trampoline layout, checked anchor writes and final ELF emission. Replacements omit the original instruction and execute their supplied body after an optional probe.
 
 ### Pipeline stages
 
 ```
-InstrumentationPoint        -- request: "instrument here, with this body"
+InstrumentationPoint        -- source offset + operation-specific payload
       |  validate_points()
       v
 ResolvedInstrumentationSite -- one validated anchor + snapshot of the
       |                        original bytes (captured before mutation)
-      |  make_trampoline_plan() + TrampolineBuilder::build()
+      |  private replacement layout for fresh analysis when needed
+      |  shared planning and TrampolineBuilder emission
       v
 (preflight: per-site plan + built bytes, accumulated locally)
-      |  local checked-edit batch on original text
+      |  shared checked-edit batch on original text
       |  append probes/stub/trampolines, then replace_text()
       |  (KernelEntry callbacks retarget only the entry-stub branch)
       v
@@ -87,9 +79,9 @@ ConSan uses this orchestrator for its compiled probe calls. See
 [Extending ConSan](consan.md#extending-consan) for the ownership boundary and
 current limits.
 
-- Source-derived decoding: a concrete ELF target selects its concrete decoder features. Without a concrete target binding, the caller's architecture supplies the decoder; a recognized conflicting ELF architecture is rejected. CFG construction is lazy and uses `BasicBlock::build`. The checked batch uses this same decoder selection and the existing full-section instruction, clause, and direct-reference index after verifying complete coverage. It does not introduce a second target-admission policy.
-- `validate_points()` looks up the decoded `Instruction` at each requested `anchor_offset` and runs `validate_anchor()`. All-or-nothing today: any per-site failure empties `sites` and reports diagnostics in `errors`. Success establishes per-site eligibility, not that the final patch will succeed: batch, reference, and layout checks still run during `patch()`. Checked-edit failures also expose `edit_error` with a category and text-relative offset; the diagnostic types do not expose the private writer.
-- `patch()` builds trampolines, then checks their original-text anchor replacements together. The local transaction checks expected bytes, complete instruction extents, replacement encoding, clauses, overlap, and the collected references described under [Checked edits](#checked-edits-codepatchchecked_text_editsh) before changing the private text buffer. Existing kernel descriptor entries are supplied by observation resolution. `KernelEntry` callbacks retarget the entry-stub branch without adding original-text edits. The orchestrator appends copied probe bodies, the entry stub, and trampolines, then grows the section in one `CodeObjectPatcher::replace_text()` call. It returns ELF bytes, diagnostics, production site maps, and planned resources.
+- Source-derived decoding: a concrete ELF target selects its concrete decoder features; recognized legacy ELF identities retain the existing architecture policy, and an unknown machine uses the caller architecture. Both operation paths use the same decoder selection; a conflicting known architecture is rejected. Observational CFG construction is lazy and uses `BasicBlock::build`; replacement-only validation needs full-text structural facts but no reachable ownership graph or liveness.
+- `validate_points()` resolves each operation through its own admission path. Observations use `validate_anchor()` for per-site eligibility; final encoded-batch references and layout are checked during `patch()`. Replacements validate expected bytes, complete extents, references, clauses, and replacement encoding. Any failure empties `sites` and reports diagnostics in `errors`; source-facts and structural replacement failures also expose `edit_error` with a category and text-relative offset. Malformed requests or unsupported options use `errors` only, without an `edit_error`.
+- `patch()` preflights the entire batch before changing the private writer. Both operations build trampolines and commit their original-text anchor replacements together through the checked backend. `KernelEntry` callbacks retarget the entry-stub branch without adding original-text edits. The orchestrator appends copied probe bodies, the entry stub, and trampolines, then grows the section in one `CodeObjectPatcher::replace_text()` call. The shared pipeline returns ELF bytes, diagnostics, production site maps and any planned probe resources.
 - `patch_with_debug_summaries()` is a test/debug entry point returning `InstrumentedCodeObjectDebug` (extends `InstrumentedCodeObject` with per-site `InstrumentationPatch` summaries — schema unstable; production callers use `patch()` and its `InstrumentedSite` maps).
 - Single-attempt: both entry points share one budget. After `patched_ = true`, subsequent calls return a fatal error. Recoverable errors require constructing a new Instrumentor.
 
@@ -97,15 +89,99 @@ current limits.
 
 - Multiple queued `InstrumentationPoint`s per `patch()` call are supported; sites sharing the same `(probe_obj, probe_symbol)` reuse one copied probe body, and a site whose declared argument count, argument sources, or mask policy disagrees with the first declaration of that probe is rejected. All-or-nothing: any per-site failure fails the whole patch.
 - Single `.text` section (multi-text is fatal).
-- `BeforeInst` relocates an ordinary anchor. Callable `KernelEntry` runs once through the descriptor stub and composes before a before-site on the original entry. It leaves that entry instruction in place, so it does not impose the ordinary 4/8-byte relocation limit. Callable `KernelExit` runs before `s_endpgm` without a return branch. Other kinds are rejected.
-- `probe_obj` + `probe_symbol` are **consumed**: set both to request a probe-call trampoline, or leave both empty for the inline nop. Setting only one is fatal.
-- `filter_flags` is still a reserved milestone guardrail; a non-default value is fatal until it gains a real consumer. `force_full_exec` is consumed (see [Mask policy](#mask-policy)); it is rejected only on an inline-nop site, which has no call envelope whose mask could be widened.
+- `ReplaceWithInst` omits one complete 4/8/12-byte source instruction and executes an independently sized replacement sequence in its trampoline, including empty deletion. `BeforeInst` relocates an ordinary anchor. Callable `KernelEntry` runs once through the descriptor stub and composes before a before-site on the original entry. It leaves that entry instruction in place, so it does not impose the ordinary 4/8-byte relocation limit. Callable `KernelExit` runs before `s_endpgm` without a return branch. Other kinds are rejected.
+- Replacement and observation requests share a batch. A replacement can carry its callable probe directly or coalesce one same-site callable BeforeInst. Probe analysis reflects all replacements in the batch; pristine CFG/liveness cannot be reused for the changed guest program.
+- For observational points, `probe_obj` + `probe_symbol` are **consumed**: set both to request a probe-call trampoline, or leave both empty for the inline nop. Setting only one is fatal.
+- `filter_flags` is still a reserved milestone guardrail; a non-default value is fatal until it gains a real consumer. `force_full_exec` is consumed by callable points (see [Mask policy](#mask-policy)); points without a probe reject it because they have no call envelope whose mask could be widened.
 - Probe calls require the probe body to read no register its ABI does not supply (`analyze_probe_live_ins`, see [Probe live-ins](#probe-live-ins)). Under `AmdGpuFuncReturnS30S31` that is the link pair plus the declared argument VGPRs; any other input is fatal.
 - Callable probes reject code objects containing decoded guest `s_movrel*` instructions because liveness does not model M0-displaced SGPR accesses. This check includes unreachable blocks and other kernels. Inline-nop instrumentation without register growth remains supported.
 - The scalar guard does not cover vector-relative guest accesses. Without register growth, a callable probe can still be admitted and clobber a hidden live VGPR. On gfx1200 with `M0 = 2`, `v_movrels_b32 v3, v0` reads `v2`; a zero-argument probe that clears `v2` before the move can change `v3` from `7` to `0`. This pre-existing VGPR issue requires a separate fix.
 - Probe calls may pass 32-bit arguments via `InstrumentationPoint::probe_args`, delivered in VGPRs from `v0`. Each names a `ProbeArgSource`: a build-time constant, an anchor VGPR, a dword of the anchor `EXEC` mask, a dword of the framework's entry storage, or a lane-zero VGPR snapshot captured at dispatch entry. The count and the sources are declared by the caller and verified against the body; see [Probe arguments](#probe-arguments).
 - Probe calls require the probe's link pair (`s[30:31]` for `rj_nop_probe`) to be within the kernel's SGPR allocation (`kernel_sgpr_count`) and any chosen scratch/special-state temps to be below `ordinary_sgpr_bound` of it; allocation growth requires explicit original metadata counts and a supported resource note (see [Probe-call register requirement](#instrumentation-flow-probe-call)).
 - Register spilling is enabled for `spill_set = live_at_anchor ∩ (probe_clobbers ∪ builder_clobbers)`. The orchestrator scans the kernel descriptor (`scan_kernel_descriptors`), builds one `SpillManager` from its `private_segment_fixed_size`, splits the spill set by class, and calls `plan_vgpr_spills` / `plan_sgpr_spills` / `plan_acc_spills`. Spilling is gated per-arch by `max_scratch_offset_bytes()` (returns 0 ⇒ arch has no scratch emitter ⇒ unsupported) and by those fail-closed helpers; there is no `SpillPolicy` enum. A kernel with zero scratch, more than one kernel, an over-offset-cap slot, a probe that clobbers FLAT_SCRATCH, or (for SGPR spills) no dead bridge VGPR within the kernel's VGPR allocation fails closed.
+
+### Instruction replacement
+
+Set `InstrumentationPoint::kind` to `ReplaceWithInst` and provide an
+`InstructionReplacement`. Expected bytes identify one complete 4/8/12-byte source
+instruction. Replacement bytes are a separately sized sequence of complete
+instructions; an empty sequence deletes the original operation. The source
+instruction is never replayed. Each request builds an ordinary trampoline and
+patches the source extent with a branch plus NOP padding. This implementation has
+no direct in-place replacement fast path.
+
+```text
+source anchor:        branch to cave; padding NOPs as needed
+replacement cave:     [optional probe envelope] [replacement instructions] [return]
+empty deletion:       [optional probe envelope] [return]
+terminal replacement: [optional probe envelope] [replacement ending in s_endpgm]
+```
+
+The body moves to a cave. PC-dependent branch/call/getpc forms and clauses are
+rejected rather than copied with changed PC semantics. A final `s_endpgm` ends the
+body without a return branch; other terminators or instructions after termination
+are rejected. A nonterminal body requires a decoded source continuation after the
+original extent. A byte inside `.text` that is linker padding is not a valid
+continuation. The omitted source instruction need not be relocatable, but source
+admission still enforces the missing-reference metadata guards below.
+
+Source admission validates expected bytes, bounds/overflow, physical overlap,
+one complete source extent, clause membership, and collected incoming references.
+References include direct branches throughout pristine text, symbol starts/ends,
+supported raw relocation destinations and descriptor entries. ET_REL symbols
+remain section-relative. Interior references reject the batch; boundary references
+remain permitted. Known `s_cbranch_cdbg*`, `s_subvector_loop_begin`, and
+`s_subvector_loop_end` forms without destination metadata reject source admission;
+the same forms cannot be emitted as replacement payloads without relocation
+support. Adding complete branch metadata remains separate work. Computed
+PC-relative addresses remain outside this collected-reference proof. Payload
+decoding uses the source's concrete decoder, including variants.
+
+Replacement facts retain the shared source-admission proof, while each batch
+still checks its edited PT_LOAD file ranges; see [Checked edits](#checked-edits-codepatchchecked_text_editsh).
+
+A replacement point can carry the normal callable-probe fields; its probe runs
+before the replacement body. One separate callable `BeforeInst` at the same offset
+can also coalesce with the replacement in either queue order. Multiple replacements,
+multiple probes for one replacement, and other conflicting duplicates reject.
+Distinct observation and replacement sites share one atomic batch. The normal
+probe ABI, resource, scratch and wrapper gates apply when a probe is requested;
+a pure replacement needs no probe or liveness.
+
+Before probe planning, all replacements are laid out privately using the same
+TrampolineBuilder and CodeObjectPatcher used for final output. Fresh CFG/liveness
+is built from this effective guest program, not the pristine instructions. This
+also handles a replacement at another site removing a definition that would
+otherwise hide a live value from an earlier probe. PC-independent replacement
+bodies make this probe-free analysis layout semantically equivalent to the final
+probe-bearing layout. No second Instrumentor pass or intermediate published ELF
+is used. The analysis code object owns its bytes; its temporary patcher is discarded.
+Site validation and source attribution decode the pristine instruction at its
+original boundary, including a KernelEntry shared with a replacement. Liveness
+and probe planning use the effective CFG at that source offset.
+
+Every final anchor batch is preflighted before private text writes. The common
+emitter appends probes, entry stub and trampolines, then grows `.text` through
+`CodeObjectPatcher::replace_text()`. Failure publishes neither ELF bytes nor sites.
+`InstrumentationPatch` is present for replacement sites too. In `InstrumentedSite`,
+`original_offset/original_size` describe the source extent; `guest_offset/guest_size`
+describe the effective replacement sequence in the cave (zero size for deletion).
+The preceding `instrumentation_offset/instrumentation_size` range describes the
+probe envelope and is empty for pure replacement. Return branches follow the guest.
+
+`instruction_boundaries(error)` exposes a borrowed read-only pristine full-text
+index without requiring a CFG. Private `SourceTextFacts` owns the index and collected
+reference values; no mutable decoder, writer, CFG or liveness is shared.
+`fork(error)` retains those facts for the exact same source/architecture/options
+while creating an empty queue and independent patch budget. A child can outlive its
+parent, but the immutable, unmoved source **code object** must outlive all forks.
+A borrowed index must not outlive the last sharing Instrumentor or the source.
+`AmdGpuCodeObject` itself copies its constructor input; Instrumentor borrows that
+owning object, not the caller's original input buffer.
+
+Facts reuse does not bypass any batch's expected-byte or source-reference checks.
+For later processing of an emitted mutant, create a new code object and analyze its
+emitted bytes afresh; pristine facts cannot be attached to a different source.
 
 ### Key design constraint
 
@@ -117,7 +193,7 @@ The Instrumentor knows about milestones; the TrampolineBuilder and CodeObjectPat
 
 **Files:** `code/patch/trampoline_builder.h`, `code/patch/trampoline_builder.cpp`
 
-Generic byte emitter. Takes a `TrampolinePlan` and returns `TrampolineBytes` (see [Data Types](#data-types)). Knows nothing about `InstrumentationPoint`s or milestones. It emits two body shapes: the inline-nop body, and the probe-call envelope preceding or following the relocated original. `plan_probe_call()` selects the link/target SGPR pairs, the SCC temp, and any special-state (EXEC/VCC/M0) and SGPR-bridge temps, and reports `builder_clobbers`; `emit_probe_call()` lowers the chosen plan to bytes.
+Generic byte emitter. Takes a `TrampolinePlan` and returns `TrampolineBytes` (see [Data Types](#data-types)). Knows nothing about `InstrumentationPoint`s or milestones. It emits supplied inline items, optional original replay and an optional return. Observation plans use an inline nop or a probe-call envelope preceding or following the relocated original; replacement plans omit the original and retain their supplied `after_items` body, including empty deletion. `plan_probe_call()` selects the link/target SGPR pairs, the SCC temp, and any special-state (EXEC/VCC/M0) and SGPR-bridge temps, and reports `builder_clobbers`; `emit_probe_call()` lowers the chosen plan to bytes.
 
 The low-level `probe_after_original` plan option places the relocated instruction
 before its callable envelope. It defaults to false; the Instrumentor still
@@ -137,15 +213,15 @@ The emitted call-target displacement includes the relocated instruction's four
 or eight bytes only when `emit_original` is true. With the original omitted,
 both placements emit the envelope at the trampoline start and call the same
 probe body, with identical bytes and attribution offsets. `original_byte_offset`
-then names the return branch, or the end of the trampoline if no return branch
-is requested.
+then names the replacement body when present, or the return branch/end of the
+trampoline for empty deletion.
 `TrampolineBytes` reports the call envelope's offset and size separately from the
 guest instruction and resume branch, allowing the Instrumentor to attribute
 emitted bytes without deriving their range from a particular layout.
 
 The caller supplies the `preserve_exec`, `preserve_vcc`, and `preserve_m0` inputs. `plan_probe_call()` reserves an EXEC temp when `preserve_exec || needs_full_mask`; VCC and M0 temps follow their respective inputs. The full-mask window is required for spills, argument writes, or `force_full_exec`. The builder allocates a dead SGPR pair for each saved EXEC/VCC and a single dead SGPR for saved M0; the caller's production decisions are described in [Special state](#special-state-preservation).
 
-The probe-call envelope, in emit order, is: an in-flight-load drain; the special-state saves (`s_mov` EXEC/VCC into dead SGPR pairs, M0 into a dead SGPR); the **spill prologue** (see below); the argument writes; the guest-mask restore; the SCC save; the `s_getpc_b64` + 64-bit add chain that materializes the copied probe body's address; `s_swappc_b64` to it; then after the call a `build_wait_all_loads_complete()` drain (so the probe's own in-flight loads finish before state restoration and before the guest resumes), the SCC restore, the **spill epilogue**, and the special-state restores. The default layout places this envelope before the relocated original; `probe_after_original` places it after the original. Saves and restores protect the state at the selected observation point.
+The probe-call envelope, in emit order, is: an in-flight-load drain; the special-state saves (`s_mov` EXEC/VCC into dead SGPR pairs, M0 into a dead SGPR); the **spill prologue** (see below); the argument writes; the guest-mask restore; the SCC save; the `s_getpc_b64` + 64-bit add chain that materializes the copied probe body's address; `s_swappc_b64` to it; then after the call a `build_wait_all_loads_complete()` drain (so the probe's own in-flight loads finish before state restoration and before the guest resumes), the SCC restore, the **spill epilogue**, and the special-state restores. The default layout places this envelope before the relocated original; `probe_after_original` places it after the original. Saves and restores protect the state at the selected observation point. For replacement, restoration completes before the supplied replacement body executes.
 
 ### Spill bracket
 
@@ -162,8 +238,8 @@ Per-arch specifics (scratch encodings, waitcnt split) live in `code/builders/spi
 ### What it handles
 
 - Encoding the forward `s_branch` that goes into the anchor slot, pointing at the trampoline's first word.
-- Emitting the trampoline body in order: `before_items` (each an `InlineAsmItem` containing one or more pre-encoded words), then the relocated original instruction words (when `emit_original`), then `after_items`, then the return `s_branch` back to `anchor_offset + original_size`.
-- Plan well-formedness: `original_size` ∈ {4, 8}, `original_words.size() * sizeof(uint32_t) == original_size`, branch reach fits in SOPP `simm16`.
+- Emitting the trampoline body in order: `before_items` (each an `InlineAsmItem` containing one or more pre-encoded words), then the original instruction words when `emit_original`, then `after_items`. A return `s_branch` to `return_target` follows only when `returns_to_kernel`; nonterminal replacement uses `anchor_offset + original_size`, while terminal bodies omit the return.
+- Plan well-formedness: `original_size` is nonzero and dword-aligned, and `original_words.size() * sizeof(uint32_t) == original_size`. Original replay accepts 4/8-byte extents; an anchor splice accepts 4/8/12 bytes, with 12 allowed only when the original is omitted. Emitted branches must fit SOPP `simm16`. Source splices fill any bytes after the forward branch with NOPs.
 - Architecture awareness — SOPP encoding format is uniform across AMDGPU but opcodes differ (e.g. `s_branch` is opcode 2 on GFX9/CDNA, opcode 32 on GFX12/RDNA4). All opcode selection goes through `instruction_builder.h` helpers.
 
 ### What it does NOT handle
@@ -203,7 +279,7 @@ Combines `is_relocatable_anchor()` with milestone-scoped policy checks against `
 
 ### `validate_inline_nop_plan(plan, error_out)`
 
-Defense-in-depth check that the orchestrator-produced `TrampolinePlan` matches the canonical inline-nop shape: exactly one `before_items` entry containing `s_nop 0`, empty `after_items`, `emit_original == true`. Lives at the orchestrator boundary rather than inside the builder so the builder stays generic. Deleted once arbitrary inline-asm bodies are supported.
+Defense-in-depth check that the orchestrator-produced `TrampolinePlan` matches the canonical inline-nop shape: exactly one `before_items` entry containing `s_nop 0`, empty `after_items`, `emit_original == true`. Runs only for inline-nop observations at the orchestrator boundary; replacement and probe-call plans use their own validation while the builder stays generic.
 
 ---
 
@@ -211,12 +287,14 @@ Defense-in-depth check that the orchestrator-produced `TrampolinePlan` matches t
 
 | Type | Stage | Carries |
 | --- | --- | --- |
-| `InstrumentationPoint` | request | `anchor_offset`, `kind`, `probe_obj`, `probe_symbol`, `probe_args`, `force_full_exec`, reserved `filter_flags` |
-| `ResolvedInstrumentationSite` | post-validation | `anchor_offset`, `original_size`, `original_bytes`, `mnemonic`, `kind`, `probe_index` (set for probe calls), `probe_args` |
+| `InstrumentationPoint` | request | `anchor_offset`, `kind`, optional `replacement`, `probe_obj`, `probe_symbol`, `probe_args`, `force_full_exec`, reserved `filter_flags` |
+| `InstructionReplacement` | replacement payload | owned complete source `expected_bytes` and independently sized `replacement_bytes` |
+| `ResolvedInstrumentationSite` | post-validation | `anchor_offset`, `original_size`, `original_bytes`, `mnemonic`, `kind`, `probe_index` (set for probe calls), `probe_args`, `replacement_words`, `replacement_terminates` |
 | `ProbeCallable` | probe registry | resolved probe `symbol`, `arch`, `target`, verified `ProbeAbi`, `body_words`, declared `arg_sources` and `force_full_exec`, `output_text_offset` |
-| `TrampolinePlan` | builder input | `arch`, `anchor_offset`, `original_size`, `original_words`, `trampoline_offset`, `return_target`, `before_items`, `after_items`, `emit_original`, `kernel_sgpr_count`, `entry_storage_base`; probe-call: `is_probe_call`, `probe_after_original`, `probe_target_offset`, `link_pair_base`, `arg_vgpr_base`, `probe_args`, `force_full_exec`, `target_pair_base`, `scc_temp`, `preserve_scc`, `preserve_exec`, `preserve_vcc`, `preserve_m0`, `special_state_saves`, `vgpr_spills`, `sgpr_spills`, `acc_spills`, `spill_bridge_vgpr`, `planned_envelope_word_count`, `builder_clobbers` |
+| `TrampolinePlan` | builder input | `arch`, `anchor_offset`, `original_size`, `original_words`, `trampoline_offset`, `return_target`, `before_items`, `after_items`, `emit_original`, `patch_anchor`, `returns_to_kernel`, `kernel_sgpr_count`, `entry_storage_base`; probe-call: `is_probe_call`, `probe_after_original`, `probe_target_offset`, `link_pair_base`, `arg_vgpr_base`, `probe_args`, `force_full_exec`, `target_pair_base`, `scc_temp`, `preserve_scc`, `preserve_exec`, `preserve_vcc`, `preserve_m0`, `special_state_saves`, `vgpr_spills`, `sgpr_spills`, `acc_spills`, `spill_bridge_vgpr`, `planned_envelope_word_count`, `builder_clobbers` |
 | `TrampolineBytes` | builder output | `patched_anchor_bytes`, `trampoline_words`, `original_byte_offset`, `call_envelope_byte_offset`, `call_envelope_byte_size` |
 | `InstrumentationPatch` | per-site summary (test/debug) | `anchor_offset`, `original_size`, `trampoline_offset`, optional `return_target`, `original_bytes`, `patched_anchor_bytes`; probe-call: `is_probe_call`, `probe_symbol`, `probe_target_offset`, `link_pair_base`, `target_pair_base` |
+| `InstrumentedSite` | production attribution | `kind`, `original_offset`, `original_size`, effective guest and instrumentation ranges; replacement guest names its body, with size zero for deletion |
 | `InstrumentedCodeObject` | `patch()` output | `elf_bytes`, `errors`, optional typed `edit_error`, `warnings`, `sites`, `resources` |
 | `InstrumentedCodeObjectDebug` | `patch_with_debug_summaries()` output | `InstrumentedCodeObject` + `patches` |
 
@@ -233,8 +311,8 @@ The intermediate site/plan types are expected to thicken as the framework grows 
 
 ### Code Object Patcher (`code/patch/code_object_patcher.h`) [shared with DBT]
 
-Owns ELF-level mutations. The orchestrator applies validated original-text
-anchor edits to a local text buffer, then
+Owns ELF-level mutations. All operations apply checked branch splices to private original text. The common path applies
+its validated original-text anchor edits to a local text buffer, then
 assembles the new `.text` (the already-edited original text,
 then the probe bodies, the `s_nop`-padded entry-prologue stub if there is one, and
 every trampoline appended after the original bytes with `append_words()` /
@@ -297,14 +375,33 @@ Section-only images without LOAD segments retain their offline mutation path.
 
 ### Checked edits (`code/patch/checked_text_edits.h`)
 
-The checked operation is local to one original-text anchor batch. It requires
-the unchanged source, full-section decoded boundaries, selected decoder, and
-existing patcher; these inputs remain owned by Instrumentor for the duration of
-the call. Its edit extents are the 4/8-byte anchors supported by observation.
-It does not cache source facts, create a fallback decoder or patcher,
-or expose a reusable context. All edits are validated before writing the
-orchestrator's private text buffer. Probe admission, layout, and resource policy
-remain with Instrumentor, and CodeObjectPatcher remains the ELF writer.
+This internal backend serves both Instrumentor operations. Source admission and
+reference collection are separate from per-batch validation and writing. The
+collector checks full-text boundary coverage, ELF/section aliases, relocation
+admission, symbol endpoints, raw relative destinations and descriptor entries.
+Observation can supply its already decoded pristine index, existing patcher and
+resolved descriptor entries. Replacement/query/fork share pristine facts for
+independent mutants; both operations use local transactions. Observation's replay
+admission remains 4/8 bytes; the shared splice supports complete 4/8/12-byte extents.
+
+Replacement/query/fork are the consumers of reusable ownership. A private
+`SourceTextFacts` owns the full-text index and collected references behind
+`shared_ptr<const ...>`; it does not own the source ELF. Instrumentor performs a
+standalone full-section decode when no existing index is available, using the
+same decoder-selection policy as observation. A fork shares only those immutable
+facts. Each Instrumentor creates its own decoder. Source admission checks complete
+4/8/12-byte extents and incoming references; final branch splices preserve those
+extents while effective guest bodies can have different lengths. The transaction borrows those inputs for a synchronous call
+and writes only after the entire batch passes. It has no factory, cache or PImpl.
+
+The orchestrator passes its existing patcher's text or its local assembly buffer;
+it does not emit an intermediate ELF merely to recover text. Diagnostics live
+in `text_edit_error.h`, separately from the private writer. Instruction replacement
+is requested through Instrumentor, not a second public context/apply API. Kernel
+ownership, recipe qualification/selection, dynamic descriptor-write admission and
+whole-kernel loaded-mapping ownership and alias qualification stay with the
+consumer. Generic structural admission also supports section-only transformations
+without a load mapping.
 
 Source admission checks the complete write interval of supported ROCr dynamic
 relocations against the original `.text`. A write can start before the section
@@ -495,7 +592,7 @@ ISA-independent register-file model. `RegisterRef` is `(RegClass, uint16_t index
 
 ## Instrumentation Flow (inline-nop)
 
-For a code object with one queued `InstrumentationPoint` at `anchor_offset`:
+For a code object with one queued `BeforeInst` at `anchor_offset` and no callable probe:
 
 1. **Lazy block decode:** On the first stage that needs the CFG, check source-target admission and select the concrete-target decoder, or the caller architecture's decoder when no concrete target binding exists. `BasicBlock::build` populates `blocks_`, and decoded instructions populate the full-text `InstructionBoundaries` index. An unsupported architecture or recognized source mismatch surfaces as a fatal error here. The final checked batch uses this same selection.
 2. **Validate:** `validate_points()` walks `points_`; for each, `find_instruction_at_offset()` locates the decoded `Instruction`, then `validate_anchor()` runs milestone-scoped + structural checks and produces a `ResolvedInstrumentationSite` capturing the original bytes.
@@ -760,3 +857,7 @@ Each aborts the whole patch with its own diagnostic. Those raised while planning
 - **Static probe-call smoke (`tests/dbi/hsa_dbi_nop_probe_test.cpp`, `HsaDbiNopProbeCdna2Static`, gated on `HAS_PROBE_FIXTURES`):** Instruments the register-padded `vector_add_probe` kernel with a probe call to `rj_nop_probe`, then asserts the patch shape — anchor decodes as `s_branch`, `.text` grew, the copied probe body matches the resolved body and ends in `s_setpc_b64`, and the trampoline contains the `s_swappc_b64` to it. No GPU required.
 - **Hardware probe-call smoke (`HsaDbiNopProbeCdna2Hardware`, gated on `HAS_CDNA2_GPU`):** Load + validate; dispatch the probe-call-patched kernel and confirm bit-identical output to the original (the no-op probe is transparent); a *sabotage* test overwrites the copied probe body's first word with `s_endpgm` and asserts the wave terminates, proving the `s_swappc_b64` genuinely transfers control into the body. **Preconditions:** these dispatching cases require the [register-padded fixture kernel](#instrumentation-flow-probe-call) *and* the SMEM SBASE operand decode fix in the branch's base; without both the probe-call wave hangs the GPU.
 - Run with `build/tests/rocjitsu_tests`, `build/tests/hsa_dbi_nop_asm_test`, and `build/tests/hsa_dbi_nop_probe_test`.
+
+Replacement/probe simulation in `tests/dbi/dbi_replacement_sim_test.cpp` checks
+replacement-only inputs and cross-site definition deletion with independent
+memory sentinels and missing-restore/replayed-original corruption controls.
