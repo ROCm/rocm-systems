@@ -209,13 +209,19 @@ if (ENABLE_DEVICE_API)
     add_definitions(-DENABLE_DEVICE_API)
 endif()
 
+# Mono-repo layout probe. Hoisted out of the ENABLE_ROCSHMEM_GIN block below so
+# a device-API-only build reaches it too: src/CMakeLists.txt needs
+# RCCL_SOURCE_DIR for the nccl_device/gin headers under ENABLE_DEVICE_API, and
+# it used to carry a second copy of this probe for exactly that case.
+get_filename_component(_mono_root "${CMAKE_SOURCE_DIR}/../.." ABSOLUTE)
+if (NOT RCCL_SOURCE_DIR AND EXISTS "${_mono_root}/projects/rccl/CMakeLists.txt")
+    set(RCCL_SOURCE_DIR "${_mono_root}/projects/rccl")
+endif()
+
 if (ENABLE_ROCSHMEM_GIN)
     message(STATUS "rocshmem GIN backend support enabled")
-    # Factory test reaches gin_rocshmem_gda_factory.h (not yet installed) via RCCL_SOURCE_DIR.
-    get_filename_component(_mono_root "${CMAKE_SOURCE_DIR}/../.." ABSOLUTE)
-    if (NOT RCCL_SOURCE_DIR AND EXISTS "${_mono_root}/projects/rccl/CMakeLists.txt")
-        set(RCCL_SOURCE_DIR "${_mono_root}/projects/rccl")
-    endif()
+    # Factory test reaches gin_rocshmem_gda_factory.h (not yet installed) via
+    # RCCL_SOURCE_DIR, probed once above this block.
 endif()
 
 set(ROCM_USE_DEV_COMPONENT OFF)  # This repo doesn't have a dev component
