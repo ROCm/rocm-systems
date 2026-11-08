@@ -234,7 +234,11 @@ def _modern_rdna_dpp_opcode_rule(
 
 
 class FloatDotAccumulation(Enum):
-    """Numerical accumulation policy for F32-output floating DOT2."""
+    """Numerical accumulation policy for the floating DOT instructions.
+
+    Selects the arithmetic for F32-output DOT2, true16 packed DOT2 and the
+    FP8/BF8 DOT4 forms.
+    """
 
     HOST_F32 = 'HostF32'
     GFX11 = 'Gfx11'
@@ -424,6 +428,11 @@ class IsaProfile(ABC):
     """
 
     @property
+    def uses_rj_arith_matrix(self) -> bool:
+        """Opt into rj-arith matrix execution independently of operand layout."""
+        return False
+
+    @property
     @abstractmethod
     def supported_versions(self) -> list[str]:
         """Schema versions this profile supports."""
@@ -561,6 +570,16 @@ class IsaProfile(ABC):
         return False
 
     @property
+    def valu16_preserves_unwritten_half(self) -> bool:
+        """True when ordinary 16-bit VALU writes preserve the other half."""
+        return False
+
+    @property
+    def bf16_inline_uses_f32_carrier(self) -> bool:
+        """True when numeric BF16 sources retain the full F32 inline carrier."""
+        return False
+
+    @property
     def supports_gpr_idx(self) -> bool:
         """True when MODE.GPR_IDX_EN applies M0 indexing to VALU operands."""
         return False
@@ -591,8 +610,30 @@ class IsaProfile(ABC):
 
     @property
     def has_gfx11_image_address_extension(self) -> bool:
-        """Whether MIMG NSA appends one DWORD of address-register selectors."""
+        """Whether MIMG uses GFX11 operand rendering and fixed BVH tuple sizing.
+
+        DIM-based sizing and NSA extension length have separate properties below.
+        """
         return False
+
+    @property
+    def image_dimensions_in_resource(self) -> bool:
+        """Whether image dimensions come from T# rather than instruction DIM."""
+        return False
+
+    @property
+    def mimg_max_nsa_words(self) -> int:
+        """Maximum DWORD count of a MIMG NSA extension."""
+        return 0
+
+    @property
+    def mimg_nsa_dword_count_expr(self) -> str | None:
+        """C++ expression for the nonzero MIMG NSA extension length, or None without NSA."""
+        if self.mimg_max_nsa_words == 0:
+            return None
+        if self.mimg_max_nsa_words == 1:
+            return '1u'
+        return 'inst_.nsa'
 
     @property
     def split_ds_2addr_offsets(self) -> bool:
@@ -909,7 +950,11 @@ class IsaProfile(ABC):
         *,
         has_modifier_encoding: bool,
     ) -> bool:
-        """Qualify DPP16/DPP8 availability when the XML omits a valid form."""
+        """Qualify DPP16/DPP8 encoding availability.
+
+        has_modifier_encoding supplies the XML default. Profiles may override
+        it when the XML omits a valid form; dpp_opcode_rule defines ISA legality.
+        """
         del enc_name, inst_name
         return has_modifier_encoding
 
@@ -1531,7 +1576,7 @@ class _AmdgpuProfileBase(IsaProfile):
 
     @property
     def float_dot_accumulation(self) -> FloatDotAccumulation:
-        """Select the scalar/SIMD arithmetic contract for floating DOT2."""
+        """Select the scalar/SIMD arithmetic contract for the floating DOTs."""
         return FloatDotAccumulation.HOST_F32
 
     @property
@@ -1621,11 +1666,6 @@ class _AmdgpuProfileBase(IsaProfile):
     def generic_flat_counters_complete_in_order(self) -> bool:
         """Whether nonzero waits prove progress for generic FLAT operations."""
         return True
-
-    @property
-    def vmem_writes_use_expcnt(self) -> bool:
-        """Whether vector-memory writes also contribute to EXPCNT."""
-        return False
 
     @property
     def gds_uses_expcnt(self) -> bool:
@@ -1817,6 +1857,10 @@ class CdnaProfile(_AmdgpuProfileBase):
     scratch_has_vaddr_expr = 'inst_.lds != 0'
 
     @property
+    def image_dimensions_in_resource(self) -> bool:
+        return True
+
+    @property
     def ds_compare_store_compare_first(self) -> bool:
         # CDNA1-4 / RDNA1-2 DS CMPST reverses the BUFFER operand order.
         return True
@@ -1830,10 +1874,6 @@ class CdnaProfile(_AmdgpuProfileBase):
         # CDNA1-4 can report early completion for generic FLAT operations on
         # both VMCNT and LGKMCNT. Fixed GLOBAL/SCRATCH segments remain ordered.
         return False
-
-    @property
-    def vmem_writes_use_expcnt(self) -> bool:
-        return True
 
     @property
     def gds_uses_expcnt(self) -> bool:
@@ -1992,6 +2032,11 @@ class CdnaProfile(_AmdgpuProfileBase):
 
 class Cdna4Profile(CdnaProfile):
     """ISA profile for CDNA4-only encoding capabilities."""
+
+    @property
+    def gds_uses_expcnt(self) -> bool:
+        # CDNA4 ISA, sections 3.1 and 4.4: EXPCNT is unused.
+        return False
 
     @property
     def mfma_scale_vop3px2_specs(self) -> tuple[MfmaScaleVop3px2Spec, ...]:
@@ -2195,6 +2240,14 @@ class Rdna1Profile(_AmdgpuProfileBase):
       padding fields for gaps in the MicrocodeFormat bitfield layout.
     """
 
+    @property
+    def mimg_max_nsa_words(self) -> int:
+        return 3
+
+    @property
+    def valu16_preserves_unwritten_half(self) -> bool:
+        return True
+
     _FLAT_SEGMENTS = frozenset({'GLBL', 'SCRATCH'})
     _SKIP_DPP_SDWA = True
 
@@ -2210,10 +2263,6 @@ class Rdna1Profile(_AmdgpuProfileBase):
 
     flat_lds_m0_mask = 0xFFFC
     flat_saddr_null_aliases = ('127',)
-
-    @property
-    def vmem_writes_use_expcnt(self) -> bool:
-        return True
 
     @property
     def gds_uses_expcnt(self) -> bool:
@@ -2369,8 +2418,15 @@ class Rdna3Profile(_AmdgpuProfileBase):
         return True
 
     @property
-    def vmem_writes_use_expcnt(self) -> bool:
-        return True
+    def mimg_max_nsa_words(self) -> int:
+        return 1
+
+    @property
+    def gfx11_mimg_fixed_vaddr_words(self) -> dict[str, tuple[int, int]]:
+        return {
+            'IMAGE_BVH_INTERSECT_RAY': (11, 8),
+            'IMAGE_BVH64_INTERSECT_RAY': (12, 9),
+        }
 
     @property
     def gds_uses_expcnt(self) -> bool:
@@ -2522,6 +2578,10 @@ class Rdna3Profile(_AmdgpuProfileBase):
         return FloatDotAccumulation.GFX11
 
     @property
+    def uses_rj_arith_matrix(self) -> bool:
+        return True
+
+    @property
     def matrix_layout(self) -> MatrixLayout:
         return MatrixLayout.WMMA_REPLICATED_HALFWAVE
 
@@ -2598,6 +2658,11 @@ class Rdna3_5Profile(Rdna3Profile):
     """
 
     @property
+    def uses_rj_arith_matrix(self) -> bool:
+        # RDNA3.5 retains its legacy implementation despite sharing the RDNA3 layout.
+        return False
+
+    @property
     def extra_lane_selector_intervals(self) -> tuple[tuple[int, int], ...]:
         # Literal lane indices are only qualified on RDNA3 and RDNA4.
         return ((192, 192),)
@@ -2623,13 +2688,6 @@ class Rdna3_5Profile(Rdna3Profile):
         return {
             'IMAGE_BVH_INTERSECT_RAY': 4,
             'IMAGE_BVH64_INTERSECT_RAY': 4,
-        }
-
-    @property
-    def gfx11_mimg_fixed_vaddr_words(self) -> dict[str, tuple[int, int]]:
-        return {
-            'IMAGE_BVH_INTERSECT_RAY': (11, 8),
-            'IMAGE_BVH64_INTERSECT_RAY': (12, 9),
         }
 
     @property
@@ -2869,6 +2927,10 @@ class Rdna4Profile(_AmdgpuProfileBase):
         return True
 
     @property
+    def uses_rj_arith_matrix(self) -> bool:
+        return True
+
+    @property
     def matrix_layout(self) -> MatrixLayout:
         return MatrixLayout.WMMA_SPLIT_K
 
@@ -2995,6 +3057,20 @@ class Cdna5Profile(Rdna4Profile):
     """
 
     flat_saddr_null_aliases = ()
+
+    @property
+    def uses_rj_arith_matrix(self) -> bool:
+        # CDNA5 needs its own matrix bindings, including fixed-wave sparse forms.
+        return False
+
+    @property
+    def bf16_inline_uses_f32_carrier(self) -> bool:
+        # CDNA5 ISA section 4.1 describes automatic upper-half selection
+        # without OPSEL, but section 7.2.2 forbids BF16 VOP1 inline inputs.
+        # Follow LLVM 1bcad03262a5 AMDGPUAsmParser.cpp:4678-4726's raw-carrier
+        # interpretation: VOP1 reads the low half, while VOP3 uses OPSEL.
+        # Older assembler acceptance does not qualify CDNA5 hardware behavior.
+        return True
 
     @property
     def smem_register_offset_condition(self) -> str:

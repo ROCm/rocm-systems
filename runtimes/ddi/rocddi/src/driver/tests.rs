@@ -8,7 +8,7 @@ use crate::Error;
 use crate::memory::storage::{Owned, Shared};
 use crate::memory::{AllocationInfo, DeviceAccess, DriverAllocation, HostCacheability, MemoryKind};
 use crate::session::DriverContextLifetime;
-use crate::topology::{Endpoint, EndpointKind, TopologyKey};
+use crate::topology::{Endpoint, EndpointKind};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -72,12 +72,6 @@ impl FakeDriver {
             minimum_address: 0,
             maximum_address: u64::MAX,
             supported_permissions: DeviceAccess::READ | DeviceAccess::WRITE,
-            caches: None,
-            memory_links: None,
-            topology_key: TopologyKey {
-                group: 0,
-                member: 0,
-            },
             driver_instance: self.instance,
             selector: EndpointSelector::Opaque(7),
         }

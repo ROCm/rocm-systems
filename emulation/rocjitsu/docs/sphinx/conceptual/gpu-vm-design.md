@@ -76,9 +76,11 @@ failure.
 SDMA queues use the separate SoC-owned SDMA scheduler, ring consumer, and
 packet processor; no SDMA packet logic is part of the CP. A completion tracker
 inside each XCD monitors per-dispatch workgroup
-retirement and fires completion signals in submission order. When a
-hardware queue becomes idle, the tracker writes the queue-inactive
-signal.
+retirement and fires completion signals in submission order. When a hardware
+queue becomes idle, the tracker writes the event ID to its mailbox when present,
+delivers the targeted interrupt for a nonzero event ID, then delivers the generic
+interrupt. ROCr uses the queue-inactive signal's value for queue errors, scratch
+management, and teardown.
 
 In the public API, `rj_vm_run` drives the simulation to completion,
 while `rj_vm_step` advances the simulation by one tick. The VM creation

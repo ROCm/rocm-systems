@@ -37,7 +37,6 @@ Panel Config:
       id: 301
       title: "Instruction Cache"
       cli_style: mem_chart
-      tui_style: mem_chart
       comparable: false
       header:
         metric: Metric
@@ -61,7 +60,6 @@ Panel Config:
       id: 302
       title: "Scalar Data Cache"
       cli_style: mem_chart
-      tui_style: mem_chart
       comparable: false
       header:
         metric: Metric
@@ -85,7 +83,6 @@ Panel Config:
       id: 303
       title: "TCP Cache (GL0 Vector Cache)"
       cli_style: mem_chart
-      tui_style: mem_chart
       comparable: false
       header:
         metric: Metric
@@ -113,7 +110,6 @@ Panel Config:
       id: 304
       title: "LDS (Local Data Share)"
       cli_style: mem_chart
-      tui_style: mem_chart
       comparable: false
       header:
         metric: Metric
@@ -140,7 +136,6 @@ Panel Config:
       id: 305
       title: "TCP-GL1 Interface"
       cli_style: mem_chart
-      tui_style: mem_chart
       comparable: false
       header:
         metric: Metric
@@ -161,7 +156,6 @@ Panel Config:
       id: 306
       title: "GL1 Cache (L1)"
       cli_style: mem_chart
-      tui_style: mem_chart
       comparable: false
       header:
         metric: Metric
@@ -185,7 +179,6 @@ Panel Config:
       id: 307
       title: "GL1-GL2 Interface"
       cli_style: mem_chart
-      tui_style: mem_chart
       comparable: false
       header:
         metric: Metric
@@ -206,7 +199,6 @@ Panel Config:
       id: 308
       title: "GL2 Cache (L2)"
       cli_style: mem_chart
-      tui_style: mem_chart
       comparable: false
       header:
         metric: Metric
@@ -233,7 +225,6 @@ Panel Config:
       id: 309
       title: "Graphics Core Efficiency Arbiter (GCEA) to System Memory"
       cli_style: mem_chart
-      tui_style: mem_chart
       comparable: false
       header:
         metric: Metric
@@ -253,7 +244,60 @@ Panel Config:
           value: 32 * SUM(GCEA_WDRAM_SIZE_REQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
 
+  # =========================================================================
+  # Table 310: Workgroup Processors (WGPs)
+  # =========================================================================
+  - metric_table:
+      id: 310
+      title: "Workgroup Processors (WGPs)"
+      cli_style: mem_chart
+      comparable: false
+      header:
+        metric: Metric
+        value: Value
+        unit: Unit
+      metric:
+        Wavefront Occupancy:
+          value: ROUND(100 * SUM(SQ_WAVE_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_sum * 2 * $max_waves_per_cu), 1)
+          unit: Percent
+        VGPR:
+          value: ROUND(AVG(Arch_VGPR), 0)
+          unit: Registers
+        SGPR:
+          value: ROUND(AVG(SGPR), 0)
+          unit: Registers
+        LDS Allocation:
+          value: ROUND(AVG(LDS_Per_Workgroup), 0)
+          unit: Bytes per Workgroup
+        Scratch Allocation:
+          value: ROUND(AVG(Scratch_Per_Workitem) * $wave_size / 1024, 3)
+          unit: KB per Wave
+        Workgroups:
+          value: ROUND(AVG(Grid_Size / Workgroup_Size) / ($cu_per_gpu / 2), 1)
+          unit: Workgroups per WGP
+
   metrics_description:
+    Wavefront Occupancy: >-
+      Resident wavefronts per WGP, averaged over GPU-active cycles, as a percent of the
+      maximum wavefronts per WGP.
+    VGPR: >-
+      The number of architected vector general-purpose registers allocated
+      for the kernel. Note: this may not exactly match the number of VGPRs
+      requested by the compiler due to allocation granularity.
+    SGPR: >-
+      The number of scalar general-purpose registers allocated for the kernel.
+      Note: this may not exactly match the number of SGPRs requested by
+      the compiler due to allocation granularity.
+    LDS Allocation: >-
+      The number of bytes of LDS memory (or, shared memory) allocated per workgroup. Note:
+      This may also be larger than what was requested at compile time due to both allocation
+      granularity and dynamic per-dispatch LDS allocations.
+    Scratch Allocation: >-
+      The amount of scratch memory requested per wavefront, in KB: the scratch bytes
+      requested per work-item multiplied by the wavefront size. Scratch memory is used for
+      stack memory on the accelerator, as well as for register spills and restores.
+    Workgroups: >-
+      The number of workgroups in the launch divided by the number of WGPs.
     ICache Hit Rate: >-
       Percentage of instruction cache accesses that are serviced from cache without fetching
       from the GL1 cache. High hit rates indicate good instruction locality. Low hit rates

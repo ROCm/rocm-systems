@@ -6,7 +6,8 @@
 //! This module assigns no runtime handles and does not activate a device.
 
 use super::{
-    CpuCache, CpuCacheKind, CpuInfo, CpuSet, HostCaches, HostDomain, HostTopologySnapshot,
+    CpuApicId, CpuCache, CpuCacheKind, CpuInfo, CpuSet, HostCaches, HostDomain,
+    HostTopologySnapshot,
 };
 use crate::topology::CacheInfo;
 use std::path::{Path, PathBuf};
@@ -44,6 +45,30 @@ fn parse_cpu_info(contents: &str) -> Option<CpuInfo> {
             .ok()
             .filter(|count| *count != 0)?,
     })
+}
+
+fn parse_cpu_apic_ids(contents: &str) -> Vec<CpuApicId> {
+    contents
+        .split("\n\n")
+        .filter_map(|entry| {
+            let mut logical_cpu = None;
+            let mut apic_id = None;
+            for line in entry.lines() {
+                let Some((key, value)) = line.split_once(':') else {
+                    continue;
+                };
+                match key.trim() {
+                    "processor" => logical_cpu = value.trim().parse().ok(),
+                    "apicid" => apic_id = value.trim().parse().ok(),
+                    _ => (),
+                }
+            }
+            Some(CpuApicId {
+                logical_cpu: logical_cpu?,
+                apic_id: apic_id?,
+            })
+        })
+        .collect()
 }
 
 fn parse_cpu_set(contents: &str) -> Option<CpuSet> {
@@ -181,9 +206,11 @@ fn snapshot_from(
         .ok()
         .and_then(|contents| parse_memory_bytes(&contents))
         .filter(|bytes| *bytes != 0);
-    let cpu = std::fs::read_to_string(cpuinfo)
-        .ok()
-        .and_then(|contents| parse_cpu_info(&contents));
+    let cpuinfo_contents = std::fs::read_to_string(cpuinfo).ok();
+    let cpu = cpuinfo_contents.as_deref().and_then(parse_cpu_info);
+    let cpu_apic_ids = cpuinfo_contents
+        .as_deref()
+        .map_or_else(Vec::new, parse_cpu_apic_ids);
     let online_cpus = std::fs::read_to_string(online)
         .ok()
         .and_then(|contents| parse_cpu_set(&contents));
@@ -225,6 +252,7 @@ fn snapshot_from(
     HostTopologySnapshot {
         memory_bytes,
         cpu,
+        cpu_apic_ids,
         online_cpus,
         caches,
         domains,
@@ -348,6 +376,32 @@ mod tests {
             Some(263_219_812 * 1024)
         );
         assert_eq!(parse_memory_bytes("MemTotal: invalid kB\n"), None);
+    }
+
+    #[test]
+    fn apic_ids_resolve_numa_domains_through_logical_cpu_ids() {
+        let fixture = Fixture::new();
+        fixture.write(
+            "cpuinfo",
+            "processor : 0\napicid : 8\n\nprocessor : 1\napicid : 2\n",
+        );
+        fixture.write("node/node0/cpulist", "0\n");
+        fixture.write("node/node1/cpulist", "1\n");
+        let snapshot = fixture.snapshot();
+        assert_eq!(snapshot.logical_cpu_for_apic_id(2), Some(1));
+        assert_eq!(
+            snapshot
+                .domain_for_apic_id(2)
+                .map(|domain| domain.numa_node),
+            Some(1)
+        );
+        assert_eq!(
+            snapshot
+                .domain_for_apic_id(8)
+                .map(|domain| domain.numa_node),
+            Some(0)
+        );
+        assert!(snapshot.domain_for_apic_id(1).is_none());
     }
 
     #[test]

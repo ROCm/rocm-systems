@@ -75,6 +75,7 @@ struct thread_trace_parameter_pack
     uint64_t buffer_size        = DEFAULT_BUFFER_SIZE;
     uint64_t perf_exclude_mask  = 0;
     bool     no_detail_simd     = false;
+    bool     exec_mask_trace    = false;
     /// Number of CPU staging buffers in the producer/consumer pipeline.
     /// 1 = single buffer (synchronous, no async copy).
     /// Values >= 3 enable the async copy pipeline. 2 is rejected at the API layer.

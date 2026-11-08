@@ -40,9 +40,13 @@ void run_case(const char *label, Fmt fmt, Fmt acc_fmt,
   for (auto [mode, seed] : trials_for(fmt)) {
     fx.seed(S0, IN_REGS, fmt, mode, seed + 1);
     fx.seed(S1, IN_REGS, fmt, mode, seed + 2);
-    auto reseed_acc = [&] { fx.seed(ACC, ACC_REGS, acc_fmt, Mode::RandomInt, seed + 3); };
+    auto reseed = [&] {
+      // Clear scalar results so an omitted SIMD store cannot match them.
+      fx.seed_words(DST, DST_REGS, seed + 4);
+      fx.seed(ACC, ACC_REGS, acc_fmt, Mode::RandomInt, seed + 3);
+    };
     for (uint32_t const_acc : {amdgpu::ACC_FROM_VGPR, CONST_ONE}) {
-      expect_bit_exact(label, mode, fx, reseed_acc, [&] { kernel(fx, const_acc); }, DST, DST_REGS);
+      expect_bit_exact(label, mode, fx, reseed, [&] { kernel(fx, const_acc); }, DST, DST_REGS);
       if (testing::Test::HasFatalFailure())
         return;
     }

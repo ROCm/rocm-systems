@@ -28,6 +28,7 @@ test_categories:
       - "EnqueueCountTests.*"
       - "DdaCollCommon.*"
       - "DdaVecElementAdd.*"
+      - "DdaLL128PollWire.*"
       - "CheapPostSendFenceTests.*"
       - "Gfx1250SendRecvLl128WindowTests.*"
       - "PackRoundtripTest.LdStVolatileGlobalPtr"
@@ -65,6 +66,7 @@ test_categories:
       - "EnqueueCountTests.*"
       - "DdaCollCommon.*"
       - "DdaVecElementAdd.*"
+      - "DdaLL128PollWire.*"
       - "Fp8ReduceTest.*"
       - "CheapPostSendFenceTests.*"
       - "Gfx1250SendRecvLl128WindowTests.*"
@@ -76,6 +78,8 @@ test_categories:
       - "LlFifoSysScopeDeviceTest.*"
       - "LlFifoSysScope.*"
       - "DdaIpcGpuBarrierOrdering.*"
+      - "DdaReduceScatterFabricLL.*"
+      - "DdaAllReduceFabricLL.*"
       - "DIVUP.*"
       - "ROUNDUP.*"
       - "ALIGN_POWER.*"
@@ -90,6 +94,7 @@ test_categories:
       - "Add4G.*"
       - "RcclEpWaveTest.*"
       - "RcclEpLayoutTest.*"
+      - "DeviceApi.RejectedCreate*"
     exclude_windows:
       - "*"
     labels:
