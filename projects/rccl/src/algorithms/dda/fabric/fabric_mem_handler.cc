@@ -63,23 +63,19 @@ ncclResult_t ncclFabricMemHandler::exchangeMemPtrs() {
   std::vector<FabricExchEntry> entries(static_cast<size_t>(nranks_));
   memset(entries.data(), 0, entries.size() * sizeof(FabricExchEntry));
 
-  // Always enter the allgather, even if export fails. A rank-local CUCHECK
-  // return here leaves peers blocked in the FabricExchEntry collective.
-  // Use HIP VMM APIs directly: hipify-perl + CUPFN/CUCHECK produce pfn_hipMem*
-  // / pfn_cuMem* mismatches on this TU (see p2p.cc for the CUDA PFN path).
+  // Join the allgather even if export fails, so peers do not block in it.
   hipError_t exp = hipMemExportToShareableHandle(&entries[static_cast<size_t>(rank_)].desc, selfHandle_,
                                                  ncclCuMemHandleType, 0);
   if (exp == hipSuccess) {
     entries[static_cast<size_t>(rank_)].size = selfSize_;
   } else {
     memset(&entries[static_cast<size_t>(rank_)], 0, sizeof(FabricExchEntry));
-    WARN("ncclFabricMemHandler::exchangeMemPtrs: hipMemExportToShareableHandle failed");
+    WARN("ncclFabricMemHandler::exchangeMemPtrs: hipMemExportToShareableHandle failed: %s", hipGetErrorString(exp));
+    (void)hipGetLastError();
   }
 
   NCCLCHECK(bootstrapAllGather(bootstrap_, entries.data(), static_cast<int>(sizeof(FabricExchEntry))));
-  // Size 0 is the empty entry a failed export publishes. Every rank rejects
-  // it before import, so peers do not map that handle and continue while the
-  // failing rank has already returned.
+  // A failed export publishes size 0; every rank rejects it so all of them return here together.
   for (int i = 0; i < nranks_; ++i) {
     if (entries[static_cast<size_t>(i)].size != 0) continue;
     if (i != rank_ || exp == hipSuccess) {
@@ -88,31 +84,51 @@ ncclResult_t ncclFabricMemHandler::exchangeMemPtrs() {
     return ncclUnhandledCudaError;
   }
 
-  for (int i = 0; i < nranks_; ++i) {
-    if (i == rank_) {
-      continue;
-    }
-    CUmemGenericAllocationHandle peerHandle{};
-    hipError_t imp = hipMemImportFromShareableHandle(&peerHandle, (void*)&entries[static_cast<size_t>(i)].desc,
-                                                     ncclCuMemHandleType);
-    if (imp != hipSuccess) {
-      WARN("ncclFabricMemHandler::exchangeMemPtrs: hipMemImportFromShareableHandle failed for peer %d", i);
-      return ncclUnhandledCudaError;
-    }
+  auto importPeers = [&]() -> ncclResult_t {
+    for (int i = 0; i < nranks_; ++i) {
+      if (i == rank_) {
+        continue;
+      }
+      CUmemGenericAllocationHandle peerHandle{};
+      hipError_t imp = hipMemImportFromShareableHandle(&peerHandle, (void*)&entries[static_cast<size_t>(i)].desc,
+                                                       ncclCuMemHandleType);
+      if (imp != hipSuccess) {
+        WARN("ncclFabricMemHandler::exchangeMemPtrs: hipMemImportFromShareableHandle failed for peer %d: %s", i,
+             hipGetErrorString(imp));
+        (void)hipGetLastError();
+        return ncclUnhandledCudaError;
+      }
 
-    // Reserve + map + set access for the imported handle
-    void* peerPtr = nullptr;
-    ncclResult_t res = ncclCuMemAllocAddr(&peerPtr, &peerHandle, entries[static_cast<size_t>(i)].size);
-    if (res != ncclSuccess) {
-      (void)hipMemRelease(peerHandle);
-      WARN("ncclFabricMemHandler::exchangeMemPtrs: ncclCuMemAllocAddr failed for peer %d", i);
-      return res;
+      // Reserve + map + set access for the imported handle
+      void* peerPtr = nullptr;
+      ncclResult_t res = ncclCuMemAllocAddr(&peerPtr, &peerHandle, entries[static_cast<size_t>(i)].size);
+      if (res != ncclSuccess) {
+        if (hipMemRelease(peerHandle) != hipSuccess) (void)hipGetLastError();
+        WARN("ncclFabricMemHandler::exchangeMemPtrs: ncclCuMemAllocAddr failed for peer %d", i);
+        return res;
+      }
+      // Record the mapping before releasing the handle so the destructor can
+      // free it even if hipMemRelease below fails and returns early.
+      memPtrs_[static_cast<size_t>(i)] = peerPtr;
+      hipError_t rel = hipMemRelease(peerHandle);
+      if (rel != hipSuccess) {
+        WARN("ncclFabricMemHandler::exchangeMemPtrs: hipMemRelease failed for peer %d: %s", i, hipGetErrorString(rel));
+        (void)hipGetLastError();
+        return ncclUnhandledCudaError;
+      }
     }
-    // Record the mapping before releasing the handle so the destructor can
-    // free it even if hipMemRelease below fails and returns early.
-    memPtrs_[static_cast<size_t>(i)] = peerPtr;
-    if (hipMemRelease(peerHandle) != hipSuccess) {
-      WARN("ncclFabricMemHandler::exchangeMemPtrs: hipMemRelease failed for peer %d", i);
+    return ncclSuccess;
+  };
+  ncclResult_t res = importPeers();
+
+  // Every rank votes, so a rank that failed to import does not leave its peers to continue alone.
+  std::vector<int> ready(static_cast<size_t>(nranks_), 0);
+  ready[static_cast<size_t>(rank_)] = res == ncclSuccess ? 1 : 0;
+  NCCLCHECK(bootstrapAllGather(bootstrap_, ready.data(), static_cast<int>(sizeof(int))));
+  if (res != ncclSuccess) return res;
+  for (int i = 0; i < nranks_; ++i) {
+    if (ready[static_cast<size_t>(i)] == 0) {
+      WARN("ncclFabricMemHandler::exchangeMemPtrs: rank %d failed to map its fabric peers", i);
       return ncclUnhandledCudaError;
     }
   }

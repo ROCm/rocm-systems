@@ -145,9 +145,7 @@ option(ENABLE_ROCSHMEM_GIN                     "GIN plugins: device bitcode inje
 if(ENABLE_ROCSHMEM AND ENABLE_ROCSHMEM_GIN)
   message(FATAL_ERROR "ENABLE_ROCSHMEM and ENABLE_ROCSHMEM_GIN are mutually exclusive")
 endif()
-# --rocshmem-gin extracts host objects from HIP-RDC librocshmem.a via ld -r.
-# Linking that fat object with hip::device / -fgpu-rdc (--no-device-linker)
-# unpacks overlapping gfx device TUs and fails with duplicate __hip_cuid_*.
+# Without the device linker, objects extracted from HIP-RDC librocshmem.a link with duplicate __hip_cuid_* symbols.
 if(ENABLE_ROCSHMEM_GIN AND NOT ENABLE_DEVICE_LINKER)
   message(FATAL_ERROR "ENABLE_ROCSHMEM_GIN requires ENABLE_DEVICE_LINKER=ON (do not pass --no-device-linker with --rocshmem-gin)")
 endif()
