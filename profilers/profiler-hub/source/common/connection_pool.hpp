@@ -28,10 +28,11 @@ namespace profiler_hub::common
 class connection_pool
 {
 public:
-    connection_pool(std::string_view                                file_path,
-                    size_t                                          num_connections,
-                    std::shared_ptr<profiler_hub::reader_catalog_t> catalog,
-                    std::string_view                                uuid = {});
+    connection_pool(std::string_view                                  file_path,
+                    size_t                                            num_connections,
+                    std::shared_ptr<profiler_hub::reader_catalog_t>   catalog,
+                    std::string_view                                  uuid,
+                    const profiler_hub::reader_types::trace_format_t& format);
     ~connection_pool() = default;
 
     connection_pool(const connection_pool&)            = delete;

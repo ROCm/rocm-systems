@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocpd_v3_reader.hpp"
 #include "trim_schema.hpp"
 
 #include <string>
@@ -99,7 +100,7 @@ public:
                 return trim_statement_t{
                     role->kind,
                     "INSERT INTO " + quoted + " SELECT * FROM oldDb." + quoted +
-                        " WHERE \"start\" < " + end + " AND \"end\" > " + start };
+                        " WHERE \"start\" < " + end + " AND \"end\" >= " + start };
             case row_kind_t::sample: return sample_statement(*role, table, tables, start, end);
             case row_kind_t::event: return event_statement(*role, table, tables);
             case row_kind_t::event_child: return child_statement(*role, table, tables);
@@ -116,7 +117,7 @@ private:
     {
         const std::string quoted = quote_ident(table);
         std::string       sql    = "INSERT INTO " + quoted + " SELECT S.* FROM oldDb." +
-                           quoted + " S WHERE (S.\"timestamp\" > " + start +
+                           quoted + " S WHERE (S.\"timestamp\" >= " + start +
                            " AND S.\"timestamp\" < " + end + ")";
         const std::string region = sibling(table, "rocpd_sample", "rocpd_region");
         if(!region.empty() && tables.count(region) != 0)
@@ -175,25 +176,9 @@ private:
 }  // namespace
 
 std::unique_ptr<trim_schema_t>
-make_trim_schema(reader_types::trace_schema_t schema, version_t version)
+make_rocpd_v3_trim_schema()
 {
-    if(schema == reader_types::trace_schema_t::rocpd && version.major == 3)
-    {
-        return std::make_unique<rocpd_v3_trim_schema_t>();
-    }
-    return nullptr;
-}
-
-std::string
-table_guid(std::string_view table)
-{
-    const table_role_t* role = role_of(table);
-    if(role == nullptr || table.size() <= role->prefix.size() ||
-       table[role->prefix.size()] != '_')
-    {
-        return {};
-    }
-    return std::string{ table.substr(role->prefix.size() + 1) };
+    return std::make_unique<rocpd_v3_trim_schema_t>();
 }
 
 }  // namespace profiler_hub

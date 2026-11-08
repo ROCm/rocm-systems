@@ -9,6 +9,8 @@
 #include <memory>
 #include <mutex>
 #include <stop_token>
+#include <utility>
+#include <vector>
 
 /**
  * Definition of the opaque ph_future handle. It is shared between the user, who holds
@@ -38,6 +40,12 @@ struct ph_future : std::enable_shared_from_this<ph_future>
 
     [[nodiscard]] ph_result_t wait();
     [[nodiscard]] ph_result_t cancel();
+
+    /** Registers a SQLite connection that this future may interrupt. If the
+     *  stop was already requested, @p interrupt is called before returning. */
+    void bind_sql(void (*interrupt)(void*) noexcept, void* arg);
+    void unbind_sql(void* arg);
+
     [[nodiscard]] ph_result_t result(ph_result_t& out);
 
     /** @return false if the user reference was already released. */
@@ -55,4 +63,5 @@ private:
     bool                       m_finishing{ false };
     bool                       m_done{ false };
     ph_result_t                m_result{ PH_RESULT_SUCCESS };
+    std::vector<std::pair<void (*)(void*) noexcept, void*>> m_sql;
 };

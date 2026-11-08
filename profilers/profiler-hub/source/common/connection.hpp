@@ -26,9 +26,11 @@ class connection
 public:
     // Pooled/shared-catalog construction: `catalog` (non-null) is shared
     // with sibling connections in the same pool; see connection_pool.
-    connection(std::string_view                                file_path,
-               std::shared_ptr<profiler_hub::reader_catalog_t> catalog,
-               std::string_view                                uuid = {});
+    // `format` is the probed schema and version and selects the reader.
+    connection(std::string_view                                  file_path,
+               std::shared_ptr<profiler_hub::reader_catalog_t>   catalog,
+               std::string_view                                  uuid,
+               const profiler_hub::reader_types::trace_format_t& format);
 
     ~connection() = default;
 

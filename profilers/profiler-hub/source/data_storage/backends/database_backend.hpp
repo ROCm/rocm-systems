@@ -5,6 +5,7 @@
 
 #include "common/traits.hpp"
 #include "debug.hpp"
+#include "../../sql_cancel.hpp"
 #include <fmt/format.h>
 
 #include <cstddef>
@@ -188,9 +189,11 @@ public:
         template <typename Fn>
         void for_each(Fn&& fn)
         {
-            auto raw = m_stmt.raw();
-            T    row;
-            int  rc = SqlitePolicy::result_done;
+            const profiler_hub::running_sql query{ &database_backend::interrupt_callback,
+                                                   m_backend.get() };
+            auto                            raw = m_stmt.raw();
+            T                               row;
+            int                             rc = SqlitePolicy::result_done;
             while((rc = SqlitePolicy::step(raw)) == SqlitePolicy::result_row)
             {
                 m_extractor(*m_backend, raw, row);
@@ -201,9 +204,11 @@ public:
 
         std::vector<T> to_vector()
         {
-            std::vector<T> results;
-            auto           raw = m_stmt.raw();
-            int            rc  = SqlitePolicy::result_done;
+            const profiler_hub::running_sql query{ &database_backend::interrupt_callback,
+                                                   m_backend.get() };
+            std::vector<T>                  results;
+            auto                            raw = m_stmt.raw();
+            int                             rc  = SqlitePolicy::result_done;
             while((rc = SqlitePolicy::step(raw)) == SqlitePolicy::result_row)
             {
                 results.emplace_back();
@@ -252,6 +257,7 @@ public:
     // =========================================================================
     void                      initialize_schema();
     void                      execute(const std::string& query);
+    void                      interrupt() noexcept;
     void                      flush();
     [[nodiscard]] std::string get_uuid() const { return m_uuid; }
 
@@ -509,6 +515,10 @@ private:
         {
             return;
         }
+        if(sqlite3_error_code == SqlitePolicy::result_interrupt)
+        {
+            throw profiler_hub::sql_interrupted{};
+        }
         throw_sqlite_error(sqlite3_error_code, query, context);
     }
 
@@ -530,6 +540,10 @@ private:
            sqlite3_error_code == SqlitePolicy::result_done)
         {
             return;
+        }
+        if(sqlite3_error_code == SqlitePolicy::result_interrupt)
+        {
+            throw profiler_hub::sql_interrupted{};
         }
         throw_sqlite_error(
             sqlite3_error_code, query, std::forward<ContextFn>(context_fn)());
@@ -553,6 +567,11 @@ private:
                         context.empty() ? "" : fmt::format("Context: {}\n", context));
 
         throw std::runtime_error(message);
+    }
+
+    static void interrupt_callback(void* self) noexcept
+    {
+        static_cast<database_backend*>(self)->interrupt();
     }
 
     database_t     m_sqlite3{ nullptr };

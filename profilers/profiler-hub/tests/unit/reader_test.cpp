@@ -373,6 +373,11 @@ TEST_F(reader_test, get_region_details_returns_matching_data)
     EXPECT_EQ(region->name, "test-region");
     EXPECT_EQ(region->start_timestamp, 1000);
     EXPECT_EQ(region->end_timestamp, 2000);
+    ASSERT_EQ(region->args.size(), 1U);
+    EXPECT_EQ(region->args[0].position, 0U);
+    EXPECT_EQ(region->args[0].type, "int");
+    EXPECT_EQ(region->args[0].name, "x");
+    EXPECT_EQ(region->args[0].value, "5");
 }
 
 TEST_F(reader_test, get_kernel_dispatch_details_returns_nullopt_for_region_event)

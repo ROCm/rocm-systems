@@ -628,6 +628,13 @@ enum class trace_schema_t
     rocpd,
 };
 
+/** @brief Schema family and version of a probed file. Selects its reader. */
+struct trace_format_t
+{
+    trace_schema_t          schema{ trace_schema_t::unknown };
+    profiler_hub::version_t version{ 0, 0, 0 };
+};
+
 /** @brief What a path contains, and whether a reader can open it. */
 struct file_probe_result_t
 {
