@@ -154,6 +154,13 @@ def add_general_group(
     )
 
 
+def experimental_requested(argv: List[str]) -> bool:
+    """Return True if --experimental comes before the "--" that starts the workload."""
+    parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+    parser.add_argument("--experimental", action="store_true")
+    return parser.parse_known_args(argv)[0].experimental
+
+
 def build_parser(
     rocprof_compute_home: Path,
     supported_archs: Dict[str, str],
