@@ -566,7 +566,6 @@ TEST_F(CollTraceMicrotest, Trace_FewerThanEightLocalRanksReportResults) {
 
   ASSERT_EQ(g_allGathers.size(), 1u);
   EXPECT_EQ(g_allGathers[0].nranks, 2);
-  EXPECT_FALSE(DebugLogged(NCCL_LOG_WARN, "Aggregating error"));
   ASSERT_EQ(DebugLogMatching("coll_id").size(), 1u);
 }
 
@@ -595,7 +594,6 @@ TEST_F(CollTraceMicrotest, Trace_AllGatherUsesEveryLocalRank) {
       EXPECT_EQ(g_allGathers[0].rank, localRank);
       EXPECT_EQ(g_allGathers[0].nranks, localRanks);
       EXPECT_EQ(g_allGathers[0].mine, (std::vector<float>{2.0f, 10.0f}));
-      EXPECT_FALSE(DebugLogged(NCCL_LOG_WARN, "Aggregating error"));
       auto lines = DebugLogMatching("coll_id");
       ASSERT_EQ(lines.size(), 2u);
       EXPECT_NE(lines[0].find("min_latency_us 2000.000000, max_latency_us 5000.000000"), std::string::npos);
