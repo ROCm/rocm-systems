@@ -25,7 +25,8 @@ are skipped, and the reason arrives as the `CLOSE` callback's `status`.
 | Kernarg bytes available at replay time | HIP recycles a kernarg block as soon as its kernel completes | bytes copied at record time |
 | Recorded code stays loaded, and its module variables are in the snapshot | An unload frees code a recorded packet points at; a code object loaded after the entry snapshot has `__device__` / `__constant__` globals the snapshot never saw | declined |
 | Dispatch packets re-submittable | The recorded packets must reach the GPU through the same path the application used | requires the interception path; queue interposition declines |
-| Everything read is in the snapshot | Unified memory, host memory, and host-side state are not captured | **not checkable** — see the divergence check |
+| Everything written is in the snapshot | Unified memory, host memory, fine-grained and VM-mapped allocations are not captured, so a pass would apply its writes to them again | declined when a dispatch's explicit kernel arguments point at such memory; pointers stored inside other memory are **not checkable** |
+| Everything read is in the snapshot | Host-side state is not captured | **not checkable** — see the divergence check |
 
 ## The decline decision table
 
@@ -45,6 +46,7 @@ GPU dependencies so the table below can be unit tested directly.
 | Any code object is unloaded while the range is bound | `CODE_OBJECT_CHANGED_IN_RANGE` | cross-thread, folded in |
 | Device allocation created or freed inside the range | `ALLOCATION_CHANGED_IN_RANGE` | close time |
 | Snapshot capture or a later snapshot failed | `SNAPSHOT_FAILED` | snapshot time |
+| A dispatch's kernel arguments point at memory the snapshot does not cover | `SNAPSHOT_FAILED` | submission time |
 | Kernarg staging allocation failed | `STAGING_FAILED` | close time |
 | Queue interposition is enabled | `UNSUPPORTED_QUEUE_PATH` | `begin` |
 | Nothing was recorded | `NO_DISPATCH` | close time |
@@ -161,9 +163,11 @@ timings.
 
 ## The divergence check
 
-The checks above cover interference the SDK can see. They cannot cover a range that reads state the
-snapshot does not capture — unified or managed memory, fine-grained or host memory,
-virtual-memory-mapped allocations, or a value the host recomputed inside the range. Such a range
+The checks above cover interference the SDK can see. A range whose explicit kernel arguments point
+at memory the snapshot does not capture — unified or managed memory, fine-grained or host memory,
+virtual-memory-mapped allocations — is declined (`SNAPSHOT_FAILED`) when the dispatch is recorded.
+What remains unseen is a pointer to such memory stored inside other memory or packed into a by-value
+word that is not 8-byte aligned, and a value the host recomputed inside the range. Such a range
 passes every check and is replayed, and its passes quietly describe different inputs.
 
 Setting `ROCPROF_RANGE_REPLAY_VERIFY` turns on a check for exactly that residue. The executor hashes
@@ -234,6 +238,7 @@ All paths are relative to `projects/rocprofiler-sdk/`.
 | Open-range fast gate | `source/lib/rocprofiler-sdk/range_replay/range_state.cpp` | `any_range_open()` |
 | Replay window and pass loop | `source/lib/rocprofiler-sdk/range_replay/executor.cpp` | `execute_range()` |
 | Entry snapshot | `source/lib/rocprofiler-sdk/range_replay/executor.cpp` | `ensure_entry_snapshot()` |
+| Kernel arguments outside the snapshot | `source/lib/rocprofiler-sdk/range_replay/untracked_memory.cpp` | `decline_untracked()` |
 | Kernarg staging | `source/lib/rocprofiler-sdk/range_replay/executor.cpp` | `kernarg_staging` |
 | Kernarg block retention | `source/lib/rocprofiler-sdk/range_replay/retained_kernarg.cpp` | `kernarg_block_fits()`, `take_retained_kernarg_block()`, `retain_kernarg_block()` |
 | Divergence hashing | `source/lib/rocprofiler-sdk/range_replay/digest.cpp` | `hash_bytes()`, `count_divergent()` |

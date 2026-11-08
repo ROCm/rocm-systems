@@ -84,6 +84,7 @@ experimental/range_replay.h           public payload struct, status enum, begin/
         |     range_state.cpp         eligibility bookkeeping, the recorder, decline channels
         |     replay_callbacks.cpp    CONFIG / PASS / CLOSE delivery, pass-count decisions
         |     executor.cpp            snapshot, kernarg staging, the pass loop, restore
+        |     untracked_memory.cpp    kernel arguments that point outside the snapshot
         |     retained_kernarg.cpp    the kernarg block kept for each agent's next range
         |     digest.cpp              region hashing and divergence counting
         |
@@ -107,7 +108,7 @@ Range replay v1 is scoped to what the existing snapshot can restore correctly.
 | Not supported in v1 | Consequence |
 |---|---|
 | More than one queue or agent per range | declined (`MULTI_QUEUE` / `MULTI_AGENT`) |
-| Unified / managed memory, host memory, fine-grained memory, VM-mapped allocations | not restored between passes; not detected — see the divergence check |
+| Unified / managed memory, host memory, fine-grained memory, VM-mapped allocations | not restored between passes; declined (`SNAPSHOT_FAILED`) when an explicit kernel argument points at them, otherwise not detected — see the divergence check |
 | Host state | never rewound; a range whose kernels consume values the host recomputed inside it is not a replay candidate |
 | HIP graph launches inside a range | declined (`GRAPH_LAUNCH`) |
 | Code objects loaded or unloaded inside a range (lazy module loading, JIT, `hipModuleUnload`) | declined (`CODE_OBJECT_CHANGED_IN_RANGE`); run a range once before measuring it |

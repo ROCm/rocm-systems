@@ -44,6 +44,7 @@ submission_hook(const hsa::Queue*                     queue,
     {
         note_submission(_queue, packets, pkt_count, graph_launch_active);
         ensure_entry_snapshot(*open_range, _queue, writer);
+        decline_untracked(*open_range);
     }
     else if(const auto* rocp_agent = _queue.get_agent().get_rocp_agent(); rocp_agent != nullptr)
     {
