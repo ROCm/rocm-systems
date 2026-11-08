@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-include(${CMAKE_CURRENT_LIST_DIR}/../check_model_only_symbols.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/../../check_model_only_symbols.cmake)
 foreach(
     _forbidden
     "rocjitsu::consan::"

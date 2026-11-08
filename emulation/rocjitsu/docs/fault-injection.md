@@ -93,9 +93,9 @@ Generic mechanics and recipe semantics have separate responsibilities:
 
 | Feature | Status and main boundary | References |
 | --- | --- | --- |
-| Complete barrier Drop | Implemented for the target/wave forms below. Removes one logical barrier: an ordered two-member signal/wait pair or one true full-barrier instruction. A half-pair is never a singleton. | [`StaticBarrier` / family policy](../lib/rocjitsu/src/rocjitsu/code/analysis/static_barriers.h), [qualification](../lib/rocjitsu/src/rocjitsu/code/analysis/static_barriers.cpp), [family and RDNA3 regressions](../tests/patch/fault_drop_barrier_test.cpp) |
-| Exact and logical-ordinal selection | Implemented. Exact kernel name chooses one inventory; an exact context-bound handle takes precedence over the zero-based logical ordinal. Invalid exact requests fail without fallback. Default ordinal zero deterministically chooses the first barrier in first-member source order; there is no race ranking or legacy physical-index adapter. | [`DropBarrierSelector`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.h), [`select_drop_barrier`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.cpp), [selection regressions](../tests/patch/fault_drop_barrier_test.cpp) |
-| Multiple kernels in one text section | Limited support for independent sibling kernels. Discovery checks all entries before exposing one exact kernel's inventory; shared blocks, calls, aliased entries, and unresolved owners are rejected. | [`FaultMutationContext`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.h), [ownership analysis](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.cpp), [sibling preservation tests](../tests/patch/fault_drop_barrier_test.cpp) |
+| Complete barrier Drop | Implemented for the target/wave forms below. Removes one logical barrier: an ordered two-member signal/wait pair or one true full-barrier instruction. A half-pair is never a singleton. | [`StaticBarrier` / family policy](../lib/rocjitsu/src/rocjitsu/code/analysis/static_barriers.h), [qualification](../lib/rocjitsu/src/rocjitsu/code/analysis/static_barriers.cpp), [analysis regressions](../tests/analysis/static_barriers_test.cpp), [Drop regressions](../tests/patch/fault_injection/drop_barrier_test.cpp) |
+| Exact and logical-ordinal selection | Implemented. Exact kernel name chooses one inventory; an exact context-bound handle takes precedence over the zero-based logical ordinal. Invalid exact requests fail without fallback. Default ordinal zero deterministically chooses the first barrier in first-member source order; there is no race ranking or legacy physical-index adapter. | [`DropBarrierSelector`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.h), [`select_drop_barrier`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.cpp), [selection regressions](../tests/patch/fault_injection/drop_barrier_test.cpp) |
+| Multiple kernels in one text section | Limited support for independent sibling kernels. Discovery checks all entries before exposing one exact kernel's inventory; shared blocks, calls, aliased entries, and unresolved owners are rejected. | [`FaultMutationContext`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.h), [ownership analysis](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.cpp), [sibling preservation tests](../tests/patch/fault_injection/drop_barrier_test.cpp) |
 | Shared DBI instruction replacement | Consumed through `InstrumentationKind::ReplaceWithInst`. One transaction replaces complete source instructions through trampolines. Drop supplies one 4-byte NOP body for each qualified 4-byte barrier member. This does not widen observational trampoline-anchor admission. | [Instrumentor contract](../lib/rocjitsu/src/rocjitsu/code/patch/instrumentor.h), [DBI design](dbi-design.md), [transaction tests](../tests/patch/checked_text_edits_test.cpp), [replacement tests](../tests/patch/instrumentor_replacement_test.cpp) |
 | Mutation CLI | Planned separately; this library does not provide an executable. | — |
 | Persistent selection files and replay bundles | Not provided; no durable replay format is committed. | — |
@@ -134,7 +134,7 @@ targets and ten target/wave combinations:
 | CDNA3 | gfx942 | 64 | Full `s_barrier` singleton, workgroup |
 | CDNA4 | gfx950 | 64 | Full `s_barrier` singleton, workgroup |
 
-The [host regression matrix](../tests/patch/fault_drop_barrier_test.cpp) covers
+The [host regression matrix](../tests/patch/fault_injection/drop_barrier_test.cpp) covers
 discovery, exact/ordinal selection, emission, concrete decoding, and preservation
 for these rows. RDNA3 has its own instruction encodings and descriptor-selected
 wave modes; the shared singleton representation does not imply CDNA encodings
@@ -223,8 +223,12 @@ Drop introduces extra branches and NOPs, so it does not preserve instruction
 counts or timing. Host transformation tests do not establish physical execution.
 
 For ConSan use, follow the [fresh-prepare integration contract](consan.md#fault-injection).
-ConSan applies its own input admission during fresh prepare. Mutation admission
-and detector admission are separate decisions.
+Fresh prepare currently requires a single-kernel image and rejects remaining
+`s_barrier*` instructions in the analyzed scope. Sibling-preserving multi-kernel
+mutants and Drops that leave another barrier in that scope cannot use this path.
+The mutant must also satisfy ConSan's other input restrictions; fresh preparation
+does not establish detector qualification. Mutation admission and detector
+admission are separate decisions.
 
 ## Optional compiled corpus regression
 

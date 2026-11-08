@@ -1087,7 +1087,10 @@ rj_configure_target(rocjitsu_text_edit_tests PRIVATE_INCLUDES WARNINGS)
 rj_add_gtest_tests(rocjitsu_text_edit_tests)
 
 # Host-only Drop recipe tests use shared DBI replacement and model ISA providers.
-add_executable(rocjitsu_fault_injection_tests patch/fault_drop_barrier_test.cpp)
+add_executable(
+    rocjitsu_fault_injection_tests
+    patch/fault_injection/drop_barrier_test.cpp
+)
 target_include_directories(
     rocjitsu_fault_injection_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
@@ -1126,7 +1129,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             -DMODEL_BINARY=$<TARGET_FILE:rocjitsu_fault_injection_tests>
             -DREQUIRED_MODEL_ARCHES=cdna1,cdna2,cdna3,cdna4,cdna5,rdna1,rdna2,rdna3,rdna3_5,rdna4
             -P
-            ${CMAKE_CURRENT_SOURCE_DIR}/patch/check_fault_injection_symbols.cmake
+            ${CMAKE_CURRENT_SOURCE_DIR}/patch/fault_injection/check_fault_injection_symbols.cmake
     )
 endif()
 
@@ -1137,6 +1140,7 @@ add_executable(
     analysis/decoder_window_test.cpp
     analysis/free_registers_test.cpp
     analysis/reachable_cfg_test.cpp
+    analysis/static_barriers_test.cpp
     code/amdgpu_code_object_test.cpp
     code/kernel_descriptor_scan_test.cpp
     code/kernel_scope_test.cpp
