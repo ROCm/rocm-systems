@@ -9936,7 +9936,8 @@ amdsmi_status_t amdsmi_get_cpu_model_name(amdsmi_processor_handle processor_hand
  *  @param[in,out]    status_string - A pointer to a const char * which will be made
  *  to point to a description of the provided error code
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, ::AMDSMI_STATUS_MAP_ERROR if
+ *  @p status is not a known ESMI status, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_esmi_err_msg(amdsmi_status_t status, const char** status_string);
 
