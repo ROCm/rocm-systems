@@ -2641,8 +2641,8 @@ kernel_replay_callback(rocprofiler_callback_tracing_record_t record,
 // Range replay asks for one pass count per range, before it knows which agent the range will
 // bind to. Use the widest counter-group list any agent has, which is the list the user asked
 // for when every agent implements those counters.
-uint64_t
-range_replay_pass_count_callback(uint64_t /*range_id*/, rocprofiler_user_data_t /*user_data*/)
+uint64_t range_replay_pass_count_callback(uint64_t /*range_id*/,
+                                          rocprofiler_user_data_t /*user_data*/)
 {
     auto n = size_t{0};
     for(const auto& entry : get_agent_profiles().profiles)
@@ -2680,14 +2680,14 @@ range_replay_callback(rocprofiler_callback_tracing_record_t record,
 // Host replay is not started from here: the sigsetjmp has to be in the application's frame.
 struct range_bracket_t
 {
-    int              push_depth      = 0;
-    bool             open            = false;
-    bool             opened_by_push  = false;
-    roctx_range_id_t start_id        = 0;
+    int              push_depth     = 0;
+    bool             open           = false;
+    bool             opened_by_push = false;
+    roctx_range_id_t start_id       = 0;
 };
 
-thread_local auto        tl_range_bracket = range_bracket_t{};
-std::atomic<uint64_t>    next_range_id{1};
+thread_local auto     tl_range_bracket = range_bracket_t{};
+std::atomic<uint64_t> next_range_id{1};
 
 void
 open_marked_replay_range()
@@ -2718,7 +2718,7 @@ range_replay_marker_callback(rocprofiler_callback_tracing_record_t record,
     if(!tool::get_config().range_replay || tool::get_config().range_replay_host) return;
     if(record.kind != ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API) return;
 
-    auto* marker = static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload);
+    auto* marker  = static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload);
     auto& bracket = tl_range_bracket;
 
     if(record.operation == ROCPROFILER_MARKER_CORE_API_ID_roctxRangePushA &&
@@ -4016,15 +4016,14 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             auto marker_ctx = rocprofiler_context_id_t{0};
             ROCPROFILER_CALL(rocprofiler_create_context(&marker_ctx),
                              "failed to create range replay marker context");
-            ROCPROFILER_CALL(skip_if_unsupported(
-                                 rocprofiler_configure_callback_tracing_service(
-                                     marker_ctx,
-                                     ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API,
-                                     marker_ops.data(),
-                                     marker_ops.size(),
-                                     callbacks.range_replay_marker,
-                                     nullptr),
-                                 ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API),
+            ROCPROFILER_CALL(skip_if_unsupported(rocprofiler_configure_callback_tracing_service(
+                                                     marker_ctx,
+                                                     ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API,
+                                                     marker_ops.data(),
+                                                     marker_ops.size(),
+                                                     callbacks.range_replay_marker,
+                                                     nullptr),
+                                                 ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API),
                              "range replay marker tracing configure failed");
             start_context(marker_ctx, "range replay markers");
         }
