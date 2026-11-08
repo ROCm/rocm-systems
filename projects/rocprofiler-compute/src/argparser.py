@@ -226,17 +226,6 @@ def add_general_group(
         ),
     )
     general_group.add_argument(
-        "--list-metrics-gfx-id",
-        dest="list_metrics_gfx_id",
-        metavar="<arch>",
-        choices=supported_archs.keys(),
-        help=(
-            "List the blocks of GPU <arch> instead of the current GPU.\n"
-            "Add --list-metrics [id ...] to list their metrics.\n"
-            f"Values: {', '.join(supported_archs)}"
-        ),
-    )
-    general_group.add_argument(
         "--list-blocks",
         dest="list_blocks",
         metavar="<arch>",
@@ -299,6 +288,8 @@ def omniarg_parser(
         supported_archs,
         rocprof_compute_version,
     )
+    debug_group = parser.add_argument_group("Debug Options")
+    _add_list_metrics_gfx_id(debug_group, supported_archs, debug_enabled)
     parser._positionals.title = "Modes"
     parser._optionals.title = "Help"
     skills_note = _skills_note(rocprof_compute_home)
@@ -343,6 +334,8 @@ Examples:
         supported_archs,
         rocprof_compute_version,
     )
+    profile_debug_group = profile_parser.add_argument_group("Debug Options")
+    _add_list_metrics_gfx_id(profile_debug_group, supported_archs, debug_enabled)
     profile_group = profile_parser.add_argument_group("Profile Options")
     roofline_group = profile_parser.add_argument_group("Standalone Roofline Options")
 
@@ -958,3 +951,26 @@ def _skills_note(rocprof_compute_home: Path) -> Optional[str]:
         if readme.is_file():
             return f"Agent Skills: see {readme} to install them."
     return None
+
+
+def _add_list_metrics_gfx_id(
+    debug_group: argparse._ArgumentGroup,
+    supported_archs: Dict[str, str],
+    debug_enabled: bool,
+) -> None:
+    """Add --debug-list-metrics-gfx-id, which analyze doesn't take: it lists the
+    metrics of the -p workload's GPU."""
+    debug_group.add_argument(
+        "--debug-list-metrics-gfx-id",
+        dest="list_metrics_gfx_id",
+        metavar="<arch>",
+        choices=supported_archs.keys(),
+        action=DebugAction,
+        base_action="store",
+        debug_enabled=debug_enabled,
+        help=(
+            "List the blocks of GPU <arch> instead of the current GPU.\n"
+            "Add --list-metrics [id ...] to list their metrics.\n"
+            f"Values: {', '.join(supported_archs)}"
+        ),
+    )

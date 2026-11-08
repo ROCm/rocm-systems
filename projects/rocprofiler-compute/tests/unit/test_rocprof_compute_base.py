@@ -54,9 +54,13 @@ def print_startup_help(monkeypatch, argv) -> None:
 @pytest.mark.parametrize(
     "argv, debug_option, shown",
     [
+        (["--help"], "--debug-list-metrics-gfx-id", False),
+        (["--debug", "--help"], "--debug-list-metrics-gfx-id", True),
+        (["profile", "--help", "--debug"], "--debug-list-metrics-gfx-id", True),
         (["analyze", "--help"], "--debug-single-metric", False),
         (["analyze", "--debug", "--help"], "--debug-single-metric", True),
         (["analyze", "--help", "--debug"], "--debug-single-metric", True),
+        (["analyze", "--debug", "--help"], "--debug-list-metrics-gfx-id", False),
     ],
 )
 def test_parse_args_shows_debug_options_with_debug(

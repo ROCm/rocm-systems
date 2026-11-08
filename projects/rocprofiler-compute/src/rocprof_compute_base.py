@@ -287,8 +287,11 @@ class RocProfCompute:
         )
         self.__args = self.__parser.parse_args()
         warn_deprecated_options(self.__args)
-        # --list-metrics-gfx-id <arch> on its own lists the blocks of <arch>
-        if self.__args.list_metrics_gfx_id and self.__args.list_metrics is None:
+        # --debug-list-metrics-gfx-id <arch> on its own lists the blocks of <arch>
+        if (
+            getattr(self.__args, "list_metrics_gfx_id", None)
+            and self.__args.list_metrics is None
+        ):
             self.__args.list_metrics = []
 
         if self.__args.mode == "profile":
@@ -640,12 +643,6 @@ class RocProfCompute:
     def _validate_list_option_exclusions(self) -> None:
         """Check which options the list options can be combined with."""
         args = self.__args
-        if args.list_metrics_gfx_id is not None and self.__mode == "analyze":
-            console_error(
-                "--list-metrics-gfx-id can't be used in analyze mode, which "
-                "lists the metrics of the -p workload's GPU."
-            )
-
         block_active = bool(
             getattr(args, "filter_blocks", None)
             or getattr(args, "filter_metrics", None)
