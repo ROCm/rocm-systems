@@ -4,7 +4,7 @@
 import argparse
 import os
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Sequence, Tuple, Type
 
 from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS, OPERATOR_BACKENDS
 from utils.logger import console_warning
@@ -27,7 +27,62 @@ def warn_deprecated_options(args: argparse.Namespace) -> None:
             )
 
 
-class ExperimentalAction(argparse.Action):
+# Standard argparse actions that ExperimentalAction and DebugAction delegate to
+_BASE_ACTIONS: Dict[str, Type[argparse.Action]] = {
+    "store": argparse._StoreAction,
+    "store_const": argparse._StoreConstAction,
+    "store_true": argparse._StoreTrueAction,
+    "store_false": argparse._StoreFalseAction,
+    "append": argparse._AppendAction,
+    "append_const": argparse._AppendConstAction,
+    "count": argparse._CountAction,
+    "extend": argparse._ExtendAction,
+}
+
+
+class _DelegatingAction(argparse.Action):
+    """Parse an option like the standard argparse action named by base_action.
+
+    Subclasses change the help text or check the option before it is stored.
+    """
+
+    def __init__(
+        self,
+        option_strings: Sequence[str],
+        dest: str,
+        base_action: str,
+        **kwargs: Any,
+    ) -> None:
+        if base_action not in _BASE_ACTIONS:
+            raise ValueError(
+                f"Unsupported base_action: {base_action}. "
+                f"Specify one of: {', '.join(_BASE_ACTIONS)}"
+            )
+        self._base_action = _BASE_ACTIONS[base_action](option_strings, dest, **kwargs)
+        super().__init__(
+            option_strings=option_strings,
+            dest=dest,
+            nargs=self._base_action.nargs,
+            const=self._base_action.const,
+            default=self._base_action.default,
+            type=self._base_action.type,
+            choices=self._base_action.choices,
+            required=self._base_action.required,
+            help=self._base_action.help,
+            metavar=self._base_action.metavar,
+        )
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: object,
+        option_string: Optional[str] = None,
+    ) -> None:
+        self._base_action(parser, namespace, values, option_string)
+
+
+class ExperimentalAction(_DelegatingAction):
     """
     Custom action that enforces experimental feature gating.
     - Suppresses help text when experimental mode is disabled
@@ -38,57 +93,31 @@ class ExperimentalAction(argparse.Action):
 
     def __init__(
         self,
-        option_strings: List[str],
+        option_strings: Sequence[str],
+        dest: str,
+        base_action: str,
+        experimental_enabled: bool,
+        feature_label: str,
         help: str,
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
-        self.experimental_enabled = kwargs.pop("experimental_enabled", False)
-        self.feature_label = kwargs.pop("feature_label", None)
+        self.experimental_enabled = experimental_enabled
+        self.feature_label = feature_label
 
-        # Extract the base_action
-        base_action = kwargs.pop("base_action", None)
-        if base_action is None:
-            raise ValueError(
-                "base_action is required for ExperimentalAction. "
-                "Specify one of: store, store_const, store_true, store_false, "
-                "append, append_const, count, extend"
-            )
-
-        if self.experimental_enabled:
+        if experimental_enabled:
             leading_whitespace = help[: len(help) - len(help.lstrip())]
             help_content = help.lstrip()
             help = f"{leading_whitespace}EXPERIMENTAL: {help_content}"
         else:
             help = argparse.SUPPRESS
 
-        super().__init__(
-            option_strings=option_strings,
-            help=help,
-            **kwargs,
-        )
-
-        # Map of action types to their __call__ methods
-        action_map = {
-            "store": argparse._StoreAction.__call__,
-            "store_const": argparse._StoreConstAction.__call__,
-            "store_true": argparse._StoreTrueAction.__call__,
-            "store_false": argparse._StoreFalseAction.__call__,
-            "append": argparse._AppendAction.__call__,
-            "append_const": argparse._AppendConstAction.__call__,
-            "count": argparse._CountAction.__call__,
-            "extend": argparse._ExtendAction.__call__,
-        }
-
-        if base_action not in action_map:
-            raise ValueError(f"Unsupported base_action: {base_action}")
-
-        self._base_action_call = action_map[base_action]
+        super().__init__(option_strings, dest, base_action, help=help, **kwargs)
 
     def __call__(
         self,
         parser: argparse.ArgumentParser,
         namespace: argparse.Namespace,
-        values,  # noqa ANN001
+        values: object,
         option_string: Optional[str] = None,
     ) -> None:
         # Error if experimental feature used without --experimental flag
@@ -102,7 +131,7 @@ class ExperimentalAction(argparse.Action):
             f"{self.feature_label} is experimental and may change in future releases."
         )
 
-        self._base_action_call(self, parser, namespace, values, option_string)
+        super().__call__(parser, namespace, values, option_string)
 
 
 def validate_block(value: str) -> str:
@@ -564,12 +593,10 @@ Examples:
         dest="membw_analysis",
         required=False,
         default=False,
-        base_action="store_const",
+        base_action="store_true",
         action=ExperimentalAction,
         experimental_enabled=experimental_enabled,
         feature_label="Memory Bandwidth Analysis",
-        nargs=0,
-        const=True,
         help="\t\t\tEnable Memory Bandwidth Analysis counters (block 30).",
     )
 
@@ -578,12 +605,10 @@ Examples:
         dest="pc_sampling",
         required=False,
         default=False,
-        base_action="store_const",
+        base_action="store_true",
         action=ExperimentalAction,
         experimental_enabled=experimental_enabled,
         feature_label="PC Sampling",
-        nargs=0,
-        const=True,
         help="\t\t\tEnable PC sampling (block 21) for profile mode.",
     )
     profile_group.add_argument(
