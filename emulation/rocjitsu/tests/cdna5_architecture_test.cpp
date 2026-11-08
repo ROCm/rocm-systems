@@ -1156,11 +1156,11 @@ TEST(Gfx1250ExecutionTest, WmmaScaleExecutesAllMatrixFormatPairs) {
         for (uint32_t row = 0; row < 16; ++row)
           for (uint32_t k = 0; k < 128; ++k)
             write_wmma_packed(*cu, vgpr_base,
-                              amdgpu::wmma_a_input_loc(16, 128, row, k, a_bits, b_bits), a_one);
+                              amdgpu::wmma_a_input_loc<16, 128>(row, k, a_bits, b_bits), a_one);
         for (uint32_t col = 0; col < 16; ++col)
           for (uint32_t k = 0; k < 128; ++k)
             write_wmma_packed(*cu, vgpr_base + 32,
-                              amdgpu::wmma_b_input_loc(16, 128, col, k, a_bits, b_bits), b_one);
+                              amdgpu::wmma_b_input_loc<16, 128>(col, k, a_bits, b_bits), b_one);
 
         const auto words =
             build_scaled_wmma_words(0x35, matrix_a_fmt, matrix_b_fmt, 0, 0, 128, 128);
@@ -1339,11 +1339,11 @@ TEST(Gfx1250ExecutionTest, WmmaScaleDecodesE5m3ForFp4Operand) {
   const uint32_t vgpr_base = wf->vgpr_alloc().base;
   for (uint32_t row = 0; row < 16; ++row)
     for (uint32_t k = 0; k < 128; ++k)
-      write_wmma_packed(*cu, vgpr_base, amdgpu::wmma_a_input_loc(16, 128, row, k, 4, 8),
+      write_wmma_packed(*cu, vgpr_base, amdgpu::wmma_a_input_loc<16, 128>(row, k, 4, 8),
                         util::f32_to_fp4_e2m1_rne(1.0f));
   for (uint32_t col = 0; col < 16; ++col)
     for (uint32_t k = 0; k < 128; ++k)
-      write_wmma_packed(*cu, vgpr_base + 32, amdgpu::wmma_b_input_loc(16, 128, col, k, 4, 8),
+      write_wmma_packed(*cu, vgpr_base + 32, amdgpu::wmma_b_input_loc<16, 128>(col, k, 4, 8),
                         util::f32_to_fp8_e4m3_rne(1.0f));
   write_wave_sgpr(*cu, *wf, 0, 0x78u);
   write_wave_sgpr(*cu, *wf, 1, 0x7fu);
@@ -1393,11 +1393,11 @@ TEST(Gfx1250ExecutionTest, WmmaNonE8ScalesApplyAfterEachBlockDot) {
             cu->write_vgpr(vgpr_base + reg, lane, 0);
         for (uint32_t row = 0; row < 16; ++row)
           for (uint32_t k = 0; k < 128; ++k)
-            write_wmma_packed(*cu, vgpr_base, amdgpu::wmma_a_input_loc(16, 128, row, k, 4, 8),
+            write_wmma_packed(*cu, vgpr_base, amdgpu::wmma_a_input_loc<16, 128>(row, k, 4, 8),
                               util::f32_to_fp4_e2m1_rne(0.5f));
         for (uint32_t col = 0; col < 16; ++col)
           for (uint32_t k = 0; k < 128; ++k)
-            write_wmma_packed(*cu, vgpr_base + 32, amdgpu::wmma_b_input_loc(16, 128, col, k, 4, 8),
+            write_wmma_packed(*cu, vgpr_base + 32, amdgpu::wmma_b_input_loc<16, 128>(col, k, 4, 8),
                               util::f32_to_fp8_e4m3_rne(1.0f));
         for (uint32_t reg = 0; reg < 8; ++reg)
           for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
@@ -1537,7 +1537,8 @@ TEST(Gfx1250ExecutionTest, WmmaScaledExecutionMatchesManualLayoutAndDistinctBloc
       output.reserve(tc.M * N);
       for (uint32_t row = 0; row < tc.M; ++row)
         for (uint32_t col = 0; col < N; ++col) {
-          const auto loc = amdgpu::wmma_output_loc_32(tc.M, N, row, col);
+          const auto loc = tc.M == 32 ? amdgpu::wmma_output_loc_32<32, N>(row, col)
+                                      : amdgpu::wmma_output_loc_32<16, N>(row, col);
           output.push_back(cu->read_vgpr(vgpr_base + kOutput + loc.reg, loc.lane));
         }
       return output;
