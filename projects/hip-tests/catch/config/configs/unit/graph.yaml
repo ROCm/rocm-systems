@@ -2101,3 +2101,15 @@ graph:
   Unit_hipStreamSync_DiffStream_CrossThread_RelaxedCapture_NonBlocking_Active:
     <<: *level_default
     tags: [capture]
+  Unit_hipGraphAddExternalSemaphoresSignalNode_Negative_InvalidArgs:
+    <<: *level_default
+    tags: [node]
+  Unit_hipGraphAddExternalSemaphoresWaitNode_Negative_InvalidArgs:
+    <<: *level_default
+    tags: [node]
+  Unit_hipGraphExternalSemaphoresNodeParams_Negative_NullNode:
+    <<: *level_default
+    tags: [node]
+  Unit_hipGraphExecExternalSemaphoresNodeSetParams_Negative_InvalidArgs:
+    <<: *level_default
+    tags: [node]

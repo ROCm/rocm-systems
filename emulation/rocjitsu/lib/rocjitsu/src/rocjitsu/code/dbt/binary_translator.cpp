@@ -3407,23 +3407,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       // entry at +256, which hardware enters with unknown EXEC) and pass it to
       // LivenessAnalysis so EXEC-masked vector defs can be promoted to kills where
       // EXEC is provably full, freeing more scratch registers. Reference issue #9733.
-      // The EXEC analysis must use the liveness wave size (the LivenessAnalysis
-      // constructor requires a match), so a Wave32 ExecMaskAnalysis cannot be
-      // paired with the B0-to-A0 liveness below while it runs at 64.
-      //
-      // B0-to-A0 liveness keeps the decoded operand widths instead of gfx1250's
-      // Wave32, so that its translated output stays stable; narrowing it is #14566.
-      // This 64 is an output-stability policy, not the width the code executes at.
-      // It is conservative today because the only CDNA5 wave mask decoded as a pair
-      // is the VOPD3 v_dual_cndmask_b32 selector, a source: keeping the SGPR above
-      // it live is safe. CDNA5 wave-mask destinations already decode as one SGPR;
-      // a pair-decoded destination would kill the SGPR above it, which is not safe.
-      constexpr uint8_t kB0ToA0DecodedWidthLivenessWaveSize = 64;
-      const uint8_t liveness_wave_size = is_gfx1250_b0_to_a0_profile
-                                             ? kB0ToA0DecodedWidthLivenessWaveSize
-                                             : scope.translation->guest_wavefront_size;
-      liveness = LivenessAnalysis(KernelBlockScope(scope.blocks), liveness_wave_size,
-                                  /*exec=*/nullptr, liveness_options, scope_analysis_edges);
+      liveness =
+          LivenessAnalysis(KernelBlockScope(scope.blocks), scope.translation->guest_wavefront_size,
+                           /*exec=*/nullptr, liveness_options, scope_analysis_edges);
     }
 
     std::unique_ptr<Gfx1250VgprMsbAnalysis> wmma_completion_wait_vgpr_msb;

@@ -86,6 +86,7 @@ if(HIP_PLATFORM MATCHES "amd")
     hipStreamGetCaptureInfo_v2.cc
     hipStreamUpdateCaptureDependencies.cc
     hipGraphAddNodeBeginCapture.cc
+    hipGraphExternalSemaphoresNodes.cc
   )
   set(TEST_SRC ${TEST_SRC} ${AMD_SRC})
 endif()
