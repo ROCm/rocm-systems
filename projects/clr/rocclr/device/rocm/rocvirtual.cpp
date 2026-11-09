@@ -2569,17 +2569,22 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
   }
   fence_state_ = static_cast<Device::CacheState>(expected_fence_state);
 
-  // A chunk is reserved whole, so it can never exceed the ring capacity. Cap it at
-  // half the ring: a full-capacity chunk is only grantable once read_dispatch_id has
-  // caught up exactly.
-  const size_t kPeriod = std::min<size_t>(DEBUG_HIP_GRAPH_BATCH_SIZE, queueSize / 2);
-  // Ramp-up: submit a small first (lead) chunk so the doorbell is rung after
-  // copying only kLead packets instead of a full kPeriod, then double the chunk
-  // size up to kPeriod. The GPU starts executing the lead while the CPU keeps
-  // copying the remaining packet+metadata payload. Doubling keeps each chunk's
-  // host work (copy plus per-packet profiling fixups) covered by the GPU executing
-  // the previous chunk; jumping from kLead straight to kPeriod lets the GPU drain
-  // the lead and idle until the full kPeriod chunk is published.
+  // A chunk is reserved whole, so it can never exceed the ring capacity. Cap every chunk,
+  // including one a remainder is merged into, at half the ring: a full-capacity chunk is
+  // only grantable once read_dispatch_id has caught up exactly.
+  const size_t kMaxChunk = queueSize / 2;
+  const size_t kPeriod = std::min<size_t>(DEBUG_HIP_GRAPH_BATCH_SIZE, kMaxChunk);
+  // A small first (lead) chunk rings the doorbell after copying only kLead packets, so the
+  // GPU starts on them while the CPU copies the rest of the packet+metadata payload. It
+  // only helps when the GPU would otherwise sit idle. When the queue already holds kLead
+  // unconsumed packets, or the batch's first packet waits on another segment (a leading
+  // barrier, or the dependency an ext kernel dispatch carries in dep_signal), the GPU
+  // cannot start the batch sooner and the lead only adds a reservation, fence and doorbell.
+  // Every chunk after the lead is a full kPeriod. A graph batch is one segment, a chain the
+  // GPU runs in order, so the kLead packets take at least kLead dependent dispatches, which
+  // covers copying the next kPeriod packets.
+  // A remainder smaller than half a period rides in the chunk before it instead of costing
+  // its own doorbell.
   constexpr size_t kLead = 8;
 
   // A pre-patched packet already carries the completion signal ApplyHwEventPatches
@@ -2782,9 +2787,36 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
   // Reserving the full batch up front lets the write index lead the read index by a full
   // ring or more, which the CP cannot tell apart from an empty queue.
   uint64_t lastIndex = 0;
-  size_t chunk_size = std::min(kLead, kPeriod);
+  bool useLead = numPackets > std::min(kLead, kPeriod);
+  if (useLead) {
+    const bool firstPacketWaits =
+        firstPacketIsKernel
+            ? (firstPacketType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
+               reinterpret_cast<const hsa_amd_ext_kernel_dispatch_packet_t*>(
+                   flatPacketData.data())->dep_signal.handle != 0)
+            : (firstPacketType == HSA_PACKET_TYPE_BARRIER_AND ||
+               firstPacketType == HSA_PACKET_TYPE_BARRIER_OR ||
+               (firstPacketType == HSA_PACKET_TYPE_VENDOR_SPECIFIC &&
+                (firstSetup & 0xFF) == HSA_AMD_PACKET_TYPE_BARRIER_VALUE));
+    if (firstPacketWaits) {
+      useLead = false;
+    } else {
+      // The indices live in the queue descriptor, which is in system memory even when the
+      // ring is in device memory. Load the read index before the write index so the pair
+      // never shows read > write.
+      cached_read_dispatch_id_ = Hsa::queue_load_read_index_scacquire(gpu_queue_);
+      const uint64_t writeIndex = Hsa::queue_load_write_index_relaxed(gpu_queue_);
+      useLead = (writeIndex - cached_read_dispatch_id_) < kLead;
+    }
+  }
+  size_t chunk_size = useLead ? std::min(kLead, kPeriod) : kPeriod;
   for (size_t chunkStart = 0; chunkStart < numPackets; ) {
-    const size_t chunkEnd  = std::min(chunkStart + chunk_size, numPackets);
+    size_t chunkEnd = std::min(chunkStart + chunk_size, numPackets);
+    const bool isLeadChunk = useLead && chunkStart == 0;
+    if (!isLeadChunk && (numPackets - chunkEnd) < kPeriod / 2 &&
+        (numPackets - chunkStart) <= kMaxChunk) {
+      chunkEnd = numPackets;
+    }
     const size_t thisChunk = chunkEnd - chunkStart;
     const bool isFirstChunk = (chunkStart == 0);
     const bool isLastChunk  = (chunkEnd == numPackets);
@@ -2920,7 +2952,7 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
     }
 
     chunkStart = chunkEnd;
-    chunk_size = std::min(chunk_size * 2, kPeriod);
+    chunk_size = kPeriod;
   }
 
   SetStateFlag(kHasPendingDispatch);
