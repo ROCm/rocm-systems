@@ -17,6 +17,8 @@ probe call with the same function whose interval lies inside it (within --slack-
   before rocprofv3 a probe call that starts before rocprofv3's first call in its domain: other
                    threads can enter the table while the first call is still initializing HIP,
                    before rocprofv3 wraps it; reported, not a failure
+  after rocprofv3  a probe call that starts after rocprofv3's last call in the process: library
+                   teardown at exit, after rocprofv3 has finalized; reported, not a failure
   only in one side everything else
 
 Exit status 0 when every rocprofv3 call is matched and every other probe call is either inside a
@@ -103,6 +105,15 @@ def before_first(t, c):
 before_ref = [(t, c) for t, c in only_probe if before_first(t, c)]
 only_probe = [(t, c) for t, c in only_probe if not before_first(t, c)]
 
+# Calls that started after rocprofv3's last recorded call in the process: static destructors and
+# library teardown at exit, after rocprofv3 has finalized.
+last_ref = {}
+for (pid, _), calls in ref.items():
+    for c in calls:
+        last_ref[pid] = max(last_ref.get(pid, c["end"]), c["end"])
+after_ref = [(t, c) for t, c in only_probe if c["start"] > last_ref.get(t[0], c["start"])]
+only_probe = [(t, c) for t, c in only_probe if c["start"] <= last_ref.get(t[0], c["start"])]
+
 domain_diff = [(t, r, p) for t, r, p in pairs if r["domain"] != p["domain"]]
 unexpected_probe = [(t, c) for t, c in only_probe if c["name"] not in allow_extra]
 allowed_probe = [(t, c) for t, c in only_probe if c["name"] in allow_extra]
@@ -125,6 +136,11 @@ for _, c, r in inside_ref:
     inside_by_api[f"{c['name']} inside {r['name']}"] += 1
 print(f"probe calls before rocprofv3's first call (it had not wrapped the table yet): "
       f"{len(before_ref)}" + "".join(f" [tid {t[1]} {c['name']}]" for t, c in before_ref[:10]))
+after_by_api = defaultdict(int)
+for _, c in after_ref:
+    after_by_api[c["name"]] += 1
+print(f"probe calls after rocprofv3's last call (exit, after it finalized): {len(after_ref)}"
+      + "".join(f"\n  {n:6d} x {k}" for k, n in sorted(after_by_api.items())))
 print(f"probe calls made by rocprofv3 itself (inside its calls): {len(inside_ref)}"
       + "".join(f"\n  {n:6d} x {k}" for k, n in sorted(inside_by_api.items())))
 print(f"domain differs: {len(domain_diff)}   correlation ids equal: {ids_equal} of {len(pairs)}")
