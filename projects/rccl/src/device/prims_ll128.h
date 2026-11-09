@@ -684,9 +684,8 @@ public:
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS && RCCL_LL_FIFO_SYS_SCOPE
     skip_fence = !ncclShmem.comm.cheapPostSendFenceOff;
 #else
-    // The cheap post-send fence only waits for this wave's stores. It is safe only when store128Fifo
-    // issues system-scope stores; plain FIFO stores need the full fence before the proxy sees the tail,
-    // or the NIC can read stale 128-byte lines of the step.
+    // Cheap fence waits only for this wave's stores. Plain FIFO stores need the full fence before the tail
+    // update, or the NIC can read stale lines.
     skip_fence = false;
 #endif
   }

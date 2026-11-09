@@ -8,15 +8,10 @@
  * @file NetLl128MPITests.cpp
  * @brief LL128 Ring AllReduce with every ring hop on the NET transport.
  *
- * NET LL128 hands a step to the proxy by bumping the tail, and the NIC reads the step from GPU memory once the
- * proxy sees it. A 128-byte line that is not yet visible by then reaches the receiver with the previous step's
- * flag, and the receiver polls that line forever. P2P and SHM are disabled so intra-node hops go through the NIC
- * too, which makes one node enough. On gfx942 with the post-send fence that skips the L2 writeback, the in-place
- * ops below hung within a few runs of this test.
- *
- * NCCL_P2P_DISABLE and NCCL_SHM_DISABLE are cached for the process, so the test skips unless every ring hop is on
- * NET with GPU Direct RDMA. Run it in its own process:
- *   mpirun -np 8 ./rccl-UnitTestsMPI --gtest_filter=NetLl128MPITest.*
+ * Regression test for the LL128 post-send fence: if the proxy sees the tail before every 128-byte line of the step
+ * is visible, the NIC sends stale lines and the receiver polls them forever. P2P and SHM are disabled so one node is
+ * enough. They are cached for the process, so run the test in its own process with both set:
+ *   NCCL_P2P_DISABLE=1 NCCL_SHM_DISABLE=1 mpirun -np 8 ./rccl-UnitTestsMPI --gtest_filter=NetLl128MPITest.*
  */
 
 #ifdef MPI_TESTS_ENABLED
@@ -27,6 +22,7 @@
 #include "TestChecks.hpp"
 
 #include "comm.h"
+#include "rccl_common.h"
 #include "transport.h"
 
 #include <hip/hip_runtime.h>
@@ -44,12 +40,13 @@ using namespace RCCLTestGuards;
 namespace
 {
 // 16 MiB of bf16, the size that hung.
-constexpr size_t   kCount      = size_t{8} << 20;
-constexpr int      kIterations = 2000;
-constexpr int      kInFlight   = 32;
-constexpr auto     kTimeout    = std::chrono::seconds(120);
-constexpr uint16_t kBf16One    = 0x3f80;
-constexpr uint16_t kBf16Inf    = 0x7f80;
+constexpr size_t   kCount         = size_t{8} << 20;
+constexpr int      kOutOfPlaceOps = 8;
+constexpr int      kInPlaceOps    = 4000;
+constexpr int      kInFlight      = 32;
+constexpr auto     kTimeout       = std::chrono::seconds(120);
+constexpr uint16_t kBf16One       = 0x3f80;
+constexpr uint16_t kBf16Inf       = 0x7f80;
 
 uint16_t bf16Bits(float value)
 {
@@ -68,6 +65,15 @@ size_t countMismatches(const void* device, uint16_t expected)
     return static_cast<size_t>(std::count_if(host.begin(), host.end(), [=](uint16_t v) { return v != expected; }));
 }
 
+bool selectsRingLl128(ncclComm_t comm, const void* send, void* recv)
+{
+    int algo = -1, protocol = -1, maxChannels = -1;
+    return rcclGetCollImplInfo(comm, ncclFuncAllReduce, kCount, ncclBfloat16, ncclSum, send, recv,
+                               /*graphCapturing=*/0, &algo, &protocol, &maxChannels)
+               == ncclSuccess
+           && algo == NCCL_ALGO_RING && protocol == NCCL_PROTO_LL128;
+}
+
 bool ringHopsOnGdrNet(ncclComm_t comm)
 {
     for(int c = 0; c < comm->nChannels; ++c)
@@ -83,22 +89,13 @@ bool ringHopsOnGdrNet(ncclComm_t comm)
     }
     return true;
 }
-
-bool allRanks(bool local)
-{
-    int ok = local ? 1 : 0;
-    int all = 0;
-    MPI_Allreduce(&ok, &all, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
-    return all != 0;
-}
 } // namespace
 
 class NetLl128MPITest : public MPITestBase
 {
 protected:
-    // Runs `iterations` AllReduces and waits for them. Behind a hung op the stream fills up and a kernel launch
-    // blocks the host, so at most kInFlight ops are queued. Destroying the communicator would wait on the hung
-    // kernels, so every rank aborts it if any rank timed out.
+    // Queues at most kInFlight ops, because launches behind a hung op block the host. A hung communicator cannot be
+    // destroyed, so every rank aborts it if any rank timed out.
     bool runAllReduce(const void* send, void* recv, int iterations)
     {
         hipStream_t stream   = getActiveStream();
@@ -135,7 +132,7 @@ protected:
             }
         }
 
-        if(allRanks(ok))
+        if(mpiAllRanks(ok))
         {
             return true;
         }
@@ -163,25 +160,32 @@ TEST_F(NetLl128MPITest, RingAllReduceCompletesWithEveryHopOnNet)
     ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recv, kCount * sizeof(uint16_t)));
     auto recv_guard = makeDeviceBufferAutoGuard(recv);
 
+    // NCCL_PROTO=LL128 is a request: the tuner drops LL128 where it is unsupported and falls back to Simple.
+    ncclComm_t comm = getActiveCommunicator();
+    if(!mpiAllRanks(selectsRingLl128(comm, send, recv) && selectsRingLl128(comm, recv, recv)))
+    {
+        GTEST_SKIP() << "AllReduce does not select Ring/LL128 on this system";
+    }
+
     std::vector<uint16_t> host(kCount, kBf16One);
     ASSERT_MPI_EQ(hipSuccess,
                   hipMemcpy(send, host.data(), kCount * sizeof(uint16_t), hipMemcpyHostToDevice));
 
     // Ring connections are made by the first collective.
     ASSERT_MPI_TRUE(runAllReduce(send, recv, 1));
-    if(!allRanks(ringHopsOnGdrNet(getActiveCommunicator())))
+    if(!mpiAllRanks(ringHopsOnGdrNet(getActiveCommunicator())))
     {
-        GTEST_SKIP() << "A ring hop is not on NET with GPU Direct RDMA: run this test in its own process, on "
-                        "hosts with an RDMA NIC";
+        GTEST_SKIP() << "A ring hop is not on NET with GPU Direct RDMA: run this test in its own process with "
+                        "NCCL_P2P_DISABLE=1 and NCCL_SHM_DISABLE=1, on hosts with an RDMA NIC";
     }
 
-    ASSERT_MPI_TRUE(runAllReduce(send, recv, kIterations));
+    ASSERT_MPI_TRUE(runAllReduce(send, recv, kOutOfPlaceOps));
     size_t mismatches = countMismatches(recv, bf16Bits(static_cast<float>(MPIEnvironment::world_size)));
     EXPECT_EQ(size_t{0}, mismatches) << "out of place, rank " << MPIEnvironment::world_rank;
     ASSERT_MPI_TRUE(mismatches == 0);
 
-    // Keep the in-place ops: out-of-place ops alone did not reproduce the hang.
-    ASSERT_MPI_TRUE(runAllReduce(recv, recv, kIterations));
+    // The hang reproduced only with in-place ops, so they get the iteration budget.
+    ASSERT_MPI_TRUE(runAllReduce(recv, recv, kInPlaceOps));
     // Each in-place sum multiplies every element by the rank count, so the result saturates at +inf.
     mismatches = countMismatches(recv, kBf16Inf);
     EXPECT_EQ(size_t{0}, mismatches) << "in place, rank " << MPIEnvironment::world_rank;
