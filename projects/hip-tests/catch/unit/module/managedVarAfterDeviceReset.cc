@@ -16,9 +16,9 @@
 
 namespace {
 
-// The helper needs exactly one visible device. With two or more, the managed allocation
-// lives in a multi-device context, which MemObjMap::Purge() skips, so a reset never
-// releases it and the test would pass whether or not the runtime is correct.
+// The helper needs exactly one visible device. With more than one, the variable's storage is
+// shared across devices and a reset leaves it alone regardless, so the test would pass whether
+// or not the runtime is correct.
 void runWithOneVisibleDevice(const char* deferredLoading) {
   hip::SpawnProc proc("managedVarAfterDeviceReset_exe", true);
   proc.setEnv("HIP_VISIBLE_DEVICES", "0");

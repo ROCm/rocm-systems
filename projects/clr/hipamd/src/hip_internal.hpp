@@ -817,13 +817,10 @@ namespace hip {
 
   extern hipError_t ihipMalloc(void** ptr, size_t sizeBytes, unsigned int flags);
 
-  //! Who owns the storage behind a managed allocation. A module-scope __managed__ variable's
-  //! storage is part of the program image: it has to outlive a device reset, and there is no
-  //! API to re-register one afterwards. A hipMallocManaged() allocation belongs to the
-  //! application and a reset releases it, as documented.
+  //! Owner of the storage behind a managed allocation, which determines its lifetime.
   enum class ManagedMemOwner {
-    kApplication,
-    kModuleVariable,
+    kApplication,     //!< Released by the application, or by a device reset
+    kModuleVariable,  //!< Released with the module declaring the __managed__ variable
   };
 
   extern hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align = 0,
