@@ -365,8 +365,16 @@ ncclResult_t ncclDevrFinalize(struct ncclComm* comm) {
       // so this is now expected to succeed. Surface failures instead of
       // masking with CUCHECKIGNORE — a regression in the drain path should
       // not be silently swallowed (AICOMRCCL-835).
+      // Temporary ROCM-30633 skip (gfx1250 or NCCL_CUMEM_SKIP_FREE=1); see rcclSkipLsaFlatAddressFree in alloc.h.
       CUdeviceptr flatAddr = reinterpret_cast<CUdeviceptr>(devr->lsaFlatBase);
-      CUCHECKGOTO(cuMemAddressFree(flatAddr, devr->lsaSize * devr->bigSize), fatalRet, cleanup);
+      size_t flatBytes = devr->lsaSize * devr->bigSize;
+      devr->lsaFlatBase = nullptr;
+      if (!rcclSkipLsaFlatAddressFree()) {
+        CUCHECKGOTO(cuMemAddressFree(flatAddr, flatBytes), fatalRet, cleanup);
+      } else {
+        INFO(NCCL_INIT, "ncclDevrFinalize: skipping lsaFlatBase cuMemAddressFree "
+             "(temporary gfx1250/NCCL_CUMEM_SKIP_FREE; VA unreclaimed until exit)");
+      }
     }
     ncclSpaceDestruct(&devr->bigSpace);
   }
@@ -1537,6 +1545,10 @@ static ncclResult_t windowRegisterNonSym(struct ncclComm* comm, void* userPtr, s
       memcpy(&mine->cuMemHandle, &localCuMemHandle, sizeof(mine->cuMemHandle));
     }
     if (!exportCuMem) {
+      // RCCL: HIP keeps a failed cuMem probe above as the thread's last error
+      if (ncclCuMemEnable() && ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
+        (void)cudaGetLastError();
+      }
       cudaError_t cerr = cudaIpcGetMemHandle(&mine->handle, reinterpret_cast<void*>(allocBase));
       if (cerr != cudaSuccess) {
         WARN("windowRegisterNonSym: cudaIpcGetMemHandle failed: %s", cudaGetErrorString(cerr));

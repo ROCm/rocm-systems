@@ -14,6 +14,7 @@
 #include "fp/half_fma_test.h"
 #include "fp/reference.h"
 #include "rj_arith/rj_arith.h"
+#include <bit>
 #include <gtest/gtest.h>
 #include <stdint.h>
 #include <type_traits>
@@ -688,4 +689,134 @@ TEST(FpFmaF16, LooseTinyResults) {
       }
     }
   }
+}
+
+// Exact literal witnesses for guest rounding, independent of host rounding controls.
+TEST(FpFmaF64, GuestRounding) {
+  using namespace rocjitsu::arith::test;
+  const struct {
+    double a, b, c;
+    uint64_t expected[4];
+    uint64_t instruction_flags = 0;
+  } cases[] = {
+      {1,
+       0x1p-53,
+       1,
+       {0x3ff0000000000000ULL, 0x3ff0000000000001ULL, 0x3ff0000000000000ULL,
+        0x3ff0000000000000ULL}},
+      {-1,
+       0x1p-53,
+       -1,
+       {0xbff0000000000000ULL, 0xbff0000000000000ULL, 0xbff0000000000001ULL,
+        0xbff0000000000000ULL}},
+      {1, 1, -1, {0, 0, 0x8000000000000000ULL, 0}},
+      {0x1p-1074, 0.5, 0, {0, 1, 0, 0}},
+      {0x1.fffffffffffffp1023,
+       2,
+       0,
+       {0x7ff0000000000000ULL, 0x7ff0000000000000ULL, 0x7fefffffffffffffULL,
+        0x7fefffffffffffffULL}},
+      {0x1p1023,
+       1,
+       0,
+       {0x7ff0000000000000ULL, 0x7ff0000000000000ULL, 0x7fefffffffffffffULL, 0x7fefffffffffffffULL},
+       RJ_ARITH_ALU_OMOD_2},
+      {-0x1p1023,
+       1,
+       0,
+       {0xfff0000000000000ULL, 0xffefffffffffffffULL, 0xfff0000000000000ULL, 0xffefffffffffffffULL},
+       RJ_ARITH_ALU_OMOD_2},
+  };
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (unsigned rounding = 0; rounding < 4; ++rounding) {
+      for (const auto &sample : cases) {
+        Registers<8, 32> r;
+        const double inputs[] = {sample.a, sample.b, sample.c};
+        for (int operand = 0; operand < 3; ++operand) {
+          const uint64_t bits = std::bit_cast<uint64_t>(inputs[operand]);
+          r.v[2 * operand][31] = uint32_t(bits);
+          r.v[2 * operand + 1][31] = uint32_t(bits >> 32);
+        }
+        ASSERT_EQ(rj_arith_v_fma_f64_w32_gfx12(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY |
+                                                   (uint64_t(rounding) << 24),
+                                               0x80000000U, sample.instruction_flags, r.v + 6, r.v,
+                                               r.v + 2, r.v + 4, nullptr),
+                  RJ_ARITH_SUCCESS);
+        EXPECT_EQ(uint64_t(r.v[6][31]) | (uint64_t(r.v[7][31]) << 32), sample.expected[rounding]);
+      }
+    }
+  }
+}
+
+// Loose output flushing retains a tiny value rounded to minimum normal, as in
+// the legacy emulator. This is an approximation, not a hardware golden.
+TEST(FpFmaF64, RoundedMinimumNormal) {
+  using namespace rocjitsu::arith::test;
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (uint64_t semantics : {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_COMPATIBILITY}) {
+      Registers<8, 32> r;
+      r.v[0][0] = 0;
+      r.v[1][0] = 0x00100000;
+      r.v[2][0] = 0xffffffff;
+      r.v[3][0] = 0x3fefffff;
+      r.v[4][0] = r.v[5][0] = 0;
+      ASSERT_EQ(rj_arith_v_fma_f64_w32_gfx12(cpu | semantics | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+                                             1, 0, r.v + 6, r.v, r.v + 2, r.v + 4, nullptr),
+                RJ_ARITH_SUCCESS);
+      EXPECT_EQ(r.v[6][0], 0U);
+      EXPECT_EQ(r.v[7][0], 0x00100000U);
+    }
+  }
+}
+
+// gfx1201 captures: an invalid FP64 FMA product (0 * infinity, after input flushing) gives the
+// default NaN even when the addend is a NaN; otherwise the first NaN source is quieted. Check
+// under every guest rounding mode, in every lane and alone in the first lane (others 1 * 1 + 1).
+template <int Lanes, typename Call> void check_fma_f64_nan(Call call) {
+  using namespace rocjitsu::arith::test;
+  using Mask = std::conditional_t<Lanes == 32, uint32_t, uint64_t>;
+  constexpr uint64_t infinity = 0x7ff0000000000000ULL, default_nan = 0xfff8000000000000ULL;
+  constexpr uint64_t flush = RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+  const struct {
+    uint64_t a, b, c, flags, expected;
+  } cases[] = {
+      {0, infinity, 0x7ff4000000000001ULL, 0, default_nan},
+      {0xfff0000000000000ULL, 0x8000000000000000ULL, 0x7ff8000000000005ULL, flush, default_nan},
+      {infinity, 1, 0x7ff0000000000001ULL, flush, default_nan},
+      {infinity, 1, 0x7ff0000000000001ULL, 0, 0x7ff8000000000001ULL},
+      {0x7ff4000000000007ULL, 0x7ff8000000000009ULL, 0x7ff800000000000bULL, 0,
+       0x7ffc000000000007ULL},
+      {0x3ff0000000000000ULL, 0x7ff4000000000007ULL, 0x7ff800000000000bULL, flush,
+       0x7ffc000000000007ULL},
+  };
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (const auto &sample : cases) {
+      for (uint64_t rounding = 0; rounding < 4; ++rounding) {
+        for (bool alone : {false, true}) {
+          SCOPED_TRACE(::testing::Message() << std::hex << cpu << '/' << sample.a << '/' << sample.b
+                                            << '/' << sample.c << '/' << rounding << '/' << alone);
+          constexpr uint64_t one = 0x3ff0000000000000ULL, two = 0x4000000000000000ULL;
+          Registers<8, Lanes> r;
+          for (int lane = 0; lane < Lanes; ++lane) {
+            const bool sampled = !alone || lane == 0;
+            write_fp(r.v, lane, 64, sampled ? sample.a : one);
+            write_fp(r.v + 2, lane, 64, sampled ? sample.b : one);
+            write_fp(r.v + 4, lane, 64, sampled ? sample.c : one);
+          }
+          ASSERT_EQ(call(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY | sample.flags | (rounding << 24),
+                         ~Mask(0), 0, r.v + 6, r.v, r.v + 2, r.v + 4, nullptr),
+                    RJ_ARITH_SUCCESS);
+          for (int lane = 0; lane < Lanes; ++lane) {
+            EXPECT_EQ(read_fp(r.v + 6, lane, 64), !alone || lane == 0 ? sample.expected : two)
+                << lane;
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(FpFmaF64, NanPriority) {
+  check_fma_f64_nan<32>(rj_arith_v_fma_f64_w32_gfx12);
+  check_fma_f64_nan<64>(rj_arith_v_fma_f64_w64_gfx12);
 }

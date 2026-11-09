@@ -241,7 +241,9 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
         "amdgcn-amd-amdhsa--" + isa->GetProcessorName() + "-strict";
     const core::Isa* strict_isa = core::IsaRegistry::GetIsa(strict_name);
     // gfx1250 (12.5.0) A0 must have a registered strict variant.
-    if (isa->GetMajorVersion() == 12 && isa->GetMinorVersion() == 5)
+    // Later 12.5 steppings (e.g. gfx1251) have no -strict target.
+    if (isa->GetMajorVersion() == 12 && isa->GetMinorVersion() == 5 &&
+        isa->GetStepping() == 0)
       assert(strict_isa != nullptr && "A0 strict ISA variant is not registered.");
     if (strict_isa != nullptr) isa = strict_isa;
   }
@@ -460,11 +462,14 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
       break;
     case 12:
         if (supported_isas()[0]->GetMinorVersion() == 5 &&
+            supported_isas()[0]->GetStepping() == 0 &&
             properties_.Capability.ui32.ASICRevision == 0) {
           // The trap-during-VOP3PX PC fixup in the second-level trap handler
-          // applies to minor version 5 revision 0 only.  Every later revision,
-          // and every later minor version, uses the blob assembled without it.
-          // Shaders that do not vary by revision leave this slot zeroed.
+          // applies to gfx1250 (12.5.0) revision 0 only.  Later 12.5 steppings
+          // such as gfx1251 always use compute_1250, even when KFD reports
+          // ASICRevision 0.  Every later gfx1250 revision uses the blob
+          // assembled without the fixup.  Shaders that do not vary by
+          // revision leave this slot zeroed.
           ASICShader& rev0 = compiled_shader_it->second.compute_1250_rev0;
           // An entry that supplies the later-revision blob must supply the
           // revision 0 blob too.  Falling back would hand a revision 0 part

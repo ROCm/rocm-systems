@@ -363,7 +363,7 @@ TEST_F(GdrFlushFlagTest, Enabled_FlagsZeroedAndHintDefaultsOff) {
     const int rank = MPIEnvironment::world_rank;
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
+    ASSERT_SETUP_CONNECTION(0, pair, connGuard);
     uint64_t* flags = nullptr;
     ASSERT_TRUE(FlagSetUp(pair, &flags)) << "the flag is enabled but the recv comm has none";
 
@@ -419,7 +419,7 @@ TEST_F(GdrFlushFlagTest, Disabled_NoFlagAndHintIgnored) {
     const int rank = MPIEnvironment::world_rank;
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
+    ASSERT_SETUP_CONNECTION(0, pair, connGuard);
     EXPECT_FALSE(FlagSetUp(pair, nullptr));
 
     const size_t size = 4097;
@@ -471,7 +471,7 @@ TEST_F(GdrFlushFlagTest, Enabled_ListenCommOffKeepsRdmaReadFlush) {
     const int rank = MPIEnvironment::world_rank;
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
+    ASSERT_SETUP_CONNECTION(0, pair, connGuard);
     EXPECT_FALSE(FlagSetUp(pair, nullptr)) << "the recv comm took the context's flag over the listen comm's";
 
     const size_t size = 8191;
@@ -532,7 +532,7 @@ TEST_F(GdrFlushFlagTest, Enabled_FusedNicKeepsRdmaReadFlush) {
     const int rank = MPIEnvironment::world_rank;
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(vdev, pair, connGuard);
+    ASSERT_SETUP_CONNECTION(vdev, pair, connGuard);
     EXPECT_FALSE(FlagSetUp(pair, nullptr)) << "the flag was set up over a fused NIC";
 
     const size_t size = 65536 + 3;
@@ -580,7 +580,7 @@ TEST_F(GdrFlushFlagTest, PerRequestGating_RandomHintsAndSizes) {
     const int rank = MPIEnvironment::world_rank;
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
+    ASSERT_SETUP_CONNECTION(0, pair, connGuard);
     uint64_t* flags = nullptr;
     ASSERT_TRUE(FlagSetUp(pair, &flags));
     const std::vector<uint64_t> snap = (rank == 0) ? SnapshotFlags(flags) : std::vector<uint64_t>();
@@ -659,7 +659,7 @@ TEST_F(GdrFlushFlagTest, OutstandingMixedHints_CtsIsolation) {
     const int rank = MPIEnvironment::world_rank;
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
+    ASSERT_SETUP_CONNECTION(0, pair, connGuard);
     uint64_t* flags = nullptr;
     ASSERT_TRUE(FlagSetUp(pair, &flags));
     const std::vector<uint64_t> snap = (rank == 0) ? SnapshotFlags(flags) : std::vector<uint64_t>();
@@ -822,7 +822,7 @@ TEST_F(GdrFlushFlagTest, GpuObserver_PayloadVisibleOnceFlagSet) {
     const int rank = MPIEnvironment::world_rank;
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    SetupConnectionWithGuard(0, pair, connGuard);
+    ASSERT_SETUP_CONNECTION(0, pair, connGuard);
     uint64_t* flags = nullptr;
     ASSERT_TRUE(FlagSetUp(pair, &flags));
 
@@ -946,7 +946,7 @@ TEST_F(GdrFlushFlagTest, Lifecycle_ReconnectFreshStateNoLeaks) {
         }
         ConnectionPair pair;
         NetConnectionGuard connGuard(net_);
-        SetupConnectionWithGuard(0, pair, connGuard);
+        ASSERT_SETUP_CONNECTION(0, pair, connGuard);
         uint64_t* flags = nullptr;
         ASSERT_TRUE(FlagSetUp(pair, &flags)) << "cycle " << cycle;
         std::vector<uint64_t> snap;

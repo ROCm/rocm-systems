@@ -31,9 +31,20 @@ template <typename T> constexpr int bit_width(T value) {
 // Return the larger value, retaining the first on ties.
 template <typename T> constexpr T maximum(T a, T b) { return a < b ? b : a; }
 
+// Return the smaller value, retaining the first on ties.
+template <typename T> constexpr T minimum(T a, T b) { return b < a ? b : a; }
+
 // Constrain a value to the inclusive bounds; callers provide low <= high.
 template <typename T> constexpr T clamp(T value, T low, T high) {
   return value < low ? low : high < value ? high : value;
+}
+
+// Leading or trailing zero count; a zero word returns UINT32_MAX.
+template <bool Trailing, typename T> uint32_t bit_count_zero(T a) {
+  if (!a) {
+    return UINT32_MAX;
+  }
+  return Trailing ? __builtin_ctzll(static_cast<unsigned long long>(a)) : countl_zero(a);
 }
 
 } // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE
