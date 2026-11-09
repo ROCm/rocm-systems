@@ -4786,31 +4786,16 @@ Runtime::MemoryHandle::MemoryHandle(const MemoryRegion* region, uint64_t flags_u
   assert(driver_handle.handle != 0);
 }
 
-Runtime::MemoryHandle::MemoryHandle(int dmabuf_fd)
-    : region(nullptr),
+Runtime::MemoryHandle::MemoryHandle(int dmabuf_fd, const MemoryRegion* imported_region,
+                                    size_t size)
+    : region(imported_region),
       ref_count(1),
       use_count(0),
-      driver_handle({.dmabuf_fd = dmabuf_fd}),
+      driver_handle({.dmabuf_fd = dmabuf_fd, .size = size}),
       imported(true),
       is_fabric_handle(false),
       alloc_flag(MemoryRegion::AllocateNoFlags),
-      drm_owner(nullptr) {
-  /* Caller holds memory_lock_. Ask each agent driver in turn and take the first
-   * that recognizes the fd. AgentDriver(KFD) is not used because it throws when
-   * no KFD driver is present. alloc_flag stays AllocateNoFlags: the dmabuf carries
-   * no memory-type metadata. */
-  if (driver_handle.dmabuf_fd < 0) return;
-
-  core::Runtime* runtime = core::Runtime::runtime_singleton_;
-  core::DmaBufInfo info = {};
-  for (auto& driver : runtime->AgentDrivers()) {
-    if (driver->QueryDmaBufInfo(driver_handle.dmabuf_fd, &info) == HSA_STATUS_SUCCESS) {
-      region = runtime->ResolveImportedRegion(info);
-      driver_handle.size = info.size;
-      return;
-    }
-  }
-}
+      drm_owner(nullptr) {}
 
 Runtime::MemoryHandle::MemoryHandle(hsa_fabric_handle_t fabric_handle)
     : region(nullptr),
@@ -5093,10 +5078,25 @@ hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
   int owned_fd = os::DmaBufDup(dmabuf_fd);
   if (owned_fd < 0) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
-  /* memory_lock_ is held across construction. The dmabuf constructor queries the
-   * fd for its owning region, which requires that lock. */
+  /* QueryDmaBufInfo is a stateless ioctl, and ResolveImportedRegion only reads
+   * agent and region tables fixed after init, so the query stays outside
+   * memory_lock_. Ask each agent driver in turn and take the first that
+   * recognizes the fd. AgentDriver(KFD) is not used because it throws when no
+   * KFD driver is present. A buffer no driver can describe keeps a null region.
+   * alloc_flag stays AllocateNoFlags: the dmabuf carries no memory-type metadata. */
+  const MemoryRegion* region = nullptr;
+  size_t size = 0;
+  core::DmaBufInfo info = {};
+  for (auto& driver : AgentDrivers()) {
+    if (driver->QueryDmaBufInfo(owned_fd, &info) == HSA_STATUS_SUCCESS) {
+      region = ResolveImportedRegion(info);
+      size = info.size;
+      break;
+    }
+  }
+
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
-  auto memoryHandle = std::make_unique<MemoryHandle>(owned_fd);
+  auto memoryHandle = std::make_unique<MemoryHandle>(owned_fd, region, size);
   *memoryOnlyHandle = MemoryHandle::Convert(memoryHandle.get());
   memory_handles.emplace(*memoryOnlyHandle, std::move(memoryHandle));
   return HSA_STATUS_SUCCESS;

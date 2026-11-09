@@ -256,6 +256,22 @@ void VirtMemoryTestBasic::TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_po
   free(agents_accessible);
   agents_accessible = nullptr;
 
+  /* An interior address must report the mapping, not the queried pointer.
+   * Callers pair the base with sizeInBytes. */
+  ptrInfo = {};
+  ptrInfo.size = sizeof(ptrInfo);
+  num_agents_accessible = 0;
+  void* interior = reinterpret_cast<uint8_t*>(addrRange) + granule_size;
+  ASSERT_SUCCESS(hsa_amd_pointer_info(interior, &ptrInfo, &malloc, &num_agents_accessible,
+                                      &agents_accessible));
+  ASSERT_EQ(ptrInfo.type, HSA_EXT_POINTER_TYPE_HSA_VMEM);
+  ASSERT_EQ(ptrInfo.hostBaseAddress, addrRange);
+  ASSERT_EQ(ptrInfo.agentBaseAddress, addrRange);
+  ASSERT_EQ(ptrInfo.sizeInBytes, sizeof_mem_handle);
+  ASSERT_EQ(num_agents_accessible, 0);
+  free(agents_accessible);
+  agents_accessible = nullptr;
+
   // Access to each GPU should be None
   for (auto gpuIt = gpus.begin(); gpuIt != gpus.end(); ++gpuIt) {
     hsa_access_permission_t perm = HSA_ACCESS_PERMISSION_RW;
@@ -2942,14 +2958,17 @@ static void QueryVmemPointerInfo(void* addr, hsa_agent_t expected_owner) {
 
 // Asks the imported handle itself which device backs it. Uses hsa_amd_vmem_get_vmem_info
 // rather than pointer_info, so the check is independent of the pointer_info under test.
+// A false return means the thunk or kernel could not describe the dmabuf. That is logged
+// by the caller; a recovered handle must also report the size the constructor stored.
 [[nodiscard]] static bool VmemImportResolvedAgent(hsa_amd_vmem_alloc_handle_t imported_handle,
-                                                  hsa_agent_t* agent) {
+                                                  size_t expected_size, hsa_agent_t* agent) {
   hsa_amd_vmem_handle_info_t info = {};
   info.size = sizeof(info);
   if (hsa_amd_vmem_get_vmem_info(imported_handle, &info) != HSA_STATUS_SUCCESS ||
       info.agent.handle == 0) {
     return false;
   }
+  EXPECT_EQ(info.alloc_size, expected_size);
   *agent = info.agent;
   return true;
 }
@@ -3037,17 +3056,18 @@ void VirtMemoryTestBasic::DmaBufImportedHandlePointerInfo(hsa_agent_t gpu_agent,
     std::cout << "    Pointer info on dmabuf-imported VA " << addr << std::endl;
   }
   hsa_agent_t resolved_agent = {};
-  const bool placement_known = VmemImportResolvedAgent(imported_handle, &resolved_agent);
+  const bool placement_known =
+      VmemImportResolvedAgent(imported_handle, alloc_size, &resolved_agent);
   if (placement_known) {
     EXPECT_EQ(resolved_agent.handle, gpu_agent.handle)
         << "imported handle resolved to a device other than the exporter";
-  } else if (verbosity() > 0) {
+  } else {
     std::cout << "    Import placement not recoverable on this system - owner not checked."
               << std::endl;
   }
 
-  /* pointer_info reports no owner for an import: the handle has no local MemoryRegion to
-   * resolve one through. Owner coverage comes from hsa_amd_vmem_get_vmem_info above. */
+  /* pointer_info reports no owner for an import. Owner and size come from
+   * hsa_amd_vmem_get_vmem_info above. */
   QueryVmemPointerInfo(addr, hsa_agent_t{0});
 
   EXPECT_SUCCESS(hsa_amd_vmem_unmap(addr, alloc_size));
@@ -3056,7 +3076,8 @@ void VirtMemoryTestBasic::DmaBufImportedHandlePointerInfo(hsa_agent_t gpu_agent,
   EXPECT_SUCCESS(hsa_amd_vmem_address_free(addr, alloc_size));
 }
 
-// A host-backed import has no GPU owner to report.
+// A host-backed import has no GPU owner. pointer_info reports none; get_vmem_info
+// reports a CPU agent, which is the host branch of ResolveImportedRegion.
 void VirtMemoryTestBasic::HostBackedImportedHandlePointerInfo(hsa_agent_t gpu_agent,
                                                               hsa_amd_memory_pool_t cpu_pool) {
   rocrtst::pool_info_t pool_i;
@@ -3093,6 +3114,15 @@ void VirtMemoryTestBasic::HostBackedImportedHandlePointerInfo(hsa_agent_t gpu_ag
 
   if (verbosity() > 0) {
     std::cout << "    Pointer info on host-backed imported VA " << addr << std::endl;
+  }
+  hsa_agent_t resolved_agent = {};
+  if (VmemImportResolvedAgent(imported_handle, alloc_size, &resolved_agent)) {
+    hsa_device_type_t dev_type = HSA_DEVICE_TYPE_GPU;
+    ASSERT_SUCCESS(hsa_agent_get_info(resolved_agent, HSA_AGENT_INFO_DEVICE, &dev_type));
+    EXPECT_EQ(dev_type, HSA_DEVICE_TYPE_CPU);
+  } else {
+    std::cout << "    Host import placement not recoverable on this system - owner not checked."
+              << std::endl;
   }
   QueryVmemPointerInfo(addr, hsa_agent_t{0});
 

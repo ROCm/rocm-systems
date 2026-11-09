@@ -1109,7 +1109,7 @@ class Runtime {
   struct MemoryHandle {
     MemoryHandle(const MemoryRegion* region, uint64_t flags_unused,
                  DriverMemoryHandle driver_handle, MemoryRegion::AllocateFlags alloc_flag);
-    MemoryHandle(int dmabuf_fd);
+    MemoryHandle(int dmabuf_fd, const MemoryRegion* region, size_t size);
     MemoryHandle(hsa_fabric_handle_t fabric_handle);
     ~MemoryHandle();
 
