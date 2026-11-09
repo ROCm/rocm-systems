@@ -48,6 +48,7 @@ typedef struct rj_gfx1250_b0_to_a0_diagnostic_s {
 } rj_gfx1250_b0_to_a0_diagnostic_t;
 
 /// Synchronous sink for diagnostics from a failed translation.
+/// The callback must not throw or allow a C++ exception to cross the C API boundary.
 typedef void (*rj_gfx1250_b0_to_a0_diagnostic_callback_t)(
     const rj_gfx1250_b0_to_a0_diagnostic_t *diagnostic, void *user_data);
 

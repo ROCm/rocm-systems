@@ -1322,8 +1322,10 @@ public:
 
   /// @brief Disassemble captured instruction bytes with this CU's target decoder.
   /// @details Call on the CU execution thread with a complete instruction encoding.
-  /// @throws std::logic_error if the encoding is empty, truncated, or undecodable.
-  std::string disassemble_instruction(std::span<const uint32_t> encoding, uint64_t pc) const;
+  /// Returns failure and emits a diagnostic if the encoding is empty, truncated, or undecodable.
+  util::FailureOr<std::string>
+  disassemble_instruction(std::span<const uint32_t> encoding, uint64_t pc,
+                          util::DiagnosticEmitter diagnostic = {}) const;
 
   /// @brief Replace the concrete decoder in scheduler-level tests.
   /// @details Some concrete targets intentionally remain unavailable to full
@@ -1851,9 +1853,10 @@ inline Lds &Wavefront::lds() { return lds_ ? *lds_ : cu_.lds(); }
 inline const Lds &Wavefront::lds() const { return lds_ ? *lds_ : cu_.lds(); }
 
 template <GpuIsa Isa>
-std::string IsaWavefront<Isa>::disassemble_instruction(std::span<const uint32_t> encoding,
-                                                       uint64_t pc) const {
-  return this->cu_.disassemble_instruction(encoding, pc);
+util::FailureOr<std::string>
+IsaWavefront<Isa>::disassemble_instruction(std::span<const uint32_t> encoding, uint64_t pc,
+                                           util::DiagnosticEmitter diagnostic) const {
+  return this->cu_.disassemble_instruction(encoding, pc, diagnostic);
 }
 
 inline InstructionCache &InstructionComputeUnitView::instruction_cache() {

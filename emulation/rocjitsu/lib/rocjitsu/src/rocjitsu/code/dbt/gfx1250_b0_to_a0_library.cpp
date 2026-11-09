@@ -79,12 +79,7 @@ void invoke_diagnostic_callback(rj_gfx1250_b0_to_a0_diagnostic_callback_t callba
                                 void *user_data) noexcept {
   if (callback == nullptr)
     return;
-  try {
-    callback(&diagnostic, user_data);
-  } catch (...) {
-    // A reporting sink must not let an exception cross the C API boundary or
-    // change the translation result it is observing.
-  }
+  callback(&diagnostic, user_data);
 }
 
 void emit_diagnostic(rj_gfx1250_b0_to_a0_diagnostic_callback_t callback, void *user_data,

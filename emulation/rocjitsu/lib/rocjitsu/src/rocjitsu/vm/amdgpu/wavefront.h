@@ -16,6 +16,7 @@
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
 #include "rocjitsu/vm/plugins/wavefront_state.h"
 #include "rocjitsu/vm/thread_context.h"
+#include "util/diagnostic.h"
 
 #include <array>
 #include <cassert>
@@ -59,6 +60,7 @@ enum class InstructionExecutionError : uint8_t {
   InvalidRegisterAccess,
   UnimplementedInstruction,
   DecodeFailure,
+  PluginFailure,
 };
 
 /// @brief Allocation slice within a register file.
@@ -386,9 +388,10 @@ public:
   /// decoder through this virtual call. It is pure virtual because an out-of-line
   /// definition would become Wavefront's key function, and plugins could then no
   /// longer emit Wavefront's type information themselves.
-  /// @throws std::logic_error if the encoding is empty, truncated, or undecodable.
-  virtual std::string disassemble_instruction(std::span<const uint32_t> encoding,
-                                              uint64_t pc) const = 0;
+  /// Returns failure and emits a diagnostic if the encoding is empty, truncated, or undecodable.
+  virtual util::FailureOr<std::string>
+  disassemble_instruction(std::span<const uint32_t> encoding, uint64_t pc,
+                          util::DiagnosticEmitter diagnostic = {}) const = 0;
 
   /// @brief Read GPU memory in this wave's process address space.
   [[nodiscard]] VmAccessOutcome read_gpu_memory(uint64_t addr, std::span<uint8_t> dst) const;
@@ -1371,8 +1374,9 @@ public:
       : Wavefront(cu, wf_id, Isa::WF_SIZE, Isa::WF_SIZE_MAX, Isa::MAX_SGPRS_PER_WF,
                   Isa::MAX_VGPRS_PER_WF, Isa::MODE_HAS_GPR_IDX_EN) {}
 
-  std::string disassemble_instruction(std::span<const uint32_t> encoding,
-                                      uint64_t pc) const override;
+  util::FailureOr<std::string>
+  disassemble_instruction(std::span<const uint32_t> encoding, uint64_t pc,
+                          util::DiagnosticEmitter diagnostic = {}) const override;
 };
 
 } // namespace amdgpu

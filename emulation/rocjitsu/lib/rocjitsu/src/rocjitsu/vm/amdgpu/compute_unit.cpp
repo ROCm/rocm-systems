@@ -143,6 +143,8 @@ std::string_view instruction_execution_error_name(InstructionExecutionError erro
     return "unimplemented instruction";
   case InstructionExecutionError::DecodeFailure:
     return "instruction decode failure";
+  case InstructionExecutionError::PluginFailure:
+    return "plugin failure";
   }
   return "unknown instruction execution error";
 }
@@ -183,14 +185,17 @@ std::unique_ptr<Decoder> ComputeUnitCore::create_decoder(const Config &config) {
              : Decoder::create(default_isa_target_registry(), config.target);
 }
 
-std::string ComputeUnitCore::disassemble_instruction(std::span<const uint32_t> encoding,
-                                                     uint64_t pc) const {
+util::FailureOr<std::string>
+ComputeUnitCore::disassemble_instruction(std::span<const uint32_t> encoding, uint64_t pc,
+                                         util::DiagnosticEmitter diagnostic) const {
   Instruction::ScopedHeapAllocation heap_allocation;
   util::StringDiagnostic error;
   auto decoded = decoder_->decode_window(encoding, pc, error.emitter());
-  if (decoded.failed())
-    throw std::logic_error(std::format("cannot disassemble captured instruction at PC {:#x}: {}",
-                                       pc, error.message()));
+  if (decoded.failed()) {
+    diagnostic.emit() << std::format("cannot disassemble captured instruction at PC {:#x}: {}", pc,
+                                     error.message());
+    return util::Result::failure();
+  }
   return decoded.value()->disassemble();
 }
 
@@ -1082,6 +1087,10 @@ void ComputeUnitCore::tick_pipelines() {
 VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
   if (observes_memory_instruction_routing_)
     plugin_group_->onAmdgpuRouteMemoryInstruction(*inst, wf);
+  if (wf.instruction_execution_failed()) {
+    delete inst;
+    return VmAccessOutcome::Malformed;
+  }
   const bool observe_routed_access =
       observes_memory_routing_ && plugin_group_->observes_memory_routing(wf);
   const uint8_t decoded_route_tag = inst->data()->tag();
@@ -1177,6 +1186,10 @@ VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront 
   if (observe_routed_access)
     report_routed_access(*inst, wf, route_tag, decoded_route_tag, normalized_to_local,
                          pre_routing_addresses, flat_local_lane_mask, flat_dds_lane_mask);
+  if (wf.instruction_execution_failed()) {
+    delete inst;
+    return VmAccessOutcome::Malformed;
+  }
 
   switch (route_tag) {
   case SCALAR_MEM:
@@ -2086,13 +2099,16 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
   Instruction *inst = decoded.value().get();
   DecodedInstructionCache::ScopedReturn return_decoded(decoded_inst_cache_, decoded.value(),
                                                        active->pc, vmid, words, reuse_decoded);
+  const std::string_view instruction_mnemonic = inst->mnemonic();
   const auto fail_current_instruction = [&]() {
     return_decoded.discard();
     if constexpr (EnableAsync) {
       if (window)
         window->drain();
     }
-    fail_wave_instruction(*active, inst->mnemonic(), active->pc,
+    if (active->instruction_execution_error_detail())
+      execution_failure_detail_ = active->instruction_execution_error_detail();
+    fail_wave_instruction(*active, instruction_mnemonic, active->pc,
                           active->instruction_execution_error(),
                           // Taken before reporting, so a throwing failure handler
                           // cannot leave it for the next instruction.
@@ -2213,6 +2229,10 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
     plugin_group_->onAmdgpuBeforeExecuteInstruction(
         active->pc, *inst, *active,
         std::span(words).first(std::max<size_t>(kFirstFetchWords, inst_size / 4)));
+  if (active->instruction_execution_failed()) [[unlikely]] {
+    fail_current_instruction();
+    return IssueOutcome::Issued;
+  }
 
   // s_trap enters the per-process handler configured by SET_TRAP_HANDLER. The
   // hardware saves the interrupted PC/status in TTMPs and begins fetching at
@@ -2355,6 +2375,10 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
 
   if (observes_after_execute_instruction_)
     plugin_group_->onAmdgpuAfterExecuteInstruction(active->pc, *inst, *active);
+  if (active->instruction_execution_failed()) [[unlikely]] {
+    fail_current_instruction();
+    return IssueOutcome::Issued;
+  }
 
   if constexpr (util::Logger::group_enabled(util::Logger::GROUP_VM)) {
     if (active->num_vgprs_ > 0) {
@@ -2523,6 +2547,10 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
         d->issue_pc = active->pc;
       }
       const VmAccessOutcome memory_outcome = route_memory_inst(decoded.value().release(), *active);
+      if (active->instruction_execution_failed()) [[unlikely]] {
+        fail_current_instruction();
+        return IssueOutcome::Issued;
+      }
       if (memory_outcome != VmAccessOutcome::Complete) {
         if (memory_outcome == VmAccessOutcome::Unavailable) {
           request_functional_yield();
