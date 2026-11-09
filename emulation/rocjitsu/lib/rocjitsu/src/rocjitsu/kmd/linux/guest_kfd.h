@@ -225,18 +225,13 @@ private:
   int wait_events(unsigned long request, void *arg);
 
   /// @brief Drop a wait lease, performing a close that close() deferred.
-  /// @details The overlay it installs was prepared when the close was deferred, so this
-  /// adds no allocation of its own. It can still reach a full backend teardown, which
-  /// allocates, so callers drop the lease explicitly (WaitLease::release()) rather than
-  /// leaving it to the destructor.
+  /// @details The overlay it installs was prepared when the close was deferred,
+  /// so this adds no allocation of its own. Call after releasing lifecycle locks.
   void release_wait_lease();
 
   /// @brief RAII holder for acquire_wait_lease()/release_wait_lease().
-  /// @details Callers should release() on the normal path. Dropping the LAST lease can
-  /// run a deferred final close, and a backend teardown there allocates -- from a
-  /// destructor, which is implicitly noexcept, that turns a bad_alloc into a terminate on
-  /// the way out of an ioctl. Releasing explicitly keeps that work off the noexcept path
-  /// and leaves the destructor as the unwind-only fallback it should be.
+  /// @details Callers release() explicitly after forwarding has dropped its locks;
+  /// draining the last lease may complete a deferred backend close.
   class WaitLease {
   public:
     explicit WaitLease(GuestKfd &owner) : owner_(owner.acquire_wait_lease() ? &owner : nullptr) {}
@@ -358,11 +353,20 @@ private:
 };
 
 /// @brief Test-only handle to GuestKfd internals a real /dev/kfd would otherwise gate.
-/// @details Both members below belong to the hardware-backed path, which needs a real
+/// @details The members below exercise the hardware-backed path, which needs a real
 /// device to reach through GuestKfd::ioctl(); exposing them lets their contracts be
 /// tested on any host. Nothing outside tests may use this.
 class GuestKfdTestAccess {
 public:
+  /// @brief Adopt a character-device fd without hardware discovery for wait tests.
+  static void prepare_hardware_wait(GuestKfd &guest, int fd) {
+    std::lock_guard lock(guest.mutex_);
+    guest.real_kfd_fd_.store(fd, std::memory_order_release);
+    guest.record_kfd_identity(fd);
+    guest.open_refs_ = 1;
+    guest.ready_.store(true, std::memory_order_release);
+  }
+
   /// @brief The bounded-wait algorithm: a pure function of its poll and cancel flag.
   static int wait_events_poll_loop(kfd_ioctl_wait_events_args &args,
                                    const std::atomic<bool> &cancelled,
