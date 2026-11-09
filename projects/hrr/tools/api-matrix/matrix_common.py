@@ -43,14 +43,12 @@ class ApiRow:
     workloads: List[str]
     gpus: int
     payload_loss: bool
-    # False for APIs the workload does call but that never reach the archive
-    # under their own name — HIP lowers them to another entry point first, or
+    # False for APIs the workload calls that never reach the archive under their own name, because HIP lowers them first.
     expect_captured: bool = True
     handler_error_in: List[str] = field(default_factory=list)
     skip: bool = False
     skip_reason: str = ""
-    # Measured reason this API cannot be made to write an event on this stack,
-    # from the unreachable: groups. Empty for every API that is expected to be
+    # Measured reason this API cannot write an event on this stack, from the unreachable: groups. Empty otherwise.
     unreachable_reason: str = ""
     unreachable_group: str = ""
     note: str = ""
@@ -421,13 +419,11 @@ def resolve(manifest: Dict[str, Any], overlay: Dict[str, Any]) -> List[ApiRow]:
             workloads=workloads,
             gpus=gpus,
             payload_loss=payload_loss,
-            # A passthrough-only capture shim writes no event at all, so the
-            # API can never appear in an archive. That is derivable, so derive
+            # A passthrough-only capture shim writes no event, so the API never appears in an archive. Derive that, do not declare it.
             expect_captured=bool(
                 ov.get("captured", entry["capture_class"] != "PASSTHROUGH_ONLY")),
             handler_error_in=list(ov.get("handler_error_in") or []),
-            # Only a per-API skip means "never assert this". A tier that is
-            # not run by default is already expressed by whether it produced
+            # Only a per-API skip means "never assert this". A tier not run by default is already visible in its output.
             skip=bool(ov.get("skip", False)),
             skip_reason=ov.get("reason", ""),
             unreachable_reason=unreachable.get(api, {}).get("reason", ""),
@@ -459,8 +455,7 @@ def validate(rows: List[ApiRow], overlay: Dict[str, Any]) -> List[str]:
                 f"whose class is {CLASS_REAL}; this one expects "
                 f"{r.expect_class}")
 
-    # Every API named in the overlay must exist, or the overlay has rotted
-    # against the generator — the same failure derive_manifest.py's baseline
+    # Every API named in the overlay must exist, or the overlay has rotted against the generator.
     for tier, meta in (overlay.get("tiers") or {}).items():
         for api in (meta or {}).get("apis") or []:
             if api not in by_name:

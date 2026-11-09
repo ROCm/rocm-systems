@@ -75,14 +75,11 @@ from typing import Any, Collection, Dict, List, Optional
 
 import matrix_common as mc  # noqa: E402
 
-# The header the Catch2 tests compile against, so --emit-cxx needs no argument
-# from inside the tree: projects/hrr/tools/api-matrix -> projects/hrr.
 DEFAULT_HEADER = (Path(__file__).resolve().parents[2] / "tests" /
                   "integration" / "hrr_api_matrix_expectations.h")
 DEFAULT_TEST_DIR = DEFAULT_HEADER.parent
 
-# These two files exist only to supply tier workloads, so a workload defined in
-# one of them that no tier names is dead weight: it compiles, it passes when
+# These two files only supply tier workloads. A workload in them that no tier names is dead weight: it compiles and passes unobserved.
 MATRIX_WORKLOAD_SOURCES = ("hrr_api_matrix_workload_test.cc",
                            "hrr_spt_workload_test.cc")
 
@@ -99,8 +96,7 @@ VERDICT_SKIPPED = "SKIPPED"
 VERDICT_ORDER = [VERDICT_FAIL, VERDICT_XPASS, VERDICT_PASS, VERDICT_XFAIL,
                  VERDICT_NOT_CAPTURED, VERDICT_NOT_EXERCISED, VERDICT_SKIPPED]
 
-# Verdicts that mean "the matrix checked something and it held". Everything
-# else is either a problem or an admitted gap.
+# Verdicts where the matrix checked something and it held. All others are problems or admitted gaps.
 VERDICT_COVERED = {VERDICT_PASS, VERDICT_XFAIL, VERDICT_NOT_CAPTURED}
 
 CLASS_CODE = {mc.CLASS_REAL: 0, mc.CLASS_NOOP: 1, mc.CLASS_ERROR_STUB: 2,
@@ -329,8 +325,7 @@ def load_observations(results_dir: Path,
 
     merged: Dict[str, Any] = {"tiers": {}, "captured": {}, "observed": {},
                               "by_tier": {}}
-    # Matched by tier name rather than by taking every .json and excluding the
-    # ones we know about: this directory also holds the matrix report and the
+    # Match tier names rather than every .json minus known files: the directory also holds the matrix report.
     files = [f for f in sorted(results_dir.glob("T*.json"))
              if f.stem in mc.TIER_ORDER]
     if not files:
@@ -357,8 +352,7 @@ def load_observations(results_dir: Path,
             merged["captured"][api] = merged["captured"].get(api, 0) + count
         for api, klass in data["observed"].items():
             merged["by_tier"].setdefault(api, {})[tier] = klass
-            # If two tiers both reached an API they must agree; a disagreement
-            # is itself worth surfacing rather than silently taking the last.
+            # Two tiers that both reached an API must agree; surface a disagreement rather than taking the last.
             prev = merged["observed"].get(api)
             if prev is not None and prev != klass:
                 merged["observed"][api] = CLASS_CONFLICT
@@ -386,8 +380,7 @@ def verdict_for(row: mc.ApiRow, observations: Dict[str, Any]) -> Dict[str, Any]:
         result["detail"] = row.skip_reason or "skipped by the overlay"
         return result
 
-    # Declared as never reaching the archive under its own name. The assertion
-    # is the absence: if it starts being captured, HIP's lowering changed and
+    # Declared as never reaching the archive under its own name; the assertion is the absence. If captured, HIP's lowering changed.
     if not row.expect_captured:
         if captured:
             result["verdict"] = VERDICT_XPASS
@@ -400,22 +393,19 @@ def verdict_for(row: mc.ApiRow, observations: Dict[str, Any]) -> Dict[str, Any]:
 
     if observed is None or not captured:
         result["verdict"] = VERDICT_NOT_EXERCISED
-        # Being captured but unobserved is a different situation from never
-        # being called: the workload did reach it, and the replay then stopped
+        # Captured but unobserved differs from never called: the workload reached it and the replay then stopped.
         result["detail"] = (
             "captured, but the replay stopped before reaching it"
             if observed is None and captured
             else "no workload in this tier called it")
-        # A gap the overlay has measured and explained is expected; one it has
-        # not is the matrix quietly losing an API, so build_report counts it as
+        # A gap the overlay explains is expected; an unexplained one is the matrix losing an API, so build_report counts it.
         if row.unreachable_reason:
             result["expected_gap"] = True
             result["unreachable_group"] = row.unreachable_group
             result["detail"] = row.unreachable_reason
         return result
 
-    # Declared unreachable, and a tier reached it anyway. Whatever blocked it —
-    # a device without image support, a missing SDK declaration, a crash
+    # Declared unreachable, yet a tier reached it. Whatever blocked it, the declaration is now stale.
     if row.unreachable_reason:
         result["verdict"] = VERDICT_XPASS
         result["unreachable_group"] = row.unreachable_group
@@ -425,16 +415,14 @@ def verdict_for(row: mc.ApiRow, observations: Dict[str, Any]) -> Dict[str, Any]:
             "tier assert on it")
         return result
 
-    # A real handler can succeed on one archive's arguments and fail on
-    # another's — a pointer it cannot translate, a handle that meant something
+    # A real handler can succeed on one archive's arguments and fail on another's, such as an untranslatable pointer.
     by_tier = observations["by_tier"].get(row.api, {})
     unexpected = {
         tier: klass for tier, klass in by_tier.items()
         if klass != row.expect_class
         and not (klass == mc.CLASS_HANDLER_ERROR and tier in row.handler_error_in)
     }
-    # Only when a tier actually saw the error. A run that did not include the
-    # failing tier's workload must report the plain PASS it measured rather
+    # Only when a tier saw the error: a run without the failing tier's workload reports the plain PASS it measured.
     declared_error = not unexpected and any(
         klass == mc.CLASS_HANDLER_ERROR and tier in row.handler_error_in
         for tier, klass in by_tier.items())
@@ -477,7 +465,6 @@ def verdict_for(row: mc.ApiRow, observations: Dict[str, Any]) -> Dict[str, Any]:
                             "scope exclusion")
         return result
 
-    # Class matches. For a payload-loss API that is not the end of the story:
     if row.payload_loss and row.expect_class == mc.CLASS_REAL:
         result["verdict"] = VERDICT_XFAIL
         result["cause"] = "payload_loss"
@@ -513,8 +500,7 @@ def build_report(rows: List[mc.ApiRow], overlay: Dict[str, Any],
 
     floors = {}
     problems = []
-    # A tier that ran must show every workload the overlay gives it. A missing
-    # one means a workload failed before it was recorded, and everything only
+    # A tier that ran must show every workload the overlay gives it; a missing one failed before it was recorded.
     for tier in sorted(ran_tiers):
         seen = set(observations["tiers"][tier]["workloads"])
         for workload in mc.tier_workloads(overlay, tier):
@@ -529,12 +515,10 @@ def build_report(rows: List[mc.ApiRow], overlay: Dict[str, Any],
         covered = sum(
             1 for r in results
             if r["tier"] == tier
-            # An API the overlay skips is asserted on by neither side, so it
-            # cannot count towards a floor. Excluding it here is what keeps
+            # An API the overlay skips is asserted by neither side, so it cannot count towards a floor.
             and r["verdict"] != VERDICT_SKIPPED
             and (tier in observations["by_tier"].get(r["api"], {})
-                 # An API declared as never captured is asserted on by the
-                 # absence of its row, which the tier's own archive shows.
+                 # An API declared never captured is asserted by the absence of its row, which the tier's archive shows.
                  or r["verdict"] == VERDICT_NOT_CAPTURED))
         elsewhere = sum(bucket[v] for v in VERDICT_COVERED) + \
             bucket[VERDICT_XPASS] + bucket[VERDICT_FAIL] - covered
@@ -546,8 +530,7 @@ def build_report(rows: List[mc.ApiRow], overlay: Dict[str, Any],
                 f"{tier}: its own workloads exercised {covered} APIs, "
                 f"floor is {floor}")
 
-    # An API in a tier that ran, that nothing reached, and that the overlay
-    # does not explain. Left unreported this is how a matrix rots: a workload
+    # An API in a tier that ran, reached by nothing and unexplained by the overlay: this is how a matrix rots.
     undeclared = [r for r in results
                   if r["verdict"] == VERDICT_NOT_EXERCISED
                   and not r.get("expected_gap")]
@@ -786,8 +769,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 
 def run(args: argparse.Namespace, ap: argparse.ArgumentParser) -> int:
-    # Reads only the overlay and the test sources, so it still runs in a fresh
-    # clone where api_classes.json has not been derived yet.
+    # Reads only the overlay and test sources, so it runs in a fresh clone before api_classes.json is derived.
     if args.check_workloads:
         return check_workloads(mc.load_overlay(args.overlay), args.test_dir)
 

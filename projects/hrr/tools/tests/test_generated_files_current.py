@@ -76,8 +76,8 @@ class GeneratedFilesCurrent(unittest.TestCase):
     def test_api_matrix_header_matches_the_derived_manifest(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp)
-            # derive_manifest.py exits non-zero when the classification drifted
-            # from api_classes_baseline.json, which is itself a stale-file failure.
+            # derive_manifest.py exits non-zero when the classification drifts from
+            # api_classes_baseline.json. That counts as a stale file.
             _run([MATRIX / "derive_manifest.py", "--quiet", "-o", out / "api_classes.json"])
             _run([MATRIX / "check_matrix.py", "--manifest", out / "api_classes.json",
                   "--emit-cxx", out / "hrr_api_matrix_expectations.h"])

@@ -144,8 +144,6 @@ class RawSlotRule(unittest.TestCase):
         self.assertTrue(manual_raw_pointer_casts("void* dst = reinterpret_cast<void*>(a->dst);"))
         self.assertTrue(manual_raw_pointer_casts("auto p = (const char*)a->name;"))
         self.assertFalse(manual_raw_pointer_casts("auto p = reinterpret_cast<const char*>(a->name_bytes);"))
-        # What the manual-handler test runs: opaque handles and multi-word
-        # pointer types, which the pointer-only scanner does not see.
         self.assertTrue(manual_slot_casts("auto c = (hipExecutionCtx_t)a->ctx;"))
         self.assertTrue(manual_slot_casts("auto p = (const unsigned char*)a->src;"))
         self.assertTrue(manual_slot_casts("auto p = reinterpret_cast<void*>(a->dst);"))
@@ -190,7 +188,6 @@ class RawSlotRule(unittest.TestCase):
         body = _handler_body(self.playback, "hipLinkCreate")
         self.assertIn("hrr::jit_options_carry_pointer(_d_options, _d_options_n)", body)
         self.assertIn('hrr_note_unreplayable(ctx, "hipLinkCreate"', body)
-        # The refusal has to come before the real call.
         self.assertLess(body.index("jit_options_carry_pointer"), body.index("hipLinkCreate((unsigned int)"))
 
 
@@ -244,8 +241,7 @@ class GeneratorFunctions(unittest.TestCase):
         gen.AUTO_UNREPLAYABLE_PLAYBACK_APIS.pop("hipFooTexture", None)
 
     def test_explicit_playback_only_refusal_does_not_touch_the_capture_table(self):
-        # hipLinkAddFile is refused for replay only; adding it to
-        # UNREPLAYABLE_PLAYBACK_APIS would also change the capture shims.
+        # hipLinkAddFile is refused for replay only; adding it to UNREPLAYABLE_PLAYBACK_APIS would change the capture shims.
         self.assertIn("hipLinkAddFile", gen.PLAYBACK_ONLY_UNREPLAYABLE_APIS)
         self.assertNotIn("hipLinkAddFile", gen.UNREPLAYABLE_PLAYBACK_APIS)
 

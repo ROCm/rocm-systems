@@ -42,8 +42,7 @@ from typing import Any, Dict, List
 
 BASELINE_PATH_NAME = "api_classes_baseline.json"
 
-# This script ships inside rocm-systems, so the checkout it describes is by
-# default the one containing it: projects/hrr/tools/api-matrix -> repo root.
+# The checkout this script describes is the one containing it: projects/hrr/tools/api-matrix -> repo root.
 DEFAULT_ROCM_SYSTEMS = Path(__file__).resolve().parents[4]
 
 # Replay classes, in the priority order generate_playback_shim() applies them.
@@ -54,8 +53,7 @@ REPLAY_CUSTOM = "CUSTOM"
 REPLAY_MANUAL = "MANUAL"
 REPLAY_COMPILER = "COMPILER_NOOP"
 REPLAY_GENERATED = "GENERATED"
-# Handled by is_special() in hrr_playback.cpp, ahead of the dispatch table, so
-# whatever the generator emitted for them is dead code.
+# Handled by is_special() in hrr_playback.cpp ahead of the dispatch table, so generator output for them is dead code.
 REPLAY_SPECIAL = "SPECIAL"
 
 OBSERVABLE = {
@@ -73,8 +71,7 @@ CAPTURE_MANUAL = "MANUAL"
 CAPTURE_PASSTHROUGH = "PASSTHROUGH_ONLY"
 CAPTURE_GENERATED = "GENERATED"
 
-# Pointer-to-scalar types that are genuinely serialisable or genuinely opaque,
-# and so are not evidence of the CONST_STRUCT_PTR_IN payload-loss shape.
+# Pointer-to-scalar types that are serialisable or opaque, so not evidence of the CONST_STRUCT_PTR_IN payload-loss shape.
 _SCALARISH_POINTEES = {
     "void", "char", "int", "unsigned", "float", "double", "size_t",
     "uint32_t", "uint64_t", "int32_t", "int64_t", "uint8_t", "int8_t",
@@ -83,14 +80,12 @@ _SCALARISH_POINTEES = {
     "hipGraphNode_t", "hipArray_t", "hipMemPool_t",
 }
 
-# normalise_field_type() emits `uint64_t /* <type> */` for anything it does not
-# recognise, which is mostly by-value structs but also catches spellings of
+# normalise_field_type() emits `uint64_t /* <type> */` for unrecognised types: mostly by-value structs, also some pointer spellings.
 _SCALAR_KEYWORDS = re.compile(
     r"\b(char|short|int|long|float|double|signed|unsigned|bool|enum|_Bool)\b")
 
 
-# What this script reads off the generator. Checked once on load so a rename
-# upstream stops the derivation with a message, rather than being papered over
+# What this script reads from the generator, checked once on load so an upstream rename stops with a message.
 REQUIRED_GENERATOR_ATTRS = (
     "UNREPLAYABLE_PLAYBACK_APIS", "ERROR_STUB_PLAYBACK_APIS",
     "NOOP_PLAYBACK_APIS", "CUSTOM_PLAYBACK_BODIES", "MANUAL_PLAYBACK_APIS",
@@ -253,7 +248,6 @@ def detect_payload_loss(gen, entry, capture_class: str) -> List[Dict[str, str]]:
 
         if "*" not in raw or "const" not in raw:
             continue
-        # A pointer-to-pointer is an output handle slot, not an input struct.
         if raw.count("*") > 1:
             continue
         base = _pointee_base(raw)
@@ -296,8 +290,7 @@ def summarise(rows: List[Dict[str, Any]]) -> Dict[str, int]:
     for shape in ("CONST_STRUCT_PTR_IN", "BIG_STRUCT_BY_VALUE"):
         counts[f"payload_loss.{shape}"] = sum(
             1 for r in rows if any(p["shape"] == shape for p in r["payload_loss"]))
-    # The decision-relevant number: APIs that count as faithfully replayed yet
-    # may not actually be replayable.
+    # APIs counted as faithfully replayed that may not be replayable: the number that drives decisions.
     counts["payload_loss.in_faithful"] = sum(
         1 for r in rows if r["payload_loss"] and r["observable_class"] == "REAL")
     return counts
@@ -415,8 +408,7 @@ def main() -> int:
     out_path = args.output or (here / "api_classes.json")
     baseline_path = here / BASELINE_PATH_NAME
 
-    # The generator lives under tools/ and the playback driver under playback/,
-    # so this is the project root rather than one directory holding both.
+    # The generator is under tools/ and the playback driver under playback/, so use the project root.
     hrr_dir = args.rocm_systems / "projects" / "hrr"
     trace_hpp = (args.rocm_systems / "projects" / "clr" / "hipamd" / "include" /
                  "hip" / "amd_detail" / "hip_api_trace.hpp")

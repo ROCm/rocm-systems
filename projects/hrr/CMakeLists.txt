@@ -7,15 +7,13 @@ project(hrr LANGUAGES CXX)
 option(HRR_BUILD_PLAYBACK "Build HRR playback tools" ON)
 option(HRR_BUILD_TESTS "Build HRR unit tests" OFF)
 
-# Public HIP headers from this tree, searched ahead of the SDK's. A HIP API added
-# to the tree is declared here before any SDK that CI installs has it, so
+# Public HIP headers from this tree, searched ahead of the SDK's, so an API added here is declared before any CI SDK has it.
 set(HRR_HIP_INCLUDE_DIRS "" CACHE STRING
     "Directories of in-tree public HIP headers to search before the SDK's (host C++ only)")
 foreach(_hrr_hip_dir IN LISTS HRR_HIP_INCLUDE_DIRS)
   include_directories(BEFORE "$<$<COMPILE_LANGUAGE:CXX>:${_hrr_hip_dir}>")
 endforeach()
 
-# Shared HRR archive wire format (header-only public interface).
 add_library(hrr_api_args INTERFACE)
 add_library(hrr::api_args ALIAS hrr_api_args)
 
@@ -26,8 +24,7 @@ target_include_directories(hrr_api_args INTERFACE
 
 install(DIRECTORY include/ DESTINATION include)
 
-# The playback subdirectory defines both the CPU-only hrr_reader library and the
-# HIP-dependent hrr-playback tool. hrr_reader is needed by the unit tests even
+# The playback subdirectory defines hrr_reader (CPU-only) and hrr-playback (HIP); the unit tests need hrr_reader even without HIP.
 if((HRR_BUILD_PLAYBACK OR HRR_BUILD_TESTS) AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/playback/CMakeLists.txt")
   add_subdirectory(playback)
 endif()

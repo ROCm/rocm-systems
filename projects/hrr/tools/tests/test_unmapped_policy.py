@@ -27,8 +27,8 @@ _OWN_NULL_CHECK = re.compile(
     r"(\w+) = ctx\.translate_ptr\([^;]*\);\s*\n\s*if \(\s*(?:!\1\b|\1 == nullptr)")
 _FUNCTION = re.compile(r"^(?:static\s+)?(?:inline\s+)?[\w:<>*&]+(?:\s+[\w:<>*&]+)*\s+\**(\w+)\(")
 
-# Where a miss is an answer, not a lost pointer: kernel-argument words are
-# pointers only by shape, a guard or release has nothing to do for memory
+# A miss is a valid answer for these: kernel-argument words only look like pointers,
+# and a guard or release has no memory to act on.
 LOOKUP_ALLOWED = {
     "decode_kernel_args",
     "hrr_block_guard_relocate",
