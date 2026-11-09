@@ -471,6 +471,25 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
       }
     }
   }
+  // A dense D16 load fills the same half of one VGPR across the wave.
+  // Resolve the register and its preservation policy once for all lanes.
+  if (!is_atomic && d.elem_size == sizeof(uint16_t) && d.num_elems == 1 && (d.d16_lo || d.d16_hi) &&
+      writes_dword(0) &&
+      ((d.wf_size == 32 && d.lane_mask == UINT32_MAX) ||
+       (d.wf_size == 64 && d.lane_mask == UINT64_MAX)) &&
+      d.wf_size <= cu.vgpr_storage_lane_count()) {
+    auto *dst = reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(d.dst_reg_base));
+    const uint32_t shift = d.d16_hi ? 16 : 0;
+    const uint32_t preserve = cu.sram_ecc() ? 0u : ~(0xffffu << shift);
+    const uint32_t lanes = d.wf_size;
+    for (uint32_t lane = 0; lane < lanes; ++lane) {
+      uint16_t halfword;
+      std::memcpy(&halfword, d.response_data.data() + lane * sizeof(halfword), sizeof(halfword));
+      const uint32_t retained = preserve ? (dst[lane] & preserve) : 0;
+      dst[lane] = retained | (static_cast<uint32_t>(halfword) << shift);
+    }
+    return MemoryAccessCompletion::Complete;
+  }
   // Performance-only fast path for ordinary dword loads. The general completion
   // path below remains authoritative for atomics, conversions, and partial-register
   // writes. Ownership is validated above for ordinary loads and per DWORD for
