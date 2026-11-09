@@ -33,8 +33,6 @@ pub(crate) struct Instance {
     pub native: session::Session,
     /// Callback policy for public frontend owner records.
     pub host_allocator: Allocator,
-    /// Guards host-only ABI work that does not enter a native driver.
-    pub process_id: u32,
     /// Number of public children that still borrow this instance.
     pub children: AtomicU64,
     /// Prevents new children during destruction.
@@ -700,20 +698,20 @@ pub(crate) unsafe extern "C" fn create(
             session::DriverContextLifetime::Session
         };
         let native = session::Session::new(lifetime).map_err(|e| crate::support::native(&e))?;
+        let event_service = SignalEventService::new(&native);
         let host_page_size =
             native_memory::host::host_page_size().map_err(|e| crate::support::native(&e))?;
         let host_write_back_cache = CacheMaintenance::qualify(CachePolicy::WriteBack).ok();
         let owner = slot.write(Instance {
             native,
             host_allocator,
-            process_id: std::process::id(),
             host_page_size,
             host_write_back_cache,
             children: AtomicU64::new(0),
             closing: false,
             ids: AtomicU64::new(1),
             host_backing_head: Mutex::new(0),
-            event_service: Mutex::new(SignalEventService::new(lifetime)),
+            event_service: Mutex::new(event_service),
             event_observers: Mutex::new(OwnerVec::with_allocator(host_allocator)),
             scope: Scope {
                 instance: std::ptr::null_mut(),
