@@ -470,7 +470,13 @@ enum ibv_rate {
 	IBV_RATE_25_GBPS  = 15,
 	IBV_RATE_100_GBPS = 16,
 	IBV_RATE_200_GBPS = 17,
-	IBV_RATE_300_GBPS = 18
+	IBV_RATE_300_GBPS = 18,
+	IBV_RATE_28_GBPS   = 19,
+	IBV_RATE_50_GBPS   = 20,
+	IBV_RATE_400_GBPS  = 21,
+	IBV_RATE_600_GBPS  = 22,
+	IBV_RATE_800_GBPS  = 23,
+	IBV_RATE_1200_GBPS = 24
 };
 
 /**
@@ -865,6 +871,26 @@ struct ibv_cq {
 	uint32_t		async_events_completed;
 };
 
+/* Extended CQ. Shares its leading members with struct ibv_cq so that
+ * ibv_cq_ex_to_cq() is a plain pointer cast. The trailing poll/read
+ * function pointers are managed by libibverbs and left opaque here —
+ * GIN only passes the pointer back to cq_ex_to_cq(), never dereferences
+ * the extended fields. */
+struct ibv_cq_ex {
+	struct ibv_context     *context;
+	struct ibv_comp_channel *channel;
+	void		       *cq_context;
+	uint32_t		handle;
+	int			cqe;
+
+	pthread_mutex_t		mutex;
+	pthread_cond_t		cond;
+	uint32_t		comp_events_completed;
+	uint32_t		async_events_completed;
+
+	uint32_t		comp_mask;
+};
+
 struct ibv_ah {
 	struct ibv_context     *context;
 	struct ibv_pd	       *pd;
@@ -1140,7 +1166,39 @@ struct verbs_context {
 	int (*query_port)(struct ibv_context *context, uint8_t port_num,
 			  struct ibv_port_attr *port_attr,
 			  size_t port_attr_len);
-	int (*_reserved[25]) (void);
+	/* All 25 verbs_context slots between query_port and priv (upstream layout).
+	 * Every slot is present and in exact upstream order so verbs_get_ctx_op()
+	 * resolves the right offset. The two rccl calls (alloc_parent_domain,
+	 * create_cq_ex) carry real signatures; the other 23 are opaque 8-byte
+	 * void(*)(void) placeholders that hold the ABI offset without vendoring
+	 * their argument types. */
+	void (*advise_mr)(void);
+	void (*alloc_null_mr)(void);
+	void (*read_counters)(void);
+	void (*attach_counters_point_flow)(void);
+	void (*create_counters)(void);
+	void (*destroy_counters)(void);
+	void (*reg_dm_mr)(void);
+	void (*alloc_dm)(void);
+	void (*free_dm)(void);
+	void (*modify_flow_action_esp)(void);
+	void (*destroy_flow_action)(void);
+	void (*create_flow_action_esp)(void);
+	void (*modify_qp_rate_limit)(void);
+	struct ibv_pd *(*alloc_parent_domain)(struct ibv_context *context,
+					      struct ibv_parent_domain_init_attr *attr);
+	void (*dealloc_td)(void);
+	void (*alloc_td)(void);
+	void (*modify_cq)(void);
+	void (*post_srq_ops)(void);
+	void (*destroy_rwq_ind_table)(void);
+	void (*create_rwq_ind_table)(void);
+	void (*destroy_wq)(void);
+	void (*modify_wq)(void);
+	void (*create_wq)(void);
+	void (*query_rt_values)(void);
+	struct ibv_cq_ex *(*create_cq_ex)(struct ibv_context *context,
+					  struct ibv_cq_init_attr_ex *init_attr);
 	struct verbs_ex_private *priv;
 	int (*query_device_ex)(struct ibv_context *context,
 			       const struct ibv_query_device_ex_input *input,

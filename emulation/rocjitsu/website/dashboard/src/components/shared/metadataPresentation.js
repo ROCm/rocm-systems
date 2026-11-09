@@ -4,7 +4,7 @@ export function metadataLabel(label, key) {
 
 const sectionLabels = {
   machine: 'Machine', execution: 'Execution & measurement', corpus: 'Benchmark corpus',
-  rocjitsu: 'Rocjitsu', runtime: 'Runtime', auxiliary: 'Additional tools & settings',
+  rocjitsu: 'rocjitsu', runtime: 'Runtime', auxiliary: 'Additional tools & settings',
 };
 
 // Keep arbitrary published keys, including facts present in only one attempt.

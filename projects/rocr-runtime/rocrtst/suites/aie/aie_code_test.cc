@@ -44,13 +44,26 @@ using rocr::AMD::aie_kernel_entry;
 using rocr::AMD::aie_section_header;
 using rocr::AMD::AieCode;
 
-// Same hsaco test_dispatch.cc's HsacoKernelObjectIsPublished loads; built by the same CMake rule.
-constexpr const char* kHsaco = "vsadd.hsaco";
-// vsmul packed as aie2 and then vsadd as aie2p, in that order, so the aie2p section is not the
-// first AIE section in the file.
-constexpr const char* kMultiArchHsaco = "multiarch.hsaco";
-// The arch vsadd.hsaco was packed for.
+// The arch vsadd's hsaco was packed for.
 constexpr const char* kArch = AIE_HSACO_ARCH;
+
+/**
+ * @brief Whether kArch is aie4.
+ *
+ * aie4 dispatches entirely through full-ELF control code, so its hsaco differs in shape from every
+ * other arch's (see kHsaco below); several tests only make sense for one shape or the other.
+ *
+ * @return true if kArch is "aie4"
+ */
+bool IsAie4() { return std::strcmp(kArch, "aie4") == 0; }
+
+// aie4 builds only a full-ELF hsaco (see CMakeLists.txt's AIE_HSACO_ARCH/npu3 branch); on that arch
+// test_dispatch.cc calls vsadd_elf.hsaco instead, built by vsadd_elf_hsaco_artifact rather than
+// vsadd_hsaco_artifact.
+const char* kHsaco = IsAie4() ? "vsadd_elf.hsaco" : "vsadd.hsaco";
+// vsmul packed as aie2 and then vsadd as aie2p, in that order, so the aie2p section is not the
+// first AIE section in the file. No multi-arch hsaco is built for aie4.
+constexpr const char* kMultiArchHsaco = "multiarch.hsaco";
 
 /**
  * @brief Parses the AIE section for one arch out of an hsaco.
@@ -153,9 +166,15 @@ TEST(AieCodeParse, ParsesVsaddHsaco) {
 
   const auto* info = code->GetKernel(names.front());
   ASSERT_NE(info, nullptr);
-  EXPECT_EQ(info->kind, rocr::AMD::AieKernelKind::PdiInsts);
   EXPECT_GT(info->insts_size, 0u);
-  EXPECT_GT(info->pdi_size, 0u);
+  if (IsAie4()) {
+    // aie4's only hsaco kind is FullElf; its kernel representation carries no separate PDI entry.
+    EXPECT_EQ(info->kind, rocr::AMD::AieKernelKind::FullElf);
+    EXPECT_EQ(info->pdi_size, 0u);
+  } else {
+    EXPECT_EQ(info->kind, rocr::AMD::AieKernelKind::PdiInsts);
+    EXPECT_GT(info->pdi_size, 0u);
+  }
 }
 
 TEST(AieCodeParse, RejectsNullAndEmpty) {
@@ -187,8 +206,10 @@ TEST(AieCodeParse, ReportsMissingArchAsIncompatible) {
   const auto hsaco = ReadFile(kHsaco);
   if (hsaco.empty()) GTEST_SKIP() << "hsaco was not built: " << kHsaco;
 
+  // Any arch this hsaco was not packed for; aie4's own hsaco was packed only for aie4.
+  const char* other_arch = IsAie4() ? "aie2p" : "aie4";
   std::unique_ptr<AieCode> code;
-  EXPECT_EQ(ParseArchSection(hsaco, "aie4", &code), HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS);
+  EXPECT_EQ(ParseArchSection(hsaco, other_arch, &code), HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS);
 }
 
 TEST(AieCodeParse, SelectsTheAgentsArchSection) {
@@ -244,6 +265,10 @@ TEST_F(AieCodeMutation, RejectsNameOutsideTheStringTable) {
 }
 
 TEST_F(AieCodeMutation, RejectsFullElfEntryWithSeparatePdi) {
+  // Needs a PdiInsts entry (pdi_size > 0) to turn into an invalid FullElf-with-a-PDI one; aie4's
+  // entry is already FullElf, so forcing its kind to FullElf again is not a mutation at all.
+  if (IsAie4()) GTEST_SKIP() << "aie4's entry is already FullElf; this mutation does not apply";
+
   // vsadd's entry carries a PDI, which a full ELF never does: it holds its own.
   SetEntryField(offsetof(aie_kernel_entry, kind),
                 static_cast<std::uint32_t>(rocr::AMD::AieKernelKind::FullElf));
