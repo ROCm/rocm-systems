@@ -110,8 +110,6 @@ macro(HIP_ADD_LIBRARY hip_target)
     _HIP_PARSE_ARGS(_hip_src _hip_cmake_opts _hip_cxx_opts ${ARGN})
     # Tag sources as HIP so CMake compiles them with CMAKE_HIP_COMPILER
     # (amdclang++) instead of CMAKE_CXX_COMPILER (which may be GCC).
-    # This matches what the old FindHIP.cmake achieved by invoking hipcc
-    # via add_custom_command for each source file.
     if(CMAKE_HIP_COMPILER)
         set_source_files_properties(${_hip_src} PROPERTIES LANGUAGE HIP)
     endif()
