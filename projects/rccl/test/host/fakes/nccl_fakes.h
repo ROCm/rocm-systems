@@ -114,6 +114,8 @@ extern std::function<ncclResult_t(struct ncclMemManager*, void*, size_t, hipMemG
                                   hipMemAllocationHandleType, ncclMemType_t)>
     g_memTrack;
 extern std::function<ncclResult_t(struct ncclMemManager*, void*, struct ncclMemUntrackInfo*)> g_memUntrackDynamic;
+// Defaults to success without untracking.
+extern std::function<ncclResult_t(struct ncclMemManager*, void*, size_t)> g_memUntrackPersist;
 
 // NCCL_PARAM redirector: p2p-test.cc replaces the body of every
 // NCCL_PARAM(name, env, deftVal) generator in the #included p2p.cc with a
