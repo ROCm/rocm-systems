@@ -1,10 +1,18 @@
 /*
  * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
  *
+ * hip_capture.h — In-tree HIP capture layer public API.
+ *
+ * Captures HIP API calls to a .hrr archive for later replay.
+ * Independent of the profiler layer — no profiler headers included.
+ *
+ * Binary format is compatible with hrr_reader.h / hrr_replay.cpp.
+ * Format constants (HRR_MAGIC, HRR_VERSION, hrr_file_header) are in
+ * hrr_api_args.h — included by hip_capture.cpp and hip_capture_writer.cpp.
+ *
  * SPDX-License-Identifier: MIT
  */
 #pragma once
-
 
 #include <cstddef>
 #include <cstdint>
