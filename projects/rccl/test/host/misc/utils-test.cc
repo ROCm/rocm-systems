@@ -551,6 +551,8 @@ TEST_F(UtilsMicrotest, MemoryStackAlloc_ZeroesReusedMemoryOfEveryOverload) {
   check(48, 16, [&] { return ncclMemoryStackAlloc(&stack_, 48, 16); });
   check(8 + 5 * sizeof(uint64_t), alignof(uint64_t),
         [&] { return ncclMemoryStackAllocInlineArray<Header, uint64_t>(&stack_, 5); });
+  check(16 + 5 * sizeof(Wide), alignof(Wide),
+        [&] { return ncclMemoryStackAllocInlineArray<Header, Wide>(&stack_, 5); });
   EXPECT_EQ(1u, g_mallocSizes.size());
 }
 
