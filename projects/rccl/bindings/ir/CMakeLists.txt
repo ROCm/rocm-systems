@@ -61,10 +61,16 @@ set(BITCODE_CXX_STD  "c++17"  CACHE STRING
 # LTO IR knobs, mirroring NCCL's LTO_IR_ARCH / LTO_IR_CXX_STD. Both default
 # to the bitcode library's settings, so the two artifacts stay in step
 # unless deliberately diverged.
-set(LTO_IR_ARCH    "${BITCODE_LIB_ARCH}" CACHE STRING
-    "AMDGPU architecture for the LTO IR artifact (defaults to BITCODE_LIB_ARCH)")
-set(LTO_IR_CXX_STD "${BITCODE_CXX_STD}"  CACHE STRING
-    "C++ standard for the LTO IR build (defaults to BITCODE_CXX_STD)")
+set(LTO_IR_ARCH    "" CACHE STRING
+    "AMDGPU architecture for the LTO IR artifact (empty = BITCODE_LIB_ARCH)")
+set(LTO_IR_CXX_STD "" CACHE STRING
+    "C++ standard for the LTO IR build (empty = BITCODE_CXX_STD)")
+if(NOT LTO_IR_ARCH)
+  set(LTO_IR_ARCH "${BITCODE_LIB_ARCH}")
+endif()
+if(NOT LTO_IR_CXX_STD)
+  set(LTO_IR_CXX_STD "${BITCODE_CXX_STD}")
+endif()
 
 # ROCM_PATH is normally set by the top-level CMakeLists.txt; provide a
 # safe default so this file is also usable standalone (cmake -P style).
@@ -138,16 +144,7 @@ set(ROCM_INCLUDES
 )
 
 ##### Stage the public wrapper header into build/include #####
-# Shared by both artifacts: the .bc and the .ltoir expose the same public C
-# surface, so the header is staged once regardless of which knob is on.
-#
-# The command is owned by a utility target, and llvm_ir / ltoir order
-# themselves against that target rather than naming ${WRAPPER_HEADER} as a
-# file dependency. The Makefile generator emits a copy of a custom command's
-# recipe into every target that depends on its output, so naming the file in
-# two targets would run the staging copy twice per build -- and concurrently
-# under -j. The compile steps below depend on the *source* header instead,
-# which is what actually changes.
+# Owned by one utility target so the copy runs once under -j, not once per dependent target.
 set(WRAPPER_HEADER_SRC ${CMAKE_CURRENT_SOURCE_DIR}/nccl_device_wrapper.h)
 
 add_custom_command(
@@ -311,21 +308,7 @@ endif() # EMIT_LLVM_IR
 # ===========================================================================
 # LTO IR (NCCL_EMIT_LTO_IR) -> librccl_device.ltoir
 # ===========================================================================
-# This is a *variant* of the bitcode library build, not a different library:
-# same translation unit, same public surface, same defines plus one. The only
-# difference is that the optimizer never runs, so inlining is deferred to the
-# consumer's device link.
-#
-#   -O1                            : pick an optimization level that does NOT
-#                                    make the frontend stamp optnone/noinline
-#                                    on every function. -O0 would, and optnone
-#                                    permanently forbids the link-time inliner.
-#   -Xclang -disable-llvm-passes   : emit the frontend's IR before the pass
-#                                    pipeline runs. This -- not an inline
-#                                    attribute -- is what defers inlining.
-#
-# Net effect: unoptimized but still fully optimizable, which is the property
-# nvcc's -dlto --ltoir gives on the NVIDIA side.
+# Same TU as the .bc; -O1 -Xclang -disable-llvm-passes defers inlining to the consumer's link.
 if(NCCL_EMIT_LTO_IR)
 
 ##### Compiler flags #####

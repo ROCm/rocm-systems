@@ -26,27 +26,10 @@
 #     Example: cmake --build $(BUILDDIR) --target hipify_all
 #
 
-##########################################################################
-# Shared configuration.
-#
-# Everything in this section is needed by BOTH the llvm_ir (EMIT_LLVM_IR)
-# and ltoir (NCCL_EMIT_LTO_IR) targets, so it must sit outside the
-# EMIT_LLVM_IR guard below. The two knobs are independent -- NCCL's own
-# bindings/ir/Makefile has no guard at all -- and `make NCCL_EMIT_LTO_IR=1`
-# with EMIT_LLVM_IR=0 has to work.
-##########################################################################
+# Shared by llvm_ir and ltoir; kept outside the EMIT_LLVM_IR guard.
 
 ##### Knob defaults #####
-# EMIT_LLVM_IR deliberately has no default here: standalone `make llvm_ir`
-# has always worked with the knob unset, and that stays true.
-#
-# NCCL_EMIT_LTO_IR is opt-in, matching the only other two places it is
-# spelled: `NCCL_EMIT_LTO_IR ?= 0` in projects/rccl/Makefile and
-# `option(NCCL_EMIT_LTO_IR ... OFF)` in projects/rccl/CMakeLists.txt.
-# Without this default, `$(NCCL_EMIT_LTO_IR)` expands to the empty string
-# when unset, `ifneq ($(NCCL_EMIT_LTO_IR), 0)` is true, and the plain
-# `make build` that used to produce only librccl_device.bc would silently
-# start producing a 12 MB librccl_device.ltoir as well.
+# EMIT_LLVM_IR has no default (standalone `make llvm_ir` works unset); LTO IR is opt-in.
 NCCL_EMIT_LTO_IR ?= 0
 
 ##### Source #####
@@ -209,19 +192,7 @@ llvm_ir:
 
 endif
 
-##########################################################################
-# ltoir: librccl_device.ltoir
-#
-# RCCL's analogue of NCCL's libnccl_device.ltoir. Same knob name
-# (NCCL_EMIT_LTO_IR), same target name (ltoir), same build-tree location
-# ($(LIBDIR)), same deferred-inlining semantics, so a consumer that knows
-# how to drive NCCL's LTO IR finds RCCL's in the same place.
-#
-# What NCCL produces with a single `nvcc -dlto --ltoir` is frontend IR with
-# the optimizer not yet run: inlining is undecided, so the device linker
-# later inlines with the real call site visible. It is unoptimized but still
-# fully OPTIMIZABLE. That last word is the whole design constraint.
-##########################################################################
+# ltoir: librccl_device.ltoir, RCCL's analogue of NCCL's deferred-inlining libnccl_device.ltoir.
 
 ifneq ($(NCCL_EMIT_LTO_IR), 0)
 
@@ -235,22 +206,7 @@ LTO_IR_CXX_STD ?= $(BITCODE_CXX_STD)
 LTO_IR_RAW := $(OBJDIR)/librccl_device.ltoir.raw
 
 ##### Compiler flags #####
-# There is no --ltoir on AMDGPU. The analogue is
-#   -c -emit-llvm -O1 -Xclang -disable-llvm-passes
-# -O1 sets CodeGenOpts.OptimizationLevel so the frontend does NOT stamp
-# optnone/noinline; -disable-llvm-passes then suppresses the pipeline, so
-# the IR arrives unoptimized but unencumbered.
-#
-# -O0 is NOT a substitute. Measured on gfx950 / ROCm 7.2.4, -O0 stamps
-# `noinline optnone` on every function with or without
-# -disable-llvm-passes. optnone permanently forbids the downstream
-# link-time inliner from touching the function -- strictly worse than
-# --ltoir, and not removable downstream. -fno-inline and
-# -finline-hint-functions are out for the same reason: both stamp noinline.
-#
-# Both macros, never one: __NCCL_DEVICE_LTOIR_LIB__ is a MODIFIER of the
-# bitcode-library build, not a replacement for it. See the #error in
-# nccl_device_wrapper.h for the two things that break otherwise.
+# AMDGPU analogue of --ltoir: -O1 avoids -O0's optnone, -disable-llvm-passes defers inlining.
 LTO_IR_CLANG_FLAGS := -c -emit-llvm -O1 -Xclang -disable-llvm-passes \
 	-std=$(LTO_IR_CXX_STD) \
 	-x hip \
@@ -265,22 +221,7 @@ LTO_IR_CLANG_FLAGS := -c -emit-llvm -O1 -Xclang -disable-llvm-passes \
 	-D__HIP_PLATFORM_AMD__=1
 
 ##### opt passes #####
-# internalize ONLY.
-#
-# nvcc --ltoir has its own symbol discipline; pristine clang IR does not --
-# every non-static C++ header function survives as an external mangled
-# symbol, so without this the artifact's export surface would not match the
-# .bc's. Measured: the raw compile has 213 defined T symbols of which 50 are
-# mangled; after internalize it has exactly the .bc's 82, none mangled.
-#
-# No -internalize-public-api-list is needed, unlike the .bc recipe above:
-# NCCL_IR_EXPORT's `used, retain` already puts every thunk into @llvm.used,
-# which internalize honours as a root set.
-#
-# NOT `inline`. NOT `globaldce`. Those are precisely what this artifact
-# exists to avoid -- adding either silently turns it back into
-# librccl_device.bc, and only the define-count test in
-# test/ir-device/tests/test_lto_ir.py would notice.
+# internalize only (roots = @llvm.used); inline/globaldce would turn this back into the .bc.
 LTO_IR_OPT_PASSES := --passes=internalize
 
 ##### Rules #####
@@ -322,21 +263,8 @@ clean:
 
 .PHONY: llvm_ir ltoir build clean
 
-# Serialize IR-gen to avoid a race, mirroring NCCL's guard at the bottom of
-# its bindings/ir/Makefile, including the nested-ifneq spelling.
-#
-# Order-only (|), never a real prerequisite: the .ltoir must NOT regenerate
-# just because the .bc changed. The two artifacts are independent outputs of
-# the same source, not derived from one another.
-#
-# NCCL hangs this off $(FINAL_LTO_IR) because there its .ltoir IS the single
-# nvcc compile. RCCL splits the recipe into a raw compile plus an internalize
-# step, so the equivalent of NCCL's intent -- keep the two expensive IR
-# compiles of this heavily-templated TU from running concurrently under -j --
-# is to hang it off $(LTO_IR_RAW). Hanging it off $(FINAL_LTO_IR) instead
-# would only serialize the cheap internalize step and let both clang
-# invocations overlap, which is the thing being guarded against.
-ifneq ($(EMIT_LLVM_IR), 0)
+# Serialize the two IR compiles under -j (order-only, as in NCCL's bindings/ir/Makefile).
+ifneq ($(filter-out 0,$(EMIT_LLVM_IR)),)
 ifneq ($(NCCL_EMIT_LTO_IR), 0)
 $(LTO_IR_RAW): | $(FINAL_BC)
 endif
