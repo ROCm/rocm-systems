@@ -60,6 +60,8 @@ set_tests_properties(
                45
                LABELS
                "samples;pc-sampling"
+               RUN_SERIAL
+               ON
                ENVIRONMENT
                "${pc-sampling-env}"
                FAIL_REGULAR_EXPRESSION

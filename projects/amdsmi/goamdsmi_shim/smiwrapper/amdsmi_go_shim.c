@@ -456,10 +456,12 @@ uint32_t goamdsmi_cpu_prochot_status_get(uint32_t socket_index) {
 uint32_t goamdsmi_cpu_socket_power_get(uint32_t socket_index) {
   bool readSuccess = false;
   uint32_t socket_power_watts = 0;
+#ifdef ENABLE_ESMI_LIB
   if ((AMDSMI_STATUS_SUCCESS ==
        amdsmi_get_cpu_socket_power(amdsmi_processor_handle_all_cpu_across_socket[socket_index],
                                    &socket_power_watts)))
     readSuccess = true;
+#endif
   if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
     printf("AMDSMI, %s for Socket:%d, CpuSocketPowerWatt:%u\n", readSuccess ? "Success" : "Failed",
            socket_index, socket_power_watts);
@@ -471,10 +473,12 @@ uint32_t goamdsmi_cpu_socket_power_get(uint32_t socket_index) {
 uint32_t goamdsmi_cpu_socket_power_cap_get(uint32_t socket_index) {
   bool readSuccess = false;
   uint32_t socket_power_cap_watts = 0;
+#ifdef ENABLE_ESMI_LIB
   if ((AMDSMI_STATUS_SUCCESS ==
        amdsmi_get_cpu_socket_power_cap(amdsmi_processor_handle_all_cpu_across_socket[socket_index],
                                        &socket_power_cap_watts)))
     readSuccess = true;
+#endif
   if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {
     printf("AMDSMI, %s for Socket:%d, CpuSocketPowerCapWatt:%u\n",
            readSuccess ? "Success" : "Failed", socket_index, socket_power_cap_watts);

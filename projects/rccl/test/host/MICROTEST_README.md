@@ -161,9 +161,12 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     I/O, timeout recovery, keep-alives, and fallback-link maintenance.
   - `ras/diagnostics_gpu.cc` (`RAS_DIAGNOSTICS_GPU_CC_PATH`, from
     `ras-diagnostics-gpu-test.cc`); suite `RasDiagnosticsGpuMicrotest.*`. Covers
-    GPU inventory, CUDA and NVIDIA graphics driver versions, ECC, and NVLink
-    collection and summaries, including failed NVML queries and bounded
-    driver-version strings.
+    the AMD SMI arm against the `amd_smi_diag*` fakes in `fakes/amdsmi_fakes.cc`:
+    GPU inventory, HIP and AMD GPU driver versions, ECC, and XGMI collection and
+    summaries, including failed queries, bounded driver-version strings, AMD SMI
+    unavailable on some or all nodes, the corrected-error threshold, down and
+    missing XGMI links, and partition bus IDs (CPX, DPX) that fall back to the
+    physical GPU. Also checks that `rasDiagnosticsGpuInit` loads AMD SMI up front.
   - `ras/peers.cc` (`RAS_PEERS_CC_PATH`, from `ras-peers-test.cc`); suite
     `RasPeersMicrotest.*`. Covers peer conversion and merging, update
     propagation, link selection, dead-peer tracking, address ordering, and
@@ -1165,8 +1168,9 @@ triage it into the right bucket:
 
 ## Coverage
 
-`rccl-UnitTestsMicroTransportP2p` always builds with llvm source-based coverage
-(`-fprofile-instr-generate -fcoverage-mapping`). Render a report with ROCm's
+`rccl-UnitTestsMicroTransportP2p` builds with llvm source-based coverage
+(`-fprofile-instr-generate -fcoverage-mapping`) only when coverage is requested
+with `-DENABLE_CODE_COVERAGE=ON`. Render a report with ROCm's
 llvm tooling directly. Scope it to the unit under test -- the file compiled in
 via `P2P_CC_PATH`, i.e. the unroll-transformed
 `hipify/src/transport/p2p_tmp.cc` (there is no plain `p2p.cc` in the hipify
@@ -1459,8 +1463,9 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroAmdsmiWrap         # src/misc/amdsmi_wrap.cc
 ```
 
-Disable coverage instrumentation for the standalone host-only test binaries
-with `-DHOST_TEST_COVERAGE=OFF`.
+Coverage instrumentation for the standalone host-only test binaries is OFF by
+default; enable it with `-DENABLE_CODE_COVERAGE=ON` (`run_host_tests.sh
+configure` does this).
 
 
 ### Peers review follow-up

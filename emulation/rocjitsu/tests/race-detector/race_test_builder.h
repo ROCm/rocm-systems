@@ -12,6 +12,7 @@
 #include "rocjitsu/vm/plugins/race_detector/core/race_detector.h"
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
 
+#include <array>
 #include <cassert>
 #include <cstdint>
 #include <memory>
@@ -84,9 +85,26 @@ public:
     constexpr MemoryOrderClass memoryOrder = MemoryOrderClass::VMEM;
     waves_[wave]->prepareForCounterIncrement(amdgpu::WaitCounterType::VMCNT);
     ldsAddrs.resize(waveSize_, 0);
+    // Validate each active lane's write against outstanding reads, as the plugin does.
+    for (int lane = 0; lane < waveSize_; ++lane)
+      if (exec & (1ULL << lane))
+        detector_->validateWrite(static_cast<int>(ldsAddrs[lane]), WaveId{wave}, lane, bytesPerLane,
+                                 memoryOrder);
     waves_[wave]->registerLdsEvent(testInstruction(pc_++), MemoryEventType::GLOBAL_TO_LDS,
                                    /*registers=*/{}, exec, waveSize_, ldsAddrs, bytesPerLane,
                                    /*byteMask=*/0xF, amdgpu::WaitCounterType::VMCNT, memoryOrder);
+  }
+
+  /// Register a tensor DMA load into LDS (tracked by tensorcnt). The load
+  /// writes every range; it is validated against outstanding LDS reads.
+  void tensorLoadToLds(int wave, std::vector<LdsByteRange> ranges) {
+    tensorTransfer(wave, MemoryEventType::GLOBAL_TO_LDS, ranges);
+  }
+
+  /// Register a tensor DMA store from LDS (tracked by tensorcnt). The store
+  /// reads every range; it is validated against outstanding LDS writes.
+  void tensorStoreFromLds(int wave, std::vector<LdsByteRange> ranges) {
+    tensorTransfer(wave, MemoryEventType::LDS_TO_GLOBAL, ranges);
   }
 
   /// Register a global store from VGPRs (tracked by vmcnt).
@@ -213,6 +231,12 @@ public:
     waves_[wave]->dispatch(wait);
   }
 
+  void waitTensorcnt(int wave, int tensorcnt) {
+    PendingWaitCount wait;
+    wait.add(amdgpu::WaitCounterType::TENSORCNT, tensorcnt);
+    waves_[wave]->dispatch(wait);
+  }
+
   /// Barrier: flush all waves' barrier-pending events (simulates s_barrier).
   void barrier() {
     for (auto *w : waves_) {
@@ -319,6 +343,30 @@ public:
   const EventRegistry &events() const { return detector_->events(); }
 
 private:
+  /// A transfer has no lanes; its violations report lane -1. Validates and
+  /// registers the same bytes as the plugin's tensor DMA hook.
+  void tensorTransfer(int wave, MemoryEventType type, std::span<const LdsByteRange> ranges) {
+    // Completion is in issue order (TENSOR); LDS accesses are checked as
+    // unordered, a conservative rule, as in the plugin.
+    constexpr MemoryOrderClass memoryOrder = MemoryOrderClass::TENSOR;
+    constexpr MemoryOrderClass ldsAccessOrder = MemoryOrderClass::UNORDERED;
+    for (const auto &range : ranges) {
+      const auto bytes = static_cast<int>(
+          detector_->ldsBytesInRange(range.address, range.bytes, /*elementBytes=*/1));
+      if (bytes == 0)
+        continue;
+      const int addr = static_cast<int>(range.address);
+      if (type == MemoryEventType::GLOBAL_TO_LDS)
+        detector_->validateWrite(addr, WaveId{wave}, /*lane=*/-1, bytes, ldsAccessOrder);
+      else
+        detector_->validateRead(addr, WaveId{wave}, /*lane=*/-1, bytes, ldsAccessOrder);
+    }
+    const std::array obligations{
+        amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::TENSORCNT, memoryOrder}};
+    waves_[wave]->registerLdsRangeEvent(testInstruction(pc_++), type, ranges, obligations,
+                                        memoryOrder);
+  }
+
   std::unique_ptr<RaceDetector> detector_;
   std::vector<WaveRaceState *> waves_;
   std::vector<RaceViolation> violations_;
