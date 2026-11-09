@@ -678,31 +678,26 @@ constexpr auto k_timemory_only_sampling_settings = std::to_array<std::string_vie
     env_vars::SAMPLING_INCLUDE_INLINES,
 });
 
+// A boolean setting's value, false if it is not registered. Reads the settings directly,
+// so it is safe inside configure_settings(), unlike the getters that use get_config().
 [[nodiscard]] bool
-use_experimental_callstack_sampler()
+get_setting_flag(const char* name)
 {
-    return get_setting_value<bool>(
-               std::string{ env_vars::USE_EXPERIMENTAL_CALLSTACK_SAMPLER })
-        .value_or(false);
+    return get_setting_value<bool>(std::string{ name }).value_or(false);
 }
 
 void
 validate_cpu_snap_sampling_settings()
 {
-    auto const use_sampling =
-        get_setting_value<bool>(std::string{ env_vars::USE_SAMPLING }).value_or(false);
-    if(!use_sampling || !use_experimental_callstack_sampler())
+    if(!get_setting_flag(env_vars::USE_SAMPLING) ||
+       !get_setting_flag(env_vars::USE_EXPERIMENTAL_CALLSTACK_SAMPLER))
     {
         return;
     }
 
-    auto const is_enabled = [](const char* name) {
-        return get_setting_value<bool>(std::string{ name }).value_or(false);
-    };
-
     // cpu-snap runs only its signal trigger here (no perf_event_open), and that trigger
     // does not expose CPU-time sampling yet.
-    if(is_enabled(env_vars::SAMPLING_CPUTIME))
+    if(get_setting_flag(env_vars::SAMPLING_CPUTIME))
     {
         throw std::runtime_error(fmt::format(
             "Error! {}=ON samples wall time only for now, but {} is enabled. Disable "
@@ -710,7 +705,7 @@ validate_cpu_snap_sampling_settings()
             env_vars::USE_EXPERIMENTAL_CALLSTACK_SAMPLER, env_vars::SAMPLING_CPUTIME,
             env_vars::USE_EXPERIMENTAL_CALLSTACK_SAMPLER));
     }
-    if(is_enabled(env_vars::SAMPLING_OVERFLOW))
+    if(get_setting_flag(env_vars::SAMPLING_OVERFLOW))
     {
         throw std::runtime_error(fmt::format(
             "Error! {}=ON has no overflow sampling, but {} is enabled. Disable it or "
@@ -2820,13 +2815,15 @@ get_use_sampling()
 bool
 get_use_timemory_sampling()
 {
-    return get_use_sampling() && !use_experimental_callstack_sampler();
+    return get_use_sampling() &&
+           !get_setting_flag(env_vars::USE_EXPERIMENTAL_CALLSTACK_SAMPLER);
 }
 
 bool
 get_use_cpu_snap_sampling()
 {
-    return get_use_sampling() && use_experimental_callstack_sampler();
+    return get_use_sampling() &&
+           get_setting_flag(env_vars::USE_EXPERIMENTAL_CALLSTACK_SAMPLER);
 }
 
 bool&
