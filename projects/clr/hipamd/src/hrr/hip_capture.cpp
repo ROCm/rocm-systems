@@ -1,6 +1,29 @@
 /*
  * Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
  *
+ * hip_capture.cpp — Hand-written capture shims for complex HIP APIs.
+ *
+ * Covers the MANUAL_CAPTURE_APIS set defined in gen_hrr_api_args.py:
+ *   - Memcpy H2D variants with blob snapshotting (hipMemcpy, hipMemcpyAsync,
+ *     hipMemcpyHtoD, hipMemcpyHtoDAsync, hipMemcpyWithStream)
+ *   - Module load with code object snapshotting (hipModuleLoad*)
+ *   - Module unload (hipModuleUnload) to drop the program hash cache entry
+ *   - Kernel launch with arg introspection via kernel->signature()
+ *   - Fat binary registration (__hipRegisterFatBinary)
+ *   - Host memory registration (hipHostRegister / hipHostUnregister)
+ *
+ * Everything else (malloc/free, stream/event, memset, device sync, etc.)
+ * is auto-generated in hip_capture_generated.cpp.
+ *
+ * All shims write hrr_args_* structs as event payloads (uniform format).
+ * Kernel launch is the exception — it uses a variable-length binary payload
+ * (the format defined in hrr_reader.h parse_kernel_launch).
+ *
+ * g_real_table, g_cap_table, g_compiler_installed are defined here (non-static)
+ * so hip_capture_generated.cpp can extern them.
+ *
+ * Independence rule: zero dependency on hipamd/src/profiler/.
+ *
  * SPDX-License-Identifier: MIT
  */
 
