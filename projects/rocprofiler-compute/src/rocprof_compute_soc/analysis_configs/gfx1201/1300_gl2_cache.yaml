@@ -35,12 +35,12 @@ Panel Config:
             min: MIN(GL2C_ATOMIC_sum / $denom)
             max: MAX(GL2C_ATOMIC_sum / $denom)
             unit: (Count + $normUnit)
-          GCEA Read Requests (DRAM):
+          EA Read Requests (DRAM):
             avg: SUM(GL2C_EA_RDREQ_DRAM_sum) / SUM($denom)
             min: MIN(GL2C_EA_RDREQ_DRAM_sum / $denom)
             max: MAX(GL2C_EA_RDREQ_DRAM_sum / $denom)
             unit: (Count + $normUnit)
-          GCEA Write Requests (DRAM):
+          EA Write Requests (DRAM):
             avg: SUM(GL2C_EA_WRREQ_DRAM_sum) / SUM($denom)
             min: MIN(GL2C_EA_WRREQ_DRAM_sum / $denom)
             max: MAX(GL2C_EA_WRREQ_DRAM_sum / $denom)

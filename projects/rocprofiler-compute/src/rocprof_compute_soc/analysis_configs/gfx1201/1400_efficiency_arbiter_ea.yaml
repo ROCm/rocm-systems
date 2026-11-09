@@ -1,13 +1,13 @@
-# gfx1201 (RDNA 4, Navi 48) -- Graphics Core Efficiency Arbiter (GCEA)
+# gfx1201 (RDNA 4, Navi 48) -- Efficiency Arbiter (EA)
 # Metric bodies are carried from the gfx1201 metrics port and placed in the
 # gfx12 panel template. Tables with no carried metric are empty.
 Panel Config:
   id: 1400
-  title: Graphics Core Efficiency Arbiter (GCEA)
+  title: Efficiency Arbiter (EA)
   data source:
     - metric_table:
         id: 1401
-        title: GCEA Utilization
+        title: EA Utilization
         header: &id001
           metric: Metric
           avg: Avg
@@ -42,7 +42,7 @@ Panel Config:
             unit: (Count + $normUnit)
     - metric_table:
         id: 1402
-        title: GCEA Traffic Bandwidth
+        title: EA Traffic Bandwidth
         header: *id001
         metric:
           DRAM Read Requests:
@@ -87,7 +87,7 @@ Panel Config:
             unit: (Count + $normUnit)
     - metric_table:
         id: 1403
-        title: GCEA-SDP Interface - Outstanding Requests
+        title: EA-SDP Interface - Outstanding Requests
         header: *id001
         metric:
           Read Returns:
@@ -107,7 +107,7 @@ Panel Config:
             unit: (Count + $normUnit)
     - metric_table:
         id: 1404
-        title: GCEA-SDP Interface - Stalls
+        title: EA-SDP Interface - Stalls
         header: *id001
         metric:
           DRAM Stall:
@@ -127,27 +127,27 @@ Panel Config:
             unit: (Cycles + $normUnit)
   metrics_description:
     SARB Busy: >-
-      Not available on gfx1201. The GCEA counters have no busy or always-count event.
+      Not available on gfx1201. The EA counters have no busy or always-count event.
     SARB Stalled: >-
-      Cycles the GCEA front end was ready but the back end could not send to SDP.
+      Cycles the EA front end was ready but the back end could not send to SDP.
     SARB Starving: >-
-      Cycles the GCEA back end was ready but the front end had nothing to send.
+      Cycles the EA back end was ready but the front end had nothing to send.
     SARB Total Requests: >-
-      Requests GCEA sent to SDP: DRAM reads and writes, IO reads and writes, and MAM writes.
+      Requests EA sent to SDP: DRAM reads and writes, IO reads and writes, and MAM writes.
     SARB DRAM Requests: >-
-      DRAM read and write requests GCEA sent to SDP.
+      DRAM read and write requests EA sent to SDP.
     DRAM Read Chained Requests: >-
       Not available on gfx1201.
     DRAM Read Banks Active: >-
       Not available on gfx1201.
     DRAM Read Size (32B increments): >-
-      DRAM read data GCEA requested, in 32-byte units.
+      DRAM read data EA requested, in 32-byte units.
     DRAM Write Chained Requests: >-
       Not available on gfx1201.
     DRAM Write Banks Active: >-
       Not available on gfx1201.
     DRAM Write Size (32B increments): >-
-      DRAM write data GCEA requested, in 32-byte units.
+      DRAM write data EA requested, in 32-byte units.
     Read Returns: >-
       Read response data beats from SDP.
     Write Returns: >-
@@ -155,8 +155,8 @@ Panel Config:
     Probe Requests: >-
       Not available on gfx1201.
     DRAM Stall: >-
-      Cycles the DRAM front end was ready but the GCEA back end for DRAM was not.
+      Cycles the DRAM front end was ready but the EA back end for DRAM was not.
     IO Read Stall: >-
-      Cycles the IO read front end was ready but the GCEA back end for IO reads was not.
+      Cycles the IO read front end was ready but the EA back end for IO reads was not.
     IO Write Stall: >-
-      Cycles the IO write front end was ready but the GCEA back end for IO writes was not.
+      Cycles the IO write front end was ready but the EA back end for IO writes was not.

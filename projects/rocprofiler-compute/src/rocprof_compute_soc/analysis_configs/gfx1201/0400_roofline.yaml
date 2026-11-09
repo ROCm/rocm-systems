@@ -5,7 +5,7 @@
 # Cache hierarchy: GL0 (TCP) -> GL1 -> GL2 -> Infinity Cache -> DRAM.
 # The DRAM column of roofline.csv (DRAMBw) holds the measured DRAM bandwidth
 # and the MALL column the measured Infinity Cache bandwidth.
-# Device-memory bytes are 32-byte granules of GL2C/GCEA requests destined for DRAM
+# Device-memory bytes are 32-byte granules of GL2C/EA requests destined for DRAM
 # (GL2C_EA_RDREQ_DRAM_32B, PERF_SEL 0xa7; GL2C_EA_WRREQ_DRAM_32B, PERF_SEL 0xa8).
 # The unsized EA_RDREQ_DRAM / EA_WRREQ_DRAM counters (0xa5 / 0xa6) mix 32-byte
 # through 128-byte requests, so a fixed 256 bytes per request overstates them.
@@ -119,11 +119,11 @@ Panel Config:
     LDS BW: >-
       Achieved bandwidth for Local Data Share memory operations.
     DRAM BW: >-
-      Bandwidth of GL2C/GCEA read and write requests destined for DRAM, compared
+      Bandwidth of GL2C/EA read and write requests destined for DRAM, compared
       with the measured DRAM bandwidth. These requests are also served by the
       Infinity Cache, so a working set that fits in it can exceed this peak.
     DRAM-Destined BW (Infinity Cache Peak): >-
-      Bandwidth of GL2C/GCEA read and write requests destined for DRAM, compared
+      Bandwidth of GL2C/EA read and write requests destined for DRAM, compared
       with the measured Infinity Cache bandwidth. No counter separates
       Infinity Cache hits from DRAM traffic.
     AI L2: >-
@@ -135,7 +135,7 @@ Panel Config:
     AI LDS: >-
       Arithmetic intensity relative to Local Data Share traffic.
     AI DRAM: >-
-      Arithmetic intensity relative to GL2C/GCEA requests destined for DRAM. The
+      Arithmetic intensity relative to GL2C/EA requests destined for DRAM. The
       point is drawn against both the DRAM roof and the Infinity Cache (MALL)
       roof, since those requests can hit in the Infinity Cache.
     Performance (GFLOPs): >-
