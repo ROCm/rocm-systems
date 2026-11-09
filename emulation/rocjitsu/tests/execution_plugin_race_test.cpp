@@ -1071,15 +1071,8 @@ TEST_F(TensorDmaRaceTest, AsyncStoreLaneStraddlingTheAllocationTracksItsInRangeB
   EXPECT_TRUE(ds_write(1, 244));
 }
 
-// An async copy with no active lanes still issues and takes an ASYNCcnt slot
-// while other async copies are pending, so it counts toward partial waits.
-TEST_F(TensorDmaRaceTest, AsyncStoreWithoutActiveLanesKeepsItsAsynccntSlot) {
-  async_store(0, 0);
-  async_store(0, kInvalidLdsAddress, sizeof(uint32_t), std::nullopt, /*exec=*/0);
-  wait_asynccnt(0, 1);
-  EXPECT_FALSE(ds_write(0, 0));
-}
-
+// An async store with no active lanes takes one ASYNCcnt slot and no more: with
+// it and an older store pending, waiting for all but two retires neither.
 TEST_F(TensorDmaRaceTest, AsyncStoreWithoutActiveLanesLeavesTheOlderStorePendingUntilCovered) {
   async_store(0, 0);
   async_store(0, kInvalidLdsAddress, sizeof(uint32_t), std::nullopt, /*exec=*/0);
