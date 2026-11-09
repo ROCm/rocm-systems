@@ -19,6 +19,7 @@ build:
    jobs:
      post_checkout:
        - git sparse-checkout add projects/clr/hipamd/include
+       - git sparse-checkout add projects/hrr/include
    apt_packages:
      - "doxygen" # Ubuntu 24.04 ships doxygen 1.9.8, previously provided by conda
      - "gfortran" # For pre-processing fortran sources

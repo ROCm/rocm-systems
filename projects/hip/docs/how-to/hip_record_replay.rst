@@ -124,20 +124,16 @@ Sharing an archive
 
 .. warning::
 
-  An archive is unencrypted and confidential. It holds host memory the workload
-  copied to or from the GPU or registered with HIP, such as model weights,
-  prompts, passwords, keys and tokens, together with the GPU code it ran and the
-  kernel names. HRR does not encrypt, redact or anonymise any of it.
+  Capture writes the notice below to ``NOTICE.txt`` at the archive root. Read it
+  before an archive leaves the machine.
 
-Capture writes ``NOTICE.txt`` at the archive root, stating what the archive can
-contain and how it may be shared. Read it before an archive leaves the machine:
-never post one publicly (GitHub issues are public), and share it only with
-recipients authorised to receive that code and data, on terms agreed in advance.
-The full notice is quoted in
+.. literalinclude:: ../../../hrr/include/hrr/hrr_archive_notice.h
+   :language: text
+   :start-after: /* hrr-archive-notice-begin */
+   :end-before: /* hrr-archive-notice-end */
+
+The HRR sources explain what the notice covers in
 `Sharing an archive <https://github.com/ROCm/rocm-systems/blob/develop/projects/hrr/PRIVACY.md#sharing-an-archive>`_.
-
-Replay runs the recorded GPU code on your GPU with your user's rights, so replay
-an archive only if you trust whoever produced it.
 
 Your first replay
 =======================================================
