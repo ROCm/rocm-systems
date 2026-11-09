@@ -1104,6 +1104,17 @@ target_link_libraries(
         GTest::gtest_main
 )
 rj_configure_target(rocjitsu_fault_injection_tests PRIVATE_INCLUDES WARNINGS)
+if(TARGET probe_fault_injection_pc_global)
+    add_dependencies(
+        rocjitsu_fault_injection_tests
+        probe_fault_injection_pc_global
+    )
+    target_compile_definitions(
+        rocjitsu_fault_injection_tests
+        PRIVATE
+            RJ_FAULT_INJECTION_PC_GLOBAL_OBJECT="${KERNEL_OUTPUT_DIR}/fault_injection_pc_global.hsaco"
+    )
+endif()
 set(RJ_FAULT_INJECTION_CORPUS_OBJECT
     ""
     CACHE FILEPATH

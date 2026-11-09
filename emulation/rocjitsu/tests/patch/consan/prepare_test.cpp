@@ -9,6 +9,7 @@
 #include "rocjitsu/code/consan/image/artifact.h"
 #include "rocjitsu/code/consan/image/metadata.h"
 #include "rocjitsu/code/patch/consan/prepare.h"
+#include "rocjitsu/code/patch/fault_injection/drop_barrier.h"
 #include "rocjitsu/isa/register_set.h"
 
 #include <gtest/gtest.h>
@@ -71,6 +72,67 @@ TEST_F(ConSanPrepare, AllAdmittedCompanionsHaveOwningValidatedReplayableArtifact
     EXPECT_EQ(repeated.value().image, artifact.value().image);
     EXPECT_EQ(repeated.value().manifest, artifact.value().manifest);
   }
+}
+
+TEST_F(ConSanPrepare, DropBarrierMutantReceivesFreshPreparation) {
+  std::vector<uint8_t> source_image = load("barrier");
+  ASSERT_FALSE(source_image.empty());
+  const std::vector<uint8_t> pristine = source_image;
+  const TargetProfile *target = target_profile("gfx1100");
+  ASSERT_NE(target, nullptr);
+  EXPECT_TRUE(prepare(pristine, *target, "lds_producer_consumer", error_).failed());
+  EXPECT_EQ(error_.code, InputErrorCode::UnsupportedSynchronization);
+
+  std::vector<uint8_t> mutant;
+  {
+    FaultMutationContext context(source_image);
+    FaultMutationError mutation_error;
+    const FailureOr<FaultBarrierInventory> inventory =
+        discover_drop_barriers(context, "lds_producer_consumer", mutation_error);
+    ASSERT_TRUE(inventory.succeeded()) << mutation_error.message;
+    ASSERT_EQ(inventory.value().owner().entry_offset, 0u);
+    ASSERT_EQ(inventory.value().barriers().size(), 1u);
+    const FailureOr<DropBarrierSelection> selected =
+        select_drop_barrier(inventory.value(), {}, mutation_error);
+    ASSERT_TRUE(selected.succeeded()) << mutation_error.message;
+    ASSERT_EQ(selected.value().barrier().members.size(), 1u);
+    EXPECT_EQ(selected.value().barrier().members.front().offset, 0x34u);
+    const FailureOr<DropBarrierResult> dropped =
+        apply_drop_barrier(context, selected.value(), mutation_error);
+    ASSERT_TRUE(dropped.succeeded()) << mutation_error.message;
+    EXPECT_EQ(dropped.value().logical_mutation_count, 1u);
+    EXPECT_TRUE(std::ranges::equal(context.image(), pristine));
+    EXPECT_EQ(source_image, pristine);
+    mutant = dropped.value().image;
+  }
+  ASSERT_FALSE(mutant.empty());
+  EXPECT_NE(mutant, pristine);
+
+  // Preparation must own and reanalyze the emitted image after the FI context,
+  // inventory, selection and result have expired, including a second DBI pass.
+  const FailureOr<PreparedArtifact> artifact =
+      prepare(mutant, *target, "lds_producer_consumer", error_);
+  ASSERT_TRUE(artifact.succeeded()) << error_.message;
+  const Manifest &manifest = artifact.value().manifest;
+  EXPECT_EQ(manifest.original.sha256, digest(mutant));
+  EXPECT_NE(manifest.original.sha256, digest(pristine));
+  EXPECT_EQ(manifest.original.bytes, mutant.size());
+  ASSERT_EQ(manifest.sites.size(), 2u);
+  // native_lds.s case 7 has ds_store_b32 at 0x28 and ds_load_b32 at 0x40.
+  // Keep these source expectations independent of the mutant input analysis.
+  EXPECT_EQ(manifest.sites[0].id, 0u);
+  EXPECT_EQ(manifest.sites[0].original_offset, 0x28u);
+  EXPECT_EQ(manifest.sites[0].access, AccessKind::Write);
+  EXPECT_EQ(manifest.sites[0].original_size, 8u);
+  EXPECT_EQ(manifest.sites[1].id, 1u);
+  EXPECT_EQ(manifest.sites[1].original_offset, 0x40u);
+  EXPECT_EQ(manifest.sites[1].access, AccessKind::Read);
+  EXPECT_EQ(manifest.sites[1].original_size, 8u);
+  ContractError image_error;
+  EXPECT_TRUE(
+      verify_artifact_images(manifest, mutant, artifact.value().image, &image_error).succeeded())
+      << image_error.message;
+  EXPECT_EQ(source_image, pristine);
 }
 
 TEST_F(ConSanPrepare, NonExecutableOriginalCannotProduceAPublishableArtifact) {
