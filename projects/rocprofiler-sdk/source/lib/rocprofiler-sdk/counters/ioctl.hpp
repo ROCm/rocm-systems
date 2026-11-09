@@ -39,16 +39,17 @@ get_profiler_ioctl_request_for_version(uint32_t major_version, uint32_t minor_ve
 uint32_t
 kfd_profiler_version();
 
-// Whether the given KFD profiler interface version supports dispatch mode (see
-// KFD_IOC_PROFILER_VERSION_NUM history in kfd_ioctl.h). Exposed separately from
-// perfmon_clock_supported() so the version-comparison logic can be unit tested without a real
-// /dev/kfd.
+// Whether the given KFD profiler interface version forces the perfmon clock on for
+// KFD_IOC_PROFILER_PMC requests (see KFD_IOC_PROFILER_VERSION_NUM history in kfd_ioctl.h).
+// Exposed separately from perfmon_clock_supported() so the version-comparison logic can be
+// unit tested without a real /dev/kfd.
 bool
 perfmon_clock_supported_for_version(uint32_t version);
 
-// Whether the running KFD supports dispatch mode, i.e. perfmon_clock_supported_for_version()
-// on the version reported by kfd_profiler_version(). Used internally by
-// counter_collection_dispatch_perfmon_enable() to gate the dispatch-mode ioctl below.
+// Whether the running KFD forces the perfmon clock on for KFD_IOC_PROFILER_PMC requests, i.e.
+// perfmon_clock_supported_for_version() on the version reported by kfd_profiler_version().
+// Used internally by counter_collection_dispatch_perfmon_enable() to gate the dispatch-mode
+// ioctl below.
 bool
 perfmon_clock_supported();
 
