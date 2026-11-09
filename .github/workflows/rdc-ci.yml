@@ -665,7 +665,7 @@ jobs:
   rdc_clang:
     if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork) }}
     needs: rdc_build
-    runs-on: lstt_ci_runners
+    runs-on: lstt-ci-runner
     timeout-minutes: 60
     continue-on-error: ${{ vars.RDC_CLANG_GATING != 'true' }}
     container:
