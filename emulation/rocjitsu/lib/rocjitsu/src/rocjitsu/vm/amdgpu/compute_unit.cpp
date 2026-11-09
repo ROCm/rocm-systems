@@ -729,11 +729,23 @@ void ComputeUnitCore::notify_barrier_complete(std::span<Wavefront *> members,
                                               uint8_t completion_bit) {
   if (members.empty())
     return;
-  BarrierKind kind = BarrierKind::Workgroup;
-  if (completion_bit == kNamedBarrierBit)
+  BarrierKind kind;
+  switch (completion_bit) {
+  case kNamedBarrierBit:
     kind = BarrierKind::Named;
-  else if (completion_bit == kClusterBarrierBit || completion_bit == kClusterTrapBarrierBit)
+    break;
+  case kWorkgroupBarrierBit:
+  case kWorkgroupTrapBarrierBit:
+    kind = BarrierKind::Workgroup;
+    break;
+  case kClusterBarrierBit:
+  case kClusterTrapBarrierBit:
     kind = BarrierKind::Cluster;
+    break;
+  default:
+    assert(false && "unknown barrier completion bit");
+    return;
+  }
   plugin_group_->onAmdgpuBarrierResolved(members, kind);
 }
 
