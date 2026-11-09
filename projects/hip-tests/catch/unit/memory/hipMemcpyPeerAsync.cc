@@ -5,6 +5,8 @@
  */
 
 #include <hip/hip_runtime_api.h>
+#include <algorithm>
+#include <vector>
 #include <hip_test_common.hh>
 #include <resource_guards.hh>
 #include <utils.hh>
@@ -293,6 +295,143 @@ HIP_TEST_CASE(Unit_hipMemcpyPeerAsync_Negative_Parameters) {
   } else {
     INFO("Peer access cannot be enabled between devices " << src_device << " " << dst_device);
   }
+}
+
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Allocates VMM (expandable-segment style) memory on two devices and copies
+ *    with hipMemcpyPeerAsync while hipMemSetAccess grants only the owning
+ *    device. The runtime must either copy the bytes or return an explicit
+ *    error. A success return with an unchanged destination is the bug.
+ *  - Repeats after granting the peer device access as a positive control.
+ * Test source
+ * ------------------------
+ *  - unit/memory/hipMemcpyPeerAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - Peer access supported
+ *  - Multi-device
+ *  - VMM supported
+ *  - HIP_VERSION >= 6.0
+ */
+HIP_TEST_CASE(Unit_hipMemcpyPeerAsync_VmmPeerAccessValidation) {
+  const int device_count = HipTest::getDeviceCount();
+  if (device_count < 2) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kFewerThanTwoGpus);
+  }
+
+  int vmm_src = 0;
+  int vmm_dst = 0;
+  HIP_CHECK(
+      hipDeviceGetAttribute(&vmm_src, hipDeviceAttributeVirtualMemoryManagementSupported, 0));
+  HIP_CHECK(
+      hipDeviceGetAttribute(&vmm_dst, hipDeviceAttributeVirtualMemoryManagementSupported, 1));
+  if (vmm_src == 0 || vmm_dst == 0) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kVmmUnsupported);
+  }
+
+  int can_access_peer = 0;
+  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, 0, 1));
+  if (can_access_peer == 0) {
+    INFO("Peer access cannot be enabled between devices 0 and 1");
+    return;
+  }
+
+  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipDeviceEnablePeerAccess(1, 0));
+  HIP_CHECK(hipSetDevice(1));
+  HIP_CHECK(hipDeviceEnablePeerAccess(0, 0));
+
+  hipMemAllocationProp prop{};
+  prop.type = hipMemAllocationTypePinned;
+  prop.location.type = hipMemLocationTypeDevice;
+  prop.location.id = 0;
+
+  size_t granularity = 0;
+  HIP_CHECK(hipMemGetAllocationGranularity(&granularity, &prop,
+                                           hipMemAllocationGranularityRecommended));
+  const size_t size = granularity * 4;
+  const unsigned char pattern = 0x5a;
+
+  void* src = nullptr;
+  void* dst = nullptr;
+  hipMemGenericAllocationHandle_t src_handle{nullptr};
+  hipMemGenericAllocationHandle_t dst_handle{nullptr};
+
+  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipMemAddressReserve(&src, size, 0, nullptr, 0));
+  HIP_CHECK(hipMemCreate(&src_handle, size, &prop, 0));
+  HIP_CHECK(hipMemMap(src, size, 0, src_handle, 0));
+
+  prop.location.id = 1;
+  HIP_CHECK(hipSetDevice(1));
+  HIP_CHECK(hipMemAddressReserve(&dst, size, 0, nullptr, 0));
+  HIP_CHECK(hipMemCreate(&dst_handle, size, &prop, 0));
+  HIP_CHECK(hipMemMap(dst, size, 0, dst_handle, 0));
+
+  hipMemAccessDesc desc{};
+  desc.location.type = hipMemLocationTypeDevice;
+  desc.flags = hipMemAccessFlagsProtReadWrite;
+  desc.location.id = 0;
+  HIP_CHECK(hipMemSetAccess(src, size, &desc, 1));
+  desc.location.id = 1;
+  HIP_CHECK(hipMemSetAccess(dst, size, &desc, 1));
+
+  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipMemset(src, pattern, size));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  hipStream_t stream = nullptr;
+  HIP_CHECK(hipStreamCreate(&stream));
+  std::vector<unsigned char> host(size, 0);
+
+  // Owner-only VMM access. Returning success without copying is the bug.
+  hipError_t copy_status = hipMemcpyPeerAsync(dst, 1, src, 0, size, stream);
+  if (copy_status == hipSuccess) {
+    HIP_CHECK(hipStreamSynchronize(stream));
+    HIP_CHECK(hipSetDevice(1));
+    HIP_CHECK(hipMemcpy(host.data(), dst, size, hipMemcpyDeviceToHost));
+    REQUIRE(std::all_of(host.begin(), host.end(),
+                        [pattern](unsigned char value) { return value == pattern; }));
+  } else {
+    // An explicit error is acceptable: the API must not silently succeed.
+    (void)hipGetLastError();
+  }
+
+  // Positive control: grant the peer device access to both mappings.
+  desc.location.id = 1;
+  HIP_CHECK(hipMemSetAccess(src, size, &desc, 1));
+  desc.location.id = 0;
+  HIP_CHECK(hipMemSetAccess(dst, size, &desc, 1));
+
+  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipMemset(src, pattern, size));
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemcpyPeerAsync(dst, 1, src, 0, size, stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipSetDevice(1));
+  HIP_CHECK(hipMemcpy(host.data(), dst, size, hipMemcpyDeviceToHost));
+  REQUIRE(std::all_of(host.begin(), host.end(),
+                      [pattern](unsigned char value) { return value == pattern; }));
+
+  HIP_CHECK(hipStreamDestroy(stream));
+
+  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipMemUnmap(src, size));
+  HIP_CHECK(hipMemRelease(src_handle));
+  HIP_CHECK(hipMemAddressFree(src, size));
+
+  HIP_CHECK(hipSetDevice(1));
+  HIP_CHECK(hipMemUnmap(dst, size));
+  HIP_CHECK(hipMemRelease(dst_handle));
+  HIP_CHECK(hipMemAddressFree(dst, size));
+
+  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipDeviceDisablePeerAccess(1));
+  HIP_CHECK(hipSetDevice(1));
+  HIP_CHECK(hipDeviceDisablePeerAccess(0));
 }
 
 HIP_TEST_CASE(Unit_hipMemcpyPeerAsync_Capture) {

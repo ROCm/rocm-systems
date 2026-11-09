@@ -585,7 +585,7 @@ class Device : public NullDevice {
                             VmmLocationType = VmmLocationType::kDevice,
                             int numaNode = -1) override;
   virtual bool GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const override;
-  virtual bool ValidateMemAccess(amd::Memory& mem, bool read_write) const override { return true; }
+  virtual bool ValidateMemAccess(amd::Memory& mem, bool read_write) const override;
 
   virtual VmmExportStatus ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags,
                                                  void* shareableHandle,
