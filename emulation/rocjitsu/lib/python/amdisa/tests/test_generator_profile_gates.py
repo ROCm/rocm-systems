@@ -5573,7 +5573,7 @@ def test_generated_image_forms_agree_on_address_tuple(
     assert bool(re.search(r'\+\s*1u\b', width)) == bool(mip)
     assert f'amdgpu::image_coordinate_count(inst_.dim) + {mip};' in metadata
     assert ('modifiers.image_prefix_words' in metadata) == derivatives
-    assert ('modifiers.memory_result_last_bytes' in metadata) != gather
+    assert ('modifiers.set_packed_image_result' in metadata) != gather
     assert f'ImageSampleMode::{mode}' in body
     assert f'.gather = {str(gather).lower()}' in body
 
@@ -5643,8 +5643,10 @@ def test_generated_rdna_image_load_tracks_d16_destination_preservation(
     modifiers = _generated_inline_method_body(
         header, f'ImageLoad{suffix}', 'void amdgpu_register_modifiers'
     )
-    assert 'std::popcount(uint32_t{inst_.dmask}) & 1u' in modifiers
-    assert 'modifiers.memory_result_last_bytes = 0x3' in modifiers
+    assert (
+        'modifiers.set_packed_image_result(std::popcount(uint32_t{inst_.dmask}), '
+        'vdata.size_bits() / 32)' in ' '.join(modifiers.split())
+    )
 
 
 @pytest.mark.parametrize(

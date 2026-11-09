@@ -39,6 +39,8 @@ thread_local! {
 pub(crate) struct LifecycleCallScope {
     /// Whether this scope set and must clear the thread-local entry flag.
     owns_flag: bool,
+    /// The thread-local entry flag must be cleared on its entering thread.
+    _thread_bound: std::marker::PhantomData<std::rc::Rc<()>>,
 }
 
 impl LifecycleCallScope {
@@ -49,7 +51,10 @@ impl LifecycleCallScope {
                 Err(INVALID_RUNTIME_STATE)
             } else {
                 active.set(true);
-                Ok(Self { owns_flag: true })
+                Ok(Self {
+                    owns_flag: true,
+                    _thread_bound: std::marker::PhantomData,
+                })
             }
         })
     }
@@ -65,7 +70,10 @@ impl LifecycleCallScope {
                 true
             }
         });
-        Self { owns_flag }
+        Self {
+            owns_flag,
+            _thread_bound: std::marker::PhantomData,
+        }
     }
 }
 
