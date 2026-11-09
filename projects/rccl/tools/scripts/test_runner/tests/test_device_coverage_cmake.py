@@ -208,6 +208,14 @@ class DeviceCoverageCMakeTest(unittest.TestCase):
 
         self.assertEqual(result, f"FALSE\n{error}")
 
+    def test_rdc_host_coverage_probe_drops_the_final_period(self):
+        error = "error: unknown special variable\n1 error generated when compiling for host"
+        _root, result, _argv, _ = self._run_rdc_host_coverage_probe(
+            f"printf '%s.\\n' '{error}' >&2; exit 1\n"
+        )
+
+        self.assertEqual(result, f"FALSE\n{error}")
+
     def test_host_probe_finds_companion_rocm_profile_runtime(self):
         runtime, result, argv = self.run_host_probe(create_runtime=True)
 
