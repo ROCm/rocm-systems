@@ -3,21 +3,27 @@
 
     compare_rocprofv3.py <rocprofv3.csv> <probes.csv> [--allow-extra=api,api] [--slack-ns=N]
 
-Both traces come from the same run (rocprofv3 and the LTTng session record the same process),
-so every call should appear on both sides. Per (process, thread), the calls are aligned by
-function name in start order, so a call one side lacks shows up as a gap and does not shift the
-rest. For each aligned pair:
+Both traces come from the same run (rocprofv3 and the LTTng session record the same process,
+with the same clock), so every call should appear on both sides. rocprofv3's wrapper is the
+outermost dispatch-table entry and calls the probe, so a rocprofv3 call's interval contains its
+probe call's. Per (process, thread), each rocprofv3 call is matched to the earliest unmatched
+probe call with the same function whose interval lies inside it (within --slack-ns). Then:
 
-  domain      must be equal
-  nesting     rocprofv3's wrapper is outermost, so its interval should contain the probe's:
-              rocprofv3 start <= probe start and probe end <= rocprofv3 end (within --slack-ns)
-  timing      start delta (probe - rocprofv3), end delta (rocprofv3 - probe), duration delta
+  domain           must be equal
+  timing           start delta (probe - rocprofv3), end delta (rocprofv3 - probe), duration delta
+  inside rocprofv3 a probe call inside a rocprofv3 call's interval that is not its match was made
+                   by rocprofv3 itself through the HIP table (it does not trace its own calls);
+                   reported per enclosing API, not a failure
+  before rocprofv3 a probe call that starts before rocprofv3's first call in its domain: other
+                   threads can enter the table while the first call is still initializing HIP,
+                   before rocprofv3 wraps it; reported, not a failure
+  only in one side everything else
 
-Exit status 0 when every call is matched (apart from --allow-extra APIs) with equal domains and
-correct nesting; 1 otherwise.
+Exit status 0 when every rocprofv3 call is matched and every other probe call is either inside a
+rocprofv3 call or an --allow-extra API, with equal domains; 1 otherwise.
 """
+import bisect
 import csv
-import difflib
 import statistics
 import sys
 from collections import defaultdict
@@ -48,21 +54,56 @@ def load(path):
 ref, probe = load(paths[0]), load(paths[1])
 
 pairs = []  # (thread, rocprofv3 call, probe call)
-only_ref, only_probe = [], []
+only_ref, only_probe, inside_ref = [], [], []
 for thread in sorted(set(ref) | set(probe)):
     a, b = ref.get(thread, []), probe.get(thread, [])
-    sm = difflib.SequenceMatcher(a=[c["name"] for c in a], b=[c["name"] for c in b],
-                                 autojunk=False)
-    for tag, i1, i2, j1, j2 in sm.get_opcodes():
-        if tag == "equal":
-            pairs += [(thread, a[i], b[j]) for i, j in zip(range(i1, i2), range(j1, j2))]
+    by_name = defaultdict(list)  # name -> probe calls in start order
+    for c in b:
+        by_name[c["name"]].append(c)
+    starts = {n: [c["start"] for c in cs] for n, cs in by_name.items()}
+    matched = set()
+    for r in a:
+        cs = by_name.get(r["name"], [])
+        i = bisect.bisect_left(starts.get(r["name"], []), r["start"] - slack)
+        while i < len(cs) and (id(cs[i]) in matched or cs[i]["end"] > r["end"] + slack):
+            if cs[i]["start"] > r["end"] + slack:
+                break
+            i += 1
+        if i < len(cs) and id(cs[i]) not in matched and cs[i]["start"] <= r["end"] + slack \
+                and cs[i]["end"] <= r["end"] + slack:
+            matched.add(id(cs[i]))
+            pairs.append((thread, r, cs[i]))
         else:
-            only_ref += [(thread, c) for c in a[i1:i2]]
-            only_probe += [(thread, c) for c in b[j1:j2]]
+            only_ref.append((thread, r))
+    ref_starts = [r["start"] for r in a]
+    for c in b:
+        if id(c) in matched:
+            continue
+        j = bisect.bisect_right(ref_starts, c["start"]) - 1
+        if j >= 0 and c["end"] <= a[j]["end"]:
+            inside_ref.append((thread, c, a[j]))
+        else:
+            only_probe.append((thread, c))
+
+# Calls that started before rocprofv3 recorded anything in the process: other threads can enter
+# the HIP table while the first call is still initializing HIP, before rocprofv3 has wrapped it.
+# rocprofv3 wraps each dispatch table (domain) when the runtime hands it over, so the cut-off is
+# per process and domain.
+first_ref = {}
+for (pid, _), calls in ref.items():
+    for c in calls:
+        key = (pid, c["domain"])
+        first_ref[key] = min(first_ref.get(key, c["start"]), c["start"])
+
+
+def before_first(t, c):
+    return c["start"] < first_ref.get((t[0], c["domain"]), c["start"] + 1)
+
+
+before_ref = [(t, c) for t, c in only_probe if before_first(t, c)]
+only_probe = [(t, c) for t, c in only_probe if not before_first(t, c)]
 
 domain_diff = [(t, r, p) for t, r, p in pairs if r["domain"] != p["domain"]]
-not_nested = [(t, r, p) for t, r, p in pairs
-              if p["start"] + slack < r["start"] or r["end"] + slack < p["end"]]
 unexpected_probe = [(t, c) for t, c in only_probe if c["name"] not in allow_extra]
 allowed_probe = [(t, c) for t, c in only_probe if c["name"] in allow_extra]
 
@@ -79,8 +120,14 @@ print(f"calls:   rocprofv3 {sum(map(len, ref.values()))}, probes {sum(map(len, p
       f"matched {len(pairs)}")
 print(f"only in rocprofv3: {len(only_ref)}   only in probes: {len(only_probe)} "
       f"({len(allowed_probe)} allowed: {', '.join(sorted(allow_extra)) or '-'})")
-print(f"domain differs: {len(domain_diff)}   not nested in rocprofv3's interval: {len(not_nested)}"
-      f"   correlation ids equal: {ids_equal} of {len(pairs)}")
+inside_by_api = defaultdict(int)
+for _, c, r in inside_ref:
+    inside_by_api[f"{c['name']} inside {r['name']}"] += 1
+print(f"probe calls before rocprofv3's first call (it had not wrapped the table yet): "
+      f"{len(before_ref)}" + "".join(f" [tid {t[1]} {c['name']}]" for t, c in before_ref[:10]))
+print(f"probe calls made by rocprofv3 itself (inside its calls): {len(inside_ref)}"
+      + "".join(f"\n  {n:6d} x {k}" for k, n in sorted(inside_by_api.items())))
+print(f"domain differs: {len(domain_diff)}   correlation ids equal: {ids_equal} of {len(pairs)}")
 print("timing (ns), over matched calls:")
 print(f"  start delta (probe - rocprofv3)   {stats([p['start'] - r['start'] for _, r, p in pairs])}")
 print(f"  end delta   (rocprofv3 - probe)   {stats([r['end'] - p['end'] for _, r, p in pairs])}")
@@ -106,10 +153,6 @@ show("only in rocprofv3", only_ref, lambda x: f"tid {x[0][1]} {x[1]['name']} @ {
 show("only in probes", only_probe, lambda x: f"tid {x[0][1]} {x[1]['name']} @ {x[1]['start']}")
 show("domain differs", domain_diff,
      lambda x: f"{x[1]['name']}: rocprofv3 {x[1]['domain']}, probes {x[2]['domain']}")
-show("not nested", not_nested,
-     lambda x: f"tid {x[0][1]} {x[1]['name']}: rocprofv3 [{x[1]['start']}, {x[1]['end']}] "
-               f"probe [{x[2]['start']}, {x[2]['end']}]")
-
-ok = not only_ref and not unexpected_probe and not domain_diff and not not_nested
+ok = not only_ref and not unexpected_probe and not domain_diff
 print("RESULT:", "PASS" if ok else "FAIL")
 sys.exit(0 if ok else 1)
