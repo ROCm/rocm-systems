@@ -318,6 +318,118 @@ TEST_P(DbiReplacementSim, EmptyReplacementRemovesTheOriginalEffect) {
   EXPECT_EQ(std::memcmp(source.image_data(), image.data(), image.size()), 0);
 }
 
+class DbiVectorRelativeSim : public DbiReplacementSim {
+protected:
+  struct RelativeCase {
+    std::vector<uint8_t> image;
+    std::vector<uint8_t> probe;
+    uint64_t anchor = 0;
+    uint32_t relative = 0;
+  };
+
+  void make_relative_case(RelativeCase &value) const {
+    const rj_code_arch_t arch = GetParam().arch;
+    ASSERT_EQ(arch, ROCJITSU_CODE_ARCH_RDNA4);
+    const util::FailureOr<uint16_t> m0 = scalar_operand_m0(arch);
+    ASSERT_TRUE(m0.succeeded());
+    const util::FailureOr<uint32_t> set_m0 =
+        build_s_mov_b32(m0.value(), scalar_positive_inline_u32(2), arch);
+    const util::FailureOr<uint32_t> clear_v2 =
+        build_v_mov_b32_src(2, scalar_positive_inline_u32(0), arch);
+    const util::FailureOr<uint32_t> ret = build_s_setpc_b64(30, arch);
+    ASSERT_TRUE(set_m0.succeeded());
+    ASSERT_TRUE(clear_v2.succeeded());
+    ASSERT_TRUE(ret.succeeded());
+    value.relative = rdna4::build_vop1(rdna4::kVMovrelsB32Vop1, {.src0 = 256, .vdst = 3})[0];
+    std::vector<uint32_t> words = setup_;
+    words.push_back(set_m0.value());
+    value.anchor = words.size() * sizeof(uint32_t);
+    words.push_back(copy_v3_v1_);
+    finish_kernel(words);
+    make_image(words, value.image);
+    value.probe =
+        test::make_gfx1200_probe_elf("replacement_probe", {clear_v2.value(), ret.value()});
+  }
+
+  void expect_source_unchanged(const AmdGpuCodeObject &source,
+                               const std::vector<uint8_t> &image) const {
+    ASSERT_EQ(source.image_size(), image.size());
+    EXPECT_EQ(std::memcmp(source.image_data(), image.data(), image.size()), 0);
+  }
+
+  void expect_emitted_memory(const InstrumentedCodeObjectDebug &result, uint32_t expected) const {
+    ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+    const AmdGpuCodeObject candidate(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(candidate.is_valid());
+    expect_memory(test::section_words(candidate, ".text"),
+                  test::patched_private_segment_size(candidate), expected);
+  }
+};
+
+TEST_P(DbiVectorRelativeSim, PureRelativeAndDirectProbeControlsRemainExecutable) {
+  RelativeCase value;
+  ASSERT_NO_FATAL_FAILURE(make_relative_case(value));
+  const AmdGpuCodeObject source(value.image.data(), value.image.size());
+  const AmdGpuCodeObject probe(value.probe.data(), value.probe.size());
+  ASSERT_TRUE(source.is_valid());
+  ASSERT_TRUE(probe.is_valid());
+
+  const std::array<uint32_t, 1> relative = {value.relative};
+  Instrumentor pure(source, GetParam().arch);
+  pure.add_point(replacement(value.anchor, copy_v3_v1_, relative));
+  const InstrumentedCodeObjectDebug pure_result = pure.patch_with_debug_summaries();
+  ASSERT_NO_FATAL_FAILURE(expect_emitted_memory(pure_result, 11));
+  ASSERT_NO_FATAL_FAILURE(expect_source_unchanged(source, value.image));
+
+  const std::array<uint32_t, 1> direct = {copy_v3_v2_};
+  Instrumentor ordinary(source, GetParam().arch);
+  InstrumentationPoint direct_point = replacement(value.anchor, copy_v3_v1_, direct);
+  direct_point.probe_obj = &probe;
+  direct_point.probe_symbol = "replacement_probe";
+  ordinary.add_point(direct_point);
+  const InstrumentedCodeObjectDebug direct_result = ordinary.patch_with_debug_summaries();
+  ASSERT_NO_FATAL_FAILURE(expect_emitted_memory(direct_result, 11));
+  ASSERT_NO_FATAL_FAILURE(expect_source_unchanged(source, value.image));
+}
+
+TEST_P(DbiVectorRelativeSim, CallableProbeRejectsReplacementIntroducingHiddenVgprRead) {
+  RelativeCase value;
+  ASSERT_NO_FATAL_FAILURE(make_relative_case(value));
+  const AmdGpuCodeObject source(value.image.data(), value.image.size());
+  const AmdGpuCodeObject probe(value.probe.data(), value.probe.size());
+  ASSERT_TRUE(source.is_valid());
+  ASSERT_TRUE(probe.is_valid());
+  const std::array<uint32_t, 1> relative = {value.relative};
+  for (int shape = 0; shape < 3; ++shape) {
+    SCOPED_TRACE(shape);
+    Instrumentor instrumentor(source, GetParam().arch);
+    InstrumentationPoint mutation = replacement(value.anchor, copy_v3_v1_, relative);
+    const InstrumentationPoint observation = probe_at(value.anchor, probe);
+    if (shape == 0) {
+      mutation.probe_obj = &probe;
+      mutation.probe_symbol = "replacement_probe";
+      instrumentor.add_point(mutation);
+    } else {
+      instrumentor.add_point(shape == 1 ? mutation : observation);
+      instrumentor.add_point(shape == 1 ? observation : mutation);
+    }
+    const Instrumentor::ValidationResult validation = instrumentor.validate_points();
+    EXPECT_FALSE(validation.errors.empty());
+    EXPECT_TRUE(validation.sites.empty());
+    const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+    EXPECT_FALSE(result.errors.empty());
+    EXPECT_TRUE(result.elf_bytes.empty());
+    EXPECT_TRUE(result.sites.empty());
+    EXPECT_TRUE(result.patches.empty());
+    if (!result.errors.empty()) {
+      EXPECT_NE(result.errors.front().find("VGPR"), std::string::npos);
+    }
+    ASSERT_NO_FATAL_FAILURE(expect_source_unchanged(source, value.image));
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(Gfx1200, DbiVectorRelativeSim, ::testing::Values(kRdna4));
+
 INSTANTIATE_TEST_SUITE_P(Targets, DbiReplacementSim, ::testing::Values(kCdna3, kCdna4, kRdna4),
                          [](const ::testing::TestParamInfo<ReplacementSimTarget> &info) {
                            return std::string(info.param.sim_arch);
