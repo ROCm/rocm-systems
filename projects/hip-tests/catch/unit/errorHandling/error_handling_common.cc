@@ -125,6 +125,8 @@ const char* ErrorName(hipError_t enumerator) {
       return "hipErrorHostMemoryNotRegistered";
     case hipErrorLaunchFailure:
       return "hipErrorLaunchFailure";
+    case hipErrorNotPermitted:
+      return "hipErrorNotPermitted";
     case hipErrorNotSupported:
       return "hipErrorNotSupported";
     case hipErrorUnknown:
@@ -276,6 +278,8 @@ const char* ErrorName(hipError_t enumerator) {
       return "CUDA_ERROR_HOST_MEMORY_NOT_REGISTERED";
     case hipErrorLaunchFailure:
       return "CUDA_ERROR_LAUNCH_FAILED";
+    case hipErrorNotPermitted:
+      return "CUDA_ERROR_NOT_PERMITTED";
     case hipErrorNotSupported:
       return "CUDA_ERROR_NOT_SUPPORTED";
     case hipErrorUnknown:
@@ -484,6 +488,8 @@ const char* ErrorString(hipError_t enumerator) {
       return "unspecified launch failure";
     case hipErrorCooperativeLaunchTooLarge:
       return "too many blocks in cooperative launch";
+    case hipErrorNotPermitted:
+      return "operation not permitted";
     case hipErrorNotSupported:
       return "operation not supported";
     case hipErrorStreamCaptureUnsupported:

@@ -109,7 +109,7 @@ TEST(RaceDetector, CounterCapacity_VmcntAllOnesWaitIsNoOpBelowCapacity) {
 TEST(RaceDetector, CounterCapacity_MissingConfiguredCapacityFailsLoudly) {
   RaceDetector detector(/*nWaves=*/
                         1, /*vgprCount=*/1, /*sgprCount=*/1, Dim3d(0), [](RaceViolation) {},
-                        CounterCapacities{.vmcnt = 0, .lgkmcnt = 0});
+                        CounterCapacities{.vmcnt = 0, .lgkmcnt = 0}, /*ldsSizeBytes=*/64 * 1024);
 
   EXPECT_THROW(
       detector.getWaveRaceState(0).prepareForCounterIncrement(amdgpu::WaitCounterType::VMCNT),

@@ -32,6 +32,12 @@ class TestGpuProcess(unittest.TestCase):
 
     def test_clean_gpu_local_data(self):
         self.common.print_func_name("")
+
+        if self.common.cleaner_shader_resets_gpu():
+            msg = "\tSkipping test_clean_gpu_local_data as it resets the GPU (gfx906)."
+            self.common.print(msg)
+            self.skipTest(msg)
+
         self.common.Test_API_Per_GPU(amdsmi_clean_gpu_local_data=amdsmi.amdsmi_clean_gpu_local_data)
         return
 

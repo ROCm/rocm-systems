@@ -15,8 +15,9 @@ namespace rocjitsu::plugins::perfsim {
 class PerfsimPlugin final : public ExecutionPlugin {
 public:
   /// @param config_json Resolved plugin configuration containing the required
-  ///        string field `library_path` and optional positive integer
-  ///        `max_staged_bytes`.
+  ///        non-empty string `library_path`; optional positive integers
+  ///        `max_staged_bytes` and `max_observed_workgroups`; and the optional
+  ///        non-empty string `dispatch_name`.
   explicit PerfsimPlugin(const char *config_json);
   ~PerfsimPlugin() override;
 
@@ -42,6 +43,7 @@ public:
   void onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) override;
   void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) override;
   void onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) override;
+  void onAmdgpuWavefrontCancelled(amdgpu::Wavefront &wf) override;
   void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
                                         amdgpu::Wavefront &wf) override;
   void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst, amdgpu::Wavefront &wf,
@@ -55,6 +57,7 @@ public:
                                      const amdgpu::Wavefront &wf) override;
 
 private:
+  void retire_wavefront(amdgpu::Wavefront &wf, bool cancelled);
   void record_instruction(uint64_t pc, const Instruction &inst, amdgpu::Wavefront &wf,
                           std::span<const uint32_t> fetch_window);
 

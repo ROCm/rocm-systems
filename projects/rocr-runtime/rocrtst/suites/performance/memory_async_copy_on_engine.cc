@@ -16,7 +16,6 @@
 #include "common/helper_funcs.h"
 #include "gtest/gtest.h"
 
-#define GPU_MEMORY_THRESHOLD 536870912
 #define RET_IF_HSA_ERR(err)                                                                        \
   {                                                                                                \
     if ((err) != HSA_STATUS_SUCCESS) {                                                             \
@@ -38,16 +37,9 @@ MemoryAsyncCopyOnEngine::MemoryAsyncCopyOnEngine(void) :
 
 void MemoryAsyncCopyOnEngine::RunBenchmarkWithVerification(Transaction *t) {
   hsa_status_t err;
-  void* ptr_src;
-  void* ptr_dst;
-  size_t src_alloc_size;
-  size_t dst_alloc_size;
-  size_t max_alloc_size;
-  size_t size;
-  hsa_device_type_t ag_type;
-
-
-  size_t max_trans_size = t->max_size * 1024;
+  void* ptr_src = nullptr;
+  void* ptr_dst = nullptr;
+  size_t size = 0;
 
   hsa_amd_memory_pool_t src_pool =  pool_info_[t->src]->pool_;
   hsa_agent_t dst_agent = pool_info_[t->dst]->owner_agent_info()->agent();
@@ -56,57 +48,66 @@ void MemoryAsyncCopyOnEngine::RunBenchmarkWithVerification(Transaction *t) {
 
   PrintTransactionType(t);
 
-  err = hsa_amd_memory_pool_get_info(src_pool, HSA_AMD_MEMORY_POOL_INFO_ALLOC_MAX_SIZE,
-                                      &src_alloc_size);
+  err = BenchmarkAllocLimit(t, &size);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
-
-  err = hsa_agent_get_info(src_agent, HSA_AGENT_INFO_DEVICE, &ag_type);
-  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
-
-  if (src_alloc_size <= GPU_MEMORY_THRESHOLD && ag_type == HSA_DEVICE_TYPE_GPU) {
-    err = hsa_agent_get_info(src_agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MEMORY_AVAIL,
-                              &src_alloc_size);
-    ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+  if (size == 0) {
+    std::cout << "Skipping: host pool cannot hold this copy." << std::endl;
+    return;
   }
 
-  err = hsa_amd_memory_pool_get_info(dst_pool, HSA_AMD_MEMORY_POOL_INFO_ALLOC_MAX_SIZE,
-                                      &dst_alloc_size);
-  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+  const bool src_is_cpu =
+      pool_info_[t->src]->owner_agent_info()->device_type() == HSA_DEVICE_TYPE_CPU;
+  const bool dst_is_cpu =
+      pool_info_[t->dst]->owner_agent_info()->device_type() == HSA_DEVICE_TYPE_CPU;
 
-  err = hsa_agent_get_info(dst_agent, HSA_AGENT_INFO_DEVICE, &ag_type);
-  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
-
-  if (dst_alloc_size <= GPU_MEMORY_THRESHOLD && ag_type == HSA_DEVICE_TYPE_GPU) {
-    err = hsa_agent_get_info(dst_agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MEMORY_AVAIL,
-                              &dst_alloc_size);
-    ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+  void* allocated = nullptr;
+  err = hsa_amd_memory_pool_allocate(src_pool, size, 0, &allocated);
+  if (src_is_cpu && HostPoolShort(err)) {
+    std::cout << "Skipping: host pool cannot allocate " << size
+              << " bytes." << std::endl;
+    return;
   }
-
-  max_alloc_size = (src_alloc_size < dst_alloc_size) ? src_alloc_size: dst_alloc_size;
-
-  if (dst_alloc_size <= GPU_MEMORY_THRESHOLD && ag_type == HSA_DEVICE_TYPE_GPU)
-    size = (max_alloc_size/3 <= max_trans_size) ? max_alloc_size/3: max_trans_size;
-  else
-    size = (max_alloc_size/2 <= max_trans_size) ? max_alloc_size/2: max_trans_size;
-
-  err = hsa_amd_memory_pool_allocate(src_pool, size, 0,
-                      &ptr_src);
   ASSERT_EQ(HSA_STATUS_SUCCESS, err);
+  ptr_src = allocated;
 
-  err = hsa_amd_memory_pool_allocate(dst_pool, size, 0,
-                      &ptr_dst);
+  allocated = nullptr;
+  err = hsa_amd_memory_pool_allocate(dst_pool, size, 0, &allocated);
+  if (dst_is_cpu && HostPoolShort(err)) {
+    std::cout << "Skipping: host pool cannot allocate " << size
+              << " bytes." << std::endl;
+    ASSERT_EQ(HSA_STATUS_SUCCESS, hsa_amd_memory_pool_free(ptr_src));
+    return;
+  }
   ASSERT_EQ(HSA_STATUS_SUCCESS, err);
-
+  ptr_dst = allocated;
 
   // rocrtst::CommonCleanUp data
-  void* host_ptr_src = NULL;
-  void* host_ptr_dst = NULL;
-  err = hsa_amd_memory_pool_allocate(sys_pool_, size, 0,
-                                     reinterpret_cast<void**>(&host_ptr_src));
+  void* host_ptr_src = nullptr;
+  void* host_ptr_dst = nullptr;
+  allocated = nullptr;
+  err = hsa_amd_memory_pool_allocate(sys_pool_, size, 0, &allocated);
+  if (HostPoolShort(err)) {
+    std::cout << "Skipping: host pool cannot allocate " << size
+              << " bytes." << std::endl;
+    ASSERT_EQ(HSA_STATUS_SUCCESS, hsa_amd_memory_pool_free(ptr_src));
+    ASSERT_EQ(HSA_STATUS_SUCCESS, hsa_amd_memory_pool_free(ptr_dst));
+    return;
+  }
   ASSERT_EQ(HSA_STATUS_SUCCESS, err);
-  err = hsa_amd_memory_pool_allocate(sys_pool_, size, 0,
-                                     reinterpret_cast<void**>(&host_ptr_dst));
+  host_ptr_src = allocated;
+
+  allocated = nullptr;
+  err = hsa_amd_memory_pool_allocate(sys_pool_, size, 0, &allocated);
+  if (HostPoolShort(err)) {
+    std::cout << "Skipping: host pool cannot allocate " << size
+              << " bytes." << std::endl;
+    ASSERT_EQ(HSA_STATUS_SUCCESS, hsa_amd_memory_pool_free(ptr_src));
+    ASSERT_EQ(HSA_STATUS_SUCCESS, hsa_amd_memory_pool_free(ptr_dst));
+    ASSERT_EQ(HSA_STATUS_SUCCESS, hsa_amd_memory_pool_free(host_ptr_src));
+    return;
+  }
   ASSERT_EQ(HSA_STATUS_SUCCESS, err);
+  host_ptr_dst = allocated;
 
   err = hsa_amd_memory_fill(host_ptr_src, 1, size/sizeof(uint32_t));
   ASSERT_EQ(HSA_STATUS_SUCCESS, err);

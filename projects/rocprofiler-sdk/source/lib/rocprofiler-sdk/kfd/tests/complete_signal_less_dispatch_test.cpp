@@ -362,9 +362,9 @@ TEST(complete_signal_less_dispatch, grossly_stale_or_future_raw_terminal_is_reje
          finalize_outcome::completed_no_timing,
          finalize_reason::stale_interval,
          "grossly stale"},
-        // raw_end 4 s past now -> stale.
-        {std::optional<uint64_t>{5'000'000'000},
-         5'000'000'000,
+        // raw_end 64 s past now -> stale.
+        {std::optional<uint64_t>{65'000'000'000},
+         65'000'000'000,
          0,
          1'000'000'000,
          finalize_outcome::completed_no_timing,
@@ -373,7 +373,7 @@ TEST(complete_signal_less_dispatch, grossly_stale_or_future_raw_terminal_is_reje
         // exactly at the future bound (raw_end - now == kMaxFutureNs) is NOT
         // rejected (strict >), so it clamps in and emits.
         {std::optional<uint64_t>{1},
-         2'000'000'000,
+         61'000'000'000,
          0,
          1'000'000'000,
          finalize_outcome::result_ready,
@@ -397,6 +397,34 @@ TEST(complete_signal_less_dispatch, grossly_stale_or_future_raw_terminal_is_reje
         EXPECT_EQ(detail.reason, tc.reason) << tc.label;
         EXPECT_EQ(obs.retires, 1) << tc.label;  // proven completion always retires once
     }
+}
+
+// MI450 A0 dispatch timestamps carry a stable ~10.43 s epoch offset from the clock
+// ROCr calibrates against. Inside kMaxFutureNs it is clamped to now like the signal
+// path does, preserving the measured duration.
+TEST(complete_signal_less_dispatch, fixed_gpu_epoch_offset_is_clamped_and_emitted)
+{
+    constexpr uint64_t now      = 20'000'000'000;
+    constexpr uint64_t offset   = 10'430'000'000;
+    constexpr uint64_t duration = 25'000;
+    auto               obs      = observer{};
+    auto               conv     = converter{true, /*epoch=*/0};
+    auto               detail   = finalize_detail{};
+    auto               outcome =
+        run_complete_signal_less_dispatch(std::optional<uint64_t>{now + offset - duration},
+                                          now + offset,
+                                          /*enqueue_ts=*/now - 5'000'000,
+                                          now,
+                                          conv.fn(),
+                                          obs.emit_fn(),
+                                          obs.retire_fn(),
+                                          &detail);
+    EXPECT_EQ(outcome, finalize_outcome::result_ready);
+    EXPECT_EQ(detail.reason, finalize_reason::after_now);
+    EXPECT_EQ(obs.emits, 1);
+    EXPECT_EQ(obs.retires, 1);
+    EXPECT_EQ(obs.end, now);
+    EXPECT_EQ(obs.end - obs.start, duration);
 }
 
 // A few ms past now stays inside the slack: reported ready, NOT counted against

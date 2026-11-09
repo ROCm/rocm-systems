@@ -30,11 +30,11 @@ RUN zypper --non-interactive update -y && \
         gcc-c++ gcc-fortran git gmock gtest iproute2 ninja nlohmann_json-devel \
         openmpi3-devel papi-devel python3-devel python3-pip rpm-build \
         sqlite3-devel vim wget libucp-devel libuct-devel && \
-    zypper --non-interactive clean --all && \
+    zypper clean --all && \
     python3 -m pip install --upgrade pip && \
     python3 -m pip install 'cmake==3.25' perfetto
 
-ARG PYTHON_VERSIONS="8 9 10 11 12 13"
+ARG PYTHON_VERSIONS="8 9 10 11 12 13 14 15"
 
 # Install pytest test dependencies into each conda env
 COPY requirements.txt /tmp/requirements.txt
@@ -74,3 +74,7 @@ RUN if [ -n "${GPU_TYPE}" ]; then \
 
 WORKDIR /home
 SHELL [ "/bin/bash", "--login", "-c" ]
+
+# Build/development image that runs as root by design.
+# trivy:ignore:DS-0002
+USER root

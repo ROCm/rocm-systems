@@ -10,6 +10,7 @@
 
 #include <hip_test_common.hh>
 #include <hip/hip_runtime_api.h>
+#include <memcpy1d_tests_common.hh>
 #include <utils.hh>
 #include <resource_guards.hh>
 #include "hipArrayCommon.hh"
@@ -244,19 +245,6 @@ void Memcpy2DDevicetoAShell(F memcpy_func, size_t width, size_t height,
   ArrayFindIfNot(host_allocation.host_ptr(), fill_value, element_count);
 }
 
-// Synchronization behavior checks
-template <typename F>
-void MemcpyArraySyncBehaviorCheck(F memcpy_func, const bool should_sync,
-                                  const hipStream_t kernel_stream) {
-  LaunchDelayKernel(std::chrono::milliseconds{100}, kernel_stream);
-  HIP_CHECK(memcpy_func());
-  if (should_sync) {
-    HIP_CHECK(hipStreamQuery(kernel_stream));
-  } else {
-    HIP_CHECK_ERROR(hipStreamQuery(kernel_stream), hipErrorNotReady);
-  }
-}
-
 /* Host -> Array Sync check */
 template <typename F>
 void MemcpyHtoASyncBehavior(F memcpy_func, size_t width, size_t height, const bool should_sync,
@@ -267,8 +255,8 @@ void MemcpyHtoASyncBehavior(F memcpy_func, size_t width, size_t height, const bo
 
   LinearAllocGuard<int> host_alloc(LinearAllocs::hipHostMalloc, allocation_size);
   ArrayAllocGuard<int> array_allocation(make_hipExtent(width, height, 0), flag);
-  MemcpyArraySyncBehaviorCheck(std::bind(memcpy_func, array_allocation.ptr(), host_alloc.ptr()),
-                               should_sync, kernel_stream);
+  MemcpySyncBehaviorCheck(std::bind(memcpy_func, array_allocation.ptr(), host_alloc.ptr()),
+                          should_sync, kernel_stream);
 }
 
 /* Array -> Host sync check */
@@ -282,8 +270,8 @@ void MemcpyAtoHPageableSyncBehavior(F memcpy_func, size_t width, size_t height,
 
   LinearAllocGuard<int> host_alloc(LinearAllocs::hipHostMalloc, allocation_size);
   ArrayAllocGuard<int> array_allocation(make_hipExtent(width, height, 0), flag);
-  MemcpyArraySyncBehaviorCheck(std::bind(memcpy_func, host_alloc.ptr(), array_allocation.ptr()),
-                               should_sync, kernel_stream);
+  MemcpySyncBehaviorCheck(std::bind(memcpy_func, host_alloc.ptr(), array_allocation.ptr()),
+                          should_sync, kernel_stream);
 }
 
 template <typename F>
@@ -296,8 +284,8 @@ void MemcpyAtoHPinnedSyncBehavior(F memcpy_func, size_t width, size_t height,
 
   LinearAllocGuard<int> host_alloc(LinearAllocs::hipHostMalloc, allocation_size);
   ArrayAllocGuard<int> array_allocation(make_hipExtent(width, height, 0), flag);
-  MemcpyArraySyncBehaviorCheck(std::bind(memcpy_func, host_alloc.ptr(), array_allocation.ptr()),
-                               should_sync, kernel_stream);
+  MemcpySyncBehaviorCheck(std::bind(memcpy_func, host_alloc.ptr(), array_allocation.ptr()),
+                          should_sync, kernel_stream);
 }
 
 /* Device -> Array sync check */
@@ -309,9 +297,9 @@ void MemcpyDtoASyncBehavior(F memcpy_func, size_t width, size_t height, const bo
   ArrayAllocGuard<int> array_allocation(make_hipExtent(width, height, 0), flag);
   LinearAllocGuard2D<int> device_allocation(width, height);
 
-  MemcpyArraySyncBehaviorCheck(std::bind(memcpy_func, array_allocation.ptr(),
-                                         device_allocation.ptr(), device_allocation.pitch()),
-                               should_sync, kernel_stream);
+  MemcpySyncBehaviorCheck(std::bind(memcpy_func, array_allocation.ptr(), device_allocation.ptr(),
+                                    device_allocation.pitch()),
+                          should_sync, kernel_stream);
 }
 
 /* Array -> Device sync check */
@@ -323,9 +311,9 @@ void MemcpyAtoDSyncBehavior(F memcpy_func, size_t width, size_t height, const bo
   LinearAllocGuard2D<int> device_allocation(width, height);
   ArrayAllocGuard<int> array_allocation(make_hipExtent(width, height, 0), flag);
 
-  MemcpyArraySyncBehaviorCheck(std::bind(memcpy_func, device_allocation.ptr(),
-                                         device_allocation.pitch(), array_allocation.ptr()),
-                               should_sync, kernel_stream);
+  MemcpySyncBehaviorCheck(std::bind(memcpy_func, device_allocation.ptr(),
+                                    device_allocation.pitch(), array_allocation.ptr()),
+                          should_sync, kernel_stream);
 }
 
 /* Array -> Host/Device zero copy */

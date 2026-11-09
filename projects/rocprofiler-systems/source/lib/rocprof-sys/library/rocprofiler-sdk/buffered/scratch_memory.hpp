@@ -59,29 +59,30 @@ on_scratch_memory(typename SdkBackend::scratch_memory_record_t* record,
         rocprofiler_sdk::stream_stack_service<SdkBackend>::get_stream_id(record).handle;
 
     auto& metadata_registry = Externals::get_metadata_registry();
-    metadata_registry.add_thread_info({
-        .parent_process_id = Externals::get_ppid(),
-        .process_id        = Externals::get_pid(),
-        .thread_id         = record->thread_id,
-        .start             = k_zero_start_timestamp,
-        .end               = k_zero_end_timestamp,
-        .extdata           = k_empty_json,
+    metadata_registry.ensure_thread(record->thread_id, [&] {
+        return typename Externals::thread_info_t{
+            .parent_process_id = Externals::get_ppid(),
+            .process_id        = Externals::get_pid(),
+            .thread_id         = record->thread_id,
+            .start             = k_zero_start_timestamp,
+            .end               = k_zero_end_timestamp,
+            .extdata           = k_empty_json,
+        };
     });
 
-    metadata_registry.add_track({
-        .track_name = fmt::format("GPU Scratch Memory [{}] Thread {}", agent->device_id,
-                                  record->thread_id),
-        .thread_id  = record->thread_id,
-        .extdata    = k_empty_json,
-    });
+    auto const track_name = fmt::format("GPU Scratch Memory [{}] Thread {}",
+                                        agent->device_id, record->thread_id);
+    metadata_registry.ensure_track(track_name, record->thread_id);
 
     metadata_registry.add_queue(record->queue_id.handle);
     metadata_registry.add_stream(stream_id);
 
+    const auto name =
+        SdkBackend::get_buffer_tracing_names().at(record->kind, record->operation);
+
     Externals::get_buffer_storage().store(typename Externals::scratch_memory_sample_t{
         record->start_timestamp, record->end_timestamp, record->thread_id,
-        record->agent_id.handle, record->queue_id.handle,
-        static_cast<std::int32_t>(record->kind),
+        record->agent_id.handle, record->queue_id.handle, name,
         static_cast<std::int32_t>(record->operation),
         static_cast<std::int32_t>(record->flags),
         SdkBackend::get_scratch_memory_allocation_size(*record),
@@ -93,9 +94,6 @@ on_scratch_memory(typename SdkBackend::scratch_memory_record_t* record,
         if(const auto sequent_tid =
                Externals::get_thread_info_sequent_tid(record->thread_id))
         {
-            const auto name = SdkBackend::get_buffer_tracing_names().at(
-                SdkBackend::BUFFER_TRACING_SCRATCH_MEMORY, record->operation);
-
             Externals::write_timemory_bundle(
                 name, *sequent_tid, record->end_timestamp - record->start_timestamp);
         }

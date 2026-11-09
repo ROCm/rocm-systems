@@ -27,9 +27,10 @@
 // is translation-unit-exclusive) or a live stream. The validator takes plain
 // scalars pulled from kfd_dlog_stream_info and the requested ring size, and checks
 // them against the kernel's canonical BO layout:
-//   records[buffer_size] | wptr[num_regions] | rptr[num_regions] | page-pad
+//   records[buffer_size] | wptr[num_regions] | page-pad
 // Every offset, the derived per-region record count, and the page-aligned mmap
-// size are fixed by the ABI, so anything else is a contract violation.
+// size are fixed by the ABI, so anything else is a contract violation. There is
+// no rptr[] in the BO (ABI v4): the read cursor is consumer-private.
 
 #include "lib/rocprofiler-sdk/kfd/dlog_drain.hpp"  // kFwRecBytes, kMaxRegions
 
@@ -56,7 +57,6 @@ struct stream_geometry
     uint64_t mmap_size           = 0;
     uint64_t records_offset      = 0;
     uint64_t wptr_offset         = 0;
-    uint64_t rptr_offset         = 0;
 };
 
 // Which validation check rejected the geometry. Kept as a returned value rather
@@ -96,7 +96,7 @@ struct stream_geometry_result
 // Validate `g` (the kernel-returned geometry) against `requested_buffer_size` and
 // `page_size`. Rejects an unsupported region layout copy_pipes() could not drain,
 // then requires every offset / count / mmap size to match the canonical layout
-// exactly, and requires the three regions to be disjoint. All arithmetic is in
+// exactly, and requires records and wptr[] to be disjoint. All arithmetic is in
 // u64; num_regions is bounded by kMaxRegions and buffer_size is a bounded u32, so
 // nothing wraps.
 inline stream_geometry_result
@@ -114,17 +114,15 @@ validate_stream_geometry(const stream_geometry& g,
     const uint64_t nr        = g.num_regions;
     const uint64_t ptr_bytes = nr * sizeof(uint64_t);
     const uint64_t exp_wptr  = g.buffer_size;
-    const uint64_t exp_rptr  = g.buffer_size + ptr_bytes;
-    const uint64_t exp_mmap  = round_up_to_page(exp_rptr + ptr_bytes, page_size);
+    const uint64_t exp_mmap  = round_up_to_page(exp_wptr + ptr_bytes, page_size);
     const uint64_t exp_rrc   = g.buffer_size / (nr * kFwRecBytes);
 
     // Disjoint by construction once the offsets are exact, but asserted directly:
-    // records ends at wptr start, wptr ends at rptr start, rptr ends within mmap.
-    const bool disjoint =
-        g.records_offset < exp_wptr && exp_wptr < exp_rptr && exp_rptr + ptr_bytes <= exp_mmap;
+    // records ends at wptr start, and wptr[] ends within the mapping.
+    const bool disjoint = g.records_offset < exp_wptr && exp_wptr + ptr_bytes <= exp_mmap;
 
-    if(g.records_offset != 0 || g.wptr_offset != exp_wptr || g.rptr_offset != exp_rptr ||
-       g.mmap_size != exp_mmap || rrc != exp_rrc || !disjoint)
+    if(g.records_offset != 0 || g.wptr_offset != exp_wptr || g.mmap_size != exp_mmap ||
+       rrc != exp_rrc || !disjoint)
         return {false, 0, geometry_reason::layout_mismatch};
 
     return stream_geometry_result{true, exp_mmap, geometry_reason::ok};

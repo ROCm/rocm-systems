@@ -10,10 +10,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from resolve_ci_config import GPU_FAMILIES, TRIGGER_TYPES, load_gpu_configs, main
+from resolve_ci_config import GPU_FAMILIES, load_gpu_configs, main
 
 SAMPLE_RUNNER_CONFIG = {
-    "version": "1",
+    "version": "2",
     "build_runners": {
         "linux": {
             "default": [
@@ -22,69 +22,25 @@ SAMPLE_RUNNER_CONFIG = {
             ]
         }
     },
-    "gpu_families": {
-        "presubmit": {
-            "gfx94x": {
-                "linux": {
-                    "test-runs-on": "linux-gfx942-1gpu-ccs-csp-ossci-rocm",
-                    "test-runs-on-sandbox": "linux-mi325-gpu-rocm-cpu-sandbox",
-                    "family": "gfx94X-dcgpu",
-                    "fetch-gfx-targets": ["gfx942"],
-                }
-            },
-            "gfx110x": {
-                "linux": {
-                    "test-runs-on": "linux-gfx110X-gpu-rocm",
-                    "family": "gfx110X-all",
-                    "fetch-gfx-targets": [],
-                }
-            },
-            "gfx120x": {
-                "linux": {
-                    "test-runs-on": "linux-gfx120X-gpu-rocm",
-                    "family": "gfx120X-all",
-                    "fetch-gfx-targets": ["gfx1200", "gfx1201"],
-                }
-            },
-            "gfx1151": {
-                "linux": {
-                    "test-runs-on": "linux-gfx1151-gpu-rocm",
-                    "family": "gfx1151",
-                    "fetch-gfx-targets": ["gfx1151"],
-                }
-            },
-        },
-        "postsubmit": {
-            "gfx950": {
-                "linux": {
-                    "test-runs-on": "linux-gfx950-1gpu-ccs-ossci-rocm",
-                    "family": "gfx950-dcgpu",
-                    "fetch-gfx-targets": ["gfx950"],
-                }
+    "gpu_runner_labels": {
+        "gfx94x": {
+            "linux": {
+                "test-runs-on": "linux-gfx942-1gpu-ccs-csp-ossci-rocm",
+                "test-runs-on-sandbox": "linux-mi325-gpu-rocm-cpu-sandbox",
             }
         },
-        "nightly": {
-            "gfx90a": {
-                "linux": {
-                    "test-runs-on": "linux-gfx90a-gpu-rocm",
-                    "family": "gfx90a",
-                    "fetch-gfx-targets": ["gfx90a"],
-                }
-            },
-            "gfx103x": {
-                "linux": {
-                    "test-runs-on": "linux-gfx1030-gpu-rocm",
-                    "family": "gfx103X-all",
-                    "fetch-gfx-targets": ["gfx1030"],
-                }
-            },
-        },
+        "gfx110x": {"linux": {"test-runs-on": "linux-gfx110X-gpu-rocm"}},
+        "gfx120x": {"linux": {"test-runs-on": "linux-gfx120X-gpu-rocm"}},
+        "gfx1151": {"linux": {"test-runs-on": "linux-gfx1151-gpu-rocm"}},
+        "gfx950": {"linux": {"test-runs-on": "linux-gfx950-1gpu-ccs-ossci-rocm"}},
+        "gfx90a": {"linux": {"test-runs-on": "linux-gfx90a-gpu-rocm"}},
+        "gfx103x": {"linux": {"test-runs-on": "linux-gfx1030-gpu-rocm"}},
     },
 }
 
 
 def _write_config(tmpdir: Path, config: dict) -> None:
-    (tmpdir / "runner-config.json").write_text(json.dumps(config))
+    (tmpdir / "runner-config-v2.json").write_text(json.dumps(config))
     ci_api = textwrap.dedent("""\
         import json
         from pathlib import Path
@@ -94,24 +50,19 @@ def _write_config(tmpdir: Path, config: dict) -> None:
         @dataclass
         class Config:
             build_runners: dict
-            gpu_families: dict
+            gpu_runner_labels: dict
             _raw: dict
-            def get_gpu_families(self, trigger_types):
-                result = {}
-                for tt in trigger_types:
-                    if tt in self.gpu_families:
-                        for name, cfg in self.gpu_families[tt].items():
-                            result[name] = cfg
-                return result
+            def get_gpu_runner_labels(self):
+                return self.gpu_runner_labels
 
         def load_config(version=2, config_path=None):
             if config_path is None:
                 config_path = Path(__file__).parent
-            with open(config_path / "runner-config.json") as f:
+            with open(config_path / "runner-config-v2.json") as f:
                 raw = json.load(f)
             return Config(
                 build_runners=raw["build_runners"],
-                gpu_families=raw["gpu_families"],
+                gpu_runner_labels=raw["gpu_runner_labels"],
                 _raw=raw,
             )
     """)
@@ -160,16 +111,12 @@ class TestLoadGpuConfigs(unittest.TestCase):
 
     def test_missing_family_returns_empty_dict(self):
         config = {
-            "version": "1",
+            "version": "2",
             "build_runners": {},
-            "gpu_families": {
-                "presubmit": {
-                    "gfx94x": {
-                        "linux": {
-                            "test-runs-on": "some-runner",
-                            "family": "f",
-                            "fetch-gfx-targets": [],
-                        }
+            "gpu_runner_labels": {
+                "gfx94x": {
+                    "linux": {
+                        "test-runs-on": "some-runner",
                     }
                 }
             },
@@ -191,7 +138,7 @@ class TestLoadGpuConfigs(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir = Path(tmpdir)
             (tmpdir / "ci_config_api.py").write_text("raise ImportError('broken')")
-            (tmpdir / "runner-config.json").write_text("{}")
+            (tmpdir / "runner-config-v2.json").write_text("{}")
             result = load_gpu_configs(tmpdir)
             self.assertEqual(result, {})
 
@@ -277,17 +224,13 @@ class TestMain(unittest.TestCase):
 
     def test_partial_config_uses_fallback_for_missing_families(self):
         partial_config = {
-            "version": "1",
+            "version": "2",
             "build_runners": {},
-            "gpu_families": {
-                "presubmit": {
-                    "gfx94x": {
-                        "linux": {
-                            "test-runs-on": "configured-gfx94x",
-                            "test-runs-on-sandbox": "configured-sandbox",
-                            "family": "f",
-                            "fetch-gfx-targets": [],
-                        }
+            "gpu_runner_labels": {
+                "gfx94x": {
+                    "linux": {
+                        "test-runs-on": "configured-gfx94x",
+                        "test-runs-on-sandbox": "configured-sandbox",
                     }
                 }
             },
@@ -315,11 +258,6 @@ class TestMain(unittest.TestCase):
 class TestConstants(unittest.TestCase):
     def test_gpu_families_not_empty(self):
         self.assertTrue(len(GPU_FAMILIES) > 0)
-
-    def test_trigger_types_cover_all_scopes(self):
-        self.assertIn("presubmit", TRIGGER_TYPES)
-        self.assertIn("postsubmit", TRIGGER_TYPES)
-        self.assertIn("nightly", TRIGGER_TYPES)
 
 
 if __name__ == "__main__":

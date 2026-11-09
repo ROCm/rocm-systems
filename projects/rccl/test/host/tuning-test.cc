@@ -42,6 +42,7 @@ using ParamHook = std::function<int64_t(const char*, int64_t)>;
 
 CommHook g_tuningTunerPluginLoad;
 CommHook g_tuningTunerPluginUnload;
+CommHook g_tuningCostModelPreInit;
 CommHook g_tuningCostModelInit;
 CommHook g_tuningCostModelFinalize;
 CommHook g_tuningSetThreadThresholds;
@@ -86,6 +87,7 @@ ncclResult_t DefaultExpandId(int id, int* algo, int* proto, int* symKernelId, in
 void ResetTuningHooks() {
   g_tuningTunerPluginLoad = [](struct ncclComm*) { return ncclSuccess; };
   g_tuningTunerPluginUnload = [](struct ncclComm*) { return ncclSuccess; };
+  g_tuningCostModelPreInit = [](struct ncclComm*) { return ncclSuccess; };
   g_tuningCostModelInit = [](struct ncclComm*) { return ncclSuccess; };
   g_tuningCostModelFinalize = [](struct ncclComm*) { return ncclSuccess; };
   g_tuningSetThreadThresholds = [](struct ncclComm*) { return ncclSuccess; };
@@ -113,6 +115,7 @@ void ResetTuningHooks() {
 
 ncclResult_t TuningTunerPluginLoad(struct ncclComm* comm) { return g_tuningTunerPluginLoad(comm); }
 ncclResult_t TuningTunerPluginUnload(struct ncclComm* comm) { return g_tuningTunerPluginUnload(comm); }
+ncclResult_t TuningCostModelPreInit(struct ncclComm* comm) { return g_tuningCostModelPreInit(comm); }
 ncclResult_t TuningCostModelInit(struct ncclComm* comm) { return g_tuningCostModelInit(comm); }
 ncclResult_t TuningCostModelFinalize(struct ncclComm* comm) { return g_tuningCostModelFinalize(comm); }
 ncclResult_t TuningSetThreadThresholds(struct ncclComm* comm) { return g_tuningSetThreadThresholds(comm); }
@@ -168,6 +171,7 @@ void TuningFree(void* pointer) {
 
 #define ncclTunerPluginLoad TuningTunerPluginLoad
 #define ncclTunerPluginUnload TuningTunerPluginUnload
+#define ncclTuningCostModelPreInit TuningCostModelPreInit
 #define ncclTuningCostModelInit TuningCostModelInit
 #define ncclTuningCostModelFinalize TuningCostModelFinalize
 #define ncclTuningCostModelSimModel TuningCostModelSimModel
@@ -197,6 +201,7 @@ void TuningFree(void* pointer) {
 #undef ncclTuningCostModelSimModel
 #undef ncclTuningCostModelFinalize
 #undef ncclTuningCostModelInit
+#undef ncclTuningCostModelPreInit
 #undef ncclTunerPluginUnload
 #undef ncclTunerPluginLoad
 #undef free

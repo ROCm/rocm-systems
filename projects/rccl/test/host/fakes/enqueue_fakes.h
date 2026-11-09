@@ -34,8 +34,8 @@ extern std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int, i
 extern std::function<void(struct ncclComm*, struct ncclKernelPlan*)> g_planSetDefaultKernel;
 
 // enqueue.cc's ncclAddWorkBatchToPlan: default is a no-op observer.
-extern std::function<void(struct ncclComm*, struct ncclKernelPlan*, int, enum ncclDevWorkType, int, uint32_t, int,
-                          int, bool)>
+extern std::function<void(struct ncclComm*, struct ncclKernelPlan*, int, enum ncclDevWorkType, int, int, uint32_t,
+                          int, int, bool)>
     g_addWorkBatchToPlan;
 
 // enqueue.cc's ncclAddProxyOpIfNeeded: default accepts every proxy op.
@@ -51,6 +51,19 @@ extern std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int*)>
 
 // enqueue.cc's rcclEffectiveP2pBatchEnable: default 0 is batching off, the single-node answer.
 extern std::function<int(struct ncclComm*)> g_rcclEffectiveP2pBatchEnable;
+
+// enqueue.cc's rcclP2pTaskParts: default p2pnChannelsPerPeer; install the multi-node AINIC Scatter limit per test.
+extern std::function<int(struct ncclComm*, ncclFunc_t)> g_rcclP2pTaskParts;
+
+// enqueue.cc's collective entry, COLL log line and addon-launch bracket. Fail loud until a test installs them.
+struct ncclInfo;
+struct rcclAddonLaunchState;
+extern std::function<ncclResult_t(struct ncclInfo*)> g_enqueueCheck;
+extern std::function<void(const struct ncclInfo&)> g_rcclLogCollInfo;
+extern std::function<ncclResult_t(struct ncclComm*, hipStream_t, struct rcclAddonLaunchState*)>
+    g_rcclAddonLaunchBegin;
+extern std::function<ncclResult_t(struct ncclComm*, hipStream_t, const struct rcclAddonLaunchState&, ncclResult_t)>
+    g_rcclAddonLaunchEnd;
 
 void ResetEnqueueFakes();
 

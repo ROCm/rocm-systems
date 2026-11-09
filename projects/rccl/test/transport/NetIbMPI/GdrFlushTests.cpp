@@ -20,10 +20,23 @@
 #include "rocmwrap.h"
 
 #include <hsa/hsa_ext_amd.h>
+#include <string>
 
 #ifdef MPI_TESTS_ENABLED
 
 namespace {
+
+// Preserve fatal failures raised by helpers inside the burst.
+#define ASSERT_RECV_FLUSH_BURST(iterations, verifyData, lastFlush)                   \
+    do {                                                                             \
+        std::string _burstWhy;                                                       \
+        ncclResult_t _burstRet = RunRecvFlushBurst((iterations), (verifyData),       \
+                                                  (lastFlush), &_burstWhy);          \
+        ASSERT_EQ(_burstRet, ncclSuccess)                                            \
+            << "GDR recv+flush burst setup failed on at least one rank (this rank: " \
+            << _burstWhy << ")";                                                     \
+        if (::testing::Test::HasFatalFailure()) return;                              \
+    } while (0)
 
 class GdrFlushTest : public NetIbMPITest {
 protected:
@@ -48,6 +61,13 @@ protected:
         ncclNetProperties_t props;
         if (GetDeviceProperties(0, &props) != ncclSuccess) return 0;
         return props.ptrSupport & (NCCL_PTR_CUDA | NCCL_PTR_DMABUF);
+    }
+
+    static std::string CollectiveSkipReason(std::string why) {
+        int skip = why.empty() ? 0 : 1;
+        MPI_Allreduce(MPI_IN_PLACE, &skip, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+        if (skip && why.empty()) why = "peer rank cannot run this configuration";
+        return skip ? why : std::string();
     }
 
     // Registers a GPU buffer for GDR: through regMr() where peermem is available,
@@ -77,23 +97,18 @@ protected:
         return res;
     }
 
-    // Runs `iterations` of GPU recv + flush across 2 ranks on device 0.
-    // rank 0 = receiver + flush, rank 1 = sender. Returns rank 0's last flush
-    // completion result via `rank0LastFlush` (may be null).
-    //
-    // The data buffer is plain hipMalloc, registered through RegisterGdrMemory. The
-    // exercised scratchpad is the recv comm's INTERNAL gpuFlush, which becomes
-    // dma-buf-backed purely from NCCL_CUMEM_ENABLE=1 - independent of how the data
-    // buffer is allocated or registered.
-    void RunRecvFlushBurst(int iterations, bool verifyData,
-                           ncclResult_t* rank0LastFlush) {
+    // Returns rank-agreed setup status; rank-local transfer checks remain non-fatal.
+    [[nodiscard]] ncclResult_t RunRecvFlushBurst(int iterations, bool verifyData,
+                                                ncclResult_t* rank0LastFlush,
+                                                std::string* setupWhy = nullptr) {
         const int rank = MPIEnvironment::world_rank;
 
         AssertInitAndGetDevices(nullptr);
 
         ConnectionPair pair;
         NetConnectionGuard connGuard(net_);
-        SetupConnectionWithGuard(0, pair, connGuard);
+        const ncclResult_t setup = SetupConnectionWithGuard(0, pair, connGuard, setupWhy);
+        if (setup != ncclSuccess) return setup;
 
         const size_t bufferSize = kSmallBufferSize;
         void* buffer = nullptr;
@@ -153,6 +168,7 @@ protected:
         }
 
         if (rank == 0 && rank0LastFlush) *rank0LastFlush = lastFlush;
+        return ncclSuccess;
     }
 };
 
@@ -161,12 +177,15 @@ protected:
 TEST_F(GdrFlushTest, CuMemDmaBuf_GpuRecvFlush_NoAsyncFatal) {
     SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
                                           false, kMinGpusPerNode, kNoNodeLimit);
-    if (!cuMemEnabledEnv()) GTEST_SKIP() << "Requires NCCL_CUMEM_ENABLE=1 (dma-buf scratchpad path)";
     AssertInitAndGetDevices(nullptr);
-    if (!gdrPtrSupport()) GTEST_SKIP() << "no GDR backend (neither peermem nor dma-buf) on this device";
+    std::string why;
+    if (!cuMemEnabledEnv()) why = "Requires NCCL_CUMEM_ENABLE=1 (dma-buf scratchpad path)";
+    else if (!gdrPtrSupport()) why = "no GDR backend (neither peermem nor dma-buf) on this device";
+    why = CollectiveSkipReason(why);
+    if (!why.empty()) GTEST_SKIP() << why;
 
     ncclResult_t flush = ncclSuccess;
-    RunRecvFlushBurst(/*iterations=*/4, /*verifyData=*/true, &flush);
+    ASSERT_RECV_FLUSH_BURST(/*iterations=*/4, /*verifyData=*/true, &flush);
     if (MPIEnvironment::world_rank == 0)
         EXPECT_EQ(flush, ncclSuccess) << "write+read flush over dma-buf scratchpad must not fault";
 }
@@ -176,13 +195,16 @@ TEST_F(GdrFlushTest, CuMemDmaBuf_GpuRecvFlush_NoAsyncFatal) {
 TEST_F(GdrFlushTest, Peermem_GpuRecvFlush_NoAsyncFatal) {
     SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
                                           false, kMinGpusPerNode, kNoNodeLimit);
-    if (cuMemEnabledEnv()) GTEST_SKIP() << "Requires NCCL_CUMEM_ENABLE=0 (peermem scratchpad path)";
     AssertInitAndGetDevices(nullptr);
-    if (!(gdrPtrSupport() & NCCL_PTR_CUDA))
-        GTEST_SKIP() << "peermem (NCCL_PTR_CUDA) not available for the reg_mr scratchpad";
+    std::string why;
+    if (cuMemEnabledEnv()) why = "Requires NCCL_CUMEM_ENABLE=0 (peermem scratchpad path)";
+    else if (!(gdrPtrSupport() & NCCL_PTR_CUDA))
+        why = "peermem (NCCL_PTR_CUDA) not available for the reg_mr scratchpad";
+    why = CollectiveSkipReason(why);
+    if (!why.empty()) GTEST_SKIP() << why;
 
     ncclResult_t flush = ncclSuccess;
-    RunRecvFlushBurst(/*iterations=*/4, /*verifyData=*/true, &flush);
+    ASSERT_RECV_FLUSH_BURST(/*iterations=*/4, /*verifyData=*/true, &flush);
     if (MPIEnvironment::world_rank == 0)
         EXPECT_EQ(flush, ncclSuccess) << "peermem RO=0 scratchpad flush must succeed";
 }
@@ -192,13 +214,16 @@ TEST_F(GdrFlushTest, Peermem_GpuRecvFlush_NoAsyncFatal) {
 TEST_F(GdrFlushTest, FeatureDisabled_FallbackReadRecvBuffer) {
     SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
                                           false, kMinGpusPerNode, kNoNodeLimit);
-    if (scratchpadFlushEnabled())
-        GTEST_SKIP() << "Requires RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING=0 (fallback path)";
     AssertInitAndGetDevices(nullptr);
-    if (!gdrPtrSupport()) GTEST_SKIP() << "no GDR backend (neither peermem nor dma-buf) on this device";
+    std::string why;
+    if (scratchpadFlushEnabled())
+        why = "Requires RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING=0 (fallback path)";
+    else if (!gdrPtrSupport()) why = "no GDR backend (neither peermem nor dma-buf) on this device";
+    why = CollectiveSkipReason(why);
+    if (!why.empty()) GTEST_SKIP() << why;
 
     ncclResult_t flush = ncclSuccess;
-    RunRecvFlushBurst(/*iterations=*/4, /*verifyData=*/true, &flush);
+    ASSERT_RECV_FLUSH_BURST(/*iterations=*/4, /*verifyData=*/true, &flush);
     if (MPIEnvironment::world_rank == 0)
         EXPECT_EQ(flush, ncclSuccess) << "fallback flush (read recv buffer) must succeed";
 }
@@ -209,10 +234,12 @@ TEST_F(GdrFlushTest, RepeatedFlush_NoFaultBurst) {
     SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
                                           false, kMinGpusPerNode, kNoNodeLimit);
     AssertInitAndGetDevices(nullptr);
-    if (!gdrPtrSupport()) GTEST_SKIP() << "no GDR backend (neither peermem nor dma-buf) on this device";
+    std::string why = gdrPtrSupport() ? std::string() : "no GDR backend (neither peermem nor dma-buf) on this device";
+    why = CollectiveSkipReason(why);
+    if (!why.empty()) GTEST_SKIP() << why;
 
     ncclResult_t flush = ncclSuccess;
-    RunRecvFlushBurst(/*iterations=*/50, /*verifyData=*/false, &flush);
+    ASSERT_RECV_FLUSH_BURST(/*iterations=*/50, /*verifyData=*/false, &flush);
     if (MPIEnvironment::world_rank == 0)
         EXPECT_EQ(flush, ncclSuccess) << "no flush in the burst may raise a QP async-fatal";
 }

@@ -22,7 +22,8 @@ template <policies::domain_service::backend   SdkBackend,
 inline void
 on_hip_stream_enter(typename SdkBackend::callback_tracing_record_t     record,
                     [[maybe_unused]] typename SdkBackend::user_data_t* user_data,
-                    [[maybe_unused]] void*                             callback_data)
+                    [[maybe_unused]] void*                             callback_data,
+                    [[maybe_unused]] typename SdkBackend::timestamp_t  timestamp)
 {
     const auto* stream_handle_data =
         static_cast<const SdkBackend::tracing_hip_stream_data_t*>(record.payload);
@@ -47,7 +48,8 @@ template <policies::domain_service::backend   SdkBackend,
 inline void
 on_hip_stream_exit(typename SdkBackend::callback_tracing_record_t     record,
                    [[maybe_unused]] typename SdkBackend::user_data_t* user_data,
-                   [[maybe_unused]] void*                             callback_data)
+                   [[maybe_unused]] void*                             callback_data,
+                   [[maybe_unused]] typename SdkBackend::timestamp_t  timestamp)
 {
     const auto* stream_handle_data =
         static_cast<const SdkBackend::tracing_hip_stream_data_t*>(record.payload);

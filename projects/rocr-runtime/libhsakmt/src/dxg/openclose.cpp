@@ -147,7 +147,7 @@ bool hsakmtRuntime::ReserveSvmSpace(uint64_t &base, uint64_t &size, uint64_t ali
             pr_err("fail to unmap right %lx with size %llx\n", (local_va + size), right_size);
 #endif
     } else {
-        pr_err("fail to reserve Local Heap Space!\n");
+        pr_err("fail to reserve Heap Space!\n");
         base = 0;
         size = 0;
     }
@@ -190,13 +190,19 @@ bool hsakmtRuntime::ReserveLocalHeapSpace() {
    * resource, so oversize the pool and shrink only if the range can't be reserved.
    */
   for (uint64_t scale : {8ull, 4ull, 2ull}) {
-    local_heap_space_start_ = 0;
     local_heap_space_size_ = total_local_size * scale;
-    if (ReserveSvmSpace(local_heap_space_start_, local_heap_space_size_, align))
-      return true;
 
-    pr_warn("fail to reserve %" PRIu64 "x VRAM (%" PRIu64 " MB) of local heap VA, retry smaller\n",
-            scale, (total_local_size * scale) >> 20);
+    pr_debug("try to reserve %" PRIu64 " MB (%" PRIu64 "x VRAM) of local heap VA\n",
+      (total_local_size * scale) >> 20, scale);
+
+    if (ReserveSvmSpace(local_heap_space_start_, local_heap_space_size_, align)) {
+      pr_debug("successfully reserved %" PRIu64 " MB of local heap VA at 0x%" PRIx64 "\n",
+        (total_local_size * scale) >> 20, local_heap_space_start_);
+      return true;
+    }
+
+    pr_warn("failed to reserve %" PRIu64 " MB of local heap VA\n",
+      (total_local_size * scale) >> 20);
   }
 
   return false;
@@ -240,8 +246,31 @@ bool hsakmtRuntime::ReserveSystemHeapSpace() {
   uint64_t total_ram = rocr::os::HostTotalPhysicalMemory();
   // minimum of reserve size is 8G, maximum of reserve size is 1T.
   total_ram = rocr::AlignUp(total_ram, static_cast<size_t>(alignment) * 2);
-  system_heap_space_size_ = (total_ram > max_ram) ? max_ram : total_ram;
-  return ReserveSvmSpace(system_heap_space_start_, system_heap_space_size_, alignment);
+  total_ram = (total_ram > max_ram) ? max_ram : total_ram;
+
+  for (uint64_t divisor : {1ull, 2ull, 4ull}) {
+    system_heap_space_size_ = total_ram / divisor;
+
+    pr_debug("try to reserve %" PRIu64 " MB (1/%" PRIu64 " RAM) of system heap VA\n",
+      (total_ram / divisor) >> 20, divisor);
+
+    if (divisor > 1 && system_heap_space_size_ < alignment * 2) {
+      pr_err("System heap reserve size would shrink below 8G minimum. "
+        "Not enough heap space to reserve.\n");
+      return false;
+    }
+
+    if (ReserveSvmSpace(system_heap_space_start_, system_heap_space_size_, alignment)) {
+      pr_debug("successfully reserved %" PRIu64 " MB of system heap VA at 0x%" PRIx64 "\n",
+        (total_ram / divisor) >> 20, system_heap_space_start_);
+      return true;
+    }
+
+    pr_warn("failed to reserve %" PRIu64 " MB of system heap VA\n",
+      (total_ram / divisor) >> 20);
+  }
+
+  return false;
 }
 
 bool hsakmtRuntime::FreeSystemHeapSpace(void) {
@@ -436,6 +465,10 @@ ErrorCode hsakmtRuntime::ReserveIPCSysMem(gpusize size,
         int &memfd, bool lock) {
     gpusize gpu_addr = 0;
     ErrorCode code = ErrorCode::Success;
+    if (!system_heap_mgr_) {
+        *out_gpu_virt_addr = 0;
+        return ErrorCode::OutOfMemory;
+    }
     gpu_addr = system_heap_mgr_->Alloc(size, alignment, 0);
     if (gpu_addr == 0)
         return ErrorCode::OutOfMemory;
@@ -453,8 +486,9 @@ ErrorCode hsakmtRuntime::FreeIPCSysMem(gpusize gpu_addr, gpusize size, int &memf
     auto code = ErrorCode::Success;
 
     DecommitSystemHeapSpaceIPC((void *)gpu_addr, size, memfd);
-
-    system_heap_mgr_->Free(gpu_addr);
+    if (system_heap_mgr_) {
+        system_heap_mgr_->Free(gpu_addr);
+    }
     return code;
 }
 
@@ -512,6 +546,11 @@ ErrorCode hsakmtRuntime::HandleApertureAlloc(gpusize size, gpusize *out_gpu_virt
     if (size >= GPU_HUGE_PAGE_SIZE)
         align = GPU_HUGE_PAGE_SIZE;
 
+    if (!handle_aperture_mgr_) {
+        *out_gpu_virt_addr = 0;
+        return ErrorCode::OutOfHandleApeMemory;
+    }
+
     *out_gpu_virt_addr = handle_aperture_mgr_->Alloc(size, align);
     if (*out_gpu_virt_addr == 0)
         return ErrorCode::OutOfHandleApeMemory;
@@ -520,7 +559,9 @@ ErrorCode hsakmtRuntime::HandleApertureAlloc(gpusize size, gpusize *out_gpu_virt
 }
 
 void hsakmtRuntime::HandleApertureFree(gpusize gpu_addr) {
-    handle_aperture_mgr_->Free(gpu_addr);
+    if (handle_aperture_mgr_) {
+        handle_aperture_mgr_->Free(gpu_addr);
+    }
 }
 
 /* is_forked_child detects when the process has forked since the last
@@ -658,8 +699,9 @@ static HSAKMT_STATUS init_vars_from_env(void) {
   if ((envvar = getenv("ROCR_USE_PM4")) != nullptr) {
     dxg_runtime->use_pm4_ = safe_env_to_int(envvar, 0);
   }
+
 #ifdef __linux__
-  dxg_runtime->use_pm4_ = 1;  // Force PM4 usage on Linux for now
+  dxg_runtime->use_pm4_ = safe_env_to_int(getenv("ROCR_USE_PM4"), 1);
 #endif
 
   // Disable wait timeout if ROCR_DISABLE_WAIT_TIMEOUT is set.
@@ -672,14 +714,11 @@ static HSAKMT_STATUS init_vars_from_env(void) {
     dxg_runtime->check_avail_sysram = (envvar[0] == '1' && envvar[1] == '\0');
   }
 
-  // Set default GPU node based on ROCR_VISIBLE_DEVICES. Extract the first numeric value
-  // from the environment variable and add 1 to convert to 1-indexed node ID.
-  if ((envvar = getenv("ROCR_VISIBLE_DEVICES")) != nullptr) {
-    std::string devices(envvar);
-    size_t first_num_pos = devices.find_first_of("0123456789");
-    if (first_num_pos != std::string::npos) {
-      dxg_runtime->default_node = std::stoi(devices.substr(first_num_pos));
-    }
+  // Leave the dependency POLL_REGMEM packets in the ring for the SDMA engine to execute if
+  // HSA_ENABLE_SDMA_GPU_POLL is "1", instead of waiting them out and stripping them on a host
+  // thread. Only meaningful on a native SDMA user queue. Defaults off: gpu poll is stuck in KMD.
+  if ((envvar = getenv("HSA_ENABLE_SDMA_GPU_POLL")) != nullptr) {
+    dxg_runtime->sdma_gpu_poll_ = (envvar[0] == '1' && envvar[1] == '\0');
   }
 
   // Determine SVM (Shared Virtual Memory) API support. Enabled by default unless

@@ -78,13 +78,12 @@ constexpr bool CheckReservedBits(
     if (sizeof(T) * 8 == expectedTotalBitWidth)
     {
         // Get the width of the reserved field by detecting when it stops filling bits
-        T      sample       = {};
+        T      sample{ .reserved = 0 };
         uint64 mask         = 0;
         uint32 reservedBits = 0;
         do
         {
-            sample = {};
-            mask   = (mask << 1) | 1;
+            mask = (mask << 1) | 1;
             reservedBits++;
             sample.reserved = mask;
         } while ((sample.reserved == mask) && (reservedBits < sizeof(T) * 8));

@@ -1,0 +1,47 @@
+# rccl-UnitTestsMicroAmdsmiWrap — shared/ctest schema.
+# Host-only micro-tests for src/misc/amdsmi_wrap.cc -- GPU enumeration, bus IDs, link topology,
+# firmware and UALoE/UALink fabric discovery over all three backends (no GPU, no librccl).
+# RCCL does not support Windows: exclude_windows matches all tests so generated suites are empty on Windows.
+
+test_categories:
+  quick: &micro_amdsmi_wrap_quick
+    description: "Smoke — host-only src/misc/amdsmi_wrap.cc micro-tests, sub-second."
+    test_patterns:
+      - "AmdsmiWrap*"
+    exclude_windows:
+      - "*"
+    labels:
+      - "rccl"
+      - "quick"
+      - "smoke"
+      - "precheck"
+      - "microtest"
+  standard:
+    <<: *micro_amdsmi_wrap_quick
+    labels:
+      - "rccl"
+      - "standard"
+      - "regression"
+      - "microtest"
+  comprehensive:
+    <<: *micro_amdsmi_wrap_quick
+    labels:
+      - "rccl"
+      - "comprehensive"
+      - "comprehensive_regression"
+      - "microtest"
+  full:
+    <<: *micro_amdsmi_wrap_quick
+    labels:
+      - "rccl"
+      - "full"
+      - "full_regression"
+      - "microtest"
+
+execution_settings:
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 600
+    standard: 600
+    comprehensive: 600
+    full: 600

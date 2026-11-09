@@ -60,8 +60,11 @@ SigquitTest ()
   hipError_t err;
   int start = 0;
   int *fence;
-  err = hipMallocManaged (&fence, sizeof (int));
-  TEST_ASSERT (err == hipSuccess, "alloc");
+  /* Host-coherent so the device atomic is visible to the host while the
+     kernel is still running.  Managed memory is not coherent mid-kernel
+     when XNACK is off.  */
+  err = hipHostMalloc ((void **)&fence, sizeof (int), hipHostMallocCoherent);
+  TEST_ASSERT (err == hipSuccess, "hipHostMalloc");
 
   __atomic_store_n (fence, 0, __ATOMIC_RELAXED);
 

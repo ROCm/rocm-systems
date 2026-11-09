@@ -6,7 +6,7 @@ set-user-defaults()
     : ${ROCM_VERSIONS:="6.3"}
     : ${DISTRO:=ubuntu}
     : ${VERSIONS:=22.04}
-    : ${PYTHON_VERSIONS:="8 9 10 11 12 13"}
+    : ${PYTHON_VERSIONS:="8 9 10 11 12 13 14 15"}
     : ${BUILD_CI:=""}
     : ${PUSH:=0}
     : ${PULL:=--pull}
