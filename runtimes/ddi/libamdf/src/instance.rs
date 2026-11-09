@@ -57,6 +57,16 @@ pub(crate) struct Instance {
 }
 
 impl Instance {
+    /// Rejects an inherited handle before entering frontend mutexes or
+    /// releasing native owners that belong to its creating process.
+    pub(crate) fn require_current_process(&self) -> Result<(), u64> {
+        if self.native.is_current_process() {
+            Ok(())
+        } else {
+            Err(PRECONDITION)
+        }
+    }
+
     /// Reports the immutable native lifetime selected for this instance.
     pub(crate) fn process_lifetime(&self) -> bool {
         self.native.driver_context_lifetime() == session::DriverContextLifetime::Process
@@ -889,6 +899,7 @@ pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_instance_t) -> u64 {
             // Destruction is externally serialized. Keep this owner alive
             // until native shutdown releases every resource it retains.
             let instance = object(pointer.cast::<Instance>())?;
+            instance.require_current_process()?;
             if instance.children.load(Ordering::Acquire) != 0 {
                 return Err(BUSY);
             }
@@ -1016,6 +1027,7 @@ pub(crate) unsafe extern "C" fn open(
 pub(crate) unsafe extern "C" fn close(pointer: *mut amdf_endpoint_t) -> u64 {
     crate::support::boundary(|| unsafe {
         let endpoint = object(pointer.cast::<Endpoint>())?;
+        (*endpoint.instance).require_current_process()?;
         if endpoint.children.load(Ordering::Acquire) != 0 {
             return Err(BUSY);
         }
@@ -1212,6 +1224,7 @@ pub(crate) unsafe extern "C" fn device_info(
 pub(crate) unsafe extern "C" fn device_destroy(pointer: *mut amdf_device_t) -> u64 {
     crate::support::boundary(|| unsafe {
         let device = object(pointer.cast::<Device>())?;
+        device_instance(device).require_current_process()?;
         if device.queues.load(Ordering::Acquire) != 0 || device.events.load(Ordering::Acquire) != 0
         {
             return Err(BUSY);
