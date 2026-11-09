@@ -236,7 +236,7 @@ uses bounded queue turns for event-loop fairness and retains CP queue
 serialization.
 
 Graceful AQL removal is a publication barrier. The CP retains the registration
-while a consumed ring cursor, dispatch completion, or queue-idle signal still
+while a consumed ring cursor, dispatch completion, or queue-idle notification still
 needs retry, and reports a terminal publication failure instead of silently
 dropping it. Reset and rollback use a distinct force-cancel operation.
 
@@ -495,7 +495,10 @@ wavefronts it stops scheduling and fires its `on_idle` callback. When all
 CUs are idle and no packets remain, the CP signals completion via
 `engine()->primary_release()`.
 
-Completion-signal and queue-inactive writes are durable per-queue journals.
+Each queue journals its completion-signal updates and idle notifications.
+An idle notification writes the event ID to the queue event's mailbox when
+present, delivers the targeted interrupt for a nonzero event ID, then delivers
+the generic interrupt.
 An unavailable translated backing pauses admission and advancement only for
 the queue whose journal is incomplete; the CP continues fetching, dispatching,
 and retiring independent queues. A later retry resumes at the first uncommitted

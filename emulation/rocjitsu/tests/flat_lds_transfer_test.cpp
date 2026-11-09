@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
@@ -35,7 +36,8 @@ protected:
     cfg.sgprs_per_wf = 102;
     cfg.vgprs_per_wf = 16;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("flat_lds", cfg, &memory, &l2);
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "flat_lds", cfg, &memory, &l2));
     wave = cu->dispatch_wf(0, 0, 102, 16, GetParam().second);
     ASSERT_NE(wave, nullptr);
     wave->set_lds_base(128);
@@ -152,6 +154,77 @@ TEST_P(FlatLdsTransfer, ScratchWidthsAndAddressModesPreserveInactiveLanesAndVgpr
         EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 8, lane), 0xdeadbeef);
       }
     }
+}
+
+TEST_P(FlatLdsTransfer, GlobalLoadsToLdsAdvertiseVmemObligation) {
+  if (!modern())
+    GTEST_SKIP() << "Tests specific to modern architectures.";
+  for (unsigned kind = 0; kind < 5; ++kind) {
+    SCOPED_TRACE(testing::Message() << "kind=" << kind);
+    const auto words = encoding(kind, 2, false, vector_saddr());
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    const auto *issue_info = inst->amdgpu_memory_issue_info();
+    ASSERT_NE(issue_info, nullptr);
+    const auto obligations = issue_info->counter_obligations();
+    ASSERT_EQ(obligations.size(), 1u);
+    EXPECT_EQ(obligations[0].wait_counter_type(), amdgpu::WaitCounterType::VMCNT);
+    EXPECT_EQ(obligations[0].completion_class(), amdgpu::MemoryCompletionClass::VMEM);
+  }
+}
+
+TEST_P(FlatLdsTransfer, GlobalLoadsToLdsPreserveInactiveLanesAndVgprs) {
+  if (!modern())
+    GTEST_SKIP() << "Tests specific to modern architectures.";
+  const std::array<uint32_t, 5> expected{0x81, 0xffffff81, 0x8081, 0xffff8081, 0x76548081};
+  const int base_offset = 64;
+  const uint64_t exec_mask = 0x25;
+  for (unsigned kind = 0; kind < 5; ++kind) {
+    for (bool scalar_base : {false, true}) {
+      for (int offset : {-4, 0, 4}) {
+        SCOPED_TRACE(testing::Message()
+                     << "kind=" << kind << " scalar_base=" << scalar_base << " offset=" << offset);
+        clear();
+        wave->set_exec(exec_mask);
+        wave->set_m0(base_offset);
+        scalar(4, 0x20000);
+        scalar(5, 0);
+        for (unsigned lane = 0; lane < wave->wf_size(); ++lane) {
+          const int source_slot = base_offset + static_cast<int>(lane) * 4;
+          const int address_before_offset = source_slot - offset;
+
+          vector(2, lane,
+                 scalar_base ? static_cast<uint32_t>(address_before_offset)
+                             : 0x20000u + static_cast<uint32_t>(address_before_offset));
+          vector(3, lane, 0);
+          memory.write32(0x20000u + static_cast<uint32_t>(source_slot), 0x76548081u + lane);
+        }
+
+        ASSERT_NO_FATAL_FAILURE(
+            issue(encoding(kind, 2, false, scalar_base ? 4 : vector_saddr(), offset)));
+        for (unsigned lane = 0; lane < wave->wf_size(); ++lane) {
+          const unsigned destination =
+              static_cast<unsigned>(128 + 64 + offset + static_cast<int>(lane) * 4);
+          const bool active = (exec_mask & (uint64_t{1} << lane)) != 0;
+
+          EXPECT_EQ(wave->lds().read32(destination), active ? expected[kind] + lane : 0xccccccccu)
+              << "lane=" << lane;
+
+          EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 8, lane), 0xdeadbeefu)
+              << "lane=" << lane;
+        }
+      }
+    }
+  }
+}
+
+TEST_P(FlatLdsTransfer, Cdna3RejectsCdna4WideGlobalLoadEncodings) {
+  if (GetParam().first != ROCJITSU_CODE_ARCH_CDNA3)
+    GTEST_SKIP() << "Checks the CDNA3 decoder boundary.";
+  for (unsigned dwords : {3u, 4u}) {
+    auto words = global_wide_lds_encoding(dwords, 127, 0);
+    EXPECT_TRUE(decode_fails(*decoder, words.data()));
+  }
 }
 
 TEST_P(FlatLdsTransfer, LegacyGlobalWidthsAndScalarOrVectorBase) {
@@ -346,74 +419,83 @@ TEST_P(FlatLdsTransfer, GlobalWideLoadsPreservePaddingInactiveLanesAndVgprs) {
   constexpr uint64_t base = 0x123400020000;
   for (unsigned count : {3u, 4u})
     for (bool scalar_base : {false, true})
-      for (int offset : {-16, 16})
-        for (uint64_t exec : {uint64_t{0}, uint64_t{0x8000000000000025}}) {
-          SCOPED_TRACE(testing::Message()
-                       << count << ',' << scalar_base << ',' << offset << ',' << exec);
-          clear();
-          cu->flush_all();
-          wave->set_lds_size(2048);
-          wave->set_exec(exec);
-          wave->set_m0(0xfffc0043);
-          scalar(4, static_cast<uint32_t>(base));
-          scalar(5, base >> 32);
-          for (unsigned lane = 0; lane < wave->wf_size(); ++lane) {
-            const uint64_t address = base + 0x80000000u + lane * 32;
-            vector(2, lane, scalar_base ? 0x80000000u + lane * 32 : address);
-            vector(3, lane, address >> 32);
-            for (unsigned word = 0; word < count; ++word)
-              memory.write32(address + offset + word * 4, 0x12340000 + lane * 16 + word);
+      for (int offset : {-16, -4, 0, 4, 16})
+        for (uint64_t exec : {uint64_t{0}, uint64_t{0x25}, uint64_t{0x8000000000000025}})
+          for (unsigned vdst : {8u, 255u}) {
+            SCOPED_TRACE(testing::Message() << count << ',' << scalar_base << ',' << offset << ','
+                                            << exec << ',' << vdst);
+            clear();
+            cu->flush_all();
+            wave->set_lds_size(2048);
+            wave->set_exec(exec);
+            wave->set_m0(0xfffc0043);
+            scalar(4, static_cast<uint32_t>(base));
+            scalar(5, base >> 32);
+            for (unsigned lane = 0; lane < wave->wf_size(); ++lane) {
+              const uint64_t address = base + 0x80000000u + lane * 32;
+              vector(2, lane, scalar_base ? 0x80000000u + lane * 32 : address);
+              vector(3, lane, address >> 32);
+              for (unsigned word = 0; word < 4; ++word) {
+                vector(8 + word, lane, 0xdeadbeef);
+                if (word < count)
+                  memory.write32(address + offset + word * 4, 0x12340000 + lane * 16 + word);
+              }
+            }
+            ASSERT_NO_FATAL_FAILURE(
+                issue(global_wide_lds_encoding(count, scalar_base ? 4 : 127, offset, vdst)));
+            EXPECT_EQ(wave->exec(), exec);
+            for (unsigned address = 0; address < 1408; address += 4) {
+              const int relative = static_cast<int>(address) - (128 + 64 + offset);
+              const unsigned lane = relative / 16;
+              const unsigned word = (relative % 16) / 4;
+              const bool written =
+                  relative >= 0 && lane < 64 && word < count && (exec & (uint64_t{1} << lane));
+              EXPECT_EQ(wave->lds().read32(address),
+                        written ? 0x12340000 + lane * 16 + word : 0xcccccccc)
+                  << address;
+            }
+            for (unsigned lane = 0; lane < wave->wf_size(); ++lane)
+              for (unsigned word = 0; word < 4; ++word)
+                EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 8 + word, lane), 0xdeadbeef);
           }
-          ASSERT_NO_FATAL_FAILURE(
-              issue(global_wide_lds_encoding(count, scalar_base ? 4 : 127, offset, 255)));
-          for (unsigned address = 0; address < 1408; address += 4) {
-            const int relative = static_cast<int>(address) - (128 + 64 + offset);
-            const unsigned lane = relative / 16;
-            const unsigned word = (relative % 16) / 4;
-            const bool written =
-                relative >= 0 && lane < 64 && word < count && (exec & (uint64_t{1} << lane));
-            EXPECT_EQ(wave->lds().read32(address),
-                      written ? 0x12340000 + lane * 16 + word : 0xcccccccc)
-                << address;
-          }
-          for (unsigned lane = 0; lane < wave->wf_size(); ++lane)
-            EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 8, lane), 0xdeadbeef);
-        }
 }
 
 TEST_P(FlatLdsTransfer, GlobalWideLoadsRespectM0WidthAndWholePayloadBounds) {
   if (GetParam().first != ROCJITSU_CODE_ARCH_CDNA4)
     GTEST_SKIP() << "Wide GLOBAL LDS loads require CDNA4.";
   for (unsigned count : {3u, 4u})
-    for (uint32_t m0 : {3u, 0x10003u, 0xfffc0003u})
-      for (int offset : {-16, 0, 16}) {
-        SCOPED_TRACE(testing::Message() << count << ',' << m0 << ',' << offset);
-        clear();
-        cu->flush_all();
-        wave->set_lds_size(44);
-        wave->set_exec(7);
-        wave->set_m0(m0);
-        for (unsigned lane = 0; lane < 3; ++lane) {
-          vector(2, lane, 0x20000 + lane * 32);
-          vector(3, lane, 0);
-          for (unsigned word = 0; word < count; ++word)
-            memory.write32(0x20000 + lane * 32 + offset + word * 4, 0xabc000 + lane * 16 + word);
-        }
-        ASSERT_NO_FATAL_FAILURE(issue(global_wide_lds_encoding(count, 127, offset)));
-        for (unsigned address = 0; address < 256; address += 4) {
-          uint32_t expected = 0xcccccccc;
+    for (uint32_t m0 : {0u, 3u, 0x10003u, 0xfffc0003u})
+      for (int offset : {-16, 0, 16})
+        // Include exact-fit and one-byte-short boundaries for the first two lanes.
+        for (unsigned allocation_size : {11u, 12u, 15u, 16u, 27u, 28u, 31u, 32u, 44u}) {
+          SCOPED_TRACE(testing::Message()
+                       << count << ',' << m0 << ',' << offset << ',' << allocation_size);
+          clear();
+          cu->flush_all();
+          wave->set_lds_size(allocation_size);
+          wave->set_exec(7);
+          wave->set_m0(m0);
           for (unsigned lane = 0; lane < 3; ++lane) {
-            const int relative =
-                static_cast<int>(m0 & 0x3fffcu) + offset + static_cast<int>(lane) * 16;
-            if (relative < 0 || relative + count * 4 > 44)
-              continue;
+            vector(2, lane, 0x20000 + lane * 32);
+            vector(3, lane, 0);
             for (unsigned word = 0; word < count; ++word)
-              if (address == 128 + relative + word * 4)
-                expected = 0xabc000 + lane * 16 + word;
+              memory.write32(0x20000 + lane * 32 + offset + word * 4, 0xabc000 + lane * 16 + word);
           }
-          EXPECT_EQ(wave->lds().read32(address), expected) << address;
+          ASSERT_NO_FATAL_FAILURE(issue(global_wide_lds_encoding(count, 127, offset)));
+          for (unsigned address = 0; address < 256; address += 4) {
+            uint32_t expected = 0xcccccccc;
+            for (unsigned lane = 0; lane < 3; ++lane) {
+              const int relative =
+                  static_cast<int>(m0 & 0x3fffcu) + offset + static_cast<int>(lane) * 16;
+              if (relative < 0 || relative + count * 4 > allocation_size)
+                continue;
+              for (unsigned word = 0; word < count; ++word)
+                if (address == 128 + relative + word * 4)
+                  expected = 0xabc000 + lane * 16 + word;
+            }
+            EXPECT_EQ(wave->lds().read32(address), expected) << address;
+          }
         }
-      }
 }
 
 TEST_P(FlatLdsTransfer, GlobalWideLoadsApplyThirteenBitOffsetToLds) {

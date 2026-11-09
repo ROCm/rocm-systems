@@ -535,6 +535,7 @@ add_executable(
     register_access_test.cpp
     register_file_test.cpp
     simd_correctness/mfma_lazy_storage_test.cpp
+    simd_correctness/mfma_register_paths_test.cpp
     vgpr_redispatch_test.cpp
     instruction_execution_harness_test.cpp
     vop3_conversion_modifiers_test.cpp
@@ -751,11 +752,13 @@ endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     rj_add_test_path(rocjitsu_tests PLUGIN_LOADER_FIXTURE_DIR "${PLUGIN_LOADER_FIXTURE_DIR}")
+    rj_add_test_path(rocjitsu_tests PLUGIN_LOADER_RACE_DIR "$<TARGET_FILE_DIR:rocjitsu_plugin_race_so>")
     add_dependencies(
         rocjitsu_tests
         plugin_loader_fixture_good
         plugin_loader_fixture_missing
         plugin_loader_fixture_duplicate
+        rocjitsu_plugin_race_so
     )
     if(ROCJITSU_ENABLE_PERFSIM_PLUGIN)
         rj_add_test_path(rocjitsu_tests PERFSIM_FAKE_BACKEND_PATH "$<TARGET_FILE:rocjitsu_perfsim_fake_backend>")
@@ -1150,6 +1153,23 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
     rj_configure_target(file_loading_allocation_failure_test PRIVATE_INCLUDES WARNINGS)
     rj_add_gtest_tests(file_loading_allocation_failure_test)
+
+    # Keep allocation injection isolated from the main test executable.
+    add_executable(
+        queue_registration_allocation_failure_test
+        queue_registration_allocation_failure_test.cpp
+    )
+    target_link_libraries(
+        queue_registration_allocation_failure_test
+        PRIVATE
+            ${RJ_OBJECT_LIBS}
+            util
+            flatbuffers
+            Threads::Threads
+            GTest::gtest_main
+    )
+    rj_configure_target(queue_registration_allocation_failure_test PRIVATE_INCLUDES WARNINGS)
+    rj_add_gtest_tests(queue_registration_allocation_failure_test)
 
     # Native dispatch must extract both the relative tables and their factories
     # from a static archive, including when the C++ objects use LTO.
