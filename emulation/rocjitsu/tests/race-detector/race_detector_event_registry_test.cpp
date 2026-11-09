@@ -64,7 +64,7 @@ TEST(RaceDetector, EventRegistry_LdsEventsWithoutBytesAreTrimmedOnceComplete) {
   int N = EventRegistry::kTrimAttemptInterval;
   RaceDetector detector(/*nWaves=*/
                         1, /*vgprCount=*/2, /*sgprCount=*/2, Dim3d(0), [](RaceViolation) {},
-                        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4),
+                        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5),
                         /*ldsSizeBytes=*/64 * 1024);
   auto &wave = detector.getWaveRaceState(0);
   const std::array obligations{rocjitsu::amdgpu::MemoryCounterObligation{

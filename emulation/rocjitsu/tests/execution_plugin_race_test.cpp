@@ -641,7 +641,9 @@ protected:
       state->per_lane_lds_src_bytes[lane] = static_cast<uint8_t>(
           addresses[lane] == kInvalidLdsAddress ? 0 : in_range_bytes.value_or(bytes));
     }
-    const uint64_t lanes = exec.value_or((uint64_t{1} << addresses.size()) - 1);
+    const uint64_t all_lanes =
+        addresses.size() >= 64 ? ~uint64_t{0} : (uint64_t{1} << addresses.size()) - 1;
+    const uint64_t lanes = exec.value_or(all_lanes);
     state->wf_size = waves[wave]->wf_size();
     state->exec_mask = lanes;
     state->lane_mask = lanes;

@@ -615,10 +615,9 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
       // each other (CDNA5 ISA 10.8) and with DS instructions, so the read is
       // checked as unordered against every pending LDS write, including the
       // wave's own DS writes, async loads and tensor loads.
-      // Each lane reads the leading bytes the execution recorded: the whole
-      // DWORDs of its source inside the allocation.
-      const int elementBytes =
-          static_cast<int>(std::min<uint32_t>(d.num_elems * d.elem_size, sizeof(uint32_t)));
+      // Each lane reads the leading bytes the execution recorded: the bytes of
+      // its source inside the allocation. They are checked and registered at
+      // byte granularity.
       std::vector<LdsByteRange> ranges;
       ranges.reserve(wf.wf_size());
       for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
@@ -628,7 +627,7 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
             laneBytes == 0)
           continue;
         ranges.push_back({.address = address, .bytes = laneBytes});
-        const auto bytes = detector->ldsBytesInRange(address, laneBytes, elementBytes);
+        const auto bytes = detector->ldsBytesInRange(address, laneBytes, /*elementBytes=*/1);
         if (bytes != 0)
           detector->validateRead(static_cast<int>(address), waveId, static_cast<int>(lane),
                                  static_cast<int>(bytes), MemoryOrderClass::UNORDERED);
