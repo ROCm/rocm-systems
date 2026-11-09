@@ -612,9 +612,10 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
     } else if (d.lds_src) {
       // An async store reads its LDS source, which stays an LDS read until a
       // wait retires the store. Async copies may access LDS out of order with
-      // each other (CDNA5 ISA 10.8) and with DS instructions, so the read is
-      // checked as unordered against every pending LDS write, including the
-      // wave's own DS writes, async loads and tensor loads.
+      // each other (CDNA5 ISA 10.8). The ISA does not establish their LDS access
+      // order relative to DS instructions or tensor DMA, so as a conservative
+      // rule the read is checked as unordered against every pending LDS write,
+      // including the wave's own DS writes, async loads and tensor loads.
       // Each lane reads the leading bytes the execution recorded: the bytes of
       // its source inside the allocation. They are checked and registered at
       // byte granularity.

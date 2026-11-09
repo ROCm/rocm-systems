@@ -226,15 +226,21 @@ races. Some examples:
   its LDS address. Any wave, including the issuing one, that reads a load's
   destination or overwrites a store's source before `s_wait_asynccnt` is
   reported; other waves also need an `s_barrier`. Async copies may access LDS
-  out of order with each other (CDNA5 ISA 10.8) and with DS instructions, so a
-  store is also reported when it reads bytes of the same wave's pending DS
-  write, async load or tensor load, and an async load when it overwrites the
-  source of the same wave's pending async store. Async loads complete in issue
-  order with other async loads and async stores with other async stores, but
-  loads and stores complete out of order with each other, so a partial
-  `s_wait_asynccnt` retires the oldest of each kind only when the count
-  guarantees it: after a load and then a store, `s_wait_asynccnt 1` retires
-  neither. `ds_atomic_async_barrier_arrive_b64` also completes on `asynccnt`, in
+  out of order with each other (CDNA5 ISA 10.8), so a store is also reported
+  when it reads bytes of the same wave's pending async load, and an async load
+  when it overwrites the source of the same wave's pending async store. The ISA
+  does not establish the LDS access order of an async copy relative to DS
+  instructions or tensor DMA, so as a conservative rule the detector also
+  reports a store that reads bytes of the same wave's pending DS write or tensor
+  load, until a DS or tensor wait completes it. Compilers can emit such a pair
+  without a DS wait (on gfx1250, Clang places no `s_wait_dscnt` between the
+  `ds_store_b32` of a shared-memory assignment and a following
+  `global_store_async_from_lds_b32` builtin that reads the same bytes), and the
+  detector reports it. Async loads complete in issue order with other async
+  loads and async stores with other async stores, but loads and stores
+  complete out of order with each other, so a partial `s_wait_asynccnt`
+  retires the oldest of each kind only when the count guarantees it: after a
+  load and then a store, `s_wait_asynccnt 1` retires neither. `ds_atomic_async_barrier_arrive_b64` also completes on `asynccnt`, in
   order with async loads (10.8), so partial waits count it with the loads. The
   ISA specifies out-of-range LDS behavior for async loads only: their LDS write
   is dropped (CDNA5 ISA 3.3.3). As modeling choices, a load lane with any byte
