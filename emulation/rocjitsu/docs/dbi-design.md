@@ -140,6 +140,13 @@ decoding uses the source's concrete decoder, including variants.
 Replacement facts retain the shared source-admission proof, while each batch
 still checks its edited PT_LOAD file ranges; see [Checked edits](#checked-edits-codepatchchecked_text_editsh).
 
+Replacement batches reject retained `s_getpc_b64` / `s_get_pc_i64` when growth
+moves allocated storage or consumes a loaded file/zero-fill tail. Linked address
+constants are not yet relocated. This conservative restriction includes cases
+whose actual target stays fixed while unrelated metadata moves. Removing every
+source getpc in the batch remains permitted. The check uses immutable source
+facts across queries and forks; it does not add CFG/liveness to pure replacement.
+
 A replacement point can carry the normal callable-probe fields; its probe runs
 before the replacement body. One separate callable `BeforeInst` at the same offset
 can also coalesce with the replacement in either queue order. Multiple replacements,
@@ -147,6 +154,8 @@ multiple probes for one replacement, and other conflicting duplicates reject.
 Distinct observation and replacement sites share one atomic batch. The normal
 probe ABI, resource, scratch and wrapper gates apply when a probe is requested;
 a pure replacement needs no probe or liveness.
+The callable-probe MOVREL check runs on the effective guest blocks, including
+relative SGPR accesses introduced only by replacement bodies.
 
 Before probe planning, all replacements are laid out privately using the same
 TrampolineBuilder and CodeObjectPatcher used for final output. Fresh CFG/liveness

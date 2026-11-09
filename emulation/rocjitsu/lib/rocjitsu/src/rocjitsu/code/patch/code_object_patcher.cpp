@@ -1602,8 +1602,6 @@ bool CodeObjectPatcher::replace_text(
                                          .target_section_offset = target->section_offset});
   }
   const uint64_t old_text_end_file = text_offset_ + text_size_;
-  if (new_text.size() > std::numeric_limits<uint64_t>::max() - text_header.sh_addr)
-    return false;
   const uint64_t old_text_end_vaddr = text_header.sh_addr + text_size_;
   const uint64_t growth = new_text.size() - text_size_;
 
