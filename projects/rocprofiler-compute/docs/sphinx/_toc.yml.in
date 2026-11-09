@@ -103,7 +103,7 @@ subtrees:
         - file: conceptual/rdna4/gl2-cache.rst
           title: GL2
         - file: conceptual/rdna4/gcea.rst
-          title: Efficiency Arbiter (EA)
+          title: Graphics Core Efficiency Arbiter (GCEA)
         - file: conceptual/rdna4/command-processor.rst
           title: Command processor (CP)
         - file: conceptual/rdna4/grbm.rst

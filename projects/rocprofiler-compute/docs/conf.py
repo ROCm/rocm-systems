@@ -200,14 +200,14 @@ rdna4_gfx1201_section_map = {
         "Memory chart - GL1-GL2 Interface"
     ),
     "rdna4-memory-chart-gl2-cache-gfx1201": "Memory chart - GL2 Cache (L2)",
-    "rdna4-memory-chart-ea-to-dram-gfx1201": "Memory chart - EA to DRAM",
+    "rdna4-memory-chart-gcea-to-dram-gfx1201": "Memory chart - GCEA to DRAM",
     "rdna4-memory-chart-wgps-gfx1201": "Memory chart - Workgroup Processors (WGPs)",
-    "rdna4-ea-utilization-gfx1201": "EA Utilization",
-    "rdna4-ea-traffic-bandwidth-gfx1201": "EA Traffic Bandwidth",
-    "rdna4-ea-sdp-outstanding-requests-gfx1201": (
-        "EA-SDP Interface - Outstanding Requests"
+    "rdna4-gcea-utilization-gfx1201": "GCEA Utilization",
+    "rdna4-gcea-traffic-bandwidth-gfx1201": "GCEA Traffic Bandwidth",
+    "rdna4-gcea-sdp-outstanding-requests-gfx1201": (
+        "GCEA-SDP Interface - Outstanding Requests"
     ),
-    "rdna4-ea-sdp-stalls-gfx1201": "EA-SDP Interface - Stalls",
+    "rdna4-gcea-sdp-stalls-gfx1201": "GCEA-SDP Interface - Stalls",
 }
 
 for context_name, section_name in rdna4_gfx1201_section_map.items():

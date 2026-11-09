@@ -24,12 +24,12 @@ System Speed-of-Light:
     rst: Percentage of L2 lookups that hit. Navi 48 has an 8 MB L2.
     unit: Percent
   GL2-Fabric Read BW:
-    plain: Bytes L2 read over its EA interface, from the 32, 64, 128, and 256-byte read request counts. The 64 MB Infinity Cache serves part of this traffic, so it is not compared against the DRAM (GDDR6) peak.
-    rst: Bytes L2 read over its EA interface, from the 32, 64, 128, and 256-byte read request counts. The 64 MB Infinity Cache serves part of this traffic, so it is not compared against the DRAM (GDDR6) peak.
+    plain: Bytes L2 read over its GCEA interface, from the 32, 64, 128, and 256-byte read request counts. The 64 MB Infinity Cache serves part of this traffic, so it is not compared against the DRAM (GDDR6) peak.
+    rst: Bytes L2 read over its GCEA interface, from the 32, 64, 128, and 256-byte read request counts. The 64 MB Infinity Cache serves part of this traffic, so it is not compared against the DRAM (GDDR6) peak.
     unit: Bytes/s
   GL2-Fabric Write BW:
-    plain: Bytes L2 wrote over its EA interface, from the 32, 64, 128, and 256-byte write request counts. The Infinity Cache absorbs part of this traffic, so it is not compared against the DRAM (GDDR6) peak.
-    rst: Bytes L2 wrote over its EA interface, from the 32, 64, 128, and 256-byte write request counts. The Infinity Cache absorbs part of this traffic, so it is not compared against the DRAM (GDDR6) peak.
+    plain: Bytes L2 wrote over its GCEA interface, from the 32, 64, 128, and 256-byte write request counts. The Infinity Cache absorbs part of this traffic, so it is not compared against the DRAM (GDDR6) peak.
+    rst: Bytes L2 wrote over its GCEA interface, from the 32, 64, 128, and 256-byte write request counts. The Infinity Cache absorbs part of this traffic, so it is not compared against the DRAM (GDDR6) peak.
     unit: Bytes/s
   LDS Bank Conflicts:
     plain: Cycles LDS stalled on conflicting bank addresses, averaged per dispatch.
@@ -184,29 +184,29 @@ Memory chart - GL2 Cache (L2):
     rst: Percentage of L2 lookups that hit. Navi 48 has an 8 MB L2.
     unit: Percent
   GL2-Fabric Read BW:
-    plain: Bytes L2 read over its EA interface, from the 32, 64, 128, and 256-byte read request counts. This includes traffic the Infinity Cache serves.
-    rst: Bytes L2 read over its EA interface, from the 32, 64, 128, and 256-byte read request counts. This includes traffic the Infinity Cache serves.
+    plain: Bytes L2 read over its GCEA interface, from the 32, 64, 128, and 256-byte read request counts. This includes traffic the Infinity Cache serves.
+    rst: Bytes L2 read over its GCEA interface, from the 32, 64, 128, and 256-byte read request counts. This includes traffic the Infinity Cache serves.
     unit: Bytes/s
   GL2-Fabric Write BW:
-    plain: Bytes L2 wrote over its EA interface, from the 32, 64, 128, and 256-byte write request counts. 64-byte requests include atomics.
-    rst: Bytes L2 wrote over its EA interface, from the 32, 64, 128, and 256-byte write request counts. 64-byte requests include atomics.
+    plain: Bytes L2 wrote over its GCEA interface, from the 32, 64, 128, and 256-byte write request counts. 64-byte requests include atomics.
+    rst: Bytes L2 wrote over its GCEA interface, from the 32, 64, 128, and 256-byte write request counts. 64-byte requests include atomics.
     unit: Bytes/s
-Memory chart - EA to DRAM:
+Memory chart - GCEA to DRAM:
   DRAM Read Requests:
-    plain: L2 read requests over EA destined for DRAM. The 64 MB Infinity Cache can serve them before they reach DRAM.
-    rst: L2 read requests over EA destined for DRAM. The 64 MB Infinity Cache can serve them before they reach DRAM.
+    plain: L2 read requests over GCEA destined for DRAM. The 64 MB Infinity Cache can serve them before they reach DRAM.
+    rst: L2 read requests over GCEA destined for DRAM. The 64 MB Infinity Cache can serve them before they reach DRAM.
     unit: Requests per Normalization Unit
   DRAM Write Requests:
-    plain: L2 write requests over EA destined for DRAM. The 64 MB Infinity Cache can absorb them before they reach DRAM.
-    rst: L2 write requests over EA destined for DRAM. The 64 MB Infinity Cache can absorb them before they reach DRAM.
+    plain: L2 write requests over GCEA destined for DRAM. The 64 MB Infinity Cache can absorb them before they reach DRAM.
+    rst: L2 write requests over GCEA destined for DRAM. The 64 MB Infinity Cache can absorb them before they reach DRAM.
     unit: Requests per Normalization Unit
   DRAM Read Bandwidth:
-    plain: Bytes L2 read over EA for requests destined for DRAM, in 32-byte units. Infinity Cache hits are included, so this can exceed the 640 GB/s DRAM (GDDR6) peak.
-    rst: Bytes L2 read over EA for requests destined for DRAM, in 32-byte units. Infinity Cache hits are included, so this can exceed the 640 GB/s DRAM (GDDR6) peak.
+    plain: Bytes L2 read over GCEA for requests destined for DRAM, in 32-byte units. Infinity Cache hits are included, so this can exceed the 640 GB/s DRAM (GDDR6) peak.
+    rst: Bytes L2 read over GCEA for requests destined for DRAM, in 32-byte units. Infinity Cache hits are included, so this can exceed the 640 GB/s DRAM (GDDR6) peak.
     unit: Bytes/s
   DRAM Write Bandwidth:
-    plain: Bytes L2 wrote over EA for requests destined for DRAM, in 32-byte units. Infinity Cache hits are included.
-    rst: Bytes L2 wrote over EA for requests destined for DRAM, in 32-byte units. Infinity Cache hits are included.
+    plain: Bytes L2 wrote over GCEA for requests destined for DRAM, in 32-byte units. Infinity Cache hits are included.
+    rst: Bytes L2 wrote over GCEA for requests destined for DRAM, in 32-byte units. Infinity Cache hits are included.
     unit: Bytes/s
 Memory chart - Workgroup Processors (WGPs):
   Wavefront Occupancy:
@@ -263,12 +263,12 @@ Roofline Performance Rates:
     rst: Achieved bandwidth for Local Data Share memory operations.
     unit: Bytes/s
   DRAM BW:
-    plain: Bandwidth of GL2C/EA read and write requests destined for DRAM, compared with the measured DRAM bandwidth. These requests are also served by the Infinity Cache, so a working set that fits in it can exceed this peak.
-    rst: Bandwidth of GL2C/EA read and write requests destined for DRAM, compared with the measured DRAM bandwidth. These requests are also served by the Infinity Cache, so a working set that fits in it can exceed this peak.
+    plain: Bandwidth of GL2C/GCEA read and write requests destined for DRAM, compared with the measured DRAM bandwidth. These requests are also served by the Infinity Cache, so a working set that fits in it can exceed this peak.
+    rst: Bandwidth of GL2C/GCEA read and write requests destined for DRAM, compared with the measured DRAM bandwidth. These requests are also served by the Infinity Cache, so a working set that fits in it can exceed this peak.
     unit: Bytes/s
   DRAM-Destined BW (Infinity Cache Peak):
-    plain: Bandwidth of GL2C/EA read and write requests destined for DRAM, compared with the measured Infinity Cache bandwidth. No counter separates Infinity Cache hits from DRAM traffic.
-    rst: Bandwidth of GL2C/EA read and write requests destined for DRAM, compared with the measured Infinity Cache bandwidth. No counter separates Infinity Cache hits from DRAM traffic.
+    plain: Bandwidth of GL2C/GCEA read and write requests destined for DRAM, compared with the measured Infinity Cache bandwidth. No counter separates Infinity Cache hits from DRAM traffic.
+    rst: Bandwidth of GL2C/GCEA read and write requests destined for DRAM, compared with the measured Infinity Cache bandwidth. No counter separates Infinity Cache hits from DRAM traffic.
     unit: Bytes/s
 Roofline Plot Points:
   AI L2:
@@ -288,35 +288,35 @@ Roofline Plot Points:
     rst: Arithmetic intensity relative to Local Data Share traffic.
     unit: FLOPs/Byte
   AI DRAM:
-    plain: Arithmetic intensity relative to GL2C/EA requests destined for DRAM. The point is drawn against both the DRAM roof and the Infinity Cache (MALL) roof, since those requests can hit in the Infinity Cache.
-    rst: Arithmetic intensity relative to GL2C/EA requests destined for DRAM. The point is drawn against both the DRAM roof and the Infinity Cache (MALL) roof, since those requests can hit in the Infinity Cache.
+    plain: Arithmetic intensity relative to GL2C/GCEA requests destined for DRAM. The point is drawn against both the DRAM roof and the Infinity Cache (MALL) roof, since those requests can hit in the Infinity Cache.
+    rst: Arithmetic intensity relative to GL2C/GCEA requests destined for DRAM. The point is drawn against both the DRAM roof and the Infinity Cache (MALL) roof, since those requests can hit in the Infinity Cache.
     unit: FLOPs/Byte
   Performance (GFLOPs):
     plain: Achieved VALU plus WMMA throughput in billions of floating-point operations per second.
     rst: Achieved VALU plus WMMA throughput in billions of floating-point operations per second.
     unit: GFLOP/s
-EA Utilization:
+GCEA Utilization:
   SARB Busy:
-    plain: Not available on gfx1201. The EA counters have no busy or always-count event.
-    rst: Not available on gfx1201. The EA counters have no busy or always-count event.
+    plain: Not available on gfx1201. The GCEA counters have no busy or always-count event.
+    rst: Not available on gfx1201. The GCEA counters have no busy or always-count event.
     unit: Percent
   SARB Stalled:
-    plain: Cycles the EA front end was ready but the back end could not send to SDP.
-    rst: Cycles the EA front end was ready but the back end could not send to SDP.
+    plain: Cycles the GCEA front end was ready but the back end could not send to SDP.
+    rst: Cycles the GCEA front end was ready but the back end could not send to SDP.
     unit: Cycles per Normalization Unit
   SARB Starving:
-    plain: Cycles the EA back end was ready but the front end had nothing to send.
-    rst: Cycles the EA back end was ready but the front end had nothing to send.
+    plain: Cycles the GCEA back end was ready but the front end had nothing to send.
+    rst: Cycles the GCEA back end was ready but the front end had nothing to send.
     unit: Cycles per Normalization Unit
   SARB Total Requests:
-    plain: 'Requests EA sent to SDP: DRAM reads and writes, IO reads and writes, and MAM writes.'
-    rst: 'Requests EA sent to SDP: DRAM reads and writes, IO reads and writes, and MAM writes.'
+    plain: 'Requests GCEA sent to SDP: DRAM reads and writes, IO reads and writes, and MAM writes.'
+    rst: 'Requests GCEA sent to SDP: DRAM reads and writes, IO reads and writes, and MAM writes.'
     unit: Count per Normalization Unit
   SARB DRAM Requests:
-    plain: DRAM read and write requests EA sent to SDP.
-    rst: DRAM read and write requests EA sent to SDP.
+    plain: DRAM read and write requests GCEA sent to SDP.
+    rst: DRAM read and write requests GCEA sent to SDP.
     unit: Count per Normalization Unit
-EA Traffic Bandwidth:
+GCEA Traffic Bandwidth:
   DRAM Read Chained Requests:
     plain: Not available on gfx1201.
     rst: Not available on gfx1201.
@@ -326,8 +326,8 @@ EA Traffic Bandwidth:
     rst: Not available on gfx1201.
     unit: Count per Normalization Unit
   DRAM Read Size (32B increments):
-    plain: DRAM read data EA requested, in 32-byte units.
-    rst: DRAM read data EA requested, in 32-byte units.
+    plain: DRAM read data GCEA requested, in 32-byte units.
+    rst: DRAM read data GCEA requested, in 32-byte units.
     unit: Count per Normalization Unit
   DRAM Write Chained Requests:
     plain: Not available on gfx1201.
@@ -338,10 +338,10 @@ EA Traffic Bandwidth:
     rst: Not available on gfx1201.
     unit: Count per Normalization Unit
   DRAM Write Size (32B increments):
-    plain: DRAM write data EA requested, in 32-byte units.
-    rst: DRAM write data EA requested, in 32-byte units.
+    plain: DRAM write data GCEA requested, in 32-byte units.
+    rst: DRAM write data GCEA requested, in 32-byte units.
     unit: Count per Normalization Unit
-EA-SDP Interface - Outstanding Requests:
+GCEA-SDP Interface - Outstanding Requests:
   Read Returns:
     plain: Read response data beats from SDP.
     rst: Read response data beats from SDP.
@@ -354,16 +354,16 @@ EA-SDP Interface - Outstanding Requests:
     plain: Not available on gfx1201.
     rst: Not available on gfx1201.
     unit: Count per Normalization Unit
-EA-SDP Interface - Stalls:
+GCEA-SDP Interface - Stalls:
   DRAM Stall:
-    plain: Cycles the DRAM front end was ready but the EA back end for DRAM was not.
-    rst: Cycles the DRAM front end was ready but the EA back end for DRAM was not.
+    plain: Cycles the DRAM front end was ready but the GCEA back end for DRAM was not.
+    rst: Cycles the DRAM front end was ready but the GCEA back end for DRAM was not.
     unit: Cycles per Normalization Unit
   IO Read Stall:
-    plain: Cycles the IO read front end was ready but the EA back end for IO reads was not.
-    rst: Cycles the IO read front end was ready but the EA back end for IO reads was not.
+    plain: Cycles the IO read front end was ready but the GCEA back end for IO reads was not.
+    rst: Cycles the IO read front end was ready but the GCEA back end for IO reads was not.
     unit: Cycles per Normalization Unit
   IO Write Stall:
-    plain: Cycles the IO write front end was ready but the EA back end for IO writes was not.
-    rst: Cycles the IO write front end was ready but the EA back end for IO writes was not.
+    plain: Cycles the IO write front end was ready but the GCEA back end for IO writes was not.
+    rst: Cycles the IO write front end was ready but the GCEA back end for IO writes was not.
     unit: Cycles per Normalization Unit

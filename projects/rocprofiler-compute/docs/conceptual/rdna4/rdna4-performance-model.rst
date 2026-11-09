@@ -60,17 +60,17 @@ On Navi 48, the gfx1201 analysis panels follow this path:
 
 * The GL1 write-combining cache, then the GL1-GL2 interface and the 8 MB GL2.
 
-* The Efficiency Arbiter (EA) after GL2.
+* The Graphics Core Efficiency Arbiter (GCEA) after GL2.
 
 * MALL, the 64 MB Infinity Cache, then 256-bit GDDR6 memory at 20 Gbps (640 GB/s).
   The tool calls the device memory DRAM and the Infinity Cache roof MALL.
 
 The Memory Chart panel walks the on-chip path: instruction and scalar data caches,
-GL0, LDS, the GL0-GL1 interface, the GL1 cache, the GL1-GL2 interface, GL2, and EA
+GL0, LDS, the GL0-GL1 interface, the GL1 cache, the GL1-GL2 interface, GL2, and GCEA
 to DRAM. It has no MALL table.
 
 No gfx1201 counter separates MALL hits from DRAM traffic. Requests that
-GL2 sends to EA for DRAM can be served by MALL, so a DRAM-destined
+GL2 sends to GCEA for DRAM can be served by MALL, so a DRAM-destined
 bandwidth can exceed the 640 GB/s DRAM peak.
 
 The gfx1201 panel set follows the RDNA3.5 panels. The texture addresser stays TA
@@ -121,9 +121,9 @@ Last-level cache and memory paths
 
 * :doc:`gl2-cache`: The 8 MB GL2 read/write cache.
 
-* :doc:`gcea`: The Efficiency Arbiter (EA) after GL2. EA sends requests toward MALL and DRAM.
+* :doc:`gcea`: The Graphics Core Efficiency Arbiter (GCEA) after GL2. GCEA sends requests toward MALL and DRAM.
 
-* MALL (Infinity Cache): 64 MB cache between EA and DRAM. The gfx1201 panels have no
+* MALL (Infinity Cache): 64 MB cache between GCEA and DRAM. The gfx1201 panels have no
   MALL counters. Roofline measures its bandwidth and draws it as the MALL roof; see
   :ref:`rdna4-roofline`.
 
@@ -143,6 +143,6 @@ Additional reference material
 
 .. Note::
 
-   Only the System Speed-of-Light, Roofline, Memory Chart, and Efficiency Arbiter
+   Only the System Speed-of-Light, Roofline, Memory Chart, and Graphics Core Efficiency Arbiter
    panels have gfx1201 metric descriptions. The other chapters describe the
    hardware block and name the panel tables without metric tables.
