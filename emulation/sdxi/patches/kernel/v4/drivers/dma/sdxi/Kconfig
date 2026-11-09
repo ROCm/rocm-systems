@@ -1,0 +1,41 @@
+config SDXI_CORE
+	tristate "SDXI (Smart Data Accelerator Interface) support"
+	# Doorbell updates require naturally-aligned 64-bit writes, per
+	# SDXI 1.0 9 MMIO Control Registers.
+	depends on 64BIT
+	select DMA_ENGINE
+	select DMA_VIRTUAL_CHANNELS
+	select DMA_SHARED_BUFFER
+	help
+	  Enable support for Smart Data Accelerator Interface (SDXI)
+	  Platform Data Mover devices. SDXI is a vendor-neutral
+	  standard for a memory-to-memory data mover and acceleration
+	  interface.
+
+	  This option is automatically selected by the SDXI PCI driver.
+	  Enable it manually if you want to build the SDXI core for unit
+	  testing without enabling the PCI driver.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be named "sdxi-core".
+
+config SDXI_PCI
+	tristate "SDXI (Smart Data Accelerator Interface) PCI driver"
+	depends on PCI_MSI && 64BIT
+	select SDXI_CORE
+	help
+	  Enable support for PCI-hosted SDXI devices.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be named "sdxi-pci".
+
+config SDXI_KUNIT_TEST
+	tristate "SDXI unit tests" if !KUNIT_ALL_TESTS
+	depends on SDXI_CORE && KUNIT
+	default KUNIT_ALL_TESTS
+	select PACKING
+	help
+	  KUnit tests for parts of the SDXI driver. Does not require
+	  SDXI hardware.
+
+	  If unsure, say N.

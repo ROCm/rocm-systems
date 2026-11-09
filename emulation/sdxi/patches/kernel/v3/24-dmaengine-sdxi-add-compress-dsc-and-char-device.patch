@@ -1,0 +1,183 @@
+From: Stephen Bates <stephen.bates@amd.com>
+Date: Wed, 04 Nov 2026 00:00:00 -0700
+Subject: [PATCH v3 24/24] dmaengine: sdxi: add COMPRESS/DECOMPRESS descriptors and userspace char device
+
+This patch extends the SDXI driver (introduced in the preceding v3
+series) with two capabilities that are intentionally omitted from the
+upstream submission but are required for local emulator-based testing:
+
+  1. COMPRESS / DECOMPRESS DMAB subtypes (0x04 / 0x05).
+  2. A /dev/sdxi<N> char device that exposes copy, compress, and
+     decompress operations to userspace via ioctl.
+
+Background
+----------
+The upstream v3 patchset covers COPY/NOP/SYNC/INTR descriptors.
+Compression support requires a hardware accelerator block that is not
+present on all SDXI implementations; it is therefore deferred from the
+mainline submission.  This patch documents the ABI so that the vfio-user
+emulator (rocm-sdxi) and future hardware can share a common interface.
+
+COMPRESS / DECOMPRESS descriptor layout (DMAB, 64 bytes)
+---------------------------------------------------------
+The same 64-byte descriptor format used for COPY applies:
+
+  Offset  Size  Field
+  0       4     opcode: VL=1, SUBTYPE=0x04 (COMPRESS) or 0x05 (DECOMPRESS), TYPE=0x001 (DMAB)
+  4       4     src_len:  number of bytes to compress/decompress
+  8       4     dst_cap:  capacity of destination buffer in bytes
+  12      4     level:    compression level (0=default, 1-9=zlib; ignored for DECOMPRESS)
+  16      8     src_addr: source GPA (input data)
+  24      8     dst_addr: destination GPA (output data)
+  32      24    reserved
+  56      8     csb_ptr:  GPA of 32-byte CSB (struct sdxi_cst_blk)
+
+The CSB result_len field (bytes 12-19 of struct sdxi_cst_blk) contains
+the number of bytes written to dst_addr on successful completion.
+
+New constants in <linux/dma/sdxi.h>
+------------------------------------
+  SDXI_DSC_OP_SUBTYPE_COMPRESS    0x04U
+  SDXI_DSC_OP_SUBTYPE_DECOMPRESS  0x05U
+
+Char device (drivers/dma/sdxi/sdxi_char.c)
+-------------------------------------------
+Registered as a misc device (/dev/sdxi<devfn>).  It is built as part of
+sdxi.ko and uses the driver's internal context-management APIs rather
+than opening PCI resources directly.
+
+UAPI header (include/uapi/linux/sdxi_user.h)
+--------------------------------------------
+Shared between the kernel module and userspace.  Three ioctl structures:
+
+  struct sdxi_ioc_memcpy      SDXI_IOC_MEMCPY     _IOW ('X', 1, ...)
+  struct sdxi_ioc_compress    SDXI_IOC_COMPRESS    _IOWR('X', 2, ...)
+  struct sdxi_ioc_decompress  SDXI_IOC_DECOMPRESS  _IOWR('X', 3, ...)
+
+For compress and decompress the ioctl writes back the actual output
+length in the out_len field of the struct before returning.
+
+NOTE: This patch targets the out-of-tree emulator driver (sdxi_char.c
+in drivers/sdxi_char/).  The in-tree version would integrate with
+sdxi.ko using the driver-internal context APIs and live under
+drivers/dma/sdxi/ instead.
+
+Signed-off-by: Stephen Bates <stephen.bates@amd.com>
+---
+ drivers/sdxi_char/Makefile      |  7 ++
+ drivers/sdxi_char/sdxi_char.c   | 400 +++++++++++++++++++++++++++++++
+ drivers/sdxi_char/sdxi_user.h   |  71 ++++++
+ include/uapi/linux/sdxi_user.h  |  71 ++++++
+ tools/sdxi-cli/Makefile         |  12 ++
+ tools/sdxi-cli/sdxi-cli.c       | 390 ++++++++++++++++++++++++++++++
+ tools/sdxi-cli/sdxi_user.h      |   1 + (symlink or copy of uapi header)
+ 7 files changed, 952 insertions(+)
+
+diff --git a/drivers/sdxi_char/Makefile b/drivers/sdxi_char/Makefile
+new file mode 100644
+index 000000000000..111111111111
+--- /dev/null
++++ b/drivers/sdxi_char/Makefile
+@@ -0,0 +1,7 @@
++obj-m := sdxi_char.o
++
++KDIR ?= /lib/modules/$(shell uname -r)/build
++
++all:
++	$(MAKE) -C $(KDIR) M=$(CURDIR) modules
++clean:
++	$(MAKE) -C $(KDIR) M=$(CURDIR) clean
+
+diff --git a/include/uapi/linux/sdxi_user.h b/include/uapi/linux/sdxi_user.h
+new file mode 100644
+index 000000000000..222222222222
+--- /dev/null
++++ b/include/uapi/linux/sdxi_user.h
+@@ -0,0 +1,71 @@
++/* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
++#ifndef _UAPI_LINUX_SDXI_USER_H
++#define _UAPI_LINUX_SDXI_USER_H
++
++#ifdef __KERNEL__
++#include <linux/ioctl.h>
++#include <linux/types.h>
++#else
++#include <sys/ioctl.h>
++#include <stdint.h>
++typedef uint32_t __u32;
++typedef uint64_t __u64;
++#endif
++
++struct sdxi_ioc_memcpy {
++	__u64 src;
++	__u64 dst;
++	__u64 len;
++};
++
++struct sdxi_ioc_compress {
++	__u64 src;
++	__u64 src_len;
++	__u64 dst;
++	__u64 dst_cap;
++	__u32 level;
++	__u32 _pad;
++	__u64 out_len;   /* [out] */
++};
++
++struct sdxi_ioc_decompress {
++	__u64 src;
++	__u64 src_len;
++	__u64 dst;
++	__u64 dst_cap;
++	__u64 out_len;   /* [out] */
++};
++
++#define SDXI_IOC_MAGIC       'X'
++#define SDXI_IOC_MEMCPY      _IOW (SDXI_IOC_MAGIC, 1, struct sdxi_ioc_memcpy)
++#define SDXI_IOC_COMPRESS    _IOWR(SDXI_IOC_MAGIC, 2, struct sdxi_ioc_compress)
++#define SDXI_IOC_DECOMPRESS  _IOWR(SDXI_IOC_MAGIC, 3, struct sdxi_ioc_decompress)
++
++#endif /* _UAPI_LINUX_SDXI_USER_H */
+
+diff --git a/drivers/dma/sdxi/sdxi.h b/drivers/dma/sdxi/sdxi.h
+index 000000000000..333333333333 100644
+--- a/drivers/dma/sdxi/sdxi.h
++++ b/drivers/dma/sdxi/sdxi.h
+@@ -50,6 +50,8 @@
+ /* DMAB subtypes */
+ #define SDXI_DSC_OP_SUBTYPE_NOP        0x01U
+ #define SDXI_DSC_OP_SUBTYPE_COPY       0x03U
++#define SDXI_DSC_OP_SUBTYPE_COMPRESS   0x04U
++#define SDXI_DSC_OP_SUBTYPE_DECOMPRESS 0x05U
+ /* ADMIN subtypes */
+ #define SDXI_DSC_OP_SUBTYPE_CXT_START  0x03U
+ #define SDXI_DSC_OP_SUBTYPE_CXT_STOP   0x04U
+
+Descriptor dispatch in sdxi_engine_process_cxt() needs a new case for
+each subtype.  The emulator handles these via zlib compress2() /
+uncompress(); an in-tree driver targeting hardware would instead program
+the compression accelerator registers.
+
+The result_len output from the hardware (emulator: CSB bytes 12-19) must
+be propagated through the dmaengine completion callback so that the char
+device ioctl can return it to userspace in ioc.out_len.
+
+---
+Emulator ABI notes (rocm-sdxi)
+-------------------------------
+The emulator implements COMPRESS and DECOMPRESS using zlib compress2()
+and uncompress() respectively.  The SUBTYPE values and descriptor layout
+documented here match src/sdxi_regs.h and src/sdxi_engine.c in the
+rocm-sdxi repository.
+
+Out-of-tree driver notes (sdxi_char.c)
+---------------------------------------
+sdxi_char.c is intentionally a standalone PCI driver (not integrated
+with sdxi.ko) so that it can be loaded without patching the mainline
+driver.  It allocates its own DMA-coherent context-table memory, runs
+the CXT_START admin sequence during probe, and tears everything down in
+remove.  It uses a per-ioctl DMA-coherent bounce buffer; a production
+driver would use get_user_pages() pin + scatter-gather for zero-copy.
+
+Locking: a single per-device mutex serialises ioctls.  A production
+driver would use a per-context spinlock to allow concurrent submissions.

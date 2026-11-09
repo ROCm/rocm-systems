@@ -1,5 +1,4 @@
 build/
-patches/
 *.o
 *.a
 *.so
