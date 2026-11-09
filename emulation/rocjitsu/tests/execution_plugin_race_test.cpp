@@ -871,17 +871,29 @@ protected:
 };
 
 // A workgroup barrier among the remaining waves cannot resolve until wave 1
-// has ended, so it orders the write wave 1 waited for.
+// has ended, so it orders the write completed by its explicit or implicit wait.
 TEST_F(ExitedWaveRaceTest, WorkgroupBarrierRetiresCompletedWrite) {
   write_and_exit(/*wait=*/true);
   barrier_without_wave_1(BarrierKind::Workgroup);
   EXPECT_FALSE(ds_read(0, 64));
 }
 
-TEST_F(ExitedWaveRaceTest, UnwaitedWriteStillRacesAfterWorkgroupBarrier) {
+TEST_F(ExitedWaveRaceTest, WorkgroupBarrierRetiresImplicitlyWaitedWrite) {
   write_and_exit(/*wait=*/false);
   barrier_without_wave_1(BarrierKind::Workgroup);
+  EXPECT_FALSE(ds_read(0, 64));
+}
+
+TEST_F(ExitedWaveRaceTest, ExitAloneDoesNotOrderTheWritersLdsAccess) {
+  write_and_exit(/*wait=*/false);
   EXPECT_TRUE(ds_read(0, 64));
+}
+
+TEST_F(ExitedWaveRaceTest, ExitWaitAlsoCompletesTensorDmaBeforeTheWorkgroupBarrier) {
+  EXPECT_FALSE(tensor_load(1, {{.address = 64, .bytes = 16}}));
+  fixture.plugin_group_->onAmdgpuWavefrontHalted(*waves[1]);
+  barrier_without_wave_1(BarrierKind::Workgroup);
+  EXPECT_FALSE(ds_read(0, 64));
 }
 
 TEST_F(ExitedWaveRaceTest, NamedBarrierDoesNotRetireAnUnjoinedLiveWave) {
@@ -894,7 +906,7 @@ TEST_F(ExitedWaveRaceTest, NamedBarrierDoesNotRetireAnUnjoinedLiveWave) {
 // Named and cluster barriers do not wait for every wave of the workgroup, so
 // they could have resolved before wave 1 ended.
 TEST_F(ExitedWaveRaceTest, NamedAndClusterBarriersDoNotRetireCompletedWrite) {
-  write_and_exit(/*wait=*/true);
+  write_and_exit(/*wait=*/false);
   barrier_without_wave_1(BarrierKind::Named);
   barrier_without_wave_1(BarrierKind::Cluster);
   EXPECT_TRUE(ds_read(0, 64));
@@ -954,9 +966,31 @@ TEST(RaceDetectorPluginTest, BarrierAfterWriterEndsOrdersItsWaitedLdsWrite) {
   EXPECT_EQ(report.find("RACE "), std::string::npos) << report;
 }
 
-TEST(RaceDetectorPluginTest, BarrierAfterWriterEndsDoesNotOrderItsUnwaitedLdsWrite) {
+TEST(RaceDetectorPluginTest, BarrierAfterWriterEndsOrdersItsImplicitlyWaitedLdsWrite) {
   const std::string report = run_exited_writer_kernel(/*wait=*/false);
-  EXPECT_NE(report.find("RACE "), std::string::npos) << report;
+  EXPECT_EQ(report.find("RACE "), std::string::npos) << report;
+}
+
+// The emulator's null-PC return sentinel is another normal termination path.
+// Keep a counter pending to distinguish draining it from freeing the wave early.
+TEST(RaceDetectorPluginTest, NullPcReturnDrainsMemoryBeforeHalt) {
+  PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/1));
+  const std::array<uint32_t, 1> words = cdna4::build_sop1(cdna4::kSSetPcB64Sop1, {.ssrc0 = 0});
+  constexpr uint64_t kPc = 0x1000;
+  fixture.mem->load_image(reinterpret_cast<const uint8_t *>(words.data()), sizeof(words), kPc);
+  Wavefront *wave = fixture.cu()->dispatch_wf(0, kPc, 104, 32);
+  ASSERT_NE(wave, nullptr);
+  fixture.cu()->write_sgpr(wave->sgpr_alloc().base, 0);
+  fixture.cu()->write_sgpr(wave->sgpr_alloc().base + 1, 0);
+  wave->wait_counters().increment(WaitCounterType::LGKMCNT);
+
+  fixture.cu()->step();
+
+  ASSERT_EQ(wave->state(), WfState::ENDING);
+  EXPECT_FALSE(wave->is_halted());
+  wave->release_wait_counter(WaitCounterType::LGKMCNT);
+  EXPECT_TRUE(wave->is_halted());
 }
 
 /// Executes decoded tensor DMA instructions, so the emulator itself reports

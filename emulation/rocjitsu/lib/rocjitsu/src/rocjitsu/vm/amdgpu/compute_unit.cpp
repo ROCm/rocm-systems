@@ -2286,7 +2286,9 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
         return IssueOutcome::Issued;
       }
       if (target == 0) {
-        active->halt();
+        // The null-PC return sentinel terminates like s_endpgm, including its
+        // implicit memory wait before registers and the wave slot are freed.
+        active->end();
         return IssueOutcome::Issued;
       }
     }
