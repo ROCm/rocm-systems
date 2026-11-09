@@ -498,7 +498,7 @@ mi_gpu_spec:
           bandwidth: [DRAM, MALL, L2, L1, L0, LDS]
           plot_mall: true
           valu: [FP16, FP32, FP64, I8, I32, I64]
-          wmma: [FP8, FP16, BF16]
+          wmma: [FP8, BF8, FP16, BF16]
         models:
           - gpu_model: rdna4_navi48
             design:

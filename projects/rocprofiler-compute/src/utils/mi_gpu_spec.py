@@ -12,6 +12,7 @@ ROOFLINE_DATA_TYPES = (
     "FP4",
     "FP6",
     "FP8",
+    "BF8",
     "MXFP8",
     "FP16",
     "BF16",

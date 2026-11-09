@@ -670,6 +670,8 @@ class Bench_base(ABC):
             src = self.matrix_f32_src
         elif type == "F8":
             src = self.matrix_f8_src
+        elif type == "BF8":
+            src = self.matrix_bf8_src
         elif type == "F16":
             src = self.matrix_f16_src
         elif type == "BF16":
@@ -722,6 +724,9 @@ class Bench_base(ABC):
 
     def matrix_f8_bench(self, device: int) -> float:
         return self.matrix_bench(device, "F8", "FLOP", "GFLOPS")
+
+    def matrix_bf8_bench(self, device: int) -> float:
+        return self.matrix_bench(device, "BF8", "FLOP", "GFLOPS")
 
     def matrix_i8_bench(self, device: int) -> float:
         return self.matrix_bench(device, "I8", "IOP", "GOPS")

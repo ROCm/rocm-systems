@@ -106,8 +106,9 @@ Panel Config:
       estimate rather than a precision-specific FLOP count.
     WMMA FLOPs (F16->F32): >-
       Matrix operations per second at 8192 FLOPs per 16x16x16 WMMA instruction.
-      The counter does not separate FP16, BF16, and FP8; the peak is the measured
-      FP16 WMMA rate.
+      The counter does not separate FP16, BF16, FP8, and BF8. The peak is the
+      measured FP16 WMMA rate. BF8 has its own measured roof,
+      V_WMMA_F32_16X16X16_BF8_BF8, at the same 8192 FLOPs per instruction.
     VALU FLOPs (F64): >-
       64-bit floating-point operations per second on the VALU.
     GL2 Cache BW: >-

@@ -78,6 +78,7 @@ MATRIX_SOURCE_ATTRS = {
     "F32": "matrix_f32_src",
     "F64": "matrix_f64_src",
     "F8": "matrix_f8_src",
+    "BF8": "matrix_bf8_src",
     "BF16": "matrix_bf16_src",
     "I8": "matrix_i8_src",
 }
@@ -231,7 +232,7 @@ def test_gfx1201_enabled_matrix_tests_have_operations_and_kernels():
         if test_key.startswith(prefix) and runs_benchmark(bench, test_key)
     ]
 
-    assert sorted(enabled) == ["BF16", "F16", "F8"]
+    assert sorted(enabled) == ["BF16", "BF8", "F16", "F8"]
     for matrix_type in enabled:
         assert bench.matrix_ops[matrix_type] > 0
         assert matrix_type in bench.matrix_kernel_selector

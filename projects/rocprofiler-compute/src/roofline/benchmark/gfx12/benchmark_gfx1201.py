@@ -154,17 +154,21 @@ class Bench_gfx1201(benchmark_gfx12_base.Bench_gfx12):
         self.tests["L1"] = self.l1_bw_bench
         self.tests["L2"] = self.l2_bw_bench
         self.tests["MALL"] = self.mall_bw_bench
-        self.apply_roofline_spec(gpu_arch)
-
+        # V_WMMA_F32_16X16X16_BF8_BF8 is the same 16x16x16 shape as FP8.
+        self.tests["WMMA-BF8"] = self.matrix_bf8_bench
         self.matrix_kernel_selector = {
             "F8": "wmma_fp8",
+            "BF8": "wmma_bf8",
             "F16": "wmma_f16",
             "BF16": "wmma_bf16",
         }
+        self.apply_roofline_spec(gpu_arch)
 
         # FLOPs per wave per inner iteration, accounting for the WMMA_ACC chains.
+        # BF8 is V_WMMA_F32_16X16X16_BF8_BF8: the same 16x16x16 MAC count as FP8.
         self.matrix_ops = {
             "F8": WMMA_FLOPS_PER_INSTRUCTION * WMMA_ACC,
+            "BF8": WMMA_FLOPS_PER_INSTRUCTION * WMMA_ACC,
             "F16": WMMA_FLOPS_PER_INSTRUCTION * WMMA_ACC,
             "BF16": WMMA_FLOPS_PER_INSTRUCTION * WMMA_ACC,
         }
@@ -610,6 +614,32 @@ class Bench_gfx1201(benchmark_gfx12_base.Bench_gfx12):
                     c5=__builtin_amdgcn_wmma_f32_16x16x16_fp8_fp8_w32_gfx12(a,b,c5);
                     c6=__builtin_amdgcn_wmma_f32_16x16x16_fp8_fp8_w32_gfx12(a,b,c6);
                     c7=__builtin_amdgcn_wmma_f32_16x16x16_fp8_fp8_w32_gfx12(a,b,c7);
+                }
+                float8 s = c0+c1+c2+c3+c4+c5+c6+c7;
+                if (s[0] != 2 * s[0]) dummy[0] = s[0];
+            }
+            """
+
+        # BF8 (e5m2) uses the same packing as FP8: 2x int32 per lane.
+        # V_WMMA_F32_16X16X16_BF8_BF8, RDNA4 ISA section 7.12.
+        self.matrix_bf8_src = """
+            typedef int   int2v  __attribute__((ext_vector_type(2)));
+            typedef float float8 __attribute__((ext_vector_type(8)));
+            extern "C" __global__ void wmma_bf8(int iter, float *dummy)
+            {
+                int2v a = {(int)threadIdx.x + 1, (int)threadIdx.x + 2};
+                int2v b = {(int)threadIdx.x + 3, (int)threadIdx.x + 4};
+                float8 c0={0},c1={0},c2={0},c3={0},c4={0},c5={0},c6={0},c7={0};
+                #pragma unroll 1
+                for (int i = 0; i < iter; ++i) {
+                    c0=__builtin_amdgcn_wmma_f32_16x16x16_bf8_bf8_w32_gfx12(a,b,c0);
+                    c1=__builtin_amdgcn_wmma_f32_16x16x16_bf8_bf8_w32_gfx12(a,b,c1);
+                    c2=__builtin_amdgcn_wmma_f32_16x16x16_bf8_bf8_w32_gfx12(a,b,c2);
+                    c3=__builtin_amdgcn_wmma_f32_16x16x16_bf8_bf8_w32_gfx12(a,b,c3);
+                    c4=__builtin_amdgcn_wmma_f32_16x16x16_bf8_bf8_w32_gfx12(a,b,c4);
+                    c5=__builtin_amdgcn_wmma_f32_16x16x16_bf8_bf8_w32_gfx12(a,b,c5);
+                    c6=__builtin_amdgcn_wmma_f32_16x16x16_bf8_bf8_w32_gfx12(a,b,c6);
+                    c7=__builtin_amdgcn_wmma_f32_16x16x16_bf8_bf8_w32_gfx12(a,b,c7);
                 }
                 float8 s = c0+c1+c2+c3+c4+c5+c6+c7;
                 if (s[0] != 2 * s[0]) dummy[0] = s[0];
