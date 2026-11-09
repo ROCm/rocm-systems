@@ -3,11 +3,10 @@
 
 #pragma once
 
-#include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 #include "rocjitsu/isa/register_set.h"
 #include "util/result.h"
 
-#include <array>
 #include <cstdint>
 #include <limits>
 #include <optional>
@@ -19,129 +18,19 @@
 namespace rocjitsu {
 class Instruction;
 
-/// @brief Internal wait counters tracked by waitcheck.
-///
-/// @details GFX12 targets use the split counter names directly. Legacy gfx9
-/// style targets reuse Load for vmcnt, Ds for lgkmcnt, and Exp for expcnt.
-enum class WaitCounterKind : uint8_t {
-  Load = 0,
-  Store,
-  Ds,
-  Km,
-  Sample,
-  Bvh,
-  Exp,
-  X,
-  Async,
-  Tensor,
-  VmVsrc,
-  VaVdst,
-  Depctr,
-  Count,
-};
-
-[[nodiscard]] std::string_view wait_counter_name(WaitCounterKind counter);
-
 namespace waitcheck_detail {
-inline constexpr size_t kCounterCount = static_cast<size_t>(WaitCounterKind::Count);
-using WaitFields = std::array<std::optional<uint32_t>, kCounterCount>;
-
-enum class WaitcntModel { LegacyNoVscnt, LegacyVscnt, SplitGfx12 };
-
-// Reject unsupported architectures before selecting any target policies.
-[[nodiscard]] inline util::FailureOr<WaitcntModel> waitcnt_model(rj_code_arch_t arch) {
-  switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
-  case ROCJITSU_CODE_ARCH_CDNA2:
-  case ROCJITSU_CODE_ARCH_CDNA3:
-  case ROCJITSU_CODE_ARCH_CDNA4:
-    return WaitcntModel::LegacyNoVscnt;
-  case ROCJITSU_CODE_ARCH_RDNA1:
-  case ROCJITSU_CODE_ARCH_RDNA2:
-  case ROCJITSU_CODE_ARCH_RDNA3:
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
-    return WaitcntModel::LegacyVscnt;
-  case ROCJITSU_CODE_ARCH_RDNA4:
-  case ROCJITSU_CODE_ARCH_CDNA5:
-    return WaitcntModel::SplitGfx12;
-  default:
-    return util::Result::failure();
-  }
-}
-
-[[nodiscard]] inline bool uses_legacy_waitcnt(WaitcntModel model) {
-  return model != WaitcntModel::SplitGfx12;
-}
-
-[[nodiscard]] inline bool has_legacy_vscnt(WaitcntModel model) {
-  return model == WaitcntModel::LegacyVscnt;
-}
-
-[[nodiscard]] inline bool supports_expert_scheduling(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
-}
-
-// Counter retirement order does not imply ordered VGPR writeback on GFX12.
-[[nodiscard]] inline bool has_ordered_vmem_writeback(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
-         arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5;
-}
-
-[[nodiscard]] inline WaitCounterKind smem_wait_counter(WaitcntModel model) {
-  return uses_legacy_waitcnt(model) ? WaitCounterKind::Ds : WaitCounterKind::Km;
-}
-
-[[nodiscard]] inline WaitCounterKind vmem_store_wait_counter(WaitcntModel model) {
-  return model == WaitcntModel::LegacyNoVscnt ? WaitCounterKind::Load : WaitCounterKind::Store;
-}
-
-[[nodiscard]] inline WaitCounterKind image_sample_wait_counter(WaitcntModel model) {
-  return uses_legacy_waitcnt(model) ? WaitCounterKind::Load : WaitCounterKind::Sample;
-}
-
-[[nodiscard]] inline WaitCounterKind image_bvh_wait_counter(WaitcntModel model) {
-  return uses_legacy_waitcnt(model) ? WaitCounterKind::Load : WaitCounterKind::Bvh;
-}
-
-struct LegacyWaitcnt {
-  uint32_t vmcnt = 0;
-  uint32_t expcnt = 0;
-  uint32_t lgkmcnt = 0;
-};
-
-[[nodiscard]] inline LegacyWaitcnt decode_legacy_waitcnt(uint32_t value) {
-  return {
-      (value & 0xFu) | (((value >> 14u) & 0x3u) << 4u),
-      (value >> 4u) & 0x7u,
-      (value >> 8u) & 0xFu,
-  };
-}
-
-[[nodiscard]] inline LegacyWaitcnt decode_gfx11_waitcnt(uint32_t value) {
-  return {
-      (value >> 10u) & 0x3Fu,
-      value & 0x7u,
-      (value >> 4u) & 0x3Fu,
-  };
-}
-
-[[nodiscard]] inline LegacyWaitcnt decode_legacy_waitcnt(uint32_t value, rj_code_arch_t arch) {
-  if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5)
-    return decode_gfx11_waitcnt(value);
-  auto fields = decode_legacy_waitcnt(value);
-  // GFX10 retains the GFX9 positions but widens LGKM to six bits.
-  if (arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2)
-    fields.lgkmcnt = (value >> 8u) & 0x3fu;
-  return fields;
-}
+using amdgpu::WaitcntModel;
+using amdgpu::WaitCounterKind;
+using amdgpu::WaitCounterPolicy;
+using amdgpu::WaitFields;
 
 [[nodiscard]] inline util::FailureOr<std::string>
 wait_expression(WaitCounterKind counter, uint32_t required_count, rj_code_arch_t arch) {
-  const auto model = waitcnt_model(arch);
+  const auto model = amdgpu::waitcnt_model(arch);
   if (model.failed())
     return util::Result::failure();
   std::ostringstream os;
-  if (uses_legacy_waitcnt(model.value())) {
+  if (amdgpu::uses_legacy_waitcnt(model.value())) {
     switch (counter) {
     case WaitCounterKind::Load:
       os << "s_waitcnt vmcnt(" << required_count << ")";
@@ -153,7 +42,7 @@ wait_expression(WaitCounterKind counter, uint32_t required_count, rj_code_arch_t
       os << "s_waitcnt expcnt(" << required_count << ")";
       return os.str();
     case WaitCounterKind::Store:
-      if (has_legacy_vscnt(model.value())) {
+      if (amdgpu::has_legacy_vscnt(model.value())) {
         os << "s_waitcnt_vscnt null, " << required_count;
         return os.str();
       }
@@ -165,14 +54,16 @@ wait_expression(WaitCounterKind counter, uint32_t required_count, rj_code_arch_t
   if (counter == WaitCounterKind::X) {
     os << "s_wait_xcnt " << required_count;
   } else if (counter == WaitCounterKind::VmVsrc || counter == WaitCounterKind::VaVdst) {
-    os << (has_legacy_vscnt(model.value()) ? "s_waitcnt_depctr " : "s_wait_alu ")
+    os << (amdgpu::has_legacy_vscnt(model.value()) ? "s_waitcnt_depctr " : "s_wait_alu ")
        << (counter == WaitCounterKind::VmVsrc ? "depctr_vm_vsrc(" : "depctr_va_vdst(")
        << required_count << ")";
   } else {
-    os << "s_wait_" << wait_counter_name(counter) << " <= " << required_count;
+    os << "s_wait_" << amdgpu::wait_counter_name(counter) << " <= " << required_count;
   }
   return os.str();
 }
+
+inline constexpr size_t kCounterCount = amdgpu::kWaitCounterCount;
 
 enum class WaitEventKind {
   Unknown,
@@ -241,19 +132,7 @@ struct ClassifiedEvent {
 // dependencies. The checker composes these policies with its dataflow state.
 // Each fallible entry point independently rejects unsupported architectures.
 // Successful empty optionals/vectors represent absent counters, waits, or events.
-struct WaitcheckTarget {
-  [[nodiscard]] static size_t counter_index(WaitCounterKind counter);
-
-  [[nodiscard]] static util::FailureOr<uint32_t> maximum_dependency_wait(rj_code_arch_t arch,
-                                                                         WaitCounterKind counter);
-
-  [[nodiscard]] static util::FailureOr<std::optional<uint32_t>>
-  counter_no_wait_value(rj_code_arch_t arch, WaitCounterKind counter);
-
-  // An engaged result with no active fields represents an explicit no-wait sentinel.
-  [[nodiscard]] static util::FailureOr<std::optional<WaitFields>>
-  explicit_wait_fields(const Instruction &inst, rj_code_arch_t arch);
-
+struct WaitcheckTarget : WaitCounterPolicy {
   [[nodiscard]] static util::FailureOr<std::optional<WaitFields>>
   embedded_wait_fields(const Instruction &inst, rj_code_arch_t arch);
 
@@ -267,11 +146,9 @@ struct WaitcheckTarget {
 
   [[nodiscard]] static bool is_xcnt_drain(const Instruction &inst);
 
-  [[nodiscard]] static uint32_t depctr_field(uint32_t value, uint32_t shift, uint32_t width);
-
   [[nodiscard]] static std::optional<int64_t> first_barrier_id(const Instruction &inst);
 
-  [[nodiscard]] static bool is_cdna4_mubuf_lds_load(const Instruction &inst, rj_code_arch_t arch);
+  [[nodiscard]] static bool is_cdna_lds_dma_load(const Instruction &inst, rj_code_arch_t arch);
 
   [[nodiscard]] static std::optional<uint32_t> vinterp_wait_exp(const Instruction &inst);
 
@@ -303,6 +180,11 @@ struct WaitcheckTarget {
 
   [[nodiscard]] static util::FailureOr<std::vector<ClassifiedEvent>>
   classify_events(const Instruction &inst, rj_code_arch_t arch);
+
+  // Runtime issuers retain the output storage between instructions.
+  [[nodiscard]] static util::Result classify_events_into(const Instruction &inst,
+                                                         rj_code_arch_t arch,
+                                                         std::vector<ClassifiedEvent> &events);
 };
 
 } // namespace waitcheck_detail

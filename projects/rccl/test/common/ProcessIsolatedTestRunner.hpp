@@ -325,6 +325,13 @@ public:
      * @return Number of registered tests
      */
     static size_t getTestCount();
+
+    /**
+     * @brief Flush stdio and coverage data, then _exit() with the given code
+     * @note Use in forked or re-exec'd children: _exit() skips the atexit
+     *       handlers that would otherwise write coverage data.
+     */
+    [[noreturn]] static void exitChild(int code);
 };
 
 // Macros for Simplified Usage

@@ -10,8 +10,6 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 
-#include "util/except.h"
-
 #include <algorithm>
 #include <cassert>
 #include <iterator>
@@ -36,8 +34,10 @@ bool is_block_terminator(const Instruction &inst) {
 
 bool has_no_static_successor(const Instruction &inst) {
   // Indirect calls return to the fallthrough block; indirect branches do not
-  // expose a statically-known successor in this local CFG.
-  return is_program_path_terminator(inst) || (inst.flags() & INDIRECT_BRANCH);
+  // expose a statically-known successor in this local CFG, except for the
+  // fallthrough of a fork or join.
+  return is_program_path_terminator(inst) ||
+         ((inst.flags() & INDIRECT_BRANCH) && !indirect_branch_falls_through(inst));
 }
 
 bool is_unconditional_branch(const Instruction &inst) {
@@ -312,9 +312,9 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
         const bool decode_gap =
             i >= decoded.size() ? next_offset < section_end : decoded[i]->src_loc() != next_offset;
         const Instruction &last = *current->terminator();
-        const bool can_fall_through = !is_program_path_terminator(last) &&
-                                      !is_unconditional_branch(last) &&
-                                      (last.flags() & INDIRECT_BRANCH) == 0;
+        const bool can_fall_through =
+            !is_program_path_terminator(last) && !is_unconditional_branch(last) &&
+            ((last.flags() & INDIRECT_BRANCH) == 0 || indirect_branch_falls_through(last));
         // Range bounds are not evidence that a callee ends here. Apply this
         // distinction before call/return classification can prune continuations.
         const bool padding_permitted =
@@ -380,9 +380,10 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
                                   .targets = {}});
       } else {
         DeferredCallSite &site = deferred_calls[map_it->second];
-        if (site.continuation != &continuation || site.return_sreg != return_sreg)
-          throw util::Exception(
-              std::string_view("inconsistent deferred call metadata for one terminator"));
+        // A source has one continuation, and discovery derives every target's
+        // return SGPR from the same decoded call instruction.
+        assert(site.continuation == &continuation && site.return_sreg == return_sreg &&
+               "inconsistent deferred call metadata for one terminator");
         site.target_set_incomplete |= target_set_incomplete;
       }
 
@@ -733,14 +734,17 @@ BasicBlock::build_cfg(const CodeObject &co, Decoder &decoder, rj_code_arch_t arc
       section_end > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
     return emit_error.emit() << "invalid text section for reachable CFG";
 
-  std::vector<CodeRange> ranges(permitted_ranges.begin(), permitted_ranges.end());
-  for (const CodeRange &range : ranges) {
+  for (const CodeRange &range : permitted_ranges) {
     if (range.start_offset % sizeof(uint32_t) || range.size % sizeof(uint32_t) || range.size == 0 ||
         range.start_offset >= section_end || range.size > section_end - range.start_offset)
       return emit_error.emit() << "invalid reachable CFG code range at byte " << range.start_offset;
   }
-  if (ranges.empty())
-    ranges.push_back({0, section_end});
+  // Built in one step: a push_back onto a range-constructed vector trips a GCC 15
+  // -Wfree-nonheap-object false positive.
+  std::vector<CodeRange> ranges =
+      permitted_ranges.empty()
+          ? std::vector<CodeRange>{{0, section_end}}
+          : std::vector<CodeRange>(permitted_ranges.begin(), permitted_ranges.end());
   std::ranges::sort(ranges, {}, &CodeRange::start_offset);
   std::vector<CodeRange> merged_ranges;
   for (const CodeRange &range : ranges) {

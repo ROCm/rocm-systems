@@ -1,5 +1,6 @@
 #
-# Range replay performance regression tests (pass scaling + fixed-cost amortization).
+# Range replay performance regression tests (pass scaling, fixed-cost amortization, and
+# idle-gate overhead when range replay is configured but no range is opened).
 #
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
@@ -114,4 +115,36 @@ if(ROCPROFILER_BUILD_NIGHTLY_PERF_CTESTS)
             "\\[rr-perf-amort\\] PASS"
             FAIL_REGULAR_EXPRESSION
             "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+endif()
+
+# Idle-gate overhead (P1): range replay configured, no range opened. Per-dispatch wall
+# time against a run with no tool. The tool must report zero closed ranges before the
+# ratio is accepted, so an accidental begin/end cannot be timed as gate overhead.
+if(ROCPROFILER_BUILD_NIGHTLY_PERF_CTESTS)
+    add_test(
+        NAME test-range-replay-perf-idle-gate
+        COMMAND
+            ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/run_idle_overhead.py
+            --testapp $<TARGET_FILE:range-replay-perf-testapp> --client
+            $<TARGET_FILE:range-replay-perf-client> --dispatches 256 --max-overhead-ratio
+            2.0 --repeat 3 --warmup 1)
+
+    set_tests_properties(
+        test-range-replay-perf-idle-gate
+        PROPERTIES TIMEOUT
+                   300
+                   LABELS
+                   "integration-tests;range-replay;range-replay-perf;perf-nightly"
+                   RESOURCE_LOCK
+                   rocprofiler_range_replay
+                   DEPENDS
+                   "range-replay-perf-client;range-replay-perf-testapp"
+                   ENVIRONMENT
+                   "RR_PERF_IDLE_JSON=${CMAKE_CURRENT_BINARY_DIR}/rr_perf_idle_gate.json"
+                   PASS_REGULAR_EXPRESSION
+                   "\\[rr-perf-idle\\] PASS"
+                   SKIP_REGULAR_EXPRESSION
+                   "\\[rr-perf\\] SKIP"
+                   FAIL_REGULAR_EXPRESSION
+                   "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 endif()

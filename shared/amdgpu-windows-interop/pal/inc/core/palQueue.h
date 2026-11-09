@@ -53,6 +53,7 @@ struct GpuMemoryRef;
 struct DoppRef;
 
 enum class VirtualGpuMemAccessMode : uint32;
+enum PresentStage : uint32;
 
 /// Specifies whether presents are windowed or fullscreen.  This will determine whether the present is performed via a
 /// BLT or flip.
@@ -188,8 +189,12 @@ struct QueueCreateInfo
         uint32 aqlQueue                        :  1; ///< Compute queue will process AQL packets and kernels
         uint32 windowedPriorBlit               :  1; ///< All windowed presents on this queue are notifications
                                                      ///  that the client has manually done a blit present
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1011
         uint32 tmzOnly                         :  1; ///< This queue allows only TMZ submissions. Required for
                                                      ///  compute TMZ submits.
+#else
+        uint32 placeholder4                    :  1;
+#endif
 
 #if PAL_AMDGPU_BUILD
         uint32 enableGpuMemoryPriorities       :  1; ///< Enables support for GPU memory priorities on this Queue.
@@ -213,6 +218,12 @@ struct QueueCreateInfo
 
     uint32 numReservedCu;           ///< The number of reserved compute units for RT CU queue
     uintptr_t aqlPacketList;        ///< Location of the HIP runtime's info about this queue
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 1011
+    /// Sets the tmz mode for this queue.
+    /// If not set to Disabled, then this queue allows only TMZ submissions. Note that some TmzMode values additionally
+    /// restrict GPU access to specific groups of HW functionality (e.g. HwdrmPlus forbids shader access).
+    TmzMode tmzMode;
+#endif
 };
 
 /// Contains general information about a living IQueue which the client might want to query.
@@ -303,14 +314,43 @@ struct MultiSubmitInfo
                                                   ///  multiply by 2 if a Wave64 shader that needs scratch is used.
                                                   ///  Note that the size will not shrink for the lifetime of the queue
                                                   ///  once it is grown and only affects compute scratch ring.
-    const IGpuMemory*       pFreeMuxMemory;       ///< The gpu memory object of the private flip primary surface for the
-                                                  ///  FreeMux feature.
 };
 
 typedef MultiSubmitInfo SubmitInfo;
 
 /// The value of blockIfFlippingCount in @ref SubmitInfo cannot be greater than this value.
 constexpr uint32 MaxBlockIfFlippingCount = 16;
+
+/// Identifies a frame's position within a frame-generation sequence.
+enum class FramePacingId : uint32
+{
+    RealFrame        = 0, ///< The application-rendered frame.
+    GeneratedFrame0  = 1, ///< The first generated frame. Subsequent generated frames increment this value.
+};
+
+/// Frame-pacing flags for a present operation.
+union FramePacingPresentFlags
+{
+    struct
+    {
+        uint32 forcePresent :  1; ///< Force the present regardless of pacing.
+        uint32 skipPacing   :  1; ///< Bypass pacing for this present.
+        uint32 reserved     : 30; ///< Reserved for future use.
+    };
+    uint32 u32All; ///< Flags packed as a 32-bit value.
+};
+
+/// Frame-generation pacing information for the next present.
+struct FramePacingPresentInfo
+{
+    uint64                  sequenceId;          ///< Identifier shared by all frames in a generation sequence.
+    uint64                  qpcPresentTimestamp; ///< Target QPC timestamp for this present.
+    uint32                  appFrameTimeNs;      ///< Application frame time in nanoseconds, or zero when unknown.
+    FramePacingId           frameGenId;          ///< Position of this frame within its generation sequence.
+    FramePacingPresentFlags flags;               ///< Flags controlling pacing for this present.
+    uint32                  clientSpecificData;  ///< Opaque client data associated with this present.
+    uint32                  reserved[6];         ///< Reserved for future use.
+};
 
 /// Specifies properties for the presentation of an image to the screen.  Input structure to IQueue::PresentDirect().
 struct PresentDirectInfo
@@ -372,25 +412,28 @@ struct MscInfo
 /// Specifies properties for the presentation of an image to the screen.  Input structure to IQueue::PresentSwapChain().
 struct PresentSwapChainInfo
 {
-    PresentMode presentMode;    ///< Chooses between windowed and fullscreen present.
-    IImage*     pSrcImage;      ///< The image to be presented.
-    ISwapChain* pSwapChain;     ///< The swap chain associated with the source image.
-    uint32      imageIndex;     ///< The index of the source image within the swap chain. Owership of this image
-                                ///  index will be released back to the swap chain if this call succeeds.
-    uint32      rectangleCount; ///< Number of valid rectangles in the pRectangles array.
-    uint32      syncInterval;   ///< Applicable only when syncIntervalOverride is set
-                                ///  0 - The presentation occurs immediately, there is no synchronization.
-                                ///  1 through 4 - Synchronize presentation after the nth vertical blank.
-    const Rect* pRectangles;    ///< Array of rectangles defining the regions which will be updated.
-    uint64      presentId;      ///< PresentId functions as an identifier for present operations on a swapchain.
-                                ///  If this PresentId is non-zero, then the application can later use this value
-                                ///  to refer to that image presentation. A value of zero indicates that this
-                                ///  presentation has no associated presentId. A non-zero presentId must be greater
-                                ///  than any non-zero presentId passed previously by the application for the same
-                                ///  swapchain.
-    uint64  frameId;            ///< The frameId will be incremented by the UMD at present time. Only implemented on
-                                ///  WsiPlatform::Win32. XGL/OGLP must fall back to WsiPlatform::Win32 if frameId is
-                                ///  required, otherwise DXXP will update frameId for DXGI presents.
+    PresentMode presentMode;          ///< Chooses between windowed and fullscreen present.
+    IImage*     pSrcImage;            ///< The image to be presented.
+    ISwapChain* pSwapChain;           ///< The swap chain associated with the source image.
+    uint32      imageIndex;           ///< The index of the source image within the swap chain. Owership of this image
+                                      ///  index will be released back to the swap chain if this call succeeds.
+    uint32      rectangleCount;       ///< Number of valid rectangles in the pRectangles array.
+    uint32      syncInterval;         ///< Applicable only when syncIntervalOverride is set
+                                      ///  0 - The presentation occurs immediately, there is no synchronization.
+                                      ///  1 through 4 - Synchronize presentation after the nth vertical blank.
+    const Rect* pRectangles;          ///< Array of rectangles defining the regions which will be updated.
+    uint64      presentId;            ///< PresentId functions as an identifier for present operations on a swapchain.
+                                      ///  If this PresentId is non-zero, then the application can later use this value
+                                      ///  to refer to that image presentation. A value of zero indicates that this
+                                      ///  presentation has no associated presentId. A non-zero presentId must be
+                                      ///  greater than any non-zero presentId passed previously by the application for
+                                      ///  the same swapchain.
+    uint64  frameId;                  ///< The frameId will be incremented by the UMD at present time. Only implemented
+                                      ///  on WsiPlatform::Win32. XGL/OGLP must fall back to WsiPlatform::Win32 if
+                                      ///  frameId is required, otherwise DXXP will update frameId for DXGI presents.
+    PresentStage presentTimingStages; ///< An optional mask of present stages to collect timings for.
+
+    const FramePacingPresentInfo* pFramePacingInfo; ///< Optional frame generation pacing info for this present.
 
     union
     {

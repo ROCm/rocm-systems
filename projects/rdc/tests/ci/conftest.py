@@ -1,6 +1,7 @@
 """Shared pytest fixtures and helpers for RDC CI tests."""
 
 import os
+import re
 import signal
 import shutil
 import subprocess
@@ -121,31 +122,65 @@ def terminate_process(proc, timeout=10):
         proc.wait()
 
 
+class RdcdServer:
+    """The session rdcd. Only one rdcd can run per host (rdcd.lock)."""
+
+    def __init__(self, rdcd_path, env=None):
+        self.rdcd_path = rdcd_path
+        self.env = env
+        self.proc = None
+
+    def start(self):
+        """Start rdcd on port 50051; return False if it is not listening within 15 s."""
+        self.proc = subprocess.Popen(
+            [self.rdcd_path, "-u"],  # unauthenticated mode
+            env=self.env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return _wait_for_port(50051, timeout=15)
+
+    def stop(self):
+        terminate_process(self.proc)
+
+    def poll(self):
+        return self.proc.poll()
+
+
+def fake_amdsmi(rocm_dir):
+    """The fake amd-smi from tests/fake_amdsmi, if it is installed."""
+    for path in (
+        os.environ.get("RDC_FAKE_LIB"),
+        os.path.join(rocm_dir, "share", "rdc", "rdctst_tests", "fake_gpu", "librdc_fake_amdsmi.so"),
+    ):
+        if path and os.path.isfile(path):
+            return path
+    return None
+
+
 @pytest.fixture(scope="session")
-def rdcd_server(rdcd_path, has_gpu):
+def rdcd_server(rdcd_path, has_gpu, rocm_dir):
     """Start rdcd in unauthenticated mode for the test session.
 
-    Yields the subprocess.Popen handle.  Cleans up on teardown.
-    Skips if no GPU is present (daemon won't be useful).
+    Yields the RdcdServer.  Cleans up on teardown.
+    Without a GPU, rdcd runs against the fake amd-smi (four simulated GPUs)
+    when it is installed; otherwise the daemon tests are skipped.
     """
-    if not has_gpu:
-        pytest.skip("No AMD GPU detected -- skipping daemon tests")
-
     env = os.environ.copy()
-    proc = subprocess.Popen(
-        [rdcd_path, "-u"],  # unauthenticated mode
-        env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    if not has_gpu:
+        fake = fake_amdsmi(rocm_dir)
+        if fake is None:
+            pytest.skip("No AMD GPU and no fake amd-smi -- skipping daemon tests")
+        env.update(LD_PRELOAD=fake, RDC_FAKE_GPUS="4", RDC_DISABLE_ROCP="yes")
 
-    if not _wait_for_port(50051, timeout=15):
-        terminate_process(proc)
+    server = RdcdServer(rdcd_path, env)
+    if not server.start():
+        server.stop()
         pytest.fail("rdcd did not start within 15 s")
 
-    yield proc
+    yield server
 
-    terminate_process(proc)
+    server.stop()
 
 
 def run_rdci(rdci_path, *args, timeout=30):
@@ -158,6 +193,32 @@ def run_rdci(rdci_path, *args, timeout=30):
         cmd.append("-u")
     cmd.extend(subsystem_args)
     return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+
+
+def created_id(result):
+    """ID from rdci's "Successfully created ... group ID <n>" message."""
+    m = re.search(r"group ID (\d+)", result.stdout)
+    assert result.returncode == 0 and m, f"create failed: {result.stdout}{result.stderr}"
+    return m.group(1)
+
+
+def gpu_indexes(rdci_path):
+    """GPU indexes that `rdci discovery -l` reports."""
+    r = run_rdci(rdci_path, "discovery", "-l")
+    assert r.returncode == 0, f"rdci discovery failed: {r.stdout}"
+    gpus = re.findall(r"^(\d+)\t", r.stdout, re.M)
+    assert gpus, f"rdci discovery listed no GPUs:\n{r.stdout}"
+    return gpus
+
+
+def create_gpu_group(rdci_path, name, gpus):
+    """Create a GPU group holding `gpus` and return its ID."""
+    gid = created_id(run_rdci(rdci_path, "group", "-c", name))
+    r = run_rdci(rdci_path, "group", "-g", gid, "-a", ",".join(gpus))
+    if r.returncode != 0:
+        run_rdci(rdci_path, "group", "-d", gid)
+    assert r.returncode == 0, f"group add GPU failed: {r.stdout}"
+    return gid
 
 
 @pytest.fixture(scope="session")

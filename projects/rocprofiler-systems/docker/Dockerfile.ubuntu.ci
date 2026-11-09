@@ -23,13 +23,15 @@ ENV CMAKE_PREFIX_PATH="/usr/local"
 
 RUN apt-get update && \
     apt-get dist-upgrade -y && \
-    apt-get install -y autoconf autotools-dev bash-completion build-essential \
-        bzip2 ccache chrpath cmake curl environment-modules flex gettext git-core gnupg2 \
-        gzip iproute2 libgmock-dev libgtest-dev libiberty-dev libpapi-dev libpfm4-dev \
-        libsqlite3-dev libtool locales lsb-release m4 ninja-build nlohmann-json3-dev \
-        pkg-config python3-pip software-properties-common unzip wget vim zip zlib1g-dev \
-        libucx-dev ucx-utils && \
-    apt-get autoclean
+    apt-get install -y --no-install-recommends \
+        autoconf autotools-dev bash-completion build-essential bzip2 ca-certificates \
+        ccache chrpath cmake curl environment-modules flex gettext git-core gnupg2 gzip \
+        iproute2 libgmock-dev libgtest-dev libiberty-dev libpapi-dev libpfm4-dev \
+        libsqlite3-dev libtool libucx-dev locales lsb-release m4 ninja-build \
+        nlohmann-json3-dev pkg-config python3-dev python3-pip software-properties-common \
+        ucx-utils unzip vim wget zip zlib1g-dev && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 RUN OS_VERSION=$(grep '^VERSION_ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"') && \
     OS_ID=$(grep '^ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"') && \
@@ -46,7 +48,7 @@ RUN if ! pip show perfetto 2>&1 | tee pip_output.log | grep -q "WARNING"; then \
         exit 1; \
     fi
 
-ARG PYTHON_VERSIONS="8 9 10 11 12 13"
+ARG PYTHON_VERSIONS="8 9 10 11 12 13 14 15"
 
 # Install pytest test dependencies into each conda env
 COPY requirements.txt /tmp/requirements.txt
@@ -99,18 +101,24 @@ RUN if [ -n "${ROCM_VERSION}" ]; then \
         OS_CODENAME=$(grep '^VERSION_CODENAME=' /etc/os-release | cut -d'=' -f2) && \
         if [ "${OS_CODENAME}" = "bookworm" ]; then OS_CODENAME=jammy; fi && \
         wget -q https://repo.radeon.com/amdgpu-install/${ROCM_VERSION}/ubuntu/${OS_CODENAME}/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb && \
-        DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-downgrades \
+        apt-get update && \
+        DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --allow-downgrades \
             -o Dpkg::Options::="--force-confnew" \
             ./amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb && \
         rm -f ./amdgpu-install_*.deb && \
         apt-get update && \
         if [ ! -d /opt/rocm ]; then \
-            apt-get install -y rocm-dev; \
+            apt-get install -y --no-install-recommends rocm-dev; \
         fi && \
-        apt-get install -y rocdecode-dev libavformat-dev libavcodec-dev libomp-dev libopenmpi-dev && \
-        apt-get autoclean; \
-    fi
+        apt-get install -y --no-install-recommends rocdecode-dev libavformat-dev libavcodec-dev libomp-dev libopenmpi-dev && \
+        apt-get clean; \
+    fi && \
+    rm -rf /var/lib/apt/lists/*
 
 ENV LC_ALL=C.UTF-8
 WORKDIR /home
 SHELL [ "/bin/bash", "--login", "-c" ]
+
+# Build/development image that runs as root by design.
+# trivy:ignore:DS-0002
+USER root

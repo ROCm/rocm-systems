@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 /* One work-item publishes a prepared packet into a device-mapped queue.
  * AQL writes its header last. The release fences order ring, index, doorbell,
  * and completion stores across the GPU producer and target queue. */

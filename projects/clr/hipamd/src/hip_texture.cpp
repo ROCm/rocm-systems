@@ -144,15 +144,6 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipReso
     return hipErrorInvalidValue;
   }
 
-  // Pitch2D (pitch-linear) resources can't use normalized coordinates or linear
-  // filtering on AMD GPUs, which require a tiled layout; CUDA allows it.
-  if ((pResDesc->resType == hipResourceTypePitch2D) &&
-      ((pTexDesc->normalizedCoords != 0) || (pTexDesc->filterMode == hipFilterModeLinear))) {
-    LogPrintfInfo("%s doesn't support normalizedCoords or linear filtering with Pitch2D resources!",
-                  info.name_);
-    return hipErrorNotSupported;
-  }
-
   // We don't program the max_ansio_ratio field in the the HW sampler SRD.
   if (pTexDesc->maxAnisotropy != 0) {
     return hipErrorNotSupported;

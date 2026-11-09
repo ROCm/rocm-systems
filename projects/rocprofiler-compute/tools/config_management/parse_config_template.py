@@ -15,7 +15,7 @@ Generate a template from an architecture directory:
 
     python tools/config_management/parse_config_template.py \
         analysis_configs/gfx950 \
-        analysis_configs/config_template.yaml
+        analysis_configs/gfx9_config_template.yaml
 
 Inspect an architecture (no template written):
 

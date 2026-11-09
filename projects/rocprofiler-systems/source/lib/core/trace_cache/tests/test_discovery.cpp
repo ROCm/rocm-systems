@@ -100,8 +100,9 @@ TEST(discovery_test, list_dir_files_empty_path_returns_empty)
 
 TEST(discovery_test, list_dir_files_nonexistent_path_throws)
 {
-    EXPECT_THROW(list_dir_files("/nonexistent_path_for_rocprofsys_test"),
-                 std::runtime_error);
+    EXPECT_THROW(
+        static_cast<void>(list_dir_files("/nonexistent_path_for_rocprofsys_test")),
+        std::runtime_error);
 }
 
 TEST_F(temp_dir_fixture, list_dir_files_returns_files_excluding_dot_entries)

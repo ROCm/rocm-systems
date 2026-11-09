@@ -1,0 +1,46 @@
+# rccl-UnitTestsMicroRoctxNvml — shared/ctest schema.
+# Host-only micro-tests for misc/roctx.cc and misc/nvmlwrap_stub.cc (no GPU, no librccl).
+# RCCL does not support Windows: exclude_windows matches all tests so generated suites are empty on Windows.
+
+test_categories:
+  quick: &micro_roctx_nvml_quick
+    description: "Smoke — host-only misc/roctx.cc and misc/nvmlwrap_stub.cc micro-tests, sub-second."
+    test_patterns:
+      - "RoctxNvml*"
+    exclude_windows:
+      - "*"
+    labels:
+      - "rccl"
+      - "quick"
+      - "smoke"
+      - "precheck"
+      - "microtest"
+  standard:
+    <<: *micro_roctx_nvml_quick
+    labels:
+      - "rccl"
+      - "standard"
+      - "regression"
+      - "microtest"
+  comprehensive:
+    <<: *micro_roctx_nvml_quick
+    labels:
+      - "rccl"
+      - "comprehensive"
+      - "comprehensive_regression"
+      - "microtest"
+  full:
+    <<: *micro_roctx_nvml_quick
+    labels:
+      - "rccl"
+      - "full"
+      - "full_regression"
+      - "microtest"
+
+execution_settings:
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 600
+    standard: 600
+    comprehensive: 600
+    full: 600

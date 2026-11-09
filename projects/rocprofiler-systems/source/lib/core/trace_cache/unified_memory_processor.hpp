@@ -4,12 +4,13 @@
 #pragma once
 
 #include "core/agent_manager.hpp"
-#include "core/output_file_registry.hpp"
-#include "core/trace_cache/sample_processor.hpp"
+#include "core/trace_cache/sample_processor_interface.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/pmc/collectors/hipfile/sample.hpp"
 
 #include <algorithm>
+#include <sys/types.h>
+
 #include <array>
 #include <cstdint>
 #include <limits>
@@ -24,39 +25,6 @@
 
 namespace rocprofsys::trace_cache
 {
-
-class output_file_sink_view
-{
-public:
-    using register_file_fn_t = void (*)(void*, std::string, output_format);
-
-    // Non-owning sink view. The referenced sink object must outlive any
-    // unified_memory_processor_t storing this view. Excludes output_file_sink_view
-    // itself so this doesn't shadow the copy/move constructors below and wrap
-    // a soon-to-be-destroyed view instead of the real sink.
-    template <typename SinkT>
-        requires(!std::is_same_v<std::decay_t<SinkT>, output_file_sink_view>)
-    explicit output_file_sink_view(SinkT& sink) noexcept
-    : m_object{ std::addressof(sink) }
-    , m_register_file_impl{ +[](void* obj, std::string path, output_format format) {
-        static_cast<SinkT*>(obj)->register_file(std::move(path), format);
-    } }
-    {}
-
-    output_file_sink_view(const output_file_sink_view&) noexcept            = default;
-    output_file_sink_view(output_file_sink_view&&) noexcept                 = default;
-    output_file_sink_view& operator=(const output_file_sink_view&) noexcept = default;
-    output_file_sink_view& operator=(output_file_sink_view&&) noexcept      = default;
-
-    void register_file(std::string path, output_format format) const
-    {
-        m_register_file_impl(m_object, std::move(path), format);
-    }
-
-private:
-    void*              m_object;
-    register_file_fn_t m_register_file_impl;
-};
 
 struct migration_stats
 {
@@ -159,11 +127,10 @@ static_assert(kTriggerTable.back().kfd_name == nullptr,
 
 // NOT thread-safe. handle() and finalize_processing() must be called from a
 // single thread; finalize_processing() is not idempotent.
-class unified_memory_processor_t : public processor_t<unified_memory_processor_t>
+class unified_memory_processor_t : public sample_processor_interface
 {
 public:
-    unified_memory_processor_t(std::shared_ptr<agent_manager> agent_mgr, int pid,
-                               output_file_sink_view output_sink);
+    unified_memory_processor_t(std::shared_ptr<agent_manager> agent_mgr, pid_t pid);
 
     unified_memory_processor_t(const unified_memory_processor_t&)            = delete;
     unified_memory_processor_t(unified_memory_processor_t&&)                 = delete;
@@ -171,24 +138,24 @@ public:
     unified_memory_processor_t& operator=(unified_memory_processor_t&&)      = delete;
     ~unified_memory_processor_t()                                            = default;
 
-    void prepare_for_processing();
-    void finalize_processing();
+    void prepare_for_processing() override;
+    void finalize_processing() override;
 
-    void handle(const kfd_sample& sample);
+    void handle(const kfd_sample& sample) override;
 
-    void handle(const in_time_sample&) {}
-    void handle(const pmc_event_with_sample&) {}
-    void handle(const region_sample&) {}
-    void handle(const kernel_dispatch_sample&) {}
-    void handle(const memory_copy_sample&) {}
-    void handle(const memory_allocate_sample&) {}
-    void handle(const scratch_memory_sample&) {}
-    void handle(const gpu_pmc_sample&) {}
-    void handle(const ainic_pmc_sample&) {}
-    void handle(const cpu_pmc_sample&) {}
-    void handle(const gpu_perf_counter_sample&) {}
-    void handle(const hipfile_pmc_sample&) {}
-    void handle(const backtrace_region_sample&) {}
+    void handle(const in_time_sample&) override {}
+    void handle(const pmc_event_with_sample&) override {}
+    void handle(const region_sample&) override {}
+    void handle(const kernel_dispatch_sample&) override {}
+    void handle(const memory_copy_sample&) override {}
+    void handle(const memory_allocate_sample&) override {}
+    void handle(const scratch_memory_sample&) override {}
+    void handle(const gpu_pmc_sample&) override {}
+    void handle(const ainic_pmc_sample&) override {}
+    void handle(const cpu_pmc_sample&) override {}
+    void handle(const gpu_perf_counter_sample&) override {}
+    void handle(const hipfile_pmc_sample&) override {}
+    void handle(const backtrace_region_sample&) override {}
 
 private:
     void handle_page_migrate(const kfd_sample& sample);
@@ -225,9 +192,8 @@ private:
 
     unified_memory_data            m_data;
     std::shared_ptr<agent_manager> m_agent_manager;
-    int                            m_pid;
+    pid_t                          m_pid;
     std::string                    m_output_dir;
-    output_file_sink_view          m_output_sink;
 
     std::unordered_map<std::uint32_t, agent_type>  m_node_type_cache;
     std::unordered_map<std::uint32_t, std::string> m_gpu_name_cache;

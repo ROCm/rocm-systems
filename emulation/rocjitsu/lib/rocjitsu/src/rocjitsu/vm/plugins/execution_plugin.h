@@ -18,6 +18,7 @@
 #include "rocjitsu/vm/plugins/kernel_dispatch_info.h"
 #include "rocjitsu/vm/plugins/memory_access_observation.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
+#include "rocjitsu/vm/plugins/tensor_dma_issue_observation.h"
 #include "rocjitsu/vm/plugins/tensor_dma_memory_access_observation.h"
 #include "rocjitsu/vm/plugins/wavefront_state.h"
 
@@ -77,10 +78,12 @@ public:
   /// The conservative default preserves the historical behavior. A plugin may
   /// return false after its wavefront-dispatch callback has decided that the
   /// wave is outside its observation scope. The group samples the decision once
-  /// after every plugin's wavefront-dispatch callback and reuses it until halt.
-  /// Reentrant hooks during dispatch/halt and hooks without a wavefront use a
-  /// live query, so this method must remain lock-free and thread-safe. The
-  /// decision must be stable between dispatch completion and the matching halt.
+  /// after every plugin's wavefront-dispatch callback and reuses it until halt
+  /// or cancellation, including rollback before a retry in the same slot.
+  /// Reentrant hooks during dispatch, halt or cancellation, hooks without a
+  /// wavefront, and hooks after live plugin-group replacement use a live query,
+  /// so this method must remain lock-free and thread-safe. The decision must be
+  /// stable between dispatch completion and the matching halt or cancellation.
   /// Lifecycle and dispatch/workgroup/wavefront callbacks are unaffected.
   virtual bool observes_hot_hooks_for_wavefront(const amdgpu::Wavefront * /*wf*/) const {
     return true;
@@ -194,9 +197,11 @@ public:
   }
 
   /// Called after one tensor DMA instruction and any descriptor-requested
-  /// atomic-barrier arrival return normally. The observation contains only
-  /// in-bounds global requests attempted, in execution order. It intentionally
-  /// does not filter memory access outcomes, matching the observer boundary.
+  /// atomic-barrier arrival return normally, when the transfer made at least one
+  /// global request, so its transfer fields come from a validated descriptor.
+  /// The observation contains only in-bounds global requests attempted, in
+  /// execution order. It intentionally does not filter memory access outcomes,
+  /// matching the observer boundary.
   /// Its deferred address view is borrowed and valid only during this callback.
   /// May run concurrently across simulation partitions unless
   /// requires_serial_hot_hooks() returns true.
@@ -210,6 +215,25 @@ public:
     onAmdgpuTensorDmaMemoryAccess(access);
   }
 
+  /// Called once when a tensor DMA instruction issues, after its descriptor is
+  /// read and, unless it is NULL, validated and prepared. A store has already
+  /// sampled its LDS source bytes, so changing LDS in the callback does not
+  /// change what it writes to global memory. No global request has been made
+  /// and a load has written no LDS. This is the tensor DMA counterpart of
+  /// onAmdgpuMemoryAccessRouted():
+  /// it fires in the issuing wave's instruction step, also when the transfer
+  /// later waits for memory, and also for an instruction that moves no data,
+  /// such as a NULL descriptor, a NOP tile, a gather with no valid indices or a
+  /// store wholly outside the tensor. A transfer deferred until its memory is
+  /// available is not reported again when it resumes. The observation's LDS
+  /// ranges are byte ranges that can end mid-element; see
+  /// TensorDmaIssueObservation. They are
+  /// borrowed and valid only during this callback.
+  /// May run concurrently across simulation partitions unless
+  /// requires_serial_hot_hooks() returns true.
+  virtual void onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObservation & /*issue*/,
+                                       const amdgpu::Wavefront & /*wf*/) {}
+
   /// Called when the command processor has parsed an AQL kernel dispatch packet
   /// and created a DispatchEntry. Fires during packet fetching, before any
   /// workgroups are placed. Multiple packets may be parsed in a single fetch.
@@ -222,6 +246,8 @@ public:
   virtual void onAmdgpuDispatchExecutionBegin(uint32_t /*dispatch_id*/) {}
 
   /// Called when all workgroups of a dispatch have completed execution.
+  /// Cancelled dispatches do not receive this callback, even if
+  /// onAmdgpuDispatchExecutionBegin was called.
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuDispatchExecutionEnd(uint32_t /*dispatch_id*/) {}
 
@@ -234,7 +260,8 @@ public:
                                            uint32_t /*physical_sgpr_count*/,
                                            std::span<amdgpu::Wavefront *> /*wavefronts*/) {}
 
-  /// Called when the last wavefront of a workgroup has halted.
+  /// Called when the last wavefront of a workgroup has completed normally.
+  /// Cancelled workgroups do not receive this callback.
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuWorkgroupCompleted(uint32_t /*dispatch_id*/, uint32_t /*wg_id*/) {}
 
@@ -242,9 +269,21 @@ public:
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuWavefrontDispatched(amdgpu::Wavefront & /*wf*/) {}
 
-  /// Called when a wavefront halts, before its resources are freed.
+  /// Called when a wavefront terminates normally, before its resources are freed.
+  /// Dispatch cancellation uses onAmdgpuWavefrontCancelled instead.
   /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
   virtual void onAmdgpuWavefrontHalted(amdgpu::Wavefront & /*wf*/) {}
+
+  /// Called once when a dispatched wave incarnation is cancelled, while its
+  /// registers and plugin state are still available. The wave's instruction-execution
+  /// error, if present, is still available. May precede its first instruction.
+  /// Cancellation also covers committed cluster placements rolled back after
+  /// a later peer fails setup. That dispatch may retry and complete normally;
+  /// cancellation alone does not imply permanent dispatch failure.
+  /// This is a terminal notification for this incarnation, not successful
+  /// workgroup or dispatch completion; it does not also call onAmdgpuWavefrontHalted.
+  /// Infrequent hook; see the concurrency contract on requires_serial_hot_hooks().
+  virtual void onAmdgpuWavefrontCancelled(amdgpu::Wavefront & /*wf*/) {}
 
   /// Called when a VGPR is read during instruction execution.
   /// @param wf Owning wavefront, or nullptr if the register is unallocated.
@@ -318,6 +357,11 @@ public:
   /// opt in explicitly. The group samples this stable policy when the plugin is
   /// added.
   virtual bool observes_tensor_dma_memory_access() const { return false; }
+
+  /// Whether this plugin consumes onAmdgpuTensorDmaIssued(). Building the LDS
+  /// ranges is work on the instruction path, so consumers must opt in. The
+  /// group samples this stable policy when the plugin is added.
+  virtual bool observes_tensor_dma_issue() const { return false; }
 
   /// Whether this plugin needs typed scalar-register reads or legacy SGPR reads.
   /// The group samples this policy once when the plugin is added. The

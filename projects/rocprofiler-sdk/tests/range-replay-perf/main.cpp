@@ -2,20 +2,27 @@
 //
 // Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 
-// Application half of the range replay perf regression tests: time a number of ranges, each
-// containing a configurable number of dispatches over a configurable device-memory footprint.
+// Application half of the range replay perf regression tests.
 //
-// The dispatch count per range is a parameter rather than a constant because it is the axis the
-// amortization test sweeps. Range replay's reason to exist is that the fixed cost of a replay
-// window -- agent drain, snapshot of the tracked inventory, restore -- is paid once per range
-// instead of once per dispatch, so wall time should grow far more slowly than the dispatch count.
-// A regression that reintroduced per-dispatch window cost would still pass a pass-count scaling
-// test and only shows up when this axis moves.
+// Two modes share this binary:
+//
+// - Default: time a number of ranges, each containing a configurable number of dispatches over a
+//   configurable device-memory footprint. The dispatch count per range is a parameter rather than
+//   a constant because it is the axis the amortization test sweeps. Range replay's reason to exist
+//   is that the fixed cost of a replay window -- agent drain, snapshot of the tracked inventory,
+//   restore -- is paid once per range instead of once per dispatch, so wall time should grow far
+//   more slowly than the dispatch count. A regression that reintroduced per-dispatch window cost
+//   would still pass a pass-count scaling test and only shows up when this axis moves.
+//
+// - Idle gate (RR_PERF_IDLE_GATE=1): never open a range. Time a burst of dispatches with range
+//   replay configured against the same burst with no tool, so the process-wide interception gate
+//   is the only cost under test (P1).
 //
 // Like the range replay samples, this resolves the two API entry points with dlsym rather than
 // linking rocprofiler-sdk, because linking the SDK into a HIP executable makes HIP report
 // hipErrorInvalidDeviceFunction on the first launch on gfx942. The tool is LD_PRELOADed, so the
-// symbols are already in the process.
+// symbols are already in the process. The idle-gate path does not need those symbols at all: the
+// no-tool baseline has nothing to resolve.
 
 #include "client.hpp"
 
@@ -28,6 +35,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 #define HIP_CHECK(call)                                                                            \
     do                                                                                             \
@@ -64,16 +72,35 @@ touch(float* ballast, int n, int* counter)
         ballast[i] = ballast[i] * 1.0001f + 0.001f;
     if(blockIdx.x == 0 && threadIdx.x == 0) atomicAdd(counter, 1);
 }
+
+bool
+env_flag(const char* name)
+{
+    const char* v = std::getenv(name);
+    return v != nullptr && v[0] != '\0' && std::strcmp(v, "0") != 0;
+}
+
+int
+skip(const char* reason)
+{
+    std::printf("[rr-perf] SKIP: %s\n", reason);
+    return EXIT_SUCCESS;
+}
 }  // namespace
 
 int
 main(int argc, char** argv)
 {
+    int device_count = 0;
+    if(hipGetDeviceCount(&device_count) != hipSuccess || device_count == 0)
+        return skip("no GPU device");
+
     // ballast_mb: device memory held live across the range, i.e. the snapshot footprint.
-    // dispatches: dispatches inside each range -- the amortization axis.
-    // ranges:     ranges timed in one run.
-    // warmup:     untimed ranges first. The first range pays for ballast page faults, code-object
-    //             load and the profiler's attach, none of which repeat.
+    // dispatches: dispatches inside each range -- the amortization axis; or, in idle-gate mode,
+    //             the number of timed launches.
+    // ranges:     ranges timed in one run (ignored in idle-gate mode).
+    // warmup:     untimed ranges (or launches) first. The first pays for ballast page faults,
+    //             code-object load and the profiler's attach, none of which repeat.
     int ballast_mb = 32;
     int dispatches = 4;
     int ranges     = 2;
@@ -87,17 +114,27 @@ main(int argc, char** argv)
     if(ranges < 1) ranges = 1;
     if(warmup < 0) warmup = 0;
 
-    auto* begin_fn = reinterpret_cast<decltype(&rocprofiler_range_replay_begin)>(
-        dlsym(RTLD_DEFAULT, "rocprofiler_range_replay_begin"));
-    auto* end_fn = reinterpret_cast<decltype(&rocprofiler_range_replay_end)>(
-        dlsym(RTLD_DEFAULT, "rocprofiler_range_replay_end"));
-    if(begin_fn == nullptr || end_fn == nullptr)
+    const bool idle_gate = env_flag("RR_PERF_IDLE_GATE");
+
+    decltype(&rocprofiler_range_replay_begin) begin_fn = nullptr;
+    decltype(&rocprofiler_range_replay_end)   end_fn   = nullptr;
+    if(!idle_gate)
     {
-        fprintf(stderr, "[rr-perf] FAIL the range replay API is not in this process\n");
-        return EXIT_FAILURE;
+        begin_fn = reinterpret_cast<decltype(&rocprofiler_range_replay_begin)>(
+            dlsym(RTLD_DEFAULT, "rocprofiler_range_replay_begin"));
+        end_fn = reinterpret_cast<decltype(&rocprofiler_range_replay_end)>(
+            dlsym(RTLD_DEFAULT, "rocprofiler_range_replay_end"));
+        if(begin_fn == nullptr || end_fn == nullptr)
+        {
+            fprintf(stderr, "[rr-perf] FAIL the range replay API is not in this process\n");
+            return EXIT_FAILURE;
+        }
     }
 
-    const size_t ballast_bytes = static_cast<size_t>(ballast_mb) * 1024U * 1024U;
+    // Idle-gate only needs a tiny working set: there is no snapshot. Keep a small ballast so the
+    // kernel still writes something, and ignore the caller's ballast_mb.
+    const size_t ballast_bytes = idle_gate ? static_cast<size_t>(kWorkElems) * sizeof(float)
+                                           : static_cast<size_t>(ballast_mb) * 1024U * 1024U;
     const int    ballast_elems = static_cast<int>(ballast_bytes / sizeof(float));
     const int    work_elems    = (ballast_elems < kWorkElems) ? ballast_elems : kWorkElems;
 
@@ -107,6 +144,49 @@ main(int argc, char** argv)
     HIP_CHECK(hipMalloc(&counter, sizeof(int)));
     HIP_CHECK(hipMemset(ballast, 0, ballast_bytes));
     HIP_CHECK(hipMemset(counter, 0, sizeof(int)));
+
+    const auto launch_burst = [&](int count) -> hipError_t {
+        for(int i = 0; i < count; ++i)
+        {
+            touch<<<32, 64>>>(ballast, work_elems, counter);
+            if(auto err = hipGetLastError(); err != hipSuccess) return err;
+        }
+        return hipDeviceSynchronize();
+    };
+
+    if(idle_gate)
+    {
+        // P1: the interception gate is process-wide once range replay is configured. This path
+        // never calls begin/end, so the only cost under measurement is that gate on each submit.
+        HIP_CHECK(launch_burst(warmup));
+        HIP_CHECK(hipMemset(counter, 0, sizeof(int)));
+
+        using clock      = std::chrono::steady_clock;
+        const auto start = clock::now();
+        HIP_CHECK(launch_burst(dispatches));
+        const auto   end     = clock::now();
+        const double wall_ms = std::chrono::duration<double, std::milli>(end - start).count();
+
+        int counter_h = 0;
+        HIP_CHECK(hipMemcpy(&counter_h, counter, sizeof(int), hipMemcpyDeviceToHost));
+        HIP_CHECK(hipFree(ballast));
+        HIP_CHECK(hipFree(counter));
+
+        std::printf("[rr-perf] idle_gate=1 dispatches=%d warmup=%d wall_ms=%.3f counter=%d\n",
+                    dispatches,
+                    warmup,
+                    wall_ms,
+                    counter_h);
+
+        if(counter_h != dispatches)
+        {
+            std::fprintf(stderr, "[rr-perf] FAIL counter=%d expected %d\n", counter_h, dispatches);
+            return EXIT_FAILURE;
+        }
+
+        std::printf("[rr-perf] PASS\n");
+        return EXIT_SUCCESS;
+    }
 
     // One range, start to finish. Allocation inside a range is a decline reason, so everything the
     // range touches is allocated above and only launches happen in here.

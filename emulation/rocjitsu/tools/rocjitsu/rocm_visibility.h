@@ -12,7 +12,7 @@
 #include <string_view>
 #include <vector>
 
-namespace rocjitsu::cli {
+namespace rocjitsu::launcher {
 
 /// @brief GPU identity used while applying ROCm visibility selectors.
 struct VisibleGpu {
@@ -77,4 +77,4 @@ expanded_rocr_visible_devices(const std::vector<VisibleGpu> &topology,
 HostSelection select_host_gpu(const std::vector<VisibleGpu> &visible_gpus,
                               uint32_t configured_gpu_id, uint32_t gfx_target_version);
 
-} // namespace rocjitsu::cli
+} // namespace rocjitsu::launcher

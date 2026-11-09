@@ -26,11 +26,25 @@ class GenericAllocation : public amd::RuntimeObject {
   amd::Memory& phys_mem_ref_;        //<! Physical memory object
   size_t size_;                      //<! Allocated size
   hipMemAllocationProp properties_;  //<! Allocation Properties
+  //! True when this handle was produced by hipMemImportFromShareableHandle.
+  //! Indicates the memory shouldn't be released as it is borrowed
+  bool is_imported_;
 
  public:
-  GenericAllocation(amd::Memory& phys_mem_ref, size_t size, const hipMemAllocationProp& prop)
-      : phys_mem_ref_(phys_mem_ref), size_(size), properties_(prop) {}
+  GenericAllocation(amd::Memory& phys_mem_ref, size_t size, const hipMemAllocationProp& prop,
+                    bool is_imported = false)
+      : phys_mem_ref_(phys_mem_ref),
+        size_(size),
+        properties_(prop),
+        is_imported_(is_imported) {}
   ~GenericAllocation() {
+    if (is_imported_ || size_ == 0) {
+      if (amd::MemObjMap::FindMemObj(phys_mem_ref_.getSvmPtr()) == &phys_mem_ref_) {
+        amd::MemObjMap::RemoveMemObj(phys_mem_ref_.getSvmPtr());
+      }
+      phys_mem_ref_.release();
+      return;
+    }
     // Host-backed allocations (Host / HostNuma / HostNumaCurrent) are allocated on
     // host_context; only Device allocations live on a per-device context indexed by
     // location.id (which is a NUMA node id, not a device index, for host-NUMA).

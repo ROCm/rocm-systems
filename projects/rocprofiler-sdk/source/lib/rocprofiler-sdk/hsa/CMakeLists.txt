@@ -41,3 +41,4 @@ target_sources(rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_LIB_HSA_SOUR
                                                       ${ROCPROFILER_LIB_HSA_HEADERS})
 
 add_subdirectory(details)
+add_subdirectory(queue_hooks)

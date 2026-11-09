@@ -1,7 +1,7 @@
 """CuTeDSL bindings for C struct types declared in
 ``bindings/ir/nccl_device_wrapper.h`` and ``src/include/nccl_device/``.
 
-Codegen target — each entry is 1:1 with a C struct definition.
+Codegen target -- each entry is 1:1 with a C struct definition.
 ``_LLVMPtrType`` and ``_array_i8`` are MLIR-type adapters used as
 ``@cute.native_struct`` field annotations.
 """
@@ -29,8 +29,8 @@ class _LLVMPtrType:
     def isinstance(cls, value):
         """Match an ``!llvm.ptr`` ir.Value during ``@cute.extern`` dispatch.
 
-        Callers pass pointers as bare ``!llvm.ptr`` ir.Values — a wrapper's
-        ``.ptr``, or ``_to_ptr`` for an integer address — so the extern
+        Callers pass pointers as bare ``!llvm.ptr`` ir.Values -- a wrapper's
+        ``.ptr``, or ``_to_ptr`` for an integer address -- so the extern
         overload matcher needs this hook to recognize them against a
         ``_LLVMPtrType`` annotation.
         """
@@ -90,6 +90,15 @@ class ncclGinBarrierHandle:
 
 
 @cute.native_struct
+class ncclCftBarrierHandle:
+    """``struct ncclCftBarrierHandle { ncclDevResourceHandle_t bufHandle; int nBarriers; }``
+    (src/include/nccl_device/impl/cft_barrier__types.h)."""
+
+    bufHandle: cutlass.Uint32
+    nBarriers: cutlass.Int32
+
+
+@cute.native_struct
 class ncclMultimemHandle:
     """``struct ncclMultimemHandle { void* mcBasePtr; }``
     (src/include/nccl_device/impl/core__types.h)."""
@@ -101,21 +110,18 @@ class ncclMultimemHandle:
 class ncclResourceWindow_vidmem:
     """``ncclResourceWindow_vidmem_t`` from ``impl/core__types.h``."""
 
-    reserved1: _array_i8(8)
     lsa_flat_base: _LLVMPtrType
-    reserved2: _array_i8(8)
     stride4g: cutlass.Uint32
     mc_offset4k: cutlass.Uint32
-    reserved3: _array_i8(32)
 
 
 @cute.native_struct
 class DevCommValue:
     """By-value ABI mirror of ``struct ncclDevComm``.
 
-    Field order and types must stay synchronized with
-    ``nccl_device_expanded.h`` used to generate the low-level bindings. The
-    unpacked LLVM struct supplies the same natural padding as the C structure.
+    Field order and types must stay synchronized with ``struct ncclDevComm``
+    in ``nccl_device/impl/comm__types.h``. The unpacked LLVM struct supplies
+    the same natural padding as the C structure.
     """
 
     magic: cutlass.Uint32
@@ -132,22 +138,23 @@ class DevCommValue:
     resource_window: _LLVMPtrType
     resource_window_inlined: ncclResourceWindow_vidmem
 
-    hybrid_world_gin_barrier: ncclGinBarrierHandle
+    hybrid_dense_gin_barrier: ncclGinBarrierHandle
 
     lsa_multimem: ncclMultimemHandle
     lsa_barrier: ncclLsaBarrierHandle
     rail_gin_barrier: ncclGinBarrierHandle
 
     gin_connection_count: cutlass.Uint8
+    backend_index: cutlass.Uint8
     gin_net_device_types: _array_i8(4)
     gin_handles: _array_ptr(4)
     gin_signal_count: cutlass.Int32
     gin_counter_count: cutlass.Int32
     gin_signal_shadows: _LLVMPtrType
     gin_context_count: cutlass.Uint32
-    gin_connections_railed: cutlass.Uint8
+    gin_connection_stride: cutlass.Int32
+    gin_context_stride: cutlass.Int32
     gin_strong_legacy_signals: cutlass.Uint8
-    gin_contexts_railed: cutlass.Uint8
 
     abort_flag: _LLVMPtrType
 
@@ -155,6 +162,17 @@ class DevCommValue:
     hybrid_rail_gin_barrier: ncclGinBarrierHandle
 
     world_gin_barrier: ncclGinBarrierHandle
+    gin_connection_stride_rcp32: cutlass.Uint32
+
+    cft_rank: cutlass.Int32
+    cft_size: cutlass.Int32
+    cft_multimem_rank: cutlass.Int32
+    cft_multimem_size: cutlass.Int32
+    cft_multimem_size_rcp32: cutlass.Uint32
+    uc_le_id: cutlass.Uint32
+    mc_le_id: cutlass.Uint32
+    cft_barrier: ncclCftBarrierHandle
+    cft_multimem_barrier: ncclCftBarrierHandle
 
 
 @cute.native_struct
@@ -164,7 +182,7 @@ class _ncclCoopStorage:
 
 @cute.native_struct
 class ncclCoopAny:
-    """``struct ncclCoopAny`` — 16-byte aligned-to-ptr storage + vtable ptr
+    """``struct ncclCoopAny`` -- 16-byte aligned-to-ptr storage + vtable ptr
     (src/include/nccl_device/coop.h)."""
 
     storage: _ncclCoopStorage
