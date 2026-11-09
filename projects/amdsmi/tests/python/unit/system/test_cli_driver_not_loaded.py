@@ -445,3 +445,56 @@ class TestPciDevicesWithoutDriver(unittest.TestCase):
         (self.bus / "0000:0a:00.0").symlink_to(self.root / "gone")  # dangling link
         self.assertEqual(self._find("amdgpu"), [])
         self.assertEqual(self._find("amdgpu", bus=self.root / "absent"), [])
+
+
+class TestDriverLiveness(unittest.TestCase):
+    """The real helpers over a fake /sys/module, with the other probes mocked."""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.modules = Path(tmp.name)
+        real_path = Path
+        patcher = mock.patch.object(
+            helpers_module,
+            "Path",
+            lambda first, *rest: (
+                self.modules if str(first) == "/sys/module" else real_path(first, *rest)
+            ),
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.helpers = object.__new__(helpers_module.AMDSMIHelpers)
+
+    def _module(self, name: str, initstate: str) -> None:
+        (self.modules / name).mkdir()
+        (self.modules / name / "initstate").write_text(initstate + "\n")
+
+    def test_only_a_live_module_is_loaded(self) -> None:
+        self._module("ionic", "live")
+        self._module("bnxt_en", "coming")
+        self.assertTrue(self.helpers.is_driver_loaded("ionic"))
+        self.assertFalse(self.helpers.is_driver_loaded("bnxt_en"))
+        self.assertFalse(self.helpers.is_driver_loaded("bng_en"))
+
+    def test_amdgpu_counts_as_loaded_when_the_cli_initialized_it(self) -> None:
+        with mock.patch.object(self.helpers, "is_amdgpu_initialized", return_value=True):
+            self.assertTrue(self.helpers.is_driver_loaded("amdgpu"))
+        with mock.patch.object(self.helpers, "is_amdgpu_initialized", return_value=False):
+            self.assertFalse(self.helpers.is_driver_loaded("amdgpu"))
+
+    def test_hsmp_is_loaded_when_either_cpu_driver_made_the_device_node(self) -> None:
+        with mock.patch.object(self.helpers, "is_amd_hsmp_initialized", return_value=False):
+            with mock.patch.object(helpers_module.os.path, "exists", return_value=True):
+                self.assertTrue(self.helpers.is_driver_loaded("hsmp_acpi"))
+            with mock.patch.object(helpers_module.os.path, "exists", return_value=False):
+                self.assertFalse(self.helpers.is_driver_loaded("hsmp_acpi"))
+
+    def test_missing_drivers_are_those_with_hardware_and_no_driver(self) -> None:
+        present_without_driver = {"hsmp_acpi", "bnxt_en"}
+        with mock.patch.object(
+            self.helpers,
+            "get_devices_without_driver",
+            side_effect=lambda driver: ["dev"] if driver in present_without_driver else [],
+        ):
+            self.assertEqual(self.helpers.get_missing_drivers(), ["hsmp_acpi", "bnxt_en"])

@@ -53,7 +53,9 @@ def _load_modules() -> types.SimpleNamespace:
     }
     with mock.patch.dict(sys.modules, stubs):
         metric = load_cli_module(
-            "csv_ports_metric", str(Path(_CLI_DIR) / "subcommands" / "metric.py")
+            "csv_ports_metric",
+            str(Path(_CLI_DIR) / "subcommands" / "metric.py"),
+            sys_path_dir=_CLI_DIR,
         )
         logger = load_cli_module("csv_ports_logger", str(Path(_CLI_DIR) / "amdsmi_logger.py"))
     return types.SimpleNamespace(metric=metric, logger=logger, interface=interface)

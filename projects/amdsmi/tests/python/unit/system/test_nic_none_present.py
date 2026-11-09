@@ -47,7 +47,9 @@ def _load(file_name: str, extra_stubs: dict = None) -> types.ModuleType:
     stubs.update(extra_stubs or {})
     path = _SUBCOMMANDS / file_name if _SUBCOMMANDS else None
     with mock.patch.dict(sys.modules, stubs):
-        return load_cli_module("nic_none_present_" + file_name, str(path) if path else None)
+        return load_cli_module(
+            "nic_none_present_" + file_name, str(path) if path else None, sys_path_dir=_CLI_DIR
+        )
 
 
 def _command(cls: type, **attributes) -> object:

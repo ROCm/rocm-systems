@@ -11,14 +11,13 @@ so the control flow is exercised without a built libamd_smi.so or NIC hardware.
 
 from __future__ import annotations
 
-import importlib.util
 import os
 import sys
 import types
 import unittest
 from unittest import mock
 
-from common.common import amdsmi_path, cli_search_order, find_cli_dir
+from common.common import amdsmi_path, cli_search_order, find_cli_dir, load_cli_module
 
 _CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
 _MODULE_PATH = os.path.join(_CLI_DIR, "subcommands", "metric.py") if _CLI_DIR else None
@@ -65,9 +64,7 @@ def _load_metric():
             "amdsmi.amdsmi_interface": interface_stub,
         },
     ):
-        spec = importlib.util.spec_from_file_location("metric_under_test", _MODULE_PATH)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        module = load_cli_module("metric_under_test", str(_MODULE_PATH), sys_path_dir=_CLI_DIR)
     return module, amdsmi_stub
 
 

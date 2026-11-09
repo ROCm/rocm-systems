@@ -21,7 +21,7 @@ import types
 import unittest
 from unittest import mock
 
-from common.common import amdsmi_path, cli_search_order, find_cli_dir
+from common.common import amdsmi_path, cli_search_order, find_cli_dir, load_cli_module
 
 _CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
 _MODULE_PATH = os.path.join(_CLI_DIR, "amdsmi_init.py") if _CLI_DIR else None
@@ -70,10 +70,16 @@ def _make_amdsmi_stub():
 
 
 def _load_amdsmi_init(amdsmi_stub):
+    # amdsmi_init.py imports its exception module by bare name; hand it over without touching
+    # sys.path so the test does not depend on another module having added the CLI directory
+    exceptions = load_cli_module(
+        "amdsmi_cli_exceptions", os.path.join(_CLI_DIR, "amdsmi_cli_exceptions.py")
+    )
     patched = {
         "amdsmi": amdsmi_stub,
         "amdsmi.amdsmi_exception": amdsmi_stub.amdsmi_exception,
         "amdsmi.amdsmi_interface": amdsmi_stub.amdsmi_interface,
+        "amdsmi_cli_exceptions": exceptions,
     }
     with mock.patch.dict(sys.modules, patched):
         spec = importlib.util.spec_from_file_location("amdsmi_init_under_test", _MODULE_PATH)

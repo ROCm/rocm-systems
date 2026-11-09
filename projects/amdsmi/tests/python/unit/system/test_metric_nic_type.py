@@ -7,7 +7,6 @@ A UALoE endpoint has no telemetry source, so its block is all N/A; the type line
 block is not read as a failure. ``metric.py`` is loaded in isolation with a stubbed ``amdsmi``.
 """
 
-import importlib.util
 import sys
 import types
 import unittest
@@ -15,7 +14,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from unittest import mock
 
-from common.common import cli_search_order, find_cli_dir
+from common.common import cli_search_order, find_cli_dir, load_cli_module
 
 # cli_search_order() decides whether the install or this checkout wins; None means no CLI found.
 _CLI_DIR = find_cli_dir(*cli_search_order(str(Path(__file__).resolve().parent)))
@@ -47,9 +46,7 @@ def _load_metric() -> types.SimpleNamespace:
         "amdsmi.amdsmi_interface": interface_stub,
     }
     with mock.patch.dict(sys.modules, stubs):
-        spec = importlib.util.spec_from_file_location("metric_type_under_test", _MODULE_PATH)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        module = load_cli_module("metric_type_under_test", str(_MODULE_PATH), sys_path_dir=_CLI_DIR)
     return types.SimpleNamespace(module=module, interface=interface_stub)
 
 
