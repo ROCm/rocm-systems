@@ -373,17 +373,17 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp8_storage_t
 __amd_cvt_float_to_fp8_sr_scale(const float val, const __amd_fp8_interpretation_t interpret,
                                 const unsigned int seed, const __amd_scale_t scale) {
 #if HIP_ENABLE_GFX1250_OCP_BUILTINS
-  static_assert(sizeof(__amd_fp8x8_storage_t) == sizeof(__amd_fp8_storage_t[8]));
+  static_assert(sizeof(__amd_uintx2_storage_t) == sizeof(__amd_fp8_storage_t[8]));
   __amd_floatx8_storage_t f32x8{val};
   union {
-    __amd_fp8x8_storage_t fp8x8;
+    __amd_uintx2_storage_t ui32x2;
     __amd_fp8_storage_t fp8[8];
   } ret;
   if (interpret == __AMD_OCP_E4M3) {
-    ret.fp8x8 =
+    ret.ui32x2 =
         __builtin_amdgcn_cvt_scalef32_sr_pk8_fp8_f32(f32x8, seed, __amd_scale_to_float(scale));
   } else {
-    ret.fp8x8 =
+    ret.ui32x2 =
         __builtin_amdgcn_cvt_scalef32_sr_pk8_bf8_f32(f32x8, seed, __amd_scale_to_float(scale));
   }
   return ret.fp8[0];
@@ -3000,11 +3000,16 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp8x8_storage_t __amd_cvt_floatx8_to_fp8x8_s
     const __amd_floatx8_storage_t val, const __amd_fp8_interpretation_t interpret,
     const unsigned int seed, const __amd_scale_t scale) {
 #if HIP_ENABLE_GFX1250_OCP_BUILTINS
+  union {
+    __amd_uintx2_storage_t ui32x2;
+    __amd_fp8x8_storage_t fp8x8;
+  } u;
   if (interpret == __AMD_OCP_E4M3) {
-    return __builtin_amdgcn_cvt_scalef32_sr_pk8_fp8_f32(val, seed, __amd_scale_to_float(scale));
+    u.ui32x2 = __builtin_amdgcn_cvt_scalef32_sr_pk8_fp8_f32(val, seed, __amd_scale_to_float(scale));
   } else {
-    return __builtin_amdgcn_cvt_scalef32_sr_pk8_bf8_f32(val, seed, __amd_scale_to_float(scale));
+    u.ui32x2 = __builtin_amdgcn_cvt_scalef32_sr_pk8_bf8_f32(val, seed, __amd_scale_to_float(scale));
   }
+  return u.fp8x8;
 #elif HIP_ENABLE_GFX950_OCP_BUILTINS
   static_assert(sizeof(__amd_fp8_storage_t[4]) == sizeof(unsigned int));
   __amd_fp8x8_storage_t ret;
@@ -3103,17 +3108,17 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp8_storage_t __amd_cvt_fp16_to_fp8_sr_scale
     const __amd_fp16_storage_t val, const __amd_fp8_interpretation_t interpret,
     const unsigned int seed, const __amd_scale_t scale) {
 #if HIP_ENABLE_GFX1250_OCP_BUILTINS
-  static_assert(sizeof(__amd_fp8x8_storage_t) == sizeof(__amd_fp8_storage_t[8]));
+  static_assert(sizeof(__amd_uintx2_storage_t) == sizeof(__amd_fp8_storage_t[8]));
   __amd_fp16x8_storage_t fp16x8{val};
   union {
-    __amd_fp8x8_storage_t fp8x8;
+    __amd_uintx2_storage_t ui32x2;
     __amd_fp8_storage_t fp8[8];
   } ret;
   if (interpret == __AMD_OCP_E4M3) {
-    ret.fp8x8 =
+    ret.ui32x2 =
         __builtin_amdgcn_cvt_scalef32_sr_pk8_fp8_f16(fp16x8, seed, __amd_scale_to_float(scale));
   } else {
-    ret.fp8x8 =
+    ret.ui32x2 =
         __builtin_amdgcn_cvt_scalef32_sr_pk8_bf8_f16(fp16x8, seed, __amd_scale_to_float(scale));
   }
   return ret.fp8[0];
@@ -3154,11 +3159,16 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp8x8_storage_t __amd_cvt_fp16x8_to_fp8x8_sr
     const __amd_fp16x8_storage_t val, const __amd_fp8_interpretation_t interpret,
     const unsigned int seed, const __amd_scale_t scale) {
 #if HIP_ENABLE_GFX1250_OCP_BUILTINS
+  union {
+    __amd_uintx2_storage_t ui32x2;
+    __amd_fp8x8_storage_t fp8x8;
+  } u;
   if (interpret == __AMD_OCP_E4M3) {
-    return __builtin_amdgcn_cvt_scalef32_sr_pk8_fp8_f16(val, seed, __amd_scale_to_float(scale));
+    u.ui32x2 = __builtin_amdgcn_cvt_scalef32_sr_pk8_fp8_f16(val, seed, __amd_scale_to_float(scale));
   } else {
-    return __builtin_amdgcn_cvt_scalef32_sr_pk8_bf8_f16(val, seed, __amd_scale_to_float(scale));
+    u.ui32x2 = __builtin_amdgcn_cvt_scalef32_sr_pk8_bf8_f16(val, seed, __amd_scale_to_float(scale));
   }
+  return u.fp8x8;
 #elif HIP_ENABLE_GFX950_OCP_BUILTINS
   static_assert(sizeof(__amd_fp8_storage_t[4]) == sizeof(unsigned int));
   __amd_fp8x8_storage_t ret;
@@ -3257,17 +3267,17 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp8_storage_t __amd_cvt_bf16_to_fp8_sr_scale
     const __amd_bf16_storage_t val, const __amd_fp8_interpretation_t interpret,
     const unsigned int seed, const __amd_scale_t scale) {
 #if HIP_ENABLE_GFX1250_OCP_BUILTINS
-  static_assert(sizeof(__amd_fp8x8_storage_t) == sizeof(__amd_fp8_storage_t[8]));
+  static_assert(sizeof(__amd_uintx2_storage_t) == sizeof(__amd_fp8_storage_t[8]));
   __amd_bf16x8_storage_t bf16x8{val};
   union {
-    __amd_fp8x8_storage_t fp8x8;
+    __amd_uintx2_storage_t ui32x2;
     __amd_fp8_storage_t fp8[8];
   } ret;
   if (interpret == __AMD_OCP_E4M3) {
-    ret.fp8x8 =
+    ret.ui32x2 =
         __builtin_amdgcn_cvt_scalef32_sr_pk8_fp8_bf16(bf16x8, seed, __amd_scale_to_float(scale));
   } else {
-    ret.fp8x8 =
+    ret.ui32x2 =
         __builtin_amdgcn_cvt_scalef32_sr_pk8_bf8_bf16(bf16x8, seed, __amd_scale_to_float(scale));
   }
   return ret.fp8[0];
@@ -3308,11 +3318,18 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp8x8_storage_t __amd_cvt_bf16x8_to_fp8x8_sr
     const __amd_bf16x8_storage_t val, const __amd_fp8_interpretation_t interpret,
     const unsigned int seed, const __amd_scale_t scale) {
 #if HIP_ENABLE_GFX1250_OCP_BUILTINS
+  union {
+    __amd_uintx2_storage_t ui32x2;
+    __amd_fp8x8_storage_t fp8x8;
+  } u;
   if (interpret == __AMD_OCP_E4M3) {
-    return __builtin_amdgcn_cvt_scalef32_sr_pk8_fp8_bf16(val, seed, __amd_scale_to_float(scale));
+    u.ui32x2 =
+        __builtin_amdgcn_cvt_scalef32_sr_pk8_fp8_bf16(val, seed, __amd_scale_to_float(scale));
   } else {
-    return __builtin_amdgcn_cvt_scalef32_sr_pk8_bf8_bf16(val, seed, __amd_scale_to_float(scale));
+    u.ui32x2 =
+        __builtin_amdgcn_cvt_scalef32_sr_pk8_bf8_bf16(val, seed, __amd_scale_to_float(scale));
   }
+  return u.fp8x8;
 #elif HIP_ENABLE_GFX950_OCP_BUILTINS
   static_assert(sizeof(__amd_fp8_storage_t[4]) == sizeof(unsigned int));
   __amd_fp8x8_storage_t ret;
