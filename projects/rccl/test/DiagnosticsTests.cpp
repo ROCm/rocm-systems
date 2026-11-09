@@ -180,7 +180,8 @@ static bool xgmiFullMesh(const std::vector<int>& devices)
 // On a full XGMI mesh each communicator verifies all of its N * (N - 1) directed pairs. Elsewhere only the tested
 // edges are known: each summary must still be [OK] and bounded by the pair count, and a communicator without
 // eligible pairs prints no summary. A report with no summary at all tested nothing, so the case is skipped and
-// runDiagCases() reports the skip on the parent test.
+// runDiagCases() reports the skip on the parent test. Callers wrap the call in ASSERT_NO_FATAL_FAILURE; after a
+// skip they still check the rest of the report, which must complete without failure lines either way.
 static void expectEdgeSummaries(const DiagReport& report, const std::vector<std::vector<int>>& groups)
 {
     const int nRanks  = static_cast<int>(groups.front().size());
@@ -408,7 +409,7 @@ TEST_F(Diagnostics, AllDirectedEdgesVerified)
         const DiagReport report = parseDiagReport(out);
 
         EXPECT_EQ(report.count(kDiagHeader), 1) << report.dump();
-        expectEdgeSummaries(report, {firstDevices(nGpus)});
+        ASSERT_NO_FATAL_FAILURE(expectEdgeSummaries(report, {firstDevices(nGpus)}));
         const std::string done = "across " + std::to_string(nGpus) + " ranks";
         EXPECT_EQ(report.count("NCCL diagnostics completed in"), 1) << report.dump();
         EXPECT_EQ(report.count(done), 1) << report.dump();
@@ -429,7 +430,7 @@ TEST_F(Diagnostics, EdgeCountFollowsCommSize)
             const auto commGuards   = guardComms(comms);
             const DiagReport report = parseDiagReport(out);
             EXPECT_EQ(report.count(kDiagHeader), 1) << report.dump();
-            expectEdgeSummaries(report, {firstDevices(nWanted)});
+            ASSERT_NO_FATAL_FAILURE(expectEdgeSummaries(report, {firstDevices(nWanted)}));
             EXPECT_TRUE(report.failures().empty()) << report.dump();
         };
     };
@@ -470,7 +471,7 @@ TEST_F(Diagnostics, RunsAtEveryCommInit)
             const auto commGuards   = guardComms(comms);
             const DiagReport report = parseDiagReport(out);
             EXPECT_EQ(report.count(kDiagHeader), 1) << report.dump();
-            expectEdgeSummaries(report, {firstDevices(nGpus)});
+            ASSERT_NO_FATAL_FAILURE(expectEdgeSummaries(report, {firstDevices(nGpus)}));
             EXPECT_TRUE(report.failures().empty()) << report.dump();
         }
     };
@@ -504,7 +505,7 @@ TEST_F(Diagnostics, RunsAtEveryCommInit)
         for(int i = 0; i < nGpus; ++i)
             colors[i % 2].push_back(i);
         EXPECT_EQ(report.count(kDiagHeader), 2) << report.dump();
-        expectEdgeSummaries(report, colors);
+        ASSERT_NO_FATAL_FAILURE(expectEdgeSummaries(report, colors));
         EXPECT_EQ(report.count("across " + std::to_string(half) + " ranks"), 2) << report.dump();
         EXPECT_TRUE(report.failures().empty()) << report.dump();
     };
@@ -585,7 +586,7 @@ TEST_F(Diagnostics, SingleProcessPeerAccessNotice)
             else
                 EXPECT_LE(n, 1) << "rank " << rank << "\n" << report.dump();
         }
-        expectEdgeSummaries(report, {devices});
+        ASSERT_NO_FATAL_FAILURE(expectEdgeSummaries(report, {devices}));
         EXPECT_TRUE(report.failures().empty()) << report.dump();
     }}});
 }
