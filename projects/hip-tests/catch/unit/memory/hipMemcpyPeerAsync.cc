@@ -333,6 +333,7 @@ struct VmmPeerResources {
  * ------------------------
  *  - Reject VMM peer copies when only the owners have mapping access.
  *  - Explicitly granted copies must transfer random bytes exactly.
+ *  - Read-only source access permits a copy; read-only destination access rejects it.
  *    Covers both APIs and directions.
  * Test source
  * ------------------------
@@ -360,8 +361,9 @@ HIP_TEST_CASE(Unit_hipMemcpyPeerAsync_VmmPeerAccessValidation) {
   const bool async = GENERATE(false, true);
   const bool on_source = GENERATE(true, false);
   const size_t bytes = 4 * 1024 * 1024;
-  // 0: owner only; 1: both mappings accessible from the copy device.
-  const int permissions = GENERATE(0, 1);
+  // 0: owner only; 1: read-write source and destination;
+  // 2: read-only source; 3: read-only destination.
+  const int permissions = GENERATE(0, 1, 2, 3);
   CAPTURE(src_device, async, on_source, bytes, permissions);
 
   VmmPeerResources resources;
@@ -428,8 +430,10 @@ HIP_TEST_CASE(Unit_hipMemcpyPeerAsync_VmmPeerAccessValidation) {
   HIP_CHECK(hipSetDevice(resources.stream_device));
   HIP_CHECK(hipStreamCreate(&resources.stream));
   if (permissions != 0) {
-    set_access(src_device, resources.stream_device, hipMemAccessFlagsProtReadWrite);
-    set_access(dst_device, resources.stream_device, hipMemAccessFlagsProtReadWrite);
+    set_access(src_device, resources.stream_device,
+               permissions == 2 ? hipMemAccessFlagsProtRead : hipMemAccessFlagsProtReadWrite);
+    set_access(dst_device, resources.stream_device,
+               permissions == 3 ? hipMemAccessFlagsProtRead : hipMemAccessFlagsProtReadWrite);
   }
   auto* src = resources.ptr[src_device];
   auto* dst = resources.ptr[dst_device];
@@ -437,12 +441,16 @@ HIP_TEST_CASE(Unit_hipMemcpyPeerAsync_VmmPeerAccessValidation) {
   unsigned long long src_access = 0, dst_access = 0;
   HIP_CHECK(hipMemGetAccess(&src_access, &location, src));
   HIP_CHECK(hipMemGetAccess(&dst_access, &location, dst));
-  REQUIRE(src_access == (permissions || resources.stream_device == src_device ? 3 : 0));
-  REQUIRE(dst_access == (permissions || resources.stream_device == dst_device ? 3 : 0));
+  REQUIRE(src_access == (permissions == 2                                       ? 1
+                         : permissions || resources.stream_device == src_device ? 3
+                                                                                : 0));
+  REQUIRE(dst_access == (permissions == 3                                       ? 1
+                         : permissions || resources.stream_device == dst_device ? 3
+                                                                                : 0));
   const auto status =
       async ? hipMemcpyPeerAsync(dst, dst_device, src, src_device, bytes, resources.stream)
             : hipMemcpyPeer(dst, dst_device, src, src_device, bytes);
-  const bool allowed = permissions == 1;
+  const bool allowed = permissions == 1 || permissions == 2;
   REQUIRE(status == (allowed ? hipSuccess : hipErrorInvalidValue));
   (void)hipGetLastError();
   HIP_CHECK(hipStreamSynchronize(resources.stream));
