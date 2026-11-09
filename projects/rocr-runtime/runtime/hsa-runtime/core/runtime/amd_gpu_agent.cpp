@@ -258,17 +258,24 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
     workgroup_clusters_supported_ = true;
   }
 
-  if (workgroup_clusters_supported_ && properties_.NumShaderBanks != 0 &&
-      properties_.NumSIMDPerCU != 0) {
+  if (workgroup_clusters_supported_) {
     // A cluster places each workgroup on its own CU and must fit in one shader
-    // engine. NumArrays * NumCUPerArray is the pre-harvest width of the widest
-    // shader array, so it overstates the active CUs the smallest shader engine
-    // can host. The largest cluster that can launch on any shader engine is the
-    // active CU count divided by the shader-engine count.
-    const uint64_t num_cus =
-        static_cast<uint64_t>(properties_.NumFComputeCores) / properties_.NumSIMDPerCU;
-    const uint64_t num_cu_per_se = num_cus / properties_.NumShaderBanks;
-    cluster_max_dim_ = { num_cu_per_se, num_cu_per_se, num_cu_per_se };
+    // engine. NumShaderBanks counts the shader engines on the whole agent,
+    // including every XCC, so it is not divided by NumXcc again. Harvesting is
+    // within one shader engine (8/8 or 9/7), so every engine has the same
+    // active CU count. NumArrays * NumCUPerArray is the pre-harvest CU count
+    // of one shader engine and overstates that count.
+    uint64_t num_cu_per_se = 0;
+    if (properties_.NumShaderBanks != 0 && properties_.NumSIMDPerCU != 0) {
+      const uint64_t num_cus =
+          static_cast<uint64_t>(properties_.NumFComputeCores) / properties_.NumSIMDPerCU;
+      num_cu_per_se = num_cus / properties_.NumShaderBanks;
+    }
+    // Topology that cannot describe a cluster leaves the max size at {1, 1, 1}.
+    if (num_cu_per_se == 0)
+      workgroup_clusters_supported_ = false;
+    else
+      cluster_max_dim_ = { num_cu_per_se, num_cu_per_se, num_cu_per_se };
   }
 
   max_wave_scratch_ = (supported_isas_[0]->GetMajorVersion() >= 12) ? MAX_WAVE_SCRATCH_GFX12 : MAX_WAVE_SCRATCH;

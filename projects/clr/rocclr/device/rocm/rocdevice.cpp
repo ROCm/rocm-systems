@@ -1910,7 +1910,10 @@ bool Device::populateOCLDeviceConstants() {
     LogError("HSA_AMD_AGENT_INFO_CLUSTER_MAX_SIZE query failed");
   }
 
-  // Devices without clustered launch support report a max cluster size of 1.
+  // The limit comes from ROCr. gfx12.5 cluster sizes are correct only with a
+  // ROCr that derives them from the active CUs per shader engine. HIP does not
+  // recompute the limit. Devices without clustered launch support, and a query
+  // this ROCr does not implement, report a max cluster size of 1.
   if (hsaStatus != HSA_STATUS_SUCCESS || info_.clusterMaxSize_ <= 1) {
     info_.clusterMaxSize_ = 1;
   }
