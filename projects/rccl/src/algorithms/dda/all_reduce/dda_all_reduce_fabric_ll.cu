@@ -95,7 +95,7 @@ static inline std::pair<dim3, dim3> ddaArLL128TwoShotGeom(const ncclComm* comm, 
 }
 
 // The LDS-staged writers need gfx1250's async LDS stores (ASYNC_COPY_SUPPORTED) and one LL128 warp per wave.
-// Opt-in with RCCL_DDA_LL128_ASYNC_WIRE=1: at 0 (default) neither the staged two-shot writer nor the peer-split runs.
+// On by default (RCCL_DDA_LL128_ASYNC_WIRE=1); at 0 neither the staged two-shot writer nor the peer-split runs.
 static bool ddaArLL128StagedWireOk(const ncclComm* comm) {
   return rcclParamDdaLL128AsyncWire() != 0 && comm->archName != nullptr && IsArchMatch(comm->archName, "gfx1250") &&
          comm->WarpSize == kDdaLL128Warp;

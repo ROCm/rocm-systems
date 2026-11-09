@@ -16,7 +16,7 @@ std::vector<DdaLaunch> g_ddaLaunches;
 RCCL_PARAM(DdaLL, "DDA_LL", 1);
 RCCL_PARAM(DdaLLOneShotThreshold, "DDA_LL_ONESHOT_THRESHOLD", (size_t)(1) * 1024 * 1024);
 RCCL_PARAM(DdaLL128OneShotThreshold, "DDA_LL128_ONESHOT_THRESHOLD", (size_t)(4) * 1024 * 1024);
-RCCL_PARAM(DdaLL128AsyncWire, "DDA_LL128_ASYNC_WIRE", 0);
+RCCL_PARAM(DdaLL128AsyncWire, "DDA_LL128_ASYNC_WIRE", 1);
 
 static size_t DefaultDdaLLThreshold(const ncclComm*, ncclFunc_t) { return kDdaLLBaseDefault; }
 static size_t DefaultDdaLL128Threshold(const ncclComm*, ncclFunc_t) { return 0; }  // DDA_LL128 unset, no table: off

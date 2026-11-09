@@ -108,8 +108,8 @@ RCCL_PARAM(DdaLLOneShotThreshold, "DDA_LL_ONESHOT_THRESHOLD", (size_t)(1) * 1024
 RCCL_PARAM(DdaLLTwoShotThreshold, "DDA_LL_TWOSHOT_THRESHOLD", (size_t)(2) * 1024 * 1024); // 2 MiB
 RCCL_PARAM(DdaLL128OneShotThreshold, "DDA_LL128_ONESHOT_THRESHOLD", (size_t)(4) * 1024 * 1024); // 4 MiB
 RCCL_PARAM(DdaLL128TwoShotThreshold, "DDA_LL128_TWOSHOT_THRESHOLD", (size_t)(64) * 1024 * 1024); // 64 MiB
-// Opt in to the LDS-staged LL128 two-shot AllReduce writer on gfx1250 wave32 from 2 MiB shards.
-RCCL_PARAM(DdaLL128AsyncWire, "DDA_LL128_ASYNC_WIRE", 0);
+// LDS-staged LL128 two-shot AllReduce writer and peer-split on gfx1250 wave32 from 2 MiB; on by default, 0 turns off.
+RCCL_PARAM(DdaLL128AsyncWire, "DDA_LL128_ASYNC_WIRE", 1);
 RCCL_PARAM(DdaLL128, "DDA_LL128", kDdaThresholdUnset);
 RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", kDdaThresholdUnset);
 // When set, bypass the per-arch tuning table entirely and use base-commit

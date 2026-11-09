@@ -703,21 +703,25 @@ const void* LL128TwoShotW() {
 constexpr int kAsync = dda::common::kDdaLL128WireAsync;
 constexpr size_t kMiB = 1024 * 1024;
 
-// RCCL_DDA_LL128_ASYNC_WIRE unset or 0: a gfx1250 wave32 comm keeps the cooperative writer and no LDS at every shard.
-TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_StagedWriterOffByDefault) {
+// RCCL_DDA_LL128_ASYNC_WIRE unset or 1: a gfx1250 wave32 comm takes the staged writer from a 2 MiB shard; 0 keeps coop.
+TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_StagedWriterOnByDefault) {
   comm().WarpSize = 32;
   for (const bool unset : {true, false}) {
     if (!unset) {
-      params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 0;
+      params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 1;
     }
     for (const size_t count : {16 * kMiB / 4, 32 * kMiB / 4}) {  // 8 ranks: 2 and 4 MiB shards, two-shot
       const DdaLaunch& launch = RunOneLL128(count);
-      EXPECT_EQ(launch.kernel, (LL128TwoShot<float, 8>())) << "unset " << unset << " count " << count;
-      EXPECT_EQ(launch.sharedMemBytes, 0u) << "unset " << unset << " count " << count;
+      EXPECT_EQ(launch.kernel, (LL128TwoShotW<float, 8, kAsync>())) << "unset " << unset << " count " << count;
+      EXPECT_EQ(launch.sharedMemBytes, launch.block.x / 32 * 2 * kSliceWire) << "unset " << unset << " count " << count;
     }
   }
-  params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 1;
-  EXPECT_EQ(RunOneLL128(16 * kMiB / 4).kernel, (LL128TwoShotW<float, 8, kAsync>())) << "1 opts in";
+  params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 0;
+  for (const size_t count : {16 * kMiB / 4, 32 * kMiB / 4}) {
+    const DdaLaunch& launch = RunOneLL128(count);
+    EXPECT_EQ(launch.kernel, (LL128TwoShot<float, 8>())) << "0 turns it off, count " << count;
+    EXPECT_EQ(launch.sharedMemBytes, 0u) << "0 turns it off, count " << count;
+  }
 }
 
 // With RCCL_DDA_LL128_ASYNC_WIRE=1, from a 2 MiB shard a gfx1250 wave32 comm takes the staged writer on the same grid.
@@ -1098,7 +1102,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, Eligible_PeerSplitWindowLeavesTheLLTwoShot
   EXPECT_TRUE(Eligible(&ddaLLArTwoShotEligible, count)) << "no split on wave64: the LL two-shot keeps it";
 }
 
-// RCCL_DDA_LL128_ASYNC_WIRE unset or 0 keeps window messages on the LL and cooperative LL128 tiers; 1 splits them.
+// RCCL_DDA_LL128_ASYNC_WIRE unset or 1 splits window messages; 0 keeps them on the LL and cooperative LL128 tiers.
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_PeerSplitFollowsTheStagedWireFlag) {
   SplitTiersOn(comm(), params_);
   const size_t count = 2 * kMiB / 4;  // 8 ranks: 256 KiB shards
@@ -1107,23 +1111,23 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_PeerSplitFollowsTheStagedWireFlag
     if (unset) {
       params_.erase("RCCL_DDA_LL128_ASYNC_WIRE");
     } else {
-      params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 0;
+      params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 1;
     }
-    EXPECT_FALSE(TakesSplit(count));
-    EXPECT_TRUE(Eligible(&ddaLLArTwoShotEligible, count));
-    EXPECT_TRUE(Eligible(&ddaLL128ArOneShotEligible, count));
-    EXPECT_EQ(RunOneLL(count).kernel, (LLTwoShot<float, 8>()));
-    EXPECT_EQ(RunSelectedLL128(count).kernel, (LL128OneShot<float, 8>()));
-    params_["RCCL_DDA_LL128_ONESHOT_THRESHOLD"] = kMiB;
-    const DdaLaunch& two = RunSelectedLL128(count);
-    EXPECT_EQ(two.kernel, (LL128TwoShot<float, 8>()));
-    EXPECT_EQ(two.sharedMemBytes, 0u);
-    params_.erase("RCCL_DDA_LL128_ONESHOT_THRESHOLD");
+    EXPECT_TRUE(TakesSplit(count));
+    EXPECT_FALSE(Eligible(&ddaLLArTwoShotEligible, count));
+    EXPECT_FALSE(Eligible(&ddaLL128ArOneShotEligible, count));
+    EXPECT_EQ(RunSelectedLL128(count).kernel, (LL128Split<float>()));
   }
-  params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 1;
-  EXPECT_FALSE(Eligible(&ddaLLArTwoShotEligible, count));
-  EXPECT_FALSE(Eligible(&ddaLL128ArOneShotEligible, count));
-  EXPECT_EQ(RunSelectedLL128(count).kernel, (LL128Split<float>()));
+  params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 0;
+  EXPECT_FALSE(TakesSplit(count));
+  EXPECT_TRUE(Eligible(&ddaLLArTwoShotEligible, count));
+  EXPECT_TRUE(Eligible(&ddaLL128ArOneShotEligible, count));
+  EXPECT_EQ(RunOneLL(count).kernel, (LLTwoShot<float, 8>()));
+  EXPECT_EQ(RunSelectedLL128(count).kernel, (LL128OneShot<float, 8>()));
+  params_["RCCL_DDA_LL128_ONESHOT_THRESHOLD"] = kMiB;
+  const DdaLaunch& two = RunSelectedLL128(count);
+  EXPECT_EQ(two.kernel, (LL128TwoShot<float, 8>()));
+  EXPECT_EQ(two.sharedMemBytes, 0u);
 }
 
 // Under a launch cap the split stays within the blocks and threads of the capped launch it replaces (the LL two-shot).
