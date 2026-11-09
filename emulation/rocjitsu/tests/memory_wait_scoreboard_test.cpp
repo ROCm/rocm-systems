@@ -1455,6 +1455,45 @@ TEST(MemoryWaitExecutionTest, ScalarMissingWaitWarnsWithoutChangingTheResult) {
   }
 }
 
+// A wave32 v_dual_cndmask_b32 lane mask is one SGPR: a scalar load pending into
+// the SGPR above the selector needs no wait, and one pending into a VCC_HI
+// selector does.
+TEST(MemoryWaitExecutionTest, Vopd3CndmaskSelectorWaitsOnlyForItsOwnSgpr) {
+  using namespace rocjitsu::amdhsa;
+  constexpr uint8_t kVccHi = 107;
+  struct Case {
+    uint8_t loaded;
+    uint8_t selector;
+    uint32_t diagnostics;
+  };
+  for (const Case &test_case : {Case{4, 4, 1}, Case{5, 4, 0}, Case{kVccHi, kVccHi, 1}}) {
+    SCOPED_TRACE(testing::Message() << "load " << unsigned{test_case.loaded} << ", selector "
+                                    << unsigned{test_case.selector});
+    std::vector<uint32_t> code;
+    append_instruction(code, make_s_load_b32_scaled_imm(test_case.loaded, 0, 0));
+    append_instruction(
+        code,
+        make_vopd3_pair(
+            {.op = VopdOp::CndmaskB32,
+             .src0 = vopd_src0_vgpr(2),
+             .src1 = 3,
+             .src2 = test_case.selector,
+             .dst = 1},
+            {.op = VopdOp::MovB32, .src0 = vopd_src0_vgpr(5), .src1 = 0, .src2 = 0, .dst = 4}));
+    append_instruction(code, S_ENDPGM_GFX12);
+    uint32_t properties = 0;
+    RJ_AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+    Gfx1250Sim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize(memory_wait_test_config()));
+    auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32, 2, false, false,
+                                   false, properties, 16);
+    test::AqlQueue queue(sim.memory, sim.cp());
+    queue.dispatch(kernel, 32, 32, 0x400000);
+    step_until_halted(*sim.engine, *sim.cu());
+    EXPECT_EQ(sim.cu()->memory_wait_diagnostic_count(), test_case.diagnostics);
+  }
+}
+
 // Counter-class tests need decoded register identities, without an executable
 // image implementation or a memory payload. Use the same pre-execution API as
 // decoded instructions in the core issuer.

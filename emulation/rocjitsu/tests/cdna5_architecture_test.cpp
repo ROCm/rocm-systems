@@ -1697,6 +1697,21 @@ TEST(Gfx1250DecodeTest, VopdSourceOperandsFollowPrintedSlots) {
   EXPECT_EQ(*inst->src_operand(2)->to_register_ref(), (RegisterRef{RegClass::SGPR, 11, 1}));
 }
 
+TEST(Gfx1250DecodeTest, Vopd3CndmaskSelectorPrintsOneSgpr) {
+  const uint32_t words[] = {
+      0xCF249102u, // v_dual_cndmask_b32 v1, v2, v3, s4 :: v_dual_cndmask_b32 v6, v7, v8, s6
+      0x04030107u,
+      0x06060801u,
+  };
+
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->disassemble(),
+            "v_dual_cndmask_b32 v1, v2, v3, s4 :: v_dual_cndmask_b32 v6, v7, v8, s6");
+}
+
 TEST(Gfx1250DecodeTest, VopdRejectsInvalidOpcodes) {
   const std::array<std::array<uint32_t, 3>, 2> words = {{
       // Opcode 18 is valid in the Y slot, but not the X slot.
