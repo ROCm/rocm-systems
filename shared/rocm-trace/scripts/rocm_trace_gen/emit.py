@@ -97,10 +97,15 @@ def _check_names(slot: Slot, api: ApiConfig, by_field: Dict[str, Param]) -> List
                 errors.append(
                     f"{where}: strings names 'result', which is not a char pointer"
                 )
-        elif name not in api.out or not by_field[name].ctype.is_char_pointer:
+        elif not by_field[name].ctype.is_char_pointer:
             errors.append(
-                f"{where}: strings names '{name}', which is not a char-pointer output; "
-                "const char* inputs are recorded as strings already"
+                f"{where}: strings names '{name}', which is not a char-pointer output "
+                "or char* input"
+            )
+        elif name not in api.out and by_field[name].ctype.is_const_char_pointer:
+            errors.append(
+                f"{where}: strings names '{name}': const char* inputs are recorded as "
+                "strings already"
             )
     for name in api.uncapped:
         is_input_string = (
@@ -147,7 +152,10 @@ def _plan(
         if name in api.omit:
             continue
         try:
-            if p.ctype.is_const_char_pointer and name not in api.out:
+            # const char* inputs are strings; a char* input only when listed in strings (an
+            # API that is not const-correct), since a char* is usually a buffer.
+            is_string = p.ctype.is_const_char_pointer or name in api.strings
+            if is_string and name not in api.out:
                 enter.append(string(p.name, name, name not in api.uncapped, full))
             else:
                 enter.extend(value(p.ctype, p.name, name, scalars))
