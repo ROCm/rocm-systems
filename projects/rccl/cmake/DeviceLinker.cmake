@@ -353,6 +353,10 @@ foreach(_inc ${_dev_sys_includes})
   endif()
 endforeach()
 
+# The tail of every host+device TU's compile: the fat objects and common.cu.cpp's host half.
+set(DL_TU_FLAGS ${_link_def_flags} ${_link_inc_flags} ${DL_OPT_FLAGS}
+  ${DL_INHERITED_FLAGS} ${DL_COVERAGE_FLAGS} -std=c++17 -fPIC)
+
 # ---------------------------------------------------------------------------
 # Read specialized file list
 # ---------------------------------------------------------------------------
@@ -394,12 +398,8 @@ function(dl_evaluate_guard GUARD GPU_TARGET RESULT_VAR)
 endfunction()
 
 # ===========================================================================
-# Mixed host+device TUs: sources outside the specialized-kernel pipeline that
-# define kernels of their own. The device half is compiled once per GPU target
-# and linked into that target's device.elf; the host half goes into
-# DEVICE_LINKER_OBJECTS. Both halves are -fgpu-rdc with the same -cuid, so
-# internal-linkage kernels and variables get the same name on each side, and
-# the host half carries offload entries instead of an image of its own.
+# Fat objects: mixed host+device TUs outside the specialized-kernel pipeline. Each device half
+# joins its target's device.o; the host half, with the same -cuid, carries the offload entries.
 # ===========================================================================
 set(DEVICE_LINKER_OBJECTS "")
 
@@ -433,8 +433,7 @@ function(dl_add_fat_object NAME SRC)
   endif()
   list(TRANSFORM FO_DEFINES PREPEND "-D")
   set(_flags ${DL_HIP_COMPILER_FLAGS} --offload-new-driver -fgpu-rdc -cuid=${NAME}
-    ${FO_DEFINES} ${_link_def_flags} ${_link_inc_flags} ${DL_OPT_FLAGS}
-    ${DL_INHERITED_FLAGS} ${DL_COVERAGE_FLAGS} -std=c++17 -fPIC)
+    ${FO_DEFINES} ${DL_TU_FLAGS})
   if(FO_SUPPRESS_WARNINGS)
     list(APPEND _flags -w)
   endif()
@@ -448,9 +447,7 @@ function(dl_add_fat_object NAME SRC)
     else()
       set(_obj "${DEVICE_BUILD_DIR}/${_half}/${NAME}.o")
       file(MAKE_DIRECTORY "${DEVICE_BUILD_DIR}/${_half}")
-      # Each TU is self-contained on the device; internalize as non-RDC does.
-      # Codegen is a separate step because ROCm 7.0's clang emits bitcode here
-      # even with -fno-offload-lto; see ir_codegen_cmd in tools/rccl-device-compile.
+      # Self-contained on the device, so internalize; codegen is a separate step, see ir_codegen_cmd.
       set(_half_flags --offload-device-only --offload-arch=${DL_TARGET_ID_${_half}}
         -fno-offload-lto -mllvm -amdgpu-internalize-symbols ${FO_EXTRA_FLAGS} -emit-llvm)
       set(_out "${_obj}.bc")
@@ -759,14 +756,8 @@ add_custom_command(
     -x hip --offload-host-only ${DL_OFFLOAD_ARCH_FLAGS}
     ${DL_HIP_COMPILER_FLAGS}
     --offload-new-driver -fgpu-rdc
-    ${_link_def_flags}
-    ${_link_inc_flags}
-    ${DL_OPT_FLAGS}
-    ${DL_INHERITED_FLAGS}
-    ${DL_COVERAGE_FLAGS}
     ${DL_MAIN_MODULE_CUID_FLAGS}
-    -std=c++17
-    -fPIC
+    ${DL_TU_FLAGS}
     -c -o ${COMMON_FAT_OBJ}
     ${HIPIFY_DIR}/src/device/common.cu.cpp
   DEPENDS ${HIPIFY_DIR}/src/device/common.cu.cpp
