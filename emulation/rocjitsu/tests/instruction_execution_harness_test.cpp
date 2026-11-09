@@ -363,6 +363,37 @@ TEST(ScalarControlTest, SetkillHonorsLowImmediateBitAndDrainsMemory) {
   }
 }
 
+TEST(ScalarControlTest, OnlySTrapCarriesTheSoftwareTrapFlag) {
+  // The issue loop enters the trap handler, and CFG construction ends a path, on
+  // this flag instead of the mnemonic. Any other instruction carrying it (for
+  // example s_rfe_b64, which returns from the handler) would be taken as a trap.
+  const auto check = [](rj_code_arch_t arch, const auto &encodings) {
+    SCOPED_TRACE(testing::Message() << "arch=" << arch);
+    auto decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    size_t traps = 0;
+    for (const auto &encoding : encodings) {
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, encoding.words.data()));
+      if (!inst)
+        continue;
+      const bool trap = (inst->flags() & SOFTWARE_TRAP) != 0;
+      EXPECT_EQ(trap, inst->mnemonic() == "s_trap") << inst->mnemonic();
+      traps += trap;
+    }
+    EXPECT_EQ(traps, 1u);
+  };
+  check(ROCJITSU_CODE_ARCH_CDNA1, cdna1::test_data::ENCODINGS);
+  check(ROCJITSU_CODE_ARCH_CDNA2, cdna2::test_data::ENCODINGS);
+  check(ROCJITSU_CODE_ARCH_CDNA3, cdna3::test_data::ENCODINGS);
+  check(ROCJITSU_CODE_ARCH_CDNA4, cdna4::test_data::ENCODINGS);
+  check(ROCJITSU_CODE_ARCH_CDNA5, cdna5::test_data::ENCODINGS);
+  check(ROCJITSU_CODE_ARCH_RDNA1, rdna1::test_data::ENCODINGS);
+  check(ROCJITSU_CODE_ARCH_RDNA2, rdna2::test_data::ENCODINGS);
+  check(ROCJITSU_CODE_ARCH_RDNA3, rdna3::test_data::ENCODINGS);
+  check(ROCJITSU_CODE_ARCH_RDNA3_5, rdna3_5::test_data::ENCODINGS);
+  check(ROCJITSU_CODE_ARCH_RDNA4, rdna4::test_data::ENCODINGS);
+}
+
 TEST(ScreenPartitionTest, RectangleCoverageMatchesAllSelectorsAndRespectsExec) {
   for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
                     ROCJITSU_CODE_ARCH_CDNA4}) {
@@ -3160,6 +3191,41 @@ protected:
   amdgpu::Wavefront *wf = nullptr;
   uint32_t vgpr_base = 0;
 };
+
+TEST_F(Cdna4BlockScaleMfmaExecutionTest, Bare16x16x128Fp8Fp4AccumulatesFullK) {
+  const auto words = cdna4::build_vop3p_mfma(cdna4::kVMfmaF3216x16x128F8f6f4Vop3pMfma,
+                                             {.vdst = kDst,
+                                              .cbsz = 0,
+                                              .src0 = static_cast<uint16_t>(vgpr_src(kSrc0)),
+                                              .src1 = static_cast<uint16_t>(vgpr_src(kSrc1)),
+                                              .src2 = static_cast<uint16_t>(vgpr_src(kAccumulator)),
+                                              .blgp = 4});
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+
+  // The 16x128 inputs occupy eight FP8 or four FP4 registers per lane.
+  for (uint32_t reg = 0; reg < 8; ++reg)
+    for (uint32_t lane = 0; lane < 64; ++lane)
+      cu->write_vgpr(vgpr_base + kSrc0 + reg, lane, 0x38383838u); // FP8 1.0.
+  for (uint32_t reg = 0; reg < 4; ++reg)
+    for (uint32_t lane = 0; lane < 64; ++lane)
+      cu->write_vgpr(vgpr_base + kSrc1 + reg, lane, 0x22222222u); // FP4 1.0.
+  seed_accumulator(std::bit_cast<uint32_t>(0.0f), 4);
+
+  for (bool force_scalar : {true, false}) {
+    SCOPED_TRACE(testing::Message() << "force_scalar=" << force_scalar);
+    ForceScalarGuard guard(force_scalar);
+    for (uint32_t reg = 0; reg < 4; ++reg)
+      for (uint32_t lane = 0; lane < 64; ++lane)
+        cu->write_vgpr(vgpr_base + kDst + reg, lane, 0xccccccccu);
+
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+    for (uint32_t reg = 0; reg < 4; ++reg)
+      for (uint32_t lane = 0; lane < 64; ++lane)
+        ASSERT_EQ(cu->read_vgpr(vgpr_base + kDst + reg, lane), std::bit_cast<uint32_t>(128.0f))
+            << "reg=" << reg << " lane=" << lane;
+  }
+}
 
 TEST_F(Cdna4BlockScaleMfmaExecutionTest, VgprScaleByteSelectorsAreIndependent) {
   seed_inputs(0x22222222u); // Eight packed FP4 1.0 values.
