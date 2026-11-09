@@ -72,6 +72,7 @@ RJ_DIAGNOSTIC_POP
 #include <atomic>
 #include <bit>
 #include <bitset>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <format>
@@ -1003,8 +1004,10 @@ std::vector<uint8_t> random_input(uint64_t seed) {
     return input;
   }
   const std::size_t tail_size = input.size() - kHeaderSize - prefix.size();
-  const std::vector<uint8_t> program = execution_fuzz::random_input(
+  const util::FailureOr<std::vector<uint8_t>> maybe_program = execution_fuzz::random_input(
       next_random(seed), tail_size + execution_fuzz::kHeaderSize, target);
+  assert(maybe_program.succeeded());
+  const std::vector<uint8_t> &program = maybe_program.value();
   std::copy(program.begin() + execution_fuzz::kHeaderSize, program.end(),
             input.begin() + kHeaderSize + prefix.size());
   return input;
