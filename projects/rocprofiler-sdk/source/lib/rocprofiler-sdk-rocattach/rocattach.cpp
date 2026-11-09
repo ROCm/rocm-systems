@@ -198,7 +198,20 @@ build_environment_buffer()
         }
 
         var_count++;
-        ROCP_TRACE << "[rocprofiler-sdk-rocattach] Adding to environment buffer: " << var;
+        constexpr auto extra_counters_contents_env =
+            std::string_view{"ROCPROF_EXTRA_COUNTERS_CONTENTS="};
+        const auto var_view = std::string_view{var};
+        if(var_view.find(extra_counters_contents_env) == 0)
+        {
+            ROCP_TRACE << "[rocprofiler-sdk-rocattach] Adding to environment buffer: "
+                          "ROCPROF_EXTRA_COUNTERS_CONTENTS ("
+                       << (var_view.size() - extra_counters_contents_env.size())
+                       << " bytes, redacted)";
+        }
+        else
+        {
+            ROCP_TRACE << "[rocprofiler-sdk-rocattach] Adding to environment buffer: " << var;
+        }
 
         // Add variable name
         while(*var != '=')

@@ -28,6 +28,7 @@
 
 #include <cerrno>
 #include <csignal>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -36,6 +37,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <vector>
 
 namespace
 {
@@ -105,6 +107,72 @@ verify_loaded_library(const char* symbol_name, const fs::path& expected_library)
     return true;
 }
 
+std::vector<char>
+make_extra_counters_environment_buffer()
+{
+    auto       buffer        = std::vector<char>(sizeof(uint32_t), '\0');
+    const auto append_string = [&buffer](std::string_view input) {
+        buffer.insert(buffer.end(), input.begin(), input.end());
+        buffer.emplace_back('\0');
+    };
+    append_string("ROCPROF_EXTRA_COUNTERS_FILE");
+    append_string("");
+    append_string("ROCPROF_EXTRA_COUNTERS_CONTENTS");
+    const auto contents =
+        std::string{ "rocprofiler-register-sensitive-extra-counter-contents" } +
+        std::string(256 * 1024 + 1, 'x');
+    append_string(contents);
+
+    constexpr uint32_t pair_count = 2;
+    std::memcpy(buffer.data(), &pair_count, sizeof(pair_count));
+    return buffer;
+}
+
+std::vector<char>
+make_invalid_environment_buffer()
+{
+    auto       buffer        = std::vector<char>(sizeof(uint32_t), '\0');
+    const auto append_string = [&buffer](std::string_view input) {
+        buffer.insert(buffer.end(), input.begin(), input.end());
+        buffer.emplace_back('\0');
+    };
+    append_string("ROCPROFILER_TEST_SCOPED_ENV");
+    append_string("temporary");
+    append_string("INVALID=ENVIRONMENT=NAME");
+    append_string("rejected");
+
+    constexpr uint32_t pair_count = 2;
+    std::memcpy(buffer.data(), &pair_count, sizeof(pair_count));
+    return buffer;
+}
+
+bool
+attach_environment_is_restored()
+{
+    const auto* file = std::getenv("ROCPROF_EXTRA_COUNTERS_FILE");
+    const auto* tool = std::getenv("ROCP_TOOL_LIBRARIES");
+    return file != nullptr && std::string_view{ file } == "original-file" &&
+           std::getenv("ROCPROF_EXTRA_COUNTERS_CONTENTS") == nullptr &&
+           std::getenv("ROCPROFILER_REGISTER_TOOL_ATTACHED") == nullptr &&
+           tool != nullptr && std::string_view{ tool } == "original-tool";
+}
+
+bool
+exec_true_succeeds()
+{
+    const auto child = fork();
+    if(child < 0) return false;
+    if(child == 0)
+    {
+        execl("/bin/true", "true", nullptr);
+        _exit(127);
+    }
+
+    auto status = 0;
+    if(waitpid(child, &status, 0) != child) return false;
+    return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
+
 int
 run_child(std::string_view mode,
           const fs::path&  register_library,
@@ -135,18 +203,72 @@ run_child(std::string_view mode,
     if(mode == "attach-core")
     {
         using register_attach_t = int (*)(const char*, const char*);
+        using register_detach_t = int (*)();
         auto* register_attach   = reinterpret_cast<register_attach_t>(
             dlsym(RTLD_DEFAULT, "rocprofiler_register_attach"));
-        if(register_attach == nullptr)
+        auto* register_detach = reinterpret_cast<register_detach_t>(
+            dlsym(RTLD_DEFAULT, "rocprofiler_register_detach"));
+        if(register_attach == nullptr || register_detach == nullptr)
         {
-            std::cerr << "Test FAILED: could not find rocprofiler_register_attach\n";
+            std::cerr
+                << "Test FAILED: could not find rocprofiler-register attach functions\n";
             return 1;
         }
 
-        // the SDK fixture has no rocprofiler_attach, so only the core selection matters
-        register_attach(nullptr, "runtime-soname-unused-tool");
+        if(setenv("ROCPROF_EXTRA_COUNTERS_FILE", "original-file", 1) != 0 ||
+           unsetenv("ROCPROF_EXTRA_COUNTERS_CONTENTS") != 0 ||
+           unsetenv("ROCPROFILER_REGISTER_TOOL_ATTACHED") != 0 ||
+           setenv("ROCP_TOOL_LIBRARIES", "original-tool", 1) != 0)
+        {
+            std::cerr << "Test FAILED: could not prepare attachment environment\n";
+            return 1;
+        }
+
+        const auto environment_buffer = make_extra_counters_environment_buffer();
+        if(register_attach(environment_buffer.data(), "runtime-soname-unused-tool") != 0)
+        {
+            std::cerr << "Test FAILED: rocprofiler_register_attach failed\n";
+            return 1;
+        }
         if(!verify_loaded_library("rocprofiler_set_api_table", expected_sdk_library))
             return 1;
+        if(!attach_environment_is_restored() || !exec_true_succeeds())
+        {
+            std::cerr
+                << "Test FAILED: target environment was not restored after attach\n";
+            return 1;
+        }
+
+        if(register_detach() != 0)
+        {
+            std::cerr << "Test FAILED: rocprofiler_register_detach failed\n";
+            return 1;
+        }
+        if(!attach_environment_is_restored() || !exec_true_succeeds())
+        {
+            std::cerr << "Test FAILED: target environment changed after detach\n";
+            return 1;
+        }
+
+        if(setenv("ROCPROFILER_TEST_SCOPED_ENV", "original", 1) != 0)
+        {
+            std::cerr << "Test FAILED: could not prepare setenv failure test\n";
+            return 1;
+        }
+        const auto invalid_environment_buffer = make_invalid_environment_buffer();
+        if(register_attach(invalid_environment_buffer.data(),
+                           "runtime-soname-unused-tool") == 0)
+        {
+            std::cerr << "Test FAILED: invalid environment name was accepted\n";
+            return 1;
+        }
+        const auto* restored = std::getenv("ROCPROFILER_TEST_SCOPED_ENV");
+        if(restored == nullptr || std::string_view{ restored } != "original" ||
+           !attach_environment_is_restored() || !exec_true_succeeds())
+        {
+            std::cerr << "Test FAILED: partial environment update was not restored\n";
+            return 1;
+        }
     }
 
     return 0;

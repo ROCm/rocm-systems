@@ -84,6 +84,7 @@ ROCPROFV3=$2
 OUTPUT_DIR=${3:-${PWD}}
 LOG_LEVEL=${4:-info}
 OUTPUT_FILENAME=${5:-out}
+EXTRA_COUNTERS_SOURCE=$6
 
 # Set environment variables required for attachment
 export ROCP_TOOL_ATTACH=1
@@ -91,6 +92,7 @@ export ROCP_TOOL_ATTACH=1
 OUTPUT_SUBDIR="attachment-output"
 OUTPUT_FORMAT="json rocpd"
 SELECTED_REGION_ARGS=(--selected-regions false --selected-regions-ref-count false)
+EXTRA_COUNTERS_FILE="${OUTPUT_DIR}/${OUTPUT_SUBDIR}/reattach-extra-counters.yaml"
 APP_PID=""
 
 cleanup() {
@@ -104,6 +106,7 @@ trap cleanup EXIT
 # Clean up any existing output
 rm -rf ${OUTPUT_DIR}/${OUTPUT_SUBDIR}
 mkdir -p ${OUTPUT_DIR}/${OUTPUT_SUBDIR}
+cp "${EXTRA_COUNTERS_SOURCE}" "${EXTRA_COUNTERS_FILE}"
 
 # Check for permissions. We need to be able to ptrace any process in the system. (ptrace_scope == 0)
 # First, if the ptrace_scope variable is not present, we assume there is no restriction and we can proceed normally.
@@ -150,7 +153,8 @@ echo "First attachment: Attaching profiler to PID $APP_PID for 500 milliseconds.
 LD_PRELOAD="${ROCPROF_PRELOAD}" "${ROCPROFV3}" --attach "${APP_PID}" \
     --attach-duration-msec 500 -s -f ${OUTPUT_FORMAT} --stats --summary \
     --group-by-queue --attach-sync-output -d "${OUTPUT_DIR}/${OUTPUT_SUBDIR}" \
-    --log-level "${LOG_LEVEL}" "${SELECTED_REGION_ARGS[@]}" &
+    --log-level "${LOG_LEVEL}" "${SELECTED_REGION_ARGS[@]}" \
+    -E "${EXTRA_COUNTERS_FILE}" &
 FIRST_ROCPROF_PID=$!
 ROCPROF_PID=$FIRST_ROCPROF_PID
 echo "First rocprofv3 PID: $FIRST_ROCPROF_PID"
@@ -186,6 +190,9 @@ if [ -z "$APP_JSON" ]; then
     exit 1
 fi
 echo "Found app JSON output: $APP_JSON"
+
+# The second attachment omits -E and must reuse the target's immutable snapshot.
+rm -f "${EXTRA_COUNTERS_FILE}"
 
 # Clear output files between attachments
 echo "Clearing output files before second attachment..."

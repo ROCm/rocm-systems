@@ -136,6 +136,26 @@ The following example attaches the profiler to a process with PID "12345", colle
 
    rocprofv3 --pid 12345 --pmc SQ_WAVES GRBM_COUNT --output-format csv
 
+When ``-E`` or ``--extra-counters`` is used in attachment mode, the attaching
+process must be able to read the definition file. ``rocprofv3`` passes only the
+path while starting the attachment helper; the helper then reads the file and
+transfers its contents directly to the target. The target process does not need
+the path to be visible or readable in its mount namespace. Current
+``rocprofiler-register`` restores the target environment as soon as synchronous
+tool configuration finishes.
+
+The first attachment stores an immutable copy of the definitions in the target.
+Later attachments can omit ``-E`` or repeat the identical path; both forms reuse
+that copy without reading the source file again. A different path is rejected as
+an unsupported configuration change.
+
+Targets whose ``rocprofiler-register`` predates scoped attachment environments
+can retain inline contents after attachment and can print them when INFO logging
+is enabled. For compatibility, ``rocprofv3`` permits a definition below Linux's
+single-environment-entry limit with a warning. It rejects a larger definition
+before attaching, because leaving that value in the target would prevent later
+``exec`` calls. Update the target ROCm installation to remove this limitation.
+
 Reattaching to the same process
 --------------------------------
 
