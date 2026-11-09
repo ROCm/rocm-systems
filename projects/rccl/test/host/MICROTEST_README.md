@@ -161,9 +161,12 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     I/O, timeout recovery, keep-alives, and fallback-link maintenance.
   - `ras/diagnostics_gpu.cc` (`RAS_DIAGNOSTICS_GPU_CC_PATH`, from
     `ras-diagnostics-gpu-test.cc`); suite `RasDiagnosticsGpuMicrotest.*`. Covers
-    GPU inventory, CUDA and NVIDIA graphics driver versions, ECC, and NVLink
-    collection and summaries, including failed NVML queries and bounded
-    driver-version strings.
+    the AMD SMI arm against the `amd_smi_diag*` fakes in `fakes/amdsmi_fakes.cc`:
+    GPU inventory, HIP and AMD GPU driver versions, ECC, and XGMI collection and
+    summaries, including failed queries, bounded driver-version strings, AMD SMI
+    unavailable on some or all nodes, the corrected-error threshold, down and
+    missing XGMI links, and partition bus IDs (CPX, DPX) that fall back to the
+    physical GPU. Also checks that `rasDiagnosticsGpuInit` loads AMD SMI up front.
   - `ras/peers.cc` (`RAS_PEERS_CC_PATH`, from `ras-peers-test.cc`); suite
     `RasPeersMicrotest.*`. Covers peer conversion and merging, update
     propagation, link selection, dead-peer tracking, address ordering, and
