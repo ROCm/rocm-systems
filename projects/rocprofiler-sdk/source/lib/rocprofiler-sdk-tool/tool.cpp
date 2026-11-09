@@ -2597,12 +2597,19 @@ configure_pc_sampling_on_all_agents(uint64_t                        buffer_size,
 // the same per-agent profile list counter_dispatch_callback -> get_replay_profile indexes -- so
 // that pass i maps to group i with no wrap/skip on agents with a different or partial group set
 // (the global --pmc group count can differ per agent). Returning 1 (a single group, or none)
-// disables replay, as for dispatches the kernel filters do not select: those run once, without
-// counters.
+// disables replay, as for dispatches made while counter collection is paused or that the kernel
+// filters do not select: those run once, without counters.
 uint64_t
 kernel_replay_pass_count_callback(rocprofiler_kernel_dispatch_info_t dispatch_info,
                                   rocprofiler_user_data_t /*user_data*/)
 {
+    // While counter collection is paused (--selected-regions, roctxProfilerPause), a dispatch
+    // collects nothing and, as without replay, does not count toward the kernel filters.
+    if(int active = 0; rocprofiler_context_is_active(counter_collection_ctx, &active) !=
+                           ROCPROFILER_STATUS_SUCCESS ||
+                       active == 0)
+        return 1;
+
     if(!is_targeted_kernel(
            dispatch_info.kernel_id, dispatch_info.dispatch_id, counter_kernel_iteration()))
         return 1;
@@ -2629,7 +2636,7 @@ kernel_replay_callback(rocprofiler_callback_tracing_record_t record,
        record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
     {
         // Tell the SDK how many passes to run for this dispatch (= counter groups for its agent,
-        // or 1 when the kernel filters do not select it).
+        // or 1 when counter collection is paused or the kernel filters do not select it).
         payload->replay_pass_count = kernel_replay_pass_count_callback;
         // A new dispatch is configured here; the pass-count callback records its filter decision.
         tl_replay_dispatch_targeted.reset();

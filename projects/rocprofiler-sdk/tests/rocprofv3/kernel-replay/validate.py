@@ -374,6 +374,43 @@ def test_unselected_dispatches_run_once(json_data, expected_passes):
         )
 
 
+def test_iteration_range_selects_launches(json_data, selected_kernel, selected_launches):
+    # --kernel-iteration-range numbers the launches the profiler observes, from 1, once each however
+    # often a selected launch is replayed. With --selected-regions only the launches inside a region
+    # are observed, and the kernel trace records exactly those.
+    if not selected_kernel or not selected_launches:
+        pytest.skip("--selected-kernel and --selected-launches were not specified")
+
+    sdk = _sdk(json_data)
+    executions = sdk.get("buffer_records", {}).get("kernel_dispatch", [])
+    if not executions:
+        pytest.skip("generated without --kernel-trace")
+
+    names = _kernel_id_to_name(sdk)
+    launches = sorted(
+        {
+            int(rec["dispatch_info"]["dispatch_id"])
+            for rec in executions
+            if selected_kernel in names.get(int(rec["dispatch_info"]["kernel_id"]), "")
+        }
+    )
+    assert len(launches) >= max(selected_launches), (
+        f"only {len(launches)} launches of {selected_kernel} were traced, expected at least "
+        f"{max(selected_launches)}"
+    )
+
+    want = [launches[launch - 1] for launch in selected_launches]
+    got = sorted(
+        did
+        for did, entry in _dispatch_passes(sdk).items()
+        if selected_kernel in names.get(entry["kernel_id"], "")
+    )
+    assert got == want, (
+        f"counters came from {selected_kernel} dispatches {got}, expected launches "
+        f"{selected_launches} of {len(launches)}, which are dispatches {want}"
+    )
+
+
 def test_dispatch_ids_increment_sequentially(json_data):
     # Across distinct dispatches the dispatch_id increments sequentially -- one fresh id per logical
     # dispatch, none skipped, none reused. Replay passes reuse their dispatch's reserved id (they

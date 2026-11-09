@@ -54,6 +54,20 @@ def pytest_addoption(parser):
         default=None,
         help="optional exact number of logical dispatches expected in the counter records",
     )
+    parser.addoption(
+        "--selected-kernel",
+        action="store",
+        default=None,
+        help="part of the kernel name whose launches --selected-launches counts",
+    )
+    parser.addoption(
+        "--selected-launches",
+        action="store",
+        nargs="+",
+        type=int,
+        default=None,
+        help="1-based launches of --selected-kernel, among those in the kernel trace, that the kernel filters must select",
+    )
     parser.addoption("--n-elems", type=int, default=1048576)
     parser.addoption("--baseline-json", help="optional 1-pass baseline JSON for scaling")
     parser.addoption("--max-scaling-ratio", type=float, default=10.0)
@@ -87,3 +101,13 @@ def expected_dispatch_count(request):
 @pytest.fixture
 def common_counters(request):
     return list(request.config.getoption("--common-counters"))
+
+
+@pytest.fixture
+def selected_kernel(request):
+    return request.config.getoption("--selected-kernel")
+
+
+@pytest.fixture
+def selected_launches(request):
+    return request.config.getoption("--selected-launches")
