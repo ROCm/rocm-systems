@@ -597,7 +597,7 @@ def device_compile_cmd(clang, target_id, forwarded_flags, asm_out, source):
 
 
 def _codegen_flags(forwarded_flags):
-    """The forwarded flags codegen of optimized bitcode still reads."""
+    """Keep only the -O and -mllvm options; codegen of optimized bitcode ignores the rest."""
     out = []
     it = iter(forwarded_flags)
     for flag in it:
@@ -625,6 +625,13 @@ def ir_codegen_cmd(clang, target_id, forwarded_flags, out, bitcode):
         '-Xclang', '-disable-llvm-passes',
         '-c', '-o', out, bitcode,
     ]
+
+
+def do_ir_codegen(args, forwarded_flags):
+    clang, _ = discover_tools(args.clang)
+    run(ir_codegen_cmd(clang, args.target_id, forwarded_flags, args.output,
+                       args.bitcode),
+        f"codegen {os.path.basename(args.bitcode)}")
 
 
 def build_link_cmd(lld, output, rsp_path, arch, profile_rt):
@@ -880,10 +887,8 @@ def main():
             raise SystemExit(
                 "ERROR: --ir-codegen requires --arch=<target>, -o <output> and "
                 "one bitcode input")
-        clang, _ = discover_tools(args.clang)
-        run(ir_codegen_cmd(clang, args.target_id, forwarded_flags, args.output,
-                           positional[0]),
-            f"codegen {os.path.basename(positional[0])}")
+        args.bitcode = positional[0]
+        do_ir_codegen(args, forwarded_flags)
 
     else:
         raise SystemExit("ERROR: specify --compile or --link mode")
