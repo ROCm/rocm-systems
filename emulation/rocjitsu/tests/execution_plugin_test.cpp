@@ -2773,7 +2773,8 @@ TEST(ExecutionPluginGroupTest, FansOutToEveryConfiguredSink) {
 }
 
 TEST(ExecutionPluginGroupTest, OwnsFileSinkThroughPluginDestruction) {
-  test::ScopedTempDirectory sink_directory("rocjitsu-plugin-sink-lifetime-");
+  test::ScopedTempDirectory sink_directory;
+  ASSERT_TRUE(sink_directory.initialize("rocjitsu-plugin-sink-lifetime-"));
   const std::string log_path = sink_directory.path() + "/destructor_writer.log";
   std::vector<std::string> events;
   {
