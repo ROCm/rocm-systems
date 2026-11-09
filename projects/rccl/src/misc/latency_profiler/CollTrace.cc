@@ -37,7 +37,7 @@ CollTrace::~CollTrace() {
       profilingWorkerThread_.join();
     }
 
-    if (rank_ == 0) {
+    if (comm_->localRank == 0) {
       reportIfNeeded(false);
     }
 
@@ -78,7 +78,7 @@ void* CollTrace::collTraceThreadFn(int cudaDev) {
       latency = *latencyMaybe;
     }
 
-    recordCurCollResult(rank_, latency);
+    recordCurCollResult(comm_->localRank, latency);
     curEvent_.reset();
   }
 

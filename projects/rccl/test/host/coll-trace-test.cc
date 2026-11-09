@@ -193,8 +193,9 @@ class CollTraceMicrotest : public ::testing::Test {
     comm_ = std::make_unique<ncclComm>();
     comm_->commHash = 0xabc;
     comm_->rank = 0;
+    comm_->nRanks = 19;
     comm_->cudaDev = 0;
-    comm_->localRank = 1;
+    comm_->localRank = 0;
     comm_->localRanks = 8;
     comm_->localRankToRank = localRankToRank_;
     comm_->bootstrap = reinterpret_cast<void*>(0xb0);
@@ -221,7 +222,7 @@ class CollTraceMicrotest : public ::testing::Test {
   }
 
   std::unique_ptr<ncclComm> comm_;
-  int localRankToRank_[8] = {4, 6, 8, 10, 12, 14, 16, 18};
+  int localRankToRank_[8] = {0, 6, 8, 10, 12, 14, 16, 18};
 };
 
 TEST_F(CollTraceMicrotest, Utils_SizeMbScalesByElementWidth) {
@@ -437,7 +438,7 @@ TEST_F(CollTraceMicrotest, Trace_RingBoundaryAllGathersAndReports) {
 
   ASSERT_EQ(g_allGathers.size(), 1u);
   EXPECT_EQ(g_allGathers[0].ranks, localRankToRank_);
-  EXPECT_EQ(g_allGathers[0].rank, 1);
+  EXPECT_EQ(g_allGathers[0].rank, 0);
   EXPECT_EQ(g_allGathers[0].nranks, 8);
   EXPECT_EQ(g_allGathers[0].size, (int)(2 * sizeof(float)));
   EXPECT_EQ(g_allGathers[0].mine, (std::vector<float>{2.0f, 10.0f}));
@@ -481,18 +482,36 @@ TEST_F(CollTraceMicrotest, Trace_RankZeroReportsOnNonzeroDevice) {
   EXPECT_EQ(DebugLogMatching("coll_id").size(), 1u);
 }
 
-TEST_F(CollTraceMicrotest, Trace_NonzeroRankOnDeviceZeroDoesNotReport) {
+TEST_F(CollTraceMicrotest, Trace_NonzeroGlobalRankReportsOnNonzeroDevice) {
   SetParam("NCCL_COLLTRACE_RECORD_MAX", 1);
   SetParam("NCCL_COLLTRACE_MAX_DUMP_SIZE", 1);
-  comm_->localRank = 0;
+  localRankToRank_[0] = 4;
   comm_->rank = localRankToRank_[0];
+  comm_->cudaDev = 1;
+  auto trace = std::make_unique<CollTrace>(comm_.get());
+
+  Enqueue(trace.get(), 2.0f);
+  EXPECT_TRUE(WaitUntil([] { return DebugLogMatching("coll_id").size() == 1; }));
+  trace.reset();
+
+  ASSERT_EQ(g_allGathers.size(), 1u);
+  EXPECT_EQ(g_allGathers[0].rank, 0);
+  EXPECT_EQ(g_setDevices, std::vector<int>{1});
+  EXPECT_EQ(DebugLogMatching("coll_id").size(), 1u);
+}
+
+TEST_F(CollTraceMicrotest, Trace_NonzeroLocalRankOnDeviceZeroDoesNotReport) {
+  SetParam("NCCL_COLLTRACE_RECORD_MAX", 1);
+  SetParam("NCCL_COLLTRACE_MAX_DUMP_SIZE", 1);
+  comm_->localRank = 1;
+  comm_->rank = localRankToRank_[1];
   auto trace = std::make_unique<CollTrace>(comm_.get());
 
   Enqueue(trace.get(), 2.0f);
   trace.reset();
 
   ASSERT_EQ(g_allGathers.size(), 1u);
-  EXPECT_EQ(g_allGathers[0].rank, 0);
+  EXPECT_EQ(g_allGathers[0].rank, 1);
   EXPECT_EQ(g_setDevices, std::vector<int>{0});
   EXPECT_TRUE(DebugLogMatching("latency metrics all gather takes").empty());
   EXPECT_TRUE(DebugLogMatching("coll_id").empty());
@@ -528,15 +547,18 @@ TEST_F(CollTraceMicrotest, Trace_ZeroIntervalReportsEveryAggregation) {
   trace.reset();
 }
 
-TEST_F(CollTraceMicrotest, Trace_DestroyReportsWhatIsLeftOnRankZeroOnly) {
+TEST_F(CollTraceMicrotest, Trace_DestroyReportsWhatIsLeftOnLocalRankZeroOnly) {
   SetParam("NCCL_COLLTRACE_RECORD_MAX", 1);
+  localRankToRank_[0] = 4;
+  comm_->rank = localRankToRank_[0];
   comm_->cudaDev = 1;
   auto trace = std::make_unique<CollTrace>(comm_.get());
   Enqueue(trace.get(), 2.0f);
   trace.reset();
   EXPECT_EQ(DebugLogMatching("coll_id").size(), 1u);
 
-  comm_->rank = 1;
+  comm_->localRank = 1;
+  comm_->rank = localRankToRank_[1];
   comm_->cudaDev = 0;
   trace = std::make_unique<CollTrace>(comm_.get());
   Enqueue(trace.get(), 2.0f);
@@ -600,7 +622,6 @@ TEST_F(CollTraceMicrotest, Trace_AllGatherUsesEveryLocalRank) {
   for (int localRanks : {2, 8, 16}) {
     std::vector<int> rankMap(localRanks);
     for (int localRank = 0; localRank < localRanks; ++localRank) rankMap[localRank] = 4 + 2 * localRank;
-    rankMap[0] = 0;
     for (int localRank : {0, localRanks - 1}) {
       SCOPED_TRACE(localRanks);
       SCOPED_TRACE(localRank);
@@ -622,7 +643,7 @@ TEST_F(CollTraceMicrotest, Trace_AllGatherUsesEveryLocalRank) {
       EXPECT_EQ(g_allGathers[0].nranks, localRanks);
       EXPECT_EQ(g_allGathers[0].mine, (std::vector<float>{2.0f, 10.0f}));
       auto lines = DebugLogMatching("coll_id");
-      if (comm_->rank == 0) {
+      if (localRank == 0) {
         const float lastPeerLatency = g_peerLatency + (localRanks - 1) * g_peerLatencyStep;
         ASSERT_EQ(lines.size(), 2u);
         EXPECT_NE(lines[0].find("min_latency_us 2000.000000, max_latency_us " +
@@ -639,9 +660,9 @@ TEST_F(CollTraceMicrotest, Trace_AllGatherUsesEveryLocalRank) {
 TEST_F(CollTraceMicrotest, Trace_SingleLocalRankReportsItsOwnLatencies) {
   SetParam("NCCL_COLLTRACE_RECORD_MAX", 2);
   SetParam("NCCL_COLLTRACE_MAX_DUMP_SIZE", 1);
-  int rankMap[] = {0};
-  comm_->rank = 0;
-  comm_->nRanks = 1;
+  int rankMap[] = {4};
+  comm_->rank = 4;
+  comm_->nRanks = 5;
   comm_->localRank = 0;
   comm_->localRanks = 1;
   comm_->localRankToRank = rankMap;
