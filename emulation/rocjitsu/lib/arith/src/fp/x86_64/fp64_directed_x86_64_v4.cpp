@@ -92,15 +92,35 @@ template <int Rounding> __m512d arithmetic(Fp64 op, __m512d x, __m512d y, __m512
   return _mm512_fmadd_round_pd(x, y, z, Rounding | _MM_FROUND_NO_EXC);
 }
 
-} // namespace
+// Apply fp64_nan_priority to eight lanes.
+__m512d nan_priority(Fp64 op, __m512d value, __m512d x, __m512d y, __m512d z) {
+  auto quiet = _mm512_set1_epi64(INT64_C(0x0008000000000000));
+  auto pick = [&](__m512d result, __m512d source) {
+    return _mm512_mask_mov_pd(
+        result, _mm512_cmp_pd_mask(source, source, _CMP_UNORD_Q),
+        _mm512_castsi512_pd(_mm512_or_si512(_mm512_castpd_si512(source), quiet)));
+  };
+  if (op == Fp64::Fma) {
+    value = pick(value, z);
+    auto zero = _mm512_setzero_pd(), inf = _mm512_set1_pd(__builtin_inf());
+    auto invalid = (_mm512_cmp_pd_mask(x, zero, _CMP_EQ_OQ) &
+                    _mm512_cmp_pd_mask(_mm512_abs_pd(y), inf, _CMP_EQ_OQ)) |
+                   (_mm512_cmp_pd_mask(_mm512_abs_pd(x), inf, _CMP_EQ_OQ) &
+                    _mm512_cmp_pd_mask(y, zero, _CMP_EQ_OQ));
+    value = _mm512_mask_mov_pd(
+        value, invalid, _mm512_castsi512_pd(_mm512_set1_epi64(int64_t(0xfff8000000000000ULL))));
+  }
+  return pick(pick(value, y), x);
+}
 
-void fp64_directed_x86_64_v4(Fp64 op, uint64_t flags, uint32_t exec_mask,
-                             uint32_t instruction_flags, uint32_t *const *d,
-                             const uint32_t *const *a, const uint32_t *const *b,
-                             const uint32_t *const *c) {
+// Evaluate all lanes into result. NanPriority applies nan_priority; otherwise host NaNs are kept,
+// and the return value tells whether any lane produced a NaN.
+template <bool NanPriority>
+bool evaluate(Fp64 op, uint64_t flags, uint32_t instruction_flags, const uint32_t *const *a,
+              const uint32_t *const *b, const uint32_t *const *c, uint32_t (&result)[2][32]) {
   const unsigned rounding = unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24);
   const bool flush = flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
-  uint32_t result[2][32];
+  __mmask8 nan = 0;
   for (int lane = 0; lane < 32; lane += 8) {
     auto x = input(a, lane, instruction_flags, flush);
     auto y = input(b, lane, instruction_flags >> 1, flush);
@@ -117,10 +137,30 @@ void fp64_directed_x86_64_v4(Fp64 op, uint64_t flags, uint32_t exec_mask,
       value = arithmetic<_MM_FROUND_TO_ZERO>(op, x, y, z);
       break;
     }
+    if constexpr (NanPriority) {
+      value = nan_priority(op, value, x, y, z);
+    } else {
+      nan |= _mm512_cmp_pd_mask(value, value, _CMP_UNORD_Q);
+    }
     auto bits = _mm512_castpd_si512(output(value, instruction_flags, flags, rounding));
     _mm256_storeu_si256(reinterpret_cast<__m256i *>(result[0] + lane), _mm512_cvtepi64_epi32(bits));
     _mm256_storeu_si256(reinterpret_cast<__m256i *>(result[1] + lane),
                         _mm512_cvtepi64_epi32(_mm512_srli_epi64(bits, 32)));
+  }
+  return nan != 0;
+}
+
+} // namespace
+
+void fp64_directed_x86_64_v4(Fp64 op, uint64_t flags, uint32_t exec_mask,
+                             uint32_t instruction_flags, uint32_t *const *d,
+                             const uint32_t *const *a, const uint32_t *const *b,
+                             const uint32_t *const *c, bool rdna3) {
+  uint32_t result[2][32];
+  // A NaN source or an invalid operation always yields a NaN. Such results are rare, so gfx12
+  // re-evaluates with NaN priority only when the host produced one.
+  if (evaluate<false>(op, flags, instruction_flags, a, b, c, result) && !rdna3) {
+    evaluate<true>(op, flags, instruction_flags, a, b, c, result);
   }
   // Delay writes until every input has been consumed, including cross-half aliases.
   for (int reg = 0; reg < 2; ++reg) {

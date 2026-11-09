@@ -307,3 +307,21 @@ TEST(FpAddF64, GuestRounding) {
     }
   }
 }
+
+// gfx1201 captures: FP64 ADD returns the first NaN source, quieted, in operand order under every
+// guest rounding mode.
+TEST(FpAddF64, NanPriority) {
+  using rocjitsu::arith::test::check_binary64_rounding;
+  const uint64_t cases[][3] = {
+      {0x7ff0000000000001ULL, 0x7ff8000000000000ULL, 0x7ff8000000000001ULL},
+      {0xfff8000000000000ULL, 0x7ff8000000000000ULL, 0xfff8000000000000ULL},
+      {0x7ff4000012345678ULL, 0x7ff8000000000000ULL, 0x7ffc000012345678ULL},
+      {0x7ff8000000000000ULL, 0x7ff0000000000001ULL, 0x7ff8000000000000ULL},
+      {0xfff8000000000000ULL, 0x7ff0000000000001ULL, 0xfff8000000000000ULL},
+  };
+  for (const auto &sample : cases) {
+    const uint64_t expected[] = {sample[2], sample[2], sample[2], sample[2]};
+    check_binary64_rounding<32>(rj_arith_v_add_f64_w32_gfx12, sample[0], sample[1], expected);
+    check_binary64_rounding<64>(rj_arith_v_add_f64_w64_gfx12, sample[0], sample[1], expected);
+  }
+}

@@ -137,3 +137,86 @@ TEST(FpDivFmasGfx11, SignalingNan) {
   check_rdna3_nan<64, 32>(rj_arith_v_div_fmas_f64_w32);
   check_rdna3_nan<64, 64>(rj_arith_v_div_fmas_f64_w64);
 }
+
+namespace {
+
+// Smallest-normal boundary captures with VCC clear. Tininess is judged after rounding at normal
+// precision: a value that reaches the smallest normal only on the subnormal grid still flushes
+// when MODE flushes outputs. C is the negative subnormal next to the smallest normal; the negative
+// product is 1.25 or 1.75 normal-precision ulps there, or far below one under round-down.
+struct TinyCase {
+  uint64_t a, b, c, flags, expected;
+  bool post_scale = false; // VCC set: the result is scaled by 2^-64 (F32) before rounding.
+};
+
+constexpr uint64_t flush = RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+
+const TinyCase tiny_cases_f32[] = {
+    {0x9a200000U, 0x1a000000U, 0x807fffffU, flush, 0x80000000U},
+    {0x9a200000U, 0x1a000000U, 0x807fffffU, 0, 0x80800000U},
+    {0x9a200000U, 0x1a000000U, 0x807fffffU, flush | RJ_ARITH_FP_ROUND_DOWN, 0x80800000U},
+    {0x9a600000U, 0x1a000000U, 0x807fffffU, flush, 0x80800000U},
+    {0x807fffffU, 0x00000001U, 0x807fffffU, flush, 0x80000000U},
+    {0x807fffffU, 0x00000001U, 0x807fffffU, 0, 0x807fffffU},
+    {0x807fffffU, 0x00000001U, 0x807fffffU, flush | RJ_ARITH_FP_ROUND_DOWN, 0x80000000U},
+    {0x807fffffU, 0x00000001U, 0x807fffffU, RJ_ARITH_FP_ROUND_DOWN, 0x80800000U},
+    // 2^-62 * (1 - 2^-24) scaled to 2^-126 - 2^-150: a tie that rounds up only on the subnormal
+    // grid.
+    {0x20800000U, 0x3f7fffffU, 0, flush, 0, true},
+    {0x20800000U, 0x3f7fffffU, 0, 0, 0x00800000U, true},
+};
+
+const TinyCase tiny_cases_f64[] = {
+    {0x9e54000000000000ULL, 0x1e60000000000000ULL, 0x800fffffffffffffULL, flush,
+     0x8000000000000000ULL},
+    {0x9e54000000000000ULL, 0x1e60000000000000ULL, 0x800fffffffffffffULL, 0, 0x8010000000000000ULL},
+    {0x9e54000000000000ULL, 0x1e60000000000000ULL, 0x800fffffffffffffULL,
+     flush | RJ_ARITH_FP_ROUND_DOWN, 0x8010000000000000ULL},
+    {0x9e5c000000000000ULL, 0x1e60000000000000ULL, 0x800fffffffffffffULL, flush,
+     0x8010000000000000ULL},
+    {0x800fffffffffffffULL, 0x0010000000000000ULL, 0x800fffffffffffffULL, flush,
+     0x8000000000000000ULL},
+    {0x800fffffffffffffULL, 0x0010000000000000ULL, 0x800fffffffffffffULL, 0, 0x800fffffffffffffULL},
+    {0x800fffffffffffffULL, 0x0010000000000000ULL, 0x800fffffffffffffULL,
+     flush | RJ_ARITH_FP_ROUND_DOWN, 0x8000000000000000ULL},
+    {0x800fffffffffffffULL, 0x0010000000000000ULL, 0x800fffffffffffffULL, RJ_ARITH_FP_ROUND_DOWN,
+     0x8010000000000000ULL},
+};
+
+template <int Width, int Lanes, typename Call, typename Cases>
+void check_tiny(Call call, const Cases &cases) {
+  using namespace rocjitsu::arith::test;
+  using Mask = std::conditional_t<Lanes == 32, uint32_t, uint64_t>;
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (const auto &sample : cases) {
+      SCOPED_TRACE(::testing::Message()
+                   << std::hex << cpu << '/' << sample.a << '/' << sample.flags);
+      Registers<8, Lanes> r;
+      for (int lane = 0; lane < Lanes; ++lane) {
+        write_fp(r.v, lane, Width, sample.a);
+        write_fp(r.v + 2, lane, Width, sample.b);
+        write_fp(r.v + 4, lane, Width, sample.c);
+      }
+      ASSERT_EQ(call(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY | sample.flags, ~Mask(0), 0, r.v + 6,
+                     r.v, r.v + 2, r.v + 4, sample.post_scale ? ~Mask(0) : Mask(0), nullptr),
+                RJ_ARITH_SUCCESS);
+      for (int lane = 0; lane < Lanes; ++lane) {
+        EXPECT_EQ(read_fp(r.v + 6, lane, Width), sample.expected) << lane;
+      }
+    }
+  }
+}
+
+} // namespace
+
+// gfx1201 and gfx1100 give these results for both RDNA3 and gfx12 entry points.
+TEST(FpDivFmas, TininessAfterRounding) {
+  check_tiny<32, 32>(rj_arith_v_div_fmas_f32_w32_gfx12, tiny_cases_f32);
+  check_tiny<32, 64>(rj_arith_v_div_fmas_f32_w64_gfx12, tiny_cases_f32);
+  check_tiny<64, 32>(rj_arith_v_div_fmas_f64_w32_gfx12, tiny_cases_f64);
+  check_tiny<64, 64>(rj_arith_v_div_fmas_f64_w64_gfx12, tiny_cases_f64);
+  check_tiny<32, 32>(rj_arith_v_div_fmas_f32_w32, tiny_cases_f32);
+  check_tiny<32, 64>(rj_arith_v_div_fmas_f32_w64, tiny_cases_f32);
+  check_tiny<64, 32>(rj_arith_v_div_fmas_f64_w32, tiny_cases_f64);
+  check_tiny<64, 64>(rj_arith_v_div_fmas_f64_w64, tiny_cases_f64);
+}
