@@ -243,7 +243,10 @@ following lifecycle:
    perspective of other waves in the same workgroup.
 1. **RETIRED** — `s_barrier` has synchronized all waves. The event is fully
    retired and, from the perspective of all threads in all wavefronts, the
-   operation is complete.
+   operation is complete. A workgroup with a single wave has no other wave to
+   race with, so its LDS events are retired as soon as they are wave-complete,
+   without a barrier. Long single-wave kernels therefore do not accumulate
+   completed LDS events.
 
 Generic `FLAT_*` instructions select counter domains from their resolved memory
 requests. Global and scratch requests use the vector-memory counter; LDS
