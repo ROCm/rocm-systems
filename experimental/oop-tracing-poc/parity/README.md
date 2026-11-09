@@ -39,3 +39,29 @@ Expected differences, which the comparison reports but does not fail on:
 - Calls rocprofv3 itself makes through the HIP table inside its wrappers (`hipStreamGetDevice` in
   `hipGraphLaunch`, `hipStreamIsCapturing` in `hipEventRecord`): only present when both run.
 - Correlation ids: both number calls in start order, so the extra calls above shift them.
+
+## Separate runs and overhead (`overhead.sh`)
+
+    overhead.sh <out-dir> <reps> <app> [args...]
+
+Runs the application alone in each mode, median wall time of `<reps>` runs:
+`baseline` (nightly HIP, no probes), `probes-idle` (probes built in, no LTTng session),
+`probes-rec` (LTTng session recording), `rocprofv3` (nightly HIP, `rocprofv3 --hip-trace`).
+
+Call counts, `mt 8 4 200` run separately under each tool: identical per function (40,468 calls),
+except that rocprofv3 records 1 of the 8 threads' first `hipSetDevice` (the probes record all 8:
+the other threads enter while HIP initializes, before rocprofv3 wraps the table) and the
+`__hipUnregisterFatBinary` at exit. The calls rocprofv3 makes itself (`hipStreamGetDevice`,
+`hipStreamIsCapturing`) are absent when it is not in the process.
+
+Wall time added over `baseline`, `mt 8 4 <iters>` (8 threads), median of 5:
+
+| Mode | 10,476 calls | 160,476 calls | per call (slope) | fixed |
+|---|---|---|---|---|
+| probes-idle | +26 ms | +8 ms | ~0 (noise) | within noise |
+| probes-rec | +161 ms | +140 ms | not measurable | ~150 ms |
+| rocprofv3 | +241 ms | +1,060 ms | 5.5 us (wall) | ~180 ms |
+
+The probes' fixed cost is liblttng-ust's registration wait at process start: with
+`LTTNG_UST_REGISTER_TIMEOUT=0` the run takes the baseline time, but the first ~76 events
+(`__hipRegisterFatBinary`, the first `hipSetDevice`) are lost before registration completes.
