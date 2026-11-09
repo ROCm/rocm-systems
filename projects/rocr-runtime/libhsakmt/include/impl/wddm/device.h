@@ -203,7 +203,7 @@ public:
 #endif
 
   bool CreateQueue(WDDMQueue *queue, uint64_t debugger_data = 0);
-  void DestroyQueue(WDDMQueue *queue);
+  bool DestroyQueue(WDDMQueue *queue);
   bool CreateHwQueue(WDDMQueue *queue);
   bool DestroyHwQueue(WDDMQueue *queue);
   bool SubmitToSwQueue(WDDMQueue *queue, uint64_t command_addr,
