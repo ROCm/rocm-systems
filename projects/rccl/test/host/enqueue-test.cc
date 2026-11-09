@@ -27,6 +27,7 @@
 #include "../common/LogCapture.hpp"
 #include "ScopedHook.h"
 #include "fakes/enqueue_test_deps.h"
+#include "fakes/profiler_fakes.h"
 #include "fakes/strongstream_stubs.h"
 
 // alloc.h first, so its macros are visible to be #undef'd before enqueue.cc's
@@ -4478,21 +4479,25 @@ TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx1250Enable1AboveCap_UsesSimple) {
   EXPECT_EQ(ncclDevFuncId_P2p(false), batch->funcId);
 }
 
+// hostStreamPlanTask drives all six profiler plan events; profiler_fakes.cc owns the symbols and
+// fails loud until a test installs a seam. Counting the start-group event is what distinguishes
+// "the callback ran the task" from "the callback returned early".
 static int g_planCallbackEntered;
 
-ncclResult_t ncclProfilerStartGroupEvent(struct ncclKernelPlan*) {
-  g_planCallbackEntered++;
-  return ncclSuccess;
+static void InstallCountingProfilerSeams() {
+  g_planCallbackEntered = 0;
+  g_ncclProfilerStartGroupEvent = [](struct ncclKernelPlan*) {
+    g_planCallbackEntered++;
+    return ncclSuccess;
+  };
+  g_ncclProfilerStopGroupEvent = [](struct ncclKernelPlan*) { return ncclSuccess; };
+  g_ncclProfilerStartTaskEvents = [](struct ncclKernelPlan*) { return ncclSuccess; };
+  g_ncclProfilerStopTaskEvents = [](struct ncclKernelPlan*) { return ncclSuccess; };
+  g_ncclProfilerPostPlanWork = [](struct ncclComm*, struct ncclKernelPlan*) { return ncclSuccess; };
 }
-ncclResult_t ncclProfilerStopGroupEvent(struct ncclKernelPlan*) { return ncclSuccess; }
-ncclResult_t ncclProfilerStartTaskEvents(struct ncclKernelPlan*) { return ncclSuccess; }
-ncclResult_t ncclProfilerStopTaskEvents(struct ncclKernelPlan*) { return ncclSuccess; }
-ncclResult_t ncclProfilerPostPlanWork(struct ncclComm*, struct ncclKernelPlan*) { return ncclSuccess; }
-ncclResult_t ncclProfilerAddPidToProxyOp(struct ncclProxyOp*) { return ncclSuccess; }
-const char* ncclGetErrorString(ncclResult_t) { return "ncclSuccess"; }
 
 TEST_F(EnqueueMicrotest, HostStreamPlanCallback_AbortOrRevokeReturns_DestroyStillRuns) {
-  g_planCallbackEntered = 0;
+  InstallCountingProfilerSeams();
   ncclComm comm{};
   uint32_t abortFlag = 0;
   comm.abortFlag = &abortFlag;

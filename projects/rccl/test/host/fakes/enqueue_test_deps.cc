@@ -13,6 +13,7 @@
 
 #include "fail_loud.h"
 #include "nccl_fakes.h"
+#include "profiler_fakes.h"
 #include "rma/rma.h"
 
 // init.cc owns NCCL_PARAM(P2pDisable). enqueue.cc's addP2pToPlan calls it via
@@ -37,6 +38,7 @@ void ResetEnqueueTestDeps() {
   ResetDevRuntimeFakes();
   ResetGroupFakes();
   ResetMgmtTaskEnqFakes();
+  ResetProfilerFakes();
   ResetProxyFakes();
   ResetRcclWrapFakes();
   ResetRecorderFakes();
