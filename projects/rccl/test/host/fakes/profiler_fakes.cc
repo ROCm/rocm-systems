@@ -11,7 +11,6 @@
 #include <mutex>
 
 #include "comm.h"  // profiler.h is not self-contained
-#include "fail_loud.h"
 #include "profiler.h"
 
 namespace {
@@ -32,23 +31,4 @@ void ResetProfilerFakes() {
 void ncclProfilerProxyTraceDumpIfAny(void* profilerContext) {
   std::lock_guard<std::mutex> lock(g_profilerMutex);
   g_proxyTraceDumps.push_back(profilerContext);
-}
-
-ncclResult_t ncclProfilerStartGroupEvent(struct ncclKernelPlan*) {
-  FailLoudUnfaked("profiler_fakes", "ncclProfilerStartGroupEvent");
-}
-ncclResult_t ncclProfilerStopGroupEvent(struct ncclKernelPlan*) {
-  FailLoudUnfaked("profiler_fakes", "ncclProfilerStopGroupEvent");
-}
-ncclResult_t ncclProfilerStartTaskEvents(struct ncclKernelPlan*) {
-  FailLoudUnfaked("profiler_fakes", "ncclProfilerStartTaskEvents");
-}
-ncclResult_t ncclProfilerStopTaskEvents(struct ncclKernelPlan*) {
-  FailLoudUnfaked("profiler_fakes", "ncclProfilerStopTaskEvents");
-}
-ncclResult_t ncclProfilerPostPlanWork(struct ncclComm*, struct ncclKernelPlan*) {
-  FailLoudUnfaked("profiler_fakes", "ncclProfilerPostPlanWork");
-}
-ncclResult_t ncclProfilerAddPidToProxyOp(struct ncclProxyOp*) {
-  FailLoudUnfaked("profiler_fakes", "ncclProfilerAddPidToProxyOp");
 }

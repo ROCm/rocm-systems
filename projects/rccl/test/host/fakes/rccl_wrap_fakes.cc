@@ -144,10 +144,6 @@ bool rcclWarpSpeedSupported(struct ncclComm*, struct ncclKernelPlan*) {
   ++g_rcclWarpSpeedSupportedCalls;
   return g_rcclWarpSpeedSupported;
 }
-bool rcclWarpSpeedSupported(struct ncclComm*, struct ncclKernelPlan*, struct ncclTaskColl*, int) {
-  ++g_rcclWarpSpeedSupportedCalls;
-  return g_rcclWarpSpeedSupported;
-}
 
 // Identity by default, so an ENABLE_WARP_SPEED=ON build computes the same
 // channel count as an OFF one and the existing topoGetAlgoInfo expectations hold.
