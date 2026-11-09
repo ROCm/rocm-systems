@@ -29,6 +29,7 @@ and GoogleTest are all present.
 import glob
 import logging
 import os
+import re
 import shutil
 import subprocess
 from types import SimpleNamespace
@@ -158,6 +159,33 @@ def _missing_static_prerequisite():
     return None
 
 
+def _run_ir_make(make_args, log_name, artifact):
+    """Run the standalone bindings/ir Makefile and check it produced `artifact`.
+
+    Returns the build log path; raises on failure.
+    """
+    env = os.environ.copy()
+    env.update({"ROCM_PATH": ROCM_PATH})
+    args = [
+        "make", "-C", IR_DIR,
+        *make_args,
+        f"BUILDDIR={RCCL_BUILD}",
+        f"ROCM_PATH={ROCM_PATH}",
+    ]
+    name = os.path.basename(artifact)
+    build_log = os.path.join(LOGDIR, log_name)
+    with open(build_log, "w") as log:
+        log.write("$ " + " ".join(args) + "\n\n")
+        log.flush()
+        proc = subprocess.run(
+            args, env=env, stdout=log, stderr=subprocess.STDOUT,
+            universal_newlines=True,
+        )
+    assert proc.returncode == 0, f"Failed to build {name} (see {build_log})"
+    assert os.path.isfile(artifact), f"{name} not produced at {artifact}"
+    return build_log
+
+
 def _build_bitcode():
     """Emit librccl_device.bc via the standalone bindings/ir Makefile.
 
@@ -165,27 +193,10 @@ def _build_bitcode():
     rebuild: the Makefile reuses the hipify-staged headers an earlier RCCL
     build already produced. Returns the build log path; raises on failure.
     """
-    env = os.environ.copy()
-    env.update({"ROCM_PATH": ROCM_PATH})
-    args = [
-        "make", "-C", IR_DIR,
-        "EMIT_LLVM_IR=1",
-        f"BITCODE_LIB_ARCH={ARCH}",
-        f"BUILDDIR={RCCL_BUILD}",
-        f"ROCM_PATH={ROCM_PATH}",
-        "llvm_ir",
-    ]
-    build_log = os.path.join(LOGDIR, "ir_bitcode_build.log")
-    with open(build_log, "w") as log:
-        proc = subprocess.run(
-            args, env=env, stdout=log, stderr=subprocess.STDOUT,
-            universal_newlines=True,
-        )
-    assert proc.returncode == 0, (
-        f"Failed to build librccl_device.bc (see {build_log})"
+    return _run_ir_make(
+        ["EMIT_LLVM_IR=1", f"BITCODE_LIB_ARCH={ARCH}", "llvm_ir"],
+        "ir_bitcode_build.log", BITCODE,
     )
-    assert os.path.isfile(BITCODE), f"Bitcode not produced at {BITCODE}"
-    return build_log
 
 
 def _build_lto_ir():
@@ -197,30 +208,10 @@ def _build_lto_ir():
 
     Returns the build log path; raises on failure.
     """
-    env = os.environ.copy()
-    env.update({"ROCM_PATH": ROCM_PATH})
-    args = [
-        "make", "-C", IR_DIR,
-        "EMIT_LLVM_IR=0",
-        "NCCL_EMIT_LTO_IR=1",
-        f"LTO_IR_ARCH={ARCH}",
-        f"BUILDDIR={RCCL_BUILD}",
-        f"ROCM_PATH={ROCM_PATH}",
-        "ltoir",
-    ]
-    build_log = os.path.join(LOGDIR, "ir_ltoir_build.log")
-    with open(build_log, "w") as log:
-        log.write("$ " + " ".join(args) + "\n\n")
-        log.flush()
-        proc = subprocess.run(
-            args, env=env, stdout=log, stderr=subprocess.STDOUT,
-            universal_newlines=True,
-        )
-    assert proc.returncode == 0, (
-        f"Failed to build librccl_device.ltoir (see {build_log})"
+    return _run_ir_make(
+        ["EMIT_LLVM_IR=0", "NCCL_EMIT_LTO_IR=1", f"LTO_IR_ARCH={ARCH}", "ltoir"],
+        "ir_ltoir_build.log", LTO_IR,
     )
-    assert os.path.isfile(LTO_IR), f"LTO IR not produced at {LTO_IR}"
-    return build_log
 
 
 def _build_test_binary(device_lib=None, exe=None, log_name="ir_test_build.log"):
@@ -527,6 +518,46 @@ def paths():
         LTO_IR_TEST_EXE=LTO_IR_TEST_EXE,
         LOGDIR=LOGDIR,
     )
+
+
+def _summarize_gtest(proc, log, what):
+    """Translate a GoogleTest binary run into a pytest outcome.
+
+    Reads the captured log so we can tell a genuine pass from a run in which
+    every selected case was SKIPPED (both exit 0).
+    """
+    try:
+        # The GPU runtime can emit non-UTF-8 bytes; don't let them mask the result.
+        with open(log, errors="replace") as fh:
+            text = fh.read()
+    except OSError:
+        text = ""
+
+    if proc.returncode != 0 or "[  FAILED  ]" in text:
+        # Inline the tail too: CI may not archive logs/, leaving only a path.
+        raise AssertionError(
+            f"{what} failed (exit {proc.returncode}), see {log}\n{text[-4000:]}"
+        )
+
+    def _count(pattern):
+        m = re.search(pattern, text)
+        return int(m.group(1)) if m else 0
+
+    passed = _count(r"\[  PASSED  \] (\d+) test")
+    skipped = _count(r"\[  SKIPPED \] (\d+) test")
+
+    # Nothing passed but something skipped -> surface a real pytest SKIP with
+    # the GoogleTest skip reason (the line printed right after ": Skipped").
+    if passed == 0 and skipped > 0:
+        m = re.search(r": Skipped\s*\n([^\[]+)", text)
+        reason = " ".join(m.group(1).split()) if m else "all cases skipped"
+        pytest.skip(f"{what}: {reason} (see {log})")
+
+
+@pytest.fixture(scope="session")
+def summarize_gtest():
+    """Map a GoogleTest run to a pytest outcome (see _summarize_gtest)."""
+    return _summarize_gtest
 
 
 def _make_gtest_runner(binary):

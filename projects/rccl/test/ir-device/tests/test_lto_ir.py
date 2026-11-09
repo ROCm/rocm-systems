@@ -508,7 +508,7 @@ def test_ltoir_macro_requires_bitcode_lib_macro(ir_artifacts, paths, tmp_path):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.ir_device
-def test_lto_ir_links_and_runs(run_lto_ir_gtest):
+def test_lto_ir_links_and_runs(run_lto_ir_gtest, summarize_gtest):
     """Link the .ltoir into the IR_test consumer and run it on a GPU.
 
     Tests 1-6 are static. This one is the only end-to-end evidence that
@@ -519,20 +519,8 @@ def test_lto_ir_links_and_runs(run_lto_ir_gtest):
     the library differs.
 
     Runtime tests needing a live ncclDevComm GTEST_SKIP themselves, exactly
-    as they do on the .bc path, so this asserts on the process exit status
-    rather than on a pass count.
+    as they do on the .bc path. summarize_gtest fails on any failure and
+    reports SKIPPED, not PASSED, if every case skipped.
     """
     proc, log = run_lto_ir_gtest("*", "ir_test_ltoir_run.log")
-    with open(log, errors="replace") as fh:
-        output = fh.read()
-    assert proc.returncode == 0, (
-        f"IR_test linked against librccl_device.ltoir failed "
-        f"(exit {proc.returncode}); see {log}\n{output[-4000:]}"
-    )
-    assert "[  FAILED  ]" not in output, (
-        f"IR_test reported failures against the .ltoir; see {log}\n"
-        + output[-4000:]
-    )
-    assert "[  PASSED  ]" in output, (
-        f"IR_test produced no GoogleTest summary; see {log}\n{output[-4000:]}"
-    )
+    summarize_gtest(proc, log, "IR_test linked against librccl_device.ltoir")
