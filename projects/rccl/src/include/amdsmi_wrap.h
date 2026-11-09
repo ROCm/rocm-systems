@@ -1144,11 +1144,9 @@ ncclResult_t amd_smi_getFabricBandwidth(uint32_t deviceIndex, uint32_t* bandwidt
 /*************************************************************************
  * RAS Diagnostics Queries
  *
- * Used by the GPU checks of the RAS diagnostics (src/ras/diagnostics_gpu.cc).
- * They load amd_smi on first use, whatever RCCL_USE_AMD_SMI_LIB selects for
- * topology discovery, and identify a GPU by its PCI bus ID in the int64 form
- * of busIdToInt64(). Every query returns ncclSystemError when amd_smi or the
- * value is unavailable; nothing is logged above INFO level.
+ * Used by src/ras/diagnostics_gpu.cc. They load amd_smi on first use,
+ * independent of RCCL_USE_AMD_SMI_LIB, take busIdToInt64() bus IDs, and
+ * return ncclSystemError when a value is unavailable.
  ************************************************************************/
 
 struct amdsmiDiagEccCounts {
@@ -1163,10 +1161,7 @@ struct amdsmiDiagXgmiLinks {
 };
 
 /**
- * @brief Load and initialize amd_smi for the queries below, once per process
- *
- * The queries do it on first use; calling this up front keeps the first
- * query from paying the library load.
+ * @brief Load amd_smi up front; the queries otherwise load it on first use
  */
 ncclResult_t amd_smi_diagInit();
 

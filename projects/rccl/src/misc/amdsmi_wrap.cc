@@ -145,11 +145,9 @@ bool fabricUsedSysfs = false;
 std::mutex amdSmiInitLock;
 ncclResult_t amdSmiInitResult = ncclSuccess;
 bool amdSmiInitCalled = false;
-// Set by whichever of the RCCL_USE_AMD_SMI_LIB path and the RAS diagnostics called amdsmi_init, so the library is
-// initialized once and amd_smi_shutdown undoes it through that path's amdsmi_shut_down.
+// amdsmi_init ran, from either the RCCL_USE_AMD_SMI_LIB path or the RAS diagnostics.
 bool amdSmiLibInitialized = false;
 amdsmi_status_t (*amdSmiLibShutDown)() = nullptr;
-// Cleared by amd_smi_shutdown, so the RAS diagnostics initialize the library again on their next query.
 bool amdSmiDiagLoadCalled = false;
 
 // Major version of the loaded amd_smi, as it reports itself. Selects the telemetry
@@ -1302,8 +1300,7 @@ ncclResult_t amd_smi_fabricTelemetryRelease(uint32_t deviceIndex) {
 
 #if AMDSMI_DIRECT
 namespace {
-// Separate from the pfn_ table above: that table belongs to the RCCL_USE_AMD_SMI_LIB path, which loads it only
-// when its own amdsmi_init pointer is still null.
+// Separate from pfn_ above, which only the RCCL_USE_AMD_SMI_LIB path loads.
 struct AmdSmiDiagFns {
   amdsmi_status_t (*init)(uint64_t initFlags);
   amdsmi_status_t (*shutDown)();
@@ -1322,7 +1319,7 @@ AmdSmiDiagFns amdSmiDiag = {};
 ncclResult_t amdSmiDiagLoadResult = ncclSystemError;
 } // namespace
 
-// A missing symbol (logged once at load) or a failed query makes the value unavailable; it is not an error of the job.
+// A missing symbol or a failed query only makes the value unavailable.
 #define AMDSMIDIAG(fn, ...) \
   do { \
     if (amdSmiDiag.fn == nullptr) return ncclSystemError; \
@@ -1367,7 +1364,7 @@ static ncclResult_t amd_smi_diagLoadImpl() {
     if (*sym.ppfn == nullptr) INFO(NCCL_RAS, "RAS diagnostics: %s not found in %s", sym.name, RCCL_AMDSMI_LIBNAME);
   }
 
-  // The RCCL_USE_AMD_SMI_LIB path may have initialized the library already; amdsmi_init is not called twice.
+  // The RCCL_USE_AMD_SMI_LIB path may have called amdsmi_init already.
   if (!amdSmiLibInitialized) {
     AMDSMIDIAG(init, AMDSMI_INIT_AMD_GPUS);
     amdSmiLibInitialized = true;
@@ -1407,7 +1404,7 @@ ncclResult_t amd_smi_diagGpuCount(uint32_t* count) {
   AMDSMIDIAG(getSocketHandles, &nSockets, nullptr);
   std::vector<amdsmi_socket_handle> sockets(nSockets);
   AMDSMIDIAG(getSocketHandles, &nSockets, sockets.data());
-  // The second call may report a different count than the first; only the handles it wrote are read.
+  // The count may change between the two calls.
   sockets.resize(std::min<size_t>(nSockets, sockets.size()));
 
   uint32_t nGpus = 0;
@@ -1440,8 +1437,7 @@ ncclResult_t amd_smi_diagGpuModel(int64_t busId, char* model, size_t len) {
 
 ncclResult_t amd_smi_diagDriverVersion(int64_t busId, char* version, size_t len) {
   amdsmi_processor_handle handle;
-  // amdsmi_driver_info_t has grown between AMD SMI releases (3 to 7 strings), and the loaded library may be newer
-  // than the header RCCL was built with. Its first field, driver_version, is read from a buffer with room to spare.
+  // amdsmi_driver_info_t grew across AMD SMI releases; leave room for a library newer than our header.
   struct {
     amdsmi_driver_info_t info;
     char spare[16 * AMDSMI_MAX_STRING_LENGTH];
@@ -1450,7 +1446,7 @@ ncclResult_t amd_smi_diagDriverVersion(int64_t busId, char* version, size_t len)
   AMDSMIDIAG(getGpuDriverInfo, handle, &buf.info);
   char* driverVersion = buf.info.driver_version;
   driverVersion[sizeof(buf.info.driver_version) - 1] = '\0';
-  // Without /sys/module/amdgpu/version, as with an in-tree amdgpu, AMD SMI reports "N/A".
+  // AMD SMI reports "N/A" without /sys/module/amdgpu/version (in-tree amdgpu).
   if (driverVersion[0] == '\0' || strcmp(driverVersion, "N/A") == 0) return ncclSystemError;
   snprintf(version, len, "%s", driverVersion);
   return ncclSuccess;
