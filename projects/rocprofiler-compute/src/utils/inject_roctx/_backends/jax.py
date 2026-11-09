@@ -3,9 +3,9 @@
 
 """ROCTX instrumentation backend for JAX.
 
-Resolves jax.jit, jax.pmap, and jax.extend.core.Primitive handles.
-Wraps jax.jit compiled __call__, the jax.pmap factory, and
-Primitive.bind_with_trace with ROCTX ranges.
+Resolves jax.jit, jax.pmap, jax.shard_map, and jax.extend.core.Primitive
+handles. Wraps jax.jit compiled __call__, the jax.pmap and jax.shard_map
+factories, and Primitive.bind_with_trace with ROCTX ranges.
 """
 
 import importlib.util
@@ -27,6 +27,8 @@ class _JaxState:
         self.jit: Any = None
         self.pmap: Any = None
         self.pmap_factory: Any = None
+        self.shard_map: Any = None
+        self.shard_map_factory: Any = None
         self.primitive: Any = None
         self.compiled_call: Any = None
         self.bind_with_trace: Any = None
@@ -40,6 +42,7 @@ def patch_jax_entry_points() -> None:
     """Wrap JAX compiled-call and primitive-dispatch entry points."""
     _wrap_jit_compiled_call()
     _wrap_pmap_factory()
+    _wrap_shard_map_factory()
     _wrap_primitive_bind_with_trace()
 
 
@@ -54,6 +57,7 @@ def _resolve_jax() -> bool:
 
     _STATE.jit = getattr(jax, "jit", None)
     _STATE.pmap = getattr(jax, "pmap", None)
+    _STATE.shard_map = getattr(jax, "shard_map", None)
     try:
         import jax.extend.core as jax_extend_core
 
@@ -84,7 +88,7 @@ def _identity(value: object) -> object:
 
 
 def _compiled_function_name(compiled: object) -> str:
-    """Name for a jax.jit or jax.pmap marker from the compiled callable."""
+    """Name for a jax.jit, jax.pmap, or jax.shard_map marker from the callable."""
     name = getattr(compiled, "__name__", None)
     if isinstance(name, str) and name:
         return name
@@ -147,6 +151,23 @@ def _roctx_pmap_factory(fun: object, *args: Any, **kwargs: Any) -> object:
 
 
 _roctx_pmap_factory._roctx_wrapped = True
+
+
+def _roctx_shard_map_call(compiled: object, *args: Any, **kwargs: Any) -> object:
+    """Run the shard_map result under jax.shard_map.<fn>, skipping a nested range."""
+    marker = f"jax.shard_map.{_compiled_function_name(compiled)}"
+    return _run_with_jax_range(marker, compiled, *args, **kwargs)
+
+
+def _roctx_shard_map_factory(fun: object, *args: Any, **kwargs: Any) -> object:
+    """Call original jax.shard_map and return a marked callable that forwards attrs."""
+    compiled = _STATE.shard_map_factory(fun, *args, **kwargs)
+    if getattr(compiled, "_roctx_wrapped", False):
+        return compiled
+    return _RoctxShardMapCallable(compiled)
+
+
+_roctx_shard_map_factory._roctx_wrapped = True
 
 
 def _roctx_bind_with_trace(primitive: object, *args: Any, **kwargs: Any) -> object:
@@ -215,6 +236,34 @@ def _wrap_pmap_factory() -> None:
     )
 
 
+def _wrap_shard_map_factory() -> None:
+    """Replace jax.shard_map with _roctx_shard_map_factory."""
+    shard_map = _STATE.shard_map
+    if shard_map is None:
+        console_warning(
+            "ml api trace",
+            "jax.shard_map is not available; skipping shard_map instrumentation.",
+        )
+        return
+    if getattr(shard_map, "_roctx_wrapped", False):
+        return
+    try:
+        import jax
+
+        _STATE.shard_map_factory = shard_map
+        jax.shard_map = _roctx_shard_map_factory
+    except Exception as exc:
+        console_warning(
+            "ml api trace",
+            f"Could not patch jax.shard_map: {exc}",
+        )
+        return
+    console_log(
+        "ml api trace",
+        "Wrapped jax.shard_map compiled calls with ROCTX markers",
+    )
+
+
 def _wrap_primitive_bind_with_trace() -> None:
     """Replace Primitive.bind_with_trace with _roctx_bind_with_trace."""
     primitive = _STATE.primitive
@@ -268,6 +317,15 @@ class _RoctxPmapCallable:
         compiled = object.__getattribute__(self, "_compiled")
         names.update(dir(compiled))
         return sorted(names)
+
+
+class _RoctxShardMapCallable(_RoctxPmapCallable):
+    """shard_map result that opens a ROCTX range, then forwards attributes."""
+
+    __slots__ = ()
+
+    def __call__(self, *args: Any, **kwargs: Any) -> object:
+        return _roctx_shard_map_call(self._compiled, *args, **kwargs)
 
 
 class JaxBackend:
