@@ -565,6 +565,13 @@ add_test(
 )
 
 add_test(
+    NAME test_gpu_identity
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_gpu_identity.xml
+        ${COV_OPTION} tests/unit/utils/test_gpu_identity.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
     NAME test_noise_clamper
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_noise_clamper.xml
@@ -1049,6 +1056,44 @@ add_test(
         tests/unit/rocprof_compute_soc/test_soc_base.py ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_sdk_config
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_sdk_config.xml
+        ${COV_OPTION} tests/unit/rocprof_compute_soc/test_sdk_config.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_soc_gfx1201
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_soc_gfx1201.xml
+        ${COV_OPTION} tests/unit/rocprof_compute_soc/test_soc_gfx1201.py
+        ${WORKING_DIR_OPTION}
+)
+
+# -----------------------------------
+# Configuration tooling unit tests
+# -----------------------------------
+
+add_test(
+    NAME test_metric_description_manager
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_metric_description_manager.xml ${COV_OPTION}
+        tests/unit/config_management/test_metric_description_manager.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_verify_against_config_template
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_verify_against_config_template.xml ${COV_OPTION}
+        tests/unit/config_management/test_verify_against_config_template.py
+        ${WORKING_DIR_OPTION}
+)
+
 # -----------------------------------
 # TTY table rendering unit tests
 # -----------------------------------
@@ -1165,6 +1210,7 @@ if(${ENABLE_COVERAGE})
         test_utils_profile
         test_common
         test_amdsmi_interface
+        test_gpu_identity
         test_noise_clamper
         test_benchmark_base
         test_analysis_cli
@@ -1210,6 +1256,10 @@ if(${ENABLE_COVERAGE})
         test_rocprof_compute_base
         test_rocprofv3_avail_interface
         test_soc_base
+        test_sdk_config
+        test_soc_gfx1201
+        test_metric_description_manager
+        test_verify_against_config_template
         test_tty
         test_file_io
         test_utils_profile_csv
@@ -1465,6 +1515,17 @@ if(INSTALL_TESTS)
         FILES_MATCHING
         PATTERN "*.py"
         PATTERN "__pycache__" EXCLUDE
+    )
+    # Keep tooling unit tests runnable from the installed pytest tools path.
+    install(
+        FILES
+            tools/config_management/__init__.py
+            tools/config_management/metric_description_manager.py
+            tools/config_management/parse_config_template.py
+            tools/config_management/utils_ruamel.py
+            tools/config_management/verify_against_config_template.py
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/tools/config_management
+        COMPONENT tests
     )
     # The conjugate_gradient driver resolves its kernel libraries relative to
     # its own path, so the whole directory installs as a unit.

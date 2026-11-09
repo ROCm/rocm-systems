@@ -1,0 +1,39 @@
+# gfx1201 (RDNA 4, Navi 48) -- Central Hub (CH)
+# Metric bodies are carried from the gfx1201 metrics port and placed in the
+# gfx12 panel template. Tables with no carried metric are empty.
+Panel Config:
+  id: 1500
+  alias: ch
+  title: Central Hub (CH)
+  data source:
+    - metric_table:
+        id: 1501
+        title: CHA Utilization
+        header: &id001
+          metric: Metric
+          avg: Avg
+          min: Min
+          max: Max
+          unit: Unit
+        metric: {}
+    - metric_table:
+        id: 1502
+        title: CHA Arbitration
+        header: *id001
+        metric: {}
+    - metric_table:
+        id: 1503
+        title: CHC Utilization
+        header: *id001
+        metric: {}
+    - metric_table:
+        id: 1504
+        title: CHC Requests
+        header: *id001
+        metric: {}
+    - metric_table:
+        id: 1505
+        title: CHC Bandwidth and Latency
+        header: *id001
+        metric: {}
+  metrics_description: {}

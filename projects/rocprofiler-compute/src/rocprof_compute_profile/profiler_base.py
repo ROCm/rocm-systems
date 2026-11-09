@@ -29,6 +29,7 @@ from utils.utils_common import (
     format_time,
     get_job_rank_and_size,
     is_only_pc_sampling,
+    parse_pmc_perf,
     print_status,
 )
 from utils.utils_exceptions import (
@@ -422,13 +423,22 @@ class RocProfCompute_Base:
                 )
         console_debug(f"Sending profiler options to run_prof: {options}")
 
-        run_prof(
+        collected_counters = run_prof(
             fnames=str_fnames,
             profiler_options=options,
             workload_dir=args.output_directory,
             ml_api_trace_enabled=args.trace_ml_api is not None,
             retain_rocpd_output=args.retain_rocpd_output,
         )
+        if collected_counters:
+            input_files = str_fnames if isinstance(str_fnames, list) else [str_fnames]
+            # Multiplexed output has no input-pass ID. A populated sibling pass
+            # cannot establish whether a missing counter's own pass ran kernels.
+            if len(input_files) == 1:
+                requested_counters = set(parse_pmc_perf(input_files[0]))
+                self._soc.validate_counter_collection(
+                    requested_counters, collected_counters
+                )
 
         end_time = time.time()
         duration = end_time - start_time

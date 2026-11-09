@@ -120,6 +120,32 @@ def test_layout_shows_every_panel_metric_and_no_other(path, arch):
     assert not panel - shown, f"missing from {path.name}: {sorted(panel - shown)}"
 
 
+def test_gfx1201_memory_demand_belongs_to_l2():
+    layout = Layouts.for_arch("gfx1201")
+    blocks = {block.id: block for block in layout.blocks()}
+    # Memory-Destined Read/Write Requests and Read/Write Bandwidth
+    memory_demand = {"3.8.0", "3.8.1", "3.8.2", "3.8.3"}
+    assert memory_demand <= {item.metric_id for item in blocks["l2"].items}
+    # GDDR6 Read/Write Bandwidth
+    assert {item.metric_id for item in blocks["gddr6"].items} == {"3.10.1", "3.10.2"}
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["Infinity Cache Hit Rate", "GDDR6 Read Bandwidth", "GDDR6 Write Bandwidth"],
+)
+def test_gfx1201_unmeasured_memory_levels_are_explicitly_unavailable(name):
+    panel = PanelConfigs.for_arch("gfx1201")
+    metrics = {
+        metric_name: metric
+        for source in panel["data source"]
+        for table in source.values()
+        for metric_name, metric in table["metric"].items()
+    }
+    assert metrics[name]["value"] == "None"
+    assert "Not collected" in panel["metrics_description"][name]
+
+
 @pytest.mark.parametrize(("path", "arch"), LAYOUT_ARCHS, ids=LAYOUT_ARCH_IDS)
 def test_every_shown_unit_has_a_display_rule(path, arch):
     units = panel_units(PanelConfigs.for_arch(arch))

@@ -1,0 +1,151 @@
+# gfx1201 (RDNA 4, Navi 48) -- GL2 Cache
+# Metric bodies are carried from the gfx1201 metrics port and placed in the
+# gfx12 panel template. Tables with no carried metric are empty.
+Panel Config:
+  id: 1300
+  alias: gl2
+  title: GL2 Cache
+  data source:
+    - metric_table:
+        id: 1301
+        title: GL2A Processing
+        header: &id001
+          metric: Metric
+          avg: Avg
+          min: Min
+          max: Max
+          unit: Unit
+        metric: {}
+    - metric_table:
+        id: 1310
+        title: GL2C Utilization
+        header: *id001
+        metric:
+          Total Requests:
+            avg: SUM(GL2C_REQ_sum) / SUM($denom)
+            min: MIN(GL2C_REQ_sum / $denom)
+            max: MAX(GL2C_REQ_sum / $denom)
+            unit: (Count + $normUnit)
+          Read Requests:
+            avg: SUM(GL2C_READ_sum) / SUM($denom)
+            min: MIN(GL2C_READ_sum / $denom)
+            max: MAX(GL2C_READ_sum / $denom)
+            unit: (Count + $normUnit)
+          Write Requests:
+            avg: SUM(GL2C_WRITE_sum) / SUM($denom)
+            min: MIN(GL2C_WRITE_sum / $denom)
+            max: MAX(GL2C_WRITE_sum / $denom)
+            unit: (Count + $normUnit)
+          Atomic Requests:
+            avg: SUM(GL2C_ATOMIC_sum) / SUM($denom)
+            min: MIN(GL2C_ATOMIC_sum / $denom)
+            max: MAX(GL2C_ATOMIC_sum / $denom)
+            unit: (Count + $normUnit)
+          Memory-Destined Read Requests:
+            avg: SUM(GL2C_EA_RDREQ_DRAM_sum) / SUM($denom)
+            min: MIN(GL2C_EA_RDREQ_DRAM_sum / $denom)
+            max: MAX(GL2C_EA_RDREQ_DRAM_sum / $denom)
+            unit: (Count + $normUnit)
+          Memory-Destined Write Requests:
+            avg: SUM(GL2C_EA_WRREQ_DRAM_sum) / SUM($denom)
+            min: MIN(GL2C_EA_WRREQ_DRAM_sum / $denom)
+            max: MAX(GL2C_EA_WRREQ_DRAM_sum / $denom)
+            unit: (Count + $normUnit)
+    - metric_table:
+        id: 1311
+        title: GL2C Cache Lookup
+        header: *id001
+        metric:
+          GL2 Cache Hit Rate:
+            avg: 100 * SUM(GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum)
+            min: MIN(100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum))
+            max: MAX(100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum))
+            unit: Percent
+          GL2 Cache Hits:
+            avg: SUM(GL2C_HIT_sum) / SUM($denom)
+            min: MIN(GL2C_HIT_sum / $denom)
+            max: MAX(GL2C_HIT_sum / $denom)
+            unit: (Count + $normUnit)
+          GL2 Cache Misses:
+            avg: SUM(GL2C_MISS_sum) / SUM($denom)
+            min: MIN(GL2C_MISS_sum / $denom)
+            max: MAX(GL2C_MISS_sum / $denom)
+            unit: (Count + $normUnit)
+    - metric_table:
+        id: 1302
+        title: GL2C-EA Stalls
+        header: *id001
+        metric: {}
+    - metric_table:
+        id: 1303
+        title: GL2C-EA Interface - Latencies
+        header: *id001
+        metric: {}
+    - metric_table:
+        id: 1304
+        title: GL2C Request Bandwidth
+        header: *id001
+        metric:
+          GL2 Cache Read BW:
+            avg: SUM(GL2C_READ_32_REQ_sum * 32 + GL2C_READ_64_REQ_sum * 64 + GL2C_READ_128_REQ_sum * 128 + GL2C_READ_256_REQ_sum * 256) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
+            min: MIN((GL2C_READ_32_REQ_sum * 32 + GL2C_READ_64_REQ_sum * 64 + GL2C_READ_128_REQ_sum * 128 + GL2C_READ_256_REQ_sum * 256) / ((End_Timestamp - Start_Timestamp) / 1e9))
+            max: MAX((GL2C_READ_32_REQ_sum * 32 + GL2C_READ_64_REQ_sum * 64 + GL2C_READ_128_REQ_sum * 128 + GL2C_READ_256_REQ_sum * 256) / ((End_Timestamp - Start_Timestamp) / 1e9))
+            unit: Bytes/s
+          GL2 Cache Write BW:
+            avg: SUM(GL2C_WRITE_32_REQ_sum * 32 + GL2C_WRITE_64_REQ_sum * 64 + GL2C_WRITE_128_REQ_sum * 128 + GL2C_WRITE_256_REQ_sum * 256) / SUM((End_Timestamp - Start_Timestamp) / 1e9)
+            min: MIN((GL2C_WRITE_32_REQ_sum * 32 + GL2C_WRITE_64_REQ_sum * 64 + GL2C_WRITE_128_REQ_sum * 128 + GL2C_WRITE_256_REQ_sum * 256) / ((End_Timestamp - Start_Timestamp) / 1e9))
+            max: MAX((GL2C_WRITE_32_REQ_sum * 32 + GL2C_WRITE_64_REQ_sum * 64 + GL2C_WRITE_128_REQ_sum * 128 + GL2C_WRITE_256_REQ_sum * 256) / ((End_Timestamp - Start_Timestamp) / 1e9))
+            unit: Bytes/s
+    - metric_table:
+        id: 1305
+        title: GL2C-EA Interface - Host CPU Bandwidth
+        header: *id001
+        metric: {}
+    - metric_table:
+        id: 1306
+        title: GL2C-EA Interface - PCIe Bandwidth
+        header: *id001
+        metric: {}
+    - metric_table:
+        id: 1307
+        title: GL2C-EA Interface - Remote Node Bandwidth
+        header: *id001
+        metric: {}
+    - metric_table:
+        id: 1308
+        title: GL2C-EA Interface - Remote Memory Bandwidth (Same Node)
+        header: *id001
+        metric: {}
+  metrics_description:
+    Total Requests: >-
+      L2 requests, normalized by the chosen unit.
+    Read Requests: >-
+      L2 read requests, normalized by the chosen unit.
+    Write Requests: >-
+      L2 write requests, normalized by the chosen unit.
+    Atomic Requests: >-
+      L2 atomic requests, normalized by the chosen unit.
+    Memory-Destined Read Requests: >-
+      L2 read requests over EA destined for memory. Infinity Cache can serve
+      these requests before they reach GDDR6.
+    Memory-Destined Write Requests: >-
+      L2 write requests over EA destined for memory. Infinity Cache can absorb
+      these requests before they reach GDDR6.
+    GL2 Cache Hit Rate: >-
+      Percentage of L2 lookups that hit.
+    GL2 Cache Hits: >-
+      L2 lookups that hit, normalized by the chosen unit.
+    GL2 Cache Misses: >-
+      L2 lookups that miss, normalized by the chosen unit.
+    GL2 Cache Read BW: >-
+      Size-weighted uncompressed read requests measured at GL2 output FIFOs,
+      using the 32, 64, 128, and 256-byte request categories. This request rate
+      excludes the separate compressed-read categories and does not measure
+      all L2 traffic or physical GDDR6 transfers. Complete compression coverage
+      and request-size normalization require Navi48 qualification.
+    GL2 Cache Write BW: >-
+      Size-weighted write requests measured at GL2 output FIFOs, including
+      recompressed writes, using the 32, 64, 128, and 256-byte request categories.
+      This request rate does not measure all L2 traffic or physical GDDR6
+      transfers. Overlap with the separate compressed-write categories and
+      request-size normalization require Navi48 qualification.

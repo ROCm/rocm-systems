@@ -26,9 +26,11 @@ rocprofiler-compute/
 │       ├── gfx942/
 │       ├── gfx950/
 │       ├── gfx115x/                     # RDNA 3.5 shared analysis configs
+│       ├── gfx1201/                     # Navi48 RDNA4 analysis configs
 │       ├── gfx1250/
 │       ├── gfx9_config_template.yaml    # CDNA (gfx9) panel contract
 │       ├── gfx11_config_template.yaml   # RDNA 3.5 (gfx115*) panel contract
+│       ├── gfx1201_config_template.yaml # Navi48 panel contract
 │       └── gfx12_config_template.yaml   # gfx12xx panel contract
 │
 └── tools/config_management/
@@ -52,6 +54,12 @@ analysis_configs/<arch>/*.yaml
 ```
 - Must conform strictly to the template schema
 - Are edited in-place using ruamel.yaml round-trip mode
+
+Automatic template selection first uses `<arch>_config_template.yaml` when
+present, then the gfx9, gfx11, or gfx12 family template. This lets Navi48 use
+its own panel contract while gfx1250 retains the gfx12 contract. An explicit
+`--gfx9-template`, `--gfx11-template`, or `--gfx12-template` option overrides
+automatic selection for all architectures in that family, including gfx1201.
 
 ### Hash Database
 
@@ -180,7 +188,7 @@ Panel YAMLs (src/) → Per-Arch YAMLs (tools/) → Docs YAMLs (docs/) → Sphinx
 **Files:**
 ```bash
 tools/per_arch_metric_definitions/
-  ├── gfx{908,90a,940,941,942,950,115x,1250}_metrics_description.yaml   # plain + rst + unit
+  ├── gfx{908,90a,940,941,942,950,115x,1201,1250}_metrics_description.yaml   # plain + rst + unit
 
 docs/data/metrics/
   └── <arch>_metrics.yaml                                  # per-arch rst + unit (generated)
@@ -199,3 +207,11 @@ python tools/config_management/metric_description_manager.py --generate-docs --d
 ```
 
 **Manual RST edits:** Edit per-arch YAMLs directly. The framework preserves an edit when its `rst` differs from `plain`.
+
+Earlier or imported gfx1201 per-architecture description files can contain
+the sections `GL2C-EA Interface - HBM Bandwidth` or `GL2C Cache Bandwidth`.
+During `--sync-arch gfx1201` or `--sync-all`, the manager merges those sections
+into `GL2C Request Bandwidth`, preserving authored RST. Authored RST in the
+current section takes precedence, followed by the prior cache section and then
+the HBM section. This compatibility path applies to those description artifacts;
+it does not rename workload counters or affect gfx1250's HBM-labelled section.

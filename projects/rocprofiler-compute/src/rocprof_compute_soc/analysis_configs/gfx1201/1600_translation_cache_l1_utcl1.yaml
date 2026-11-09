@@ -1,0 +1,19 @@
+# gfx1201 (RDNA 4, Navi 48) -- UTCL1 (Translation Cache L1)
+# Metric bodies are carried from the gfx1201 metrics port and placed in the
+# gfx12 panel template. Tables with no carried metric are empty.
+Panel Config:
+  id: 1600
+  alias: utcl1
+  title: UTCL1 (Translation Cache L1)
+  data source:
+    - metric_table:
+        id: 1601
+        title: UTCL1 Metrics
+        header:
+          metric: Metric
+          avg: Avg
+          min: Min
+          max: Max
+          unit: Unit
+        metric: {}
+  metrics_description: {}

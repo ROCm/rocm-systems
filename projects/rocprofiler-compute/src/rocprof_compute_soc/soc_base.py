@@ -743,6 +743,13 @@ class OmniSoC_Base:
     # ----------------------------------------------------
     # Required methods to be implemented by child classes
     # ----------------------------------------------------
+    def validate_counter_collection(
+        self,
+        requested: Set[str],  # noqa: UP006
+        collected: Set[str],  # noqa: UP006
+    ) -> None:
+        """Inspect one pass's counter inventory without rereading profiling output."""
+
     @abstractmethod
     def profiling_setup(self) -> Optional[List[str]]:
         """Perform any SoC-specific setup prior to profiling."""

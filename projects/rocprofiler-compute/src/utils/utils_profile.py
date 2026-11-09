@@ -11,8 +11,9 @@ import shlex
 import shutil
 import time
 from contextlib import contextmanager
+from functools import partial
 from pathlib import Path
-from typing import Any, Dict, Generator, List, Optional, Tuple, Union, cast
+from typing import Any, Dict, Generator, List, Optional, Set, Tuple, Union, cast
 
 import config
 import utils.utils_profile_csv as csv_ops
@@ -178,7 +179,8 @@ def run_prof(
     workload_dir: str,
     ml_api_trace_enabled: bool = False,
     retain_rocpd_output: bool = False,
-) -> None:
+) -> Set[str]:
+    """Collect a pass and return the counter names observed while writing its rows."""
     multiple_files = isinstance(fnames, list)
     if multiple_files and (
         (
@@ -193,7 +195,7 @@ def run_prof(
         console_error(
             "Multiple pmc files detected but ROCPROF_ITERATION_MULTIPLEXING is not set."
         )
-        return
+        return set()
 
     fpath = Path(fnames[0]) if multiple_files else Path(fnames)
     fbase = fpath.stem
@@ -218,7 +220,7 @@ def run_prof(
                 "Multiple pmc files detected but rocprofv3 does not "
                 "support multiple input files."
             )
-            return
+            return set()
         default_options = ["-i", fnames]
         options = default_options + cast(List[str], profiler_options)
         options = ["-A", "absolute"] + options
@@ -397,11 +399,17 @@ def run_prof(
 
     # Subprocess succeeded but may have dispatched zero GPU kernels,
     # in which case the CSV is missing or has no data rows.
+    collected_counters: Set[str] = set()
     try:
         rows_written = csv_ops.stream_csv_to_file(
             str(counter_csv),
             str(results_csv),
-            transform=lambda row: kernel_ids.apply(dispatch_ids.apply(row)),
+            transform=partial(
+                _relabel_counter_row,
+                dispatch_ids=dispatch_ids,
+                kernel_ids=kernel_ids,
+                collected_counters=collected_counters,
+            ),
             drop_columns=["PID"],
         )
     except (FileNotFoundError, ValueError):
@@ -414,7 +422,7 @@ def run_prof(
             "The workload may not have dispatched any GPU kernels."
         )
         shutil.rmtree(str(out_dir), ignore_errors=True)
-        return
+        return set()
     if ml_api_trace_enabled:
         # results_*.csv already holds the relabeled counters the ML API trace
         # path needs; copy it and the marker trace to the workload dir.
@@ -431,6 +439,7 @@ def run_prof(
             console_warning(f"Retaining large raw rocpd database: {dest}")
     # Remove temp directory
     shutil.rmtree(str(out_dir), ignore_errors=True)
+    return collected_counters
 
 
 @demarcate
@@ -502,3 +511,16 @@ def save_ml_api_trace_inputs(
     )
     console_log("Counter Collection: ", str(dst_counter))
     console_log("Marker API Trace: ", str(dst_marker))
+
+
+def _relabel_counter_row(
+    row: Dict[str, Any],
+    dispatch_ids: csv_ops.GroupIdAssigner,
+    kernel_ids: csv_ops.GroupIdAssigner,
+    collected_counters: Set[str],
+) -> Dict[str, Any]:
+    """Record each counter name while applying the shared dispatch/kernel labels."""
+    counter_name = row.get("Counter_Name")
+    if counter_name:
+        collected_counters.add(counter_name)
+    return kernel_ids.apply(dispatch_ids.apply(row))

@@ -13,9 +13,10 @@ import os
 import sys
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
-from utils.logger import console_debug, console_error
+from utils.gpu_identity import GpuIdentity, match_gpu_identity
+from utils.logger import console_debug, console_error, console_warning
 from utils.utils_common import resolve_rocm_library_path
 
 LIBRARY_NAME = "librocprofv3-list-avail.so"
@@ -49,17 +50,78 @@ def get_pc_sample_configs(
     return configs
 
 
-def get_counters(sdk_tool_path: Optional[str]) -> Dict[str, Any]:
+def get_counters(sdk_tool_path: Optional[str]) -> Dict[int, List[Any]]:
     """Return the avail module's per-agent counter listing."""
-    # Load through ctypes first so the beta gate is applied before the avail
-    # module dlopens the same file and settles what the library reports.
-    _load_library(sdk_tool_path)
-    if _library_path is None:
-        console_error(f"Failed to locate {LIBRARY_NAME}.")
+    return _load_avail_module(sdk_tool_path).get_counters()
 
-    avail = _import_avail_module(sdk_tool_path)
-    avail.loadLibrary.libname = _library_path
-    return avail.get_counters()
+
+def query_agent_info_map(sdk_tool_path: Optional[str]) -> Dict[int, Dict[str, Any]]:
+    """Return GPU identity metadata keyed by the same opaque agent handles."""
+    return _agent_info_map(_load_avail_module(sdk_tool_path))
+
+
+def query_supported_counter_names(
+    sdk_tool_path: Optional[str],
+    gpu_arch: Optional[str],
+    gpu_chip_id: Optional[str],
+    gpu_node_id: Optional[int] = None,
+    gpu_bdf_id: Optional[int] = None,
+    gpu_uuid: Optional[str] = None,
+) -> Optional[Set[str]]:
+    """Query counter names for the selected GPU, normalizing SDK records."""
+    avail = _load_avail_module(sdk_tool_path)
+    counters = avail.get_counters()
+    agents = _agent_info_map(avail)
+    return supported_counter_names_for_gpu(
+        counters, agents, gpu_arch, gpu_chip_id, gpu_node_id, gpu_bdf_id, gpu_uuid
+    )
+
+
+def supported_counter_names_for_gpu(
+    counters_by_agent: Dict[int, List[Any]],
+    agent_info_by_handle: Dict[int, Dict[str, Any]],
+    gpu_arch: Optional[str],
+    gpu_chip_id: Optional[str],
+    gpu_node_id: Optional[int] = None,
+    gpu_bdf_id: Optional[int] = None,
+    gpu_uuid: Optional[str] = None,
+) -> Optional[Set[str]]:
+    """Normalize SDK support for one physical GPU or legacy arch/chip specs.
+
+    None means identity could not be matched. An empty set means a matching
+    listing reported no supported counters. SDK handles are opaque identifiers.
+    Older workload specs without a physical identity use the intersection of
+    matching architecture/chip listings.
+    """
+    if not gpu_arch:
+        return None
+    selected = GpuIdentity(gpu_arch, gpu_chip_id, gpu_node_id, gpu_bdf_id, gpu_uuid)
+    candidates = [
+        (handle, _sdk_agent_identity(agent_info_by_handle[handle]))
+        for handle in counters_by_agent
+        if handle in agent_info_by_handle
+    ]
+    if selected.has_physical_identity:
+        try:
+            handle = match_gpu_identity(selected, candidates, "rocprofiler-sdk")
+        except ValueError as error:
+            console_warning(str(error))
+            return None
+        return _counter_names(counters_by_agent[handle])
+
+    matches = [
+        handle
+        for handle, identity in candidates
+        if identity.arch == selected.arch
+        and (selected.chip_id is None or identity.chip_id == selected.chip_id)
+    ]
+    if not matches:
+        return None
+
+    supported_names = _counter_names(counters_by_agent[matches[0]])
+    for handle in matches[1:]:
+        supported_names.intersection_update(_counter_names(counters_by_agent[handle]))
+    return supported_names
 
 
 def resolve_library_path(sdk_tool_path: Optional[str]) -> Optional[str]:
@@ -83,6 +145,47 @@ def resolve_library_path(sdk_tool_path: Optional[str]) -> Optional[str]:
 
     console_debug(f"{LIBRARY_NAME} not found for {sdk_tool_path}")
     return None
+
+
+def _sdk_agent_identity(agent: Dict[str, Any]) -> GpuIdentity:
+    """Translate SDK field names into the shared physical GPU record."""
+    return GpuIdentity(
+        arch=agent.get("name"),
+        chip_id=agent.get("device_id"),
+        node_id=agent.get("node_id"),
+        bdf_id=agent.get("location_id"),
+        uuid=agent.get("uuid"),
+    )
+
+
+def _agent_info_map(avail: ModuleType) -> Dict[int, Dict[str, Any]]:
+    """Keep counter listing available with SDKs lacking the metadata API."""
+    query = getattr(avail, "get_agent_info_map", None)
+    if query is None:
+        console_debug("rocprofiler-sdk does not expose GPU identity metadata.")
+        return {}
+    return query()
+
+
+def _counter_names(counters: List[Any]) -> Set[str]:
+    """Exclude constant records from SDK hardware and derived counter names."""
+    return {
+        counter.name
+        for counter in counters
+        if hasattr(counter, "block") or hasattr(counter, "expression")
+    }
+
+
+def _load_avail_module(sdk_tool_path: Optional[str]) -> ModuleType:
+    # Load through ctypes first so the beta gate is applied before the avail
+    # module dlopens the same file and settles what the library reports.
+    _load_library(sdk_tool_path)
+    if _library_path is None:
+        console_error(f"Failed to locate {LIBRARY_NAME}.")
+
+    avail = _import_avail_module(sdk_tool_path)
+    avail.loadLibrary.libname = _library_path
+    return avail
 
 
 def _load_library(sdk_tool_path: Optional[str]) -> Optional[ctypes.CDLL]:
@@ -159,8 +262,10 @@ def _import_avail_module(sdk_tool_path: Optional[str]) -> ModuleType:
     """
     new_path = str(Path(sdk_tool_path).parents[1] / "python3/site-packages")
     old_path = str(Path(sdk_tool_path).parents[2] / "bin")
+    added_new_path = new_path not in sys.path
     try:
-        sys.path.append(new_path)
+        if added_new_path:
+            sys.path.append(new_path)
         from rocprofv3 import avail
 
         return avail
@@ -171,8 +276,10 @@ def _import_avail_module(sdk_tool_path: Optional[str]) -> ModuleType:
         )
 
     try:
-        sys.path.remove(new_path)
-        sys.path.append(old_path)
+        if added_new_path:
+            sys.path.remove(new_path)
+        if old_path not in sys.path:
+            sys.path.append(old_path)
         from rocprofv3_avail_module import avail
 
         return avail

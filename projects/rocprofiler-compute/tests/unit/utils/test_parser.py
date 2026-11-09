@@ -13,6 +13,7 @@ import common
 import pandas as pd
 import pytest
 
+import config
 from pc_sampling.pc_sampling_analysis import load_pc_sample_records
 from utils import schema
 from utils.parser import (
@@ -26,11 +27,19 @@ from utils.specs import MachineSpecsCDNA
 from utils.utils_common import (
     convert_filter_blocks_to_panel_ids,
     expand_placeholder_ranges,
+    load_panel_configs,
 )
 
 # =============================================================================
 # Helpers to build in-memory panel configs
 # =============================================================================
+
+
+@pytest.fixture(scope="module")
+def gfx1201_wgp_tables():
+    """Load the Navi48 WGP tables once for their column-order contract."""
+    panel = load_panel_configs([str(config.analysis_configs_dir / "gfx1201")])[700]
+    return [source["metric_table"] for source in panel["data source"]]
 
 
 def _metric_panel(
@@ -1144,3 +1153,14 @@ class TestCorrectSysInfo:
 
         assert "not_a_spec" in str(error_calls[0])
         assert "--specs" in str(error_calls[0])
+
+
+@pytest.mark.misc
+def test_gfx1201_wgp_metrics_fill_every_header_column_in_order(gfx1201_wgp_tables):
+    """Displayed WGP fields match header order; nondisplayed metadata is ignored."""
+    assert gfx1201_wgp_tables
+    for table in gfx1201_wgp_tables:
+        columns = [key for key in table["header"] if key != "metric"]
+        for name, metric in table["metric"].items():
+            displayed_columns = [key for key in metric if key in columns]
+            assert displayed_columns == columns, (table["id"], name)

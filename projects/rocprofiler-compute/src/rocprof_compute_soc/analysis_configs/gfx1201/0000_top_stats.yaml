@@ -1,0 +1,17 @@
+# gfx1201 (RDNA 4, Navi 48) -- Top Stats
+# Metric bodies are carried from the gfx1201 metrics port and placed in the
+# gfx12 panel template. Tables with no carried metric are empty.
+Panel Config:
+  id: 0
+  alias: topstats
+  title: Top Stats
+  data source:
+    - raw_csv_table:
+        id: 1
+        title: Top Kernels
+        source: pmc_kernel_top.csv
+    - raw_csv_table:
+        id: 2
+        title: Dispatch List
+        source: pmc_dispatch_info.csv
+  metrics_description: {}

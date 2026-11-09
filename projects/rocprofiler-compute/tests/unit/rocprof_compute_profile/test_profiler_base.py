@@ -12,6 +12,7 @@ import common
 import pytest
 import yaml
 
+import rocprof_compute_profile.profiler_base as profiler_base_module
 from pc_sampling.pc_sampling_profile import PCSamplingLimits
 from rocprof_compute_base import RocProfCompute
 from rocprof_compute_profile.profiler_base import (
@@ -1289,3 +1290,33 @@ def test_sanitize_rejects_ml_api_trace_with_attach_pid(tmp_path):
     profiler = RocProfCompute_Base(args, profiler_mode="rocprofiler-sdk", soc=None)
     with pytest.raises(SystemExit):
         profiler.sanitize()
+
+
+@pytest.mark.parametrize("multiple_files", [False, True])
+@pytest.mark.parametrize("collected", [set(), {"SQ_WAVES"}])
+def test_profile_reports_each_pass_counter_inventory(
+    tmp_path, monkeypatch, multiple_files, collected
+):
+    first_input = tmp_path / "pmc_perf_0.yaml"
+    first_input.write_text("jobs:\n  - pmc: [SQ_WAVES]\n", encoding="utf-8")
+    second_input = tmp_path / "pmc_perf_1.yaml"
+    second_input.write_text(
+        "jobs:\n  - pmc: [SQ_WMMA_VALU_INSTS_sum]\n", encoding="utf-8"
+    )
+    validation = Mock()
+    args = argparse.Namespace(
+        output_directory=str(tmp_path), trace_ml_api=None, retain_rocpd_output=False
+    )
+    profiler = rocprofiler_sdk_profiler(
+        args,
+        profiler_mode="rocprofiler-sdk",
+        soc=SimpleNamespace(validate_counter_collection=validation),
+    )
+    monkeypatch.setattr(profiler_base_module, "run_prof", lambda **_kwargs: collected)
+    input_files = [first_input, second_input] if multiple_files else first_input
+    profiler.profile(input_files, {}, total_runs=1)
+    if collected and not multiple_files:
+        expected_requested = {"SQ_WAVES"}
+        validation.assert_called_once_with(expected_requested, collected)
+    else:
+        validation.assert_not_called()

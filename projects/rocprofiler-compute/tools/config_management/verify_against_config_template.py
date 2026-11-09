@@ -10,6 +10,8 @@ Validate per-architecture panel YAMLs against a shared config template.
 - Treat any deviation as an error.
 - Collect all errors and report at end.
 - Panels marked as 'experimental: true' are excluded from validation.
+- An explicit family-template option takes precedence over automatic selection.
+- Automatic selection prefers an <arch>_config_template.yaml over a family template.
 - CDNA gfx9 configs use gfx9_config_template.yaml (see --gfx9-template)
 - RDNA 3.5 gfx115* configs use gfx11_config_template.yaml (see --gfx11-template)
 - GFX12 gfx12xx configs use gfx12_config_template.yaml (see --gfx12-template)
@@ -35,7 +37,9 @@ Usage:
 --gfx9-template, --gfx11-template, and --gfx12-template default to
 ``<analysis_configs_dir>/gfx9_config_template.yaml``,
 ``<analysis_configs_dir>/gfx11_config_template.yaml``, and
-``<analysis_configs_dir>/gfx12_config_template.yaml`` respectively.
+``<analysis_configs_dir>/gfx12_config_template.yaml`` respectively, unless an
+architecture-specific template is available. Passing an option explicitly
+uses that template for every architecture in its family.
 """
 
 from __future__ import annotations
@@ -69,6 +73,30 @@ def is_gfx115x_ip_variant(arch_name: str) -> bool:
 def is_gfx12_ip_variant(arch_name: str) -> bool:
     """True for GFX12 IP dirs: gfx12xx (e.g. gfx1250)."""
     return bool(re.fullmatch(r"gfx12[0-9a-f]{2}", arch_name, re.IGNORECASE))
+
+
+def template_for_arch(
+    arch_dir: Path,
+    gfx9_template: Optional[Path] = None,
+    gfx11_template: Optional[Path] = None,
+    gfx12_template: Optional[Path] = None,
+) -> Path:
+    """Honor explicit family overrides, then select the automatic contract."""
+    family_template_name = "gfx9_config_template.yaml"
+    family_override = gfx9_template
+    if is_gfx12_ip_variant(arch_dir.name):
+        family_template_name = "gfx12_config_template.yaml"
+        family_override = gfx12_template
+    elif is_gfx115x_ip_variant(arch_dir.name):
+        family_template_name = "gfx11_config_template.yaml"
+        family_override = gfx11_template
+    if family_override is not None:
+        return family_override
+
+    arch_template = arch_dir.parent / f"{arch_dir.name}_config_template.yaml"
+    if arch_template.is_file():
+        return arch_template
+    return arch_dir.parent / family_template_name
 
 
 def normalize_panel_id(panel_id: int) -> int:
@@ -344,24 +372,27 @@ def main() -> None:
         "--gfx9-template",
         default=None,
         help=(
-            "CDNA / gfx9 line template (default: "
-            "<analysis_configs_dir>/gfx9_config_template.yaml)"
+            "Override automatic template selection for CDNA / gfx9. "
+            "Automatic selection prefers an architecture-specific template, "
+            "then <analysis_configs_dir>/gfx9_config_template.yaml."
         ),
     )
     parser.add_argument(
         "--gfx11-template",
         default=None,
         help=(
-            "RDNA 3.5 gfx11** template (default: "
-            "<analysis_configs_dir>/gfx11_config_template.yaml)"
+            "Override automatic template selection for RDNA 3.5 gfx115*. "
+            "Automatic selection prefers an architecture-specific template, "
+            "then <analysis_configs_dir>/gfx11_config_template.yaml."
         ),
     )
     parser.add_argument(
         "--gfx12-template",
         default=None,
         help=(
-            "GFX12 gfx12xx template (default: "
-            "<analysis_configs_dir>/gfx12_config_template.yaml)"
+            "Override automatic template selection for GFX12 gfx12xx. "
+            "Automatic selection prefers an architecture-specific template, "
+            "then <analysis_configs_dir>/gfx12_config_template.yaml."
         ),
     )
     parser.add_argument(
@@ -378,57 +409,10 @@ def main() -> None:
         print(f"Error: {configs_dir} is not a directory")
         sys.exit(1)
 
-    template_file = (
-        Path(args.gfx9_template)
-        if args.gfx9_template
-        else configs_dir / "gfx9_config_template.yaml"
-    )
-    if not template_file.is_file():
-        print(f"Error: gfx9 template not found: {template_file}")
-        sys.exit(1)
-
-    gfx11_template_path = (
-        Path(args.gfx11_template)
-        if args.gfx11_template
-        else configs_dir / "gfx11_config_template.yaml"
-    )
-
-    gfx11_panels: list[TemplatePanel] = []
-    gfx11_by_id: dict[int, TemplatePanel] = {}
-    if any(is_gfx115x_ip_variant(p.name) for p in configs_dir.iterdir() if p.is_dir()):
-        if not gfx11_template_path.is_file():
-            print(
-                f"Error: gfx115x architecture(s) present but template missing: "
-                f"{gfx11_template_path}"
-            )
-            sys.exit(1)
-        print(f"Loading gfx11 template from {gfx11_template_path}")
-        gfx11_panels, gfx11_by_id = load_template(gfx11_template_path)
-        print(f"gfx11 template loaded: {len(gfx11_panels)} panels\n")
-
-    gfx12_template_path = (
-        Path(args.gfx12_template)
-        if args.gfx12_template
-        else configs_dir / "gfx12_config_template.yaml"
-    )
-    gfx12_panels: list[TemplatePanel] = []
-    gfx12_by_id: dict[int, TemplatePanel] = {}
-    if any(is_gfx12_ip_variant(p.name) for p in configs_dir.iterdir() if p.is_dir()):
-        if not gfx12_template_path.is_file():
-            print(
-                f"Error: gfx12xx architecture(s) present but template missing: "
-                f"{gfx12_template_path}"
-            )
-            sys.exit(1)
-        print(f"Loading gfx12 template from {gfx12_template_path}")
-        gfx12_panels, gfx12_by_id = load_template(gfx12_template_path)
-        print(f"gfx12 template loaded: {len(gfx12_panels)} panels\n")
-
-    template_panels, template_by_id = load_template(template_file)
+    template_file = Path(args.gfx9_template) if args.gfx9_template else None
+    gfx11_template_path = Path(args.gfx11_template) if args.gfx11_template else None
+    gfx12_template_path = Path(args.gfx12_template) if args.gfx12_template else None
     allowed_panel_keys = set(DEFAULT_ALLOWED_PANEL_KEYS) | set(args.allow_panel_key)
-    print(f"Loading gfx9 template from {template_file}")
-    print(f"Gfx9 template loaded: {len(template_panels)} panels\n")
-
     all_errors: list[str] = []
     total_arches = 0
 
@@ -437,16 +421,14 @@ def main() -> None:
             continue
         total_arches += 1
         print(f"{'=' * 80}\nValidating architecture: {arch_dir.name}\n{'=' * 80}")
-        if is_gfx12_ip_variant(arch_dir.name):
-            tpl_panels, tpl_by_id = gfx12_panels, gfx12_by_id
-            tpl_label = "gfx12"
-        elif is_gfx115x_ip_variant(arch_dir.name):
-            tpl_panels, tpl_by_id = gfx11_panels, gfx11_by_id
-            tpl_label = "gfx11"
-        else:
-            tpl_panels, tpl_by_id = template_panels, template_by_id
-            tpl_label = "gfx9"
-        print(f"Using {tpl_label} template ({len(tpl_panels)} panels)")
+        selected_template = template_for_arch(
+            arch_dir, template_file, gfx11_template_path, gfx12_template_path
+        )
+        if not selected_template.is_file():
+            print(f"Error: {arch_dir.name} template not found: {selected_template}")
+            sys.exit(1)
+        tpl_panels, tpl_by_id = load_template(selected_template)
+        print(f"Using {selected_template.name} ({len(tpl_panels)} panels)")
         arch_errors = validate_arch(
             arch_dir=arch_dir,
             template_panels=tpl_panels,

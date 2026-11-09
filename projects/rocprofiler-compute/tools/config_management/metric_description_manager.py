@@ -27,7 +27,7 @@ import argparse
 import re
 import sys
 from pathlib import Path
-from typing import Union
+from typing import Dict, Union
 
 import yaml
 
@@ -36,17 +36,6 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from config_management import utils_ruamel as cm_utils
-
-
-def is_gfx115x_ip_variant(arch_name: str) -> bool:
-    """True for gfx115x IP names (gfx1150 to gfx115f)."""
-    return bool(re.fullmatch(r"gfx115([0-9a-f]|x)", arch_name, re.IGNORECASE))
-
-
-def is_gfx1250_arch(arch_name: str) -> bool:
-    """Check if arch is gfx1250 to correctly use the gfx1250 analysis layout."""
-    return arch_name == "gfx1250"
-
 
 # gfx1250 metric_table ids -> documentation section names (disambiguated
 # where multiple panels reuse generic titles like "Utilization").
@@ -146,56 +135,13 @@ GFX1250_PANEL_ID_TO_SECTION: dict[int, str] = {
 }
 
 
-def normalize_unit_for_docs(unit: str) -> str:
-    """
-    Convert template variable units to human-readable format for documentation.
-
-    Patterns like (Requests + $normUnit) become "Requests per Normalization Unit"
-    Patterns like (Cycles + $normUnit) become "Cycles per Normalization Unit"
-    Other units are returned as-is.
-    """
-    if not unit or not isinstance(unit, str):
-        return unit
-
-    # Match patterns like (PREFIX + $normUnit) where PREFIX can contain
-    # letters, hyphens, and spaces
-    match = re.match(r"\(([A-Za-z\-\s]+?)\s+\+\s+\$normUnit\)", unit.strip())
-    if match:
-        prefix = match.group(1).strip()
-        return f"{prefix} per Normalization Unit"
-
-    return unit
-
-
-def format_yaml_scalar(value: str):
-    """Serialize descriptions like gfx942: inline scalars without block markers."""
-    if isinstance(value, str) and "\n" in value:
-        return re.sub(r"\s*\n\s*", " ", value).strip()
-    return value
-
-
-def normalize_docs_section_name(arch_name: str, section_name: str) -> str:
-    """Apply docs-only section name cleanup for selected architectures."""
-    if not is_gfx115x_ip_variant(arch_name):
-        return section_name
-
-    replacements = {
-        "Memory chart - TCP Cache (GL0 Vector Cache)": "Memory chart - TCP Cache",
-        "Memory chart - GL1 Cache (L1)": "Memory chart - GL1 Cache",
-        "Memory chart - GL2 Cache (L2)": "Memory chart - GL2 Cache",
-    }
-    return replacements.get(section_name, section_name)
-
-
-def normalize_docs_metric_name(arch_name: str, metric_name: str) -> str:
-    """Apply docs-only metric name cleanup for selected architectures."""
-    if not is_gfx115x_ip_variant(arch_name):
-        return metric_name
-
-    replacements = {
-        "GL0 Cache BW (TCP Cache)": "GL0 Cache BW",
-    }
-    return replacements.get(metric_name, metric_name)
+GFX1201_PANEL_ID_TO_SECTION: Dict[int, str] = {
+    **GFX1250_PANEL_ID_TO_SECTION,
+    306: "Memory chart - GL1 (Write-Combining)",
+    308: "Memory chart - L2 Memory Interface",
+    310: "Memory chart - Infinity Cache and GDDR6",
+    1304: "GL2C Request Bandwidth",
+}
 
 
 # All CDNA architectures share the same panel ID mapping.
@@ -296,12 +242,76 @@ RDNA35_PANEL_ID_TO_SECTION_BY_ARCH: dict[int, str] = {
 }
 
 
+def is_gfx115x_ip_variant(arch_name: str) -> bool:
+    """True for gfx115x IP names (gfx1150 to gfx115f)."""
+    return bool(re.fullmatch(r"gfx115([0-9a-f]|x)", arch_name, re.IGNORECASE))
+
+
+def is_gfx1250_arch(arch_name: str) -> bool:
+    """Check if arch is gfx1250 to correctly use the gfx1250 analysis layout."""
+    return arch_name == "gfx1250"
+
+
+def normalize_unit_for_docs(unit: str) -> str:
+    """
+    Convert template variable units to human-readable format for documentation.
+
+    Patterns like (Requests + $normUnit) become "Requests per Normalization Unit"
+    Patterns like (Cycles + $normUnit) become "Cycles per Normalization Unit"
+    Other units are returned as-is.
+    """
+    if not unit or not isinstance(unit, str):
+        return unit
+
+    # Match patterns like (PREFIX + $normUnit) where PREFIX can contain
+    # letters, hyphens, and spaces
+    match = re.match(r"\(([A-Za-z\-\s]+?)\s+\+\s+\$normUnit\)", unit.strip())
+    if match:
+        prefix = match.group(1).strip()
+        return f"{prefix} per Normalization Unit"
+
+    return unit
+
+
+def format_yaml_scalar(value: str):
+    """Serialize descriptions like gfx942: inline scalars without block markers."""
+    if isinstance(value, str) and "\n" in value:
+        return re.sub(r"\s*\n\s*", " ", value).strip()
+    return value
+
+
+def normalize_docs_section_name(arch_name: str, section_name: str) -> str:
+    """Apply docs-only section name cleanup for selected architectures."""
+    if not is_gfx115x_ip_variant(arch_name):
+        return section_name
+
+    replacements = {
+        "Memory chart - TCP Cache (GL0 Vector Cache)": "Memory chart - TCP Cache",
+        "Memory chart - GL1 Cache (L1)": "Memory chart - GL1 Cache",
+        "Memory chart - GL2 Cache (L2)": "Memory chart - GL2 Cache",
+    }
+    return replacements.get(section_name, section_name)
+
+
+def normalize_docs_metric_name(arch_name: str, metric_name: str) -> str:
+    """Apply docs-only metric name cleanup for selected architectures."""
+    if not is_gfx115x_ip_variant(arch_name):
+        return metric_name
+
+    replacements = {
+        "GL0 Cache BW (TCP Cache)": "GL0 Cache BW",
+    }
+    return replacements.get(metric_name, metric_name)
+
+
 def panel_id_to_section(arch_name: str, table_id: int | None) -> str | None:
     """Resolve documentation section name for a metric_table id (arch-specific)."""
     if table_id is None:
         return None
     if is_gfx115x_ip_variant(arch_name):
         return RDNA35_PANEL_ID_TO_SECTION_BY_ARCH.get(table_id)
+    if arch_name == "gfx1201":
+        return GFX1201_PANEL_ID_TO_SECTION.get(table_id)
     if is_gfx1250_arch(arch_name):
         return GFX1250_PANEL_ID_TO_SECTION.get(table_id)
     return CDNA_PANEL_ID_TO_SECTION.get(table_id)
@@ -651,6 +661,8 @@ def sync_arch(
 
     # 2) Load existing per-arch YAML (if exists) to preserve manual RST edits
     existing_per_arch = load_existing_per_arch(arch_name, per_arch_metrics_dir)
+    if arch_name == "gfx1201":
+        existing_per_arch = _migrate_navi48_bandwidth_section(existing_per_arch)
 
     # 3) Preserve manual RST edits (if rst != plain, keep existing RST)
     descriptions = preserve_manual_rst_edits(descriptions, existing_per_arch)
@@ -792,6 +804,41 @@ def main() -> int:
 
     parser.print_help()
     return 1
+
+
+def _migrate_navi48_bandwidth_section(existing_per_arch: dict) -> dict:
+    """Preserve authored RST from earlier or imported gfx1201 description files.
+
+    Earlier files label table 1304 as cache or HBM bandwidth. Merge those
+    sections into the current request-bandwidth section, preferring authored
+    guidance from the current section, then cache, then HBM.
+    """
+    for legacy_section in (
+        "GL2C Cache Bandwidth",
+        "GL2C-EA Interface - HBM Bandwidth",
+    ):
+        legacy_metrics = existing_per_arch.pop(legacy_section, {})
+        if not legacy_metrics:
+            continue
+        current_metrics = existing_per_arch.setdefault(
+            GFX1201_PANEL_ID_TO_SECTION[1304], {}
+        )
+        for metric_name, legacy_description in legacy_metrics.items():
+            current_description = current_metrics.get(metric_name)
+            if current_description is None:
+                current_metrics[metric_name] = legacy_description
+                continue
+            legacy_rst = legacy_description.get("rst", "")
+            current_rst = current_description.get("rst", "")
+            legacy_authored = legacy_rst and legacy_rst != legacy_description.get(
+                "plain", ""
+            )
+            current_authored = current_rst and current_rst != current_description.get(
+                "plain", ""
+            )
+            if legacy_authored and not current_authored:
+                current_description["rst"] = legacy_rst
+    return existing_per_arch
 
 
 if __name__ == "__main__":

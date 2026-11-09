@@ -235,6 +235,25 @@ def test_drawn_arrows_sit_between_the_box_borders(gpu_arch, box, outer, side):
 # ---------------------------------------------------------------------------
 
 
+def test_gfx1201_memory_demand_does_not_appear_as_gddr6_bandwidth():
+    values = sample_values("gfx1201")
+    # Infinity Cache Hit Rate, GDDR6 Read Bandwidth, GDDR6 Write Bandwidth
+    for metric_id in ("3.10.0", "3.10.1", "3.10.2"):
+        values.pop(metric_id)
+    values["3.8.2"] = 2e12  # Memory-Destined Read Bandwidth
+    lines = render("gfx1201", values).splitlines()
+    top, bottom, left = box_rows(lines, "L2")
+    right = lines[top].index("╮", left)
+    l2_text = "\n".join(line[left:right] for line in lines[top:bottom])
+    assert re.search(r"Memory Read BW\s+2000\.000 GB/s", l2_text)
+    top, bottom, left = box_rows(lines, "GDDR6")
+    right = lines[top].index("╮", left)
+    gddr6_text = "\n".join(line[left:right] for line in lines[top:bottom])
+    assert re.search(r"Read BW\s+N/A", gddr6_text)
+    assert re.search(r"Write BW\s+N/A", gddr6_text)
+    assert "2000.000" not in gddr6_text
+
+
 def test_gfx950_shows_io_bandwidth_above_and_below_the_grid():
     output = render("gfx950", {"3.1.35": 2e9, "3.1.40": 3e9})  # xGMI Read, PCIe Atomic
     assert re.search(r"\|\|  Read BW\s+2\.000 GB/s", output)

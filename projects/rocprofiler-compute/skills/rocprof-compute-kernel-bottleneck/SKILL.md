@@ -49,6 +49,33 @@ Not every feature works on every architecture. Check there before promising a
 result, and let the tool's own error message stand when a feature is
 unavailable.
 
+### Navi48 (gfx1201)
+
+GPU metrics and the Memory Chart are available on Linux starting with
+ROCm Compute Profiler 3.11 (ROCm 10.3). ROCm 10.2 and 10.1 shipped without
+gfx1201 support. Apply the `STABLE_STD` performance-state prerequisite in the
+[Navi48 guide](../../docs/conceptual/rdna/navi48.rst) before collecting counters,
+and keep that state consistent when comparing runs.
+
+Roofline benchmarks and PC sampling are outside Navi48 support in this release.
+Use `sol` first, then `memchart` or an available detailed block. List the
+Navi48 aliases with `rocprof-compute --list-metrics-gfx-id gfx1201`; for example,
+its WGP block is `wgp`, and its cache blocks are `gl0`, `gl1`, and `gl2`.
+Do not send a Navi48 user to an unsupported collection mode or infer physical
+GDDR6 bandwidth from L2 traffic. Instruction issue rates without a printed
+peak also cannot establish how close the kernel is to a FLOP ceiling.
+
+WGP `SQ_INST_CYCLES_VALU` reports raw SDK SIMD execution-cycle counts, with
+no peak comparison. Its counted instance/wave population remains unqualified;
+do not interpret it as elapsed GPU time, FLOPs or utilization.
+
+Treat `Wavefront Occupancy` and WGP `Wave Life` as provisional on Navi48:
+living-wave counter units, reduction, and wave-count normalization still need
+validation. The WGP Instruction Issue Stalls table is omitted from the CLI
+because its values are unavailable, and the `wave_wait` shortcut is unavailable.
+Do not infer an occupancy resource limit or quantified scheduler stall from
+those metrics. Restoration is tracked under AIPROFCOMP-907.
+
 ## 2. Collect what you need before profiling
 
 Ask once:
@@ -91,12 +118,13 @@ running, see
 ### Collect only what the question needs
 
 Never run a full profile. It replays the application once per counter pass and
-also runs the roofline benchmarks.
+also runs roofline benchmarks on architectures that support them.
 
-- List what this GPU can collect with `rocprof-compute --list-blocks <gfx_arch>`
-  and `rocprof-compute --list-metrics <gfx_arch>`. Pass `-b` only the block
-  aliases, block ids, or metric ids (for example `2.1.0`) the question needs.
-  Aliases differ by architecture.
+- List block aliases with `rocprof-compute --list-metrics-gfx-id <gfx_arch>`
+  and metrics with
+  `rocprof-compute --list-metrics-gfx-id <gfx_arch> --list-metrics all`.
+  Pass `-b` only the block aliases, block ids, or metric ids (for example
+  `2.1.0`) the question needs. Aliases differ by architecture.
 - `--set <set_name>` collects a predefined topic in one pass.
   `rocprof-compute profile --list-sets` lists the sets.
 - Add `-k <kernel_name>` when the user names the kernels that matter.
@@ -107,6 +135,10 @@ also runs the roofline benchmarks.
   times. Pair it with `-k`. See Iteration multiplexing in
   [profile mode](../../docs/how-to/profile/mode.rst).
 - Tell the user which analysis panels the narrower profile leaves empty.
+
+In ROCm 10.2 and 10.1, use `--list-blocks <gfx_arch>` to list blocks and
+`--list-metrics <gfx_arch>` to list metrics. The architecture selector changed
+in ROCm 10.3.
 
 ## 4. Find the hot kernel
 
@@ -234,7 +266,7 @@ disables terminal output, and `--output-name` sets the file name. See
 | Symptom | Likely cause |
 |---|---|
 | No workload data | `--path` is not the directory with `profiling_config.yaml` |
-| Empty or missing panels | those counters were not collected; re-profile |
+| Empty or missing panels | check architecture support and profiling diagnostics, then collect missing supported counters |
 | All metrics zero | kernel too short, or no dispatches were captured |
 | No kernel ids | the application launched no GPU kernels |
 | Roofline missing | not collected, or unsupported on this architecture |
