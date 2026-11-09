@@ -46,7 +46,7 @@ fi
 if want py; then
   # Wheels into $WORK/whl; install them as root afterwards (README).
   . $D/py_env.sh
-  W=$WORK/whl; T=$WORK/py-build   # staged sources; cibuildwheel runs from here (README)
+  W=$WORK/whl; T=$WORK/py-build   # staged sources
   rm -rf $T $W && mkdir -p $T $W
   cp -r --no-preserve=all $SRC/projects/rccl/bindings/nccl4py $T/nccl4py
   cp -r --no-preserve=all $M2N_PY $T/nccl_m2n
@@ -63,10 +63,9 @@ if want py; then
   cp $WORK/mk/include/nccl_m2n.h $T/nccl_m2n/nccl/m2n/include/
   (cd $T/nccl_m2n && PYTHONPATH=$T/site NCCL_EXTENSIONS_REQUIRE_NATIVE_LIBS=1 \
     python -m pip wheel -q --no-build-isolation --no-deps -w $W .)
-  rm -rf $T/nccl4py/build $T/nccl_m2n/build   # keep $T clean for cibuildwheel
   python -m zipfile -l $W/nccl_extensions-*.whl | grep -q 'nccl/m2n/lib/rocm/libnccl_m2n.so' \
     || { echo "libnccl_m2n.so missing from the wheel"; exit 1; }
-  # manylinux tag, ROCm runtime excluded (same command as [tool.cibuildwheel.linux] repair-wheel-command).
+  # Local wheel, ROCm runtime excluded; the tag follows the image's glibc. Release wheel: manylinux_wheel.sh.
   if [[ ${REPAIR:-1} == 1 ]]; then
     auditwheel repair -w $W/repaired $W/nccl_extensions-*.whl --plat manylinux_2_38_x86_64 --exclude librccl.so.1 --exclude libamdhip64.so.7 \
       --exclude libhsa-runtime64.so.1 --exclude libamd_comgr.so.3 --exclude librocprofiler-register.so.0
