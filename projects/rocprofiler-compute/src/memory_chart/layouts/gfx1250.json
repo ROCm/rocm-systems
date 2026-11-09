@@ -1,4 +1,5 @@
 {
+  "version": 1,
   "archs": ["gfx1250"],
   "description": "gfx1250: WGPs, TCP (LDS, GL0) and SQC, GL1, GLARB, GL2, EA/DF, then HBM, IO, HDM and GMI.",
   "scope": {"labels": ["XCD", "AID"], "split": "ea_df"},

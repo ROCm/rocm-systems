@@ -220,6 +220,7 @@ def test_block_list_order_does_not_matter(tmp_path):
     ("data", "message"),
     [
         (changed(schema_version=3), "unknown keys"),
+        (changed(version=2), "version 2 is not 1"),
         ({k: v for k, v in gfx950_data().items() if k != "scope"}, "missing ['scope']"),
         (changed(scope={"labels": ["a"], "split": "l2"}), "two labels"),
         (changed(scope={"labels": ["a", "b"], "split": "cu"}), "scope split"),
@@ -254,6 +255,7 @@ def test_block_list_order_does_not_matter(tmp_path):
     ],
     ids=[
         "unknown-top-level-key",
+        "unknown-version",
         "missing-key",
         "scope-labels",
         "scope-split-in-first-column",

@@ -43,7 +43,9 @@ class Keys:
         return self.required + self.optional
 
 
-LAYOUT_KEYS = Keys(("archs", "description", "scope", "blocks", "arrows"))
+# Format version of the layout files this code reads; bumped on breaking changes
+LAYOUT_VERSION = 1
+LAYOUT_KEYS = Keys(("version", "archs", "description", "scope", "blocks", "arrows"))
 SCOPE_KEYS = Keys(("labels", "split"))
 BLOCK_KEYS = Keys(
     ("id", "title", "column", "order", "position", "style"),
@@ -235,6 +237,9 @@ def read_layout_json(path: Path) -> Dict[str, Any]:
 def layout_from_json(path: Path, data: dict[str, Any]) -> Layout:
     """Check a parsed layout file and index its blocks; *path* names it in errors."""
     _check_keys(path, data, LAYOUT_KEYS, "the layout")
+    _check_index(path, data["version"], "version")
+    if data["version"] != LAYOUT_VERSION:
+        _fail(path, f"version {data['version']} is not {LAYOUT_VERSION}")
     _check_keys(path, data["scope"], SCOPE_KEYS, "scope")
     if len(data["scope"]["labels"]) != 2:
         _fail(path, "scope needs two labels")
