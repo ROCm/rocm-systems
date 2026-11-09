@@ -10,7 +10,9 @@
 #include "../hip_compat.h"
 #include "lsa_barrier__types.h"
 #include "comm__types.h"
+#ifdef __cplusplus
 #include <atomic>
+#endif
 
 #ifdef __CUDACC__
 template <typename Coop>
