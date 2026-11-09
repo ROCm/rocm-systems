@@ -9,6 +9,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/flat_address.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/image_resource.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/register_modifiers.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h"
 #include "rocjitsu/isa/instruction.h"
@@ -270,7 +271,8 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     for (uint32_t word = 0; word < prefix; ++word) {
       const uint16_t reg = modifiers.image_coordinates[word];
       if (reg < wf.num_vgprs())
-        access({RegClass::VGPR, reg, 1}, lanes, 0xf, false);
+        access({RegClass::VGPR, reg, 1}, lanes,
+               (modifiers.image_low_half_prefix & (1u << word)) ? 0x3 : 0xf, false);
     }
     for (uint32_t component = 0; component < components; ++component) {
       const uint32_t word = prefix + (modifiers.image_a16 ? component / 2 : component);
@@ -609,7 +611,7 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
             access(*reg, lanes, 0xf, write);
       return;
     }
-    const auto reg = resolve(*op, write);
+    auto reg = resolve(*op, write);
     if (!reg || reg->cls == RegClass::ACC_VGPR)
       return;
     uint64_t accessed_lanes = reg->cls != RegClass::VGPR ? ~uint64_t{0}
@@ -637,6 +639,13 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     if (vector && !lanes && !write && !inst.is_memory_op())
       return;
     uint8_t bytes = op->register_byte_mask();
+    if (!write && op == modifiers.packed_store_data && reg->width == (op->size_bits() + 31) / 32) {
+      const RegisterRef tail{reg->cls, static_cast<uint16_t>(reg->index + reg->width - 1), 1};
+      if (--reg->width)
+        access(*reg, accessed_lanes, bytes, false);
+      access(tail, accessed_lanes, 0x3, false);
+      return;
+    }
     if (modifiers.sdwa && reg->cls == RegClass::VGPR) {
       if (write)
         bytes = sdwa::sdwa_dst_byte_mask(modifiers.dst_selection, modifiers.dst_unused);
@@ -847,17 +856,7 @@ void MemoryWaitScoreboard::check_memory_result(const Instruction &inst, Wavefron
         xcnt_ordered_write(range, vector_lanes, bytes);
       access(range, vector_lanes, bytes, true, order);
     };
-    const uint8_t bytes = wf.cu().sram_ecc() ? 0xf : modifiers.memory_result_bytes;
-    const uint8_t tail = wf.cu().sram_ecc() ? 0xf : modifiers.memory_result_last_bytes;
-    if (bytes == tail) {
-      check(reg, bytes);
-    } else {
-      const RegisterRef last{reg.cls, static_cast<uint16_t>(reg.index + reg.width - 1), 1};
-      --reg.width;
-      if (reg.width)
-        check(reg, bytes);
-      check(last, tail);
-    }
+    for_each_memory_result_range(reg, modifiers, wf.cu().sram_ecc(), check);
   }
 }
 

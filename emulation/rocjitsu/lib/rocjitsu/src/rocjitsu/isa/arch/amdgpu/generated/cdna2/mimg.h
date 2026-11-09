@@ -11,6 +11,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/image_address.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/image_address_instruction.h"
 
 namespace rocjitsu {
 namespace cdna2 {
@@ -103,6 +104,8 @@ public:
     modifiers.gfx9_image_tuple.image_array = inst_.da;
     modifiers.gfx9_image_tuple.mip = false;
     modifiers.gfx9_image_tuple.derivatives = false;
+    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u))
+      modifiers.packed_store_data = &vdata;
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool tracks_explicit_source(uint8_t operand_index) const override;
@@ -123,6 +126,8 @@ public:
     modifiers.gfx9_image_tuple.image_array = inst_.da;
     modifiers.gfx9_image_tuple.mip = true;
     modifiers.gfx9_image_tuple.derivatives = false;
+    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u))
+      modifiers.packed_store_data = &vdata;
   }
   void implicit_uses(RegisterSet &uses) const override;
   bool tracks_explicit_source(uint8_t operand_index) const override;
@@ -149,7 +154,9 @@ public:
   Operand srsrc;
 };
 
-class ImageGetResinfoMimg : public Mimg {
+class ImageGetResinfoMimg
+    : public amdgpu::ImageAddressInstruction<
+          Mimg, false, amdgpu::ImageAddressForm{.kind = amdgpu::ImageAddressKind::ResourceInfo}> {
 public:
   ImageGetResinfoMimg(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);

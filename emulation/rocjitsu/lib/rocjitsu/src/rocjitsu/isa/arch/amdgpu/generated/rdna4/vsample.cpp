@@ -37,8 +37,8 @@ uint32_t mimg_vdata_bits(const MimgMachineInst *inst, bool gather4, bool d16_all
 } // namespace
 
 ImageMsaaLoadVsample::ImageMsaaLoadVsample(const MachineInst *inst)
-    : Vsample("image_msaa_load", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageMsaaLoadVsample)),
+    : ImageAddressInstruction("image_msaa_load", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageMsaaLoadVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, false),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
@@ -323,8 +323,8 @@ DecodeResult decodeImageSampleLVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageSampleBVsample::ImageSampleBVsample(const MachineInst *inst)
-    : Vsample("image_sample_b", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageSampleBVsample)),
+    : ImageAddressInstruction("image_sample_b", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageSampleBVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
@@ -435,8 +435,8 @@ DecodeResult decodeImageSampleLzVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageSampleCVsample::ImageSampleCVsample(const MachineInst *inst)
-    : Vsample("image_sample_c", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageSampleCVsample)),
+    : ImageAddressInstruction("image_sample_c", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageSampleCVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
@@ -464,8 +464,8 @@ DecodeResult decodeImageSampleCVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageSampleCDVsample::ImageSampleCDVsample(const MachineInst *inst)
-    : Vsample("image_sample_c_d", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageSampleCDVsample)),
+    : ImageAddressInstruction("image_sample_c_d", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageSampleCDVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(320, OperandType::OPR_VGPR, 0),
@@ -493,8 +493,8 @@ DecodeResult decodeImageSampleCDVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageSampleCLVsample::ImageSampleCLVsample(const MachineInst *inst)
-    : Vsample("image_sample_c_l", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageSampleCLVsample)),
+    : ImageAddressInstruction("image_sample_c_l", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageSampleCLVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, 0),
@@ -522,8 +522,8 @@ DecodeResult decodeImageSampleCLVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageSampleCBVsample::ImageSampleCBVsample(const MachineInst *inst)
-    : Vsample("image_sample_c_b", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageSampleCBVsample)),
+    : ImageAddressInstruction("image_sample_c_b", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageSampleCBVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, 0),
@@ -551,8 +551,8 @@ DecodeResult decodeImageSampleCBVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageSampleCLzVsample::ImageSampleCLzVsample(const MachineInst *inst)
-    : Vsample("image_sample_c_lz", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageSampleCLzVsample)),
+    : ImageAddressInstruction("image_sample_c_lz", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageSampleCLzVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
@@ -580,8 +580,8 @@ DecodeResult decodeImageSampleCLzVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageSampleOVsample::ImageSampleOVsample(const MachineInst *inst)
-    : Vsample("image_sample_o", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageSampleOVsample)),
+    : ImageAddressInstruction("image_sample_o", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageSampleOVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
@@ -609,8 +609,8 @@ DecodeResult decodeImageSampleOVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageSampleDOVsample::ImageSampleDOVsample(const MachineInst *inst)
-    : Vsample("image_sample_d_o", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageSampleDOVsample)),
+    : ImageAddressInstruction("image_sample_d_o", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageSampleDOVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(320, OperandType::OPR_VGPR, 0),
@@ -638,8 +638,8 @@ DecodeResult decodeImageSampleDOVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageSampleLOVsample::ImageSampleLOVsample(const MachineInst *inst)
-    : Vsample("image_sample_l_o", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageSampleLOVsample)),
+    : ImageAddressInstruction("image_sample_l_o", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageSampleLOVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, 0),
@@ -667,8 +667,8 @@ DecodeResult decodeImageSampleLOVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageSampleBOVsample::ImageSampleBOVsample(const MachineInst *inst)
-    : Vsample("image_sample_b_o", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageSampleBOVsample)),
+    : ImageAddressInstruction("image_sample_b_o", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageSampleBOVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, 0),
@@ -696,8 +696,8 @@ DecodeResult decodeImageSampleBOVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageSampleLzOVsample::ImageSampleLzOVsample(const MachineInst *inst)
-    : Vsample("image_sample_lz_o", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageSampleLzOVsample)),
+    : ImageAddressInstruction("image_sample_lz_o", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageSampleLzOVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
@@ -725,8 +725,8 @@ DecodeResult decodeImageSampleLzOVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageSampleCOVsample::ImageSampleCOVsample(const MachineInst *inst)
-    : Vsample("image_sample_c_o", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageSampleCOVsample)),
+    : ImageAddressInstruction("image_sample_c_o", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageSampleCOVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, 0),
@@ -754,8 +754,8 @@ DecodeResult decodeImageSampleCOVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageSampleCDOVsample::ImageSampleCDOVsample(const MachineInst *inst)
-    : Vsample("image_sample_c_d_o", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageSampleCDOVsample)),
+    : ImageAddressInstruction("image_sample_c_d_o", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageSampleCDOVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(352, OperandType::OPR_VGPR, 0),
@@ -783,8 +783,8 @@ DecodeResult decodeImageSampleCDOVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageSampleCLOVsample::ImageSampleCLOVsample(const MachineInst *inst)
-    : Vsample("image_sample_c_l_o", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageSampleCLOVsample)),
+    : ImageAddressInstruction("image_sample_c_l_o", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageSampleCLOVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(192, OperandType::OPR_VGPR, 0),
@@ -812,8 +812,8 @@ DecodeResult decodeImageSampleCLOVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageSampleCBOVsample::ImageSampleCBOVsample(const MachineInst *inst)
-    : Vsample("image_sample_c_b_o", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageSampleCBOVsample)),
+    : ImageAddressInstruction("image_sample_c_b_o", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageSampleCBOVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(192, OperandType::OPR_VGPR, 0),
@@ -841,8 +841,8 @@ DecodeResult decodeImageSampleCBOVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageSampleCLzOVsample::ImageSampleCLzOVsample(const MachineInst *inst)
-    : Vsample("image_sample_c_lz_o", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageSampleCLzOVsample)),
+    : ImageAddressInstruction("image_sample_c_lz_o", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageSampleCLzOVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, 0),
@@ -870,8 +870,8 @@ DecodeResult decodeImageSampleCLzOVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageGather4Vsample::ImageGather4Vsample(const MachineInst *inst)
-    : Vsample("image_gather4", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageGather4Vsample)),
+    : ImageAddressInstruction("image_gather4", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageGather4Vsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(96, OperandType::OPR_VGPR, 0),
@@ -899,8 +899,8 @@ DecodeResult decodeImageGather4Vsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageGather4LVsample::ImageGather4LVsample(const MachineInst *inst)
-    : Vsample("image_gather4_l", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageGather4LVsample)),
+    : ImageAddressInstruction("image_gather4_l", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageGather4LVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
@@ -928,8 +928,8 @@ DecodeResult decodeImageGather4LVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageGather4BVsample::ImageGather4BVsample(const MachineInst *inst)
-    : Vsample("image_gather4_b", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageGather4BVsample)),
+    : ImageAddressInstruction("image_gather4_b", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageGather4BVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
@@ -1024,8 +1024,8 @@ DecodeResult decodeImageGather4LzVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageGather4CVsample::ImageGather4CVsample(const MachineInst *inst)
-    : Vsample("image_gather4_c", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageGather4CVsample)),
+    : ImageAddressInstruction("image_gather4_c", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageGather4CVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
@@ -1053,8 +1053,8 @@ DecodeResult decodeImageGather4CVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageGather4CLzVsample::ImageGather4CLzVsample(const MachineInst *inst)
-    : Vsample("image_gather4_c_lz", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageGather4CLzVsample)),
+    : ImageAddressInstruction("image_gather4_c_lz", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageGather4CLzVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
@@ -1082,8 +1082,8 @@ DecodeResult decodeImageGather4CLzVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageGather4OVsample::ImageGather4OVsample(const MachineInst *inst)
-    : Vsample("image_gather4_o", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageGather4OVsample)),
+    : ImageAddressInstruction("image_gather4_o", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageGather4OVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
@@ -1111,8 +1111,8 @@ DecodeResult decodeImageGather4OVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageGather4LzOVsample::ImageGather4LzOVsample(const MachineInst *inst)
-    : Vsample("image_gather4_lz_o", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageGather4LzOVsample)),
+    : ImageAddressInstruction("image_gather4_lz_o", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageGather4LzOVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
@@ -1140,8 +1140,8 @@ DecodeResult decodeImageGather4LzOVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageGather4CLzOVsample::ImageGather4CLzOVsample(const MachineInst *inst)
-    : Vsample("image_gather4_c_lz_o", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageGather4CLzOVsample)),
+    : ImageAddressInstruction("image_gather4_c_lz_o", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageGather4CLzOVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, 0),
@@ -1169,8 +1169,8 @@ DecodeResult decodeImageGather4CLzOVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageGetLodVsample::ImageGetLodVsample(const MachineInst *inst)
-    : Vsample("image_get_lod", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageGetLodVsample)),
+    : ImageAddressInstruction("image_get_lod", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageGetLodVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, false, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(96, OperandType::OPR_VGPR, 0),
@@ -1198,8 +1198,8 @@ DecodeResult decodeImageGetLodVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageSampleDG16Vsample::ImageSampleDG16Vsample(const MachineInst *inst)
-    : Vsample("image_sample_d_g16", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageSampleDG16Vsample)),
+    : ImageAddressInstruction("image_sample_d_g16", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageSampleDG16Vsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(224, OperandType::OPR_VGPR, 0),
@@ -1227,8 +1227,8 @@ DecodeResult decodeImageSampleDG16Vsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageSampleCDG16Vsample::ImageSampleCDG16Vsample(const MachineInst *inst)
-    : Vsample("image_sample_c_d_g16", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageSampleCDG16Vsample)),
+    : ImageAddressInstruction("image_sample_c_d_g16", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageSampleCDG16Vsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(256, OperandType::OPR_VGPR, 0),
@@ -1256,8 +1256,8 @@ DecodeResult decodeImageSampleCDG16Vsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageSampleDOG16Vsample::ImageSampleDOG16Vsample(const MachineInst *inst)
-    : Vsample("image_sample_d_o_g16", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageSampleDOG16Vsample)),
+    : ImageAddressInstruction("image_sample_d_o_g16", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageSampleDOG16Vsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(256, OperandType::OPR_VGPR, 0),
@@ -1285,8 +1285,8 @@ DecodeResult decodeImageSampleDOG16Vsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageSampleCDOG16Vsample::ImageSampleCDOG16Vsample(const MachineInst *inst)
-    : Vsample("image_sample_c_d_o_g16", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageSampleCDOG16Vsample)),
+    : ImageAddressInstruction("image_sample_c_d_o_g16", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageSampleCDOG16Vsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(288, OperandType::OPR_VGPR, 0),
@@ -1314,8 +1314,8 @@ DecodeResult decodeImageSampleCDOG16Vsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageSampleClVsample::ImageSampleClVsample(const MachineInst *inst)
-    : Vsample("image_sample_cl", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageSampleClVsample)),
+    : ImageAddressInstruction("image_sample_cl", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageSampleClVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
@@ -1343,8 +1343,8 @@ DecodeResult decodeImageSampleClVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageSampleDClVsample::ImageSampleDClVsample(const MachineInst *inst)
-    : Vsample("image_sample_d_cl", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageSampleDClVsample)),
+    : ImageAddressInstruction("image_sample_d_cl", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageSampleDClVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(320, OperandType::OPR_VGPR, 0),
@@ -1372,8 +1372,8 @@ DecodeResult decodeImageSampleDClVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageSampleBClVsample::ImageSampleBClVsample(const MachineInst *inst)
-    : Vsample("image_sample_b_cl", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageSampleBClVsample)),
+    : ImageAddressInstruction("image_sample_b_cl", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageSampleBClVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, 0),
@@ -1401,8 +1401,8 @@ DecodeResult decodeImageSampleBClVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageSampleCClVsample::ImageSampleCClVsample(const MachineInst *inst)
-    : Vsample("image_sample_c_cl", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageSampleCClVsample)),
+    : ImageAddressInstruction("image_sample_c_cl", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageSampleCClVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, 0),
@@ -1430,8 +1430,8 @@ DecodeResult decodeImageSampleCClVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageSampleCDClVsample::ImageSampleCDClVsample(const MachineInst *inst)
-    : Vsample("image_sample_c_d_cl", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageSampleCDClVsample)),
+    : ImageAddressInstruction("image_sample_c_d_cl", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageSampleCDClVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(352, OperandType::OPR_VGPR, 0),
@@ -1459,8 +1459,8 @@ DecodeResult decodeImageSampleCDClVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageSampleCBClVsample::ImageSampleCBClVsample(const MachineInst *inst)
-    : Vsample("image_sample_c_b_cl", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageSampleCBClVsample)),
+    : ImageAddressInstruction("image_sample_c_b_cl", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageSampleCBClVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(192, OperandType::OPR_VGPR, 0),
@@ -1488,8 +1488,8 @@ DecodeResult decodeImageSampleCBClVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageSampleClOVsample::ImageSampleClOVsample(const MachineInst *inst)
-    : Vsample("image_sample_cl_o", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageSampleClOVsample)),
+    : ImageAddressInstruction("image_sample_cl_o", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageSampleClOVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, 0),
@@ -1517,8 +1517,8 @@ DecodeResult decodeImageSampleClOVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageSampleDClOVsample::ImageSampleDClOVsample(const MachineInst *inst)
-    : Vsample("image_sample_d_cl_o", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageSampleDClOVsample)),
+    : ImageAddressInstruction("image_sample_d_cl_o", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageSampleDClOVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(352, OperandType::OPR_VGPR, 0),
@@ -1546,8 +1546,8 @@ DecodeResult decodeImageSampleDClOVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageSampleBClOVsample::ImageSampleBClOVsample(const MachineInst *inst)
-    : Vsample("image_sample_b_cl_o", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageSampleBClOVsample)),
+    : ImageAddressInstruction("image_sample_b_cl_o", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageSampleBClOVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(192, OperandType::OPR_VGPR, 0),
@@ -1575,8 +1575,8 @@ DecodeResult decodeImageSampleBClOVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageSampleCClOVsample::ImageSampleCClOVsample(const MachineInst *inst)
-    : Vsample("image_sample_c_cl_o", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageSampleCClOVsample)),
+    : ImageAddressInstruction("image_sample_c_cl_o", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageSampleCClOVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(192, OperandType::OPR_VGPR, 0),
@@ -1604,8 +1604,8 @@ DecodeResult decodeImageSampleCClOVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageSampleCDClOVsample::ImageSampleCDClOVsample(const MachineInst *inst)
-    : Vsample("image_sample_c_d_cl_o", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageSampleCDClOVsample)),
+    : ImageAddressInstruction("image_sample_c_d_cl_o", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageSampleCDClOVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(384, OperandType::OPR_VGPR, 0),
@@ -1633,8 +1633,8 @@ DecodeResult decodeImageSampleCDClOVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageSampleCBClOVsample::ImageSampleCBClOVsample(const MachineInst *inst)
-    : Vsample("image_sample_c_b_cl_o", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageSampleCBClOVsample)),
+    : ImageAddressInstruction("image_sample_c_b_cl_o", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageSampleCBClOVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(224, OperandType::OPR_VGPR, 0),
@@ -1662,8 +1662,8 @@ DecodeResult decodeImageSampleCBClOVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageSampleCDClG16Vsample::ImageSampleCDClG16Vsample(const MachineInst *inst)
-    : Vsample("image_sample_c_d_cl_g16", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageSampleCDClG16Vsample)),
+    : ImageAddressInstruction("image_sample_c_d_cl_g16", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageSampleCDClG16Vsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(288, OperandType::OPR_VGPR, 0),
@@ -1691,8 +1691,8 @@ DecodeResult decodeImageSampleCDClG16Vsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageSampleDClOG16Vsample::ImageSampleDClOG16Vsample(const MachineInst *inst)
-    : Vsample("image_sample_d_cl_o_g16", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageSampleDClOG16Vsample)),
+    : ImageAddressInstruction("image_sample_d_cl_o_g16", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageSampleDClOG16Vsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(288, OperandType::OPR_VGPR, 0),
@@ -1720,8 +1720,9 @@ DecodeResult decodeImageSampleDClOG16Vsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageSampleCDClOG16Vsample::ImageSampleCDClOG16Vsample(const MachineInst *inst)
-    : Vsample("image_sample_c_d_cl_o_g16", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageSampleCDClOG16Vsample)),
+    : ImageAddressInstruction("image_sample_c_d_cl_o_g16",
+                              reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageSampleCDClOG16Vsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(320, OperandType::OPR_VGPR, 0),
@@ -1750,8 +1751,8 @@ DecodeResult decodeImageSampleCDClOG16Vsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageSampleDClG16Vsample::ImageSampleDClG16Vsample(const MachineInst *inst)
-    : Vsample("image_sample_d_cl_g16", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageSampleDClG16Vsample)),
+    : ImageAddressInstruction("image_sample_d_cl_g16", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageSampleDClG16Vsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(256, OperandType::OPR_VGPR, 0),
@@ -1779,8 +1780,8 @@ DecodeResult decodeImageSampleDClG16Vsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageGather4ClVsample::ImageGather4ClVsample(const MachineInst *inst)
-    : Vsample("image_gather4_cl", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageGather4ClVsample)),
+    : ImageAddressInstruction("image_gather4_cl", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageGather4ClVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(128, OperandType::OPR_VGPR, 0),
@@ -1808,8 +1809,8 @@ DecodeResult decodeImageGather4ClVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageGather4BClVsample::ImageGather4BClVsample(const MachineInst *inst)
-    : Vsample("image_gather4_b_cl", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageGather4BClVsample)),
+    : ImageAddressInstruction("image_gather4_b_cl", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageGather4BClVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, 0),
@@ -1837,8 +1838,8 @@ DecodeResult decodeImageGather4BClVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageGather4CClVsample::ImageGather4CClVsample(const MachineInst *inst)
-    : Vsample("image_gather4_c_cl", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageGather4CClVsample)),
+    : ImageAddressInstruction("image_gather4_c_cl", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageGather4CClVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, 0),
@@ -1866,8 +1867,8 @@ DecodeResult decodeImageGather4CClVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageGather4CLVsample::ImageGather4CLVsample(const MachineInst *inst)
-    : Vsample("image_gather4_c_l", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageGather4CLVsample)),
+    : ImageAddressInstruction("image_gather4_c_l", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageGather4CLVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, 0),
@@ -1895,8 +1896,8 @@ DecodeResult decodeImageGather4CLVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageGather4CBVsample::ImageGather4CBVsample(const MachineInst *inst)
-    : Vsample("image_gather4_c_b", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageGather4CBVsample)),
+    : ImageAddressInstruction("image_gather4_c_b", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageGather4CBVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(160, OperandType::OPR_VGPR, 0),
@@ -1924,8 +1925,8 @@ DecodeResult decodeImageGather4CBVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageGather4CBClVsample::ImageGather4CBClVsample(const MachineInst *inst)
-    : Vsample("image_gather4_c_b_cl", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageGather4CBClVsample)),
+    : ImageAddressInstruction("image_gather4_c_b_cl", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageGather4CBClVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(192, OperandType::OPR_VGPR, 0),
@@ -1953,8 +1954,8 @@ DecodeResult decodeImageGather4CBClVsample(const MachineInst *opcode,
 } // namespace detail
 
 ImageGather4hVsample::ImageGather4hVsample(const MachineInst *inst)
-    : Vsample("image_gather4h", reinterpret_cast<const OpEncoding *>(inst),
-              selected_exec_fn(InstructionExecutionId::ImageGather4hVsample)),
+    : ImageAddressInstruction("image_gather4h", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageGather4hVsample)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true, true, true, true),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(96, OperandType::OPR_VGPR, 0),
