@@ -89,13 +89,6 @@ void ncclDevKernel_Generic_32(ncclDevKernelArgsDefaultStorage) {}
 // construction. None of these paths executes before the test seam returns.
 ncclResult_t scheduleRmaTasksToPlan(struct ncclComm*, struct ncclKernelPlan*) { return ncclInternalError; }
 hipError_t hipLaunchHostFunc(hipStream_t, hipHostFn_t, void*) { return hipErrorInvalidValue; }
-const char* ncclGetErrorString(ncclResult_t) { return "host microtest"; }
-ncclResult_t ncclProfilerStartGroupEvent(struct ncclKernelPlan*) { return ncclInternalError; }
-ncclResult_t ncclProfilerStartTaskEvents(struct ncclKernelPlan*) { return ncclInternalError; }
-ncclResult_t ncclProfilerPostPlanWork(struct ncclComm*, struct ncclKernelPlan*) { return ncclInternalError; }
-ncclResult_t ncclProfilerStopTaskEvents(struct ncclKernelPlan*) { return ncclInternalError; }
-ncclResult_t ncclProfilerStopGroupEvent(struct ncclKernelPlan*) { return ncclInternalError; }
-ncclResult_t ncclProfilerAddPidToProxyOp(struct ncclProxyOp*) { return ncclInternalError; }
 
 class EnqueueMicrotest : public ::testing::Test {
  protected:
