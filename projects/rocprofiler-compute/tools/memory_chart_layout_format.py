@@ -6,9 +6,10 @@
 
 Each metric_id is set from the memory chart panel config of the layout's archs, and
 the loader checks the result. The file is then written with keys in the
-loader's order, blocks in drawing order (each block followed by its nested and
-attached blocks), one block, metric, or arrow per line, and a blank line between
-columns and between arrows of different block pairs.
+loader's order, blocks column by column (each block followed by its nested
+blocks, and each column's row 0 followed by its other rows), one block, metric, or
+arrow per line, and a blank line between columns and between arrows of different
+block pairs.
 
 Usage:
     tools/memory_chart_layout_format.py           # rewrite every layout

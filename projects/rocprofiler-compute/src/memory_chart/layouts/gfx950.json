@@ -4,7 +4,7 @@
   "description": "MI350: CU, L1s, L2, Data Fabric, MALL, UMC, HBM; xGMI above and PCIe below the fabric.",
   "scope": {"labels": ["GPU (XCD)", "Fabric / Memory"], "split": "data_fabric"},
   "blocks": [
-    {"id": "cu", "title": "Compute Units", "column": 0, "order": 0, "position": "grid", "style": "list", "content": [
+    {"id": "cu", "title": "Compute Units", "column": 0, "row": 0, "order": 0, "style": "list", "content": [
       {"metric_name": "Wavefront Occupancy", "metric_id": "3.1.0", "title": "Wave Occ", "category": "util", "bar": false},
       {"metric_name": "VGPR", "metric_id": "3.1.1", "title": "vGPRs", "category": "util", "bar": false},
       {"metric_name": "SGPR", "metric_id": "3.1.2", "title": "sGPRs", "category": "util", "bar": false},
@@ -13,33 +13,33 @@
       {"metric_name": "Workgroups", "metric_id": "3.1.5", "title": "Workgroups/CU", "category": "util", "bar": false}
     ]},
 
-    {"id": "vl1d", "title": "VL1D", "column": 1, "order": 0, "position": "grid", "style": "panel", "stall_level": "GL1", "content": [
+    {"id": "vl1d", "title": "VL1D", "column": 1, "row": 0, "order": 0, "style": "panel", "stall_level": "GL1", "content": [
       {"metric_name": "VL1 Hit", "metric_id": "3.1.17", "title": "Hit", "category": "hit", "bar": true},
       {"metric_name": "VL1 Coalesce", "metric_id": "3.1.18", "title": "Coalesce", "category": "neutral", "bar": true}
     ]},
-    {"id": "lds", "title": "LDS", "column": 1, "order": 1, "position": "grid", "style": "panel", "content": [
+    {"id": "lds", "title": "LDS", "column": 1, "row": 0, "order": 1, "style": "panel", "content": [
       {"metric_name": "LDS Util", "metric_id": "3.1.13", "title": "Util", "category": "util", "bar": true}
     ]},
-    {"id": "sl1d", "title": "sL1D", "column": 1, "order": 2, "position": "grid", "style": "panel", "content": [
+    {"id": "sl1d", "title": "sL1D", "column": 1, "row": 0, "order": 2, "style": "panel", "content": [
       {"metric_name": "sL1D Hit", "metric_id": "3.1.23", "title": "Hit", "category": "hit", "bar": true}
     ]},
-    {"id": "l1i", "title": "L1I", "column": 1, "order": 3, "position": "grid", "style": "panel", "content": [
+    {"id": "l1i", "title": "L1I", "column": 1, "row": 0, "order": 3, "style": "panel", "content": [
       {"metric_name": "IL1 Hit", "metric_id": "3.1.26", "title": "Hit", "category": "hit", "bar": true}
     ]},
 
-    {"id": "l2", "title": "L2", "column": 2, "order": 0, "position": "grid", "style": "panel", "stall_level": "GL2", "content": [
+    {"id": "l2", "title": "L2", "column": 2, "row": 0, "order": 0, "style": "panel", "stall_level": "GL2", "content": [
       {"metric_name": "L2 Hit", "metric_id": "3.1.28", "title": "Hit", "category": "hit", "bar": true}
     ]},
 
-    {"id": "data_fabric", "title": "Data Fabric", "column": 3, "order": 0, "position": "grid", "style": "panel", "stall_level": "EA"},
-    {"id": "xgmi", "title": "xGMI (to Peer GPU)", "column": 3, "order": 0, "position": "above", "style": "panel", "host": "data_fabric"},
-    {"id": "pcie", "title": "PCIe (to CPU or Non-xGMI connected GPU)", "column": 3, "order": 0, "position": "below", "style": "panel", "host": "data_fabric"},
+    {"id": "data_fabric", "title": "Data Fabric", "column": 3, "row": 0, "order": 0, "style": "panel", "stall_level": "EA"},
+    {"id": "xgmi", "title": "xGMI (to Peer GPU)", "column": 3, "row": -1, "style": "panel"},
+    {"id": "pcie", "title": "PCIe (to CPU or Non-xGMI connected GPU)", "column": 3, "row": 1, "style": "panel"},
 
-    {"id": "mall", "title": "MALL", "column": 4, "order": 0, "position": "grid", "style": "panel"},
+    {"id": "mall", "title": "MALL", "column": 4, "row": 0, "order": 0, "style": "panel"},
 
-    {"id": "umc", "title": "UMC", "column": 5, "order": 0, "position": "grid", "style": "panel"},
+    {"id": "umc", "title": "UMC", "column": 5, "row": 0, "order": 0, "style": "panel"},
 
-    {"id": "hbm", "title": "HBM", "column": 6, "order": 0, "position": "grid", "style": "panel", "content": [
+    {"id": "hbm", "title": "HBM", "column": 6, "row": 0, "order": 0, "style": "panel", "content": [
       {"metric_name": "HBM Read BW", "metric_id": "3.1.31", "title": "Read BW", "category": "read", "bar": false},
       {"metric_name": "HBM Write BW", "metric_id": "3.1.32", "title": "Write BW", "category": "write", "bar": false},
       {"metric_name": "HBM Atomic BW", "metric_id": "3.1.33", "title": "Atomic BW", "category": "atomic", "bar": false}

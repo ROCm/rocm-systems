@@ -4,7 +4,7 @@
   "description": "gfx1250: WGPs, TCP (LDS, GL0) and SQC, GL1, GLARB, GL2, EA/DF, then HBM, IO, HDM and GMI.",
   "scope": {"labels": ["XCD", "AID"], "split": "ea_df"},
   "blocks": [
-    {"id": "cu", "title": "WGPs", "column": 0, "order": 0, "position": "grid", "style": "list", "content": [
+    {"id": "cu", "title": "WGPs", "column": 0, "row": 0, "order": 0, "style": "list", "content": [
       {"metric_name": "Wavefront Occupancy", "metric_id": "3.9.0", "title": "Wave Occ", "category": "util", "bar": false},
       {"metric_name": "VGPR", "metric_id": "3.9.1", "title": "vGPRs", "category": "util", "bar": false},
       {"metric_name": "SGPR", "metric_id": "3.9.2", "title": "sGPRs", "category": "util", "bar": false},
@@ -13,27 +13,27 @@
       {"metric_name": "Workgroups", "metric_id": "3.9.5", "title": "Workgroups/WGP", "category": "util", "bar": false}
     ]},
 
-    {"id": "tcp", "title": "TCP (TXA/TXD/TDM)", "column": 1, "order": 0, "position": "grid", "style": "panel"},
-    {"id": "lds", "title": "LDS", "column": 1, "order": 0, "position": "grid", "style": "panel", "parent": "tcp", "content": [
+    {"id": "tcp", "title": "TCP (TXA/TXD/TDM)", "column": 1, "row": 0, "order": 0, "style": "panel"},
+    {"id": "lds", "title": "LDS", "column": 1, "order": 0, "style": "panel", "parent": "tcp", "content": [
       {"metric_name": "LDS Utilization", "metric_id": "3.4.5", "title": "Util", "category": "util", "bar": true},
       {"metric_name": "LDS Bank Conflict Stall Rate", "metric_id": "3.4.6", "title": "Bank Conflict", "category": "stall", "bar": true},
       {"metric_name": "LDS Load Bandwidth", "metric_id": "3.4.7", "title": "Load BW", "category": "read", "bar": false},
       {"metric_name": "LDS Store Bandwidth", "metric_id": "3.4.8", "title": "Store BW", "category": "write", "bar": false},
       {"metric_name": "LDS Atomic Bandwidth", "metric_id": "3.4.9", "title": "Atomic BW", "category": "atomic", "bar": false}
     ]},
-    {"id": "gl0", "title": "GL0", "column": 1, "order": 1, "position": "grid", "style": "panel", "parent": "tcp", "content": [
+    {"id": "gl0", "title": "GL0", "column": 1, "order": 1, "style": "panel", "parent": "tcp", "content": [
       {"metric_name": "GL0 Utilization", "metric_id": "3.3.0", "title": "Util", "category": "util", "bar": true},
       {"metric_name": "GL0 Hit Rate", "metric_id": "3.3.4", "title": "Hit Rate", "category": "hit", "bar": true}
     ]},
-    {"id": "sqc", "title": "SQC", "column": 1, "order": 1, "position": "grid", "style": "panel"},
-    {"id": "icache", "title": "Instruction Cache", "column": 1, "order": 0, "position": "grid", "style": "panel", "parent": "sqc", "content": [
+    {"id": "sqc", "title": "SQC", "column": 1, "row": 0, "order": 1, "style": "panel"},
+    {"id": "icache", "title": "Instruction Cache", "column": 1, "order": 0, "style": "panel", "parent": "sqc", "content": [
       {"metric_name": "ICache Utilization", "metric_id": "3.1.1", "title": "Util", "category": "util", "bar": true},
       {"metric_name": "ICache Hit Rate", "metric_id": "3.1.2", "title": "Hit Rate", "category": "hit", "bar": true},
       {"metric_name": "ICache Latency", "metric_id": "3.1.3", "title": "Latency", "category": "neutral", "bar": false},
       {"metric_name": "ICache Request Stall Rate", "metric_id": "3.1.4", "title": "Stall Rate", "category": "stall", "bar": true},
       {"metric_name": "ICache-GL1 Request Latency", "metric_id": "3.1.6", "title": "GL1 Req Latency", "category": "neutral", "bar": false}
     ]},
-    {"id": "dcache", "title": "Scalar Data Cache", "column": 1, "order": 1, "position": "grid", "style": "panel", "parent": "sqc", "content": [
+    {"id": "dcache", "title": "Scalar Data Cache", "column": 1, "order": 1, "style": "panel", "parent": "sqc", "content": [
       {"metric_name": "Dcache Utilization", "metric_id": "3.2.1", "title": "Util", "category": "util", "bar": true},
       {"metric_name": "Dcache Hit Rate", "metric_id": "3.2.2", "title": "Hit Rate", "category": "hit", "bar": true},
       {"metric_name": "Dcache Latency", "metric_id": "3.2.3", "title": "Latency", "category": "neutral", "bar": false},
@@ -42,32 +42,32 @@
       {"metric_name": "Dcache-GL1 Request Latency", "metric_id": "3.2.7", "title": "GL1 Req Latency", "category": "neutral", "bar": false}
     ]},
 
-    {"id": "gl1", "title": "GL1", "column": 2, "order": 0, "position": "grid", "style": "panel", "content": [
+    {"id": "gl1", "title": "GL1", "column": 2, "row": 0, "order": 0, "style": "panel", "content": [
       {"metric_name": "GL1A Utilization", "metric_id": "3.5.3", "title": "GL1A Util", "category": "util", "bar": true},
       {"metric_name": "GL1C Utilization", "metric_id": "3.5.4", "title": "GL1C Util", "category": "util", "bar": true},
       {"metric_name": "GL1C Buffer Full Stall", "metric_id": "3.5.5", "title": "Buf Stall", "category": "stall", "bar": true}
     ]},
 
-    {"id": "glarb", "title": "GLARB", "column": 3, "order": 0, "position": "grid", "style": "panel", "content": [
+    {"id": "glarb", "title": "GLARB", "column": 3, "row": 0, "order": 0, "style": "panel", "content": [
       {"metric_name": "GLARBA Utilization", "metric_id": "3.6.0", "title": "GLARBA Util", "category": "util", "bar": true},
       {"metric_name": "GLARBC Utilization", "metric_id": "3.6.1", "title": "GLARBC Util", "category": "util", "bar": true},
       {"metric_name": "GLARBC Buffer Full Stall", "metric_id": "3.6.2", "title": "Buf Stall", "category": "stall", "bar": true}
     ]},
 
-    {"id": "gl2", "title": "GL2", "column": 4, "order": 0, "position": "grid", "style": "panel", "content": [
+    {"id": "gl2", "title": "GL2", "column": 4, "row": 0, "order": 0, "style": "panel", "content": [
       {"metric_name": "GL2A Utilization", "metric_id": "3.7.0", "title": "GL2A Util", "category": "util", "bar": true},
       {"metric_name": "GL2C Hit Rate", "metric_id": "3.7.1", "title": "GL2C Hit", "category": "hit", "bar": true}
     ]},
 
-    {"id": "ea_df", "title": "EA/DF", "column": 5, "order": 0, "position": "grid", "style": "panel", "content": [
+    {"id": "ea_df", "title": "EA/DF", "column": 5, "row": 0, "order": 0, "style": "panel", "content": [
       {"metric_name": "EA Utilization", "metric_id": "3.8.0", "title": "EA Util", "category": "util", "bar": true},
       {"metric_name": "EA Stall Rate", "metric_id": "3.8.9", "title": "Stall", "category": "stall", "bar": true}
     ]},
 
-    {"id": "hbm", "title": "HBM", "column": 6, "order": 0, "position": "grid", "style": "panel"},
-    {"id": "io", "title": "IO (PCIe and other I/O)", "column": 6, "order": 1, "position": "grid", "style": "panel"},
-    {"id": "hdm", "title": "HDM (CXL)", "column": 6, "order": 2, "position": "grid", "style": "panel"},
-    {"id": "gmi", "title": "GMI", "column": 6, "order": 3, "position": "grid", "style": "panel"}
+    {"id": "hbm", "title": "HBM", "column": 6, "row": 0, "order": 0, "style": "panel"},
+    {"id": "io", "title": "IO (PCIe and other I/O)", "column": 6, "row": 0, "order": 1, "style": "panel"},
+    {"id": "hdm", "title": "HDM (CXL)", "column": 6, "row": 0, "order": 2, "style": "panel"},
+    {"id": "gmi", "title": "GMI", "column": 6, "row": 0, "order": 3, "style": "panel"}
   ],
   "arrows": [
     {"from": "cu", "to": "lds", "direction": "backward", "metric_name": "LDS Load Requests", "metric_id": "3.4.0", "title": "Load", "category": "read", "style": "inline", "group": "Request"},

@@ -4,7 +4,7 @@
   "description": "MI100/MI200: CU, L1s, L2, Data Fabric, UMC, HBM; xGMI above the fabric.",
   "scope": {"labels": ["GPU (XCD)", "Fabric / Memory"], "split": "data_fabric"},
   "blocks": [
-    {"id": "cu", "title": "Compute Units", "column": 0, "order": 0, "position": "grid", "style": "list", "content": [
+    {"id": "cu", "title": "Compute Units", "column": 0, "row": 0, "order": 0, "style": "list", "content": [
       {"metric_name": "Wavefront Occupancy", "metric_id": "3.1.0", "title": "Wave Occ", "category": "util", "bar": false},
       {"metric_name": "VGPR", "metric_id": "3.1.1", "title": "vGPRs", "category": "util", "bar": false},
       {"metric_name": "SGPR", "metric_id": "3.1.2", "title": "sGPRs", "category": "util", "bar": false},
@@ -13,30 +13,30 @@
       {"metric_name": "Workgroups", "metric_id": "3.1.5", "title": "Workgroups/CU", "category": "util", "bar": false}
     ]},
 
-    {"id": "vl1d", "title": "VL1D", "column": 1, "order": 0, "position": "grid", "style": "panel", "content": [
+    {"id": "vl1d", "title": "VL1D", "column": 1, "row": 0, "order": 0, "style": "panel", "content": [
       {"metric_name": "VL1 Hit", "metric_id": "3.1.14", "title": "Hit", "category": "hit", "bar": true},
       {"metric_name": "VL1 Coalesce", "metric_id": "3.1.15", "title": "Coalesce", "category": "neutral", "bar": true}
     ]},
-    {"id": "lds", "title": "LDS", "column": 1, "order": 1, "position": "grid", "style": "panel", "content": [
+    {"id": "lds", "title": "LDS", "column": 1, "row": 0, "order": 1, "style": "panel", "content": [
       {"metric_name": "LDS Util", "metric_id": "3.1.13", "title": "Util", "category": "util", "bar": true}
     ]},
-    {"id": "sl1d", "title": "sL1D", "column": 1, "order": 2, "position": "grid", "style": "panel", "content": [
+    {"id": "sl1d", "title": "sL1D", "column": 1, "row": 0, "order": 2, "style": "panel", "content": [
       {"metric_name": "sL1D Hit", "metric_id": "3.1.20", "title": "Hit", "category": "hit", "bar": true}
     ]},
-    {"id": "l1i", "title": "L1I", "column": 1, "order": 3, "position": "grid", "style": "panel", "content": [
+    {"id": "l1i", "title": "L1I", "column": 1, "row": 0, "order": 3, "style": "panel", "content": [
       {"metric_name": "IL1 Hit", "metric_id": "3.1.23", "title": "Hit", "category": "hit", "bar": true}
     ]},
 
-    {"id": "l2", "title": "L2", "column": 2, "order": 0, "position": "grid", "style": "panel", "content": [
+    {"id": "l2", "title": "L2", "column": 2, "row": 0, "order": 0, "style": "panel", "content": [
       {"metric_name": "L2 Hit", "metric_id": "3.1.25", "title": "Hit", "category": "hit", "bar": true}
     ]},
 
-    {"id": "data_fabric", "title": "Data Fabric", "column": 3, "order": 0, "position": "grid", "style": "panel"},
-    {"id": "xgmi", "title": "xGMI (to Peer GPU)", "column": 3, "order": 0, "position": "above", "style": "panel", "host": "data_fabric"},
+    {"id": "data_fabric", "title": "Data Fabric", "column": 3, "row": 0, "order": 0, "style": "panel"},
+    {"id": "xgmi", "title": "xGMI (to Peer GPU)", "column": 3, "row": -1, "style": "panel"},
 
-    {"id": "umc", "title": "UMC", "column": 4, "order": 0, "position": "grid", "style": "panel"},
+    {"id": "umc", "title": "UMC", "column": 4, "row": 0, "order": 0, "style": "panel"},
 
-    {"id": "hbm", "title": "HBM", "column": 5, "order": 0, "position": "grid", "style": "panel"}
+    {"id": "hbm", "title": "HBM", "column": 5, "row": 0, "order": 0, "style": "panel"}
   ],
   "arrows": [
     {"from": "cu", "to": "vl1d", "direction": "backward", "metric_name": "Flat Read", "metric_id": "3.1.6", "title": "Read", "category": "read", "style": "inline", "group": "Non-buffer Request"},

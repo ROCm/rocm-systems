@@ -10,7 +10,7 @@ without a GPU or a profile.
 from collections import defaultdict
 from dataclasses import dataclass
 from io import StringIO
-from typing import Any, Optional, Union
+from typing import Any, List, Optional, Tuple, Union
 
 from rich.console import Console, Group, RenderableType
 from rich.panel import Panel
@@ -175,9 +175,8 @@ class MemChart:
         for block in self.layout.top_level_blocks():
             width = panel_width if block in self.panels else self._needed_width(block)
             self._assign_width(block, width, widths)
-        for block in self.layout.blocks():
-            for sub in (*block.above, *block.below):
-                widths[sub.id] = max(len(sub.title), _MIN_TEXT_WIDTH)
+        for block in self.layout.off_grid:
+            widths[block.id] = max(len(block.title), _MIN_TEXT_WIDTH)
         return widths
 
     def _fit_scope_labels(self) -> None:
@@ -253,7 +252,7 @@ class MemChart:
         segments: dict[Optional[str], list[LayoutArrow]] = defaultdict(list)
         for arrow in self.layout.arrows:
             source, target = self.blocks[arrow.source], self.blocks[arrow.target]
-            if target.position == "grid" and source.column == column:
+            if target.row == 0 and source.column == column:
                 segments[self._anchor(arrow)].append(arrow)
         return segments
 
@@ -432,22 +431,27 @@ class MemChart:
         """Left edge of a column block."""
         return sum(self._column_widths()[: 2 * self.blocks[block_id].column])
 
-    def _attached(self, host: LayoutBlock, sub: LayoutBlock, above: bool) -> Group:
-        """A block drawn above or below *host*, joined by a connector."""
-        x = self._column_left_edge(host.id)
-        panel = Table.grid(padding=0)
-        panel.add_column(width=x)
-        panel.add_column()
-        panel.add_row(
-            "",
-            Panel(
-                f"[dim]{sub.title}[/dim]",
+    def _band(self, blocks: List[LayoutBlock], above: bool) -> Group:
+        """A row of blocks above or below the grid, each joined by a connector
+        on the side toward the grid."""
+        panels: List[Tuple[int, RenderableType]] = []
+        connectors: List[Tuple[int, RenderableType]] = []
+        for block in blocks:
+            x = self._column_left_edge(block.id)
+            panel = Panel(
+                f"[dim]{block.title}[/dim]",
                 border_style=COLORS["block"],
-                width=self.text_width[sub.id] + _PANEL_FRAME,
+                width=self.text_width[block.id] + _PANEL_FRAME,
                 height=3,
-            ),
-        )
-        arrows = [a for a in self.layout.arrows if a.target == sub.id]
+            )
+            panels.append((x, panel))
+            connectors.append((x + 3, self._connector(block)))
+        parts = (_at_offsets(panels), _at_offsets(connectors))
+        return Group(*parts) if above else Group(*reversed(parts))
+
+    def _connector(self, block: LayoutBlock) -> Text:
+        """The values of the arrows to a block outside the grid, or a bare connector."""
+        arrows = [a for a in self.layout.arrows if a.target == block.id]
         label_width = max((len(a.title) for a in arrows), default=0)
         lines = [
             _colored(
@@ -456,11 +460,7 @@ class MemChart:
             )
             for a in arrows
         ] or ["[dim]||[/dim]"]
-        connector = Table.grid(padding=0)
-        connector.add_column(width=x + 3)
-        connector.add_column()
-        connector.add_row("", Text.from_markup("\n".join(lines)))
-        return Group(panel, connector) if above else Group(connector, panel)
+        return Text.from_markup("\n".join(lines))
 
     def _scope_bar(self, total_width: int) -> str:
         split = self._column_left_edge(self.layout.scope_split)
@@ -490,13 +490,13 @@ class MemChart:
             grid.add_column(width=width, no_wrap=True)
         grid.add_row(*(cell for cell, _ in kept))
 
-        hosts = list(self.layout.top_level_blocks())
+        rows = self.layout.rows()
         sections: list[RenderableType] = [f"[bold]{chart_title}[/bold]"]
-        sections += [self._attached(h, sub, True) for h in hosts for sub in h.above]
+        sections += [self._band(blocks, True) for row, blocks in rows if row < 0]
         sections += [self._scope_bar(sum(widths)), "", grid]
-        for host in hosts:
-            for sub in host.below:
-                sections += ["", self._attached(host, sub, False)]
+        for row, blocks in rows:
+            if row > 0:
+                sections += ["", self._band(blocks, False)]
 
         categories = {a.category for a in self.layout.arrows}
         categories |= {item.category for b in self.layout.blocks() for item in b.items}
@@ -531,6 +531,18 @@ def _legend(*, include_atomic: bool, include_stall: bool) -> str:
         if key not in skip
     ]
     return f"[dim]Legend:[/dim] {'  '.join(items)}"
+
+
+def _at_offsets(cells: List[Tuple[int, RenderableType]]) -> Table:
+    """One line of renderables, each starting at its x offset; offsets increase."""
+    table = Table.grid(padding=0)
+    starts = [x for x, _ in cells]
+    table.add_column(width=starts[0])
+    for start, end in zip(starts, starts[1:]):
+        table.add_column(width=end - start, no_wrap=True)
+    table.add_column()
+    table.add_row("", *(cell for _, cell in cells))
+    return table
 
 
 def _cell_len(markup: str) -> int:
