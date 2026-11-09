@@ -65,6 +65,7 @@ ASSERT_HOOK_MATCHES_PROD(g_hipStreamWaitValue64,          hipStreamWaitValue64);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemcpyBatchAsync,           hipMemcpyBatchAsync);
 #endif
 ASSERT_HOOK_MATCHES_PROD(g_hipMemset,                     hipMemset);
+ASSERT_HOOK_MATCHES_PROD(g_hipFuncSetAttribute,           hipFuncSetAttribute);
 #define RCCL_ASSERT_INTERCEPTOR_HOOK(name, params) ASSERT_HOOK_MATCHES_PROD(g_##name, name);
 RCCL_HIP_PROFILE_INTERCEPTORS_HOOKED(RCCL_ASSERT_INTERCEPTOR_HOOK)
 #undef RCCL_ASSERT_INTERCEPTOR_HOOK
@@ -222,6 +223,16 @@ static hipError_t DefaultHipHostFree(void* ptr)
 }
 std::function<hipError_t(void*)> g_hipHostFree = DefaultHipHostFree;
 
+static hipError_t DefaultHipHostRegister(void*, std::size_t, unsigned) { return hipErrorInvalidValue; }
+std::function<hipError_t(void*, std::size_t, unsigned)> g_hipHostRegister = DefaultHipHostRegister;
+
+static hipError_t DefaultHipHostUnregister(void*) { return hipSuccess; }
+std::function<hipError_t(void*)> g_hipHostUnregister = DefaultHipHostUnregister;
+
+// Same as the plain stub it replaces: fails without touching *devPtr.
+static hipError_t DefaultHipHostGetDevicePointer(void**, void*, unsigned) { return hipErrorInvalidValue; }
+std::function<hipError_t(void**, void*, unsigned)> g_hipHostGetDevicePointer = DefaultHipHostGetDevicePointer;
+
 // --- device inventory + current-device state ----------------------------
 int g_deviceCount = 8;
 int g_currentDevice = 0;
@@ -251,6 +262,12 @@ static hipError_t DefaultHipGetDeviceCount(int* count)
     return hipSuccess;
 }
 std::function<hipError_t(int*)> g_hipGetDeviceCount = DefaultHipGetDeviceCount;
+
+static hipError_t DefaultHipFuncSetAttribute(const void*, hipFuncAttribute, int)
+{
+    return hipSuccess;
+}
+std::function<hipError_t(const void*, hipFuncAttribute, int)> g_hipFuncSetAttribute = DefaultHipFuncSetAttribute;
 
 // Defined with the plain HIP stubs below, where the attribute switch lives.
 static hipError_t DefaultHipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int device);
@@ -660,9 +677,13 @@ void ResetHipFakes()
     g_hipMallocManaged              = DefaultHipMallocManaged;
     g_hipFree                       = DefaultHipFree;
     g_hipHostFree                   = DefaultHipHostFree;
+    g_hipHostRegister               = DefaultHipHostRegister;
+    g_hipHostUnregister             = DefaultHipHostUnregister;
+    g_hipHostGetDevicePointer       = DefaultHipHostGetDevicePointer;
     g_hipGetDevice                  = DefaultHipGetDevice;
     g_hipSetDevice                  = DefaultHipSetDevice;
     g_hipGetDeviceCount             = DefaultHipGetDeviceCount;
+    g_hipFuncSetAttribute           = DefaultHipFuncSetAttribute;
     g_hipDeviceCanAccessPeer        = DefaultHipDeviceCanAccessPeer;
     g_hipDeviceEnablePeerAccess     = DefaultHipDeviceEnablePeerAccess;
     g_hipDeviceDisablePeerAccess    = DefaultHipDeviceDisablePeerAccess;
@@ -877,6 +898,11 @@ hipError_t hipGetDevice(int* deviceId) { return g_hipGetDevice(deviceId); }
 
 hipError_t hipGetDeviceCount(int* count) { return g_hipGetDeviceCount(count); }
 
+hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int value)
+{
+    return g_hipFuncSetAttribute(func, attr, value);
+}
+
 const char* hipGetErrorString(hipError_t) { return "[hip_fake] stub error"; }
 
 hipError_t hipGetLastError(void) { return g_hipGetLastError(); }
@@ -887,6 +913,13 @@ hipError_t hipHostMalloc(void** ptr, size_t size, unsigned int flags)
 {
     return g_hipHostMalloc(ptr, size, flags);
 }
+
+hipError_t hipHostRegister(void* ptr, size_t size, unsigned int flags)
+{
+    return g_hipHostRegister(ptr, size, flags);
+}
+
+hipError_t hipHostUnregister(void* ptr) { return g_hipHostUnregister(ptr); }
 
 hipError_t hipIpcCloseMemHandle(void* ptr) { return g_hipIpcCloseMemHandle(ptr); }
 
@@ -1072,7 +1105,10 @@ hipError_t hipStreamCreate(hipStream_t*) { return hipErrorInvalidValue; }
 // hipStreamCreateWithPriority / hipDeviceGetStreamPriorityRange are defined
 // above (seam-routed) -- the develop merge added plainer duplicates here.
 hipError_t hipPointerGetAttributes(hipPointerAttribute_t*, const void*) { return hipErrorInvalidValue; }
-hipError_t hipHostGetDevicePointer(void**, void*, unsigned int) { return hipErrorInvalidValue; }
+hipError_t hipHostGetDevicePointer(void** devPtr, void* hostPtr, unsigned int flags)
+{
+    return g_hipHostGetDevicePointer(devPtr, hostPtr, flags);
+}
 hipError_t hipIpcGetEventHandle(hipIpcEventHandle_t*, hipEvent_t) { return hipErrorInvalidValue; }
 hipError_t hipEventSynchronize(hipEvent_t event) { return g_hipEventSynchronize(event); }
 
