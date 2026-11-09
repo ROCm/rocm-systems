@@ -63,6 +63,8 @@ function(rccl_compiler_supports_rdc_host_coverage compiler work_dir output_suppo
     RESULT_VARIABLE probe_result)
 
   if(NOT probe_result EQUAL 0)
+    # Callers end the reason with their own period.
+    string(REGEX REPLACE "\\.$" "" probe_error "${probe_error}")
     set(${output_supported} FALSE PARENT_SCOPE)
     set(${output_reason} "${probe_error}" PARENT_SCOPE)
     return()
