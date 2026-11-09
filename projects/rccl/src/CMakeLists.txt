@@ -1811,6 +1811,18 @@ if(ENABLE_ROCSHMEM)
     endforeach()
     list(REMOVE_DUPLICATES _rocshmem_offload_arch_flags)
     target_link_options(rccl PRIVATE -fgpu-rdc --hip-link ${_rocshmem_offload_arch_flags})
+  elseif(NOT TARGET rocshmem_ext AND EXISTS "${ROCSHMEM_LIBRARY}")
+    # A pre-built rocSHMEM. The new-driver link takes device code only from new-driver
+    # objects, so one built by ROCm 7.0's default old driver would leave its device
+    # symbols undefined.
+    execute_process(COMMAND "${DL_OBJDUMP}" --offloading "${ROCSHMEM_LIBRARY}"
+      OUTPUT_VARIABLE _rocshmem_offloading ERROR_QUIET)
+    if(NOT _rocshmem_offloading MATCHES "OFFLOADING IMAGE")
+      message(FATAL_ERROR
+        "${ROCSHMEM_LIBRARY} has no new-driver device code, which the device linker needs. "
+        "Rebuild rocSHMEM with -DCMAKE_CXX_FLAGS=--offload-new-driver, or unset "
+        "ROCSHMEM_INSTALL_DIR to let RCCL build it.")
+    endif()
   endif()
 elseif(ENABLE_ROCSHMEM_GIN)
   # GIN is self-contained: all rocshmem host code it needs is compiled directly
