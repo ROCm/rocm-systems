@@ -345,12 +345,27 @@ set(LTO_IR_CLANG_FLAGS
   -D__HIP_PLATFORM_AMD__=1
 )
 
+# Track staged device headers explicitly; DEPFILE support for custom commands
+# is not available with every generator supported by RCCL's CMake minimum.
+file(GLOB_RECURSE RCCL_DEVICE_HEADER_DEPS CONFIGURE_DEPENDS
+  "${CMAKE_BINARY_DIR}/include/*.h"
+  "${CMAKE_BINARY_DIR}/include/*.hpp"
+  "${CMAKE_BINARY_DIR}/include/*.cuh"
+  "${IR_HIPIFY_DIR}/src/include/*.h"
+  "${IR_HIPIFY_DIR}/src/include/*.hpp"
+  "${IR_HIPIFY_DIR}/src/include/*.cuh"
+  "${IR_HIPIFY_DIR}/src/device/*.h"
+  "${IR_HIPIFY_DIR}/src/device/*.hpp"
+  "${IR_HIPIFY_DIR}/src/device/*.cuh"
+)
+
 ##### Step 1: clang -> raw LTO IR #####
 add_custom_command(
   OUTPUT ${LTO_IR_RAW}
   COMMAND ${CMAKE_COMMAND} -E make_directory ${OBJDIR}
   COMMAND ${CLANG_EXECUTABLE} ${LTO_IR_CLANG_FLAGS} ${LLVM_SRC} -o ${LTO_IR_RAW}
   DEPENDS ${LLVM_SRC} ${WRAPPER_HEADER_SRC} ${CMAKE_CURRENT_SOURCE_DIR}/util.h
+          ${RCCL_DEVICE_HEADER_DEPS}
   COMMENT "Generating LTO IR (deferred inlining) for ${LTO_IR_ARCH}..."
   VERBATIM
 )
