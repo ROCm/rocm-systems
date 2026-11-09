@@ -273,11 +273,20 @@ def test_gfx1201_valu_cycles_reports_raw_total_without_peak(
     )
 
 
+@pytest.mark.parametrize("metric", ["Wave Dependency Wait", "Wave Issue Wait"])
+def test_gfx1201_sol_wait_percentages_use_wave_cycles(wait_domain_evaluator, metric):
+    expression = panel_metric("0200_system_speed_of_light.yaml", 201, metric)["value"]
+    waits = 1711739396 + 1696050988 + 1764241951
+    cycles = 1123998562 + 1158838422 + 1056240211
+
+    assert wait_domain_evaluator.eval_expression(build_eval_string(expression)) == (
+        pytest.approx(100 * waits / cycles)
+    )
+
+
 @pytest.mark.parametrize(
     "filename, table_id, metric, statistic",
     [
-        ("0200_system_speed_of_light.yaml", 201, "Wave Dependency Wait", "value"),
-        ("0200_system_speed_of_light.yaml", 201, "Wave Issue Wait", "value"),
         ("0700_workgroup_processor_wgp.yaml", 711, "Wait for Any", "avg"),
         ("0700_workgroup_processor_wgp.yaml", 711, "Wait for Any", "min"),
         ("0700_workgroup_processor_wgp.yaml", 711, "Wait for Any", "max"),

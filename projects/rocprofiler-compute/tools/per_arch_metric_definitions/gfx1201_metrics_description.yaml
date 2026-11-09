@@ -36,12 +36,12 @@ System Speed-of-Light:
     rst: Cycles LDS stalled on conflicting bank addresses, averaged per dispatch.
     unit: Cycles
   Wave Dependency Wait:
-    plain: Not available on gfx1201 while wait-counter normalization is being validated. The percentage of wave cycles spent waiting for dependencies cannot yet be determined reliably.
-    rst: Not available on gfx1201 while wait-counter normalization is being validated. The percentage of wave cycles spent waiting for dependencies cannot yet be determined reliably.
+    plain: Percentage of wave cycles spent waiting for anything, such as pending memory operations or prior instruction results.
+    rst: Percentage of wave cycles spent waiting for anything, such as pending memory operations or prior instruction results.
     unit: Percent
   Wave Issue Wait:
-    plain: Not available on gfx1201 while wait-counter normalization is being validated. The percentage of wave cycles spent waiting for instruction issue cannot yet be determined reliably.
-    rst: Not available on gfx1201 while wait-counter normalization is being validated. The percentage of wave cycles spent waiting for instruction issue cannot yet be determined reliably.
+    plain: Percentage of wave cycles spent waiting for any instruction to issue.
+    rst: Percentage of wave cycles spent waiting for any instruction to issue.
     unit: Percent
   GL0 Cache Hit Rate (TCP Cache):
     plain: Percentage of vector L0 cache line accesses that hit.

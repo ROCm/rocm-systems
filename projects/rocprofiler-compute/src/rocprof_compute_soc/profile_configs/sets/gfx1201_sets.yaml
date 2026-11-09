@@ -108,6 +108,16 @@ sets:
   - 7.5.7: Instructions - LDS
   - 7.6.0: Instructions - VMEM Flat
 
+- title: Wave Wait Analysis
+  set_option: wave_wait
+  description: >-
+    Wavefront stall and wait analysis: dependency wait cycles and
+    instruction-issue stalls. Use to identify execution bottlenecks
+    caused by memory latency or RAW dependencies.
+  metric:
+  - 2.1.9: Wave Dependency Wait
+  - 2.1.10: Wave Issue Wait
+
 - title: Cache Efficiency
   set_option: cache_efficiency
   description: >-

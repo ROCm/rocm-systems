@@ -46,10 +46,10 @@ A fixed wave32 FP16-to-FP32 16x16x16 diagnostic supports WMMA inclusion in
 VALU for that instruction; counted population and other variants remain
 unqualified.
 
-`Wave Dependency Wait` and `Wave Issue Wait` display `N/A` while Navi48
-wait-counter units and reduction are validated. The WGP Instruction Issue Stalls
-table, including `Wait for Any`, is omitted from the CLI because its values are
-unavailable; the `wave_wait` shortcut is unavailable. `Wavefront Occupancy` and
+`Wave Dependency Wait` and `Wave Issue Wait` are percentages of wave cycles,
+from `SQ_WAIT_ANY` and `SQ_WAIT_INST_ANY` over `SQG_WAVE_CYCLES`. The
+`wave_wait` shortcut collects those two rows. The WGP Instruction Issue Stalls
+table, including `Wait for Any`, stays unavailable. `Wavefront Occupancy` and
 WGP `Wave Life` remain provisional while living-wave counter units, reduction,
 and wave-count normalization are validated. Treat these values as unknown when
 inferring occupancy limits or quantified scheduler stalls. Restoration is
