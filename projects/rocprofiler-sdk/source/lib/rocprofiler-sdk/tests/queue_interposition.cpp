@@ -494,7 +494,8 @@ TEST(queue_interposition, hw_drain_checks_the_window_across_ring_wrap)
     EXPECT_TRUE(wait_queue_hw_drained_locked(state, 9, deadline_in(std::chrono::milliseconds{20})));
 
     // a window longer than the ring cannot be decided from headers
-    real_rdid = 4;
+    real_rdid                   = 4;
+    get_pkt(ring, 9, 3)->header = k_retired_header;
     EXPECT_FALSE(
         wait_queue_hw_drained_locked(state, 9, deadline_in(std::chrono::milliseconds{20})));
 
