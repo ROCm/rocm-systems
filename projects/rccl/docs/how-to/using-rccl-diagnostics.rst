@@ -19,8 +19,8 @@ This feature is inherited from NCCL (active diagnostics). Besides the P2P
 check, it includes a network bandwidth check that runs only on multi-node
 communicators (see `Network bandwidth check`_ for more info). The passive RAS diagnostics
 (``NCCL_RUN_RAS_DIAGNOSTICS``), which compare configuration across ranks
-without exercising data paths, are a separate feature and are not covered on
-this page.
+without exercising data paths, are a separate feature, see
+:ref:`using-rccl-ras-diagnostics`.
 
 Enable diagnostics
 ==================

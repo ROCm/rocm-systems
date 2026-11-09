@@ -9,6 +9,25 @@ add_library(
     STATIC
     common/cpu.cpp
     common/cpu_decode.cpp
+    conversion/byte_conversion.cpp
+    conversion/conversion16.cpp
+    conversion/conversion32.cpp
+    conversion/conversion64.cpp
+    conversion/fp8_conversion.cpp
+    conversion/fp8_narrow.cpp
+    conversion/integer_conversion.cpp
+    conversion/normalized.cpp
+    conversion/pack.cpp
+    conversion/packed_conversion.cpp
+    compare/class.cpp
+    compare/constant_compare.cpp
+    compare/float_compare.cpp
+    compare/integer_compare.cpp
+    dot/scalar_repair.cpp
+    dot/dot.cpp
+    dot/fp8_dot.cpp
+    dot/half_dot.cpp
+    dot/integer_dot.cpp
     fp/scalar_repair.cpp
     fp/fma.cpp
     fp/binary.cpp
@@ -25,12 +44,19 @@ add_library(
     fp/minmax.cpp
     fp/mixed_fma.cpp
     fp/packed_fma.cpp
-    dot/dot.cpp
-    dot/fp8_dot.cpp
-    dot/half_dot.cpp
-    dot/integer_dot.cpp
-    dot/scalar_repair.cpp
+    graphics/cube.cpp
+    graphics/interp16.cpp
+    graphics/interp32.cpp
+    graphics/mullit.cpp
+    register/cndmask.cpp
     register/dpp.cpp
+    register/ds_permute.cpp
+    register/ds_swizzle.cpp
+    register/lane_transfer.cpp
+    register/move.cpp
+    register/permlane.cpp
+    register/relative_move.cpp
+    register/swap.cpp
     wmma/swmmac16.cpp
     wmma/swmmac8.cpp
     wmma/swmmac_float.cpp

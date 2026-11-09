@@ -35,6 +35,7 @@ public:
   static const void *full_execution_backend();
   /// @brief Validate that every full-simulator operand callback is present.
   static bool full_execution_backend_complete();
+  bool execution_backend_available() const override;
   bool simd_capable() const override;
 
 private:

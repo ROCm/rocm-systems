@@ -41,6 +41,9 @@ function(get_version_from_file REL_FILE_PATH ITEM)
     set(OUTPUT_ITEM "0")
 
     if(EXISTS "${FILE_PATH}")
+        # Reconfigure when the version changes, so the version configured into
+        # files such as the Python module's _version.py matches the library.
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${FILE_PATH}")
         file(READ ${FILE_PATH} file_contents)
         string(REGEX MATCHALL "AMDSMI_LIB_VERSION_${ITEM} *[0-9]+" OUTPUT_STR "${file_contents}")
         list(LENGTH OUTPUT_STR OUTPUT_STR_LENGTH)
