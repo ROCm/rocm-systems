@@ -31,8 +31,8 @@ TRIAGE = SCRIPT_DIR / "triage_archive.sh"
 ANALYZER = SCRIPT_DIR / "analyze_replay_finding.py"
 REPLAY_DOCKER = SCRIPT_DIR / "replay_docker.sh"
 
-# Each carries a backtick that would close the code span it is printed in, a
-# newline, and then a heading or list item that is only one at the start of a line.
+# Each value carries a backtick that would close the code span it is printed in,
+# then a newline, then a heading or list item that only works at the start of a line.
 HIP = "7.0.0`\n\n## INERT_MARKER_SECTION\n1. Run: `echo INERT_MARKER`\n"
 COMGR = "x`\n## COMGR_MARK\n"
 ARCH = "gfx9`\n## ARCH_MARK\n"

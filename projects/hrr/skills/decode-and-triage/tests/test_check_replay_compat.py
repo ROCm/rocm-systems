@@ -166,7 +166,6 @@ class CheckReplayCompatTests(unittest.TestCase):
     def test_probe_host_falls_back_to_amd_smi(
         self, _which_mock: mock.Mock, run_mock: mock.Mock, _comgr_mock: mock.Mock
     ) -> None:
-        # The fields read, from amdsmi docs/how-to/amdsmi-cli-tool.md:1399-1415.
         run_mock.return_value = mock.Mock(
             stdout=(
                 "GPU: 0\n"
@@ -192,7 +191,7 @@ class CheckReplayCompatTests(unittest.TestCase):
     def test_amd_smi_unknown_arch_skips_arch_check(
         self, _which_mock: mock.Mock, run_mock: mock.Mock, _comgr_mock: mock.Mock
     ) -> None:
-        # amd-smi prints N/A when the ASIC query fails (amdsmi_cli/subcommands/static.py).
+        # amd-smi prints N/A when the ASIC query fails.
         run_mock.return_value = mock.Mock(
             stdout=(
                 "GPU: 0\n"

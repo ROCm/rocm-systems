@@ -2,8 +2,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Archive-derived text this script prints (the archive path, and a log name built
-# from it) goes through the skill's one sanitizer, as does the replay's output.
+# Archive-derived text (the archive path and a log name built from it)
+# and the replay output go through the skill's sanitizer.
 safe() { python3 "$SCRIPT_DIR/archive_text.py" --text "$1"; }
 
 ARCHIVE=""

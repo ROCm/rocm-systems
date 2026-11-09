@@ -34,7 +34,7 @@ from pathlib import Path
 SKILL = "decode-and-triage"
 FIXTURES = Path(__file__).resolve().parent.parent / "tests" / "fixtures"
 
-# fixtures/replay_memory_fault.log with the archive listing in info_crash.txt:
+# Values from fixtures/replay_memory_fault.log, whose archive listing is info_crash.txt.
 FAULT_ADDRESS = "0x7f91da000000"
 FAULT_KERNEL = "crash_oob"
 

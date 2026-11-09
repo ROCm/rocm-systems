@@ -30,7 +30,7 @@ EXPECTATIONS = {"expected_behavior", "unexpected_behavior", "logs_contain", "fil
 NON_TRIGGERING_KEYS = {"id", "prompt", "skill_should_trigger", "note"}
 TRIGGERING_KEYS = NON_TRIGGERING_KEYS | EXPECTATIONS | {"workspace"}
 
-# Everything skillscope reads from evals/. Anything else there is never run.
+# Everything skillscope reads from evals/. Anything else there never runs.
 EVALS_FILES = {"evals.json", "extended_evals.json", "hooks.py", "machine.yml", "files"}
 
 
@@ -93,7 +93,6 @@ class FrontmatterTests(unittest.TestCase):
         self.assertLessEqual(len(description), 1024)
         for phrase in ("Use when", "Use PROACTIVELY when", "Do NOT activate when", ".hrr", "replay"):
             self.assertIn(phrase, description)
-        # Mechanics are not what a user says.
         self.assertNotRegex(description, r"\.(sh|ps1|py)\b")
 
     def test_inputs_and_outputs_are_in_the_body(self):
@@ -161,7 +160,7 @@ class EvalDatasetTests(unittest.TestCase):
         self.assertTrue(any(EXPECTATIONS & set(c) for c in positive))
 
     def test_no_case_asserts_the_skill_name_in_the_log(self):
-        # The init event lists every installed skill, so this could not fail.
+        # The init event lists every installed skill, so this assertion could never fail.
         for case in _dataset():
             for literal in case.get("logs_contain", []):
                 self.assertNotIn(SKILL, literal, case["id"])
@@ -192,7 +191,7 @@ class EvalHooksTests(unittest.TestCase):
                 self.assertTrue(self.hooks.skill_loaded(_log(tool_use)))
 
     def test_every_hooked_case_is_a_behavioral_case(self):
-        # skillscope only calls the hooks for triggering cases with expectations.
+        # skillscope calls the hooks only for triggering cases with expectations.
         self.assertTrue(self.hooks.CASES)
         for case_id in self.hooks.CASES:
             with self.subTest(case=case_id):

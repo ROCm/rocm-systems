@@ -149,8 +149,7 @@ def test_incomplete_process_is_reported_but_still_recorded(tmp_path):
     rendered = inspect_archive.render(report)
     assert "incomplete" in rendered
     assert "still worth sending" in rendered
-    # A lossy capture has no trailer either, and only the always-on line of
-    # capture's stderr tells it apart: the louder one needs AMD_LOG_LEVEL.
+    # A lossy capture lacks the trailer too; only capture's always-on stderr line tells it apart.
     assert "Archive marked INCOMPLETE" in rendered
 
 
@@ -243,7 +242,6 @@ def test_a_manifest_that_is_not_an_object_is_unreadable_not_fatal(tmp_path, cont
     assert report.root_manifest_error
     assert report.processes[0].manifest_error
     assert report.recorded_processes, "the events are still there"
-    # Said, rather than shown as an ordinary process that never finalized.
     assert any("pid-56: manifest.json is unreadable" in w for w in report.warnings)
     assert not any("died before finalizing" in w for w in report.warnings)
     assert "state: unknown (manifest unreadable)" in inspect_archive.render(report)
@@ -489,7 +487,6 @@ def test_build_tree_playback_gets_rocr_lib_on_the_path(tmp_path, monkeypatch):
 
     assert env["LD_LIBRARY_PATH"] == f"{rocr}:/mine"
 
-    # A ROCR_LIB without the library in it is not put on the path.
     (rocr / "libhsa-runtime64.so.1").unlink()
     assert inspect_archive._playback_env(str(binary))["LD_LIBRARY_PATH"] == "/mine"
 
@@ -638,7 +635,6 @@ def test_verify_reports_hardware_identifiers_and_build_info(tmp_path, capsys):
     (clean / "code_objects" / "a.hsaco").write_bytes(
         make_elf({".text": b"\1" * 8, ".comment": b"\0" * 21, ".debug_str": b"\0" * 11})
     )
-    # Buffer contents are not code objects, whatever bytes they hold.
     (clean / "blobs" / "blob-0").write_bytes(make_elf({".comment": b"user data\0"})[4:])
 
     inspect_archive.main(["--archive", str(tmp_path), "--no-playback", "--json"])
@@ -810,14 +806,12 @@ def test_the_reader_comes_from_hrr_playback_first(tmp_path, monkeypatch):
 
     assert inspect_archive._find_playback(None) == str(named)
 
-    # Only a file that can run, as its `-x` does: one that cannot is passed over.
     named.chmod(0o644)
     assert inspect_archive._find_playback(None) == str(rocm / "bin" / "hrr-playback")
 
     monkeypatch.delenv("HRR_PLAYBACK")
     assert inspect_archive._find_playback(None) == str(rocm / "bin" / "hrr-playback")
 
-    # PATH last, and only when ROCm has none.
     (rocm / "bin" / "hrr-playback").unlink()
     assert inspect_archive._find_playback(None) == "/usr/bin/hrr-playback"
 
@@ -880,7 +874,6 @@ def test_an_unusable_playback_path_is_an_error_not_a_skip(tmp_path, capsys):
     assert rc == inspect_archive.EXIT_USAGE
     assert "not an executable file" in capsys.readouterr().err
 
-    # A gate parsing --json gets JSON for this too, not prose on stderr.
     rc = inspect_archive.main(
         ["--archive", str(tmp_path), "--playback", str(tmp_path / "no-such-binary"), "--json"]
     )
@@ -1073,7 +1066,6 @@ def test_a_torn_first_event_header_is_not_a_recording(tmp_path):
         handle.truncate(len(header) + too_long)
     assert inspect_archive.inspect(tmp_path, use_playback=False).recorded_processes == []
 
-    # A plausible event behind a file header that is not HRR's.
     bad_header = struct.pack("<IHH", 0, 5, 0)
     (pid_dir / "events.bin").write_bytes(bad_header + struct.pack("<HQQQI2x", 1, 1, 0, 0, 32))
     assert inspect_archive.inspect(tmp_path, use_playback=False).recorded_processes == []
@@ -1305,11 +1297,7 @@ def _strip_launchers(command: str) -> str:
         ("nice -n 10 vllm serve", "vllm"),
         ("ionice -c 2 -n 4 python train.py", "python"),
         ("stdbuf -oL python train.py", "python"),
-        # Launchers whose grammar we do not model stop the search at themselves
-        # rather than guessing.
         ("srun -N2 python train.py", "srun"),
-        # env's own options change the environment in ways an assignment
-        # cannot carry, so `env` itself is the workload.
         ("env -u LD_PRELOAD app", "env"),
         ("env --ignore-environment app", "env"),
         ("/usr/bin/env -i A=1 app", "/usr/bin/env"),
@@ -1325,12 +1313,10 @@ def test_the_workload_is_found_behind_its_launcher(command, expected):
     [
         ("#!/venv/bin/python3", "/venv/bin/python3"),
         ("#!/usr/bin/env python3", "python3"),
-        # -S is not the interpreter; the package scan must not run it.
         ("#!/usr/bin/env -S python3 -u", "python3"),
         ("#!/usr/bin/env -Spython3", "python3"),
         ("#!/usr/bin/env --split-string=python3 -u", "python3"),
         ("#!/usr/bin/env -S PYTHONUNBUFFERED=1 python3", "python3"),
-        # An option we do not model is not a binary: fall back to the PATH's.
         ("#!/usr/bin/env -i python3", "FALLBACK"),
     ],
 )
@@ -1417,8 +1403,6 @@ def test_ldd_version_errors_do_not_defeat_resolution(tmp_path):
     )
     assert _resolved_runtime(noisy, binary) == str(runtime)
 
-    # An interpreter links no HIP runtime of its own, and that has to stay
-    # unresolved rather than resolving to something arbitrary.
     assert _resolved_runtime("\tlibc.so.6 => /usr/lib/libc.so.6 (0x00007f00)", binary) == ""
 
 
@@ -1601,7 +1585,6 @@ def test_an_output_directory_that_exists_is_checked_itself(tmp_path):
     out.mkdir()
     assert f"filesystem: fs-of:{out}," in _output_path_log(out)
 
-    # Not there yet: capture creates it inside its parent, so the parent counts.
     assert f"filesystem: fs-of:{tmp_path}," in _output_path_log(tmp_path / "run.hrr")
 
 

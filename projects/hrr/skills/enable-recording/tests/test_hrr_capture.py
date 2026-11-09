@@ -81,8 +81,7 @@ class World:
         self.stubs = tmp_path / "stubs"
         self.rocm = tmp_path / "rocm"
         (self.rocm / "lib").mkdir(parents=True)
-        # `ldd BIN` answers from BIN.ldd and `readelf -d BIN` from BIN.readelf,
-        # so a workload's linkage is whatever the test wrote beside it.
+        # `ldd BIN` answers from BIN.ldd and `readelf -d BIN` from BIN.readelf.
         _executable(self.stubs / "ldd", '#!/bin/sh\n[ -f "$1.ldd" ] && cat "$1.ldd"\nexit 0\n')
         _executable(
             self.stubs / "readelf",
@@ -92,8 +91,7 @@ class World:
             self.stubs / "ldconfig",
             '#!/bin/sh\n[ -n "$FAKE_LDCONFIG" ] && cat "$FAKE_LDCONFIG"\nexit 0\n',
         )
-        # The site scan feeds the interpreter a program on stdin; everything
-        # else, the inspector included, goes to the real Python.
+        # The site scan feeds the interpreter a program on stdin; everything else goes to the real Python.
         _executable(
             self.stubs / "python3",
             '#!/bin/sh\n'
@@ -231,8 +229,6 @@ def test_run_and_verify_need_their_required_arguments(world):
         ("libamdhip64.so.7", True),
         ("libamdhip64.so.7.1.70100", True),
         ("/opt/rocm/lib/libamdhip64.so.7", True),
-        # Backups left beside the real runtime match a `.so.[0-9]*` glob and
-        # were judged as if the loader would pick them.
         ("libamdhip64.so.7.hrr-orig", False),
         ("libamdhip64.so.7.bak", False),
         ("libamdhip64.so.hrr-orig", False),
@@ -352,8 +348,6 @@ def test_a_bound_runtime_without_capture_is_refused_with_the_remedy(world):
     )
     assert "use a ROCm build whose libamdhip64 has HRR compiled in" in alone.stderr
 
-    # A capture-capable runtime elsewhere changes the advice, and the advice
-    # has to say where LD_PRELOAD stops working.
     world.lib("capture/lib", capture=True)
     world.env["LD_LIBRARY_PATH"] = str(world.root / "capture/lib")
     beside = world.script("preflight", "--", str(app))
@@ -531,8 +525,6 @@ def test_preflight_says_whether_a_reader_is_here(world, where):
 
     result = world.script("preflight")
 
-    # A missing reader is not a preflight failure: the manifests-only verify
-    # and replay elsewhere are both documented.
     assert result.returncode == 0, result.stderr
     if where == "nowhere":
         assert "no hrr-playback here" in result.stderr
@@ -601,7 +593,6 @@ def test_a_relative_output_path_is_warned_about(tmp_path):
         ("/data/captures", "ext4"),
         ("/data/captures/run.hrr", "ext4"),
         ("/data", "overlay"),
-        # A prefix of the mount point's name is not inside it.
         ("/data/captures-old", "overlay"),
         ("/data/scratch/run.hrr", "tmpfs"),
     ],
@@ -746,8 +737,7 @@ def test_run_waits_for_what_the_workload_left_running(world):
     assert done.exists(), "the wrapper returned while the workload's children were running"
 
 
-# Runs a command as a child subreaper that waits for that command only: a
-# process orphaned below it is reparented here and never reaped, as under a
+# Run a command as a child subreaper that waits for that command only, so an orphan below it is reparented here and never reaped.
 NON_REAPING_PARENT = (
     "import ctypes, subprocess, sys\n"
     "PR_SET_CHILD_SUBREAPER = 36\n"

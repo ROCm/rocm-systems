@@ -262,8 +262,8 @@ class WorkdirDefaultTests(unittest.TestCase):
             archive.mkdir(parents=True)
             (archive / "events.bin").write_bytes(b"\0" * 64)
             before = {p.name: p.read_bytes() for p in archive.iterdir()}
-            # The default is what is under test, so TMPDIR is what points
-            # somewhere disposable, not HRR_TRIAGE_WORKDIR.
+            # The default is under test, so TMPDIR points somewhere disposable,
+            # not HRR_TRIAGE_WORKDIR.
             env = {k: v for k, v in os.environ.items() if k != "HRR_TRIAGE_WORKDIR"}
             env["TMPDIR"] = tmp
 
@@ -373,8 +373,8 @@ class LibraryPathSafetyTests(unittest.TestCase):
 
     def _resulting_path(self, env: dict, parent: str = "bin") -> str:
         body = _shell_function("setup_library_path")
-        # The playback has to exist: from a path that does not resolve, the
-        # sibling probe reads /../lib, which is /lib on any Linux host.
+        # The playback must exist. From a path that does not resolve,
+        # the sibling probe reads /../lib, which is /lib on any Linux host.
         with tempfile.TemporaryDirectory() as tmp:
             play = Path(tmp) / parent / "hrr-playback"
             play.parent.mkdir()

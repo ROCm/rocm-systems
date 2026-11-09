@@ -79,8 +79,6 @@ if ($env:HRR_PLAYBACK -and (Test-Path $env:HRR_PLAYBACK -PathType Leaf)) {
 $sdkFound = Find-InHipSdk
 if ($sdkFound) { Write-Host $sdkFound; exit 0 }
 
-# ---------------------------------------------------------------------------
-# STEP 3 — Build (only when --build requested)
 if (-not $Build) {
     Write-Host @"
 [ensure_playback] hrr-playback.exe not found.
@@ -116,8 +114,7 @@ if ($already) { Write-Host $already; exit 0 }
 
 Write-Host "[ensure_playback] configuring projects/hrr in $BuildOut" -ForegroundColor DarkGray
 
-# ---- CMake configure -------------------------------------------------------
-# ROCM_PATH / HIP_PATH must point to a capture-enabled ROCm/HIP install that
+# ROCM_PATH and HIP_PATH must point to a capture-enabled ROCm/HIP install.
 $Prefix = if ($env:CMAKE_PREFIX_PATH) { $env:CMAKE_PREFIX_PATH } else { $HipRoot }
 $CMakeArgs = @(
     "-S", $HrrProjectDir,

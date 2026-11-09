@@ -290,7 +290,6 @@ for c in dll_candidates:
 if lib is None:
     sys.exit(1)
 
-# hipGetDeviceCount
 count = ctypes.c_int(0)
 rc = lib.hipGetDeviceCount(ctypes.byref(count))
 if rc != 0:
@@ -441,8 +440,6 @@ def probe_host_replay_env() -> ReplayEnvironment:
     return probe_host_replay_env_windows() if _IS_WIN else probe_host_replay_env_linux()
 
 
-# ---------------------------------------------------------------------------
-# Docker environment probe — Linux only
 
 def _docker_cmd(*args: str) -> list[str]:
     if _IS_WIN:

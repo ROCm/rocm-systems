@@ -30,7 +30,6 @@ Reason: Write access to a read-only page
         self.assertIn("Cijk_Test", finding.kernel_name or "")
 
     def test_version_mismatch_from_info(self) -> None:
-        # hrr_reader.cpp:168
         text = "[HRR] Version mismatch in /data/hrr/pid-4242/events.bin: file=3 reader=4\n"
         finding = arf.Finding(outcome="UNKNOWN", fault_class="unknown")
         arf.parse_text(text, "info", finding)
@@ -352,7 +351,6 @@ class RecordedCaptureTests(unittest.TestCase):
         self.assertIsNone(finding.kernel_name)
 
     def test_memory_fault_bracket_printed_apart_from_its_title(self) -> None:
-        # rocdevice.cpp:4039 and :4055
         text = (
             ":1:rocdevice.cpp            :4039: 0001736211 us:  Memory Fault Error\n"
             ":0:rocdevice.cpp            :4055: 0001736215 us:  [host: node1, "
@@ -366,7 +364,6 @@ class RecordedCaptureTests(unittest.TestCase):
         self.assertEqual(finding.kernel_name, "crash_oob")
 
     def test_sync_after_launch_error_names_the_kernel(self) -> None:
-        # hip_playback.cpp:1497
         text = (
             "[HRR] GPU error after 'crash_oob': 719 (unspecified launch failure) "
             "last=719 (unspecified launch failure)\n"

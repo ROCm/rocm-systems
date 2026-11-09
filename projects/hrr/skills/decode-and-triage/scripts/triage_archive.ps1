@@ -94,8 +94,7 @@ if (-not (Test-Path $Archive -PathType Container)) {
     exit 1
 }
 
-# GetFullPath is lexical only, so a symbolic link or a junction anywhere in a
-# path is followed here, as realpath does for triage_archive.sh. Components that
+# GetFullPath is lexical, so follow symbolic links and junctions here as realpath does in triage_archive.sh.
 function Resolve-LinkedPath([string]$Path) {
     $full = [IO.Path]::GetFullPath($Path)
     $hops = 0
@@ -120,8 +119,7 @@ function Resolve-LinkedPath([string]$Path) {
     }
 }
 
-# The archive's own links are followed before anything is derived from its name,
-# as readlink -f does in triage_archive.sh: a link to a pid-<n> directory has to
+# Follow the archive's own links before deriving anything from its name, as readlink -f does in triage_archive.sh.
 $ArchiveTarget = Resolve-LinkedPath $Archive
 if (-not $ArchiveTarget) {
     Write-Host "error: a symbolic link loop in the archive path: $(Get-SafeText $Archive)" -ForegroundColor Red
@@ -131,8 +129,7 @@ $Archive = $ArchiveTarget
 $Name    = Split-Path $Archive -Leaf
 $Ts      = (Get-Date).ToUniversalTime().ToString("yyyyMMdd'T'HHmmss'Z'") + "-$PID"
 $Workdir = if ($env:HRR_TRIAGE_WORKDIR) { $env:HRR_TRIAGE_WORKDIR } else { Join-Path ([IO.Path]::GetTempPath()) 'hrr-triage' }
-# The archive is not to be written to, as in triage_archive.sh: the archive here
-# is the pid directory and, for a pid-<n> one, the capture directory holding it.
+# Never write to the archive: for a pid-<n> archive, that includes the capture directory holding it.
 $ArchiveRoot = if ($Name -like 'pid-*') { Split-Path $Archive -Parent } else { $Archive }
 $ArchiveRoot = Resolve-LinkedPath $ArchiveRoot
 function Test-InArchive([string]$Path) {
@@ -150,8 +147,7 @@ if (Test-InArchive $Workdir) {
     Write-Host "error: the triage work directory is inside the archive: $(Get-SafeText $Workdir); set HRR_TRIAGE_WORKDIR outside it" -ForegroundColor Red
     exit 1
 }
-# -o is checked too: a finding named into the archive writes there as surely
-# as a work directory inside it does.
+# Check -o too: a finding named into the archive writes there as surely as a work directory does.
 if ($Output -and (Test-InArchive $Output)) {
     Write-Host "error: --output is inside the archive: $(Get-SafeText $Output)" -ForegroundColor Red
     exit 1
@@ -254,15 +250,13 @@ function Invoke-NativeReplay([string]$PlaybackExe, [string]$LogPath, [string]$Gp
                                                $env:HIP_HRR_REPLAY_PROGRESS_SECONDS
                                            } else { "30" }
 
-    # WHY Start-Process instead of "& exe 2>&1 | Tee-Object":
     $tmpOut = [System.IO.Path]::GetTempFileName()
     $tmpErr = [System.IO.Path]::GetTempFileName()
     $rc = -1
 
     try {
         Write-Triage "log=$LogPath"
-        # Strip trailing backslash: "path\" in a quoted Win32 arg is parsed as
-        # "path" + escaped-quote, corrupting the path (pid-14372" \events.bin).
+        # Strip the trailing backslash: "path\" in a quoted Win32 arg parses as an escaped quote and corrupts the path.
         $archArg = $Archive.TrimEnd('\')
         $proc = Start-Process `
             -FilePath               $PlaybackExe `
@@ -274,13 +268,11 @@ function Invoke-NativeReplay([string]$PlaybackExe, [string]$LogPath, [string]$Gp
             -PassThru
         $rc = $proc.ExitCode
 
-        # stderr has [HRR progress] lines; stdout has [HRR] PASS / archive stats.
         $errText = [System.IO.File]::ReadAllText($tmpErr)
         $outText = [System.IO.File]::ReadAllText($tmpOut)
         $combined = $errText + $outText
         [System.IO.File]::WriteAllText($LogPath, $combined, [System.Text.Encoding]::UTF8)
 
-        # Echo to console so progress/result are visible
         # Through the sanitizer: kernel names and log lines are the archive's.
         if ($errText) { $errText.TrimEnd() | & python $Sanitizer | Write-Host }
         if ($outText) { $outText.TrimEnd() | & python $Sanitizer | Write-Host }
@@ -334,8 +326,7 @@ Then re-run with --replay docker (or set HRR_DOCKER_IMAGE and use --replay auto)
     Write-Triage "archive (WSL2)=$wslArchive"
     Write-Triage "log=$Log"
 
-    # Pass every value as its own argument. The archive path is the capture
-    # author's to name, so it must never be spliced into a command string that
+    # Pass each value as its own argument: the archive path is the capture author's, so never splice it into a command string.
     $wslEnv = @("HRR_DOCKER_IMAGE=$($env:HRR_DOCKER_IMAGE)")
     if ($env:HRR_DOCKER_MOUNT_CLR -eq "1") { $wslEnv += "HRR_DOCKER_MOUNT_CLR=1" }
     $wslArgs = @($wslEnv) + @("bash", $wslScript, "--archive", $wslArchive, "--log", $wslLog)

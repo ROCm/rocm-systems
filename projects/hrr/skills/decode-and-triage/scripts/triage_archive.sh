@@ -69,8 +69,7 @@ ARCHIVE="$(readlink -f "$ARCHIVE" 2>/dev/null || realpath "$ARCHIVE" 2>/dev/null
 
 name="$(basename "$ARCHIVE")"
 ts="$(date -u +%Y%m%dT%H%M%SZ)-$$"
-# Never the current directory by default: run from inside a customer's archive
-# and the finding and the replay log land in it, against this skill's own rule
+# Never default to the current directory: run inside a customer's archive, the finding and replay log would land in it.
 ARCHIVE_ROOT="$ARCHIVE"
 [[ "$name" == pid-* ]] && ARCHIVE_ROOT="$(dirname "$ARCHIVE")"
 in_archive() {
@@ -84,8 +83,7 @@ if [[ -n "${HRR_TRIAGE_WORKDIR:-}" ]]; then
     echo "error: HRR_TRIAGE_WORKDIR is inside the archive: $WORKDIR" >&2
     exit 1
   fi
-  # Created private when we are the one creating it. An existing directory is
-  # the caller's business, but the finding inside it is not: see the chmod
+  # Create the directory private. An existing one is the caller's, but the finding inside it is chmoded.
   mkdir -p -m 700 "$WORKDIR"
 else
   tmp_base="${TMPDIR:-/tmp}"
@@ -106,8 +104,7 @@ fi
 LOG=""
 ext=".finding.md"; [[ "$FORMAT" == "json" ]] && ext=".finding.json"
 FINDING="${OUTPUT:-$WORKDIR/${name}-${ts}${ext}}"
-# -o is checked too: a finding named into the archive writes there as surely
-# as a work directory inside it does. /dev/stdout is the caller's own stream.
+# Check -o too: a finding named into the archive writes there as surely as a work directory does. /dev/stdout is the caller's stream.
 if [[ -n "$OUTPUT" ]] && ! [[ "$FINDING" -ef /dev/stdout ]] && in_archive "$FINDING"; then
   echo "error: --output is inside the archive: $(safe "$OUTPUT")" >&2
   exit 1
@@ -126,8 +123,7 @@ setup_library_path() {
   if [[ "$bin_dir" == */bin ]]; then
     lib_dirs+=("$(cd "$bin_dir/../lib" 2>/dev/null && pwd || true)")
   fi
-  # A packaged playback ships as bin/, lib/ and runtime-lib/ siblings rather
-  # than inside a build tree. Without these its libamdhip64 and libhsa are
+  # A packaged playback ships bin/, lib/ and runtime-lib/ as siblings; without them its libamdhip64 and libhsa are not found.
   for p in lib runtime-lib; do
     [[ -d "$bin_dir/../$p" ]] && lib_dirs+=("$(cd "$bin_dir/../$p" && pwd)")
   done
@@ -165,8 +161,7 @@ pick_gpu() {
       [[ -n "$idx" ]] || continue
       (( free > best_free )) && { best_free=$free; best=$idx; }
     done < <(rocm-smi --showmeminfo vram 2>/dev/null | awk '
-      # The used line reads "VRAM Total Used Memory", so it also contains the
-      # word Total and must be tested first. Total and used arrive on separate
+      # The used line reads "VRAM Total Used Memory", which also contains "Total", so test it first.
       /GPU\[/ {
         id = $1; gsub(/[^0-9]/, "", id)
         if ($0 ~ /Total Used Memory/) used[id] = $NF
@@ -182,14 +177,12 @@ pick_gpu() {
 }
 
 replay_sync_args() {
-  # Default replay serializes the GPU once at the end, so a fault is reported
-  # but not attributed to a launch: the finding then has no failing event and
+  # The default replay syncs the GPU once at the end, so a fault is reported but not attributed to a launch.
   [[ "$NO_SYNC" == "1" ]] && return 0
   echo "--sync-after-launch"
 }
 
-# A stop the replay does not explain itself has to be recorded here, because
-# the log just ends where the process died. The analyzer would read that
+# Record a stop the replay does not explain: the log ends where the process died.
 record_replay_stop() {
   local rc="$1" log="$2"
   [[ -n "$log" ]] || return 0
@@ -206,8 +199,7 @@ run_native_replay() {
   gpu="$(pick_gpu)"
   [[ -r /dev/kfd ]] || { echo "error: /dev/kfd not accessible" >&2; return 1; }
   read -r -a sync_args <<< "$(replay_sync_args)"
-  # A hung workload replays as a hang, and without a bound the replay never
-  # returns, so the analyzer never runs and the archive yields no finding at
+  # Bound the replay: a hung workload would otherwise never return, so the analyzer never runs and no finding is produced.
   local timeout_s="${HRR_REPLAY_TIMEOUT:-1800}" runner=()
   if [[ "$timeout_s" != "0" ]] && command -v timeout >/dev/null 2>&1; then
     runner=(timeout "$timeout_s")
@@ -217,8 +209,7 @@ run_native_replay() {
   HIP_VISIBLE_DEVICES="$gpu" HIP_HRR_REPLAY_PROGRESS_SECONDS="${HIP_HRR_REPLAY_PROGRESS_SECONDS:-30}" \
     ${runner[@]+"${runner[@]}"} "$play" "$ARCHIVE" --max-wall-seconds "$timeout_s" ${sync_args[@]+"${sync_args[@]}"} 2>&1 | tee "$log" | python3 "$SANITIZER"
   local rc=${PIPESTATUS[0]}
-  # Deliberately not re-enabling `set -e` here. The caller wraps this call in
-  # `set +e` precisely so a failing replay is survivable, and restores `set -e`
+  # Do not re-enable `set -e`: the caller wraps this call in `set +e` so a failing replay is survivable.
   echo "[triage] native replay exit=$rc" >&2
   return "$rc"
 }
@@ -274,13 +265,11 @@ if [[ "$mode" != "skip" && "$mode" == "native" && -x "$ENSURE" ]]; then
   }
   export HRR_PLAYBACK
 elif [[ "$mode" == "skip" && -x "$ENSURE" ]]; then
-  # Metadata-only still wants `hrr-playback --info`, which needs no GPU. Locate
-  # without --build so this never tries to compile; if there is no binary the
+  # Metadata-only still wants `hrr-playback --info`, which needs no GPU. Locate without --build so nothing compiles.
   HRR_PLAYBACK="$("$ENSURE" 2>/dev/null || true)"
   if [[ -n "$HRR_PLAYBACK" ]]; then
     export HRR_PLAYBACK
-    # The library path is otherwise only prepared inside the native replay, so
-    # without this the analyzer finds the binary and then cannot load it.
+    # The library path is otherwise set only for native replay; without it the analyzer cannot load the binary.
     setup_library_path "$HRR_PLAYBACK"
   fi
 elif [[ "$mode" == "docker" && "${HRR_DOCKER_MOUNT_CLR:-0}" == "1" && -x "$ENSURE" ]]; then
@@ -291,14 +280,12 @@ elif [[ "$mode" == "docker" && "${HRR_DOCKER_MOUNT_CLR:-0}" == "1" && -x "$ENSUR
   export HRR_PLAYBACK
 fi
 
-# The replay log and the finding name a customer's kernels and addresses, so
-# they are private from the moment they exist, not only after the chmod at the
+# The replay log and finding name a customer's kernels and addresses, so make them private from creation.
 umask 077
 
 REPLAY_GPU=""
 if [[ "$mode" != "skip" ]]; then
-  # Only when a device is actually going to be used: metadata-only needs no GPU
-  # and should not announce a choice it never makes.
+  # Pick a GPU only when replaying: metadata-only runs need none.
   REPLAY_GPU="${GPU:-$(pick_gpu)}"
   run_replay_preflight "$mode" "$REPLAY_GPU"
 fi
@@ -314,16 +301,14 @@ elif [[ "$mode" == "native" ]]; then
   record_replay_stop "$replay_rc" "$LOG"
 fi
 
-# The analyzer prints the finding as well as writing it, so it is the only
-# thing on stdout, and -o naming stdout itself would print it twice.
+# The analyzer prints the finding itself, so skip -o when it names stdout to avoid printing twice.
 CMD=(python3 "$ANALYZER" --format "$FORMAT" --archive "$ARCHIVE")
 [[ "$FINDING" -ef /dev/stdout ]] || CMD+=(-o "$FINDING")
 [[ -n "${HRR_PLAYBACK:-}" ]] && CMD+=(--hrr-playback "$HRR_PLAYBACK")
 [[ -n "$LOG" && -f "$LOG" ]] && CMD+=(--log "$LOG")
 "${CMD[@]}"
 
-# A regular file only: -o can name a device such as /dev/stdout or /dev/null,
-# and -f follows a link, so /dev/stdout redirected to a file would pass it.
+# Only regular files: -o may name /dev/stdout or /dev/null, and -f follows links.
 [[ -f "$FINDING" && ! -L "$FINDING" ]] && chmod 600 "$FINDING" 2>/dev/null || true
 [[ -n "$LOG" && -f "$LOG" ]] && chmod 600 "$LOG" 2>/dev/null || true
 echo "[triage] finding=$(safe "$FINDING")" >&2

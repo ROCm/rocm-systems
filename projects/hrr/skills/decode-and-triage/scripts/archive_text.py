@@ -27,13 +27,13 @@ import sys
 import unicodedata
 from typing import Any
 
-# A kernel name is the longest legitimate value (a mangled template symbol runs
-# to a few hundred characters); a version or an architecture is far shorter.
+# A kernel name is the longest legitimate value: a mangled template symbol can reach
+# a few hundred characters. Versions and architectures are far shorter.
 MAX_LEN = 256
 TRUNCATED = "...[truncated]"
 
-# Prefix of every line the filter mode writes. A line that starts with it cannot
-# start a markdown heading, list item, quote or fence.
+# Prefix of every line the filter mode writes. A line with it cannot start
+# a markdown heading, list item, quote or fence.
 STREAM_PREFIX = "[data] "
 
 

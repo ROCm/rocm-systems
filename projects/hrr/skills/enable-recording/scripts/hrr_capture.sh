@@ -5,16 +5,13 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSPECT="$SCRIPT_DIR/inspect_archive.py"
-# The sibling skill, which replays an archive and says what failed. Also where
-# the only script that finds or builds a matching hrr-playback lives.
 TRIAGE="$SCRIPT_DIR/../../decode-and-triage/scripts/triage_archive.sh"
 ENSURE_PLAYBACK="$SCRIPT_DIR/../../decode-and-triage/scripts/ensure_playback.sh"
 ROCM_PATH="${ROCM_PATH:-/opt/rocm}"
 
 CAPTURE_VAR="HIP_HRR_CAPTURE_OUTPUT"
 
-# Set by check_runtime when it could not establish which runtime will bind, so
-# `run` can repeat the caveat at the moment it matters.
+# Set when check_runtime cannot establish which runtime binds, so `run` can repeat the caveat.
 RUNTIME_UNRESOLVED=0
 
 usage() {
@@ -60,11 +57,8 @@ lib_has_capture() {
   grep -a -q -- "$CAPTURE_VAR" "$1" 2>/dev/null
 }
 
-# Only the names a linked binary can ask for. A build or backup left beside the
-# real thing, `libamdhip64.so.hrr-orig` and the like, is not a runtime anything
 is_runtime_name() {
-  # Anchored: `libamdhip64.so.7.hrr-orig` and `libamdhip64.so.7.bak` match a
-  # `.so.[0-9]*` glob and are not runtimes anything loads.
+  # Anchored: `libamdhip64.so.7.hrr-orig` and `.so.7.bak` match the `.so.[0-9]*` glob, but no binary loads them.
   [[ "${1##*/}" =~ ^libamdhip64\.so(\.[0-9]+)*$ ]]
 }
 
@@ -87,8 +81,7 @@ workload_interpreter() {
       '#!'*python*)
         shebang="${shebang#\#!}"
         set -- $shebang
-        # `#!/usr/bin/env python3` names the interpreter in the second word,
-        # and `#!/usr/bin/env -S python3 -u` in the third, possibly after
+        # `#!/usr/bin/env python3` names the interpreter in the second word; `env -S python3 -u` in the third.
         if [[ "${1##*/}" == "env" ]]; then
           shift
           case "${1:-}" in
@@ -105,8 +98,7 @@ workload_interpreter() {
   PATH="${WORKLOAD_PATH:-$PATH}" command -v python3 2>/dev/null || echo python3
 }
 
-# Launchers that wrap the real workload. The binary that matters is the one
-# after them, otherwise preflight resolves `srun` or `env` and learns nothing.
+# Skip launchers that wrap the workload: preflight must inspect the binary after them.
 strip_launchers() {
   while (( $# )); do
     case "${1##*/}" in
@@ -120,8 +112,7 @@ strip_launchers() {
       nohup)
         shift ;;
       timeout)
-        # Options, then the duration, which is a bare operand: skipping only
-        # dashed arguments left `60s` as the workload.
+        # Skip options, then the duration: a bare operand that would otherwise be taken as the workload.
         shift
         while (( $# )) && [[ "$1" == -* ]]; do
           case "$1" in
@@ -158,8 +149,7 @@ strip_launchers() {
           esac
         done ;;
       mpirun|mpiexec|srun|torchrun|accelerate|deepspeed)
-        # Their own options and the command are not separable without knowing
-        # each launcher's grammar, so stop here and say so rather than guess.
+        # Launcher option grammars differ, so stop at the launcher rather than guess.
         printf '%s\n' "$1"; return 0 ;;
       *) printf '%s\n' "$1"; return 0 ;;
     esac
@@ -167,8 +157,6 @@ strip_launchers() {
   return 0
 }
 
-# Directories on the binary's own DT_RPATH or DT_RUNPATH, with $ORIGIN expanded,
-# for whichever of the two tags is asked for. The order matters and the two are
 binary_rpath_dirs() {
   local bin="$1" tag="${2:-RPATH|RUNPATH}" origin list dir
   [[ -n "$bin" && -f "$bin" ]] || return 0
@@ -184,14 +172,12 @@ binary_rpath_dirs() {
              awk -v tag="$tag" '$0 ~ "\\((" tag ")\\)" { match($0, /\[.*\]/); print substr($0, RSTART + 1, RLENGTH - 2) }')
 }
 
-# The runtime the loader will actually bind for this binary. This is the only
-# answer that accounts for DT_RPATH, and it is why the list below is a listing
+# The runtime the loader binds for this binary. Only this answer accounts for DT_RPATH.
 resolved_runtime() {
   local bin="$1" path
   [[ -n "$bin" && -f "$bin" ]] || return 1
   command -v ldd >/dev/null 2>&1 || return 1
-  # Only the mapping lines: `soname => /path`, or `/path` alone for a runtime
-  # preloaded by absolute path, which also satisfies the binary's own entry so
+  # Only mapping lines: `soname => /path`, or a bare `/path` for a runtime preloaded by absolute path.
   path="$(ldd "$bin" 2>/dev/null |
             awk '$2 == "=>" && $1 ~ /libamdhip64\.so/ { print $3; exit }
                  $1 ~ /^\/.*libamdhip64\.so[^\/]*$/ && $2 ~ /^\(0x/ { print $1; exit }')"
@@ -203,8 +189,7 @@ candidate_libs() {
   local entry dir pkg_dir interpreter
   local IFS_SAVE="$IFS"
 
-  # `#!/usr/bin/env python3` names an interpreter the workload finds on its own
-  # PATH, which under `env PATH=/venv/bin vllm` is not this script's.
+  # The workload finds `#!/usr/bin/env python3` on its own PATH, which `env PATH=/venv/bin` changes.
   interpreter="$(workload_interpreter)"
   if [[ "$interpreter" != */* ]]; then
     interpreter="$(PATH="${WORKLOAD_PATH:-$PATH}" command -v -- "$interpreter" 2>/dev/null ||
@@ -227,14 +212,12 @@ candidate_libs() {
   done
   IFS="$IFS_SAVE"
 
-  # After LD_LIBRARY_PATH, which is where the loader looks for it. DT_RUNPATH
-  # is the modern linker's default, so listing it as if it were DT_RPATH put
+  # List DT_RUNPATH after LD_LIBRARY_PATH, where the loader searches it, not as DT_RPATH.
   while read -r dir; do
     [[ -d "$dir" ]] && emit_libs "workload RUNPATH" "$dir"
   done < <(binary_rpath_dirs "${WORKLOAD_BIN:-}" RUNPATH)
 
-  # Runtimes bundled inside installed packages. Listed generically rather than
-  # by package name: any package may ship one, and the site directories are
+  # List bundled runtimes generically: any package may ship one.
   while read -r pkg_dir; do
     [[ -n "$pkg_dir" && -d "$pkg_dir" ]] || continue
     while read -r dir; do
@@ -261,8 +244,7 @@ PY
   emit_libs "$ROCM_PATH/lib" "$ROCM_PATH/lib"
 }
 
-# Identity of a file for dedup purposes. Device and inode rather than the
-# resolved path, because the same library is routinely installed as several
+# Compare device and inode, not the resolved path: one library is often installed under several paths.
 file_identity() {
   stat -c '%d:%i' "$1" 2>/dev/null || readlink -f "$1" 2>/dev/null || echo "$1"
 }
@@ -291,8 +273,7 @@ check_runtime() {
     fi
   done < <(candidate_libs)
 
-  # The listing above is what is visible from here. When a command was given and
-  # it links a HIP runtime itself, the loader's own answer replaces the guess.
+  # When the command links a HIP runtime itself, the loader's answer replaces the listing's guess.
   if bound="$(resolved_runtime "${WORKLOAD_BIN:-}")"; then
     effective="$bound"
     effective_src="bound by ${WORKLOAD_BIN##*/}"
@@ -321,8 +302,7 @@ check_runtime() {
     fi
     RUNTIME_UNRESOLVED=1
     if [[ -n "$no_capture_seen" ]]; then
-      # The PyTorch case exactly: binding cannot be established, and a runtime
-      # that cannot capture is sitting in the load path. Passing here is how a
+      # The PyTorch case: binding cannot be established and a non-capturing runtime is on the load path.
       log "UNRESOLVED, and refusing: nothing here was resolved, and $no_capture_seen has no"
       log "capture. If the workload binds that one, which a wheel or a plugin commonly does,"
       log "nothing will be recorded. Install a capture-capable runtime where the workload"
@@ -339,8 +319,7 @@ check_runtime() {
   log "the runtime that will load is $effective (via $effective_src) and it has NO capture"
   log "capture is compiled into libamdhip64, so a build without it ignores $CAPTURE_VAR"
   log "and no archive is created at all: verify then reports 'no archive'."
-  # Collected rather than piped into `grep -q`: under `pipefail` an early-closing
-  # reader makes the whole pipeline fail, and the advice below would then flip to
+  # Collect first: under pipefail, `grep -q` closing early fails the pipeline and flips the advice.
   local alternatives
   alternatives="$(candidate_libs | while IFS='|' read -r _ path; do
                     lib_has_capture "$path" && echo yes
@@ -358,8 +337,7 @@ check_runtime() {
 }
 
 
-# Filesystem type of the mount a path sits on, from /proc/self/mountinfo, which
-# knows about bind mounts where `stat -f` on a parent directory does not. Falls
+# Filesystem type of the mount holding a path, from /proc/self/mountinfo, which sees bind mounts that `stat -f` on a parent misses.
 path_fstype() {
   local target="$1" resolved
   resolved="$(readlink -f "$target" 2>/dev/null || echo "$target")"
@@ -386,12 +364,10 @@ check_output_path() {
        log "working directory happens to be. An absolute path is safer." ;;
   esac
 
-  # Capture writes into the output directory, so when it already exists, most
-  # often because it is the bind mount itself, that directory is the one to
+  # Check the output directory itself when it exists, as with a bind mount; otherwise check its parent.
   if [[ -d "$out" ]]; then
     probe="$out"
   elif [[ -e "$out" || -L "$out" ]]; then
-    # A file, or a link to nothing: capture cannot make its directory there.
     fail "$out exists and is not a directory"
   else
     parent="$(dirname "$out")"
@@ -400,8 +376,7 @@ check_output_path() {
   fi
   [[ -w "$probe" && -x "$probe" ]] || fail "not writable (needs write and search permission): $probe"
 
-  # The filesystem of the output path itself, resolved through its own mount
-  # rather than its parent's. With `-v /host/captures:/data/captures` the
+  # Use the output path's own mount, not its parent's: with `-v /host/captures:/data/captures` the parent is on the overlay.
   fstype="$(path_fstype "$probe")"
   avail_kb="$(df -Pk "$probe" 2>/dev/null | awk 'NR==2 {print $4}')"
   avail_gb=$(( ${avail_kb:-0} / 1024 / 1024 ))
@@ -437,8 +412,7 @@ group_running() {
   fi
   for stat in /proc/[0-9]*/stat; do
     read -r line 2>/dev/null < "$stat" || continue
-    # The command name is in parentheses and may itself hold spaces or a `)`,
-    # so the fields are counted from the last one: state, ppid, pgrp.
+    # The command name sits in parentheses and may hold spaces or `)`, so count fields from the last `)`: state, ppid, pgrp.
     read -r -a fields <<<"${line##*) }"
     if [[ "${fields[2]:-}" == "$pgid" && "${fields[0]:-}" != Z ]]; then
       return 0
@@ -461,8 +435,7 @@ MIN_FREE_GB=50
 PASSTHROUGH=()
 CMD=()
 
-# A missing flag value must not exit 1 silently: 1 is also verify's "nothing
-# captured" code, so a scripted gate could not tell a typo from an empty archive.
+# A missing value must say so: exit 1 alone is also verify's "nothing captured" code.
 needs_value() {
   (( $2 >= 2 )) || fail "$1 needs a value"
 }
@@ -485,8 +458,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# The executable the command will run, when there is one. Preflight answers a
-# different and much weaker question without it.
 WORKLOAD_BIN=""
 WORKLOAD_PATH=""
 LAUNCHER_ENV=()
@@ -497,16 +468,13 @@ if [[ ${#CMD[@]} -gt 0 ]]; then
     WORKLOAD_NAME="$line"
   done < <(strip_launchers "${CMD[@]}")
   [[ "$WORKLOAD_NAME" == *=* ]] && { LAUNCHER_ENV+=("$WORKLOAD_NAME"); WORKLOAD_NAME=""; }
-  # Looked up on the PATH the workload is started with: `env PATH=/x app` runs
-  # /x/app, and the last assignment wins as it does for env.
+  # Resolve on the workload's PATH: `env PATH=/x app` runs /x/app, and the last assignment wins.
   for assignment in ${LAUNCHER_ENV[@]+"${LAUNCHER_ENV[@]}"}; do
     if [[ "$assignment" == PATH=* ]]; then WORKLOAD_PATH="${assignment#PATH=}"; fi
   done
   WORKLOAD_BIN="$(PATH="${WORKLOAD_PATH:-$PATH}" command -v -- "${WORKLOAD_NAME:-${CMD[0]}}" 2>/dev/null || true)"
 fi
 
-# check_runtime in the environment the workload will have. `local -x` exports
-# each assignment for the length of this call only, so the reader run after the
 check_runtime_as_launched() {
   local assignment
   for assignment in ${LAUNCHER_ENV[@]+"${LAUNCHER_ENV[@]}"}; do
@@ -579,8 +547,7 @@ case "$VERB" in
     fi
     log "capturing to $OUTPUT"
     log "running: ${CMD[*]}"
-    # Backgrounded and waited on, with the signals forwarded, so that a stop
-    # aimed at this script reaches the workload. Left in the foreground, a
+    # Run in the background and forward signals, so a stop aimed at this script reaches the workload.
     workload_pid=0
     forward_signal() {
       local sig="$1"
@@ -591,8 +558,7 @@ case "$VERB" in
     trap 'forward_signal HUP' HUP
 
     set +e
-    # Job control on for the launch only, which is what gives the job its own
-    # group. It also stops stdin defaulting to /dev/null for a background job,
+    # Job control gives the job its own process group and stops stdin defaulting to /dev/null.
     set -m
     (
       trap - INT QUIT
@@ -601,8 +567,7 @@ case "$VERB" in
     ) &
     workload_pid=$!
     set +m
-    # A trapped signal cuts `wait` short while the workload may still be
-    # shutting down. Keep waiting until it has gone, then take its own status.
+    # A trapped signal cuts `wait` short. Wait until the workload has gone, then take its status.
     wait "$workload_pid"
     while kill -0 "$workload_pid" 2>/dev/null; do
       wait "$workload_pid"

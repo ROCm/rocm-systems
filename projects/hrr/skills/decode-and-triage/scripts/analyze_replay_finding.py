@@ -30,16 +30,14 @@ RE_MAF = re.compile(
     r"Memory access fault by GPU node-(\d+).*on address (0x[0-9a-fA-F]+)\.\s*"
     r"Reason:\s*([^.\n]+)"
 )
-# CLR prints "Memory Fault Error" and this bracket with separate log calls, and
-# the first only at AMD_LOG_LEVEL>=1, so the bracket is matched on its own. Its
+# CLR logs "Memory Fault Error" and this bracket separately, the first only at AMD_LOG_LEVEL>=1, so match the bracket alone.
 RE_MEM_FAULT_ERR = re.compile(
     r"\[[^\]\n]*?faulting addr: (0x[0-9a-fA-F]+), kernel: ([^\]]+)\]"
 )
 RE_HSA_STATUS = re.compile(r"HSA_STATUS_ERROR_(MEMORY_FAULT|ABORTED|EXCEPTION)")
 RE_REPLAY_TIMEOUT = re.compile(r"replay timed out after (\d+)s")
 RE_REPLAY_SIGNAL = re.compile(r"replay killed by signal (\d+)")
-# A queue abort carries its own bracket, with the kernel but no faulting
-# address, so the memory-fault regex above cannot see it. Observed on an
+# A queue abort has its own bracket with the kernel but no faulting address, so the memory-fault regex misses it.
 RE_QUEUE_ABORT_KERNEL = re.compile(
     r"aborting with error[^\[\n]*\[[^\]]*?kernel: ([^\]]+)\]"
 )
@@ -49,22 +47,18 @@ RE_ARCHIVE_RECOVERED = re.compile(
     r"recovered (\d+) events|Archive : (\d+) events, (\d+) kernels, (\d+) blobs, (\d+) code objects"
 )
 RE_ARCHIVE_COMPLETE = re.compile(r"Complete:\s+(yes|no)\b", re.IGNORECASE)
-# `--info` reports the archive as labelled fields, one per line, while a replay
-# run reports the same totals on a single `[HRR] Archive :` line.
+# `--info` prints labelled fields, one per line; a replay prints the same totals on one `[HRR] Archive :` line.
 RE_INFO_EVENTS = re.compile(r"^Events:\s+(\d+)\s*$", re.MULTILINE)
 RE_INFO_KERNELS = re.compile(r"^Kernels:\s+(\d+)\s*$", re.MULTILINE)
 RE_INFO_RECOVERED = re.compile(r"^Recovered:\s+(\d+)\s+events\s*$", re.MULTILINE)
-# Short archives print no `Kernels:` total and report launches only in the API
-# call-count block. Without this the total stays unknown and the single-kernel
+# Short archives print no `Kernels:` total, only launch counts in the API call-count block.
 RE_INFO_LAUNCH_COUNT = re.compile(r"\bhip\w*LaunchKernel\s+(\d+)\b")
-# Rows of the `--info` kernel summary table: name, grid, block, with an optional
-# leading id, since some builds omit the id column. A memory fault can kill the
+# Rows of the `--info` kernel table: name, grid, block, with a leading id that some builds omit.
 RE_INFO_KERNEL_ROW = re.compile(
     r"^[ \t]*(?:\d+[ \t]+)?([A-Za-z_][^\s\[]*)[ \t]+\[[\d,\s]+\][ \t]+\[[\d,\s]+\]",
     re.MULTILINE,
 )
-# `--verbose` prints one line per replayed event. A GPU fault tears the process
-# down before HRR writes its own Fatal line, so when a run was made verbose the
+# `--verbose` prints one line per replayed event. A GPU fault kills the process before HRR's Fatal line, so these name the last event.
 RE_EVENT_PROGRESS = re.compile(
     r"^[ \t]*(?:\[HRR\][ \t]*)?Event (\d+):[ \t]*(\w+)"
     r"(?:[^\n]*?->[ \t]*Kernel '([^']+)')?",
@@ -81,7 +75,6 @@ RE_CAPTURE_HIP = re.compile(r"\[capture\] HIP_SO=(\S+)")
 RE_VERSION_MISMATCH = re.compile(
     r"\[HRR\] Version mismatch(?: in [^\n]*)?: file=(\d+) reader=(\d+)"
 )
-# `--sync-after-launch` names the kernel it synchronized after when the sync fails.
 RE_SYNC_GPU_ERROR = re.compile(r"\[HRR\] GPU error after '([^'\n]+)'")
 
 
@@ -151,8 +144,7 @@ def _classify(text: str, finding: Finding) -> str:
         if "out of memory" in text.lower():
             return "replay_oom"
         return "replay_fatal_api"
-    # An HSA queue abort is not a hang. MEMORY_FAULT says so in as many words,
-    # and EXCEPTION is a hardware exception, which an out-of-bounds access
+    # An HSA queue abort is not a hang: MEMORY_FAULT is a fault and EXCEPTION is a hardware exception.
     hsa = RE_HSA_STATUS.search(text)
     if hsa and not RE_PASS.search(text):
         return (
@@ -164,8 +156,7 @@ def _classify(text: str, finding: Finding) -> str:
         return "nan_inf_divergence"
     if "Replay aborted" in text or "aborting replay" in text:
         return "replay_aborted"
-    # Last, so that a log which explains its own stop is believed first: a
-    # memory fault also dies on a signal, and there the fault line is the
+    # Last, so a log that explains its own stop is believed first: a memory fault also dies on a signal.
     if RE_REPLAY_SIGNAL.search(text):
         return "replay_crashed"
     return "unknown"
@@ -221,8 +212,7 @@ def parse_text(text: str, source: str, finding: Finding) -> Finding:
             finding.archive_kernels = int(m.group(1))
 
     for name in RE_INFO_KERNEL_ROW.findall(text):
-        # The table truncates long names to its column width, and a truncated
-        # symbol is worse than none: it cannot be looked up or handed over.
+        # The table truncates long names, and a truncated symbol cannot be looked up.
         if name.endswith("...") or name in finding.archive_kernel_names:
             continue
         finding.archive_kernel_names.append(name)
@@ -253,8 +243,7 @@ def parse_text(text: str, source: str, finding: Finding) -> Finding:
         finding.d2h_fail = int(m.group(4))
         finding.d2h_attempted = int(m.group(5))
         last_prog = m.group(6)
-    # Only when this input had progress lines. Assigning unconditionally let the
-    # archive `--info` pass, which has none, wipe the kernel the replay log had
+    # Assign only when this input had progress lines, so the archive `--info` pass does not wipe the replay log's kernel.
     if last_prog is not None:
         finding.last_progress_kernel = last_prog
 
@@ -270,8 +259,7 @@ def parse_text(text: str, source: str, finding: Finding) -> Finding:
     for m in RE_EVENT_PROGRESS.finditer(text):
         last_event = m
     if last_event is not None:
-        # An HRR Fatal line names the failing event exactly; this is only the
-        # last event that started, so it never overrides one.
+        # A Fatal line names the failing event exactly; this is only the last event started, so it never overrides one.
         if finding.failing_call_index is None:
             finding.failing_call_index = int(last_event.group(1))
             finding.failing_api = last_event.group(2)
@@ -312,8 +300,7 @@ def parse_text(text: str, source: str, finding: Finding) -> Finding:
         finding.grid = m.group(1)
         finding.workgroup = m.group(2)
 
-    # The replay summary carries the end-of-run totals, so it wins over the
-    # last progress line, which is printed at the first kernel and then only
+    # The replay summary holds end-of-run totals, so it wins over the progress line, which prints only at intervals.
     m = RE_D2H_SUMMARY.search(text)
     if m:
         finding.d2h_pass = int(m.group(1))
@@ -338,8 +325,7 @@ def parse_text(text: str, source: str, finding: Finding) -> Finding:
     elif RE_FAIL.search(text):
         new_outcome = "FAIL"
     elif RE_HSA_STATUS.search(text):
-        # A queue abort is a GPU-side stop, so it is never UNKNOWN. Its own
-        # status says which: MEMORY_FAULT is a fault, the rest are aborts.
+        # A queue abort is GPU-side, never UNKNOWN: MEMORY_FAULT is a fault, the rest are aborts.
         new_outcome = (
             "MAF"
             if RE_HSA_STATUS.search(text).group(1) == "MEMORY_FAULT"
@@ -377,8 +363,7 @@ def finalize(finding: Finding) -> Finding:
         finding.failing_api = None
         return finding
 
-    # The replay process died without reaching a verdict, so nothing here is a
-    # statement about the workload. Inferring a kernel from the archive would
+    # The replay died without a verdict, so nothing here describes the workload. Inferring a kernel from the archive would mislead.
     if finding.fault_class == "replay_crashed":
         finding.kernel_name = None
         finding.kernel_family = None
@@ -391,8 +376,7 @@ def finalize(finding: Finding) -> Finding:
         )
         return finding
 
-    # Under --sync-after-launch the last launch to start is the one that
-    # faulted, so it stands in when the runtime's fault line carried no kernel.
+    # Under --sync-after-launch the last launch to start is the one that faulted, so use it when the fault line names no kernel.
     if not finding.kernel_name and finding.last_event_kernel:
         finding.kernel_name = finding.last_event_kernel
         finding.notes.append(
@@ -402,8 +386,7 @@ def finalize(finding: Finding) -> Finding:
             f"prints those per-event lines."
         )
 
-    # A memory fault can tear the process down before the failing dispatch is
-    # attributed, leaving a log with no kernel at all. When the archive holds
+    # A memory fault can kill the process before the failing dispatch is attributed. When the archive holds one kernel, name it.
     if (
         not finding.kernel_name
         and finding.archive_kernels == 1
@@ -454,8 +437,7 @@ def run_archive_info(archive: Path, hrr_playback: str | None) -> str:
 
 
 def render_markdown(f: Finding) -> str:
-    # Every value below came from the archive or from a log its replay wrote, so
-    # each goes through the one sanitizer before it is printed: a value is a line
+    # Every value came from the archive or a replay log, so each goes through the sanitizer before printing.
     d2h = (
         f"- **D2H**: pass={f.d2h_pass or 0} fail={f.d2h_fail or 0} "
         f"attempted={f.d2h_attempted or 0}"

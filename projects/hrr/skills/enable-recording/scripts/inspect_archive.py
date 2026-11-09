@@ -39,8 +39,7 @@ from pathlib import Path
 EXIT_OK = 0
 EXIT_EMPTY = 1
 EXIT_USAGE = 2
-# A cross-check the caller asked for and that did not happen. Distinct from a
-# bad archive: the archive may be perfect and the reader unable to start. It
+# A requested cross-check that did not happen. The archive may be fine while the reader cannot start.
 EXIT_NO_CROSS_CHECK = 3
 
 VERSION_MISMATCH = "Version mismatch"
@@ -54,19 +53,16 @@ EOF_MAGIC_OFFSET = 40
 # `hrr_event_header`: uint16 event_type, uint64 sequence_id, uint64 timestamp_ns,
 # uint64 thread_id, uint32 payload_length, 2 bytes of padding. Packed, 32 bytes.
 EVENT_HEADER_BYTES = 32
-# The reader takes a record claiming more than this as torn (`kMaxRecordBytes`
-# in playback/hrr_reader.cpp), however large the file is.
+# The reader treats a record claiming more than this as torn (`kMaxRecordBytes` in playback/hrr_reader.cpp).
 MAX_RECORD_BYTES = 64 * 1024 * 1024
 
-# Capture zeroes these ELF sections in every code object it stores, since they
-# hold the compiler build, source file names and build paths; and it writes the
+# Capture zeroes these ELF sections in each stored code object: they hold the compiler build, source names and build paths.
 BUNDLE_MAGIC = b"__CLANG_OFFLOAD_BUNDLE__"
 COMPRESSED_BUNDLE_MAGIC = b"CCOB"
 REGISTER_FAT_BINARY = {8: 549, 9: 550, 10: 550, 11: 551, 12: 552}
 FAT_BINARY_HASH_OFFSET = EVENT_HEADER_BYTES + 8
 HARDWARE_ID_FIELDS = ("pci", "uuid", "luid")
-# Capture cannot zero what the GPU loads, so `verify` looks there for strings
-# such as "/home/dev/src/model.hip" or "C:\src\model.hip": a NUL-terminated
+# Capture cannot zero what the GPU loads, so verify scans there for host paths like "/home/dev/src/model.hip" or "C:\src\model.hip".
 SHT_PROGBITS, SHF_ALLOC, SHF_EXECINSTR = 1, 0x2, 0x4
 ABSOLUTE_PATH = re.compile(
     rb"(?<=\0)(?:/[\x20-\xff]+/|[A-Za-z]:[\\/][\x20-\xff]+[\\/])[\x20-\xff]+(?=\0)"
@@ -86,12 +82,10 @@ class ProcessArchive:
     code_object_files: int = 0
     total_bytes: int = 0
     manifest_error: str | None = None
-    # Manifest fields present with the wrong JSON type, read as unknown.
     manifest_bad_fields: list[str] = field(default_factory=list)
     hip_runtime_version: str | None = None
     format_version: int | None = None
     holds_an_event: bool = False
-    # Manifest fields that name the individual GPU and are not blank.
     hardware_ids: list[str] = field(default_factory=list)
     debug_info_files: int = 0
     path_files: int = 0
@@ -145,8 +139,7 @@ class ArchiveReport:
     playback_version: str | None = None
     playback_format_version: int | None = None
     capture_runtime: str | None = None
-    # True only when a reader actually decoded the archive. A reader that
-    # refused it explained itself, which is useful, but the archive still went
+    # True only when a reader decoded the archive. A reader that refused it explained why but did not cross-check.
     cross_check_ran: bool = False
     warnings: list[str] = field(default_factory=list)
 
@@ -316,7 +309,6 @@ def _holds_an_event(events: Path) -> bool:
         return False
     if len(head) < HEADER_BYTES + EVENT_HEADER_BYTES:
         return False
-    # The reader rejects a file without the HRR header, whatever follows it.
     if struct.unpack_from("<I", head)[0] != HEADER_MAGIC:
         return False
     event_type, payload_length = struct.unpack_from("<H24xI", head, HEADER_BYTES)
@@ -327,8 +319,7 @@ def _holds_an_event(events: Path) -> bool:
         and struct.unpack_from("<I", head, HEADER_BYTES + EOF_MAGIC_OFFSET)[0] == EOF_MAGIC
     ):
         return False
-    # payload_length counts the header too, and a record cannot claim more than
-    # the file holds, nor more than the reader will take.
+    # payload_length includes the header; a record cannot exceed the file or the reader's limit.
     if (
         payload_length < EVENT_HEADER_BYTES
         or payload_length > size - HEADER_BYTES
@@ -345,8 +336,6 @@ def _read_manifest(path: Path) -> tuple[dict | None, str | None]:
         manifest = json.loads(path.read_text(encoding="utf-8", errors="replace"))
     except (OSError, ValueError) as exc:
         return None, str(exc)
-    # Valid JSON is not yet a manifest: `[]` or `1` crashed the first `.get`
-    # on it, in the tool meant to report on damaged captures.
     if not isinstance(manifest, dict):
         return None, f"not a JSON object: {type(manifest).__name__}"
     return manifest, None
@@ -369,10 +358,8 @@ def _load_process(pid_dir: Path) -> ProcessArchive:
 
     manifest, error = _read_manifest(pid_dir / "manifest.json")
     proc.manifest_error = error
-    # `{}` is a manifest too, and a damaged one, not a missing one.
     if manifest is not None:
-        # A damaged manifest is reported, not raised on: any field can be any
-        # JSON value, and `"event_count": "100"` crashed the first comparison.
+        # Report a damaged manifest instead of raising: any field can hold any JSON value.
         def typed(source: dict, key: str, kind: type):
             if key not in source:
                 return None
@@ -408,8 +395,7 @@ def _load_process(pid_dir: Path) -> ProcessArchive:
         if suffix.isdigit():
             proc.pid = int(suffix)
 
-    # The whole directory is what gets sent: the manifests and any `regions/`
-    # sidecars as well as the events, blobs and code objects.
+    # Count the whole directory: manifests and `regions/` sidecars are sent too.
     _, proc.total_bytes = _dir_stats(pid_dir)
     return proc
 
@@ -420,8 +406,7 @@ def _resolve(archive: Path) -> tuple[Path, list[Path]]:
     A single pid dir is its own root: it is what gets sent, and the parent's
     manifest lists processes that were not passed.
     """
-    # A pid-* directory with no events.bin is a leftover the reader skips
-    # (playback/hrr_playback.cpp), not a process that recorded nothing, and so is
+    # A pid-* directory without events.bin is a leftover the reader skips (playback/hrr_playback.cpp), not an empty capture.
     pid_dirs = sorted(
         d
         for d in archive.glob("pid-*")
@@ -562,14 +547,12 @@ def _run_playback_info(playback: str, target: Path, timeout: int) -> tuple[str |
         return None, str(exc)
     output = ((completed.stdout or "") + (completed.stderr or "")).strip()
     if completed.returncode != 0:
-        # A reader that refused the archive explains itself, and that explanation
-        # is worth keeping. A reader that never started prints a loader error,
+        # A reader that refused the archive explains why; keep that. A loader error says nothing about the archive.
         if VERSION_MISMATCH in output:
             return output, None
         detail = output.splitlines()[0] if output else "no output"
         return None, f"hrr-playback --info exited {completed.returncode}: {detail}"
-    # Success with nothing said is not a cross-check either, and without an
-    # error here the report gave no reason for its failed exit status.
+    # Silent success is not a cross-check; record why the exit status failed.
     if not output:
         return None, "hrr-playback --info exited 0 and printed nothing"
     return output, None
@@ -658,8 +641,7 @@ def inspect(
         if binary:
             report.playback_binary = binary
             report.playback_version, report.playback_format_version = _playback_version(binary)
-            # The substantive process, not the alphabetically first one: pid-406
-            # sorts before pid-45, and in a server capture the small process is
+            # Pick the substantive process, not the alphabetically first: pid-406 sorts before pid-45.
             target = max(
                 report.recorded_processes,
                 key=lambda p: (p.event_count or 0, p.events_bytes),
@@ -738,8 +720,7 @@ def _cross_check(report: ArchiveReport, target: Path) -> None:
             "the two do not agree and nothing it reports can be relied on"
         )
     elif report.playback_format_version is None:
-        # Keyed on the format version rather than on the identity string: a
-        # reader whose `--version` succeeds without printing that field still
+        # Key on the format version, not the identity string: a reader's `--version` may succeed without printing it.
         report.warnings.append(
             "this hrr-playback does not report the archive format it reads, so the pairing "
             "with the runtime that captured is unverified. A reader from a different build "
@@ -793,8 +774,7 @@ def render(report: ArchiveReport) -> str:
     lines.append("")
     for proc in report.processes:
         events = "unknown" if proc.event_count is None else f"{proc.event_count:,}"
-        # Files on disk rather than the manifest total, which counts code
-        # objects among its blobs and so disagrees with both `blobs/` and
+        # Count files on disk, not the manifest total, which includes code objects and so disagrees with `blobs/`.
         blobs = f"{proc.blob_files:,}"
         if proc.manifest_error:
             state = "unknown (manifest unreadable)"
@@ -954,8 +934,7 @@ def main(argv: list[str] | None = None) -> int:
 
     archive = Path(args.archive).expanduser()
 
-    # A reader the caller named and that cannot run is a mistake to report, not
-    # one to fall back from: a silently skipped cross-check exiting 0 passes a
+    # A named reader that cannot run is an error, not a fallback: skipping the cross-check silently would exit 0.
     if args.playback and not (Path(args.playback).is_file() and os.access(args.playback, os.X_OK)):
         message = f"--playback is not an executable file: {args.playback}"
         if args.json:
@@ -982,8 +961,7 @@ def main(argv: list[str] | None = None) -> int:
     print(json.dumps(to_dict(report), indent=2) if args.json else render(report))
     if not report.recorded_processes:
         return EXIT_EMPTY
-    # A reader that was found and then failed is a check that did not happen,
-    # whoever asked for it. No reader on the machine at all is the documented
+    # A reader that was found and failed is a missed check, whoever asked. No reader at all is the documented normal case.
     if not report.cross_check_ran and (args.playback or report.playback_binary):
         return EXIT_NO_CROSS_CHECK
     return EXIT_OK
