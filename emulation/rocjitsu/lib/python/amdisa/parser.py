@@ -1329,6 +1329,13 @@ class Parser:
                         opnd_name = synthesize_fieldless_name(opnd_type)
                         data_format_name = ''
                         is_fieldless = True
+                    # Read from the node rather than data_format_name, which is
+                    # blank for fieldless operands: a VOPC's fieldless VCC
+                    # destination becomes an SGPR under SDWA sd=1.
+                    is_wave_mask = (
+                        data_format_name_node is not None
+                        and xs.get_node_text(data_format_name_node) == 'FMT_NUM_M64'
+                    )
                     opnds.append(
                         Operand(
                             opnd_name,
@@ -1341,6 +1348,7 @@ class Parser:
                             order,
                             data_format_name,
                             is_fieldless,
+                            is_wave_mask,
                         )
                     )
                 opnds.sort(key=lambda x: x.order)

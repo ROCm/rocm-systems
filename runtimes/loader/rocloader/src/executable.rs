@@ -29,34 +29,9 @@ pub struct Definition {
 /// One owned image and the frontend's loaded-object metadata.
 pub struct LoadedObject<M> {
     /// Device image retained until this loaded object is removed.
-    image: LoadedImage,
+    pub image: LoadedImage,
     /// Frontend-owned metadata associated with that image.
-    metadata: M,
-}
-
-impl<M> LoadedObject<M> {
-    /// Attaches frontend metadata to an unpublished loaded image.
-    #[must_use]
-    pub fn new(image: LoadedImage, metadata: M) -> Self {
-        Self { image, metadata }
-    }
-
-    /// Borrows the owned image and its device-address facts.
-    #[must_use]
-    pub fn image(&self) -> &LoadedImage {
-        &self.image
-    }
-
-    /// Borrows frontend-specific metadata.
-    #[must_use]
-    pub fn metadata(&self) -> &M {
-        &self.metadata
-    }
-
-    /// Mutably borrows frontend-specific metadata before publication.
-    pub fn metadata_mut(&mut self) -> &mut M {
-        &mut self.metadata
-    }
+    pub metadata: M,
 }
 
 /// Mutable AMD HSA executable with transactional object publication.

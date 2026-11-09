@@ -24,15 +24,6 @@
 
 namespace {
 
-using dda::common::kDdaLLRsMaxBytes;
-using dda::common::kDdaLLRsSlotStridePkts;
-using dda::common::LLPacket16;
-
-// LL scratch footprint: 2 banks * nRanks slots * slotStride packets * 16B.
-static inline size_t ddaLLRsScratchSize(int nRanks) {
-  return (size_t)2 * (size_t)nRanks * kDdaLLRsSlotStridePkts * sizeof(LLPacket16);
-}
-
 template <typename T>
 static ncclResult_t ncclReduceScatterDdaFabricLLTyped(const void* sendbuff, void* recvbuff, size_t recvcount,
                                                       ncclComm* comm, cudaStream_t stream) {
@@ -60,9 +51,11 @@ static ncclResult_t ncclReduceScatterDdaFabricLLTyped(const void* sendbuff, void
   T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
+  // Bank 1 starts at ddaBankSize, matching the other LL tiers on this scratch.
+  const size_t bankSize = dda::common::ddaBankSize(comm->ddaScratchBytes);
 
-  INFO(NCCL_COLL, "DDA fabric ReduceScatter LL: nRanks=%d shardBytes=%zu nPk=%zu grid=%u block=%u", nRanks, bytes, nPk,
-       grid.x, block.x);
+  INFO(NCCL_COLL, "DDA fabric ReduceScatter LL: nRanks=%d shardBytes=%zu nPk=%zu grid=%u block=%u bankSize=%zu", nRanks,
+       bytes, nPk, grid.x, block.x, bankSize);
 
   const dda::common::DdaKernelParams params{comm->abortFlagDev};
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
@@ -71,17 +64,17 @@ static ncclResult_t ncclReduceScatterDdaFabricLLTyped(const void* sendbuff, void
   case 4:
     hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL<T, 4>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          recvcount, comm->rank, nRanks, epochDev, epochLen, params);
+                          recvcount, comm->rank, nRanks, epochDev, epochLen, bankSize, params);
     break;
   case 8:
     hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL<T, 8>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          recvcount, comm->rank, nRanks, epochDev, epochLen, params);
+                          recvcount, comm->rank, nRanks, epochDev, epochLen, bankSize, params);
     break;
   default:
     hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL<T, 0>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          recvcount, comm->rank, nRanks, epochDev, epochLen, params);
+                          recvcount, comm->rank, nRanks, epochDev, epochLen, bankSize, params);
     break;
   }
 
@@ -121,10 +114,13 @@ bool ncclReduceScatterDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, 
     return false;
   }
   // Slot holds kDdaLLRsMaxBytes of payload (stride = cap/8 packets).
-  if (bytes > kDdaLLRsMaxBytes) {
+  if (bytes > dda::common::kDdaLLRsMaxBytes) {
     return false;
   }
-  if (ddaLLRsScratchSize(comm->nRanks) > comm->ddaScratchBytes) {
+  // Bank 0 is [0, bankBytes). Bank 1 is [bankSize, bankSize + bankBytes).
+  const size_t bankBytes = dda::common::ddaLLRsBankBytes(comm->nRanks);
+  const size_t bankSize = dda::common::ddaBankSize(comm->ddaScratchBytes);
+  if (bankBytes > bankSize || bankSize + bankBytes > comm->ddaScratchBytes) {
     return false;
   }
 

@@ -4,6 +4,7 @@
 /// @file scalar_scc_test.cpp
 /// @brief Cross-architecture scalar SCC execution and preservation tests.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/rj_code.h"
@@ -194,7 +195,9 @@ public:
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 256;
     config.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create(std::string(profile.name), config, &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, std::string(profile.name), config, &gpu_mem, &l2);
+    if (!cu)
+      return;
     decoder = Decoder::create(profile.arch);
     if (cu)
       wf = cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
@@ -303,7 +306,7 @@ void expect_wrexec_def_use(const ScalarSccProfile &profile, const WrexecPair &pa
       EXPECT_FALSE(inst->dst_operand(i)->to_register_ref()) << profile.name << " " << mnemonic;
     }
 
-    const InstDefUse def_use(*inst);
+    const InstDefUse def_use(*inst, 64);
     EXPECT_TRUE(def_use.uses.contains(source)) << profile.name << " " << mnemonic;
     EXPECT_FALSE(def_use.uses.contains(destination)) << profile.name << " " << mnemonic;
     EXPECT_TRUE(def_use.defs.contains(destination)) << profile.name << " " << mnemonic;
@@ -721,7 +724,7 @@ TEST(ScalarSccTest, AddkAndMulkRegisterDestinationRead) {
       EXPECT_EQ(inst->dst_operand(0)->to_register_ref(), (RegisterRef{RegClass::SGPR, 4, 1}))
           << profile.name << " " << mnemonic;
 
-      const InstDefUse def_use(*inst);
+      const InstDefUse def_use(*inst, 64);
       EXPECT_TRUE(def_use.uses.contains(RegisterRef{RegClass::SGPR, 4, 1}))
           << profile.name << " " << mnemonic;
       EXPECT_TRUE(def_use.defs.contains(RegisterRef{RegClass::SGPR, 4, 1}))
