@@ -46,8 +46,8 @@ struct frame_strings
 
 struct cpu_snap_decoder::impl
 {
-    explicit impl(emit_fn emit_in)
-    : emit{ std::move(emit_in) }
+    explicit impl(on_slice_fn on_slice_in)
+    : on_slice{ std::move(on_slice_in) }
     {
         reader.on_event([this](const ::cpu_snap::core::record_variant& record) {
             on_record(record);
@@ -109,7 +109,7 @@ struct cpu_snap_decoder::impl
         for(auto const address : frames | std::views::reverse)
         {
             auto const& frame = frame_cache.at(address);
-            emit(backtrace_region_sample{
+            on_slice(backtrace_region_sample{
                 static_cast<std::uint32_t>(ROCPROFSYS_CATEGORY_TIMER_SAMPLING),
                 sample.tid, track_name, frame.name, start, sample.timestamp_ns,
                 k_timer_sampling_category, frame.call_stack, std::string_view{}, "{}" });
@@ -155,7 +155,7 @@ struct cpu_snap_decoder::impl
 
     using address_at = std::pair<std::uint64_t, std::uint64_t>;
 
-    emit_fn                  emit;
+    on_slice_fn              on_slice;
     ::cpu_snap::core::reader reader;
     // Modules loaded over time, from the stream's maps records; read by the symbolizer.
     ::cpu_snap::core::module_map                modules;
@@ -172,8 +172,8 @@ struct cpu_snap_decoder::impl
     std::uint64_t                                    unresolved_samples = 0;
 };
 
-cpu_snap_decoder::cpu_snap_decoder(emit_fn emit)
-: m_impl{ std::make_unique<impl>(std::move(emit)) }
+cpu_snap_decoder::cpu_snap_decoder(on_slice_fn on_slice)
+: m_impl{ std::make_unique<impl>(std::move(on_slice)) }
 {}
 
 cpu_snap_decoder::~cpu_snap_decoder() = default;
