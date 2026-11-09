@@ -1743,7 +1743,7 @@ protected:
   };
   std::vector<Wavefront *> complete_barrier(uint32_t dispatch_id, uint32_t wg_id,
                                             uint8_t completion_bit, uint32_t named_barrier_id = 0);
-  void notify_barrier_complete(std::span<Wavefront *> members);
+  void notify_barrier_complete(std::span<Wavefront *> members, uint8_t completion_bit);
   std::unordered_map<uint64_t, WorkgroupBarriers> barrier_wgs_;
 
   /// @brief CU-private fallback GWS store, used when no shared store is injected.

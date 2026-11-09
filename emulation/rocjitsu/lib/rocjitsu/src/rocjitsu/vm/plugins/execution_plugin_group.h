@@ -500,10 +500,10 @@ public:
     });
   }
 
-  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts) {
+  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts, BarrierKind kind) {
     dispatch_with_plugin_lock([&]() {
       for (auto &entry : plugins_)
-        entry.plugin->onAmdgpuBarrierResolved(wavefronts);
+        entry.plugin->onAmdgpuBarrierResolved(wavefronts, kind);
     });
   }
 

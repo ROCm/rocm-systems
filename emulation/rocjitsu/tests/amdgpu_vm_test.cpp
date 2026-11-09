@@ -8455,6 +8455,28 @@ TEST_P(IsaTest, SEndpgm_Halts) {
   EXPECT_TRUE(fx.halted());
 }
 
+// The emulator's null-PC return sentinel is another normal termination path.
+// Keep a counter pending to distinguish draining it from freeing the wave early.
+TEST(ComputeUnitTest, NullPcReturnDrainsMemoryBeforeHalt) {
+  VmFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize("cdna4", /*num_cus=*/1, /*num_wf_slots=*/1));
+  const std::array<uint32_t, 1> words = cdna4::build_sop1(cdna4::kSSetPcB64Sop1, {.ssrc0 = 0});
+  constexpr uint64_t kPc = 0x1000;
+  fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(words.data()), sizeof(words), kPc);
+  amdgpu::Wavefront *wave = fixture.cu()->dispatch_wf(0, kPc, 104, 32);
+  ASSERT_NE(wave, nullptr);
+  fixture.cu()->write_sgpr(wave->sgpr_alloc().base, 0);
+  fixture.cu()->write_sgpr(wave->sgpr_alloc().base + 1, 0);
+  wave->wait_counters().increment(amdgpu::WaitCounterType::LGKMCNT);
+
+  fixture.cu()->step();
+
+  ASSERT_EQ(wave->state(), amdgpu::WfState::ENDING);
+  EXPECT_FALSE(wave->is_halted());
+  wave->release_wait_counter(amdgpu::WaitCounterType::LGKMCNT);
+  EXPECT_TRUE(wave->is_halted());
+}
+
 TEST_P(IsaTest, VMovB32_PerLane) {
   ExecFixture fx;
   ASSERT_NO_FATAL_FAILURE(fx.initialize(arch()));
