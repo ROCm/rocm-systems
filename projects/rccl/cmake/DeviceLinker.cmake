@@ -51,6 +51,14 @@ foreach(_dl_tool PACKAGER OBJDUMP)
   endif()
 endforeach()
 message(STATUS "Device Linker: offload packager = ${DL_PACKAGER}")
+# Each target's relocatable device.o is ~300 MB uncompressed, so a full TheRock target list
+# packs several GB into device_image.o, past what the link can read back. ROCm 7.0's packager
+# cannot compress.
+execute_process(COMMAND "${DL_PACKAGER}" --help OUTPUT_VARIABLE _dl_packager_help ERROR_QUIET)
+set(DL_PACKAGER_FLAGS "")
+if(_dl_packager_help MATCHES "--compress")
+  set(DL_PACKAGER_FLAGS --compress)
+endif()
 
 # Extract --hip-path and --hip-device-lib-path from CMAKE_CXX_FLAGS.
 # TheRock's amd-hip toolchain injects these so amdclang++ can locate HIP
@@ -733,8 +741,10 @@ set(DEVICE_OFFLOAD_BINARY "${DEVICE_BUILD_DIR}/device.offload")
 
 add_custom_command(
   OUTPUT  ${DEVICE_OFFLOAD_BINARY}
-  COMMAND ${DL_PACKAGER} -o ${DEVICE_OFFLOAD_BINARY} ${DL_PACKAGER_IMAGES}
-  DEPENDS ${ALL_DEVICE_OBJS}
+  COMMAND ${DL_PACKAGER} ${DL_PACKAGER_FLAGS} -o ${DEVICE_OFFLOAD_BINARY} ${DL_PACKAGER_IMAGES}
+  COMMAND ${CMAKE_COMMAND} -DOFFLOAD_BINARY=${DEVICE_OFFLOAD_BINARY}
+          -P ${PROJECT_SOURCE_DIR}/cmake/scripts/check_offload_size.cmake
+  DEPENDS ${ALL_DEVICE_OBJS} ${PROJECT_SOURCE_DIR}/cmake/scripts/check_offload_size.cmake
   COMMENT "DL package: device.o(s) -> device.offload [${GPU_TARGETS}]"
   VERBATIM
 )
