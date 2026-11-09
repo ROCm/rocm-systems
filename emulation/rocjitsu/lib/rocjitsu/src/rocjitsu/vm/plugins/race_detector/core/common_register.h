@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cassert>
+#include <cstddef>
 #include <optional>
 #include <span>
 
@@ -128,22 +129,22 @@ inline MemoryOrderClass defaultMemoryOrder(MemoryEventType t) {
   return MemoryOrderClass::UNORDERED;
 }
 
-/// Counter obligations of an event that waits on one counter, or on two
-/// counters with the same completion order, as unit tests and the
-/// default-counter registration overloads describe events. Converts to the
-/// obligation span that event registration takes; the span refers to this
-/// object, so pass a temporary directly to the registering call.
+/// @brief Owns one or two unit counter increments with the same completion order.
+/// @details The converted span borrows this object's storage. Event registration
+/// consumes it before returning, so passing a temporary directly is safe. Keep
+/// the owner alive when storing a span for later use. Use an explicit obligation
+/// array for different completion orders or non-unit counter increments.
 class CounterObligations {
 public:
   CounterObligations(
-      amdgpu::WaitCounterType waitCounterType, MemoryOrderClass memoryOrder,
-      std::optional<amdgpu::WaitCounterType> additionalWaitCounterType = std::nullopt)
-      : obligations_{amdgpu::MemoryCounterObligation{waitCounterType, memoryOrder}, {}} {
-    if (additionalWaitCounterType)
-      obligations_[count_++] = {*additionalWaitCounterType, memoryOrder};
+      amdgpu::WaitCounterType wait_counter_type, MemoryOrderClass memory_order,
+      std::optional<amdgpu::WaitCounterType> additional_wait_counter_type = std::nullopt)
+      : obligations_{amdgpu::MemoryCounterObligation{wait_counter_type, memory_order}, {}} {
+    if (additional_wait_counter_type)
+      obligations_[count_++] = {*additional_wait_counter_type, memory_order};
   }
 
-  /// The default counter and order for an event type.
+  /// @brief The default counter and order for an event type.
   explicit CounterObligations(MemoryEventType type)
       : CounterObligations(defaultWaitCounterType(type), defaultMemoryOrder(type)) {}
 
@@ -153,7 +154,7 @@ public:
 
 private:
   std::array<amdgpu::MemoryCounterObligation, 2> obligations_;
-  size_t count_ = 1;
+  std::size_t count_ = 1;
 };
 
 } // namespace rocjitsu::plugins::race_detector
