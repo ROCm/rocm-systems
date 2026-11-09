@@ -8530,6 +8530,28 @@ def test_generated_vopd_owns_its_encoding_words(tmp_path, arch, profile, operand
     )
 
 
+def test_gfx1250_vopd3_cndmask_selector_uses_wave32_mask_size(tmp_path):
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='cdna5',
+        generated_dir_name='cdna5',
+        cpp_namespace='cdna5',
+        profile=Cdna5Profile(),
+        operand_types={'OPR_SRC_SIMPLE'},
+    )
+    codegen.out_path = str(tmp_path)
+    codegen.config = CodegenConfig()
+
+    codegen.gen_vopd()
+    cpp = (tmp_path / 'cdna5' / 'vopd.cpp').read_text()
+
+    assert 'Operand(32, OperandType::OPR_SREG, vsrcx2)' in cpp
+    assert 'Operand(32, OperandType::OPR_SREG, vsrcy2)' in cpp
+    assert 'Operand(64, OperandType::OPR_SREG' not in cpp
+    assert 'srcx2_.set_wave_mask();' in cpp
+    assert 'srcy2_.set_wave_mask();' in cpp
+
+
 def test_bf16_mad_mix_half_updates_read_destination_operand():
     codegen = object.__new__(CodeGenerator)
     codegen.semantics = SimpleNamespace(
@@ -10157,7 +10179,13 @@ def test_scratch_lds_and_global_lds_share_opcode_dispatch(arch, profile_type):
         instructions = [inst for inst in flat.insts if inst.opcode == opcode]
         assert {inst.required_flat_segment for inst in instructions} == {1, 2}
         scratch = next(inst for inst in instructions if inst.required_flat_segment == 1)
+        global_lds = next(
+            inst for inst in instructions if inst.required_flat_segment == 2
+        )
         assert semantics.instructions[scratch.name].semantic_class == 'scratch_load_lds'
+        assert (
+            semantics.instructions[global_lds.name].semantic_class == 'global_load_lds'
+        )
         assert any(
             entry and f'decodeFlatSegment{opcode}' in (entry.sub_decode_funcs or [])
             for entry in spec.primary_decode_table
@@ -10183,3 +10211,25 @@ def test_opted_in_fixed_wave_matrix_layout_is_rejected(name):
     )
     with pytest.raises(ValueError, match=message):
         _gen_mfma(Instruction(name, 'ENC_VOP3P', 0, []), 'fixed_wave', profile)
+
+
+@pytest.mark.parametrize('count,opcode', [(3, 126), (4, 125)])
+def test_cdna4_wide_global_lds_load_semantics(count, opcode):
+    spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_cdna4.xml'), Cdna4Profile()).parse()
+    name = f'GLOBAL_LOAD_LDS_DWORDX{count}'
+    inst = next(
+        inst for inst in spec.encoding_map['ENC_FLAT'].insts if inst.name == name
+    )
+    assert inst.opcode == opcode
+    assert inst.required_flat_segment == 2
+    sem = derive_all_semantics(spec).instructions[name]
+    assert sem.semantic_class == 'global_load_lds'
+    assert sem.elem_size == 4
+    assert sem.num_elems == count
+    assert not sem.sign_extend
+    generator = CodeGenerator(spec, '', derive_all_semantics(spec))
+    body = generator._gen_flat_load([], [], sem)
+    assert f'd->num_elems = {count};' in body
+    assert f'+ offset, {count * 4}, 16);' in body
+    assert 'd->lds_dst = true;' in body
+    assert 'dst_reg_base' not in body
