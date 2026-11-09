@@ -8916,6 +8916,34 @@ TEST(ArithBridgeTest, InterpolationUsesGuestRoundingAndInputFlushing) {
   }
 }
 
+// Strict exact requests run instead of failing and keep the guest NaN modes: with MODE.IEEE
+// clear, gfx1100 returns the selected signaling NaN unquieted; gfx1201 always quiets it.
+TEST(ArithBridgeTest, InterpolationStrictExactFollowsGuestNanModes) {
+  for (auto semantics :
+       {ArithmeticSemantics::BitExactEmpiricalNoFpStatus, ArithmeticSemantics::BitExactEmpirical})
+    for (bool rdna3 : {true, false}) {
+      SCOPED_TRACE(::testing::Message() << int(semantics) << '/' << rdna3);
+      BridgeFixture fixture(rdna3, 32, ArithmeticPolicy{semantics});
+      ASSERT_FALSE(::testing::Test::HasFatalFailure());
+      fixture.wave->set_exec(1);
+      fixture.wave->set_mode_raw(0x1f0);
+      fixture.cu->write_vgpr(fixture.base(), 1, 0x7f801abc);
+      fixture.cu->write_vgpr(fixture.base() + 1, 0, 0x3f800000);
+      fixture.cu->write_vgpr(fixture.base() + 2, 0, 0);
+      auto words =
+          rdna3
+              ? rdna3::build_vinterp(rdna3::kVInterpP10F32Vinterp,
+                                     {.vdst = 3, .src0 = 256, .src1 = 257, .src2 = 258, .neg = 1})
+              : rdna4::build_vinterp(rdna4::kVInterpP10F32Vinterp,
+                                     {.vdst = 3, .src0 = 256, .src1 = 257, .src2 = 258, .neg = 1});
+      auto instruction = fixture.decoder->decode_window(words);
+      ASSERT_TRUE(instruction.succeeded());
+      ASSERT_TRUE(
+          fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+      EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 3, 0), rdna3 ? 0xff801abcU : 0xffc01abcU);
+    }
+}
+
 TEST(ArithBridgeTest, InterpolationQuadReadsModesAliasesAndPartialWrites) {
   const uint16_t opcodes[2][6] = {
       {rdna3::kVInterpP10F32Vinterp, rdna3::kVInterpP2F32Vinterp, rdna3::kVInterpP10F16F32Vinterp,
