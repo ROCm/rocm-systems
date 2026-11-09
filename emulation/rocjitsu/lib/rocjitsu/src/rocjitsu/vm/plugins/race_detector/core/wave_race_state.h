@@ -134,9 +134,10 @@ public:
                              std::span<const amdgpu::MemoryCounterObligation> counterObligations,
                              MemoryOrderClass memoryOrder);
 
-  /// Register an event with LDS intervals that the caller has finalized and
-  /// already limited to bytes the access really touches: within the LDS
-  /// backing and, for FLAT, the workgroup allocation.
+  /// @brief Register an event using the caller's finalized LDS intervals.
+  /// @details Intervals must contain only accessed bytes within the LDS backing
+  /// and, for FLAT, the workgroup allocation, with endpoints that fit in int.
+  /// Empty intervals retain the event's register and counter dependencies.
   void registerEventWithIntervals(InstructionSnapshot instruction, MemoryEventType,
                                   std::vector<uint32_t> registers, uint64_t execMask,
                                   uint8_t byteMask, IntervalSet ldsIntervals,

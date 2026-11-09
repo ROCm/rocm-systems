@@ -36,6 +36,7 @@
 #include <format>
 #include <functional>
 #include <iterator>
+#include <limits>
 #include <map>
 #include <memory>
 #include <span>
@@ -1649,6 +1650,52 @@ TEST(RaceDetectorPluginTest, DualOffsetStoreRegistersEachContiguousAddressSetAsO
   EXPECT_EQ(intervals[0].end, static_cast<int>(4 * lanes));
   EXPECT_EQ(intervals[1].start, static_cast<int>(kSecondBase));
   EXPECT_EQ(intervals[1].end, static_cast<int>(kSecondBase + 4 * lanes));
+}
+
+TEST(RaceDetectorPluginTest, LdsIntervalsRejectAddressesOutsideSignedIndexRange) {
+  // Logical capacity does not materialize host storage. Exercise the interval
+  // index boundary without allocating a multi-gigabyte LDS buffer.
+  Lds backing((uint32_t{1} << 21) + 1);
+  PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/1));
+  auto plugin = std::make_unique<RaceDetectorPlugin>();
+  RaceDetectorPlugin *plugin_ptr = plugin.get();
+  fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  ASSERT_TRUE(fixture.plugin_group_->add(std::move(plugin)));
+  fixture.soc->set_plugin_group(fixture.plugin_group_);
+  fixture.plugin_group_->onInit();
+
+  Wavefront *wave = fixture.cu()->dispatch_wf(0, 0, 104, 256);
+  ASSERT_NE(wave, nullptr);
+  wave->set_lds(&backing);
+  wave->set_exec(1);
+  std::array<Wavefront *, 1> waves{wave};
+  fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 104, waves);
+  auto *state = static_cast<RaceWavefrontState *>(wave->plugin_state(plugin_ptr->slot_index()));
+  const EventRegistry &events = state->race_state->getDetector()->events();
+
+  constexpr uint64_t kIndexLimit = std::numeric_limits<int>::max();
+  for (uint64_t address : {kIndexLimit - 1, kIndexLimit + 1}) {
+    SCOPED_TRACE(address);
+    const EventId event{events.totalAllocated()};
+    auto memory = std::make_unique<VectorMemState>(LOCAL_MEM);
+    memory->elem_size = 4;
+    memory->num_elems = 1;
+    memory->is_load = true;
+    memory->wf_size = wave->wf_size();
+    memory->exec_mask = memory->lane_mask = 1;
+    memory->dst_reg_base = wave->vgpr_alloc().base;
+    memory->per_lane_addr[0] = address;
+    TestMemoryInstruction load(std::move(memory));
+    fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, load, *wave);
+    fixture.plugin_group_->onAmdgpuMemoryAccessRouted({}, load, *wave);
+
+    ASSERT_EQ(events.totalAllocated(), event.value + 1);
+    EXPECT_TRUE(events.ldsIntervals(event).empty());
+    EXPECT_EQ(events.status(event), EventStatus::ACTIVE);
+    ASSERT_EQ(events.registers(event).size(), 1u);
+    EXPECT_EQ(events.registers(event).front(), wave->vgpr_alloc().base);
+  }
 }
 
 // The pending stores lie inside the span of the strided load, so a check of

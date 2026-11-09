@@ -14,6 +14,8 @@
 
 #include "rocjitsu/vm/plugins/memory_access_observation.h"
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
+#include "rocjitsu/vm/plugins/race_detector/core/interval_set.h"
+#include "rocjitsu/vm/plugins/race_detector/core/race_detector.h"
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
 #include "rocjitsu/vm/plugins/tensor_dma_issue_observation.h"
 
@@ -21,12 +23,14 @@
 #include <array>
 #include <cassert>
 #include <format>
+#include <limits>
 #include <mutex>
 #include <optional>
 #include <span>
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu::plugins::race_detector {
@@ -450,11 +454,15 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
         if (!(ldsMask & (1ULL << lane)))
           continue;
         const uint64_t address = (*addressSets[set])[lane];
-        auto bytes = detector->ldsBytesInRange(address, perLaneBytes, d.elem_size);
+        uint64_t bytes = detector->ldsBytesInRange(address, perLaneBytes, d.elem_size);
         if (access.flat_local_allocation_end && d.elem_size != 0)
           bytes = amdgpu::whole_element_bytes_in_range(address, bytes, d.elem_size,
                                                        *access.flat_local_allocation_end);
         if (bytes == 0)
+          continue;
+        // Interval endpoints use signed indices even when the configured LDS
+        // backing is larger. Keep register and counter dependencies below.
+        if (address + bytes > std::numeric_limits<int>::max())
           continue;
         laneBytes[set][lane] = static_cast<uint32_t>(bytes);
         intervals.append(static_cast<int>(address), static_cast<int>(address + bytes));
