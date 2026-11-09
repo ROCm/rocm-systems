@@ -60,7 +60,8 @@ int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
                 Op == rocjitsu::arith::Fp64::Mul) {
     if ((flags & RJ_ARITH_FP_ROUND_MASK) &&
         rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
-      rocjitsu::arith::fp64_directed_x86_64_v4(Op, flags, exec_mask, instruction_flags, d, a, b, c);
+      rocjitsu::arith::fp64_directed_x86_64_v4(Op, flags, exec_mask, instruction_flags, d, a, b, c,
+                                               Rdna3);
       return RJ_ARITH_SUCCESS;
     }
   }
@@ -73,7 +74,7 @@ int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
       Op == rocjitsu::arith::Fp64::Mul || Op == rocjitsu::arith::Fp64::Fract;
   if ((!directed_arithmetic || !(flags & RJ_ARITH_FP_ROUND_MASK)) &&
       rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
-    rocjitsu::arith::fp64_x86_64_v3(Op, flags, exec_mask, instruction_flags, d, a, b, c);
+    rocjitsu::arith::fp64_x86_64_v3(Op, flags, exec_mask, instruction_flags, d, a, b, c, Rdna3);
     return RJ_ARITH_SUCCESS;
   }
 #endif
@@ -103,6 +104,9 @@ int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
       } else {
         value = Op == rocjitsu::arith::Fp64::Add ? x + y : x * y;
       }
+      if constexpr (!Rdna3) {
+        value = rocjitsu::arith::fp64_nan_priority<false>(value, x, y);
+      }
     }
     if constexpr (Op == rocjitsu::arith::Fp64::Fma) {
       double z = rocjitsu::arith::fp64_input(c, lane, instruction_flags >> 2);
@@ -118,6 +122,9 @@ int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
                   (zb & exponent) != exponent
               ? rocjitsu::arith::as_double(rocjitsu::arith::fma_finite_f64(xb, yb, zb, rounding))
               : __builtin_fma(x, y, z);
+      if constexpr (!Rdna3) {
+        value = rocjitsu::arith::fp64_nan_priority<true>(value, x, y, z);
+      }
     }
     if constexpr (Op == rocjitsu::arith::Fp64::MinLegacy ||
                   Op == rocjitsu::arith::Fp64::MaxLegacy) {
