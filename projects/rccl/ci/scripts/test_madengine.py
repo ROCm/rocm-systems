@@ -364,7 +364,7 @@ WORKLOAD_CONFIGS = {
             # phases share the nodes, so the ratio is unaffected.
             "SGLANG_ENABLE_TP_MEMORY_INBALANCE_CHECK": "0",
             # A hang otherwise holds four nodes for two hours before failing.
-            "BARRIER_TIMEOUT_S": "1800",
+            "BARRIER_TIMEOUT_SECONDS": "1800",
             "IP_SYNC_TIMEOUT": "1800",
             "SMOKE": "0",
             # A point is only 2 x concurrency requests, and one pass at
@@ -2056,7 +2056,7 @@ def write_repro_bundle(
 
 # The sglang launcher reaches every node at the address DNS gives its name and
 # binds its barrier to the node's own one, so a stale record leaves rank 0
-# waiting out BARRIER_TIMEOUT_S for a node that is up and never answers.
+# waiting out BARRIER_TIMEOUT_SECONDS for a node that is up and never answers.
 PREFLIGHT_DNS = """\
 #!/bin/bash
 h=$(hostname -s)
