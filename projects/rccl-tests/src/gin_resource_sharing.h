@@ -13,7 +13,6 @@
 #define GIN_RESOURCE_SHARING_H_
 
 #include "common.h"  // ginResourceSharingMode, ncclGinResourceSharingMode, CUDACHECK
-#include "cuda_runtime.h"  // cudaGetDevice
 
 // Device mirror of the host flag, as the resolved enum value. static so each GIN
 // tester TU gets its own copy (device symbols are not shared across -fgpu-rdc TUs).
