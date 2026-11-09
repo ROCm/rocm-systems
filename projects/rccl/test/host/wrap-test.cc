@@ -974,7 +974,7 @@ TEST(WrapMicrotestIsolated, SetDefaultBuffSizes_Gfx1250UsesWiderLL128Line) {
       });
 }
 
-// The NaN FIFO is one slice unless NCCL_PROTO names NaN, then 2 MiB, and 8 MiB
+// The NaN FIFO is one slice unless NCCL_PROTO names NaN, then 4 MiB, and 8 MiB
 // when the gfx1250 TDM path is on. Sizes are literals so a change to the
 // elems-per-thread macros is caught rather than mirrored.
 TEST(WrapMicrotestIsolated, SetDefaultBuffSizes_NanFifoDepth) {
@@ -992,7 +992,7 @@ TEST(WrapMicrotestIsolated, SetDefaultBuffSizes_NanFifoDepth) {
         comm->nanTdmMinBytes = -1;
 #endif
         rcclSetDefaultBuffSizes(comm, sizes);
-        EXPECT_EQ(2 << 20, sizes[NCCL_PROTO_NAN]);
+        EXPECT_EQ(4 << 20, sizes[NCCL_PROTO_NAN]);
 #if ENABLE_TDM_NAN
         comm->nanTdmMinBytes = 0;
         rcclSetDefaultBuffSizes(comm, sizes);

@@ -278,9 +278,9 @@ static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK 
  * register-slices, so one credit round-trip covers many inner iterations rather
  * than one.
  *
- * 128 puts the FIFO at 2 MiB (256 KiB per step). calcCollChunking() does not cap
+ * 256 puts the FIFO at 4 MiB (512 KiB per step). calcCollChunking() does not cap
  * the NaN chunk, so a round moves up to one full step. */
-#define NCCL_NAN_STEP_ELEMS_PER_THREAD 128
+#define NCCL_NAN_STEP_ELEMS_PER_THREAD 256
 /* The gfx1250 TDM path pays a fixed sync per op (poll, sentinel restore, tensorcnt
  * wait), so it wants a deep step instead: 8 MiB FIFO (1 MiB per step) took 1 GiB
  * AllReduce from 257 to 328 GB/s busbw and AlltoAll from 195 to 210; the register
