@@ -9235,6 +9235,8 @@ class CodeGenerator:
         lines.append(
             f'{indent}const int32_t offset = static_cast<int32_t>({raw} << {32-width}) >> {32-width};'
         )
+        # GLOBAL LDS X3 uses the 16-byte lane stride specified for MUBUF X3 in CDNA4 ISA §9.1.9.
+        # This is only an inference; the GLOBAL LDS addressing rules in §10.3 do not specify an X3 stride.
         lines.append(
             f'{indent}amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),'
             f' static_cast<int64_t>(wf.m0() & {mask}) + offset,'
@@ -13751,6 +13753,10 @@ class CodeGenerator:
                         ctor_body_parts.append('flags_ |= XCNT_DRAIN;')
                     if inst.name.lower().startswith('v_interp_'):
                         ctor_body_parts.append('flags_ |= EMBEDDED_MEMORY_WAIT;')
+                    # The semantic trap class marks software traps, which the
+                    # CU and CFG construction recognise by flag, not by name.
+                    if _mem_sem and _mem_sem.semantic_class == 'trap':
+                        ctor_body_parts.append('flags_ |= SOFTWARE_TRAP;')
                     # Control-flow flags drive BasicBlock splitting and CFG
                     # edge construction. Keep this metadata generated from the
                     # semantic classification so generic code does not have to

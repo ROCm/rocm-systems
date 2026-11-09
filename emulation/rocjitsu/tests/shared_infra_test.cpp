@@ -1319,9 +1319,9 @@ TEST(MfmaExecTest, ScalarF32ReadsEachMatrixOperandOnce) {
   };
 
   ForceScalarGuard force_scalar(/*force_scalar=*/true);
-  amdgpu::exec_f32(*cu, M, N, K, B, /*in_bits=*/32, vb + destination, vb + source_a, vb + source_b,
-                   vb + accumulator, extract_a, extract_b, amdgpu::ACC_FROM_VGPR,
-                   /*cbsz=*/1, /*abid=*/0, /*blgp=*/1);
+  amdgpu::exec_f32<M, N, K, B>(*cu, /*in_bits=*/32, vb + destination, vb + source_a, vb + source_b,
+                               vb + accumulator, extract_a, extract_b, amdgpu::ACC_FROM_VGPR,
+                               /*cbsz=*/1, /*abid=*/0, /*blgp=*/1);
 
   EXPECT_EQ(source_a_reads, static_cast<size_t>(M) * K * B);
   EXPECT_EQ(source_b_reads, static_cast<size_t>(N) * K * B);

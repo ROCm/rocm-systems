@@ -2234,7 +2234,7 @@ def test_unsupported_swmmac_layout_does_not_emit_sparse_setup(
     assert 'index_base' not in body
     assert 'index_key' not in body
     assert 'exec_swmmac' not in body
-    assert 'amdgpu::exec_f32(' in body
+    assert 'amdgpu::exec_f32<16, 16, 32, 0>(' in body
 
 
 @pytest.mark.parametrize(
@@ -4545,20 +4545,18 @@ def test_local_true16_vop3_probe_uses_scoped_dpp_binding(tmp_path):
         rdna4_vop3, 'RJ_NOINLINE void VCeilF16Vop3::execute_modifier_impl'
     )
 
-    assert 'ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16' in ceil_body
-    assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in ceil_body
-    assert 'write_vop3_true16_dst(vdst, wf, lane, opsel,' in ceil_body
+    assert 'arith::execute_float_unary16' in ceil_body
+    assert 'rj_arith_v_ceil_f16_w64_gfx12' in ceil_body
+    assert 'RJ_ARITH_ALU_HIGH_A' in ceil_body and 'RJ_ARITH_ALU_HIGH_D' in ceil_body
     assert 'inst_.src0 != amdgpu::SRC_DPP' not in ceil_body
     assert 'src0.clear_delegate();' not in ceil_body
-    assert ceil_body.index(
-        'ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16'
-    ) < ceil_body.index('read_vop3_true16_src(src0, wf, lane, opsel, 0)')
+    assert 'ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16' not in ceil_body
     assert 'ScopedVgprWriteMask dpp_write_mask_scope_' in ceil_modifier_body
     assert 'ScopedOperandDelegate dpp_src0_binding_' in ceil_modifier_body
-    assert 'ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16' in ceil_modifier_body
+    assert 'arith::execute_float_unary16' in ceil_modifier_body
     assert ceil_modifier_body.index(
         'ScopedOperandDelegate dpp_src0_binding_'
-    ) < ceil_modifier_body.index('ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16')
+    ) < ceil_modifier_body.index('arith::execute_float_unary16')
 
 
 def test_single_isa_cdna1_sources_preprocess_with_source_includes(
@@ -10179,7 +10177,13 @@ def test_scratch_lds_and_global_lds_share_opcode_dispatch(arch, profile_type):
         instructions = [inst for inst in flat.insts if inst.opcode == opcode]
         assert {inst.required_flat_segment for inst in instructions} == {1, 2}
         scratch = next(inst for inst in instructions if inst.required_flat_segment == 1)
+        global_lds = next(
+            inst for inst in instructions if inst.required_flat_segment == 2
+        )
         assert semantics.instructions[scratch.name].semantic_class == 'scratch_load_lds'
+        assert (
+            semantics.instructions[global_lds.name].semantic_class == 'global_load_lds'
+        )
         assert any(
             entry and f'decodeFlatSegment{opcode}' in (entry.sub_decode_funcs or [])
             for entry in spec.primary_decode_table
@@ -10205,3 +10209,25 @@ def test_opted_in_fixed_wave_matrix_layout_is_rejected(name):
     )
     with pytest.raises(ValueError, match=message):
         _gen_mfma(Instruction(name, 'ENC_VOP3P', 0, []), 'fixed_wave', profile)
+
+
+@pytest.mark.parametrize('count,opcode', [(3, 126), (4, 125)])
+def test_cdna4_wide_global_lds_load_semantics(count, opcode):
+    spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_cdna4.xml'), Cdna4Profile()).parse()
+    name = f'GLOBAL_LOAD_LDS_DWORDX{count}'
+    inst = next(
+        inst for inst in spec.encoding_map['ENC_FLAT'].insts if inst.name == name
+    )
+    assert inst.opcode == opcode
+    assert inst.required_flat_segment == 2
+    sem = derive_all_semantics(spec).instructions[name]
+    assert sem.semantic_class == 'global_load_lds'
+    assert sem.elem_size == 4
+    assert sem.num_elems == count
+    assert not sem.sign_extend
+    generator = CodeGenerator(spec, '', derive_all_semantics(spec))
+    body = generator._gen_flat_load([], [], sem)
+    assert f'd->num_elems = {count};' in body
+    assert f'+ offset, {count * 4}, 16);' in body
+    assert 'd->lds_dst = true;' in body
+    assert 'dst_reg_base' not in body
