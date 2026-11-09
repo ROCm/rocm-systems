@@ -151,12 +151,10 @@ Foo foo = static_cast<Foo>(bar); // OK but could use auto instead to avoid repet
 - Expected failures such as a rejected instruction encoding return `Result` or
   `FailureOr<T>`. Accept a `DiagnosticEmitter` when the caller needs the reason;
   its sink is non-owning and must not outlive its callable.
-- Exceptions are only for unrecoverable initialization, configuration, or
-  execution failures. Exception types live in `util/except.h`.
-- Do not throw in simulation hot paths (event handlers, instruction execution,
-  cache lookups).
-- Do not add `try`/`catch` except at a boundary that must translate an error
-  (e.g. the C API layer). Assume code is not exception-safe unless documented.
+- C++ exceptions are disabled. Use checked native APIs for expected operating-system
+  failures and propagate their errors through results.
+- Diagnostic sinks and runtime callbacks must not throw. Preserve ownership,
+  cleanup, and the original failure when propagating results across threads.
 
 ## Formatting
 

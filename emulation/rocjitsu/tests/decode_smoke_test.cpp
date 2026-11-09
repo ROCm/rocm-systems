@@ -2795,7 +2795,7 @@ TEST_P(VopdExecutionFailureTest, UnsupportedSlotCommitsNeitherDestination) {
           cu->write_vgpr(base + reg, lane, 100u * reg + lane);
       }
       wf->clear_instruction_execution_error();
-      ASSERT_NO_THROW(inst->execute(*inst, wf));
+      inst->execute(*inst, wf);
       EXPECT_EQ(wf->instruction_execution_error(),
                 exec ? amdgpu::InstructionExecutionError::UnimplementedInstruction
                      : amdgpu::InstructionExecutionError::None);

@@ -117,11 +117,11 @@ TEST(InstructionBuilder, ScalarFrontendsRejectUnsupportedArchitecturesWithoutThr
       };
       const util::DiagnosticEmitter error(record);
       util::FailureOr<uint32_t> encoded = util::Result::failure();
-      ASSERT_NO_THROW(encoded = entry.encode(arch, &error));
+      encoded = entry.encode(arch, &error);
       EXPECT_TRUE(encoded.failed());
       EXPECT_EQ(messages, 1u);
       EXPECT_NE(message.find(entry.name), std::string::npos) << message;
-      ASSERT_NO_THROW(encoded = entry.encode(arch, nullptr));
+      encoded = entry.encode(arch, nullptr);
       EXPECT_TRUE(encoded.failed());
       EXPECT_EQ(messages, 1u);
     }
@@ -151,7 +151,7 @@ TEST(InstructionBuilder, ScalarOperandLookupsRejectUnsupportedArchitecturesWitho
       };
       const util::DiagnosticEmitter error(record);
       util::FailureOr<uint16_t> operand = util::Result::failure();
-      ASSERT_NO_THROW(operand = entry.lookup(arch, &error));
+      operand = entry.lookup(arch, &error);
       EXPECT_TRUE(operand.failed());
       EXPECT_EQ(messages, 1u);
       EXPECT_NE(message.find(entry.name), std::string::npos) << message;
@@ -376,18 +376,17 @@ TEST(InstructionBuilder, UnsupportedPaddingAndIslandPoolLeaveOutputsUnchanged) {
     std::string message;
     auto record = [&](std::string_view text) { message = text; };
     const util::DiagnosticEmitter error(record);
-    ASSERT_NO_THROW(EXPECT_TRUE(append_nop_padding(text, 8, arch, &error).failed()));
+    EXPECT_TRUE(append_nop_padding(text, 8, arch, &error).failed());
     EXPECT_EQ(message, "Unimplemented instruction: s_nop for target architecture");
     message.clear();
     EXPECT_EQ(text, original);
     KernelTextLayout layout;
     layout.branch_island_slots = {42};
-    ASSERT_NO_THROW(
-        EXPECT_TRUE(append_direct_branch_island_pool(text, layout, arch, &error).failed()));
+    EXPECT_TRUE(append_direct_branch_island_pool(text, layout, arch, &error).failed());
     EXPECT_EQ(text, original);
     EXPECT_EQ(layout.branch_island_slots, std::vector<uint64_t>{42});
     EXPECT_EQ(message, "Unimplemented instruction: s_nop for target architecture");
-    ASSERT_NO_THROW(EXPECT_FALSE(append_skipped_kernel_stub(text, {}, arch).ok));
+    EXPECT_FALSE(append_skipped_kernel_stub(text, {}, arch).ok);
     EXPECT_EQ(text, original);
   }
 }
@@ -765,12 +764,12 @@ TEST(InstructionBuilder, SpillBuildersReportFailuresWithoutThrowing) {
   auto check_failure = [](auto build, std::string_view expected) {
     util::StringDiagnostic diagnostic;
     const auto error = diagnostic.emitter();
-    EXPECT_NO_THROW({
+    {
       const auto result = build(&error);
       EXPECT_TRUE(result.failed());
-    });
+    }
     EXPECT_EQ(diagnostic.message(), expected);
-    EXPECT_NO_THROW(EXPECT_TRUE(build(nullptr).failed()));
+    EXPECT_TRUE(build(nullptr).failed());
   };
   constexpr auto invalid = ROCJITSU_CODE_ARCH_INVALID;
   check_failure([&](auto error) { return build_v_writelane_b32(0, 0, 0, invalid, error); },

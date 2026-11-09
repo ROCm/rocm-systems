@@ -6,7 +6,6 @@
 #include <gtest/gtest.h>
 
 #include <array>
-#include <stdexcept>
 
 using namespace rocjitsu::plugins::race_detector;
 namespace amdgpu = rocjitsu::amdgpu;

@@ -76,7 +76,6 @@ RJ_DIAGNOSTIC_POP
 #include <limits>
 #include <memory>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>

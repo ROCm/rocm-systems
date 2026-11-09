@@ -25,7 +25,6 @@
 #include <mutex>
 #include <optional>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -452,94 +451,71 @@ TEST(GpuVmPipeline, QuantumInstructionFetchTracksAddressSpaceChanges) {
   }
 }
 
-TEST(GpuVmPipeline, QuantumReleasesInstructionSnapshotOnReturnAndException) {
-  for (bool throw_from_plugin : {false, true}) {
-    SCOPED_TRACE(throw_from_plugin);
-    TranslatedPipelineContext context;
-    ASSERT_NO_FATAL_FAILURE(context.initialize());
-    ASSERT_NE(context.wf, nullptr);
-    constexpr uint64_t kCode = 0x1000;
-    context.external->store(kCode, std::array<uint32_t, 4>{0xBF800000u, S_ENDPGM_GFX12, 0, 0});
-    auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
-    auto plugin = std::make_unique<InstructionVmPlugin>();
-    auto *events = plugin.get();
-    events->after_instruction = [&](amdgpu::Wavefront &) {
-      if (throw_from_plugin)
-        throw std::runtime_error("instruction callback");
-    };
-    ASSERT_TRUE(group->add(std::move(plugin)));
-    context.sim.soc->set_plugin_group(group);
-    context.wf->pc = kCode;
-    context.cu->set_functional_quantum(1);
-    if (throw_from_plugin)
-      EXPECT_THROW(context.cu->run_quantum(), std::runtime_error);
-    else
-      EXPECT_TRUE(context.cu->run_quantum().ran);
+TEST(GpuVmPipeline, QuantumReleasesInstructionSnapshotOnReturn) {
+  TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
+  ASSERT_NE(context.wf, nullptr);
+  constexpr uint64_t kCode = 0x1000;
+  context.external->store(kCode, std::array<uint32_t, 4>{0xBF800000u, S_ENDPGM_GFX12, 0, 0});
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto plugin = std::make_unique<InstructionVmPlugin>();
+  ASSERT_TRUE(group->add(std::move(plugin)));
+  context.sim.soc->set_plugin_group(group);
+  context.wf->pc = kCode;
+  context.cu->set_functional_quantum(1);
+  EXPECT_TRUE(context.cu->run_quantum().ran);
 
-    std::weak_ptr<TestExternalAddressSpace> old_backing = context.external;
-    auto &vm = context.sim.soc->gpu_vm();
-    ASSERT_TRUE(vm.unregister_address_space(context.address_space));
-    context.external.reset();
-    EXPECT_TRUE(old_backing.expired());
+  std::weak_ptr<TestExternalAddressSpace> old_backing = context.external;
+  auto &vm = context.sim.soc->gpu_vm();
+  ASSERT_TRUE(vm.unregister_address_space(context.address_space));
+  context.external.reset();
+  EXPECT_TRUE(old_backing.expired());
 
-    auto replacement = std::make_shared<TestExternalAddressSpace>();
-    replacement->store(kCode, std::array<uint32_t, 4>{S_ENDPGM_GFX12, 0, 0, 0});
-    context.wf->set_address_space(vm.register_translated(77, replacement, replacement));
-    context.wf->pc = kCode;
-    events->after_instruction = {};
-    static_cast<void>(context.cu->step());
-    EXPECT_FALSE(context.cu->has_active_wfs());
-  }
+  auto replacement = std::make_shared<TestExternalAddressSpace>();
+  replacement->store(kCode, std::array<uint32_t, 4>{S_ENDPGM_GFX12, 0, 0, 0});
+  context.wf->set_address_space(vm.register_translated(77, replacement, replacement));
+  context.wf->pc = kCode;
+  static_cast<void>(context.cu->step());
+  EXPECT_FALSE(context.cu->has_active_wfs());
 }
 
-TEST(GpuVmPipeline, QuantumRetainsAdmissionSnapshotAcrossReturnAndException) {
-  for (bool throw_from_plugin : {false, true}) {
-    SCOPED_TRACE(throw_from_plugin);
-    TranslatedPipelineContext context;
-    ASSERT_NO_FATAL_FAILURE(context.initialize());
-    ASSERT_NE(context.wf, nullptr);
-    constexpr uint64_t kCode = 0x1000;
-    constexpr uint32_t kNop = 0xBF800000u;
-    context.external->store(kCode, std::array{kNop, kNop, S_ENDPGM_GFX12, 0u});
-    auto &vm = context.sim.soc->gpu_vm();
-    {
-      auto admitted = vm.snapshot_pinned(context.address_space);
-      ASSERT_TRUE(admitted);
-      context.wf->set_vm_access(
-          util::IntrusiveSharedPtr<amdgpu::GpuVmAccessSnapshot>::make(std::move(*admitted)));
-    }
-    auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
-    auto plugin = std::make_unique<InstructionVmPlugin>();
-    auto *events = plugin.get();
-    events->after_instruction = [&](amdgpu::Wavefront &) {
-      if (throw_from_plugin)
-        throw std::runtime_error("instruction callback");
-    };
-    ASSERT_TRUE(group->add(std::move(plugin)));
-    context.sim.soc->set_plugin_group(group);
-    context.wf->pc = kCode;
-    context.cu->set_functional_quantum(1);
-    if (throw_from_plugin)
-      EXPECT_THROW(context.cu->run_quantum(), std::runtime_error);
-    else
-      EXPECT_TRUE(context.cu->run_quantum().ran);
-
-    auto replacement = std::make_shared<TestExternalAddressSpace>();
-    replacement->store(kCode, std::array{kNop, S_ENDPGM_GFX12, 0u, 0u});
-    ASSERT_TRUE(vm.replace_translated(context.address_space, replacement, replacement));
-    std::weak_ptr<TestExternalAddressSpace> old_backing = context.external;
-    context.external.reset();
-    EXPECT_FALSE(old_backing.expired());
-
-    // Resume after the callback, including when it threw before the PC advance.
-    events->after_instruction = {};
-    context.wf->pc = kCode + sizeof(uint32_t);
-    context.cu->set_functional_quantum(4);
-    EXPECT_TRUE(context.cu->run_quantum().ran);
-    EXPECT_EQ(events->nops, 2u);
-    EXPECT_FALSE(context.cu->has_active_wfs());
-    EXPECT_TRUE(old_backing.expired());
+TEST(GpuVmPipeline, QuantumRetainsAdmissionSnapshotAcrossReturn) {
+  TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
+  ASSERT_NE(context.wf, nullptr);
+  constexpr uint64_t kCode = 0x1000;
+  constexpr uint32_t kNop = 0xBF800000u;
+  context.external->store(kCode, std::array{kNop, kNop, S_ENDPGM_GFX12, 0u});
+  auto &vm = context.sim.soc->gpu_vm();
+  {
+    auto admitted = vm.snapshot_pinned(context.address_space);
+    ASSERT_TRUE(admitted);
+    context.wf->set_vm_access(
+        util::IntrusiveSharedPtr<amdgpu::GpuVmAccessSnapshot>::make(std::move(*admitted)));
   }
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto plugin = std::make_unique<InstructionVmPlugin>();
+  auto *events = plugin.get();
+  ASSERT_TRUE(group->add(std::move(plugin)));
+  context.sim.soc->set_plugin_group(group);
+  context.wf->pc = kCode;
+  context.cu->set_functional_quantum(1);
+  EXPECT_TRUE(context.cu->run_quantum().ran);
+
+  auto replacement = std::make_shared<TestExternalAddressSpace>();
+  replacement->store(kCode, std::array{kNop, S_ENDPGM_GFX12, 0u, 0u});
+  ASSERT_TRUE(vm.replace_translated(context.address_space, replacement, replacement));
+  std::weak_ptr<TestExternalAddressSpace> old_backing = context.external;
+  context.external.reset();
+  EXPECT_FALSE(old_backing.expired());
+
+  // Resume after the callback.
+  context.wf->pc = kCode + sizeof(uint32_t);
+  context.cu->set_functional_quantum(4);
+  EXPECT_TRUE(context.cu->run_quantum().ran);
+  EXPECT_EQ(events->nops, 2u);
+  EXPECT_FALSE(context.cu->has_active_wfs());
+  EXPECT_TRUE(old_backing.expired());
 }
 
 TEST(GpuVmPipeline, WaveUsesAdmissionSnapshotAcrossRootReplacement) {

@@ -67,14 +67,12 @@ RJ_DIAGNOSTIC_POP
 #include <condition_variable>
 #include <cstdint>
 #include <cstring>
-#include <exception>
 #include <functional>
 #include <future>
 #include <limits>
 #include <memory>
 #include <new>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <sys/mman.h>
@@ -611,9 +609,8 @@ TEST(ComputeUnitConfigTest, DirectFactoryDiagnosesRejectedConfiguration) {
     for (auto mode : {simdojo::ExecMode::FUNCTIONAL, simdojo::ExecMode::CLOCKED}) {
       diagnostic("");
       std::unique_ptr<amdgpu::ComputeUnitCore> compute_unit;
-      EXPECT_NO_THROW(compute_unit =
-                          amdgpu::ComputeUnitCore::create("rejected", test_case.config, nullptr,
-                                                          nullptr, mode, diagnostic.emitter()));
+      compute_unit = amdgpu::ComputeUnitCore::create("rejected", test_case.config, nullptr, nullptr,
+                                                     mode, diagnostic.emitter());
       EXPECT_EQ(compute_unit, nullptr);
       EXPECT_EQ(diagnostic.message(), test_case.message);
     }
@@ -658,9 +655,9 @@ TEST(ComputeUnitConfigTest, DirectFactoryDiagnosesUnsupportedExecutionMode) {
   };
   util::StringDiagnostic diagnostic;
   std::unique_ptr<amdgpu::ComputeUnitCore> compute_unit;
-  EXPECT_NO_THROW(compute_unit = amdgpu::ComputeUnitCore::create(
-                      "rejected", config, nullptr, nullptr, static_cast<simdojo::ExecMode>(255),
-                      diagnostic.emitter()));
+  compute_unit =
+      amdgpu::ComputeUnitCore::create("rejected", config, nullptr, nullptr,
+                                      static_cast<simdojo::ExecMode>(255), diagnostic.emitter());
   EXPECT_EQ(compute_unit, nullptr);
   EXPECT_EQ(diagnostic.message(), "Unsupported execution mode for ComputeUnit");
 }
@@ -764,9 +761,8 @@ TEST(ComputeUnitConfigTest, DirectFactoryRejectsTargetFromAnotherArchitecture) {
 
   util::StringDiagnostic diagnostic;
   std::unique_ptr<amdgpu::ComputeUnitCore> compute_unit;
-  EXPECT_NO_THROW(compute_unit = amdgpu::ComputeUnitCore::create("cu", config, &memory, &l2,
-                                                                 simdojo::ExecMode::FUNCTIONAL,
-                                                                 diagnostic.emitter()));
+  compute_unit = amdgpu::ComputeUnitCore::create(
+      "cu", config, &memory, &l2, simdojo::ExecMode::FUNCTIONAL, diagnostic.emitter());
   EXPECT_EQ(compute_unit, nullptr);
   EXPECT_EQ(diagnostic.message(),
             "concrete GPU target does not belong to the configured architecture");
@@ -886,7 +882,7 @@ TEST(LdsAllocationTest, ZeroLdsDispatchKeepsCuBackingUnmaterialized) {
 
   ASSERT_EQ(f.cu()->lds().materialized_size_bytes(), 0u);
   queue.dispatch(kernel_object, /*grid_size_x=*/32, /*workgroup_size_x=*/32);
-  ASSERT_NO_THROW(f.engine->run());
+  f.engine->run();
   EXPECT_EQ(f.cu()->lds().materialized_size_bytes(), 0u);
 }
 
@@ -903,7 +899,7 @@ TEST(LdsAllocationTest, DescriptorFixedSizeMaterializesWorkgroupBacking) {
 
   ASSERT_EQ(f.cu()->lds().materialized_size_bytes(), 0u);
   queue.dispatch(kernel_object, /*grid_size_x=*/32, /*workgroup_size_x=*/32);
-  ASSERT_NO_THROW(f.engine->run());
+  f.engine->run();
 
   constexpr uint32_t kAlignedStaticLdsBytes = 1792;
   EXPECT_GE(f.cu()->lds().materialized_size_bytes(), kAlignedStaticLdsBytes);
@@ -932,7 +928,7 @@ TEST(LdsAllocationTest, PacketGroupSizeMaterializesDynamicWorkgroupBacking) {
 
   ASSERT_EQ(f.cu()->lds().materialized_size_bytes(), 0u);
   queue.submit(packet);
-  ASSERT_NO_THROW(f.engine->run());
+  f.engine->run();
 
   constexpr uint32_t kAlignedDynamicLdsBytes = 6400;
   EXPECT_GE(f.cu()->lds().materialized_size_bytes(), kAlignedDynamicLdsBytes);
@@ -962,7 +958,7 @@ TEST(RdnaDispatchTest, DescriptorSelectsCoherentWaveWidthAndVgprGranule) {
     test::AqlQueue queue(fixture.mem(), fixture.cp());
     queue.dispatch(kernel_object, /*workgroup_size=*/64, /*grid_size=*/64);
 
-    ASSERT_NO_THROW(fixture.engine->run());
+    fixture.engine->run();
     ASSERT_FALSE(snapshots->snapshots().empty());
     EXPECT_EQ(snapshots->snapshots().size(), wave32 ? 2u : 1u);
     for (const auto &snapshot : snapshots->snapshots()) {
@@ -1263,7 +1259,7 @@ TEST(RdnaDispatchTest, WgpModeCombinesSiblingCuLdsCapacity) {
     test::AqlQueue queue(f.mem(), f.cp());
     queue.dispatch(ko, 64, 64);
 
-    EXPECT_NO_THROW(f.engine->run());
+    f.engine->run();
     EXPECT_EQ(f.cu(0)->lds().size_bytes(), kPerCuLdsBytes);
     EXPECT_EQ(f.se()->spi().max_wgp_lds_bytes(), kWgpLdsBytes);
 
@@ -1411,7 +1407,7 @@ TEST(AqlDispatchTest, InitializesModeFromComputePgmRsrc1) {
     test::AqlQueue queue(f.mem(), f.cp());
     queue.dispatch(ko, 64, 64);
 
-    EXPECT_NO_THROW(f.engine->run());
+    f.engine->run();
     ASSERT_GE(snap->snapshots().size(), 1u);
     for (const auto &wf : snap->snapshots())
       EXPECT_EQ(wf.mode_raw, mode_case.expected_mode);
@@ -1449,7 +1445,7 @@ TEST(AqlDispatchTest, AdmittedWavesShareTheDispatchVmSnapshot) {
   const uint64_t kernel = fixture.write_kernel(0x1000, code, sizeof(code));
   test::AqlQueue queue(fixture.mem(), fixture.cp());
   queue.dispatch(kernel, /*grid_size=*/128, /*workgroup_size=*/64);
-  ASSERT_NO_THROW(fixture.engine->run());
+  fixture.engine->run();
 
   EXPECT_EQ(observed->dispatched, 4u);
   EXPECT_TRUE(observed->all_share_access);
@@ -1958,18 +1954,11 @@ TEST(AqlDispatchTest, ConcurrentRootReplacementPreservesAdmittedDispatchSnapshot
   const bool replacement_started = replacements.load(std::memory_order_acquire) >= 16;
 
   gate->release();
-  bool first_quantum_ran = false;
-  std::exception_ptr execution_error;
-  try {
-    first_quantum_ran = execution.get();
-    fixture.engine->run();
-  } catch (...) {
-    execution_error = std::current_exception();
-  }
+  const bool first_quantum_ran = execution.get();
+  fixture.engine->run();
   stop_replacing.store(true, std::memory_order_release);
   const bool replacements_succeeded = replacement.get();
 
-  EXPECT_EQ(execution_error, nullptr);
   ASSERT_TRUE(replacement_started);
   EXPECT_TRUE(replacements_succeeded);
   EXPECT_TRUE(first_quantum_ran);
@@ -1987,7 +1976,7 @@ TEST(RdnaDispatchTest, Gfx1250DoesNotEnableWgpMode) {
   test::AqlQueue queue(f.mem(), f.cp());
   queue.dispatch(ko, 64, 64);
 
-  EXPECT_NO_THROW((void)f.engine->step());
+  (void)f.engine->step();
   EXPECT_TRUE(f.cp()->queue_faulted_for_test(1, 0));
   EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 0u);
   EXPECT_EQ(f.cp()->dispatched_count(), 0u);
@@ -2016,7 +2005,7 @@ TEST(RdnaDispatchTest, CuModeRejectsLdsRequestAboveOneCu) {
   test::AqlQueue queue(f.mem(), f.cp());
   queue.dispatch(ko, 64, 64);
 
-  EXPECT_NO_THROW((void)f.engine->step());
+  (void)f.engine->step();
   EXPECT_TRUE(f.cp()->queue_faulted_for_test(1, 0));
   EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 0u);
   EXPECT_EQ(f.cp()->dispatched_count(), 0u);
@@ -2031,7 +2020,7 @@ TEST(RdnaDispatchTest, WgpModeRejectsLdsRequestAboveSiblingPair) {
   test::AqlQueue queue(f.mem(), f.cp());
   queue.dispatch(ko, 64, 64);
 
-  EXPECT_NO_THROW((void)f.engine->step());
+  (void)f.engine->step();
   EXPECT_TRUE(f.cp()->queue_faulted_for_test(1, 0));
   EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 0u);
   EXPECT_EQ(f.cp()->dispatched_count(), 0u);
@@ -2046,7 +2035,7 @@ TEST(RdnaDispatchTest, WgpModeRequiresConfiguredSiblingCuPair) {
   test::AqlQueue queue(f.mem(), f.cp());
   queue.dispatch(ko, 64, 64);
 
-  EXPECT_NO_THROW((void)f.engine->step());
+  (void)f.engine->step();
   EXPECT_TRUE(f.cp()->queue_faulted_for_test(1, 0));
   EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 0u);
   EXPECT_EQ(f.cp()->dispatched_count(), 0u);
@@ -6639,7 +6628,7 @@ TEST_P(IsaTest, VendorSpecificBarrierValueRejectsInvalidCondition) {
   invalid_queue.submit(barrier);
   independent_queue.barrier_and();
 
-  EXPECT_NO_THROW((void)f.engine->step());
+  (void)f.engine->step();
   EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 0u);
   EXPECT_TRUE(f.cp()->queue_faulted_for_test(1, 0));
   EXPECT_EQ(f.mem()->read64(0xF0110000), 1u)
@@ -6799,7 +6788,7 @@ TEST(CommandProcessorAqlTest, BlockingBarriersRetireBeforeUnsupportedSuccessorFa
     queue.submit(unsupported);
 
     for (uint32_t i = 0; i < 100 && !f.cp()->queue_faulted_for_test(1, 0); ++i)
-      EXPECT_NO_THROW((void)f.engine->step());
+      (void)f.engine->step();
 
     EXPECT_EQ(completion_signal_value(f.mem(), kPriorCompletionSignal), 0);
     EXPECT_EQ(completion_signal_value(f.mem(), kBarrierCompletionSignal), 0)
@@ -6871,10 +6860,10 @@ TEST(CommandProcessorAqlTest, Pm4IbRetiresBeforeUnsupportedSuccessorFaultsQueue)
   queue.submit(pm4_ib);
   queue.submit(unsupported);
 
-  EXPECT_NO_THROW((void)f.engine->step());
+  (void)f.engine->step();
   EXPECT_FALSE(f.cp()->queue_faulted_for_test(1, 0));
   for (uint32_t i = 0; i < 100 && !f.cp()->queue_faulted_for_test(1, 0); ++i)
-    EXPECT_NO_THROW((void)f.engine->step());
+    (void)f.engine->step();
   EXPECT_EQ(completion_signal_value(f.mem(), kPriorCompletionSignal), 0);
   EXPECT_EQ(completion_signal_value(f.mem(), kPm4CompletionSignal), 0);
   EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 2u);
@@ -7123,7 +7112,7 @@ TEST(CommandProcessorGwsPlacementTest, UnsatisfiedGwsGridFailsWithoutCompletion)
     queue.submit(make_dispatch_packet(ko, kSignal, /*grid_size_x=*/192,
                                       /*workgroup_size_x=*/64));
 
-    ASSERT_NO_THROW(f.engine->run());
+    f.engine->run();
     EXPECT_FALSE(f.cu()->has_active_wfs());
     EXPECT_EQ(failure_pc.load(), 0x1040u);
     EXPECT_EQ(completion_signal_value(f.mem(), kSignal), 1);
@@ -7166,7 +7155,7 @@ TEST(CommandProcessorAqlTest, InvalidPm4IbFaultsWithoutCompletionOrSuccessorExec
         queue.submit(invalid);
         queue.submit(test::make_pm4_ib_packet(0xa000, 5));
         for (unsigned i = 0; i < 100 && !f.cp()->queue_faulted_for_test(1, 0); ++i)
-          EXPECT_NO_THROW((void)f.engine->step());
+          (void)f.engine->step();
         EXPECT_TRUE(f.cp()->queue_faulted_for_test(1, 0));
         EXPECT_EQ(completion_signal_value(f.mem(), signal), 1);
         EXPECT_EQ(f.mem()->read32(0xb000), 0u);
@@ -7358,7 +7347,7 @@ TEST_P(IsaTest, VendorSpecificRejectsUnsupportedFormats) {
     unsupported_queue.submit(packet);
     independent_queue.barrier_and();
 
-    EXPECT_NO_THROW((void)f.engine->step());
+    (void)f.engine->step();
     EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 0u);
     EXPECT_EQ(f.mem()->read64(0xF0110000), 1u)
         << "an unsupported packet faulted an independent AQL queue";
@@ -7375,7 +7364,7 @@ TEST(ClusterDispatchTest, RejectsClusterThatCannotFitWithoutSpinning) {
   queue.dispatch_clustered(ko, /*cluster_count_x=*/1, /*cluster_size_x=*/2,
                            /*workgroup_size_x=*/32);
 
-  EXPECT_NO_THROW((void)f.engine->step());
+  (void)f.engine->step();
   EXPECT_TRUE(f.cp()->queue_faulted_for_test(1, 0));
   EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 0u)
       << "a faulted dispatch retains its packet until queue teardown";
@@ -7398,7 +7387,7 @@ TEST(ClusterDispatchTest, AccountsForPerWorkgroupLdsAlignmentWhenPlanningCluster
                            /*workgroup_size_x=*/32, /*kernarg_addr=*/0,
                            /*group_segment_size=*/257);
 
-  EXPECT_NO_THROW((void)f.engine->step());
+  (void)f.engine->step();
   EXPECT_TRUE(f.cp()->queue_faulted_for_test(1, 0));
   EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 0u)
       << "a faulted dispatch retains its packet until queue teardown";
@@ -7419,7 +7408,7 @@ TEST(ClusterDispatchTest, ParallelCdna5RetiresClusterAfterWorkersRejoin) {
   queue.dispatch_clustered(ko, /*cluster_count_x=*/1, /*cluster_size_x=*/2,
                            /*workgroup_size_x=*/32);
 
-  ASSERT_NO_THROW(f.engine->run());
+  f.engine->run();
   EXPECT_FALSE(f.cu(0)->has_active_wfs());
   EXPECT_FALSE(f.cu(1)->has_active_wfs());
   EXPECT_TRUE(f.cp()
@@ -7459,13 +7448,13 @@ TEST(ClusterDispatchTest, CuMaskRestrictsEveryClusterWorkgroup) {
 
   f.cp()->set_queue_cu_selection(/*queue_id=*/1, /*process_id=*/0,
                                  amdgpu::QueueCuSelection(std::in_place));
-  ASSERT_NO_THROW((void)f.engine->step());
+  (void)f.engine->step();
   EXPECT_EQ(f.mem()->read64(signal + 8), 1u);
   EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 0u);
   EXPECT_EQ(f.cp()->dispatched_workgroups(), 0u);
   f.cp()->set_queue_cu_selection(/*queue_id=*/1, /*process_id=*/0, selected);
 
-  ASSERT_NO_THROW(f.engine->run());
+  f.engine->run();
   EXPECT_EQ(f.mem()->read64(signal + 8), 0u);
   EXPECT_EQ(f.cp()->dispatched_workgroups(), 6u);
   for (uint32_t cu = 0; cu < 4; ++cu) {
@@ -7508,7 +7497,7 @@ TEST(ClusterDispatchTest, ReclaimsLdsBetweenClusterWaves) {
   test::AqlQueue queue(f.mem(), f.cp());
   queue.submit(ext);
 
-  EXPECT_NO_THROW(f.engine->run());
+  f.engine->run();
   EXPECT_EQ(f.mem()->read64(kSignal + kSignalValueOffset), 0u);
   EXPECT_FALSE(f.cu(0)->has_active_wfs());
   EXPECT_FALSE(f.cu(1)->has_active_wfs());
@@ -7588,7 +7577,7 @@ TEST(ClusterDispatchTest, RejectsExtKernelDispatchWithZeroClusterShape) {
   test::AqlQueue queue(f.mem(), f.cp());
   queue.submit(ext);
 
-  EXPECT_NO_THROW((void)f.engine->step());
+  (void)f.engine->step();
   EXPECT_TRUE(f.cp()->queue_faulted_for_test(1, 0));
   EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 0u);
   EXPECT_EQ(f.cp()->dispatched_count(), 0u);
@@ -7619,7 +7608,7 @@ TEST(ClusterDispatchTest, RejectsExtKernelDispatchGridOverflow) {
   test::AqlQueue queue(f.mem(), f.cp());
   queue.submit(ext);
 
-  EXPECT_NO_THROW((void)f.engine->step());
+  (void)f.engine->step();
   EXPECT_TRUE(f.cp()->queue_faulted_for_test(1, 0));
   EXPECT_EQ(f.mem()->read64(test::AqlQueue::DEFAULT_READ_PTR_ADDR), 0u);
   EXPECT_EQ(f.cp()->dispatched_count(), 0u);
@@ -7865,7 +7854,7 @@ TEST(AqlDispatchTest, Fp16OvflDescriptorControlsFp8ConversionResult) {
     test::AqlQueue queue(f.mem(), f.cp());
     queue.dispatch(ko, 64, 64);
 
-    ASSERT_NO_THROW(f.engine->run());
+    f.engine->run();
     ASSERT_EQ(snap->snapshots().size(), 1u);
     EXPECT_EQ((snap->snapshots().front().mode_raw & amdgpu::Wavefront::FP16_OVFL_BIT) != 0,
               fp16_ovfl);
@@ -7911,7 +7900,7 @@ TEST(RdnaDispatchTest, WgpModeRoutesDsWritesThroughSiblingLdsPool) {
   test::AqlQueue queue(f.mem(), f.cp());
   queue.dispatch(ko, 32, 32);
 
-  ASSERT_NO_THROW(f.engine->run());
+  f.engine->run();
 
   // The DS store wrote an offset in the sibling CU's half of the combined WGP LDS
   // pool, then the DS load read it back into v2. A correct v2 proves the store and
@@ -9124,7 +9113,7 @@ TEST(MubufLdsTest, LoadDwordLdsAppliesInstOffset) {
 
     test::AqlQueue queue(f.mem(), f.cp());
     queue.dispatch(ko, 64, 64);
-    ASSERT_NO_THROW(f.engine->run());
+    f.engine->run();
 
     for (uint32_t lane = 0; lane < 64; ++lane) {
       EXPECT_EQ(f.cu()->lds().read32(kLdsBase + lane * 4), 0xA0000000u | lane)
@@ -9244,7 +9233,7 @@ TEST(MubufRangeCheckTest, CdnaCountsSoffsetClampsPerDwordAndZeroFillsLds) {
 
     test::AqlQueue queue(f.mem(), f.cp());
     queue.dispatch(ko, 64, 64);
-    ASSERT_NO_THROW(f.engine->run());
+    f.engine->run();
     f.cu()->flush_all();
     ASSERT_EQ(snap->snapshots().size(), 1u);
     const auto &wf = snap->snapshots().front();
@@ -9354,7 +9343,7 @@ TEST(MubufAddTidTest, CdnaAddsLaneTimesStride) {
 
     test::AqlQueue queue(f.mem(), f.cp());
     queue.dispatch(ko, 64, 64);
-    ASSERT_NO_THROW(f.engine->run());
+    f.engine->run();
     f.cu()->flush_all();
     ASSERT_EQ(snap->snapshots().size(), 1u);
     const auto &wf = snap->snapshots().front();
@@ -10495,61 +10484,6 @@ INSTANTIATE_TEST_SUITE_P(FailureKinds, AqlQueueFailureConcurrencyTest, testing::
                            return info.param ? "VmFault" : "InstructionFailure";
                          });
 
-class ThrowingIssuePlugin final : public ExecutionPlugin {
-public:
-  enum Hook { Before, After, Halt };
-  explicit ThrowingIssuePlugin(Hook hook) : ExecutionPlugin("throwing_issue"), hook_(hook) {}
-
-  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &,
-                                        amdgpu::Wavefront &) override {
-    fail_at(Before);
-  }
-  void onAmdgpuAfterExecuteInstruction(uint64_t, const Instruction &,
-                                       amdgpu::Wavefront &) override {
-    fail_at(After);
-  }
-  void onAmdgpuWavefrontHalted(amdgpu::Wavefront &) override { fail_at(Halt); }
-
-private:
-  void fail_at(Hook hook) {
-    if (hook == hook_)
-      throw std::runtime_error("injected issue hook failure");
-  }
-  Hook hook_;
-};
-
-TEST(AqlDispatchTest, ThrowingIssueHooksReclaimDecodedInstruction) {
-  for (auto hook :
-       {ThrowingIssuePlugin::Before, ThrowingIssuePlugin::After, ThrowingIssuePlugin::Halt}) {
-    SCOPED_TRACE(hook);
-    VmFixture f;
-    ASSERT_NO_FATAL_FAILURE(f.initialize("cdna4"));
-    auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
-    ASSERT_TRUE(group->add(std::make_unique<ThrowingIssuePlugin>(hook)));
-    f.soc_ptr->set_plugin_group(group);
-    // An indirect branch to zero halts outside execute_instruction().
-    const util::FailureOr<uint32_t> maybe_code =
-        hook == ThrowingIssuePlugin::Halt ? build_s_setpc_b64(0, ROCJITSU_CODE_ARCH_CDNA4)
-                                          : util::FailureOr<uint32_t>(0xBE800000u);
-    ASSERT_TRUE(maybe_code.succeeded());
-    const uint32_t code = maybe_code.value();
-    f.write_kernel(0x1000, &code, sizeof(code));
-    ASSERT_NE(f.dispatch_scratch_wf(), nullptr);
-
-    // Count instruction frees on this thread, including non-sanitized builds.
-    // The guard restores the decoder's allocator hooks before fixture teardown.
-    Instruction::ScopedHeapAllocation heap_allocation;
-    uint32_t deallocations = 0;
-    Instruction::alloc_pool_ = &deallocations;
-    Instruction::dealloc_fn_ = [](void *counter, void *ptr) {
-      ++*static_cast<uint32_t *>(counter);
-      ::operator delete(ptr);
-    };
-    EXPECT_THROW((void)f.cu()->step(), std::runtime_error);
-    EXPECT_EQ(deallocations, 1u);
-  }
-}
-
 TEST(AqlDispatchTest, WorkerYieldReturnsToEventLoopBeforeResuming) {
   constexpr uint32_t kSSleep = 0xBF8E0001u;
   VmFixture f;
@@ -11366,7 +11300,7 @@ TEST(Pm4DispatchTest, ScratchExhaustionFailsQueueWithoutCompletionOrSuccessorEff
     ++completions;
   };
   ASSERT_TRUE(fixture.cp()->submit_pm4(71, 0, std::move(submission)));
-  EXPECT_NO_THROW(fixture.engine->run());
+  fixture.engine->run();
   ASSERT_NE(observed->lease, nullptr);
   EXPECT_EQ(completions, 1u);
   EXPECT_TRUE(fixture.cp()->queue_faulted_for_test(71, 0));

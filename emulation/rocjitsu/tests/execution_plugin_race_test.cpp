@@ -295,12 +295,11 @@ TEST_F(FormattedLoadRaceTest, RejectsInvalidEncodingAtCapture) {
     SCOPED_TRACE(size);
     InvalidInstruction instruction(words, size);
     wave->clear_instruction_execution_error();
-    EXPECT_NO_THROW(
-        fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(0x1000, instruction, *wave));
+    fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(0x1000, instruction, *wave);
     EXPECT_EQ(wave->instruction_execution_error(), InstructionExecutionError::PluginFailure);
     EXPECT_EQ(plugin_state->trace.size(), 0u);
     wave->clear_instruction_execution_error();
-    EXPECT_NO_THROW(fixture.plugin_group_->onAmdgpuMemoryAccessRouted({}, instruction, *wave));
+    fixture.plugin_group_->onAmdgpuMemoryAccessRouted({}, instruction, *wave);
     EXPECT_EQ(wave->instruction_execution_error(), InstructionExecutionError::PluginFailure);
     EXPECT_TRUE(plugin_state->race_state->getWaveMemoryEvents().empty());
   }
@@ -310,8 +309,7 @@ TEST_F(FormattedLoadRaceTest, RejectsMissingInstructionHistoryWhenReporting) {
   issue(rdna4::kBufferLoadFormatXVbuffer, 46, 8, 1);
   ASSERT_EQ(plugin_state->race_state->getWaveMemoryEvents().size(), 1u);
   plugin_state->trace = {};
-  EXPECT_NO_THROW(
-      fixture.plugin_group_->onAmdgpuReadVgprLanes(wave, wave->vgpr_alloc().base + 8, 1));
+  fixture.plugin_group_->onAmdgpuReadVgprLanes(wave, wave->vgpr_alloc().base + 8, 1);
   EXPECT_EQ(wave->instruction_execution_error(), InstructionExecutionError::PluginFailure);
   EXPECT_EQ(sink->str().find("RACE "), std::string::npos);
 }
@@ -324,8 +322,7 @@ TEST_F(FormattedLoadRaceTest, RejectsUndecodableInstructionHistoryWhenReporting)
   const std::span<const uint32_t> truncated = std::span(words).first(1);
   plugin_state->trace = {};
   plugin_state->trace.push(InstructionSnapshot{0x1234, truncated});
-  EXPECT_NO_THROW(
-      fixture.plugin_group_->onAmdgpuReadVgprLanes(wave, wave->vgpr_alloc().base + 8, 1));
+  fixture.plugin_group_->onAmdgpuReadVgprLanes(wave, wave->vgpr_alloc().base + 8, 1);
   EXPECT_EQ(wave->instruction_execution_error(), InstructionExecutionError::PluginFailure);
   EXPECT_NE(sink->str().find("cannot disassemble captured instruction at PC 0x1234"),
             std::string::npos);
@@ -2231,11 +2228,11 @@ TEST(RaceDetectorPluginTest, DebuggerReadsIgnorePendingLoads) {
 
       ordering->events.clear();
       const auto output = sink.str();
-      EXPECT_NO_THROW({
+      {
         EXPECT_EQ(wave->debug_read_sgpr(8), 42u);
         EXPECT_EQ(wave->debug_read_vgpr(8, 0), 43u);
         EXPECT_EQ(wave->debug_read_vgpr(8, 31), 44u);
-      });
+      }
       EXPECT_TRUE(ordering->events.empty());
       EXPECT_EQ(sink.str(), output);
       EXPECT_EQ(state->race_state->getWaveMemoryEvents().size(), 1u);
@@ -3157,7 +3154,7 @@ TEST(RaceDetectorPluginOutputTest, SwapPcDisassemblesAtTheCapturedInstructionAdd
     code.insert(code.end(), {swap[0], S_NOP, S_ENDPGM});
     const uint32_t value = 7;
     f.mem->load_image(reinterpret_cast<const uint8_t *>(&value), sizeof(value), 0x3000);
-    ASSERT_NO_THROW(f.run_kernel(code.data(), code.size()));
+    f.run_kernel(code.data(), code.size());
     if (waited) {
       EXPECT_EQ(sink.str().find("RACE "), std::string::npos) << sink.str();
     } else {
