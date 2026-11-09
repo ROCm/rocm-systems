@@ -1287,10 +1287,10 @@ TEST_P(DsGwsTest, ConcurrentCrossCuSteppingIsRaceFree) {
   (void)consumed;
 }
 
-// Production wiring (direct Xcd constructor): every CU of an XCD shares that
+// Production wiring (configured Xcd factory): every CU of an XCD shares that
 // XCD's single device-global GWS store, so cross-CU GWS works for production
 // dispatches. Regression for CUs keeping their private default store.
-TEST_P(DsGwsTest, XcdConstructorSharesGwsStoreAcrossCus) {
+TEST_P(DsGwsTest, XcdFactorySharesGwsStoreAcrossCus) {
   auto cu_cfg = cu_config(4);
   amdgpu::ShaderEngine::Config se_cfg{};
   se_cfg.num_compute_units = 2;
@@ -1299,7 +1299,9 @@ TEST_P(DsGwsTest, XcdConstructorSharesGwsStoreAcrossCus) {
   amdgpu::Xcd::Config xcd_cfg{};
   xcd_cfg.num_shader_engines = 1;
   xcd_cfg.shader_engine = se_cfg;
-  amdgpu::Xcd xcd("ds_gws_xcd", xcd_cfg, arch, &mem);
+  auto xcd_owner = amdgpu::Xcd::create("ds_gws_xcd", xcd_cfg, arch, &mem);
+  ASSERT_NE(xcd_owner, nullptr);
+  auto &xcd = *xcd_owner;
 
   const amdgpu::GwsDevice *store = xcd.gws_device().get();
   ASSERT_NE(store, nullptr);
@@ -1324,7 +1326,9 @@ TEST_P(DsGwsTest, DirectlyAttachedCpCuSharesGwsStore) {
   amdgpu::Xcd::Config xcd_cfg{};
   xcd_cfg.num_shader_engines = 1;
   xcd_cfg.shader_engine = se_cfg;
-  amdgpu::Xcd xcd("ds_gws_directcu_xcd", xcd_cfg, arch, &mem);
+  auto xcd_owner = amdgpu::Xcd::create("ds_gws_directcu_xcd", xcd_cfg, arch, &mem);
+  ASSERT_NE(xcd_owner, nullptr);
+  auto &xcd = *xcd_owner;
 
   const amdgpu::GwsDevice *store = xcd.gws_device().get();
   ASSERT_NE(store, nullptr);
@@ -2095,7 +2099,9 @@ TEST_P(DsGwsTest, XcdAndCpRejectStoreReplacementBeforeAnyMutation) {
   amdgpu::Xcd::Config xc{};
   xc.num_shader_engines = 1;
   xc.shader_engine = se;
-  amdgpu::Xcd xcd("xcd", xc, GetParam(), &mem);
+  auto xcd_owner = amdgpu::Xcd::create("xcd", xc, GetParam(), &mem);
+  ASSERT_NE(xcd_owner, nullptr);
+  auto &xcd = *xcd_owner;
   auto old = xcd.gws_device();
   auto replacement = std::make_shared<amdgpu::GwsDevice>();
   auto *cu0 = xcd.shader_engine(0)->compute_unit(0);

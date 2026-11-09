@@ -208,7 +208,7 @@ public:
   /// @brief Wire deferred link specs, creating ports on demand.
   /// @param emit_error Destination for failure diagnostics. Omitting it discards the message.
   /// @returns Success, or diagnosed failure for invalid paths or a missing root.
-  /// All paths are validated before changing ports or links. Allocations may throw.
+  /// All paths are validated before changing ports or links.
   util::Result wire_links(const std::vector<LinkSpec> &specs, ExecMode mode,
                           util::DiagnosticEmitter emit_error = {});
 
@@ -226,7 +226,7 @@ public:
   /// @param emit_error Destination for failure diagnostics. Omitting it discards the message.
   /// @returns Failure with a diagnostic for zero partitions, an empty assigner, or an
   /// out-of-range assignment. Existing partitions and component IDs are unchanged.
-  /// Allocations and caller-supplied callbacks can still throw.
+  /// The assigner must not throw.
   util::Result partition_manual(uint32_t num_partitions,
                                 std::function<PartitionID(Component *)> assigner,
                                 util::DiagnosticEmitter emit_error = {});

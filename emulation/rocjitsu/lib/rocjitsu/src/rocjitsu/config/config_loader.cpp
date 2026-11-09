@@ -35,6 +35,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cctype>
+#include <cerrno>
 #include <charconv>
 #include <cstdlib>
 #include <limits>
@@ -174,12 +175,19 @@ simdojo::ExecMode exec_mode_from_fb(const rocjitsu::fb::SimulationConfig *fb_con
   return parse_exec_mode(fb_config->exec_mode() ? fb_config->exec_mode()->str() : "");
 }
 
-uint32_t config_u32(const std::unordered_map<std::string, std::string> &cfg, const std::string &key,
-                    uint32_t def = 0) {
+util::FailureOr<uint32_t> config_u32(const std::unordered_map<std::string, std::string> &cfg,
+                                     const std::string &key, uint32_t fallback,
+                                     util::DiagnosticEmitter emit_error) {
   auto it = cfg.find(key);
   if (it == cfg.end())
-    return def;
-  return static_cast<uint32_t>(std::stoul(it->second));
+    return fallback;
+  char *end = nullptr;
+  errno = 0;
+  const unsigned long value = std::strtoul(it->second.c_str(), &end, 10);
+  if (end == it->second.c_str() || errno == ERANGE)
+    return emit_error.emit() << key << " must start with a decimal integer in unsigned long range";
+  // Preserve stoul's sign/prefix handling and the existing narrowing to uint32_t.
+  return static_cast<uint32_t>(value);
 }
 
 uint32_t default_sgprs_per_wf(rj_code_arch_t arch) {
@@ -617,13 +625,34 @@ parse_compute_unit_config(const CfgMap &cfg, rj_code_arch_t arch, rj_code_target
     return util::Result::failure();
   cc.arithmetic = arithmetic.value();
   cc.image_gb_addr_config = image_config;
-  cc.num_wf_slots = config_u32(cfg, "num_wf_slots", 10);
-  cc.sgprs_per_wf = config_u32(cfg, "sgprs_per_wf", default_sgprs_per_wf(arch));
-  cc.vgprs_per_wf = config_u32(cfg, "vgprs_per_wf", default_vgprs_per_wf(arch));
-  cc.lds_size_kb = config_u32(cfg, "lds_size_kb", 160);
-  cc.gws_wait_limit = config_u32(cfg, "gws_wait_limit", cc.gws_wait_limit);
-  cc.functional_quantum =
-      config_u32(cfg, "functional_quantum", amdgpu::ComputeUnitCore::kFunctionalQuantum);
+  util::FailureOr<uint32_t> num_wf_slots = config_u32(cfg, "num_wf_slots", 10, emit_error);
+  if (num_wf_slots.failed())
+    return util::Result::failure();
+  cc.num_wf_slots = num_wf_slots.value();
+  util::FailureOr<uint32_t> sgprs_per_wf =
+      config_u32(cfg, "sgprs_per_wf", default_sgprs_per_wf(arch), emit_error);
+  if (sgprs_per_wf.failed())
+    return util::Result::failure();
+  cc.sgprs_per_wf = sgprs_per_wf.value();
+  util::FailureOr<uint32_t> vgprs_per_wf =
+      config_u32(cfg, "vgprs_per_wf", default_vgprs_per_wf(arch), emit_error);
+  if (vgprs_per_wf.failed())
+    return util::Result::failure();
+  cc.vgprs_per_wf = vgprs_per_wf.value();
+  util::FailureOr<uint32_t> lds_size_kb = config_u32(cfg, "lds_size_kb", 160, emit_error);
+  if (lds_size_kb.failed())
+    return util::Result::failure();
+  cc.lds_size_kb = lds_size_kb.value();
+  util::FailureOr<uint32_t> gws_wait_limit =
+      config_u32(cfg, "gws_wait_limit", cc.gws_wait_limit, emit_error);
+  if (gws_wait_limit.failed())
+    return util::Result::failure();
+  cc.gws_wait_limit = gws_wait_limit.value();
+  util::FailureOr<uint32_t> functional_quantum = config_u32(
+      cfg, "functional_quantum", amdgpu::ComputeUnitCore::kFunctionalQuantum, emit_error);
+  if (functional_quantum.failed())
+    return util::Result::failure();
+  cc.functional_quantum = functional_quantum.value();
   if (auto it = cfg.find("memory_wait_diagnostics"); it != cfg.end()) {
     if (it->second == "off")
       cc.memory_wait_diagnostics = amdgpu::MemoryWaitDiagnostics::Off;
@@ -702,7 +731,10 @@ const FactoryMap &factories(BuildMode build_mode) {
       if (!mem)
         return emit_error.emit() << "IOD requires gpu_memory";
       amdgpu::Iod::Config ic{};
-      ic.num_hbm_stacks = config_u32(cfg, "num_hbm_stacks", 4);
+      util::FailureOr<uint32_t> num_hbm_stacks = config_u32(cfg, "num_hbm_stacks", 4, emit_error);
+      if (num_hbm_stacks.failed())
+        return util::Result::failure();
+      ic.num_hbm_stacks = num_hbm_stacks.value();
       return std::unique_ptr<simdojo::Component>(std::make_unique<amdgpu::Iod>(n, ic, mem));
     };
 
