@@ -15,7 +15,6 @@
 
 namespace hrr {
 
-// Loading
 
 size_t RegionMap::load(const std::string& archive_dir) {
     const std::vector<std::string> paths = find_region_streams(archive_dir);
@@ -53,8 +52,8 @@ size_t RegionMap::load(const std::string& archive_dir) {
         ++streams_;
     }
 
-    // Stable so that records sharing a timestamp — a producer emitting a free
-    // and the reallocation of the same address in one batch — keep the order
+    // Stable, so records sharing a timestamp keep their order: a producer may emit
+    // a free and the reallocation of the same address in one batch.
     std::stable_sort(records_.begin(), records_.end(),
                      [](const hrr_region_rec& a, const hrr_region_rec& b) {
                          return a.mono_ns < b.mono_ns;
@@ -77,7 +76,7 @@ void RegionMap::check_clock_against(uint64_t first_event_ns, uint64_t last_event
     if (stamped == 0) return;
 
     // Region timestamps must come from the same clock as the event headers
-    // (CLOCK_MONOTONIC via amd::Os::timeNanos). A producer that stamped
+    // (CLOCK_MONOTONIC via amd::Os::timeNanos).
     if (inside * 10 < stamped) {
         fprintf(stderr,
                 "[HRR] WARNING: %zu of %zu region timestamps fall outside the "
@@ -90,7 +89,6 @@ void RegionMap::check_clock_against(uint64_t first_event_ns, uint64_t last_event
     }
 }
 
-// Timeline application
 
 // Tightest enclosing entry: the largest base <= addr whose extent covers addr.
 template <typename Extent>
@@ -118,8 +116,8 @@ void RegionMap::apply(PlaybackContext& ctx, const hrr_region_rec& r) {
         return;
     }
     live_set.erase(r.base);
-    // A segment the producer freed mid-run. Release the buffer standing in for
-    // it, so a later pointer into that address is reported rather than quietly
+    // A segment the producer freed mid-run: release its stand-in buffer, so a later
+    // pointer into that address is reported rather than quietly translated.
     if (r.kind == HRR_REGION_SEGMENT) {
         auto it = materialized_.find(r.base);
         if (it != materialized_.end()) {
@@ -131,8 +129,8 @@ void RegionMap::apply(PlaybackContext& ctx, const hrr_region_rec& r) {
 
 void RegionMap::advance_to(PlaybackContext& ctx, int64_t ts) {
     if (records_.empty()) return;
-    // Monotonic only. Events are dispatched in sequence order, which is the
-    // capture's call order, so a timestamp going backwards means clock jitter
+    // Monotonic only. Events dispatch in capture order,
+    // so a timestamp going backwards is clock jitter.
     if (ts < last_ts_) return;
     last_ts_ = ts;
     while (cursor_ < records_.size() && records_[cursor_].mono_ns <= ts) {
@@ -146,8 +144,8 @@ void RegionMap::rewind() {
     last_ts_ = INT64_MIN;
     blocks_.clear();
     segments_.clear();
-    // Keep materialized_ / materialize_failed_ / materialized_total_: a warm-up
-    // pass may already have allocated stand-in buffers and registered them in
+    // Keep materialized_, materialize_failed_ and materialized_total_: a warm-up pass
+    // may already have registered stand-in buffers in alloc_map.
 }
 
 void* RegionMap::materialize_for(PlaybackContext& ctx, uint64_t rec_addr) {
@@ -170,7 +168,6 @@ void* RegionMap::materialize_for(PlaybackContext& ctx, uint64_t rec_addr) {
     return static_cast<char*>(it->second) + (rec_addr - base);
 }
 
-// Classification
 
 RegionMap::Class RegionMap::classify(uint64_t rec_addr, uint64_t* blk_base,
                                      uint64_t* blk_size) const {

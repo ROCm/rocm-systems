@@ -53,12 +53,10 @@ static_assert(sizeof(hrr_region_rec) == 32, "hrr_region_rec must be 32 bytes");
 static_assert(sizeof(hrr_region_batch) == 40, "hrr_region_batch must be 40 bytes");
 #endif
 
-/* Total on-the-wire size of a batch carrying n records. */
 static inline uint32_t hrr_region_batch_bytes(uint32_t n) {
     return (uint32_t)sizeof(hrr_region_batch) + n * (uint32_t)sizeof(hrr_region_rec);
 }
 
-/* Build the 8-byte header a sidecar region stream starts with. */
 static inline hrr_file_header hrr_make_region_file_header(void) {
     hrr_file_header fh;
     memset(&fh, 0, sizeof(fh));

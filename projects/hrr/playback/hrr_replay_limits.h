@@ -5,7 +5,6 @@
  */
 #pragma once
 
-// Bounds on the waits and retries a replay performs on behalf of the archive.
 
 #include <algorithm>
 #include <atomic>
@@ -23,12 +22,12 @@
 
 namespace hrr {
 
-// Default bounds. Each is one "wait": a single 1 µs sleep (the yield phase
-// before it is not counted). A sleep costs about 50-60 µs on Linux, so the
+// Each wait is one 1 µs sleep; the yield phase before it is not counted.
+// A sleep costs about 50-60 µs on Linux, so the default is a few minutes.
 constexpr uint64_t kDefaultMaxSeqWaits      = 5000000;
 
 // A hipEventQuery/hipStreamQuery replay spins until the recorded work is done,
-// which is what a synchronize does and a synchronize has no count either: the
+// as a synchronize does. Neither has a count, so the default is unlimited.
 constexpr uint64_t kDefaultMaxQueryAttempts = UINT64_MAX;
 
 // Caps on the resources an archive can make replay consume.
@@ -38,7 +37,6 @@ constexpr uint64_t kDefaultMaxHostBytes = 16ull << 30;  // 16 GiB
 constexpr uint64_t kDefaultMaxWallSecs  = 3600;         // 1 hour
 constexpr uint64_t kMaxWallSecs         = 31536000;     // 365 days, the largest accepted value
 
-// Number of yields before a wait starts sleeping.
 constexpr int kSpinYields = 1000;
 
 enum class TurnResult {
@@ -47,8 +45,8 @@ enum class TurnResult {
   Stalled,  // next_seq made no progress for max_waits waits
 };
 
-// The first sequence number that occurs more than once in `ids`, if any. Two
-// events with the same number would both see next_seq equal to it and both
+// The first sequence number that occurs more than once in `ids`. Two events with
+// the same number would both see next_seq equal to it and both run.
 inline bool find_duplicate_seq(std::vector<uint64_t> ids, uint64_t* dup) {
   std::sort(ids.begin(), ids.end());
   const auto it = std::adjacent_find(ids.begin(), ids.end());
@@ -57,8 +55,8 @@ inline bool find_duplicate_seq(std::vector<uint64_t> ids, uint64_t* dup) {
   return true;
 }
 
-// The first sequence number missing from `ids` between its smallest and
-// largest value, if any. Capture hands out a number only to an event it
+// The first sequence number missing from `ids` between its smallest and largest value.
+// Capture numbers only the events it records, so a gap means a lost event.
 inline bool find_seq_gap(std::vector<uint64_t> ids, uint64_t* missing) {
   std::sort(ids.begin(), ids.end());
   for (size_t i = 1; i < ids.size(); ++i) {
@@ -70,7 +68,6 @@ inline bool find_seq_gap(std::vector<uint64_t> ids, uint64_t* missing) {
   return false;
 }
 
-// Wait until `next_seq` equals `seq`.
 inline TurnResult wait_for_turn(const std::atomic<uint64_t>& next_seq,
                                 uint64_t seq,
                                 const std::atomic<bool>& fatal,
@@ -112,8 +109,8 @@ inline TurnResult wait_for_turn(const std::atomic<uint64_t>& next_seq,
   }
 }
 
-// Parse an unsigned integer option value. Requires the first character to be a
-// digit: strtoull skips leading whitespace (space, tab, newline) and accepts a
+// Parse an unsigned integer option. The first character must be a digit:
+// strtoull skips leading whitespace and accepts a sign.
 inline bool parse_u64(const char* text, uint64_t* out) {
   if (!text || *text < '0' || *text > '9') return false;
   char* end = nullptr;
@@ -124,7 +121,6 @@ inline bool parse_u64(const char* text, uint64_t* out) {
   return true;
 }
 
-// Call `attempt` until it returns true or max_attempts calls have been made.
 template <typename Attempt>
 bool retry_bounded(uint64_t max_attempts, Attempt&& attempt) {
   int spin = 0;
@@ -138,8 +134,8 @@ bool retry_bounded(uint64_t max_attempts, Attempt&& attempt) {
   return false;
 }
 
-// Refuse a recorded thread count above the cap. Returns true if `recorded`
-// threads may be created; otherwise false and *message says how many were
+// True if `recorded` threads may be created; otherwise false and *message
+// says how many were recorded against the cap.
 inline bool check_thread_cap(size_t recorded, uint64_t cap, std::string* message) {
   if (recorded <= cap) return true;
   if (message)
@@ -149,8 +145,8 @@ inline bool check_thread_cap(size_t recorded, uint64_t cap, std::string* message
   return false;
 }
 
-// A running total of bytes against a cap. try_charge() is all-or-nothing: it
-// adds `n` only if the total stays within the cap, with no overflow for any
+// A running total of bytes against a cap. try_charge() is all-or-nothing:
+// it adds `n` only if the total stays within the cap, without overflow.
 class ByteBudget {
  public:
   explicit ByteBudget(uint64_t cap = kDefaultMaxHostBytes) : cap_(cap) {}
@@ -177,8 +173,8 @@ class ByteBudget {
   std::atomic<uint64_t> used_{0};
 };
 
-// Holds a charge against a ByteBudget for the life of the object, for buffers
-// that are freed again (read-back buffers). ok() is false if the charge was
+// Holds a charge against a ByteBudget for the object's life, for buffers that are freed again.
+// ok() is false if the charge was refused.
 class ScopedCharge {
  public:
   ScopedCharge(ByteBudget& b, uint64_t n) : b_(b), n_(n), ok_(b.try_charge(n)) {}
@@ -193,8 +189,8 @@ class ScopedCharge {
   bool ok_;
 };
 
-// Calls `on_expire` once, from its own thread, if it is still alive `limit`
-// after construction. Destroying it first cancels the call. A zero `limit`
+// Calls `on_expire` once, from its own thread, if still alive `limit` after construction.
+// Destroying it first cancels the call. A zero `limit` disables it.
 class WallClockWatchdog {
  public:
   WallClockWatchdog(std::chrono::milliseconds limit, std::function<void()> on_expire)

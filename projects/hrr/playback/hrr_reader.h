@@ -13,26 +13,19 @@
 #include <vector>
 #include <unordered_map>
 
-// hrr_api_args.h — HRR_API_* enum values and hrr_api_names[] string table
 #include "hrr/hrr_api_args.h"
 #include "hrr_replay_limits.h"  // kDefaultMaxEvents
 
-// HRR Archive Reader — reads .hrr trace archives produced by the in-tree
-// capture layer (HIP_HRR_CAPTURE_OUTPUT).
-//
 // Binary format (v5):
 //   events.bin:
 //     [0..7]   hrr_file_header  { HRR_MAGIC, HRR_VERSION, reserved }
 //     [8..]    hrr_event_header (32 bytes) + payload bytes, repeated per event
 //   blobs/<2hex>/  — content-addressed raw buffers (FNV-1a-128 hash)
 //   code_objects/  — .hsaco ELFs keyed by hash
-// Format constants (HRR_MAGIC, HRR_VERSION, hrr_file_header, hrr_event_header)
-// are defined in hrr_api_args.h (included above).
 
 namespace hrr {
 
-// Typed payload structs — populated by load_archive for fast replay access.
-// All handle fields are raw runtime pointers cast to uint64_t.
+// Handle fields are raw runtime pointers cast to uint64_t.
 
 struct MallocEvent {
   uint64_t ptr_handle;  // device pointer returned by hipMalloc
@@ -102,7 +95,6 @@ struct BufferSnapshot {
   uint8_t  direction;
 };
 
-// Parsed kernel launch event
 struct KernelLaunchEvent {
   std::string              kernel_name;
   uint64_t                 co_hash_lo   = 0;
@@ -114,7 +106,6 @@ struct KernelLaunchEvent {
   std::vector<BufferSnapshot>  snapshots;
 };
 
-// Single event
 
 struct Event {
   // raw_payload is the single source of truth: header(32) + fields.
@@ -124,13 +115,11 @@ struct Event {
     return *reinterpret_cast<const hrr_event_header*>(raw_payload.data());
   }
 
-  // Stream handle for kernel launch events (raw hipStream_t pointer)
   uint64_t stream_handle = 0;
 
   // Generic single-handle field: stream, event, or module depending on event_type
   uint64_t handle64 = 0;
 
-  // Typed payload (set based on event_type)
   MallocEvent          malloc_ev{};
   MemcpyEvent          memcpy_ev{};
   ModuleLoadEvent      module_load_ev{};
@@ -151,7 +140,6 @@ struct Event {
   Event& operator=(const Event&) = delete;
 };
 
-// Full loaded archive
 
 struct Archive {
   std::string path;
@@ -159,7 +147,6 @@ struct Archive {
   uint16_t    flags = 0;          // HRR_FILE_FLAG_* bits from hrr_file_header
   std::vector<Event> events;
 
-  // Crash-resilience status, set by load_archive:
   bool complete  = false;
   bool truncated = false;
   // The trailer was found and how many events it counts. trailer && !complete
@@ -180,31 +167,26 @@ struct Archive {
   size_t blob_count        = 0;
   size_t code_object_count = 0;
 
-  // Distinct thread IDs that appear in the archive, in first-seen order.
-  // Populated during load_archive — no extra scan needed by the replayer.
+  // Distinct thread IDs in first-seen order.
   std::vector<uint64_t> threads;
 };
 
-// API
 
 // Load an archive from disk. Returns false on error, including a load that
 // would take `bytes` past its cap; the diagnostic names --max-host-bytes.
 bool load_archive(const std::string& path, Archive& archive,
                   ByteBudget* bytes = nullptr);
 
-// The pid in the name of a per-process archive directory, "pid-<decimal pid>",
-// or 0 for any other name. An archive moved aside to pid-<pid>.prev-<n>, when a
+// The pid in a per-process archive directory name, "pid-<decimal pid>", or 0 for any other name.
 uint64_t pid_from_archive_dir_name(const std::string& name);
 
-// Whether load_archive would find the archive in `archive_dir` complete: a
-// trailer whose total_events counts the records before it. Walks the record
+// Whether load_archive would find the archive in `archive_dir` complete:
+// a trailer whose total_events counts the records before it.
 bool has_clean_trailer(const std::string& archive_dir);
 
-// Record-stream primitives
-// events.bin and the external-region sidecars (regions/*.hrrr, see
 
 // payload_length is file-supplied. Without a ceiling, a corrupt header can ask
-// resize() for ~4 GiB and OOM the process. Captured kernel launches are far
+// resize() for ~4 GiB and OOM the process.
 constexpr uint32_t kMaxRecordBytes = 64u * 1024u * 1024u;
 
 enum class RecordStatus {
@@ -214,13 +196,13 @@ enum class RecordStatus {
   OverBudget    // the record would not fit the budget; nothing was allocated
 };
 
-// Read one framed record into `out` (resized to the record's full length,
-// header included). Only the final record of a stream can ever be Torn, because
+// Read one framed record into `out` (resized to its full length, header included).
+// Only the final record of a stream can be Torn.
 RecordStatus read_raw_record(FILE* f, std::vector<uint8_t>& out,
                              ByteBudget* budget = nullptr);
 
-// Open a record stream and validate its 8-byte header. `expected_magic` selects
-// the stream kind (HRR_MAGIC for events.bin, HRR_REGION_MAGIC for a region
+// Open a record stream and validate its 8-byte header. `expected_magic` selects the stream
+// kind: HRR_MAGIC for events.bin, HRR_REGION_MAGIC for a region stream.
 FILE* open_record_stream(const std::string& file_path, uint32_t expected_magic,
                          uint16_t expected_version, uint16_t* version,
                          uint16_t* flags = nullptr);
@@ -229,33 +211,28 @@ FILE* open_record_stream(const std::string& file_path, uint32_t expected_magic,
 // <archive_dir>/regions/*.hrrr, sorted by name for a deterministic merge order.
 std::vector<std::string> find_region_streams(const std::string& archive_dir);
 
-// Largest file read_file_capped() and the readers below will load whole. A blob
-// or code object above it is refused instead of allocated; the archive chose
+// Largest file read_file_capped() and the readers below load whole.
+// A larger blob or code object is refused, not allocated.
 constexpr uint64_t kDefaultMaxFileBytes = 4ull << 30;
 uint64_t max_file_bytes();
 void set_max_file_bytes(uint64_t bytes);
 
-// Most events load_archive() will hold. It stops at the first record past the
-// cap and fails, naming the count and the cap, so an archive cannot make the
+// Most events load_archive() holds. It fails at the first record past the cap,
+// naming the count and the cap.
 uint64_t max_events();
 void set_max_events(uint64_t events);
 
-// Read a whole file into `data`, refusing one larger than max_file_bytes().
 bool read_file_capped(const std::string& path, std::vector<uint8_t>& data,
                       std::string* error = nullptr, bool* refused = nullptr);
 
-// Read a blob's bytes given its hash. Returns false if not found.
 bool read_blob(const Archive& archive, uint64_t hash_lo, uint64_t hash_hi,
                std::vector<uint8_t>& data);
 
-// Read a code object (.hsaco) given its hash. Returns false if not found.
 bool read_code_object(const Archive& archive, uint64_t hash_lo, uint64_t hash_hi,
                       std::vector<uint8_t>& data);
 
-// Format a 128-bit hash as a 32-character hex string.
 std::string hash_hex(uint64_t lo, uint64_t hi);
 
-// Human-readable API name for an event_type (uses hrr_api_names[]).
 const char* event_type_name(uint16_t type);
 
 }  // namespace hrr

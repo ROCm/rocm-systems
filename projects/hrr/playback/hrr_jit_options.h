@@ -5,14 +5,13 @@
  */
 #pragma once
 
-// Which JIT/link options carry a pointer in their value.
 
 #include <cstdint>
 
 namespace hrr {
 
-// True if the value paired with JIT option `option` is an integer, so the
-// recorded value can be passed through. False for the options whose value is a
+// True if the value paired with JIT option `option` is an integer, so the recorded value
+// can pass through. False for options whose value is a pointer.
 constexpr bool jit_option_value_is_integer(int option) {
   switch (option) {
     case 0:      // hipJitOptionMaxRegisters
@@ -43,8 +42,8 @@ constexpr bool jit_option_value_is_integer(int option) {
     case 10001:  // hipJitOptionIRtoISAOptCountExt
       return true;
     default:
-      // 2 WallTime, 3 InfoLogBuffer, 5 ErrorLogBuffer, 17 GlobalSymbolNames,
-      // 18 GlobalSymbolAddresses, 10000 IRtoISAOptExt carry pointers; anything
+      // 2 WallTime, 3 InfoLogBuffer, 5 ErrorLogBuffer, 17 GlobalSymbolNames, 18 GlobalSymbolAddresses
+      // and 10000 IRtoISAOptExt carry pointers; anything unknown is treated as one.
       return false;
   }
 }

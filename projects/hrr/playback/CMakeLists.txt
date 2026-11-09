@@ -10,10 +10,9 @@ else()
   set(HRR_CXX_STANDARD 17)
 endif()
 
-# CPU-only: depends solely on the header-only wire format (hrr::api_args) and the
-# C++ standard library. It is defined unconditionally so the unit tests can link
-# it even when the HIP-dependent playback tool is not built
-# (HRR_BUILD_PLAYBACK=OFF); it must not gain a HIP dependency.
+# CPU-only: depends on the header-only wire format and the C++ standard library.
+# Defined unconditionally so unit tests link it when HRR_BUILD_PLAYBACK=OFF;
+# it must not gain a HIP dependency.
 add_library(hrr_reader STATIC hrr_reader.cpp)
 add_library(hrr::reader ALIAS hrr_reader)
 set_target_properties(hrr_reader PROPERTIES
@@ -56,10 +55,8 @@ if(HRR_BUILD_PLAYBACK)
   # hrr_runtime_symbol: dlsym on POSIX, module enumeration on Windows.
   target_link_libraries(hrr-playback PRIVATE ${CMAKE_DL_LIBS} $<$<BOOL:${WIN32}>:psapi>)
 
-  # Build identity reported by --version. Stamped by a build rule rather than at
-  # configure time so it cannot name a commit the binary was not built from; see
-  # HrrVersionStamp.cmake. Generated into the binary dir, which is added to the
-  # include path below.
+  # Build identity reported by --version. Stamped by a build rule, not at configure time,
+  # so it cannot name a commit the binary was not built from; see HrrVersionStamp.cmake.
   set(HRR_BUILD_INFO_H ${CMAKE_CURRENT_BINARY_DIR}/hrr_build_info.h)
   set(HRR_VERSION_STAMP ${CMAKE_CURRENT_SOURCE_DIR}/HrrVersionStamp.cmake)
   set(HRR_VERSION_STAMP_ARGS

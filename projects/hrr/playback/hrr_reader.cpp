@@ -21,7 +21,6 @@ namespace fs = std::filesystem;
 
 namespace hrr {
 
-// Event move semantics
 
 Event::Event(Event&& o) noexcept
     : raw_payload(std::move(o.raw_payload)),
@@ -59,7 +58,6 @@ Event& Event::operator=(Event&& o) noexcept {
   return *this;
 }
 
-// Utilities
 
 std::string hash_hex(uint64_t lo, uint64_t hi) {
   char buf[33];
@@ -94,8 +92,8 @@ static std::vector<fs::path> find_pid_subarchives(const fs::path& root) {
   return dirs;
 }
 
-// Shared record framing
-// Crash resilience: a record stream is an append-only log of self-delimiting
+// A record stream is an append-only log of self-delimiting records,
+// so a crash can tear only the last one.
 
 RecordStatus read_raw_record(FILE* f, std::vector<uint8_t>& out,
                              ByteBudget* budget) {
@@ -211,11 +209,6 @@ static bool resolve_archive_path(const std::string& input, std::string& resolved
   return false;
 }
 
-// ---------------------------------------------------------------------------
-// Payload read helpers (bytes after the 32-byte EventHeader already consumed)
-// ---------------------------------------------------------------------------
-// Kernel launch payload parser
-//
 // Binary layout (bytes in raw_payload, after 32-byte EventHeader):
 //   [0..7]   stream_handle (uint64_t, raw hipStream_t pointer)
 //   [8..9]   name_len (uint16_t)
@@ -229,7 +222,6 @@ static bool resolve_archive_path(const std::string& input, std::string& resolved
 //   [+30..31] num_snapshots (uint16_t)
 //   per arg: u8 value_kind, u16 size, <size> bytes data
 //   per snapshot (v10, 41 bytes): see BufferSnapshot; the attribute tail follows
-// ---------------------------------------------------------------------------
 
 // What an unordered_map node costs beyond its pair: the next pointer, the cached
 // hash and the bucket slot, rounded up.
@@ -248,8 +240,8 @@ struct ParseCharge {
     total += n;
     return true;
   }
-  // A non-empty vector's buffer is its own malloc, which takes at least
-  // kMinAllocation whatever it holds, so a record full of one-byte arguments
+  // A non-empty vector's buffer is its own malloc, which takes at least kMinAllocation,
+  // so a record of one-byte arguments costs more than its bytes.
   bool charge_buffer(uint64_t n) {
     return charge(n ? std::max<uint64_t>(n, kMinAllocation) : 0);
   }
@@ -261,11 +253,9 @@ static bool parse_kernel_launch(const uint8_t* data, size_t len,
   const uint8_t* p   = data;
   const uint8_t* end = data + len;
 
-  // stream_handle
   if (p + 8 > end) return false;
   memcpy(&out_stream_handle, p, 8); p += 8;
 
-  // kernel name
   if (p + 2 > end) return false;
   uint16_t name_len;
   memcpy(&name_len, p, 2); p += 2;
@@ -274,14 +264,12 @@ static bool parse_kernel_launch(const uint8_t* data, size_t len,
   kl.kernel_name.assign(reinterpret_cast<const char*>(p), name_len);
   p += name_len;
 
-  // co_hash
   kl.co_hash_lo = 0; kl.co_hash_hi = 0;
   if (p + 16 <= end) {
     memcpy(&kl.co_hash_lo, p, 8); p += 8;
     memcpy(&kl.co_hash_hi, p, 8); p += 8;
   }
 
-  // grid / block / shared / counts
   if (p + 12 + 12 + 4 + 2 + 2 > end) return false;
   memcpy(kl.grid,        p, 12); p += 12;
   memcpy(kl.block,       p, 12); p += 12;
@@ -291,7 +279,6 @@ static bool parse_kernel_launch(const uint8_t* data, size_t len,
   memcpy(&num_args,      p, 2); p += 2;
   memcpy(&num_snapshots, p, 2); p += 2;
 
-  // args
   if (!pc.charge(uint64_t(num_args) * sizeof(KernelArg))) return false;
   kl.args.reserve(num_args);
   for (uint16_t i = 0; i < num_args; i++) {
@@ -317,7 +304,6 @@ static bool parse_kernel_launch(const uint8_t* data, size_t len,
     kl.args.push_back(std::move(arg));
   }
 
-  // pinned host snapshots
   if (!pc.charge(uint64_t(num_snapshots) * sizeof(BufferSnapshot))) return false;
   kl.snapshots.reserve(num_snapshots);
   for (uint16_t i = 0; i < num_snapshots; i++) {
@@ -335,7 +321,6 @@ static bool parse_kernel_launch(const uint8_t* data, size_t len,
   return true;
 }
 
-// Archive loader
 
 bool load_archive(const std::string& path, Archive& archive,
                   ByteBudget* bytes) {
@@ -352,8 +337,8 @@ bool load_archive(const std::string& path, Archive& archive,
   archive.version = file_version;
   archive.flags = file_flags;
 
-  // The budget is the caller's when given: the archive keeps its bytes charged
-  // on success, and a failed load gives back what it charged since `start`
+  // The budget is the caller's when given: the archive keeps its bytes charged on success;
+  // a failed load gives back what it charged since `start`.
   ByteBudget own_budget;
   ByteBudget& budget = bytes ? *bytes : own_budget;
   const uint64_t start = budget.used();
@@ -370,8 +355,8 @@ bool load_archive(const std::string& path, Archive& archive,
                       " bytes of host memory (--max-host-bytes)";
     return fail(why.c_str());
   };
-  // Event slots: the vector's capacity is what is held, and a growth holds the
-  // old and the new buffer at once, so the new one is charged before the old is
+  // Event slots: the vector's capacity is what is held, and growth holds the old and new
+  // buffers at once, so the new one is charged before the old is released.
   uint64_t slots_charged = 0;
   auto grow_events = [&] {
     const size_t cap = std::max<size_t>(archive.events.capacity() * 2, 64);
@@ -382,8 +367,8 @@ bool load_archive(const std::string& path, Archive& archive,
     return true;
   };
 
-  // Read events sequentially. read_raw_record handles the framing and the
-  // torn-tail recovery; a torn record means the capture was interrupted, and
+  // read_raw_record handles framing and torn-tail recovery;
+  // a torn record means the capture was interrupted, so stop there.
   bool truncated = false;
   bool complete  = false;
   bool trailer   = false;
@@ -417,7 +402,6 @@ bool load_archive(const std::string& path, Archive& archive,
       }
     }
 
-    // Convenience cast macro — raw_payload.data() is the full hrr_args_* struct.
     #define AS(T) reinterpret_cast<const T*>(ev.raw_payload.data())
     #define SIZE_OK(T) (total >= static_cast<uint32_t>(sizeof(T)))
 
@@ -662,8 +646,8 @@ bool load_archive(const std::string& path, Archive& archive,
     archive.events.push_back(std::move(ev));
   }
 
-  // A runtime older than the writer fix for it could append a few records
-  // after the trailer, from calls still in flight at shutdown. They are not in
+  // A runtime older than the writer fix could append records after the trailer,
+  // from calls in flight at shutdown. They are not replayed.
   if (trailer) {
     std::vector<uint8_t> rest;
     while (read_raw_record(f, rest) == RecordStatus::Ok)
@@ -708,8 +692,6 @@ bool load_archive(const std::string& path, Archive& archive,
 
   archive.event_count = archive.events.size();
 
-  // Collect distinct thread IDs in first-seen order (after sort = sequence order).
-  // One linear pass; avoids a separate scan by the replayer.
   {
     std::unordered_map<uint64_t, bool> seen;
     for (const auto& ev : archive.events) {
@@ -726,7 +708,6 @@ bool load_archive(const std::string& path, Archive& archive,
                              p.string().size());
   };
 
-  // Enumerate blobs
   std::string blobs_dir = archive_dir + "/blobs";
   if (fs::exists(blobs_dir)) {
     for (auto& entry : fs::recursive_directory_iterator(blobs_dir)) {
@@ -738,7 +719,6 @@ bool load_archive(const std::string& path, Archive& archive,
     }
   }
 
-  // Enumerate code objects
   std::string co_dir = archive_dir + "/code_objects";
   if (fs::exists(co_dir)) {
     for (auto& entry : fs::directory_iterator(co_dir)) {
@@ -753,8 +733,8 @@ bool load_archive(const std::string& path, Archive& archive,
   return true;
 }
 
-// fseek takes a long, 32 bits on Windows, and an msvcrt fseek fails once the
-// file position passes 2 GiB even for a small relative offset. events.bin can
+// fseek takes a long, 32 bits on Windows, and msvcrt fseek fails once the file position
+// passes 2 GiB even for a small relative offset; events.bin can exceed 2 GiB.
 static int seek64(FILE* f, int64_t offset, int origin) {
 #ifdef _WIN32
   return _fseeki64(f, offset, origin);
@@ -763,8 +743,8 @@ static int seek64(FILE* f, int64_t offset, int origin) {
 #endif
 }
 
-// The framing checks are read_raw_record's, so a record the loader takes as
-// torn ends the walk here too, and like the loader the walk stops at the first
+// The framing checks are read_raw_record's, so a record the loader takes as torn
+// ends the walk here too.
 bool has_clean_trailer(const std::string& archive_dir) {
   FILE* f = fopen((fs::path(archive_dir) / "events.bin").string().c_str(), "rb");
   if (!f) return false;
@@ -793,7 +773,6 @@ bool has_clean_trailer(const std::string& archive_dir) {
   return clean;
 }
 
-// Blob / code object readers
 
 static std::atomic<uint64_t> g_max_file_bytes{kDefaultMaxFileBytes};
 static std::atomic<uint64_t> g_max_events{kDefaultMaxEvents};

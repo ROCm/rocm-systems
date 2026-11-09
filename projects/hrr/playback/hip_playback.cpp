@@ -12,7 +12,6 @@
 #include "hrr_replay_limits.h"
 
 #include <hip/hip_runtime.h>
-// hipExtModuleLaunchKernel is declared in <hip/hip_ext.h>.
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wattributes"
@@ -50,9 +49,8 @@
 #endif
 #endif
 
-// Thread-local sequence ID — set by dispatch_event before calling any handler.
-// Kernel-launch handlers use this to wait for their submission turn and then immediately
-// unblock the next thread before doing timing/sync.
+// Set by dispatch_event before each handler runs. Kernel-launch handlers wait on it for their turn,
+// then unblock the next thread before timing and sync.
 thread_local uint64_t hrr_dispatch_seq = 0;
 
 void hrr_note_unreplayable(PlaybackContext& ctx, const char* api,
@@ -157,8 +155,7 @@ static hipError_t hrr_sync_after_replayed_h2d(PlaybackContext& ctx,
     // Replay substitutes captured blobs for capture-time host pointers. Drain the restore
     // so following kernels see the replayed input bytes.
     if (!hrr_replayed_h2d_needs_drain(ctx.in_graph_capture)) return hipSuccess;
-    // Clear any pre-existing sticky error so we attribute only an error surfaced
-    // by this drain, matching the kernel-launch sync path.
+    // Clears a sticky error so only an error from this drain is reported.
     (void)hipGetLastError();
     hipError_t r = hrr_watchdog_device_sync(ctx, what);
     hipError_t last_r = hipGetLastError();
@@ -345,17 +342,14 @@ hipModule_t PlaybackContext::load_module(uint64_t hash_lo, uint64_t hash_hi) {
 }
 
 hipFunction_t PlaybackContext::resolve_replacement(const std::string& kernel_name) {
-    // Fast path: nothing to do if no replacements were requested.
     if (kernel_replacements.empty()) return nullptr;
 
-    // Cache hit — already resolved (or already resolved to "no replacement").
     {
         std::shared_lock lk(map_mutex);
         auto it = replacement_funcs.find(kernel_name);
         if (it != replacement_funcs.end()) return it->second;
     }
 
-    // Find the replacement whose NAME exactly equals the recorded kernel name.
     const std::string* path = nullptr;
     for (auto& [name, p] : kernel_replacements) {
         if (kernel_name == name) { path = &p; break; }
@@ -367,8 +361,6 @@ hipFunction_t PlaybackContext::resolve_replacement(const std::string& kernel_nam
         return nullptr;
     }
 
-    // Load the replacement code object from the filesystem path and resolve the function
-    // by the recorded (same) symbol name.
     auto data = read_file(*path);
     hipFunction_t func = nullptr;
     if (data.empty()) {
@@ -395,7 +387,6 @@ hipFunction_t PlaybackContext::resolve_replacement(const std::string& kernel_nam
         }
     }
 
-    // Cache result (func or nullptr-on-failure) so each kernel is resolved once.
     std::unique_lock lk(map_mutex);
     replacement_funcs[kernel_name] = func;
     return func;
@@ -486,22 +477,12 @@ static hipError_t restore_host_snapshots(PlaybackContext& ctx, const uint8_t* re
     return hipSuccess;
 }
 
-// ext_global_worksize: the captured grid[] holds *global work-item counts* (HSA/OpenCL
-// semantics, as passed to hipExtModuleLaunchKernel), NOT workgroup counts. When false the
-// grid[] holds workgroup counts (hipModuleLaunchKernel / hipLaunchKernel semantics).
+// ext_global_worksize: grid[] holds global work-item counts (HSA/OpenCL semantics, as
+// hipExtModuleLaunchKernel takes them), not workgroup counts.
 
-//
-// Every recorded device pointer a kernel receives passes through one of the
-// translation sites in replay_kernel_launch, which makes them the one place where
-// a pointer can be compared against what an external producer said the memory
-// layout was. Two questions get answered here:
-//
-//   - Does this pointer land inside an annotated segment but in no live block?
-//     That is an intra-segment out-of-bounds or stale pointer. Replay cannot
-//     see it otherwise: the segment is a single contiguous allocation, so the
-//     access is in bounds as far as HIP is concerned.
-//   - Should the owning block be relocated behind a guard page so an overrun
-//     faults instead of hitting a neighbour? Only when block guarding is on.
+// Every recorded device pointer a kernel receives passes through this check.
+// It flags a pointer inside an annotated segment but in no live block, which HIP cannot see as out of bounds.
+// With block guarding on, it relocates the owning block behind a guard page.
 
 // One VMM-backed buffer standing in for a block, with an unmapped guard span
 // after it. Populated by hrr_block_guard_alloc.
@@ -575,12 +556,9 @@ static hipFunction_t resolve_kernel_function(PlaybackContext& ctx,
                                              uint64_t co_hash_hi) {
     hipFunction_t func = nullptr;
 
-    // Playback-time kernel override: if this kernel matches a --replace-kernel pattern,
-    // launch the user-supplied code object instead of the recorded one.
     if (!ctx.kernel_replacements.empty())
         func = ctx.resolve_replacement(kernel_name);
 
-    // Resolve by (co_hash, name).
     std::string cache_key = kernel_name;
     if (co_hash_lo || co_hash_hi) {
         char hpfx[34];
@@ -647,7 +625,7 @@ static void decode_kernel_args(
     const bool dbg_dump_ptrs = (dbg_ptrs_out != nullptr);
     auto& dbg_ptrs = dbg_ptrs_out ? *dbg_ptrs_out : dbg_sink;
 
-    // A pointer that the kernel's own metadata does not describe as one.
+    // The previous 4-byte scalar argument, kept in case it is the low half of a pointer.
     struct { bool valid = false; uint16_t idx = 0;
              const uint8_t* data = nullptr; size_t store = 0; } prev_half;
     static const bool no_rescan =
@@ -702,7 +680,6 @@ static void decode_kernel_args(
             *dbg_args_out += "\n";
         }
 
-        // value_kind 3 carries a trailing list of embedded-pointer byte offsets.
         std::vector<uint16_t> ptr_offsets;
         if (value_kind == 3) {
             if (end - p < 2) return;
@@ -748,8 +725,6 @@ static void decode_kernel_args(
                             sentinel ? "not an address, passing it through unchanged"
                                      : "passing null so it faults at first use");
             } else {
-                // Region check: an intra-segment OOB/stale pointer, or a block to be
-                // relocated behind a guard page. No-op when no sidecar was loaded.
                 live = hrr_region_check_ptr(ctx, rls, kernel_name, i, rec_ptr, live);
             }
             if (dbg_dump_ptrs) dbg_ptrs.emplace_back(i, rec_ptr, live);
@@ -810,12 +785,10 @@ static void decode_kernel_args(
         } else {
             storage.assign(data, data + arg_size);
             if (ctx.verbose) {
-                // Print scalar args as hex bytes for debugging
                 fprintf(stderr, "[HRR]   arg[%u]: scalar %u bytes = ", i, arg_size);
                 for (uint16_t b = 0; b < arg_size && b < 8; b++)
                     fprintf(stderr, "%02x", data[b]);
                 if (arg_size > 8) fprintf(stderr, "...");
-                // Also print as u32/u64 for convenience
                 if (arg_size == 4) { uint32_t v; memcpy(&v, data, 4); fprintf(stderr, " (u32=%u)", v); }
                 if (arg_size == 8) { uint64_t v; memcpy(&v, data, 8); fprintf(stderr, " (u64=%llu)", (unsigned long long)v); }
                 fprintf(stderr, "\n");
@@ -881,8 +854,6 @@ void hrr_decode_kernel_args(PlaybackContext& ctx, const uint8_t* p,
     decode_kernel_args(ctx, p, end, num_args, "", arg_ptrs, arg_storage);
 }
 
-// Whether the arguments a launch record carries cover the kernel's signature: at least as
-// many arguments, each at least as many bytes as its parameter.
 static bool kernel_args_match(const std::vector<size_t>& recorded,
                               const std::vector<size_t>& declared,
                               std::string& why) {
@@ -905,9 +876,7 @@ static bool kernel_args_match(const std::vector<size_t>& recorded,
     return true;
 }
 
-// Refuse a launch whose decoded arguments do not cover the signature of the kernel it
-// resolved to. A short list or an argument narrower than its parameter is an over-read of
-// replay's own vectors.
+// A short list or an argument narrower than its parameter would over-read replay's own vectors.
 static bool kernel_args_fit_signature(
     PlaybackContext& ctx, const char* api, const std::string& kernel_name,
     hipFunction_t func,
@@ -945,7 +914,6 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
                                        bool ext_global_worksize = false,
                                        bool launch_ex = false,
                                        bool cooperative = false) {
-    // Skip the 32-byte header; kernel launch has a variable-length binary format.
     const auto* hdr = reinterpret_cast<const hrr_event_header*>(pl);
     const uint8_t* p   = pl + sizeof(hrr_event_header);
     const uint8_t* end = pl + hdr->payload_length;
@@ -959,10 +927,9 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
     std::string kernel_name(reinterpret_cast<const char*>(p), name_len);
     p += name_len;
 
-    // Workaround for recordings made before the capture side tagged Ext launches:
-    // hipBLASLt/Tensile ("Cijk_*") StreamK kernels are launched via
-    // hipExtModuleLaunchKernel, whose grid[] is *global work-item counts*.
-    // HIP_HRR_REPLAY_FORCE_EXT_CIJK=1 reinterprets them as such. Backward-compat only; delete once no old archives remain.
+    // Backward compatibility for recordings made before capture tagged Ext launches.
+    // hipBLASLt/Tensile "Cijk_*" StreamK kernels launch via hipExtModuleLaunchKernel, so grid[] holds
+    // global work-item counts. HIP_HRR_REPLAY_FORCE_EXT_CIJK=1 reads it that way. Delete once no old archives remain.
     if (!ext_global_worksize && kernel_name.compare(0, 5, "Cijk_") == 0 &&
         std::getenv("HIP_HRR_REPLAY_FORCE_EXT_CIJK"))
         ext_global_worksize = true;
@@ -983,7 +950,6 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
     memcpy(&num_args,       p, 2); p += 2;
     memcpy(&num_snapshots,  p, 2); p += 2;
 
-    // Apply kernel filter if set
     if (!ctx.kernel_filter.empty() &&
         kernel_name.find(ctx.kernel_filter) == std::string::npos)
         return hipSuccess;
@@ -992,13 +958,11 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
                                                  co_hash_lo, co_hash_hi);
     if (!func) return hipErrorNotFound;
 
-    // Build kernelParams[] from captured args, translating GPU pointers.
     std::vector<void*>                arg_ptrs;
     std::vector<std::vector<uint8_t>> arg_storage;
     // Guarded blocks this launch relocated, if block guarding is on. Scoped to
     // the launch so the relocation is undone before the next event runs.
     RegionLaunchState rls;
-    // Optional recorded->live pointer dump for one target kernel (diff tooling).
     const bool dbg_dump_ptrs = (ctx.dump_ptrs_ordinal != 0) || ctx.audit_host_args;
     std::vector<std::tuple<unsigned, uint64_t, void*>> dbg_ptrs;  // (arg_idx, recorded, live)
     std::string dbg_args;
@@ -1042,7 +1006,6 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
                        static_cast<size_t>(n_attrs) * stride);
                 p += static_cast<size_t>(n_attrs) * stride;
                 for (auto& at : launch_attrs) {
-                    // Two attribute values are themselves pointers.
                     if (at.id == hipLaunchAttributeAccessPolicyWindow) {
                         at.val.accessPolicyWindow.base_ptr = ctx.translate_ptr(
                             reinterpret_cast<uint64_t>(
@@ -1098,7 +1061,6 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
         fprintf(stderr,
                 "[HRR ptr-dump] kernel #%zu \"%s\" recorded->live pointer args:\n",
                 kernel_ordinal, compact_kernel_name(kernel_name).c_str());
-        // Name the allocation each argument lands in.
         for (auto& [idx, rec, live] : dbg_ptrs) {
             void* abase = nullptr; size_t asize = 0; uint64_t arec = 0;
             AllocKind akind = AllocKind::Device;
@@ -1262,7 +1224,6 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
             if (launch_ex) {
                 r = hipDrvLaunchKernelEx(&ex_cfg, func, nullptr, extra);
             } else if (ext_global_worksize) {
-                // grid[] = global work-item counts: replay through the Ext API.
                 r = hipExtModuleLaunchKernel(
                     func,
                     grid[0], grid[1], grid[2],
@@ -1292,7 +1253,6 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
                     &ex_cfg, func,
                     arg_ptrs.empty() ? nullptr : arg_ptrs.data(), nullptr);
             } else if (ext_global_worksize) {
-                // grid[] = global work-item counts: replay through the Ext API.
                 r = hipExtModuleLaunchKernel(
                     func,
                     grid[0], grid[1], grid[2],
@@ -1349,7 +1309,6 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
     // illegal during stream capture and invalidates it (HIP 901). The original run never
     // synced here either; syncs resume once capture ends.
     if (ctx.sync_after_launch && !ctx.in_graph_capture) {
-        // Clear any pre-existing error before sync so we get a clean error code.
         (void)hipGetLastError();
         if (ctx.trace_sync) {
             fprintf(stderr, "[HRR sync begin] seq=%llu kernel=%zu name=\"%s\"\n",
@@ -1399,9 +1358,8 @@ hipError_t playback_hipModuleLaunchKernel(PlaybackContext& ctx,
 
 hipError_t playback_hipExtModuleLaunchKernel(PlaybackContext& ctx,
                                              const uint8_t* payload) {
-    // hipExtModuleLaunchKernel is captured with HSA/OpenCL semantics: the grid[] dims are
-    // *global work-item counts*, not workgroup counts. Replay through the matching API so
-    // the grid is not over-launched by a factor of blockDim.
+    // Captured with HSA/OpenCL semantics: grid[] holds global work-item counts, so replay goes through
+    // the matching Ext API to avoid over-launching by a factor of blockDim.
     return replay_kernel_launch(ctx, payload, /*ext_global_worksize=*/true);
 }
 
@@ -1417,9 +1375,7 @@ hipError_t playback_hipLaunchByPtr(PlaybackContext& ctx,
 
 hipError_t playback_hipLaunchKernel_spt(PlaybackContext& ctx,
                                         const uint8_t* payload) {
-    // Which stream the launch goes on is recorded in the payload, so the
-    // stream-per-thread spelling replays through the same path as the plain
-    // one. Only the event id differs.
+    // The stream is in the payload, so the stream-per-thread spelling replays through the same path.
     return replay_kernel_launch(ctx, payload);
 }
 
@@ -1466,8 +1422,6 @@ bool hrr_is_launch_handler(hipError_t (*fn)(PlaybackContext&, const uint8_t*)) {
            fn == playback_hipModuleLaunchCooperativeKernel;
 }
 
-// Load the fat binary blob via hipModuleLoadData so all embedded kernel names become
-// resolvable at kernel launch replay time.
 
 // A well-formed offload bundle starts with one of the two magics the bundler
 // emits: the clang text magic, or the compressed-bundle "CCOB" magic.
@@ -1636,9 +1590,7 @@ hipError_t playback_hipGetSymbolSize(PlaybackContext& ctx,
     return hipSuccess;
 }
 
-// The node is built against the live global the symbol registry resolved.
 
-// Resolve a recorded dependency list into live nodes for the hand-written graph handlers.
 static bool dep_array(PlaybackContext& ctx, const char* api, const uint8_t* bytes,
                       size_t field_bytes, uint8_t present, uint32_t n, uint64_t recorded_n,
                       std::vector<hipGraphNode_t>& out, hipGraphNode_t** ptr) {
@@ -1669,7 +1621,6 @@ static bool dep_array(PlaybackContext& ctx, const char* api, const uint8_t* byte
     return true;
 }
 
-// Resolve the symbol a symbol-copy record names and check that the copy stays inside it.
 static hipError_t resolve_symbol_range(PlaybackContext& ctx, uint64_t rec,
                                        uint64_t offset, uint64_t count,
                                        const char* api, void** out) {
@@ -1965,7 +1916,7 @@ hipError_t playback_hipLinkAddData(PlaybackContext& ctx,
         std::memcpy(option_values, a->optionValues_bytes,
                     n_opts * sizeof(void*));
 
-    // Recorded option values may be pointers into the dead capture process, so any non-null value is refused.
+    // Recorded option values may point into the dead capture process, so any non-null value is refused.
     for (uint32_t i = 0; i < n_opts; ++i) {
         if (option_values[i]) {
             fprintf(stderr,
@@ -2122,7 +2073,6 @@ static bool hrr_replay_zero_init() {
     return g_enabled;
 }
 
-// Byte to fill fresh replay allocations with, normally zero.
 static int hrr_replay_fill_byte() {
     static std::once_flag once;
     static int g_byte = 0;
@@ -2177,7 +2127,6 @@ hipError_t hrr_materialize_region(PlaybackContext& ctx, uint64_t rec_base,
     if (out_live) *out_live = nullptr;
     if (rec_base == 0 || size == 0) return hipErrorInvalidValue;
 
-    // Place the buffer on the device the producer said the segment was on.
     const int prev = hrr_set_region_device(device);
 
     void* live = nullptr;
@@ -2380,7 +2329,6 @@ static bool hrr_place_alloc(PlaybackContext& ctx, uint64_t rec, size_t size, voi
     return false;
 }
 
-// A placed allocation was unmapped.
 static void hrr_place_released(PlaybackContext& ctx, uint64_t b, uint64_t e) {
 #ifndef _WIN32
     {
@@ -2436,7 +2384,6 @@ static hipError_t hrr_guard_alloc(PlaybackContext& ctx, size_t want, void** out)
     return hipSuccess;
 }
 
-// Returns true if `live` was a guarded or placed allocation and was torn down.
 static bool hrr_guard_free(PlaybackContext& ctx, void* live) {
     PlaybackContext::GuardAlloc g;
     {
@@ -2476,7 +2423,6 @@ void hrr_place_reset(PlaybackContext& ctx) {
 }
 
 
-// Largest power of two dividing v, capped at `cap`.
 static size_t hrr_alignment_of(uint64_t v, size_t cap) {
     if (v == 0) return cap;
     size_t a = static_cast<size_t>(v & (~v + 1));  // v & -v
@@ -2493,7 +2439,6 @@ static hipError_t hrr_block_guard_alloc(PlaybackContext& ctx, uint64_t blk_base,
     const int    dev  = hrr_current_device();
     const size_t gran = hrr_vmm_granularity(dev);
 
-    // Where inside the mapped span the block starts.
     size_t pad;
     if (ctx.guard_exact_align) {
         pad = static_cast<size_t>(blk_base & (gran - 1));
@@ -2666,7 +2611,6 @@ void PlaybackContext::note_d2h_fail(uint64_t seq) {
         return;
     if (static_cast<double>(fail) < frac * static_cast<double>(att))
         return;
-    // Threshold crossed — flag once and stop the replay cleanly.
     if (!diverged.exchange(true, std::memory_order_acq_rel)) {
         fprintf(stderr,
                 "[HRR] replay DIVERGED at recorded event seq %llu: %zu/%zu D2H "
@@ -2937,7 +2881,6 @@ hipError_t playback_hipHostRegister(PlaybackContext& ctx, const uint8_t* pl) {
                                "hipHostRegister backing buffer");
     if (!buf) return hipErrorMemoryAllocation;
 
-    // Restore snapshot into the buffer.
     size_t blob_sz = 0;
     const void* blob = ctx.load_blob(a->blob_hash_lo, a->blob_hash_hi, &blob_sz);
     if (blob && blob_sz == sz)
@@ -3063,25 +3006,9 @@ hipError_t playback_hipFreeAsync(PlaybackContext& ctx, const uint8_t* pl) {
 }
 
 
-// is_async: true  -> call hipMemcpyAsync(stream) regardless of whether stream is null
-//           false -> call synchronous hipMemcpy (no stream argument)
-// ---------------------------------------------------------------------------
-// D2H validation.
-//
-// The default oracle is byte-exact. A recorded blob carries no element type, so
-// a tolerance has to guess one, and a guess turns integers into floats: any
-// int32 below about 9.8e8 reads as an f32 within 1e-3 of zero, so a replay that
-// left the buffer zeroed would match it, and a handler that does nothing would
-// pass its own round-trip.
-//
-// Some buffers do hold floats that a faithful replay cannot reproduce bit for
-// bit: kernels with non-associative reductions (atomicAdd in backward passes,
-// split-K GEMM accumulation) are nondeterministic at the ULP level, and two
-// replays of the same recording differ there too. For those the caller names
-// the type and the tolerance, HIP_HRR_D2H_TOL=<type>:<atol>:<rtol>, and a
-// mismatching buffer passes if every element is within
-// |actual - expected| <= atol + rtol*|expected|. Such passes are counted apart
-// from exact ones in the summary.
+// The default oracle is byte-exact. A blob carries no element type, so a guessed tolerance could pass a zeroed buffer.
+// Non-associative reductions (atomicAdd, split-K) differ at the ULP level between replays of one recording.
+// For those, HIP_HRR_D2H_TOL=<type>:<atol>:<rtol> accepts elements with |actual - expected| <= atol + rtol*|expected|.
 bool hrr_parse_d2h_tol(const char* spec, HrrD2HTol* out) {
     static const struct { const char* name; HrrD2HTol::Type type; } kTypes[] = {
         {"f32", HrrD2HTol::kF32}, {"bf16", HrrD2HTol::kBF16},
@@ -3132,7 +3059,6 @@ static inline float hrr_half_to_float(uint16_t h) {
     float out; memcpy(&out, &f, 4); return out;
 }
 
-// Stats for one candidate-dtype interpretation of a mismatching buffer.
 struct HrrD2HScan { size_t n_diff; size_t n_bad; double max_abs; double max_rel; };
 
 template <typename DecodeFn>
@@ -3158,9 +3084,7 @@ static HrrD2HScan hrr_scan_elems(const uint8_t* a, const uint8_t* e, size_t n,
     return s;
 }
 
-// Validate one D2H buffer: updates ctx counters and emits a message only for a failure.
-// Returns true if the buffer is acceptable (byte-exact, or within the HIP_HRR_D2H_TOL
-// tolerance when one is set).
+// Updates ctx counters and prints only on failure. True if the buffer is exact or within HIP_HRR_D2H_TOL.
 static bool hrr_d2h_validate(PlaybackContext& ctx, const char* tag, uint64_t seq,
                              const uint8_t* actual, const uint8_t* expected, size_t n) {
     if (n == 0 || memcmp(actual, expected, n) == 0) {
@@ -3253,11 +3177,8 @@ static void* translate_or_materialize(PlaybackContext& ctx, uint64_t rec_addr) {
     return live;
 }
 
-// A recorded H2D payload is replayed byte for byte, so any device pointer the
-// application had placed in that host buffer arrives on the GPU as a
-// capture-time address: nothing in the pointer-translation path ever sees it.
-// Report those words rather than translate them — a payload is opaque bytes,
-// and a value that merely looks like an address may be data.
+// A replayed H2D payload keeps any device pointer the application stored in it as a capture-time address, which translation never sees.
+// Report those words instead of translating them: a payload is opaque bytes, and a value that looks like an address may be data.
 static void scan_h2d_payload(PlaybackContext& ctx, const void* blob, size_t n,
                              uint64_t dst_rec) {
     const uint8_t* p = static_cast<const uint8_t*>(blob);
@@ -3283,8 +3204,7 @@ static void scan_h2d_payload(PlaybackContext& ctx, const void* blob, size_t n,
                 (unsigned long long)dst_rec, hits, n);
 }
 
-// This mirrors the captured API exactly — hipMemcpyAsync on the default stream
-// (stream_rec==0, translated to nullptr) must still use the async variant.
+// Mirrors the captured API: hipMemcpyAsync on the default stream (stream_rec==0, nullptr) still uses the async variant.
 static hipError_t replay_memcpy_impl(PlaybackContext& ctx, const char* api,
                                      uint64_t dst_rec, uint64_t src_rec,
                                      uint64_t size, int32_t kind,
@@ -3292,7 +3212,6 @@ static hipError_t replay_memcpy_impl(PlaybackContext& ctx, const char* api,
                                      uint64_t hash_lo, uint64_t hash_hi) {
     if (kind == hipMemcpyHostToDevice && host_contents_left_out(api, size, hash_lo, hash_hi))
         return hipErrorNotFound;
-    // Only the kinds that write device memory translate dst.
     const bool dev_dst = kind == hipMemcpyHostToDevice || kind == hipMemcpyDeviceToDevice;
     void*      dst = dev_dst ? translate_or_materialize(ctx, dst_rec) : nullptr;
     hipError_t r   = hipSuccess;
@@ -3352,8 +3271,6 @@ static hipError_t replay_memcpy_impl(PlaybackContext& ctx, const char* api,
         }
     } else if (kind == hipMemcpyDeviceToHost && ctx.validate_d2h &&
                (hash_lo || hash_hi)) {
-        // D2H validation: copy from live device src into a local host buffer,
-        // then compare against the expected data blob captured at record time.
         ctx.d2h_attempted++;
         void* src_dev = translate_or_materialize(ctx, src_rec);
         if (!src_dev) {
@@ -3375,9 +3292,7 @@ static hipError_t replay_memcpy_impl(PlaybackContext& ctx, const char* api,
                     return hipErrorMemoryAllocation;
                 }
                 std::vector<uint8_t> actual(copy_sz);
-                // For async memcpy the stream may not yet have completed — sync it so all
-                // preceding GPU work has finished before reading back. Synchronous
-                // hipMemcpy already guarantees completion; no extra sync needed.
+                // An async copy may not have finished, so sync the stream before reading back. Synchronous hipMemcpy already completes.
                 if (is_async) (void)hipStreamSynchronize(stream);
                 r = hipMemcpy(actual.data(), src_dev, copy_sz, hipMemcpyDeviceToHost);
                 if (r != hipSuccess) {
@@ -3391,7 +3306,6 @@ static hipError_t replay_memcpy_impl(PlaybackContext& ctx, const char* api,
             }
         }
     }
-    // H2H / unhandled: no-op
     return r;
 }
 
@@ -3429,9 +3343,7 @@ hipError_t playback_hipMemcpyHtoDAsync(PlaybackContext& ctx,
                               a->blob_hash_lo, a->blob_hash_hi);
 }
 
-// Synchronous copy with stream. Captured by manual shim (has blob_hash fields).
-// Routes through replay_memcpy_impl exactly like hipMemcpy/hipMemcpyAsync.
-// is_async=true so the stream is passed through (even if it translates to null).
+// is_async is true so the stream is passed through even when it translates to null.
 hipError_t playback_hipMemcpyWithStream(PlaybackContext& ctx,
                                         const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipMemcpyWithStream*>(pl);
@@ -3440,9 +3352,7 @@ hipError_t playback_hipMemcpyWithStream(PlaybackContext& ctx,
                               a->blob_hash_lo, a->blob_hash_hi);
 }
 
-// dst is a host pointer (captured as raw address, not in alloc_map). We copy from the
-// live device src into a temp host buffer and compare against the expected blob captured
-// at record time (D2H validation).
+// dst is a host pointer, recorded as a raw address. Copies the live device source to a temp buffer and compares it with the expected blob.
 hipError_t playback_hipMemcpyDtoH(PlaybackContext& ctx,
                                   const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipMemcpyDtoH*>(pl);
@@ -3574,17 +3484,8 @@ hipError_t playback_hipStreamDestroy(PlaybackContext& ctx,
     return r;
 }
 
-// Stream-capture flow:
-//   hipStreamBeginCapture — generated shim calls real API (no handle output)
-//   hipStreamEndCapture   — calls real API, records resulting hipGraph_t handle
-//   hipGraphInstantiate   — calls real API, records resulting hipGraphExec_t handle
-//   hipGraphLaunch        — generated shim translates both handles; works once above succeed
-//
-// hrr_args_hipStreamEndCapture layout (after 32-byte EventHeader):
-//   ret(4) stream(8) pGraph(8)       — pGraph = recorded *pGraph output value
-//
-// hrr_args_hipGraphInstantiate layout:
-//   ret(4) pGraphExec(8) graph(8) pErrorNode(8) pLogBuffer(8) bufferSize(8)
+// hrr_args_hipStreamEndCapture layout: ret(4) stream(8) pGraph(8), where pGraph is the recorded *pGraph output.
+// hrr_args_hipGraphInstantiate layout: ret(4) pGraphExec(8) graph(8) pErrorNode(8) pLogBuffer(8) bufferSize(8)
 
 // hrr_args_hipStreamBeginCapture payload (after 32-byte EventHeader):
 //   ret(4) stream(8) mode(4)
@@ -3595,7 +3496,6 @@ hipError_t playback_hipStreamBeginCapture(PlaybackContext& ctx,
 
     hipStream_t stream = ctx.translate_stream(a->stream);
     if (!stream && a->stream != 0) {
-        // Stream handle not in map — create a temporary stream for graph capture
         fprintf(stderr, "[HRR] hipStreamBeginCapture: stream 0x%llx not found, "
                 "creating temp stream for graph capture\n",
                 (unsigned long long)a->stream);
@@ -3714,7 +3614,6 @@ hipError_t playback_hipGraphInstantiateWithFlags(PlaybackContext& ctx,
         return hipErrorNotSupported;
     }
     if (ctx.graph_is_incomplete(a->graph)) {
-        // See playback_hipGraphInstantiate.
         fprintf(stderr,
                 "[HRR] hipGraphInstantiateWithFlags: graph 0x%llx is missing "
                 "nodes this replay could not reconstruct. Refusing to "
@@ -3961,8 +3860,6 @@ static void hrr_pack_host_dst(hip_Memcpy2D& p) {
     p.dstPitch = p.WidthInBytes;
 }
 
-// Copies the copied bytes of a host buffer laid out as `rect` to `out`, rows packed end
-// to end.
 static void hrr_host_rect_pack(const HrrHostRect& rect, const uint8_t* base, uint8_t* out) {
     if (rect.width == 0) return;  // nothing copied, and `out` may be null
     for (size_t z = 0; z < rect.depth; ++z)
@@ -3970,8 +3867,6 @@ static void hrr_host_rect_pack(const HrrHostRect& rect, const uint8_t* base, uin
             std::memmove(out, base + rect.first + z * rect.slice + y * rect.row, rect.width);
 }
 
-// Replays a device-to-host copy whose host side is the rect `dst`, and validates what it
-// wrote against the expected blob at hash_lo/hi.
 template <typename Issue>
 static hipError_t replay_pitched_d2h(PlaybackContext& ctx, const char* api,
                                      const HrrHostRect& dst, int32_t recorded_ret,
@@ -4057,7 +3952,6 @@ static hipError_t replay_pitched_d2h(PlaybackContext& ctx, const char* api,
     return hipSuccess;
 }
 
-// A D2H copy whose device source has no live mapping.
 static void note_unmapped_d2h_src(PlaybackContext& ctx, const char* api, uint64_t src_rec,
                                   int32_t recorded_ret, uint64_t hash_lo, uint64_t hash_hi) {
     if (recorded_ret != 0) return;
@@ -4180,7 +4074,6 @@ static hipError_t replay_memcpy3d(PlaybackContext& ctx, const uint8_t* pl, bool 
                                       return copy(&parms);
                                   });
     }
-    // D2D: translate both pointers
     parms.srcPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.srcPtr.ptr));
     parms.dstPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstPtr.ptr));
     return copy(&parms);
@@ -4235,7 +4128,6 @@ static hipError_t replay_memcpy3d_async(PlaybackContext& ctx, const uint8_t* pl,
                                       return hipMemcpy3DAsync(&parms, stream);
                                   });
     }
-    // D2D: translate both pointers
     parms.srcPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.srcPtr.ptr));
     parms.dstPtr.ptr = ctx.translate_ptr(reinterpret_cast<uint64_t>(parms.dstPtr.ptr));
     return hipMemcpy3DAsync(&parms, stream);
@@ -4282,7 +4174,6 @@ static bool drvmemcpy_declines_array_rect(const char* api, bool& warned,
     return true;
 }
 
-// Shared body for hipDrvMemcpy3D / hipDrvMemcpy3DAsync.
 static hipError_t replay_drvmemcpy3d(PlaybackContext& ctx, HIP_MEMCPY3D& parms,
                                      const char* api, int32_t recorded_ret,
                                      uint64_t blob_hash_lo, uint64_t blob_hash_hi,
@@ -4564,7 +4455,6 @@ static hipError_t replay_memcpy2d(PlaybackContext& ctx, const T* a,
     // plain host memory is in no map, and the copy touches nothing replay tracks.
     if (kind == hipMemcpyHostToHost) return hipSuccess;
 
-    // D2D / H2H: translate both ends.
     void* dst = ctx.translate_ptr(a->dst);
     void* src = ctx.translate_ptr(a->src);
     if (!dst || !src) {
@@ -4675,7 +4565,6 @@ hipError_t playback_hipMemPoolSetAccess(PlaybackContext& ctx, const uint8_t* pl)
 
 hipError_t playback_hipMemSetAccess(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipMemSetAccess*>(pl);
-    // VMM reserved address — look in vmm_va_map first, then fall back to alloc_map
     void* ptr = ctx.translate_vmm_va(a->ptr);
     if (!ptr) ptr = ctx.translate_ptr(a->ptr);
     if (!ptr) return hipSuccess;  // VA not found — address space not rebuilt yet, skip
@@ -4916,7 +4805,6 @@ hipError_t playback_hipIpcOpenMemHandle(PlaybackContext& ctx, const uint8_t* pl)
 }
 
 
-// Resolve a recorded dependency list into live nodes.
 static bool translate_node_deps(PlaybackContext& ctx, const char* api,
                                 const uint8_t* bytes, size_t field_bytes,
                                 uint32_t n, uint8_t present, uint64_t recorded_n,

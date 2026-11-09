@@ -5,7 +5,6 @@
  */
 #pragma once
 
-// File writes that never go through a symbolic link.
 
 #ifndef _WIN32
 
@@ -25,7 +24,6 @@
 namespace hrr {
 namespace safefs {
 
-// Owning file descriptor.
 class Fd {
  public:
   Fd() = default;
@@ -52,8 +50,8 @@ inline std::string errno_text(const std::string& what) {
   return what + ": " + std::strerror(errno);
 }
 
-// Open the directory called `name` inside `parent_fd`. `name` must be a single
-// path component. A symbolic link, even one to a directory, is refused, and so
+// Open the directory `name` inside `parent_fd`. `name` must be one path component.
+// A symbolic link, even to a directory, is refused, and so is a directory owned by another user.
 inline Fd open_dir_at(int parent_fd, const std::string& name, std::string* err) {
   if (name.empty() || name.find('/') != std::string::npos || name == "." || name == "..") {
     if (err) *err = "not a single path component: '" + name + "'";
@@ -92,8 +90,8 @@ inline Fd open_dir_nofollow_leaf(const std::string& path, std::string* err) {
     if (err) *err = "cannot resolve " + path + ": " + ec.message();
     return Fd();
   }
-  // No lexical normalisation: "link/../x" must mean what the kernel makes of
-  // it (the parent of what link points to), the same as when the archive was
+  // No lexical normalisation: "link/../x" must mean what the kernel makes of it,
+  // the parent of what link points to.
   if (p.filename().empty()) p = p.parent_path();  // trailing slash
   if (p.filename().empty()) {                      // "/"
     if (err) *err = "refusing to write into /";
@@ -112,11 +110,10 @@ inline Fd open_dir_nofollow_leaf(const std::string& path, std::string* err) {
   return open_dir_at(pfd.get(), p.filename().string(), err);
 }
 
-// Result of looking at a name inside a directory without following a link.
 enum class Entry { Absent, Regular, Other, Error };
 
-// Is `name` in `dir_fd` absent, a regular file, or something else (a symbolic
-// link, a directory, a device...)? The link itself is examined, never its
+// Is `name` in `dir_fd` absent, a regular file, or something else (a link, a directory, a device)?
+// A link is examined itself, never followed.
 inline Entry stat_entry(int dir_fd, const std::string& name, std::string* err = nullptr) {
   struct stat st;
   if (::fstatat(dir_fd, name.c_str(), &st, AT_SYMLINK_NOFOLLOW) != 0) {
@@ -142,8 +139,8 @@ inline bool random_hex(std::string* out) {
   return true;
 }
 
-// Create a new file in `dir_fd` named "<stem>.<random>" that did not exist
-// (O_EXCL) and is not a link (O_NOFOLLOW). The file is created with `mode`
+// Create a new file in `dir_fd` named "<stem>.<random>" that did not exist (O_EXCL)
+// and is not a link (O_NOFOLLOW), with `mode`.
 inline Fd create_exclusive_temp(int dir_fd, const std::string& stem, std::string* name,
                                 std::string* err, mode_t mode = 0600) {
   for (int attempt = 0; attempt < 8; ++attempt) {
@@ -168,8 +165,8 @@ inline Fd create_exclusive_temp(int dir_fd, const std::string& stem, std::string
   return Fd();
 }
 
-// Move the finished, already-fsynced temporary file over `final_name` in
-// `dir_fd`, then persist the rename. renameat replaces a name that is a link
+// Move the finished, fsynced temporary file over `final_name` in `dir_fd` and persist the rename.
+// renameat replaces a link at that name instead of following it.
 inline bool commit_replace(int dir_fd, const std::string& tmp_name,
                            const std::string& final_name, std::string* err) {
   if (::renameat(dir_fd, tmp_name.c_str(), dir_fd, final_name.c_str()) != 0) {
