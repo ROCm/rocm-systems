@@ -165,7 +165,7 @@ hipError_t hipCtxCreate(hipCtx_t* ctx, unsigned int flags, hipDevice_t device) {
   *ctx = reinterpret_cast<hipCtx_t>(g_devices[device]);
 
   g_devices[device]->retain();
-  g_devices[device]->RetainExplicitCtx();
+  g_devices[device]->IncrementCtxCreateCount();
   g_devices[device]->setFlags(flags);
   tls.ctxt_stack_.push(g_devices[device]);
 
@@ -238,7 +238,7 @@ hipError_t hipCtxDestroy(hipCtx_t ctx) {
     HIP_RETURN(hipErrorInvalidContext);
   }
 
-  if (!dev->ReleaseExplicitCtx()) {
+  if (!dev->DecrementCtxCreateCount()) {
     HIP_RETURN(hipErrorInvalidContext);
   }
   dev->release();
@@ -368,7 +368,7 @@ hipError_t hipDevicePrimaryCtxRelease(hipDevice_t dev) {
     HIP_RETURN(hipErrorInvalidDevice);
   }
 
-  if (!g_devices[dev]->ReleasePrimaryCtx()) {
+  if (!g_devices[dev]->DecrementPrimaryCtxCount()) {
     HIP_RETURN(hipErrorInvalidContext);
   }
 
@@ -387,7 +387,7 @@ hipError_t hipDevicePrimaryCtxRetain(hipCtx_t* pctx, hipDevice_t dev) {
 
   *pctx = reinterpret_cast<hipCtx_t>(g_devices[dev]);
 
-  g_devices[dev]->RetainPrimaryCtx();
+  g_devices[dev]->IncrementPrimaryCtxCount();
 
   HIP_RETURN(hipSuccess);
 }

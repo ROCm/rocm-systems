@@ -629,26 +629,26 @@ namespace hip {
     void retain() const { context_->retain(); }
     void release() const { context_->release(); }
 
-    void RetainExplicitCtx() {
+    void IncrementCtxCreateCount() {
       std::scoped_lock lock(lock_);
-      ++explicitCtxCount_;
+      ++ctxCreateCount_;
     }
 
-    bool ReleaseExplicitCtx() {
+    bool DecrementCtxCreateCount() {
       std::scoped_lock lock(lock_);
-      if (explicitCtxCount_ == 0) {
+      if (ctxCreateCount_ == 0) {
         return false;
       }
-      --explicitCtxCount_;
+      --ctxCreateCount_;
       return true;
     }
 
-    void RetainPrimaryCtx() {
+    void IncrementPrimaryCtxCount() {
       std::scoped_lock lock(lock_);
       ++primaryCtxCount_;
     }
 
-    bool ReleasePrimaryCtx() {
+    bool DecrementPrimaryCtxCount() {
       std::scoped_lock lock(lock_);
       if (primaryCtxCount_ == 0) {
         return false;
@@ -753,8 +753,8 @@ namespace hip {
     int deviceId_;                             //!< Cached device ID (avoids linear scan)
     Stream* null_stream_ = nullptr;            //!< Default (null/legacy) stream
     unsigned int flags_;                       //!< Device flags (e.g. hipDeviceScheduleSpin)
-    uint32_t explicitCtxCount_ = 0;            //!< References taken by hipCtxCreate
-    uint32_t primaryCtxCount_ = 0;             //!< References taken by hipDevicePrimaryCtxRetain
+    uint32_t ctxCreateCount_ = 0;              //!< Outstanding hipCtxCreate calls
+    uint32_t primaryCtxCount_ = 0;             //!< Outstanding hipDevicePrimaryCtxRetain calls
     std::vector<int> userEnabledPeers_;        //!< Peer device IDs enabled via hipEnablePeerAccess
     std::atomic<bool> isActive_{false};        //!< True once any work has been submitted
 
