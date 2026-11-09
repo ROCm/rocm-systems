@@ -368,10 +368,6 @@ hipError_t hipDevicePrimaryCtxRelease(hipDevice_t dev) {
     HIP_RETURN(hipErrorInvalidDevice);
   }
 
-  if (!g_devices[dev]->DecrementPrimaryCtxCount()) {
-    HIP_RETURN(hipErrorInvalidContext);
-  }
-
   HIP_RETURN(hipSuccess);
 }
 
@@ -386,8 +382,6 @@ hipError_t hipDevicePrimaryCtxRetain(hipCtx_t* pctx, hipDevice_t dev) {
   }
 
   *pctx = reinterpret_cast<hipCtx_t>(g_devices[dev]);
-
-  g_devices[dev]->IncrementPrimaryCtxCount();
 
   HIP_RETURN(hipSuccess);
 }

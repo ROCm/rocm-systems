@@ -643,20 +643,6 @@ namespace hip {
       return true;
     }
 
-    void IncrementPrimaryCtxCount() {
-      std::scoped_lock lock(lock_);
-      ++primaryCtxCount_;
-    }
-
-    bool DecrementPrimaryCtxCount() {
-      std::scoped_lock lock(lock_);
-      if (primaryCtxCount_ == 0) {
-        return false;
-      }
-      --primaryCtxCount_;
-      return true;
-    }
-
     const std::vector<amd::Device*>& devices() const { return context_->devices(); }
     unsigned int getFlags() const { return flags_; }
     void setFlags(unsigned int flags) { flags_ = flags; }
@@ -754,7 +740,6 @@ namespace hip {
     Stream* null_stream_ = nullptr;            //!< Default (null/legacy) stream
     unsigned int flags_;                       //!< Device flags (e.g. hipDeviceScheduleSpin)
     uint32_t ctxCreateCount_ = 0;              //!< Outstanding hipCtxCreate calls
-    uint32_t primaryCtxCount_ = 0;             //!< Outstanding hipDevicePrimaryCtxRetain calls
     std::vector<int> userEnabledPeers_;        //!< Peer device IDs enabled via hipEnablePeerAccess
     std::atomic<bool> isActive_{false};        //!< True once any work has been submitted
 

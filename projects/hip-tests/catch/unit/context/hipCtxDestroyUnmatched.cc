@@ -6,7 +6,6 @@
 
 #include <hip_test_common.hh>
 
-#if HT_AMD
 /**
  * Test Description
  * ------------------------
@@ -32,9 +31,13 @@ HIP_TEST_CASE(Unit_hipCtxDestroy_WithoutCreate_Negative) {
 
   REQUIRE(hipCtxDestroy(context) == hipErrorInvalidContext);
 
-  HIP_CHECK(hipCtxCreate(&context, 0, 0));
-  HIP_CHECK(hipCtxDestroy(context));
-  REQUIRE(hipCtxDestroy(context) == hipErrorInvalidContext);
+  // hipCtxCreate makes the new context current, so restore the original before
+  // destroying it and leaving no current context behind.
+  hipCtx_t created = nullptr;
+  HIP_CHECK(hipCtxCreate(&created, 0, 0));
+  HIP_CHECK(hipCtxSetCurrent(context));
+  HIP_CHECK(hipCtxDestroy(created));
+  REQUIRE(hipCtxDestroy(created) == hipErrorInvalidContext);
 
   void* ptr = nullptr;
   HIP_CHECK(hipMalloc(&ptr, 1024));
@@ -48,8 +51,6 @@ HIP_TEST_CASE(Unit_hipCtxDestroy_WithoutCreate_Negative) {
  *  - Validates that hipCtxDestroy rejects a primary context handle:
  *    -# When the handle comes from hipDevicePrimaryCtxRetain
  *      - Expected output: return `hipErrorInvalidContext`, context stays active
- *    -# When hipDevicePrimaryCtxRelease is called more often than retained
- *      - Expected output: return `hipErrorInvalidContext`
  * Test source
  * ------------------------
  *  - unit/context/hipCtxDestroyUnmatched.cc
@@ -80,6 +81,4 @@ HIP_TEST_CASE(Unit_hipCtxDestroy_AfterPrimaryCtxRetain_Negative) {
   HIP_CHECK(hipFree(ptr));
 
   HIP_CHECK(hipDevicePrimaryCtxRelease(device));
-  REQUIRE(hipDevicePrimaryCtxRelease(device) == hipErrorInvalidContext);
 }
-#endif  // HT_AMD

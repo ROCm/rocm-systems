@@ -15,7 +15,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 ### Changed
 
 * After `hipFuncSetCacheConfig`, `preferredShmemCarveout` reads back `-1` for `hipFuncCachePreferNone` (was `0`) and `0` for `hipFuncCachePreferL1` (was `1`).
-* `hipCtxDestroy` returns `hipErrorInvalidContext` for a context the caller did not create with `hipCtxCreate`, and `hipDevicePrimaryCtxRelease` returns `hipErrorInvalidContext` when the device holds no reference from a prior `hipDevicePrimaryCtxRetain` (both were `hipSuccess`).
+* `hipCtxDestroy` returns `hipErrorInvalidContext` for a context the caller did not create with `hipCtxCreate` (was `hipSuccess`).
 
 ## HIP 7.17.0 for ROCm 10.2.0
 
