@@ -25,6 +25,9 @@
 #include <stdlib.h>
 #include <mutex>
 
+static_assert(kRcclGinTypeListMin == NCCL_GIN_TYPE_PROXY && kRcclGinTypeListMax == NCCL_GIN_MAX_TYPES - 1,
+              "RCCL_GIN_TYPE_LIST bounds in gin_type_env.h no longer match ncclGinType_t");
+
 typedef ncclGin_t* getNcclGin_t(void* ginPluginLib);
 
 extern getNcclGin_t getNcclGin_v13;
@@ -256,8 +259,9 @@ static void initPluginLibsOnceFunc() {
   if (envGinTypes) {
     uint64_t ginTypeMask;
     bool valid = ncclGinParseTypeList(envGinTypes, &ginTypeMask);
-    if (getenv("NCCL_GIN_TYPE")) {
-      INFO(NCCL_ENV | NCCL_NET, "RCCL_GIN_TYPE_LIST=%s ignored: NCCL_GIN_TYPE is set", envGinTypes);
+    if (const char* envGinType = ncclGinTypeEnv()) {
+      INFO(NCCL_ENV | NCCL_NET, "RCCL_GIN_TYPE_LIST=%s ignored: NCCL_GIN_TYPE is set to %s", envGinTypes,
+           envGinType);
     } else if (ginTypeMask == 0) {
       WARN("RCCL_GIN_TYPE_LIST=%s names no valid GIN type, ignoring it", envGinTypes);
     } else if (!valid) {
@@ -404,7 +408,15 @@ ncclResult_t ncclGinInit(struct ncclComm* comm) {
     }
   }
 
-  if (!initialized) INFO(NCCL_INIT | NCCL_NET, "GIN/Plugin: Failed to initialize any GIN plugin");
+  if (!initialized) {
+    uint64_t ginTypeMask;
+    if (ncclGinTypeListMask(&ginTypeMask)) {
+      WARN("GIN/Plugin: no GIN backend listed in RCCL_GIN_TYPE_LIST=%s could be registered",
+           getenv("RCCL_GIN_TYPE_LIST"));
+    } else {
+      INFO(NCCL_INIT | NCCL_NET, "GIN/Plugin: Failed to initialize any GIN plugin");
+    }
+  }
   return ncclSuccess;
 }
 

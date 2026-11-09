@@ -106,8 +106,19 @@ DevComm that leaves `ncclDevCommRequirements::ginType` as
 `NCCL_GIN_TYPE_NONE` gets the first backend that can serve it; set `ginType`
 to `NCCL_GIN_TYPE_ROCSHMEM_GDA` (or `NCCL_GIN_TYPE_ANVIL_SDMA`,
 `NCCL_GIN_TYPE_PROXY`) to pick one. Each backend still needs its own platform
-requirements below, and a backend that fails to initialize is dropped from the
-set.
+requirements below. A backend whose plugin fails to initialize is dropped from
+the set.
+
+Connecting is different: the first GIN DevComm on a communicator connects every
+listed backend together, and if any one of them fails to connect (for example,
+rocSHMEM GDA cannot create its queue pairs), GIN fails on that communicator for
+all of them. That includes the built-in Anvil SDMA alltoall and allreduce, which
+then return the error instead of running on SDMA. List only backends the
+platform supports.
+
+Entries must be backend types `2` through `7`; any other entry is dropped with a
+warning, and a list that leaves no backend registered also logs a warning. An
+empty `NCCL_GIN_TYPE` counts as unset, so it does not override the list.
 
 ### Platform requirements
 

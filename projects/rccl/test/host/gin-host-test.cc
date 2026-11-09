@@ -1145,6 +1145,25 @@ TEST_F(GinHostConnectOnceMicrotest, ConnectOnce_SecondConnectFails_ClosesTheEarl
   EXPECT_FALSE(gin()->connected);
 }
 
+// AICOMRCCL-3418: every active backend connects in one pass, so with
+// RCCL_GIN_TYPE_LIST naming two, one backend's connect failure closes the other
+// too. src/gin/README.md ("Mixing backends") documents this.
+TEST_F(GinHostConnectOnceMicrotest, ConnectOnce_SecondBackendConnectFails_ClosesEveryBackend) {
+  auto* gs = gin();
+  gs->numActiveBackends = 2;
+  gs->backends[1] = gs->backends[0];
+  gs->backends[1].ginType = NCCL_GIN_TYPE_ANVIL_SDMA;
+  fake_.failConnect = {ncclSystemError, 2};  // one connection per backend: call 2 is backends[1]
+
+  EXPECT_EQ(ncclSystemError, connectOnce());
+  EXPECT_EQ(2, fake_.connectCalls);
+  EXPECT_EQ(1, fake_.closeCollCalls);  // backends[0]'s connection, which had succeeded
+  EXPECT_EQ(nullptr, gs->backends[0].ginComms[0]);
+  EXPECT_TRUE(gs->backends[0].closed);
+  EXPECT_TRUE(gs->backends[1].closed);
+  EXPECT_FALSE(gs->connected);
+}
+
 // Two local GIN devices, four connections: connections are spread round-robin
 // over the devices, and each one gets its own properties slot.
 TEST_F(GinHostConnectOnceMicrotest, ConnectOnce_MoreConnectionsThanLocalDevs_SpreadsThemOverTheDevices) {

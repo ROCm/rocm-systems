@@ -858,17 +858,21 @@ in the following table.
         | ``6``: rocSHMEM GDA (this value, or ``6`` in ``RCCL_GIN_TYPE_LIST``, is
           required for that backend to initialize)
         | ``7``: Anvil SDMA (also accepts unset)
+        | An empty value counts as unset.
 
     * - | ``RCCL_GIN_TYPE_LIST``
         | Lists the GIN backend types that may be active together, so DevComms
           on one communicator can use different backends. RCCL-specific.
-          Ignored when ``NCCL_GIN_TYPE`` is set.
-      - | Comma-separated list of ``NCCL_GIN_TYPE`` values, for example
-          ``6,7`` (rocSHMEM GDA and Anvil SDMA) or ``6,2`` (rocSHMEM GDA and
-          the proxy). Types not in the list are not registered.
+          Ignored when ``NCCL_GIN_TYPE`` is set to a non-empty value.
+      - | Comma-separated list of ``NCCL_GIN_TYPE`` values from ``2`` to ``7``,
+          for example ``6,7`` (rocSHMEM GDA and Anvil SDMA) or ``6,2``
+          (rocSHMEM GDA and the proxy). Types not in the list are not
+          registered. Other entries are dropped with a warning.
         | When Anvil SDMA and rocSHMEM GDA are both active, Anvil SDMA is the
           default backend. A DevComm uses rocSHMEM GDA by requesting
           ``NCCL_GIN_TYPE_ROCSHMEM_GDA`` in ``ncclDevCommRequirements::ginType``.
+        | All listed backends connect together, so if one fails to connect,
+          GIN fails on that communicator for every backend in the list.
         | Default: unset (every backend except rocSHMEM GDA may be active)
 
     * - | ``NCCL_GIN_ALLREDUCE_GFX1250_ENABLE``

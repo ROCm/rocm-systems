@@ -252,7 +252,7 @@
     },
     "gin_devmpi_mixed": {
       "extends": "default",
-      "description": "Mixed GIN backends with NCCL_GIN_TYPE unset (an empty value disables anvil-sdma). Single node. Covers per-comm logging (SDMA+proxy) and rocSHMEM GDA alongside SDMA or the proxy via RCCL_GIN_TYPE_LIST.",
+      "description": "Mixed GIN backends with NCCL_GIN_TYPE unset or empty. Single node. Covers per-comm logging (SDMA+proxy) and rocSHMEM GDA alongside SDMA or the proxy via RCCL_GIN_TYPE_LIST.",
       "is_gtest": true,
       "binary": "rccl-UnitTestsMPI",
       "num_ranks": 2,

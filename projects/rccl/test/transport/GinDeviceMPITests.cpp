@@ -189,7 +189,8 @@ std::string ginProxyTestSkipReason() {
 // For runs that need anvil-sdma and the proxy active together: a set NCCL_GIN_TYPE
 // filters out all but one backend type, and anvil-sdma is single-node only.
 std::string ginMixedBackendSkipReason() {
-  if (std::getenv("NCCL_GIN_TYPE"))
+  const char* ginType = std::getenv("NCCL_GIN_TYPE");
+  if (ginType && ginType[0])
     return "Requires NCCL_GIN_TYPE unset so anvil-sdma and the proxy are both active";
   for (auto check : {ginEnvDisabledReason, cuMemReason, singleNodeReason}) {
     if (auto reason = check(); !reason.empty()) return reason;
@@ -210,7 +211,7 @@ bool ginTypeListed(uint64_t listed, ncclGinType_t type) { return (listed >> type
 std::string gdaAlongsideSkipReason() {
   std::string local = ginEnvDisabledReason();
   if (local.empty()) local = cuMemReason();
-  if (local.empty() && std::getenv("NCCL_GIN_TYPE"))
+  if (local.empty() && ncclGinTypeEnv())
     local = "Requires NCCL_GIN_TYPE unset so RCCL_GIN_TYPE_LIST selects the backends";
   const uint64_t listed = listedGinTypes();
   if (local.empty() && (!ginTypeListed(listed, NCCL_GIN_TYPE_ROCSHMEM_GDA) ||

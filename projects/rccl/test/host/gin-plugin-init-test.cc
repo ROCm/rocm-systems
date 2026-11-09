@@ -278,6 +278,17 @@ TEST_F(GinFinalizeTest, AssignToComm_HonorsGinTypesList) {
   }
 }
 
+// An empty NCCL_GIN_TYPE is unset to ncclParamGinType(), so the list still filters.
+TEST_F(GinFinalizeTest, AssignToComm_EmptyGinType_StillHonorsGinTypesList) {
+  ScopedEnv ty("NCCL_GIN_TYPE", "");
+  ScopedEnv list("RCCL_GIN_TYPE_LIST", "6,7");
+  fake_.netDeviceType = NCCL_NET_DEVICE_GIN_PROXY;
+  bool isAssigned = true;
+  ASSERT_EQ(ncclGinPluginAssignToComm(&comm_, 0, nullptr, &isAssigned), ncclSuccess);
+  EXPECT_FALSE(isAssigned);
+  EXPECT_EQ(sharedRes_->ginState.numActiveBackends, 0);
+}
+
 #ifdef ENABLE_ROCSHMEM_GIN
 // AICOMRCCL-3418: every registration order sorts to Anvil SDMA, then rocSHMEM GDA, then the proxy.
 TEST_F(GinFinalizeTest, SetDefaultBackend_OrdersSdmaThenGdaThenProxy) {
@@ -307,6 +318,8 @@ TEST(GinTypeListTest, ParsesCommaSeparatedTypes) {
   EXPECT_EQ(mask, BIT(6) | BIT(7));
   EXPECT_TRUE(ncclGinParseTypeList(" 2 , 6 ", &mask));
   EXPECT_EQ(mask, BIT(2) | BIT(6));
+  EXPECT_TRUE(ncclGinParseTypeList("2,3,4,5,6,7", &mask));
+  EXPECT_EQ(mask, BIT(2) | BIT(3) | BIT(4) | BIT(5) | BIT(6) | BIT(7));
   EXPECT_TRUE(ncclGinParseTypeList("", &mask));
   EXPECT_EQ(mask, 0u);
 }
@@ -316,6 +329,16 @@ TEST(GinTypeListTest, FlagsInvalidEntriesAndKeepsValidOnes) {
   EXPECT_FALSE(ncclGinParseTypeList("6,x,7", &mask));
   EXPECT_EQ(mask, BIT(6) | BIT(7));
   EXPECT_FALSE(ncclGinParseTypeList("0,64,-1,6x,,", &mask));
+  EXPECT_EQ(mask, 0u);
+}
+
+// 1 and 8 are in range for the bitmask but name no backend, so a typo cannot
+// pass as a valid list that silently filters out every backend.
+TEST(GinTypeListTest, RejectsTypesThatNameNoBackend) {
+  uint64_t mask = 0;
+  EXPECT_FALSE(ncclGinParseTypeList("1,8,6", &mask));
+  EXPECT_EQ(mask, BIT(6));
+  EXPECT_FALSE(ncclGinParseTypeList("8", &mask));
   EXPECT_EQ(mask, 0u);
 }
 
@@ -336,6 +359,26 @@ TEST(GinTypeListTest, GinTypeWinsOverGinTypes) {
     // A list with no valid entry is ignored, so the defaults apply.
     ScopedEnv noValidEntry("RCCL_GIN_TYPE_LIST", "x");
     EXPECT_FALSE(ncclGinTypeEnabled(6, false));
+    EXPECT_TRUE(ncclGinTypeEnabled(7, true));
+  }
+}
+
+// ncclParamGinType() reads an empty NCCL_GIN_TYPE as unset, so the list applies and,
+// without a list, each backend keeps its default.
+TEST(GinTypeListTest, EmptyGinTypeCountsAsUnset) {
+  ScopedEnv ty("NCCL_GIN_TYPE", "");
+  {
+    ScopedEnv list("RCCL_GIN_TYPE_LIST", nullptr);
+    EXPECT_EQ(ncclGinTypeEnv(), nullptr);
+    EXPECT_FALSE(ncclGinTypeEnabled(6, /*enabledByDefault=*/false));
+    EXPECT_TRUE(ncclGinTypeEnabled(7, /*enabledByDefault=*/true));
+  }
+  {
+    ScopedEnv list("RCCL_GIN_TYPE_LIST", "6,7");
+    uint64_t mask = 0;
+    ASSERT_TRUE(ncclGinTypeListMask(&mask));
+    EXPECT_EQ(mask, BIT(6) | BIT(7));
+    EXPECT_TRUE(ncclGinTypeEnabled(6, false));
     EXPECT_TRUE(ncclGinTypeEnabled(7, true));
   }
 }
