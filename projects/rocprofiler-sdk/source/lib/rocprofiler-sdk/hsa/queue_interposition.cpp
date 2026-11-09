@@ -151,6 +151,10 @@ lookup_queue_state(const hsa_queue_t* queue, bool create_if_missing)
     // if create_if_missing is true, create a new state. this is for dynamic discovery of queues.
     if(!_state && create_if_missing)
     {
+        // Complete adoption before publishing the interposition state, so concurrent
+        // lookups cannot submit packets before record emission is ready.
+        // Called with no registry lock held.
+        queue_controller_adopt_existing_queue(queue);
         auto _created = create_queue_state(queue, true);
         // A queue discovered dynamically (never seen at hsa_queue_create) was
         // never windowed, so first_owner can no longer be trusted anywhere -- the

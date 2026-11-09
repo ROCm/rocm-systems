@@ -4,7 +4,7 @@ import { expect, test } from 'vitest';
 import CompareRunsView from '../../src/components/views/CompareRunsView.jsx';
 import { benchmarkData } from '../fixtures/publishedData.js';
 import { selectRunComparison } from '../../src/data/selectors.js';
-import { formatDuration, formatPercent } from '../../src/utils/formatters.js';
+import { formatDuration, formatPercent, formatRunTime } from '../../src/utils/formatters.js';
 
 const filters = { targets: benchmarkData.targets, suites: benchmarkData.suites, modes: benchmarkData.modes };
 function renderComparison(baseline, candidate, scope = filters) {
@@ -75,10 +75,13 @@ test('excluded cells preserve optional configuration presence and published stat
 });
 
 test('selected run labels retain one clock while metadata excludes bookkeeping clocks', () => {
-  const html = renderComparison(benchmarkData.runs.at(-2), benchmarkData.runs.at(-1));
+  const runs = [benchmarkData.runs.at(-2), benchmarkData.runs.at(-1)];
+  const html = renderComparison(...runs);
   const inputs = [...html.matchAll(/<input[^>]*role="combobox"[^>]*value="([^"]*)"/g)].map((match) => match[1]);
   expect(inputs).toHaveLength(2);
-  expect(inputs.every((value) => value.split('UTC').length === 2)).toBe(true);
+  for (const [index, run] of [runs[1], runs[0]].entries()) {
+    expect(inputs[index].split(formatRunTime(run.timestamp))).toHaveLength(2);
+  }
   for (const key of ['commitTime', 'runTime']) expect(html).not.toContain(`data-testid="metadata-row-${key}"`);
   for (const key of ['coverage', 'catalog', 'machine', 'configurations']) expect(html).toContain(`data-testid="metadata-row-${key}"`);
 });

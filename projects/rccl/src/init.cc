@@ -374,9 +374,15 @@ static ncclResult_t ncclInit() {
   NCCLCHECK(ncclOsTopoGetStrFromSys("/proc", "version", strValue, sizeof(strValue)));
   char *verStr, *state;
   verStr = strtok_r(strValue, " ", &state);
-  for (int i = 0; i < 2; i++) {
+  for (int i = 0; i < 2 && verStr != NULL; i++) {
     verStr = strtok_r(NULL, " ", &state);
-    if (verStr == NULL) break;
+  }
+  // A failed read is reported as "" and ncclSuccess. Fewer than three tokens also leaves
+  // verStr NULL, and strstr(NULL) would SIGSEGV. This runs before call_once, so the failure
+  // is not latched.
+  if (verStr == NULL) {
+    WARN("Could not read kernel version from /proc/version");
+    return ncclSystemError;
   }
   INFO(NCCL_INIT, "Kernel version: %s", verStr);
   if (strstr(verStr, "cray") == NULL) {
@@ -447,7 +453,7 @@ ncclResult_t ncclGetUniqueId_impl(ncclUniqueId* out) {
   memset(out, 0, sizeof(*out));
   // copy to avoid alignment mismatch
   memcpy(out, &handle, sizeof(handle));
-  Recorder::instance().record(rrGetUniqueId, -1, -1, out);
+  (void)Recorder::instance().record(rrGetUniqueId, -1, -1, out);
   TRACE_CALL("ncclGetUniqueId(0x%llx)", (unsigned long long)getHash(out->internal, NCCL_UNIQUE_ID_BYTES));
   return ncclSuccess;
 }
@@ -1266,7 +1272,7 @@ fail:
 #endif
 static void showVersion() {
   // Retrieve Hostname info
-  char hostBuf[HOST_NAME_MAX];
+  char hostBuf[HOST_NAME_MAX + 1] = {};
   std::string hostInfo = (gethostname(hostBuf, sizeof(hostBuf) - 1) == 0) ? hostBuf : "Unknown";
 
   // Retrieve librccl path
@@ -3311,10 +3317,10 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   }
 
   // Check if using host uncached mem correctly
-  NCCLCHECK(checkHostUncacheMemSetting(comm));
+  NCCLCHECKGOTO(checkHostUncacheMemSetting(comm), res, fail);
 
   // RCCL: determine and set unroll factor for comm
-  NCCLCHECK(commSetUnrollFactor(comm));
+  NCCLCHECKGOTO(commSetUnrollFactor(comm), res, fail);
 
 #ifdef ENABLE_ROCSHMEM
   if (!job->parent && rcclParamRocshmemEnabled()) {
@@ -3327,7 +3333,8 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
       ret = rocshmem::rocshmem_get_uniqueid(&rocshmemUniqueId);
       if (ret != rocshmem::ROCSHMEM_SUCCESS) {
         ERROR("Error in rocshmem_get_uniqueid, Rocshmem cannot be initialized.");
-        return ncclSystemError;
+        res = ncclSystemError;
+        goto fail;
       }
     }
 
@@ -3337,13 +3344,15 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
     ret = rocshmem::rocshmem_set_attr_uniqueid_args(job->myrank, job->nranks, &rocshmemUniqueId, &rocshmemAttr);
     if (ret != rocshmem::ROCSHMEM_SUCCESS) {
       ERROR("Error in rocshmem_set_attr_uniqueid_args, Rocshmem cannot be initialized.");
-      return ncclSystemError;
+      res = ncclSystemError;
+      goto fail;
     }
 
     ret = rocshmem::rocshmem_init_attr(rocshmem::ROCSHMEM_INIT_WITH_UNIQUEID, &rocshmemAttr);
     if (ret != rocshmem::ROCSHMEM_SUCCESS) {
       ERROR("Error in rocshmem_init_attr, Rocshmem cannot be initialized.");
-      return ncclSystemError;
+      res = ncclSystemError;
+      goto fail;
     }
 
     const char* inputStr = std::getenv("ROCSHMEM_HEAP_SIZE");
@@ -3378,13 +3387,13 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
                                           &(comm->team_reduce_world_dup));
 
     ncclCommToRshmemTeam[comm] = comm->team_reduce_world_dup;
-    CUDACHECK(hipDeviceSynchronize());
+    CUDACHECKGOTO(hipDeviceSynchronize(), res, fail);
   }
 #endif
 
   // Allocate Temp Buffer for Direct Reduce Scatter
   if (IsArchMatch(archName, "gfx950")) {
-    NCCLCHECK(ncclCudaMalloc(&(comm->tempBuff), TEMP_BUFF_SIZE, comm->memManager));
+    NCCLCHECKGOTO(ncclCudaMalloc(&(comm->tempBuff), TEMP_BUFF_SIZE, comm->memManager), res, fail);
   }
 
   NCCLCHECKGOTO(latency_profiler::collTraceInit(comm), res, fail);
@@ -3438,9 +3447,6 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
 
   // Trace this call for replay tool
   if (job->parent) {
-    /* unlink child abort flag. */
-    COMPILER_ATOMIC_STORE(&job->parent->childAbortFlag, static_cast<uint32_t*>(nullptr), std::memory_order_release);
-    COMPILER_ATOMIC_STORE(&job->parent->childAbortFlagDev, static_cast<uint32_t*>(nullptr), std::memory_order_release);
     if (job->isGrow) {
       TRACE_CALL("ncclCommGrow(%p, %d, %p)", job->parent, comm->nRanks, comm);
     } else {
@@ -3469,6 +3475,10 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
        timers[TIMER_INIT_TOPO] / 1e9, timers[TIMER_INIT_GRAPHS] / 1e9, timers[TIMER_INIT_CONNECT] / 1e9,
        timers[TIMER_INIT_TOTAL] / 1e9 - sum_timers);
 exit:
+  if (job->parent) {
+    /* unlink child abort flag. */
+    COMPILER_ATOMIC_STORE(&job->parent->childAbortFlag, static_cast<uint32_t*>(nullptr), std::memory_order_release);
+  }
   if (job->newcomm) {
     /* assign it to user pointer. */
     __atomic_store_n(job->newcomm, comm, __ATOMIC_RELEASE);
@@ -3480,11 +3490,11 @@ fail:
   // If failure occurs after that assignment, commFree() will free comm->archName,
   // so freeing archName here as well would be a double free. Null it out so that
   // commFree handles cleanup exclusively.
-  if (archName == comm->archName) {
+  if (comm && archName == comm->archName) {
     archName = NULL;
   }
   free(archName);
-  COMPILER_ATOMIC_STORE(&comm->initState, res, std::memory_order_release);
+  if (comm) COMPILER_ATOMIC_STORE(&comm->initState, res, std::memory_order_release);
   goto exit;
 }
 
@@ -4435,12 +4445,27 @@ static ncclResult_t commDestroySync(struct ncclAsyncJob* job_) {
            comm->rank, ret);
     }
 
-    NCCLCHECKGOTO(ncclCommPollEventCallbacks(comm, true), ret, fail);
-    NCCLCHECKGOTO(ncclCommPollCallbacks(comm, false), ret, fail);
-    // And keep polling until all graphs referencing us die.
-    while (comm->localPersistentRefs != 0) {
-      NCCLCHECKGOTO(ncclCommPollCallbacks(comm, /*waitSome=*/true), ret, fail);
+    int aborting = COMPILER_ATOMIC_LOAD(comm->abortFlag, std::memory_order_acquire) != 0;
+    if (aborting) {
+      NCCLCHECKGOTO(ncclCommOrphanPersistentPlans(comm), ret, fail);
     }
+    ncclResult_t pollRet = ncclCommPollEventCallbacks(comm, true);
+    if (pollRet != ncclSuccess) {
+      if (ret == ncclSuccess) ret = pollRet;
+      if (!aborting) goto fail;
+    }
+    pollRet = ncclCommPollCallbacks(comm, false);
+    if (pollRet != ncclSuccess) {
+      if (ret == ncclSuccess) ret = pollRet;
+      if (!aborting) goto fail;
+    }
+    // And keep polling until all graphs referencing us die.
+    if (!aborting) {
+      while (comm->localPersistentRefs != 0) {
+        NCCLCHECKGOTO(ncclCommPollCallbacks(comm, /*waitSome=*/true), ret, fail);
+      }
+    }
+    if (comm->localPersistentRefs == 0) ncclCommDropPersistentPlanRefs(comm);
     while (!ncclIntruQueueEmpty(&comm->legacyRegCleanupQueue)) {
       struct ncclCommCallback* cb = ncclIntruQueueDequeue(&comm->legacyRegCleanupQueue);
       if (cb->fn(comm, cb) != ncclSuccess) {
@@ -4587,6 +4612,27 @@ fail:
   goto exit;
 }
 
+static void persistentPlanReaper(ncclComm_t comm) {
+  cudaError_t devErr = cudaSetDevice(comm->cudaDev);
+  if (devErr != cudaSuccess) {
+    WARN("persistentPlanReaper: comm %p rank %d cudaSetDevice(%d) failed", comm, comm->rank, comm->cudaDev);
+  }
+  while (comm->localPersistentRefs != 0) {
+    ncclResult_t ret = ncclCommPollCallbacks(comm, /*waitSome=*/true);
+    if (ret != ncclSuccess) {
+      WARN("persistentPlanReaper: comm %p rank %d poll error %d", comm, comm->rank, ret);
+    }
+  }
+  uint64_t commHash = comm->commHash;
+  int rank = comm->rank;
+  ncclCommDropPersistentPlanRefs(comm);
+  ncclResult_t ret = ncclSuccess;
+  NOWARN(ret = commCleanup(comm), NCCL_DESTROY);
+  if (ret != ncclSuccess) {
+    ATTN("cleanup comm 0x%" PRIx64 " rank %d failed in destroy/abort, error %d", commHash, rank, ret);
+  }
+}
+
 static ncclResult_t commReclaim(struct ncclAsyncJob* job_) {
   struct ncclCommFinalizeAsyncJob* job = (struct ncclCommFinalizeAsyncJob*)job_;
   ncclComm_t comm = job->comm;
@@ -4637,12 +4683,15 @@ static ncclResult_t commReclaim(struct ncclAsyncJob* job_) {
             lbd(curIntraComm, curRank);
           }
         } else if (curIntraComm->revokedFlag) {
-          /* commRevokeAsync already synced streams and stopped proxy;
-           * drain any remaining persistent graph refs and legacy IPC cleanup
-           * callbacks before commCleanup runs (mirrors commDestroySync). */
-          while (curIntraComm->localPersistentRefs != 0) {
-            if ((ret = ncclCommPollCallbacks(curIntraComm, /*waitSome=*/true)) != ncclSuccess) break;
+          if ((ret = ncclCommOrphanPersistentPlans(curIntraComm)) != ncclSuccess) {
+            WARN("commReclaim: reclaiming graph plans failed comm %p (rank = %d) error %d", curIntraComm, curRank,
+                 ret);
           }
+          if ((ret = ncclCommPollCallbacks(curIntraComm, /*waitSome=*/false)) != ncclSuccess) {
+            WARN("commReclaim: polling graph callbacks failed comm %p (rank = %d) error %d", curIntraComm, curRank,
+                 ret);
+          }
+          if (curIntraComm->localPersistentRefs == 0) ncclCommDropPersistentPlanRefs(curIntraComm);
           while (!ncclIntruQueueEmpty(&curIntraComm->legacyRegCleanupQueue)) {
             struct ncclCommCallback* cb = ncclIntruQueueDequeue(&curIntraComm->legacyRegCleanupQueue);
             if (cb->fn(curIntraComm, cb) != ncclSuccess) {
@@ -4670,9 +4719,23 @@ static ncclResult_t commReclaim(struct ncclAsyncJob* job_) {
         uint64_t commHash = curIntraComm->commHash;
         nextIntraComm = nextIntraComm->intraNext;
 
-        NOWARN(ret = commCleanup(curIntraComm), NCCL_DESTROY);
-        if (ret != ncclSuccess) {
-          ATTN("cleanup comm 0x%" PRIx64 " rank %d failed in destroy/abort, error %d", commHash, curRank, ret);
+        int deferCleanup = curIntraComm->localPersistentRefs != 0;
+        if (deferCleanup) {
+          std::thread reaperThread;
+          try {
+            reaperThread = std::thread(persistentPlanReaper, curIntraComm);
+          } catch (const std::exception& e) {
+            WARN("Thread creation failed: %s", e.what());
+            ret = ncclSystemError;
+            continue;
+          }
+          reaperThread.detach();
+        } else {
+          ncclCommDropPersistentPlanRefs(curIntraComm);
+          NOWARN(ret = commCleanup(curIntraComm), NCCL_DESTROY);
+          if (ret != ncclSuccess) {
+            ATTN("cleanup comm 0x%" PRIx64 " rank %d failed in destroy/abort, error %d", commHash, curRank, ret);
+          }
         }
       }
     }
@@ -4743,13 +4806,22 @@ fail:
   goto exit;
 }
 
+// A child init can unlink childAbortFlag concurrently, so it is loaded once and only that snapshot is written.
+// childAbortFlagDev is never cleared (it can go stale), so it is written only while a child is linked.
+static void setChildAbortFlags(ncclComm_t comm, uint32_t uval) {
+  uint32_t* childAbortFlag = COMPILER_ATOMIC_LOAD(&comm->childAbortFlag, std::memory_order_acquire);
+  if (childAbortFlag != nullptr) {
+    COMPILER_ATOMIC_STORE(childAbortFlag, uval, std::memory_order_release);
+    if (comm->childAbortFlagDev != nullptr) {
+      COMPILER_ATOMIC_STORE(comm->childAbortFlagDev, uval, std::memory_order_release);
+    }
+  }
+}
+
 static ncclResult_t setCommAbortFlags(ncclComm_t comm, int value) {
   // Set abort flags
   uint32_t uval = static_cast<uint32_t>(value);
-  if (comm->childAbortFlag != nullptr) COMPILER_ATOMIC_STORE(comm->childAbortFlag, uval, std::memory_order_release);
-  if (comm->childAbortFlagDev != nullptr) {
-    COMPILER_ATOMIC_STORE(comm->childAbortFlagDev, uval, std::memory_order_release);
-  }
+  setChildAbortFlags(comm, uval);
   if (comm->abortFlag != nullptr) COMPILER_ATOMIC_STORE(comm->abortFlag, uval, std::memory_order_release);
   if (comm->abortFlagDev != nullptr) COMPILER_ATOMIC_STORE(comm->abortFlagDev, uval, std::memory_order_release);
   return ncclSuccess;
@@ -4786,7 +4858,12 @@ static ncclResult_t commRevokeAsync(struct ncclAsyncJob* job_) {
     }
   }
 
-  NCCLCHECKGOTO(setCommAbortFlags(comm, 0), res, exit);
+  if (comm->localPersistentRefs == 0) {
+    NCCLCHECKGOTO(setCommAbortFlags(comm, 0), res, exit);
+  } else {
+    setChildAbortFlags(comm, 0u);
+    COMPILER_ATOMIC_STORE(comm->abortFlag, 0u, std::memory_order_release);
+  }
 
 exit:
   (void)ncclCommSetAsyncError(comm, res);
@@ -4825,7 +4902,7 @@ ncclResult_t ncclCommRevoke_impl(ncclComm_t comm, int revokeFlags) {
   // Abort in-flight kernels so commRevokeAsync's stream sync cannot deadlock.
   // finalizeCalled blocks commDestroySync in commReclaim (revoke handles cleanup).
   (void)setCommAbortFlags(comm, 1);
-  comm->revokedFlag = 1;
+  COMPILER_ATOMIC_STORE(&comm->revokedFlag, 1u, std::memory_order_release);
   (void)ncclCommEnsureReady(comm);
   comm->finalizeCalled = true;
 
@@ -4905,14 +4982,15 @@ fail:
 static ncclResult_t ncclCommInitChildComm(ncclComm_t comm, ncclComm_t* newcomm, bool isShrink, int flags, int color,
                                           int key, int* excludeRanksList, int excludeRanksCount, ncclConfig_t* config,
                                           const char* caller) {
-  NCCLCHECK(PtrCheck(newcomm, caller, "newcomm"));
-
   struct ncclCommInitRankAsyncJob* job = NULL;
   struct ncclComm* childComm = NCCL_COMM_NULL;
   ncclResult_t res = ncclSuccess;
 
   int oldDev;
+  /* *newcomm should be NCCL_COMM_NULL until comm split fully complete. */
+  if (newcomm) *newcomm = NCCL_COMM_NULL;
   CUDACHECK(cudaGetDevice(&oldDev));
+  NCCLCHECKGOTO(PtrCheck(newcomm, caller, "newcomm"), res, exit);
   NCCLCHECKGOTO(CommCheck(comm, caller, "comm"), res, exit);
   if (isShrink) {
     NCCLCHECKGOTO(PtrCheck(excludeRanksList, caller, "excludeRanksList"), res, exit);
@@ -4927,9 +5005,20 @@ static ncclResult_t ncclCommInitChildComm(ncclComm_t comm, ncclComm_t* newcomm, 
   }
   NCCLCHECKGOTO(ncclCommEnsureReady(comm), res, exit);
   CUDACHECKGOTO(cudaSetDevice(comm->cudaDev), res, exit);
-
-  /* *newcomm should be NCCL_COMM_NULL until comm split fully complete. */
-  *newcomm = NCCL_COMM_NULL;
+  if (isShrink) {
+    if (excludeRanksList[0] < 0 || excludeRanksList[excludeRanksCount - 1] >= comm->nRanks) {
+      WARN("%s: excludeRanksList entries must be in [0, %d)", caller, comm->nRanks);
+      res = ncclInvalidArgument;
+      goto exit;
+    }
+    for (int i = 1; i < excludeRanksCount; i++) {
+      if (excludeRanksList[i] == excludeRanksList[i - 1]) {
+        WARN("%s: excludeRanksList contains rank %d more than once", caller, excludeRanksList[i]);
+        res = ncclInvalidArgument;
+        goto exit;
+      }
+    }
+  }
   if (!isShrink && color == NCCL_SPLIT_NOCOLOR) {
     INFO(NCCL_INIT, "Rank %d has color with NCCL_SPLIT_NOCOLOR, not creating a new communicator", comm->rank);
   } else {
@@ -4951,15 +5040,14 @@ static ncclResult_t ncclCommInitChildComm(ncclComm_t comm, ncclComm_t* newcomm, 
       childComm->abortFlagDev = comm->abortFlagDev;
       childComm->abortFlagRefCount = comm->abortFlagRefCount;
       comm->childAbortFlag = NULL;
-      comm->childAbortFlagDev = NULL;
       ncclAtomicRefCountIncrement(comm->abortFlagRefCount);
     } else {
       NCCLCHECKGOTO(ncclCalloc(&childComm->abortFlag, 1), res, fail);
       NCCLCHECKGOTO(ncclCudaHostCalloc(&childComm->abortFlagDev, 1), res, fail);
       NCCLCHECKGOTO(ncclCalloc(&childComm->abortFlagRefCount, 1), res, fail);
       /* temporarily used to abort everything during child comm init. */
-      comm->childAbortFlag = childComm->abortFlag;
       comm->childAbortFlagDev = childComm->abortFlagDev;
+      COMPILER_ATOMIC_STORE(&comm->childAbortFlag, childComm->abortFlag, std::memory_order_release);
       *childComm->abortFlagRefCount = 1;
     }
     if (config == NULL) {
@@ -5005,7 +5093,8 @@ exit:
   // for loggin only, not ready for replaying
   // TODO: further integrate overloaded record header
   // !recording at sink
-  Recorder::instance().record(rrCommSplit, color, key, (ncclUniqueId*)comm, config, *newcomm);
+  Recorder::instance().record(rrCommSplit, color, key, (ncclUniqueId*)comm, config,
+                              newcomm ? *newcomm : NCCL_COMM_NULL);
   (void)cudaSetDevice(oldDev);
   return res;
 fail:
@@ -5015,10 +5104,10 @@ fail:
       // Drop the reference taken on the parent's abort flags.
       if (childComm->abortFlagRefCount) (void)ncclAtomicRefCountDecrement(childComm->abortFlagRefCount);
     } else {
-      // Unlink the parent from the flags freed below.
-      if (childComm->abortFlag != nullptr && comm->childAbortFlag == childComm->abortFlag) {
-        comm->childAbortFlag = NULL;
-        comm->childAbortFlagDev = NULL;
+      // Unlink the parent from the flags freed below, but not from another child's.
+      if (childComm->abortFlag != nullptr &&
+          COMPILER_ATOMIC_LOAD(&comm->childAbortFlag, std::memory_order_acquire) == childComm->abortFlag) {
+        COMPILER_ATOMIC_STORE(&comm->childAbortFlag, static_cast<uint32_t*>(nullptr), std::memory_order_release);
       }
       if (childComm->abortFlag) free(childComm->abortFlag);
       if (childComm->abortFlagDev) ncclCudaHostFree(childComm->abortFlagDev);
@@ -5044,7 +5133,12 @@ ncclResult_t ncclCommShrink_impl(ncclComm_t comm, int* excludeRanksList, int exc
     comm->ddaDisabledAfterAbort = true;
     NCCLCHECKGOTO(setCommAbortFlags(comm, 1), res, exit);
     NCCLCHECKGOTO(ncclStrongStreamSynchronize(&comm->sharedRes->deviceStream), res, exit);
-    NCCLCHECKGOTO(setCommAbortFlags(comm, 0), res, exit);
+    if (__atomic_load_n(&comm->revokedFlag, __ATOMIC_ACQUIRE) && comm->localPersistentRefs != 0) {
+      setChildAbortFlags(comm, 0u);
+      COMPILER_ATOMIC_STORE(comm->abortFlag, 0u, std::memory_order_release);
+    } else {
+      NCCLCHECKGOTO(setCommAbortFlags(comm, 0), res, exit);
+    }
   }
   NCCLCHECKGOTO(ncclCommInitChildComm(comm, newcomm, /*isShrink=*/true, shrinkFlags, /*color=*/0, /*key=*/comm->rank,
                                       excludeRanksList, excludeRanksCount, config, __func__),

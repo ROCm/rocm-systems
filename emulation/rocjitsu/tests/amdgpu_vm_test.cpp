@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "aql_queue.h"
+#include "compute_unit_test_util.h"
 #include "config_test_util.h"
 #include "halt_snapshot_plugin.h"
 #include "instruction_failure_test_util.h"
@@ -34,6 +35,7 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/partitioning.h"
 #include "rocjitsu/vm/amdgpu/request_mtype_resolver.h"
+#include "rocjitsu/vm/amdgpu/shader_engine.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/amdgpu/wf_scheduler.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
@@ -553,14 +555,153 @@ TEST(CommandProcessorTest, LargeInternalWorkgroupsKeepCallbackOrderAndReclaimFai
   }
 }
 
-TEST(ComputeUnitConfigTest, RejectsWavefrontSlotsAboveIsaMaximum) {
-  VmFixture fixture;
-  EXPECT_THROW(fixture.initialize("cdna3", 1, 33), util::ConfigError);
+TEST(ComputeUnitConfigTest, DirectFactoryDiagnosesRejectedConfiguration) {
+  using Config = amdgpu::ComputeUnitCore::Config;
+  const Config valid{
+      .arch = ROCJITSU_CODE_ARCH_CDNA3,
+      .num_wf_slots = 8,
+      .sgprs_per_wf = 104,
+      .vgprs_per_wf = 256,
+      .lds_size_kb = 64,
+  };
+  struct InvalidConfig {
+    Config config;
+    const char *message;
+  };
+  std::vector<InvalidConfig> cases;
+  Config invalid = valid;
+  invalid.num_wf_slots = 33;
+  cases.push_back({invalid, "num_wf_slots exceeds the ISA maximum of 32"});
+  invalid = valid;
+  invalid.vgprs_per_wf = 513;
+  cases.push_back({invalid, "effective VGPRs per wavefront exceeds the ISA maximum of 512"});
+  invalid = valid;
+  invalid.arch = ROCJITSU_CODE_ARCH_INVALID;
+  cases.push_back({invalid, "Unsupported architecture for ComputeUnit"});
+  invalid.arch = ROCJITSU_CODE_ARCH_RV64I;
+  cases.push_back({invalid, "Unsupported architecture for ComputeUnit"});
+  invalid = valid;
+  invalid.target = static_cast<rj_code_target_id_t>(UINT32_MAX);
+  cases.push_back({invalid, "unsupported concrete GPU target"});
+
+  for (const auto &test_case : cases) {
+    SCOPED_TRACE(test_case.message);
+    util::StringDiagnostic diagnostic;
+    EXPECT_TRUE(amdgpu::ComputeUnitCore::validate(test_case.config, diagnostic.emitter()).failed());
+    EXPECT_EQ(diagnostic.message(), test_case.message);
+    for (auto mode : {simdojo::ExecMode::FUNCTIONAL, simdojo::ExecMode::CLOCKED}) {
+      diagnostic("");
+      std::unique_ptr<amdgpu::ComputeUnitCore> compute_unit;
+      EXPECT_NO_THROW(compute_unit =
+                          amdgpu::ComputeUnitCore::create("rejected", test_case.config, nullptr,
+                                                          nullptr, mode, diagnostic.emitter()));
+      EXPECT_EQ(compute_unit, nullptr);
+      EXPECT_EQ(diagnostic.message(), test_case.message);
+    }
+  }
 }
 
-TEST(ComputeUnitConfigTest, RejectsVgprSpanAboveIsaMaximum) {
-  VmFixture fixture;
-  EXPECT_THROW(fixture.initialize("cdna3", 1, 32, 64, 104, 513), util::ConfigError);
+TEST(ComputeUnitConfigTest, FixtureSetupStopsWithRejectedConfigurationDiagnostic) {
+  ::testing::TestPartResultArray failures;
+  bool continued_setup = false;
+  {
+    ::testing::ScopedFakeTestPartResultReporter reporter(
+        ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD, &failures);
+    [&] {
+      std::unique_ptr<amdgpu::ComputeUnitCore> compute_unit;
+      const amdgpu::ComputeUnitCore::Config config{
+          .arch = ROCJITSU_CODE_ARCH_CDNA3,
+          .num_wf_slots = 33,
+          .sgprs_per_wf = 104,
+          .vgprs_per_wf = 256,
+          .lds_size_kb = 64,
+      };
+      ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(
+          compute_unit, "rejected_fixture", config, nullptr, nullptr));
+      continued_setup = true;
+    }();
+  }
+  EXPECT_FALSE(continued_setup);
+  ASSERT_GE(failures.size(), 1);
+  EXPECT_TRUE(failures.GetTestPartResult(0).fatally_failed());
+  EXPECT_NE(std::string(failures.GetTestPartResult(0).message())
+                .find("num_wf_slots exceeds the ISA maximum of 32"),
+            std::string::npos);
+}
+
+TEST(ComputeUnitConfigTest, DirectFactoryDiagnosesUnsupportedExecutionMode) {
+  const amdgpu::ComputeUnitCore::Config config{
+      .arch = ROCJITSU_CODE_ARCH_CDNA3,
+      .num_wf_slots = 8,
+      .sgprs_per_wf = 104,
+      .vgprs_per_wf = 256,
+      .lds_size_kb = 64,
+  };
+  util::StringDiagnostic diagnostic;
+  std::unique_ptr<amdgpu::ComputeUnitCore> compute_unit;
+  EXPECT_NO_THROW(compute_unit = amdgpu::ComputeUnitCore::create(
+                      "rejected", config, nullptr, nullptr, static_cast<simdojo::ExecMode>(255),
+                      diagnostic.emitter()));
+  EXPECT_EQ(compute_unit, nullptr);
+  EXPECT_EQ(diagnostic.message(), "Unsupported execution mode for ComputeUnit");
+}
+
+TEST(ComputeUnitConfigTest, DirectFactoryPropagatesDiagnosticDeliveryFailures) {
+  const struct {
+    const char *name;
+    uint32_t wave_slots;
+    simdojo::ExecMode mode;
+    const char *message;
+  } cases[] = {
+      {"invalid wave slots", 33, simdojo::ExecMode::FUNCTIONAL,
+       "num_wf_slots exceeds the ISA maximum of 32"},
+      {"unsupported execution mode", 8, static_cast<simdojo::ExecMode>(255),
+       "Unsupported execution mode for ComputeUnit"},
+  };
+  for (const auto &test_case : cases) {
+    SCOPED_TRACE(test_case.name);
+    const amdgpu::ComputeUnitCore::Config config{
+        .arch = ROCJITSU_CODE_ARCH_CDNA3,
+        .num_wf_slots = test_case.wave_slots,
+        .sgprs_per_wf = 104,
+        .vgprs_per_wf = 256,
+        .lds_size_kb = 64,
+    };
+    std::string diagnostic;
+    uint32_t deliveries = 0;
+    auto sink = [&](std::string_view message) {
+      diagnostic = message;
+      ++deliveries;
+      throw std::runtime_error("diagnostic delivery failed");
+    };
+    EXPECT_THROW((void)amdgpu::ComputeUnitCore::create("rejected", config, nullptr, nullptr,
+                                                       test_case.mode,
+                                                       util::DiagnosticEmitter(sink)),
+                 std::runtime_error);
+    EXPECT_EQ(deliveries, 1u);
+    EXPECT_EQ(diagnostic, test_case.message);
+  }
+}
+
+TEST(ComputeUnitConfigTest, ShaderEngineTranslatesRejectedConfigurationToConfigError) {
+  const amdgpu::ShaderEngine::Config config{
+      .num_compute_units = 1,
+      .compute_unit =
+          {
+              .arch = ROCJITSU_CODE_ARCH_CDNA3,
+              .num_wf_slots = 33,
+              .sgprs_per_wf = 104,
+              .vgprs_per_wf = 256,
+              .lds_size_kb = 64,
+          },
+  };
+  try {
+    amdgpu::ShaderEngine shader_engine("rejected", config, ROCJITSU_CODE_ARCH_CDNA3, nullptr,
+                                       nullptr);
+    FAIL() << "Expected rejected CU configuration to throw ConfigError";
+  } catch (const util::ConfigError &error) {
+    EXPECT_STREQ(error.what(), "Config error: num_wf_slots exceeds the ISA maximum of 32");
+  }
 }
 
 TEST(ComputeUnitConfigTest, DirectFactoryAcceptsExecutionEnabledConcreteTarget) {
@@ -611,8 +752,14 @@ TEST(ComputeUnitConfigTest, DirectFactoryRejectsTargetFromAnotherArchitecture) {
       .lds_size_kb = 64,
   };
 
-  EXPECT_THROW((void)amdgpu::ComputeUnitCore::create("cu", config, &memory, &l2),
-               util::ConfigError);
+  util::StringDiagnostic diagnostic;
+  std::unique_ptr<amdgpu::ComputeUnitCore> compute_unit;
+  EXPECT_NO_THROW(compute_unit = amdgpu::ComputeUnitCore::create("cu", config, &memory, &l2,
+                                                                 simdojo::ExecMode::FUNCTIONAL,
+                                                                 diagnostic.emitter()));
+  EXPECT_EQ(compute_unit, nullptr);
+  EXPECT_EQ(diagnostic.message(),
+            "concrete GPU target does not belong to the configured architecture");
 }
 
 enum class SubmitTrigger { DispatchBegin, AfterInstruction };
@@ -8559,8 +8706,8 @@ TEST_P(IsaTest, MfmaF16Accumulation) {
   uint32_t s1 = vb + 18;
   uint32_t s2 = vb + 256;
   uint32_t const_acc = amdgpu::ACC_FROM_VGPR;
-  amdgpu::exec_f32(*cu, 16, 16, 32, 1, 16, dst, s0, s1, s2, amdgpu::extract_f16,
-                   amdgpu::extract_f16, const_acc);
+  amdgpu::exec_f32<16, 16, 32, 1>(*cu, 16, dst, s0, s1, s2, amdgpu::extract_f16,
+                                  amdgpu::extract_f16, const_acc);
 
   // Verify: every output element should be exactly 32.0f
   float expected = 32.0f;
@@ -8611,8 +8758,8 @@ TEST_P(IsaTest, MfmaF16AccumulationPatterned) {
 
   // Execute MFMA with zero accumulator (const_acc = 0.0f)
   uint32_t dst = vb + 256;
-  amdgpu::exec_f32(*cu, 16, 16, 32, 1, 16, dst, vb + 10, vb + 18, dst, amdgpu::extract_f16,
-                   amdgpu::extract_f16, std::bit_cast<uint32_t>(0.0f));
+  amdgpu::exec_f32<16, 16, 32, 1>(*cu, 16, dst, vb + 10, vb + 18, dst, amdgpu::extract_f16,
+                                  amdgpu::extract_f16, std::bit_cast<uint32_t>(0.0f));
 
   // With const_acc=0.0, all outputs should be 32.0 (sum of 32 ones*ones)
   float expected = 32.0f;

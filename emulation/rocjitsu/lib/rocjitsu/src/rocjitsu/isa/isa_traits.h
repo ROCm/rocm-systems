@@ -126,6 +126,14 @@ template <GpuIsa Isa> inline constexpr bool supports_wave_size(uint32_t wf) {
   }
 }
 
+/// @brief Non-architected flat scratch appends a private-segment wavefront byte offset SGPR.
+/// @details The kernel also uses this offset to rebase its private buffer descriptor.
+[[nodiscard]] inline constexpr bool
+arch_appends_private_segment_wave_offset_sgpr(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+}
+
 /// @brief Return true when scalar selectors 102 and 103 name FLAT_SCRATCH.
 ///
 /// @details GFX10+ makes those selectors ordinary SGPRs. Keep both the legacy

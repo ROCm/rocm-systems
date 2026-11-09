@@ -27,6 +27,7 @@
 #include "../common/LogCapture.hpp"
 #include "ScopedHook.h"
 #include "fakes/enqueue_test_deps.h"
+#include "fakes/strongstream_stubs.h"
 
 // alloc.h first, so its macros are visible to be #undef'd before enqueue.cc's
 // transitive includes see them.
@@ -218,6 +219,16 @@ TEST_F(EnqueueMicrotest, TestBudget_BatchBytesScalesWithBatchCount) {
 TEST_F(EnqueueMicrotest, TestBudget_ZeroWorkZeroBatches_Fits) {
   auto b = MakeBudget(0, 0);
   EXPECT_TRUE(ncclTestBudget(&b, 0, 0));  // 0 + 0 <= 0
+}
+
+TEST_F(EnqueueMicrotest, KernelArgs_DefaultStorageFitsOneBatchPerChannelPlusOneP2pWork) {
+  // ROCM-33800: a 1-rank gfx1250 comm schedules a P2P round over MAXCHANNELS parts, one batch
+  // each, so that round plus its one ncclDevWorkP2p must fit an empty plan's kernel args.
+#ifdef ENABLE_WARP_SPEED
+  GTEST_SKIP() << "WARP_SPEED raises MAXCHANNELS to 512 over the same 5K args; such a round is rejected";
+#endif
+  const ssize_t inArgs = ncclMaxKernelArgsSize() - sizeof(struct ncclDevKernelArgs);
+  EXPECT_LE(ssize_t(MAXCHANNELS * kBatch + sizeof(struct ncclDevWorkP2p)), inArgs);
 }
 
 // ===========================================================================
@@ -2298,6 +2309,44 @@ TEST_F(EnqueueMicrotest, EffectiveP2pBatchEnable_MultiNodeOtherArch_IsDisabled) 
     SetBatchParam(-1);
     EXPECT_EQ(0, rcclEffectiveP2pBatchEnable(bc.get())) << "gcn=" << gcn;
   }
+}
+
+TEST_F(EnqueueMicrotest, P2pBatchEligible_Gfx942FourNode_ThresholdDefaultVersusSet) {
+  // Reaches the enqueue wrapper, which the channel.h tests do not. gfx942 leaves
+  // batching off unless RCCL_P2P_BATCH_ENABLE is set, so both cases force it on.
+  // SetParam covers one key; this case has to set the enable and the threshold.
+  constexpr ssize_t perPeer = 128 * 1024;
+  BatchComm bc(/*nNodes=*/4, "gfx942");
+  auto setEnableAndThreshold = [](int64_t threshold, bool thresholdSet) {
+    g_loadParam = [threshold, thresholdSet](const char* env, int64_t deft) {
+      if (std::strcmp(env, "RCCL_P2P_BATCH_ENABLE") == 0) return int64_t(1);
+      if (thresholdSet && std::strcmp(env, "RCCL_P2P_BATCH_THRESHOLD") == 0) return threshold;
+      return deft;
+    };
+  };
+
+  setEnableAndThreshold(/*threshold=*/-1, /*thresholdSet=*/false);
+  EXPECT_TRUE(rcclP2pBatchEligible(bc.get(), perPeer, perPeer));
+
+  setEnableAndThreshold(/*threshold=*/-1, /*thresholdSet=*/true);
+  EXPECT_TRUE(rcclP2pBatchEligible(bc.get(), perPeer, perPeer));
+
+  setEnableAndThreshold(/*threshold=*/64 * 1024, /*thresholdSet=*/true);
+  EXPECT_FALSE(rcclP2pBatchEligible(bc.get(), perPeer, perPeer));
+
+  setEnableAndThreshold(/*threshold=*/perPeer, /*thresholdSet=*/true);
+  EXPECT_TRUE(rcclP2pBatchEligible(bc.get(), perPeer, perPeer));
+}
+
+TEST_F(EnqueueMicrotest, P2pBatchEligible_Gfx950_UnsetThresholdFollowsNodeCount) {
+  // 128 KiB is above the 64 KiB arch default. Multi-node gfx950 turns batching
+  // on with the threshold left unset. BatchComm leaves nRanks at 0, so passing
+  // that instead of nNodes would fuse the 16-node case.
+  constexpr ssize_t perPeer = 128 * 1024;
+  BatchComm at16(/*nNodes=*/16, "gfx950");
+  EXPECT_FALSE(rcclP2pBatchEligible(at16.get(), perPeer, perPeer));
+  BatchComm at15(/*nNodes=*/15, "gfx950");
+  EXPECT_TRUE(rcclP2pBatchEligible(at15.get(), perPeer, perPeer));
 }
 
 // ===========================================================================
@@ -4438,6 +4487,129 @@ TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx1250Enable1AboveCap_UsesSimple) {
   EXPECT_EQ(ncclDevFuncId_P2p(false), batch->funcId);
 }
 
+static int g_planCallbackEntered;
+
+ncclResult_t ncclProfilerStartGroupEvent(struct ncclKernelPlan*) {
+  g_planCallbackEntered++;
+  return ncclSuccess;
+}
+ncclResult_t ncclProfilerStopGroupEvent(struct ncclKernelPlan*) { return ncclSuccess; }
+ncclResult_t ncclProfilerStartTaskEvents(struct ncclKernelPlan*) { return ncclSuccess; }
+ncclResult_t ncclProfilerStopTaskEvents(struct ncclKernelPlan*) { return ncclSuccess; }
+ncclResult_t ncclProfilerPostPlanWork(struct ncclComm*, struct ncclKernelPlan*) { return ncclSuccess; }
+ncclResult_t ncclProfilerAddPidToProxyOp(struct ncclProxyOp*) { return ncclSuccess; }
+const char* ncclGetErrorString(ncclResult_t) { return "ncclSuccess"; }
+
+TEST_F(EnqueueMicrotest, HostStreamPlanCallback_AbortOrRevokeReturns_DestroyStillRuns) {
+  g_planCallbackEntered = 0;
+  ncclComm comm{};
+  uint32_t abortFlag = 0;
+  comm.abortFlag = &abortFlag;
+  ncclKernelPlan plan{};
+  plan.persistent = 1;
+  plan.comm = &comm;
+
+  abortFlag = 1;
+  hostStreamPlanCallback(&plan);
+  EXPECT_EQ(0, g_planCallbackEntered);
+
+  abortFlag = 0;
+  comm.revokedFlag = 1;
+  hostStreamPlanCallback(&plan);
+  EXPECT_EQ(0, g_planCallbackEntered);
+
+  comm.revokedFlag = 0;
+  comm.destroyFlag = 1;
+  hostStreamPlanCallback(&plan);
+  EXPECT_EQ(1, g_planCallbackEntered);
+
+  ncclKernelPlan eager{};
+  eager.comm = &comm;
+  abortFlag = 1;
+  hostStreamPlanCallback(&eager);
+  EXPECT_EQ(2, g_planCallbackEntered);
+}
+
+TEST_F(EnqueueMicrotest, PersistentDestructor_LiveRef_ReclaimsAndOrphanDoesNotEnqueueAgain) {
+  ncclComm comm{};
+  ncclKernelPlan plan{};
+  ncclPersistentPlanRef ref{};
+  ref.comm = &comm;
+  ref.planHead = &plan;
+  ref.state = ncclPersistentPlanRefLive;
+  ref.refCount = 2;
+  comm.persistentPlanRefs = &ref;
+
+  persistentDestructor(&ref);
+  EXPECT_EQ(ncclPersistentPlanRefReleased, ref.state);
+  EXPECT_EQ(1, ref.refCount);
+  ncclCommCallback* cb = ncclIntruQueueMpscDequeueAll(&comm.callbackQueue, false);
+  ASSERT_NE(nullptr, cb);
+  EXPECT_EQ(&plan.reclaimer, cb);
+  EXPECT_EQ(nullptr, cb->next);
+
+  ncclCommOrphanPersistentPlans(&comm);
+  EXPECT_EQ(nullptr, ncclIntruQueueMpscDequeueAll(&comm.callbackQueue, false));
+}
+
+TEST_F(EnqueueMicrotest, PersistentDestructor_OrphanedRef_StillReclaims) {
+  ncclComm comm{};
+  ncclKernelPlan plan{};
+  ncclPersistentPlanRef ref{};
+  ref.comm = &comm;
+  ref.planHead = &plan;
+  ref.state = ncclPersistentPlanRefLive;
+  ref.refCount = 2;
+  comm.persistentPlanRefs = &ref;
+
+  ncclCommOrphanPersistentPlans(&comm);
+  EXPECT_EQ(ncclPersistentPlanRefOrphaned, ref.state);
+  EXPECT_EQ(nullptr, ncclIntruQueueMpscDequeueAll(&comm.callbackQueue, false));
+
+  persistentDestructor(&ref);
+  EXPECT_EQ(ncclPersistentPlanRefOrphaned, ref.state);
+  EXPECT_EQ(1, ref.refCount);
+  ncclCommCallback* cb = ncclIntruQueueMpscDequeueAll(&comm.callbackQueue, false);
+  ASSERT_NE(nullptr, cb);
+  EXPECT_EQ(&plan.reclaimer, cb);
+}
+
+TEST_F(EnqueueMicrotest, AddPersistentPlanRef_DropsNonLiveRefsAndKeepsLiveOnes) {
+  ncclComm comm{};
+  auto* stale = static_cast<ncclPersistentPlanRef*>(calloc(1, sizeof(ncclPersistentPlanRef)));
+  auto* live = static_cast<ncclPersistentPlanRef*>(calloc(1, sizeof(ncclPersistentPlanRef)));
+  ASSERT_NE(nullptr, stale);
+  ASSERT_NE(nullptr, live);
+  stale->state = ncclPersistentPlanRefReleased;
+  stale->refCount = 2;
+  live->state = ncclPersistentPlanRefLive;
+  live->refCount = 2;
+  live->next = stale;
+  comm.persistentPlanRefs = live;
+
+  ncclPersistentPlanRef* registered = nullptr;
+  g_cudaGraphAddDestructor = [&](ncclCudaGraph, hipHostFn_t, void* arg) {
+    registered = static_cast<ncclPersistentPlanRef*>(arg);
+    return ncclSuccess;
+  };
+
+  ncclKernelPlan plan{};
+  ASSERT_EQ(ncclSuccess, addPersistentPlanRef(&comm, ncclCudaGraph{}, &plan));
+  ASSERT_EQ(registered, comm.persistentPlanRefs);
+  EXPECT_EQ(live, registered->next);
+  EXPECT_EQ(nullptr, live->next);
+  EXPECT_EQ(1, stale->refCount);
+  EXPECT_EQ(2, live->refCount);
+  EXPECT_EQ(2, registered->refCount);
+  EXPECT_EQ(ncclPersistentPlanRefLive, registered->state);
+
+  ncclPersistentPlanRefDrop(stale);
+  ncclPersistentPlanRefDrop(live);
+  ncclPersistentPlanRefDrop(live);
+  ncclPersistentPlanRefDrop(registered);
+  ncclPersistentPlanRefDrop(registered);
+}
+
 // ===========================================================================
 // rawTaskAppend / ncclCeInitJob (the NCCL_ENQUEUE_REARCH_ENABLE=1 path), then argument validation arms.
 // ===========================================================================
@@ -5081,6 +5253,118 @@ TEST_F(EnqueueMicrotest, ScheduleP2pTasksToPlan_UnpairedSelfSendOrRecv_IsInvalid
                             : "Trying to recv to self without a matching send";
     EXPECT_TRUE(RcclUnitTesting::LogHas(log, warn)) << log;
   }
+}
+
+namespace {
+// Rank 0 of one with a grouped send+recv to itself, the world-size-1 all_to_all shape (ROCM-33800).
+struct SelfPairBudgetScene {
+  BatchPlanComm bp{/*nNodes=*/1, /*cudaArch=*/1250};
+  std::unique_ptr<ncclTopoSystem> topo{new ncclTopoSystem{}};
+  std::vector<ncclKernelPlanner::Peer> peers{1};
+  std::vector<std::remove_pointer_t<decltype(ncclComm::p2pSchedule)>> schedule{1};
+  char sendBuf[64]{};
+  char recvBuf[64]{};
+  ncclTaskP2p sendTask{};
+  ncclTaskP2p recvTask{};
+  ncclKernelPlanBudget budget{};
+
+  explicit SelfPairBudgetScene(int channelsPerPeer, bool inPlace = false) {
+    InstallSendRecvDevFuncIds();
+    ncclComm* c = bp.c();
+    c->rank = 0;
+    c->nRanks = 1;
+    c->p2pnChannels = channelsPerPeer;
+    c->p2pnChannelsPerPeer = channelsPerPeer;
+    c->p2pChunkSize = 128 << 10;
+    c->buffSizes[NCCL_PROTO_SIMPLE] = 1 << 20;
+    c->workArgsBytes = ncclMaxKernelArgsSize();
+    c->workFifoBytes = 1 << 20;
+    SetSingleGpuArch(topo.get(), "gfx1250");
+    c->topo = topo.get();
+    c->planner.peers = peers.data();
+    schedule[0] = {0, 0};
+    c->p2pSchedule = schedule.data();
+    initTask(&sendTask, ncclFuncSend, sendBuf);
+    initTask(&recvTask, ncclFuncRecv, inPlace ? sendBuf : recvBuf);
+    ncclIntruQueueEnqueue(&peers[0].sendQueue, &sendTask);
+    ncclIntruQueueEnqueue(&peers[0].recvQueue, &recvTask);
+    c->planner.nTasksP2p = 2;
+    c->planner.nTasksP2pSend = 1;
+    c->planner.nTasksP2pRecv = 1;
+    bp.p()->kernelSpecialized = true;
+    budget.inArgsBytes = c->workArgsBytes - sizeof(struct ncclDevKernelArgs);
+    budget.outArgsBytes = c->workFifoBytes / 2;
+  }
+  // Splits into one 16 KiB minimum part per channel at 256 channels; the host path never reads the buffers.
+  static constexpr size_t kBytes = 4 << 20;
+  static void initTask(ncclTaskP2p* task, ncclFunc_t func, char* buf) {
+    task->func = func;
+    task->collAPI = func;
+    task->buff = buf;
+    task->bytes = kBytes;
+  }
+  ncclResult_t Schedule(std::string* log) {
+    int epoch = 0;
+    int round = 0;
+    ncclResult_t rc = ncclSuccess;
+    *log = RcclUnitTesting::CaptureLog(
+        [&] { rc = scheduleP2pTasksToPlan(bp.c(), &epoch, &round, bp.p(), &budget); });
+    return rc;
+  }
+};
+}  // namespace
+
+TEST_F(EnqueueMicrotest, ScheduleP2pTasksToPlan_SelfPair256ChannelsDefaultArgs_SchedulesInOnePlan) {
+  SelfPairBudgetScene sc(/*channelsPerPeer=*/256);
+  std::string log;
+  ASSERT_EQ(ncclSuccess, sc.Schedule(&log)) << log;
+  EXPECT_EQ(0, sc.bp.c()->planner.nTasksP2p) << "the pair must leave the planner in this plan";
+  EXPECT_EQ(ssize_t(sizeof(struct ncclDevWorkP2p)), ssize_t(sc.bp.p()->workBytes));
+  EXPECT_EQ(256, sc.bp.p()->nWorkBatches) << "one batch per channel part";
+}
+
+TEST_F(EnqueueMicrotest, ScheduleP2pTasksToPlan_RoundDoesNotFitEmptyPlan_IsInvalidUsage) {
+  SelfPairBudgetScene sc(/*channelsPerPeer=*/256);
+  sc.budget.inArgsBytes = 255 * kBatch;  // one batch short of a full round
+  std::string log;
+  EXPECT_EQ(ncclInvalidUsage, sc.Schedule(&log));
+  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "does not fit an empty kernel plan")) << log;
+  EXPECT_EQ(2, sc.bp.c()->planner.nTasksP2p);
+}
+
+TEST_F(EnqueueMicrotest, ScheduleP2pTasksToPlan_RoundExactlyFillsEmptyPlan_Schedules) {
+  SelfPairBudgetScene sc(/*channelsPerPeer=*/256);
+  sc.budget.inArgsBytes = 256 * kBatch;  // exactly one batch per channel
+  std::string log;
+  ASSERT_EQ(ncclSuccess, sc.Schedule(&log)) << log;
+  EXPECT_EQ(0, sc.bp.c()->planner.nTasksP2p);
+  EXPECT_EQ(256, sc.bp.p()->nWorkBatches);
+}
+
+TEST_F(EnqueueMicrotest, ScheduleP2pTasksToPlan_RoundDoesNotFitPartialPlan_DefersToNextPlan) {
+  SelfPairBudgetScene sc(/*channelsPerPeer=*/256);
+  sc.bp.p()->nWorkBatches = 1;  // earlier work already in this plan
+  sc.budget.inArgsBytes = 256 * kBatch;
+  std::string log;
+  EXPECT_EQ(ncclSuccess, sc.Schedule(&log)) << log;
+  EXPECT_EQ(2, sc.bp.c()->planner.nTasksP2p) << "the round waits for a fresh plan";
+}
+
+TEST_F(EnqueueMicrotest, LaunchPrepare_P2pRoundNeverFits_ReturnsErrorInsteadOfSpinning) {
+  SelfPairBudgetScene sc(/*channelsPerPeer=*/256);
+  sc.bp.c()->workArgsBytes = sizeof(struct ncclDevKernelArgs) + 255 * kBatch;
+  ncclResult_t rc = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog([&] { rc = ncclLaunchPrepare(sc.bp.c()); });
+  EXPECT_EQ(ncclInvalidUsage, rc);
+  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "does not fit an empty kernel plan")) << log;
+}
+
+TEST_F(EnqueueMicrotest, LaunchPrepare_InPlaceSelfPairOnly_ReturnsEmptyPlanToPool) {
+  // An in-place self pair with P2P batching off is consumed without work, leaving an empty plan.
+  SelfPairBudgetScene sc(/*channelsPerPeer=*/1, /*inPlace=*/true);
+  ASSERT_EQ(ncclSuccess, ncclLaunchPrepare(sc.bp.c()));
+  EXPECT_EQ(0, sc.bp.c()->planner.nTasksP2p);
+  EXPECT_NE(nullptr, sc.bp.c()->memPool_ncclKernelPlan.head) << "the empty plan must go back to the pool";
 }
 
 // ===========================================================================
