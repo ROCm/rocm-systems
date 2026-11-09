@@ -41,7 +41,7 @@ Memory chart - GL2 cache
 GL2 cache panel
 ===============
 
-The GL2 Cache panel (panel 1300) has tables for GL2C utilization, GL2C cache lookup,
-and GL2C-EA DRAM bandwidth. The gfx1201 metrics in this panel have no descriptions
+The GL2 Cache (L2) panel (panel 1300) has tables for request statistics, cache
+performance, and bandwidth. The gfx1201 metrics in this panel have no descriptions
 yet, so this section has no metric tables. Run ``rocprof-compute analyze`` with
 ``--block 13`` to show the panel.

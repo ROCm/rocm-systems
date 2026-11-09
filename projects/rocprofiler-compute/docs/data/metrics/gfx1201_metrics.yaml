@@ -3,7 +3,7 @@ System Speed-of-Light:
     rst: Floating-point operations per second on the VALU, excluding WMMA instructions already counted in SQ_INSTS_VALU, times the wavefront size. Peak is FP32 FMA single-issue (128 FLOPs/CU/cycle). VOPD dual-issue can exceed it.
     unit: GFLOP/s
   WMMA FLOPs (F16->F32 16x16x16):
-    rst: Matrix FLOPs per second, counting 8192 FLOPs per vec32 WMMA instruction. The counter increments once per vec32, so a wave64 WMMA counts twice. Peak is 1024 FLOPs/CU/cycle, the published dense FP16 rate of Navi 48.
+    rst: Matrix FLOPs per second, counting 8192 FLOPs per vec32 WMMA instruction. The counter increments once per vec32, so a wave64 WMMA counts twice. It does not separate FP16, BF16, FP8, and BF8. Peak is 1024 FLOPs/CU/cycle, the published dense FP16 rate of Navi 48. The BF8 roof is the measured V_WMMA_F32_16X16X16_BF8_BF8 rate.
     unit: GFLOP/s
   VALU FLOPs (F64):
     rst: 64-bit floating-point operations per second on the VALU. Peak is 4 FLOPs/CU/cycle, 1/32 of the FP32 FMA rate.
@@ -112,7 +112,7 @@ Memory chart - GL0-GL1 Interface:
   GL0-GL1 Write Requests:
     rst: Write requests the vector L0 cache sent to GL1. The counters give no write size.
     unit: Requests per Normalization Unit
-Memory chart - GLARB (GL1-GL2 Arbiter):
+Memory chart - GL1 Cache (L1):
   GL1 Utilization:
     rst: Percentage of GL1 cycles with a request pending. GL1 is a write-combining cache between the WGPs and L2.
     unit: Percent
@@ -125,6 +125,7 @@ Memory chart - GLARB (GL1-GL2 Arbiter):
   GL1 Buffer Full Stall Rate:
     rst: Percentage of GL1 cycles stalled because no buffer entry was free.
     unit: Percent
+Memory chart - GL1-GL2 Interface:
   GL1-GL2 Read Bandwidth:
     rst: Bytes L2 returned to GL1, from the physical 32-byte beats returned.
     unit: Bytes/s
@@ -181,7 +182,7 @@ Roofline Performance Rates:
     rst: Floating-point operations per second on the VALU, excluding WMMA instructions. Uses the aggregate VALU instruction counter, so it is an estimate rather than a precision-specific FLOP count.
     unit: GFLOP/s
   WMMA FLOPs (F16->F32):
-    rst: Matrix operations per second at 8192 FLOPs per 16x16x16 WMMA instruction. The counter does not separate FP16, BF16, and FP8; the peak is the measured FP16 WMMA rate.
+    rst: Matrix operations per second at 8192 FLOPs per 16x16x16 WMMA instruction. The counter does not separate FP16, BF16, FP8, and BF8. The peak is the measured FP16 WMMA rate. BF8 has its own measured roof, V_WMMA_F32_16X16X16_BF8_BF8, at the same 8192 FLOPs per instruction.
     unit: GFLOP/s
   VALU FLOPs (F64):
     rst: 64-bit floating-point operations per second on the VALU.

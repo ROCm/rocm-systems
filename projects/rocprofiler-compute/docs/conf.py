@@ -195,7 +195,10 @@ rdna4_gfx1201_section_map = {
     "rdna4-memory-chart-gl0-gl1-interface-gfx1201": (
         "Memory chart - GL0-GL1 Interface"
     ),
-    "rdna4-memory-chart-glarb-gfx1201": "Memory chart - GLARB (GL1-GL2 Arbiter)",
+    "rdna4-memory-chart-gl1-cache-gfx1201": "Memory chart - GL1 Cache (L1)",
+    "rdna4-memory-chart-gl1-gl2-interface-gfx1201": (
+        "Memory chart - GL1-GL2 Interface"
+    ),
     "rdna4-memory-chart-gl2-cache-gfx1201": "Memory chart - GL2 Cache (L2)",
     "rdna4-memory-chart-ea-to-dram-gfx1201": "Memory chart - EA to DRAM",
     "rdna4-memory-chart-wgps-gfx1201": "Memory chart - Workgroup Processors (WGPs)",

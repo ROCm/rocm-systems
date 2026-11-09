@@ -15,7 +15,7 @@ two L0 read/write caches per WGP. Hardware counters keep the ``TCP_*`` prefix on
 Each WGP also has a 128 KB Local Data Share (LDS) with 64 banks. A workgroup can
 allocate up to 64 KB of LDS.
 
-For the GL1 write-combining cache and the GL1-GL2 arbiter, see :doc:`gl1-cache`.
+For the GL1 write-combining cache and the GL1-GL2 interface, see :doc:`gl1-cache`.
 The handoff toward GL2 is under :doc:`gl2-cache`.
 
 .. note::
@@ -65,7 +65,7 @@ Memory chart - GL0-GL1 interface
 GL0 cache and LDS panel
 =======================
 
-The GL0 Cache and LDS panel (panel 900) has tables for WGP cache utilization, GL0
-requests and lookups, and GL0-GL1 interface requests, bandwidth, and stalls. The
+The GL0 Cache (TCP Cache) panel (panel 900) has tables for GL0 utilization,
+requests, cache performance, the GL0-GL1 interface, and GL0 stalls. The
 gfx1201 metrics in this panel have no descriptions yet, so this section has no metric
 tables. Run ``rocprof-compute analyze`` with ``--block 9`` to show the panel.

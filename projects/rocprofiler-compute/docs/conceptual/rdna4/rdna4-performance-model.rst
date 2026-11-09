@@ -58,7 +58,7 @@ On Navi 48, the gfx1201 analysis panels follow this path:
 
 * GL0, the vector L0 cache (TCP), and the LDS inside each WGP.
 
-* The GL1 write-combining cache, then the GL1-GL2 arbiter (GLARB) and the 8 MB GL2.
+* The GL1 write-combining cache, then the GL1-GL2 interface and the 8 MB GL2.
 
 * The Efficiency Arbiter (EA) after GL2.
 
@@ -66,31 +66,20 @@ On Navi 48, the gfx1201 analysis panels follow this path:
   The tool calls the device memory DRAM and the Infinity Cache roof MALL.
 
 The Memory Chart panel walks the on-chip path: instruction and scalar data caches,
-GL0, LDS, the GL0-GL1 interface, GLARB, GL2, and EA to DRAM. It has no MALL table.
+GL0, LDS, the GL0-GL1 interface, the GL1 cache, the GL1-GL2 interface, GL2, and EA
+to DRAM. It has no MALL table.
 
 No gfx1201 counter separates MALL hits from DRAM traffic. Requests that
 GL2 sends to EA for DRAM can be served by MALL, so a DRAM-destined
 bandwidth can exceed the 640 GB/s DRAM peak.
 
-The gfx1201 analysis configuration also has panels for blocks that the RDNA3.5
-chapters do not cover. These panels have no chapter in this guide. Every table
-in the panels below is empty:
+The gfx1201 panel set follows the RDNA3.5 panels. The texture addresser stays TA
+and the texture data return stays TD, the same block names as RDNA3.5. TA Busy is
+on the GRBM Shader Engine Utilization table. gfx1201 does not add TXA, TXD, GLARB,
+Central Hub, or UTCL1 panels.
 
-* GL0 Texture Addresser (TXA, panel 800) and GL0 Texture Data (TXD, panel 1000).
-  TXA's tables are shader-to-TXA requests for LDS, VMEM, and other memory
-  operations, the TXA-VMW interface, and LDS and GL0 data bandwidth. TXD has one
-  table, TXD Utilization. The WGP panel's WGP-TXA Interface and WGP-TXD Interface
-  tables are empty too.
-
-* GLARB (Graphics Level Arbiter, panel 1200), including its GLARBC-GL2 Interface
-  table. GL1-to-GL2 numbers are elsewhere: the Memory Chart table "GLARB
-  (GL1-GL2 Arbiter)" and the GL1 panel's GL1C-GLARB Interface table. See
-  :doc:`gl1-cache`.
-
-* Central Hub (CH, panel 1500). Its CHA and CHC tables are empty.
-
-* UTCL1 (Translation Cache L1, panel 1600). The GL0 panel's UTCL0-UTCL1 Interface
-  table is empty too.
+What gfx1201 adds on top of that layout is the MALL roof, FP8 and BF8 WMMA roofs,
+and DRAM in place of the RDNA3.5 system-memory path.
 
 Workgroups and execution
 ==============================
@@ -123,7 +112,7 @@ Within each shader engine, gfx1201 metric tables are grouped under:
 
 * :doc:`gl0-cache`: Vector L0 cache (TCP) and LDS, through the GL0-GL1 interface.
 
-* :doc:`gl1-cache`: The GL1 write-combining cache and the GL1-GL2 arbiter (GLARB).
+* :doc:`gl1-cache`: The GL1 write-combining cache and the GL1-GL2 interface.
 
 For more details, see :doc:`shader-engine`.
 

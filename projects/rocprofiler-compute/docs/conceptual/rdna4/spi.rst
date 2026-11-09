@@ -12,11 +12,9 @@ The Shader Processor Input (SPI) is the RDNA front-end unit that accepts dispatc
 
 On gfx1201, the Workgroup Manager (SPI) panel (panel 600) has these tables:
 
-* Utilization
+* SPI Utilization
 
-* Wavefront Dispatch
-
-* Resource Allocation and CPC-SPI Interface, which have no metrics yet
+* Wave Dispatch Statistics
 
 The gfx1201 SPI metrics have no descriptions yet, so this page has no metric tables.
 Run ``rocprof-compute analyze`` with ``--block 6`` to show the panel.

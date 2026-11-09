@@ -30,6 +30,8 @@ Roofline
 
 The roofline peaks are measured on the GPU by the gfx1201 micro-benchmarks. The
 bandwidth roofs are DRAM, MALL (the 64 MB Infinity Cache), GL2, the GL1 write-combining cache, GL0, and LDS.
+The matrix roofs are FP8, BF8, FP16, and BF16. BF8 is ``V_WMMA_F32_16X16X16_BF8_BF8``,
+the same 16x16x16 shape as FP8, so it counts 8192 FLOPs per instruction.
 No counter separates MALL hits from DRAM traffic, so the DRAM-destined traffic is drawn
 against both the DRAM roof and the MALL roof.
 
@@ -102,7 +104,7 @@ WGP block panel
 
 The Workgroup Processor (WGP) panel (panel 700) has tables for utilization,
 wavefront launch, dispatch, and life, the wavefront, VMEM, LDS, and VALU instruction
-mixes, WMMA FLOPs and IOPs counting, instruction issue stalls, and the instruction
+mixes, WMMA FLOPs and IOPs counting, wait state analysis, and the instruction
 and scalar data caches. The gfx1201 WGP metrics have no descriptions yet, so this
 section has no metric tables. Run ``rocprof-compute analyze`` with ``--block 7`` to
 show the panel.

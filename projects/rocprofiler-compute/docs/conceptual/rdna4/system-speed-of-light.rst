@@ -29,7 +29,7 @@ peak rates here as approximations. The ``VALU FLOPs (FP32)`` row scales as
 
 The ``WMMA FLOPs`` row counts 8192 FLOPs per WMMA instruction, the work of one
 16x16x16 multiply-accumulate. The counter increments once per vec32, so a wave64
-WMMA counts twice. The counter does not separate FP16, BF16, and FP8 WMMA.
+WMMA counts twice. The counter does not separate FP16, BF16, FP8, and BF8 WMMA.
 
 .. _rdna4-dual-issue-valu:
 

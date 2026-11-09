@@ -22,7 +22,7 @@ Follow the nested sections under Shader engine in the navigation for gfx1201 met
 
 * :doc:`gl0-cache`: The vector L0 cache (TCP) and LDS, through the GL0-GL1 interface.
 
-* :doc:`gl1-cache`: The GL1 write-combining cache and the GL1-GL2 arbiter (GLARB).
+* :doc:`gl1-cache`: The GL1 write-combining cache and the GL1-GL2 interface.
 
 GPU-wide utilization summarized through GRBM is documented separately; see :doc:`grbm`.
 
