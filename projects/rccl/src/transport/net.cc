@@ -828,6 +828,10 @@ static ncclResult_t recvConnect(struct ncclComm* comm, struct ncclConnect* conne
   }
 
   for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) recv->conn.buffs[p] = NCCL_NET_MAP_GET_POINTER(map, gpu, buffs[p]);
+  // See p2pRecvConnect: a free NaN-protocol slot must hold the sentinel.
+  if (recv->conn.buffs[NCCL_PROTO_NAN] != nullptr && comm->buffSizes[NCCL_PROTO_NAN] > 0) {
+    NCCLCHECK(ncclCudaMemsetSync(recv->conn.buffs[NCCL_PROTO_NAN], 0xFF, comm->buffSizes[NCCL_PROTO_NAN]));
+  }
 
   if (recv->proxyConn.sameProcess) {
     if (recv->proxyConn.connection->netDeviceHandle) {

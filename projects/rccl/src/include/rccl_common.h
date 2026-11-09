@@ -52,9 +52,9 @@ static inline bool rcclNanProtoForced() {
   return proto != nullptr && strcmp(proto, "NaN") == 0;
 }
 
-// Intra-node, more than one rank, float dtype, and the user named NaN.
-static inline bool rcclNanProtoForcedFor(int nNodes, int nRanks, ncclDataType_t datatype) {
-  return nNodes == 1 && nRanks > 1 && rcclNanProtoForced() && rcclNanProtoDtype(datatype);
+// More than one rank, float dtype, and the user named NaN.
+static inline bool rcclNanProtoForcedFor(int nRanks, ncclDataType_t datatype) {
+  return nRanks > 1 && rcclNanProtoForced() && rcclNanProtoDtype(datatype);
 }
 
 // Collectives with a NaN kernel: AllReduce (ring and tree), ring AllGather and
@@ -76,8 +76,7 @@ static inline bool rcclNanProtoFunc(ncclFunc_t func) {
 }
 
 // NCCL_PROTO=NaN forces NaN only where a NaN kernel can run; everything else
-// (other collectives, other dtypes, multi-node comms) keeps the default protocol
-// set. So the protocol tuners parse NCCL_PROTO only when it names something else.
+// (other collectives, other dtypes) keeps the default protocol set. So the protocol tuners parse NCCL_PROTO only when it names something else.
 static inline const char* rcclTunerProtoEnv() {
   return rcclNanProtoForced() ? nullptr : ncclGetEnv("NCCL_PROTO");
 }
@@ -85,9 +84,9 @@ static inline const char* rcclTunerProtoEnv() {
 // Whether NCCL_PROTO decides this collective's protocol: the user named a
 // protocol list, or NCCL_PROTO=NaN and a NaN kernel serves it. Heuristics that
 // hardcode a protocol must stand down when it does.
-static inline bool rcclProtoPinned(int nNodes, int nRanks, ncclFunc_t func, ncclDataType_t datatype) {
+static inline bool rcclProtoPinned(int nRanks, ncclFunc_t func, ncclDataType_t datatype) {
   static const bool named = rcclTunerProtoEnv() != nullptr;
-  return named || (rcclNanProtoForcedFor(nNodes, nRanks, datatype) && rcclNanProtoFunc(func));
+  return named || (rcclNanProtoForcedFor(nRanks, datatype) && rcclNanProtoFunc(func));
 }
 
 typedef enum RcclTunableColls {

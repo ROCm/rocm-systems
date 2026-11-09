@@ -246,7 +246,7 @@ void rcclUpdateCollectiveAlgorithm(struct ncclComm* comm, size_t nBytes, struct 
                                    float table[][NCCL_NUM_PROTOCOLS]) {
   // With NCCL_PROTO set, rcclUpdateCollectiveProtocol leaves the protocol alone, so a
   // switch to Tree would keep the protocol picked for Ring.
-  if (rcclNcclAlgoEnvIsSet() || rcclProtoPinned(comm->nNodes, comm->nRanks, info->func, info->datatype)) return;
+  if (rcclNcclAlgoEnvIsSet() || rcclProtoPinned(comm->nRanks, info->func, info->datatype)) return;
   if (info->func != ncclFuncAllReduce || info->algorithm != NCCL_ALGO_RING) return;
   const rcclArchThresholds* t = rcclRingTreeTable(comm, /*rankScaled=*/true);
   if (t == nullptr || t->arTreeMaxPerRank == 0 || nBytes > (uint64_t)comm->nRanks * t->arTreeMaxPerRank) return;
@@ -266,7 +266,7 @@ static bool rcclRemoteFlushTuned(struct ncclComm* comm) {
 
 void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, struct ncclTaskColl* info) {
   // Honor user input for protocol choice
-  const bool userProtocolInput = rcclProtoPinned(comm->nNodes, comm->nRanks, info->func, info->datatype);
+  const bool userProtocolInput = rcclProtoPinned(comm->nRanks, info->func, info->datatype);
   size_t sizePerRank = rcclGetSizePerRank(info->func, nBytes, comm->nRanks);
 
   // Broadcast on a table with total-byte ceilings (gfx1250 DPX). NCCL_PROTO still wins.
@@ -743,7 +743,7 @@ ncclResult_t rcclHierarchicalAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, ui
   size_t intraCount = count * nNodes;
   size_t intraMsgSize = intraCount * ncclTypeSize(dataType) * intraComm->nRanks;
   if (isAllGather && rcclUseAllGatherDirect(intraComm, intraMsgSize)) {
-    intraProto = rcclNanProtoForcedFor(intraComm->nNodes, intraComm->nRanks, dataType) ? NCCL_PROTO_NAN : NCCL_PROTO_SIMPLE;
+    intraProto = rcclNanProtoForcedFor(intraComm->nRanks, dataType) ? NCCL_PROTO_NAN : NCCL_PROTO_SIMPLE;
     intraChan = intraComm->p2pnChannels;
   } else {
     struct ncclTaskColl task = {};
@@ -776,7 +776,7 @@ ncclResult_t rcclGetAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t co
   }
   if (coll == ncclFuncAllGather && rcclUseAllGatherDirect(comm, msgSize)) {
     *algo = rcclAddonAlgos_t::RCCL_DIRECT_ALLGATHER;
-    *protocol = rcclNanProtoForcedFor(comm->nNodes, comm->nRanks, dataType) ? NCCL_PROTO_NAN : NCCL_PROTO_SIMPLE;
+    *protocol = rcclNanProtoForcedFor(comm->nRanks, dataType) ? NCCL_PROTO_NAN : NCCL_PROTO_SIMPLE;
     *maxChannels = comm->p2pnChannels;
     return ncclSuccess;
   }
@@ -785,7 +785,7 @@ ncclResult_t rcclGetAlgoInfo(struct ncclComm* comm, ncclFunc_t coll, uint64_t co
   // answer (DDA / CE / pivot for these operands) comes from rcclGetCollImplInfo().
   if (coll == ncclFuncAlltoAll) {
     *algo = rcclAddonAlgos_t::RCCL_DIRECT_ALLTOALL;
-    *protocol = rcclNanProtoForcedFor(comm->nNodes, comm->nRanks, dataType) ? NCCL_PROTO_NAN : NCCL_PROTO_SIMPLE;
+    *protocol = rcclNanProtoForcedFor(comm->nRanks, dataType) ? NCCL_PROTO_NAN : NCCL_PROTO_SIMPLE;
     *maxChannels = comm->p2pnChannels;
     return ncclSuccess;
   }
@@ -1917,7 +1917,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   const size_t msgBytes = count * ncclTypeSize(datatype);
   // Under NCCL_PROTO=NaN only ring and tree have a NaN-flag variant, so the
   // GIN, symmetric, CE and DDA backends are skipped.
-  const bool nanForced = rcclNanProtoForcedFor(comm->nNodes, comm->nRanks, datatype);
+  const bool nanForced = rcclNanProtoForcedFor(comm->nRanks, datatype);
   if (!rcclNcclAlgoEnvIsSet() && !nanForced) {
   #if defined(ENABLE_ROCSHMEM_GIN)
     // GIN-SDMA scaleup AllReduce. Same gates as the previous early return in
@@ -2281,7 +2281,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
   // Under NCCL_PROTO=NaN only ring and Direct have a NaN-flag variant, so the
   // DDA, CE and symmetric backends are skipped. Hierarchical AllGather is
   // multi-node, where this is false.
-  const bool nanForced = rcclNanProtoForcedFor(comm->nNodes, comm->nRanks, datatype);
+  const bool nanForced = rcclNanProtoForcedFor(comm->nRanks, datatype);
   if (!rcclNcclAlgoEnvIsSet() && !nanForced) {
     // Window registration type is needed for both symSuppressedByMax and CE
     // branch gates below; hoist the lookup here so it is computed once.
@@ -2410,7 +2410,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
         size_t intraMsgSize = intraCount * typeSize * intraComm->nRanks;
         if (rcclUseAllGatherDirect(intraComm, intraMsgSize)) {
           intraProto =
-            rcclNanProtoForcedFor(intraComm->nNodes, intraComm->nRanks, datatype) ? NCCL_PROTO_NAN : NCCL_PROTO_SIMPLE;
+            rcclNanProtoForcedFor(intraComm->nRanks, datatype) ? NCCL_PROTO_NAN : NCCL_PROTO_SIMPLE;
           intraChan = intraComm->p2pnChannels;
         } else {
           // Zero-initialized: getAlgoInfo now reads task.algMask/forceAlgSelection.
@@ -2579,7 +2579,7 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
   // Under NCCL_PROTO=NaN only ring has a NaN-flag variant, so the symmetric, DDA
   // and CE backends are skipped. Hierarchical and Direct ReduceScatter are
   // multi-node, where this is false.
-  const bool nanForced = rcclNanProtoForcedFor(comm->nNodes, comm->nRanks, datatype);
+  const bool nanForced = rcclNanProtoForcedFor(comm->nRanks, datatype);
   if (!rcclNcclAlgoEnvIsSet() && !nanForced) {
     // (1) Symmetric eligibility (sum/avg). Reported last but gates DDA / hierarchical / Direct here.
     // symMinR2: below this threshold DDA beats symk for R2 buffers -- suppress symk so DDA wins.
@@ -2791,7 +2791,7 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
 
   // Under NCCL_PROTO=NaN AlltoAll is per-peer Send/Recv on the NaN-flag protocol:
   // pivot, GDA, GIN, symmetric, DDA and CE have no NaN variant.
-  if (rcclNanProtoForcedFor(comm->nNodes, comm->nRanks, datatype)) {
+  if (rcclNanProtoForcedFor(comm->nRanks, datatype)) {
     decision->algo = RCCL_DIRECT_ALLTOALL;
     decision->protocol = NCCL_PROTO_NAN;
     decision->nMaxChannels = comm->p2pnChannels;

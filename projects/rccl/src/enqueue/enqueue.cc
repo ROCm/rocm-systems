@@ -3119,7 +3119,7 @@ static void initCollCostTable(float** collCostTable) {
 // ring AllGather and ReduceScatter. AlltoAll takes it on the send/recv path
 // (addP2pToPlan). Everything else keeps the default protocol set.
 static bool nanProtoOnly(struct ncclComm* comm, struct ncclTaskColl* info) {
-  return rcclNanProtoForcedFor(comm->nNodes, comm->nRanks, info->datatype) && rcclNanProtoFunc(info->func);
+  return rcclNanProtoForcedFor(comm->nRanks, info->datatype) && rcclNanProtoFunc(info->func);
 }
 
 // numPipeOps: number of pipelined ops. Can be greater than 1 in aggregation mode. Used to adjust latency.
@@ -3380,7 +3380,7 @@ static ncclResult_t topoGetAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* 
 #endif
   if (info->func == ncclFuncAllReduce && comm->topo->pivotA2ANumBiRings == 3) {
     static const bool userAlgoTune = getenv("NCCL_ALGO") != nullptr;
-    const bool userTuneInput = userAlgoTune || rcclProtoPinned(comm->nNodes, comm->nRanks, info->func, info->datatype);
+    const bool userTuneInput = userAlgoTune || rcclProtoPinned(comm->nRanks, info->func, info->datatype);
     info->nMaxChannels = nc;
     if (!userTuneInput) {
       // always respect user settings
@@ -3503,7 +3503,7 @@ rccl_static ncclResult_t getAlgoInfo(struct ncclComm* comm, struct ncclTaskColl*
     size_t sizePerRank = rcclGetSizePerRank(info->func, nBytes, comm->nRanks);
     // This hardcode names a protocol, so it has to stand down when the caller
     // named one too -- otherwise NCCL_PROTO=<x> silently lands on Tree/LL here.
-    const bool userProtoInput = rcclProtoPinned(comm->nNodes, comm->nRanks, info->func, info->datatype);
+    const bool userProtoInput = rcclProtoPinned(comm->nRanks, info->func, info->datatype);
     if (!userAlgoInput && !userProtoInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") &&
         comm->nNodes == 1 && (info->func == ncclFuncAllReduce) && sizePerRank >= 64 && sizePerRank <= 262144) {
       info->algorithm = NCCL_ALGO_TREE;
@@ -4264,7 +4264,7 @@ static ncclResult_t collTaskAppend(struct ncclComm* comm, struct ncclInfo* info,
     // so keep the original dtype only where NaN is the protocol that will run;
     // elsewhere (multi-node) an int8-only kernel would be looked up as float.
     if ((t->func == ncclFuncAllGather &&
-         !rcclNanProtoForcedFor(comm->nNodes, comm->nRanks, t->datatype)) ||
+         !rcclNanProtoForcedFor(comm->nRanks, t->datatype)) ||
         t->func == ncclFuncBroadcast || t->func == ncclFuncAlltoAllPivot || t->func == ncclFuncAlltoAllGda ||
         t->func == ncclFuncAlltoAllvGda) {
       t->count *= elementSize;
