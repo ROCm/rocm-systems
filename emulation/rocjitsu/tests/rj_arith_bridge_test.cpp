@@ -1367,6 +1367,9 @@ TEST(ArithBridgeTest, DoubleUnaryEncodingsPairAliasesAndState) {
   struct Case {
     uint16_t op3[2], op4[2];
     double result;
+    // Compatibility selects the TRANS-unit model for RCP/RSQ/SQRT; nonzero
+    // encodings are the gfx1201/gfx1100 results for 1.5.
+    uint64_t compatibility = 0;
   };
   const Case cases[] = {
       {{rdna3::kVTruncF64Vop1, rdna3::kVTruncF64Vop3},
@@ -1389,13 +1392,16 @@ TEST(ArithBridgeTest, DoubleUnaryEncodingsPairAliasesAndState) {
        0.75},
       {{rdna3::kVRcpF64Vop1, rdna3::kVRcpF64Vop3},
        {rdna4::kVRcpF64Vop1, rdna4::kVRcpF64Vop3},
-       1.0 / 1.5},
+       1.0 / 1.5,
+       0x3fe5555554000000ULL},
       {{rdna3::kVRsqF64Vop1, rdna3::kVRsqF64Vop3},
        {rdna4::kVRsqF64Vop1, rdna4::kVRsqF64Vop3},
-       1.0 / std::sqrt(1.5)},
+       1.0 / std::sqrt(1.5),
+       0x3fea20bd74000000ULL},
       {{rdna3::kVSqrtF64Vop1, rdna3::kVSqrtF64Vop3},
        {rdna4::kVSqrtF64Vop1, rdna4::kVSqrtF64Vop3},
-       std::sqrt(1.5)},
+       std::sqrt(1.5),
+       0x3ff3988e14000000ULL},
   };
   for (bool rdna3 : {false, true})
     for (unsigned lanes : {32u, 64u})
@@ -1444,12 +1450,18 @@ TEST(ArithBridgeTest, DoubleUnaryEncodingsPairAliasesAndState) {
               }
               EXPECT_EQ(written[0], rejected ? 0 : exec_mask);
               EXPECT_EQ(written[1], rejected ? 0 : exec_mask);
-              const double result = test.result * (vop3 && (!rdna3 || !(guest & 1)) ? 2 : 1);
+              const bool doubled = vop3 && (!rdna3 || !(guest & 1));
+              const double result = test.result * (doubled ? 2 : 1);
               for (unsigned lane = 0; lane < lanes; ++lane) {
                 const uint64_t actual =
                     fixture.cu->read_vgpr(fixture.base(), lane) |
                     (uint64_t(fixture.cu->read_vgpr(fixture.base() + 1, lane)) << 32);
-                const double expected = !rejected && ((exec_mask >> lane) & 1) ? result : 1.5;
+                const bool written = !rejected && ((exec_mask >> lane) & 1);
+                if (written && test.compatibility && policy_index == 0) {
+                  EXPECT_EQ(actual, test.compatibility + (doubled ? 1ULL << 52 : 0));
+                  continue;
+                }
+                const double expected = written ? result : 1.5;
                 EXPECT_NEAR(std::bit_cast<double>(actual), expected,
                             1e-12 + 1e-12 * std::abs(expected));
               }
