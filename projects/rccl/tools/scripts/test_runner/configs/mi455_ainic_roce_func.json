@@ -2572,6 +2572,11 @@
           "test_filter": "Register.ProcessIsolatedRegisterTests"
         },
         {
+          "name": "Register.P2pIpcSegmentReuse",
+          "description": "Verify a reused P2P IPC registration stays in bounds when the registered buffer spans multiple cuMem segments",
+          "test_filter": "Register.P2pIpcSegmentReuse"
+        },
+        {
           "name": "SendRecv.SinglePairs",
           "description": "SendRecv single pairs",
           "test_filter": "SendRecv.SinglePairs"
@@ -2580,6 +2585,11 @@
           "name": "SendRecv.UserBufferRegister",
           "description": "SendRecv user buffer register",
           "test_filter": "SendRecv.UserBufferRegister"
+        },
+        {
+          "name": "SendRecv.SingleRankGroupedSendRecvToSelf",
+          "description": "1-rank grouped send/recv to self, default env and forced 256 P2P channels per peer",
+          "test_filter": "SendRecv.SingleRankGroupedSendRecvToSelf"
         },
         {
           "name": "GroupCall.Identical",
