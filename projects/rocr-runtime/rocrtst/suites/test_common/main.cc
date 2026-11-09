@@ -762,6 +762,7 @@ TEST(rocrtstFunc, AgentPropertiesTests) {
     if (!RunCustomTestProlog(&propTest)) return;
     propTest.QueryAgentUUID();
     propTest.QueryAgentClockCounters();
+    propTest.QueryGpuShaderEngineTopology();
     RunCustomTestEpilog(&propTest);
 }
 

@@ -80,6 +80,10 @@ class AgentPropTest : public TestBase {
   // @Brief: Query Clock Counter property of agents of a ROCm platform
   void QueryAgentClockCounters();
 
+  // @Brief: A GPU with no shader engines, no SIMDs per CU, or no CU in a
+  // shader engine is an invalid topology. Cluster limits use that topology.
+  void QueryGpuShaderEngineTopology();
+
  private:
   // Capture value for all agents on system
   std::vector<std::string> propList_;
