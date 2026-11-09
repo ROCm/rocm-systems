@@ -308,4 +308,23 @@ TEST_F(SymModelTdmReachableTest, DefaultParam_OneSidedRegistration_TmaValidOnlyO
   }
 }
 
+TEST_F(SymModelTdmTest, AgHierCtas_SymCtasCannotExceedTheDefaultCap) {
+  g_loadParam = ParamOverride({{"SYM_CTAS", 96}});
+  EXPECT_EQ(ncclSymkModelCtasEnvOverride(ncclSymkKernelId_AllGather_HierLsaST), ncclSymkAgHierMaxBlocks);
+  EXPECT_EQ(ncclSymkModelCtasEnvOverride(ncclSymkKernelId_AllGather_ST), ncclSymkMaxBlocks);
+}
+
+TEST_F(SymModelTdmTest, AgHierCtas_EnvSetsTheCountAboveTheDefaultCap) {
+  g_loadParam = ParamOverride({{"SYM_AG_HIER_CTAS", 96}});
+  EXPECT_EQ(ncclSymkModelCtasEnvOverride(ncclSymkKernelId_AllGather_HierLsaST), 96);
+  EXPECT_EQ(ncclSymkModelCtasEnvOverride(ncclSymkKernelId_AllGather_ST), 0);
+}
+
+TEST_F(SymModelTdmTest, AgHierCtas_SymCtasReducesFromTheOverriddenCap) {
+  g_loadParam = ParamOverride({{"SYM_AG_HIER_CTAS", 96}, {"SYM_CTAS", 40}});
+  EXPECT_EQ(ncclSymkModelCtasEnvOverride(ncclSymkKernelId_AllGather_HierLsaST), 40);
+  g_loadParam = ParamOverride({{"SYM_AG_HIER_CTAS", 96}, {"SYM_CTAS", 128}});
+  EXPECT_EQ(ncclSymkModelCtasEnvOverride(ncclSymkKernelId_AllGather_HierLsaST), 96);
+}
+
 }  // namespace

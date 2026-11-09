@@ -27,7 +27,7 @@ static int maxBlocksLsa(struct ncclComm* comm, enum ncclSymkKernelId kernelId) {
     return ncclSymkIsGfx950(comm) ? std::min(ncclSymkMaxBlocks, 24) : ncclSymkMaxBlocks;
 #endif
   case ncclSymkKernelId_AllGather_HierLsaST:
-    return ncclSymkAgHierMaxBlocks;
+    return ncclSymkAgHierMaxBlocksLimit();
   default:
     return ncclSymkMaxBlocks;
   }

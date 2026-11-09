@@ -317,13 +317,10 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_TmaST(ncclSymkDevWorkArgs 
   ncclSymkRun_AllGather_ST_impl<EnableProfiler, /*EnableTma=*/true>(args);
 }
 
-// Largest chunk a block pushes.
-static constexpr size_t ncclSymkAgHierMaxChunkBytes = 256 << 10;
-
 static __device__ void agHierPush(ncclSymkArgsHandler const& handler, ncclLsaBarrierSession<ncclCoopCta>& bar,
                                   int block, int nBlocks, ncclTeam scaleIn, ncclTeam scaleUp,
                                   ncclDevResourceHandle flagsBuf, uint64_t& seq, size_t nElts, size_t nAllElts,
-                                  ncclSymPtr<char> input, ncclSymPtr<char> output) {
+                                  ncclSymPtr<char> input, ncclSymPtr<char> output, size_t maxChunkBytes) {
   int const& rank = handler.comm.rank;
   int lane = threadIdx.x % WARP_SIZE;
   int warp = threadIdx.x / WARP_SIZE;
@@ -344,10 +341,10 @@ static __device__ void agHierPush(ncclSymkArgsHandler const& handler, ncclLsaBar
   int tn = nHalfWarps * WARP_SIZE;
   ncclCoopWarpSpan half{/*warp0=*/pusher ? 0 : nHalfWarps, /*nWarps=*/nHalfWarps, /*id=*/pusher ? 0 : 1};
 
-  // Every block of a group pushes the same number of chunks of up to ncclSymkAgHierMaxChunkBytes, each a
+  // Every block of a group pushes the same number of chunks of up to maxChunkBytes, each a
   // multiple of ncclSymkBytePerChunk per warp, so bcast()'s 16-byte tier copies it all, split evenly.
   size_t chunkAlign = size_t(nHalfWarps) * ncclSymkBytePerChunk;
-  size_t nBlockChunksMax = max(size_t(1), divUp(divUp(nElts, size_t(nGroupBlocks)), ncclSymkAgHierMaxChunkBytes));
+  size_t nBlockChunksMax = max(size_t(1), divUp(divUp(nElts, size_t(nGroupBlocks)), maxChunkBytes));
   size_t chunkBytes = roundUp(divUp(nElts, nBlockChunksMax * nGroupBlocks), chunkAlign);
   size_t nChunks = chunkBytes == 0 ? 0 : divUp(nElts, chunkBytes);
   size_t flagRow = size_t(blockIdx.x) * nGroups;
@@ -426,10 +423,12 @@ __device__ __forceinline__ void ncclSymkRun_AllGather_HierLsaST(ncclSymkDevWorkA
   bar.sync(ncclCoopCta(), cuda::memory_order_acquire);
   if NCCL_IF_CONSTEXPR (EnableProfiler) ncclSymkProfilerPhase(args, NCCL_KERNEL_PHASE_AFTER_OPEN);
 
+  size_t maxChunkBytes =
+      args->kcomm.hierMaxChunkBytes != 0 ? args->kcomm.hierMaxChunkBytes : ncclSymkAgHierMaxChunkBytes;
   handler.forEachWork<char>([&] __device__(int block, int nBlocks, size_t nElts, size_t nAllElts,
                                            ncclSymPtr<char> input, ncclSymPtr<char> output) {
     agHierPush(handler, bar, block, nBlocks, scaleIn, scaleUp, args->kcomm.hierPushFlags, seq, nElts, nAllElts, input,
-               output);
+               output, maxChunkBytes);
   });
   if (threadIdx.x == 0) *seqSlot = seq;
 

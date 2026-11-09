@@ -17,12 +17,15 @@
 #include <algorithm>
 
 NCCL_PARAM(SymCTAs, "SYM_CTAS", 0)
+extern int64_t ncclParamSymAgHierCtas();
 
 static constexpr float disableTime = 1.e30f;
 
 int ncclSymkModelCtasEnvOverride(enum ncclSymkKernelId kernelId) {
-  int maxBlocks = kernelId == ncclSymkKernelId_AllGather_HierLsaST ? ncclSymkAgHierMaxBlocks : ncclSymkMaxBlocks;
+  bool hier = kernelId == ncclSymkKernelId_AllGather_HierLsaST;
+  int maxBlocks = hier ? ncclSymkAgHierMaxBlocksLimit() : ncclSymkMaxBlocks;
   int64_t nUserCTAs = ncclParamSymCTAs();
+  if (hier && nUserCTAs < 1) nUserCTAs = ncclParamSymAgHierCtas();
   if (nUserCTAs < 1) return 0;
   if (nUserCTAs > maxBlocks) return maxBlocks;
   return static_cast<int>(nUserCTAs);

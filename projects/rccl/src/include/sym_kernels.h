@@ -31,6 +31,8 @@ constexpr int ncclSymkLLMaxEltSize = 8;
 
 // Max blocks for the hierarchical LSA AllGather kernel.
 constexpr int ncclSymkAgHierMaxBlocks = 72;
+// Largest chunk a block of the hierarchical LSA AllGather pushes.
+constexpr size_t ncclSymkAgHierMaxChunkBytes = 256 << 10;
 
 // How the hierarchical LSA AllGather kernel splits nBlocks over nGroups packages. Group 0 copies with
 // whole blocks where a pushing group forwards with half of each, so it gets about half as many blocks
@@ -123,6 +125,8 @@ struct ncclSymkDevComm {
   // Per block of the hierarchical AllGather, a row of flags, one per package group, that the pushing
   // block on another rank raises after each chunk.
   ncclDevResourceHandle hierPushFlags;
+  // 0 selects ncclSymkAgHierMaxChunkBytes.
+  uint32_t hierMaxChunkBytes;
   // Profiler counters (host-pinned), indexed by channel id and per-channel slot.
   // workPhases holds per-phase timestamps published behind a fence.
   struct ncclDevProfiler* workStarted;
@@ -214,6 +218,8 @@ uint32_t ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp
                       size_t nElts, bool symAligned16B = true);
 // How many of nBlocks the hierarchical LSA AllGather kernel puts to work; the rest would sit out.
 int ncclSymkAgHierLaunchBlocks(struct ncclComm* comm, int nBlocks);
+int ncclSymkAgHierMaxBlocksLimit();
+size_t ncclSymkAgHierMaxChunkBytesLimit();
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 bool ncclSymkIsGfx950(struct ncclComm* comm);
