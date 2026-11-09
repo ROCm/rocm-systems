@@ -56,10 +56,29 @@ retains only its size and SHA-256. Its `finalize` command requires every pinned
 corpus input to have either a successful pair or a matching declared
 exclusion, which prevents partial runs from becoming a develop baseline.
 
-## Near-timeout reporting
+## HIP, race, and DBT corpus pin
+
+`ROCJITSU_DBT_CORPUS_REF` pins the HIP, race, and DBT suites together in
+`.github/workflows/rocjitsu-corpus-tests.yml`. Keep it equal to the `corpus_ref`
+manual-dispatch default. After a corpus change merges, update both references
+to its merged revision and validate that pair in corpus CI before landing the
+systems pin update. Matching references also preserves canonical manual
+collection of the gfx1250 translation SHA baseline.
+
+## Per-test deadlines and near-timeout reporting
+
+`run-corpus-tests.sh` uses `--soft-timeout` for the first pass and
+`--hard-timeout` for failed-test retries (30 and 60 seconds by default).
+For race cases, it sets `ROCJITSU_RACE_CASE_TIMEOUT` to the same per-test
+deadline as the launch wrapper, overriding any inherited value on both
+passes. The Release workflow explicitly selects 360 seconds for the first
+pass and 600 seconds for retries. `--rerun-timeout` separately bounds each
+target's entire retry invocation; a successful retry retains the original CI
+failure.
 
 With `--warn-perf`, `run-corpus-tests.sh` warns about passing tests whose
-runtime approaches the pytest timeout.
+runtime approaches the first-pass per-test deadline. Reporting uses
+`--soft-timeout`, including for the race suite.
 
 ## gfx1201 simulator exclusions
 

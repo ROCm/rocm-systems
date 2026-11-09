@@ -76,8 +76,7 @@ int64_t g_paramDmaBufEnable = 0;
 // --- Link-satisfying stubs for rma_proxy.cc's non-static externals ---------
 //
 // Defined here rather than in a shared fakes/ .cc because none of them has an
-// owning fakes file today and this is the only binary that needs them (same
-// reasoning as p2p-test.cc's allocTracker and ras-test.cc's ncclSetThreadName).
+// owning fakes file today and this is the only binary that needs them.
 // They must precede the #include of the unit under test.
 int64_t ncclParamDmaBufEnable() { return g_paramDmaBufEnable; }
 // NCCL_PARAM(IbDataDirect, "IB_DATA_DIRECT", 1), declared by src/transport/net_ib/init.cc.
@@ -88,17 +87,6 @@ void ncclSetThreadName(std::thread&, const char*, ...) {}
 ncclResult_t ncclTopoGetLocalRmaDevs(struct ncclComm*, int*, int*) { return ncclInternalError; }
 // src/rma/rma_proxy_progress.cc. Only the proxy thread calls it; never started here.
 ncclResult_t ncclRmaProxyProgress(ncclRma_t*, void*) { return ncclInternalError; }
-// libhsa-runtime64, reached from rma_proxy.cc's file-static getDmaBufFd via the
-// HSACHECK macro (src/include/rocmwrap.h) -- a required HSA entry point, called
-// directly rather than through a pfn gate. Host tests link no ROCr, and no RCCL
-// TU defines it, so there is no owning fakes file. It must be defined even
-// though no test reaches it: at -O0 (the host-test default, and what CI builds)
-// the dead static survives and the reference is emitted. A Release build
-// discards it via --gc-sections, which is why this only shows up in Debug.
-extern "C" hsa_status_t hsa_status_string(hsa_status_t, const char** status_string) {
-    if (status_string != nullptr) *status_string = "fake HSA status (host microtest)";
-    return HSA_STATUS_SUCCESS;
-}
 // Defined by src/init.cc. Not a hook: allocMemCPUAccessible() is a header-static
 // template, so this global is the only way to steer it. NULL is production's
 // default (NCCL_GDRCOPY_ENABLE defaults to 0) and selects host-NUMA memory.
@@ -108,9 +96,10 @@ gdr_t ncclGdrCopy = NULL;
 // reachable. Must come after the stubs and headers above are in scope.
 #include RMA_PROXY_CC_PATH
 
-// alloc.h data symbol, referenced by the ncclCudaCalloc templates the
-// GDRCopy-on arm walks through. Must follow the include, which brings
-// allocationTracker into scope. Zero-initialised.
+// alloc.h data symbol owned by src/init.cc, referenced by the ncclCudaCalloc
+// templates the GDRCopy-on arm walks through. Local because this target does
+// not link fakes/comm_fakes.cc.
+// Must follow the include, which brings allocationTracker into scope.
 struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
 
 namespace {

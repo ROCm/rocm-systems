@@ -12,7 +12,9 @@ executionctx:
     <<: *level_default
   Unit_hipExecutionCtxStreamDestroy_Negative:
     <<: *level_default
-    disabled: [amd_linux, amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
   Unit_hipExecutionCtxStreamDetached_StreamApis_Negative:
     <<: *level_default
   Unit_hipExecutionCtxStreamDetached_EventRecord_Negative:
@@ -59,7 +61,9 @@ executionctx:
     <<: *level_default
   Unit_hipExecutionCtxRecordWaitEvent_Sanity:
     <<: *level_default
-    disabled: [amd_linux, amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_linux]
+      reason: "AIRUNTIME-2744 - fails on amd_linux. Needs re-triage on amd_linux. amd_windows re-disabled (AIRUNTIME-2892): test passes but the full suite exceeds the 120min CI timeout with these tests enabled; improve test runtimes or raise the TheRock total timeout."
   Unit_hipExecutionCtxRecordEventFunctional:
     <<: *level_default
   Unit_hipExecutionCtxRecordWait_Blocking:
@@ -68,7 +72,9 @@ executionctx:
     <<: *level_default
   Unit_hipExecutionCtxRecordEvent_ElapsedTime_MultiStream:
     <<: *level_default
-    disabled: [amd_linux, amd_windows, amd_wsl, nvidia_linux, nvidia_windows]
+    disabled:
+      targets: [amd_linux, amd_windows, amd_wsl, nvidia_linux, nvidia_windows]
+      reason: "AIRUNTIME-2892 - needs to be further investigated. gfx1201 (amd_windows) FAIL: false -> false. gfx1201 (amd_wsl) FAIL: false -> false. Needs re-triage on amd_linux, nvidia_linux, nvidia_windows."
   Unit_hipExecutionCtxRecordWaitEvent_Negative:
     <<: *level_default
   Unit_hipExecutionCtxWaitEvent_CrossCtx:
@@ -93,7 +99,9 @@ executionctx:
     <<: *level_default
   Unit_hipExecutionCtxResourceSplit_Disjoint_Sets:
     <<: *level_default
-    disabled: [nvidia_linux]
+    disabled:
+      targets: [nvidia_linux]
+      reason: "AIRUNTIME-2744 - fails on nvidia_linux. Needs re-triage."
   Unit_hipExecutionCtxSmAlignment_DeviceGetDevResource:
     <<: *level_default
   Unit_hipExecutionCtxSmAlignment_StreamGetDevResource:

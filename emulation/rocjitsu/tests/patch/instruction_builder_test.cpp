@@ -23,6 +23,40 @@ TEST(InstructionBuilder, Sop2SetsEncodingPrefix) {
   EXPECT_EQ((word >> 30) & 0x3u, 0x2u);
 }
 
+TEST(InstructionBuilder, SoppEncodingReturnsEncodingOrFailure) {
+  constexpr auto invalid = build_sopp_encoding(ROCJITSU_CODE_ARCH_INVALID, 0, 0);
+  static_assert(invalid.failed());
+
+  for (int value = 0; value < ROCJITSU_CODE_ARCH_NUM_ARCHS; ++value) {
+    const auto arch = static_cast<rj_code_arch_t>(value);
+    SCOPED_TRACE(value);
+    if (arch == ROCJITSU_CODE_ARCH_RV32I || arch == ROCJITSU_CODE_ARCH_RV64I)
+      continue;
+    EXPECT_TRUE(build_sopp_encoding(arch, sopp_op_nop(arch), 0).succeeded());
+  }
+
+  for (auto arch : {ROCJITSU_CODE_ARCH_INVALID, ROCJITSU_CODE_ARCH_RV32I, ROCJITSU_CODE_ARCH_RV64I,
+                    static_cast<rj_code_arch_t>(15)}) {
+    SCOPED_TRACE(static_cast<int>(arch));
+    EXPECT_TRUE(build_sopp_encoding(arch, 0, 0).failed());
+  }
+}
+
+TEST(InstructionBuilder, SoppEncodingEmitsOnlyRequestedFailureDiagnostic) {
+  unsigned messages = 0;
+  std::string message;
+  auto callback = [&](std::string_view text) {
+    ++messages;
+    message = text;
+  };
+  const util::DiagnosticEmitter error(callback);
+  EXPECT_TRUE(build_sopp_encoding(ROCJITSU_CODE_ARCH_CDNA5, 0, 0, &error).succeeded());
+  EXPECT_EQ(messages, 0u);
+  EXPECT_TRUE(build_sopp_encoding(ROCJITSU_CODE_ARCH_INVALID, 0, 0, &error).failed());
+  EXPECT_EQ(messages, 1u);
+  EXPECT_EQ(message, "unsupported target architecture for SOPP encoding");
+}
+
 TEST(InstructionBuilder, DelayAluReturnsEncodingOrFailure) {
   constexpr auto rdna4 = build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4);
   static_assert(rdna4.succeeded());
@@ -205,7 +239,10 @@ TEST(GeneratedInstructionBuilder, Gfx1250ScalarPathsUseGeneratedLayouts) {
   constexpr uint16_t kSsrc1 = 9;
 
   constexpr auto sopp = cdna5::build_sopp(cdna5::kSBranchSopp, {.simm16 = kSimm16});
-  EXPECT_EQ(build_sopp_encoding(ROCJITSU_CODE_ARCH_CDNA5, cdna5::kSBranchSopp, kSimm16), sopp[0]);
+  constexpr auto encoded_sopp =
+      build_sopp_encoding(ROCJITSU_CODE_ARCH_CDNA5, cdna5::kSBranchSopp, kSimm16);
+  static_assert(encoded_sopp.succeeded());
+  EXPECT_EQ(encoded_sopp.value(), sopp[0]);
 
   constexpr auto sop1 = cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = kSsrc0, .sdst = kSdst});
   EXPECT_EQ(build_sop1_encoding(ROCJITSU_CODE_ARCH_CDNA5, cdna5::kSMovB32Sop1, kSdst, kSsrc0),

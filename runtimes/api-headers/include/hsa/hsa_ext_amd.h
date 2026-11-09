@@ -49,6 +49,7 @@
 #include "hsa_ext_image.h"
 #include "hsa_ven_amd_pc_sampling.h"
 #include "amd_launch_descriptor.h"
+#include "amd_hsa_signal.h"
 
 /**
  * - 1.0 - initial version
@@ -85,9 +86,16 @@
  * - 1.31 - hsa_amd_queue_get_info: queue read/write pointer addresses
  * - 1.32 - hsa_amd_svm_discard_and_prefetch_batch_async
  * - 1.33 - hsa_amd_agent_set_attribute: GL2 persisting cache size control
+ * - 1.34 - hsa_amd_vmem_get_vmem_info
+ * - 1.35 - tools-only: hsa_amd_enable_high_precision_timestamps
+ * - 1.36 - hsa_amd_signal_batch_create, hsa_amd_signal_batch_destroy,
+ *          HSA_AMD_MEMORY_POOL_INFO_SIGNAL_CAPABLE,
+ *          HSA_AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH, HSA_AMD_AGENT_INFO_HOST_ATOMICS_SUPPORTED,
+ *          HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED,
+ *          hsa_amd_signal_set_hints, hsa_amd_signal_get_hints (inline)
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 33
+#define HSA_AMD_INTERFACE_VERSION_MINOR 36
 
 #ifdef __cplusplus
 extern "C" {
@@ -1002,8 +1010,34 @@ typedef enum hsa_amd_agent_info_s {
    * Returns the maximum supported persisting L2 cache size on this HW in bytes.
    * The type of this attribute is size_t.
    */
-  HSA_AMD_AGENT_INFO_MAX_PERSISTING_L2_CACHE_SIZE = 0xA126
-
+  HSA_AMD_AGENT_INFO_MAX_PERSISTING_L2_CACHE_SIZE = 0xA126,
+  /**
+   * Whether the agent's memory is reached over PCIe, so stores that arrive
+   * that way, from the host or from a peer, pass through HDP and are ordered
+   * with the agent's accesses only once flushed. Applies to anything written
+   * there: queues, kernel arguments, signals. The writer flushes by writing the
+   * HSA_AMD_AGENT_INFO_HDP_FLUSH register or by reading back its last store,
+   * before the agent can observe the data (for example before publishing a
+   * packet header or ringing a doorbell). One flush covers every earlier store.
+   * GPU agents only.
+   * The type of this attribute is bool.
+   */
+  HSA_AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH = 0xA127,
+  /**
+   * Whether host atomic read-modify-write operations on the agent's memory are
+   * atomic with respect to the agent: true when the CPU and GPU are coherently
+   * connected over xGMI (A+A). When false, the host may only load and store
+   * there. GPU agents only.
+   * The type of this attribute is bool.
+   */
+  HSA_AMD_AGENT_INFO_HOST_ATOMICS_SUPPORTED = 0xA128,
+  /**
+   * Whether the agent's CP firmware consumes completion signal handle hints
+   * (::hsa_amd_signal_set_hints). Hints may be put in the completion_signal
+   * of an AQL packet only on an agent that reports true. GPU agents only.
+   * The type of this attribute is bool.
+   */
+  HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED = 0xA129,
 } hsa_amd_agent_info_t;
 
 /**
@@ -1957,6 +1991,12 @@ typedef enum {
    * The size of this attribute is size_t.
    */
   HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_REC_GRANULE = 18,
+  /**
+   * Whether ::hsa_amd_signal_batch_create accepts this pool: a fine-grained
+   * system memory pool, or a device pool where every queue's command processor
+   * sees a signal completion. The type of this attribute is bool.
+   */
+  HSA_AMD_MEMORY_POOL_INFO_SIGNAL_CAPABLE = 19,
 } hsa_amd_memory_pool_info_t;
 
 /**
@@ -2103,6 +2143,120 @@ hsa_status_t HSA_API
  *
  */
 hsa_status_t HSA_API hsa_amd_memory_pool_free(void* ptr);
+
+/**
+ * @brief Opaque handle to a batch of signals.
+ */
+typedef struct hsa_amd_signal_batch_s {
+  uint64_t handle;
+} hsa_amd_signal_batch_t;
+
+/**
+ * @brief Create @p count signals in one contiguous allocation from @p pool.
+ *
+ * Members are ordinary signals and may be used with every hsa_signal_* API.
+ * Each member must be destroyed with hsa_signal_destroy, and the batch with
+ * ::hsa_amd_signal_batch_destroy, in any order. The batch memory is released
+ * once all of them have been destroyed.
+ *
+ * Interrupt-capable members each consume a KFD event, of which a process has a
+ * limited number (about 4096). Members created after that limit busy-wait.
+ *
+ * @param[in] count Number of signals. Must be greater than 0.
+ *
+ * @param[in] initial_values Initial value of each signal, @p count entries.
+ *
+ * @param[in] num_consumers Size of @p consumers, as for ::hsa_amd_signal_create.
+ *
+ * @param[in] consumers Agents that might wait on the signals, as for
+ * ::hsa_amd_signal_create. Applies to every member.
+ *
+ * @param[in] attributes Signal attributes applied to every member.
+ * ::HSA_AMD_SIGNAL_IPC is not supported.
+ *
+ * @param[in] pool Memory pool providing the signal memory: one that reports
+ * ::HSA_AMD_MEMORY_POOL_INFO_SIGNAL_CAPABLE. That is a fine-grained system
+ * memory pool, or a pool of a GPU whose memory is host visible (large BAR):
+ * the extended-scope fine-grained (uncached) pool on gfx94x and gfx95x, or the
+ * coarse-grained pool on gfx125x. Device memory is made accessible to the host
+ * and to @p consumers, or to every GPU if @p num_consumers is 0. When the GPU
+ * reports ::HSA_AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH, the hsa_signal_* APIs
+ * flush every host store they make, and a caller writing a member's value
+ * directly must flush it before an agent reads it. Host read-modify-write
+ * operations (hsa_signal_add, subtract, and, or, xor, exchange and cas) are not
+ * supported on members in device memory unless the GPU reports
+ * ::HSA_AMD_AGENT_INFO_HOST_ATOMICS_SUPPORTED (A+A: CPU and GPU coherently
+ * connected over xGMI). Elsewhere they are not atomic, even between host
+ * threads.
+ *
+ * @param[out] batch Handle to the new batch.
+ *
+ * @param[out] signals Array of @p count entries receiving the signal handles.
+ *
+ * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ *
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been
+ * initialized.
+ *
+ * @retval ::HSA_STATUS_ERROR_OUT_OF_RESOURCES The HSA runtime failed to allocate
+ * the required resources.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_MEMORY_POOL @p pool is invalid or not a
+ * supported kind (see @p pool).
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p count is 0, @p initial_values,
+ * @p batch or @p signals is NULL, @p attributes requests ::HSA_AMD_SIGNAL_IPC, @p num_consumers is greater than
+ * 0 but @p consumers is NULL, or @p consumers contains duplicates.
+ */
+hsa_status_t HSA_API hsa_amd_signal_batch_create(uint32_t count,
+                                                 const hsa_signal_value_t* initial_values,
+                                                 uint32_t num_consumers,
+                                                 const hsa_agent_t* consumers,
+                                                 uint64_t attributes,
+                                                 hsa_amd_memory_pool_t pool,
+                                                 hsa_amd_signal_batch_t* batch,
+                                                 hsa_signal_t* signals);
+
+/**
+ * @brief Destroy a signal batch handle.
+ *
+ * Members not yet destroyed remain valid. Batch memory is released once every
+ * member has also been destroyed with hsa_signal_destroy.
+ *
+ * @param[in] batch Batch created by ::hsa_amd_signal_batch_create.
+ *
+ * @retval ::HSA_STATUS_SUCCESS The function has been executed successfully.
+ *
+ * @retval ::HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime has not been
+ * initialized.
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p batch is not a valid batch.
+ */
+hsa_status_t HSA_API hsa_amd_signal_batch_destroy(hsa_amd_signal_batch_t batch);
+
+/**
+ * @brief Return @p signal with its handle hints replaced by @p hints.
+ *
+ * @p hints combines ::amd_signal_hint_t values; 0 returns the plain handle.
+ * Use hints only on an agent that reports
+ * ::HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED: its CP firmware consumes every
+ * defined hint, while firmware without support takes the hinted handle as the
+ * signal address. Bits outside
+ * ::AMD_SIGNAL_HINT_MASK are dropped. A hinted handle is only for the
+ * completion_signal of an AQL packet; pass the plain handle to every runtime API.
+ */
+static inline hsa_signal_t hsa_amd_signal_set_hints(hsa_signal_t signal, uint64_t hints) {
+  const hsa_signal_t hinted_signal = {(signal.handle & ~AMD_SIGNAL_HINT_MASK) |
+                                      (hints & AMD_SIGNAL_HINT_MASK)};
+  return hinted_signal;
+}
+
+/**
+ * @brief Return the hints carried by the handle of @p signal; 0 for a plain handle.
+ */
+static inline uint64_t hsa_amd_signal_get_hints(hsa_signal_t signal) {
+  return signal.handle & AMD_SIGNAL_HINT_MASK;
+}
 
 /**
  * @brief Asynchronously copy a block of memory from the location pointed to by
@@ -4830,6 +4984,14 @@ hsa_status_t hsa_amd_vmem_retain_alloc_handle(hsa_amd_vmem_alloc_handle_t* memor
  *
  * Returns the allocation properties of an existing handle
  *
+ * For a handle obtained from ::hsa_amd_vmem_import_shareable_handle, the
+ * returned pool identifies placement class only -- host versus device -- and is
+ * not the pool the exporting process allocated from. A shareable handle carries
+ * neither a NUMA node nor an allocation grain, so a host-resident import names
+ * the canonical fine-grained system region regardless of the node or grain of
+ * the original allocation. Consumers must not treat the returned pool as the
+ * source pool, and must not infer NUMA placement from it.
+ *
  * @param[in] memory_handle memory handle to be queried
  * @param[out] pool memory pool that owns this handle
  * @param[out] memory type
@@ -4841,6 +5003,64 @@ hsa_status_t hsa_amd_vmem_retain_alloc_handle(hsa_amd_vmem_alloc_handle_t* memor
 hsa_status_t hsa_amd_vmem_get_alloc_properties_from_handle(
     hsa_amd_vmem_alloc_handle_t memory_handle, hsa_amd_memory_pool_t* pool,
     hsa_amd_memory_type_t* type);
+
+/**
+ * @brief Information about a virtual memory allocation handle.
+ *
+ * Within a ROCr major version this structure can only grow: members are
+ * appended, never reordered or resized. @p size lets ROCr fill only the members
+ * present in the layout the caller was compiled against, so a newer ROCr stays
+ * compatible with an older caller and vice versa.
+ */
+typedef struct hsa_amd_vmem_handle_info_s {
+  /**
+   * Size of this structure in bytes, as compiled by the caller. Must be set to
+   * sizeof(hsa_amd_vmem_handle_info_t) prior to the call. ROCr writes only the
+   * members that fit within this many bytes and leaves the rest untouched. If
+   * ROCr supports an older version of this structure then size will be smaller
+   * on return; members starting after the returned size are not updated.
+   */
+  size_t size;
+  /**
+   * Size of the allocation in bytes.
+   */
+  size_t alloc_size;
+  /**
+   * Agent on which the allocation resides: a CPU agent for host-resident
+   * memory, the owning GPU agent for device-resident memory. For an imported
+   * handle this identifies placement class only -- see the NUMA and grain
+   * caveats on ::hsa_amd_vmem_get_alloc_properties_from_handle.
+   */
+  hsa_agent_t agent;
+} hsa_amd_vmem_handle_info_t;
+
+/**
+ * @brief Returns information about an allocation handle
+ *
+ * Supports handles created locally by ::hsa_amd_vmem_handle_create, and handles
+ * from ::hsa_amd_vmem_import_shareable_handle whose placement and size the
+ * kernel driver was able to describe.
+ *
+ * An imported handle whose properties could not be recovered -- a fabric handle
+ * from ::hsa_amd_vmem_import_fabric_handle, a POSIX dma-buf on a kernel without
+ * GET_DMABUF_INFO support, or a thunk lacking the query -- reports
+ * ::HSA_STATUS_ERROR_INVALID_ALLOCATION rather than succeeding with a zero
+ * size, so callers can distinguish an unrecoverable handle from a genuinely
+ * empty allocation.
+ *
+ * @param[in] memory_handle memory handle to be queried
+ * @param[in,out] info handle information, with @p info->size set by the caller
+ *
+ * @retval ::HSA_STATUS_SUCCESS
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p info is NULL, or @p info->size
+ * is too small to hold any member
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ALLOCATION Invalid memory_handle, or an
+ * imported handle whose properties could not be recovered
+ */
+hsa_status_t hsa_amd_vmem_get_vmem_info(
+    hsa_amd_vmem_alloc_handle_t memory_handle, hsa_amd_vmem_handle_info_t* info);
 
 /**
  * @brief 128-bit globally unique identifier for a ROCr shared memory

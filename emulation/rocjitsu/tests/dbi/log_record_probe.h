@@ -58,7 +58,11 @@
 #include "rocjitsu/code/patch/log_abi.h"
 #include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/rj_code.h"
+#include "util/result.h"
 
+#include <gtest/gtest.h>
+
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -111,13 +115,25 @@ inline void append(std::vector<uint32_t> &words, std::span<const uint32_t> more)
   words.insert(words.end(), more.begin(), more.end());
 }
 
+inline void append(std::vector<uint32_t> &words, const util::FailureOr<uint32_t> &word) {
+  ASSERT_TRUE(word.succeeded());
+  words.push_back(word.value());
+}
+
+inline void append(std::vector<uint32_t> &words,
+                   const util::FailureOr<std::array<uint32_t, 2>> &more) {
+  ASSERT_TRUE(more.succeeded());
+  const auto &value = more.value();
+  words.insert(words.end(), value.begin(), value.end());
+}
+
 // RDNA4 only: once a VALU may have read an SGPR, a later SALU write to it is not
 // guaranteed visible to a reader until s_wait_alu clears sa_sdst. LLVM assumes
 // every SGPR may have been read on entry to a called function, which a probe is.
 // 0xfffe is the value LLVM's amdgpu-wait-sgpr-hazards pass emits for it.
 inline void append_salu_sgpr_write_wait(std::vector<uint32_t> &words, rj_code_arch_t arch) {
   if (arch == ROCJITSU_CODE_ARCH_RDNA4)
-    words.push_back(build_sopp_encoding(arch, rdna4::kSWaitAluSopp, 0xfffe));
+    words.push_back(build_sopp_encoding(arch, rdna4::kSWaitAluSopp, 0xfffe).value());
 }
 
 } // namespace detail
@@ -125,8 +141,9 @@ inline void append_salu_sgpr_write_wait(std::vector<uint32_t> &words, rj_code_ar
 /// @brief Build the probe body for @p arch.
 /// @param record_type Written into every record.
 /// @param slot_count The buffer's slot count, a power of two no larger than 64.
-[[nodiscard]] inline std::vector<uint32_t>
-build_log_record_probe_body(rj_code_arch_t arch, uint32_t record_type, uint32_t slot_count) {
+/// @param words Caller-owned output, cleared before emission and filled with the probe body.
+inline void build_log_record_probe_body(rj_code_arch_t arch, uint32_t record_type,
+                                        uint32_t slot_count, std::vector<uint32_t> &words) {
   if (slot_count == 0 || (slot_count & (slot_count - 1)) != 0 || slot_count > 64)
     throw std::invalid_argument("slot_count must be a power of two no larger than 64");
 
@@ -165,14 +182,14 @@ build_log_record_probe_body(rj_code_arch_t arch, uint32_t record_type, uint32_t 
   // The encoded inline constant 0, not a register.
   constexpr uint16_t kInlineZero = vop3_inline_uint(0);
 
-  std::vector<uint32_t> words;
+  words.clear();
   words.push_back(build_v_readfirstlane_b32(kBase, kArgBufferLo, arch));
   words.push_back(build_v_readfirstlane_b32(kBase + 1, kArgBufferLo + 1, arch));
   words.push_back(build_v_readfirstlane_b32(kExec, kArgExecLo, arch));
   words.push_back(build_v_readfirstlane_b32(kExec + 1, kArgExecLo + 1, arch));
   words.push_back(build_s_bcnt1_i32_b64(kCount, kExec, arch));
   words.push_back(build_s_first_set_bit_b64(kWriter, kExec, arch));
-  words.push_back(build_v_mov_b32_src(kZero, kInlineZero, arch));
+  ASSERT_NO_FATAL_FAILURE(detail::append(words, build_v_mov_b32_src(kZero, kInlineZero, arch)));
   // GFX9: a VMEM read of an SGPR a VALU wrote needs five wait states. The five
   // instructions after the base pair's last v_readfirstlane provide them before
   // the load below.
@@ -193,41 +210,56 @@ build_log_record_probe_body(rj_code_arch_t arch, uint32_t record_type, uint32_t 
   words.push_back(build_s_add_u32(kSlot, kSlot, kScalarSrcLiteral, arch));
   words.push_back(static_cast<uint32_t>(sizeof(RjLogBufferHeader)));
   detail::append_salu_sgpr_write_wait(words, arch);
-  words.push_back(build_v_mov_b32_src(kSlotV, kSlot, arch));
+  ASSERT_NO_FATAL_FAILURE(detail::append(words, build_v_mov_b32_src(kSlotV, kSlot, arch)));
 
   // abi_version (reserved0 zero), record_size, record_type.
-  detail::append(words, build_v_mov_b32_imm(kHeaderData, kRjLogAbiVersion, arch));
-  detail::append(words, build_v_mov_b32_imm(kHeaderData + 1, kRjLogRecordSize, arch));
-  detail::append(words, build_v_mov_b32_imm(kHeaderData + 2, record_type, arch));
+  ASSERT_NO_FATAL_FAILURE(
+      detail::append(words, build_v_mov_b32_imm(kHeaderData, kRjLogAbiVersion, arch)));
+  ASSERT_NO_FATAL_FAILURE(
+      detail::append(words, build_v_mov_b32_imm(kHeaderData + 1, kRjLogRecordSize, arch)));
+  ASSERT_NO_FATAL_FAILURE(
+      detail::append(words, build_v_mov_b32_imm(kHeaderData + 2, record_type, arch)));
   detail::append(words, build_global_store_dwordx3(kHeaderData, kSlotV, kBase,
                                                    offsetof(RjLogRecord, abi_version), arch));
 
   // exec_mask, site, wave_id.
-  words.push_back(build_v_mov_b32_src(kExecSiteData, vop3_vgpr_src(kArgExecLo), arch));
-  words.push_back(build_v_mov_b32_src(kExecSiteData + 1, vop3_vgpr_src(kArgExecLo + 1), arch));
-  words.push_back(build_v_mov_b32_src(kExecSiteData + 2, vop3_vgpr_src(kArgSite), arch));
-  words.push_back(build_v_mov_b32_src(kExecSiteData + 3, kInlineZero, arch));
+  ASSERT_NO_FATAL_FAILURE(
+      detail::append(words, build_v_mov_b32_src(kExecSiteData, vop3_vgpr_src(kArgExecLo), arch)));
+  ASSERT_NO_FATAL_FAILURE(detail::append(
+      words, build_v_mov_b32_src(kExecSiteData + 1, vop3_vgpr_src(kArgExecLo + 1), arch)));
+  ASSERT_NO_FATAL_FAILURE(
+      detail::append(words, build_v_mov_b32_src(kExecSiteData + 2, vop3_vgpr_src(kArgSite), arch)));
+  ASSERT_NO_FATAL_FAILURE(
+      detail::append(words, build_v_mov_b32_src(kExecSiteData + 3, kInlineZero, arch)));
   detail::append(words, build_global_store_dwordx4(kExecSiteData, kSlotV, kBase,
                                                    offsetof(RjLogRecord, exec_mask), arch));
 
   // workgroup_x/y/z, active_lane_count.
-  words.push_back(build_v_mov_b32_src(kWorkgroupData, kInlineZero, arch));
-  words.push_back(build_v_mov_b32_src(kWorkgroupData + 1, kInlineZero, arch));
-  words.push_back(build_v_mov_b32_src(kWorkgroupData + 2, kInlineZero, arch));
-  words.push_back(build_v_mov_b32_src(kWorkgroupData + 3, kCount, arch));
+  ASSERT_NO_FATAL_FAILURE(
+      detail::append(words, build_v_mov_b32_src(kWorkgroupData, kInlineZero, arch)));
+  ASSERT_NO_FATAL_FAILURE(
+      detail::append(words, build_v_mov_b32_src(kWorkgroupData + 1, kInlineZero, arch)));
+  ASSERT_NO_FATAL_FAILURE(
+      detail::append(words, build_v_mov_b32_src(kWorkgroupData + 2, kInlineZero, arch)));
+  ASSERT_NO_FATAL_FAILURE(
+      detail::append(words, build_v_mov_b32_src(kWorkgroupData + 3, kCount, arch)));
   detail::append(words, build_global_store_dwordx4(kWorkgroupData, kSlotV, kBase,
                                                    offsetof(RjLogRecord, workgroup_x), arch));
 
   // writer_lane, reserved1, payload.
-  words.push_back(build_v_mov_b32_src(kWriterData, kWriter, arch));
-  words.push_back(build_v_mov_b32_src(kWriterData + 1, kInlineZero, arch));
-  words.push_back(build_v_mov_b32_src(kWriterData + 2, kInlineZero, arch));
-  words.push_back(build_v_mov_b32_src(kWriterData + 3, kInlineZero, arch));
+  ASSERT_NO_FATAL_FAILURE(detail::append(words, build_v_mov_b32_src(kWriterData, kWriter, arch)));
+  ASSERT_NO_FATAL_FAILURE(
+      detail::append(words, build_v_mov_b32_src(kWriterData + 1, kInlineZero, arch)));
+  ASSERT_NO_FATAL_FAILURE(
+      detail::append(words, build_v_mov_b32_src(kWriterData + 2, kInlineZero, arch)));
+  ASSERT_NO_FATAL_FAILURE(
+      detail::append(words, build_v_mov_b32_src(kWriterData + 3, kInlineZero, arch)));
   detail::append(words, build_global_store_dwordx4(kWriterData, kSlotV, kBase,
                                                    offsetof(RjLogRecord, writer_lane), arch));
 
   // valid, after the rest of the record.
-  words.push_back(build_v_mov_b32_src(kValidData, vop3_inline_uint(1), arch));
+  ASSERT_NO_FATAL_FAILURE(
+      detail::append(words, build_v_mov_b32_src(kValidData, vop3_inline_uint(1), arch)));
   detail::append(words, build_global_store_dword(kValidData, kSlotV, kBase,
                                                  offsetof(RjLogRecord, valid), arch));
 
@@ -236,12 +268,12 @@ build_log_record_probe_body(rj_code_arch_t arch, uint32_t record_type, uint32_t 
   words.push_back(
       build_s_addc_u32(kWritePtr + 1, kWritePtr + 1, scalar_positive_inline_u32(0), arch));
   detail::append_salu_sgpr_write_wait(words, arch);
-  words.push_back(build_v_mov_b32_src(kNextPtr, kWritePtr, arch));
-  words.push_back(build_v_mov_b32_src(kNextPtr + 1, kWritePtr + 1, arch));
+  ASSERT_NO_FATAL_FAILURE(detail::append(words, build_v_mov_b32_src(kNextPtr, kWritePtr, arch)));
+  ASSERT_NO_FATAL_FAILURE(
+      detail::append(words, build_v_mov_b32_src(kNextPtr + 1, kWritePtr + 1, arch)));
   detail::append(words, build_global_store_dwordx2(kNextPtr, kZero, kBase, kWritePtrOffset, arch));
 
   words.push_back(build_s_setpc_b64(kLink, arch));
-  return words;
 }
 
 } // namespace test

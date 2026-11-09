@@ -714,10 +714,14 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
             context.arch != ROCJITSU_CODE_ARCH_RDNA4)
           throw std::runtime_error("interleaved dispatch requires a GFX12 graphics queue");
         [[fallthrough]];
-      case Pm4Opcode::DispatchDirect:
+      case Pm4Opcode::DispatchDirect: {
         require(4);
-        context.dispatch({words[0], words[1], words[2], words[3]});
+        util::StringDiagnostic diagnostic;
+        if (context.dispatch({words[0], words[1], words[2], words[3]}, diagnostic.emitter())
+                .failed())
+          throw std::runtime_error(diagnostic.message());
         break;
+      }
       case Pm4Opcode::DispatchIndirectInterleaved:
         if (!submission.graphics_engine || context.arch == ROCJITSU_CODE_ARCH_INVALID ||
             context.arch != ROCJITSU_CODE_ARCH_RDNA4)
@@ -732,7 +736,9 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         if (access->read(arguments, {reinterpret_cast<std::byte *>(dimensions.data()), 12}) !=
             VmAccessOutcome::Complete)
           throw std::runtime_error("PM4 DISPATCH_INDIRECT read failed");
-        context.dispatch(dimensions);
+        util::StringDiagnostic diagnostic;
+        if (context.dispatch(dimensions, diagnostic.emitter()).failed())
+          throw std::runtime_error(diagnostic.message());
         break;
       }
       default:

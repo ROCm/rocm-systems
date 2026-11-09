@@ -31,14 +31,27 @@
 
 namespace dda::common {
 
-// Per-shard staging slot capacity and hard per-shard cap (enforced in the
-// eligibility check). Fixes the slot stride at compile time so the
-// double-buffered layout is identical on every rank and call.
-// Footprint = 2 banks * nRanks * (kDdaLLRsMaxBytes * 2) for the 8B->16B
-// expansion; 16 MiB at 1 MiB/rank * 4 ranks * 2 banks * 2 (LL overhead),
-// within the 10 GiB DDA fabric scratch on gfx1250.
+// Per-shard payload cap, enforced by eligibility. The slot stride is fixed so
+// every rank addresses the same geometry. One bank is nRanks slots with the
+// 8B payload expanded to 16B: 8 MiB at 1 MiB/rank and 4 ranks.
 constexpr size_t kDdaLLRsMaxBytes = 1ULL*1024*1024;         // 1 MiB per-rank (= 4 MiB total at 4 ranks)
 constexpr size_t kDdaLLRsSlotStridePkts = kDdaLLRsMaxBytes / 8;   // 131072
+
+// Bytes in one bank: nRanks slots at the fixed stride.
+constexpr size_t ddaLLRsBankBytes(int nRanks) {
+  return (size_t)nRanks * kDdaLLRsSlotStridePkts * sizeof(LLPacket16);
+}
+
+// Packet offset of this epoch's bank. Odd epochs start at bankSize, where the
+// other LL tiers sharing this scratch put bank 1.
+constexpr size_t ddaLLRsBankOffsetPkts(uint32_t flag, size_t bankSize) {
+  return (size_t)(flag & 1u) * (bankSize / sizeof(LLPacket16));
+}
+
+// Phase-2 reads in flight at once. Each peer keeps two data words and two
+// flags, so 4 stays in registers; 8 matches the send batch but costs twice
+// the temporary values.
+constexpr int kDdaLLRsRecvBatch = 4;
 
 // LL reduce-scatter kernel. 1D grid over packets (8B payload each) of the
 // per-rank shard (recvcount elements).
@@ -59,7 +72,9 @@ __launch_bounds__(512)
                                            size_t recvcount, // per-rank shard element count
                                            int selfRank, int nRanksRt,
                                            uint32_t* __restrict__ epochDev, // per-block LL epoch cells
-                                           int epochLen) { // number of cells in epochDev
+                                           int epochLen, // number of cells in epochDev
+                                           size_t bankSize, // scratch bank size (from host)
+                                           DdaKernelParams params) {
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const size_t bytes = recvcount * sizeof(T);
@@ -68,7 +83,7 @@ __launch_bounds__(512)
   const size_t chunkWords = nPk * 2; // uint32 words per shard chunk
 
   const uint32_t flag = ddaGetLLEpochInc(epochDev, blockIdx.x, 1);
-  const size_t bankOffsetPkts = (size_t)(flag & 1u) * (size_t)nRanks * slot;
+  const size_t bankOffsetPkts = ddaLLRsBankOffsetPkts(flag, bankSize);
 
   const size_t gtid = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
   const size_t stride = (size_t)gridDim.x * blockDim.x;
@@ -76,34 +91,99 @@ __launch_bounds__(512)
   const uint32_t* in = reinterpret_cast<const uint32_t*>(sendbuff);
   uint32_t* out = reinterpret_cast<uint32_t*>(recvbuff);
 
-  // Phase 1: scatter my chunk-for-peer (sendbuff[peer]) into peer's slot[self].
+  // Phase 1: scatter sendbuff[peer] into peer's slot[self]. Gather loads before stores.
   for (size_t pk = gtid; pk < nPk; pk += stride) {
+    for (int base = 1; base < nRanks; base += kDdaLLPeerBatch) {
+      uint32_t d0[kDdaLLPeerBatch], d1[kDdaLLPeerBatch];
 #pragma unroll
-    for (int r = 1; r < nRanks; ++r) {
-      const int peer = (selfRank + r) % nRanks;
-      const uint32_t* inPeer = in + (size_t)peer * chunkWords;
-      const uint32_t d0 = inPeer[2 * pk];
-      const uint32_t d1 = inPeer[2 * pk + 1];
-      LLPacket16* dst = reinterpret_cast<LLPacket16*>(peerScratch[peer]) + bankOffsetPkts + (size_t)selfRank * slot;
-      ddaLLStoreLineB128(reinterpret_cast<uint32_t*>(&dst[pk]), d0, flag, d1, flag);
+      for (int i = 0; i < kDdaLLPeerBatch; ++i) {
+        const int r = base + i;
+        if (r < nRanks) {
+          const int peer = (selfRank + r) % nRanks;
+          const uint32_t* inPeer = in + (size_t)peer * chunkWords;
+          d0[i] = inPeer[2 * pk];
+          d1[i] = inPeer[2 * pk + 1];
+        }
+      }
+#pragma unroll
+      for (int i = 0; i < kDdaLLPeerBatch; ++i) {
+        const int r = base + i;
+        if (r < nRanks) {
+          const int peer = (selfRank + r) % nRanks;
+          LLPacket16* dst = reinterpret_cast<LLPacket16*>(peerScratch[peer]) + bankOffsetPkts + (size_t)selfRank * slot;
+          ddaLLStoreLineB128(reinterpret_cast<uint32_t*>(&dst[pk]), d0[i], flag, d1[i], flag);
+        }
+      }
     }
   }
 
   // Phase 2: seed with my self-chunk, poll my slots for the others, reduce.
+  // The first read of each peer group is issued before any flag is tested, so
+  // those remote reads stay in flight together. A line whose flags already
+  // match is kept; only a stale line is read again.
   const uint32_t* inSelf = in + (size_t)selfRank * chunkWords;
   LLPacket16* myBase = reinterpret_cast<LLPacket16*>(peerScratch[selfRank]) + bankOffsetPkts;
   for (size_t pk = gtid; pk < nPk; pk += stride) {
     uint32_t acc0 = inSelf[2 * pk];
     uint32_t acc1 = inSelf[2 * pk + 1];
-    for (int r = 1; r < nRanks; ++r) {
-      const int peer = (selfRank + r) % nRanks;
-      volatile LLPacket16* src = myBase + (size_t)peer * slot;
-      uint32_t d0, f0, d1, f1;
-      do {
-        ddaLLLoadLineB128(reinterpret_cast<const uint32_t*>(const_cast<LLPacket16*>(&src[pk])), d0, f0, d1, f1);
-      } while (f0 != flag || f1 != flag);
-      acc0 = vecElementAdd<T>(acc0, d0);
-      acc1 = vecElementAdd<T>(acc1, d1);
+    for (int base = 1; base < nRanks; base += kDdaLLRsRecvBatch) {
+      uint32_t d0[kDdaLLRsRecvBatch], f0[kDdaLLRsRecvBatch];
+      uint32_t d1[kDdaLLRsRecvBatch], f1[kDdaLLRsRecvBatch];
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+      v4u got[kDdaLLRsRecvBatch];
+#pragma unroll
+      for (int i = 0; i < kDdaLLRsRecvBatch; ++i) {
+        const int r = base + i;
+        if (r < nRanks) {
+          const int peer = (selfRank + r) % nRanks;
+          const uint32_t* src = reinterpret_cast<const uint32_t*>(myBase + (size_t)peer * slot + pk);
+          got[i] = __builtin_amdgcn_global_load_b128((v4u_gptr)src, RCCL_SYSTEM_SYNCSCOPE);
+        }
+      }
+      // Keep every peer load above this point so the flag tests cannot sink
+      // the later loads back between them.
+      asm volatile("" ::: "memory");
+#pragma unroll
+      for (int i = 0; i < kDdaLLRsRecvBatch; ++i) {
+        const int r = base + i;
+        if (r < nRanks) {
+          union { v4u v; uint32_t w[4]; } u;
+          u.v = got[i];
+          d0[i] = u.w[0];
+          f0[i] = u.w[1];
+          d1[i] = u.w[2];
+          f1[i] = u.w[3];
+        }
+      }
+#else
+#pragma unroll
+      for (int i = 0; i < kDdaLLRsRecvBatch; ++i) {
+        const int r = base + i;
+        if (r < nRanks) {
+          const int peer = (selfRank + r) % nRanks;
+          const uint32_t* src = reinterpret_cast<const uint32_t*>(myBase + (size_t)peer * slot + pk);
+          ddaLLLoadLineB128(src, d0[i], f0[i], d1[i], f1[i]);
+        }
+      }
+#endif
+#pragma unroll
+      for (int i = 0; i < kDdaLLRsRecvBatch; ++i) {
+        const int r = base + i;
+        if (r < nRanks) {
+          const int peer = (selfRank + r) % nRanks;
+          const uint32_t* src = reinterpret_cast<const uint32_t*>(myBase + (size_t)peer * slot + pk);
+          // A matching first load is kept. A miss polls through the shared
+          // helper so a revoked communicator can leave the spin.
+          if (f0[i] != flag || f1[i] != flag) {
+            if (!ddaLLWaitLineFlags(reinterpret_cast<const volatile LLPacket16*>(src), flag, params, d0[i], f0[i],
+                                    d1[i], f1[i])) {
+              ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag);
+              return;
+            }
+          }
+          ddaLLAddPayload<T>(acc0, acc1, d0[i], d1[i]);
+        }
+      }
     }
     out[2 * pk] = acc0;
     out[2 * pk + 1] = acc1;

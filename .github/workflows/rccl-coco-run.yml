@@ -27,7 +27,7 @@ on:
         description: 'ROCm/tRCCL git ref (commit, tag, or branch) to check out the harness at.'
         type: string
         required: false
-        default: '1.3.x'
+        default: '1.4.x'
       trigger_kind:
         description: 'coco --trigger-kind, recorded against the run. Required, so a caller that does not wire it through fails rather than mislabelling its run.'
         type: string
@@ -120,11 +120,16 @@ jobs:
         run: |
           set -euo pipefail
           scratch=$(mktemp -d "${RUNNER_TEMP}/coco.XXXXXX")
+          # A nightly run reuses a persistent stage_dir, so this marks the
+          # point before which an old *_summary.md must not reappear.
+          touch "${scratch}/launch.stamp"
           {
             echo "CI_SCRATCH=${scratch}"
             echo "COCO_VENV=${scratch}/venv"
             echo "LOG_FILE=${scratch}/coco-${MODE}-${JOB}-${GITHUB_RUN_ID}.log"
             echo "BUILD_LOG=${scratch}/coco-pr-${BUILD_JOB}-${GITHUB_RUN_ID}.log"
+            echo "LAUNCH_STAMP=${scratch}/launch.stamp"
+            echo "REPORTS_FILE=${scratch}/reports.md"
           } >> "${GITHUB_ENV}"
 
       # Not at the workspace root: checkout's clean there would delete COCO_DIR.
@@ -302,6 +307,7 @@ jobs:
             ${{ steps.artifact_dir.outputs.dir }}/logs
             ${{ steps.artifact_dir.outputs.dir }}/scripts
             ${{ steps.artifact_dir.outputs.dir }}/harness_*.log
+            ${{ steps.artifact_dir.outputs.dir }}/reports
           if-no-files-found: warn
           retention-days: 14
 
@@ -318,6 +324,7 @@ jobs:
           PR_SHA: ${{ inputs.pr_sha }}
           ARTIFACT_DIR: ${{ steps.artifact_dir.outputs.dir }}
           LAUNCH_OUTCOME: ${{ steps.launch.outcome }}
+          LAUNCH_STAMP: ${{ env.LAUNCH_STAMP }}
         run: |
           set -uo pipefail
           title="${JOB}"
@@ -341,6 +348,29 @@ jobs:
             echo "| extra flags | \`${COCO_ARGS:-(none)}\` |"
           } >> "${GITHUB_STEP_SUMMARY}"
 
+          # Each stack's markdown summary, written this run only (a persistent
+          # stage_dir keeps an older report from a prior night alongside it).
+          # Also kept at REPORTS_FILE so the PR-comment step need not re-glob it.
+          if [[ -n "${ARTIFACT_DIR}" && -d "${ARTIFACT_DIR}/reports" ]]; then
+            : > "${REPORTS_FILE}"
+            find "${ARTIFACT_DIR}/reports" -name '*_summary.md' \
+              -newer "${LAUNCH_STAMP}" -print0 | sort -z |
+              while IFS= read -r -d '' md; do
+                # The PR build-only pass's own report (every *-pr-build.yaml job's
+                # fixed `tag: pr-smoke-build`) is a superset build and reports
+                # little beyond what the smoke pass's own report already shows.
+                # Worth reading only when the build itself is why this run failed.
+                if [[ "${LAUNCH_OUTCOME}" == "success" &&
+                      "$(basename "${md}")" == "pr-smoke-build_summary.md" ]]; then
+                  continue
+                fi
+                { echo; cat "${md}"; } | tee -a "${GITHUB_STEP_SUMMARY}" "${REPORTS_FILE}" > /dev/null
+              done
+            # Every report this run wrote can be the skipped build-only one;
+            # leave no empty file for the upload step to turn into a blank PR comment.
+            [[ -s "${REPORTS_FILE}" ]] || rm -f "${REPORTS_FILE}"
+          fi
+
           if [[ "${LAUNCH_OUTCOME}" != "success" ]]; then
             for log in "${BUILD_LOG:-}" "${LOG_FILE:-}"; do
               [[ -s "${log}" ]] || continue
@@ -349,3 +379,15 @@ jobs:
               echo "::endgroup::"
             done
           fi
+
+      # Posting to the PR needs issues: write, which this job does not hold --
+      # it checks out and builds PR-controlled code, and must not also carry a
+      # write token. A separate job with no PR checkout posts this artifact.
+      - name: Upload the PR summary
+        if: always() && inputs.mode == 'pr' && steps.artifact_dir.outputs.dir != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ env.ARTIFACT_NAME }}-summary
+          path: ${{ env.REPORTS_FILE }}
+          if-no-files-found: ignore
+          retention-days: 14

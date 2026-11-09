@@ -65,6 +65,7 @@ constexpr std::size_t kPollDwords = 6;
 constexpr std::size_t kPoll64Dwords = 8;
 constexpr std::size_t kAtomicDwords = 8;
 constexpr std::size_t kFillDwords = 5;
+constexpr uint8_t kFillSizeDword = 2;
 constexpr std::size_t kTimestampDwords = 3;
 constexpr std::size_t kIndirectDwords = 6;
 constexpr std::size_t kConditionalDwords = 5;
@@ -504,8 +505,12 @@ private:
       operation.kind = Kind::Fill;
       operation.address = join(word(frame, 1), word(frame, 2));
       operation.value32 = word(frame, 3);
-      operation.count = (word(frame, 4) & 0x3fffffff) + uint64_t{1};
       operation.fill_size = (header >> 30) & 0x3;
+      operation.count = (word(frame, 4) & 0x3fffffff) + uint64_t{1};
+      // The count names the first byte of the final dword, so include the
+      // remaining three bytes of that element.
+      if (operation.fill_size == kFillSizeDword)
+        operation.count = (operation.count + 3) & ~uint64_t{3};
       break;
     case kOpTimestamp:
       operation.kind = Kind::Timestamp;
@@ -807,7 +812,7 @@ private:
             std::bit_cast<std::array<std::byte, sizeof(uint32_t)>>(operation.value32);
         for (std::size_t index = 0; index < operation.chunk_size; ++index) {
           operation.scratch[index] =
-              dialect_ == SdmaPacketDialect::Gfx1250 || operation.fill_size == 2
+              dialect_ == SdmaPacketDialect::Gfx1250 || operation.fill_size == kFillSizeDword
                   ? pattern[(operation.completed + index) % pattern.size()]
                   : pattern[0];
         }

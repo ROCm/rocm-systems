@@ -100,7 +100,7 @@ __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct 
       tid - workNthreads, nthreads - workNthreads, work->redOpArg, false, 1, (void**)&inputBuf, 1, (void**)&outputBuf,
       partCount);
   }
-#if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
+#if NCCL_ALLGATHER_NET_OFFLOAD_SUPPORTED
     // we have to wait for all warps before we can proceed to the next work;
     // otherwise, we can have contention if next work will use the outputBuf
     // in this work. We use bar 14 to avoid conflicts with prims barrier and
@@ -138,10 +138,10 @@ __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct 
 template <typename T, typename RedOp>
 struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE> {
   __device__ __forceinline__ void run(int tid, int nthreads, struct ncclDevWorkColl* work) {
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-    bool isNetOffload = false;
-#else
+#if NCCL_ALLGATHER_NET_OFFLOAD_SUPPORTED
     bool isNetOffload = work->isOneRPN && work->netRegUsed;
+#else
+    bool isNetOffload = false;
 #endif
     if (isNetOffload) runRing<T, RedOp, ProtoSimple<1, 1>, true>(tid, nthreads, work);
     else {

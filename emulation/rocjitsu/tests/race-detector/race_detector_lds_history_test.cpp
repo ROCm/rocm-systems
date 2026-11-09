@@ -117,7 +117,8 @@ protected:
                          /*sgprCount=*/8,
                          Dim3d(0),
                          [this](RaceViolation v) { observed_.push_back(v.conflictingEvent.value); },
-                         CounterCapacities{}};
+                         CounterCapacities{},
+                         /*ldsSizeBytes=*/64 * 1024};
 };
 
 TEST_F(LdsHistoryTest, DeterministicSoak) {

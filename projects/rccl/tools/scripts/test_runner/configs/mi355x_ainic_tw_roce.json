@@ -506,6 +506,11 @@
           "name": "A18_SubnetMatchesAny",
           "description": "subnetMatchesAny skips invalid/zero GIDs and matches against the remaining set.",
           "test_filter": "NetIbCastSubnet.SubnetMatchesAny"
+        },
+        {
+          "name": "A18_SignalingRateTable",
+          "description": "ibvSpeeds[] maps every IB signaling rate, including FDR10, to its Mb/s value.",
+          "test_filter": "NetIbCastSpeed.SignalingRateTable"
         }
       ]
     },
@@ -772,6 +777,82 @@
       ]
     },
 
+    "net_ib_gdr_flush_flag_base": {
+      "extends": "gtest_base",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 1200,
+      "description": "Shared env for remote GDR flush flag suites. Carries no tests: extends merges test lists, so children would inherit them. NCCL_NET=IB: with RCCL_AINIC_ROCE=1 an unset NCCL_NET selects IB-CAST, which keeps the flag off.",
+      "env_variables": {
+        "RCCL_IB_GDR_FLUSH_FLAG": "1",
+        "NCCL_IB_ADAPTIVE_ROUTING": "0",
+        "NCCL_NET": "IB"
+      }
+    },
+    "net_ib_gdr_flush_flag": {
+      "extends": "net_ib_gdr_flush_flag_base",
+      "tests": [
+        {
+          "name": "GdrFlushFlag_DefaultQps",
+          "description": "Remote GDR flush flag with default QPs. GdrFlushFlagTest needs 2 ranks; GdrFlushFlagProtoSwitchMPITest needs 2 nodes.",
+          "test_filter": "GdrFlushFlagTest.*:GdrFlushTest.*:GdrFlushFlagProtoSwitchMPITest.*-GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
+        },
+        {
+          "name": "GdrFlushFlag_FusedNic",
+          "description": "Fused (two-NIC) device keeps the RDMA read flush. Its own process: the vNIC it makes stays in the device list, and later comms in the process would use it and run without the flag.",
+          "test_filter": "GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
+        }
+      ]
+    },
+    "net_ib_gdr_flush_flag_4qps": {
+      "extends": "net_ib_gdr_flush_flag_base",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "4"
+      },
+      "tests": [
+        {
+          "name": "GdrFlushFlag_4Qps",
+          "description": "Remote GDR flush flag over 4 QPs per connection: requests rotate over the QPs and each flag tracks its own QP.",
+          "test_filter": "GdrFlushFlagTest.*:GdrFlushFlagProtoSwitchMPITest.*-GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
+        }
+      ]
+    },
+    "net_ib_gdr_flush_flag_4qps_split": {
+      "extends": "net_ib_gdr_flush_flag_base",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "4",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
+      },
+      "tests": [
+        {
+          "name": "GdrFlushFlag_4QpsSplit",
+          "description": "Remote GDR flush flag over 4 QPs with NCCL_IB_SPLIT_DATA_ON_QPS=1: every request spans all 4 QPs, and the GPU waits on all 4 flags.",
+          "test_filter": "GdrFlushFlagTest.*:GdrFlushFlagProtoSwitchMPITest.*-GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
+        }
+      ]
+    },
+    "net_ib_gdr_flush_flag_tune": {
+      "extends": "rccl_tests_base",
+      "timeout": 1200,
+      "command_args": "-b 8 -e 1G -f 2 -g 1 -c 1",
+      "description": "RCCL_IB_GDR_FLUSH_FLAG_TUNE=1 on 2 nodes x 8 gfx950 GPUs, data checked: the 4x collective LL128 buffer next to the 1x send/recv LL128 buffer, and the tuned AllReduce/ReduceScatter choices and broadcast/reduce LL128 chunk.",
+      "env_variables": {
+        "RCCL_IB_GDR_FLUSH_FLAG": "1",
+        "RCCL_IB_GDR_FLUSH_FLAG_TUNE": "1",
+        "NCCL_IB_ADAPTIVE_ROUTING": "0",
+        "NCCL_NET": "IB"
+      },
+      "tests": [
+        { "name": "GdrFlushFlagTune_sendrecv_LL128", "binary": "sendrecv_perf", "env_variables": { "NCCL_PROTO": "LL128" }, "description": "Send/recv LL128 on the 1x buffer while collectives use 4x." },
+        { "name": "GdrFlushFlagTune_allreduce_LL128", "binary": "all_reduce_perf", "env_variables": { "NCCL_PROTO": "LL128" }, "description": "AllReduce LL128 on the 4x buffer." },
+        { "name": "GdrFlushFlagTune_allreduce", "binary": "all_reduce_perf", "description": "AllReduce with the tuned algorithm, protocol and channel choices." },
+        { "name": "GdrFlushFlagTune_reduce_scatter", "binary": "reduce_scatter_perf", "description": "ReduceScatter with LL128 up to 7 MiB per rank." },
+        { "name": "GdrFlushFlagTune_broadcast", "binary": "broadcast_perf", "description": "Broadcast with the scaled-down Ring/LL128 pipeline chunk." },
+        { "name": "GdrFlushFlagTune_reduce", "binary": "reduce_perf", "description": "Reduce with the scaled-down Ring/LL128 pipeline chunk." }
+      ]
+    },
+
     "ionic_counters": {
       "extends": "rccl_tests_base",
       "timeout": 600,
@@ -826,6 +907,11 @@
     { "config": "opt_recv_completion",   "enabled": true, "smoke": true },
     { "config": "opt_recv_completion_no_cts", "enabled": true, "smoke": true },
     { "config": "alltoall_fullrange_guard", "enabled": true, "smoke": true },
+
+    { "config": "net_ib_gdr_flush_flag", "enabled": true },
+    { "config": "net_ib_gdr_flush_flag_4qps", "enabled": true },
+    { "config": "net_ib_gdr_flush_flag_4qps_split", "enabled": true },
+    { "config": "net_ib_gdr_flush_flag_tune", "enabled": true },
 
     { "config": "ionic_counters",        "enabled": true }
   ]

@@ -28,8 +28,9 @@ inline constexpr char kEffectiveConfigName[] = "effective_config.json";
 struct LaunchOverrides {
   std::optional<uint32_t> cpu_thread_budget = std::nullopt;
   std::optional<WaitChecking> wait_checking = std::nullopt;
+  std::string local_node = {};
 
-  bool empty() const { return !cpu_thread_budget && !wait_checking; }
+  bool empty() const { return !cpu_thread_budget && !wait_checking && local_node.empty(); }
 };
 
 /// @brief Return @p json with its top-level `cpu_thread_budget` set to @p budget.
@@ -49,6 +50,13 @@ json_with_cpu_thread_budget(std::string_view json, uint32_t budget,
 json_with_launch_overrides(std::string_view json, const LaunchOverrides &overrides,
                            const util::DiagnosticEmitter &emit_error = {});
 
+/// @brief Return @p json with a validated per-launch local node selector.
+/// @details Escapes arbitrary node IDs as JSON strings and rejects an unknown
+/// node or a selector that disagrees with the source config before launch.
+[[nodiscard]] FailureOr<std::string>
+json_with_local_node(std::string_view json, std::string_view node_id,
+                     const util::DiagnosticEmitter &emit_error = {});
+
 /// @brief Write the effective config for one invocation and return its path.
 ///
 /// @details The copy is placed in the invocation runtime directory next to the
@@ -58,6 +66,12 @@ json_with_launch_overrides(std::string_view json, const LaunchOverrides &overrid
 /// copy cannot be written. The reason is emitted through @p emit_error.
 [[nodiscard]] FailureOr<std::string>
 write_effective_config(const std::string &source_path, const LaunchOverrides &overrides, pid_t pid,
+                       const util::DiagnosticEmitter &emit_error = {});
+
+/// @brief Publish one launch copy containing both optional overrides.
+[[nodiscard]] FailureOr<std::string>
+write_effective_config(const std::string &source_path, std::optional<uint32_t> budget,
+                       std::string_view node_id, pid_t pid,
                        const util::DiagnosticEmitter &emit_error = {});
 
 } // namespace config

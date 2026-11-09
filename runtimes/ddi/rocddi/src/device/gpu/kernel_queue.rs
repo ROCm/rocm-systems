@@ -54,7 +54,9 @@ pub enum KernelQueueWait {
 
 /// Retains a concrete driver and its kernel queue until native retirement.
 pub(crate) struct DriverKernelQueue<D: Driver, Q: KernelQueueResource> {
+    /// Native submission owner retained until retirement and destruction.
     inner: Owned<Q>,
+    /// Keeps the exact creating driver alive through queue cleanup.
     _driver: Shared<D>,
 }
 
@@ -99,7 +101,9 @@ impl<D: Driver, Q: KernelQueueResource> DriverKernelQueue<D, Q> {
 
 /// Owns one native submission context and its retryable teardown state.
 pub struct KernelQueue {
+    /// Concrete driver-mediated queue owner.
     pub(crate) inner: driver::KernelQueueState,
+    /// Native command format selected at creation.
     pub(crate) format: KernelQueueFormat,
 }
 

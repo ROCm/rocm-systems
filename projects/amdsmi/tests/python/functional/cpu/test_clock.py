@@ -19,33 +19,6 @@ XGMI_WIDTH_MAX = 16
 PCIE_RATE_CTRLS = (0, 1, 2)
 NBIO_IDS = (0, 1, 2, 3)
 
-# amdsmi_set_cpu_xgmi_width reaches the ESMI IO path before the HSMP
-# message-support check, so a wrong (GPU) handle is rejected with
-# AMDSMI_STATUS_IO on a discrete-GPU host rather than NO_HSMP_MSG_SUP; on other
-# hosts/APUs it is rejected with INVAL. All are valid rejections of a bogus
-# handle - the negative portion only has to reject SUCCESS.
-XGMI_WRONG_ACCEPT = [
-    amdsmi.AmdSmiStatus.NOT_SUPPORTED,
-    amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
-    amdsmi.AmdSmiStatus.NOT_FOUND,
-    amdsmi.AmdSmiStatus.IO,
-    amdsmi.AmdSmiStatus.INVAL,
-]
-
-# amdsmi_set_cpu_xgmi_width and amdsmi_get_cpu_current_io_bandwidth answer a real
-# CPU handle with INVAL where the target is absent on the platform: no xGMI width
-# control (single-socket host / APU) for the former, and a non-existent IO link
-# (several entries in IO_BW_ENCODINGS are not wired on every platform) for the
-# latter. Treat INVAL as "target not present here" alongside the documented
-# feature-absent statuses so the positive portion still runs everywhere without
-# false failures.
-CORRECT_ACCEPT_WITH_INVAL = [
-    amdsmi.AmdSmiStatus.SUCCESS,
-    amdsmi.AmdSmiStatus.NOT_SUPPORTED,
-    amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
-    amdsmi.AmdSmiStatus.INVAL,
-]
-
 
 class TestCpuClock(unittest.TestCase):
     @classmethod
@@ -62,118 +35,428 @@ class TestCpuClock(unittest.TestCase):
     def setUp(self):
         self.common.amdsmi_smart_init()
 
-    def tearDown(self):
-        amdsmi.amdsmi_shut_down()
-
     def test_cpu_apb_disable(self):
         self.common.print_func_name("")
         self.common.run_cpu_api_contract(
-            amdsmi.amdsmi_cpu_apb_disable, "amdsmi_cpu_apb_disable", arg_sets=[("pstate=0", (0,))]
+            amdsmi.amdsmi_cpu_apb_disable,
+            "amdsmi_cpu_apb_disable",
+            arg_sets=[("pstate=0", (0,))],
+            wrong_accept=[
+                # NOT_SUPPORTED: a GPU handle reaches the CPU path, which reports the feature
+                # absent. Incidental; there is no processor-type check yet.
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                # NO_HSMP_MSG_SUP: a GPU handle reaches the HSMP message check, which reports the
+                # message absent. Incidental; there is no processor-type check yet.
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                # NOT_FOUND: a GPU handle is not a CPU socket, so the lookup fails. The CPU path has
+                # no processor-type check yet, so this rejection is incidental.
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                # INVAL: a GPU handle is rejected as invalid input. The CPU path has no processor-
+                # type check yet, so this rejection is incidental.
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                # NOT_SUPPORTED: the platform does not provide this API, for example when no CPU
+                # sockets are present or the CPU family is unsupported.
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                # NO_HSMP_MSG_SUP: the HSMP firmware on this platform does not implement this API's
+                # message.
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            ],
+            null_accept=[
+                # INVAL: a null processor handle is rejected before it reaches the library.
+                amdsmi.AmdSmiStatus.INVAL
+            ],
         )
         return
 
     def test_cpu_apb_enable(self):
         self.common.print_func_name("")
-        self.common.run_cpu_api_contract(amdsmi.amdsmi_cpu_apb_enable, "amdsmi_cpu_apb_enable")
+        # Same status sets as test_cpu_apb_disable (see there).
+        self.common.run_cpu_api_contract(
+            amdsmi.amdsmi_cpu_apb_enable,
+            "amdsmi_cpu_apb_enable",
+            wrong_accept=[
+                # NOT_SUPPORTED: a GPU handle reaches the CPU path, which reports the feature
+                # absent. Incidental; there is no processor-type check yet.
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                # NO_HSMP_MSG_SUP: a GPU handle reaches the HSMP message check, which reports the
+                # message absent. Incidental; there is no processor-type check yet.
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                # NOT_FOUND: a GPU handle is not a CPU socket, so the lookup fails. The CPU path has
+                # no processor-type check yet, so this rejection is incidental.
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                # INVAL: a GPU handle is rejected as invalid input. The CPU path has no processor-
+                # type check yet, so this rejection is incidental.
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                # NOT_SUPPORTED: the platform does not provide this API, for example when no CPU
+                # sockets are present or the CPU family is unsupported.
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                # NO_HSMP_MSG_SUP: the HSMP firmware on this platform does not implement this API's
+                # message.
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            ],
+            null_accept=[
+                # INVAL: a null processor handle is rejected before it reaches the library.
+                amdsmi.AmdSmiStatus.INVAL
+            ],
+        )
         return
 
     def test_get_cpu_cclk_limit(self):
         self.common.print_func_name("")
+        # Same status sets as test_cpu_apb_disable (see there).
         self.common.run_cpu_api_contract(
-            amdsmi.amdsmi_get_cpu_cclk_limit, "amdsmi_get_cpu_cclk_limit"
+            amdsmi.amdsmi_get_cpu_cclk_limit,
+            "amdsmi_get_cpu_cclk_limit",
+            wrong_accept=[
+                # NOT_SUPPORTED: a GPU handle reaches the CPU path, which reports the feature
+                # absent. Incidental; there is no processor-type check yet.
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                # NO_HSMP_MSG_SUP: a GPU handle reaches the HSMP message check, which reports the
+                # message absent. Incidental; there is no processor-type check yet.
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                # NOT_FOUND: a GPU handle is not a CPU socket, so the lookup fails. The CPU path has
+                # no processor-type check yet, so this rejection is incidental.
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                # INVAL: a GPU handle is rejected as invalid input. The CPU path has no processor-
+                # type check yet, so this rejection is incidental.
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                # NOT_SUPPORTED: the platform does not provide this API, for example when no CPU
+                # sockets are present or the CPU family is unsupported.
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                # NO_HSMP_MSG_SUP: the HSMP firmware on this platform does not implement this API's
+                # message.
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            ],
+            null_accept=[
+                # INVAL: a null processor handle is rejected before it reaches the library.
+                amdsmi.AmdSmiStatus.INVAL
+            ],
         )
         return
 
     def test_get_cpu_core_current_freq_limit(self):
         self.common.print_func_name("")
+        # Same status sets as test_cpu_apb_disable (see there), per core handle.
         self.common.run_cpu_api_contract(
             amdsmi.amdsmi_get_cpu_core_current_freq_limit,
             "amdsmi_get_cpu_core_current_freq_limit",
             handle_kind="core",
+            wrong_accept=[
+                # NOT_SUPPORTED: a GPU handle reaches the CPU path, which reports the feature
+                # absent. Incidental; there is no processor-type check yet.
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                # NO_HSMP_MSG_SUP: a GPU handle reaches the HSMP message check, which reports the
+                # message absent. Incidental; there is no processor-type check yet.
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                # NOT_FOUND: a GPU handle is not a CPU socket, so the lookup fails. The CPU path has
+                # no processor-type check yet, so this rejection is incidental.
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                # INVAL: a GPU handle is rejected as invalid input. The CPU path has no processor-
+                # type check yet, so this rejection is incidental.
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                # NOT_SUPPORTED: the platform does not provide this API, for example when no CPU
+                # sockets are present or the CPU family is unsupported.
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                # NO_HSMP_MSG_SUP: the HSMP firmware on this platform does not implement this API's
+                # message.
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            ],
+            null_accept=[
+                # INVAL: a null processor handle is rejected before it reaches the library.
+                amdsmi.AmdSmiStatus.INVAL
+            ],
         )
         return
 
     def test_get_cpu_current_io_bandwidth(self):
         self.common.print_func_name("")
-        for i, cpu in enumerate(self.common.skip_without_cpu()):
-            # Link names are only legal if the platform's encoding table lists them,
-            # and that table is selected by HSMP protocol version.
-            try:
-                proto_ver = amdsmi.amdsmi_get_cpu_hsmp_proto_ver(cpu)
-            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                self.skipTest(f"HSMP protocol version unavailable: {e}")
-            links = common.io_bw_encodings_for_proto_ver(proto_ver)
-            if not links:
-                self.skipTest(f"HSMP protocol version {proto_ver} defines no IO link encodings")
 
-            for encoding_name, encoding, encoding_cond in links:
-                msg = f"\t### amdsmi_get_cpu_current_io_bandwidth(cpu={i}, encoding={encoding} encoding_name={encoding_name}):"
-                try:
-                    ret = amdsmi.amdsmi_get_cpu_current_io_bandwidth(cpu, encoding, encoding_name)
-                    self.common.print(msg, ret)
-                    self.common.check_ret("", "", self.common.PASS)
-                except amdsmi.AmdSmiLibraryException as e:
-                    if self.common.check_ret(msg, e, encoding_cond):
-                        self.raise_exception = e
-                self.common.print("")
-        if self.raise_exception:
-            raise self.raise_exception
+        def positive(handles, failures):
+            # Link names are legal only for the platform's HSMP protocol version, so
+            # resolve the table per socket. A version with no table is skipped for
+            # that socket; a legal link returning INVAL is a real failure.
+            with self.common.status_sweep():
+                for i, cpu in enumerate(handles):
+                    try:
+                        proto_ver = amdsmi.amdsmi_get_cpu_hsmp_proto_ver(cpu)
+                    except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
+                        self.common.print(
+                            f"\t### amdsmi_get_cpu_hsmp_proto_ver(cpu={i}): unavailable ({e}), skipping"
+                        )
+                        continue
+                    links = common.io_bw_encodings_for_proto_ver(proto_ver)
+                    if not links:
+                        self.common.print(
+                            f"\t### HSMP protocol version {proto_ver} defines no IO link encodings, skipping cpu={i}"
+                        )
+                        continue
+                    for link_name, encoding, _ in links:
+                        msg = (
+                            f"\t### amdsmi_get_cpu_current_io_bandwidth(cpu={i}, "
+                            f"encoding={encoding}, link_name={link_name}):"
+                        )
+                        val = "N/A"
+                        with self.common.expect_status(msg, correct_accept):
+                            val = amdsmi.amdsmi_get_cpu_current_io_bandwidth(
+                                cpu, encoding, link_name
+                            )
+                        self.common.print(f"\t    data: {val}")
+
+        # Positive accepts only feature-absent statuses; INVAL is not accepted for a
+        # legal link ID (see positive above).
+        correct_accept = [
+            amdsmi.AmdSmiStatus.SUCCESS,
+            # NOT_SUPPORTED: the platform does not provide this API, for example when no CPU sockets
+            # are present or the CPU family is unsupported.
+            amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+            # NO_HSMP_MSG_SUP: the HSMP firmware on this platform does not implement this API's
+            # message.
+            amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+        ]
+        self.common.run_cpu_api_contract(
+            amdsmi.amdsmi_get_cpu_current_io_bandwidth,
+            "amdsmi_get_cpu_current_io_bandwidth",
+            arg_sets=[
+                (f"encoding={encoding} link_name={link_name}", (encoding, link_name))
+                for link_name, encoding, _ in common.IO_BW_ENCODINGS
+            ],
+            wrong_accept=[
+                # NOT_SUPPORTED: a GPU handle reaches the CPU path, which reports the feature
+                # absent. Incidental; there is no processor-type check yet.
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                # NO_HSMP_MSG_SUP: a GPU handle reaches the HSMP message check, which reports the
+                # message absent. Incidental; there is no processor-type check yet.
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                # NOT_FOUND: a GPU handle is not a CPU socket, so the lookup fails. The CPU path has
+                # no processor-type check yet, so this rejection is incidental.
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                # INVAL: a GPU handle is rejected as invalid input. The CPU path has no processor-
+                # type check yet, so this rejection is incidental.
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=correct_accept,
+            null_accept=[
+                # INVAL: a null processor handle is rejected before it reaches the library.
+                amdsmi.AmdSmiStatus.INVAL
+            ],
+            positive=positive,
+        )
         return
 
     def test_get_cpu_fclk_mclk(self):
         self.common.print_func_name("")
+        # Same status sets as test_cpu_apb_disable (see there).
         self.common.run_cpu_api_contract(
-            amdsmi.amdsmi_get_cpu_fclk_mclk, "amdsmi_get_cpu_fclk_mclk"
+            amdsmi.amdsmi_get_cpu_fclk_mclk,
+            "amdsmi_get_cpu_fclk_mclk",
+            wrong_accept=[
+                # NOT_SUPPORTED: a GPU handle reaches the CPU path, which reports the feature
+                # absent. Incidental; there is no processor-type check yet.
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                # NO_HSMP_MSG_SUP: a GPU handle reaches the HSMP message check, which reports the
+                # message absent. Incidental; there is no processor-type check yet.
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                # NOT_FOUND: a GPU handle is not a CPU socket, so the lookup fails. The CPU path has
+                # no processor-type check yet, so this rejection is incidental.
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                # INVAL: a GPU handle is rejected as invalid input. The CPU path has no processor-
+                # type check yet, so this rejection is incidental.
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                # NOT_SUPPORTED: the platform does not provide this API, for example when no CPU
+                # sockets are present or the CPU family is unsupported.
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                # NO_HSMP_MSG_SUP: the HSMP firmware on this platform does not implement this API's
+                # message.
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            ],
+            null_accept=[
+                # INVAL: a null processor handle is rejected before it reaches the library.
+                amdsmi.AmdSmiStatus.INVAL
+            ],
         )
         return
 
     def test_get_cpu_socket_current_active_freq_limit(self):
         self.common.print_func_name("")
+        # Same status sets as test_cpu_apb_disable (see there).
         self.common.run_cpu_api_contract(
             amdsmi.amdsmi_get_cpu_socket_current_active_freq_limit,
             "amdsmi_get_cpu_socket_current_active_freq_limit",
+            wrong_accept=[
+                # NOT_SUPPORTED: a GPU handle reaches the CPU path, which reports the feature
+                # absent. Incidental; there is no processor-type check yet.
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                # NO_HSMP_MSG_SUP: a GPU handle reaches the HSMP message check, which reports the
+                # message absent. Incidental; there is no processor-type check yet.
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                # NOT_FOUND: a GPU handle is not a CPU socket, so the lookup fails. The CPU path has
+                # no processor-type check yet, so this rejection is incidental.
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                # INVAL: a GPU handle is rejected as invalid input. The CPU path has no processor-
+                # type check yet, so this rejection is incidental.
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                # NOT_SUPPORTED: the platform does not provide this API, for example when no CPU
+                # sockets are present or the CPU family is unsupported.
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                # NO_HSMP_MSG_SUP: the HSMP firmware on this platform does not implement this API's
+                # message.
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            ],
+            null_accept=[
+                # INVAL: a null processor handle is rejected before it reaches the library.
+                amdsmi.AmdSmiStatus.INVAL
+            ],
         )
         return
 
     def test_get_cpu_socket_freq_range(self):
         self.common.print_func_name("")
+        # Same status sets as test_cpu_apb_disable (see there).
         self.common.run_cpu_api_contract(
-            amdsmi.amdsmi_get_cpu_socket_freq_range, "amdsmi_get_cpu_socket_freq_range"
+            amdsmi.amdsmi_get_cpu_socket_freq_range,
+            "amdsmi_get_cpu_socket_freq_range",
+            wrong_accept=[
+                # NOT_SUPPORTED: a GPU handle reaches the CPU path, which reports the feature
+                # absent. Incidental; there is no processor-type check yet.
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                # NO_HSMP_MSG_SUP: a GPU handle reaches the HSMP message check, which reports the
+                # message absent. Incidental; there is no processor-type check yet.
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                # NOT_FOUND: a GPU handle is not a CPU socket, so the lookup fails. The CPU path has
+                # no processor-type check yet, so this rejection is incidental.
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                # INVAL: a GPU handle is rejected as invalid input. The CPU path has no processor-
+                # type check yet, so this rejection is incidental.
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                # NOT_SUPPORTED: the platform does not provide this API, for example when no CPU
+                # sockets are present or the CPU family is unsupported.
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                # NO_HSMP_MSG_SUP: the HSMP firmware on this platform does not implement this API's
+                # message.
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            ],
+            null_accept=[
+                # INVAL: a null processor handle is rejected before it reaches the library.
+                amdsmi.AmdSmiStatus.INVAL
+            ],
         )
         return
 
     def test_get_cpu_socket_lclk_dpm_level(self):
         self.common.print_func_name("")
+        # Same status sets as test_cpu_apb_disable (see there), per NBIO id.
         self.common.run_cpu_api_contract(
             amdsmi.amdsmi_get_cpu_socket_lclk_dpm_level,
             "amdsmi_get_cpu_socket_lclk_dpm_level",
             arg_sets=[(f"nbio_id={nbio_id}", (nbio_id,)) for nbio_id in NBIO_IDS],
+            wrong_accept=[
+                # NOT_SUPPORTED: a GPU handle reaches the CPU path, which reports the feature
+                # absent. Incidental; there is no processor-type check yet.
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                # NO_HSMP_MSG_SUP: a GPU handle reaches the HSMP message check, which reports the
+                # message absent. Incidental; there is no processor-type check yet.
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                # NOT_FOUND: a GPU handle is not a CPU socket, so the lookup fails. The CPU path has
+                # no processor-type check yet, so this rejection is incidental.
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                # INVAL: a GPU handle is rejected as invalid input. The CPU path has no processor-
+                # type check yet, so this rejection is incidental.
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                # NOT_SUPPORTED: the platform does not provide this API, for example when no CPU
+                # sockets are present or the CPU family is unsupported.
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                # NO_HSMP_MSG_SUP: the HSMP firmware on this platform does not implement this API's
+                # message.
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            ],
+            null_accept=[
+                # INVAL: a null processor handle is rejected before it reaches the library.
+                amdsmi.AmdSmiStatus.INVAL
+            ],
         )
         return
 
     def test_set_cpu_df_pstate_range(self):
         self.common.print_func_name("")
+        # Same status sets as test_cpu_apb_disable (see there).
+        correct_accept = [
+            amdsmi.AmdSmiStatus.SUCCESS,
+            # NOT_SUPPORTED: the platform does not provide this API, for example when no CPU sockets
+            # are present or the CPU family is unsupported.
+            amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+            # NO_HSMP_MSG_SUP: the HSMP firmware on this platform does not implement this API's
+            # message.
+            amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+        ]
 
         def positive(handles, failures):
             # Narrow the range, then hand P-state selection back to the firmware.
-            # Note the parameter order is (min, max). There is no getter for the
-            # DF P-state range, so enabling APB is the documented restore path.
+            # Firmware requires max_pstate <= min_pstate, with 0 the highest P-state
+            # and 2 the lowest. There is no getter for the DF P-state range, so
+            # enabling APB is the documented restore path.
             with self.common.status_sweep():
                 for i, cpu in enumerate(handles):
                     set_msg = (
                         f"\t### amdsmi_set_cpu_df_pstate_range(cpu={i}, "
-                        f"min_pstate=1, max_pstate={DF_PSTATE_MAX}):"
+                        f"min_pstate={DF_PSTATE_MAX}, max_pstate=1):"
                     )
-                    with self.common.expect_status(set_msg, self.common.CPU_CORRECT_ACCEPT):
-                        amdsmi.amdsmi_set_cpu_df_pstate_range(cpu, 1, DF_PSTATE_MAX)
+                    val = "N/A"
+                    with self.common.expect_status(set_msg, correct_accept):
+                        val = amdsmi.amdsmi_set_cpu_df_pstate_range(cpu, DF_PSTATE_MAX, 1)
+                    self.common.print(f"\t    data: {val}")
                     restore_msg = f"\t### amdsmi_cpu_apb_enable(cpu={i}):"
-                    with self.common.expect_status(restore_msg, self.common.CPU_CORRECT_ACCEPT):
-                        amdsmi.amdsmi_cpu_apb_enable(cpu)
+                    val = "N/A"
+                    with self.common.expect_status(restore_msg, correct_accept):
+                        val = amdsmi.amdsmi_cpu_apb_enable(cpu)
+                    self.common.print(f"\t    data: {val}")
 
         self.common.run_cpu_api_contract(
             amdsmi.amdsmi_set_cpu_df_pstate_range,
             "amdsmi_set_cpu_df_pstate_range",
-            arg_sets=[(f"min_pstate=1, max_pstate={DF_PSTATE_MAX}", (1, DF_PSTATE_MAX))],
+            arg_sets=[(f"min_pstate={DF_PSTATE_MAX}, max_pstate=1", (DF_PSTATE_MAX, 1))],
+            wrong_accept=[
+                # NOT_SUPPORTED: a GPU handle reaches the CPU path, which reports the feature
+                # absent. Incidental; there is no processor-type check yet.
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                # NO_HSMP_MSG_SUP: a GPU handle reaches the HSMP message check, which reports the
+                # message absent. Incidental; there is no processor-type check yet.
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                # NOT_FOUND: a GPU handle is not a CPU socket, so the lookup fails. The CPU path has
+                # no processor-type check yet, so this rejection is incidental.
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                # INVAL: a GPU handle is rejected as invalid input. The CPU path has no processor-
+                # type check yet, so this rejection is incidental.
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=correct_accept,
+            null_accept=[
+                # INVAL: a null processor handle is rejected before it reaches the library.
+                amdsmi.AmdSmiStatus.INVAL
+            ],
             positive=positive,
         )
         return
@@ -195,11 +478,48 @@ class TestCpuClock(unittest.TestCase):
                     (0, GMI3_LINK_WIDTH_MAX),
                 ),
             ],
+            wrong_accept=[
+                # NOT_SUPPORTED: a GPU handle reaches the CPU path, which reports the feature
+                # absent. Incidental; there is no processor-type check yet.
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                # NO_HSMP_MSG_SUP: a GPU handle reaches the HSMP message check, which reports the
+                # message absent. Incidental; there is no processor-type check yet.
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                # NOT_FOUND: a GPU handle is not a CPU socket, so the lookup fails. The CPU path has
+                # no processor-type check yet, so this rejection is incidental.
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                # INVAL: a GPU handle is rejected as invalid input. The CPU path has no processor-
+                # type check yet, so this rejection is incidental.
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                # NOT_SUPPORTED: the platform does not provide this API, for example when no CPU
+                # sockets are present or the CPU family is unsupported.
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                # NO_HSMP_MSG_SUP: the HSMP firmware on this platform does not implement this API's
+                # message.
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            ],
+            null_accept=[
+                # INVAL: a null processor handle is rejected before it reaches the library.
+                amdsmi.AmdSmiStatus.INVAL
+            ],
         )
         return
 
     def test_set_cpu_pcie_link_rate(self):
         self.common.print_func_name("")
+        # Same status sets as test_cpu_apb_disable (see there).
+        correct_accept = [
+            amdsmi.AmdSmiStatus.SUCCESS,
+            # NOT_SUPPORTED: the platform does not provide this API, for example when no CPU sockets
+            # are present or the CPU family is unsupported.
+            amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+            # NO_HSMP_MSG_SUP: the HSMP firmware on this platform does not implement this API's
+            # message.
+            amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+        ]
 
         def positive(handles, failures):
             # The setter reports the mode it replaced, which is the only way to
@@ -211,27 +531,60 @@ class TestCpuClock(unittest.TestCase):
                         msg = (
                             f"\t### amdsmi_set_cpu_pcie_link_rate(cpu={i}, rate_ctrl={rate_ctrl}):"
                         )
-                        with self.common.expect_status(msg, self.common.CPU_CORRECT_ACCEPT):
+                        ret = "N/A"
+                        with self.common.expect_status(msg, correct_accept):
                             ret = amdsmi.amdsmi_set_cpu_pcie_link_rate(cpu, rate_ctrl)
                             if prev_mode is None:
                                 prev_mode = int(ret)
+                        self.common.print(f"\t    data: {ret}")
                     if prev_mode is not None:
                         msg = (
                             f"\t### amdsmi_set_cpu_pcie_link_rate(cpu={i}, rate_ctrl={prev_mode}):"
                         )
-                        with self.common.expect_status(msg, self.common.CPU_CORRECT_ACCEPT):
-                            amdsmi.amdsmi_set_cpu_pcie_link_rate(cpu, prev_mode)
+                        ret = "N/A"
+                        with self.common.expect_status(msg, correct_accept):
+                            ret = amdsmi.amdsmi_set_cpu_pcie_link_rate(cpu, prev_mode)
+                        self.common.print(f"\t    data: {ret}")
 
         self.common.run_cpu_api_contract(
             amdsmi.amdsmi_set_cpu_pcie_link_rate,
             "amdsmi_set_cpu_pcie_link_rate",
             arg_sets=[("rate_ctrl=0", (0,))],
+            wrong_accept=[
+                # NOT_SUPPORTED: a GPU handle reaches the CPU path, which reports the feature
+                # absent. Incidental; there is no processor-type check yet.
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                # NO_HSMP_MSG_SUP: a GPU handle reaches the HSMP message check, which reports the
+                # message absent. Incidental; there is no processor-type check yet.
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                # NOT_FOUND: a GPU handle is not a CPU socket, so the lookup fails. The CPU path has
+                # no processor-type check yet, so this rejection is incidental.
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                # INVAL: a GPU handle is rejected as invalid input. The CPU path has no processor-
+                # type check yet, so this rejection is incidental.
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=correct_accept,
+            null_accept=[
+                # INVAL: a null processor handle is rejected before it reaches the library.
+                amdsmi.AmdSmiStatus.INVAL
+            ],
             positive=positive,
         )
         return
 
     def test_set_cpu_socket_lclk_dpm_level(self):
         self.common.print_func_name("")
+        # Same status sets as test_cpu_apb_disable (see there).
+        correct_accept = [
+            amdsmi.AmdSmiStatus.SUCCESS,
+            # NOT_SUPPORTED: the platform does not provide this API, for example when no CPU sockets
+            # are present or the CPU family is unsupported.
+            amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+            # NO_HSMP_MSG_SUP: the HSMP firmware on this platform does not implement this API's
+            # message.
+            amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+        ]
 
         def positive(handles, failures):
             # Read the current bounds so they can be put back afterwards.
@@ -243,10 +596,12 @@ class TestCpuClock(unittest.TestCase):
                             f"\t### amdsmi_get_cpu_socket_lclk_dpm_level(cpu={i}, "
                             f"nbio_id={nbio_id}):"
                         )
-                        with self.common.expect_status(get_msg, self.common.CPU_CORRECT_ACCEPT):
+                        dpm = "N/A"
+                        with self.common.expect_status(get_msg, correct_accept):
                             dpm = amdsmi.amdsmi_get_cpu_socket_lclk_dpm_level(cpu, nbio_id)
                             bounds["min"] = dpm["nbio_min_dpm_level"]
                             bounds["max"] = dpm["nbio_max_dpm_level"]
+                        self.common.print(f"\t    data: {dpm}")
                         if "max" not in bounds:
                             continue  # getter did not succeed; nothing to set/restore
                         min_orig, max_orig = bounds["min"], bounds["max"]
@@ -256,15 +611,36 @@ class TestCpuClock(unittest.TestCase):
                                 f"\t### amdsmi_set_cpu_socket_lclk_dpm_level(cpu={i}, "
                                 f"nbio_id={nbio_id}, min_val={min_val}, max_val={max_val}):"
                             )
-                            with self.common.expect_status(set_msg, self.common.CPU_CORRECT_ACCEPT):
-                                amdsmi.amdsmi_set_cpu_socket_lclk_dpm_level(
+                            val = "N/A"
+                            with self.common.expect_status(set_msg, correct_accept):
+                                val = amdsmi.amdsmi_set_cpu_socket_lclk_dpm_level(
                                     cpu, nbio_id, min_val, max_val
                                 )
+                            self.common.print(f"\t    data: {val}")
 
         self.common.run_cpu_api_contract(
             amdsmi.amdsmi_set_cpu_socket_lclk_dpm_level,
             "amdsmi_set_cpu_socket_lclk_dpm_level",
             arg_sets=[("nbio_id=0, min_val=0, max_val=1", (0, 0, 1))],
+            wrong_accept=[
+                # NOT_SUPPORTED: a GPU handle reaches the CPU path, which reports the feature
+                # absent. Incidental; there is no processor-type check yet.
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                # NO_HSMP_MSG_SUP: a GPU handle reaches the HSMP message check, which reports the
+                # message absent. Incidental; there is no processor-type check yet.
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                # NOT_FOUND: a GPU handle is not a CPU socket, so the lookup fails. The CPU path has
+                # no processor-type check yet, so this rejection is incidental.
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                # INVAL: a GPU handle is rejected as invalid input. The CPU path has no processor-
+                # type check yet, so this rejection is incidental.
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=correct_accept,
+            null_accept=[
+                # INVAL: a null processor handle is rejected before it reaches the library.
+                amdsmi.AmdSmiStatus.INVAL
+            ],
             positive=positive,
         )
         return
@@ -286,7 +662,35 @@ class TestCpuClock(unittest.TestCase):
                     (XGMI_WIDTH_MIN, XGMI_WIDTH_MAX),
                 ),
             ],
-            wrong_accept=XGMI_WRONG_ACCEPT,
-            correct_accept=CORRECT_ACCEPT_WITH_INVAL,
+            wrong_accept=[
+                # NOT_SUPPORTED: a GPU handle reaches the CPU path, which reports the feature
+                # absent. Incidental; there is no processor-type check yet.
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                # NO_HSMP_MSG_SUP: a GPU handle reaches the HSMP message check, which reports the
+                # message absent. Incidental; there is no processor-type check yet.
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                # NOT_FOUND: a GPU handle is not a CPU socket, so the lookup fails. The CPU path has
+                # no processor-type check yet, so this rejection is incidental.
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                # IO: on a discrete-GPU host a GPU handle reaches the ESMI IO path first; on other
+                # hosts it gets INVAL.
+                amdsmi.AmdSmiStatus.IO,
+                # INVAL: a GPU handle is rejected as invalid input. The CPU path has no processor-
+                # type check yet, so this rejection is incidental.
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                # NOT_SUPPORTED: the platform does not provide this API, for example when no CPU
+                # sockets are present or the CPU family is unsupported.
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                # NO_HSMP_MSG_SUP: the HSMP firmware on this platform does not implement this API's
+                # message.
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            ],
+            null_accept=[
+                # INVAL: a null processor handle is rejected before it reaches the library.
+                amdsmi.AmdSmiStatus.INVAL
+            ],
         )
         return

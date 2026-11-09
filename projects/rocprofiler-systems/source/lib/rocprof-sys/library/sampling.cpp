@@ -2,18 +2,19 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/sampling.hpp"
+#include "common/clocks.hpp"
 #include "common/env_vars.hpp"
 #include "common/units/power.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
-#include "core/control/clocks/timeline.hpp"
 #include "core/demangler.hpp"
 #include "core/locking.hpp"
 #include "core/node_info.hpp"
 #include "core/perf.hpp"
 #include "core/state.hpp"
 #include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/metadata_registry.hpp"
 #include "core/utility.hpp"
 #include "library/components/backtrace.hpp"
 #include "library/components/backtrace_metrics.hpp"
@@ -35,7 +36,6 @@
 #include <timemory/components/papi/extern.hpp>
 #include <timemory/components/papi/papi_array.hpp>
 #include <timemory/components/papi/papi_vector.hpp>
-#include <timemory/components/timing/backends.hpp>
 #include <timemory/components/trip_count/extern.hpp>
 #include <timemory/macros.hpp>
 #include <timemory/math.hpp>
@@ -77,6 +77,7 @@
 
 #include <pthread.h>
 #include <signal.h>
+#include <unistd.h>
 
 namespace rocprofsys::sampling
 {
@@ -208,22 +209,20 @@ void
 metadata_initialize_thread_info(size_t tid)
 {
     const auto& _thread_info = thread_info::get(tid, SequentTID);
-    if(!_thread_info)
+    if(!_thread_info || !_thread_info->index_data)
     {
         throw std::runtime_error(fmt::format("No valid thread info for tid={}", tid));
     }
-    if(!_thread_info)
-    {
-        return;
-    }
 
-    trace_cache::get_metadata_registry().add_thread_info(
-        { .parent_process_id = getppid(),
-          .process_id        = getpid(),
-          .thread_id = static_cast<size_t>(_thread_info->index_data->system_value),
-          .start     = static_cast<std::uint32_t>(_thread_info->get_start()),
-          .end       = static_cast<std::uint32_t>(_thread_info->get_stop()),
-          .extdata   = "{}" });
+    auto const thread_id = static_cast<size_t>(_thread_info->index_data->system_value);
+    trace_cache::get_metadata_registry().ensure_thread(thread_id, [&] {
+        return trace_cache::info::thread{ .parent_process_id = getppid(),
+                                          .process_id        = getpid(),
+                                          .thread_id         = thread_id,
+                                          .start             = _thread_info->get_start(),
+                                          .end               = _thread_info->get_stop(),
+                                          .extdata           = "{}" };
+    });
 }
 
 void
@@ -246,10 +245,9 @@ metadata_initialize_track(std::int64_t tid)
     const auto& _overflow_track_name =
         get_track_name<category::overflow_sampling>(*_thread_info);
 
-    trace_cache::get_metadata_registry().add_track(
-        { .track_name = _timer_track_name, .thread_id = thread_id, .extdata = "{}" });
-    trace_cache::get_metadata_registry().add_track(
-        { .track_name = _overflow_track_name, .thread_id = thread_id, .extdata = "{}" });
+    auto& registry = trace_cache::get_metadata_registry();
+    registry.ensure_track(_timer_track_name, thread_id);
+    registry.ensure_track(_overflow_track_name, thread_id);
 }
 
 // Added
@@ -751,7 +749,7 @@ configure(bool _setup, std::int64_t _tid)
 
         if(_signal_types->contains(get_sampling_realtime_signal()))
         {
-            _sampler->configure(timer{ get_sampling_realtime_signal(), CLOCK_REALTIME,
+            _sampler->configure(timer{ get_sampling_realtime_signal(), CLOCK_BOOTTIME,
                                        SIGEV_THREAD_ID, get_sampling_realtime_freq(),
                                        get_sampling_realtime_delay(), _tid,
                                        threading::get_sys_tid() });
@@ -799,7 +797,7 @@ configure(bool _setup, std::int64_t _tid)
             // otherwise stay on perf's CLOCK_MONOTONIC, and parse_overflow_data()
             // freezes the monotonic-to-timeline offset from the first sample.
             _pe.use_clockid = 1;
-            _pe.clockid     = CLOCK_BOOTTIME;
+            _pe.clockid     = clocks::timeline::k_timeline_clock_id;
 
             auto _perf_open_error =
                 _perf_sampler->open(_pe, _info->index_data->system_value);
@@ -1573,10 +1571,12 @@ post_process_timemory(std::int64_t                               _tid,
 
                 if(_cc && _metrics && _metrics(category::thread_cpu_time{}))
                 {
-                    const double _elapsed_cc = _metrics.get_cpu_timestamp();
+                    const auto elapsed_cpu =
+                        static_cast<double>(_metrics.get_cpu_time().count()) /
+                        static_cast<double>(sampling_cpu_clock::get_unit());
 
-                    _cc->set_value(_elapsed_cc / sampling_cpu_clock::get_unit());
-                    _cc->set_accum(_elapsed_cc / sampling_cpu_clock::get_unit());
+                    _cc->set_value(elapsed_cpu);
+                    _cc->set_accum(elapsed_cpu);
                 }
             }
 
@@ -1812,7 +1812,7 @@ pause()
     }
 
     LOG_DEBUG("Pausing sampling...");
-    pending_pause_ts.store(control::clocks::timeline_ns());
+    pending_pause_ts.store(clocks::timeline::now_ns());
     block_samples();
     set_sampler_timers(timer_state::stopped);
 }
@@ -1831,7 +1831,7 @@ resume()
 
     LOG_DEBUG("Resuming sampling...");
     auto const pause_ts  = pending_pause_ts.exchange(0);
-    auto const resume_ts = control::clocks::timeline_ns();
+    auto const resume_ts = clocks::timeline::now_ns();
     if(pause_ts > 0)
     {
         auto const _lk = std::lock_guard<std::mutex>{ pause_mutex };

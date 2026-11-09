@@ -9,30 +9,6 @@ import unittest
 import common.common as common
 from common.common import amdsmi
 
-# amdsmi_first_online_core_on_cpu_socket reaches the ESMI IO path before the HSMP
-# message-support check, so a wrong (GPU) handle is rejected with AMDSMI_STATUS_IO
-# on a discrete-GPU host rather than NO_HSMP_MSG_SUP; on other hosts/APUs it is
-# rejected with INVAL. All are valid rejections of a bogus handle - the negative
-# portion only has to reject SUCCESS.
-FIRST_ONLINE_WRONG_ACCEPT = [
-    amdsmi.AmdSmiStatus.NOT_SUPPORTED,
-    amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
-    amdsmi.AmdSmiStatus.NOT_FOUND,
-    amdsmi.AmdSmiStatus.IO,
-    amdsmi.AmdSmiStatus.INVAL,
-]
-
-# amdsmi_get_cpu_family / _model / _threads_per_core take no processor handle and
-# read CPU identity directly. On a host with no CPU/HSMP target they fail with
-# AMDSMI_STATUS_IO; on a real CPU they return SUCCESS. Accept both (plus the
-# platform "absent" status) so the positive portion runs and validates without
-# skipping, while still rejecting INVAL and friends.
-NO_CPU_INFO_ACCEPT = [
-    amdsmi.AmdSmiStatus.SUCCESS,
-    amdsmi.AmdSmiStatus.NOT_SUPPORTED,
-    amdsmi.AmdSmiStatus.IO,
-]
-
 
 class TestCpuIdentity(unittest.TestCase):
     @classmethod
@@ -49,63 +25,149 @@ class TestCpuIdentity(unittest.TestCase):
     def setUp(self):
         self.common.amdsmi_smart_init()
 
-    def tearDown(self):
-        amdsmi.amdsmi_shut_down()
-
     def test_first_online_core_on_cpu_socket(self):
         self.common.print_func_name("")
         self.common.run_cpu_api_contract(
             amdsmi.amdsmi_first_online_core_on_cpu_socket,
             "amdsmi_first_online_core_on_cpu_socket",
-            wrong_accept=FIRST_ONLINE_WRONG_ACCEPT,
+            wrong_accept=[
+                # NOT_SUPPORTED: a GPU handle reaches the CPU path, which reports the feature
+                # absent. Incidental; there is no processor-type check yet.
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                # NO_HSMP_MSG_SUP: a GPU handle reaches the HSMP message check, which reports the
+                # message absent. Incidental; there is no processor-type check yet.
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+                # NOT_FOUND: a GPU handle is not a CPU socket, so the lookup fails. The CPU path has
+                # no processor-type check yet, so this rejection is incidental.
+                amdsmi.AmdSmiStatus.NOT_FOUND,
+                # IO: on a discrete-GPU host a GPU handle reaches the ESMI IO path first; on other
+                # hosts it gets INVAL.
+                amdsmi.AmdSmiStatus.IO,
+                # INVAL: a GPU handle is rejected as invalid input. The CPU path has no processor-
+                # type check yet, so this rejection is incidental.
+                amdsmi.AmdSmiStatus.INVAL,
+            ],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                # NOT_SUPPORTED: the platform does not provide this API, for example when no CPU
+                # sockets are present or the CPU family is unsupported.
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                # NO_HSMP_MSG_SUP: the HSMP firmware on this platform does not implement this API's
+                # message.
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            ],
+            null_accept=[
+                # INVAL: a null processor handle is rejected before it reaches the library.
+                amdsmi.AmdSmiStatus.INVAL
+            ],
         )
         return
 
     def test_get_cpu_family(self):
         self.common.print_func_name("")
+        # Takes no processor handle, so only the positive portion runs.
         self.common.run_cpu_api_contract(
             amdsmi.amdsmi_get_cpu_family,
             "amdsmi_get_cpu_family",
             handle_kind="none",
-            correct_accept=NO_CPU_INFO_ACCEPT,
+            wrong_accept=[],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                # NOT_SUPPORTED: the platform does not provide this API, for example when no CPU
+                # sockets are present or the CPU family is unsupported.
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                # IO: no CPU or HSMP target on the host, so the identity read fails.
+                amdsmi.AmdSmiStatus.IO,
+            ],
+            null_accept=[],
         )
         return
 
     def test_get_cpu_handles(self):
         self.common.print_func_name("")
+        # Takes no processor handle, so only the positive portion runs.
         self.common.run_cpu_api_contract(
-            amdsmi.amdsmi_get_cpu_handles, "amdsmi_get_cpu_handles", handle_kind="none"
+            amdsmi.amdsmi_get_cpu_handles,
+            "amdsmi_get_cpu_handles",
+            handle_kind="none",
+            wrong_accept=[],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                # NOT_SUPPORTED: the platform does not provide this API, for example when no CPU
+                # sockets are present or the CPU family is unsupported.
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                # NO_HSMP_MSG_SUP: the HSMP firmware on this platform does not implement this API's
+                # message.
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            ],
+            null_accept=[],
         )
         return
 
     def test_get_cpu_model(self):
         self.common.print_func_name("")
+        # Takes no processor handle, so only the positive portion runs. Same
+        # status set as test_get_cpu_family (see there).
         self.common.run_cpu_api_contract(
             amdsmi.amdsmi_get_cpu_model,
             "amdsmi_get_cpu_model",
             handle_kind="none",
-            correct_accept=NO_CPU_INFO_ACCEPT,
+            wrong_accept=[],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                # NOT_SUPPORTED: the platform does not provide this API, for example when no CPU
+                # sockets are present or the CPU family is unsupported.
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                # IO: no CPU or HSMP target on the host, so the identity read fails.
+                amdsmi.AmdSmiStatus.IO,
+            ],
+            null_accept=[],
         )
         return
 
     def test_get_cpu_smu_fw_version(self):
         self.common.print_func_name("")
         # Returns the global SMU firmware version; the processor handle is not
-        # validated, so a wrong (GPU) handle legitimately succeeds. Skip the
-        # wrong-handle negative, which does not apply.
+        # validated, so a wrong (GPU) handle legitimately succeeds. The wrong-handle
+        # negative does not apply (check_wrong_handle=False), so wrong_accept is empty.
         self.common.run_cpu_api_contract(
             amdsmi.amdsmi_get_cpu_smu_fw_version,
             "amdsmi_get_cpu_smu_fw_version",
             check_wrong_handle=False,
+            wrong_accept=[],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                # NOT_SUPPORTED: the platform does not provide this API, for example when no CPU
+                # sockets are present or the CPU family is unsupported.
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                # NO_HSMP_MSG_SUP: the HSMP firmware on this platform does not implement this API's
+                # message.
+                amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+            ],
+            null_accept=[
+                # INVAL: a null processor handle is rejected before it reaches the library.
+                amdsmi.AmdSmiStatus.INVAL
+            ],
         )
         return
 
     def test_get_threads_per_core(self):
         self.common.print_func_name("")
+        # Takes no processor handle, so only the positive portion runs. Same
+        # status set as test_get_cpu_family (see there).
         self.common.run_cpu_api_contract(
             amdsmi.amdsmi_get_threads_per_core,
             "amdsmi_get_threads_per_core",
             handle_kind="none",
-            correct_accept=NO_CPU_INFO_ACCEPT,
+            wrong_accept=[],
+            correct_accept=[
+                amdsmi.AmdSmiStatus.SUCCESS,
+                # NOT_SUPPORTED: the platform does not provide this API, for example when no CPU
+                # sockets are present or the CPU family is unsupported.
+                amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+                # IO: no CPU or HSMP target on the host, so the identity read fails.
+                amdsmi.AmdSmiStatus.IO,
+            ],
+            null_accept=[],
         )
         return

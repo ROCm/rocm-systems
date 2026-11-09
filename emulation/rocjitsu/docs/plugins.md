@@ -474,12 +474,45 @@ There are two memory hooks, and they see different things.
 instruction still carries the address space it decoded as and the addresses it
 computed. `onAmdgpuMemoryAccessRouted` fires once routing has settled and
 reports a `MemoryAccessObservation` describing the access the memory system is
-actually about to be asked for — the pipeline it was issued to, the wait
-counter it will post to, and the addresses it was issued with. The difference is
-not cosmetic: a FLAT access into the shared aperture decodes as global and is
-issued to the LDS pipeline with its addresses rewritten and its counter changed,
-so an observer using the earlier hook charges it against the wrong cache at an
-address the memory system never uses.
+actually about to be asked for — the pipeline it was issued to, its routing-selected
+counter, and its effective addresses. The scalar `wait_counter` field does not
+describe the complete wait requirement: mixed FLAT retains its VMEM counter here,
+while `VectorMemState::routed_issue_info` carries both VMEM and LDS obligations.
+Consult that routed issue's `counter_obligations()` for the full set.
+
+When all requesting FLAT lanes use the shared aperture, routing selects the
+LDS pipeline and sets `normalized_to_local` to `true`. This flag describes the
+uniform local route, not whether addresses were normalized.
+
+Mixed FLAT requests retain `MemoryRoute::GLOBAL`. The global pipeline separates the lanes by backing store, completing
+retryable global/scratch work before accessing LDS. These
+observations have `normalized_to_local == false`. On both routes, `addresses`
+reports effective ordinary LDS addresses, which can still be outside the backing, and
+`pre_routing_addresses` preserves the original aperture addresses. Normalizing
+shared lanes during routing gives execution and observers the same addresses.
+CDNA5 DDS lanes are identified separately. Their reported values also include
+LDS-base arithmetic, but identify neither a DDS backing location nor a valid
+LDS allocation address. Requesting DDS lanes emit a warning naming the instruction
+and PC, then fault before any memory effects because DDS backing is unimplemented.
+On other architectures the shared aperture remains LDS; out-of-backing accesses
+read zero and discard writes.
+
+For RDNA4 FLAT LDS requests, the offset wraps to 17 bits before adding the
+workgroup base. `flat_local_allocation_end` captures the exclusive modeled
+`lds_base + lds_size` limit and remains fixed across retries. This includes the
+current 256-byte scheduler rounding; PM4 sizes may already be 512-byte multiples
+before that rounding. Target allocation and encoding granules remain unmodeled.
+A lane whose first memory element does not fit is rejected in full and appears
+in `flat_local_oob_lane_mask`. Other lanes retain only complete elements below
+the allocation end (DWORDs for multiword transfers); atomics require their whole
+element. Rejected reads return zero and rejected writes are discarded. These
+bounds leave `valid_lane_mask`, `request_lane_mask` and nominal counter
+participation unchanged, so those masks describe requests rather than bytes
+actually accessed.
+
+Observers must inspect `flat_local_lane_mask` and `flat_dds_lane_mask` to account
+for LDS and DDS lanes; choosing a backing store
+from `route` alone misses the shared-aperture portion of a mixed request.
 
 `decoded_space` preserves the instruction's original address-space family
 independently of its effective `route`, so explicit SCRATCH remains distinct

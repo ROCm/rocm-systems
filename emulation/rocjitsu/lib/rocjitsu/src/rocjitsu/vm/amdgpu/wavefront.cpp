@@ -48,10 +48,6 @@ void Wavefront::update_activity_counts(bool was_active, bool was_runnable) {
   (void)previous;
 }
 
-Lds &Wavefront::lds() { return lds_ ? *lds_ : cu_.lds(); }
-
-const Lds &Wavefront::lds() const { return lds_ ? *lds_ : cu_.lds(); }
-
 bool Wavefront::uses_separate_trap_ctrl() const {
   return isa_properties(cu_.arch()).wave_state_layout != WaveStateLayout::Legacy;
 }

@@ -65,6 +65,7 @@ test_categories:
       - "EnqueueCountTests.*"
       - "DdaCollCommon.*"
       - "DdaVecElementAdd.*"
+      - "Fp8ReduceTest.*"
       - "CheapPostSendFenceTests.*"
       - "Gfx1250SendRecvLl128WindowTests.*"
       - "BitOpsTemplateAllIntTestsFixture.*"

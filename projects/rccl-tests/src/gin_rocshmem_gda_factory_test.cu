@@ -114,7 +114,7 @@ static int test_qp_creation(int rank, int nranks, MPI_Comm comm) {
   void **gpu_qps = nullptr;
 
   int rc = rocshmem_gin_create_qps(nranks, rank, mpi_allgather, &comm,
-                                    &qp_set, &gpu_qps);
+                                    /*traffic_class=*/0, &qp_set, &gpu_qps);
   if (rc != 0) {
     fprintf(stderr, "[rank %d] FAIL: rocshmem_gin_create_qps returned %d\n", rank, rc);
     return -1;
@@ -135,7 +135,7 @@ static int test_put(int rank, int nranks, MPI_Comm comm) {
   void **gpu_qps = nullptr;
 
   int rc = rocshmem_gin_create_qps(nranks, rank, mpi_allgather, &comm,
-                                    &qp_set, &gpu_qps);
+                                    /*traffic_class=*/0, &qp_set, &gpu_qps);
   if (rc != 0) {
     fprintf(stderr, "[rank %d] FAIL: QP creation failed\n", rank);
     return -1;
@@ -226,7 +226,7 @@ static int test_atomic_signal(int rank, int nranks, MPI_Comm comm) {
   void **gpu_qps = nullptr;
 
   int rc = rocshmem_gin_create_qps(nranks, rank, mpi_allgather, &comm,
-                                    &qp_set, &gpu_qps);
+                                    /*traffic_class=*/0, &qp_set, &gpu_qps);
   if (rc != 0) {
     fprintf(stderr, "[rank %d] FAIL: QP creation failed\n", rank);
     return -1;
@@ -287,7 +287,7 @@ static int test_put_signal(int rank, int nranks, MPI_Comm comm) {
   void **gpu_qps = nullptr;
 
   int rc = rocshmem_gin_create_qps(nranks, rank, mpi_allgather, &comm,
-                                    &qp_set, &gpu_qps);
+                                    /*traffic_class=*/0, &qp_set, &gpu_qps);
   if (rc != 0) {
     fprintf(stderr, "[rank %d] FAIL: QP creation failed\n", rank);
     return -1;

@@ -152,6 +152,7 @@ struct alignas(64) ncclIbDev {
   int dmaBufSupported;
   int8_t udSupported;  // -1 not probed yet, 0 no, 1 yes
   int8_t rdmaReadSupported;  // -1 not probed yet, 0 no, 1 yes
+  bool speedFromQuery;  // test-only: true if speed came from ibv_query_port_speed()
   int16_t railId;
   int16_t planeId;
   int16_t planeIdx;
@@ -160,6 +161,9 @@ struct alignas(64) ncclIbDev {
     struct {
       int dataDirect;
     } mlx5;
+    struct {
+      uint8_t udmaCount;
+    } ionic;
   } capsProvider;
   struct ncclIbGidInfo gidInfo;
 };

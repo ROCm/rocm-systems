@@ -357,6 +357,18 @@ if _staged_amdsmi:
 PASS = "AMDSMI_STATUS_SUCCESS"
 FAIL = "AMDSMI_STATUS_INVAL"
 
+
+def failure_text(exc):
+    """Describe a collected test failure.
+
+    Assertion messages already say what failed. Anything else is a surprise (a bug in
+    the test, the Python wrapper or the library), so name its type: "unexpected KeyError: 'x'".
+    """
+    if isinstance(exc, AssertionError):
+        return str(exc)
+    return f"unexpected {type(exc).__name__}: {exc}"
+
+
 # Status-code -> name map, derived once from the AmdSmiStatus enum so the table
 # never drifts from the library. Shared by the Common class and the standalone
 # performance benchmark suites (which intentionally do not inherit Common).
@@ -1273,8 +1285,6 @@ class Common:
             # Set bad gpu: None is rejected by the isinstance check in amdsmi_interface.py,
             # raising AmdSmiParameterException(INVAL). Platform-agnostic and unambiguous.
             self.bad_gpu = None
-            # Same sentinel for CPU/CPU-core APIs; named separately so CPU tests read clearly.
-            self.bad_cpu = None
 
             self.virt_mode = []
             self.asic_info = []
@@ -1325,7 +1335,7 @@ class Common:
                 else:
                     print(msg)
                 if isinstance(data, dict) or isinstance(data, list):
-                    print(json.dumps(data, sort_keys=False, indent=4, default=str), flush=True)
+                    print(json.dumps(data, sort_keys=False, indent=4), flush=True)
                 else:
                     print(data)
         return
@@ -1678,12 +1688,12 @@ class Common:
             raise unittest.SkipTest(msg)
         return
 
-    def _build_call_msg(self, func_name, i, j, params, label="gpu"):
+    def _build_call_msg(self, func_name, i, j, params):
         msg = f"\t### {func_name}("
         if i is not None:
-            msg += f"{label}={i}"
+            msg += f"gpu={i}"
         if j is not None:
-            msg += f", {label}={j}"
+            msg += f", gpu={j}"
         for param_name, param_value in params.items():
             if isinstance(param_value, list):
                 msg += f", {param_name}={{value}}"
@@ -1816,134 +1826,13 @@ class Common:
         except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException):
             return []
 
-    def _skip_cpu_if_unsupported(self, handles):
-        """Skip the calling CPU test when the host CPU cannot be exercised.
-
-        Two cases are treated as "CPU not supported":
-          * no CPU handles were enumerated (library initialized without CPUs), and
-          * the CPU/platform does not implement the HSMP mailbox (e.g. STX APUs),
-            probed with the lightweight amdsmi_get_cpu_hsmp_proto_ver() query. A
-            driver node may exist while the platform still rejects HSMP messages,
-            so an actual probe is more reliable than checking for /dev/hsmp.
-        """
-        if not handles:
-            msg = "\tNo CPU processors found; skipping CPU-specific test"
-            self.print(msg)
-            raise unittest.SkipTest(msg)
-        sockets = self._cpu_socket_handles()
-        if not sockets:
-            msg = "\tNo CPU processors found; skipping CPU-specific test"
-            self.print(msg)
-            raise unittest.SkipTest(msg)
-        try:
-            amdsmi.amdsmi_get_cpu_hsmp_proto_ver(sockets[0])
-        except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException):
-            msg = "\tCPU does not support the HSMP/ESMI interface; skipping CPU-specific test"
-            self.print(msg)
-            raise unittest.SkipTest(msg)
-
-    def skip_without_cpu(self):
-        """CPU socket handles, skipping the calling test when the CPU is unsupported.
-
-        For CPU tests that iterate handles inline (rather than through
-        Test_API_Per_CPU) but still need to skip cleanly on CPU-less or
-        HSMP-unsupported hosts.
-        """
-        handles = self._cpu_socket_handles()
-        self._skip_cpu_if_unsupported(handles)
-        return handles
-
-    def skip_without_cpu_core(self):
-        """CPU core handles, skipping the calling test when the CPU is unsupported.
-
-        Core-handle counterpart to skip_without_cpu() for inline-iterating tests.
-        """
-        handles = self._cpu_core_handles()
-        self._skip_cpu_if_unsupported(handles)
-        return handles
-
-    def _Test_API_Per_Handles(self, handles, label, **kwargs):
-        params = kwargs
-        iterator = iter(params.items())
-        func_name, func = next(iterator)
-        del params[func_name]
-
-        self._skip_cpu_if_unsupported(handles)
-
-        raise_exception = None
-        for i in range(len(handles) + 1):
-            cond = self.PASS
-            if i < len(handles):
-                handle = handles[i]
-            else:
-                handle = self.bad_cpu
-                i = "invalid"
-                cond = self.FAIL
-
-            msg = self._build_call_msg(func_name, i, None, params, label=label)
-            try:
-                data = func(handle, *[value for value in params.values()])
-                self.print(msg, data)
-                self.check_ret("", "", cond)
-            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                if self.check_ret(msg, e, cond):
-                    raise_exception = e
-            self.print("")
-        if raise_exception:
-            raise raise_exception
-        return
-
-    def Test_API_Per_CPU(self, **kwargs):
-        """Tests an API against every CPU socket handle and one invalid handle.
-
-        Skips the calling test when the library was initialized without CPUs.
-        """
-        return self._Test_API_Per_Handles(self._cpu_socket_handles(), "cpu", **kwargs)
-
-    def Test_API_Per_CPU_Core(self, **kwargs):
-        """Tests an API against every CPU-core handle and one invalid handle.
-
-        Skips the calling test when the library was initialized without CPUs.
-        """
-        return self._Test_API_Per_Handles(self._cpu_core_handles(), "core", **kwargs)
-
     # ------------------------------------------------------------------ #
     # CPU API contract: negative-input + positive-input, never skip.
     # ------------------------------------------------------------------ #
-    # Default accept sets for run_cpu_api_contract(). Built on expect_status /
-    # status_sweep, which tolerate nothing implicitly (unlike check_ret).
-    #
-    #  * CPU_WRONG_ACCEPT   - a GPU handle (or any non-CPU handle) handed to a
-    #                         CPU/core API must be rejected, never SUCCESS. The
-    #                         exact rejection code is platform- and state-
-    #                         dependent: the ESMI/HSMP layer may answer
-    #                         NO_HSMP_MSG_SUP (no HSMP mailbox for that target),
-    #                         NOT_FOUND (the out-of-range socket for a GPU handle
-    #                         no longer resolves once the ESMI socket cache has
-    #                         been touched), NOT_SUPPORTED, or INVAL (the handle
-    #                         fails validation outright). All four are valid
-    #                         rejections of a bogus handle - the contract only
-    #                         forbids SUCCESS. APIs that do not validate the
-    #                         processor handle at all (version/firmware queries
-    #                         that return global data) genuinely succeed with any
-    #                         handle; those pass check_wrong_handle=False so this
-    #                         non-applicable portion is skipped rather than failed.
-    #  * CPU_CORRECT_ACCEPT - a real CPU/core handle: SUCCESS, or a documented
-    #                         "feature absent" status on platforms that lack it.
-    #  * CPU_NULL_ACCEPT    - a null (zero) processor handle is rejected by the
-    #                         native library with INVAL before any dereference.
-    CPU_WRONG_ACCEPT = [
-        amdsmi.AmdSmiStatus.NOT_SUPPORTED,
-        amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
-        amdsmi.AmdSmiStatus.NOT_FOUND,
-        amdsmi.AmdSmiStatus.INVAL,
-    ]
-    CPU_CORRECT_ACCEPT = [
-        amdsmi.AmdSmiStatus.SUCCESS,
-        amdsmi.AmdSmiStatus.NOT_SUPPORTED,
-        amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
-    ]
-    CPU_NULL_ACCEPT = [amdsmi.AmdSmiStatus.INVAL]
+    # Accept sets (wrong_accept, correct_accept, null_accept) are required
+    # arguments of run_cpu_api_contract(), passed at each call site. Built on
+    # expect_status / status_sweep, which tolerate nothing implicitly (unlike
+    # check_ret).
 
     @staticmethod
     def _cpu_call_msg(func_name, handle_part, desc):
@@ -1985,7 +1874,7 @@ class Common:
     def _portion_status(failures):
         """Reduce a portion's collected failures to a ``(status, detail)`` pair."""
         if failures:
-            return "FAIL", "\n".join(str(f) for f in failures)
+            return "FAIL", "\n".join(failure_text(f) for f in failures)
         return "PASS", None
 
     def _cpu_negative_wrong_handle(self, func, func_name, desc, args, accept):
@@ -2185,11 +2074,12 @@ class Common:
         self,
         func,
         func_name,
+        *,
+        wrong_accept,
+        correct_accept,
+        null_accept,
         handle_kind="socket",
         arg_sets=None,
-        wrong_accept=None,
-        correct_accept=None,
-        null_accept=None,
         positive=None,
         check_wrong_handle=True,
     ):
@@ -2234,9 +2124,11 @@ class Common:
                 ``"nbio_id=0"``) and *args* a tuple/scalar. ``None`` means none.
                 The negative portions use the first entry; the positive portion
                 iterates them all.
-            wrong_accept, correct_accept, null_accept: statuses treated as
-                correct for each portion. Default to CPU_WRONG_ACCEPT,
-                CPU_CORRECT_ACCEPT and CPU_NULL_ACCEPT.
+            wrong_accept, correct_accept, null_accept: required, no defaults.
+                Statuses treated as correct for the wrong-handle, positive and
+                null-handle portions. Pass ``[]`` for a portion that does not run
+                (``wrong_accept`` with ``check_wrong_handle=False``, and both
+                ``wrong_accept`` and ``null_accept`` with ``handle_kind="none"``).
             positive: optional ``callable(handles, failures)`` replacing the
                 default positive portion. Used by read-modify-write tests that
                 must get/set/restore rather than issue a single call. It receives
@@ -2255,9 +2147,6 @@ class Common:
                 the offending portion name(s) and detail.
         """
         arg_sets = self._normalize_arg_sets(arg_sets)
-        wrong_accept = self.CPU_WRONG_ACCEPT if wrong_accept is None else wrong_accept
-        correct_accept = self.CPU_CORRECT_ACCEPT if correct_accept is None else correct_accept
-        null_accept = self.CPU_NULL_ACCEPT if null_accept is None else null_accept
 
         results = []
         if handle_kind == "none":

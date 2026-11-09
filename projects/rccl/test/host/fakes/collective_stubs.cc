@@ -84,15 +84,13 @@ void ResetCollectiveStubs() {
   g_ncclArgsGlobalCheck = DefaultArgsGlobalCheck;
 }
 
-// os.h
-int ncclOsCpuCount(const ncclAffinity&) { ::abort(); }
-ncclResult_t ncclOsSetAffinity(const ncclAffinity&) { ::abort(); }
-
 // transport.h -- only the connect/setup entry points group.cc references.
 ncclResult_t ncclTransportRingConnect(struct ncclComm*) { ::abort(); }
 ncclResult_t ncclTransportTreeConnect(struct ncclComm*) { ::abort(); }
 ncclResult_t ncclTransportPatConnect(struct ncclComm*) { ::abort(); }
 ncclResult_t ncclNvlsBufferSetup(struct ncclComm*) { ::abort(); }
 ncclResult_t ncclNvlsTreeConnect(struct ncclComm*) { ::abort(); }
+#ifndef RCCL_COLLECTIVE_STUBS_OMIT_COLL_NET  // the binary compiles the real coll_net.cc
 ncclResult_t ncclCollNetChainBufferSetup(ncclComm_t) { ::abort(); }
 ncclResult_t ncclCollNetDirectBufferSetup(ncclComm_t) { ::abort(); }
+#endif

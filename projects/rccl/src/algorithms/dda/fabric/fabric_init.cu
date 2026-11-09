@@ -170,7 +170,8 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
 
   {
     auto barrierPair =
-      dda::common::FabricGpuBarrier::mallocAndInit(nRanks, nBlocksMax, comm->rank, comm->bootstrap, comm->memManager);
+      dda::common::FabricGpuBarrier::mallocAndInit(nRanks, nBlocksMax, comm->rank, comm->bootstrap, comm->memManager,
+                                                   dda::common::DdaKernelParams{comm->abortFlagDev});
     if (!barrierPair.first) {
       WARN("ncclDdaFabricCommInit: FabricGpuBarrier malloc/init failed");
       goto fail;

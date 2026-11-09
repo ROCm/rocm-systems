@@ -82,7 +82,8 @@ const std::array<F64UnaryCase, 10> kCases = {{
     {"v_floor_f64", 26, true},
     {"v_trunc_f64", 23, true},
     {"v_rndne_f64", 25, true},
-    {"v_fract_f64", 50, true},
+    // fract: raw-bit result, NaNs included, so exact compare (is_float=false).
+    {"v_fract_f64", 50, false},
     {"v_rcp_f64", 37, true},
     {"v_rsq_f64", 38, true},
     {"v_sqrt_f64", 40, true},

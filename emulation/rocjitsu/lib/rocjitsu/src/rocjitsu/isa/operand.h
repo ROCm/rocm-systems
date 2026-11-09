@@ -218,6 +218,8 @@ public:
   /// default covers only the literal case; ISA subclasses override it to add
   /// inline-constant resolution. Useful for static analysis (e.g. detecting
   /// `s_mov exec, -1`) where no wavefront is available.
+  /// This is the raw scalar carrier, matching read_scalar(); precision-specific
+  /// lane formatting and numeric scalar F16 reads may interpret it differently.
   [[nodiscard]] virtual std::optional<uint64_t> const_value() const { return literal64_value(); }
 
   /// @brief Operand width in bits.
@@ -227,6 +229,22 @@ public:
   uint8_t register_byte_mask() const { return register_byte_mask_; }
   /// @brief Construction-only, after literal and extension operands are finalized.
   void set_register_byte_mask(uint8_t mask) { register_byte_mask_ = mask; }
+
+  enum class LaneInlineFloatFormat : uint8_t { F16, F32, BF16 };
+
+  /// @brief Format used for floating inline selectors in 16-bit lane reads.
+  /// @details Set only during decoded-operand construction, after fixups.
+  /// Synthetic operands default to F16, preserving their width-based behavior.
+  /// Raw scalar reads, register carriers and literals are unaffected.
+  LaneInlineFloatFormat lane_inline_float_format() const { return lane_inline_float_format_; }
+  void set_lane_inline_float_format(LaneInlineFloatFormat format) {
+    lane_inline_float_format_ = format;
+  }
+
+  /// @brief Preserve bytes outside the decoded destination's register byte mask.
+  /// @details Construction-only; the decoder publishes immutable operands.
+  bool preserve_unwritten_bytes() const { return preserve_unwritten_bytes_; }
+  void set_preserve_unwritten_bytes() { preserve_unwritten_bytes_ = true; }
 
   /// @brief Whether this operand references a VGPR or AccVGPR.
   /// @details A construction-time capability flag. Field-bearing operands are
@@ -276,6 +294,24 @@ public:
     writable_ = writable;
     is_vgpr_ = is_vgpr;
   }
+
+  /// @brief Whether this encoded operand is a wave mask: one bit per lane, so
+  /// one SGPR in Wave32 and an SGPR pair in Wave64.
+  /// @details A construction-time flag, generated from the MR ISA's
+  /// FMT_NUM_M64 data format on Wave32-capable targets (RDNA and gfx1250), for
+  /// a consumer that adjusts the operand's width to the wave size. The
+  /// encoding does not carry the wave size, so an RDNA decoder sizes the
+  /// operand for Wave64. Fieldless VCC and EXEC lane masks stay unmarked,
+  /// except a VOPC destination that SDWA sd=1 turns into an encoded SGPR, so
+  /// the flag does not find every lane-mask access: a VOPC e32 write of VCC
+  /// is a lane mask but unmarked. CDNA1-4 are Wave64-only and leave the flag
+  /// clear.
+  [[nodiscard]] bool is_wave_mask() const { return wave_mask_; }
+
+  /// @brief Mark this operand a wave mask.
+  /// @warning Construction-only, and after any reassignment of the operand,
+  /// which resets the flag.
+  void set_wave_mask() { wave_mask_ = true; }
 
   /// @brief Assign the GFX12 VGPR high-bank role for this operand.
   void set_vgpr_msb_role(amdgpu::VgprMsbRole role) { vgpr_msb_role_ = role; }
@@ -441,23 +477,24 @@ protected:
     decoded_vgpr_width_ = static_cast<uint8_t>(std::max(1u, unsigned(size_bits_) / 32));
   }
 
-  /// @brief Capability/role flags, set once at construction and never
-  /// mutated afterward. Subclass constructors set is_vgpr_; fieldless
-  /// operands get their (reads_value, writable, is_vgpr) triple from
-  /// apply_fieldless_caps(). Kept out of the public interface so only
-  /// construction can flip them: readers do lockless bool loads on the CU
-  /// thread and rely on the flags being immutable post-construction. Query
-  /// through is_vgpr() / reads_value() / is_writable() / is_fieldless().
+  /// @brief Capability/role flags, immutable after decoded operands are ready.
+  /// Subclass constructors set is_vgpr_; fieldless operands get their capability
+  /// triple from apply_fieldless_caps(), and generated constructors mark wave
+  /// masks with set_wave_mask(). Construction-only setters finish source formats
+  /// and write windows after literal/extension fixups. CU readers rely on these
+  /// flags remaining immutable once decoding publishes the operand.
   ///
   /// Defaults describe a normal field-bearing operand (readable, writable,
-  /// not fieldless).
+  /// not fieldless, not a wave mask).
   uint16_t decoded_vgpr_index_ = 0;
   uint8_t decoded_vgpr_width_ = 0;
   bool is_vgpr_ : 1 = false;
   bool reads_value_ : 1 = true;
   bool writable_ : 1 = true;
   bool fieldless_ : 1 = false;
-  uint8_t reserved_caps_ : 4 = 0;
+  bool wave_mask_ : 1 = false;
+  LaneInlineFloatFormat lane_inline_float_format_ : 2 = LaneInlineFloatFormat::F16;
+  bool preserve_unwritten_bytes_ : 1 = false;
   EncodingError encoding_error_ = EncodingError::None;
 
 private:

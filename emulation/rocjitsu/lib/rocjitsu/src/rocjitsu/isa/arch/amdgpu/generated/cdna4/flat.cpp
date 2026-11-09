@@ -34,6 +34,16 @@ FlatLoadUbyteFlat::FlatLoadUbyteFlat(const MachineInst *inst)
     src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -88,6 +98,16 @@ FlatLoadSbyteFlat::FlatLoadSbyteFlat(const MachineInst *inst)
     src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -142,6 +162,16 @@ FlatLoadUshortFlat::FlatLoadUshortFlat(const MachineInst *inst)
     src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -196,6 +226,16 @@ FlatLoadSshortFlat::FlatLoadSshortFlat(const MachineInst *inst)
     src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -250,6 +290,16 @@ FlatLoadDwordFlat::FlatLoadDwordFlat(const MachineInst *inst)
     src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -304,6 +354,16 @@ FlatLoadDwordx2Flat::FlatLoadDwordx2Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -358,6 +418,16 @@ FlatLoadDwordx3Flat::FlatLoadDwordx3Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -412,6 +482,16 @@ FlatLoadDwordx4Flat::FlatLoadDwordx4Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -466,6 +546,16 @@ FlatStoreByteFlat::FlatStoreByteFlat(const MachineInst *inst)
     src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -523,6 +613,16 @@ FlatStoreByteD16HiFlat::FlatStoreByteD16HiFlat(const MachineInst *inst)
     src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -580,6 +680,16 @@ FlatStoreShortFlat::FlatStoreShortFlat(const MachineInst *inst)
     src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -637,6 +747,16 @@ FlatStoreShortD16HiFlat::FlatStoreShortD16HiFlat(const MachineInst *inst)
     src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -694,6 +814,16 @@ FlatStoreDwordFlat::FlatStoreDwordFlat(const MachineInst *inst)
     src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -750,6 +880,16 @@ FlatStoreDwordx2Flat::FlatStoreDwordx2Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -806,6 +946,16 @@ FlatStoreDwordx3Flat::FlatStoreDwordx3Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -862,6 +1012,16 @@ FlatStoreDwordx4Flat::FlatStoreDwordx4Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -918,6 +1078,16 @@ FlatLoadUbyteD16Flat::FlatLoadUbyteD16Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -972,6 +1142,16 @@ FlatLoadUbyteD16HiFlat::FlatLoadUbyteD16HiFlat(const MachineInst *inst)
     src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -1026,6 +1206,16 @@ FlatLoadSbyteD16Flat::FlatLoadSbyteD16Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -1080,6 +1270,16 @@ FlatLoadSbyteD16HiFlat::FlatLoadSbyteD16HiFlat(const MachineInst *inst)
     src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -1134,6 +1334,16 @@ FlatLoadShortD16Flat::FlatLoadShortD16Flat(const MachineInst *inst)
     src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -1188,6 +1398,16 @@ FlatLoadShortD16HiFlat::FlatLoadShortD16HiFlat(const MachineInst *inst)
     src_operands_[num_src_++] = &flat_scratch;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -1251,6 +1471,16 @@ FlatAtomicSwapFlat::FlatAtomicSwapFlat(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -1317,6 +1547,16 @@ FlatAtomicCmpswapFlat::FlatAtomicCmpswapFlat(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -1383,6 +1623,16 @@ FlatAtomicAddFlat::FlatAtomicAddFlat(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -1449,6 +1699,16 @@ FlatAtomicSubFlat::FlatAtomicSubFlat(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -1515,6 +1775,16 @@ FlatAtomicSminFlat::FlatAtomicSminFlat(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -1581,6 +1851,16 @@ FlatAtomicUminFlat::FlatAtomicUminFlat(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -1647,6 +1927,16 @@ FlatAtomicSmaxFlat::FlatAtomicSmaxFlat(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -1713,6 +2003,16 @@ FlatAtomicUmaxFlat::FlatAtomicUmaxFlat(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -1779,6 +2079,16 @@ FlatAtomicAndFlat::FlatAtomicAndFlat(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -1845,6 +2155,16 @@ FlatAtomicOrFlat::FlatAtomicOrFlat(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -1911,6 +2231,16 @@ FlatAtomicXorFlat::FlatAtomicXorFlat(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -1977,6 +2307,16 @@ FlatAtomicIncFlat::FlatAtomicIncFlat(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -2043,6 +2383,16 @@ FlatAtomicDecFlat::FlatAtomicDecFlat(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -2109,6 +2459,16 @@ FlatAtomicAddF32Flat::FlatAtomicAddF32Flat(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -2175,6 +2535,16 @@ FlatAtomicPkAddF16Flat::FlatAtomicPkAddF16Flat(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -2241,6 +2611,16 @@ FlatAtomicAddF64Flat::FlatAtomicAddF64Flat(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -2307,6 +2687,16 @@ FlatAtomicMinF64Flat::FlatAtomicMinF64Flat(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -2373,6 +2763,16 @@ FlatAtomicMaxF64Flat::FlatAtomicMaxF64Flat(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -2439,6 +2839,16 @@ FlatAtomicPkAddBf16Flat::FlatAtomicPkAddBf16Flat(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -2505,6 +2915,16 @@ FlatAtomicSwapX2Flat::FlatAtomicSwapX2Flat(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -2571,6 +2991,16 @@ FlatAtomicCmpswapX2Flat::FlatAtomicCmpswapX2Flat(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -2637,6 +3067,16 @@ FlatAtomicAddX2Flat::FlatAtomicAddX2Flat(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -2703,6 +3143,16 @@ FlatAtomicSubX2Flat::FlatAtomicSubX2Flat(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -2769,6 +3219,16 @@ FlatAtomicSminX2Flat::FlatAtomicSminX2Flat(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -2835,6 +3295,16 @@ FlatAtomicUminX2Flat::FlatAtomicUminX2Flat(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -2901,6 +3371,16 @@ FlatAtomicSmaxX2Flat::FlatAtomicSmaxX2Flat(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -2967,6 +3447,16 @@ FlatAtomicUmaxX2Flat::FlatAtomicUmaxX2Flat(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -3033,6 +3523,16 @@ FlatAtomicAndX2Flat::FlatAtomicAndX2Flat(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -3099,6 +3599,16 @@ FlatAtomicOrX2Flat::FlatAtomicOrX2Flat(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -3165,6 +3675,16 @@ FlatAtomicXorX2Flat::FlatAtomicXorX2Flat(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -3231,6 +3751,16 @@ FlatAtomicIncX2Flat::FlatAtomicIncX2Flat(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -3297,6 +3827,16 @@ FlatAtomicDecX2Flat::FlatAtomicDecX2Flat(const MachineInst *inst)
     dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -3350,6 +3890,16 @@ GlobalLoadLdsUbyteFlat::GlobalLoadLdsUbyteFlat(const MachineInst *inst)
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -3372,7 +3922,7 @@ DecodeResult decodeGlobalLoadLdsUbyteFlat(const MachineInst *opcode,
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u) [[unlikely]]
-    return emit_error.emit() << "GLOBAL_LOAD_LDS_UBYTE requires its GLOBAL segment";
+    return emit_error.emit() << "GLOBAL_LOAD_LDS_UBYTE requires segment 2";
   return std::make_unique<GlobalLoadLdsUbyteFlat>(opcode);
 }
 } // namespace detail
@@ -3394,6 +3944,16 @@ GlobalLoadLdsSbyteFlat::GlobalLoadLdsSbyteFlat(const MachineInst *inst)
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -3416,7 +3976,7 @@ DecodeResult decodeGlobalLoadLdsSbyteFlat(const MachineInst *opcode,
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u) [[unlikely]]
-    return emit_error.emit() << "GLOBAL_LOAD_LDS_SBYTE requires its GLOBAL segment";
+    return emit_error.emit() << "GLOBAL_LOAD_LDS_SBYTE requires segment 2";
   return std::make_unique<GlobalLoadLdsSbyteFlat>(opcode);
 }
 } // namespace detail
@@ -3438,6 +3998,16 @@ GlobalLoadLdsUshortFlat::GlobalLoadLdsUshortFlat(const MachineInst *inst)
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -3460,7 +4030,7 @@ DecodeResult decodeGlobalLoadLdsUshortFlat(const MachineInst *opcode,
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u) [[unlikely]]
-    return emit_error.emit() << "GLOBAL_LOAD_LDS_USHORT requires its GLOBAL segment";
+    return emit_error.emit() << "GLOBAL_LOAD_LDS_USHORT requires segment 2";
   return std::make_unique<GlobalLoadLdsUshortFlat>(opcode);
 }
 } // namespace detail
@@ -3482,6 +4052,16 @@ GlobalLoadLdsSshortFlat::GlobalLoadLdsSshortFlat(const MachineInst *inst)
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -3504,7 +4084,7 @@ DecodeResult decodeGlobalLoadLdsSshortFlat(const MachineInst *opcode,
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u) [[unlikely]]
-    return emit_error.emit() << "GLOBAL_LOAD_LDS_SSHORT requires its GLOBAL segment";
+    return emit_error.emit() << "GLOBAL_LOAD_LDS_SSHORT requires segment 2";
   return std::make_unique<GlobalLoadLdsSshortFlat>(opcode);
 }
 } // namespace detail
@@ -3526,6 +4106,16 @@ GlobalLoadLdsDwordFlat::GlobalLoadLdsDwordFlat(const MachineInst *inst)
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -3548,7 +4138,7 @@ DecodeResult decodeGlobalLoadLdsDwordFlat(const MachineInst *opcode,
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u) [[unlikely]]
-    return emit_error.emit() << "GLOBAL_LOAD_LDS_DWORD requires its GLOBAL segment";
+    return emit_error.emit() << "GLOBAL_LOAD_LDS_DWORD requires segment 2";
   return std::make_unique<GlobalLoadLdsDwordFlat>(opcode);
 }
 } // namespace detail
@@ -3570,6 +4160,16 @@ GlobalLoadLdsDwordx4Flat::GlobalLoadLdsDwordx4Flat(const MachineInst *inst)
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -3592,7 +4192,7 @@ DecodeResult decodeGlobalLoadLdsDwordx4Flat(const MachineInst *opcode,
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u) [[unlikely]]
-    return emit_error.emit() << "GLOBAL_LOAD_LDS_DWORDX4 requires its GLOBAL segment";
+    return emit_error.emit() << "GLOBAL_LOAD_LDS_DWORDX4 requires segment 2";
   return std::make_unique<GlobalLoadLdsDwordx4Flat>(opcode);
 }
 } // namespace detail
@@ -3614,6 +4214,16 @@ GlobalLoadLdsDwordx3Flat::GlobalLoadLdsDwordx3Flat(const MachineInst *inst)
   num_dst_ = 1;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
     if (inst_.saddr != 0x7F) {
       saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
       src_operands_[num_src_++] = &saddr;
@@ -3636,8 +4246,303 @@ DecodeResult decodeGlobalLoadLdsDwordx3Flat(const MachineInst *opcode,
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 2u) [[unlikely]]
-    return emit_error.emit() << "GLOBAL_LOAD_LDS_DWORDX3 requires its GLOBAL segment";
+    return emit_error.emit() << "GLOBAL_LOAD_LDS_DWORDX3 requires segment 2";
   return std::make_unique<GlobalLoadLdsDwordx3Flat>(opcode);
+}
+} // namespace detail
+
+ScratchLoadLdsUbyteFlat::ScratchLoadLdsUbyteFlat(const MachineInst *inst)
+    : Flat("scratch_load_lds_ubyte", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::ScratchLoadLdsUbyteFlat)),
+      vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR,
+           (reinterpret_cast<const OpEncoding *>(inst)->vdst +
+            (reinterpret_cast<const OpEncoding *>(inst)->acc
+                 ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
+                 : 0))),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
+      saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &m0;
+  num_src_ = 2;
+  num_dst_ = 0;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+namespace detail {
+DecodeResult decodeScratchLoadLdsUbyteFlat(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Flat::validate_encoding(
+      "scratch_load_lds_ubyte", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 1u) [[unlikely]]
+    return emit_error.emit() << "SCRATCH_LOAD_LDS_UBYTE requires segment 1";
+  return std::make_unique<ScratchLoadLdsUbyteFlat>(opcode);
+}
+} // namespace detail
+
+ScratchLoadLdsSbyteFlat::ScratchLoadLdsSbyteFlat(const MachineInst *inst)
+    : Flat("scratch_load_lds_sbyte", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::ScratchLoadLdsSbyteFlat)),
+      vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR,
+           (reinterpret_cast<const OpEncoding *>(inst)->vdst +
+            (reinterpret_cast<const OpEncoding *>(inst)->acc
+                 ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
+                 : 0))),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
+      saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &m0;
+  num_src_ = 2;
+  num_dst_ = 0;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+namespace detail {
+DecodeResult decodeScratchLoadLdsSbyteFlat(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Flat::validate_encoding(
+      "scratch_load_lds_sbyte", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 1u) [[unlikely]]
+    return emit_error.emit() << "SCRATCH_LOAD_LDS_SBYTE requires segment 1";
+  return std::make_unique<ScratchLoadLdsSbyteFlat>(opcode);
+}
+} // namespace detail
+
+ScratchLoadLdsUshortFlat::ScratchLoadLdsUshortFlat(const MachineInst *inst)
+    : Flat("scratch_load_lds_ushort", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::ScratchLoadLdsUshortFlat)),
+      vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR,
+           (reinterpret_cast<const OpEncoding *>(inst)->vdst +
+            (reinterpret_cast<const OpEncoding *>(inst)->acc
+                 ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
+                 : 0))),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
+      saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &m0;
+  num_src_ = 2;
+  num_dst_ = 0;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+namespace detail {
+DecodeResult decodeScratchLoadLdsUshortFlat(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Flat::validate_encoding(
+      "scratch_load_lds_ushort", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 1u) [[unlikely]]
+    return emit_error.emit() << "SCRATCH_LOAD_LDS_USHORT requires segment 1";
+  return std::make_unique<ScratchLoadLdsUshortFlat>(opcode);
+}
+} // namespace detail
+
+ScratchLoadLdsSshortFlat::ScratchLoadLdsSshortFlat(const MachineInst *inst)
+    : Flat("scratch_load_lds_sshort", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::ScratchLoadLdsSshortFlat)),
+      vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR,
+           (reinterpret_cast<const OpEncoding *>(inst)->vdst +
+            (reinterpret_cast<const OpEncoding *>(inst)->acc
+                 ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
+                 : 0))),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
+      saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &m0;
+  num_src_ = 2;
+  num_dst_ = 0;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+namespace detail {
+DecodeResult decodeScratchLoadLdsSshortFlat(const MachineInst *opcode,
+                                            const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Flat::validate_encoding(
+      "scratch_load_lds_sshort", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 1u) [[unlikely]]
+    return emit_error.emit() << "SCRATCH_LOAD_LDS_SSHORT requires segment 1";
+  return std::make_unique<ScratchLoadLdsSshortFlat>(opcode);
+}
+} // namespace detail
+
+ScratchLoadLdsDwordFlat::ScratchLoadLdsDwordFlat(const MachineInst *inst)
+    : Flat("scratch_load_lds_dword", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::ScratchLoadLdsDwordFlat)),
+      vdst(32, OperandType::OPR_VGPR_OR_ACCVGPR,
+           (reinterpret_cast<const OpEncoding *>(inst)->vdst +
+            (reinterpret_cast<const OpEncoding *>(inst)->acc
+                 ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
+                 : 0))),
+      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), m0(32, OperandType::OPR_SDST_M0, 124),
+      saddr(0, OperandType::OPR_SREG, 0) {
+  src_operands_[0] = &addr;
+  src_operands_[1] = &m0;
+  num_src_ = 2;
+  num_dst_ = 0;
+  if (inst_.seg != 2)
+    src_operands_[num_src_++] = &flat_scratch;
+  if (inst_.seg == 1) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    if (!(inst_.lds != 0)) {
+      for (uint8_t i = 0; i < num_src_; ++i) {
+        if (src_operands_[i] != &addr)
+          continue;
+        for (uint8_t j = i + 1; j < num_src_; ++j)
+          src_operands_[j - 1] = src_operands_[j];
+        --num_src_;
+        break;
+      }
+    }
+    if (inst_.saddr != 0x7F) {
+      saddr = Operand(32, OperandType::OPR_SREG, inst_.saddr);
+      src_operands_[num_src_++] = &saddr;
+    }
+  } else if (inst_.seg == 2 && inst_.saddr != 0x7F) {
+    addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
+    saddr = Operand(64, OperandType::OPR_SREG, inst_.saddr);
+    src_operands_[num_src_++] = &saddr;
+  }
+  flat_scratch.apply_fieldless_caps(false, false, false);
+  m0.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
+  flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+namespace detail {
+DecodeResult decodeScratchLoadLdsDwordFlat(const MachineInst *opcode,
+                                           const DecodeErrorEmitter &emit_error) {
+  const auto *inst = opcode;
+  Result validation = Flat::validate_encoding(
+      "scratch_load_lds_dword", reinterpret_cast<const Flat::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  if (reinterpret_cast<const Flat::OpEncoding *>(inst)->seg != 1u) [[unlikely]]
+    return emit_error.emit() << "SCRATCH_LOAD_LDS_DWORD requires segment 1";
+  return std::make_unique<ScratchLoadLdsDwordFlat>(opcode);
 }
 } // namespace detail
 

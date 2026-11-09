@@ -16,6 +16,18 @@
 
 #define NCCL_MAX_NET_SIZE (1024 * 1024 * 1024L) // Rather than send INT_MAX which is 2G-1, send a power of two.
 
+// Keep host proxy scheduling and device kernel dispatch on the same compile-time capability.
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+#define NCCL_ALLGATHER_NET_OFFLOAD_SUPPORTED 0
+#else
+#define NCCL_ALLGATHER_NET_OFFLOAD_SUPPORTED 1
+#endif
+
+static inline bool ncclUseOneRpnNetRegChannelCap(ncclFunc_t func) {
+  return func == ncclFuncBroadcast ||
+         (func == ncclFuncAllGather && NCCL_ALLGATHER_NET_OFFLOAD_SUPPORTED);
+}
+
 // CHUNKSIZE must be a multiple of SLICESIZE
 // RCCL: Benchmarking on single node for MI300X showed improved throughput for single node always using
 // a single slice, so we have separate configurations for single node and multi-node.  Single node configs

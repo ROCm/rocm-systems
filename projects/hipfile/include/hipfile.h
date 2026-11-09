@@ -10,6 +10,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <sys/types.h>
+#include <time.h>
 
 /* Needed for struct sockaddr */
 #ifdef _WIN32

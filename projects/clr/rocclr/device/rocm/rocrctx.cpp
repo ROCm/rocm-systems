@@ -98,6 +98,10 @@ bool Hsa::LoadLib() {
   GET_ROCR_SYMBOL(hsa_amd_register_system_event_handler)
   GET_ROCR_SYMBOL(hsa_amd_queue_set_priority)
   GET_ROCR_OPTIONAL_SYMBOL(hsa_amd_queue_create)
+  // Absent before interface 1.36; signals are then created individually. Only a dynamically
+  // loaded ROCr can lack them: a linked build requires them, as it does hsa_amd_queue_create.
+  GET_ROCR_OPTIONAL_SYMBOL(hsa_amd_signal_batch_create)
+  GET_ROCR_OPTIONAL_SYMBOL(hsa_amd_signal_batch_destroy)
   GET_ROCR_SYMBOL(hsa_amd_memory_async_copy_rect)
   GET_ROCR_SYMBOL(hsa_amd_memory_lock_to_pool)
   GET_ROCR_SYMBOL(hsa_amd_signal_value_pointer)
@@ -111,7 +115,7 @@ bool Hsa::LoadLib() {
   GET_ROCR_SYMBOL(hsa_amd_vmem_address_free)
   GET_ROCR_SYMBOL(hsa_amd_vmem_handle_create)
   // Optional: absent on an older ROCr, in which case getVmmAllocInfo falls back.
-  GET_ROCR_OPTIONAL_SYMBOL_DECLTYPE(hsa_amd_vmem_get_vmem_info)
+  GET_ROCR_OPTIONAL_SYMBOL(hsa_amd_vmem_get_vmem_info)
   GET_ROCR_SYMBOL(hsa_amd_vmem_handle_release)
   GET_ROCR_SYMBOL(hsa_amd_vmem_map)
   GET_ROCR_SYMBOL(hsa_amd_vmem_unmap)
@@ -123,6 +127,7 @@ bool Hsa::LoadLib() {
   GET_ROCR_SYMBOL(hsa_amd_vmem_import_fabric_handle)
   GET_ROCR_SYMBOL(hsa_amd_vmem_retain_alloc_handle)
   GET_ROCR_SYMBOL(hsa_amd_agent_set_async_scratch_limit)
+  GET_ROCR_SYMBOL(hsa_amd_agent_set_attribute)
   GET_ROCR_SYMBOL(hsa_amd_vmem_address_reserve_align)
   GET_ROCR_SYMBOL(hsa_amd_enable_logging)
   GET_ROCR_SYMBOL(hsa_amd_memory_get_preferred_copy_engine)

@@ -133,22 +133,25 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
   const bool isHostMemBacked = (prop->location.type == hipMemLocationTypeHost ||
                                 prop->location.type == hipMemLocationTypeHostNuma ||
                                 prop->location.type == hipMemLocationTypeHostNumaCurrent);
-  bool useHostDevice = isHostMemBacked;
-  // NUMA node selector handed to ROCclr: explicit node for HostNuma; -1 (default/
-  // resolve-current) for Host, HostNumaCurrent, and non-NUMA allocations.
-  const int numaNode =
-      (prop->location.type == hipMemLocationTypeHostNuma) ? prop->location.id : -1;
+  // NUMA node selector handed to ROCclr: explicit node for HostNuma; -1 (resolve current) for 
+  // HostNumaCurrent; -2 (default) for Host.
+  int numaNode = -2;
+  if (prop->location.type == hipMemLocationTypeHostNuma) {
+    numaNode = prop->location.id;
+  } else if (prop->location.type == hipMemLocationTypeHostNumaCurrent) {
+    numaNode = -1;
+  }
   if (isHostMemBacked) {
     // Pack the host-NUMA marker + node into the upper bits so roc::Memory::create
-    // routes to the CPU-pool allocator (hostVmemAlloc). Stored node value is
-    // (node + 1); 0 means "resolve current node" (Host/HostNumaCurrent, numaNode == -1).
+    // routes to the CPU-pool allocator (hostVmemAlloc). Stored node value is (node + 2);
+    // 0 means use default agent ("Host"), 1 means "resolve current node" ("HostNumaCurrent").
     ihipFlags |= ROCCLR_MEM_HOST_NUMA;
-    ihipFlags |= (static_cast<cl_svm_mem_flags>(numaNode + 1) << ROCCLR_MEM_HOST_NUMA_NODE_SHIFT) &
+    ihipFlags |= (static_cast<cl_svm_mem_flags>(numaNode + 2) << ROCCLR_MEM_HOST_NUMA_NODE_SHIFT) &
                  ROCCLR_MEM_HOST_NUMA_NODE_MASK;
   }
   hip::Device* dev = hip::getCurrentDevice();
   amd::Context* curDevContext = dev->asContext();
-  amd::Context* amdContext = useHostDevice ? hip::host_context : curDevContext;
+  amd::Context* amdContext = isHostMemBacked ? hip::host_context : curDevContext;
 
   if (amdContext == nullptr) {
     HIP_RETURN(hipErrorOutOfMemory);
@@ -164,7 +167,7 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
   }
 
   void* ptr = amd::SvmBuffer::malloc(*amdContext, ihipFlags, size, dev_info.memBaseAddrAlign_,
-                                     useHostDevice ? curDevContext->svmDevices()[0] : nullptr);
+                                     isHostMemBacked ? curDevContext->svmDevices()[0] : nullptr);
 
   // Handle out of memory cases,
   if (ptr == nullptr) {

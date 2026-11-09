@@ -35,6 +35,8 @@ test_categories:
       - "RcclDdaTierThresholds.*"
       - "CeAllReduceEligibilityTest.*"
       - "RcclCeAllReduceEligibility.*"
+      - "CeReduceScatterEligibilityTest.*"
+      - "RcclCeReduceScatterEligibility.*"
       - "RcclAllGatherCeRegisteredWindow.*"
       - "RcclCeGraphLatch.*"
       - "RcclAlltoAllDecision.*"
@@ -47,6 +49,7 @@ test_categories:
       - "GinAllReduceEligibilityTest.*"
       - "NetSocketTests.*"
       - "NetBootstrapInterfaceTest.*"
+      - "BcmLinksTest.*"
       - "SocketPollTimeout.*"
       - "Ipcsocket.*"
       - "XmlTest.*"
@@ -59,6 +62,8 @@ test_categories:
       - "TopoNicFusionTests.*"
       - "P2pMaxNchannels.*"
       - "ChannelDefaults.*"
+      - "Search*.*"
+      - "NetIbCastUdma.*"
     exclude_windows:
       - "*"
     labels:

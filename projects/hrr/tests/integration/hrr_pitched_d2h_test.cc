@@ -272,8 +272,7 @@ struct ScopedLegacyArchive {
 // Byte-exact D2H with the divergence guard off, so the exit code is the D2H
 // verdict alone: 0 when every check passes, 1 when one fails.
 std::pair<int, std::string> exact_replay(const fs::path& cap) {
-  return hrr_playback_env(cap, {{"HIP_HRR_D2H_EXACT", "1"},
-                                {"HIP_HRR_REPLAY_DIVERGENCE_ABORT", "0"}});
+  return hrr_playback_env(cap, {{"HIP_HRR_REPLAY_DIVERGENCE_ABORT", "0"}});
 }
 
 void require_replay(const fs::path& cap, int want_ret, int want_pass, int want_fail) {
@@ -446,7 +445,7 @@ TEST_CASE("Unit_HRR_PitchedD2H_Direct", "[.][hrr-direct]") {
  *     pitched copies recorded an expected-output blob, and that the
  *     hipDrvMemcpy3D and hipMemcpy2D blobs hold only the copied rows, packed
  *     end to end, and none of the host buffer's fill.
- *   - Replay with HIP_HRR_D2H_EXACT=1: all eleven checks must pass. Reading a
+ *   - Replay: all eleven checks must pass. Reading a
  *     packed blob with the recorded pitch and position runs past its end, and
  *     that check is skipped instead.
  */
@@ -485,8 +484,8 @@ HRR_TEST_CASE(Unit_HRR_PitchedD2HRoundtrip) {
  * Test Description
  * ----------------
  *   - Capture Unit_HRR_PitchedD2H_Direct, then edit the expected blob of
- *     hipDrvMemcpy3D, hipMemcpy3D and hipMemcpy2D in turn, replaying with
- *     HIP_HRR_D2H_EXACT=1 after each edit.
+ *     hipDrvMemcpy3D, hipMemcpy3D and hipMemcpy2D in turn, replaying after
+ *     each edit.
  *   - A flipped first byte of the second copied row must fail exactly that
  *     check.
  *   - A flipped last byte of the last copied row must fail exactly that check.
@@ -518,7 +517,7 @@ HRR_TEST_CASE(Unit_HRR_PitchedD2HBlobEdits) {
  * ----------------
  *   - Capture Unit_HRR_PitchedD2H_Direct, then cut the last byte off expected
  *     blobs, so they are short of the rect the way blobs captured before
- *     rect-shaped D2H blobs are, and replay with HIP_HRR_D2H_EXACT=1.
+ *     rect-shaped D2H blobs are, and replay.
  *   - With one blob short, that check is counted as skipped and the other ten
  *     pass.
  *   - With all eleven short, every check is skipped and the replay fails rather
@@ -629,7 +628,7 @@ TEST_CASE("Unit_HRR_PitchedD2HGap_Direct", "[.][hrr-direct]") {
  *   - Capture Unit_HRR_PitchedD2HGap_Direct, whose host destination has a
  *     PROT_NONE page between its two rows. Capture must finish, and the
  *     expected blob must hold the two rows packed end to end.
- *   - Replay with HIP_HRR_D2H_EXACT=1: the one check must pass.
+ *   - Replay: the one check must pass.
  */
 HRR_TEST_CASE(Unit_HRR_PitchedD2HGapRoundtrip) {
 #ifdef _WIN32
@@ -758,7 +757,7 @@ TEST_CASE("Unit_HRR_DenseOffsetD2H_Direct", "[.][hrr-direct]") {
  * ----------------
  *   - Capture Unit_HRR_DenseOffsetD2H_Direct. Each expected blob must hold
  *     the copied run alone, none of the buffer's fill before it.
- *   - Replay with HIP_HRR_D2H_EXACT=1: both checks must pass. Comparing from
+ *   - Replay: both checks must pass. Comparing from
  *     the pointer the copy was given compares the buffer's fill with the run,
  *     and fails.
  *   - Editing a blob's first or last byte must fail exactly that check.
@@ -919,7 +918,7 @@ TEST_CASE("Unit_HRR_PitchedH2D_Direct", "[.][hrr-direct]") {
  * ----------------
  *   - Capture Unit_HRR_PitchedH2D_Direct: the H2D source blob must hold the
  *     copied rows of the host rect, packed end to end.
- *   - Replay with HIP_HRR_D2H_EXACT=1: all four device readbacks must match.
+ *   - Replay: all four device readbacks must match.
  */
 HRR_TEST_CASE(Unit_HRR_PitchedH2DRoundtrip) {
 #ifdef _WIN32
@@ -1045,7 +1044,7 @@ TEST_CASE("Unit_HRR_PitchedH2D2D_Direct", "[.][hrr-direct]") {
  * ----------------
  *   - Capture Unit_HRR_PitchedH2D2D_Direct: the H2D source blob must hold
  *     the copied rows of the host rect, packed end to end.
- *   - Replay with HIP_HRR_D2H_EXACT=1: both device readbacks must match.
+ *   - Replay: both device readbacks must match.
  */
 HRR_TEST_CASE(Unit_HRR_PitchedH2D2DRoundtrip) {
 #ifdef _WIN32
@@ -1149,7 +1148,7 @@ TEST_CASE("Unit_HRR_SparsePitch_Direct", "[.][hrr-direct]") {
  *   - Capture Unit_HRR_SparsePitch_Direct. The H2D source blob and the D2H
  *     expected blob must each hold the 192 copied bytes, packed end to end.
  *     A blob of the whole host span is 48 MiB.
- *   - Replay with HIP_HRR_D2H_EXACT=1: the H2D copy writes the device rows
+ *   - Replay: the H2D copy writes the device rows
  *     from the packed blob, and the D2H check must pass.
  */
 HRR_TEST_CASE(Unit_HRR_SparsePitchRoundtrip) {

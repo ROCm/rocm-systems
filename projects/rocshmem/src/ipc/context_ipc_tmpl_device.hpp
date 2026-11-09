@@ -1020,7 +1020,7 @@ __device__ inline int IPCContext::tile_put(void* dst_data, const void* src_data,
                                            const size_t* start_coord, const size_t* boundary,
                                            int ndim, size_t element_size, int pe,
                                            [[maybe_unused]] uint64_t flags) {
-  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   void* remote_base = shmem_ptr(dst_data, pe);
   if (!remote_base) {
     return ROCSHMEM_ERROR;
@@ -1038,7 +1038,7 @@ __device__ inline int IPCContext::tile_put_wave(void* dst_data, const void* src_
                                                 const size_t* start_coord, const size_t* boundary,
                                                 int ndim, size_t element_size, int pe,
                                                 [[maybe_unused]] uint64_t flags) {
-  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   void* remote_base = shmem_ptr(dst_data, pe);
   if (!remote_base) {
     return ROCSHMEM_ERROR;
@@ -1058,7 +1058,7 @@ __device__ inline int IPCContext::tile_put_wg(void* dst_data, const void* src_da
                                               const size_t* start_coord, const size_t* boundary,
                                               int ndim, size_t element_size, int pe,
                                               [[maybe_unused]] uint64_t flags) {
-  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   void* remote_base = shmem_ptr(dst_data, pe);
   if (!remote_base) {
     return ROCSHMEM_ERROR;
@@ -1080,7 +1080,7 @@ __device__ inline int IPCContext::tile_get(void* dst_data, const void* src_data,
                                            const size_t* start_coord, const size_t* boundary,
                                            int ndim, size_t element_size, int pe,
                                            [[maybe_unused]] uint64_t flags) {
-  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   void* remote_base = shmem_ptr(const_cast<void*>(src_data), pe);
   if (!remote_base) {
     return ROCSHMEM_ERROR;
@@ -1098,7 +1098,7 @@ __device__ inline int IPCContext::tile_get_wave(void* dst_data, const void* src_
                                                 const size_t* start_coord, const size_t* boundary,
                                                 int ndim, size_t element_size, int pe,
                                                 [[maybe_unused]] uint64_t flags) {
-  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   void* remote_base = shmem_ptr(const_cast<void*>(src_data), pe);
   if (!remote_base) {
     return ROCSHMEM_ERROR;
@@ -1118,7 +1118,7 @@ __device__ inline int IPCContext::tile_get_wg(void* dst_data, const void* src_da
                                               const size_t* start_coord, const size_t* boundary,
                                               int ndim, size_t element_size, int pe,
                                               [[maybe_unused]] uint64_t flags) {
-  if (ndim < 1 || ndim > 2) return ROCSHMEM_ERROR;
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   void* remote_base = shmem_ptr(const_cast<void*>(src_data), pe);
   if (!remote_base) {
     return ROCSHMEM_ERROR;
@@ -1146,6 +1146,7 @@ __device__ inline int IPCContext::tile_allgather(rocshmem_team_t team,
                                                  int ndim,
                                                  size_t element_size,
                                                  uint64_t flags) {
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
   int team_size = team_obj->num_pes;
 
@@ -1186,6 +1187,7 @@ __device__ inline int IPCContext::tile_allgather_wave(rocshmem_team_t team,
                                                       int ndim,
                                                       size_t element_size,
                                                       uint64_t flags) {
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
   int team_size = team_obj->num_pes;
 
@@ -1225,6 +1227,7 @@ __device__ inline int IPCContext::tile_allgather_wg(rocshmem_team_t team,
                                                     int ndim,
                                                     size_t element_size,
                                                     uint64_t flags) {
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
   int team_size = team_obj->num_pes;
 
@@ -1266,6 +1269,7 @@ __device__ inline int IPCContext::tile_broadcast(rocshmem_team_t team,
                                                  size_t element_size,
                                                  int pe_root,
                                                  uint64_t flags) {
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
   int my_pe_in_team = team_obj->my_pe;
   int root_pe_world = team_obj->get_pe_in_world(pe_root);
@@ -1281,7 +1285,6 @@ __device__ inline int IPCContext::tile_broadcast(rocshmem_team_t team,
     // Root PE: copy src tile into dst locally when they are different buffers.
     // Non-root PEs receive via tile_get above; the root must populate its own
     // dst explicitly — the GET path does not write to the root's dst.
-    // Use Put (not Get) to avoid system-scope loads on local finegrained memory.
     tile_memcpy_rma<MemcpyKind::Put, TileScope::Lane>(
         dst_data, src_data, dst_strides, src_strides,
         start_coord, boundary, ndim, element_size);
@@ -1304,6 +1307,7 @@ __device__ inline int IPCContext::tile_broadcast_wave(rocshmem_team_t team,
                                                       size_t element_size,
                                                       int pe_root,
                                                       uint64_t flags) {
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
   int my_pe_in_team = team_obj->my_pe;
   int root_pe_world = team_obj->get_pe_in_world(pe_root);
@@ -1317,7 +1321,6 @@ __device__ inline int IPCContext::tile_broadcast_wave(rocshmem_team_t team,
     }
   } else if (dst_data != src_data) {
     // Root PE: copy src tile into dst locally when they are different buffers.
-    // Use Put (not Get) to avoid system-scope loads on local finegrained memory.
     tile_memcpy_rma<MemcpyKind::Put, TileScope::Wave>(
         dst_data, src_data, dst_strides, src_strides,
         start_coord, boundary, ndim, element_size);
@@ -1340,6 +1343,7 @@ __device__ inline int IPCContext::tile_broadcast_wg(rocshmem_team_t team,
                                                     size_t element_size,
                                                     int pe_root,
                                                     uint64_t flags) {
+  if (ndim < 1 || ndim > TileView::MAX_NDIM) return ROCSHMEM_ERROR;
   IPCTeam *team_obj = reinterpret_cast<IPCTeam *>(team);
   int my_pe_in_team = team_obj->my_pe;
   int root_pe_world = team_obj->get_pe_in_world(pe_root);
@@ -1353,7 +1357,6 @@ __device__ inline int IPCContext::tile_broadcast_wg(rocshmem_team_t team,
     }
   } else if (dst_data != src_data) {
     // Root PE: copy src tile into dst locally when they are different buffers.
-    // Use Put (not Get) to avoid system-scope loads on local finegrained memory.
     tile_memcpy_rma<MemcpyKind::Put, TileScope::Wg>(
         dst_data, src_data, dst_strides, src_strides,
         start_coord, boundary, ndim, element_size);
@@ -1439,7 +1442,7 @@ __device__ inline int IPCContext::tile_reduce_typed_impl(
   const int my_pe_in_team = team_obj->my_pe;
   const int root_pe_world = team_obj->get_pe_in_world(root);
 
-  if (root < 0 || root >= team_size || ndim < 1 || ndim > 2) {
+  if (root < 0 || root >= team_size || ndim < 1 || ndim > TileView::MAX_NDIM) {
     LOGD_WARN("Invalid tile reduce arguments for IPC backend");
     return ROCSHMEM_ERROR;
   }

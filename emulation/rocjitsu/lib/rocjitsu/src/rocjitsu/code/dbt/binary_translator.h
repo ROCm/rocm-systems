@@ -38,6 +38,10 @@
 
 namespace rocjitsu {
 
+namespace internal {
+struct BinaryTranslatorTestAccess;
+}
+
 class AmdGpuCodeObject;
 class SemanticTranslator;
 class Instruction;
@@ -202,6 +206,8 @@ public:
   [[nodiscard]] TranslatedCodeObject translate(const AmdGpuCodeObject &obj);
 
 private:
+  friend struct internal::BinaryTranslatorTestAccess;
+
   /// @brief Translate without final-output validation.
   /// @details Keeping the translation body in a separate call ensures its
   /// analysis state is destroyed before translate() audits the resulting ELF.
@@ -249,6 +255,7 @@ private:
   /// letting the first object that uses a deferred mnemonic hide the same gap
   /// in every object loaded after it.
   std::unordered_set<std::string> reported_deferred_families_;
+  bool force_unavailable_liveness_ = false; ///< Test seam for analysis-contract failures.
 };
 
 } // namespace rocjitsu

@@ -58,6 +58,7 @@ fn fixture() -> (
         identity: [0; 16],
         queues: sysfs::KfdQueueProperties {
             gfx_target: 120_001,
+            target_profile: crate::topology::GpuTargetProfile::Gfx1201,
             xcc_count: 1,
             ..sysfs::KfdQueueProperties::default()
         },
@@ -70,6 +71,104 @@ fn fixture() -> (
     let source = backing_file();
     let physical = KfdVirtualMemory::import(source.as_raw_fd()).unwrap();
     (vm, reservation, physical)
+}
+
+#[test]
+fn imported_vmem_placement_comes_from_kfd_dma_buf_info() {
+    let source = backing_file();
+    for (flags, expected) in [
+        (uapi::GTT, Some(VirtualMemoryPlacement::System)),
+        (uapi::VRAM, Some(VirtualMemoryPlacement::Device([42; 16]))),
+        (uapi::GTT | uapi::VRAM, None),
+    ] {
+        let kfd = sys::Kfd::with_hook(
+            File::open("/dev/null").unwrap(),
+            Arc::new(move |call| {
+                if let sys::Call::DmaBufInfo(args, _) = call {
+                    args.size = page();
+                    args.gpu_id = 42;
+                    args.flags = flags;
+                }
+                Ok(())
+            }),
+        );
+        let imported = KfdVirtualMemory::import_with_kfd(source.as_raw_fd(), &kfd, |id| {
+            (id == 42).then_some([42; 16])
+        })
+        .unwrap();
+        assert_eq!(imported.info().placement, expected);
+    }
+
+    let old_kfd = sys::Kfd::with_hook(
+        File::open("/dev/null").unwrap(),
+        Arc::new(|call| {
+            if matches!(call, sys::Call::DmaBufInfo(_, _)) {
+                return Err(std::io::Error::from_raw_os_error(errno::EINVAL));
+            }
+            Ok(())
+        }),
+    );
+    let imported =
+        KfdVirtualMemory::import_with_kfd(source.as_raw_fd(), &old_kfd, |_| None).unwrap();
+    assert_eq!(imported.info().placement, None);
+
+    let foreign_kfd = sys::Kfd::with_hook(
+        File::open("/dev/null").unwrap(),
+        Arc::new(|call| {
+            if let sys::Call::DmaBufInfo(args, _) = call {
+                args.size = page();
+                args.gpu_id = 99;
+                args.flags = uapi::VRAM;
+            }
+            Ok(())
+        }),
+    );
+    let imported = KfdVirtualMemory::import_with_kfd(source.as_raw_fd(), &foreign_kfd, |id| {
+        (id == 42).then_some([42; 16])
+    })
+    .unwrap();
+    assert_eq!(imported.info().placement, None);
+}
+
+#[test]
+fn extended_coherence_rejects_uncached_request_from_either_source() {
+    let (vm, _address, _physical) = fixture();
+    let kind = MemoryKind::DeviceLocal {
+        host_visible: false,
+        coherent: true,
+        extended_coherent: true,
+        uncached: false,
+        contiguous: false,
+    };
+    assert_eq!(
+        KfdVirtualMemory::create(
+            vm.clone(),
+            kind,
+            page(),
+            VirtualMemoryOptions {
+                pinned: false,
+                uncached: true,
+            },
+        )
+        .err()
+        .unwrap()
+        .kind(),
+        ErrorKind::InvalidArgument
+    );
+    let kind_uncached = MemoryKind::DeviceLocal {
+        host_visible: false,
+        coherent: true,
+        extended_coherent: true,
+        uncached: true,
+        contiguous: false,
+    };
+    assert_eq!(
+        KfdVirtualMemory::create(vm, kind_uncached, page(), VirtualMemoryOptions::default(),)
+            .err()
+            .unwrap()
+            .kind(),
+        ErrorKind::InvalidArgument
+    );
 }
 
 #[test]

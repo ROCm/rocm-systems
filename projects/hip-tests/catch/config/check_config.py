@@ -3,9 +3,16 @@
 # SPDX-License-Identifier: MIT
 
 import argparse
+import re
 import sys
 
 from common import iter_group_configs, ERROR, RESET
+
+
+# Known Jira project keys accepted in a skip 'reason'. Add a new key here when
+# a new project starts tracking hip-tests skips.
+JIRA_PROJECTS = ("AIRUNTIME", "ROCM", "SWDEV", "EXSWHTEC", "AIRADSW")
+JIRA_RE = re.compile(r"(?:" + "|".join(JIRA_PROJECTS) + r")-\d+")
 
 
 def parse_args():
@@ -27,6 +34,8 @@ def main():
 
     missing = []
     invalid_skip_fields = []
+    missing_reasons = []
+    missing_jira = []
 
     for group, cases in iter_group_configs(configs_path):
         for case_name, case_config in cases.items():
@@ -37,18 +46,31 @@ def main():
                     continue
                 value = case_config[field]
                 # A skip field is either a flat list of targets, or a mapping
-                # with a 'targets' list plus an optional 'reason' scalar. The
-                # reason is metadata and is intentionally NOT enforced yet —
-                # deferred to a later phase (AIRUNTIME-2744):
-                # https://amd-hub.atlassian.net/browse/AIRUNTIME-2744
-                # We only guard that the targets are a list, since a scalar
-                # breaks tag generation (a string is iterated char-by-char) and
-                # a malformed mapping fails the parser's list concatenation.
+                # with a 'targets' list plus a 'reason' scalar. We guard that the
+                # targets are a list, since a scalar breaks tag generation (a
+                # string is iterated char-by-char) and a malformed mapping fails
+                # the parser's list concatenation.
                 if isinstance(value, list):
+                    targets = value
+                    reason = ""
+                elif isinstance(value, dict) and isinstance(value.get("targets"), list):
+                    targets = value["targets"]
+                    reason = value.get("reason", "")
+                else:
+                    invalid_skip_fields.append(f"  {group}/{case_name}: '{field}'")
                     continue
-                if isinstance(value, dict) and isinstance(value.get("targets"), list):
-                    continue
-                invalid_skip_fields.append(f"  {group}/{case_name}: '{field}'")
+                # A populated skip section (non-empty targets) must record a
+                # non-empty string 'reason'; a non-scalar (list/mapping) or
+                # non-string reason is treated as missing. An empty section
+                # (targets: []) is a no-op and needs no reason.
+                if targets and not (isinstance(reason, str) and reason.strip()):
+                    missing_reasons.append(f"  {group}/{case_name}: '{field}'")
+                # A populated skip section with a real reason must cite a Jira
+                # reference (e.g. AIRUNTIME-2892 or ROCM-123, from a known
+                # project key); a reason with no such ref (or a digitless
+                # placeholder) does not count as a real ref.
+                elif targets and not JIRA_RE.search(reason):
+                    missing_jira.append(f"  {group}/{case_name}: '{field}'")
 
     if missing:
         print(
@@ -65,6 +87,24 @@ def main():
             file=sys.stderr,
         )
         for entry in invalid_skip_fields:
+            print(f"[check_config] {ERROR}{entry}{RESET}", file=sys.stderr)
+        sys.exit(1)
+
+    if missing_reasons:
+        print(
+            f"[check_config] {ERROR}ERROR: The following test cases have a 'disabled'/'unsupported' field with targets but no 'reason'. Use the mapping form ({{targets: [...], reason: \"...\"}}) and record why the case is skipped:{RESET}",
+            file=sys.stderr,
+        )
+        for entry in missing_reasons:
+            print(f"[check_config] {ERROR}{entry}{RESET}", file=sys.stderr)
+        sys.exit(1)
+
+    if missing_jira:
+        print(
+            f"[check_config] {ERROR}ERROR: The following test cases have a 'disabled'/'unsupported' 'reason' with no real Jira reference. The reason must cite a real Jira reference from a known project ({', '.join(JIRA_PROJECTS)}), e.g. AIRUNTIME-2892; a digitless placeholder like AIRUNTIME-XXXX does not count:{RESET}",
+            file=sys.stderr,
+        )
+        for entry in missing_jira:
             print(f"[check_config] {ERROR}{entry}{RESET}", file=sys.stderr)
         sys.exit(1)
 
