@@ -45,6 +45,13 @@ extern std::function<ncclResult_t(struct ncclComm*, struct ncclCeCollArgs*, hipS
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclCeCollArgs*, hipStream_t)>
     g_profilerStopCeCollEvent;
 
+// ncclProfilerStart/Stop{Group,Coll}ApiEvent. Default succeed without a profiler.
+struct ncclInfo;
+extern std::function<ncclResult_t(struct ncclInfo*, bool)> g_profilerStartGroupApiEvent;
+extern std::function<ncclResult_t()> g_profilerStopGroupApiEvent;
+extern std::function<ncclResult_t(struct ncclInfo*, bool)> g_profilerStartCollApiEvent;
+extern std::function<ncclResult_t()> g_profilerStopCollApiEvent;
+
 // Restore every comm_fakes seam to its default. Call from a fixture TearDown.
 void ResetCommFakes();
 
