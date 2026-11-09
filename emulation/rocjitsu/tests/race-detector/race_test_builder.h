@@ -9,6 +9,7 @@
 #pragma once
 
 #include "race_test_instruction.h"
+#include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include "rocjitsu/vm/plugins/race_detector/core/race_detector.h"
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
 
@@ -18,6 +19,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu::plugins::race_detector {

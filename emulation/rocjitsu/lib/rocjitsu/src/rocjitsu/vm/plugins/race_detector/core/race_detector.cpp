@@ -4,7 +4,13 @@
 #include "rocjitsu/vm/plugins/race_detector/core/race_detector.h"
 #include <algorithm>
 #include <cassert>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
 #include <limits>
+#include <span>
+#include <utility>
+#include <vector>
 
 namespace rocjitsu::plugins::race_detector {
 

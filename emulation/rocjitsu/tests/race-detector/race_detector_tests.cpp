@@ -27,9 +27,15 @@
 
 #include "race_test_builder.h"
 #include "race_test_instruction.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/memory_issue.h"
+#include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include <array>
+#include <cstdint>
 #include <gtest/gtest.h>
 #include <limits>
+#include <span>
+#include <utility>
+#include <vector>
 
 using namespace rocjitsu::plugins::race_detector;
 namespace amdgpu = rocjitsu::amdgpu;

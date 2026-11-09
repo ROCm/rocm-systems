@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: MIT
 
 #include "race_test_instruction.h"
+#include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include "rocjitsu/vm/plugins/race_detector/core/race_detector.h"
 #include <algorithm>
 #include <array>
 #include <bitset>
+#include <cstddef>
 #include <gtest/gtest.h>
 #include <random>
 #include <utility>
