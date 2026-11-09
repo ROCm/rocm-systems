@@ -800,7 +800,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             )
             L.append('      [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {')
             L.append(
-                f'        amdgpu::exec_f32_mixed(cu, {M}, {N}, {K}, {B}, a_bits, b_bits,'
+                f'        amdgpu::exec_f32_mixed<{M}, {N}, {K}, {B}>(cu, a_bits, b_bits,'
             )
             L.append(
                 f'                               dst, s0b, s1b, s2, ea, eb, const_acc);'
@@ -858,12 +858,12 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 )
             elif has_blgp:
                 L.append(
-                    f'  amdgpu::exec_f32(cu, {M}, {N}, {K}, {B}, {in_bits}, dst, {s0b}, {s1b},'
+                    f'  amdgpu::exec_f32<{M}, {N}, {K}, {B}>(cu, {in_bits}, dst, {s0b}, {s1b},'
                     f' s2, {ea}, {eb}, const_acc, inst_.cbsz, inst_.abid, inst_.blgp);'
                 )
             else:
                 L.append(
-                    f'  amdgpu::exec_f32(cu, {M}, {N}, {K}, {B}, {in_bits}, dst, {s0b}, {s1b},'
+                    f'  amdgpu::exec_f32<{M}, {N}, {K}, {B}>(cu, {in_bits}, dst, {s0b}, {s1b},'
                     f' s2, {ea}, {eb}, const_acc);'
                 )
 
