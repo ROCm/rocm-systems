@@ -15,10 +15,7 @@
  *      - Expected output: return `hipErrorInvalidContext`
  *    -# When a matched hipCtxCreate/hipCtxDestroy pair is destroyed a second time
  *      - Expected output: return `hipErrorInvalidContext`
- *    -# The device context remains usable afterwards
- *      - Expected output: `hipMalloc` returns `hipSuccess`
- *  - Nothing is allocated before the destroy. A live allocation holds its own
- *    reference on the device context and would hide an erroneous release.
+ *  - Nothing is allocated beforehand; a live allocation masks the failure.
  * Test source
  * ------------------------
  *  - unit/context/hipCtxDestroyUnmatched.cc
@@ -50,11 +47,7 @@ HIP_TEST_CASE(Unit_hipCtxDestroy_WithoutCreate_Negative) {
  * ------------------------
  *  - Validates that hipCtxDestroy rejects a primary context handle:
  *    -# When the handle comes from hipDevicePrimaryCtxRetain
- *      - Expected output: return `hipErrorInvalidContext`
- *    -# The primary context is still reported active
- *      - Expected output: is_active = 1
- *    -# The device context remains usable afterwards
- *      - Expected output: `hipMalloc` returns `hipSuccess`
+ *      - Expected output: return `hipErrorInvalidContext`, context stays active
  *    -# When hipDevicePrimaryCtxRelease is called more often than retained
  *      - Expected output: return `hipErrorInvalidContext`
  * Test source
