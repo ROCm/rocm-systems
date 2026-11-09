@@ -6,6 +6,7 @@
  *************************************************************************/
 
 #include "core.h"
+#include "nccl_device/host.h"
 // RCCL: gin_barrier__funcs.h's device-inline template bodies dereference
 // ncclDevComm members (net.comm.*). Under HIP these bodies are always compiled
 // (NCCL_DEVICE_COMPILE is on for both host and device passes), so the full

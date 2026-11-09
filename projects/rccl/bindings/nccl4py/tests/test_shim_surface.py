@@ -5,7 +5,7 @@
 
 Verifies that the HIP-backed ``cuda.core`` shim implements exactly the
 subset that ``nccl/core/*.py`` imports: :class:`Device`, :class:`Stream`,
-:class:`Buffer`, :class:`MemoryResource`, :func:`system.get_num_devices`,
+:class:`Event`, :class:`Buffer`, :class:`MemoryResource`, :func:`system.get_num_devices`,
 :class:`StridedMemoryView`, :func:`args_viewable_as_strided_memory`,
 and DLPack capsule export with ``kROCM=10``.
 
@@ -22,7 +22,7 @@ import nccl  # noqa: F401  (registers the cuda.core shim under sys.modules)
 pytest.importorskip("hip", reason="hip-python is required for the HIP shim tests")
 
 
-from cuda.core import Buffer, Device, MemoryResource, Stream, system  # noqa: E402
+from cuda.core import Buffer, Device, Event, MemoryResource, Stream, system  # noqa: E402
 from cuda.core.utils import StridedMemoryView, args_viewable_as_strided_memory  # noqa: E402
 
 if system.get_num_devices() == 0:  # pragma: no cover - host without GPUs
@@ -71,6 +71,37 @@ class TestStream:
         first = Stream.from_handle(0xCAFE)
         second = Stream.from_handle(first.handle)
         assert int(second.handle) == 0xCAFE
+
+
+# ---------------------------------------------------------------------------
+# Event (3 tests)
+# ---------------------------------------------------------------------------
+
+
+class TestEvent:
+    def test_create_event_has_a_handle_until_closed(self):
+        Device(0).set_current()
+        e = Device(0).create_event()
+        assert isinstance(e, Event)
+        assert int(e.handle) != 0
+        e.close()
+        assert int(e.handle) == 0
+
+    def test_from_handle_round_trip_is_not_owned(self):
+        e = Event.from_handle(0xFEED)
+        assert int(e.handle) == 0xFEED
+        e.close()  # borrowed: not destroyed
+        assert int(e.handle) == 0xFEED
+
+    def test_get_event_ptr_accepts_a_shim_event(self):
+        from nccl.core.cuda import get_event_ptr
+
+        Device(0).set_current()
+        e = Device(0).create_event()
+        try:
+            assert get_event_ptr(e) == int(e.handle)
+        finally:
+            e.close()
 
 
 # ---------------------------------------------------------------------------

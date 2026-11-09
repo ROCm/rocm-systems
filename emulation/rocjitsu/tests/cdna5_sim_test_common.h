@@ -4,12 +4,13 @@
 #pragma once
 
 #include "aql_queue.h"
+#include "config_test_util.h"
 #include "decode_test_util.h"
 #include "halt_snapshot_plugin.h"
 
-#include "embedded_schema.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
@@ -44,12 +45,6 @@
 
 #include "simdojo/sim/simulation.h"
 
-#include "rocjitsu/base/rj_compiler.h"
-RJ_DIAGNOSTIC_PUSH
-RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
-RJ_DIAGNOSTIC_POP
-
 #include <gtest/gtest.h>
 
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -67,7 +62,6 @@ RJ_DIAGNOSTIC_POP
 #include <optional>
 #include <set>
 #include <shared_mutex>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -117,16 +111,18 @@ struct Gfx1250Sim {
   std::shared_ptr<ExecutionPluginGroup> plugin_group;
   test::HaltSnapshotPlugin *snapshot = nullptr;
 
-  Gfx1250Sim() : loaded(config::load_config(kGfx1250ConfigPath, rocjitsu::kEmbeddedSchema)) {
-    build();
+  void initialize() {
+    ASSERT_TRUE(load_valid_config(kGfx1250ConfigPath, loaded));
+    ASSERT_NO_FATAL_FAILURE(build());
   }
 
-  explicit Gfx1250Sim(const std::string &config_json)
-      : loaded(config::load_config_from_string(config_json, rocjitsu::kEmbeddedSchema)) {
-    build();
+  void initialize(const std::string &config_json) {
+    ASSERT_TRUE(load_valid_config_from_string(config_json, loaded));
+    ASSERT_NO_FATAL_FAILURE(build());
   }
 
   void build() {
+    util::StringDiagnostic admission_diagnostic;
     soc = loaded.soc();
     memory = loaded.memory();
     // This fixture drives the engine directly and inspects single-partition
@@ -135,8 +131,10 @@ struct Gfx1250Sim {
     loaded.engine_config.num_threads = 1;
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
     engine->topology().set_root(loaded.take_root());
-    loaded.wire_links(engine->topology());
-    engine->create();
+    ASSERT_TRUE(loaded.wire_links(engine->topology(), admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
+    ASSERT_TRUE(engine->create(admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
     // Capture every wavefront's final register state at halt. A wave frees its
     // registers at s_endpgm, so tests that run a kernel to completion read the
     // result from the snapshot rather than the (freed) slot.
@@ -163,28 +161,28 @@ struct Gfx1250Sim {
                         uint32_t kernarg_size = 0, uint32_t kernarg_preload_length = 0,
                         uint32_t kernarg_preload_offset = 0, uint32_t enable_vgpr_workitem_id = 0,
                         uint32_t named_barrier_blocks = 0) {
-    using namespace rocr::llvm::amdhsa;
+    using namespace rocjitsu::amdhsa;
     kernel_descriptor_t kd{};
     kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
     kd.kernarg_size = kernarg_size;
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                    ((vgprs / kGfx1250VgprEncodingGranule) - 1));
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                    ((sgprs / 8) - 1));
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_GFX125_USER_SGPR_COUNT, user_sgprs);
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X,
-                    enable_wg_id_x);
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y,
-                    enable_wg_id_y);
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z,
-                    enable_wg_id_z);
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_VGPR_WORKITEM_ID,
-                    enable_vgpr_workitem_id);
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX125_NAMED_BAR_CNT,
-                    named_barrier_blocks);
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                       ((vgprs / kGfx1250VgprEncodingGranule) - 1));
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                       ((sgprs / 8) - 1));
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_GFX125_USER_SGPR_COUNT, user_sgprs);
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X,
+                       enable_wg_id_x);
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y,
+                       enable_wg_id_y);
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z,
+                       enable_wg_id_z);
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_VGPR_WORKITEM_ID,
+                       enable_vgpr_workitem_id);
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX125_NAMED_BAR_CNT,
+                       named_barrier_blocks);
     kd.kernel_code_properties = kernel_code_properties;
-    AMDHSA_BITS_SET(kd.kernarg_preload, KERNARG_PRELOAD_SPEC_LENGTH, kernarg_preload_length);
-    AMDHSA_BITS_SET(kd.kernarg_preload, KERNARG_PRELOAD_SPEC_OFFSET, kernarg_preload_offset);
+    RJ_AMDHSA_BITS_SET(kd.kernarg_preload, KERNARG_PRELOAD_SPEC_LENGTH, kernarg_preload_length);
+    RJ_AMDHSA_BITS_SET(kd.kernarg_preload, KERNARG_PRELOAD_SPEC_OFFSET, kernarg_preload_offset);
 
     memory->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), addr);
     memory->load_image(reinterpret_cast<const uint8_t *>(words), num_words * sizeof(uint32_t),
@@ -273,6 +271,7 @@ enum class VopdOp : uint16_t {
   CndmaskB32 = 9,
   FmaF32 = 19,
   FmaF64 = 32,
+  AddF64 = 33,
 };
 
 struct VopdSlot {

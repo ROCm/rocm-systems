@@ -18,7 +18,7 @@ namespace rdna2 {
 
 class Operand final : public IsaOperand<Isa> {
 public:
-  enum class Literal32Widening { ZeroExtend, SignExtend, Replicate32, F64HighBits };
+  enum class Literal32Widening : uint8_t { ZeroExtend, SignExtend, Replicate32, F64HighBits };
   static constexpr bool kStaticRegisterAccess = true;
   Operand(int size_bits, OperandType opr_type, int encoding_value);
   Operand(int size_bits, OperandType opr_type, int encoding_value, uint16_t literal16_display_value,
@@ -28,12 +28,14 @@ public:
   std::string name() const override;
   std::optional<uint64_t> literal64_value() const override;
   std::optional<uint64_t> const_value() const override;
+  bool has_register_selector() const override;
   std::optional<RegisterRef> to_register_ref() const override;
   std::optional<RegClass> to_special_reg_class() const override;
   /// @brief Return the immutable full-simulator operand table.
   static const void *full_execution_backend();
   /// @brief Validate that every full-simulator operand callback is present.
   static bool full_execution_backend_complete();
+  bool execution_backend_available() const override;
   bool simd_capable() const override;
 
 private:
@@ -129,11 +131,12 @@ private:
   void simd_notify_write_mut_exec(amdgpu::Wavefront &, uint64_t, uint8_t) const;
   void simd_notify_write64_mut_exec(amdgpu::Wavefront &, uint64_t, uint8_t) const;
   uint64_t widened_literal32_value() const;
+  // Pack literal state with the byte-sized widening enum to keep operands at 64 bytes.
+  uint64_t literal64_value_ = 0;
+  std::optional<Literal32Widening> literal32_widening_;
   uint16_t literal16_display_value_ = 0;
   bool has_literal16_display_ = false;
-  uint64_t literal64_value_ = 0;
   bool has_literal64_ = false;
-  std::optional<Literal32Widening> literal32_widening_;
 };
 
 } // namespace rdna2

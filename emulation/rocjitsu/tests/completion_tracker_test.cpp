@@ -289,6 +289,25 @@ TEST(CompletionTrackerTest, RetryKeepsTheAddressSpaceSnapshotThatStartedPublicat
   EXPECT_EQ(replacement->successful_stores(CompletionFixture::kMailbox), 0u);
 }
 
+TEST(CompletionTrackerTest, RevokedPublicationSnapshotBecomesTerminal) {
+  CompletionFixture fixture;
+  fixture.memory->fail_next(CompletionRetryMemory::Operation::CompareExchange,
+                            CompletionFixture::kSignal + CompletionFixture::kValueOffset);
+
+  const CompletionDrainResult first = fixture.tracker.drain_completions(fixture.queues);
+  ASSERT_TRUE(first.retry_pending);
+  ASSERT_FALSE(first.terminal_fault);
+  ASSERT_TRUE(fixture.vm.invalidate(fixture.address_space));
+
+  const CompletionDrainResult second = fixture.tracker.drain_completions(fixture.queues);
+  EXPECT_FALSE(second.retry_pending);
+  ASSERT_TRUE(second.terminal_fault);
+  EXPECT_EQ(second.terminal_fault->outcome, VmAccessOutcome::Revoked);
+  ASSERT_EQ(fixture.queues.front().entries.size(), 1u);
+  EXPECT_TRUE(fixture.queues.front().entries.front().terminal_faulted);
+  EXPECT_EQ(fixture.retired, 0u);
+}
+
 TEST(CompletionTrackerTest, UnavailableQueueDoesNotStarveIndependentQueueRetirement) {
   constexpr uint64_t kSecondSignal = 0x400;
   constexpr uint64_t kSecondMailbox = 0x480;
@@ -382,81 +401,22 @@ TEST(CompletionTrackerTest, QueueIdlePublicationSurvivesUnavailableMailboxStore)
   EXPECT_TRUE(fixture.queues.front().entries.empty());
   EXPECT_TRUE(fixture.queues.front().idle_publication.active());
   EXPECT_FALSE(fixture.tracker.all_complete(fixture.queues));
-  EXPECT_EQ(fixture.memory->load<uint64_t>(kIdleSignal + CompletionFixture::kValueOffset), 0x10u);
+  EXPECT_EQ(fixture.memory->load<uint64_t>(kIdleSignal + CompletionFixture::kValueOffset), 0u);
   EXPECT_EQ(fixture.interrupts, 0u);
 
+  // Queue teardown can start after the dispatch completion becomes visible.
+  constexpr uint64_t kTerminateQueue = uint64_t{1} << 63;
+  fixture.memory->store(kIdleSignal + CompletionFixture::kValueOffset, kTerminateQueue);
   const CompletionDrainResult second = fixture.tracker.drain_completions(fixture.queues);
   EXPECT_FALSE(second.retry_pending);
   EXPECT_FALSE(second.terminal_fault);
   EXPECT_FALSE(fixture.queues.front().idle_publication.active());
   EXPECT_TRUE(fixture.tracker.all_complete(fixture.queues));
-  EXPECT_EQ(fixture.memory->successful_stores(kIdleMailbox), 1u);
-  EXPECT_EQ(fixture.interrupts, 2u);
-}
-
-TEST(CompletionTrackerTest, NewQueueGenerationFinishesCommittedIdleRetry) {
-  constexpr uint64_t kQueueDescriptor = 0x500;
-  constexpr uint64_t kIdleSignal = 0x200;
-  constexpr uint64_t kIdleMailbox = 0x380;
-  constexpr uint32_t kIdleEvent = 41;
-
-  CompletionFixture fixture;
-  auto &queue = fixture.queues.front();
-  queue.fanout_replica = false;
-  queue.address_space = fixture.address_space;
-  queue.interrupt_sink = fixture.subscription.sink();
-  queue.queue_desc_va = kQueueDescriptor;
-  queue.entries.front().completion_signal = 0;
-  fixture.memory->store(kQueueDescriptor + offsetof(amd_queue_t, queue_inactive_signal),
-                        kIdleSignal);
-  fixture.memory->store(kIdleSignal + CompletionFixture::kValueOffset, uint64_t{0});
-  fixture.memory->store(kIdleSignal + CompletionFixture::kMailboxOffset, kIdleMailbox);
-  fixture.memory->store(kIdleSignal + CompletionFixture::kEventOffset, kIdleEvent);
-  fixture.subscription.reset();
-  fixture.subscription =
-      InterruptSubscription([&fixture](uint32_t, uint32_t) { ++fixture.interrupts; });
-  queue.interrupt_sink = fixture.subscription.sink();
-  fixture.memory->fail_next(CompletionRetryMemory::Operation::AtomicStore, kIdleMailbox);
-
-  const CompletionDrainResult first = fixture.tracker.drain_completions(fixture.queues);
-  ASSERT_TRUE(first.retry_pending);
-  ASSERT_TRUE(queue.entries.empty());
-  ASSERT_TRUE(queue.idle_publication.active());
-  EXPECT_EQ(queue.idle_publication.phase, QueueIdlePublicationPhase::StoreMailbox);
-  EXPECT_EQ(fixture.memory->load<uint64_t>(kIdleSignal + CompletionFixture::kValueOffset), 0x10u);
-  EXPECT_EQ(fixture.memory->successful_compare_exchanges(), 1u);
-
-  DispatchEntry next{};
-  next.dispatch_id = 8;
-  next.queue_id = CompletionFixture::kQueueId;
-  next.address_space = fixture.address_space;
-  next.interrupt_sink = fixture.subscription.sink();
-  next.process_id = CompletionFixture::kProcessId;
-  next.total_wgs = 1;
-  next.kind = DispatchPacketKind::Kernel;
-  queue.push_entry(std::move(next));
-
-  const CompletionDrainResult while_active = fixture.tracker.drain_completions(fixture.queues);
-  EXPECT_FALSE(while_active.retry_pending);
-  EXPECT_FALSE(while_active.terminal_fault);
-  ASSERT_EQ(queue.entries.size(), 1u);
-  EXPECT_FALSE(queue.idle_publication.active());
-  EXPECT_FALSE(fixture.tracker.all_complete(fixture.queues));
-  EXPECT_EQ(fixture.memory->load<uint64_t>(kIdleSignal + CompletionFixture::kValueOffset), 0x10u);
+  EXPECT_EQ(fixture.memory->load<uint64_t>(kIdleSignal + CompletionFixture::kValueOffset),
+            kTerminateQueue);
   EXPECT_EQ(fixture.memory->load<uint64_t>(kIdleMailbox), kIdleEvent);
-  EXPECT_EQ(fixture.memory->successful_compare_exchanges(), 1u);
-  EXPECT_EQ(fixture.interrupts, 2u);
   EXPECT_EQ(fixture.memory->successful_stores(kIdleMailbox), 1u);
-
-  queue.entries.front().completed_wgs = 1;
-  const CompletionDrainResult final = fixture.tracker.drain_completions(fixture.queues);
-  EXPECT_FALSE(final.retry_pending);
-  EXPECT_FALSE(final.terminal_fault);
-  EXPECT_TRUE(queue.entries.empty());
-  EXPECT_FALSE(queue.idle_publication.active());
-  EXPECT_EQ(fixture.memory->successful_stores(kIdleMailbox), 2u);
-  EXPECT_EQ(fixture.memory->successful_compare_exchanges(), 1u);
-  EXPECT_EQ(fixture.interrupts, 4u);
+  EXPECT_EQ(fixture.interrupts, 2u);
 }
 
 TEST(CompletionTrackerTest, NewQueueGenerationCancelsUncommittedIdleRetry) {
@@ -476,14 +436,13 @@ TEST(CompletionTrackerTest, NewQueueGenerationCancelsUncommittedIdleRetry) {
   fixture.memory->store(kIdleSignal + CompletionFixture::kValueOffset, uint64_t{0});
   fixture.memory->store(kIdleSignal + CompletionFixture::kMailboxOffset, kIdleMailbox);
   fixture.memory->store(kIdleSignal + CompletionFixture::kEventOffset, uint32_t{41});
-  fixture.memory->fail_next(CompletionRetryMemory::Operation::CompareExchange,
-                            kIdleSignal + CompletionFixture::kValueOffset);
+  fixture.memory->fail_next(CompletionRetryMemory::Operation::AtomicStore, kIdleMailbox);
 
   const CompletionDrainResult first = fixture.tracker.drain_completions(fixture.queues);
   ASSERT_TRUE(first.retry_pending);
   ASSERT_TRUE(queue.entries.empty());
   ASSERT_TRUE(queue.idle_publication.active());
-  EXPECT_EQ(queue.idle_publication.phase, QueueIdlePublicationPhase::StoreIdleStatus);
+  EXPECT_EQ(queue.idle_publication.phase, QueueIdlePublicationPhase::StoreMailbox);
   EXPECT_EQ(fixture.memory->load<uint64_t>(kIdleSignal + CompletionFixture::kValueOffset), 0u);
   EXPECT_EQ(fixture.memory->successful_compare_exchanges(), 0u);
 
@@ -512,8 +471,8 @@ TEST(CompletionTrackerTest, NewQueueGenerationCancelsUncommittedIdleRetry) {
   EXPECT_FALSE(final.terminal_fault);
   EXPECT_TRUE(queue.entries.empty());
   EXPECT_FALSE(queue.idle_publication.active());
-  EXPECT_EQ(fixture.memory->load<uint64_t>(kIdleSignal + CompletionFixture::kValueOffset), 0x10u);
-  EXPECT_EQ(fixture.memory->successful_compare_exchanges(), 1u);
+  EXPECT_EQ(fixture.memory->load<uint64_t>(kIdleSignal + CompletionFixture::kValueOffset), 0u);
+  EXPECT_EQ(fixture.memory->successful_compare_exchanges(), 0u);
   EXPECT_EQ(fixture.memory->successful_stores(kIdleMailbox), 1u);
   EXPECT_EQ(fixture.interrupts, 2u);
 }

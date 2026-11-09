@@ -7,6 +7,10 @@
 
 namespace kpack {
 
+// Maximum allocation for an extracted code object or the cached aggregate
+// Zstd blob. This does not limit the size of the complete kpack archive.
+constexpr uint64_t MAX_ALLOCATION_SIZE = 4ULL * 1024 * 1024 * 1024;
+
 kpack_error_t decompress_noop(kpack_archive* archive, uint32_t ordinal,
                               uint64_t expected_size) {
   if (ordinal >= archive->blobs.size()) {
@@ -14,6 +18,9 @@ kpack_error_t decompress_noop(kpack_archive* archive, uint32_t ordinal,
   }
 
   const BlobInfo& blob = archive->blobs[ordinal];
+  if (blob.size > MAX_ALLOCATION_SIZE) {
+    return KPACK_ERROR_INVALID_FORMAT;
+  }
 
   // Allocate kernel cache
   archive->kernel_cache.resize(blob.size);
@@ -35,9 +42,7 @@ kpack_error_t decompress_noop(kpack_archive* archive, uint32_t ordinal,
 
 kpack_error_t build_zstd_frame_index(kpack_archive* archive) {
   // Validate blob size is reasonable before allocating
-  // Max 4GB per blob (arbitrary but prevents obvious attacks)
-  constexpr uint64_t MAX_BLOB_SIZE = 4ULL * 1024 * 1024 * 1024;
-  if (archive->zstd_size > MAX_BLOB_SIZE) {
+  if (archive->zstd_size > MAX_ALLOCATION_SIZE) {
     return KPACK_ERROR_INVALID_FORMAT;
   }
 
@@ -118,6 +123,9 @@ kpack_error_t decompress_zstd(kpack_archive* archive, uint32_t ordinal,
                               uint64_t expected_size) {
   if (ordinal >= archive->zstd_frames.size()) {
     return KPACK_ERROR_KERNEL_NOT_FOUND;
+  }
+  if (expected_size > MAX_ALLOCATION_SIZE) {
+    return KPACK_ERROR_INVALID_FORMAT;
   }
 
   const FrameInfo& frame = archive->zstd_frames[ordinal];

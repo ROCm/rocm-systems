@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 //! Platform-specific memory-sharing transports.
 //!
 //! Interop moves memory ownership or access between rocddi and another API or

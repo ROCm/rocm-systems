@@ -5,16 +5,16 @@ on:
     branches:
       - develop
     paths:
-      - 'projects/cuid/**'
+      - 'shared/cuid/**'
   pull_request:
     paths:
       - '.github/workflows/cuid-formatting.yml'
-      - 'projects/cuid/**'
+      - 'shared/cuid/**'
       - '!**/*.md'
       - '!**/*.rst'
       - '!**/*.rtf'
       - '!**/.readthedocs.yaml'
-      - '!projects/cuid/docs/**'
+      - '!shared/cuid/docs/**'
 
 permissions:
   contents: read
@@ -43,6 +43,6 @@ jobs:
           # Use the cuid project pre-commit config and only check files changed
           # in this push/PR.
           extra_args: >-
-            --config projects/cuid/.pre-commit-config.yaml
+            --config shared/cuid/.pre-commit-config.yaml
             --from-ref ${{ env.FROM_REF }}
             --to-ref HEAD

@@ -1,0 +1,41 @@
+{
+    "evaluations": [
+        {
+            "expected_behavior": [
+                "recommends rocprof-sys-avail -H -bd -A",
+                "explains -A restricts to counters usable on this machine"
+            ],
+            "id": "what-hw-counters-available",
+            "prompt": "What hardware counters are available on my system for rocprof-sys?",
+            "skill_should_trigger": true
+        },
+        {
+            "expected_behavior": [
+                "recommends rocprof-sys-avail -bd -r ROCM_DOMAINS",
+                "lists example domain choices like hip_runtime_api, hsa_api, kernel_dispatch"
+            ],
+            "id": "what-rocm-apis-traceable",
+            "prompt": "What ROCm APIs can I trace with rocprof-sys-run?",
+            "skill_should_trigger": true
+        },
+        {
+            "expected_behavior": [
+                "recommends rocprof-sys-avail -G ~/.rocprof-sys.cfg --all",
+                "explains setting ROCPROFSYS_CONFIG_FILE"
+            ],
+            "id": "persist-configuration",
+            "prompt": "How do I save my rocprof-sys settings so I don't have to set environment variables every time?",
+            "skill_should_trigger": true
+        },
+        {
+            "id": "which-preset-should-i-use",
+            "prompt": "Which preset should I use to profile my MPI application?",
+            "skill_should_trigger": false
+        },
+        {
+            "id": "vague-performance-question-no-tool",
+            "prompt": "How can I make my application run faster?",
+            "skill_should_trigger": false
+        }
+    ]
+}

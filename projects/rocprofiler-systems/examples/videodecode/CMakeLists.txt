@@ -179,11 +179,16 @@ if(FFMPEG_FOUND AND rocdecode_FOUND)
             DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
             COMPONENT rocprofiler-systems-examples
         )
-        install(
-            DIRECTORY ${CMAKE_BINARY_DIR}/videos/
-            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples/videos
-            COMPONENT rocprofiler-systems-examples
-        )
+        # Sample videos ship only in ROCm test builds. install(DIRECTORY) fails
+        # the whole examples install when that directory was never created.
+        if(EXISTS "${CMAKE_BINARY_DIR}/videos")
+            install(
+                DIRECTORY ${CMAKE_BINARY_DIR}/videos/
+                DESTINATION
+                    ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples/videos
+                COMPONENT rocprofiler-systems-examples
+            )
+        endif()
     endif()
 else()
     message(

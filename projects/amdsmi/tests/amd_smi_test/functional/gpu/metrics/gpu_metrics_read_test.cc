@@ -14,18 +14,16 @@
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_utils.h"
-#include "libdrm/amdgpu_drm.h"
 #include "rocm_smi/rocm_smi_utils.h"
 #include "test_common.h"
 
 namespace {
 
-// APU metrics version constants
-constexpr uint8_t kApuMetricsV24FormatRevision = 2;
-constexpr uint8_t kApuMetricsV24ContentRevision = 4;
-constexpr uint8_t kApuMetricsV30FormatRevision = 3;
-constexpr uint8_t kApuMetricsV30ContentRevision = 0;
-constexpr size_t kApuMetricsV24CoreCount = AMDSMI_APU_V24_CORES;
+// amdsmi.h publishes the APU auxiliary table through amdsmi_gpu_metrics_t
+// apu_metrics for format_revision 2 (v2.x) and 3 (v3.0); every other revision
+// describes a GPU-only table and leaves that pointer null.
+constexpr auto kApuMetricsFormatRevision = std::uint8_t(2);
+constexpr auto kApuMetricsV3FormatRevision = std::uint8_t(3);
 
 template <typename T>
 void PrintArrayLine(const std::string& label, const T* values, size_t count) {
@@ -39,62 +37,46 @@ void PrintApuMetrics(const amdsmi_gpu_metrics_t& smu) {
     return;
   }
 
+  // The APU auxiliary block is a single unified structure across metric
+  // versions: any field a given device/version does not populate reads back as
+  // the not-applicable sentinel (the maximum value of the field's type). Print
+  // every field unconditionally so callers never branch on the metric version.
   const auto& apu = *smu.apu_metrics;
-  const bool is_v24 = smu.common_header.format_revision == kApuMetricsV24FormatRevision &&
-                      smu.common_header.content_revision == kApuMetricsV24ContentRevision;
-  const bool is_v30 = smu.common_header.format_revision == kApuMetricsV30FormatRevision &&
-                      smu.common_header.content_revision == kApuMetricsV30ContentRevision;
-
-  const size_t core_count = is_v24 ? kApuMetricsV24CoreCount : AMDSMI_APU_MAX_CORES;
-  const size_t l3_count = is_v24 ? AMDSMI_APU_MAX_L3 : 0;
 
   std::cout << "\n";
   std::cout << "APU METRICS AUXILIARY DATA:\n";
   std::cout << "temperature_gfx = " << std::dec << apu.temperature_gfx << "\n";
   std::cout << "temperature_soc = " << std::dec << apu.temperature_soc << "\n";
-  PrintArrayLine("temperature_core", apu.temperature_core, core_count);
-  if (l3_count != 0) {
-    PrintArrayLine("temperature_l3", apu.temperature_l3, l3_count);
-  }
-  if (is_v30) {
-    std::cout << "temperature_skin = " << std::dec << apu.temperature_skin << "\n";
-  }
+  PrintArrayLine("temperature_core", apu.temperature_core, AMDSMI_APU_MAX_CORES);
+  PrintArrayLine("temperature_l3", apu.temperature_l3, AMDSMI_APU_MAX_L3);
+  std::cout << "temperature_skin = " << std::dec << apu.temperature_skin << "\n";
 
   std::cout << "\n";
   std::cout << "APU UTILIZATION:\n";
   std::cout << "average_gfx_activity = " << std::dec << apu.average_gfx_activity << "\n";
-  if (is_v24) {
-    std::cout << "average_mm_activity = " << std::dec << apu.average_mm_activity << "\n";
-  }
-  if (is_v30) {
-    std::cout << "average_vcn_activity = " << std::dec << apu.average_vcn_activity << "\n";
-    PrintArrayLine("average_ipu_activity", apu.average_ipu_activity, AMDSMI_APU_MAX_IPU);
-    PrintArrayLine("average_core_c0_activity", apu.average_core_c0_activity, core_count);
-    std::cout << "average_dram_reads = " << std::dec << apu.average_dram_reads << "\n";
-    std::cout << "average_dram_writes = " << std::dec << apu.average_dram_writes << "\n";
-    std::cout << "average_ipu_reads = " << std::dec << apu.average_ipu_reads << "\n";
-    std::cout << "average_ipu_writes = " << std::dec << apu.average_ipu_writes << "\n";
-  }
+  std::cout << "average_mm_activity = " << std::dec << apu.average_mm_activity << "\n";
+  std::cout << "average_vcn_activity = " << std::dec << apu.average_vcn_activity << "\n";
+  PrintArrayLine("average_ipu_activity", apu.average_ipu_activity, AMDSMI_APU_MAX_IPU);
+  PrintArrayLine("average_core_c0_activity", apu.average_core_c0_activity, AMDSMI_APU_MAX_CORES);
+  std::cout << "average_dram_reads = " << std::dec << apu.average_dram_reads << "\n";
+  std::cout << "average_dram_writes = " << std::dec << apu.average_dram_writes << "\n";
+  std::cout << "average_ipu_reads = " << std::dec << apu.average_ipu_reads << "\n";
+  std::cout << "average_ipu_writes = " << std::dec << apu.average_ipu_writes << "\n";
 
   std::cout << "\n";
   std::cout << "APU POWER (mW):\n";
   std::cout << "average_socket_power = " << std::dec << apu.average_socket_power << "\n";
-  if (is_v24) {
-    std::cout << "average_cpu_power = " << std::dec << apu.average_cpu_power << "\n";
-    std::cout << "average_soc_power = " << std::dec << apu.average_soc_power << "\n";
-  }
+  std::cout << "average_cpu_power = " << std::dec << apu.average_cpu_power << "\n";
+  std::cout << "average_soc_power = " << std::dec << apu.average_soc_power << "\n";
   std::cout << "average_gfx_power = " << std::dec << apu.average_gfx_power << "\n";
-  PrintArrayLine("average_core_power", apu.average_core_power, core_count);
-  if (is_v30) {
-    std::cout << "average_ipu_power = " << std::dec << apu.average_ipu_power << "\n";
-    std::cout << "average_apu_power = " << std::dec << apu.average_apu_power << "\n";
-    std::cout << "average_dgpu_power = " << std::dec << apu.average_dgpu_power << "\n";
-    std::cout << "average_all_core_power = " << std::dec << apu.average_all_core_power << "\n";
-    std::cout << "average_sys_power = " << std::dec << apu.average_sys_power << "\n";
-    std::cout << "stapm_power_limit = " << std::dec << apu.stapm_power_limit << "\n";
-    std::cout << "current_stapm_power_limit = " << std::dec << apu.current_stapm_power_limit
-              << "\n";
-  }
+  PrintArrayLine("average_core_power", apu.average_core_power, AMDSMI_APU_MAX_CORES);
+  std::cout << "average_ipu_power = " << std::dec << apu.average_ipu_power << "\n";
+  std::cout << "average_apu_power = " << std::dec << apu.average_apu_power << "\n";
+  std::cout << "average_dgpu_power = " << std::dec << apu.average_dgpu_power << "\n";
+  std::cout << "average_all_core_power = " << std::dec << apu.average_all_core_power << "\n";
+  std::cout << "average_sys_power = " << std::dec << apu.average_sys_power << "\n";
+  std::cout << "stapm_power_limit = " << std::dec << apu.stapm_power_limit << "\n";
+  std::cout << "current_stapm_power_limit = " << std::dec << apu.current_stapm_power_limit << "\n";
 
   std::cout << "\n";
   std::cout << "APU AVERAGE CLOCKS (MHz):\n";
@@ -103,78 +85,60 @@ void PrintApuMetrics(const amdsmi_gpu_metrics_t& smu) {
   std::cout << "average_uclk_frequency = " << std::dec << apu.average_uclk_frequency << "\n";
   std::cout << "average_fclk_frequency = " << std::dec << apu.average_fclk_frequency << "\n";
   std::cout << "average_vclk_frequency = " << std::dec << apu.average_vclk_frequency << "\n";
-  if (is_v24) {
-    std::cout << "average_dclk_frequency = " << std::dec << apu.average_dclk_frequency << "\n";
-  }
-  if (is_v30) {
-    std::cout << "average_vpeclk_frequency = " << std::dec << apu.average_vpeclk_frequency << "\n";
-    std::cout << "average_ipuclk_frequency = " << std::dec << apu.average_ipuclk_frequency << "\n";
-    std::cout << "average_mpipu_frequency = " << std::dec << apu.average_mpipu_frequency << "\n";
-  }
+  std::cout << "average_dclk_frequency = " << std::dec << apu.average_dclk_frequency << "\n";
+  std::cout << "average_vpeclk_frequency = " << std::dec << apu.average_vpeclk_frequency << "\n";
+  std::cout << "average_ipuclk_frequency = " << std::dec << apu.average_ipuclk_frequency << "\n";
+  std::cout << "average_mpipu_frequency = " << std::dec << apu.average_mpipu_frequency << "\n";
 
   std::cout << "\n";
   std::cout << "APU CURRENT CLOCKS (MHz):\n";
-  if (is_v24) {
-    std::cout << "current_gfxclk = " << std::dec << apu.current_gfxclk << "\n";
-    std::cout << "current_socclk = " << std::dec << apu.current_socclk << "\n";
-    std::cout << "current_uclk = " << std::dec << apu.current_uclk << "\n";
-    std::cout << "current_fclk = " << std::dec << apu.current_fclk << "\n";
-    std::cout << "current_vclk = " << std::dec << apu.current_vclk << "\n";
-    std::cout << "current_dclk = " << std::dec << apu.current_dclk << "\n";
-  }
-  PrintArrayLine("current_coreclk", apu.current_coreclk, core_count);
-  if (l3_count != 0) {
-    PrintArrayLine("current_l3clk", apu.current_l3clk, l3_count);
-  }
-  if (is_v30) {
-    std::cout << "current_core_maxfreq = " << std::dec << apu.current_core_maxfreq << "\n";
-    std::cout << "current_gfx_maxfreq = " << std::dec << apu.current_gfx_maxfreq << "\n";
-  }
+  std::cout << "current_gfxclk = " << std::dec << apu.current_gfxclk << "\n";
+  std::cout << "current_socclk = " << std::dec << apu.current_socclk << "\n";
+  std::cout << "current_uclk = " << std::dec << apu.current_uclk << "\n";
+  std::cout << "current_fclk = " << std::dec << apu.current_fclk << "\n";
+  std::cout << "current_vclk = " << std::dec << apu.current_vclk << "\n";
+  std::cout << "current_dclk = " << std::dec << apu.current_dclk << "\n";
+  PrintArrayLine("current_coreclk", apu.current_coreclk, AMDSMI_APU_MAX_CORES);
+  PrintArrayLine("current_l3clk", apu.current_l3clk, AMDSMI_APU_MAX_L3);
+  std::cout << "current_core_maxfreq = " << std::dec << apu.current_core_maxfreq << "\n";
+  std::cout << "current_gfx_maxfreq = " << std::dec << apu.current_gfx_maxfreq << "\n";
 
   std::cout << "\n";
   std::cout << "APU THROTTLE:\n";
-  if (is_v24) {
-    std::cout << "throttle_status = " << std::dec << apu.throttle_status << "\n";
-    std::cout << "indep_throttle_status = " << std::dec << apu.indep_throttle_status << "\n";
-  }
-  if (is_v30) {
-    std::cout << "throttle_residency_prochot = " << std::dec << apu.throttle_residency_prochot
-              << "\n";
-    std::cout << "throttle_residency_spl = " << std::dec << apu.throttle_residency_spl << "\n";
-    std::cout << "throttle_residency_fppt = " << std::dec << apu.throttle_residency_fppt << "\n";
-    std::cout << "throttle_residency_sppt = " << std::dec << apu.throttle_residency_sppt << "\n";
-    std::cout << "throttle_residency_thm_core = " << std::dec << apu.throttle_residency_thm_core
-              << "\n";
-    std::cout << "throttle_residency_thm_gfx = " << std::dec << apu.throttle_residency_thm_gfx
-              << "\n";
-    std::cout << "throttle_residency_thm_soc = " << std::dec << apu.throttle_residency_thm_soc
-              << "\n";
-  }
+  std::cout << "throttle_status = " << std::dec << apu.throttle_status << "\n";
+  std::cout << "indep_throttle_status = " << std::dec << apu.indep_throttle_status << "\n";
+  std::cout << "throttle_residency_prochot = " << std::dec << apu.throttle_residency_prochot
+            << "\n";
+  std::cout << "throttle_residency_spl = " << std::dec << apu.throttle_residency_spl << "\n";
+  std::cout << "throttle_residency_fppt = " << std::dec << apu.throttle_residency_fppt << "\n";
+  std::cout << "throttle_residency_sppt = " << std::dec << apu.throttle_residency_sppt << "\n";
+  std::cout << "throttle_residency_thm_core = " << std::dec << apu.throttle_residency_thm_core
+            << "\n";
+  std::cout << "throttle_residency_thm_gfx = " << std::dec << apu.throttle_residency_thm_gfx
+            << "\n";
+  std::cout << "throttle_residency_thm_soc = " << std::dec << apu.throttle_residency_thm_soc
+            << "\n";
 
-  if (is_v24) {
-    std::cout << "\n";
-    std::cout << "APU FAN / VOLTAGE / CURRENT:\n";
-    std::cout << "fan_pwm = " << std::dec << apu.fan_pwm << "\n";
-    std::cout << "average_cpu_voltage = " << std::dec << apu.average_cpu_voltage << "\n";
-    std::cout << "average_soc_voltage = " << std::dec << apu.average_soc_voltage << "\n";
-    std::cout << "average_gfx_voltage = " << std::dec << apu.average_gfx_voltage << "\n";
-    std::cout << "average_cpu_current = " << std::dec << apu.average_cpu_current << "\n";
-    std::cout << "average_soc_current = " << std::dec << apu.average_soc_current << "\n";
-    std::cout << "average_gfx_current = " << std::dec << apu.average_gfx_current << "\n";
+  std::cout << "\n";
+  std::cout << "APU FAN / VOLTAGE / CURRENT:\n";
+  std::cout << "fan_pwm = " << std::dec << apu.fan_pwm << "\n";
+  std::cout << "average_cpu_voltage = " << std::dec << apu.average_cpu_voltage << "\n";
+  std::cout << "average_soc_voltage = " << std::dec << apu.average_soc_voltage << "\n";
+  std::cout << "average_gfx_voltage = " << std::dec << apu.average_gfx_voltage << "\n";
+  std::cout << "average_cpu_current = " << std::dec << apu.average_cpu_current << "\n";
+  std::cout << "average_soc_current = " << std::dec << apu.average_soc_current << "\n";
+  std::cout << "average_gfx_current = " << std::dec << apu.average_gfx_current << "\n";
 
-    std::cout << "\n";
-    std::cout << "APU AVERAGE TEMPERATURE:\n";
-    std::cout << "average_temperature_gfx = " << std::dec << apu.average_temperature_gfx << "\n";
-    std::cout << "average_temperature_soc = " << std::dec << apu.average_temperature_soc << "\n";
-    PrintArrayLine("average_temperature_core", apu.average_temperature_core, core_count);
-    PrintArrayLine("average_temperature_l3", apu.average_temperature_l3, l3_count);
-  }
+  std::cout << "\n";
+  std::cout << "APU AVERAGE TEMPERATURE:\n";
+  std::cout << "average_temperature_gfx = " << std::dec << apu.average_temperature_gfx << "\n";
+  std::cout << "average_temperature_soc = " << std::dec << apu.average_temperature_soc << "\n";
+  PrintArrayLine("average_temperature_core", apu.average_temperature_core, AMDSMI_APU_MAX_CORES);
+  PrintArrayLine("average_temperature_l3", apu.average_temperature_l3, AMDSMI_APU_MAX_L3);
 
-  if (is_v30) {
-    std::cout << "\n";
-    std::cout << "APU OTHER:\n";
-    std::cout << "time_filter_alphavalue = " << std::dec << apu.time_filter_alphavalue << "\n";
-  }
+  std::cout << "\n";
+  std::cout << "APU OTHER:\n";
+  std::cout << "time_filter_alphavalue = " << std::dec << apu.time_filter_alphavalue << "\n";
 }
 
 }  // namespace
@@ -229,11 +193,14 @@ void TestGpuMetricsRead::Run(void) {
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_metrics_info", "gpu=" + std::to_string(i), VERB(STANDARD));
     err = amdsmi_get_gpu_metrics_info(processor_handles_[i], &smu);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
-    if (err != AMDSMI_STATUS_SUCCESS) {
-      if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
-        continue;
-      }
-    } else {
+    if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
+      std::cout << "\t**GPU METRICS: Not supported on device " << i << ", skipping\n";
+      continue;
+    }
+    // Any other failure is a real one: letting it fall through left the metrics
+    // claim unasserted on every ASIC.
+    CHK_ERR_ASRT(err);
+    {
       auto temp_xcd_counter_value = uint16_t(0);
       DISPLAY_AMDSMI_API("amdsmi_get_gpu_xcd_counter", "gpu=" + std::to_string(i), VERB(STANDARD));
       auto ret_xcd = amdsmi_get_gpu_xcd_counter(processor_handles_[i], &temp_xcd_counter_value);
@@ -243,7 +210,13 @@ void TestGpuMetricsRead::Run(void) {
                   << smi_amdgpu_get_status_string(ret_xcd, false)
                   << "\n\t\t** XCD Counter Value: " << temp_xcd_counter_value << "\n";
       }
-      CHK_ERR_ASRT(err);
+      // This asserted err a second time, so the XCD result itself went
+      // unchecked. A device without XCDs may answer NOT_SUPPORTED; anything
+      // else is a real failure.
+      if (ret_xcd != AMDSMI_STATUS_NOT_SUPPORTED) {
+        ASSERT_EQ(ret_xcd, AMDSMI_STATUS_SUCCESS)
+            << "device " << i << " failed to report its XCD counter";
+      }
 
       // Verify XCD count is stable across multiple calls regardless of clock state
       if (ret_xcd == AMDSMI_STATUS_SUCCESS && temp_xcd_counter_value > 0) {
@@ -258,13 +231,19 @@ void TestGpuMetricsRead::Run(void) {
                     << " (current_gfxclk=" << smu.current_gfxclks[0] << " MHz)\n";
         }
       }
-      amdsmi_asic_info_t asic_info = {};
-      err = amdsmi_get_gpu_asic_info(processor_handles_[i], &asic_info);
-      ASSERT_EQ(err, AMDSMI_STATUS_SUCCESS);
-      if ((asic_info.flags & AMDGPU_IDS_FLAGS_FUSION) != 0 && smu.apu_metrics == nullptr) {
-        std::cout << "Fusion/APU device detected but APU metrics not available, skipping device "
-                  << i << std::endl;
-        continue;
+      // amdsmi.h ties apu_metrics to the header revision, not to the FUSION
+      // bit: an APU such as MI300A publishes a v1.x GPU table and correctly
+      // leaves the pointer null, so gating this on FUSION would fail it.
+      const auto format_revision = smu.common_header.format_revision;
+      if (format_revision == kApuMetricsFormatRevision ||
+          format_revision == kApuMetricsV3FormatRevision) {
+        ASSERT_NE(smu.apu_metrics, nullptr)
+            << "device " << i << " reports APU metrics format_revision "
+            << static_cast<uint16_t>(format_revision) << " but exposed no APU metrics";
+      } else {
+        ASSERT_EQ(smu.apu_metrics, nullptr)
+            << "device " << i << " reports GPU metrics format_revision "
+            << static_cast<uint16_t>(format_revision) << " but exposed an APU metrics pointer";
       }
       IF_VERB(STANDARD) {
         std::cout << "METRIC TABLE HEADER:\n";

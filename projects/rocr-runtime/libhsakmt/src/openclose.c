@@ -165,6 +165,13 @@ static HSAKMT_STATUS init_vars_from_env(void)
 	envvar = getenv("PM4_TARGET_XCC");
 	if (envvar)
 		hsakmt_pm4_target_xcc = hsakmt_safe_env_to_int(envvar, 0);
+
+	/* Force the legacy per-agent mbind even when the process set an explicit
+	 * NUMA memory policy (e.g. numactl -m).
+	 */
+	envvar = getenv("HSA_FORCE_MBIND");
+	if (envvar)
+		hsakmt_force_mbind = hsakmt_safe_env_to_int(envvar, 0);
 	return HSAKMT_STATUS_SUCCESS;
 }
 

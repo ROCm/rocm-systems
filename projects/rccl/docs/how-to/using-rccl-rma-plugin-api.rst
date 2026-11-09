@@ -10,17 +10,18 @@ Using the RCCL RMA plugin API
 
 The RMA plugin API lets an external library provide the host-side network
 operations used by RCCL's one-sided communication path. RCCL loads the newest
-supported interface exported by the library, trying ``ncclRmaPlugin_v15``,
-``ncclRmaPlugin_v14`` and then ``ncclRmaPlugin_v13``.
+supported interface exported by the library, trying ``ncclRmaPlugin_v16``,
+``ncclRmaPlugin_v15``, ``ncclRmaPlugin_v14`` and then ``ncclRmaPlugin_v13``.
 
-Implementing version 15
+Implementing version 16
 =======================
 
-Implement ``ncclRma_v15_t`` from ``src/include/plugin/rma/rma_v15.h`` and
-export the vtable as ``ncclRmaPlugin_v15``. The following callbacks are
+Implement ``ncclRma_v16_t`` from ``src/include/plugin/rma/rma_v16.h`` and
+export the vtable as ``ncclRmaPlugin_v16``. The following callbacks are
 required:
 
-* ``init``, ``devices``, ``getProperties``, ``listen`` and ``connect``
+* ``init``, ``devices``, ``getRmaProperties``, ``getProperties``, ``listen``
+  and ``connect``
 * ``createContext``, ``regMrSym``, ``deregMrSym`` and ``destroyContext``
 * ``closeColl`` and ``closeListen``
 * ``iput``, ``iputSignal``, ``iget``, ``test`` and ``finalize``
@@ -29,21 +30,36 @@ required:
 ``NCCL_PTR_DMABUF``. ``iflush``, ``rmaProgress`` and ``queryLastError`` are
 optional.
 
-Version 15 adds an ``optFlags`` argument to ``iput``, ``iputSignal`` and
-``iget``. Plugins must accept these values:
+Version 16 adds ``getRmaProperties``, which RCCL calls once per collective
+communicator when it sets up the GIN proxy. It fills ``ncclRmaProperties_v16_t``:
+
+* ``flushesAllPutsOnAnySignal``: set to ``true`` only when the backend makes
+  every put already received on the communicator visible whenever any signal
+  arrives, from any peer, on every NIC the communicator uses. RCCL's device
+  barrier then skips its per-peer flush. Return ``false`` when unsure; that keeps
+  the per-peer flush and is what RCCL reports for v13 to v15 plugins.
+
+Version 15 added an ``optFlags`` argument to ``iput``, ``iputSignal`` and
+``iget``, which v16 keeps. Plugins must accept these values:
 
 * ``ncclRmaOptFlagsDefault`` (``0``): no optional behavior requested.
 * ``ncclRmaOptFlagsAggregateRequests`` (``1 << 0``): the caller permits the
   backend to aggregate compatible requests. This is a hint; it must not change
   the operation's data or ordering semantics.
 
+The GIN proxy sets the hint when that peer's next operation is already queued
+and will be issued in the same progress iteration (see
+``NCCL_GIN_PROXY_POLL_BATCH``). Each run ends with a data operation without the
+hint or with an ``iflush``, so a backend that holds hinted requests, for example
+by delaying a doorbell, should submit them on either.
+
 Compatibility with older plugins
 =================================
 
-RCCL continues to load v14 and v13 plugins. Their compatibility wrappers adapt
-the older callback signatures and discard ``optFlags``, because those versions
-cannot consume the new hint. New plugins should export v15 so they receive the
-flags directly.
+RCCL continues to load v15, v14 and v13 plugins. Their compatibility wrappers
+report ``flushesAllPutsOnAnySignal`` as ``false``. The v14 and v13 wrappers also
+adapt the older callback signatures and discard ``optFlags``, because those
+versions cannot consume the hint. New plugins should export v16.
 
 Loading a plugin
 ================
@@ -63,4 +79,8 @@ During communicator initialization, ``NCCL_DEBUG=INFO`` reports the selected
 interface version and the backend assigned to the communicator.
 
 ``plugins/rma/example`` is a minimal v15 implementation that demonstrates the
-lifecycle, registration and data-operation callback signatures.
+lifecycle, registration and data-operation callback signatures. RCCL loads it
+through the v15 compatibility wrapper. It reports the GIN proxy device type, so
+``NCCL_GIN_TYPE=2`` keeps it selected as the proxy backend, and at finalize it
+logs how many data operations it received and how many carried the aggregation
+hint.

@@ -63,6 +63,17 @@ static void insert_clk_seq(uuid_t* uuid, uint16_t seq) {
 }
 
 amdsmi_status_t amdsmi_uuid_gen(char* str, uint64_t serial, uint16_t did, uint8_t idx) {
+  // UINT64_MAX is the driver's "no serial available" sentinel; packing it in
+  // produces a UUID that looks real but isn't, and unlike a serial of 0 (which
+  // callers may still derive a per-device-unique BDF fallback from), UINT64_MAX
+  // collides identically across every affected GPU model, so it is rejected
+  // outright. NUL-terminate so callers that log/print str regardless of status
+  // never scan an uninitialized buffer.
+  if (serial == UINT64_MAX) {
+    str[0] = '\0';
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+
   uuid_t uuid;
   memset(&uuid, 0, sizeof(uuid_t));
 

@@ -67,40 +67,39 @@ void run_case(const char *label, Fmt fmt, Fmt acc_fmt,
   }
 }
 
-template <typename Ea, typename Eb>
-void run_dense_f32(const char *label, Fmt fmt, uint32_t M, uint32_t N, uint32_t K, uint32_t bits,
-                   Ea ea, Eb eb) {
+template <uint32_t M, uint32_t N, uint32_t K, typename Ea, typename Eb>
+void run_dense_f32(const char *label, Fmt fmt, uint32_t bits, Ea ea, Eb eb) {
   run_case(label, fmt, Fmt::F32, [=](WmmaFixture &fx, uint32_t const_acc) {
-    amdgpu::exec_wmma_f32(*fx.cu, M, N, K, bits, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1,
-                          fx.vbase + ACC, ea, eb, const_acc);
+    amdgpu::exec_wmma_f32<M, N, K>(*fx.cu, bits, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1,
+                                   fx.vbase + ACC, ea, eb, const_acc);
   });
 }
 
-template <typename Ea, typename Eb>
-void run_dense_f16(const char *label, Fmt fmt, uint32_t K, uint32_t bits, Ea ea, Eb eb) {
+template <uint32_t K, typename Ea, typename Eb>
+void run_dense_f16(const char *label, Fmt fmt, uint32_t bits, Ea ea, Eb eb) {
   run_case(label, fmt, Fmt::F16, [=](WmmaFixture &fx, uint32_t const_acc) {
-    amdgpu::exec_wmma_f16(*fx.cu, 16, 16, K, bits, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1,
-                          fx.vbase + ACC, ea, eb, const_acc);
+    amdgpu::exec_wmma_f16<16, 16, K>(*fx.cu, bits, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1,
+                                     fx.vbase + ACC, ea, eb, const_acc);
   });
 }
 
-template <typename Ea, typename Eb>
-void run_sparse_f32(const char *label, Fmt fmt, uint32_t K, uint32_t bits, uint32_t index_entries,
-                    Ea ea, Eb eb) {
+template <uint32_t K, typename Ea, typename Eb>
+void run_sparse_f32(const char *label, Fmt fmt, uint32_t bits, uint32_t index_entries, Ea ea,
+                    Eb eb) {
   run_case(label, fmt, Fmt::F32, [=](WmmaFixture &fx, uint32_t const_acc) {
-    amdgpu::exec_swmmac_f32(*fx.cu, 16, 16, K, bits, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1,
-                            fx.vbase + ACC, fx.vbase + INDEX, index_entries, INDEX_KEY, ea, eb,
-                            const_acc);
+    amdgpu::exec_swmmac_f32<16, 16, K>(*fx.cu, bits, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1,
+                                       fx.vbase + ACC, fx.vbase + INDEX, index_entries, INDEX_KEY,
+                                       ea, eb, const_acc);
   });
 }
 
-template <typename Ea, typename Eb>
-void run_sparse_f16(const char *label, Fmt fmt, uint32_t K, uint32_t bits, uint32_t index_entries,
-                    Ea ea, Eb eb) {
+template <uint32_t K, typename Ea, typename Eb>
+void run_sparse_f16(const char *label, Fmt fmt, uint32_t bits, uint32_t index_entries, Ea ea,
+                    Eb eb) {
   run_case(label, fmt, Fmt::F16, [=](WmmaFixture &fx, uint32_t const_acc) {
-    amdgpu::exec_swmmac_f16(*fx.cu, 16, 16, K, bits, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1,
-                            fx.vbase + ACC, fx.vbase + INDEX, index_entries, INDEX_KEY, ea, eb,
-                            const_acc);
+    amdgpu::exec_swmmac_f16<16, 16, K>(*fx.cu, bits, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1,
+                                       fx.vbase + ACC, fx.vbase + INDEX, index_entries, INDEX_KEY,
+                                       ea, eb, const_acc);
   });
 }
 
@@ -109,10 +108,10 @@ void run_sparse_f16(const char *label, Fmt fmt, uint32_t K, uint32_t bits, uint3
 // --- dense f32-out, f16 inputs (generic + both specialized kernels) ---
 TEST(WmmaSimdExact, F32_f16) {
   SKIP_IF_NO_SIMD();
-  run_dense_f32("wmma_f32_16x16x16_f16", Fmt::F16, 16, 16, 16, 16, amdgpu::extract_f16,
-                amdgpu::extract_f16);
-  run_dense_f32("wmma_f32_16x16x32_f16", Fmt::F16, 16, 16, 32, 16, amdgpu::extract_f16,
-                amdgpu::extract_f16);
+  run_dense_f32<16, 16, 16>("wmma_f32_16x16x16_f16", Fmt::F16, 16, amdgpu::extract_f16,
+                            amdgpu::extract_f16);
+  run_dense_f32<16, 16, 32>("wmma_f32_16x16x32_f16", Fmt::F16, 16, amdgpu::extract_f16,
+                            amdgpu::extract_f16);
   run_case("wmma_f32_16x16x32_f16_spec", Fmt::F16, Fmt::F32, [](WmmaFixture &fx, uint32_t ca) {
     amdgpu::exec_wmma_f32_16x16x32_f16(*fx.cu, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1,
                                        fx.vbase + ACC, ca);
@@ -123,13 +122,74 @@ TEST(WmmaSimdExact, F32_f16) {
   });
 }
 
+// Compare to the pre-existing generic native path, including rounding-sensitive
+// inputs and distinct NaN payloads for this host/compiler path, not a portable
+// ISA NaN policy. Scalar-vs-SIMD checks above use an exact corpus.
+TEST(WmmaSimdExact, F16NativeWidthSpecializationMatchesGeneric) {
+  SKIP_IF_NO_SIMD();
+  const uint32_t width = util::native<float>::size();
+  if (!amdgpu::mma_f32_native_width_supported(16, width))
+    GTEST_SKIP() << "unsupported native float width";
+  constexpr uint16_t halves[] = {0x0000, 0x8000, 0x0001, 0x03ff, 0x0400, 0x3c01, 0x3555, 0xbc01,
+                                 0x7bff, 0x7c00, 0xfc00, 0x7e11, 0xfe22, 0x7c33, 0xfc44};
+  constexpr uint32_t kFiniteHalfCount = 9; // The prefix before the first infinity.
+  for (bool scalar : {false, true})
+    for (bool nan_inputs : {false, true})
+      for (uint32_t dst : {0u, 4u, 32u, 36u, 64u, 68u, 112u})
+        for (uint32_t ca : {amdgpu::ACC_FROM_VGPR, CONST_ONE})
+          for (uint32_t modifier = 0; modifier < 4; ++modifier) {
+            // The legacy 16-wide path has its own host NaN operand priority.
+            // This comparison qualifies the newly enabled widths.
+            if (nan_inputs && width == 16)
+              continue;
+            WmmaFixture fx;
+            ASSERT_NE(fx.wf, nullptr);
+            // Match the template instantiation used by generated instruction execution.
+            amdgpu::InstructionComputeUnitView view(*fx.cu, *fx.wf);
+            ForceScalarGuard force_scalar_guard;
+            util::set_force_scalar_for_testing(scalar);
+            auto reseed = [&] {
+              const uint32_t count = nan_inputs ? std::size(halves) : kFiniteHalfCount;
+              for (uint32_t reg = 0; reg < 8; ++reg)
+                for (uint32_t lane = 0; lane < 32; ++lane) {
+                  const uint32_t i = reg * 32 + lane;
+                  fx.cu->write_vgpr(fx.vbase + S0 + reg, lane,
+                                    halves[i % count] |
+                                        (static_cast<uint32_t>(halves[(i + 3) % count]) << 16));
+                  fx.cu->write_vgpr(fx.vbase + S1 + reg, lane,
+                                    halves[(i + 7) % count] |
+                                        (static_cast<uint32_t>(halves[(i + 9) % count]) << 16));
+                  fx.cu->write_vgpr(fx.vbase + ACC + reg, lane,
+                                    nan_inputs ? 0x7fc01234u : 0x3f800001u);
+                }
+            };
+            reseed();
+            amdgpu::exec_wmma_f32<16, 16, 32>(view, 16, fx.vbase + dst, fx.vbase + S0,
+                                              fx.vbase + S1, fx.vbase + ACC, amdgpu::extract_f16,
+                                              amdgpu::extract_f16, ca, modifier);
+            std::array<uint32_t, 256> expected;
+            for (uint32_t reg = 0; reg < 8; ++reg)
+              for (uint32_t lane = 0; lane < 32; ++lane)
+                expected[reg * 32 + lane] = fx.cu->read_vgpr(fx.vbase + dst + reg, lane);
+            reseed();
+            amdgpu::exec_wmma_f32_16x16x32_f16(view, fx.vbase + dst, fx.vbase + S0, fx.vbase + S1,
+                                               fx.vbase + ACC, ca, modifier);
+            for (uint32_t reg = 0; reg < 8; ++reg)
+              for (uint32_t lane = 0; lane < 32; ++lane)
+                ASSERT_EQ(fx.cu->read_vgpr(fx.vbase + dst + reg, lane), expected[reg * 32 + lane])
+                    << "scalar=" << scalar << " nan=" << nan_inputs << " dst=" << dst
+                    << " ca=" << ca << " modifier=" << modifier << " reg=" << reg
+                    << " lane=" << lane;
+          }
+}
+
 // --- dense f16-out (packed16, generic + specialized) ---
 TEST(WmmaSimdExact, F16_f16) {
   SKIP_IF_NO_SIMD();
-  run_dense_f16("wmma_f16_16x16x16_f16", Fmt::F16, 16, 16, amdgpu::extract_f16,
-                amdgpu::extract_f16);
-  run_dense_f16("wmma_f16_16x16x32_f16", Fmt::F16, 32, 16, amdgpu::extract_f16,
-                amdgpu::extract_f16);
+  run_dense_f16<16>("wmma_f16_16x16x16_f16", Fmt::F16, 16, amdgpu::extract_f16,
+                    amdgpu::extract_f16);
+  run_dense_f16<32>("wmma_f16_16x16x32_f16", Fmt::F16, 16, amdgpu::extract_f16,
+                    amdgpu::extract_f16);
   run_case("wmma_f16_16x16x32_f16_spec", Fmt::F16, Fmt::F16, [](WmmaFixture &fx, uint32_t ca) {
     amdgpu::exec_wmma_f16_spec<16, 16, 32>(*fx.cu, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1,
                                            fx.vbase + ACC, ca);
@@ -139,11 +199,12 @@ TEST(WmmaSimdExact, F16_f16) {
 // --- dense bf16 inputs: f32-out and packed bf16-out ---
 TEST(WmmaSimdExact, Bf16) {
   SKIP_IF_NO_SIMD();
-  run_dense_f32("wmma_f32_16x16x32_bf16", Fmt::BF16, 16, 16, 32, 16, amdgpu::extract_bf16,
-                amdgpu::extract_bf16);
+  run_dense_f32<16, 16, 32>("wmma_f32_16x16x32_bf16", Fmt::BF16, 16, amdgpu::extract_bf16,
+                            amdgpu::extract_bf16);
   run_case("wmma_bf16_16x16x32_bf16", Fmt::BF16, Fmt::BF16, [](WmmaFixture &fx, uint32_t ca) {
-    amdgpu::exec_wmma_bf16(*fx.cu, 16, 16, 32, 16, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1,
-                           fx.vbase + ACC, amdgpu::extract_bf16, amdgpu::extract_bf16, ca);
+    amdgpu::exec_wmma_bf16<16, 16, 32>(*fx.cu, 16, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1,
+                                       fx.vbase + ACC, amdgpu::extract_bf16, amdgpu::extract_bf16,
+                                       ca);
   });
   run_case("wmma_f32_16x16x32_bf16_spec", Fmt::BF16, Fmt::F32, [](WmmaFixture &fx, uint32_t ca) {
     amdgpu::exec_wmma_f32_16x16x32_bf16(*fx.cu, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1,
@@ -153,12 +214,12 @@ TEST(WmmaSimdExact, Bf16) {
     amdgpu::exec_wmma_bf16_spec<16, 16, 32>(*fx.cu, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1,
                                             fx.vbase + ACC, ca);
   });
-  run_sparse_f32("swmmac_f32_16x16x64_bf16", Fmt::BF16, 64, 16, 16, amdgpu::extract_bf16,
-                 amdgpu::extract_bf16);
+  run_sparse_f32<64>("swmmac_f32_16x16x64_bf16", Fmt::BF16, 16, 16, amdgpu::extract_bf16,
+                     amdgpu::extract_bf16);
   run_case("swmmac_bf16_16x16x64_bf16", Fmt::BF16, Fmt::BF16, [](WmmaFixture &fx, uint32_t ca) {
-    amdgpu::exec_swmmac_bf16(*fx.cu, 16, 16, 64, 16, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1,
-                             fx.vbase + ACC, fx.vbase + INDEX, 16, INDEX_KEY, amdgpu::extract_bf16,
-                             amdgpu::extract_bf16, ca);
+    amdgpu::exec_swmmac_bf16<16, 16, 64>(*fx.cu, 16, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1,
+                                         fx.vbase + ACC, fx.vbase + INDEX, 16, INDEX_KEY,
+                                         amdgpu::extract_bf16, amdgpu::extract_bf16, ca);
   });
 }
 
@@ -264,28 +325,28 @@ TEST(WmmaSimdExact, Bf16F32MixedNanPayloadPriority) {
       fx.cu->write_vgpr(fx.vbase + base + loc.vgpr_offset, loc.lane, word);
     };
     auto write_acc = [&](uint32_t row, uint32_t col, uint32_t value) {
-      const auto loc = amdgpu::wmma_output_loc_32(16, 16, row, col);
+      const auto loc = amdgpu::wmma_output_loc_32<16, 16>(row, col);
       fx.cu->write_vgpr(fx.vbase + ACC + loc.reg, loc.lane, value);
     };
 
-    write_bf16(S0, amdgpu::wmma_input_loc(16, 32, 0, 0, 16), 0x7FC1u);
-    write_bf16(S1, amdgpu::wmma_input_loc(16, 32, 0, 0, 16), 0x7FC2u);
+    write_bf16(S0, amdgpu::wmma_input_loc<16, 32>(0, 0, 16), 0x7FC1u);
+    write_bf16(S1, amdgpu::wmma_input_loc<16, 32>(0, 0, 16), 0x7FC2u);
     write_acc(0, 0, 0x7FC30000u);
 
-    write_bf16(S0, amdgpu::wmma_input_loc(16, 32, 1, 0, 16), 0x3F80u);
-    write_bf16(S1, amdgpu::wmma_input_loc(16, 32, 1, 0, 16), 0x7FC2u);
+    write_bf16(S0, amdgpu::wmma_input_loc<16, 32>(1, 0, 16), 0x3F80u);
+    write_bf16(S1, amdgpu::wmma_input_loc<16, 32>(1, 0, 16), 0x7FC2u);
     write_acc(1, 1, 0x7FC30000u);
 
     write_acc(2, 2, 0x7FC30000u);
-    write_bf16(S0, amdgpu::wmma_input_loc(16, 32, 3, 1, 16), 0x7F81u);
-    write_bf16(S1, amdgpu::wmma_input_loc(16, 32, 3, 1, 16), 0x3F80u);
-    write_bf16(S0, amdgpu::wmma_input_loc(16, 32, 4, 2, 16), 0x3F80u);
-    write_bf16(S1, amdgpu::wmma_input_loc(16, 32, 4, 2, 16), 0xFFC4u);
-    write_bf16(S0, amdgpu::wmma_input_loc(16, 32, 5, 3, 16), 0x7F80u);
+    write_bf16(S0, amdgpu::wmma_input_loc<16, 32>(3, 1, 16), 0x7F81u);
+    write_bf16(S1, amdgpu::wmma_input_loc<16, 32>(3, 1, 16), 0x3F80u);
+    write_bf16(S0, amdgpu::wmma_input_loc<16, 32>(4, 2, 16), 0x3F80u);
+    write_bf16(S1, amdgpu::wmma_input_loc<16, 32>(4, 2, 16), 0xFFC4u);
+    write_bf16(S0, amdgpu::wmma_input_loc<16, 32>(5, 3, 16), 0x7F80u);
 
-    write_bf16(S0, amdgpu::wmma_input_loc(16, 32, 6, 0, 16), 0x7FC1u);
-    write_bf16(S0, amdgpu::wmma_input_loc(16, 32, 6, 31, 16), 0x3F80u);
-    write_bf16(S1, amdgpu::wmma_input_loc(16, 32, 6, 31, 16), 0x7FC2u);
+    write_bf16(S0, amdgpu::wmma_input_loc<16, 32>(6, 0, 16), 0x7FC1u);
+    write_bf16(S0, amdgpu::wmma_input_loc<16, 32>(6, 31, 16), 0x3F80u);
+    write_bf16(S1, amdgpu::wmma_input_loc<16, 32>(6, 31, 16), 0x7FC2u);
   };
   expect_bit_exact(
       "wmma_bf16f32_nan_payloads", Mode::NaN, fx, reseed,
@@ -298,7 +359,7 @@ TEST(WmmaSimdExact, Bf16F32MixedNanPayloadPriority) {
   ASSERT_FALSE(testing::Test::HasFatalFailure());
 
   auto expect_output = [&](uint32_t row, uint32_t col, uint16_t expected) {
-    const auto out = amdgpu::wmma_output_loc_16(16, 16, row, col);
+    const auto out = amdgpu::wmma_output_loc_16<16, 16>(row, col);
     const uint32_t word = fx.cu->read_vgpr(fx.vbase + BF16_DST + out.reg, out.lane);
     EXPECT_EQ(static_cast<uint16_t>(word >> (16 * out.sub_element)), expected)
         << "row=" << row << " col=" << col;
@@ -327,7 +388,7 @@ TEST(WmmaSimdExact, Bf16F32MixedPackLayout) {
     fx.seed_words(BF16_DST, BF16_DST_REGS, 0xBAD5EED);
     for (uint32_t row = 0; row < 16; ++row)
       for (uint32_t col = 0; col < 16; ++col) {
-        const auto out = amdgpu::wmma_output_loc_32(16, 16, row, col);
+        const auto out = amdgpu::wmma_output_loc_32<16, 16>(row, col);
         fx.cu->write_vgpr(fx.vbase + ACC + out.reg, out.lane,
                           inputs[(row * 16 + col) % std::size(inputs)]);
       }
@@ -341,7 +402,7 @@ TEST(WmmaSimdExact, Bf16F32MixedPackLayout) {
                                             /*c_modifier=*/0);
     for (uint32_t row = 0; row < 16; ++row)
       for (uint32_t col = 0; col < 16; ++col) {
-        const auto out = amdgpu::wmma_output_loc_16(16, 16, row, col);
+        const auto out = amdgpu::wmma_output_loc_16<16, 16>(row, col);
         const uint32_t word = fx.cu->read_vgpr(fx.vbase + BF16_DST + out.reg, out.lane);
         const uint16_t actual = static_cast<uint16_t>(word >> (16 * out.sub_element));
         const uint16_t expected =
@@ -359,10 +420,10 @@ TEST(WmmaSimdExact, Bf16F32MixedPackLayout) {
   }
 }
 
-// Multiplication overflows in isolation, but the hardware-fused operation is
-// finite after adding -FLT_MAX.  This witnesses the single-rounding contract
-// in both the forced-scalar oracle and the vector path.
-TEST(WmmaSimdExact, Bf16F32MixedFusedOverflow) {
+// The selected dot-before-C model rounds the dot to F32 before adding C.
+// An overflowing dot therefore remains infinite even when a product fused
+// with C could be finite. This is a simulator grouping choice.
+TEST(WmmaSimdExact, Bf16F32MixedDotOverflow) {
   SKIP_IF_NO_SIMD();
   if (util::native<float>::size() != 16)
     GTEST_SKIP() << "the BF16F32 fast path requires 16-lane native SIMD";
@@ -374,8 +435,8 @@ TEST(WmmaSimdExact, Bf16F32MixedFusedOverflow) {
     fx.seed(S1, BF16_IN_REGS, Fmt::BF16, Mode::Zeros, 0);
     fx.seed(ACC, ACC_REGS, Fmt::F32, Mode::Zeros, 0);
     fx.seed_words(BF16_DST, BF16_DST_REGS, 0x5151);
-    const auto a = amdgpu::wmma_input_loc(16, 32, /*row=*/0, /*k=*/0, 16);
-    const auto b = amdgpu::wmma_input_loc(16, 32, /*col=*/0, /*k=*/0, 16);
+    const auto a = amdgpu::wmma_input_loc<16, 32>(/*row=*/0, /*k=*/0, 16);
+    const auto b = amdgpu::wmma_input_loc<16, 32>(/*col=*/0, /*k=*/0, 16);
     auto write_bf16 = [&](uint32_t base, const auto &loc, uint16_t value) {
       uint32_t word = fx.cu->read_vgpr(fx.vbase + base + loc.vgpr_offset, loc.lane);
       const uint32_t shift = 16 * loc.sub_element;
@@ -384,11 +445,11 @@ TEST(WmmaSimdExact, Bf16F32MixedFusedOverflow) {
     };
     write_bf16(S0, a, 0x5F80u); // 2^64
     write_bf16(S1, b, 0x5F80u);
-    const auto c = amdgpu::wmma_output_loc_32(16, 16, /*row=*/0, /*col=*/0);
+    const auto c = amdgpu::wmma_output_loc_32<16, 16>(/*row=*/0, /*col=*/0);
     fx.cu->write_vgpr(fx.vbase + ACC + c.reg, c.lane, 0xFF7FFFFFu); // -FLT_MAX
   };
   expect_bit_exact(
-      "wmma_bf16f32_fused_overflow", Mode::MaxFinite, fx, reseed,
+      "wmma_bf16f32_dot_overflow", Mode::MaxFinite, fx, reseed,
       [&] {
         amdgpu::exec_wmma_bf16f32_16x16x32_bf16(*fx.cu, fx.vbase + BF16_DST, fx.vbase + S0,
                                                 fx.vbase + S1, fx.vbase + ACC,
@@ -396,26 +457,28 @@ TEST(WmmaSimdExact, Bf16F32MixedFusedOverflow) {
       },
       BF16_DST, BF16_DST_REGS);
   ASSERT_FALSE(testing::Test::HasFatalFailure());
-  const auto out = amdgpu::wmma_output_loc_16(16, 16, /*row=*/0, /*col=*/0);
+  const auto out = amdgpu::wmma_output_loc_16<16, 16>(/*row=*/0, /*col=*/0);
   const uint32_t word = fx.cu->read_vgpr(fx.vbase + BF16_DST + out.reg, out.lane);
-  EXPECT_EQ(static_cast<uint16_t>(word >> (16 * out.sub_element)), 0x7380u);
+  EXPECT_EQ(static_cast<uint16_t>(word >> (16 * out.sub_element)), 0x7F80u);
 }
 
 // --- dense fp8/bf8 inputs, all four A/B combos, K=64 and K=128, f32/f16 out ---
 TEST(WmmaSimdExact, F8Dense) {
   SKIP_IF_NO_SIMD();
-  for (uint32_t k : {64u, 128u}) {
-    run_dense_f32("wmma_f32_fp8_fp8", Fmt::FP8, 16, 16, k, 8, amdgpu::extract_fp8,
-                  amdgpu::extract_fp8);
-    run_dense_f32("wmma_f32_fp8_bf8", Fmt::FP8, 16, 16, k, 8, amdgpu::extract_fp8,
-                  amdgpu::extract_bf8);
-    run_dense_f32("wmma_f32_bf8_fp8", Fmt::BF8, 16, 16, k, 8, amdgpu::extract_bf8,
-                  amdgpu::extract_fp8);
-    run_dense_f32("wmma_f32_bf8_bf8", Fmt::BF8, 16, 16, k, 8, amdgpu::extract_bf8,
-                  amdgpu::extract_bf8);
-    run_dense_f16("wmma_f16_fp8_fp8", Fmt::FP8, k, 8, amdgpu::extract_fp8, amdgpu::extract_fp8);
-    run_dense_f16("wmma_f16_bf8_bf8", Fmt::BF8, k, 8, amdgpu::extract_bf8, amdgpu::extract_bf8);
-  }
+  auto run = []<uint32_t K>() {
+    run_dense_f32<16, 16, K>("wmma_f32_fp8_fp8", Fmt::FP8, 8, amdgpu::extract_fp8,
+                             amdgpu::extract_fp8);
+    run_dense_f32<16, 16, K>("wmma_f32_fp8_bf8", Fmt::FP8, 8, amdgpu::extract_fp8,
+                             amdgpu::extract_bf8);
+    run_dense_f32<16, 16, K>("wmma_f32_bf8_fp8", Fmt::BF8, 8, amdgpu::extract_bf8,
+                             amdgpu::extract_fp8);
+    run_dense_f32<16, 16, K>("wmma_f32_bf8_bf8", Fmt::BF8, 8, amdgpu::extract_bf8,
+                             amdgpu::extract_bf8);
+    run_dense_f16<K>("wmma_f16_fp8_fp8", Fmt::FP8, 8, amdgpu::extract_fp8, amdgpu::extract_fp8);
+    run_dense_f16<K>("wmma_f16_bf8_bf8", Fmt::BF8, 8, amdgpu::extract_bf8, amdgpu::extract_bf8);
+  };
+  run.template operator()<64>();
+  run.template operator()<128>();
 }
 
 // --- specialized dense fp8/bf8 kernels (constexpr dims + LUT bulk convert):
@@ -467,20 +530,20 @@ TEST(WmmaSimdExact, F8SpecDense) {
 // --- sparse f16/fp8 SWMMAC ---
 TEST(WmmaSimdExact, Sparse) {
   SKIP_IF_NO_SIMD();
-  run_sparse_f32("swmmac_f32_16x16x32_f16", Fmt::F16, 32, 16, 16, amdgpu::extract_f16,
-                 amdgpu::extract_f16);
-  run_sparse_f32("swmmac_f32_16x16x64_f16", Fmt::F16, 64, 16, 16, amdgpu::extract_f16,
-                 amdgpu::extract_f16);
-  run_sparse_f16("swmmac_f16_16x16x64_f16", Fmt::F16, 64, 16, 16, amdgpu::extract_f16,
-                 amdgpu::extract_f16);
-  run_sparse_f32("swmmac_f32_16x16x128_fp8", Fmt::FP8, 128, 8, 32, amdgpu::extract_fp8,
-                 amdgpu::extract_fp8);
-  run_sparse_f32("swmmac_f32_16x16x128_bf8", Fmt::BF8, 128, 8, 32, amdgpu::extract_bf8,
-                 amdgpu::extract_bf8);
-  run_sparse_f16("swmmac_f16_16x16x128_fp8", Fmt::FP8, 128, 8, 32, amdgpu::extract_fp8,
-                 amdgpu::extract_fp8);
-  run_sparse_f16("swmmac_f16_16x16x128_bf8", Fmt::BF8, 128, 8, 32, amdgpu::extract_bf8,
-                 amdgpu::extract_bf8);
+  run_sparse_f32<32>("swmmac_f32_16x16x32_f16", Fmt::F16, 16, 16, amdgpu::extract_f16,
+                     amdgpu::extract_f16);
+  run_sparse_f32<64>("swmmac_f32_16x16x64_f16", Fmt::F16, 16, 16, amdgpu::extract_f16,
+                     amdgpu::extract_f16);
+  run_sparse_f16<64>("swmmac_f16_16x16x64_f16", Fmt::F16, 16, 16, amdgpu::extract_f16,
+                     amdgpu::extract_f16);
+  run_sparse_f32<128>("swmmac_f32_16x16x128_fp8", Fmt::FP8, 8, 32, amdgpu::extract_fp8,
+                      amdgpu::extract_fp8);
+  run_sparse_f32<128>("swmmac_f32_16x16x128_bf8", Fmt::BF8, 8, 32, amdgpu::extract_bf8,
+                      amdgpu::extract_bf8);
+  run_sparse_f16<128>("swmmac_f16_16x16x128_fp8", Fmt::FP8, 8, 32, amdgpu::extract_fp8,
+                      amdgpu::extract_fp8);
+  run_sparse_f16<128>("swmmac_f16_16x16x128_bf8", Fmt::BF8, 8, 32, amdgpu::extract_bf8,
+                      amdgpu::extract_bf8);
 }
 
 TEST(WmmaSimdExact, SparseK128NaNPayloadsMatchScalar) {
@@ -494,16 +557,16 @@ TEST(WmmaSimdExact, SparseK128NaNPayloadsMatchScalar) {
 
   // Use opposite-sign BF8 qNaNs so a host FMA choosing B instead of A is
   // visible. The architectural source priority selects positive A.
-  write_packed8(fx, S0, amdgpu::swmmac_a_input_loc(WF, 16, 128, 0, 0, 8), 0x7Eu);
-  write_packed8(fx, S1, amdgpu::swmmac_b_input_loc(WF, 16, 128, 0, 0, 8), 0xFEu);
+  write_packed8(fx, S0, amdgpu::swmmac_a_input_loc<16, 128>(WF, 0, 0, 8), 0x7Eu);
+  write_packed8(fx, S1, amdgpu::swmmac_b_input_loc<16, 128>(WF, 0, 0, 8), 0xFEu);
 
   auto reseed_f32 = [&] { fx.seed(ACC, ACC_REGS, Fmt::F32, Mode::Zeros, 0); };
   expect_bit_exact(
       "swmmac_f32_16x16x128_bf8_nan", Mode::NaN, fx, reseed_f32,
       [&] {
-        amdgpu::exec_swmmac_f32(*fx.cu, 16, 16, 128, 8, fx.vbase + ACC, fx.vbase + S0,
-                                fx.vbase + S1, fx.vbase + ACC, fx.vbase + INDEX, 32, INDEX_KEY,
-                                amdgpu::extract_bf8, amdgpu::extract_bf8);
+        amdgpu::exec_swmmac_f32<16, 16, 128>(*fx.cu, 8, fx.vbase + ACC, fx.vbase + S0,
+                                             fx.vbase + S1, fx.vbase + ACC, fx.vbase + INDEX, 32,
+                                             INDEX_KEY, amdgpu::extract_bf8, amdgpu::extract_bf8);
       },
       ACC, ACC_REGS);
   EXPECT_EQ(fx.cu->read_vgpr(fx.vbase + ACC, 0), 0x7FC00000u);
@@ -512,9 +575,9 @@ TEST(WmmaSimdExact, SparseK128NaNPayloadsMatchScalar) {
   expect_bit_exact(
       "swmmac_f16_16x16x128_bf8_nan", Mode::NaN, fx, reseed_f16,
       [&] {
-        amdgpu::exec_swmmac_f16(*fx.cu, 16, 16, 128, 8, fx.vbase + ACC, fx.vbase + S0,
-                                fx.vbase + S1, fx.vbase + ACC, fx.vbase + INDEX, 32, INDEX_KEY,
-                                amdgpu::extract_bf8, amdgpu::extract_bf8);
+        amdgpu::exec_swmmac_f16<16, 16, 128>(*fx.cu, 8, fx.vbase + ACC, fx.vbase + S0,
+                                             fx.vbase + S1, fx.vbase + ACC, fx.vbase + INDEX, 32,
+                                             INDEX_KEY, amdgpu::extract_bf8, amdgpu::extract_bf8);
       },
       ACC, ACC_REGS);
   // Narrowing 0x7FC00000 retains the quiet bit without adding a payload bit.
@@ -525,23 +588,31 @@ TEST(WmmaSimdExact, SparseK128NaNPayloadsMatchScalar) {
 TEST(WmmaSimdExact, I32) {
   SKIP_IF_NO_SIMD();
   run_case("wmma_i32_16x16x16_i8", Fmt::I8, Fmt::I8, [](WmmaFixture &fx, uint32_t ca) {
-    amdgpu::exec_wmma_i32_i8(*fx.cu, 16, 16, 16, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1,
-                             fx.vbase + ACC, ca);
+    amdgpu::exec_wmma_i32_i8<16, 16, 16>(*fx.cu, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1,
+                                         fx.vbase + ACC, ca);
   });
   for (bool clamp : {false, true}) {
     run_case("wmma_i32_16x16x64_iu8", Fmt::I8, Fmt::I8, [clamp](WmmaFixture &fx, uint32_t ca) {
-      amdgpu::exec_wmma_i32(*fx.cu, 16, 16, 64, 8, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1,
-                            fx.vbase + ACC, amdgpu::extract_i8, amdgpu::extract_u8, clamp, ca);
+      amdgpu::exec_wmma_i32<16, 16, 64>(*fx.cu, 8, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1,
+                                        fx.vbase + ACC, amdgpu::extract_i8, amdgpu::extract_u8,
+                                        clamp, ca);
     });
     run_case("swmmac_i32_16x16x128_i8", Fmt::I8, Fmt::I8, [clamp](WmmaFixture &fx, uint32_t ca) {
-      amdgpu::exec_swmmac_i32(*fx.cu, 16, 16, 128, 8, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1,
-                              fx.vbase + ACC, fx.vbase + INDEX, 32, INDEX_KEY, amdgpu::extract_i8,
-                              amdgpu::extract_i8, clamp, ca);
+      amdgpu::exec_swmmac_i32<16, 16, 128>(*fx.cu, 8, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1,
+                                           fx.vbase + ACC, fx.vbase + INDEX, 32, INDEX_KEY,
+                                           amdgpu::extract_i8, amdgpu::extract_i8, clamp, ca);
     });
   }
   run_case("swmmac_i32_16x16x32_i8", Fmt::I8, Fmt::I8, [](WmmaFixture &fx, uint32_t ca) {
-    amdgpu::exec_swmmac_i32_i8(*fx.cu, 16, 16, 32, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1,
-                               fx.vbase + ACC, fx.vbase + INDEX, 16, INDEX_KEY, ca);
+    // RDNA4 sparse instructions accumulate into D rather than a separate C operand.
+    if (ca != amdgpu::ACC_FROM_VGPR)
+      for (uint32_t reg = 0; reg < ACC_REGS; ++reg)
+        for (uint32_t lane = 0; lane < WF; ++lane)
+          fx.cu->write_vgpr(fx.vbase + ACC + reg, lane, ca);
+    amdgpu::exec_rdna_swmmac_i32<8, 32>(*fx.cu, WF, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1,
+                                        fx.vbase + INDEX, /*index_key=*/INDEX_KEY,
+                                        /*a_signed=*/true,
+                                        /*b_signed=*/true, /*clamp=*/false);
   });
 }
 
@@ -595,22 +666,22 @@ TEST(WmmaSimdExact, I32Iu8SpecSaturation) {
 // --- mixed-format dense (fp4/fp6/bf6 paths) and fp4 32x16 shape ---
 TEST(WmmaSimdExact, MixedFmt) {
   SKIP_IF_NO_SIMD();
-  run_dense_f32("wmma_f32_32x16x128_fp4", Fmt::RAW4, 32, 16, 128, 4, amdgpu::extract_fp4,
-                amdgpu::extract_fp4);
+  run_dense_f32<32, 16, 128>("wmma_f32_32x16x128_fp4", Fmt::RAW4, 4, amdgpu::extract_fp4,
+                             amdgpu::extract_fp4);
   run_case("wmma_f32_mixed_fp4_fp4", Fmt::RAW4, Fmt::F32, [](WmmaFixture &fx, uint32_t ca) {
-    amdgpu::exec_wmma_f32_mixed(*fx.cu, 16, 16, 128, 4, 4, fx.vbase + ACC, fx.vbase + S0,
-                                fx.vbase + S1, fx.vbase + ACC, amdgpu::extract_fp4,
-                                amdgpu::extract_fp4, ca);
+    amdgpu::exec_wmma_f32_mixed<16, 16, 128>(*fx.cu, 4, 4, fx.vbase + ACC, fx.vbase + S0,
+                                             fx.vbase + S1, fx.vbase + ACC, amdgpu::extract_fp4,
+                                             amdgpu::extract_fp4, ca);
   });
   run_case("wmma_f32_mixed_fp6_bf6", Fmt::RAW6, Fmt::F32, [](WmmaFixture &fx, uint32_t ca) {
-    amdgpu::exec_wmma_f32_mixed(*fx.cu, 16, 16, 128, 6, 6, fx.vbase + ACC, fx.vbase + S0,
-                                fx.vbase + S1, fx.vbase + ACC, amdgpu::extract_fp6,
-                                amdgpu::extract_bf6, ca);
+    amdgpu::exec_wmma_f32_mixed<16, 16, 128>(*fx.cu, 6, 6, fx.vbase + ACC, fx.vbase + S0,
+                                             fx.vbase + S1, fx.vbase + ACC, amdgpu::extract_fp6,
+                                             amdgpu::extract_bf6, ca);
   });
   run_case("wmma_f32_mixed_fp8_fp6", Fmt::FP8, Fmt::F32, [](WmmaFixture &fx, uint32_t ca) {
-    amdgpu::exec_wmma_f32_mixed(*fx.cu, 16, 16, 128, 8, 6, fx.vbase + ACC, fx.vbase + S0,
-                                fx.vbase + S1, fx.vbase + ACC, amdgpu::extract_fp8,
-                                amdgpu::extract_fp6, ca);
+    amdgpu::exec_wmma_f32_mixed<16, 16, 128>(*fx.cu, 8, 6, fx.vbase + ACC, fx.vbase + S0,
+                                             fx.vbase + S1, fx.vbase + ACC, amdgpu::extract_fp8,
+                                             amdgpu::extract_fp6, ca);
   });
 }
 
@@ -635,10 +706,10 @@ TEST(WmmaSimdExact, ScaledMixed) {
     seed_scales(fx, SCALE_B, 0x5A);
     auto sa = [&fx](uint32_t lane) { return fx.cu->read_vgpr(fx.vbase + SCALE_A, lane); };
     auto sb = [&fx](uint32_t lane) { return fx.cu->read_vgpr(fx.vbase + SCALE_B, lane); };
-    amdgpu::exec_wmma_f32_scaled_mixed(*fx.cu, 16, 16, 128, 8, 8, fx.vbase + ACC, fx.vbase + S0,
-                                       fx.vbase + S1, fx.vbase + ACC, amdgpu::extract_fp8,
-                                       amdgpu::extract_fp8, ca, sa, sb, /*matrix_a_scale=*/0,
-                                       /*matrix_b_scale=*/0, /*matrix_a_scale_fmt=*/0,
-                                       /*matrix_b_scale_fmt=*/0);
+    amdgpu::exec_wmma_f32_scaled_mixed<16, 16, 128>(
+        *fx.cu, 8, 8, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1, fx.vbase + ACC,
+        amdgpu::extract_fp8, amdgpu::extract_fp8, ca, sa, sb, /*matrix_a_scale=*/0,
+        /*matrix_b_scale=*/0, /*matrix_a_scale_fmt=*/0,
+        /*matrix_b_scale_fmt=*/0);
   });
 }

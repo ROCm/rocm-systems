@@ -72,14 +72,21 @@ void convertSymTaskDevOp(struct ncclComm* comm, struct ncclTaskColl* task) {
 }
 
 // Match device deep-tier gate: uint32_t(input.offset - output.offset) % 16 == 0.
-static bool symBatchAligned16B(struct ncclTaskColl* headTask) {
+// [RCCL] ncclSymAligned16B keeps the answer rank-uniform for in-place AllGather/ReduceScatter.
+static bool symBatchAligned16B(struct ncclComm* comm, struct ncclTaskColl* headTask) {
   for (struct ncclTaskColl* t = headTask; t != nullptr; t = t->isSymLast ? nullptr : t->next) {
-    size_t inputOff = t->sendWin ? (uintptr_t)t->sendbuff - (uintptr_t)t->sendWin->userPtr : (uintptr_t)t->sendbuff;
-    size_t outputOff = t->recvWin ? (uintptr_t)t->recvbuff - (uintptr_t)t->recvWin->userPtr : (uintptr_t)t->recvbuff;
-    if (uint32_t(inputOff - outputOff) % 16 != 0) return false;
+    if (!ncclSymAligned16B(t->func, comm->rank, t->sendbuff, t->recvbuff, t->sendWin, t->recvWin,
+                           t->count * ncclTypeSize(t->datatype))) {
+      return false;
+    }
     if (t->isSymLast) break;
   }
   return true;
+}
+
+// [RCCL] A configured task and a TDM-window task each form their own batch, so a TDM-only pick binds just that task.
+static bool symBatchesAlone(const struct ncclTaskColl* t) {
+  return t->aggIsolate || t->symkExtract == RCCL_SYMK_EXTRACT_ALLOW_TDM_ONLY;
 }
 
 ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskColl* task,
@@ -104,6 +111,10 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
     ncclDevRedOp_t symkOp = symkRedOp(task->opHost, task->opDev.op);
     bool symAvailable = task->symkExtract != RCCL_SYMK_EXTRACT_DENY &&
                         ncclSymkAvailable(comm, task->func, symkOp, task->datatype, task->count);
+    // [RCCL] Across trays only AllGathers the selector admitted may run symk.
+    if (task->func == ncclFuncAllGather && comm->spansTrays && task->symkExtract == RCCL_SYMK_EXTRACT_NONE) {
+      symAvailable = false;
+    }
     // Env (NCCL_ALGO/PROTO/SYM_KERNEL) is a global override that wins over per-call
     // algSelection for any function it forced.
     uint64_t effAlgMask = comm->tuningContext.forced[task->func] ? 0 : task->algMask;
@@ -173,11 +184,9 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
         countTotal += count;
         // Keep countMax as the true largest work count; TMA eligibility is per work, not per aligned batch.
         if (task->count > countMax) countMax = task->count;
-        // A configured task forms its own singleton batch: end here if this task is
-        // configured (it is the head), or if the next task is configured (so it starts
-        // its own batch). This realizes the per-call caps exactly and never ignores a
-        // non-head configured task.
-        bool configBoundary = task->aggIsolate || (task->next != nullptr && task->next->aggIsolate);
+        // A configured or TDM-window task forms its own batch: end here if this task is one
+        // (it is the head), or if the next task is one (so it starts its own batch).
+        bool configBoundary = symBatchesAlone(task) || (task->next != nullptr && symBatchesAlone(task->next));
         if (ncclSymkDevWorkArgs::calcArgsSize(MAXCHANNELS, nWorks + 1, ncclProfilerPluginLoaded()) >
               comm->workArgsBytes ||
             task->next == nullptr || configBoundary) {
@@ -196,6 +205,12 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
         uint64_t symkMask = effAlgMask & NCCL_TUNING_MASK_SYM_KERNELS;
         if (symkMask != 0) input.tuningMask = symkMask;
       }
+      // [RCCL] The selector admitted this task for its TDM kernel, so offer only TDM kernels,
+      // unless the caller's algSelection leaves them out.
+      if (headTask->symkExtract == RCCL_SYMK_EXTRACT_ALLOW_TDM_ONLY) {
+        const uint64_t tdmMask = (uint64_t)(uint32_t)ncclSymkTmaKernelMask() << NCCL_TUNING_SYM_KERNEL_ID_OFFSET;
+        if (input.tuningMask & tdmMask) input.tuningMask &= tdmMask;
+      }
       input.func = headTask->func;
       input.redOp = headTask->opHost;
       input.devRedOp = symkOp;
@@ -206,12 +221,18 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
       input.countMax = countMax;
       input.nWorks = nWorks;
       input.winRegType = headTask->winRegType;
-      input.symAligned16B = symBatchAligned16B(headTask);
+      input.inPlace = nWorks == 1 && headTask->func == ncclFuncAllGather &&
+                      ncclAllGatherIsInPlace(headTask->sendbuff, headTask->recvbuff, comm->rank,
+                                             headTask->count * ncclTypeSize(headTask->datatype));
+      input.symAligned16B = symBatchAligned16B(comm, headTask);
       input.minCTAs = headTask->minCTAs;
       input.maxCTAs = headTask->maxCTAs;
       input.CTAPolicy = headTask->CTAPolicy;
-      input.nvlsSupport = comm->nvlsSupport && (ncclNvlsSupported(headTask->opDev.op, headTask->datatype) ||
-                                                headTask->func == ncclFuncAllGather);
+      // Symmetric kernels use comm->symkState.hasLsaMultimem for multicast capability.
+      // input.nvlsSupport only gates NVLS/NVLS_TREE during general-kernel fallback tuning.
+      input.nvlsSupport =
+        ncclNvlsTransportEnabled(comm) &&
+        (ncclNvlsSupported(headTask->opDev.op, headTask->datatype) || headTask->func == ncclFuncAllGather);
       NCCLCHECK(ncclGetCollNetSupport(comm, headTask, &input.collNetSupport));
       NCCLCHECK(ncclGetRegBuff(comm, headTask, &input.regBuff));
       struct ncclTuningResult_t bestTuning = NCCL_TUNING_RESULT_INIT;
@@ -327,6 +348,7 @@ ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm* comm,
 #else
   plan->threadPerBlock = headTask->nWarps * WARP_SIZE;
 #endif
+  plan->launchCompletionEvent = headTask->launchCompletionEvent;
   plan->hasProxyOps = false;
   ncclSymkKernelId kernelId = (ncclSymkKernelId)headTask->devFuncId;
   int kernelIndex = ncclSymkGetKernelIndex(kernelId, headTask->opDev.op, headTask->datatype);
@@ -361,7 +383,9 @@ ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm* comm,
 
   argsBuf->nMaxChannels = nMaxChannels;
   argsBuf->maxDynamicSmem = maxDynamicSmem;
-  argsBuf->profilerEnabled = profilerEnabled ? 1 : 0;
+  // KernelCh-only launches leave the phase bit clear, so the profile variant skips the
+  // phase stamps and their fence at runtime.
+  argsBuf->profilerMode = profilerEnabled ? ncclProfilerDeviceMode(headTask->eActivationMask) : ncclDevProfilerModeNone;
 
   remainCell = cellPerChannel = DIVUP(DIVUP(totalCount, nMaxChannels), cellCount);
   workRangePtr = argsBuf->getWorkRange();
@@ -388,11 +412,6 @@ ncclResult_t ncclSymmetricTaskScheduler(struct ncclComm* comm,
           devWork.nChannels = 1;
         } else if (cellLeft <= remainCell) {
           // the last segment of the task
-          if (devWork.nChannels <= 0) {
-            WARN("Symmetric work channel count is %d", devWork.nChannels);
-            ret = ncclInternalError;
-            goto fail;
-          }
           // if the remaining cell is less than 1024 bytes, we can fuse the last channel
           if ((remainCell - cellLeft) * NCCL_SYM_KERNEL_CELL_SIZE <= (1 << 10) || ncclIntruQueueEmpty(symTaskQueue))
             devWork.nChannels++;

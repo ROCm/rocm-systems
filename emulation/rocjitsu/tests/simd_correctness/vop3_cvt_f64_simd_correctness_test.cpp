@@ -3,11 +3,14 @@
 
 /// @file vop3_cvt_f64_simd_correctness_test.cpp
 /// @brief Bit-identity check (SIMD fast path vs scalar body) for the VOP3 form
-/// of the six mixed-width f64<->32-bit conversions on CDNA4. Their scalar
-/// generated bodies drop the abs/neg/omod/clamp modifier reads (verified
-/// per-op), so the VOP3 form is bit-identical to the VOP1 form and reuses the
-/// existing try_execute_cvt_{f64_to_b32, b32_to_f64}_simd glue via a `_vop3 ->
-/// _vop1` fallback in simd_probe_line. The process runs one fixed execute mode
+/// of the six mixed-width f64<->32-bit conversions on CDNA4. Unmodified VOP3
+/// encodings are bit-identical to their VOP1 forms: the float-result pair
+/// shares one stage object with the scalar body (shared/conversion.h), and the
+/// integer-result forms reuse the try_execute_cvt_f64_to_b32_simd glue via a
+/// `_vop3 -> _vop1` fallback in simd_probe_line. The float-result pair keeps
+/// its SIMD path with modifiers set; the integer-result forms run the scalar
+/// body when ABS or NEG is set. This file compares the unmodified encodings;
+/// valu_fp_mode_test covers the modified ones. The process runs one fixed execute mode
 /// (RJ_FORCE_SCALAR, immutable); each case runs TWICE in the same process -- once
 /// forcing the scalar body, once the SIMD fast path, with identical inputs/EXEC
 /// -- and the destination word pairs are asserted equal with EXPECT_EQ
@@ -21,6 +24,7 @@
 /// both runs skip the same words. The int conversions are exact (NaN -> 0,
 /// saturating clamp), compared with no carve-out.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
@@ -128,7 +132,9 @@ struct Fixture {
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("cu_vop3_cvt_f64", cfg, &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, "cu_vop3_cvt_f64", cfg, &gpu_mem, &l2);
+    if (!cu)
+      return;
     decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
@@ -178,6 +184,8 @@ void check_case(const CvtCase &c, uint64_t exec) {
   auto run_mode = [&](bool force_scalar) -> std::array<uint64_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};

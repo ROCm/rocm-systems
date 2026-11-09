@@ -50,13 +50,24 @@ lib/
       config/           JSON/FlatBuffers configuration
   util/                 Shared utilities
   python/amdisa/        ISA codegen pipeline
+python/                 Python callable execution and sessions
 tools/rocjitsu/         CLI (local, daemon, attach modes)
 configs/                GPU topology JSON files
 schemas/                FlatBuffers schemas
 tests/                  Test suite
 docs/                   Design documents and guides
-website/                React dashboard source and web tests
+website/                Public web applications
+  dashboard/            React dashboard source and web tests
+  handbook/             Markdown documentation and blog site
 ```
+
+When adding a guide under `docs/`, also register it in the handbook navigation.
+See [Adding a guide](website/handbook/README.md#adding-a-guide) for the steps and
+local validation command.
+
+See [website/handbook/README.md](website/handbook/README.md) to build and preview the
+Handbook. The simulation-performance dashboard has its own
+[website/dashboard/README.md](website/dashboard/README.md).
 
 ## Building
 
@@ -78,14 +89,37 @@ HIP kernel tests and RCCL daemon tests require an ROCm installation.
 They are disabled automatically when `hipcc` or `libhsa-runtime64` is
 not found.
 
+Floating-point mode tests run in 16 batches to share process startup and
+GoogleTest registration. Per-case fixtures and assertions are unchanged.
+Run all batches with:
+
+```bash
+ctest --test-dir build -L '^fp-mode$' --output-on-failure
+```
+
+Each batch writes per-case GoogleTest results under `build/tests/gtest-results/`.
+Installed tests use the same batches and write results under `gtest-results/`
+in the installed test directory. The launcher removes each batch's previous XML
+before starting GoogleTest to avoid stale results after a crash or timeout.
+Cleanup errors fail the batch before GoogleTest starts.
+If the launcher cannot start or finish cleanup, an older report may remain;
+use CTest's status alongside the XML.
+CTest batches ignore an inherited `GTEST_FILTER` and suppress passing-case output;
+failure diagnostics and per-case XML are retained. To select individual cases or
+a family, run the dedicated executable with a GoogleTest filter:
+
+```bash
+build/tests/rocjitsu_fp_mode_tests --gtest_filter='BinaryF32/ValuFpModeTest.*'
+```
+
 ## Running HIP workloads
 
 ```bash
 # Local mode (in-process simulation)
-rocjitsu --config configs/gfx950_mi355x_kmd.json -- ./my_hip_app
+rocjitsu --config configs/gfx950_mi350x_kmd.json -- ./my_hip_app
 
 # Daemon mode (separate daemon process)
-rocjitsu --daemon --config configs/gfx950_mi355x_kmd.json -- ./my_hip_app
+rocjitsu --daemon --config configs/gfx950_mi350x_kmd.json -- ./my_hip_app
 ```
 
 See [docs/rocjitsu-cli.md](docs/rocjitsu-cli.md) for all CLI modes.
@@ -107,11 +141,14 @@ See
 ## Running PyTorch
 
 ```bash
-rocjitsu --daemon --config configs/gfx950_mi355x_kmd.json -- \
+rocjitsu --daemon --config configs/gfx950_mi350x_kmd.json -- \
   python3 -c "import torch; x = torch.randn(4, 4, device='cuda'); print(x @ x)"
 ```
 
 See [docs/building.md](docs/building.md) for container setup with PyTorch.
+
+The [Python API](python/README.md) provides `rocjitsu.run` and persistent `Session`
+workers. Scripts, tests, interactive shells, and notebooks use the same library.
 
 ## Documentation
 
@@ -122,7 +159,9 @@ See [docs/building.md](docs/building.md) for container setup with PyTorch.
 | [Building](docs/building.md) | Build options, sanitizers, container setup |
 | [Benchmarking](docs/benchmarking.md) | Reproducible performance and memory measurement protocol |
 | [Configuration](docs/configuration.md) | JSON config format and topology |
+| [Two-node RCCL NET smoke](docs/rccl-scaleout.md) | Reproduce an unqualified gfx1250 daemon-mode control |
 | [QEMU VFIO-user compute](docs/qemu-vfio.md) | Run a gfx1250 guest and qualify a GEMM workload |
+| [Python API](python/README.md) | Configuration presets, callable workers, and sessions |
 | [CLI & Transport](docs/rocjitsu-cli.md) | CLI modes, daemon RPC protocol |
 | [Race Detector](docs/race-detector.md) | Race detection tutorial and internals |
 | [Debugging with ROCgdb](docs/rocgdb-debugging.md) | Debug emulated GPU kernels with ROCgdb: breakpoints, watchpoints, faults, multi-wave |

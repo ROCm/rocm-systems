@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
-// Snapshot generated from the pinned AMDF headers. Do not edit by hand.
-// Source: api-headers/include/amdf/ at upstream 4aa34130de44c45d68a48575cebfd0ff0610c461.
+// ABI snapshot from the pinned AMDF headers, checked by tests/abi/check_layout.py.
+// Source: api-headers/include/amdf/ at hrx-system 8bdaeca172e5cbcbcd83edb5284c4407e7e02ee8.
 //! AMDF C ABI declarations. See api-headers/README.md.
 //!
 //! Zero defaults initialize storage only. Callers must set structure tags,
@@ -117,6 +117,11 @@ pub const AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES: amdf_structure_type_t 
 
 pub const AMDF_STRUCTURE_TYPE_MEMORY_PROFILE_PAIR_QUERY: amdf_structure_type_t = 21;
 
+pub const AMDF_STRUCTURE_TYPE_MEMORY_RESERVATION_CAPABILITIES: amdf_structure_type_t = 22;
+pub const AMDF_STRUCTURE_TYPE_MEMORY_RESERVATION_CREATE_INFO: amdf_structure_type_t = 23;
+pub const AMDF_STRUCTURE_TYPE_MEMORY_RESERVATION_ACCESS_INFO: amdf_structure_type_t = 24;
+pub const AMDF_STRUCTURE_TYPE_ENDPOINT_HOST_LOCALITY: amdf_structure_type_t = 25;
+
 pub type amdf_extension_id_t = u32;
 
 pub type amdf_extension_id_e = ::core::ffi::c_uint;
@@ -124,6 +129,8 @@ pub type amdf_extension_id_e = ::core::ffi::c_uint;
 pub const AMDF_EXTENSION_XDNA: amdf_extension_id_t = 1;
 
 pub const AMDF_EXTENSION_GPU: amdf_extension_id_t = 2;
+
+pub const AMDF_EXTENSION_OBSERVATION: amdf_extension_id_t = 3;
 
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -212,6 +219,12 @@ impl Default for amdf_memory_scope_t {
 pub struct amdf_memory_t {
     _opaque: [u8; 0],
 }
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct amdf_memory_reservation_t {
+    _opaque: [u8; 0],
+}
 impl Default for amdf_memory_t {
     fn default() -> Self {
         // SAFETY: ABI records contain only integer values, raw pointers,
@@ -272,9 +285,16 @@ impl Default for amdf_kernel_queue_t {
     }
 }
 
+pub type amdf_native_lifetime_t = u32;
+
+pub type amdf_native_lifetime_e = ::core::ffi::c_uint;
+
+pub const AMDF_NATIVE_LIFETIME_PROCESS: amdf_native_lifetime_t = 0;
+
+pub const AMDF_NATIVE_LIFETIME_INSTANCE: amdf_native_lifetime_t = 1;
+
 pub type amdf_allocator_allocate_fn_t =
     Option<unsafe extern "C" fn(*mut ::core::ffi::c_void, u64, u64) -> *mut ::core::ffi::c_void>;
-
 pub type amdf_allocator_resize_fn_t = Option<
     unsafe extern "C" fn(
         *mut ::core::ffi::c_void,
@@ -284,33 +304,17 @@ pub type amdf_allocator_resize_fn_t = Option<
         u64,
     ) -> *mut ::core::ffi::c_void,
 >;
-
 pub type amdf_allocator_free_fn_t =
     Option<unsafe extern "C" fn(*mut ::core::ffi::c_void, *mut ::core::ffi::c_void)>;
 
 #[repr(C)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 pub struct amdf_allocator_t {
     pub user_data: *mut ::core::ffi::c_void,
     pub allocate: amdf_allocator_allocate_fn_t,
     pub resize: amdf_allocator_resize_fn_t,
     pub free: amdf_allocator_free_fn_t,
 }
-impl Default for amdf_allocator_t {
-    fn default() -> Self {
-        // SAFETY: ABI records contain only integer values, raw pointers,
-        // nullable function pointers, and aggregates of those types.
-        unsafe { ::core::mem::zeroed() }
-    }
-}
-
-pub type amdf_native_lifetime_t = u32;
-
-pub type amdf_native_lifetime_e = ::core::ffi::c_uint;
-
-pub const AMDF_NATIVE_LIFETIME_PROCESS: amdf_native_lifetime_t = 0;
-
-pub const AMDF_NATIVE_LIFETIME_INSTANCE: amdf_native_lifetime_t = 1;
 
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -518,6 +522,21 @@ pub struct amdf_endpoint_info_t {
     pub queue_family_count: u32,
     pub native_identity: amdf_endpoint_native_identity_t,
 }
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct amdf_endpoint_host_locality_t {
+    pub r#type: amdf_structure_type_t,
+    pub structure_size: u32,
+    pub next: *mut ::core::ffi::c_void,
+    pub numa_node: u32,
+}
+impl Default for amdf_endpoint_host_locality_t {
+    fn default() -> Self {
+        // SAFETY: This ABI record permits all-zero storage.
+        unsafe { ::core::mem::zeroed() }
+    }
+}
 impl Default for amdf_endpoint_info_t {
     fn default() -> Self {
         // SAFETY: ABI records contain only integer values, raw pointers,
@@ -538,6 +557,18 @@ pub const AMDF_MEMORY_CLASS_LOCAL: amdf_memory_class_t = 2;
 
 pub const AMDF_MEMORY_CLASS_PRIVATE: amdf_memory_class_t = 3;
 
+pub type amdf_memory_placement_kind_t = u32;
+pub type amdf_memory_placement_kinds_t = u32;
+pub const AMDF_MEMORY_PLACEMENT_KIND_NONE: amdf_memory_placement_kind_t = 0;
+pub const AMDF_MEMORY_PLACEMENT_KIND_HOST_NUMA: amdf_memory_placement_kind_t = 1;
+
+#[repr(C)]
+#[derive(Copy, Clone, Default)]
+pub struct amdf_memory_placement_t {
+    pub kind: amdf_memory_placement_kind_t,
+    pub node: u32,
+}
+
 pub type amdf_memory_flags_t = u64;
 
 pub type amdf_memory_flag_bits_e = ::core::ffi::c_uint;
@@ -553,6 +584,9 @@ pub const AMDF_MEMORY_FLAG_QUEUE_STORAGE: amdf_memory_flags_t = 8;
 pub const AMDF_MEMORY_FLAG_HOST_COHERENT: amdf_memory_flags_t = 16;
 
 pub const AMDF_MEMORY_FLAG_DEVICE_ADDRESS: amdf_memory_flags_t = 32;
+pub const AMDF_MEMORY_FLAG_MAPPING_SOURCE: amdf_memory_flags_t = 64;
+pub const AMDF_MEMORY_FLAG_HOST_MAPPING_SOURCE: amdf_memory_flags_t = 128;
+pub const AMDF_MEMORY_FLAG_HOST_FILE_IO: amdf_memory_flags_t = 256;
 
 pub type amdf_memory_access_t = u32;
 
@@ -573,6 +607,7 @@ pub const AMDF_MEMORY_ADDRESS_GPU: amdf_memory_address_kind_t = 0;
 pub const AMDF_MEMORY_ADDRESS_XDNA_DMA: amdf_memory_address_kind_t = 1;
 
 pub const AMDF_MEMORY_ADDRESS_XDNA_FIRMWARE: amdf_memory_address_kind_t = 2;
+pub const AMDF_MEMORY_ADDRESS_HOST: amdf_memory_address_kind_t = 3;
 
 pub type amdf_memory_address_kinds_t = u64;
 
@@ -799,7 +834,7 @@ pub struct amdf_memory_construction_capabilities_t {
     pub byte_length_granularity: u64,
     pub registered_host_pointer_alignment: u64,
     pub registered_host_cacheability: amdf_host_cacheability_t,
-    pub reserved: u32,
+    pub placement_kinds: amdf_memory_placement_kinds_t,
     pub minimum_alignment: u64,
     pub maximum_alignment: u64,
     pub native_byte_length_granularity: u64,
@@ -883,6 +918,9 @@ impl Default for amdf_memory_access_capabilities_t {
     }
 }
 
+pub type amdf_host_mapping_features_t = u32;
+pub const AMDF_HOST_MAPPING_FEATURE_FILE_IO: amdf_host_mapping_features_t = 1;
+
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct amdf_host_mapping_capabilities_t {
@@ -890,7 +928,7 @@ pub struct amdf_host_mapping_capabilities_t {
     pub byte_offset_granularity: u64,
     pub byte_length_granularity: u64,
     pub supported_access: amdf_memory_map_flags_t,
-    pub reserved: u32,
+    pub features: amdf_host_mapping_features_t,
 }
 impl Default for amdf_host_mapping_capabilities_t {
     fn default() -> Self {
@@ -911,6 +949,7 @@ pub struct amdf_memory_profile_t {
     pub roles: amdf_memory_profile_roles_t,
     pub guaranteed_flags: amdf_memory_flags_t,
     pub supported_flags: amdf_memory_flags_t,
+    pub availability: amdf_status_t,
     pub allocation: amdf_memory_construction_capabilities_t,
     pub registration: amdf_memory_construction_capabilities_t,
     pub import: amdf_memory_construction_capabilities_t,
@@ -970,6 +1009,7 @@ pub struct amdf_memory_create_info_t {
     pub accesses: *const amdf_memory_device_access_t,
     pub registered_host_cacheability: amdf_host_cacheability_t,
     pub reserved: u32,
+    pub placement: amdf_memory_placement_t,
 }
 impl Default for amdf_memory_create_info_t {
     fn default() -> Self {
@@ -996,6 +1036,14 @@ pub struct amdf_memory_info_t {
     pub native_allocation_byte_length: u64,
     pub native_allocation_granularity: u64,
     pub physical_backing_id: amdf_physical_memory_id_t,
+    pub placement: amdf_memory_placement_t,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Default)]
+pub struct amdf_memory_release_info_t {
+    pub status: amdf_status_t,
+    pub abandoned_byte_length: u64,
 }
 impl Default for amdf_memory_info_t {
     fn default() -> Self {
@@ -1205,7 +1253,7 @@ pub struct amdf_host_mapping_info_t {
     pub byte_offset_granularity: u64,
     pub byte_length_granularity: u64,
     pub cache_line_size: u32,
-    pub reserved: u32,
+    pub features: amdf_host_mapping_features_t,
     pub flush: amdf_cache_transition_t,
     pub invalidate: amdf_cache_transition_t,
 }
@@ -1224,6 +1272,7 @@ pub type amdf_memory_site_kind_e = ::core::ffi::c_uint;
 pub const AMDF_MEMORY_SITE_KIND_DEVICE: amdf_memory_site_kind_t = 0;
 
 pub const AMDF_MEMORY_SITE_KIND_HOST: amdf_memory_site_kind_t = 1;
+pub const AMDF_MEMORY_SITE_KIND_FILE_IO: amdf_memory_site_kind_t = 2;
 
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -1242,9 +1291,22 @@ impl Default for amdf_memory_site_t__value__device {
 
 #[repr(C)]
 #[derive(Copy, Clone)]
+pub struct amdf_memory_site_t__value__host {
+    pub mapping: *mut amdf_host_mapping_t,
+    pub source_memory: *mut amdf_memory_t,
+}
+impl Default for amdf_memory_site_t__value__host {
+    fn default() -> Self {
+        // SAFETY: This ABI record permits all-zero storage.
+        unsafe { ::core::mem::zeroed() }
+    }
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
 pub union amdf_memory_site_t__value {
     pub device: amdf_memory_site_t__value__device,
-    pub host_mapping: *mut amdf_host_mapping_t,
+    pub host: amdf_memory_site_t__value__host,
 }
 impl Default for amdf_memory_site_t__value {
     fn default() -> Self {
@@ -1619,6 +1681,8 @@ pub struct amdf_kernel_queue_info_t {
     pub command_type: amdf_queue_command_type_t,
     pub maximum_pending_submission_count: u32,
     pub maximum_command_count: u32,
+    pub notification_types: amdf_native_event_types_t,
+    pub capabilities: amdf_kernel_queue_capabilities_t,
 }
 impl Default for amdf_kernel_queue_info_t {
     fn default() -> Self {
@@ -1643,6 +1707,51 @@ impl Default for amdf_kernel_queue_status_t {
     fn default() -> Self {
         // SAFETY: ABI records contain only integer values, raw pointers,
         // nullable function pointers, and aggregates of those types.
+        unsafe { ::core::mem::zeroed() }
+    }
+}
+
+pub type amdf_native_event_type_t = u32;
+
+pub type amdf_native_event_type_e = ::core::ffi::c_uint;
+
+pub const AMDF_NATIVE_EVENT_TYPE_NONE: amdf_native_event_type_t = 0;
+
+pub const AMDF_NATIVE_EVENT_TYPE_EVENTFD: amdf_native_event_type_t = 1;
+
+pub const AMDF_NATIVE_EVENT_TYPE_WIN32_EVENT: amdf_native_event_type_t = 2;
+
+pub type amdf_native_event_types_t = u64;
+
+pub type amdf_native_event_type_bits_e = ::core::ffi::c_uint;
+
+pub const AMDF_NATIVE_EVENT_TYPE_BIT_EVENTFD: amdf_native_event_types_t = 2;
+
+pub const AMDF_NATIVE_EVENT_TYPE_BIT_WIN32_EVENT: amdf_native_event_types_t = 4;
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub union amdf_native_event_payload_t {
+    pub file_descriptor: i64,
+    pub native_handle: *mut ::core::ffi::c_void,
+}
+impl Default for amdf_native_event_payload_t {
+    fn default() -> Self {
+        // SAFETY: ABI payload permits its all-zero representation as storage.
+        unsafe { ::core::mem::zeroed() }
+    }
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct amdf_native_event_t {
+    pub r#type: amdf_native_event_type_t,
+    pub reserved: u32,
+    pub payload: amdf_native_event_payload_t,
+}
+impl Default for amdf_native_event_t {
+    fn default() -> Self {
+        // SAFETY: ABI records contain integer values and a pointer union.
         unsafe { ::core::mem::zeroed() }
     }
 }
@@ -1731,6 +1840,7 @@ pub struct amdf_api_t {
             *mut amdf_memory_scope_t,
             *const amdf_memory_create_info_t,
             *mut *mut amdf_memory_t,
+            *mut amdf_memory_release_info_t,
         ) -> amdf_status_t,
     >,
     pub memory_import: Option<
@@ -1739,6 +1849,7 @@ pub struct amdf_api_t {
             *const amdf_memory_import_info_t,
             *mut amdf_external_memory_t,
             *mut *mut amdf_memory_t,
+            *mut amdf_memory_release_info_t,
         ) -> amdf_status_t,
     >,
     pub memory_query_info:
@@ -1788,7 +1899,9 @@ pub struct amdf_api_t {
     >,
     pub host_mapping_destroy:
         Option<unsafe extern "C" fn(*mut amdf_host_mapping_t) -> amdf_status_t>,
-    pub memory_destroy: Option<unsafe extern "C" fn(*mut amdf_memory_t) -> amdf_status_t>,
+    pub memory_destroy: Option<
+        unsafe extern "C" fn(*mut amdf_memory_t, *mut amdf_memory_release_info_t) -> amdf_status_t,
+    >,
     pub kernel_queue_query_info: Option<
         unsafe extern "C" fn(
             *mut amdf_kernel_queue_t,
@@ -1847,6 +1960,76 @@ pub struct amdf_api_t {
             *mut amdf_memory_pair_info_t,
         ) -> amdf_status_t,
     >,
+    pub kernel_queue_refresh_status: Option<
+        unsafe extern "C" fn(
+            *mut amdf_kernel_queue_t,
+            *mut amdf_kernel_queue_status_t,
+        ) -> amdf_status_t,
+    >,
+    pub kernel_queue_request_notification: Option<
+        unsafe extern "C" fn(
+            *mut amdf_kernel_queue_t,
+            u64,
+            *const amdf_native_event_t,
+        ) -> amdf_status_t,
+    >,
+    pub device_query_memory_reservation_capabilities: Option<
+        unsafe extern "C" fn(
+            *mut amdf_device_t,
+            u32,
+            *mut amdf_memory_reservation_capabilities_t,
+        ) -> amdf_status_t,
+    >,
+    pub instance_query_host_memory_reservation_capabilities: Option<
+        unsafe extern "C" fn(
+            *mut amdf_instance_t,
+            *mut amdf_memory_reservation_capabilities_t,
+        ) -> amdf_status_t,
+    >,
+    pub memory_reservation_create: Option<
+        unsafe extern "C" fn(
+            *mut amdf_instance_t,
+            *const amdf_memory_reservation_create_info_t,
+            *mut *mut amdf_memory_reservation_t,
+        ) -> amdf_status_t,
+    >,
+    pub memory_reservation_map: Option<
+        unsafe extern "C" fn(
+            *mut amdf_memory_reservation_t,
+            u32,
+            *const amdf_memory_map_info_t,
+            *mut *mut amdf_host_mapping_t,
+        ) -> amdf_status_t,
+    >,
+    pub memory_reservation_query_access_info: Option<
+        unsafe extern "C" fn(
+            *mut amdf_memory_reservation_t,
+            u32,
+            *mut amdf_memory_reservation_access_info_t,
+        ) -> amdf_status_t,
+    >,
+    pub memory_reservation_update: Option<
+        unsafe extern "C" fn(
+            *mut amdf_memory_reservation_t,
+            u32,
+            u32,
+            *const amdf_memory_mapping_update_t,
+        ) -> amdf_status_t,
+    >,
+    pub memory_reservation_detach:
+        Option<unsafe extern "C" fn(*mut amdf_memory_reservation_t, u32) -> amdf_status_t>,
+    pub memory_reservation_destroy:
+        Option<unsafe extern "C" fn(*mut amdf_memory_reservation_t) -> amdf_status_t>,
+    pub kernel_queue_update_memory: Option<
+        unsafe extern "C" fn(
+            *mut amdf_kernel_queue_t,
+            *mut amdf_memory_reservation_t,
+            u32,
+            u32,
+            *const amdf_memory_mapping_update_t,
+            *mut u64,
+        ) -> amdf_status_t,
+    >,
 }
 impl Default for amdf_api_t {
     fn default() -> Self {
@@ -1883,6 +2066,7 @@ pub const AMDF_GPU_DEVICE_FEATURE_DEVICE_RECREATION: amdf_gpu_device_features_t 
 pub const AMDF_GPU_DEVICE_FEATURE_LOCAL_MEMORY: amdf_gpu_device_features_t = 4;
 
 pub const AMDF_GPU_DEVICE_FEATURE_HOST_VISIBLE_LOCAL_MEMORY: amdf_gpu_device_features_t = 8;
+pub const AMDF_GPU_DEVICE_FEATURE_NATIVE_EVENTS: amdf_gpu_device_features_t = 16;
 
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -1989,11 +2173,28 @@ pub const AMDF_GPU_PM4_FORMAT_FEATURE_ACQUIRE_MEM_GCR: amdf_queue_format_feature
 
 pub type amdf_gpu_sdma_format_feature_bits_e = ::core::ffi::c_uint;
 
-pub const AMDF_GPU_SDMA_FORMAT_FEATURE_GCR: amdf_queue_format_features_t = 1;
+pub const AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR: amdf_queue_format_features_t = 1;
 
 pub const AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_SYSTEM: amdf_queue_format_features_t = 2;
 
 pub const AMDF_GPU_SDMA_FORMAT_FEATURE_MEMORY_SCOPE: amdf_queue_format_features_t = 4;
+
+pub const AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_MEMORY_TYPE: amdf_queue_format_features_t = 8;
+
+pub const AMDF_GPU_SDMA_FORMAT_FEATURE_COPY_LINEAR_RECT: amdf_queue_format_features_t = 16;
+
+pub const AMDF_GPU_SDMA_FORMAT_FEATURE_COPY_LINEAR_RECT_EXTENDED_Z: amdf_queue_format_features_t =
+    32;
+
+pub const AMDF_GPU_SDMA_FORMAT_FEATURE_COPY_LINEAR_RECT_WIDE: amdf_queue_format_features_t = 64;
+
+pub type amdf_gpu_aql_format_feature_bits_e = ::core::ffi::c_uint;
+
+pub const AMDF_GPU_AQL_FORMAT_FEATURE_BARRIER_VALUE: amdf_queue_format_features_t = 16;
+pub const AMDF_GPU_AQL_FORMAT_FEATURE_DISPATCH_TIMESTAMPS: amdf_queue_format_features_t = 32;
+
+pub type amdf_gpu_user_queue_flags_t = u32;
+pub const AMDF_GPU_USER_QUEUE_FLAG_DISPATCH_TIMESTAMPS: amdf_gpu_user_queue_flags_t = 1;
 
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -2023,7 +2224,7 @@ pub struct amdf_gpu_user_queue_create_info_t {
     pub queue_family_ordinal: u32,
     pub priority: amdf_queue_priority_t,
     pub producer_mode: amdf_queue_producer_mode_t,
-    pub reserved: u32,
+    pub flags: amdf_gpu_user_queue_flags_t,
     pub required_capabilities: amdf_user_queue_capabilities_t,
     pub ring_byte_length: u64,
     pub scratch: amdf_gpu_queue_scratch_t,
@@ -2060,7 +2261,7 @@ pub struct amdf_gpu_kernel_queue_create_info_t {
     pub structure_size: u32,
     pub next: *const ::core::ffi::c_void,
     pub queue_family_ordinal: u32,
-    pub reserved: u32,
+    pub maximum_pending_submission_count: u32,
 }
 impl Default for amdf_gpu_kernel_queue_create_info_t {
     fn default() -> Self {
@@ -2127,6 +2328,33 @@ pub struct amdf_gpu_api_t {
             *mut *mut amdf_user_queue_t,
         ) -> amdf_status_t,
     >,
+    pub device_query_queue_clock_info: Option<
+        unsafe extern "C" fn(
+            *mut amdf_device_t,
+            u32,
+            *mut amdf_observation_clock_info_t,
+        ) -> amdf_status_t,
+    >,
+    pub device_query_clock_sample: Option<
+        unsafe extern "C" fn(
+            *mut amdf_device_t,
+            u32,
+            *mut amdf_observation_clock_sample_t,
+        ) -> amdf_status_t,
+    >,
+    pub event_create: Option<
+        unsafe extern "C" fn(
+            *mut amdf_device_t,
+            *const amdf_gpu_event_create_info_t,
+            *mut *mut amdf_gpu_event_t,
+        ) -> amdf_status_t,
+    >,
+    pub event_query_info: Option<
+        unsafe extern "C" fn(*mut amdf_gpu_event_t, *mut amdf_gpu_event_info_t) -> amdf_status_t,
+    >,
+    pub event_signal: Option<unsafe extern "C" fn(*mut amdf_gpu_event_t) -> amdf_status_t>,
+    pub event_wait: Option<unsafe extern "C" fn(*mut amdf_gpu_event_t, u64) -> amdf_status_t>,
+    pub event_destroy: Option<unsafe extern "C" fn(*mut amdf_gpu_event_t) -> amdf_status_t>,
 }
 impl Default for amdf_gpu_api_t {
     fn default() -> Self {
@@ -2376,7 +2604,7 @@ pub struct amdf_xdna_kernel_queue_create_info_t {
     pub structure_size: u32,
     pub next: *const ::core::ffi::c_void,
     pub queue_family_ordinal: u32,
-    pub reserved: u32,
+    pub maximum_pending_submission_count: u32,
 }
 impl Default for amdf_xdna_kernel_queue_create_info_t {
     fn default() -> Self {
@@ -2481,6 +2709,65 @@ pub struct amdf_xdna_api_t {
         ) -> amdf_status_t,
     >,
     pub context_destroy: Option<unsafe extern "C" fn(*mut amdf_xdna_context_t) -> amdf_status_t>,
+    pub device_query_firmware_trace_info: Option<
+        unsafe extern "C" fn(
+            *mut amdf_device_t,
+            *mut amdf_xdna_firmware_trace_info_t,
+        ) -> amdf_status_t,
+    >,
+    pub device_configure_firmware_trace: Option<
+        unsafe extern "C" fn(
+            *mut amdf_device_t,
+            u32,
+            amdf_xdna_firmware_trace_categories_t,
+        ) -> amdf_status_t,
+    >,
+    pub device_read_firmware_trace: Option<
+        unsafe extern "C" fn(
+            *mut amdf_device_t,
+            u32,
+            u64,
+            *mut ::core::ffi::c_void,
+            u32,
+            *mut amdf_observation_read_result_t,
+        ) -> amdf_status_t,
+    >,
+    pub context_query_result_buffer_info: Option<
+        unsafe extern "C" fn(
+            *mut amdf_xdna_context_t,
+            *mut amdf_xdna_result_buffer_info_t,
+        ) -> amdf_status_t,
+    >,
+    pub context_attach_result_buffer: Option<
+        unsafe extern "C" fn(
+            *mut amdf_xdna_context_t,
+            *const amdf_xdna_result_buffer_binding_t,
+        ) -> amdf_status_t,
+    >,
+    pub context_collect_result_buffer: Option<
+        unsafe extern "C" fn(
+            *mut amdf_xdna_context_t,
+            *const amdf_xdna_result_buffer_binding_t,
+        ) -> amdf_status_t,
+    >,
+    pub context_detach_result_buffer: Option<
+        unsafe extern "C" fn(
+            *mut amdf_xdna_context_t,
+            *const amdf_xdna_result_buffer_binding_t,
+        ) -> amdf_status_t,
+    >,
+    pub device_query_timer_clock_info: Option<
+        unsafe extern "C" fn(
+            *mut amdf_device_t,
+            *mut amdf_observation_clock_info_t,
+        ) -> amdf_status_t,
+    >,
+    pub context_query_firmware_trace_info: Option<
+        unsafe extern "C" fn(
+            *mut amdf_xdna_context_t,
+            *mut amdf_xdna_context_firmware_trace_info_t,
+        ) -> amdf_status_t,
+    >,
 }
 impl Default for amdf_xdna_api_t {
     fn default() -> Self {
@@ -2498,7 +2785,21 @@ pub const AMDF_ABI_VERSION_2: amdf_abi_version_t = 2;
 
 pub const AMDF_ABI_VERSION_3: amdf_abi_version_t = 3;
 
-pub const AMDF_ABI_VERSION_LATEST: amdf_abi_version_t = 3;
+pub const AMDF_ABI_VERSION_4: amdf_abi_version_t = 4;
+
+pub const AMDF_ABI_VERSION_5: amdf_abi_version_t = 5;
+
+pub const AMDF_ABI_VERSION_6: amdf_abi_version_t = 6;
+pub const AMDF_ABI_VERSION_7: amdf_abi_version_t = 7;
+pub const AMDF_ABI_VERSION_8: amdf_abi_version_t = 8;
+pub const AMDF_ABI_VERSION_9: amdf_abi_version_t = 9;
+pub const AMDF_ABI_VERSION_10: amdf_abi_version_t = 10;
+pub const AMDF_ABI_VERSION_11: amdf_abi_version_t = 11;
+pub const AMDF_ABI_VERSION_12: amdf_abi_version_t = 12;
+pub const AMDF_ABI_VERSION_LATEST: amdf_abi_version_t = 12;
+
+pub const AMDF_GPU_PM4_FORMAT_FEATURE_DISPATCH_SCRATCH: amdf_queue_format_features_t = 1 << 3;
+pub const AMDF_GPU_SDMA_FORMAT_FEATURE_SUBMISSION_GCR: amdf_queue_format_features_t = 1 << 7;
 
 pub const AMDF_ADDRESS_DOMAIN_ORDINAL_NONE: u32 = 4294967295;
 
@@ -2510,11 +2811,22 @@ pub const AMDF_EXTERNAL_MEMORY_TYPE_COUNT: ::core::ffi::c_uint = 5;
 
 pub const AMDF_GPU_EXTENSION_VERSION_1: ::core::ffi::c_uint = 1;
 
-pub const AMDF_GPU_EXTENSION_VERSION_LATEST: ::core::ffi::c_uint = 1;
+pub const AMDF_GPU_EXTENSION_VERSION_2: ::core::ffi::c_uint = 2;
+pub const AMDF_GPU_EXTENSION_VERSION_3: ::core::ffi::c_uint = 3;
+pub const AMDF_GPU_EXTENSION_VERSION_LATEST: ::core::ffi::c_uint = 3;
+
+pub const AMDF_OBSERVATION_EXTENSION_VERSION_1: ::core::ffi::c_uint = 1;
+pub const AMDF_OBSERVATION_EXTENSION_VERSION_LATEST: ::core::ffi::c_uint = 1;
+pub const AMDF_STRUCTURE_TYPE_GPU_EVENT_CREATE_INFO: amdf_structure_type_t = 0x0002_0008;
+pub const AMDF_STRUCTURE_TYPE_GPU_EVENT_INFO: amdf_structure_type_t = 0x0002_0009;
 
 pub const AMDF_GPU_PM4_QUEUE_FORMAT_VERSION_1: ::core::ffi::c_uint = 1;
 
 pub const AMDF_GPU_SDMA_QUEUE_FORMAT_VERSION_1: ::core::ffi::c_uint = 1;
+
+pub const AMDF_GPU_AQL_QUEUE_FORMAT_VERSION_1: ::core::ffi::c_uint = 1;
+
+pub const AMDF_GPU_KERNEL_QUEUE_DEFAULT_PENDING_SUBMISSION_COUNT: ::core::ffi::c_uint = 4096;
 
 pub const AMDF_MEMORY_PROFILE_EXTERNAL_SUPPORT_CAPACITY: ::core::ffi::c_uint = 5;
 
@@ -2554,12 +2866,308 @@ pub const AMDF_TIMEOUT_INFINITE: u64 = 18446744073709551615;
 
 pub const AMDF_XDNA_EXTENSION_VERSION_1: ::core::ffi::c_uint = 1;
 
-pub const AMDF_XDNA_EXTENSION_VERSION_LATEST: ::core::ffi::c_uint = 1;
+pub const AMDF_XDNA_EXTENSION_VERSION_2: ::core::ffi::c_uint = 2;
+pub const AMDF_XDNA_EXTENSION_VERSION_3: ::core::ffi::c_uint = 3;
+pub const AMDF_XDNA_EXTENSION_VERSION_LATEST: ::core::ffi::c_uint = 3;
 
 pub const AMDF_XDNA_PHYSICAL_COLUMN_ORIGIN_ANY: u32 = 4294967295;
 
 pub const AMDF_XDNA_QUEUE_FORMAT_VERSION_1: ::core::ffi::c_uint = 1;
 
+pub const AMDF_XDNA_KERNEL_QUEUE_DEFAULT_PENDING_SUBMISSION_COUNT: ::core::ffi::c_uint = 128;
+
 pub const AMDF_XDNA_TARGET_ID_CAPACITY: ::core::ffi::c_uint = 64;
 
 pub const AMDF_XDNA_TRANSACTION_FORMAT_VERSION_0_1: ::core::ffi::c_uint = 1;
+
+// ABI v11 additions. Every record below is compared against the C header by
+// the layout probe before this snapshot is accepted.
+macro_rules! zero_default {
+    ($($name:ident),+ $(,)?) => {$ (
+        impl Default for $name {
+            fn default() -> Self {
+                // SAFETY: The ABI record permits an all-zero storage value.
+                unsafe { ::core::mem::zeroed() }
+            }
+        }
+    )+ };
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct amdf_memory_reservation_capabilities_t {
+    pub r#type: amdf_structure_type_t,
+    pub structure_size: u32,
+    pub next: *mut ::core::ffi::c_void,
+    pub supported_access: amdf_memory_access_t,
+    pub required_access: amdf_memory_access_t,
+    pub address_domain_ordinal: u32,
+    pub reserved: u32,
+    pub maximum_byte_length: u64,
+    pub reservation_granularity: u64,
+    pub maximum_alignment: u64,
+    pub mapping_granularity: u64,
+    pub minimum_address: u64,
+    pub maximum_address: u64,
+    pub required_source_flags: amdf_memory_flags_t,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct amdf_memory_reservation_access_t {
+    pub device: *mut amdf_device_t,
+    pub address_domain_ordinal: u32,
+    pub access: amdf_memory_access_t,
+    pub mapping_granularity: u64,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct amdf_memory_reservation_create_info_t {
+    pub r#type: amdf_structure_type_t,
+    pub structure_size: u32,
+    pub next: *const ::core::ffi::c_void,
+    pub byte_length: u64,
+    pub minimum_alignment: u64,
+    pub access_count: u32,
+    pub reserved: u32,
+    pub accesses: *const amdf_memory_reservation_access_t,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct amdf_memory_reservation_access_info_t {
+    pub r#type: amdf_structure_type_t,
+    pub structure_size: u32,
+    pub next: *mut ::core::ffi::c_void,
+    pub device_id: amdf_device_id_t,
+    pub ordinal: u32,
+    pub mapping_access_ordinal: u32,
+    pub address_domain_ordinal: u32,
+    pub access: amdf_memory_access_t,
+    pub address_kind: amdf_memory_address_kind_t,
+    pub reserved: u32,
+    pub address: u64,
+    pub byte_length: u64,
+    pub mapping_granularity: u64,
+    pub reset_epoch: u64,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct amdf_memory_mapping_update_t {
+    pub target_byte_offset: u64,
+    pub byte_length: u64,
+    pub memory: *mut amdf_memory_t,
+    pub memory_access_ordinal: u32,
+    pub access: amdf_memory_access_t,
+    pub source_byte_offset: u64,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Default)]
+pub struct amdf_observation_clock_info_t {
+    pub frequency_hz: u64,
+    pub counter_bit_count: u32,
+    pub reserved: u32,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Default)]
+pub struct amdf_observation_clock_sample_t__host {
+    pub before: u64,
+    pub timestamp: u64,
+    pub after: u64,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Default)]
+pub struct amdf_observation_clock_sample_t__system {
+    pub timestamp: u64,
+    pub frequency_hz: u64,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Default)]
+pub struct amdf_observation_clock_sample_t {
+    pub clock: amdf_observation_clock_info_t,
+    pub timestamp: u64,
+    pub host: amdf_observation_clock_sample_t__host,
+    pub system: amdf_observation_clock_sample_t__system,
+}
+
+pub type amdf_observation_read_flags_t = u32;
+pub const AMDF_OBSERVATION_READ_FLAG_GAP: amdf_observation_read_flags_t = 1;
+pub const AMDF_OBSERVATION_READ_FLAG_RESTART: amdf_observation_read_flags_t = 2;
+pub const AMDF_OBSERVATION_READ_FLAG_DISCARDED: amdf_observation_read_flags_t = 4;
+
+#[repr(C)]
+#[derive(Copy, Clone, Default)]
+pub struct amdf_observation_read_result_t {
+    pub next_position: u64,
+    pub byte_offset: u64,
+    pub byte_length: u64,
+    pub lost_byte_length: u64,
+    pub flags: amdf_observation_read_flags_t,
+    pub reserved: u32,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct amdf_observation_api_t {
+    pub structure_size: u32,
+    pub extension_version: u32,
+    pub query_host_clock_info:
+        Option<unsafe extern "C" fn(*mut amdf_observation_clock_info_t) -> amdf_status_t>,
+    pub query_host_clock: Option<unsafe extern "C" fn(*mut u64) -> amdf_status_t>,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct amdf_gpu_event_t {
+    _opaque: [u8; 0],
+}
+pub type amdf_gpu_event_format_t = u32;
+pub const AMDF_GPU_EVENT_FORMAT_NONE: amdf_gpu_event_format_t = 0;
+pub const AMDF_GPU_EVENT_FORMAT_KFD_SIGNAL: amdf_gpu_event_format_t = 1;
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct amdf_gpu_event_create_info_t {
+    pub r#type: amdf_structure_type_t,
+    pub structure_size: u32,
+    pub next: *const ::core::ffi::c_void,
+    pub reserved: u64,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct amdf_gpu_event_info_t {
+    pub r#type: amdf_structure_type_t,
+    pub structure_size: u32,
+    pub next: *mut ::core::ffi::c_void,
+    pub device_id: amdf_device_id_t,
+    pub reset_epoch: u64,
+    pub format: amdf_gpu_event_format_t,
+    pub format_version: u32,
+    pub publication_modes: amdf_queue_publication_modes_t,
+    pub mailbox_address: u64,
+    pub trigger_data: u32,
+    pub interrupt_context: u32,
+}
+
+pub const AMDF_STRUCTURE_TYPE_XDNA_RESULT_BUFFER_INFO: amdf_structure_type_t = 0x0001_000f;
+pub const AMDF_STRUCTURE_TYPE_XDNA_FIRMWARE_TRACE_INFO: amdf_structure_type_t = 0x0001_000e;
+pub const AMDF_STRUCTURE_TYPE_XDNA_CONTEXT_FIRMWARE_TRACE_INFO: amdf_structure_type_t = 0x0001_0010;
+pub const AMDF_XDNA_FIRMWARE_CONTEXT_ID_UNASSIGNED: u32 = u32::MAX;
+pub const AMDF_XDNA_FIRMWARE_TRACE_FORMAT_2_0: u32 = 0x200;
+
+pub type amdf_xdna_result_buffer_binding_mode_t = u32;
+pub const AMDF_XDNA_RESULT_BUFFER_BINDING_WHOLE_MEMORY: amdf_xdna_result_buffer_binding_mode_t = 1;
+pub const AMDF_XDNA_RESULT_BUFFER_BINDING_RANGE: amdf_xdna_result_buffer_binding_mode_t = 2;
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct amdf_xdna_result_buffer_info_t {
+    pub r#type: amdf_structure_type_t,
+    pub structure_size: u32,
+    pub next: *mut ::core::ffi::c_void,
+    pub memory_scope: *mut amdf_memory_scope_t,
+    pub memory_profile_ordinal: u32,
+    pub binding_mode: amdf_xdna_result_buffer_binding_mode_t,
+    pub minimum_byte_length: u64,
+    pub maximum_byte_length: u64,
+    pub byte_offset_alignment: u64,
+    pub byte_length_granularity: u64,
+    pub timer_clock: amdf_observation_clock_info_t,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct amdf_xdna_result_buffer_binding_t {
+    pub memory: *mut amdf_memory_t,
+    pub access_ordinal: u32,
+    pub reserved: u32,
+    pub byte_offset: u64,
+    pub byte_length: u64,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Default)]
+pub struct amdf_xdna_timer_record_t__timestamp {
+    pub high: u32,
+    pub low: u32,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Default)]
+pub struct amdf_xdna_timer_record_t {
+    pub id: u32,
+    pub timestamp: amdf_xdna_timer_record_t__timestamp,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct amdf_xdna_context_firmware_trace_info_t {
+    pub r#type: amdf_structure_type_t,
+    pub structure_size: u32,
+    pub next: *mut ::core::ffi::c_void,
+    pub firmware_context_id: u32,
+    pub reserved: u32,
+}
+
+pub type amdf_xdna_firmware_trace_categories_t = u32;
+pub const AMDF_XDNA_FIRMWARE_TRACE_CATEGORY_SCHEDULING: amdf_xdna_firmware_trace_categories_t = 1;
+pub const AMDF_XDNA_FIRMWARE_TRACE_CATEGORY_MAILBOX: amdf_xdna_firmware_trace_categories_t = 2;
+pub const AMDF_XDNA_FIRMWARE_TRACE_CATEGORY_CLOCK_POWER: amdf_xdna_firmware_trace_categories_t = 4;
+pub const AMDF_XDNA_FIRMWARE_TRACE_CATEGORY_SUSPEND_RESUME: amdf_xdna_firmware_trace_categories_t =
+    8;
+pub const AMDF_XDNA_FIRMWARE_TRACE_CATEGORY_ERRORS: amdf_xdna_firmware_trace_categories_t = 16;
+pub const AMDF_XDNA_FIRMWARE_TRACE_CATEGORY_PDI_LOAD: amdf_xdna_firmware_trace_categories_t = 32;
+pub const AMDF_XDNA_FIRMWARE_TRACE_CATEGORY_FAST_POWER: amdf_xdna_firmware_trace_categories_t = 64;
+pub const AMDF_XDNA_FIRMWARE_TRACE_CATEGORY_L2: amdf_xdna_firmware_trace_categories_t = 128;
+pub const AMDF_XDNA_FIRMWARE_TRACE_CATEGORY_PREEMPTION: amdf_xdna_firmware_trace_categories_t = 256;
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct amdf_xdna_firmware_trace_info_t {
+    pub r#type: amdf_structure_type_t,
+    pub structure_size: u32,
+    pub next: *mut ::core::ffi::c_void,
+    pub enabled: u32,
+    pub categories: amdf_xdna_firmware_trace_categories_t,
+    pub format_version: u32,
+    pub buffer_alignment: u32,
+    pub minimum_buffer_byte_length: u32,
+    pub recommended_buffer_byte_length: u32,
+    pub clock: amdf_observation_clock_info_t,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Default)]
+pub struct amdf_xdna_firmware_trace_event_t {
+    pub timestamp: u64,
+    pub arguments: u64,
+    pub event_id: u32,
+    pub sequence: u32,
+}
+
+pub const AMDF_XDNA_FIRMWARE_TRACE_EVENT_COMMAND_BEGIN: u32 = 0;
+pub const AMDF_XDNA_FIRMWARE_TRACE_EVENT_COMMAND_END: u32 = 1;
+pub const AMDF_XDNA_FIRMWARE_TRACE_EVENT_CONTEXT_CREATE: u32 = 2;
+pub const AMDF_XDNA_FIRMWARE_TRACE_EVENT_CONTEXT_DELETE: u32 = 3;
+
+zero_default!(
+    amdf_memory_reservation_capabilities_t,
+    amdf_memory_reservation_access_t,
+    amdf_memory_reservation_create_info_t,
+    amdf_memory_reservation_access_info_t,
+    amdf_memory_mapping_update_t,
+    amdf_observation_api_t,
+    amdf_gpu_event_create_info_t,
+    amdf_gpu_event_info_t,
+    amdf_xdna_result_buffer_info_t,
+    amdf_xdna_result_buffer_binding_t,
+    amdf_xdna_context_firmware_trace_info_t,
+    amdf_xdna_firmware_trace_info_t,
+);

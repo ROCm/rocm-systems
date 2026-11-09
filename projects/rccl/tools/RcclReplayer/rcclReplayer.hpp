@@ -6,16 +6,14 @@
 #include <chrono>
 #include <cstring>
 #include <iostream>
+#include <unordered_set>
+#include <vector>
 
+#include <mpi.h>
 #include <rccl/rccl.h>
 #include <hip/hip_bfloat16.h>
 #include "hip/hip_fp16.h"
 
-// Forward declaration for ncclInfo
-// - recorder.h declares functions that take 'const ncclInfo&' as parameter
-// - These functions are only used during recording (by recorder.cc), not during replay
-// - RcclReplayer only uses rcclApiCall struct
-struct ncclInfo;
 #include "recorder.h"
 
 // NOTE: Parsing is based on this line logging collective information in enqueue.cc
@@ -36,12 +34,20 @@ struct ncclInfo;
       }                                                                 \
   } while (0)
 
+// Print a printf-style message and abort every rank, so a failed replay never hangs or exits 0.
+#define REPLAY_ABORT(...)                                       \
+  do {                                                          \
+    printf(__VA_ARGS__);                                        \
+    fflush(stdout);                                             \
+    MPI_Abort(MPI_COMM_WORLD, 1);                               \
+  } while (0)
+
 #define NCCL_CALL(cmd)                                          \
   do {                                                          \
     ncclResult_t res = cmd;                                     \
     if (res != ncclSuccess) {                                   \
-      printf("NCCL failure %s:%d '%s'\n",                       \
-             __FILE__,__LINE__,ncclGetErrorString(res));        \
+      REPLAY_ABORT("NCCL failure %s:%d '%s'\n",                 \
+                   __FILE__, __LINE__, ncclGetErrorString(res)); \
     }                                                           \
   } while(0)
 
@@ -49,7 +55,8 @@ struct DeviceMemAllocation
 {
   void*                 base = NULL;
   size_t                size = 0;
-  int                   lastLineUsed = -1;
+  bool                  ncclMemAllocated = false; // owned by ncclMemAlloc/ncclMemFree, never hipFree'd here
+  int                   ncclMemFreeLine = -1; // line of the last ncclMemFree of this address
 };
 
 struct DeviceGraphInfo
@@ -121,6 +128,8 @@ class Replayer
   std::unordered_map<void*, void*>                      handleMap; // UBR handle
   std::unordered_map<unsigned long long, DeviceGraphInfo>
                                                         graphLife; // when does a graph (graphID) end and how many node it contains
+  std::unordered_map<int, std::vector<void*>>           buffersToFree; // line -> logged buffer bases to free there
+  std::unordered_map<int, std::vector<hipStream_t>>     streamsToDestroy; // line -> logged streams to destroy there
 
   // auxiliary variables for replayer
   ncclUniqueId uniqueID;

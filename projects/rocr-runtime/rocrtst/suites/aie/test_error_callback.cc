@@ -66,8 +66,8 @@ TEST_F(ErrorCallback, InvalidDispatchInvokesCallback) {
             HSA_STATUS_SUCCESS);
   ASSERT_NE(queue, nullptr);
 
-  // Build a dispatch packet whose PDI address is not a buffer registered with the driver, so the
-  // command is rejected at submission time (before reaching the device).
+  // Build a dispatch packet whose kernel object is not one the loader published, so the command
+  // is rejected at submission time (before reaching the device).
   auto* ring = static_cast<hsa_amd_aie_kernel_dispatch_packet_t*>(queue->base_address);
   const uint64_t wr_idx = hsa_queue_add_write_index_relaxed(queue, 1);
 
@@ -77,7 +77,9 @@ TEST_F(ErrorCallback, InvalidDispatchInvokesCallback) {
                (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
   pkt.opcode = HSA_AMD_AIE_PACKET_OPCODE_KMQ;
   pkt.count = 24;
-  pkt.pdi_addr = reinterpret_cast<void*>(0x1000);  // deliberately not a registered BO
+  // Deliberately not a handle from HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT.
+  pkt.kernel_object_low = 0;
+  pkt.kernel_object_high = 0;
   pkt.num_kernargs = 0;
   pkt.kernarg_address = nullptr;
   ring[wr_idx % queue->size] = pkt;

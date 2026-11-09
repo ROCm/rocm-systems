@@ -6,6 +6,7 @@ include(GoogleTest)
 add_executable(
     test_kpack_runtime
     test_kpack_api.cpp
+    test_compression.cpp
     test_utils_test.cpp
     test_archive_integration.cpp
     test_loader_api.cpp

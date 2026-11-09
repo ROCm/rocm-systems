@@ -1,25 +1,31 @@
-# Changelog for release 0.1.7
+# Rocprof Trace Decoder Changelog
+
+## Unreleased version 0.2.3
+
+### Added
+
+- Added new WMMA instruction encodings (8- and 16-cycle variants), decoded as VALU instructions.
+- Added `dispatch_id` to dispatch and occupancy records, and `ROCPROF_TRACE_DECODER_EVENT_DISPATCH_END` events marking when all waves of a dispatch ended (RDNA). IDs are unique only within an ME/pipe.
+
+## Changelog for version 0.2.2 | ROCm 10.2
+
+### Added
+
+- Python wrapper (`rocprof_trace_decoder`) for the C API.
+- Python samples, including `samples/hidden_latency_hotspots.py`, which ranks instructions by non-hidden latency.
+- `rocprof_trace_decoder.analysis` Python subpackage for post-processing decoded records. Its first module, `hidden_latency`, is used by the ATT Skill.
+  - Reports hidden idle, stall, and issue cycles per PC and per (shader engine, SIMD), matching the hidden-latency analysis in ROCprof Compute Viewer.
+  - Matrix instructions are classified from the ISA text and counted on both the MATRIX and VALU pipes.
+  - The existing `rcv` module moved into the `analysis` subpackage.
+
+### Changed
+
+- The Python bindings now look for versioned library names (`librocprof-trace-decoder.so.X`, `.so.X.Y`, `.so.X.Y.Z`) and pick the highest installed version numerically, so `.so.0.10` is preferred over `.so.0.9`.
+- The `llvm-objdump` lookup in the Python `codegen` module now also covers ROCm installed as Python wheels, in addition to `ROCM_HOME`/`ROCM_PATH`, `/opt/rocm`, and `PATH`.
 
 ### Resolved issues
 
-- Fixed fp64 operations reporting incorrect cycles in gfx11/11.5
-- Fixed ds_bvh_ instructions in gfx12
-- Fixed s_ttracedata and s_wakeup not properly parsing in MI3xx
-
-### Changes
-
-- s_barrier in gfx11/11.5 is now MSG type and also reports wait time as stalled time, instead of idle.
-  - Similar to previous gfx9 versions, this can be misleading in MSG bus utilization and tools shall aware of it.
-- s_barrier in gfx9 (MI2xx, MI3xx) now reports two tokens:
-  - MSG when entered
-  - IMMED when exiting
-  - This means tools need to be aware they'll get double the hitcount in gfx9 s_barriers
-  - The previous behavior could be misleading on messagebus utilization
-- s_endpgm now only reports stall and execute time for the message part.
-  - Previously, s_endpgm would display a large MSG use.
-
-### Known issues
-
-- The wave completion part of s_endpgm time is now 'idle' time. This is incoherent with s_waitcnt and s_barrier which considers it a wait (stall).
-- In gfx10 and gfx11, the latency of s_barrier is ambiguous when there are some types of surrounding IMMEDs.
-  - Consider adding s_nop 0 around barriers when accurate timing is required.
+- Fixed stitching failures with `flat_prefetch_*` instructions on gfx1250, where the wave reported the instruction as VMEM and the ISA reported it as FLAT.
+- Improved stitching accuracy when the trace has lost data.
+- `rocprof_trace_decoder_parse_data()` no longer lets C++ exceptions escape the C ABI on malformed shader data. It now returns `ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_SHADER_DATA`, like the handle-based `rocprof_trace_decoder_parse()` API.
+- `REG_INIT` packets in gfx10 debug output now print the `me` field.

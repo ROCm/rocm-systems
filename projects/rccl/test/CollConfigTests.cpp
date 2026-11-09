@@ -5,7 +5,7 @@
  ************************************************************************/
 // Unit tests for per-collective config validation: src/config/collconfig.cc (ncclParseCollConfig)
 // and its eight call sites in src/collectives.cc (the nccl*Config entry points).
-// One case pins a known unfixed defect: it asserts the parser still overruns the destination on an oversized config.
+// The parser bounds its copy by the library struct size, so oversized configs must not write past the destination.
 #include <gtest/gtest.h>
 #include <rccl/rccl.h>
 
@@ -90,8 +90,8 @@ struct ConfigCaseBuilder {
 // Configs the parser must reject.
 std::vector<ConfigCase> rejectedConfigs() {
   ConfigCaseBuilder builder;
-  // The lower bound is the versioned v23100 tag, not ncclCollConfig_t; they differ once a field is appended.
-  builder.add("size_one_below_minimum", [](ncclCollConfig_t* c) { c->size = sizeof(ncclCollConfig_v23100) - 1; });
+  // A size that stops before magic leaves the internal magic zeroed, so the header check rejects it.
+  builder.add("size_excludes_magic", [](ncclCollConfig_t* c) { c->size = offsetof(ncclCollConfig_t, magic); });
   builder.add("size_zero", [](ncclCollConfig_t* c) { c->size = 0; });
   builder.add("bad_magic", [](ncclCollConfig_t* c) { c->magic = 0xdeadbeefu; });
   builder.add("force_alg_selection_two", [](ncclCollConfig_t* c) { c->forceAlgSelection = 2; });
@@ -107,11 +107,22 @@ std::vector<ConfigCase> acceptedConfigs() {
   // forceAlgSelection = 1 and CTAPolicy = NCCL_CONFIG_UNDEF_INT are already the initializer defaults,
   // so rows setting them would be byte-identical to pristine_initializer and are deliberately absent.
   builder.add("pristine_initializer", [](ncclCollConfig_t*) {});
+  // A caller built against the 2.31 header passes the struct prefix that ends before launchCompletionEvent.
+  builder.add("size_v23100_prefix",
+              [](ncclCollConfig_t* c) { c->size = offsetof(ncclCollConfig_t, launchCompletionEvent); });
   builder.add("force_alg_selection_zero", [](ncclCollConfig_t* c) { c->forceAlgSelection = 0; });
   builder.add("cta_policy_default", [](ncclCollConfig_t* c) { c->CTAPolicy = NCCL_CTA_POLICY_DEFAULT; });
   builder.add("cta_policy_efficiency", [](ncclCollConfig_t* c) { c->CTAPolicy = NCCL_CTA_POLICY_EFFICIENCY; });
   builder.add("cta_policy_zero", [](ncclCollConfig_t* c) { c->CTAPolicy = NCCL_CTA_POLICY_ZERO; });
   builder.add("cta_policy_max", [](ncclCollConfig_t* c) { c->CTAPolicy = kCtaPolicyMax; });
+  // One CTA bound without the other, as for ncclConfig_t (NVIDIA/nccl#2256): the unset bound stays
+  // NCCL_CONFIG_UNDEF_INT and is resolved at enqueue time.
+  builder.add("min_ctas_only", [](ncclCollConfig_t* c) { c->minCTAs = 4; });
+  builder.add("max_ctas_only", [](ncclCollConfig_t* c) { c->maxCTAs = 2; });
+  builder.add("min_and_max_ctas", [](ncclCollConfig_t* c) {
+    c->minCTAs = 4;
+    c->maxCTAs = 16;
+  });
   return builder.cases;
 }
 
@@ -147,16 +158,41 @@ TEST(CollConfigTests, AcceptedConfigs_ReturnSuccess) {
   });
 }
 
-// The clamp is not in ncclParseCollConfig yet, so an oversized config still writes past the destination.
-// This pins that: the guard must be dirty today, and any fix, clamp or reject, turns the test red.
-TEST(CollConfigTests, OversizedSize_OverrunsDestination_PinsKnownDefect) {
-  RUN_ISOLATED_TEST("OversizedSize_OverrunsDestination", []() {
+// A single CTA bound is kept as given, the other stays unset, and either one alone is enough to
+// isolate the call from aggregation (its channel range differs from its neighbours').
+TEST(CollConfigTests, SingleCtaBound_KeptAndIsolatedFromAggregation) {
+  RUN_ISOLATED_TEST("SingleCtaBound_KeptAndIsolatedFromAggregation", []() {
+    // Control: a user config with neither bound set does not isolate, so the
+    // checks below are down to the CTA bound rather than to any config being passed.
+    ncclCollConfig_t neither = NCCL_COLLCONFIG_INITIALIZER;
+    ncclCollConfig_t internal = NCCL_COLLCONFIG_INITIALIZER;
+    ASSERT_EQ(ncclParseCollConfig(&neither, &internal), ncclSuccess);
+    EXPECT_FALSE(ncclCollConfigNeedAggIsolate(&internal));
+
+    ncclCollConfig_t onlyMin = NCCL_COLLCONFIG_INITIALIZER;
+    onlyMin.minCTAs = 4;
+    ASSERT_EQ(ncclParseCollConfig(&onlyMin, &internal), ncclSuccess);
+    EXPECT_EQ(internal.minCTAs, 4);
+    EXPECT_EQ(internal.maxCTAs, NCCL_CONFIG_UNDEF_INT);
+    EXPECT_TRUE(ncclCollConfigNeedAggIsolate(&internal));
+
+    ncclCollConfig_t onlyMax = NCCL_COLLCONFIG_INITIALIZER;
+    onlyMax.maxCTAs = 2;
+    ASSERT_EQ(ncclParseCollConfig(&onlyMax, &internal), ncclSuccess);
+    EXPECT_EQ(internal.minCTAs, NCCL_CONFIG_UNDEF_INT);
+    EXPECT_EQ(internal.maxCTAs, 2);
+    EXPECT_TRUE(ncclCollConfigNeedAggIsolate(&internal));
+  });
+}
+
+// An oversized config is copied only up to the library struct size, leaving memory behind it untouched.
+TEST(CollConfigTests, OversizedSize_ClampedToLibraryStruct) {
+  RUN_ISOLATED_TEST("OversizedSize_ClampedToLibraryStruct", []() {
     // One byte past the end: the copy dirties guard[0] rather than crashing the child.
     std::vector<unsigned char> storage = makeOversizedConfig(sizeof(ncclCollConfig_t) + 1);
     GuardedConfig dst = makeGuardedConfig();
     ASSERT_EQ(ncclParseCollConfig(asConfig(storage), &dst.config), ncclSuccess);
-    EXPECT_FALSE(guardIntact(dst))
-        << "ncclParseCollConfig no longer overruns the destination; the clamp landed, so invert this pin";
+    EXPECT_TRUE(guardIntact(dst)) << "oversized copy must stop at the library struct size";
   });
 }
 

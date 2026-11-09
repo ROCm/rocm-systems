@@ -71,20 +71,22 @@ For rocSHMEM itself, nothing changes — no new options are required; the existi
 
 ### `resource_usage_compare.sh`
 
-| Option               | Default                   | Description                                                                       |
-| -------------------- | ------------------------- | --------------------------------------------------------------------------------- |
-| `--commit1 REF`      | `HEAD` (or PR merge-base) | First commit/branch to measure                                                    |
-| `--commit2 REF`      | *(none)*                  | Second commit to diff against `commit1`; omit for a single-commit snapshot        |
-| `--pr NUM`           |                           | Fetch GitHub PR #NUM and diff it against its merge-base with `--base-branch`      |
-| `--base-branch NAME` | `origin/develop`          | Base branch for `--pr` merge-base resolution                                      |
-| `--gpu-target ARCH`  | `gfx950`                  | GPU target architecture                                                           |
-| `--build-config CFG` | `all_backends`            | Named build script under `scripts/build_configs/`                                 |
-| `--config-path PATH` |                           | Direct path to an executable build script; takes precedence over `--build-config` |
-| `--skip-build`       | on                        | No-op flag kept for explicitness — cached builds are reused by default            |
-| `--force-rebuild`    | off                       | Force a fresh rebuild even if this commit is cached                               |
-| `--match REGEX`      |                           | Pin kernels matching this regex to the top of every report/chart                  |
-| `--top N`            | `50`                      | Rows shown per generated chart/CSV                                                |
-| `--output-dir DIR`   | See below                 | Where to write the report                                                         |
+| Option                      | Default                   | Description                                                                       |
+| --------------------------- | ------------------------- | --------------------------------------------------------------------------------- |
+| `--commit1 REF`             | `HEAD` (or PR merge-base) | First commit/branch to measure                                                    |
+| `--commit2 REF`             | *(none)*                  | Second commit to diff against `commit1`; omit for a single-commit snapshot        |
+| `--pr NUM`                  |                           | Fetch GitHub PR #NUM and diff it against its merge-base with `--base-branch`      |
+| `--base-branch NAME`        | `origin/develop`          | Base branch for `--pr` merge-base resolution                                      |
+| `--gpu-target ARCH`         | `gfx950`                  | GPU target architecture                                                           |
+| `--build-config CFG`        | `all_backends`            | Named build script under `scripts/build_configs/`                                 |
+| `--config-path PATH`        |                           | Direct path to an executable build script; takes precedence over `--build-config` |
+| `--commit1-extra-args ARGS` |                           | Extra args appended to the build-config invocation for `commit1` only             |
+| `--commit2-extra-args ARGS` |                           | Same as `--commit1-extra-args`, for `commit2` only                                |
+| `--skip-build`              | on                        | No-op flag kept for explicitness — cached builds are reused by default            |
+| `--force-rebuild`           | off                       | Force a fresh rebuild even if this commit is cached                               |
+| `--match REGEX`             |                           | Pin kernels matching this regex to the top of every report/chart                  |
+| `--top N`                   | `50`                      | Rows shown per generated chart/CSV                                                |
+| `--output-dir DIR`          | See below                 | Where to write the report                                                         |
 
 Output DIR default value is: `<parent-of-project>/resource-usage/<gpu>-<config>-<sha1>-vs-<sha2>/`
 
@@ -92,26 +94,30 @@ Output DIR default value is: `<parent-of-project>/resource-usage/<gpu>-<config>-
 ./resource_usage_compare.sh --commit1 d48c64f6e --commit2 3caf8d080 --build-config all_backends
 ./resource_usage_compare.sh --pr 42 --build-config all_backends
 ./resource_usage_compare.sh --commit1 HEAD~1 --commit2 HEAD --config-path ./scripts/my_build.sh
+./resource_usage_compare.sh --commit1 923767a9 --commit1-extra-args "-DUSE_SDMA=1" --commit2 41b678fa --commit2-extra-args "-DUSE_TDM=1"
 ```
 
 ### `lto_inline_remarks_compare.sh`
 
-| Option               | Default        | Description                                                                       |
-| -------------------- | -------------- | --------------------------------------------------------------------------------- |
-| `--commit1 REF`      | `HEAD`         | First commit/branch to measure                                                    |
-| `--commit2 REF`      | *(none)*       | Second commit to diff against `commit1`; omit for a single-commit snapshot        |
-| `--gpu-target ARCH`  | `gfx950`       | GPU target architecture                                                           |
-| `--build-config CFG` | `all_backends` | Named build script under `scripts/build_configs/`                                 |
-| `--config-path PATH` |                | Direct path to an executable build script; takes precedence over `--build-config` |
-| `--force-rebuild`    | off            | Force a fresh rebuild even if cached (same non-determinism caveat as above)       |
-| `--top N`            | `20`           | Rows shown in dashboard charts/report panels                                      |
-| `--output-dir DIR`   | See below      | Where to write the report                                                         |
+| Option                      | Default        | Description                                                                       |
+| --------------------------- | -------------- | --------------------------------------------------------------------------------- |
+| `--commit1 REF`             | `HEAD`         | First commit/branch to measure                                                    |
+| `--commit2 REF`             | *(none)*       | Second commit to diff against `commit1`; omit for a single-commit snapshot        |
+| `--gpu-target ARCH`         | `gfx950`       | GPU target architecture                                                           |
+| `--build-config CFG`        | `all_backends` | Named build script under `scripts/build_configs/`                                 |
+| `--config-path PATH`        |                | Direct path to an executable build script; takes precedence over `--build-config` |
+| `--commit1-extra-args ARGS` |                | Extra args appended to the build-config invocation for `commit1` only             |
+| `--commit2-extra-args ARGS` |                | Same as `--commit1-extra-args`, for `commit2` only                                |
+| `--force-rebuild`           | off            | Force a fresh rebuild even if cached (same non-determinism caveat as above)       |
+| `--top N`                   | `20`           | Rows shown in dashboard charts/report panels                                      |
+| `--output-dir DIR`          | See below      | Where to write the report                                                         |
 
 Output DIR default value is: `<parent-of-project>/lto-inline-remarks/<gpu>-<config>-<sha1>[-vs-<sha2>]/`
 
 ```bash
 ./lto_inline_remarks_compare.sh --commit1 HEAD~1 --commit2 HEAD --build-config ipc_single
 ./lto_inline_remarks_compare.sh --commit1 HEAD~1 --commit2 HEAD --config-path ./scripts/my_build.sh
+./lto_inline_remarks_compare.sh --commit1 923767a9 --commit2 41b678fa --commit2-extra-args "-DUSE_TDM=1"
 ```
 
 ## Output layout
