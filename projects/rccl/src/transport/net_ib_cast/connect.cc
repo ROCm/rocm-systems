@@ -2632,7 +2632,15 @@ ib_recv:
           hsa_status_t exportStatus =
             pfn_hsa_amd_portable_export_dmabuf(aligned_ptr, alignedSize, &rCommDev->gpuFlush.dmabufFd, &exportOffset);
           if (rCommDev->gpuFlush.dmabufFd < 0 || exportStatus != HSA_STATUS_SUCCESS) {
-            WARN("Failed to export DMA BUF");
+            const char* errStr = nullptr;
+            if (exportStatus != HSA_STATUS_SUCCESS &&
+                hsa_status_string(exportStatus, &errStr) == HSA_STATUS_SUCCESS && errStr != nullptr) {
+              WARN("Failed to export DMA BUF: %s", errStr);
+            } else {
+              WARN("Failed to export DMA BUF");
+            }
+            // Success with a null recv comm means "not connected yet".
+            ret = ncclSystemError;
             goto fail;
           }
           NCCLCHECKGOTO(
