@@ -295,6 +295,32 @@ class TargetIdTest(unittest.TestCase):
         self.assertIn("--offload-arch=gfx942:xnack+", compile_cmd)
         self.assertIn("-mcpu=gfx942:xnack+", assemble_cmd)
 
+    def test_main_hands_the_target_id_to_ir_codegen(self):
+        args = self._main_with(["--ir-codegen", "--arch=gfx942",
+                                "--target-id=gfx942:xnack+",
+                                "-o", "k.o", "k.bc"],
+                               mode="ir_codegen")
+
+        self.assertEqual(args.target_id, "gfx942:xnack+")
+        self.assertEqual(args.bitcode, "k.bc")
+
+    def test_ir_codegen_hands_the_target_id_to_codegen(self):
+        calls = []
+        args = argparse.Namespace(clang="clang", arch="gfx942",
+                                  target_id="gfx942:xnack+",
+                                  output="k.o", bitcode="k.bc")
+
+        saved = (driver.discover_tools, driver.run)
+        driver.discover_tools = lambda _: ("clang", "ld.lld")
+        driver.run = lambda cmd, description="": calls.append(cmd)
+        try:
+            driver.do_ir_codegen(args, ["-O3"])
+        finally:
+            driver.discover_tools, driver.run = saved
+
+        (cmd,) = calls
+        self.assertIn("-mcpu=gfx942:xnack+", cmd)
+
     def test_a_suffixed_arch_is_stripped(self):
         """A target ID on args.arch reaches lld and the register model, both
         of which misread it silently."""
