@@ -9,6 +9,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <climits>
 #include <cstddef>
 #include <cstdint>
@@ -313,6 +314,7 @@ struct RankRun {
   size_t copyStreamCopies = 0;
   size_t copyCalls = 0;
   int syncCalls = 0;
+  std::vector<uintptr_t> destinations;
   // Barriers already issued when the copy to each destination slot was enqueued; 0 for a slot with nothing to send.
   std::vector<uint32_t> slotEpochs;
 };
@@ -390,6 +392,7 @@ class CeAlltoAllvSyncMicrotest : public ::testing::TestWithParam<LaunchPath> {
     ++current_.copies;
     current_.bytes += bytes;
     const uintptr_t addr = reinterpret_cast<uintptr_t>(dst);
+    current_.destinations.push_back(addr);
     const int nRanks = activeComm_->nRanks;
     const int dstRank =
         addr >= kPeerWindowBase ? static_cast<int>((addr - kPeerWindowBase) / kPeerWindowStride) : activeComm_->rank;
@@ -690,13 +693,14 @@ TEST_P(CeAlltoAllvSyncMicrotest, GatheredRecvSizeDisagreesWithPeerSendSize_Every
   }
 }
 
-TEST_P(CeAlltoAllvSyncMicrotest, GatheredRecvDisplacementDisagreesWithPeer_SizesStillConsistentSoEveryRankCopies) {
+TEST_P(CeAlltoAllvSyncMicrotest, SenderWritesAtTheReceiversGatheredDisplacement) {
   const int kNRanks = 4;
   const int kSrc = 2;
   const int kDst = 3;
   const SizeMatrix send = EqualTotalsMatrix(std::vector<int>(kNRanks, kNRanks), kNRanks * kMiB);
+  size_t recvDisplacement = 0;
   corruptGathered_ = [&](std::vector<size_t>& gathered) {
-    ncclAlltoAllvRecvDispls(gathered.data(), kDst, kNRanks)[kSrc] += 1;
+    recvDisplacement = ++ncclAlltoAllvRecvDispls(gathered.data(), kDst, kNRanks)[kSrc];
   };
 
   const std::vector<RankRun> runs = Run(send, CE_COLL_INTRA_BATCH_SYNC_FREQ);
@@ -704,6 +708,8 @@ TEST_P(CeAlltoAllvSyncMicrotest, GatheredRecvDisplacementDisagreesWithPeer_Sizes
   EXPECT_EQ(Barriers(runs), std::vector<uint32_t>(kNRanks, 2));
   ExpectRowsCopied(send, runs, kNRanks);
   ExpectLaunchPathTaken(runs);
+  const uintptr_t expectedDestination = kPeerWindowBase + kDst * kPeerWindowStride + recvDisplacement;
+  EXPECT_EQ(std::count(runs[kSrc].destinations.begin(), runs[kSrc].destinations.end(), expectedDestination), 1);
 }
 
 TEST_P(CeAlltoAllvSyncMicrotest, FirstRoundBarrierFails_ReturnsTheErrorWithoutLaunchingTheNextRound) {
