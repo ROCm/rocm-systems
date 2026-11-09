@@ -24,6 +24,8 @@ THE SOFTWARE.
 #include <assert.h>
 
 #include <algorithm>
+#include <cctype>
+#include <cstdint>
 
 #include "rdc/rdc.h"
 namespace amd {
@@ -52,6 +54,25 @@ bool get_field_id_from_name(const std::string name, rdc_field_t* value) {
   }
 
   *value = static_cast<rdc_field_t>(id->second);
+  return true;
+}
+
+bool is_field_id_valid(uint32_t field_id) {
+  return field_id != RDC_FI_INVALID && field_id_to_descript.count(field_id) != 0;
+}
+
+bool get_field_id_from_number(const std::string& text, rdc_field_t* value) {
+  assert(value != nullptr);
+  // At most 10 digits: the number fits in 64 bits, and std::stoull() cannot throw.
+  if (text.empty() || text.size() > 10 ||
+      !std::all_of(text.begin(), text.end(), [](unsigned char c) { return std::isdigit(c); })) {
+    return false;
+  }
+  const uint64_t id = std::stoull(text);
+  if (id > UINT32_MAX || !is_field_id_valid(static_cast<uint32_t>(id))) {
+    return false;
+  }
+  *value = static_cast<rdc_field_t>(id);
   return true;
 }
 
