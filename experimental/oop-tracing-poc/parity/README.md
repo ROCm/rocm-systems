@@ -65,3 +65,28 @@ Wall time added over `baseline`, `mt 8 4 <iters>` (8 threads), median of 5:
 The probes' fixed cost is liblttng-ust's registration wait at process start: with
 `LTTNG_UST_REGISTER_TIMEOUT=0` the run takes the baseline time, but the first ~76 events
 (`__hipRegisterFatBinary`, the first `hipSetDevice`) are lost before registration completes.
+
+## Arguments (`compare_args.py`)
+
+`run_both.sh` also writes rocprofv3's rocpd database and, with `join.py --calls-json`, every probe
+call with its enter and exit fields. `compare_args.py <rocpd.db> <calls.json> <hip include dir>`
+pairs the calls as before and compares each argument rocprofv3 recorded (`rocpd_arg`: position,
+type, name, value as text) after normalizing the text: pointers and `(null)` to integers, enums to
+their values from the HIP headers, `dim3` to `<name>_x/_y/_z`. rocprofv3 records arguments at entry
+only, so the probes' exit fields (result, outputs) are not compared.
+
+| Workload | argument values | equal | APIs |
+|---|---|---|---|
+| `vadd` | 105 | 104 | 12 |
+| `mt 4 2 50` | 10,768 | 10,767 | 25 |
+| `rocblas-test` smoke | 840,012 | 832,291 (all but `deviceFunction`) | 17 |
+
+Differences:
+- `__hipRegisterFunction(..., char* deviceFunction, ...)`: rocprofv3 prints the kernel name; the
+  probe records the address, because the generator treats only `const char*` as a string. Fix in
+  the CLR annotations (#15122): mark it as a string, uncapped, like `deviceName`.
+- Names, values equal by position: `hipExtModuleLaunchKernel` `f`/`hStream` (the public
+  declaration in `hip_ext.h`) are `func`/`stream` in rocprofv3; `hipGetDevicePropertiesR0600`
+  `device` is `deviceId` in rocprofv3 and in `hip_runtime_api.h`. That declaration is inside
+  `#if HIP_TARGET_API_VERSION >= 600`, which the generator's parse does not enter, so it took the
+  dispatch-table typedef's name (#15087: define the version when parsing).

@@ -6,6 +6,7 @@
         The LTTng session needs the vpid and vtid contexts. --rocprofv3-csv also writes the
         API calls in rocprofv3's hip_api_trace.csv format; --probes-src (the generated
         hip_trace_probes.cpp) gives each API's table, hence its rocprofv3 domain.
+        --calls-json writes every paired call with its enter and exit fields.
 
 Joins, as in the dispatch-tracing design (section 5) and the collector design (8.5), with the
 doorbell-slot key from rocprofiler-sdk's in-process reader:
@@ -33,6 +34,7 @@ args = [a for a in sys.argv[1:] if not a.startswith("--")]
 provider = option("provider", "rocm_hip")
 rocprofv3_csv = option("rocprofv3-csv")  # also write rocprofv3's <prefix>_hip_api_trace.csv
 probes_src = option("probes-src")  # generated hip_trace_probes.cpp: which table each API is in
+calls_json = option("calls-json")  # also write every paired call with its enter and exit fields
 run = Path(args[0])
 
 
@@ -249,6 +251,13 @@ if rocprofv3_csv:
             if c["end"] is not None:
                 w.writerow([domain(c["name"]), c["name"], c["pid"], c["tid"], c["id"], c["start"],
                             c["end"]])
+
+# ------------------------------------------------------------------ calls with arguments
+if calls_json:
+    with open(calls_json, "w") as f:
+        json.dump([dict(id=c["id"], name=c["name"], pid=c["pid"], tid=c["tid"], start=c["start"],
+                        end=c["end"], args=c["args"], exit=c["exit"])
+                   for c in api_calls if c["end"] is not None], f)
 
 # ------------------------------------------------------------------ report
 lat = sorted(p["gpu_start"] - p["t"] for p in matched)

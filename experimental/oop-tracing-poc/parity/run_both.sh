@@ -38,14 +38,14 @@ lttng create s --output=${OUT}/lttng >/dev/null
 lttng enable-event -u 'rocm_hip:*' >/dev/null
 lttng add-context -u -t vpid -t vtid >/dev/null
 lttng start >/dev/null
-/opt/nr/bin/rocprofv3 --hip-trace --output-format csv -d ${OUT}/rocprofv3 -o run -- $* \
+/opt/nr/bin/rocprofv3 --hip-trace --output-format csv rocpd -d ${OUT}/rocprofv3 -o run -- $* \
     > ${OUT}/rocprofv3.log 2>&1 || echo app exit status \$? > ${OUT}/app_status.txt
 lttng stop > ${OUT}/lttng-ctl.log 2>&1
 lttng list s >> ${OUT}/lttng-ctl.log 2>&1 || true
 lttng destroy >> ${OUT}/lttng-ctl.log 2>&1
 babeltrace2 ${OUT}/lttng > ${OUT}/lttng.txt 2> ${OUT}/lttng.err || true
 /usr/bin/python3.10 ${J}/join.py ${OUT} --rocprofv3-csv=${OUT}/probes_hip_api_trace.csv \
-    --probes-src=${S}/hip_trace_probes.cpp > ${OUT}/join.log
+    --probes-src=${S}/hip_trace_probes.cpp --calls-json=${OUT}/calls.json > ${OUT}/join.log
 chmod -R a+rwX ${OUT}
 "
 echo "rocprofv3 rows: $(($(wc -l < "${OUT}/rocprofv3/run_hip_api_trace.csv") - 1))"
