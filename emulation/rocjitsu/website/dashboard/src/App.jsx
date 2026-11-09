@@ -1,3 +1,4 @@
+import { fontWeights } from './theme/typography';
 import { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
@@ -12,6 +13,7 @@ import {
   ThemeProvider,
   Typography,
 } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import DashboardHeader from './components/layout/DashboardHeader';
 import DashboardShell from './components/layout/DashboardShell';
 import OverviewView from './components/views/OverviewView';
@@ -50,7 +52,7 @@ function LoadingDataState({ progress }) {
   const determinate = progress.total > 0;
   return (
     <Box component="main">
-      <Container maxWidth={false} sx={{ px: { xs: 1.5, sm: 2, xl: 3 }, pt: 2, pb: 4 }}>
+      <Container maxWidth={false} sx={{ px: { xs: '12px', sm: '24px' }, pt: '20px', pb: '40px' }}>
         <Paper
           data-testid="dashboard-data-loading"
           aria-busy="true"
@@ -68,24 +70,24 @@ function LoadingDataState({ progress }) {
             variant={determinate ? 'determinate' : 'indeterminate'}
             {...(determinate ? { value: (progress.loaded / progress.total) * 100 } : {})}
           />
-          <Box sx={{ p: { xs: 2, sm: 2.5 } }}>
-            <Typography fontWeight={700}>Loading benchmark run data…</Typography>
-            <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.4 }}>
+          <Box sx={{ p: { xs: 2, sm: '20px' } }}>
+            <Typography fontWeight={fontWeights.emphasized}>Loading benchmark run data…</Typography>
+            <Typography variant="body2" sx={{ color: 'text.secondary', mt: '3px' }}>
               The dashboard shell is ready while run files are fetched and validated.
             </Typography>
             {determinate && (
-              <Typography data-testid="dashboard-load-progress" variant="body2" sx={{ color: 'text.secondary', mt: 0.4 }}>
+              <Typography data-testid="dashboard-load-progress" variant="body2" sx={{ color: 'text.secondary', mt: '3px' }}>
                 {progress.loaded} of {progress.total} run files loaded
               </Typography>
             )}
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ mt: 2.25 }}>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing="12px" sx={{ mt: '18px' }}>
               <Skeleton variant="rounded" animation="wave" height={54} sx={{ flex: 1 }} />
               <Skeleton variant="rounded" animation="wave" height={54} sx={{ flex: 1 }} />
             </Stack>
           </Box>
         </Paper>
-        <Skeleton variant="rounded" animation="wave" height={52} sx={{ mt: 1.75, borderRadius: 3 }} />
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, minmax(0, 1fr))' }, gap: 1.5, mt: 1.75 }}>
+        <Skeleton variant="rounded" animation="wave" height={52} sx={{ mt: '14px', borderRadius: 3 }} />
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, minmax(0, 1fr))' }, gap: '12px', mt: '14px' }}>
           {[0, 1, 2].map((index) => (
             <Skeleton key={index} variant="rounded" animation="wave" height={150} sx={{ borderRadius: 3 }} />
           ))}
@@ -123,11 +125,7 @@ function Dashboard({ data, state, dataError = null, onRetry = null }) {
     state.openComparison(selection);
     window.requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: 'instant' }));
   };
-  const openBenchmarks = () => {
-    state.setExplorerRunIds([]);
-    state.setTab('benchmarks');
-    window.requestAnimationFrame(() => window.scrollTo({ top: 0 }));
-  };
+
   const selectExplorerRun = (runId) => {
     state.setExplorerRunIds((current) => (
       current.includes(runId)
@@ -139,23 +137,23 @@ function Dashboard({ data, state, dataError = null, onRetry = null }) {
   return (
     <>
       <Box component="main">
-        <Container maxWidth={false} sx={{ px: { xs: 1.5, sm: 2, xl: 3 }, pt: 2, pb: 4 }}>
+        <Container maxWidth={false} sx={{ px: { xs: '12px', sm: '24px' }, pt: '20px', pb: '40px' }}>
 
           {dataError && (
             <Alert
               data-testid="dashboard-data-error"
               severity="warning"
               variant="outlined"
-              action={<Button color="inherit" size="small" onClick={onRetry}>Retry</Button>}
-              sx={{ mb: 1.75 }}
+              action={<Button color="warning" variant="outlined" size="small" onClick={onRetry} sx={{ fontWeight: fontWeights.emphasized }}>Retry</Button>}
+              sx={{ mb: '14px' }}
             >
-              <Typography fontWeight={700}>No available test data</Typography>
+              <Typography fontWeight={fontWeights.emphasized} color="warning.main">No available test data</Typography>
               {dataErrorMessage !== 'No available test data' && (
-                <Typography variant="body2" sx={{ mt: 0.5, whiteSpace: 'pre-line' }}>
+                <Typography variant="body2" sx={{ mt: '4px', whiteSpace: 'pre-line', color: 'text.secondary' }}>
                   {dataErrorMessage}
                 </Typography>
               )}
-              <Typography variant="body2" sx={{ mt: 1 }}>Dashboard values will remain empty until benchmark data is published to the site.</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>Dashboard values will remain empty until benchmark data is published to the site.</Typography>
             </Alert>
           )}
 
@@ -166,15 +164,15 @@ function Dashboard({ data, state, dataError = null, onRetry = null }) {
               viewModel={overview}
               data={data}
               state={state}
-              onOpenBenchmarks={openBenchmarks}
+
             />
           )}
           {state.tab === 'benchmarks' && (
             <BenchmarksView
               data={data}
               filters={state.filters}
-              historyRange={state.historyRange}
-              onRangeChange={state.setHistoryRange}
+              historyRange={state.benchmarkRange}
+              onRangeChange={state.setBenchmarkRange}
               selectedBenchmarks={state.selectedBenchmarks}
               onBenchmarksChange={state.setSelectedBenchmarks}
               selectedRunIds={state.explorerRunIds}
@@ -224,8 +222,13 @@ export default function App() {
     reloadAll: false,
     cacheGeneration: readCacheGeneration(),
   }));
-  const theme = useMemo(() => createDashboardTheme(mode), [mode]);
+  const targets = dataState.data?.targets;
+  const theme = useMemo(() => createDashboardTheme(mode, targets), [mode, targets]);
   const state = useDashboardState(dataState.data ?? emptyDashboardData);
+
+  useEffect(() => {
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme.palette.background.default);
+  }, [theme.palette.background.default]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -307,8 +310,8 @@ export default function App() {
         />
       )}
       {dataState.data && <Dashboard data={dataState.data} state={state} />}
-      <Container component="footer" maxWidth={false} sx={{ px: { xs: 1.5, sm: 2, xl: 3 } }}>
-        <Box sx={{ borderTop: 1, borderColor: 'divider', py: 2, color: 'text.secondary' }}>
+      <Container component="footer" maxWidth={false} sx={{ px: { xs: '12px', sm: '24px' } }}>
+        <Box sx={{ borderTop: 1, borderColor: (theme) => theme.palette.mode === 'light' ? alpha(theme.palette.dashboard.controlBorder, 0.55) : 'divider', py: 2, color: 'text.secondary' }}>
           <Typography variant="caption" component="p">Copyright © 2025–2026 Advanced Micro Devices, Inc.</Typography>
           <Typography variant="caption" component="p">MIT License</Typography>
         </Box>

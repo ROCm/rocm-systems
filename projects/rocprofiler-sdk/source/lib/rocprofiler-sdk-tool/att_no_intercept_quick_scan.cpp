@@ -34,6 +34,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <iterator>
 #include <memory>
@@ -77,7 +78,7 @@ struct scan_context_t
     uint64_t chunk_index          = 0;
     uint64_t first_valid_offset   = 0;
     int      remaining_dispatches = 0;
-    int      first_flush_count    = 2;
+    int      first_flush_count    = 3;
 };
 
 std::shared_ptr<std::atomic<size_t>>
@@ -136,7 +137,7 @@ handle_dispatch(scan_context_t&                                    context,
     auto& state = *context.state;
 
     // Latch first valid dispatch, taking consecutive kernels into consideration
-    if(--context.remaining_dispatches == 0) context.first_flush_count = 2;
+    if(--context.remaining_dispatches == 0) context.first_flush_count = 3;
 
     ROCP_TRACE << "Received dispatch: " << dispatch.entry_point.code_object_id << " / "
                << dispatch.entry_point.address << " at me/pipe " << int(dispatch.me_id) << "/"
@@ -201,7 +202,7 @@ handle_event(scan_context_t& context, const rocprofiler_thread_trace_decoder_eve
 
     if(is_flush || trace.flush_count > 0) trace.flush_count++;
 
-    if(trace.flush_count == 2)
+    if(trace.flush_count == 3)
     {
         ROCP_INFO << "End cut trace at byte: " << event.byte_offset;
         trace.offset_end = event.byte_offset;
@@ -342,6 +343,16 @@ backend_create(agent_state_t& state)
     }
 
     status = rocprof_trace_decoder_quick_scan(state.decoder, 0, nullptr, 0, nullptr, nullptr);
+    if(status == ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED)
+    {
+        ROCP_ERROR << "--att-no-intercept requires a host CPU with AVX-512 support (AVX512F, "
+                      "AVX512BW and AVX512VBMI), which this system does not have. Consider "
+                      "--att --selected-regions instead, which has similar performance "
+                      "characteristics but requires marking the traced regions with "
+                      "roctxProfilerResume/roctxProfilerPause. See the rocprofv3 thread trace "
+                      "documentation for details.";
+        std::exit(EXIT_FAILURE);
+    }
     if(status != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS)
     {
         auto msg = fmt::format("ATT no-intercept quick-scan support is unavailable for "

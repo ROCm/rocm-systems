@@ -238,7 +238,7 @@
       ]
     },
     "cast_multithread": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 600,
       "command_args": "--net_ib_nthreads=4",
       "env_variables": {
@@ -260,7 +260,7 @@
       ]
     },
     "fault_inject_multithread": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 600,
       "command_args": "--net_ib_nthreads=4",
       "env_variables": {
@@ -650,7 +650,7 @@
         }
       ]
     },
-    "cast_base": {
+    "cast_scheduler_base": {
       "extends": "net_ib_base",
       "num_nodes": 2,
       "num_gpus": 1,
@@ -660,11 +660,33 @@
         "RCCL_IB_QP_SCHED_WEIGHT": "0",
         "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "50",
         "RCCL_IB_QP_SCHED_RESET_INTERVAL": "60000",
-        "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN": "65536"
+        "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN": "65536",
+        "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "0"
       }
     },
+    "cast_setup": {
+      "extends": "net_ib_base",
+      "timeout": 120,
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "2",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
+      },
+      "tests": [
+        {
+          "name": "Cast_SetupUnilateralConnectFailureReported",
+          "description": "One invalid connect-side device must fail setup on both ranks without hanging",
+          "test_filter": "NetIbMPITest.CastSetupUnilateralConnectFailureReported"
+        },
+        {
+          "name": "Cast_SetupPeerFailurePropagates",
+          "description": "A post-connect failure must reach the healthy peer through setup reduction",
+          "test_filter": "NetIbMPITest.CastSetupPeerFailurePropagates"
+        }
+      ]
+    },
+
     "cast_wrr_split": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 120,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "2",
@@ -714,10 +736,11 @@
           "description": "regMr, regMrDmaBuf and deregMr reject a null communicator, and regMr rejects a zero size, instead of dereferencing it",
           "test_filter": "NetIbMPITest.CastRegistrationRejectsBadArguments"
         }
+
       ]
     },
     "cast_wrr_no_split": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 120,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "2",
@@ -756,7 +779,7 @@
       ]
     },
     "cast_single_qp": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 60,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "1",
@@ -771,7 +794,7 @@
       ]
     },
     "cast_grh": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 60,
       "tests": [
         {
@@ -782,7 +805,7 @@
       ]
     },
     "cast_four_qp": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 120,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "4",
@@ -802,7 +825,7 @@
       ]
     },
     "cast_max_qp": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 120,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "128",
@@ -817,7 +840,7 @@
       ]
     },
     "cast_stress": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 300,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "2",
@@ -832,7 +855,7 @@
       ]
     },
     "fault_inject_cast": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 300,
       "env_variables": {
         "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
@@ -907,7 +930,7 @@
       ]
     },
     "resiliency_failover": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 300,
       "env_variables": {
         "NCCL_IB_RESILIENCY_PORT_FAILOVER": "1",
@@ -954,7 +977,7 @@
       ]
     },
     "resiliency_recovery": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 300,
       "env_variables": {
         "NCCL_IB_RESILIENCY_PORT_FAILOVER": "1",
@@ -1019,6 +1042,11 @@
           "name": "NetIB_Branch_NullCommClose",
           "description": "closeSend/closeRecv/closeListen on NULL comm returns ncclSuccess without crash",
           "test_filter": "NetIbMPITest.NullCommClose"
+        },
+        {
+          "name": "NetIB_Branch_NullCommCastDataPath",
+          "description": "IB-CAST isend/irecv/iflush reject a NULL comm instead of dereferencing it",
+          "test_filter": "NetIbMPITest.NullCommCastDataPath"
         },
         {
           "name": "NetIB_Branch_SetNetAttrNoOp",
@@ -2029,6 +2057,11 @@
           "test_filter": "Register.ProcessIsolatedRegisterTests"
         },
         {
+          "name": "Register.P2pIpcSegmentReuse",
+          "description": "Verify a reused P2P IPC registration stays in bounds when the registered buffer spans multiple cuMem segments",
+          "test_filter": "Register.P2pIpcSegmentReuse"
+        },
+        {
           "name": "SendRecv.SinglePairs",
           "description": "SendRecv single pairs",
           "test_filter": "SendRecv.SinglePairs"
@@ -2037,6 +2070,11 @@
           "name": "SendRecv.UserBufferRegister",
           "description": "SendRecv user buffer register",
           "test_filter": "SendRecv.UserBufferRegister"
+        },
+        {
+          "name": "SendRecv.SingleRankGroupedSendRecvToSelf",
+          "description": "1-rank grouped send/recv to self, default env and forced 256 P2P channels per peer",
+          "test_filter": "SendRecv.SingleRankGroupedSendRecvToSelf"
         },
         {
           "name": "GroupCall.Identical",
@@ -5806,7 +5844,7 @@
         {
           "name": "GIN_DeviceMPI_AllTests",
           "description": "GIN proxy device-side MPI tests over IB across two nodes (put/signal/counter/barrier/alltoall/recycle/splitShare)",
-          "test_filter": "GinMPIDeviceTests.*:GinProxyNthreadsSplitTests.*-GinMPIDeviceTests.MultiContext_NonPowerOf2:GinMPIDeviceTests.RailConnection_Create:GinMPIDeviceTests.*_MultiContext",
+          "test_filter": "GinMPIDeviceTests.*:GinProxyNthreadsSplitTests.*-GinMPIDeviceTests.MultiContext_NonPowerOf2:GinMPIDeviceTests.RailConnection_Create:GinMPIDeviceTests.*_MultiContext:GinMPIDeviceTests.GinContextCount_ReportsRoundedUp",
           "timeout": 600
         },
         {
@@ -5823,6 +5861,14 @@
           "test_filter": "GinMPIDeviceTests.MultiContext_NonPowerOf2",
           "env_variables": {
             "NCCL_GIN_NCONTEXTS": "3"
+          }
+        },
+        {
+          "name": "GIN_ContextCount_ReportsRoundedUp",
+          "description": "ginContextCount reports the allocation after rounding up to NCCL_GIN_NCONNECTIONS=2",
+          "test_filter": "GinMPIDeviceTests.GinContextCount_ReportsRoundedUp",
+          "env_variables": {
+            "NCCL_GIN_NCONNECTIONS": "2"
           }
         },
         {
@@ -6764,6 +6810,44 @@
       "num_ranks": 8,
       "num_gpus": 8
     },
+    "symmetric_all_gather_tdm_base": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_nodes": 1,
+      "timeout": 300,
+      "env_variables": {
+        "UT_DDA_FABRIC_REQUIRE_INIT": "1"
+      },
+      "tests": [
+        {
+          "name": "Symmetric_AllGather_TDM_Window",
+          "description": "Registered AllGather on symmetric windows around the gfx1250 TDM window: floor, just below, in place, past the eager ceiling, and under graph capture at 512 MiB and just past it, and 1 MiB below the window; checks the reported algorithm, the logged kernel and every rank's data",
+          "test_filter": "SymWin_AllGatherTdm.*"
+        }
+      ]
+    },
+    "symmetric_all_gather_tdm_2rank": {
+      "extends": "symmetric_all_gather_tdm_base",
+      "num_ranks": 2,
+      "num_gpus": 2
+    },
+    "symmetric_all_gather_tdm_4rank": {
+      "extends": "symmetric_all_gather_tdm_base",
+      "num_ranks": 4,
+      "num_gpus": 4
+    },
+    "symmetric_all_gather_tdm_8rank": {
+      "extends": "symmetric_all_gather_tdm_base",
+      "num_ranks": 8,
+      "num_gpus": 8
+    },
+    "symmetric_all_gather_tdm_2node": {
+      "extends": "symmetric_all_gather_tdm_base",
+      "num_ranks": 8,
+      "num_nodes": 2,
+      "num_gpus": 4
+    },
     "dda_fabric_allreduce_ll_base": {
       "extends": "default",
       "is_gtest": true,
@@ -6813,6 +6897,16 @@
           "name": "DDA_Fabric_AllReduce_LL_FreshComm_NonBlockingStream",
           "description": "32 fresh comms with staggered rank arrival, each running two LL one-shot AllReduces on a non-blocking stream right after init; catches the init zero fills landing after a rank's first LL kernel (about 35 s at 8 ranks)",
           "test_filter": "DdaMPI_AllReduce.LLFreshCommNonBlockingStream"
+        },
+        {
+          "name": "DDA_Fabric_AllReduce_Registered_Captured",
+          "description": "Registered sum AllReduce under graph capture at 8 MiB and the capture bound picks DDA within the replaced Ring grid and returns exact sums",
+          "test_filter": "DdaMPI_AllReduceRegistered.CapturedSumsWithinRingGrid"
+        },
+        {
+          "name": "DDA_Fabric_AllReduce_Registered_Eager",
+          "description": "Registered eager sum AllReduce with 1 MiB shards picks DDA LL128 within the CE-registered grid and returns exact sums; skips below 8 ranks",
+          "test_filter": "DdaMPI_AllReduceRegistered.EagerSumsWithinCeGrid"
         }
       ]
     },
@@ -6969,6 +7063,12 @@
       "name": "NET IB - CAST WRR+Split (QPS=2, splitData=1)",
       "description": "White-box WRR scheduler tests with split-data path enabled: token counts, threshold boundary, split/WRR token accounting, sched enable/disable. Disabled: Broadcom Thor Ultra has no matching OFED/verbs userspace.",
       "config": "cast_wrr_split",
+      "enabled": false
+    },
+    {
+      "name": "NET IB - CAST Setup Failure Propagation",
+      "description": "Rank-agreed CAST setup failures must report cleanly without hanging",
+      "config": "cast_setup",
       "enabled": false
     },
     {
@@ -7849,6 +7949,30 @@
       "name": "DDA Fabric ReduceScatter LL/LL128 - 8-Rank",
       "description": "DDA fabric ReduceScatter LL and LL128 tiers on 8 GPUs, unrolled NRANKS_CT=8 kernel. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with MNNVL fabric DDA initialised.",
       "config": "dda_fabric_reduce_scatter_8rank",
+      "enabled": true
+    },
+    {
+      "name": "Symmetric AllGather TDM window - 2-Rank",
+      "description": "Symmetric AllGather TDM window on 2 GPUs. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with symmetric memory, one UALink LSA team and the TDM toolchain.",
+      "config": "symmetric_all_gather_tdm_2rank",
+      "enabled": true
+    },
+    {
+      "name": "Symmetric AllGather TDM window - 4-Rank",
+      "description": "Symmetric AllGather TDM window on 4 GPUs. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with symmetric memory, one UALink LSA team and the TDM toolchain.",
+      "config": "symmetric_all_gather_tdm_4rank",
+      "enabled": true
+    },
+    {
+      "name": "Symmetric AllGather TDM window - 8-Rank",
+      "description": "Symmetric AllGather TDM window on 8 GPUs. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with symmetric memory, one UALink LSA team and the TDM toolchain.",
+      "config": "symmetric_all_gather_tdm_8rank",
+      "enabled": true
+    },
+    {
+      "name": "Symmetric AllGather TDM window - 2 Nodes",
+      "description": "Symmetric AllGather TDM window on 8 GPUs across two UALink trays, where the graph-capture window ends at 512 MiB and is the only symmetric AllGather path. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with symmetric memory, one UALink LSA team and the TDM toolchain.",
+      "config": "symmetric_all_gather_tdm_2node",
       "enabled": true
     },
     {
