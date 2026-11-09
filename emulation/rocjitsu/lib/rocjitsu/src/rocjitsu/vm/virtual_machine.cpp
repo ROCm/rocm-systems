@@ -12,13 +12,19 @@
 
 namespace rocjitsu {
 
-VirtualMachine::VirtualMachine(const Config &config)
-    : simdojo::CompositeComponent("vm"), config_(config) {
-  set_weight(0);
-  auto soc = std::make_unique<SoC>("gpu_soc", config.soc);
-  soc_ = soc.get();
-  socs_.push_back(soc_);
-  add_child(std::move(soc));
+VirtualMachine::VirtualMachine() : simdojo::CompositeComponent("vm") { set_weight(0); }
+
+std::unique_ptr<VirtualMachine> VirtualMachine::create(const Config &config,
+                                                       util::DiagnosticEmitter emit_error) {
+  auto soc = SoC::create("gpu_soc", config.soc, emit_error);
+  if (!soc)
+    return nullptr;
+  auto vm = std::unique_ptr<VirtualMachine>(new VirtualMachine());
+  vm->config_ = config;
+  vm->soc_ = soc.get();
+  vm->socs_.push_back(vm->soc_);
+  vm->add_child(std::move(soc));
+  return vm;
 }
 
 VirtualMachine::VirtualMachine(std::unique_ptr<SoC> soc, bool daemon_mode)

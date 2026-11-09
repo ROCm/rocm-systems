@@ -19,7 +19,6 @@
 
 #include <gtest/gtest.h>
 #include <memory>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -28,19 +27,28 @@
 namespace rocjitsu {
 namespace {
 
-std::string arithmetic_config(const std::string &policy) {
-  util::StringDiagnostic diagnostic;
-  auto result =
-      config::read_config_file(test::config_path("gfx1201_r9700.json"), diagnostic.emitter());
-  if (result.failed())
-    throw std::runtime_error(diagnostic.message());
-  auto json = std::move(result).value();
-  if (!policy.empty())
-    json.insert(json.find('{') + 1, "\"arithmetic\": " + policy + ",");
-  return json;
-}
+class ArithConfigTest : public testing::Test {
+protected:
+  void SetUp() override {
+    util::StringDiagnostic diagnostic;
+    auto result =
+        config::read_config_file(test::config_path("gfx1201_r9700.json"), diagnostic.emitter());
+    ASSERT_TRUE(result.succeeded()) << diagnostic.message();
+    base_config_ = std::move(result).value();
+  }
 
-TEST(ArithConfigTest, DefaultsAndTopLevelPolicyReachExecution) {
+  std::string arithmetic_config(const std::string &policy) const {
+    auto json = base_config_;
+    if (!policy.empty())
+      json.insert(json.find('{') + 1, "\"arithmetic\": " + policy + ",");
+    return json;
+  }
+
+private:
+  std::string base_config_;
+};
+
+TEST_F(ArithConfigTest, DefaultsAndTopLevelPolicyReachExecution) {
   config::LoadedConfig defaults;
   ASSERT_TRUE(test::load_valid_config_from_string(arithmetic_config(""), defaults));
   auto *cu = defaults.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
@@ -53,7 +61,7 @@ TEST(ArithConfigTest, DefaultsAndTopLevelPolicyReachExecution) {
   EXPECT_EQ(cu->arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK, RJ_ARITH_SEMANTICS_LOOSE);
 }
 
-TEST(ArithConfigTest, EveryModeAndEmptyObjectReachExecution) {
+TEST_F(ArithConfigTest, EveryModeAndEmptyObjectReachExecution) {
   for (const auto *name :
        {"loose", "bit_exact_empirical_allow_loose", "bit_exact_empirical_no_fp_status",
         "bit_exact_empirical", "compatibility"}) {
@@ -61,8 +69,10 @@ TEST(ArithConfigTest, EveryModeAndEmptyObjectReachExecution) {
     config::LoadedConfig loaded;
     ASSERT_TRUE(test::load_valid_config_from_string(arithmetic_config(policy), loaded));
     auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+    auto policy_value = amdgpu::parse_arithmetic_policy(name);
+    ASSERT_TRUE(policy_value.succeeded());
     EXPECT_EQ(cu->arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK,
-              (static_cast<uint64_t>(amdgpu::parse_arithmetic_policy(name).semantics) << 16));
+              (static_cast<uint64_t>(policy_value.value().semantics) << 16));
   }
   config::LoadedConfig loaded;
   ASSERT_TRUE(test::load_valid_config_from_string(arithmetic_config("{}"), loaded));
@@ -71,7 +81,7 @@ TEST(ArithConfigTest, EveryModeAndEmptyObjectReachExecution) {
             RJ_ARITH_SEMANTICS_COMPATIBILITY);
 }
 
-TEST(ArithConfigTest, RejectsMisspelledFieldsWithoutRestrictingOtherObjects) {
+TEST_F(ArithConfigTest, RejectsMisspelledFieldsWithoutRestrictingOtherObjects) {
   util::StringDiagnostic diagnostic;
   auto invalid =
       config::load_config_from_string(arithmetic_config(R"({"semantic":"bit_exact_empirical"})"),
@@ -91,7 +101,7 @@ TEST(ArithConfigTest, RejectsMisspelledFieldsWithoutRestrictingOtherObjects) {
   }
 }
 
-TEST(ArithConfigTest, ArithmeticPolicyAcceptsUtf8Bom) {
+TEST_F(ArithConfigTest, ArithmeticPolicyAcceptsUtf8Bom) {
   config::LoadedConfig loaded;
   ASSERT_TRUE(test::load_valid_config_from_string(
       "\xef\xbb\xbf" + arithmetic_config(R"({"semantics":"loose"})"), loaded));
@@ -100,7 +110,7 @@ TEST(ArithConfigTest, ArithmeticPolicyAcceptsUtf8Bom) {
             RJ_ARITH_SEMANTICS_LOOSE);
 }
 
-TEST(ArithConfigTest, RejectsInvalidAndRemovedSemanticsNames) {
+TEST_F(ArithConfigTest, RejectsInvalidAndRemovedSemanticsNames) {
   for (const char *name :
        {"invalid", "exact_empirical", "bit_exact_empirical_fp_status", "4", "7"}) {
     const std::string policy = std::string("{\"semantics\":\"") + name + "\"}";
@@ -112,7 +122,7 @@ TEST(ArithConfigTest, RejectsInvalidAndRemovedSemanticsNames) {
   }
 }
 
-TEST(ArithConfigTest, TopLevelOverridesPerCuButDoesNotHideInvalidPolicies) {
+TEST_F(ArithConfigTest, TopLevelOverridesPerCuButDoesNotHideInvalidPolicies) {
   auto json = arithmetic_config("");
   auto cu = json.find("\"type\": \"compute_unit\"");
   ASSERT_NE(cu, std::string::npos);
@@ -146,7 +156,7 @@ TEST(ArithConfigTest, TopLevelOverridesPerCuButDoesNotHideInvalidPolicies) {
   EXPECT_NE(diagnostic.message().find("arithmetic_semantics"), std::string::npos);
 }
 
-TEST(ArithConfigTest, InvalidPerCuEntriesCannotBeHidden) {
+TEST_F(ArithConfigTest, InvalidPerCuEntriesCannotBeHidden) {
   for (auto entry :
        {R"({"key":"arithmetic_semantics","value":null})", R"({"key":"arithmetic_semantics"})",
         R"({"key":"arithmetic_semantics","value":"invalid"},
@@ -163,7 +173,7 @@ TEST(ArithConfigTest, InvalidPerCuEntriesCannotBeHidden) {
   }
 }
 
-TEST(ArithConfigTest, UnknownPerCuArithmeticControlsAreRejected) {
+TEST_F(ArithConfigTest, UnknownPerCuArithmeticControlsAreRejected) {
   for (auto key : {"arithmetic_fallback", "arithmetic_state_reporting", "arithmetic_semantic"}) {
     for (auto policy : {"", R"({"semantics":"loose"})"}) {
       auto json = arithmetic_config(policy);
@@ -180,14 +190,13 @@ TEST(ArithConfigTest, UnknownPerCuArithmeticControlsAreRejected) {
   }
 }
 
-TEST(ArithConfigTest, CheckpointPreservesPerCuPolicyAndCachedFlags) {
+TEST_F(ArithConfigTest, CheckpointPreservesPerCuPolicyAndCachedFlags) {
   config::LoadedConfig loaded;
   ASSERT_TRUE(test::load_valid_config_from_string(arithmetic_config(""), loaded));
   auto *se = loaded.soc()->xcd(0)->shader_engine(0);
   ASSERT_GE(se->num_compute_units(), 2u);
-  se->compute_unit(0)->restore_arithmetic_policy(
-      amdgpu::parse_arithmetic_policy("bit_exact_empirical"));
-  se->compute_unit(1)->restore_arithmetic_policy(amdgpu::parse_arithmetic_policy("loose"));
+  se->compute_unit(0)->restore_arithmetic_policy({amdgpu::ArithmeticSemantics::BitExactEmpirical});
+  se->compute_unit(1)->restore_arithmetic_policy({amdgpu::ArithmeticSemantics::Loose});
   test::ScopedTempFile file;
   ASSERT_TRUE(file.initialize("rocjitsu-rj_arith-policy-"));
   util::StringDiagnostic diagnostic;
@@ -206,7 +215,7 @@ TEST(ArithConfigTest, CheckpointPreservesPerCuPolicyAndCachedFlags) {
   }
 }
 
-TEST(ArithConfigTest, CheckpointRejectsNonuniformCuMembership) {
+TEST_F(ArithConfigTest, CheckpointRejectsNonuniformCuMembership) {
   // Six CUs arranged 2/3/1 cannot round-trip through a uniform 2/2/2 template.
   const char *json = R"({
     "num_threads": 1, "vm": {"arch": "rdna4"},
@@ -227,7 +236,7 @@ TEST(ArithConfigTest, CheckpointRejectsNonuniformCuMembership) {
   config::LoadedConfig loaded;
   ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
   loaded.soc()->xcd(0)->shader_engine(2)->compute_unit(0)->restore_arithmetic_policy(
-      amdgpu::parse_arithmetic_policy("bit_exact_empirical"));
+      {amdgpu::ArithmeticSemantics::BitExactEmpirical});
   test::ScopedTempFile file;
   ASSERT_TRUE(file.initialize("rocjitsu-rj_arith-topology-"));
   util::StringDiagnostic diagnostic;
@@ -237,7 +246,7 @@ TEST(ArithConfigTest, CheckpointRejectsNonuniformCuMembership) {
   EXPECT_NE(diagnostic.message().find("nonuniform compute-unit topology"), std::string::npos);
 }
 
-TEST(ArithConfigTest, CheckpointRejectsUnserializedCus) {
+TEST_F(ArithConfigTest, CheckpointRejectsUnserializedCus) {
   const std::string cu = R"({"name":"cu0","type":"compute_unit"})";
   const std::string cp = R"({"name":"cp","type":"command_processor"},)";
   const std::string xcd = R"({"name":"xcd0","type":"xcd","children":[
@@ -273,7 +282,7 @@ TEST(ArithConfigTest, CheckpointRejectsUnserializedCus) {
   }
 }
 
-TEST(ArithConfigTest, CheckpointUsesPerGpuComponentRoot) {
+TEST_F(ArithConfigTest, CheckpointUsesPerGpuComponentRoot) {
   const char *json = R"({"num_threads":1,"vm":{"arch":"rdna4"},
     "topology":{"root":{"name":"soc","type":"soc","children":[
       {"name":"vram","type":"gpu_memory"},
@@ -303,7 +312,7 @@ TEST(ArithConfigTest, CheckpointUsesPerGpuComponentRoot) {
   }
 }
 
-TEST(ArithConfigTest, MissingCheckpointStatePolicyInheritsTemplate) {
+TEST_F(ArithConfigTest, MissingCheckpointStatePolicyInheritsTemplate) {
   for (bool strict_template : {false, true}) {
     flatbuffers::FlatBufferBuilder builder;
     auto policy =

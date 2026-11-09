@@ -7,7 +7,6 @@
 #include "util/simd_test_hooks.h"
 
 #include <gtest/gtest.h>
-#include <stdexcept>
 
 namespace rocjitsu::amdgpu {
 namespace {
@@ -46,7 +45,9 @@ TEST(ArithPolicyTest, ConfigurationNamesMapDirectlyToArithSemantics) {
   };
   for (const auto &sample : cases) {
     SCOPED_TRACE(sample.name);
-    auto policy = parse_arithmetic_policy(sample.name);
+    auto parsed_policy = parse_arithmetic_policy(sample.name);
+    ASSERT_TRUE(parsed_policy.succeeded());
+    auto policy = parsed_policy.value();
     ArithmeticExecution execution(policy);
     EXPECT_EQ((static_cast<uint64_t>(policy.semantics) << 16), sample.mode);
     EXPECT_EQ(execution.flags() & RJ_ARITH_SEMANTICS_MASK, sample.mode);
@@ -58,7 +59,7 @@ TEST(ArithPolicyTest, ConfigurationNamesMapDirectlyToArithSemantics) {
 
 TEST(ArithPolicyTest, RejectsUnknownReservedAndRemovedNames) {
   for (auto name : {"typo", "exact_empirical", "bit_exact_empirical_fp_status", "4", "7", ""})
-    EXPECT_THROW(parse_arithmetic_policy(name), std::invalid_argument);
+    EXPECT_TRUE(parse_arithmetic_policy(name).failed());
 }
 
 } // namespace

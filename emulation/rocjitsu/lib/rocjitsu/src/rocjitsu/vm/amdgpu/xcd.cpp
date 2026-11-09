@@ -8,16 +8,27 @@
 
 #include <cassert>
 #include <memory>
-#include <stdexcept>
 #include <string>
 
 namespace rocjitsu {
 namespace amdgpu {
 
-Xcd::Xcd(std::string name, const Config &config, rj_code_arch_t arch, GpuMemory *memory,
-         simdojo::ExecMode exec_mode, std::shared_ptr<DeviceCacheCoherence> coherence)
-    : simdojo::CompositeComponent(std::move(name)), exec_mode_(exec_mode),
-      coherence_(std::move(coherence)) {
+std::unique_ptr<Xcd> Xcd::create(std::string name, const Config &config, rj_code_arch_t arch,
+                                 GpuMemory *memory, simdojo::ExecMode exec_mode,
+                                 std::shared_ptr<DeviceCacheCoherence> coherence,
+                                 util::DiagnosticEmitter emit_error) {
+  auto xcd = std::make_unique<Xcd>(std::move(name));
+  if (xcd->configure(config, arch, memory, exec_mode, std::move(coherence), emit_error).failed())
+    return nullptr;
+  return xcd;
+}
+
+util::Result Xcd::configure(const Config &config, rj_code_arch_t arch, GpuMemory *memory,
+                            simdojo::ExecMode exec_mode,
+                            std::shared_ptr<DeviceCacheCoherence> coherence,
+                            util::DiagnosticEmitter emit_error) {
+  exec_mode_ = exec_mode;
+  coherence_ = std::move(coherence);
   assert(coherence_ && "XCD requires a cache-coherence domain");
   set_weight(0); // Structural container, not a work-producing component.
   auto xcd_name = this->name();
@@ -36,9 +47,10 @@ Xcd::Xcd(std::string name, const Config &config, rj_code_arch_t arch, GpuMemory 
 
   // Create shader engines, each with its own CU array sharing the XCD's L2.
   for (uint32_t i = 0; i < config.num_shader_engines; ++i) {
-    auto se =
-        std::make_unique<ShaderEngine>(xcd_name + ".se" + std::to_string(i), config.shader_engine,
-                                       arch, memory, l2_cache_, exec_mode);
+    auto se = ShaderEngine::create(xcd_name + ".se" + std::to_string(i), config.shader_engine, arch,
+                                   memory, l2_cache_, exec_mode, emit_error);
+    if (!se)
+      return util::Result::failure();
     // Register all CUs in this SE with the XCD's command processor.
     // This also sets up on_idle callbacks from CUs to CP::check_all_idle().
     for (uint32_t c = 0; c < se->num_compute_units(); ++c) {
@@ -60,6 +72,7 @@ Xcd::Xcd(std::string name, const Config &config, rj_code_arch_t arch, GpuMemory 
   // Share one device-global GWS store across every CU of this XCD now that all
   // shader engines and their CUs exist.
   wire_gws_to_cus();
+  return util::Result::success();
 }
 
 void Xcd::wire_gws_to_cus() {
@@ -122,7 +135,7 @@ util::Result Xcd::set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coh
   return util::Result::success();
 }
 
-void Xcd::initialize() {
+util::Result Xcd::initialize(util::DiagnosticEmitter) {
   auto &topo = engine()->topology();
 
   // Wire CP req ports → CU cpl ports.
@@ -179,6 +192,7 @@ void Xcd::initialize() {
 
   // L2→HBM/fabric port wiring is done by SoC::initialize() since the
   // destination depends on the IOD topology.
+  return util::Result::success();
 }
 
 } // namespace amdgpu
