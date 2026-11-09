@@ -4,6 +4,7 @@
 #include "decode_fuzz_core.h"
 
 #include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/instruction.h"
 
 #include <gtest/gtest.h>
 
@@ -11,7 +12,6 @@
 #include <cstdint>
 #include <memory>
 #include <span>
-#include <stdexcept>
 
 namespace rocjitsu::decode_fuzz {
 namespace {
@@ -30,8 +30,9 @@ std::array<uint8_t, kWindowSize> make_window(const std::array<uint32_t, N> &word
 class DecodeFuzzCoreTest : public ::testing::Test {
 protected:
   void SetUp() override {
-    decoder = create_decoder("gfx1250");
-    ASSERT_NE(decoder, nullptr);
+    util::FailureOr<std::unique_ptr<Decoder>> created = create_decoder("gfx1250");
+    ASSERT_TRUE(created.succeeded());
+    decoder = std::move(created).value();
   }
 
   std::unique_ptr<Decoder> decoder;
@@ -42,7 +43,7 @@ TEST(DecodeFuzzTargetsTest, CreatesEachSupportedDecoder) {
                                           "rdna3", "rdna3_5", "rdna4", "gfx1250", "gfx1251"};
   for (const std::string_view target : targets) {
     SCOPED_TRACE(target);
-    EXPECT_NE(create_decoder(target), nullptr);
+    EXPECT_TRUE(create_decoder(target).succeeded());
   }
 }
 
@@ -50,29 +51,64 @@ TEST(DecodeFuzzTargetsTest, CreatesRegisteredGpuAliases) {
   constexpr std::string_view targets[] = {"gfx90a", "gfx942", "gfx950", "gfx1200", "gfx1201"};
   for (const std::string_view target : targets) {
     SCOPED_TRACE(target);
-    EXPECT_NE(create_decoder(target), nullptr);
+    EXPECT_TRUE(create_decoder(target).succeeded());
   }
 }
 
 TEST(DecodeFuzzTargetsTest, RejectsUnknownTarget) {
-  EXPECT_THROW((void)create_decoder("unknown"), std::invalid_argument);
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(create_decoder("unknown", diagnostic.emitter()).failed());
+  EXPECT_EQ(diagnostic.message(), "unsupported decoder target: unknown");
 }
 
-TEST_F(DecodeFuzzCoreTest, RejectsShortWindowBeforeDecode) {
-  std::array<uint8_t, kWindowSize - 1> input{};
-  EXPECT_THROW((void)decode_window(*decoder, input), std::invalid_argument);
+class InvalidSizeInstruction final : public Instruction {
+public:
+  InvalidSizeInstruction() : Instruction("invalid_size", nullptr) { size_ = 0; }
+};
+
+class InvariantDecoder final : public Decoder {
+public:
+  size_t max_instruction_words() const override { return 4; }
+  DecodeResult decode(const uint32_t *, const DecodeErrorEmitter &) override {
+    called = true;
+    return std::unique_ptr<Instruction>(new InvalidSizeInstruction());
+  }
+
+  bool called = false;
+};
+
+TEST(DecodeFuzzWindowTest, RejectsInvalidWindowSizesBeforeCallingDecoder) {
+  for (size_t size : {size_t{0}, kWindowSize - 1, kWindowSize + 1}) {
+    SCOPED_TRACE(size);
+    InvariantDecoder decoder;
+    std::vector<uint8_t> input(size);
+    util::StringDiagnostic diagnostic;
+    EXPECT_TRUE(decode_window(decoder, input, diagnostic.emitter()).failed());
+    EXPECT_FALSE(decoder.called);
+    EXPECT_EQ(diagnostic.message(), "decoder input must be exactly 16 bytes");
+  }
+}
+
+TEST(DecodeFuzzDeathTest, InternalDecoderDefectsRemainFatal) {
+  InvariantDecoder decoder;
+  const std::array<uint8_t, kWindowSize> input{};
+  EXPECT_DEATH((void)decode_window(decoder, input), "instruction size is outside");
 }
 
 TEST_F(DecodeFuzzCoreTest, TreatsInvalidInstructionAsNormalRejection) {
   const auto input = make_window(std::array<uint32_t, 1>{0xffffffffu});
-  const DecodeRecord record = decode_window(*decoder, input);
+  const util::FailureOr<DecodeRecord> decoded = decode_window(*decoder, input);
+  ASSERT_TRUE(decoded.succeeded());
+  const DecodeRecord &record = decoded.value();
   EXPECT_FALSE(record.valid);
   EXPECT_FALSE(record.rejection.empty());
 }
 
 TEST_F(DecodeFuzzCoreTest, DecodesFourByteInstruction) {
   const auto input = make_window(std::array<uint32_t, 1>{0xBF800000u});
-  const DecodeRecord record = decode_window(*decoder, input);
+  const util::FailureOr<DecodeRecord> decoded = decode_window(*decoder, input);
+  ASSERT_TRUE(decoded.succeeded());
+  const DecodeRecord &record = decoded.value();
   ASSERT_TRUE(record.valid);
   EXPECT_EQ(record.size, 4);
   EXPECT_EQ(record.mnemonic, "s_nop");
@@ -81,7 +117,9 @@ TEST_F(DecodeFuzzCoreTest, DecodesFourByteInstruction) {
 
 TEST_F(DecodeFuzzCoreTest, PreservesTwelveByteLiteral) {
   const auto input = make_window(std::array<uint32_t, 3>{0x46040504u, 0x00000000u, 0xC1F00000u});
-  const DecodeRecord record = decode_window(*decoder, input);
+  const util::FailureOr<DecodeRecord> decoded = decode_window(*decoder, input);
+  ASSERT_TRUE(decoded.succeeded());
+  const DecodeRecord &record = decoded.value();
   ASSERT_TRUE(record.valid);
   EXPECT_EQ(record.size, 12);
   EXPECT_EQ(record.mnemonic, "v_fmamk_f64_e32");
@@ -91,7 +129,9 @@ TEST_F(DecodeFuzzCoreTest, PreservesTwelveByteLiteral) {
 TEST_F(DecodeFuzzCoreTest, DecodesSopTwoWithLiteralWithoutAborting) {
   const auto input =
       make_window(std::array<uint32_t, 4>{0x9842FFB4u, 0xFD9670E6u, 0x673F885Eu, 0x2036829Bu});
-  const DecodeRecord record = decode_window(*decoder, input);
+  const util::FailureOr<DecodeRecord> decoded = decode_window(*decoder, input);
+  ASSERT_TRUE(decoded.succeeded());
+  const DecodeRecord &record = decoded.value();
   ASSERT_TRUE(record.valid);
   EXPECT_EQ(record.size, 8);
   EXPECT_EQ(record.mnemonic, "s_cselect_b32");
@@ -100,7 +140,9 @@ TEST_F(DecodeFuzzCoreTest, DecodesSopTwoWithLiteralWithoutAborting) {
 TEST_F(DecodeFuzzCoreTest, PreservesSixteenByteInstruction) {
   const auto input =
       make_window(std::array<uint32_t, 4>{0xCC350000u, 0x04020900u, 0xCC330006u, 0x02026912u});
-  const DecodeRecord record = decode_window(*decoder, input);
+  const util::FailureOr<DecodeRecord> decoded = decode_window(*decoder, input);
+  ASSERT_TRUE(decoded.succeeded());
+  const DecodeRecord &record = decoded.value();
   ASSERT_TRUE(record.valid);
   EXPECT_EQ(record.size, 16);
   EXPECT_EQ(record.mnemonic, "v_wmma_scale_f32_16x16x128_f8f6f4");
@@ -110,7 +152,9 @@ TEST_F(DecodeFuzzCoreTest, PreservesSixteenByteInstruction) {
 
 TEST_F(DecodeFuzzCoreTest, AcceptsCompoundMnemonicDisassembly) {
   const auto input = make_window(std::array<uint32_t, 2>{0xCA500501u, 0x02000080u});
-  const DecodeRecord record = decode_window(*decoder, input);
+  const util::FailureOr<DecodeRecord> decoded = decode_window(*decoder, input);
+  ASSERT_TRUE(decoded.succeeded());
+  const DecodeRecord &record = decoded.value();
   ASSERT_TRUE(record.valid);
   EXPECT_EQ(record.size, 8);
   EXPECT_EQ(record.mnemonic, "v_dual_cndmask_b32 :: v_dual_mov_b32");
@@ -119,8 +163,11 @@ TEST_F(DecodeFuzzCoreTest, AcceptsCompoundMnemonicDisassembly) {
 
 TEST_F(DecodeFuzzCoreTest, ReusesDecoderAcrossManyIterations) {
   const auto input = make_window(std::array<uint32_t, 1>{0xBF800000u});
-  for (int iteration = 0; iteration < 1000; ++iteration)
-    ASSERT_TRUE(decode_window(*decoder, input).valid);
+  for (int iteration = 0; iteration < 1000; ++iteration) {
+    const util::FailureOr<DecodeRecord> decoded = decode_window(*decoder, input);
+    ASSERT_TRUE(decoded.succeeded());
+    ASSERT_TRUE(decoded.value().valid);
+  }
 }
 
 } // namespace

@@ -23,6 +23,7 @@ template <typename Isa> class AmdgpuIsaOperand;
 
 namespace amdgpu {
 class ComputeUnitCore;
+struct ImageAddressConfig;
 class InstructionCache;
 class L1ScalarCache;
 class L1VectorCache;
@@ -30,6 +31,7 @@ class L2Cache;
 class Lds;
 class OperandExecutionAccess;
 class RegisterAccess;
+struct TensorDmaIssueObservation;
 struct TensorDmaMemoryAccessObservation;
 class Wavefront;
 
@@ -65,6 +67,7 @@ public:
   bool debug_active() const;
   rj_code_arch_t arch() const;
   uint64_t arithmetic_flags() const;
+  ImageAddressConfig image_address_config() const;
   uint32_t cus_per_shader_array() const;
   uint32_t shader_array_cu_id() const;
   uint32_t shader_engine_id() const;
@@ -92,6 +95,8 @@ public:
                               bool retain_wave = true);
   bool observes_tensor_dma_memory_access() const;
   void report_tensor_dma_memory_access(const TensorDmaMemoryAccessObservation &access);
+  bool observes_tensor_dma_issue() const;
+  void report_tensor_dma_issue(const TensorDmaIssueObservation &issue);
 
 private:
   ComputeUnitCore &raw_cu() { return *cu_; }

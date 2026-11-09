@@ -16,7 +16,7 @@ layout formulas and a fixed inventory of source/target layout names.
 | `isa_profile.py` | Per-ISA profile constants and encoding rules |
 | `semantics.py` | Derive instruction semantics from mnemonics |
 | `cross_isa.py` | Cross-ISA instruction overlap analysis |
-| `codegen/` | Generate C++ decoders, encoders, and instruction execute bodies |
+| `codegen/` | Generate C++ decoders, encoders and execute bodies, and native assembly dispatch tables |
 | `legalization.py` | Generate cross-ISA legalization tables (Action classification) |
 | `legalization_codegen.py` | Emit C++20 `InstructionLegalization[]` legalization table headers |
 | `encoding_translator_codegen.py` | Emit C++20 neutral field structs + decode/encode functions |
@@ -201,9 +201,12 @@ python -m amdisa cdna5:/path/to/amdgpu_isa_cdna5.xml \
 
 ## Generated file locations
 
+The portable C++ switches and native assembly tables share the same
+opcode-to-factory rows.
+
 | Generated files | Location | Generator |
 |---|---|---|
-| ISA decoders, encoders, execute bodies, and `insts.h` | `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/<output-directory>/` | `codegen/` |
+| ISA decoders (including `decode_factories.h`, `decode_tables.inc`, and `decode_tables.S`), encoders, execute bodies, and `insts.h` | `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/<output-directory>/` | `codegen/` |
 | Shared execute templates | `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/shared/` | `codegen/` |
 | ISA files generated at a custom path | A caller-selected tree such as `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/custom/generated/` | `codegen/` |
 | Cross-ISA legalization tables | `lib/rocjitsu/src/rocjitsu/code/dbt/generated/` | `legalization_codegen.py` |
