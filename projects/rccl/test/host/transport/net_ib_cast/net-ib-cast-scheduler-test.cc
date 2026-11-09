@@ -641,6 +641,7 @@ TEST_F(NetIbCastSchedulerNqpsMicrotest, EffectiveNqps_SingleQpComm_UsesIt) {
 }
 
 TEST_F(NetIbCastSchedulerNqpsMicrotest, EffectiveNqps_SplitData_SplitsOnlyFromTheMinimum) {
+  req_.id = 2;
   req_.desc.parms.splitData = true;
   req_.desc.parms.splitDataMin = 1000;
   req_.send.size = 1500;
@@ -655,6 +656,37 @@ TEST_F(NetIbCastSchedulerNqpsMicrotest, EffectiveNqps_SplitData_SplitsOnlyFromTh
   EXPECT_EQ(Pick(&start, &wrr), 1);
   EXPECT_EQ(start, 2);
   EXPECT_FALSE(wrr);
+}
+
+TEST_F(NetIbCastSchedulerNqpsMicrotest, EffectiveNqps_WrrDisabled_RotatesSmallSendsByRequestId) {
+  params_["RCCL_IB_QP_SCHED_ENABLE"] = 1;
+  params_["IB_SPLIT_DATA_ON_QPS"] = 1;
+  params_["RCCL_IB_QP_SCHED_WRR_ENABLE"] = 0;
+  params_["RCCL_IB_QP_SCHED_SPLIT_DATA_MIN"] = 1000;
+  req_.desc.parms = Init();
+  ASSERT_TRUE(req_.desc.parms.enable);
+  ASSERT_TRUE(req_.desc.parms.splitData);
+  ASSERT_FALSE(req_.desc.parms.doWrr);
+  const int tokens[] = {2, 1, 3};
+  ASSERT_EQ(ncclIbCastSetTokens(comm_.get(), tokens, 3), ncclSuccess);
+  for (bool initialized : {false, true}) {
+    base().qpTxSchedInit = initialized;
+    for (int requestId = 0; requestId < 9; ++requestId) {
+      SCOPED_TRACE(testing::Message() << "initialized=" << initialized << " requestId=" << requestId);
+      req_.id = requestId;
+      req_.send.size = 2999;
+      int start = -1;
+      bool wrr = true;
+      EXPECT_EQ(Pick(&start, &wrr), 1);
+      EXPECT_EQ(start, requestId % base().nqps);
+      EXPECT_FALSE(wrr);
+      EXPECT_EQ(base().rrQpTxSched.activeTokens.totTokens, 6);
+      EXPECT_EQ(base().rrQpTxSched.qpIndex, 0);
+      for (int qp = 0; qp < base().nqps; ++qp) {
+        EXPECT_EQ(base().rrQpTxSched.activeTokens.qpTokens[qp], tokens[qp]);
+      }
+    }
+  }
 }
 
 // Tokens {2,0,1}: the cursor moves on after every pick and skips the empty qp1, so qp0 and qp2 alternate; the

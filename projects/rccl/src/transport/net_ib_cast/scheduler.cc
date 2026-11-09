@@ -386,7 +386,9 @@ int IbCastQpSchedGetEffectiveTxNqps(struct ncclIbRequest* req, int* startQpIndex
 
 oneQp:
   nqps = 1;
-  if (parms->doWrr && req->base->qpTxSchedInit) {
+  if (!parms->doWrr) {
+    qpIndex = req->id % req->base->nqps;
+  } else if (req->base->qpTxSchedInit) {
     if (req->base->rrQpTxSched.activeTokens.totTokens == 0)
       req->base->rrQpTxSched.activeTokens = req->base->rrQpTxSched.initTokens;
     qpIndex = req->base->rrQpTxSched.qpIndex;
