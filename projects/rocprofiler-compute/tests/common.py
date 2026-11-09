@@ -18,7 +18,7 @@ from typing import Set
 from unittest.mock import Mock
 
 import config
-from memory_chart.loader import Layouts, PanelConfigs
+from memory_chart.loader import Layouts, PanelConfigs, metric_entries
 from utils import csv_compression
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
@@ -56,12 +56,11 @@ def memory_chart_layout_data(arch: str) -> dict:
     return json.loads(Layouts.for_arch(arch).path.read_text(encoding="utf-8"))
 
 
-def with_metric_change(data: dict, metric: str, **fields) -> dict:
-    """A copy of layout *data* with *fields* set on every item and arrow of *metric*."""
+def with_metric_change(data: dict, metric_name: str, **fields) -> dict:
+    """A copy of layout *data* with *fields* set on every item and arrow of a metric."""
     data = copy.deepcopy(data)
-    items = [item for block in data["blocks"] for item in block.get("content", [])]
-    for entry in (*items, *data["arrows"]):
-        if entry["metric"] == metric:
+    for entry in metric_entries(data):
+        if entry["metric_name"] == metric_name:
             entry.update(fields)
     return data
 

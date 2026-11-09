@@ -12,12 +12,16 @@ from collections import defaultdict
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, NoReturn, Optional
+from typing import Any, Dict, List, NoReturn, Optional, Union
 
 import config
 from membw_analysis.models import BOTTLENECK_LEVELS
 from utils.logger import console_warning
-from utils.utils_common import canonical_config_arch, load_panel_configs
+from utils.utils_common import (
+    canonical_config_arch,
+    load_panel_configs,
+    metric_ids_by_name,
+)
 
 LAYOUTS_DIR = config.rocprof_compute_home / "memory_chart" / "layouts"
 
@@ -45,9 +49,19 @@ BLOCK_KEYS = Keys(
     ("id", "title", "column", "order", "position", "style"),
     ("parent", "host", "stall_level", "content"),
 )
-ITEM_KEYS = Keys(("metric", "title", "category", "bar"))
+ITEM_KEYS = Keys(("metric_name", "metric_id", "title", "category", "bar"))
 ARROW_KEYS = Keys(
-    ("from", "to", "direction", "metric", "title", "category", "style"), ("group",)
+    (
+        "from",
+        "to",
+        "direction",
+        "metric_name",
+        "metric_id",
+        "title",
+        "category",
+        "style",
+    ),
+    ("group",),
 )
 
 _POSITIONS = ("grid", "above", "below")
@@ -65,7 +79,8 @@ StackKey = tuple[Optional[str], str, int]
 class LayoutItem:
     """A metric shown in a block."""
 
-    metric: str
+    metric_name: str
+    metric_id: str
     title: str
     category: str
     bar: bool  # draw a progress bar under the value
@@ -96,7 +111,8 @@ class LayoutArrow:
     source: str
     target: str
     direction: str
-    metric: str
+    metric_name: str
+    metric_id: str
     title: str
     category: str
     style: str  # "inline": one "title : value" line; "stacked": title, value, arrow
@@ -125,10 +141,13 @@ class Layout:
         for block in self.top_level_blocks():
             yield from _with_descendants(block)
 
+    def metric_entries(self) -> List[Union[LayoutItem, LayoutArrow]]:
+        """Every metric shown in a block, then every arrow."""
+        return [*(item for b in self.blocks() for item in b.items), *self.arrows]
+
     def metrics(self) -> set[str]:
         """Names of all metrics the layout shows."""
-        names = {item.metric for b in self.blocks() for item in b.items}
-        return names | {arrow.metric for arrow in self.arrows}
+        return {entry.metric_name for entry in self.metric_entries()}
 
 
 class Layouts:
@@ -164,6 +183,24 @@ class PanelConfigs:
         return cls._by_arch[arch]
 
 
+def panel_metric_ids(arch: str) -> Dict[str, str]:
+    """Id of every metric in the memory chart panel of *arch*, by metric name."""
+    panel = PanelConfigs.for_arch(arch) or {}
+    return {
+        name: metric_id
+        for source in panel.get("data source") or []
+        for table in source.values()
+        for name, metric_id in metric_ids_by_name(table).items()
+    }
+
+
+def metric_entries(layout_json: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Every metric entry of a parsed layout file: block contents, then arrows."""
+    blocks = layout_json["blocks"]
+    items = [item for block in blocks for item in block.get("content", [])]
+    return [*items, *layout_json["arrows"]]
+
+
 def is_memory_chart_panel(panel: dict[str, Any]) -> bool:
     """True when every table of a panel config is drawn as the memory chart."""
     sources = panel.get("data source") or []
@@ -181,13 +218,18 @@ def layout_files() -> list[Path]:
 
 def load_layout(path: Path) -> Layout:
     """Read and check a layout file; raise LayoutError if missing or malformed."""
+    return layout_from_json(path, read_layout_json(path))
+
+
+def read_layout_json(path: Path) -> Dict[str, Any]:
+    """The parsed layout file, unchecked; raise LayoutError if it is not JSON."""
     try:
         layout_json = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:  # ValueError covers invalid JSON
         _fail(path, f"cannot read the layout: {error}")
     if not isinstance(layout_json, dict):
         _fail(path, "the layout must be a JSON object")
-    return layout_from_json(path, layout_json)
+    return layout_json
 
 
 def layout_from_json(path: Path, data: dict[str, Any]) -> Layout:
@@ -369,16 +411,18 @@ def _block(
 
 
 def _item(path: Path, raw: dict[str, Any]) -> LayoutItem:
-    where = repr(raw.get("metric"))
+    where = repr(raw.get("metric_name"))
     _check_keys(path, raw, ITEM_KEYS, where)
     _check_choice(path, raw["category"], _ITEM_CATEGORIES, f"category of {where}")
     if not isinstance(raw["bar"], bool):
         _fail(path, f"bar of {where} must be true or false, not {raw['bar']!r}")
-    return LayoutItem(raw["metric"], raw["title"], raw["category"], raw["bar"])
+    return LayoutItem(
+        raw["metric_name"], raw["metric_id"], raw["title"], raw["category"], raw["bar"]
+    )
 
 
 def _arrow(path: Path, raw: dict[str, Any]) -> LayoutArrow:
-    where = f"arrow {raw.get('metric')!r}"
+    where = f"arrow {raw.get('metric_name')!r}"
     _check_keys(path, raw, ARROW_KEYS, where)
     _check_choice(path, raw["direction"], _DIRECTIONS, f"direction of {where}")
     _check_choice(path, raw["category"], _ARROW_CATEGORIES, f"category of {where}")
@@ -387,7 +431,8 @@ def _arrow(path: Path, raw: dict[str, Any]) -> LayoutArrow:
         source=raw["from"],
         target=raw["to"],
         direction=raw["direction"],
-        metric=raw["metric"],
+        metric_name=raw["metric_name"],
+        metric_id=raw["metric_id"],
         title=raw["title"],
         category=raw["category"],
         style=raw["style"],
@@ -420,22 +465,23 @@ def _check_references(layout: Layout, raw_blocks: dict[str, dict[str, Any]]) -> 
 def _check_arrow(path: Path, arrow: LayoutArrow, by_id: dict[str, LayoutBlock]) -> None:
     for end in (arrow.source, arrow.target):
         if end not in by_id:
-            _fail(path, f"arrow {arrow.metric!r} refers to unknown block {end!r}")
+            _fail(path, f"arrow {arrow.metric_name!r} refers to unknown block {end!r}")
         if by_id[end].children:
             _fail(
                 path,
-                f"arrow {arrow.metric!r} must connect to a block nested in {end!r}",
+                f"arrow {arrow.metric_name!r} must connect to a block nested in "
+                f"{end!r}",
             )
     source, target = by_id[arrow.source], by_id[arrow.target]
     if source.position != "grid":
-        _fail(path, f"arrow {arrow.metric!r} must start at a block in a column")
+        _fail(path, f"arrow {arrow.metric_name!r} must start at a block in a column")
     attached = target.host == arrow.source
     next_column = target.position == "grid" and target.column == source.column + 1
     if not (attached or next_column):
         _fail(
             path,
-            f"arrow {arrow.metric!r} must go to a block in the next column "
+            f"arrow {arrow.metric_name!r} must go to a block in the next column "
             "or to a block attached to its source",
         )
     if attached and arrow.style != "inline":
-        _fail(path, f"arrow {arrow.metric!r} to an attached block must be inline")
+        _fail(path, f"arrow {arrow.metric_name!r} to an attached block must be inline")

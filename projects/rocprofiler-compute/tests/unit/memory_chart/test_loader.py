@@ -19,6 +19,7 @@ from memory_chart.loader import (
     PanelConfigs,
     layout_files,
     load_layout,
+    panel_metric_ids,
 )
 from memory_chart.units import display_unit, panel_units
 
@@ -34,7 +35,8 @@ READ_ARROW = {
     "from": "cu",
     "to": "vl1d",
     "direction": "backward",
-    "metric": "Flat Read",
+    "metric_name": "Flat Read",
+    "metric_id": "3.1.6",
     "title": "Read",
     "category": "read",
     "style": "inline",
@@ -120,6 +122,15 @@ def test_layout_shows_every_panel_metric_and_no_other(path, arch):
     assert not panel - shown, f"missing from {path.name}: {sorted(panel - shown)}"
 
 
+@pytest.mark.parametrize(("path", "arch"), LAYOUT_ARCHS, ids=LAYOUT_ARCH_IDS)
+def test_metric_ids_match_the_panel_config(path, arch):
+    layout = load_layout(path)
+    ids = panel_metric_ids(arch)
+    shown = {(entry.metric_name, entry.metric_id) for entry in layout.metric_entries()}
+    wrong = shown - set(ids.items())
+    assert not wrong, "run tools/memory_chart_layout_format.py to renumber them"
+
+
 @pytest.mark.parametrize("arch", MEMORY_CHART_ARCHS)
 def test_panel_metric_names_are_unique(arch):
     # Charts and the analysis database find metrics by name
@@ -142,11 +153,11 @@ def test_arrow_style_fits_the_metric_unit(path, arch):
     layout = load_layout(path)
     grid = {b.id for b in layout.blocks() if b.position == "grid"}
     wrong = [
-        arrow.metric
+        arrow.metric_name
         for arrow in layout.arrows
         if arrow.target in grid
         and (arrow.style == "inline")
-        != (display_unit(units[arrow.metric]).kind == "count")
+        != (display_unit(units[arrow.metric_name]).kind == "count")
     ]
     assert not wrong
 
@@ -155,10 +166,10 @@ def test_arrow_style_fits_the_metric_unit(path, arch):
 def test_bars_are_only_on_percent_metrics(path, arch):
     units = panel_units(PanelConfigs.for_arch(arch))
     wrong = [
-        item.metric
+        item.metric_name
         for block in load_layout(path).blocks()
         for item in block.items
-        if item.bar and display_unit(units[item.metric]).kind != "percent"
+        if item.bar and display_unit(units[item.metric_name]).kind != "percent"
     ]
     assert not wrong
 
