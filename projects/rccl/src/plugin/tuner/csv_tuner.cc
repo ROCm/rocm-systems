@@ -700,8 +700,8 @@ static ncclResult_t csvTunerGetCollInfo(void* context, ncclFunc_t collType, size
                      collTypeToString(collType), nBytes, numPipeOps, regBuff);
   }
 
-  // Cast the collCostTable pointer to a 2D array
-  float (*table)[NCCL_NUM_PROTOCOLS] = (float (*)[NCCL_NUM_PROTOCOLS])collCostTable;
+  // The caller's row stride is numProto (the plugin ABI width), not NCCL_NUM_PROTOCOLS.
+  float* table = (float*)collCostTable;
 
   // Look for matching configuration
   for (int i = 0; i < ctx->numConfigs; i++) {
@@ -715,8 +715,9 @@ static ncclResult_t csvTunerGetCollInfo(void* context, ncclFunc_t collType, size
         (config->regBuff == -1 || config->regBuff == regBuff)) {
       // Check bounds
       if (config->algorithm < numAlgo && config->protocol < numProto) {
-        if (table[config->algorithm][config->protocol] != NCCL_ALGO_PROTO_IGNORE) {
-          table[config->algorithm][config->protocol] = 0.0; // Set low cost to prefer this configuration
+        float* cost = &table[config->algorithm * numProto + config->protocol];
+        if (*cost != NCCL_ALGO_PROTO_IGNORE) {
+          *cost = 0.0; // Set low cost to prefer this configuration
 
           // Only override channels for valid explicit values; -1 keeps the default.
           if (config->nChannels >= 1) {

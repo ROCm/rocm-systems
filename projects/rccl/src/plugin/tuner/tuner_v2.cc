@@ -24,7 +24,7 @@ static int hasNvlsSupport(float** collCostTable) {
   // - Collnet* inter-node: collNetSupport
   //
   // nvlsSupport = 1 if either NVLS or NVLS_TREE entries in the cost table are not -1
-  float (*table)[NCCL_NUM_PROTOCOLS] = (float (*)[NCCL_NUM_PROTOCOLS])collCostTable;
+  float (*table)[NCCL_NUM_PROTOCOLS_V5] = (float (*)[NCCL_NUM_PROTOCOLS_V5])collCostTable;
   return (table[NCCL_ALGO_NVLS][NCCL_PROTO_SIMPLE] != NCCL_ALGO_PROTO_IGNORE ||
           table[NCCL_ALGO_NVLS_TREE][NCCL_PROTO_SIMPLE] != NCCL_ALGO_PROTO_IGNORE) ?
            1 :
@@ -32,7 +32,7 @@ static int hasNvlsSupport(float** collCostTable) {
 }
 
 static int hasCollNetSupport(float** collCostTable) {
-  float (*table)[NCCL_NUM_PROTOCOLS] = (float (*)[NCCL_NUM_PROTOCOLS])collCostTable;
+  float (*table)[NCCL_NUM_PROTOCOLS_V5] = (float (*)[NCCL_NUM_PROTOCOLS_V5])collCostTable;
   return (table[NCCL_ALGO_COLLNET_CHAIN][NCCL_PROTO_SIMPLE] == NCCL_ALGO_PROTO_IGNORE) ? 0 : 1;
 }
 
@@ -47,8 +47,8 @@ static ncclResult_t ncclTuner_getCollInfo(void* context, ncclFunc_t collType, si
   NCCLCHECK(ncclTuner_v2->getCollInfo(context, collType, nBytes, collNetSupport, nvlsSupport, numPipeOps, &algorithm,
                                       &protocol, nChannels));
   // set time to 0 below to make sure this algorithm/protocol is selected later on
-  if (algorithm >= 0 && algorithm < NCCL_NUM_ALGORITHMS && protocol >= 0 && protocol < NCCL_NUM_PROTOCOLS) {
-    float (*table)[NCCL_NUM_PROTOCOLS] = (float (*)[NCCL_NUM_PROTOCOLS])collCostTable;
+  if (algorithm >= 0 && algorithm < NCCL_NUM_ALGORITHMS && protocol >= 0 && protocol < NCCL_NUM_PROTOCOLS_V5) {
+    float (*table)[NCCL_NUM_PROTOCOLS_V5] = (float (*)[NCCL_NUM_PROTOCOLS_V5])collCostTable;
     if (table[algorithm][protocol] != NCCL_ALGO_PROTO_IGNORE) table[algorithm][protocol] = 0.0;
   }
   return ncclSuccess;
