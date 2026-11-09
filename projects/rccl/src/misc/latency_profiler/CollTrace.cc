@@ -78,7 +78,7 @@ void* CollTrace::collTraceThreadFn(int cudaDev) {
       latency = *latencyMaybe;
     }
 
-    recordCurCollResult(cudaDev, latency);
+    recordCurCollResult(rank_, latency);
     curEvent_.reset();
   }
 
