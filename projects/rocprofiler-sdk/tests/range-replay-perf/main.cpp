@@ -4,7 +4,7 @@
 
 // Application half of the range replay perf regression tests.
 //
-// Two modes share this binary:
+// Modes, selected by environment (at most one):
 //
 // - Default: time a number of ranges, each containing a configurable number of dispatches over a
 //   configurable device-memory footprint. The dispatch count per range is a parameter rather than
@@ -14,9 +14,18 @@
 //   more slowly than the dispatch count. A regression that reintroduced per-dispatch window cost
 //   would still pass a pass-count scaling test and only shows up when this axis moves.
 //
-// - Idle gate (RR_PERF_IDLE_GATE=1): never open a range. Time a burst of dispatches with range
+// - Idle gate (RR_PERF_IDLE_GATE=1, P1): never open a range. Time a burst of dispatches with range
 //   replay configured against the same burst with no tool, so the process-wide interception gate
-//   is the only cost under test (P1).
+//   is the only cost under test.
+//
+// - Copies (RR_PERF_COPIES=1, P2): never open a range. Time a burst of hipMemcpyAsync calls. The
+//   copy wrappers stay installed while range replay is configured, and each call classifies the
+//   pointers before forwarding, whether or not a range is open and whether or not anything traces
+//   memory copies.
+//
+// - Graphs (RR_PERF_GRAPHS=1, P3): never open a range. Time a burst of hipGraphLaunch calls. While
+//   range replay is configured, a graph launch does not take the fast path that writes the
+//   original packets through: the service has to see every dispatch, replayed or not.
 //
 // Like the range replay samples, this resolves the two API entry points with dlsym rather than
 // linking rocprofiler-sdk, because linking the SDK into a HIP executable makes HIP report
@@ -62,6 +71,10 @@ namespace
 // footprint large is what makes the window cost the dominant term and the sweep meaningful.
 constexpr int kWorkElems = 16384;
 
+// Above HIP's default shader-blit threshold (GPU_FORCE_BLIT_COPY_SIZE, 16 KiB), so the copy takes
+// the async-copy wrapper rather than a dispatch on the application's queue.
+constexpr size_t kCopyBytes = 1U << 20;
+
 // Bumps a counter so the application can tell afterwards whether the replay handed back its own
 // result, and writes a small slice of the ballast so the dispatches are not optimized away.
 __global__ void
@@ -70,6 +83,12 @@ touch(float* ballast, int n, int* counter)
     const int stride = blockDim.x * gridDim.x;
     for(int i = blockDim.x * blockIdx.x + threadIdx.x; i < n; i += stride)
         ballast[i] = ballast[i] * 1.0001f + 0.001f;
+    if(blockIdx.x == 0 && threadIdx.x == 0) atomicAdd(counter, 1);
+}
+
+__global__ void
+bump(int* counter)
+{
     if(blockIdx.x == 0 && threadIdx.x == 0) atomicAdd(counter, 1);
 }
 
@@ -115,10 +134,22 @@ main(int argc, char** argv)
     if(warmup < 0) warmup = 0;
 
     const bool idle_gate = env_flag("RR_PERF_IDLE_GATE");
+    const bool copies    = env_flag("RR_PERF_COPIES");
+    const bool graphs    = env_flag("RR_PERF_GRAPHS");
+    if(static_cast<int>(idle_gate) + static_cast<int>(copies) + static_cast<int>(graphs) > 1)
+    {
+        fprintf(
+            stderr,
+            "[rr-perf] FAIL set only one of RR_PERF_IDLE_GATE, RR_PERF_COPIES, RR_PERF_GRAPHS\n");
+        return EXIT_FAILURE;
+    }
+    // P1, P2 and P3 time the cost of having range replay configured. None of them opens a range,
+    // so the no-tool baseline has no range-replay symbols to resolve.
+    const bool configured_only = idle_gate || copies || graphs;
 
     decltype(&rocprofiler_range_replay_begin) begin_fn = nullptr;
     decltype(&rocprofiler_range_replay_end)   end_fn   = nullptr;
-    if(!idle_gate)
+    if(!configured_only)
     {
         begin_fn = reinterpret_cast<decltype(&rocprofiler_range_replay_begin)>(
             dlsym(RTLD_DEFAULT, "rocprofiler_range_replay_begin"));
@@ -131,10 +162,10 @@ main(int argc, char** argv)
         }
     }
 
-    // Idle-gate only needs a tiny working set: there is no snapshot. Keep a small ballast so the
-    // kernel still writes something, and ignore the caller's ballast_mb.
-    const size_t ballast_bytes = idle_gate ? static_cast<size_t>(kWorkElems) * sizeof(float)
-                                           : static_cast<size_t>(ballast_mb) * 1024U * 1024U;
+    // The configured-only modes do not snapshot anything. Keep a small ballast so the kernel still
+    // writes something, and ignore the caller's ballast_mb.
+    const size_t ballast_bytes = configured_only ? static_cast<size_t>(kWorkElems) * sizeof(float)
+                                                 : static_cast<size_t>(ballast_mb) * 1024U * 1024U;
     const int    ballast_elems = static_cast<int>(ballast_bytes / sizeof(float));
     const int    work_elems    = (ballast_elems < kWorkElems) ? ballast_elems : kWorkElems;
 
@@ -184,6 +215,115 @@ main(int argc, char** argv)
             return EXIT_FAILURE;
         }
 
+        std::printf("[rr-perf] PASS\n");
+        return EXIT_SUCCESS;
+    }
+
+    if(copies)
+    {
+        // P2: each hipMemcpyAsync pays the copy wrapper's pointer classification while range
+        // replay is configured, even though no range is open and nothing traces memory copies.
+        void*       src    = nullptr;
+        void*       dst    = nullptr;
+        hipStream_t stream = nullptr;
+        HIP_CHECK(hipHostMalloc(&src, kCopyBytes));
+        HIP_CHECK(hipMalloc(&dst, kCopyBytes));
+        HIP_CHECK(hipStreamCreate(&stream));
+        std::memset(src, 0x5a, kCopyBytes);
+
+        const auto burst = [&](int count) -> hipError_t {
+            for(int i = 0; i < count; ++i)
+            {
+                if(auto err = hipMemcpyAsync(dst, src, kCopyBytes, hipMemcpyHostToDevice, stream);
+                   err != hipSuccess)
+                    return err;
+            }
+            return hipStreamSynchronize(stream);
+        };
+
+        HIP_CHECK(burst(warmup));
+
+        using clock      = std::chrono::steady_clock;
+        const auto start = clock::now();
+        HIP_CHECK(burst(dispatches));
+        const auto   end     = clock::now();
+        const double wall_ms = std::chrono::duration<double, std::milli>(end - start).count();
+
+        auto* check = static_cast<unsigned char*>(std::malloc(kCopyBytes));
+        if(check == nullptr) return EXIT_FAILURE;
+        HIP_CHECK(hipMemcpy(check, dst, kCopyBytes, hipMemcpyDeviceToHost));
+        const bool copied = std::memcmp(check, src, kCopyBytes) == 0;
+        std::free(check);
+        HIP_CHECK(hipStreamDestroy(stream));
+        HIP_CHECK(hipFree(dst));
+        HIP_CHECK(hipHostFree(src));
+
+        std::printf("[rr-perf] copies=1 bytes=%zu count=%d warmup=%d wall_ms=%.3f ok=%d\n",
+                    kCopyBytes,
+                    dispatches,
+                    warmup,
+                    wall_ms,
+                    static_cast<int>(copied));
+        if(!copied)
+        {
+            std::fprintf(stderr, "[rr-perf] FAIL the copied bytes do not match the source\n");
+            return EXIT_FAILURE;
+        }
+        std::printf("[rr-perf] PASS\n");
+        return EXIT_SUCCESS;
+    }
+
+    if(graphs)
+    {
+        // P3: with range replay configured, graph launch does not take the packet-forwarding fast
+        // path. No range is opened, so this times that path and not a replay.
+        int*           counter = nullptr;
+        hipStream_t    stream  = nullptr;
+        hipGraph_t     graph   = nullptr;
+        hipGraphExec_t exec    = nullptr;
+        HIP_CHECK(hipMalloc(&counter, sizeof(int)));
+        HIP_CHECK(hipMemset(counter, 0, sizeof(int)));
+        HIP_CHECK(hipStreamCreate(&stream));
+        HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeThreadLocal));
+        bump<<<1, 64, 0, stream>>>(counter);
+        HIP_CHECK(hipGetLastError());
+        HIP_CHECK(hipStreamEndCapture(stream, &graph));
+        HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+
+        const auto burst = [&](int count) -> hipError_t {
+            for(int i = 0; i < count; ++i)
+            {
+                if(auto err = hipGraphLaunch(exec, stream); err != hipSuccess) return err;
+            }
+            return hipStreamSynchronize(stream);
+        };
+
+        HIP_CHECK(burst(warmup));
+        HIP_CHECK(hipMemset(counter, 0, sizeof(int)));
+
+        using clock      = std::chrono::steady_clock;
+        const auto start = clock::now();
+        HIP_CHECK(burst(dispatches));
+        const auto   end     = clock::now();
+        const double wall_ms = std::chrono::duration<double, std::milli>(end - start).count();
+
+        int counter_h = 0;
+        HIP_CHECK(hipMemcpy(&counter_h, counter, sizeof(int), hipMemcpyDeviceToHost));
+        HIP_CHECK(hipGraphExecDestroy(exec));
+        HIP_CHECK(hipGraphDestroy(graph));
+        HIP_CHECK(hipStreamDestroy(stream));
+        HIP_CHECK(hipFree(counter));
+
+        std::printf("[rr-perf] graphs=1 launches=%d warmup=%d wall_ms=%.3f counter=%d\n",
+                    dispatches,
+                    warmup,
+                    wall_ms,
+                    counter_h);
+        if(counter_h != dispatches)
+        {
+            std::fprintf(stderr, "[rr-perf] FAIL counter=%d expected %d\n", counter_h, dispatches);
+            return EXIT_FAILURE;
+        }
         std::printf("[rr-perf] PASS\n");
         return EXIT_SUCCESS;
     }
