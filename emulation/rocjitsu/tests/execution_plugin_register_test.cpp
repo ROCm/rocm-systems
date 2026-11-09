@@ -2554,9 +2554,9 @@ TEST(ExecutionPluginTest, WmmaReadObservationUsesWave32RegisterSet) {
   const uint32_t vb = wf->vgpr_alloc().base;
   constexpr uint32_t S0 = 0, S1 = 16, ACC = 32;
 
-  amdgpu::observe_wmma_fast_path_reads(*f.cu, vb + S0, vb + S1, vb + ACC, /*M=*/16, /*N=*/16,
-                                       /*K=*/32, /*data_bits=*/16, /*acc_bits=*/32,
-                                       amdgpu::ACC_FROM_VGPR, wf->wf_size());
+  amdgpu::observe_wmma_fast_path_reads</*M=*/16, /*N=*/16, /*K=*/32>(
+      *f.cu, vb + S0, vb + S1, vb + ACC, /*data_bits=*/16, /*acc_bits=*/32, amdgpu::ACC_FROM_VGPR,
+      wf->wf_size());
 
   expect_vgpr_read_set(vgpr_read_events(*plugin), vb,
                        {S0 + 0,  S0 + 1,  S0 + 2,  S0 + 3,  S0 + 4,  S0 + 5,  S0 + 6,  S0 + 7,
@@ -2576,9 +2576,9 @@ TEST(ExecutionPluginTest, WmmaReadObservationSkipsConstantAccumulator) {
   const uint32_t vb = wf->vgpr_alloc().base;
   constexpr uint32_t S0 = 0, S1 = 16, ACC = 32;
 
-  amdgpu::observe_wmma_fast_path_reads(*f.cu, vb + S0, vb + S1, vb + ACC, /*M=*/16, /*N=*/16,
-                                       /*K=*/32, /*data_bits=*/16, /*acc_bits=*/32,
-                                       /*const_acc=*/0, wf->wf_size());
+  amdgpu::observe_wmma_fast_path_reads</*M=*/16, /*N=*/16, /*K=*/32>(
+      *f.cu, vb + S0, vb + S1, vb + ACC, /*data_bits=*/16, /*acc_bits=*/32,
+      /*const_acc=*/0, wf->wf_size());
 
   expect_vgpr_read_set(vgpr_read_events(*plugin), vb,
                        {S0 + 0, S0 + 1, S0 + 2, S0 + 3, S0 + 4, S0 + 5, S0 + 6, S0 + 7, S1 + 0,
@@ -2757,7 +2757,7 @@ TEST(ExecutionPluginTest, MfmaSnapshotsReadBeforeFullWaveWritesAndSkipConstantAc
        }},
       {"fp8 chunked", 8, 4,
        [](ComputeUnitCore &cu, uint32_t d, uint32_t a, uint32_t b, uint32_t c, uint32_t acc) {
-         exec_f32(cu, 16, 16, 128, 1, 8, d, a, b, c, extract_fp8, extract_fp8, acc);
+         exec_f32<16, 16, 128, 1>(cu, 8, d, a, b, c, extract_fp8, extract_fp8, acc);
        }},
       {"i8", 4, 4,
        [](ComputeUnitCore &cu, uint32_t d, uint32_t a, uint32_t b, uint32_t c, uint32_t acc) {
@@ -2852,20 +2852,24 @@ TEST(ExecutionPluginTest, MfmaSnapshotObservationsMatchForcedScalar) {
     for (const auto &[k, bits] : {std::pair{1u, 32u}, std::pair{2u, 16u}, std::pair{4u, 16u}})
       for (uint32_t cbsz = 0; cbsz <= 4; ++cbsz)
         for (uint32_t blgp = 0; blgp < 8; ++blgp)
-          cases.push_back({std::format("f32 4x4x{}x16 acc={} cbsz={} blgp={}", k, acc, cbsz, blgp),
-                           [=](ComputeUnitCore &cu, uint32_t vb) {
-                             if (bits == 32)
-                               exec_f32(cu, 4, 4, k, 16, 32, vb + D, vb + A, vb + B, vb + C,
-                                        extract_f32, extract_f32, acc, cbsz, 1, blgp);
-                             else
-                               exec_f32(cu, 4, 4, k, 16, 16, vb + D, vb + A, vb + B, vb + C,
-                                        extract_bf16, extract_bf16, acc, cbsz, 1, blgp);
-                           }});
+          cases.push_back(
+              {std::format("f32 4x4x{}x16 acc={} cbsz={} blgp={}", k, acc, cbsz, blgp),
+               [=](ComputeUnitCore &cu, uint32_t vb) {
+                 if (bits == 32)
+                   exec_f32<4, 4, 1, 16>(cu, 32, vb + D, vb + A, vb + B, vb + C, extract_f32,
+                                         extract_f32, acc, cbsz, 1, blgp);
+                 else if (k == 2)
+                   exec_f32<4, 4, 2, 16>(cu, 16, vb + D, vb + A, vb + B, vb + C, extract_bf16,
+                                         extract_bf16, acc, cbsz, 1, blgp);
+                 else
+                   exec_f32<4, 4, 4, 16>(cu, 16, vb + D, vb + A, vb + B, vb + C, extract_bf16,
+                                         extract_bf16, acc, cbsz, 1, blgp);
+               }});
     // Four blocks of 4x4 outputs use only lanes 0-15 of each result register.
     cases.push_back({std::format("f32 4x4x4x4 acc={}", acc),
                      [=](ComputeUnitCore &cu, uint32_t vb) {
-                       exec_f32(cu, 4, 4, 4, 4, 32, vb + D, vb + A, vb + B, vb + C, extract_f32,
-                                extract_f32, acc);
+                       exec_f32<4, 4, 4, 4>(cu, 32, vb + D, vb + A, vb + B, vb + C, extract_f32,
+                                            extract_f32, acc);
                      },
                      /*uses_snapshot=*/false});
     for (uint32_t m : {16u, 32u})
@@ -2876,8 +2880,12 @@ TEST(ExecutionPluginTest, MfmaSnapshotObservationsMatchForcedScalar) {
                [=](ComputeUnitCore &cu, uint32_t vb) {
                  ASSERT_TRUE(dispatch_matrix_fmt_pair(
                      a_fmt, b_fmt, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
-                       exec_f32_mixed(cu, m, m, m == 16 ? 128 : 64, 1, a_bits, b_bits, vb + D,
-                                      vb + A, vb + B, vb + C, ea, eb, acc);
+                       if (m == 16)
+                         exec_f32_mixed<16, 16, 128, 1>(cu, a_bits, b_bits, vb + D, vb + A, vb + B,
+                                                        vb + C, ea, eb, acc);
+                       else
+                         exec_f32_mixed<32, 32, 64, 1>(cu, a_bits, b_bits, vb + D, vb + A, vb + B,
+                                                       vb + C, ea, eb, acc);
                      }));
                }});
   }
