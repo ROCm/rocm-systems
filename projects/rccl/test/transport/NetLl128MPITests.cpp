@@ -46,6 +46,7 @@ namespace
 // 16 MiB of bf16, the size that hung.
 constexpr size_t   kCount      = size_t{8} << 20;
 constexpr int      kIterations = 2000;
+constexpr int      kInFlight   = 32;
 constexpr auto     kTimeout    = std::chrono::seconds(120);
 constexpr uint16_t kBf16One    = 0x3f80;
 constexpr uint16_t kBf16Inf    = 0x7f80;
@@ -95,17 +96,46 @@ bool allRanks(bool local)
 class NetLl128MPITest : public MPITestBase
 {
 protected:
-    // Destroying the communicator would wait on the hung kernels, so every rank aborts it if any rank timed out.
-    bool drainOrAbort()
+    // Runs `iterations` AllReduces and waits for them. Behind a hung op the stream fills up and a kernel launch
+    // blocks the host, so at most kInFlight ops are queued. Destroying the communicator would wait on the hung
+    // kernels, so every rank aborts it if any rank timed out.
+    bool runAllReduce(const void* send, void* recv, int iterations)
     {
-        const auto deadline = std::chrono::steady_clock::now() + kTimeout;
-        hipError_t status;
-        while((status = hipStreamQuery(getActiveStream())) == hipErrorNotReady
-              && std::chrono::steady_clock::now() < deadline)
+        hipStream_t stream   = getActiveStream();
+        const auto  deadline = std::chrono::steady_clock::now() + kTimeout;
+        auto        wait     = [&](auto query)
         {
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            hipError_t status;
+            while((status = query()) == hipErrorNotReady && std::chrono::steady_clock::now() < deadline)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            return status == hipSuccess;
+        };
+
+        std::vector<hipEvent_t> events(kInFlight, nullptr);
+        bool                    ok = true;
+        for(hipEvent_t& event : events)
+        {
+            ok = ok && hipEventCreateWithFlags(&event, hipEventDisableTiming) == hipSuccess;
         }
-        if(allRanks(status == hipSuccess))
+        for(int i = 0; ok && i < iterations; ++i)
+        {
+            hipEvent_t event = events[i % kInFlight];
+            ok = (i < kInFlight || wait([&] { return hipEventQuery(event); }))
+                 && ncclAllReduce(send, recv, kCount, ncclBfloat16, ncclSum, test_comm_, stream) == ncclSuccess
+                 && hipEventRecord(event, stream) == hipSuccess;
+        }
+        ok = ok && wait([&] { return hipStreamQuery(stream); });
+        for(hipEvent_t event : events)
+        {
+            if(event != nullptr)
+            {
+                (void)hipEventDestroy(event);
+            }
+        }
+
+        if(allRanks(ok))
         {
             return true;
         }
@@ -125,8 +155,6 @@ TEST_F(NetLl128MPITest, RingAllReduceCompletesWithEveryHopOnNet)
     MPIHelpers::MpiEnvGuard proto("NCCL_PROTO", "LL128");
 
     ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
-    ncclComm_t  comm   = getActiveCommunicator();
-    hipStream_t stream = getActiveStream();
 
     void* send = nullptr;
     void* recv = nullptr;
@@ -140,31 +168,20 @@ TEST_F(NetLl128MPITest, RingAllReduceCompletesWithEveryHopOnNet)
                   hipMemcpy(send, host.data(), kCount * sizeof(uint16_t), hipMemcpyHostToDevice));
 
     // Ring connections are made by the first collective.
-    ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(send, recv, kCount, ncclBfloat16, ncclSum, comm, stream));
-    ASSERT_MPI_TRUE(drainOrAbort());
-    if(!allRanks(ringHopsOnGdrNet(comm)))
+    ASSERT_MPI_TRUE(runAllReduce(send, recv, 1));
+    if(!allRanks(ringHopsOnGdrNet(getActiveCommunicator())))
     {
         GTEST_SKIP() << "A ring hop is not on NET with GPU Direct RDMA: run this test in its own process, on "
                         "hosts with an RDMA NIC";
     }
 
-    for(int i = 0; i < kIterations; ++i)
-    {
-        ASSERT_MPI_EQ(ncclSuccess,
-                      ncclAllReduce(send, recv, kCount, ncclBfloat16, ncclSum, comm, stream));
-    }
-    ASSERT_MPI_TRUE(drainOrAbort());
+    ASSERT_MPI_TRUE(runAllReduce(send, recv, kIterations));
     size_t mismatches = countMismatches(recv, bf16Bits(static_cast<float>(MPIEnvironment::world_size)));
     EXPECT_EQ(size_t{0}, mismatches) << "out of place, rank " << MPIEnvironment::world_rank;
     ASSERT_MPI_TRUE(mismatches == 0);
 
     // Keep the in-place ops: out-of-place ops alone did not reproduce the hang.
-    for(int i = 0; i < kIterations; ++i)
-    {
-        ASSERT_MPI_EQ(ncclSuccess,
-                      ncclAllReduce(recv, recv, kCount, ncclBfloat16, ncclSum, comm, stream));
-    }
-    ASSERT_MPI_TRUE(drainOrAbort());
+    ASSERT_MPI_TRUE(runAllReduce(recv, recv, kIterations));
     // Each in-place sum multiplies every element by the rank count, so the result saturates at +inf.
     mismatches = countMismatches(recv, kBf16Inf);
     EXPECT_EQ(size_t{0}, mismatches) << "in place, rank " << MPIEnvironment::world_rank;
