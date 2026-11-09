@@ -20,6 +20,7 @@
 #include <list>
 #include <map>
 #include <unordered_map>
+#include <unordered_set>
 #include <memory>
 #include <limits>
 #define CL_MEM_FOLLOW_USER_NUMA_POLICY (1u << 31)
@@ -245,6 +246,7 @@ class Memory : public amd::RuntimeObject {
   Memory(const Memory&);
 
   std::recursive_mutex lockMemoryOps_;  //!< Lock to serialize memory operations
+  std::unique_ptr<std::unordered_set<const Device*>> explicitVmmAccess_;
   std::set<Memory*> subBuffers_;  //!< List of all subbuffers for this memory object
   device::Memory* svmBase_;       //!< svmBase allocation for MGPU case
   size_t alignment_ = 0;          //!< alignment for allocation address
@@ -297,6 +299,19 @@ class Memory : public amd::RuntimeObject {
 
   //! Returns the memory lock object
   std::recursive_mutex& lockMemoryOps() { return lockMemoryOps_; }
+
+  void recordExplicitVmmAccess(const Device* dev) {
+    std::scoped_lock lock(lockMemoryOps_);
+    if (!explicitVmmAccess_) {
+      explicitVmmAccess_ = std::make_unique<std::unordered_set<const Device*>>();
+    }
+    explicitVmmAccess_->insert(dev);
+  }
+
+  bool hasExplicitVmmAccess(const Device* dev) {
+    std::scoped_lock lock(lockMemoryOps_);
+    return explicitVmmAccess_ && explicitVmmAccess_->find(dev) != explicitVmmAccess_->end();
+  }
 
   //! Adds a view into the list
   void addSubBuffer(Memory* item);

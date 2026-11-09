@@ -2024,6 +2024,9 @@ class Device : public RuntimeObject {
 
   bool disableP2P(amd::Device* ptrDev);
 
+  //! Returns whether this device permits \a peer to access its memory.
+  bool isPeerAccessEnabled(const amd::Device* peer) const;
+
   /**
    * @copydoc amd::Context::hostFree
    */

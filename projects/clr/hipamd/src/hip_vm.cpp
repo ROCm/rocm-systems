@@ -551,6 +551,21 @@ hipError_t hipMemSetAccess(void* ptr, size_t size, const hipMemAccessDesc* desc,
                                  numaNode)) {
       HIP_RETURN(hipErrorInvalidValue);
     }
+    if (accessLocationType == hipMemLocationTypeDevice) {
+      uintptr_t cursor = reinterpret_cast<uintptr_t>(ptr);
+      size_t remaining = size;
+      while (remaining != 0) {
+        size_t offset = 0;
+        amd::Memory* mapped = amd::MemObjMap::FindMemObj(reinterpret_cast<void*>(cursor), &offset);
+        if (mapped == nullptr || offset >= mapped->getSize()) {
+          HIP_RETURN(hipErrorInvalidValue);
+        }
+        mapped->recordExplicitVmmAccess(accessDev);
+        const size_t chunk = std::min(remaining, mapped->getSize() - offset);
+        cursor += chunk;
+        remaining -= chunk;
+      }
+    }
   }
 
   HIP_RETURN(hipSuccess);

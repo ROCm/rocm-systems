@@ -522,22 +522,39 @@ bool IsHtoHMemcpyValid(void* dst, const void* src, hipMemcpyKind kind) {
 // ================================================================================================
 hipError_t ihipMemcpy_validate_memory(amd::Device& device, amd::Memory* memObj, size_t sizeBytes,
                                       size_t offset, bool read_write) {
-  // Reject inaccessible VMM mappings before submitting the copy.
-  if (!memObj->ValidateMemAccess(device, read_write)) {
-    return hipErrorInvalidValue;
-  }
-
-  // If the mem object is a VMM sub buffer (subbuffer has parent set),
-  // then use parent's size for validation.
   if (memObj->parent() && (memObj->getMemFlags() & CL_MEM_VA_RANGE_AMD)) {
-    memObj = memObj->parent();
+    // A copy may span several physical allocations mapped into one VA range.
+    // Grant/check access on every mapped segment before submitting the copy.
+    amd::Memory* reservation = memObj->parent();
+    const uintptr_t base = reinterpret_cast<uintptr_t>(memObj->getSvmPtr());
+    const uintptr_t start = base + offset;
+    const uintptr_t reservation_base = reinterpret_cast<uintptr_t>(reservation->getSvmPtr());
+    if (start < base || start < reservation_base ||
+        start - reservation_base > reservation->getSize() ||
+        sizeBytes > reservation->getSize() - (start - reservation_base)) {
+      return hipErrorInvalidValue;
+    }
+    uintptr_t cursor = start;
+    size_t remaining = sizeBytes;
+    while (remaining != 0) {
+      size_t segment_offset = 0;
+      amd::Memory* segment =
+          amd::MemObjMap::FindMemObj(reinterpret_cast<void*>(cursor), &segment_offset);
+      if (segment == nullptr || segment->parent() != reservation ||
+          segment_offset >= segment->getSize() || !segment->ValidateMemAccess(device, read_write)) {
+        return hipErrorInvalidValue;
+      }
+      const size_t chunk = std::min(remaining, segment->getSize() - segment_offset);
+      remaining -= chunk;
+      cursor += chunk;
+    }
+    return hipSuccess;
   }
 
-  // Size validation
   if (offset > memObj->getSize() || sizeBytes > (memObj->getSize() - offset)) {
     return hipErrorInvalidValue;
   }
-  return hipSuccess;
+  return memObj->ValidateMemAccess(device, read_write) ? hipSuccess : hipErrorInvalidValue;
 }
 
 // ================================================================================================

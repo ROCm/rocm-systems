@@ -1189,6 +1189,15 @@ bool Device::disableP2P(amd::Device* ptrDev) {
   return true;
 }
 
+bool Device::isPeerAccessEnabled(const amd::Device* peer) const {
+  if (peer == nullptr) {
+    return false;
+  }
+  std::scoped_lock lock(lockP2P_);
+  return std::find(enabled_p2p_devices_.cbegin(), enabled_p2p_devices_.cend(), peer) !=
+         enabled_p2p_devices_.cend();
+}
+
 bool Device::UpdateStackSize(uint64_t stackSize) {
   if (stackSize > maxStackSize_) {
     return false;

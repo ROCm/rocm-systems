@@ -55,6 +55,7 @@
 #include <iostream>
 #include <iomanip>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <thread>
 #include <vector>
@@ -2955,20 +2956,65 @@ bool Device::GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const {
 
 // ================================================================================================
 bool Device::ValidateMemAccess(amd::Memory& mem, bool read_write) const {
-  VmmAccess access = VmmAccess::kNone;
-  if (!GetMemAccess(mem.getSvmPtr(), &access)) {
+  auto has_access = [read_write](VmmAccess access) {
+    return read_write ? (access == VmmAccess::kReadWrite)
+                      : (access == VmmAccess::kReadWrite || access == VmmAccess::kReadOnly);
+  };
+
+  void* va_addr = mem.getSvmPtr();
+
+  // Query without logging: "permissions never set for this agent" is the
+  // expected pre-grant state for a peer mapping, not an error.
+  hsa_access_permission_t perms = HSA_ACCESS_PERMISSION_NONE;
+  if ((Hsa::vmem_get_access(va_addr, &perms, getBackendDevice()) == HSA_STATUS_SUCCESS) &&
+      has_access(static_cast<VmmAccess>(perms))) {
+    return true;
+  }
+
+  // The owner of a mapped VMM range is the physical allocation recorded in
+  // phys_mem_obj; Memory::parent() is the VA reservation object, which is not
+  // device-owned.
+  amd::Memory* phys = mem.getUserData().phys_mem_obj;
+  amd::Device* owner = (phys != nullptr) ? phys->GetDeviceById() : mem.GetDeviceById();
+
+  // Serialize grants so a concurrent read grant cannot downgrade a write grant.
+  static std::mutex grant_lock;
+  std::lock_guard<std::mutex> lock(grant_lock);
+  perms = HSA_ACCESS_PERMISSION_NONE;
+  if ((Hsa::vmem_get_access(va_addr, &perms, getBackendDevice()) == HSA_STATUS_SUCCESS) &&
+      has_access(static_cast<VmmAccess>(perms))) {
+    return true;
+  }
+
+  // An explicit hipMemSetAccess permission takes precedence over peer enable.
+  if (mem.hasExplicitVmmAccess(this)) {
     return false;
   }
-  if (read_write) {
-    return access == VmmAccess::kReadWrite;
+
+  // hipDeviceEnablePeerAccess() updates regular allocations through
+  // hsa_amd_agents_allow_access, but VMM mappings need an explicit per-agent
+  // hsa_amd_vmem_set_access() descriptor. Grant the current device access
+  // lazily here so a peer copy over VMM memory actually transfers data instead
+  // of silently succeeding with zero bytes copied.
+  if (!owner->isPeerAccessEnabled(this)) {
+    return false;
   }
-  return access == VmmAccess::kReadWrite || access == VmmAccess::kReadOnly;
+
+  const VmmAccess required = read_write ? VmmAccess::kReadWrite : VmmAccess::kReadOnly;
+  if (!const_cast<Device*>(this)->SetMemAccess(va_addr, mem.getSize(), required,
+                                               VmmLocationType::kDevice)) {
+    return false;
+  }
+
+  perms = HSA_ACCESS_PERMISSION_NONE;
+  return (Hsa::vmem_get_access(va_addr, &perms, getBackendDevice()) == HSA_STATUS_SUCCESS) &&
+         has_access(static_cast<VmmAccess>(perms));
 }
 
 // ================================================================================================
 amd::Device::VmmExportStatus Device::ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags,
-                                                void* shareableHandle,
-                                                amd::Memory::HandleType handle_type) {
+                                                              void* shareableHandle,
+                                                              amd::Memory::HandleType handle_type) {
   hsa_status_t hsa_status = HSA_STATUS_SUCCESS;
   hsa_amd_vmem_alloc_handle_t hsa_vmem_handle{};
   hsa_vmem_handle.handle = amd_mem_obj.getUserData().hsa_handle;
