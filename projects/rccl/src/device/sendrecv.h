@@ -19,8 +19,11 @@
 //                       gfx1250 when NCCL_P2P_LL128_ENABLE=1 (SendRecv 4 GPU/node
 //                       windows from 0 through the nRanks cap, or the threshold path
 //                       on other rank counts). Default ENABLE=-1 does not launch it.
-// The host picks the variant via ncclDevFuncId_P2p(useLL128); the per-op work->{send,recv}
-// ProtoLL bit only means "this op is latency-bound", not which LL-family protocol.
+//   UserRegMode == 2 -> latency-bound ops flagged work->{send,recv}Nan use the NaN-flag
+//                       protocol, the rest legacy LL. Launched when a float AlltoAll runs
+//                       under NCCL_PROTO=NaN, intra-node.
+// The host picks the variant via ncclDevFuncId_P2p(); the per-op work->{send,recv}
+// ProtoLL bit only means "this op is not SIMPLE", not which protocol it is.
 template <typename T, typename RedOp>
 struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE> {
   static_assert(sizeof(T) == 1, "SendRecv only works on single byte types T.");
@@ -61,6 +64,40 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
       prims.directRecv(cursor, n);
       cursor += n;
     } while (cursor < bytes);
+  }
+
+  // NaN-flag transfers are typed by the width the arrival test reads: U = half
+  // covers f16, bf16 and f32 (every all-ones dword of real data would be a NaN),
+  // U = double tests only the high dword of each element. The host keeps
+  // partitions and chunks multiples of 8 bytes, so U never splits an element.
+  template <typename U>
+  __device__ void runSendNaN(int tid, int tn, int group, struct ncclDevWorkP2p* work) {
+    size_t count = work->sendBytes / sizeof(U);
+    size_t chunk = u32fp8Decode(work->sendChunkSize_u32fp8) / sizeof(U);
+    Primitives<U, FuncSum<U>, FanAsymmetric<0, 1>, /*Direct=*/0, ProtoNaN, 1> prims(
+      tid, tn, nullptr, &work->sendRank, work->sendAddr, nullptr, /*redOpArg=*/0, group, work->sendConnIndex,
+      work->sendConnIndex, nullptr, work);
+    size_t cursor = 0;
+    do {
+      int n = min(chunk, count - cursor);
+      prims.send(cursor, n);
+      cursor += n;
+    } while (cursor < count);
+  }
+
+  template <typename U>
+  __device__ void runRecvNaN(int tid, int tn, int group, struct ncclDevWorkP2p* work) {
+    size_t count = work->recvBytes / sizeof(U);
+    size_t chunk = u32fp8Decode(work->recvChunkSize_u32fp8) / sizeof(U);
+    Primitives<U, FuncSum<U>, FanAsymmetric<1, 0>, /*Direct=*/0, ProtoNaN, 1> prims(
+      tid, tn, &work->recvRank, nullptr, nullptr, work->recvAddr, /*redOpArg=*/0, group, work->recvConnIndex,
+      work->recvConnIndex, nullptr, work);
+    size_t cursor = 0;
+    do {
+      int n = min(chunk, count - cursor);
+      prims.recv(cursor, n);
+      cursor += n;
+    } while (cursor < count);
   }
 
 #if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__) && (!defined(__gfx1250__) && !defined(__gfx1250_strict__))
@@ -186,7 +223,11 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
 #endif
   } else if (isSend) {
     if (work->sendProtoLL) {
-      if constexpr (UserRegMode == 1) {
+      if constexpr (UserRegMode == 2) {
+        if (!work->sendNan) runSend<ProtoLL>(subtid, subtn, group, work);
+        else if (work->sendNanF64) runSendNaN<double>(subtid, subtn, group, work);
+        else runSendNaN<half>(subtid, subtn, group, work);
+      } else if constexpr (UserRegMode == 1) {
         runSend<ProtoLL128>(subtid, subtn, group, work);
       } else {
         runSend<ProtoLL>(subtid, subtn, group, work);
@@ -204,7 +245,11 @@ struct RunWorkBatch<ncclFuncSendRecv, T, RedOp, NCCL_ALGO_RING, NCCL_PROTO_SIMPL
     }
   } else {
     if (work->recvProtoLL) {
-      if constexpr (UserRegMode == 1) {
+      if constexpr (UserRegMode == 2) {
+        if (!work->recvNan) runRecv<ProtoLL>(subtid, subtn, group, work);
+        else if (work->recvNanF64) runRecvNaN<double>(subtid, subtn, group, work);
+        else runRecvNaN<half>(subtid, subtn, group, work);
+      } else if constexpr (UserRegMode == 1) {
         runRecv<ProtoLL128>(subtid, subtn, group, work);
       } else {
         runRecv<ProtoLL>(subtid, subtn, group, work);

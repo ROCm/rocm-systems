@@ -47,9 +47,14 @@ ncclResult_t ncclTuningInit(struct ncclComm* comm) {
 
   NCCLCHECKGOTO(ncclTunerPluginLoad(comm), ret, fail);
   if (comm->tuner) {
+    // The plugin ABI is frozen at NCCL_NUM_PROTOCOLS_V5 columns, so hand it a v7
+    // view rather than the wider internal struct.
+    ncclTunerConstants_v7_t v7Constants;
+    ncclTunerConstantsToV7(&v7Constants, &comm->tuningContext.tuningConstants);
     NCCLCHECKGOTO(comm->tuner->init(&comm->tunerContext, comm->commHash, comm->nRanks, comm->nNodes, ncclDebugLog,
-                                    &comm->nvlDomainInfo, &comm->tuningContext.tuningConstants),
+                                    &comm->nvlDomainInfo, &v7Constants),
                   ret, fail);
+    ncclTunerConstantsFromV7(&comm->tuningContext.tuningConstants, &v7Constants);
   }
 
   NCCLCHECKGOTO(ncclTuningCostModelInit(comm), ret, fail);

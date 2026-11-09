@@ -51,7 +51,9 @@ static ncclResult_t fillCollTuningInput(struct ncclComm* comm, struct ncclRawTas
   // Treat an AllGather as in-place when each rank sends from its own receive slice.
   in->inPlace = in->func == ncclFuncAllGather &&
                 ncclAllGatherIsInPlace(raw->sendbuff, raw->recvbuff, comm->rank, raw->count * userElementSize);
-  if (in->func == ncclFuncAllGather || in->func == ncclFuncBroadcast || in->func == ncclFuncAlltoAll) {
+  // NaN AllGather is a typed float kernel. Broadcast and AlltoAll stay int8.
+  if ((in->func == ncclFuncAllGather && !rcclNanProtoForcedFor(comm->nNodes, comm->nRanks, in->datatype)) ||
+      in->func == ncclFuncBroadcast || in->func == ncclFuncAlltoAll) {
     in->count *= userElementSize;
     in->datatype = ncclInt8;
     in->countMax = in->count;
