@@ -192,8 +192,8 @@ __global__ void ddaBroadcastFabricLL128TwoShot(
         break;
       if (elt > 0)
         ddaLL128StoreRegs<int8_t>(recvbuff + dOff, vr, elt, lane, flagLane);
-      //ddaLL128ClearWire(const_cast<uint64_t*>(myGather) +
-      //  s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, lane);
+      ddaLL128ClearWire(const_cast<uint64_t*>(myGather) +
+        s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, lane);
     }
     } // if (peer != root) -- O8 guard
   }
