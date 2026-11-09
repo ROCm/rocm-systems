@@ -73,6 +73,12 @@ union enabled_metrics
         std::uint32_t mem_clock            : 1;  // current_uclk (MHz)
     } bits;
     std::uint32_t value = 0;
+
+    template <typename Archive>
+    void serialize(Archive& archive)
+    {
+        archive(value);
+    }
 };
 
 // Socket power: prefer the instantaneous "current" reading, falling back to the

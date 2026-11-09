@@ -186,6 +186,11 @@ ThreadTraceAQLPacketFactory::ThreadTraceAQLPacketFactory(
     if(params.no_detail_simd)
         aql_params.push_back({HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_OCCUPANCY_MODE, {1}});
 
+    if(params.exec_mask_trace)
+        aql_params.push_back({static_cast<hsa_ven_amd_aqlprofile_parameter_name_t>(
+                                  AQLPROFILE_ATT_PARAMETER_NAME_EXEC_MASK_TRACE),
+                              {1}});
+
     if(perf_ctrl != 0 && !params.perfcounters.empty())
     {
         for(const auto& perf_counter : params.perfcounters)
@@ -324,6 +329,11 @@ spm_construct_packet(const rocprofiler_agent_id_t                     agent_id,
                 params.push_back({AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL, param.value});
                 params.push_back({AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_MODE,
                                   AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_SCLK});
+                break;
+            case ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_REFCLK_CYCLES:
+                params.push_back({AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL, param.value});
+                params.push_back({AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_MODE,
+                                  AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_REFCLK});
                 break;
             case ROCPROFILER_SPM_PARAMETER_TYPE_NONE:
             case ROCPROFILER_SPM_PARAMETER_TYPE_LAST:

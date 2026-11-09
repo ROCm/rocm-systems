@@ -50,7 +50,6 @@ import argparse
 import concurrent.futures
 import json
 import os
-from pathlib import Path
 import re
 import shutil
 import stat
@@ -58,6 +57,7 @@ import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 
 try:
     import yaml
@@ -144,8 +144,7 @@ def git(directory: Path, *args: str) -> bytes:
         proc = subprocess.run(
             ["git", *args],
             cwd=directory,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             timeout=60,
             check=False,
         )
@@ -484,9 +483,7 @@ def select_edits(
                 if build_directory
                 else result.directory
             )
-            edits = tuple(
-                sorted(set(decode_replacement(item, directory) for item in raw))
-            )
+            edits = tuple(sorted({decode_replacement(item, directory) for item in raw}))
             if not all(in_scope(edit, states, diff_only) for edit in edits):
                 counts["outside_scope"] += 1
                 continue
@@ -773,7 +770,10 @@ def main(argv: list[str] | None = None) -> int:
             # Revalidate all editable snapshots before starting the next analysis.
             for path, state in states.items():
                 ensure_unchanged(path, state.data)
-            with tempfile.TemporaryDirectory(prefix="clang-tidy-fixes-") as temporary:
+            # Not merged: parenthesized `with` needs Python 3.9+ and this targets py38
+            with tempfile.TemporaryDirectory(  # noqa: SIM117
+                prefix="clang-tidy-fixes-"
+            ) as temporary:
                 with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
                     futures = [
                         pool.submit(

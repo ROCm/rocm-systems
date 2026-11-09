@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <concepts>
 #include <fstream>
 #include <iostream>
 #include <set>
@@ -185,10 +186,6 @@ resolve_schema_config(const nlohmann::json& config)
     {
         const auto& tracing = config["tracing"];
         resolve_enabled(result, tracing, "enabled", env_vars::TRACE);
-        if(tracing.contains("legacy"))
-        {
-            resolve_enabled(result, tracing["legacy"], "enabled", env_vars::TRACE_LEGACY);
-        }
         resolve_value(result, tracing, "buffer_size_kb",
                       env_vars::PERFETTO_BUFFER_SIZE_KB);
         resolve_value(result, tracing, "fill_policy", env_vars::PERFETTO_FILL_POLICY);
@@ -698,78 +695,15 @@ expand_gpu_metrics(const std::string& metrics_str)
     return result;
 }
 
-std::optional<int>
-safe_stoi(const std::string& s)
-{
-    if(s.empty())
-    {
-        return std::nullopt;
-    }
-    int        value  = 0;
-    const auto result = std::from_chars(s.data(), s.data() + s.size(), value);
-    // Reject partial parses (e.g. "12.5" -> 12) by checking entire string was consumed
-    if(result.ec != std::errc{} || result.ptr != s.data() + s.size())
-    {
-        return std::nullopt;
-    }
-    return value;
-}
+template <typename Number>
+concept json_number = std::integral<Number> || std::floating_point<Number>;
 
-std::optional<double>
-safe_stod(const std::string& s)
-{
-    if(s.empty())
-    {
-        return std::nullopt;
-    }
-    double value = 0.0;
-#if defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L
-    // Prefer from_chars: locale-independent, zero-allocation
-    const auto result = std::from_chars(s.data(), s.data() + s.size(), value);
-    if(result.ec != std::errc{} || result.ptr != s.data() + s.size())
-    {
-        return std::nullopt;
-    }
-#else
-    // Fallback for older compilers (GCC <11, Clang <16).
-    // Note: std::stod is locale-sensitive -assumes C/POSIX locale.
-    try
-    {
-        std::size_t pos = 0;
-        value           = std::stod(s, &pos);
-        if(pos != s.size()) return std::nullopt;
-    } catch(const std::exception&)
-    {
-        return std::nullopt;
-    }
-#endif
-    return value;
-}
-
+template <json_number Number>
 void
-set_json_int(nlohmann::json& target, const std::string& value)
+set_json_number(nlohmann::json& target, const std::string& value)
 {
-    if(auto n = safe_stoi(value))
-    {
-        target = *n;
-    }
-    else
-    {
-        target = value;
-    }
-}
-
-void
-set_json_double(nlohmann::json& target, const std::string& value)
-{
-    if(auto n = safe_stod(value))
-    {
-        target = *n;
-    }
-    else
-    {
-        target = value;
-    }
+    const auto number = utility::string::safe_from_chars<Number>(value);
+    target = number.is_ok() ? nlohmann::json(number.value()) : nlohmann::json(value);
 }
 
 bool
@@ -833,7 +767,8 @@ export_int_value(nlohmann::json&                           config,
     auto const it = env_map.find(std::string{ env_var });
     if(it != env_map.end())
     {
-        set_json_int(config[json_path_section][json_path_key]["value"], it->second);
+        set_json_number<int>(config[json_path_section][json_path_key]["value"],
+                             it->second);
     }
 }
 
@@ -846,7 +781,8 @@ export_double_value(nlohmann::json&                           config,
     auto const it = env_map.find(std::string{ env_var });
     if(it != env_map.end())
     {
-        set_json_double(config[json_path_section][json_path_key]["value"], it->second);
+        set_json_number<double>(config[json_path_section][json_path_key]["value"],
+                                it->second);
     }
 }
 
@@ -868,7 +804,6 @@ export_tracing_section(nlohmann::json&                           config,
                        const std::map<std::string, std::string>& env_map)
 {
     export_section_enabled(config, env_map, env_vars::TRACE, "tracing");
-    export_enabled(config, env_map, env_vars::TRACE_LEGACY, "tracing", "legacy");
     export_int_value(config, env_map, env_vars::PERFETTO_BUFFER_SIZE_KB, "tracing",
                      "buffer_size_kb");
     export_string_value(config, env_map, env_vars::PERFETTO_FILL_POLICY, "tracing",
@@ -933,15 +868,15 @@ export_domain_gpu(nlohmann::json&                           config,
     }
     if(auto freq = lookup(env_map, env_vars::AMD_SMI_FREQ))
     {
-        set_json_int(gpu["sampling_rate_hz"]["value"], *freq);
+        set_json_number<int>(gpu["sampling_rate_hz"]["value"], *freq);
     }
     if(auto freq = lookup(env_map, env_vars::PROCESS_SAMPLING_FREQ))
     {
-        set_json_double(gpu["process_sampling_freq"]["value"], *freq);
+        set_json_number<double>(gpu["process_sampling_freq"]["value"], *freq);
     }
     if(auto dur = lookup(env_map, env_vars::PROCESS_SAMPLING_DURATION))
     {
-        set_json_double(gpu["process_sampling_duration"]["value"], *dur);
+        set_json_number<double>(gpu["process_sampling_duration"]["value"], *dur);
     }
     if(auto v = lookup(env_map, env_vars::USE_AINIC))
     {

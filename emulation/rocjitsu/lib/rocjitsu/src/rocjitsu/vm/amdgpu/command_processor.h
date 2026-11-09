@@ -21,6 +21,7 @@
 /// href="https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/conceptual/command-processor.html">ROCm
 /// CP documentation</a>
 
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/vm/amdgpu/aql/aql_packet_processor.h"
 #include "rocjitsu/vm/amdgpu/aql/aql_packet_types.h"
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
@@ -36,10 +37,13 @@
 #include "rocjitsu/vm/amdgpu/workgroup_key.h"
 
 #include "simdojo/sim/component.h"
+#include "util/diagnostic.h"
+#include "util/result.h"
 
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cassert>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -47,6 +51,7 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <shared_mutex>
 #include <string>
 #include <thread>
@@ -61,7 +66,6 @@
 #endif
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
 #include "hsa/hsa.h"
 RJ_DIAGNOSTIC_POP
 
@@ -112,6 +116,22 @@ public:
   /// not participate in numeric VMID routing.
   void set_gpu_vm(GpuVm *gpu_vm, AddressSpaceHandle default_address_space = {});
   [[nodiscard]] AddressSpaceHandle default_address_space() const { return default_address_space_; }
+
+  /// @brief Replace the GWS store across this CP's drained compute units.
+  /// @details The caller serializes topology changes. Preflights every CU and
+  /// returns failure if any active CU would change stores, before
+  /// updating any CU or the CP's shared owner.
+  /// @param emit_error Destination for failure diagnostics.
+  util::Result set_gws_device(std::shared_ptr<GwsDevice> device,
+                              util::DiagnosticEmitter emit_error = {}) {
+    for (ComputeUnitCore *cu : cus_)
+      if (!cu->can_set_gws_device(device))
+        return emit_error.emit() << "Cannot replace GWS store with active waves or workgroups";
+    for (ComputeUnitCore *cu : cus_)
+      (void)cu->set_gws_device(device);
+    gws_device_ = std::move(device);
+    return util::Result::success();
+  }
   void add_l2_cache(L2Cache *l2) {
     // Idempotent: the config-driven builder and the Xcd full constructor may
     // both attempt to register the same L2. Avoid duplicate entries so cache
@@ -166,6 +186,12 @@ public:
   /// @param peers All XCD command processors of the SoC, in XCD index order.
   void set_xcd_topology(uint32_t rank, std::vector<CommandProcessor *> peers);
 
+  /// @brief Return the physical XCC rank, or nullopt before topology assignment.
+  /// @details This is the rank from set_xcd_topology(), independent of scratch overrides.
+  std::optional<uint32_t> xcc_id() const {
+    return xcd_peers_.empty() ? std::nullopt : std::optional<uint32_t>(xcd_rank_);
+  }
+
   [[nodiscard]] uint64_t register_pm4_queue(Pm4QueueConfig config);
   [[nodiscard]] QueuePrepareCloseStatus
   prepare_unregister_pm4_queue_registration(uint64_t registration_id) noexcept;
@@ -186,6 +212,10 @@ public:
   void set_scratch_xcc_layout_for_test(uint32_t xcc_id, uint32_t xcc_count);
 
   /// @brief Register a queue and return its CP-local lifetime identity.
+  /// @details Invalid layout and VM capability publication failures return zero.
+  /// Exceptions from VM capability access propagate before queue publication.
+  /// Monitor thread-creation errors propagate after rolling back owner and peer
+  /// registrations. Replicas do not repeat capability publication.
   uint64_t register_queue(ComputeQueueConfig queue);
 
   /// @brief Remove only the queue incarnation identified by @p registration_id.
@@ -203,7 +233,7 @@ public:
   /// @brief Cancel DRM work before its frontend revokes the process VM binding.
   void unregister_drm_queues(uint32_t process_id);
   void unregister_drm_queue(uint32_t queue_id, uint32_t process_id);
-  /// @brief Enqueue a DRM submission; return false if the queue has faulted.
+  /// @brief Enqueue a DRM submission; return false if its queue is missing, non-DRM, or faulted.
   [[nodiscard]] bool submit_pm4(uint32_t queue_id, uint32_t process_id, Pm4Submission submission);
   /// @brief Remove the queue currently identified by the legacy routing tuple.
   void unregister_queue(uint32_t queue_id, uint32_t process_id);
@@ -224,7 +254,14 @@ public:
   void accept_fanout_shard(DispatchEntry shard);
   [[nodiscard]] bool update_queue(uint32_t queue_id, uint32_t process_id, uint64_t ring_base_va,
                                   uint32_t ring_size, uint32_t queue_percentage);
-  /// @brief Reconfigure only the queue incarnation identified by @p registration_id.
+  /// @brief Reconfigure a queue incarnation and propagate its state to fanout replicas.
+  /// @details A fanout owner must be called without any CP queue mutex already held:
+  /// peer propagation acquires peer locks after releasing the owner's mutation lock.
+  /// Busy reflects entries/publications on the ring owner; replicas never access
+  /// packet slots or publish its consumer pointer.
+  [[nodiscard]] QueueReconfigureStatus
+  reconfigure_queue_registration(uint64_t registration_id, const QueueReconfigureRequest &request);
+  /// @brief Compatibility update returning true for Applied or Disabled.
   [[nodiscard]] bool update_queue_registration(uint64_t registration_id, uint64_t ring_base_va,
                                                uint32_t ring_size, uint32_t queue_percentage);
   void set_queue_debug_suspended(uint32_t queue_id, uint32_t process_id, bool suspended,
@@ -249,7 +286,11 @@ public:
 
   void add_spi(ShaderProcessorInput *spi) { spis_.push_back(spi); }
 
+  /// @brief Attach a CU during topology construction, before execution starts.
+  /// @details The CU must be compatible with the CP's GWS store.
   void add_compute_unit(ComputeUnitCore *cu) {
+    assert((!gws_device_ || cu->can_set_gws_device(gws_device_)) &&
+           "CU must accept the CP's GWS store during construction");
     auto port_id = static_cast<simdojo::PortID>(dispatch_ports_.size());
     auto port = std::make_unique<simdojo::Port>("req_" + cu->name(), port_id, this,
                                                 simdojo::PortDirection::OUT,
@@ -265,6 +306,10 @@ public:
     cu->set_pool_driven(dispatch_threads_ > 1);
     cu->set_command_processor(this);
     cu->set_gpu_vm(gpu_vm_);
+    // Forward the shared GWS store (like set_gpu_vm above) so a CU added after the
+    // store was wired joins it too; null leaves the CU on its private default store.
+    if (gws_device_)
+      cu->set_gws_device(gws_device_);
     cu->set_on_idle([this]() { on_cu_idle(); });
     cu->set_on_pool_ready([this, cu]() { on_cu_pool_ready(cu); });
     on_cu_pool_ready(cu);
@@ -278,12 +323,29 @@ public:
   /// @brief WG completion notification from CU refcount reaching zero.
   void notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id);
 
+  /// @brief Cancel all replicas of a failed queue, then request engine exit.
+  /// @details Thread-safe publication; callbacks and cancellation execute on
+  /// each CP's engine partition after its current worker batch rejoins.
+  /// Used by GWS failures. Exit is requested only after every replica
+  /// acknowledges cancellation, so callers must not request it themselves.
+  void notify_execution_failure(uint32_t queue_id, uint32_t process_id, std::string reason);
+
   /// @brief Terminate a dispatch after a CU observes a non-retryable VM fault.
   /// @details The caller must have released the CU wave-state lock. The owning
   /// queue and every fan-out replica are halted, resident work is cancelled,
   /// and normal dispatch completion is suppressed.
   void notify_dispatch_vm_fault(uint32_t queue_id, uint32_t process_id, uint64_t dispatch_id,
                                 VmAccessOutcome outcome);
+
+  /// @brief Fault a dispatch's queue without publishing successful completion.
+  /// @details Called outside the CU wave-state lock. Cancels all outstanding
+  /// dispatches, including earlier admitted work, and every fan-out replica.
+  /// This method does not request engine exit or wait for peer cancellation.
+  /// A fatal instruction caller requests exit before this notification;
+  /// shutdown() then drains any peer cancellations still pending. Failure
+  /// sources that require engine termination must request it themselves, or
+  /// use notify_execution_failure() to wait for all replica acknowledgements.
+  void notify_dispatch_failure(uint32_t queue_id, uint32_t process_id, uint64_t dispatch_id);
 
   void set_workgroup_id_offset(uint32_t offset) { workgroup_id_offset_ = offset; }
 
@@ -424,6 +486,8 @@ public:
   const std::vector<ComputeUnitCore *> &compute_units() const { return cus_; }
 
   /// @brief Return LDS targets selected by a cluster multicast mask.
+  /// @details Resolve targets only after all cluster peers have been admitted.
+  /// Dispatch plugin callbacks may run before cluster admission is complete.
   std::vector<ClusterLdsTarget> cluster_lds_targets(uint32_t dispatch_id, uint32_t wg_id,
                                                     uint32_t mcast_mask);
 
@@ -438,6 +502,11 @@ public:
   [[nodiscard]] bool doorbell_monitor_running_for_test() {
     std::lock_guard<std::mutex> lock(doorbell_thread_mutex_);
     return doorbell_running_;
+  }
+  /// @brief Fail the next monitor startup with a thread-creation error.
+  void fail_next_doorbell_monitor_start_for_testing() {
+    std::lock_guard<std::mutex> lock(doorbell_thread_mutex_);
+    fail_next_doorbell_monitor_start_for_testing_ = true;
   }
   /// @brief Test-only check that teardown reaped the monitor's thread handle.
   [[nodiscard]] bool doorbell_monitor_joinable_for_test() {
@@ -512,6 +581,7 @@ public:
 private:
   friend class CommandProcessorCloseTestAccess;
   friend class CommandProcessorPlacementTestAccess;
+  friend class CommandProcessorCacheTestAccess;
 
   class QueueRegistrationTransaction {
   public:
@@ -535,7 +605,7 @@ private:
 
   struct KernelDescriptorReadResult {
     VmAccessOutcome outcome;
-    rocr::llvm::amdhsa::kernel_descriptor_t descriptor{};
+    rocjitsu::amdhsa::kernel_descriptor_t descriptor{};
   };
 
   class ClusterWorkgroupPlacement;
@@ -577,10 +647,19 @@ private:
   /// @brief Fetch AQL packets from a single AQL queue.
   void fetch_from_queue(ComputeQueueRecord &queue, simdojo::Tick now);
 
-  /// @brief Coarse writeback+invalidate of the GPU data caches (L1 K$/V$ + L2).
+  /// @brief Write back L2 and invalidate scalar, vector and instruction caches.
   /// @details Scalar and vector L1 are write-through and only need
-  /// invalidation. Dirty L2 data is published under the owning VMID.
-  void flush_gpu_caches();
+  /// invalidation. A supplied address space limits L2 maintenance to its VMID;
+  /// otherwise all L2 lines are published under their owning VMIDs. If the supplied
+  /// address space cannot be looked up, returns Faulted without touching any cache.
+  /// Otherwise, returns the first incomplete L2 outcome after visiting every L2
+  /// and invalidating L1/I$.
+  /// Successful writebacks remain published; failed dirty lines remain for retry.
+  /// Requires hw_queue_mutex_ and joined CU workers. CU maintenance takes each
+  /// CU's mutex to serialize with runtime snapshots, without delivering
+  /// notifications that could re-enter the CP and invalidate queue or dispatch
+  /// references.
+  [[nodiscard]] VmAccessOutcome flush_gpu_caches(AddressSpaceHandle address_space = {});
 
   /// @brief Ask ROCr to provision scratch while leaving the head packet unconsumed.
   [[nodiscard]] AqlAdmissionResult request_dynamic_scratch(ComputeQueueRecord &queue,
@@ -595,6 +674,9 @@ private:
                                                          uint64_t packet_index,
                                                          bool alternate) const;
 
+  /// @brief Invalidate the admitted AQL slot before publishing its consumer cursor.
+  [[nodiscard]] VmAccessOutcome retire_aql_packet(ComputeQueueRecord &queue,
+                                                  const DispatchEntry &entry);
   /// @brief Hold retirement until ROCr acknowledges a use-once scratch reclaim.
   [[nodiscard]] VmAccessOutcome gate_dispatch_retirement(ComputeQueueRecord &queue,
                                                          const DispatchEntry &entry);
@@ -622,10 +704,14 @@ private:
   [[nodiscard]] DispatchWorkgroupResult dispatch_workgroups(DispatchEntry &entry);
   [[nodiscard]] bool execute_aql_pm4(ComputeQueueRecord &queue, DispatchEntry &entry,
                                      simdojo::Tick now);
+  void cancel_queue_dispatches(const ComputeQueueRecord &queue);
   void fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchState &qs);
+  void complete_failed_queue(ComputeQueueRecord &queue);
+  void drain_pending_queue_failures();
   void fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs, simdojo::Tick now);
-  void dispatch_pm4(const ComputeQueueRecord &queue, Pm4DispatchState &qs,
-                    const std::array<uint32_t, 4> &dimensions);
+  util::Result dispatch_pm4(const ComputeQueueRecord &queue, Pm4DispatchState &qs,
+                            const std::array<uint32_t, 4> &dimensions,
+                            util::DiagnosticEmitter emit_error);
   void service_command_streams(simdojo::Tick now);
   void service_pm4_ring(ComputeQueueRecord &queue, simdojo::Tick now);
 
@@ -671,7 +757,7 @@ private:
     uint32_t queue_id = 0;
     uint32_t process_id = 0;
     uint64_t dispatch_id = 0;
-    VmAccessOutcome outcome;
+    std::function<void()> on_cancelled = {};
   };
   void accept_dispatch_fault(DispatchFaultNotification fault);
   void drain_dispatch_fault_inbox();
@@ -736,8 +822,13 @@ private:
   /// transient retry is recorded on only the affected ComputeQueueRecord so unrelated
   /// queues remain runnable.
   [[nodiscard]] bool drain_completions();
-  bool fault_dispatch_local(uint32_t queue_id, uint32_t process_id, uint64_t dispatch_id,
-                            VmAccessOutcome outcome);
+  /// @brief Cancel all outstanding work on the identified queue.
+  /// @details A supplied failed_dispatch_id must be admitted or still in transit;
+  /// otherwise a delayed fault is ignored so it cannot cancel a reused queue.
+  /// std::nullopt skips this identity check. The ID does not limit cancellation
+  /// to one dispatch: either accepted form cancels the queue's outstanding work.
+  bool fault_queue_local(uint32_t queue_id, uint32_t process_id,
+                         std::optional<uint32_t> failed_dispatch_id = std::nullopt);
   /// @brief Drop cluster LDS pins collected under cluster_placements_mutex_.
   /// @warning Must run with that lock released; it reaches the CUs' wave-state lock.
   void release_cluster_lds_pins(const std::vector<std::pair<ComputeUnitCore *, uint64_t>> &unpin);
@@ -812,6 +903,9 @@ private:
   std::unordered_map<uint32_t, DispatchLaunchMetadata> dispatch_launch_metadata_;
   std::vector<ComputeUnitCore *> cus_;
   std::vector<simdojo::Port *> dispatch_ports_;
+  /// XCD/SoC store forwarded to every attached CU. Null on a standalone CP,
+  /// whose CUs retain their private defaults.
+  std::shared_ptr<GwsDevice> gws_device_;
 
   uint32_t xcd_rank_ = 0;
   // Every XCD's CP in XCD index order, including this one. Empty until the SoC
@@ -863,6 +957,16 @@ private:
   std::atomic<uint64_t> dispatched_workgroups_{0};
   simdojo::ExecMode exec_mode_ = simdojo::ExecMode::FUNCTIONAL;
   uint32_t dispatch_threads_ = 1;
+  /// Protected by hw_queue_mutex_; true only while the CU batch owns its workers.
+  bool dispatch_workers_active_ = false;
+  /// Queue registration IDs whose waves are cancelled but whose cache maintenance
+  /// and submission callbacks must wait for the CU worker join. Protected by
+  /// hw_queue_mutex_; queue_structure_mutex_ keeps their registrations alive.
+  /// The normal batch drains these IDs before releasing the shared structure lock.
+  /// If CpuDispatchPool::run() rethrows a host exception after joining, the handler
+  /// unwinds before that drain. Close, a later queue failure, or shutdown must then
+  /// finish the deferred work before releasing the queue's submission backing.
+  std::vector<uint64_t> pending_queue_failures_;
   CpuDispatchPool *shared_dispatch_pool_ = nullptr;
   std::unique_ptr<CpuDispatchPool> local_dispatch_pool_;
   std::vector<ComputeUnitCore *> active_cu_scratch_;
@@ -1026,6 +1130,7 @@ private:
   std::mutex doorbell_thread_mutex_;
   // True while the lifecycle owns a running monitor.
   bool doorbell_running_ = false;
+  bool fail_next_doorbell_monitor_start_for_testing_ = false;
   std::jthread doorbell_thread_;
 };
 

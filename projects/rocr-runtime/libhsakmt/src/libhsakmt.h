@@ -45,6 +45,7 @@ extern pthread_mutex_t hsakmt_mutex;
 extern bool hsakmt_is_dgpu;
 extern int hsakmt_zfb_support;
 extern int hsakmt_pm4_target_xcc;
+extern int hsakmt_force_mbind;
 
 extern HsaVersionInfo hsakmt_kfd_version_info;
 extern HsaKFDContext hsakmt_primary_kfd_ctx;
@@ -194,7 +195,8 @@ enum full_gfx_versions {
 	GFX_VERSION_GFX1151		= 0x0B0501,
 	GFX_VERSION_GFX1200		= 0x0C0000,
 	GFX_VERSION_GFX1201		= 0x0C0001,
-	GFX_VERSION_GFX1250		= 0x0C0500
+	GFX_VERSION_GFX1250		= 0x0C0500,
+	GFX_VERSION_GFX1251		= 0x0C0501,
 };
 
 struct hsa_gfxip_table {

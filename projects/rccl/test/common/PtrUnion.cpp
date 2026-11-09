@@ -28,14 +28,8 @@ namespace RcclUnitTesting
       case ncclFloat32:   { using T = float;        ACTION; break; }           \
       case ncclFloat64:   { using T = double;       ACTION; break; }           \
       case ncclBfloat16:  { using T = hip_bfloat16; ACTION; break; }           \
-      /* fp8 is never dispatched here: callers route it to the dedicated byte-based    */ \
-      /* kernels (rccl_float8/rccl_bfloat8 alias different types in the host vs device */ \
-      /* compile pass, so a templated kernel would be instantiated with a mismatched  */ \
-      /* mangling). Fail loudly rather than instantiate the templated form for fp8.   */ \
-      case ncclFloat8e4m3:                                                     \
-      case ncclFloat8e5m2:                                                     \
-        TEST_ERROR("fp8 must use the byte-based kernel path (%d)", dt);        \
-        return TEST_FAIL;                                                      \
+      case ncclFloat8e4m3:{ using T = Fp8E4m3Bits;  ACTION; break; }           \
+      case ncclFloat8e5m2:{ using T = Fp8E5m2Bits;  ACTION; break; }           \
       default: TEST_ERROR("Unsupported datatype (%d)", dt); return TEST_FAIL;  \
     }
 
@@ -57,18 +51,9 @@ namespace RcclUnitTesting
     if (numElements == 0) return TEST_SUCCESS;
     bool const fp8 = (dataType == ncclFloat8e4m3 || dataType == ncclFloat8e5m2);
     size_t const threads = kDeviceKernelBlockSize, blocks = (numElements + threads - 1) / threads;
-    if (fp8)
-    {
-      hipLaunchKernelGGL(FillKernelFp8, dim3(blocks), dim3(threads), 0, 0,
-                         (uint8_t*)this->ptr, numElements, globalRank, startIdx,
-                         dataType == ncclFloat8e5m2);
-    }
-    else
-    {
-      RCCL_UT_DTYPE_DISPATCH(dataType,
-        hipLaunchKernelGGL(FillKernel<T>, dim3(blocks), dim3(threads), 0, 0,
-                           (T*)this->ptr, numElements, globalRank, startIdx, fp8));
-    }
+    RCCL_UT_DTYPE_DISPATCH(dataType,
+      hipLaunchKernelGGL(FillKernel<T>, dim3(blocks), dim3(threads), 0, 0,
+                         (T*)this->ptr, numElements, globalRank, startIdx, fp8));
     CHECK_HIP(hipGetLastError());
     CHECK_HIP(hipDeviceSynchronize());
     return TEST_SUCCESS;
@@ -78,7 +63,8 @@ namespace RcclUnitTesting
                                   size_t         const numElements,
                                   void*          const actualGpu,
                                   void*          const expectedGpu,
-                                  size_t&              mismatches)
+                                  size_t&              mismatches,
+                                  bool           const verbose)
   {
     // Wiring telltale: fire once per process so runs visibly confirm the device
     // validate path is actually exercised (guards against a silent host fallback).
@@ -106,7 +92,7 @@ namespace RcclUnitTesting
 
     // dScratch[0] = mismatch count, dScratch[1] = first (lowest) divergent index.
     unsigned long long* dScratch = nullptr;
-    double*             dVals    = nullptr;   // [expected, actual] float view at first divergent index
+    double*             dVals    = nullptr;   // [expected, actual]
     unsigned long long* dBits    = nullptr;   // [expected, actual] exact raw bits (integer dtypes)
     CHECK_HIP(hipMalloc(&dScratch, 2 * sizeof(unsigned long long))); gScratch.p = dScratch;
     CHECK_HIP(hipMalloc(&dVals,    2 * sizeof(double)));             gVals.p    = dVals;
@@ -114,22 +100,11 @@ namespace RcclUnitTesting
     unsigned long long hInit[2] = { 0ULL, (unsigned long long)numElements };  // idx init = n (= "none")
     CHECK_HIP(hipMemcpy(dScratch, hInit, sizeof(hInit), hipMemcpyHostToDevice));
 
-    bool const fp8    = (dataType == ncclFloat8e4m3 || dataType == ncclFloat8e5m2);
-    bool const isE5m2 = (dataType == ncclFloat8e5m2);
     size_t const threads = kDeviceKernelBlockSize, blocks = (numElements + threads - 1) / threads;
-    if (fp8)
-    {
-      hipLaunchKernelGGL(MismatchReduceFp8, dim3(blocks), dim3(threads), 0, 0,
-                         (const uint8_t*)actualGpu, (const uint8_t*)expectedGpu, numElements,
-                         dScratch, dScratch + 1, isE5m2);
-    }
-    else
-    {
-      RCCL_UT_DTYPE_DISPATCH(dataType,
-        hipLaunchKernelGGL(MismatchReduceKernel<T>, dim3(blocks), dim3(threads), 0, 0,
-                           (const T*)actualGpu, (const T*)expectedGpu, numElements,
-                           dScratch, dScratch + 1));
-    }
+    RCCL_UT_DTYPE_DISPATCH(dataType,
+      hipLaunchKernelGGL(MismatchReduceKernel<T>, dim3(blocks), dim3(threads), 0, 0,
+                         (const T*)actualGpu, (const T*)expectedGpu, numElements,
+                         dScratch, dScratch + 1));
     CHECK_HIP(hipGetLastError());
     unsigned long long hOut[2] = { 0ULL, 0ULL };
     CHECK_HIP(hipMemcpy(hOut, dScratch, sizeof(hOut), hipMemcpyDeviceToHost));
@@ -138,28 +113,19 @@ namespace RcclUnitTesting
     // Diagnostic: with the host buffering path retired this is the only value dump, so
     // report the first divergent index with its expected/actual (dtype-aware). The test
     // pattern's values are small, so a double captures every dtype exactly.
-    if (hOut[0] != 0 && hOut[1] < (unsigned long long)numElements)
+    if (verbose && hOut[0] != 0 && hOut[1] < (unsigned long long)numElements)
     {
       size_t const fi = (size_t)hOut[1];
-      if (fp8)
-      {
-        hipLaunchKernelGGL(CaptureElemFp8, dim3(1), dim3(1), 0, 0,
-                           (const uint8_t*)actualGpu, (const uint8_t*)expectedGpu, fi, dVals, isE5m2);
-      }
-      else
-      {
-        RCCL_UT_DTYPE_DISPATCH(dataType,
-          hipLaunchKernelGGL(CaptureElemKernel<T>, dim3(1), dim3(1), 0, 0,
-                             (const T*)actualGpu, (const T*)expectedGpu, fi, dVals, dBits));
-      }
+      RCCL_UT_DTYPE_DISPATCH(dataType,
+        hipLaunchKernelGGL(CaptureElemKernel<T>, dim3(1), dim3(1), 0, 0,
+                           (const T*)actualGpu, (const T*)expectedGpu, fi, dVals, dBits));
       CHECK_HIP(hipGetLastError());
-      double             hVals[2] = { 0.0, 0.0 };    // float view [expected, actual]
+      double             hVals[2] = { 0.0, 0.0 };    // [expected, actual]
       unsigned long long hBits[2] = { 0ULL, 0ULL };  // exact raw bits [expected, actual]
       CHECK_HIP(hipMemcpy(hVals, dVals, sizeof(hVals), hipMemcpyDeviceToHost));
       CHECK_HIP(hipMemcpy(hBits, dBits, sizeof(hBits), hipMemcpyDeviceToHost));
       // Mirror the host IsEqual verbose format exactly, per dtype: integers print from the
-      // exact bits (no double rounding), floats from the double view. fp8's dBits are unused
-      // (it fills only dVals via CaptureElemFp8) and prints through the float default.
+      // exact bits (no double rounding), floats (including fp8) from the double view.
       switch (dataType)
       {
       case ncclInt8:
@@ -182,7 +148,8 @@ namespace RcclUnitTesting
                    (unsigned long long)hBits[0], (unsigned long long)hBits[1], fi); break;
       default:  // floating-point dtypes (fp16/fp32/fp64/bf16/fp8) — exact via double
         TEST_ERROR("Expected output: %f.  Actual output: %f at index %zu",
-                   hVals[0], hVals[1], fi); break;
+                   hVals[0], hVals[1], fi);
+        break;
       }
     }
     return TEST_SUCCESS;
@@ -209,16 +176,12 @@ namespace RcclUnitTesting
     size_t const threads = kDeviceKernelBlockSize, blocks = (numElements + threads - 1) / threads;
     if (fp8)
     {
-      hipLaunchKernelGGL(ExpectedReduceFp8, dim3(blocks), dim3(threads), 0, 0,
-                         (uint8_t*)this->ptr, numElements, totalRanks, tempOp, isAvg,
-                         dataType == ncclFloat8e5m2, startIdx);
+      TEST_ERROR("FP8 reductions are validated by the verifiable generator, not the reduced pattern");
+      return TEST_FAIL;
     }
-    else
-    {
-      RCCL_UT_DTYPE_DISPATCH(dataType,
-        hipLaunchKernelGGL(ExpectedReduceKernel<T>, dim3(blocks), dim3(threads), 0, 0,
-                           (T*)this->ptr, numElements, totalRanks, fp8, tempOp, isAvg, startIdx));
-    }
+    RCCL_UT_DTYPE_DISPATCH(dataType,
+      hipLaunchKernelGGL(ExpectedReduceKernel<T>, dim3(blocks), dim3(threads), 0, 0,
+                         (T*)this->ptr, numElements, totalRanks, fp8, tempOp, isAvg, startIdx));
     CHECK_HIP(hipGetLastError());
     CHECK_HIP(hipDeviceSynchronize());
     return TEST_SUCCESS;
@@ -262,6 +225,11 @@ namespace RcclUnitTesting
   {
     if (numBytes)
     {
+      if (userRegistered && useManagedMem)
+      {
+        TEST_ERROR("Managed memory cannot be combined with ncclMemAlloc (user-registered) allocation");
+        return TEST_FAIL;
+      }
       if (userRegistered)
       {
         if (ncclMemAlloc((void**)&I1, numBytes) != ncclSuccess)
@@ -567,11 +535,11 @@ namespace RcclUnitTesting
       case ncclUint32:  isMatch = (U4[idx] == expected.U4[idx]); break;
       case ncclInt64:   isMatch = (I8[idx] == expected.I8[idx]); break;
       case ncclUint64:  isMatch = (U8[idx] == expected.U8[idx]); break;
-      case ncclFloat8e4m3: isMatch = (fabs(float(F1[idx]) - float(expected.F1[idx])) < 9e-2); break;
+      case ncclFloat8e4m3: isMatch = Matches(F1[idx], expected.F1[idx]); break;
       case ncclFloat16: isMatch = (fabs(__half2float(F2[idx]) - __half2float(expected.F2[idx])) < 9e-2); break;
       case ncclFloat32: isMatch = (fabs(F4[idx] - expected.F4[idx]) < 1e-5); break;
       case ncclFloat64: isMatch = (fabs(F8[idx] - expected.F8[idx]) < 1e-12); break;
-      case ncclFloat8e5m2: isMatch = (fabs(float(B1[idx]) - float(expected.B1[idx])) < 9e-2); break;
+      case ncclFloat8e5m2: isMatch = Matches(B1[idx], expected.B1[idx]); break;
       case ncclBfloat16: isMatch = (fabs((float)B2[idx] - (float)expected.B2[idx]) < 9e-2); break;
       default:
         TEST_ERROR("Unsupported datatype");

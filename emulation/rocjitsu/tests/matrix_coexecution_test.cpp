@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "async_mma_test_util.h"
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "mma_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
@@ -28,6 +29,8 @@
 #include <array>
 #include <barrier>
 #include <bit>
+#include <chrono>
+#include <iostream>
 #include <memory>
 #include <semaphore>
 #include <set>
@@ -215,7 +218,9 @@ TEST(MatrixCoexecutionTest, IssueMatchesSerialForLargeShapesAndHazards) {
       config.num_wf_slots = 1;
       config.sgprs_per_wf = 106;
       config.vgprs_per_wf = 128;
-      auto cu = amdgpu::ComputeUnitCore::create("matrix_test_cu", config, &memory, &l2);
+      std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+      ASSERT_NO_FATAL_FAILURE(
+          rocjitsu::test::initialize_compute_unit(cu, "matrix_test_cu", config, &memory, &l2));
       auto *wf = cu->dispatch_wf(0, pc, 106, 128);
       ASSERT_NE(wf, nullptr);
       wf->set_exec(0xFFFFFFFFu);
@@ -290,9 +295,12 @@ TEST(MatrixCoexecutionTest, WiderBatchChecksNonAdjacentDependenciesAndAllocatesB
         config.num_wf_slots = 1;
         config.sgprs_per_wf = 106;
         config.vgprs_per_wf = 128;
-        auto cu = amdgpu::ComputeUnitCore::create("wide_cu", config, &memory, &l2,
-                                                  clocked ? simdojo::ExecMode::CLOCKED
-                                                          : simdojo::ExecMode::FUNCTIONAL);
+        std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+        rocjitsu::test::initialize_compute_unit(cu, "wide_cu", config, &memory, &l2,
+                                                clocked ? simdojo::ExecMode::CLOCKED
+                                                        : simdojo::ExecMode::FUNCTIONAL);
+        if (!cu)
+          return std::vector<uint32_t>{};
         auto *wf = cu->dispatch_wf(0, pc, 106, 128);
         wf->set_exec(0xFFFFFFFFu);
         const uint32_t base = wf->vgpr_alloc().base;
@@ -329,7 +337,10 @@ TEST(MatrixCoexecutionTest, WiderBatchChecksNonAdjacentDependenciesAndAllocatesB
         return output;
       };
       const auto expected = execute(false);
-      EXPECT_EQ(execute(true), expected);
+      ASSERT_FALSE(::testing::Test::HasFatalFailure());
+      const auto actual = execute(true);
+      ASSERT_FALSE(::testing::Test::HasFatalFailure());
+      EXPECT_EQ(actual, expected);
     }
   }
 }
@@ -385,7 +396,10 @@ TEST(AsyncInstructionQueueTest, InterleavedMemoryMmaAndRegisterReuseMatchSerial)
     config.num_wf_slots = 1;
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 128;
-    auto cu = amdgpu::ComputeUnitCore::create("interleave_cu", config, &memory, &l2);
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    rocjitsu::test::initialize_compute_unit(cu, "interleave_cu", config, &memory, &l2);
+    if (!cu)
+      return std::vector<uint32_t>{};
     auto *wf = cu->dispatch_wf(0, pc, 106, 128);
     wf->set_exec(0xFFFFFFFFu);
     const auto base = wf->vgpr_alloc().base;
@@ -429,7 +443,11 @@ TEST(AsyncInstructionQueueTest, InterleavedMemoryMmaAndRegisterReuseMatchSerial)
   };
   const auto submitted = amdgpu::async_execution::stats.mma;
   const auto retired = amdgpu::async_execution::stats.retired_mma;
-  EXPECT_EQ(execute(true), execute(false));
+  const auto actual = execute(true);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
+  const auto expected = execute(false);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
+  EXPECT_EQ(actual, expected);
   const auto offloads = amdgpu::async_execution::stats.mma - submitted;
   EXPECT_EQ(amdgpu::async_execution::stats.retired_mma - retired, offloads);
   EXPECT_GT(offloads, 0u);
@@ -618,6 +636,88 @@ TEST(MatrixCoexecutionTest, SharedPoolClaimsAndReclaimsCapacityAcrossBitmapWords
   }
 }
 
+TEST(MatrixCoexecutionTest, SharedPoolMakesProgressUnderConcurrentHandoffs) {
+  constexpr size_t kIssuerCount = 8;
+  struct alignas(64) Progress {
+    std::atomic<uint64_t> completed{0};
+    uint64_t offloads = 0;
+    bool matched = true;
+  };
+  std::array<Progress, kIssuerCount> progress;
+  Instruction increment("increment",
+                        [](Instruction &, void *opaque) { ++*static_cast<uint64_t *>(opaque); });
+  mc::SharedPool pool(progress.size());
+  ASSERT_TRUE(mc::helpers_enabled());
+  std::atomic<bool> stop{false};
+  std::barrier started(progress.size() + 1);
+  std::array<std::thread, kIssuerCount> issuers;
+  for (size_t i = 0; i != issuers.size(); ++i)
+    issuers[i] = std::thread([&, i] {
+      uint64_t value = 0;
+      uint64_t completed = 0;
+      started.arrive_and_wait();
+      while (!stop.load(std::memory_order_relaxed)) {
+        const auto before = value;
+        // Do not add an atomic RMW or other synchronization between submit and
+        // finish: a locked instruction could mask the publication race.
+        const mc::SharedPool::Ticket ticket = pool.submit(increment, &value);
+        if (ticket) {
+          if (pool.finish(ticket))
+            progress[i].matched = false;
+          ++progress[i].offloads;
+        } else {
+          increment.execute(increment, &value);
+        }
+        if (value != before + 1)
+          progress[i].matched = false;
+        if (!progress[i].matched)
+          stop.store(true, std::memory_order_relaxed);
+        progress[i].completed.store(++completed, std::memory_order_relaxed);
+      }
+    });
+
+  started.arrive_and_wait();
+  using Clock = std::chrono::steady_clock;
+  const auto begin = Clock::now();
+  std::array<uint64_t, kIssuerCount> previous{};
+  std::array<Clock::time_point, kIssuerCount> last_progress_time;
+  last_progress_time.fill(begin);
+  while (!stop.load(std::memory_order_relaxed) && Clock::now() - begin < std::chrono::seconds(20)) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    const auto now = Clock::now();
+    for (size_t i = 0; i != progress.size(); ++i) {
+      const auto completed = progress[i].completed.load(std::memory_order_relaxed);
+      if (completed != previous[i]) {
+        previous[i] = completed;
+        last_progress_time[i] = now;
+      } else if (now - last_progress_time[i] >= std::chrono::seconds(6)) {
+        ADD_FAILURE() << "SharedPool issuer " << i << " made no progress for six seconds";
+        std::cerr << "SharedPool handoff progress:";
+        for (const auto &issuer : progress)
+          std::cerr << ' ' << issuer.completed.load(std::memory_order_relaxed);
+        std::cerr << std::endl;
+        stop.store(true, std::memory_order_relaxed);
+        break;
+      }
+    }
+  }
+  stop.store(true, std::memory_order_relaxed);
+  // CTest's external timeout also covers a blocked finish/join and idle-helper
+  // destruction. Do not send recovery notifications that could hide the bug.
+  for (auto &issuer : issuers)
+    issuer.join();
+  uint64_t completed = 0;
+  uint64_t offloads = 0;
+  for (size_t i = 0; i != progress.size(); ++i) {
+    EXPECT_TRUE(progress[i].matched) << "issuer " << i;
+    EXPECT_GT(progress[i].completed.load(std::memory_order_relaxed), 0u) << "issuer " << i;
+    completed += progress[i].completed.load(std::memory_order_relaxed);
+    offloads += progress[i].offloads;
+  }
+  EXPECT_GT(offloads, 0u);
+  std::cout << "SharedPool completed=" << completed << " offloads=" << offloads << std::endl;
+}
+
 class QueueRetirementProbe final : public DynamicInstState {
 public:
   QueueRetirementProbe(std::vector<unsigned> &retired, unsigned id)
@@ -657,10 +757,10 @@ TEST(AsyncInstructionQueueTest, IndependentCompletionReleasesOnlyItsOwnDependenc
   a.writes.set(64);
   b.reads.set(0);
   b.writes.set(96);
-  ASSERT_TRUE(queue.submit(first, &state, a));
+  ASSERT_TRUE(queue.submit(first, &state, a, 0));
   EXPECT_FALSE(first);
   state.started.acquire();
-  EXPECT_TRUE(queue.submit(second, &state, b));
+  EXPECT_TRUE(queue.submit(second, &state, b, 0));
   EXPECT_FALSE(second);
   EXPECT_FALSE(pool.available());
   // This dependency must not join the still-blocked earlier instruction.
@@ -701,15 +801,15 @@ TEST(AsyncInstructionQueueTest, RejectsFullPoolWithoutTakingInstructionOwnership
   second->set_data(std::make_unique<QueueRetirementProbe>(state.retired, 1));
   third->set_data(std::make_unique<QueueRetirementProbe>(state.retired, 2));
   Queue queue(pool);
-  ASSERT_TRUE(queue.submit(first, &state, {}));
+  ASSERT_TRUE(queue.submit(first, &state, {}, 0));
   state.started.acquire();
-  EXPECT_TRUE(queue.submit(second, &state, {}));
+  EXPECT_TRUE(queue.submit(second, &state, {}, 0));
   state.second_done.acquire();
   EXPECT_TRUE(state.retired.empty());
   EXPECT_EQ(queue.size(), 2u);
   EXPECT_FALSE(pool.available());
   auto *retained = third.get();
-  EXPECT_FALSE(queue.submit(third, &state, {}));
+  EXPECT_FALSE(queue.submit(third, &state, {}, 0));
   EXPECT_EQ(third.get(), retained);
   // Synchronous fallback is available even though the first job is blocked.
   third->execute(*third, &state);
@@ -850,7 +950,9 @@ TEST(AsyncInstructionQueueTest, SmallerWmmaAndMultiBlockMfmaMatchSerialAcrossReg
       config.num_wf_slots = 1;
       config.sgprs_per_wf = 106;
       config.vgprs_per_wf = 256;
-      auto cu = amdgpu::ComputeUnitCore::create("extended_matrix_cu", config, &memory, &l2);
+      std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+      ASSERT_NO_FATAL_FAILURE(
+          rocjitsu::test::initialize_compute_unit(cu, "extended_matrix_cu", config, &memory, &l2));
       auto *wf = cu->dispatch_wf(0, pc, 106, 256);
       ASSERT_NE(wf, nullptr);
       const unsigned wave_size = c.mfma ? 64 : 32;

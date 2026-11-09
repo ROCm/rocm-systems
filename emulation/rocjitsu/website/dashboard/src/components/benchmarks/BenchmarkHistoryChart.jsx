@@ -1,305 +1,97 @@
-import { useMemo, useState } from 'react';
+import { fontSizes } from '../../theme/typography';
+import { useMemo } from 'react';
+import useElementWidth from '../../hooks/useElementWidth';
 import { useMediaQuery, useTheme } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import Chart from '../shared/Chart';
-import ChartPointSelector from './ChartPointSelector';
 import { selectBenchmarkSeries } from '../../data/selectors';
+import { selectDaySlots } from '../../data/overviewProjection';
 import { commitTimestampFor } from '../../data/runOrdering';
+import { dayAxisBounds, dayXAxis } from '../../utils/dayAxis';
 import { escapeHtml, formatDuration, formatFullDate, shortSha } from '../../utils/formatters';
-import { chartAreaGradient, chartLineStyle, chartPointStyle } from '../../utils/chartStyles';
-import { chartGapPresentation } from '../../utils/chartGaps';
+import { CHART_GRID_INSETS, chartLineStyle, chartPointStyle, chartPointSize, chartSwatch } from '../../utils/chartStyles';
 import { durationAxisBounds } from '../../utils/durationAxis';
-import { initialZoomWindow, zoomFromEvent, zoomIncludingIndexes, zoomIndexRange } from '../../utils/chartZoom';
+import { targetColor } from '../../theme/targetColors';
 
-const INITIAL_VISIBLE_RUNS = 45;
+// Cards are ~300px wide, so their dots may sit closer than on the full-width trend chart, but still sparse.
+const MIN_CARD_DOT_SPACING = 44;
+const LEFT_PAD_FRACTION = 0.08; // of the visible span
 
-export default function BenchmarkHistoryChart({
-  data,
-  filters,
-  benchmark,
-  height = 370,
-  selectedRunIds = [],
-  onSelectRecord,
-  onOpenRecord,
-  onSelectRun,
-  showDetailsOnClick = false,
-  showPointSelector = false,
-  scrollZoomEnabled = true,
-}) {
+export default function BenchmarkHistoryChart({ data, filters, benchmark, range = 'ALL', height = 370, selectedRunIds = [], onSelectRecord }) {
   const theme = useTheme();
+  const [chartRef, chartWidth] = useElementWidth();
   const compact = useMediaQuery(theme.breakpoints.down('sm'));
-  const viewModel = useMemo(
-    () => selectBenchmarkSeries(data, filters, benchmark.id),
-    [benchmark.id, data, filters],
-  );
+  // Same commit-day layout and axis as Overview's performance trend: one run per day
+  // (every run in 1W), x = commit time; the line connects across days without a measured result.
+  const model = useMemo(() => {
+    const view = selectBenchmarkSeries(data, filters, benchmark.id);
+    const layout = selectDaySlots(data.runs, data.generatedAt, range);
+    const series = view.series.map((row) => {
+      const byRun = new Map(view.runs.map((run, index) => [run, row.points[index]]));
+      return { ...row, points: layout.slots.map((slot) => {
+        const point = slot.run ? byRun.get(slot.run) : null;
+        return point ? { value: [slot.x, point.value], record: point.record } : { value: [slot.x, null] };
+      }) };
+    });
+    series.forEach((row) => { row.measured = row.points.map((point) => ({ value: point.value[1] })); });
+    const firstData = layout.slots.findIndex((slot, index) => slot.run && series.some((row) => row.points[index].record));
+    return { series, layout, slots: layout.slots, bounds: dayAxisBounds(layout, firstData < 0 ? null : firstData) };
+  }, [data, filters, benchmark.id, range]);
+  const viewModel = model;
   const selectedRunIdSet = useMemo(() => new Set(selectedRunIds), [selectedRunIds]);
-  const selectedIndexes = useMemo(() => viewModel.runs
-    .map((run, index) => (selectedRunIdSet.has(run.runId) ? index : -1))
-    .filter((index) => index >= 0), [selectedRunIdSet, viewModel.runs]);
-  const [initialAnchorRunId] = useState(() => selectedRunIds.at(-1) ?? null);
-  const initialAnchorIndex = viewModel.runs.findIndex((run) => run.runId === initialAnchorRunId);
-  const [zoom, setZoom] = useState(() => (
-    zoomIncludingIndexes(
-      initialZoomWindow(viewModel.runs.length, INITIAL_VISIBLE_RUNS, initialAnchorIndex),
-      viewModel.runs.length,
-      selectedIndexes,
-    )
-  ));
-  const displayZoom = zoomIncludingIndexes(zoom, viewModel.runs.length, selectedIndexes);
-  const { startIndex, endIndex } = zoomIndexRange(displayZoom, viewModel.runs.length);
-  const chartValues = viewModel.series.flatMap((series) => (
-    series.points
-      .slice(startIndex, endIndex + 1)
-      .map((point) => point?.value)
-      .filter(Number.isFinite)
-  ));
-  const durationAxis = durationAxisBounds(chartValues);
-  const seriesPresentations = viewModel.series.map((series) => ({
-    ...series,
-    ...chartGapPresentation(series.points),
-  }));
-  const minimumValue = chartValues.length ? Math.min(...chartValues) : 0;
-  const statusMarkerData = seriesPresentations.flatMap((series) => (
-    series.records.flatMap((record, index) => {
-      if (!record || record.test.status === 'completed') return [];
-      const value = series.estimatedValues[index];
-      if (!Number.isFinite(value)) return [];
-      const statusColor = record.test.status === 'failed'
-        ? theme.palette.error.main
-        : theme.palette.warning.main;
-      const selected = selectedRunIdSet.has(record.run.runId);
-      return [{
-        value: [index, value],
-        record,
-        target: series.name,
-        statusPoint: true,
-        selected,
-        symbolSize: selected ? (compact ? 14 : 17) : (compact ? 11 : 14),
-        itemStyle: {
-          ...chartPointStyle(statusColor, theme.palette.background.paper),
-          borderWidth: selected ? 4 : 2,
-          shadowBlur: selected ? 13 : 9,
-          shadowColor: statusColor,
-        },
-        label: {
-          show: true,
-          formatter: record.test.status === 'failed' ? 'Failed' : 'Timeout',
-          position: 'top',
-          color: statusColor,
-          fontSize: 10,
-          fontWeight: 700,
-        },
-      }];
-    })
-  ));
-  const unavailableMarkerData = selectedIndexes.flatMap((index) => {
-    const unavailableTargets = viewModel.series
-      .filter((series) => !series.records[index])
-      .map((series) => series.name);
-    if (unavailableTargets.length === 0) return [];
-    return [{
-      value: [index, minimumValue],
-      run: viewModel.runs[index],
-      unavailableTargets,
-      label: {
-        show: true,
-        formatter: unavailableTargets.length === 1 ? 'N/A' : `N/A · ${unavailableTargets.join(', ')}`,
-        position: 'top',
-        color: theme.palette.text.secondary,
-        fontSize: 10,
-        fontWeight: 700,
-      },
-    }];
-  });
+  const values = viewModel.series.flatMap((series) => series.points.map((point) => point.value[1]).filter(Number.isFinite));
+  const colorFor = (series) => targetColor(theme, series.target);
   const option = {
-    color: viewModel.series.map((series) => series.color),
+    color: viewModel.series.map(colorFor),
     tooltip: {
-      trigger: 'axis',
-      triggerOn: showDetailsOnClick ? 'mousemove|click' : 'mousemove',
-      axisPointer: { type: 'line', lineStyle: { color: theme.palette.text.disabled, type: 'dashed' } },
-      backgroundColor: theme.palette.background.paper,
-      borderColor: theme.palette.divider,
-      textStyle: { color: theme.palette.text.primary },
+      trigger: 'axis', triggerOn: 'mousemove|click', className: 'performance-trend-tooltip',
+      axisPointer: { type: 'line', snap: true, lineStyle: { color: theme.palette.text.secondary, type: 'dotted' } },
       formatter: (parameters) => {
-        const points = (Array.isArray(parameters) ? parameters : [parameters]).filter((point) => (
-          point.data?.record && (point.seriesType === 'line' || point.data.statusPoint)
-        ));
-        if (points.length === 0) return 'No result for this benchmark';
+        const points = (Array.isArray(parameters) ? parameters : [parameters]).filter((point) => point.data?.record && point.seriesType === 'line');
+        if (!points.length) return 'No measured result for this benchmark';
         const run = points[0].data.record.run;
         return [
-          `<strong>Commit ${escapeHtml(shortSha(run))}</strong>`,
-          `Commit name · ${escapeHtml(run.provenance?.commitMessage ?? 'unknown')}`,
-          `Catalog · ${escapeHtml(run.catalogId ?? 'unknown')}`,
-          `Commit time · ${escapeHtml(formatFullDate(commitTimestampFor(run)))}`,
-          `Execution time · ${escapeHtml(formatFullDate(run.timestamp))}`,
-          `Branch · ${escapeHtml(run.branch ?? 'unknown')}`,
-          ...points.map((point) => {
-            const { test } = point.data.record;
-            const target = escapeHtml(point.data.target ?? point.seriesName);
-            return test.status === 'completed'
-              ? `${point.marker}${target}&nbsp;&nbsp;<strong>${formatDuration(test.durationSeconds)}</strong> · Completed`
-              : `${point.marker}${target}&nbsp;&nbsp;<strong>${test.status === 'failed' ? 'Failed' : 'Timeout'}</strong>`;
-          }),
-        ].join('<br/>');
+          `<div><b>Commit ${escapeHtml(shortSha(run))}</b></div>`,
+          `<div>${escapeHtml(formatFullDate(commitTimestampFor(run)))}</div>`,
+          // Hollow "single" points have a paper-colored fill, so the swatch uses the series line color.
+          ...points.map((point) => `<div class="performance-trend-tooltip-row">${chartSwatch(escapeHtml(colorFor(viewModel.series[point.seriesIndex])), point.data.record.test.mode)}${escapeHtml(point.seriesName)} · <b>${formatDuration(point.data.record.test.durationSeconds)}</b></div>`),
+        ].join('');
       },
     },
-    legend: {
-      data: viewModel.series.map((series) => series.name),
-      top: 0,
-      right: 0,
-      textStyle: { color: theme.palette.text.secondary },
-    },
-    grid: { left: 52, right: 18, top: 42, bottom: 58 },
-    xAxis: {
-      type: 'category',
-      name: 'Commit date / commit',
-      nameLocation: 'middle',
-      nameGap: 43,
-      data: viewModel.labels,
-      axisLabel: { color: theme.palette.text.secondary, fontSize: 10, lineHeight: 14, hideOverlap: true },
-      nameTextStyle: { color: theme.palette.text.secondary, fontSize: 11 },
-      axisLine: { lineStyle: { color: theme.palette.divider } },
-    },
+    grid: { ...CHART_GRID_INSETS, top: 24, bottom: 30 },
+    // Extra room on the left so the first point clears the y axis.
+    xAxis: { ...dayXAxis(viewModel.bounds, theme, { leftPad: (viewModel.bounds.lastX - viewModel.bounds.firstX) * LEFT_PAD_FRACTION }), name: 'Date (UTC)', nameLocation: 'middle', nameGap: 18 },
     yAxis: {
-      type: 'value',
-      name: 'Seconds',
-      ...durationAxis,
-      axisLabel: { color: theme.palette.text.secondary },
-      splitLine: { lineStyle: { color: theme.palette.divider, type: 'dashed' } },
+      type: 'value', name: 'Seconds', ...durationAxisBounds(values),
+      nameTextStyle: { color: theme.palette.text.secondary, fontFamily: theme.typography.fontFamily, fontSize: fontSizes.caption },
+      axisLabel: { color: theme.palette.text.secondary, fontFamily: theme.typography.fontFamily, fontSize: fontSizes.caption },
+      axisLine: { show: true, lineStyle: { width: 1, color: theme.palette.dashboard.border } },
+      splitLine: { lineStyle: { color: alpha(theme.palette.dashboard.border, 0.55), width: 1 } },
     },
-    dataZoom: [{ type: 'inside', disabled: !scrollZoomEnabled, ...displayZoom }],
-    series: seriesPresentations.map((series) => ({
-        name: series.name,
-        type: 'line',
-        data: series.points,
-        smooth: 0.18,
-        showSymbol: false,
-        symbol: 'circle',
-        symbolSize: compact ? 4 : 6,
-        connectNulls: false,
-        lineStyle: chartLineStyle(series.color, 2.7),
-        itemStyle: chartPointStyle(series.color, theme.palette.background.paper),
-        areaStyle: { color: chartAreaGradient(series.color, 0.13), opacity: 1 },
-        emphasis: { focus: 'series', scale: 1.6, lineStyle: { width: 3.3 } },
-        z: 3,
-      })).concat(seriesPresentations.flatMap((series) => (
-      series.segments.map((segment, index) => ({
-        name: `${series.name} missed-data bridge ${index + 1}`,
-        type: 'line',
-        data: segment,
-        smooth: 0.18,
-        showSymbol: false,
-        symbol: 'none',
-        connectNulls: false,
-        silent: true,
-        tooltip: { show: false },
-        lineStyle: { ...chartLineStyle(series.color, 2.4), type: 'dotted', opacity: 0.85 },
-        emphasis: { disabled: true },
-        z: 4,
-      }))
-    ))).concat(seriesPresentations.map((series) => ({
-      name: `${series.name} point details`,
-      type: 'scatter',
-      data: series.points,
-      symbolSize: compact ? 18 : 14,
-      itemStyle: { color: 'rgba(0, 0, 0, 0.001)' },
-      emphasis: { scale: false },
-      tooltip: { show: showDetailsOnClick },
-      z: 10,
-    }))).concat(statusMarkerData.length > 0 ? [{
-      name: 'Failed or timed-out test results',
-      type: 'scatter',
-      data: statusMarkerData,
-      symbol: 'diamond',
-      symbolSize: compact ? 11 : 14,
-      clip: false,
-      emphasis: { scale: 1.3 },
-      tooltip: { show: true },
-      z: 11,
-    }] : []).concat(seriesPresentations.map((series) => ({
-      name: `${series.name} selected points`,
-      type: 'scatter',
-      data: series.points.map((point) => (
-        point?.record && selectedRunIdSet.has(point.record.run.runId) ? point : null
-      )),
-      symbol: 'circle',
-      symbolSize: compact ? 9 : 12,
-      clip: false,
-      itemStyle: { ...chartPointStyle(series.color, theme.palette.background.paper), borderWidth: 3 },
-      emphasis: { scale: 1.25 },
-      tooltip: { show: false },
-      z: 12,
-    }))).concat(unavailableMarkerData.length > 0 ? [{
-      name: 'Selected runs unavailable',
-      type: 'scatter',
-      data: unavailableMarkerData,
-      symbol: 'circle',
-      symbolSize: compact ? 9 : 12,
-      clip: false,
-      itemStyle: { ...chartPointStyle(theme.palette.text.disabled, theme.palette.background.paper), borderWidth: 3 },
-      emphasis: { scale: 1.25 },
-      tooltip: { show: false },
-      z: 12,
-    }] : []),
+    series: viewModel.series.map((series) => ({
+      name: series.name, type: 'line', data: series.points, smooth: false,
+      showSymbol: true, symbol: series.mode === 'single' ? 'diamond' : 'circle', symbolSize: (_value, params) => chartPointSize(series.measured, params.dataIndex, series.mode, 'value', chartWidth, MIN_CARD_DOT_SPACING), connectNulls: true,
+      lineStyle: chartLineStyle(colorFor(series), series.mode),
+      itemStyle: chartPointStyle(colorFor(series), theme.palette.background.paper, series.mode),
+      emphasis: { focus: 'series', scale: 1.4 }, z: 3,
+    })).concat(viewModel.series.map((series) => ({
+      name: `${series.name} point details`, type: 'scatter', data: series.points,
+      // Keep the hit area painted for chart input without a visible extra point.
+      symbolSize: compact ? 18 : 14, itemStyle: { color: alpha(theme.palette.primary.main, 0.001) },
+      emphasis: { scale: false }, tooltip: { show: true }, z: 10,
+    }))).concat(viewModel.series.map((series) => ({
+      name: `${series.name} selected points`, type: 'scatter',
+      data: series.points.map((point) => point?.record && selectedRunIdSet.has(point.record.run.runId) ? point : null),
+      symbol: 'circle', symbolSize: compact ? 9 : 11,
+      itemStyle: { ...chartPointStyle(colorFor(series), theme.palette.background.paper, series.mode), borderWidth: 3 }, tooltip: { show: false }, z: 12,
+    }))),
   };
-  const recordOptions = useMemo(() => (showPointSelector ? viewModel.series
-    .flatMap((series) => series.records.map((record, index) => ({ record, index })))
-    .filter(({ record }) => record)
-    .sort((left, right) => right.index - left.index)
-    .map(({ record }) => ({
-      id: `${record.test.target}:${record.run.runId}`,
-      label: `${record.test.target} · ${shortSha(record.run)} · ${record.test.status === 'completed'
-        ? formatDuration(record.test.durationSeconds)
-        : record.test.status}`,
-      record,
-    })) : []), [showPointSelector, viewModel.series]);
-  const chartEvents = useMemo(() => ({
-    click: (parameters) => {
-      if (parameters.componentType === 'series' && parameters.data?.record) {
-        setZoom((current) => zoomIncludingIndexes(
-          current,
-          viewModel.runs.length,
-          selectedIndexes,
-        ));
-        onSelectRecord(parameters.data.record);
-      } else if (parameters.componentType === 'series' && parameters.data?.run) {
-        setZoom((current) => zoomIncludingIndexes(
-          current,
-          viewModel.runs.length,
-          selectedIndexes,
-        ));
-        onSelectRun(parameters.data.run.runId);
-      }
+  const events = {
+    click: (event) => {
+      if (event.componentType === 'series' && event.data?.record) onSelectRecord?.(event.data.record);
     },
-    datazoom: (parameters) => {
-      setZoom((current) => zoomIncludingIndexes(
-        zoomFromEvent(parameters, current),
-        viewModel.runs.length,
-        selectedIndexes,
-      ));
-    },
-  }), [onSelectRecord, onSelectRun, selectedIndexes, viewModel.runs.length]);
-
-  const keyboardHelpId = `benchmark-chart-keyboard-help-${benchmark.id}`;
-
+  };
   return (
-    <>
-      <Chart
-        option={option}
-        height={height}
-        ariaLabel={`${benchmark.name} duration history`}
-        ariaDescribedBy={showPointSelector ? keyboardHelpId : undefined}
-        onEvents={chartEvents}
-      />
-      {showPointSelector && (
-        <ChartPointSelector
-          label={`${benchmark.name} result`}
-          actionLabel={`Open ${benchmark.name} result`}
-          description={`Every point in this chart can also be reached with the ${benchmark.name} result control below it.`}
-          descriptionId={keyboardHelpId}
-          options={recordOptions}
-          onActivate={(choice) => onOpenRecord(choice.record)}
-        />
-      )}
-    </>
+    <div ref={chartRef}><Chart option={option} height={height} ariaLabel={`${benchmark.name} duration history`} onEvents={events} lazyUpdate={false} /></div>
   );
 }

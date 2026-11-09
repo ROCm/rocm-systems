@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2026, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -45,16 +45,16 @@
 #include <algorithm>
 #include <cassert>
 #include <cstring>
+#include <cstdlib>
+#include <utility>
 
+#include "core/inc/amd_aie_agent.h"
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/amd_memory_region.h"
 #include "core/util/os.h"
-
-#include <cstdlib>
-#include <utility>
 #include "core/inc/hsa_internal.h"
 #include "core/util/utils.h"
-#include "inc/hsa_ext_amd.h"
+#include "inc/amd_hsa_kernel_code.h"
 
 #if defined(_WIN32) || defined(_WIN64)
 #include <windows.h>
@@ -251,7 +251,8 @@ public:
        ptr_(nullptr),
        host_ptr_(nullptr),
        size_(0),
-       is_code_(is_code) {}
+       is_code_(is_code),
+       external_(false) {}
  ~RegionMemory() {}
 
  void* Address(size_t offset = 0) const override {
@@ -262,6 +263,7 @@ public:
   bool Allocated() const override
     { return nullptr != ptr_; }
 
+  hsa_status_t Adopt(void* address, size_t size);
   bool Allocate(size_t size, size_t align, bool zero) override;
   bool Copy(size_t offset, const void *src, size_t size) override;
   void Free() override;
@@ -276,18 +278,44 @@ private:
   void *host_ptr_;
   size_t size_;
   bool is_code_;
+  // Device address belongs to the caller. Free releases only the host shadow.
+  bool external_;
 };
 
 const core::MemoryRegion* RegionMemory::AgentLocal(hsa_agent_t agent, bool is_code) {
-  AMD::GpuAgent *amd_agent = (AMD::GpuAgent*)core::Agent::Convert(agent);
-  assert(amd_agent->device_type() == core::Agent::kAmdGpuDevice && "Invalid agent type.");
-  auto agent_local_region =
-      std::find_if(amd_agent->regions().begin(), amd_agent->regions().end(),
-                   [&](const std::shared_ptr<const core::MemoryRegion>& region) {
-                     const AMD::MemoryRegion* amd_region = (const AMD::MemoryRegion*)region.get();
-                     return amd_region->IsLocalMemory() && (!amd_region->fine_grain());
-                   });
-  return agent_local_region == amd_agent->regions().end() ? nullptr : agent_local_region->get();
+  core::Agent* base_agent = core::Agent::Convert(agent);
+
+  switch (base_agent->device_type()) {
+    case core::Agent::kAmdGpuDevice: {
+      // GPU agent: find local, coarse-grain memory region
+      auto gpu_agent = static_cast<AMD::GpuAgent*>(base_agent);
+      auto region_it =
+          std::find_if(gpu_agent->regions().begin(), gpu_agent->regions().end(),
+                       [&](const std::shared_ptr<const core::MemoryRegion>& region) {
+                         auto amd_region = static_cast<const AMD::MemoryRegion*>(region.get());
+                         return amd_region->IsLocalMemory() && (!amd_region->fine_grain());
+                       });
+      return region_it == gpu_agent->regions().end() ? nullptr : region_it->get();
+    }
+    case core::Agent::kAmdAieDevice: {
+      // AIE agent: code goes in the device SVM region (dev heap), data in ordinary system memory.
+      auto aie_agent = static_cast<AMD::AieAgent*>(base_agent);
+      auto region_it = std::find_if(aie_agent->regions().begin(), aie_agent->regions().end(),
+                                    [&](const std::shared_ptr<const core::MemoryRegion>& region) {
+                                      auto amd_region =
+                                          static_cast<const AMD::MemoryRegion*>(region.get());
+                                      if (is_code) {
+                                        return amd_region->IsDeviceSVM();
+                                      } else {
+                                        return amd_region->IsSystem() && !amd_region->IsDeviceSVM();
+                                      }
+                                    });
+      return region_it == aie_agent->regions().end() ? nullptr : region_it->get();
+    }
+    default:
+      assert(false && "Unsupported agent type");
+      return nullptr;
+  }
 }
 
 const core::MemoryRegion* RegionMemory::System(bool is_code) {
@@ -324,6 +352,25 @@ bool RegionMemory::Allocate(size_t size, size_t align, bool zero) {
   return true;
 }
 
+// Places the segment at a caller-owned device address. The host shadow is where
+// the loader writes the image; Freeze copies it onto address.
+hsa_status_t RegionMemory::Adopt(void* address, size_t size) {
+  assert(!this->Allocated());
+  assert(address != nullptr);
+  assert(0 < size);
+  if (HSA_STATUS_SUCCESS !=
+      core::Runtime::runtime_singleton_->AllocateMemory(
+          RegionMemory::System(false), size, core::MemoryRegion::AllocateNoFlags, &host_ptr_)) {
+    host_ptr_ = nullptr;
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+  memset(host_ptr_, 0x0, size);
+  ptr_ = address;
+  size_ = size;
+  external_ = true;
+  return HSA_STATUS_SUCCESS;
+}
+
 bool RegionMemory::Copy(size_t offset, const void* src, size_t size) {
   assert(this->Allocated() && nullptr != host_ptr_);
   assert(nullptr != src);
@@ -335,7 +382,7 @@ bool RegionMemory::Copy(size_t offset, const void* src, size_t size) {
 void RegionMemory::Free()
 {
   assert(this->Allocated());
-  HSA::hsa_memory_free(ptr_);
+  if (!external_) HSA::hsa_memory_free(ptr_);
   if (nullptr != host_ptr_) {
     HSA::hsa_memory_free(host_ptr_);
   }
@@ -354,7 +401,9 @@ bool RegionMemory::Freeze() {
 
   const bool isGpuDevice = (agent->device_type() == core::Agent::kAmdGpuDevice);
   const bool isLargeBarDisabled = isGpuDevice && !reinterpret_cast<AMD::GpuAgent*>(agent)->LargeBarEnabled();
-  const bool shouldDmaCopy = isGpuDevice && (isLargeBarDisabled || size_ > code_object_dmacopy_size);
+  // A caller-owned vmem mapping is not writable from the host.
+  const bool shouldDmaCopy =
+      isGpuDevice && (external_ || isLargeBarDisabled || size_ > code_object_dmacopy_size);
 
   if (shouldDmaCopy) {
       if (HSA_STATUS_SUCCESS != agent->DmaCopy(ptr_, host_ptr_, size_)) return false;
@@ -487,6 +536,28 @@ void* LoaderContext::SegmentAlloc(amdgpu_hsa_elf_segment_t segment,
   }
 
   return mem;
+}
+
+hsa_status_t LoaderContext::SegmentAllocAt(amdgpu_hsa_elf_segment_t segment, hsa_agent_t agent,
+                                           size_t size, void* address, void** seg) {
+  assert(0 < size);
+  if (segment != AMDGPU_HSA_SEGMENT_CODE_AGENT) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  if (reinterpret_cast<uintptr_t>(address) % AMD_ISA_ALIGN_BYTES)
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  const core::MemoryRegion* region = RegionMemory::AgentLocal(agent, true);
+  if (!region) return HSA_STATUS_ERROR_INVALID_AGENT;
+
+  RegionMemory* mem = new (std::nothrow) RegionMemory(region, true);
+  if (!mem) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
+  hsa_status_t status = mem->Adopt(address, size);
+  if (status != HSA_STATUS_SUCCESS) {
+    delete mem;
+    return status;
+  }
+  *seg = mem;
+  return HSA_STATUS_SUCCESS;
 }
 
 bool LoaderContext::SegmentCopy(amdgpu_hsa_elf_segment_t segment, // not used.

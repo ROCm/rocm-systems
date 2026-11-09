@@ -75,4 +75,20 @@ rocprofiler_configure_callback_dispatch_counting_service(
                                                               record_callback,
                                                               record_callback_args);
 }
+
+/**
+ * @brief Restrict a dispatch counting service to a set of GPU agents.
+ *
+ * @param [in] context_id context id with a configured dispatch counting service
+ * @param [in] agents array of GPU agent ids to restrict collection to
+ * @param [in] num_agents number of entries in agents
+ * @return ::rocprofiler_status_t
+ */
+rocprofiler_status_t
+rocprofiler_dispatch_counting_service_set_agents(rocprofiler_context_id_t      context_id,
+                                                 const rocprofiler_agent_id_t* agents,
+                                                 size_t                        num_agents)
+{
+    return rocprofiler::counters::set_dispatch_agents(context_id, agents, num_agents);
+}
 }

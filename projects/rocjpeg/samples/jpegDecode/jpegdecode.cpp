@@ -57,8 +57,6 @@ int main(int argc, char **argv) {
     bool is_roi_valid = false;
     uint32_t roi_width;
     uint32_t roi_height;
-    roi_width = decode_params.crop_rectangle.right - decode_params.crop_rectangle.left;
-    roi_height = decode_params.crop_rectangle.bottom - decode_params.crop_rectangle.top;
 
     if (!RocJpegUtils::GetFilePaths(input_path, file_paths, is_dir, is_file)) {
         std::cerr << "ERROR: Failed to get input file paths!" << std::endl;
@@ -110,9 +108,10 @@ int main(int argc, char **argv) {
 
         CHECK_ROCJPEG(rocJpegGetImageInfo(rocjpeg_handle, rocjpeg_stream_handle, &num_components, &subsampling, widths, heights));
 
-        if (roi_width > 0 && roi_height > 0 && roi_width <= widths[0] && roi_height <= heights[0]) {
-            is_roi_valid = true;
-        }
+        RocJpegDecodeParams image_decode_params = RocJpegUtils::FitCropToImage(decode_params, widths[0], heights[0]);
+        roi_width = image_decode_params.crop_rectangle.right - image_decode_params.crop_rectangle.left;
+        roi_height = image_decode_params.crop_rectangle.bottom - image_decode_params.crop_rectangle.top;
+        is_roi_valid = roi_width > 0 && roi_height > 0;
 
         rocjpeg_utils.GetChromaSubsamplingStr(subsampling, chroma_sub_sampling);
         std::cout << "Input image resolution: " << widths[0] << "x" << heights[0] << std::endl;
@@ -139,7 +138,7 @@ int main(int argc, char **argv) {
                 return EXIT_FAILURE;
         }
 
-        if (rocjpeg_utils.GetChannelPitchAndSizes(decode_params, subsampling, widths, heights, num_channels, output_image, channel_sizes)) {
+        if (rocjpeg_utils.GetChannelPitchAndSizes(image_decode_params, subsampling, widths, heights, num_channels, output_image, channel_sizes)) {
             std::cerr << "ERROR: Failed to get the channel pitch and sizes" << std::endl;
             return EXIT_FAILURE;
         }
@@ -160,7 +159,7 @@ int main(int argc, char **argv) {
         }
         std::cout << "Decoding started, please wait! ... " << std::endl;
         auto start_time = std::chrono::high_resolution_clock::now();
-        CHECK_ROCJPEG(rocJpegDecode(rocjpeg_handle, rocjpeg_stream_handle, &decode_params, &output_image));
+        CHECK_ROCJPEG(rocJpegDecode(rocjpeg_handle, rocjpeg_stream_handle, &image_decode_params, &output_image));
         auto end_time = std::chrono::high_resolution_clock::now();
         double time_per_image_in_milli_sec = std::chrono::duration<double, std::milli>(end_time - start_time).count();
         double image_size_in_mpixels = (static_cast<double>(widths[0]) * static_cast<double>(heights[0]) / 1000000);

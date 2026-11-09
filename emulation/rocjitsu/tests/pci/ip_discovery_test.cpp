@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/pci/ip_discovery.h"
+#include "util/diagnostic.h"
 
 #include "embedded_schema.h"
 #include "rocjitsu/config/config_common.h"
@@ -16,46 +17,43 @@
 #include <cstdint>
 #include <map>
 #include <set>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace {
 
-/// @brief A device with the blocks a driver needs before it will go further.
-const rocjitsu::GpuGenerationDescriptor &gfx1250_generation() {
-  const auto *generation = rocjitsu::gpu_generations().find(std::string_view("gfx1250"));
-  if (generation == nullptr)
-    throw std::runtime_error("the gfx1250 generation is not registered");
-  return *generation;
-}
+class Gfx1250DiscoveryTest : public ::testing::Test {
+protected:
+  void SetUp() override {
+    generation_ = rocjitsu::gpu_generations().find(std::string_view("gfx1250"));
+    ASSERT_NE(generation_, nullptr) << "the gfx1250 generation is not registered";
+  }
 
-rocjitsu::GpuDiscoveryTopology gfx1250_topology() { return gfx1250_generation().topology_defaults; }
+  rocjitsu::GpuDiscoveryTopology gfx1250_topology() const { return generation_->topology_defaults; }
+  rocjitsu::IpDiscoverySpec gfx1250_spec() const {
+    return generation_->discovery_factory(generation_->topology_defaults);
+  }
 
-rocjitsu::IpDiscoverySpec gfx1250_spec() {
-  const auto &generation = gfx1250_generation();
-  return generation.discovery_factory(generation.topology_defaults);
-}
+  void build_table(std::vector<std::byte> &table) const { build_table(table, gfx1250_spec()); }
+
+  void build_table(std::vector<std::byte> &table, const rocjitsu::IpDiscoverySpec &spec) const {
+    rocjitsu::IpDiscoveryBuild built = rocjitsu::build_ip_discovery_table(spec);
+    ASSERT_TRUE(built.ok()) << built.problem;
+    table = std::move(built.table);
+  }
+
+private:
+  const rocjitsu::GpuGenerationDescriptor *generation_ = nullptr;
+};
+
+using IpDiscoveryTable = Gfx1250DiscoveryTest;
+using IpDiscoveryProfile = Gfx1250DiscoveryTest;
 
 rocjitsu::IpDiscoverySpec empty_discovery_spec(const rocjitsu::GpuDiscoveryTopology &) {
   return {};
-}
-
-/// @brief Build a table, insisting it could be built at all.
-///
-/// @details Failure throws rather than recording a non-fatal expectation,
-/// because every caller reads the returned table by offset: a build that failed
-/// would return an empty one and the test would index past its end rather than
-/// stop at the real problem. ASSERT_ is unavailable here, since this returns a
-/// value.
-std::vector<std::byte> build(const rocjitsu::IpDiscoverySpec &spec) {
-  const rocjitsu::IpDiscoveryBuild built = rocjitsu::build_ip_discovery_table(spec);
-  if (!built.ok()) {
-    throw std::runtime_error("cannot build a discovery table: " + built.problem);
-  }
-  return built.table;
 }
 
 uint16_t read16(const std::vector<std::byte> &table, std::size_t at) {
@@ -113,15 +111,17 @@ void reseal_binary(std::vector<std::byte> &table) {
   write16(table, 8, byte_sum(table, 10, table.size() - 10));
 }
 
-TEST(IpDiscoveryTable, BuildsATableTheDriverWouldAccept) {
-  const std::vector<std::byte> table = build(gfx1250_spec());
+TEST_F(IpDiscoveryTable, BuildsATableTheDriverWouldAccept) {
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
 
   const rocjitsu::IpDiscoveryValidation checked = rocjitsu::validate_ip_discovery_table(table);
   EXPECT_TRUE(checked.valid) << checked.problem;
 }
 
-TEST(IpDiscoveryTable, PublishesConfiguredGraphicsTopology) {
-  const std::vector<std::byte> table = build(gfx1250_spec());
+TEST_F(IpDiscoveryTable, PublishesConfiguredGraphicsTopology) {
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   const std::size_t graphics = read16(table, 12 + 8);
 
   ASSERT_NE(graphics, 0u);
@@ -139,7 +139,7 @@ TEST(IpDiscoveryTable, PublishesConfiguredGraphicsTopology) {
   EXPECT_EQ(read32(table, graphics + 72), 2u);
 }
 
-TEST(IpDiscoveryTable, RefusesToBuildWithoutAGraphicsBlock) {
+TEST_F(IpDiscoveryTable, RefusesToBuildWithoutAGraphicsBlock) {
   rocjitsu::IpDiscoverySpec spec;
   spec.graphics = gfx1250_spec().graphics;
   spec.blocks.push_back({.hardware_id = rocjitsu::IpHardwareId::Mp0,
@@ -155,7 +155,7 @@ TEST(IpDiscoveryTable, RefusesToBuildWithoutAGraphicsBlock) {
   EXPECT_NE(built.problem.find("graphics block"), std::string::npos);
 }
 
-TEST(IpDiscoveryTable, RefusesToBuildWithoutGraphicsTopology) {
+TEST_F(IpDiscoveryTable, RefusesToBuildWithoutGraphicsTopology) {
   rocjitsu::IpDiscoverySpec spec = gfx1250_spec();
   spec.graphics = {};
 
@@ -172,7 +172,7 @@ TEST(IpDiscoveryTable, RefusesToBuildWithoutGraphicsTopology) {
 // mismatch: the access resolves against the base's zero high dword and lands at
 // a raw offset, which reads as a broken register model rather than a short
 // table. This is what left GMC initializing against a memory size of zero.
-TEST(IpDiscoveryProfile, PublishesEverySegmentTheDriverIndexesInto) {
+TEST_F(IpDiscoveryProfile, PublishesEverySegmentTheDriverIndexesInto) {
   // Exact counts, not a floor: this pins the modeled profile and catches a list
   // losing its *tail*. NBIO reaches _BASE_IDX 5, so a truncation to two entries
   // would break it while sailing past any lower bound.
@@ -247,8 +247,9 @@ TEST(IpDiscoveryProfile, PublishesEverySegmentTheDriverIndexesInto) {
   }
 }
 
-TEST(IpDiscoveryTable, StartsWithTheSignatureTheDriverLooksFor) {
-  const std::vector<std::byte> table = build(gfx1250_spec());
+TEST_F(IpDiscoveryTable, StartsWithTheSignatureTheDriverLooksFor) {
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
 
   ASSERT_GE(table.size(), 4u);
   const auto byte_at = [&table](std::size_t index) {
@@ -264,8 +265,9 @@ TEST(IpDiscoveryTable, StartsWithTheSignatureTheDriverLooksFor) {
 
 // The driver checksums the binary and the block list separately, so a table
 // corrupted anywhere has to be caught here rather than in a guest's dmesg.
-TEST(IpDiscoveryTable, RejectsACorruptedBlockList) {
-  std::vector<std::byte> table = build(gfx1250_spec());
+TEST_F(IpDiscoveryTable, RejectsACorruptedBlockList) {
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   ASSERT_TRUE(rocjitsu::validate_ip_discovery_table(table).valid);
 
   table[table.size() - 1] = static_cast<std::byte>(std::to_integer<uint8_t>(table.back()) ^ 0xff);
@@ -273,8 +275,9 @@ TEST(IpDiscoveryTable, RejectsACorruptedBlockList) {
   EXPECT_FALSE(rocjitsu::validate_ip_discovery_table(table).valid);
 }
 
-TEST(IpDiscoveryTable, RejectsATableWithTheWrongSignature) {
-  std::vector<std::byte> table = build(gfx1250_spec());
+TEST_F(IpDiscoveryTable, RejectsATableWithTheWrongSignature) {
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   table[0] = std::byte{0};
 
   const rocjitsu::IpDiscoveryValidation checked = rocjitsu::validate_ip_discovery_table(table);
@@ -283,8 +286,9 @@ TEST(IpDiscoveryTable, RejectsATableWithTheWrongSignature) {
   EXPECT_NE(checked.problem.find("signature"), std::string::npos);
 }
 
-TEST(IpDiscoveryTable, RejectsATruncatedTable) {
-  std::vector<std::byte> table = build(gfx1250_spec());
+TEST_F(IpDiscoveryTable, RejectsATruncatedTable) {
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   table.resize(table.size() - 8);
 
   EXPECT_FALSE(rocjitsu::validate_ip_discovery_table(table).valid);
@@ -292,15 +296,16 @@ TEST(IpDiscoveryTable, RejectsATruncatedTable) {
 
 // Every length inside the table is the thing under test, so none of them may
 // bound a read of it. Each of these once walked off the end of the buffer.
-TEST(IpDiscoveryTable, RejectsInputTooShortToHoldAHeader) {
+TEST(IpDiscoveryValidation, RejectsInputTooShortToHoldAHeader) {
   for (std::size_t size = 0; size < 60; ++size) {
     const std::vector<std::byte> table(size, std::byte{0});
     EXPECT_FALSE(rocjitsu::validate_ip_discovery_table(table).valid) << "at " << size << " bytes";
   }
 }
 
-TEST(IpDiscoveryTable, RejectsABlockListShorterThanItsOwnHeader) {
-  std::vector<std::byte> table = build(gfx1250_spec());
+TEST_F(IpDiscoveryTable, RejectsABlockListShorterThanItsOwnHeader) {
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   // Point the block list one byte before the end, so the range check on its
   // recorded size passes while its fixed header does not fit.
   write16(table, 12, static_cast<uint16_t>(table.size() - 1));
@@ -310,8 +315,9 @@ TEST(IpDiscoveryTable, RejectsABlockListShorterThanItsOwnHeader) {
   EXPECT_FALSE(rocjitsu::validate_ip_discovery_table(table).valid);
 }
 
-TEST(IpDiscoveryTable, RejectsMoreDiesThanTheHeaderHasRoomFor) {
-  std::vector<std::byte> table = build(gfx1250_spec());
+TEST_F(IpDiscoveryTable, RejectsMoreDiesThanTheHeaderHasRoomFor) {
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   write16(table, ip_table_offset(table) + 12, 17);
   reseal_block_list(table);
   reseal_binary(table);
@@ -321,8 +327,9 @@ TEST(IpDiscoveryTable, RejectsMoreDiesThanTheHeaderHasRoomFor) {
   EXPECT_NE(checked.problem.find("dies"), std::string::npos);
 }
 
-TEST(IpDiscoveryTable, RejectsADiePointedPastTheEnd) {
-  std::vector<std::byte> table = build(gfx1250_spec());
+TEST_F(IpDiscoveryTable, RejectsADiePointedPastTheEnd) {
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   write16(table, ip_table_offset(table) + 14 + 2, static_cast<uint16_t>(table.size() - 2));
   reseal_block_list(table);
   reseal_binary(table);
@@ -333,8 +340,9 @@ TEST(IpDiscoveryTable, RejectsADiePointedPastTheEnd) {
 // The bug that shipped: a die offset measured from the table rather than from
 // the binary still lands inside the table, so only reading what it points at
 // catches it.
-TEST(IpDiscoveryTable, RejectsADieOffsetMeasuredFromTheWrongPlace) {
-  std::vector<std::byte> table = build(gfx1250_spec());
+TEST_F(IpDiscoveryTable, RejectsADieOffsetMeasuredFromTheWrongPlace) {
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   const std::size_t ip_table = ip_table_offset(table);
   const uint16_t correct = read16(table, ip_table + 14 + 2);
   write16(table, ip_table + 14 + 2, static_cast<uint16_t>(correct - ip_table));
@@ -344,8 +352,9 @@ TEST(IpDiscoveryTable, RejectsADieOffsetMeasuredFromTheWrongPlace) {
   EXPECT_FALSE(rocjitsu::validate_ip_discovery_table(table).valid);
 }
 
-TEST(IpDiscoveryTable, RejectsDisagreeingEmbeddedAndOuterSizes) {
-  std::vector<std::byte> table = build(gfx1250_spec());
+TEST_F(IpDiscoveryTable, RejectsDisagreeingEmbeddedAndOuterSizes) {
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   const std::size_t ip_table = ip_table_offset(table);
   write16(table, ip_table + 6, static_cast<uint16_t>(read16(table, ip_table + 6) - 8));
   reseal_binary(table);
@@ -355,8 +364,9 @@ TEST(IpDiscoveryTable, RejectsDisagreeingEmbeddedAndOuterSizes) {
   EXPECT_NE(checked.problem.find("bytes"), std::string::npos);
 }
 
-TEST(IpDiscoveryTable, RejectsBlockRecordsThatRunPastTheEnd) {
-  std::vector<std::byte> table = build(gfx1250_spec());
+TEST_F(IpDiscoveryTable, RejectsBlockRecordsThatRunPastTheEnd) {
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   const std::size_t ip_table = ip_table_offset(table);
   const uint16_t die = read16(table, ip_table + 14 + 2);
   // Claim far more blocks than the records behind the die can supply.
@@ -367,8 +377,9 @@ TEST(IpDiscoveryTable, RejectsBlockRecordsThatRunPastTheEnd) {
   EXPECT_FALSE(rocjitsu::validate_ip_discovery_table(table).valid);
 }
 
-TEST(IpDiscoveryTable, RejectsAGraphicsBlockWithNoTopologyTable) {
-  std::vector<std::byte> table = build(gfx1250_spec());
+TEST_F(IpDiscoveryTable, RejectsAGraphicsBlockWithNoTopologyTable) {
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   write16(table, 12 + 8, 0);
   write16(table, 12 + 8 + 2, 0);
   write16(table, 12 + 8 + 4, 0);
@@ -379,8 +390,9 @@ TEST(IpDiscoveryTable, RejectsAGraphicsBlockWithNoTopologyTable) {
   EXPECT_NE(checked.problem.find("graphics-topology"), std::string::npos);
 }
 
-TEST(IpDiscoveryTable, RejectsAGraphicsTableWithTheWrongIdentifier) {
-  std::vector<std::byte> table = build(gfx1250_spec());
+TEST_F(IpDiscoveryTable, RejectsAGraphicsTableWithTheWrongIdentifier) {
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   write32(table, graphics_table_offset(table), 0);
   reseal_graphics_table(table);
   reseal_binary(table);
@@ -390,8 +402,9 @@ TEST(IpDiscoveryTable, RejectsAGraphicsTableWithTheWrongIdentifier) {
   EXPECT_NE(checked.problem.find("identifier"), std::string::npos);
 }
 
-TEST(IpDiscoveryTable, RejectsAGraphicsTableWithTheWrongEmbeddedSize) {
-  std::vector<std::byte> table = build(gfx1250_spec());
+TEST_F(IpDiscoveryTable, RejectsAGraphicsTableWithTheWrongEmbeddedSize) {
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   write32(table, graphics_table_offset(table) + 8, 12);
   reseal_graphics_table(table);
   reseal_binary(table);
@@ -401,8 +414,9 @@ TEST(IpDiscoveryTable, RejectsAGraphicsTableWithTheWrongEmbeddedSize) {
   EXPECT_NE(checked.problem.find("table says"), std::string::npos);
 }
 
-TEST(IpDiscoveryTable, RejectsAGraphicsTableWithTheWrongChecksum) {
-  std::vector<std::byte> table = build(gfx1250_spec());
+TEST_F(IpDiscoveryTable, RejectsAGraphicsTableWithTheWrongChecksum) {
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   table[graphics_table_offset(table) + 12] ^= std::byte{1};
   reseal_binary(table);
 
@@ -411,8 +425,9 @@ TEST(IpDiscoveryTable, RejectsAGraphicsTableWithTheWrongChecksum) {
   EXPECT_NE(checked.problem.find("checksum"), std::string::npos);
 }
 
-TEST(IpDiscoveryTable, RejectsAnUnsupportedGraphicsTableVersion) {
-  std::vector<std::byte> table = build(gfx1250_spec());
+TEST_F(IpDiscoveryTable, RejectsAnUnsupportedGraphicsTableVersion) {
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   write16(table, graphics_table_offset(table) + 4, 3);
   reseal_graphics_table(table);
   reseal_binary(table);
@@ -422,8 +437,9 @@ TEST(IpDiscoveryTable, RejectsAnUnsupportedGraphicsTableVersion) {
   EXPECT_NE(checked.problem.find("unsupported version"), std::string::npos);
 }
 
-TEST(IpDiscoveryTable, RejectsASelfConsistentShortGraphicsTable) {
-  std::vector<std::byte> table = build(gfx1250_spec());
+TEST_F(IpDiscoveryTable, RejectsASelfConsistentShortGraphicsTable) {
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   constexpr uint16_t kShortSize = 12;
   write16(table, 12 + 8 + 4, kShortSize);
   write32(table, graphics_table_offset(table) + 8, kShortSize);
@@ -435,8 +451,9 @@ TEST(IpDiscoveryTable, RejectsASelfConsistentShortGraphicsTable) {
   EXPECT_NE(checked.problem.find("unsupported version"), std::string::npos);
 }
 
-TEST(IpDiscoveryTable, RejectsAZeroGraphicsGeometryField) {
-  std::vector<std::byte> table = build(gfx1250_spec());
+TEST_F(IpDiscoveryTable, RejectsAZeroGraphicsGeometryField) {
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   write32(table, graphics_table_offset(table) + 12, 0);
   reseal_graphics_table(table);
   reseal_binary(table);
@@ -446,8 +463,9 @@ TEST(IpDiscoveryTable, RejectsAZeroGraphicsGeometryField) {
   EXPECT_NE(checked.problem.find("zero geometry"), std::string::npos);
 }
 
-TEST(IpDiscoveryTable, RejectsIndivisibleGraphicsGeometry) {
-  std::vector<std::byte> table = build(gfx1250_spec());
+TEST_F(IpDiscoveryTable, RejectsIndivisibleGraphicsGeometry) {
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   write32(table, graphics_table_offset(table) + 24, 3);
   reseal_graphics_table(table);
   reseal_binary(table);
@@ -457,8 +475,9 @@ TEST(IpDiscoveryTable, RejectsIndivisibleGraphicsGeometry) {
   EXPECT_NE(checked.problem.find("not divisible"), std::string::npos);
 }
 
-TEST(IpDiscoveryTable, RejectsIndivisibleShaderComplexGeometry) {
-  std::vector<std::byte> table = build(gfx1250_spec());
+TEST_F(IpDiscoveryTable, RejectsIndivisibleShaderComplexGeometry) {
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   write32(table, graphics_table_offset(table) + 72, 3);
   reseal_graphics_table(table);
   reseal_binary(table);
@@ -468,8 +487,9 @@ TEST(IpDiscoveryTable, RejectsIndivisibleShaderComplexGeometry) {
   EXPECT_NE(checked.problem.find("shader complexes"), std::string::npos);
 }
 
-TEST(IpDiscoveryTable, RejectsACorruptedHarvestTable) {
-  std::vector<std::byte> table = build(gfx1250_spec());
+TEST_F(IpDiscoveryTable, RejectsACorruptedHarvestTable) {
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table));
   const uint16_t harvest = read16(table, 12 + 2 * 8);
   ASSERT_NE(harvest, 0u);
   table[harvest] = static_cast<std::byte>(std::to_integer<uint8_t>(table[harvest]) ^ 0xff);
@@ -486,9 +506,10 @@ TEST(IpDiscoveryTable, RejectsACorruptedHarvestTable) {
 // measured from the wrong place still validates against any checker that makes
 // the same mistake — which is how this shipped as "9 blocks" to a driver that
 // read zero of them and refused the device with no diagnostic.
-TEST(IpDiscoveryTable, PutsItsDieWhereTheDriverLooksForIt) {
+TEST_F(IpDiscoveryTable, PutsItsDieWhereTheDriverLooksForIt) {
   const rocjitsu::IpDiscoverySpec spec = gfx1250_spec();
-  const std::vector<std::byte> table = build(spec);
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table, spec));
 
   const unsigned ip_table = read16(table, 12);           // table_list[0].offset
   const unsigned die = read16(table, ip_table + 14 + 2); // die_info[0].die_offset
@@ -498,9 +519,11 @@ TEST(IpDiscoveryTable, PutsItsDieWhereTheDriverLooksForIt) {
   EXPECT_EQ(read16(table, die + 2), spec.blocks.size());
 }
 
-TEST(IpDiscoveryTable, DescribesEveryBlockItWasGiven) {
+TEST_F(IpDiscoveryTable, DescribesEveryBlockItWasGiven) {
   rocjitsu::IpDiscoverySpec spec = gfx1250_spec();
-  const std::vector<std::byte> smaller = build(spec);
+  const rocjitsu::IpDiscoveryBuild built_smaller = rocjitsu::build_ip_discovery_table(spec);
+  ASSERT_TRUE(built_smaller.ok()) << built_smaller.problem;
+  const std::vector<std::byte> smaller = built_smaller.table;
 
   spec.blocks.push_back({.hardware_id = rocjitsu::IpHardwareId::Sdma0,
                          .instance = 1,
@@ -508,7 +531,9 @@ TEST(IpDiscoveryTable, DescribesEveryBlockItWasGiven) {
                          .minor = 1,
                          .revision = 0,
                          .register_bases = {0x00001260}});
-  const std::vector<std::byte> larger = build(spec);
+  const rocjitsu::IpDiscoveryBuild built_larger = rocjitsu::build_ip_discovery_table(spec);
+  ASSERT_TRUE(built_larger.ok()) << built_larger.problem;
+  const std::vector<std::byte> larger = built_larger.table;
 
   EXPECT_GT(larger.size(), smaller.size());
   EXPECT_TRUE(rocjitsu::validate_ip_discovery_table(larger).valid);
@@ -516,7 +541,7 @@ TEST(IpDiscoveryTable, DescribesEveryBlockItWasGiven) {
 
 // The format records a base count in one byte, so a block with more bases than
 // that would serialize a count meaning something else entirely.
-TEST(IpDiscoveryTable, RefusesToBuildABlockWithMoreBasesThanTheFormatHolds) {
+TEST_F(IpDiscoveryTable, RefusesToBuildABlockWithMoreBasesThanTheFormatHolds) {
   rocjitsu::IpDiscoverySpec spec = gfx1250_spec();
   spec.blocks.push_back({.hardware_id = rocjitsu::IpHardwareId::Hdp,
                          .instance = 1,
@@ -533,7 +558,7 @@ TEST(IpDiscoveryTable, RefusesToBuildABlockWithMoreBasesThanTheFormatHolds) {
 
 // The advertised graphics instance count becomes the guest's XCC mask, so it is
 // a deliberate choice rather than an incidental one.
-TEST(IpDiscoveryProfile, AdvertisesTheRequestedGraphicsInstances) {
+TEST_F(IpDiscoveryProfile, AdvertisesTheRequestedGraphicsInstances) {
   auto topology = gfx1250_topology();
   topology.graphics_instances = 4;
   const rocjitsu::IpDiscoverySpec spec = rocjitsu::gfx1250_discovery_spec(topology);
@@ -546,16 +571,20 @@ TEST(IpDiscoveryProfile, AdvertisesTheRequestedGraphicsInstances) {
   }
 
   EXPECT_EQ(graphics, 4);
-  EXPECT_TRUE(rocjitsu::validate_ip_discovery_table(build(spec)).valid);
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table, spec));
+  EXPECT_TRUE(rocjitsu::validate_ip_discovery_table(table).valid);
 }
 
-TEST(IpDiscoveryProfile, AdvertisesNoMediaBlocks) {
+TEST_F(IpDiscoveryProfile, AdvertisesNoMediaBlocks) {
   const rocjitsu::IpDiscoverySpec spec = gfx1250_spec();
 
   for (const rocjitsu::IpBlock &block : spec.blocks) {
     EXPECT_NE(static_cast<uint16_t>(block.hardware_id), 12u);
   }
-  EXPECT_TRUE(rocjitsu::validate_ip_discovery_table(build(spec)).valid);
+  std::vector<std::byte> table;
+  ASSERT_NO_FATAL_FAILURE(build_table(table, spec));
+  EXPECT_TRUE(rocjitsu::validate_ip_discovery_table(table).valid);
 }
 
 } // namespace
@@ -641,11 +670,16 @@ TEST(GpuGenerations, PartialDirectDeviceTopologyIsRejected) {
 }
 
 TEST(GpuGenerations, ParsedOmittedTopologyKeepsGenerationDefaults) {
-  rocjitsu::config::KfdDeviceConfig device = rocjitsu::config::with_parsed_simulation_config_json(
+  util::StringDiagnostic diagnostic;
+  auto device_result = rocjitsu::config::with_parsed_simulation_config_json(
       R"({"vm":{"gpu":{"device":{"gfx_target_version":120500,"num_sdma_engines":0}}}})",
-      rocjitsu::kEmbeddedSchema, [](const rocjitsu::fb::SimulationConfig *config) {
-        return rocjitsu::config::kfd_device_from_fb(config->vm()->gpu()->device(), "vm.gpu.device");
+      rocjitsu::kEmbeddedSchema, diagnostic.emitter(),
+      [&](const rocjitsu::fb::SimulationConfig *config) {
+        return rocjitsu::config::kfd_device_from_fb(config->vm()->gpu()->device(), "vm.gpu.device",
+                                                    diagnostic.emitter());
       });
+  ASSERT_TRUE(device_result.succeeded()) << diagnostic.message();
+  auto device = std::move(device_result).value();
   ASSERT_TRUE(rocjitsu::resolve_gpu_generation_topology(device));
 
   const rocjitsu::GpuPciDeviceSpec spec = rocjitsu::gpu_pci_spec_from_config(device, {});
@@ -662,11 +696,16 @@ TEST(GpuGenerations, ParsedOmittedTopologyKeepsGenerationDefaults) {
 }
 
 TEST(GpuGenerations, ParsedTopologyFieldExplicitlyOverridesGenerationDefault) {
-  rocjitsu::config::KfdDeviceConfig device = rocjitsu::config::with_parsed_simulation_config_json(
+  util::StringDiagnostic diagnostic;
+  auto device_result = rocjitsu::config::with_parsed_simulation_config_json(
       R"({"vm":{"gpu":{"device":{"gfx_target_version":120500,"wave_front_size":64,"num_sdma_engines":0}}}})",
-      rocjitsu::kEmbeddedSchema, [](const rocjitsu::fb::SimulationConfig *config) {
-        return rocjitsu::config::kfd_device_from_fb(config->vm()->gpu()->device(), "vm.gpu.device");
+      rocjitsu::kEmbeddedSchema, diagnostic.emitter(),
+      [&](const rocjitsu::fb::SimulationConfig *config) {
+        return rocjitsu::config::kfd_device_from_fb(config->vm()->gpu()->device(), "vm.gpu.device",
+                                                    diagnostic.emitter());
       });
+  ASSERT_TRUE(device_result.succeeded()) << diagnostic.message();
+  auto device = std::move(device_result).value();
   ASSERT_TRUE(rocjitsu::resolve_gpu_generation_topology(device));
 
   const rocjitsu::GpuPciDeviceSpec spec = rocjitsu::gpu_pci_spec_from_config(device, {});

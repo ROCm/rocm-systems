@@ -224,7 +224,7 @@ ncclResult_t ncclNdListen(void*, int dev, void* opaqueHandle, void** listenComm)
   {
     char oobLine[SOCKET_NAME_MAXLEN + 1];
     INFO(NCCL_NET, "NET/ND : Listen dev %d OOB %s across %d ND adapter(s)", dev,
-         ncclSocketToString(&handle->oobAddr, oobLine), lComm->ndevs);
+         ncclSocketToString(&handle->oobAddr, oobLine, sizeof(oobLine)), lComm->ndevs);
   }
 
   *listenComm = lComm;
@@ -424,8 +424,8 @@ ncclResult_t ncclNdConnect(void*, int dev, void* opaqueHandle, void** sendComm, 
         char localLine[SOCKET_NAME_MAXLEN + 1];
         char peerLine[SOCKET_NAME_MAXLEN + 1];
         INFO(NCCL_NET, "NET/ND : Connect dev %d local ND %s peer ND %s (%d QPs)", dev,
-             ncclSocketToString(&ndDev->addr, localLine), ncclSocketToString(&sComm->remSetup.addrs[0], peerLine),
-             sComm->base.nqps);
+             ncclSocketToString(&ndDev->addr, localLine, sizeof(localLine)),
+             ncclSocketToString(&sComm->remSetup.addrs[0], peerLine, sizeof(peerLine)), sComm->base.nqps);
       }
       sComm->connectQpIndex = 0;
       NCCLCHECKGOTO(ncclNdStartConnectQp(sComm, 0), result, fail);

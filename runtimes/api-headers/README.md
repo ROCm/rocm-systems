@@ -18,16 +18,36 @@ The headers are organized by API family under `include/`:
 
 These files are mirrors for runtime consumers; their primary sources remain:
 
-- `amdf`: `hrx-system/libamdf/include/amdf`, synchronized from
-  `hrx-system@bd24215e6a5d1e12570c892356fd5b343ac38a6d`;
+- `amdf`: based on `hrx-system/libamdf/include/amdf` at
+  `hrx-system@8bdaeca172e5cbcbcd83edb5284c4407e7e02ee8`;
 - `hsa`: `projects/rocr-runtime/runtime/hsa-runtime/inc` in this repository;
 - DRM: `projects/rocr-runtime/libhsakmt/include/hsakmt/drm` in this repository;
-- KFD and UDMABUF: `projects/rocr-runtime/libhsakmt/include/hsakmt/linux` in
-  this repository.
+- KFD ioctl and UDMABUF: `projects/rocr-runtime/libhsakmt/include/hsakmt/linux`
+  in this repository.
+- KFD sysfs: Linux `include/uapi/linux/kfd_sysfs.h` at
+  [`e83f63da2ac776fbc30861e4ce8b798df6ee8a7a`](https://github.com/torvalds/linux/blob/e83f63da2ac776fbc30861e4ce8b798df6ee8a7a/include/uapi/linux/kfd_sysfs.h).
 
-The AMDF headers preserve upstream contents except that their copyright line
-names Advanced Micro Devices, Inc. and their SPDX identifier is MIT. The HSA, DRM,
-KFD, and UDMABUF mirrors are byte-identical to their primary files in this
-checkout.
+The AMDF headers track the upstream ABI v12 declarations and retain the
+AMD/MIT notices from this runtime's earlier headers. One local comment
+clarifies that native event-page availability can change after a
+capability query. The Rust `ddi/libamdf` provider implements ABI v12, GPU
+extension v3, and observation extension v1. It does not advertise the XDNA
+extension. The HSA, DRM, and UDMABUF mirrors are byte-identical to their
+primary files in this checkout. `kfd_ioctl.h` differs only in its DRM include
+path, which points to the shared `uapi/linux/drm` location.
+
+`kfd_sysfs.h` contains KFD topology capability definitions used by rocjitsu.
+It is copied verbatim from the Linux revision above; refresh it from that
+upstream file so the per-queue reset and CAP2 definitions remain in sync.
+
+The HSA headers and Rust `ddi/libhsa` provider expose AMD extension revision
+1.36. Signal batches are supported in fine-grained system pools and in
+qualified host-visible GPU pools. PCIe-backed GPU signal stores use a
+readback to flush posted writes. Async copy and SVM completion signals require
+host atomic support, so PCIe-backed batch members cannot serve as completions.
+Query `HSA_AMD_MEMORY_POOL_INFO_SIGNAL_CAPABLE` for each pool and
+`HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED` before using completion hints.
+The provider currently reports signal hints unsupported because it does not
+probe the CP firmware's queue capability bit.
 
 `abce` is not a mirror: `include/abce` is its primary location.

@@ -63,6 +63,8 @@ if(HRR_BUILD_PLAYBACK)
     $<$<BOOL:${WIN32}>:NOMINMAX WIN32_LEAN_AND_MEAN>
   )
   target_link_libraries(hrr-playback PRIVATE hrr::reader hip::host Threads::Threads)
+  # hrr_runtime_symbol: dlsym on POSIX, module enumeration on Windows.
+  target_link_libraries(hrr-playback PRIVATE ${CMAKE_DL_LIBS} $<$<BOOL:${WIN32}>:psapi>)
 
   # Build identity reported by --version. Stamped by a build rule rather than at
   # configure time so it cannot name a commit the binary was not built from; see

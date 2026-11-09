@@ -471,14 +471,15 @@ ncclResult_t p2pSendSetup(struct ncclComm* comm, struct ncclTopoGraph* graph, st
 
   resources->next_hdp_reg = 0;
   bool isXGMI;
-  if (ncclTopoGetLinkType(comm->topo, myInfo->cudaDev, peerInfo->cudaDev, &isXGMI) != ncclSuccess) {
+  if (ncclTopoGetLinkType(comm->topo, myInfo->nvmlDev, peerInfo->nvmlDev, &isXGMI) != ncclSuccess) {
     INFO(NCCL_INIT | NCCL_P2P, "Ring %02d : %d -> %d failed to get link type and hop count", channelId, myInfo->rank,
          peerInfo->rank);
     return ncclInternalError;
   }
   if (!isXGMI && !IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx90a") &&
       !IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") &&
-      !IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950")) {
+      !IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") &&
+      !IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250")) {
     CUDACHECK(hipDeviceGetAttribute((int*)&resources->next_hdp_reg, hipDeviceAttributeHdpMemFlushCntl,
                                     peerInfo->cudaDev));
     TRACE(NCCL_INIT | NCCL_P2P, "Ring %02d : %d -> %d HDP %p", channelId, myInfo->rank, peerInfo->rank,
@@ -1221,6 +1222,8 @@ static ncclResult_t ipcRegisterBuffer(ncclComm* comm, const void* userbuff, size
           } else {
             CUmemGenericAllocationHandle handle;
             if (CUPFN(cuMemRetainAllocationHandle(&handle, baseAddr)) != CUDA_SUCCESS) {
+              // RCCL: HIP keeps this expected failure for a cudaMalloc buffer as the thread's last error
+              (void)cudaGetLastError();
               // if cuMem* export fails, retry legacy export
               if (comm->directMode || !ncclParamLegacyCudaRegister()) goto fail;
               CUDACHECKGOTO(cudaIpcGetMemHandle(&ipcInfo->ipcDesc.devIpc, baseAddr), ret, fail);
@@ -1242,6 +1245,8 @@ static ncclResult_t ipcRegisterBuffer(ncclComm* comm, const void* userbuff, size
                   // Allow this to silently fail for cases where the user buff cannot be registered
                   if (CUPFN(cuMemExportToShareableHandle(&ipcInfo->ipcDesc.cuDesc.handle, handle, ncclCuMemHandleType,
                                                          0)) != CUDA_SUCCESS) {
+                    // RCCL: HIP keeps the failed export as the thread's last error
+                    (void)cudaGetLastError();
                     CUCHECKGOTO(cuMemRelease(handle), ret, fail);
                     goto fail;
                   }

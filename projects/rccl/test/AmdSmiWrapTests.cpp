@@ -16,13 +16,17 @@
 
 #include "amdsmi_wrap.h"
 #include "alt_rsmi.h"
+#include "common/LogCapture.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
+#include "utils.h"
 
 #include <cerrno>
+#include <cstdio>
 #include <cstdlib>
 #include <cstdint>
 #include <cstring>
 #include <dlfcn.h>
+#include <fstream>
 #include <gtest/gtest.h>
 #include <string>
 #include <thread>
@@ -177,6 +181,58 @@ TEST(AmdSmiWrapLifecycle, ShutdownCleansUpAfterVersionFailure)
     );
 }
 
+// The RAS diagnostics initialize the library themselves on the default path. amd_smi_shutdown has to undo that,
+// and the next diagnostics query has to initialize it again rather than use a library that is shut down.
+TEST(AmdSmiWrapLifecycle, ShutdownUndoesDiagnosticsInit)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "ShutdownUndoesDiagnosticsInit",
+        []() {
+            if(amd_smi_diagInit() != ncclSuccess)
+                GTEST_SKIP() << "amd_smi_diagInit() failed: built without the amdsmi header";
+            EXPECT_EQ(amd_smi_diagInit(), ncclSuccess);
+            EXPECT_EQ(lifecycleStubCounter("amdsmi_test_init_count"), 1u);
+
+            EXPECT_EQ(amd_smi_shutdown(), ncclSuccess);
+            EXPECT_EQ(lifecycleStubCounter("amdsmi_test_shutdown_count"), 1u);
+            EXPECT_EQ(amd_smi_shutdown(), ncclSuccess);
+            EXPECT_EQ(lifecycleStubCounter("amdsmi_test_shutdown_count"), 1u);
+
+            EXPECT_EQ(amd_smi_diagInit(), ncclSuccess);
+            EXPECT_EQ(lifecycleStubCounter("amdsmi_test_init_count"), 2u);
+            EXPECT_EQ(amd_smi_shutdown(), ncclSuccess);
+            EXPECT_EQ(lifecycleStubCounter("amdsmi_test_shutdown_count"), 2u);
+        },
+        {{"RCCL_USE_AMD_SMI_LIB", "0"},
+         {"LD_LIBRARY_PATH", lifecycleStubLibraryPath()}}
+    );
+}
+
+// With RCCL_USE_AMD_SMI_LIB both the wrapper and the RAS diagnostics need the library, in either order; it is
+// initialized once and one shutdown undoes it.
+TEST(AmdSmiWrapLifecycle, WrapperAndDiagnosticsShareOneInit)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "WrapperAndDiagnosticsShareOneInit",
+        []() {
+            ASSERT_EQ(amd_smi_init(), ncclSuccess);
+            if(amd_smi_diagInit() != ncclSuccess)
+                GTEST_SKIP() << "amd_smi_diagInit() failed: built without the amdsmi header";
+            EXPECT_EQ(lifecycleStubCounter("amdsmi_test_init_count"), 1u);
+            EXPECT_EQ(amd_smi_shutdown(), ncclSuccess);
+            EXPECT_EQ(lifecycleStubCounter("amdsmi_test_shutdown_count"), 1u);
+
+            EXPECT_EQ(amd_smi_diagInit(), ncclSuccess);
+            EXPECT_EQ(amd_smi_init(), ncclSuccess);
+            EXPECT_EQ(lifecycleStubCounter("amdsmi_test_init_count"), 2u);
+            EXPECT_EQ(amd_smi_shutdown(), ncclSuccess);
+            EXPECT_EQ(lifecycleStubCounter("amdsmi_test_shutdown_count"), 2u);
+        },
+        {{"RCCL_USE_AMD_SMI_LIB", "1"},
+         {"LD_LIBRARY_PATH", lifecycleStubLibraryPath()}}
+    );
+}
+
 TEST_F(AmdSmiWrapTest, PciBusIdIsPopulatedForEveryDevice)
 {
     requireDevices(1);
@@ -205,6 +261,63 @@ TEST_F(AmdSmiWrapTest, PciBusIdRoundTripsToDeviceIndex)
         ASSERT_EQ(amd_smi_getDeviceIndexByPciBusId(busId, &deviceIndex), ncclSuccess)
             << "bus ID " << busId;
         EXPECT_EQ(deviceIndex, i) << "bus ID " << busId << " resolved to the wrong device";
+    }
+}
+
+// The RAS diagnostics name a GPU by its busIdToInt64() value, which amd_smi_diag* decode back into a BDF, so
+// every device's bus ID has to reach a GPU that AMD SMI knows. A partition (non-zero PCI function) may be known
+// only through its physical GPU on function 0, which is what the diagnostics fall back to. ECC counters and XGMI
+// links depend on the GPU, so only the values they return when they answer are checked. AMD SMI reads the amdgpu
+// driver version from /sys/module/amdgpu/version, which an in-tree amdgpu does not provide.
+TEST_F(AmdSmiWrapTest, DiagnosticsQueriesResolveEveryDeviceBusId)
+{
+    requireDevices(1);
+    if(amd_smi_diagInit() != ncclSuccess)
+        GTEST_SKIP() << "amd_smi_diagInit() failed: no AMD SMI library";
+
+    std::string sysfsDriverVersion;
+    std::ifstream("/sys/module/amdgpu/version") >> sysfsDriverVersion;
+
+    uint32_t nGpus = 0;
+    ASSERT_EQ(amd_smi_diagGpuCount(&nGpus), ncclSuccess);
+    EXPECT_GT(nGpus, 0u);
+
+    for(uint32_t i = 0; i < numDevices_; i++)
+    {
+        char busIdString[32] = {0};
+        ASSERT_EQ(amd_smi_getDevicePciBusIdString(i, busIdString, sizeof(busIdString)), ncclSuccess);
+        int64_t busId = 0;
+        ASSERT_EQ(busIdToInt64(busIdString, &busId), ncclSuccess) << "bus ID " << busIdString;
+
+        char model[256] = {0};
+        if(amd_smi_diagGpuModel(busId, model, sizeof(model)) != ncclSuccess && (busId & 0xf) != 0)
+            busId &= ~INT64_C(0xf);
+        model[0] = '\0';
+        EXPECT_EQ(amd_smi_diagGpuModel(busId, model, sizeof(model)), ncclSuccess) << "bus ID " << busIdString;
+        EXPECT_GT(strlen(model), 0u) << "bus ID " << busIdString;
+
+        char driverVersion[80] = {0};
+        if(!sysfsDriverVersion.empty())
+        {
+            EXPECT_EQ(amd_smi_diagDriverVersion(busId, driverVersion, sizeof(driverVersion)), ncclSuccess)
+                << "bus ID " << busIdString;
+            EXPECT_EQ(std::string(driverVersion), sysfsDriverVersion) << "bus ID " << busIdString;
+        }
+        else if(amd_smi_diagDriverVersion(busId, driverVersion, sizeof(driverVersion)) == ncclSuccess)
+            EXPECT_GT(strlen(driverVersion), 0u) << "bus ID " << busIdString;
+
+        amdsmiDiagEccCounts ecc = {UINT64_MAX, UINT64_MAX, UINT64_MAX};
+        if(amd_smi_diagEccCounts(busId, &ecc) == ncclSuccess)
+            EXPECT_TRUE(ecc.correctable != UINT64_MAX && ecc.uncorrectable != UINT64_MAX && ecc.deferred != UINT64_MAX)
+                << "bus ID " << busIdString;
+
+        amdsmiDiagXgmiLinks links = {-1, -1};
+        if(amd_smi_diagXgmiLinks(busId, &links) == ncclSuccess)
+        {
+            EXPECT_GE(links.nLinks, 0) << "bus ID " << busIdString;
+            EXPECT_GE(links.nDown, 0) << "bus ID " << busIdString;
+            EXPECT_LE(links.nDown, links.nLinks) << "bus ID " << busIdString;
+        }
     }
 }
 
@@ -338,6 +451,88 @@ TEST(AmdSmiWrapFabricPaths, LibraryPathMatchesSysfs)
         },
         {{"RCCL_USE_AMD_SMI_LIB", "1"}}
     );
+}
+
+// ---------------------------------------------------------------------------
+// Fabric telemetry gating
+//
+// commAlloc() calls amd_smi_fabricTelemetryAcquire() unconditionally and decides
+// whether to release later from the out-param alone, so a path that returns early
+// without clearing it would leave the reference count unbalanced. Both gates are
+// read through RCCL_PARAM, which caches on first use, so each needs its own
+// process.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+// Acquire returns ncclSuccess whichever gate declines, so the out-param alone cannot
+// say which one did. Neither child loads amd_smi, which leaves every pfn_ null and
+// makes the "exports no fabric telemetry entry points" exit reachable in both; a test
+// that checked only the out-param would pass through that exit and still pass with
+// the gate it meant to cover deleted. Each caller below therefore names its gate in
+// the log. Runs the release too: for such a comm commCleanup() skips it, so releasing
+// a device that was never acquired has to be harmless rather than underflow a count.
+std::string acquireExpectingNothing()
+{
+    bool         acquired = true; // must be cleared even on the early return
+    ncclResult_t res      = ncclSuccess;
+
+    // WARN goes to ncclDebugFile, which is stdout unless NCCL_DEBUG_FILE moves it,
+    // and ncclDebugLog does not flush. Without the flush inside the capture the text
+    // is still in the FILE buffer when gtest puts the descriptor back.
+    const std::string log = CaptureStdout([&]() {
+        res = amd_smi_fabricTelemetryAcquire(0, 0xabcd, 0, &acquired);
+        fflush(stdout);
+    });
+
+    EXPECT_EQ(res, ncclSuccess);
+    EXPECT_FALSE(acquired);
+    EXPECT_EQ(amd_smi_fabricTelemetryRelease(0), ncclSuccess);
+    return log;
+}
+
+} // namespace
+
+// NCCL_DEBUG=WARN in both children because an unset NCCL_DEBUG means NCCL_LOG_ERROR,
+// which is below WARN and would leave every log assertion below trivially satisfied.
+
+// clearVariable rather than setting the key to 0: the child inherits the parent
+// environment, and the point is the RCCL_PARAM default, not an explicit zero.
+TEST(AmdSmiFabricTelemetryAcquire, DisabledByDefaultAcquiresNothing)
+{
+    RUN_ISOLATED_TESTS(ProcessIsolatedTestRunner::TestConfig(
+                           "DisabledByDefaultAcquiresNothing",
+                           []() {
+                               const std::string log = acquireExpectingNothing();
+                               // The enable check precedes preflight, so an unset key
+                               // reports nothing whatsoever. Flipped to 1, this child
+                               // would reach preflight and warn from there instead.
+                               EXPECT_FALSE(LogHas(log, "fabric telemetry"))
+                                   << "telemetry is opt-in, so an unset enable does not get as far as a "
+                                      "complaint; got: "
+                                   << log;
+                           })
+                           .setVariable("RCCL_USE_AMD_SMI_LIB", "1")
+                           .setVariable("NCCL_DEBUG", "WARN")
+                           .clearVariable("RCCL_FABRIC_TELEMETRY_ENABLE"));
+}
+
+TEST(AmdSmiFabricTelemetryAcquire, EnabledWithoutAmdSmiLibAcquiresNothing)
+{
+    RUN_ISOLATED_TESTS(ProcessIsolatedTestRunner::TestConfig(
+                           "EnabledWithoutAmdSmiLibAcquiresNothing",
+                           []() {
+                               // The counters are only reachable through amd_smi, so
+                               // enabling telemetry while RCCL is on its sysfs path has
+                               // to be declined, not attempted.
+                               const std::string log = acquireExpectingNothing();
+                               EXPECT_TRUE(LogHas(log, "requires RCCL_USE_AMD_SMI_LIB=1"))
+                                   << "declined, but not at the RCCL_USE_AMD_SMI_LIB gate; got: " << log;
+                           })
+                           .setVariable("RCCL_FABRIC_TELEMETRY_ENABLE", "1")
+                           .setVariable("RCCL_USE_AMD_SMI_LIB", "0")
+                           .setVariable("NCCL_DEBUG", "WARN"));
 }
 
 } // namespace RcclUnitTesting
