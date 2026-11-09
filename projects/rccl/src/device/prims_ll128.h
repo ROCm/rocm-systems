@@ -681,11 +681,12 @@ public:
 #if TDM_LL128_ON
     tdmEnable = ncclShmem.comm.tdmLl128Enable;
 #endif
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS && RCCL_LL_FIFO_SYS_SCOPE
     skip_fence = !ncclShmem.comm.cheapPostSendFenceOff;
 #else
-    // The cheap post-peer fence is only safe with global DWORDX4 builtins
-    // (system-scope cache-bypassing stores); otherwise always use the full fence.
+    // The cheap post-send fence only waits for this wave's stores. It is safe only when store128Fifo
+    // issues system-scope stores; plain FIFO stores need the full fence before the proxy sees the tail,
+    // or the NIC can read stale 128-byte lines of the step.
     skip_fence = false;
 #endif
   }
