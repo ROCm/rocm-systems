@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/sop2.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/decode_factories.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/execution_backend.h"
 #include <memory>
 
@@ -1520,6 +1521,7 @@ SRfeRestoreB64Sop2::SRfeRestoreB64Sop2(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Sop2InstLiteralMachineInst *>(inst)->simm32));
   pc.apply_fieldless_caps(false, false, false);
+  flags_ |= WRITES_PC;
 }
 
 namespace detail {

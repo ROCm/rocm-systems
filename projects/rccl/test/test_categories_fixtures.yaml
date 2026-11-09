@@ -79,6 +79,7 @@ test_categories:
       - "LlFifoSysScope.*"
       - "DdaIpcGpuBarrierOrdering.*"
       - "DdaReduceScatterFabricLL.*"
+      - "DdaAllReduceFabricLL.*"
       - "DIVUP.*"
       - "ROUNDUP.*"
       - "ALIGN_POWER.*"
@@ -93,6 +94,7 @@ test_categories:
       - "Add4G.*"
       - "RcclEpWaveTest.*"
       - "RcclEpLayoutTest.*"
+      - "DeviceApi.RejectedCreate*"
     exclude_windows:
       - "*"
     labels:

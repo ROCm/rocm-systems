@@ -1470,6 +1470,53 @@ TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_ContextCountNotAMultipleOfTheC
   EXPECT_EQ(4, devComm_.ginConnectionCount);
 }
 
+// Applications index contexts with devComm.ginContextCount, so it has to be the
+// allocated count -- the request rounded up to ginCommCount -- whether or not
+// the request was already a multiple (NVIDIA/nccl#2301).
+TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_AnyContextRequest_ReportsTheAllocatedCount) {
+  const struct {
+    int requested;
+    int connections;
+    int allocated;
+  } cases[] = {
+      {1, 1, 1}, {4, 1, 4}, {3, 3, 3}, {6, 3, 6},
+      {1, 4, 4}, {4, 3, 6}, {5, 2, 6}, {3, 2, 4},
+  };
+  for (const auto& spec : cases) {
+    SCOPED_TRACE("requested=" + std::to_string(spec.requested) +
+                 " connections=" + std::to_string(spec.connections));
+    gin()->backends[0].ginCommCount = spec.connections;
+    for (int i = 1; i < spec.connections; i++) gin()->backends[0].ginComms[i] = fake_.collCommHandle(i);
+    fake_.createContextCalls = 0;
+    fake_.createdConfigs.clear();
+
+    auto reqs = proxyReqs();
+    reqs.ginContextCount = spec.requested;
+    ncclDevComm devComm{};
+    ASSERT_EQ(ncclSuccess, setup(reqs, &devComm));
+    EXPECT_EQ(spec.allocated, static_cast<int>(devComm.ginContextCount));
+    EXPECT_EQ(spec.connections, fake_.createContextCalls);
+    for (const auto& config : fake_.createdConfigs) {
+      EXPECT_EQ(spec.allocated, config.nContexts * spec.connections);
+    }
+    ASSERT_EQ(ncclSuccess, ncclGinDevCommFree(comm(), &devComm));
+  }
+}
+
+// A createContext failure must not leave a reported count an application could
+// index with.
+TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_CreateContextFails_ClearsTheReportedContextCount) {
+  gin()->backends[0].ginCommCount = 3;
+  for (int i = 1; i < 3; i++) gin()->backends[0].ginComms[i] = fake_.collCommHandle(i);
+  fake_.failCreateContext = {ncclSystemError, 1};
+
+  auto reqs = proxyReqs();
+  reqs.ginContextCount = 4;
+  EXPECT_NE(ncclSuccess, setup(reqs, &devComm_));
+  EXPECT_EQ(0u, devComm_.ginContextCount);
+  EXPECT_EQ(1, fake_.createContextCalls);
+}
+
 // AICOMRCCL-3181: ncclDevCommCreate corrupted the heap when a devComm was
 // requested with ginConnectionType=FULL and ginContextCount=0. The count flows
 // through ncclGinContextCount() = ROUNDUP(request, ginCommCount), which returned

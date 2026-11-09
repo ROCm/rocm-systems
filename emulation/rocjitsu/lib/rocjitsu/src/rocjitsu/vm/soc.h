@@ -77,6 +77,15 @@ public:
   /// the same path from its destructor.
   void release_vm_resources();
 
+  /// Move the GPU component tree into a VM wrapper, retaining its traversal root.
+  void move_components_to(simdojo::CompositeComponent &owner) {
+    owner.adopt_children(*this);
+    component_root_ = &owner;
+  }
+
+  /// Return this GPU's component tree, including components outside the XCD hierarchy.
+  const simdojo::CompositeComponent &component_root() const { return *component_root_; }
+
   uint32_t gpu_id() const { return gpu_id_; }
 
   /// @brief Attach an XCD during topology construction, before its CUs can execute.
@@ -289,6 +298,7 @@ private:
   [[nodiscard]] std::optional<amdgpu::ComputeQueueBindingPlan>
   make_pm4(uint32_t queue_ordinal, amdgpu::Pm4PacketCallbacks callbacks) override;
 
+  const simdojo::CompositeComponent *component_root_ = this;
   static inline std::atomic<uint32_t> next_gpu_id_{0};
   uint32_t gpu_id_ = next_gpu_id_++;
   rj_code_arch_t arch_ = ROCJITSU_CODE_ARCH_INVALID;
