@@ -2582,6 +2582,11 @@
           "test_filter": "SendRecv.UserBufferRegister"
         },
         {
+          "name": "SendRecv.SingleRankGroupedSendRecvToSelf",
+          "description": "1-rank grouped send/recv to self, default env and forced 256 P2P channels per peer",
+          "test_filter": "SendRecv.SingleRankGroupedSendRecvToSelf"
+        },
+        {
           "name": "GroupCall.Identical",
           "description": "GroupCall identical",
           "test_filter": "GroupCall.Identical"
