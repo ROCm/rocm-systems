@@ -184,7 +184,8 @@ endforeach()
 foreach(_dda_param
     "RCCL_PARAM(DdaLL, \"DDA_LL\", 1)"
     "RCCL_PARAM(DdaLLOneShotThreshold, \"DDA_LL_ONESHOT_THRESHOLD\", (size_t)(1) * 1024 * 1024)"
-    "RCCL_PARAM(DdaLL128OneShotThreshold, \"DDA_LL128_ONESHOT_THRESHOLD\", (size_t)(4) * 1024 * 1024)")
+    "RCCL_PARAM(DdaLL128OneShotThreshold, \"DDA_LL128_ONESHOT_THRESHOLD\", (size_t)(4) * 1024 * 1024)"
+    "RCCL_PARAM(DdaLL128AsyncWire, \"DDA_LL128_ASYNC_WIRE\", 0)")
   rccl_assert_source_line("${_rccl_src_root}/rccl_wrap.cc" "${_dda_param}" "algorithms/dda/dda-coll-seams.cc")
   rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/algorithms/dda/dda-coll-seams.cc" "${_dda_param}"
     "the rccl_wrap.cc DDA param")
@@ -313,6 +314,7 @@ function(rccl_define_micro_source_lists)
     fakes/tuning_fakes.cc
     fakes/wrap_fakes.cc
     ../common/main_altrsmi.cpp
+    ../common/GpuCountProbe.cpp
     ../common/ProcessIsolatedTestRunner.cpp
     PARENT_SCOPE)
 
@@ -448,6 +450,7 @@ function(rccl_define_micro_source_lists)
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
     ../common/main_altrsmi.cpp
+    ../common/GpuCountProbe.cpp
     ../common/ProcessIsolatedTestRunner.cpp
     PARENT_SCOPE)
 
@@ -523,8 +526,10 @@ function(rccl_define_micro_source_lists)
     algorithms/dda/reduce_scatter/dda-reduce-scatter-fabric-ll128-test.cc
     algorithms/dda/reduce_scatter/dda-reduce-scatter-ipc-test.cc
     algorithms/dda/dda-coll-seams.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     fakes/hip_fakes.cc
     fakes/nccl_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
@@ -817,7 +822,9 @@ function(rccl_define_micro_source_lists)
   # rccl-UnitTestsMicroParam -- src/param/{param,c_api}.cc, src/misc/param.cc. Own binary: misc/param.cc
   # defines ncclGetEnv, initEnv and ncclLoadParam, which the shared fakes in rccl-UnitTestsMicro also define.
   set(TEST_MICRO_PARAM_SOURCE_FILES
+    fakes/hip_fakes.cc
     param-test.cc
+    ../common/GpuCountProbe.cpp
     ../common/ProcessIsolatedTestRunner.cpp
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
@@ -847,6 +854,7 @@ function(rccl_define_micro_source_lists)
   # rccl-UnitTestsMicroPlugin -- src/plugin/net.cc, net/net_v*.cc, plugin_open.cc. Own binary: gin-plugin-init-test.cc
   # defines ncclPluginLibPaths, ncclClosePluginLib and ncclGetNetPluginLib in rccl-UnitTestsMicro.
   set(TEST_MICRO_PLUGIN_SOURCE_FILES
+    fakes/hip_fakes.cc
     plugin-net-test.cc
     plugin-open-test.cc
     net-v6-test.cc
@@ -859,6 +867,7 @@ function(rccl_define_micro_source_lists)
     fakes/env_fakes.cc
     fakes/nccl_fakes.cc
     fakes/transport_stubs.cc
+    ../common/GpuCountProbe.cpp
     ../common/ProcessIsolatedTestRunner.cpp
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
@@ -1044,6 +1053,7 @@ function(rccl_define_micro_source_lists)
 
   # src/misc/ IB verbs and direct-verbs loaders
   set(TEST_MICRO_MISC_SOURCE_FILES
+    fakes/hip_fakes.cc
     misc/gdr-peermem-test.cc
     misc/ibvsymbols-test.cc
     misc/dvsymbols-test.cc               # mlx5dvsymbols.cc + ionicdvsymbols.cc
@@ -1056,6 +1066,7 @@ function(rccl_define_micro_source_lists)
     fakes/nccl_fakes.cc
     fakes/net_ib_ops_fault_fakes.cc      # ibvwrap.cc fault shims
     fakes/transport_stubs.cc             # rcclUseAinic
+    ../common/GpuCountProbe.cpp
     ../common/ProcessIsolatedTestRunner.cpp
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
@@ -1377,6 +1388,7 @@ function(rccl_standalone_setup)
     ${RCCL_TEST_DIR}/DdaCollCommonTests.cpp
     ${RCCL_TEST_DIR}/RomeTopoConsensusTests.cpp
     RomeTopoConsensusLogTests.cpp
+    process-isolated-runner-pool-test.cc
     ${RCCL_TEST_DIR}/MiscTests.cpp
     ${RCCL_TEST_DIR}/VersionGateTests.cpp
     ${RCCL_TEST_DIR}/TimeoutTests.cpp
@@ -1384,6 +1396,7 @@ function(rccl_standalone_setup)
     ${RCCL_TEST_DIR}/BootstrapBidirTests.cpp
     ${RCCL_TEST_DIR}/AltRsmiTests.cpp
     ${RCCL_TEST_DIR}/AcclProfilerTests.cpp
+    ${RCCL_TEST_DIR}/common/GpuCountProbe.cpp
     ${RCCL_TEST_DIR}/common/ProcessIsolatedTestRunner.cpp
     ${RCCL_HIPIFY_DIR}/src/misc/kernel_config.cc
     ${RCCL_HIPIFY_DIR}/src/misc/alt_rsmi.cc
@@ -1617,6 +1630,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     CSV_TUNER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/tuner/csv_tuner.cc"
     # Source tuner/ dir, so a test can check the generator embedded the CSVs verbatim.
     RCCL_TUNER_CSV_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../tuner"
+    RING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/ring.cc"
     RAS_CLIENT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/client.cc"
     RMA_PROXY_LAUNCH_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_proxy_launch.cc"
     RMA_PROXY_PROGRESS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_proxy_progress.cc"
@@ -1830,6 +1844,9 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDdaColl
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/empty_gpubinary" "")
 target_compile_options(rccl-UnitTestsMicroDdaColl PRIVATE
   "SHELL:-Xclang -fcuda-include-gpubinary -Xclang ${CMAKE_CURRENT_BINARY_DIR}/empty_gpubinary")
+# dda_alltoall_fabric.cu.cpp pulls in alltoall_dda_fabric_tdm.h, which includes "tdm/tdmCopy.h".
+target_include_directories(rccl-UnitTestsMicroDdaColl PRIVATE
+  ${RCCL_HOST_HIPIFY_DIR}/src/device)
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroRmaProxy
@@ -2443,7 +2460,8 @@ function(rccl_add_transport_micro_binary _name _test)
   cmake_parse_arguments(_ratmb "PROCESS_ISOLATED" "" "SOURCES;EXTRA_DEFS" ${ARGN})
   set(_ratmb_shared ${_ratmb_SOURCES} ../common/main_altrsmi.cpp)
   if(_ratmb_PROCESS_ISOLATED)
-    list(APPEND _ratmb_shared ../common/ProcessIsolatedTestRunner.cpp)
+    # GpuCountProbe.cpp resolves the runner's gpuCountViaFreshImage(); the two always link together.
+    list(APPEND _ratmb_shared ../common/GpuCountProbe.cpp ../common/ProcessIsolatedTestRunner.cpp)
   endif()
   set(_ratmb_args
     EXTRA_INCLUDES
@@ -2502,6 +2520,7 @@ rccl_add_transport_micro_binary(rccl-UnitTestsMicroTransportNetTelemetry net-tel
   PROCESS_ISOLATED
   SOURCES
     fakes/env_fakes.cc
+    fakes/hip_fakes.cc                   # hipGetDeviceCount, for the runner's GPU-pool probe
     fakes/libc_fakes.cc)
 
 rccl_add_transport_micro_binary(rccl-UnitTestsMicroTransportNet net-test.cc
