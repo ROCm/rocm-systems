@@ -21,8 +21,8 @@ uncovered_allowlisted: 13
 coverage_pct: 97.4
 -->
 
-- Snapshot date: 2026-08-26
-- Snapshot commit: `920418c484`
+- Snapshot date: 2026-11-09
+- Snapshot commit: `16ad3db387` (base branch; counts include the changes under review)
 - Contract tests: 634
 - Contract domains: 118
 - Declared HIP runtime APIs parsed from `hip_runtime_api.h`: 505

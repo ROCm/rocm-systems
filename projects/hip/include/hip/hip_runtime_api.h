@@ -653,8 +653,8 @@ typedef enum hipDeviceAttribute_t {
                                                  ///< per kernel launch (0 if unsupported).
   hipDeviceAttributeL3CacheSize,                 ///< Size of L3 cache in bytes, capped at INT_MAX.
                                                  ///< 0 if no cache information is available.
-                                                 ///< AMD-specific: populated only by the Linux
-                                                 ///< ROCm backend; other backends report 0.
+                                                 ///< AMD-specific: populated by the ROCm (ROCr)
+                                                 ///< backend; the PAL backend reports 0.
                                                  ///< On a partitioned AMD Instinct GPU this is
                                                  ///< the partition's L3 share, scaled by the
                                                  ///< memory-partition (NPS) mode, not by the

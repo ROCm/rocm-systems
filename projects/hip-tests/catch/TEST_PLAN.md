@@ -144,7 +144,7 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_Device_HipDeviceFlushGPUDirectRDMAWrites_ToAllDevices_AcceptedOrUnsupported` | hipDeviceFlushGPUDirectRDMAWrites | a flush to all-devices scope is accepted or reports unsupported |
 | `Contract_Device_HipDeviceFlushGPUDirectRDMAWrites_ToOwner_AcceptedOrUnsupported` | hipDeviceFlushGPUDirectRDMAWrites | a flush to owner scope is accepted or reports unsupported |
 | `Contract_Device_HipDeviceGetAttribute_L3CacheSize_InvalidDeviceIsRejected` | hipDeviceGetAttribute | an out-of-range device for hipDeviceAttributeL3CacheSize is rejected |
-| `Contract_Device_HipDeviceGetAttribute_L3CacheSize_IsWithinIntRange` | hipDeviceGetAttribute | hipDeviceAttributeL3CacheSize returns a value in [0, INT_MAX] |
+| `Contract_Device_HipDeviceGetAttribute_L3CacheSize_IsNonNegative` | hipDeviceGetAttribute | hipDeviceAttributeL3CacheSize returns a non-negative size in bytes |
 | `Contract_Device_HipDeviceGetAttribute_L3CacheSize_NullOutputIsRejected` | hipDeviceGetAttribute | a null output pointer for hipDeviceAttributeL3CacheSize is rejected |
 | `Contract_Device_HipDeviceGetAttribute_WarpSize_MatchesProperties` | hipDeviceGetAttribute | hipDeviceAttributeWarpSize matches the warp size from hipGetDeviceProperties |
 | `Contract_Device_HipGetDeviceProperties_GetProperties_SucceedsForCurrentDevice` | hipGetDeviceProperties | succeeds in populating properties for the current device |

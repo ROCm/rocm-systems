@@ -6,7 +6,6 @@
 
 #include <cstring>
 #include <initializer_list>
-#include <limits>
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
@@ -71,23 +70,24 @@ HIP_TEST_CASE(Contract_Device_HipDeviceGetAttribute_WarpSize_MatchesProperties) 
 }
 
 // hipDeviceAttributeL3CacheSize is AMD-specific: it is appended to the
-// hipDeviceAttribute_t AMD range and only the Linux ROCm backend populates it.
+// hipDeviceAttribute_t AMD range and only the ROCm (ROCr) backend populates it.
 // BACKEND-DIFF: NVIDIA has no equivalent cudaDeviceAttr for an L3/Infinity Cache
 // size, so these contracts are AMD-only; parity would require a CUDA attribute.
 #if HT_AMD
 // The header documents the attribute's contract: bytes, capped at INT_MAX, and 0
-// when no cache information is available. The device-only harness can pin the
-// range and the rejection behavior; the actual HSA-derived value is compared on
-// AMD hardware in unit/device/hipGetDeviceAttribute.cc.
-// @asserts: hipDeviceGetAttribute - hipDeviceAttributeL3CacheSize returns a value in [0, INT_MAX]
-HIP_TEST_CASE(Contract_Device_HipDeviceGetAttribute_L3CacheSize_IsWithinIntRange) {
+// when no cache information is available. The device-only harness can pin
+// non-negativity and the rejection behavior; the actual HSA-derived value is
+// compared on AMD hardware in unit/device/hipGetDeviceAttribute.cc.
+// @asserts: hipDeviceGetAttribute - hipDeviceAttributeL3CacheSize returns a non-negative size in bytes
+HIP_TEST_CASE(Contract_Device_HipDeviceGetAttribute_L3CacheSize_IsNonNegative) {
   const int device = CurrentDevice();
   int l3_cache_size = -1;
 
   HIP_CHECK(hipDeviceGetAttribute(&l3_cache_size, hipDeviceAttributeL3CacheSize, device));
 
+  // The runtime caps the reported bytes at INT_MAX, so the value is never negative.
+  // An upper-bound assertion would be vacuous here: the output parameter is an int.
   REQUIRE(l3_cache_size >= 0);
-  REQUIRE(l3_cache_size <= std::numeric_limits<int>::max());
 }
 
 // @asserts: hipDeviceGetAttribute - a null output pointer for hipDeviceAttributeL3CacheSize is rejected
