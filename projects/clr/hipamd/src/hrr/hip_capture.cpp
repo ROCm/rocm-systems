@@ -69,9 +69,14 @@
 #include <map>
 #include <memory>
 #include <new>
+#include <thread>
 #include <tuple>
 #include <unordered_map>
 #include <vector>
+#ifdef __linux__
+#include <pthread.h>
+#include <sched.h>
+#endif
 
 static std::once_flag g_hrr_atexit_once;
 
@@ -213,6 +218,7 @@ struct SnapChunk {
   bool             changed = false;  // in: the last snapshot's flag; out: this one's
   bool             taken = false;    // hash names the bytes
   bool             copy = false;     // new bytes, written from a copy
+  size_t           at = 0;           // where in the copy
 };
 struct HostSnap {
   uint64_t               base = 0, size = 0, chunk = 0;
@@ -226,6 +232,11 @@ std::map<uintptr_t, PinnedAlloc> g_pinned;
 std::atomic<size_t>              g_pinned_count{0};
 // The pinned allocations the launch this thread is making points into.
 thread_local std::vector<HostSnap> t_snaps;
+// Helper threads that hash chunks of a large allocation. A forked child has
+// none of them, so it leaves the parent's pool alone and makes its own.
+struct PinnedHashPool;
+std::atomic<PinnedHashPool*> g_hash_pool{nullptr};
+std::atomic<bool>            g_hash_pool_made{false};
 }  // namespace
 
 static size_t hrr_host_snapshot_chunk_bytes();
@@ -263,7 +274,8 @@ static void pinned_untrack(void* p) {
 // fork() takes g_pinned_mu before the writer's locks, the order a launch takes
 // them in, so a child never inherits it held by a thread it does not have.
 // The child has none of the threads that were reading allocations, so it
-// clears their counts, or its frees would wait forever. Registered after
+// clears their counts, or its frees would wait forever, and none of the hash
+// helpers, so it makes a pool of its own when it needs one. Registered after
 // writer::open() registers the writer's handlers: prepare handlers run in
 // reverse order of registration.
 static void pinned_install_atfork() {
@@ -273,6 +285,8 @@ static void pinned_install_atfork() {
     pthread_atfork([] { g_pinned_mu.lock(); }, [] { g_pinned_mu.unlock(); },
                    [] {
                      for (auto& e : g_pinned) e.second.readers = 0;
+                     g_hash_pool.store(nullptr, std::memory_order_relaxed);
+                     g_hash_pool_made.store(false, std::memory_order_relaxed);
                      g_pinned_mu.unlock();
                    });
   });
@@ -401,6 +415,142 @@ static bool hash_eq(hrr_cap::Hash128 a, hrr_cap::Hash128 b) {
   return a.lo == b.lo && a.hi == b.hi;
 }
 
+static size_t pinned_chunk_len(const HostSnap& s, size_t i) {
+  return std::min<size_t>(s.chunk, s.size - i * s.chunk);
+}
+
+// One core hashes about 20 GB/s, so a launch that reads a 16 MiB allocation
+// spends ~0.8 ms on the hash alone. At least kPinnedSharedChunks chunks are
+// hashed, or written, with helper threads, one per 8 CPUs the process may run
+// on, at most 7. One launch at a time uses the helpers; another works on its
+// own thread meanwhile.
+constexpr size_t kPinnedSharedChunks = 16;
+
+namespace {
+// Hashes the chunks of `snap` in place, or, given the copy of its new chunks,
+// hashes and writes those.
+struct PinnedHashJob {
+  HostSnap*           snap = nullptr;
+  const uint8_t*      copy = nullptr;
+  std::atomic<size_t> next{0};
+};
+struct PinnedHashPool {
+  std::mutex              mu;
+  std::condition_variable wake, idle;
+  PinnedHashJob*          job = nullptr;  // open to helpers; set while a launch owns them
+  uint64_t                generation = 0;
+  unsigned                active = 0;     // helpers inside the job
+};
+}  // namespace
+
+// A new chunk is named by the hash of its copy, so a host store after the
+// read cannot leave a blob that differs from its name.
+static void pinned_store_chunk(SnapChunk& c, size_t len, const uint8_t* copy) {
+  try {
+    const hrr_cap::Hash128 h = hrr_cap::writer::hash_bytes(copy, len);
+    c.changed = !hash_eq(h, c.last) && !hrr_cap::writer::blob_written(h, len);
+    c.hash    = c.changed ? hrr_cap::writer::write_blob_hashed(copy, len, h) : h;
+    c.taken   = true;
+  } catch (...) {
+    c = SnapChunk{};
+  }
+}
+
+// Works through the chunks until none are left. In place, a chunk equal to
+// its last record, or to a blob the archive holds, is taken; any other is
+// marked to be copied, as is one the last snapshot found new.
+static void pinned_hash_chunks(PinnedHashJob& j) {
+  HostSnap& s = *j.snap;
+  const auto* src = reinterpret_cast<const uint8_t*>(s.base);
+  for (size_t i; (i = j.next.fetch_add(1, std::memory_order_relaxed)) < s.chunks.size();) {
+    SnapChunk& c = s.chunks[i];
+    if (j.copy) {
+      if (c.copy) pinned_store_chunk(c, pinned_chunk_len(s, i), j.copy + c.at);
+      continue;
+    }
+    if (!c.changed) {
+      const size_t len = pinned_chunk_len(s, i);
+      try {
+        c.hash = hrr_cap::writer::hash_bytes(src + i * s.chunk, len);
+        if (hash_eq(c.hash, c.last) || hrr_cap::writer::blob_written(c.hash, len)) {
+          c.taken = true;
+          continue;
+        }
+      } catch (...) {
+      }
+    }
+    c.copy = true;
+  }
+}
+
+static void pinned_hash_helper(PinnedHashPool* p) {
+#ifdef __linux__
+  pthread_setname_np(pthread_self(), "hrr-pin-hash");
+#endif
+  uint64_t seen = 0;
+  std::unique_lock<std::mutex> lk(p->mu);
+  for (;;) {
+    p->wake.wait(lk, [&] { return p->job && p->generation != seen; });
+    seen = p->generation;
+    PinnedHashJob* j = p->job;
+    ++p->active;
+    lk.unlock();
+    pinned_hash_chunks(*j);
+    lk.lock();
+    if (--p->active == 0) p->idle.notify_all();
+  }
+}
+
+static PinnedHashPool* pinned_hash_pool() {
+  if (PinnedHashPool* p = g_hash_pool.load(std::memory_order_acquire)) return p;
+  if (g_hash_pool_made.exchange(true)) return nullptr;
+  unsigned cpus = std::thread::hardware_concurrency();
+#ifdef __linux__
+  cpu_set_t set;
+  if (sched_getaffinity(0, sizeof(set), &set) == 0) cpus = CPU_COUNT(&set);
+#endif
+  const unsigned helpers = std::min(cpus / 8, 7u);
+  if (helpers == 0) return nullptr;
+  auto* p = new (std::nothrow) PinnedHashPool;
+  if (!p) return nullptr;
+  unsigned started = 0;
+  try {
+    for (; started < helpers; ++started) std::thread(pinned_hash_helper, p).detach();
+  } catch (...) {
+  }
+  if (started == 0) {
+    delete p;
+    return nullptr;
+  }
+  g_hash_pool.store(p, std::memory_order_release);
+  return p;
+}
+
+// Runs a job over the chunks of `s`, with the helpers when there are `work`
+// chunks or more and they are free.
+static void pinned_run_chunks(HostSnap& s, const uint8_t* copy, size_t work) {
+  PinnedHashJob j;
+  j.snap = &s;
+  j.copy = copy;
+  PinnedHashPool* p = work >= kPinnedSharedChunks ? pinned_hash_pool() : nullptr;
+  bool shared = false;
+  if (p) {
+    std::lock_guard<std::mutex> lk(p->mu);
+    if (!p->job) {
+      p->job = &j;
+      ++p->generation;
+      shared = true;
+    }
+  }
+  if (shared) p->wake.notify_all();
+  pinned_hash_chunks(j);
+  if (!shared) return;
+  // No helper joins after this, and the job lives until every one has left.
+  std::unique_lock<std::mutex> lk(p->mu);
+  p->job = nullptr;
+  p->idle.wait(lk, [&] { return p->active == 0; });
+}
+
 // Names the bytes of each chunk of one allocation by a blob, without
 // g_pinned_mu. A chunk equal to its last record needs nothing more, and most
 // chunks of most launches are. A chunk the last snapshot found new is likely
@@ -409,31 +559,20 @@ static bool hash_eq(hrr_cap::Hash128 a, hrr_cap::Hash128 b) {
 // hashed again and written, so a free does not wait for the files.
 static void pinned_snapshot_one(HostSnap& s) {
   const auto* src = reinterpret_cast<const uint8_t*>(s.base);
-  const auto chunk_len = [&](size_t i) { return std::min<size_t>(s.chunk, s.size - i * s.chunk); };
-  size_t fresh_bytes = 0;
-  for (size_t i = 0; i < s.chunks.size(); ++i) {
-    SnapChunk& c = s.chunks[i];
-    const size_t len = chunk_len(i);
-    if (!c.changed) {
-      c.hash = hrr_cap::writer::hash_bytes(src + i * s.chunk, len);
-      if (hash_eq(c.hash, c.last) || hrr_cap::writer::blob_written(c.hash, len)) {
-        c.taken = true;
-        continue;
-      }
+  pinned_run_chunks(s, nullptr, s.chunks.size());
+  size_t fresh_bytes = 0, fresh = 0;
+  for (size_t i = 0; i < s.chunks.size(); ++i)
+    if (s.chunks[i].copy) {
+      s.chunks[i].at = fresh_bytes;
+      fresh_bytes += pinned_chunk_len(s, i);
+      ++fresh;
     }
-    c.copy = true;
-    fresh_bytes += len;
-  }
-  // The host may change the buffer while it is read, so a new chunk is written
-  // from a copy and named by the copy's hash.
   std::unique_ptr<uint8_t[]> copy;
   if (fresh_bytes) {
     copy.reset(new (std::nothrow) uint8_t[fresh_bytes]);
-    for (size_t i = 0, at = 0; copy && i < s.chunks.size(); ++i)
-      if (s.chunks[i].copy) {
-        std::memcpy(copy.get() + at, src + i * s.chunk, chunk_len(i));
-        at += chunk_len(i);
-      }
+    for (size_t i = 0; copy && i < s.chunks.size(); ++i)
+      if (s.chunks[i].copy)
+        std::memcpy(copy.get() + s.chunks[i].at, src + i * s.chunk, pinned_chunk_len(s, i));
   }
   pinned_end_read(s);
   if (fresh_bytes && !copy) {
@@ -443,16 +582,7 @@ static void pinned_snapshot_one(HostSnap& s) {
                                        "no memory to copy a pinned allocation");
     return;
   }
-  for (size_t i = 0, at = 0; i < s.chunks.size(); ++i) {
-    SnapChunk& c = s.chunks[i];
-    if (!c.copy) continue;
-    const size_t len = chunk_len(i);
-    const hrr_cap::Hash128 h = hrr_cap::writer::hash_bytes(copy.get() + at, len);
-    c.changed = !hash_eq(h, c.last) && !hrr_cap::writer::blob_written(h, len);
-    c.hash    = c.changed ? hrr_cap::writer::write_blob_hashed(copy.get() + at, len, h) : h;
-    c.taken   = true;
-    at += len;
-  }
+  if (fresh) pinned_run_chunks(s, copy.get(), fresh);
 }
 
 static void pinned_finish_snapshots() {
