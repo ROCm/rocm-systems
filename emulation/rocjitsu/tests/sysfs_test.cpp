@@ -293,8 +293,9 @@ TEST(SysfsTopologyTest, RejectsCuLdsCapacityBeyondAdvertisedCwsrBound) {
   EXPECT_TRUE(loaded.failed());
   EXPECT_EQ(diagnostic.message(), "CWSR CU LDS capacity exceeds advertised device LDS capacity");
 
-  test::ScopedTempFile file("rocjitsu-cwsr-config-");
-  file.write(config);
+  test::ScopedTempFile file;
+  ASSERT_TRUE(file.initialize("rocjitsu-cwsr-config-"));
+  ASSERT_TRUE(file.write(config));
   util::StringDiagnostic validate_diagnostic;
   EXPECT_TRUE(config::validate_config(file.path(), kEmbeddedSchema, validate_diagnostic.emitter())
                   .failed());
@@ -318,8 +319,9 @@ TEST(SysfsTopologyTest, RejectsCuWaveSlotsBeyondAdvertisedCwsrBound) {
   EXPECT_TRUE(loaded.failed());
   EXPECT_EQ(diagnostic.message(), "CWSR CU wave slots exceed advertised device wave capacity");
 
-  test::ScopedTempFile file("rocjitsu-cwsr-config-");
-  file.write(config);
+  test::ScopedTempFile file;
+  ASSERT_TRUE(file.initialize("rocjitsu-cwsr-config-"));
+  ASSERT_TRUE(file.write(config));
   util::StringDiagnostic validate_diagnostic;
   EXPECT_TRUE(config::validate_config(file.path(), kEmbeddedSchema, validate_diagnostic.emitter())
                   .failed());
@@ -346,8 +348,9 @@ TEST(SysfsTopologyTest, RejectsCuCountBeyondAdvertisedCwsrBound) {
   EXPECT_TRUE(loaded.failed());
   EXPECT_EQ(diagnostic.message(), "CWSR CU count exceeds advertised device CU capacity");
 
-  test::ScopedTempFile file("rocjitsu-cwsr-config-");
-  file.write(config);
+  test::ScopedTempFile file;
+  ASSERT_TRUE(file.initialize("rocjitsu-cwsr-config-"));
+  ASSERT_TRUE(file.write(config));
   util::StringDiagnostic validate_diagnostic;
   EXPECT_TRUE(config::validate_config(file.path(), kEmbeddedSchema, validate_diagnostic.emitter())
                   .failed());
