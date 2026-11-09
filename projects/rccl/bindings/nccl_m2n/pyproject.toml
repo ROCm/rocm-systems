@@ -72,26 +72,26 @@ include = ["nccl._extensions*", "nccl.m2n*"]
     "include/nccl_m2n.h",
 ]
 
-# Run from the staged copy that contrib/nccl_m2n/scripts/build.sh py leaves in $WORK/py-build:
-#   cibuildwheel --platform linux nccl_m2n
-# The project directory (/project in the container) then also holds the RCCL nccl4py port,
-# which the build needs importable; pip's isolated build would fetch NVIDIA's nccl4py instead.
+# Release build: contrib/nccl_m2n/scripts/manylinux_wheel.sh runs, from projects/rccl ({project}),
+#   cibuildwheel --platform linux bindings/nccl_m2n
+# before-all builds libnccl_m2n.so in the manylinux image (manylinux_lib.sh); the build needs the RCCL
+# nccl4py port importable, pip's isolated build would fetch NVIDIA's nccl4py instead.
 [tool.cibuildwheel]
 build = "cp310-* cp311-* cp312-* cp313-* cp314-*"
 skip = "*-musllinux_*"
 build-frontend = { name = "pip", args = ["--no-build-isolation"] }
 before-build = [
     "pip install 'setuptools>=77.0.3' 'setuptools-scm>=8' 'Cython>=3.1'",
-    "SETUPTOOLS_SCM_PRETEND_VERSION=0.2.0 pip install --no-build-isolation --no-deps {project}/nccl4py",
+    "SETUPTOOLS_SCM_PRETEND_VERSION=0.2.0 pip install --no-build-isolation --no-deps {project}/bindings/nccl4py",
 ]
 environment = { NCCL_EXTENSIONS_REQUIRE_NATIVE_LIBS = "1" }
+environment-pass = ["M2N_RCCL_HOME", "M2N_ROCM_DEVEL_VERSION", "M2N_ROCM_INDEX", "M2N_GPU_ARCHS"]
 
 [tool.cibuildwheel.linux]
 archs = ["x86_64"]
 manylinux-x86_64-image = "manylinux_2_28"
-# The ROCm runtime comes from the user's ROCm / TheRock install, never from this wheel. The tag follows
-# the glibc of the staged libnccl_m2n.so (built in the Ubuntu 24.04 Primus image: GLIBC_2.38), not the
-# manylinux_2_28 image that builds the Cython extensions.
-repair-wheel-command = """auditwheel repair -w {dest_dir} {wheel} --plat manylinux_2_38_x86_64 \
+before-all = "bash {project}/contrib/nccl_m2n/scripts/manylinux_lib.sh"
+# The ROCm runtime comes from the user's ROCm / TheRock install, never from this wheel.
+repair-wheel-command = """auditwheel repair -w {dest_dir} {wheel} --plat manylinux_2_28_x86_64 \
     --exclude librccl.so.1 --exclude libamdhip64.so.7 --exclude libhsa-runtime64.so.1 \
     --exclude libamd_comgr.so.3 --exclude librocprofiler-register.so.0"""
