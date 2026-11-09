@@ -212,9 +212,6 @@ pub(crate) struct HsaState {
     pub(crate) gpus: Vec<Gpu>,
     /// Native session retained until all GPU and memory owners are gone.
     pub(crate) session: Option<Session>,
-    /// Lifetime policy for the KFD context used by this runtime generation.
-    /// Memory-pool choices that require the primary context use this value.
-    pub(crate) lifetime: DriverContextLifetime,
 }
 
 /// Callback work detached while HSA storage remains published for `OnUnload`.
@@ -622,7 +619,6 @@ impl HsaState {
             topology,
             gpus,
             session: Some(session),
-            lifetime,
         })
     }
 
