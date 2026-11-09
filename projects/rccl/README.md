@@ -144,6 +144,8 @@ Please consult the [rocSHMEM documentation](https://rocm.docs.amd.com/projects/r
   cmake -DENABLE_ROCSHMEM=ON -DROCSHMEM_SOURCE_DIR=/path/to/rocshmem/source ..
   ```
 
+  With the device linker (the default), a pre-built rocSHMEM must have been compiled with the new offload driver, which newer compilers use by default; with ROCm 7.0, build it with `-DCMAKE_CXX_FLAGS=--offload-new-driver`. Configuration fails if it was not.
+
   If neither `ROCSHMEM_INSTALL_DIR` (with a successful `find_package(rocshmem_static)`) nor `ROCSHMEM_SOURCE_DIR` is set, configuration fails with an error directing you to set `ROCSHMEM_SOURCE_DIR` (or use `install.sh --rocshmem`).
 
 **Runtime behavior**
