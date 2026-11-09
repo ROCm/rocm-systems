@@ -6,7 +6,13 @@ import argparse
 import re
 import sys
 
-from common import iter_group_configs, ERROR, RESET
+from common import (
+    expand_skip_target,
+    iter_group_configs,
+    ERROR,
+    RESET,
+    SKIP_TARGET_PLATFORMS,
+)
 
 
 # Known Jira project keys accepted in a skip 'reason'. Add a new key here when
@@ -15,10 +21,18 @@ JIRA_PROJECTS = ("AIRUNTIME", "ROCM", "SWDEV", "EXSWHTEC", "AIRADSW")
 JIRA_RE = re.compile(r"(?:" + "|".join(JIRA_PROJECTS) + r")-\d+")
 
 
+def _unsupported_everywhere(field, targets):
+    """Return True if an 'unsupported' field's targets cover every platform."""
+    covered = {c for target in targets for c in expand_skip_target(target)}
+    return field == "unsupported" and set(SKIP_TARGET_PLATFORMS) <= covered
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Check that every test case in the YAML configs has a "
-        "'level' field defined.",
+        "'level' field, that every 'disabled'/'unsupported' field has "
+        "well-formed targets and a reason citing a Jira reference, and that "
+        "no case is 'unsupported' on every platform.",
     )
     parser.add_argument(
         "configs_path",
@@ -36,6 +50,7 @@ def main():
     invalid_skip_fields = []
     missing_reasons = []
     missing_jira = []
+    unsupported_everywhere = []
 
     for group, cases in iter_group_configs(configs_path):
         for case_name, case_config in cases.items():
@@ -59,6 +74,11 @@ def main():
                 else:
                     invalid_skip_fields.append(f"  {group}/{case_name}: '{field}'")
                     continue
+                if not all(isinstance(target, str) for target in targets):
+                    invalid_skip_fields.append(f"  {group}/{case_name}: '{field}'")
+                    continue
+                if _unsupported_everywhere(field, targets):
+                    unsupported_everywhere.append(f"  {group}/{case_name}: '{field}'")
                 # A populated skip section (non-empty targets) must record a
                 # non-empty string 'reason'; a non-scalar (list/mapping) or
                 # non-string reason is treated as missing. An empty section
@@ -83,10 +103,19 @@ def main():
 
     if invalid_skip_fields:
         print(
-            f"[check_config] {ERROR}ERROR: The following test cases have a 'disabled'/'unsupported' field that is neither a YAML list nor a mapping with a 'targets' list:{RESET}",
+            f"[check_config] {ERROR}ERROR: The following test cases have a 'disabled'/'unsupported' field that is neither a YAML list of strings nor a mapping with a 'targets' list of strings:{RESET}",
             file=sys.stderr,
         )
         for entry in invalid_skip_fields:
+            print(f"[check_config] {ERROR}{entry}{RESET}", file=sys.stderr)
+        sys.exit(1)
+
+    if unsupported_everywhere:
+        print(
+            f"[check_config] {ERROR}ERROR: The following test cases are 'unsupported' on every platform (via 'all', or targets that together cover every platform). A test that cannot run anywhere should be removed instead of skipped:{RESET}",
+            file=sys.stderr,
+        )
+        for entry in unsupported_everywhere:
             print(f"[check_config] {ERROR}{entry}{RESET}", file=sys.stderr)
         sys.exit(1)
 

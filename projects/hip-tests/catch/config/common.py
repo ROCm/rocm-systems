@@ -17,6 +17,25 @@ NON_UNIT_GROUPS = [
     "contract",
 ]
 
+SKIP_TARGET_GROUPS = {
+    "all": ("amd", "nvidia"),
+    "amd": ("amd_linux", "amd_windows", "amd_wsl"),
+    "nvidia": ("nvidia_linux", "nvidia_windows"),
+}
+
+
+def expand_skip_target(target):
+    """Return [target] followed by every target it covers."""
+    expanded = [target]
+    for member in SKIP_TARGET_GROUPS.get(target, ()):
+        expanded.extend(expand_skip_target(member))
+    return expanded
+
+
+SKIP_TARGET_PLATFORMS = tuple(
+    t for t in expand_skip_target("all") if t not in SKIP_TARGET_GROUPS
+)
+
 _use_color = sys.stderr.isatty() and not os.environ.get("NO_COLOR")
 WARNING = "\033[0;33m" if _use_color else ""
 ERROR = "\033[0;31m" if _use_color else ""

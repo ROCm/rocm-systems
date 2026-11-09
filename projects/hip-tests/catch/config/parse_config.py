@@ -7,7 +7,12 @@ import re
 
 import yaml
 
-from common import iter_group_configs, load_definitions, parse_size_string
+from common import (
+    expand_skip_target,
+    iter_group_configs,
+    load_definitions,
+    parse_size_string,
+)
 
 
 def parse_args():
@@ -105,11 +110,15 @@ def create_test_definition(
     skip_targets = _skip_targets(disabled) + _skip_targets(unsupported)
 
     # Targets in 'disabled' or 'unsupported' that apply to this build:
+    #   all                     every build
+    #   {platform}              amd or nvidia, any OS
     #   {platform}_{os_name}    amd_linux, nvidia_windows, ...
     #   {arch}                  any platform and OS
     #   {os_name}_{arch}        linux_<arch>, windows_<arch>
     #   asan                    ASAN builds only
-    disable_keys = {f"{platform}_{os_name}", arch, f"{os_name}_{arch}"}
+    disable_keys = {
+        "all", platform, f"{platform}_{os_name}", arch, f"{os_name}_{arch}"
+    }
     if asan:
         disable_keys.add("asan")
 
@@ -141,9 +150,13 @@ def create_test_definition(
 
     # Promote every disable reason to a distinct tag so a runner can query which
     # specific labels a test is disabled for (incl. OS labels dropped above).
-    # Prefix is "exclude_" (not "disabled_") so it does not substring-match a
-    # ctest -LE disabled filter; consumers should match anchored ^exclude_<entry>$.
-    for entry in skip_targets:
+    # A group also emits the label of every target it covers so per-platform
+    # filters still see it. Prefix is "exclude_" (not "disabled_") so it does
+    # not substring-match a ctest -LE disabled filter. Consumers must anchor
+    # (^exclude_amd$): unanchored exclude_amd also matches exclude_amd_linux.
+    for entry in dict.fromkeys(
+        covered for target in skip_targets for covered in expand_skip_target(target)
+    ):
         tags_str += f"[exclude_{entry}]"
 
     return f'#define {case_name} "{case_name}", "{tags_str}"'
