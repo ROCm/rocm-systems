@@ -38,6 +38,7 @@ def resolve(
         for s in workflow['jobs']['source-metadata']['steps']
         if s.get('id') == 'resolve'
     )
+    minimum_source = workflow['env']['MIN_BENCHMARK_SOURCE_COMMIT']
     # gh is the network boundary only; run the real resolver, git validation and jq.
     gh = tmp_path / 'gh'
     gh.write_text(
@@ -64,6 +65,12 @@ def resolve(
         f'repos/{REPO}/compare/{SOURCE}...{TIP}': {
             'merge_base_commit': {'sha': SOURCE}
         },
+        **{
+            f'repos/{REPO}/compare/{minimum_source}...{source}': {
+                'merge_base_commit': {'sha': minimum_source}
+            }
+            for source in (SOURCE, TIP, WORKFLOW_SHA)
+        },
         **(responses or {}),
     }
     result = subprocess.run(
@@ -79,6 +86,7 @@ def resolve(
             ),
             'GITHUB_REF_TYPE': ref_type,
             'GITHUB_SHA': WORKFLOW_SHA,
+            'MIN_BENCHMARK_SOURCE_COMMIT': minimum_source,
             'REQUESTED_SOURCE_COMMIT': commit,
             'REQUESTED_PULL_REQUEST': pr,
             'GITHUB_OUTPUT': str(output),
@@ -102,10 +110,14 @@ def test_manual_source_is_independent_of_workflow_revision(tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
     assert values['source_branch'] == 'develop'
     assert values['source_sha'] == SOURCE != WORKFLOW_SHA
-    assert calls == [
+    assert calls[:-1] == [
         f'repos/{REPO}/git/ref/heads/develop',
         f'repos/{REPO}/compare/{SOURCE}...{TIP}',
     ]
+    minimum_source = yaml.safe_load(WORKFLOW.read_text())['env'][
+        'MIN_BENCHMARK_SOURCE_COMMIT'
+    ]
+    assert calls[-1] == f'repos/{REPO}/compare/{minimum_source}...{SOURCE}'
 
 
 def side_responses(**pr_changes):
@@ -248,7 +260,10 @@ def test_push_uses_event_sha_without_resolving_a_later_branch_tip(tmp_path):
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert values == {'source_branch': 'develop', 'source_sha': WORKFLOW_SHA}
-    assert calls == []
+    minimum_source = yaml.safe_load(WORKFLOW.read_text())['env'][
+        'MIN_BENCHMARK_SOURCE_COMMIT'
+    ]
+    assert calls == [f'repos/{REPO}/compare/{minimum_source}...{WORKFLOW_SHA}']
 
 
 def test_blank_commit_freezes_selected_tip_once(tmp_path):

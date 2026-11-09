@@ -46,6 +46,10 @@ defaults:
 
 env:
   BENCHMARK_MANIFEST: benchmarks/suites/performance-v1.toml
+  # Theoretical feature-compatibility floor: --cpu-thread-budget (PR #12245).
+  MIN_BENCHMARK_SOURCE_COMMIT: b38e78f1b7cb0f45904fcac3680cdf072ceecd7c
+  GFX950_CONFIG_FILENAME: gfx950_mi355x_kmd.json
+  GFX1250_CONFIG_FILENAME: gfx1250_mi455x.json
   CORPUS_SHA: b95ea549e1f500ce4ce83ae511ae5e4434930374
   TENSILE_SHA: dd77374194a3ea1a7258cd54f87af6747b6362a5
   NANOBIND_SHA: 9b3afa9dbdc23641daf26fadef7743e7127ff92f
@@ -61,7 +65,7 @@ env:
 jobs:
   source-metadata:
     name: Resolve benchmark source metadata
-    # Opt in only same-repository PRs, as in rocjitsu-fuzz.yml.
+    # Opt in only same-repository PRs.
     if: >-
       github.repository == 'ROCm/rocm-systems' && (
         github.event_name == 'workflow_dispatch' ||
@@ -143,6 +147,15 @@ jobs:
               "${BENCHMARK_BRANCH}" "${BENCHMARK_SHA}" >> "${GITHUB_OUTPUT}"
           }
 
+          validate_source_compatibility() {
+            MINIMUM_MERGE_BASE="$(gh api \
+              "repos/${GITHUB_REPOSITORY}/compare/${MIN_BENCHMARK_SOURCE_COMMIT}...${BENCHMARK_SHA}" \
+              --jq '.merge_base_commit.sha')"
+            if [[ "${MINIMUM_MERGE_BASE}" != "${MIN_BENCHMARK_SOURCE_COMMIT}" ]]; then
+              fail "Measurement source must contain ${MIN_BENCHMARK_SOURCE_COMMIT} (--cpu-thread-budget, PR #12245)."
+            fi
+          }
+
           resolve_base_metadata() {
             if [[ "${BENCHMARK_BRANCH}" == "develop" ]]; then
               if [[ -n "${REQUESTED_PULL_REQUEST}" ]]; then
@@ -206,6 +219,7 @@ jobs:
             fail "Select a workflow branch, not a tag."
           fi
           resolve_source
+          validate_source_compatibility
           resolve_base_metadata
           resolve_optional_pr
 
@@ -383,8 +397,8 @@ jobs:
           taskset -c 0-15 "${ROCJITSU_VENV}/bin/python" -m benchmarks.runner \
             --rocjitsu-source-dir "${ROCJITSU_SOURCE_DIR}" \
             --build-dir "${ROCJITSU_BUILD_DIR}" \
-            --target-config "gfx950=${ROCJITSU_SOURCE_DIR}/configs/gfx950_mi350x_kmd.json" \
-            --target-config "gfx1250=${ROCJITSU_SOURCE_DIR}/configs/gfx1250_mi455x.json" \
+            --target-config "gfx950=${ROCJITSU_SOURCE_DIR}/configs/${GFX950_CONFIG_FILENAME}" \
+            --target-config "gfx1250=${ROCJITSU_SOURCE_DIR}/configs/${GFX1250_CONFIG_FILENAME}" \
             --run-wrapper "/usr/bin/python3 -E -s /usr/local/libexec/rocjitsu-benchmark-runner/benchmark_run.py -- \"${ROCJITSU_BUILD_DIR}/tools/rocjitsu/rocjitsu\" --config {config} --" \
             --manifest "${BENCHMARK_MANIFEST}" \
             --output "${ROCJITSU_RESULT_DIR}" | taskset -c 0-15 tee "${BENCHMARK_DIR}/runner-output.txt"
