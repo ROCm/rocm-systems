@@ -80,7 +80,9 @@ Each metric's definition and the counters behind it are in
 [system-speed-of-light.rst](../../docs/conceptual/cdna/system-speed-of-light.rst)
 for CDNA accelerators and
 [the RDNA equivalent](../../docs/conceptual/rdna/system-speed-of-light.rst)
-for client APUs. The whole metric hierarchy is in the
+for client APUs, and
+[the RDNA4 equivalent](../../docs/conceptual/rdna4/system-speed-of-light.rst)
+for RDNA4 Radeon GPUs. The whole metric hierarchy is in the
 [performance model](../../docs/conceptual/performance-model.rst).
 
 ## 4. Compute Speed-of-Light

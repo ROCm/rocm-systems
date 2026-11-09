@@ -92,7 +92,9 @@ they mean:
 
 Client APUs use a different hierarchy; see the
 [RDNA performance model](../../docs/conceptual/rdna/rdna-performance-model.rst)
-for GL0, GL1, and GL2.
+for GL0, GL1, and GL2. RDNA4 Radeon GPUs (gfx1201) add an Infinity Cache before
+DRAM; see the
+[RDNA4 performance model](../../docs/conceptual/rdna4/rdna4-performance-model.rst).
 
 Read hit rates and utilizations against the `Percent of Peak` and `Peak`
 columns the report prints. Do not apply a remembered cutoff such as "L2 hit

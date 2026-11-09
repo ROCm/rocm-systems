@@ -97,6 +97,30 @@ in practice.
 
           * :doc:`conceptual/rdna/references`
 
+        * :doc:`conceptual/rdna4/rdna4-performance-model`
+
+          * :doc:`conceptual/rdna4/system-speed-of-light`
+
+          * :doc:`conceptual/rdna4/shader-engine`
+
+            * :doc:`conceptual/rdna4/spi`
+
+            * :doc:`conceptual/rdna4/wgp`
+
+            * :doc:`conceptual/rdna4/gl0-cache`
+
+            * :doc:`conceptual/rdna4/gl1-cache`
+
+          * :doc:`conceptual/rdna4/gl2-cache`
+
+          * :doc:`conceptual/rdna4/gcea`
+
+          * :doc:`conceptual/rdna4/command-processor`
+
+          * :doc:`conceptual/rdna4/grbm`
+
+          * :doc:`conceptual/rdna4/references`
+
       * :doc:`conceptual/definitions`
 
         * :ref:`normalization-units`

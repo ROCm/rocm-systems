@@ -174,6 +174,42 @@ for context_name, section_name in rdna_gfx115x_section_map.items():
         "data": gfx115x_metrics.get(section_name, {}),
     }
 
+# Load gfx1201 (RDNA 4) metrics YAML
+with open("data/metrics/gfx1201_metrics.yaml") as f:
+    gfx1201_metrics = yaml.safe_load(f)
+
+# RDNA 4 gfx1201 section mapping: jinja context id -> YAML section name.
+# Only panels with metric descriptions appear in the YAML.
+rdna4_gfx1201_section_map = {
+    "rdna4-sys-sol-gfx1201": "System Speed-of-Light",
+    "rdna4-roofline-performance-rates-gfx1201": "Roofline Performance Rates",
+    "rdna4-roofline-plot-points-gfx1201": "Roofline Plot Points",
+    "rdna4-memory-chart-instruction-cache-gfx1201": (
+        "Memory chart - Instruction Cache"
+    ),
+    "rdna4-memory-chart-scalar-data-cache-gfx1201": (
+        "Memory chart - Scalar Data Cache"
+    ),
+    "rdna4-memory-chart-gl0-cache-gfx1201": "Memory chart - GL0 Cache (Vector L0)",
+    "rdna4-memory-chart-lds-gfx1201": "Memory chart - LDS (Local Data Share)",
+    "rdna4-memory-chart-gl0-gl1-interface-gfx1201": (
+        "Memory chart - GL0-GL1 Interface"
+    ),
+    "rdna4-memory-chart-glarb-gfx1201": "Memory chart - GLARB (GL1-GL2 Arbiter)",
+    "rdna4-memory-chart-gl2-cache-gfx1201": "Memory chart - GL2 Cache (L2)",
+    "rdna4-memory-chart-ea-to-dram-gfx1201": "Memory chart - EA to DRAM",
+    "rdna4-memory-chart-wgps-gfx1201": "Memory chart - Workgroup Processors (WGPs)",
+    "rdna4-ea-utilization-gfx1201": "EA Utilization",
+    "rdna4-ea-traffic-bandwidth-gfx1201": "EA Traffic Bandwidth",
+    "rdna4-ea-sdp-outstanding-requests-gfx1201": (
+        "EA-SDP Interface - Outstanding Requests"
+    ),
+    "rdna4-ea-sdp-stalls-gfx1201": "EA-SDP Interface - Stalls",
+}
+
+for context_name, section_name in rdna4_gfx1201_section_map.items():
+    jinja_contexts[context_name] = {"data": gfx1201_metrics[section_name]}
+
 external_toc_path = "./sphinx/_toc.yml"
 external_projects_current_project = "rocprofiler-compute"
 
