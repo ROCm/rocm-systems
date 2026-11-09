@@ -10542,6 +10542,47 @@ TEST(BinaryTranslatorE2E, Gfx1250MasksM0AroundSaddrClusterLoadForA0) {
   EXPECT_EQ(second_result.elf_bytes, result.elf_bytes);
 }
 
+TEST(BinaryTranslatorE2E, Gfx1250ClusterLoadSavesM0AboveVopd3CndmaskSelector) {
+  // s0..s3 stay live past the cluster load, and the v_dual_cndmask_b32 after it
+  // reads its lane mask from s4. gfx1250 is wave32-only, so the mask is s4 alone
+  // and the M0 save takes the lowest dead SGPR, s5.
+  constexpr auto cluster =
+      cdna5::build_vglobal(cdna5::kClusterLoadB32Vglobal, {.saddr = 124, .vdst = 8, .vaddr = 12});
+  constexpr std::array<uint32_t, 6> words = {
+      cluster[0], cluster[1], cluster[2],
+      // v_dual_cndmask_b32 v1, v2, v3, s4 :: v_dual_mov_b32 v4, v5
+      0xCF248102u, 0x04030105u, 0x04000001u};
+  auto image = rocjitsu::make_gfx1250_image_with_live_sgprs(words, 4);
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  const auto decoded =
+      decode_text_instructions(*translated.text_sections()[0], ROCJITSU_CODE_ARCH_CDNA5);
+  // SOP1 s_mov_b32: SSRC0[7:0], SDST[22:16]. M0 encodes as 125 on gfx1250.
+  constexpr uint16_t kGfx1250M0Operand = 125;
+  std::vector<uint16_t> m0_saves;
+  for (const auto &inst : decoded) {
+    if (inst->mnemonic() != "s_mov_b32" || inst->raw_encoding() == nullptr)
+      continue;
+    const uint32_t word = inst->raw_encoding()[0];
+    if ((word & 0xffu) == kGfx1250M0Operand)
+      m0_saves.push_back(static_cast<uint16_t>((word >> 16) & 0x7fu));
+  }
+  EXPECT_EQ(m0_saves, std::vector<uint16_t>{5});
+
+  const auto second = translator.translate(translated);
+  ASSERT_TRUE(second.ok()) << (second.diagnostics.empty() ? ""
+                                                          : second.diagnostics.front().message);
+  EXPECT_EQ(second.elf_bytes, result.elf_bytes);
+}
+
 TEST(BinaryTranslatorE2E, Gfx1250ClusterLoadsUseVgprCarrierUnderSgprPressure) {
   for (const uint16_t opcode :
        {cdna5::kClusterLoadB32Vglobal, cdna5::kClusterLoadAsyncToLdsB32Vglobal}) {

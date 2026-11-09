@@ -7892,10 +7892,10 @@ TEST(GeneratedInstDefUse, Gfx1250Vop3CompareDefinesOneSgpr) {
   EXPECT_FALSE(idu.defs.contains({RegClass::SGPR, 54, 1}));
 }
 
-TEST(GeneratedInstDefUse, Gfx1250VopdCndmaskMaskIsOneSgprInWave32) {
+TEST(GeneratedInstDefUse, Gfx1250VopdCndmaskMaskIsOneSgpr) {
   // v_dual_cndmask_b32 in either VOPD3 slot, its mask in s8, paired with
-  // v_dual_fmac_f32. The VOPD3 decoder declares the mask as a 64-bit SGPR
-  // operand, and Wave32 narrows it to s8.
+  // v_dual_fmac_f32. gfx1250 is wave32-only, so the mask occupies s8 at either
+  // analysis wave size and must not keep the adjacent s9 live.
   for (const bool x_slot : {true, false}) {
     SCOPED_TRACE(x_slot ? "X slot" : "Y slot");
     const uint32_t opx = x_slot ? 9u : 0u;
@@ -7908,9 +7908,12 @@ TEST(GeneratedInstDefUse, Gfx1250VopdCndmaskMaskIsOneSgprInWave32) {
     ASSERT_NE(inst->mnemonic().find("v_dual_cndmask_b32"), std::string_view::npos)
         << inst->mnemonic();
 
-    const InstDefUse wave32(*inst, 32);
-    EXPECT_TRUE(wave32.uses.contains({RegClass::SGPR, 8, 1}));
-    EXPECT_FALSE(wave32.uses.contains({RegClass::SGPR, 9, 1}));
+    for (const unsigned wave_size : {32u, 64u}) {
+      SCOPED_TRACE(wave_size);
+      const InstDefUse idu(*inst, static_cast<uint8_t>(wave_size));
+      EXPECT_TRUE(idu.uses.contains({RegClass::SGPR, 8, 1}));
+      EXPECT_FALSE(idu.uses.contains({RegClass::SGPR, 9, 1}));
+    }
   }
 }
 
