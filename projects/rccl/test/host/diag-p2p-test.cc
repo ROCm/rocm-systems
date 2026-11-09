@@ -331,6 +331,14 @@ TEST_F(DiagP2pMicrotest, HandleType_CuMemFollowsCuMemHandleType) {
   ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
   ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
   EXPECT_EQ(ncclDiagP2pHandleType(comm_.get(), 0, 1), ncclDiagP2pHandleCuMemPosixFd);
+  // The value ncclMnnvlCheck sets. A hipify that knows the fabric handle renames it to hipMemHandleTypeFabric in
+  // the hipified p2p.h and p2p.cc; an older one, as in the ROCm 7.2 host-test image, keeps the CUDA name.
+#ifdef CU_MEM_HANDLE_TYPE_FABRIC
+  ncclCuMemHandleType = CU_MEM_HANDLE_TYPE_FABRIC;
+#else
+  ncclCuMemHandleType = hipMemHandleTypeFabric;
+#endif
+  EXPECT_EQ(ncclDiagP2pHandleType(comm_.get(), 0, 1), ncclDiagP2pHandleCuMemFabric);
   ncclCuMemHandleType = hipMemHandleTypeNone;
   EXPECT_EQ(ncclDiagP2pHandleType(comm_.get(), 0, 1), ncclDiagP2pHandleCuMemOther);
 }
