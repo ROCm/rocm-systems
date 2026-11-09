@@ -1279,9 +1279,9 @@ TEST(FaultDropBarrier, LongSameBlockPairUsesCompleteMembersWithoutDistanceCutoff
       << error.message;
 }
 
-TEST(FaultDropBarrier, OutOfRangeCaveRejectsDropWithoutPublishingMutation) {
+TEST(FaultDropBarrier, OutOfRangeSecondMemberRejectsDropWithoutPublishingMutation) {
   const uint32_t nop = checked_encoding(build_s_nop(0, kArch));
-  std::vector<uint32_t> words(32770, nop);
+  std::vector<uint32_t> words(32767, nop);
   words[0] = kSignal;
   words[1] = kWait;
   words.back() = kEnd;
@@ -1293,18 +1293,10 @@ TEST(FaultDropBarrier, OutOfRangeCaveRejectsDropWithoutPublishingMutation) {
   ASSERT_TRUE(inventory.succeeded()) << error.message;
   ASSERT_EQ(inventory.value().barriers().size(), 1u);
   const DropBarrierSelection selection = select_barrier_for_test(inventory.value());
-  for (int attempt = 0; attempt < 2; ++attempt) {
-    SCOPED_TRACE(attempt);
-    const FailureOr<DropBarrierResult> result = apply_drop_barrier(context, selection, error);
-    EXPECT_TRUE(result.failed());
-    EXPECT_EQ(error.code, FaultMutationErrorCode::ValidationFailure);
-    EXPECT_NE(error.message.find("s_branch simm16"), std::string::npos) << error.message;
-    EXPECT_TRUE(std::ranges::equal(context.image(), image));
-  }
-  // Inspect the shared emission boundary too: a failure publishes neither an
-  // ELF nor success records; repeated applies above retain the source.
-  Instrumentor instrumentor(context.source(), kArch);
-  for (const StaticBarrierMember &member : selection.barrier().members) {
+  ASSERT_EQ(selection.barrier().members.size(), 2u);
+  EXPECT_EQ(selection.barrier().members[0].offset, 0u);
+  EXPECT_EQ(selection.barrier().members[1].offset, sizeof(nop));
+  auto add_replacement = [nop](Instrumentor &instrumentor, const StaticBarrierMember &member) {
     std::vector<uint8_t> bytes(sizeof(nop));
     std::memcpy(bytes.data(), &nop, sizeof(nop));
     instrumentor.add_point(
@@ -1314,9 +1306,38 @@ TEST(FaultDropBarrier, OutOfRangeCaveRejectsDropWithoutPublishingMutation) {
          .probe_args = {},
          .replacement = InstructionReplacement{.expected_bytes = member.bytes,
                                                .replacement_bytes = std::move(bytes)}});
+  };
+  // The first return uses simm16 -32768. A second cave moves the wait's
+  // return to -32769, so failure must follow a successfully planned member.
+  Instrumentor signal_only(context.source(), kArch);
+  add_replacement(signal_only, selection.barrier().members.front());
+  const InstrumentedCodeObjectDebug control = signal_only.patch_with_debug_summaries();
+  ASSERT_TRUE(control.errors.empty()) << control.errors.front();
+  EXPECT_FALSE(control.elf_bytes.empty());
+  ASSERT_EQ(control.sites.size(), 1u);
+  EXPECT_EQ(control.sites.front().kind, InstrumentationKind::ReplaceWithInst);
+  EXPECT_EQ(control.sites.front().original_offset, selection.barrier().members.front().offset);
+  ASSERT_EQ(control.patches.size(), 1u);
+  EXPECT_EQ(control.patches.front().anchor_offset, selection.barrier().members.front().offset);
+  EXPECT_EQ(control.patches.front().return_target, sizeof(nop));
+  EXPECT_TRUE(std::ranges::equal(context.image(), image));
+  for (int attempt = 0; attempt < 2; ++attempt) {
+    SCOPED_TRACE(attempt);
+    const FailureOr<DropBarrierResult> result = apply_drop_barrier(context, selection, error);
+    EXPECT_TRUE(result.failed());
+    EXPECT_EQ(error.code, FaultMutationErrorCode::ValidationFailure);
+    EXPECT_NE(error.message.find("return branch exceeds s_branch simm16"), std::string::npos)
+        << error.message;
+    EXPECT_TRUE(std::ranges::equal(context.image(), image));
   }
+  // Inspect the shared emission boundary too: a failure publishes neither an
+  // ELF nor success records; repeated applies above retain the source.
+  Instrumentor instrumentor(context.source(), kArch);
+  for (const StaticBarrierMember &member : selection.barrier().members)
+    add_replacement(instrumentor, member);
   const InstrumentedCodeObjectDebug rejected = instrumentor.patch_with_debug_summaries();
-  EXPECT_FALSE(rejected.errors.empty());
+  ASSERT_EQ(rejected.errors.size(), 1u);
+  EXPECT_EQ(rejected.errors.front(), "relocation trampoline return branch exceeds s_branch simm16");
   EXPECT_TRUE(rejected.elf_bytes.empty());
   EXPECT_TRUE(rejected.sites.empty());
   EXPECT_TRUE(rejected.patches.empty());
@@ -2254,6 +2275,77 @@ TEST(FaultDropBarrier, RejectsTrapBetweenSignalAndWait) {
   const FaultMutationContext context(image);
   EXPECT_TRUE(discover_drop_barriers(context, "test_kernel", error).failed());
   EXPECT_EQ(error.code, FaultMutationErrorCode::UnsupportedForm);
+}
+
+TEST(FaultDropBarrier, CompiledGlobalLoadRejectsDropBeforePublishingMutation) {
+#ifndef RJ_FAULT_INJECTION_PC_GLOBAL_OBJECT
+  GTEST_SKIP() << "compiled gfx950 PC-relative global-load fixture is unavailable";
+#else
+  std::ifstream input(RJ_FAULT_INJECTION_PC_GLOBAL_OBJECT, std::ios::binary);
+  ASSERT_TRUE(input.is_open());
+  const std::vector<uint8_t> image((std::istreambuf_iterator<char>(input)), {});
+  ASSERT_FALSE(input.bad());
+  const FaultMutationContext context(image);
+  ASSERT_TRUE(context.source().is_valid());
+  ASSERT_EQ(context.source().target_id(), ROCJITSU_CODE_TARGET_GFX950);
+  ASSERT_EQ(context.source().image_size(), image.size());
+  ASSERT_EQ(context.source().text_sections().size(), 1u);
+  const Section &text = *context.source().text_sections().front();
+  const std::vector<KernelDescriptorInfo> kernels =
+      scan_kernel_descriptors(image, text.sectionOffset(), text.size(), text.sectionHeaderIndex());
+  ASSERT_EQ(kernels.size(), 2u);
+  const std::vector<KernelDescriptorInfo>::const_iterator selected_kernel =
+      std::ranges::find(kernels, "selected", &KernelDescriptorInfo::kernel_name);
+  const std::vector<KernelDescriptorInfo>::const_iterator sibling_kernel =
+      std::ranges::find(kernels, "sibling", &KernelDescriptorInfo::kernel_name);
+  ASSERT_NE(selected_kernel, kernels.end());
+  ASSERT_NE(sibling_kernel, kernels.end());
+  EXPECT_NE(selected_kernel->entry_text_offset, sibling_kernel->entry_text_offset);
+  EXPECT_NE(selected_kernel->descriptor_file_offset, sibling_kernel->descriptor_file_offset);
+  std::unique_ptr<Decoder> decoder =
+      Decoder::create(default_isa_target_registry(), context.source().target_id());
+  ASSERT_NE(decoder, nullptr);
+  auto expect_pc_read = [&](uint64_t offset) {
+    ASSERT_LT(offset, text.size());
+    ASSERT_GE(text.size() - offset, sizeof(uint32_t));
+    uint32_t word = 0;
+    std::memcpy(&word, text.data() + offset, sizeof(word));
+    const DecodeResult decoded = decoder->decode_window(std::span(&word, 1), offset);
+    ASSERT_TRUE(decoded.succeeded());
+    EXPECT_EQ(decoded.value()->mnemonic(), "s_getpc_b64");
+  };
+  ASSERT_NO_FATAL_FAILURE(expect_pc_read(selected_kernel->entry_text_offset));
+  ASSERT_NO_FATAL_FAILURE(expect_pc_read(sibling_kernel->entry_text_offset));
+
+  FaultMutationError error;
+  const FailureOr<FaultBarrierInventory> selected =
+      discover_drop_barriers(context, "selected", error);
+  ASSERT_TRUE(selected.succeeded()) << error.message;
+  ASSERT_EQ(selected.value().barriers().size(), 1u);
+  EXPECT_EQ(selected.value().owner().entry_offset, selected_kernel->entry_text_offset);
+  EXPECT_EQ(selected.value().owner().descriptor_file_offset,
+            selected_kernel->descriptor_file_offset);
+  EXPECT_EQ(selected.value().barriers().front().form, StaticBarrierForm::FullSingleton);
+  ASSERT_EQ(selected.value().barriers().front().members.size(), 1u);
+  const FailureOr<FaultBarrierInventory> sibling =
+      discover_drop_barriers(context, "sibling", error);
+  ASSERT_TRUE(sibling.succeeded()) << error.message;
+  EXPECT_TRUE(sibling.value().barriers().empty());
+  EXPECT_EQ(sibling.value().owner().entry_offset, sibling_kernel->entry_text_offset);
+  EXPECT_EQ(sibling.value().owner().descriptor_file_offset, sibling_kernel->descriptor_file_offset);
+  const DropBarrierSelection selection = select_barrier_for_test(selected.value());
+  for (int attempt = 0; attempt < 2; ++attempt) {
+    SCOPED_TRACE(attempt);
+    const FailureOr<DropBarrierResult> result = apply_drop_barrier(context, selection, error);
+    EXPECT_TRUE(result.failed());
+    EXPECT_EQ(error.code, FaultMutationErrorCode::UnsupportedForm);
+    EXPECT_EQ(error.message,
+              "replacement growth cannot preserve retained PC-relative addresses to moved storage");
+    ASSERT_NO_FATAL_FAILURE(expect_pc_read(error.offset));
+    EXPECT_TRUE(std::ranges::equal(context.image(), image));
+    EXPECT_EQ(std::memcmp(context.source().image_data(), image.data(), image.size()), 0);
+  }
+#endif
 }
 
 #ifdef RJ_FAULT_INJECTION_CORPUS_OBJECT
