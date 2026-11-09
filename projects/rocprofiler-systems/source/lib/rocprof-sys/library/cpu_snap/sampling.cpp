@@ -41,24 +41,19 @@ store_chunk(std::span<const std::byte> chunk)
     trace_cache::get_buffer_storage().store(
         trace_cache::cpu_snap_sample{ std::move(bytes) });
 }
-
-[[nodiscard]] sampler_settings
-read_settings()
-{
-    return { .cputime = config::get_setting_value<bool>(
-                            std::string{ env_vars::SAMPLING_CPUTIME })
-                            .value_or(false),
-             .freq_hz = config::get_sampling_freq() };
-}
 }  // namespace
 
 void
 setup()
 {
-    auto const settings = read_settings();
-    auto       cfg      = make_sampler_config(settings);
-    cfg.streaming.sink  = &store_chunk;
-    cfg.logger          = &forward_log_record;
+    auto const settings =
+        sampler_settings{ .cputime = config::get_setting_value<bool>(
+                                         std::string{ env_vars::SAMPLING_CPUTIME })
+                                         .value_or(false),
+                          .freq_hz = config::get_sampling_freq() };
+    auto cfg           = make_sampler_config(settings);
+    cfg.streaming.sink = &store_chunk;
+    cfg.logger         = &forward_log_record;
 
     g_sampler = std::make_unique<::cpu_snap::sampling::sampler>(std::move(cfg));
     g_sampler->start();
