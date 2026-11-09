@@ -35,6 +35,7 @@ MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("SDXI userspace char device — MEMCPY, COMPRESS, DECOMPRESS");
 MODULE_AUTHOR("Advanced Micro Devices, Inc.");
 MODULE_VERSION("1.0");
+MODULE_IMPORT_NS("DMA_BUF");
 
 /* PCI identity */
 #define SDXI_VENDOR_ID   0x1022
