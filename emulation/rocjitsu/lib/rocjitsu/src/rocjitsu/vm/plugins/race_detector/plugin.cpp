@@ -447,7 +447,7 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
     // workgroup allocation. Zero for lanes that access no LDS bytes.
     std::array<std::array<uint32_t, 64>, 2> laneBytes{};
     // Appending one address set at a time lets neighboring lanes merge into
-    // the previous interval, so finalize() rarely has anything to sort.
+    // the previous interval before the final sort.
     IntervalSet intervals;
     for (size_t set = 0; set < numAddressSets; ++set) {
       for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {

@@ -38,10 +38,9 @@ struct CounterCapacities {
 /// race checking. Holds a pointer to the workgroup level RaceDetector for
 /// event allocation and lifecycle transitions.
 ///
-/// Every event registration method (registerEvent, registerScalarLoad,
-/// registerLdsEvent and registerLdsRangeEvent) takes the producing instruction
-/// as an InstructionSnapshot; the event's PC comes from the snapshot. The
-/// encoding is decoded only if a plugin report needs its disassembly.
+/// Every event registration method takes the producing instruction as an
+/// InstructionSnapshot; the event's PC comes from the snapshot. The encoding
+/// is decoded only if a plugin report needs its disassembly.
 class WaveRaceState {
 public:
   WaveRaceState(int vgprCount, int sgprCount, WaveId, RaceDetector *, CounterCapacities);
@@ -137,6 +136,7 @@ public:
   /// @brief Register an event using the caller's finalized LDS intervals.
   /// @details Intervals must contain only accessed bytes within the LDS backing
   /// and, for FLAT, the workgroup allocation, with endpoints that fit in int.
+  /// This does not clip ranges or validate conflicts; validate before registering.
   /// Empty intervals retain the event's register and counter dependencies.
   void registerEventWithIntervals(InstructionSnapshot instruction, MemoryEventType,
                                   std::vector<uint32_t> registers, uint64_t execMask,
