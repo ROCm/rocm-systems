@@ -412,6 +412,7 @@ if(BUILD_TESTS)
       device/DdaIpcGpuBarrierOrderingTests.cpp
       device/DdaReduceScatterFabricLLTests.cpp
       device/DdaAllReduceFabricLLTests.cpp
+      device/DdaAllReduceFabricLL128TwoShotTests.cpp
       device/DdaVecElementAddTests.cpp
       device/DdaLL128PollWireTests.cpp
       device/TestTDM.cpp

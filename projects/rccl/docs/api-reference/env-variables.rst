@@ -656,6 +656,16 @@ in the following table.
       - | Integer value in bytes (default: ``128``)
         | ``N``: Split only when message size >= N bytes
 
+    * - | ``RCCL_NET_SHARED_HOST_HUGEPAGES``
+        | Backs the host-memory shared P2P network staging pools (used by
+          connections without GPU Direct RDMA) with 2 MiB pages, so each
+          pool takes fewer NIC memory-registration page-table entries.
+          Falls back to the regular pinned host allocation if the huge-page
+          allocation or registration fails. Hosts with transparent huge
+          pages set to ``never`` get 4 KiB pages either way.
+      - | ``1``: Use 2 MiB pages (default).
+        | ``0``: Use the regular pinned host allocation.
+
     * - | ``RCCL_IB_GDR_FLUSH_FLAG``
         | Replaces the GPUDirect RDMA flush of Simple-protocol receives in the
           ``IB`` network transport (``net_ib``). By default, the proxy fences
@@ -1308,6 +1318,15 @@ threshold table introduced for gfx1250.
       - | ``0``: Resolved from the per-arch table at runtime (default).
         | ``N``: Use ``N`` threads per block, overriding the table. ``N`` must be a
           multiple of 32 from 32 to 1024. Pre-table default: ``512``.
+
+    * - | ``RCCL_DDA_LL128_ASYNC_WIRE``
+        | Opts in to the LDS-staged writer for the DDA LL128 two-shot ``ncclAllReduce``
+          on gfx1250 communicators with one LL128 warp per wavefront (wave32). When
+          enabled, launches whose per-rank shard is at least 2 MiB stage their wire
+          stores in LDS through gfx1250 async LDS stores, using two 2 KiB windows per
+          warp of dynamic LDS. It is off by default. Other architectures are unaffected.
+      - | ``0``: Cooperative writer for every launch, no dynamic LDS (default).
+        | ``1``: Staged writer from 2 MiB shards on gfx1250 wave32 communicators.
 
     * - | ``RCCL_DDA_A2A_PUSH``
         | Selects the ``ncclAllToAll`` kernel on the DDA fabric (VMM) tier. The push
