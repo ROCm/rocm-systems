@@ -2854,9 +2854,9 @@ class CodeGenerator:
                 srcy0_ = make_src0(y_bits, true, false, 0, srcy0);
                 srcx1_ = Operand(x_bits, OperandType::OPR_VGPR, vsrcx1);
                 srcy1_ = Operand(y_bits, OperandType::OPR_VGPR, vsrcy1);
-                srcx2_ = (opx_ == kVopdCndmaskB32) ? Operand(64, OperandType::OPR_SREG, vsrcx2)
+                srcx2_ = (opx_ == kVopdCndmaskB32) ? Operand(@VOPD3_SELECTOR_BITS@, OperandType::OPR_SREG, vsrcx2)
                                                    : Operand(x_bits, OperandType::OPR_VGPR, vsrcx2);
-                srcy2_ = (opy_ == kVopdCndmaskB32) ? Operand(64, OperandType::OPR_SREG, vsrcy2)
+                srcy2_ = (opy_ == kVopdCndmaskB32) ? Operand(@VOPD3_SELECTOR_BITS@, OperandType::OPR_SREG, vsrcy2)
                                                    : Operand(y_bits, OperandType::OPR_VGPR, vsrcy2);
                 if (opx_ == kVopdCndmaskB32)
                   srcx2_.set_wave_mask();
@@ -2871,6 +2871,11 @@ class CodeGenerator:
                 .replace('@VOPD3_PREFIX@', f'0x{vopd3_prefix.prefix:X}')
                 .replace(
                     '@VOPD3_EXECUTION_BLOCK@', _execution_block_flag_stmt('VOPD3XY')
+                )
+                # The cndmask selector is a lane mask, one bit per lane of the
+                # widest wave the target runs.
+                .replace(
+                    '@VOPD3_SELECTOR_BITS@', str(self.isa_spec.profile.wave_size_max)
                 )
             )
             vopd3_validation_branch = cpp_block('''
@@ -6501,7 +6506,7 @@ class CodeGenerator:
 
               bool dispatched = false;
               if (inst_.op == 0x88) {
-                amdgpu::exec_wmma_f32_scaled_mixed(cu, 32, 16, 128, 4, 4, dst, src0_base,
+                amdgpu::exec_wmma_f32_scaled_mixed<32, 16, 128>(cu, 4, 4, dst, src0_base,
                                                    src1_base, s2, amdgpu::extract_fp4,
                                                    amdgpu::extract_fp4, const_acc, scale0, scale1,
                                                    matrix_a_scale, matrix_b_scale,
@@ -6513,8 +6518,7 @@ class CodeGenerator:
                 dispatched = amdgpu::dispatch_matrix_fmt_pair(
                     matrix_a_fmt, matrix_b_fmt,
                     [&](uint32_t a_bits, uint32_t b_bits, auto extract_a, auto extract_b) {
-                      amdgpu::exec_wmma_f32_scaled_mixed(
-                          cu, 16, 16, 128, a_bits, b_bits, dst, src0_base, src1_base, s2,
+                      amdgpu::exec_wmma_f32_scaled_mixed<16, 16, 128>(cu, a_bits, b_bits, dst, src0_base, src1_base, s2,
                           extract_a, extract_b, const_acc, scale0, scale1, matrix_a_scale,
                           matrix_b_scale, scale0_inline_zero ? 0u : matrix_a_scale_fmt,
                           scale1_inline_zero ? 0u : matrix_b_scale_fmt, scale16,
@@ -9231,6 +9235,8 @@ class CodeGenerator:
         lines.append(
             f'{indent}const int32_t offset = static_cast<int32_t>({raw} << {32-width}) >> {32-width};'
         )
+        # GLOBAL LDS X3 uses the 16-byte lane stride specified for MUBUF X3 in CDNA4 ISA §9.1.9.
+        # This is only an inference; the GLOBAL LDS addressing rules in §10.3 do not specify an X3 stride.
         lines.append(
             f'{indent}amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),'
             f' static_cast<int64_t>(wf.m0() & {mask}) + offset,'

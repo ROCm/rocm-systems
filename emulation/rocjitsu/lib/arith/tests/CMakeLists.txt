@@ -167,6 +167,16 @@ foreach(
     rj_arith_add_test(${target} register/${family}_test.cpp)
 endforeach()
 
+# Math families share unary layouts, with independent loose and exact references.
+foreach(
+    family
+    IN
+    ITEMS round root_reciprocal log_exp decompose trig rcp_iflag preop
+)
+    set(target "rj_arith_math_${family}_test")
+    rj_arith_add_test(${target} math/${family}_test.cpp)
+endforeach()
+
 # Infrastructure has no all-entry-point registry; contracts live in family helpers.
 rj_arith_add_test(rj_arith_cpu_test common/cpu_test.cpp)
 target_compile_definitions(
@@ -179,6 +189,13 @@ add_subdirectory(headers)
 add_subdirectory(cpuinfo)
 
 if(UNIX AND CMAKE_NM AND RJ_ARITH_ENABLE_X86_64)
+    add_test(
+        NAME rj_arith.baseline_linkage_regression
+        COMMAND
+            ${CMAKE_COMMAND} -DNM=${CMAKE_NM} -DCXX=${CMAKE_CXX_COMPILER}
+            -DWORK=${CMAKE_CURRENT_BINARY_DIR}/linkage-fixtures -P
+            ${CMAKE_CURRENT_SOURCE_DIR}/common/baseline_linkage_test.cmake
+    )
     add_test(
         NAME rj_arith.baseline_linkage
         COMMAND

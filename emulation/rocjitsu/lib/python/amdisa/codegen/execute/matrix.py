@@ -522,7 +522,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 L.append(f'  auto extract_a = amdgpu::extract_i8;')
                 L.append(f'  auto extract_b = amdgpu::extract_i8;')
             L.append(
-                f'  amdgpu::exec_swmmac_i32(cu, {M}, {N}, {K}, {in_bits}, dst,'
+                f'  amdgpu::exec_swmmac_i32<{M}, {N}, {K}>(cu, {in_bits}, dst,'
                 f' {src0_base_expr}, {src1_base_expr}, s2, {index_base_expr},'
                 f' {swmmac_index_entries}, {index_key_expr},'
                 f' extract_a, extract_b, inst_.clamp, const_acc);'
@@ -548,7 +548,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 L.append(f'  auto extract_a = amdgpu::extract_i8;')
                 L.append(f'  auto extract_b = amdgpu::extract_i8;')
             L.append(
-                f'  amdgpu::exec_wmma_i32(cu, {M}, {N}, {K}, {in_bits}, dst,'
+                f'  amdgpu::exec_wmma_i32<{M}, {N}, {K}>(cu, {in_bits}, dst,'
                 f' {src0_base_expr}, {src1_base_expr}, s2, extract_a, extract_b,'
                 f' inst_.clamp, const_acc);'
             )
@@ -603,7 +603,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 f'      [&](uint32_t a_bits, uint32_t b_bits, auto extract_a, auto extract_b) {{'
             )
             L.append(
-                f'        amdgpu::exec_wmma_f32_mixed(cu, {M}, {N}, {K}, a_bits, b_bits, dst,'
+                f'        amdgpu::exec_wmma_f32_mixed<{M}, {N}, {K}>(cu, a_bits, b_bits, dst,'
             )
             L.append(f'            {src0_base_expr},')
             L.append(f'            {src1_base_expr},')
@@ -658,14 +658,14 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 else ''
             )
             L.append(
-                f'  amdgpu::{exec_fn}(cu, {M}, {N}, {K}, {in_bits}, dst,'
+                f'  amdgpu::{exec_fn}<{M}, {N}, {K}>(cu, {in_bits}, dst,'
                 f' {src0_base_expr}, {src1_base_expr}, s2, {index_base_expr},'
                 f' {swmmac_index_entries}, {index_key_expr},'
                 f' {ea}, {eb}, const_acc{mode_args});'
             )
         elif uses_fixed_wave32_split_k_dense_layout:
             # Dense WMMA: a specialized Wave32 kernel where one exists, else
-            # the generic exec_wmma_* runtime path.
+            # the generic exec_wmma_* kernel.
             spec = _fixed_wave32_wmma_spec(result_type, input_type, M, N, K)
             if spec is not None:
                 if result_type in ('F32', 'BF16F32'):
@@ -694,13 +694,13 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                     exec_fn = 'exec_wmma_f32'
                 if exec_fn == 'exec_wmma_f32':
                     L.append(
-                        f'  amdgpu::{exec_fn}(cu, {M}, {N}, {K}, {in_bits}, dst,'
+                        f'  amdgpu::{exec_fn}<{M}, {N}, {K}>(cu, {in_bits}, dst,'
                         f' {src0_base_expr}, {src1_base_expr}, s2, {ea}, {eb}, const_acc,'
                         f' amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));'
                     )
                 else:
                     L.append(
-                        f'  amdgpu::{exec_fn}(cu, {M}, {N}, {K}, {in_bits}, dst,'
+                        f'  amdgpu::{exec_fn}<{M}, {N}, {K}>(cu, {in_bits}, dst,'
                         f' {src0_base_expr}, {src1_base_expr}, s2, {ea}, {eb}, const_acc);'
                     )
         elif (
@@ -729,7 +729,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             and input_type not in ('F8_F6_F4', 'F8F6F4')
         ):
             L.append(
-                f'  amdgpu::exec_gfx11_wmma_f32(cu, wf.wf_size(), {M}, {N}, {K}, {in_bits}, dst,'
+                f'  amdgpu::exec_gfx11_wmma_f32<{M}, {N}, {K}>(cu, wf.wf_size(), {in_bits}, dst,'
                 f' {src0_base_expr}, {src1_base_expr}, s2, {ea}, {eb}, const_acc,'
                 f' amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));'
             )
@@ -771,19 +771,19 @@ def gen_mfma(ctx: ExecuteContext) -> str:
         elif uses_gfx12_wmma_layout and input_type not in ('F8_F6_F4', 'F8F6F4'):
             if result_type == 'F16':
                 L.append(
-                    f'  amdgpu::exec_wmma_f16(cu, {M}, {N}, {K}, {in_bits}, dst,'
+                    f'  amdgpu::exec_wmma_f16<{M}, {N}, {K}>(cu, {in_bits}, dst,'
                     f' {src0_base_expr}, {src1_base_expr}, s2, {ea}, {eb}, const_acc,'
                     f' wf.wf_size());'
                 )
             elif result_type == 'BF16':
                 L.append(
-                    f'  amdgpu::exec_wmma_bf16(cu, {M}, {N}, {K}, {in_bits}, dst,'
+                    f'  amdgpu::exec_wmma_bf16<{M}, {N}, {K}>(cu, {in_bits}, dst,'
                     f' {src0_base_expr}, {src1_base_expr}, s2, {ea}, {eb}, const_acc,'
                     f' wf.wf_size());'
                 )
             else:
                 L.append(
-                    f'  amdgpu::exec_wmma_f32(cu, {M}, {N}, {K}, {in_bits}, dst,'
+                    f'  amdgpu::exec_wmma_f32<{M}, {N}, {K}>(cu, {in_bits}, dst,'
                     f' {src0_base_expr}, {src1_base_expr}, s2, {ea}, {eb}, const_acc,'
                     f' amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi), wf.wf_size());'
                 )
@@ -800,7 +800,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             )
             L.append('      [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {')
             L.append(
-                f'        amdgpu::exec_f32_mixed(cu, {M}, {N}, {K}, {B}, a_bits, b_bits,'
+                f'        amdgpu::exec_f32_mixed<{M}, {N}, {K}, {B}>(cu, a_bits, b_bits,'
             )
             L.append(
                 f'                               dst, s0b, s1b, s2, ea, eb, const_acc);'
@@ -820,14 +820,14 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 else 'exec_gfx11_wmma_bf16'
             )
             L.append(
-                f'  amdgpu::{exec_fn}(cu, wf.wf_size(), {M}, {N}, {K}, {in_bits}, dst,'
+                f'  amdgpu::{exec_fn}<{M}, {N}, {K}>(cu, wf.wf_size(), {in_bits}, dst,'
             )
             L.append(f'      {src0_base_expr},')
             L.append(f'      {src1_base_expr}, s2,' ' (inst_.op_sel >> 2) & 0x1u,')
             L.append(f'      {ea}, {eb}, const_acc);')
         elif uses_gfx12_wmma_layout and result_type in ('F16', 'BF16'):
             exec_fn = 'exec_wmma_f16' if result_type == 'F16' else 'exec_wmma_bf16'
-            L.append(f'  amdgpu::{exec_fn}(cu, {M}, {N}, {K}, {in_bits}, dst,')
+            L.append(f'  amdgpu::{exec_fn}<{M}, {N}, {K}>(cu, {in_bits}, dst,')
             L.append(f'      {src0_base_expr},')
             L.append(
                 f'      {src1_base_expr}, s2, {ea}, {eb}, const_acc,' f' wf.wf_size());'
@@ -858,12 +858,12 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 )
             elif has_blgp:
                 L.append(
-                    f'  amdgpu::exec_f32(cu, {M}, {N}, {K}, {B}, {in_bits}, dst, {s0b}, {s1b},'
+                    f'  amdgpu::exec_f32<{M}, {N}, {K}, {B}>(cu, {in_bits}, dst, {s0b}, {s1b},'
                     f' s2, {ea}, {eb}, const_acc, inst_.cbsz, inst_.abid, inst_.blgp);'
                 )
             else:
                 L.append(
-                    f'  amdgpu::exec_f32(cu, {M}, {N}, {K}, {B}, {in_bits}, dst, {s0b}, {s1b},'
+                    f'  amdgpu::exec_f32<{M}, {N}, {K}, {B}>(cu, {in_bits}, dst, {s0b}, {s1b},'
                     f' s2, {ea}, {eb}, const_acc);'
                 )
 
