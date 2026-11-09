@@ -1014,9 +1014,11 @@ static ncclResult_t IbCastSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
   memset(&qpCreateAttrs, 0, sizeof(struct ncclIbQpCreateAttr));
   qpCreateAttrs.type = IBV_QPT_RC;
   qpCreateAttrs.maxRecvWorkRequest = 0;
-  // Two WRs per in-flight request, plus room for one request split at the post cap.
-  qpCreateAttrs.maxSendWorkRequest = IbCastDataSendQueueDepth();
   qpCreateAttrs.isQpSharingEnabled = IbCastQpSharingEnabled();
+  // Ionic multiplies this value by depthMult for a shared QP. Amortize the
+  // single split-chain allowance so that it is not multiplied once per comm.
+  qpCreateAttrs.maxSendWorkRequest =
+      IbCastDataSendQueueDepth(qpCreateAttrs.isQpSharingEnabled ? depthMult : 1);
   qpCreateAttrs.qpSharingGroupIdx = meta->sharedGroupIdx;
   qpCreateAttrs.cqDepthMultiplier = depthMult;
   for (int qpIndex = 0; qpIndex < nqps; qpIndex++) {

@@ -56,6 +56,13 @@ constexpr uint32_t kRkey = 0x200;
 constexpr char kPeer[] = "10.1.2.3<4242>";
 constexpr int kPollBatch = 4;  // IbCastTest's batch off AINIC; test/host/CMakeLists.txt pins it to p2p.cc
 
+TEST(NetIbCastQueueDepthMicrotest, SharedDepthMultiplierAmortizesOneSplitChain) {
+  constexpr uint32_t kOrdinaryRequestWrs = 2u * (NET_IB_MAX_REQUESTS - 1);
+  EXPECT_EQ(IbCastDataSendQueueDepth(), kOrdinaryRequestWrs + IB_CAST_MAX_SPLIT_WRS);
+  EXPECT_EQ(IbCastDataSendQueueDepth(64), kOrdinaryRequestWrs + 16u);
+  EXPECT_EQ(IbCastDataSendQueueDepth(96), kOrdinaryRequestWrs + 11u);
+}
+
 class NetIbCastP2pMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {

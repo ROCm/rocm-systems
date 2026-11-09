@@ -552,8 +552,13 @@ static_assert(NET_IB_MAX_REQUESTS <= 256,
 // queue keeps two WRs for every other in-flight request so that one split still
 // fits beside them. A longer chain fails in ibv_post_send.
 #define IB_CAST_MAX_SPLIT_WRS 1024
-static inline uint32_t IbCastDataSendQueueDepth() {
-  return 2u * (NET_IB_MAX_REQUESTS - 1) + IB_CAST_MAX_SPLIT_WRS;
+static inline uint32_t IbCastDataSendQueueDepth(uint32_t depthMultiplier = 1) {
+  // The Ionic QP creator applies depthMultiplier to this result for shared QPs.
+  // Scale only the ordinary request slots; a shared physical QP still needs
+  // room for one maximum-length split chain, not one chain per logical comm.
+  const uint32_t splitWrsPerUnit =
+      (IB_CAST_MAX_SPLIT_WRS + depthMultiplier - 1) / depthMultiplier;
+  return 2u * (NET_IB_MAX_REQUESTS - 1) + splitWrsPerUnit;
 }
 
 // Structure to describe the completion records on the sender side.
