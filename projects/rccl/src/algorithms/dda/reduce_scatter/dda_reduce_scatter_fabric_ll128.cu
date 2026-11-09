@@ -166,6 +166,11 @@ bool ncclReduceScatterDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuf
   return true;
 }
 
+uint32_t ncclReduceScatterDdaFabricLL128Blocks(ncclComm* comm, size_t recvcount, ncclDataType_t datatype) {
+  const auto grid = ddaReduceScatterFabricLL128Geom(comm, recvcount * ncclTypeSize(datatype)).first;
+  return grid.x * grid.y;
+}
+
 ncclResult_t ncclReduceScatterDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t recvcount,
                                              ncclDataType_t datatype, ncclRedOp_t op, ncclComm* comm,
                                              cudaStream_t stream) {

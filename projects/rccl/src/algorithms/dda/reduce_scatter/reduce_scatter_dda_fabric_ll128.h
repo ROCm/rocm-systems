@@ -63,33 +63,35 @@ __host__ __device__ __forceinline__ constexpr int ddaLL128RsBatchPeers(int peer,
 }
 
 // Wait until every valid flag in the batch is current; vr then holds the landed payload. Returns false on abort.
+// Every line is read, and all the batch's loads issue before its first flag check.
 template <int kBatch>
 __device__ __forceinline__ bool ddaLL128RsWaitBatch(const uint64_t* const (&lines)[kBatch], const bool (&valid)[kBatch],
-                                                    const bool (&read)[kBatch], int laneWord, uint64_t flag,
-                                                    bool flagLane, DdaKernelParams params,
+                                                    int laneWord, uint64_t flag, bool flagLane, DdaKernelParams params,
                                                     uint64_t (&vr)[kBatch][kDdaLL128WordsPerThread]) {
   int spins = 0;
   while (true) {
+#pragma unroll
+    for (int k = 0; k < kBatch; ++k) {
+#pragma unroll
+      for (int u = 0; u < kDdaLL128WordsPerThread; u += 2) {
+        ddaLL128LoadAtomic16B(lines[k] + laneWord + u * kDdaLL128Warp, vr[k][u], vr[k][u + 1]);
+      }
+    }
     bool stale = false;
 #pragma unroll
     for (int k = 0; k < kBatch; ++k) {
-      if (read[k]) {
 #pragma unroll
-        for (int u = 0; u < kDdaLL128WordsPerThread; u += 2) {
-          ddaLL128LoadAtomic16B(lines[k] + laneWord + u * kDdaLL128Warp, vr[k][u], vr[k][u + 1]);
-          stale |= valid[k] && flagLane && vr[k][u + 1] != flag;
-        }
+      for (int u = 0; u < kDdaLL128WordsPerThread; u += 2) {
+        stale |= valid[k] && flagLane && vr[k][u + 1] != flag;
       }
     }
     if (!__any(stale)) {
 #if !RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS
 #pragma unroll
       for (int k = 0; k < kBatch; ++k) {
-        if (read[k]) {
 #pragma unroll
-          for (int u = 0; u < kDdaLL128WordsPerThread; u += 2) {
-            ddaLL128LoadAtomic16B(lines[k] + laneWord + u * kDdaLL128Warp, vr[k][u], vr[k][u + 1]);
-          }
+        for (int u = 0; u < kDdaLL128WordsPerThread; u += 2) {
+          ddaLL128LoadAtomic16B(lines[k] + laneWord + u * kDdaLL128Warp, vr[k][u], vr[k][u + 1]);
         }
       }
 #endif
@@ -172,20 +174,25 @@ __launch_bounds__(512)
     // Runtime-rank instance stages 4 peers per batch: 8 would spill.
     constexpr int kSendBatch = NRANKS_CT ? kDdaLLPeerBatch : 4;
     for (int base = 1; base < nRanks; base += kSendBatch) {
-      uint64_t regs[kSendBatch][kDdaLL128WordsPerThread] = {};
+      uint64_t regs[kSendBatch][kDdaLL128WordsPerThread];
 #pragma unroll
       for (int i = 0; i < kSendBatch; ++i) {
         const int r = base + i;
-        if (r < nRanks) {
+        // The runtime kernel also loads past the last peer, a shard the modulo wraps to and nothing sends, so no
+        // branch splits its batch.
+        if (NRANKS_CT == 0 || r < nRanks) {
           const int peer = (selfRank + r) % nRanks;
-          ddaLL128LoadRegs<int8_t>(regs[i], srcBytes + (size_t)peer * shardBytes + sliceByte, eltInSlice, lane,
-                                   flagLane);
+          ddaLL128LoadRegsBegin<int8_t>(regs[i], srcBytes + (size_t)peer * shardBytes + sliceByte, eltInSlice, lane,
+                                        flagLane);
         }
       }
+      // Keeps every flag-lane shuffle below the batch's loads, so no peer's loads wait on another peer's.
+      __builtin_amdgcn_sched_barrier(0);
 #pragma unroll
       for (int i = 0; i < kSendBatch; ++i) {
         const int r = base + i;
         if (r < nRanks) {
+          ddaLL128LoadRegsFinish(regs[i], flagLane);
           // peer is wave-uniform; readfirstlane makes that explicit so the scratch base is a scalar load.
           const int peer = __builtin_amdgcn_readfirstlane((selfRank + r) % nRanks);
           uint64_t* scatterSlot = reinterpret_cast<uint64_t*>(peerScratch[peer]) + bankWords +
@@ -209,8 +216,10 @@ __launch_bounds__(512)
     const size_t sliceWire = s * (size_t)kDdaLL128WireWordsPerSlice;
 
     // Seed with my own shard; peers are folded on top.
-    uint64_t acc[kDdaLL128WordsPerThread] = {};
-    ddaLL128LoadRegs<int8_t>(acc, srcBytes + (size_t)selfRank * shardBytes + sliceByte, eltInSlice, lane, flagLane);
+    // Its loads stay in flight through the first poll batch, which is when it is finished.
+    uint64_t acc[kDdaLL128WordsPerThread];
+    ddaLL128LoadRegsBegin<int8_t>(acc, srcBytes + (size_t)selfRank * shardBytes + sliceByte, eltInSlice, lane,
+                                  flagLane);
 
     int peer = firstRecvPeer;
     for (int base = 1; base < nRanks; base += kPollBatch) {
@@ -218,17 +227,18 @@ __launch_bounds__(512)
       bool valid[kPollBatch];
       peer = ddaLL128RsBatchPeers(peer, base, nRanks, peers, valid);
       const uint64_t* lines[kPollBatch];
-      bool read[kPollBatch];
 #pragma unroll
       for (int k = 0; k < kPollBatch; ++k) {
-        // The runtime kernel reads every line to stay branch-free; a past-the-end one is my own unused slot, ignored.
-        read[k] = NRANKS_CT == 0 || valid[k];
+        // Every line is read to stay branch-free, and a past-the-end one is my own unused slot, ignored.
         lines[k] = gatherBase + (uint64_t)peers[k] * (uint64_t)slotWords + sliceWire;
       }
       uint64_t vr[kPollBatch][kDdaLL128WordsPerThread];
-      if (!ddaLL128RsWaitBatch(lines, valid, read, laneWord, flag, flagLane, params, vr)) {
+      if (!ddaLL128RsWaitBatch(lines, valid, laneWord, flag, flagLane, params, vr)) {
         aborted = true;
         break;
+      }
+      if (base == 1) {
+        ddaLL128LoadRegsFinish(acc, flagLane);
       }
       // Fold word by word, each word taking the batch's peers in rank order, so every element sums in the same order.
       // On a flag lane the odd words hold flags rather than payload, so the sums
@@ -239,11 +249,9 @@ __launch_bounds__(512)
       for (int u = 0; u < kDdaLL128WordsPerThread; ++u) {
 #pragma unroll
         for (int k = 0; k < kPollBatch; ++k) {
-          if (read[k]) {
-            // A select rather than a branch, so the runtime kernel keeps the batch's reads in flight together.
-            const uint64_t sum = ddaLL128AddWord<T>(acc[u], vr[k][u]);
-            acc[u] = valid[k] ? sum : acc[u];
-          }
+          // A select rather than a branch, so the batch's reads stay in flight together.
+          const uint64_t sum = ddaLL128AddWord<T>(acc[u], vr[k][u]);
+          acc[u] = valid[k] ? sum : acc[u];
         }
         if constexpr (is_fp8_v<T>) {
           // Fold fp8 per word: hoisted pk8 upconverts take 8 VGPRs each and spill; mask 0x20 lets VMEM reads cross.
