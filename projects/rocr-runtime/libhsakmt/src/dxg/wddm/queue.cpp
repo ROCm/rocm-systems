@@ -288,7 +288,9 @@ void ComputeQueue::AqlToPm4Thread(ComputeQueue* queue) {
       hsa_status_t status = queue->Process();
       if (status != HSA_STATUS_SUCCESS) {
         pr_err("process compute queue fail status = %08x\n", status);
-        queue->HandleError(status);
+        // Process() already reports poison faults under a thread_stop_ one-shot guard; only
+        // report here if it has not already claimed the teardown (e.g. non-poison errors).
+        if (!queue->thread_stop_.exchange(true)) queue->HandleError(status);
         break;
       }
       sleep = false;
@@ -1265,14 +1267,16 @@ hsa_status_t ComputeQueue::Process(void) {
     uint64_t reuse_fence = CmdbufFrameRing::NextFrameReuseFence(sync_point, frame_num);
     if (IsFencePoisoned(sync_addr)) {
       pending_signals_.clear();
-      HandleError(static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION));
+      if (!thread_stop_.exchange(true))
+        HandleError(static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION));
       return static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION);
     }
     if (LoadSyncValue(sync_addr) < reuse_fence) {
       if (!device->CpuWait(&syncobj, &reuse_fence, 1, false)) return HSA_STATUS_ERROR;
       if (IsFencePoisoned(sync_addr)) {
         pending_signals_.clear();
-        HandleError(static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION));
+        if (!thread_stop_.exchange(true))
+          HandleError(static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION));
         return static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION);
       }
     }
@@ -1294,7 +1298,8 @@ hsa_status_t ComputeQueue::Process(void) {
     if (!platform_atomic_support_ && !pending_signals_.empty()) {
       if (IsFencePoisoned(sync_addr)) {
         pending_signals_.clear();
-        HandleError(static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION));
+        if (!thread_stop_.exchange(true))
+          HandleError(static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION));
         return static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION);
       }
       if (LoadSyncValue(sync_addr) < sync_point) {
@@ -1306,7 +1311,8 @@ hsa_status_t ComputeQueue::Process(void) {
         }
         if (IsFencePoisoned(sync_addr)) {
           pending_signals_.clear();
-          HandleError(static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION));
+          if (!thread_stop_.exchange(true))
+            HandleError(static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION));
           return static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION);
         }
       }
