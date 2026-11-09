@@ -29,9 +29,11 @@
 #include "race_test_instruction.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/memory_issue.h"
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
+#include "rocjitsu/vm/plugins/race_detector/core/interval_set.h"
 #include <array>
 #include <cstdint>
 #include <gtest/gtest.h>
+#include <initializer_list>
 #include <limits>
 #include <span>
 #include <utility>
@@ -956,24 +958,24 @@ TEST(RaceDetector, LdsSameWave_SpanningAccessChecksLaterChunks) {
 TEST(RaceDetector, LdsMayConflictChecksOnlyTheAccessedChunks) {
   for (bool writes : {false, true}) {
     SCOPED_TRACE(writes ? "RAW" : "WAR");
-    RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/8, /*sgprs=*/8);
+    RaceTestBuilder builder(/*numWaves=*/2, /*vgprs=*/8, /*sgprs=*/8);
     // Wave 1's pending access lies in the gap between wave 0's two ranges.
     if (writes)
-      b.ldsWrite(/*wave=*/1, /*lane=*/0, /*addr=*/1024, /*bytes=*/4);
+      builder.ldsWrite(/*wave=*/1, /*lane=*/0, /*addr=*/1024, /*bytes=*/4);
     else
-      b.ldsRead(/*wave=*/1, /*lane=*/0, /*addr=*/1024, /*bytes=*/4, /*vgprDst=*/2);
+      builder.ldsRead(/*wave=*/1, /*lane=*/0, /*addr=*/1024, /*bytes=*/4, /*vgprDst=*/2);
     auto intervals = [](std::initializer_list<Interval> ranges) {
       IntervalSet set;
-      for (const auto &range : ranges)
+      for (const Interval &range : ranges)
         set.append(range.start, range.end);
       set.finalize();
       return set;
     };
     const IntervalSet around = intervals({{0, 256}, {4096, 4352}});
     const IntervalSet over = intervals({{0, 256}, {1020, 1028}});
-    const RaceDetector &detector = b.detector();
+    const RaceDetector &detector = builder.detector();
     const bool checkWrite = !writes;
-    const auto order = MemoryOrderClass::LDS;
+    const MemoryOrderClass order = MemoryOrderClass::LDS;
     EXPECT_FALSE(detector.mayConflict(around, WaveId{0}, checkWrite, order));
     EXPECT_TRUE(detector.mayConflict(over, WaveId{0}, checkWrite, order));
     // Same-wave LDS accesses are ordered, and a read never conflicts with a
