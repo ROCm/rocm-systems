@@ -57,7 +57,7 @@ panels:
     title: GL2 Cache (L2)
   - type: metric_table
     id: 9
-    title: EA to DRAM
+    title: GCEA to DRAM
   - type: metric_table
     id: 10
     title: Workgroup Processors (WGPs)
@@ -183,23 +183,23 @@ panels:
   - type: metric_table
     id: 4
     title: GL2 Cache Bandwidth
-- file: efficiency_arbiter_ea.yaml
+- file: graphics_core_efficiency_arbiter.yaml
   panel_id: 14
-  panel_title: Efficiency Arbiter (EA)
+  panel_title: Graphics Core Efficiency Arbiter (GCEA)
   panel_alias: ea
   data_sources:
   - type: metric_table
     id: 1
-    title: EA Utilization
+    title: GCEA Utilization
   - type: metric_table
     id: 2
-    title: EA Traffic Bandwidth
+    title: GCEA Traffic Bandwidth
   - type: metric_table
     id: 3
-    title: EA-SDP Interface - Outstanding Requests
+    title: GCEA-SDP Interface - Outstanding Requests
   - type: metric_table
     id: 4
-    title: EA-SDP Interface - Stalls
+    title: GCEA-SDP Interface - Stalls
 - file: graphics_register_bus_manager_grbm.yaml
   panel_id: 17
   panel_title: Graphics Register Bus Manager (GRBM)
