@@ -848,8 +848,10 @@ class Graph {
   //! Schedules nodes into batches for optimized execution
   hipError_t ScheduleNodesIntoBatches();
 
-  //! Find execution paths hierarchically, keeping child graphs separate
-  hipError_t FindExecutionPathsHierarchical(GraphExecutionPaths& graph_paths);
+  //! Find execution paths hierarchically, keeping child graphs separate.
+  //! skip_topo_check: the caller has already checked this graph for cycles.
+  hipError_t FindExecutionPathsHierarchical(GraphExecutionPaths& graph_paths,
+                                            bool skip_topo_check = false);
 
   //! Find all paths from a node using an explicit DFS over a node stack, with
   //! hierarchical handling of child graphs (only child graphs recurse)
