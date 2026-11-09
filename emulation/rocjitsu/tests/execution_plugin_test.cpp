@@ -1912,7 +1912,7 @@ TEST(ExecutionPluginTest, ReportedRoutingHookFailurePreventsPipelineIssue) {
     state->dst_reg_base = destination;
     state->per_lane_addr[0] = 0x8000;
     auto instruction = std::make_unique<TestMemoryInstruction>(std::move(state));
-    EXPECT_EQ(test::ComputeUnitTestAccess::route_memory_inst(*cu, instruction.release(), *wave),
+    EXPECT_EQ(test::ComputeUnitTestAccess::route_memory_inst(*cu, std::move(instruction), *wave),
               amdgpu::VmAccessOutcome::Malformed);
     EXPECT_EQ(wave->instruction_execution_error(), InstructionExecutionError::PluginFailure);
     EXPECT_EQ(observed->routed_callbacks, after_routing ? 1u : 0u);
@@ -2491,7 +2491,7 @@ TEST(HookOrderingTest, UniformLdsFlatPreservesPreAndPostRoutingViews) {
   ASSERT_NE(flat, nullptr);
 
   EXPECT_TRUE(cu->execute_instruction(flat.get(), *wf).succeeded());
-  test::ComputeUnitTestAccess::route_memory_inst(*cu, flat.release(), *wf);
+  test::ComputeUnitTestAccess::route_memory_inst(*cu, std::move(flat), *wf);
 
   ASSERT_EQ(plugin->before_tag.size(), 1u);
   EXPECT_EQ(plugin->before_tag[0], GLOBAL_MEM);

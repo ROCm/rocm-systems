@@ -608,7 +608,7 @@ public:
   void execute_and_route(Instruction *inst, amdgpu::Wavefront &wf) {
     EXPECT_TRUE(this->execute_instruction(inst, wf).succeeded());
     if (inst->is_memory_op())
-      this->route_memory_inst(inst, wf);
+      this->route_memory_inst(std::unique_ptr<Instruction>(inst), wf);
     else
       delete inst;
   }
@@ -1004,7 +1004,7 @@ template <typename Isa> void check_high_shared_flat_addresses(rj_code_arch_t arc
           std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
           ASSERT_NE(inst, nullptr);
           ASSERT_TRUE(cu.execute_instruction(inst.get(), *wf).succeeded());
-          ASSERT_EQ(cu.route_memory_inst(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
+          ASSERT_EQ(cu.route_memory_inst(std::move(inst), *wf), amdgpu::VmAccessOutcome::Complete);
           cu.flush_all();
           EXPECT_EQ(wf->state(), amdgpu::WfState::RUNNING);
           EXPECT_TRUE(wf->wait_counters().empty());
@@ -1109,7 +1109,7 @@ TEST(Rdna4MemoryExecutionHarness, SharedFlatMultiwordBoundsPreserveNeighborAlloc
           std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
           ASSERT_NE(instruction, nullptr);
           ASSERT_TRUE(cu.execute_instruction(instruction.get(), *wave).succeeded());
-          ASSERT_EQ(cu.route_memory_inst(instruction.release(), *wave),
+          ASSERT_EQ(cu.route_memory_inst(std::move(instruction), *wave),
                     amdgpu::VmAccessOutcome::Complete);
           cu.flush_all();
           const uint32_t valid_words = std::min(width, test.valid_words);
@@ -1193,7 +1193,7 @@ TEST(Rdna4MemoryExecutionHarness, SharedFlatAtomic64RequiresACompleteAllocationE
       std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
       ASSERT_NE(instruction, nullptr);
       ASSERT_TRUE(cu.execute_instruction(instruction.get(), *wave).succeeded());
-      ASSERT_EQ(cu.route_memory_inst(instruction.release(), *wave),
+      ASSERT_EQ(cu.route_memory_inst(std::move(instruction), *wave),
                 amdgpu::VmAccessOutcome::Complete);
       cu.flush_all();
       EXPECT_EQ(wave->lds().read64(256 + 248), logical_size == 256 ? initial + 1 : initial);
@@ -1260,7 +1260,7 @@ TEST(Gfx1250MemoryExecutionHarness, DdsFaultsWithoutWrappingIntoAnotherLdsAlloca
           std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
           ASSERT_NE(inst, nullptr);
           ASSERT_TRUE(cu.execute_instruction(inst.get(), *wf).succeeded());
-          EXPECT_EQ(cu.route_memory_inst(inst.release(), *wf), amdgpu::VmAccessOutcome::Faulted);
+          EXPECT_EQ(cu.route_memory_inst(std::move(inst), *wf), amdgpu::VmAccessOutcome::Faulted);
           EXPECT_TRUE(wf->wait_counters().empty());
           EXPECT_EQ(wf->state(), amdgpu::WfState::RUNNING);
           for (uint32_t address = 0; address < 512; address += 4)
@@ -1333,7 +1333,7 @@ TEST(Gfx1250MemoryExecutionHarness, MixedFlatLdsAndGlobalLanesPreserveEachResult
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
       ASSERT_NE(inst, nullptr);
       ASSERT_TRUE(cu.execute_instruction(inst.get(), *wf).succeeded());
-      ASSERT_EQ(cu.route_memory_inst(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
+      ASSERT_EQ(cu.route_memory_inst(std::move(inst), *wf), amdgpu::VmAccessOutcome::Complete);
       cu.flush_all();
       for (uint32_t lane = 0; lane < 3; ++lane) {
         for (uint32_t word = 0; word <= test.width; ++word) {
@@ -1442,7 +1442,7 @@ template <typename Isa> void check_mixed_flat_global_scratch_lds(rj_code_arch_t 
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
       ASSERT_NE(inst, nullptr);
       ASSERT_TRUE(cu.execute_instruction(inst.get(), *wf).succeeded());
-      ASSERT_EQ(cu.route_memory_inst(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
+      ASSERT_EQ(cu.route_memory_inst(std::move(inst), *wf), amdgpu::VmAccessOutcome::Complete);
       cu.flush_all();
       auto expected = [&](uint32_t lane, uint32_t word, uint32_t selected_lane) {
         if (lane != selected_lane || word < offset / 4 || word >= offset / 4 + 4)
@@ -1625,7 +1625,7 @@ void check_block_transfer_masks(rj_code_arch_t arch, bool general_completion = f
           inst->data_as<amdgpu::VectorMemState>()->sign_extend = true;
         }
         wf->set_m0(~mask); // Memory access and writeback use the issue-time mask.
-        ASSERT_EQ(cu.route_memory_inst(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
+        ASSERT_EQ(cu.route_memory_inst(std::move(inst), *wf), amdgpu::VmAccessOutcome::Complete);
         cu.flush_all();
         for (uint32_t lane = 0; lane < 3; ++lane) {
           for (uint32_t word = 0; word < 32; ++word) {
@@ -1739,7 +1739,7 @@ template <typename Isa> void check_block_transfer_ownership(rj_code_arch_t arch)
         ASSERT_NE(inst, nullptr);
         ASSERT_TRUE(cu.execute_instruction(inst.get(), *wave).succeeded());
         wave->set_m0(~mask);
-        ASSERT_EQ(cu.route_memory_inst(inst.release(), *wave), amdgpu::VmAccessOutcome::Complete);
+        ASSERT_EQ(cu.route_memory_inst(std::move(inst), *wave), amdgpu::VmAccessOutcome::Complete);
         cu.flush_all();
         for (uint32_t lane = 0; lane < 3; ++lane) {
           for (uint32_t word = 0; word < 32; ++word) {
@@ -9038,7 +9038,7 @@ TEST(Rdna4AtomicReturnTest, FlatPackedHalfAddPreservesLdsDenormals) {
             std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
             ASSERT_NE(inst, nullptr);
             EXPECT_TRUE(cu.execute_instruction(inst.get(), *wave).succeeded());
-            cu.route_memory_inst(inst.release(), *wave);
+            cu.route_memory_inst(std::move(inst), *wave);
             const bool flush =
                 direct_ds && (!(denorm & 2u) || (test.input_denorm && !(denorm & 1u)));
             EXPECT_EQ(cu.lds().read32(kLdsBase + kOffset), flush ? 0u : test.expected);

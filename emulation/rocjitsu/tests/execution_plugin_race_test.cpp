@@ -1774,7 +1774,7 @@ TEST(RaceDetectorPluginTest, LdsRoutedFlatStoreDwordx2TracksTrailingDword) {
       if (!store->data())
         return false;
       EXPECT_EQ(store->data()->tag(), GLOBAL_MEM);
-      test::ComputeUnitTestAccess::route_memory_inst(*cu, store.release(), *writer);
+      test::ComputeUnitTestAccess::route_memory_inst(*cu, std::move(store), *writer);
       return true;
     };
 
@@ -1884,7 +1884,7 @@ TEST(RaceDetectorPluginTest, MixedFlatChecksAndRecordsOnlySharedLaneIntervals) {
           ASSERT_NE(inst, nullptr);
           f.plugin_group_->onAmdgpuBeforeExecuteInstruction(flat_wave->pc, *inst, *flat_wave);
           ASSERT_TRUE(cu->execute_instruction(inst.get(), *flat_wave).succeeded());
-          test::ComputeUnitTestAccess::route_memory_inst(*cu, inst.release(), *flat_wave);
+          test::ComputeUnitTestAccess::route_memory_inst(*cu, std::move(inst), *flat_wave);
 
           auto *plugin_state =
               static_cast<RaceWavefrontState *>(flat_wave->plugin_state(plugin_ptr->slot_index()));
@@ -1948,7 +1948,7 @@ TEST(RaceDetectorPluginTest, MixedFlatAtLdsBackingEndTracksExecutedElements) {
     ASSERT_NE(inst, nullptr);
     f.plugin_group_->onAmdgpuBeforeExecuteInstruction(flat_wave->pc, *inst, *flat_wave);
     ASSERT_TRUE(cu->execute_instruction(inst.get(), *flat_wave).succeeded());
-    test::ComputeUnitTestAccess::route_memory_inst(*cu, inst.release(), *flat_wave);
+    test::ComputeUnitTestAccess::route_memory_inst(*cu, std::move(inst), *flat_wave);
     auto *state =
         static_cast<RaceWavefrontState *>(flat_wave->plugin_state(plugin_ptr->slot_index()));
     const auto &events = state->race_state->getDetector()->events();
@@ -2028,7 +2028,7 @@ TEST(RaceDetectorPluginTest, FlatInvalidSharedLanesKeepDependenciesWithoutLdsInt
       ASSERT_NE(inst, nullptr);
       f.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, *inst, *wave);
       ASSERT_TRUE(cu->execute_instruction(inst.get(), *wave).succeeded());
-      test::ComputeUnitTestAccess::route_memory_inst(*cu, inst.release(), *wave);
+      test::ComputeUnitTestAccess::route_memory_inst(*cu, std::move(inst), *wave);
       auto *state = static_cast<RaceWavefrontState *>(wave->plugin_state(plugin_ptr->slot_index()));
       auto &race = *state->race_state;
       const auto &events = race.getDetector()->events();
@@ -2783,7 +2783,7 @@ TEST(RaceDetectorPluginTest, FlatResultsFollowTheirResolvedCounter) {
             cu->track_memory_wait(*load, *wf);
             f.plugin_group_->onAmdgpuBeforeExecuteInstruction(wf->pc, *load, *wf);
             ASSERT_TRUE(cu->execute_instruction(load.get(), *wf).succeeded());
-            test::ComputeUnitTestAccess::route_memory_inst(*cu, load.release(), *wf);
+            test::ComputeUnitTestAccess::route_memory_inst(*cu, std::move(load), *wf);
             // Inspect eager values without making these assertions instruction consumers.
             for (unsigned part = 0; part < width; ++part)
               for (uint32_t lane = 0; lane < wave_size; ++lane)
@@ -4158,7 +4158,7 @@ TEST(RaceDetectorPluginTest, DecodedDirectLdsLoadsDetectConflictingWaveStores) {
       fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(reader->pc, *load, *reader);
       ASSERT_TRUE(cu->execute_instruction(load.get(), *reader).succeeded());
       ASSERT_NE(load->data(), nullptr);
-      test::ComputeUnitTestAccess::route_memory_inst(*cu, load.release(), *reader);
+      test::ComputeUnitTestAccess::route_memory_inst(*cu, std::move(load), *reader);
       EXPECT_EQ(sink.str().find("RACE ") != std::string::npos, store_address == 16);
     }
   }

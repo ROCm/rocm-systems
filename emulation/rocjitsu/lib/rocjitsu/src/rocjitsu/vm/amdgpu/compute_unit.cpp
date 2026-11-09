@@ -1084,13 +1084,12 @@ void ComputeUnitCore::tick_pipelines() {
     tensor_dma_pipeline_.tick();
 }
 
-VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
+VmAccessOutcome ComputeUnitCore::route_memory_inst(std::unique_ptr<Instruction> inst,
+                                                   Wavefront &wf) {
   if (observes_memory_instruction_routing_)
     plugin_group_->onAmdgpuRouteMemoryInstruction(*inst, wf);
-  if (wf.instruction_execution_failed()) {
-    delete inst;
+  if (wf.instruction_execution_failed())
     return VmAccessOutcome::Malformed;
-  }
   const bool observe_routed_access =
       observes_memory_routing_ && plugin_group_->observes_memory_routing(wf);
   const uint8_t decoded_route_tag = inst->data()->tag();
@@ -1186,20 +1185,17 @@ VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront 
   if (observe_routed_access)
     report_routed_access(*inst, wf, route_tag, decoded_route_tag, normalized_to_local,
                          pre_routing_addresses, flat_local_lane_mask, flat_dds_lane_mask);
-  if (wf.instruction_execution_failed()) {
-    delete inst;
+  if (wf.instruction_execution_failed())
     return VmAccessOutcome::Malformed;
-  }
 
   switch (route_tag) {
   case SCALAR_MEM:
-    return scalar_mem_pipeline_.issue_deferred(inst, wf);
+    return scalar_mem_pipeline_.issue_deferred(inst.release(), wf);
   case LOCAL_MEM:
-    return local_mem_pipeline_.issue_deferred(inst, wf);
+    return local_mem_pipeline_.issue_deferred(inst.release(), wf);
   case GLOBAL_MEM:
-    return global_mem_pipeline_.issue_deferred(inst, wf);
+    return global_mem_pipeline_.issue_deferred(inst.release(), wf);
   default:
-    delete inst;
     return VmAccessOutcome::Malformed;
   }
 }
@@ -2546,7 +2542,7 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
         auto *d = inst->data_as<VectorMemState>();
         d->issue_pc = active->pc;
       }
-      const VmAccessOutcome memory_outcome = route_memory_inst(decoded.value().release(), *active);
+      const VmAccessOutcome memory_outcome = route_memory_inst(std::move(decoded.value()), *active);
       if (active->instruction_execution_failed()) [[unlikely]] {
         fail_current_instruction();
         return IssueOutcome::Issued;
