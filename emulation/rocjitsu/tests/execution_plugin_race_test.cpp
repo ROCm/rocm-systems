@@ -1086,10 +1086,13 @@ TEST_F(TensorDmaRaceTest, AsyncStoreWithoutActiveLanesLeavesTheOlderStorePending
   EXPECT_TRUE(ds_write(0, 0));
 }
 
-// Lanes outside EXEC read no LDS, even with an address recorded.
-TEST_F(TensorDmaRaceTest, AsyncStoreWithoutActiveLanesReadsNoLds) {
-  async_store(0, 0, sizeof(uint32_t), std::nullopt, /*exec=*/0);
+// Lanes outside EXEC read no LDS, even with an address recorded: only lane 1
+// of this store is active.
+TEST_F(TensorDmaRaceTest, AsyncStoreLanesOutsideExecReadNoLds) {
+  const std::array<uint32_t, 2> lanes{0, 16};
+  async_store_lanes(0, lanes, sizeof(uint32_t), std::nullopt, /*exec=*/0b10);
   EXPECT_FALSE(ds_write(1, 0));
+  EXPECT_TRUE(ds_write(1, 16));
 }
 
 TEST_F(TensorDmaRaceTest, AsyncLoadWithoutActiveLanesKeepsItsAsynccntSlot) {
