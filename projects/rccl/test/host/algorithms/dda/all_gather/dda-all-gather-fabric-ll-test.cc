@@ -212,6 +212,24 @@ TEST_F(DdaAllGatherFabricLLMicrotest, Launch_BlocksPerPeerFollowPacketCountCappe
   }
 }
 
+// Each of the nRanks columns gets at most its share of ddaFabricMaxBlocks, and at least one block.
+TEST_F(DdaAllGatherFabricLLMicrotest, Launch_BlocksPerPeerCappedAtShareOfMaxBlocks) {
+  comm().nRanks = 32;
+  comm().ddaFabricMaxBlocks = 96;
+  // 1024, 2048 and 4096 floats per rank want 2, 4 and 8 blocks per column, and 96 / 32 allows 3.
+  const std::pair<size_t, unsigned> cases[] = {{1024, 2}, {2048, 3}, {4096, 3}};
+  for (const auto& [count, bpp] : cases) {
+    g_ddaLaunches.clear();
+    ASSERT_EQ(Run(count), ncclSuccess);
+    ASSERT_EQ(g_ddaLaunches.size(), 1u);
+    EXPECT_EQ(g_ddaLaunches[0].grid.x, 32u);
+    EXPECT_EQ(g_ddaLaunches[0].grid.y, bpp) << "count " << count;
+    EXPECT_EQ(ncclAllGatherDdaFabricLLBlocks(mock_.get(), count, ncclFloat32), 32 * bpp);
+  }
+  comm().nRanks = 144;
+  EXPECT_EQ(ncclAllGatherDdaFabricLLBlocks(mock_.get(), 4096, ncclFloat32), 144u);
+}
+
 TEST_F(DdaAllGatherFabricLLMicrotest, Blocks_SizedOnBytesNotElements) {
   EXPECT_EQ(ncclAllGatherDdaFabricLLBlocks(mock_.get(), 1024, ncclFloat16), 8u);
   EXPECT_EQ(ncclAllGatherDdaFabricLLBlocks(mock_.get(), 1024, ncclFloat32), 16u);

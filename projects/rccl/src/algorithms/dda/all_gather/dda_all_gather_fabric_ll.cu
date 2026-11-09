@@ -18,6 +18,7 @@
 #include <cuda_runtime.h>
 #include <hip/hip_ext.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <utility>
@@ -50,11 +51,12 @@ static inline int ddaLLAgBlocksPerPeer(size_t perRankBytes) {
   return (int)bpp;
 }
 
-// Single source of the launch geometry: grid.x = peer (nRanks), grid.y = the
-// per-peer packet split; 256 threads/block.
+// Single source of the launch geometry: grid.x = peer (nRanks), grid.y = the per-peer packet split,
+// at most each column's share of ddaFabricMaxBlocks. 256 threads/block.
 static inline std::pair<dim3, dim3> ddaAllGatherFabricLLGeom(ncclComm* comm, size_t perRankBytes) {
   const unsigned threads = 256;
-  const int blocksPerPeer = ddaLLAgBlocksPerPeer(perRankBytes);
+  const int share = std::max(comm->ddaFabricMaxBlocks / comm->nRanks, 1);
+  const int blocksPerPeer = std::min(ddaLLAgBlocksPerPeer(perRankBytes), share);
   return std::make_pair(dim3((unsigned)comm->nRanks, (unsigned)blocksPerPeer), dim3(threads));
 }
 
