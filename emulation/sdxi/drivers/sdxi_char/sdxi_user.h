@@ -128,12 +128,34 @@ struct sdxi_ioc_stats {
 	__u64 val[SDXI_NUM_STATS];       /* [out] counter values */
 };
 
-#define SDXI_IOC_MAGIC       'X'
-#define SDXI_IOC_MEMCPY      _IOW (SDXI_IOC_MAGIC, 1, struct sdxi_ioc_memcpy)
-#define SDXI_IOC_COMPRESS    _IOWR(SDXI_IOC_MAGIC, 2, struct sdxi_ioc_compress)
-#define SDXI_IOC_DECOMPRESS  _IOWR(SDXI_IOC_MAGIC, 3, struct sdxi_ioc_decompress)
-#define SDXI_IOC_ELEMWISE    _IOWR(SDXI_IOC_MAGIC, 4, struct sdxi_ioc_elemwise)
-#define SDXI_IOC_INFO        _IOR (SDXI_IOC_MAGIC, 5, struct sdxi_ioc_info)
-#define SDXI_IOC_STATS       _IOWR(SDXI_IOC_MAGIC, 6, struct sdxi_ioc_stats)
+/*
+ * SDXI_IOC_DMABUF_COPY — DMA copy between two dma-buf file descriptors.
+ *
+ * src_fd and dst_fd are open dma-buf file descriptors (e.g. from
+ * /dev/dma_heap/system or an amdgpu BO export).  The kernel driver imports
+ * both, maps them for the SDXI device, issues a copy descriptor, and releases
+ * the attachments before returning.
+ *
+ * Both dma-bufs must map to a single sg entry for the SDXI device (i.e. the
+ * physical backing must be contiguous from the device's perspective).
+ * dma-heap/system and /dev/udmabuf allocations satisfy this; fragmented GPU
+ * memory may not.
+ */
+struct sdxi_ioc_dmabuf_copy {
+	__s32 src_fd;       /* dma-buf fd for source */
+	__s32 dst_fd;       /* dma-buf fd for destination */
+	__u64 src_offset;   /* byte offset into source dma-buf */
+	__u64 dst_offset;   /* byte offset into destination dma-buf */
+	__u64 len;          /* bytes to copy */
+};
+
+#define SDXI_IOC_MAGIC        'X'
+#define SDXI_IOC_MEMCPY       _IOW (SDXI_IOC_MAGIC, 1, struct sdxi_ioc_memcpy)
+#define SDXI_IOC_COMPRESS     _IOWR(SDXI_IOC_MAGIC, 2, struct sdxi_ioc_compress)
+#define SDXI_IOC_DECOMPRESS   _IOWR(SDXI_IOC_MAGIC, 3, struct sdxi_ioc_decompress)
+#define SDXI_IOC_ELEMWISE     _IOWR(SDXI_IOC_MAGIC, 4, struct sdxi_ioc_elemwise)
+#define SDXI_IOC_INFO         _IOR (SDXI_IOC_MAGIC, 5, struct sdxi_ioc_info)
+#define SDXI_IOC_STATS        _IOWR(SDXI_IOC_MAGIC, 6, struct sdxi_ioc_stats)
+#define SDXI_IOC_DMABUF_COPY  _IOWR(SDXI_IOC_MAGIC, 7, struct sdxi_ioc_dmabuf_copy)
 
 #endif /* _UAPI_LINUX_SDXI_USER_H */

@@ -14,19 +14,21 @@ def _IOWR(t, nr, size): return _IOC(_IOC_READ | _IOC_WRITE, t, nr, size)
 
 _M = 'X'
 
-_SZ_MEMCPY     = struct.calcsize("=QQQ")
-_SZ_COMPRESS   = struct.calcsize("=QQQQIIQ")
-_SZ_DECOMPRESS = struct.calcsize("=QQQQIIQ")
-_SZ_ELEMWISE   = struct.calcsize("=QQQIIQQ")
-_SZ_INFO       = struct.calcsize("=IHHIIQQ")
-_SZ_STATS      = struct.calcsize("=II14Q")
+_SZ_MEMCPY      = struct.calcsize("=QQQ")
+_SZ_COMPRESS    = struct.calcsize("=QQQQIIQ")
+_SZ_DECOMPRESS  = struct.calcsize("=QQQQIIQ")
+_SZ_ELEMWISE    = struct.calcsize("=QQQIIQQ")
+_SZ_INFO        = struct.calcsize("=IHHIIQQ")
+_SZ_STATS       = struct.calcsize("=II14Q")
+_SZ_DMABUF_COPY = struct.calcsize("=iiQQQ")
 
-SDXI_IOC_MEMCPY     = _IOW(_M,  1, _SZ_MEMCPY)
-SDXI_IOC_COMPRESS   = _IOWR(_M, 2, _SZ_COMPRESS)
-SDXI_IOC_DECOMPRESS = _IOWR(_M, 3, _SZ_DECOMPRESS)
-SDXI_IOC_ELEMWISE   = _IOWR(_M, 4, _SZ_ELEMWISE)
-SDXI_IOC_INFO       = _IOR(_M,  5, _SZ_INFO)
-SDXI_IOC_STATS      = _IOWR(_M, 6, _SZ_STATS)
+SDXI_IOC_MEMCPY      = _IOW(_M,  1, _SZ_MEMCPY)
+SDXI_IOC_COMPRESS    = _IOWR(_M, 2, _SZ_COMPRESS)
+SDXI_IOC_DECOMPRESS  = _IOWR(_M, 3, _SZ_DECOMPRESS)
+SDXI_IOC_ELEMWISE    = _IOWR(_M, 4, _SZ_ELEMWISE)
+SDXI_IOC_INFO        = _IOR(_M,  5, _SZ_INFO)
+SDXI_IOC_STATS       = _IOWR(_M, 6, _SZ_STATS)
+SDXI_IOC_DMABUF_COPY = _IOWR(_M, 7, _SZ_DMABUF_COPY)
 
 ALGO = {"zlib": 0, "lz4": 1, "zstd": 2}
 
@@ -129,3 +131,10 @@ def sdxi_elemwise(fd: int, data: bytes, dtype: int, op: int, scalar: int) -> byt
     fcntl.ioctl(fd, SDXI_IOC_ELEMWISE, ioc_buf)
     out_len = struct.unpack_from("=Q", ioc_buf, 40)[0]
     return bytes(dst_buf[:out_len])
+
+
+def sdxi_dmabuf_copy(fd: int, src_fd: int, dst_fd: int, length: int,
+                     src_offset: int = 0, dst_offset: int = 0) -> None:
+    ioc_buf = ctypes.create_string_buffer(_SZ_DMABUF_COPY)
+    struct.pack_into("=iiQQQ", ioc_buf, 0, src_fd, dst_fd, src_offset, dst_offset, length)
+    fcntl.ioctl(fd, SDXI_IOC_DMABUF_COPY, ioc_buf)

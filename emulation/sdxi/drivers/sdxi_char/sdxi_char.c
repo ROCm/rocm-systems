@@ -19,6 +19,7 @@
 #include <linux/pci.h>
 #include <linux/miscdevice.h>
 #include <linux/fs.h>
+#include <linux/dma-buf.h>
 #include <linux/dma-mapping.h>
 #include <linux/uaccess.h>
 #include <linux/mutex.h>
@@ -487,6 +488,95 @@ static long handle_stats(struct sdxi_char_dev *sdev,
 	return 0;
 }
 
+static long handle_dmabuf_copy(struct sdxi_char_dev *sdev,
+			        struct sdxi_ioc_dmabuf_copy __user *uioc)
+{
+	struct sdxi_ioc_dmabuf_copy ioc;
+	struct dma_buf *src_buf = NULL, *dst_buf = NULL;
+	struct dma_buf_attachment *src_attach = NULL, *dst_attach = NULL;
+	struct sg_table *src_sgt = NULL, *dst_sgt = NULL;
+	dma_addr_t src_dma, dst_dma;
+	u8 *slot;
+	long ret;
+
+	if (copy_from_user(&ioc, uioc, sizeof(ioc)))
+		return -EFAULT;
+	if (ioc.len == 0)
+		return 0;
+
+	src_buf = dma_buf_get(ioc.src_fd);
+	if (IS_ERR(src_buf))
+		return PTR_ERR(src_buf);
+
+	dst_buf = dma_buf_get(ioc.dst_fd);
+	if (IS_ERR(dst_buf)) {
+		ret = PTR_ERR(dst_buf);
+		dst_buf = NULL;
+		goto out;
+	}
+
+	src_attach = dma_buf_attach(src_buf, &sdev->pdev->dev);
+	if (IS_ERR(src_attach)) {
+		ret = PTR_ERR(src_attach);
+		src_attach = NULL;
+		goto out;
+	}
+
+	dst_attach = dma_buf_attach(dst_buf, &sdev->pdev->dev);
+	if (IS_ERR(dst_attach)) {
+		ret = PTR_ERR(dst_attach);
+		dst_attach = NULL;
+		goto out;
+	}
+
+	src_sgt = dma_buf_map_attachment_unlocked(src_attach, DMA_TO_DEVICE);
+	if (IS_ERR(src_sgt)) {
+		ret = PTR_ERR(src_sgt);
+		src_sgt = NULL;
+		goto out;
+	}
+
+	dst_sgt = dma_buf_map_attachment_unlocked(dst_attach, DMA_FROM_DEVICE);
+	if (IS_ERR(dst_sgt)) {
+		ret = PTR_ERR(dst_sgt);
+		dst_sgt = NULL;
+		goto out;
+	}
+
+	if (src_sgt->nents != 1 || dst_sgt->nents != 1) {
+		ret = -ENOTSUPP;
+		goto out;
+	}
+
+	src_dma = sg_dma_address(src_sgt->sgl) + ioc.src_offset;
+	dst_dma = sg_dma_address(dst_sgt->sgl) + ioc.dst_offset;
+
+	clear_csb(&sdev->client);
+	slot = ring_slot(&sdev->client);
+	memset(slot, 0, DSC_SIZE);
+	*(__le32 *)(slot + 0)  = cpu_to_le32(make_opcode(TYPE_DMAB, SUBTYPE_COPY));
+	*(__le32 *)(slot + 4)  = cpu_to_le32((u32)(ioc.len - 1));
+	*(__le64 *)(slot + 16) = cpu_to_le64(src_dma);
+	*(__le64 *)(slot + 24) = cpu_to_le64(dst_dma);
+	*(__le64 *)(slot + 56) = cpu_to_le64(sdev->client.csb_dma);
+	sdev->client.wi++;
+	ring_doorbell(sdev, CLIENT_CID, sdev->client.wi);
+	ret = poll_csb(&sdev->client, NULL);
+out:
+	if (dst_sgt)
+		dma_buf_unmap_attachment_unlocked(dst_attach, dst_sgt, DMA_FROM_DEVICE);
+	if (src_sgt)
+		dma_buf_unmap_attachment_unlocked(src_attach, src_sgt, DMA_TO_DEVICE);
+	if (dst_attach)
+		dma_buf_detach(dst_buf, dst_attach);
+	if (src_attach)
+		dma_buf_detach(src_buf, src_attach);
+	if (dst_buf)
+		dma_buf_put(dst_buf);
+	dma_buf_put(src_buf);
+	return ret;
+}
+
 static long sdxi_char_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 {
 	struct sdxi_char_dev *sdev = g_sdev;
@@ -514,6 +604,9 @@ static long sdxi_char_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 		break;
 	case SDXI_IOC_STATS:
 		ret = handle_stats(sdev, (struct sdxi_ioc_stats __user *)arg);
+		break;
+	case SDXI_IOC_DMABUF_COPY:
+		ret = handle_dmabuf_copy(sdev, (struct sdxi_ioc_dmabuf_copy __user *)arg);
 		break;
 	default:
 		ret = -ENOTTY;

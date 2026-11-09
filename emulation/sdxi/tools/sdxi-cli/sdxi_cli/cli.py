@@ -7,6 +7,7 @@ from .ioctl import (
     ALGO, DTYPE, ELEMOP, STAT_NAMES,
     sdxi_info, sdxi_stats, sdxi_copy,
     sdxi_compress, sdxi_decompress, sdxi_elemwise,
+    sdxi_dmabuf_copy,
 )
 
 
@@ -92,6 +93,17 @@ def _cmd_decompress(args) -> None:
         print(f"decompressed {len(data)} -> {len(out)} bytes")
 
 
+def _cmd_dmabuf_copy(args) -> None:
+    fd = _open_dev(args.device)
+    try:
+        sdxi_dmabuf_copy(fd, args.src_fd, args.dst_fd, args.len,
+                         src_offset=args.src_offset, dst_offset=args.dst_offset)
+    finally:
+        os.close(fd)
+    if args.verbose:
+        print(f"dmabuf-copy: {args.len} bytes src_fd={args.src_fd} dst_fd={args.dst_fd}")
+
+
 def _cmd_elemwise(args) -> None:
     data = open(args.src, "rb").read()
     dtype_val = DTYPE[args.dtype]
@@ -142,6 +154,19 @@ def _build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--dst-cap", type=int, default=0, metavar="N",
                     help="output buffer capacity in bytes (default: 16 * input size)")
 
+    sp = sub.add_parser("dmabuf-copy",
+                        help="DMA copy between two dma-buf file descriptors")
+    sp.add_argument("src_fd", type=int, metavar="SRC_FD",
+                    help="open dma-buf fd for source")
+    sp.add_argument("dst_fd", type=int, metavar="DST_FD",
+                    help="open dma-buf fd for destination")
+    sp.add_argument("len", type=int, metavar="LEN",
+                    help="bytes to copy")
+    sp.add_argument("--src-offset", type=int, default=0, metavar="N",
+                    help="byte offset into source dma-buf (default: 0)")
+    sp.add_argument("--dst-offset", type=int, default=0, metavar="N",
+                    help="byte offset into destination dma-buf (default: 0)")
+
     sp = sub.add_parser("elemwise", help="element-wise operation via SDXI")
     sp.add_argument("op", choices=list(ELEMOP))
     sp.add_argument("dtype", choices=list(DTYPE))
@@ -163,12 +188,13 @@ def main(argv=None) -> None:
     args = parser.parse_args(argv)
 
     dispatch = {
-        "info":       _cmd_info,
-        "stats":      _cmd_stats,
-        "copy":       _cmd_copy,
-        "compress":   _cmd_compress,
-        "decompress": _cmd_decompress,
-        "elemwise":   _cmd_elemwise,
+        "info":         _cmd_info,
+        "stats":        _cmd_stats,
+        "copy":         _cmd_copy,
+        "compress":     _cmd_compress,
+        "decompress":   _cmd_decompress,
+        "elemwise":     _cmd_elemwise,
+        "dmabuf-copy":  _cmd_dmabuf_copy,
     }
     try:
         dispatch[args.cmd](args)
