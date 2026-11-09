@@ -508,7 +508,8 @@ int rj_arith_v_pk_fmac_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 // result rounds to FP16; the two results use original inputs even with aliases.
 // Packed ADD/MUL do not support DPP.
 // ADD/MUL accept guest IEEE and input/output denormal flags. Flushing applies
-// to each selected input half and each rounded output half. In the RDNA3 scalar
+// to each selected input half and each output half that is tiny after rounding,
+// including a product rounded to minimum normal on the subnormal grid. In the RDNA3 scalar
 // guest-mode path, IEEE controls NaN quieting. Directed guest rounding uses
 // scalar FP64 arithmetic and integer narrowing. RDNA3 RJ_ARITH_FP_DX10_CLAMP_OFF uses
 // that scalar path to preserve NaNs under CLAMP. Loose and Compatibility are
@@ -611,6 +612,8 @@ int rj_arith_v_mul_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t in
 // Mode 2 returns UNSUPPORTED_SEMANTICS; mode 3 returns UNSUPPORTED_FP_STATUS.
 // Loose may combine arithmetic and OMOD rounding; Compatibility rounds to FP16
 // before OMOD, preserving rocjitsu behavior (including intermediate overflow).
+// Output flushing and OMOD test tininess after rounding: a product that reaches
+// the minimum normal only through subnormal rounding is still flushed.
 // Loose semantics require host nearest-even arithmetic with denormals enabled.
 // ADD/SUB/SUBREV/MUL accept RJ_ARITH_FP_ROUND_MASK. Directed guest rounding uses
 // exact FP64 intermediates and integer narrowing on a scalar path; nearest-even

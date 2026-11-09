@@ -257,6 +257,58 @@ TEST(FpMulF16, CompatibilityOmodRounding) {
   }
 }
 
+// Tininess is judged after rounding. (1 - 2^-11) * 2^-14 is exact at FP16 precision, so it is
+// tiny in every rounding mode although subnormal rounding can reach the smallest normal;
+// (1 - 2^-20) * 2^-14 is not tiny unless rounded down. Flushing outputs and OMOD zero tiny
+// results, OMOD even when MODE keeps denormals. Halving gives a signed zero only when the
+// rounded result is below 2^-13. Expected results are gfx1201 captures in nearest, up, down
+// and zero rounding (~0U: not captured); gfx1100 flushes the same products.
+TEST(FpMulF16, TinyAfterRounding) {
+  using namespace rocjitsu::arith::test;
+  constexpr uint32_t not_captured = ~0U;
+  const struct {
+    uint32_t a, b;
+    uint64_t fp_flags;
+    uint32_t instruction_flags;
+    uint32_t expected[4];
+  } cases[] = {
+      {0x3bff, 0x0400, RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS, 0, {0, 0, 0, 0}},
+      {0x3bff, 0x8400, RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS, 0, {0x8000, 0x8000, 0x8000, 0x8000}},
+      {0x3bff, 0x0400, 0, 0, {0x0400, 0x0400, 0x03ff, 0x03ff}},
+      {0x3bfe, 0x0401, RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS, 0, {0x0400, 0x0400, 0, 0}},
+      {0x3bff, 0x0400, 0, RJ_ARITH_ALU_OMOD_2, {0, 0, 0, 0}},
+      {0x3bfe, 0x0401, 0, RJ_ARITH_ALU_OMOD_2, {0x0800, 0x0800, 0, 0}},
+      {0x3800, 0x87ff, 0, RJ_ARITH_ALU_OMOD_HALF, {0, 0, 0, 0}},
+      {0x9873, 0x2b31, 0, RJ_ARITH_ALU_OMOD_HALF, {0x8400, not_captured, not_captured, 0x8000}},
+  };
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (uint64_t semantics : {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_COMPATIBILITY}) {
+      for (const auto &test : cases) {
+        for (unsigned rounding = 0; rounding < 4; ++rounding) {
+          if (test.expected[rounding] == not_captured) {
+            continue;
+          }
+          const uint64_t flags = cpu | semantics | test.fp_flags | (uint64_t(rounding) << 24);
+          // gfx11 applies OMOD only when output denormals are flushed.
+          for (auto call : {rj_arith_v_mul_f16_w32, rj_arith_v_mul_f16_w32_gfx12}) {
+            if (call == rj_arith_v_mul_f16_w32 && test.instruction_flags) {
+              continue;
+            }
+            Registers<3, 32> r;
+            r.v[0][0] = test.a;
+            r.v[1][0] = test.b;
+            r.v[2][0] = 0xa5a50000U;
+            ASSERT_EQ(call(flags, 1, test.instruction_flags, r.v + 2, r.v, r.v + 1, nullptr),
+                      RJ_ARITH_SUCCESS);
+            EXPECT_EQ(r.v[2][0], 0xa5a50000U | test.expected[rounding])
+                << std::hex << test.a << " * " << test.b << " rounding " << rounding;
+          }
+        }
+      }
+    }
+  }
+}
+
 TEST(FpMulF64, GuestRounding) {
   using rocjitsu::arith::test::check_binary64_rounding;
   const struct {
