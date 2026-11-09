@@ -3695,6 +3695,15 @@ typedef union rocprofiler_hip_api_args_t
         hipStream_t             stream;
     } hipExtMemcpyBatchAsync;
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 40
+    struct
+    {
+        hipStream_t                    stream;
+        hipStreamCaptureMode           mode;
+        hipGraph_t                     graph;
+        hipGraphRecaptureCallbackData* callbackData;
+    } hipStreamBeginRecaptureToGraph;
+#endif
 } rocprofiler_hip_api_args_t;
 
 ROCPROFILER_EXTERN_C_FINI

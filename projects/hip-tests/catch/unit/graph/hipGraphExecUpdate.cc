@@ -1548,6 +1548,87 @@ HIP_TEST_CASE(Unit_hipGraphExecUpdate_RebuildWithDisabledNodeKeepsSync) {
   HIP_CHECK(hipGraphDestroy(graph));
 }
 
+static void GraphExecUpdateIncrementHost(void* data) { ++*static_cast<int*>(data); }
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Verify exec updates of host, event record, event wait and mem alloc/free nodes. Updates
+ *    from an unchanged graph succeed and keep the exec launchable. A host user data change in
+ *    the graph is applied, and an exec-side host change is reverted by the next update from the
+ *    graph, so an exec node that differs from its graph node is still detected.
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipGraphExecUpdate.cc
+ */
+HIP_TEST_CASE(Unit_hipGraphExecUpdate_HostEventAllocNodes) {
+  int first = 0;
+  int second = 0;
+  EventsGuard events(4);
+  StreamGuard stream(Streams::created);
+  HIP_CHECK(hipEventRecord(events[2], stream.stream()));
+  HIP_CHECK(hipEventRecord(events[3], stream.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream.stream()));
+
+  hipGraph_t graph = nullptr;
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+  hipHostNodeParams firstHost{GraphExecUpdateIncrementHost, &first};
+  hipHostNodeParams secondHost{GraphExecUpdateIncrementHost, &second};
+  hipGraphNode_t host = nullptr, record = nullptr, wait = nullptr;
+  HIP_CHECK(hipGraphAddHostNode(&host, graph, nullptr, 0, &firstHost));
+  HIP_CHECK(hipGraphAddEventRecordNode(&record, graph, &host, 1, events[0]));
+  HIP_CHECK(hipGraphAddEventWaitNode(&wait, graph, &record, 1, events[2]));
+
+  hipMemAllocNodeParams allocParams{};
+  allocParams.poolProps.allocType = hipMemAllocationTypePinned;
+  allocParams.poolProps.location.type = hipMemLocationTypeDevice;
+  allocParams.poolProps.location.id = 0;
+  allocParams.bytesize = 1024;
+  hipGraphNode_t allocNode = nullptr, freeNode = nullptr;
+  HIP_CHECK(hipGraphAddMemAllocNode(&allocNode, graph, nullptr, 0, &allocParams));
+  HIP_CHECK(hipGraphAddMemFreeNode(&freeNode, graph, &allocNode, 1, allocParams.dptr));
+
+  hipGraphExec_t exec = nullptr;
+  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+  auto update = [&]() {
+    hipGraphNode_t errorNode = nullptr;
+    hipGraphExecUpdateResult result = hipGraphExecUpdateError;
+    HIP_CHECK(hipGraphExecUpdate(exec, graph, &errorNode, &result));
+    REQUIRE(result == hipGraphExecUpdateSuccess);
+    REQUIRE(errorNode == nullptr);
+  };
+  auto launch = [&]() {
+    HIP_CHECK(hipGraphLaunch(exec, stream.stream()));
+    HIP_CHECK(hipStreamSynchronize(stream.stream()));
+  };
+
+  launch();
+  REQUIRE(first == 1);
+
+  update();
+  update();
+  launch();
+  REQUIRE(first == 2);
+  REQUIRE(second == 0);
+
+  HIP_CHECK(hipGraphHostNodeSetParams(host, &secondHost));
+  HIP_CHECK(hipGraphEventRecordNodeSetEvent(record, events[1]));
+  HIP_CHECK(hipGraphEventWaitNodeSetEvent(wait, events[3]));
+  update();
+  launch();
+  REQUIRE(first == 2);
+  REQUIRE(second == 1);
+
+  HIP_CHECK(hipGraphExecHostNodeSetParams(exec, host, &firstHost));
+  update();
+  launch();
+  REQUIRE(first == 2);
+  REQUIRE(second == 2);
+
+  HIP_CHECK(hipGraphExecDestroy(exec));
+  HIP_CHECK(hipGraphDestroy(graph));
+}
+
 /**
  * End doxygen group GraphTest.
  * @}

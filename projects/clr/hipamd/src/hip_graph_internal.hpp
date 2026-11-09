@@ -13,6 +13,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <shared_mutex>
+#include <thread>
 #include <vector>
 
 #include "hip/hip_runtime.h"
@@ -38,6 +39,20 @@ class GraphExecSegmented;
 class UserObject;
 class GraphKernelNode;
 typedef GraphNode* Node;
+
+// Positional recapture of an existing graph. Lives on the origin stream. Distinct from
+// GraphNode::NeedsRecapture, which rebuilds AQL packets.
+struct GraphRecapture {
+  std::vector<GraphNode*> originals;  //!< Creation-order snapshot taken at begin.
+  size_t next = 0;                    //!< First unmatched original.
+  hipGraphRecaptureCallbackData callback{};
+  bool terminated = false;
+  bool callbackInProgress = false;  //!< Capture from callbackThread fails. Other threads wait.
+  std::thread::id callbackThread;   //!< Valid while callbackInProgress.
+  bool* callbackEndedCapture = nullptr;  //!< Matcher's flag, valid while callbackInProgress. Set
+                                         //!< when callbackThread ends the capture; the state is
+                                         //!< freed then.
+};
 enum class GraphMemcpyNodeKind {
   None,
   ThreeD,
@@ -72,6 +87,10 @@ inline bool HasMatchingDependencies(const std::vector<Node>& oldDependencies,
 hipError_t ihipGraphAddNode(hip::GraphNode* graphNode, hip::Graph* graph,
                             hip::GraphNode* const* pDependencies, size_t numDependencies,
                             bool capture = true, int devId = 0);
+// Adds a captured node to graph, making it the stream's last captured node. With
+// exemptFromUnjoinedCheck, a normal capture does not report the node as unjoined work at end.
+hipError_t ihipAddCapturedNode(hip::Stream* s, hip::GraphNode** node, int devId = 0,
+                               bool exemptFromUnjoinedCheck = false);
 
 class UserObject : public amd::ReferenceCountedObject {
   typedef void (*UserCallbackDestructor)(void* data);
@@ -474,7 +493,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
     }
     return hipSuccess;
   }
-  Graph* GetParentGraph() { return parentGraph_; }
+  Graph* GetParentGraph() const { return parentGraph_; }
   GraphNode* GetOriginalNode() const { return originalNode_; }
   //! True when committed params have stale packets from a failed recapture.
   bool NeedsRecapture() const { return needsRecapture_; }
@@ -650,6 +669,10 @@ class GraphEventWaitNode : public GraphNode {
     const GraphEventWaitNode* eventWaitNode = static_cast<GraphEventWaitNode const*>(node);
     return SetParams(eventWaitNode->event_);
   }
+
+  bool HasSameParams(const GraphNode* node) const override {
+    return event_ == static_cast<const GraphEventWaitNode*>(node)->event_;
+  }
 };
 
 class Graph {
@@ -669,14 +692,18 @@ class Graph {
 
   //! Finds and erases a tracked dptr across all graphs (an alloc may be freed in a
   //! different graph). Returns false if it is not a live unmatched allocation; both
-  //! free paths reject that as hipErrorInvalidValue.
-  static bool UntrackMemAllocPtr(void* dptr) {
+  //! free paths reject that as hipErrorInvalidValue. On success *owner, if given, is the
+  //! graph that tracked dptr.
+  static bool UntrackMemAllocPtr(void* dptr, Graph** owner = nullptr) {
     if (dptr == nullptr) return false;
     amd::ScopedLock lock(graphSetLock_);
     for (auto* g : graphSet_) {
       auto it = g->memAllocNodePtrs_.find(dptr);
       if (it != g->memAllocNodePtrs_.end()) {
         g->memAllocNodePtrs_.erase(it);
+        if (owner != nullptr) {
+          *owner = g;
+        }
         return true;
       }
     }
@@ -702,14 +729,11 @@ class Graph {
       }
     }
   }
-  virtual ~Graph() {
-    for (auto node : vertices_) {
-      delete node;
-    }
-    amd::ScopedLock lock(graphSetLock_);
-    graphSet_.erase(this);
+  // Drops every user-object reference this graph owns and runs destructors as the count hits
+  // zero. User objects retained afterwards stay until the graph is destroyed.
+  void ReleaseAllUserObjects() {
     for (auto& userobj : graphUserObj_) {
-      // Graph is destorying so remove it from user object's graph list.
+      // Graph is releasing ownership, so remove it from the user object's graph list.
       userobj.first->owning_graphs_.erase(this);
       // Bypass if graph owned refcount is more then actual refcount of user object
       if (userobj.second > userobj.first->referenceCount()) {
@@ -727,7 +751,23 @@ class Graph {
       }
     }
     graphUserObj_.clear();
+  }
+
+  virtual ~Graph() {
+    for (auto node : vertices_) {
+      delete node;
+    }
+    amd::ScopedLock lock(graphSetLock_);
+    graphSet_.erase(this);
+    ReleaseAllUserObjects();
     memAllocNodePtrs_.clear();
+  }
+
+  hip::Stream* GetRecapturingStream() const {
+    return recapturingStream_.load(std::memory_order_acquire);
+  }
+  void SetRecapturingStream(hip::Stream* stream) {
+    recapturingStream_.store(stream, std::memory_order_release);
   }
 
   void AddManualNodeDuringCapture(GraphNode* node) { capturedNodes_.insert(node); }
@@ -993,7 +1033,7 @@ class Graph {
   //! Decrements the graph memory alloc node count
   void DecrementMemAllocNodeCount() { memalloc_nodes_ -= (memalloc_nodes_ > 0); }
   //! returns device object
-  hip::Device* Device() { return device_; }
+  hip::Device* Device() const { return device_; }
   bool IsLeafNodeSyncRequired() const {
     // A single-segment graph runs entirely on the launch stream; no explicit sync needed.
     // For all multi-segment graphs we always require leaf sync: a single leaf segment
@@ -1065,6 +1105,8 @@ class Graph {
   hip::Device* device_;                //!< HIP device object
   hip::MemoryPool* mem_pool_;          //!< Memory pool, associated with this graph
   std::unordered_set<GraphNode*> capturedNodes_;
+  //! Origin stream currently recapturing into this graph. Null otherwise.
+  std::atomic<hip::Stream*> recapturingStream_{nullptr};
   bool graphInstantiated_;
   uint64_t topologyVersion_ = 0;
   uint64_t originalTopologyVersion_ = 0;
@@ -1937,24 +1979,45 @@ class GraphKernelNode : public GraphNode {
 
   bool HasSameParams(const GraphNode* node) const override {
     const GraphKernelNode* other = static_cast<const GraphKernelNode*>(node);
+    return HasSameAttributes(*other) && HasSameLaunchParams(*other);
+  }
+
+  //! Launch attributes: priority, cooperative mode, cluster dimensions, access policy window.
+  bool HasSameAttributes(const GraphKernelNode& other) const {
+    return coopKernel_ == other.coopKernel_ && clusterDim_.x == other.clusterDim_.x &&
+           clusterDim_.y == other.clusterDim_.y && clusterDim_.z == other.clusterDim_.z &&
+           clusterDimsSpecified_ == other.clusterDimsSpecified_ &&
+           std::memcmp(&accessPolicyWindow_, &other.accessPolicyWindow_,
+                       sizeof(accessPolicyWindow_)) == 0 &&
+           cooperative_ == other.cooperative_ && priority_ == other.priority_;
+  }
+
+  //! Copies every launch attribute that HasSameAttributes compares.
+  hipError_t CopyAttributesFrom(const GraphKernelNode& src) {
+    coopKernel_ = src.coopKernel_;
+    return CopyAttr(&src);
+  }
+
+  //! False when SetParams(newNode) would fail to resolve newNode's function on the current device.
+  bool CanResolveFunction(const GraphKernelNode& newNode) const {
+    // An unchanged function was already resolved for this node.
+    return newNode.kernelParams_.func == kernelParams_.func ||
+           getFunc(newNode.kernelParams_, ihipGetDevice()) != nullptr;
+  }
+
+  //! Function, launch dimensions, shared memory, arguments, ext launch flags and events.
+  bool HasSameLaunchParams(const GraphKernelNode& other) const {
     const hipKernelNodeParams& lhs = kernelParams_;
-    const hipKernelNodeParams& rhs = other->kernelParams_;
+    const hipKernelNodeParams& rhs = other.kernelParams_;
     if (lhs.func != rhs.func || lhs.gridDim.x != rhs.gridDim.x || lhs.gridDim.y != rhs.gridDim.y ||
         lhs.gridDim.z != rhs.gridDim.z || lhs.blockDim.x != rhs.blockDim.x ||
         lhs.blockDim.y != rhs.blockDim.y || lhs.blockDim.z != rhs.blockDim.z ||
-        lhs.sharedMemBytes != rhs.sharedMemBytes || numParams_ != other->numParams_ ||
-        coopKernel_ != other->coopKernel_ ||
-        globalWorkSizeX_remainder_ != other->globalWorkSizeX_remainder_ ||
-        globalWorkSizeY_remainder_ != other->globalWorkSizeY_remainder_ ||
-        globalWorkSizeZ_remainder_ != other->globalWorkSizeZ_remainder_ ||
-        clusterDim_.x != other->clusterDim_.x || clusterDim_.y != other->clusterDim_.y ||
-        clusterDim_.z != other->clusterDim_.z ||
-        clusterDimsSpecified_ != other->clusterDimsSpecified_ ||
-        launchFlags_ != other->launchFlags_ ||
-        std::memcmp(&accessPolicyWindow_, &other->accessPolicyWindow_, sizeof(accessPolicyWindow_)) != 0 ||
-        cooperative_ != other->cooperative_ ||
-        priority_ != other->priority_ ||
-        std::memcmp(&kernelEvents_, &other->kernelEvents_, sizeof(kernelEvents_)) != 0) {
+        lhs.sharedMemBytes != rhs.sharedMemBytes || numParams_ != other.numParams_ ||
+        globalWorkSizeX_remainder_ != other.globalWorkSizeX_remainder_ ||
+        globalWorkSizeY_remainder_ != other.globalWorkSizeY_remainder_ ||
+        globalWorkSizeZ_remainder_ != other.globalWorkSizeZ_remainder_ ||
+        launchFlags_ != other.launchFlags_ ||
+        std::memcmp(&kernelEvents_, &other.kernelEvents_, sizeof(kernelEvents_)) != 0) {
       return false;
     }
 
@@ -2047,7 +2110,7 @@ class GraphKernelNode : public GraphNode {
     return status;
   }
 
-  void GetParams(hipKernelNodeParams* params) { *params = kernelParams_; }
+  void GetParams(hipKernelNodeParams* params) const { *params = kernelParams_; }
 
   hipError_t SetParams(const hipKernelNodeParams* params) {
     return SetParams(params, clusterDim_, clusterDimsSpecified_);
@@ -2311,7 +2374,7 @@ class GraphMemcpyNode : public GraphNode {
     return GraphNode::EnqueueCommands(stream);
   }
 
-  void GetParams(hipMemcpy3DParms* params) {
+  void GetParams(hipMemcpy3DParms* params) const {
     std::memcpy(params, &copyParams_, sizeof(hipMemcpy3DParms));
   }
 
@@ -2653,6 +2716,16 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
 
   hipMemcpyKind GetMemcpyKind() const override { return kind_; }
 
+  //! The copy as dst, src, count and kind. Symbol nodes report the resolved symbol address.
+  virtual hipError_t GetLinearParams(void** dst, const void** src, size_t* count,
+                                     hipMemcpyKind* kind) const {
+    *dst = dst_;
+    *src = src_;
+    *count = count_;
+    *kind = kind_;
+    return hipSuccess;
+  }
+
   GraphMemcpyNodeKind GetMemcpyNodeKind() const override { return GraphMemcpyNodeKind::OneD; }
 
   bool HasSameParams(const GraphNode* node) const override {
@@ -2834,6 +2907,19 @@ class GraphMemcpyNodeFromSymbol : public GraphMemcpyNode1D {
     return GraphMemcpyNodeKind::FromSymbol;
   }
 
+  hipError_t GetLinearParams(void** dst, const void** src, size_t* count,
+                             hipMemcpyKind* kind) const override {
+    hipError_t status = GraphMemcpyNode1D::GetLinearParams(dst, src, count, kind);
+    if (status != hipSuccess || !usesSymbol_) {
+      return status;
+    }
+    size_t sym_size = 0;
+    hipDeviceptr_t device_ptr = nullptr;
+    status = ihipMemcpySymbol_validate(symbol_, count_, offset_, sym_size, device_ptr);
+    *src = device_ptr;
+    return status;
+  }
+
   bool HasSameParams(const GraphNode* node) const override {
     const GraphMemcpyNodeFromSymbol* other = static_cast<const GraphMemcpyNodeFromSymbol*>(node);
     return usesSymbol_ == other->usesSymbol_ && GraphMemcpyNode1D::HasSameParams(node) &&
@@ -2985,6 +3071,19 @@ class GraphMemcpyNodeToSymbol : public GraphMemcpyNode1D {
 
   GraphMemcpyNodeKind GetMemcpyNodeKind() const override {
     return GraphMemcpyNodeKind::ToSymbol;
+  }
+
+  hipError_t GetLinearParams(void** dst, const void** src, size_t* count,
+                             hipMemcpyKind* kind) const override {
+    hipError_t status = GraphMemcpyNode1D::GetLinearParams(dst, src, count, kind);
+    if (status != hipSuccess || !usesSymbol_) {
+      return status;
+    }
+    size_t sym_size = 0;
+    hipDeviceptr_t device_ptr = nullptr;
+    status = ihipMemcpySymbol_validate(symbol_, count_, offset_, sym_size, device_ptr);
+    *dst = device_ptr;
+    return status;
   }
 
   bool HasSameParams(const GraphNode* node) const override {
@@ -3216,8 +3315,34 @@ class GraphMemsetNode : public GraphNode {
     return status;
   }
 
-  void GetParams(hipMemsetParams* params) {
+  void GetParams(hipMemsetParams* params) const {
     std::memcpy(params, &memsetParams_, sizeof(hipMemsetParams));
+  }
+
+  //! Exec-only rules: the destination stays on the same device, and a 2D/3D memset keeps
+  //! its row size, height and depth.
+  bool IsExecUpdatableTo(const hipMemsetParams* params, size_t depth) const {
+    if (params->dst != memsetParams_.dst) {
+      size_t discardOffset = 0;
+      amd::Memory* memObj = getMemoryObjectForCurrentDevice(params->dst, discardOffset);
+      if (memObj != nullptr) {
+        amd::Memory* memObjOri = getMemoryObjectForCurrentDevice(memsetParams_.dst, discardOffset);
+        if (memObjOri != nullptr &&
+            memObjOri->getUserData().deviceId != memObj->getUserData().deviceId) {
+          return false;
+        }
+      }
+    }
+    if (params->height != 1 &&
+        (memsetParams_.width * memsetParams_.elementSize != params->width * params->elementSize ||
+         memsetParams_.height != params->height || depth != depth_)) {
+      return false;
+    }
+    return true;
+  }
+
+  bool IsExecUpdatableTo(const GraphMemsetNode& newNode) const {
+    return IsExecUpdatableTo(&newNode.memsetParams_, newNode.depth_);
   }
 
   hipError_t SetParamsInternal(const hipMemsetParams* params, bool isExec, size_t depth = 1) {
@@ -3229,17 +3354,8 @@ class GraphMemsetNode : public GraphNode {
     if (depth == 0) {
       return hipErrorInvalidValue;
     }
-    if (isExec) {
-      size_t discardOffset = 0;
-      amd::Memory* memObj = getMemoryObjectForCurrentDevice(params->dst, discardOffset);
-      if (memObj != nullptr) {
-        amd::Memory* memObjOri = getMemoryObjectForCurrentDevice(memsetParams_.dst, discardOffset);
-        if (memObjOri != nullptr) {
-          if (memObjOri->getUserData().deviceId != memObj->getUserData().deviceId) {
-            return hipErrorInvalidValue;
-          }
-        }
-      }
+    if (isExec && !IsExecUpdatableTo(params, depth)) {
+      return hipErrorInvalidValue;
     }
     size_t sizeBytes;
     if (params->height == 1) {
@@ -3258,15 +3374,7 @@ class GraphMemsetNode : public GraphNode {
       hip_error =
           ihipMemset_validate(memObj, params->value, params->elementSize, sizeBytes, offset);
     } else {
-      if (isExec) {
-        // 2D - hipGraphExecMemsetNodeSetParams returns invalid value if new width or new height is
-        // not same as what memset node is added with.
-        if (memsetParams_.width * memsetParams_.elementSize !=
-                params->width * params->elementSize ||
-            memsetParams_.height != params->height || depth != depth_) {
-          return hipErrorInvalidValue;
-        }
-      } else {
+      if (!isExec) {
         // 2D - hipGraphMemsetNodeSetParams returns invalid value if new width or new height is
         // greater than actual allocation. userData extents are only populated for hipMallocPitch /
         // hipMalloc3D; for plain hipMalloc (and similar flat allocators) they are 0, in which case
@@ -3314,14 +3422,19 @@ class GraphMemsetNode : public GraphNode {
            arrHeight_ == other->arrHeight_;
   }
 
-  hipError_t SetParams(GraphNode* node) override {
-    const GraphMemsetNode* memsetNode = static_cast<GraphMemsetNode const*>(node);
-    hipError_t status = SetParams(&memsetNode->memsetParams_, true, memsetNode->depth_);
+  //! An exec update must keep the 2D/3D shape (IsExecUpdatableTo); a graph-node update may
+  //! change it.
+  hipError_t SetParamsFrom(const GraphMemsetNode& memsetNode, bool isExec) {
+    hipError_t status = SetParams(&memsetNode.memsetParams_, isExec, memsetNode.depth_);
     if (status == hipSuccess) {
-      arrWidth_ = memsetNode->arrWidth_;
-      arrHeight_ = memsetNode->arrHeight_;
+      arrWidth_ = memsetNode.arrWidth_;
+      arrHeight_ = memsetNode.arrHeight_;
     }
     return status;
+  }
+
+  hipError_t SetParams(GraphNode* node) override {
+    return SetParamsFrom(*static_cast<GraphMemsetNode const*>(node), true);
   }
 };
 
@@ -3380,6 +3493,10 @@ class GraphEventRecordNode : public GraphNode {
   hipError_t SetParams(GraphNode* node) override {
     const GraphEventRecordNode* eventRecordNode = static_cast<GraphEventRecordNode const*>(node);
     return SetParams(eventRecordNode->event_);
+  }
+
+  bool HasSameParams(const GraphNode* node) const override {
+    return event_ == static_cast<const GraphEventRecordNode*>(node)->event_;
   }
 };
 
@@ -3452,8 +3569,14 @@ class GraphHostNode : public GraphNode {
     return hipSuccess;
   }
 
-  void GetParams(hipHostNodeParams* params) {
+  void GetParams(hipHostNodeParams* params) const {
     std::memcpy(params, &NodeParams_, sizeof(hipHostNodeParams));
+  }
+
+  bool HasSameParams(const GraphNode* node) const override {
+    const GraphHostNode* other = static_cast<const GraphHostNode*>(node);
+    return NodeParams_.fn == other->NodeParams_.fn &&
+           NodeParams_.userData == other->NodeParams_.userData;
   }
   hipError_t SetParams(const hipHostNodeParams* params) {
     std::memcpy(&NodeParams_, params, sizeof(hipHostNodeParams));
@@ -3785,6 +3908,18 @@ class GraphMemAllocNode final : public GraphNode {
   void GetParams(hipMemAllocNodeParams* params) const {
     std::memcpy(params, &node_params_, sizeof(hipMemAllocNodeParams));
   }
+
+  // dptr is assigned by the runtime and accessDescs may point to caller storage that is gone.
+  bool HasSameParams(const GraphNode* node) const final {
+    const hipMemAllocNodeParams& l = node_params_;
+    const hipMemAllocNodeParams& r = static_cast<const GraphMemAllocNode*>(node)->node_params_;
+    return l.bytesize == r.bytesize && l.poolProps.allocType == r.poolProps.allocType &&
+           l.poolProps.handleTypes == r.poolProps.handleTypes &&
+           l.poolProps.location.type == r.poolProps.location.type &&
+           l.poolProps.location.id == r.poolProps.location.id &&
+           l.poolProps.win32SecurityAttributes == r.poolProps.win32SecurityAttributes &&
+           l.poolProps.maxSize == r.poolProps.maxSize;
+  }
 };
 
 // ================================================================================================
@@ -3875,6 +4010,10 @@ class GraphMemFreeNode : public GraphNode {
   }
 
   void GetParams(void** params) const { *params = device_ptr_; }
+
+  bool HasSameParams(const GraphNode* node) const final {
+    return device_ptr_ == static_cast<const GraphMemFreeNode*>(node)->device_ptr_;
+  }
 };
 
 class GraphDrvMemcpyNode : public GraphNode {

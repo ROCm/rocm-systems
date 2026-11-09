@@ -2680,6 +2680,28 @@ CUSTOM_PLAYBACK_BODIES: Dict[str, str] = {
         "  return _r;\n"
         "}\n"
     ),
+    # Callback-bearing recaptures are marked unreplayable by the capture shim.
+    # A null callback (or a callback-data object with callbackFunc == nullptr)
+    # has the same API behavior as passing nullptr, so replay uses that form.
+    "hipStreamBeginRecaptureToGraph": (
+        "static hipError_t playback_hipStreamBeginRecaptureToGraph(PlaybackContext& ctx, const uint8_t* payload) {\n"
+        "  const auto* a = reinterpret_cast<const hrr_args_hipStreamBeginRecaptureToGraph*>(payload);\n"
+        "  static const auto _fn = reinterpret_cast<decltype(&hipStreamBeginRecaptureToGraph)>(\n"
+        "      hrr_runtime_symbol(\"hipStreamBeginRecaptureToGraph\"));\n"
+        "  if (_fn == nullptr) {\n"
+        "    static bool warned = false;\n"
+        "    if (!warned) {\n"
+        "      warned = true;\n"
+        "      fprintf(stderr, \"[HRR] hipStreamBeginRecaptureToGraph is not exported by this \"\n"
+        "              \"HIP runtime; skipping it during replay, results may differ from capture.\\n\");\n"
+        "    }\n"
+        "    return hipSuccess;\n"
+        "  }\n"
+        "  return (hipError_t)_fn(\n"
+        "      (hipStream_t)ctx.translate_stream(a->stream), (hipStreamCaptureMode)a->mode,\n"
+        "      (hipGraph_t)ctx.translate_graph(a->graph), nullptr);\n"
+        "}\n"
+    ),
 }
 
 
@@ -2805,6 +2827,12 @@ def _note_unreplayable(lines: List[str], entry: ApiEntry) -> None:
     if entry.name in UNREPLAYABLE_PLAYBACK_APIS:
         lines.append(f'    hrr_cap::writer::note_unreplayable("{entry.name}",')
         lines.append(f'        "{UNREPLAYABLE_PLAYBACK_APIS[entry.name]}");')
+    elif entry.name == "hipStreamBeginRecaptureToGraph":
+        lines.append("    if (callbackData != nullptr && callbackData->callbackFunc != nullptr) {")
+        lines.append('      hrr_cap::writer::note_unreplayable("hipStreamBeginRecaptureToGraph",')
+        lines.append('          "the callback is a host function pointer belonging to the capturing "')
+        lines.append('          "process, so it cannot be invoked during replay");')
+        lines.append("    }")
 
 
 def generate_build_table(entries: List[ApiEntry]) -> str:

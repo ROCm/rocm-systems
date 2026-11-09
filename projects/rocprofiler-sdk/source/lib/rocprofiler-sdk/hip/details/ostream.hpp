@@ -5683,3 +5683,12 @@ operator<<(std::ostream& out, const hipExtMemcpySignal& v)
     return out;
 }
 #endif
+
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 40
+inline static std::ostream&
+operator<<(std::ostream& out, const hipGraphRecaptureCallbackData& v)
+{
+    out << "{callbackFunc=" << (v.callbackFunc != nullptr) << ", userData=" << v.userData << "}";
+    return out;
+}
+#endif

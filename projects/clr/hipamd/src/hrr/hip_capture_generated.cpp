@@ -8034,6 +8034,26 @@ static hipError_t capture_hipExtMemcpyBatchAsync(void** dsts, void** srcs, size_
 }
 
 // Generated shim
+static hipError_t capture_hipStreamBeginRecaptureToGraph(hipStream_t stream, hipStreamCaptureMode mode, hipGraph_t graph, hipGraphRecaptureCallbackData* callbackData) {
+  hipError_t r = g_real_table.hipStreamBeginRecaptureToGraph_fn(stream, mode, graph, callbackData);
+  if (r == hipSuccess) {
+    hrr_args_hipStreamBeginRecaptureToGraph a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.stream = reinterpret_cast<uint64_t>(stream);
+    a.mode = static_cast<decltype(a.mode)>(mode);
+    a.graph = reinterpret_cast<uint64_t>(graph);
+    a.callbackData = reinterpret_cast<uint64_t>(callbackData);
+    if (callbackData != nullptr && callbackData->callbackFunc != nullptr) {
+      hrr_cap::writer::note_unreplayable("hipStreamBeginRecaptureToGraph",
+          "the callback is a host function pointer belonging to the capturing "
+          "process, so it cannot be invoked during replay");
+    }
+    hrr_cap::writer::write_event_raw(HRR_API_HIPSTREAMBEGINRECAPTURETOGRAPH, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
 static hipError_t capture___hipPopCallConfiguration(dim3* gridDim, dim3* blockDim, size_t* sharedMem, hipStream_t* stream) {
   hipError_t r = g_real_compiler_table.__hipPopCallConfiguration_fn(gridDim, blockDim, sharedMem, stream);
   if (r == hipSuccess) {
@@ -8773,6 +8793,7 @@ void hip_capture_build_table() {
   g_cap_table.hipKernelSetAttributeForDevice_fn = capture_hipKernelSetAttributeForDevice;
   g_cap_table.hipKernelSetCacheConfig_fn = capture_hipKernelSetCacheConfig;
   g_cap_table.hipExtMemcpyBatchAsync_fn = capture_hipExtMemcpyBatchAsync;
+  g_cap_table.hipStreamBeginRecaptureToGraph_fn = capture_hipStreamBeginRecaptureToGraph;
 }
 
 void hip_capture_build_compiler_table() {

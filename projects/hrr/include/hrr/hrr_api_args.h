@@ -5934,6 +5934,16 @@ static_assert(sizeof(hipExtMemcpyAttributes) <= 56, "hrr_args_hipExtMemcpyBatchA
 static_assert(sizeof(size_t) <= 8, "hrr_args_hipExtMemcpyBatchAsync::attrsIdxs_bytes too small for size_t");
 #endif
 
+/* hipError_t hipStreamBeginRecaptureToGraph(hipStream_t stream, hipStreamCaptureMode mode, hipGraph_t graph, hipGraphRecaptureCallbackData* callbackData) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t stream;
+    int32_t mode;
+    uint64_t graph;
+    uint64_t callbackData;
+} hrr_args_hipStreamBeginRecaptureToGraph;
+
 /* ---- API id enumeration ---- */
 typedef enum hrr_api_id {
     HRR_API_HIPAPINAME = 0,
@@ -6486,16 +6496,17 @@ typedef enum hrr_api_id {
     HRR_API_HIPKERNELSETATTRIBUTEFORDEVICE = 547,
     HRR_API_HIPKERNELSETCACHECONFIG = 548,
     HRR_API_HIPEXTMEMCPYBATCHASYNC = 549,
-    HRR_API_HIPPOPCALLCONFIGURATION = 550,
-    HRR_API_HIPPUSHCALLCONFIGURATION = 551,
-    HRR_API_HIPREGISTERFATBINARY = 552,
-    HRR_API_HIPREGISTERFUNCTION = 553,
-    HRR_API_HIPREGISTERMANAGEDVAR = 554,
-    HRR_API_HIPREGISTERSURFACE = 555,
-    HRR_API_HIPREGISTERTEXTURE = 556,
-    HRR_API_HIPREGISTERVAR = 557,
-    HRR_API_HIPUNREGISTERFATBINARY = 558,
-    HRR_API_COUNT = 559
+    HRR_API_HIPSTREAMBEGINRECAPTURETOGRAPH = 550,
+    HRR_API_HIPPOPCALLCONFIGURATION = 551,
+    HRR_API_HIPPUSHCALLCONFIGURATION = 552,
+    HRR_API_HIPREGISTERFATBINARY = 553,
+    HRR_API_HIPREGISTERFUNCTION = 554,
+    HRR_API_HIPREGISTERMANAGEDVAR = 555,
+    HRR_API_HIPREGISTERSURFACE = 556,
+    HRR_API_HIPREGISTERTEXTURE = 557,
+    HRR_API_HIPREGISTERVAR = 558,
+    HRR_API_HIPUNREGISTERFATBINARY = 559,
+    HRR_API_COUNT = 560
 } hrr_api_id_t;
 
 /* Array of API names indexed by hrr_api_id_t */
@@ -7051,6 +7062,7 @@ const char* const hrr_api_names[HRR_API_COUNT] = {
     "hipKernelSetAttributeForDevice",
     "hipKernelSetCacheConfig",
     "hipExtMemcpyBatchAsync",
+    "hipStreamBeginRecaptureToGraph",
     "__hipPopCallConfiguration",
     "__hipPushCallConfiguration",
     "__hipRegisterFatBinary",
