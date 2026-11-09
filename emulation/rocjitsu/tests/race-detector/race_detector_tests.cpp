@@ -164,11 +164,11 @@ TEST(RaceDetector, MixedFlatKeepsOneCounterEntryAndAllRegisterLanes) {
     EXPECT_EQ(events.status(EventId{0}), EventStatus::WAVE_COMPLETE);
     EXPECT_EQ(events.status(EventId{1}), EventStatus::ACTIVE);
     for (int lane : {0, 1}) {
-      wave.checkVgprRead(1, lane, 0xf);
+      wave.checkVgprReadLanes(1, uint64_t{1} << lane, 0xf);
       EXPECT_TRUE(violations.empty());
     }
     for (int lane : {0, 1}) {
-      wave.checkVgprRead(2, lane, 0xf);
+      wave.checkVgprReadLanes(2, uint64_t{1} << lane, 0xf);
       ASSERT_EQ(violations.size(), 1u);
       EXPECT_EQ(violations.front().lane, lane);
       violations.clear();
@@ -238,7 +238,7 @@ TEST(RaceDetector, InvalidLdsAddressesKeepRegisterAndCounterDependencies) {
     EXPECT_EQ(events.pendingCounterIncrement(event, amdgpu::WaitCounterType::LOADCNT), 1);
     EXPECT_EQ(events.pendingCounterIncrement(event, amdgpu::WaitCounterType::DSCNT), 1);
     for (int lane = 0; lane < 4; ++lane)
-      wave.checkVgprRead(1, lane, 0xf);
+      wave.checkVgprReadLanes(1, uint64_t{1} << lane, 0xf);
     EXPECT_EQ(violations.size(), 4u);
     PendingWaitCount wait;
     wait.add(amdgpu::WaitCounterType::LOADCNT, 0);

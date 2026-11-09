@@ -7,10 +7,17 @@
 #include "rocjitsu/vm/plugins/race_detector/core/interval_set.h"
 #include "rocjitsu/vm/plugins/race_detector/core/race_detector.h"
 #include <algorithm>
+#include <array>
 #include <bit>
+#include <cassert>
+#include <cstddef>
+#include <cstdint>
 #include <limits>
+#include <optional>
 #include <span>
 #include <stdexcept>
+#include <utility>
+#include <vector>
 
 namespace rocjitsu::plugins::race_detector {
 namespace {
@@ -397,10 +404,6 @@ void WaveRaceState::flushBarrierPendingEvents() {
   barrierPendingEvents.clear();
 }
 
-void WaveRaceState::checkVgprRead(int reg, int lane, uint8_t byteMask) const {
-  checkVgprReadLanes(reg, uint64_t{1} << lane, byteMask);
-}
-
 void WaveRaceState::checkVgprReadLanes(int reg, uint64_t laneMask, uint8_t byteMask) const {
   if (laneMask == 0)
     return;
@@ -413,10 +416,6 @@ void WaveRaceState::checkVgprReadLanes(int reg, uint64_t laneMask, uint8_t byteM
                                   detector->getWorkgroupId(), eid});
     }
   }
-}
-
-void WaveRaceState::checkVgprWrite(int reg, int lane, uint8_t byteMask) const {
-  checkVgprWriteLanes(reg, uint64_t{1} << lane, byteMask);
 }
 
 void WaveRaceState::checkVgprWriteLanes(int reg, uint64_t laneMask, uint8_t byteMask) const {

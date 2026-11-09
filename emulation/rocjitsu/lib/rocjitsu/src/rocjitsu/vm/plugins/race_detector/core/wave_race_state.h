@@ -7,7 +7,6 @@
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include "rocjitsu/vm/plugins/race_detector/core/instruction_snapshot.h"
 #include "rocjitsu/vm/plugins/race_detector/core/types.h"
-#include <array>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -40,10 +39,9 @@ struct CounterCapacities {
 /// event allocation and lifecycle transitions.
 ///
 /// Every event registration method (registerEvent, registerScalarLoad,
-/// registerLdsEvent and registerLdsRangeEvent) takes the producing
-/// instruction as an InstructionSnapshot; the event's PC
-/// comes from the snapshot. The encoding is decoded only if a plugin report
-/// needs its disassembly.
+/// registerLdsEvent and registerLdsRangeEvent) takes the producing instruction
+/// as an InstructionSnapshot; the event's PC comes from the snapshot. The
+/// encoding is decoded only if a plugin report needs its disassembly.
 class WaveRaceState {
 public:
   WaveRaceState(int vgprCount, int sgprCount, WaveId, RaceDetector *, CounterCapacities);
@@ -159,17 +157,11 @@ public:
   /// Retire non-trimmable events whose owning wave completed them before a workgroup barrier.
   void flushBarrierPendingEvents();
 
-  /// Check a full VGPR read for races. Calls the RaceHandler on violation.
-  void checkVgprRead(int reg, int lane, uint8_t byteMask) const;
-
   /// Check a VGPR read by a set of lanes for races. Calls the RaceHandler on violation.
   void checkVgprReadLanes(int reg, uint64_t laneMask, uint8_t byteMask) const;
 
   /// Check a VGPR instruction write for conflicts with pending asynchronous
-  /// loads targeting the same register bytes and lanes.
-  void checkVgprWrite(int reg, int lane, uint8_t byteMask) const;
-
-  /// Mask-based counterpart of checkVgprWrite().
+  /// loads targeting the same register bytes and lanes in laneMask.
   void checkVgprWriteLanes(int reg, uint64_t laneMask, uint8_t byteMask) const;
 
   /// Check an asynchronous memory destination write. On supported targets,
