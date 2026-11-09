@@ -4,9 +4,14 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Host-only microtests for src/ras/diagnostics_gpu.cc.
+// Host-only microtests for src/ras/diagnostics_gpu.cc, which builds its AMD SMI arm here. The collect and
+// summarize cases call one function each. The end-to-end cases (Run) collect a check on every simulated node, whose
+// amd_smi_diag* answers come from fakes/amdsmi_fakes.cc, concatenate the records the way the RAS overlay gathers
+// them, and summarize the result into report lines.
 
 #include <array>
+#include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
@@ -19,6 +24,7 @@
 
 #include "comm.h"
 #include "fmt/format.h"
+#include "fakes/amdsmi_fakes.h"
 #include "fakes/ras_diagnostics_test_support.h"
 #include "cudawrap.h"
 #include "fakes/nccl_fakes.h"
@@ -31,9 +37,6 @@ namespace {
 int64_t g_eccThreshold = 0;
 ncclResult_t g_driverResult = ncclSuccess;
 int g_driverVersion = 0;
-ncclResult_t g_nvidiaDriverResult = ncclSuccess;
-std::string g_nvidiaDriverVersion;
-std::vector<unsigned int> g_nvidiaDriverBufferSizes;
 std::vector<std::string> g_paramEnvs;
 std::vector<int64_t> g_paramDefaults;
 
@@ -47,137 +50,15 @@ ncclResult_t DiagnosticsGpuTestCudaDriverVersion(int* version);
 
 #undef ncclCudaDriverVersion
 
+// Owned by src/misc/nvmlwrap.cc, which this binary does not link.
 int ncclNvmlDeviceCount = 0;
 ncclNvmlDeviceInfo ncclNvmlDevices[ncclNvmlMaxDevices]{};
 ncclNvmlDevicePairInfo ncclNvmlDevicePairs[ncclNvmlMaxDevices][ncclNvmlMaxDevices]{};
-
-namespace {
-
-ncclResult_t g_deviceCountResult = ncclSuccess;
-unsigned int g_deviceCount = 0;
-ncclResult_t g_handleResult = ncclSuccess;
-ncclResult_t g_nameResult = ncclSuccess;
-std::string g_deviceName;
-std::array<std::array<unsigned long long, 2>, 2> g_eccCounters{};
-std::array<std::array<ncclResult_t, 2>, 2> g_eccResults{};
-struct NvLinkSample {
-  nvmlEnableState_t state = NVML_FEATURE_ENABLED;
-  unsigned int speedMBps = 50000;
-  ncclResult_t result = ncclSuccess;
-  nvmlReturn_t stateStatus = NVML_SUCCESS;
-  nvmlReturn_t speedStatus = NVML_SUCCESS;
-};
-std::vector<NvLinkSample> g_nvLinks;
-ncclResult_t g_nvLinkCountResult = ncclSuccess;
-nvmlReturn_t g_nvLinkCountStatus = NVML_SUCCESS;
-std::vector<unsigned int> g_handleIndices;
-std::vector<int> g_nameDevices;
-std::vector<int> g_eccDevices;
-std::vector<nvmlMemoryErrorType_t> g_eccErrorTypes;
-std::vector<nvmlEccCounterType_t> g_eccCounterTypes;
-std::vector<nvmlMemoryLocation_t> g_eccLocations;
-std::vector<int> g_nvLinkFieldDevices;
-std::vector<std::pair<unsigned int, unsigned int>> g_nvLinkFieldQueries;
-
-int DeviceIndex(nvmlDevice_t device) {
-  return static_cast<int>(reinterpret_cast<uintptr_t>(device)) - 1;
-}
-
-int ErrorIndex(nvmlMemoryErrorType_t type) {
-  return type == NVML_MEMORY_ERROR_TYPE_UNCORRECTED ? 1 : 0;
-}
-
-int LocationIndex(nvmlMemoryLocation_t location) {
-  return location == NVML_MEMORY_LOCATION_DRAM ? 1 : 0;
-}
-
-}  // namespace
 
 ncclResult_t DiagnosticsGpuTestCudaDriverVersion(int* version) {
   *version = 0x5EED;
   if (g_driverResult != ncclSuccess) return g_driverResult;
   *version = g_driverVersion;
-  return ncclSuccess;
-}
-
-ncclResult_t ncclNvmlSystemGetDriverVersion(char* version, unsigned int length) {
-  g_nvidiaDriverBufferSizes.push_back(length);
-  if (g_nvidiaDriverResult != ncclSuccess) {
-    // An unsuccessful query must not leave partial output in the collected POD.
-    memset(version, '!', length);
-    return g_nvidiaDriverResult;
-  }
-  g_nvidiaDriverVersion.copy(version, length);
-  if (g_nvidiaDriverVersion.size() < length) version[g_nvidiaDriverVersion.size()] = '\0';
-  return ncclSuccess;
-}
-
-ncclResult_t ncclNvmlDeviceGetCount(unsigned int* deviceCount) {
-  *deviceCount = 0x5EED;
-  if (g_deviceCountResult != ncclSuccess) return g_deviceCountResult;
-  *deviceCount = g_deviceCount;
-  return ncclSuccess;
-}
-
-ncclResult_t ncclNvmlDeviceGetHandleByIndex(unsigned int index, nvmlDevice_t* device) {
-  g_handleIndices.push_back(index);
-  *device = reinterpret_cast<nvmlDevice_t>(static_cast<uintptr_t>(0x5EED));
-  if (g_handleResult != ncclSuccess) return g_handleResult;
-  *device = reinterpret_cast<nvmlDevice_t>(static_cast<uintptr_t>(index + 1));
-  return ncclSuccess;
-}
-
-ncclResult_t ncclNvmlDeviceGetName(nvmlDevice_t device, char* name, unsigned int length) {
-  g_nameDevices.push_back(DeviceIndex(device));
-  snprintf(name, length, "%s", "sentinel");
-  if (g_nameResult != ncclSuccess) return g_nameResult;
-  snprintf(name, length, "%s", g_deviceName.c_str());
-  return ncclSuccess;
-}
-
-ncclResult_t ncclNvmlDeviceGetMemoryErrorCounter(nvmlDevice_t device, nvmlMemoryErrorType_t errorType,
-                                                 nvmlEccCounterType_t counterType, nvmlMemoryLocation_t location,
-                                                 unsigned long long* count) {
-  g_eccDevices.push_back(DeviceIndex(device));
-  g_eccErrorTypes.push_back(errorType);
-  g_eccCounterTypes.push_back(counterType);
-  g_eccLocations.push_back(location);
-  *count = 0x5EED;
-  const int error = ErrorIndex(errorType);
-  const int memory = LocationIndex(location);
-  if (g_eccResults[error][memory] != ncclSuccess) return g_eccResults[error][memory];
-  *count = g_eccCounters[error][memory];
-  return ncclSuccess;
-}
-
-ncclResult_t ncclNvmlDeviceGetFieldValues(nvmlDevice_t device, int count, nvmlFieldValue_t* values) {
-  g_nvLinkFieldDevices.push_back(DeviceIndex(device));
-  for (int i = 0; i < count; ++i) {
-    auto& value = values[i];
-    g_nvLinkFieldQueries.emplace_back(value.fieldId, value.scopeId);
-    if (value.fieldId == NVML_FI_DEV_NVLINK_LINK_COUNT) {
-      EXPECT_EQ(1, count);
-      value.nvmlReturn = g_nvLinkCountStatus;
-      value.value.uiVal = static_cast<unsigned int>(g_nvLinks.size());
-      if (g_nvLinkCountResult != ncclSuccess) return g_nvLinkCountResult;
-    } else {
-      EXPECT_EQ(2, count);
-      if (value.scopeId >= g_nvLinks.size()) {
-        ADD_FAILURE() << "Unexpected NVLink scope " << value.scopeId;
-        return ncclInternalError;
-      }
-      const auto& link = g_nvLinks[value.scopeId];
-      if (link.result != ncclSuccess) return link.result;
-      if (value.fieldId == NVML_FI_DEV_NVLINK_GET_STATE) {
-        value.nvmlReturn = link.stateStatus;
-        value.value.uiVal = link.state;
-      } else {
-        EXPECT_EQ(NVML_FI_DEV_NVLINK_GET_SPEED, value.fieldId);
-        value.nvmlReturn = link.speedStatus;
-        value.value.uiVal = link.speedMBps;
-      }
-    }
-  }
   return ncclSuccess;
 }
 
@@ -246,34 +127,71 @@ rasDiagnosticsNvLinkData NvLinkData(int links, int inactive, uint32_t minSpeed =
 
 void ResetState() {
   ras_test::ResetNcclComms();
+  ResetAmdSmiFakes();
   g_eccThreshold = 0;
   g_paramEnvs.clear();
   g_paramDefaults.clear();
   g_driverResult = ncclSuccess;
   g_driverVersion = 0;
-  g_nvidiaDriverResult = ncclSuccess;
-  g_nvidiaDriverVersion.clear();
-  g_nvidiaDriverBufferSizes.clear();
-  g_deviceCountResult = ncclSuccess;
-  g_deviceCount = 0;
-  g_handleResult = ncclSuccess;
-  g_nameResult = ncclSuccess;
-  g_deviceName.clear();
-  ncclNvmlDeviceCount = 0;
-  for (auto& byLocation : g_eccCounters) byLocation.fill(0);
-  for (auto& byLocation : g_eccResults) byLocation.fill(ncclSuccess);
-  g_nvLinks.clear();
-  g_nvLinkCountResult = ncclSuccess;
-  g_nvLinkCountStatus = NVML_SUCCESS;
-  g_handleIndices.clear();
-  g_nameDevices.clear();
-  g_eccDevices.clear();
-  g_eccErrorTypes.clear();
-  g_eccCounterTypes.clear();
-  g_eccLocations.clear();
-  g_nvLinkFieldDevices.clear();
-  g_nvLinkFieldQueries.clear();
 }
+
+constexpr uint64_t kCommHash = UINT64_C(0x5fa31c27a9e0d1b4);
+constexpr int kRanks = 4;
+constexpr int kRanksPerNode = 2;
+constexpr int kNodes = kRanks / kRanksPerNode;
+constexpr char kModel[] = "AMD Instinct MI355X";
+constexpr int kDriverVersion = 70253211;
+constexpr char kGpuDriverVersion[] = "6.19.14.31400000";
+constexpr int kXgmiLinks = 7;
+
+int64_t BusIdOfRank(int rank) { return int64_t(0x05 + 0x20 * rank) << 12; }
+
+int RankOfBusId(int64_t busId) {
+  for (int rank = 0; rank < kRanks; rank++) {
+    if (BusIdOfRank(rank) == busId) return rank;
+  }
+  return -1;
+}
+
+// What AMD SMI reports for the GPU of one rank; an empty model makes the model query fail, unknownToAmdSmi every
+// query.
+struct FakeGpu {
+  bool unknownToAmdSmi = false;
+  std::string model = kModel;
+  amdsmiDiagEccCounts ecc{};
+  amdsmiDiagXgmiLinks links{kXgmiLinks, 0};
+};
+
+// What one node reports; ranks 2n and 2n+1 run on node n.
+struct FakeNode {
+  bool amdSmiAvailable = true;
+  uint32_t nGpus = 8;
+  int driverVersion = kDriverVersion;
+  std::string gpuDriverVersion = kGpuDriverVersion;  // amdgpu; empty makes the query fail
+};
+
+// One rank of the communicator under test, registered the way ncclCommInit leaves it in ncclComms.
+struct FakeRank {
+  explicit FakeRank(int rank) : comm(std::make_unique<ncclComm>()), peer(std::make_unique<ncclPeerInfo[]>(1)) {
+    comm->commHash = kCommHash;
+    comm->peerInfo = peer.get();
+    comm->peerInfoValid = true;
+    comm->rank = rank;
+    comm->nRanks = kRanks;
+    comm->cudaDev = rank % kRanksPerNode;
+    comm->nvmlDev = rank % kRanksPerNode;
+    comm->busId = BusIdOfRank(rank);
+    comm->localRank = rank % kRanksPerNode;
+    comm->localRanks = kRanksPerNode;
+    peer[0].hostHash = UINT64_C(0x99aabbccddeeff00);
+    peer[0].pidHash = UINT64_C(0x0123456789abcdef);
+  }
+
+  std::unique_ptr<ncclComm> comm;
+  std::unique_ptr<ncclPeerInfo[]> peer;
+};
+
+using Lines = std::vector<std::string>;
 
 class RasDiagnosticsGpuMicrotest : public ::testing::Test {
  protected:
@@ -335,6 +253,103 @@ class RasDiagnosticsGpuMicrotest : public ::testing::Test {
     state.emitResult = ncclSuccess;
     state.failCall = 0;
   }
+
+  // Answers the AMD SMI queries of node `nodeIdx`; a bus ID that is not on that node is a test bug.
+  void InstallNodeFakes(int nodeIdx) {
+    const FakeNode& node = nodes[nodeIdx];
+    g_driverVersion = node.driverVersion;
+    if (!node.amdSmiAvailable) {
+      ResetAmdSmiFakes();
+      return;
+    }
+    // Like AMD SMI, the fakes know the physical GPUs only: a partition alias (function .1-.7) is not found.
+    auto gpuOf = [this, nodeIdx](int64_t busId) -> FakeGpu* {
+      if (busId & 0xf) {
+        aliasQueries++;
+        return nullptr;
+      }
+      int rank = RankOfBusId(busId);
+      if (rank >= 0 && gpus[rank].unknownToAmdSmi) return nullptr;
+      EXPECT_EQ(nodeIdx, rank / kRanksPerNode) << "query for bus ID 0x" << std::hex << busId;
+      return rank < 0 ? nullptr : &gpus[rank];
+    };
+    g_amdSmiDiagGpuCount = [node](uint32_t* count) {
+      *count = node.nGpus;
+      return ncclSuccess;
+    };
+    g_amdSmiDiagGpuModel = [gpuOf](int64_t busId, char* model, size_t len) {
+      FakeGpu* gpu = gpuOf(busId);
+      if (gpu == nullptr || gpu->model.empty()) return ncclSystemError;
+      snprintf(model, len, "%s", gpu->model.c_str());
+      return ncclSuccess;
+    };
+    g_amdSmiDiagDriverVersion = [gpuOf, node](int64_t busId, char* version, size_t len) {
+      FakeGpu* gpu = gpuOf(busId);
+      if (gpu == nullptr || node.gpuDriverVersion.empty()) return ncclSystemError;
+      snprintf(version, len, "%s", node.gpuDriverVersion.c_str());
+      return ncclSuccess;
+    };
+    g_amdSmiDiagEccCounts = [gpuOf](int64_t busId, amdsmiDiagEccCounts* counts) {
+      FakeGpu* gpu = gpuOf(busId);
+      if (gpu == nullptr) return ncclSystemError;
+      *counts = gpu->ecc;
+      return ncclSuccess;
+    };
+    g_amdSmiDiagXgmiLinks = [gpuOf](int64_t busId, amdsmiDiagXgmiLinks* links) {
+      FakeGpu* gpu = gpuOf(busId);
+      if (gpu == nullptr) return ncclSystemError;
+      *links = gpu->links;
+      return ncclSuccess;
+    };
+  }
+
+  // Collects the check on every node, then summarizes all records together and returns the report lines.
+  Lines Run(rasDiagnosticsCollectLocalFn collect, rasDiagnosticsSummarizeFn summarize) {
+    std::string gathered;
+    for (int nodeIdx = 0; nodeIdx < kNodes; nodeIdx++) {
+      std::vector<FakeRank> ranks;
+      std::vector<ncclComm*> comms;
+      for (int i = 0; i < kRanksPerNode; i++) {
+        ranks.emplace_back(nodeIdx * kRanksPerNode + i);
+        ranks.back().comm->busId |= partitionFunction;
+        comms.push_back(ranks.back().comm.get());
+      }
+      InstallNcclComms(comms);
+      InstallNodeFakes(nodeIdx);
+      rasDiagnosticsLocalData data{};
+      EXPECT_EQ(ncclSuccess, collect(&ctx, &data));
+      EXPECT_EQ(kRanksPerNode, data.nRecords);
+      if (data.records != nullptr) gathered.append(data.records, data.recordsBytes);
+      free(data.records);
+      ras_test::ResetNcclComms();
+    }
+    ResetAmdSmiFakes();
+
+    state.lines.clear();
+    EXPECT_EQ(ncclSuccess, summarize(&ctx, &reporter, gathered.data(), static_cast<int>(gathered.size())));
+    for (const std::string& line : state.lines) {
+      EXPECT_EQ(std::string::npos, line.find("NVML")) << line;
+      EXPECT_EQ(std::string::npos, line.find("NVLink")) << line;
+      EXPECT_EQ(std::string::npos, line.find("CUDA")) << line;
+    }
+    return state.lines;
+  }
+
+  Lines RunGpuInventory() { return Run(rasDiagnosticsGpuModelCollectLocal, rasDiagnosticsGpuModelSummarize); }
+  Lines RunDriverVersion() {
+    return Run(rasDiagnosticsCudaDriverVersionCollectLocal, rasDiagnosticsCudaDriverVersionSummarize);
+  }
+  Lines RunGpuDriverVersion() {
+    return Run(rasDiagnosticsNvidiaDriverVersionCollectLocal, rasDiagnosticsNvidiaDriverVersionSummarize);
+  }
+  Lines RunEcc() { return Run(rasDiagnosticsEccCollectLocal, rasDiagnosticsEccSummarize); }
+  Lines RunXgmi() { return Run(rasDiagnosticsNvLinkCollectLocal, rasDiagnosticsNvLinkSummarize); }
+
+  FakeNode nodes[kNodes];
+  FakeGpu gpus[kRanks];
+  // Function of the bus ID HIP gives every rank: 0 for a whole GPU, 1-7 for a partition alias (CPX, DPX).
+  int partitionFunction = 0;
+  int aliasQueries = 0;
 };
 
 }  // namespace
@@ -358,67 +373,6 @@ TEST_F(RasDiagnosticsGpuMicrotest, SummariesValidateArguments) {
   }
 }
 
-TEST_F(RasDiagnosticsGpuMicrotest, GpuModelCollectReportsKnownAndUnknownInventory) {
-  OwnedComm owned(0x100, 0x101, 0x102, 0);
-  owned.comm->nRanks = 1;
-  owned.comm->nvmlDev = 0;
-  InstallNcclComms({owned.comm.get()});
-  owned.comm->nvmlDev = 1;
-  ncclNvmlDeviceCount = 2;
-  g_deviceCount = 8;
-  g_deviceName = "MI300X";
-  rasDiagnosticsGpuModelData data{};
-
-  ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsGpuModelCollectLocal, &data));
-  EXPECT_EQ(8, data.nGpus);
-  EXPECT_STREQ("MI300X", data.model);
-  ASSERT_EQ(1u, g_handleIndices.size());
-  EXPECT_EQ(1u, g_handleIndices[0]);
-  ASSERT_EQ(1u, g_nameDevices.size());
-  EXPECT_EQ(1, g_nameDevices[0]);
-
-  g_deviceCountResult = ncclSystemError;
-  g_nameResult = ncclSystemError;
-  ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsGpuModelCollectLocal, &data));
-  EXPECT_EQ(0, data.nGpus);
-  EXPECT_STREQ(RAS_DIAG_GPU_MODEL_UNKNOWN, data.model);
-
-  owned.comm->nvmlDev = -1;
-  ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsGpuModelCollectLocal, &data));
-  EXPECT_STREQ(RAS_DIAG_GPU_MODEL_UNKNOWN, data.model);
-}
-
-TEST_F(RasDiagnosticsGpuMicrotest, GpuModelCollectSkipsOutOfRangeDevicesAndHandlesLookupFailure) {
-  OwnedComm owned(0x100, 0x101, 0x102, 0);
-  owned.comm->nRanks = 1;
-  owned.comm->nvmlDev = 0;
-  InstallNcclComms({owned.comm.get()});
-  ncclNvmlDeviceCount = 2;
-  g_deviceCount = 8;
-  g_deviceName = "MI300X";
-  rasDiagnosticsGpuModelData data{};
-
-  for (int nvmlDev : {-1, ncclNvmlDeviceCount}) {
-    owned.comm->nvmlDev = nvmlDev;
-    data = GpuModel(1, "stale");
-    ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsGpuModelCollectLocal, &data));
-    EXPECT_EQ(8, data.nGpus);
-    EXPECT_STREQ(RAS_DIAG_GPU_MODEL_UNKNOWN, data.model);
-  }
-  EXPECT_TRUE(g_handleIndices.empty());
-  EXPECT_TRUE(g_nameDevices.empty());
-
-  owned.comm->nvmlDev = 1;
-  g_handleResult = ncclSystemError;
-  data = GpuModel(1, "stale");
-  ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsGpuModelCollectLocal, &data));
-  EXPECT_EQ(8, data.nGpus);
-  EXPECT_STREQ(RAS_DIAG_GPU_MODEL_UNKNOWN, data.model);
-  ASSERT_EQ(1u, g_handleIndices.size());
-  EXPECT_EQ(1u, g_handleIndices[0]);
-  EXPECT_TRUE(g_nameDevices.empty());
-}
-
 TEST_F(RasDiagnosticsGpuMicrotest, DriverVersionCollectHandlesSuccessFailureAndZero) {
   OwnedComm owned(0x100, 0x101, 0x102, 0);
   owned.comm->nRanks = 1;
@@ -438,190 +392,52 @@ TEST_F(RasDiagnosticsGpuMicrotest, DriverVersionCollectHandlesSuccessFailureAndZ
   EXPECT_EQ(RAS_DIAG_CUDA_DRIVER_VERSION_UNKNOWN, data.version);
 }
 
-TEST_F(RasDiagnosticsGpuMicrotest, NvidiaDriverVersionCollectClearsFailedOutputAndTerminatesFullBuffers) {
+TEST_F(RasDiagnosticsGpuMicrotest, GpuDriverVersionCollectClearsFailedOutputAndTerminatesFullBuffers) {
   OwnedComm owned(0x100, 0x101, 0x102, 0);
   owned.comm->nRanks = 1;
   InstallNcclComms({owned.comm.get()});
   rasDiagnosticsNvidiaDriverVersionData data{};
+  std::string version = "6.14.14";
+  ncclResult_t versionResult = ncclSuccess;
+  std::vector<size_t> bufferSizes;
+  g_amdSmiDiagDriverVersion = [&](int64_t, char* out, size_t len) {
+    bufferSizes.push_back(len);
+    if (versionResult != ncclSuccess) {
+      // An unsuccessful query must not leave partial output in the collected POD.
+      memset(out, '!', len);
+      return versionResult;
+    }
+    version.copy(out, len);
+    if (version.size() < len) out[version.size()] = '\0';
+    return ncclSuccess;
+  };
 
-  g_nvidiaDriverVersion = "580.82.07";
   ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsNvidiaDriverVersionCollectLocal, &data));
-  EXPECT_STREQ("580.82.07", data.version);
-  for (size_t i = g_nvidiaDriverVersion.size(); i < sizeof(data.version); ++i) EXPECT_EQ('\0', data.version[i]);
+  EXPECT_STREQ("6.14.14", data.version);
+  for (size_t i = version.size(); i < sizeof(data.version); ++i) EXPECT_EQ('\0', data.version[i]);
 
-  g_nvidiaDriverResult = ncclSystemError;
+  versionResult = ncclSystemError;
   ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsNvidiaDriverVersionCollectLocal, &data));
   for (char byte : data.version) EXPECT_EQ('\0', byte);
 
-  g_nvidiaDriverResult = ncclSuccess;
-  g_nvidiaDriverVersion.assign(sizeof(data.version), 'V');
+  versionResult = ncclSuccess;
+  version.assign(sizeof(data.version), 'V');
   ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsNvidiaDriverVersionCollectLocal, &data));
   EXPECT_EQ(std::string(sizeof(data.version) - 1, 'V'), std::string(data.version, sizeof(data.version) - 1));
   EXPECT_EQ('\0', data.version[sizeof(data.version) - 1]);
-  EXPECT_EQ((std::vector<unsigned int>(3, NVML_SYSTEM_DRIVER_VERSION_BUFFER_SIZE)), g_nvidiaDriverBufferSizes);
+  EXPECT_EQ(std::vector<size_t>(3, sizeof(data.version)), bufferSizes);
 }
 
-TEST_F(RasDiagnosticsGpuMicrotest, NvidiaDriverVersionCollectRejectsInvalidArguments) {
+TEST_F(RasDiagnosticsGpuMicrotest, GpuDriverVersionCollectRejectsInvalidArguments) {
+  int queries = 0;
+  g_amdSmiDiagDriverVersion = [&](int64_t, char*, size_t) {
+    ++queries;
+    return ncclSuccess;
+  };
   rasDiagnosticsLocalData data{};
   EXPECT_EQ(ncclInternalError, rasDiagnosticsNvidiaDriverVersionCollectLocal(nullptr, &data));
   EXPECT_EQ(ncclInternalError, rasDiagnosticsNvidiaDriverVersionCollectLocal(&ctx, nullptr));
-  EXPECT_TRUE(g_nvidiaDriverBufferSizes.empty());
-}
-
-TEST_F(RasDiagnosticsGpuMicrotest, EccCollectRequiresEveryCounter) {
-  OwnedComm owned(0x100, 0x101, 0x102, 0);
-  owned.comm->nRanks = 1;
-  owned.comm->nvmlDev = 0;
-  InstallNcclComms({owned.comm.get()});
-  owned.comm->nvmlDev = 0;
-  ncclNvmlDeviceCount = 1;
-  g_eccCounters = {{{{1, 2}}, {{3, 4}}}};
-  rasDiagnosticsEccData data{};
-
-  ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsEccCollectLocal, &data));
-  EXPECT_EQ(1u, data.correctedSram);
-  EXPECT_EQ(2u, data.correctedDram);
-  EXPECT_EQ(3u, data.uncorrectedSram);
-  EXPECT_EQ(4u, data.uncorrectedDram);
-  EXPECT_EQ(1, data.available);
-  EXPECT_EQ((std::vector<int>{0, 0, 0, 0}), g_eccDevices);
-  EXPECT_EQ((std::vector<nvmlMemoryErrorType_t>{NVML_MEMORY_ERROR_TYPE_CORRECTED,
-                                                NVML_MEMORY_ERROR_TYPE_UNCORRECTED,
-                                                NVML_MEMORY_ERROR_TYPE_CORRECTED,
-                                                NVML_MEMORY_ERROR_TYPE_UNCORRECTED}),
-            g_eccErrorTypes);
-  EXPECT_EQ((std::vector<nvmlMemoryLocation_t>{NVML_MEMORY_LOCATION_SRAM, NVML_MEMORY_LOCATION_SRAM,
-                                               NVML_MEMORY_LOCATION_DRAM, NVML_MEMORY_LOCATION_DRAM}),
-            g_eccLocations);
-  for (nvmlEccCounterType_t counterType : g_eccCounterTypes) EXPECT_EQ(NVML_VOLATILE_ECC, counterType);
-
-  const std::array<std::pair<int, int>, 4> failedSlots = {{{0, 0}, {1, 0}, {0, 1}, {1, 1}}};
-  for (size_t slot = 0; slot < failedSlots.size(); slot++) {
-    for (auto& byLocation : g_eccResults) byLocation.fill(ncclSuccess);
-    g_eccResults[failedSlots[slot].first][failedSlots[slot].second] = ncclSystemError;
-    data = EccData(true, 9, 9, 9, 9);
-
-    ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsEccCollectLocal, &data));
-    EXPECT_EQ(slot == 0 ? 0u : 1u, data.correctedSram);
-    EXPECT_EQ(slot == 1 ? 0u : 3u, data.uncorrectedSram);
-    EXPECT_EQ(slot == 2 ? 0u : 2u, data.correctedDram);
-    EXPECT_EQ(slot == 3 ? 0u : 4u, data.uncorrectedDram);
-    EXPECT_EQ(0, data.available);
-  }
-
-  for (auto& byLocation : g_eccResults) byLocation.fill(ncclSuccess);
-  g_handleResult = ncclSystemError;
-  data = EccData(true, 9, 9, 9, 9);
-  ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsEccCollectLocal, &data));
-  EXPECT_EQ(0u, data.correctedSram);
-  EXPECT_EQ(0u, data.uncorrectedSram);
-  EXPECT_EQ(0u, data.correctedDram);
-  EXPECT_EQ(0u, data.uncorrectedDram);
-  EXPECT_EQ(0, data.available);
-
-  g_handleResult = ncclSuccess;
-  g_handleIndices.clear();
-  for (int nvmlDev : {-1, ncclNvmlDeviceCount}) {
-    owned.comm->nvmlDev = nvmlDev;
-    data = EccData(true, 9, 9, 9, 9);
-    ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsEccCollectLocal, &data));
-    EXPECT_EQ(0u, data.correctedSram);
-    EXPECT_EQ(0u, data.uncorrectedSram);
-    EXPECT_EQ(0u, data.correctedDram);
-    EXPECT_EQ(0u, data.uncorrectedDram);
-    EXPECT_EQ(0, data.available);
-  }
-  EXPECT_TRUE(g_handleIndices.empty());
-}
-
-TEST_F(RasDiagnosticsGpuMicrotest, NvLinkCollectCountsValidAndInactiveLinks) {
-  OwnedComm owned(0x100, 0x101, 0x102, 0);
-  owned.comm->nRanks = 1;
-  owned.comm->nvmlDev = 0;
-  InstallNcclComms({owned.comm.get()});
-  owned.comm->nvmlDev = 0;
-  ncclNvmlDeviceCount = 1;
-  g_nvLinks.resize(4);
-  g_nvLinks[1].state = NVML_FEATURE_DISABLED;
-  g_nvLinks[2].speedMBps = 25000;
-  g_nvLinks[3].result = ncclSystemError;
-  rasDiagnosticsNvLinkData data{};
-
-  ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsNvLinkCollectLocal, &data));
-  EXPECT_EQ(4, data.nLinks);
-  EXPECT_EQ(2, data.nInactive);
-  EXPECT_EQ(25000u, data.minSpeedMBps);
-  EXPECT_EQ(50000u, data.maxSpeedMBps);
-  EXPECT_EQ((std::vector<int>{0, 0, 0, 0, 0}), g_nvLinkFieldDevices);
-  const std::vector<std::pair<unsigned int, unsigned int>> expectedQueries = {
-    {NVML_FI_DEV_NVLINK_LINK_COUNT, 0},
-    {NVML_FI_DEV_NVLINK_GET_STATE, 0}, {NVML_FI_DEV_NVLINK_GET_SPEED, 0},
-    {NVML_FI_DEV_NVLINK_GET_STATE, 1}, {NVML_FI_DEV_NVLINK_GET_SPEED, 1},
-    {NVML_FI_DEV_NVLINK_GET_STATE, 2}, {NVML_FI_DEV_NVLINK_GET_SPEED, 2},
-    {NVML_FI_DEV_NVLINK_GET_STATE, 3}};
-  EXPECT_EQ(expectedQueries, g_nvLinkFieldQueries);
-
-  g_handleIndices.clear();
-  for (int nvmlDev : {-1, ncclNvmlDeviceCount}) {
-    owned.comm->nvmlDev = nvmlDev;
-    data = NvLinkData(9, 9);
-    ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsNvLinkCollectLocal, &data));
-    EXPECT_EQ(0, data.nLinks);
-    EXPECT_EQ(0, data.nInactive);
-  }
-  EXPECT_TRUE(g_handleIndices.empty());
-
-  owned.comm->nvmlDev = 0;
-  g_handleResult = ncclSystemError;
-  g_nvLinkFieldDevices.clear();
-  data = NvLinkData(9, 9);
-  ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsNvLinkCollectLocal, &data));
-  EXPECT_EQ(0, data.nLinks);
-  EXPECT_EQ(0, data.nInactive);
-  ASSERT_EQ(1u, g_handleIndices.size());
-  EXPECT_EQ(0u, g_handleIndices[0]);
-  EXPECT_TRUE(g_nvLinkFieldDevices.empty());
-}
-
-TEST_F(RasDiagnosticsGpuMicrotest, NvLinkCollectHandlesUnavailableCountsAndUnreadableLinks) {
-  OwnedComm owned(0x100, 0x101, 0x102, 0);
-  owned.comm->nRanks = 1;
-  InstallNcclComms({owned.comm.get()});
-  owned.comm->nvmlDev = 0;
-  ncclNvmlDeviceCount = 1;
-  g_nvLinks.resize(2);
-  for (int failure = 0; failure < 4; ++failure) {
-    SCOPED_TRACE(failure);
-    g_nvLinkCountResult = failure == 0 ? ncclSystemError : ncclSuccess;
-    g_nvLinkCountStatus = failure == 1 ? NVML_ERROR_UNKNOWN : NVML_SUCCESS;
-    for (auto& link : g_nvLinks) {
-      link.result = failure == 2 ? ncclSystemError : ncclSuccess;
-      link.stateStatus = failure == 3 ? NVML_ERROR_UNKNOWN : NVML_SUCCESS;
-    }
-    rasDiagnosticsNvLinkData data = NvLinkData(9, 9);
-    ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsNvLinkCollectLocal, &data));
-    EXPECT_EQ(0, data.nLinks);
-    EXPECT_EQ(0, data.nInactive);
-    EXPECT_EQ(0u, data.minSpeedMBps);
-    EXPECT_EQ(0u, data.maxSpeedMBps);
-  }
-}
-
-TEST_F(RasDiagnosticsGpuMicrotest, NvLinkCollectTreatsUnknownAndZeroSpeedsAsInactive) {
-  OwnedComm owned(0x100, 0x101, 0x102, 0);
-  owned.comm->nRanks = 1;
-  InstallNcclComms({owned.comm.get()});
-  owned.comm->nvmlDev = 0;
-  ncclNvmlDeviceCount = 1;
-  g_nvLinks.resize(3);
-  g_nvLinks[0].speedStatus = NVML_ERROR_UNKNOWN;
-  g_nvLinks[1].speedMBps = 0;
-  rasDiagnosticsNvLinkData data{};
-  ASSERT_NO_FATAL_FAILURE(CollectPayload(rasDiagnosticsNvLinkCollectLocal, &data));
-  EXPECT_EQ(3, data.nLinks);
-  EXPECT_EQ(2, data.nInactive);
-  EXPECT_EQ(50000u, data.minSpeedMBps);
-  EXPECT_EQ(50000u, data.maxSpeedMBps);
+  EXPECT_EQ(0, queries);
 }
 
 TEST_F(RasDiagnosticsGpuMicrotest, CollectLocalBuildsOneRecordForEachCheck) {
@@ -629,11 +445,27 @@ TEST_F(RasDiagnosticsGpuMicrotest, CollectLocalBuildsOneRecordForEachCheck) {
   comm.comm->nRanks = 1;
   comm.comm->nvmlDev = 0;
   InstallNcclComms({comm.comm.get()});
-  ncclNvmlDeviceCount = 1;
-  g_deviceCount = 1;
-  g_deviceName = "MI300X";
+  g_amdSmiDiagGpuCount = [](uint32_t* count) {
+    *count = 1;
+    return ncclSuccess;
+  };
+  g_amdSmiDiagGpuModel = [](int64_t, char* model, size_t len) {
+    snprintf(model, len, "%s", "MI300X");
+    return ncclSuccess;
+  };
+  g_amdSmiDiagDriverVersion = [](int64_t, char* version, size_t len) {
+    snprintf(version, len, "%s", "6.14.14");
+    return ncclSuccess;
+  };
+  g_amdSmiDiagEccCounts = [](int64_t, amdsmiDiagEccCounts* counts) {
+    *counts = {};
+    return ncclSuccess;
+  };
+  g_amdSmiDiagXgmiLinks = [](int64_t, amdsmiDiagXgmiLinks* links) {
+    *links = {};
+    return ncclSuccess;
+  };
   g_driverVersion = 70002000;
-  g_nvidiaDriverVersion = "580.82.07";
 
   const std::array<rasDiagnosticsCollectLocalFn, 5> collectors = {rasDiagnosticsGpuModelCollectLocal,
                                                                   rasDiagnosticsCudaDriverVersionCollectLocal,
@@ -667,11 +499,11 @@ TEST_F(RasDiagnosticsGpuMicrotest, CollectLocalBuildsOneRecordForEachCheck) {
     } else if (index == 2) {
       EXPECT_EQ(1, reinterpret_cast<const rasDiagnosticsEccData*>(payload)->available);
     } else if (index == 3) {
-      const auto* nvLink = reinterpret_cast<const rasDiagnosticsNvLinkData*>(payload);
-      EXPECT_EQ(0, nvLink->nLinks);
-      EXPECT_EQ(0, nvLink->nInactive);
+      const auto* links = reinterpret_cast<const rasDiagnosticsNvLinkData*>(payload);
+      EXPECT_EQ(0, links->nLinks);
+      EXPECT_EQ(0, links->nInactive);
     } else {
-      EXPECT_STREQ("580.82.07", reinterpret_cast<const rasDiagnosticsNvidiaDriverVersionData*>(payload)->version);
+      EXPECT_STREQ("6.14.14", reinterpret_cast<const rasDiagnosticsNvidiaDriverVersionData*>(payload)->version);
     }
   }
 }
@@ -687,7 +519,7 @@ TEST_F(RasDiagnosticsGpuMicrotest, GpuModelSummaryCoversAvailabilityAndMismatchC
   EXPECT_TRUE(Contains(state.lines, "8x MI300X"));
   EXPECT_TRUE(Contains(state.lines, "GPU model unavailable"));
   EXPECT_TRUE(Contains(state.lines, "GPU count unavailable"));
-  EXPECT_TRUE(Contains(state.lines, "unavailable via NVML"));
+  EXPECT_TRUE(Contains(state.lines, "unavailable via " RAS_DIAG_GPU_SOURCE));
 
   state.lines.clear();
   records = BuildRecords<rasDiagnosticsGpuModelData>(
@@ -695,7 +527,8 @@ TEST_F(RasDiagnosticsGpuMicrotest, GpuModelSummaryCoversAvailabilityAndMismatchC
   ASSERT_EQ(ncclSuccess,
             rasDiagnosticsGpuModelSummarize(&ctx, &reporter, records.data(), static_cast<int>(records.size())));
   ASSERT_EQ(1u, state.lines.size());
-  EXPECT_EQ("[INFO] GPU inventory: unavailable via NVML across 1 ranks in comm 0x8", state.lines[0]);
+  EXPECT_EQ("[INFO] GPU inventory: unavailable via " RAS_DIAG_GPU_SOURCE " across 1 ranks in comm 0x8",
+            state.lines[0]);
 
   state.lines.clear();
   records = BuildRecords<rasDiagnosticsGpuModelData>(
@@ -728,11 +561,11 @@ TEST_F(RasDiagnosticsGpuMicrotest, DriverVersionSummaryCoversKnownUnknownMismatc
      {MakeRank(5, 0, 2), DriverVersion(RAS_DIAG_CUDA_DRIVER_VERSION_UNKNOWN)}});
   ASSERT_EQ(ncclSuccess, rasDiagnosticsCudaDriverVersionSummarize(&ctx, &reporter, records.data(), static_cast<int>(records.size())));
   ASSERT_EQ(1u, state.lines.size());
-  EXPECT_EQ("[INFO] CUDA driver version: mismatch across 2 ranks in comm 0x5, rank(s) {1} differ from rank 0 "
+  EXPECT_EQ("[INFO] " RAS_DIAG_DRIVER_LABEL ": mismatch across 2 ranks in comm 0x5, rank(s) {1} differ from rank 0 "
             "(unavailable)",
             state.lines[0]);
 
-  ExpectIncomplete(rasDiagnosticsCudaDriverVersionSummarize, "CUDA driver version", 4, DriverVersion(1));
+  ExpectIncomplete(rasDiagnosticsCudaDriverVersionSummarize, RAS_DIAG_DRIVER_LABEL, 4, DriverVersion(1));
 }
 
 TEST_F(RasDiagnosticsGpuMicrotest, NvidiaDriverVersionSummaryReportsAvailabilityMismatchAndIncomplete) {
@@ -743,8 +576,9 @@ TEST_F(RasDiagnosticsGpuMicrotest, NvidiaDriverVersionSummaryReportsAvailability
   ASSERT_EQ(ncclSuccess, rasDiagnosticsNvidiaDriverVersionSummarize(
                           &ctx, &reporter, records.data(), static_cast<int>(records.size())));
   ASSERT_EQ(2u, state.lines.size());
-  EXPECT_EQ("[OK]   NVIDIA graphics driver version: 580.82.07 consistent across 2 ranks in comm 0x1", state.lines[0]);
-  EXPECT_EQ("[INFO] NVIDIA graphics driver version: unavailable via NVML across 1 ranks in comm 0x2", state.lines[1]);
+  EXPECT_EQ("[OK]   " RAS_DIAG_GPU_DRIVER_LABEL ": 580.82.07 consistent across 2 ranks in comm 0x1", state.lines[0]);
+  EXPECT_EQ("[INFO] " RAS_DIAG_GPU_DRIVER_LABEL ": unavailable via " RAS_DIAG_GPU_SOURCE " across 1 ranks in comm 0x2",
+            state.lines[1]);
 
   for (const char* expected : {"580.82.07", ""}) {
     state.lines.clear();
@@ -754,11 +588,11 @@ TEST_F(RasDiagnosticsGpuMicrotest, NvidiaDriverVersionSummaryReportsAvailability
     ASSERT_EQ(ncclSuccess, rasDiagnosticsNvidiaDriverVersionSummarize(
                             &ctx, &reporter, records.data(), static_cast<int>(records.size())));
     ASSERT_EQ(1u, state.lines.size());
-    EXPECT_EQ(std::string("[INFO] NVIDIA graphics driver version: mismatch across 2 ranks in comm 0x3, "
+    EXPECT_EQ(std::string("[INFO] " RAS_DIAG_GPU_DRIVER_LABEL ": mismatch across 2 ranks in comm 0x3, "
                           "rank(s) {1} differ from rank 0 (") +
-                (expected[0] != '\0' ? expected : "unavailable via NVML") + ")", state.lines[0]);
+                (expected[0] != '\0' ? expected : "unavailable via " RAS_DIAG_GPU_SOURCE) + ")", state.lines[0]);
   }
-  ExpectIncomplete(rasDiagnosticsNvidiaDriverVersionSummarize, "NVIDIA graphics driver version",
+  ExpectIncomplete(rasDiagnosticsNvidiaDriverVersionSummarize, RAS_DIAG_GPU_DRIVER_LABEL,
                    0xabc, NvidiaDriverVersion("580.82.07"));
 }
 
@@ -769,14 +603,14 @@ TEST_F(RasDiagnosticsGpuMicrotest, NvidiaDriverVersionSummaryBoundsUnterminatedP
   ASSERT_EQ(ncclSuccess, rasDiagnosticsNvidiaDriverVersionSummarize(
                           &ctx, &reporter, records.data(), static_cast<int>(records.size())));
   ASSERT_EQ(1u, state.lines.size());
-  EXPECT_EQ("[OK]   NVIDIA graphics driver version: " + std::string(sizeof(version.version) - 1, 'V') +
+  EXPECT_EQ("[OK]   " RAS_DIAG_GPU_DRIVER_LABEL ": " + std::string(sizeof(version.version) - 1, 'V') +
               " consistent across 1 ranks in comm 0x1", state.lines[0]);
 }
 
 TEST_F(RasDiagnosticsGpuMicrotest, EccSummaryCoversAvailabilityHealthyAndErrorCases) {
   auto records = BuildRecords<rasDiagnosticsEccData>({{MakeRank(1, 0, 1), EccData(false)}});
   ASSERT_EQ(ncclSuccess, rasDiagnosticsEccSummarize(&ctx, &reporter, records.data(), static_cast<int>(records.size())));
-  EXPECT_TRUE(Contains(state.lines, "ECC: unavailable via NVML across 1 ranks"));
+  EXPECT_TRUE(Contains(state.lines, "ECC: unavailable via " RAS_DIAG_GPU_SOURCE " across 1 ranks"));
 
   state.lines.clear();
   records = BuildRecords<rasDiagnosticsEccData>({{MakeRank(2, 0, 1), EccData(true)}});
@@ -807,7 +641,7 @@ TEST_F(RasDiagnosticsGpuMicrotest, EccSummaryCoversAvailabilityHealthyAndErrorCa
     {{MakeRank(7, 0, 1), EccData(false)}, {MakeRank(6, 0, 1), EccData(true)}});
   ASSERT_EQ(ncclSuccess, rasDiagnosticsEccSummarize(&ctx, &reporter, records.data(), static_cast<int>(records.size())));
   EXPECT_TRUE(Contains(state.lines, "no uncorrected volatile errors across 1 ranks in comm 0x6"));
-  EXPECT_TRUE(Contains(state.lines, "ECC: unavailable via NVML across 1 ranks in comm 0x7"));
+  EXPECT_TRUE(Contains(state.lines, "ECC: unavailable via " RAS_DIAG_GPU_SOURCE " across 1 ranks in comm 0x7"));
 }
 
 TEST_F(RasDiagnosticsGpuMicrotest, NvLinkSummaryCoversNoLinksHealthyMismatchInactiveAndIncomplete) {
@@ -818,7 +652,9 @@ TEST_F(RasDiagnosticsGpuMicrotest, NvLinkSummaryCoversNoLinksHealthyMismatchInac
   records = BuildRecords<rasDiagnosticsNvLinkData>({{MakeRank(2, 0, 1), NvLinkData(8, 0)}});
   ASSERT_EQ(ncclSuccess, rasDiagnosticsNvLinkSummarize(&ctx, &reporter, records.data(), static_cast<int>(records.size())));
   ASSERT_EQ(1u, state.lines.size());
-  EXPECT_EQ("[OK]   NVLink: 8 links per GPU, all active at consistent speed across 1 ranks in comm 0x2", state.lines[0]);
+  EXPECT_EQ("[OK]   " RAS_DIAG_LINK_LABEL ": 8 links per GPU, all active" RAS_DIAG_LINK_SPEED_OK
+            " across 1 ranks in comm 0x2",
+            state.lines[0]);
 
   state.lines.clear();
   records = BuildRecords<rasDiagnosticsNvLinkData>(
@@ -832,13 +668,13 @@ TEST_F(RasDiagnosticsGpuMicrotest, NvLinkSummaryCoversNoLinksHealthyMismatchInac
   ASSERT_EQ(ncclSuccess, rasDiagnosticsNvLinkSummarize(&ctx, &reporter, records.data(), static_cast<int>(records.size())));
   EXPECT_TRUE(Contains(state.lines, "inactive link(s) on rank(s) {1}"));
 
-  ExpectIncomplete(rasDiagnosticsNvLinkSummarize, "NVLink", 20, NvLinkData(8, 0));
+  ExpectIncomplete(rasDiagnosticsNvLinkSummarize, RAS_DIAG_LINK_LABEL, 20, NvLinkData(8, 0));
 
   state.lines.clear();
   records = BuildRecords<rasDiagnosticsNvLinkData>(
     {{MakeRank(6, 0, 1), NvLinkData(8, 0)}, {MakeRank(7, 0, 1), NvLinkData(8, 1)}});
   ASSERT_EQ(ncclSuccess, rasDiagnosticsNvLinkSummarize(&ctx, &reporter, records.data(), static_cast<int>(records.size())));
-  EXPECT_TRUE(Contains(state.lines, "all active at consistent speed across 1 ranks in comm 0x6"));
+  EXPECT_TRUE(Contains(state.lines, "all active" RAS_DIAG_LINK_SPEED_OK " across 1 ranks in comm 0x6"));
   EXPECT_TRUE(Contains(state.lines, "inactive link(s) on rank(s) {0} across 1 ranks in comm 0x7"));
 }
 
@@ -850,7 +686,8 @@ TEST_F(RasDiagnosticsGpuMicrotest, NvLinkSummaryReportsSpeedDifferencesWithinAnd
     ASSERT_EQ(ncclSuccess, rasDiagnosticsNvLinkSummarize(&ctx, &reporter, records.data(),
                                                         static_cast<int>(records.size())));
     ASSERT_EQ(1u, state.lines.size());
-    EXPECT_EQ("[INFO] NVLink: inconsistent link speeds on rank(s) {1} across 2 ranks in comm 0x1e", state.lines[0]);
+    EXPECT_EQ("[INFO] " RAS_DIAG_LINK_LABEL ": inconsistent link speeds on rank(s) {1} across 2 ranks in comm 0x1e",
+              state.lines[0]);
   }
 }
 
@@ -979,4 +816,157 @@ TEST_F(RasDiagnosticsGpuMicrotest, EveryReporterFailurePropagates) {
     {{MakeRank(20, 0, 2), NvLinkData(8, 0)}, {MakeRank(20, 1, 2), NvLinkData(6, 0)}});
   ExpectReporterFailure<rasDiagnosticsNvLinkData>(rasDiagnosticsNvLinkSummarize,
                                                   {{MakeRank(21, 0, 1), NvLinkData(8, 1)}});
+}
+
+TEST_F(RasDiagnosticsGpuMicrotest, GpuInitLoadsAmdSmi) {
+  rasDiagnosticsGpuInit();
+  EXPECT_EQ(1, g_amdSmiDiagInitCalls);
+}
+
+TEST_F(RasDiagnosticsGpuMicrotest, HealthyNodesReportOkForEveryCheck) {
+  EXPECT_EQ(Lines{"[OK]   GPU inventory: 8x AMD Instinct MI355X per node consistent across 4 ranks in comm "
+                  "0x5fa31c27a9e0d1b4"},
+            RunGpuInventory());
+  EXPECT_EQ(Lines{"[OK]   HIP driver version: 70253211 consistent across 4 ranks in comm 0x5fa31c27a9e0d1b4"},
+            RunDriverVersion());
+  EXPECT_EQ(Lines{"[OK]   AMD GPU driver version: 6.19.14.31400000 consistent across 4 ranks in comm "
+                  "0x5fa31c27a9e0d1b4"},
+            RunGpuDriverVersion());
+  EXPECT_EQ(Lines{"[OK]   ECC: no uncorrected volatile errors across 4 ranks in comm 0x5fa31c27a9e0d1b4"}, RunEcc());
+  EXPECT_EQ(Lines{"[OK]   XGMI: 7 links per GPU, all active across 4 ranks in comm 0x5fa31c27a9e0d1b4"},
+            RunXgmi());
+}
+
+TEST_F(RasDiagnosticsGpuMicrotest, GpuCountMismatchAcrossNodes) {
+  nodes[1].nGpus = 7;
+  EXPECT_EQ(Lines{"[INFO] GPU inventory: count mismatch across 4 ranks in comm 0x5fa31c27a9e0d1b4, rank(s) {2,3} "
+                  "differ from rank 0 (8)"},
+            RunGpuInventory());
+}
+
+TEST_F(RasDiagnosticsGpuMicrotest, GpuModelMismatchOnOneRank) {
+  gpus[3].model = "AMD Instinct MI300X";
+  EXPECT_EQ(Lines{"[INFO] GPU inventory: model mismatch across 4 ranks in comm 0x5fa31c27a9e0d1b4, rank(s) {3} "
+                  "differ from rank 0 (AMD Instinct MI355X)"},
+            RunGpuInventory());
+}
+
+TEST_F(RasDiagnosticsGpuMicrotest, GpuModelQueryFailsOnOneRank) {
+  gpus[1].model = "";
+  EXPECT_EQ(Lines{"[INFO] GPU inventory: model mismatch across 4 ranks in comm 0x5fa31c27a9e0d1b4, rank(s) {1} "
+                  "differ from rank 0 (AMD Instinct MI355X)"},
+            RunGpuInventory());
+}
+
+TEST_F(RasDiagnosticsGpuMicrotest, DriverVersionMismatchAcrossNodes) {
+  nodes[1].driverVersion = 70051831;
+  EXPECT_EQ(Lines{"[INFO] HIP driver version: mismatch across 4 ranks in comm 0x5fa31c27a9e0d1b4, rank(s) {2,3} "
+                  "differ from rank 0 (70253211)"},
+            RunDriverVersion());
+}
+
+TEST_F(RasDiagnosticsGpuMicrotest, GpuDriverVersionMismatchAcrossNodes) {
+  nodes[1].gpuDriverVersion = "6.16.13.30300000";
+  EXPECT_EQ(Lines{"[INFO] AMD GPU driver version: mismatch across 4 ranks in comm 0x5fa31c27a9e0d1b4, rank(s) {2,3} "
+                  "differ from rank 0 (6.19.14.31400000)"},
+            RunGpuDriverVersion());
+}
+
+TEST_F(RasDiagnosticsGpuMicrotest, EccUncorrectableErrorsOnOneRank) {
+  gpus[2].ecc.uncorrectable = 3;
+  gpus[2].ecc.correctable = 40;
+  EXPECT_EQ(Lines{"[INFO] ECC: uncorrected volatile errors on rank(s) {2} (worst=3) across 4 ranks in comm "
+                  "0x5fa31c27a9e0d1b4"},
+            RunEcc());
+}
+
+TEST_F(RasDiagnosticsGpuMicrotest, EccDeferredErrorsCountAsUncorrected) {
+  gpus[1].ecc.deferred = 2;
+  gpus[3].ecc.uncorrectable = 1;
+  gpus[3].ecc.deferred = 4;
+  EXPECT_EQ(Lines{"[INFO] ECC: uncorrected volatile errors on rank(s) {1,3} (worst=5) across 4 ranks in comm "
+                  "0x5fa31c27a9e0d1b4"},
+            RunEcc());
+}
+
+TEST_F(RasDiagnosticsGpuMicrotest, EccCorrectableErrorsIgnoredWithoutThreshold) {
+  gpus[0].ecc.correctable = 1000;
+  EXPECT_EQ(Lines{"[OK]   ECC: no uncorrected volatile errors across 4 ranks in comm 0x5fa31c27a9e0d1b4"}, RunEcc());
+}
+
+TEST_F(RasDiagnosticsGpuMicrotest, EccCorrectableErrorsAtOrAboveThreshold) {
+  g_eccThreshold = 10;
+  gpus[0].ecc.correctable = 9;
+  gpus[1].ecc.correctable = 10;
+  gpus[3].ecc.correctable = 12;
+  EXPECT_EQ(Lines{"[INFO] ECC: corrected volatile errors at or above threshold 10 on rank(s) {1,3} (worst=12) "
+                  "across 4 ranks in comm 0x5fa31c27a9e0d1b4"},
+            RunEcc());
+  EXPECT_FALSE(g_paramEnvs.empty());
+}
+
+TEST_F(RasDiagnosticsGpuMicrotest, XgmiInactiveLinkOnOneRank) {
+  gpus[2].links.nDown = 1;
+  EXPECT_EQ(Lines{"[INFO] XGMI: inactive link(s) on rank(s) {2} across 4 ranks in comm 0x5fa31c27a9e0d1b4"},
+            RunXgmi());
+}
+
+TEST_F(RasDiagnosticsGpuMicrotest, XgmiLinkCountMismatchOnOneRank) {
+  gpus[1].links.nLinks = 6;
+  EXPECT_EQ(Lines{"[INFO] XGMI: link-count mismatch across 4 ranks in comm 0x5fa31c27a9e0d1b4, rank(s) {1} differ "
+                  "from rank 0 (7)"},
+            RunXgmi());
+}
+
+TEST_F(RasDiagnosticsGpuMicrotest, NoXgmiLinesWithoutXgmiLinks) {
+  for (FakeGpu& gpu : gpus) gpu.links = {0, 0};
+  EXPECT_EQ(Lines{}, RunXgmi());
+}
+
+TEST_F(RasDiagnosticsGpuMicrotest, PartitionAliasReadsThePhysicalGpu) {
+  partitionFunction = 3;
+  gpus[2].ecc.uncorrectable = 1;
+  gpus[1].links.nDown = 1;
+  EXPECT_EQ(Lines{"[OK]   GPU inventory: 8x AMD Instinct MI355X per node consistent across 4 ranks in comm "
+                  "0x5fa31c27a9e0d1b4"},
+            RunGpuInventory());
+  EXPECT_EQ(Lines{"[INFO] ECC: uncorrected volatile errors on rank(s) {2} (worst=1) across 4 ranks in comm "
+                  "0x5fa31c27a9e0d1b4"},
+            RunEcc());
+  EXPECT_EQ(Lines{"[INFO] XGMI: inactive link(s) on rank(s) {1} across 4 ranks in comm 0x5fa31c27a9e0d1b4"},
+            RunXgmi());
+  EXPECT_EQ(Lines{"[OK]   AMD GPU driver version: 6.19.14.31400000 consistent across 4 ranks in comm "
+                  "0x5fa31c27a9e0d1b4"},
+            RunGpuDriverVersion());
+  EXPECT_EQ(4 * kRanks, aliasQueries);
+}
+
+TEST_F(RasDiagnosticsGpuMicrotest, PhysicalGpuUnknownToAmdSmiIsNotRetried) {
+  gpus[3].unknownToAmdSmi = true;
+  EXPECT_EQ(Lines{"[INFO] ECC: no uncorrected volatile errors across 3 of 4 ranks in comm 0x5fa31c27a9e0d1b4 (ECC "
+                  "counters unavailable via AMD SMI on 1 ranks)"},
+            RunEcc());
+  EXPECT_EQ(0, aliasQueries);
+}
+
+TEST_F(RasDiagnosticsGpuMicrotest, AmdSmiUnavailableOnEveryNode) {
+  for (FakeNode& node : nodes) node.amdSmiAvailable = false;
+  EXPECT_EQ(Lines{"[INFO] GPU inventory: unavailable via AMD SMI across 4 ranks in comm 0x5fa31c27a9e0d1b4"},
+            RunGpuInventory());
+  EXPECT_EQ(Lines{"[OK]   HIP driver version: 70253211 consistent across 4 ranks in comm 0x5fa31c27a9e0d1b4"},
+            RunDriverVersion());
+  EXPECT_EQ(Lines{"[INFO] AMD GPU driver version: unavailable via AMD SMI across 4 ranks in comm 0x5fa31c27a9e0d1b4"},
+            RunGpuDriverVersion());
+  EXPECT_EQ(Lines{"[INFO] ECC: unavailable via AMD SMI across 4 ranks in comm 0x5fa31c27a9e0d1b4"}, RunEcc());
+  EXPECT_EQ(Lines{}, RunXgmi());
+}
+
+TEST_F(RasDiagnosticsGpuMicrotest, AmdSmiUnavailableOnOneNode) {
+  nodes[1].amdSmiAvailable = false;
+  EXPECT_EQ(Lines{"[INFO] ECC: no uncorrected volatile errors across 2 of 4 ranks in comm 0x5fa31c27a9e0d1b4 (ECC "
+                  "counters unavailable via AMD SMI on 2 ranks)"},
+            RunEcc());
+  EXPECT_EQ(Lines{"[INFO] XGMI: link-count mismatch across 4 ranks in comm 0x5fa31c27a9e0d1b4, rank(s) {2,3} differ "
+                  "from rank 0 (7)"},
+            RunXgmi());
 }
