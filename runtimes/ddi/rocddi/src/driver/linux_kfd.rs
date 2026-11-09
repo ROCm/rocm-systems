@@ -326,6 +326,10 @@ pub(crate) struct DeviceState {
 }
 
 impl DeviceState {
+    pub(crate) fn event_origin_id(&self) -> crate::device::event::DeviceEventOriginId {
+        self.vm.event_origin_id()
+    }
+
     pub(crate) fn subscribe_events(&self) -> Result<KfdEventSubscription, Error> {
         self.vm.subscribe_events()
     }
