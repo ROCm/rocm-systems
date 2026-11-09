@@ -210,9 +210,10 @@ __device__ __forceinline__ void ddaLL128LoadRegs(
     if (flag) regs[2 * g] = regs[2 * g - 1];
 }
 
-// ddaLL128LoadRegs without per-lane branches. Loads a lane does not need are in bounds and discarded.
+// The loads of ddaLL128LoadRegsBatched. Call ddaLL128LoadRegsFinish once they land, so several
+// slices can have their loads in flight before any is finished.
 template <typename T>
-__device__ __forceinline__ void ddaLL128LoadRegsBatched(
+__device__ __forceinline__ void ddaLL128LoadRegsBegin(
     uint64_t (&regs)[kDdaLL128WordsPerThread], const T* src, int eltN, int wid, bool flag) {
   constexpr int EltPer16B = 16 / sizeof(T);
 #pragma unroll
@@ -221,14 +222,26 @@ __device__ __forceinline__ void ddaLL128LoadRegsBatched(
     const int elt = ix * EltPer16B < eltN ? ix * EltPer16B : 0;
     ddaLL128Load16B(reinterpret_cast<const uint64_t*>(src + elt), regs[2 * g], regs[2 * g + 1]);
   }
+}
+
+// The flag-lane shuffle that completes ddaLL128LoadRegsBegin.
+__device__ __forceinline__ void ddaLL128LoadRegsFinish(uint64_t (&regs)[kDdaLL128WordsPerThread], bool flag) {
+#pragma unroll
+  for (int g = 1; g < kDdaLL128Pairs; g += 2)  // move flag-lane data out of odd regs
+    if (flag) regs[2 * g] = regs[2 * g - 1];
+}
+
+// ddaLL128LoadRegs without per-lane branches. Loads a lane does not need are in bounds and discarded.
+template <typename T>
+__device__ __forceinline__ void ddaLL128LoadRegsBatched(
+    uint64_t (&regs)[kDdaLL128WordsPerThread], const T* src, int eltN, int wid, bool flag) {
+  ddaLL128LoadRegsBegin<T>(regs, src, eltN, wid, flag);
 #if defined(__HIP_DEVICE_COMPILE__) && __has_builtin(__builtin_amdgcn_sched_barrier)
   // Without it the scheduler moves the shuffle below up between the loads, and the
   // loads after the shuffle wait for the ones before it.
   __builtin_amdgcn_sched_barrier(0);
 #endif
-#pragma unroll
-  for (int g = 1; g < kDdaLL128Pairs; g += 2)  // move flag-lane data out of odd regs
-    if (flag) regs[2 * g] = regs[2 * g - 1];
+  ddaLL128LoadRegsFinish(regs, flag);
 }
 
 // This lane's wire image of one slice: f(word, lo, hi) per 16B pair; the flag lane carries the flag in place of hi.

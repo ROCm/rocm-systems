@@ -9106,6 +9106,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_DdaFabricLL128ChosenWhenLLNotEli
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, decision.algo);
 
         EXPECT_EQ(NCCL_PROTO_LL128, decision.protocol);
+        EXPECT_EQ(134u, decision.nMaxChannels);  // proves ncclReduceScatterDdaFabricLL128Blocks ran, not a sibling
         DeleteCommWithArch(comm);
       });
 }

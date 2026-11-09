@@ -443,8 +443,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
     0,                   // [2] AllGather       -- ddaLL128Max total (DPX)
-    1ULL*1024*1024,      // [3] ReduceScatter   -- beats Ring through 16M/32M at 16/32 (1M/rank);
-                         //                        Ring LL128 wins from 32M/64M (DPX)
+    2ULL*1024*1024,      // [3] ReduceScatter   -- 2M/rank: LL128 through 32M at 16 ranks (DPX)
     0,                   // [4] AllReduce       -- ddaLL128Max total
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used

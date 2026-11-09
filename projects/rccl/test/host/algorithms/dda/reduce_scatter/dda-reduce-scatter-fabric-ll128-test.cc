@@ -272,6 +272,26 @@ TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_GridFollowsShardSlicesWithin
   EXPECT_EQ(RunOne(16 * 100 * kSliceFloats).grid.x, 1u);
 }
 
+// The reported block count is the launch grid, caps included.
+TEST_F(DdaReduceScatterFabricLL128Microtest, Blocks_MatchTheLaunchedGrid) {
+  struct Case {
+    size_t count;
+    ncclDataType_t datatype;
+  };
+  const Case cases[] = {{8, ncclFloat16},
+                        {16 * kSliceFloats + 4, ncclFloat32},
+                        {32 * kSliceFloats, ncclBfloat16},
+                        {16 * 100 * kSliceFloats, ncclFloat32}};
+  for (int maxBlocks : {256, 6}) {
+    comm().ddaFabricMaxBlocks = maxBlocks;
+    for (const Case& c : cases) {
+      EXPECT_EQ(ncclReduceScatterDdaFabricLL128Blocks(mock_.get(), c.count, c.datatype),
+                RunOne(c.count, c.datatype).grid.x)
+        << "count " << c.count << " maxBlocks " << maxBlocks;
+    }
+  }
+}
+
 TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_LaunchErrorIsReported) {
   g_hipGetLastError = [] { return hipErrorLaunchFailure; };
   EXPECT_EQ(Run(4), ncclUnhandledCudaError);
