@@ -119,6 +119,10 @@ private:
 
   using signed_sq_idx_t = std::make_signed_t<sq_idx_t>;
 
+  __device__ bool cq_reached_target(sq_idx_t target, sq_idx_t complete_idx);
+  __device__ sq_idx_t cq_complete_idx();
+  __device__ sq_idx_t cq_complete_idx(sq_idx_t complete_idx);
+
   __device__ void ring_doorbell(sq_idx_t next_commit_idx, const gda_mlx5_wqe& wqe);
 
   __device__ __forceinline__ uint16_t get_sq_idx(uint16_t wqe_idx) {
@@ -410,20 +414,13 @@ __device__ __forceinline__ QueuePairMLX5::sq_idx_t QueuePairMLX5::cq_target() {
   return sq.commit_idx;
 }
 
-/* precondition: called with all active lanes using different QPs
- * test whether target number of WQEs have been completed
- * TODO: apply PostOpts to poll_cq_once */
-__device__ __forceinline__ bool QueuePairMLX5::poll_cq_once(
-    QueuePairMLX5::sq_idx_t target) {
-  /* must be device scope, so that we don't miss 16-bit rollovers
-   * if one workgroup runs far ahead of another */
-  sq_idx_t complete_idx = __scoped_atomic_load_n(&sq.complete_idx,
-                                                 __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
-
+__device__ __forceinline__ bool QueuePairMLX5::cq_reached_target(
+    QueuePairMLX5::sq_idx_t target, QueuePairMLX5::sq_idx_t complete_idx) {
   /* complete_idx is an index to the next free WQE i.e. counts number of completed WQEs
    * target is the complete_idx you need to observe before returning
    *
-   * desired behavior: 'if (complete_idx < target)', but valid through wraparound
+   * desired behavior: 'target <= complete_idx', but valid through wraparound
+   *
    * for unsigned integers, when target index wraps (occurs before complete index)
    * then target is small while complete_idx is large, so it appears that complete_idx > target
    *
@@ -435,63 +432,106 @@ __device__ __forceinline__ bool QueuePairMLX5::poll_cq_once(
    * so computing the (unsigned) difference and then casting to signed integer
    * correctly (and cheaply) handles all cases while avoiding undefined behavior
    * due to signed integer overflow or underflow. */
-  if (static_cast<signed_sq_idx_t>(complete_idx - target) < 0) {
-    struct mlx5_cqe64* cqe = cq.buf;
+  return static_cast<signed_sq_idx_t>(complete_idx - target) >= 0;
+}
 
-    /* read wqe_counter and sig_op_own from CQE
-     * 32-bit load: big-endian 16-bit field, then two 8-bit fields
-     * wqe_counter is the sq_wqebb_counter; all our WQEs are exactly one WQEBB (64B) */
-    uint32_t wqecnt_sig_op_own = *reinterpret_cast<volatile uint32_t*>(&cqe->wqe_counter);
+/* precondition: called with all active lanes using different QPs
+ * return current value of sq.complete_idx
+ * TODO: apply PostOpts to cq_complete_idx() */
+__device__ __forceinline__ QueuePairMLX5::sq_idx_t QueuePairMLX5::cq_complete_idx() {
+  /* must be device scope, so that we don't miss 16-bit rollovers
+   * if one workgroup runs far ahead of another */
+  return __scoped_atomic_load_n(&sq.complete_idx, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+}
 
-    /* GPU is little-endian, so op_own is loaded into the top byte of wqecnt_sig_op_own;
-     * opcode is the top 4 bits of op_own */
-    uint8_t opcode = static_cast<uint8_t>(wqecnt_sig_op_own >> 28);
+/* precondition: called with all active lanes using different QPs
+ * update sq.complete_idx with new value derived from complete_idx argument + cqe->wqe_counter
+ * and return the updated complete_idx value
+ * TODO: apply PostOpts to cq_complete_idx(sq_idx_t) */
+__device__ __forceinline__ QueuePairMLX5::sq_idx_t QueuePairMLX5::cq_complete_idx(
+    QueuePairMLX5::sq_idx_t complete_idx) {
+  struct mlx5_cqe64* cqe = cq.buf;
 
-    // CQEs are initially invalid, retry until we see a valid CQE
-    if (opcode == MLX5_CQE_INVALID) {
-      LOGD_TRACE("QP[%d] CQ: invalid completion (%x)", qp_num, opcode);
-      continue;
-    }
+  /* read wqe_counter and sig_op_own from CQE
+   * 32-bit load: big-endian 16-bit field, then two 8-bit fields
+   * wqe_counter is the sq_wqebb_counter; all our WQEs are exactly one WQEBB (64B) */
+  uint32_t wqecnt_sig_op_own = *reinterpret_cast<volatile uint32_t*>(&cqe->wqe_counter);
 
-#if defined(BUILD_DEBUG_DEVICE)
-    if (opcode != MLX5_CQE_REQ) {
-      /* GPU is little-endian, so op_own is loaded into the top byte of wqecnt_sig_op_own;
-       * owner is the low 4 bits of op_own */
-      uint8_t owner = static_cast<uint8_t>(wqecnt_sig_op_own >> 24) & MLX5_CQE_OWNER_MASK;
-      print_cqe_error(cqe, opcode, owner);
-    }
-#endif  // BUILD_DEBUG_DEVICE
+  /* GPU is little-endian, so op_own is loaded into the top byte of wqecnt_sig_op_own;
+   * opcode is the top 4 bits of op_own */
+  uint8_t opcode = static_cast<uint8_t>(wqecnt_sig_op_own >> 28);
 
-    // GPU is little-endian, so wqe_counter is loaded into the low half of wqecnt_sig_op_own
-    __be16 be_wqe_counter = static_cast<__be16>(wqecnt_sig_op_own);
-    uint16_t wqe_counter = endian::from_be(be_wqe_counter);
-    /* wqe_counter is an index to the *last* completed WQE;
-     * need to add one to get *count* of completed WQEs */
-    uint16_t complete_idx16 = wqe_counter + 1;
-
-    /* complete_idx16_diff <= sq_depth
-     * except when many more WQEs get committed & executed while inside poll_cq_until
-     * but in that case complete_idx is necessarily updated since we need to call poll_cq_until
-     * to ensure that the SQ slots are free and we catch it */
-    uint16_t complete_idx16_diff = complete_idx16 - static_cast<uint16_t>(complete_idx);
-    sq_idx_t next_complete_idx   = complete_idx   + static_cast<sq_idx_t>(complete_idx16_diff);
-
-    /* accumulate the newly-complete indices into sq.complete_idx,
-     * if some other thread didn't get there first */
-    // NOTE: cannot use fetch_max, otherwise can never wrap around (when sq_idx_t is uint32_t)
-    if (__scoped_atomic_compare_exchange_n(&sq.complete_idx, &complete_idx, next_complete_idx,
-                                           /* weak */ false, __ATOMIC_RELAXED, __ATOMIC_RELAXED,
-                                           __MEMORY_SCOPE_DEVICE)) {
-      complete_idx = next_complete_idx;
-    }
+  // CQEs are initially invalid, so just return input complete_idx
+  if (opcode == MLX5_CQE_INVALID) {
+    LOGD_TRACE("QP[%d] CQ: invalid completion (%x)", qp_num, opcode);
+    // complete_idx should always be zero here
+    return complete_idx;
   }
 
-  bool success = (static_cast<signed_sq_idx_t>(complete_idx - target) >= 0);
-  if (success) {
+#if defined(BUILD_DEBUG_DEVICE)
+  if (opcode != MLX5_CQE_REQ) {
+    /* GPU is little-endian, so op_own is loaded into the top byte of wqecnt_sig_op_own;
+     * owner is the low 4 bits of op_own */
+    uint8_t owner = static_cast<uint8_t>(wqecnt_sig_op_own >> 24) & MLX5_CQE_OWNER_MASK;
+    print_cqe_error(cqe, opcode, owner);
+  }
+#endif  // BUILD_DEBUG_DEVICE
+
+  // GPU is little-endian, so wqe_counter is loaded into the low half of wqecnt_sig_op_own
+  __be16 be_wqe_counter = static_cast<__be16>(wqecnt_sig_op_own);
+  uint16_t wqe_counter = endian::from_be(be_wqe_counter);
+  /* wqe_counter is an index to the *last* completed WQE;
+   * need to add one to get *count* of completed WQEs */
+  uint16_t complete_idx16 = wqe_counter + 1;
+
+  /* complete_idx16_diff <= sq_depth
+   * except when many more WQEs get committed & executed while inside cq_complete_idx(sq_idx_t)
+   * but in that case complete_idx is necessarily updated since we need to call poll_cq_until
+   * to ensure that the SQ slots are free and we catch it */
+  uint16_t complete_idx16_diff = complete_idx16 - static_cast<uint16_t>(complete_idx);
+  sq_idx_t next_complete_idx   = complete_idx   + static_cast<sq_idx_t>(complete_idx16_diff);
+
+  /* accumulate the newly-complete indices into sq.complete_idx,
+   * if some other thread didn't get there first
+   * assumes that cq_complete_idx(sq_idx_t) will be called from a loop *somewhere*,
+   * so uses atomic_compare_exchange_weak
+   *
+   * NOTE: cannot use fetch_max, otherwise can never wrap around (when sq_idx_t is uint32_t) */
+  if (__scoped_atomic_compare_exchange_n(&sq.complete_idx, &complete_idx, next_complete_idx,
+                                         /* weak */ true, __ATOMIC_RELAXED, __ATOMIC_RELAXED,
+                                         __MEMORY_SCOPE_DEVICE)) {
+    complete_idx = next_complete_idx;
+    LOGD_TRACE("QP[%d] CQ: polled completed = %zu", qp_num, static_cast<size_t>(complete_idx));
+  }
+
+  return complete_idx;
+}
+
+/* precondition: called with all active lanes using different QPs
+ * test whether target number of WQEs have been completed
+ * TODO: apply PostOpts to poll_cq_once */
+__device__ __forceinline__ bool QueuePairMLX5::poll_cq_once(
+    QueuePairMLX5::sq_idx_t target) {
+  // load cached sq.complete_idx value
+  sq_idx_t complete_idx = cq_complete_idx();
+
+  // check if we've already reached target
+  bool reached_target = cq_reached_target(target, complete_idx);
+
+  if (!reached_target) {
+    // check CQE and update sq.complete_idx
+    complete_idx = cq_complete_idx(complete_idx);
+    // check whether we've reached target now
+    reached_target = cq_reached_target(target, complete_idx);
+  }
+
+  // output trace only when complete_idx reaches target
+  if (reached_target) {
     LOGD_TRACE("QP[%d] CQ: completed %zu >= target %zu",
                qp_num, static_cast<size_t>(complete_idx), static_cast<size_t>(target));
   }
-  return success;
+
+  return reached_target;
 }
 
 /* precondition: called with all active lanes using different QPs
@@ -499,76 +539,14 @@ __device__ __forceinline__ bool QueuePairMLX5::poll_cq_once(
  * TODO: apply PostOpts to poll_cq_until */
 __device__ __forceinline__ void QueuePairMLX5::poll_cq_until(
     QueuePairMLX5::sq_idx_t target) {
-  /* must be device scope, so that we don't miss 16-bit rollovers
-   * if one workgroup runs far ahead of another */
-  sq_idx_t complete_idx = __scoped_atomic_load_n(&sq.complete_idx,
-                                                 __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+  // load cached sq.complete_idx value
+  sq_idx_t complete_idx = cq_complete_idx();
 
-  /* complete_idx is an index to the next free WQE i.e. counts number of completed WQEs
-   * target is the complete_idx you need to observe before returning
-   *
-   * desired behavior: 'while (complete_idx < target)', but valid through wraparound
-   * for unsigned integers, when target index wraps (occurs before complete index)
-   * then target is small while complete_idx is large, so it appears that complete_idx > target
-   *
-   * when complete_idx > target due to wrapping of target at 2^N [for uintN_t]
-   * then the difference complete_idx - target is large, >= 2^(N-1)
-   * when cast to a signed integer of the same width, then this difference appears negative
-   *
-   * complete_idx - target is also negative when complete_idx < target,
-   * so computing the (unsigned) difference and then casting to signed integer
-   * correctly (and cheaply) handles all cases while avoiding undefined behavior
-   * due to signed integer overflow or underflow. */
-  while (static_cast<signed_sq_idx_t>(complete_idx - target) < 0) {
-    struct mlx5_cqe64* cqe = cq.buf;
-
-    /* read wqe_counter and sig_op_own from CQE
-     * 32-bit load: big-endian 16-bit field, then two 8-bit fields
-     * wqe_counter is the sq_wqebb_counter; all our WQEs are exactly one WQEBB (64B) */
-    uint32_t wqecnt_sig_op_own = *reinterpret_cast<volatile uint32_t*>(&cqe->wqe_counter);
-
-    /* GPU is little-endian, so op_own is loaded into the top byte of wqecnt_sig_op_own;
-     * opcode is the top 4 bits of op_own */
-    uint8_t opcode = static_cast<uint8_t>(wqecnt_sig_op_own >> 28);
-
-    // CQEs are initially invalid, retry until we see a valid CQE
-    if (opcode == MLX5_CQE_INVALID) {
-      LOGD_TRACE("QP[%d] CQ: invalid completion (%x)", qp_num, opcode);
-      continue;
-    }
-
-#if defined(BUILD_DEBUG_DEVICE)
-    if (opcode != MLX5_CQE_REQ) {
-      /* GPU is little-endian, so op_own is loaded into the top byte of wqecnt_sig_op_own;
-       * owner is the low 4 bits of op_own */
-      uint8_t owner = static_cast<uint8_t>(wqecnt_sig_op_own >> 24) & MLX5_CQE_OWNER_MASK;
-      print_cqe_error(cqe, opcode, owner);
-    }
-#endif  // BUILD_DEBUG_DEVICE
-
-    // GPU is little-endian, so wqe_counter is loaded into the low half of wqecnt_sig_op_own
-    __be16 be_wqe_counter = static_cast<__be16>(wqecnt_sig_op_own);
-    uint16_t wqe_counter = endian::from_be(be_wqe_counter);
-    /* wqe_counter is an index to the *last* completed WQE;
-     * need to add one to get *count* of completed WQEs */
-    uint16_t complete_idx16 = wqe_counter + 1;
-
-    /* complete_idx16_diff <= sq_depth
-     * except when many more WQEs get committed & executed while inside poll_cq_until
-     * but in that case complete_idx is necessarily updated since we need to call poll_cq_until
-     * to ensure that the SQ slots are free and we catch it */
-    uint16_t complete_idx16_diff = complete_idx16 - static_cast<uint16_t>(complete_idx);
-    sq_idx_t next_complete_idx   = complete_idx   + static_cast<sq_idx_t>(complete_idx16_diff);
-
-    /* accumulate the newly-complete indices into sq.complete_idx,
-     * if some other thread didn't get there first */
-    // NOTE: cannot use fetch_max, otherwise can never wrap around (when sq_idx_t is uint32_t)
-    if (__scoped_atomic_compare_exchange_n(&sq.complete_idx, &complete_idx, next_complete_idx,
-                                           /* weak */ true, __ATOMIC_RELAXED, __ATOMIC_RELAXED,
-                                           __MEMORY_SCOPE_DEVICE)) {
-      complete_idx = next_complete_idx;
-    }
+  // poll until complete_idx reaches target
+  while (!cq_reached_target(target, complete_idx)) {
+    complete_idx = cq_complete_idx(complete_idx);
   }
+
   LOGD_TRACE("QP[%d] CQ: completed %zu >= target %zu",
              qp_num, static_cast<size_t>(complete_idx), static_cast<size_t>(target));
 }
