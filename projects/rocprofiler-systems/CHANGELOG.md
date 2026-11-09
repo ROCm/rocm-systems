@@ -13,6 +13,16 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   bundled `install-skills.sh --agent <claude|codex|cursor>` to copy them into your AI coding
   agent's personal skills folder.
 
+### Changed
+
+- The `wall_clock` profile (`wall_clock.txt` and `wall_clock.json`) is now generated from
+  the trace cache instead of Timemory. GPU kernels and memory copies are nested under the
+  API call that launched them, and each worker thread's tree starts at the top level
+  instead of under the `pthread_create` call that spawned it. The report is written
+  whenever `ROCPROFSYS_PROFILE` is enabled; `wall_clock` in
+  `ROCPROFSYS_TIMEMORY_COMPONENTS` is accepted but no longer needed, and the default of
+  that setting is now empty instead of `wall_clock`.
+
 ### Resolved issues
 
 - Sampled PAPI hardware-counter tracks use the short description instead of the raw event symbol.
@@ -27,6 +37,8 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - Fixed the default `ROCPROFSYS_AMD_SMI_METRICS` value (`busy, temp, power, mem_usage`) failing
   validation because of the spaces after the commas, which enabled all 17 GPU metrics instead of
   the four defaults. Whitespace around `,` and `;` separators is now accepted.
+- Fixed GPU kernel and memory copy durations in the `wall_clock` profile, which were
+  reported several orders of magnitude too small.
 
 ## ROCm Systems Profiler 1.10.0 for ROCm 10.2 (unreleased)
 
@@ -47,19 +59,8 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   target cannot see this installation's library (for example, inside a container), so
   `ROCPROF_ATTACH_TOOL_LIBRARY` is no longer needed there.
 
-### Changed
-
-- The `wall_clock` profile (`wall_clock.txt` and `wall_clock.json`) is now generated from
-  the trace cache instead of timemory. GPU kernels and memory copies are nested under the
-  API call that launched them, and each worker thread's tree starts at the top level
-  instead of under the `pthread_create` call that spawned it. The report is written
-  whenever `ROCPROFSYS_PROFILE` is enabled; `wall_clock` in
-  `ROCPROFSYS_TIMEMORY_COMPONENTS` is accepted but no longer needed, and the default of that setting is now empty instead of `wall_clock`.
-
 ### Resolved issues
 
-- Fixed GPU kernel and memory copy durations in the `wall_clock` profile, which were
-  reported several orders of magnitude too small.
 - Fixed a crash (`SIGSEGV`) in `rocprof-sys-instrument` when instrumenting Fortran+HIP
   programs compiled with `gfortran -g` or `-g -O0`. gfortran encodes assumed-shape and
   allocatable array bounds as DWARF location expression blocks rather than integer
