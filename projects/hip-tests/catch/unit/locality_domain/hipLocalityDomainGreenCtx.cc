@@ -229,7 +229,7 @@ HIP_TEST_CASE(Unit_hipLocalityDomain_GreenCtx_Negative) {
  * Test requirements
  * ------------------------
  *  - Runtime implements the locality domain device attributes
- *  - Device has enough compute units to split into two aligned groups
+ *  - A locality domain has enough compute units to split into two aligned groups
  */
 HIP_TEST_CASE(Unit_hipLocalityDomain_GreenCtx_GenerateDesc_Negative) {
   int domains = 0;
@@ -242,7 +242,15 @@ HIP_TEST_CASE(Unit_hipLocalityDomain_GreenCtx_GenerateDesc_Negative) {
   hipDevResource input = LocalityDomain::DeviceSmResource(0);
   const unsigned int alignment =
       input.sm.smCoscheduledAlignment ? input.sm.smCoscheduledAlignment : 1u;
-  const unsigned int half = (input.sm.smCount / 2u / alignment) * alignment;
+
+  int domain_cus = 0;
+  if (!LocalityDomain::GetDomainCuCount(0, &domain_cus) || domain_cus < 1) {
+    HIP_SKIP_TEST(LocalityDomain::kUnsupported);
+    return;
+  }
+
+  const unsigned int half =
+      (static_cast<unsigned int>(domain_cus) / 2u / alignment) * alignment;
   if (half == 0) {
     HIP_SKIP_TEST(HipTest::SkipReason::kSmCountTooSmall);
     return;

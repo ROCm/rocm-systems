@@ -205,13 +205,13 @@ HIP_TEST_CASE(Unit_hipLocalityDomain_MemPool_Negative) {
     hipMemPoolProps props =
         LocalityDomain::DomainPoolProps(0, static_cast<unsigned char>(domains));
     hipMemPool_t pool = nullptr;
-    HIP_CHECK_ERROR(hipMemPoolCreate(&pool, &props), hipErrorNotSupported);
+    HIP_CHECK_ERRORS(hipMemPoolCreate(&pool, &props), hipErrorNotSupported, hipErrorInvalidValue);
   }
 
   SECTION("ordinal far out of range") {
     hipMemPoolProps props = LocalityDomain::DomainPoolProps(0, 255);
     hipMemPool_t pool = nullptr;
-    HIP_CHECK_ERROR(hipMemPoolCreate(&pool, &props), hipErrorNotSupported);
+    HIP_CHECK_ERRORS(hipMemPoolCreate(&pool, &props), hipErrorNotSupported, hipErrorInvalidValue);
   }
 
   SECTION("managed allocation type cannot be localized") {
@@ -291,7 +291,7 @@ HIP_TEST_CASE(Unit_hipLocalityDomain_Location_Rejected_Negative) {
     hipMemAccessDesc bad{};
     bad.location = LocalityDomain::DomainLocation(0, 255);
     bad.flags = hipMemAccessFlagsProtReadWrite;
-    HIP_CHECK_ERROR(hipMemPoolSetAccess(pool, &bad, 1), hipErrorNotSupported);
+    HIP_CHECK_ERRORS(hipMemPoolSetAccess(pool, &bad, 1), hipErrorNotSupported, hipErrorInvalidValue);
 
     HIP_CHECK(hipMemPoolDestroy(pool));
   }
