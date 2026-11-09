@@ -5,6 +5,7 @@
 
 #include <array>
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -720,7 +721,9 @@ struct FakeApiTable {
 
 [[nodiscard]] testing::AssertionResult
 write_runtime_config_path(const std::string &runtime_dir, bool create_host_topology_node = true) {
-  setenv("ROCJITSU_RUNTIME_DIR", runtime_dir.c_str(), 1);
+  if (setenv("ROCJITSU_RUNTIME_DIR", runtime_dir.c_str(), 1) == -1)
+    return testing::AssertionFailure()
+           << "Failed to set ROCJITSU_RUNTIME_DIR: " << std::strerror(errno);
 
   const std::filesystem::path topology_root =
       std::filesystem::path(runtime_dir) / "topology" / "nodes";

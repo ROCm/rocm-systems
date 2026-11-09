@@ -11,6 +11,9 @@
 #include <string>
 #include <utility>
 
+#include <fcntl.h>
+#include <unistd.h>
+
 namespace {
 
 TEST(ScopedTempTest, UnavailableTemporaryDirectoryLeavesResourcesUninitialized) {
@@ -72,11 +75,10 @@ TEST(ScopedTempFileTest, ReportsWriteFlushFailure) {
   std::error_code error;
   std::filesystem::create_symlink("/dev/full", file.path(), error);
   ASSERT_FALSE(error) << error.message();
-  std::ofstream probe(file.path(), std::ios::binary);
-  if (!probe.is_open())
+  const int probe = ::open(file.path().c_str(), O_WRONLY | O_CLOEXEC);
+  if (probe == -1)
     GTEST_SKIP() << "/dev/full is unavailable for writing";
-  probe.close();
-  ASSERT_TRUE(probe);
+  ASSERT_EQ(::close(probe), 0);
   EXPECT_FALSE(file.write("cannot flush to a full device"));
 }
 
