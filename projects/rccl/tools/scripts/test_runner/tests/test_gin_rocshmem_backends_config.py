@@ -2,12 +2,7 @@
 # Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
 #
 # See LICENSE.txt for license information
-"""Guards for the 2-node mixed-backend suite in gin_rocshmem_backends_mellanox.json.
-
-GinMPIDeviceTests.MixedBackends_TwoNodeUnsetType skips unless NCCL_GIN_TYPE is
-unset (an empty value also disables Anvil SDMA) and the run is 2 ranks on 2
-hosts. A skip still reports green, so lock the launch shape here (AICOMRCCL-3450).
-"""
+"""Lock the 2-node unset-type suite's launch shape; a skip still reports green (AICOMRCCL-3450)."""
 
 import unittest
 from pathlib import Path

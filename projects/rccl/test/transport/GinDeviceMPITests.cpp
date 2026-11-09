@@ -143,9 +143,7 @@ std::string anvilSingleNodeReason() {
   return "";
 }
 
-// AICOMRCCL-3417. The rest of this file requires NCCL_GIN_TYPE. This case is
-// the opposite: unset, so Anvil SDMA and PROXY are both eligible and SDMA
-// would otherwise sort ahead of PROXY on a multi-host communicator.
+// AICOMRCCL-3417: NCCL_GIN_TYPE must be unset so Anvil SDMA and PROXY are both eligible.
 std::string mixedBackendTwoNodeSkipReason() {
   std::string local = ginEnvDisabledReason();
   if (local.empty()) local = cuMemReason();
@@ -155,8 +153,7 @@ std::string mixedBackendTwoNodeSkipReason() {
   if (local.empty() && gin_anvil_sdma_probe() <= 0)
     local = "AICOMRCCL-3417 requires Anvil SDMA (gin_anvil_sdma_probe)";
 #endif
-  // Skip on presence: ginAnvilInit rejects an empty NCCL_GIN_TYPE, so Anvil
-  // would never load and the drop would go untested.
+  // Presence, not value: ginAnvilInit rejects an empty NCCL_GIN_TYPE.
   if (local.empty() && std::getenv("NCCL_GIN_TYPE"))
     local = "AICOMRCCL-3417 requires NCCL_GIN_TYPE to be unset";
   // crossNodeReason splits MPI_COMM_TYPE_SHARED. Every rank must call it.
@@ -8376,12 +8373,7 @@ TEST_F(GinProxyNthreadsSplitTests, SplitShare_SecondDevCommPut) {
   runPutWaitRoundTrip(child, getActiveStream());
 }
 
-// Two ranks, two physical hosts, NCCL_GIN_TYPE unset (AICOMRCCL-3417). Anvil
-// SDMA must not stay active: its factory addresses peers by local device id,
-// including across hosts in one MNNVL pod where nNodes folds to 1. PROXY is
-// the default, a symmetric window registers, a default DevComm and an explicit
-// PROXY DevComm each complete a cross-host put/signal, and an explicit Anvil
-// DevComm is rejected.
+// AICOMRCCL-3417: 2 hosts, NCCL_GIN_TYPE unset; Anvil SDMA is dropped and PROXY carries the put/signal.
 TEST_F(GinMPIDeviceTests, MixedBackends_TwoNodeUnsetType) {
   if (auto reason = mixedBackendTwoNodeSkipReason(); !reason.empty()) GTEST_SKIP() << reason;
   if (auto reason = mpiCoordinatedSkipReason(
