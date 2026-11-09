@@ -48,6 +48,11 @@ def is_gfx1250_arch(arch_name: str) -> bool:
     return arch_name == "gfx1250"
 
 
+def is_gfx1201_arch(arch_name: str) -> bool:
+    """Check if arch is gfx1201 to use the RDNA 4 analysis layout."""
+    return arch_name == "gfx1201"
+
+
 # gfx1250 metric_table ids -> documentation section names (disambiguated
 # where multiple panels reuse generic titles like "Utilization").
 GFX1250_PANEL_ID_TO_SECTION: dict[int, str] = {
@@ -296,6 +301,62 @@ RDNA35_PANEL_ID_TO_SECTION_BY_ARCH: dict[int, str] = {
 }
 
 
+# RDNA 4 (gfx1201) metric_table ids -> section names. SPI and WGP both have
+# "Utilization" and "Wavefront Dispatch" tables, so those carry the block name.
+RDNA4_PANEL_ID_TO_SECTION: dict[int, str] = {
+    1: "Top Kernels",
+    2: "Dispatch List",
+    101: "System Info",
+    201: "System Speed-of-Light",
+    301: "Memory chart - Instruction Cache",
+    302: "Memory chart - Scalar Data Cache",
+    303: "Memory chart - GL0 Cache (Vector L0)",
+    304: "Memory chart - LDS (Local Data Share)",
+    305: "Memory chart - GL0-GL1 Interface",
+    306: "Memory chart - GL1 Cache (L1)",
+    307: "Memory chart - GL1-GL2 Interface",
+    308: "Memory chart - GL2 Cache (L2)",
+    309: "Memory chart - EA to DRAM",
+    310: "Memory chart - Workgroup Processors (WGPs)",
+    401: "Roofline Performance Rates",
+    402: "Roofline Plot Points",
+    501: "CPC Utilizations",
+    601: "SPI Utilization",
+    602: "Wave Dispatch Statistics",
+    701: "WGP Utilization",
+    702: "Wavefront Launch Stats",
+    703: "WGP Wavefront Dispatch",
+    704: "Wavefront Life",
+    705: "Wavefront Instruction Mix",
+    706: "VMEM Instruction Mix",
+    707: "LDS Instruction Mix",
+    708: "VALU Instruction Mix",
+    710: "WMMA Instruction FLOPs and IOPs Counting",
+    711: "Wait State Analysis",
+    716: "Instruction Cache",
+    717: "Scalar Data Cache",
+    901: "GL0 Utilization",
+    902: "GL0 Request Statistics",
+    903: "GL0 Cache Performance",
+    906: "GL0-GL1 Interface",
+    908: "GL0 Stalls",
+    1102: "GL1 Cache Utilization",
+    1103: "GL1 Cache Request Statistics",
+    1104: "GL1 Cache Request Bandwidth",
+    1106: "GL1-GL2 Interface",
+    1304: "GL2 Cache Bandwidth",
+    1310: "GL2 Cache Request Statistics",
+    1311: "GL2 Cache Performance",
+    1401: "EA Utilization",
+    1402: "EA Traffic Bandwidth",
+    1403: "EA-SDP Interface - Outstanding Requests",
+    1404: "EA-SDP Interface - Stalls",
+    1701: "GPU Utilization",
+    1702: "Shader Engine Utilization",
+    2101: "PC Sampling",
+}
+
+
 def panel_id_to_section(arch_name: str, table_id: int | None) -> str | None:
     """Resolve documentation section name for a metric_table id (arch-specific)."""
     if table_id is None:
@@ -304,6 +365,8 @@ def panel_id_to_section(arch_name: str, table_id: int | None) -> str | None:
         return RDNA35_PANEL_ID_TO_SECTION_BY_ARCH.get(table_id)
     if is_gfx1250_arch(arch_name):
         return GFX1250_PANEL_ID_TO_SECTION.get(table_id)
+    if is_gfx1201_arch(arch_name):
+        return RDNA4_PANEL_ID_TO_SECTION.get(table_id)
     return CDNA_PANEL_ID_TO_SECTION.get(table_id)
 
 
