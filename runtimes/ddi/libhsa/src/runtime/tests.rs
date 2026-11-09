@@ -543,6 +543,7 @@ fn hardware_exception_events_match_the_amd_extension_layout() {
             agent,
             GpuHardwareException {
                 endpoint_id: Some([42; 16]),
+                origin_id: None,
                 scope: rocddi::device::event::GpuResetScope::WholeGpu,
                 memory_lost: false,
                 cause,

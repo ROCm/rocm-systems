@@ -11,8 +11,10 @@
 /// sink, so construction order and lifetime are explicit in the type.
 ///
 /// When a plugin is added via add(), the group constructs an internal fanout sink
-/// combining all configured sinks + an optional per-plugin FileSink, and
-/// assigns it to the plugin. Every fanout in one group shares a sink mutex so
+/// combining configured sinks + an optional per-plugin FileSink, and
+/// assigns it to the plugin. Loader-created groups defer file opening until
+/// onInit(), after the outgoing group has shut down and been destroyed.
+/// Every fanout in one group shares a sink mutex so
 /// asynchronous plugin writers cannot concurrently enter a configured sink.
 
 #pragma once
@@ -93,6 +95,20 @@ public:
       : configured_sinks_(std::move(config.sinks_)), sink_dir_(std::move(config.file_directory_)) {}
 
   ~ExecutionPluginGroup() = default;
+
+  /// Defer file creation until plugin admission is complete. Call before add().
+  void defer_file_sinks() { file_sinks_deferred_ = !sink_dir_.empty(); }
+
+  /// Open deferred files after outgoing group destruction, before initialization.
+  void activate_file_sinks() {
+    if (!file_sinks_deferred_)
+      return;
+    file_sinks_deferred_ = false;
+    for (auto &entry : plugins_) {
+      entry.sink = build_sink_bundle(entry.plugin->name() + ".log");
+      entry.plugin->sink_ = entry.sink.get();
+    }
+  }
 
   /// Add a plugin owned with a boundary-aware deleter (see OwnedPlugin).
   bool add(OwnedPlugin p) {
@@ -182,6 +198,7 @@ public:
   // completes before callbacks start, and onShutdown() starts after they stop.
   // callback_mutex_ orders simulation callbacks, not lifecycle teardown.
   void onInit() {
+    activate_file_sinks();
     dispatch_with_plugin_lock([&]() {
       for (auto &entry : plugins_)
         entry.plugin->onInit();
@@ -483,10 +500,10 @@ public:
     });
   }
 
-  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts) {
+  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts, BarrierKind kind) {
     dispatch_with_plugin_lock([&]() {
       for (auto &entry : plugins_)
-        entry.plugin->onAmdgpuBarrierResolved(wavefronts);
+        entry.plugin->onAmdgpuBarrierResolved(wavefronts, kind);
     });
   }
 
@@ -667,8 +684,8 @@ private:
   /// Build a sink combining configured sinks + optional file sink.
   /// Returns an empty bundle if no sinks are configured.
   [[nodiscard]] SinkBundle build_sink_bundle(const std::string &file_name) {
-    bool has_file = !sink_dir_.empty() && !file_name.empty();
-    if (configured_sinks_.empty() && !has_file)
+    bool has_file = !file_sinks_deferred_ && !sink_dir_.empty() && !file_name.empty();
+    if (configured_sinks_.empty() && !has_file && !file_sinks_deferred_)
       return {};
 
     SinkBundle result;
@@ -698,6 +715,7 @@ private:
   std::mutex sink_mutex_;
   std::vector<std::unique_ptr<PluginSink>> configured_sinks_;
   std::string sink_dir_;
+  bool file_sinks_deferred_ = false;
   /// Owns the sink assigned to one plugin. The plugin is declared last and is
   /// therefore destroyed before its sink bundle.
   struct PluginEntry {

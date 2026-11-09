@@ -11,6 +11,7 @@
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
+#include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
 #include "util/simd.h"
 #include "util/simd_test_hooks.h"
@@ -26,6 +27,20 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand_types.h"
+
+#include <gtest/gtest.h>
+
+#include <algorithm>
+#include <array>
+#include <cstdint>
+#include <functional>
+#include <iterator>
+#include <map>
+#include <memory>
+#include <span>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -68,6 +83,7 @@ uint32_t legacy_wait_word(rj_code_arch_t arch, uint8_t vmcnt, uint8_t lgkmcnt) {
   return 0xbf8c0070u | (vmcnt & 0xfu) | ((vmcnt & 0x30u) << 10) | (uint32_t{lgkmcnt} << 8);
 }
 
+/// Applies the race detector's register checks to the VGPR reads and writes of one wave.
 class MfmaRacePlugin : public ExecutionPlugin {
 public:
   MfmaRacePlugin() : ExecutionPlugin("mfma_race_probe") {}
@@ -93,10 +109,24 @@ public:
     state_->checkVgprReadLanes(static_cast<int>(logical_reg), lane_mask, byte_mask);
   }
 
+  void onAmdgpuWriteVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg,
+                              uint64_t lane_mask, uint8_t byte_mask) override {
+    if (wf != wf_ || !state_)
+      return;
+    uint32_t logical_reg = physical_reg - wf->vgpr_alloc().base;
+    state_->checkVgprWriteLanes(static_cast<int>(logical_reg), lane_mask, byte_mask);
+  }
+
   void registerOutstandingLoad(uint32_t logical_reg, uint64_t exec_mask, uint8_t byte_mask = 0xF) {
     ASSERT_NE(state_, nullptr);
     state_->registerEvent(testInstruction(/*pc=*/0x1000), MemoryEventType::GLOBAL_TO_VGPR,
                           {logical_reg}, exec_mask, byte_mask);
+  }
+
+  [[nodiscard]] bool raced_on(uint32_t logical_reg) const {
+    return std::ranges::any_of(violations, [&](const RaceViolation &v) {
+      return v.space == RaceViolation::Space::VGPR && v.index == static_cast<int>(logical_reg);
+    });
   }
 
   std::vector<RaceViolation> violations;
@@ -259,12 +289,12 @@ TEST_F(FormattedLoadRaceTest, RejectsInvalidEncodingAtCapture) {
       size_ = size;
     }
   };
-  const uint32_t word = S_NOP;
+  const std::array<uint32_t, InstructionSnapshot::kMaxWords + 1> encoding{S_NOP};
   for (const auto &[words, size] : {std::pair<const uint32_t *, int>{nullptr, 4},
-                                    {&word, 0},
-                                    {&word, -4},
-                                    {&word, 2},
-                                    {&word, 20}}) {
+                                    {encoding.data(), 0},
+                                    {encoding.data(), -4},
+                                    {encoding.data(), 2},
+                                    {encoding.data(), static_cast<int>(sizeof(encoding))}}) {
     SCOPED_TRACE(size);
     InvalidInstruction instruction(words, size);
     EXPECT_THROW(
@@ -511,9 +541,8 @@ protected:
     waves[wave]->pc += 16;
     record_tensor_instruction(wave, is_load);
     const size_t previous = sink->str().size();
-    fixture.plugin_group_->onAmdgpuTensorDmaIssued(
-        {.is_load = is_load, .element_size_bytes = sizeof(uint32_t), .lds_ranges = ranges},
-        *waves[wave]);
+    fixture.plugin_group_->onAmdgpuTensorDmaIssued({.is_load = is_load, .lds_ranges = ranges},
+                                                   *waves[wave]);
     return sink->str().find("RACE ", previous) != std::string::npos;
   }
 
@@ -585,7 +614,7 @@ protected:
     execute_wait(*fixture.plugin_group_, *waves[wave], 0xbfc60000u); // s_wait_dscnt 0.
   }
 
-  void barrier() { fixture.plugin_group_->onAmdgpuBarrierResolved(waves); }
+  void barrier() { fixture.plugin_group_->onAmdgpuBarrierResolved(waves, BarrierKind::Workgroup); }
 
   /// Wave 0 issues a tensor load at 0x2010 that overwrites bytes wave 1 is
   /// still reading. Returns the race report.
@@ -824,6 +853,278 @@ TEST_F(TensorDmaRaceTest, TransferWithoutLdsBytesLeavesTheLoadPendingUntilTheWai
   EXPECT_TRUE(ds_read(0, 4));
 }
 
+// Wave 1 writes LDS and may end; wave 0 then passes a barrier and reads the
+// bytes. The fixture's DS helpers are not specific to tensor DMA.
+class ExitedWaveRaceTest : public TensorDmaRaceTest {
+protected:
+  void write_and_exit(bool wait) {
+    EXPECT_FALSE(ds_write(1, 64));
+    if (wait)
+      wait_dscnt(1);
+    fixture.plugin_group_->onAmdgpuWavefrontHalted(*waves[1]);
+  }
+
+  void barrier_without_wave_1(BarrierKind kind) {
+    std::array<Wavefront *, 1> remaining{waves[0]};
+    fixture.plugin_group_->onAmdgpuBarrierResolved(remaining, kind);
+  }
+};
+
+// A workgroup barrier among the remaining waves cannot resolve until wave 1
+// has ended, so it orders the write completed by its explicit or implicit wait.
+TEST_F(ExitedWaveRaceTest, WorkgroupBarrierRetiresCompletedWrite) {
+  write_and_exit(/*wait=*/true);
+  barrier_without_wave_1(BarrierKind::Workgroup);
+  EXPECT_FALSE(ds_read(0, 64));
+}
+
+TEST_F(ExitedWaveRaceTest, WorkgroupBarrierRetiresImplicitlyWaitedWrite) {
+  write_and_exit(/*wait=*/false);
+  barrier_without_wave_1(BarrierKind::Workgroup);
+  EXPECT_FALSE(ds_read(0, 64));
+}
+
+TEST_F(ExitedWaveRaceTest, ExitAloneDoesNotOrderTheWritersLdsAccess) {
+  write_and_exit(/*wait=*/false);
+  EXPECT_TRUE(ds_read(0, 64));
+}
+
+TEST_F(ExitedWaveRaceTest, ExitWaitAlsoCompletesTensorDmaBeforeTheWorkgroupBarrier) {
+  EXPECT_FALSE(tensor_load(1, {{.address = 64, .bytes = 16}}));
+  fixture.plugin_group_->onAmdgpuWavefrontHalted(*waves[1]);
+  barrier_without_wave_1(BarrierKind::Workgroup);
+  EXPECT_FALSE(ds_read(0, 64));
+}
+
+TEST_F(ExitedWaveRaceTest, NamedBarrierDoesNotRetireAnUnjoinedLiveWave) {
+  EXPECT_FALSE(ds_write(1, 64));
+  wait_dscnt(1);
+  barrier_without_wave_1(BarrierKind::Named);
+  EXPECT_TRUE(ds_read(0, 64));
+}
+
+// Named and cluster barriers do not wait for every wave of the workgroup, so
+// they could have resolved before wave 1 ended.
+TEST_F(ExitedWaveRaceTest, NamedAndClusterBarriersDoNotRetireCompletedWrite) {
+  write_and_exit(/*wait=*/false);
+  barrier_without_wave_1(BarrierKind::Named);
+  barrier_without_wave_1(BarrierKind::Cluster);
+  EXPECT_TRUE(ds_read(0, 64));
+}
+
+// Run a two-wave CDNA4 kernel: wave 1 writes LDS, optionally waits for the
+// write, and ends; wave 0 passes s_barrier and reads the same bytes. Returns
+// the race report.
+std::string run_exited_writer_kernel(bool wait) {
+  PluginFixture f;
+  EXPECT_NO_FATAL_FAILURE(f.initialize());
+  PluginSinkConfig config;
+  auto &sink = config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(config));
+  EXPECT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  constexpr uint16_t kVgprBase = 256;
+  constexpr uint16_t kInline2 = 130;
+  constexpr uint8_t kInline64 = 192;
+  const auto first_id =
+      cdna4::build_vop1(cdna4::kVReadfirstlaneB32Vop1, {.src0 = kVgprBase + 0, .vdst = 4});
+  const auto address =
+      cdna4::build_vop2(cdna4::kVLshlrevB32Vop2, {.src0 = kInline2, .vsrc1 = 0, .vdst = 1});
+  const auto is_wave_0 = cdna4::build_sopc(cdna4::kSCmpLtU32Sopc, {.ssrc0 = 4, .ssrc1 = kInline64});
+  const auto to_reader = cdna4::build_sopp(cdna4::kSCbranchScc1Sopp, {.simm16 = 4});
+  const auto write = cdna4::build_ds(cdna4::kDsWriteB32Ds, {.addr = 1, .data0 = 0});
+  // offset1 is the high byte of the 16-bit offset, so the read is at v1 + 256.
+  const auto read = cdna4::build_ds(cdna4::kDsReadB32Ds, {.offset1 = 1, .addr = 1, .vdst = 2});
+  const uint32_t lgkm_wait = legacy_wait_word(ROCJITSU_CODE_ARCH_CDNA4, 63, 0);
+  const uint32_t code[] = {
+      first_id[0],
+      address[0],
+      is_wave_0[0],
+      to_reader[0], // Waves with work-item IDs below 64 read.
+      write[0],
+      write[1], // Wave 1 writes bytes [256, 512).
+      wait ? lgkm_wait : S_NOP,
+      S_ENDPGM,
+      S_BARRIER,
+      read[0],
+      read[1], // Wave 0 reads bytes [256, 512).
+      lgkm_wait,
+      S_ENDPGM,
+  };
+  const uint64_t kernel = f.write_kernel(0x1000, code, std::size(code), /*sgprs=*/12,
+                                         /*group_segment_fixed_size=*/512);
+  test::AqlQueue queue(f.mem, f.cp());
+  queue.dispatch(kernel, /*grid=*/128, /*workgroup=*/128);
+  f.run_until_idle();
+  return sink.str();
+}
+
+TEST(RaceDetectorPluginTest, BarrierAfterWriterEndsOrdersItsWaitedLdsWrite) {
+  const std::string report = run_exited_writer_kernel(/*wait=*/true);
+  EXPECT_EQ(report.find("RACE "), std::string::npos) << report;
+}
+
+TEST(RaceDetectorPluginTest, BarrierAfterWriterEndsOrdersItsImplicitlyWaitedLdsWrite) {
+  const std::string report = run_exited_writer_kernel(/*wait=*/false);
+  EXPECT_EQ(report.find("RACE "), std::string::npos) << report;
+}
+
+/// Executes decoded tensor DMA instructions, so the emulator itself reports
+/// them to the race detector. Both waves share one 256-byte LDS allocation.
+class DecodedTensorDmaRaceTest : public TensorDmaRaceTest {
+protected:
+  static constexpr uint64_t kGlobal = 0x10000;
+  static constexpr uint32_t kTileOffset = 0;
+  static constexpr uint32_t kEmptyOffset = 64;
+  /// The descriptor's data_size encoding for eight-byte elements.
+  static constexpr uint32_t kI64DataSizeEncoding = 3;
+  /// An i32 element at offset 254 straddles the end of the 256-byte
+  /// allocation: the transfer moves only its first two bytes, so its LDS range
+  /// ends mid-element. The race detector tracks those bytes at byte
+  /// granularity, so a peer DWORD access at kPeerDwordOffset overlaps them;
+  /// DWORD granularity would drop them.
+  static constexpr uint32_t kPartialI32Offset = 254;
+  static constexpr uint32_t kPeerDwordOffset = 252;
+
+  struct Descriptor {
+    uint32_t lds_offset = kTileOffset;
+    uint32_t tensor_dim0 = 4; ///< Zero places the whole tile outside the tensor.
+    uint32_t tile_dim0 = 4;   ///< Zero makes the tile a NOP.
+    uint32_t tile_dim1 = 0;
+    uint32_t count = 1;     ///< Zero makes this a NULL tensor.
+    uint32_t data_size = 2; ///< D# data_size encoding: elements are 1 << data_size bytes.
+  };
+
+  void SetUp() override {
+    TensorDmaRaceTest::SetUp();
+    const uint32_t lds_base = fixture.cu()->allocate_lds(256);
+    for (auto *wave : waves) {
+      wave->set_lds_base(lds_base);
+      wave->set_lds_size(256);
+    }
+  }
+
+  /// Decode and execute one tensor DMA instruction on `wave`: one row. Unlike
+  /// record_tensor_instruction(), this runs the instruction, so the race
+  /// detector hears of it through the issue hook as in a run.
+  void execute_decoded_tensor(int wave, bool is_load, const Descriptor &desc) {
+    waves[wave]->pc += 16;
+    const uint32_t sgprs = waves[wave]->sgpr_alloc().base;
+    const std::array<uint32_t, 4> group0{desc.count, desc.lds_offset,
+                                         static_cast<uint32_t>(kGlobal), 0x80000000u};
+    const std::array<uint32_t, 8> group1{desc.data_size << 16,
+                                         desc.tensor_dim0 << 16,
+                                         1u << 16,
+                                         desc.tile_dim0 << 16,
+                                         desc.tile_dim1,
+                                         4,
+                                         0,
+                                         0};
+    for (uint32_t reg = 0; reg < group0.size(); ++reg)
+      fixture.cu()->write_sgpr(sgprs + reg, group0[reg]);
+    for (uint32_t reg = 0; reg < group1.size(); ++reg)
+      fixture.cu()->write_sgpr(sgprs + 12 + reg, group1[reg]);
+    const std::array<uint32_t, 3> words{is_load ? 0xd0710001u : 0xd0714001u, 0x7c000000u,
+                                        0x7c7c0c00u};
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_EQ(inst->mnemonic(), is_load ? "tensor_load_to_lds" : "tensor_store_from_lds");
+    fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[wave]->pc, *inst, *waves[wave]);
+    EXPECT_TRUE(fixture.cu()->execute_instruction(inst.get(), *waves[wave]).succeeded());
+  }
+
+  /// Load a tile, issue a transfer that moves no data, wait until at most
+  /// `remaining` transfers are outstanding, and read the loaded tile.
+  bool load_then_empty_then_read(uint16_t remaining, bool empty_is_load, const Descriptor &empty) {
+    execute_decoded_tensor(0, /*is_load=*/true, {});
+    execute_decoded_tensor(0, empty_is_load, empty);
+    wait_tensorcnt(0, remaining);
+    return ds_read(0, waves[0]->lds_base() + kTileOffset + 4);
+  }
+};
+
+// Each tensor instruction completes on TENSORcnt once, in issue order with the
+// others, including one that moves no data. Waiting for all but one therefore
+// completes the load issued before it.
+TEST_F(DecodedTensorDmaRaceTest, StoreOutsideTheTensorTakesATensorcntSlot) {
+  EXPECT_FALSE(load_then_empty_then_read(/*remaining=*/1, /*empty_is_load=*/false,
+                                         {.lds_offset = kEmptyOffset, .tensor_dim0 = 0}));
+}
+
+TEST_F(DecodedTensorDmaRaceTest, NullTensorStoreTakesATensorcntSlot) {
+  EXPECT_FALSE(load_then_empty_then_read(/*remaining=*/1, /*empty_is_load=*/false,
+                                         {.lds_offset = kEmptyOffset, .count = 0}));
+}
+
+TEST_F(DecodedTensorDmaRaceTest, NullTensorLoadTakesATensorcntSlot) {
+  EXPECT_FALSE(load_then_empty_then_read(/*remaining=*/1, /*empty_is_load=*/true,
+                                         {.lds_offset = kEmptyOffset, .count = 0}));
+}
+
+TEST_F(DecodedTensorDmaRaceTest, NopTileLoadTakesATensorcntSlot) {
+  // With tile_dim1 = 0 the zero-width tile has rank zero, a shape accepted
+  // before NOP tiles were; tile_dim1 = 1 exercises the newly accepted {0,1}.
+  EXPECT_FALSE(load_then_empty_then_read(
+      /*remaining=*/1,
+      /*empty_is_load=*/true, {.lds_offset = kEmptyOffset, .tile_dim0 = 0, .tile_dim1 = 1}));
+}
+
+// With both transfers outstanding, the load is still pending, so the read races.
+// Had the NOP tile taken more than one slot, waiting for two would complete the
+// load.
+TEST_F(DecodedTensorDmaRaceTest, NopTileLoadStaysPendingUntilTheWaitCoversIt) {
+  EXPECT_TRUE(load_then_empty_then_read(
+      /*remaining=*/2, /*empty_is_load=*/true,
+      {.lds_offset = kEmptyOffset, .tile_dim0 = 0, .tile_dim1 = 1}));
+}
+
+// Likewise for a store outside the tensor.
+TEST_F(DecodedTensorDmaRaceTest, LoadStaysPendingUntilTheWaitCoversIt) {
+  EXPECT_TRUE(load_then_empty_then_read(/*remaining=*/2, /*empty_is_load=*/false,
+                                        {.lds_offset = kEmptyOffset, .tensor_dim0 = 0}));
+}
+
+// Partial elements at the end of the allocation; see kPartialI32Offset.
+
+TEST_F(DecodedTensorDmaRaceTest, PartialElementLoadIsAnLdsWrite) {
+  execute_decoded_tensor(0, /*is_load=*/true, {.lds_offset = kPartialI32Offset, .tile_dim0 = 1});
+  EXPECT_TRUE(ds_read(1, waves[1]->lds_base() + kPeerDwordOffset));
+}
+
+TEST_F(DecodedTensorDmaRaceTest, MergedLoadKeepsItsPartialTail) {
+  // Elements at 244 and 252 merge into one range of twelve bytes.
+  execute_decoded_tensor(0, /*is_load=*/true,
+                         {.lds_offset = 244, .tile_dim0 = 2, .data_size = kI64DataSizeEncoding});
+  EXPECT_TRUE(ds_read(1, waves[1]->lds_base() + 252));
+}
+
+TEST_F(DecodedTensorDmaRaceTest, PartialElementStoreIsAnLdsRead) {
+  execute_decoded_tensor(0, /*is_load=*/false, {.lds_offset = kPartialI32Offset, .tile_dim0 = 1});
+  EXPECT_TRUE(ds_write(1, waves[1]->lds_base() + kPeerDwordOffset));
+}
+
+TEST_F(DecodedTensorDmaRaceTest, PartialElementLoadIsCheckedAgainstAnOlderRead) {
+  EXPECT_FALSE(ds_read(1, waves[1]->lds_base() + kPeerDwordOffset));
+  const size_t previous = sink->str().size();
+  execute_decoded_tensor(0, /*is_load=*/true, {.lds_offset = kPartialI32Offset, .tile_dim0 = 1});
+  EXPECT_NE(sink->str().find("RACE ", previous), std::string::npos) << sink->str();
+}
+
+// Controls: whole 8-byte elements inside the allocation.
+TEST_F(DecodedTensorDmaRaceTest, WholeElementLoadIsAnLdsWrite) {
+  execute_decoded_tensor(0, /*is_load=*/true,
+                         {.lds_offset = 240, .tile_dim0 = 1, .data_size = kI64DataSizeEncoding});
+  EXPECT_TRUE(ds_read(1, waves[1]->lds_base() + 244));
+}
+
+TEST_F(DecodedTensorDmaRaceTest, WholeElementStoreIsAnLdsRead) {
+  execute_decoded_tensor(0, /*is_load=*/false,
+                         {.lds_offset = 240, .tile_dim0 = 1, .data_size = kI64DataSizeEncoding});
+  EXPECT_TRUE(ds_write(1, waves[1]->lds_base() + 244));
+}
+
 TEST(RaceDetectorPluginTest, D16LoadTracksFullDwordWhenSramEccEnabled) {
   auto opposite_half_read_reports_race = [](std::string_view arch, uint32_t wavefront_size,
                                             bool formatted) {
@@ -877,6 +1178,189 @@ TEST(RaceDetectorPluginTest, D16LoadTracksFullDwordWhenSramEccEnabled) {
     EXPECT_TRUE(opposite_half_read_reports_race("cdna4", /*wavefront_size=*/64, formatted));
     EXPECT_TRUE(opposite_half_read_reports_race("cdna5", /*wavefront_size=*/32, formatted));
     EXPECT_FALSE(opposite_half_read_reports_race("rdna4", /*wavefront_size=*/32, formatted));
+  }
+}
+
+TEST(RaceDetectorPluginTest, CompletedWorkgroupReleasesOnlyItsDetector) {
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/3));
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  auto plugin = std::make_unique<RaceDetectorPlugin>();
+  RaceDetectorPlugin *race = plugin.get();
+  ASSERT_TRUE(f.plugin_group_->add(std::move(plugin)));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  auto *cu = f.cu();
+  auto *first = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+  auto *second = cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+  auto *next_dispatch = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+  ASSERT_NE(next_dispatch, nullptr);
+  first->set_exec(1u);
+  second->set_exec(1u);
+  next_dispatch->set_exec(1u);
+  std::array<amdgpu::Wavefront *, 1> first_waves{first};
+  std::array<amdgpu::Wavefront *, 1> second_waves{second};
+  std::array<amdgpu::Wavefront *, 1> next_dispatch_waves{next_dispatch};
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(/*dispatch_id=*/1, /*wg_id=*/0,
+                                               /*physical_vgpr_count=*/256,
+                                               /*physical_sgpr_count=*/104, first_waves);
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(/*dispatch_id=*/1, /*wg_id=*/1,
+                                               /*physical_vgpr_count=*/256,
+                                               /*physical_sgpr_count=*/104, second_waves);
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(/*dispatch_id=*/2, /*wg_id=*/0,
+                                               /*physical_vgpr_count=*/256,
+                                               /*physical_sgpr_count=*/104, next_dispatch_waves);
+  EXPECT_EQ(race->retainedWorkgroupCount(), 3u);
+
+  // Workgroup 0 of dispatch 2 keeps its detector.
+  f.plugin_group_->onAmdgpuWorkgroupCompleted(/*dispatch_id=*/1, /*wg_id=*/0);
+  EXPECT_EQ(race->retainedWorkgroupCount(), 2u);
+
+  // The other workgroup of the dispatch still detects a read before its load
+  // completes.
+  constexpr uint32_t kDst = 4;
+  auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+  state->elem_size = 4;
+  state->num_elems = 1;
+  state->is_load = true;
+  state->wf_size = second->wf_size();
+  state->exec_mask = 1;
+  state->lane_mask = 1;
+  state->dst_reg_base = second->vgpr_alloc().base + kDst;
+  TestMemoryInstruction load(std::move(state));
+  f.plugin_group_->onAmdgpuBeforeExecuteInstruction(second->pc, load, *second);
+  f.plugin_group_->onAmdgpuMemoryAccessRouted({}, load, *second);
+  f.plugin_group_->onAmdgpuReadVgprLanes(second, second->vgpr_alloc().base + kDst,
+                                         /*lane_mask=*/1);
+  EXPECT_NE(sink.str().find("RACE "), std::string::npos);
+
+  const std::string summary = race->getSummary();
+  f.plugin_group_->onAmdgpuWorkgroupCompleted(/*dispatch_id=*/1, /*wg_id=*/1);
+  f.plugin_group_->onAmdgpuWorkgroupCompleted(/*dispatch_id=*/2, /*wg_id=*/0);
+  EXPECT_EQ(race->retainedWorkgroupCount(), 0u);
+  EXPECT_EQ(race->getSummary(), summary);
+}
+
+TEST(RaceDetectorPluginTest, SchedulerReleasesDetectorsAcrossWaveSlotReuse) {
+  // Reads registers from the workgroup-dispatch callback, which runs before the
+  // race plugin installs state for the new waves.
+  class RegisterProbe : public ExecutionPlugin {
+  public:
+    RegisterProbe() : ExecutionPlugin("register_probe") {}
+
+    void onAmdgpuWorkgroupDispatched(uint32_t, uint32_t, uint32_t, uint32_t,
+                                     std::span<Wavefront *> waves) override {
+      for (auto *wave : waves) {
+        const RegisterAccess registers(*wave);
+        static_cast<void>(registers.read_vgpr(wave->vgpr_alloc().base, /*lane=*/0));
+        static_cast<void>(registers.read_sgpr(wave->sgpr_alloc().base));
+        ++probed_waves;
+      }
+    }
+
+    uint32_t probed_waves = 0;
+  };
+
+  class LifetimeObserver : public ExecutionPlugin {
+  public:
+    explicit LifetimeObserver(RaceDetectorPlugin &race)
+        : ExecutionPlugin("detector_lifetime"), race_(race) {}
+
+    void onAmdgpuWorkgroupDispatched(uint32_t, uint32_t, uint32_t, uint32_t,
+                                     std::span<Wavefront *> waves) override {
+      ++dispatched;
+      const size_t retained = race_.retainedWorkgroupCount();
+      EXPECT_EQ(retained, dispatched - completed);
+      peak_retained = std::max(peak_retained, retained);
+      for (auto *wave : waves)
+        ++slot_uses[wave];
+    }
+
+    void onAmdgpuWorkgroupCompleted(uint32_t, uint32_t) override {
+      ++completed;
+      EXPECT_EQ(race_.retainedWorkgroupCount(), dispatched - completed);
+    }
+
+    uint32_t dispatched = 0;
+    uint32_t completed = 0;
+    size_t peak_retained = 0;
+    std::map<Wavefront *, uint32_t> slot_uses;
+
+  private:
+    RaceDetectorPlugin &race_;
+  };
+
+  for (uint32_t dispatch_threads : {1u, 2u}) {
+    SCOPED_TRACE(dispatch_threads);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/2, "cdna4", /*wavefront_size=*/64,
+                                         /*sgprs_per_wf=*/104, /*vgprs_per_wf=*/256,
+                                         /*num_cus=*/2));
+    f.cp()->set_dispatch_threads(dispatch_threads);
+    PluginSinkConfig sink_config;
+    auto &sink = sink_config.emplace<StringSink>();
+    f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+    auto probe = std::make_unique<RegisterProbe>();
+    RegisterProbe *register_probe = probe.get();
+    ASSERT_TRUE(f.plugin_group_->add(std::move(probe)));
+    auto plugin = std::make_unique<RaceDetectorPlugin>();
+    RaceDetectorPlugin *race = plugin.get();
+    ASSERT_TRUE(f.plugin_group_->add(std::move(plugin)));
+    auto observer = std::make_unique<LifetimeObserver>(*race);
+    LifetimeObserver *lifetime = observer.get();
+    // Observe counts after the race plugin processes each lifecycle callback.
+    ASSERT_TRUE(f.plugin_group_->add(std::move(observer)));
+    f.soc->set_plugin_group(f.plugin_group_);
+    f.plugin_group_->onInit();
+
+    const auto load = cdna4::build_ds(cdna4::kDsReadB32Ds, {.addr = 0, .vdst = 8});
+    const auto read = cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = 264, .vdst = 9});
+    // Reading v8 without a wait must still report a race after slots are reused.
+    const uint32_t code[] = {S_NOP, load[0], load[1], read[0], S_ENDPGM};
+    const uint64_t kernel = f.write_kernel(0x1000, code, std::size(code));
+    test::AqlQueue queue(f.mem, f.cp());
+    EXPECT_EQ(race->retainedWorkgroupCount(), 0u);
+
+    std::string previous_output;
+    std::string previous_summary;
+    std::map<Wavefront *, uint32_t> previous_slot_uses;
+    for (uint32_t dispatch = 1; dispatch <= 2; ++dispatch) {
+      SCOPED_TRACE(dispatch);
+      // Each workgroup fills one CU's two slots, so four groups require refills.
+      queue.dispatch(kernel, /*grid_size_x=*/512, /*workgroup_size_x=*/128);
+      for (uint32_t step = 0;
+           step < 100000 && lifetime->completed < dispatch * 4 && f.engine->step(); ++step) {
+      }
+
+      EXPECT_EQ(lifetime->dispatched, dispatch * 4);
+      ASSERT_EQ(lifetime->completed, dispatch * 4);
+      EXPECT_EQ(register_probe->probed_waves, dispatch * 8);
+      EXPECT_EQ(lifetime->peak_retained, 2u);
+      EXPECT_EQ(race->retainedWorkgroupCount(), 0u);
+      EXPECT_TRUE(f.cu(0)->is_idle());
+      EXPECT_TRUE(f.cu(1)->is_idle());
+      ASSERT_EQ(lifetime->slot_uses.size(), 4u);
+      for (const auto &[slot, uses] : lifetime->slot_uses)
+        EXPECT_GT(uses, previous_slot_uses[slot]);
+      previous_slot_uses = lifetime->slot_uses;
+
+      const std::string output = sink.str();
+      EXPECT_TRUE(output.starts_with(previous_output));
+      const size_t report = output.find("RACE ", previous_output.size());
+      ASSERT_NE(report, std::string::npos) << output;
+      EXPECT_EQ(output.find("RACE ", report + 5), std::string::npos) << output;
+      previous_output = output;
+
+      const std::string summary = race->getSummary();
+      EXPECT_NE(summary.find(" race(s) detected"), std::string::npos) << summary;
+      EXPECT_NE(summary, previous_summary);
+      previous_summary = summary;
+    }
   }
 }
 
@@ -2622,6 +3106,108 @@ TEST(ExecutionPluginTest, MfmaFastPathReadHookReportsRace) {
   }
 }
 
+namespace mfma_race {
+
+constexpr uint32_t A = 0, B = 16, C = 32, D = 64;
+using Run = std::function<void(ComputeUnitCore &, uint32_t vb, uint32_t acc)>;
+
+/// Runs @p run after an outstanding load to one lane of @p reg and reports whether the race
+/// detector flagged that register.
+bool races_on(const Run &run, uint32_t reg, uint32_t lane, uint32_t acc, bool force_scalar) {
+  PluginFixture f;
+  f.initialize(/*num_wf_slots=*/1);
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto plugin = std::make_unique<MfmaRacePlugin>();
+  auto *race_plugin = plugin.get();
+  f.plugin_group_->add(std::move(plugin));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+  auto *wf = f.cu()->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  EXPECT_NE(wf, nullptr);
+  if (!wf)
+    return false;
+  std::array<amdgpu::Wavefront *, 1> waves{wf};
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(/*dispatch_id=*/1, /*wg_id=*/0, 256, 104, waves);
+  race_plugin->registerOutstandingLoad(reg, /*exec_mask=*/uint64_t{1} << lane);
+  util::set_force_scalar_for_testing(force_scalar);
+  run(*f.cu(), wf->vgpr_alloc().base, acc);
+  util::set_force_scalar_for_testing(false);
+  return race_plugin->raced_on(reg);
+}
+
+} // namespace mfma_race
+
+// Each operand range is observed through its last register and lane, so a pending load into
+// A, B or a VGPR accumulator, or under the destination, is a race on both MFMA paths.
+TEST(ExecutionPluginTest, MfmaSnapshotsReportRacesOnEveryOperandRegister) {
+  using namespace mfma_race;
+  struct ForceScalarGuard {
+    bool old = util::force_scalar();
+    ~ForceScalarGuard() { util::set_force_scalar_for_testing(old); }
+  } guard;
+  struct Case {
+    const char *name;
+    uint32_t a_regs, b_regs, d_regs;
+    mfma_race::Run run;
+  };
+  const Case cases[] = {
+      {"f64 16x16x4", 2, 2, 8,
+       [](ComputeUnitCore &cu, uint32_t vb, uint32_t acc) {
+         exec_f64(cu, 16, 16, 4, 1, vb + D, vb + A, vb + B, vb + C, acc);
+       }},
+      {"i8 16x16x64", 4, 4, 4,
+       [](ComputeUnitCore &cu, uint32_t vb, uint32_t acc) {
+         exec_i32_i8(cu, 16, 16, 64, 1, vb + D, vb + A, vb + B, vb + C, acc);
+       }},
+      {"fp8 x fp4 16x16x128", 8, 4, 4,
+       [](ComputeUnitCore &cu, uint32_t vb, uint32_t acc) {
+         dispatch_matrix_fmt_pair(0, 4, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
+           exec_f32_mixed<16, 16, 128, 1>(cu, a_bits, b_bits, vb + D, vb + A, vb + B, vb + C, ea,
+                                          eb, acc);
+         });
+       }},
+      {"f32 4x4x1x16", 1, 1, 4,
+       [](ComputeUnitCore &cu, uint32_t vb, uint32_t acc) {
+         exec_f32<4, 4, 1, 16>(cu, 32, vb + D, vb + A, vb + B, vb + C, extract_f32, extract_f32,
+                               acc);
+       }},
+  };
+  for (const Case &test : cases)
+    for (bool force_scalar : {false, true}) {
+      SCOPED_TRACE(testing::Message() << test.name << " force_scalar=" << force_scalar);
+      const auto races = [&](uint32_t reg, uint32_t acc = ACC_FROM_VGPR) {
+        return races_on(test.run, reg, /*lane=*/63, acc, force_scalar);
+      };
+      EXPECT_TRUE(races(A + test.a_regs - 1)) << "A";
+      EXPECT_TRUE(races(B + test.b_regs - 1)) << "B";
+      EXPECT_TRUE(races(C + test.d_regs - 1)) << "accumulator";
+      EXPECT_FALSE(races(C + test.d_regs - 1, /*acc=*/0u)) << "constant accumulator";
+      EXPECT_TRUE(races(D + test.d_regs - 1)) << "destination";
+      EXPECT_FALSE(races(A + test.a_regs)) << "register after A";
+    }
+}
+
+// cbsz/abid and blgp broadcast part of a register; only the lanes they select are read.
+TEST(ExecutionPluginTest, MfmaSnapshotsReportRacesOnlyOnBroadcastLanes) {
+  using namespace mfma_race;
+  struct ForceScalarGuard {
+    bool old = util::force_scalar();
+    ~ForceScalarGuard() { util::set_force_scalar_for_testing(old); }
+  } guard;
+  // cbsz=2 broadcasts A's 16-lane block abid=1 (lanes 16-31); blgp=4 broadcasts B lanes 0-15.
+  const mfma_race::Run run = [](ComputeUnitCore &cu, uint32_t vb, uint32_t acc) {
+    exec_i32_i8(cu, 4, 4, 4, 16, vb + D, vb + A, vb + B, vb + C, acc, /*cbsz=*/2, /*abid=*/1,
+                /*blgp=*/4);
+  };
+  for (bool force_scalar : {false, true}) {
+    SCOPED_TRACE(testing::Message() << "force_scalar=" << force_scalar);
+    EXPECT_TRUE(races_on(run, A, /*lane=*/16, ACC_FROM_VGPR, force_scalar));
+    EXPECT_FALSE(races_on(run, A, /*lane=*/0, ACC_FROM_VGPR, force_scalar));
+    EXPECT_TRUE(races_on(run, B, /*lane=*/15, ACC_FROM_VGPR, force_scalar));
+    EXPECT_FALSE(races_on(run, B, /*lane=*/63, ACC_FROM_VGPR, force_scalar));
+  }
+}
+
 // -- Ordering tests ----------------------------------------------------------
 //
 // These tests use functional mode (the PluginFixture default). Tests that
@@ -3354,6 +3940,154 @@ TEST_P(IgnoredGlobalMemoryRaceTest, DoesNotConsumeLoadcntOrderingSlot) {
 
 INSTANTIATE_TEST_SUITE_P(LoadAndReturningAtomic, IgnoredGlobalMemoryRaceTest,
                          ::testing::Values(AtomicOp::NONE, AtomicOp::SWAP));
+
+// Two CDNA4 waves share a 108-byte LDS allocation. The producer's M0 selects
+// allocation byte 64, and its active lanes 0, 2 and 5 write 16-byte lane slots
+// at bytes 64, 96 and 144. X3 writes the first 12 bytes of each slot and X4
+// writes all 16. Lane 5's slot is outside the allocation, so it writes nothing.
+class GlobalWideLdsRaceHarness {
+public:
+  void initialize() {
+    ASSERT_NO_FATAL_FAILURE(f_.initialize(2));
+    PluginSinkConfig config;
+    sink_ = &config.emplace<StringSink>();
+    f_.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(config));
+    ASSERT_TRUE(f_.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+    f_.soc->set_plugin_group(f_.plugin_group_);
+    f_.plugin_group_->onInit();
+    producer_ = f_.cu()->dispatch_wf(0, 0x1000, 104, 256);
+    peer_ = f_.cu()->dispatch_wf(0, 0x2000, 104, 256);
+    ASSERT_NE(producer_, nullptr);
+    ASSERT_NE(peer_, nullptr);
+    waves_ = {producer_, peer_};
+    for (auto *wave : waves_) {
+      wave->set_exec(1);
+      wave->set_lds_base(128);
+      wave->set_lds_size(108);
+    }
+    producer_->set_m0(0xfffc0043);
+    for (unsigned lane : {0u, 2u, 5u}) {
+      f_.cu()->write_vgpr(producer_->vgpr_alloc().base + 2, lane, 0x20000 + lane * 32);
+      f_.cu()->write_vgpr(producer_->vgpr_alloc().base + 3, lane, 0);
+    }
+    f_.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 512, 208, waves_);
+  }
+
+  Wavefront &producer() { return *producer_; }
+  Wavefront &peer() { return *peer_; }
+  bool raced() const { return sink_->str().find("RACE ") != std::string::npos; }
+  const std::string &report() const { return sink_->str(); }
+
+  void wide_load(unsigned count) {
+    producer_->set_exec(0x25);
+    execute(*producer_, cdna4::build_flat(count == 3 ? cdna4::kGlobalLoadLdsDwordx3Flat
+                                                     : cdna4::kGlobalLoadLdsDwordx4Flat,
+                                          {.seg = 2, .addr = 2, .saddr = 0x7f, .vdst = 0xff}));
+  }
+
+  void read_byte(Wavefront &wave, unsigned address) {
+    wave.set_exec(1);
+    wave.pc = 0x3000;
+    f_.cu()->write_vgpr(wave.vgpr_alloc().base, 0, address);
+    execute(wave, cdna4::build_ds(cdna4::kDsReadU8Ds, {.addr = 0, .vdst = 8}));
+  }
+
+  void wait(Wavefront &wave, uint8_t vmcnt, uint8_t lgkmcnt) {
+    execute_wait(*f_.plugin_group_, wave,
+                 legacy_wait_word(ROCJITSU_CODE_ARCH_CDNA4, vmcnt, lgkmcnt));
+  }
+
+  void barrier() { f_.plugin_group_->onAmdgpuBarrierResolved(waves_, BarrierKind::Workgroup); }
+
+private:
+  void execute(Wavefront &wave, std::array<uint32_t, 2> words) {
+    auto decoded = decoder_->decode_window(words);
+    ASSERT_TRUE(decoded.succeeded());
+    auto &inst = *instructions_.emplace_back(std::move(decoded.value()));
+    f_.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave.pc, inst, wave);
+    ASSERT_TRUE(f_.cu()->execute_instruction(&inst, wave).succeeded());
+    f_.plugin_group_->onAmdgpuMemoryAccessRouted({}, inst, wave);
+  }
+
+  PluginFixture f_;
+  StringSink *sink_ = nullptr;
+  Wavefront *producer_ = nullptr;
+  Wavefront *peer_ = nullptr;
+  std::array<Wavefront *, 2> waves_{};
+  std::unique_ptr<Decoder> decoder_ = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  std::vector<std::unique_ptr<Instruction>> instructions_;
+};
+
+enum class WideLdsWait {
+  None,
+  VmcntOne,         // Leaves the single outstanding load pending.
+  LgkmcntZero,      // Waits on the wrong counter.
+  VmcntZero,        // Completes the load for the producer only.
+  VmcntZeroBarrier, // Completes the load and orders it for the peer.
+};
+
+TEST(RaceDetectorPluginTest, GlobalWideLdsLoadsTrackPayloadAndSynchronization) {
+  using enum WideLdsWait;
+  for (unsigned count : {3u, 4u})
+    for (bool other_wave : {false, true})
+      for (WideLdsWait wait : {None, VmcntOne, LgkmcntZero, VmcntZero, VmcntZeroBarrier})
+        // Byte 75 is in lane 0's payload for both widths. Byte 79 is lane 0's
+        // fourth DWORD, written only by X4. Byte 80 starts inactive lane 1's
+        // slot. Lane 2's 96..107 payload fits only for X3, because X4 would
+        // cross the 108-byte allocation, so byte 107 is written only by X3.
+        // Bytes 108 and 144 are outside the allocation.
+        for (unsigned address : {75u, 79u, 80u, 107u, 108u, 144u}) {
+          SCOPED_TRACE(testing::Message() << count << ',' << other_wave << ','
+                                          << static_cast<int>(wait) << ',' << address);
+          GlobalWideLdsRaceHarness h;
+          ASSERT_NO_FATAL_FAILURE(h.initialize());
+          ASSERT_NO_FATAL_FAILURE(h.wide_load(count));
+          EXPECT_FALSE(h.raced()) << h.report();
+          if (wait == VmcntOne)
+            h.wait(h.producer(), 1, 15);
+          else if (wait == LgkmcntZero)
+            h.wait(h.producer(), 63, 0);
+          else if (wait == VmcntZero || wait == VmcntZeroBarrier)
+            h.wait(h.producer(), 0, 15);
+          if (wait == VmcntZeroBarrier)
+            h.barrier();
+
+          ASSERT_NO_FATAL_FAILURE(h.read_byte(other_wave ? h.peer() : h.producer(), address));
+          const bool overlaps =
+              address == 75 || (address == 79 && count == 4) || (address == 107 && count == 3);
+          const bool synchronized = wait == VmcntZeroBarrier || (!other_wave && wait == VmcntZero);
+          EXPECT_EQ(h.raced(), overlaps && !synchronized) << h.report();
+        }
+}
+
+TEST(RaceDetectorPluginTest, GlobalWideLdsLoadsDetectPendingLdsReads) {
+  enum class ReadSync { None, LgkmcntZero, LgkmcntZeroBarrier };
+  using enum ReadSync;
+  for (unsigned count : {3u, 4u})
+    for (bool other_wave : {false, true})
+      for (ReadSync sync : {None, LgkmcntZero, LgkmcntZeroBarrier})
+        // Byte 75 is in lane 0's payload for both widths; byte 80 is in
+        // inactive lane 1's slot.
+        for (unsigned address : {75u, 80u}) {
+          SCOPED_TRACE(testing::Message() << count << ',' << other_wave << ','
+                                          << static_cast<int>(sync) << ',' << address);
+          GlobalWideLdsRaceHarness h;
+          ASSERT_NO_FATAL_FAILURE(h.initialize());
+          Wavefront &reader = other_wave ? h.peer() : h.producer();
+          ASSERT_NO_FATAL_FAILURE(h.read_byte(reader, address));
+          if (sync != None)
+            h.wait(reader, 63, 0);
+          if (sync == LgkmcntZeroBarrier)
+            h.barrier();
+          EXPECT_FALSE(h.raced()) << h.report();
+          ASSERT_NO_FATAL_FAILURE(h.wide_load(count));
+          // The load's LDS write is not ordered after the producer's own DS
+          // read, so that read also needs an lgkmcnt wait.
+          const bool synchronized =
+              sync == LgkmcntZeroBarrier || (!other_wave && sync == LgkmcntZero);
+          EXPECT_EQ(h.raced(), address == 75 && !synchronized) << h.report();
+        }
+}
 
 TEST(RaceDetectorPluginTest, DecodedDirectLdsLoadsDetectConflictingWaveStores) {
   for (auto arch : {"rdna3", "rdna3_5", "rdna4"}) {

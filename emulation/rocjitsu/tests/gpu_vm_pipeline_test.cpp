@@ -874,43 +874,51 @@ TEST(GpuVmPipeline, ADeclinedFetchFaultIsOfferedOnlyOnce) {
   EXPECT_TRUE(context.wf->is_halted());
 }
 
+// A load from unmapped global memory faults once and does not complete, so it
+// never arrives at its barrier. That holds even when its whole LDS destination
+// lies past the wave's allocation: the global read still happens.
 TEST(GpuVmPipeline, TensorDmaFaultReportsIssueAndResumePcs) {
-  for (const bool rewind : {false, true}) {
-    SCOPED_TRACE(rewind);
-    TranslatedPipelineContext context;
-    ASSERT_NO_FATAL_FAILURE(context.initialize());
-    ASSERT_NE(context.wf, nullptr);
-    constexpr uint64_t kCode = 0x1000, kUnmappedData = 0x20000;
-    const std::array<uint32_t, 3> instruction{0xd0710001u, 0x7c000000u, 0x7c7c0c00u};
-    context.external->store(kCode, instruction);
-    context.wf->pc = kCode;
-    context.wf->set_lds_base(context.cu->allocate_lds(256));
-    context.wf->set_lds_size(256);
-    const uint32_t base = context.wf->sgpr_alloc().base;
-    context.cu->write_sgpr(base, 1);
-    context.cu->write_sgpr(base + 1, 0);
-    context.cu->write_sgpr(base + 2, kUnmappedData);
-    context.cu->write_sgpr(base + 3, 0x80000000u);
-    context.cu->write_sgpr(base + 12, (2u << 16) | (1u << 18));
-    context.cu->write_sgpr(base + 13, (1u << 16) | (64u >> 3));
-    context.cu->write_sgpr(base + 15, 1u << 16);
-    uint32_t faults = 0;
-    context.cu->set_memory_violation_handler(
-        [&](amdgpu::Wavefront &wf, uint64_t, bool, uint64_t issue_pc) {
-          ++faults;
-          EXPECT_EQ(issue_pc, kCode);
-          EXPECT_EQ(wf.pc, kCode + sizeof(instruction));
-          if (rewind)
-            wf.pc = issue_pc;
-          wf.set_fatal_exception_pending(true);
-          wf.set_debug_suspended(true);
-          return true;
-        });
-    context.cu->step();
-    EXPECT_EQ(faults, 1u);
-    EXPECT_TRUE(context.wf->fatal_exception_pending());
-    EXPECT_EQ(context.wf->pc, rewind ? kCode : kCode + sizeof(instruction));
-  }
+  constexpr uint32_t kBarrierLdsAddr = 64;
+  for (const uint32_t lds_offset : {0u, 256u}) // In range, and fully clipped.
+    for (const bool rewind : {false, true}) {
+      SCOPED_TRACE(testing::Message() << "LDS offset " << lds_offset << ", rewind " << rewind);
+      TranslatedPipelineContext context;
+      ASSERT_NO_FATAL_FAILURE(context.initialize());
+      ASSERT_NE(context.wf, nullptr);
+      constexpr uint64_t kCode = 0x1000, kUnmappedData = 0x20000;
+      const std::array<uint32_t, 3> instruction{0xd0710001u, 0x7c000000u, 0x7c7c0c00u};
+      context.external->store(kCode, instruction);
+      context.wf->pc = kCode;
+      context.wf->set_lds_base(context.cu->allocate_lds(256));
+      context.wf->set_lds_size(256);
+      const uint64_t unarrived = amdgpu::lds_barrier_cell_init_state(1);
+      context.cu->lds().write64(context.wf->lds_base() + kBarrierLdsAddr, unarrived);
+      const uint32_t base = context.wf->sgpr_alloc().base;
+      context.cu->write_sgpr(base, 1);
+      context.cu->write_sgpr(base + 1, lds_offset);
+      context.cu->write_sgpr(base + 2, kUnmappedData);
+      context.cu->write_sgpr(base + 3, 0x80000000u);
+      context.cu->write_sgpr(base + 12, (2u << 16) | (1u << 18)); // i32, atomic barrier enabled.
+      context.cu->write_sgpr(base + 13, (1u << 16) | (kBarrierLdsAddr >> 3));
+      context.cu->write_sgpr(base + 15, 1u << 16);
+      uint32_t faults = 0;
+      context.cu->set_memory_violation_handler(
+          [&](amdgpu::Wavefront &wf, uint64_t, bool, uint64_t issue_pc) {
+            ++faults;
+            EXPECT_EQ(issue_pc, kCode);
+            EXPECT_EQ(wf.pc, kCode + sizeof(instruction));
+            if (rewind)
+              wf.pc = issue_pc;
+            wf.set_fatal_exception_pending(true);
+            wf.set_debug_suspended(true);
+            return true;
+          });
+      context.cu->step();
+      EXPECT_EQ(faults, 1u);
+      EXPECT_TRUE(context.wf->fatal_exception_pending());
+      EXPECT_EQ(context.wf->pc, rewind ? kCode : kCode + sizeof(instruction));
+      EXPECT_EQ(context.cu->lds().read64(context.wf->lds_base() + kBarrierLdsAddr), unarrived);
+    }
 }
 
 TEST(GpuVmPipeline, DebuggerProbeDoesNotClaimUnavailableTranslation) {
@@ -1655,6 +1663,84 @@ TEST(GpuVmPipeline, TranslatedVectorLoadAndStoreCoalesceInExternalBacking) {
   EXPECT_EQ(context.external->write_calls, 1u);
   EXPECT_EQ(context.external->last_write.address, kAddress);
   EXPECT_EQ(context.external->last_write.size, sizeof(kStored));
+}
+
+// Synthetic sampled requests use the translated-memory fixture to isolate retry
+// semantics from ISA encoding. image_access_test.cpp covers decoded sampler setup.
+TEST(GpuVmPipeline, FilteredImageRetryRetainsTexelsAndOneSampleCounter) {
+  for (bool replace_root : {false, true}) {
+    SCOPED_TRACE(replace_root);
+    TranslatedPipelineContext context;
+    ASSERT_NO_FATAL_FAILURE(context.initialize());
+    ASSERT_NE(context.wf, nullptr);
+    auto &wf = *context.wf;
+    const auto destination = wf.vgpr_alloc().base + 8;
+    constexpr uint32_t sentinel = 0xdeadbeef;
+    for (uint32_t lane : {0u, 1u})
+      context.cu->write_vgpr(destination, lane, sentinel);
+    auto state = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    state->elem_size = 4;
+    state->num_elems = 1;
+    state->is_load = true;
+    state->wf_size = wf.wf_size();
+    state->exec_mask = state->lane_mask = 1;
+    state->dst_reg_base = destination;
+    state->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
+    state->buffer_components = 1;
+    state->decoded_buffer_format = {{32, 0, 0, 0}, amdgpu::BufferNumberFormat::Float};
+    state->buffer_selectors = 4;
+    state->image_sample = std::make_unique<amdgpu::ImageSampleAccess>();
+    state->image_sample->taps.resize(4);
+    for (uint32_t i = 0; i < 4; ++i) {
+      const uint64_t address = 0x100 + i * 0x40;
+      context.external->store(address, std::bit_cast<uint32_t>(float(2 + 2 * i)));
+      auto &tap = state->image_sample->taps[i];
+      tap.addresses[0] = address;
+      tap.lane_mask = 1;
+      tap.weights[0] = 0.25f;
+    }
+    context.external->unavailable_read_call = 3;
+    amdgpu::GlobalMemPipeline pipeline(&context.cu->l1_vector(), context.cu->l2());
+    ASSERT_EQ(pipeline.issue_deferred(new TestMemoryInstruction(std::move(state)), wf),
+              amdgpu::VmAccessOutcome::Complete);
+    EXPECT_EQ(wf.state(), amdgpu::WfState::VM_RETRY);
+    EXPECT_EQ(wf.wait_counters().samplecnt, 1);
+    EXPECT_EQ(wf.wait_counters().vmcnt, 0);
+    EXPECT_EQ(context.cu->read_vgpr(destination, 0), sentinel);
+    // A completed texel must stay captured even if backing bytes change on retry.
+    context.external->store(0x100, std::bit_cast<uint32_t>(1000.0f));
+    auto replacement = std::make_shared<TestExternalAddressSpace>();
+    for (uint32_t i = 0; i < 4; ++i)
+      replacement->store(0x100 + i * 0x40, std::bit_cast<uint32_t>(2000.0f));
+    if (replace_root) {
+      ASSERT_TRUE(context.sim.soc->gpu_vm().replace_translated(context.address_space, replacement,
+                                                               replacement));
+    }
+    unsigned faults = 0;
+    pipeline.set_fault_handler([&](auto &, auto, auto) { ++faults; });
+    pipeline.tick();
+    EXPECT_EQ(replacement->read_calls, 0u);
+    EXPECT_EQ(wf.state(), amdgpu::WfState::RUNNING);
+    EXPECT_TRUE(wf.wait_counters().empty());
+    if (replace_root) {
+      // A revoked snapshot must fault without publishing a partial filtered value
+      // or silently mixing texels from the replacement address-space generation.
+      EXPECT_EQ(faults, 1u);
+      EXPECT_EQ(context.cu->read_vgpr(destination, 0), sentinel);
+      EXPECT_EQ(context.cu->read_vgpr(destination, 1), sentinel);
+      EXPECT_EQ(context.external->read_history.size(), 3u);
+      continue;
+    }
+    EXPECT_EQ(faults, 0u);
+    EXPECT_EQ(context.cu->read_vgpr(destination, 0), std::bit_cast<uint32_t>(5.0f));
+    EXPECT_EQ(context.cu->read_vgpr(destination, 1), sentinel);
+    ASSERT_EQ(context.external->read_history.size(), 5u);
+    EXPECT_EQ(context.external->read_history[0].address, 0x100u);
+    EXPECT_EQ(context.external->read_history[1].address, 0x140u);
+    EXPECT_EQ(context.external->read_history[2].address, 0x180u);
+    EXPECT_EQ(context.external->read_history[3].address, 0x180u);
+    EXPECT_EQ(context.external->read_history[4].address, 0x1c0u);
+  }
 }
 
 TEST(GpuVmPipeline, TransactionPolicyPreservesBatchingAndSplitRetryProgress) {

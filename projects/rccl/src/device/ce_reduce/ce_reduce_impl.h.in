@@ -16,14 +16,18 @@
 #include <algorithm>
 
 // Kept in sync with src/include/ce_coll.h, which the host side (ce_coll.cc)
-// uses to size the signal buffer and slot strides. The guards let a build
-// override both consistently from the command line.
+// uses to size the signal buffer, slot strides and DDA re-route cap. The guards let a build
+// override them consistently from the command line.
 #ifndef NCCL_CE_REDUCE_MAX_BLOCKS
 #define NCCL_CE_REDUCE_MAX_BLOCKS 46
 #endif
 
 #ifndef NCCL_CE_NUM_SLOTS
 #define NCCL_CE_NUM_SLOTS 2
+#endif
+
+#ifndef NCCL_CE_REDUCE_THREADS
+#define NCCL_CE_REDUCE_THREADS 256
 #endif
 
 namespace cg = cooperative_groups;
@@ -149,7 +153,7 @@ struct VecTrait<uint8_t> {
 // *********************************************************************************
 template <typename T>
 static inline int ncclCeLocalReduceBlocksT(size_t chunkElems) {
-  constexpr int threads = 256;
+  constexpr int threads = NCCL_CE_REDUCE_THREADS;
   constexpr int UnrollFactor = VecTrait<T>::GpuUnroll;
   return (int)std::clamp<size_t>((chunkElems / VecTrait<T>::W + (size_t)threads * UnrollFactor - 1) /
                                    ((size_t)threads * UnrollFactor),
@@ -210,7 +214,7 @@ struct ReduceOp<T, 3> {
 // compile-time constant, and pragmas there regress runtime performance.
 // *********************************************************************************
 template <typename T, int RedOp, int U>
-__global__ __launch_bounds__(256) void ncclCeLocalReduceKernelVec(
+__global__ __launch_bounds__(NCCL_CE_REDUCE_THREADS) void ncclCeLocalReduceKernelVec(
   const T* __restrict__ in,
   T* __restrict__ out, // recvbuff + rank*shardBytes (final AllReduce shard region)
   int nRanks, size_t baseChunkElems, size_t tailChunkElems, size_t chunksPerShard, size_t slotChunkElems,
