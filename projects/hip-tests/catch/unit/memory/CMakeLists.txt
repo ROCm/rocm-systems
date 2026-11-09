@@ -215,7 +215,10 @@ if(HIP_PLATFORM MATCHES "amd")
       # Below 3 tests should be compiled for NVIDIA as well after EXSWHTEC-349 is addressed
       hipArrayGetInfo.cc
       hipArrayGetDescriptor.cc
-      hipArray3DGetDescriptor.cc)
+      hipArray3DGetDescriptor.cc
+      # cudaArrayGetMemoryRequirements only accepts arrays created with cudaArrayDeferredMapping,
+      # which HIP does not have
+      hipArrayGetMemoryRequirements.cc)
 endif()
 
 set(NOT_FOR_gfx90a_AND_ABOVE_TEST hipMallocArray.cc hipArrayCreate.cc) # tests not for gfx90a+

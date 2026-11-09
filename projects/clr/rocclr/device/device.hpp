@@ -882,6 +882,10 @@ class Memory {
   //! Read the size
   size_t size() const { return size_; }
 
+  //! Gets the size and alignment the device requires for the memory backing an image.
+  //! Returns false if the object isn't an image or the backend can't report them.
+  virtual bool getImageMemoryRequirements(size_t* size, size_t* alignment) const { return false; }
+
   //! Gets the owner Memory instance
   amd::Memory* owner() const { return owner_; }
 

@@ -1688,6 +1688,20 @@ bool Image::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
   return true;
 }
 
+bool Image::getImageMemoryRequirements(size_t* size, size_t* alignment) const {
+  // Query HSA again rather than reading deviceImageInfo_, because create() overwrites its size
+  // with the padded allocation size, and views never fill it in.
+  hsa_ext_image_data_info_t info = {};
+  hsa_status_t status =
+      Hsa::image_data_get_info(dev().getBackendDevice(), &imageDescriptor_, permission_, &info);
+  if (status != HSA_STATUS_SUCCESS) {
+    return false;
+  }
+  *size = info.size;
+  *alignment = info.alignment;
+  return true;
+}
+
 bool Image::createView(const Memory& parent, amd::Memory::ErrorCode* errorCode) {
   if (errorCode != nullptr) {
     *errorCode = amd::Memory::kErrorUnknown;

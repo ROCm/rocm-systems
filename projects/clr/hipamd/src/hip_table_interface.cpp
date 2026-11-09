@@ -3287,6 +3287,13 @@ HIP_PUBLIC_API hipError_t hipMipmappedArrayGetMemoryRequirements(hipArrayMemoryR
                                                                                mipmap, device);
   CATCH;
 }
+HIP_PUBLIC_API hipError_t hipArrayGetMemoryRequirements(hipArrayMemoryRequirements* memoryRequirements,
+                                                        hipArray_t array, hipDevice_t device) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipArrayGetMemoryRequirements_fn(memoryRequirements, array,
+                                                                      device);
+  CATCH;
+}
 HIP_PUBLIC_API hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKernel_t kernel, hipDevice_t dev) {
   TRY;
   return hip::GetHipDispatchTable()->hipKernelSetAttribute_fn(attrib, value, kernel, dev);

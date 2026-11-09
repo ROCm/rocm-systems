@@ -13,6 +13,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
       * `hipMemcpy3DWithAttributesAsync` performs a single asynchronous 3D copy described by a
         `hipMemcpy3DBatchOp` structure, without requiring the caller to build the operation list
         that `hipMemcpy3DBatchAsync` takes.
+      * `hipArrayGetMemoryRequirements` returns the size and alignment of the memory backing a HIP array.
 
 ### Resolved issues
 

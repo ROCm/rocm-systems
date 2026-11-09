@@ -2797,6 +2797,18 @@ memory:
   Unit_hipArrayGetInfo_Negative_Parameters:
     <<: *level_default
     tags: [query, image, P1]
+  Unit_hipArrayGetMemoryRequirements_Positive_Basic:
+    <<: *level_default
+    tags: [query, image, P1]
+  Unit_hipArrayGetMemoryRequirements_Positive_SizeScalesWithExtent:
+    <<: *level_default
+    tags: [query, image, P1]
+  Unit_hipArrayGetMemoryRequirements_Negative_Parameters:
+    <<: *level_default
+    tags: [query, image, P1]
+  Unit_hipArrayGetMemoryRequirements_Positive_GetProcAddress:
+    <<: *level_default
+    tags: [query, image, P1]
   Unit_hipArrayCreate_DiffSizes:
     <<: *level_default
     tags: [image, P1]
