@@ -2209,7 +2209,7 @@ def test_matrix_direct_sparse_operands_reach_final_call():
     assert 'Isa::resolved_vgpr_offset' not in body
     assert 'uint32_t index_base = amdgpu::src_base(vb, src2.encoding_value_);' in body
     assert (
-        'amdgpu::exec_swmmac_f32(cu, 16, 16, 32, 16, dst, '
+        'amdgpu::exec_swmmac_f32<16, 16, 32>(cu, 16, dst, '
         'src0_base, src1_base, s2, index_base, '
         '16, index_key,' in body
     )
@@ -2234,7 +2234,7 @@ def test_unsupported_swmmac_layout_does_not_emit_sparse_setup(
     assert 'index_base' not in body
     assert 'index_key' not in body
     assert 'exec_swmmac' not in body
-    assert 'amdgpu::exec_f32(' in body
+    assert 'amdgpu::exec_f32<16, 16, 32, 0>(' in body
 
 
 @pytest.mark.parametrize(
@@ -2386,11 +2386,11 @@ def test_matrix_i32_final_call_sources_follow_profile_gate():
     )
 
     assert (
-        'amdgpu::exec_wmma_i32(cu, 16, 16, 16, 8, dst, src0_base, src1_base, s2,'
+        'amdgpu::exec_wmma_i32<16, 16, 16>(cu, 8, dst, src0_base, src1_base, s2,'
         in resolved
     )
     assert (
-        'amdgpu::exec_wmma_i32(cu, 16, 16, 16, 8, dst, src0_base, '
+        'amdgpu::exec_wmma_i32<16, 16, 16>(cu, 8, dst, src0_base, '
         'src1_base, s2,' in direct
     )
 
@@ -3085,7 +3085,7 @@ def test_rdna_wmma_i32_uses_measured_accumulation_policy(bits, arch):
         assert '(inst_.neg & 3u) | (inst_.clamp ? RJ_ARITH_WMMA_CLAMP : 0u)' in body
     assert 'amdgpu::exec_i32_mixed(cu, 16, 16, 16' not in body
     # CDNA5 shares a split-K layout but has independent numerical behavior.
-    assert 'amdgpu::exec_wmma_i32(' in _gen_mfma(inst, 'cdna5')
+    assert 'amdgpu::exec_wmma_i32<' in _gen_mfma(inst, 'cdna5')
 
 
 @pytest.mark.parametrize(
@@ -3099,7 +3099,7 @@ def test_rdna_unmeasured_integer_shape_is_not_approximated(arch, dtype):
         return
     body = _gen_mfma(inst, arch)
     assert 'throw util::UnimplementedInst(mnemonic());' in body
-    assert 'exec_wmma_i32(' not in body
+    assert 'exec_wmma_i32<' not in body
     assert 'exec_rdna_wmma_i32' not in body
 
 
@@ -3116,8 +3116,8 @@ def test_rdna4_iu4_k32_uses_measured_saturation():
     assert 'rj_arith_v_wmma_i32_16x16x32_iu4_w32_gfx12' in body
     assert 'RJ_ARITH_WMMA_CLAMP' in body
     assert 'src2.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc)' in body
-    assert 'exec_wmma_i32(' not in body
-    assert 'amdgpu::exec_wmma_i32(' in _gen_mfma(inst, 'cdna5')
+    assert 'exec_wmma_i32<' not in body
+    assert 'amdgpu::exec_wmma_i32<' in _gen_mfma(inst, 'cdna5')
 
 
 @pytest.mark.parametrize('bits, k', [(8, 32), (4, 32), (4, 64)])
@@ -3134,7 +3134,7 @@ def test_rdna4_sparse_integers_use_full_index_key_and_measured_groups(bits, k):
     assert 'uint64_t(index_key) << 7' in body
     assert '(inst_.neg & 3u) | (inst_.clamp ? RJ_ARITH_WMMA_CLAMP : 0u)' in body
     assert 'const_acc' not in body
-    assert 'amdgpu::exec_swmmac_i32(' in _gen_mfma(inst, 'cdna5')
+    assert 'amdgpu::exec_swmmac_i32<' in _gen_mfma(inst, 'cdna5')
 
 
 @pytest.mark.parametrize('input_type', ['FP8_FP8', 'FP8_BF8', 'BF8_FP8', 'BF8_BF8'])
@@ -3182,7 +3182,7 @@ def test_rdna4_sparse_float_uses_measured_arithmetic(result_type, input_type):
     if input_type in ('F16', 'BF16'):
         assert '(inst_.neg & 7u) | (uint64_t(inst_.neg_hi & 7u) << 3)' in body
     assert 'const_acc' not in body
-    assert f'amdgpu::exec_swmmac_{result_type.lower()}(' in _gen_mfma(inst, 'cdna5')
+    assert f'amdgpu::exec_swmmac_{result_type.lower()}<' in _gen_mfma(inst, 'cdna5')
 
 
 def test_rdna4_unmeasured_sparse_float_shape_is_not_approximated():
@@ -3246,7 +3246,7 @@ def test_gfx1250_wmma_i32_iu4_emits_executor():
     body = _gen_mfma(inst, 'cdna5')
 
     assert '(inst_.neg & 0x1u) ? amdgpu::extract_i4(cu, base, loc)' in body
-    assert 'amdgpu::exec_wmma_i32(cu, 16, 16, 16, 4, dst, src0_base,' in body
+    assert 'amdgpu::exec_wmma_i32<16, 16, 16>(cu, 4, dst, src0_base,' in body
 
 
 def test_cdna3_fp8_mfma_uses_fnuz_helper_variant():
@@ -4545,20 +4545,18 @@ def test_local_true16_vop3_probe_uses_scoped_dpp_binding(tmp_path):
         rdna4_vop3, 'RJ_NOINLINE void VCeilF16Vop3::execute_modifier_impl'
     )
 
-    assert 'ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16' in ceil_body
-    assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in ceil_body
-    assert 'write_vop3_true16_dst(vdst, wf, lane, opsel,' in ceil_body
+    assert 'arith::execute_float_unary16' in ceil_body
+    assert 'rj_arith_v_ceil_f16_w64_gfx12' in ceil_body
+    assert 'RJ_ARITH_ALU_HIGH_A' in ceil_body and 'RJ_ARITH_ALU_HIGH_D' in ceil_body
     assert 'inst_.src0 != amdgpu::SRC_DPP' not in ceil_body
     assert 'src0.clear_delegate();' not in ceil_body
-    assert ceil_body.index(
-        'ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16'
-    ) < ceil_body.index('read_vop3_true16_src(src0, wf, lane, opsel, 0)')
+    assert 'ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16' not in ceil_body
     assert 'ScopedVgprWriteMask dpp_write_mask_scope_' in ceil_modifier_body
     assert 'ScopedOperandDelegate dpp_src0_binding_' in ceil_modifier_body
-    assert 'ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16' in ceil_modifier_body
+    assert 'arith::execute_float_unary16' in ceil_modifier_body
     assert ceil_modifier_body.index(
         'ScopedOperandDelegate dpp_src0_binding_'
-    ) < ceil_modifier_body.index('ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16')
+    ) < ceil_modifier_body.index('arith::execute_float_unary16')
 
 
 def test_single_isa_cdna1_sources_preprocess_with_source_includes(
@@ -7606,7 +7604,7 @@ def test_gfx1250_float_swmmac_uses_32_index_entries_for_k128(result_type, input_
         f'V_SWMMAC_{result_type}_16X16X128_{input_type}', 'ENC_VOP3P', 0, []
     )
     body = _gen_mfma(inst, 'cdna5')
-    assert f'amdgpu::exec_swmmac_{result_type.lower()}(' in body
+    assert f'amdgpu::exec_swmmac_{result_type.lower()}<' in body
     assert 'index_base, 32, index_key,' in body
     assert 'uint32_t index_key = 0u;' in body
     assert 'index_key = inst_.opsel' not in body
@@ -8528,6 +8526,28 @@ def test_generated_vopd_owns_its_encoding_words(tmp_path, arch, profile, operand
     assert (
         'raw_encoding_ = raw_words_.data();' in constructor[constructor.index(copy) :]
     )
+
+
+def test_gfx1250_vopd3_cndmask_selector_uses_wave32_mask_size(tmp_path):
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='cdna5',
+        generated_dir_name='cdna5',
+        cpp_namespace='cdna5',
+        profile=Cdna5Profile(),
+        operand_types={'OPR_SRC_SIMPLE'},
+    )
+    codegen.out_path = str(tmp_path)
+    codegen.config = CodegenConfig()
+
+    codegen.gen_vopd()
+    cpp = (tmp_path / 'cdna5' / 'vopd.cpp').read_text()
+
+    assert 'Operand(32, OperandType::OPR_SREG, vsrcx2)' in cpp
+    assert 'Operand(32, OperandType::OPR_SREG, vsrcy2)' in cpp
+    assert 'Operand(64, OperandType::OPR_SREG' not in cpp
+    assert 'srcx2_.set_wave_mask();' in cpp
+    assert 'srcy2_.set_wave_mask();' in cpp
 
 
 def test_bf16_mad_mix_half_updates_read_destination_operand():
@@ -10157,7 +10177,13 @@ def test_scratch_lds_and_global_lds_share_opcode_dispatch(arch, profile_type):
         instructions = [inst for inst in flat.insts if inst.opcode == opcode]
         assert {inst.required_flat_segment for inst in instructions} == {1, 2}
         scratch = next(inst for inst in instructions if inst.required_flat_segment == 1)
+        global_lds = next(
+            inst for inst in instructions if inst.required_flat_segment == 2
+        )
         assert semantics.instructions[scratch.name].semantic_class == 'scratch_load_lds'
+        assert (
+            semantics.instructions[global_lds.name].semantic_class == 'global_load_lds'
+        )
         assert any(
             entry and f'decodeFlatSegment{opcode}' in (entry.sub_decode_funcs or [])
             for entry in spec.primary_decode_table
@@ -10183,3 +10209,25 @@ def test_opted_in_fixed_wave_matrix_layout_is_rejected(name):
     )
     with pytest.raises(ValueError, match=message):
         _gen_mfma(Instruction(name, 'ENC_VOP3P', 0, []), 'fixed_wave', profile)
+
+
+@pytest.mark.parametrize('count,opcode', [(3, 126), (4, 125)])
+def test_cdna4_wide_global_lds_load_semantics(count, opcode):
+    spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_cdna4.xml'), Cdna4Profile()).parse()
+    name = f'GLOBAL_LOAD_LDS_DWORDX{count}'
+    inst = next(
+        inst for inst in spec.encoding_map['ENC_FLAT'].insts if inst.name == name
+    )
+    assert inst.opcode == opcode
+    assert inst.required_flat_segment == 2
+    sem = derive_all_semantics(spec).instructions[name]
+    assert sem.semantic_class == 'global_load_lds'
+    assert sem.elem_size == 4
+    assert sem.num_elems == count
+    assert not sem.sign_extend
+    generator = CodeGenerator(spec, '', derive_all_semantics(spec))
+    body = generator._gen_flat_load([], [], sem)
+    assert f'd->num_elems = {count};' in body
+    assert f'+ offset, {count * 4}, 16);' in body
+    assert 'd->lds_dst = true;' in body
+    assert 'dst_reg_base' not in body
