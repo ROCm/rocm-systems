@@ -991,12 +991,13 @@ DecodeResult decodeImageAtomicDecUintVimage(const MachineInst *opcode,
 } // namespace detail
 
 ImageGetResinfoVimage::ImageGetResinfoVimage(const MachineInst *inst)
-    : Vimage("image_get_resinfo", reinterpret_cast<const OpEncoding *>(inst),
-             selected_exec_fn(InstructionExecutionId::ImageGetResinfoVimage)),
+    : ImageAddressInstruction("image_get_resinfo", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageGetResinfoVimage)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, false, false, false),
             OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(32, OperandType::OPR_VGPR, 0),
-      rsrc(256, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
+      rsrc((reinterpret_cast<const OpEncoding *>(inst)->r128 ? 128 : 256), OperandType::OPR_SREG,
+           reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &rsrc;
@@ -1018,8 +1019,8 @@ DecodeResult decodeImageGetResinfoVimage(const MachineInst *opcode,
 } // namespace detail
 
 ImageBvhIntersectRayVimage::ImageBvhIntersectRayVimage(const MachineInst *inst)
-    : Vimage("image_bvh_intersect_ray", reinterpret_cast<const OpEncoding *>(inst),
-             selected_exec_fn(InstructionExecutionId::ImageBvhIntersectRayVimage)),
+    : ImageAddressInstruction("image_bvh_intersect_ray", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageBvhIntersectRayVimage)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(352, OperandType::OPR_VGPR, 0),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
@@ -1044,8 +1045,9 @@ DecodeResult decodeImageBvhIntersectRayVimage(const MachineInst *opcode,
 } // namespace detail
 
 ImageBvh64IntersectRayVimage::ImageBvh64IntersectRayVimage(const MachineInst *inst)
-    : Vimage("image_bvh64_intersect_ray", reinterpret_cast<const OpEncoding *>(inst),
-             selected_exec_fn(InstructionExecutionId::ImageBvh64IntersectRayVimage)),
+    : ImageAddressInstruction(
+          "image_bvh64_intersect_ray", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::ImageBvh64IntersectRayVimage)),
       vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(384, OperandType::OPR_VGPR, 0),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {

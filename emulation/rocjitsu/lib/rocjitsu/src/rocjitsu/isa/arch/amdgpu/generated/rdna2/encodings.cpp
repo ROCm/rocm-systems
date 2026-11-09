@@ -1422,7 +1422,7 @@ Mubuf::Mubuf(std::string_view mnemonic, const MubufMachineInst *inst, ExecuteFn 
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
-  opcode_ = inst_.op;
+  opcode_ = inst_.op | (inst_.opm << 7);
 }
 
 Mtbuf::Mtbuf(std::string_view mnemonic, const MtbufMachineInst *inst, ExecuteFn exec_fn)
@@ -1431,7 +1431,7 @@ Mtbuf::Mtbuf(std::string_view mnemonic, const MtbufMachineInst *inst, ExecuteFn 
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
-  opcode_ = inst_.op;
+  opcode_ = inst_.op | (inst_.opm << 3);
 }
 
 Mimg::Mimg(std::string_view mnemonic, const MimgMachineInst *inst, ExecuteFn exec_fn)
@@ -1440,7 +1440,7 @@ Mimg::Mimg(std::string_view mnemonic, const MimgMachineInst *inst, ExecuteFn exe
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
-  opcode_ = inst_.op;
+  opcode_ = inst_.op | (inst_.opm << 7);
 }
 
 void Mimg::capture_nsa_words(const MachineInst *inst, const Operand *vaddr) {
