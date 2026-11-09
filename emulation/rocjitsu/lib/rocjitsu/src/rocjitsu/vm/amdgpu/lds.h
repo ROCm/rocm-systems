@@ -205,6 +205,10 @@ public:
       if (!(lane_mask & (1ULL << lane)))
         continue;
       uint64_t base = static_cast<uint64_t>(static_cast<uint32_t>(addrs[lane])) + base_offset;
+      if (elem_size == 4 && num_elems == 4 && base + 16 <= data_.size()) {
+        std::memcpy(dst + lane * 16, data_.data() + base, 16);
+        continue;
+      }
       for (uint32_t e = 0; e < num_elems; ++e) {
         uint64_t ea = base + static_cast<uint64_t>(e) * elem_size;
         if (ea + elem_size > capacity_bytes_) {
@@ -224,6 +228,10 @@ public:
       if (!(lane_mask & (1ULL << lane)))
         continue;
       uint64_t base = static_cast<uint64_t>(static_cast<uint32_t>(addrs[lane])) + base_offset;
+      if (elem_size == 4 && num_elems == 4 && base + 16 <= data_.size()) {
+        std::memcpy(data_.data() + base, src + lane * 16, 16);
+        continue;
+      }
       for (uint32_t e = 0; e < num_elems; ++e) {
         uint64_t ea = base + static_cast<uint64_t>(e) * elem_size;
         if (ea + elem_size > capacity_bytes_)
