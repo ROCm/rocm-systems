@@ -146,6 +146,8 @@ cases:
   Unit_HRR_ExtLaunchEventMarkers: {}
   Unit_HRR_ExtMallocRoundtrip: {}
   Unit_HRR_ExtMalloc_Direct: {}
+  Unit_HRR_ExtMemcpyBatchRoundtrip: {}
+  Unit_HRR_ExtMemcpyBatch_Direct: {}
   Unit_HRR_ExtModuleLaunchKernelRoundtrip: {}
   Unit_HRR_ExtModuleLaunchKernel_Direct: {}
   Unit_HRR_FailedBlobClose_Direct: {}
@@ -192,6 +194,14 @@ cases:
   Unit_HRR_GraphWorkload_Direct: {}
   Unit_HRR_HostAliasesRoundtrip: {}
   Unit_HRR_HostAliases_Direct: {}
+  Unit_HRR_HostBudgetManagedLeakRoundtrip: {}
+  Unit_HRR_HostBudgetManagedLeak_Direct: {}
+  Unit_HRR_HostBudgetManagedRoundtrip: {}
+  Unit_HRR_HostBudgetManaged_Direct: {}
+  Unit_HRR_HostBudgetMemCreateRoundtrip: {}
+  Unit_HRR_HostBudgetMemCreate_Direct: {}
+  Unit_HRR_HostBudgetMemMapHoldRoundtrip: {}
+  Unit_HRR_HostBudgetMemMapHold_Direct: {}
   Unit_HRR_HostFreeRoundtrip: {}
   Unit_HRR_HostFree_Direct: {}
   Unit_HRR_HostMemRoundtrip: {}

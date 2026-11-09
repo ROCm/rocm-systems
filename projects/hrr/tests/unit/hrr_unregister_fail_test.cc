@@ -28,11 +28,6 @@ hipError_t playback_hipHostRegister(PlaybackContext& ctx, const uint8_t* pl);
 hipError_t playback_hipHostUnregister(PlaybackContext& ctx, const uint8_t* pl);
 
 namespace {
-bool have_device() {
-  int n = 0;
-  return hipGetDeviceCount(&n) == hipSuccess && n > 0;
-}
-
 // Replays a hipHostRegister of size bytes at the recorded address rec. The blob
 // is not in the archive, so the buffer is zero-filled.
 hipError_t replay_register(PlaybackContext& ctx, uint64_t rec, size_t size) {
@@ -54,7 +49,7 @@ hipError_t replay_register(PlaybackContext& ctx, uint64_t rec, size_t size) {
  *     must still name it afterwards, so a later snapshot can write it.
  */
 TEST_CASE("Unit_HRR_HostUnregister_FailedCallKeepsBuffer", "[hrr]") {
-  if (!have_device()) SKIP("needs a GPU: without one the call fails with hipErrorNoDevice");
+  if (!hrr_test::have_device()) SKIP("needs a GPU: without one the call fails with hipErrorNoDevice");
 
   void* buf = nullptr;
   REQUIRE(posix_memalign(&buf, 64, 256) == 0);
@@ -87,7 +82,7 @@ TEST_CASE("Unit_HRR_HostUnregister_FailedCallKeepsBuffer", "[hrr]") {
  *     fresh block rather than the old one.
  */
 TEST_CASE("Unit_HRR_HostUnregister_FailedReplaceTakesNewBlock", "[hrr]") {
-  if (!have_device()) SKIP("needs a GPU to register host memory");
+  if (!hrr_test::have_device()) SKIP("needs a GPU to register host memory");
 
   PlaybackContext ctx;
   REQUIRE(replay_register(ctx, 0x1000, 256) == hipSuccess);
@@ -110,7 +105,7 @@ TEST_CASE("Unit_HRR_HostUnregister_FailedReplaceTakesNewBlock", "[hrr]") {
  *     freed buffer fails the write.
  */
 TEST_CASE("Unit_HRR_HostUnregister_GraphNodeKeepsBuffer", "[hrr]") {
-  if (!have_device()) SKIP("needs a GPU to register host memory");
+  if (!hrr_test::have_device()) SKIP("needs a GPU to register host memory");
 
   constexpr uint64_t kHost = 0x1000;
   constexpr size_t kSize = 256;

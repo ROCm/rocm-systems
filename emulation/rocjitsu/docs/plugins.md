@@ -615,15 +615,17 @@ instead copy the instruction's PC and encoding as it executes, and disassemble
 the copy when the report is written. Validate the encoding before copying it:
 `raw_encoding()` is null when the instruction has no encoding, and the copy
 needs `size()` to be a positive multiple of four bytes that fits the buffer.
-An encoding is at most four words (the CU's 16-byte fetch window). The example
-rejects anything else at capture, as the race detector does, so every stored
-copy can be disassembled.
+The CU normally fetches four words starting at the PC. GFX10 MIMG with
+NSA=3 uses a fifth word. The fetch-aware hook receives all five for that
+instruction. The example stores up to five words, as the race detector does,
+and rejects invalid sizes at capture. Perfsim's FFM event format has its own
+four-word encoding limit.
 
 ```cpp
 // Set for each wave in onAmdgpuWavefrontDispatched() with wf.set_plugin_state().
 struct LastInstruction : WavefrontState {
   uint64_t pc = 0;
-  std::array<uint32_t, 4> words{};
+  std::array<uint32_t, 5> words{};
   size_t word_count = 0; // Zero until the wave executes an instruction.
 };
 
@@ -706,3 +708,15 @@ Throughput, instruction mix, and kernel logging support this contract. The
 its dependency-event access and diagnostic context support concurrent register
 hooks within one wave. Plugins and the host
 must be rebuilt together, as for other execution-plugin interface changes.
+
+Sampler instructions, regardless of filter mode, report one `onAmdgpuMemoryAccessRouted` callback per
+instruction. Samples with a prepared footprint use `image_sample_footprints`
+and leave `addresses` empty. A null resource or unbacked sampler completes as
+an empty request: the callback carries the ordinary per-lane `addresses` span,
+an empty footprint span and a zero `request_lane_mask`. Its counter obligation
+still identifies the sampled request on targets with SAMPLECNT. Each footprint has
+`wavefront_size` entries and its lane mask is a subset of `request_lane_mask`.
+Border-only and zero-weight taps remain present with those lanes cleared.
+`bytes_per_lane()` is the size of one texel per footprint, including gather
+instructions that return four selected components. Consumers must visit every
+footprint without counting another issued instruction or wait-counter event.

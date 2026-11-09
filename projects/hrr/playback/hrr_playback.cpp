@@ -594,6 +594,13 @@ static bool needs_ordering(uint16_t etype) {
     case HRR_API_HIPHOSTMALLOC:
     case HRR_API_HIPMEMADDRESSRESERVE:
     case HRR_API_HIPMEMCREATE:
+    // hipMemMap / hipMemUnmap move a handle's mapping count and its host-budget
+    // charge (vmm_note_map / vmm_note_unmap). Unordered, a hipMemRelease on
+    // another thread could run between the runtime's retain and vmm_note_map,
+    // return the charge while the mapping still holds the memory, and leave the
+    // map with no entry to count.
+    case HRR_API_HIPMEMMAP:
+    case HRR_API_HIPMEMUNMAP:
     // Stream create / destroy
     case HRR_API_HIPSTREAMCREATE:
     case HRR_API_HIPSTREAMCREATEWITHFLAGS:
@@ -1702,8 +1709,9 @@ static void print_usage(const char* argv0) {
     "  --max-events N        Refuse an archive with more than N events. Default 50000000.\n"
     "  --max-host-bytes N    Refuse an archive that would hold more than N bytes once\n"
     "                        loaded, and end the replay when host memory held for it\n"
-    "                        (blob caches, pinned buffers, read-backs) would pass N\n"
-    "                        bytes. Default 17179869184 (16 GiB).\n"
+    "                        (blob caches, pinned buffers, managed memory, host-\n"
+    "                        located VMM handles, read-backs) would pass N bytes.\n"
+    "                        Default 17179869184 (16 GiB).\n"
     "  --max-wall-seconds S  End the run after S seconds, loading the archive\n"
     "                        included (0 = no limit; at most 31536000, 365 days).\n"
     "                        --repair is not limited. Default 3600.\n"
@@ -2268,13 +2276,14 @@ int main(int argc, char** argv) {
 
     // alloc_map mixes device and host allocations; each must be released with the
     // matching API. Dispatch on AllocEntry::kind:
-    //   Device         -> hipFree
+    //   Device, Managed -> hipFree
     //   HostMalloc     -> hipHostFree
     //   HostRegister   -> unregistered below via host_reg_bufs
     //   DevicePtrAlias -> not separately freed (alias into a pinned host alloc)
     for (auto& [rec, entry] : ctx.alloc_map) {
       switch (entry.kind) {
-        case AllocKind::Device:        hrr_free_device_alloc(ctx, entry.live_ptr); break;
+        case AllocKind::Device:
+        case AllocKind::Managed:       hrr_free_device_alloc(ctx, entry.live_ptr); break;
         case AllocKind::HostMalloc:    (void)hipHostFree(entry.live_ptr); break;
         case AllocKind::HostRegister:                                     break;
         case AllocKind::DevicePtrAlias:                                   break;
