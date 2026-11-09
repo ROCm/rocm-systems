@@ -73,17 +73,19 @@ Every test case has its own entry. Currently supported options are:
 - unsupported : Permanently skip the case on the listed targets, where the platform, architecture, or backend cannot support it
 `disabled` and `unsupported` share the same syntax and produce the same skip; they differ only in intent (temporary regression versus permanent capability gap).
 Each takes the mapping form `{targets: [...], reason: "..."}`. A section with a
-non-empty `targets` list **must** carry a non-empty `reason`, and that reason **must**
-cite a real Jira reference from a known project key (**AIRUNTIME, ROCM, SWDEV, EXSWHTEC,
-AIRADSW**), e.g. `AIRUNTIME-2892`; both are enforced by `check_config.py` in CI. The known
+non-empty `targets` list **must** carry a non-empty `reason`. A `disabled` reason **must**
+also cite a real Jira reference from a known project key (**AIRUNTIME, ROCM, SWDEV, EXSWHTEC,
+AIRADSW**), e.g. `AIRUNTIME-2892`; an `unsupported` reason needs no Jira key. Both rules are
+enforced by `check_config.py` in CI. The known
 project keys are an allowlist; add a new one by editing the `JIRA_PROJECTS` tuple in
 `check_config.py`. The bare flat-list form (`disabled: [amd_wsl]`) is no longer accepted for a
 non-empty skip. An empty section (`targets: []`) is a no-op and needs no reason. If a
 skip has not yet been triaged, lead the reason with the tracking ticket, e.g.
 `AIRUNTIME-2744 - needs to be re-triaged`.
 Besides the per-platform, per-architecture and `asan` targets, a field may name a group:
-- `all` : every build. Use it under `disabled` to switch a case off everywhere for a while; a case
-  that is unsupported on every platform should be deleted instead, and `check_config.py` rejects it.
+- `all` : every build (only for disabled). Use it to switch a case off everywhere for a while.
+  'all' is not permitted to be used with unsupported, just remove the test; `check_config.py`
+  rejects it.
 - `amd` : `amd_linux`, `amd_windows` and `amd_wsl`
 - `nvidia` : `nvidia_linux` and `nvidia_windows`
 
@@ -106,7 +108,7 @@ unit:
         reason: "SWDEV-435667: fails randomly in stress test"
       unsupported:
         targets: [gfx900]
-        reason: "SWDEV-123456: requires a hardware feature not present on this architecture"
+        reason: "requires a hardware feature not present on this architecture"
 ```
 will be generated (on an AMD Linux build for gfx942) as:
 ```cpp

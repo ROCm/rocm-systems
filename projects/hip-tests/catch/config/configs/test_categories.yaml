@@ -58,7 +58,7 @@ test_categories:
 # `disabled:` (temporary regression) or `unsupported:` (permanent capability
 # gap) field of its group config (unit/<group>.yaml, or <group>.yaml for the
 # non-unit groups). Both fields take the same targets. A non-empty field uses
-# the mapping form, with a `reason` that cites a Jira key:
+# the mapping form, with a `reason`; a `disabled` reason must cite a Jira key:
 #
 #   Unit_hipMemsetDSync:
 #     <<: *level_default
@@ -67,7 +67,7 @@ test_categories:
 #       reason: "SWDEV-123456: intermittent mismatch after async memset"
 #     unsupported:
 #       targets: [windows_<arch>]
-#       reason: "SWDEV-123457: feature not available on this architecture"
+#       reason: "requires a hardware feature not present on this architecture"
 #
 # Every accepted target, where <arch> is the exact architecture the build
 # targets (a gfx name):
@@ -90,14 +90,14 @@ test_categories:
 #     asan                       AddressSanitizer builds only
 #
 #   Groups
-#     all                        every build; under `disabled:` only
+#     all                        every build (only for disabled)
 #     amd                        amd_linux, amd_windows, amd_wsl
 #     nvidia                     nvidia_linux, nvidia_windows
 #
 # Targets in a field are additive: the case is skipped wherever any of them
 # applies, so adding `all` to an existing list disables it everywhere. `amd`
-# and `nvidia` are valid in both fields, but a case unsupported on every
-# platform should be removed rather than skipped.
+# and `nvidia` are valid in both fields. 'all' is not permitted to be used
+# with unsupported, just remove the test.
 #
 # A matching case is tagged [disabled] and registered DISABLED TRUE in ctest,
 # so `ctest -L quick` already skips it. Note that Windows builds do not carry

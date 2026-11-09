@@ -31,8 +31,8 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Check that every test case in the YAML configs has a "
         "'level' field, that every 'disabled'/'unsupported' field has "
-        "well-formed targets and a reason citing a Jira reference, and that "
-        "no case is 'unsupported' on every platform.",
+        "well-formed targets and a reason (citing a Jira reference for "
+        "'disabled'), and that no case is 'unsupported' on every platform.",
     )
     parser.add_argument(
         "configs_path",
@@ -85,11 +85,11 @@ def main():
                 # (targets: []) is a no-op and needs no reason.
                 if targets and not (isinstance(reason, str) and reason.strip()):
                     missing_reasons.append(f"  {group}/{case_name}: '{field}'")
-                # A populated skip section with a real reason must cite a Jira
-                # reference (e.g. AIRUNTIME-2892 or ROCM-123, from a known
+                # A populated 'disabled' section with a real reason must cite a
+                # Jira reference (e.g. AIRUNTIME-2892 or ROCM-123, from a known
                 # project key); a reason with no such ref (or a digitless
                 # placeholder) does not count as a real ref.
-                elif targets and not JIRA_RE.search(reason):
+                elif field == "disabled" and targets and not JIRA_RE.search(reason):
                     missing_jira.append(f"  {group}/{case_name}: '{field}'")
 
     if missing:
@@ -130,7 +130,7 @@ def main():
 
     if missing_jira:
         print(
-            f"[check_config] {ERROR}ERROR: The following test cases have a 'disabled'/'unsupported' 'reason' with no real Jira reference. The reason must cite a real Jira reference from a known project ({', '.join(JIRA_PROJECTS)}), e.g. AIRUNTIME-2892; a digitless placeholder like AIRUNTIME-XXXX does not count:{RESET}",
+            f"[check_config] {ERROR}ERROR: The following test cases have a 'disabled' 'reason' with no real Jira reference. The reason must cite a real Jira reference from a known project ({', '.join(JIRA_PROJECTS)}), e.g. AIRUNTIME-2892; a digitless placeholder like AIRUNTIME-XXXX does not count:{RESET}",
             file=sys.stderr,
         )
         for entry in missing_jira:
