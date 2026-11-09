@@ -356,7 +356,7 @@ TEST_F(GpuDevice, ReportsAPartiallyProgrammedInterruptRingAsProgrammed) {
        {Case{"a size alone", 0x4480, 16u << 1}, Case{"an address space alone", 0x4480, 2u << 28},
         Case{"a request for messages alone", 0x4480, 1u << 17},
         Case{"a write-pointer address alone", 0x4498, 0xabcd1000u}}) {
-    device_.reset(simdojo::ResetKind::FunctionLevel);
+    EXPECT_TRUE(device_.reset(simdojo::ResetKind::FunctionLevel).succeeded());
     ASSERT_FALSE(device_.interrupt_ring().programmed()) << "reset did not clear the ring";
 
     write_register_at(partial.reg, partial.value);
@@ -368,7 +368,7 @@ TEST_F(GpuDevice, ReportsAPartiallyProgrammedInterruptRingAsProgrammed) {
 
   // And back to nothing, so the diagnostic does not keep reporting a ring the
   // guest has already taken away.
-  device_.reset(simdojo::ResetKind::FunctionLevel);
+  EXPECT_TRUE(device_.reset(simdojo::ResetKind::FunctionLevel).succeeded());
   EXPECT_FALSE(device_.interrupt_ring().programmed());
 }
 
@@ -1335,6 +1335,46 @@ TEST_F(GpuDeviceMes, DropsADoorbellQueuedByARevokedTransportGeneration) {
       << "work captured for the old peer generation reached its replacement";
 }
 
+TEST_F(GpuDeviceMes, ResetReturnsFailureWhileGartBindingIsRetained) {
+  constexpr uint64_t kScratchRegister = (0xa000 + 0x2040) * sizeof(uint32_t);
+  write_register_at(kScratchRegister, 0x12345678);
+  const rocjitsu::amdgpu::AddressSpaceHandle gart = soc_.gpu_vm().gart_address_space();
+  std::optional<rocjitsu::amdgpu::GpuVmBindingLease> binding = soc_.gpu_vm().retain_binding(gart);
+  ASSERT_TRUE(binding);
+  const uint64_t generation = device_.transport_session_generation();
+  const uint64_t translation_epoch = soc_.gpu_vm().lookup(gart)->translation_epoch;
+  util::StringDiagnostic diagnostic;
+  util::Result result;
+  EXPECT_NO_THROW(result = device_.reset(simdojo::ResetKind::FunctionLevel, diagnostic.emitter()));
+  EXPECT_TRUE(result.failed());
+  EXPECT_EQ(diagnostic.message(), "VMID-0 GART binding could not be cleared");
+  EXPECT_EQ(soc_.gpu_vm().lookup(gart)->translation_epoch, translation_epoch);
+  EXPECT_EQ(read_register_at(kScratchRegister), 0x12345678u);
+  EXPECT_NE(device_.transport_session_generation(), generation);
+  binding.reset();
+  EXPECT_TRUE(device_.reset(simdojo::ResetKind::FunctionLevel).succeeded());
+  EXPECT_EQ(read_register_at(kScratchRegister), 0u);
+}
+
+TEST_F(GpuDeviceMes, ResetReturnsFailureAfterPartialQueueTeardown) {
+  constexpr uint64_t kScratchRegister = (0xa000 + 0x2040) * sizeof(uint32_t);
+  write_register_at(kScratchRegister, 0x12345678);
+  const std::optional<rocjitsu::amdgpu::AddressSpaceHandle> address_space =
+      submit_sdma_queue(3, 0x4808, 0x20000, 0x21000, 0x22000, 0x30000);
+  ASSERT_TRUE(address_space);
+  ASSERT_TRUE(soc_.gpu_vm().retain_queue(*address_space));
+  const uint64_t generation = device_.transport_session_generation();
+  util::StringDiagnostic diagnostic;
+  util::Result result;
+  EXPECT_NO_THROW(result = device_.reset(simdojo::ResetKind::FunctionLevel, diagnostic.emitter()));
+  EXPECT_TRUE(result.failed());
+  EXPECT_EQ(diagnostic.message(), "PCI queue state could not be cleared");
+  EXPECT_EQ(soc_.queue_registry().active_queues(), 0u);
+  EXPECT_EQ(read_register_at(kScratchRegister), 0x12345678u);
+  EXPECT_NE(device_.transport_session_generation(), generation);
+  EXPECT_TRUE(soc_.gpu_vm().release_queue(*address_space));
+}
+
 TEST_F(GpuDeviceMes, ResetDropsDoorbellsQueuedInTheSameTransportGeneration) {
   store_dword(kRingPhysical, 0x00040001);
   store_qword(kRingPhysical + 50 * 4, kApiStatusGpu);
@@ -1346,7 +1386,7 @@ TEST_F(GpuDeviceMes, ResetDropsDoorbellsQueuedInTheSameTransportGeneration) {
                                /*write=*/true),
             8);
 
-  device_.reset(simdojo::ResetKind::FunctionLevel);
+  EXPECT_TRUE(device_.reset(simdojo::ResetKind::FunctionLevel).succeeded());
   ASSERT_NE(device_.transport_session_generation(), generation);
   device_.drain_doorbell_inbox_for_test();
 
@@ -1413,8 +1453,9 @@ TEST_F(GpuDeviceMes, ResetWaitsForAnAdmittedDoorbellObserver) {
   if (!blocked)
     transport_.release_read();
   ASSERT_TRUE(blocked);
-  auto resetting = std::async(std::launch::async,
-                              [this]() { device_.reset(simdojo::ResetKind::FunctionLevel); });
+  auto resetting = std::async(std::launch::async, [this]() {
+    EXPECT_TRUE(device_.reset(simdojo::ResetKind::FunctionLevel).succeeded());
+  });
 
   EXPECT_EQ(resetting.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout)
       << "reset did not wait for the admitted observer";
@@ -1827,7 +1868,7 @@ TEST_F(GpuDeviceMes, ResetInvalidatesScheduledRemoveQueueRetry) {
   ASSERT_EQ(transport_.dword_at(kRingFencePhysical), 0u);
   ASSERT_EQ(transport_.dword_at(kReadPointerPhysical), 64u);
 
-  device_.reset(simdojo::ResetKind::FunctionLevel);
+  EXPECT_TRUE(device_.reset(simdojo::ResetKind::FunctionLevel).succeeded());
   device_.drain_doorbell_inbox_for_test();
   EXPECT_EQ(transport_.dword_at(kRingFencePhysical), 0u);
   EXPECT_EQ(transport_.dword_at(kReadPointerPhysical), 64u)
@@ -2210,7 +2251,7 @@ TEST_F(GpuDeviceMes, PermanentPm4CursorFaultMakesRemoveQueueTerminalUntilReset) 
   EXPECT_EQ(read_register_at(kScratchRegister), kAfterExecutionSentinel)
       << "failed graceful removal replayed the committed PM4 packet";
 
-  device_.reset(simdojo::ResetKind::FunctionLevel);
+  EXPECT_TRUE(device_.reset(simdojo::ResetKind::FunctionLevel).succeeded());
   EXPECT_EQ(soc_.mes_engine().active_queues(), 0u);
   EXPECT_EQ(soc_.queue_registry().active_queues(), 0u);
   EXPECT_EQ(command_processor_.registered_pm4_queue_count_for_test(), 0u);
@@ -2233,7 +2274,7 @@ TEST_F(GpuDeviceMes, ResetForceCancelsPm4QueueWithPendingCursorPublication) {
   ASSERT_EQ(read_register_at(kScratchRegister), 0xdeadbeefu);
   ASSERT_EQ(transport_.dword_at(kDefaultComputeReadPointerPhysical), 0u);
 
-  device_.reset(simdojo::ResetKind::FunctionLevel);
+  EXPECT_TRUE(device_.reset(simdojo::ResetKind::FunctionLevel).succeeded());
   EXPECT_EQ(soc_.mes_engine().active_queues(), 0u);
   EXPECT_EQ(soc_.queue_registry().active_queues(), 0u);
   EXPECT_EQ(command_processor_.registered_pm4_queue_count_for_test(), 0u);
@@ -2489,7 +2530,7 @@ TEST_F(GpuDeviceMes, LostConnectionReleasesOnlyPciQueuesAndAllowsPasidReuse) {
   ASSERT_TRUE(gart);
   ASSERT_TRUE(soc_.gpu_vm().lookup(gart)->ready);
 
-  device_.reset(simdojo::ResetKind::LostConnection);
+  EXPECT_TRUE(device_.reset(simdojo::ResetKind::LostConnection).succeeded());
 
   EXPECT_TRUE(soc_.queue_registry().contains(legacy_queue));
   EXPECT_EQ(soc_.queue_registry().active_queues(), 1u);
@@ -2509,7 +2550,7 @@ TEST_F(GpuDeviceMes, LostConnectionReleasesOnlyPciQueuesAndAllowsPasidReuse) {
   EXPECT_NE(replacement_address_space->generation, first_address_space->generation);
   EXPECT_EQ(soc_.queue_registry().active_queues(), 2u);
 
-  device_.reset(simdojo::ResetKind::LostConnection);
+  EXPECT_TRUE(device_.reset(simdojo::ResetKind::LostConnection).succeeded());
   EXPECT_TRUE(soc_.queue_registry().unregister_queue(legacy_queue));
   EXPECT_TRUE(legacy_vm.unregister_address_space(legacy_address_space));
 }
@@ -2785,7 +2826,7 @@ TEST_F(GpuDeviceSdma, ConcurrentResetCancelsQueuedPciEffectsWithoutDeadlock) {
             static_cast<int64_t>(doorbell.size()));
 
   std::jthread drain([this]() { device_.drain_doorbell_inbox_for_test(); });
-  device_.reset(simdojo::ResetKind::FunctionLevel);
+  EXPECT_TRUE(device_.reset(simdojo::ResetKind::FunctionLevel).succeeded());
   drain.join();
 
   EXPECT_EQ(soc_.queue_registry().active_queues(), 0u);
@@ -2850,8 +2891,9 @@ TEST_F(GpuDeviceSdma, ResetWaitsForAdmittedPciEffectBeforeResettingRegisters) {
     ASSERT_TRUE(gate_changed.wait_for(lock, std::chrono::seconds(1), [&] { return admitted; }));
   }
 
-  reset = std::async(std::launch::async,
-                     [this]() { device_.reset(simdojo::ResetKind::FunctionLevel); });
+  reset = std::async(std::launch::async, [this]() {
+    EXPECT_TRUE(device_.reset(simdojo::ResetKind::FunctionLevel).succeeded());
+  });
   EXPECT_EQ(reset.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout)
       << "reset crossed an admitted PCI effect";
 
@@ -4085,7 +4127,7 @@ TEST_F(GpuDeviceWindow, RestoresTheDiscoveryTableOnReset) {
   ASSERT_EQ(read_register(rocjitsu::MmioRegister::MmData), 0xdeadbeefu)
       << "the signature was not actually overwritten, so this proves nothing";
 
-  gpu_.reset(simdojo::ResetKind::FunctionLevel);
+  EXPECT_TRUE(gpu_.reset(simdojo::ResetKind::FunctionLevel).succeeded());
 
   select(table_at);
   EXPECT_EQ(read_register(rocjitsu::MmioRegister::MmData), 0x28211407u)
@@ -4346,7 +4388,7 @@ TEST_F(GpuDevice, RestoresPowerOnRegisterStateOnReset) {
                                /*write=*/true),
             4);
 
-  device_.reset(simdojo::ResetKind::LostConnection);
+  EXPECT_TRUE(device_.reset(simdojo::ResetKind::LostConnection).succeeded());
 
   EXPECT_EQ(read_register(rocjitsu::MmioRegister::DriverScratch1), 0u);
   EXPECT_NE(read_register(rocjitsu::MmioRegister::Mp0SmnC2pmsg33) & rocjitsu::kFirmwareInitDoneBit,
@@ -4519,7 +4561,7 @@ TEST_F(GpuDeviceDelivery, ResetClearsAnUnacknowledgedOverflow) {
   ASSERT_EQ(transport_.dword_at(kWptrAddress) & 1u, 1u)
       << "the test did not establish a latched overflow before reset";
 
-  device_.reset(simdojo::ResetKind::FunctionLevel);
+  EXPECT_TRUE(device_.reset(simdojo::ResetKind::FunctionLevel).succeeded());
   program_ring();
   ASSERT_TRUE(device_.deliver_interrupt({.client_id = 0x12, .source_id = 0x34}));
   EXPECT_EQ(transport_.dword_at(kWptrAddress) & 1u, 0u)

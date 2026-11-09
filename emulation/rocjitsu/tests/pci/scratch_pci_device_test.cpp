@@ -119,7 +119,7 @@ TEST(ScratchPciDevice, ForgetsItsContentsOnReset) {
 
   uint32_t written = 0xa5a5a5a5;
   ASSERT_GT(device.bar_access(0, as_bytes(written), 0x20, /*write=*/true), 0);
-  device.reset(simdojo::ResetKind::FunctionLevel);
+  EXPECT_TRUE(device.reset(simdojo::ResetKind::FunctionLevel).succeeded());
 
   uint32_t read = 0xffffffff;
   ASSERT_GT(device.bar_access(0, as_bytes(read), 0x20, /*write=*/false), 0);

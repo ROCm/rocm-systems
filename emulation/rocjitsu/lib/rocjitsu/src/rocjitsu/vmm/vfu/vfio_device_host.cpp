@@ -90,7 +90,7 @@ void forward_library_log(vfu_ctx_t * /*ctx*/, int level, const char *message) {
 // must not unwind through the library's C frames either.
 template <int Bar>
 ssize_t bar_trampoline(vfu_ctx_t *ctx, char *buf, std::size_t count, loff_t offset,
-                       const bool is_write) try {
+                       const bool is_write) {
   const std::span bytes(reinterpret_cast<std::byte *>(buf), count);
   const int64_t serviced =
       device_of(ctx).bar_access(Bar, bytes, static_cast<uint64_t>(offset), is_write);
@@ -99,9 +99,6 @@ ssize_t bar_trampoline(vfu_ctx_t *ctx, char *buf, std::size_t count, loff_t offs
     return -1;
   }
   return static_cast<ssize_t>(serviced);
-} catch (...) {
-  errno = EIO;
-  return -1;
 }
 
 constexpr std::array<vfu_region_access_cb_t *, 6> kBarTrampolines = {
@@ -128,7 +125,7 @@ simdojo::DmaRegion to_dma_region(const vfu_dma_info_t &info) {
           ((info.prot & PROT_WRITE) != 0 ? simdojo::DmaAccess::Write : simdojo::DmaAccess::None)};
 }
 
-void dma_register_trampoline(vfu_ctx_t *ctx, vfu_dma_info_t *info) try {
+void dma_register_trampoline(vfu_ctx_t *ctx, vfu_dma_info_t *info) {
   const simdojo::DmaRegion region = to_dma_region(*info);
   // Telling the device about a window it could never read would leave it holding
   // a mapping every access fails against. The request itself still succeeds --
@@ -143,26 +140,17 @@ void dma_register_trampoline(vfu_ctx_t *ctx, vfu_dma_info_t *info) try {
   if (host_of(ctx).record_guest_region(region)) {
     device_of(ctx).dma_map(region);
   }
-} catch (...) {
-  util::Logger::warn("vfu: device threw while mapping a guest memory window");
 }
 
-void dma_unregister_trampoline(vfu_ctx_t *ctx, vfu_dma_info_t *info) try {
+void dma_unregister_trampoline(vfu_ctx_t *ctx, vfu_dma_info_t *info) {
   if (!is_mmap_backed(*info)) {
     // Never announced, so there is nothing to withdraw.
     return;
   }
   const simdojo::DmaRegion region = to_dma_region(*info);
-  // The library drops the window once this returns whatever the device does, so
-  // the transport's own record is cleared even if the device hook throws.
-  struct ForgetOnReturn {
-    VfioDeviceHost &host;
-    const simdojo::DmaRegion &region;
-    ~ForgetOnReturn() { host.forget_guest_region(region); }
-  } forget{host_of(ctx), region};
+  // The library drops the window once this returns, so withdraw both records.
   device_of(ctx).dma_unmap(region);
-} catch (...) {
-  util::Logger::warn("vfu: device threw while unmapping a guest memory window");
+  host_of(ctx).forget_guest_region(region);
 }
 
 simdojo::ResetKind to_reset_kind(vfu_reset_type_t type) {
@@ -177,12 +165,9 @@ simdojo::ResetKind to_reset_kind(vfu_reset_type_t type) {
   return simdojo::ResetKind::Bus;
 }
 
-int reset_trampoline(vfu_ctx_t *ctx, vfu_reset_type_t type) try {
+int reset_trampoline(vfu_ctx_t *ctx, vfu_reset_type_t type) {
   host_of(ctx).request_reset(to_reset_kind(type));
   return 0;
-} catch (...) {
-  errno = EIO;
-  return -1;
 }
 
 } // namespace
@@ -258,35 +243,22 @@ void VfioDeviceHost::request_reset(simdojo::ResetKind kind) {
 }
 
 bool VfioDeviceHost::finish_session_reset(
-    simdojo::ResetKind kind,
-    std::shared_ptr<simdojo::PciTransportSession> closing_session) noexcept {
+    simdojo::ResetKind kind, std::shared_ptr<simdojo::PciTransportSession> closing_session) {
   // Never called with either host mutex held. Revocation prevents new leases;
   // drain the admitted operations before reset tears down the routes and
   // storage they can reach.
-  try {
-    if (closing_session != nullptr)
-      closing_session->wait_until_drained();
-  } catch (...) {
-    util::Logger::warn("vfu: failed while draining a revoked PCI transport session");
-    return false;
-  }
-  try {
-    device_.reset(kind);
-  } catch (const std::exception &error) {
-    util::Logger::warn(std::format("vfu: deferred device reset failed: {}", error.what()));
-    return false;
-  } catch (...) {
-    util::Logger::warn("vfu: deferred device reset failed");
+  if (closing_session != nullptr)
+    closing_session->wait_until_drained();
+  util::StringDiagnostic diagnostic;
+  if (device_.reset(kind, diagnostic.emitter()).failed()) {
+    util::Logger::warn("vfu: deferred device reset failed: ", diagnostic.message());
     return false;
   }
   return true;
 }
 
 bool VfioDeviceHost::ask_serving_thread(std::function<void()> work) {
-  // Refused here rather than thrown there. An empty target reaches the serving
-  // thread as a bad_function_call, which is reported as work that failed --
-  // indistinguishable from work that ran and could not be done -- and it
-  // occupies the single slot while doing nothing at all.
+  // Reject an empty callback before it occupies the single outstanding slot.
   if (!work) {
     return false;
   }
@@ -517,17 +489,8 @@ VfioDeviceHost::ServeResult VfioDeviceHost::run(std::stop_token stop_token) {
     }
     if (asked.has_value()) {
       const std::lock_guard lock(vfu_mutex_);
-      // The request runs on this thread, so an exception escaping it would take
-      // the process down rather than the request. Report and carry on serving:
-      // a faulty request is not a reason to drop the guest's device.
-      try {
-        (*asked)();
-      } catch (const std::exception &error) {
-        util::Logger::warn(
-            std::format("vfu: a request for the serving thread failed: {}", error.what()));
-      } catch (...) {
-        util::Logger::warn("vfu: a request for the serving thread failed");
-      }
+      (*asked)();
+
       const std::lock_guard asked_lock(asked_mutex_);
       asked_running_ = false;
     }

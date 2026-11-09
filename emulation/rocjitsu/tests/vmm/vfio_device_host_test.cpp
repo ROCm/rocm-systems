@@ -59,7 +59,6 @@ extern "C" {
 #include <future>
 #include <memory>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
@@ -630,8 +629,10 @@ public:
     simdojo::PciTransportSession::State old_session_state;
   };
 
-  explicit ResetObservingDevice(std::shared_future<void> reset_release = {})
-      : simdojo::PciDevice("reset-observer", kTestId), reset_release_(std::move(reset_release)) {}
+  explicit ResetObservingDevice(std::shared_future<void> reset_release = {},
+                                bool fail_reset = false)
+      : simdojo::PciDevice("reset-observer", kTestId), reset_release_(std::move(reset_release)),
+        fail_reset_(fail_reset) {}
 
   [[nodiscard]] std::vector<simdojo::BarSpec> bars() const override {
     simdojo::BarSpec bar;
@@ -650,9 +651,9 @@ public:
   void dma_map(const simdojo::DmaRegion &) override {}
   void dma_unmap(const simdojo::DmaRegion &) override {}
 
-  void reset(simdojo::ResetKind kind) override {
+  util::Result reset(simdojo::ResetKind kind, util::DiagnosticEmitter diag = {}) override {
     if (recorded_.exchange(true))
-      return;
+      return util::Result::success();
     // Cleanup may reset after a failed setup, before the test has captured a session.
     first_reset_.set_value({.kind = kind,
                             .active_generation = transport_session_generation(),
@@ -661,6 +662,9 @@ public:
                                                      : simdojo::PciTransportSession::State::Open});
     if (reset_release_.valid())
       reset_release_.wait();
+    if (fail_reset_)
+      return diag.emit() << "injected reset failure";
+    return util::Result::success();
   }
 
   [[nodiscard]] std::shared_ptr<simdojo::PciTransportSession> current_session() const {
@@ -678,6 +682,7 @@ private:
   std::promise<Observation> first_reset_;
   std::atomic<bool> recorded_ = false;
   std::shared_future<void> reset_release_;
+  bool fail_reset_;
 };
 
 class ScopedResetRelease {
@@ -699,6 +704,42 @@ private:
   std::promise<void> &promise_;
   bool released_ = false;
 };
+
+TEST(VfioDeviceHostLifecycle, FailedDisconnectResetStopsServingWithoutReportingCompletion) {
+  rocjitsu::test::ScopedTempDirectory runtime;
+  ASSERT_TRUE(runtime.initialize("rj-vfu-failed-reset-"));
+  const std::string socket_path = std::format("{}/gpu.sock", runtime.path());
+  ResetObservingDevice device({}, /*fail_reset=*/true);
+  rocjitsu::VfioDeviceHost host(socket_path, device);
+  ASSERT_TRUE(host.build());
+  std::promise<rocjitsu::VfioDeviceHost::ServeResult> result;
+  std::future<rocjitsu::VfioDeviceHost::ServeResult> finished = result.get_future();
+  std::jthread serving([&](std::stop_token stop) { result.set_value(host.run(stop)); });
+  std::shared_ptr<simdojo::PciTransportSession> old_session;
+  {
+    rocjitsu::test::VfioUserClient client;
+    bool connected = false;
+    for (int attempt = 0; attempt < 200 && !connected; ++attempt) {
+      connected = client.connect(socket_path);
+      if (!connected)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    ASSERT_TRUE(connected);
+    uint32_t regions = 0;
+    uint32_t irqs = 0;
+    ASSERT_TRUE(client.device_info(regions, irqs));
+    old_session = device.current_session();
+    ASSERT_NE(old_session, nullptr);
+  }
+  ASSERT_EQ(finished.wait_for(std::chrono::seconds(3)), std::future_status::ready);
+  EXPECT_EQ(finished.get(), rocjitsu::VfioDeviceHost::ServeResult::Failed);
+  serving.join();
+  const rocjitsu::VfioDeviceHost::ClientSnapshot snapshot = host.client_snapshot();
+  EXPECT_FALSE(snapshot.attached);
+  EXPECT_EQ(snapshot.completed_disconnects, 0u);
+  EXPECT_EQ(device.current_session(), nullptr);
+  EXPECT_FALSE(old_session->acquire());
+}
 
 TEST(VfioDeviceHostLifecycle, KeepsClosedSnapshotWhileDisconnectResetIsSlow) {
   rocjitsu::test::ScopedTempDirectory runtime;
@@ -989,7 +1030,9 @@ public:
 
   void dma_map(const simdojo::DmaRegion &) override {}
   void dma_unmap(const simdojo::DmaRegion &) override {}
-  void reset(simdojo::ResetKind) override {}
+  util::Result reset(simdojo::ResetKind, util::DiagnosticEmitter = {}) override {
+    return util::Result::success();
+  }
 
   /// @brief Raise vector zero, as an interrupt source eventually will.
   [[nodiscard]] bool raise() {
@@ -1610,6 +1653,24 @@ TEST(VfioServer, CleansTheFirstListenerWhenTheSecondBindFails) {
       << "the first listener survived the failure to bind the second";
 }
 
+TEST(VfioServer, ReturnsFailureWhenRelativeSocketPathCannotBeNormalized) {
+  rocjitsu::test::ScopedTempDirectory runtime;
+  ASSERT_TRUE(runtime.initialize("rj-vfu-missing-cwd-"));
+  const pid_t child = ::fork();
+  ASSERT_GE(child, 0);
+  if (child == 0) {
+    if (::chdir(runtime.path().c_str()) != 0 || ::rmdir(runtime.path().c_str()) != 0)
+      ::_exit(2);
+    ::_exit(rocjitsu::run_vfio_server(RJ_VFU_TEST_CONFIG_PATH, "gpu.sock"));
+  }
+  ChildProcessGuard child_guard(child);
+  const std::optional<int> status = wait_for_child_bounded(child, std::chrono::seconds(15));
+  ASSERT_TRUE(status);
+  child_guard.release();
+  ASSERT_TRUE(WIFEXITED(*status));
+  EXPECT_EQ(WEXITSTATUS(*status), 1);
+}
+
 // A server that cannot serve must say so and exit, not hang. The engine runs on
 // its own thread and finishes only when asked to, so any early return that
 // forgets to ask joins a thread that never ends -- and the process then sits
@@ -1753,10 +1814,7 @@ TEST(VfioServer, PropagatesAnEngineFailureAfterReadiness) {
   FAIL() << "the server remained alive after its simulation engine failed";
 }
 
-// An empty target is a caller's mistake, and the serving thread is the wrong
-// place to discover it: invoking one throws bad_function_call there, which is
-// reported as work that ran and failed -- indistinguishable from work that
-// could not be done -- while the single slot is spent on nothing.
+// An empty target must be refused before it consumes the single request slot.
 TEST(VfioDeviceHost, RefusesEmptyWorkRatherThanThrowingOnTheServingThread) {
   ServedDevice served;
   ASSERT_TRUE(served.built());
@@ -1823,42 +1881,6 @@ TEST(VfioDeviceHost, RefusesASecondRequestWhileOneIsOutstanding) {
   // visible here and the bounded wait in the first callback has ended.
   served.stop_serving();
   EXPECT_FALSE(second_ran) << "a refused request must not run";
-}
-
-// A request that throws must not take the process with it: it runs on the serving
-// thread, where an escaping exception would terminate rather than propagate.
-TEST(VfioDeviceHost, SurvivesAThrowingRequest) {
-  // Both promises are declared before the fixture so they outlive the join
-  // in its destructor: on a timed-out wait, or a rejected retry loop, the
-  // test returns with a request still pending, and the serving thread may
-  // call set_value() after the test body has ended.
-  std::promise<void> threw;
-  std::promise<void> ran_after;
-  ServedDevice served;
-  ASSERT_TRUE(served.built());
-
-  std::future<void> did_throw = threw.get_future();
-  ASSERT_TRUE(served.host().ask_serving_thread([&threw] {
-    threw.set_value();
-    throw std::runtime_error("request failed");
-  }));
-  ASSERT_EQ(did_throw.wait_for(std::chrono::seconds(10)), std::future_status::ready);
-
-  // Still serving afterwards, which is the point: the request failed, the device
-  // did not. Retried because the throwing request signalled before it threw, so
-  // it is legitimately still outstanding -- and therefore still refusing -- for
-  // the moment it takes the serving thread to unwind and clear it.
-  std::future<void> after = ran_after.get_future();
-  bool accepted = false;
-  for (int attempt = 0; attempt < 200 && !accepted; ++attempt) {
-    accepted = served.host().ask_serving_thread([&ran_after] { ran_after.set_value(); });
-    if (!accepted) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-  }
-  ASSERT_TRUE(accepted) << "the host never accepted a request again after one threw";
-  EXPECT_EQ(after.wait_for(std::chrono::seconds(10)), std::future_status::ready)
-      << "serving stopped after a request threw";
 }
 
 // Documented: a request may never run. Accepting one after serving has stopped
