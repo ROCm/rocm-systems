@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from conftest import RocprofsysTest, assert_resolved_settings
+from conftest import RocprofsysTest, assert_resolved_settings, host_counters_expected
 
 pytestmark = [pytest.mark.presets]
 
@@ -902,7 +902,7 @@ class TestCpuTargetFlags(RocprofsysTest):
                 result,
                 subtest_name="CPU frequency counters",
                 label_substrings=["fib"],
-                counter_names_present=["Frequency (S)"],
+                counter_names_present=host_counters_expected(["Frequency (S)"]),
             )
         self.assert_rocpd(
             result,
