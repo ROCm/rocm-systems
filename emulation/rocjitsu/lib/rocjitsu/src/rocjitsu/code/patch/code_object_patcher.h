@@ -95,6 +95,8 @@ public:
   /// the executable LOAD segment that contains .text, preserves LOAD alignment,
   /// updates moved symbols and relocation places, and keeps descriptor-relative
   /// entries coherent with explicit descriptor patches applied by DBT.
+  /// Rejects growth that would extend a divergent LOAD mapping and supported
+  /// dynamic relocation writes that overlap final .text after place remapping.
   [[nodiscard]] bool replace_text(
       std::span<const uint8_t> new_text,
       std::span<const TextOffsetRelocation> text_relocations = {},

@@ -272,13 +272,21 @@ Shared admission checks the complete write interval of supported ROCr dynamic
 relocations, including writes that start before `.text` and extend into it.
 Overflowing write ends reject; an interval ending exactly at `.text` only
 touches it. Existing static, inert and unsupported-form policies remain separate.
+`CodeObjectPatcher::replace_text()` checks supported dynamic
+writes again after remapping relocation destinations, using the final text extent.
+An unmoved write into the appended trampoline rejects; a destination in a moved
+allocated section remains eligible when its final write interval clears `.text`.
 
 Each edit batch also checks PT_LOAD file ranges. Edited bytes shared by mappings
 to different virtual addresses reject, while touching ranges, empty file ranges,
-and aliases outside the edited anchors remain eligible. Equivalent mappings to
-the same address retain the modern loader's shared-allocation semantics. This
+and aliases outside the edited anchors remain eligible for this check. Equivalent
+mappings to the same address retain the modern loader's shared-allocation semantics. This
 check does not establish descriptor ownership or require a unique executable
 mapping for an entire kernel; those qualification decisions remain with consumers.
+Separately, text growth rejects any PT_LOAD that would acquire the inserted bytes
+at a different virtual address. This includes an alias of the last source word
+whose file range ends exactly at the insertion point, even if no anchor edits
+that word. Equivalent mappings at the insertion point remain eligible.
 
 The reference checks cover decoded direct-branch destinations, text-symbol
 start/end offsets, raw symbol-less RELATIVE64 destinations under the existing

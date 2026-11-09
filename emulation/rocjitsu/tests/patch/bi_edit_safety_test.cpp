@@ -206,6 +206,157 @@ TEST(BiEditSafety, AllowsRelocationWriteEndingAtTextBoundary) {
   expect_loaded_prefix_relocation_policy(8, false);
 }
 
+void expect_tail_relocation_growth_policy(bool moved_section) {
+  std::vector<uint8_t> image =
+      test::make_gfx1200_kernel_elf({kNop0Word, kNop1Word, kNop0Word, kEndpgmWord}, 0);
+  const AmdGpuCodeObject original(image.data(), image.size());
+  ASSERT_TRUE(original.is_valid());
+  const Section &text = *original.text_sections().front();
+  const uint64_t text_end = text.vaddr() + text.size();
+  const uint64_t text_file_end = text.sectionOffset() + text.size();
+  const CodeObjectPatcher original_patcher(original);
+  std::vector<Elf64_Shdr> sections = original_patcher.section_headers();
+  Elf64_Ehdr header = {};
+  std::memcpy(&header, image.data(), sizeof(header));
+  header.e_ident[EI_DATA] = ELFDATA2LSB;
+  header.e_ident[EI_VERSION] = 1;
+  header.e_ident[EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
+  std::optional<std::vector<Elf64_Phdr>> segments =
+      read_elf_table<Elf64_Phdr>(image, header.e_phoff, header.e_phnum, header.e_phentsize);
+  ASSERT_TRUE(segments);
+  ASSERT_EQ(segments->size(), 2u);
+  ASSERT_EQ(segments->front().p_vaddr, text.vaddr());
+  ASSERT_EQ(segments->front().p_memsz, text.size());
+  if (moved_section) {
+    // This target moves with its own LOAD. The equal starting address must not
+    // cause a pre-growth range check to reject an otherwise safe relocation.
+    sections.push_back({.sh_name = 0,
+                        .sh_type = SHT_NOBITS,
+                        .sh_flags = SHF_ALLOC | SHF_WRITE,
+                        .sh_addr = text_end,
+                        .sh_offset = text_file_end,
+                        .sh_size = sizeof(uint64_t),
+                        .sh_link = 0,
+                        .sh_info = 0,
+                        .sh_addralign = alignof(uint64_t),
+                        .sh_entsize = 0});
+    segments->push_back({.p_type = PT_LOAD,
+                         .p_flags = 0x6, // PF_R | PF_W
+                         .p_offset = text_file_end,
+                         .p_vaddr = text_end,
+                         .p_paddr = text_end,
+                         .p_filesz = 0,
+                         .p_memsz = sizeof(uint64_t),
+                         .p_align = 1});
+  } else {
+    // No allocated section owns this zero-fill tail, so relocation remapping
+    // leaves its address at the start of the appended trampoline.
+    segments->front().p_memsz += sizeof(uint64_t);
+    segments->front().p_flags |= 0x2u; // PF_W
+  }
+  const std::vector<Elf64_Shdr>::iterator symbols =
+      std::ranges::find(sections, SHT_SYMTAB, &Elf64_Shdr::sh_type);
+  ASSERT_NE(symbols, sections.end());
+  const uint32_t symbol_table_index = static_cast<uint32_t>(symbols - sections.begin());
+  symbols->sh_type = SHT_DYNSYM;
+  const uint64_t relocation_offset = header.e_shoff;
+  const Elf64_Rela relocation = {
+      .r_offset = text_end, .r_info = (uint64_t{1} << 32) | R_AMDGPU_ABS64, .r_addend = 0};
+  const std::vector<Elf64_Phdr>::iterator data_load =
+      std::ranges::find_if(*segments, [](const Elf64_Phdr &segment) {
+        return segment.p_type == PT_LOAD && segment.p_filesz != 0 && (segment.p_flags & PF_X) == 0;
+      });
+  ASSERT_NE(data_load, segments->end());
+  const uint64_t relocation_vaddr = data_load->p_vaddr + relocation_offset - data_load->p_offset;
+  data_load->p_filesz = relocation_offset + sizeof(relocation) - data_load->p_offset;
+  data_load->p_memsz = data_load->p_filesz;
+  sections.push_back({.sh_name = 0,
+                      .sh_type = SHT_RELA,
+                      .sh_flags = SHF_ALLOC,
+                      .sh_addr = relocation_vaddr,
+                      .sh_offset = relocation_offset,
+                      .sh_size = sizeof(relocation),
+                      .sh_link = symbol_table_index,
+                      .sh_info = SHN_UNDEF,
+                      .sh_addralign = alignof(Elf64_Rela),
+                      .sh_entsize = sizeof(relocation)});
+  std::ranges::sort(*segments, {}, &Elf64_Phdr::p_vaddr);
+  header.e_phnum = static_cast<uint16_t>(segments->size());
+  ASSERT_LE(header.e_phoff + segments->size() * sizeof(Elf64_Phdr), text.sectionOffset());
+  header.e_shoff += sizeof(relocation);
+  header.e_shnum = static_cast<uint16_t>(sections.size());
+  image.resize(header.e_shoff + sections.size() * sizeof(Elf64_Shdr));
+  std::memcpy(image.data() + relocation_offset, &relocation, sizeof(relocation));
+  std::memcpy(image.data(), &header, sizeof(header));
+  std::memcpy(image.data() + header.e_phoff, segments->data(),
+              segments->size() * sizeof(Elf64_Phdr));
+  std::memcpy(image.data() + header.e_shoff, sections.data(), sections.size() * sizeof(Elf64_Shdr));
+  ASSERT_EQ(classify_rocr_relocation_section(header, sections, sections.back()),
+            RocrRelocationSectionMode::Dynamic);
+  ASSERT_EQ(std::ranges::any_of(sections,
+                                [&](const Elf64_Shdr &section) {
+                                  return (section.sh_flags & SHF_ALLOC) != 0 &&
+                                         text_end >= section.sh_addr &&
+                                         text_end - section.sh_addr < section.sh_size;
+                                }),
+            moved_section);
+  const std::vector<uint8_t> pristine = image;
+  const AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  const CodeObjectPatcher patcher(source);
+  ASSERT_FALSE(patcher.has_relocations_within_text());
+  ASSERT_FALSE(patcher.has_malformed_rocr_relocation_section());
+  ASSERT_FALSE(patcher.has_unsupported_relocation_to_text());
+  Instrumentor instrumentor(source, kArch);
+  instrumentor.add_point_by_offset(0);
+  const Instrumentor::ValidationResult eligible = instrumentor.validate_points();
+  ASSERT_TRUE(eligible.errors.empty()) << eligible.errors.front();
+  ASSERT_EQ(eligible.sites.size(), 1u);
+  const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+  if (moved_section) {
+    ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+    ASSERT_EQ(result.sites.size(), 1u);
+    ASSERT_EQ(result.patches.size(), 1u);
+    const AmdGpuCodeObject candidate(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(candidate.is_valid());
+    const Section &emitted_text = *candidate.text_sections().front();
+    ASSERT_GT(emitted_text.size(), text.size());
+    const CodeObjectPatcher emitted_patcher(candidate);
+    EXPECT_FALSE(emitted_patcher.has_relocations_within_text());
+    const std::vector<Elf64_Shdr> emitted_sections = emitted_patcher.section_headers();
+    ASSERT_EQ(emitted_sections.size(), sections.size());
+    Elf64_Rela emitted_relocation = {};
+    std::memcpy(&emitted_relocation, result.elf_bytes.data() + emitted_sections.back().sh_offset,
+                sizeof(emitted_relocation));
+    const Elf64_Shdr &target = emitted_sections[emitted_sections.size() - 2];
+    EXPECT_EQ(target.sh_type, SHT_NOBITS);
+    EXPECT_GT(target.sh_addr, text_end);
+    EXPECT_GE(target.sh_addr, emitted_text.vaddr() + emitted_text.size());
+    EXPECT_EQ(emitted_relocation.r_offset, target.sh_addr);
+    EXPECT_EQ(emitted_relocation.r_info, relocation.r_info);
+    EXPECT_EQ(emitted_relocation.r_addend, relocation.r_addend);
+    uint32_t relocated_word = 0;
+    std::memcpy(&relocated_word, emitted_text.data() + result.sites.front().guest_offset,
+                sizeof(relocated_word));
+    EXPECT_EQ(relocated_word, kNop0Word);
+  } else {
+    EXPECT_FALSE(result.errors.empty());
+    EXPECT_TRUE(result.elf_bytes.empty());
+    EXPECT_TRUE(result.sites.empty());
+    EXPECT_TRUE(result.patches.empty());
+  }
+  EXPECT_EQ(image, pristine);
+  EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
+}
+
+TEST(BiEditSafety, RejectsRelocationWriteIntoAppendedTrampoline) {
+  expect_tail_relocation_growth_policy(false);
+}
+
+TEST(BiEditSafety, AllowsRelocationTargetMovedClearOfAppendedTrampoline) {
+  expect_tail_relocation_growth_policy(true);
+}
+
 struct LoadAliasFixture {
   std::vector<uint8_t> image;
   Elf64_Phdr alias;
@@ -397,6 +548,62 @@ TEST(BiEditSafety, RejectsDivergentLoadFileAliasesAtEditedInstructions) {
     EXPECT_EQ(fixture->image, pristine);
     EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
   }
+}
+
+TEST(BiEditSafety, RejectsTextGrowthIntoDivergentLoadZeroFill) {
+  const std::optional<LoadAliasFixture> fixture = make_load_alias_fixture(12, 4, 64);
+  ASSERT_TRUE(fixture);
+  const std::vector<uint8_t> pristine = fixture->image;
+  const AmdGpuCodeObject source(pristine.data(), pristine.size());
+  ASSERT_TRUE(source.is_valid());
+  const Section &text = *source.text_sections().front();
+  ASSERT_EQ(text.size(), 16u);
+  ASSERT_EQ(fixture->alias.p_offset + fixture->alias.p_filesz, text.sectionOffset() + text.size());
+  ASSERT_GT(fixture->alias.p_memsz, fixture->alias.p_filesz);
+  Instrumentor instrumentor(source, kArch);
+  instrumentor.add_point_by_offset(0);
+  const Instrumentor::ValidationResult eligible = instrumentor.validate_points();
+  ASSERT_TRUE(eligible.errors.empty()) << eligible.errors.front();
+  ASSERT_EQ(eligible.sites.size(), 1u);
+  const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+  EXPECT_FALSE(result.errors.empty());
+  EXPECT_TRUE(result.elf_bytes.empty());
+  EXPECT_TRUE(result.sites.empty());
+  EXPECT_TRUE(result.patches.empty());
+  EXPECT_EQ(fixture->image, pristine);
+  EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
+}
+
+TEST(BiEditSafety, AllowsTextGrowthThroughEquivalentLoadMapping) {
+  const std::optional<LoadAliasFixture> fixture = make_load_alias_fixture(12, 4, 4, true);
+  ASSERT_TRUE(fixture);
+  const AmdGpuCodeObject source(fixture->image.data(), fixture->image.size());
+  ASSERT_TRUE(source.is_valid());
+  Instrumentor instrumentor(source, kArch);
+  instrumentor.add_point_by_offset(0);
+  const InstrumentedCodeObject result = instrumentor.patch();
+  ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+  ASSERT_EQ(result.sites.size(), 1u);
+  const AmdGpuCodeObject candidate(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(candidate.is_valid());
+  const Section &text = *candidate.text_sections().front();
+  ASSERT_GT(text.size(), 16u);
+  Elf64_Ehdr header = {};
+  std::memcpy(&header, result.elf_bytes.data(), sizeof(header));
+  const std::optional<std::vector<Elf64_Phdr>> segments = read_elf_table<Elf64_Phdr>(
+      result.elf_bytes, header.e_phoff, header.e_phnum, header.e_phentsize);
+  ASSERT_TRUE(segments);
+  const std::vector<Elf64_Phdr>::const_iterator alias =
+      std::ranges::find(*segments, fixture->alias.p_vaddr, &Elf64_Phdr::p_vaddr);
+  ASSERT_NE(alias, segments->end());
+  EXPECT_EQ(alias->p_offset, fixture->alias.p_offset);
+  EXPECT_EQ(alias->p_vaddr, text.vaddr() + 12);
+  EXPECT_GE(alias->p_filesz, text.size() - 12);
+  EXPECT_GE(alias->p_memsz, alias->p_filesz);
+  ASSERT_LE(alias->p_offset + text.size() - 12, result.elf_bytes.size());
+  EXPECT_EQ(
+      std::memcmp(result.elf_bytes.data() + alias->p_offset, text.data() + 12, text.size() - 12),
+      0);
 }
 
 TEST(BiEditSafety, LoadFileAliasChecksKeepTouchingEmptyAndEquivalentMappingsEligible) {
