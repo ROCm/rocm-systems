@@ -5,6 +5,10 @@
  */
 
 #include <hip_test_common.hh>
+#include <resource_guards.hh>
+#include <algorithm>
+#include <array>
+#include <atomic>
 #include <iterator>
 #include <vector>
 #include <mutex>
@@ -154,6 +158,79 @@ HIP_TEST_CASE(Unit_hipGetSetDeviceFlags_Threaded) {
 
   test_thread.join();
   HIP_CHECK_THREAD_FINALIZE();
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Change the scheduling policy after queues have allocated their completion signals.
+ *  - Check that callbacks, memory operations and synchronization still complete as signals
+ *    are reused across repeated policy changes.
+ * Test source
+ * ------------------------
+ *  - unit/device/hipGetSetDeviceFlags.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.2
+ */
+HIP_TEST_CASE(Unit_hipGetSetDeviceFlags_CompletionAfterPolicyChange) {
+  unsigned int saved_flags = 0;
+  HIP_CHECK(hipGetDeviceFlags(&saved_flags));
+  struct RestoreFlags {
+    unsigned int flags;
+    ~RestoreFlags() { static_cast<void>(hipSetDeviceFlags(flags)); }
+  } restore{saved_flags};
+
+  const auto initial = GENERATE(hipDeviceScheduleSpin, hipDeviceScheduleBlockingSync);
+  const auto alternate =
+      initial == hipDeviceScheduleSpin ? hipDeviceScheduleBlockingSync : hipDeviceScheduleSpin;
+  HIP_CHECK(hipSetDeviceFlags(initial));
+
+  constexpr size_t bytes_per_stream = 4096;
+  constexpr size_t iterations = 128;
+  LinearAllocGuard<unsigned char> memory(LinearAllocs::hipMalloc, 2 * bytes_per_stream);
+  std::atomic<size_t> callbacks{0};
+  std::array<StreamGuard, 2> streams{StreamGuard(Streams::withFlags, hipStreamNonBlocking),
+                                     StreamGuard(Streams::withFlags, hipStreamNonBlocking)};
+  struct DrainStreams {
+    const std::array<StreamGuard, 2>& streams;
+    ~DrainStreams() {
+      // Keep callback data alive even when a test assertion unwinds this scope.
+      for (const auto& stream : streams) {
+        static_cast<void>(hipStreamSynchronize(stream.stream()));
+      }
+    }
+  } drain{streams};
+  for (size_t i = 0; i < streams.size(); ++i) {
+    HIP_CHECK(hipMemsetAsync(memory.ptr() + i * bytes_per_stream, 0, bytes_per_stream,
+                             streams[i].stream()));
+    HIP_CHECK(hipStreamSynchronize(streams[i].stream()));
+  }
+
+  size_t expected_callbacks = 0;
+  for (auto policy : {alternate, initial, alternate}) {
+    CAPTURE(initial, policy);
+    HIP_CHECK(hipSetDeviceFlags(policy));
+    // Exceed the default signal-pool size, so both existing and reused signals are exercised.
+    for (size_t iteration = 0; iteration < iterations; ++iteration) {
+      for (size_t i = 0; i < streams.size(); ++i) {
+        HIP_CHECK(hipMemsetAsync(memory.ptr() + i * bytes_per_stream, iteration, bytes_per_stream,
+                                 streams[i].stream()));
+        HIP_CHECK(hipLaunchHostFunc(
+            streams[i].stream(),
+            [](void* data) { static_cast<std::atomic<size_t>*>(data)->fetch_add(1); }, &callbacks));
+        ++expected_callbacks;
+      }
+    }
+    for (const auto& stream : streams) {
+      HIP_CHECK(hipStreamSynchronize(stream.stream()));
+    }
+    REQUIRE(callbacks.load() == expected_callbacks);
+    std::array<unsigned char, 2 * bytes_per_stream> result{};
+    HIP_CHECK(hipMemcpy(result.data(), memory.ptr(), result.size(), hipMemcpyDeviceToHost));
+    REQUIRE(std::all_of(result.begin(), result.end(),
+                        [](unsigned char value) { return value == iterations - 1; }));
+  }
 }
 
 /**

@@ -1252,9 +1252,6 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
         !ts->command().CpuWaitRequested();
   }
   bool use_irq = enqueHandler || (IS_WINDOWS && gpu_.ForceIrq()) || !gpu_.dev().ActiveWait();
-  if (!use_irq) {
-    PlaceForUse(timing_only);
-  }
   // The scheduling policy can change after the signal pool is created. Check the selected
   // signal's type even in blocking mode, so callbacks never use a polling-only signal.
   if (signal_list_[current_id_]->flags_.interrupt_ != use_irq) {
@@ -1278,6 +1275,9 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
       signal_list_[current_id_] = pool_get.top();
       pool_get.pop();
     }
+  }
+  if (!use_irq) {
+    PlaceForUse(timing_only);
   }
   ProfilingSignal* prof_signal = signal_list_[current_id_];
   const bool blocking_callback = enqueHandler && ts->command().Callback() != nullptr &&
