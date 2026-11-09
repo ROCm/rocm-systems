@@ -17,6 +17,7 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "util/except.h"
 
 #include <gtest/gtest.h>
 
@@ -30,6 +31,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -907,6 +909,54 @@ TEST(DecodedInstructionCacheTest, FailedExecutionAndExceptionsDoNotRetainInstruc
   auto decoded = cache.decode(decoder, kCodeBase, 7, words, {});
   ASSERT_FALSE(decoded.failed());
   EXPECT_EQ(decoder.calls, 3u);
+}
+
+// Fails every execution: first through the legacy exception path, whose message
+// becomes the failure detail, then with an encoding error that carries none.
+class FailingDecoder final : public rocjitsu::Decoder {
+public:
+  class Failing final : public rocjitsu::Instruction {
+  public:
+    Failing() : Instruction("failing", &execute_failing) { size_ = 4; }
+  };
+
+  static void execute_failing(rocjitsu::Instruction &, void *wave) {
+    if (std::exchange(with_detail, false))
+      throw util::UnimplementedInst("first-failure-detail");
+    static_cast<amdgpu::Wavefront *>(wave)->report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::InvalidInstructionEncoding);
+  }
+
+  rocjitsu::DecodeResult decode(const rj_code_binary_inst_t *,
+                                const rocjitsu::DecodeErrorEmitter &) override {
+    return std::unique_ptr<rocjitsu::Instruction>(new Failing);
+  }
+  size_t max_instruction_words() const override { return 4; }
+
+  static inline bool with_detail = true;
+};
+
+TEST(DecodedInstructionCacheCuTest, FailureDetailDoesNotOutliveAThrowingFailureHandler) {
+  CuFixture fixture("failure_detail");
+  fixture.cu()->replace_decoder_for_test(std::make_unique<FailingDecoder>());
+  FailingDecoder::with_detail = true;
+  bool throw_next = true;
+  fixture.cu()->set_execution_failure_handler([&](amdgpu::Wavefront &) -> bool {
+    if (std::exchange(throw_next, false))
+      throw std::runtime_error("failure handler failed");
+    return false;
+  });
+  fixture.write_program(std::array<uint32_t, 1>{kSNop});
+  ASSERT_NE(fixture.launch(1, 0), nullptr);
+
+  // The handler throws while the first failure, which has a detail, is reported.
+  EXPECT_THROW(fixture.cu()->step(), std::runtime_error);
+  // The next failure has no detail of its own and must not report the first one's.
+  testing::internal::CaptureStderr();
+  fixture.cu()->step();
+  const std::string warning = testing::internal::GetCapturedStderr();
+  EXPECT_NE(warning.find("could not execute failing"), std::string::npos) << warning;
+  EXPECT_EQ(warning.find("first-failure-detail"), std::string::npos) << warning;
 }
 
 // An external decoder may return an instruction whose raw encoding points into
