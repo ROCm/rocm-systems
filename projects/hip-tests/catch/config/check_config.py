@@ -21,10 +21,10 @@ JIRA_PROJECTS = ("AIRUNTIME", "ROCM", "SWDEV", "EXSWHTEC", "AIRADSW")
 JIRA_RE = re.compile(r"(?:" + "|".join(JIRA_PROJECTS) + r")-\d+")
 
 
-def _unsupported_everywhere(field, targets):
-    """Return True if an 'unsupported' field's targets cover every platform."""
+def _covers_every_platform(targets):
+    """Return True if the targets together cover every platform."""
     covered = {c for target in targets for c in expand_skip_target(target)}
-    return field == "unsupported" and set(SKIP_TARGET_PLATFORMS) <= covered
+    return set(SKIP_TARGET_PLATFORMS) <= covered
 
 
 def parse_args():
@@ -77,7 +77,7 @@ def main():
                 if not all(isinstance(target, str) for target in targets):
                     invalid_skip_fields.append(f"  {group}/{case_name}: '{field}'")
                     continue
-                if _unsupported_everywhere(field, targets):
+                if field == "unsupported" and _covers_every_platform(targets):
                     unsupported_everywhere.append(f"  {group}/{case_name}: '{field}'")
                 # A populated skip section (non-empty targets) must record a
                 # non-empty string 'reason'; a non-scalar (list/mapping) or

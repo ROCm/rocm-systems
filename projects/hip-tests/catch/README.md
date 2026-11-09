@@ -90,7 +90,8 @@ Besides the per-platform, per-architecture and `asan` targets, a field may name 
 `amd` and `nvidia` are valid in both fields. The targets in a field are additive: the case is
 skipped wherever any of them applies, so adding `all` to an existing list disables the case
 everywhere and the existing targets can stay. The `reason` and Jira rules above apply unchanged.
-The group name is automatically added as a tag for every case.
+
+The config group name (e.g. `atomics`) is automatically added as a tag for every case.
 Changing the configuration file will retrigger the build, so we have an up to date configuration every time.
 
 Example:
