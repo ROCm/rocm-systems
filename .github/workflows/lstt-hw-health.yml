@@ -51,27 +51,27 @@ jobs:
     runs-on:
       - self-hosted
       - ${{ matrix.label }}
+      - ${{ matrix.host }}
     timeout-minutes: 20
 
     steps:
-      # The job is placed by label, and a GPU label can be on several hosts
-      # (lstt-gfx90a is on three), so check that this is the host the matrix
-      # row describes before comparing anything with its values. When a host's
-      # runner carries a label with its own name, add it to runs-on so a job is
-      # never sent to a runner that was not meant for this row.
+      # runs-on selects the host by its own name as well as its GPU label, since
+      # a GPU label can be on several hosts (lstt-gfx90a is on three). Check
+      # anyway that this is the host the matrix row describes, so a runner with
+      # the wrong label fails here instead of being compared with the values of
+      # another machine.
       - name: Host identity
         id: host
         shell: bash
         env:
           HOST: ${{ matrix.host }}
-          LABEL: ${{ matrix.label }}
         run: |
           set -euo pipefail
           echo "### ${HOST}" >> "$GITHUB_STEP_SUMMARY"
           got="$(hostname -s)"
           if [ "$got" != "${HOST}" ]; then
             echo "- host: ran on ${got}, not ${HOST}" >> "$GITHUB_STEP_SUMMARY"
-            echo "::error::This row is for ${HOST} but the job ran on ${got}. The label ${LABEL} is on more than one host: add a label that only ${HOST} carries to runs-on."
+            echo "::error::This row is for ${HOST} but the job ran on ${got}. Check that the runner labelled ${HOST} is the one on that machine."
             exit 1
           fi
 
