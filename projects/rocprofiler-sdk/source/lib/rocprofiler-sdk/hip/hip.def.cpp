@@ -760,6 +760,9 @@ HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNT
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 44
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipArrayGetPlane, hipArrayGetPlane, hipArrayGetPlane_fn, pPlaneArray, hArray, planeIdx);
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 45
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipArrayGetMemoryRequirements, hipArrayGetMemoryRequirements, hipArrayGetMemoryRequirements_fn, memoryRequirements, array, device);
+#endif
 // clang-format on
 
 #else

@@ -967,6 +967,8 @@ hipError_t hipGraphNodeGetLocalId(hipGraphNode_t node, unsigned int* nodeId);
 hipError_t hipGraphNodeGetToolsId(hipGraphNode_t node, unsigned long long* toolsId);
 hipError_t hipGraphGetId(hipGraph_t graph, unsigned int* graphId);
 hipError_t hipGraphExecGetId(hipGraphExec_t graphExec, unsigned int* graphId);
+hipError_t hipArrayGetMemoryRequirements(hipArrayMemoryRequirements* memoryRequirements,
+                                         hipArray_t array, hipDevice_t device);
 }  // namespace hip
 
 namespace hip {
@@ -1326,6 +1328,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipMipmappedArrayGetMemoryRequirements_fn =
      hip::hipMipmappedArrayGetMemoryRequirements;
   ptrDispatchTable->hipArrayGetSparseProperties_fn = hip::hipArrayGetSparseProperties;
+  ptrDispatchTable->hipArrayGetMemoryRequirements_fn = hip::hipArrayGetMemoryRequirements;
   ptrDispatchTable->hipMipmappedArrayGetLevel_fn = hip::hipMipmappedArrayGetLevel;
   ptrDispatchTable->hipModuleGetFunction_fn = hip::hipModuleGetFunction;
   ptrDispatchTable->hipModuleGetFunctionCount_fn = hip::hipModuleGetFunctionCount;
@@ -2346,9 +2349,10 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipGraphGetId_fn, 555);
 HIP_ENFORCE_ABI(HipDispatchTable, hipGraphExecGetId_fn, 556);
 // HIP_RUNTIME_API_TABLE_STEP_VERSION == 43
 HIP_ENFORCE_ABI(HipDispatchTable, hipDeviceGetExecAffinitySupport_fn, 557);
-
 // HIP_RUNTIME_API_TABLE_STEP_VERSION == 44
 HIP_ENFORCE_ABI(HipDispatchTable, hipArrayGetPlane_fn, 558);
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 45
+HIP_ENFORCE_ABI(HipDispatchTable, hipArrayGetMemoryRequirements_fn, 559);
 
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
@@ -2356,9 +2360,9 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipArrayGetPlane_fn, 558);
 //  HIP_ENFORCE_ABI(<table>, <functor>, 8)
 //
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
-HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 559)
+HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 560)
 
-static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 44,
+static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 45,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "
               "pointers and then update this check so it is true");
 #endif

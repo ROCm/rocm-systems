@@ -2641,6 +2641,10 @@ inline static hipError_t hipMipmappedArrayGetMemoryRequirements(
   return hipCUDAErrorTohipError(
       cudaMipmappedArrayGetMemoryRequirements(memoryRequirements, mipmap, device));
 }
+inline static hipError_t hipArrayGetMemoryRequirements(
+    hipArrayMemoryRequirements* memoryRequirements, hipArray_t array, hipDevice_t device) {
+  return hipCUDAErrorTohipError(cudaArrayGetMemoryRequirements(memoryRequirements, array, device));
+}
 
 inline static hipError_t hipArrayGetSparseProperties(hipArraySparseProperties* sparseProperties,
                                                      hipArray_t array) {
