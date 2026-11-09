@@ -140,6 +140,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
   struct ncclConnInfo* recvConn = NULL;
   volatile uint64_t* recvConnHeadPtr = NULL;
   uint64_t recvConnHead;
+  bool recvConnFifo = false;
 
   struct ncclConnInfo* sendConn = NULL;
   volatile struct ncclConnFifo* sendConnFifo = NULL;
@@ -229,12 +230,16 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
 #if RCCL_LL_FIFO_SYS_SCOPE
       __asm__ volatile("s_wait_storecnt 0x0" ::: "memory");
 #endif
+      // A network FIFO is refilled by the NIC once the proxy sees this credit, so the
+      // restore has to be visible system-wide first or it could land over new data.
+      if (recvConnFifo) __threadfence_system();
       STORE(recvConnHeadPtr, recvConnHead += 1);
     }
   }
   inline __device__ void postSend() {
     if (sendConnTailPtr) {
-      __atomic_signal_fence(__ATOMIC_SEQ_CST);
+      // The tail hands the slot to a proxy, which reads it from outside the GPU.
+      __threadfence_system();
       STORE((unsigned long long*)sendConnTailPtr, sendConnTail += 1);
     }
   }
@@ -571,6 +576,18 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
     }
   }
 
+  static constexpr int RowBytes = WARP_SIZE * 16;
+
+  // Bytes of FIFO an op of nelem elements occupies, padding included.
+  __device__ __forceinline__ static int padBytes(int nelem) {
+    constexpr int SliceBytes = PackPerSlice * 16;
+    const int bytes = nelem * (int)sizeof(T);
+    const int full = bytes / SliceBytes * SliceBytes;
+    const int rows = divUp(bytes - full, RowBytes);
+    const int nr = rows == 0 ? 0 : (PackPerThread > 1 && rows <= 1) ? 1 : (PackPerThread > 2 && rows <= 2) ? 2 : PackPerThread;
+    return full + nr * RowBytes;
+  }
+
 #if TDM_SUPPORTED && RCCL_TDM_NAN_WINDOW_BYTES
   // TDM path. The wire format is the register path's, byte for byte: a FIFO byte sits at the
   // same offset as the user byte it carries, and an op's last slice is padded to the same row
@@ -578,7 +595,6 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
   // the choice is made per op. Each warp moves contiguous row-aligned chunks through its LDS
   // windows instead of a slice through registers, so a chunk is one bulk FIFO poll, one bulk
   // restore and one bulk forward rather than a b128 access per lane per row.
-  static constexpr int RowBytes = WARP_SIZE * 16;
   static constexpr int TdmWindow = RCCL_TDM_NAN_WINDOW_BYTES;
   static_assert(TdmWindow % RowBytes == 0, "TDM NaN windows hold whole rows");
   // The FIFO is shared with a peer, so it is system scope and kept out of local caches, as
@@ -596,16 +612,6 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
     const uint32_t lo = __builtin_amdgcn_readfirstlane((uint32_t)v);
     const uint32_t hi = __builtin_amdgcn_readfirstlane((uint32_t)(v >> 32));
     return (P*)(((uint64_t)hi << 32) | lo);
-  }
-
-  // Bytes of FIFO an op of nelem elements occupies, padding included.
-  __device__ __forceinline__ static int padBytes(int nelem) {
-    constexpr int SliceBytes = PackPerSlice * 16;
-    const int bytes = nelem * (int)sizeof(T);
-    const int full = bytes / SliceBytes * SliceBytes;
-    const int rows = divUp(bytes - full, RowBytes);
-    const int nr = rows == 0 ? 0 : (PackPerThread > 1 && rows <= 1) ? 1 : (PackPerThread > 2 && rows <= 2) ? 2 : PackPerThread;
-    return full + nr * RowBytes;
   }
 
   // Keeps the first n bytes of x (n may fall outside [0, 16]) and zeroes the rest.
@@ -799,7 +805,9 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
       sendFifo[i] = SEND && i < nsend ? (v4u_gptr)sendPtr(i) + PackPerSlice * warp + lane : nullptr;
     int abortCache = __builtin_amdgcn_readfirstlane(abort);
 
-    if (SEND) waitSend(divUp(nelem, DataEltPerSlice) * PackPerSlice * 16);
+    // A proxy ships exactly these bytes, so rows past padBytes() must not be
+    // counted: stale ones in the staging slot would land over the peer's sentinel.
+    if (SEND) waitSend(padBytes(nelem));
     barrier();
 
     sqtt_marker_enter("PRIM_NAN_DATA_PROCESS");
@@ -870,6 +878,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
     if (tid >= nthreads - WARP_SIZE && wid < fan.nrecv()) {
       recvConnHeadPtr = recvConn->head;
       recvConnHead = recvConn->step;
+      recvConnFifo = recvConn->connFifo != nullptr;
     }
   }
 
