@@ -145,27 +145,31 @@ std::vector<ReplacementEdit> make_mixed_width_nop_edits() {
            .replacement = make_instruction_bytes({nop, nop, nop})}};
 }
 
-// Keep both executable sections loaded while only the exact .text name is
-// indexed by Instrumentor. The branch at 0x304 may legally leave that section.
-std::vector<uint8_t> make_branch_to_earlier_section_elf(uint32_t branch) {
-  constexpr uint64_t kEarlyAddress = 0x200;
+// Keep a second executable section loaded outside the indexed .text. The later
+// placement has its own LOAD so text growth moves its target by 4096 bytes.
+std::vector<uint8_t> make_branch_to_other_section_elf(uint32_t branch,
+                                                      bool helper_after_text = false) {
+  const uint64_t helper_address = helper_after_text ? 0x1400 : 0x200;
+  const uint64_t helper_file_offset = helper_after_text ? 0x400 : 0x200;
   constexpr uint64_t kTextAddress = 0x300;
   constexpr util::FailureOr<uint32_t> kNop = build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA2);
   constexpr util::FailureOr<uint32_t> kEndpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA2);
   static_assert(kNop.succeeded() && kEndpgm.succeeded());
-  const std::array<uint32_t, 2> words = {kNop.value(), branch};
+  const std::array<uint32_t, 3> words = {kNop.value(), branch, kEndpgm.value()};
   std::vector<uint8_t> names = {'\0'};
-  const uint32_t early_name = test::add_elf_name(names, ".text.early");
+  const uint32_t early_name =
+      test::add_elf_name(names, helper_after_text ? ".text.late" : ".text.early");
   const uint32_t text_name = test::add_elf_name(names, ".text");
   const uint32_t names_name = test::add_elf_name(names, ".shstrtab");
-  const uint64_t names_offset = kTextAddress + sizeof(words);
+  const uint64_t names_offset =
+      std::max(kTextAddress + sizeof(words), helper_file_offset + sizeof(uint32_t));
   const uint64_t section_offset = test::align_up_for_test(names_offset + names.size(), 8);
   std::array<Elf64_Shdr, 4> sections = {};
   sections[1] = {.sh_name = early_name,
                  .sh_type = SHT_PROGBITS,
                  .sh_flags = SHF_ALLOC | SHF_EXECINSTR,
-                 .sh_addr = kEarlyAddress,
-                 .sh_offset = kEarlyAddress,
+                 .sh_addr = helper_address,
+                 .sh_offset = helper_file_offset,
                  .sh_size = sizeof(uint32_t),
                  .sh_link = 0,
                  .sh_info = 0,
@@ -204,22 +208,34 @@ std::vector<uint8_t> make_branch_to_earlier_section_elf(uint32_t branch) {
   header.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX1030;
   header.e_ehsize = sizeof(header);
   header.e_phentsize = sizeof(Elf64_Phdr);
-  header.e_phnum = 1;
+  header.e_phnum = helper_after_text ? 2 : 1;
   header.e_shentsize = sizeof(Elf64_Shdr);
   header.e_shnum = sections.size();
   header.e_shstrndx = 3;
-  const Elf64_Phdr segment = {.p_type = PT_LOAD,
-                              .p_flags = 0x5, // PF_R | PF_X
-                              .p_offset = kEarlyAddress,
-                              .p_vaddr = kEarlyAddress,
-                              .p_paddr = kEarlyAddress,
-                              .p_filesz = names_offset - kEarlyAddress,
-                              .p_memsz = names_offset - kEarlyAddress,
-                              .p_align = sizeof(uint32_t)};
+  const Elf64_Phdr segment = {
+      .p_type = PT_LOAD,
+      .p_flags = 0x5, // PF_R | PF_X
+      .p_offset = helper_after_text ? kTextAddress : helper_file_offset,
+      .p_vaddr = helper_after_text ? kTextAddress : helper_address,
+      .p_paddr = helper_after_text ? kTextAddress : helper_address,
+      .p_filesz = helper_after_text ? sizeof(words) : names_offset - helper_file_offset,
+      .p_memsz = helper_after_text ? sizeof(words) : names_offset - helper_file_offset,
+      .p_align = sizeof(uint32_t)};
   std::vector<uint8_t> image(section_offset + sizeof(sections), 0);
   test_support::write_elf_struct_for_test(image, 0, header);
   test_support::write_elf_struct_for_test(image, header.e_phoff, segment);
-  test_support::write_elf_struct_for_test(image, kEarlyAddress, kEndpgm.value());
+  if (helper_after_text) {
+    const Elf64_Phdr helper = {.p_type = PT_LOAD,
+                               .p_flags = 0x5,
+                               .p_offset = helper_file_offset,
+                               .p_vaddr = helper_address,
+                               .p_paddr = helper_address,
+                               .p_filesz = sizeof(uint32_t),
+                               .p_memsz = sizeof(uint32_t),
+                               .p_align = 4096};
+    test_support::write_elf_struct_for_test(image, header.e_phoff + sizeof(segment), helper);
+  }
+  test_support::write_elf_struct_for_test(image, helper_file_offset, kEndpgm.value());
   std::memcpy(image.data() + kTextAddress, words.data(), sizeof(words));
   std::memcpy(image.data() + names_offset, names.data(), names.size());
   std::memcpy(image.data() + section_offset, sections.data(), sizeof(sections));
@@ -1852,12 +1868,132 @@ TEST(CheckedTextEdits, InstrumentorChecksDirectReferencesIncludingUnreachableBra
   }
 }
 
+TEST(CheckedTextEdits, ReplacementGrowthRejectsRetainedBranchesToMovedTargets) {
+  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA2;
+  const util::FailureOr<uint32_t> nop = build_s_nop(0, arch);
+  const util::FailureOr<uint32_t> endpgm = build_s_endpgm(arch);
+  ASSERT_TRUE(nop.succeeded() && endpgm.succeeded());
+  // Cases: later, same-text, removed, earlier, sectionless shifted LOAD,
+  // containing LOAD file tail, containing LOAD zero-fill tail.
+  for (int scenario = 0; scenario < 7; ++scenario) {
+    SCOPED_TRACE(scenario);
+    const bool later = scenario != 3;
+    const uint64_t target = scenario == 1 ? 0x308 : scenario >= 5 ? 0x400 : later ? 0x1400 : 0x200;
+    const int64_t displacement = static_cast<int64_t>(target) - 0x308;
+    const util::FailureOr<uint32_t> branch = build_s_branch(displacement / 4, arch);
+    ASSERT_TRUE(branch.succeeded());
+    std::vector<uint8_t> image = make_branch_to_other_section_elf(branch.value(), later);
+    if (scenario >= 4) {
+      const Elf64_Ehdr header = test_support::read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+      const Elf64_Shdr unsectioned = {};
+      test_support::write_elf_struct_for_test(image, header.e_shoff + sizeof(Elf64_Shdr),
+                                              unsectioned);
+      if (scenario >= 5) {
+        Elf64_Phdr segment =
+            test_support::read_elf_struct_for_test<Elf64_Phdr>(image, header.e_phoff);
+        segment.p_filesz = scenario == 6 ? 12 : 0x104;
+        segment.p_memsz = 0x104;
+        const Elf64_Phdr unused = {};
+        test_support::write_elf_struct_for_test(image, header.e_phoff, segment);
+        test_support::write_elf_struct_for_test(image, header.e_phoff + sizeof(segment), unused);
+      }
+    }
+    const AmdGpuCodeObject source(image.data(), image.size());
+    ASSERT_TRUE(source.is_valid());
+    const Section *helper =
+        test_support::find_section(source, later ? ".text.late" : ".text.early");
+    if (scenario < 4) {
+      ASSERT_NE(helper, nullptr);
+    }
+    // The three sectionless negatives exercise the mapping predicates directly.
+    for (int route = 0; route < (scenario < 4 ? 4 : 1); ++route) {
+      SCOPED_TRACE(route);
+      Instrumentor direct(source, arch);
+      Instrumentor seed(source, arch);
+      std::unique_ptr<Instrumentor> forked;
+      Instrumentor *batch = &direct;
+      TextEditError error;
+      if (route == 1) {
+        ASSERT_NE(direct.instruction_boundaries(error), nullptr) << error.message;
+      } else if (route >= 2) {
+        if (route == 3) {
+          seed.add_point_by_offset(0);
+          const Instrumentor::ValidationResult warm = seed.validate_points();
+          ASSERT_TRUE(warm.errors.empty()) << warm.errors.front();
+          ASSERT_EQ(warm.sites.size(), 1u);
+        }
+        FailureOr<std::unique_ptr<Instrumentor>> child = seed.fork(error);
+        ASSERT_TRUE(child.succeeded()) << error.message;
+        forked = std::move(child).value();
+        batch = forked.get();
+      }
+      InstrumentationPoint point = {
+          .anchor_offset = scenario == 2 ? 4u : 0u,
+          .kind = InstrumentationKind::ReplaceWithInst,
+          .probe_symbol = {},
+          .probe_args = {},
+          .replacement = InstructionReplacement{
+              .expected_bytes =
+                  make_instruction_bytes({scenario == 2 ? branch.value() : nop.value()}),
+              .replacement_bytes = scenario == 2 ? make_instruction_bytes({endpgm.value()})
+                                                 : std::vector<uint8_t>{}}};
+      batch->add_point(std::move(point));
+      const Instrumentor::ValidationResult validated = batch->validate_points();
+      const InstrumentedCodeObject result = batch->patch();
+      if (scenario == 0 || scenario >= 4) {
+        EXPECT_FALSE(validated.errors.empty());
+        EXPECT_TRUE(validated.sites.empty());
+        EXPECT_FALSE(result.errors.empty());
+        if (!validated.errors.empty()) {
+          EXPECT_NE(validated.errors.front().find("retained direct branch"), std::string::npos);
+        }
+        if (!result.errors.empty()) {
+          EXPECT_NE(result.errors.front().find("retained direct branch"), std::string::npos);
+        }
+        EXPECT_TRUE(result.elf_bytes.empty());
+        EXPECT_TRUE(result.sites.empty());
+        EXPECT_TRUE(result.edit_error.has_value());
+        if (result.edit_error) {
+          EXPECT_EQ(result.edit_error->code, TextEditErrorCode::UnsupportedReferences);
+          EXPECT_EQ(result.edit_error->offset, 4u);
+        }
+      } else {
+        ASSERT_TRUE(validated.errors.empty()) << validated.errors.front();
+        ASSERT_EQ(validated.sites.size(), 1u);
+        ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+        ASSERT_EQ(result.sites.size(), 1u);
+        const AmdGpuCodeObject candidate(result.elf_bytes.data(), result.elf_bytes.size());
+        ASSERT_TRUE(candidate.is_valid());
+        const Section *text = test_support::find_section(candidate, ".text");
+        const Section *moved_helper =
+            test_support::find_section(candidate, later ? ".text.late" : ".text.early");
+        ASSERT_NE(text, nullptr);
+        ASSERT_NE(moved_helper, nullptr);
+        EXPECT_EQ(moved_helper->vaddr(), helper->vaddr() + (later ? 4096 : 0));
+        const std::unique_ptr<Decoder> decoder = Decoder::create(arch);
+        ASSERT_NE(decoder, nullptr);
+        uint32_t word = 0;
+        std::memcpy(&word, text->data() + 4, sizeof(word));
+        const DecodeResult decoded = decoder->decode_window(std::span(&word, 1), 4);
+        ASSERT_TRUE(decoded.succeeded());
+        ASSERT_TRUE(decoded.value()->branch_offset_bytes());
+        const std::optional<uint64_t> destination = add_signed_offset(
+            text->vaddr() + 4 + decoded.value()->size(), *decoded.value()->branch_offset_bytes());
+        const uint64_t expected =
+            scenario == 2 ? text->vaddr() + result.sites.front().guest_offset : target;
+        EXPECT_EQ(destination, expected);
+      }
+      EXPECT_EQ(std::memcmp(source.image_data(), image.data(), image.size()), 0);
+    }
+  }
+}
+
 TEST(CheckedTextEdits, PreservesBranchToEarlierExecutableSection) {
   constexpr rj_code_arch_t kRdna2 = ROCJITSU_CODE_ARCH_RDNA2;
   // The branch at 0x304 uses next PC 0x308: (0x200 - 0x308) / 4 = -66.
   const util::FailureOr<uint32_t> branch = build_s_branch(-66, kRdna2);
   ASSERT_TRUE(branch.succeeded());
-  const std::vector<uint8_t> image = make_branch_to_earlier_section_elf(branch.value());
+  const std::vector<uint8_t> image = make_branch_to_other_section_elf(branch.value());
   const std::vector<uint8_t> pristine = image;
   const AmdGpuCodeObject object(image.data(), image.size());
   ASSERT_TRUE(object.is_valid());
@@ -1913,7 +2049,7 @@ TEST(CheckedTextEdits, RejectsBranchWhoseVirtualAddressUnderflows) {
   // Unlike an address before .text, (0x308 + -195 * 4) = -4 cannot be a VA.
   const util::FailureOr<uint32_t> branch = build_s_branch(-195, ROCJITSU_CODE_ARCH_RDNA2);
   ASSERT_TRUE(branch.succeeded());
-  const std::vector<uint8_t> image = make_branch_to_earlier_section_elf(branch.value());
+  const std::vector<uint8_t> image = make_branch_to_other_section_elf(branch.value());
   expect_reference_result(image, 0, 0, ROCJITSU_CODE_ARCH_RDNA2);
 }
 
@@ -1923,7 +2059,7 @@ TEST(CheckedTextEdits, ReplacementFactsRetainEarlierSectionAddressesAcrossForks)
   const util::FailureOr<uint32_t> nop = build_s_nop(0, kRdna2);
   const util::FailureOr<uint32_t> replacement = build_s_nop(1, kRdna2);
   ASSERT_TRUE(branch.succeeded() && nop.succeeded() && replacement.succeeded());
-  const std::vector<uint8_t> image = make_branch_to_earlier_section_elf(branch.value());
+  const std::vector<uint8_t> image = make_branch_to_other_section_elf(branch.value());
   const AmdGpuCodeObject source(image.data(), image.size());
   Instrumentor seed(source, kRdna2);
   TextEditError error;

@@ -95,7 +95,7 @@ current limits.
 - `filter_flags` is still a reserved milestone guardrail; a non-default value is fatal until it gains a real consumer. `force_full_exec` is consumed by callable points (see [Mask policy](#mask-policy)); points without a probe reject it because they have no call envelope whose mask could be widened.
 - Probe calls require the probe body to read no register its ABI does not supply (`analyze_probe_live_ins`, see [Probe live-ins](#probe-live-ins)). Under `AmdGpuFuncReturnS30S31` that is the link pair plus the declared argument VGPRs; any other input is fatal.
 - Callable probes reject code objects containing decoded guest `s_movrel*` instructions because liveness does not model M0-displaced SGPR accesses. This check includes unreachable blocks and other kernels. Inline-nop instrumentation without register growth remains supported.
-- The scalar guard does not cover vector-relative guest accesses. Without register growth, a callable probe can still be admitted and clobber a hidden live VGPR. On gfx1200 with `M0 = 2`, `v_movrels_b32 v3, v0` reads `v2`; a zero-argument probe that clears `v2` before the move can change `v3` from `7` to `0`. This pre-existing VGPR issue requires a separate fix.
+- Callable probes also require complete VGPR usage on the effective guest. Relative moves/swaps and potentially enabled GPR indexing are rejected because their runtime-selected registers are absent from ordinary def/use. This includes access introduced by replacement bodies; removing the only indirect access remains permitted. Pure replacement without register growth does not require this analysis.
 - Probe calls may pass 32-bit arguments via `InstrumentationPoint::probe_args`, delivered in VGPRs from `v0`. Each names a `ProbeArgSource`: a build-time constant, an anchor VGPR, a dword of the anchor `EXEC` mask, a dword of the framework's entry storage, or a lane-zero VGPR snapshot captured at dispatch entry. The count and the sources are declared by the caller and verified against the body; see [Probe arguments](#probe-arguments).
 - Probe calls require the probe's link pair (`s[30:31]` for `rj_nop_probe`) to be within the kernel's SGPR allocation (`kernel_sgpr_count`) and any chosen scratch/special-state temps to be below `ordinary_sgpr_bound` of it; allocation growth requires explicit original metadata counts and a supported resource note (see [Probe-call register requirement](#instrumentation-flow-probe-call)).
 - Register spilling is enabled for `spill_set = live_at_anchor ∩ (probe_clobbers ∪ builder_clobbers)`. The orchestrator scans the kernel descriptor (`scan_kernel_descriptors`), builds one `SpillManager` from its `private_segment_fixed_size`, splits the spill set by class, and calls `plan_vgpr_spills` / `plan_sgpr_spills` / `plan_acc_spills`. Spilling is gated per-arch by `max_scratch_offset_bytes()` (returns 0 ⇒ arch has no scratch emitter ⇒ unsupported) and by those fail-closed helpers; there is no `SpillPolicy` enum. A kernel with zero scratch, more than one kernel, an over-offset-cap slot, a probe that clobbers FLAT_SCRATCH, or (for SGPR spills) no dead bridge VGPR within the kernel's VGPR allocation fails closed.
@@ -146,6 +146,13 @@ constants are not yet relocated. This conservative restriction includes cases
 whose actual target stays fixed while unrelated metadata moves. Removing every
 source getpc in the batch remains permitted. The check uses immutable source
 facts across queries and forks; it does not add CFG/liveness to pure replacement.
+
+Retained direct branches are checked separately against the storage moved by
+growth, including allocated sections and unsectioned loaded tails. A batch that
+would leave such a branch targeting the old address is rejected before publishing
+ELF bytes or sites. Branches removed by the batch are excluded; same-text and
+earlier-section targets remain supported. This check reuses the pristine boundary
+index's checked destination arithmetic and shared source-facts lifetime.
 
 A replacement point can carry the normal callable-probe fields; its probe runs
 before the replacement body. One separate callable `BeforeInst` at the same offset
