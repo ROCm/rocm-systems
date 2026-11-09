@@ -5942,12 +5942,13 @@ TEST(Gfx1250ExecutionTest, SwmmacIu8K128MatchesIndependentSparseLayoutOracle) {
       for (uint32_t lane = 0; lane < 32; ++lane)
         cu.write_vgpr(base + kAcc + reg, lane, 0);
 
-    amdgpu::exec_swmmac_i32(cu, 16, 16, 128, 8, base + kAcc, base + kA, base + kB, base + kAcc,
-                            base + kIndex, 32, 0, amdgpu::extract_u8, amdgpu::extract_u8, false);
+    amdgpu::exec_swmmac_i32<16, 16, 128>(cu, 8, base + kAcc, base + kA, base + kB, base + kAcc,
+                                         base + kIndex, 32, 0, amdgpu::extract_u8,
+                                         amdgpu::extract_u8, false);
 
     for (uint32_t row = 0; row < 16; ++row)
       for (uint32_t col = 0; col < 16; ++col) {
-        const auto out = amdgpu::wmma_output_loc_32(16, 16, row, col);
+        const auto out = amdgpu::wmma_output_loc_32<16, 16>(row, col);
         EXPECT_EQ(cu.read_vgpr(base + kAcc + out.reg, out.lane), expected[row * 16 + col])
             << "row=" << row << " col=" << col;
       }

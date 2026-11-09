@@ -227,6 +227,16 @@ static hipError_t DefaultHipHostFree(void* ptr)
 }
 std::function<hipError_t(void*)> g_hipHostFree = DefaultHipHostFree;
 
+static hipError_t DefaultHipHostRegister(void*, std::size_t, unsigned) { return hipErrorInvalidValue; }
+std::function<hipError_t(void*, std::size_t, unsigned)> g_hipHostRegister = DefaultHipHostRegister;
+
+static hipError_t DefaultHipHostUnregister(void*) { return hipSuccess; }
+std::function<hipError_t(void*)> g_hipHostUnregister = DefaultHipHostUnregister;
+
+// Same as the plain stub it replaces: fails without touching *devPtr.
+static hipError_t DefaultHipHostGetDevicePointer(void**, void*, unsigned) { return hipErrorInvalidValue; }
+std::function<hipError_t(void**, void*, unsigned)> g_hipHostGetDevicePointer = DefaultHipHostGetDevicePointer;
+
 // --- device inventory + current-device state ----------------------------
 int g_deviceCount = 8;
 int g_currentDevice = 0;
@@ -442,12 +452,6 @@ std::function<hipError_t(hipStream_t)> g_hipStreamDestroy = DefaultHipStreamDest
 std::function<hipError_t(hipStreamCaptureMode*)>
     g_hipThreadExchangeStreamCaptureMode = DefaultHipThreadExchangeStreamCaptureMode;
 std::function<hipError_t(void)> g_hipGetLastError = DefaultHipGetLastError;
-static hipError_t DefaultHipHostRegister(void*, size_t, unsigned int) { return hipErrorInvalidValue; }
-static hipError_t DefaultHipHostGetDevicePointer(void**, void*, unsigned int) { return hipErrorInvalidValue; }
-static hipError_t DefaultHipHostUnregister(void*) { return hipErrorInvalidValue; }
-std::function<hipError_t(void*, size_t, unsigned int)> g_hipHostRegister = DefaultHipHostRegister;
-std::function<hipError_t(void**, void*, unsigned int)> g_hipHostGetDevicePointer = DefaultHipHostGetDevicePointer;
-std::function<hipError_t(void*)> g_hipHostUnregister = DefaultHipHostUnregister;
 static hipError_t DefaultHipExtLaunchKernel(const void*, dim3, dim3, void**, size_t, hipStream_t, hipEvent_t,
                                             hipEvent_t, int) {
     FailLoudUnfaked("hip_fakes", "hipExtLaunchKernel");
@@ -677,6 +681,9 @@ void ResetHipFakes()
     g_hipMallocManaged              = DefaultHipMallocManaged;
     g_hipFree                       = DefaultHipFree;
     g_hipHostFree                   = DefaultHipHostFree;
+    g_hipHostRegister               = DefaultHipHostRegister;
+    g_hipHostUnregister             = DefaultHipHostUnregister;
+    g_hipHostGetDevicePointer       = DefaultHipHostGetDevicePointer;
     g_hipGetDevice                  = DefaultHipGetDevice;
     g_hipSetDevice                  = DefaultHipSetDevice;
     g_hipGetDeviceCount             = DefaultHipGetDeviceCount;
@@ -725,9 +732,6 @@ void ResetHipFakes()
     g_hipStreamDestroy              = DefaultHipStreamDestroy;
     g_hipThreadExchangeStreamCaptureMode = DefaultHipThreadExchangeStreamCaptureMode;
     g_hipGetLastError               = DefaultHipGetLastError;
-    g_hipHostRegister               = DefaultHipHostRegister;
-    g_hipHostGetDevicePointer       = DefaultHipHostGetDevicePointer;
-    g_hipHostUnregister             = DefaultHipHostUnregister;
     g_hipExtLaunchKernel            = DefaultHipExtLaunchKernel;
     g_hipLaunchKernel               = DefaultHipLaunchKernel;
     g_hipEventRecord                = DefaultHipEventRecord;
@@ -914,6 +918,13 @@ hipError_t hipHostMalloc(void** ptr, size_t size, unsigned int flags)
     return g_hipHostMalloc(ptr, size, flags);
 }
 
+hipError_t hipHostRegister(void* ptr, size_t size, unsigned int flags)
+{
+    return g_hipHostRegister(ptr, size, flags);
+}
+
+hipError_t hipHostUnregister(void* ptr) { return g_hipHostUnregister(ptr); }
+
 hipError_t hipIpcCloseMemHandle(void* ptr) { return g_hipIpcCloseMemHandle(ptr); }
 
 hipError_t hipIpcOpenMemHandle(void** devPtr, hipIpcMemHandle_t handle, unsigned int flags)
@@ -1098,12 +1109,10 @@ hipError_t hipStreamCreate(hipStream_t*) { return hipErrorInvalidValue; }
 // hipStreamCreateWithPriority / hipDeviceGetStreamPriorityRange are defined
 // above (seam-routed) -- the develop merge added plainer duplicates here.
 hipError_t hipPointerGetAttributes(hipPointerAttribute_t*, const void*) { return hipErrorInvalidValue; }
-hipError_t hipHostGetDevicePointer(void** dptr, void* hptr, unsigned int flags)
+hipError_t hipHostGetDevicePointer(void** devPtr, void* hostPtr, unsigned int flags)
 {
-    return g_hipHostGetDevicePointer(dptr, hptr, flags);
+    return g_hipHostGetDevicePointer(devPtr, hostPtr, flags);
 }
-hipError_t hipHostRegister(void* ptr, size_t size, unsigned int flags) { return g_hipHostRegister(ptr, size, flags); }
-hipError_t hipHostUnregister(void* ptr) { return g_hipHostUnregister(ptr); }
 hipError_t hipIpcGetEventHandle(hipIpcEventHandle_t*, hipEvent_t) { return hipErrorInvalidValue; }
 hipError_t hipEventSynchronize(hipEvent_t event) { return g_hipEventSynchronize(event); }
 
@@ -1149,6 +1158,7 @@ hipError_t hipLaunchKernel(const void* function, dim3 grid, dim3 block, void** a
                            hipStream_t stream) {
   return g_hipLaunchKernel(function, grid, block, args, sharedMemBytes, stream);
 }
+hipError_t hipLaunchHostFunc(hipStream_t, hipHostFn_t, void*) { FailLoudUnfaked("hip_fakes", "hipLaunchHostFunc"); }
 }  // extern "C"
 
 // ---- Kernel registration the compiler emits for a TU that defines __global__ functions ----
