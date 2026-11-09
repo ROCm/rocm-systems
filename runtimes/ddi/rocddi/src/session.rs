@@ -790,6 +790,7 @@ mod tests {
 
         let event = DeviceEvent::GpuHardwareException(GpuHardwareException {
             endpoint_id: Some(id),
+            origin_id: None,
             scope: GpuResetScope::WholeGpu,
             memory_lost: false,
             cause: GpuResetCause::Hang,
@@ -808,6 +809,7 @@ mod tests {
 
         let next = DeviceEvent::GpuHardwareException(GpuHardwareException {
             endpoint_id: Some(id),
+            origin_id: None,
             scope: GpuResetScope::WholeGpu,
             memory_lost: true,
             cause: GpuResetCause::Ecc,
@@ -829,6 +831,7 @@ mod tests {
         drop(second);
         let older = DeviceEvent::GpuHardwareException(GpuHardwareException {
             endpoint_id: Some(id),
+            origin_id: None,
             scope: GpuResetScope::WholeGpu,
             memory_lost: false,
             cause: GpuResetCause::Other,

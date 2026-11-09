@@ -321,6 +321,10 @@ pub(crate) struct DeviceVm {
 }
 
 impl DeviceVm {
+    pub(crate) fn event_origin_id(&self) -> crate::device::event::DeviceEventOriginId {
+        crate::device::event::DeviceEventOriginId::from_driver_key(u64::from(self.gpu_id))
+    }
+
     pub(super) fn render(&self) -> Result<&File, Error> {
         self.render
             .as_ref()
@@ -810,6 +814,9 @@ impl LossEvent {
                 exception.gpu_id,
                 DeviceEvent::GpuHardwareException(GpuHardwareException {
                     endpoint_id: None,
+                    origin_id: Some(crate::device::event::DeviceEventOriginId::from_driver_key(
+                        u64::from(exception.gpu_id),
+                    )),
                     scope: if exception.reset_type == 0 {
                         GpuResetScope::WholeGpu
                     } else {

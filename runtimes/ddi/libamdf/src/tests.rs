@@ -40,28 +40,36 @@ fn reset_epoch_policy_uses_reset_evidence_and_device_identity() {
         imprecise: false,
         cause: GpuMemoryFaultCause::None,
     });
-    assert!(!instance::event_resets_device(memory_fault, endpoint_id));
+    assert!(!instance::event_resets_device(
+        memory_fault,
+        endpoint_id,
+        None
+    ));
 
     let exception = GpuHardwareException {
         endpoint_id: Some(endpoint_id),
+        origin_id: None,
         scope: GpuResetScope::Other,
         memory_lost: false,
         cause: GpuResetCause::Hang,
     };
     assert!(instance::event_resets_device(
         DeviceEvent::GpuHardwareException(exception),
-        endpoint_id
+        endpoint_id,
+        None
     ));
     assert!(!instance::event_resets_device(
         DeviceEvent::GpuHardwareException(exception),
-        [2; 16]
+        [2; 16],
+        None
     ));
     assert!(instance::event_resets_device(
         DeviceEvent::GpuHardwareException(GpuHardwareException {
             memory_lost: true,
             ..exception
         }),
-        [2; 16]
+        [2; 16],
+        None
     ));
 }
 
