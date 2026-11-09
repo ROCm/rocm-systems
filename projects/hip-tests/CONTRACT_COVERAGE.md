@@ -61,8 +61,8 @@ allowlisted:
 ### External-semaphore graph nodes
 
 These APIs require a valid external semaphore node. The device-only contract harness
-cannot construct such a node without an external producer, and the add path faults when
-fed an invalid handle on some runtime paths.
+cannot construct such a node without an external producer. Invalid-argument checks for
+all eight live in `catch/unit/graph/hipGraphExternalSemaphoresNodes.cc`.
 
 - `hipGraphAddExternalSemaphoresSignalNode`
 - `hipGraphAddExternalSemaphoresWaitNode`

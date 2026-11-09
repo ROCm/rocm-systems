@@ -108,6 +108,8 @@ RCCL_PARAM(DdaLLOneShotThreshold, "DDA_LL_ONESHOT_THRESHOLD", (size_t)(1) * 1024
 RCCL_PARAM(DdaLLTwoShotThreshold, "DDA_LL_TWOSHOT_THRESHOLD", (size_t)(2) * 1024 * 1024); // 2 MiB
 RCCL_PARAM(DdaLL128OneShotThreshold, "DDA_LL128_ONESHOT_THRESHOLD", (size_t)(4) * 1024 * 1024); // 4 MiB
 RCCL_PARAM(DdaLL128TwoShotThreshold, "DDA_LL128_TWOSHOT_THRESHOLD", (size_t)(64) * 1024 * 1024); // 64 MiB
+// Opt in to the LDS-staged LL128 two-shot AllReduce writer on gfx1250 wave32 from 2 MiB shards.
+RCCL_PARAM(DdaLL128AsyncWire, "DDA_LL128_ASYNC_WIRE", 0);
 RCCL_PARAM(DdaLL128, "DDA_LL128", kDdaThresholdUnset);
 RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", kDdaThresholdUnset);
 // When set, bypass the per-arch tuning table entirely and use base-commit
@@ -2905,7 +2907,15 @@ void rcclSetPxn(struct ncclComm* comm, int& rcclPxnDisable) {
   const char* inputStr = getenv("NCCL_PXN_DISABLE");
   const bool archGfx942 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942");
   const bool archGfx950 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
+  const bool archGfx1250 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250");
   comm->enableCustColl = (archGfx942 || archGfx950) && (inputStr && !atoi(inputStr));
+
+  // gfx1250: keep PXN off unless NCCL_PXN_DISABLE explicitly asks for it.
+  if (archGfx1250 && !inputStr) {
+    INFO(NCCL_INIT, "RCCL PXN disabled by default on gfx1250");
+    rcclPxnDisable = comm->pxnDisable = 1;
+    return;
+  }
 
   if ((!archGfx942 && !archGfx950) || inputStr) {
     rcclPxnDisable = comm->pxnDisable = RCCL_VALUE_INVALID;

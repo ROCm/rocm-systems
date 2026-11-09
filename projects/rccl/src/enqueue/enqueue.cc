@@ -1311,11 +1311,9 @@ NCCL_PARAM(ChunkSize, "CHUNK_SIZE", 0);
 // Need this temporary parameter to disable p2p batching to avoid some dips at 4MB - 32 MB message size at large scale
 // This parameter must be removed after further investigation,
 // Note that NCCL enables batching by default and it is needed to achieve perf for with smaller messages <= 4MB
-// Batching helps small P2P operations but loses bandwidth once each peer carries
-// more than 64 KiB. Apply the cutoff even when the user explicitly enables
-// batching; rcclEffectiveP2pBatchEnable separately controls the default policy.
+// Fusion size cutoff policy: see rcclP2pBatchCutoff in channel.h.
 RCCL_PARAM(P2pBatchEnable, "P2P_BATCH_ENABLE", -1);
-RCCL_PARAM(P2pBatchThreshold, "P2P_BATCH_THRESHOLD", 1 << 16); // 64k per-rank message size
+RCCL_PARAM(P2pBatchThreshold, "P2P_BATCH_THRESHOLD", -1);
 
 int rcclEffectiveP2pBatchEnable(struct ncclComm* comm) {
   auto userInput = rcclParamP2pBatchEnable();
@@ -1326,8 +1324,9 @@ int rcclEffectiveP2pBatchEnable(struct ncclComm* comm) {
 }
 
 static bool rcclP2pBatchEligible(struct ncclComm* comm, ssize_t sendBytes, ssize_t recvBytes) {
-  return rcclP2pBatchEligible(rcclEffectiveP2pBatchEnable(comm), sendBytes, recvBytes,
-                              rcclParamP2pBatchThreshold());
+  const char* gcn = comm->topo->nodes[GPU].nodes[0].gpu.gcn;
+  ssize_t cutoff = rcclP2pBatchCutoff(gcn, comm->nNodes, sendBytes, recvBytes, (ssize_t)rcclParamP2pBatchThreshold());
+  return rcclP2pBatchEligible(rcclEffectiveP2pBatchEnable(comm), sendBytes, recvBytes, cutoff);
 }
 
 // Number of the p2pnChannelsPerPeer parts a task of collAPI uses and connects. Multi-node AINIC scatter
@@ -1868,10 +1867,15 @@ static ncclResult_t scheduleP2pTasksToPlan(struct ncclComm* comm, int* p2pEpoch,
         comm->planner.nTasksP2pSend -= 1;
         comm->planner.nTasksP2pRecv -= 1;
       } else {
-        // Ensure room for worst case of one new batch per channel. Mixed LL/LL128 rounds
-        // split into two one-sided work items, so reserve twice the P2P work.
-        if (!ncclTestBudget(budget, plan->nWorkBatches + 2 * nChannelsMax,
-                            plan->workBytes + 2 * sizeof(struct ncclDevWorkP2p))) {
+        // Ensure room for worst case of one new batch per channel.
+        if (!ncclTestBudget(budget, plan->nWorkBatches + nChannelsMax,
+                            plan->workBytes + sizeof(struct ncclDevWorkP2p))) {
+          if (plan->nWorkBatches == 0) {
+            WARN("P2P round with %d channels per peer does not fit an empty kernel plan (%zd bytes of kernel args); "
+                 "lower NCCL_MAX_P2P_NCHANNELS",
+                 nChannelsMax, budget->inArgsBytes);
+            return ncclInvalidUsage;
+          }
           return ncclSuccess;
         }
         struct ncclTaskP2p* p2pTasks[2] = {recv, send};
@@ -2568,6 +2572,8 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
         if (plan->workBytes != 0) {
           ncclIntruQueueEnqueue(&planner->planQueue, plan);
           nPlans += 1;
+        } else {
+          ncclMemoryPoolFree(&comm->memPool_ncclKernelPlan, plan);
         }
       }
     } while (planner->nTasksColl + planner->nTasksP2p + planner->nTasksBcast != 0 ||

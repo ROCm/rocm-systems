@@ -736,10 +736,15 @@ const FactoryMap &factories(BuildMode build_mode) {
                            rj_code_arch_t arch, rj_code_target_id_t target, amdgpu::GpuMemory *mem,
                            const AsyncResources &resources, uint32_t image_config,
                            util::DiagnosticEmitter emit_error) -> ComponentResult {
-      auto cc = parse_compute_unit_config(cfg, arch, target, resources, image_config, emit_error);
-      if (cc.failed())
+      util::FailureOr<amdgpu::ComputeUnitCore::Config> maybe_cu_config =
+          parse_compute_unit_config(cfg, arch, target, resources, image_config, emit_error);
+      if (maybe_cu_config.failed())
         return util::Result::failure();
-      return amdgpu::ComputeUnitCore::create(n, cc.value(), mem, nullptr, mode);
+      auto compute_unit = amdgpu::ComputeUnitCore::create(n, maybe_cu_config.value(), mem, nullptr,
+                                                          mode, emit_error);
+      if (!compute_unit)
+        return util::Result::failure();
+      return std::unique_ptr<simdojo::Component>(std::move(compute_unit));
     };
     return f;
   }();
@@ -756,7 +761,8 @@ const FactoryMap &factories(BuildMode build_mode) {
       if (maybe_cu_config.failed())
         return util::Result::failure();
       const auto &cu_config = maybe_cu_config.value();
-      amdgpu::ComputeUnitCore::validate(cu_config);
+      if (amdgpu::ComputeUnitCore::validate(cu_config, emit_error).failed())
+        return util::Result::failure();
       // Preserve the parsed CU config and declarative children without execution state.
       return std::unique_ptr<simdojo::Component>(
           std::make_unique<ValidatedComputeUnit>(name, cu_config));
