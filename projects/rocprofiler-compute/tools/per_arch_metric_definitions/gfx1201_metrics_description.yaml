@@ -60,8 +60,8 @@ System Speed-of-Light:
     rst: Bytes GL1 returned to its clients, from the physical 32-byte beats returned.
     unit: Bytes/s
   GL2 Cache BW:
-    plain: Size-weighted uncompressed read requests measured at the GL2 output FIFOs, from the 32, 64, 128, and 256-byte categories. This request rate does not measure all L2 traffic or physical GDDR6 transfers. Compressed traffic coverage and an applicable interface peak require Navi48 qualification; no percentage of peak is reported.
-    rst: Size-weighted uncompressed read requests measured at the GL2 output FIFOs, from the 32, 64, 128, and 256-byte categories. This request rate does not measure all L2 traffic or physical GDDR6 transfers. Compressed traffic coverage and an applicable interface peak require Navi48 qualification; no percentage of peak is reported.
+    plain: Size-weighted uncompressed read requests measured at the GL2 output FIFOs, from the 32, 64, 128, and 256-byte categories. This request rate does not measure all L2 traffic or physical GDDR6 transfers. The percentage of peak uses the L2 interface width, not the GDDR6 peak.
+    rst: Size-weighted uncompressed read requests measured at the GL2 output FIFOs, from the 32, 64, 128, and 256-byte categories. This request rate does not measure all L2 traffic or physical GDDR6 transfers. The percentage of peak uses the L2 interface width, not the GDDR6 peak.
     unit: Bytes/s
   Scalar Data Cache Hit Rate:
     plain: Percentage of scalar data cache requests that hit.

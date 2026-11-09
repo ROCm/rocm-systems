@@ -55,8 +55,9 @@ and wave-count normalization are validated. Treat these values as unknown when
 inferring occupancy limits or quantified scheduler stalls. Restoration is
 tracked under AIPROFCOMP-907.
 
-`GL2-Fabric Read BW` and `GL2-Fabric Write BW` include traffic served or absorbed
-by Infinity Cache. They have no GDDR6 percentage of peak. Use the Memory Chart
+`GL2 Cache BW` reports a percentage of the L2 interface peak. `GL2-Fabric Read BW`
+and `GL2-Fabric Write BW` include traffic served or absorbed by Infinity Cache.
+They have no GDDR6 percentage of peak. Use the Memory Chart
 and available cache metrics for memory questions; roofline benchmarks are
 outside Navi48 support in this release. If the relevant row has no usable peak,
 report its measured rate and compare like workloads in the same performance

@@ -362,14 +362,14 @@ def test_gfx1201_lds_bandwidth_counts_four_bytes_per_load_store_and_atomic_dword
     ) == pytest.approx(524 / 7e-6)
 
 
-def test_gfx1201_sol_gl2_bandwidth_reports_fifo_rate_without_unqualified_peak(
+def test_gfx1201_sol_gl2_bandwidth_reports_fifo_rate_against_l2_interface_peak(
     dispatch_rate_evaluator,
 ):
     definition = panel_metric("0200_system_speed_of_light.yaml", 201, "GL2 Cache BW")
 
     assert definition["unit"] == "Bytes/s"
-    assert definition["peak"] == "None"
-    assert definition["pct_of_peak"] is False
+    assert definition["peak"] == "$total_l2_chan * 128 * $max_sclk * 1e6"
+    assert definition["pct_of_peak"] is True
     assert dispatch_rate_evaluator.eval_expression(
         build_eval_string(definition["value"])
     ) == pytest.approx(2720 / 7e-6)
