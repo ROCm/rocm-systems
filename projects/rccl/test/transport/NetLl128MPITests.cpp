@@ -15,7 +15,7 @@
  * most runs within the launch count below.
  *
  * NCCL_P2P_DISABLE and NCCL_SHM_DISABLE are cached for the process, so the test skips unless every ring hop is on
- * NET. Run it in its own process:
+ * NET with GPU Direct RDMA. Run it in its own process:
  *   mpirun -np 8 ./rccl-UnitTestsMPI --gtest_filter=NetLl128MPITest.*
  */
 
@@ -42,7 +42,7 @@ using namespace RCCLTestGuards;
 
 namespace
 {
-// 16 MiB of bf16: the largest AllReduce the tuner gives LL128 before switching to Simple.
+// 16 MiB of bf16, the size that hung.
 constexpr size_t   kCount      = size_t{8} << 20;
 constexpr int      kIterations = 2000;
 constexpr auto     kTimeout    = std::chrono::seconds(120);
@@ -55,13 +55,15 @@ uint16_t bf16Bits(float value)
     return static_cast<uint16_t>(bits >> 16);
 }
 
-bool ringHopsOnNet(ncclComm_t comm)
+bool ringHopsOnGdrNet(ncclComm_t comm)
 {
     for(int c = 0; c < comm->nChannels; ++c)
     {
-        const ncclChannel& channel = comm->channels[c];
-        if(channel.peers[channel.ring.next]->send[0].transportComm != &netTransport.send
-           || channel.peers[channel.ring.prev]->recv[0].transportComm != &netTransport.recv)
+        const ncclChannel&   channel = comm->channels[c];
+        const ncclConnector& send    = channel.peers[channel.ring.next]->send[0];
+        const ncclConnector& recv    = channel.peers[channel.ring.prev]->recv[0];
+        if(send.transportComm != &netTransport.send || recv.transportComm != &netTransport.recv
+           || !(send.conn.flags & NCCL_DIRECT_NIC) || !(recv.conn.flags & NCCL_DIRECT_NIC))
         {
             return false;
         }
@@ -128,9 +130,10 @@ TEST_F(NetLl128MPITest, RingAllReduceCompletesWithEveryHopOnNet)
     // Ring connections are made by the first collective.
     ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(send, recv, kCount, ncclBfloat16, ncclSum, comm, stream));
     ASSERT_MPI_TRUE(drainOrAbort());
-    if(!allRanks(ringHopsOnNet(comm)))
+    if(!allRanks(ringHopsOnGdrNet(comm)))
     {
-        GTEST_SKIP() << "A ring hop is not on NET: run this test in its own process, on hosts with an RDMA NIC";
+        GTEST_SKIP() << "A ring hop is not on NET with GPU Direct RDMA: run this test in its own process, on "
+                        "hosts with an RDMA NIC";
     }
 
     for(int i = 0; i < kIterations; ++i)
