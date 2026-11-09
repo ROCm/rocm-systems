@@ -15,7 +15,12 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from conftest import RocprofsysTest, _validate_rocpd_candidates
+from conftest import (
+    RocprofsysTest,
+    _validate_rocpd_candidates,
+    cpu_frequency_available,
+    host_counters_expected,
+)
 from rocprofsys import GPUInfo, ValidationResult, cache
 from rocprofsys import TestResult as RocprofsysTestResult
 from rocprofsys.runners import (
@@ -587,3 +592,46 @@ class TestRunnerTmpdirIsolation:
                 f"{tmpdir} exists but is owned by uid {st_uid}, "
                 f"not the current user (uid {os.getuid()})"
             )
+
+
+# ---------------------------------------------------------------------------
+# cpufreq availability (host Frequency counter validation)
+# ---------------------------------------------------------------------------
+class TestCpuFrequencyAvailable:
+    def test_false_when_no_cpufreq_dir(self, tmp_path):
+        (tmp_path / "cpu0").mkdir()
+        assert not cpu_frequency_available(tmp_path)
+
+    def test_false_when_root_missing(self, tmp_path):
+        assert not cpu_frequency_available(tmp_path / "absent")
+
+    def test_true_when_scaling_cur_freq_readable(self, tmp_path):
+        freq_dir = tmp_path / "cpu3" / "cpufreq"
+        freq_dir.mkdir(parents=True)
+        (freq_dir / "scaling_cur_freq").write_text("2400000\n")
+        assert cpu_frequency_available(tmp_path)
+
+    def test_ignores_non_cpu_entries(self, tmp_path):
+        freq_dir = tmp_path / "cpufreq" / "cpufreq"
+        freq_dir.mkdir(parents=True)
+        (freq_dir / "scaling_cur_freq").write_text("1\n")
+        assert not cpu_frequency_available(tmp_path)
+
+
+class TestHostCountersExpected:
+    def test_keeps_frequency_when_available(self, monkeypatch):
+        monkeypatch.setattr("conftest.cpu_frequency_available", lambda: True)
+        assert host_counters_expected(["Frequency (S)", "Load (S)"]) == [
+            "Frequency (S)",
+            "Load (S)",
+        ]
+
+    def test_drops_frequency_and_warns_when_unavailable(self, monkeypatch):
+        monkeypatch.setattr("conftest.cpu_frequency_available", lambda: False)
+        with pytest.warns(UserWarning, match="Frequency"):
+            result = host_counters_expected(["Frequency (S)", "Load (S)"])
+        assert result == ["Load (S)"]
+
+    def test_passthrough_without_frequency(self, monkeypatch):
+        monkeypatch.setattr("conftest.cpu_frequency_available", lambda: False)
+        assert host_counters_expected(["Load (S)"]) == ["Load (S)"]
