@@ -1479,6 +1479,11 @@
           "test_filter": "P2pCeChannelCapTests.*"
         },
         {
+          "name": "P2pDirectMaxChannels",
+          "description": "Opt-in direct P2P channel widening policy, bounds, and kernel-argument capacity",
+          "test_filter": "P2pDirectMaxChannelsTests.*"
+        },
+        {
           "name": "XmlTest",
           "description": "XML topology parsing tests",
           "test_filter": "XmlTest.*"
