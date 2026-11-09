@@ -38,8 +38,7 @@ RUN OS_VERSION=$(grep '^VERSION_ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"'
         apt-get install -y python3.12 python3.12-venv python3.12-dev && \
         ln -sf /usr/bin/python3.12 /usr/bin/python3 && \
         curl -sS https://bootstrap.pypa.io/get-pip.py | python3 - --break-system-packages && \
-        python3 -m pip install --break-system-packages 'cmake==3.28.*' && \
-        python3 --version; \
+        python3 -m pip install --break-system-packages 'cmake==3.28.*'; \
     else \
         python3 -m pip install --break-system-packages 'cmake==3.28.*'; \
     fi
