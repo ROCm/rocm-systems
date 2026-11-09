@@ -76,6 +76,7 @@
 #ifdef __linux__
 #include <pthread.h>
 #include <sched.h>
+#include <unistd.h>
 #endif
 
 static std::once_flag g_hrr_atexit_once;
@@ -143,10 +144,12 @@ const char* hip_capture_output_dir() {
 // build (DEBUG from rocclr/utils/macros.hpp, the macro that picks debug() over
 // release() there) honours it; any other build ignores it, because the dumps put
 // a second copy of the workload's kernel arguments in the log, where log
-// collection picks them up. HIP_HRR_HOST_SNAPSHOTS and
-// HIP_HRR_HOST_SNAPSHOT_MAX_MB are not in flags.hpp: they only tune capture, so
-// they are read here (hrr_host_snapshots_enabled, hrr_host_snapshot_cap_bytes)
-// and stay with the HRR code and its reviewers.
+// collection picks them up. HIP_HRR_HOST_SNAPSHOTS, HIP_HRR_HOST_SNAPSHOT_MAX_MB,
+// HIP_HRR_HOST_SNAPSHOT_CHUNK_KB and HIP_HRR_HOST_SNAPSHOT_HELPERS are not in
+// flags.hpp: they only tune capture, so they are read here
+// (hrr_host_snapshots_enabled, hrr_host_snapshot_cap_bytes,
+// hrr_host_snapshot_chunk_bytes, pinned_hash_pool) and stay with the HRR code
+// and its reviewers.
 static bool hrr_dbg_args_enabled() {
 #if defined(DEBUG)
   return HIP_HRR_DEBUG_ARGS;
@@ -211,6 +214,7 @@ struct PinnedAlloc {
   std::vector<PinnedChunk> chunks;
   hipStream_t              last_stream = nullptr;  // launch stream of the last record
   unsigned                 readers = 0;  // snapshots reading the bytes; a free waits for 0
+  bool                     record_all = false;  // the last launch left records out
 };
 struct SnapChunk {
   hrr_cap::Hash128 hash{}, last{};
@@ -224,7 +228,9 @@ struct HostSnap {
   uint64_t               base = 0, size = 0, chunk = 0;
   std::vector<SnapChunk> chunks;
   hipStream_t            last_stream = nullptr;
-  bool                   reading = false;  // counted in the allocation's readers
+  bool                   reading = false;     // counted in the allocation's readers
+  bool                   record_all = false;  // in: record every chunk, whatever the stream
+  bool                   dropped = false;     // out: a record over the event's cap was left out
 };
 std::mutex                       g_pinned_mu;
 std::condition_variable          g_pinned_cv;  // signalled when readers drops
@@ -356,6 +362,7 @@ static void pinned_scan_locked(const uint8_t* bytes, size_t sz) {
         s.chunks[i].changed = a.chunks[i].changed;
       }
       s.last_stream = a.last_stream;
+      s.record_all  = a.record_all;
       s.reading     = true;
       ++it->second.readers;
     }
@@ -421,9 +428,10 @@ static size_t pinned_chunk_len(const HostSnap& s, size_t i) {
 
 // One core hashes about 20 GB/s, so a launch that reads a 16 MiB allocation
 // spends ~0.8 ms on the hash alone. At least kPinnedSharedChunks chunks are
-// hashed, or written, with helper threads, one per 8 CPUs the process may run
-// on, at most 7. One launch at a time uses the helpers; another works on its
-// own thread meanwhile.
+// hashed, or written, with helper threads named hrr-pin-hash: one per 8 CPUs
+// the process's main thread may run on, at most 7, unless
+// HIP_HRR_HOST_SNAPSHOT_HELPERS says how many. One job is open to them at a
+// time; a launch that finds one open works on its own thread.
 constexpr size_t kPinnedSharedChunks = 16;
 
 namespace {
@@ -433,26 +441,32 @@ struct PinnedHashJob {
   HostSnap*           snap = nullptr;
   const uint8_t*      copy = nullptr;
   std::atomic<size_t> next{0};
+  std::atomic<bool>   lost{false};  // a new chunk could not be stored
+  unsigned            active = 0;   // helpers inside it, under the pool's mu
 };
 struct PinnedHashPool {
   std::mutex              mu;
   std::condition_variable wake, idle;
-  PinnedHashJob*          job = nullptr;  // open to helpers; set while a launch owns them
+  PinnedHashJob*          job = nullptr;  // open to helpers
   uint64_t                generation = 0;
-  unsigned                active = 0;     // helpers inside the job
+#ifdef __linux__
+  cpu_set_t               cpus;  // the main thread's, not the first launcher's
+#endif
 };
 }  // namespace
 
 // A new chunk is named by the hash of its copy, so a host store after the
 // read cannot leave a blob that differs from its name.
-static void pinned_store_chunk(SnapChunk& c, size_t len, const uint8_t* copy) {
+static bool pinned_store_chunk(SnapChunk& c, size_t len, const uint8_t* copy) {
   try {
     const hrr_cap::Hash128 h = hrr_cap::writer::hash_bytes(copy, len);
     c.changed = !hash_eq(h, c.last) && !hrr_cap::writer::blob_written(h, len);
     c.hash    = c.changed ? hrr_cap::writer::write_blob_hashed(copy, len, h) : h;
     c.taken   = true;
+    return true;
   } catch (...) {
     c = SnapChunk{};
+    return false;
   }
 }
 
@@ -465,7 +479,8 @@ static void pinned_hash_chunks(PinnedHashJob& j) {
   for (size_t i; (i = j.next.fetch_add(1, std::memory_order_relaxed)) < s.chunks.size();) {
     SnapChunk& c = s.chunks[i];
     if (j.copy) {
-      if (c.copy) pinned_store_chunk(c, pinned_chunk_len(s, i), j.copy + c.at);
+      if (c.copy && !pinned_store_chunk(c, pinned_chunk_len(s, i), j.copy + c.at))
+        j.lost.store(true, std::memory_order_relaxed);
       continue;
     }
     if (!c.changed) {
@@ -486,6 +501,7 @@ static void pinned_hash_chunks(PinnedHashJob& j) {
 static void pinned_hash_helper(PinnedHashPool* p) {
 #ifdef __linux__
   pthread_setname_np(pthread_self(), "hrr-pin-hash");
+  pthread_setaffinity_np(pthread_self(), sizeof(p->cpus), &p->cpus);
 #endif
   uint64_t seen = 0;
   std::unique_lock<std::mutex> lk(p->mu);
@@ -493,26 +509,33 @@ static void pinned_hash_helper(PinnedHashPool* p) {
     p->wake.wait(lk, [&] { return p->job && p->generation != seen; });
     seen = p->generation;
     PinnedHashJob* j = p->job;
-    ++p->active;
+    ++j->active;
     lk.unlock();
     pinned_hash_chunks(*j);
     lk.lock();
-    if (--p->active == 0) p->idle.notify_all();
+    if (--j->active == 0) p->idle.notify_all();
   }
 }
 
 static PinnedHashPool* pinned_hash_pool() {
   if (PinnedHashPool* p = g_hash_pool.load(std::memory_order_acquire)) return p;
   if (g_hash_pool_made.exchange(true)) return nullptr;
-  unsigned cpus = std::thread::hardware_concurrency();
-#ifdef __linux__
-  cpu_set_t set;
-  if (sched_getaffinity(0, sizeof(set), &set) == 0) cpus = CPU_COUNT(&set);
-#endif
-  const unsigned helpers = std::min(cpus / 8, 7u);
-  if (helpers == 0) return nullptr;
   auto* p = new (std::nothrow) PinnedHashPool;
   if (!p) return nullptr;
+  unsigned cpus = std::thread::hardware_concurrency();
+#ifdef __linux__
+  // The process id names the main thread; a launching thread may be pinned narrower.
+  if (sched_getaffinity(getpid(), sizeof(p->cpus), &p->cpus) == 0) cpus = CPU_COUNT(&p->cpus);
+  else CPU_ZERO(&p->cpus);
+#endif
+  // HIP_HRR_HOST_SNAPSHOT_HELPERS sets the count; 0 keeps the work on the launching thread.
+  const char* env = std::getenv("HIP_HRR_HOST_SNAPSHOT_HELPERS");
+  const unsigned helpers =
+      env ? std::min(static_cast<unsigned>(std::atoi(env)), 64u) : std::min(cpus / 8, 7u);
+  if (helpers == 0) {
+    delete p;
+    return nullptr;
+  }
   unsigned started = 0;
   try {
     for (; started < helpers; ++started) std::thread(pinned_hash_helper, p).detach();
@@ -527,8 +550,10 @@ static PinnedHashPool* pinned_hash_pool() {
 }
 
 // Runs a job over the chunks of `s`, with the helpers when there are `work`
-// chunks or more and they are free.
-static void pinned_run_chunks(HostSnap& s, const uint8_t* copy, size_t work) {
+// chunks or more and they are free. False when a new chunk could not be
+// stored; the caller notes that, since a note is staged on the thread that
+// writes the launch's event.
+static bool pinned_run_chunks(HostSnap& s, const uint8_t* copy, size_t work) {
   PinnedHashJob j;
   j.snap = &s;
   j.copy = copy;
@@ -544,11 +569,14 @@ static void pinned_run_chunks(HostSnap& s, const uint8_t* copy, size_t work) {
   }
   if (shared) p->wake.notify_all();
   pinned_hash_chunks(j);
-  if (!shared) return;
-  // No helper joins after this, and the job lives until every one has left.
-  std::unique_lock<std::mutex> lk(p->mu);
-  p->job = nullptr;
-  p->idle.wait(lk, [&] { return p->active == 0; });
+  if (shared) {
+    // No helper joins after this, and the job lives until every one has left.
+    // Another launch may open its job meanwhile, to helpers that are free.
+    std::unique_lock<std::mutex> lk(p->mu);
+    p->job = nullptr;
+    p->idle.wait(lk, [&] { return j.active == 0; });
+  }
+  return !j.lost.load(std::memory_order_relaxed);
 }
 
 // Names the bytes of each chunk of one allocation by a blob, without
@@ -582,7 +610,9 @@ static void pinned_snapshot_one(HostSnap& s) {
                                        "no memory to copy a pinned allocation");
     return;
   }
-  if (fresh) pinned_run_chunks(s, copy.get(), fresh);
+  if (fresh && !pinned_run_chunks(s, copy.get(), fresh))
+    hrr_cap::writer::note_unreplayable("pinned host snapshot",
+                                       "a changed pinned chunk could not be stored");
 }
 
 static void pinned_finish_snapshots() {
@@ -686,17 +716,19 @@ static hipStream_t pinned_stream(hipStream_t stream, bool spt) {
 }
 
 // Replay restores a record on its launch's stream, so a launch on another
-// stream needs a record of every chunk.
+// stream needs a record of every chunk, as does one after a launch that left
+// records out.
 static void pinned_mark_stream(hipStream_t stream) {
   for (HostSnap& s : t_snaps) {
-    if (s.last_stream == stream) continue;
+    if (s.last_stream == stream && !s.record_all) continue;
     for (SnapChunk& c : s.chunks)
       if (c.taken && (c.hash.lo || c.hash.hi)) c.record = true;
   }
 }
 
 // One event names at most UINT16_MAX records. A launch that reads more chunks
-// than that keeps the first, and the rest are recorded on a later launch.
+// than that keeps the first. The next launch that reads an allocation that lost
+// a record records all of it, on whichever stream.
 static uint16_t pinned_record_count() {
   size_t n = 0;
   for (HostSnap& s : t_snaps)
@@ -704,6 +736,7 @@ static uint16_t pinned_record_count() {
       if (!c.record) continue;
       if (n == UINT16_MAX) {
         c.record = false;
+        s.dropped = true;
         hrr_cap::writer::note_unreplayable(
             "pinned host snapshot", "a launch read more pinned chunks than one event can name");
         continue;
@@ -750,6 +783,7 @@ static void pinned_write_event(uint16_t api, void* payload, uint32_t size,
       recorded = true;
     }
     if (recorded) it->second.last_stream = stream;
+    it->second.record_all = s.dropped;
   }
 }
 

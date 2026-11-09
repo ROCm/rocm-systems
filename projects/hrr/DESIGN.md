@@ -583,6 +583,11 @@ hash. Each chunk gets a record (base, offset, length, blob hash, direction 0) in
 event, unless its hash and the launch stream equal those of its last record. A launch that
 follows a few host stores therefore writes only the chunks they touched, though every
 byte of the allocation is still read once per launch: nothing assumes a chunk is unchanged.
+When 16 or more chunks are to be hashed, or written, capture shares them with helper
+threads it starts in the process on first use: `hrr-pin-hash`, one per 8 CPUs the main
+thread may run on, at most 7, on that thread's CPU set. `HIP_HRR_HOST_SNAPSHOT_HELPERS`
+sets the count instead, and `0` starts none. One launch's chunks are open to them at a
+time, and the launch waits for them before it goes on.
 Struct words pointing into such an allocation
 are flagged for translation like
 embedded device pointers, and replay translates them without the device-address shape

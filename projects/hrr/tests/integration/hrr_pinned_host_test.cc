@@ -15,6 +15,7 @@
 
 #include "hrr_test_common.hh"
 
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -224,11 +225,14 @@ TEST_CASE("Unit_HRR_PinnedHostRevisit_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipHostFree(in));
 }
 
-// A 1 MiB allocation, 16 chunks at the default HIP_HRR_HOST_SNAPSHOT_CHUNK_KB.
-// The first launch records every chunk. Then two chunks change, then one, then
-// that one returns to bytes the archive already holds: 16 + 2 + 1 + 1 records,
-// and 19 chunk blobs.
-constexpr int kChunkedN = (1 << 20) / sizeof(int);
+// A 1 MiB + 4 KiB allocation: 16 chunks at the default
+// HIP_HRR_HOST_SNAPSHOT_CHUNK_KB and a short 17th. The first launch records
+// every chunk. Then the first and the last change, then one in the middle, then
+// that one returns to bytes the archive already holds. Last, a graph captured
+// on another stream launches after a fifth chunk changes; on a new stream every
+// chunk is recorded again. Records: 17 + 2 + 1 + 1 + 17, and the 17 of the
+// capturing launch replay skips. 64 KiB blobs: 16 + 1 + 1 + 1.
+constexpr int kChunkedN = ((1 << 20) + (4 << 10)) / sizeof(int);
 TEST_CASE("Unit_HRR_PinnedHostChunks_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
   int *in = nullptr, *dev_in = nullptr, *dout = nullptr;
@@ -236,6 +240,15 @@ TEST_CASE("Unit_HRR_PinnedHostChunks_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&dev_in), in, 0));
   HRR_HIP_CHECK(hipMalloc(&dout, kChunkedN * sizeof(int)));
   std::vector<int> expect(kChunkedN), hout(kChunkedN);
+  auto launch = [&](hipStream_t s) {
+    hipLaunchKernelGGL(hrr_pinned_triple, dim3(kChunkedN / 256), dim3(256), 0, s, dout, dev_in,
+                       kChunkedN);
+    HRR_HIP_CHECK(hipGetLastError());
+  };
+  auto check = [&] {
+    HRR_HIP_CHECK(hipMemcpy(hout.data(), dout, kChunkedN * sizeof(int), hipMemcpyDeviceToHost));
+    for (int i = 0; i < kChunkedN; ++i) REQUIRE(hout[i] == expect[i] * 3 + 1);
+  };
   for (int i = 0; i < kChunkedN; ++i) expect[i] = i;
   for (int it = 0; it < 4; ++it) {
     if (it == 1) {
@@ -247,14 +260,37 @@ TEST_CASE("Unit_HRR_PinnedHostChunks_Direct", "[.][hrr-direct]") {
       expect[kChunkedN / 2] = kChunkedN / 2;
     }
     std::memcpy(in, expect.data(), kChunkedN * sizeof(int));
-    hipLaunchKernelGGL(hrr_pinned_triple, dim3(kChunkedN / 256), dim3(256), 0, 0, dout, dev_in,
-                       kChunkedN);
-    HRR_HIP_CHECK(hipGetLastError());
-    HRR_HIP_CHECK(hipMemcpy(hout.data(), dout, kChunkedN * sizeof(int), hipMemcpyDeviceToHost));
-    for (int i = 0; i < kChunkedN; ++i) REQUIRE(hout[i] == expect[i] * 3 + 1);
+    launch(nullptr);
+    check();
   }
+  hipStream_t s = nullptr;
+  hipGraph_t g = nullptr;
+  hipGraphExec_t exec = nullptr;
+  HRR_HIP_CHECK(hipStreamCreate(&s));
+  HRR_HIP_CHECK(hipStreamBeginCapture(s, hipStreamCaptureModeGlobal));
+  launch(s);
+  HRR_HIP_CHECK(hipStreamEndCapture(s, &g));
+  HRR_HIP_CHECK(hipGraphInstantiate(&exec, g, nullptr, nullptr, 0));
+  expect[kChunkedN / 4] = -4;
+  std::memcpy(in, expect.data(), kChunkedN * sizeof(int));
+  HRR_HIP_CHECK(hipGraphLaunch(exec, s));
+  HRR_HIP_CHECK(hipStreamSynchronize(s));
+  check();
+  HRR_HIP_CHECK(hipGraphExecDestroy(exec));
+  HRR_HIP_CHECK(hipGraphDestroy(g));
+  HRR_HIP_CHECK(hipStreamDestroy(s));
   HRR_HIP_CHECK(hipFree(dout));
   HRR_HIP_CHECK(hipHostFree(in));
+#ifdef __linux__
+  // Under capture, a launch of 17 chunks starts the hash helpers it was told to.
+  const char* helpers = std::getenv("HIP_HRR_HOST_SNAPSHOT_HELPERS");
+  if (helpers && std::getenv("HIP_HRR_CAPTURE_OUTPUT")) {
+    int named = 0;
+    for (const auto& t : fs::directory_iterator("/proc/self/task"))
+      if (read_text_file(t.path() / "comm") == "hrr-pin-hash\n") ++named;
+    REQUIRE(named == std::atoi(helpers));
+  }
+#endif
 }
 
 TEST_CASE("Unit_HRR_PinnedHostStruct_Direct", "[.][hrr-direct]") {
@@ -458,24 +494,30 @@ HRR_TEST_CASE(Unit_HRR_PinnedHostGraphRoundtrip) {
         std::string::npos);
 }
 
-// Replay restores each changed chunk at its offset, and capture stores only
-// the chunks that changed.
+// Replay restores each recorded chunk at its offset, a graph launch's
+// included, and capture stores only the chunks that changed: on the launching
+// thread alone, and with two hash helpers.
 HRR_TEST_CASE(Unit_HRR_PinnedHostChunksRoundtrip) {
-  ScopedDir cap{hrr_temp_dir("hrr_pinned_host_chunks")};
-  hrr_capture_direct("Unit_HRR_PinnedHostChunks_Direct", cap.path, 5);
-  int chunk_blobs = 0;
-  for (const auto& e :
-       fs::recursive_directory_iterator(hrr_single_process_archive(cap.path) / "blobs"))
-    if (e.is_regular_file() && e.file_size() == 64 * 1024) ++chunk_blobs;
-  CHECK(chunk_blobs == 19);
-  auto [ret, out] = hrr_playback_env(cap.path, {});
-  INFO("Playback exit " << ret << ", stdout:\n" << out);
-  int pass = 0, fail = 0;
-  REQUIRE(hrr_parse_d2h_summary(out, pass, fail));
-  CHECK(ret == 0);
-  CHECK(pass == 4);
-  CHECK(fail == 0);
-  CHECK(out.find("Pinned host snapshots: 20 restored, 0 refused, 0 skipped") != std::string::npos);
+  for (const char* helpers : {"0", "2"}) {
+    INFO("HIP_HRR_HOST_SNAPSHOT_HELPERS=" << helpers);
+    ScopedDir cap{hrr_temp_dir("hrr_pinned_host_chunks")};
+    hrr_capture_direct("Unit_HRR_PinnedHostChunks_Direct", cap.path, 5,
+                       {{"HIP_HRR_HOST_SNAPSHOT_HELPERS", helpers}});
+    int chunk_blobs = 0;
+    for (const auto& e :
+         fs::recursive_directory_iterator(hrr_single_process_archive(cap.path) / "blobs"))
+      if (e.is_regular_file() && e.file_size() == 64 * 1024) ++chunk_blobs;
+    CHECK(chunk_blobs == 19);
+    auto [ret, out] = hrr_playback_env(cap.path, {});
+    INFO("Playback exit " << ret << ", stdout:\n" << out);
+    int pass = 0, fail = 0;
+    REQUIRE(hrr_parse_d2h_summary(out, pass, fail));
+    CHECK(ret == 0);
+    CHECK(pass == 5);
+    CHECK(fail == 0);
+    CHECK(out.find("Pinned host snapshots: 38 restored, 0 refused, 17 skipped") !=
+          std::string::npos);
+  }
 }
 
 // Replay restores every launch. Without the third and fourth records it
