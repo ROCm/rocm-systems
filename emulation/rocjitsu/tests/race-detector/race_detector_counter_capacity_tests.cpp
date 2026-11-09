@@ -127,7 +127,7 @@ TEST(RaceDetector, CounterCapacity_LgkmcntOverflowRetiresOldestOrderedReads) {
 // Backpressure completes the oldest DS reads like a wait does, so a
 // single-wave workgroup retires their LDS events at once, while a workgroup
 // with another wave keeps them for a barrier.
-TEST(RaceDetector, CounterCapacity_LgkmcntOverflowRetiresLdsEventsInASingleWaveWorkgroup) {
+TEST(RaceDetector, CounterCapacity_LgkmcntOverflowRetiresLdsEventsOnlyInASingleWaveWorkgroup) {
   for (const int numWaves : {1, 2}) {
     SCOPED_TRACE(numWaves);
     RaceTestBuilder builder(numWaves, /*vgprs=*/kLgkmcntCapacity + kLgkmcntOverflow,

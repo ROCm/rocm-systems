@@ -146,9 +146,6 @@ TEST_F(RaceEventRegistrationTest, WaveApisRetainCapturedPcAndEncoding) {
 // wave, so its waits retire LDS events immediately.
 
 namespace {
-using rocjitsu::amdgpu::MemoryCounterObligation;
-using rocjitsu::amdgpu::WaitCounterType;
-
 constexpr uint32_t kTileBytes = 128;
 constexpr std::array kAsyncStoreObligations{
     MemoryCounterObligation{WaitCounterType::ASYNCCNT, MemoryOrderClass::ASYNC_STORE}};
@@ -213,6 +210,8 @@ TEST(RaceDetector, MultiWave_CompletedLdsEventsStayLiveUntilABarrier) {
   waitAsynccnt(wave, 0);
 
   // Another wave can still race with the completed events.
+  EXPECT_EQ(detector->events().status(EventId{0}), EventStatus::WAVE_COMPLETE);
+  EXPECT_EQ(detector->events().status(EventId{1}), EventStatus::WAVE_COMPLETE);
   EXPECT_EQ(detector->getLdsReadEvents().size(), 1u);
   EXPECT_EQ(detector->getLdsWriteEvents().size(), 1u);
   EXPECT_EQ(wave.getBarrierPendingEvents().size(), 2u);
@@ -220,15 +219,18 @@ TEST(RaceDetector, MultiWave_CompletedLdsEventsStayLiveUntilABarrier) {
   EXPECT_EQ(violations.size(), 1u);
 
   wave.flushBarrierPendingEvents();
+  EXPECT_EQ(detector->events().status(EventId{0}), EventStatus::RETIRED);
+  EXPECT_EQ(detector->events().status(EventId{1}), EventStatus::RETIRED);
   EXPECT_TRUE(detector->getLdsReadEvents().empty());
   EXPECT_TRUE(detector->getLdsWriteEvents().empty());
 }
 
 TEST(RaceDetector, SingleWave_DoubleBufferedStoreLoopKeepsOnlyPendingStores) {
-  // Each iteration refills one of two tiles with a DS write, stores it with an
-  // async store, and waits until at most one store is outstanding. The wait
-  // completes the store of the tile the next iteration refills, so only one
-  // store is ever pending, and the read list must not grow with the loop.
+  // Each iteration checks a refill of one of two tiles as a DS write would be
+  // checked, stores the tile with an async store, and waits until at most one
+  // store is outstanding. The wait completes the store of the tile the next
+  // iteration refills, so only one store is ever pending, and the read list
+  // must not grow with the loop.
   constexpr int kIterations = 8192;
   std::vector<RaceViolation> violations;
   auto detector = makeDetector(/*nWaves=*/1, violations);
