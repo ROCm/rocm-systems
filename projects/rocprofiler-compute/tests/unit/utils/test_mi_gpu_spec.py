@@ -227,6 +227,12 @@ class TestMIGPUSpecs:
                 levels = MIGPUSpecs.get_memory_levels(gpu_model)
                 assert set(bandwidth) <= set(levels), (gpu_arch, gpu_model)
 
+    def test_roofline_plots_mall_only_where_the_arch_opts_in(self):
+        assert MIGPUSpecs.get_roofline_plots_mall("gfx1201")
+        assert not MIGPUSpecs.get_roofline_plots_mall("gfx942")
+        assert not MIGPUSpecs.get_roofline_plots_mall("gfx1151")
+        assert not MIGPUSpecs.get_roofline_plots_mall("gfx908")
+
     def test_roofline_data_types_are_known(self):
         """An unknown data type would be measured but silently left out of the plot."""
         for gpu_arch in MIGPUSpecs.get_roofline_archs():

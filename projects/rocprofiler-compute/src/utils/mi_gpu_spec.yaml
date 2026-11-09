@@ -26,6 +26,7 @@
 #               | -- memory_levels # Cache and memory levels supported by the arch
 #           |-- roofline: ceilings the roofline benchmark measures (archs without it have none)
 #               | -- bandwidth # Memory levels with a bandwidth ceiling
+#               | -- plot_mall # Draw the MALL ceiling as a roof (default: measured only)
 #               | -- valu # Data types with a VALU ceiling
 #               | -- mfma or wmma # Data types with a matrix ceiling, by matrix type
 #               | -- mfma_mixed or wmma_mixed # Mixed-precision matrix types, not plotted
@@ -490,10 +491,18 @@ mi_gpu_spec:
           GL1C: 4
           GL2A: 4
           GL2C: 4
+        # Device memory is DRAM (CSV column DRAMBw). The 64 MB Infinity Cache
+        # uses the MALL column. No counter attributes traffic to the Infinity
+        # Cache, so its roof is drawn without a kernel point.
+        roofline:
+          bandwidth: [DRAM, MALL, L2, L1, L0, LDS]
+          plot_mall: true
+          valu: [FP16, FP32, FP64, I8, I32, I64]
+          wmma: [FP8, FP16, BF16]
         models:
           - gpu_model: rdna4_navi48
             design:
-              memory_levels: ["LDS", "L0", "L1", "L2", "MALL", "HBM"]
+              memory_levels: ["LDS", "L0", "L1", "L2", "MALL", "DRAM"]
             chip_ids:
               physical: 30032  # 0x7550, Radeon RX 9070 and RX 9070 XT
 
