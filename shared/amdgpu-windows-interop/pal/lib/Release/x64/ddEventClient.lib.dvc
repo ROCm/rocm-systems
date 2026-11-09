@@ -1,5 +1,0 @@
-outs:
-- md5: 37ca0b7c35c7d30ec19c2d404ee06eec
-  size: 138854
-  hash: md5
-  path: ddEventClient.lib

@@ -1,5 +1,0 @@
-outs:
-- md5: 663ea49e9721421daee234950e4b098b
-  size: 1356574
-  hash: md5
-  path: zstd.lib
