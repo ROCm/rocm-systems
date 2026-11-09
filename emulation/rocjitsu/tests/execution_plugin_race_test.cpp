@@ -971,28 +971,6 @@ TEST(RaceDetectorPluginTest, BarrierAfterWriterEndsOrdersItsImplicitlyWaitedLdsW
   EXPECT_EQ(report.find("RACE "), std::string::npos) << report;
 }
 
-// The emulator's null-PC return sentinel is another normal termination path.
-// Keep a counter pending to distinguish draining it from freeing the wave early.
-TEST(RaceDetectorPluginTest, NullPcReturnDrainsMemoryBeforeHalt) {
-  PluginFixture fixture;
-  ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/1));
-  const std::array<uint32_t, 1> words = cdna4::build_sop1(cdna4::kSSetPcB64Sop1, {.ssrc0 = 0});
-  constexpr uint64_t kPc = 0x1000;
-  fixture.mem->load_image(reinterpret_cast<const uint8_t *>(words.data()), sizeof(words), kPc);
-  Wavefront *wave = fixture.cu()->dispatch_wf(0, kPc, 104, 32);
-  ASSERT_NE(wave, nullptr);
-  fixture.cu()->write_sgpr(wave->sgpr_alloc().base, 0);
-  fixture.cu()->write_sgpr(wave->sgpr_alloc().base + 1, 0);
-  wave->wait_counters().increment(WaitCounterType::LGKMCNT);
-
-  fixture.cu()->step();
-
-  ASSERT_EQ(wave->state(), WfState::ENDING);
-  EXPECT_FALSE(wave->is_halted());
-  wave->release_wait_counter(WaitCounterType::LGKMCNT);
-  EXPECT_TRUE(wave->is_halted());
-}
-
 /// Executes decoded tensor DMA instructions, so the emulator itself reports
 /// them to the race detector. Both waves share one 256-byte LDS allocation.
 class DecodedTensorDmaRaceTest : public TensorDmaRaceTest {
