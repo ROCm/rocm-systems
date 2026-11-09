@@ -1102,6 +1102,11 @@
           "name": "SkipPresetTopoMatching",
           "description": "SkipPreset arch topology matching and threshold lookup tests",
           "test_filter": "SkipPresetTopoMatching.*"
+        },
+        {
+          "name": "SocketCrypt",
+          "description": "Socket encryption over loopback sockets: ncclSetEncryption API contract, plaintext wire capture, no-TLS-support failure. The TLS cases skip unless the build uses -DTLS_BACKEND=OPENSSL3",
+          "test_filter": "SocketCrypt.*"
         }
       ]
     },
@@ -1359,6 +1364,7 @@
         {"name": "Register.ProcessIsolatedRegisterTests", "description": "Process isolated buffer registration tests", "test_filter": "Register.ProcessIsolatedRegisterTests"},
         {"name": "SendRecv.SinglePairs", "description": "SendRecv single pairs", "test_filter": "SendRecv.SinglePairs"},
         {"name": "SendRecv.UserBufferRegister", "description": "SendRecv user buffer register", "test_filter": "SendRecv.UserBufferRegister"},
+        {"name": "SendRecv.SingleRankGroupedSendRecvToSelf", "description": "1-rank grouped send/recv to self, default env and forced 256 P2P channels per peer", "test_filter": "SendRecv.SingleRankGroupedSendRecvToSelf"},
         {"name": "GroupCall.Identical", "description": "GroupCall identical", "test_filter": "GroupCall.Identical"},
         {"name": "GroupCall.Different", "description": "GroupCall different", "test_filter": "GroupCall.Different"},
         {"name": "GroupCall.Multistream", "description": "GroupCall multistream", "test_filter": "GroupCall.Multistream"},
@@ -3970,6 +3976,71 @@
       ]
     },
 
+    "bootstrap_tls_mpi_2rank": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 300,
+      "tests": [
+        {
+          "name": "BootstrapTls_2Rank",
+          "description": "Communicator lifecycle with a socket encryption key set, 2 ranks and default bootstrap settings. With 2 ranks every bootstrap ring AllGather step is one-way, so the write-only clients exposed the TLS session-ticket reset. Without -DTLS_BACKEND=OPENSSL3 only the no-TLS-support check runs",
+          "test_filter": "BootstrapTlsMPITest.*"
+        }
+      ]
+    },
+    "bootstrap_tls_mpi_bidir": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 1,
+      "num_gpus": 4,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_BOOTSTRAP_BIDIR_ALLGATHER": "1",
+        "NCCL_BOOTSTRAP_BIDIR_THRESHOLD": "0"
+      },
+      "tests": [
+        {
+          "name": "BootstrapTls_Bidir",
+          "description": "Communicator lifecycle with a socket encryption key set, bidirectional bootstrap ring AllGather (needs at least 3 ranks). Without -DTLS_BACKEND=OPENSSL3 only the no-TLS-support check runs",
+          "test_filter": "BootstrapTlsMPITest.*"
+        },
+        {
+          "name": "BootstrapStrayPeer_Bidir",
+          "description": "A connection that fails the socket handshake does not end the bootstrap root",
+          "test_filter": "BootstrapStrayPeerMPITest.*"
+        }
+      ]
+    },
+    "bootstrap_tls_mpi_unidir": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 1,
+      "num_gpus": 4,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_BOOTSTRAP_BIDIR_ALLGATHER": "0"
+      },
+      "tests": [
+        {
+          "name": "BootstrapTls_Unidir",
+          "description": "Same with the unidirectional bootstrap ring AllGather, whose write-only clients exposed the TLS session-ticket reset",
+          "test_filter": "BootstrapTlsMPITest.*"
+        },
+        {
+          "name": "BootstrapStrayPeer_Unidir",
+          "description": "A connection that fails the socket handshake does not end the bootstrap root",
+          "test_filter": "BootstrapStrayPeerMPITest.*"
+        }
+      ]
+    },
     "grow_mpi_tests_netbidir": {
       "extends": "default",
       "is_gtest": true,
@@ -5979,6 +6050,24 @@
       "name": "Grow MPI Tests - Net Bidir Regression (4-rank, single-node)",
       "description": "AICOMRCCL-3004: ncclCommGrow over the network bootstrap with NCCL_BOOTSTRAP_BIDIR_NET=1 at 4 ranks on one node, guarding against the bidirectional-net reverse-ring hang during grow (Grow_SendRecv, DoubleGrow_AllReduce, Grow_RankPreservation, Grow_CoordinatorOnlyUniqueId).",
       "config": "grow_mpi_tests_netbidir",
+      "enabled": true
+    },
+    {
+      "name": "Bootstrap TLS - Default Settings (2-rank, single-node)",
+      "description": "BootstrapTlsMPITest.* on 2 ranks with default bootstrap settings, where the ring AllGather is one-way",
+      "config": "bootstrap_tls_mpi_2rank",
+      "enabled": true
+    },
+    {
+      "name": "Bootstrap TLS - Bidirectional Ring (4-rank, single-node)",
+      "description": "BootstrapTlsMPITest.* and BootstrapStrayPeerMPITest.* with the bidirectional bootstrap ring AllGather",
+      "config": "bootstrap_tls_mpi_bidir",
+      "enabled": true
+    },
+    {
+      "name": "Bootstrap TLS - Unidirectional Ring (4-rank, single-node)",
+      "description": "BootstrapTlsMPITest.* and BootstrapStrayPeerMPITest.* with the unidirectional bootstrap ring AllGather",
+      "config": "bootstrap_tls_mpi_unidir",
       "enabled": true
     },
     {
