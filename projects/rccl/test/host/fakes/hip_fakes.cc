@@ -1214,7 +1214,9 @@ hipError_t hipLaunchKernel(const void* function, dim3 grid, dim3 block, void** a
                            hipStream_t stream) {
   return g_hipLaunchKernel(function, grid, block, args, sharedMemBytes, stream);
 }
+#ifndef RCCL_HIP_FAKES_OMIT_hipLaunchHostFunc
 hipError_t hipLaunchHostFunc(hipStream_t, hipHostFn_t, void*) { FailLoudUnfaked("hip_fakes", "hipLaunchHostFunc"); }
+#endif
 }  // extern "C"
 
 // ---- Kernel registration the compiler emits for a TU that defines __global__ functions ----
