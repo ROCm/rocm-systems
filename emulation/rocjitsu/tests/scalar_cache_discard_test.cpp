@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "legacy_gpu_memory_fixture.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -25,7 +26,9 @@ TEST_P(ScalarCacheDiscard, AddressedLinesAndWaitMetadataIgnoreExec) {
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 102;
   cfg.vgprs_per_wf = 4;
-  auto cu = amdgpu::ComputeUnitCore::create("discard", cfg, &memory, &l2);
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "discard", cfg, &memory, &l2));
   auto *wave = cu->dispatch_wf(0, 0, 102, 4);
   ASSERT_NE(wave, nullptr);
   auto decoder = Decoder::create(GetParam());
