@@ -14,6 +14,7 @@ set(TEST_SRC
   hipGraphAddEventWaitNode.cc
   hipGraph.cc
   hipSimpleGraphWithKernel.cc
+  hipGraphSdmaMemcpyOrdering.cc
   hipGraphAddMemcpyNode.cc
   hipGraphClone.cc
   hipGraphInstantiateWithFlags.cc
@@ -55,6 +56,7 @@ set(TEST_SRC
   hipGraphExecMemcpyNodeSetParams.cc
   hipGraphExecMemcpyNodeSetParams_old.cc
   hipStreamBeginCapture.cc
+  hipStreamCaptureDeviceScopedInvalidation.cc
   hipGraphAddMemcpyNode1D_old.cc
   hipStreamBeginCapture_old.cc
   hipStreamIsCapturing.cc
@@ -83,6 +85,7 @@ if(HIP_PLATFORM MATCHES "amd")
     hipStreamGetCaptureInfo_v2.cc
     hipStreamUpdateCaptureDependencies.cc
     hipGraphAddNodeBeginCapture.cc
+    hipGraphExternalSemaphoresNodes.cc
   )
   set(TEST_SRC ${TEST_SRC} ${AMD_SRC})
 endif()

@@ -387,6 +387,19 @@ FILTER[gfx1250]=\
 "KFDQMTest.GpuMemCopyTest:"\
 "KFDDBGTest.HitTrapOnWaveStartEndEvent"
 
+FILTER[gfx1251]=\
+"$BLACKLIST_ALL_ASICS_NO_CU_MASK:"\
+"$BLACKLIST_GFX12:"\
+"KFDEventTest.SignalInvalidEvent:"\
+"KFDQMTest.MultipleCpQueuesStressDispatch:"\
+"KFDCWSRTest.InternalRegTest:"\
+"KFDEvictTest.QueueTest:"\
+"KFDEvictTest.BasicTest:"\
+"KFDRASTest.*:"\
+"KFDExceptionTest.AddressFault:"\
+"KFDQMTest.GpuMemCopyTest:"\
+"KFDDBGTest.HitTrapOnWaveStartEndEvent"
+
 FILTER[RHEL9]=\
 "$BLACKLIST_ALL_ASICS:"\
 "$BLACKLIST_GFX11:"\
