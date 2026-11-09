@@ -50,13 +50,13 @@ namespace RcclUnitTesting
         HIPCALL(hipMemset(recvbuffs[i], 0, numElements * sizeof(float)));
       }
 
-      NCCLCHECK(ncclGroupStart());
+      NCCLCALL(ncclGroupStart());
       for (int i = 0; i < numRanks; i++) {
         HIPCALL(hipSetDevice(i));
-        NCCLCHECK(ncclAllReduce(sendbuffs[i], recvbuffs[i], numElements,
+        NCCLCALL(ncclAllReduce(sendbuffs[i], recvbuffs[i], numElements,
                                 ncclFloat32, ncclSum, comms[i], streams[i]));
       }
-      NCCLCHECK(ncclGroupEnd());
+      NCCLCALL(ncclGroupEnd());
 
       for (int i = 0; i < numRanks; i++) {
         HIPCALL(hipSetDevice(i));
@@ -71,7 +71,7 @@ namespace RcclUnitTesting
         HIPCALL(hipStreamDestroy(streams[i]));
       }
       for (auto& comm : comms)
-        NCCLCHECK(ncclCommDestroy(comm));
+        NCCLCALL(ncclCommDestroy(comm));
     });
   }
 
@@ -113,13 +113,13 @@ namespace RcclUnitTesting
         HIPCALL(hipMemset(recvbuffs[i], 0, numElements * sizeof(float)));
       }
 
-      NCCLCHECK(ncclGroupStart());
+      NCCLCALL(ncclGroupStart());
       for (int i = 0; i < numRanks; i++) {
         HIPCALL(hipSetDevice(i));
-        NCCLCHECK(ncclAllReduce(sendbuffs[i], recvbuffs[i], numElements,
+        NCCLCALL(ncclAllReduce(sendbuffs[i], recvbuffs[i], numElements,
                                 ncclFloat32, ncclSum, comms[i], streams[i]));
       }
-      NCCLCHECK(ncclGroupEnd());
+      NCCLCALL(ncclGroupEnd());
 
       // Verify results: sum of (1 + 2 + ... + numRanks)
       float expectedSum = static_cast<float>(numRanks * (numRanks + 1) / 2);
@@ -145,7 +145,7 @@ namespace RcclUnitTesting
         HIPCALL(hipStreamDestroy(streams[i]));
       }
       for (auto& comm : comms)
-        NCCLCHECK(ncclCommDestroy(comm));
+        NCCLCALL(ncclCommDestroy(comm));
     },
     {{"RCCL_DDA_ENABLE", "0"}});
   }

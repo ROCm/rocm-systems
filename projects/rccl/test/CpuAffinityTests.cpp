@@ -171,9 +171,9 @@ namespace RcclUnitTesting
 
       ncclComm_t comm;
       ncclUniqueId id;
-      NCCLCHECK(ncclGetUniqueId(&id));
+      NCCLCALL(ncclGetUniqueId(&id));
       HIPCALL(hipSetDevice(0));
-      NCCLCHECK(ncclCommInitRank(&comm, 1, id, 0));
+      NCCLCALL(ncclCommInitRank(&comm, 1, id, 0));
 
       cpu_set_t after;
       CPU_ZERO(&after);
@@ -181,7 +181,7 @@ namespace RcclUnitTesting
       int getAffinityStatus = sched_getaffinity(0, sizeof(after), &after);
       int getAffinityErrno  = errno;
 
-      NCCLCHECK(ncclCommDestroy(comm));
+      NCCLCALL(ncclCommDestroy(comm));
 
       ASSERT_EQ(getAffinityStatus, 0)
           << "sched_getaffinity failed: " << strerror(getAffinityErrno);

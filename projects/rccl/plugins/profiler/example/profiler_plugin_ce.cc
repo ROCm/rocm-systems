@@ -115,8 +115,8 @@ static void pollCeCollEvents(struct context* ctx) {
       // Retiring unlinks the event, so destroy its cudaEvents here: the
       // finalize-time cleanup only walks the lists and would never see them,
       // and the slot's handles are overwritten when the ring wraps.
-      if (event->startEvent) { cudaEventDestroy(event->startEvent); event->startEvent = NULL; }
-      if (event->stopEvent) { cudaEventDestroy(event->stopEvent); event->stopEvent = NULL; }
+      if (event->startEvent) { (void)cudaEventDestroy(event->startEvent); event->startEvent = NULL; }
+      if (event->stopEvent) { (void)cudaEventDestroy(event->stopEvent); event->stopEvent = NULL; }
 
       // Return event to pool for reuse (ring buffer behavior)
       __atomic_fetch_add(&ctx->ceCollPoolBase, 1, __ATOMIC_RELAXED);
@@ -172,8 +172,8 @@ static void pollCeSyncEvents(struct context* ctx) {
       // Retiring unlinks the event, so destroy its cudaEvents here: the
       // finalize-time cleanup only walks the lists and would never see them,
       // and the slot's handles are overwritten when the ring wraps.
-      if (event->startEvent) { cudaEventDestroy(event->startEvent); event->startEvent = NULL; }
-      if (event->stopEvent) { cudaEventDestroy(event->stopEvent); event->stopEvent = NULL; }
+      if (event->startEvent) { (void)cudaEventDestroy(event->startEvent); event->startEvent = NULL; }
+      if (event->stopEvent) { (void)cudaEventDestroy(event->stopEvent); event->stopEvent = NULL; }
 
       // Return event to pool for reuse (ring buffer behavior)
       __atomic_fetch_add(&ctx->ceSyncPoolBase, 1, __ATOMIC_RELAXED);
@@ -227,8 +227,8 @@ static void pollCeBatchEvents(struct context* ctx) {
       // Retiring unlinks the event, so destroy its cudaEvents here: the
       // finalize-time cleanup only walks the lists and would never see them,
       // and the slot's handles are overwritten when the ring wraps.
-      if (event->startEvent) { cudaEventDestroy(event->startEvent); event->startEvent = NULL; }
-      if (event->stopEvent) { cudaEventDestroy(event->stopEvent); event->stopEvent = NULL; }
+      if (event->startEvent) { (void)cudaEventDestroy(event->startEvent); event->startEvent = NULL; }
+      if (event->stopEvent) { (void)cudaEventDestroy(event->stopEvent); event->stopEvent = NULL; }
 
       // Return event to pool for reuse (ring buffer behavior)
       __atomic_fetch_add(&ctx->ceBatchPoolBase, 1, __ATOMIC_RELAXED);
@@ -407,24 +407,24 @@ void ceProfilerCleanupPendingEvents(struct context* ctx) {
 
   struct ceColl* ceColl = ctx->ceEvents.ceCollHead;
   while (ceColl) {
-    if (ceColl->startEvent) cudaEventDestroy(ceColl->startEvent);
-    if (ceColl->stopEvent) cudaEventDestroy(ceColl->stopEvent);
+    if (ceColl->startEvent) (void)cudaEventDestroy(ceColl->startEvent);
+    if (ceColl->stopEvent) (void)cudaEventDestroy(ceColl->stopEvent);
     ceColl->pollerLinked = false;
     ceColl = ceColl->pollerNext;
   }
 
   struct ceSync* ceSync = ctx->ceEvents.ceSyncHead;
   while (ceSync) {
-    if (ceSync->startEvent) cudaEventDestroy(ceSync->startEvent);
-    if (ceSync->stopEvent) cudaEventDestroy(ceSync->stopEvent);
+    if (ceSync->startEvent) (void)cudaEventDestroy(ceSync->startEvent);
+    if (ceSync->stopEvent) (void)cudaEventDestroy(ceSync->stopEvent);
     ceSync->pollerLinked = false;
     ceSync = ceSync->pollerNext;
   }
 
   struct ceBatch* ceBatch = ctx->ceEvents.ceBatchHead;
   while (ceBatch) {
-    if (ceBatch->startEvent) cudaEventDestroy(ceBatch->startEvent);
-    if (ceBatch->stopEvent) cudaEventDestroy(ceBatch->stopEvent);
+    if (ceBatch->startEvent) (void)cudaEventDestroy(ceBatch->startEvent);
+    if (ceBatch->stopEvent) (void)cudaEventDestroy(ceBatch->stopEvent);
     ceBatch->pollerLinked = false;
     ceBatch = ceBatch->pollerNext;
   }
@@ -491,15 +491,15 @@ ncclResult_t ceProfilerStartCeCollEvent(struct context* ctx, void** eHandle, ncc
 
     // Create CUDA events with appropriate flags
     if (ceProfilerCtxt.timingMode == CE_TIMING_GPU) {
-      cudaEventCreateWithFlags(&event->startEvent, 0);
-      cudaEventCreateWithFlags(&event->stopEvent, 0);
+      (void)cudaEventCreateWithFlags(&event->startEvent, 0);
+      (void)cudaEventCreateWithFlags(&event->stopEvent, 0);
     } else {
-      cudaEventCreateWithFlags(&event->startEvent, cudaEventDisableTiming);
-      cudaEventCreateWithFlags(&event->stopEvent, cudaEventDisableTiming);
+      (void)cudaEventCreateWithFlags(&event->startEvent, cudaEventDisableTiming);
+      (void)cudaEventCreateWithFlags(&event->stopEvent, cudaEventDisableTiming);
     }
 
     // Record start event to stream
-    cudaEventRecord(event->startEvent, event->stream);
+    (void)cudaEventRecord(event->startEvent, event->stream);
 
     // Must not be skipped: an unlinked event is never polled, so its slot would
     // never retire.
@@ -525,7 +525,7 @@ ncclResult_t ceProfilerStartCeCollEvent(struct context* ctx, void** eHandle, ncc
 // Stop CE Coll event
 ncclResult_t ceProfilerStopCeCollEvent(void* eHandle) {
   struct ceColl* event = (struct ceColl*)eHandle;
-  cudaEventRecord(event->stopEvent, event->stream);
+  (void)cudaEventRecord(event->stopEvent, event->stream);
   __atomic_store_n(&event->stopRecorded, true, __ATOMIC_RELEASE);
   debugEvent(eHandle, "CeCollStopEvent");
   return ncclSuccess;
@@ -576,14 +576,14 @@ ncclResult_t ceProfilerStartCeSyncEvent(struct context* ctx, void** eHandle, ncc
 
     // Create CUDA events with appropriate flags
     if (ceProfilerCtxt.timingMode == CE_TIMING_GPU) {
-      cudaEventCreateWithFlags(&event->startEvent, 0);
-      cudaEventCreateWithFlags(&event->stopEvent, 0);
+      (void)cudaEventCreateWithFlags(&event->startEvent, 0);
+      (void)cudaEventCreateWithFlags(&event->stopEvent, 0);
     } else {
-      cudaEventCreateWithFlags(&event->startEvent, cudaEventDisableTiming);
-      cudaEventCreateWithFlags(&event->stopEvent, cudaEventDisableTiming);
+      (void)cudaEventCreateWithFlags(&event->startEvent, cudaEventDisableTiming);
+      (void)cudaEventCreateWithFlags(&event->stopEvent, cudaEventDisableTiming);
     }
 
-    if (event->stream) cudaEventRecord(event->startEvent, event->stream);
+    if (event->stream) (void)cudaEventRecord(event->startEvent, event->stream);
 
     pthread_mutex_lock(&ctx->ceEvents.mutex);
     if (event->parent) {
@@ -607,7 +607,7 @@ ncclResult_t ceProfilerStartCeSyncEvent(struct context* ctx, void** eHandle, ncc
 // Stop CE Sync event
 ncclResult_t ceProfilerStopCeSyncEvent(void* eHandle) {
   struct ceSync* event = (struct ceSync*)eHandle;
-  cudaEventRecord(event->stopEvent, event->stream);
+  (void)cudaEventRecord(event->stopEvent, event->stream);
   __atomic_store_n(&event->stopRecorded, true, __ATOMIC_RELEASE);
   debugEvent(eHandle, "CeSyncStopEvent");
   return ncclSuccess;
@@ -657,14 +657,14 @@ ncclResult_t ceProfilerStartCeBatchEvent(struct context* ctx, void** eHandle, nc
 
     // Create CUDA events with appropriate flags
     if (ceProfilerCtxt.timingMode == CE_TIMING_GPU) {
-      cudaEventCreateWithFlags(&event->startEvent, 0);
-      cudaEventCreateWithFlags(&event->stopEvent, 0);
+      (void)cudaEventCreateWithFlags(&event->startEvent, 0);
+      (void)cudaEventCreateWithFlags(&event->stopEvent, 0);
     } else {
-      cudaEventCreateWithFlags(&event->startEvent, cudaEventDisableTiming);
-      cudaEventCreateWithFlags(&event->stopEvent, cudaEventDisableTiming);
+      (void)cudaEventCreateWithFlags(&event->startEvent, cudaEventDisableTiming);
+      (void)cudaEventCreateWithFlags(&event->stopEvent, cudaEventDisableTiming);
     }
 
-    if (event->stream) cudaEventRecord(event->startEvent, event->stream);
+    if (event->stream) (void)cudaEventRecord(event->startEvent, event->stream);
 
     pthread_mutex_lock(&ctx->ceEvents.mutex);
     if (event->parent) {
@@ -688,7 +688,7 @@ ncclResult_t ceProfilerStartCeBatchEvent(struct context* ctx, void** eHandle, nc
 // Stop CE Batch event
 ncclResult_t ceProfilerStopCeBatchEvent(void* eHandle) {
   struct ceBatch* event = (struct ceBatch*)eHandle;
-  cudaEventRecord(event->stopEvent, event->stream);
+  (void)cudaEventRecord(event->stopEvent, event->stream);
   __atomic_store_n(&event->stopRecorded, true, __ATOMIC_RELEASE);
   debugEvent(eHandle, "CeBatchStopEvent");
   return ncclSuccess;

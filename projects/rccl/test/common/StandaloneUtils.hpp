@@ -17,7 +17,7 @@
         }                                                                                     \
     } while (0)
 
-#define NCCLCHECK(cmd) do {                                     \
+#define NCCLCALL(cmd) do {                                     \
     ncclResult_t res = cmd;                                     \
     if (res != ncclSuccess) {                                   \
          printf("NCCL failure %s:%d '%s'\n",                    \

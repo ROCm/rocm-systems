@@ -39,7 +39,7 @@ struct CeAlltoAllvMockComm
 
     void reset()
     {
-        std::memset(&comm, 0, sizeof(comm));
+        comm = ncclComm{};
         comm.nNodes            = 1;
         comm.nRanks            = 4;
         comm.rank              = 0;

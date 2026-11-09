@@ -1194,9 +1194,20 @@ if(SQTT_ENABLED)
     OUTPUT_QUIET ERROR_QUIET
   )
 
-  target_compile_options(rccl PRIVATE "-fpass-plugin=/opt/rocm/lib/libsqttinstrumentpass.so")
+  set(_sqtt_plugin "")
+  foreach(_sqtt_dir "${ROCM_PATH}/lib" "${HIP_PATH}/lib" "/opt/rocm/lib")
+    if(EXISTS "${_sqtt_dir}/libsqttinstrumentpass.so")
+      set(_sqtt_plugin "${_sqtt_dir}/libsqttinstrumentpass.so")
+      break()
+    endif()
+  endforeach()
+  if(_sqtt_plugin)
+    target_compile_options(rccl PRIVATE "-fpass-plugin=${_sqtt_plugin}")
+    message(STATUS "SQTT instrumentation pass plugin enabled: ${_sqtt_plugin}")
+  else()
+    message(STATUS "SQTT_ENABLED but libsqttinstrumentpass.so was not found under ROCM_PATH/HIP_PATH; compiling with SQTT source guards only")
+  endif()
   target_compile_definitions(rccl PRIVATE SQTT_ENABLED=1)
-  message(STATUS "SQTT instrumentation pass plugin enabled for RCCL")
 endif()
 
 ## Set RCCL compile and linker options for unit tests and code coverage
@@ -1338,6 +1349,9 @@ if (ROCTX_ENABLE)
 endif()
 if(NOT ENABLE_DEVICE_LINKER)
   target_link_libraries(rccl PRIVATE   -fgpu-rdc)             # Required when linking relocatable device code
+  # Device LTO requested #pragma unroll but cannot apply it; the notes are
+  # attributed to <unknown>:0:0 so a source pragma cannot silence them.
+  target_link_options(rccl PRIVATE -Wno-pass-failed)
 endif()
 target_link_libraries(rccl PRIVATE   Threads::Threads)
 target_link_libraries(rccl INTERFACE hip::host)

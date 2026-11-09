@@ -32,7 +32,7 @@ struct StepProfEvent {
   uint64_t tag; /* ncclProfileProxyStep */
 };
 
-static ncclDebugLogger_t gLog;
+[[maybe_unused]] static ncclDebugLogger_t gLog;
 
 static ncclResult_t pluginInit(void** context, uint64_t commId, int* eActivationMask, const char* /*commName*/,
                                int /*nNodes*/, int /*nRanks*/, int rank, ncclDebugLogger_t logfn) {

@@ -245,6 +245,25 @@ endif()
 
 set(GPU_TARGETS "${SUPPORTED_GPUS}")
 
+# rocm_check_target_ids may drop the :xnack+ suffix. ASAN device sanitizer
+# requires it; without this, clang warns -Woption-ignored on bare gfx*.
+if(BUILD_ADDRESS_SANITIZER)
+  set(_asan_targets "")
+  foreach(_t IN LISTS GPU_TARGETS)
+    if(_t STREQUAL "")
+      continue()
+    endif()
+    string(FIND "${_t}" ":xnack+" _has_xnack)
+    if(_has_xnack EQUAL -1)
+      list(APPEND _asan_targets "${_t}:xnack+")
+    else()
+      list(APPEND _asan_targets "${_t}")
+    endif()
+  endforeach()
+  set(GPU_TARGETS "${_asan_targets}")
+  message(STATUS "ASAN GPU_TARGETS retargeted to ${GPU_TARGETS}")
+endif()
+
 # Fail fast if we ended up with no GPU targets at all
 if(NOT GPU_TARGETS OR "${GPU_TARGETS}" STREQUAL "NOTFOUND")
   message(FATAL_ERROR

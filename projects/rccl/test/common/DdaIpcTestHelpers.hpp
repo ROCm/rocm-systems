@@ -24,7 +24,7 @@ struct DdaIpcMockComm
 
     void reset()
     {
-        std::memset(&comm, 0, sizeof(comm));
+        comm = ncclComm{};
         comm.bootstrap           = &bootstrapPlaceholder;
         comm.nNodes              = 1;
         comm.nRanks              = nccl_dda_detail::kDdaNranks;

@@ -561,7 +561,7 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
 
     struct acclCollInfo* coll = (struct acclCollInfo*)eDescr->parentObj;
     uint8_t chId = eDescr->kernelCh.channelId;
-    if (chId >= ACCL_MAX_CHANNELS) {
+    if (!acclChannelIdValid(chId)) {
       *eHandle = NULL;
       return ncclSuccess;
     }

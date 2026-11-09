@@ -13,6 +13,13 @@
 #define ACCL_MAX_CHANNELS 256
 #define ACCL_MAX_PROXY_OPS 256
 
+/* Channel ids arrive as uint8_t. Compare after promoting to unsigned so clang
+ * does not treat `id >= ACCL_MAX_CHANNELS` as tautological while the limit is
+ * 256; the check remains live if ACCL_MAX_CHANNELS is raised later. */
+static inline int acclChannelIdValid(unsigned channelId) {
+  return channelId < (unsigned)ACCL_MAX_CHANNELS;
+}
+
 static inline uint64_t acclGetTimeUs() {
   struct timespec ts;
   clock_gettime(CLOCK_MONOTONIC, &ts);

@@ -423,7 +423,6 @@ static __device__ void ncclSymkRun_AllGather_LL_impl(ncclSymkDevWorkArgs const* 
   ncclLLA2ASession<ncclCoopCta> lla2a(ncclCoopCta(), handler.comm, ncclTeamLsa(handler.comm), handler.lsaLLA2A,
                                       blockIdx.x, /*maxElts=*/ncclSymkMaxThreads, multimem, handler.comm.lsaMultimem);
 
-  using Pack = BytePack<8>;
   constexpr int BytePerPack = 8;
 
   handler.singleWork<char>([&] __device__(int nElts, int nAllElts, ncclSymPtr<char> input, ncclSymPtr<char> output) {

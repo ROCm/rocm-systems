@@ -14,6 +14,7 @@
 #include "algorithms/dda/dda_init_detail.h"
 #include "algorithms/dda/ipc/ipc_mem_handler.h"
 
+#include <iostream>
 #include <cuda_runtime.h>
 
 using nccl_dda_detail::DdaIpcBarrierState;

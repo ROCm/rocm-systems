@@ -137,12 +137,10 @@ static void inspectorPromFormatMessageSizeRange(size_t bytes,
 
   const char* units[] = {"B", "KB", "MB", "GB", "TB"};
   size_t unitIndex = 0;
-  double unitSize = 1.0;
   double byteValue = static_cast<double>(bytes);
 
   while (byteValue >= 1024.0 && unitIndex < 4) {
     byteValue /= 1024.0;
-    unitSize *= 1024.0;
     unitIndex++;
   }
 

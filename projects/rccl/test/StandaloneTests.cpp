@@ -29,25 +29,25 @@ namespace RcclUnitTesting
 
       // Initialize the original comms
       std::vector<ncclComm_t> comms(numDevices);
-      NCCLCHECK(ncclCommInitAll(comms.data(), numDevices, nullptr));
+      NCCLCALL(ncclCommInitAll(comms.data(), numDevices, nullptr));
 
       // Split into new comms (round-robin)
       std::vector<ncclComm_t> subComms(numDevices);
       int numSubComms = 2;
 
       std::map<int, int> mapCounter;
-      NCCLCHECK(ncclGroupStart());
+      NCCLCALL(ncclGroupStart());
       for (int localRank = 0; localRank < numDevices; localRank++) {
-        NCCLCHECK(ncclCommSplit(comms[localRank], localRank % numSubComms, localRank, &subComms[localRank], NULL));
+        NCCLCALL(ncclCommSplit(comms[localRank], localRank % numSubComms, localRank, &subComms[localRank], NULL));
         mapCounter[localRank % numSubComms]++;
       }
-      NCCLCHECK(ncclGroupEnd());
+      NCCLCALL(ncclGroupEnd());
 
       // Check that new comms have correct subranks / ranks
       for (int i = 0; i < numDevices; i++) {
         int subCommRank, subCommNRank;
-        NCCLCHECK(ncclCommUserRank(subComms[i], &subCommRank));
-        NCCLCHECK(ncclCommCount(subComms[i], &subCommNRank));
+        NCCLCALL(ncclCommUserRank(subComms[i], &subCommRank));
+        NCCLCALL(ncclCommCount(subComms[i], &subCommNRank));
 
         ASSERT_EQ(subCommRank, i / numSubComms);
         ASSERT_EQ(subCommNRank, mapCounter[i % numSubComms]);
@@ -55,9 +55,9 @@ namespace RcclUnitTesting
 
       // Clean up comms
       for (auto& subComm : subComms)
-        NCCLCHECK(ncclCommDestroy(subComm));
+        NCCLCALL(ncclCommDestroy(subComm));
       for (auto& comm : comms)
-        NCCLCHECK(ncclCommDestroy(comm));
+        NCCLCALL(ncclCommDestroy(comm));
     });
   }
 
@@ -77,24 +77,24 @@ namespace RcclUnitTesting
 
       // Initialize the original comms
       std::vector<ncclComm_t> comms(numDevices);
-      NCCLCHECK(ncclCommInitAll(comms.data(), numDevices, nullptr));
+      NCCLCALL(ncclCommInitAll(comms.data(), numDevices, nullptr));
 
       // Split into new comms (all of the same color)
       std::vector<ncclComm_t> subComms(numDevices);
-      NCCLCHECK(ncclGroupStart());
+      NCCLCALL(ncclGroupStart());
       for (int localRank = 0; localRank < numDevices; localRank++)
-        NCCLCHECK(ncclCommSplit(comms[localRank], 0, localRank, &subComms[localRank], NULL));
-      NCCLCHECK(ncclGroupEnd());
+        NCCLCALL(ncclCommSplit(comms[localRank], 0, localRank, &subComms[localRank], NULL));
+      NCCLCALL(ncclGroupEnd());
 
       // Validate results
       for (int i = 0; i < numDevices; i++) {
         int originalRank, originalNRank;
-        NCCLCHECK(ncclCommUserRank(comms[i], &originalRank));
-        NCCLCHECK(ncclCommCount(comms[i], &originalNRank));
+        NCCLCALL(ncclCommUserRank(comms[i], &originalRank));
+        NCCLCALL(ncclCommCount(comms[i], &originalNRank));
 
         int subCommRank, subCommNRank;
-        NCCLCHECK(ncclCommUserRank(subComms[i], &subCommRank));
-        NCCLCHECK(ncclCommCount(subComms[i], &subCommNRank));
+        NCCLCALL(ncclCommUserRank(subComms[i], &subCommRank));
+        NCCLCALL(ncclCommCount(subComms[i], &subCommNRank));
 
         ASSERT_EQ(originalRank, subCommRank);
         ASSERT_EQ(originalNRank, subCommNRank);
@@ -102,9 +102,9 @@ namespace RcclUnitTesting
 
       // Clean up comms
       for (auto& subComm : subComms)
-        NCCLCHECK(ncclCommDestroy(subComm));
+        NCCLCALL(ncclCommDestroy(subComm));
       for (auto& comm : comms)
-        NCCLCHECK(ncclCommDestroy(comm));
+        NCCLCALL(ncclCommDestroy(comm));
     });
   }
 
@@ -124,28 +124,28 @@ namespace RcclUnitTesting
 
       // Initialize the original comms
       std::vector<ncclComm_t> comms(numDevices);
-      NCCLCHECK(ncclCommInitAll(comms.data(), numDevices, nullptr));
+      NCCLCALL(ncclCommInitAll(comms.data(), numDevices, nullptr));
 
       // Split into new comms
       int numReducedRanks = numDevices / 2;
       std::vector<ncclComm_t> subComms(numDevices);
-      NCCLCHECK(ncclGroupStart());
+      NCCLCALL(ncclGroupStart());
       for (int localRank = 0; localRank < numDevices; localRank++)
-        NCCLCHECK(ncclCommSplit(comms[localRank],
+        NCCLCALL(ncclCommSplit(comms[localRank],
               localRank < numReducedRanks ? 0 : NCCL_SPLIT_NOCOLOR,
               localRank, &subComms[localRank], NULL));
-      NCCLCHECK(ncclGroupEnd());
+      NCCLCALL(ncclGroupEnd());
 
       // Validate results
       for (int i = 0; i < numDevices; i++) {
         int originalRank, originalNRank;
-        NCCLCHECK(ncclCommUserRank(comms[i], &originalRank));
-        NCCLCHECK(ncclCommCount(comms[i], &originalNRank));
+        NCCLCALL(ncclCommUserRank(comms[i], &originalRank));
+        NCCLCALL(ncclCommCount(comms[i], &originalNRank));
 
         if (i < numReducedRanks) {
           int subCommRank, subCommNRank;
-          NCCLCHECK(ncclCommUserRank(subComms[i], &subCommRank));
-          NCCLCHECK(ncclCommCount(subComms[i], &subCommNRank));
+          NCCLCALL(ncclCommUserRank(subComms[i], &subCommRank));
+          NCCLCALL(ncclCommCount(subComms[i], &subCommNRank));
 
           ASSERT_EQ(originalRank, subCommRank);
           ASSERT_EQ(subCommNRank, numReducedRanks);
@@ -156,9 +156,9 @@ namespace RcclUnitTesting
 
       // Cleanup comms
       for (auto& subComm : subComms)
-        NCCLCHECK(ncclCommDestroy(subComm));
+        NCCLCALL(ncclCommDestroy(subComm));
       for (auto& comm : comms)
-        NCCLCHECK(ncclCommDestroy(comm));
+        NCCLCALL(ncclCommDestroy(comm));
     });
   }
 
@@ -201,7 +201,7 @@ namespace RcclUnitTesting
           setenv("NCCL_PROTO", p, 1);
         }
 
-        NCCLCHECK(ncclCommInitAll(comms.data(), numRanks, nullptr));
+        NCCLCALL(ncclCommInitAll(comms.data(), numRanks, nullptr));
 
         // Prepare CPU data arrays
         int N = 1250;
@@ -232,9 +232,9 @@ namespace RcclUnitTesting
           }
 
           // Initiate the allreduce
-          NCCLCHECK(ncclGroupStart());
+          NCCLCALL(ncclGroupStart());
           for (int rank = 0; rank < numRanks; rank++)
-            NCCLCHECK(ncclAllReduce(gpuInput[rank], gpuOutput[rank], N, ncclInt, ncclSum, comms[rank], stream[rank]));
+            NCCLCALL(ncclAllReduce(gpuInput[rank], gpuOutput[rank], N, ncclInt, ncclSum, comms[rank], stream[rank]));
           ncclResult_t res = ncclGroupEnd();
 
           if (res != ncclSuccess) continue;
@@ -266,7 +266,7 @@ namespace RcclUnitTesting
           HIPCALL(hipFree(gpuInput[rank]));
           HIPCALL(hipFree(gpuOutput[rank]));
           HIPCALL(hipStreamDestroy(stream[rank]));
-          NCCLCHECK(ncclCommDestroy(comms[rank]));
+          NCCLCALL(ncclCommDestroy(comms[rank]));
         }
       }
       if (proto)
@@ -328,33 +328,33 @@ namespace RcclUnitTesting
       // Test single comm initialization
       ncclComm_t comm;
       ncclUniqueId id;
-      NCCLCHECK(ncclGetUniqueId(&id));
+      NCCLCALL(ncclGetUniqueId(&id));
       HIPCALL(hipSetDevice(0));
-      NCCLCHECK(ncclCommInitRank(&comm, 1, id, 0));
+      NCCLCALL(ncclCommInitRank(&comm, 1, id, 0));
 
       // Verify device assignment
       int device;
-      NCCLCHECK(ncclCommCuDevice(comm, &device));
+      NCCLCALL(ncclCommCuDevice(comm, &device));
       ASSERT_EQ(device, 0);
-      NCCLCHECK(ncclCommDestroy(comm));
+      NCCLCALL(ncclCommDestroy(comm));
 
       // Test multi-device scenario if available
       if (numDevices > 1) {
         std::vector<ncclComm_t> comms(numDevices);
 
         // Initialize all communicators at once
-        NCCLCHECK(ncclCommInitAll(comms.data(), numDevices, nullptr));
+        NCCLCALL(ncclCommInitAll(comms.data(), numDevices, nullptr));
 
         // Verify device assignments
         for (int i = 0; i < numDevices; i++) {
           int assignedDevice;
-          NCCLCHECK(ncclCommCuDevice(comms[i], &assignedDevice));
+          NCCLCALL(ncclCommCuDevice(comms[i], &assignedDevice));
           ASSERT_EQ(assignedDevice, i);
         }
 
         // Clean up
         for (int i = 0; i < numDevices; i++) {
-          NCCLCHECK(ncclCommDestroy(comms[i]));
+          NCCLCALL(ncclCommDestroy(comms[i]));
         }
       }
     });
@@ -375,18 +375,18 @@ namespace RcclUnitTesting
 
       // Initialize the original comms
       std::vector<ncclComm_t> comms(numDevices);
-      NCCLCHECK(ncclCommInitAll(comms.data(), numDevices, nullptr));
+      NCCLCALL(ncclCommInitAll(comms.data(), numDevices, nullptr));
 
       // Create an invalid comm handle that will cause a failure
       ncclComm_t invalidComm = nullptr;
 
       // This NCCL_CHECK will fail because we're trying to query rank from a null communicator
       int rank;
-      NCCLCHECK(ncclCommUserRank(invalidComm, &rank));
+      NCCLCALL(ncclCommUserRank(invalidComm, &rank));
 
       // Clean up comms
       for (auto& comm : comms)
-        NCCLCHECK(ncclCommDestroy(comm));
+        NCCLCALL(ncclCommDestroy(comm));
     });
   }
 }

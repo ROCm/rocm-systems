@@ -43,12 +43,12 @@ inline void CreateMockComm(
     mockComm->p2pNetChunkSize = RCCL_VALUE_UNSET;
 
     // Initialize topology
-    memset(&mockTopo, 0, sizeof(mockTopo));
+    mockTopo = {};
     mockComm->topo = &mockTopo;
 
     // Initialize GPU node
     mockTopo.nodes[GPU].count = 1;
-    memset(&mockGpuNode, 0, sizeof(mockGpuNode));
+    mockGpuNode = {};
 
     // Set GPU architecture
     strncpy(mockGpuNode.gpu.gcn, arch, sizeof(mockGpuNode.gpu.gcn) - 1);
@@ -76,7 +76,7 @@ inline void CleanupMockComm(ncclComm_t& mockComm)
 // comm->sharedRes, such as ncclTopoComputeP2pChannels. Caller owns the storage.
 inline void AttachMockSharedRes(ncclComm_t mockComm, struct ncclSharedResources& sharedRes)
 {
-    memset(&sharedRes, 0, sizeof(sharedRes));
+    sharedRes = {};
     sharedRes.owner     = mockComm;
     sharedRes.tpNRanks  = mockComm->nRanks;
     mockComm->sharedRes = &sharedRes;

@@ -65,10 +65,9 @@ struct P2pChannelsComm
                     int seedP2pPerPeer, int cu = 0)
     {
         ncclTopoNode gpuNode{};
-        memset(comm, 0, sizeof(*comm));
-        memset(topo, 0, sizeof(*topo));
-        memset(sharedRes, 0, sizeof(*sharedRes));
-        memset(&gpuNode, 0, sizeof(gpuNode));
+        *comm = ncclComm{};
+        *topo = ncclTopoSystem{};
+        *sharedRes = ncclSharedResources{};
 
         for(int c = 0; c < MAXCHANNELS; c++) comm->channels[c].id = -1;
 

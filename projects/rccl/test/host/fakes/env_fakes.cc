@@ -42,11 +42,9 @@ const char* micro_getenv(const char* name) {
 // cannot catch. It is process-wide, so gtest/libstdc++ reads must still see the real environment -- unlike
 // micro_getenv it falls back.
 extern "C" char* getenv(const char* name) {
-  if (name != nullptr) {
-    auto& m = microEnvMap();
-    auto it = m.find(name);
-    if (it != m.end()) return it->second ? const_cast<char*>(it->second->c_str()) : nullptr;
-  }
+  auto& m = microEnvMap();
+  auto it = m.find(name);
+  if (it != m.end()) return it->second ? const_cast<char*>(it->second->c_str()) : nullptr;
   return real_getenv(name);
 }
 

@@ -260,9 +260,7 @@ static void inspectorPluginCollInfoInit(struct inspectorCollInfo **collInfo,
   collInfoPtr->algo = eDescr->coll.algo;
   collInfoPtr->proto = eDescr->coll.proto;
   collInfoPtr->sn = eDescr->coll.seqNumber;
-  // RCCL: clamp nChannels to MAX_CHANNELS; RCCL MAXCHANNELS (128/512) can exceed kernelCh[].
-  collInfoPtr->nChannels = (eDescr->coll.nChannels < MAX_CHANNELS)
-                            ? eDescr->coll.nChannels : MAX_CHANNELS;
+  collInfoPtr->nChannels = inspectorClampNChannels(eDescr->coll.nChannels);
   if (collInfoPtr->nChannels > 0) {
     inspectorPluginCollInfoRef(collInfoPtr); //extra ref for kernel completion
   }
@@ -294,9 +292,7 @@ static void inspectorPluginP2pInfoInit(struct inspectorP2pInfo **p2pInfo,
   p2pInfoPtr->refCount = 0;
   inspectorPluginP2pInfoRef(p2pInfoPtr); // self ref
   p2pInfoPtr->func = eDescr->p2p.func;
-  // RCCL: clamp nChannels to MAX_CHANNELS; RCCL MAXCHANNELS (128/512) can exceed kernelCh[].
-  p2pInfoPtr->nChannels = (eDescr->p2p.nChannels < MAX_CHANNELS)
-                           ? eDescr->p2p.nChannels : MAX_CHANNELS;
+  p2pInfoPtr->nChannels = inspectorClampNChannels(eDescr->p2p.nChannels);
   p2pInfoPtr->peer = eDescr->p2p.peer;
   if (p2pInfoPtr->nChannels > 0) {
     inspectorPluginP2pInfoRef(p2pInfoPtr); // extra ref for kernel completion
@@ -414,11 +410,7 @@ static void inspectorPluginKernelChInfoInitP2p(struct inspectorKernelChInfo **ke
 
 static void inspectorPluginKernelChInfoInit(struct inspectorKernelChInfo **kernelChInfo,
                                             ncclProfilerEventDescr_t *eDescr) {
-  // RCCL: drop kernel-channel events whose channelId exceeds kernelCh[MAX_CHANNELS]
-  // (RCCL MAXCHANNELS 128/512 can exceed 64). A null handle makes the matching
-  // stop/record events no-op via their eHandle==nullptr checks, keeping refcounts
-  // and the nKernelCh{Started,Completed} == clamped nChannels condition balanced.
-  if (eDescr->kernelCh.channelId >= MAX_CHANNELS) {
+  if (!inspectorChannelIdValid(eDescr->kernelCh.channelId)) {
     *kernelChInfo = nullptr;
     return;
   }
@@ -664,8 +656,7 @@ done:
 }
 
 static ncclResult_t inspectorPluginStopEventKernelCh(struct inspectorKernelChInfo *kernelChInfo) {
-  // RCCL: guard against channelId >= MAX_CHANNELS; RCCL MAXCHANNELS can exceed 64.
-  if (kernelChInfo->channelId >= MAX_CHANNELS) return ncclSuccess;
+  if (!inspectorChannelIdValid(kernelChInfo->channelId)) return ncclSuccess;
   if (kernelChInfo->parentType == ncclProfileColl) {
     struct inspectorCollInfo *collInfo = getKernelChCollInfo(kernelChInfo);
     if (collInfo) return inspectorPluginStopEventKernelChColl(kernelChInfo, collInfo);
@@ -726,8 +717,7 @@ static ncclResult_t inspectorPluginRecordEventStateKernelChP2p(struct inspectorK
 
 static ncclResult_t inspectorPluginRecordEventStateKernelCh(struct inspectorKernelChInfo *kernelChInfo,
                                                             ncclProfilerEventStateArgs_t* eStateArgs) {
-  // RCCL: guard against channelId >= MAX_CHANNELS; RCCL MAXCHANNELS can exceed 64.
-  if (kernelChInfo->channelId >= MAX_CHANNELS) return ncclSuccess;
+  if (!inspectorChannelIdValid(kernelChInfo->channelId)) return ncclSuccess;
   if (kernelChInfo->parentType == ncclProfileColl) {
     struct inspectorCollInfo *collInfo = getKernelChCollInfo(kernelChInfo);
     if (collInfo) return inspectorPluginRecordEventStateKernelChColl(kernelChInfo, collInfo, eStateArgs);

@@ -115,7 +115,7 @@ static void testCommRegisterDeregister(bool expectNonNull) {
     HIPCALL(hipSetDevice(0));
 
     ncclComm_t comm;
-    NCCLCHECK(initSingleRankComm(&comm));
+    NCCLCALL(initSingleRankComm(&comm));
 
     // Create buffer on device
     const size_t bufferSize = 1024 * 1024; // 1 MB
@@ -125,7 +125,7 @@ static void testCommRegisterDeregister(bool expectNonNull) {
 
     // Register buffer with ncclCommRegister
     void* regHandle = nullptr;
-    NCCLCHECK(ncclCommRegister(comm, deviceBuffer, bufferSize, &regHandle));
+    NCCLCALL(ncclCommRegister(comm, deviceBuffer, bufferSize, &regHandle));
 
     // Verify handle based on expected behavior
     if (expectNonNull) {
@@ -137,9 +137,9 @@ static void testCommRegisterDeregister(bool expectNonNull) {
     }
 
     // Deregister and clean up
-    NCCLCHECK(ncclCommDeregister(comm, regHandle));
+    NCCLCALL(ncclCommDeregister(comm, regHandle));
     HIPCALL(hipFree(deviceBuffer));
-    NCCLCHECK(ncclCommDestroy(comm));
+    NCCLCALL(ncclCommDestroy(comm));
 }
 
 /**
@@ -152,7 +152,7 @@ static void testMultipleBufferRegistration(bool expectNonNull) {
     HIPCALL(hipSetDevice(0));
 
     ncclComm_t comm;
-    NCCLCHECK(initSingleRankComm(&comm));
+    NCCLCALL(initSingleRankComm(&comm));
 
     // Create and register multiple buffers
     const int numBuffers = 4;
@@ -164,7 +164,7 @@ static void testMultipleBufferRegistration(bool expectNonNull) {
         HIPCALL(hipMalloc(&deviceBuffers[i], bufferSize));
         ASSERT_NE(deviceBuffers[i], nullptr) << "Failed to allocate buffer " << i;
 
-        NCCLCHECK(ncclCommRegister(comm, deviceBuffers[i], bufferSize, &regHandles[i]));
+        NCCLCALL(ncclCommRegister(comm, deviceBuffers[i], bufferSize, &regHandles[i]));
 
         if (expectNonNull) {
             EXPECT_NE(regHandles[i], nullptr) << "Registration failed for buffer " << i;
@@ -187,10 +187,10 @@ static void testMultipleBufferRegistration(bool expectNonNull) {
 
     // Deregister and clean up
     for (int i = 0; i < numBuffers; i++) {
-        NCCLCHECK(ncclCommDeregister(comm, regHandles[i]));
+        NCCLCALL(ncclCommDeregister(comm, regHandles[i]));
         HIPCALL(hipFree(deviceBuffers[i]));
     }
-    NCCLCHECK(ncclCommDestroy(comm));
+    NCCLCALL(ncclCommDestroy(comm));
 }
 
 /**
@@ -203,7 +203,7 @@ static void testVariableSizeBuffers(bool expectNonNull) {
     HIPCALL(hipSetDevice(0));
 
     ncclComm_t comm;
-    NCCLCHECK(initSingleRankComm(&comm));
+    NCCLCALL(initSingleRankComm(&comm));
 
     // Test various buffer sizes: 4KB, 64KB, 1MB, 4MB
     const size_t sizes[] = {4096, 64 * 1024, 1024 * 1024, 4 * 1024 * 1024};
@@ -216,7 +216,7 @@ static void testVariableSizeBuffers(bool expectNonNull) {
         HIPCALL(hipMalloc(&deviceBuffer, sizes[i]));
         ASSERT_NE(deviceBuffer, nullptr) << "Failed to allocate buffer of size " << sizes[i];
 
-        NCCLCHECK(ncclCommRegister(comm, deviceBuffer, sizes[i], &regHandle));
+        NCCLCALL(ncclCommRegister(comm, deviceBuffer, sizes[i], &regHandle));
 
         if (expectNonNull) {
             EXPECT_NE(regHandle, nullptr)
@@ -226,11 +226,11 @@ static void testVariableSizeBuffers(bool expectNonNull) {
                 << "Expected NULL handle for buffer size " << sizes[i] << " bytes";
         }
 
-        NCCLCHECK(ncclCommDeregister(comm, regHandle));
+        NCCLCALL(ncclCommDeregister(comm, regHandle));
         HIPCALL(hipFree(deviceBuffer));
     }
 
-    NCCLCHECK(ncclCommDestroy(comm));
+    NCCLCALL(ncclCommDestroy(comm));
 }
 
 /**
@@ -548,12 +548,12 @@ static void testDeregisterNullHandle() {
     HIPCALL(hipSetDevice(0));
 
     ncclComm_t comm;
-    NCCLCHECK(initSingleRankComm(&comm));
+    NCCLCALL(initSingleRankComm(&comm));
 
     // Deregister NULL handle - should be a no-op
-    NCCLCHECK(ncclCommDeregister(comm, nullptr));
+    NCCLCALL(ncclCommDeregister(comm, nullptr));
 
-    NCCLCHECK(ncclCommDestroy(comm));
+    NCCLCALL(ncclCommDestroy(comm));
 }
 
 /**
@@ -583,21 +583,21 @@ static void testWindowRegisterSingleRankNonSymTeardown() {
     HIPCALL(hipSetDevice(0));
 
     ncclComm_t comm;
-    NCCLCHECK(initSingleRankComm(&comm));
+    NCCLCALL(initSingleRankComm(&comm));
 
     const size_t bufferSize = NCCL_WIN_REQUIRED_ALIGNMENT; // required alignment for window registration
     void* buf = nullptr;
-    NCCLCHECK(ncclMemAlloc(&buf, bufferSize));
+    NCCLCALL(ncclMemAlloc(&buf, bufferSize));
 
     ncclWindow_t win = nullptr;
     ncclResult_t reg = ncclCommWindowRegister(comm, buf, bufferSize, &win,
                                               NCCL_WIN_COLL_SYMMETRIC);
     if (reg == ncclSuccess && win != nullptr) {
-        NCCLCHECK(ncclCommWindowDeregister(comm, win));
+        NCCLCALL(ncclCommWindowDeregister(comm, win));
     }
 
-    NCCLCHECK(ncclMemFree(buf));
-    NCCLCHECK(ncclCommDestroy(comm));
+    NCCLCALL(ncclMemFree(buf));
+    NCCLCALL(ncclCommDestroy(comm));
 }
 
 //==============================================================================

@@ -9,9 +9,11 @@
 #include "nvtx.h"
 #include "param.h"
 
+#ifndef NVTX_NO_IMPL
 static constexpr const nvtxPayloadEnum_t NvtxEnumRedSchema[] = {
   {"Sum", ncclSum, 0}, {"Product", ncclProd, 0}, {"Max", ncclMax, 0}, {"Min", ncclMin, 0}, {"Avg", ncclAvg, 0}
 };
+#endif
 
 NCCL_PARAM(NvtxDisable, "NVTX_DISABLE", 0);
 

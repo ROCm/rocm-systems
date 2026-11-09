@@ -26,7 +26,7 @@ struct GinAllReduceMockComm
 
     void reset()
     {
-        std::memset(&comm, 0, sizeof(comm));
+        comm = ncclComm{};
         std::memset(archName_, 0, sizeof(archName_));
         std::memcpy(archName_, "gfx950", 6);
         comm.archName         = archName_;

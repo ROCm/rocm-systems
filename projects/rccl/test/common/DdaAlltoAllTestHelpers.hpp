@@ -59,7 +59,7 @@ struct DdaAlltoAllMockComm
 
     void reset(const char* archName)
     {
-        std::memset(&comm, 0, sizeof(comm));
+        comm = ncclComm{};
         std::strncpy(archNameBuf, archName, sizeof(archNameBuf) - 1);
         archNameBuf[sizeof(archNameBuf) - 1] = '\0';
         comm.archName = archNameBuf;

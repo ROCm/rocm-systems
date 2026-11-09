@@ -8,6 +8,10 @@
 #ifndef NCCL_NVTX_H_
 #define NCCL_NVTX_H_
 
+#if defined(NVTX_NO_IMPL)
+#include "nvtx_stub.h"
+#else
+
 #include "nvtx3/nvtx3.hpp"
 #include "roctx.h"
 
@@ -252,5 +256,7 @@ private:
 #endif
 
 extern void initNvtxRegisteredEnums();
+
+#endif /* !NVTX_NO_IMPL */
 
 #endif

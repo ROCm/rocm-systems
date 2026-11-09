@@ -21,6 +21,16 @@
 
 #define MAX_CHANNELS                     256 // RCCL MAXCHANNELS
 
+/* Channel ids/counts arrive as uint8_t. Compare after promoting to unsigned so
+ * clang does not treat `id >= MAX_CHANNELS` as tautological while MAX_CHANNELS
+ * is 256; the check remains live if MAX_CHANNELS is raised later. */
+static inline int inspectorChannelIdValid(unsigned channelId) {
+  return channelId < (unsigned)MAX_CHANNELS;
+}
+static inline unsigned inspectorClampNChannels(unsigned nChannels) {
+  return nChannels < (unsigned)MAX_CHANNELS ? nChannels : (unsigned)MAX_CHANNELS;
+}
+
 // Bump when ncclProfiler_t alias changes to a new interface version.
 #define NCCL_PROFILER_INTERFACE_VERSION 5
 

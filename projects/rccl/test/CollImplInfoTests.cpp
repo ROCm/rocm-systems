@@ -42,10 +42,9 @@
 #include "common/SymmetricBufferHelpers.hpp"  // RCCLTestHelpers::SymBuf (RAII deregister+free)
 #include "rccl_common.h"  // rcclGetCollImplInfo, rcclSymKGetInfo, rcclGetAlgoName, rcclGetProtocolName, rcclAddonAlgos_t
 
-// rccl_common.h drags in RCCL's internal NCCLCHECK (which `return`s). These tests
-// live in void functions, so use a gtest-friendly, non-returning check instead.
-#undef NCCLCHECK
-#define NCCLCHECK(cmd)                                                       \
+// StandaloneUtils.hpp defines NCCLCALL (printf). Prefer gtest ASSERT here.
+#undef NCCLCALL
+#define NCCLCALL(cmd)                                                        \
   do {                                                                       \
     ncclResult_t res_ = (cmd);                                              \
     ASSERT_EQ(res_, ncclSuccess) << "NCCL failure: " << ncclGetErrorString(res_); \
@@ -271,18 +270,18 @@ namespace RcclUnitTesting
       setenv("NCCL_DEBUG_FILE", path, 1);
       ncclResetDebugInitInternal();  // reopen NCCL_DEBUG_FILE on next log
 
-      NCCLCHECK(ncclGroupStart());
+      NCCLCALL(ncclGroupStart());
       for (int i = 0; i < nRanks; i++)
       {
         HIPCALL(hipSetDevice(i));
         if (coll == ncclFuncAllReduce)
-          NCCLCHECK(ncclAllReduce(sbuf[i], rbuf[i], count, dt, ncclSum, comms[i], streams[i]));
+          NCCLCALL(ncclAllReduce(sbuf[i], rbuf[i], count, dt, ncclSum, comms[i], streams[i]));
         else if (coll == ncclFuncReduceScatter)
-          NCCLCHECK(ncclReduceScatter(sbuf[i], rbuf[i], count, dt, ncclSum, comms[i], streams[i]));
+          NCCLCALL(ncclReduceScatter(sbuf[i], rbuf[i], count, dt, ncclSum, comms[i], streams[i]));
         else
-          NCCLCHECK(ncclAllGather(sbuf[i], rbuf[i], count, dt, comms[i], streams[i]));
+          NCCLCALL(ncclAllGather(sbuf[i], rbuf[i], count, dt, comms[i], streams[i]));
       }
-      NCCLCHECK(ncclGroupEnd());
+      NCCLCALL(ncclGroupEnd());
       for (int i = 0; i < nRanks; i++)
       {
         HIPCALL(hipSetDevice(i));
@@ -304,13 +303,13 @@ namespace RcclUnitTesting
       // context so the report reflects the backend that actually ran; querying
       // ungrouped would spuriously report DDA. The query only reads state (no
       // enqueue), so the surrounding group closes empty.
-      NCCLCHECK(ncclGroupStart());
+      NCCLCALL(ncclGroupStart());
       ReportedImpl rep = QueryReport(comms[0], coll, count, dt, ncclSum, sbuf[0], rbuf[0]);
       // rcclSymKGetInfo's non-symk fallback routes through rcclSelect*, which is
       // group-depth sensitive, so query it at the same depth as dispatch.
       SymkReport symk;
       if (mode.checkSymk) symk = QuerySymk(comms[0], coll, count, dt, ncclSum);
-      NCCLCHECK(ncclGroupEnd());
+      NCCLCALL(ncclGroupEnd());
 
       if (sawSym && sel.algoName == "SYM") *sawSym = true;
 
@@ -435,7 +434,7 @@ namespace RcclUnitTesting
         if (allocOk)
         {
           std::vector<ncclResult_t> rr(2 * nRanks, ncclSuccess);
-          NCCLCHECK(ncclGroupStart());
+          NCCLCALL(ncclGroupStart());
           for (int i = 0; i < nRanks; i++)
           {
             HIPCALL(hipSetDevice(i));
@@ -460,7 +459,7 @@ namespace RcclUnitTesting
           for (int j = 0; j < nRanks; j++)
           {
             HIPCALL(hipSetDevice(j));
-            hipStreamDestroy(streams[j]);
+            HIPCALL(hipStreamDestroy(streams[j]));
           }
           for (auto& c : comms) ncclCommDestroy(c);
           GTEST_SKIP() << "symmetric windows unavailable (cuMem/VMM off or unsupported): "
@@ -503,18 +502,18 @@ namespace RcclUnitTesting
         {
           const size_t count = bytes / denom;
           if (count == 0) continue;
-          NCCLCHECK(ncclGroupStart());
+          NCCLCALL(ncclGroupStart());
           for (int i = 0; i < nRanks; i++)
           {
             HIPCALL(hipSetDevice(i));
             if (coll == ncclFuncAllReduce)
-              NCCLCHECK(ncclAllReduce(sbuf[i], rbuf[i], count, dt, ncclSum, comms[i], streams[i]));
+              NCCLCALL(ncclAllReduce(sbuf[i], rbuf[i], count, dt, ncclSum, comms[i], streams[i]));
             else if (coll == ncclFuncReduceScatter)
-              NCCLCHECK(ncclReduceScatter(sbuf[i], rbuf[i], count, dt, ncclSum, comms[i], streams[i]));
+              NCCLCALL(ncclReduceScatter(sbuf[i], rbuf[i], count, dt, ncclSum, comms[i], streams[i]));
             else
-              NCCLCHECK(ncclAllGather(sbuf[i], rbuf[i], count, dt, comms[i], streams[i]));
+              NCCLCALL(ncclAllGather(sbuf[i], rbuf[i], count, dt, comms[i], streams[i]));
           }
-          NCCLCHECK(ncclGroupEnd());
+          NCCLCALL(ncclGroupEnd());
         }
       }
       for (int i = 0; i < nRanks; i++)
@@ -571,7 +570,7 @@ namespace RcclUnitTesting
         }
         HIPCALL(hipStreamDestroy(streams[i]));
       }
-      for (auto& c : comms) NCCLCHECK(ncclCommDestroy(c));
+      for (auto& c : comms) NCCLCALL(ncclCommDestroy(c));
     }
 
     // 1 KiB .. 2 GiB total message size, powers of two.

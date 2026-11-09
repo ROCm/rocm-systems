@@ -54,7 +54,7 @@ enum ncclLaunchMode ncclParamLaunchMode = ncclLaunchModeParallel;
 // overloads each target referenced.
 
 roctx_scoped_range_in::roctx_scoped_range_in(const char*) noexcept {}
-roctx_scoped_range_in::~roctx_scoped_range_in() {}
+roctx_scoped_range_in::~roctx_scoped_range_in() noexcept {}
 
 thread_local ncclProfilerApiState_t ncclProfilerApiState = {};
 ncclResult_t ncclProfilerRecordGroupApiEventState(ncclProfilerEventState_t) { return ncclSuccess; }

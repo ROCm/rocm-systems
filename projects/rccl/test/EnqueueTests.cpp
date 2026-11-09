@@ -232,8 +232,7 @@ struct EnqueueTestEnvironment
         ASSERT_EQ(hipErr, hipSuccess) << "Failed to allocate recvbuff";
 
         // Initialize communicator
-        comm = new ncclComm();
-        memset(comm, 0, sizeof(ncclComm));
+        comm = new ncclComm{};
 
         comm->startMagic = NCCL_MAGIC; // 0x0280028002800280
 

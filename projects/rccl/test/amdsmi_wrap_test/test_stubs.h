@@ -38,8 +38,8 @@
     fprintf(stderr, "[ERROR] " fmt "\n", ##__VA_ARGS__); \
 } while(0)
 
-// NCCLCHECK macro
-#define NCCLCHECK(cmd) do { \
+// NCCLCALL: test-local check (do not collide with src/include/checks.h NCCLCHECK)
+#define NCCLCALL(cmd) do { \
     ncclResult_t __res = (cmd); \
     if (__res != ncclSuccess) return __res; \
 } while(0)

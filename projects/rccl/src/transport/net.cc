@@ -31,6 +31,9 @@
 #include <dirent.h>
 #include <linux/limits.h>
 #include <mutex>
+#include <map>
+#include <string>
+#include <utility>
 
 static_assert(sizeof(ncclNetHandle_t) <= CONNECT_SIZE, "NET Connect info is too large");
 

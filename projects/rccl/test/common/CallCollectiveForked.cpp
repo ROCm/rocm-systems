@@ -20,7 +20,7 @@
         }                                                                                     \
     } while (0)
 
-#define NCCLCHECK(cmd) do {                                     \
+#define NCCLCALL(cmd) do {                                      \
     ncclResult_t res = cmd;                                     \
     if (res != ncclSuccess) {                                   \
          printf("NCCL failure %s:%d '%s'\n",                    \
@@ -48,7 +48,7 @@ void callCollective(ncclUniqueId id, int collID, int rank, int nranks, const std
     
     
 
-    NCCLCHECK(ncclCommInitRank(&comm, nranks, id, rank));
+    NCCLCALL(ncclCommInitRank(&comm, nranks, id, rank));
     int *sendbuff;
     int *recvbuff;
     void *sendRegHandle;
@@ -80,18 +80,18 @@ void callCollective(ncclUniqueId id, int collID, int rank, int nranks, const std
       HIPCALL(hipMallocManaged((void **)&recvbuff, recvSize * sizeof(int)));
     }    
    
-    NCCLCHECK(ncclCommRegister(comm, sendbuff, sendSize * sizeof(int), &sendRegHandle));
-    NCCLCHECK(ncclCommRegister(comm, recvbuff, recvSize * sizeof(int), &recvRegHandle));
+    NCCLCALL(ncclCommRegister(comm, sendbuff, sendSize * sizeof(int), &sendRegHandle));
+    NCCLCALL(ncclCommRegister(comm, recvbuff, recvSize * sizeof(int), &recvRegHandle));
 
     HIPCALL(hipMemcpy(sendbuff, send.data(), sizeof(int) * sendSize, hipMemcpyHostToDevice));
     HIPCALL(hipMemcpy(recvbuff, recv.data(), sizeof(int) *recvSize, hipMemcpyHostToDevice));
 
     switch(collID){
       case ncclCollAllReduce:
-        NCCLCHECK(ncclAllReduce(sendbuff, recvbuff, sendSize, ncclInt, ncclSum, comm, stream));
+        NCCLCALL(ncclAllReduce(sendbuff, recvbuff, sendSize, ncclInt, ncclSum, comm, stream));
         break;
       case ncclCollAllGather:
-        NCCLCHECK(ncclAllGather(sendbuff, recvbuff, sendSize, ncclInt, comm, stream));
+        NCCLCALL(ncclAllGather(sendbuff, recvbuff, sendSize, ncclInt, comm, stream));
         break;
       default: exit(0);
     }
@@ -99,8 +99,8 @@ void callCollective(ncclUniqueId id, int collID, int rank, int nranks, const std
     HIPCALL(hipStreamSynchronize(stream));
     HIPCALL(hipMemcpy(recv.data(), recvbuff, sizeof(int) * recvSize, hipMemcpyDeviceToHost));
     
-    NCCLCHECK(ncclCommDeregister(comm, sendRegHandle));
-    NCCLCHECK(ncclCommDeregister(comm, recvRegHandle));
+    NCCLCALL(ncclCommDeregister(comm, sendRegHandle));
+    NCCLCALL(ncclCommDeregister(comm, recvRegHandle));
 
     HIPCALL(hipFree(sendbuff));
     HIPCALL(hipFree(recvbuff));

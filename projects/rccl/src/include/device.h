@@ -39,7 +39,7 @@ typedef __hip_bfloat16 hip_bfloat16;
 #ifdef ENABLE_ROCSHMEM
 #include <rocshmem/rocshmem.hpp>
 #endif
-#if SQTT_ENABLED
+#if SQTT_ENABLED && defined(__has_include) && __has_include(<rocprof-trace-decoder/rocprof_trace_decoder/cxx/markers.hpp>)
 #include <rocprof-trace-decoder/rocprof_trace_decoder/cxx/markers.hpp>
 #else
 #define sqtt_marker_enter(name) do {} while(0)

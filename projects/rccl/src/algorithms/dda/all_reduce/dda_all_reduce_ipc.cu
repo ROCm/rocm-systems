@@ -51,7 +51,6 @@ static ncclResult_t ncclAllReduceDdaIpcTyped(const void* sendbuff, void* recvbuf
   }
 
   const size_t sizeBytes = count * sizeof(T);
-  const unsigned threads = 512;
   const bool wantTree = sizeBytes > kDdaFlatTreeThresholdBytes;
   const bool treeOk = wantTree && (count % static_cast<size_t>(kDdaNranks) == 0);
 

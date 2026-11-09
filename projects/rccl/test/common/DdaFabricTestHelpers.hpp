@@ -27,7 +27,7 @@ struct DdaFabricMockComm
 
     void reset()
     {
-        std::memset(&comm, 0, sizeof(comm));
+        comm = ncclComm{};
         comm.bootstrap          = &bootstrapPlaceholder;
         comm.nNodes             = 1;
         comm.nRanks             = 8; // any value in [2, kDdaMaxNranks]

@@ -144,7 +144,7 @@ struct MockComm
     {
         const int nRanks = system->nodes[GPU].count;
         comm             = new ncclComm();
-        memset(comm, 0, sizeof(*comm));
+        *comm = ncclComm{};
         comm->topo   = system;
         comm->rank   = kRank;
         comm->nRanks = nRanks;
