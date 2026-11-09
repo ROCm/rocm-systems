@@ -6,7 +6,8 @@
 
 // The NaN-flag protocols (NCCL_PROTO=NaN) read an all-ones dword as "not yet
 // written", so a sender must never put one on the wire. Real data can hold one
-// (as a NaN), and the sender escapes it by clearing bit 31. These tests feed such
+// (as a NaN), and the sender escapes it to another NaN: the DDA kernels clear
+// bit 31, the primitives clear bit 0. These tests feed such
 // data through both implementations and check that every collective completes
 // and delivers the escaped value:
 //
@@ -68,6 +69,7 @@ namespace
 constexpr uint32_t kAllOnes = 0xFFFFFFFFu;
 
 uint32_t escapedDword(uint32_t x) { return x == kAllOnes ? 0x7FFFFFFFu : x; }
+uint32_t primsEscapedDword(uint32_t x) { return x == kAllOnes ? 0xFFFFFFFEu : x; }
 
 // Copy payload: sentinel dwords among near misses that must pass untouched. The
 // last dword is always the sentinel so the tail of a slice is covered.
@@ -386,9 +388,9 @@ void storeDword(std::vector<uint8_t>& b, size_t off, uint32_t d) { memcpy(b.data
 // an all-ones high dword (a finite double can have an all-ones low dword).
 std::vector<uint8_t> escaped(std::vector<uint8_t> b, size_t elemSize) {
   if (elemSize <= 4) {
-    for (size_t o = 0; o + 4 <= b.size(); o += 4) storeDword(b, o, escapedDword(loadDword(b, o)));
+    for (size_t o = 0; o + 4 <= b.size(); o += 4) storeDword(b, o, primsEscapedDword(loadDword(b, o)));
   } else {
-    for (size_t o = 0; o < b.size(); o += 8) storeDword(b, o + 4, escapedDword(loadDword(b, o + 4)));
+    for (size_t o = 0; o < b.size(); o += 8) storeDword(b, o + 4, primsEscapedDword(loadDword(b, o + 4)));
   }
   return b;
 }

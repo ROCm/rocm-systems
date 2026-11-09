@@ -30,7 +30,7 @@
 // credit that lets the sender reuse the slot.
 //
 // Real data can still hold an all-ones dword, but only as a NaN: the sender
-// clears bit 31 of every such dword before it goes on the wire (see
+// turns every such dword into 0xFFFFFFFE before it goes on the wire (see
 // escapeSentinel), which leaves a NaN that cannot be mistaken for an empty slot.
 
 #include "rccl_ptr.h"
@@ -265,9 +265,28 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
     return m == 0xFFFFFFFFu;
   }
 
-  // Clears bit 31 of every dword anyNan() would read as the sentinel. That bit
-  // is a sign bit in each case (of the f32, of the upper f16/bf16, or of the
-  // f64), so the value stays a NaN. It has to run after the reduce, not just on
+  // A ballot straight off the compare, so the vote stays in SGPRs instead of
+  // round-tripping through a VGPR select.
+  __device__ __forceinline__ static bool waveAny(bool pred) {
+    return __builtin_amdgcn_ballot_w64(pred) != 0;
+  }
+
+  // Bit p is set when any lane of the wave still reads the sentinel in row p.
+  template <int NR>
+  __device__ __forceinline__ static uint32_t pendingRows(const v4u (&vr)[NR]) {
+    uint32_t pend = 0;
+#pragma unroll
+    for (int p = 0; p < NR; p++) {
+      const v4u x[1] = {vr[p]};
+      pend |= waveAny(anyNan<1>(x)) ? 1u << p : 0u;
+    }
+    return pend;
+  }
+
+  // Turns every dword anyNan() would read as the sentinel into 0xFFFFFFFE, with
+  // one unsigned min rather than a compare and select. That only clears a
+  // mantissa bit: the value stays a NaN as an f32, as either f16/bf16 half, and
+  // as the high dword of an f64. It has to run after the reduce, not just on
   // input: a sum can carry NaN payloads into an all-ones dword, e.g. two f16
   // dwords that each hold one all-ones half.
   template <int NR>
@@ -276,7 +295,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
 #pragma unroll
     for (int p = 0; p < NR; p++) {
 #pragma unroll
-      for (int d = First; d < 4; d += Stride) x[p][d] = x[p][d] == 0xFFFFFFFFu ? 0x7FFFFFFFu : x[p][d];
+      for (int d = First; d < 4; d += Stride) x[p][d] = min(x[p][d], 0xFFFFFFFEu);
     }
   }
 
@@ -399,14 +418,48 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
     }
   }
 
+  // Re-reads the rows of vr that some lane still sees at the sentinel until none
+  // does. The whole wave leaves together (letting lanes exit independently was
+  // measurably worse below ~32 MiB), the votes are ballots, and a row that has
+  // landed is not read again: it stays put until this receiver restores it.
+  template <int NR>
+  __device__ __forceinline__ void pollRows(v4u (&vr)[NR], v4u_gptr ptr, int& abortCache) {
+    if (!waveAny(anyNan<NR>(vr))) return;
+    int spins = 0;
+    for (uint32_t pend = pendingRows<NR>(vr); pend != 0; pend = pendingRows<NR>(vr)) {
+      if (checkAbort(abortCache, 1, spins)) break;
+#if (defined(__gfx942__) || defined(__gfx950__)) && !RCCL_LL_FIFO_SYS_SCOPE
+      // A nontemporal load can still be served from a stale L1 line, and a tight
+      // re-poll then reads the sentinel until the line is evicted or the abort
+      // check invalidates it: milliseconds, now and then, without this.
+      __asm__ volatile("buffer_inv sc0" ::: "memory");
+#endif
+#pragma unroll
+      for (int p = 0; p < NR; p++) {
+        if (pend & (1u << p)) vr[p] = loadNanPack(ptr + p * WARP_SIZE);
+      }
+    }
+  }
+
+  // The next full slice's first FIFO poll and source load, which a slice in
+  // GenericOp()'s steady loop issues before its own stores.
+  struct Ahead {
+    v4u fifo[PackPerThread];
+    v4u src[PackPerThread];
+    T const* nextSrc;
+    int fifoStride;
+    bool have;  // fifo and src already hold this slice's
+    bool fetch; // this slice issues the next one's
+  };
+
   // Spin until every pack this lane owns has left the sentinel, then reduce and
   // forward. Unlike LL128 there is no reload after the spin: each lane validates
   // exactly the packs it keeps, so the values that ended the loop are the values
   // it goes on to use.
-  template <int NR, int RECV, int SEND, int SrcBuf, int DstBuf>
+  template <int NR, int RECV, int SEND, int SrcBuf, int DstBuf, bool Steady>
   __device__ __forceinline__ void recvReduceSendCopy(v4u (&v)[PackPerThread], v4u_gptr const (&recvFifo)[RecvSlots],
                                                      v4u_gptr const (&sendFifo)[SendSlots], int nrecv, int nsend,
-                                                     int lane, int& abortCache, int eltN, bool postOp) {
+                                                     int lane, int& abortCache, int eltN, bool postOp, Ahead* ah) {
     constexpr int SRC = SrcBuf != -1 ? 1 : 0;
 
     // Sparse readiness was tried here and removed. The sender drained with an
@@ -422,17 +475,22 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
         if (i >= nrecv) break;
         v4u_gptr ptr = recvFifo[i];
         v4u vr[NR];
-        int spins = 0;
-        bool pending;
-        // The warp leaves the spin together; letting lanes exit independently
-        // was measurably worse below ~32 MiB. An s_sleep backoff between
-        // re-reads makes no difference at 1 GiB, so the loop stays tight.
-        do {
+        if (Steady && i == 0 && ah->have) {
+#pragma unroll
+          for (int p = 0; p < NR; p++) vr[p] = ah->fifo[p];
+        } else {
 #pragma unroll
           for (int p = 0; p < NR; p++) vr[p] = loadNanPack(ptr + p * WARP_SIZE);
-          pending = anyNan<NR>(vr);
-          if (checkAbort(abortCache, 1, spins)) break;
-        } while (__any(pending));
+        }
+        pollRows<NR>(vr, ptr, abortCache);
+        if (Steady && i == 0 && ah->fetch) {
+#pragma unroll
+          for (int p = 0; p < NR; p++) ah->fifo[p] = loadNanPack(ptr + ah->fifoStride + p * WARP_SIZE);
+          if (SRC) {
+#pragma unroll
+            for (int p = 0; p < NR; p++) ah->src[p] = nanUserLoad((UserVecPtr)(ah->nextSrc + eltOf(p, lane)));
+          }
+        }
 
         if (SRC && i == 0) finishSrc<NR, SrcBuf>(v, eltN, lane);
         // The first peer seeds v[] when there is no local source to reduce
@@ -479,18 +537,28 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
     }
   }
 
-  // One slice of eltN elements, carried in NR rows.
-  template <int NR, int RECV, int SEND, int SrcBuf, int DstBuf>
+  // One slice of eltN elements, carried in NR rows. A Steady slice is a full one
+  // from GenericOp()'s steady loop, which may find its first poll and source in
+  // *ah and issue the next slice's there.
+  template <int NR, int RECV, int SEND, int SrcBuf, int DstBuf, bool Steady = false>
   __device__ __forceinline__ void runSlice(T const* srcPtr, T* dstPtr, T const* accPtr,
                                            v4u_gptr const (&recvFifo)[RecvSlots], v4u_gptr const (&sendFifo)[SendSlots],
                                            int nrecv, int nsend, int lane, int& abortCache, int eltN,
-                                           bool postOp) {
+                                           bool postOp, Ahead* ah = nullptr) {
+    static_assert(!Steady || (NR == PackPerThread && RECV), "only full receiving slices run ahead");
     constexpr int SRC = SrcBuf != -1 ? 1 : 0;
     constexpr int DST = DstBuf != -1 ? 1 : 0;
     v4u regs[PackPerThread];
-    if (SRC) loadRegs<NR>(regs, srcPtr, eltN, lane);
-    recvReduceSendCopy<NR, RECV, SEND, SrcBuf, DstBuf>(regs, recvFifo, sendFifo, nrecv, nsend, lane, abortCache, eltN,
-                                                       postOp);
+    if (SRC) {
+      if (Steady && ah->have) {
+#pragma unroll
+        for (int p = 0; p < NR; p++) regs[p] = ah->src[p];
+      } else {
+        loadRegs<NR>(regs, srcPtr, eltN, lane);
+      }
+    }
+    recvReduceSendCopy<NR, RECV, SEND, SrcBuf, DstBuf, Steady>(regs, recvFifo, sendFifo, nrecv, nsend, lane,
+                                                               abortCache, eltN, postOp, ah);
     if (DST) {
       if (accPtr != nullptr) {
         v4u accRegs[PackPerThread];
@@ -557,10 +625,9 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
 
   // escapeSentinel() for one pack.
   __device__ __forceinline__ static v4u escapePack(v4u x) {
-    constexpr int First = sizeof(T) <= 4 ? 0 : 1, Stride = sizeof(T) <= 4 ? 1 : 2;
-#pragma unroll
-    for (int d = First; d < 4; d += Stride) x[d] = x[d] == 0xFFFFFFFFu ? 0x7FFFFFFFu : x[d];
-    return x;
+    v4u a[PackPerThread] = {x};
+    escapeSentinel<1>(a);
+    return a[0];
   }
 
   // Every warp writes the whole sentinel window before its first restore, so it never stores
@@ -676,6 +743,43 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
   }
 #endif
 
+  // Full slices with another full slice after them in this wave, for a
+  // receiving op with every peer present and no accumulator. Each issues the
+  // next one's first FIFO poll and source load ahead of its own stores. With
+  // the slice size and peer counts constants, every path through the loop
+  // issues the same memory operations, so the compiler waits for the
+  // prefetched poll alone rather than for the previous slice's stores too.
+  // Nothing prefetched outlives the loop: held across GenericOp()'s general
+  // loop, which carries all three slice shapes, it pushes the function past the
+  // caller-saved VGPRs and every call pays for saving the rest. Leaves the
+  // pointers and nelem at the first slice it did not run.
+  template <int SEND, int SrcBuf, int DstBuf>
+  __device__ __forceinline__ void steadyOp(T const*& srcPtr, T*& dstPtr, v4u_gptr (&recvFifo)[RecvSlots],
+                                           v4u_gptr (&sendFifo)[SendSlots], int lane, int nwarps, int& abortCache,
+                                           int& nelem, bool postOp) {
+    const int stride = DataEltPerSlice * nwarps;
+    Ahead ah;
+    ah.have = false;
+    ah.fifoStride = PackPerSlice * nwarps;
+    auto run = [&]() {
+      ah.nextSrc = SrcBuf != -1 ? srcPtr + stride : nullptr;
+      runSlice<PackPerThread, 1, SEND, SrcBuf, DstBuf, true>(srcPtr, dstPtr, nullptr, recvFifo, sendFifo, MaxRecv,
+                                                             MaxSend, lane, abortCache, DataEltPerSlice, postOp, &ah);
+#pragma unroll
+      for (int i = 0; i < MaxRecv; i++) recvFifo[i] += ah.fifoStride;
+#pragma unroll
+      for (int i = 0; i < MaxSend; i++) sendFifo[i] += ah.fifoStride;
+      srcPtr += stride;
+      dstPtr += stride;
+      nelem -= stride;
+      ah.have = ah.fetch;
+    };
+    while (nelem - stride >= DataEltPerSlice) {
+      ah.fetch = nelem - 2 * stride >= DataEltPerSlice;
+      run();
+    }
+  }
+
   template <int RECV, int SEND, int SrcBuf, int DstBuf>
   __device__ __forceinline__ void GenericOp(intptr_t srcIx, intptr_t dstIx, int nelem, bool postOp) {
     T const* srcPtr = SrcBuf == -1 ? nullptr : userBufs[SrcBuf] + srcIx;
@@ -712,6 +816,12 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
       srcPtr += DataEltPerSlice * warp;
       dstPtr += DataEltPerSlice * warp;
       if (accPtr != nullptr) accPtr += DataEltPerSlice * warp;
+      if constexpr (RECV) {
+        if (__builtin_expect(nrecv == MaxRecv && (!SEND || nsend == MaxSend) && accPtr == nullptr &&
+                               nelem - DataEltPerSlice * nwarps >= DataEltPerSlice,
+                             0))
+          steadyOp<SEND, SrcBuf, DstBuf>(srcPtr, dstPtr, recvFifo, sendFifo, lane, nwarps, abortCache, nelem, postOp);
+      }
       // warp is wave-uniform, so this loop and the row dispatch are scalar
       // branches. A slice that fits in one row -- every slice of a small op --
       // moves 1 KiB instead of a full slice of padding.
@@ -784,7 +894,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
   }
 
 public:
-  __device__ Primitives(const int tid, const int nthreads, int const* recvPeers, int const* sendPeers,
+  __device__ __forceinline__ Primitives(const int tid, const int nthreads, int const* recvPeers, int const* sendPeers,
                         void const* inputBuf, void* outputBuf, uint64_t redOpArg, uint8_t group = 0,
                         uint8_t connIndexRecv = 0, uint8_t connIndexSend = 0, struct ncclDevWorkColl* e = nullptr,
                         bool ipcReg = false, bool netReg = false, int stepSize_ = 0)
@@ -821,7 +931,7 @@ public:
     : Primitives(tid, nthreads, recvPeers, sendPeers, inputBuf, outputBuf, redOpArg, group, connIndexRecv,
                  connIndexSend, collWork) {}
 
-  __device__ ~Primitives() {
+  __device__ __forceinline__ ~Primitives() {
     // Save steps for the next operation
     if (tid >= nthreads - WARP_SIZE && wid < fan.nrecv()) recvConn->step = recvConnHead;
     if (tid < fan.nsend()) sendConn->step = sendConnHead;
@@ -840,31 +950,48 @@ public:
     userBufs[Output] += delta;
   }
 
-  __device__ void send(intptr_t inpIx, int eltN) {
+  __device__ __forceinline__ void send(intptr_t inpIx, int eltN) {
     GenericOp<0, 1, Input, -1>(inpIx, -1, eltN, false);
   }
-  __device__ void sendFromOutput(intptr_t outIx, int eltN) {
+  __device__ __forceinline__ void sendFromOutput(intptr_t outIx, int eltN) {
     GenericOp<0, 1, Output, -1>(outIx, -1, eltN, false);
   }
-  __device__ void recv(intptr_t outIx, int eltN, bool postOp = false) {
+  __device__ __forceinline__ void recv(intptr_t outIx, int eltN, bool postOp = false) {
     GenericOp<1, 0, -1, Output>(-1, outIx, eltN, postOp);
   }
-  __device__ void recvReduceSend(intptr_t inpIx, int eltN) {
+  __device__ __forceinline__ void recvReduceSend(intptr_t inpIx, int eltN) {
     GenericOp<1, 1, Input, -1>(inpIx, -1, eltN, false);
   }
-  __device__ void recvReduceCopy(intptr_t inpIx, intptr_t outIx, int eltN, bool postOp = false) {
+  __device__ __forceinline__ void recvReduceCopy(intptr_t inpIx, intptr_t outIx, int eltN, bool postOp = false) {
     GenericOp<1, 0, Input, Output>(inpIx, outIx, eltN, postOp);
   }
-  __device__ void copySend(intptr_t inpIx, intptr_t outIx, int eltN, bool postOp = false) {
+  __device__ __forceinline__ void copySend(intptr_t inpIx, intptr_t outIx, int eltN, bool postOp = false) {
     GenericOp<0, 1, Input, Output>(inpIx, outIx, eltN, postOp);
   }
-  __device__ void recvCopySend(intptr_t outIx, int eltN, bool postOp = false) {
+  __device__ __forceinline__ void recvCopySend(intptr_t outIx, int eltN, bool postOp = false) {
     GenericOp<1, 1, -1, Output>(-1, outIx, eltN, postOp);
   }
-  __device__ void recvReduceCopySend(intptr_t inpIx, intptr_t outIx, int eltN, bool postOp = false) {
+  __device__ __forceinline__ void recvReduceCopySend(intptr_t inpIx, intptr_t outIx, int eltN, bool postOp = false) {
     GenericOp<1, 1, Input, Output>(inpIx, outIx, eltN, postOp);
   }
-  __device__ void recvSend(int eltN) {
+  __device__ __forceinline__ void recvSend(int eltN) {
     return GenericOp<1, 1, -1, -1>(-1, -1, eltN, false);
+  }
+
+  // Shadow PrimitivesWithoutDirect's forwards, which are not force-inlined: once a ring kernel is large enough
+  // for the inliner to outline one of them, Primitives no longer fits in registers and lives in scratch.
+  __device__ __forceinline__ void directSend(intptr_t inpIx, intptr_t outIx, int eltN) { send(inpIx, eltN); }
+  __device__ __forceinline__ void directSendFromOutput(intptr_t outIx, int eltN) { sendFromOutput(outIx, eltN); }
+  __device__ __forceinline__ void directRecv(intptr_t outIx, int eltN) { recv(outIx, eltN, false); }
+  __device__ __forceinline__ void directCopySend(intptr_t inpIx, intptr_t outIx, int eltN, bool postOp = false) {
+    copySend(inpIx, outIx, eltN, postOp);
+  }
+  __device__ __forceinline__ void directRecvCopyDirectSend(intptr_t inpIx, intptr_t outIx, int eltN,
+                                                           bool postOp = false) {
+    recvCopySend(outIx, eltN, false);
+  }
+  __device__ __forceinline__ void recvReduceCopyDirectSend(intptr_t inpIx, intptr_t outIx, int eltN,
+                                                           bool postOp = false) {
+    recvReduceCopySend(inpIx, outIx, eltN, postOp);
   }
 };
