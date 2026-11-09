@@ -81,8 +81,8 @@ os.makedirs(LOGDIR, exist_ok=True)
 # which RCCL symbols are present in the loaded librccl.so.
 CPU_SMOKE_TESTS = ("tests/test_rocm_extensions.py",)
 
-# Optional GPU-backed shim surface; the module self-skips without HIP devices.
-GPU_SMOKE_TESTS = ("tests/test_shim_surface.py",)
+# Optional GPU-backed modules; each self-skips without enough HIP devices.
+GPU_SMOKE_TESTS = ("tests/test_shim_surface.py", "tests/test_group_window.py")
 
 
 def _librccl_candidates():
