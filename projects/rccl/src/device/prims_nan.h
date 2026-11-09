@@ -441,14 +441,25 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
     }
   }
 
+  // The next full slice's first FIFO poll and source load, which a slice in
+  // GenericOp()'s steady loop issues before its own stores.
+  struct Ahead {
+    v4u fifo[PackPerThread];
+    v4u src[PackPerThread];
+    T const* nextSrc;
+    int fifoStride;
+    bool have;  // fifo and src already hold this slice's
+    bool fetch; // this slice issues the next one's
+  };
+
   // Spin until every pack this lane owns has left the sentinel, then reduce and
   // forward. Unlike LL128 there is no reload after the spin: each lane validates
   // exactly the packs it keeps, so the values that ended the loop are the values
   // it goes on to use.
-  template <int NR, int RECV, int SEND, int SrcBuf, int DstBuf>
+  template <int NR, int RECV, int SEND, int SrcBuf, int DstBuf, bool Steady>
   __device__ __forceinline__ void recvReduceSendCopy(v4u (&v)[PackPerThread], v4u_gptr const (&recvFifo)[RecvSlots],
                                                      v4u_gptr const (&sendFifo)[SendSlots], int nrecv, int nsend,
-                                                     int lane, int& abortCache, int eltN, bool postOp) {
+                                                     int lane, int& abortCache, int eltN, bool postOp, Ahead* ah) {
     constexpr int SRC = SrcBuf != -1 ? 1 : 0;
 
     // Sparse readiness was tried here and removed. The sender drained with an
@@ -464,9 +475,22 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
         if (i >= nrecv) break;
         v4u_gptr ptr = recvFifo[i];
         v4u vr[NR];
+        if (Steady && i == 0 && ah->have) {
 #pragma unroll
-        for (int p = 0; p < NR; p++) vr[p] = loadNanPack(ptr + p * WARP_SIZE);
+          for (int p = 0; p < NR; p++) vr[p] = ah->fifo[p];
+        } else {
+#pragma unroll
+          for (int p = 0; p < NR; p++) vr[p] = loadNanPack(ptr + p * WARP_SIZE);
+        }
         pollRows<NR>(vr, ptr, abortCache);
+        if (Steady && i == 0 && ah->fetch) {
+#pragma unroll
+          for (int p = 0; p < NR; p++) ah->fifo[p] = loadNanPack(ptr + ah->fifoStride + p * WARP_SIZE);
+          if (SRC) {
+#pragma unroll
+            for (int p = 0; p < NR; p++) ah->src[p] = nanUserLoad((UserVecPtr)(ah->nextSrc + eltOf(p, lane)));
+          }
+        }
 
         if (SRC && i == 0) finishSrc<NR, SrcBuf>(v, eltN, lane);
         // The first peer seeds v[] when there is no local source to reduce
@@ -513,18 +537,28 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
     }
   }
 
-  // One slice of eltN elements, carried in NR rows.
-  template <int NR, int RECV, int SEND, int SrcBuf, int DstBuf>
+  // One slice of eltN elements, carried in NR rows. A Steady slice is a full one
+  // from GenericOp()'s steady loop, which may find its first poll and source in
+  // *ah and issue the next slice's there.
+  template <int NR, int RECV, int SEND, int SrcBuf, int DstBuf, bool Steady = false>
   __device__ __forceinline__ void runSlice(T const* srcPtr, T* dstPtr, T const* accPtr,
                                            v4u_gptr const (&recvFifo)[RecvSlots], v4u_gptr const (&sendFifo)[SendSlots],
                                            int nrecv, int nsend, int lane, int& abortCache, int eltN,
-                                           bool postOp) {
+                                           bool postOp, Ahead* ah = nullptr) {
+    static_assert(!Steady || (NR == PackPerThread && RECV), "only full receiving slices run ahead");
     constexpr int SRC = SrcBuf != -1 ? 1 : 0;
     constexpr int DST = DstBuf != -1 ? 1 : 0;
     v4u regs[PackPerThread];
-    if (SRC) loadRegs<NR>(regs, srcPtr, eltN, lane);
-    recvReduceSendCopy<NR, RECV, SEND, SrcBuf, DstBuf>(regs, recvFifo, sendFifo, nrecv, nsend, lane, abortCache, eltN,
-                                                       postOp);
+    if (SRC) {
+      if (Steady && ah->have) {
+#pragma unroll
+        for (int p = 0; p < NR; p++) regs[p] = ah->src[p];
+      } else {
+        loadRegs<NR>(regs, srcPtr, eltN, lane);
+      }
+    }
+    recvReduceSendCopy<NR, RECV, SEND, SrcBuf, DstBuf, Steady>(regs, recvFifo, sendFifo, nrecv, nsend, lane,
+                                                               abortCache, eltN, postOp, ah);
     if (DST) {
       if (accPtr != nullptr) {
         v4u accRegs[PackPerThread];
@@ -709,6 +743,43 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
   }
 #endif
 
+  // Full slices with another full slice after them in this wave, for a
+  // receiving op with every peer present and no accumulator. Each issues the
+  // next one's first FIFO poll and source load ahead of its own stores. With
+  // the slice size and peer counts constants, every path through the loop
+  // issues the same memory operations, so the compiler waits for the
+  // prefetched poll alone rather than for the previous slice's stores too.
+  // Nothing prefetched outlives the loop: held across GenericOp()'s general
+  // loop, which carries all three slice shapes, it pushes the function past the
+  // caller-saved VGPRs and every call pays for saving the rest. Leaves the
+  // pointers and nelem at the first slice it did not run.
+  template <int SEND, int SrcBuf, int DstBuf>
+  __device__ __forceinline__ void steadyOp(T const*& srcPtr, T*& dstPtr, v4u_gptr (&recvFifo)[RecvSlots],
+                                           v4u_gptr (&sendFifo)[SendSlots], int lane, int nwarps, int& abortCache,
+                                           int& nelem, bool postOp) {
+    const int stride = DataEltPerSlice * nwarps;
+    Ahead ah;
+    ah.have = false;
+    ah.fifoStride = PackPerSlice * nwarps;
+    auto run = [&]() {
+      ah.nextSrc = SrcBuf != -1 ? srcPtr + stride : nullptr;
+      runSlice<PackPerThread, 1, SEND, SrcBuf, DstBuf, true>(srcPtr, dstPtr, nullptr, recvFifo, sendFifo, MaxRecv,
+                                                             MaxSend, lane, abortCache, DataEltPerSlice, postOp, &ah);
+#pragma unroll
+      for (int i = 0; i < MaxRecv; i++) recvFifo[i] += ah.fifoStride;
+#pragma unroll
+      for (int i = 0; i < MaxSend; i++) sendFifo[i] += ah.fifoStride;
+      srcPtr += stride;
+      dstPtr += stride;
+      nelem -= stride;
+      ah.have = ah.fetch;
+    };
+    while (nelem - stride >= DataEltPerSlice) {
+      ah.fetch = nelem - 2 * stride >= DataEltPerSlice;
+      run();
+    }
+  }
+
   template <int RECV, int SEND, int SrcBuf, int DstBuf>
   __device__ __forceinline__ void GenericOp(intptr_t srcIx, intptr_t dstIx, int nelem, bool postOp) {
     T const* srcPtr = SrcBuf == -1 ? nullptr : userBufs[SrcBuf] + srcIx;
@@ -745,6 +816,12 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
       srcPtr += DataEltPerSlice * warp;
       dstPtr += DataEltPerSlice * warp;
       if (accPtr != nullptr) accPtr += DataEltPerSlice * warp;
+      if constexpr (RECV) {
+        if (__builtin_expect(nrecv == MaxRecv && (!SEND || nsend == MaxSend) && accPtr == nullptr &&
+                               nelem - DataEltPerSlice * nwarps >= DataEltPerSlice,
+                             0))
+          steadyOp<SEND, SrcBuf, DstBuf>(srcPtr, dstPtr, recvFifo, sendFifo, lane, nwarps, abortCache, nelem, postOp);
+      }
       // warp is wave-uniform, so this loop and the row dispatch are scalar
       // branches. A slice that fits in one row -- every slice of a small op --
       // moves 1 KiB instead of a full slice of padding.
