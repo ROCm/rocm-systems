@@ -13,9 +13,10 @@
 // precisely backwards. So the numbers are only trustworthy alongside a check that every range
 // reached CLOSE with status REPLAYED and with the dispatch count the application actually issued.
 //
-// Idle-gate overhead (RR_PERF_EXPECT_IDLE) inverts that check: the application must not open any
-// range, because the measurement is the process-wide interception gate alone. A CLOSE there would
-// mean the harness timed a replay window by mistake.
+// Configured-only overhead (RR_PERF_EXPECT_IDLE) inverts that check. P1, P2 and P3 must not open
+// any range: the measurement is the cost of having range replay configured (the dispatch gate,
+// the copy wrappers, or the graph-launch path). A CLOSE there would mean the harness timed a
+// replay window by mistake.
 
 #include "client.hpp"
 
@@ -120,8 +121,8 @@ tool_fini(void*)
             static_cast<unsigned long>(g_dispatches.load()),
             static_cast<unsigned long>(g_divergence.load()));
 
-    // P1: the application never opens a range. A CLOSE here would mean the idle-gate measurement
-    // timed a real replay window instead of the process-wide interception check alone.
+    // P1, P2, P3: the application never opens a range. A CLOSE here would mean the measurement
+    // timed a real replay window instead of the cost of having the service configured.
     if(expect_idle())
     {
         if(closes != 0)

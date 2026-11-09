@@ -1,6 +1,7 @@
 #
 # Range replay performance regression tests (pass scaling, fixed-cost amortization, and
-# idle-gate overhead when range replay is configured but no range is opened).
+# the cost of having range replay configured: the dispatch gate, copy wrappers, and the
+# graph-launch path, each with no range opened).
 #
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
@@ -147,4 +148,49 @@ if(ROCPROFILER_BUILD_NIGHTLY_PERF_CTESTS)
                    "\\[rr-perf\\] SKIP"
                    FAIL_REGULAR_EXPRESSION
                    "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+endif()
+
+# Copy-wrapper overhead (P2) and graph-launch overhead (P3). Range replay is configured
+# and no range is opened. The tool must report zero closed ranges before the ratio is
+# accepted. The caps are loose on purpose: these paths are slower than the no-tool fast
+# path, and a shared runner moves the ratio around. They exist to catch a path that stops
+# forwarding.
+if(ROCPROFILER_BUILD_NIGHTLY_PERF_CTESTS)
+    foreach(_KIND copies graphs)
+        if(_KIND STREQUAL "copies")
+            set(_CAP 4.0)
+            set(_MARKER "rr-perf-copies")
+            set(_JSON "RR_PERF_COPIES_JSON")
+        else()
+            set(_CAP 8.0)
+            set(_MARKER "rr-perf-graphs")
+            set(_JSON "RR_PERF_GRAPHS_JSON")
+        endif()
+        add_test(
+            NAME test-range-replay-perf-${_KIND}
+            COMMAND
+                ${Python3_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/run_configured_overhead.py --kind ${_KIND}
+                --testapp $<TARGET_FILE:range-replay-perf-testapp> --client
+                $<TARGET_FILE:range-replay-perf-client> --count 64 --max-overhead-ratio
+                ${_CAP} --repeat 3 --warmup 1)
+        set_tests_properties(
+            test-range-replay-perf-${_KIND}
+            PROPERTIES TIMEOUT
+                       300
+                       LABELS
+                       "integration-tests;range-replay;range-replay-perf;perf-nightly"
+                       RESOURCE_LOCK
+                       rocprofiler_range_replay
+                       DEPENDS
+                       "range-replay-perf-client;range-replay-perf-testapp"
+                       ENVIRONMENT
+                       "${_JSON}=${CMAKE_CURRENT_BINARY_DIR}/rr_perf_${_KIND}.json"
+                       PASS_REGULAR_EXPRESSION
+                       "\\[${_MARKER}\\] PASS"
+                       SKIP_REGULAR_EXPRESSION
+                       "\\[rr-perf\\] SKIP"
+                       FAIL_REGULAR_EXPRESSION
+                       "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    endforeach()
 endif()
