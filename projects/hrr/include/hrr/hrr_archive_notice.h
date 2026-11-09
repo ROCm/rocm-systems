@@ -12,8 +12,8 @@
  *
  * Capture writes kHrrArchiveNotice to NOTICE.txt at the archive root and appends
  * kHrrArchiveNoticeShort to its start notice; hrr-playback prints the short form
- * on stderr. PRIVACY.md quotes kHrrArchiveNotice, and
- * tools/tests/test_privacy_doc.py fails when the two differ.
+ * on stderr. This is the notice's only copy: PRIVACY.md links here, and
+ * tools/tests/test_privacy_doc.py fails if it quotes the text.
  */
 
 // NOTICE.txt holds the lines between the two marker lines, which docs can include
