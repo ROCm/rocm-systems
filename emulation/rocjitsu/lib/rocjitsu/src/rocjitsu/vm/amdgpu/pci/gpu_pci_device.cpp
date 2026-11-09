@@ -31,7 +31,6 @@
 #include <limits>
 #include <optional>
 #include <span>
-#include <stdexcept>
 #include <utility>
 
 namespace rocjitsu {
@@ -1262,21 +1261,14 @@ void GpuPciDevice::drain_doorbell_inbox(simdojo::Tick now) {
     if (!lease || transport_session() != session || !frontend)
       continue;
 
-    try {
-      for (const OwnedBlockModel &owned : models_) {
-        const DoorbellDisposition disposition = owned.model_->observe_doorbell_write(
-            notification.byte_offset_, notification.value_, notification.width_, *this);
-        if (disposition == DoorbellDisposition::Retry) {
-          enqueue_doorbell_retry(notification, owned.model_.get(), now, 1);
-        } else if (disposition != DoorbellDisposition::Ignored) {
-          discard_doorbell_retry(notification, owned.model_.get());
-        }
+    for (const OwnedBlockModel &owned : models_) {
+      const DoorbellDisposition disposition = owned.model_->observe_doorbell_write(
+          notification.byte_offset_, notification.value_, notification.width_, *this);
+      if (disposition == DoorbellDisposition::Retry) {
+        enqueue_doorbell_retry(notification, owned.model_.get(), now, 1);
+      } else if (disposition != DoorbellDisposition::Ignored) {
+        discard_doorbell_retry(notification, owned.model_.get());
       }
-    } catch (const std::exception &error) {
-      util::Logger::warn(
-          std::format("{}: deferred doorbell handling failed: {}", name(), error.what()));
-    } catch (...) {
-      util::Logger::warn(std::format("{}: deferred doorbell handling failed", name()));
     }
   }
 }
@@ -1307,16 +1299,8 @@ void GpuPciDevice::drain_doorbell_retry_inbox(simdojo::Tick now, bool ignore_rea
     if (!lease || transport_session() != session || !frontend)
       continue;
 
-    DoorbellDisposition disposition = DoorbellDisposition::Faulted;
-    try {
-      disposition = retry.model_->observe_doorbell_write(
-          notification.byte_offset_, notification.value_, notification.width_, *this);
-    } catch (const std::exception &error) {
-      util::Logger::warn(
-          std::format("{}: deferred doorbell retry failed: {}", name(), error.what()));
-    } catch (...) {
-      util::Logger::warn(std::format("{}: deferred doorbell retry failed", name()));
-    }
+    const DoorbellDisposition disposition = retry.model_->observe_doorbell_write(
+        notification.byte_offset_, notification.value_, notification.width_, *this);
     if (disposition == DoorbellDisposition::Retry) {
       if (now == simdojo::TICK_MAX)
         continue;
@@ -1501,51 +1485,55 @@ bool GpuPciDevice::write_register(uint64_t byte_offset, uint32_t value) {
   return true;
 }
 
-void GpuPciDevice::reset(simdojo::ResetKind kind) {
+util::Result GpuPciDevice::reset(simdojo::ResetKind kind, util::DiagnosticEmitter diag) {
   const std::lock_guard reset_lock(doorbell_reset_mutex_);
   close_doorbell_admission_for_reset();
   const bool restart_transport = quiesce_transport_session();
   util::Logger::warn(std::format("{}: reset requested, kind {}", name(), static_cast<int>(kind)));
-  try {
-    const bool queues_released = teardown_frontend_queues();
-    if (!queues_released)
-      throw std::runtime_error("PCI queue state could not be cleared");
-    if (soc_ != nullptr) {
-      // Preserve the device-global VMID-0 identity, but drop the translator
-      // and its retained transport backing. A later hub invalidation publishes
-      // the replacement frontend's coherent GART configuration.
-      if (!soc_->gpu_vm().clear_gart_binding())
-        throw std::runtime_error("VMID-0 GART binding could not be cleared");
-    }
-    // Everything a client could have changed goes back to power-on state. Video
-    // memory is not cleared here: a mapping already handed out cannot be taken
-    // back, which is why a device that exports one is served to a single client.
-    {
-      const std::lock_guard lock(doorbell_storage_mutex_);
-      std::ranges::fill(doorbells_, std::byte{0});
-    }
-    std::ranges::fill(msix_table_, std::byte{0});
-    reset_registers();
-    // The table is restored rather than assumed intact. On real hardware it lives
-    // in memory the security processor reserves and the driver cannot write; here
-    // it is ordinary video memory, reachable through MM_DATA, so a guest that
-    // scribbles over it once would otherwise make every later bind fail.
-    if (!publish_discovery_table()) {
-      util::Logger::warn(std::format("{}: the discovery table could not be restored, so a driver "
-                                     "binding after this reset will refuse the device",
-                                     name()));
-    }
-    if (restart_transport && kind != simdojo::ResetKind::LostConnection &&
-        !restart_transport_session_after_reset()) {
-      throw std::runtime_error("PCI transport session could not be restarted after reset");
-    }
-  } catch (...) {
+  const bool queues_released = teardown_frontend_queues();
+  if (!queues_released) {
     if (restart_transport && kind != simdojo::ResetKind::LostConnection)
       (void)restart_transport_session_after_reset();
     reopen_doorbell_admission_after_reset();
-    throw;
+    return diag.emit() << "PCI queue state could not be cleared";
+  }
+  if (soc_ != nullptr) {
+    // Preserve the device-global VMID-0 identity, but drop the translator
+    // and its retained transport backing. A later hub invalidation publishes
+    // the replacement frontend's coherent GART configuration.
+    if (!soc_->gpu_vm().clear_gart_binding()) {
+      if (restart_transport && kind != simdojo::ResetKind::LostConnection)
+        (void)restart_transport_session_after_reset();
+      reopen_doorbell_admission_after_reset();
+      return diag.emit() << "VMID-0 GART binding could not be cleared";
+    }
+  }
+  // Everything a client could have changed goes back to power-on state. Video
+  // memory is not cleared here: a mapping already handed out cannot be taken
+  // back, which is why a device that exports one is served to a single client.
+  {
+    const std::lock_guard lock(doorbell_storage_mutex_);
+    std::ranges::fill(doorbells_, std::byte{0});
+  }
+  std::ranges::fill(msix_table_, std::byte{0});
+  reset_registers();
+  // The table is restored rather than assumed intact. On real hardware it lives
+  // in memory the security processor reserves and the driver cannot write; here
+  // it is ordinary video memory, reachable through MM_DATA, so a guest that
+  // scribbles over it once would otherwise make every later bind fail.
+  if (!publish_discovery_table()) {
+    util::Logger::warn(std::format("{}: the discovery table could not be restored, so a driver "
+                                   "binding after this reset will refuse the device",
+                                   name()));
+  }
+  if (restart_transport && kind != simdojo::ResetKind::LostConnection &&
+      !restart_transport_session_after_reset()) {
+    (void)restart_transport_session_after_reset();
+    reopen_doorbell_admission_after_reset();
+    return diag.emit() << "PCI transport session could not be restarted after reset";
   }
   reopen_doorbell_admission_after_reset();
+  return util::Result::success();
 }
 
 } // namespace rocjitsu
