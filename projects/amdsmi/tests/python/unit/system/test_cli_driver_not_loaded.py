@@ -110,12 +110,6 @@ class _FakeHelpers:
     def is_ainic_initialized(self) -> bool:
         return bool({"ionic", "bnxt_en"} & self.loaded)
 
-    def is_brcm_nic_initialized(self) -> bool:
-        return "bnxt_en" in self.loaded
-
-    def is_brcm_switch_initialized(self) -> bool:
-        return False
-
     def is_driver_loaded(self, driver: str) -> bool:
         return driver in self.loaded
 
@@ -151,6 +145,9 @@ class _FakeHelpers:
 
     def get_nic_choices(self):
         return {"0": "nic0"}, "0"
+
+    def get_device_handles_from_nic_selections(self, nic_selections, nic_choices):
+        return True, ["nic0"]
 
     def get_switch_choices(self):
         return {}, ""
@@ -199,8 +196,6 @@ class TestMissingDriverErrors(unittest.TestCase):
             "partition",
             "fabric",
             "bad-pages",
-            "firmware",
-            "ucode",
             "topology",
             "monitor",
             "dmon",
@@ -267,11 +262,13 @@ class TestMissingDriverErrors(unittest.TestCase):
             exc = self._error("process", loaded=("hsmp_acpi", "ionic"))
         self.assertIsInstance(exc, cli_exc.AmdSmiCommandNotSupportedException)
 
-    def test_broadcom_only_systems_run_the_broadcom_options(self) -> None:
-        args = _parse(["firmware", "--brcm_nic"], loaded=("bnxt_en",))
-        self.assertEqual(args.func(args), "ran")
+    def test_nic_only_systems_run_firmware_nic(self) -> None:
+        for driver in ("ionic", "bnxt_en"):
+            with self.subTest(driver=driver):
+                args = _parse(["firmware", "--nic"], loaded=(driver,))
+                self.assertEqual(args.func(args), "ran")
 
-    def test_broadcom_only_systems_explain_gpu_output(self) -> None:
+    def test_nic_only_systems_explain_gpu_output(self) -> None:
         for present, expected in (
             (("amdgpu", "bnxt_en"), cli_exc.AmdSmiDriverNotLoadedException),
             (("bnxt_en",), cli_exc.AmdSmiCommandNotSupportedException),

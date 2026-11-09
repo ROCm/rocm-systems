@@ -340,7 +340,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             return func
 
         def run_nic_options(args):
-            if any(getattr(args, option, False) for option in nic_options):
+            if any(getattr(args, option, None) not in (None, False) for option in nic_options):
                 return func(args)
             outputformat = self.helpers.get_output_format()
             if self.helpers.get_devices_without_driver("amdgpu"):
@@ -1916,9 +1916,9 @@ class AMDSMIParser(argparse.ArgumentParser):
         firmware_parser._optionals.title = firmware_optionals_title
         firmware_parser.formatter_class = lambda prog: AMDSMISubparserHelpFormatter(prog)
         firmware_parser.set_defaults(
-            func=self._without_amdgpu_only(func, "firmware", ("brcm_nic",)),
+            func=self._without_amdgpu_only(func, "firmware", ("nic",)),
             gpu=None,
-            note_drivers=("amdgpu", "bnxt_en"),
+            note_drivers=("amdgpu", "ionic", "bnxt_en"),
         )
 
         # Optional Args
@@ -2593,12 +2593,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         self._add_command_modifiers(event_parser)
 
     def _add_topology_parser(self, subparsers: argparse._SubParsersAction, func):
-        if not (
-            self.helpers.is_amdgpu_initialized()
-            or self.helpers.is_brcm_nic_initialized()
-            or self.helpers.is_brcm_switch_initialized()
-        ):
-            # The topology subcommand needs amdgpu, or a Broadcom NIC or switch for its NIC options
+        if not self.helpers.is_amdgpu_initialized():
+            # The topology subcommand is only applicable to systems with amdgpu initialized
             return
 
         # Subparser help text
@@ -2624,11 +2620,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         )
         topology_parser._optionals.title = topology_optionals_title
         topology_parser.formatter_class = lambda prog: AMDSMISubparserHelpFormatter(prog)
-        topology_parser.set_defaults(
-            func=self._without_amdgpu_only(func, "topology", ("nic_topo", "nic_switch")),
-            gpu=None,
-            note_drivers=("amdgpu", "bnxt_en"),
-        )
+        topology_parser.set_defaults(func=func, gpu=None, note_drivers=("amdgpu",))
 
         # Add Universal Arguments
         self._add_command_modifiers(topology_parser)
@@ -3328,12 +3320,8 @@ class AMDSMIParser(argparse.ArgumentParser):
             # This subparser is only applicable to Linux
             return
 
-        if not (
-            self.helpers.is_amdgpu_initialized()
-            or self.helpers.is_brcm_nic_initialized()
-            or self.helpers.is_brcm_switch_initialized()
-        ):
-            # The monitor subcommand needs amdgpu, or a Broadcom NIC or switch for its NIC options
+        if not self.helpers.is_amdgpu_initialized():
+            # The monitor subcommand is only applicable to systems with amdgpu initialized
             return
 
         # Subparser help text
@@ -3366,11 +3354,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         )
         monitor_parser._optionals.title = monitor_optionals_title
         monitor_parser.formatter_class = lambda prog: AMDSMISubparserHelpFormatter(prog)
-        monitor_parser.set_defaults(
-            func=self._without_amdgpu_only(func, "monitor", ("brcm_nic", "brcm_switch")),
-            gpu=None,
-            note_drivers=("amdgpu", "bnxt_en"),
-        )
+        monitor_parser.set_defaults(func=func, gpu=None, note_drivers=("amdgpu",))
 
         # Add monitor arguments
         monitor_parser.add_argument(

@@ -151,7 +151,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - ``HEALTH`` read ``UNSUPPORTED`` on every AI-NIC because the health reporter belongs to a different function than the one that was queried.
 
 - **``amd-smi firmware --nic`` now reports NIC firmware versions** (breaking).  
-  - ``amdsmi_get_nic_fw_info()`` is implemented and its entry layout changed, so callers must recompile and read ``entry.fw.name`` where ``entry.name`` was used; the Python function returns a firmware name to version dictionary.
+  - ``amdsmi_get_nic_fw_info()`` is implemented and its entry layout changed, so callers must recompile and read ``entry.fw.name`` where ``entry.name`` was used; the Python function returns a firmware name to version dictionary. This is an ABI break in ``amdsmi_nic_fw_entry_t`` and ``amdsmi_nic_fw_info_t``, and ``AMDSMI_MAX_NIC_FW`` grows from 16 to 64.
 
 - **RDMA ``MAX_MTU`` and ``ACTIVE_MTU`` now come from libibverbs**.  
   - They read ``N/A`` when neither the RDMA provider nor sysfs can answer, and a provider that crashes no longer affects ``amd-smi`` or the library.

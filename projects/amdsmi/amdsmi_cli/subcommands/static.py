@@ -1592,9 +1592,9 @@ class StaticCommands:
                 else:
                     nic_info_filtered = {}
                     for attr in info_filter:  # remove all attributes except the one in info_filter:
-                        nic_info_filtered = nic_info_filtered | {
-                            key: value for key, value in nic_info.items() if key.lower() == attr
-                        }
+                        nic_info_filtered.update(
+                            {key: value for key, value in nic_info.items() if key.lower() == attr}
+                        )
                     static_dict.update(nic_info_filtered)
             except amdsmi_exception.AmdSmiLibraryException as e:
                 logging.debug("Failed to get NIC %s | %s", nic_id, e.get_error_info())

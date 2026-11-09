@@ -151,5 +151,5 @@ class TestMetricNicCsvPorts(unittest.TestCase):
             },
         )
         self.assertEqual(row["PORT_0_STATISTICS_RX_PACKETS"], "5")
-        self.assertEqual(row["RDMA_PORT_0_STATISTICS_TX_PKTS"], "100")
-        self.assertEqual(row["RDMA_PORT_1_STATISTICS_TX_PKTS"], "101")
+        self.assertEqual(row["RDMA_RDMA_DEVICE_0_PORTS_PORT_0_STATISTICS_TX_PKTS"], "100")
+        self.assertEqual(row["RDMA_RDMA_DEVICE_0_PORTS_PORT_1_STATISTICS_TX_PKTS"], "101")
