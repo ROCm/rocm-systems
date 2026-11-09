@@ -398,6 +398,86 @@ TEST_F(CeCollMicrotest, EnsureStaging_AlreadySetUp_ReturnsWithoutRegistering) {
   EXPECT_EQ(0, alloc_.calls);
 }
 
+// ncclCeInit on a 2-rank comm, as in the CE init race NVIDIA/nccl@430afbce fixed. ncclMemAlloc does not zero memory, so
+// each allocation comes back as recycled memory holding 1: the value the first UC sync, and every sync under graph
+// capture, waits for.
+class CeInitMicrotest : public ::testing::Test {
+ protected:
+  static constexpr uint32_t kStaleFlag = 1;
+  struct Allocation {
+    std::vector<uint32_t> words;
+    std::vector<uint32_t> atRegistration;  // after the registration's barrier, peers may signal into the window
+    ncclWindow_vidmem vidmem{};
+    ncclDevrWindow win{};
+  };
+  Allocation allocs_[2];  // the signal buffer, then the ready/complete flag window
+  int nAllocs_ = 0;
+  std::unique_ptr<ncclComm> comm_ = std::make_unique<ncclComm>();
+  ScopedHook<ncclResult_t(void**, size_t)> alloc_{g_ncclMemAlloc, [this](void** ptr, size_t size) {
+    if (nAllocs_ == 2) return ncclInternalError;
+    Allocation& a = allocs_[nAllocs_++];
+    a.words.assign((size + sizeof(uint32_t) - 1) / sizeof(uint32_t), kStaleFlag);
+    *ptr = a.words.data();
+    return ncclSuccess;
+  }};
+  ScopedHook<ncclResult_t(ncclComm*, void*, size_t, int, ncclWindow_t*)> registration_{
+      g_devrWindowRegisterInGroup, [this](ncclComm*, void* ptr, size_t, int, ncclWindow_t* win) {
+        Allocation* a = Find(ptr);
+        if (a == nullptr) return ncclInvalidArgument;
+        a->atRegistration = a->words;
+        a->win.userPtr = ptr;
+        a->vidmem.winHost = &a->win;
+        *win = &a->vidmem;
+        return ncclSuccess;
+      }};
+  ScopedHook<ncclResult_t(ncclShadowPool*, void*, void**)> toHost_{
+      g_shadowPoolToHost, [](ncclShadowPool*, void* devObj, void** hostObj) {
+        *hostObj = devObj;
+        return ncclSuccess;
+      }};
+  ScopedHook<size_t(const ncclComm*)> nonRegCap_{g_rcclCeArNonRegCap, [](const ncclComm*) { return size_t{0}; }};
+  ScopedHook<hipError_t(hipStream_t)> streamSync_{g_hipStreamSynchronize, [](hipStream_t) { return hipSuccess; }};
+
+  void SetUp() override {
+    comm_->nRanks = 2;
+    // The rest of ncclCeInit: its stream and event, and the seq-number buffer it fills through a side stream.
+    g_hipStreamCreateResult = hipSuccess;
+    g_hipEventCreateResult = hipSuccess;
+    g_hipAsyncOpsResult = hipSuccess;
+    g_hipDeviceGetPCIBusIdResult = hipSuccess;
+  }
+  void TearDown() override {
+    EXPECT_EQ(hipSuccess, hipFree(comm_->ceColl.d_barrierSync));
+    EXPECT_EQ(hipSuccess, hipFree(comm_->ceColl.ceSeqNumDev));
+    ResetHipFakes();
+  }
+  Allocation* Find(const void* ptr) {
+    for (Allocation& a : allocs_) {
+      if (!a.words.empty() && a.words.data() == ptr) return &a;
+    }
+    return nullptr;
+  }
+};
+
+TEST_F(CeInitMicrotest, StaleSyncFlags_ClearsThemBeforeRegisteringTheWindow) {
+  ASSERT_EQ(ncclSuccess, ncclCeInit(comm_.get()));
+
+  const Allocation* flags = Find(comm_->ceColl.ceSyncWin->userPtr);
+  ASSERT_NE(nullptr, flags);
+  EXPECT_EQ(std::vector<uint32_t>(flags->words.size(), 0), flags->atRegistration)
+      << "a stale " << kStaleFlag << " lets the first UC sync pass before its peer arrives";
+}
+
+// The signal buffer gets the same stale memory, and ncclCeInit clears it.
+TEST_F(CeInitMicrotest, StaleSignalBuffer_ClearsIt) {
+  ASSERT_EQ(ncclSuccess, ncclCeInit(comm_.get()));
+
+  const Allocation* signal = Find(comm_->ceColl.signalBuffer);
+  ASSERT_NE(nullptr, signal);
+  EXPECT_EQ(std::vector<uint32_t>(signal->words.size(), 0), signal->words);
+  EXPECT_NE(nullptr, Find(comm_->ceColl.ceSyncWin->userPtr));
+}
+
 constexpr size_t kMiB = 1024 * 1024;
 constexpr uintptr_t kSendBase = 0x100000000000;
 constexpr uintptr_t kRecvBase = 0x200000000000;
