@@ -94,12 +94,14 @@ jobs:
           fi
 
       # Whether the module the GPU step below depends on is loaded. The version
-      # is never printed: it is an internal build.
+      # is never printed: it is an internal build. Test the module's directory,
+      # not its version file: only the DKMS driver exports a version, so the
+      # inbox driver would otherwise be reported as not loaded.
       - name: amdgpu driver
         shell: bash
         run: |
           set -euo pipefail
-          if ! cat /sys/module/amdgpu/version > /dev/null 2>&1; then
+          if [ ! -d /sys/module/amdgpu ]; then
             echo "- amdgpu: not loaded" >> "$GITHUB_STEP_SUMMARY"
             echo "::error::The amdgpu module is not loaded, so no GPU test can run on this host."
             exit 1
