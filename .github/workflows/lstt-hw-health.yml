@@ -37,7 +37,7 @@ concurrency:
 
 jobs:
   health:
-    name: ${{ matrix.host }}
+    name: ${{ matrix.host }} (${{ matrix.gfx }})
     # Self-hosted lab hardware: never auto-run untrusted fork-PR code on it.
     if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
     strategy:
@@ -48,6 +48,15 @@ jobs:
             label: lstt-gfx1151
             gfx: gfx1151
             bios: 'X53 Ver. 01.08.00'
+          # One row per runner entry, so the two arches check in parallel.
+          - host: lsttserver2
+            label: lstt-gfx90a
+            gfx: gfx90a
+            bios: '2.4a'
+          - host: lsttserver2
+            label: lstt-gfx1100
+            gfx: gfx1100
+            bios: '2.4a'
     runs-on:
       - self-hosted
       - ${{ matrix.label }}
