@@ -499,10 +499,6 @@ static void pinned_hash_chunks(PinnedHashJob& j) {
 }
 
 static void pinned_hash_helper(PinnedHashPool* p) {
-#ifdef __linux__
-  pthread_setname_np(pthread_self(), "hrr-pin-hash");
-  pthread_setaffinity_np(pthread_self(), sizeof(p->cpus), &p->cpus);
-#endif
   uint64_t seen = 0;
   std::unique_lock<std::mutex> lk(p->mu);
   for (;;) {
@@ -530,15 +526,25 @@ static PinnedHashPool* pinned_hash_pool() {
 #endif
   // HIP_HRR_HOST_SNAPSHOT_HELPERS sets the count; 0 keeps the work on the launching thread.
   const char* env = std::getenv("HIP_HRR_HOST_SNAPSHOT_HELPERS");
-  const unsigned helpers =
-      env ? std::min(static_cast<unsigned>(std::atoi(env)), 64u) : std::min(cpus / 8, 7u);
+  const int asked = env ? std::atoi(env) : 0;
+  const unsigned helpers = !env ? std::min(cpus / 8, 7u)
+                           : asked <= 0 ? 0u
+                                        : std::min(static_cast<unsigned>(asked), 64u);
   if (helpers == 0) {
     delete p;
     return nullptr;
   }
   unsigned started = 0;
   try {
-    for (; started < helpers; ++started) std::thread(pinned_hash_helper, p).detach();
+    for (; started < helpers; ++started) {
+      std::thread t(pinned_hash_helper, p);
+#ifdef __linux__
+      // Named and placed here, so both hold before any launch can use the thread.
+      pthread_setname_np(t.native_handle(), "hrr-pin-hash");
+      pthread_setaffinity_np(t.native_handle(), sizeof(p->cpus), &p->cpus);
+#endif
+      t.detach();
+    }
   } catch (...) {
   }
   if (started == 0) {
@@ -783,7 +789,10 @@ static void pinned_write_event(uint16_t api, void* payload, uint32_t size,
       recorded = true;
     }
     if (recorded) it->second.last_stream = stream;
-    it->second.record_all = s.dropped;
+    // Only a launch that saw the flag recorded every chunk; one that ran
+    // alongside it did not.
+    if (s.dropped) it->second.record_all = true;
+    else if (s.record_all) it->second.record_all = false;
   }
 }
 
