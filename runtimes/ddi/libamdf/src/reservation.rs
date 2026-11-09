@@ -190,6 +190,7 @@ pub(crate) unsafe extern "C" fn map(
     boundary(|| unsafe {
         output_pointer(out)?;
         let reservation = object(pointer.cast::<Reservation>())?;
+        (*reservation.instance).require_current_process()?;
         let map = input(info, AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO)?;
         if ordinal != 0 {
             return Err(RANGE);
@@ -246,6 +247,7 @@ pub(crate) unsafe extern "C" fn update(
 ) -> u64 {
     boundary(|| unsafe {
         let reservation = object(pointer.cast::<Reservation>())?;
+        (*reservation.instance).require_current_process()?;
         if ordinal != 0 {
             return Err(RANGE);
         }
@@ -297,6 +299,7 @@ pub(crate) unsafe extern "C" fn detach(
 ) -> u64 {
     boundary(|| unsafe {
         let reservation = object(pointer.cast::<Reservation>())?;
+        (*reservation.instance).require_current_process()?;
         if ordinal != 0 {
             return Err(RANGE);
         }
@@ -318,6 +321,7 @@ pub(crate) unsafe extern "C" fn detach(
 pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_memory_reservation_t) -> u64 {
     boundary(|| unsafe {
         let reservation = object(pointer.cast::<Reservation>())?;
+        (*reservation.instance).require_current_process()?;
         if reservation.children.load(Ordering::Acquire) != 0 {
             return Err(BUSY);
         }
