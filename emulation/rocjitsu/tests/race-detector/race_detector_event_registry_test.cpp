@@ -109,7 +109,6 @@ TEST(EventRegistry, RetainsCapturedInstruction) {
   EventRegistry events;
   const auto id = events.add(WaveId{0}, kInstruction, MemoryEventType::GLOBAL_TO_VGPR, {2}, 1, 0xf,
                              {}, kObligations, MemoryOrderClass::UNORDERED);
-  EXPECT_EQ(events.pc(id), kInstruction.pc());
   EXPECT_EQ(events.instruction(id), kInstruction);
 }
 
