@@ -757,8 +757,8 @@ int rj_arith_v_mul_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
 // set; RDNA4 applies it regardless. These three families accept guest input/output
 // denormal flushing, also in Wave64. They remain loose-only: IEEE-mode support
 // does not promise exact NaN behavior or exception reporting.
-// Output flushing follows rounding: a tiny result rounded to minimum normal is
-// retained. This inherited approximation can differ from GPU flushing.
+// Output flushing and OMOD test tininess after rounding: a MUL or FMA result that
+// reaches minimum normal only through subnormal rounding is still flushed.
 // CLAMP maps NaNs to +0; RDNA3 preserves NaNs with RJ_ARITH_FP_DX10_CLAMP_OFF.
 int rj_arith_v_add_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                            uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,

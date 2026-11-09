@@ -748,23 +748,53 @@ TEST(FpFmaF64, GuestRounding) {
   }
 }
 
-// Loose output flushing retains a tiny value rounded to minimum normal, as in
-// the legacy emulator. This is an approximation, not a hardware golden.
+// Tininess is judged after rounding. (1 - 2^-53) * 2^-1022 is exact at full precision, so it
+// is tiny in every rounding mode although subnormal rounding can reach the smallest normal;
+// (1 - 2^-52) * (2^-1022 + 2^-1074) is not tiny unless rounded down. Flushing outputs and OMOD
+// zero tiny results, OMOD even when MODE keeps denormals. Expected results are gfx1201
+// captures of V_FMA_F64 with a +0 addend, in nearest, up, down and zero rounding.
 TEST(FpFmaF64, RoundedMinimumNormal) {
   using namespace rocjitsu::arith::test;
+  const struct {
+    uint64_t a, b, fp_flags;
+    uint32_t instruction_flags;
+    uint64_t expected[4];
+  } cases[] = {
+      {0x3fefffffffffffffULL, 0x0010000000000000ULL, RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS, 0, {}},
+      {0x3fefffffffffffffULL,
+       0x0010000000000000ULL,
+       0,
+       0,
+       {0x0010000000000000ULL, 0x0010000000000000ULL, 0x000fffffffffffffULL,
+        0x000fffffffffffffULL}},
+      {0x3fefffffffffffffULL, 0x0010000000000000ULL, 0, RJ_ARITH_ALU_OMOD_2, {}},
+      {0x3feffffffffffffeULL,
+       0x0010000000000001ULL,
+       RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+       0,
+       {0x0010000000000000ULL, 0x0010000000000000ULL, 0, 0}},
+      {0x3feffffffffffffeULL,
+       0x0010000000000001ULL,
+       0,
+       RJ_ARITH_ALU_OMOD_2,
+       {0x0020000000000000ULL, 0x0020000000000000ULL, 0, 0}},
+  };
   for (uint64_t cpu : supported_cpu_levels()) {
     for (uint64_t semantics : {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_COMPATIBILITY}) {
-      Registers<8, 32> r;
-      r.v[0][0] = 0;
-      r.v[1][0] = 0x00100000;
-      r.v[2][0] = 0xffffffff;
-      r.v[3][0] = 0x3fefffff;
-      r.v[4][0] = r.v[5][0] = 0;
-      ASSERT_EQ(rj_arith_v_fma_f64_w32_gfx12(cpu | semantics | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
-                                             1, 0, r.v + 6, r.v, r.v + 2, r.v + 4, nullptr),
-                RJ_ARITH_SUCCESS);
-      EXPECT_EQ(r.v[6][0], 0U);
-      EXPECT_EQ(r.v[7][0], 0x00100000U);
+      for (const auto &test : cases) {
+        for (unsigned rounding = 0; rounding < 4; ++rounding) {
+          Registers<8, 32> r;
+          write_fp(r.v, 0, 64, test.a);
+          write_fp(r.v + 2, 0, 64, test.b);
+          write_fp(r.v + 4, 0, 64, 0);
+          ASSERT_EQ(rj_arith_v_fma_f64_w32_gfx12(
+                        cpu | semantics | test.fp_flags | (uint64_t(rounding) << 24), 1,
+                        test.instruction_flags, r.v + 6, r.v, r.v + 2, r.v + 4, nullptr),
+                    RJ_ARITH_SUCCESS);
+          EXPECT_EQ(read_fp(r.v + 6, 0, 64), test.expected[rounding])
+              << std::hex << test.a << " * " << test.b << " rounding " << rounding;
+        }
+      }
     }
   }
 }

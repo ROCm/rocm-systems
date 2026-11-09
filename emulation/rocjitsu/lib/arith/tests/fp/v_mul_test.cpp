@@ -345,10 +345,36 @@ TEST(FpMulF64, OutputScalingAndFlushing) {
                                0x7fefffffffffffffULL};
   check_binary64_rounding<32>(rj_arith_v_mul_f64_w32_gfx12, 0x7fefffffffffffffULL,
                               0x3ff0000000000000ULL, overflow, RJ_ARITH_ALU_OMOD_2);
-  // Inherited loose approximation: flush after rounding, retaining minimum normal.
-  const uint64_t tiny[] = {0x0010000000000000ULL, 0x0010000000000000ULL, 0, 0};
-  check_binary64_rounding<64>(rj_arith_v_mul_f64_w64_gfx12, 0x0010000000000000ULL,
-                              0x3fefffffffffffffULL, tiny, 0, RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS);
+}
+
+// Tininess is judged after rounding. (1 - 2^-53) * 2^-1022 is exact at full precision, so it
+// is tiny in every rounding mode although subnormal rounding can reach the smallest normal;
+// (1 - 2^-52) * (2^-1022 + 2^-1074) is not tiny unless rounded down. Flushing outputs and OMOD
+// zero tiny results, OMOD even when MODE keeps denormals. Expected results are gfx1201
+// captures in nearest, up, down and zero rounding; gfx1100 flushes the same products.
+TEST(FpMulF64, TinyAfterRounding) {
+  using rocjitsu::arith::test::check_binary64_rounding;
+  const uint64_t tiny = 0x3fefffffffffffffULL, not_tiny = 0x3feffffffffffffeULL;
+  const uint64_t zero[] = {0, 0, 0, 0};
+  const uint64_t kept[] = {0x0010000000000000ULL, 0x0010000000000000ULL, 0x000fffffffffffffULL,
+                           0x000fffffffffffffULL};
+  const uint64_t not_tiny_flushed[] = {0x0010000000000000ULL, 0x0010000000000000ULL, 0, 0};
+  const uint64_t not_tiny_doubled[] = {0x0020000000000000ULL, 0x0020000000000000ULL, 0, 0};
+  for (auto call : {rj_arith_v_mul_f64_w32, rj_arith_v_mul_f64_w32_gfx12}) {
+    check_binary64_rounding<32>(call, tiny, 0x0010000000000000ULL, zero, 0,
+                                RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS);
+    check_binary64_rounding<32>(call, not_tiny, 0x0010000000000001ULL, not_tiny_flushed, 0,
+                                RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS);
+  }
+  for (auto call : {rj_arith_v_mul_f64_w64, rj_arith_v_mul_f64_w64_gfx12}) {
+    check_binary64_rounding<64>(call, tiny, 0x0010000000000000ULL, zero, 0,
+                                RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS);
+  }
+  check_binary64_rounding<32>(rj_arith_v_mul_f64_w32_gfx12, tiny, 0x0010000000000000ULL, kept);
+  check_binary64_rounding<32>(rj_arith_v_mul_f64_w32_gfx12, tiny, 0x0010000000000000ULL, zero,
+                              RJ_ARITH_ALU_OMOD_2);
+  check_binary64_rounding<64>(rj_arith_v_mul_f64_w64_gfx12, not_tiny, 0x0010000000000001ULL,
+                              not_tiny_doubled, RJ_ARITH_ALU_OMOD_2);
 }
 
 // gfx1201 captures: FP64 MUL returns the first NaN source, quieted, in operand order under every
