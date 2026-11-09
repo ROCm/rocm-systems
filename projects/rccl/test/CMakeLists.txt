@@ -305,6 +305,7 @@ if(BUILD_TESTS)
     PipeUtilsTests.cpp
     VersionGateTests.cpp
     SendRecvTests.cpp
+    SendRecvSingleRankTests.cpp
     StandaloneTests.cpp
     SymmetricInPlaceSliceTests.cpp
     DdaIpcTests.cpp
@@ -831,6 +832,7 @@ if(BUILD_TESTS)
       PatAlgorithmTests.cpp
       RcclWrapTests.cpp
       SymkBlockWidthTests.cpp
+      SocketCryptTests.cpp
       SocketPollTests.cpp
       TransportTests.cpp
       TimeoutTests.cpp
@@ -1105,6 +1107,8 @@ if(BUILD_TESTS)
       ImplicitLaunchOrderMPITests.cpp
       CommMPITests.cpp
       PatForcedMPITests.cpp
+      BootstrapTlsMPITests.cpp
+      BootstrapStrayPeerMPITests.cpp
       NChannelsPerNetPeerMPITests.cpp
       MaxP2pPeersMPITests.cpp
       GdrFlushFlagProtoSwitchMPITests.cpp
