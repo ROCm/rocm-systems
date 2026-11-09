@@ -53,13 +53,41 @@ need wave64, so gfx1xxx targets fail to compile. `Makefile.rocm` writes the base
 
 The `py` step stages `libnccl_m2n.so` (RUNPATH `$ORIGIN`) and `gpu_archs.txt` into the package and builds
 the wheel with `NCCL_EXTENSIONS_REQUIRE_NATIVE_LIBS=1`. It then runs `auditwheel repair` with the ROCm runtime
-excluded (`librccl.so.1`, `libamdhip64.so.7`, ...; the same command as `repair-wheel-command` in
-`bindings/nccl_m2n/pyproject.toml`) into `whl/repaired/`, which gives the manylinux tag (`REPAIR=0` skips it).
-Release wheels for all Python versions: on a host with Docker, after the `py` step,
-`cd ~/m2n-ruby/py-build && cibuildwheel --platform linux nccl_m2n` (staged copy with the library and the
-nccl4py port next to it; configuration in `[tool.cibuildwheel]`, manylinux_2_28 image). On Ruby the default
-Docker bridge has no DNS, so add `CIBW_CONTAINER_ENGINE="docker; create_args: --network=host"`, and with
-`sudo docker` use a local copy and `--output-dir` (root cannot write the NFS home).
+excluded (`librccl.so.1`, `libamdhip64.so.7`, ...; the same excludes as `repair-wheel-command` in
+`bindings/nccl_m2n/pyproject.toml`) into `whl/repaired/`; its tag follows the image's glibc (manylinux_2_38 for
+the Ubuntu 24.04 Primus image, `REPAIR=0` skips it).
+
+Release wheel (manylinux_2_28): on a host with Docker and cibuildwheel,
+`M2N_RCCL_HOME=~/m2n-ruby/rccl-install bash $SD/manylinux_wheel.sh [outdir]`. The script stages
+`bindings/nccl4py`, `bindings/nccl_m2n` and `contrib/nccl_m2n` into a temporary directory (cibuildwheel copies
+its project into the container) and runs cibuildwheel there; it runs `manylinux_lib.sh` in the manylinux_2_28 image,
+which installs TheRock `rocm[devel]` for the compiler: by default the latest GA release from the stable index
+`https://repo.amd.com/rocm/whl/gfx94X-dcgpu` (the compiler still targets every `M2N_GPU_ARCHS`). `M2N_ROCM_INDEX`
+selects another index (nightly `https://rocm.nightlies.amd.com/whl-multi-arch`, release candidates
+`https://rocm.prereleases.amd.com/whl-multi-arch`) and `M2N_ROCM_DEVEL_VERSION` pins a version (nightlies are
+dropped from their index after a while); the build log prints the resolved `rocm[devel]` version. It then builds
+`libnccl_m2n.so` for `M2N_GPU_ARCHS` against the RCCL in `M2N_RCCL_HOME` (headers and `librccl.so` to link;
+it must be >= 2.30.5, so not the 2.28.9 that TheRock 7.14 ships), and `auditwheel repair --plat manylinux_2_28`
+excludes the ROCm runtime; the nccl4py port wheel is built the same way. 2.30.5 is enough for the build and
+single-node runs, but multi-node (GIN) DTensor needs RCCL newer than 2.30.7: 2.30.7 hangs in the GIN proxy
+with `RMA: trying to send to non-connected peer` (validated with 2.32.3). The wheel then needs that RCCL at run time too: with TheRock torch, keep the
+`py_env.sh` workaround (`LD_PRELOAD` of it plus `sitecustomize.py`). `CIBW_BUILD` defaults to cp310–cp314, as
+in `pyproject.toml`; cp314 wheels need cibuildwheel >= 3.x running on Python >= 3.11 (2.23 silently skips cp314).
+On Ruby Docker needs root: `sudo env PATH=$PATH WORK=$WORK M2N_RCCL_HOME=... bash $SD/manylinux_wheel.sh /tmp/wh`
+(root's own HOME, an output dir outside the NFS home: root cannot write it). The script runs the container on
+the host network (the default bridge has no DNS).
+`M2N_RCCL_HOME` must not be under `/tmp`: cibuildwheel's container does not see it there (use `/var/tmp` or
+similar). To build against the RCCL of a TheRock nightly, install `rocm[libraries,devel]` (devel's `librccl.so`
+links into the libraries package) and point `M2N_RCCL_HOME` at a dereferenced copy of `include/` and
+`lib/librccl.so`. With only `librccl.so.1` installed at run time, nccl4py needs `NCCL_LIBRARY=.../librccl.so.1`.
+A newer `rocm[devel]` needs no newer runtime: `libnccl_m2n.so` links only `libamdhip64.so.7` (symbol versions up
+to `hip_6.0`, the same with `rocm[devel]` 7.13.0 GA, 7.14.1rc0, 10.0.0rc4 and nightly 10.1.0a20260822) and
+`librccl.so.1`. Built with `rocm[devel]` 7.13.0 or 10.1.0a20260822 against RCCL 2.32.3, the wheel passes
+the bench and DTensor checks with TheRock torch 2.12 + ROCm 7.14 (this image) and TheRock torch 2.9.1 + ROCm 7.15
+on MI350X. The runtime floor comes from RCCL and the kernel: that RCCL 2.32.3 build needs HIP >= 7.1
+(`hipMemcpyBatchAsync@hip_7.1`, so HIP 7.0.2 cannot load it), and RCCL enables cuMem, which nccl.m2n needs for
+symmetric memory, only on Linux >= 6.8: on kernel 5.15 (MI300X, ConnectX-7) `ncclDevCommCreate` fails with
+`Communicator does not support symmetric memory`.
 
 Install the wheels as root in every container that runs Python ranks (from the login node; `--no-deps`):
 
