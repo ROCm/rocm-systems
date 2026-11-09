@@ -11,8 +11,8 @@
  * NET LL128 hands a step to the proxy by bumping the tail, and the NIC reads the step from GPU memory once the
  * proxy sees it. A 128-byte line that is not yet visible by then reaches the receiver with the previous step's
  * flag, and the receiver polls that line forever. P2P and SHM are disabled so intra-node hops go through the NIC
- * too, which makes one node enough. On gfx942 with the post-send fence that skips the L2 writeback, this hung on
- * most runs within the launch count below.
+ * too, which makes one node enough. On gfx942 with the post-send fence that skips the L2 writeback, the in-place
+ * ops below hung within a few runs of this test.
  *
  * NCCL_P2P_DISABLE and NCCL_SHM_DISABLE are cached for the process, so the test skips unless every ring hop is on
  * NET with GPU Direct RDMA. Run it in its own process:
@@ -31,6 +31,7 @@
 
 #include <hip/hip_runtime.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
@@ -47,12 +48,23 @@ constexpr size_t   kCount      = size_t{8} << 20;
 constexpr int      kIterations = 2000;
 constexpr auto     kTimeout    = std::chrono::seconds(120);
 constexpr uint16_t kBf16One    = 0x3f80;
+constexpr uint16_t kBf16Inf    = 0x7f80;
 
 uint16_t bf16Bits(float value)
 {
     uint32_t bits;
     std::memcpy(&bits, &value, sizeof(bits));
     return static_cast<uint16_t>(bits >> 16);
+}
+
+size_t countMismatches(const void* device, uint16_t expected)
+{
+    std::vector<uint16_t> host(kCount);
+    if(hipMemcpy(host.data(), device, kCount * sizeof(uint16_t), hipMemcpyDeviceToHost) != hipSuccess)
+    {
+        return kCount;
+    }
+    return static_cast<size_t>(std::count_if(host.begin(), host.end(), [=](uint16_t v) { return v != expected; }));
 }
 
 bool ringHopsOnGdrNet(ncclComm_t comm)
@@ -142,16 +154,20 @@ TEST_F(NetLl128MPITest, RingAllReduceCompletesWithEveryHopOnNet)
                       ncclAllReduce(send, recv, kCount, ncclBfloat16, ncclSum, comm, stream));
     }
     ASSERT_MPI_TRUE(drainOrAbort());
+    size_t mismatches = countMismatches(recv, bf16Bits(static_cast<float>(MPIEnvironment::world_size)));
+    EXPECT_EQ(size_t{0}, mismatches) << "out of place, rank " << MPIEnvironment::world_rank;
+    ASSERT_MPI_TRUE(mismatches == 0);
 
-    ASSERT_MPI_EQ(hipSuccess,
-                  hipMemcpy(host.data(), recv, kCount * sizeof(uint16_t), hipMemcpyDeviceToHost));
-    const uint16_t expected   = bf16Bits(static_cast<float>(MPIEnvironment::world_size));
-    size_t         mismatches = 0;
-    for(uint16_t v : host)
+    // Keep the in-place ops: out-of-place ops alone did not reproduce the hang.
+    for(int i = 0; i < kIterations; ++i)
     {
-        mismatches += v != expected;
+        ASSERT_MPI_EQ(ncclSuccess,
+                      ncclAllReduce(recv, recv, kCount, ncclBfloat16, ncclSum, comm, stream));
     }
-    EXPECT_EQ(size_t{0}, mismatches) << "rank " << MPIEnvironment::world_rank;
+    ASSERT_MPI_TRUE(drainOrAbort());
+    // Each in-place sum multiplies every element by the rank count, so the result saturates at +inf.
+    mismatches = countMismatches(recv, kBf16Inf);
+    EXPECT_EQ(size_t{0}, mismatches) << "in place, rank " << MPIEnvironment::world_rank;
     ASSERT_MPI_TRUE(mismatches == 0);
 }
 
