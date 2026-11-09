@@ -2583,8 +2583,13 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
   // Every chunk after the lead is a full kPeriod. A graph batch is one segment, a chain the
   // GPU runs in order, so the kLead packets take at least kLead dependent dispatches, which
   // covers copying the next kPeriod packets.
-  // A remainder smaller than half a period rides in the chunk before it instead of costing
-  // its own doorbell.
+  // Profiling breaks that balance. A profiled launch gives each packet its own signal and
+  // dispatch record, and an attached profiler tool scans and rewrites every packet from the
+  // host when the doorbell rings. Either slows submitting a packet far more than it slows
+  // running one, so the chunk size then doubles after the lead up to kPeriod, keeping the
+  // GPU running one chunk while the next is submitted.
+  // A remainder smaller than half the next chunk rides in the chunk before it instead of
+  // costing its own doorbell.
   constexpr size_t kLead = 8;
 
   // A pre-patched packet already carries the completion signal ApplyHwEventPatches
@@ -2809,11 +2814,14 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
       useLead = (writeIndex - cached_read_dispatch_id_) < kLead;
     }
   }
+  const bool rampChunks =
+      profiled || amd::activity_prof::tool_attached.load(std::memory_order_relaxed);
   size_t chunk_size = useLead ? std::min(kLead, kPeriod) : kPeriod;
   for (size_t chunkStart = 0; chunkStart < numPackets; ) {
     size_t chunkEnd = std::min(chunkStart + chunk_size, numPackets);
     const bool isLeadChunk = useLead && chunkStart == 0;
-    if (!isLeadChunk && (numPackets - chunkEnd) < kPeriod / 2 &&
+    const size_t nextChunkSize = rampChunks ? std::min(chunk_size * 2, kPeriod) : kPeriod;
+    if (!isLeadChunk && (numPackets - chunkEnd) < nextChunkSize / 2 &&
         (numPackets - chunkStart) <= kMaxChunk) {
       chunkEnd = numPackets;
     }
@@ -2952,7 +2960,7 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
     }
 
     chunkStart = chunkEnd;
-    chunk_size = kPeriod;
+    chunk_size = nextChunkSize;
   }
 
   SetStateFlag(kHasPendingDispatch);
