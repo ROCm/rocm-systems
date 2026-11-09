@@ -108,7 +108,9 @@ uint16_t read_fma_mix_f16_bits(uint32_t raw, uint32_t src_selector, bool high_ha
 
 float read_fma_mix_source_f32(const Operand &src, const amdgpu::Wavefront &wf, uint32_t lane,
                               uint32_t src_selector, bool src_is_f16, bool high_half) {
-  uint32_t raw = amdgpu::RegisterAccess(wf).read_lane(src, lane);
+  uint32_t raw = amdgpu::RegisterAccess(wf)
+                     .read_operand(src, uint64_t{1} << lane, src.register_byte_mask())
+                     .lane(lane);
   if (!src_is_f16)
     return std::bit_cast<float>(raw);
   return util::f16_to_f32(read_fma_mix_f16_bits(raw, src_selector, high_half));
@@ -116,7 +118,9 @@ float read_fma_mix_source_f32(const Operand &src, const amdgpu::Wavefront &wf, u
 
 float read_fma_mix_bf16_source_f32(const Operand &src, const amdgpu::Wavefront &wf, uint32_t lane,
                                    bool src_is_bf16, bool high_half) {
-  uint32_t raw = amdgpu::RegisterAccess(wf).read_lane(src, lane);
+  uint32_t raw = amdgpu::RegisterAccess(wf)
+                     .read_operand(src, uint64_t{1} << lane, src.register_byte_mask())
+                     .lane(lane);
   if (!src_is_bf16)
     return std::bit_cast<float>(raw);
   // CDNA5 inline BF16 sources retain the FP32 bits for OPSEL.
@@ -819,18 +823,20 @@ void VDot4I32Iu8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
+    raw0 = amdgpu::select_packed_halves(raw0, inst_.opsel, inst_.opsel_hi, 0);
+    raw1 = amdgpu::select_packed_halves(raw1, inst_.opsel, inst_.opsel_hi, 1);
     int64_t sum = static_cast<int64_t>(
         static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src2, lane)));
     const bool src0_signed = (inst_.neg & 0x1u) != 0;
     const bool src1_signed = (inst_.neg & 0x2u) != 0;
     for (int i = 0; i < 4; ++i) {
-      uint32_t raw_a = (raw0 >> (i * 8)) & 0xFF;
-      uint32_t raw_b = (raw1 >> (i * 8)) & 0xFF;
-      int32_t a = src0_signed ? static_cast<int32_t>(static_cast<int8_t>(raw_a))
-                              : static_cast<int32_t>(raw_a);
-      int32_t b = src1_signed ? static_cast<int32_t>(static_cast<int8_t>(raw_b))
-                              : static_cast<int32_t>(raw_b);
-      sum += static_cast<int64_t>(a) * static_cast<int64_t>(b);
+      uint32_t src0_bits = (raw0 >> (i * 8)) & 0xFF;
+      uint32_t src1_bits = (raw1 >> (i * 8)) & 0xFF;
+      int32_t src0_elem = src0_signed ? static_cast<int32_t>(static_cast<int8_t>(src0_bits))
+                                      : static_cast<int32_t>(src0_bits);
+      int32_t src1_elem = src1_signed ? static_cast<int32_t>(static_cast<int8_t>(src1_bits))
+                                      : static_cast<int32_t>(src1_bits);
+      sum += static_cast<int64_t>(src0_elem) * static_cast<int64_t>(src1_elem);
     }
     if (inst_.clamp && amdgpu::dot4_clamp_supported(wf)) {
       sum = std::clamp(sum, static_cast<int64_t>(std::numeric_limits<int32_t>::min()),
@@ -850,11 +856,13 @@ void VDot4U32U8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
+    raw0 = amdgpu::select_packed_halves(raw0, inst_.opsel, inst_.opsel_hi, 0);
+    raw1 = amdgpu::select_packed_halves(raw1, inst_.opsel, inst_.opsel_hi, 1);
     uint64_t sum = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
     for (int i = 0; i < 4; ++i) {
-      uint8_t a = static_cast<uint8_t>((raw0 >> (i * 8)) & 0xFF);
-      uint8_t b = static_cast<uint8_t>((raw1 >> (i * 8)) & 0xFF);
-      sum += static_cast<uint32_t>(a) * b;
+      uint8_t src0_elem = static_cast<uint8_t>((raw0 >> (i * 8)) & 0xFF);
+      uint8_t src1_elem = static_cast<uint8_t>((raw1 >> (i * 8)) & 0xFF);
+      sum += static_cast<uint32_t>(src0_elem) * src1_elem;
     }
     if (inst_.clamp && amdgpu::dot4_clamp_supported(wf))
       sum = std::min(sum, static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()));
@@ -872,18 +880,22 @@ void VDot8I32Iu4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
+    raw0 = amdgpu::select_packed_halves(raw0, inst_.opsel, inst_.opsel_hi, 0);
+    raw1 = amdgpu::select_packed_halves(raw1, inst_.opsel, inst_.opsel_hi, 1);
     int64_t sum = static_cast<int64_t>(
         static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(src2, lane)));
     const bool src0_signed = (inst_.neg & 0x1u) != 0;
     const bool src1_signed = (inst_.neg & 0x2u) != 0;
     for (int i = 0; i < 8; ++i) {
-      uint32_t raw_a = (raw0 >> (i * 4)) & 0xF;
-      uint32_t raw_b = (raw1 >> (i * 4)) & 0xF;
-      int32_t a = src0_signed ? static_cast<int32_t>((raw_a & 0x8) ? (raw_a | ~0xF) : raw_a)
-                              : static_cast<int32_t>(raw_a);
-      int32_t b = src1_signed ? static_cast<int32_t>((raw_b & 0x8) ? (raw_b | ~0xF) : raw_b)
-                              : static_cast<int32_t>(raw_b);
-      sum += static_cast<int64_t>(a) * static_cast<int64_t>(b);
+      uint32_t src0_bits = (raw0 >> (i * 4)) & 0xF;
+      uint32_t src1_bits = (raw1 >> (i * 4)) & 0xF;
+      int32_t src0_elem =
+          src0_signed ? static_cast<int32_t>((src0_bits & 0x8) ? (src0_bits | ~0xF) : src0_bits)
+                      : static_cast<int32_t>(src0_bits);
+      int32_t src1_elem =
+          src1_signed ? static_cast<int32_t>((src1_bits & 0x8) ? (src1_bits | ~0xF) : src1_bits)
+                      : static_cast<int32_t>(src1_bits);
+      sum += static_cast<int64_t>(src0_elem) * static_cast<int64_t>(src1_elem);
     }
     if (inst_.clamp) {
       sum = std::clamp(sum, static_cast<int64_t>(std::numeric_limits<int32_t>::min()),
@@ -903,11 +915,13 @@ void VDot8U32U4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
+    raw0 = amdgpu::select_packed_halves(raw0, inst_.opsel, inst_.opsel_hi, 0);
+    raw1 = amdgpu::select_packed_halves(raw1, inst_.opsel, inst_.opsel_hi, 1);
     uint64_t sum = amdgpu::RegisterAccess(wf).read_lane(src2, lane);
     for (int i = 0; i < 8; ++i) {
-      uint32_t a = (raw0 >> (i * 4)) & 0xF;
-      uint32_t b = (raw1 >> (i * 4)) & 0xF;
-      sum += a * b;
+      uint32_t src0_elem = (raw0 >> (i * 4)) & 0xF;
+      uint32_t src1_elem = (raw1 >> (i * 4)) & 0xF;
+      sum += src0_elem * src1_elem;
     }
     if (inst_.clamp)
       sum = std::min(sum, static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()));
@@ -1088,7 +1102,7 @@ void VPkFmaF32Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &inst = *this;
   ROCJITSU_TRY_SIMD_VOP3P_PK_TERNARY_F32_SELECTORS(
       inst_.opsel, inst_.opsel_hi, inst_.opsel_hi_2,
-      [&wf](auto a, auto b, auto c) { return amdgpu::fma_f32_simd(a, b, c, wf); });
+      [&wf](auto a, auto b, auto c) { return amdgpu::fma_f32_simd_unscoped(a, b, c, wf); });
   uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
@@ -1798,12 +1812,30 @@ void VPkMin3U16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
 void VWmmaF3216x16x128F8f6f4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint32_t const_acc;
   auto src2_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
@@ -1819,12 +1851,15 @@ void VWmmaF3216x16x128F8f6f4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   bool dispatched = amdgpu::dispatch_matrix_fmt_pair(
       matrix_a_fmt, matrix_b_fmt,
       [&](uint32_t a_bits, uint32_t b_bits, auto extract_a, auto extract_b) {
-        amdgpu::exec_wmma_f32_mixed(cu, 16, 16, 128, a_bits, b_bits, dst, src0_base, src1_base, s2,
-                                    extract_a, extract_b, const_acc,
-                                    amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));
+        amdgpu::exec_wmma_f32_mixed<16, 16, 128>(cu, a_bits, b_bits, dst, src0_base, src1_base, s2,
+                                                 extract_a, extract_b, const_acc,
+                                                 amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));
       });
-  if (!dispatched)
-    throw util::UnimplementedInst(mnemonic());
+  if (!dispatched) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
 }
 
 void VPkMinimum3F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -2258,12 +2293,30 @@ RJ_NOINLINE void VFmaMixhiBf16Vop3p::execute_modifier_impl(amdgpu::Wavefront &wf
 void VWmmaF3216x16x4F32Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint32_t const_acc;
   auto src2_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
@@ -2281,12 +2334,30 @@ void VWmmaF3216x16x4F32Vop3p::execute_impl(amdgpu::Wavefront &wf) {
 void VWmmaF3216x16x32F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint32_t const_acc;
   auto src2_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
@@ -2304,12 +2375,30 @@ void VWmmaF3216x16x32F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
 void VWmmaF1616x16x32F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint32_t const_acc;
   auto src2_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
@@ -2326,12 +2415,30 @@ void VWmmaF1616x16x32F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
 void VWmmaF3216x16x32Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint32_t const_acc;
   auto src2_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
@@ -2349,12 +2456,30 @@ void VWmmaF3216x16x32Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
 void VWmmaBf1616x16x32Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint32_t const_acc;
   auto src2_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
@@ -2371,12 +2496,30 @@ void VWmmaBf1616x16x32Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
 void VWmmaBf16f3216x16x32Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint32_t const_acc;
   auto src2_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
@@ -2394,120 +2537,245 @@ void VWmmaBf16f3216x16x32Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
 void VSwmmacF3216x16x64F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint32_t const_acc = amdgpu::ACC_FROM_VGPR;
   uint32_t s2 = dst;
   auto index_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
-  if (!index_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!index_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t index_base = vb + *index_off;
   uint32_t index_key = 0u;
-  amdgpu::exec_swmmac_f32(cu, 16, 16, 64, 16, dst, src0_base, src1_base, s2, index_base, 16,
-                          index_key, amdgpu::extract_f16, amdgpu::extract_f16, const_acc);
+  amdgpu::exec_swmmac_f32<16, 16, 64>(cu, 16, dst, src0_base, src1_base, s2, index_base, 16,
+                                      index_key, amdgpu::extract_f16, amdgpu::extract_f16,
+                                      const_acc);
 }
 
 void VSwmmacF3216x16x64Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint32_t const_acc = amdgpu::ACC_FROM_VGPR;
   uint32_t s2 = dst;
   auto index_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
-  if (!index_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!index_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t index_base = vb + *index_off;
   uint32_t index_key = 0u;
-  amdgpu::exec_swmmac_f32(cu, 16, 16, 64, 16, dst, src0_base, src1_base, s2, index_base, 16,
-                          index_key, amdgpu::extract_bf16, amdgpu::extract_bf16, const_acc);
+  amdgpu::exec_swmmac_f32<16, 16, 64>(cu, 16, dst, src0_base, src1_base, s2, index_base, 16,
+                                      index_key, amdgpu::extract_bf16, amdgpu::extract_bf16,
+                                      const_acc);
 }
 
 void VSwmmacF1616x16x64F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint32_t const_acc = amdgpu::ACC_FROM_VGPR;
   uint32_t s2 = dst;
   auto index_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
-  if (!index_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!index_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t index_base = vb + *index_off;
   uint32_t index_key = 0u;
-  amdgpu::exec_swmmac_f16(cu, 16, 16, 64, 16, dst, src0_base, src1_base, s2, index_base, 16,
-                          index_key, amdgpu::extract_f16, amdgpu::extract_f16, const_acc,
-                          amdgpu::WMMA_WAVE32, wf.fp16_ovfl());
+  amdgpu::exec_swmmac_f16<16, 16, 64>(cu, 16, dst, src0_base, src1_base, s2, index_base, 16,
+                                      index_key, amdgpu::extract_f16, amdgpu::extract_f16,
+                                      const_acc, amdgpu::WMMA_WAVE32, wf.fp16_ovfl());
 }
 
 void VSwmmacBf1616x16x64Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint32_t const_acc = amdgpu::ACC_FROM_VGPR;
   uint32_t s2 = dst;
   auto index_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
-  if (!index_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!index_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t index_base = vb + *index_off;
   uint32_t index_key = 0u;
-  amdgpu::exec_swmmac_bf16(cu, 16, 16, 64, 16, dst, src0_base, src1_base, s2, index_base, 16,
-                           index_key, amdgpu::extract_bf16, amdgpu::extract_bf16, const_acc,
-                           amdgpu::WMMA_WAVE32, wf.fp16_ovfl());
+  amdgpu::exec_swmmac_bf16<16, 16, 64>(cu, 16, dst, src0_base, src1_base, s2, index_base, 16,
+                                       index_key, amdgpu::extract_bf16, amdgpu::extract_bf16,
+                                       const_acc, amdgpu::WMMA_WAVE32, wf.fp16_ovfl());
 }
 
 void VSwmmacBf16f3216x16x64Bf16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint32_t const_acc = amdgpu::ACC_FROM_VGPR;
   uint32_t s2 = dst;
   auto index_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
-  if (!index_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!index_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t index_base = vb + *index_off;
   uint32_t index_key = 0u;
-  amdgpu::exec_swmmac_bf16f32(cu, 16, 16, 64, 16, dst, src0_base, src1_base, s2, index_base, 16,
-                              index_key, amdgpu::extract_bf16, amdgpu::extract_bf16, const_acc,
-                              amdgpu::WMMA_WAVE32, wf.fp16_ovfl());
+  amdgpu::exec_swmmac_bf16f32<16, 16, 64>(cu, 16, dst, src0_base, src1_base, s2, index_base, 16,
+                                          index_key, amdgpu::extract_bf16, amdgpu::extract_bf16,
+                                          const_acc, amdgpu::WMMA_WAVE32, wf.fp16_ovfl());
 }
 
 void VWmmaF3216x16x64Fp8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint32_t const_acc;
   auto src2_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
@@ -2526,12 +2794,30 @@ void VWmmaF3216x16x64Fp8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
 void VWmmaF3216x16x64Fp8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint32_t const_acc;
   auto src2_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
@@ -2550,12 +2836,30 @@ void VWmmaF3216x16x64Fp8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
 void VWmmaF3216x16x64Bf8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint32_t const_acc;
   auto src2_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
@@ -2574,12 +2878,30 @@ void VWmmaF3216x16x64Bf8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
 void VWmmaF3216x16x64Bf8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint32_t const_acc;
   auto src2_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
@@ -2598,12 +2920,30 @@ void VWmmaF3216x16x64Bf8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
 void VWmmaF1616x16x64Fp8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint32_t const_acc;
   auto src2_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
@@ -2621,12 +2961,30 @@ void VWmmaF1616x16x64Fp8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
 void VWmmaF1616x16x64Fp8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint32_t const_acc;
   auto src2_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
@@ -2644,12 +3002,30 @@ void VWmmaF1616x16x64Fp8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
 void VWmmaF1616x16x64Bf8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint32_t const_acc;
   auto src2_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
@@ -2667,12 +3043,30 @@ void VWmmaF1616x16x64Bf8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
 void VWmmaF1616x16x64Bf8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint32_t const_acc;
   auto src2_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
@@ -2690,12 +3084,30 @@ void VWmmaF1616x16x64Bf8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
 void VWmmaI3216x16x64Iu8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint32_t const_acc;
   auto src2_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
@@ -2714,190 +3126,383 @@ void VWmmaI3216x16x64Iu8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
 void VSwmmacF3216x16x128Fp8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint32_t const_acc = amdgpu::ACC_FROM_VGPR;
   uint32_t s2 = dst;
   auto index_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
-  if (!index_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!index_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t index_base = vb + *index_off;
   uint32_t index_key = 0u;
-  amdgpu::exec_swmmac_f32(cu, 16, 16, 128, 8, dst, src0_base, src1_base, s2, index_base, 32,
-                          index_key, amdgpu::extract_fp8, amdgpu::extract_fp8, const_acc);
+  amdgpu::exec_swmmac_f32<16, 16, 128>(cu, 8, dst, src0_base, src1_base, s2, index_base, 32,
+                                       index_key, amdgpu::extract_fp8, amdgpu::extract_fp8,
+                                       const_acc);
 }
 
 void VSwmmacF3216x16x128Fp8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint32_t const_acc = amdgpu::ACC_FROM_VGPR;
   uint32_t s2 = dst;
   auto index_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
-  if (!index_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!index_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t index_base = vb + *index_off;
   uint32_t index_key = 0u;
-  amdgpu::exec_swmmac_f32(cu, 16, 16, 128, 8, dst, src0_base, src1_base, s2, index_base, 32,
-                          index_key, amdgpu::extract_fp8, amdgpu::extract_bf8, const_acc);
+  amdgpu::exec_swmmac_f32<16, 16, 128>(cu, 8, dst, src0_base, src1_base, s2, index_base, 32,
+                                       index_key, amdgpu::extract_fp8, amdgpu::extract_bf8,
+                                       const_acc);
 }
 
 void VSwmmacF3216x16x128Bf8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint32_t const_acc = amdgpu::ACC_FROM_VGPR;
   uint32_t s2 = dst;
   auto index_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
-  if (!index_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!index_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t index_base = vb + *index_off;
   uint32_t index_key = 0u;
-  amdgpu::exec_swmmac_f32(cu, 16, 16, 128, 8, dst, src0_base, src1_base, s2, index_base, 32,
-                          index_key, amdgpu::extract_bf8, amdgpu::extract_fp8, const_acc);
+  amdgpu::exec_swmmac_f32<16, 16, 128>(cu, 8, dst, src0_base, src1_base, s2, index_base, 32,
+                                       index_key, amdgpu::extract_bf8, amdgpu::extract_fp8,
+                                       const_acc);
 }
 
 void VSwmmacF3216x16x128Bf8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint32_t const_acc = amdgpu::ACC_FROM_VGPR;
   uint32_t s2 = dst;
   auto index_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
-  if (!index_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!index_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t index_base = vb + *index_off;
   uint32_t index_key = 0u;
-  amdgpu::exec_swmmac_f32(cu, 16, 16, 128, 8, dst, src0_base, src1_base, s2, index_base, 32,
-                          index_key, amdgpu::extract_bf8, amdgpu::extract_bf8, const_acc);
+  amdgpu::exec_swmmac_f32<16, 16, 128>(cu, 8, dst, src0_base, src1_base, s2, index_base, 32,
+                                       index_key, amdgpu::extract_bf8, amdgpu::extract_bf8,
+                                       const_acc);
 }
 
 void VSwmmacF1616x16x128Fp8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint32_t const_acc = amdgpu::ACC_FROM_VGPR;
   uint32_t s2 = dst;
   auto index_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
-  if (!index_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!index_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t index_base = vb + *index_off;
   uint32_t index_key = 0u;
-  amdgpu::exec_swmmac_f16(cu, 16, 16, 128, 8, dst, src0_base, src1_base, s2, index_base, 32,
-                          index_key, amdgpu::extract_fp8, amdgpu::extract_fp8, const_acc,
-                          amdgpu::WMMA_WAVE32, wf.fp16_ovfl());
+  amdgpu::exec_swmmac_f16<16, 16, 128>(cu, 8, dst, src0_base, src1_base, s2, index_base, 32,
+                                       index_key, amdgpu::extract_fp8, amdgpu::extract_fp8,
+                                       const_acc, amdgpu::WMMA_WAVE32, wf.fp16_ovfl());
 }
 
 void VSwmmacF1616x16x128Fp8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint32_t const_acc = amdgpu::ACC_FROM_VGPR;
   uint32_t s2 = dst;
   auto index_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
-  if (!index_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!index_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t index_base = vb + *index_off;
   uint32_t index_key = 0u;
-  amdgpu::exec_swmmac_f16(cu, 16, 16, 128, 8, dst, src0_base, src1_base, s2, index_base, 32,
-                          index_key, amdgpu::extract_fp8, amdgpu::extract_bf8, const_acc,
-                          amdgpu::WMMA_WAVE32, wf.fp16_ovfl());
+  amdgpu::exec_swmmac_f16<16, 16, 128>(cu, 8, dst, src0_base, src1_base, s2, index_base, 32,
+                                       index_key, amdgpu::extract_fp8, amdgpu::extract_bf8,
+                                       const_acc, amdgpu::WMMA_WAVE32, wf.fp16_ovfl());
 }
 
 void VSwmmacF1616x16x128Bf8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint32_t const_acc = amdgpu::ACC_FROM_VGPR;
   uint32_t s2 = dst;
   auto index_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
-  if (!index_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!index_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t index_base = vb + *index_off;
   uint32_t index_key = 0u;
-  amdgpu::exec_swmmac_f16(cu, 16, 16, 128, 8, dst, src0_base, src1_base, s2, index_base, 32,
-                          index_key, amdgpu::extract_bf8, amdgpu::extract_fp8, const_acc,
-                          amdgpu::WMMA_WAVE32, wf.fp16_ovfl());
+  amdgpu::exec_swmmac_f16<16, 16, 128>(cu, 8, dst, src0_base, src1_base, s2, index_base, 32,
+                                       index_key, amdgpu::extract_bf8, amdgpu::extract_fp8,
+                                       const_acc, amdgpu::WMMA_WAVE32, wf.fp16_ovfl());
 }
 
 void VSwmmacF1616x16x128Bf8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint32_t const_acc = amdgpu::ACC_FROM_VGPR;
   uint32_t s2 = dst;
   auto index_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
-  if (!index_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!index_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t index_base = vb + *index_off;
   uint32_t index_key = 0u;
-  amdgpu::exec_swmmac_f16(cu, 16, 16, 128, 8, dst, src0_base, src1_base, s2, index_base, 32,
-                          index_key, amdgpu::extract_bf8, amdgpu::extract_bf8, const_acc,
-                          amdgpu::WMMA_WAVE32, wf.fp16_ovfl());
+  amdgpu::exec_swmmac_f16<16, 16, 128>(cu, 8, dst, src0_base, src1_base, s2, index_base, 32,
+                                       index_key, amdgpu::extract_bf8, amdgpu::extract_bf8,
+                                       const_acc, amdgpu::WMMA_WAVE32, wf.fp16_ovfl());
 }
 
 void VSwmmacI3216x16x128Iu8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint32_t const_acc = amdgpu::ACC_FROM_VGPR;
   uint32_t s2 = dst;
   auto index_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
-  if (!index_off)
-    throw util::UnimplementedInst(mnemonic());
+  if (!index_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t index_base = vb + *index_off;
   uint32_t index_key = 0u;
   auto extract_a = [&](auto &cu, uint32_t base, const amdgpu::InputLoc &loc) {
@@ -2908,19 +3513,37 @@ void VSwmmacI3216x16x128Iu8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     return (inst_.neg & 0x2u) ? amdgpu::extract_i8(cu, base, loc)
                               : amdgpu::extract_u8(cu, base, loc);
   };
-  amdgpu::exec_swmmac_i32(cu, 16, 16, 128, 8, dst, src0_base, src1_base, s2, index_base, 32,
-                          index_key, extract_a, extract_b, inst_.clamp, const_acc);
+  amdgpu::exec_swmmac_i32<16, 16, 128>(cu, 8, dst, src0_base, src1_base, s2, index_base, 32,
+                                       index_key, extract_a, extract_b, inst_.clamp, const_acc);
 }
 
 void VWmmaF3216x16x128Fp8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint32_t const_acc;
   auto src2_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
@@ -2939,12 +3562,30 @@ void VWmmaF3216x16x128Fp8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
 void VWmmaF3216x16x128Fp8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint32_t const_acc;
   auto src2_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
@@ -2963,12 +3604,30 @@ void VWmmaF3216x16x128Fp8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
 void VWmmaF3216x16x128Bf8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint32_t const_acc;
   auto src2_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
@@ -2987,12 +3646,30 @@ void VWmmaF3216x16x128Bf8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
 void VWmmaF3216x16x128Bf8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint32_t const_acc;
   auto src2_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
@@ -3011,12 +3688,30 @@ void VWmmaF3216x16x128Bf8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
 void VWmmaF1616x16x128Fp8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint32_t const_acc;
   auto src2_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
@@ -3034,12 +3729,30 @@ void VWmmaF1616x16x128Fp8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
 void VWmmaF1616x16x128Fp8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint32_t const_acc;
   auto src2_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
@@ -3057,12 +3770,30 @@ void VWmmaF1616x16x128Fp8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
 void VWmmaF1616x16x128Bf8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint32_t const_acc;
   auto src2_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
@@ -3080,12 +3811,30 @@ void VWmmaF1616x16x128Bf8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
 void VWmmaF1616x16x128Bf8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint32_t const_acc;
   auto src2_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
@@ -3103,12 +3852,30 @@ void VWmmaF1616x16x128Bf8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
 void VWmmaF3232x16x128F4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint32_t const_acc;
   auto src2_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
@@ -3119,9 +3886,9 @@ void VWmmaF3232x16x128F4Vop3p::execute_impl(amdgpu::Wavefront &wf) {
   } else {
     const_acc = amdgpu::RegisterAccess(wf).read_scalar(src2);
   }
-  amdgpu::exec_wmma_f32(cu, 32, 16, 128, 4, dst, src0_base, src1_base, s2, amdgpu::extract_fp4,
-                        amdgpu::extract_fp4, const_acc,
-                        amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));
+  amdgpu::exec_wmma_f32<32, 16, 128>(cu, 4, dst, src0_base, src1_base, s2, amdgpu::extract_fp4,
+                                     amdgpu::extract_fp4, const_acc,
+                                     amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));
 }
 
 void VPkFmaF64Vop3p::execute_impl(amdgpu::Wavefront &wf) {
@@ -3363,12 +4130,30 @@ void VWmmaF6416x16x4F64Vop3p::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  auto src0_base_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src0_base = vb + *src0_base_off;
+  auto src1_base_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_base_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t src1_base = vb + *src1_base_off;
   uint64_t const_acc;
   auto src2_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
@@ -3383,15 +4168,53 @@ void VWmmaF6416x16x4F64Vop3p::execute_impl(amdgpu::Wavefront &wf) {
                                     inst_.neg_hi, wf.exec());
 }
 
+namespace {
+bool isGfx1250WmmaScaleFormatPairLegal(uint32_t matrix_a_fmt, uint32_t matrix_b_fmt,
+                                       uint32_t scale_a_fmt, uint32_t scale_b_fmt) {
+  if (matrix_a_fmt > 4u || matrix_b_fmt > 4u || scale_a_fmt > 2u || scale_b_fmt > 2u)
+    return false;
+  if (scale_a_fmt == 0u && scale_b_fmt == 0u)
+    return true;
+  if ((scale_a_fmt != 0u && matrix_a_fmt != 4u) || (scale_b_fmt != 0u && matrix_b_fmt != 4u))
+    return false;
+  return matrix_a_fmt != 4u || matrix_b_fmt != 4u || scale_a_fmt == scale_b_fmt;
+}
+} // namespace
 void VWmmaScaleF32Vop3px2::execute_impl(amdgpu::Wavefront &wf) {
   auto &cu = wf.cu();
+  const uint32_t matrix_a_fmt = inst_.op == 0x88u ? 4u : inst_.opsel;
+  const uint32_t matrix_b_fmt = inst_.op == 0x88u ? 4u : (inst_.opsel_hi_2 << 2u) | inst_.opsel_hi;
+  if (!isGfx1250WmmaScaleFormatPairLegal(matrix_a_fmt, matrix_b_fmt, scale_inst_.neg & 0x3u,
+                                         scale_inst_.neg_hi & 0x3u)) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
   uint32_t vb = wf.vgpr_alloc().base;
-  uint32_t dst = vb + *Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_,
-                                                 vdst.vgpr_msb_role());
-  uint32_t src0_base = vb + *Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_,
-                                                       src0.vgpr_msb_role());
-  uint32_t src1_base = vb + *Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_,
-                                                       src1.vgpr_msb_role());
+  auto dst_off =
+      Isa::resolved_vgpr_offset(wf, vdst.opr_type_, vdst.encoding_value_, vdst.vgpr_msb_role());
+  if (!dst_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  auto src0_off =
+      Isa::resolved_vgpr_offset(wf, src0.opr_type_, src0.encoding_value_, src0.vgpr_msb_role());
+  if (!src0_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  auto src1_off =
+      Isa::resolved_vgpr_offset(wf, src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());
+  if (!src1_off) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  uint32_t dst = vb + *dst_off;
+  uint32_t src0_base = vb + *src0_off;
+  uint32_t src1_base = vb + *src1_off;
   uint32_t const_acc;
   auto src2_off =
       Isa::resolved_vgpr_offset(wf, src2.opr_type_, src2.encoding_value_, src2.vgpr_msb_role());
@@ -3403,8 +4226,6 @@ void VWmmaScaleF32Vop3px2::execute_impl(amdgpu::Wavefront &wf) {
     const_acc = amdgpu::RegisterAccess(wf).read_scalar(src2);
   }
 
-  const uint32_t matrix_a_fmt = inst_.opsel;
-  const uint32_t matrix_b_fmt = (inst_.opsel_hi_2 << 2) | inst_.opsel_hi;
   const uint32_t matrix_a_scale =
       (scale_inst_.opsel & 0x1u) | (((scale_inst_.opsel >> 2u) & 0x1u) << 1u);
   const uint32_t matrix_b_scale =
@@ -3435,9 +4256,9 @@ void VWmmaScaleF32Vop3px2::execute_impl(amdgpu::Wavefront &wf) {
 
   bool dispatched = false;
   if (inst_.op == 0x88) {
-    amdgpu::exec_wmma_f32_scaled_mixed(
-        cu, 32, 16, 128, 4, 4, dst, src0_base, src1_base, s2, amdgpu::extract_fp4,
-        amdgpu::extract_fp4, const_acc, scale0, scale1, matrix_a_scale, matrix_b_scale,
+    amdgpu::exec_wmma_f32_scaled_mixed<32, 16, 128>(
+        cu, 4, 4, dst, src0_base, src1_base, s2, amdgpu::extract_fp4, amdgpu::extract_fp4,
+        const_acc, scale0, scale1, matrix_a_scale, matrix_b_scale,
         scale0_inline_zero ? 0u : matrix_a_scale_fmt, scale1_inline_zero ? 0u : matrix_b_scale_fmt,
         scale16, amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));
     dispatched = true;
@@ -3445,16 +4266,19 @@ void VWmmaScaleF32Vop3px2::execute_impl(amdgpu::Wavefront &wf) {
     dispatched = amdgpu::dispatch_matrix_fmt_pair(
         matrix_a_fmt, matrix_b_fmt,
         [&](uint32_t a_bits, uint32_t b_bits, auto extract_a, auto extract_b) {
-          amdgpu::exec_wmma_f32_scaled_mixed(cu, 16, 16, 128, a_bits, b_bits, dst, src0_base,
-                                             src1_base, s2, extract_a, extract_b, const_acc, scale0,
-                                             scale1, matrix_a_scale, matrix_b_scale,
-                                             scale0_inline_zero ? 0u : matrix_a_scale_fmt,
-                                             scale1_inline_zero ? 0u : matrix_b_scale_fmt, scale16,
-                                             amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));
+          amdgpu::exec_wmma_f32_scaled_mixed<16, 16, 128>(
+              cu, a_bits, b_bits, dst, src0_base, src1_base, s2, extract_a, extract_b, const_acc,
+              scale0, scale1, matrix_a_scale, matrix_b_scale,
+              scale0_inline_zero ? 0u : matrix_a_scale_fmt,
+              scale1_inline_zero ? 0u : matrix_b_scale_fmt, scale16,
+              amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));
         });
   }
-  if (!dispatched)
-    throw util::UnimplementedInst(mnemonic());
+  if (!dispatched) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
 }
 
 } // namespace cdna5

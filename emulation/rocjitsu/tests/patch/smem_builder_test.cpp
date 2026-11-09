@@ -31,6 +31,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string>
 #include <string_view>
 
 namespace rocjitsu {
@@ -79,8 +80,8 @@ constexpr std::array<SmemArch, 10> kArchs{{
      124, "s_wait_kmcnt"},
 }};
 
-constexpr std::array<rj_code_arch_t, 2> kNonAmdGpuArchs{ROCJITSU_CODE_ARCH_RV32I,
-                                                        ROCJITSU_CODE_ARCH_RV64I};
+constexpr std::array<rj_code_arch_t, 3> kNonAmdGpuArchs{
+    ROCJITSU_CODE_ARCH_RV32I, ROCJITSU_CODE_ARCH_RV64I, ROCJITSU_CODE_ARCH_INVALID};
 
 // Decode the instruction starting at `words[0]`, or null if it did not decode.
 // Two words are always passed so an 8-byte encoding has its second word.
@@ -106,7 +107,9 @@ TEST(SmemBuilder, LoadDwordx2RoundTripsThroughTheDecoderOnEveryTarget) {
   constexpr uint32_t kOffset = 0x1010;
 
   for (const SmemArch &a : kArchs) {
-    const auto inst = decode_one(build_s_load_dwordx2(kSdst, kSbase, kOffset, a.arch), a.arch);
+    const auto words = build_s_load_dwordx2(kSdst, kSbase, kOffset, a.arch);
+    ASSERT_TRUE(words.succeeded()) << a.name;
+    const auto inst = decode_one(words.value(), a.arch);
     ASSERT_NE(inst, nullptr) << a.name;
     EXPECT_EQ(inst->mnemonic(), std::string_view(a.load_mnemonic)) << a.name;
 
@@ -151,7 +154,10 @@ TEST(SmemBuilder, RdnaNamesItsOwnNullCodeInSoffset) {
   for (const SmemArch &a : kArchs) {
     if (a.shape != SmemOffsetShape::RdnaSoffsetNull)
       continue;
-    const auto words = build_s_load_dwordx2(/*sdst=*/4, /*sbase=*/6, /*byte_offset=*/0x40, a.arch);
+    const auto words_result =
+        build_s_load_dwordx2(/*sdst=*/4, /*sbase=*/6, /*byte_offset=*/0x40, a.arch);
+    ASSERT_TRUE(words_result.succeeded());
+    const auto words = words_result.value();
     ASSERT_TRUE(a.soffset_null.has_value()) << a.name;
     EXPECT_EQ(encoded_soffset(words), *a.soffset_null) << a.name;
     EXPECT_NE(encoded_soffset(words), 0) << a.name << ": SOFFSET 0 would name s0";
@@ -168,11 +174,9 @@ TEST(SmemBuilder, RdnaNamesItsOwnNullCodeInSoffset) {
 // load through, or into, the wrong register.
 TEST(SmemBuilder, OddPairBaseIsRejectedOnEveryTarget) {
   for (const SmemArch &a : kArchs) {
-    EXPECT_THROW((void)build_s_load_dwordx2(/*sdst=*/4, /*sbase=*/7, /*byte_offset=*/0, a.arch),
-                 util::InvalidInst)
+    EXPECT_TRUE(build_s_load_dwordx2(/*sdst=*/4, /*sbase=*/7, /*byte_offset=*/0, a.arch).failed())
         << a.name << ": odd sbase";
-    EXPECT_THROW((void)build_s_load_dwordx2(/*sdst=*/5, /*sbase=*/6, /*byte_offset=*/0, a.arch),
-                 util::InvalidInst)
+    EXPECT_TRUE(build_s_load_dwordx2(/*sdst=*/5, /*sbase=*/6, /*byte_offset=*/0, a.arch).failed())
         << a.name << ": odd sdst";
   }
 }
@@ -183,16 +187,14 @@ TEST(SmemBuilder, OddPairBaseIsRejectedOnEveryTarget) {
 // silently loading through s[0:1].
 TEST(SmemBuilder, OutOfRangeRegisterIndexIsRejectedOnEveryTarget) {
   for (const SmemArch &a : kArchs) {
-    EXPECT_NO_THROW(
-        (void)build_s_load_dwordx2(kMaxSmemSdata - 1, kMaxSmemSbase, /*byte_offset=*/0, a.arch))
+    EXPECT_TRUE(build_s_load_dwordx2(kMaxSmemSdata - 1, kMaxSmemSbase, /*byte_offset=*/0, a.arch)
+                    .succeeded())
         << a.name;
-    EXPECT_THROW(
-        (void)build_s_load_dwordx2(/*sdst=*/4, kMaxSmemSbase + 2, /*byte_offset=*/0, a.arch),
-        util::InvalidInst)
+    EXPECT_TRUE(
+        build_s_load_dwordx2(/*sdst=*/4, kMaxSmemSbase + 2, /*byte_offset=*/0, a.arch).failed())
         << a.name << ": sbase past SBASE";
-    EXPECT_THROW(
-        (void)build_s_load_dwordx2(kMaxSmemSdata + 1, /*sbase=*/6, /*byte_offset=*/0, a.arch),
-        util::InvalidInst)
+    EXPECT_TRUE(
+        build_s_load_dwordx2(kMaxSmemSdata + 1, /*sbase=*/6, /*byte_offset=*/0, a.arch).failed())
         << a.name << ": sdst past SDATA";
   }
 }
@@ -202,12 +204,14 @@ TEST(SmemBuilder, OutOfRangeRegisterIndexIsRejectedOnEveryTarget) {
 // "the field is 21 bits wide" simplification from doubling the accepted range.
 TEST(SmemBuilder, OffsetIsBoundedByTheArchSignedImmediateRange) {
   for (const SmemArch &a : kArchs) {
-    EXPECT_EQ(max_smem_byte_offset(a.arch), a.max_byte_offset) << a.name;
+    const auto offset_max = max_smem_byte_offset(a.arch);
+    ASSERT_TRUE(offset_max.succeeded()) << a.name;
+    EXPECT_EQ(offset_max.value(), a.max_byte_offset) << a.name;
     const uint32_t aligned_max = a.max_byte_offset & ~0x3u;
-    EXPECT_NO_THROW((void)build_s_load_dwordx2(/*sdst=*/4, /*sbase=*/0, aligned_max, a.arch))
+    EXPECT_TRUE(build_s_load_dwordx2(/*sdst=*/4, /*sbase=*/0, aligned_max, a.arch).succeeded())
         << a.name;
-    EXPECT_THROW((void)build_s_load_dwordx2(/*sdst=*/4, /*sbase=*/0, a.max_byte_offset + 1, a.arch),
-                 util::InvalidInst)
+    EXPECT_TRUE(
+        build_s_load_dwordx2(/*sdst=*/4, /*sbase=*/0, a.max_byte_offset + 1, a.arch).failed())
         << a.name;
 
     // The offset an unsigned reading of the field would have admitted is
@@ -215,23 +219,20 @@ TEST(SmemBuilder, OffsetIsBoundedByTheArchSignedImmediateRange) {
     // zero-extends, so this bound is the only guard against an offset that runs
     // backwards on hardware.
     const uint32_t unsigned_max = ((a.max_byte_offset << 1) | 1u) & ~0x3u;
-    EXPECT_THROW((void)build_s_load_dwordx2(/*sdst=*/4, /*sbase=*/0, unsigned_max, a.arch),
-                 util::InvalidInst)
+    EXPECT_TRUE(build_s_load_dwordx2(/*sdst=*/4, /*sbase=*/0, unsigned_max, a.arch).failed())
         << a.name;
   }
 
   // GFX12's field is wider, so an offset legal there is not legal earlier.
-  EXPECT_THROW((void)build_s_load_dwordx2(4, 0, 0x100000u, ROCJITSU_CODE_ARCH_CDNA4),
-               util::InvalidInst);
-  EXPECT_NO_THROW((void)build_s_load_dwordx2(4, 0, 0x100000u, ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_TRUE(build_s_load_dwordx2(4, 0, 0x100000u, ROCJITSU_CODE_ARCH_CDNA4).failed());
+  EXPECT_TRUE(build_s_load_dwordx2(4, 0, 0x100000u, ROCJITSU_CODE_ARCH_RDNA4).succeeded());
 }
 
 // Scalar loads drop the low two address bits, so offset 1 would load from the
 // base itself.
 TEST(SmemBuilder, UnalignedOffsetIsRejectedOnEveryTarget) {
   for (const SmemArch &a : kArchs) {
-    EXPECT_THROW((void)build_s_load_dwordx2(/*sdst=*/4, /*sbase=*/0, /*byte_offset=*/1, a.arch),
-                 util::InvalidInst)
+    EXPECT_TRUE(build_s_load_dwordx2(/*sdst=*/4, /*sbase=*/0, /*byte_offset=*/1, a.arch).failed())
         << a.name;
   }
 }
@@ -241,7 +242,9 @@ TEST(SmemBuilder, UnalignedOffsetIsRejectedOnEveryTarget) {
 // flight. CDNA5 has no s_waitcnt opcode at all.
 TEST(SmemBuilder, ScalarLoadWaitSelectsTheScalarCounter) {
   for (const SmemArch &a : kArchs) {
-    const std::array<uint32_t, 2> wait{build_wait_scalar_loads_complete(a.arch), 0};
+    const auto wait_word = build_wait_scalar_loads_complete(a.arch);
+    ASSERT_TRUE(wait_word.succeeded()) << a.name;
+    const std::array<uint32_t, 2> wait{wait_word.value(), 0};
     const auto inst = decode_one(wait, a.arch);
     ASSERT_NE(inst, nullptr) << a.name;
     EXPECT_EQ(inst->mnemonic(), std::string_view(a.wait_mnemonic)) << a.name;
@@ -249,18 +252,59 @@ TEST(SmemBuilder, ScalarLoadWaitSelectsTheScalarCounter) {
 
   // Through RDNA3.5 the monolithic wait covers both counters; GFX12 splits them,
   // and only there is the distinction observable in the encoding.
-  EXPECT_EQ(build_wait_scalar_loads_complete(ROCJITSU_CODE_ARCH_CDNA3),
-            build_wait_loads_complete(ROCJITSU_CODE_ARCH_CDNA3));
-  EXPECT_NE(build_wait_scalar_loads_complete(ROCJITSU_CODE_ARCH_RDNA4),
-            build_wait_loads_complete(ROCJITSU_CODE_ARCH_RDNA4));
+  const auto cdna3_wait = build_wait_scalar_loads_complete(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(cdna3_wait.succeeded());
+  const util::FailureOr<uint32_t> maybe_wait_loads_complete_cdna3 =
+      build_wait_loads_complete(ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(maybe_wait_loads_complete_cdna3.succeeded());
+  EXPECT_EQ(cdna3_wait.value(), maybe_wait_loads_complete_cdna3.value());
+  const auto rdna4_wait = build_wait_scalar_loads_complete(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(rdna4_wait.succeeded());
+  const util::FailureOr<uint32_t> maybe_wait_loads_complete_rdna4 =
+      build_wait_loads_complete(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(maybe_wait_loads_complete_rdna4.succeeded());
+  EXPECT_NE(rdna4_wait.value(), maybe_wait_loads_complete_rdna4.value());
 }
 
-TEST(SmemBuilder, NonAmdGpuArchsThrow) {
+TEST(SmemBuilder, EmitsOneDiagnosticOnlyOnFailure) {
+  unsigned messages = 0;
+  std::string message;
+  auto callback = [&](std::string_view text) {
+    ++messages;
+    message = text;
+  };
+  const util::DiagnosticEmitter error(callback);
+  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA4;
+  EXPECT_TRUE(max_smem_byte_offset(arch, &error).succeeded());
+  EXPECT_TRUE(build_s_load_dwordx2(4, 0, 0, arch, &error).succeeded());
+  EXPECT_TRUE(build_wait_scalar_loads_complete(arch, &error).succeeded());
+  EXPECT_EQ(messages, 0u);
+
+  EXPECT_TRUE(build_s_load_dwordx2(4, 1, 0, arch, &error).failed());
+  EXPECT_EQ(messages, 1u);
+  EXPECT_EQ(message, "SMEM address SGPR pair base must be even");
+  EXPECT_TRUE(build_s_load_dwordx2(4, 0, 1, arch, &error).failed());
+  EXPECT_EQ(messages, 2u);
+  EXPECT_EQ(message, "SMEM immediate byte offset must be a multiple of 4");
+
+  // The load delegates architecture validation to the offset helper. Its
+  // failure must propagate without emitting a second diagnostic.
+  EXPECT_TRUE(build_s_load_dwordx2(4, 0, 0, ROCJITSU_CODE_ARCH_INVALID, &error).failed());
+  EXPECT_EQ(messages, 3u);
+  EXPECT_EQ(message, "unsupported target architecture for the SMEM offset range");
+  EXPECT_TRUE(build_wait_scalar_loads_complete(ROCJITSU_CODE_ARCH_INVALID, &error).failed());
+  EXPECT_EQ(messages, 4u);
+  EXPECT_EQ(message, "unsupported target architecture for the scalar-load wait");
+  EXPECT_TRUE(max_smem_byte_offset(ROCJITSU_CODE_ARCH_INVALID, &error).failed());
+  EXPECT_EQ(messages, 5u);
+  EXPECT_EQ(message, "unsupported target architecture for the SMEM offset range");
+}
+
+TEST(SmemBuilder, NonAmdGpuArchsReturnFailure) {
   for (const rj_code_arch_t arch : kNonAmdGpuArchs) {
-    EXPECT_THROW((void)build_s_load_dwordx2(/*sdst=*/4, /*sbase=*/0, /*byte_offset=*/0, arch),
-                 util::UnimplementedInst);
-    EXPECT_THROW((void)build_wait_scalar_loads_complete(arch), util::UnimplementedInst);
-    EXPECT_THROW((void)max_smem_byte_offset(arch), util::UnimplementedInst);
+    EXPECT_TRUE(build_s_load_dwordx2(/*sdst=*/4, /*sbase=*/0, /*byte_offset=*/0, arch).failed());
+    EXPECT_TRUE(build_wait_scalar_loads_complete(arch).failed());
+    EXPECT_TRUE(max_smem_byte_offset(arch).failed());
   }
 }
 

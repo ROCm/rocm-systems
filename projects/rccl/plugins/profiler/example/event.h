@@ -25,6 +25,8 @@ typedef enum {
   CE_TIMING_GPU = 1
 } CeTimingMode_t;
 
+// Must match MAXCHANNELS in RCCL's src/include/device.h (not exposed by the public or
+// plugin API). Core reports raw channel ids in [0, MAXCHANNELS) and does not clamp them.
 #define MAX_CHANNELS                     256 // RCCL MAXCHANNELS
 #define MAX_STEPS                        1024
 #define MAX_OPS                          16 // Up to 64K ranks for PAT

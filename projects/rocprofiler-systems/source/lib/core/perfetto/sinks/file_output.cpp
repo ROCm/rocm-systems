@@ -4,12 +4,10 @@
 #include "core/perfetto/sinks/file_output.hpp"
 
 #include "common/path.hpp"
-#include "core/output_file_registry.hpp"
 #include "logger/debug.hpp"
 
 #include <cerrno>
 #include <cstring>
-#include <filesystem>
 #include <fstream>
 #include <ios>
 #include <string>
@@ -21,34 +19,8 @@
 
 namespace rocprofsys::core
 {
-namespace
-{
-// TIME_OUTPUT=ON puts the output under a timestamped subdirectory that no other
-// code may have created yet on this process.
-[[nodiscard]] bool
-ensure_parent_directory(const std::string& filename)
-{
-    const auto parent = std::filesystem::path{ filename }.parent_path();
-    if(parent.empty())
-    {
-        return true;
-    }
-
-    std::error_code dir_ec{};
-    std::filesystem::create_directories(parent, dir_ec);
-    if(dir_ec)
-    {
-        LOG_ERROR("could not create directory '{}': {}", parent.string(),
-                  dir_ec.message());
-        return false;
-    }
-    return true;
-}
-}  // namespace
-
 bool
-write_proto_to(const std::string& filename, const char* data, std::size_t size,
-               output_file_registry& registry)
+write_proto_to(const std::string& filename, const char* data, std::size_t size)
 {
     std::ofstream ofs{};
     if(!path::create_parent_dirs_and_open_ofstream(ofs, filename,
@@ -64,16 +36,18 @@ write_proto_to(const std::string& filename, const char* data, std::size_t size,
         LOG_ERROR("write_proto_to: write or close failed for '{}'", filename);
         return false;
     }
-
-    registry.register_file(filename, output_format::perfetto);
     return true;
 }
 
 locked_append_status
 append_with_file_lock(const std::string& filename, const char* data, std::size_t size)
 {
-    if(!ensure_parent_directory(filename))
+    // TIME_OUTPUT=ON puts the output under a timestamped subdirectory that no other
+    // code may have created yet on this process.
+    std::error_code dir_ec{};
+    if(!path::ensure_parent_directory(filename, dir_ec))
     {
+        LOG_ERROR("could not create directory for '{}': {}", filename, dir_ec.message());
         return locked_append_status::open_failed;
     }
 

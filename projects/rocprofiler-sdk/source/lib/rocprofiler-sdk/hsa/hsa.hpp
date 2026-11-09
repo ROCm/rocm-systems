@@ -37,6 +37,11 @@
 
 namespace rocprofiler
 {
+namespace context
+{
+struct context;
+}
+
 namespace hsa
 {
 struct tracing_table
@@ -150,6 +155,13 @@ get_hsa_status_string(hsa_status_t _status);
 
 uint64_t
 get_hsa_timestamp_period();
+
+bool
+needs_high_precision_timestamps(const context::context* ctx);
+
+// Uses the incoming runtime table so an older runtime's shorter table is respected.
+bool
+enable_high_precision_timestamps(hsa_amd_ext_table_t* table);
 
 template <size_t TableIdx>
 const char*

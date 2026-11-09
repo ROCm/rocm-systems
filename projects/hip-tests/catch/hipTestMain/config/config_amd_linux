@@ -52,8 +52,6 @@
         "=== SWDEV-511679 : Below tests fail in stress test ===",
         "Unit_hipIpcOpenMemHandle_Negative_Open_In_Two_Contexts_Same_Device",
         "Unit_hipIpcCloseMemHandle_Positive_Reference_Counting",
-        "=== SWDEV-457316 Below test is skipped due ref count logic (Discussed with German) ===",
-        "Unit_hipGraphAddMemAllocNode_Negative_Free_Alloc_Memory_Again",
         "=== Enable the below test when multi-device graph launches are fully supported ===",
         "Unit_hipGraphInstantiateWithFlags_DependencyGraphDeviceCtxtChg",
         "=== SWDEV-553920 disabled until multi device graph issues are resolved ===",

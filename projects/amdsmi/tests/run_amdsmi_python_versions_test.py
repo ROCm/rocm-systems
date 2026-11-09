@@ -32,7 +32,7 @@ TEST_DIR = REPO_ROOT / "tests" / "python"
 
 # Highest CPython minor AMD SMI claims support for; keep in sync with the
 # matrix in .github/workflows/amdsmi-python-versions.yml.
-NEWEST_SUPPORTED_MINOR = 14
+NEWEST_SUPPORTED_MINOR = 15
 
 
 def _discover_default_interpreters() -> list:
@@ -75,7 +75,7 @@ def main() -> int:
         "--interpreters",
         nargs="*",
         default=None,
-        help="Python interpreters to test (default: discovered python3.6..3.14).",
+        help="Python interpreters to test (default: discovered python3.6..3.15).",
     )
     args = parser.parse_args()
     interpreters = args.interpreters or _discover_default_interpreters()

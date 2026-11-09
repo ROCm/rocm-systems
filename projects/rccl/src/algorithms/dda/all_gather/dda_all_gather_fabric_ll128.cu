@@ -21,10 +21,10 @@
 #include <cstdint>
 #include <utility>
 
-// Tuned block size, and the fallback when the env override is out of range.
+// Block size when neither a valid RCCL_DDA_LL128_AG_THREADS nor the arch table sets one.
 constexpr unsigned kDdaLL128AGDefaultThreads = 512;
 
-RCCL_PARAM(DdaLL128AGThreads, "DDA_LL128_AG_THREADS", kDdaLL128AGDefaultThreads);
+RCCL_PARAM(DdaLL128AGThreads, "DDA_LL128_AG_THREADS", 0);
 
 namespace {
 
@@ -67,10 +67,12 @@ unsigned ddaLL128AGBlocksPerPeer(size_t slices, size_t warps, int nPeers, size_t
 // Single source of the launch geometry: grid.x = one column per remote peer,
 // grid.y = the per-peer slice split.
 static inline std::pair<dim3, dim3> ddaAllGatherFabricLL128Geom(ncclComm* comm, size_t perRankBytes) {
-  const unsigned threads = ddaLL128AGThreads(kDdaLL128AGDefaultThreads);
+  const size_t totalBytes = perRankBytes * (size_t)comm->nRanks;
+  const int tuned = rcclDdaFabricAgLL128Threads(comm, totalBytes);
+  const unsigned threads = ddaLL128AGThreads(tuned > 0 ? (unsigned)tuned : kDdaLL128AGDefaultThreads);
   const size_t warps = threads / (unsigned)kDdaLL128Warp;
   const int nPeers = comm->nRanks - 1;
-  int nBlocksMax = comm->ddaFabricMaxBlocks;
+  int nBlocksMax = rcclDdaFabricAgLL128Blocks(comm, totalBytes);
   if (nBlocksMax < 1) nBlocksMax = 1;
   if (nBlocksMax < nPeers) nBlocksMax = nPeers;
   const unsigned blocksPerPeer =
@@ -103,23 +105,24 @@ static ncclResult_t ncclAllGatherDdaFabricLL128Typed(
        nRanks, perRankBytes, slices, grid.x, grid.y, block.x, blocksPerPeer,
        ddaLL128AgSlotWords(bankSize, nRanks));
 
+  const dda::common::DdaKernelParams params{comm->abortFlagDev};
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   // NRANKS_CT 4/8: unrolled; 0: runtime fallback.
   switch (nRanks) {
   case 4:
     hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL128<T, 4>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize);
+                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize, params);
     break;
   case 8:
     hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL128<T, 8>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize);
+                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize, params);
     break;
   default:
     hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL128<T, 0>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize);
+                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, slices, bankSize, params);
     break;
   }
 
@@ -134,9 +137,6 @@ bool ncclAllGatherDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, v
                                          ncclDataType_t datatype) {
   (void)sendbuff;
   (void)recvbuff;
-  if (!rcclParamDdaLL()) {
-    return false;
-  }
   if (comm == nullptr || comm->bootstrap == nullptr) {
     return false;
   }
@@ -152,7 +152,7 @@ bool ncclAllGatherDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, v
   if (comm->nRanks < 2 || comm->nRanks > dda::common::kDdaMaxNranks) {
     return false;
   }
-  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
+  if (!rcclDdaDatatypeSupported(comm, datatype)) {
     return false;
   }
   const size_t perRankBytes = sendcount * ncclTypeSize(datatype);
@@ -180,7 +180,7 @@ uint32_t ncclAllGatherDdaFabricLL128Blocks(ncclComm* comm, size_t sendcount, ncc
 
 ncclResult_t ncclAllGatherDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t sendcount,
                                          ncclDataType_t datatype, ncclComm* comm, cudaStream_t stream) {
-  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
+  if (!rcclDdaDatatypeSupported(comm, datatype)) {
     return ncclInvalidArgument;
   }
   // AllGather is a pure copy, so the payload moves as raw bytes: instantiate the

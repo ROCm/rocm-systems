@@ -20,6 +20,14 @@
     || NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0)
 #include "nccl_device.h"
 #endif
+// For a GIN put that carries its own signal, where the receiver counts one
+// signal per put. Legacy ncclGin_SignalInc follows ginStrongSignalsRequired
+// (strong by default), which on Anvil SDMA drains every queue to the peer.
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,30,7)
+#define TEST_GIN_WEAK_SIGNAL_INC(sig) ncclGin_WeakSignalInc{sig}
+#else
+#define TEST_GIN_WEAK_SIGNAL_INC(sig) ncclGin_SignalInc{sig}
+#endif
 #include <stdio.h>
 #include <cstdint>
 #include <cstring>
@@ -102,6 +110,25 @@ typedef enum {
     return r;                                       \
   }                                                 \
 } while(0)
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,0) && defined(NCCL_GIN_BACKEND_MASK_ALL)
+// NCCL_GIN_BACKEND_MASK_ALL is computed from the GIN device headers that the
+// rccl install shipped (the rocshmem GDA/SDMA backends self-detect via
+// __has_include), so it must expand in the translation unit that compiles the
+// GIN kernels: keep this static. A backend missing from the mask is not caught on
+// the device; its context is dispatched as another backend's and faults.
+static inline testResult_t testCheckGinBackendCompiled(ncclGinType_t ginType) {
+  if (ginType == NCCL_GIN_TYPE_NONE) return testSuccess;
+  if ((NCCL_GIN_BACKEND_MASK_ALL >> (unsigned)ginType) & 1u) return testSuccess;
+  fprintf(stderr, "The communicator uses GIN type %d (NCCL_GIN_TYPE), but this binary's device code "
+                  "was built without that backend (compiled-in backend mask 0x%x). "
+                  "NCCL_GIN_TYPE_ROCSHMEM_GDA (%d) and NCCL_GIN_TYPE_ANVIL_SDMA (%d) need an rccl "
+                  "built with the CMake option ENABLE_ROCSHMEM_GIN=ON (install.sh --rocshmem-gin).\n",
+          (int)ginType, (unsigned)(NCCL_GIN_BACKEND_MASK_ALL),
+          (int)NCCL_GIN_TYPE_ROCSHMEM_GDA, (int)NCCL_GIN_TYPE_ANVIL_SDMA);
+  return testInvalidUsage;
+}
+#endif
 
 struct testColl {
   const char name[20];

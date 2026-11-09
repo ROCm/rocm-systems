@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 //! Implementation-neutral device-interface mechanisms for heterogeneous
 //! compute runtimes.
 //!
@@ -15,14 +18,9 @@
 pub mod device;
 mod driver;
 mod error;
-#[cfg(target_os = "linux")]
-mod event;
-pub mod gpu;
-pub mod host_storage;
-mod kernel_queue;
+pub mod host;
 pub mod memory;
-mod profiling;
-mod queue;
+mod os;
 pub mod session;
 pub mod topology;
 pub use error::{Error, ErrorKind};

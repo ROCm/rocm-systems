@@ -15,11 +15,12 @@ namespace rocprofsys::domains::callback
 namespace
 {
 
+using ::testing::Field;
 using ::testing::StrictMock;
 
 using test_support::externals;
-using test_support::g_externals_mock;
-using test_support::gmock_externals;
+using test_support::g_metadata_registry_mock;
+using test_support::gmock_metadata_registry;
 using test_support::mock_sdk;
 
 }  // namespace
@@ -39,15 +40,78 @@ TEST(code_object_test, on_code_object_enter_handles_call_without_crashing)
     const mock_sdk::callback_tracing_record_t record{};
     mock_sdk::user_data_t                     user_data{};
 
-    on_code_object_enter<mock_sdk, externals>(record, &user_data, nullptr);
+    on_code_object_enter<mock_sdk, externals>(record, &user_data, nullptr,
+                                              mock_sdk::get_timestamp());
 }
 
-TEST(code_object_test, on_code_object_exit_handles_call_without_crashing)
+TEST(code_object_test, on_code_object_enter_registers_loaded_code_object)
 {
-    const mock_sdk::callback_tracing_record_t record{};
-    mock_sdk::user_data_t                     user_data{};
+    g_metadata_registry_mock = std::make_unique<StrictMock<gmock_metadata_registry>>();
 
-    on_code_object_exit<mock_sdk, externals>(record, &user_data, nullptr);
+    auto payload     = mock_sdk::code_object_load_data_t{ .code_object_id = 42 };
+    auto record      = mock_sdk::callback_tracing_record_t{};
+    record.operation = mock_sdk::CODE_OBJECT_LOAD;
+    record.payload   = &payload;
+    mock_sdk::user_data_t user_data{};
+
+    EXPECT_CALL(
+        *g_metadata_registry_mock,
+        add_code_object(Field(&mock_sdk::code_object_load_data_t::code_object_id, 42)));
+
+    on_code_object_enter<mock_sdk, externals>(record, &user_data, nullptr,
+                                              mock_sdk::get_timestamp());
+
+    g_metadata_registry_mock.reset();
+}
+
+TEST(code_object_test, on_code_object_enter_registers_kernel_symbol)
+{
+    g_metadata_registry_mock = std::make_unique<StrictMock<gmock_metadata_registry>>();
+
+    auto payload = mock_sdk::code_object_kernel_symbol_register_data_t{ .kernel_id = 7 };
+    auto record  = mock_sdk::callback_tracing_record_t{};
+    record.operation = mock_sdk::CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER;
+    record.payload   = &payload;
+    mock_sdk::user_data_t user_data{};
+
+    EXPECT_CALL(*g_metadata_registry_mock,
+                add_kernel_symbol(Field(
+                    &mock_sdk::code_object_kernel_symbol_register_data_t::kernel_id, 7)));
+
+    on_code_object_enter<mock_sdk, externals>(record, &user_data, nullptr,
+                                              mock_sdk::get_timestamp());
+
+    g_metadata_registry_mock.reset();
+}
+
+TEST(code_object_test, on_code_object_enter_ignores_null_code_object_payload)
+{
+    g_metadata_registry_mock = std::make_unique<StrictMock<gmock_metadata_registry>>();
+
+    auto record      = mock_sdk::callback_tracing_record_t{};
+    record.operation = mock_sdk::CODE_OBJECT_LOAD;
+    record.payload   = nullptr;
+    mock_sdk::user_data_t user_data{};
+
+    on_code_object_enter<mock_sdk, externals>(record, &user_data, nullptr,
+                                              mock_sdk::get_timestamp());
+
+    g_metadata_registry_mock.reset();
+}
+
+TEST(code_object_test, on_code_object_enter_ignores_null_kernel_symbol_payload)
+{
+    g_metadata_registry_mock = std::make_unique<StrictMock<gmock_metadata_registry>>();
+
+    auto record      = mock_sdk::callback_tracing_record_t{};
+    record.operation = mock_sdk::CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER;
+    record.payload   = nullptr;
+    mock_sdk::user_data_t user_data{};
+
+    on_code_object_enter<mock_sdk, externals>(record, &user_data, nullptr,
+                                              mock_sdk::get_timestamp());
+
+    g_metadata_registry_mock.reset();
 }
 
 TEST(code_object_test, on_record_dispatches_by_phase_without_crashing)
@@ -66,18 +130,6 @@ TEST(code_object_test, on_record_dispatches_by_phase_without_crashing)
     auto none_record  = mock_sdk::callback_tracing_record_t{};
     none_record.phase = mock_sdk::CALLBACK_PHASE_NONE;
     k_domain.on_record(none_record, &user_data, nullptr);
-}
-
-// on_code_object_configure() is a no-op: it must not touch any Externals member.
-// StrictMock<gmock_externals> fails the test if add_string/get_agents_by_type/
-// add_pmc_info are called here.
-TEST(code_object_test, on_configure_is_a_noop)
-{
-    g_externals_mock = std::make_unique<StrictMock<gmock_externals>>();
-
-    on_code_object_configure<externals>();
-
-    g_externals_mock.reset();
 }
 
 }  // namespace rocprofsys::domains::callback

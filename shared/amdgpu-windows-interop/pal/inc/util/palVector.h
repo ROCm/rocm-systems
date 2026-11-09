@@ -265,6 +265,14 @@ public:
     operator Span<const T>() const { return Span<const T>(Data(), NumElements()); }
     ///@}
 
+    ///@{
+    /// Implicitly gets the current contents of the vector as a ByteSpan.
+    ///
+    /// @returns The contents of the vector as a ByteSpan; same as ByteSpan(Data(), NumElements() * sizeof(T)).
+    operator ByteSpan() { return ByteSpan::FromArray(Data(), NumElements()); }
+    operator ConstByteSpan() const { return ConstByteSpan::FromArray(Data(), NumElements()); }
+    ///@}
+
     /// Returns pointer to the underlying buffer serving as data storage.
     /// The returned pointer defines always valid range [Data(), Data() + NumElements()),
     /// even if the container is empty (Data() is not dereferenceable in that case).

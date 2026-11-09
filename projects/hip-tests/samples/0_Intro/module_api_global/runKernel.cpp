@@ -145,6 +145,7 @@ int main() {
   hipFree(Bd);
   delete[] A;
   delete[] B;
+  checkHipErrors(hipModuleUnload(Module));
   hipCtxDestroy(context);
   return 0;
 }

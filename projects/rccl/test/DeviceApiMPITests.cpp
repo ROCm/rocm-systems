@@ -805,10 +805,14 @@ TEST_F(DeviceApiMPITests, Pointer_Host_GetLsaDevicePointer) {
   ASSERT_EQ(hostPeerPtr, hostPeerViaWorld);
 }
 
+// startEpoch, when non-null, receives the session's starting epoch so the host can track it across launches.
 __global__ void barrierSyncHandoffKernel(ncclWindow_t win, int dstLsaPeer, int writeVal, int* readBack,
-                                         ncclDevComm devComm, int mode) {
+                                         ncclDevComm devComm, int mode, uint32_t* startEpoch = nullptr) {
   ncclCoopCta coop = ncclCoopCta();
   ncclLsaBarrierSession<ncclCoopCta> bar(coop, devComm, ncclTeamLsa(devComm), devComm.lsaBarrier, blockIdx.x);
+  if (startEpoch != nullptr && threadIdx.x == 0) {
+    startEpoch[0] = bar.epoch;
+  }
   bar.sync(coop, cuda::memory_order_acquire);
   if (mode == 0 && threadIdx.x == 0) {
     int* peer = static_cast<int*>(ncclGetLsaPointer(win, 0, dstLsaPeer));
@@ -869,6 +873,90 @@ TEST_F(DeviceApiMPITests, Barrier_Lsa_SyncOrdering) {
           : hipSuccess;
   ASSERT_MPI_HIP_OK_ON_RANK(rank, lsaBase + dstLsaPeer, hostMemcpyErr);
   ASSERT_MPI_EQ_ON_RANK(rank, lsaBase + dstLsaPeer, kValue, hostRead);
+}
+
+// The session destructor saves its epoch; without it the next launch restarts from a stale epoch and its waits no-op.
+TEST_F(DeviceApiMPITests, Barrier_Lsa_EpochPersistsAcrossLaunches) {
+  if (auto reason = lsaSkipReason(); !reason.empty()) {
+    GTEST_SKIP() << reason;
+  }
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/8)) {
+    GTEST_SKIP() << "Requires 2-8 ranks";
+  }
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  ncclComm_t comm = getActiveCommunicator();
+  hipStream_t stream = getActiveStream();
+
+  ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
+  reqs.lsaBarrierCount = 1;
+  ncclDevComm devComm{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &devComm));
+  auto devCommCleanup = makeScopeGuard([&]() { (void)ncclDevCommDestroy(comm, &devComm); });
+
+  int rank = -1;
+  ncclCommUserRank(comm, &rank);
+  const int lsaSize = nodeLocalRanks();
+  const int lsaBase = lsaBaseRank(rank, lsaSize);
+  const int myLsa = rank - lsaBase;
+
+  void* dWin = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dWin, sizeof(int)));
+  auto memCleanup = makeScopeGuard([&]() {
+    if (dWin) {
+      (void)ncclMemFree(dWin);
+    }
+  });
+  ncclWindow_t win = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(comm, dWin, sizeof(int), &win, NCCL_WIN_COLL_SYMMETRIC));
+  auto winCleanup = makeScopeGuard([&]() {
+    if (win) {
+      (void)ncclCommWindowDeregister(comm, win);
+    }
+  });
+  ASSERT_MPI_EQ(hipSuccess, hipMemset(dWin, 0, sizeof(int)));
+
+  int* dRead = nullptr;
+  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dRead, sizeof(int)));
+  auto readCleanup = makeScopeGuard([&]() {
+    if (dRead) {
+      (void)hipFree(dRead);
+    }
+  });
+  uint32_t* dEpoch = nullptr;
+  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&dEpoch, sizeof(uint32_t)));
+  auto epochCleanup = makeScopeGuard([&]() {
+    if (dEpoch) {
+      (void)hipFree(dEpoch);
+    }
+  });
+
+  constexpr int kLaunches = 3;
+  constexpr uint32_t kSyncsPerLaunch = 2;  // non-multimem: each sync advances the session epoch by one
+  constexpr int kValueBase = 4242;
+  const int dstLsaPeer = 1;  // rank 0 writes into LSA peer 1's slot (lsaSize >= 2)
+  const int mode = (myLsa == 0) ? 0 : (myLsa == dstLsaPeer) ? 1 : 2;
+  constexpr uint32_t kInitialEpoch = 0;  // ncclDevCommCreate zeroes the barrier state in its resource window
+  for (int launch = 0; launch < kLaunches; ++launch) {
+    const int writeVal = kValueBase + launch;  // distinct per launch so a stale window value cannot satisfy the check
+    ASSERT_MPI_EQ(hipSuccess, hipMemset(dRead, 0, sizeof(int)));
+    ASSERT_MPI_EQ(hipSuccess, hipMemset(dEpoch, 0xff, sizeof(uint32_t)));  // unwritten marker, never a valid epoch here
+    MPI_Barrier(MPI_COMM_WORLD);
+    barrierSyncHandoffKernel<<<1, 1, 0, stream>>>(win, dstLsaPeer, writeVal, dRead, devComm, mode, dEpoch);
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+
+    uint32_t startEpoch = 0;
+    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(&startEpoch, dEpoch, sizeof(uint32_t), hipMemcpyDeviceToHost));
+    ASSERT_MPI_EQ(kInitialEpoch + kSyncsPerLaunch * static_cast<uint32_t>(launch), startEpoch);
+
+    int hostRead = 0;
+    const hipError_t hostMemcpyErr =
+        (rank == lsaBase + dstLsaPeer)
+            ? hipMemcpy(&hostRead, dRead, sizeof(int), hipMemcpyDeviceToHost)
+            : hipSuccess;
+    ASSERT_MPI_HIP_OK_ON_RANK(rank, lsaBase + dstLsaPeer, hostMemcpyErr);
+    ASSERT_MPI_EQ_ON_RANK(rank, lsaBase + dstLsaPeer, writeVal, hostRead);
+  }
 }
 
 __global__ void barrierArriveWaitKernel(ncclWindow_t win, int dstLsaPeer, int writeVal, int* readBack,

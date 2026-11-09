@@ -15,8 +15,9 @@ Tile routines
 
 .. note::
 
-   Only **1-D and 2-D tiles** are supported. Tensors with rank greater than 2 are
-   not supported.
+   Tensors of rank **1 through 4** are supported (``ndim`` = 1, 2, 3, or 4)
+   for both the **IPC** and **GDA** backends. Tensors with rank greater than 4
+   are not supported and will return ``ROCSHMEM_ERROR``.
 
 The tile API provides tensor-aware data movement and collective operations that
 operate on multi-dimensional sub-regions (tiles) of symmetric-heap tensors.

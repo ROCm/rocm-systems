@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "ScopedHook.h"
+#include "../common/LogCapture.hpp"  // DebugLevelToMask
 #include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/dev_runtime_micro_fakes.h"
@@ -1453,16 +1454,16 @@ struct FailAt {
 
 class RmaDebugLoggingTest : public RmaScheduleTest {
 protected:
-  int savedLevel_ = 0;
+  uint32_t savedLevel_ = 0;
   uint64_t savedMask_ = 0;
   int savedNoWarn_ = 0;
 
   void SetUp() override {
     RmaScheduleTest::SetUp();
-    savedLevel_ = ncclDebugLevel;
+    savedLevel_ = ncclDebugLevelMask;
     savedMask_ = ncclDebugMask;
     savedNoWarn_ = ncclDebugNoWarn;
-    ncclDebugLevel = NCCL_LOG_INFO;
+    ncclDebugLevelMask = RcclUnitTesting::DebugLevelToMask(NCCL_LOG_INFO);
     ncclDebugMask = ~0ULL;  // every subsystem, so NCCL_COLL passes the mask test
     // Establish it rather than inherit it: the tests below that do not call
     // SetDebug exist to take NCCLCHECKGOTO's `ncclDebugNoWarn == 0` arm, and
@@ -1471,7 +1472,7 @@ protected:
   }
 
   void SetDebug(const DebugState& d) {
-    ncclDebugLevel = d.level;
+    ncclDebugLevelMask = RcclUnitTesting::DebugLevelToMask(d.level);
     ncclDebugMask = d.mask;
     ncclDebugNoWarn = d.noWarn;
   }
@@ -1501,7 +1502,7 @@ protected:
   }
 
   void TearDown() override {
-    ncclDebugLevel = savedLevel_;
+    ncclDebugLevelMask = savedLevel_;
     ncclDebugMask = savedMask_;
     ncclDebugNoWarn = savedNoWarn_;
     RmaScheduleTest::TearDown();

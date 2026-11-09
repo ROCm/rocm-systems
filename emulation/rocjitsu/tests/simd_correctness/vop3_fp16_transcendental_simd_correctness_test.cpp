@@ -3,18 +3,20 @@
 
 /// @file vop3_fp16_transcendental_simd_correctness_test.cpp
 /// @brief SIMD/scalar comparison for the CDNA4 F16 VOP3 transcendentals.
-/// Inputs are promoted to F32, modified, evaluated, and narrowed to F16.
-/// RSQ honors the F16 input-denormal mode and preserves quieted NaN payloads.
+/// @details Uses try_execute_unary_vop3_fp16_simd's documented modifier pipeline.
+/// Sources honor the F16 input-denormal mode; RSQ preserves quieted NaN payloads.
 /// Each case runs with scalar execution forced and then with SIMD allowed,
 /// using identical inputs and EXEC. RSQ compares every active lane exactly;
 /// the other operations retain their existing NaN-result exclusions.
 /// Inactive lanes must keep the sentinel.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/simd_path_test_hooks.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -102,7 +104,9 @@ struct Fixture {
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("cu_vop3_fp16_trans", cfg, &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, "cu_vop3_fp16_trans", cfg, &gpu_mem, &l2);
+    if (!cu)
+      return;
     decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
@@ -146,6 +150,8 @@ void check_case(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32
   auto run_mode = [&](bool force_scalar) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
+    if (::testing::Test::HasFatalFailure())
+      return {};
     fx.wf->set_mode_raw(mode);
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
@@ -153,7 +159,14 @@ void check_case(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32
     vop3_encode(c.opcode, /*vdst=*/kDstVgpr, /*src0=*/256, abs, neg, omod, clamp, words);
     Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.name << " decode failed";
+    amdgpu::ScopedSimdFastPathTracker tracker;
     auto out = fx.run(inst, exec, lane_input);
+    if (force_scalar)
+      EXPECT_TRUE(tracker.no_tracked_path_executed())
+          << c.name << ": forced-scalar execution used SIMD";
+    else
+      EXPECT_TRUE(tracker.only_tracked_path_executed(amdgpu::SimdFastPath::VOP3_UNARY_FP16))
+          << c.name << ": eligible execution did not use the unary F16 SIMD path";
     delete inst;
     return out;
   };

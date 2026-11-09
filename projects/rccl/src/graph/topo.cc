@@ -6,6 +6,7 @@
  ************************************************************************/
 
 #include "core.h"
+#include "cudawrap.h"
 #include "graph.h"
 #include "topo.h"
 #include "comm.h"
@@ -79,9 +80,8 @@ static ncclResult_t ncclTopoGetInterCpuBw(struct ncclTopoNode* cpu, float* bw) {
                                                             BDW_QPI_BW;
   }
   if (cpu->cpu.arch == NCCL_TOPO_CPU_ARCH_X86 && cpu->cpu.vendor == NCCL_TOPO_CPU_VENDOR_AMD) {
-    *bw = cpu->cpu.model == NCCL_TOPO_CPU_MODEL_AMD_ZEN5  ? AMD_ZEN5_BW :
-          cpu->cpu.model == NCCL_TOPO_CPU_MODEL_AMD_ZEN34 ? AMD_ZEN34_BW :
-                                                            AMD_ZEN12_BW;
+    // RCCL: AMD_ZEN34_BW/AMD_ZEN5_BW are not yet validated with AMD GPUs; keep one value for every Zen generation.
+    *bw = AMD_ZEN12_BW;
   }
   if (cpu->cpu.arch == NCCL_TOPO_CPU_ARCH_X86 && cpu->cpu.vendor == NCCL_TOPO_CPU_VENDOR_ZHAOXIN) {
     *bw = cpu->cpu.model == NCCL_TOPO_CPU_MODEL_YONGFENG ? YONGFENG_ZPI_BW : ZPI_BW;
@@ -124,6 +124,7 @@ ncclResult_t ncclTopoCreateNode(struct ncclTopoSystem* system, struct ncclTopoNo
     n->cpu.arch = NCCL_TOPO_UNDEF;
     n->cpu.vendor = NCCL_TOPO_UNDEF;
     n->cpu.model = NCCL_TOPO_UNDEF;
+    n->cpu.rome = 0;
   } else if (type == NET) {
     n->net.vendor = UINT64_MAX;
     n->net.device = UINT64_MAX;
@@ -131,6 +132,9 @@ ncclResult_t ncclTopoCreateNode(struct ncclTopoSystem* system, struct ncclTopoNo
     n->net.port = NCCL_TOPO_UNDEF;
     n->net.bw = 0.0;
     n->net.latency = 0.0;
+    n->net.railId = NCCL_TOPO_UNDEF;
+    n->net.planeId = NCCL_TOPO_UNDEF;
+  } else if (type == GIN || type == RMA) {
     n->net.railId = NCCL_TOPO_UNDEF;
     n->net.planeId = NCCL_TOPO_UNDEF;
   } else if (type == DEV) {
@@ -419,6 +423,55 @@ ncclResult_t ncclTopoGetMinNetBw(struct ncclTopoSystem* system, int rank, float*
   return ncclSuccess;
 }
 
+static ncclResult_t ncclTopoGetNetDevKey(struct ncclXmlNode* xmlNet, uint64_t* key) {
+  // Create the unique key per device to be used for rail logic.
+  // Note: virtual device might have the same key as their first physical device.
+  uint64_t hacc[2] = {1, 1}, guid;
+  NCCLCHECK(xmlGetAttrUint64Default(xmlNet, "guid", &guid, 0));
+  eatHash(hacc, &guid);
+  *key = digestHash(hacc);
+  return ncclSuccess;
+}
+
+// return the index of the rail key in the unique rail key table
+static ncclResult_t ncclTopoGetNetRailKeyIndex(struct ncclTopoNetRailKeyList* list, uint64_t key, int* railId) {
+  auto it = list->keys.find(key);
+  if (it != list->keys.end()) {
+    *railId = it->second;
+    return ncclSuccess;
+  }
+  if (list->keys.size() == NCCL_TOPO_MAX_NODES) {
+    WARN("NCCL cannot use more than %d rails.", NCCL_TOPO_MAX_NODES);
+    return ncclInternalError;
+  }
+  *railId = list->keys.size();
+  list->keys[key] = *railId;
+  return ncclSuccess;
+}
+
+static ncclResult_t ncclTopoGetRailPlane(struct ncclTopoNetRailKeyList* list, struct ncclXmlNode* xmlNet, int port,
+                                         int* rail, int* plane) {
+  if (*rail == NCCL_TOPO_UNDEF) {
+    uint64_t railKey;
+    int keyIndex;
+    NCCLCHECK(ncclTopoGetNetDevKey(xmlNet, &railKey));
+    NCCLCHECK(ncclTopoGetNetRailKeyIndex(list, railKey, &keyIndex));
+    *rail = NCCL_TOPO_UNDEF_BIT | keyIndex;
+  }
+  if (*plane == NCCL_TOPO_UNDEF) {
+    *plane = NCCL_TOPO_UNDEF_BIT | port;
+  }
+  return ncclSuccess;
+}
+
+static ncclResult_t ncclTopoAddNetAsic(struct ncclXmlNode* xmlNet, int64_t netId, struct ncclTopoNode* net) {
+  const char* str;
+  NCCLCHECK(xmlGetAttr(xmlNet, "guid", &str));
+  // if not guid is present use the net->id unique id instead, which will be unique within the node/NVLD
+  net->net.asic = (str) ? strtoull(str, NULL, 16) : netId;
+  return ncclSuccess;
+}
+
 static ncclResult_t ncclTopoAddNet(struct ncclXmlNode* xmlNet, struct ncclXmlNode* parent,
                                    struct ncclTopoSystem* system, struct ncclTopoNode* nic, int systemId,
                                    int64_t busId) {
@@ -429,10 +482,6 @@ static ncclResult_t ncclTopoAddNet(struct ncclXmlNode* xmlNet, struct ncclXmlNod
   struct ncclTopoNode* net;
   NCCLCHECK(ncclTopoCreateNode(system, &net, NET, netId));
   net->net.dev = dev;
-  const char* str;
-  // if not guid is present use the net->id unique id instead, which will be unique within the node/NVLD
-  NCCLCHECK(xmlGetAttr(xmlNet, "guid", &str));
-  net->net.asic = (str) ? strtoull(str, NULL, 16) : netId;
 
   int mbps;
   NCCLCHECKNOWARN(xmlGetAttrIntDefault(xmlNet, "speed", &mbps, 0), NCCL_GRAPH);
@@ -446,11 +495,10 @@ static ncclResult_t ncclTopoAddNet(struct ncclXmlNode* xmlNet, struct ncclXmlNod
   NCCLCHECKNOWARN(xmlGetAttrIntDefault(xmlNet, "maxconn", &net->net.maxChannels, MAXCHANNELS), NCCL_GRAPH);
   NCCLCHECKNOWARN(xmlGetAttrIntDefault(xmlNet, "coll", &net->net.collSupport, 0), NCCL_GRAPH);
   net->net.busId = busId;  // RCCL: keep this
-  int railId, planeId;
-  NCCLCHECKNOWARN(xmlGetAttrIntDefault(xmlNet, "rail", &railId, NCCL_TOPO_UNDEF), NCCL_GRAPH);
-  NCCLCHECKNOWARN(xmlGetAttrIntDefault(xmlNet, "plane", &planeId, NCCL_TOPO_UNDEF), NCCL_GRAPH);
-  net->net.railId = railId;
-  net->net.planeId = planeId;
+
+  NCCLCHECK(ncclTopoAddNetAsic(xmlNet, netId, net));
+  NCCLCHECK(xmlGetAttrInt(xmlNet, "rail", &net->net.railId));
+  NCCLCHECK(xmlGetAttrInt(xmlNet, "plane", &net->net.planeId));
 
   // build the PCI id using the parent PCI link
   const char* pciBusId = NULL;
@@ -494,6 +542,10 @@ static ncclResult_t ncclTopoAddGin(struct ncclXmlNode* xmlNet, struct ncclXmlNod
     NCCLCHECK(xmlGetAttrUint64Default(parent, "device", &net->net.device, UINT64_MAX));
   }
 
+  NCCLCHECK(ncclTopoAddNetAsic(xmlNet, netId, net));
+  NCCLCHECK(xmlGetAttrInt(xmlNet, "rail", &net->net.railId));
+  NCCLCHECK(xmlGetAttrInt(xmlNet, "plane", &net->net.planeId));
+
   NCCLCHECK(ncclTopoConnectNodes(nic, net, LINK_NET, net->net.bw));
   NCCLCHECK(ncclTopoConnectNodes(net, nic, LINK_NET, net->net.bw));
   return ncclSuccess;
@@ -519,6 +571,10 @@ static ncclResult_t ncclTopoAddRma(struct ncclXmlNode* xmlNet, struct ncclXmlNod
     NCCLCHECK(xmlGetAttrUint64Default(parent, "device", &net->net.device, UINT64_MAX));
   }
 
+  NCCLCHECK(ncclTopoAddNetAsic(xmlNet, netId, net));
+  NCCLCHECK(xmlGetAttrInt(xmlNet, "rail", &net->net.railId));
+  NCCLCHECK(xmlGetAttrInt(xmlNet, "plane", &net->net.planeId));
+
   NCCLCHECK(ncclTopoConnectNodes(nic, net, LINK_NET, net->net.bw));
   NCCLCHECK(ncclTopoConnectNodes(net, nic, LINK_NET, net->net.bw));
   return ncclSuccess;
@@ -532,18 +588,18 @@ ncclResult_t ncclTopoAddNic(struct ncclXmlNode* xmlNic, struct ncclTopoSystem* s
 
   for (int s = 0; s < xmlNic->nSubs; s++) {
     struct ncclXmlNode* xmlNet = xmlNic->subs[s];
-    if (strcmp(xmlNet->name, "net") != 0) continue;
+    int net = strcmp(xmlNet->name, "net") == 0;
+    int gin = strcmp(xmlNet->name, "gin") == 0;
+    int rma = strcmp(xmlNet->name, "rma") == 0;
+    if (!net && !gin && !rma) continue;
+
+    // Physical NICs fused into a vNIC are marked net="0"; absent "net" remains enabled for older XML.
+    if (net) NCCLCHECK(xmlGetAttrIntDefault(xmlNet, "net", &net, 1));
+
     int index;
     NCCLCHECK(xmlGetAttrIndex(xmlNet, "dev", &index));
-    // This means that the "dev" attribute wasn't set on this net xml node. That means it should not be added to
-    // the system topology graph
+    // XML net nodes without "dev" attribute will be ignore
     if (index == -1) continue;
-
-    // Backward compatibility: net without "net" attr is a net dev, net without a "gin" attr is not a gin dev
-    int net = 0, gin = 0, rma = 0;
-    NCCLCHECK(xmlGetAttrIntDefault(xmlNet, "net", &net, 1));
-    NCCLCHECK(xmlGetAttrIntDefault(xmlNet, "gin", &gin, 0));
-    NCCLCHECK(xmlGetAttrIntDefault(xmlNet, "rma", &rma, 0));
     if (net) NCCLCHECK(ncclTopoAddNet(xmlNet, parent, system, nic, systemId, busId));
     if (gin) NCCLCHECK(ncclTopoAddGin(xmlNet, parent, system, nic, systemId));
     if (rma) NCCLCHECK(ncclTopoAddRma(xmlNet, parent, system, nic, systemId));
@@ -679,15 +735,8 @@ static ncclResult_t ncclTopoAddGpuSub(struct ncclXmlNode* xmlPci, struct ncclXml
     NCCLCHECK(xmlGetAttrInt(xmlGpu, "gdr", &gpudeviceNode->dev.gdrSupport));
     NCCLCHECK(ncclTopoConnectNodes(gpudeviceNode, parent, LINK_PCI, bw));
     NCCLCHECK(ncclTopoConnectNodes(parent, gpudeviceNode, LINK_PCI, bw));
-    // add the local link with the existing uGPUs.
-    struct ncclTopoNode* sibDevs[NCCL_TOPO_MLOPART_DEV_MAX];
-    int nSibDevs = 0;
-    NCCLCHECK(ncclTopoGetDevNodes(system, gpudeviceNode->id, sibDevs, &nSibDevs));
-    for (int s = 0; s < nSibDevs; s++) {
-      if (sibDevs[s] == gpudeviceNode) continue;
-      NCCLCHECK(ncclTopoConnectNodes(gpudeviceNode, sibDevs[s], LINK_LOC, MLOPART_LOC_BW));
-      NCCLCHECK(ncclTopoConnectNodes(sibDevs[s], gpudeviceNode, LINK_LOC, MLOPART_LOC_BW));
-    }
+    // Sibling partitions of this device are linked once the XGMI pass has run, see
+    // ncclTopoConnectMloPartSiblings().
   }
 
   struct ncclTopoNode* gpuNode = NULL;
@@ -774,14 +823,21 @@ ncclResult_t ncclTopoAddPci(struct ncclXmlNode* xmlPci, struct ncclTopoSystem* s
   return ncclSuccess;
 }
 
-struct kvDict kvDictCpuArch[] = {
-  {"x86_64", NCCL_TOPO_CPU_ARCH_X86}, {"arm64", NCCL_TOPO_CPU_ARCH_ARM}, {"ppc64", NCCL_TOPO_CPU_ARCH_POWER}, {NULL, 0}
-};
+struct kvDict kvDictCpuArch[] = {{"x86_64", NCCL_TOPO_CPU_ARCH_X86},
+                                 {"arm64", NCCL_TOPO_CPU_ARCH_ARM},
+                                 {"ppc64", NCCL_TOPO_CPU_ARCH_POWER},
+                                 {NULL, NCCL_TOPO_CPU_ARCH_UNDEF}};
 struct kvDict kvDictCpuVendor[] = {{"GenuineIntel", NCCL_TOPO_CPU_VENDOR_INTEL},
                                    {"AuthenticAMD", NCCL_TOPO_CPU_VENDOR_AMD},
                                    {"CentaurHauls", NCCL_TOPO_CPU_VENDOR_ZHAOXIN},
                                    {"  Shanghai  ", NCCL_TOPO_CPU_VENDOR_ZHAOXIN},
                                    {NULL, 0}};
+
+// RCCL: Rome class is family 17h model >= 0x31, or all of 19h; also accepts the old file encoding (0x8F/0xAF).
+static bool rcclAmdCpuIsRome(int familyId, int modelId) {
+  if (familyId == 0x17 || familyId == 0x8F) return modelId >= 0x31;
+  return familyId == 0x19 || familyId == 0xAF;
+}
 
 ncclResult_t ncclGetSystemId(struct ncclTopoSystem* system, struct ncclXmlNode* xmlCpu, int* systemIdPtr) {
   const char* hostHashStr;
@@ -805,7 +861,9 @@ ncclResult_t ncclTopoAddCpu(struct ncclXmlNode* xmlCpu, struct ncclTopoSystem* s
   const char* str;
   NCCLCHECK(xmlGetAttr(xmlCpu, "affinity", &str));
   if (str != NULL) {
-    NCCLCHECK(ncclStrToCpuset(str, &cpu->cpu.affinity));
+    int cpuOffset;
+    NCCLCHECK(xmlGetAttrIntDefault(xmlCpu, "affinity_offset", &cpuOffset, 0));
+    NCCLCHECK(ncclStrToCpuset(str, &cpu->cpu.affinity, cpuOffset));
   }
 
   NCCLCHECK(xmlGetAttrStr(xmlCpu, "arch", &str));
@@ -848,9 +906,7 @@ ncclResult_t ncclTopoAddCpu(struct ncclXmlNode* xmlCpu, struct ncclTopoSystem* s
       int familyId, modelId;
       NCCLCHECK(xmlGetAttrInt(xmlCpu, "familyid", &familyId));
       NCCLCHECK(xmlGetAttrInt(xmlCpu, "modelid", &modelId));
-      // Treat "Milan" also as "Rome"
-      cpu->cpu.model = ((familyId == 143 && modelId >= 49) || familyId == 175) ? NCCL_TOPO_CPU_MODEL_AMD_ROME :
-                                                                                 NCCL_TOPO_CPU_MODEL_AMD_ZEN;
+      cpu->cpu.rome = rcclAmdCpuIsRome(familyId, modelId);
     }
   }
   for (int s = 0; s < xmlCpu->nSubs; s++) {
@@ -928,6 +984,19 @@ static ncclResult_t ncclTopoGetDevForPciBusId(struct ncclTopoSystem* system, int
   return ncclSuccess;
 }
 
+// RCCL: workaround (AICOMNET-435) until fused MNNVL hosts are recognised as NVL-connected. Only a
+// scale-out comm (cross_clique on <system>, set by ncclTopoGetSystem) links UALoE fabric peers through
+// the shared NVS; a comm inside one clique keeps the per-host topology its ring search and channel
+// setup are tuned for.
+static ncclResult_t rcclTopoXmlIsCrossClique(struct ncclXmlNode* node, bool* crossClique) {
+  struct ncclXmlNode* topNode = node;
+  while (topNode->parent) topNode = topNode->parent;
+  int value = 0;
+  NCCLCHECK(xmlGetAttrIntDefault(topNode, "cross_clique", &value, 0));
+  *crossClique = value == 1;
+  return ncclSuccess;
+}
+
 // RCCL: XGMI is the AMD analogue of NVLink. Upstream v2.30 introduced the generic DEV
 // (physical device) topology node, with GPU (rank) nodes hanging off their parent DEV node
 // via LINK_LOC. ncclTopoComputePaths()/search now assemble inter-GPU links as DEV->DEV hops
@@ -961,7 +1030,15 @@ ncclResult_t ncclTopoAddXGMI(struct ncclXmlNode* node, struct ncclTopoSystem* sy
     int targetType;
     NCCLCHECK(kvConvertToInt(targetClass, &targetType, kvDictPciClass));
     struct ncclTopoNode* remote = NULL;
-    if (targetType == GPU) {
+    // RCCL: amd-smi lists only local fabric peers, so with several MNNVL hosts link every GPU's fabric
+    // entries to one shared NVS (each adds one link width); a single host keeps direct links.
+    int fabricSupported = 0;
+    NCCLCHECK(xmlGetAttrIntDefault(node, "fabric_supported", &fabricSupported, 0));
+    bool viaFabricSwitch = false;
+    if (targetType == GPU && fabricSupported == 1 && system->nHosts > 1) {
+      NCCLCHECK(rcclTopoXmlIsCrossClique(node, &viaFabricSwitch));
+    }
+    if (targetType == GPU && !viaFabricSwitch) {
       // XGMI P2P connection to another GPU (between physical DEV nodes)
       const char* target;
       NCCLCHECK(xmlGetAttrStr(node, "target", &target));
@@ -981,7 +1058,7 @@ ncclResult_t ncclTopoAddXGMI(struct ncclXmlNode* node, struct ncclTopoSystem* sy
     if (remote) {
       float nvlSpeed = ncclTopoXGMISpeed(devNode->dev.gcn);
       NCCLCHECK(ncclTopoConnectNodes(devNode, remote, LINK_NVL, count * nvlSpeed));
-      if (targetType != GPU) {
+      if (targetType != GPU || viaFabricSwitch) {
         NCCLCHECK(ncclTopoConnectNodes(remote, devNode, LINK_NVL, count * nvlSpeed));
       }
     }
@@ -1146,6 +1223,54 @@ ncclResult_t ncclTopoAddC2c(struct ncclXmlNode* node, struct ncclTopoSystem* sys
   return ncclSuccess;
 }
 
+// Rate one direction of a sibling hop at the on-package bw, whether or not the XGMI pass already
+// built it. ncclTopoConnectNodes() accumulates onto an existing link of the same type, so the
+// reported case has to be re-rated in place rather than topped up.
+static ncclResult_t ncclTopoConnectMloPartSibling(struct ncclTopoNode* dev, struct ncclTopoNode* sibDev, float bw) {
+  for (int l = 0; l < dev->nlinks; l++) {
+    // No fixture can reach the LINK_NVL test: XGMI is the only link type any pass puts between two
+    // DEV nodes, so the remNode test already excludes everything else a DEV carries (LINK_PCI to its
+    // bridge, LINK_LOC to its GPU nodes, LINK_C2C to a CPU or C2C bridge). It stays because it picks
+    // which link gets re-rated -- a later DEV-to-DEV link of another type would otherwise take the
+    // on-package bw and leave the pair with no XGMI link, since the fallback below would not run.
+    if (dev->links[l].remNode != sibDev || dev->links[l].type != LINK_NVL) continue;
+    dev->links[l].bw = bw;
+    return ncclSuccess;
+  }
+  INFO(NCCL_GRAPH, "No XGMI link reported from MLOPart sibling %lx to %lx, assuming %.1f GB/s", dev->id, sibDev->id,
+       bw);
+  NCCLCHECK(ncclTopoConnectNodes(dev, sibDev, LINK_NVL, bw));
+  return ncclSuccess;
+}
+
+// Compute partitions of one physical device (CPX/DPX, carried as MLOPart) reach each other over
+// the on-package fabric, which sysfs reports as XGMI between the partitions' PCI functions, so
+// ncclTopoAddXGMI() has normally already linked their DEV nodes. Cover the case where a platform
+// does not report those links: without a link the partitions are unreachable. The hop is XGMI,
+// not LINK_LOC -- PATH_LOC outranks PATH_NVL in the path search, so a LINK_LOC here would shadow
+// the real XGMI links and hide the peer from everything keyed on PATH_NVL (P2P channel counts,
+// XGMI topology classification), leaving it with the PCIe fallbacks.
+//
+// Rate every sibling hop at MLOPART_LOC_BW rather than at the width sysfs reports for the pair.
+// The on-package fabric is far wider than the inter-device XGMI link whose width that report
+// carries, and the search treats link bw as a budget: ncclTopoSearch's followPath() subtracts
+// bwIntra from every link it lays a channel over. Rating a sibling hop at one XGMI width lets a
+// partitioned node exhaust it, which walks the balanced-tree search down the whole speed array.
+static ncclResult_t ncclTopoConnectMloPartSiblings(struct ncclTopoSystem* system) {
+  for (int d = 0; d < system->nodes[DEV].count; d++) {
+    struct ncclTopoNode* dev = system->nodes[DEV].nodes + d;
+    struct ncclTopoNode* sibDevs[NCCL_TOPO_MLOPART_DEV_MAX];
+    int nSibDevs = 0;
+    NCCLCHECK(ncclTopoGetDevNodes(system, dev->id, sibDevs, &nSibDevs));
+    for (int s = 0; s < nSibDevs; s++) {
+      if (sibDevs[s] == dev) continue;
+      NCCLCHECK(ncclTopoConnectMloPartSibling(dev, sibDevs[s], MLOPART_LOC_BW));
+      NCCLCHECK(ncclTopoConnectMloPartSibling(sibDevs[s], dev, MLOPART_LOC_BW));
+    }
+  }
+  return ncclSuccess;
+}
+
 ncclResult_t ncclTopoGetSystemFromXml(struct ncclXml* xml, struct ncclTopoSystem** topoSystem,
                                       const uint64_t localHostHash) {
   NCCLCHECK(ncclCalloc(topoSystem, 1));
@@ -1177,6 +1302,7 @@ ncclResult_t ncclTopoGetSystemFromXml(struct ncclXml* xml, struct ncclTopoSystem
 #endif
   NCCLCHECK(ncclTopoAddC2c(topNode, *topoSystem, NULL, 0));
   NCCLCHECK(ncclTopoAddPciLinks(topNode, *topoSystem, NULL, 0));
+  NCCLCHECK(ncclTopoConnectMloPartSiblings(*topoSystem));
 
   NCCLCHECK(ncclTopoFlattenBcmSwitches(*topoSystem));
   NCCLCHECK(ncclTopoConnectCpus(*topoSystem));
@@ -1192,7 +1318,7 @@ static ncclResult_t xmlInitAttrInt(struct ncclXmlNode* node, const char* attrNam
   int index;
   NCCLCHECK(xmlGetAttrIndex(node, attrName, &index));
   if (index == -1) {
-    index = node->nAttrs++;
+    NCCLCHECK(xmlGetNextAttrIndex(node, &index));
     strncpy(node->attrs[index].key, attrName, MAX_STR_LEN);
     node->attrs[index].key[MAX_STR_LEN] = '\0';
     snprintf(node->attrs[index].value, MAX_STR_LEN, "%d", value);
@@ -1203,7 +1329,7 @@ static ncclResult_t xmlInitAttrUint64(struct ncclXmlNode* node, const char* attr
   int index;
   NCCLCHECK(xmlGetAttrIndex(node, attrName, &index));
   if (index == -1) {
-    index = node->nAttrs++;
+    NCCLCHECK(xmlGetNextAttrIndex(node, &index));
     strncpy(node->attrs[index].key, attrName, MAX_STR_LEN);
     node->attrs[index].key[MAX_STR_LEN] = '\0';
     snprintf(node->attrs[index].value, MAX_STR_LEN, "0x%lx", value);
@@ -1214,7 +1340,7 @@ static ncclResult_t xmlInitAttrFloat(struct ncclXmlNode* node, const char* attrN
   int index;
   NCCLCHECK(xmlGetAttrIndex(node, attrName, &index));
   if (index == -1) {
-    index = node->nAttrs++;
+    NCCLCHECK(xmlGetNextAttrIndex(node, &index));
     strncpy(node->attrs[index].key, attrName, MAX_STR_LEN);
     node->attrs[index].key[MAX_STR_LEN] = '\0';
     snprintf(node->attrs[index].value, MAX_STR_LEN, "%f", value);
@@ -1349,7 +1475,9 @@ ncclResult_t ncclTopoGetPath(ncclXmlNode** nodes, int nNodes, int* path, ncclXml
 
     if (c) {
       common = temp;
-      if (common == NULL) TRACE(NCCL_GRAPH, "COMMON IS NULL");
+      if (common == NULL) {
+        TRACE(NCCL_GRAPH, "COMMON IS NULL");
+      }
       for (int i = 0; i < nNodes; i++) {
         parents[i].pop();
       }
@@ -1745,36 +1873,15 @@ ncclResult_t ncclTopoFindLinkWidth(ncclXmlNode* parent, ncclXmlNode** physNetNod
   return ncclSuccess;
 }
 
-ncclResult_t ncclTopoWidenLinks(ncclXmlNode** physNetNodes, int ndevs, ncclXmlNode* parent) {
-  int sumLinkWidth = 0;
-  NCCLCHECK(ncclTopoFindLinkWidth(parent, physNetNodes, ndevs, &sumLinkWidth));
-  for (int i = 0; i < ndevs; i++) {
-    ncclXmlNode* temp = physNetNodes[i];
-    while (temp != parent) {
-      if (strcmp(temp->name, "pci") == 0) {
-        NCCLCHECK(xmlSetAttrInt(temp, "link_width", sumLinkWidth));
-        TRACE(NCCL_GRAPH, "Set link_width to %d for node %s", sumLinkWidth, temp->name);
-      }
-      temp = temp->parent;
-    }
-  }
-
-  if (strcmp(parent->name, "pci") == 0) {
-    NCCLCHECK(xmlSetAttrInt(parent, "link_width", sumLinkWidth));
-    TRACE(NCCL_GRAPH, "Set link_width to %d for node %s", sumLinkWidth, parent->name);
-  }
-
-  return ncclSuccess;
-}
-
-ncclResult_t ncclTopoGetVNicParent(struct ncclXml* xml, ncclResult_t (*getProperties)(int, ncclNetProperties_t*),
+ncclResult_t ncclTopoGetVNicParent(struct ncclXml* xml, const char* tagName,
+                                   ncclResult_t (*getProperties)(int, ncclNetProperties_t*),
                                    ncclNetVDeviceProps_t* vProps, ncclXmlNode** parent) {
   ncclNetProperties_t props[NCCL_NET_MAX_DEVS_PER_NIC];
   ncclXmlNode* physNetNodes[NCCL_NET_MAX_DEVS_PER_NIC];
   for (int i = 0; i < vProps->ndevs; i++) {
     NCCLCHECK(getProperties(vProps->devs[i], props + i));
     struct ncclXmlNode* physNetNode;
-    NCCLCHECK(xmlFindTagKv(xml, "net", &physNetNode, "name", props[i].name));
+    NCCLCHECK(xmlFindTagKv(xml, tagName, &physNetNode, "name", props[i].name));
     physNetNodes[i] = physNetNode;
     TRACE(NCCL_GRAPH, "Re-found physical ncclNet node %d %s", i, props[i].name);
   }
@@ -1868,6 +1975,7 @@ out:
 
 static ncclResult_t ncclTopoPopulateNics(ncclXml* xml, int startIndex, int endIndex, struct ncclTopoNetInfo* netInfo,
                                          int virtualNics) {
+  const char* tagName = netInfo->gin ? "gin" : (netInfo->rma ? "rma" : "net");
   for (int n = startIndex; n < endIndex; n++) {
     ncclNetProperties_t props;
     NCCLCHECK(netInfo->getProperties(n, &props));
@@ -1875,14 +1983,32 @@ static ncclResult_t ncclTopoPopulateNics(ncclXml* xml, int startIndex, int endIn
     struct ncclXmlNode* parent = NULL;
     if (virtualNics) {
       struct ncclXmlNode* net = NULL;
-      NCCLCHECK(xmlFindTagKv(xml, "net", &net, "name", props.name));
+      NCCLCHECK(xmlFindTagKv(xml, tagName, &net, "name", props.name));
       // In the event of multithreaded use case, we need to re-discover the shared parent of the given devices for
       // this vNIC
       // Only run this if the net doesn't exist locally - this may alter the XML state
-      if (net == NULL) NCCLCHECK(ncclTopoGetVNicParent(xml, netInfo->getProperties, &props.vProps, &parent));
+      if (net == NULL) NCCLCHECK(ncclTopoGetVNicParent(xml, tagName, netInfo->getProperties, &props.vProps, &parent));
     }
 
-    NCCLCHECK(ncclTopoFillNet(xml, "net", props.pciPath, props.name, &netNode, parent));
+    NCCLCHECK(ncclTopoFillNet(xml, tagName, props.pciPath, props.name, &netNode, parent));
+    // Move <net .... gin/rma=1> XML nodes to <gin/rma ...> nodes.
+    // This would lead to duplication of the device in ncclTopoAddNic.
+    if (netInfo->gin || netInfo->rma) {
+      struct ncclXmlNode* legacyNetNode = NULL;
+      NCCLCHECK(xmlFindTagKv(xml, "net", &legacyNetNode, "name", props.name));
+      if (legacyNetNode) {
+        int legacyAttr = 0;
+        NCCLCHECK(xmlGetAttrIntDefault(legacyNetNode, tagName, &legacyAttr, 0));
+        if (legacyAttr) {
+          int count = 0;
+          while (count < legacyNetNode->nAttrs) {
+            NCCLCHECK(xmlSetAttrIfUnset(netNode, legacyNetNode->attrs[count].key, legacyNetNode->attrs[count].value));
+            count++;
+          }
+          NCCLCHECK(xmlUnsetAttr(legacyNetNode, tagName));
+        }
+      }
+    }
 
     const char* colAttr;
     NCCLCHECK(xmlGetAttr(netNode, "coll", &colAttr));
@@ -1895,8 +2021,7 @@ static ncclResult_t ncclTopoPopulateNics(ncclXml* xml, int startIndex, int endIn
       xmlGetAttrIntDefault(netNode, "net", &net, dev >= 0); // no "net" attribute uses the presence of dev
       xmlGetAttrIntDefault(netNode, "gin", &gin, 0);
       xmlGetAttrIntDefault(netNode, "rma", &rma, 0);
-      INFO(NCCL_GRAPH | NCCL_INIT | NCCL_NET,
-           "TOPO/NET : Changing %s dev index from %d to %d. This device is shared by %s %s %s plugin(s). This can be "
+      ATTN("TOPO/NET : Changing %s dev index from %d to %d. This device is shared by %s %s %s plugin(s). This can be "
            "due to outdated plugin or topology xml file. The former may cause performance degradation. Try setting "
            "NCCL_IB_DEVICE_PCI_ORDER=0 or upgrading your net plugin to resolve this warning.",
            netInfo->name, dev, n, net ? "NET" : "", gin ? "GIN" : "", rma ? "RMA" : "");
@@ -1906,9 +2031,23 @@ static ncclResult_t ncclTopoPopulateNics(ncclXml* xml, int startIndex, int endIn
     NCCLCHECK(xmlInitAttrInt(netNode, "latency", props.latency));
     NCCLCHECK(xmlInitAttrInt(netNode, "speed", props.speed));
     NCCLCHECK(xmlInitAttrInt(netNode, "port", props.port));
-    if (props.railId != NCCL_NET_ID_UNDEF) NCCLCHECK(xmlInitAttrInt(netNode, "rail", props.railId));
-    if (props.planeId != NCCL_NET_ID_UNDEF) NCCLCHECK(xmlInitAttrInt(netNode, "plane", props.planeId));
     NCCLCHECK(xmlInitAttrUint64(netNode, "guid", props.guid));
+    // Reserve bit 16 for NCCL-generated rail and plane IDs.
+    int rail = (props.railId == NCCL_NET_ID_UNDEF) ? NCCL_TOPO_UNDEF : (props.railId & 0xFFFF);
+    int plane = (props.planeId == NCCL_NET_ID_UNDEF) ? NCCL_TOPO_UNDEF : (props.planeId & 0xFFFF);
+    NCCLCHECK(ncclTopoGetRailPlane(netInfo->railKeyList, netNode, props.port, &rail, &plane));
+
+    int oldRail, oldPlane;
+    NCCLCHECK(xmlGetAttrIntDefault(netNode, "rail", &oldRail, rail));
+    NCCLCHECK(xmlGetAttrIntDefault(netNode, "plane", &oldPlane, plane));
+    if (oldRail != rail || oldPlane != plane) {
+      WARN("TOPO/NET : Inconsistent rail/plane for net %s: existing %d/%d, new %d/%d.", props.name, oldRail, oldPlane,
+           rail, plane);
+      return ncclInvalidUsage;
+    }
+    NCCLCHECK(xmlInitAttrInt(netNode, "rail", rail));
+    NCCLCHECK(xmlInitAttrInt(netNode, "plane", plane));
+
     NCCLCHECK(xmlInitAttrInt(netNode, "maxconn", props.maxComms));
     bool gdrSupport =
       (props.ptrSupport & NCCL_PTR_CUDA) || (netInfo->dmaBufSupport && (props.ptrSupport & NCCL_PTR_DMABUF));
@@ -1933,10 +2072,11 @@ static ncclResult_t ncclTopoPopulateNics(ncclXml* xml, int startIndex, int endIn
     NCCLCHECK(xmlGetAttr(netNode, "rma", &rmaAttr));
     NCCLCHECK(xmlGetAttr(netNode, "coll", &colAttr));
     NCCLCHECK(xmlGetAttr(netNode, "keep", &keepAttr));
-    INFO(
-      NCCL_GRAPH,
-      "ncclTopoPopulateNics : Filled %s in topo with pciPath=%s net=%s gin=%s rma=%s keep=%s coll=%s rail=%d plane=%d",
-      props.name, props.pciPath, netAttr, ginAttr, rmaAttr, keepAttr, colAttr, props.railId, props.planeId);
+    INFO(NCCL_GRAPH,
+         "ncclTopoPopulateNics : Filled %s in topo with pciPath=%s net=%s gin=%s rma=%s keep=%s coll=%s rail=%d (%d) "
+         "plane=%d (%d)",
+         props.name, props.pciPath, netAttr, ginAttr, rmaAttr, keepAttr, colAttr, rail, props.railId, plane,
+         props.planeId);
   }
 
   return ncclSuccess;
@@ -1987,6 +2127,7 @@ ncclResult_t ncclTopoProcessNet(ncclXml* xml, const char* dumpXmlFile, struct nc
     }
     // populate the virtual devices if any
     if (nVirtualNics > 0) {
+      // Physical devices within a virtual one have to be removed. The fused dev inherits the guid.
       // Note: ncclTopoMakeVnic doesn't create a vNic if ndevs = 1; no special case needed
       NCCLCHECK(ncclTopoUpdateVNics(xml, net, nPhysicalNics, nVirtualNics));
       // Populate the virtual devices and set keep = 1
@@ -1997,32 +2138,111 @@ ncclResult_t ncclTopoProcessNet(ncclXml* xml, const char* dumpXmlFile, struct nc
   return ncclSuccess;
 }
 
-ncclResult_t ncclTopoGetFusionEnv(int* mergeLevel, const char** forceMerge) {
+ncclResult_t ncclTopoGetXmlCpuArch(ncclXml* xml, int* cpuArch) {
+  // loop over the CPUs until we find the arch
+  const char* str = NULL;
+  struct ncclXmlNode* cpu = NULL;
+  NCCLCHECK(xmlFindTag(xml, "cpu", &cpu));
+  while (str == NULL && cpu != NULL) {
+    NCCLCHECK(xmlGetAttr(cpu, "arch", &str));
+    NCCLCHECK(xmlFindNextTag(xml, "cpu", cpu, &cpu));
+  }
+  // str == NULL will return NCCL_TOPO_CPU_ARCH_UNDEF
+  NCCLCHECK(kvConvertToInt(str, cpuArch, kvDictCpuArch));
+  return ncclSuccess;
+}
+
+static bool ncclTopoIsVeraRubin(int cudaCompCap, int cpuArch) {
+  return cpuArch == NCCL_TOPO_CPU_ARCH_ARM && RUBIN_AND_LATER(cudaCompCap);
+}
+
+ncclResult_t ncclTopoGetFusionEnv(int* mergeLevel, const char** forceMerge, int cudaCompCap, int cpuArch) {
   if (forceMerge) *forceMerge = ncclGetEnv("NCCL_NET_FORCE_MERGE");
   const char* mergeLevelEnv = ncclGetEnv("NCCL_NET_MERGE_LEVEL");
   if (mergeLevelEnv) {
     kvConvertToInt(mergeLevelEnv, mergeLevel, nicPathKvList);
   } else {
-    *mergeLevel = PATH_PORT;
+    *mergeLevel = ncclTopoIsVeraRubin(cudaCompCap, cpuArch) ? PATH_PHB : PATH_PORT;
   }
   return ncclSuccess;
 }
 
-static ncclResult_t ncclTopoGetMergePolicy(int* mergePolicy) {
-  *mergePolicy = NCCL_NET_MERGE_POLICY_ALL;
+static ncclResult_t ncclTopoGetMergePolicy(int* mergePolicy, int cudaCompCap, int cpuArch) {
+  *mergePolicy = ncclTopoIsVeraRubin(cudaCompCap, cpuArch) ? NCCL_NET_MERGE_POLICY_RAIL : NCCL_NET_MERGE_POLICY_ALL;
   const char* env = ncclGetEnv("NCCL_NET_MERGE_POLICY");
   if (env) {
     if (strcasecmp(env, "RAIL") == 0) {
       *mergePolicy = NCCL_NET_MERGE_POLICY_RAIL;
       INFO(NCCL_ENV, "NCCL_NET_MERGE_POLICY set by environment to RAIL");
-    } else if (strcasecmp(env, "ALL") != 0) {
-      WARN("NCCL_NET_MERGE_POLICY: unknown value '%s', defaulting to ALL", env);
+    } else {
+      *mergePolicy = NCCL_NET_MERGE_POLICY_ALL;
+      if (strcasecmp(env, "ALL") != 0) {
+        WARN("NCCL_NET_MERGE_POLICY: unknown value '%s', defaulting to ALL", env);
+      }
     }
   }
   return ncclSuccess;
 }
 
 static std::mutex netMutex;
+
+ncclResult_t ncclTopoGetNetPropertiesSnapshot(struct ncclComm* comm, bool requireCommInitialized,
+                                              struct ncclTopoNetPropertiesSnapshot** snapshots, int* nSnapshots) {
+  ncclResult_t ret = ncclSuccess;
+  int count = 0;
+
+  if (comm == nullptr || snapshots == nullptr || nSnapshots == nullptr) {
+    WARN("invalid arguments for network properties snapshot");
+    return ncclInvalidArgument;
+  }
+  *snapshots = nullptr;
+  *nSnapshots = 0;
+
+  std::lock_guard<std::mutex> lock(netMutex);
+  if (requireCommInitialized) {
+    ncclResult_t initState = COMPILER_ATOMIC_LOAD(&comm->initState, std::memory_order_acquire);
+    if (initState != ncclSuccess) return initState;
+  }
+
+  ncclNet_t* net = comm->ncclNet;
+  if (net == nullptr) return ncclSuccess;
+  if (net->devices == nullptr || net->getProperties == nullptr) {
+    WARN("network plugin has invalid properties callbacks");
+    return ncclInvalidArgument;
+  }
+  NCCLCHECKGOTO(net->devices(&count), ret, exit);
+  if (count < 0) {
+    WARN("network plugin returned invalid device count %d", count);
+    ret = ncclInternalError;
+    goto exit;
+  }
+  if (count == 0) goto exit;
+
+  NCCLCHECKGOTO(ncclCalloc(snapshots, count), ret, exit);
+  for (int dev = 0; dev < count; dev++) {
+    struct ncclTopoNetPropertiesSnapshot* snapshot = *snapshots + dev;
+    ncclNetProperties_t properties = {};
+
+    if (net->getProperties(dev, &properties) != ncclSuccess) continue;
+    snapshot->propertiesValid = true;
+    snapshot->vProps = properties.vProps;
+    snapshot->speed = properties.speed;
+    snapshot->port = properties.port;
+    snapshot->netDeviceType = properties.netDeviceType;
+    if (properties.name != nullptr) {
+      int n = snprintf(snapshot->name, sizeof(snapshot->name), "%s", properties.name);
+      if (n < 0 || (size_t)n >= sizeof(snapshot->name)) snapshot->name[0] = '\0';
+    }
+    if (properties.pciPath != nullptr) {
+      int n = snprintf(snapshot->pciPath, sizeof(snapshot->pciPath), "%s", properties.pciPath);
+      if (n < 0 || (size_t)n >= sizeof(snapshot->pciPath)) snapshot->pciPath[0] = '\0';
+    }
+  }
+  *nSnapshots = count;
+
+exit:
+  return ret;
+}
 
 ncclResult_t ncclTopoGetSystem(struct ncclComm* comm, struct ncclTopoSystem** system, const char* dumpXmlFile) {
   ncclResult_t ret = ncclSuccess;
@@ -2031,7 +2251,9 @@ ncclResult_t ncclTopoGetSystem(struct ncclComm* comm, struct ncclTopoSystem** sy
   int* localRanks = NULL;
   struct ncclXml* rankXml;
   int localRank = -1, nLocalRanks = 0;
+  int cpuArch = NCCL_TOPO_UNDEF;
   struct ncclTopoNetInfo netInfo = {0};
+  struct ncclTopoNetRailKeyList railKeyList;
   NCCLCHECK(xmlAlloc(&xml, NCCL_TOPO_XML_MAX_NODES));
   const char* xmlTopoFile = ncclGetEnv("NCCL_TOPO_FILE");
   if (xmlTopoFile) {
@@ -2069,6 +2291,7 @@ ncclResult_t ncclTopoGetSystem(struct ncclComm* comm, struct ncclTopoSystem** sy
     NCCLCHECKGOTO(xmlInitAttrInt(node, "gdr", comm->peerInfo[comm->rank].gdrSupport), ret, fail);
     NCCLCHECKGOTO(xmlSetAttrInt(node, "mlopart", comm->peerInfo[comm->rank].mloPart), ret, fail);
   }
+  NCCLCHECKGOTO(ncclTopoGetXmlCpuArch(xml, &cpuArch), ret, fail);
 
   // Auto-detect NICs if needed, net/gin/collnet share the same xml/graph nodes.
   // Start with gin, then with collnet so that they precedence.
@@ -2089,6 +2312,7 @@ ncclResult_t ncclTopoGetSystem(struct ncclComm* comm, struct ncclTopoSystem** sy
       netInfo.getProperties = gin->getProperties;
       netInfo.makeVDevice = NULL;
       netInfo.devices = gin->devices;
+      netInfo.railKeyList = &railKeyList;
       NCCLCHECKGOTO(ncclTopoProcessNet(xml, dumpXmlFile, &netInfo), ret, fail);
     }
     ncclRma_t* rma = comm->rmaState.rmaProxyState.ncclRma;
@@ -2104,6 +2328,7 @@ ncclResult_t ncclTopoGetSystem(struct ncclComm* comm, struct ncclTopoSystem** sy
       netInfo.getProperties = rma->getProperties;
       netInfo.makeVDevice = NULL;
       netInfo.devices = rma->devices;
+      netInfo.railKeyList = &railKeyList;
       NCCLCHECKGOTO(ncclTopoProcessNet(xml, dumpXmlFile, &netInfo), ret, fail);
     }
     if (collNetSupport(comm)) {
@@ -2120,8 +2345,9 @@ ncclResult_t ncclTopoGetSystem(struct ncclComm* comm, struct ncclTopoSystem** sy
       netInfo.getProperties = comm->ncclCollNet->getProperties;
       netInfo.makeVDevice = comm->ncclCollNet->makeVDevice;
       netInfo.devices = comm->ncclCollNet->devices;
-      NCCLCHECK(ncclTopoGetFusionEnv(&netInfo.mergeLevel, &netInfo.forceMerge));
-      NCCLCHECK(ncclTopoGetMergePolicy(&netInfo.mergePolicy));
+      netInfo.railKeyList = &railKeyList;
+      NCCLCHECK(ncclTopoGetFusionEnv(&netInfo.mergeLevel, &netInfo.forceMerge, comm->minCompCap, cpuArch));
+      NCCLCHECK(ncclTopoGetMergePolicy(&netInfo.mergePolicy, comm->minCompCap, cpuArch));
       NCCLCHECKGOTO(ncclTopoProcessNet(xml, dumpXmlFile, &netInfo), ret, fail);
     }
 
@@ -2138,8 +2364,9 @@ ncclResult_t ncclTopoGetSystem(struct ncclComm* comm, struct ncclTopoSystem** sy
     netInfo.getProperties = comm->ncclNet->getProperties;
     netInfo.makeVDevice = comm->ncclNet->makeVDevice;
     netInfo.devices = comm->ncclNet->devices;
-    NCCLCHECK(ncclTopoGetFusionEnv(&netInfo.mergeLevel, &netInfo.forceMerge));
-    NCCLCHECK(ncclTopoGetMergePolicy(&netInfo.mergePolicy));
+    netInfo.railKeyList = &railKeyList;
+    NCCLCHECK(ncclTopoGetFusionEnv(&netInfo.mergeLevel, &netInfo.forceMerge, comm->minCompCap, cpuArch));
+    NCCLCHECK(ncclTopoGetMergePolicy(&netInfo.mergePolicy, comm->minCompCap, cpuArch));
     NCCLCHECKGOTO(ncclTopoProcessNet(xml, dumpXmlFile, &netInfo), ret, fail);
   }
 
@@ -2186,13 +2413,27 @@ ncclResult_t ncclTopoGetSystem(struct ncclComm* comm, struct ncclTopoSystem** sy
     NCCLCHECKGOTO(ncclTopoFuseXml(xml, peerXml), ret, fail);
   }
 
+  {
+    struct ncclXmlNode* topNode;
+    NCCLCHECKGOTO(xmlFindTag(xml, "system", &topNode), ret, fail);
+    if (topNode) {
+      NCCLCHECKGOTO(xmlSetAttrInt(topNode, "cross_clique", comm->MNNVL && comm->clique.size < comm->nRanks),
+                    ret, fail);
+    }
+  }
+
   if (dumpXmlFile && comm->rank == ncclParamTopoDumpFileRank()) {
     INFO(NCCL_ENV, "NCCL_TOPO_DUMP_FILE set by environment to %s", dumpXmlFile);
     NCCLCHECKGOTO(ncclTopoDumpXmlToFile(dumpXmlFile, xml), ret, fail);
   }
 
   // Only update our topo tracking structure if we aren't dumping (separate steps)
-  if (dumpXmlFile == NULL) NCCLCHECKGOTO(ncclTopoGetSystemFromXml(xml, system, getHostHash()), ret, fail);
+  if (dumpXmlFile == NULL) {
+    NCCLCHECKGOTO(ncclTopoGetSystemFromXml(xml, system, getHostHash()), ret, fail);
+    // store comm related information
+    (*system)->minDriverVersion = comm->minDriverVersion;
+    (*system)->cuMemGdrSupport = comm->cuMemGdrSupport;
+  }
 
 exit:
   if (!comm->MNNVL && localRanks) free(localRanks);
@@ -2314,7 +2555,53 @@ ncclResult_t ncclTopoGetNetDevsPolicy(enum netDevsPolicy* policy, int* policyNum
   return ncclSuccess;
 }
 
-NCCL_PARAM(TopoScatterStartNet, "TOPO_SCATTER_START_NET", 0);
+// Sort localNets by (rail, plane); rail r spans [railOffset[r], railOffset[r+1]).
+struct netRailSort {
+  int netIndex;
+  int railIdx;
+  int planeId;
+  int idx;
+};
+
+static int compareRailPlane(const void* a, const void* b) {
+  const struct netRailSort* x = (const struct netRailSort*)a;
+  const struct netRailSort* y = (const struct netRailSort*)b;
+  if (x->railIdx != y->railIdx) return (x->railIdx < y->railIdx) ? -1 : 1;
+  if (x->planeId != y->planeId) return (x->planeId < y->planeId) ? -1 : 1;
+  if (x->idx != y->idx) return (x->idx < y->idx) ? -1 : 1;
+  return 0;
+}
+
+static ncclResult_t ncclTopoSortDevsByRailPlane(struct ncclTopoSystem* system, int type, int* localNets,
+                                                int localNetCount, int* railOffset, int* localRailCount) {
+  *localRailCount = 0;
+  if (localNetCount == 0) return ncclSuccess;
+
+  struct netRailSort sorted[NCCL_TOPO_MAX_NODES];
+  for (int d = 0; d < localNetCount; d++) {
+    struct ncclTopoNode* netNode = system->nodes[type].nodes + localNets[d];
+    int idx = 0;
+    while (idx < d) {
+      struct ncclTopoNode* tmpNode = system->nodes[type].nodes + localNets[idx];
+      if (tmpNode->net.railId == netNode->net.railId) break;
+      idx++;
+    }
+    sorted[d].railIdx = idx;
+    sorted[d].netIndex = localNets[d];
+    sorted[d].planeId = netNode->net.planeId;
+    sorted[d].idx = d;
+  }
+  qsort(sorted, localNetCount, sizeof(struct netRailSort), compareRailPlane);
+
+  railOffset[0] = 0;
+  *localRailCount = 1;
+  for (int d = 0; d < localNetCount; d++) {
+    localNets[d] = sorted[d].netIndex;
+    if (d > 0 && sorted[d].railIdx != sorted[d - 1].railIdx) (*localRailCount)++;
+    railOffset[*localRailCount] = d + 1;
+  }
+  return ncclSuccess;
+}
 
 ncclResult_t ncclTopoGetLocalNetType(struct ncclTopoSystem* system, int type, int rank, int channelId, int64_t* id,
                                      int* dev) {
@@ -2331,39 +2618,39 @@ ncclResult_t ncclTopoGetLocalNetType(struct ncclTopoSystem* system, int type, in
     return ncclInternalError;
   }
 
-  int localGpuCount = 0, netsPerGpu = 0, policyCount = 0;
+  int localGpuCount = 0, netsPerGpu = 0, policyCount = 0, localRailCount = 0;
   int localGpus[NCCL_TOPO_MAX_NODES];
+  int railOffset[NCCL_TOPO_MAX_NODES + 1];
   enum netDevsPolicy policy;
   NCCLCHECK(ncclTopoGetNetDevsPolicy(&policy, &policyCount));
   NCCLCHECK(ncclTopoGetLocal(system, type, localNets[0], GPU, localGpus, &localGpuCount, NULL));
-  if (policy == NETDEVS_POLICY_AUTO) {
-    netsPerGpu = DIVUP(localNetCount, localGpuCount);
-  } else if (policy == NETDEVS_POLICY_ALL) {
+
+  struct ncclTopoNode* gpuNode = system->nodes[GPU].nodes + gpu;
+  int net = 0;
+  NCCLCHECK(ncclTopoSortDevsByRailPlane(system, type, localNets, localNetCount, railOffset, &localRailCount));
+  if (localRailCount == 0) {
+    WARN("No rails found for GPU/%d.", gpuNode->gpu.dev);
+    return ncclInternalError;
+  }
+  int rail = 0;
+  int devIdx = gpuNode->gpu.dev;
+  if (isPow2(localRailCount)) {
+    rail = mirrorBits(devIdx, localRailCount);
+  } else {
+    rail = (gpuNode->gpu.dev * DIVUP(localRailCount, localGpuCount)) % localRailCount;
+  }
+  int railEnd = rail + DIVUP(localRailCount, localGpuCount);
+  netsPerGpu = railOffset[railEnd % localRailCount] + ((railEnd < localRailCount) ? 0 : railOffset[localRailCount]) -
+               railOffset[rail];
+  net = railOffset[rail];
+  // overwrite the netsPerGpu if needed
+  if (policy == NETDEVS_POLICY_ALL) {
     netsPerGpu = localNetCount;
   } else if (policy == NETDEVS_POLICY_MAX) {
     netsPerGpu = std::min(policyCount, localNetCount);
-  } else {
-    WARN("Unknown netDevs policy");
-    return ncclInternalError;
   }
 
-  int gpuArch = system->nodes[GPU].nodes[gpu].gpu.cudaCompCap;
-  bool isCx8 = false;
-  int n = 0;
-  while (n < localNetCount && !isCx8) {
-    struct ncclTopoNode* net = &system->nodes[type].nodes[localNets[n]];
-    isCx8 |= net && net->net.vendor == 0x15b3 && (net->net.device == 0x2100 || net->net.device == 0x1023);
-    n++;
-  }
-
-  // Starting net is chosen to avoid collision and follow a similar pattern for all GPUs.
-  // localGpuCount GPUs share localNetCount NET devs; each GPU using netsPerGpu NET devs.
-  int net = system->nodes[GPU].nodes[gpu].gpu.dev;
-  if ((gpuArch >= 100 && isCx8) || ncclParamTopoScatterStartNet()) {
-    net = net % localGpuCount;
-  }
-  if (isPow2(localNetCount)) net = mirrorBits(net, localNetCount);
-  net += channelId % (netsPerGpu);
+  net += channelId % netsPerGpu;
   if (id) *id = system->nodes[type].nodes[localNets[net % localNetCount]].id;
   if (dev) *dev = system->nodes[type].nodes[localNets[net % localNetCount]].net.dev;
   return ncclSuccess;
@@ -2437,6 +2724,11 @@ ncclResult_t ncclTopoCpuType(struct ncclTopoSystem* system, int* arch, int* vend
   *vendor = system->nodes[CPU].nodes[0].cpu.vendor;
   *model = system->nodes[CPU].nodes[0].cpu.model;
   return ncclSuccess;
+}
+
+bool rcclTopoCpuIsRome(struct ncclTopoSystem* system) {
+  const struct ncclTopoNode* cpu = system->nodes[CPU].nodes;
+  return cpu->cpu.arch == NCCL_TOPO_CPU_ARCH_X86 && cpu->cpu.vendor == NCCL_TOPO_CPU_VENDOR_AMD && cpu->cpu.rome;
 }
 
 NCCL_PARAM(IgnoreCpuAffinity, "IGNORE_CPU_AFFINITY", 0);

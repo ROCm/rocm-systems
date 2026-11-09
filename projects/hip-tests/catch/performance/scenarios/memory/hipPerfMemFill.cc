@@ -118,7 +118,7 @@ template <class T> class hipPerfMemFill {
               << " " << props_.name << " with " << props_.multiProcessorCount
               << " CUs, large bar: " << supportLargeBar()
               << ", managed memory: " << supportManagedMemory()
-              << ", DeviceMallocFinegrained: " << supportDeviceMallocFinegrained() << std::endl;
+              << ", Device has FineGrained Attribute: " << deviceAttributeSupportFineGrained() << std::endl;
     return true;
   }
 
@@ -369,19 +369,12 @@ template <class T> class hipPerfMemFill {
     return true;
   }
 
-  /* This function should be via device attribute query*/
-  bool supportDeviceMallocFinegrained() {
+  bool deviceAttributeSupportFineGrained() {
 #ifdef __HIP_PLATFORM_AMD__
-    T* A = nullptr;
-    hipError_t err;
-
-    err =
-        hipExtMallocWithFlags(reinterpret_cast<void**>(&A), sizeof(T), hipDeviceMallocFinegrained);
-    if (err || !A) {
-      return false;
-    }
-    HIP_CHECK(hipFree(A));
-    return true;
+    int deviceId, deviceFineGrain;
+    HIP_CHECK(hipGetDevice(&deviceId));
+    HIP_CHECK(hipDeviceGetAttribute(&deviceFineGrain, hipDeviceAttributeFineGrainSupport, deviceId));
+    return deviceFineGrain > 0;
 #else
     return false;
 #endif
@@ -477,7 +470,7 @@ template <class T> class hipPerfMemFill {
     }
 
 #ifdef __HIP_PLATFORM_AMD__
-    if (supportDeviceMallocFinegrained()) {
+    if (deviceAttributeSupportFineGrained()) {
       if (!testExtDeviceMemory()) {
         return false;
       }

@@ -145,6 +145,10 @@ class TestContext {
 
 static bool _log_enable = (!TestContext::getEnvVar("HT_LOG_ENABLE").empty() ? true : false);
 
+// Set by the last-error-reset listener when strict mode saw an unconsumed error;
+// main() turns it into a non-zero exit after Catch and context cleanup finish.
+inline std::atomic<bool> g_hipStrictLastErrorFailed{false};
+
 // printing logs
 #define LogPrintf(format, ...)                                                                     \
   {                                                                                                \

@@ -11,11 +11,16 @@
 /// identical inputs/EXEC -- and the two 64-lane result arrays are asserted equal
 /// with EXPECT_EQ (util::set_force_scalar_for_testing flips the gate in-process).
 /// In-process inactive lanes must keep the sentinel.
+/// CDNA5 integer minmax instructions also have scalar and SIMD golden-result
+/// coverage for signed and unsigned inputs.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
@@ -30,6 +35,7 @@
 
 #include "util/simd.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <gtest/gtest.h>
@@ -61,9 +67,8 @@ struct Case {
 
 // cdna4-decodable 3-source integer ops; v_xor3_b32 is RDNA-only so omitted here
 // even though the SIMD probe ships for cross-ISA correctness. The min3/max3/med3
-// family (i16/i32/u16/u32) is included: the scalar bodies use std::max/min (and
-// the int minmax/maxmin use std::fmax/fmin on integers, order-preserving) so the
-// integer SIMD min/max is bit-identical for every input.
+// family (i16/i32/u16/u32) is included: the scalar bodies use integer
+// std::max/min, so the integer SIMD min/max is bit-identical for every input.
 const std::array<Case, 26> kCases = {{
     {"v_add3_u32_vop3", 511},
     {"v_or3_b32_vop3", 514},
@@ -120,7 +125,7 @@ struct Fixture {
   std::unique_ptr<Decoder> decoder;
   amdgpu::Wavefront *wf = nullptr;
 
-  explicit Fixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4)
+  explicit Fixture(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4, uint32_t width = 0)
       : gpu_mem("vop3_tern_int_mem"), l2("vop3_tern_int_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
     cfg.arch = arch;
@@ -128,14 +133,16 @@ struct Fixture {
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("cu_vop3_tern_int", cfg, &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, "cu_vop3_tern_int", cfg, &gpu_mem, &l2);
+    if (!cu)
+      return;
     decoder = Decoder::create(arch);
-    wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
+    wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF, width);
   }
 
   void seed_inputs(uint32_t rot, uint64_t exec) {
     uint32_t vb = wf->vgpr_alloc().base;
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
       cu->write_vgpr(vb + 0, lane, kVals[lane % kVals.size()]);
       cu->write_vgpr(vb + 1, lane, kVals[(lane + rot) % kVals.size()]);
       cu->write_vgpr(vb + 2, lane, kVals[(lane + 2 * rot) % kVals.size()]);
@@ -149,7 +156,7 @@ struct Fixture {
     EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     std::array<uint32_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
       out[lane] = cu->read_vgpr(vb + kDstVgpr, lane);
     return out;
   }
@@ -171,6 +178,8 @@ void check_case(const Case &c, uint64_t exec) {
   auto run_mode = [&](bool force_scalar, uint32_t rot) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
@@ -217,6 +226,46 @@ TEST(Vop3TernaryIntSimdCorrectness, PartialExec) {
   }
   for (const auto &c : kCases)
     check_case(c, /*exec=*/0xA5A5'F0F0'1234'8001ULL);
+}
+
+TEST(Vop3TernaryIntSimdCorrectness, Cdna5IntegerMinmaxGoldenResults) {
+  struct GoldenCase {
+    uint16_t opcode;
+    uint32_t src0;
+    uint32_t src1;
+    uint32_t src2;
+    uint32_t expected;
+  };
+  constexpr std::array cases = {
+      GoldenCase{cdna5::kVMaxminI32Vop3, static_cast<uint32_t>(-5), static_cast<uint32_t>(-3),
+                 static_cast<uint32_t>(-2), static_cast<uint32_t>(-3)},
+      GoldenCase{cdna5::kVMinmaxI32Vop3, static_cast<uint32_t>(-5), static_cast<uint32_t>(-3),
+                 static_cast<uint32_t>(-2), static_cast<uint32_t>(-2)},
+      GoldenCase{cdna5::kVMaxminU32Vop3, 0xffffffffu, 0x80000000u, 0x70000000u, 0x70000000u},
+      GoldenCase{cdna5::kVMinmaxU32Vop3, 0xffffffffu, 0x80000000u, 0xffffffffu, 0xffffffffu},
+  };
+
+  ForceScalarGuard gate_guard;
+  for (bool force_scalar : {true, false}) {
+    util::set_force_scalar_for_testing(force_scalar);
+    for (const auto &test_case : cases) {
+      Fixture fixture(ROCJITSU_CODE_ARCH_CDNA5);
+      ASSERT_NE(fixture.wf, nullptr);
+      const auto words = cdna5::build_vop3(
+          test_case.opcode, {.vdst = kDstVgpr, .src0 = 256, .src1 = 257, .src2 = 258});
+      std::unique_ptr<Instruction> instruction(decode_valid(*fixture.decoder, words.data()));
+      ASSERT_NE(instruction, nullptr);
+      const uint32_t base = fixture.wf->vgpr_alloc().base;
+      for (uint32_t lane = 0; lane < fixture.wf->wf_size(); ++lane) {
+        fixture.cu->write_vgpr(base, lane, test_case.src0);
+        fixture.cu->write_vgpr(base + 1, lane, test_case.src1);
+        fixture.cu->write_vgpr(base + 2, lane, test_case.src2);
+      }
+      fixture.wf->set_exec(~uint64_t{0});
+      ASSERT_TRUE(fixture.cu->execute_instruction(instruction.get(), *fixture.wf).succeeded());
+      EXPECT_EQ(fixture.cu->read_vgpr(base + kDstVgpr, 0), test_case.expected);
+    }
+  }
 }
 
 TEST(Vop3TernaryIntSimdCorrectness, IsaGoldenByteOperations) {
@@ -272,3 +321,54 @@ TEST(Vop3TernaryIntSimdCorrectness, IsaGoldenByteOperations) {
 }
 
 } // namespace
+
+TEST(Vop3TernaryIntSimdCorrectness, IntegerMinmaxPreservesSignedAndUnsignedBits) {
+  struct Operation {
+    uint16_t rdna4_op, cdna5_op;
+    bool is_signed, maxmin;
+  };
+  constexpr std::array operations{
+      Operation{rdna4::kVMaxminU32Vop3, cdna5::kVMaxminU32Vop3, false, true},
+      Operation{rdna4::kVMinmaxU32Vop3, cdna5::kVMinmaxU32Vop3, false, false},
+      Operation{rdna4::kVMaxminI32Vop3, cdna5::kVMaxminI32Vop3, true, true},
+      Operation{rdna4::kVMinmaxI32Vop3, cdna5::kVMinmaxI32Vop3, true, false}};
+  ForceScalarGuard guard;
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    Fixture fx(arch, arch == ROCJITSU_CODE_ARCH_CDNA5 ? 32 : 64);
+    ASSERT_NE(fx.wf, nullptr);
+    for (bool scalar : {false, true}) {
+      util::set_force_scalar_for_testing(scalar);
+      for (auto operation : operations) {
+        const uint16_t op =
+            arch == ROCJITSU_CODE_ARCH_CDNA5 ? operation.cdna5_op : operation.rdna4_op;
+        const auto words =
+            arch == ROCJITSU_CODE_ARCH_CDNA5
+                ? cdna5::build_vop3(op, {.vdst = kDstVgpr, .src0 = 256, .src1 = 257, .src2 = 258})
+                : rdna4::build_vop3(op, {.vdst = kDstVgpr, .src0 = 256, .src1 = 257, .src2 = 258});
+        std::unique_ptr<Instruction> inst(decode_valid(*fx.decoder, words.data()));
+        ASSERT_NE(inst, nullptr);
+        for (uint32_t rot = 0; rot < kVals.size(); ++rot) {
+          constexpr uint64_t exec = 0xa55a5aa55aa5a55a;
+          const auto actual = fx.run(inst.get(), rot, exec);
+          for (uint32_t lane = 0; lane < fx.wf->wf_size(); ++lane) {
+            const uint32_t a = kVals[lane % kVals.size()];
+            const uint32_t b = kVals[(lane + rot) % kVals.size()];
+            const uint32_t c = kVals[(lane + 2 * rot) % kVals.size()];
+            uint32_t expected;
+            if (operation.is_signed) {
+              const int32_t x = static_cast<int32_t>(a), y = static_cast<int32_t>(b),
+                            z = static_cast<int32_t>(c);
+              expected =
+                  operation.maxmin ? std::min(std::max(x, y), z) : std::max(std::min(x, y), z);
+            } else {
+              expected =
+                  operation.maxmin ? std::min(std::max(a, b), c) : std::max(std::min(a, b), c);
+            }
+            EXPECT_EQ(actual[lane], (exec & (uint64_t{1} << lane)) ? expected : DST_SENTINEL)
+                << "arch=" << arch << " op=" << op << " lane=" << lane << " rot=" << rot;
+          }
+        }
+      }
+    }
+  }
+}
