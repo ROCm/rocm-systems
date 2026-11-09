@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Local POC correlator: LTTng runtime tracepoints + CP dispatch log -> Perfetto/Chrome JSON.
 
-    join.py <run_dir> [--provider=rocm_hip]     (reads <run_dir>/lttng, and dlog.csv and clocks.csv when present;
-                           writes trace.json). The LTTng session needs the vpid and vtid contexts.
+    join.py <run_dir> [--provider=rocm_hip] [--rocprofv3-csv=<file>] [--probes-src=<file>]
+        Reads <run_dir>/lttng, and dlog.csv and clocks.csv when present; writes trace.json.
+        The LTTng session needs the vpid and vtid contexts. --rocprofv3-csv also writes the
+        API calls in rocprofv3's hip_api_trace.csv format; --probes-src (the generated
+        hip_trace_probes.cpp) gives each API's table, hence its rocprofv3 domain.
 
 Joins, as in the dispatch-tracing design (section 5) and the collector design (8.5), with the
 doorbell-slot key from rocprofiler-sdk's in-process reader:
@@ -22,9 +25,14 @@ from pathlib import Path
 
 import bt2
 
-args = [a for a in sys.argv[1:] if not a.startswith("--provider=")]
-provider = next((a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("--provider=")),
-                "rocm_hip")
+def option(name, default=None):
+    return next((a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith(f"--{name}=")), default)
+
+
+args = [a for a in sys.argv[1:] if not a.startswith("--")]
+provider = option("provider", "rocm_hip")
+rocprofv3_csv = option("rocprofv3-csv")  # also write rocprofv3's <prefix>_hip_api_trace.csv
+probes_src = option("probes-src")  # generated hip_trace_probes.cpp: which table each API is in
 run = Path(args[0])
 
 
@@ -217,6 +225,31 @@ for p in matched:
                            tid=p["slot"], ts=us(p["gpu_start"])))
 json.dump(dict(traceEvents=events, displayTimeUnit="ns"), open(run / "trace.json", "w"))
 
+# ------------------------------------------------------------------ rocprofv3 CSV
+if rocprofv3_csv:
+    # rocprofv3's hip_api_trace.csv: one row per completed call, in correlation-id order. The
+    # domain is the dispatch table the call goes through; the generated probes name it in each
+    # exit helper (exit_<Table>_<api>). Without them, the compiler table's APIs are the __hip*
+    # ones.
+    compiler = set()
+    if probes_src:
+        import re
+
+        compiler = set(re.findall(r"exit_HipCompilerDispatchTable_(\w+)\(", open(probes_src).read()))
+
+    def domain(name):
+        is_compiler = name in compiler if compiler else name.startswith("__hip")
+        return "HIP_COMPILER_API_EXT" if is_compiler else "HIP_RUNTIME_API_EXT"
+
+    with open(rocprofv3_csv, "w", newline="") as f:
+        w = csv.writer(f, quoting=csv.QUOTE_NONNUMERIC)
+        w.writerow(["Domain", "Function", "Process_Id", "Thread_Id", "Correlation_Id",
+                    "Start_Timestamp", "End_Timestamp"])
+        for c in api_calls:
+            if c["end"] is not None:
+                w.writerow([domain(c["name"]), c["name"], c["pid"], c["tid"], c["id"], c["start"],
+                            c["end"]])
+
 # ------------------------------------------------------------------ report
 lat = sorted(p["gpu_start"] - p["t"] for p in matched)
 nested = sum(1 for c in api_calls if c["parent"] is not None)
@@ -238,4 +271,5 @@ for p in matched:
     by_kernel[(p["kernel"], p["call"]["name"] if p["call"] else None)].append(p)
 for (k, api), lst in sorted(by_kernel.items()):
     print(f"  {len(lst):4d} x {k[:60]:60s} from {api}")
-print(f"wrote {run / 'trace.json'} ({len(events)} events)")
+print(f"wrote {run / 'trace.json'} ({len(events)} events)"
+      + (f" and {rocprofv3_csv}" if rocprofv3_csv else ""))
