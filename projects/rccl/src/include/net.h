@@ -92,8 +92,8 @@ struct rcclIBNicInfo {
  * @brief Map an NCCL_NET value to the plugin name it selects.
  *
  * Plugin selection only: ROCM-IB and IB-CAST load the same plugin but are not
- * the same mode. The other ROCM-IB / IB-CAST comparisons (transport/net.cc,
- * plugin/gin.cc, plugin/rma.cc) must keep matching their own literal spelling.
+ * the same mode. The AINIC-mode check in transport/net.cc must keep matching
+ * the literal ROCM-IB spelling.
  *
  * NCCL_NET= (set but empty) is passed through, as upstream does.
  *
@@ -123,7 +123,8 @@ extern bool rcclUseAinic();
  *
  * True when NCCL_NET selects IB-CAST, or NCCL_NET is unset on an AINIC host,
  * and NCCL_NET_PLUGIN does not request an external plugin ("none" and an empty
- * value do not). Mirrors the registration in plugin/net.cc.
+ * value do not). plugin/net.cc registers IB-CAST on it, and plugin/rma.cc and
+ * plugin/gin.cc pick the IB-CAST RMA and GIN backends on it, so all three agree.
  */
 inline bool rcclInternalNetIsIbCast() {
   const char* envNetPlugin = ncclGetEnv("NCCL_NET_PLUGIN");

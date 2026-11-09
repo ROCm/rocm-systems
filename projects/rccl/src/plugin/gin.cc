@@ -10,6 +10,7 @@
 #include "gin.h"
 #include "bootstrap.h"
 #include "checks.h"
+#include "net.h"
 #include "plugin.h"
 #include "nccl_gin.h"
 #include "graph/topo.h"
@@ -295,14 +296,11 @@ static void initPluginLibsOnceFunc() {
   // IB-CAST is provided by the generic ncclGinProxy (registered below) layered on top
   // of the IB-CAST RMA backend (IbCastRmaIbProxy, registered in plugin/rma.cc)
 #ifdef RCCL_NET_IB_CAST_ENABLE_GDAKI
-  {
-    const char* envNet = ncclGetEnv("NCCL_NET");
-    if (envNet && strcasecmp(envNet, "IB-CAST") == 0) {
-      pluginLibs[pluginCounter].ncclGin = &IbCastGinIbGdaki;
-      pluginLibs[pluginCounter].state = ncclGinPluginStateInitReady;
-      pluginLibs[pluginCounter].version = ncclGinVersion[0];
-      pluginCounter++;
-    }
+  if (rcclInternalNetIsIbCast()) {
+    pluginLibs[pluginCounter].ncclGin = &IbCastGinIbGdaki;
+    pluginLibs[pluginCounter].state = ncclGinPluginStateInitReady;
+    pluginLibs[pluginCounter].version = ncclGinVersion[0];
+    pluginCounter++;
   }
 #endif
 #endif

@@ -10,6 +10,7 @@
 #include "rma.h"
 #include "bootstrap.h"
 #include "checks.h"
+#include "net.h"
 #include "plugin.h"
 #include "nccl_rma.h"
 #include "gin/gin_host_proxy.h"
@@ -222,17 +223,15 @@ static void initPluginLibsOnceFunc() {
     strcpy(pluginLibs[pluginCounter++].name, ncclGetPluginLibName(ncclPluginTypeRma));
   }
 
-  // Add internal ib plugin. IB-CAST uses its own RMA backend layered on the CAST
-  // transport (also backs GIN over IB-CAST via the generic ncclGinProxy); all other
-  // cases use the default IB RMA proxy.
-  {
-    const char* envNet = ncclGetEnv("NCCL_NET");
-    if (envNet && strcasecmp(envNet, "IB-CAST") == 0) {
-      pluginLibs[pluginCounter].ncclRma = &IbCastRmaIbProxy;
-    } else {
-      pluginLibs[pluginCounter].ncclRma = &ncclRmaIbProxy;
-    }
-  }
+  // Add internal ib plugin. Whenever NET registers IB-CAST, RMA uses IB-CAST's backend
+  // (it also backs GIN over IB-CAST via the generic ncclGinProxy), which shares IB-CAST's
+  // verbs device list. The plain IB RMA proxy would enumerate the verbs devices a second
+  // time, which faults inside ibv_get_device_list on some rdma-core stacks (ionic, bng_re).
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  pluginLibs[pluginCounter].ncclRma = rcclInternalNetIsIbCast() ? &IbCastRmaIbProxy : &ncclRmaIbProxy;
+#else
+  pluginLibs[pluginCounter].ncclRma = &ncclRmaIbProxy;
+#endif
   pluginLibs[pluginCounter].state = ncclRmaPluginStateInitReady;
   pluginLibs[pluginCounter].version = ncclRmaVersion[0];
   pluginCounter++;

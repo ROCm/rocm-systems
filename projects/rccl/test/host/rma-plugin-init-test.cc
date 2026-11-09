@@ -5,7 +5,8 @@
  ************************************************************************/
 
 // Host-only microtests for src/plugin/rma.cc's ncclRmaPluginInit()
-// (AICOMRCCL-3322, ported from upstream NVIDIA/nccl commit 8136781a37).
+// (AICOMRCCL-3322, ported from upstream NVIDIA/nccl commit 8136781a37), and for
+// which built-in IB RMA proxy initPluginLibsOnceFunc() registers.
 //
 // init() allocates a per-comm RMA context before devices() is probed. If
 // devices() then fails or reports ndev <= 0, the plugin is disabled and that
@@ -31,7 +32,10 @@
 #include "nccl_rma.h"
 #include "plugin.h"
 
+#include "ScopedHook.h"
+#include "fakes/env_fakes.h"
 #include "fakes/nccl_fakes.h"
+#include "fakes/transport_stubs.h"
 
 // Externs the plugin rma.cc load path references. The tests call the file-static
 // ncclRmaPluginInit directly and never exercise these, but ncclRmaInit (compiled
@@ -273,6 +277,49 @@ TEST_F(RmaPluginInitTest, NullVtable_EnablesWithoutCallingIntoPlugin) {
   EXPECT_EQ(FakeRma::devicesCalls, 0);
   EXPECT_EQ(FakeRma::finalizeCalls, 0);
   EXPECT_EQ(comm_->rmaContext, nullptr);
+}
+
+// The internal IB slot takes IB-CAST's RMA backend exactly when NET registers
+// IB-CAST, so the plain IB RMA proxy never enumerates the verbs devices again.
+TEST_F(RmaPluginInitTest, InternalIbSlot_FollowsNetIbCastRegistration) {
+  struct Case {
+    const char* name;
+    const char* net;
+    const char* netPlugin;
+    bool ainic;
+    bool ibCast;
+  };
+  const Case cases[] = {
+      {"AINIC default", nullptr, nullptr, true, true},
+      {"NCCL_NET=IB-CAST", "IB-CAST", nullptr, false, true},
+      {"NCCL_NET=ib-cast", "ib-cast", nullptr, false, true},
+      {"NCCL_NET=ROCM-IB", "ROCM-IB", nullptr, false, true},
+      {"NCCL_NET_PLUGIN=none on AINIC", nullptr, "none", true, true},
+      {"empty NCCL_NET_PLUGIN on AINIC", nullptr, "", true, true},
+      {"non-AINIC default", nullptr, nullptr, false, false},
+      {"NCCL_NET=IB on AINIC", "IB", nullptr, true, false},
+      {"NCCL_NET=Socket on AINIC", "Socket", nullptr, true, false},
+      {"external net plugin on AINIC", nullptr, "librccl-net.so", true, false},
+  };
+  SetMicroEnvAbsent("NCCL_RMA_PLUGIN");
+  for (const Case& c : cases) {
+    SCOPED_TRACE(c.name);
+    if (c.net) SetMicroEnv("NCCL_NET", c.net);
+    else SetMicroEnvAbsent("NCCL_NET");
+    if (c.netPlugin) SetMicroEnv("NCCL_NET_PLUGIN", c.netPlugin);
+    else SetMicroEnvAbsent("NCCL_NET_PLUGIN");
+    ScopedHook ainic(g_useAinic, [&c] { return c.ainic; });
+
+    initPluginLibsOnceFunc();
+
+    ASSERT_GE(pluginCount, NCCL_RMA_NUM_INTERNAL_PLUGINS);
+    EXPECT_EQ(pluginLibs[pluginCount - NCCL_RMA_NUM_INTERNAL_PLUGINS].ncclRma,
+              c.ibCast ? &IbCastRmaIbProxy : &ncclRmaIbProxy);
+    EXPECT_EQ(pluginLibs[pluginCount - 1].ncclRma, &ncclRmaSocketProxy);
+  }
+  std::memset(pluginLibs, 0, sizeof(pluginLibs));
+  pluginCount = 0;
+  ResetEnvFakes();
 }
 
 }  // namespace

@@ -237,7 +237,7 @@ function(rccl_define_micro_source_lists)
     rma-proxy-launch-test.cc            # RMA proxy queue + stream-memop coverage
     rma-proxy-progress-test.cc
     gin-plugin-init-test.cc
-    rma-plugin-init-test.cc              # src/plugin/rma.cc ncclRmaPluginInit leak fix (AICOMRCCL-3322)
+    rma-plugin-init-test.cc              # src/plugin/rma.cc ncclRmaPluginInit leak fix (AICOMRCCL-3322), internal IB slot
     rma-test.cc
     rma-ce-test.cc
     ras-test.cc
@@ -2629,8 +2629,6 @@ rccl_add_transport_micro_binary(rccl-UnitTestsMicroTransportNetIbGin net_ib/gin-
     fakes/transport_net_ib_recovery_fakes.cc
     fakes/transport_net_ib_resiliency_fakes.cc
     fakes/transport_net_ib_wqe_lat_fakes.cc
-    fakes/transport_stubs.cc             # rcclUseAinic (IB-CAST verbs skip)
-    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc  # real GetGcnArchName/IsArchMatch (verbs skip)
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/common.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/connect_tmp.cc
