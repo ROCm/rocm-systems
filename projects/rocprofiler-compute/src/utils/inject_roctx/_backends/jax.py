@@ -294,7 +294,7 @@ def _wrap_primitive_bind_with_trace() -> None:
 class _RoctxPmapCallable:
     """pmap result that opens a ROCTX range, then forwards to the compiled function."""
 
-    __slots__ = ("_compiled", "_roctx_wrapped")
+    __slots__ = ("_compiled", "_roctx_wrapped", "__weakref__")
 
     def __init__(self, compiled: object) -> None:
         object.__setattr__(self, "_compiled", compiled)
