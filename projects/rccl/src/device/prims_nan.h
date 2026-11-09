@@ -784,7 +784,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
   }
 
 public:
-  __device__ Primitives(const int tid, const int nthreads, int const* recvPeers, int const* sendPeers,
+  __device__ __forceinline__ Primitives(const int tid, const int nthreads, int const* recvPeers, int const* sendPeers,
                         void const* inputBuf, void* outputBuf, uint64_t redOpArg, uint8_t group = 0,
                         uint8_t connIndexRecv = 0, uint8_t connIndexSend = 0, struct ncclDevWorkColl* e = nullptr,
                         bool ipcReg = false, bool netReg = false, int stepSize_ = 0)
@@ -821,7 +821,7 @@ public:
     : Primitives(tid, nthreads, recvPeers, sendPeers, inputBuf, outputBuf, redOpArg, group, connIndexRecv,
                  connIndexSend, collWork) {}
 
-  __device__ ~Primitives() {
+  __device__ __forceinline__ ~Primitives() {
     // Save steps for the next operation
     if (tid >= nthreads - WARP_SIZE && wid < fan.nrecv()) recvConn->step = recvConnHead;
     if (tid < fan.nsend()) sendConn->step = sendConnHead;
@@ -840,31 +840,48 @@ public:
     userBufs[Output] += delta;
   }
 
-  __device__ void send(intptr_t inpIx, int eltN) {
+  __device__ __forceinline__ void send(intptr_t inpIx, int eltN) {
     GenericOp<0, 1, Input, -1>(inpIx, -1, eltN, false);
   }
-  __device__ void sendFromOutput(intptr_t outIx, int eltN) {
+  __device__ __forceinline__ void sendFromOutput(intptr_t outIx, int eltN) {
     GenericOp<0, 1, Output, -1>(outIx, -1, eltN, false);
   }
-  __device__ void recv(intptr_t outIx, int eltN, bool postOp = false) {
+  __device__ __forceinline__ void recv(intptr_t outIx, int eltN, bool postOp = false) {
     GenericOp<1, 0, -1, Output>(-1, outIx, eltN, postOp);
   }
-  __device__ void recvReduceSend(intptr_t inpIx, int eltN) {
+  __device__ __forceinline__ void recvReduceSend(intptr_t inpIx, int eltN) {
     GenericOp<1, 1, Input, -1>(inpIx, -1, eltN, false);
   }
-  __device__ void recvReduceCopy(intptr_t inpIx, intptr_t outIx, int eltN, bool postOp = false) {
+  __device__ __forceinline__ void recvReduceCopy(intptr_t inpIx, intptr_t outIx, int eltN, bool postOp = false) {
     GenericOp<1, 0, Input, Output>(inpIx, outIx, eltN, postOp);
   }
-  __device__ void copySend(intptr_t inpIx, intptr_t outIx, int eltN, bool postOp = false) {
+  __device__ __forceinline__ void copySend(intptr_t inpIx, intptr_t outIx, int eltN, bool postOp = false) {
     GenericOp<0, 1, Input, Output>(inpIx, outIx, eltN, postOp);
   }
-  __device__ void recvCopySend(intptr_t outIx, int eltN, bool postOp = false) {
+  __device__ __forceinline__ void recvCopySend(intptr_t outIx, int eltN, bool postOp = false) {
     GenericOp<1, 1, -1, Output>(-1, outIx, eltN, postOp);
   }
-  __device__ void recvReduceCopySend(intptr_t inpIx, intptr_t outIx, int eltN, bool postOp = false) {
+  __device__ __forceinline__ void recvReduceCopySend(intptr_t inpIx, intptr_t outIx, int eltN, bool postOp = false) {
     GenericOp<1, 1, Input, Output>(inpIx, outIx, eltN, postOp);
   }
-  __device__ void recvSend(int eltN) {
+  __device__ __forceinline__ void recvSend(int eltN) {
     return GenericOp<1, 1, -1, -1>(-1, -1, eltN, false);
+  }
+
+  // Shadow PrimitivesWithoutDirect's forwards, which are not force-inlined: once a ring kernel is large enough
+  // for the inliner to outline one of them, Primitives no longer fits in registers and lives in scratch.
+  __device__ __forceinline__ void directSend(intptr_t inpIx, intptr_t outIx, int eltN) { send(inpIx, eltN); }
+  __device__ __forceinline__ void directSendFromOutput(intptr_t outIx, int eltN) { sendFromOutput(outIx, eltN); }
+  __device__ __forceinline__ void directRecv(intptr_t outIx, int eltN) { recv(outIx, eltN, false); }
+  __device__ __forceinline__ void directCopySend(intptr_t inpIx, intptr_t outIx, int eltN, bool postOp = false) {
+    copySend(inpIx, outIx, eltN, postOp);
+  }
+  __device__ __forceinline__ void directRecvCopyDirectSend(intptr_t inpIx, intptr_t outIx, int eltN,
+                                                           bool postOp = false) {
+    recvCopySend(outIx, eltN, false);
+  }
+  __device__ __forceinline__ void recvReduceCopyDirectSend(intptr_t inpIx, intptr_t outIx, int eltN,
+                                                           bool postOp = false) {
+    recvReduceCopySend(inpIx, outIx, eltN, postOp);
   }
 };
