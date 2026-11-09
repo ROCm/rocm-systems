@@ -2151,6 +2151,9 @@ set(_enq_common_args
     # supplies both, so neither needs a replacement definition.
     RCCL_STUBS_OMIT_ncclInitKernelsForDevice
     RCCL_STUBS_OMIT_ncclParamGraphStreamOrdering
+    # enqueue-test.cc provides these launch-prepare floors directly.
+    RCCL_ENQUEUE_TEST_DEPS_OMIT_scheduleRmaTasksToPlan
+    RCCL_HIP_FAKES_OMIT_hipLaunchHostFunc
     # Production librccl always builds this arm (CMakeLists.txt LL128_ENABLED=ON).
     # Standalone host CI otherwise compiles enqueue.cc without it, so addP2pToPlan's
     # gfx1250 ENABLE=1 window is unreachable there.
