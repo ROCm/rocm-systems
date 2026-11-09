@@ -143,7 +143,19 @@ GFX1201_PANEL_ID_TO_SECTION: Dict[int, str] = {
     309: "Memory chart - EA to DRAM",
     310: "Memory chart - Workgroup Processors (WGPs)",
     311: "Memory chart - Infinity Cache and GDDR6",
-    1304: "GL2C Request Bandwidth",
+    602: "Wave Dispatch Statistics",
+    901: "GL0 Utilization",
+    902: "GL0 Request Statistics",
+    903: "GL0 Cache Performance",
+    906: "GL0-GL1 Interface",
+    908: "GL0 Stalls",
+    1102: "GL1 Cache Utilization",
+    1103: "GL1 Cache Request Statistics",
+    1104: "GL1 Cache Request Bandwidth",
+    1106: "GL1-GL2 Interface",
+    1304: "GL2 Cache Bandwidth",
+    1310: "GL2 Cache Request Statistics",
+    1311: "GL2 Cache Performance",
 }
 
 

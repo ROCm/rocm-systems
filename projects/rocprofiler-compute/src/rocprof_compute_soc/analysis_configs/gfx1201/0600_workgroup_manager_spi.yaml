@@ -8,7 +8,7 @@ Panel Config:
   data source:
     - metric_table:
         id: 601
-        title: Utilization
+        title: SPI Utilization
         header: &id001
           metric: Metric
           avg: Avg
@@ -23,7 +23,7 @@ Panel Config:
             unit: Percent
     - metric_table:
         id: 602
-        title: Wavefront Dispatch
+        title: Wave Dispatch Statistics
         header: *id001
         metric:
           Compute Wave Dispatches:

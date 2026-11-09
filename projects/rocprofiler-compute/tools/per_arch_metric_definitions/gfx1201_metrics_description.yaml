@@ -315,7 +315,7 @@ CPC Utilizations:
     plain: Percentage of CPC counted cycles with its L2 address-translation interface busy.
     rst: Percentage of CPC counted cycles with its L2 address-translation interface busy.
     unit: Percent
-SPI Wavefront Dispatch:
+Wave Dispatch Statistics:
   Compute Wave Dispatches:
     plain: Measured dispatched wave count, normalized by the chosen unit. Navi48 wave-count normalization still requires validation; this count need not match the application's launch geometry.
     rst: Measured dispatched wave count, normalized by the chosen unit. Navi48 wave-count normalization still requires validation; this count need not match the application's launch geometry.
@@ -485,7 +485,7 @@ WGP Wavefront Life:
     plain: Estimated average wave lifetime from accumulated living-wave cycles divided by measured dispatched waves. Navi48 counter units, instance reduction, and wave-count normalization still require validation.
     rst: Estimated average wave lifetime from accumulated living-wave cycles divided by measured dispatched waves. Navi48 counter units, instance reduction, and wave-count normalization still require validation.
     unit: Cycles
-'GL0-GL1 Interface: Stalls':
+GL0 Stalls:
   Data FIFO Stall:
     plain: TCP data-FIFO stall counter, normalized by the chosen unit.
     rst: TCP data-FIFO stall counter, normalized by the chosen unit.
@@ -498,12 +498,12 @@ WGP Wavefront Life:
     plain: TCP request-stall counter toward the texture addresser, normalized by the chosen unit.
     rst: TCP request-stall counter toward the texture addresser, normalized by the chosen unit.
     unit: Cycles per Normalization Unit
-WGP Cache Utilization (LDS + GL0):
+GL0 Utilization:
   GL0 Busy (TCP):
     plain: TCP clock-enabled count relative to GPU-active cycles in this configuration, expressed as a percentage. Counter-instance and WGP normalization on Navi48 still require validation.
     rst: TCP clock-enabled count relative to GPU-active cycles in this configuration, expressed as a percentage. Counter-instance and WGP normalization on Navi48 still require validation.
     unit: Percent
-'GL0-GL1 Interface: Requests and Bandwidth':
+GL0-GL1 Interface:
   GL1 Read 128B Requests:
     plain: 128-byte read requests TCP sends to GL1, normalized by the chosen unit.
     rst: 128-byte read requests TCP sends to GL1, normalized by the chosen unit.
@@ -516,12 +516,12 @@ WGP Cache Utilization (LDS + GL0):
     plain: Write requests TCP sends to GL1, normalized by the chosen unit.
     rst: Write requests TCP sends to GL1, normalized by the chosen unit.
     unit: Count per Normalization Unit
-Cache Lookup:
+GL0 Cache Performance:
   Hit Rate:
     plain: Percentage of TCP requests that do not miss in the vector GL0 cache.
     rst: Percentage of TCP requests that do not miss in the vector GL0 cache.
     unit: Percent
-Cache Requests:
+GL0 Request Statistics:
   Miss Requests:
     plain: Vector GL0 cache requests reported as misses, normalized by the chosen unit.
     rst: Vector GL0 cache requests reported as misses, normalized by the chosen unit.
@@ -538,7 +538,7 @@ Cache Requests:
     plain: Vector GL0 cache write requests, normalized by the chosen unit.
     rst: Vector GL0 cache write requests, normalized by the chosen unit.
     unit: Count per Normalization Unit
-GL1C Utilization:
+GL1 Cache Utilization:
   GL1 Cache Busy:
     plain: Percentage of GL1 counted cycles marked busy. GL1 combines writes between WGPs and L2 on Navi48.
     rst: Percentage of GL1 counted cycles marked busy. GL1 combines writes between WGPs and L2 on Navi48.
@@ -555,7 +555,7 @@ GL1C Utilization:
     plain: GL1 stalls waiting for L2 request credits, normalized by the chosen unit.
     rst: GL1 stalls waiting for L2 request credits, normalized by the chosen unit.
     unit: Cycles per Normalization Unit
-GL1C-GLARB Interface:
+GL1-GL2 Interface:
   GL2 Read 128B Requests:
     plain: 128-byte read requests GL1 sends to L2, normalized by the chosen unit.
     rst: 128-byte read requests GL1 sends to L2, normalized by the chosen unit.
@@ -573,7 +573,7 @@ GL1A Processing:
     plain: Not available on gfx1201. The write-combining GL1 stage has no hit-rate measurement in this configuration.
     rst: Not available on gfx1201. The write-combining GL1 stage has no hit-rate measurement in this configuration.
     unit: Percent
-GL1C Request:
+GL1 Cache Request Statistics:
   Miss Requests:
     plain: Not available on gfx1201. This configuration does not collect GL1 miss-request counters.
     rst: Not available on gfx1201. This configuration does not collect GL1 miss-request counters.
@@ -590,7 +590,7 @@ GL1C Request:
     plain: GL1 write requests, normalized by the chosen unit.
     rst: GL1 write requests, normalized by the chosen unit.
     unit: Count per Normalization Unit
-GL1C Request Bandwidth:
+GL1 Cache Request Bandwidth:
   Read Bytes:
     plain: Read bytes requested from GL1, derived from the 32, 64, 128, and 256-byte request counts and normalized by the chosen unit.
     rst: Read bytes requested from GL1, derived from the 32, 64, 128, and 256-byte request counts and normalized by the chosen unit.
@@ -599,7 +599,7 @@ GL1C Request Bandwidth:
     plain: Write bytes requested from GL1, derived from the 32, 64, 128, and 256-byte request counts and normalized by the chosen unit.
     rst: Write bytes requested from GL1, derived from the 32, 64, 128, and 256-byte request counts and normalized by the chosen unit.
     unit: Bytes per Normalization Unit
-GL2C Utilization:
+GL2 Cache Request Statistics:
   Total Requests:
     plain: L2 requests, normalized by the chosen unit.
     rst: L2 requests, normalized by the chosen unit.
@@ -624,7 +624,7 @@ GL2C Utilization:
     plain: L2 write requests over EA destined for memory. Infinity Cache can absorb these requests before they reach GDDR6.
     rst: L2 write requests over EA destined for memory. Infinity Cache can absorb these requests before they reach GDDR6.
     unit: Count per Normalization Unit
-GL2C Cache Lookup:
+GL2 Cache Performance:
   GL2 Cache Hit Rate:
     plain: Percentage of L2 lookups that hit.
     rst: Percentage of L2 lookups that hit.
@@ -637,7 +637,7 @@ GL2C Cache Lookup:
     plain: L2 lookups that miss, normalized by the chosen unit.
     rst: L2 lookups that miss, normalized by the chosen unit.
     unit: Count per Normalization Unit
-GL2C Request Bandwidth:
+GL2 Cache Bandwidth:
   GL2 Cache Read BW:
     plain: Size-weighted uncompressed read requests measured at GL2 output FIFOs, using the 32, 64, 128, and 256-byte request categories. This request rate excludes the separate compressed-read categories and does not measure all L2 traffic or physical GDDR6 transfers. Complete compression coverage and request-size normalization require Navi48 qualification.
     rst: Size-weighted uncompressed read requests measured at GL2 output FIFOs, using the 32, 64, 128, and 256-byte request categories. This request rate excludes the separate compressed-read categories and does not measure all L2 traffic or physical GDDR6 transfers. Complete compression coverage and request-size normalization require Navi48 qualification.

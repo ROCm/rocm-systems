@@ -4,7 +4,7 @@
 Panel Config:
   id: 1300
   alias: gl2
-  title: GL2 Cache
+  title: GL2 Cache (L2)
   data source:
     - metric_table:
         id: 1301
@@ -18,7 +18,7 @@ Panel Config:
         metric: {}
     - metric_table:
         id: 1310
-        title: GL2C Utilization
+        title: GL2 Cache Request Statistics
         header: *id001
         metric:
           Total Requests:
@@ -53,7 +53,7 @@ Panel Config:
             unit: (Count + $normUnit)
     - metric_table:
         id: 1311
-        title: GL2C Cache Lookup
+        title: GL2 Cache Performance
         header: *id001
         metric:
           GL2 Cache Hit Rate:
@@ -83,7 +83,7 @@ Panel Config:
         metric: {}
     - metric_table:
         id: 1304
-        title: GL2C Request Bandwidth
+        title: GL2 Cache Bandwidth
         header: *id001
         metric:
           GL2 Cache Read BW:

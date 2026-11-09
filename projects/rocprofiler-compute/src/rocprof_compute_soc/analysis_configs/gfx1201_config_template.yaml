@@ -79,10 +79,10 @@ panels:
   data_sources:
   - type: metric_table
     id: 1
-    title: Utilization
+    title: SPI Utilization
   - type: metric_table
     id: 2
-    title: Wavefront Dispatch
+    title: Wave Dispatch Statistics
   - type: metric_table
     id: 3
     title: Resource Allocation
@@ -182,18 +182,18 @@ panels:
     title: LDS and GL0 Data Bandwidth
 - file: gl0_cache_and_lds.yaml
   panel_id: 9
-  panel_title: GL0 Cache and LDS
+  panel_title: GL0 Cache (TCP Cache)
   panel_alias: gl0
   data_sources:
   - type: metric_table
     id: 1
-    title: WGP Cache Utilization (LDS + GL0)
+    title: GL0 Utilization
   - type: metric_table
     id: 2
-    title: Cache Requests
+    title: GL0 Request Statistics
   - type: metric_table
     id: 3
-    title: Cache Lookup
+    title: GL0 Cache Performance
   - type: metric_table
     id: 4
     title: LDS Accesses
@@ -202,13 +202,13 @@ panels:
     title: Set-Slot Dynamics
   - type: metric_table
     id: 6
-    title: GL0-GL1 Interface - Requests and Bandwidth
+    title: GL0-GL1 Interface
   - type: metric_table
     id: 7
     title: GL0-GL1 Interface - Latency
   - type: metric_table
     id: 8
-    title: GL0-GL1 Interface - Stalls
+    title: GL0 Stalls
   - type: metric_table
     id: 9
     title: GL0-UTCL0 Interface
@@ -228,7 +228,7 @@ panels:
     title: TXD Utilization
 - file: gl1_cache.yaml
   panel_id: 11
-  panel_title: GL1 Cache
+  panel_title: GL1 Cache (L1)
   panel_alias: gl1
   data_sources:
   - type: metric_table
@@ -236,19 +236,19 @@ panels:
     title: GL1A Processing
   - type: metric_table
     id: 2
-    title: GL1C Utilization
+    title: GL1 Cache Utilization
   - type: metric_table
     id: 3
-    title: GL1C Request
+    title: GL1 Cache Request Statistics
   - type: metric_table
     id: 4
-    title: GL1C Request Bandwidth
+    title: GL1 Cache Request Bandwidth
   - type: metric_table
     id: 5
     title: GL1C Multicast
   - type: metric_table
     id: 6
-    title: GL1C-GLARB Interface
+    title: GL1-GL2 Interface
 - file: graphics_level_arbiter_glarb.yaml
   panel_id: 12
   panel_title: GLARB (Graphics Level Arbiter)
@@ -271,7 +271,7 @@ panels:
     title: GLARBC-GL2 Interface
 - file: gl2_cache.yaml
   panel_id: 13
-  panel_title: GL2 Cache
+  panel_title: GL2 Cache (L2)
   panel_alias: gl2
   data_sources:
   - type: metric_table
@@ -279,10 +279,10 @@ panels:
     title: GL2A Processing
   - type: metric_table
     id: 10
-    title: GL2C Utilization
+    title: GL2 Cache Request Statistics
   - type: metric_table
     id: 11
-    title: GL2C Cache Lookup
+    title: GL2 Cache Performance
   - type: metric_table
     id: 2
     title: GL2C-EA Stalls
@@ -291,7 +291,7 @@ panels:
     title: GL2C-EA Interface - Latencies
   - type: metric_table
     id: 4
-    title: GL2C Request Bandwidth
+    title: GL2 Cache Bandwidth
   - type: metric_table
     id: 5
     title: GL2C-EA Interface - Host CPU Bandwidth
@@ -351,7 +351,7 @@ panels:
     title: UTCL1 Metrics
 - file: graphics_register_bus_manager_grbm.yaml
   panel_id: 17
-  panel_title: GRBM (Graphics Register Bus Manager)
+  panel_title: Graphics Register Bus Manager (GRBM)
   panel_alias: grbm
   data_sources:
   - type: metric_table

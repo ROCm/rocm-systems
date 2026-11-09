@@ -1,14 +1,14 @@
-# gfx1201 (RDNA 4, Navi 48) -- GL0 Cache and LDS
+# gfx1201 (RDNA 4, Navi 48) -- GL0 Cache (TCP Cache)
 # Metric bodies are carried from the gfx1201 metrics port and placed in the
 # gfx12 panel template. Tables with no carried metric are empty.
 Panel Config:
   id: 900
   alias: gl0
-  title: GL0 Cache and LDS
+  title: GL0 Cache (TCP Cache)
   data source:
     - metric_table:
         id: 901
-        title: WGP Cache Utilization (LDS + GL0)
+        title: GL0 Utilization
         header: &id001
           metric: Metric
           avg: Avg
@@ -23,7 +23,7 @@ Panel Config:
             unit: Percent
     - metric_table:
         id: 902
-        title: Cache Requests
+        title: GL0 Request Statistics
         header: *id001
         metric:
           Total Requests:
@@ -48,7 +48,7 @@ Panel Config:
             unit: (Count + $normUnit)
     - metric_table:
         id: 903
-        title: Cache Lookup
+        title: GL0 Cache Performance
         header: *id001
         metric:
           Hit Rate:
@@ -68,7 +68,7 @@ Panel Config:
         metric: {}
     - metric_table:
         id: 906
-        title: GL0-GL1 Interface - Requests and Bandwidth
+        title: GL0-GL1 Interface
         header: *id001
         metric:
           GL1 Read Requests:
@@ -93,7 +93,7 @@ Panel Config:
         metric: {}
     - metric_table:
         id: 908
-        title: GL0-GL1 Interface - Stalls
+        title: GL0 Stalls
         header: *id001
         metric:
           TA Req Stall:

@@ -53,7 +53,7 @@ reaching physical GDDR6 and must not be compared against a GDDR6 peak.
 `Infinity Cache Hit Rate`, `GDDR6 Read Bandwidth`, and `GDDR6 Write Bandwidth`
 remain `N/A`; treat unavailable values as unknown, not zero.
 
-The `GL2C Request Bandwidth` table reports size-weighted requests at GL2 output
+The `GL2 Cache Bandwidth` table reports size-weighted requests at GL2 output
 FIFOs. Reads cover uncompressed categories and writes include recompressed
 requests. Keep these rates distinct from GL2/EA interface traffic and physical
 GDDR6 bandwidth. LDS byte-access rate uses load, store, and atomic dword counters;
