@@ -11,6 +11,9 @@
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/operand_types.h"
@@ -771,6 +774,72 @@ TEST(InstrumentorReplacement, ComposesProbeAndReplacementAtTheSameSite) {
         EXPECT_EQ(result.elf_bytes, direct_image);
       EXPECT_FALSE(result.edit_error);
       EXPECT_EQ(image, pristine);
+    }
+  }
+}
+
+TEST(InstrumentorReplacement, RejectsIndirectSgprReadsIntroducedByReplacementWithProbe) {
+  constexpr uint32_t set_m0 = cdna4::build_sop1(
+      cdna4::kSMovB32Sop1, {.ssrc0 = scalar_positive_inline_u32(2), .sdst = cdna4::OPR_SDST_M0})[0];
+  constexpr uint32_t original = cdna4::build_sop1(cdna4::kSMovB32Sop1, {.ssrc0 = 0, .sdst = 10})[0];
+  constexpr uint32_t relative =
+      cdna4::build_sop1(cdna4::kSMovrelsB32Sop1, {.ssrc0 = 0, .sdst = 10})[0];
+  constexpr uint32_t direct = cdna4::build_sop1(cdna4::kSMovB32Sop1, {.ssrc0 = 2, .sdst = 10})[0];
+  const std::vector<uint8_t> image =
+      test::make_gfx950_kernel_elf({set_m0, original, kEndpgmWord}, 0);
+  const std::vector<uint8_t> pristine = image;
+  const std::vector<uint8_t> probe_image = test::make_gfx950_probe_elf("probe", {kSetpc30Word});
+  const AmdGpuCodeObject source(image.data(), image.size());
+  const AmdGpuCodeObject probe(probe_image.data(), probe_image.size());
+  ASSERT_TRUE(source.is_valid());
+  ASSERT_TRUE(probe.is_valid());
+
+  // With M0=2 the replacement reads s2, although only s0 is encoded. A pure
+  // replacement needs no probe preservation analysis and must remain permitted.
+  Instrumentor pure(source, kArch);
+  pure.add_point(replacement_point(4, {original}, {relative}));
+  const InstrumentedCodeObject pure_result = pure.patch();
+  expect_pure_replacements(source, pure_result,
+                           {{.offset = 4,
+                             .expected = instruction_bytes({original}),
+                             .replacement = instruction_bytes({relative})}});
+
+  for (const uint32_t replacement : {relative, direct}) {
+    SCOPED_TRACE(replacement);
+    for (int mode = 0; mode < 3; ++mode) {
+      SCOPED_TRACE(mode);
+      Instrumentor instrumentor(source, kArch);
+      InstrumentationPoint replace = replacement_point(4, {original}, {replacement});
+      const InstrumentationPoint before = {
+          .anchor_offset = 4, .probe_obj = &probe, .probe_symbol = "probe", .probe_args = {}};
+      if (mode == 0) {
+        replace.probe_obj = &probe;
+        replace.probe_symbol = "probe";
+        instrumentor.add_point(replace);
+      } else {
+        instrumentor.add_point(mode == 1 ? replace : before);
+        instrumentor.add_point(mode == 1 ? before : replace);
+      }
+      const Instrumentor::ValidationResult validated = instrumentor.validate_points();
+      const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+      if (replacement == relative) {
+        constexpr std::string_view diagnostic =
+            "probe calls do not support relative SGPR access (s_movrel*)";
+        EXPECT_TRUE(validated.sites.empty());
+        EXPECT_NE(std::ranges::find(validated.errors, diagnostic), validated.errors.end());
+        expect_no_output(result);
+        EXPECT_NE(std::ranges::find(result.errors, diagnostic), result.errors.end());
+        EXPECT_TRUE(result.patches.empty());
+      } else {
+        ASSERT_TRUE(validated.errors.empty()) << validated.errors.front();
+        ASSERT_EQ(validated.sites.size(), 1u);
+        ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+        expect_replacement_guest(result, 4, 4, instruction_bytes({direct}), kArch, true);
+      }
+      EXPECT_FALSE(result.edit_error);
+      EXPECT_EQ(image, pristine);
+      ASSERT_EQ(source.image_size(), pristine.size());
+      EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
     }
   }
 }

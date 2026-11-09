@@ -618,6 +618,198 @@ TEST(CheckedTextEdits, SectionOnlyTransformationDoesNotRequireLoadMapping) {
   EXPECT_TRUE(matches_checked_output(object, requests, result.value().elf_bytes));
 }
 
+struct PcDataLayout {
+  bool before_text;
+  bool section_backed;
+  bool zero_fill;
+};
+
+std::vector<uint8_t> make_retained_pc_data_elf(const PcDataLayout &layout) {
+  // The getpc/add/addc words are the gfx950 sequence emitted by Clang for
+  // an indexed constant load. Use the existing descriptor payload as data.
+  std::vector<uint32_t> words(16, 0xbf800000u);
+  words[1] = 0xbe821c00u;
+  words[2] = 0x8002ff02u;
+  words[4] = 0x8203ff03u;
+  words.back() = 0xbf810000u;
+  std::vector<uint8_t> image = test::make_gfx950_kernel_elf(words, 0);
+  const Elf64_Ehdr header = test_support::read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+  std::vector<Elf64_Shdr> sections =
+      test_support::read_elf_array_for_test<Elf64_Shdr>(image, header.e_shoff, header.e_shnum);
+  if (layout.before_text) {
+    sections[2].sh_addr -= 0x2000;
+    Elf64_Phdr segment = test_support::read_elf_struct_for_test<Elf64_Phdr>(
+        image, header.e_phoff + sizeof(Elf64_Phdr));
+    segment.p_vaddr -= 0x2000;
+    segment.p_paddr -= 0x2000;
+    test_support::write_elf_struct_for_test(image, header.e_phoff + sizeof(segment), segment);
+    amdhsa::kernel_descriptor_t descriptor =
+        test_support::read_elf_struct_for_test<amdhsa::kernel_descriptor_t>(image,
+                                                                            sections[2].sh_offset);
+    descriptor.kernel_code_entry_byte_offset += 0x2000;
+    test_support::write_elf_struct_for_test(image, sections[2].sh_offset, descriptor);
+    const uint64_t symbol_offset = sections[3].sh_offset + sizeof(Elf64_Sym);
+    Elf64_Sym symbol = test_support::read_elf_struct_for_test<Elf64_Sym>(image, symbol_offset);
+    symbol.st_value = sections[2].sh_addr;
+    test_support::write_elf_struct_for_test(image, symbol_offset, symbol);
+  }
+  if (!layout.section_backed)
+    sections[2].sh_flags = 0;
+  test_support::write_elf_struct_for_test(image, header.e_shoff + 2 * sizeof(Elf64_Shdr),
+                                          sections[2]);
+  uint64_t target = sections[2].sh_addr;
+  if (layout.zero_fill) {
+    Elf64_Phdr segment = test_support::read_elf_struct_for_test<Elf64_Phdr>(image, header.e_phoff);
+    segment.p_memsz += 64;
+    test_support::write_elf_struct_for_test(image, header.e_phoff, segment);
+    target = sections[1].sh_addr + sections[1].sh_size + 16;
+  }
+  const uint64_t delta = target - (sections[1].sh_addr + 8);
+  test_support::write_value_for_test(image, sections[1].sh_offset + 12,
+                                     static_cast<uint32_t>(delta));
+  test_support::write_value_for_test(image, sections[1].sh_offset + 20,
+                                     static_cast<uint32_t>(delta >> 32));
+  return image;
+}
+
+TEST(CheckedTextEdits, RetainedPcDataReferenceRequiresStableDataAddresses) {
+  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4;
+  const std::array<PcDataLayout, 4> layouts = {{
+      {.before_text = false, .section_backed = true, .zero_fill = false},
+      {.before_text = true, .section_backed = true, .zero_fill = false},
+      {.before_text = false, .section_backed = false, .zero_fill = false},
+      {.before_text = true, .section_backed = true, .zero_fill = true},
+  }};
+  for (const PcDataLayout &layout : layouts) {
+    SCOPED_TRACE(layout.before_text);
+    SCOPED_TRACE(layout.section_backed);
+    SCOPED_TRACE(layout.zero_fill);
+    const bool stable = layout.before_text && !layout.zero_fill;
+    const std::vector<uint8_t> image = make_retained_pc_data_elf(layout);
+    const AmdGpuCodeObject source(image.data(), image.size());
+    ASSERT_TRUE(source.is_valid());
+    const Section &text = *source.text_sections().front();
+    const Section *data = test_support::find_section(source, ".rodata");
+    ASSERT_NE(data, nullptr);
+    const uint64_t original_target =
+        text.vaddr() + 8 +
+        test_support::read_elf_struct_for_test<uint32_t>(image, text.sectionOffset() + 12) +
+        (uint64_t{
+             test_support::read_elf_struct_for_test<uint32_t>(image, text.sectionOffset() + 20)}
+         << 32);
+    ASSERT_EQ(original_target, layout.zero_fill ? text.vaddr() + text.size() + 16 : data->vaddr());
+    for (int mode = 0; mode < 3; ++mode) {
+      SCOPED_TRACE(mode);
+      Instrumentor seed(source, arch);
+      Instrumentor *batch = &seed;
+      std::unique_ptr<Instrumentor> child;
+      TextEditError error;
+      if (mode != 0) {
+        if (mode == 2) {
+          seed.add_point_by_offset(0);
+          const Instrumentor::ValidationResult observed = seed.validate_points();
+          ASSERT_TRUE(observed.errors.empty()) << observed.errors.front();
+        }
+        ASSERT_NE(seed.instruction_boundaries(error), nullptr) << error.message;
+        FailureOr<std::unique_ptr<Instrumentor>> fork = seed.fork(error);
+        ASSERT_TRUE(fork.succeeded()) << error.message;
+        child = std::move(fork).value();
+        batch = child.get();
+      }
+      batch->add_point(
+          {.anchor_offset = 0,
+           .kind = InstrumentationKind::ReplaceWithInst,
+           .probe_symbol = {},
+           .probe_args = {},
+           .replacement = InstructionReplacement{
+               .expected_bytes = make_instruction_bytes({0xbf800000u}), .replacement_bytes = {}}});
+      const Instrumentor::ValidationResult validation = batch->validate_points();
+      const InstrumentedCodeObjectDebug result = batch->patch_with_debug_summaries();
+      if (!stable) {
+        EXPECT_FALSE(validation.errors.empty());
+        EXPECT_TRUE(validation.sites.empty());
+        EXPECT_FALSE(result.errors.empty());
+        EXPECT_TRUE(result.elf_bytes.empty());
+        EXPECT_TRUE(result.sites.empty());
+        EXPECT_TRUE(result.patches.empty());
+        if (!result.errors.empty()) {
+          EXPECT_NE(result.errors.front().find("PC-relative"), std::string::npos);
+        }
+      }
+      if (result.errors.empty()) {
+        const AmdGpuCodeObject candidate(result.elf_bytes.data(), result.elf_bytes.size());
+        ASSERT_TRUE(candidate.is_valid());
+        const Section *moved = test_support::find_section(candidate, ".rodata");
+        ASSERT_NE(moved, nullptr);
+        EXPECT_EQ(original_target, moved->vaddr()) << "retained getpc computes a stale data VA";
+      } else {
+        EXPECT_FALSE(stable) << result.errors.front();
+      }
+      EXPECT_EQ(std::memcmp(source.image_data(), image.data(), image.size()), 0);
+    }
+  }
+}
+
+TEST(CheckedTextEdits, ReplacementGrowthChecksFinalFileBackedDynamicWrites) {
+  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA5;
+  const util::FailureOr<uint32_t> nop = build_s_nop(0, arch);
+  const util::FailureOr<uint32_t> end = build_s_endpgm(arch);
+  ASSERT_TRUE(nop.succeeded());
+  ASSERT_TRUE(end.succeeded());
+  std::vector<uint32_t> words(16, nop.value());
+  words.back() = end.value();
+  for (const bool collides : {false, true}) {
+    SCOPED_TRACE(collides);
+    std::vector<uint8_t> image = with_relative64_reference(
+        test::make_amdgpu_kernel_elf(words, 0, 3, EF_AMDGPU_MACH_AMDGCN_GFX1250), std::nullopt);
+    Elf64_Ehdr header = test_support::read_elf_struct_for_test<Elf64_Ehdr>(image, 0);
+    header.e_ident[EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
+    test_support::write_elf_struct_for_test(image, 0, header);
+    const std::vector<Elf64_Shdr> sections =
+        test_support::read_elf_array_for_test<Elf64_Shdr>(image, header.e_shoff, header.e_shnum);
+    Elf64_Rela relocation =
+        test_support::read_elf_struct_for_test<Elf64_Rela>(image, sections.back().sh_offset);
+    relocation.r_info = (uint64_t{1} << 32) | R_AMDGPU_ABS64;
+    relocation.r_addend = 0;
+    if (collides) {
+      relocation.r_offset = sections[1].sh_addr + sections[1].sh_size;
+      Elf64_Phdr text_load =
+          test_support::read_elf_struct_for_test<Elf64_Phdr>(image, header.e_phoff);
+      text_load.p_filesz += sizeof(uint64_t);
+      text_load.p_memsz += sizeof(uint64_t);
+      text_load.p_flags |= 0x2u; // PF_W
+      test_support::write_elf_struct_for_test(image, header.e_phoff, text_load);
+    }
+    test_support::write_elf_struct_for_test(image, sections.back().sh_offset, relocation);
+    const AmdGpuCodeObject source(image.data(), image.size());
+    ASSERT_TRUE(source.is_valid());
+    ASSERT_FALSE(CodeObjectPatcher(source).has_relocations_within_text());
+    Instrumentor batch(source, arch);
+    batch.add_point(
+        {.anchor_offset = 0,
+         .kind = InstrumentationKind::ReplaceWithInst,
+         .probe_symbol = {},
+         .probe_args = {},
+         .replacement = InstructionReplacement{
+             .expected_bytes = make_instruction_bytes({nop.value()}), .replacement_bytes = {}}});
+    const Instrumentor::ValidationResult validation = batch.validate_points();
+    ASSERT_TRUE(validation.errors.empty()) << validation.errors.front();
+    const InstrumentedCodeObjectDebug result = batch.patch_with_debug_summaries();
+    if (collides) {
+      EXPECT_FALSE(result.errors.empty());
+      EXPECT_TRUE(result.elf_bytes.empty());
+      EXPECT_TRUE(result.sites.empty());
+      EXPECT_TRUE(result.patches.empty());
+    } else {
+      ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+      const AmdGpuCodeObject candidate(result.elf_bytes.data(), result.elf_bytes.size());
+      ASSERT_TRUE(candidate.is_valid());
+      EXPECT_FALSE(CodeObjectPatcher(candidate).has_relocations_within_text());
+    }
+    EXPECT_EQ(std::memcmp(source.image_data(), image.data(), image.size()), 0);
+  }
+}
+
 TEST(CheckedTextEdits, Gfx1100EditsRetainSourceTarget) {
   constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA3;
   const util::FailureOr<uint32_t> maybe_original = build_s_nop(1, arch);

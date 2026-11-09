@@ -4,6 +4,7 @@
 #include "rocjitsu/code/patch/instrumentor.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
+#include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/analysis/exec_state.h"
 #include "rocjitsu/code/analysis/gfx1250_vgpr_msb.h"
@@ -53,6 +54,7 @@ namespace rocjitsu {
 struct SourceTextFacts {
   InstructionBoundaries boundaries;
   TextEditReferences references;
+  std::vector<uint64_t> pc_read_offsets;
 };
 
 struct Instrumentor::ResolvedPoints {
@@ -951,6 +953,10 @@ bool Instrumentor::ensure_source_facts(TextEditError &error) {
     return false;
   }
   auto facts = std::make_shared<SourceTextFacts>();
+  const auto record_pc_read = [&](const Instruction &instruction) {
+    if (instruction.mnemonic() == "s_getpc_b64" || instruction.mnemonic() == "s_get_pc_i64")
+      facts->pc_read_offsets.push_back(instruction.src_loc());
+  };
   const Section &text = *obj_.text_sections().front();
   if (blocks_built_ && !analysis_object_) {
     // Own the index rather than borrowing storage from the parent Instrumentor.
@@ -958,6 +964,7 @@ bool Instrumentor::ensure_source_facts(TextEditError &error) {
       for (const Instruction &instruction : block->instructions()) {
         if (reject_unavailable_branch_reference(instruction, error))
           return false;
+        record_pc_read(instruction);
       }
     }
     facts->boundaries = instruction_boundaries_;
@@ -981,6 +988,7 @@ bool Instrumentor::ensure_source_facts(TextEditError &error) {
       }
       if (reject_unavailable_branch_reference(*decoded.value(), error))
         return false;
+      record_pc_read(*decoded.value());
       facts->boundaries.record(*decoded.value(), text.vaddr());
       cursor += static_cast<size_t>(decoded.value()->size()) / sizeof(uint32_t);
     }
@@ -1333,6 +1341,55 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
       merged.push_back(point);
     }
     requests = std::move(merged);
+
+    // Linked getpc/add constants carry no ELF relocation to adjust when data
+    // moves. Keep those layouts unsupported until the complete builder can be
+    // relocated; a getpc removed by this batch no longer produces a stale VA.
+    const std::vector<uint64_t>::const_iterator retained_pc =
+        std::ranges::find_if(source_facts_->pc_read_offsets, [&](uint64_t offset) {
+          return !replacement_indices.contains(offset);
+        });
+    if (retained_pc != source_facts_->pc_read_offsets.end()) {
+      const Section &text = *obj_.text_sections().front();
+      const uint64_t text_end = text.vaddr() + text.size();
+      const uint64_t file_end = text.sectionOffset() + text.size();
+      const CodeObjectPatcher source_patcher(obj_);
+      const std::vector<Elf64_Shdr> sections = source_patcher.section_headers();
+      bool storage_moves = std::ranges::any_of(sections, [&](const Elf64_Shdr &section) {
+        return (section.sh_flags & SHF_ALLOC) != 0 && section.sh_size != 0 &&
+               section.sh_addr >= text_end;
+      });
+      const std::span<const uint8_t> image(reinterpret_cast<const uint8_t *>(obj_.image_data()),
+                                           obj_.image_size());
+      Elf64_Ehdr header = {};
+      std::memcpy(&header, image.data(), sizeof(header));
+      const std::optional<std::vector<Elf64_Phdr>> segments =
+          read_elf_table<Elf64_Phdr>(image, header.e_phoff, header.e_phnum, header.e_phentsize);
+      if (!segments) {
+        out.errors.emplace_back("invalid program headers for replacement text growth");
+        return out;
+      }
+      for (const Elf64_Phdr &segment : *segments) {
+        if (segment.p_type != PT_LOAD || segment.p_memsz == 0)
+          continue;
+        if (segment.p_offset >= file_end) {
+          storage_moves |= segment.p_vaddr >= text_end;
+        } else {
+          // Include unsectioned file-backed data and zero-fill after .text.
+          const uint64_t insertion_offset = file_end - segment.p_offset;
+          storage_moves |=
+              insertion_offset <= segment.p_filesz && insertion_offset < segment.p_memsz;
+        }
+      }
+      if (storage_moves) {
+        out.errors.emplace_back(
+            "replacement growth cannot preserve retained PC-relative addresses to moved storage");
+        out.edit_error = TextEditError{.code = TextEditErrorCode::UnsupportedReferences,
+                                       .offset = *retained_pc,
+                                       .message = out.errors.back()};
+        return out;
+      }
+    }
   }
   const bool needs_graph =
       std::ranges::any_of(requests,
