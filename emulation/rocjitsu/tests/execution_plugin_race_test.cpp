@@ -3041,14 +3041,14 @@ TEST(ExecutionPluginTest, MfmaSnapshotsReportRacesOnEveryOperandRegister) {
       {"fp8 x fp4 16x16x128", 8, 4, 4,
        [](ComputeUnitCore &cu, uint32_t vb, uint32_t acc) {
          dispatch_matrix_fmt_pair(0, 4, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
-           exec_f32_mixed(cu, 16, 16, 128, 1, a_bits, b_bits, vb + D, vb + A, vb + B, vb + C, ea,
-                          eb, acc);
+           exec_f32_mixed<16, 16, 128, 1>(cu, a_bits, b_bits, vb + D, vb + A, vb + B, vb + C, ea,
+                                          eb, acc);
          });
        }},
       {"f32 4x4x1x16", 1, 1, 4,
        [](ComputeUnitCore &cu, uint32_t vb, uint32_t acc) {
-         exec_f32(cu, 4, 4, 1, 16, 32, vb + D, vb + A, vb + B, vb + C, extract_f32, extract_f32,
-                  acc);
+         exec_f32<4, 4, 1, 16>(cu, 32, vb + D, vb + A, vb + B, vb + C, extract_f32, extract_f32,
+                               acc);
        }},
   };
   for (const Case &test : cases)

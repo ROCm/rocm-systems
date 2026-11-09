@@ -8706,8 +8706,8 @@ TEST_P(IsaTest, MfmaF16Accumulation) {
   uint32_t s1 = vb + 18;
   uint32_t s2 = vb + 256;
   uint32_t const_acc = amdgpu::ACC_FROM_VGPR;
-  amdgpu::exec_f32(*cu, 16, 16, 32, 1, 16, dst, s0, s1, s2, amdgpu::extract_f16,
-                   amdgpu::extract_f16, const_acc);
+  amdgpu::exec_f32<16, 16, 32, 1>(*cu, 16, dst, s0, s1, s2, amdgpu::extract_f16,
+                                  amdgpu::extract_f16, const_acc);
 
   // Verify: every output element should be exactly 32.0f
   float expected = 32.0f;
@@ -8758,8 +8758,8 @@ TEST_P(IsaTest, MfmaF16AccumulationPatterned) {
 
   // Execute MFMA with zero accumulator (const_acc = 0.0f)
   uint32_t dst = vb + 256;
-  amdgpu::exec_f32(*cu, 16, 16, 32, 1, 16, dst, vb + 10, vb + 18, dst, amdgpu::extract_f16,
-                   amdgpu::extract_f16, std::bit_cast<uint32_t>(0.0f));
+  amdgpu::exec_f32<16, 16, 32, 1>(*cu, 16, dst, vb + 10, vb + 18, dst, amdgpu::extract_f16,
+                                  amdgpu::extract_f16, std::bit_cast<uint32_t>(0.0f));
 
   // With const_acc=0.0, all outputs should be 32.0 (sum of 32 ones*ones)
   float expected = 32.0f;

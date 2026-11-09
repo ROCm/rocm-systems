@@ -3161,6 +3161,41 @@ protected:
   uint32_t vgpr_base = 0;
 };
 
+TEST_F(Cdna4BlockScaleMfmaExecutionTest, Bare16x16x128Fp8Fp4AccumulatesFullK) {
+  const auto words = cdna4::build_vop3p_mfma(cdna4::kVMfmaF3216x16x128F8f6f4Vop3pMfma,
+                                             {.vdst = kDst,
+                                              .cbsz = 0,
+                                              .src0 = static_cast<uint16_t>(vgpr_src(kSrc0)),
+                                              .src1 = static_cast<uint16_t>(vgpr_src(kSrc1)),
+                                              .src2 = static_cast<uint16_t>(vgpr_src(kAccumulator)),
+                                              .blgp = 4});
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+
+  // The 16x128 inputs occupy eight FP8 or four FP4 registers per lane.
+  for (uint32_t reg = 0; reg < 8; ++reg)
+    for (uint32_t lane = 0; lane < 64; ++lane)
+      cu->write_vgpr(vgpr_base + kSrc0 + reg, lane, 0x38383838u); // FP8 1.0.
+  for (uint32_t reg = 0; reg < 4; ++reg)
+    for (uint32_t lane = 0; lane < 64; ++lane)
+      cu->write_vgpr(vgpr_base + kSrc1 + reg, lane, 0x22222222u); // FP4 1.0.
+  seed_accumulator(std::bit_cast<uint32_t>(0.0f), 4);
+
+  for (bool force_scalar : {true, false}) {
+    SCOPED_TRACE(testing::Message() << "force_scalar=" << force_scalar);
+    ForceScalarGuard guard(force_scalar);
+    for (uint32_t reg = 0; reg < 4; ++reg)
+      for (uint32_t lane = 0; lane < 64; ++lane)
+        cu->write_vgpr(vgpr_base + kDst + reg, lane, 0xccccccccu);
+
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+    for (uint32_t reg = 0; reg < 4; ++reg)
+      for (uint32_t lane = 0; lane < 64; ++lane)
+        ASSERT_EQ(cu->read_vgpr(vgpr_base + kDst + reg, lane), std::bit_cast<uint32_t>(128.0f))
+            << "reg=" << reg << " lane=" << lane;
+  }
+}
+
 TEST_F(Cdna4BlockScaleMfmaExecutionTest, VgprScaleByteSelectorsAreIndependent) {
   seed_inputs(0x22222222u); // Eight packed FP4 1.0 values.
   seed_accumulator(std::bit_cast<uint32_t>(0.0f), 4);

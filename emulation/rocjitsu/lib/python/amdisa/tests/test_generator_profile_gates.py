@@ -2234,7 +2234,7 @@ def test_unsupported_swmmac_layout_does_not_emit_sparse_setup(
     assert 'index_base' not in body
     assert 'index_key' not in body
     assert 'exec_swmmac' not in body
-    assert 'amdgpu::exec_f32(' in body
+    assert 'amdgpu::exec_f32<16, 16, 32, 0>(' in body
 
 
 @pytest.mark.parametrize(
