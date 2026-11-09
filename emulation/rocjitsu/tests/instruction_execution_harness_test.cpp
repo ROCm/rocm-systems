@@ -3926,8 +3926,8 @@ TEST(Gfx1250WmmaTest, Fp8K128PhysicalLayoutMatchesCdna5Anchors) {
 
   for (const LayoutAnchor &anchor : anchors) {
     SCOPED_TRACE(anchor.k);
-    const amdgpu::InputLoc a = amdgpu::wmma_a_input_loc(16, 128, row_or_col, anchor.k, 8, 8);
-    const amdgpu::InputLoc b = amdgpu::wmma_b_input_loc(16, 128, row_or_col, anchor.k, 8, 8);
+    const amdgpu::InputLoc a = amdgpu::wmma_a_input_loc<16, 128>(row_or_col, anchor.k, 8, 8);
+    const amdgpu::InputLoc b = amdgpu::wmma_b_input_loc<16, 128>(row_or_col, anchor.k, 8, 8);
     for (const amdgpu::InputLoc &loc : {a, b}) {
       EXPECT_EQ(loc.lane, row_or_col + 16u * anchor.lane_half);
       EXPECT_EQ(loc.vgpr_offset, anchor.slot / 4u);
@@ -4022,14 +4022,14 @@ TEST(Gfx1250WmmaTest, F16Fp8K64MatchesReferenceLayout) {
   }
   for (uint32_t row = 0; row < 16; ++row) {
     for (uint32_t col = 0; col < 16; ++col) {
-      const auto out = amdgpu::wmma_output_loc_16(16, 16, row, col);
+      const auto out = amdgpu::wmma_output_loc_16<16, 16>(row, col);
       write_packed_half(*cu, c_base + out.reg, out.lane, out.sub_element,
                         util::f32_to_f16(wmma_test_c(row, col)));
     }
   }
 
-  amdgpu::exec_wmma_f16(*cu, 16, 16, 64, 8, d_base, a_base, b_base, c_base, amdgpu::extract_fp8,
-                        amdgpu::extract_fp8, amdgpu::ACC_FROM_VGPR);
+  amdgpu::exec_wmma_f16<16, 16, 64>(*cu, 8, d_base, a_base, b_base, c_base, amdgpu::extract_fp8,
+                                    amdgpu::extract_fp8, amdgpu::ACC_FROM_VGPR);
 
   auto expect_reference = [&] {
     for (uint32_t row = 0; row < 16; ++row) {
@@ -4037,7 +4037,7 @@ TEST(Gfx1250WmmaTest, F16Fp8K64MatchesReferenceLayout) {
         float ref = wmma_test_c(row, col);
         for (uint32_t k = 0; k < 64; ++k)
           ref += wmma_test_a(row, k) * wmma_test_b(k, col);
-        const auto out = amdgpu::wmma_output_loc_16(16, 16, row, col);
+        const auto out = amdgpu::wmma_output_loc_16<16, 16>(row, col);
         const uint32_t raw = cu->read_vgpr(d_base + out.reg, out.lane);
         const auto actual = static_cast<uint16_t>((raw >> (16u * out.sub_element)) & 0xFFFFu);
         EXPECT_EQ(actual, util::f32_to_f16(ref)) << "row=" << row << " col=" << col;
@@ -4120,21 +4120,21 @@ TEST(Gfx1250WmmaTest, Bf16F32K32Bf16PreservesAccumulatorLayout) {
 
   for (uint32_t row = 0; row < 16; ++row) {
     for (uint32_t k = 0; k < 32; ++k) {
-      const auto in = amdgpu::wmma_input_loc(16, 32, row, k, 16);
+      const auto in = amdgpu::wmma_input_loc<16, 32>(row, k, 16);
       write_packed_half(*cu, a_base + in.vgpr_offset, in.lane, in.sub_element,
                         util::f32_to_bf16(wmma_test_a(row, k)));
     }
   }
   for (uint32_t k = 0; k < 32; ++k) {
     for (uint32_t col = 0; col < 16; ++col) {
-      const auto in = amdgpu::wmma_input_loc(16, 32, col, k, 16);
+      const auto in = amdgpu::wmma_input_loc<16, 32>(col, k, 16);
       write_packed_half(*cu, b_base + in.vgpr_offset, in.lane, in.sub_element,
                         util::f32_to_bf16(wmma_test_b(k, col)));
     }
   }
   for (uint32_t row = 0; row < 16; ++row) {
     for (uint32_t col = 0; col < 16; ++col) {
-      const auto out = amdgpu::wmma_output_loc_32(16, 16, row, col);
+      const auto out = amdgpu::wmma_output_loc_32<16, 16>(row, col);
       cu->write_vgpr(c_base + out.reg, out.lane, std::bit_cast<uint32_t>(wmma_test_c(row, col)));
     }
   }
@@ -4146,7 +4146,7 @@ TEST(Gfx1250WmmaTest, Bf16F32K32Bf16PreservesAccumulatorLayout) {
       float ref = wmma_test_c(row, col);
       for (uint32_t k = 0; k < 32; ++k)
         ref += wmma_test_a(row, k) * wmma_test_b(k, col);
-      const auto out = amdgpu::wmma_output_loc_16(16, 16, row, col);
+      const auto out = amdgpu::wmma_output_loc_16<16, 16>(row, col);
       const uint32_t raw = cu->read_vgpr(d_base + out.reg, out.lane);
       const auto actual = static_cast<uint16_t>((raw >> (16u * out.sub_element)) & 0xFFFFu);
       EXPECT_EQ(actual, util::f32_to_bf16(ref)) << "row=" << row << " col=" << col;
@@ -4187,11 +4187,11 @@ TEST(Gfx1250WmmaTest, Bf16F32K32Bf16MatchesF32DotOverflow) {
       cu->write_vgpr(c_base + reg, lane, 0);
     }
 
-  const auto a = amdgpu::wmma_input_loc(16, 32, /*row=*/0, /*k=*/0, 16);
-  const auto b = amdgpu::wmma_input_loc(16, 32, /*col=*/0, /*k=*/0, 16);
+  const auto a = amdgpu::wmma_input_loc<16, 32>(/*row=*/0, /*k=*/0, 16);
+  const auto b = amdgpu::wmma_input_loc<16, 32>(/*col=*/0, /*k=*/0, 16);
   write_packed_half(*cu, a_base + a.vgpr_offset, a.lane, a.sub_element, 0x5F80u); // 2^64
   write_packed_half(*cu, b_base + b.vgpr_offset, b.lane, b.sub_element, 0x5F80u);
-  const auto c = amdgpu::wmma_output_loc_32(16, 16, /*row=*/0, /*col=*/0);
+  const auto c = amdgpu::wmma_output_loc_32<16, 16>(/*row=*/0, /*col=*/0);
   cu->write_vgpr(c_base + c.reg, c.lane, 0xFF7FFFFFu); // -FLT_MAX
 
   // Both forms round the dot before adding C. Its overflow remains infinite,
@@ -4200,13 +4200,13 @@ TEST(Gfx1250WmmaTest, Bf16F32K32Bf16MatchesF32DotOverflow) {
     SCOPED_TRACE(testing::Message() << "scalar=" << scalar);
     ForceScalarGuard force_scalar(scalar);
     amdgpu::exec_wmma_bf16f32_16x16x32_bf16(*cu, d_base, a_base, b_base, c_base);
-    const auto out = amdgpu::wmma_output_loc_16(16, 16, /*row=*/0, /*col=*/0);
+    const auto out = amdgpu::wmma_output_loc_16<16, 16>(/*row=*/0, /*col=*/0);
     const uint32_t word = cu->read_vgpr(d_base + out.reg, out.lane);
     EXPECT_EQ(static_cast<uint16_t>(word >> (16 * out.sub_element)), 0x7F80u);
 
     const uint32_t f32_d_base = vb + 50;
     amdgpu::exec_wmma_f32_16x16x32_bf16(*cu, f32_d_base, a_base, b_base, c_base);
-    const auto f32_out = amdgpu::wmma_output_loc_32(16, 16, /*row=*/0, /*col=*/0);
+    const auto f32_out = amdgpu::wmma_output_loc_32<16, 16>(/*row=*/0, /*col=*/0);
     EXPECT_EQ(cu->read_vgpr(f32_d_base + f32_out.reg, f32_out.lane), 0x7F800000u);
   }
 

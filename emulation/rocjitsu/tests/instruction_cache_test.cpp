@@ -263,9 +263,10 @@ TEST(InstructionCacheTest, DeviceMaintenanceInvalidatesLazilyOnOwningThread) {
   const uint64_t epoch_before = instruction_cache.coherence_domain()->current_instruction_epoch();
   std::vector<uint8_t> second(InstructionCache::kLineSize, 0x72);
   {
-    [[maybe_unused]] amdgpu::DeviceCacheMaintenanceLease maintenance =
+    util::FailureOr<rocjitsu::amdgpu::DeviceCacheMaintenanceLease> maintenance =
         instruction_cache.coherence_domain()->acquire_cache_maintenance(
             amdgpu::DeviceCacheOperation::WritebackInvalidate);
+    ASSERT_TRUE(maintenance.succeeded());
     EXPECT_EQ(instruction_cache.coherence_domain()->current_instruction_epoch(), epoch_before);
     memory.write_block(kCodeBase, std::span<const uint8_t>(second));
   }
@@ -908,29 +909,115 @@ TEST(DecodedInstructionCacheTest, FailedExecutionAndExceptionsDoNotRetainInstruc
   EXPECT_EQ(decoder.calls, 3u);
 }
 
-TEST(DecodedInstructionCacheTest, BorrowedVopdEncodingIsNotRetainedAcrossIssues) {
+// An external decoder may return an instruction whose raw encoding points into
+// the caller's words.
+class BorrowingDecoder final : public rocjitsu::Decoder {
+public:
+  class Borrowed final : public rocjitsu::Instruction {
+  public:
+    explicit Borrowed(const uint32_t *words) : Instruction("borrowed", nullptr) {
+      raw_encoding_ = words;
+      size_ = 4;
+    }
+  };
+
+  rocjitsu::DecodeResult decode(const rj_code_binary_inst_t *words,
+                                const rocjitsu::DecodeErrorEmitter &) override {
+    ++calls;
+    return std::unique_ptr<rocjitsu::Instruction>(new Borrowed(words));
+  }
+  size_t max_instruction_words() const override { return 4; }
+
+  unsigned calls = 0;
+};
+
+TEST(DecodedInstructionCacheTest, BorrowedEncodingIsNotRetainedAcrossIssues) {
+  BorrowingDecoder decoder;
+  amdgpu::DecodedInstructionCache cache;
+  std::array<uint32_t, amdgpu::DecodedInstructionCache::kNumWords> words{kSNop};
+  {
+    auto decoded = cache.decode(decoder, kCodeBase, 7, words, {});
+    ASSERT_FALSE(decoded.failed());
+    ASSERT_EQ(decoded.value()->raw_encoding(), words.data());
+    amdgpu::DecodedInstructionCache::ScopedReturn returned(cache, decoded.value(), kCodeBase, 7,
+                                                           words);
+  }
+  // Use the same bytes from a different fetch buffer on the next issue.
+  auto next_words = words;
+  auto decoded = cache.decode(decoder, kCodeBase, 7, next_words, {});
+  ASSERT_FALSE(decoded.failed());
+  EXPECT_EQ(decoded.value()->raw_encoding(), next_words.data());
+  EXPECT_EQ(decoder.calls, 2u);
+}
+
+TEST(DecodedInstructionCacheTest, VopdOwnsItsEncodingAndIsReusedAcrossIssues) {
+  struct Case {
+    const char *mnemonic;
+    int size;
+    std::array<uint32_t, amdgpu::DecodedInstructionCache::kNumWords> words;
+  };
+  constexpr Case cases[] = {
+      // v_dual_cndmask_b32 v2, v1, v2 :: v_dual_mov_b32 v1, 0, followed in the fetch
+      // window by a word that is not part of the encoding.
+      {"v_dual_cndmask_b32 :: v_dual_mov_b32", 8, {0xCA500501u, 0x02000080u, 0xFFFFFFFFu}},
+      // v_dual_fmaak_f32 v0, v1, v2, 0x40490fdb :: v_dual_mov_b32 v3, v4
+      {"v_dual_fmaak_f32 :: v_dual_mov_b32", 12, {0xC8500501u, 0x00020104u, 0x40490FDBu}},
+  };
   for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
                           ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
-    SCOPED_TRACE(arch);
-    CountingDecoder decoder(arch);
-    amdgpu::DecodedInstructionCache cache;
-    // v_dual_cndmask_b32 v2, v1, v2 :: v_dual_mov_b32 v1, 0.
-    std::array<uint32_t, amdgpu::DecodedInstructionCache::kNumWords> words{0xCA500501u,
-                                                                           0x02000080u};
-    {
-      auto decoded = cache.decode(decoder, kCodeBase, 7, words, {});
+    for (const auto &tc : cases) {
+      SCOPED_TRACE(std::string(tc.mnemonic) + " arch " + std::to_string(arch));
+      CountingDecoder decoder(arch);
+      amdgpu::DecodedInstructionCache cache;
+      auto words = tc.words;
+      {
+        auto decoded = cache.decode(decoder, kCodeBase, 7, words, {});
+        ASSERT_FALSE(decoded.failed());
+        ASSERT_EQ(std::string_view(decoded.value()->mnemonic()), tc.mnemonic);
+        ASSERT_EQ(decoded.value()->size(), tc.size);
+        EXPECT_NE(decoded.value()->raw_encoding(), words.data());
+        amdgpu::DecodedInstructionCache::ScopedReturn returned(cache, decoded.value(), kCodeBase, 7,
+                                                               words);
+      }
+      // The next issue fetches the same bytes into a different buffer, and the
+      // first buffer no longer holds them.
+      auto next_words = words;
+      words.fill(0);
+      auto decoded = cache.decode(decoder, kCodeBase, 7, next_words, {});
       ASSERT_FALSE(decoded.failed());
-      ASSERT_EQ(decoded.value()->raw_encoding(), words.data());
-      amdgpu::DecodedInstructionCache::ScopedReturn returned(cache, decoded.value(), kCodeBase, 7,
-                                                             words);
+      EXPECT_EQ(decoder.calls, 1u);
+      EXPECT_NE(decoded.value()->raw_encoding(), next_words.data());
+      for (int word = 0; word < tc.size / 4; ++word)
+        EXPECT_EQ(decoded.value()->raw_encoding()[word], tc.words[word]) << word;
     }
-    // Use the same bytes from a different fetch buffer on the next issue.
-    auto next_words = words;
-    auto decoded = cache.decode(decoder, kCodeBase, 7, next_words, {});
-    ASSERT_FALSE(decoded.failed());
-    EXPECT_EQ(decoded.value()->raw_encoding(), next_words.data());
-    EXPECT_EQ(decoder.calls, 2u);
   }
+}
+
+// gfx1250 VOPD3 is 12 bytes without a literal: its third word holds register
+// fields, which consumers such as perfsim read back through raw_encoding().
+TEST(DecodedInstructionCacheTest, Gfx1250Vopd3KeepsItsThirdWordAcrossIssues) {
+  CountingDecoder decoder(ROCJITSU_CODE_ARCH_CDNA5);
+  amdgpu::DecodedInstructionCache cache;
+  // v_dual_lshlrev_b32 v1, 3, v0 :: v_dual_lshrrev_b32 v10, 6, v0
+  const std::array<uint32_t, amdgpu::DecodedInstructionCache::kNumWords> encoding{
+      0xCF455083u, 0x00000086u, 0x0A000001u};
+  auto words = encoding;
+  {
+    auto decoded = cache.decode(decoder, kCodeBase, 7, words, {});
+    ASSERT_FALSE(decoded.failed());
+    ASSERT_EQ(std::string_view(decoded.value()->mnemonic()),
+              "v_dual_lshlrev_b32 :: v_dual_lshrrev_b32");
+    ASSERT_EQ(decoded.value()->size(), 12);
+    amdgpu::DecodedInstructionCache::ScopedReturn returned(cache, decoded.value(), kCodeBase, 7,
+                                                           words);
+  }
+  auto next_words = words;
+  words.fill(0);
+  auto decoded = cache.decode(decoder, kCodeBase, 7, next_words, {});
+  ASSERT_FALSE(decoded.failed());
+  EXPECT_EQ(decoder.calls, 1u);
+  for (int word = 0; word < 3; ++word)
+    EXPECT_EQ(decoded.value()->raw_encoding()[word], encoding[word]) << word;
 }
 
 TEST(DecodedInstructionCacheTest, AddressSpacesAndClearCauseMisses) {
@@ -1068,9 +1155,10 @@ TEST(InstructionCacheCuTest, AsyncTranslatedLookaheadPreservesCodeCoherence) {
     if (debugger_write) {
       fixture.cu()->set_debug_active(true);
     } else {
-      [[maybe_unused]] amdgpu::DeviceCacheMaintenanceLease maintenance =
+      util::FailureOr<rocjitsu::amdgpu::DeviceCacheMaintenanceLease> maintenance =
           fixture.cu()->instruction_cache().coherence_domain()->acquire_cache_maintenance(
               amdgpu::DeviceCacheOperation::Invalidate);
+      ASSERT_TRUE(maintenance.succeeded());
     }
     // Lookahead can still see the old non-MMA word. Ordinary issue must fetch
     // the current bytes before executing, even with async helpers enabled.
@@ -1176,9 +1264,10 @@ TEST(InstructionCacheCuTest, AsyncTranslatedLookaheadSelectsInlineOrAsyncMfma) {
         fixture.cu()->write_vgpr(wf->vgpr_alloc().base + 32 + reg, lane, 0x3c003c00u);
       }
     {
-      [[maybe_unused]] amdgpu::DeviceCacheMaintenanceLease maintenance =
+      util::FailureOr<rocjitsu::amdgpu::DeviceCacheMaintenanceLease> maintenance =
           fixture.cu()->instruction_cache().coherence_domain()->acquire_cache_maintenance(
               amdgpu::DeviceCacheOperation::Invalidate);
+      ASSERT_TRUE(maintenance.succeeded());
       backing->write_program(program);
     }
     wf->pc = kCodeBase;

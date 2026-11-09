@@ -156,9 +156,9 @@ previous interpreter; instruction contracts document such exceptions.
 Rocjitsu's [`arithmetic.semantics`](configuration.md#cpu-arithmetic-policy)
 setting maps directly to these modes and defaults to compatibility. Its string
 values are the lowercase constant names without `RJ_ARITH_SEMANTICS_`.
-The migrated families are RDNA3/RDNA4 dense WMMA, RDNA4 sparse WMMA, and RDNA3/RDNA4 fused floating-point
-arithmetic, basic floating-point arithmetic and selection, division and dot products.
-VOPD remains unmigrated. RDNA3.5, CDNA, and other handlers retain their existing
+The migrated families are RDNA3/RDNA4 dense WMMA, RDNA4 sparse WMMA, and RDNA3/RDNA4
+fused floating-point arithmetic, basic floating-point arithmetic and selection,
+division, dot products, conversions, comparisons, graphics operations and register/lane routing. Other handlers retain their existing
 implementations.
 
 ### Guest FP controls

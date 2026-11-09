@@ -15,9 +15,8 @@
 /// at all -- a device library of a few hundred megabytes takes minutes to
 /// translate.
 ///
-/// Every operation is best effort. A lookup that cannot be satisfied and a store
-/// that cannot be completed both leave the caller to translate normally, so an
-/// unusable store degrades throughput and never correctness.
+/// Storage operations are best effort. Unusable storage, malformed entries and
+/// native I/O failures leave the caller to translate normally.
 ///
 /// Nothing here is specific to one translation pair. A consumer names its own
 /// domain, which selects an independent tree, and describes its configuration
@@ -160,18 +159,19 @@ public:
   /// compatibility boundary. Returns an invalid key when the store is
   /// unavailable, which lets callers skip both the lookup and the store.
   [[nodiscard]] CacheKey key_for(std::span<const uint8_t> source,
-                                 const TranslationIdentity &identity);
+                                 const TranslationIdentity &identity) noexcept;
 
   /// @brief Fetch a stored translation.
   ///
   /// @details @p identity is re-checked against the record stored alongside the
   /// object, so an entry can only satisfy a request made under the same
   /// configuration even if the digest were somehow to match.
-  /// @returns The translated object, or an empty vector on a miss or any failure.
+  /// @returns The translated object, or an empty vector on a miss, malformed entry
+  ///          or native I/O failure.
   [[nodiscard]] std::vector<uint8_t> lookup(const CacheKey &key,
-                                            const TranslationIdentity &identity);
+                                            const TranslationIdentity &identity) noexcept;
 
-  /// @brief Offer a translation for reuse. Never throws.
+  /// @brief Offer a translation for reuse.
   /// @details Does nothing on a read-only store, and nothing on any store whose
   /// tier refuses an object this large.
   void store(const CacheKey &key, std::span<const uint8_t> translated,
