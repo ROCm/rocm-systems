@@ -52,9 +52,14 @@ namespace rocjitsu {
 // own source initializes these facts, and fork() retains that exact binding.
 // Storage owns the index/references, never the borrowed ELF, decoder or CFG.
 struct SourceTextFacts {
+  struct DirectBranch {
+    uint64_t source_offset;
+    uint64_t destination;
+  };
   InstructionBoundaries boundaries;
   TextEditReferences references;
   std::vector<uint64_t> pc_read_offsets;
+  std::vector<DirectBranch> direct_branches;
 };
 
 struct Instrumentor::ResolvedPoints {
@@ -953,21 +958,28 @@ bool Instrumentor::ensure_source_facts(TextEditError &error) {
     return false;
   }
   auto facts = std::make_shared<SourceTextFacts>();
-  const auto record_pc_read = [&](const Instruction &instruction) {
+  const Section &text = *obj_.text_sections().front();
+  const auto record_instruction = [&](const Instruction &instruction) {
+    const size_t reference_count = facts->boundaries.reference_addresses().size();
+    facts->boundaries.record(instruction, text.vaddr());
+    // Reuse the boundary index's checked branch math; source admission below
+    // rejects its overflow flag before these facts can be used.
+    const std::span<const uint64_t> references = facts->boundaries.reference_addresses();
+    if (references.size() != reference_count)
+      facts->direct_branches.push_back(
+          {.source_offset = instruction.src_loc(), .destination = references.back()});
     if (instruction.mnemonic() == "s_getpc_b64" || instruction.mnemonic() == "s_get_pc_i64")
       facts->pc_read_offsets.push_back(instruction.src_loc());
   };
-  const Section &text = *obj_.text_sections().front();
   if (blocks_built_ && !analysis_object_) {
     // Own the index rather than borrowing storage from the parent Instrumentor.
     for (const std::unique_ptr<BasicBlock> &block : blocks_) {
       for (const Instruction &instruction : block->instructions()) {
         if (reject_unavailable_branch_reference(instruction, error))
           return false;
-        record_pc_read(instruction);
+        record_instruction(instruction);
       }
     }
-    facts->boundaries = instruction_boundaries_;
   } else {
     const std::span<const uint32_t> words(reinterpret_cast<const uint32_t *>(text.data()),
                                           text.size() / sizeof(uint32_t));
@@ -988,8 +1000,7 @@ bool Instrumentor::ensure_source_facts(TextEditError &error) {
       }
       if (reject_unavailable_branch_reference(*decoded.value(), error))
         return false;
-      record_pc_read(*decoded.value());
-      facts->boundaries.record(*decoded.value(), text.vaddr());
+      record_instruction(*decoded.value());
       cursor += static_cast<size_t>(decoded.value()->size()) / sizeof(uint32_t);
     }
   }
@@ -1104,11 +1115,10 @@ bool Instrumentor::ensure_liveness_built(uint8_t wave_size,
   const AmdGpuCodeObject &analysis = analysis_object_ ? *analysis_object_ : obj_;
   const Section *text = analysis.text_sections().front();
   std::vector<BasicBlock *> scope;
-  LivenessAnalysisOptions options;
-  if (arch_ == ROCJITSU_CODE_ARCH_CDNA5) {
-    options.arch = arch_;
-    options.text = {reinterpret_cast<const uint8_t *>(text->data()), text->size()};
-  }
+  LivenessAnalysisOptions options = {
+      .arch = arch_,
+      .additional_entry_blocks = {},
+      .text = {reinterpret_cast<const uint8_t *>(text->data()), text->size()}};
   for (const std::unique_ptr<BasicBlock> &block : blocks_) {
     scope.push_back(block.get());
     if (kernels.size() == 1 && block->start_offset() == kernels.front().entry_text_offset)
@@ -1349,16 +1359,16 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
         std::ranges::find_if(source_facts_->pc_read_offsets, [&](uint64_t offset) {
           return !replacement_indices.contains(offset);
         });
-    if (retained_pc != source_facts_->pc_read_offsets.end()) {
+    const bool has_retained_branch = std::ranges::any_of(
+        source_facts_->direct_branches, [&](const SourceTextFacts::DirectBranch &branch) {
+          return !replacement_indices.contains(branch.source_offset);
+        });
+    if (retained_pc != source_facts_->pc_read_offsets.end() || has_retained_branch) {
       const Section &text = *obj_.text_sections().front();
       const uint64_t text_end = text.vaddr() + text.size();
       const uint64_t file_end = text.sectionOffset() + text.size();
       const CodeObjectPatcher source_patcher(obj_);
       const std::vector<Elf64_Shdr> sections = source_patcher.section_headers();
-      bool storage_moves = std::ranges::any_of(sections, [&](const Elf64_Shdr &section) {
-        return (section.sh_flags & SHF_ALLOC) != 0 && section.sh_size != 0 &&
-               section.sh_addr >= text_end;
-      });
       const std::span<const uint8_t> image(reinterpret_cast<const uint8_t *>(obj_.image_data()),
                                            obj_.image_size());
       Elf64_Ehdr header = {};
@@ -1369,23 +1379,49 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
         out.errors.emplace_back("invalid program headers for replacement text growth");
         return out;
       }
-      for (const Elf64_Phdr &segment : *segments) {
-        if (segment.p_type != PT_LOAD || segment.p_memsz == 0)
-          continue;
-        if (segment.p_offset >= file_end) {
-          storage_moves |= segment.p_vaddr >= text_end;
-        } else {
-          // Include unsectioned file-backed data and zero-fill after .text.
-          const uint64_t insertion_offset = file_end - segment.p_offset;
-          storage_moves |=
-              insertion_offset <= segment.p_filesz && insertion_offset < segment.p_memsz;
+      const auto storage_moves = [&](std::optional<uint64_t> destination) {
+        const auto contains = [&](uint64_t base, uint64_t size, uint64_t begin = 0) {
+          return size > begin &&
+                 (!destination || (*destination >= base && *destination - base >= begin &&
+                                   *destination - base < size));
+        };
+        for (const Elf64_Shdr &section : sections) {
+          if ((section.sh_flags & SHF_ALLOC) != 0 && section.sh_addr >= text_end &&
+              contains(section.sh_addr, section.sh_size))
+            return true;
         }
-      }
-      if (storage_moves) {
+        for (const Elf64_Phdr &segment : *segments) {
+          if (segment.p_type != PT_LOAD || segment.p_memsz == 0)
+            continue;
+          if (segment.p_offset >= file_end) {
+            if (segment.p_vaddr >= text_end && contains(segment.p_vaddr, segment.p_memsz))
+              return true;
+          } else {
+            // Include unsectioned file-backed data and zero-fill after .text.
+            const uint64_t insertion_offset = file_end - segment.p_offset;
+            if (insertion_offset <= segment.p_filesz &&
+                contains(segment.p_vaddr, segment.p_memsz, insertion_offset))
+              return true;
+          }
+        }
+        return false;
+      };
+      if (retained_pc != source_facts_->pc_read_offsets.end() && storage_moves(std::nullopt)) {
         out.errors.emplace_back(
             "replacement growth cannot preserve retained PC-relative addresses to moved storage");
         out.edit_error = TextEditError{.code = TextEditErrorCode::UnsupportedReferences,
                                        .offset = *retained_pc,
+                                       .message = out.errors.back()};
+        return out;
+      }
+      for (const SourceTextFacts::DirectBranch &branch : source_facts_->direct_branches) {
+        if (replacement_indices.contains(branch.source_offset) ||
+            !storage_moves(branch.destination))
+          continue;
+        out.errors.emplace_back(
+            "replacement growth cannot preserve a retained direct branch to moved storage");
+        out.edit_error = TextEditError{.code = TextEditErrorCode::UnsupportedReferences,
+                                       .offset = branch.source_offset,
                                        .message = out.errors.back()};
         return out;
       }
@@ -1472,11 +1508,22 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   ProbeEntryState probe_entry_state = ProbeEntryState::Unknown;
   const bool has_probe_requests = std::ranges::any_of(
       requests, [](const InstrumentationPoint &point) { return point.probe_obj != nullptr; });
-  if (has_probe_requests && arch_ == ROCJITSU_CODE_ARCH_CDNA5 && out.wave_size) {
+  if (has_probe_requests && !out.kernels.empty() && out.wave_size) {
     if (!ensure_liveness_built(*out.wave_size, out.kernels, &err)) {
-      out.errors.push_back(err);
+      out.errors.push_back(std::move(err));
       return out;
     }
+    const util::FailureOr<bool> complete = liveness_->global_vgpr_usage_is_complete();
+    if (complete.failed()) {
+      out.errors.emplace_back("probe calls require available guest liveness");
+      return out;
+    }
+    if (!complete.value()) {
+      out.errors.emplace_back("probe calls do not support relative or GPR-indexed VGPR access");
+      return out;
+    }
+  }
+  if (has_probe_requests && arch_ == ROCJITSU_CODE_ARCH_CDNA5 && out.wave_size) {
     if (out.kernels.size() == 1) {
       bool has_call = false;
       for (const std::unique_ptr<BasicBlock> &block : blocks_) {

@@ -19,6 +19,8 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/operand_types.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "util/result.h"
@@ -841,6 +843,137 @@ TEST(InstrumentorReplacement, RejectsIndirectSgprReadsIntroducedByReplacementWit
       ASSERT_EQ(source.image_size(), pristine.size());
       EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
     }
+  }
+}
+
+TEST(InstrumentorReplacement, ProbeAdmissionUsesEffectiveGuestVgprCompletenessAcrossFactsReuse) {
+  enum class SeedMode { Cold, Query, ColdFork, WarmPristineFork };
+  struct CompletenessCase {
+    std::string_view name;
+    rj_code_arch_t arch = kArch;
+    uint32_t original = kNop0Word;
+    std::vector<uint32_t> body;
+    std::vector<uint32_t> tail = {};
+    SeedMode mode = SeedMode::Cold;
+    bool reject = true;
+  };
+  constexpr uint16_t mode_bit27 = 1u | (27u << 6);
+  constexpr uint32_t rdna_nop = rdna4::build_sopp(rdna4::kSNopSopp)[0];
+  constexpr uint32_t relative =
+      rdna4::build_vop1(rdna4::kVMovrelsB32Vop1, {.src0 = 256, .vdst = 3})[0];
+  constexpr uint32_t swap_relative =
+      rdna4::build_vop1(rdna4::kVSwaprelB32Vop1, {.src0 = 256, .vdst = 3})[0];
+  constexpr uint32_t direct = rdna4::build_vop1(rdna4::kVMovB32Vop1, {.src0 = 256, .vdst = 3})[0];
+  constexpr uint32_t index_on =
+      cdna4::build_sopc(cdna4::kSSetGprIdxOnSopc, {.ssrc0 = 0, .ssrc1 = 1})[0];
+  constexpr uint32_t dynamic_mode =
+      cdna4::build_sopk(cdna4::kSSetregB32Sopk, {.simm16 = mode_bit27, .sdst = 0})[0];
+  constexpr uint32_t immediate_mode =
+      cdna4::build_sopk(cdna4::kSSetregImm32B32Sopk, {.simm16 = mode_bit27})[0];
+  const std::array<CompletenessCase, 8> cases = {{
+      {.name = "introduced movrel",
+       .arch = ROCJITSU_CODE_ARCH_RDNA4,
+       .original = rdna_nop,
+       .body = {relative}},
+      {.name = "introduced swaprel",
+       .arch = ROCJITSU_CODE_ARCH_RDNA4,
+       .original = rdna_nop,
+       .body = {swap_relative},
+       .mode = SeedMode::Query},
+      {.name = "index on", .body = {index_on}, .mode = SeedMode::ColdFork},
+      {.name = "dynamic MODE bit27", .body = {dynamic_mode}, .mode = SeedMode::WarmPristineFork},
+      {.name = "immediate MODE bit27 on", .body = {immediate_mode, 1}},
+      {.name = "immediate MODE bit27 clear",
+       .body = {immediate_mode, 0},
+       .mode = SeedMode::WarmPristineFork,
+       .reject = false},
+      {.name = "removed original movrel",
+       .arch = ROCJITSU_CODE_ARCH_RDNA4,
+       .original = relative,
+       .body = {direct},
+       .mode = SeedMode::WarmPristineFork,
+       .reject = false},
+      {.name = "retained movrel elsewhere",
+       .arch = ROCJITSU_CODE_ARCH_RDNA4,
+       .original = rdna_nop,
+       .body = {direct},
+       .tail = {relative},
+       .mode = SeedMode::Query},
+  }};
+  for (const CompletenessCase &test_case : cases) {
+    SCOPED_TRACE(test_case.name);
+    const util::FailureOr<uint32_t> end = build_s_endpgm(test_case.arch);
+    const util::FailureOr<uint32_t> ret = build_s_setpc_b64(30, test_case.arch);
+    ASSERT_TRUE(end.succeeded());
+    ASSERT_TRUE(ret.succeeded());
+    const bool rdna = test_case.arch == ROCJITSU_CODE_ARCH_RDNA4;
+    const uint32_t machine = rdna ? EF_AMDGPU_MACH_AMDGCN_GFX1200 : EF_AMDGPU_MACH_AMDGCN_GFX950;
+    std::vector<uint32_t> words = {test_case.original};
+    words.insert(words.end(), test_case.tail.begin(), test_case.tail.end());
+    words.push_back(end.value());
+    const std::vector<uint8_t> image =
+        test::make_amdgpu_kernel_elf(words, 0, 3, machine, 0, 0, false, false, false, false, rdna);
+    const std::vector<uint8_t> probe_image =
+        test::make_amdgpu_probe_elf("probe", {ret.value()}, machine);
+    const AmdGpuCodeObject source(image.data(), image.size());
+    const AmdGpuCodeObject probe(probe_image.data(), probe_image.size());
+    ASSERT_TRUE(source.is_valid());
+    ASSERT_TRUE(probe.is_valid());
+    InstrumentationPoint point = replacement_point(0, {test_case.original}, {});
+    point.replacement->replacement_bytes.resize(test_case.body.size() * sizeof(uint32_t));
+    std::memcpy(point.replacement->replacement_bytes.data(), test_case.body.data(),
+                point.replacement->replacement_bytes.size());
+
+    // Pure replacement needs neither a callable-probe ABI nor enumerable VGPR use.
+    Instrumentor pure(source, test_case.arch);
+    pure.add_point(point);
+    const InstrumentedCodeObject pure_result = pure.patch();
+    expect_pure_replacements(source, pure_result,
+                             {{.offset = 0,
+                               .expected = point.replacement->expected_bytes,
+                               .replacement = point.replacement->replacement_bytes}},
+                             test_case.arch);
+
+    Instrumentor seed(source, test_case.arch);
+    Instrumentor *batch = &seed;
+    std::unique_ptr<Instrumentor> child;
+    TextEditError error;
+    if (test_case.mode == SeedMode::Query) {
+      ASSERT_NE(seed.instruction_boundaries(error), nullptr) << error.message;
+    } else if (test_case.mode != SeedMode::Cold) {
+      if (test_case.mode == SeedMode::WarmPristineFork) {
+        seed.add_point_by_offset(0);
+        const Instrumentor::ValidationResult warmed = seed.validate_points();
+        ASSERT_TRUE(warmed.errors.empty()) << warmed.errors.front();
+      }
+      FailureOr<std::unique_ptr<Instrumentor>> fork = seed.fork(error);
+      ASSERT_TRUE(fork.succeeded()) << error.message;
+      child = std::move(fork).value();
+      batch = child.get();
+    }
+    point.probe_obj = &probe;
+    point.probe_symbol = "probe";
+    batch->add_point(point);
+    const Instrumentor::ValidationResult validation = batch->validate_points();
+    const InstrumentedCodeObjectDebug result = batch->patch_with_debug_summaries();
+    if (test_case.reject) {
+      constexpr std::string_view diagnostic =
+          "probe calls do not support relative or GPR-indexed VGPR access";
+      EXPECT_TRUE(validation.sites.empty());
+      EXPECT_NE(std::ranges::find(validation.errors, diagnostic), validation.errors.end());
+      expect_no_output(result);
+      EXPECT_TRUE(result.patches.empty());
+      EXPECT_NE(std::ranges::find(result.errors, diagnostic), result.errors.end());
+    } else {
+      ASSERT_TRUE(validation.errors.empty()) << validation.errors.front();
+      ASSERT_EQ(validation.sites.size(), 1u);
+      ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+      expect_replacement_guest(result, 0, 4, point.replacement->replacement_bytes, test_case.arch,
+                               true);
+    }
+    EXPECT_FALSE(result.edit_error);
+    ASSERT_EQ(source.image_size(), image.size());
+    EXPECT_EQ(std::memcmp(source.image_data(), image.data(), image.size()), 0);
   }
 }
 
