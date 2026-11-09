@@ -30,8 +30,8 @@ rocprofiler-compute/
 │       ├── gfx1250/
 │       ├── gfx9_config_template.yaml    # CDNA (gfx9) panel contract
 │       ├── gfx11_config_template.yaml   # RDNA 3.5 (gfx115*) panel contract
-│       ├── gfx1201_config_template.yaml # Navi48 panel contract
-│       └── gfx12_config_template.yaml   # gfx12xx panel contract
+│       ├── gfx120x_config_template.yaml # RDNA4 (gfx120*) panel contract
+│       └── gfx125x_config_template.yaml # CDNA5 (gfx125*) panel contract
 │
 └── tools/config_management/
     ├── master_config_workflow_script.py
