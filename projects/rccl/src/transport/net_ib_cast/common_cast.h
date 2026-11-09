@@ -547,17 +547,19 @@ struct ncclIbQp {
 static_assert(NET_IB_MAX_REQUESTS <= 256,
               "request id are encoded in wr_id and we need up to 8 requests ids per completion");
 
-// A data send is two WRs unless the payload is split under the post cap. One
-// request may then post this many WRs, a 1 GiB payload at the 1 MiB floor. The
-// queue keeps two WRs for every other in-flight request so that one split still
-// fits beside them. A longer chain fails in ibv_post_send.
-#define IB_CAST_MAX_SPLIT_WRS 1024
-static inline uint32_t IbCastDataSendQueueDepth(uint32_t depthMultiplier = 1) {
+// A data send is two WRs unless the payload is split under the post cap. The
+// queue keeps two WRs for every other in-flight request plus enough room to
+// post one maximum-sized request and its possible signal/completion tail as a
+// single chain.
+static inline uint32_t IbCastDataSendQueueDepth(uint32_t maxPostSendBytes, uint32_t depthMultiplier = 1) {
+  const uint32_t splitDataWrs =
+      1u + (static_cast<uint32_t>(MAX_NET_SIZE) - 1u) / maxPostSendBytes;
+  const uint32_t splitWrs = splitDataWrs + 1u;
   // The Ionic QP creator applies depthMultiplier to this result for shared QPs.
   // Scale only the ordinary request slots; a shared physical QP still needs
   // room for one maximum-length split chain, not one chain per logical comm.
   const uint32_t splitWrsPerUnit =
-      (IB_CAST_MAX_SPLIT_WRS + depthMultiplier - 1) / depthMultiplier;
+      (splitWrs + depthMultiplier - 1) / depthMultiplier;
   return 2u * (NET_IB_MAX_REQUESTS - 1) + splitWrsPerUnit;
 }
 

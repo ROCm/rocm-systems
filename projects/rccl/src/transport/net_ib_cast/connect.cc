@@ -603,7 +603,7 @@ void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, s
   out->isP2p = base->isP2p;
   if (base->isSend) {
     out->maxRecvWorkRequest = 0;
-    out->maxSendWorkRequest = IbCastDataSendQueueDepth();
+    out->maxSendWorkRequest = IbCastDataSendQueueDepth(IbCastMaxPostSendBytes);
   } else {
     IbCastResiliencyDataRqSizeGet(base->resiliency, devIndex, &out->maxRecvWorkRequest);
     out->maxSendWorkRequest = NET_IB_MAX_REQUESTS;
@@ -1018,7 +1018,7 @@ static ncclResult_t IbCastSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
   // Ionic multiplies this value by depthMult for a shared QP. Amortize the
   // single split-chain allowance so that it is not multiplied once per comm.
   qpCreateAttrs.maxSendWorkRequest =
-      IbCastDataSendQueueDepth(qpCreateAttrs.isQpSharingEnabled ? depthMult : 1);
+      IbCastDataSendQueueDepth(IbCastMaxPostSendBytes, qpCreateAttrs.isQpSharingEnabled ? depthMult : 1);
   qpCreateAttrs.qpSharingGroupIdx = meta->sharedGroupIdx;
   qpCreateAttrs.cqDepthMultiplier = depthMult;
   for (int qpIndex = 0; qpIndex < nqps; qpIndex++) {
