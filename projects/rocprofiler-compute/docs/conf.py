@@ -209,6 +209,33 @@ rdna_gfx1201_section_map = {
         "EA-SDP Interface - Outstanding Requests"
     ),
     "navi48-ea-stalls-gfx1201": "EA-SDP Interface - Stalls",
+    "rdna4-sys-sol-gfx1201": "System Speed-of-Light",
+    "rdna4-roofline-performance-rates-gfx1201": "Roofline Performance Rates",
+    "rdna4-roofline-plot-points-gfx1201": "Roofline Plot Points",
+    "rdna4-memory-chart-instruction-cache-gfx1201": (
+        "Memory chart - Instruction Cache"
+    ),
+    "rdna4-memory-chart-scalar-data-cache-gfx1201": (
+        "Memory chart - Scalar Data Cache"
+    ),
+    "rdna4-memory-chart-gl0-cache-gfx1201": "Memory chart - GL0 Cache (Vector L0)",
+    "rdna4-memory-chart-lds-gfx1201": "Memory chart - LDS (Local Data Share)",
+    "rdna4-memory-chart-gl0-gl1-interface-gfx1201": (
+        "Memory chart - GL0-GL1 Interface"
+    ),
+    "rdna4-memory-chart-gl1-cache-gfx1201": "Memory chart - GL1 Cache (L1)",
+    "rdna4-memory-chart-gl1-gl2-interface-gfx1201": (
+        "Memory chart - GL1-GL2 Interface"
+    ),
+    "rdna4-memory-chart-gl2-cache-gfx1201": "Memory chart - GL2 Cache (L2)",
+    "rdna4-memory-chart-ea-to-dram-gfx1201": "Memory chart - EA to DRAM",
+    "rdna4-memory-chart-wgps-gfx1201": "Memory chart - Workgroup Processors (WGPs)",
+    "rdna4-ea-utilization-gfx1201": "EA Utilization",
+    "rdna4-ea-traffic-bandwidth-gfx1201": "EA Traffic Bandwidth",
+    "rdna4-ea-sdp-outstanding-requests-gfx1201": (
+        "EA-SDP Interface - Outstanding Requests"
+    ),
+    "rdna4-ea-sdp-stalls-gfx1201": "EA-SDP Interface - Stalls",
 }
 
 for context_name, section_name in rdna_gfx1201_section_map.items():

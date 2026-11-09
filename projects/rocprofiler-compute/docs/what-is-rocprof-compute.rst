@@ -269,6 +269,10 @@ Roofline micro-benchmark support varies by :ref:`SoC family <def-soc>` independe
      - ✅
      - ✅
      - Full feature support; roofline benchmarking for gfx1150 and gfx1152 was added in ROCm Compute Profiler 3.7.0, with the gfx1151 (Strix Halo) gap closed in 3.8.0. Uses Wave Matrix Multiply Accumulate (WMMA) in place of MFMA.
+   * - AMD Radeon™ RX 9070 (RDNA4, Navi 48; gfx1201)
+     - ✅
+     - ✅
+     - Uses WMMA in place of MFMA. The roofline draws the DRAM and Infinity Cache roofs. See :doc:`conceptual/rdna4/rdna4-performance-model`.
    * - AMD Instinct MI50, MI60 (Vega 20)
      - ❌
      - ❌

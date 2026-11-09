@@ -11,8 +11,9 @@ RDNA
 ROCm Compute Profiler makes available an extensive list of metrics to better understand achieved application performance on RDNA3.5 architecture-based AMD Ryzen™ APUs like AMD Ryzen AI Max / Ryzen AI Max+ Series (gfx115x).
 
 For RDNA4 Navi48 GPUs (gfx1201), including Radeon RX 9070, see
-:doc:`navi48`. That guide covers the Linux profiling prerequisite, GPU metrics,
-and the Memory Chart. The RDNA3.5 block diagram and metric tables below describe
+:doc:`navi48` for the Linux profiling prerequisite and
+:doc:`../rdna4/rdna4-performance-model` for the RDNA4 block hierarchy.
+The RDNA3.5 block diagram and metric tables below describe
 gfx115x; Navi48 has different GL1 and memory-interface behavior.
 
 To best use the profiling data, it's important to understand the role of various hardware blocks of AMD RDNA3 architecture. Refer to the following top-level block diagram to understand the hardware blocks of RDNA3 architecture.
