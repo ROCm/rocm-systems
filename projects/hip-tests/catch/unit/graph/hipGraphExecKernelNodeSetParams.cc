@@ -15,11 +15,17 @@ Negative -
 Functional -
 1) Instantiate a graph with kernel node, obtain executable graph and update
    the kernel node params with set and check it is taking effect.
+2) In a chain of kernel nodes with the middle node disabled, update the first and the
+   last node and check the updates take effect both while the middle node is disabled
+   and after it is re-enabled.
 */
 
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
+#include <resource_guards.hh>
+
+__global__ void ExecKernelNodeSetParamsStore(int* output, int value) { output[0] = value; }
 
 /**
  * Negative Test for API hipGraphExecKernelNodeSetParams
@@ -177,4 +183,77 @@ HIP_TEST_CASE(Unit_hipGraphExecKernelNodeSetParams_Functional) {
   HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipStreamDestroy(streamForGraph));
+}
+
+constexpr int kChainNodes = 3;
+
+// Launches |exec| a few times and checks the value each chain node stored in |output|.
+static void LaunchChainAndCheck(hipGraphExec_t exec, hipStream_t stream, int* output,
+                                const int (&expected)[kChainNodes]) {
+  constexpr int kLaunches = 3;
+  for (int launch = 0; launch < kLaunches; ++launch) {
+    HIP_CHECK(hipMemset(output, 0, kChainNodes * sizeof(int)));
+    HIP_CHECK(hipGraphLaunch(exec, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+    int actual[kChainNodes] = {};
+    HIP_CHECK(hipMemcpy(actual, output, sizeof(actual), hipMemcpyDeviceToHost));
+    for (int i = 0; i < kChainNodes; ++i) {
+      INFO("node " << i);
+      REQUIRE(actual[i] == expected[i]);
+    }
+  }
+}
+
+/**
+ * Functional Test: update the nodes of a single-stream kernel chain while a node between them
+ * is disabled. The chain keeps all three nodes in one packet batch, so the updates rewrite the
+ * batch's dispatch buffer that skips the disabled node, including its first slot.
+ */
+HIP_TEST_CASE(Unit_hipGraphExecKernelNodeSetParams_DisabledNeighborInBatch) {
+  constexpr int kNodes = kChainNodes;
+  LinearAllocGuard<int> output(LinearAllocs::hipMalloc, kNodes * sizeof(int));
+  int* ptrs[kNodes];
+  int values[kNodes] = {1, 2, 3};
+  void* args[kNodes][2];
+  hipKernelNodeParams params[kNodes];
+  hipGraphNode_t nodes[kNodes];
+
+  hipGraph_t graph = nullptr;
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+  for (int i = 0; i < kNodes; ++i) {
+    ptrs[i] = output.ptr() + i;
+    args[i][0] = &ptrs[i];
+    args[i][1] = &values[i];
+    params[i] = hipKernelNodeParams{};
+    params[i].func = reinterpret_cast<void*>(ExecKernelNodeSetParamsStore);
+    params[i].gridDim = dim3(1);
+    params[i].blockDim = dim3(1);
+    params[i].kernelParams = args[i];
+    HIP_CHECK(hipGraphAddKernelNode(&nodes[i], graph, i == 0 ? nullptr : &nodes[i - 1],
+                                    i == 0 ? 0 : 1, &params[i]));
+  }
+
+  hipGraphExec_t exec = nullptr;
+  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+  StreamGuard stream_guard(Streams::created);
+  const hipStream_t stream = stream_guard.stream();
+
+  LaunchChainAndCheck(exec, stream, output.ptr(), {1, 2, 3});
+
+  HIP_CHECK(hipGraphNodeSetEnabled(exec, nodes[1], 0));
+  LaunchChainAndCheck(exec, stream, output.ptr(), {1, 0, 3});
+
+  values[2] = 30;
+  HIP_CHECK(hipGraphExecKernelNodeSetParams(exec, nodes[2], &params[2]));
+  LaunchChainAndCheck(exec, stream, output.ptr(), {1, 0, 30});
+
+  values[0] = 10;
+  HIP_CHECK(hipGraphExecKernelNodeSetParams(exec, nodes[0], &params[0]));
+  LaunchChainAndCheck(exec, stream, output.ptr(), {10, 0, 30});
+
+  HIP_CHECK(hipGraphNodeSetEnabled(exec, nodes[1], 1));
+  LaunchChainAndCheck(exec, stream, output.ptr(), {10, 2, 30});
+
+  HIP_CHECK(hipGraphExecDestroy(exec));
+  HIP_CHECK(hipGraphDestroy(graph));
 }
