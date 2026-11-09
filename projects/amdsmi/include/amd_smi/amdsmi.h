@@ -403,6 +403,8 @@ typedef enum {
 
 /**
  * @brief Self-describing value type used by amdsmi_value_t
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef enum {
   AMDSMI_VALUE_TYPE_INT64 = 0,  //!< Value is held in amdsmi_value_data_t.int64_value
@@ -411,6 +413,8 @@ typedef enum {
 
 /**
  * @brief Data payload for amdsmi_value_t
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef union {
   int64_t int64_value;  //!< Valid when type == ::AMDSMI_VALUE_TYPE_INT64
@@ -422,6 +426,8 @@ typedef union {
  *
  * General-purpose and reusable by any API parameter that needs a typed
  * numeric value -- not specific to any one feature.
+ *
+ * @cond @tag{gpu_bm_linux} @endcond
  */
 typedef struct {
   amdsmi_value_type_t type;  //!< Which member of data is valid
@@ -11080,9 +11086,9 @@ typedef struct {
  *          ::AMDSMI_STATUS_NOT_SUPPORTED if Power Stabilization is not
  *          implemented on this device, or the device is multi-VF,
  *          ::AMDSMI_STATUS_INVAL if info is nullptr,
- *          ::AMDSMI_STATUS_NO_PERM if amd-smi lacks permission to read sysfs,
- *          ::AMDSMI_STATUS_FILE_ERROR if a sysfs field could not be read,
- *          ::AMDSMI_STATUS_UNEXPECTED_DATA if a sysfs field's content does
+ *          ::AMDSMI_STATUS_NO_PERM if amd-smi lacks permission to read this info,
+ *          ::AMDSMI_STATUS_FILE_ERROR if a field could not be read,
+ *          ::AMDSMI_STATUS_UNEXPECTED_DATA if a field's content does
  *          not parse as the documented type or range
  */
 amdsmi_status_t amdsmi_get_power_stabilization_info(amdsmi_processor_handle processor_handle,
@@ -11102,7 +11108,7 @@ amdsmi_status_t amdsmi_get_power_stabilization_info(amdsmi_processor_handle proc
  *  write on the caller's behalf, so the caller is responsible for
  *  selecting the node's primary GPU handle (OAM ID 0) before calling this
  *  function. Any parameter dependency is enforced by the
- *  driver via the sysfs write itself; this function performs no
+ *  underlying driver write itself; this function performs no
  *  client-side dependency or range validation beyond checking that
  *  value->type matches the type documented for param_id.
  *
@@ -11117,11 +11123,11 @@ amdsmi_status_t amdsmi_get_power_stabilization_info(amdsmi_processor_handle proc
  *          ::AMDSMI_STATUS_NOT_SUPPORTED if Power Stabilization is not
  *          implemented on this device, the device is multi-VF, or the
  *          driver rejects the write due to an unmet dependency,
- *          ::AMDSMI_STATUS_NO_PERM if amd-smi lacks permission to write sysfs,
+ *          ::AMDSMI_STATUS_NO_PERM if amd-smi lacks permission to write this parameter,
  *          ::AMDSMI_STATUS_INVAL if value is nullptr, param_id is invalid,
  *          value->type does not match the documented type for param_id, or
  *          the driver rejects the value,
- *          ::AMDSMI_STATUS_FILE_ERROR if the sysfs write could not complete
+ *          ::AMDSMI_STATUS_FILE_ERROR if the write could not complete
  */
 amdsmi_status_t amdsmi_set_power_stabilization_param(amdsmi_processor_handle processor_handle,
                                                      amdsmi_power_stabilization_param_id_t param_id,
