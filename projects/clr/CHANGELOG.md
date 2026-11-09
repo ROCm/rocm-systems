@@ -15,6 +15,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 * After `hipFuncSetCacheConfig`, `preferredShmemCarveout` reads back `-1` for `hipFuncCachePreferNone` (was `0`) and `0` for `hipFuncCachePreferL1` (was `1`).
 * With `HIP_SKIP_ABORT_ON_GPU_ERROR` enabled, device-side assertions now return `hipErrorLaunchFailure` rather than terminating the process with `abort()`, even when core dumps are enabled (`RLIMIT_CORE` > 0).
+
 ## HIP 7.17.0 for ROCm 10.2.0
 
 ### Added
