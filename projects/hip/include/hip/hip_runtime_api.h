@@ -6867,10 +6867,12 @@ hipError_t hipCtxCreate(hipCtx_t* ctx, unsigned int flags, hipDevice_t device);
  *
  * @param [in] ctx Context to destroy
  *
- * @returns #hipSuccess, #hipErrorInvalidValue
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidContext
  *
  * @see hipCtxCreate, hipCtxGetFlags, hipCtxPopCurrent, hipCtxGetCurrent,hipCtxSetCurrent,
  * hipCtxPushCurrent, hipCtxSetCacheConfig, hipCtxSynchronize , hipCtxGetDevice
+ * @warning Returns #hipErrorInvalidContext when the context was not created by a prior
+ * hipCtxCreate.
  *
  * @warning  This API is deprecated on the AMD platform, only for equivalent cuCtx driver API on the
  * NVIDIA platform.
@@ -7145,12 +7147,12 @@ hipError_t hipDevicePrimaryCtxGetState(hipDevice_t dev, unsigned int* flags, int
  *
  * @param [in] dev  Device which primary context is released [Deprecated]
  *
- * @returns #hipSuccess
+ * @returns #hipSuccess, #hipErrorInvalidContext
  *
  * @see hipCtxCreate, hipCtxDestroy, hipCtxGetFlags, hipCtxPopCurrent, hipCtxGetCurrent,
  * hipCtxSetCurrent, hipCtxPushCurrent, hipCtxSetCacheConfig, hipCtxSynchronize, hipCtxGetDevice
- * @warning This function return #hipSuccess though doesn't release the primaryCtx by design on
- * HIP/HIP-CLANG path.
+ * @warning Returns #hipErrorInvalidContext when the device holds no reference from a prior
+ * hipDevicePrimaryCtxRetain.
  *
  * @warning  This API is deprecated on the AMD platform, only for equivalent driver API on the
  * NVIDIA platform.
@@ -7167,6 +7169,7 @@ hipError_t hipDevicePrimaryCtxRelease(hipDevice_t dev);
  *
  * @see hipCtxCreate, hipCtxDestroy, hipCtxGetFlags, hipCtxPopCurrent, hipCtxGetCurrent,
  * hipCtxSetCurrent, hipCtxPushCurrent, hipCtxSetCacheConfig, hipCtxSynchronize, hipCtxGetDevice
+ * @warning Takes one reference on the device that a later hipDevicePrimaryCtxRelease gives back.
  *
  * @warning  This API is deprecated on the AMD platform, only for equivalent driver API on the
  * NVIDIA platform.

@@ -8,10 +8,12 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 * Kernels without an LDS carveout preference now dispatch with no preference instead of a 0% LDS hint, and `hipFuncSetCacheConfig(hipFuncCachePreferNone)` no longer overrides `hipDeviceSetCacheConfig`.
 * `hipDeviceGetCacheConfig` now returns the value set by `hipDeviceSetCacheConfig` on devices with a configurable LDS carveout.
+* `hipCtxDestroy` no longer releases the device context for a context the caller did not create with `hipCtxCreate`, which could free the context while the runtime still referenced it.
 
 ### Changed
 
 * After `hipFuncSetCacheConfig`, `preferredShmemCarveout` reads back `-1` for `hipFuncCachePreferNone` (was `0`) and `0` for `hipFuncCachePreferL1` (was `1`).
+* `hipCtxDestroy` returns `hipErrorInvalidContext` for a context the caller did not create with `hipCtxCreate`, and `hipDevicePrimaryCtxRelease` returns `hipErrorInvalidContext` when the device holds no reference from a prior `hipDevicePrimaryCtxRetain` (both were `hipSuccess`).
 
 ## HIP 7.17.0 for ROCm 10.2.0
 
