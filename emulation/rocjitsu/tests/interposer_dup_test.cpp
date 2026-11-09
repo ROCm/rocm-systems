@@ -5741,7 +5741,8 @@ TEST(InterposerForkTest, ChildRefusesMmap64OnInheritedGpuFd) {
 // (files came out mode 0000) and the "x" exclusive modifier (truncating instead of
 // failing EEXIST).
 void check_child_fopen_modes() {
-  rocjitsu::test::ScopedTempDirectory tmp("rj_fopen_");
+  rocjitsu::test::ScopedTempDirectory tmp;
+  ASSERT_TRUE(tmp.initialize("rj_fopen_"));
   const std::string target = tmp.path() + "/created";
 
   const pid_t child = fork();
@@ -5818,7 +5819,8 @@ TEST(InterposerForkTest, ChildClassifiesGpuEndpointsByIdentityNotName) {
   if (::stat("/dev/kfd", &kfd_st) != 0 || !S_ISCHR(kfd_st.st_mode))
     GTEST_SKIP() << "host has no real /dev/kfd to alias";
 
-  rocjitsu::test::ScopedTempDirectory tmp("rj_alias_");
+  rocjitsu::test::ScopedTempDirectory tmp;
+  ASSERT_TRUE(tmp.initialize("rj_alias_"));
   const std::string aliased = tmp.path() + "/gpu";          // -> /dev/kfd
   const std::string chained = tmp.path() + "/chained";      // -> gpu -> /dev/kfd
   const std::string lookalike = tmp.path() + "/kfd_shaped"; // -> /dev/null

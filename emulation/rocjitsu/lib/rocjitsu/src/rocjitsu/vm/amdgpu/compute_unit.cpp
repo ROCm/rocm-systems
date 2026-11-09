@@ -21,6 +21,7 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/ds_transpose.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/register_modifiers.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/tensor_dma.h"
 #include "rocjitsu/isa/instruction.h"
@@ -29,6 +30,7 @@
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
+#include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/memory_access_observation.h"
 #include "util/log.h"
 
@@ -696,7 +698,7 @@ bool ComputeUnitCore::barrier_signal(Wavefront &wf, int32_t barrier_id, uint32_t
 
   barrier->signal_count = 0;
   auto members = complete_barrier(wf.dispatch_id(), wf.wg_id(), completion_bit, named_id);
-  notify_barrier_complete(members);
+  notify_barrier_complete(members, completion_bit);
   return is_first;
 }
 
@@ -724,10 +726,28 @@ std::vector<Wavefront *> ComputeUnitCore::complete_barrier(uint32_t dispatch_id,
   return members;
 }
 
-void ComputeUnitCore::notify_barrier_complete(std::span<Wavefront *> members) {
-  if (!members.empty()) {
-    plugin_group_->onAmdgpuBarrierResolved(members);
+void ComputeUnitCore::notify_barrier_complete(std::span<Wavefront *> members,
+                                              uint8_t completion_bit) {
+  if (members.empty())
+    return;
+  BarrierKind kind;
+  switch (completion_bit) {
+  case kNamedBarrierBit:
+    kind = BarrierKind::Named;
+    break;
+  case kWorkgroupBarrierBit:
+  case kWorkgroupTrapBarrierBit:
+    kind = BarrierKind::Workgroup;
+    break;
+  case kClusterBarrierBit:
+  case kClusterTrapBarrierBit:
+    kind = BarrierKind::Cluster;
+    break;
+  default:
+    assert(false && "unknown barrier completion bit");
+    return;
   }
+  plugin_group_->onAmdgpuBarrierResolved(members, kind);
 }
 
 uint32_t ComputeUnitCore::barrier_state(const Wavefront &wf, int32_t barrier_id) const {
@@ -807,7 +827,7 @@ bool ComputeUnitCore::named_barrier_leave(Wavefront &wf) {
   if (barrier.signal_count >= barrier.member_count) {
     barrier.signal_count = 0;
     auto members = complete_barrier(wf.dispatch_id(), wf.wg_id(), kNamedBarrierBit, id);
-    notify_barrier_complete(members);
+    notify_barrier_complete(members, kNamedBarrierBit);
   }
   return barrier.member_count == 0;
 }
@@ -859,7 +879,7 @@ void ComputeUnitCore::release_wf(uint32_t dispatch_id, uint32_t wg_id,
         return;
       barrier.signal_count = 0;
       auto members = complete_barrier(dispatch_id, wg_id, completion_bit, joined_id);
-      notify_barrier_complete(members);
+      notify_barrier_complete(members, completion_bit);
     };
 
     retire_member(group->second.workgroup[0], kWorkgroupBarrierBit);
@@ -1418,22 +1438,12 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
           registers[count++] = *reg;
         }
       }
-      const uint8_t bytes =
-          sram_ecc() ? MemoryWaitScoreboard::kFullDwordByteMask : modifiers.memory_result_bytes;
-      const uint8_t tail = sram_ecc() ? MemoryWaitScoreboard::kFullDwordByteMask
-                                      : modifiers.memory_result_last_bytes;
       for (unsigned i = 0; i < count; ++i) {
-        auto reg = registers[i];
+        const auto reg = registers[i];
         const auto lanes = reg.cls == RegClass::VGPR ? vector_lanes : ~uint64_t{0};
-        if (reg.cls != RegClass::VGPR || bytes == tail) {
-          append(reg, lanes,
-                 reg.cls == RegClass::VGPR ? bytes : MemoryWaitScoreboard::kFullDwordByteMask);
-        } else {
-          const RegisterRef last{reg.cls, static_cast<uint16_t>(reg.index + reg.width - 1), 1};
-          if (--reg.width)
-            append(reg, lanes, bytes);
-          append(last, lanes, tail);
-        }
+        for_each_memory_result_range(
+            reg, modifiers, sram_ecc(),
+            [&](RegisterRef range, uint8_t bytes) { append(range, lanes, bytes); });
       }
     }
   }
@@ -1748,7 +1758,7 @@ void ComputeUnitCore::update_wf_states() {
             other_wf->waiting_barrier_bit_ == Wavefront::kNoBarrierWait)
           barrier_wfs.push_back(other_wf.get());
       }
-      notify_barrier_complete(barrier_wfs);
+      notify_barrier_complete(barrier_wfs, kWorkgroupBarrierBit);
       for (auto *bwf : barrier_wfs) {
         bwf->set_state(WfState::RUNNING);
         bwf->set_ready_cycle(cycle_counter_);
@@ -2279,7 +2289,9 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
         return IssueOutcome::Issued;
       }
       if (target == 0) {
-        active->halt();
+        // The null-PC return sentinel terminates like s_endpgm, including its
+        // implicit memory wait before registers and the wave slot are freed.
+        active->end();
         return IssueOutcome::Issued;
       }
     }
