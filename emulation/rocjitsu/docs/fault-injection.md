@@ -222,6 +222,14 @@ section. No partial mutant is returned and the source context remains unchanged.
 Drop introduces extra branches and NOPs, so it does not preserve instruction
 counts or timing. Host transformation tests do not establish physical execution.
 
+Apply also rejects retained `s_getpc_b64` / `s_get_pc_i64` when text growth
+moves allocated storage or consumes a loaded file or zero-fill tail. This
+shared replacement guard checks the whole image, including sibling kernels:
+unchanged instruction bytes alone cannot preserve linked PC-relative data
+addresses. The restriction is conservative and can reject a safe target when
+unrelated allocated metadata moves. Complete address-builder relocation is not
+implemented; see [replacement validation](dbi-design.md#instruction-replacement).
+
 For ConSan use, follow the [fresh-prepare integration contract](consan.md#fault-injection).
 Fresh prepare currently requires a single-kernel image and rejects remaining
 `s_barrier*` instructions in the analyzed scope. Sibling-preserving multi-kernel
