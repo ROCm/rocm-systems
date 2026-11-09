@@ -6,7 +6,7 @@
 
 // The NaN-flag protocols (NCCL_PROTO=NaN) read an all-ones dword as "not yet
 // written", so a sender must never put one on the wire. Real data can hold one
-// (as a NaN), and the sender escapes it to another NaN by clearing bit 31. These
+// (as a NaN), and the sender escapes it to another NaN by clearing bit 0. These
 // tests feed such data through the ring/tree primitives (prims_nan.h) via the
 // public API on 2-4 GPUs and check that every collective completes and delivers
 // the escaped value.
@@ -40,7 +40,7 @@ namespace
 
 constexpr uint32_t kAllOnes = 0xFFFFFFFFu;
 
-uint32_t escapedDword(uint32_t x) { return x == kAllOnes ? 0x7FFFFFFFu : x; }
+uint32_t escapedDword(uint32_t x) { return x == kAllOnes ? 0xFFFFFFFEu : x; }
 
 // Copy payload: sentinel dwords among near misses that must pass untouched. The
 // last dword is always the sentinel so the tail of a slice is covered.

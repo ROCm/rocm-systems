@@ -30,7 +30,7 @@
 // credit that lets the sender reuse the slot.
 //
 // Real data can still hold an all-ones dword, but only as a NaN: the sender
-// clears bit 31 of every such dword before it goes on the wire (see
+// turns every such dword into 0xFFFFFFFE before it goes on the wire (see
 // escapeSentinel), which leaves a NaN that cannot be mistaken for an empty slot.
 
 #include "rccl_ptr.h"
@@ -265,9 +265,28 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
     return m == 0xFFFFFFFFu;
   }
 
-  // Clears bit 31 of every dword anyNan() would read as the sentinel. That bit
-  // is a sign bit in each case (of the f32, of the upper f16/bf16, or of the
-  // f64), so the value stays a NaN. It has to run after the reduce, not just on
+  // A ballot straight off the compare, so the vote stays in SGPRs instead of
+  // round-tripping through a VGPR select.
+  __device__ __forceinline__ static bool waveAny(bool pred) {
+    return __builtin_amdgcn_ballot_w64(pred) != 0;
+  }
+
+  // Bit p is set when any lane of the wave still reads the sentinel in row p.
+  template <int NR>
+  __device__ __forceinline__ static uint32_t pendingRows(const v4u (&vr)[NR]) {
+    uint32_t pend = 0;
+#pragma unroll
+    for (int p = 0; p < NR; p++) {
+      const v4u x[1] = {vr[p]};
+      pend |= waveAny(anyNan<1>(x)) ? 1u << p : 0u;
+    }
+    return pend;
+  }
+
+  // Turns every dword anyNan() would read as the sentinel into 0xFFFFFFFE, with
+  // one unsigned min rather than a compare and select. That only clears a
+  // mantissa bit: the value stays a NaN as an f32, as either f16/bf16 half, and
+  // as the high dword of an f64. It has to run after the reduce, not just on
   // input: a sum can carry NaN payloads into an all-ones dword, e.g. two f16
   // dwords that each hold one all-ones half.
   template <int NR>
@@ -276,7 +295,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
 #pragma unroll
     for (int p = 0; p < NR; p++) {
 #pragma unroll
-      for (int d = First; d < 4; d += Stride) x[p][d] = x[p][d] == 0xFFFFFFFFu ? 0x7FFFFFFFu : x[p][d];
+      for (int d = First; d < 4; d += Stride) x[p][d] = min(x[p][d], 0xFFFFFFFEu);
     }
   }
 
@@ -399,6 +418,29 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
     }
   }
 
+  // Re-reads the rows of vr that some lane still sees at the sentinel until none
+  // does. The whole wave leaves together (letting lanes exit independently was
+  // measurably worse below ~32 MiB), the votes are ballots, and a row that has
+  // landed is not read again: it stays put until this receiver restores it.
+  template <int NR>
+  __device__ __forceinline__ void pollRows(v4u (&vr)[NR], v4u_gptr ptr, int& abortCache) {
+    if (!waveAny(anyNan<NR>(vr))) return;
+    int spins = 0;
+    for (uint32_t pend = pendingRows<NR>(vr); pend != 0; pend = pendingRows<NR>(vr)) {
+      if (checkAbort(abortCache, 1, spins)) break;
+#if (defined(__gfx942__) || defined(__gfx950__)) && !RCCL_LL_FIFO_SYS_SCOPE
+      // A nontemporal load can still be served from a stale L1 line, and a tight
+      // re-poll then reads the sentinel until the line is evicted or the abort
+      // check invalidates it: milliseconds, now and then, without this.
+      __asm__ volatile("buffer_inv sc0" ::: "memory");
+#endif
+#pragma unroll
+      for (int p = 0; p < NR; p++) {
+        if (pend & (1u << p)) vr[p] = loadNanPack(ptr + p * WARP_SIZE);
+      }
+    }
+  }
+
   // Spin until every pack this lane owns has left the sentinel, then reduce and
   // forward. Unlike LL128 there is no reload after the spin: each lane validates
   // exactly the packs it keeps, so the values that ended the loop are the values
@@ -422,17 +464,9 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
         if (i >= nrecv) break;
         v4u_gptr ptr = recvFifo[i];
         v4u vr[NR];
-        int spins = 0;
-        bool pending;
-        // The warp leaves the spin together; letting lanes exit independently
-        // was measurably worse below ~32 MiB. An s_sleep backoff between
-        // re-reads makes no difference at 1 GiB, so the loop stays tight.
-        do {
 #pragma unroll
-          for (int p = 0; p < NR; p++) vr[p] = loadNanPack(ptr + p * WARP_SIZE);
-          pending = anyNan<NR>(vr);
-          if (checkAbort(abortCache, 1, spins)) break;
-        } while (__any(pending));
+        for (int p = 0; p < NR; p++) vr[p] = loadNanPack(ptr + p * WARP_SIZE);
+        pollRows<NR>(vr, ptr, abortCache);
 
         if (SRC && i == 0) finishSrc<NR, SrcBuf>(v, eltN, lane);
         // The first peer seeds v[] when there is no local source to reduce
@@ -557,10 +591,9 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
 
   // escapeSentinel() for one pack.
   __device__ __forceinline__ static v4u escapePack(v4u x) {
-    constexpr int First = sizeof(T) <= 4 ? 0 : 1, Stride = sizeof(T) <= 4 ? 1 : 2;
-#pragma unroll
-    for (int d = First; d < 4; d += Stride) x[d] = x[d] == 0xFFFFFFFFu ? 0x7FFFFFFFu : x[d];
-    return x;
+    v4u a[PackPerThread] = {x};
+    escapeSentinel<1>(a);
+    return a[0];
   }
 
   // Every warp writes the whole sentinel window before its first restore, so it never stores
