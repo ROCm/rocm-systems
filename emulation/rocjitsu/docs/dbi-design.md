@@ -287,6 +287,12 @@ Separately, text growth rejects any PT_LOAD that would acquire the inserted byte
 at a different virtual address. This includes an alias of the last source word
 whose file range ends exactly at the insertion point, even if no anchor edits
 that word. Equivalent mappings at the insertion point remain eligible.
+After layout, the appended text range is also checked against every final
+PT_LOAD memory range. An overlap must have equivalent file backing throughout;
+distinct file contents or zero-fill storage reject, including mappings that
+remain fixed because their file ranges precede the insertion point. Touching
+ranges, empty mappings, and segments moved clear of the appended text remain
+eligible.
 
 The reference checks cover decoded direct-branch destinations, text-symbol
 start/end offsets, raw symbol-less RELATIVE64 destinations under the existing

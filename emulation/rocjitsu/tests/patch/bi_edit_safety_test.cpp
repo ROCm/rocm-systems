@@ -639,5 +639,309 @@ TEST(BiEditSafety, LoadFileAliasChecksKeepTouchingEmptyAndEquivalentMappingsElig
   }
 }
 
+void replay_load_segments(std::span<const uint8_t> image, std::span<uint8_t> loaded) {
+  Elf64_Ehdr header = {};
+  ASSERT_GE(image.size(), sizeof(header));
+  std::memcpy(&header, image.data(), sizeof(header));
+  const std::optional<std::vector<Elf64_Phdr>> segments =
+      read_elf_table<Elf64_Phdr>(image, header.e_phoff, header.e_phnum, header.e_phentsize);
+  ASSERT_TRUE(segments);
+  // The modern loader shares one zero-initialized allocation between segments.
+  std::ranges::fill(loaded, 0);
+  for (const Elf64_Phdr &segment : *segments) {
+    if (segment.p_type != PT_LOAD)
+      continue;
+    ASSERT_LE(segment.p_filesz, segment.p_memsz);
+    ASSERT_LE(segment.p_vaddr, loaded.size());
+    ASSERT_LE(segment.p_memsz, loaded.size() - segment.p_vaddr);
+    if (segment.p_filesz == 0)
+      continue;
+    ASSERT_LE(segment.p_offset, image.size());
+    ASSERT_LE(segment.p_filesz, image.size() - segment.p_offset);
+    std::memcpy(loaded.data() + segment.p_vaddr, image.data() + segment.p_offset, segment.p_filesz);
+  }
+}
+
+void expect_anchor_branch_to_cave(const Section &text, uint64_t cave_offset) {
+  const std::optional<int16_t> displacement = compute_sopp_branch_simm16(0, cave_offset);
+  ASSERT_TRUE(displacement);
+  const util::FailureOr<uint32_t> branch = build_s_branch(*displacement, kArch);
+  ASSERT_TRUE(branch.succeeded());
+  ASSERT_GE(text.size(), sizeof(uint32_t));
+  uint32_t anchor_word = 0;
+  std::memcpy(&anchor_word, text.data(), sizeof(anchor_word));
+  EXPECT_EQ(anchor_word, branch.value());
+}
+
+struct UnmovedLoadRange {
+  uint64_t vaddr;
+  uint64_t file_size;
+  uint64_t memory_size;
+  bool overlaps_cave;
+};
+
+void expect_unmoved_load_growth_policy(const UnmovedLoadRange &range) {
+  constexpr uint64_t kTextFileOffset = 0x1ff0;
+  constexpr uint64_t kTextVaddr = 0x1ff0;
+  constexpr uint64_t kDescriptorVaddr = 0x4000;
+  constexpr uint32_t kMarker = 0x12345678;
+  const uint64_t marker_file_offset = 0x1000 + range.vaddr % 0x1000;
+  ASSERT_LE(range.file_size, sizeof(kMarker));
+  ASSERT_LE(range.file_size, range.memory_size);
+  std::vector<uint8_t> image =
+      test::make_gfx1200_kernel_elf({kNop0Word, kNop1Word, kNop0Word, kEndpgmWord}, 0);
+  const AmdGpuCodeObject original(image.data(), image.size());
+  ASSERT_TRUE(original.is_valid());
+  ASSERT_EQ(original.text_sections().size(), 1u);
+  const Section &original_text = *original.text_sections().front();
+  const CodeObjectPatcher original_patcher(original);
+  std::vector<Elf64_Shdr> sections = original_patcher.section_headers();
+  ASSERT_EQ(sections.size(), 6u);
+  ASSERT_EQ(sections[1].sh_flags, SHF_ALLOC | SHF_EXECINSTR);
+  ASSERT_EQ(sections[2].sh_flags, SHF_ALLOC);
+  ASSERT_EQ(sections[3].sh_type, SHT_SYMTAB);
+  Elf64_Ehdr header = {};
+  std::memcpy(&header, image.data(), sizeof(header));
+  std::optional<std::vector<Elf64_Phdr>> segments =
+      read_elf_table<Elf64_Phdr>(image, header.e_phoff, header.e_phnum, header.e_phentsize);
+  ASSERT_TRUE(segments);
+  ASSERT_EQ(segments->size(), 2u);
+  ASSERT_LE(original_text.sectionOffset(), kTextFileOffset);
+  const uint64_t delta = kTextFileOffset - original_text.sectionOffset();
+  image.insert(image.begin() + static_cast<std::ptrdiff_t>(original_text.sectionOffset()),
+               static_cast<size_t>(delta), 0);
+  header.e_shoff += delta;
+  header.e_ident[EI_DATA] = ELFDATA2LSB;
+  header.e_ident[EI_VERSION] = 1;
+  header.e_ident[EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
+  for (Elf64_Shdr &section : sections) {
+    if (section.sh_type != SHT_NULL && section.sh_offset >= original_text.sectionOffset())
+      section.sh_offset += delta;
+  }
+  for (Elf64_Phdr &segment : *segments)
+    segment.p_offset += delta;
+  sections[1].sh_addr = kTextVaddr;
+  sections[2].sh_addr = kDescriptorVaddr;
+  (*segments)[0].p_vaddr = kTextVaddr;
+  (*segments)[0].p_paddr = kTextVaddr;
+  (*segments)[1].p_vaddr = kDescriptorVaddr;
+  (*segments)[1].p_paddr = kDescriptorVaddr;
+  // Rebind the existing descriptor and its symbol after moving the fixture.
+  amdhsa::kernel_descriptor_t descriptor = {};
+  std::memcpy(&descriptor, image.data() + sections[2].sh_offset, sizeof(descriptor));
+  descriptor.kernel_code_entry_byte_offset =
+      static_cast<int64_t>(kTextVaddr) - static_cast<int64_t>(kDescriptorVaddr);
+  std::memcpy(image.data() + sections[2].sh_offset, &descriptor, sizeof(descriptor));
+  Elf64_Sym descriptor_symbol = {};
+  std::memcpy(&descriptor_symbol, image.data() + sections[3].sh_offset + sizeof(Elf64_Sym),
+              sizeof(descriptor_symbol));
+  ASSERT_EQ(descriptor_symbol.st_shndx, 2u);
+  descriptor_symbol.st_value = kDescriptorVaddr;
+  std::memcpy(image.data() + sections[3].sh_offset + sizeof(Elf64_Sym), &descriptor_symbol,
+              sizeof(descriptor_symbol));
+  segments->push_back({.p_type = PT_LOAD,
+                       .p_flags = 0x6, // PF_R | PF_W
+                       .p_offset = marker_file_offset,
+                       .p_vaddr = range.vaddr,
+                       .p_paddr = range.vaddr,
+                       .p_filesz = range.file_size,
+                       .p_memsz = range.memory_size,
+                       .p_align = 0x1000});
+  std::ranges::sort(*segments, {}, &Elf64_Phdr::p_vaddr);
+  for (const Elf64_Phdr &segment : *segments) {
+    ASSERT_EQ(segment.p_offset % segment.p_align, segment.p_vaddr % segment.p_align);
+  }
+  header.e_phnum = static_cast<uint16_t>(segments->size());
+  ASSERT_LT(marker_file_offset + sizeof(kMarker), sections[1].sh_offset);
+  ASSERT_EQ(sections[1].sh_addr + sections[1].sh_size, 0x2000u);
+  ASSERT_GE(range.vaddr, sections[1].sh_addr + sections[1].sh_size);
+  ASSERT_LE(header.e_phoff + segments->size() * sizeof(Elf64_Phdr), marker_file_offset);
+  std::memcpy(image.data() + marker_file_offset, &kMarker, sizeof(kMarker));
+  std::memcpy(image.data(), &header, sizeof(header));
+  std::memcpy(image.data() + header.e_phoff, segments->data(),
+              segments->size() * sizeof(Elf64_Phdr));
+  std::memcpy(image.data() + header.e_shoff, sections.data(), sections.size() * sizeof(Elf64_Shdr));
+  const std::vector<uint8_t> pristine = image;
+  const AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  const Section &source_text = *source.text_sections().front();
+  std::vector<uint8_t> original_loaded(0x10000, 0);
+  ASSERT_NO_FATAL_FAILURE(replay_load_segments(image, original_loaded));
+  ASSERT_EQ(std::memcmp(original_loaded.data() + source_text.vaddr(), source_text.data(),
+                        source_text.size()),
+            0);
+  if (range.file_size == 0 && range.memory_size != 0) {
+    uint32_t original_zero_fill = kMarker;
+    std::memcpy(&original_zero_fill, original_loaded.data() + range.vaddr,
+                sizeof(original_zero_fill));
+    ASSERT_EQ(original_zero_fill, 0u);
+  }
+  Instrumentor instrumentor(source, kArch);
+  instrumentor.add_point_by_offset(0);
+  const Instrumentor::ValidationResult eligible = instrumentor.validate_points();
+  ASSERT_TRUE(eligible.errors.empty()) << eligible.errors.front();
+  ASSERT_EQ(eligible.sites.size(), 1u);
+  const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+  if (!result.elf_bytes.empty()) {
+    const AmdGpuCodeObject candidate(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(candidate.is_valid());
+    ASSERT_EQ(candidate.text_sections().size(), 1u);
+    ASSERT_EQ(result.sites.size(), 1u);
+    const Section &emitted_text = *candidate.text_sections().front();
+    ASSERT_EQ(emitted_text.size(), 28u);
+    std::vector<uint8_t> loaded(0x10000, 0);
+    ASSERT_NO_FATAL_FAILURE(replay_load_segments(result.elf_bytes, loaded));
+    const uint64_t cave_offset = result.sites.front().instrumentation_offset;
+    ASSERT_EQ(cave_offset, original_text.size());
+    ASSERT_NO_FATAL_FAILURE(expect_anchor_branch_to_cave(emitted_text, cave_offset));
+    ASSERT_LE(cave_offset, emitted_text.size());
+    ASSERT_LE(sizeof(uint32_t), emitted_text.size() - cave_offset);
+    uint32_t file_cave_word = 0;
+    std::memcpy(&file_cave_word, emitted_text.data() + cave_offset, sizeof(file_cave_word));
+    ASSERT_EQ(file_cave_word, kNop0Word);
+    uint32_t loaded_cave_word = 0;
+    std::memcpy(&loaded_cave_word, loaded.data() + emitted_text.vaddr() + cave_offset,
+                sizeof(loaded_cave_word));
+    EXPECT_EQ(loaded_cave_word, file_cave_word);
+    if (range.overlaps_cave && range.file_size != 0) {
+      EXPECT_EQ(loaded_cave_word, kMarker);
+    }
+    if (range.overlaps_cave && range.file_size == 0) {
+      uint32_t emitted_zero_fill = 0;
+      std::memcpy(&emitted_zero_fill, loaded.data() + range.vaddr, sizeof(emitted_zero_fill));
+      EXPECT_EQ(emitted_zero_fill, 0u);
+    }
+    if (range.vaddr == 0x200c) {
+      EXPECT_EQ(range.vaddr, emitted_text.vaddr() + emitted_text.size());
+    }
+  }
+  if (range.overlaps_cave) {
+    EXPECT_FALSE(result.errors.empty());
+    EXPECT_TRUE(result.elf_bytes.empty());
+    EXPECT_TRUE(result.sites.empty());
+    EXPECT_TRUE(result.patches.empty());
+  } else {
+    ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+    ASSERT_EQ(result.sites.size(), 1u);
+    EXPECT_FALSE(result.elf_bytes.empty());
+  }
+  EXPECT_EQ(image, pristine);
+  EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
+}
+
+TEST(BiEditSafety, RejectsUnmovedLoadOverwritingAppendedTrampoline) {
+  expect_unmoved_load_growth_policy(
+      {.vaddr = 0x2000, .file_size = 4, .memory_size = 4, .overlaps_cave = true});
+}
+
+TEST(BiEditSafety, AllowsUnmovedLoadClearOfAppendedTrampoline) {
+  expect_unmoved_load_growth_policy(
+      {.vaddr = 0x3000, .file_size = 4, .memory_size = 4, .overlaps_cave = false});
+}
+
+TEST(BiEditSafety, AllowsUnmovedLoadTouchingFinalTextEnd) {
+  expect_unmoved_load_growth_policy(
+      {.vaddr = 0x200c, .file_size = 4, .memory_size = 4, .overlaps_cave = false});
+}
+
+TEST(BiEditSafety, RejectsTextGrowthIntoUnmovedZeroFill) {
+  expect_unmoved_load_growth_policy(
+      {.vaddr = 0x2000, .file_size = 0, .memory_size = 4, .overlaps_cave = true});
+}
+
+TEST(BiEditSafety, AllowsEmptyUnmovedLoadAtAppendedText) {
+  expect_unmoved_load_growth_policy(
+      {.vaddr = 0x2000, .file_size = 0, .memory_size = 0, .overlaps_cave = false});
+}
+
+void expect_unedited_load_alias_growth_policy(uint64_t alias_text_offset, bool overlaps_cave) {
+  std::optional<LoadAliasFixture> fixture = make_load_alias_fixture(4, 4, 4);
+  ASSERT_TRUE(fixture);
+  const AmdGpuCodeObject original(fixture->image.data(), fixture->image.size());
+  ASSERT_TRUE(original.is_valid());
+  const Section &original_text = *original.text_sections().front();
+  Elf64_Ehdr header = {};
+  std::memcpy(&header, fixture->image.data(), sizeof(header));
+  std::optional<std::vector<Elf64_Phdr>> segments = read_elf_table<Elf64_Phdr>(
+      fixture->image, header.e_phoff, header.e_phnum, header.e_phentsize);
+  ASSERT_TRUE(segments);
+  const std::vector<Elf64_Phdr>::iterator alias =
+      std::ranges::find(*segments, fixture->alias.p_vaddr, &Elf64_Phdr::p_vaddr);
+  ASSERT_NE(alias, segments->end());
+  alias->p_vaddr = original_text.vaddr() + alias_text_offset;
+  alias->p_paddr = alias->p_vaddr;
+  alias->p_align = 1;
+  std::ranges::sort(*segments, {}, &Elf64_Phdr::p_vaddr);
+  ASSERT_GE(alias_text_offset, original_text.size());
+  std::memcpy(fixture->image.data() + header.e_phoff, segments->data(),
+              segments->size() * sizeof(Elf64_Phdr));
+  const std::vector<uint8_t> pristine = fixture->image;
+  const AmdGpuCodeObject source(pristine.data(), pristine.size());
+  ASSERT_TRUE(source.is_valid());
+  const Section &source_text = *source.text_sections().front();
+  std::vector<uint8_t> original_loaded(0x10000, 0);
+  ASSERT_NO_FATAL_FAILURE(replay_load_segments(pristine, original_loaded));
+  ASSERT_EQ(std::memcmp(original_loaded.data() + source_text.vaddr(), source_text.data(),
+                        source_text.size()),
+            0);
+  Instrumentor instrumentor(source, kArch);
+  instrumentor.add_point_by_offset(0);
+  const Instrumentor::ValidationResult eligible = instrumentor.validate_points();
+  ASSERT_TRUE(eligible.errors.empty()) << eligible.errors.front();
+  ASSERT_EQ(eligible.sites.size(), 1u);
+  const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+  if (!result.elf_bytes.empty()) {
+    const AmdGpuCodeObject candidate(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(candidate.is_valid());
+    ASSERT_EQ(candidate.text_sections().size(), 1u);
+    ASSERT_EQ(result.sites.size(), 1u);
+    const Section &text = *candidate.text_sections().front();
+    ASSERT_EQ(text.size(), 28u);
+    const uint64_t cave_offset = result.sites.front().instrumentation_offset;
+    ASSERT_EQ(cave_offset, original_text.size());
+    ASSERT_NO_FATAL_FAILURE(expect_anchor_branch_to_cave(text, cave_offset));
+    const uint64_t return_offset = text.size() - sizeof(uint32_t);
+    ASSERT_EQ(return_offset, 24u);
+    const std::optional<int16_t> return_displacement =
+        compute_sopp_branch_simm16(return_offset, sizeof(uint32_t));
+    ASSERT_TRUE(return_displacement);
+    const util::FailureOr<uint32_t> return_branch = build_s_branch(*return_displacement, kArch);
+    ASSERT_TRUE(return_branch.succeeded());
+    uint32_t file_return_word = 0;
+    std::memcpy(&file_return_word, text.data() + return_offset, sizeof(file_return_word));
+    ASSERT_EQ(file_return_word, return_branch.value());
+    std::vector<uint8_t> loaded(0x10000, 0);
+    ASSERT_NO_FATAL_FAILURE(replay_load_segments(result.elf_bytes, loaded));
+    uint32_t loaded_return_word = 0;
+    std::memcpy(&loaded_return_word, loaded.data() + text.vaddr() + return_offset,
+                sizeof(loaded_return_word));
+    EXPECT_EQ(loaded_return_word, file_return_word);
+    if (overlaps_cave) {
+      EXPECT_EQ(loaded_return_word, kNop1Word);
+    }
+    EXPECT_EQ(std::memcmp(loaded.data() + text.vaddr(), text.data(), text.size()), 0);
+  }
+  if (overlaps_cave) {
+    EXPECT_FALSE(result.errors.empty());
+    EXPECT_TRUE(result.elf_bytes.empty());
+    EXPECT_TRUE(result.sites.empty());
+    EXPECT_TRUE(result.patches.empty());
+  } else {
+    ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+    ASSERT_EQ(result.sites.size(), 1u);
+    EXPECT_FALSE(result.elf_bytes.empty());
+  }
+  EXPECT_EQ(fixture->image, pristine);
+  EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
+}
+
+TEST(BiEditSafety, RejectsUneditedLoadAliasOverwritingAppendedReturnBranch) {
+  expect_unedited_load_alias_growth_policy(24, true);
+}
+
+TEST(BiEditSafety, AllowsUneditedLoadAliasClearOfAppendedText) {
+  expect_unedited_load_alias_growth_policy(256, false);
+}
+
 } // namespace
 } // namespace rocjitsu

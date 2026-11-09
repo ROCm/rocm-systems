@@ -203,6 +203,33 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
   return file_offset <= limit && size <= limit - file_offset;
 }
 
+bool load_mappings_preserve_text(std::span<const Elf64_Phdr> segments, size_t image_size,
+                                 uint64_t text_offset, uint64_t text_vaddr, uint64_t text_size) {
+  if (!image_contains_range(image_size, text_offset, text_size) ||
+      text_size > std::numeric_limits<uint64_t>::max() - text_vaddr)
+    return false;
+  const uint64_t text_end = text_vaddr + text_size;
+  for (const Elf64_Phdr &segment : segments) {
+    if (segment.p_type != PT_LOAD)
+      continue;
+    if ((segment.p_filesz != 0 &&
+         !image_contains_range(image_size, segment.p_offset, segment.p_filesz)) ||
+        segment.p_filesz > segment.p_memsz ||
+        segment.p_memsz > std::numeric_limits<uint64_t>::max() - segment.p_vaddr)
+      return false;
+    const uint64_t overlap_begin = std::max(text_vaddr, segment.p_vaddr);
+    const uint64_t overlap_end = std::min(text_end, segment.p_vaddr + segment.p_memsz);
+    if (overlap_begin >= overlap_end)
+      continue;
+    // A distinct backing or zero-fill range must not acquire executable bytes.
+    if (overlap_end - segment.p_vaddr > segment.p_filesz ||
+        segment.p_offset + (overlap_begin - segment.p_vaddr) !=
+            text_offset + (overlap_begin - text_vaddr))
+      return false;
+  }
+  return true;
+}
+
 bool has_dynamic_write_within_text(std::span<const uint8_t> image, const Elf64_Ehdr &header,
                                    std::span<const Elf64_Shdr> sections, uint64_t text_vaddr,
                                    uint64_t text_size) {
@@ -1497,6 +1524,12 @@ bool CodeObjectPatcher::replace_text(
              "shifted LOAD lost file/virtual address congruence");
     }
   }
+
+  // File order and address order can differ. Even a LOAD whose file range
+  // precedes the insertion can remain over the newly appended executable bytes.
+  if (growth != 0 && !load_mappings_preserve_text(phdrs, image_.size(), old_text_end_file,
+                                                  old_text_end_vaddr, growth))
+    return false;
 
   // Destinations in moved sections have their final addresses now. Unsectioned
   // places remain fixed and must not overlap the newly appended executable text.

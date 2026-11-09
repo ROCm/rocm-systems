@@ -97,6 +97,8 @@ public:
   /// entries coherent with explicit descriptor patches applied by DBT.
   /// Rejects growth that would extend a divergent LOAD mapping and supported
   /// dynamic relocation writes that overlap final .text after place remapping.
+  /// Appended text must also have equivalent file backing in every overlapping
+  /// final LOAD mapping, including segments that remain at their original address.
   [[nodiscard]] bool replace_text(
       std::span<const uint8_t> new_text,
       std::span<const TextOffsetRelocation> text_relocations = {},
