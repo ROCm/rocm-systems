@@ -64,9 +64,9 @@ rocprof-compute --specs
 ```
 
 It reports what the profiler detected, including `ROCm Version`, `GPU Model`,
-and `GPU Arch`. Not every feature works on every architecture. Check the
-compatible accelerators table before promising a result, and let the tool's own
-error message stand when a feature is unavailable.
+and `GPU Arch`. Not every feature works on every GPU. The docs for each feature
+say which GPUs support it. When rocprof-compute reports that a feature is not
+supported, tell the user, and do not work around it.
 
 ## 2. Collect what you need before profiling
 
