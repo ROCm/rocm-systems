@@ -5,6 +5,8 @@
  */
 
 #include <cstring>
+#include <initializer_list>
+#include <limits>
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
@@ -67,6 +69,50 @@ HIP_TEST_CASE(Contract_Device_HipDeviceGetAttribute_WarpSize_MatchesProperties) 
 
   REQUIRE(attribute_warp_size == properties.warpSize);
 }
+
+// hipDeviceAttributeL3CacheSize is AMD-specific: it is appended to the
+// hipDeviceAttribute_t AMD range and only the Linux ROCm backend populates it.
+// BACKEND-DIFF: NVIDIA has no equivalent cudaDeviceAttr for an L3/Infinity Cache
+// size, so these contracts are AMD-only; parity would require a CUDA attribute.
+#if HT_AMD
+// The header documents the attribute's contract: bytes, capped at INT_MAX, and 0
+// when no cache information is available. The device-only harness can pin the
+// range and the rejection behavior; the actual HSA-derived value is compared on
+// AMD hardware in unit/device/hipGetDeviceAttribute.cc.
+// @asserts: hipDeviceGetAttribute - hipDeviceAttributeL3CacheSize returns a value in [0, INT_MAX]
+HIP_TEST_CASE(Contract_Device_HipDeviceGetAttribute_L3CacheSize_IsWithinIntRange) {
+  const int device = CurrentDevice();
+  int l3_cache_size = -1;
+
+  HIP_CHECK(hipDeviceGetAttribute(&l3_cache_size, hipDeviceAttributeL3CacheSize, device));
+
+  REQUIRE(l3_cache_size >= 0);
+  REQUIRE(l3_cache_size <= std::numeric_limits<int>::max());
+}
+
+// @asserts: hipDeviceGetAttribute - a null output pointer for hipDeviceAttributeL3CacheSize is rejected
+HIP_TEST_CASE(Contract_Device_HipDeviceGetAttribute_L3CacheSize_NullOutputIsRejected) {
+  const int device = CurrentDevice();
+  const hipError_t status = hipDeviceGetAttribute(nullptr, hipDeviceAttributeL3CacheSize, device);
+
+  REQUIRE(status == hipErrorInvalidValue);
+  (void)hipGetLastError();
+}
+
+// @asserts: hipDeviceGetAttribute - an out-of-range device for hipDeviceAttributeL3CacheSize is rejected
+HIP_TEST_CASE(Contract_Device_HipDeviceGetAttribute_L3CacheSize_InvalidDeviceIsRejected) {
+  int device_count = 0;
+  HIP_CHECK(hipGetDeviceCount(&device_count));
+  int l3_cache_size = -1;
+
+  for (const int device : {-1, device_count}) {
+    const hipError_t status =
+        hipDeviceGetAttribute(&l3_cache_size, hipDeviceAttributeL3CacheSize, device);
+    REQUIRE(status == hipErrorInvalidDevice);
+    (void)hipGetLastError();
+  }
+}
+#endif  // HT_AMD
 
 // @asserts: hipGetDevice - the current device ordinal is in range [0, device_count)
 HIP_TEST_CASE(Contract_Device_HipGetDevice_CurrentOrdinal_IsWithinDeviceCount) {

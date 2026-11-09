@@ -653,6 +653,8 @@ typedef enum hipDeviceAttribute_t {
                                                  ///< per kernel launch (0 if unsupported).
   hipDeviceAttributeL3CacheSize,                 ///< Size of L3 cache in bytes, capped at INT_MAX.
                                                  ///< 0 if no cache information is available.
+                                                 ///< AMD-specific: populated only by the Linux
+                                                 ///< ROCm backend; other backends report 0.
 
   hipDeviceAttributeAmdSpecificEnd = 19999,
   hipDeviceAttributeVendorSpecificBegin = 20000,

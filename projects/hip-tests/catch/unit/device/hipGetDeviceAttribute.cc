@@ -319,6 +319,7 @@ HIP_TEST_CASE(Unit_hipGetDeviceAttribute_hipDeviceAttributeL3CacheSize) {
     REQUIRE(l3 >= 0);
     HIP_CHECK_ERROR(hipDeviceGetAttribute(nullptr, hipDeviceAttributeL3CacheSize, device),
                     hipErrorInvalidValue);
+    (void)hipGetLastError();
   }
 
   int l3 = -1;
@@ -327,6 +328,9 @@ HIP_TEST_CASE(Unit_hipGetDeviceAttribute_hipDeviceAttributeL3CacheSize) {
     HIP_CHECK_ERROR(hipDeviceGetAttribute(&l3, hipDeviceAttributeL3CacheSize, device),
                     hipErrorInvalidDevice);
   }
+  // Clear the sticky errors from the intentional negative calls above so they
+  // cannot leak into a later case in the same process.
+  (void)hipGetLastError();
 }
 
 #if HT_LINUX
