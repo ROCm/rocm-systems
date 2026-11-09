@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Guest-controlled interpolation reuses the existing directed mixed-FMA arithmetic.
+// Bit-exact and guest-controlled interpolation reuse the exact mixed-FMA arithmetic.
 #pragma once
 
 #include "rj_arith/rj_arith.h"

@@ -5884,6 +5884,25 @@ TEST(ArithBridgeTest, InterpolationUsesGuestRoundingAndInputFlushing) {
   }
 }
 
+// With MODE keeping denormals there are no guest FP flags, but the default policy still returns
+// gfx1201's NaN: the invalid product wins over the NaN addend.
+TEST(ArithBridgeTest, InterpolationDefaultModeNanMatchesGfx1201) {
+  BridgeFixture fixture(false);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
+  fixture.wave->set_exec(1);
+  fixture.wave->set_mode_raw(0xf0);
+  fixture.cu->write_vgpr(fixture.base(), 1, 0x7f800000);
+  fixture.cu->write_vgpr(fixture.base() + 1, 0, 0);
+  fixture.cu->write_vgpr(fixture.base() + 2, 0, 0x7fc00000);
+  auto words = rdna4::build_vinterp(rdna4::kVInterpP10F32Vinterp,
+                                    {.vdst = 3, .src0 = 256, .src1 = 257, .src2 = 258});
+  auto instruction = fixture.decoder->decode_window(words);
+  ASSERT_TRUE(instruction.succeeded());
+  ASSERT_TRUE(
+      fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+  EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 3, 0), 0xffc00000U);
+}
+
 // RTZ opcodes override nearest-even guest MODE, including with denormals flushed.
 TEST(ArithBridgeTest, InterpolationRtzOverridesGuestNearest) {
   for (bool rdna3 : {false, true}) {
