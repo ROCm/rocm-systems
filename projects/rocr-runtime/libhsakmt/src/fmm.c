@@ -56,6 +56,10 @@
 #define MPOL_F_STATIC_NODES     (1 << 15)
 #endif
 
+#ifndef MPOL_F_RELATIVE_NODES
+#define MPOL_F_RELATIVE_NODES   (1 << 14)
+#endif
+
 #define NON_VALID_GPU_ID 0
 
 static bool hsakmt_drm_supports_vm_timeline(uint32_t major, uint32_t minor)
@@ -2892,6 +2896,24 @@ static void *fmm_allocate_host_cpu(HsaKFDContext *ctx, void *address, uint64_t M
 	return mem;
 }
 
+/* Returns true if the calling thread has an explicit NUMA memory policy
+ * (e.g. via numactl -m / set_mempolicy). Linux mempolicy is per-thread;
+ * numactl sets it before exec so every thread inherits it, which covers the
+ * common case. When set, ROCr should not override it with a per-agent mbind;
+ * the policy governs host placement.
+ */
+static bool thread_has_explicit_mempolicy(void)
+{
+	int mode = MPOL_DEFAULT;
+
+	/* flags=0, addr=NULL => returns the calling thread's default policy. */
+	if (get_mempolicy(&mode, NULL, 0, NULL, 0) != 0)
+		return false;
+
+	mode &= ~(MPOL_F_STATIC_NODES | MPOL_F_RELATIVE_NODES);
+	return mode != MPOL_DEFAULT;
+}
+
 static int bind_mem_to_numa(uint32_t numa_node_id, void *mem,
 			    uint64_t SizeInBytes, HsaMemFlags mflags)
 {
@@ -2910,6 +2932,16 @@ static int bind_mem_to_numa(uint32_t numa_node_id, void *mem,
 		else
 			return 0;
 	}
+
+	/* Honor an explicit memory policy (e.g. numactl -m) for substitutable
+	 * host allocations: leave placement to that policy instead of forcing the
+	 * per-agent node. Strict (NoSubstitute) allocations - e.g. the udmabuf APU
+	 * path - keep their hard per-agent bind and error handling below.
+	 * HSA_FORCE_MBIND=1 restores the legacy per-agent binding.
+	 */
+	if (!hsakmt_force_mbind && !mflags.ui32.NoSubstitute &&
+	    thread_has_explicit_mempolicy())
+		return 0;
 
 	num_node = numa_max_node() + 1;
 
