@@ -123,7 +123,7 @@ def test_layout_shows_every_panel_metric_and_no_other(path, arch):
 def test_gfx1201_memory_demand_belongs_to_l2():
     layout = Layouts.for_arch("gfx1201")
     blocks = {block.id: block for block in layout.blocks()}
-    # Memory-Destined Read/Write Requests and Read/Write Bandwidth
+    # DRAM Read/Write Requests and Read/Write Bandwidth
     memory_demand = {"3.8.0", "3.8.1", "3.8.2", "3.8.3"}
     assert memory_demand <= {item.metric_id for item in blocks["l2"].items}
     # GDDR6 Read/Write Bandwidth

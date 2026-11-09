@@ -240,7 +240,7 @@ def test_gfx1201_memory_demand_does_not_appear_as_gddr6_bandwidth():
     # Infinity Cache Hit Rate, GDDR6 Read Bandwidth, GDDR6 Write Bandwidth
     for metric_id in ("3.10.0", "3.10.1", "3.10.2"):
         values.pop(metric_id)
-    values["3.8.2"] = 2e12  # Memory-Destined Read Bandwidth
+    values["3.8.2"] = 2e12  # DRAM Read Bandwidth
     lines = render("gfx1201", values).splitlines()
     top, bottom, left = box_rows(lines, "L2")
     right = lines[top].index("╮", left)

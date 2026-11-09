@@ -46,8 +46,8 @@ points at that level; LDS metrics belong to `wgp` on Navi48. Discover aliases wi
 `rocprof-compute --list-metrics-gfx-id gfx1201`.
 
 GL1 is a write-combining stage. Read its utilization and stalls; do not invent a
-hit rate when the report prints `N/A`. The L2 Memory Interface reports
-`Memory-Destined Read Bandwidth` and `Memory-Destined Write Bandwidth`, including
+hit rate when the report prints `N/A`. EA to DRAM reports
+`DRAM Read Bandwidth` and `DRAM Write Bandwidth`, including
 traffic served or absorbed by Infinity Cache. Those values do not measure bytes
 reaching physical GDDR6 and must not be compared against a GDDR6 peak.
 `Infinity Cache Hit Rate`, `GDDR6 Read Bandwidth`, and `GDDR6 Write Bandwidth`

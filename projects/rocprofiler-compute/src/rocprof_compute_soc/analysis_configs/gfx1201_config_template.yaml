@@ -54,7 +54,7 @@ panels:
     title: GL2 Cache (L2)
   - type: metric_table
     id: 8
-    title: L2 Memory Interface
+    title: EA to DRAM
   - type: metric_table
     id: 9
     title: Workgroup Processors (WGPs)

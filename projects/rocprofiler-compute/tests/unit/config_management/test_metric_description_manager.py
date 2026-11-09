@@ -82,7 +82,7 @@ def test_navi48_descriptions_use_distinct_memory_sections(memory_arch_dir):
                 "unit": "Bytes",
             }
         },
-        "Memory chart - L2 Memory Interface": {
+        "Memory chart - EA to DRAM": {
             "DRAM-Bound Reads": {
                 "plain": "Traffic may be served by Infinity Cache.",
                 "rst": "Traffic may be served by Infinity Cache.",

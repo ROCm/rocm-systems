@@ -190,20 +190,20 @@ Memory chart - GL2 Cache (L2):
     plain: Bytes L2 wrote over its EA interface, from the 32, 64, 128, and 256-byte write request counts. 64-byte requests include atomics.
     rst: Bytes L2 wrote over its EA interface, from the 32, 64, 128, and 256-byte write request counts. 64-byte requests include atomics.
     unit: Bytes/s
-Memory chart - L2 Memory Interface:
-  Memory-Destined Read Requests:
+Memory chart - EA to DRAM:
+  DRAM Read Requests:
     plain: L2 read requests over EA destined for DRAM. Infinity Cache can serve them before they reach GDDR6.
     rst: L2 read requests over EA destined for DRAM. Infinity Cache can serve them before they reach GDDR6.
     unit: Requests per Normalization Unit
-  Memory-Destined Write Requests:
+  DRAM Write Requests:
     plain: L2 write requests over EA destined for DRAM. Infinity Cache can absorb them before they reach GDDR6.
     rst: L2 write requests over EA destined for DRAM. Infinity Cache can absorb them before they reach GDDR6.
     unit: Requests per Normalization Unit
-  Memory-Destined Read Bandwidth:
+  DRAM Read Bandwidth:
     plain: Bytes L2 read over EA for requests destined for DRAM, in 32-byte units. Infinity Cache hits are included, so this can exceed the GDDR6 bandwidth peak.
     rst: Bytes L2 read over EA for requests destined for DRAM, in 32-byte units. Infinity Cache hits are included, so this can exceed the GDDR6 bandwidth peak.
     unit: Bytes/s
-  Memory-Destined Write Bandwidth:
+  DRAM Write Bandwidth:
     plain: Bytes L2 wrote over EA for requests destined for DRAM, in 32-byte units. Infinity Cache hits are included.
     rst: Bytes L2 wrote over EA for requests destined for DRAM, in 32-byte units. Infinity Cache hits are included.
     unit: Bytes/s
@@ -615,11 +615,11 @@ GL2C Utilization:
     plain: L2 atomic requests, normalized by the chosen unit.
     rst: L2 atomic requests, normalized by the chosen unit.
     unit: Count per Normalization Unit
-  Memory-Destined Read Requests:
+  EA Read Requests (DRAM):
     plain: L2 read requests over EA destined for memory. Infinity Cache can serve these requests before they reach GDDR6.
     rst: L2 read requests over EA destined for memory. Infinity Cache can serve these requests before they reach GDDR6.
     unit: Count per Normalization Unit
-  Memory-Destined Write Requests:
+  EA Write Requests (DRAM):
     plain: L2 write requests over EA destined for memory. Infinity Cache can absorb these requests before they reach GDDR6.
     rst: L2 write requests over EA destined for memory. Infinity Cache can absorb these requests before they reach GDDR6.
     unit: Count per Normalization Unit
