@@ -10,6 +10,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 * Kernels without an LDS carveout preference now dispatch with no preference instead of a 0% LDS hint, and `hipFuncSetCacheConfig(hipFuncCachePreferNone)` no longer overrides `hipDeviceSetCacheConfig`.
 * `hipDeviceGetCacheConfig` now returns the value set by `hipDeviceSetCacheConfig` on devices with a configurable LDS carveout.
 * `HIP_SKIP_ABORT_ON_GPU_ERROR` now correctly suppresses process termination for device-side assertions (`HSA_STATUS_ERROR_EXCEPTION`), consistent with existing behavior for out-of-memory and invalid-dispatch errors. Previously, when core dumps were enabled (`RLIMIT_CORE` nonzero), a device-side assertion could still invoke `abort()` even when skip-abort mode was enabled. The HIP runtime now returns `hipErrorLaunchFailure` instead of aborting the process.
+* Resolved a segmentation fault on every call to the eight external-semaphore graph node APIs (`hipGraphAddExternalSemaphoresSignalNode`, `hipGraphAddExternalSemaphoresWaitNode`, and their `GetParams`/`SetParams`/`Exec...SetParams` APIs). Their runtime dispatch-table entries were never set; they now route to the implementations, and `hipGraphAddExternalSemaphoresSignalNode` returns `hipErrorInvalidValue` for invalid arguments as the wait variant does.
 
 ### Changed
 
