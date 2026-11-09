@@ -108,8 +108,6 @@ SdmaQueueBindingFactory::create_binding(const QueueRegistrationRequest &request)
   SdmaQueueProgressObserver progress_observer = progress_observer_factory_
                                                     ? progress_observer_factory_(context)
                                                     : SdmaQueueProgressObserver{};
-  // Worker startup can fail before attach publishes the queue. Let the KFD
-  // boundary translate that error after the local queue state unwinds.
   const SdmaQueueScheduler::Handle handle = scheduler_->attach(
       {.ring = std::move(ring),
        .context = context,
