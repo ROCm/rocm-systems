@@ -30,9 +30,15 @@ constexpr int ncclSymkMaxThreads = 256;
 constexpr int ncclSymkLLMaxEltSize = 8;
 
 // Max blocks for the hierarchical LSA AllGather kernel.
-constexpr int ncclSymkAgHierMaxBlocks = 72;
+constexpr int ncclSymkAgHierMaxBlocks = 80;
 // Largest chunk a block of the hierarchical LSA AllGather pushes.
 constexpr size_t ncclSymkAgHierMaxChunkBytes = 256 << 10;
+
+// AllGather_HierLsaST block count. nBytes is per rank.
+constexpr int ncclSymkAgHierBlocksForSize(int nRanks, size_t nBytes) {
+  if (size_t(nRanks) * nBytes >= (size_t(512) << 20)) return 80;
+  return 64;
+}
 
 // How the hierarchical LSA AllGather kernel splits nBlocks over nGroups packages. Group 0 copies with
 // whole blocks where a pushing group forwards with half of each, so it gets about half as many blocks
