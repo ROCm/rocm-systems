@@ -61,6 +61,7 @@ enum class InstructionExecutionError : uint8_t {
   UnimplementedInstruction,
   DecodeFailure,
   PluginFailure,
+  GwsFailure,
 };
 
 /// @brief Allocation slice within a register file.

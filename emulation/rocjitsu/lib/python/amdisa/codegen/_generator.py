@@ -7020,8 +7020,6 @@ class CodeGenerator:
         return any(
             re.fullmatch(pattern, statements) is not None
             for pattern in (
-                # Matrix generation still has legacy stubs until its migration lands.
-                r'\s*\(void\)wf;\s*throw\s+util::UnimplementedInst\(mnemonic\(\)\);\s*',
                 r'\s*(?:\(void\)wf;\s*)?wf\.report_instruction_execution_error\(\s*'
                 r'amdgpu::InstructionExecutionError::UnimplementedInstruction\s*\);'
                 r'\s*(?:return;\s*)?',

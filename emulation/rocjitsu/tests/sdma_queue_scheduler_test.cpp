@@ -28,7 +28,6 @@
 #include <mutex>
 #include <optional>
 #include <span>
-#include <stdexcept>
 #include <sys/mman.h>
 #include <thread>
 #include <unistd.h>
@@ -1096,12 +1095,12 @@ TEST_F(SdmaQueueSchedulerTest, GracefulDetachClosesTerminalWithoutRetirement) {
   EXPECT_FALSE(scheduler_.contains(queue));
 }
 
-TEST_F(SdmaQueueSchedulerTest, GracefulDetachClosesAfterPacketCallbackThrows) {
+TEST_F(SdmaQueueSchedulerTest, GracefulDetachClosesAfterPacketCallbackFault) {
   const std::array<uint32_t, 2> trap = {6, 37};
   memory_->store(kRing, trap);
   SdmaPacketCallbacks callbacks;
   callbacks.deliver_interrupt = [](uint32_t) -> VmAccessOutcome {
-    throw std::runtime_error("injected interrupt failure");
+    return VmAccessOutcome::Faulted;
   };
   const SdmaQueueScheduler::Handle queue = scheduler_.attach(queue_info(), std::move(callbacks));
   ASSERT_TRUE(queue);

@@ -33,7 +33,6 @@
 #include "simdojo/components/vector_reg.h"
 #include "util/bit.h"
 #include "util/diagnostic.h"
-#include "util/except.h"
 #include "util/log.h"
 #include "util/result.h"
 
@@ -615,7 +614,9 @@ public:
 
   // GWS hooks called by the generated DS execute bodies. These forward to the
   // device-global GWS store this CU participates in; see GwsDevice (gws_device.h)
-  // for the authoritative scheduling policy.
+  // for the authoritative scheduling policy. Rejection or timeout cancels the
+  // dispatch and retains GwsFailure and its static detail on the original wave
+  // until its slot is reused. An attached engine also receives a fatal exit request.
   /// @brief Seed a GWS resource's shared barrier/semaphore counter.
   void gws_init(Wavefront &wf, uint32_t rid, uint32_t count);
   /// @brief Arrive at a GWS barrier (may park the wave).
@@ -1354,13 +1355,12 @@ public:
   /// thread or from single-threaded test contexts only.
   /// @param inst The decoded instruction.
   /// @param wf The wavefront executing the instruction.
-  /// @param failure_detail Receives the reported register-access diagnostic or
-  /// `UnimplementedInst::what()` when that legacy exception is translated.
+  /// @param failure_detail Receives the reported execution diagnostic, when available.
   /// Otherwise the pointed-to string is unchanged.
-  /// @returns Failure for an unimplemented instruction stub or a reported operand
-  /// or register-access failure. The wavefront retains the reason for caller-owned
-  /// diagnostics.
-  /// Each call clears the previous error; a failed call does not halt the wavefront.
+  /// @returns Failure when the instruction reports an execution error. The
+  /// wavefront retains the reason for caller-owned diagnostics.
+  /// Each call clears the previous error. Instruction stubs and operand failures
+  /// leave the wavefront active; GWS rejection cancels its dispatch.
   /// Other host failures inside implemented instructions still raise exceptions.
   util::Result execute_instruction(Instruction *inst, Wavefront &wf,
                                    std::string *failure_detail = nullptr) {
@@ -1371,16 +1371,7 @@ public:
       return util::Result::success();
     check_static_isa_diagnostics(*inst, wf);
     // The decoded instruction already selects its ISA execution callback.
-    try {
-      inst->execute(*inst, &wf);
-    } catch (const util::UnimplementedInst &error) {
-      // Some implemented instructions reject particular operand or mode
-      // combinations through the legacy exception path. Treat those guest
-      // encodings like generated unimplemented stubs at the CU boundary.
-      wf.report_instruction_execution_error(InstructionExecutionError::UnimplementedInstruction);
-      if (failure_detail)
-        *failure_detail = error.what();
-    }
+    inst->execute(*inst, &wf);
     if (failure_detail && wf.instruction_execution_error_detail())
       *failure_detail = wf.instruction_execution_error_detail();
     return wf.instruction_execution_failed() ? util::Result::failure() : util::Result::success();
@@ -1609,7 +1600,7 @@ protected:
   /// @brief Cancel a terminal VM failure and notify the CP without offering it again.
   void handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome outcome);
   /// @brief Fault a dispatch for an exhausted GWS inactivity budget or a barrier before INIT.
-  void fail_gws_wait(Wavefront &wf, std::string_view reason);
+  void fail_gws_wait(Wavefront &wf, const char *reason);
 
   /// @brief Cancel a fatal decode or execution failure without successful completion.
   /// @param exception_claimed The illegal-instruction handler already owns notification;

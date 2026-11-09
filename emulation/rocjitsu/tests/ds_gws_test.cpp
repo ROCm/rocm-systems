@@ -878,7 +878,9 @@ TEST_P(DsGwsTest, UnsatisfiedBarrierFailsAtWaitLimit) {
     cu->step();
     EXPECT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT);
   }
-  EXPECT_THROW(cu->step(), std::runtime_error);
+  EXPECT_NO_THROW(cu->step());
+  EXPECT_EQ(wf0->instruction_execution_error(), amdgpu::InstructionExecutionError::GwsFailure);
+  EXPECT_STREQ(wf0->instruction_execution_error_detail(), "GWS inactivity limit exceeded");
   EXPECT_FALSE(cu->has_active_wfs());
   EXPECT_FALSE(cu->gws_device().any_parked());
 }
@@ -909,7 +911,9 @@ TEST_P(DsGwsTest, MixedBarrierWaitFailsAtWaitLimit) {
     cu->step();
     EXPECT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT);
   }
-  EXPECT_THROW(cu->step(), std::runtime_error);
+  EXPECT_NO_THROW(cu->step());
+  EXPECT_EQ(wf0->instruction_execution_error(), amdgpu::InstructionExecutionError::GwsFailure);
+  EXPECT_STREQ(wf0->instruction_execution_error_detail(), "GWS inactivity limit exceeded");
   EXPECT_FALSE(cu->has_active_wfs());
   EXPECT_FALSE(cu->gws_device().any_parked());
 }
@@ -1447,13 +1451,35 @@ TEST_P(DsGwsTest, AccBitSelectsAgprCountOperand) {
 }
 
 TEST_P(DsGwsTest, BarrierRequiresExplicitInitialization) {
-  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
-  ASSERT_NO_FATAL_FAILURE(make_cu(cu));
-  auto *wave = cu->dispatch_wf(0, 0, 102, 16);
-  ASSERT_NE(wave, nullptr);
-  cu->begin_workgroup(0, 0, 1);
-  EXPECT_THROW(cu->gws_barrier_arrive(*wave, 0, 1), std::runtime_error);
-  EXPECT_FALSE(cu->has_active_wfs());
+  for (bool issue : {false, true}) {
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(make_cu(cu));
+    auto *wave = cu->dispatch_wf(0, 0, 102, 16);
+    ASSERT_NE(wave, nullptr);
+    cu->begin_workgroup(0, 0, 1);
+    const auto words = build_gws(arch, gws_opcode(arch, GwsOp::kBarrier), /*gds=*/1, kAddrVgpr, 0);
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    unsigned failures = 0;
+    cu->set_execution_failure_handler([&](amdgpu::Wavefront &) {
+      ++failures;
+      return true;
+    });
+    wave->pc = 0x200000;
+    if (issue) {
+      for (size_t i = 0; i < words.size(); ++i)
+        mem.write32(wave->pc + 4 * i, words[i]);
+      EXPECT_NO_THROW(cu->step());
+    } else {
+      EXPECT_NO_THROW(EXPECT_TRUE(cu->execute_instruction(inst.get(), *wave).failed()));
+    }
+    EXPECT_EQ(failures, 1u);
+    EXPECT_EQ(wave->pc, 0x200000u);
+    EXPECT_EQ(wave->instruction_execution_error(), amdgpu::InstructionExecutionError::GwsFailure);
+    EXPECT_STREQ(wave->instruction_execution_error_detail(),
+                 "GWS barrier used before initialization");
+    EXPECT_FALSE(cu->has_active_wfs());
+  }
 }
 
 // A V leaves a credit for a P already parked (possibly on another CU), delivered
@@ -2023,7 +2049,10 @@ TEST_P(DsGwsTest, OnlySameProcessInstructionProgressExtendsWaitBudget) {
       waiter->halt();
     } else {
       ASSERT_NO_THROW(producer_cu->step());
-      EXPECT_THROW(waiter_cu->step(), std::runtime_error);
+      EXPECT_NO_THROW(waiter_cu->step());
+      EXPECT_EQ(waiter->instruction_execution_error(),
+                amdgpu::InstructionExecutionError::GwsFailure);
+      EXPECT_STREQ(waiter->instruction_execution_error_detail(), "GWS inactivity limit exceeded");
       EXPECT_TRUE(waiter->is_halted());
     }
     producer->halt();

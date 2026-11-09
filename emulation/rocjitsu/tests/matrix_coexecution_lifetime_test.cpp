@@ -234,7 +234,7 @@ TEST(MatrixCoexecutionTest, ForkChildRejectsInheritedPoolAndDestroysItWithoutJoi
   auto pool = std::make_unique<mc::SharedPool>(1);
   auto warm = pool->submit(increment, &calls);
   ASSERT_TRUE(warm);
-  ASSERT_FALSE(pool->finish(warm));
+  ASSERT_TRUE(pool->finish(warm).succeeded());
   ASSERT_EQ(calls, 1u);
   const pid_t child = fork();
   ASSERT_GE(child, 0);
@@ -263,8 +263,38 @@ TEST(MatrixCoexecutionTest, ForkChildRejectsInheritedPoolAndDestroysItWithoutJoi
   EXPECT_EQ(WEXITSTATUS(status), 0);
   auto parent = pool->submit(increment, &calls);
   ASSERT_TRUE(parent);
-  EXPECT_FALSE(pool->finish(parent));
+  EXPECT_TRUE(pool->finish(parent).succeeded());
   EXPECT_EQ(calls, 2u);
+}
+
+TEST(MatrixCoexecutionTest, ForkChildDrainsQueueAndRetainsFirstFailureLocation) {
+  mc::SharedPool pool(2);
+  amdgpu::AsyncInstructionQueue queue(pool);
+  auto first = std::make_unique<Instruction>("first", [](Instruction &, void *) {});
+  auto second = std::make_unique<Instruction>("second", [](Instruction &, void *) {});
+  ASSERT_TRUE(queue.submit(first, nullptr, {}, 0x1234));
+  ASSERT_TRUE(queue.submit(second, nullptr, {}, 0x5678));
+  const pid_t child = fork();
+  if (child == 0) {
+    alarm(3);
+    queue.drain();
+    const auto failure = queue.take_error();
+    if (!queue.empty() || !failure || failure->pc != 0x1234 || failure->mnemonic != "first")
+      _exit(1);
+    queue.drain();
+    _exit(queue.take_error() ? 2 : 0);
+  }
+  queue.drain();
+  ASSERT_GE(child, 0);
+  EXPECT_FALSE(queue.take_error());
+  int status = 0;
+  pid_t waited;
+  do {
+    waited = waitpid(child, &status, 0);
+  } while (waited < 0 && errno == EINTR);
+  ASSERT_EQ(waited, child);
+  ASSERT_TRUE(WIFEXITED(status));
+  EXPECT_EQ(WEXITSTATUS(status), 0);
 }
 
 TEST(MatrixCoexecutionTest, ForkChildRejectsInheritedOutstandingTicket) {
@@ -284,13 +314,13 @@ TEST(MatrixCoexecutionTest, ForkChildRejectsInheritedOutstandingTicket) {
   const pid_t child = fork();
   if (child == 0) {
     alarm(3);
-    if (!pool->ready(ticket) || !pool->finish(ticket))
+    if (!pool->ready(ticket) || pool->finish(ticket).succeeded())
       _exit(1);
     pool.reset();
     _exit(0);
   }
   context.release.release();
-  EXPECT_FALSE(pool->finish(ticket));
+  EXPECT_TRUE(pool->finish(ticket).succeeded());
   ASSERT_GE(child, 0);
   int status = 0;
   pid_t waited;

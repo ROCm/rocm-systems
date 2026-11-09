@@ -7,16 +7,11 @@
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/sdma_ring_consumer.h"
 
-#include "util/log.h"
-
 #include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <chrono>
-#include <exception>
-#include <format>
 #include <limits>
-#include <system_error>
 #include <utility>
 
 namespace rocjitsu::amdgpu {
@@ -49,7 +44,6 @@ public:
       : address_space_lease_(std::move(retained_address_space)),
         ring_consumer_(gpu_vm, std::move(config.ring), dialect, std::move(callbacks)),
         process_id_(config.context.process_id), queue_id_(config.context.queue_id),
-        engine_id_(config.context.engine_id),
         producer_pointer_address_(config.producer_pointer_address),
         doorbell_offset_(config.doorbell_offset), doorbell_base_(config.doorbell_base),
         producer_cursor_(ring_consumer_.config().initial_cursor.value_or(0)),
@@ -64,7 +58,6 @@ private:
   SdmaRingConsumer ring_consumer_;
   uint32_t process_id_ = 0;
   uint32_t queue_id_ = 0;
-  uint32_t engine_id_ = 0;
   uint64_t producer_pointer_address_ = 0;
   uint32_t doorbell_offset_ = 0;
   void *doorbell_base_ = nullptr;
@@ -134,8 +127,6 @@ SdmaQueueScheduler::Handle SdmaQueueScheduler::allocate_locked(std::shared_ptr<Q
 void SdmaQueueScheduler::ensure_worker_locked() {
   if (worker_.joinable())
     return;
-  if (std::exchange(fail_next_worker_start_for_testing_, false))
-    throw std::system_error(std::make_error_code(std::errc::resource_unavailable_try_again));
   worker_ = std::jthread([this](std::stop_token stop_token) { worker_loop(stop_token); });
 }
 
@@ -537,22 +528,8 @@ void SdmaQueueScheduler::worker_loop(std::stop_token stop_token) {
                                                                         : SdmaRingStatus::Faulted;
       }
     }
-    if (publication_ready) {
-      try {
-        outcome = queue->ring_consumer_.service(producer, kPacketsPerTurn);
-      } catch (const std::exception &error) {
-        util::Logger::warn(std::format("SDMA{} queue {}:{} stopped after exception: {}",
-                                       queue->engine_id_, queue->process_id_, queue->queue_id_,
-                                       error.what()));
-        queue->ring_consumer_.latch_callback_failure();
-        outcome = SdmaRingStatus::Faulted;
-      } catch (...) {
-        util::Logger::warn(std::format("SDMA{} queue {}:{} stopped after unknown exception",
-                                       queue->engine_id_, queue->process_id_, queue->queue_id_));
-        queue->ring_consumer_.latch_callback_failure();
-        outcome = SdmaRingStatus::Faulted;
-      }
-    }
+    if (publication_ready)
+      outcome = queue->ring_consumer_.service(producer, kPacketsPerTurn);
 
     const bool terminal_outcome =
         outcome == SdmaRingStatus::Faulted || outcome == SdmaRingStatus::Malformed;
@@ -567,18 +544,7 @@ void SdmaQueueScheduler::worker_loop(std::stop_token stop_token) {
     }
     if (queue->progress_observer_ &&
         (consumer_cursor != queue->reported_cursor_ || terminal_outcome)) {
-      try {
-        queue->progress_observer_(
-            {.consumer_cursor = consumer_cursor, .terminal = terminal_outcome});
-      } catch (const std::exception &error) {
-        util::Logger::warn(std::format("SDMA{} queue {}:{} progress observer failed: {}",
-                                       queue->engine_id_, queue->process_id_, queue->queue_id_,
-                                       error.what()));
-      } catch (...) {
-        util::Logger::warn(
-            std::format("SDMA{} queue {}:{} progress observer failed with unknown exception",
-                        queue->engine_id_, queue->process_id_, queue->queue_id_));
-      }
+      queue->progress_observer_({.consumer_cursor = consumer_cursor, .terminal = terminal_outcome});
       queue->reported_cursor_ = consumer_cursor;
     }
 
