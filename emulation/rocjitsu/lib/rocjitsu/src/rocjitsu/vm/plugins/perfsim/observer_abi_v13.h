@@ -211,6 +211,8 @@ struct FfmObserverPluginApiPrefix {
 struct FfmObserverPluginApi;
 using FfmObserverPluginGetApiFn = FfmObserverPluginApi *(*)(std::uint32_t host_api_version);
 
+// The backend API accessor, backend callbacks, and host logger must not throw.
+// These are semantic requirements; the foreign ABI function types stay unchanged.
 // Calls cross an independently declared C++ ABI mirror. The layouts are
 // checked below, but Clang's function sanitizer compares nominal source types
 // and therefore cannot validate these foreign calls.

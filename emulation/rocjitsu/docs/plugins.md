@@ -634,8 +634,12 @@ void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
   auto &last = *static_cast<LastInstruction *>(wf.plugin_state(slot_index()));
   const int bytes = inst.size();
   if (!inst.raw_encoding() || bytes <= 0 || bytes % sizeof(uint32_t) != 0 ||
-      static_cast<size_t>(bytes) > sizeof(last.words))
-    throw std::logic_error(std::format("instruction at PC {:#x} has no valid encoding", pc));
+      static_cast<size_t>(bytes) > sizeof(last.words)) {
+    if (!wf.instruction_execution_failed())
+      wf.report_instruction_execution_error(
+          amdgpu::InstructionExecutionError::PluginFailure, "instruction has no valid encoding");
+    return;
+  }
   last.pc = pc;
   last.word_count = bytes / sizeof(uint32_t);
   std::copy_n(inst.raw_encoding(), last.word_count, last.words.begin());
@@ -643,25 +647,45 @@ void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
 
 // Later, when a report about this wave needs text:
 if (last.word_count != 0) {
-  std::string text = wf.disassemble_instruction(
+  util::FailureOr<std::string> text = wf.disassemble_instruction(
       std::span(last.words).first(last.word_count), last.pc);
-  // ...
+  if (text.failed()) {
+    if (!wf.instruction_execution_failed())
+      wf.report_instruction_execution_error(
+          amdgpu::InstructionExecutionError::PluginFailure, "cannot disassemble instruction");
+    return;
+  }
+  // Use text.value().
 }
 ```
 
 `Wavefront::disassemble_instruction` decodes the copy with the wave's CU target
 decoder, so a standalone plugin module can use it without linking the
 simulator. Call it on the CU execution thread, for example from one of that
-wave's synchronous hooks. It throws `std::logic_error` if the encoding is empty,
-truncated, or cannot be decoded. Because the text comes from the copied bytes,
+wave's synchronous hooks. It returns `FailureOr<std::string>` and emits a diagnostic
+through the optional `DiagnosticEmitter` if the encoding is empty, truncated, or
+cannot be decoded. Because the text comes from the copied bytes,
 it describes the instruction that executed even if the code was later
 overwritten or unmapped. The race detector formats its instruction traces this
 way.
 
+Plugin callbacks, policy queries, constructors, destructors, and output sinks must
+not throw. This is a semantic contract; callback signatures do not require
+`noexcept`. Report expected instruction or reporting failures through
+`Wavefront::report_instruction_execution_error()` and preserve any error already
+recorded on the wave. Every accepted asynchronous instruction must still receive
+its normal completion accounting before cancellation or shutdown.
+
 ## Adding a new plugin
 
-1. Implement `ExecutionPlugin` in a new subdirectory. The plugin class
-   must be constructible from `const char *config_json`.
+1. Implement `ExecutionPlugin` in a new subdirectory. The plugin class can
+   provide a `const char *config_json` constructor, or a default constructor and
+   `util::Result initialize(const char *, util::DiagnosticEmitter)`.
+   The export macro uses the `const char *` constructor when available; it uses
+   the checked initializer only when that constructor is absent. A constructor
+   taking `const char * = nullptr` still takes precedence, so remove it when
+   migrating to the checked form. If initialization fails, the factory logs
+   `create failed: <diagnostic>`, destroys the candidate, and returns a null handle.
 2. Add a `plugin_export.cpp` that calls
    `ROCJITSU_DEFINE_PLUGIN(MyPlugin, "myname", schema)`.
 3. In `CMakeLists.txt`, add the object library and a
