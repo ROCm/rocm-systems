@@ -103,8 +103,8 @@ struct ReplayResult {
   uint64_t        wanted     = 0;
 };
 
-// Drive the same hand-off dispatch_event uses: each event waits for its turn,
-// then hands the turn to sequence_id + 1.
+// Mirrors the hand-off in dispatch_event: each event waits for its turn,
+// then passes it to sequence_id + 1.
 ReplayResult replay(const hrr::Archive& a, uint64_t max_waits) {
   std::atomic<uint64_t> next_seq{a.events.front().header().sequence_id};
   std::atomic<bool> fatal{false};
@@ -247,13 +247,8 @@ HRR_TEST_CASE(Unit_HRR_Limits_NoStallWhileACallIsInFlight) {
   CHECK(observed == 4);
 }
 
-/**
- * Test Description
- * ----------------
- *   - parse_u64 accepts decimal and 0x hex, and rejects what strtoull would
- *     quietly turn into a different number: an empty string, a sign, trailing
- *     text, and a value out of range ("-1" would otherwise switch a cap off).
- */
+/* parse_u64 rejects what strtoull silently accepts: signs, leading whitespace, trailing text.
+ * "-1" would otherwise switch a cap off. */
 HRR_TEST_CASE(Unit_HRR_Limits_ParseU64) {
   uint64_t v = 99;
   CHECK(hrr::parse_u64("0", &v));
@@ -326,13 +321,6 @@ HRR_TEST_CASE(Unit_HRR_Limits_PlaybackRefusesTooManyEvents) {
   CHECK(out.find("--max-events") != std::string::npos);
 }
 
-/**
- * Test Description
- * ----------------
- *   - ByteBudget charges up to its cap and refuses beyond it, leaving the
- *     total unchanged on a refusal; release gives bytes back; a request near
- *     UINT64_MAX does not wrap past the cap.
- */
 HRR_TEST_CASE(Unit_HRR_Limits_ByteBudget) {
   CHECK(hrr::ByteBudget().cap() == hrr::kDefaultMaxHostBytes);  // the default cap
   hrr::ByteBudget b(100);
@@ -411,10 +399,8 @@ HRR_TEST_CASE(Unit_HRR_Limits_PlaybackContextHostBudget) {
   ctx.record_alloc(0x10, nullptr, 60, AllocKind::HostMalloc);
   CHECK(ctx.host_budget.used() == 60);
 
-  // record_alloc over a live host entry does not give its charge back: the
-  // buffer is still allocated, so the charge stays with it. The replaying
-  // handlers free the replaced entry first (remove_alloc is the budget side of
-  // that), which is what returns the charge.
+  // record_alloc over a live host entry keeps its charge, because the old buffer is still allocated.
+  // The replaying handlers free the replaced entry first through remove_alloc, which returns the charge.
   REQUIRE(ctx.charge_host(40, "second"));
   CHECK(ctx.host_budget.used() == 100);
   ctx.record_alloc(0x10, nullptr, 40, AllocKind::HostMalloc);
@@ -612,8 +598,8 @@ HRR_TEST_CASE(Unit_HRR_Limits_LoadChargesEventVectorAndSort) {
     std::vector<uint64_t> seqs(kN);
     for (int i = 0; i < kN; ++i) seqs[i] = static_cast<uint64_t>(kN - i);  // out of order
     TmpArchive arc("vecsort", seqs);
-    // Holds the growth to 8192 slots (4096 old + 8192 new) and the records, not
-    // the sort scratch of 4097 slots on top of 8192.
+    // The budget covers the vector growth (4096 old + 8192 new slots) and the records,
+    // but not the 4097-slot sort scratch on top.
     hrr::ByteBudget no_scratch(uint64_t(kN) * sizeof(hrr_event_header) + 12288 * kSlot);
     hrr::Archive refused;
     CHECK_FALSE(hrr::load_archive(arc.path(), refused, &no_scratch));
@@ -646,14 +632,6 @@ HRR_TEST_CASE(Unit_HRR_Limits_LoadChargesBlobAndCodeObjectMaps) {
 }
 
 #ifndef _WIN32
-/**
- * Test Description
- * ----------------
- *   - The wall-clock limit covers the archive load: hrr-playback --info on a
- *     pid directory whose events.bin is a FIFO nobody writes to blocks in the
- *     open, and --max-wall-seconds 1 ends it with exit status 124 instead of
- *     leaving it hanging.
- */
 HRR_TEST_CASE(Unit_HRR_Limits_WallClockEndsBlockedLoad) {
   TmpArchive arc("fifo_load");
   REQUIRE(mkfifo((arc.root / "events.bin").c_str(), 0600) == 0);

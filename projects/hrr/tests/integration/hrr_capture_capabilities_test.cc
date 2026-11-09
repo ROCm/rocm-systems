@@ -72,9 +72,8 @@ bool all_zero(const uint8_t* p, size_t n) {
 }
 }  // namespace
 
-// Workload: two handle exports, an event export, entry-point lookups (plain and _spt), and a second process
-// that exports one allocation and opens one handle of each kind. Capture records only successful calls and
-// a process cannot open its own handle, so only another process reaches the by-value open shims.
+// Capture records only successful calls, and a process cannot open its own handle,
+// so a second process opens one handle of each kind to reach the by-value open shims.
 TEST_CASE("Unit_HRR_CaptureCapabilities_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
   void* mem[2] = {nullptr, nullptr};
@@ -96,8 +95,7 @@ TEST_CASE("Unit_HRR_CaptureCapabilities_Direct", "[.][hrr-direct]") {
   void* proc = nullptr;
   HRR_HIP_CHECK(hipGetProcAddress("hipMalloc", &proc, version, hipEnableDefault, &proc_status));
   print_addr(HRR_CAPS_PROC, proc);
-  // The _spt forms are what a per-thread-default-stream build reaches; they
-  // are declared whatever the build, so they are called by name here.
+  // The _spt forms are declared in every build, so they are called by name.
   void* proc_spt = nullptr;
   HRR_HIP_CHECK(hipGetProcAddress_spt("hipMalloc", &proc_spt, version, hipEnableDefault,
                                       &proc_status));
@@ -141,7 +139,6 @@ TEST_CASE("Unit_HRR_CaptureCapabilitiesImport_Direct", "[.][hrr-direct]") {
   std::memcpy(&eh, event_bytes.data(), kEventHandleBytes);
 
   HRR_HIP_CHECK(hipSetDevice(0));
-  // An export of its own, so its archive holds an export and an import.
   void* own = nullptr;
   HRR_HIP_CHECK(hipMalloc(&own, 1 << 20));
   hipIpcMemHandle_t own_h{};
@@ -170,8 +167,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureCapabilities) {
     REQUIRE(ret == 0); }
   INFO("Capture output:\n" << out);
 
-  // What the workload saw. The exports are in call order, and only those that
-  // succeeded, as in the archive.
+  // Exports are in call order and only the successful ones, as in the archive.
   std::vector<std::vector<uint8_t>> handles;
   std::map<std::string, std::string> tags;
   { std::istringstream lines(out);
@@ -266,9 +262,8 @@ HRR_TEST_CASE(Unit_HRR_CaptureCapabilities) {
   CHECK(all_zero(mem_opens[0].handle_bytes, sizeof(mem_opens[0].handle_bytes)));
   CHECK(all_zero(event_opens[0].handle_bytes, sizeof(event_opens[0].handle_bytes)));
 
-  // Its export and its import both hold zeros, and replay must not pair them:
-  // the import is reported as unmatched instead of opening the local export.
-  // The event open cannot be replayed from zeros either; keep going past it.
+  // Both the export and the import hold zeros, and replay must not pair them: the import is reported unmatched.
+  // The event open cannot be replayed from zeros either, so keep going past it.
   hrr::test::SpawnProc replay(HRR_PLAYBACK_EXE, /*capture_stdout=*/true,
                               /*capture_stderr=*/true);
   set_proc_search_path(replay);

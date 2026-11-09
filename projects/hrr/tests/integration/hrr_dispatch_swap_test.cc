@@ -52,13 +52,13 @@ namespace {
 #define HRR_NO_TABLE_MARKER "HRR_NO_HIP_TABLE"
 #define HRR_PRELOAD_MARKER "HRR_CHILD_PRELOAD"
 
-// Big enough that the failing write is cut off by the file size limit, which
-// is set well below it and well above anything else the capture writes then.
+// Big enough that the failing write is cut off by the file size limit,
+// which is set well below it and well above anything else the capture writes then.
 constexpr size_t kBigBlob = 8u << 20;
 constexpr rlim_t kFileSizeLimit = 2u << 20;
 
-// Small enough that fwrite() only fills the stdio buffer, which is the file
-// system's block size up to BUFSIZ, so the write that fails is fclose()'s.
+// Small enough that fwrite() only fills the stdio buffer (the file system's block size up to BUFSIZ),
+// so the write that fails is fclose()'s.
 constexpr size_t kSmallBlob = 2048;
 constexpr rlim_t kSmallFileSizeLimit = 1024;
 
@@ -74,8 +74,7 @@ struct RegistrationInfo {
 };
 
 // Whether libamdhip64 passed its tables to rocprofiler-register. A static build
-// or one with HIP_ENABLE_ROCPROFILER_REGISTER=OFF does not. Read through dlsym
-// so the tests do not need the rocprofiler-register headers.
+// or one with HIP_ENABLE_ROCPROFILER_REGISTER=OFF does not. Read through dlsym to avoid its headers.
 bool hip_registered() {
   if (!dlsym(RTLD_DEFAULT, "rocprofiler_register_library_api_table")) return false;
   using Cb = int (*)(const RegistrationInfo*, void*);
@@ -117,9 +116,8 @@ bool tool_set_late_hook(void (*hook)()) {
   return true;
 }
 
-// Makes one H2D hipMemcpy of `bytes` whose blob cannot be written: the file
-// size limit cuts the write short. Unlike a permission, the limit also applies
-// to root, which is what the container runners use.
+// Makes one H2D hipMemcpy of `bytes` whose blob cannot be written: the file size limit cuts the write short.
+// Unlike a permission, the limit also applies to root, which the container runners use.
 hipError_t memcpy_with_failing_blob(void* dev, size_t bytes = kBigBlob,
                                     rlim_t limit = kFileSizeLimit) {
   std::vector<unsigned char> host(bytes, 0xb5);
@@ -128,7 +126,6 @@ hipError_t memcpy_with_failing_blob(void* dev, size_t bytes = kBigBlob,
   struct rlimit lim = old;
   if (lim.rlim_max != RLIM_INFINITY && lim.rlim_max < limit) return hipErrorUnknown;
   lim.rlim_cur = limit;
-  // Past the limit write() fails with EFBIG once SIGXFSZ is ignored.
   void (*old_handler)(int) = signal(SIGXFSZ, SIG_IGN);
   if (setrlimit(RLIMIT_FSIZE, &lim) != 0) return hipErrorUnknown;
   const hipError_t err = hipMemcpy(dev, host.data(), host.size(), hipMemcpyHostToDevice);
@@ -208,8 +205,7 @@ TEST_CASE("Unit_HRR_DispatchSwap_Direct", "[.][hrr-direct]") {
   g_swap.table = t;
   const auto* bytes = reinterpret_cast<const unsigned char*>(t);
   g_swap.installed.assign(bytes, bytes + t->size);
-  // What a profiler attaching after hip::init() does: chain to whatever the
-  // slot holds now, which is the capture shim.
+  // Chains to whatever the slot holds now, as a profiler attaching after hip::init() does: the capture shim.
   g_swap.next.store(t->hipMemcpy_fn, std::memory_order_release);
   t->hipMemcpy_fn = &wrapped_hipMemcpy;
 
@@ -228,8 +224,8 @@ TEST_CASE("Unit_HRR_FailedBlobWrite_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipFree(dev));
 }
 
-// Reports the block size and the copy's result for the driver to check: the
-// blob is buffered whole only if the stdio buffer is larger than it.
+// Reports the block size and the copy's result for the driver to check:
+// the blob is buffered whole only if the stdio buffer is larger than it.
 TEST_CASE("Unit_HRR_FailedBlobClose_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
   const char* out = std::getenv("HIP_HRR_CAPTURE_OUTPUT");
@@ -239,8 +235,8 @@ TEST_CASE("Unit_HRR_FailedBlobClose_Direct", "[.][hrr-direct]") {
 
   void* dev = nullptr;
   HRR_HIP_CHECK(hipMalloc(&dev, kSmallBlob));
-  // Under the limit no other file may grow past it, so the runtime loads
-  // whatever a small copy needs first, with a copy of another size.
+  // Under the limit no other file may grow past it, so the runtime loads whatever a small copy needs first,
+  // with a copy of another size.
   std::vector<unsigned char> warm(kSmallBlob - 512, 0x4b);
   HRR_HIP_CHECK(hipMemcpy(dev, warm.data(), warm.size(), hipMemcpyHostToDevice));
   HRR_HIP_CHECK(hipDeviceSynchronize());
@@ -257,9 +253,8 @@ std::string g_own_manifest;
 
 void noop_host_fn(void*) {}
 
-// Runs when flush() opens this process's manifest: the trailer is written and
-// the manifest is not. Calls the hipUserObjectCreate shim, as a wrapper that
-// kept it would, for the first time in this process.
+// Runs when flush() opens this process's manifest: the trailer is written and the manifest is not.
+// Calls the hipUserObjectCreate shim for the first time in this process, as a wrapper that kept it would.
 void before_own_manifest(const char* path) {
   if (!path) return;
   const size_t n = std::strlen(path);
@@ -302,13 +297,12 @@ TEST_CASE("Unit_HRR_DispatchSwap_Preload_Direct", "[.][hrr-direct]") {
 
 pid_t g_fork_parent = 0;
 
-// The child's exit runs hip_capture_shutdown() and then this. Leaving straight
-// away skips the HIP runtime's own teardown, which a forked child cannot run.
+// The child's exit runs hip_capture_shutdown() and then this. Leaving straight away
+// skips the HIP runtime's own teardown, which a forked child cannot run.
 void fork_late_hook() {
   if (getpid() != g_fork_parent) _exit(0);
 }
 
-// One more dependency than an event records, so the call is noted as unreplayable.
 constexpr size_t kTooManyDeps = 17;
 
 hipError_t add_node_with_too_many_deps(hipGraph_t graph, const hipGraphNode_t* deps) {
@@ -370,8 +364,8 @@ TEST_CASE("Unit_HRR_Fork_Direct", "[.][hrr-direct]") {
 }
 
 
-// The baked-in path, or the same file next to this binary when the build was
-// unpacked somewhere else. CMake builds both into the same directory.
+// The baked-in path, or the same file next to this binary when the build was unpacked elsewhere.
+// CMake builds both into the same directory.
 std::string dispatch_tool_path() {
   std::error_code ec;
   if (fs::exists(HRR_DISPATCH_TOOL, ec)) return HRR_DISPATCH_TOOL;
@@ -380,9 +374,8 @@ std::string dispatch_tool_path() {
   return (self.parent_path() / fs::path(HRR_DISPATCH_TOOL).filename()).string();
 }
 
-// LD_PRELOAD for a child that must also preload `lib`: `lib` first, then what
-// this process was started with. An emulator such as rocJitsu is preloaded
-// too, and a child without it sees no device.
+// LD_PRELOAD for a child that must also preload `lib`: `lib` first, then what this process was started with.
+// An emulator such as rocJitsu is preloaded too, and a child without it sees no device.
 std::string preload_with(const std::string& lib) {
   const char* inherited = std::getenv("LD_PRELOAD");
   return inherited && *inherited ? lib + ":" + inherited : lib;
@@ -489,7 +482,6 @@ HRR_TEST_CASE(Unit_HRR_DispatchSwap_WrapperOutlivesCapture) {
   CHECK(scan.trailer);
   CHECK(scan.after == 0);
 
-  // A blob written after the manifest is a file no count accounts for.
   const size_t files = count_files(archive / "blobs", ".blob").first +
                        count_files(archive / "code_objects", ".hsaco").first;
   CHECK(manifest_value(archive, "blob_count") == std::to_string(files));
@@ -576,8 +568,8 @@ HRR_TEST_CASE(Unit_HRR_DispatchSwap_NoUnreplayableAfterTrailer) {
 }
 
 HRR_TEST_CASE(Unit_HRR_DispatchSwap_ChildKeepsInheritedPreload) {
-  // A library every process here has loaded already, so preloading it changes
-  // nothing but the variable. Restored on the way out, failed or not.
+  // A library every process here has loaded already, so preloading it changes nothing but the variable.
+  // Restored on the way out, failed or not.
   struct ScopedPreload {
     std::string old;
     bool had = false;

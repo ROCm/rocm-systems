@@ -25,14 +25,12 @@ constexpr size_t kSZ         = kN * sizeof(float);
 constexpr int    kBlock      = 256;
 constexpr int    kGrid       = (kN + kBlock - 1) / kBlock;
 
-// Divergence loop length.  Must comfortably exceed the divergence-abort
-// min-samples used by the roundtrip driver so the guard trips well before the
-// loop ends (and, for the null-optional case, before the faulting kernel runs).
+// Divergence loop length. It must exceed the divergence-abort min-samples used by the roundtrip driver,
+// so the guard trips before the loop ends and, for the null-optional case, before the faulting kernel runs.
 constexpr int    kDivergeIters = 64;
 
-// Sentinel stored into mapped host memory by the CPU (NOT a HIP call, so the
-// capture layer never records it).  Chosen non-zero so a fresh (zero) replay
-// allocation differs from it and reliably diverges.
+// Sentinel stored into mapped host memory by the CPU, not a HIP call, so capture never records it.
+// Non-zero, so a fresh (zero) replay allocation differs from it and reliably diverges.
 constexpr int      kFlagSentinel = 7;
 constexpr unsigned kSlotSentinel = 0xCAFEBABEu;
 // 0x8000 floats * 4 bytes = 0x20000 — reproduces the production fault address.
@@ -67,10 +65,8 @@ __global__ void hrr_repro_writeFlag(int* out, const int* flag, int n) {
   if (i < n) out[i] = flag[0];
 }
 
-// slotmap-style kernel: required_out is always written (deterministic), while
-// optional_out is written ONLY when the uncaptured flag differs from the
-// sentinel.  optional_out is genuinely NULL at capture, so the recorded arg is
-// 0x0; on replay the branch is taken and the null write faults at 0x20000.
+// slotmap-style kernel: required_out is always written; optional_out only when the uncaptured flag differs from the sentinel.
+// optional_out is NULL at capture (recorded 0x0); on replay the branch is taken and the null write faults at 0x20000.
 __global__ void hrr_repro_slotmap(float* required_out, const unsigned* flag,
                                   float* optional_out, int n) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -79,7 +75,7 @@ __global__ void hrr_repro_slotmap(float* required_out, const unsigned* flag,
     optional_out[kNullWriteIndex] = 1.0f;
 }
 
-// The first HIP call is a hipMalloc. hip_capture_init() is deferred into hip::init(), which runs before the body.
+// The first HIP call is a hipMalloc, and hip_capture_init() is deferred into hip::init(), which runs before the body.
 // The allocation must still be captured, or `da` is not translated at replay and D2H validation fails.
 TEST_CASE("Unit_HRR_FirstMalloc_Direct", "[.][hrr-direct]") {
   float* da = nullptr;
@@ -137,7 +133,7 @@ TEST_CASE("Unit_HRR_EmbeddedPtrStruct_Direct", "[.][hrr-direct]") {
   delete[] hc;
 }
 
-// A mapped host flag is written by the CPU, which is not a HIP call and so is never recorded.
+// A mapped host flag is written by the CPU, not a HIP call, so it is never recorded.
 // At replay the flag buffer is fresh (zero), so every D2H validation fails: the lever for the divergence guard test.
 TEST_CASE("Unit_HRR_UncapturedHostWrite_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
@@ -168,7 +164,7 @@ TEST_CASE("Unit_HRR_UncapturedHostWrite_Direct", "[.][hrr-direct]") {
 }
 
 // Mirrors slotmap_repro.cpp but runs the divergence loop first, so the guard stops replay (exit 2) before the faulting kernel is dispatched.
-// At capture the optional branch is skipped; optional_out is genuinely NULL (recorded as 0x0).
+// At capture the optional branch is skipped; optional_out is NULL (recorded as 0x0).
 TEST_CASE("Unit_HRR_NullOptionalPtr_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
 
@@ -212,20 +208,19 @@ TEST_CASE("Unit_HRR_NullOptionalPtr_Direct", "[.][hrr-direct]") {
 }
 
 // HRR records HIP calls only, so replay sees the allocation but not the HSA zero fill.
-// It must reproduce the zeros through HIP_HRR_REPLAY_ZERO_INIT, without recording a hipMemset that playback would run independently.
+// Replay must reproduce the zeros through HIP_HRR_REPLAY_ZERO_INIT, without recording a hipMemset that playback would run independently.
 TEST_CASE("Unit_HRR_ZeroInitRead_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
 
   float* dsrc = nullptr;
 #ifndef _WIN32
   HRR_HIP_CHECK(hipMalloc(&dsrc, kSZ));
-  // hsa_amd_memory_fill() counts in 32-bit words, not elements.  kN happens to
-  // be the same number here only because kSZ is float[kN]; spell out the unit
+  // hsa_amd_memory_fill() counts 32-bit words, not elements. Spell out the unit
   // so a change of element type cannot silently under- or over-fill.
   REQUIRE(hsa_amd_memory_fill(dsrc, 0, kSZ / sizeof(uint32_t)) == HSA_STATUS_SUCCESS);
 #else
-  // Native Windows has no ROCr/HSA runtime. Keep its deterministic oracle via
-  // host stores; Linux retains coverage of the ordinary hipMalloc replay path.
+  // Native Windows has no ROCr/HSA runtime, so host stores give the deterministic oracle there.
+  // Linux covers the ordinary hipMalloc replay path.
   HRR_HIP_CHECK(hipMallocManaged(&dsrc, kSZ));
   for (int i = 0; i < kN; ++i) dsrc[i] = 0.0f;
 #endif
@@ -239,12 +234,9 @@ TEST_CASE("Unit_HRR_ZeroInitRead_Direct", "[.][hrr-direct]") {
 
   float* hout = new float[kN];
   HRR_HIP_CHECK(hipMemcpy(hout, dout, kSZ, hipMemcpyDeviceToHost));
-  // Precondition: fresh device allocations are zeroed by the driver. This is
-  // what replay zero-init reproduces; assert it so a non-zeroing platform fails
-  // here (clearly) rather than flaking the roundtrip.
-  //
-  // But with ASAN enabled this won't be true, because doing so would
-  // add significant performance overhead and hide bugs related to uninitialized data
+  // Precondition: fresh device allocations are zeroed by the driver, which replay zero-init reproduces.
+  // Assert it so a non-zeroing platform fails here, clearly, rather than flaking the roundtrip.
+  // With ASAN enabled it does not hold: zeroing would add significant overhead and hide uninitialized-data bugs.
 #if !defined(ENABLE_ADDRESS_SANITIZER)
   for (int i = 0; i < kN; ++i) REQUIRE(hout[i] == 0.0f);
 #endif

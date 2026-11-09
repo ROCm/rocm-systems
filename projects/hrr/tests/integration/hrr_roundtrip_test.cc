@@ -8,25 +8,6 @@
  * @addtogroup HRR HRR Capture/Replay Roundtrip
  * @{
  * @ingroup HRRTest
- * Subprocess-based tests that avoid MSYS2/bash SEH-exception-handling
- * interference with HIP's internal __try/__except frames:
- *
- *   Unit_HRR_CaptureReplayRoundtrip:
- *     1. Sets HIP_HRR_CAPTURE_OUTPUT and spawns Unit_HRR_GpuWorkload_Direct
- *        so the capture layer records all HIP API calls and D2H blobs.
- *        The subprocess exiting 0 also validates GPU correctness (all
- *        REQUIRE(hc[i]==2.0f) passed in the Direct test).
- *     2. Verifies the archive exists and contains at least one blob.
- *     3. Runs hrr-playback on the archive; validates D2H buffers byte-for-byte
- *        against captured blobs. Any mismatch → non-zero exit → REQUIRE fails.
- *     4. Deletes the temp archive directory (via RAII, even on failure).
- *
- *   Unit_HRR_GraphRoundtrip:
- *     Same as Unit_HRR_CaptureReplayRoundtrip but for the HIP graph workload.
- *
- * HRR_TEST_EXE and HRR_PLAYBACK_EXE are required; CMakeLists.txt fails at
- * configure time if HRR_PLAYBACK_EXE is not found. Pass -DHRR_PLAYBACK_EXE=<path>
- * if hrr-playback is not installed under CMAKE_INSTALL_PREFIX or ROCM_PATH.
  */
 
 #include "hrr_test_common.hh"
@@ -136,26 +117,12 @@ static bool json_array_exists(const std::string& json, const std::string& key) {
   return pos != std::string::npos && pos < json.size() && json[pos] == '[';
 }
 
-/**
- * Test Description
- * ----------------
- *   - Spawns HrrTest Unit_HRR_GpuWorkload_Direct as a subprocess with
- *     HIP_HRR_CAPTURE_OUTPUT set to a temp directory.  The capture layer
- *     records all HIP API calls and writes a blob for each D2H memcpy.
- *   - Verifies the archive exists and contains at least one D2H blob.
- *   - Runs hrr-playback on the archive.  It replays every event and validates
- *     each D2H host buffer against the captured blob byte-for-byte.
- *   - REQUIRE(playback exit == 0): any D2H mismatch causes failure.
- *   - Deletes the temp archive directory on scope exit.
- */
 HRR_TEST_CASE(Unit_HRR_CaptureReplayRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_gpu"};
 
   {
     hrr::test::SpawnProc proc(hrr_self_exe());
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
-    // Prepend ROCm bin to PATH so the subprocess finds amdhip64_7.dll.
-    // SpawnProc replaces PATH entirely, so we reconstruct the full value.
     {
       set_proc_search_path(proc);
     }
@@ -185,17 +152,6 @@ HRR_TEST_CASE(Unit_HRR_CaptureReplayRoundtrip) {
   hrr_run_playback(cap.path);
 }
 
-/**
- * Test Description
- * ----------------
- *   - Spawns Unit_HRR_GpuWorkload_Direct with HIP_HRR_CAPTURE_OUTPUT set and
- *     AMD_LOG_LEVEL=0, capturing stdout and stderr. The capture layer must print
- *     its start notice exactly once, naming the per-process archive directory
- *     and the base directory that child processes record to.
- *   - Repeats the capture with only stdout captured: the notice is on stderr,
- *     so stdout holds none.
- *   - Spawns the same workload without HIP_HRR_CAPTURE_OUTPUT: no notice.
- */
 HRR_TEST_CASE(Unit_HRR_CaptureStartNotice) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_capture_notice"};
   const std::string kNotice =
@@ -233,8 +189,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureStartNotice) {
   }
 
   {
-    // Same capture with only stdout captured: the notice goes to stderr, so the
-    // program's own stdout stays exactly what it was without capture.
+    // The notice goes to stderr, so stdout holds none.
     ScopedDir cap_stdout{fs::temp_directory_path() / "hrr_capture_notice_stdout"};
     hrr::test::SpawnProc proc(hrr_self_exe(), /*capture_stdout=*/true, /*capture_stderr=*/false);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap_stdout.path.string());
@@ -250,8 +205,8 @@ HRR_TEST_CASE(Unit_HRR_CaptureStartNotice) {
   {
     hrr::test::SpawnProc proc(hrr_self_exe(), /*capture_stdout=*/true, /*capture_stderr=*/true);
     proc.setEnv("AMD_LOG_LEVEL", "0");
-    // CLR's flag parser turns HIP_HRR_CAPTURE_OUTPUT= into a single space, which
-    // still enables capture. Unset the variable so an inherited value cannot arm it.
+    // CLR turns an empty HIP_HRR_CAPTURE_OUTPUT into a single space, which still enables capture.
+    // Unset it so an inherited value cannot arm capture.
     proc.unsetEnv("HIP_HRR_CAPTURE_OUTPUT");
     set_proc_search_path(proc);
     int ret = proc.run("\"Unit_HRR_GpuWorkload_Direct\"");
@@ -262,21 +217,12 @@ HRR_TEST_CASE(Unit_HRR_CaptureStartNotice) {
   }
 }
 
-/**
- * Test Description
- * ----------------
- *   - Spawns Unit_HRR_GpuWorkload_Direct with HIP_HRR_CAPTURE_OUTPUT set and
- *     AMD_LOG_LEVEL=3, capturing stdout and stderr. The summary that
- *     hip_capture_shutdown() logs at exit must name the per-process pid-<pid>
- *     directory the archive was written to, the same one the start notice names,
- *     not the base directory.
- */
 HRR_TEST_CASE(Unit_HRR_CaptureExitSummary) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_capture_exit_summary"};
   hrr::test::SpawnProc proc(hrr_self_exe(), /*capture_stdout=*/true, /*capture_stderr=*/true);
   proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
-  // The summary goes through the CLR log at LOG_INFO with LOG_ALWAYS, which no
-  // mask filters out; AMD_LOG_MASK=0 keeps the per-API traces out of the output.
+  // The summary logs at LOG_INFO with LOG_ALWAYS, which no mask filters.
+  // AMD_LOG_MASK=0 keeps per-API traces out of the output.
   proc.setEnv("AMD_LOG_LEVEL", "3");
   proc.setEnv("AMD_LOG_MASK", "0");
   set_proc_search_path(proc);
@@ -301,20 +247,6 @@ HRR_TEST_CASE(Unit_HRR_CaptureExitSummary) {
 static void hrr_require_recorded_apis(const fs::path& cap_path,
                                       const std::vector<hrr_api_id_t>& apis);
 
-/**
- * Test Description
- * ----------------
- *   - Spawns HrrTest Unit_HRR_AllApis_Direct as a subprocess with
- *     HIP_HRR_CAPTURE_OUTPUT set to a temp directory.  Exercises ~55 distinct
- *     HIP APIs covering device queries, streams, events, malloc variants
- *     (Malloc/Async/Pool/Host/Managed), memset, memcpy variants, occupancy,
- *     pointer attributes, cache config, and (conditionally) managed-memory
- *     advise/prefetch.
- *   - Verifies the archive exists and contains at least one D2H blob.
- *   - Runs hrr-playback on the archive; validates d2[i]==94 byte-for-byte.
- *   - REQUIRE(playback exit == 0): any D2H mismatch causes failure.
- *   - Deletes the temp archive directory on scope exit.
- */
 HRR_TEST_CASE(Unit_HRR_AllApisRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_allapis"};
 
@@ -347,9 +279,8 @@ HRR_TEST_CASE(Unit_HRR_AllApisRoundtrip) {
     REQUIRE(arc.events.size() >= 40);  // ~55 distinct APIs exercised
   }
 
-  // The workload's array copies (block 19) need image support, which gfx950
-  // (MI350X) reports as absent. Where it has them, a capture without the copies
-  // would replay perfectly well, so ask for them.
+  // gfx950 (MI350X) reports no image support, so check the array copies only where images exist.
+  // Without the check, a capture missing the copies would still replay.
   int images = 0;
   HRR_HIP_CHECK(hipDeviceGetAttribute(&images, hipDeviceAttributeImageSupport, 0));
   if (images)
@@ -359,17 +290,6 @@ HRR_TEST_CASE(Unit_HRR_AllApisRoundtrip) {
   hrr_run_playback(cap.path);
 }
 
-/**
- * Test Description
- * ----------------
- *   - Spawns HrrTest Unit_HRR_HostMemWorkload_Direct as a subprocess with
- *     HIP_HRR_CAPTURE_OUTPUT set to a temp directory.
- *   - Verifies the archive exists and contains at least one blob.
- *   - Runs hrr-playback on the archive; validates D2H memcpy buffers byte-for-byte
- *     against the captured expected-output blob (value == 2).
- *   - REQUIRE(playback exit == 0): any D2H mismatch causes failure.
- *   - Deletes the temp archive directory on scope exit.
- */
 HRR_TEST_CASE(Unit_HRR_HostMemRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_hostmem"};
 
@@ -405,24 +325,12 @@ HRR_TEST_CASE(Unit_HRR_HostMemRoundtrip) {
   hrr_run_playback(cap.path, "", /*require_d2h=*/true);
 }
 
-/**
- * Test Description
- * ----------------
- *   - Spawns HrrTest Unit_HRR_GraphWorkload_Direct as a subprocess with
- *     HIP_HRR_CAPTURE_OUTPUT set to a temp directory.
- *   - Verifies the archive exists and contains at least one D2H blob.
- *   - Runs hrr-playback on the archive; validates D2H buffers byte-for-byte.
- *   - REQUIRE(playback exit == 0): any D2H mismatch causes failure.
- *   - Deletes the temp archive directory on scope exit.
- */
 HRR_TEST_CASE(Unit_HRR_GraphRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_graph"};
 
   {
     hrr::test::SpawnProc proc(hrr_self_exe());
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
-    // Prepend ROCm bin to PATH so the subprocess finds amdhip64_7.dll.
-    // SpawnProc replaces PATH entirely, so we reconstruct the full value.
     {
       set_proc_search_path(proc);
     }
@@ -445,20 +353,6 @@ HRR_TEST_CASE(Unit_HRR_GraphRoundtrip) {
   hrr_run_playback(cap.path);
 }
 
-/**
- * Test Description
- * ----------------
- *   - Spawns HrrTest Unit_HRR_StressApis_Direct as a subprocess with
- *     HIP_HRR_CAPTURE_OUTPUT set to a temp directory.  Generates 500+
- *     HIP API call events covering stream/event lifecycle, many alloc/free
- *     cycles, memset/memcpy loops, repeated kernel launches, and device
- *     attribute queries.
- *   - Verifies the archive exists and contains at least one D2H blob.
- *   - Runs hrr-playback on the archive; validates D2H buffers byte-for-byte
- *     (h_out[i] == 2.0f).
- *   - REQUIRE(playback exit == 0): any D2H mismatch causes failure.
- *   - Deletes the temp archive directory on scope exit.
- */
 HRR_TEST_CASE(Unit_HRR_StressApisRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_stress"};
 
@@ -533,48 +427,19 @@ static void hrr_require_recorded_apis(const fs::path& cap_path,
 
 
 /**
- * Test Description
- * ----------------
- *   - Capture Unit_HRR_FirstMalloc_Direct, whose very first HIP call is a
- *     hipMalloc (no hipSetDevice / warm-up allocation first).  Replay and
- *     REQUIRE the D2H validates — i.e. the very first allocation was captured
- *     and translated.
- *
- *   Hidden ([.]) because capture shims are installed from hip_capture_init()
- *   (run inside hip::init()), which is the in-flight first HIP API call, so
- *   that call itself is not recorded.  When it is a hipMalloc the allocation
- *   is missing and replay aborts with "H2D dst ... not mapped".  Run explicitly
- *   by name; it passes once first-call capture works without a warm-up
- *   allocation.
+ * Hidden: capture shims install inside hip::init(), so the first HIP call is not recorded.
+ * A first-call hipMalloc is then missing and replay aborts with "H2D dst ... not mapped".
  */
 TEST_CASE("Unit_HRR_FirstMallocRoundtrip", "[.][hrr-repro]") {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_firstmalloc"};
   hrr_run_roundtrip("Unit_HRR_FirstMalloc_Direct", cap.path);
 }
 
-/**
- * Test Description
- * ----------------
- *   - Capture Unit_HRR_EmbeddedPtrStruct_Direct (kernel takes a by-value struct
- *     with embedded device pointers).  Replay and REQUIRE D2H pass >= 1, proving
- *     the embedded pointers were detected at capture and translated at replay.
- */
 HRR_TEST_CASE(Unit_HRR_EmbeddedPtrRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_embeddedptr"};
   hrr_run_roundtrip("Unit_HRR_EmbeddedPtrStruct_Direct", cap.path);
 }
 
-/**
- * Test Description
- * ----------------
- *   - Capture Unit_HRR_ZeroInitRead_Direct (hipMalloc allocation zeroed through
- *     an unrecorded HSA fill on ROCr, copied to out, then D2H; native Windows
- *     uses managed memory and unrecorded CPU stores because HSA is unavailable).
- *   - Replay with HIP_HRR_REPLAY_ZERO_INIT=1: the replayed source is zeroed
- *     deterministically, so the D2H validates (exit 0, pass >= 1).  Verifies the
- *     zero-init replay knob.  Note: with the knob off the replay may reuse stale
- *     bytes and diverge — that path is intentionally not asserted here.
- */
 HRR_TEST_CASE(Unit_HRR_ZeroInitRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_zeroinit"};
   hrr_capture_direct("Unit_HRR_ZeroInitRead_Direct", cap.path);
@@ -591,15 +456,6 @@ HRR_TEST_CASE(Unit_HRR_ZeroInitRoundtrip) {
   CHECK(d2h_fail == 0);
 }
 
-/**
- * Test Description
- * ----------------
- *   - CPU-only check of hrr_d2h_mismatch_exit, the rule under which a Windows
- *     roundtrip accepts a non-zero hrr-playback exit: D2H mismatches explain
- *     it, nothing else does.  A fatal HIP error aborts before the summary
- *     line, so its exit 1 must not pass, or a replay handler that stopped
- *     working would go unnoticed on Windows while Linux catches it.
- */
 HRR_TEST_CASE(Unit_HRR_D2HMismatchExit) {
   const std::string mismatch =
       "[HRR]   D2H checks     : 3 pass (3 exact, 0 within tol), 1 fail, 0 skipped\n";
@@ -615,8 +471,8 @@ HRR_TEST_CASE(Unit_HRR_D2HMismatchExit) {
   CHECK_FALSE(hrr_d2h_mismatch_exit(134, mismatch));  // crash
 }
 
-// The expected blobs of the hipMemcpy readbacks in `cap`. Playback reads blobs
-// by name without re-hashing them, so replay compares against an edited one.
+// Playback reads blobs by name without re-hashing them, so a test can edit one
+// and replay compares against the edit.
 static std::vector<fs::path> hrr_memcpy_d2h_blobs(const fs::path& cap) {
   hrr::Archive arc;
   REQUIRE(hrr::load_archive(cap.string(), arc));
@@ -644,19 +500,6 @@ static bool hrr_parse_d2h_counts(const std::string& out, HrrD2HCounts& c) {
                      &c.pass, &c.exact, &c.tol, &c.fail, &c.skipped) == 5;
 }
 
-/**
- * Test Description
- * ----------------
- *   - Capture Unit_HRR_ZeroInitRead_Direct, whose one hipMemcpy readback is a
- *     zeroed buffer, and rewrite its expected blob as the int32 sentinels
- *     1, 2, 3, ...: the recording of a handler that wrote small integers, played
- *     back by one that wrote nothing.  Replay with HIP_HRR_REPLAY_ZERO_INIT=1.
- *   - Default: the check fails.  Read as f32 every sentinel is below 1e-44, so
- *     a float-tolerance retry would accept the zeros.
- *   - HIP_HRR_D2H_TOL=f32:1e-3:1e-3: the same buffer passes, and the summary
- *     counts it within tolerance, not exact.
- *   - HIP_HRR_D2H_TOL naming no float type: refused before the replay starts.
- */
 HRR_TEST_CASE(Unit_HRR_D2HExactByDefaultRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_d2h_exact"};
   hrr_capture_direct("Unit_HRR_ZeroInitRead_Direct", cap.path);
@@ -705,15 +548,6 @@ HRR_TEST_CASE(Unit_HRR_D2HExactByDefaultRoundtrip) {
   }
 }
 
-/**
- * Test Description
- * ----------------
- *   - Capture Unit_HRR_ZeroInitRead_Direct and cut its one hipMemcpy readback
- *     blob to half the copy.  Comparing the copy's first half would pass on a
- *     truncated archive and say nothing about the rest.
- *   - Replay: the check is skipped, not passed, and with every check skipped
- *     the replay fails.
- */
 HRR_TEST_CASE(Unit_HRR_D2HShortBlobRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_d2h_short"};
   hrr_capture_direct("Unit_HRR_ZeroInitRead_Direct", cap.path);
@@ -733,32 +567,9 @@ HRR_TEST_CASE(Unit_HRR_D2HShortBlobRoundtrip) {
   REQUIRE(ret == 1);
 }
 
-/**
- * Test Description
- * ----------------
- *   - Capture Unit_HRR_UncapturedHostWrite_Direct: a mapped host flag is set by
- *     an uncaptured CPU store, then kDivergeIters kernels each write the flag
- *     value out and read it back.  Every replay D2H diverges (fresh zero flag).
- *   - Section 1 (guard ON): replay with a low divergence-abort threshold,
- *     exact D2H validation, and a small min-samples count.  REQUIRE clean exit
- *     code 2 (replay diverged) — the guard stops the replay deterministically.
- *     Directly validates the divergence-abort guard.
- *   - Section 2 (guard OFF): replay with HIP_HRR_REPLAY_DIVERGENCE_ABORT=0 and
- *     exact D2H validation.  REQUIRE the exit code is NOT 2 (it runs to
- *     completion / D2H-fail), proving the guard is what produces exit 2, not
- *     some unrelated error.
- *
- *   Regression guard for ROCM-27652: the guard-ON path takes hrr-playback's
- *   early divergence-abort exit, which must still tear down every GPU/host
- *   resource tracked in the PlaybackContext.  Under the AddressSanitizer CI
- *   build a leak on this path is reported by LeakSanitizer, so this test is the
- *   guard that the divergence-abort teardown stays leak-free.  The clean exit 2
- *   (not a signal/abort >= 128) is the deterministic contract asserted here.
- */
 HRR_TEST_CASE(Unit_HRR_DivergenceAbortRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_divergence"};
-  // Pinned host snapshots would record the flag, so the write stays unseen only
-  // without them.
+  // Pinned host snapshots would record the flag, so disable them.
   hrr_capture_direct("Unit_HRR_UncapturedHostWrite_Direct", cap.path, 5,
                      {{"HIP_HRR_HOST_SNAPSHOTS", "0"}});
 
@@ -769,10 +580,7 @@ HRR_TEST_CASE(Unit_HRR_DivergenceAbortRoundtrip) {
          {"HIP_HRR_REPLAY_DIVERGENCE_MIN_SAMPLES", "16"}});
     INFO("Playback stdout:\n" << out);
     INFO("Playback exit code: " << ret);
-    // Exit 2 == divergence guard tripped and stopped cleanly. The "replay
-    // DIVERGED" text is on stderr (not captured), so the exit code is the
-    // asserted contract.
-    // A clean divergence-abort, never a crash/sanitizer abort (>= 128).
+    // The "replay DIVERGED" text is on stderr, which is not captured, so assert the exit code.
     REQUIRE(ret < 128);
     REQUIRE(ret == 2);
   }
@@ -783,27 +591,14 @@ HRR_TEST_CASE(Unit_HRR_DivergenceAbortRoundtrip) {
         {{"HIP_HRR_REPLAY_DIVERGENCE_ABORT", "0"}});
     INFO("Playback stdout:\n" << out);
     INFO("Playback exit code: " << ret);
-    // With the guard disabled the replay does not stop early: it either
-    // completes (exit 0/1 from D2H-fail) — never the divergence exit 2.
     REQUIRE(ret != 2);
     REQUIRE(ret < 128);  // and never a crash
   }
 }
 
 /**
- * Test Description
- * ----------------
- *   - Capture Unit_HRR_NullOptionalPtr_Direct: a divergence loop (uncaptured
- *     host write) followed by a slotmap kernel whose optional output pointer is
- *     NULL at capture and would be written at byte offset 0x20000 on replay.
- *   - Replay with the divergence guard ON: the guard trips during the readback
- *     loop and stops the replay (exit 2) BEFORE the faulting kernel runs, so the
- *     null + 0x20000 write never happens.  REQUIRE a clean exit 2 rather than a
- *     GPU memory fault.
- *
- *   Hidden ([.]) because a mistuned guard could let the raw GPU fault through,
- *   which can destabilise a shared runner.  Run explicitly by name to validate
- *   the guard converts the fault class into a clean exit.
+ * Hidden: a mistuned guard could let the raw GPU fault through, which can destabilise a shared runner.
+ * The guard must trip before the kernel writes null + 0x20000.
  */
 TEST_CASE("Unit_HRR_NullOptionalPtrRoundtrip", "[.][hrr-repro]") {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_nulloptional"};
@@ -816,26 +611,12 @@ TEST_CASE("Unit_HRR_NullOptionalPtrRoundtrip", "[.][hrr-repro]") {
        {"HIP_HRR_REPLAY_DIVERGENCE_MIN_SAMPLES", "16"}});
   INFO("Playback stdout:\n" << out);
   INFO("Playback exit code: " << ret);
-  // Clean divergence stop (2), NOT a GPU fault (signal -> >128) nor a generic
-  // fatal HIP error (1) from the null write.
+  // Exit 2 is the clean divergence stop; a GPU fault exits above 128 and a HIP error exits 1.
   REQUIRE(ret == 2);
 }
 
 /**
- * Test Description
- * ----------------
- *   - Capture Unit_HRR_StreamWriteValue_Direct (hipStreamWriteValue32 /
- *     hipStreamWriteValue64, including one hipExtStreamWriteValueIncrement
- *     write when the headers define it) and replay it.  Replay must
- *     reproduce every written value.
- *   - Replay with the default byte-exact D2H validation.  No float tolerance
- *     fits these values: a lost 32-bit write would be accepted as "f64 within
- *     tolerance" on any blob whose length is a multiple of 8, and the increment
- *     slot differs from its no-increment value by far less than atol=rtol=1e-3
- *     of the recorded magnitude.
- *   - Gated on hipDeviceAttributeCanUseStreamWaitValue: on a target without
- *     support the workload skips, which would leave too few events / no D2H
- *     blob for the archive assertions, so skip the roundtrip as well.
+ * Replay uses byte-exact D2H: a float tolerance would accept a lost 32-bit write as an f64 within tolerance.
  */
 HRR_TEST_CASE(Unit_HRR_StreamWriteValueRoundtrip) {
   int canUseStreamValue = 0;
@@ -852,17 +633,15 @@ HRR_TEST_CASE(Unit_HRR_StreamWriteValueRoundtrip) {
   INFO("Playback stdout:\n" << out);
   INFO("Playback exit code: " << ret);
 #ifdef _WIN32
-  // Same policy as hrr_run_playback: on the Windows consumer-iGPU CI target
-  // replay is not guaranteed to reproduce device output bit-for-bit, so D2H
-  // fidelity is best-effort there.  A crash still fails via ret < 128.
+  // Windows consumer-iGPU CI does not guarantee bit-exact device output, so D2H fidelity is best-effort.
+  // A crash still fails via ret < 128.
   REQUIRE(ret < 128);
   if (ret != 0) return;
 #else
   REQUIRE(ret == 0);  // exact-mode D2H: any differing byte fails the replay
 #endif
 
-  // Assert the three sentinel blobs were actually compared, so a replay that
-  // silently validated nothing cannot pass on the exit code alone.
+  // A replay that validated nothing must not pass on the exit code alone.
   size_t pos = out.find("D2H checks");
   REQUIRE(pos != std::string::npos);
   size_t colon = out.find(':', pos);
@@ -873,7 +652,6 @@ HRR_TEST_CASE(Unit_HRR_StreamWriteValueRoundtrip) {
   CHECK(d2h_pass >= 3);
 }
 
-// Captures a workload and replays it with byte-exact D2H validation; expect_apis lists required API ids.
 // The workloads are bit-deterministic, so no HIP_HRR_D2H_TOL: a 1e-3 tolerance would accept an all-zero buffer.
 static void hrr_run_exact_roundtrip(const std::string& direct_case,
                                     const fs::path& cap_path,
@@ -885,9 +663,8 @@ static void hrr_run_exact_roundtrip(const std::string& direct_case,
   INFO("Playback stdout:\n" << out);
   INFO("Playback exit code: " << ret);
 
-  // A handler returning anything other than hipSuccess aborts the replay pass
-  // before the summary block is printed, so the presence of the summary line is
-  // a platform-independent proof that the replay ran to completion.
+  // A handler error aborts the replay before the summary prints, so the summary line
+  // proves the replay ran to completion on every platform.
   size_t pos = out.find("D2H checks");
   REQUIRE(pos != std::string::npos);
   size_t colon = out.find(':', pos);
@@ -898,63 +675,30 @@ static void hrr_run_exact_roundtrip(const std::string& direct_case,
   INFO("D2H pass=" << d2h_pass);
 
 #ifdef _WIN32
-// Same Windows best-effort D2H policy as hrr_run_playback(); the completion check still applies and a crash fails.
+// Windows D2H is best-effort, as in hrr_run_playback(); a crash still fails.
   REQUIRE(ret < 128);
 #else
-  // hrr-playback exits non-zero when any D2H validation fails and also when
-  // every D2H event was skipped, so this is the load-bearing fidelity
-  // assertion; the pass count rules out the one remaining vacuous case, an
-  // archive that carried no D2H blob at all.
+  // hrr-playback exits non-zero on a D2H failure or when every D2H event was skipped.
+  // The pass count rules out an archive with no D2H blob.
   REQUIRE(ret == 0);
   REQUIRE(d2h_pass >= 1);
 #endif
 }
 
-/**
- * Test Description
- * ----------------
- *   - Capture Unit_HRR_MemsetD2D_Direct: hipMemsetD2D8 / hipMemsetD2D8Async /
- *     hipMemsetD2D16 / hipMemsetD2D16Async / hipMemsetD2D32 /
- *     hipMemsetD2D32Async over a sub-region of a buffer allocated with a real
- *     row stride, on top of a whole-buffer sentinel.
- *   - Replay with byte-exact D2H: the fills must reproduce the pattern in the
- *     written sub-region AND leave the inter-row padding at the sentinel, so
- *     neither a skipped fill nor a fill that ignores the pitch can pass.
- */
 HRR_TEST_CASE(Unit_HRR_MemsetD2DRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_memsetd2d"};
   hrr_run_exact_roundtrip("Unit_HRR_MemsetD2D_Direct", cap.path);
 }
 
 /**
- * Test Description
- * ----------------
- *   - Capture Unit_HRR_MemsetD2DPitchAlloc_Direct, which aims all six
- *     hipMemsetD2D* variants at a hipMemAllocPitch destination.  That API is a
- *     playback no-op, so the recorded destination has no alloc_map entry at
- *     replay.
- *   - Under the default unmapped-pointer policy (playback/hip_playback.h)
- *     replay skips those calls rather than abort the whole replay.  The
- *     archive's other (translatable) D2H blob is only reached and validated if
- *     the replay survived, which is what this asserts.
+ * hipMemAllocPitch is a playback no-op, so the memset destinations have no alloc_map entry at replay.
+ * The default unmapped-pointer policy skips those calls; D2H passes only if replay survived.
  */
 HRR_TEST_CASE(Unit_HRR_MemsetD2DPitchAllocRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_memsetd2dpitchalloc"};
   hrr_run_exact_roundtrip("Unit_HRR_MemsetD2DPitchAlloc_Direct", cap.path);
 }
 
-/**
- * Test Description
- * ----------------
- *   - Capture Unit_HRR_MemsetD2DPitchAlloc_Direct again: its six hipMemsetD2D*
- *     events write to a destination replay never maps.
- *   - By default each is reported with its event index, API and recorded
- *     pointer, the summary counts them on its Unmapped line, and the replay
- *     still reaches and passes the D2H check after them.
- *   - --strict-unmapped reports the first one the same way and ends the replay
- *     there, before the summary, also from the warm-up pass --kernel-filter
- *     runs without its usual log.
- */
 HRR_TEST_CASE(Unit_HRR_UnmappedPointerPolicy) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_unmapped_policy"};
   hrr_capture_direct("Unit_HRR_MemsetD2DPitchAlloc_Direct", cap.path);
@@ -1009,23 +753,8 @@ HRR_TEST_CASE(Unit_HRR_UnmappedPointerPolicy) {
 }
 
 /**
- * Test Description
- * ----------------
- *   - Capture Unit_HRR_MemsetSpt_Direct: hipMemset_spt / hipMemsetAsync_spt /
- *     hipMemset2D_spt / hipMemset2DAsync_spt each fill their own buffer with
- *     their own byte pattern, and each buffer is read back by its own D2H.
- *     The workload calls the ordinary hipMemset* names and is compiled with
- *     -fgpu-default-stream=per-thread, so the archive is what proves the _spt
- *     entry points were the ones reached; assert the recorded API ids before
- *     replaying.
- *   - Replay with the default byte-exact D2H validation and REQUIRE exit 0.  A
- *     float tolerance (atol=rtol=1e-3) would accept a zero-initialised replay
- *     buffer whenever the captured pattern decodes to a small magnitude, which
- *     would let a NOOP _spt memset handler pass.  The workload also picks
- *     patterns that are out of tolerance in every candidate encoding.
- *   - REQUIRE at least 4 validated D2H buffers, one per API under test: a NOOP
- *     playback handler for any single _spt memset fails its own buffer and turns
- *     the playback exit code into 1.
+ * The workload calls plain hipMemset* names under -fgpu-default-stream=per-thread, so assert the _spt ids first.
+ * A float tolerance would accept a zero-initialised buffer and hide a NOOP _spt handler, so replay byte-exact.
  */
 HRR_TEST_CASE(Unit_HRR_MemsetSptRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_memsetspt"};
@@ -1043,9 +772,8 @@ HRR_TEST_CASE(Unit_HRR_MemsetSptRoundtrip) {
     REQUIRE(recorded(HRR_API_HIPMEMSETASYNC_SPT));
     REQUIRE(recorded(HRR_API_HIPMEMSET2D_SPT));
     REQUIRE(recorded(HRR_API_HIPMEMSET2DASYNC_SPT));
-    // The readbacks must stay on the plain hipMemcpy: hipMemcpy_spt records no
-    // data blob, so a redirected readback would silently drop the D2H oracle
-    // the exit-code and pass-count checks below depend on.
+    // The readbacks must stay on plain hipMemcpy: hipMemcpy_spt records no data blob,
+    // so a redirected readback would drop the D2H oracle.
     REQUIRE(recorded(HRR_API_HIPMEMCPY));
   }
 
@@ -1069,17 +797,8 @@ HRR_TEST_CASE(Unit_HRR_MemsetSptRoundtrip) {
 }
 
 /**
- * Test Description
- * ----------------
- *   - Capture Unit_HRR_MemcpySpt_Direct: hipMemcpy_spt / hipMemcpyAsync_spt /
- *     hipMemcpy2D_spt / hipMemcpy2DAsync_spt / hipMemcpyToSymbol_spt /
- *     hipMemcpyToSymbolAsync_spt reached through their ordinary names.
- *   - REQUIRE each of those ids in the archive.  All six have NOOP playback
- *     handlers, so the recorded ids are the whole of what this proves about
- *     them; the workload keeps them off the validated buffer for that reason and
- *     the replay assertions below cover the driver-style oracle instead.
- *   - REQUIRE a clean exact-mode replay, which is what rules out the redirect
- *     having also swallowed the oracle.
+ * All six _spt copies have NOOP playback handlers, so their recorded ids are all this proves about them.
+ * A clean exact-mode replay shows the redirect did not swallow the oracle.
  */
 HRR_TEST_CASE(Unit_HRR_MemcpySptRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_memcpyspt"};
@@ -1096,9 +815,8 @@ HRR_TEST_CASE(Unit_HRR_MemcpySptRoundtrip) {
 
 HRR_TEST_CASE(Unit_HRR_Memset3DSptRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_memset3dspt"};
-  // hipMemset3D_spt / hipMemset3DAsync_spt are NOOP on replay, as are the plain
-  // 3-D memsets, so this is capture-path coverage with the oracle written by
-  // hipMemsetD32 and read by the plain hipMemcpy.
+  // hipMemset3D_spt and hipMemset3DAsync_spt are NOOP on replay, so this covers the capture path only.
+  // The oracle is written by hipMemsetD32 and read by the plain hipMemcpy.
   hrr_run_exact_roundtrip("Unit_HRR_Memset3DSpt_Direct", cap.path,
                           {HRR_API_HIPMEMSET3D_SPT,
                            HRR_API_HIPMEMSET3DASYNC_SPT,
@@ -1107,9 +825,8 @@ HRR_TEST_CASE(Unit_HRR_Memset3DSptRoundtrip) {
 
 HRR_TEST_CASE(Unit_HRR_Memcpy3DSptRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_memcpy3dspt"};
-  // Unlike the 1-D and 2-D per-thread copies these two have faithful handlers,
-  // so each destination is its own oracle: two validated buffers, and a handler
-  // that stopped copying leaves its destination holding the replayed pre-fill.
+  // These two have faithful handlers, so each destination is its own oracle:
+  // a handler that stopped copying leaves the replayed pre-fill.
   hrr_run_exact_roundtrip("Unit_HRR_Memcpy3DSpt_Direct", cap.path,
                           {HRR_API_HIPMEMCPY3D_SPT,
                            HRR_API_HIPMEMCPY3DASYNC_SPT,
@@ -1118,9 +835,8 @@ HRR_TEST_CASE(Unit_HRR_Memcpy3DSptRoundtrip) {
 
 HRR_TEST_CASE(Unit_HRR_StreamQuerySptRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_streamqueryspt"};
-  // The per-thread stream and event queries write no device memory, so the
-  // recorded ids plus a replay that runs to completion are what this proves;
-  // the validated buffer is there to give the replay an oracle at all.
+  // The per-thread queries write no device memory, so only the recorded ids and a completed replay are checked.
+  // The validated buffer gives the replay an oracle.
   hrr_run_exact_roundtrip("Unit_HRR_StreamQuerySpt_Direct", cap.path,
                           {HRR_API_HIPSTREAMISCAPTURING_SPT,
                            HRR_API_HIPSTREAMQUERY_SPT,
@@ -1265,8 +981,8 @@ HRR_TEST_CASE(Unit_HRR_OccupancyRoundtrip) {
   for ([[maybe_unused]] const auto& _ :
        fs::recursive_directory_iterator(archive_path / "blobs")) ++bc;
   INFO("Blob count: " << bc); REQUIRE(bc >= 1);
-// KNOWN LIMITATION (Linux): fat-binary code objects are not captured at static init, so kernel replay is a no-op.
-// Linux asserts only that capture produced events and playback did not crash; D2H is not verified there.
+// Linux does not capture fat-binary code objects at static init, so kernel replay is a no-op.
+// Linux asserts only that capture produced events and playback did not crash.
 #ifdef _WIN32
   hrr_run_playback(cap.path);
 #else
@@ -1296,9 +1012,8 @@ HRR_TEST_CASE(Unit_HRR_ExtMallocRoundtrip) {
 
 HRR_TEST_CASE(Unit_HRR_StreamWaitEventSptRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_streamwaitspt"};
-  // hipStreamWaitEvent_spt cross-stream ordering.  The readback stays on the
-  // driver-style D2H, which the per-thread header never redirects, so the
-  // oracle survives whatever the macro state is in that translation unit.
+  // The readback stays on the driver-style D2H, which the per-thread header never redirects,
+  // so the oracle survives.
   hrr_run_exact_roundtrip("Unit_HRR_StreamWaitEventSpt_Direct", cap.path,
                           {HRR_API_HIPSTREAMWAITEVENT_SPT,
                            HRR_API_HIPMEMCPYDTOHASYNC});
@@ -1306,10 +1021,8 @@ HRR_TEST_CASE(Unit_HRR_StreamWaitEventSptRoundtrip) {
 
 HRR_TEST_CASE(Unit_HRR_GraphLaunchSptRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_graphlaunchspt"};
-  // hipGraphLaunch_spt on a stream-capture graph.  The plain begin/end ids are
-  // asserted too: only the hand-written hipStreamEndCapture handler records a
-  // graph HRR can instantiate, so a frame that slipped over to the _spt names
-  // would leave nothing to replay.
+  // Only the hand-written hipStreamEndCapture handler records a graph HRR can instantiate,
+  // so assert the plain begin and end ids: a frame that slipped to the _spt names would leave nothing to replay.
   hrr_run_exact_roundtrip("Unit_HRR_GraphLaunchSpt_Direct", cap.path,
                           {HRR_API_HIPGRAPHLAUNCH_SPT,
                            HRR_API_HIPSTREAMBEGINCAPTURE,
@@ -1322,8 +1035,7 @@ HRR_TEST_CASE(Unit_HRR_ExtModuleLaunchKernelRoundtrip) {
   hrr_run_roundtrip("Unit_HRR_ExtModuleLaunchKernel_Direct", cap.path);
 }
 
-// Byte offset and event_type of each record in events.bin, in file order, up to
-// the EOF trailer.
+// Offset and event_type of each events.bin record before the EOF trailer.
 struct RawEvent {
   size_t   offset;
   uint16_t type;
@@ -1353,19 +1065,9 @@ static void hrr_poke_u16(const fs::path& file, size_t offset, uint16_t value) {
 }
 
 /**
- * Test Description
- * ----------------
- *   - Capture Unit_HRR_ExtModuleLaunchKernel_Direct, which times a
- *     hipExtModuleLaunchKernel with a start and a stop event and reads
- *     hipEventElapsedTime. The runtime marks both events inside the launch, so
- *     the archive must carry a hipEventRecord for the start event before the
- *     launch record and one for the stop event after it, and the header must
- *     say so (HRR_FILE_FLAG_EXT_LAUNCH_EVENT_MARKERS).
- *   - Replay reaches the end without the old-archive fallback warning.
- *   - Negative control: replace the stop marker with an event replay ignores.
- *     With the flag set the missing marker is a fault and the replay fails; with
- *     the flag cleared, as in an archive from before the markers were stored,
- *     replay warns once and finishes.
+ * The runtime marks both events inside the launch, so the archive holds a hipEventRecord on each side of it.
+ * The header flag HRR_FILE_FLAG_EXT_LAUNCH_EVENT_MARKERS says so.
+ * With the flag set a missing stop marker fails replay; with it cleared, as in older archives, replay warns once.
  */
 HRR_TEST_CASE(Unit_HRR_ExtLaunchEventMarkers) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_extlaunch_markers"};
@@ -1462,11 +1164,8 @@ HRR_TEST_CASE(Unit_HRR_StreamCaptureQuerySptRoundtrip) {
 
 HRR_TEST_CASE(Unit_HRR_StreamCaptureBeginSptRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_capturebeginspt"};
-  // hipStreamBeginCapture_spt opens the frame and the plain hipStreamEndCapture
-  // closes it, which is the pair the workload's macro ordering exists to get
-  // right; asserting both ids together is what proves it did.  The _spt handler
-  // omits the ctx.in_graph_capture bookkeeping, which is safe for a memset-only
-  // capture region with no allocation or kernel launch in it.
+  // The _spt begin handler omits the ctx.in_graph_capture bookkeeping, which is safe for a memset-only capture region.
+  // Asserting _spt begin with plain end proves the workload's macro ordering.
   hrr_run_exact_roundtrip("Unit_HRR_StreamCaptureBeginSpt_Direct", cap.path,
                           {HRR_API_HIPSTREAMBEGINCAPTURE_SPT,
                            HRR_API_HIPSTREAMENDCAPTURE,
@@ -1564,16 +1263,8 @@ HRR_TEST_CASE(Unit_HRR_GraphExplicitRoundtrip) {
 }
 
 /**
- * Test Description
- * ----------------
- *   - Capture Unit_HRR_FailedEndCapture_Direct: a stream capture forked onto a
- *     second stream and never joined, so hipStreamEndCapture fails with
- *     hipErrorStreamCaptureUnjoined, then a direct H2D restore, kernel and D2H
- *     on the stream that was capturing.
- *   - The archive must hold the failed hipStreamEndCapture: it ended the
- *     capture, so replay needs it to end its own.
- *   - Replay with byte-exact D2H must match: the restore and launch run
- *     directly instead of into a capture replay forgot to close.
+ * The failed hipStreamEndCapture still ended the capture, so replay needs it to end its own.
+ * Otherwise the restore and launch would run into a capture replay never closed.
  */
 HRR_TEST_CASE(Unit_HRR_FailedEndCaptureRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_failedendcapture"};
@@ -1584,14 +1275,7 @@ HRR_TEST_CASE(Unit_HRR_FailedEndCaptureRoundtrip) {
 }
 
 /**
- * Test Description
- * ----------------
- *   - Capture Unit_HRR_FailedEndCaptureInvalidated_Direct: a hipMalloc during a
- *     global-mode capture invalidates it, so hipStreamEndCapture fails with
- *     hipErrorStreamCaptureInvalidated, then the same direct work as above.
- *   - The failed hipMalloc is not recorded, so replay's capture is valid and
- *     its EndCapture returns a graph, which replay must destroy.
- *   - Replay with byte-exact D2H must match.
+ * The failed hipMalloc is not recorded, so replay's capture stays valid and its EndCapture returns a graph, which replay must destroy.
  */
 HRR_TEST_CASE(Unit_HRR_FailedEndCaptureInvalidatedRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_failedendcaptureinval"};
@@ -1612,16 +1296,8 @@ HRR_TEST_CASE(Unit_HRR_ModuleAPIRoundtrip) {
 }
 
 /**
- * Test Description
- * ----------------
- *   - Capture Unit_HRR_ModuleLoadBundle_Direct, which loads one HIPRTC ELF with
- *     hipModuleLoadData and, wrapped in an offload bundle file, with
- *     hipModuleLoad, then launches rtc_fill from the bundle's module.
- *   - REQUIRE that the hipModuleLoad event records the device ELF the runtime
- *     loaded, not the bundle file: its code object is an ELF and has the same
- *     hash as the hipModuleLoadData event of the bare ELF.
- *   - REQUIRE that the launch from that module records the same code object as
- *     its load event, then replay and validate the D2H.
+ * hipModuleLoad must record the device ELF the runtime loaded, not the bundle file,
+ * so it hashes the same as the bare ELF's hipModuleLoadData.
  */
 HRR_TEST_CASE(Unit_HRR_ModuleLoadBundleRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_moduleloadbundle"};
@@ -1695,14 +1371,6 @@ static bool hrr_device_supports_batch_swap() {
   return err != hipErrorNotSupported;
 }
 
-/**
- * Test Description
- * ----------------
- *   - Capture Unit_HRR_ExtMemcpyBatch_Direct and REQUIRE the archive holds a
- *     hipExtMemcpyBatchAsync event; where swap is supported, REQUIRE the
- *     asymmetric-swap event with its sizesDst recorded.
- *   - Replay and validate the D2H readbacks, which only the batches write.
- */
 HRR_TEST_CASE(Unit_HRR_ExtMemcpyBatchRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_extmemcpybatch"};
   hrr_run_roundtrip("Unit_HRR_ExtMemcpyBatch_Direct", cap.path);
@@ -1725,19 +1393,6 @@ HRR_TEST_CASE(Unit_HRR_ExtMemcpyBatchRoundtrip) {
   }));
 }
 
-/**
- * Test Description
- * ----------------
- *   - Spawns hip_raw_trace.exe as a subprocess with HIP_HRR_CAPTURE_OUTPUT set.
- *     hip_raw_trace is a genuine multi-threaded workload: 4 threadFunc threads
- *     (each with 2 streams, H2D, vectorAdd×64, D2H), plus graphFunc, pinnedFunc,
- *     and hostRegisterFunc, all running concurrently.  Captured events from all 7
- *     threads are interleaved in a single events.bin.
- *   - Replays the archive single-threaded to establish a D2H baseline.
- *   - Replays again with --multi-thread to exercise the MT dispatch path
- *     (spin-wait ordering, atomic next_seq, per-thread timing events).
- *   - Skips if HRR_RAW_TRACE_EXE was not found at configure time.
- */
 HRR_TEST_CASE(Unit_HRR_MultiThreadRoundtrip) {
   static constexpr const char* raw_trace_exe = HRR_RAW_TRACE_EXE;
   if (!raw_trace_exe || raw_trace_exe[0] == '\0') {
@@ -1784,9 +1439,8 @@ HRR_TEST_CASE(Unit_HRR_MultiThreadRoundtrip) {
     INFO("Playback args: " + extra_args);
     INFO("Playback stdout:\n" << out);
     INFO("Playback exit code: " << ret);
-    // Exit code: fat-binary kernel replay requires the capture DLL to be present,
-    // so a D2H mismatch (exit 1) is accepted in CI.  A crash (signal, exit >= 128)
-    // is always a hard failure.
+    // Fat-binary kernel replay needs the capture DLL, so CI accepts a D2H mismatch (exit 1).
+    // A crash (exit >= 128) always fails.
     REQUIRE(ret < 128);
     REQUIRE(out.find("[HRR] Archive") != std::string::npos);
   };
@@ -1841,8 +1495,7 @@ static std::string build_replacement_co(const fs::path& dir) {
   return co_path;
 }
 
-// Returns the recorded name of the first kernel-launch event containing `needle`, or "".
-// --replace-kernel matches the mangled name exactly, so tests must look it up from the archive.
+// --replace-kernel matches the mangled name exactly, so look it up from the archive.
 static std::string recorded_kernel_name(const fs::path& cap_path,
                                         const std::string& needle) {
   hrr::Archive arc;
@@ -1855,16 +1508,6 @@ static std::string recorded_kernel_name(const fs::path& cap_path,
   return "";
 }
 
-/**
- * Test Description
- * ----------------
- *   - Capture the GPU workload, build a functionally identical replacement code
- *     object for hrr_vectorAdd via HIPRTC, and replay with --replace-kernel
- *     using the EXACT recorded (mangled) kernel name looked up from the archive.
- *   - The replacement symbol matches the recorded name, so playback loads it and
- *     reports "Replacing kernel". Because behaviour is identical, the D2H
- *     validation still passes (exit 0).
- */
 HRR_TEST_CASE(Unit_HRR_ReplaceKernelRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_replace_happy"};
   ScopedDir co_dir{fs::temp_directory_path() / "hrr_replace_co"};
@@ -1879,8 +1522,6 @@ HRR_TEST_CASE(Unit_HRR_ReplaceKernelRoundtrip) {
   }
   REQUIRE(fs::exists(hrr_single_process_archive(cap.path) / "events.bin"));
 
-  // --replace-kernel matches the recorded name exactly; resolve the mangled
-  // symbol the capture stored for hrr_vectorAdd.
   std::string kname = recorded_kernel_name(cap.path, "hrr_vectorAdd");
   INFO("Recorded kernel name: " << kname);
   REQUIRE_FALSE(kname.empty());
@@ -1895,15 +1536,6 @@ HRR_TEST_CASE(Unit_HRR_ReplaceKernelRoundtrip) {
   CHECK(out.find("Replacing kernel") != std::string::npos);
 }
 
-/**
- * Test Description
- * ----------------
- *   - Replay a captured workload with --replace-kernel naming the exact recorded
- *     kernel but pointing at a path that does not exist. The name matches, but
- *     the file cannot be read, so playback must gracefully fall back to the
- *     recorded kernel: no crash, D2H still passes (exit 0), and a fallback
- *     message is emitted.
- */
 HRR_TEST_CASE(Unit_HRR_ReplaceKernelMissingCO) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_replace_missing"};
 
@@ -1931,12 +1563,6 @@ HRR_TEST_CASE(Unit_HRR_ReplaceKernelMissingCO) {
   REQUIRE(ret == 0);
 }
 
-/**
- * Test Description
- * ----------------
- *   - A --replace-kernel argument that is not in NAME=PATH form (no '=') must be
- *     rejected by the argument parser with a non-zero exit before any GPU work.
- */
 HRR_TEST_CASE(Unit_HRR_ReplaceKernelBadSpec) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_replace_badspec"};
 
@@ -1959,11 +1585,7 @@ HRR_TEST_CASE(Unit_HRR_ReplaceKernelBadSpec) {
 
 #ifndef _WIN32
 /**
- * Unit_HRR_CaptureCrashOnSmallStack
- * ---------------------------------
- *   - A recorded process that dies of SIGSEGV on a thread with a 64 KiB stack
- *     must still leave a manifest marked "complete": false. The crash handler
- *     runs on that stack, and the emergency manifest buffer is larger than it.
+ * The crash handler runs on the thread's 64 KiB stack, and the emergency manifest buffer is larger than it.
  */
 HRR_TEST_CASE(Unit_HRR_CaptureCrashOnSmallStack) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_crash_small_stack"};
@@ -1985,14 +1607,8 @@ HRR_TEST_CASE(Unit_HRR_CaptureCrashOnSmallStack) {
 }
 
 /**
- * Unit_HRR_ForkWhileRecording
- * ---------------------------
- *   - Forking while another thread records must not leave a child blocked on a
- *     writer mutex it inherited locked. The workload fails on a child that
- *     does not exit within its deadline.
- *   - A child opens its own archive on its first record and not before, so
- *     the capture holds one archive per child that recorded, besides the
- *     parent's, and none for a child that exited straight away.
+ * A child must not inherit a writer mutex that another recording thread holds locked.
+ * A child opens its archive on its first record, so one that exited at once leaves none.
  */
 HRR_TEST_CASE(Unit_HRR_ForkWhileRecording) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_fork_while_recording"};
@@ -2011,14 +1627,8 @@ HRR_TEST_CASE(Unit_HRR_ForkWhileRecording) {
 }
 
 /**
- * Unit_HRR_ForkWhileWriterHoldsLock
- * ---------------------------------
- *   - fork() keeps the capture writer's events mutex locked until it returns,
- *     so no other thread can take it in between and leave the child a mutex
- *     that only a missing thread could unlock. The workload forks at that
- *     moment every time, and fails if a child does not exit within its
- *     deadline.
- *   - The child, which records once, has its own archive beside the parent's.
+ * fork() keeps the writer's events mutex locked until it returns, so no other thread can take it in between
+ * and leave the child a mutex that only a missing thread could unlock.
  */
 HRR_TEST_CASE(Unit_HRR_ForkWhileWriterHoldsLock) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_fork_writer_holds_lock"};
@@ -2036,12 +1646,8 @@ HRR_TEST_CASE(Unit_HRR_ForkWhileWriterHoldsLock) {
 }
 
 /**
- * Unit_HRR_CaptureCrashDuringFork
- * -------------------------------
- *   - A child forked while its parent's crash callback writes the manifest
- *     writes its own manifest when it crashes in turn: it does not inherit the
- *     emergency manifest buffer marked busy. Both processes leave a manifest
- *     marked "complete": false.
+ * A child forked while the parent's crash callback writes the manifest must not inherit
+ * the emergency manifest buffer marked busy.
  */
 HRR_TEST_CASE(Unit_HRR_CaptureCrashDuringFork) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_crash_during_fork"};
@@ -2067,15 +1673,8 @@ HRR_TEST_CASE(Unit_HRR_CaptureCrashDuringFork) {
 }
 
 /**
- * Unit_HRR_ForkWhileNotingUnreplayable
- * ------------------------------------
- *   - fork() waits for a thread that is noting an API as unreplayable, so the
- *     child does not inherit the mutex of that list locked. The child records
- *     a call and exits normally, and its capture shutdown writes its manifest
- *     under that mutex. The workload fails if the child does not exit within
- *     its deadline.
- *   - Both processes leave an archive. The parent's manifest lists the API.
- *     The child's does not: its archive holds no event for it.
+ * fork() waits for a thread noting an unreplayable API, so the child does not inherit that list's mutex locked.
+ * The child's manifest omits the API because its archive holds no event for it.
  */
 HRR_TEST_CASE(Unit_HRR_ForkWhileNotingUnreplayable) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_fork_while_noting_unreplayable"};
@@ -2104,10 +1703,7 @@ HRR_TEST_CASE(Unit_HRR_ForkWhileNotingUnreplayable) {
 }
 
 /**
- * Unit_HRR_ForkedChildStaysIncomplete
- * -----------------------------------
- *   - A forked child drops a record before its first one opens its archive.
- *     The child's manifest says "complete": false, the parent's says true.
+ * A forked child drops a record before its first one opens its archive, so its manifest says "complete": false.
  */
 HRR_TEST_CASE(Unit_HRR_ForkedChildStaysIncomplete) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_forked_child_stays_incomplete"};
@@ -2136,11 +1732,7 @@ HRR_TEST_CASE(Unit_HRR_ForkedChildStaysIncomplete) {
 }
 
 /**
- * Unit_HRR_ForkedChildRecordsAfterShutdown
- * ----------------------------------------
- *   - A forked child that exits normally without recording leaves no archive,
- *     even though it records after its capture shutdown, as a fat-binary
- *     destructor does.
+ * A forked child that records after its capture shutdown, as a fat-binary destructor does, leaves no archive.
  */
 HRR_TEST_CASE(Unit_HRR_ForkedChildRecordsAfterShutdown) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_forked_child_records_after_shutdown"};
@@ -2156,12 +1748,6 @@ HRR_TEST_CASE(Unit_HRR_ForkedChildRecordsAfterShutdown) {
 
   CHECK(hrr_process_archives(cap.path).size() == 1);
 }
-/**
- * Unit_HRR_ForkAfterCaptureShutdown
- * ---------------------------------
- *   - A child forked after its parent's capture shutdown leaves no archive,
- *     even though it records before it exits.
- */
 HRR_TEST_CASE(Unit_HRR_ForkAfterCaptureShutdown) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_fork_after_capture_shutdown"};
 
@@ -2177,9 +1763,8 @@ HRR_TEST_CASE(Unit_HRR_ForkAfterCaptureShutdown) {
   CHECK(hrr_process_archives(cap.path).size() == 1);
 }
 
-// The archive's events.bin ends in the clean-shutdown trailer, and the trailer
-// counts every event before it. load_archive() sets `complete` for a trailer
-// anywhere in the file, and goes on reading past it.
+// events.bin must end in the clean-shutdown trailer, which counts every event before it.
+// load_archive() sets `complete` for a trailer anywhere in the file, so check the tail here.
 static void check_ends_in_trailer(const fs::path& archive, const hrr::Archive& arc) {
   const std::string bytes = read_text_file(archive / "events.bin");
   REQUIRE(bytes.size() >= sizeof(hrr_file_header) + sizeof(hrr_eof_record));
@@ -2192,12 +1777,8 @@ static void check_ends_in_trailer(const fs::path& archive, const hrr::Archive& a
 }
 
 /**
- * Unit_HRR_ShutdownWhileChildOpensArchive
- * ---------------------------------------
- *   - A forked child's capture shutdown waits while another of its threads
- *     opens the child's archive, and then finalizes that archive. Both
- *     processes leave a manifest marked "complete": true and an events.bin
- *     that ends in the clean-shutdown trailer, with no record after it.
+ * The child's shutdown waits while another thread opens the child's archive, then finalizes it,
+ * so events.bin ends in the trailer with no record after it.
  */
 HRR_TEST_CASE(Unit_HRR_ShutdownWhileChildOpensArchive) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_shutdown_while_child_opens_archive"};
@@ -2227,11 +1808,7 @@ HRR_TEST_CASE(Unit_HRR_ShutdownWhileChildOpensArchive) {
 }
 
 /**
- * Unit_HRR_RecordAfterCaptureShutdown
- * -----------------------------------
- *   - A record made after the capture shutdown has written the trailer, and
- *     before it closes events.bin, is dropped. The file still ends in the
- *     trailer, which counts every event in it.
+ * A record made after the trailer is written and before events.bin closes is dropped.
  */
 HRR_TEST_CASE(Unit_HRR_RecordAfterCaptureShutdown) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_record_after_capture_shutdown"};
@@ -2255,13 +1832,6 @@ HRR_TEST_CASE(Unit_HRR_RecordAfterCaptureShutdown) {
   check_ends_in_trailer(archive, arc);
 }
 
-/**
- * Unit_HRR_ForkBetweenCaptureFlushAndClose
- * ----------------------------------------
- *   - A child forked after the capture shutdown has written the trailer, and
- *     before it closes events.bin, leaves no archive, even though it records
- *     before it exits. The parent's archive is still complete.
- */
 HRR_TEST_CASE(Unit_HRR_ForkBetweenCaptureFlushAndClose) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_fork_between_capture_flush_and_close"};
 
@@ -2283,12 +1853,8 @@ HRR_TEST_CASE(Unit_HRR_ForkBetweenCaptureFlushAndClose) {
 }
 
 /**
- * Unit_HRR_CloseDuringCrashManifest
- * ---------------------------------
- *   - The capture shutdown does not close the archive's directory descriptors
- *     while a crash callback on another thread writes the manifest through
- *     one of them: the workload dies of its SIGSEGV, not exit code 3, and its
- *     hold saw the shutdown start.
+ * Shutdown must not close the archive's directory descriptors while a crash callback
+ * on another thread writes the manifest through one of them.
  */
 HRR_TEST_CASE(Unit_HRR_CloseDuringCrashManifest) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_close_during_crash_manifest"};
@@ -2303,10 +1869,7 @@ HRR_TEST_CASE(Unit_HRR_CloseDuringCrashManifest) {
 }
 
 /**
- * Unit_HRR_ForkDuringBlobWrite
- * ----------------------------
- *   - fork() waits for a blob write in flight, so the child holds no
- *     descriptor of a blobs/<xx> directory in the parent's archive.
+ * fork() waits for a blob write in flight, so the child holds no descriptor of a blobs/<xx> directory.
  */
 HRR_TEST_CASE(Unit_HRR_ForkDuringBlobWrite) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_fork_during_blob_write"};
@@ -2320,15 +1883,7 @@ HRR_TEST_CASE(Unit_HRR_ForkDuringBlobWrite) {
 #endif  // !_WIN32
 
 /**
- * Test Description
- * ----------------
- *   - Runs Unit_HRR_FailedMemcpy3D_Direct under capture: a host-to-device
- *     copy whose extent is far larger than both buffers, which the runtime
- *     rejects, made through hipMemcpy3D, hipMemcpy3DAsync and their _spt
- *     spellings.
- *   - The workload exits cleanly and the archive holds none of the four.
- *     Before the copies were success-gated, capture hashed extent-many bytes
- *     from the 4 KiB host buffer and faulted.
+ * The copy extent far exceeds both buffers, so capture must not hash extent-many bytes from the 4 KiB host buffer.
  */
 HRR_TEST_CASE(Unit_HRR_FailedMemcpy3DNotRecorded) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_failed_memcpy3d"};
@@ -2351,14 +1906,8 @@ HRR_TEST_CASE(Unit_HRR_FailedMemcpy3DNotRecorded) {
 }
 
 /**
- * Test Description
- * ----------------
- *   - Runs Unit_HRR_LongKernelName_Direct under capture: a hipModuleLaunchKernel
- *     of a kernel whose 70,000-character name does not fit the uint16_t length
- *     on the wire.
- *   - The workload exits cleanly, the archive holds no launch and is marked
- *     incomplete. Before the length was checked it wrapped, and the launch was
- *     recorded under a truncated name in an archive marked complete.
+ * The 70,000-character name does not fit the uint16_t length on the wire,
+ * so capture must record no launch and mark the archive incomplete.
  */
 HRR_TEST_CASE(Unit_HRR_LongKernelNameNotRecorded) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_long_kernel_name"};
@@ -2381,14 +1930,8 @@ HRR_TEST_CASE(Unit_HRR_LongKernelNameNotRecorded) {
 }
 
 /**
- * Test Description
- * ----------------
- *   - Runs Unit_HRR_OverflowingMemcpy3D_Direct under capture: an accepted
- *     host-to-device hipMemcpy3DAsync whose width * height * depth overflows
- *     size_t, so no blob can be sized for it.
- *   - The archive holds no hipMemcpy3DAsync, is marked incomplete and replays
- *     cleanly. Recorded without a blob, the copy took the device-to-device
- *     replay path with an unmapped host source, and replay stopped.
+ * The extent product overflows size_t, so no blob can be sized and the copy must not be recorded.
+ * Recorded blobless, it would take the device-to-device replay path with an unmapped host source.
  */
 HRR_TEST_CASE(Unit_HRR_OverflowingMemcpy3DNotRecorded) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_overflowing_memcpy3d"};
@@ -2416,15 +1959,7 @@ HRR_TEST_CASE(Unit_HRR_OverflowingMemcpy3DNotRecorded) {
 }
 
 /**
- * Test Description
- * ----------------
- *   - Runs Unit_HRR_FailedShimCalls_Direct under capture: one rejected call for
- *     each hand-written shim that inlines a struct, plus an accepted and a
- *     rejected hipMemPoolSetAttribute.
- *   - The archive holds only the accepted calls and replays cleanly. Replay
- *     issues every recorded call again, so a recorded rejected call stops it.
- *   - The accepted 4-byte reuse policy is recorded as exactly 1: an 8-byte copy
- *     would also take the sentinel word the workload put after it.
+ * Replay issues every recorded call again, so a recorded rejected call would stop it.
  */
 HRR_TEST_CASE(Unit_HRR_FailedShimCallsNotRecorded) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_failed_shim_calls"};

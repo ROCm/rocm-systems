@@ -37,8 +37,7 @@ COLUMNS = (
 MAX_FAILED_NAMES = 8
 
 
-# Same prefix run_catch2.py writes for a skip the YAML asked for. Repeated
-# here because this job checks the script out on its own.
+# Same prefix run_catch2.py writes for a requested skip, repeated because this job checks the script out alone.
 CONFIG_SKIP_PREFIX = "hrr-config:"
 
 
@@ -90,8 +89,7 @@ def summarize_xml(path: Path) -> dict[str, object]:
 
 
 def try_summarize(path: Path, errors: list[str]) -> dict[str, object]:
-    # A job killed mid-run (timeout, lost runner) can upload a truncated or
-    # empty file. Report it as unreadable rather than abort the whole table.
+    # A killed job can upload a truncated or empty file; report it as unreadable instead of aborting the table.
     try:
         return summarize_xml(path)
     except (ET.ParseError, OSError) as error:

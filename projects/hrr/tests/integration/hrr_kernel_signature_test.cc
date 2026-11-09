@@ -8,11 +8,6 @@
  * @addtogroup HRR HRR kernel-argument signature check
  * @{
  * @ingroup HRRTest
- * Replay checks a launch record's arguments against the kernel signature in the code object before launching (AIRUNTIME-3070).
- * This captures a real launch on a GPU, replays it unmodified as the control, then replays copies whose record is edited.
- * Only a record with too few arguments is refused: it must name the sequence and kernel, exit non-zero and launch nothing.
- * An extra argument or an int recorded as eight bytes replays like the control, since CLR reads nothing past the record.
- * Reading the signature must also leave no GPU error behind.
  */
 
 #include "hrr_test_common.hh"
@@ -65,13 +60,10 @@ TEST_CASE("Unit_HRR_KernelSignature_Direct", "[.][hrr-direct]") {
 
 namespace {
 
-// The launch record's wire bytes, with where each argument sits in them. The
-// reader has already parsed the record (kernel name, arguments), so the offsets
-// follow from it; the layout after the 32-byte header is
+// Launch record wire layout after the 32-byte header:
 //   stream(8) name_len(2) name co_hash(16) grid(12) block(12) shared(4)
 //   num_args(2) num_snapshots(2) args... snapshots... launch-attribute tail
-// and each argument is kind(1) size(2) data, plus a count and 2-byte offsets
-// after a kind-3 argument.
+// Each argument is kind(1) size(2) data; a kind-3 argument adds a count and 2-byte offsets.
 struct LaunchRecord {
   struct Arg {
     size_t at;   // offset of the argument's kind byte
@@ -121,10 +113,7 @@ const char* mutation_name(Mutation m) {
   return "?";
 }
 
-// Every mutation edits the record only; the code object it names is untouched,
-// so its signature stays what the kernel was compiled with.
 void mutate(LaunchRecord& rec, Mutation m) {
-  // Capture never records hidden arguments: the pointer, scale and bias.
   REQUIRE(rec.args.size() == 3);
   const auto& last = rec.args[2];
   const auto& scale = rec.args[1];
@@ -141,7 +130,6 @@ void mutate(LaunchRecord& rec, Mutation m) {
       break;
     }
     case Mutation::Wide: {
-      // The int `scale` recorded as 8 bytes, the extra bytes zero.
       REQUIRE(scale.size == sizeof(int));
       const uint16_t wide = 8;
       std::memcpy(rec.bytes.data() + scale.at + 1, &wide, 2);
@@ -161,7 +149,6 @@ void splice_record(const fs::path& copy_root, const std::vector<uint8_t>& origin
   std::vector<uint8_t> file = read_file(events);
   const auto found = std::search(file.begin(), file.end(), original.begin(), original.end());
   REQUIRE(found != file.end());
-  // The record has to be unique in the stream, or the edit could land elsewhere.
   REQUIRE(std::search(found + 1, file.end(), original.begin(), original.end()) == file.end());
   const auto at = found - file.begin();
   file.erase(file.begin() + at, file.begin() + at + static_cast<ptrdiff_t>(original.size()));
@@ -183,7 +170,6 @@ LaunchRecord find_launch_record(const hrr::Archive& arc) {
   return LaunchRecord(*found);
 }
 
-// Replay stdout carries the summary and stderr the refusal; both are merged.
 size_t kernels_launched(const std::string& out) {
   const size_t at = out.find("Kernels launched:");
   REQUIRE(at != std::string::npos);
@@ -192,7 +178,6 @@ size_t kernels_launched(const std::string& out) {
 
 }  // namespace
 
-// The control must replay cleanly, or a refusal below could be a replay that refuses everything.
 TEST_CASE("Unit_HRR_KernelSignature_MismatchedArchiveRefused", "[.][hrr]") {
   ScopedDir cap(fs::temp_directory_path() / "hrr_kernel_signature.hrr");
   hrr_capture_direct("Unit_HRR_KernelSignature_Direct", cap.path, 5);
@@ -216,10 +201,8 @@ TEST_CASE("Unit_HRR_KernelSignature_MismatchedArchiveRefused", "[.][hrr]") {
     CHECK(fail == 0);
   }
 
-  // The signature read ends on a call that answers hipErrorInvalidValue, one
-  // index past the last parameter. That must not stay HIP's last error: the
-  // warm-up pass --kernel-filter adds would report it as a pending GPU error
-  // (and --sync-after-event would abort on it).
+  // The signature read ends with a call that returns hipErrorInvalidValue one index past the last parameter.
+  // That error must not linger: the --kernel-filter warm-up pass would report it as a pending GPU error.
   SECTION("the unmodified archive leaves no pending GPU error behind") {
     auto [rc, out] = hrr_playback_merged(cap.path, std::string("--kernel-filter ") + kProbeName);
     INFO("Replay:\n" << out);
@@ -248,9 +231,7 @@ TEST_CASE("Unit_HRR_KernelSignature_MismatchedArchiveRefused", "[.][hrr]") {
     CHECK(line.find(kProbeName) != std::string::npos);
     CHECK(line.find("launch refused") != std::string::npos);
 
-    // The refusal is fatal, so replay stops before its summary. Carrying on
-    // past it gets the counters: nothing ran, and the buffer the kernel would
-    // have written reads back unwritten, which replay compares and reports.
+    // The refusal is fatal, so replay stops before its summary. --continue-on-error reaches the counters.
     auto [rc2, out2] = hrr_playback_merged(copy.path, "--continue-on-error");
     INFO("Replay of the edited archive, continuing past errors:\n" << out2);
     CHECK(out2.find(named) != std::string::npos);
@@ -261,8 +242,7 @@ TEST_CASE("Unit_HRR_KernelSignature_MismatchedArchiveRefused", "[.][hrr]") {
     CHECK(fail >= 1);
   }
 
-  // CLR reads the kernel's own parameters, each at its own size: an extra
-  // argument, or an argument wider than its parameter, is never read past.
+  // CLR reads only the kernel's own parameters, each at its own size, so extra or wider arguments are ignored.
   for (const Mutation m : {Mutation::TooMany, Mutation::Wide}) {
     DYNAMIC_SECTION("a launch record with " << mutation_name(m) << " replays") {
       ScopedDir copy(fs::temp_directory_path() / "hrr_kernel_signature_edit.hrr");

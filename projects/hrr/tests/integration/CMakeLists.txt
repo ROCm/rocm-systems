@@ -2,16 +2,12 @@
 #
 # SPDX-License-Identifier: MIT
 
-# hrr_api_matrix_expectations.h is GENERATED from the pair api_classes.json +
-# api_matrix.yaml, both in ../../tools/api-matrix.  The build never runs the
-# generators.  Regenerate after an upstream classification change or an
-# api_matrix.yaml edit, from ../../tools/api-matrix:
+# hrr_api_matrix_expectations.h is generated from api_classes.json and api_matrix.yaml in ../../tools/api-matrix.
+# The build never runs the generators. After a classification or api_matrix.yaml change, regenerate there with:
 #   ./derive_manifest.py
 #   ./check_matrix.py --emit-cxx
 
-# The workload translation units carry __global__ kernels, device built-ins
-# (blockIdx/blockDim/threadIdx), hipLaunchKernelGGL, and HIP_SYMBOL, so they must
-# be compiled with the HIP device toolchain rather than a plain C++ compiler.
+# These sources use __global__ kernels, device built-ins and hipLaunchKernelGGL, so they need the HIP device toolchain.
 set(HRR_GPU_WORKLOAD_SOURCES
   hrr_workload_test.cc
   hrr_repro_workload_test.cc
@@ -53,10 +49,8 @@ set_target_properties(hrr-integration-tests PROPERTIES
   HIP_STANDARD 17
   HIP_STANDARD_REQUIRED ON)
 
-# hrr_spt_workload_test.cc calls the ordinary hipMemset* names and relies on the
-# per-thread-default-stream compile option to redirect them to the _spt entry
-# points under test. This must stay per source so the other workloads keep
-# resolving to the plain entry points.
+# hrr_spt_workload_test.cc calls the plain hipMemset* names and relies on the per-thread-default-stream option
+# to redirect them to the _spt entry points. Keep the option per source so other workloads use the plain ones.
 if(HIP_PLATFORM STREQUAL "amd")
   set_source_files_properties(hrr_spt_workload_test.cc PROPERTIES
                               COMPILE_OPTIONS "-fgpu-default-stream=per-thread")
@@ -65,14 +59,11 @@ elseif(HIP_PLATFORM STREQUAL "nvidia")
                               COMPILE_OPTIONS "--default-stream=per-thread")
 endif()
 
-# ../include -> local harness headers.
-# ../../playback -> hrr_reader.h / hip_playback.h (also propagated by hrr::reader).
 target_include_directories(hrr-integration-tests PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../include
   ${CMAKE_CURRENT_SOURCE_DIR}/../../playback
 )
 
-# hiprtc::hiprtc (hipRTC) is a separate ROCm CMake package from hip::host.
 find_package(hiprtc CONFIG REQUIRED)
 
 target_link_libraries(hrr-integration-tests PRIVATE
@@ -81,23 +72,17 @@ target_link_libraries(hrr-integration-tests PRIVATE
   hiprtc::hiprtc
   Catch2::Catch2WithMain)
 
-# hrr_repro_workload_test.cc zeroes a device allocation with hsa_amd_memory_fill
-# so the fill itself is never recorded. hip::host resolves ROCr for its own
-# needs but does not carry it in its link interface, so a direct call from our
-# objects needs the runtime named here. Windows has no ROCr and the call site is
-# compiled out there.
+# hrr_repro_workload_test.cc zeroes a device allocation with hsa_amd_memory_fill so the fill is never recorded.
+# hip::host does not carry ROCr in its link interface, so link it directly. Windows has no ROCr and compiles the call out.
 if(NOT WIN32)
   find_package(hsa-runtime64 CONFIG REQUIRED)
   target_link_libraries(hrr-integration-tests PRIVATE hsa-runtime64::hsa-runtime64)
-  # hsa-runtime64 is REQUIRED and linked just above, so the cases that call HSA
-  # directly can compile here. Define the macro they are guarded by next to the
-  # dependency so the two cannot drift apart; without it those cases vanish from
-  # the binary with no signal. tests/config/integration.yaml is the backstop.
+  # Define the macro next to the dependency so the two cannot drift; without it the HSA cases vanish from the binary silently.
+  # tests/config/integration.yaml is the backstop.
   target_compile_definitions(hrr-integration-tests PRIVATE HRR_HAVE_HSA)
 
-  # hrr_disk_space_test.cc defines these for the HIP runtime to bind to. An
-  # executable exports only what its link-time libraries reference, and the
-  # runtime may name statvfs or fstatvfs by either name, so export all five.
+  # hrr_disk_space_test.cc defines these for the HIP runtime to bind to. An executable exports only symbols its
+  # libraries reference, and the runtime may use either statvfs name, so export all five.
   set(_hrr_disk_space_exports "${CMAKE_CURRENT_BINARY_DIR}/hrr_disk_space_exports.list")
   file(WRITE "${_hrr_disk_space_exports}" "{ statvfs; statvfs64; fstatvfs; fstatvfs64; fsync; };\n")
   target_link_options(hrr-integration-tests PRIVATE
@@ -105,9 +90,8 @@ if(NOT WIN32)
   target_link_libraries(hrr-integration-tests PRIVATE ${CMAKE_DL_LIBS})
 endif()
 
-# Optional: hip_raw_trace, a genuine multi-threaded capture workload used only by
-# Unit_HRR_MultiThreadRoundtrip. If it is not found, HRR_RAW_TRACE_EXE is defined
-# empty and that test skips itself at run time.
+# hip_raw_trace is optional, used only by Unit_HRR_MultiThreadRoundtrip.
+# When it is missing, HRR_RAW_TRACE_EXE is empty and that test skips at run time.
 if(NOT DEFINED HRR_RAW_TRACE_EXE)
   find_program(_hrr_raw_trace_found NAMES hip_raw_trace hip_raw_trace.exe
     HINTS
@@ -121,8 +105,8 @@ if(NOT DEFINED HRR_RAW_TRACE_EXE)
   endif()
 endif()
 
-# Capture honours HIP_HRR_DEBUG_ARGS only in a CLR built without NDEBUG
-# (CMAKE_BUILD_TYPE=Debug). Tell the tests which kind of runtime they run against.
+# Capture honours HIP_HRR_DEBUG_ARGS only in a CLR built without NDEBUG (Debug).
+# This option tells the tests which kind of runtime they run against.
 option(HRR_TEST_CLR_DEBUG_FLAGS "The HIP runtime under test is a Debug build" OFF)
 if(HRR_TEST_CLR_DEBUG_FLAGS)
   target_compile_definitions(hrr-integration-tests PRIVATE HRR_TEST_CLR_DEBUG_FLAGS)
@@ -139,10 +123,8 @@ target_compile_definitions(hrr-integration-tests PRIVATE
 
 add_dependencies(hrr-integration-tests hrr-playback)
 
-# The rocprofiler-register tool library hrr_dispatch_swap_test.cc loads into its
-# workloads. libamdhip64 registers with rocprofiler-register on Linux only, and
-# not in every Linux build: a test that needs the table checks at run time and
-# skips when the runtime did not register.
+# Tool library that hrr_dispatch_swap_test.cc loads into its workloads. libamdhip64 registers with
+# rocprofiler-register on Linux only, and not in every build, so tests check at run time and skip.
 if(NOT WIN32)
   add_library(hrr-test-dispatch-tool MODULE hrr_dispatch_tool.cc)
   set_target_properties(hrr-test-dispatch-tool PROPERTIES

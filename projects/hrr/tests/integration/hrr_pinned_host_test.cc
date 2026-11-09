@@ -35,7 +35,6 @@
 namespace {
 constexpr int kPinnedN     = 256;
 constexpr int kPinnedIters = 4;
-// The input changes on every second launch: two snapshot records, four checks.
 int pinned_value(int it, int i) { return (it / 2) * 1000 + i; }
 }  // namespace
 
@@ -52,8 +51,8 @@ __global__ void hrr_pinned_triple_struct(int* out, PinnedIn s) {
 
 __global__ void hrr_pinned_ignore(uint64_t) {}
 
-// by_module launches through hipModuleLaunchKernel with an extra[] buffer, the
-// path where capture finds the arguments by the kernel's offsets.
+// by_module launches through hipModuleLaunchKernel with an extra[] buffer,
+// where capture finds the arguments by the kernel's offsets.
 static void hrr_pinned_workload(int* in, bool by_struct = false, bool by_module = false) {
   int* dev_in = nullptr;
   HRR_HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&dev_in), in, 0));
@@ -79,8 +78,8 @@ static void hrr_pinned_workload(int* in, bool by_struct = false, bool by_module 
   };
   for (int it = 0; it < kPinnedIters; ++it) {
     for (int i = 0; i < kPinnedN; ++i) in[i] = pinned_value(it, i);  // uncaptured stores
-    // Replay restores nothing in a graph capture. A launch on another stream
-    // meanwhile is restored on that stream, so the next launch records again.
+    // Replay restores nothing in a graph capture. A launch on another stream meanwhile
+    // is restored on that stream, so the next launch records again.
     if (it == 2) {
       hipStream_t s = nullptr, s2 = nullptr;
       hipGraph_t g  = nullptr;
@@ -106,8 +105,6 @@ __global__ void hrr_pinned_wait(int* flag) {
 }
 __global__ void hrr_pinned_signal(int* flag) { atomicExch(flag, 1); }
 
-// The pinned-input kernel on stream a queues behind a kernel waiting for a flag
-// that b sets later, after a launch on b that reads the same unchanged input.
 TEST_CASE("Unit_HRR_PinnedHostStreams_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
   int *in = nullptr, *dev_in = nullptr, *flag = nullptr, *dout = nullptr;
@@ -187,8 +184,8 @@ TEST_CASE("Unit_HRR_PinnedHostLarge_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipHostFree(in));
 }
 
-// A released allocation's address passed on as a plain number, once for each
-// way to release it: capture must not snapshot memory that is no longer pinned.
+// A released allocation's address passed on as a plain number, once per way to release it:
+// capture must not snapshot memory that is no longer pinned.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 TEST_CASE("Unit_HRR_PinnedHostFreed_Direct", "[.][hrr-direct]") {
@@ -221,8 +218,7 @@ TEST_CASE("Unit_HRR_PinnedHostRegister_Direct", "[.][hrr-direct]") {
 }
 
 #ifndef _WIN32
-// The struct case from pinned memory whose low 32 bits are zero, an address
-// replay's device-pointer shape check rejects.
+// The struct case from pinned memory whose low 32 bits are zero, an address replay's device-pointer shape check rejects.
 TEST_CASE("Unit_HRR_PinnedHostStructLowBits_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
   void* at = reinterpret_cast<void*>(uintptr_t{0x7e0000000000});
@@ -241,10 +237,9 @@ TEST_CASE("Unit_HRR_PinnedHostStructLowBits_Direct", "[.][hrr-direct]") {
   munmap(p, 1 << 16);
 }
 
-// Forks while another thread snapshots a 32 MiB pinned allocation, so most forks land while it holds the pinned tracking lock.
-// Each child frees an address capture does not track, which takes that lock; a child that inherited it held never exits.
-// The forks wait for the launcher's first launches: the first loads the code object and creates the null stream under ROCr's memory lock,
-// and a child forked then hangs in hipFree on a lock capture does not own.
+// Forks while another thread snapshots a pinned allocation, so most forks land while it holds the pinned tracking lock.
+// A child that inherited the lock held never exits. The forks wait for the first launches,
+// which load the code object and create the null stream under ROCr's memory lock; a child forked then hangs in hipFree.
 TEST_CASE("Unit_HRR_PinnedHostFork_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
   constexpr size_t kBig = 32u << 20;
@@ -292,9 +287,8 @@ TEST_CASE("Unit_HRR_PinnedHostFork_Direct", "[.][hrr-direct]") {
 #endif
 
 #if defined(HRR_PLAYBACK_EXE) && defined(HRR_TEST_EXE)
-// Replay matches the recording only if it wrote each launch's input back; its
-// own buffer never sees the host's stores. With HIP_HRR_HOST_SNAPSHOTS=0 there
-// is nothing to write back and the checks fail.
+// Replay matches the recording only if it wrote each launch's input back. With HIP_HRR_HOST_SNAPSHOTS=0
+// there is nothing to write back and the checks fail.
 HRR_TEST_CASE(Unit_HRR_PinnedHostRoundtrip) {
   for (const char* direct : {"Unit_HRR_PinnedHostMalloc_Direct",
                              "Unit_HRR_PinnedMallocHost_Direct",
@@ -331,8 +325,7 @@ HRR_TEST_CASE(Unit_HRR_PinnedHostRoundtrip) {
   }
 }
 
-// Replay queues each restore on its launch's stream rather than waiting for
-// the stream, here held by a kernel that waits for one replay submits later.
+// Replay queues each restore on its launch's stream rather than waiting for a stream held by a kernel that waits for a later submit.
 // The launch on b records the input too, since replay restores it on a.
 HRR_TEST_CASE(Unit_HRR_PinnedHostStreamsRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_pinned_host_streams"};
@@ -341,15 +334,12 @@ HRR_TEST_CASE(Unit_HRR_PinnedHostStreamsRoundtrip) {
   INFO("Playback exit " << ret << ", output:\n" << out);
   REQUIRE(ret != kHrrWatchdogKilled);
   CHECK(ret == 0);
-  // Exact, since a HIP_HRR_D2H_TOL float tolerance would take these ints for
-  // tiny floats.
+  // Exact, since a HIP_HRR_D2H_TOL float tolerance would take these ints for tiny floats.
   CHECK(out.find("2 pass (2 exact, 0 within tol), 0 fail") != std::string::npos);
   CHECK(out.find("Pinned host snapshots: 3 restored, 0 refused, 0 skipped") !=
         std::string::npos);
 }
 
-// An allocation larger than HIP_HRR_HOST_SNAPSHOT_MAX_MB is not snapshotted and
-// is listed as unreplayable, so replay cannot match. Within the cap it is.
 HRR_TEST_CASE(Unit_HRR_PinnedHostSnapshotCap) {
   for (const char* max_mb : {"2", "1"}) {
     const bool over = *max_mb == '1';
@@ -380,9 +370,8 @@ HRR_TEST_CASE(Unit_HRR_PinnedHostSnapshotCap) {
   }
 }
 
-// A snapshot blob over --max-file-bytes, or one capture left out over
-// HIP_HRR_CAPTURE_MAX_BLOB_MB, ends the replay before the kernel that reads it
-// is launched on input replay never restored.
+// A snapshot blob over --max-file-bytes, or one capture left out over HIP_HRR_CAPTURE_MAX_BLOB_MB,
+// ends the replay before the kernel that reads it launches.
 HRR_TEST_CASE(Unit_HRR_PinnedHostBlobRefused) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_pinned_host_refused"};
   hrr_capture_direct("Unit_HRR_PinnedHostLarge_Direct", cap.path, 5);
@@ -403,9 +392,8 @@ HRR_TEST_CASE(Unit_HRR_PinnedHostBlobRefused) {
   CHECK(capped_out.find("[HRR launch]") == std::string::npos);
 }
 
-// Capture stops tracking an allocation on hipHostFree, hipFree, hipFreeHost and
-// hipHostUnregister: had it snapshotted the stale address, replay would refuse
-// the record for an allocation it released.
+// Capture stops tracking an allocation on hipHostFree, hipFree, hipFreeHost and hipHostUnregister.
+// A snapshot of the stale address would make replay refuse the record for a released allocation.
 HRR_TEST_CASE(Unit_HRR_PinnedHostFreedRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_pinned_host_freed"};
   hrr_capture_direct("Unit_HRR_PinnedHostFreed_Direct", cap.path, 3);

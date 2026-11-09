@@ -26,12 +26,7 @@ hipError_t playback_hipMemcpy2D(PlaybackContext& ctx, const uint8_t* pl);
 
 using hrr_test::dispatch;
 
-/**
- * Test Description
- * ----------------
- *   - hipLinkAddFile is refused whatever its record holds: the path would be
- *     one the archive chose. The replay records it as unreplayable by name.
- */
+/* The archive would choose the file path, so hipLinkAddFile is refused for any record. */
 TEST_CASE("Unit_HRR_Refusals_LinkAddFileIsRefused", "[hrr]") {
   PlaybackContext ctx;
   hrr_test::ExactRecord<hrr_args_hipLinkAddFile> rec;
@@ -85,13 +80,6 @@ TEST_CASE("Unit_HRR_Refusals_GeneratedHandlersRefuseUntranslatableSlots", "[hrr]
   }
 }
 
-/**
- * Test Description
- * ----------------
- *   - A 2D device-to-device copy whose destination or source is in no replay
- *     map is refused with hipErrorInvalidValue, naming the end that is
- *     missing, instead of being run against the recorded address.
- */
 TEST_CASE("Unit_HRR_Refusals_Memcpy2DWithUnmappedEndIsRefused", "[hrr]") {
   PlaybackContext ctx;
   char device_storage[256];

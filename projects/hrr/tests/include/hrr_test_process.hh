@@ -26,16 +26,9 @@
 
 namespace hrr::test {
 
-// Minimal shell-free subprocess helper for HRR tests: per-child environment overrides,
-// optional stdout capture, optional deadline.
-//
-// POSIX uses fork()/execvp(). The argument string is split on whitespace; quotes stay literal in a token
-// (Catch2's test-spec parser strips them). Overrides apply in the child only, so the parent's environment is never mutated.
-//
+// Shell-free subprocess helper. POSIX splits the argument string on whitespace and keeps quotes literal
+// (Catch2's test-spec parser strips them). Environment overrides apply in the child only.
 // run() returns the exit code, 128 + signal number if killed by a signal, or 127 if the launch failed.
-//
-// runWithTimeout() kills a hung replay (for example a no-op API leaves a program waiting forever)
-// and returns kKilledOnTimeout, so a hang becomes an assertable outcome instead of a stuck CI job.
 class SpawnProc {
  public:
   // capture_stderr merges stderr into getOutput(); it has no effect without capture_stdout.
@@ -49,12 +42,9 @@ class SpawnProc {
     env_.push_back({key, value});
   }
 
-  // Remove a variable from the child's environment (after fork, before exec).
-  // Prefer this over setEnv(key, ""): CLR's flag parser turns an empty
-  // HIP_HRR_CAPTURE_OUTPUT into a single space, which still enables capture.
+  // Prefer this over setEnv(key, ""): CLR's flag parser turns an empty HIP_HRR_CAPTURE_OUTPUT into a space, which still enables capture.
   void unsetEnv(const std::string& key) { unset_env_.push_back(key); }
 
-  // Exit code when the deadline killed the child: 128 + SIGKILL, the encoding run() uses for a signalled child.
   static constexpr int kKilledOnTimeout = 128 + 9;
 
   int run(const std::string& args) { return run_impl(args, 0); }
@@ -133,9 +123,8 @@ class SpawnProc {
         ::close(pipefd[1]);
       }
       ::execvp(exe_.c_str(), argv.data());
-      // 127 with no message is otherwise indistinguishable from a missing
-      // dynamic library. The loader writes its own line; this covers the
-      // execve failure itself (ENOENT, EACCES on a noexec mount).
+      // Without a message, exit 127 is indistinguishable from a missing dynamic library.
+      // The loader writes its own line; this covers an execve failure (ENOENT, EACCES on a noexec mount).
       dprintf(STDERR_FILENO, "hrr spawn: exec '%s': %s\n", exe_.c_str(),
               strerror(errno));
       ::_exit(127);
@@ -277,9 +266,8 @@ class SpawnProc {
   }
 
   std::string build_env_block() const {
-    // Start from the parent's environment, apply overrides (case-insensitive on
-    // the variable name, per Windows semantics), and emit a double-null
-    // terminated block for CreateProcess.
+    // Start from the parent's environment, apply overrides (case-insensitive names, per Windows),
+    // and emit a double-null-terminated block for CreateProcess.
     std::vector<std::pair<std::string, std::string>> vars;
     LPCH env = GetEnvironmentStringsA();
     if (env) {

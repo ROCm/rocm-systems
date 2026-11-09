@@ -18,21 +18,16 @@
 #include <cstdlib>
 #include <string>
 
-// ROCM-27985: the post-H2D-restore drain (hrr_sync_after_replayed_h2d) must
-// be skipped while a stream graph is being captured, because a device/stream
-// synchronize is illegal mid-capture (HIP 900/901). Lock that guard down: a
-// regression that dropped it would break HRR graph replay.
+// A device or stream synchronize is illegal during stream graph capture (HIP 900/901),
+// so the post-H2D drain must be skipped then.
 HRR_TEST_CASE(Unit_HRR_Playback_ReplayedH2DDrainGraphGuard) {
   REQUIRE(hrr_replayed_h2d_needs_drain(false));
   REQUIRE_FALSE(hrr_replayed_h2d_needs_drain(true));
 }
 
-// ROCM-27985: hipMalloc is host-synchronous, so the zero-init injected after a
-// host-synchronous replay allocation must be drained before the handler
-// returns. Without that edge the null-stream zero-init races every later
-// replayed event on a hipStreamNonBlocking stream and can overwrite a restored
-// kernel input with zeros. Draining is skipped when zero-init is turned off and
-// during graph capture, where the zero-init is never issued.
+// hipMalloc is host-synchronous, so the injected zero-init must drain before the handler returns.
+// Otherwise it races later events on a hipStreamNonBlocking stream and can zero a restored input.
+// No drain when zero-init is off or during graph capture.
 HRR_TEST_CASE(Unit_HRR_Playback_ZeroInitDrainGuard) {
   REQUIRE(hrr_zero_init_needs_drain(true, false));
   REQUIRE_FALSE(hrr_zero_init_needs_drain(false, false));
@@ -40,10 +35,8 @@ HRR_TEST_CASE(Unit_HRR_Playback_ZeroInitDrainGuard) {
   REQUIRE_FALSE(hrr_zero_init_needs_drain(false, true));
 }
 
-// The reader accepts only its own archive format version, so the number
-// --version prints is what decides whether a given capture can be opened at
-// all. Tie it to HRR_VERSION rather than to a literal, so a future format bump
-// cannot leave the tool reporting a version it no longer reads.
+// Tie the expected value to HRR_VERSION, not a literal, so a format bump
+// cannot leave --version reporting a version the reader rejects.
 HRR_TEST_CASE(Unit_HRR_Playback_VersionOption) {
   hrr::test::SpawnProc proc(HRR_PLAYBACK_EXE, /*capture_stdout=*/true);
   set_proc_search_path(proc);
@@ -88,9 +81,6 @@ HRR_TEST_CASE(Unit_HRR_Playback_PlacementHeldRanges) {
   CHECK(h.r.begin()->second == 0x20000);
 }
 
-// The range placement maps for an allocation is checked: a size that wraps
-// 2^64, or rounding that does, is refused rather than turned into a small range
-// inside a held one.
 HRR_TEST_CASE(Unit_HRR_Playback_PlacementRangeChecked) {
   const uint64_t G = 1ull << 21, B = 0x7f0000000000ull;
   uint64_t b = 0, e = 0;

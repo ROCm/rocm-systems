@@ -40,10 +40,8 @@ HrrReplayClass expect_code_to_class(int code) {
   }
 }
 
-// A real handler that ran is REAL when it returned cleanly, HANDLER_ERROR
-// when it did not, and CRASH when it did not come back at all. Two workloads
-// landing on two of those three saw the same handler behave differently on
-// different arguments, not a different handler.
+// REAL, HANDLER_ERROR and CRASH all mean a real handler ran. Two workloads landing on two of them
+// saw one handler behave differently on different arguments, not a different handler.
 bool is_real_handler_outcome(HrrReplayClass c) {
   return c == HrrReplayClass::kReal || c == HrrReplayClass::kHandlerError ||
          c == HrrReplayClass::kCrash;
@@ -134,7 +132,6 @@ void write_observation(const TierObservation& obs) {
   f << (first ? "" : "\n  ") << "}\n}\n";
 }
 
-// Failures use FAIL_CHECK rather than FAIL, so one crashing workload costs only its own APIs and the observation file is still written.
 void observe_workload(const std::string& direct_case, TierObservation& obs) {
   ScopedDir cap{fs::temp_directory_path() /
                 ("hrr_matrix_" + direct_case)};
@@ -144,9 +141,8 @@ void observe_workload(const std::string& direct_case, TierObservation& obs) {
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     set_proc_search_path(proc);
     const int ret = proc.run("\"" + direct_case + "\"");
-    // Catch2 exits 4 when the selected case skipped. HRR_SKIP uses SKIP(), so
-    // a workload that gated itself off (no VMM, no cooperative launch) is not
-    // a failure and contributes no coverage. Any other non-zero exit is.
+    // Catch2 exits 4 when the selected case skipped. A workload that gated itself off (no VMM, no cooperative launch)
+    // is not a failure and contributes no coverage. Any other non-zero exit is.
     if (ret == 4)
       return;
     if (ret != 0) {
@@ -172,20 +168,16 @@ void observe_workload(const std::string& direct_case, TierObservation& obs) {
   auto [replay_rc, merged] = hrr_playback_watchdog(
       cap.path, kReplayTimeoutSeconds, "--continue-on-error --verbose");
   INFO("Replay of " << direct_case << " exited " << replay_rc);
-  // A hang is the one replay outcome that is never acceptable: it is what a
-  // no-op stream value write looks like to a waiter, and it is also what
-  // would wedge CI.
+  // A hang is never acceptable: it is how a no-op stream value write looks to a waiter, and it would wedge CI.
   if (replay_rc == kHrrWatchdogKilled) {
     FAIL_CHECK("replay of " << direct_case << " did not finish within "
                       << kReplayTimeoutSeconds << "s (watchdog killed it)");
   }
   obs.worst_replay_exit = std::max(obs.worst_replay_exit, replay_rc);
 
-  // --continue-on-error should mean the replay reaches the end of the archive.
-  // If it stopped anyway — a special event failed, or the GPU went away — the
-  // events after that point never ran, and silence from them is absence of
-  // evidence rather than evidence of a real handler. Record nothing for those
-  // rather than a tier-wide sweep of false REALs.
+  // --continue-on-error should make the replay reach the end of the archive. If it stopped anyway,
+  // the later events never ran, and their silence is not evidence of a real handler.
+  // Record nothing for them rather than a tier-wide sweep of false REALs.
   if (hrr_replay_aborted(merged)) {
     const auto failed = hrr_replay_failed_apis(merged);
     FAIL_CHECK("replay of " << direct_case << " stopped early despite "
@@ -194,12 +186,9 @@ void observe_workload(const std::string& direct_case, TierObservation& obs) {
          << "; the events after it went unobserved");
   }
 
-  // A handler can also end the replay by dereferencing a capture-time host
-  // pointer, which is a signal rather than an error return and leaves no
-  // message behind. The verbose event log still names it: the last event
-  // printed is the one that did not come back. Everything the archive holds
-  // after it is unobservable until that handler is fixed, so it is left
-  // unobserved and surfaces as not-exercised.
+  // A handler that dereferences a capture-time host pointer ends the replay with a signal and leaves no message.
+  // The last event in the verbose log is the one that did not come back.
+  // Everything after it stays unobserved and surfaces as not-exercised.
   const std::vector<std::string> reached = hrr_replay_reached_apis(merged);
   const std::set<std::string> reached_set(reached.begin(), reached.end());
   const bool crashed = replay_rc >= 128;
@@ -226,8 +215,7 @@ void observe_workload(const std::string& direct_case, TierObservation& obs) {
     if (it == obs.observed.end()) {
       obs.observed.emplace(kv.first, klass);
     } else if (it->second != klass) {
-// Two workloads saw the same API behave differently. REAL versus HANDLER_ERROR or CRASH is one handler on different arguments.
-// Keep that failure: it is the finding, declared in api_matrix.yaml.
+// REAL versus HANDLER_ERROR or CRASH is one handler on different arguments. Keep that failure: it is declared in api_matrix.yaml.
 // Any other pairing means the API was reclassified, which this matrix exists to catch.
       if (is_real_handler_failure(it->second, klass)) {
         it->second = worse_of(it->second, klass);
@@ -268,10 +256,8 @@ void run_tier(const std::string& tier) {
     const auto it = obs.captured.find(e.api);
     const long long count = it == obs.captured.end() ? 0 : it->second;
 
-    // Declared as folded away by HIP before the capture layer runs. The
-    // absence is the assertion: a workload does call it, and it still must
-    // not appear. If it starts appearing, HIP's lowering changed and the
-    // matrix is describing the past.
+    // Declared as folded away by HIP before the capture layer runs. Its absence is the assertion:
+    // if it starts appearing, HIP's lowering changed.
     if (!e.expect_captured) {
       INFO("API: " << e.api << " (tier " << tier
                    << ") is declared as never captured");
@@ -300,9 +286,7 @@ void run_tier(const std::string& tier) {
     INFO("API: " << e.api << " (tier " << tier << ")");
     INFO("Expected replay class: " << hrr_replay_class_name(expected));
     INFO("Observed replay class: " << hrr_replay_class_name(observed));
-    // A payload-loss API is still expected to run a real handler — that is
-    // precisely what hides the loss. The class is what this test asserts; the
-    // loss itself is what check_matrix.py records as XFAIL.
+    // A payload-loss API still runs a real handler, which is what hides the loss. check_matrix.py records the loss as XFAIL.
     INFO("Known payload loss: " << (e.payload_loss ? "yes" : "no"));
     if (e.handler_error_ok && expected == HrrReplayClass::kReal &&
         observed == HrrReplayClass::kHandlerError) {
@@ -318,8 +302,7 @@ void run_tier(const std::string& tier) {
     if (!missing_list.empty()) missing_list += ", ";
     missing_list += m;
   }
-// Rows with expect_captured == false assert an absence, which holds whether or not the workload reached the API.
-// They are reported separately and subtracted from the floor, so `covered` means APIs with positive evidence.
+// Rows with expect_captured == false assert an absence, so they are subtracted from the floor and reported separately.
 // min_covered is generated counting these rows; check_matrix.py must re-emit it over assertable rows before the floor can tighten.
   const int evidence_floor = floor.min_covered - absent_asserted;
   INFO("Tier " << tier << ": " << covered << " covered with evidence, "
@@ -371,8 +354,6 @@ TEST_CASE("Unit_HRR_ApiMatrix_ManifestWellFormed", "[.][hrr][api-matrix][cpu]") 
     REQUIRE(kHrrTierFloors[i].gpus >= 1);
     REQUIRE(kHrrTierFloors[i].min_covered >= 0);
     tiers.insert(kHrrTierFloors[i].tier);
-    // A tier with no workload can never be exercised, so its results would be
-    // vacuously clean.
     CHECK(*kHrrTierFloors[i].workloads != nullptr);
   }
 
@@ -389,9 +370,7 @@ TEST_CASE("Unit_HRR_ApiMatrix_ManifestWellFormed", "[.][hrr][api-matrix][cpu]") 
   }
   CHECK(seen.size() == kHrrApiMatrixCount);
 
-  // The matrix must name exactly the APIs HRR can record: no API missing
-  // from it, and no name in it that HRR does not have. A stale header after
-  // the API table changes would otherwise pass every check above.
+  // The matrix must name exactly the APIs HRR can record, or a stale header would pass every check above.
   std::set<std::string> known;
   for (int i = 0; i < HRR_API_COUNT; ++i) known.insert(hrr_api_names[i]);
   CHECK(known.size() == static_cast<size_t>(HRR_API_COUNT));
@@ -467,9 +446,8 @@ TEST_CASE("Unit_HRR_ApiMatrix_ReplayClassMarkers", "[.][hrr][api-matrix][cpu]") 
   CHECK(hrr_observed_replay_class(many, "hipHostAlloc") ==
         HrrReplayClass::kNoop);
 
-  // An unreplayable API returns hipErrorNotSupported, so it appears in the
-  // failed-API list as well. The refusal is the more specific fact and must
-  // win, or a declared scope exclusion would read as a handler that broke.
+  // An unreplayable API also appears in the failed-API list. The refusal must win,
+  // or a declared scope exclusion would read as a broken handler.
   const std::string unreplayable_line =
       "[HRR] hipStreamAddCallback: NOT REPLAYABLE \xE2\x80\x94 the callback is "
       "a host function pointer belonging to the capturing process. The call is "
@@ -486,8 +464,7 @@ TEST_CASE("Unit_HRR_ApiMatrix_ReplayClassMarkers", "[.][hrr][api-matrix][cpu]") 
                                   "hipDrvLaunchKernelEx") ==
         HrrReplayClass::kHandlerError);
 
-  // Only the fatal form means the replay stopped; the continuing form must not
-  // be read as a truncated run, or every tier would fail on its own design.
+  // Only the fatal form means the replay stopped; the continuing form must not read as a truncated run.
   CHECK(hrr_replay_aborted(fatal_line +
                            "[HRR] Replay aborted due to fatal HIP error\n"));
   CHECK_FALSE(hrr_replay_aborted(many));
@@ -551,8 +528,7 @@ TEST_CASE("Unit_HRR_ApiMatrix_InfoBreakdownParse", "[.][hrr][api-matrix][cpu]") 
   CHECK(counts["__hipPushCallConfiguration"] == 3);
   CHECK(counts["hipModuleLaunchKernel"] == 3);
 
-  // The Kernel Summary rows sit past the terminator and must not be read as
-  // APIs — "hrr_fault_kernel" is a kernel name, not a HIP entry point.
+  // The Kernel Summary rows sit past the terminator and are not APIs: "hrr_fault_kernel" is a kernel name.
   CHECK(counts.count("hrr_fault_kernel") == 0);
   CHECK(counts.count("ID") == 0);
   CHECK(counts.count("Complete:") == 0);
@@ -560,9 +536,7 @@ TEST_CASE("Unit_HRR_ApiMatrix_InfoBreakdownParse", "[.][hrr][api-matrix][cpu]") 
   hrr_parse_info_breakdown(sample, counts);
   CHECK(counts["hipMalloc"] == 2);
 
-  // A report with no breakdown at all — which is what `--info` prints when it
-  // is pointed at an archive root instead of a pid-<pid> sub-archive — must
-  // yield nothing rather than misparse the process table.
+  // A report with no breakdown, as `--info` prints for an archive root, must yield nothing rather than misparse the process table.
   const std::string root_report =
       "HRR Archive Root: /tmp/cap\n"
       "========================================\n"

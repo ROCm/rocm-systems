@@ -278,8 +278,8 @@ class MainTest(unittest.TestCase):
     def test_select_overrides_the_config_and_a_trailing_filter_is_dropped(self):
         path = self._config({"Keep": {}})
         spec_path = self.dir / "spec.json"
-        # A non-zero status with no JUnit failure dumps the transcript, which is
-        # the only place the wrapper's argv (and the case file) are visible.
+        # A non-zero status without a JUnit failure dumps the transcript.
+        # Only the transcript shows the wrapper's argv and the case file.
         spec_path.write_text(json.dumps({
             "xml": junit(record("Keep")), "echo_args": True, "rc": 139,
         }))

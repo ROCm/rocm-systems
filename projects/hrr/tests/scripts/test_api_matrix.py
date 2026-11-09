@@ -430,8 +430,8 @@ class Observations(Scratch):
         self.assertRejected("unknown tier None", ("T1.json", no_tier))
 
     def test_nonzero_replay_exit_is_accepted_and_stored(self):
-        # --continue-on-error exits nonzero whenever a declared HANDLER_ERROR
-        # (or CRASH) API is replayed; the per-API observations stay valid.
+        # --continue-on-error exits nonzero whenever a declared HANDLER_ERROR or CRASH API is replayed.
+        # The per-API observations stay valid.
         for code in (1, 139):
             with self.subTest(code):
                 merged = self.load(

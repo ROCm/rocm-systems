@@ -8,8 +8,8 @@
  * @addtogroup HRR HRR kernel-argument translation
  * @{
  * @ingroup HRRTest
- * Replay keeps a small literal in a pointer slot (a sentinel; aiter's MLA decode passes 1) and nulls an address-shaped pointer no allocation explains.
- * Passing a lost address through could scribble over an unrelated live buffer, since the driver tends to reproduce VA layout across runs.
+ * Replay nulls an address-shaped pointer no allocation explains: passing it through could overwrite an unrelated live buffer,
+ * since the driver tends to reproduce VA layout across runs.
  */
 
 #include "hrr_test_common.hh"
@@ -34,7 +34,6 @@ constexpr size_t   kFarOff = 1ull << 32;
 }  // namespace
 
 __global__ void hrr_kargs_probe(int* out, int* sentinel, int* lost) {
-// Neither pointer is dereferenced; they only need to sit in the kernarg segment for HRR to record and translate them.
   (void)sentinel;
   (void)lost;
   if (threadIdx.x == 0) out[0] = 1;
@@ -53,7 +52,6 @@ TEST_CASE("Unit_HRR_KernelArgs_Direct", "[.][hrr-direct]") {
   int* lost     = reinterpret_cast<int*>(probe + kFarOff);
   int* sentinel = reinterpret_cast<int*>(kSentinel);
 
-// The parent needs this address; the archive holds no allocation for it.
   printf(HRR_KARGS_MARKER " 0x%llx\n",
          static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(lost)));
   fflush(stdout);
@@ -90,8 +88,8 @@ inline uint64_t hrr_capture_direct_kargs(const fs::path& cap_path) {
   return lost;
 }
 
-// The dump's live side uses %p, whose rendering differs by platform (glibc "0x1" and "(nil)", MSVC bare padded hex).
-// Match on the HRR-formatted recorded side and parse the live side instead.
+// The dump's live side uses %p, which renders differently per platform (glibc "0x1" and "(nil)", MSVC bare padded hex).
+// Match on the HRR-formatted recorded side and parse the live side.
 inline bool hrr_live_arg(const std::string& out, uint64_t recorded,
                          uint64_t* live) {
   char needle[64];
@@ -137,15 +135,12 @@ TEST_CASE("Unit_HRR_KernelArgs_SentinelKeptLostPointerNulled", "[.][hrr]") {
   CHECK(out.find("Untranslated   : 0 ") == std::string::npos);
 }
 
-// HIP_HRR_DEBUG_ARGS dumps kernel argument bytes to the log, a second copy of the archive.
-// Only a Debug runtime honours it and says so on stderr; a release runtime says it ignored it.
-// When a Debug build reads it as on, the log level is 0 and the runtime's own raise to LOG_INFO shows the dumps.
-// Otherwise AMD_LOG_LEVEL=3 shows them if anything else enabled them. AMD_LOG_MASK=0 keeps per-API traces out.
-// Env and log file are always set or unset, so the parent's environment cannot decide the outcome.
+// Only a Debug runtime honours HIP_HRR_DEBUG_ARGS, which dumps argument bytes to the log (a second copy of the archive).
+// AMD_LOG_LEVEL is 0 where a Debug build reads the flag as on, since the runtime then raises it itself, else 3.
+// AMD_LOG_MASK=0 hides per-API traces. Every variable is set or unset, so the parent's environment cannot matter.
 HRR_TEST_CASE(Unit_HRR_KernelArgs_DebugArgsOnlyInDebugRuntime) {
   struct Run { bool dumped, noticed, ignored; };
-  // A null debug_args leaves the variable unset; on is whether a Debug build
-  // reads the value as on.
+  // A null debug_args leaves the variable unset; `on` says whether a Debug build reads the value as on.
   auto capture = [](const char* debug_args, bool on) {
     ScopedDir cap(fs::temp_directory_path() / "hrr_kernel_args_debug.hrr");
     hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true,
@@ -178,7 +173,6 @@ HRR_TEST_CASE(Unit_HRR_KernelArgs_DebugArgsOnlyInDebugRuntime) {
   CHECK_FALSE(unset.noticed);
   CHECK_FALSE(unset.ignored);
 
-  // A Debug build reads "1" as on and "0" as off; a release build reports both.
   for (const bool on : {true, false}) {
     const char* value = on ? "1" : "0";
     INFO("HIP_HRR_DEBUG_ARGS=" << value);

@@ -46,8 +46,6 @@ hrr_event_header make_record(uint64_t seq) {
   return h;
 }
 
-// A crash-truncated events.bin: file header, `n` whole records, no trailer, and
-// half of one more record header.
 void write_torn_events(const fs::path& file, int n) {
   std::ofstream f(file, std::ios::binary);
   hrr_file_header fh{HRR_MAGIC, HRR_VERSION, 0};

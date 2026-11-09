@@ -81,8 +81,8 @@ class ResolveTest(unittest.TestCase):
             run, _ = cfg.resolve(suite(cases), ["Filtered"], "linux", [arch])
             self.assertEqual(run, [], arch)
         run, _ = cfg.resolve(suite(cases), ["Filtered"], "linux", ["gfx1200"])
-        # gfx1200 is not in this suite's vocabulary, but matching is against the
-        # machine, not the vocabulary. The glob does not match it.
+        # gfx1200 is outside this suite's vocabulary, but matching runs against the machine.
+        # The glob does not match it.
         self.assertEqual(run, ["Filtered"])
 
     def test_a_missing_key_matches_anything(self):

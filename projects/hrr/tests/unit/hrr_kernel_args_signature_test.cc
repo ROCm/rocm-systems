@@ -135,14 +135,6 @@ TEST_CASE("Unit_HRR_KernelArgsSignature_GraphKernelNode", "[hrr]") {
   CHECK(ctx.incomplete_graphs.count(0x77) == 1);
 }
 
-/**
- * Test Description
- * ----------------
- *   - A set-params record whose arguments do not cover the signature fails with
- *     hipErrorInvalidValue, as a refused launch does, instead of returning
- *     hipSuccess and leaving the node on its old arguments. Covers
- *     hipGraphKernelNodeSetParams and hipGraphExecKernelNodeSetParams.
- */
 TEST_CASE("Unit_HRR_KernelArgsSignature_GraphSetParams", "[hrr]") {
   PlaybackContext ctx;
   declare(ctx, {8, 8, 4});
@@ -190,14 +182,8 @@ TEST_CASE("Unit_HRR_KernelArgsSignature_GraphSetParams", "[hrr]") {
   run(exec, HRR_API_HIPGRAPHEXECKERNELNODESETPARAMS);
 }
 
-/**
- * Test Description
- * ----------------
- *   - Every decoded argument is followed by 8 zeroed bytes past its recorded
- *     size, so CLR's 8-byte read of a pointer parameter stays inside the
- *     allocation for a 4-byte argument and for an empty one (whose data() would
- *     otherwise be null). kernelParams[i] points at that storage.
- */
+/* Each decoded argument has 8 zeroed bytes past its recorded size, so CLR's 8-byte pointer read
+ * stays in bounds, even for a 4-byte or empty argument. */
 TEST_CASE("Unit_HRR_KernelArgsSignature_ArgumentsCarryReadPadding", "[hrr]") {
   PlaybackContext ctx;
   Payload records;

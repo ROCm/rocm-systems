@@ -40,13 +40,11 @@ namespace {
 
 #ifndef _WIN32
 constexpr const char* kCaptureDisabled = "[HRR capture] Capture disabled: ";
-// Far above what one small workload needs; a capture blocked on a planted FIFO
-// never finishes.
+// Far above what a small workload needs; a capture blocked on a planted FIFO never finishes.
 constexpr int kCaptureTimeoutSeconds = 120;
 
-// True when a line of the output says capture is disabled for this reason: `what`
-// right after the prefix and `then` later on the same line, so the path and the
-// errno text between them don't matter. Other refusals share the prefix.
+// True when an output line says capture is disabled for this reason: `what` right after the prefix
+// and `then` later on the same line, so the path and errno text between them don't matter. Other refusals share the prefix.
 bool disabled_because(const std::string& output, const std::string& what, const std::string& then) {
   const std::string head = kCaptureDisabled + what;
   for (size_t at = output.find(head); at != std::string::npos; at = output.find(head, at + 1)) {
@@ -75,8 +73,8 @@ struct ScopedUmask {
   ~ScopedUmask() { ::umask(saved); }
 };
 
-// HIP writes into temporary directories of its own, which a umask that takes
-// an owner bit away leaves unusable unless the process has CAP_DAC_OVERRIDE.
+// HIP writes into temporary directories of its own, which a umask that removes an owner bit
+// leaves unusable unless the process has CAP_DAC_OVERRIDE.
 bool can_write_in_new_dir(const fs::path& dir) {
   if (::mkdir(dir.c_str(), 0700) != 0) return false;
   return static_cast<bool>(std::ofstream(dir / "probe"));
@@ -87,9 +85,8 @@ void write_text(const fs::path& p, const std::string& text) {
   out << text;
 }
 
-// True if p holds exactly `contents`. A bool rather than a string comparison,
-// so that a failed check does not print the file: one written through holds
-// binary events, which the CI's log reader cannot decode.
+// A bool rather than a string comparison, so a failed check does not print the file:
+// one written through holds binary events, which the CI's log reader cannot decode.
 bool file_holds(const fs::path& p, const std::string& contents) {
   return read_text_file(p) == contents;
 }
@@ -99,9 +96,8 @@ struct PlantedRun {
   std::string output;  // stdout and stderr
 };
 
-// Runs a workload through /bin/sh so the script can plant entries named after
-// its own pid; exec keeps that pid for the workload, and therefore for the
-// pid-<pid> directory the capture writes to.
+// Runs a workload through /bin/sh so the script can plant entries named after its own pid;
+// exec keeps that pid for the workload, and therefore for the pid-<pid> directory the capture writes to.
 PlantedRun capture_after_planting(const fs::path& base, const fs::path& script,
                                   const std::string& body,
                                   const std::string& workload = "Unit_HRR_GpuWorkload_Direct") {
@@ -116,9 +112,8 @@ PlantedRun capture_after_planting(const fs::path& base, const fs::path& script,
   return {ret, proc.getOutput()};
 }
 
-// Size of the one pid-<pid>/events.bin under base, 0 unless there is exactly
-// one. More than a file header tells a capture that ran from one that never
-// started.
+// Size of the one pid-<pid>/events.bin under base, 0 unless there is exactly one.
+// More than a file header tells a capture that ran from one that never started.
 std::uintmax_t events_bytes(const fs::path& base) {
   const std::vector<fs::path> archives = hrr_process_archives(base);
   if (archives.size() != 1) return 0;
@@ -203,7 +198,6 @@ TEST_CASE("Unit_HRR_CaptureForkWithoutFds_Direct", "[.][hrr-direct]") {
   REQUIRE(::getrlimit(RLIMIT_NOFILE, &saved) == 0);
   struct rlimit tight = saved;
   tight.rlim_cur = 3;
-  // Nothing between the two setrlimit calls in the parent may need a descriptor.
   REQUIRE(::setrlimit(RLIMIT_NOFILE, &tight) == 0);
   const pid_t child = ::fork();
   if (child == 0) {
@@ -500,9 +494,8 @@ HRR_TEST_CASE(Unit_HRR_CaptureRefusesPlantedLinks) {
   }
 
   SECTION("hard-linked manifest is not read into the root manifest") {
-    // Shaped like a process manifest, so only the link check keeps it out. It
-    // sits in another process's archive: the capture would replace one in its
-    // own before the root manifest reads it.
+    // Shaped like a process manifest, so only the link check keeps it out.
+    // It sits in another process's archive, because the capture would replace one in its own before the root manifest reads it.
     write_text(victim_file, "{\n  \"pid\": 424242,\n  \"complete\": true\n}\n");
     const PlantedRun run = capture_after_planting(
         base, script,
@@ -709,8 +702,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureActiveMarker) {
         "Unit_HRR_CaptureMarkerRefused_Direct");
     INFO("Workload exit code: " << run.ret << "\n" << run.output);
     REQUIRE(run.ret == 0);
-    // The inode is refused after open() succeeded, so errno is whatever an
-    // earlier call left unless the writer sets it.
+    // The inode is refused after open() succeeded, so errno is whatever an earlier call left unless the writer sets it.
     CHECK(disabled_because(run.output, "cannot create ",
                            "/active (" + std::string(std::strerror(EPERM)) + ")"));
     CHECK(file_holds(victim_file, "must survive a capture\n"));
@@ -830,8 +822,8 @@ HRR_TEST_CASE(Unit_HRR_CaptureClosesArchiveDirs) {
     const size_t at = run.output.find(head);
     return at == std::string::npos ? -1 : std::atoi(run.output.c_str() + at + head.size());
   };
-  // Each blob is written inside its hipMemcpy, on the calling thread, so the
-  // blobs/<xx> it opened is closed again before the workload counts.
+  // Each blob is written inside its hipMemcpy on the calling thread,
+  // so the blobs/<xx> it opened is closed again before the workload counts.
   const int during = reported("during the capture");
   CHECK(during >= 0);
   CHECK(during <= 3);

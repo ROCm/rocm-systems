@@ -53,8 +53,6 @@ struct TmpArchive {
   }
 };
 
-// Serialise an hrr_args_hipSetDevice struct (the simplest non-void API:
-// hdr(32) + ret(4) + deviceId(4) = 40 bytes total).
 static std::vector<uint8_t> make_set_device_event(uint64_t seq, int32_t device_id,
                                                    int32_t ret_val = 0) {
   hrr_args_hipSetDevice ev{};
@@ -139,7 +137,7 @@ HRR_TEST_CASE(Unit_HRR_Format_HashHex) {
 
   std::string h = hrr::hash_hex(0x000000000000000Full, 0xf000000000000000ull);
   REQUIRE(h.size() == 32);
-  // lo printed first (little-endian convention in hash_hex): lo=0x0..0f, hi=0xf0..0
+  // hash_hex prints lo before hi.
   REQUIRE(h.substr(0, 16) == "000000000000000f");
   REQUIRE(h.substr(16, 16) == "f000000000000000");
 }
@@ -166,14 +164,8 @@ HRR_TEST_CASE(Unit_HRR_TranslatePtr_SubAlloc_ReturnsOffset) {
   void* fake_live = reinterpret_cast<void*>(static_cast<uintptr_t>(0xDEAD0000u));
   ctx.record_alloc(0xBEEF0000ULL, fake_live, 1024);
   void* result = ctx.translate_ptr(0xBEEF0100ULL);  // +256 bytes into alloc
-  // Build the expected address with uintptr_t arithmetic, not char* pointer
-  // arithmetic, and compare as void*. Two separate reasons:
-  //   * These are synthetic, fabricated addresses that point into no real
-  //     object, so char* arithmetic on them is undefined behaviour.
-  //   * Catch2's char* stringifier calls strlen() on a char* operand when it
-  //     formats an assertion (on failure, and on every assertion under
-  //     --success), which segfaults reading a fake pointer as a C string.
-  //     void* has no such special-cased stringifier.
+  // Use uintptr_t arithmetic and compare as void*. Catch2 formats char* operands with strlen(),
+  // which crashes on these fabricated addresses.
   void* expected =
       reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(fake_live) + 256);
   CHECK(result == expected);
@@ -193,17 +185,6 @@ HRR_TEST_CASE(Unit_HRR_TranslatePtr_Zero_ReturnsNull) {
   CHECK(ctx.translate_ptr(0) == nullptr);
 }
 
-/**
- * Test Description
- * ----------------
- *   - Allocations are recorded with PADDED sizes, so synthetic ranges can
- *     overlap.  When a recorded address falls inside two overlapping entries,
- *     translate_ptr must resolve it against the TIGHTEST enclosing entry (the
- *     one with the largest base <= rec), not an arbitrary neighbour whose pad
- *     happens to cover the address.  This makes range translation deterministic
- *     and points at the true home allocation.
- *   - Regression for the tightest-enclosing range search in hip_playback.h.
- */
 HRR_TEST_CASE(Unit_HRR_TranslatePtr_TightestEnclosing) {
   PlaybackContext ctx;
   void* liveOuter = reinterpret_cast<void*>(static_cast<uintptr_t>(0xA0000000u));
@@ -236,16 +217,6 @@ bool kind_uses_hipFree(AllocKind k) {
 }
 }  // namespace
 
-/**
- * Test Description
- * ----------------
- *   - Record one allocation of each AllocKind into a PlaybackContext.
- *   - Verify record_alloc preserved each entry's kind.
- *   - Verify the free-dispatch decision routes ONLY the Device entry to hipFree;
- *     every host-backed pointer (HostMalloc / HostRegister / DevicePtrAlias) is
- *     routed away from hipFree.  Guards against re-introducing a hipFree call on
- *     a host pointer at teardown.
- */
 HRR_TEST_CASE(Unit_HRR_AllocKind_FreeDispatch) {
   PlaybackContext ctx;
   void* dev   = reinterpret_cast<void*>(static_cast<uintptr_t>(0x10000000u));
@@ -274,21 +245,8 @@ HRR_TEST_CASE(Unit_HRR_AllocKind_FreeDispatch) {
 }
 
 
-/**
- * Test Description
- * ----------------
- *   - A hipMalloc event with payload_length == sizeof(hrr_event_header) (header
- *     only, no fields) must not be decoded as a malloc event.  load_archive()
- *     should return true (archive is structurally valid) but the event must not
- *     have malloc_ev.ptr_handle set (SIZE_OK guard skips the typed cast).
- *
- * Policy decision: the reader RETAINS undersized known events with safe-default
- * typed fields (ptr_handle == 0).  The dispatch layer in hrr_playback.cpp
- * enforces a complementary size guard: it skips dispatch for any event whose
- * raw_payload is smaller than sizeof(hrr_event_header), preventing the handler
- * from doing an OOB reinterpret_cast.  Both layers together make the malformed
- * event safe: it is loaded without crash, not decoded, and not dispatched.
- */
+/* The reader keeps undersized known events with zeroed typed fields.
+ * The dispatch layer skips events smaller than a header, so none reaches a handler. */
 HRR_TEST_CASE(Unit_HRR_Format_SmallPayloadForType) {
   TmpArchive arc("small_payload");
 

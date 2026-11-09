@@ -4,8 +4,6 @@
 
 option(HRR_BUILD_INTEGRATION_TESTS "Build HRR GPU capture/replay integration tests" OFF)
 
-# Catch2 test framework. Prefer an installed Catch2 (as the hip-tests suite
-# does); fall back to fetching the pinned tarball used across rocm-systems.
 find_package(Catch2 3.8.1 QUIET)
 if(NOT Catch2_FOUND)
   include(FetchContent)
@@ -20,8 +18,6 @@ find_package(hip CONFIG REQUIRED)
 
 add_subdirectory(unit)
 
-# Generator rules: regenerate the playback handlers and fail if
-# one still casts an archive field to a pointer or an opaque handle.
 find_package(Python3 COMPONENTS Interpreter)
 if(Python3_Interpreter_FOUND)
   add_test(NAME hrr-generator-rules

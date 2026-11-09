@@ -247,15 +247,6 @@ HRR_TEST_CASE(Unit_HRR_Recovery_RecordAfterTrailer) {
   CHECK(out.find("Ignored:      2 records after the shutdown trailer") != std::string::npos);
 }
 
-/**
- * Test Description
- * ----------------
- *   - N records followed by a trailer that claims a different count. The
- *     trailer still ends the stream, but the archive is not treated as a clean
- *     complete capture, so --repair rewrites it rather than trusting it.
- *   - The archive keeps the trailer and its count, and --info reports the
- *     mismatch instead of a missing trailer.
- */
 HRR_TEST_CASE(Unit_HRR_Recovery_TrailerCountMismatch) {
   TmpArchive arc("count_mismatch");
   arc.write_records(5);
@@ -313,14 +304,6 @@ HRR_TEST_CASE(Unit_HRR_Recovery_TornMiddleRecord) {
   CHECK_FALSE(hrr::has_clean_trailer(arc.path()));
 }
 
-/**
- * Test Description
- * ----------------
- *   - A record one byte longer than hrr::kMaxRecordBytes, whole on disk, then
- *     a trailer that counts it. The reader takes a record over the cap as
- *     torn, so the archive is not complete, and hrr::has_clean_trailer, which
- *     seeks over payloads instead of reading them, applies the same cap.
- */
 HRR_TEST_CASE(Unit_HRR_Recovery_OversizeRecordBeforeTrailer) {
   TmpArchive arc("oversize");
   arc.write_records(2);
@@ -396,17 +379,6 @@ HRR_TEST_CASE(Unit_HRR_Recovery_RepairRootRewritesMiscountedTrailer) {
   CHECK(repaired.trailer_events == 4);
 }
 
-/**
- * Test Description
- * ----------------
- *   - hrr-playback --repair on a root loads each pid under --max-host-bytes: two
- *     sub-archives without trailers, under a cap too small to hold either, are
- *     both refused naming the option and neither is repaired. Without the cap
- *     each pid would load under its own 16 GiB default.
- *   - Each pid has its own budget: under a cap that fits one pid's load but not
- *     two, both are repaired. One budget shared by the pids would keep the first
- *     archive charged while the second loads, and refuse it.
- */
 HRR_TEST_CASE(Unit_HRR_Recovery_RepairRootHonoursMaxHostBytes) {
   TmpRootArchive root("repair_root_cap");
   root.add_process(/*pid=*/111, /*parent_pid=*/0, /*records=*/5, /*trailer=*/false);

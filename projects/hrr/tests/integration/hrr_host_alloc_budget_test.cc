@@ -89,8 +89,8 @@ HRR_TEST_CASE(Unit_HRR_HostBudgetMemCreateRoundtrip) {
                     "hipMemCreate (host location)");
 }
 
-// hipMemRelease keeps the charge while hipMemMap still holds the handle, until hipMemUnmap. The workload maps h1,
-// releases it, then creates h2 before the unmap: with the hold the 3 MiB replay is refused at h2; without it h2 fits.
+// hipMemRelease keeps the charge while hipMemMap still holds the handle, until hipMemUnmap.
+// The workload releases h1 while mapped, then creates h2. With the hold, a 3 MiB replay is refused at h2; without it h2 fits.
 // A 5 MiB cap takes h1 + h2 plus the replay's cached blobs.
 TEST_CASE("Unit_HRR_HostBudgetMemMapHold_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
@@ -108,7 +108,6 @@ TEST_CASE("Unit_HRR_HostBudgetMemMapHold_Direct", "[.][hrr-direct]") {
   void* va = nullptr;
   HRR_HIP_CHECK(hipMemAddressReserve(&va, size, 0, nullptr, 0));
   hipMemGenericAllocationHandle_t h1{}, h2{};
-  // Support is decided here; a failure after it is a real one.
   if (hipMemCreate(&h1, size, &prop, 0) != hipSuccess) {
     (void)hipMemAddressFree(va, size);
     HRR_SKIP("host-located hipMemCreate is not supported on this device");
@@ -143,8 +142,9 @@ HRR_TEST_CASE(Unit_HRR_HostBudgetMemMapHoldRoundtrip) {
   }
 }
 
-// A managed buffer never freed stays live through the --kernel-filter warm-up. The timed pass replaces it
-// and must return the old charge: the cap holds one buffer (3 MiB), so a kept charge makes the second pass refuse.
+// A managed buffer never freed stays live through the --kernel-filter warm-up.
+// The timed pass replaces it and must return the old charge.
+// The cap holds one buffer (3 MiB), so a kept charge makes the second pass refuse.
 TEST_CASE("Unit_HRR_HostBudgetManagedLeak_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
   void* p = nullptr;

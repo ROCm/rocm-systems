@@ -30,7 +30,7 @@ REPO = Path(__file__).resolve().parents[4]
 ROCM_INDEX_URL = "https://rocm.nightlies.amd.com/whl-multi-arch/"
 ROCM_SDK_VERSION = "10.1.0a20260822"
 
-# Default rocJitsu jobs. These are development choices, not the CI matrix.
+# Development defaults, not the CI matrix.
 EMULATOR_JOBS = (
     {
         "family": "gfx950",
@@ -102,7 +102,6 @@ def container_script(repo: Path, backend: str) -> str:
     the other."""
     headers = f"{repo}/projects/hip/include;{repo}/projects/clr/hipamd/include"
     if backend == "gpu":
-        # Build for the GPUs actually present, not the emulator targets.
         targets = (
             "$(ROCM_SDK=\"$ROCM_PATH\" python3 -c 'import sys; sys.path.insert(0, \"projects/hrr/tests/scripts\"); "
             "import hrr_test_config as c; print(\";\".join(c.detect_archs()))')"

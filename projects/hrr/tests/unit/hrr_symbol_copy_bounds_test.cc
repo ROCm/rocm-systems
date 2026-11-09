@@ -196,13 +196,6 @@ TEST_CASE("Unit_HRR_SymbolCopyBounds_OutOfRangeIsRefusedBeforeHip", "[hrr]") {
   }
 }
 
-/**
- * Test Description
- * ----------------
- *   - Offsets and counts chosen so that offset + count wraps past UINT64_MAX
- *     to a small number are refused: the sum is never formed. So is a count of
- *     UINT64_MAX at offset 0.
- */
 TEST_CASE("Unit_HRR_SymbolCopyBounds_WrappingSumIsRefused", "[hrr]") {
   struct Bad { uint64_t off, n; };
   for (const Handler& h : kHandlers) {

@@ -57,16 +57,13 @@ constexpr size_t kFirst3D = kDstZ * kHostSlice + kDstY * kHostPitch + kDstX;
 constexpr size_t kRows3D = kWidth * kHeight * kDepth;
 constexpr size_t kRows2D = kWidth * kHeight;
 
-// One byte per copy. It fills the copy's host buffer and salts the device
-// window the copy reads, so every expected blob is distinct and a test can edit
-// one without touching the others. The fill alone would not do it: the blobs
-// hold only the copied rows.
+// One byte per copy. It fills the host buffer and salts the device window, so every expected blob is distinct.
+// The fill alone would not: blobs hold only the copied rows.
 constexpr uint8_t kFill[] = {0x31, 0x32, 0x33, 0x34, 0x35, 0x36,
                              0x37, 0x38, 0x39, 0x3A, 0x3B};
 constexpr int kPitchedCopies = static_cast<int>(sizeof(kFill));
 
-// Device contents: a byte hash of the offset, with no period that lines up
-// with a row or a slice, so reading the wrong offset or pitch reads other bytes.
+// A byte hash of the offset, with no period matching a row or slice, so a wrong offset or pitch reads other bytes.
 uint8_t dev_byte(size_t offset) { return static_cast<uint8_t>((offset * 2654435761u) >> 24); }
 
 std::vector<uint8_t> expected_host(uint8_t fill, size_t depth, size_t dst_z) {
@@ -79,9 +76,7 @@ std::vector<uint8_t> expected_host(uint8_t fill, size_t depth, size_t dst_z) {
   return host;
 }
 
-// Empty when the two buffers match, otherwise the first offset where they
-// differ. Comparing the vectors directly makes Catch2 print every byte as a
-// char, which is unreadable and not valid UTF-8.
+// Returns the first differing offset, or empty. Comparing vectors directly makes Catch2 print unreadable, non-UTF-8 bytes.
 std::string byte_diff(const std::vector<uint8_t>& got, const std::vector<uint8_t>& want) {
   if (got.size() != want.size())
     return "size " + std::to_string(got.size()) + ", want " + std::to_string(want.size());
@@ -122,8 +117,7 @@ fs::path d2h_blob(const hrr::Archive& arc, hrr_api_id_t api) {
   return it->second;
 }
 
-// Flips one byte of a blob file for the lifetime of the object. Playback reads
-// blobs by name without re-hashing them, so replay compares against the edit.
+// Playback reads blobs by name without re-hashing, so replay compares against the edit.
 struct ScopedBlobEdit {
   fs::path path;
   size_t offset;
@@ -145,8 +139,7 @@ struct ScopedBlobEdit {
   }
 };
 
-// Cuts the last byte off a blob file for the lifetime of the object, leaving it
-// short of the rect the way an archive captured before rect-shaped D2H blobs is.
+// Leaves the blob one byte short of the rect, like an archive captured before rect-shaped D2H blobs.
 struct ScopedBlobCut {
   fs::path path;
   char last = 0;
@@ -166,9 +159,7 @@ struct ScopedBlobCut {
   }
 };
 
-// Sets the recorded host pitch of the one hipMemcpy3D event in events.bin to
-// SIZE_MAX for the lifetime of the object, so the host rect replay derives from
-// it overflows size_t the way a corrupt or hostile archive's can.
+// Sets the recorded host pitch to SIZE_MAX so the derived host rect overflows size_t, as a hostile archive's can.
 struct ScopedOverflowingPitch {
   fs::path events;
   size_t at = 0;
@@ -201,8 +192,8 @@ struct ScopedOverflowingPitch {
   }
 };
 
-// A v6 reader ignores the file flags and would replay a packed blob with the
-// recorded pitch, reading past its end. Only the version keeps it out.
+// A v6 reader ignores the file flags and would replay a packed blob with the recorded pitch, reading past its end.
+// Only the version check keeps it out.
 static_assert(HRR_VERSION >= 7, "packed host rects need HRR_VERSION 7 or later");
 
 struct ScopedLegacyArchive {
@@ -357,8 +348,7 @@ TEST_CASE("Unit_HRR_PitchedD2H_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipStreamSynchronize(s));
   REQUIRE(byte_diff(h6, expected_host(kFill[6], 1, 0)) == "");
 
-  // The async copies below run on the default stream, which capture has to
-  // synchronise as well before it reads the host buffer.
+  // The copies below run on the default stream, which capture must synchronise before it reads the host buffer.
   load(7);
   std::vector<uint8_t> h7(kHostBytes, kFill[7]);
   p3d.dstPtr = make_hipPitchedPtr(h7.data(), kHostPitch, kHostPitch, kHostRows);
@@ -496,7 +486,7 @@ HRR_TEST_CASE(Unit_HRR_PitchedD2HShortBlobs) {
   }
 }
 
-// A hipMemcpy2D D2H whose host rows are a page apart with a PROT_NONE page between: capture must not read it.
+// Host rows a page apart with a PROT_NONE page between: capture must not read the gap.
 TEST_CASE("Unit_HRR_PitchedD2HGap_Direct", "[.][hrr-direct]") {
 #ifndef _WIN32
   HRR_HIP_CHECK(hipSetDevice(0));
@@ -737,9 +727,8 @@ TEST_CASE("Unit_HRR_PitchedH2D_Direct", "[.][hrr-direct]") {
   for (int i = 0; i < kH2DCopies; ++i) {
     HRR_HIP_CHECK(hipMalloc(&dev[i], kDevBytes));
     HRR_HIP_CHECK(hipMemset(dev[i], kDevFill[i], kDevBytes));
-    // hipMemset can return before the fill lands, and the non-blocking stream
-    // does not wait for the null stream: without this the fill can overwrite
-    // the async copy, at capture and again at replay.
+    // hipMemset can return before the fill lands, and the non-blocking stream does not wait for the null stream.
+    // Without the sync the fill can overwrite the async copy, at capture and at replay.
     HRR_HIP_CHECK(hipDeviceSynchronize());
     p.dstPtr = make_hipPitchedPtr(dev[i], kDevPitch, kDevPitch, kDevRows);
     switch (i) {

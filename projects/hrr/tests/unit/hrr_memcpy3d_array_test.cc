@@ -47,9 +47,9 @@ const Spelling kSpellings[] = {
 constexpr uint64_t kRecordedSrc = 0x7f1100000000ull;
 constexpr uint64_t kRecordedDst = 0x7f2200000000ull;
 
-// A copy of 16 x 2 elements with the given kind and array ends (0: none); the
-// pointers are recorded addresses in no map, so without the array check the copy
-// would reach HIP. `hash` is the blob hash of an H2D source or D2H result.
+// A 16 x 2 copy with the given kind; an array end of 0 means none. The pointers are in no map,
+// so only the array check keeps the copy from reaching HIP. hash_lo is the H2D source or D2H
+// result blob hash.
 std::vector<uint8_t> make_record(const Spelling& s, hipMemcpyKind kind, uint64_t src_array,
                                  uint64_t dst_array, uint64_t hash_lo = 0) {
   std::vector<uint8_t> rec(hrr_api_min_payload_size[s.id], 0);
@@ -97,15 +97,8 @@ TEST_CASE("Unit_HRR_Memcpy3DArray_UnknownHandleIsRefused", "[hrr]") {
   }
 }
 
-/**
- * Test Description
- * ----------------
- *   - Once replay has freed an array, a later copy that names its recorded
- *     handle is refused like any handle replay never created, instead of being
- *     translated to the freed array. The live handle here is not a real array,
- *     so the runtime refuses the free and the handler still forgets the handle:
- *     the runtime has dropped any array a free reaches.
- */
+/* The live handle is not a real array, so the runtime refuses the free.
+ * The handler must still forget the handle. */
 TEST_CASE("Unit_HRR_Memcpy3DArray_FreedHandleIsForgotten", "[hrr]") {
   PlaybackContext ctx;
   ctx.record_array(kRecordedSrc, reinterpret_cast<hipArray_t>(0x1000));
@@ -129,19 +122,8 @@ TEST_CASE("Unit_HRR_Memcpy3DArray_FreedHandleIsForgotten", "[hrr]") {
   }
 }
 
-/**
- * Test Description
- * ----------------
- *   - A host-to-array copy with a captured blob, which replay would otherwise
- *     issue, and an array-to-host copy, are not issued: the host rect is sized
- *     in bytes and the copy in array elements, so issuing them would read past
- *     the blob or write past the scratch buffer. The handler returns
- *     hipErrorNotSupported and lists the API as unreplayable, in all four
- *     spellings, and nothing reaches HIP (the live handle here is not a real
- *     array).
- *   - An array-to-host copy with a D2H check counts as a failed check; one
- *     without a check does not.
- */
+/* Host-to-array and array-to-host copies are not issued: the host rect is sized in bytes and the
+ * copy in array elements, so issuing them would read past the blob or the scratch buffer. */
 TEST_CASE("Unit_HRR_Memcpy3DArray_HostCopiesAreNotIssued", "[hrr]") {
   hrr_test::BlobDir dir(std::string(32, 'x'));
   PlaybackContext ctx;

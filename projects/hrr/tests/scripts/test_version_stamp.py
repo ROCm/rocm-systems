@@ -60,8 +60,6 @@ class VersionStampTest(unittest.TestCase):
     @unittest.skipUnless(git_enforces_ownership(),
                          "this git does not enforce the ownership check")
     def test_checkout_owned_by_someone_else_reports_unknown(self):
-        # Git treats the checkout as owned by another user. A stamp that
-        # bypasses the ownership check, by whatever route, still reads it.
         text = self.stamp(ASSUME_OTHER_OWNER)
         self.assertIn('HRR_BUILD_REV "unknown"', text)
 

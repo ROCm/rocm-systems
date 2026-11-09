@@ -25,8 +25,7 @@
 #include <string>
 #include <vector>
 
-// Exported by libamdhip64 and called by the module constructor clang emits for
-// every HIP translation unit; no header declares it.
+// Exported by libamdhip64 and called by the module constructor clang emits for every HIP translation unit; no header declares it.
 extern "C" void** __hipRegisterFatBinary(const void* data);
 
 #define HRR_HIPRTC_CHECK(expr)                                                 \
@@ -86,8 +85,7 @@ void put_marker(std::vector<uint8_t>& b, size_t at, const char* marker) {
   std::memcpy(b.data() + at, marker, std::strlen(marker));
 }
 
-// Well-formed, with a code object only for a GPU that is not here. HIP
-// registers it lazily before it initialises and refuses it after.
+// Well-formed, with a code object only for a GPU that is not here. HIP registers it lazily before it initialises and refuses it after.
 std::vector<uint8_t> foreign_bundle(const char* marker) {
   auto b = uncompressed_bundle({{kPayloadOffset, 0, kHostId},
                                 {kPayloadOffset, kMarkerPayload, kForeignId}},
@@ -96,8 +94,7 @@ std::vector<uint8_t> foreign_bundle(const char* marker) {
   return b;
 }
 
-// A compressed header whose totalSize does not even cover the header. The
-// hash field carries the tag, so the bytes a capture stored can be told apart.
+// A compressed header whose totalSize does not cover the header. The hash field carries a tag, so stored bytes can be told apart.
 std::vector<uint8_t> short_compressed_bundle(uint64_t tag) {
   std::vector<uint8_t> b(kCompressedHeaderSize, 0);
   std::memcpy(b.data(), "CCOB", 4);
@@ -111,8 +108,6 @@ std::vector<uint8_t> short_compressed_bundle(uint64_t tag) {
   return b;
 }
 
-// One entry whose identifier runs past the first 4096 bytes. The entry it
-// describes is in range, so only the table bound refuses it.
 std::vector<uint8_t> long_id_bundle(const char* marker) {
   std::string id(kTableLimit, '\0');
   std::memcpy(&id[0], kForeignId, sizeof(kForeignId) - 1);
@@ -122,8 +117,7 @@ std::vector<uint8_t> long_id_bundle(const char* marker) {
   return b;
 }
 
-// A host entry whose offset plus size wraps around, beside a code object for
-// target_id. HIP never loads the host entry and does not check it.
+// A host entry whose offset plus size wraps around, beside a code object for target_id. HIP never loads the host entry.
 std::vector<uint8_t> host_overflow_bundle(const std::string& target_id,
                                           const std::vector<uint8_t>& payload) {
   auto b = uncompressed_bundle({{1, UINT64_MAX, kHostId},
@@ -155,7 +149,6 @@ constexpr uint64_t kPreInitCompressedTag    = 0x4852524650524531ull;
 constexpr char     kPreInitPaddedMarker[]   = "HRR fatbin pre-init padded";
 // Takes a bundle past the 1 MiB HIP_HRR_CAPTURE_MAX_BLOB_MB its driver sets.
 constexpr size_t   kBundlePad               = 2u << 20;
-// And the ones after, that HIP refuses.
 constexpr char     kLiveForeignMarker[]     = "HRR fatbin live foreign";
 constexpr uint64_t kLiveCompressedTag       = 0x485252464C495631ull;
 
@@ -177,10 +170,8 @@ std::vector<uint8_t> preinit_padded() {
 std::vector<uint8_t> live_foreign()       { return foreign_bundle(kLiveForeignMarker); }
 std::vector<uint8_t> live_compressed()    { return short_compressed_bundle(kLiveCompressedTag); }
 
-// Copy a bundle to page-aligned memory that stays mapped for the life of the
-// process, as a fat binary in .hip_fatbin does: HIP keeps the pointer, and
-// capture reads it again when HIP initialises. HIP also hands COMGR the first
-// 4096 bytes whatever the bundle's size, so at least that much is readable.
+// Copies a bundle to page-aligned memory that stays mapped for the life of the process, as .hip_fatbin does: HIP keeps the pointer.
+// Capture reads it again when HIP initialises. HIP also hands COMGR the first 4096 bytes whatever the size, so that much must be readable.
 const void* pin(const std::vector<uint8_t>& bytes) {
   const size_t span = bytes.size() > 2 * kTableLimit ? bytes.size() : 2 * kTableLimit;
   auto* raw = new uint8_t[span + kTableLimit]();
@@ -263,7 +254,6 @@ bool stored_from(const RecordedFatBinary& r, const std::vector<uint8_t>& bundle)
 }
 }  // namespace
 
-// One capture covers both paths. Before the header checks every altered bundle was stored, including the two HIP refused after initialising.
 HRR_TEST_CASE(Unit_HRR_FatBinHeaderChecks) {
   ScopedDir cap(fs::temp_directory_path() / "hrr_fatbin_header.hrr");
   std::string out;
@@ -296,8 +286,8 @@ HRR_TEST_CASE(Unit_HRR_FatBinHeaderChecks) {
     recorded.push_back(std::move(r));
   }
 
-  // Registered before HIP initialised (handle recorded as 0): a bundle with a
-  // sound header is stored whole, even with no code object for this GPU.
+  // Registered before HIP initialised (handle recorded as 0): a bundle with a sound header is stored whole,
+  // even with no code object for this GPU.
   const auto pre_valid = preinit_valid();
   size_t pre_valid_hits = 0;
   for (const auto& r : recorded) {
@@ -308,8 +298,7 @@ HRR_TEST_CASE(Unit_HRR_FatBinHeaderChecks) {
   }
   CHECK(pre_valid_hits == 1);
 
-  // A bundle over HIP_HRR_CAPTURE_MAX_BLOB_MB is stored whole too, and leaves
-  // the archive complete.
+  // A bundle over HIP_HRR_CAPTURE_MAX_BLOB_MB is stored whole too and leaves the archive complete.
   const auto pre_padded = preinit_padded();
   size_t pre_padded_hits = 0;
   for (const auto& r : recorded)
@@ -317,9 +306,8 @@ HRR_TEST_CASE(Unit_HRR_FatBinHeaderChecks) {
   CHECK(pre_padded_hits == 1);
   CHECK(arc.complete);
 
-  // Registered after HIP initialised and loaded by it (a real handle): the
-  // valid bundle is stored whole, the one with the wrapping host entry not at
-  // all, though HIP loaded it, because no end can be computed for it.
+  // Registered after HIP initialised and loaded by it (a real handle): the valid bundle is stored whole.
+  // The wrapping host entry is not stored at all, though HIP loaded it, because no end can be computed for it.
   std::vector<const RecordedFatBinary*> loaded_live;
   for (const auto& r : recorded)
     if (r.ret != 0) loaded_live.push_back(&r);
@@ -341,8 +329,7 @@ HRR_TEST_CASE(Unit_HRR_FatBinHeaderChecks) {
   CHECK(valid->blob_size == vb.size());
   CHECK(std::memcmp(vb.data() + kPayloadOffset, "\x7f" "ELF", 4) == 0);
 
-  // Refused by HIP after it initialised: the register event is still written,
-  // without a blob, so replay treats it as a no-op.
+  // Refused by HIP after it initialised: the register event is written without a blob, so replay treats it as a no-op.
   size_t refused_live = 0;
   for (const auto& r : recorded)
     if (r.ret == 0 && !r.has_blob && r.blob_size == 0) ++refused_live;
@@ -405,9 +392,8 @@ struct ScrubCount {
   size_t typed = 0;     // of those, not SHT_NOBITS, so DWARF readers parse them
 };
 
-// Walks the section headers of an ELF64 image independently of capture's own
-// parser and counts the sections capture has to scrub. False if the image does
-// not parse, including a section name that does not end inside the string table.
+// Walks the section headers of an ELF64 image independently of capture's parser and counts the sections capture must scrub.
+// Returns false if the image does not parse, including a section name that does not end inside the string table.
 bool count_scrub_sections(const uint8_t* p, size_t size, ScrubCount& c) {
   auto u16 = [&](size_t at) { uint16_t v; std::memcpy(&v, p + at, 2); return v; };
   auto u32 = [&](size_t at) { uint32_t v; std::memcpy(&v, p + at, 4); return v; };
@@ -466,8 +452,6 @@ HRR_TEST_CASE(Unit_HRR_CodeObjectScrub) {
   }
   REQUIRE(module_files >= 1);
 
-  // The bundle's entries are walked from its own table, which zeroing in place
-  // left as it was.
   ScrubCount bundle_count;
   for (const auto& ev : arc.events) {
     if (ev.header().event_type != HRR_API_HIPREGISTERFATBINARY) continue;

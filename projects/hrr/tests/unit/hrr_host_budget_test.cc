@@ -87,14 +87,6 @@ TEST_CASE("Unit_HRR_HostBudget_BlobCacheChargesOnce", "[hrr]") {
   CHECK_FALSE(ctx.fatal_error.load());
 }
 
-/**
- * Test Description
- * ----------------
- *   - A blob that does not fit the remaining budget is refused: load_blob
- *     returns null, the budget is unchanged, the replay is ended, and the file
- *     is not read (the charge comes first). A missing blob returns null without
- *     touching the budget or ending the replay.
- */
 TEST_CASE("Unit_HRR_HostBudget_BlobCacheRefusesOverBudgetAndMissing", "[hrr]") {
   ScratchArchive arc("refuse");
   arc.add_blob(1, 2, 64);
@@ -258,17 +250,6 @@ TEST_CASE("Unit_HRR_HostBudget_DispatchFreesReplacedHostAllocation", "[hrr]") {
   std::free(reg);
 }
 
-/**
- * Test Description
- * ----------------
- *   - hipMallocManaged refuses a recorded size the budget cannot hold before it
- *     calls HIP (managed memory can be backed from host memory): the
- *     hipHostMalloc refusal, so hipErrorMemoryAllocation, the replay ended,
- *     the message names --max-host-bytes, nothing charged, no mapping recorded.
- *     It does so through the dispatch table too, and a size that would wrap a
- *     naive sum over an existing charge is refused the same way, the earlier
- *     charge left as it was.
- */
 TEST_CASE("Unit_HRR_HostBudget_ManagedAllocationRefusedOverBudget", "[hrr]") {
   CHECK(hrr_playback_dispatch[HRR_API_HIPMALLOCMANAGED] == &playback_hipMallocManaged);
   struct Case {
@@ -323,8 +304,6 @@ TEST_CASE("Unit_HRR_HostBudget_HostMemCreateRefusedOverBudget", "[hrr]") {
 }
 
 TEST_CASE("Unit_HRR_HostBudget_DeviceMemCreateNotCharged", "[hrr]") {
-  // Without a device hipMemCreate fails at the ordinal check, before the
-  // charge decision, so the case would pass even if device memory were charged.
   if (!hrr_test::have_device())
     SKIP("needs a GPU: without one the call fails before the charge decision");
   PlaybackContext ctx;

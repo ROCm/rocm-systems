@@ -56,8 +56,8 @@ class CaseTest(unittest.TestCase):
         self.assertEqual(summarize_junit.group_result(groups["B"]), "FAIL")
 
     def test_grouping_agrees_with_run_catch2(self):
-        # The workflow checks the two scripts out separately, so they cannot
-        # share code; they must not drift apart.
+        # The workflow checks the two scripts out separately, so they cannot share code.
+        # Their grouping must not drift apart.
         samples = [
             junit(record("A"), record("A/s", "failure")),
             junit(record("A/s", "skipped"), record("A/t")),

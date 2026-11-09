@@ -28,9 +28,8 @@ endif()
 
 target_include_directories(hrr-unit-tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../include)
 
-# hrr_test_process.hh (the SpawnProc harness) starts a std::thread watchdog.
-# Before glibc 2.34 the pthread symbols live in libpthread rather than libc, so
-# the link fails unless Threads::Threads (-pthread) is named explicitly.
+# hrr_test_process.hh starts a std::thread watchdog. Before glibc 2.34 the pthread symbols live in
+# libpthread, so the link needs Threads::Threads (-pthread).
 find_package(Threads REQUIRED)
 
 target_link_libraries(hrr-unit-tests PRIVATE
@@ -39,18 +38,16 @@ target_link_libraries(hrr-unit-tests PRIVATE
   Threads::Threads
   Catch2::Catch2WithMain)
 
-# HRR_API_ARGS_IMPLEMENTATION emits the hrr_api_names[] table with internal
-# linkage per translation unit, matching hrr_reader; keep it defined here so the
-# test TUs use their own copy rather than the extern declaration.
+# HRR_API_ARGS_IMPLEMENTATION emits hrr_api_names[] with internal linkage per translation unit,
+# matching hrr_reader. Define it so each test TU uses its own copy.
 target_compile_definitions(hrr-unit-tests PRIVATE
   HRR_API_ARGS_IMPLEMENTATION
   __HIP_PLATFORM_AMD__
   ROCM_BIN_PATH="${ROCM_PATH}/bin"
 )
 
-# hrr_recovery_test.cc spawns hrr-playback for --repair / --info. With HRR_BUILD_PLAYBACK=ON use the
-# in-tree binary and build it first; otherwise use the bare name, resolved from PATH, so those two
-# cases need an hrr-playback on PATH at run time.
+# hrr_recovery_test.cc spawns hrr-playback for --repair and --info. Without the in-tree target
+# (HRR_BUILD_PLAYBACK=OFF) those cases need hrr-playback on PATH.
 if(TARGET hrr-playback)
   target_compile_definitions(hrr-unit-tests PRIVATE
     HRR_PLAYBACK_EXE="$<TARGET_FILE:hrr-playback>")
@@ -62,10 +59,9 @@ endif()
 
 add_test(NAME hrr-unit-tests COMMAND hrr-unit-tests)
 
-# Handler tests link hip_playback.cpp and the generated handlers and call them with crafted records;
-# no GPU needed. Built with AddressSanitizer by default so an over-read aborts the run
-# (HRR_HANDLER_TESTS_ASAN=OFF for a toolchain without the runtime). POSIX only: the util header uses
-# mkstemp/dup2.
+# Handler tests link hip_playback.cpp and the generated handlers and call them with crafted
+# records, so they need no GPU. AddressSanitizer is on by default to catch over-reads
+# (HRR_HANDLER_TESTS_ASAN=OFF without the runtime). POSIX only: the util header uses mkstemp and dup2.
 if(TARGET hrr-playback AND NOT WIN32)
   option(HRR_HANDLER_TESTS_ASAN "Build hrr-handler-tests with AddressSanitizer" ON)
 

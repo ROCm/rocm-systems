@@ -8,16 +8,6 @@
  * @addtogroup HRR HRR Capture Gate
  * @{
  * @ingroup HRRTest
- * When HIP_HRR_CAPTURE_OUTPUT must not arm capture.
- *
- * Unit_HRR_BlankCaptureOutputCapturesNothing: an empty variable reaches CLR as a single space and other blanks are no path either;
- * neither may create an archive under a directory of that name.
- *
- * Unit_HRR_SecureExecIgnoresCaptureOutput (Linux): a set-group-ID copy of this binary, for one of the user's supplementary groups,
- * starts in secure-execution mode. It must write no archive and print the notice, and print none when the variable is unset.
- * A copy without the bit captures and prints no notice. No root is needed.
- * Secure-execution mode ignores LD_LIBRARY_PATH, so the copy only tests this build when the loader finds the same libamdhip64 without it.
- * The case also skips on a nosuid filesystem, with no_new_privs set, or when the kernel does not mark the copy secure.
  */
 
 #include "hrr_test_common.hh"
@@ -43,8 +33,8 @@
 #endif
 
 HRR_TEST_CASE(Unit_HRR_BlankCaptureOutputCapturesNothing) {
-  // The child inherits this working directory, so a blank value taken as a
-  // path would write under a directory of that name here. "" reaches CLR as " ".
+  // The child inherits this directory, so a blank value taken as a path would create a directory here.
+  // An empty value reaches CLR as a single space.
   for (const char* value : {"", " \t "}) {
     INFO("HIP_HRR_CAPTURE_OUTPUT=\"" << value << "\"");
     const fs::path blank = fs::current_path() / (*value != '\0' ? value : " ");
@@ -72,7 +62,7 @@ constexpr const char* kSecureExecNotice =
 constexpr const char* kProbeRuntime = "hrr-probe hip-runtime=";
 constexpr const char* kProbeSecure = "hrr-probe at-secure=";
 
-// A group differing from the effective one, so a set-group-ID exec changes it and the kernel sets AT_SECURE.
+// Pick a group other than the effective one, so the set-group-ID exec changes it and the kernel sets AT_SECURE.
 // The file's owner may use a supplementary group; root may use any.
 bool pick_other_group(gid_t* out) {
   const gid_t egid = getegid();
@@ -120,9 +110,8 @@ struct CopyRun {
   std::string out;
 };
 
-// Runs the probe and the GPU workload in the copy, capturing to `cap` unless it is empty.
-// No LD_LIBRARY_PATH: secure-execution mode ignores it, so the control must do without it too.
-// An empty `cap` also drops a capture this test was itself launched under.
+// Secure-execution mode ignores LD_LIBRARY_PATH, so the control runs without it too.
+// An empty `cap` unsets capture, including one this test was launched under.
 CopyRun run_copy(const fs::path& exe, const fs::path& cap) {
   hrr::test::SpawnProc proc(exe.string(), /*capture_stdout=*/true, /*capture_stderr=*/true);
   if (!cap.empty())
@@ -138,7 +127,6 @@ CopyRun run_copy(const fs::path& exe, const fs::path& cap) {
 
 }  // namespace
 
-// Hidden: reports the loaded runtime and AT_SECURE to the case below. Makes no HIP call.
 TEST_CASE("Unit_HRR_SecureExecProbe_Direct", "[.][hrr-direct]") {
   std::printf("%s%s\n%s%lu\n", kProbeRuntime, loaded_hip_runtime().c_str(), kProbeSecure,
               getauxval(AT_SECURE));
@@ -168,9 +156,9 @@ HRR_TEST_CASE(Unit_HRR_SecureExecIgnoresCaptureOutput) {
   if (chown(exe.c_str(), static_cast<uid_t>(-1), gid) != 0 || chmod(exe.c_str(), 0755) != 0)
     HRR_SKIP("cannot give the copy group " << gid);
 
-  // Control: the same file without the set-group-ID bit. It has to load this
-  // build's runtime and capture, or a missing archive below would prove nothing.
-  // Every skip comes before the first assertion, so a pass means the gate ran.
+  // Control: the same file without the set-group-ID bit. It must load this build's runtime and capture,
+  // or a missing archive below proves nothing.
+  // Every skip precedes the first assertion, so a pass means the gate ran.
   const std::string runtime = loaded_hip_runtime();
   const fs::path control_cap = dir.path / "control";
   const CopyRun control = run_copy(exe, control_cap);
@@ -195,7 +183,6 @@ HRR_TEST_CASE(Unit_HRR_SecureExecIgnoresCaptureOutput) {
   if (loaded != runtime)
     HRR_SKIP("in secure-execution mode the copy loads " << loaded << ", not " << runtime);
 
-  // Without the variable a secure process has nothing to be told.
   const CopyRun unset = run_copy(exe, fs::path{});
   INFO("Set-group-ID output without HIP_HRR_CAPTURE_OUTPUT:\n" << unset.out);
 
@@ -212,6 +199,5 @@ HRR_TEST_CASE(Unit_HRR_SecureExecIgnoresCaptureOutput) {
 }
 
 /**
- * End of HRR group
  * @}
  */

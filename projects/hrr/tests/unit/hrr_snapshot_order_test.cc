@@ -33,12 +33,9 @@ namespace {
 
 constexpr uint64_t kRec = 0x77;
 
-// Runs a launch against a free of the same buffer, as two replay threads do.
-// This thread is the launch: it hands the turn on through the HrrTurnGuard of
-// a launch event, as dispatch_event does, which takes the hold and moves
-// next_seq to 1, and keeps the guard while the launch would resolve the
-// destination and queue the copy. `free_call` runs on the thread of the next
-// sequence number. It must not return before the guard is gone.
+// Simulates a launch racing a free of the same buffer. This thread holds a launch HrrTurnGuard, as
+// dispatch_event does, while the launch would queue its copy. `free_call` runs on the next
+// sequence number's thread and must not return before the guard is released.
 void launch_against_free(PlaybackContext& ctx, const std::function<void()>& free_call) {
   std::atomic<bool> started{false};
   std::atomic<bool> freed{false};
@@ -138,14 +135,6 @@ TEST_CASE("Unit_HRR_SnapshotOrder_GuardReleasesTheHold", "[hrr]") {
   ctx.host_free_mu.unlock();
 }
 
-/**
- * Test Description
- * ----------------
- *   - hipHostUnregister fails, so the registration still stands. The buffer
- *     and both map entries must survive it: a snapshot queued to the buffer,
- *     or the next launch's lookup, would otherwise reach freed heap, which
- *     AddressSanitizer reports.
- */
 TEST_CASE("Unit_HRR_SnapshotOrder_FailedUnregisterKeepsBuffer", "[hrr]") {
   Buffer b;
   PlaybackContext ctx;

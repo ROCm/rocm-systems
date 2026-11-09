@@ -46,8 +46,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return args
 
 
-# Same prefix hrr_test_config.skip_message writes. Repeated here because the
-# report job checks this file out without the config module.
+# Same prefix hrr_test_config.skip_message writes, repeated because the report job checks this file out without the config module.
 CONFIG_SKIP_PREFIX = "hrr-config:"
 
 
@@ -213,8 +212,7 @@ def _apply_config(args: argparse.Namespace) -> tuple[list[str], list[tuple[str, 
     except hrr_test_config.ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc
-    # The executable may be a wrapper (python fake.py spec); only its trailing
-    # selector is Catch2's. Listing still uses command[0], which is the binary
+    # The executable may be a wrapper (python fake.py spec); only its trailing selector is Catch2's. Listing uses command[0].
     names = [case["name"] for case in listed]
     _run, skipped = hrr_test_config.resolve(config, names, os_name, archs, ignore=ignore)
     records = [
@@ -274,8 +272,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _run_suite(args: argparse.Namespace, state: dict) -> int:
-    # Durations name every case as it finishes, so the transcript of a hung
-    # suite ends just before the case that hung.
+    # Durations name every case as it finishes, so a hung suite's transcript ends before the case that hung.
     skips: list[tuple[str, str]] = []
     if args.config:
         try:
@@ -298,8 +295,7 @@ def _run_suite(args: argparse.Namespace, state: dict) -> int:
         "--reporter",
         f"junit::out={args.xml}",
     ]
-    # A session of its own, so a timeout also kills the workloads the suite
-    # spawned: they hold the pipe open and would block the read forever.
+    # Own session, so a timeout also kills workloads the suite spawned: they hold the pipe open and would block the read.
     with subprocess.Popen(
         command,
         stdout=subprocess.PIPE,
@@ -310,8 +306,7 @@ def _run_suite(args: argparse.Namespace, state: dict) -> int:
         try:
             stdout, _ = process.communicate(timeout=args.timeout)
         except subprocess.TimeoutExpired:
-            # SIGTERM first: Catch2's fatal-signal handler names the running
-            # case and flushes the console reporter, which SIGKILL would lose.
+            # SIGTERM first: Catch2's handler names the running case and flushes the reporter, which SIGKILL would lose.
             stdout = ""
             for sig, grace in ((signal.SIGTERM, 10), (signal.SIGKILL, None)):
                 try:
@@ -342,13 +337,11 @@ def _run_suite(args: argparse.Namespace, state: dict) -> int:
         if "hrr spawn:" in line:
             print(line)
 
-    # A crash can leave syntactically valid, but incomplete, JUnit without a
-    # failed case. Preserve the raw transcript only for that exceptional path.
+    # A crash can leave valid but incomplete JUnit without a failed case; keep the raw transcript only then.
     if completed.returncode not in (0, 4) and counts["FAIL"] == 0:
         print("\nCatch2 terminated without a JUnit failure:")
         print(completed.stdout, end="")
-    # Catch2 uses 4 for "tests were skipped / none ran". That is a skip, not a
-    # failed suite: returning it would paint gfx90a red after every GPU case
+    # Catch2 exit code 4 means tests were skipped or none ran. That is a skip, not a failed suite.
     if completed.returncode == 4 and counts["FAIL"] == 0:
         return 0
     return completed.returncode
