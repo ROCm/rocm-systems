@@ -383,6 +383,7 @@ FILTER[gfx1250]=\
 "KFDRASTest.*:"\
 "KFDExceptionTest.AddressFault:"\
 "KFDQMTest.GpuMemCopyTest:"\
+"KFDMemoryTest.LargestSysBufferTest:"\
 "KFDDBGTest.HitTrapOnWaveStartEndEvent"
 
 FILTER[gfx1251]=\
