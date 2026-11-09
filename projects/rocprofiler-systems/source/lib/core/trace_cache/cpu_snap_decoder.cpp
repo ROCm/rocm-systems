@@ -31,7 +31,6 @@ namespace rocprofsys::trace_cache
 {
 namespace
 {
-constexpr std::string_view k_empty_extdata = "{}";
 // Name of category::timer_sampling (core/categories.hpp), which the perfetto processor
 // matches to pick the track category.
 constexpr std::string_view k_timer_sampling_category = "timer_sampling";
@@ -113,8 +112,7 @@ struct cpu_snap_decoder::impl
             emit(backtrace_region_sample{
                 static_cast<std::uint32_t>(ROCPROFSYS_CATEGORY_TIMER_SAMPLING),
                 sample.tid, track_name, frame.name, start, sample.timestamp_ns,
-                k_timer_sampling_category, frame.call_stack, std::string_view{},
-                k_empty_extdata });
+                k_timer_sampling_category, frame.call_stack, std::string_view{}, "{}" });
         }
     }
 
