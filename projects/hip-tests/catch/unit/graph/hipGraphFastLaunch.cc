@@ -22,6 +22,7 @@
 
 #include <hip_test_common.hh>
 #include <hip_test_defgroups.hh>
+#include <utils.hh>
 #include <cstdio>
 #include <fstream>
 #include <algorithm>
@@ -83,6 +84,21 @@ struct DotFile {
   ~DotFile() { std::remove(path.c_str()); }
 };
 
+// Spins for `ticks` of the device's fixed-rate clock (SpinTicksPerUs()): wall_clock64() on AMD,
+// where clock64() follows the shader clock and may wrap; clock64() on NVIDIA, which has no
+// wall_clock64()
+__device__ void Spin(long long ticks) {
+#if HT_AMD
+  const long long t0 = wall_clock64();
+  while (wall_clock64() - t0 < ticks) {
+  }
+#else
+  const long long t0 = clock64();
+  while (clock64() - t0 < ticks) {
+  }
+#endif
+}
+
 // The head of a chain checks that every chain finished at least as many launches as its own
 // (the previous launch's tails are all done); the tail spins, then counts the launch
 __global__ void ChainHead(volatile int* count, int chain, int num_chains, int* errors) {
@@ -95,9 +111,7 @@ __global__ void ChainHead(volatile int* count, int chain, int num_chains, int* e
 
 __global__ void ChainTail(volatile int* count, int chain, long long spin) {
   if (threadIdx.x == 0) {
-    const long long t0 = clock64();
-    while (clock64() - t0 < spin) {
-    }
+    Spin(spin);
     count[chain] = count[chain] + 1;
   }
 }
@@ -106,9 +120,7 @@ __global__ void ChainTail(volatile int* count, int chain, long long spin) {
 // launch ahead of it, then counts its own launch
 __global__ void JoinRoot(volatile int* count, int root, long long spin) {
   if (threadIdx.x == 0) {
-    const long long t0 = clock64();
-    while (clock64() - t0 < spin) {
-    }
+    Spin(spin);
     count[root] = count[root] + 1;
   }
 }
@@ -124,9 +136,7 @@ __global__ void JoinCheck(volatile int* count, int num_roots, int* errors) {
 
 __global__ void FillValue(int* data, int value, long long spin) {
   if (threadIdx.x == 0) {
-    const long long t0 = clock64();
-    while (clock64() - t0 < spin) {
-    }
+    Spin(spin);
   }
   data[threadIdx.x] = value + threadIdx.x;
 }
@@ -134,9 +144,7 @@ __global__ void FillValue(int* data, int value, long long spin) {
 // Spins, then writes value to data[index]
 __global__ void SetValue(int* data, int index, int value, long long spin) {
   if (threadIdx.x == 0) {
-    const long long t0 = clock64();
-    while (clock64() - t0 < spin) {
-    }
+    Spin(spin);
     data[index] = value;
   }
 }
@@ -202,7 +210,7 @@ struct Chains {
     HIP_CHECK(hipGraphCreate(&graph, 0));
     for (int j = 0; j < num_chains; ++j) {
       chain[j] = j;
-      spin[j] = 20000 + 40000LL * (j % 3);
+      spin[j] = (10 + 20LL * (j % 3)) * SpinTicksPerUs();
       head_args[j] = {&count, &chain[j], &num_chains, &errors};
       tail_args[j] = {&count, &chain[j], &spin[j]};
       hipGraphNode_t head =
@@ -290,7 +298,8 @@ TEST_CASE("Unit_hipGraph_FastLaunch_BackToBackChains", "[graph][fast_launch][lev
  *  - Eight chains: more level-0 segments than graph streams (DEBUG_HIP_FORCE_GRAPH_QUEUES, 4),
  *    so side streams carry two level-0 segments that wait on the same command: the second fork
  *    wait meets the pending one, which the side stream's first batch then carries or flushes.
- *  - Launched 1000 times back to back, results checked as in BackToBackChains.
+ *  - Launched 1000 times back to back (100 at the quick level, HIP_TEST_LEVEL=quick), results
+ *    checked as in BackToBackChains.
  * Test source
  * ------------------------
  *  - unit/graph/hipGraphFastLaunch.cc
@@ -299,7 +308,7 @@ TEST_CASE("Unit_hipGraph_FastLaunch_BackToBackChains", "[graph][fast_launch][lev
  *  - HIP_VERSION >= 7.18; DEBUG_HIP_GRAPH_MIN_OVERLAP=0 DEBUG_HIP_GRAPH_DOT_PRINT=2 (ctest)
  */
 TEST_CASE("Unit_hipGraph_FastLaunch_SharedSideStream", "[graph][fast_launch][level_2]") {
-  std::map<int, Segment> segments = RunChains(8, 1000);
+  std::map<int, Segment> segments = RunChains(8, isQuickLevel() ? 100 : 1000);
   std::map<int, int> level0_per_stream;
   for (const auto& [id, seg] : segments) {
     if (seg.level == 0) ++level0_per_stream[seg.stream];
@@ -315,10 +324,11 @@ TEST_CASE("Unit_hipGraph_FastLaunch_SharedSideStream", "[graph][fast_launch][lev
 /**
  * Test Description
  * ------------------------
- *  - Four threads, each launching its own three chains (two executable graphs) 1000 times back to
- *    back on its own stream: the end markers of the four streams take their gates from the
- *    device's one pool at the same time, and each gate must belong to one launch only, or the
- *    first end marker to complete releases another launch's waiters early.
+ *  - Four threads, each launching its own three chains (two executable graphs) 1000 times (100 at
+ *    the quick level, HIP_TEST_LEVEL=quick) back to back on its own stream: the end markers of
+ *    the four streams take their gates from the device's one pool at the same time, and each gate
+ *    must belong to one launch only, or the first end marker to complete releases another
+ *    launch's waiters early.
  *  - The first launch of each executable graph is made beforehand, one at a time (it writes the
  *    dot file). Results checked per thread as in BackToBackChains.
  * Test source
@@ -331,7 +341,7 @@ TEST_CASE("Unit_hipGraph_FastLaunch_SharedSideStream", "[graph][fast_launch][lev
 TEST_CASE("Unit_hipGraph_FastLaunch_ConcurrentLaunchers", "[graph][fast_launch][level_2]") {
   constexpr int kThreads = 4;
   constexpr int kChains = 3;
-  constexpr int kLaunches = 1000;
+  const int launches = isQuickLevel() ? 100 : 1000;
   DotFile dot;
   std::vector<std::unique_ptr<Chains>> chains;
   std::vector<hipStream_t> streams(kThreads);
@@ -339,7 +349,7 @@ TEST_CASE("Unit_hipGraph_FastLaunch_ConcurrentLaunchers", "[graph][fast_launch][
   for (int t = 0; t < kThreads; ++t) {
     chains.push_back(std::make_unique<Chains>(kChains));
     HIP_CHECK(hipStreamCreateWithFlags(&streams[t], hipStreamNonBlocking));
-    checks[t].resize(kLaunches / 3 + 1);
+    checks[t].resize(launches / 3 + 1);
   }
   // The first launch of each executable graph writes the dot file: one at a time, before the
   // threads start
@@ -353,7 +363,7 @@ TEST_CASE("Unit_hipGraph_FastLaunch_ConcurrentLaunchers", "[graph][fast_launch][
     }
   }
   auto launcher = [&](int t) {
-    for (int k = kFirstLaunches + 1; k <= kLaunches; ++k) {
+    for (int k = kFirstLaunches + 1; k <= launches; ++k) {
       HIP_CHECK_THREAD(hipGraphLaunch(chains[t]->exec[k & 1], streams[t]));
       if (k % 3 == 0) {
         checks[t][k / 3] = {chains[t]->count, kChains, k, 0};
@@ -373,7 +383,7 @@ TEST_CASE("Unit_hipGraph_FastLaunch_ConcurrentLaunchers", "[graph][fast_launch][
     for (const auto& check : checks[t]) host_failures += check.failures;
     const int device_errors = chains[t]->DeviceErrors();
     int short_counts = 0;
-    for (int j = 0; j < kChains; ++j) short_counts += (chains[t]->count[j] != kLaunches);
+    for (int j = 0; j < kChains; ++j) short_counts += (chains[t]->count[j] != launches);
     INFO("thread " << t << ": device check errors " << device_errors << ", host check failures "
                    << host_failures << ", chains short of the launches " << short_counts);
     CHECK(device_errors == 0);
@@ -423,7 +433,7 @@ TEST_CASE("Unit_hipGraph_FastLaunch_EmptyNodeJoin", "[graph][fast_launch][level_
   std::vector<hipGraphNode_t> roots(num_roots);
   for (int j = 0; j < num_roots; ++j) {
     root[j] = j;
-    spin[j] = 20000 + 15000LL * j;
+    spin[j] = (10 + 8LL * j) * SpinTicksPerUs();
     root_args[j] = {&count, &root[j], &spin[j]};
     roots[j] = AddKernel(graph, nullptr, 0, reinterpret_cast<void*>(JoinRoot), root_args[j].data());
   }
@@ -511,7 +521,7 @@ TEST_CASE("Unit_hipGraph_FastLaunch_UncapturedEdgeCollapse", "[graph][fast_launc
   hipGraph_t graph;
   HIP_CHECK(hipGraphCreate(&graph, 0));
   int value_a = 0, value_b = 0;
-  long long spin_a = 60000, spin_b = 5000;
+  long long spin_a = 30 * SpinTicksPerUs(), spin_b = 2 * SpinTicksPerUs();
   void* args_a[] = {&d_a, &value_a, &spin_a};
   void* args_b[] = {&d_b, &value_b, &spin_b};
   hipGraphNode_t fill_a = AddKernel(graph, nullptr, 0, reinterpret_cast<void*>(FillValue), args_a);
@@ -614,7 +624,7 @@ TEST_CASE("Unit_hipGraph_FastLaunch_ChildGraphEdges", "[graph][fast_launch][leve
   auto value_kernel = [&](hipGraph_t graph, const hipGraphNode_t* deps, size_t num_deps, int i) {
     index[i] = i;
     value[i] = 10 + i;
-    spin[i] = 20000;
+    spin[i] = 10 * SpinTicksPerUs();
     args[i] = {&d_vals, &index[i], &value[i], &spin[i]};
     return AddKernel(graph, deps, num_deps, reinterpret_cast<void*>(SetValue), args[i].data());
   };
