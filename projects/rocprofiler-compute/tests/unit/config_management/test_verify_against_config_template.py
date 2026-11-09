@@ -20,7 +20,10 @@ HBM_TITLES = (
     "EA to HBM",
     "GL2C-EA Interface - HBM Bandwidth",
 )
-DRAM_TITLES = ("GCEA to DRAM",)
+DRAM_TITLES = (
+    "EA to DRAM",
+    "GL2C-EA Interface - DRAM Bandwidth",
+)
 
 
 def _write_empty_template(path: Path) -> None:
