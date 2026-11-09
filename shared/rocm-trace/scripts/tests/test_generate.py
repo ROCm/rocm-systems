@@ -7,6 +7,7 @@ import re
 import shutil
 
 import pytest
+import yaml
 
 from conftest import DATA, EXPECTED, generate_files, run_cli
 
@@ -181,3 +182,19 @@ def test_generate_writes_files(fake_config, tmp_path):
     expected = (EXPECTED / "fake_probes.cpp").read_text()
     assert (out / "fake_probes.cpp").read_text() == expected
     assert run_cli(*args, "--check") == 0
+
+
+def test_char_input_listed_in_strings_is_a_string(tmp_path):
+    # An API that is not const-correct (__hipRegisterFunction's char* deviceFunction): the
+    # annotation records the char* input as text instead of its address.
+    data = yaml.safe_load((DATA / "fake.yaml").read_text())
+    data["apis"]["fakeScratch"] = {"strings": ["buffer"], "uncapped": ["buffer"]}
+    config = tmp_path / "fake.yaml"
+    config.write_text(yaml.safe_dump(data))
+    files = generate_files(config)
+    scratch = _function(files["fake_probes.cpp"], "probe_FakeTable_fakeScratch")
+    assert (
+        "TraceLoggingString((fake_capture_level >= ROCM_TRACE_CAPTURE_FULL ? buffer"
+        in scratch
+    )
+    assert "reinterpret_cast<const void*>(buffer)" not in scratch

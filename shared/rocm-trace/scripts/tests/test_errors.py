@@ -60,7 +60,7 @@ GENERATE_ERRORS = [
     (_with_api("fakeName", {"out": ["len"]}), "out parameter 'len' is not a pointer"),
     (
         _with_api("fakeAlloc", {"out": ["ptr"], "strings": ["size"]}),
-        "strings names 'size', which is not a char-pointer output",
+        "strings names 'size', which is not a char-pointer output or char* input",
     ),
     (
         _with_api("fakeLoad", {"strings": ["path"]}),

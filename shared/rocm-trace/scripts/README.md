@@ -70,7 +70,8 @@ apis:
   hipDeviceGetName:
     out: [name]
     strings: [name]                 # a char-pointer output recorded as a string;
-                                    # may also name result
+                                    # may also name result, or a char* input that
+                                    # holds text (an API that is not const-correct)
   hipModuleGetFunction:
     uncapped: [kname]               # a string recorded whole: kernel names and
                                     # URIs only (RC-GEN-8)
@@ -85,11 +86,12 @@ apis:
 
 Names in `out`, `strings`, `uncapped` and `omit` are field names (below); `result` is
 the return value. `const char*` inputs are recorded as strings without being listed
-(RC-API-2).
+(RC-API-2); a `char*` input is recorded as an address unless `strings` names it.
 
 The generator stops with every problem it finds: an API or argument that does not
 exist, `out` on something that is not a pointer, `strings` on something that is not a
-`char`-pointer output or result, `uncapped` on something that is not a string, `skip`
+`char`-pointer output, `char*` input or result (or on a `const char*` input, which is a
+string already), `uncapped` on something that is not a string, `skip`
 without a reason, unknown keys or keywords, a parameter whose type has no field
 mapping, two fields with one name, and an event with more fields than TraceLogging
 allows (96).
@@ -112,7 +114,7 @@ the same name holds the pointer.
 | `bool` | `TraceLoggingBoolean` |
 | `float`, `double` | `TraceLoggingFloat32`, `TraceLoggingFloat64` |
 | pointers, handles, function pointers, non-const `char*` inputs | `TraceLoggingPointer` |
-| `const char*` inputs, `char*` outputs and results listed in `strings` | `TraceLoggingCountedString`, at most `ROCM_TRACE_STRING_CAP` (256) bytes; `TraceLoggingString` if `uncapped`. A null pointer is recorded as "" |
+| `const char*` inputs; `char*` inputs, `char*` outputs and results listed in `strings` | `TraceLoggingCountedString`, at most `ROCM_TRACE_STRING_CAP` (256) bytes; `TraceLoggingString` if `uncapped`. A null pointer is recorded as "" |
 | structs passed by value (`dim3`, `hipExtent`, nested structs) | every component (RC-API-1), one field per member: `<name>_<member>`, `<name>_<member>_<member>` |
 | arrays of integers, enums, bools or pointers | `TraceLogging<type>FixedArray` |
 | arrays of `float` or `double` | one field per element, `<name>_<index>`: the LTTng flavour has no floating-point array fields |
