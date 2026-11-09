@@ -417,14 +417,9 @@ private:
       }
 
       std::ranges::sort(sets_.begin(), sets_.begin() + count_);
-      try {
-        for (size_t i = 0; i < count_; ++i) {
-          mutexes_[sets_[i]].mutex.lock();
-          ++locked_;
-        }
-      } catch (...) {
-        unlock_all();
-        throw;
+      for (size_t i = 0; i < count_; ++i) {
+        mutexes_[sets_[i]].mutex.lock();
+        ++locked_;
       }
     }
 
