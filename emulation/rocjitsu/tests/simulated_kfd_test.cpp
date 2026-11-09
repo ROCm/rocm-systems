@@ -123,7 +123,8 @@ protected:
 };
 
 TEST_F(SimulatedKfdTest, MissingConfigReturnsFailureWithoutThrowing) {
-  const rocjitsu::test::ScopedTempDirectory directory("rocjitsu-test-vm-missing-config-");
+  rocjitsu::test::ScopedTempDirectory directory;
+  ASSERT_TRUE(directory.initialize("rocjitsu-test-vm-missing-config-"));
   const std::string path = directory.path() + "/missing.json";
   util::StringDiagnostic diagnostic;
   auto result = create_test_vm(diagnostic.emitter(), path);

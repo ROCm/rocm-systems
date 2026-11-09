@@ -701,7 +701,8 @@ private:
 };
 
 TEST(VfioDeviceHostLifecycle, KeepsClosedSnapshotWhileDisconnectResetIsSlow) {
-  rocjitsu::test::ScopedTempDirectory runtime("rj-vfu-slow-reset-");
+  rocjitsu::test::ScopedTempDirectory runtime;
+  ASSERT_TRUE(runtime.initialize("rj-vfu-slow-reset-"));
   const std::string socket_path = std::format("{}/gpu.sock", runtime.path());
   std::promise<void> reset_release;
   ResetObservingDevice device(reset_release.get_future().share());
@@ -1158,23 +1159,19 @@ TEST(VfioDeviceHostLifecycle, EncodesTheMessageCapabilityAGuestCanFollow) {
   }
   ASSERT_TRUE(attached);
 
-  // A failed read throws rather than recording a non-fatal expectation: these
-  // return a value, so ASSERT_ is unavailable here, and continuing would walk
-  // the capability list through zeros and report a wrong pointer rather than
-  // the read that never happened.
-  const auto read_byte = [&client](uint64_t at) {
+  const auto read_byte = [&client](uint64_t at, uint8_t &value) {
     std::array<std::byte, 1> one{};
-    if (!client.region_read(VFU_PCI_DEV_CFG_REGION_IDX, at, one)) {
-      throw std::runtime_error(std::format("cannot read config byte at {:#x}", at));
-    }
-    return std::to_integer<uint8_t>(one[0]);
+    if (!client.region_read(VFU_PCI_DEV_CFG_REGION_IDX, at, one))
+      return testing::AssertionFailure() << std::format("cannot read config byte at {:#x}", at);
+    value = std::to_integer<uint8_t>(one[0]);
+    return testing::AssertionSuccess();
   };
-  const auto read_dword = [&client](uint64_t at) {
+  const auto read_dword = [&client](uint64_t at, uint32_t &value) {
     std::array<std::byte, 4> four{};
-    if (!client.region_read(VFU_PCI_DEV_CFG_REGION_IDX, at, four)) {
-      throw std::runtime_error(std::format("cannot read config dword at {:#x}", at));
-    }
-    return std::bit_cast<uint32_t>(four);
+    if (!client.region_read(VFU_PCI_DEV_CFG_REGION_IDX, at, four))
+      return testing::AssertionFailure() << std::format("cannot read config dword at {:#x}", at);
+    value = std::bit_cast<uint32_t>(four);
+    return testing::AssertionSuccess();
   };
 
   // A capability added after the device is realized still writes itself and
@@ -1189,24 +1186,33 @@ TEST(VfioDeviceHostLifecycle, EncodesTheMessageCapabilityAGuestCanFollow) {
   // The point of the whole capability is to avoid a pin, whose delivery costs
   // the guest every BAR mapping it holds. Nothing else asserts what actually
   // reaches configuration space.
-  EXPECT_EQ(read_byte(0x3d), 0u)
+  uint8_t interrupt_pin = 0;
+  ASSERT_TRUE(read_byte(0x3d, interrupt_pin));
+  EXPECT_EQ(interrupt_pin, 0u)
       << "a pin as well would put the client's mmap-disabling path back in reach";
 
   // Walk the capability list the way a guest does, from the pointer at 0x34.
-  uint64_t at = read_byte(0x34);
+  uint8_t at = 0;
+  ASSERT_TRUE(read_byte(0x34, at));
   uint64_t found = 0;
   for (int hop = 0; hop < 48 && at >= 0x40; ++hop) {
-    if (read_byte(at) == PCI_CAP_ID_MSIX) {
+    uint8_t capability = 0;
+    ASSERT_TRUE(read_byte(at, capability));
+    if (capability == PCI_CAP_ID_MSIX) {
       found = at;
       break;
     }
-    at = read_byte(at + 1);
+    ASSERT_TRUE(read_byte(at + 1, at));
   }
   ASSERT_NE(found, 0u) << "no message capability is published for a guest to find";
 
-  const auto control = static_cast<uint16_t>(read_dword(found) >> 16);
-  const uint32_t table = read_dword(found + 4);
-  const uint32_t pending = read_dword(found + 8);
+  uint32_t header = 0;
+  uint32_t table = 0;
+  uint32_t pending = 0;
+  ASSERT_TRUE(read_dword(found, header));
+  ASSERT_TRUE(read_dword(found + 4, table));
+  ASSERT_TRUE(read_dword(found + 8, pending));
+  const auto control = static_cast<uint16_t>(header >> 16);
 
   EXPECT_EQ((control & 0x7ffu) + 1, rocjitsu::GpuPciDevice::kMsixVectors)
       << "the table size is stored one less than the count";
@@ -1281,12 +1287,12 @@ std::string compact_vfio_server_config(uint32_t gpu_count) {
   )";
 }
 
-std::string compact_manifest_vfio_server_config() {
-  std::string config = compact_vfio_server_config(2);
+[[nodiscard]] testing::AssertionResult compact_manifest_vfio_server_config(std::string &config) {
+  config = compact_vfio_server_config(2);
   const std::string replication = R"("num_gpus":2,)";
   const auto replication_at = config.find(replication);
   if (replication_at == std::string::npos)
-    throw std::runtime_error("compact VFIO fixture lost its legacy replication field");
+    return testing::AssertionFailure() << "compact VFIO fixture lost its legacy replication field";
   config.erase(replication_at, replication.size());
   config.insert(1, R"("local_node":"selected","system":{"nodes":[
     {"id":"other","gpus":[
@@ -1298,24 +1304,25 @@ std::string compact_manifest_vfio_server_config() {
       {"id":"second","gpu_id":1250,"unique_id":1250,
        "location_id":768,"drm_render_minor":128}]}
   ]},)");
-  return config;
+  return testing::AssertionSuccess();
 }
 
-bool compact_vfio_config_has_usable_functions(const std::string &path, uint32_t count) {
+[[nodiscard]] testing::AssertionResult
+compact_vfio_config_has_usable_functions(const std::string &path, uint32_t count) {
   util::StringDiagnostic diagnostic;
   auto loaded =
       rocjitsu::config::load_config(path, rocjitsu::kEmbeddedSchema, diagnostic.emitter());
   if (loaded.failed())
-    throw std::runtime_error(diagnostic.message());
+    return testing::AssertionFailure() << diagnostic.message();
   if (loaded.value().num_gpus != count || loaded.value().devices.size() != count)
-    return false;
+    return testing::AssertionFailure() << "Compact VFIO configuration has unusable functions";
   for (const auto &identity : loaded.value().devices) {
     rocjitsu::GpuPciDevice device(
         "probe", rocjitsu::gpu_pci_spec_from_config(identity, loaded.value().pci), nullptr);
     if (!device.usable())
-      return false;
+      return testing::AssertionFailure() << "Compact VFIO configuration has unusable functions";
   }
-  return true;
+  return testing::AssertionSuccess();
 }
 
 std::optional<int> wait_for_child_bounded(pid_t child, std::chrono::seconds timeout) {
@@ -1425,11 +1432,14 @@ int exercise_multi_function_clients(const std::vector<std::string> &socket_paths
 
 void run_multi_function_server_scenario(uint32_t gpu_count, MultiClientDeparture departure,
                                         const std::string &config_text = {}) {
-  rocjitsu::test::ScopedTempFile config("rj-vfu-multi-config-");
-  config.write(config_text.empty() ? compact_vfio_server_config(gpu_count) : config_text);
+  rocjitsu::test::ScopedTempFile config;
+  ASSERT_TRUE(config.initialize("rj-vfu-multi-config-"));
+  ASSERT_TRUE(
+      config.write(config_text.empty() ? compact_vfio_server_config(gpu_count) : config_text));
   ASSERT_TRUE(compact_vfio_config_has_usable_functions(config.path(), gpu_count));
 
-  rocjitsu::test::ScopedTempDirectory runtime("rj-vfu-multi-");
+  rocjitsu::test::ScopedTempDirectory runtime;
+  ASSERT_TRUE(runtime.initialize("rj-vfu-multi-"));
   std::vector<std::string> socket_paths;
   for (uint32_t i = 0; i < gpu_count; ++i)
     socket_paths.push_back(std::format("{}/gpu{}.sock", runtime.path(), i));
@@ -1526,9 +1536,11 @@ TEST(VfioServer, ServesTwoIndependentFunctionsAndStopsWhenOneDisconnects) {
 }
 
 TEST(VfioServer, ServesEachSelectedManifestFunction) {
-  const std::string manifest = compact_manifest_vfio_server_config();
-  rocjitsu::test::ScopedTempFile config("rj-vfu-manifest-config-");
-  config.write(manifest);
+  std::string manifest;
+  ASSERT_TRUE(compact_manifest_vfio_server_config(manifest));
+  rocjitsu::test::ScopedTempFile config;
+  ASSERT_TRUE(config.initialize("rj-vfu-manifest-config-"));
+  ASSERT_TRUE(config.write(manifest));
   util::StringDiagnostic diagnostic;
   auto loaded =
       rocjitsu::config::load_config(config.path(), rocjitsu::kEmbeddedSchema, diagnostic.emitter());
@@ -1559,11 +1571,13 @@ TEST(VfioServer, WaitsForLauncherAfterFourFunctionsDisconnect) {
 }
 
 TEST(VfioServer, CleansTheFirstListenerWhenTheSecondBindFails) {
-  rocjitsu::test::ScopedTempFile config("rj-vfu-multi-config-");
-  config.write(compact_vfio_server_config(2));
+  rocjitsu::test::ScopedTempFile config;
+  ASSERT_TRUE(config.initialize("rj-vfu-multi-config-"));
+  ASSERT_TRUE(config.write(compact_vfio_server_config(2)));
   ASSERT_TRUE(compact_vfio_config_has_usable_functions(config.path(), 2));
 
-  rocjitsu::test::ScopedTempDirectory runtime("rj-vfu-multi-fail-");
+  rocjitsu::test::ScopedTempDirectory runtime;
+  ASSERT_TRUE(runtime.initialize("rj-vfu-multi-fail-"));
   const std::string first_socket = runtime.path() + "/gpu0.sock";
   // An existing directory cannot become a socket. It reaches host.build()
   // after the first host has already bound, unlike duplicate-path preflight.

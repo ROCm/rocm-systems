@@ -80,8 +80,10 @@ TEST(CodeObjectFuzzTest, GeneratorIsDeterministicAndBounded) {
 
 TEST(CodeObjectFuzzTest, InMemoryExecutableCopiesTheSameBundleAsPathLoading) {
   std::vector<uint8_t> image = seed_corpus()[1];
-  test::ScopedTempFile file("rj-code-object-fuzz-bundle-");
-  file.write(std::string_view(reinterpret_cast<const char *>(image.data()), image.size()));
+  test::ScopedTempFile file;
+  ASSERT_TRUE(file.initialize("rj-code-object-fuzz-bundle-"));
+  ASSERT_TRUE(
+      file.write(std::string_view(reinterpret_cast<const char *>(image.data()), image.size())));
 
   const Executable path_executable(file.path());
   const Executable memory_executable(image);

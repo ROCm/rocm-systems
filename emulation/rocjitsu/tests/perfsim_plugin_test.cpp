@@ -352,13 +352,14 @@ size_t line_with_prefix(const std::vector<std::string> &trace, std::string_view 
 class PerfsimPluginTest : public ::testing::Test {
 protected:
   void SetUp() override {
+    ASSERT_TRUE(trace_.initialize("rocjitsu-perfsim-"));
     trace_env_ = std::make_unique<rocjitsu::test::ScopedEnvironmentVariable>(
         "ROCJITSU_PERFSIM_FAKE_TRACE", trace_.path());
     mode_env_ = std::make_unique<rocjitsu::test::ScopedEnvironmentVariable>(
         "ROCJITSU_PERFSIM_FAKE_MODE", "");
   }
 
-  rocjitsu::test::ScopedTempFile trace_{"rocjitsu-perfsim-"};
+  rocjitsu::test::ScopedTempFile trace_;
   std::unique_ptr<rocjitsu::test::ScopedEnvironmentVariable> trace_env_;
   std::unique_ptr<rocjitsu::test::ScopedEnvironmentVariable> mode_env_;
 };
@@ -2791,8 +2792,10 @@ TEST_F(PerfsimPluginTest, RealBackendMatchesDirectFfmForCanonicalStream) {
   const std::string backend_path{backend_path_env};
 
   static_assert(FFM_OBSERVER_PLUGIN_CURRENT_API_VERSION == 13);
-  rocjitsu::test::ScopedTempFile direct_report{"rocjitsu-perfsim-direct-"};
-  rocjitsu::test::ScopedTempFile bridge_report{"rocjitsu-perfsim-bridge-"};
+  rocjitsu::test::ScopedTempFile direct_report;
+  ASSERT_TRUE(direct_report.initialize("rocjitsu-perfsim-direct-"));
+  rocjitsu::test::ScopedTempFile bridge_report;
+  ASSERT_TRUE(bridge_report.initialize("rocjitsu-perfsim-bridge-"));
   rocjitsu::test::ScopedEnvironmentVariable report_path{"GPUCSIM_REPORT_PATH",
                                                         direct_report.path()};
   rocjitsu::test::ScopedEnvironmentVariable target{"GPUCSIM_TARGET", "gfx1250"};
