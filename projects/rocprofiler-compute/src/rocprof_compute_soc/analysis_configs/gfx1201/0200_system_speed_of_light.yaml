@@ -127,7 +127,9 @@ Panel Config:
     WMMA FLOPs (F16->F32 16x16x16): >-
       Matrix FLOPs per second, counting 8192 FLOPs per vec32 WMMA instruction.
       The counter increments once per vec32, so a wave64 WMMA counts twice.
-      Peak is 1024 FLOPs/CU/cycle, the published dense FP16 rate of Navi 48.
+      It does not separate FP16, BF16, FP8, and BF8. Peak is 1024 FLOPs/CU/cycle,
+      the published dense FP16 rate of Navi 48. The BF8 roof is the measured
+      V_WMMA_F32_16X16X16_BF8_BF8 rate.
     VALU FLOPs (F64): >-
       64-bit floating-point operations per second on the VALU. Peak is
       4 FLOPs/CU/cycle, 1/32 of the FP32 FMA rate.
