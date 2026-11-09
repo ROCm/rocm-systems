@@ -45,11 +45,6 @@ constexpr size_t ddaLLArTwoShotSlotPkts(size_t bankSize, int nRanks) {
   return ddaLLSlotPkts(bankSize, sizeof(LLPacket16) * (size_t)nRanks * 2, 16);
 }
 
-// Fixed-width peer staging for phase 1: a runtime-sized array, or a runtime index
-// into one, is placed in scratch. 8 covers rank counts 4 and 8 in a single pass.
-// TODO: should this be moved to common place so other kernels can do the same
-constexpr int kDdaLLArTwoShotPeerBatch = 8;
-
 // LL two-shot all-reduce kernel. 1D grid over one shard's packets (8B payload
 // each), so the launcher sizes the grid on count/nRanks, not on count.
 //
@@ -105,10 +100,10 @@ __launch_bounds__(1024)
   // fixed trip count with the rank test as a predicate is what unrolls both loops
   // and keeps d0/d1 in registers rather than scratch.
   for (size_t pk = gtid; pk < nPk_rank; pk += stride) {
-    for (int base = 1; base < nRanks; base += kDdaLLArTwoShotPeerBatch) {
-      uint32_t d0[kDdaLLArTwoShotPeerBatch], d1[kDdaLLArTwoShotPeerBatch];
+    for (int base = 1; base < nRanks; base += kDdaLLPeerBatch) {
+      uint32_t d0[kDdaLLPeerBatch], d1[kDdaLLPeerBatch];
 #pragma unroll
-      for (int i = 0; i < kDdaLLArTwoShotPeerBatch; ++i) {
+      for (int i = 0; i < kDdaLLPeerBatch; ++i) {
         const int r = base + i;
         if (r < nRanks) {
           const int peer = (selfRank + r) % nRanks;
@@ -118,7 +113,7 @@ __launch_bounds__(1024)
         }
       }
 #pragma unroll
-      for (int i = 0; i < kDdaLLArTwoShotPeerBatch; ++i) {
+      for (int i = 0; i < kDdaLLPeerBatch; ++i) {
         const int r = base + i;
         if (r < nRanks) {
           const int peer = (selfRank + r) % nRanks;

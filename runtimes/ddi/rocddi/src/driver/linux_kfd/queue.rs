@@ -16,13 +16,14 @@ use std::sync::atomic::{Ordering, fence};
 use super::memory::{BufferKind, DeviceVm, KfdAllocation};
 use super::{errno, error, native_error, os_memory, sys, sysfs, uapi};
 use crate::device::gpu::queue::{
-    MAX_PRIVATE_SEGMENT_BYTES, QueueAccessWidth, QueueErrorEvent, QueueParameters, QueuePriority,
-    QueueProducerMode, QueueRequest, QueueRingMemory, QueueScratch, QueueTransport,
-    SdmaEngineSelection,
+    AqlControlLayout, AqlControlRegion, AqlQueueHeader, MAX_PRIVATE_SEGMENT_BYTES,
+    QueueAccessWidth, QueueErrorEvent, QueueParameters, QueuePriority, QueueProducerMode,
+    QueueRequest, QueueRingMemory, QueueScratch, QueueTransport, SdmaEngineSelection,
 };
 use crate::memory::AllocationDesc;
 use crate::memory::DeviceAccess;
 use crate::session::DriverContextLifetime;
+use crate::topology::{GpuScratchEncoding, GpuTargetProfile};
 
 use crate::{Error, ErrorKind};
 
@@ -33,6 +34,9 @@ const SDMA_READ_OFFSET: usize = 0;
 const SDMA_WRITE_OFFSET: usize = 8;
 const CWSR_ALIGNMENT: usize = 2 * 1024 * 1024;
 const SCRATCH_ALIGNMENT: u64 = 256;
+const GFX9_SCRATCH_ALIGNMENT: u64 = 1024;
+const GFX9_SCRATCH_RESOURCE_WORD3: u32 =
+    4 | (5 << 3) | (6 << 6) | (7 << 9) | (4 << 12) | (4 << 15) | (1 << 19) | (3 << 21) | (1 << 23);
 const GFX12_SCRATCH_RESOURCE_WORD3: u32 =
     4 | (5 << 3) | (6 << 6) | (7 << 9) | (0x14 << 12) | (1 << 23) | (2 << 28);
 /// A progress query cannot wait indefinitely for a busy producer to pause.
@@ -59,53 +63,6 @@ fn sample_wrapping_indices(
         std::hint::spin_loop();
     }
     Err(io::Error::from(io::ErrorKind::WouldBlock))
-}
-
-/// HSA queue header prefix used to pin offsets in the native control page.
-#[allow(dead_code)]
-#[repr(C)]
-struct AqlQueueHeader {
-    queue_type: u32,
-    features: u32,
-    base_address: u64,
-    doorbell_signal: u64,
-    size: u32,
-    reserved: u32,
-    id: u64,
-}
-
-/// Native 256-byte AQL control layout shared with the command processor.
-#[allow(dead_code)]
-#[repr(C, align(64))]
-struct AqlControlLayout {
-    queue_header: AqlQueueHeader,
-    caps: u32,
-    reserved1: [u32; 3],
-    write_dispatch_id: u64,
-    group_segment_aperture_base_hi: u32,
-    private_segment_aperture_base_hi: u32,
-    max_cu_id: u32,
-    max_wave_id: u32,
-    max_legacy_doorbell_dispatch_id_plus_1: u64,
-    legacy_doorbell_lock: u32,
-    reserved2: [u32; 9],
-    read_dispatch_id: u64,
-    read_dispatch_id_field_base_byte_offset: u32,
-    compute_tmpring_size: u32,
-    scratch_resource_descriptor: [u32; 4],
-    scratch_backing_memory_location: u64,
-    scratch_backing_memory_byte_size: u64,
-    scratch_wave64_lane_byte_size: u32,
-    queue_properties: u32,
-    scratch_max_use_index: u64,
-    queue_inactive_signal: u64,
-    alt_scratch_max_use_index: u64,
-    alt_scratch_resource_descriptor: [u32; 4],
-    alt_scratch_backing_memory_location: u64,
-    alt_scratch_dispatch_limit: [u32; 3],
-    alt_scratch_wave64_lane_byte_size: u32,
-    alt_compute_tmpring_size: u32,
-    reserved5: u32,
 }
 
 const AQL_CONTROL_SIZE: usize = size_of::<AqlControlLayout>();
@@ -961,10 +918,7 @@ impl Request {
         let properties = native.queues;
         // These generations share eight-byte doorbells and the pointer
         // protocol. Context and debugger backing use reported wave geometry.
-        if native.gpu_id == 0
-            || (!(100_100..=120_001).contains(&properties.gfx_target)
-                && properties.gfx_target != 120_500)
-        {
+        if native.gpu_id == 0 || !properties.target_profile.supports_aql() {
             return Err(error(
                 ErrorKind::Unsupported,
                 "KFD queue backing is unsupported on this GPU target",
@@ -1036,7 +990,7 @@ impl Request {
             QueueParameters::Pm4 | QueueParameters::Sdma => QueueRingMemory::System,
         };
         if ring_memory == QueueRingMemory::HostVisibleLocal
-            && (properties.gfx_target != 120_001
+            && (properties.target_profile != GpuTargetProfile::Gfx1201
                 || native.public_memory_bytes < u64::from(ring_size).div_ceil(page) * page)
         {
             return Err(error(
@@ -1062,7 +1016,7 @@ impl Request {
     }
 }
 
-fn scratch_wave_bytes(scratch: QueueScratch) -> Result<u64, Error> {
+fn scratch_wave_bytes(scratch: QueueScratch, alignment: u64) -> Result<u64, Error> {
     if scratch.maximum_private_segment_byte_length == 0
         || scratch.maximum_private_segment_byte_length > MAX_PRIVATE_SEGMENT_BYTES
         || !matches!(scratch.lanes_per_wave, 32 | 64)
@@ -1075,7 +1029,7 @@ fn scratch_wave_bytes(scratch: QueueScratch) -> Result<u64, Error> {
     let wave_bytes = u64::from(scratch.lanes_per_wave)
         .checked_mul(u64::from(scratch.maximum_private_segment_byte_length))
         .ok_or_else(|| error(ErrorKind::InvalidArgument, "scratch wave size overflows"))?;
-    if wave_bytes % SCRATCH_ALIGNMENT != 0 {
+    if wave_bytes % alignment != 0 {
         return Err(error(
             ErrorKind::InvalidArgument,
             "scratch private segment does not meet wave alignment",
@@ -1084,6 +1038,10 @@ fn scratch_wave_bytes(scratch: QueueScratch) -> Result<u64, Error> {
     Ok(wave_bytes)
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "target scratch geometry and register encoding share one checked path"
+)]
 fn validate_scratch(
     properties: sysfs::KfdQueueProperties,
     scratch: Option<QueueScratch>,
@@ -1091,25 +1049,41 @@ fn validate_scratch(
     let Some(scratch) = scratch else {
         return Ok(None);
     };
-    if !matches!(properties.gfx_target, 120_000 | 120_001 | 120_500)
-        || properties.wavefront_size != 32
-        || properties.xcc_count == 0
+    let (alignment, wave_size_limit, waves_per_engine) = match properties
+        .target_profile
+        .scratch_encoding(properties.wavefront_size)
     {
+        Some(GpuScratchEncoding::Gfx9) => (GFX9_SCRATCH_ALIGNMENT, 0x1fff, false),
+        Some(GpuScratchEncoding::Gfx12) => (SCRATCH_ALIGNMENT, 0x3_ffff, true),
+        None => {
+            return Err(error(
+                ErrorKind::Unsupported,
+                "fixed AQL scratch requires a qualified GFX9 or GFX12 target",
+            ));
+        }
+    };
+    if !waves_per_engine && scratch.lanes_per_wave != 64 {
         return Err(error(
-            ErrorKind::Unsupported,
-            "fixed AQL scratch requires a supported GFX12 wave32 target",
+            ErrorKind::InvalidArgument,
+            "GFX9 scratch requires wave64 execution",
         ));
     }
-    if scratch.device_address % SCRATCH_ALIGNMENT != 0
-        || scratch.byte_length % SCRATCH_ALIGNMENT != 0
+    if properties.xcc_count == 0 {
+        return Err(error(
+            ErrorKind::Unsupported,
+            "fixed AQL scratch requires nonzero XCC geometry",
+        ));
+    }
+    if scratch.device_address % alignment != 0
+        || scratch.byte_length % alignment != 0
         || scratch.maximum_wave_count == 0
     {
         return Err(error(
             ErrorKind::InvalidArgument,
-            "scratch range or limits do not meet GFX12 alignment",
+            "scratch range or limits do not meet target alignment",
         ));
     }
-    let wave_bytes = scratch_wave_bytes(scratch)?;
+    let wave_bytes = scratch_wave_bytes(scratch, alignment)?;
     let shader_engines = properties
         .shader_engine_count_per_xcc
         .checked_mul(properties.xcc_count)
@@ -1127,15 +1101,21 @@ fn validate_scratch(
             "scratch wave count exceeds or does not divide target geometry",
         ));
     }
-    let wave_units = wave_bytes / SCRATCH_ALIGNMENT;
+    let wave_units = wave_bytes / alignment;
     let required = wave_units
-        .checked_mul(SCRATCH_ALIGNMENT)
+        .checked_mul(alignment)
         .and_then(|size| size.checked_mul(u64::from(scratch.maximum_wave_count)))
         .ok_or_else(|| error(ErrorKind::InvalidArgument, "scratch extent overflows"))?;
-    let waves_per_engine = scratch.maximum_wave_count / shader_engines;
+    let encoded_waves = scratch.maximum_wave_count
+        / if waves_per_engine {
+            shader_engines
+        } else {
+            properties.xcc_count
+        };
     if required > scratch.byte_length
-        || wave_units > 0x3_ffff
-        || waves_per_engine > 0x0fff
+        || wave_units > wave_size_limit
+        || encoded_waves > 0x0fff
+        || (!waves_per_engine && scratch.maximum_wave_count % properties.xcc_count != 0)
         || scratch.byte_length / u64::from(properties.xcc_count) > u64::from(u32::MAX)
         || scratch.byte_length % u64::from(properties.xcc_count) != 0
         || scratch.device_address >> 48 != 0
@@ -1177,12 +1157,16 @@ fn validate_scratch(
         )
     })?;
     Ok(Some(ScratchControl {
-        tmpring_size: waves_per_engine | (wave_units << 12),
+        tmpring_size: encoded_waves | (wave_units << 12),
         resource: [
             address_low,
-            (address_high & 0xffff) | (1 << 30),
+            (address_high & 0xffff) | if waves_per_engine { 1 << 30 } else { 1 << 31 },
             backing_size,
-            GFX12_SCRATCH_RESOURCE_WORD3,
+            if waves_per_engine {
+                GFX12_SCRATCH_RESOURCE_WORD3
+            } else {
+                GFX9_SCRATCH_RESOURCE_WORD3
+            },
         ],
         backing_address: scratch.device_address,
         wave64_lane_bytes,
@@ -1197,11 +1181,18 @@ fn put_u64(bytes: &mut [u8], offset: usize, value: u64) {
     bytes[offset..offset + 8].copy_from_slice(&value.to_ne_bytes());
 }
 
-fn put_aql_scratch(bytes: &mut [u8], gfx_target: u32, scratch: Option<ScratchControl>) {
-    if matches!(gfx_target, 120_000 | 120_001 | 120_500) {
-        let resource = offset_of!(AqlControlLayout, scratch_resource_descriptor);
-        put_u32(bytes, resource + 4, 1 << 30);
-        put_u32(bytes, resource + 12, GFX12_SCRATCH_RESOURCE_WORD3);
+fn put_aql_scratch(bytes: &mut [u8], profile: GpuTargetProfile, scratch: Option<ScratchControl>) {
+    let resource = offset_of!(AqlControlLayout, scratch_resource_descriptor);
+    match profile {
+        GpuTargetProfile::Gfx9 => {
+            put_u32(bytes, resource + 4, 1 << 31);
+            put_u32(bytes, resource + 12, GFX9_SCRATCH_RESOURCE_WORD3);
+        }
+        GpuTargetProfile::Gfx1200 | GpuTargetProfile::Gfx1201 | GpuTargetProfile::Gfx1250 => {
+            put_u32(bytes, resource + 4, 1 << 30);
+            put_u32(bytes, resource + 12, GFX12_SCRATCH_RESOURCE_WORD3);
+        }
+        GpuTargetProfile::Other | GpuTargetProfile::Gfx10 | GpuTargetProfile::Gfx11 => {}
     }
     if let Some(scratch) = scratch {
         put_u32(
@@ -1316,7 +1307,7 @@ fn initialize_aql_control(
             signal,
         );
     }
-    put_aql_scratch(&mut bytes, aql.properties.gfx_target, aql.scratch);
+    put_aql_scratch(&mut bytes, aql.properties.target_profile, aql.scratch);
     storage.write_bytes(0, &bytes)
 }
 
@@ -1373,7 +1364,10 @@ fn compute_storage(properties: sysfs::KfdQueueProperties) -> Result<ComputeStora
 fn pm4_control(native: &sysfs::KfdNode) -> Option<Pm4Control> {
     let properties = native.queues;
     if !cfg!(target_arch = "x86_64")
-        || !matches!(properties.gfx_target, 120_000 | 120_001 | 120_500)
+        || !matches!(
+            properties.target_profile,
+            GpuTargetProfile::Gfx1200 | GpuTargetProfile::Gfx1201 | GpuTargetProfile::Gfx1250
+        )
         || properties.compute_queues == 0
         || properties.wavefront_size != 32
         || properties.xcc_count == 0
@@ -1400,7 +1394,7 @@ fn pm4_control(native: &sysfs::KfdNode) -> Option<Pm4Control> {
 }
 
 pub(super) fn supports_aql(native: &sysfs::KfdNode) -> bool {
-    ((100_100..=120_001).contains(&native.queues.gfx_target) || native.queues.gfx_target == 120_500)
+    native.queues.target_profile.supports_aql()
         && native.queues.compute_queues != 0
         && compute_storage(native.queues).is_ok()
 }
@@ -1633,6 +1627,7 @@ impl KfdQueue {
             BufferKind::Vram {
                 public: true,
                 coherent: false,
+                extended_coherent: false,
                 uncached: true,
                 contiguous: false,
             }
@@ -1673,6 +1668,16 @@ impl KfdQueue {
         let ring_device_address = ring.device_address(&vm)?;
         let pointer_host_address = pointers.host_address()?;
         let pointer_device_address = pointers.device_address(&vm)?;
+        if request.aql.is_some()
+            && (page < AQL_CONTROL_SIZE as u64
+                || pointer_host_address % 256 != 0
+                || pointer_host_address.checked_add(AQL_CONTROL_SIZE).is_none())
+        {
+            return Err(error(
+                ErrorKind::Driver,
+                "AQL control mapping does not contain an aligned control layout",
+            ));
+        }
         let mut eop = None;
         let mut context = None;
         if let Some(compute) = &request.compute {
@@ -1681,6 +1686,7 @@ impl KfdQueue {
                 BufferKind::Vram {
                     public: false,
                     coherent: false,
+                    extended_coherent: false,
                     uncached: false,
                     contiguous: false,
                 },
@@ -1731,10 +1737,27 @@ impl KfdQueue {
         } else {
             (SDMA_READ_OFFSET, SDMA_WRITE_OFFSET)
         };
+        let aql_control = if request.aql.is_some() {
+            Some(
+                AqlControlRegion::new(
+                    pointer_host_address,
+                    AQL_CONTROL_SIZE,
+                    256,
+                    size_of::<AqlQueueHeader>(),
+                    pointer_host_address + AQL_READ_OFFSET,
+                    pointer_host_address + AQL_WRITE_OFFSET,
+                    pointer_host_address + offset_of!(AqlControlLayout, queue_properties),
+                )
+                .ok_or_else(|| error(ErrorKind::Driver, "invalid AQL control region"))?,
+            )
+        } else {
+            None
+        };
         let info = QueueTransport {
             ring_host_address,
             ring_device_address,
             ring_size_bytes: u64::from(request.ring_size),
+            aql_control,
             sdma_engine_id: selected_sdma_engine_id,
             read_index_host_address: pointer_host_address + read_offset,
             read_index_device_address: pointer_device_address + read_offset as u64,

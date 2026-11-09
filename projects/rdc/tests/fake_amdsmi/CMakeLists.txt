@@ -18,7 +18,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-# Fake amd-smi for the GPU-less tests in tests/ci/test_fake_gpu.py. Test-only:
+# Fake amd-smi for the GPU-less tests in tests/ci/test_fake_gpu*.py. Test-only:
 # it is built with BUILD_TESTS and installed with the tests component next to
 # the suite, never on a library search path. It replaces libamd_smi through
 # LD_PRELOAD, so it must not link libamd_smi or any RDC library.

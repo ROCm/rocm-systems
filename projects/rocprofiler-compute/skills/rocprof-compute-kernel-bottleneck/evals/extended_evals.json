@@ -1,0 +1,15 @@
+{
+  "evaluations": [
+    {
+      "id": "kb-kernel-name-filter",
+      "skill_should_trigger": true,
+      "prompt": "profile only the kernels whose names end in bound in my ROCm application\n\nThe application is ./occupancy.hip.",
+      "workspace": "evals/samples",
+      "expected_behavior": [
+        "uses rocprof-compute profile -k to filter by kernel name",
+        "treats the profile-time -k value as a regex matched against kernel names"
+      ],
+      "logs_contain": ["-k"]
+    }
+  ]
+}

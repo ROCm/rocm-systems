@@ -516,6 +516,7 @@ typedef int (*rocprofiler_callback_tracing_operation_args_cb_t)(
  * @retval ::ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED if the same
  * ::rocprofiler_callback_tracing_kind_t value is provided more than once (per context) -- in other
  * words, we do not support overriding or combining the operations in separate function calls.
+ * @retval ::ROCPROFILER_STATUS_ERROR_KIND_NOT_FOUND Invalid ::rocprofiler_callback_tracing_kind_t
  *
  */
 rocprofiler_status_t

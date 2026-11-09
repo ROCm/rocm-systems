@@ -28,8 +28,9 @@ namespace rocjitsu {
 namespace amdgpu {
 namespace addr_calc {
 
-/// Mark each in-range DWORD separately so partial buffer loads zero only the
-/// out-of-range destinations. Byte and halfword loads use one destination DWORD.
+/// Set the mask bit of each DWORD that starts below @p bound and clear the rest.
+/// A load returns zero for a clear DWORD and a store skips it. Byte and halfword
+/// loads use one destination DWORD.
 inline void scalar_buffer_load_mask(ScalarMemState *state, int64_t offset, uint64_t bound) {
   if (!state)
     return;
@@ -43,16 +44,35 @@ inline void scalar_buffer_load_mask(ScalarMemState *state, int64_t offset, uint6
 
 /// Scalar buffer resource layout shared by GFX9 and RDNA: a 48-bit base,
 /// 14-bit stride and 32-bit record count. Stride affects bounds, not the address.
+///
+/// @p align_mask clears low bits of the returned address. @p size_align_mask
+/// clears low bits of the byte bound before the per-DWORD mask is built; zero
+/// leaves the bound unrounded, so a DWORD counts as in range when its first byte
+/// is. GFX9 passes 3, so a DWORD must lie wholly in range, and RDNA4 passes its
+/// access alignment. RDNA1 through RDNA3.5 pass zero; their hardware rule is
+/// unverified.
+///
+/// An atomic's mask is all set or all clear. An aligned atomic is accessed only
+/// if every DWORD of its element is in range. A misaligned atomic keeps its full
+/// mask so the access path faults, because alignment is checked before bounds.
+/// The CDNA ISA manuals do not describe these rules; they are observed on gfx90a.
 inline std::optional<uint64_t> scalar_buffer_address(Wavefront &wf, uint32_t selector,
                                                      uint64_t base, int64_t offset,
-                                                     ScalarMemState *state, uint64_t align_mask = 3,
-                                                     uint64_t size_align_mask = 0) {
+                                                     ScalarMemState *state, uint64_t align_mask,
+                                                     uint64_t size_align_mask) {
   auto records = try_read_scalar_selector(wf, selector + 2);
   if (!records)
     return std::nullopt;
   const uint64_t stride = (base >> 48) & 0x3fff;
   scalar_buffer_load_mask(state, offset, (*records * (stride ? stride : 1)) & ~size_align_mask);
-  return buffer_virtual_address(base + offset) & ~align_mask;
+  const uint64_t address = buffer_virtual_address(base + offset) & ~align_mask;
+  if (state && state->atomic_op != AtomicOp::NONE) {
+    const uint16_t element_mask = (1u << state->num_dwords) - 1;
+    const bool aligned = address % state->elem_size == 0;
+    state->load_dword_mask =
+        (state->load_dword_mask == element_mask || !aligned) ? element_mask : 0;
+  }
+  return address;
 }
 
 /// @brief Scalar-buffer load opcode families (GFX9/RDNA through GFX11, then GFX12).
@@ -114,8 +134,10 @@ std::optional<uint64_t> smem_calculate_address(const SmemInst &inst, amdgpu::Wav
     wf.report_undefined_behavior("negative combined scalar-memory offset");
   inst_offset &= ~0x3LL;
   reg_offset &= kDwordMask;
+  // A DWORD is in range only if all four bytes are, so round the bound down.
   if (gfx9_smem_is_buffer_op(inst.op))
-    return scalar_buffer_address(wf, inst.sbase * 2, *base, inst_offset + reg_offset, state);
+    return scalar_buffer_address(wf, inst.sbase * 2, *base, inst_offset + reg_offset, state,
+                                 /*align_mask=*/3, /*size_align_mask=*/3);
   const uint64_t addr = *base + inst_offset + reg_offset;
   util::Logger::vm([&](auto &os) {
     static thread_local uint64_t smem_count = 0;
@@ -146,7 +168,10 @@ void ds_calculate_addresses(const DsInst &inst, amdgpu::Wavefront &wf, VectorMem
   uint32_t offset = (static_cast<uint32_t>(inst.offset1) << 8) | inst.offset0;
   RegisterAccess regs(cu);
   auto addr_region = regs.read_vgpr_region(wf.vgpr_alloc().base + inst.addr, 1, exec);
-  const std::span<const uint32_t> addresses = addr_region.lanes();
+  auto maybe_addresses = addr_region.lanes();
+  if (maybe_addresses.failed())
+    return;
+  const std::span<const uint32_t> addresses = maybe_addresses.value();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
