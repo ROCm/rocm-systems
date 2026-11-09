@@ -57,6 +57,9 @@ extern std::function<int(struct ncclComm*, ncclFunc_t, int)> g_rcclP2pTaskParts;
 extern std::function<bool(struct ncclComm*, ncclFunc_t, int)> g_rcclP2pTaskUsesCe;
 extern std::function<int(struct ncclComm*, ncclFunc_t, int)> g_rcclP2pTaskConnIndex;
 
+// enqueue.cc's direct-P2P stride policy: default p2pnChannelsPerPeer.
+extern std::function<int(struct ncclComm*, ncclFunc_t, int, int, bool)> g_rcclP2pChannelStrideForApi;
+
 // enqueue.cc's collective entry, COLL log line and addon-launch bracket. Fail loud until a test installs them.
 struct ncclInfo;
 struct rcclAddonLaunchState;
