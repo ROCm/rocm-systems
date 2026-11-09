@@ -28,7 +28,7 @@ static ncclResult_t ncclTuner_finalize(void* ctx) {
 
 static ncclResult_t ncclTuner_init(void** context, uint64_t commId, size_t nRanks, size_t nNodes,
                                    ncclDebugLogger_t logfn, ncclNvlDomainInfo_v5_t* nvlDomainInfo,
-                                   ncclTunerConstants_t* constants) {
+                                   ncclTunerConstants_v5_t* constants) {
   NCCLCHECK(ncclTuner_v5->init(context, commId, nRanks, nNodes, logfn, nvlDomainInfo, constants));
   ncclTuner.getCollInfo = ncclTuner_getCollInfo;
   ncclTuner.finalize = ncclTuner_finalize;

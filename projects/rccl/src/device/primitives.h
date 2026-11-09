@@ -111,6 +111,22 @@ struct ProtoLL128 {
   static constexpr int MaxGroupWidth = 1;
 };
 
+struct ProtoNaN {
+  static constexpr int Id = NCCL_PROTO_NAN;
+
+  // Data bytes in one step of the fifo queue. The payload is its own ready flag,
+  // so unlike LL/LL128 the whole step is data.
+  __device__ static int calcBytePerStep() {
+    return ncclShmem.comm.buffSizes[NCCL_PROTO_NAN] / NCCL_STEPS;
+  }
+  // Granularity of data bytes transferred per thread.
+  __device__ static int calcBytePerGrain() {
+    return NCCL_NAN_ELEMS_PER_THREAD * sizeof(uint64_t);
+  }
+  // Group width is how many consecutive group values a subchannel occupies.
+  static constexpr int MaxGroupWidth = 1;
+};
+
 /* Fan (as in fan-in & fan-out) classes hold recv and send counts. The template
  * arguments are static bounds on the maximum values. Asymmetric counts are
  * independent. Symmetric is a static guarantee that nrecv==nsend, so it only
@@ -212,4 +228,5 @@ __device__ inline int checkAbort(int& abortCache, const int abortValue, int& spi
 #include "prims_simple.h"
 #include "prims_ll.h"
 #include "prims_ll128.h"
+#include "prims_nan.h"
 #endif

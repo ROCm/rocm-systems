@@ -783,6 +783,9 @@ struct ncclComm {
 #if ENABLE_TDM_PRIM_LL128
   int tdmLl128Enable; // RCCL: route LL128 user-buffer legs through the async-to-LDS engine
 #endif
+#if ENABLE_TDM_NAN
+  int nanTdmMinBytes; // RCCL: smallest NaN-flag op, in bytes, moved by TDM; -1 = never
+#endif
   int localRank;
   int localRanks;
   int maxLocalRanks;

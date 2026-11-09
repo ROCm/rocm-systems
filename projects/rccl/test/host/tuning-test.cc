@@ -400,7 +400,11 @@ TEST_F(TuningMicrotest, InitPassesPluginInputsBeforeCostModelAndPrintsRankZeroTa
         EXPECT_EQ(4u, nNodes);
         EXPECT_NE(nullptr, logger);
         EXPECT_EQ(&comm_->nvlDomainInfo, nvlDomainInfo);
-        EXPECT_EQ(&comm_->tuningContext.tuningConstants, constants);
+        // The plugin gets a copy narrowed to its protocol columns, not the comm's own struct.
+        EXPECT_NE(nullptr, constants);
+        if (constants != nullptr)
+          EXPECT_EQ(comm_->tuningContext.tuningConstants.baseLatencies[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE],
+                    constants->baseLatencies[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE]);
         *context = &contextSentinel;
         return ncclSuccess;
       });
