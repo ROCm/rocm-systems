@@ -18,7 +18,7 @@ This feature is inherited from NCCL 2.31 (RAS diagnostics). The checks only
 collect and compare information. They do not send data between GPUs and do not
 assess the health of the network or of the GPU links. To verify the GPU
 peer-to-peer data paths on a node, use the active diagnostics
-(``NCCL_RUN_DIAGNOSTICS``) instead.
+(``NCCL_RUN_DIAGNOSTICS``) instead, see :ref:`using-rccl-diagnostics`.
 
 The report can be produced in two ways:
 
