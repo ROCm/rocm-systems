@@ -655,6 +655,10 @@ typedef enum hipDeviceAttribute_t {
                                                  ///< 0 if no cache information is available.
                                                  ///< AMD-specific: populated only by the Linux
                                                  ///< ROCm backend; other backends report 0.
+                                                 ///< On a partitioned AMD Instinct GPU this is
+                                                 ///< the partition's L3 share, scaled by the
+                                                 ///< memory-partition (NPS) mode, not by the
+                                                 ///< compute-partition count.
 
   hipDeviceAttributeAmdSpecificEnd = 19999,
   hipDeviceAttributeVendorSpecificBegin = 20000,
