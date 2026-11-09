@@ -1027,7 +1027,7 @@ void VirtualGPU::RetiringSignalTracker::RecycleParked() {
     StoreValue(signal, kInitSignalValueOne);
     signal->armed_ = true;
     // ActiveSignal swaps interrupt and host-memory signals in from their own pools
-    if (signal->flags_.interrupt_ && gpu_.dev().ActiveWait()) {
+    if (signal->flags_.interrupt_) {
       signal_pool_irq_.push(signal);
     } else if (!signal->in_device_memory_) {
       host_signals_.push_back(signal);
@@ -1251,11 +1251,13 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
         (ts->command().Callback() != nullptr || ts->command().GetBatchHead() != nullptr) &&
         !ts->command().CpuWaitRequested();
   }
-  bool use_irq = enqueHandler || (IS_WINDOWS && gpu_.ForceIrq());
-  // Check if the signal doesn't match the requested one.
-  // Note: runtime needs the interrupts for the callbacks and the marker events, but it can reuse
-  // the non-interrupt signals for the regular dispatches
-  if ((signal_list_[current_id_]->flags_.interrupt_ != use_irq) && gpu_.dev().ActiveWait()) {
+  bool use_irq = enqueHandler || (IS_WINDOWS && gpu_.ForceIrq()) || !gpu_.dev().ActiveWait();
+  if (!use_irq) {
+    PlaceForUse(timing_only);
+  }
+  // The scheduling policy can change after the signal pool is created. Check the selected
+  // signal's type even in blocking mode, so callbacks never use a polling-only signal.
+  if (signal_list_[current_id_]->flags_.interrupt_ != use_irq) {
     // Use different stacks if an interrupt is required or not.
     // @note: if runtime needs an interrupt, then the tracking list replaces the original signal
     // with the interrupt signal and saves the signal without interrupt, or vise versa
@@ -1276,9 +1278,6 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
       signal_list_[current_id_] = pool_get.top();
       pool_get.pop();
     }
-  }
-  if (!use_irq) {
-    PlaceForUse(timing_only);
   }
   ProfilingSignal* prof_signal = signal_list_[current_id_];
   const bool blocking_callback = enqueHandler && ts->command().Callback() != nullptr &&
