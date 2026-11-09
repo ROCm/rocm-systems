@@ -15,13 +15,7 @@
 # supported precisions to what RDNA4 actually implements.
 # -----------------------------------------------------------------------------
 
-import re
-import subprocess
-import threading
-from ctypes import c_int64
-from pathlib import Path
-from types import TracebackType
-from typing import Optional, Type
+from ctypes import c_int64, c_uint64, sizeof
 
 import utils.hip_interface as hip
 
@@ -60,18 +54,37 @@ GL2_BANKS = 32
 GL2_HIT_RETURN_BYTES_PER_CLOCK = 128
 GL2_CAPACITY_BYTES = 8 * 1024 * 1024
 
-# L0 stays inside one TCP. L1 and L2 both miss GL0 and still fit in GL2, so
-# both are GL2-hit roofs. L2 is the larger of the two resident sets. The full
-# 8 MB L2 does not fit: it misses into the Infinity Cache and measures the
-# fill path instead of the GL2 return.
-L0_WORKING_SET_BYTES = 16 * 1024
+# L0 is one whole TCP. L1 and L2 both miss GL0 and still fit in GL2, so both
+# are GL2-hit roofs. L2 is the larger of the two resident sets. The full 8 MB
+# L2 does not fit: it misses into the Infinity Cache and measures the fill
+# path instead of the GL2 return.
+L0_WORKING_SET_BYTES = 32 * 1024
 L1_WORKING_SET_BYTES = 1 * 1024 * 1024
 L2_WORKING_SET_BYTES = 4 * 1024 * 1024
-CACHE_WORKGROUPS_PER_CU = 128
+# On the RX 9070 XT, 8 workgroups per multiprocessor and 4 loads in flight
+# reached 95-97 percent of the GL2 return. The same launch only filled about
+# 60 percent of the GL0 return. GL0 holds the whole working set, so extra
+# waves hide load latency instead of thrashing: 128 workgroups and 8 loads
+# in flight reached about 75 percent, and stayed under the 128 B return.
+CACHE_WORKGROUPS_PER_CU = 8
+CACHE_LOADS_IN_FLIGHT = 4
+L0_WORKGROUPS_PER_CU = 128
+L0_LOADS_IN_FLIGHT = 8
 # Long enough that kernel launch is a small part of the timed region.
 # 8 GB at the first reading lasted under 2 ms.
 CACHE_TRAFFIC_BYTES = 64 * 1024 * 1024 * 1024
 CACHE_ELEMENT_BYTES = 16
+
+
+# Navi 48 device memory: 256-bit GDDR6 at 20 Gbps per pin (AMD RX 9070 XT
+# spec). A read-only stream cannot exceed the pin rate.
+DRAM_BUS_BITS = 256
+DRAM_GBPS_PER_PIN = 20
+
+
+def dram_pin_bandwidth_gbps(bus_bits: int, gbps_per_pin: float) -> float:
+    """Peak DRAM bandwidth in decimal GB/s from bus width and pin data rate."""
+    return bus_bits * gbps_per_pin / 8
 
 
 def pipe_bandwidth_gbps(instances: int, bytes_per_clock: int, clock_hz: float) -> float:
@@ -80,71 +93,15 @@ def pipe_bandwidth_gbps(instances: int, bytes_per_clock: int, clock_hz: float) -
     return instances * bytes_per_clock * clock_hz / 1e9
 
 
-def read_gfx_clock_hz() -> float:
-    """Current gfx clock in Hz, or 0 when neither sysfs nor amd-smi answers.
+# wall_clock64() on gfx12 counts a constant 100 MHz reference.
+WALL_CLOCK_HZ = 100e6
 
-    pp_dpm_sclk is the level the shader is in. amd-smi is the fallback; it is
-    too slow to sample from inside a short kernel.
-    """
-    for sclk_path in Path("/sys/class/drm").glob("card*/device/pp_dpm_sclk"):
-        try:
-            text = sclk_path.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        for line in text.splitlines():
-            if "*" not in line:
-                continue
-            match = re.search(r"(\d+)\s*Mhz", line, re.IGNORECASE)
-            if match is not None:
-                return float(match.group(1)) * 1e6
-    try:
-        completed = subprocess.run(
-            ["amd-smi", "metric", "--gpu", "0", "--clock"],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    except (OSError, subprocess.TimeoutExpired):
+
+def shader_clock_hz(shader_cycles: int, wall_ticks: int) -> float:
+    """Shader clock measured in one workgroup: clock64 cycles per wall second."""
+    if wall_ticks <= 0:
         return 0.0
-    match = re.search(r"GFX_0:\s*CLK:\s*(\d+)\s*MHz", completed.stdout)
-    if match is None:
-        return 0.0
-    return float(match.group(1)) * 1e6
-
-
-class _GfxClockSampler:
-    """Keep the highest gfx clock observed while a benchmark is running."""
-
-    def __init__(self) -> None:
-        self._samples = []
-        self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._sample, daemon=True)
-
-    def __enter__(self) -> "_GfxClockSampler":
-        self._thread.start()
-        return self
-
-    def __exit__(
-        self,
-        exc_type: Optional[Type[BaseException]],
-        exc: Optional[BaseException],
-        traceback: Optional[TracebackType],
-    ) -> None:
-        self._stop.set()
-        self._thread.join(timeout=15)
-
-    def _sample(self) -> None:
-        while not self._stop.is_set():
-            clock_hz = read_gfx_clock_hz()
-            if clock_hz > 0.0:
-                self._samples.append(clock_hz)
-            self._stop.wait(0.05)
-
-    def max_hz(self) -> float:
-        if not self._samples:
-            return 0.0
-        return max(self._samples)
+    return shader_cycles * WALL_CLOCK_HZ / wall_ticks
 
 
 # =============================================================================
@@ -192,7 +149,13 @@ class Bench_gfx1201(benchmark_gfx12_base.Bench_gfx12):
 
         The result is stored under the DRAM roofline test (CSV column DRAMBw).
         """
-        return self.hbm_bw_benchmark(device, "DRAM_bw", "DRAM")
+        peak = self.hbm_bw_benchmark(device, "DRAM_bw", "DRAM")
+        ceiling = dram_pin_bandwidth_gbps(DRAM_BUS_BITS, DRAM_GBPS_PER_PIN)
+        print(
+            f"DRAM pin ceiling: {DRAM_BUS_BITS}-bit x {DRAM_GBPS_PER_PIN} Gbps "
+            f"= {ceiling:.1f} GB/sec ({100.0 * peak / ceiling:.1f}%)"
+        )
+        return peak
 
     # -----------------------------------------------------------------------------
     # Infinity Cache (MALL) bandwidth benchmark
@@ -206,6 +169,9 @@ class Bench_gfx1201(benchmark_gfx12_base.Bench_gfx12):
             GL0_INSTANCES,
             GL0_READ_BYTES_PER_CLOCK,
             "GL0 read return",
+            L0_WORKGROUPS_PER_CU,
+            L0_LOADS_IN_FLIGHT,
+            "cache_l0_bw",
         )
 
     def l1_bw_bench(self, device: int) -> float:
@@ -242,63 +208,95 @@ class Bench_gfx1201(benchmark_gfx12_base.Bench_gfx12):
         instances: int,
         bytes_per_clock: int,
         pipe_name: str,
+        workgroups_per_cu: int = CACHE_WORKGROUPS_PER_CU,
+        loads_in_flight: int = CACHE_LOADS_IN_FLIGHT,
+        kernel_name: str = "cache_resident_bw",
     ) -> float:
         """Repeated 16-byte reads of one buffer, scored against one pipe."""
+        workgroup_size = benchmark_base.DEFAULT_WORKGROUP_SIZE
         element_count = working_set_bytes // CACHE_ELEMENT_BYTES
+        loads_per_step = workgroup_size * loads_in_flight
         if (
             working_set_bytes % CACHE_ELEMENT_BYTES != 0
-            or element_count <= 0
+            or element_count < loads_per_step
             or element_count & (element_count - 1) != 0
         ):
             raise ValueError(
-                "cache working set must be 16 times a power of two, "
-                f"got {working_set_bytes} bytes"
+                "cache working set must be a power of two of at least "
+                f"{loads_per_step * CACHE_ELEMENT_BYTES} bytes, "
+                f"got {working_set_bytes}"
             )
 
         hip.hipSetDevice(device)
         num_experiments = benchmark_base.DEFAULT_NUM_EXPERIMENTS
-        workgroup_size = benchmark_base.DEFAULT_WORKGROUP_SIZE
         cus = hip.hipGetDeviceProperties(device).multiProcessorCount
-        workgroups = CACHE_WORKGROUPS_PER_CU * cus
+        workgroups = workgroups_per_cu * cus
         per_pass_bytes = workgroups * working_set_bytes
         iters = max(1, CACHE_TRAFFIC_BYTES // per_pass_bytes)
         total_bytes = iters * per_pass_bytes
 
         src = hip.hipMalloc(working_set_bytes)
         dummy = hip.hipMalloc(CACHE_ELEMENT_BYTES)
+        clocks = hip.hipMalloc(2 * sizeof(c_uint64))
         program = self.Program(self.cache_resident_src)
-        func = program.get_kernel("cache_resident_bw")
-        args = [src, element_count, iters, dummy]
+        func = program.get_kernel(kernel_name)
+        args = [src, element_count, iters, dummy, clocks]
         grid = [workgroups, 1, 1]
         block = [workgroup_size, 1, 1]
 
         self.launch_kernel(func, grid, block, 0, None, args)
         hip.hipDeviceSynchronize()
 
-        with _GfxClockSampler() as clocks:
-            samples = self.run_get_samples(
-                num_experiments, total_bytes, func, grid, block, 0, None, args
+        samples = []
+        for experiment in range(num_experiments):
+            samples.append(
+                self.timed_clocked_launch(func, grid, block, args, clocks, total_bytes)
             )
-        peak = max(samples)
-        clock_hz = clocks.max_hz()
-        ceiling_text = ""
-        if clock_hz > 0.0:
-            ceiling = pipe_bandwidth_gbps(instances, bytes_per_clock, clock_hz)
-            percent = 100.0 * peak / ceiling
-            ceiling_text = (
-                f", {pipe_name} ceiling:{ceiling:.1f} GB/sec "
-                f"({percent:.1f}% at {clock_hz / 1e6:.0f} MHz)"
-            )
+            self.show_progress(float(experiment + 1) / num_experiments)
+        print()
 
+        peak, clock_hz = max(samples)
+        ceiling = pipe_bandwidth_gbps(instances, bytes_per_clock, clock_hz)
         print(
             f"{label} BW, GPU ID: {device}, workgroupSize:{workgroup_size}, "
             f"workgroups:{workgroups}, experiments:{num_experiments}, "
             f"working set:{working_set_bytes} bytes, iters:{iters}, "
             f"traffic:{total_bytes} bytes, "
             f"duration:{total_bytes / peak / 1e6:.1f} ms, "
-            f"peak:{peak:.1f} GB/sec{ceiling_text}"
+            f"peak:{peak:.1f} GB/sec, {pipe_name} ceiling:{ceiling:.1f} GB/sec "
+            f"({100.0 * peak / ceiling:.1f}% at {clock_hz / 1e6:.0f} MHz)"
         )
         return peak
+
+    def timed_clocked_launch(
+        self,
+        func: object,
+        grid: list,
+        block: list,
+        args: list,
+        clocks: hip.HIPDeviceMemory,
+        total_bytes: int,
+    ) -> tuple:
+        """One launch. Returns (GB/s, shader clock in Hz measured in-kernel).
+
+        The kernel records the longest workgroup's clock64 and wall_clock64
+        spans, so each sample is scored at the clock it actually ran at.
+        """
+        zeros = (c_uint64 * 2)(0, 0)
+        spans = (c_uint64 * 2)()
+        hip.hipMemcpyHtoD(clocks, zeros, sizeof(zeros))
+        event_start = hip.hipEventCreate()
+        event_stop = hip.hipEventCreate()
+        hip.hipEventRecord(event_start)
+        self.launch_kernel(func, grid, block, 0, None, args)
+        hip.hipEventRecord(event_stop)
+        hip.hipDeviceSynchronize()
+        event_ms = hip.hipEventElapsedTime(event_start, event_stop)
+        hip.hipMemcpyDtoH(spans, clocks, sizeof(spans))
+        return (
+            float(total_bytes) / event_ms / 1e6,
+            shader_clock_hz(spans[0], spans[1]),
+        )
 
     def mall_bw_bench(self, device: int) -> float:
         """Measure Infinity Cache bandwidth over a working set it holds but L2 does
@@ -367,28 +365,86 @@ class Bench_gfx1201(benchmark_gfx12_base.Bench_gfx12):
     def set_kernel_source(self) -> None:
         super().set_kernel_source()
 
-        # 16-byte reads of one buffer. count is a power of two. Adding
-        # iter * step rotates which thread reads which element, so each
-        # iteration still covers the buffer once and the address is not
-        # invariant. A fixed address lets the compiler keep a small buffer
-        # in registers after the first pass.
+        # 16-byte reads of one buffer. count is a power of two and a multiple
+        # of 4 * blockDim.x. Adding iter * step rotates which thread reads
+        # which element, so each iteration still covers the buffer once and
+        # the address is not invariant. A fixed address lets the compiler
+        # keep a small buffer in registers after the first pass. The four
+        # accumulators keep four loads in flight per thread. Thread 0 of each
+        # workgroup records its clock64 and wall_clock64 spans; clocks keeps
+        # the longest of each.
         self.cache_resident_src = """
             extern "C" __global__ void cache_resident_bw(
-                const __uint128_t *src, int count, int iters, __uint128_t *dummy)
+                const __uint128_t *src, int count, int iters, __uint128_t *dummy,
+                unsigned long long *clocks)
             {
                 const int tid = (int)threadIdx.x;
                 const int step = (int)blockDim.x;
-                __uint128_t sink = 0;
+                const int mask = count - 1;
+                unsigned long long cycles_start = 0, wall_start = 0;
+                if (tid == 0) {
+                    cycles_start = clock64();
+                    wall_start = wall_clock64();
+                }
+                __uint128_t s0 = 0, s1 = 0, s2 = 0, s3 = 0;
 
                 #pragma unroll 1
                 for (int iter = 0; iter < iters; ++iter) {
-                    const int base = (iter * step) & (count - 1);
+                    const int base = (iter * step) & mask;
                     #pragma unroll 1
-                    for (int element = tid; element < count; element += step) {
-                        sink ^= src[(base + element) & (count - 1)];
+                    for (int element = tid; element < count; element += step * 4) {
+                        s0 ^= src[(base + element) & mask];
+                        s1 ^= src[(base + element + step) & mask];
+                        s2 ^= src[(base + element + step * 2) & mask];
+                        s3 ^= src[(base + element + step * 3) & mask];
                     }
                 }
+                __uint128_t sink = s0 ^ s1 ^ s2 ^ s3;
                 if (sink == 0) dummy[0] = sink;
+                if (tid == 0) {
+                    atomicMax(&clocks[0], clock64() - cycles_start);
+                    atomicMax(&clocks[1], wall_clock64() - wall_start);
+                }
+            }
+
+            // Eight independent loads. The 16-32 KB GL0 set is one inner
+            // pass at this width, so a 4-load chain leaves the TCP return idle.
+            extern "C" __global__ void cache_l0_bw(
+                const __uint128_t *src, int count, int iters, __uint128_t *dummy,
+                unsigned long long *clocks)
+            {
+                const int tid = (int)threadIdx.x;
+                const int step = (int)blockDim.x;
+                const int mask = count - 1;
+                unsigned long long cycles_start = 0, wall_start = 0;
+                if (tid == 0) {
+                    cycles_start = clock64();
+                    wall_start = wall_clock64();
+                }
+                __uint128_t s0 = 0, s1 = 0, s2 = 0, s3 = 0;
+                __uint128_t s4 = 0, s5 = 0, s6 = 0, s7 = 0;
+
+                #pragma unroll 1
+                for (int iter = 0; iter < iters; ++iter) {
+                    const int base = (iter * step) & mask;
+                    #pragma unroll 1
+                    for (int element = tid; element < count; element += step * 8) {
+                        s0 ^= src[(base + element) & mask];
+                        s1 ^= src[(base + element + step) & mask];
+                        s2 ^= src[(base + element + step * 2) & mask];
+                        s3 ^= src[(base + element + step * 3) & mask];
+                        s4 ^= src[(base + element + step * 4) & mask];
+                        s5 ^= src[(base + element + step * 5) & mask];
+                        s6 ^= src[(base + element + step * 6) & mask];
+                        s7 ^= src[(base + element + step * 7) & mask];
+                    }
+                }
+                __uint128_t sink = s0 ^ s1 ^ s2 ^ s3 ^ s4 ^ s5 ^ s6 ^ s7;
+                if (sink == 0) dummy[0] = sink;
+                if (tid == 0) {
+                    atomicMax(&clocks[0], clock64() - cycles_start);
+                    atomicMax(&clocks[1], wall_clock64() - wall_start);
+                }
             }
             """
 

@@ -23,17 +23,23 @@ import roofline.benchmark.benchmark_base as benchmark_base
 import utils.utils_profile as utils_profile
 from roofline import run_benchmark
 from roofline.benchmark.gfx12.benchmark_gfx1201 import (
+    CACHE_LOADS_IN_FLIGHT,
+    DRAM_BUS_BITS,
+    DRAM_GBPS_PER_PIN,
     GL0_CAPACITY_BYTES,
     GL0_INSTANCES,
     GL0_READ_BYTES_PER_CLOCK,
     GL2_BANKS,
     GL2_CAPACITY_BYTES,
     GL2_HIT_RETURN_BYTES_PER_CLOCK,
+    L0_LOADS_IN_FLIGHT,
     L0_WORKING_SET_BYTES,
     L1_WORKING_SET_BYTES,
     L2_WORKING_SET_BYTES,
     Bench_gfx1201,
+    dram_pin_bandwidth_gbps,
     pipe_bandwidth_gbps,
+    shader_clock_hz,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
 
@@ -254,6 +260,8 @@ def test_gfx1201_cache_roofs_stay_inside_the_cache_that_serves_them():
     assert_source_defines(
         bench.cache_resident_src, "cache_resident_bw", "gfx1201 cache"
     )
+    assert_source_defines(bench.cache_resident_src, "cache_l0_bw", "gfx1201 L0")
+    assert L0_WORKING_SET_BYTES // 16 >= 256 * L0_LOADS_IN_FLIGHT
 
     assert L0_WORKING_SET_BYTES <= GL0_CAPACITY_BYTES
     assert GL0_CAPACITY_BYTES < L1_WORKING_SET_BYTES < L2_WORKING_SET_BYTES
@@ -265,6 +273,7 @@ def test_gfx1201_cache_roofs_stay_inside_the_cache_that_serves_them():
     ):
         element_count = working_set // 16
         assert working_set % 16 == 0
+        assert element_count >= 256 * CACHE_LOADS_IN_FLIGHT
         assert element_count & (element_count - 1) == 0
 
     # 2.97 GHz, the boost the cache spec comparison used. Decimal GB/s.
@@ -276,6 +285,10 @@ def test_gfx1201_cache_roofs_stay_inside_the_cache_that_serves_them():
     ) == pytest.approx(12165.12)
     # The GL1 port is the ceiling these resident reads must not be scored against.
     assert pipe_bandwidth_gbps(8, 128, 2.97e9) == pytest.approx(3041.28)
+    assert dram_pin_bandwidth_gbps(DRAM_BUS_BITS, DRAM_GBPS_PER_PIN) == 640.0
+    # 3e9 shader cycles over 1e8 ticks of the 100 MHz wall clock is 3 GHz.
+    assert shader_clock_hz(3_000_000_000, 100_000_000) == pytest.approx(3e9)
+    assert shader_clock_hz(1, 0) == 0.0
 
 
 def test_gfx1201_measures_infinity_cache_with_its_own_kernel():
