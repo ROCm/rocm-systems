@@ -54,6 +54,27 @@ jobs:
     timeout-minutes: 20
 
     steps:
+      # The job is placed by label, and a GPU label can be on several hosts
+      # (lstt-gfx90a is on three), so check that this is the host the matrix
+      # row describes before comparing anything with its values. When a host's
+      # runner carries a label with its own name, add it to runs-on so a job is
+      # never sent to a runner that was not meant for this row.
+      - name: Host identity
+        id: host
+        shell: bash
+        env:
+          HOST: ${{ matrix.host }}
+          LABEL: ${{ matrix.label }}
+        run: |
+          set -euo pipefail
+          echo "### ${HOST}" >> "$GITHUB_STEP_SUMMARY"
+          got="$(hostname -s)"
+          if [ "$got" != "${HOST}" ]; then
+            echo "- host: ran on ${got}, not ${HOST}" >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::This row is for ${HOST} but the job ran on ${got}. The label ${LABEL} is on more than one host: add a label that only ${HOST} carries to runs-on."
+            exit 1
+          fi
+
       # Host-level, so no container: /sys/class/dmi is what the firmware
       # exposes to the booted kernel. Nothing here reads the repository, so
       # there is no checkout.
@@ -65,7 +86,6 @@ jobs:
         run: |
           set -euo pipefail
           got="$(cat /sys/class/dmi/id/bios_version)"
-          echo "### ${HOST}" >> "$GITHUB_STEP_SUMMARY"
           if [ -z "${EXPECT_BIOS}" ]; then
             echo "- BIOS: not recorded for this host" >> "$GITHUB_STEP_SUMMARY"
           elif [ "$got" = "${EXPECT_BIOS}" ]; then
@@ -80,7 +100,10 @@ jobs:
       # is never printed: it is an internal build. Test the module's directory,
       # not its version file: only the DKMS driver exports a version, so the
       # inbox driver would otherwise be reported as not loaded.
+      # The checks after the host check run even when an earlier one fails, so
+      # a run reports every layer; they are skipped on the wrong host.
       - name: amdgpu driver
+        if: ${{ !cancelled() && steps.host.outcome == 'success' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -92,20 +115,34 @@ jobs:
           echo "- amdgpu: loaded" >> "$GITHUB_STEP_SUMMARY"
 
       # The same container shape the real CI jobs use, so this proves what they
-      # need: the devices are passed through and ROCm sees the right ASIC.
-      # Nothing from rocminfo or docker is printed: its output includes the
-      # kernel driver version, and a log of a failure would too.
+      # need: the devices are passed through and ROCm sees the right ASIC. The
+      # output of rocminfo and docker is never printed, because it includes the
+      # kernel driver version; instead each cause gets its own message.
       - name: GPU
+        if: ${{ !cancelled() && steps.host.outcome == 'success' }}
         shell: bash
+        env:
+          GFX: ${{ matrix.gfx }}
         run: |
           set -euo pipefail
-          if docker run --rm \
-              --device=/dev/kfd --device=/dev/dri --group-add video \
-              rocm/dev-ubuntu-22.04:7.2 \
-              bash -c 'rocminfo | grep -q ${{ matrix.gfx }}' > /dev/null 2>&1; then
-            echo "- GPU: ${{ matrix.gfx }} visible" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "- GPU: ${{ matrix.gfx }} not visible" >> "$GITHUB_STEP_SUMMARY"
-            echo "::error::${{ matrix.gfx }} was not visible inside the container. Run the same docker command on the host for details."
+          fail() {
+            echo "- GPU: $1" >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::$1"
             exit 1
+          }
+          [ -c /dev/kfd ] || fail "/dev/kfd is missing on the host, so no container can reach the GPU"
+          [ -d /dev/dri ] || fail "/dev/dri is missing on the host"
+          rc=0
+          out="$(docker run --rm \
+            --device=/dev/kfd --device=/dev/dri --group-add video \
+            rocm/dev-ubuntu-22.04:7.2 rocminfo 2>/dev/null)" || rc=$?
+          case "$rc" in
+            0) ;;
+            125) fail "docker could not start the container (daemon down, or the image could not be pulled)" ;;
+            126 | 127) fail "the container started but could not run rocminfo (exit $rc)" ;;
+            *) fail "rocminfo failed inside the container (exit $rc): a broken ROCm stack or driver" ;;
+          esac
+          if ! grep -q "$GFX" <<< "$out"; then
+            fail "rocminfo ran but did not report $GFX: a different ASIC, or the GPU is not visible"
           fi
+          echo "- GPU: $GFX visible" >> "$GITHUB_STEP_SUMMARY"
