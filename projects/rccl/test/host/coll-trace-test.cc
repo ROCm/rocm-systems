@@ -574,13 +574,14 @@ TEST_F(CollTraceMicrotest, Trace_AllGatherUsesEveryLocalRank) {
   SetParam("NCCL_COLLTRACE_MAX_DUMP_SIZE", 1);
   for (int localRanks : {2, 8, 16}) {
     std::vector<int> rankMap(localRanks);
-    for (int localRank = 0; localRank < localRanks; ++localRank) rankMap[localRank] = localRank;
+    for (int localRank = 0; localRank < localRanks; ++localRank) rankMap[localRank] = 4 + 2 * localRank;
     for (int localRank : {0, localRanks - 1}) {
       SCOPED_TRACE(localRanks);
       SCOPED_TRACE(localRank);
       ResetDebugLog();
       g_allGathers.clear();
-      comm_->rank = localRank;
+      comm_->rank = rankMap[localRank];
+      comm_->nRanks = rankMap.back() + 1;
       comm_->localRank = localRank;
       comm_->localRanks = localRanks;
       comm_->localRankToRank = rankMap.data();
@@ -600,6 +601,32 @@ TEST_F(CollTraceMicrotest, Trace_AllGatherUsesEveryLocalRank) {
       EXPECT_NE(lines[1].find("min_latency_us 5000.000000, max_latency_us 10000.000000"), std::string::npos);
     }
   }
+}
+
+TEST_F(CollTraceMicrotest, Trace_SingleLocalRankReportsItsOwnLatencies) {
+  SetParam("NCCL_COLLTRACE_RECORD_MAX", 2);
+  SetParam("NCCL_COLLTRACE_MAX_DUMP_SIZE", 1);
+  int rankMap[] = {0};
+  comm_->rank = 0;
+  comm_->nRanks = 1;
+  comm_->localRank = 0;
+  comm_->localRanks = 1;
+  comm_->localRankToRank = rankMap;
+  auto trace = std::make_unique<CollTrace>(comm_.get());
+
+  Enqueue(trace.get(), 2.0f);
+  Enqueue(trace.get(), 10.0f);
+  trace.reset();
+
+  ASSERT_EQ(g_allGathers.size(), 1u);
+  EXPECT_EQ(g_allGathers[0].ranks, rankMap);
+  EXPECT_EQ(g_allGathers[0].rank, 0);
+  EXPECT_EQ(g_allGathers[0].nranks, 1);
+  EXPECT_EQ(g_allGathers[0].mine, (std::vector<float>{2.0f, 10.0f}));
+  auto lines = DebugLogMatching("coll_id");
+  ASSERT_EQ(lines.size(), 2u);
+  EXPECT_NE(lines[0].find("min_latency_us 2000.000000, max_latency_us 2000.000000"), std::string::npos);
+  EXPECT_NE(lines[1].find("min_latency_us 10000.000000, max_latency_us 10000.000000"), std::string::npos);
 }
 
 TEST_F(CollTraceMicrotest, Trace_ReportErrorAtDestroyIsLogged) {
