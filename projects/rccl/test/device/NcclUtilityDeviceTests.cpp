@@ -9,13 +9,11 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
-#include <cstdlib>
 #include <cstring>
-#include <thread>
 #include <vector>
 
 #include "DeviceTestBase.hpp"
+#include "../common/ProcessIsolatedTestRunner.hpp"
 
 #include "nccl_device/coop.h"
 #include "nccl_device/utility.h"
@@ -547,11 +545,7 @@ constexpr int kNumSpans = 2;
 constexpr int kWarpsPerSpan = 2;
 constexpr int kNumWarps = kNumSpans * kWarpsPerSpan;
 constexpr int kSpanRounds = 64;
-// wall_clock64, not clock64: gfx11's clock64 is a 20-bit counter, so a delay that straddles its wrap never ends.
-constexpr uint64_t kSpanDelayTicks = 10000;
-constexpr uint64_t kSpanStartWaitTicks = 200000000;
-
-__global__ void kernelWarpSpanSync(int* mismatches, int* roundsDone) {
+__global__ void kernelWarpSpanSync(int* mismatches, int* roundsDone, uint64_t delayTicks, uint64_t startWaitTicks) {
   __shared__ int slot[kNumWarps];
   __shared__ uint32_t span0Done;
   const int w = threadIdx.x / warpSize;
@@ -571,14 +565,14 @@ __global__ void kernelWarpSpanSync(int* mismatches, int* roundsDone) {
   // so spans that share one barrier slot fail too.
   if (spanId == 1) {
     const uint64_t t0 = wall_clock64();
-    while (spanStarted.load(cuda::memory_order_acquire) == 0 && wall_clock64() - t0 < kSpanStartWaitTicks) {}
+    while (spanStarted.load(cuda::memory_order_acquire) == 0 && wall_clock64() - t0 < startWaitTicks) {}
     if (spanStarted.load(cuda::memory_order_acquire) == 0) bad += kSpanRounds;
   }
   int rounds = 0;
   for (int r = 1; r <= kSpanRounds; ++r) {
     if (idx == (r & 1)) {
       const uint64_t t0 = wall_clock64();
-      while (wall_clock64() - t0 < kSpanDelayTicks) {}
+      while (wall_clock64() - t0 < delayTicks) {}
     }
     if (lane == 0) vslot[w] = r;
     span.sync();
@@ -596,41 +590,38 @@ __global__ void kernelWarpSpanSync(int* mismatches, int* roundsDone) {
 }
 
 TEST_F(NcclUtilityDeviceTest, CoopWarpSpanSplitSpansSyncReleasesAfterAllArriveAndIsReusable) {
-  DeviceBuffer<int> d_bad(kNumSpans);
-  DeviceBuffer<int> d_rounds(kNumWarps);
-  ASSERT_NO_FATAL_FAILURE(d_bad.zero());
-  ASSERT_NO_FATAL_FAILURE(d_rounds.zero());
-  int warpSz = 0;
-  ASSERT_EQ(hipDeviceGetAttribute(&warpSz, hipDeviceAttributeWarpSize, 0), hipSuccess);
-  hipEvent_t done;
-  ASSERT_EQ(hipEventCreate(&done), hipSuccess);
-  kernelWarpSpanSync<<<1, kNumWarps * warpSz>>>(d_bad.ptr, d_rounds.ptr);
-  ASSERT_EQ(hipGetLastError(), hipSuccess);
-  ASSERT_EQ(hipEventRecord(done, 0), hipSuccess);
+  RUN_ISOLATED_TESTS(
+      ProcessIsolatedTestRunner::TestConfig(
+          "NcclUtilityDeviceTest.CoopWarpSpanSplitSpansSyncReleasesAfterAllArriveAndIsReusable", []() {
+            int device = 0;
+            int warpSize = 0;
+            int wallClockRateKhz = 0;
+            ASSERT_EQ(hipGetDevice(&device), hipSuccess);
+            ASSERT_EQ(hipDeviceGetAttribute(&warpSize, hipDeviceAttributeWarpSize, device), hipSuccess);
+            ASSERT_EQ(hipDeviceGetAttribute(&wallClockRateKhz, hipDeviceAttributeWallClockRate, device), hipSuccess);
+            ASSERT_GT(wallClockRateKhz, 0);
+            const uint64_t delayTicks = static_cast<uint64_t>(wallClockRateKhz) / 10;
+            const uint64_t startWaitTicks = static_cast<uint64_t>(wallClockRateKhz) * 2000;
+            DeviceBuffer<int> badBuffer(kNumSpans);
+            DeviceBuffer<int> roundsBuffer(kNumWarps);
+            ASSERT_NO_FATAL_FAILURE(badBuffer.zero());
+            ASSERT_NO_FATAL_FAILURE(roundsBuffer.zero());
+            kernelWarpSpanSync<<<1, kNumWarps * warpSize>>>(badBuffer.ptr, roundsBuffer.ptr,
+                                                          delayTicks, startWaitTicks);
+            ASSERT_EQ(hipGetLastError(), hipSuccess);
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
-  // A hung barrier must fail, not stall; the kernel may still touch the buffers, so exit without freeing them.
-  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
-  hipError_t q;
-  while ((q = hipEventQuery(done)) == hipErrorNotReady) {
-    if (std::chrono::steady_clock::now() > deadline) {
-      ADD_FAILURE() << "ncclCoopWarpSpan::sync kernel did not finish within 60s (barrier hang)";
-      std::fflush(stdout);
-      std::fflush(stderr);
-      std::_Exit(EXIT_FAILURE);
-    }
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-  }
-  ASSERT_EQ(q, hipSuccess);
-  (void)hipEventDestroy(done);
-
-  const std::vector<int> bad = d_bad.copyTo();
-  const std::vector<int> rounds = d_rounds.copyTo();
-  for (int s = 0; s < kNumSpans; ++s) {
-    EXPECT_EQ(bad[s], 0) << "span " << s << ": partner write not visible/ordered after sync()";
-  }
-  for (int w = 0; w < kNumWarps; ++w) {
-    EXPECT_EQ(rounds[w], kSpanRounds) << "warp " << w << " did not complete all rounds";
-  }
+            const std::vector<int> mismatches = badBuffer.copyTo();
+            const std::vector<int> rounds = roundsBuffer.copyTo();
+            for (int span = 0; span < kNumSpans; ++span) {
+              EXPECT_EQ(mismatches[span], 0) << "span " << span << ": partner write not visible/ordered after sync()";
+            }
+            for (int warp = 0; warp < kNumWarps; ++warp) {
+              EXPECT_EQ(rounds[warp], kSpanRounds) << "warp " << warp << " did not complete all rounds";
+            }
+          })
+          .withTimeout(std::chrono::seconds(60))
+          .withNumGpus(1));
 }
 
 }  // namespace
