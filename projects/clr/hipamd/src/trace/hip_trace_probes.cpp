@@ -2983,16 +2983,16 @@ void exit_HipDispatchTable_hipGetDevicePropertiesR0600(bool rocm_trace_exception
             TraceLoggingBoolean(static_cast<uint8_t>(rocm_trace_exception), "exception"));
 }
 
-hipError_t probe_HipDispatchTable_hipGetDevicePropertiesR0600(hipDeviceProp_tR0600 * prop, int device) {
+hipError_t probe_HipDispatchTable_hipGetDevicePropertiesR0600(hipDeviceProp_tR0600 * prop, int deviceId) {
     TraceLoggingWrite(rocm_hip, "hipGetDevicePropertiesR0600_enter",
             TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
             TraceLoggingKeyword(ROCM_TRACE_KW_API),
             TraceLoggingOpcode(WINEVENT_OPCODE_START),
             TraceLoggingPointer((rocm_hip_trace_capture >= ROCM_TRACE_CAPTURE_SCALARS ? reinterpret_cast<const void*>(prop) : static_cast<const void*>(nullptr)), "prop"),
-            TraceLoggingInt32((rocm_hip_trace_capture >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<int32_t>(device) : int32_t{}), "device"));
+            TraceLoggingInt32((rocm_hip_trace_capture >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<int32_t>(deviceId) : int32_t{}), "deviceId"));
     hipError_t rocm_trace_result{};
     try {
-        rocm_trace_result = saved_HipDispatchTable.hipGetDevicePropertiesR0600_fn(prop, device);
+        rocm_trace_result = saved_HipDispatchTable.hipGetDevicePropertiesR0600_fn(prop, deviceId);
     } catch (...) {
         exit_HipDispatchTable_hipGetDevicePropertiesR0600(true, rocm_trace_result);
         throw;
@@ -14469,7 +14469,7 @@ void exit_HipDispatchTable_hipMemAdvise_v2(bool rocm_trace_exception, hipError_t
             TraceLoggingBoolean(static_cast<uint8_t>(rocm_trace_exception), "exception"));
 }
 
-hipError_t probe_HipDispatchTable_hipMemAdvise_v2(const void * dev_ptr, size_t count, hipMemoryAdvise advice, hipMemLocation device) {
+hipError_t probe_HipDispatchTable_hipMemAdvise_v2(const void * dev_ptr, size_t count, hipMemoryAdvise advice, hipMemLocation location) {
     TraceLoggingWrite(rocm_hip, "hipMemAdvise_v2_enter",
             TraceLoggingLevel(ROCM_TRACE_LEVEL_INFORMATION),
             TraceLoggingKeyword(ROCM_TRACE_KW_API),
@@ -14477,11 +14477,11 @@ hipError_t probe_HipDispatchTable_hipMemAdvise_v2(const void * dev_ptr, size_t c
             TraceLoggingPointer((rocm_hip_trace_capture >= ROCM_TRACE_CAPTURE_SCALARS ? reinterpret_cast<const void*>(dev_ptr) : static_cast<const void*>(nullptr)), "dev_ptr"),
             TraceLoggingUInt64((rocm_hip_trace_capture >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<uint64_t>(count) : uint64_t{}), "count"),
             TraceLoggingUInt32((rocm_hip_trace_capture >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<uint32_t>(advice) : uint32_t{}), "advice"),
-            TraceLoggingUInt32((rocm_hip_trace_capture >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<uint32_t>(device.type) : uint32_t{}), "device_type"),
-            TraceLoggingInt32((rocm_hip_trace_capture >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<int32_t>(device.id) : int32_t{}), "device_id"));
+            TraceLoggingUInt32((rocm_hip_trace_capture >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<uint32_t>(location.type) : uint32_t{}), "location_type"),
+            TraceLoggingInt32((rocm_hip_trace_capture >= ROCM_TRACE_CAPTURE_SCALARS ? static_cast<int32_t>(location.id) : int32_t{}), "location_id"));
     hipError_t rocm_trace_result{};
     try {
-        rocm_trace_result = saved_HipDispatchTable.hipMemAdvise_v2_fn(dev_ptr, count, advice, device);
+        rocm_trace_result = saved_HipDispatchTable.hipMemAdvise_v2_fn(dev_ptr, count, advice, location);
     } catch (...) {
         exit_HipDispatchTable_hipMemAdvise_v2(true, rocm_trace_result);
         throw;
