@@ -661,20 +661,19 @@ protected:
                              exec);
   }
 
-  /// Issue an async load into LDS with no active lanes. It writes no LDS, but
-  /// still takes an ASYNCcnt slot.
-  void async_load_without_lanes(int wave) {
+  /// Issue a one-lane ds_atomic_async_barrier_arrive_b64 on the barrier cell at
+  /// `address`, as execution does. It completes on ASYNCcnt in the async-load
+  /// class.
+  void async_barrier_arrive(int wave, uint32_t address) {
     waves[wave]->pc += 16;
-    auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
-    state->elem_size = sizeof(uint32_t);
+    auto state = std::make_unique<VectorMemState>(LOCAL_MEM);
+    state->elem_size = sizeof(uint64_t);
     state->num_elems = 1;
-    state->is_load = true;
-    state->lds_dst = true;
-    state->lds_per_lane_addr = true;
-    state->per_lane_lds_addr.fill(kInvalidLdsAddress);
+    state->is_load = false;
     state->wf_size = waves[wave]->wf_size();
-    state->exec_mask = 0;
-    state->lane_mask = 0;
+    state->exec_mask = 1;
+    state->lane_mask = 1;
+    state->per_lane_addr[0] = address;
     TestMemoryInstruction inst(std::move(state),
                                {{WaitCounterType::ASYNCCNT, MemoryCompletionClass::ASYNC_LOAD}});
     fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[wave]->pc, inst, *waves[wave]);
@@ -1097,11 +1096,21 @@ TEST_F(TensorDmaRaceTest, AsyncStoreLanesOutsideExecReadNoLds) {
   EXPECT_TRUE(ds_write(1, 16));
 }
 
-TEST_F(TensorDmaRaceTest, AsyncLoadWithoutActiveLanesKeepsItsAsynccntSlot) {
+// An async barrier arrive completes on ASYNCcnt in order with async loads
+// (CDNA5 ISA 10.8), so it takes a slot that partial waits count with loads, and
+// not with stores.
+TEST_F(TensorDmaRaceTest, AsyncBarrierArriveCountsWithAsyncLoads) {
   async_load(0, 0);
-  async_load_without_lanes(0);
+  async_barrier_arrive(0, 192);
   wait_asynccnt(0, 1);
   EXPECT_FALSE(ds_read(0, 0));
+}
+
+TEST_F(TensorDmaRaceTest, AsyncBarrierArriveDoesNotCountWithAsyncStores) {
+  async_store(0, 0);
+  async_barrier_arrive(0, 192);
+  wait_asynccnt(0, 1);
+  EXPECT_TRUE(ds_write(0, 0));
 }
 
 // Each lane's source is tracked on its own: bytes between lanes are not read.
@@ -1314,6 +1323,33 @@ TEST_F(TensorDmaRaceTest, ExecutedAsyncStoreWithoutActiveLanesKeepsItsAsynccntSl
 
   wait_asynccnt(0, 1);
   EXPECT_FALSE(ds_write(0, lds_base));
+}
+
+// A decoded async load with EXEC zero still takes an ASYNCcnt slot, so waiting
+// for all but one completes the load issued before it.
+TEST_F(TensorDmaRaceTest, ExecutedAsyncLoadWithoutActiveLanesKeepsItsAsynccntSlot) {
+  const uint32_t lds_base = fixture.cu()->allocate_lds(256);
+  for (auto *wave : waves) {
+    wave->set_lds_base(lds_base);
+    wave->set_lds_size(256);
+  }
+  async_load(0, lds_base);
+  const uint32_t sgprs = waves[0]->sgpr_alloc().base;
+  fixture.cu()->write_sgpr(sgprs, 0x10000u);
+  fixture.cu()->write_sgpr(sgprs + 1, 0);
+  const auto words = cdna5::build_vglobal(cdna5::kGlobalLoadAsyncToLdsB32Vglobal,
+                                          {.saddr = 0, .vdst = 1, .vaddr = 0});
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+  ASSERT_NE(inst, nullptr);
+  waves[0]->set_exec(0);
+  waves[0]->pc += 16;
+  fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[0]->pc, *inst, *waves[0]);
+  ASSERT_TRUE(fixture.cu()->execute_instruction(inst.get(), *waves[0]).succeeded());
+  test::ComputeUnitTestAccess::route_memory_inst(*fixture.cu(), inst.release(), *waves[0]);
+  waves[0]->set_exec(1);
+
+  wait_asynccnt(0, 1);
+  EXPECT_FALSE(ds_read(0, lds_base));
 }
 
 TEST_F(TensorDmaRaceTest, TransferWithoutLdsBytesStillTakesATensorcntSlot) {
