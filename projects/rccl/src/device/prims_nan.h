@@ -141,6 +141,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
   volatile uint64_t* recvConnHeadPtr = NULL;
   uint64_t recvConnHead;
   bool recvConnFifo = false;
+  bool recvCreditHeld = false;
 
   struct ncclConnInfo* sendConn = NULL;
   volatile struct ncclConnFifo* sendConnFifo = NULL;
@@ -220,12 +221,32 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
     }
   }
 
+  // On gfx9 each credit trails its step by one receiving step (see GenericOp()),
+  // so the last one is released here, once every wave's restores have landed.
+  __device__ __forceinline__ void flushRecvCredit() {
+#if defined(__GFX9__)
+    if (fan.nrecv() == 0) return;
+    __asm__ volatile("s_waitcnt vmcnt(0)" ::: "memory");
+    barrier();
+    if (recvConnHeadPtr && recvCreditHeld) {
+      recvCreditHeld = false;
+      if (recvConnFifo) __threadfence_system();
+      STORE(recvConnHeadPtr, recvConnHead += 1);
+    }
+#endif
+  }
+
   inline __device__ void postRecv() {
     if (recvConnHeadPtr) {
-      // The FIFO accesses are system-scope, so ordering the sentinel restore
-      // ahead of the credit needs only a compiler barrier here. On gfx1250 the
-      // restore must also be acknowledged first: barrier() waits on storecnt,
-      // but a single-warp group skips it.
+#if defined(__GFX9__)
+      if (!recvCreditHeld) {
+        recvCreditHeld = true;
+        return;
+      }
+#endif
+      // Every wave's sentinel restore has landed by now (GenericOp() sees to it
+      // on gfx9; on gfx1250 barrier() waits on storecnt, but a single-warp group
+      // skips it, hence the wait below), so only a compiler barrier is needed.
       __atomic_signal_fence(__ATOMIC_SEQ_CST);
 #if RCCL_LL_FIFO_SYS_SCOPE
       __asm__ volatile("s_wait_storecnt 0x0" ::: "memory");
@@ -819,8 +840,10 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
       if (useTdm) tdmOp<RECV, SEND, SrcBuf, DstBuf>(srcPtr, dstPtr, nelem, postOp, abortCache);
     }
 #endif
+    [[maybe_unused]] bool polled = false;
     if (!useTdm) {
       nelem -= DataEltPerSlice * warp;
+      polled = nelem > 0;
       srcPtr += DataEltPerSlice * warp;
       dstPtr += DataEltPerSlice * warp;
       if (accPtr != nullptr) accPtr += DataEltPerSlice * warp;
@@ -857,6 +880,13 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
     }
 
     abort = abortCache;
+#if defined(__GFX9__)
+    // postRecv() credits the previous receiving step, whose restores have to have
+    // landed: one still in flight would erase the sender's refill. A wave that
+    // polled this step has them done, since gfx9 completes its global accesses in
+    // order; one that did not waits for them here.
+    if (RECV && !polled) __asm__ volatile("s_waitcnt vmcnt(0)" ::: "memory");
+#endif
     barrier();
 
     sqtt_marker_exit("PRIM_NAN_DATA_PROCESS");
@@ -941,6 +971,7 @@ public:
                  connIndexSend, collWork) {}
 
   __device__ __forceinline__ ~Primitives() {
+    flushRecvCredit();
     // Save steps for the next operation
     if (tid >= nthreads - WARP_SIZE && wid < fan.nrecv()) recvConn->step = recvConnHead;
     if (tid < fan.nsend()) sendConn->step = sendConnHead;
