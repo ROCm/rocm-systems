@@ -24,8 +24,9 @@ public:
 
     /// @brief Override fastpath backend enablement.
     ///
-    /// If hipAmdFileRead/hipAmdFileWrite are not available fastpath() will
-    /// return false even if fastpath(true) is called.
+    /// If hipAmdFileRead/hipAmdFileWrite are not available, or ROCr is running
+    /// on WSL2 (/dev/dxg), fastpath() will return false even if fastpath(true)
+    /// is called.
     virtual void fastpath(bool enabled) noexcept;
 
     /// @brief Checks if the fallback backend is enabled
