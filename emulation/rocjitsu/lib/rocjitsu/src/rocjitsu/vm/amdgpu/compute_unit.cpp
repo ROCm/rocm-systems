@@ -21,6 +21,7 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/ds_transpose.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/register_modifiers.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/tensor_dma.h"
 #include "rocjitsu/isa/instruction.h"
@@ -1418,22 +1419,12 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
           registers[count++] = *reg;
         }
       }
-      const uint8_t bytes =
-          sram_ecc() ? MemoryWaitScoreboard::kFullDwordByteMask : modifiers.memory_result_bytes;
-      const uint8_t tail = sram_ecc() ? MemoryWaitScoreboard::kFullDwordByteMask
-                                      : modifiers.memory_result_last_bytes;
       for (unsigned i = 0; i < count; ++i) {
-        auto reg = registers[i];
+        const auto reg = registers[i];
         const auto lanes = reg.cls == RegClass::VGPR ? vector_lanes : ~uint64_t{0};
-        if (reg.cls != RegClass::VGPR || bytes == tail) {
-          append(reg, lanes,
-                 reg.cls == RegClass::VGPR ? bytes : MemoryWaitScoreboard::kFullDwordByteMask);
-        } else {
-          const RegisterRef last{reg.cls, static_cast<uint16_t>(reg.index + reg.width - 1), 1};
-          if (--reg.width)
-            append(reg, lanes, bytes);
-          append(last, lanes, tail);
-        }
+        for_each_memory_result_range(
+            reg, modifiers, sram_ecc(),
+            [&](RegisterRef range, uint8_t bytes) { append(range, lanes, bytes); });
       }
     }
   }

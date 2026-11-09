@@ -171,7 +171,15 @@ struct RegisterModifiers {
   ValuPermutation valu_permutation = ValuPermutation::None;
   uint16_t ds_offset = 0;
   uint8_t memory_result_bytes = 0xf;
-  uint8_t memory_result_last_bytes = 0xf;
+  uint8_t memory_result_last_bytes = 0xf; // Last data word, excluding optional image status.
+  bool memory_result_has_status = false;
+  void set_packed_image_result(unsigned components, unsigned result_words) {
+    if (components & 1u) {
+      memory_result_last_bytes = 0x3;
+      memory_result_has_status = result_words > (components + 1) / 2;
+    }
+  }
+  const Operand *packed_store_data = nullptr; // Only the low half of the final word is stored.
   bool exec_all_if_nonzero = false;
   bool exec_whole_quads = false;
 
@@ -185,6 +193,8 @@ struct RegisterModifiers {
   bool image_a16 = false;
   /// VGPR words occupied by derivative inputs.
   uint8_t image_prefix_words = 0;
+  /// Prefix words whose upper half is unused by packed odd-dimensional derivatives.
+  uint16_t image_low_half_prefix = 0;
   /// GFX9 derives its actual tuple from the descriptor. The sentinel
   /// leaves RDNA's instruction-derived coordinate metadata in effect.
   struct Gfx9ImageTuple {
