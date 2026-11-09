@@ -275,7 +275,7 @@ clean:
 .PHONY: llvm_ir ltoir build clean
 
 # Serialize the two IR compiles under -j (order-only, as in NCCL's bindings/ir/Makefile).
-ifneq ($(filter-out 0,$(NCCL_EMIT_LLVM_IR)),)
+ifneq ($(NCCL_EMIT_LLVM_IR), 0)
 ifneq ($(NCCL_EMIT_LTO_IR), 0)
 $(LTO_IR_RAW): | $(FINAL_BC)
 endif
