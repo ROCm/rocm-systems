@@ -201,7 +201,7 @@ TEST(SemanticScratchAllocator, FallsBackToNonForbiddenSpillVictim) {
   Instruction inst("scratch_test", nullptr);
   std::vector<BasicBlock *> blocks;
   const ExecMaskAnalysis exec(KernelBlockScope(blocks), /*wave_size=*/64);
-  LivenessAnalysis liveness(blocks, std::make_unique<ExecMaskAnalysis>(exec));
+  LivenessAnalysis liveness(blocks, 64, std::make_unique<ExecMaskAnalysis>(exec));
   TranslationContext context(/*vgprs=*/8, /*agprs=*/0, /*accum_base=*/0,
                              /*sgprs=*/8, /*private_bytes=*/20);
   SemanticScratchAllocator allocator(inst, liveness, context,
@@ -225,7 +225,7 @@ TEST(SemanticScratchAllocator, PrefersKernelUnusedOverSiteDeadVgpr) {
   auto blocks = build_scratch_test_blocks();
   auto scope = scratch_test_scope(blocks);
   const ExecMaskAnalysis exec{KernelBlockScope(scope), /*wave_size=*/64};
-  const LivenessAnalysis liveness{KernelBlockScope(scope),
+  const LivenessAnalysis liveness{KernelBlockScope(scope), 64,
                                   std::make_unique<ExecMaskAnalysis>(exec)};
   auto site = blocks.front()->instructions().begin();
   ++site;
@@ -250,7 +250,7 @@ TEST(SemanticScratchAllocator, KernelUnusedSearchSkipsForbiddenWindow) {
   auto blocks = build_scratch_test_blocks();
   auto scope = scratch_test_scope(blocks);
   const ExecMaskAnalysis exec{KernelBlockScope(scope), /*wave_size=*/64};
-  const LivenessAnalysis liveness{KernelBlockScope(scope),
+  const LivenessAnalysis liveness{KernelBlockScope(scope), 64,
                                   std::make_unique<ExecMaskAnalysis>(exec)};
   auto site = blocks.front()->instructions().begin();
   ++site;
@@ -289,8 +289,8 @@ TEST(SemanticScratchAllocator, GprIndexModeWriteBypassesKernelUnusedTier) {
   options.arch = ROCJITSU_CODE_ARCH_CDNA4;
   options.text = scratch_test_text(code);
   const ExecMaskAnalysis exec{KernelBlockScope(scope), /*wave_size=*/64};
-  const LivenessAnalysis liveness{KernelBlockScope(scope), std::make_unique<ExecMaskAnalysis>(exec),
-                                  options};
+  const LivenessAnalysis liveness{KernelBlockScope(scope), 64,
+                                  std::make_unique<ExecMaskAnalysis>(exec), options};
   auto site = blocks.front()->instructions().begin();
   std::advance(site, 2);
   ASSERT_NE(site, blocks.front()->instructions().end());
@@ -315,7 +315,7 @@ TEST(SemanticScratchAllocator, SiteDeadTierCanGrowDescriptor) {
   auto blocks = build_scratch_test_blocks();
   auto scope = scratch_test_scope(blocks);
   const ExecMaskAnalysis exec{KernelBlockScope(scope), /*wave_size=*/64};
-  const LivenessAnalysis liveness{KernelBlockScope(scope),
+  const LivenessAnalysis liveness{KernelBlockScope(scope), 64,
                                   std::make_unique<ExecMaskAnalysis>(exec)};
   const Instruction &site = *blocks.front()->instructions().begin();
 
@@ -342,7 +342,7 @@ TEST(SemanticScratchAllocator, ReportsTargetSpillOffsetLimit) {
   Instruction inst("scratch_test", nullptr);
   std::vector<BasicBlock *> blocks;
   const ExecMaskAnalysis exec(KernelBlockScope(blocks), /*wave_size=*/64);
-  LivenessAnalysis liveness(blocks, std::make_unique<ExecMaskAnalysis>(exec));
+  LivenessAnalysis liveness(blocks, 64, std::make_unique<ExecMaskAnalysis>(exec));
   TranslationContext context(/*vgprs=*/8, /*agprs=*/0, /*accum_base=*/0,
                              /*sgprs=*/8, /*private_bytes=*/32);
   SemanticScratchAllocator allocator(
@@ -362,7 +362,7 @@ TEST(SemanticScratchAllocator, RejectsSpillVictimInDynamicStackKernel) {
   Instruction inst("scratch_test", nullptr);
   std::vector<BasicBlock *> blocks;
   const ExecMaskAnalysis exec(KernelBlockScope(blocks), /*wave_size=*/64);
-  LivenessAnalysis liveness(blocks, std::make_unique<ExecMaskAnalysis>(exec));
+  LivenessAnalysis liveness(blocks, 64, std::make_unique<ExecMaskAnalysis>(exec));
   // With no live-before snapshot, no register window is proven free, so the
   // allocator must borrow a victim and exercise the spill policy.
   auto maybe_has_live_inst = liveness.has_live_before(inst);
@@ -390,7 +390,7 @@ TEST(SemanticScratchAllocator, AllowsFreeWindowInDynamicStackKernel) {
     scope.push_back(block.get());
   const Instruction &inst = *blocks.front()->instructions().begin();
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
-  LivenessAnalysis liveness(scope, std::make_unique<ExecMaskAnalysis>(exec));
+  LivenessAnalysis liveness(scope, 64, std::make_unique<ExecMaskAnalysis>(exec));
   TranslationContext context(/*vgprs=*/8, /*agprs=*/0, /*accum_base=*/0,
                              /*sgprs=*/8, /*private_bytes=*/32);
   context.uses_dynamic_stack = true;

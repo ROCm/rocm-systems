@@ -63,7 +63,7 @@ uint64_t Wavefront::realtime_timestamp() const {
 
 std::optional<GpuVmAccess> Wavefront::snapshot_vm_access() const {
   if (vm_access_)
-    return *vm_access_;
+    return vm_access_->value;
   GpuVm *gpu_vm = cu_.gpu_vm();
   if (gpu_vm == nullptr)
     return std::nullopt;
@@ -74,7 +74,7 @@ VmAccessOutcome Wavefront::read_gpu_memory(uint64_t addr, std::span<uint8_t> dst
   assert(has_gpu_memory());
   if (address_space_ || process_id_ != 0) {
     if (vm_access_)
-      return vm_access_->read(
+      return vm_access_->value.read(
           addr, std::span<std::byte>(reinterpret_cast<std::byte *>(dst.data()), dst.size()));
     const std::optional<GpuVmAccess> access = snapshot_vm_access();
     if (!access)
@@ -90,7 +90,7 @@ VmAccessOutcome Wavefront::write_gpu_memory(uint64_t addr, std::span<const uint8
   assert(has_gpu_memory());
   if (address_space_ || process_id_ != 0) {
     if (vm_access_)
-      return vm_access_->write(
+      return vm_access_->value.write(
           addr,
           std::span<const std::byte>(reinterpret_cast<const std::byte *>(src.data()), src.size()));
     const std::optional<GpuVmAccess> access = snapshot_vm_access();
@@ -152,6 +152,7 @@ void Wavefront::halt(CpCompletionNotice notice) {
   //       first because reset() zeroes them,
   //   (3) notify the CU/CP of workgroup completion. Freeing before release_wf keeps
   //       has_active_wfs() accurate so the last wave triggers LDS reclaim.
+  // The halt hook also completes race events before release_wf can resolve a barrier.
   cu_.plugin_group().onAmdgpuWavefrontHalted(*this);
   const uint32_t dispatch_id = dispatch_id_;
   const uint32_t wg_id = wg_id_;

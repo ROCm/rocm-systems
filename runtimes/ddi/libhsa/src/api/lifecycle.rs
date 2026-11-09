@@ -6,16 +6,20 @@
 #[cfg(all(target_os = "linux", target_arch = "x86_64", not(test)))]
 use crate::api_trace;
 use crate::ffi::*;
-use crate::runtime::{HsaState, LifecycleTransition, ShutdownWork, boundary, lock};
+use crate::runtime::{
+    ApiLeaseScope, HsaState, LifecycleCallScope, LifecycleTransition, ShutdownWork, lock,
+    plain_boundary,
+};
 use crate::{runtime, signal};
 
 /// Quiesces tool callbacks while HSA storage is still published, then retires
 /// the prepared generation. Callback workers may enter this on a helper thread.
 fn finish_prepared_shutdown(generation: u64) -> Status {
+    let _entry = LifecycleCallScope::enter_helper();
     let mut transition = LifecycleTransition::preparing(generation);
-    // Operations admitted before Preparing may still publish a queue or PC
-    // sampling session after leaving the lifecycle lock. Stop new workers and
-    // wait for those operations before taking the callback-worker snapshot.
+    // Operations admitted before final closure may still publish a queue or
+    // sampling session after leaving the lifecycle lock. Wait for them before
+    // taking the callback-worker snapshot.
     let (inflight, logging) = {
         let guard = match lock() {
             Ok(guard) => guard,
@@ -24,7 +28,6 @@ fn finish_prepared_shutdown(generation: u64) -> Status {
         let Some(runtime) = guard.as_ref() else {
             return ERROR;
         };
-        runtime.request_stop();
         (runtime.inflight.clone(), runtime.logging.clone())
     };
     // A borrowed FILE can call back into HSA from fwrite. Stop logging only
@@ -47,25 +50,10 @@ fn finish_prepared_shutdown(generation: u64) -> Status {
     }
     #[cfg(all(target_os = "linux", target_arch = "x86_64", not(test)))]
     {
-        // OnUnload may call copied HSA functions and inspect existing handles.
-        // Callback producers have stopped and native storage is still live;
-        // functions requiring new native work report shutdown state.
+        // Tools can still inspect storage they own, but copied HSA functions
+        // observe the final reference count of zero and reject new admission.
         api_trace::unload();
     }
-    // Raw signal and queue-index calls do not take the lifecycle mutex. Close
-    // their admission while the generation is prepared, then wait without
-    // that mutex; an admitted doorbell may itself be inside a callback.
-    {
-        let guard = match lock() {
-            Ok(guard) => guard,
-            Err(status) => return status,
-        };
-        if guard.active_generation() != Some(generation) {
-            return ERROR;
-        }
-        runtime::close_public_raw_handles();
-    }
-    runtime::wait_public_raw_handles_idle();
     let runtime = {
         let mut guard = match lock() {
             Ok(guard) => guard,
@@ -77,13 +65,13 @@ fn finish_prepared_shutdown(generation: u64) -> Status {
         }
     };
     transition.advance_to_stopping(generation);
-    let mut outcome = runtime.stop();
-    let status = outcome.status;
+    let outcome = runtime.stop();
+    let status = outcome.status();
     let mut guard = match lock() {
         Ok(guard) => guard,
         Err(error) => return error,
     };
-    let result = guard.finish_shutdown(generation, &mut outcome);
+    let result = guard.finish_shutdown(generation, outcome);
     drop(guard);
     if result.is_ok() {
         transition.disarm();
@@ -99,13 +87,17 @@ fn finish_prepared_shutdown(generation: u64) -> Status {
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 /// Initializes the process HSA runtime and increments its reference count.
 pub extern "C" fn hsa_init() -> Status {
-    boundary(|| {
+    plain_boundary(|| {
+        let _entry = match LifecycleCallScope::enter() {
+            Ok(entry) => entry,
+            Err(status) => return status,
+        };
         let generation = {
-            let mut guard = match lock() {
+            let guard = match lock() {
                 Ok(guard) => guard,
                 Err(status) => return status,
             };
-            match guard.begin_init() {
+            match runtime::begin_init_waiting(guard, &runtime::LIFECYCLE_CONDVAR) {
                 Ok(None) => return SUCCESS,
                 Ok(Some(generation)) => generation,
                 Err(status) => return status,
@@ -162,15 +154,48 @@ pub extern "C" fn hsa_init() -> Status {
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 /// Releases one HSA initialization reference and tears down the final state.
 pub extern "C" fn hsa_shut_down() -> Status {
-    boundary(|| {
+    plain_boundary(|| {
+        let _entry = match LifecycleCallScope::enter() {
+            Ok(entry) => entry,
+            Err(status) => return status,
+        };
         if runtime::LogWriteScope::active() {
             return INVALID_RUNTIME_STATE;
         }
+        let mut deferred = None;
         let work = {
             let mut guard = match lock() {
                 Ok(guard) => guard,
                 Err(status) => return status,
             };
+            let will_prepare = match guard.shutdown_will_prepare() {
+                Ok(will_prepare) => will_prepare,
+                Err(status) => return status,
+            };
+            if will_prepare {
+                let Some(runtime) = guard.as_ref() else {
+                    return ERROR;
+                };
+                if ApiLeaseScope::current()
+                    || runtime::CallbackScope::active()
+                    || runtime.running_on_worker()
+                {
+                    // Spawn a parked helper before changing the reference
+                    // count. A failed spawn leaves the runtime fully active.
+                    let (send, receive) = std::sync::mpsc::channel::<u64>();
+                    if runtime::defer_cleanup(receive, |receive| {
+                        if let Ok(generation) = receive.recv() {
+                            let _ =
+                                runtime::plain_boundary(|| finish_prepared_shutdown(generation));
+                        }
+                    })
+                    .is_err()
+                    {
+                        return OUT_OF_RESOURCES;
+                    }
+                    deferred = Some(send);
+                }
+            }
             match guard.begin_shutdown() {
                 Ok(work) => work,
                 Err(status) => return status,
@@ -181,13 +206,13 @@ pub extern "C" fn hsa_shut_down() -> Status {
             ShutdownWork::Prepare(generation) => generation,
             ShutdownWork::NativeRetry(retirement, generation) => {
                 let mut transition = LifecycleTransition::stopping(generation);
-                let mut outcome = runtime::ShutdownOutcome::retry(retirement);
-                let status = outcome.status;
+                let outcome = runtime::ShutdownOutcome::retry(retirement);
+                let status = outcome.status();
                 let mut guard = match lock() {
                     Ok(guard) => guard,
                     Err(error) => return error,
                 };
-                let result = guard.finish_shutdown(generation, &mut outcome);
+                let result = guard.finish_shutdown(generation, outcome);
                 drop(guard);
                 if result.is_ok() {
                     transition.disarm();
@@ -195,41 +220,14 @@ pub extern "C" fn hsa_shut_down() -> Status {
                 return result.map_or_else(|error| error, |()| status);
             }
         };
-        let (on_worker, stop_workers, inflight) = match lock() {
-            Ok(guard) => {
-                let Some(runtime) = guard.as_ref() else {
-                    return ERROR;
-                };
-                (
-                    runtime.running_on_worker(),
-                    runtime.stop_workers.clone(),
-                    runtime.inflight.clone(),
-                )
+        if let Some(send) = deferred {
+            if send.send(generation).is_err() {
+                // The committed generation has no cleanup worker. The
+                // transition guard retains it instead of exposing it again.
+                drop(LifecycleTransition::preparing(generation));
+                return ERROR;
             }
-            Err(status) => return status,
-        };
-        if runtime::CallbackScope::active() || on_worker {
-            // The callback or worker must return before its own join. Keep the
-            // prepared state published while a helper completes that join and
-            // invokes OnUnload afterward.
-            if runtime::defer_cleanup(generation, |generation| {
-                let _ = runtime::boundary(|| finish_prepared_shutdown(generation));
-            })
-            .is_ok()
-            {
-                // The callback can return an unhandled fault before the helper
-                // runs. Publish its stop request before reporting success so
-                // the event worker cannot abort or invoke later handlers.
-                runtime::publish_stop_request(&stop_workers, &inflight);
-                return SUCCESS;
-            }
-            let mut guard = match lock() {
-                Ok(guard) => guard,
-                Err(status) => return status,
-            };
-            return guard
-                .cancel_shutdown(generation)
-                .map_or_else(|status| status, |()| OUT_OF_RESOURCES);
+            return SUCCESS;
         }
         finish_prepared_shutdown(generation)
     })

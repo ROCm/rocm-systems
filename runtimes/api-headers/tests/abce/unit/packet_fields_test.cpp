@@ -14,6 +14,8 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstring>
 
@@ -170,6 +172,54 @@ TEST(PacketFields, FusedLinearWaitAndSignalAreSystemScope) {
   const FusedBlocks blocks = InspectFused(packet, IsaByName("gfx1250").isa);
   EXPECT_EQ(blocks.emitted_dwords, 1u + 7 + 6 + 5);
   ExpectWaitAndSignalBlocksAreSystemScope(blocks);
+}
+
+TEST(PacketFields, ChunkedSwapPreservesOperandAlignment) {
+  constexpr uint64_t kAddressOffsetA = 0x100000000ull;
+  constexpr uint64_t kAddressOffsetB = 0x200000000ull;
+  const uint64_t base_address_a = reinterpret_cast<uintptr_t>(FakeAddress(kAddressOffsetA));
+  const uint64_t base_address_b = reinterpret_cast<uintptr_t>(FakeAddress(kAddressOffsetB));
+  constexpr uint64_t kClassicSwapAlignment = 64;
+  constexpr uint64_t kGfx125PlusSwapAlignment = 32;
+  constexpr size_t kClassicSwapMaxSize = 0x3fffffc0;
+  constexpr size_t kGfx125PlusSwapMaxSize = 0x3fffffe0;
+  constexpr size_t kJustAboveClassicLimit = kClassicSwapMaxSize + 16;
+  constexpr size_t kAboveBothLimits = kGfx125PlusSwapMaxSize + 64;
+  for (const char* isa_name : {"gfx942", "gfx950", "gfx1250"}) {
+    SCOPED_TRACE(isa_name);
+    const abce_builder_t builder = MakeBuilder(isa_name);
+    const bool is_gfx125plus = IsaByName(isa_name).is_gfx125plus;
+    // Independent packet-format limits: legacy operands reserve six low bits,
+    // while gfx125+ operands reserve five. Nonfinal chunks must preserve them.
+    const uint64_t alignment = is_gfx125plus ? kGfx125PlusSwapAlignment : kClassicSwapAlignment;
+    const uint64_t chunk_limit = is_gfx125plus ? kGfx125PlusSwapMaxSize : kClassicSwapMaxSize;
+    for (const size_t bytes : {kJustAboveClassicLimit, kAboveBothLimits}) {
+      SCOPED_TRACE(bytes);
+      const uint64_t packet_count = abce_builder_num_swap_packets(&builder, bytes);
+      ASSERT_EQ(packet_count, is_gfx125plus && bytes == kJustAboveClassicLimit ? 1u : 2u);
+      alignas(16) std::array<uint8_t, 2 * sizeof(SDMA_PKT_COPY_LINEAR_SWAP)> storage{};
+      abce_builder_build_swap_copy(&builder, reinterpret_cast<char*>(storage.data()),
+                                   FakeAddress(kAddressOffsetA), FakeAddress(kAddressOffsetB),
+                                   bytes);
+      uint64_t completed = 0;
+      for (uint64_t index = 0; index < packet_count; ++index) {
+        SDMA_PKT_COPY_LINEAR_SWAP packet;
+        std::memcpy(&packet, storage.data() + index * sizeof(packet), sizeof(packet));
+        const uint64_t address_a =
+            Reassemble(packet.ADDR_A_HI_UNION.addr_a_63_32, packet.ADDR_A_LO_UNION.DW_3_DATA);
+        const uint64_t address_b =
+            Reassemble(packet.ADDR_B_HI_UNION.addr_b_63_32, packet.ADDR_B_LO_UNION.DW_5_DATA);
+        EXPECT_EQ(address_a, base_address_a + completed);
+        EXPECT_EQ(address_b, base_address_b + completed);
+        EXPECT_EQ(address_a % alignment, 0u);
+        EXPECT_EQ(address_b % alignment, 0u);
+        const uint64_t count = uint64_t{packet.COUNT_UNION.count} + 1;
+        EXPECT_EQ(count, std::min<uint64_t>(chunk_limit, bytes - completed));
+        completed += count;
+      }
+      EXPECT_EQ(completed, bytes);
+    }
+  }
 }
 
 TEST(PacketFields, FusedSwapWaitAndSignalAreSystemScope) {

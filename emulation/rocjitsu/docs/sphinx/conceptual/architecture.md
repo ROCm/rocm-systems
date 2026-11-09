@@ -211,6 +211,7 @@ lib/
       config/           JSON/FlatBuffers configuration
   util/                 Shared utilities
   python/amdisa/        ISA codegen pipeline
+python/                 Python callable execution and sessions
 tools/rocjitsu/         CLI (local, daemon, attach modes)
 configs/                GPU topology JSON files
 schemas/                FlatBuffers schemas

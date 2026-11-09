@@ -17,6 +17,7 @@
 #include "fakes/hip_fakes.h"      // the shared g_hip* seams this suite drives
 #include "fakes/nccl_fakes.h"     // g_ncclProxyClientGetFdBlocking
 #include "fakes/devcomm_fakes.h"  // g_ncclTeamLsa
+#include "fakes/nccl_device_core_fakes.h"  // g_ncclTeamWorld and the rest of the ncclTeam* family
 
 // param.h's NCCL_PARAM caches its value in a function-local static, so a param
 // read once is frozen for the process. fakes/param_redirect.h -- shared with
@@ -24,8 +25,7 @@
 // g_loadParam on every read, so tests can vary a param between cases. Must
 // precede the unit under test, which is where the bodies are emitted.
 //
-// g_loadParam is supplied by fakes/dev_runtime_micro_fakes.cc here rather than
-// fakes/nccl_fakes.cc, which this binary does not link.
+// g_loadParam is defined in fakes/nccl_fakes.cc, which this binary links.
 #include "fakes/param_redirect.h"
 
 // ncclCalloc's failure arms cannot be reached while it always succeeds, and it
@@ -118,7 +118,15 @@ static inline ncclResult_t RecordCudaFree(T* ptr, struct ncclMemManager* manager
 #include <gtest/gtest.h>
 
 #include "ScopedHook.h"
+#include "StickyHipLastError.h"
+#include "../common/LogCapture.hpp"  // CaptureLog: assert on WARN text
 
+#include <malloc.h>  // mallinfo2: heap in-use bytes for the DevCommCreate leak checks
+#if defined(__GLIBC_PREREQ)
+#if __GLIBC_PREREQ(2, 33)
+#define DEV_RUNTIME_TEST_HAS_MALLINFO2 1
+#endif
+#endif
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
@@ -1558,6 +1566,20 @@ TEST_F(SymUnbindTeamMemoryTest, IsANoOpOnThisBuild) {
 }
 
 
+// symTeamObtain mallocs teams onto devrState.teamHead. symTeamDestroyAll also
+// unmaps CUDA multicast and destroys CFT logical endpoints, and a
+// value-initialized comm has le.baseId == 0 rather than NCCL_LE_ID_INVALID,
+// so these fixtures free only the malloc'd list.
+static void FreeMallocdDevrTeams(ncclComm* comm) {
+  ncclDevrTeam* t = comm->devrState.teamHead;
+  while (t != nullptr) {
+    ncclDevrTeam* next = t->next;
+    free(t);
+    t = next;
+  }
+  comm->devrState.teamHead = nullptr;
+}
+
 // ---------------------------------------------------------------------------
 // symTeamObtain looks up a team by (rank, nRanks, stride) and creates one if
 // the list has no match, pushing it onto devrState.teamHead.
@@ -1583,13 +1605,7 @@ protected:
 
   // Teams are malloc'd by the unit under test and linked onto teamHead.
   void TearDown() override {
-    ncclDevrTeam* t = comm->devrState.teamHead;
-    while (t != nullptr) {
-      ncclDevrTeam* next = t->next;
-      free(t);
-      t = next;
-    }
-    comm->devrState.teamHead = nullptr;
+    FreeMallocdDevrTeams(comm);
     ResetDevRuntimeMicroFakes();
   }
 
@@ -3751,6 +3767,22 @@ TEST_F(WindowRegisterNonSymIpcTest, MapsPeersAndReusesSelf) {
   EXPECT_EQ(win->ipcPeerPtrs[2], static_cast<char*>(reinterpret_cast<void*>(0x900000)) + 128);
 }
 
+// ROCM-33799: with cuMem off no probe runs, so an error the application has not read yet
+// must survive registration.
+TEST_F(WindowRegisterNonSymIpcTest, NoCuMemProbe_KeepsCallerLastError) {
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather, GatherPeers());
+  ScopedHook open(g_hipIpcOpenMemHandle, [](void** ptr, hipIpcMemHandle_t, unsigned int) {
+    *ptr = reinterpret_cast<void*>(0x900000);
+    return hipSuccess;
+  });
+  StickyHipLastError lastError;
+  lastError.pending = hipErrorOutOfMemory;
+
+  ncclWindow_t out = nullptr;
+  ASSERT_EQ(Register(&out), ncclSuccess);
+  EXPECT_EQ(lastError.pending, hipErrorOutOfMemory);
+}
+
 // Branch: a peer in our own process is left unmapped -- opening an IPC handle
 // against the same address space is not supported here.
 TEST_F(WindowRegisterNonSymIpcTest, SameProcessPeer_IsLeftUnmapped) {
@@ -4236,8 +4268,9 @@ TEST_F(WindowRegisterNonSymCuMemTest, VmmWindow_ExportsHandleAndImportsPeers) {
 TEST_F(WindowRegisterNonSymCuMemTest, RetainFails_FallsBackToLegacyIpc) {
   ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
   ScopedHook range(g_hipMemGetAddressRange, AddressRangeOf(8192));
-  ScopedHook retain(g_hipMemRetainAllocationHandle, [](hipMemGenericAllocationHandle_t*, void*) {
-    return hipErrorInvalidValue;
+  StickyHipLastError lastError;
+  ScopedHook retain(g_hipMemRetainAllocationHandle, [&](hipMemGenericAllocationHandle_t*, void*) {
+    return lastError.Fail(hipErrorInvalidValue);
   });
   ScopedHook ipcGet(g_hipIpcGetMemHandle, [](hipIpcMemHandle_t*, void*) { return hipSuccess; });
   ScopedHook import(g_hipMemImportFromShareableHandle,
@@ -4278,6 +4311,8 @@ TEST_F(WindowRegisterNonSymCuMemTest, RetainFails_FallsBackToLegacyIpc) {
   EXPECT_EQ(win->ipcPeerIsCuMem[1], 0);
   EXPECT_EQ(win->ipcPeerIsCuMem[2], 0);
   EXPECT_EQ(open.calls, 2);
+  // ROCM-33799: the expected retain failure must not reach the application.
+  EXPECT_EQ(lastError.pending, hipSuccess);
 }
 
 // Branch: a cuMem peer is already mapped when a later one fails, so cleanup has
@@ -5379,7 +5414,7 @@ protected:
     // descriptors carry *our own* position in that team -- the member test is
     // relative to it -- so world rank 4 is lsa rank 0, and a returned index is
     // plainly distinguishable from the world rank it came from.
-    g_devrTeamWorld = [](ncclComm_t) { return ncclTeam_t{8, 4, 1}; };
+    g_ncclTeamWorld = [](ncclComm_t) { return ncclTeam_t{8, 4, 1}; };
     g_ncclTeamLsa   = [](ncclComm_t) { return ncclTeam_t{4, 0, 1}; };
   }
   void TearDown() override {
@@ -6114,18 +6149,6 @@ TEST_F(DeepCopyDevCommRequirementsTest, NoLists_LeavesBothEmpty) {
 
 // Branch: an allocation part-way through the copy releases what was built and
 // reports nothing back, rather than handing over a half-copied structure.
-//
-// +2, deliberately, not +1. deepCopyDevCommRequirements memcpys the whole
-// source struct (deepCopyDevCommRequirements' memcpy), which copies the
-// caller's list-head
-// pointers into the copy, and only overwrites them on the first *successful*
-// node alloc. ncclCallocDebug returns without touching *ptr on failure
-// (alloc.h:415-418), so failing the first node alloc leaves the copy's
-// resourceRequirementsList still pointing at the caller's &res1 -- a fixture
-// member -- and the fail: label's freeDevCommRequirements then free()s it.
-// +1 is therefore the index that exposes AICOMRCCL-2180 finding 15; running it
-// would corrupt the heap rather than assert, so this covers the adjacent
-// index and the bug is documented instead of pinned.
 TEST_F(DeepCopyDevCommRequirementsTest, NodeAllocFails_ReleasesPartialCopy) {
   res1.next = &res2;
   src.resourceRequirementsList = &res1;
@@ -6133,6 +6156,39 @@ TEST_F(DeepCopyDevCommRequirementsTest, NodeAllocFails_ReleasesPartialCopy) {
 
   EXPECT_NE(deepCopyDevCommRequirements(&src, &dst), ncclSuccess);
   EXPECT_EQ(dst, nullptr);
+}
+
+// Branch: the first node alloc of a list fails. The memcpy of the whole source
+// struct also copies the caller's list heads, and a failed ncclCalloc leaves
+// *ptr untouched (alloc.h:456-458, and MicroCalloc above), so the copy's heads must be cleared
+// before the first node is allocated; otherwise fail:'s freeDevCommRequirements
+// free()s the caller's first node (AICOMRCCL-2180 finding 15). res1 and team1
+// are fixture members, so a regression aborts in free() rather than failing an
+// expectation here.
+TEST_F(DeepCopyDevCommRequirementsTest, FirstResourceNodeAllocFails_LeavesCallerListAlone) {
+  res1.bufferSize = 128;
+  res1.next = &res2;
+  src.resourceRequirementsList = &res1;
+  ScopedCallocFailure callocFail(1);  // only the top-level object succeeds
+
+  EXPECT_NE(deepCopyDevCommRequirements(&src, &dst), ncclSuccess);
+  EXPECT_EQ(dst, nullptr);
+  EXPECT_EQ(src.resourceRequirementsList, &res1);
+  EXPECT_EQ(res1.next, &res2);
+  EXPECT_EQ(res1.bufferSize, 128u);
+}
+
+TEST_F(DeepCopyDevCommRequirementsTest, FirstTeamNodeAllocFails_LeavesCallerListAlone) {
+  team1.multimem = true;
+  team1.next = &team2;
+  src.teamRequirementsList = &team1;
+  ScopedCallocFailure callocFail(1);  // only the top-level object succeeds
+
+  EXPECT_NE(deepCopyDevCommRequirements(&src, &dst), ncclSuccess);
+  EXPECT_EQ(dst, nullptr);
+  EXPECT_EQ(src.teamRequirementsList, &team1);
+  EXPECT_EQ(team1.next, &team2);
+  EXPECT_TRUE(team1.multimem);
 }
 
 // freeDevCommRequirements tolerates null, so callers can release
@@ -6701,6 +6757,107 @@ TEST_F(DevCommCreateTest, RequirementsFilterFails_ReturnsErrorWithoutQueueing) {
 
 
 // ---------------------------------------------------------------------------
+// ncclDevCommCreate deep-copies the caller's requirements before it checks
+// them against the communicator, so a request rejected after the copy must
+// release that copy (NVIDIA/nccl#2225). The in-group task path and the
+// enqueue-rearch job path each hold the copy in their own object, so both are
+// driven. Heap in-use bytes are the oracle: a leaked copy per call adds up to
+// far more than one copy over the loop.
+
+class DevCommCreateFailureTest : public DevCommCreateTest {
+protected:
+  static constexpr int kResourceNodes = 64;
+  static constexpr int kTeamNodes = 8;
+  static constexpr int kCalls = 200;
+
+  std::vector<ncclDevResourceRequirements> resources;
+  std::vector<ncclTeamRequirements> teams;
+
+  void SetUp() override {
+    DevCommCreateTest::SetUp();
+    resources.assign(kResourceNodes, ncclDevResourceRequirements{});
+    for (int i = 0; i + 1 < kResourceNodes; i++) resources[i].next = &resources[i + 1];
+    teams.assign(kTeamNodes, ncclTeamRequirements{});
+    for (int i = 0; i + 1 < kTeamNodes; i++) teams[i].next = &teams[i + 1];
+    reqs.resourceRequirementsList = resources.data();
+    reqs.teamRequirementsList = teams.data();
+    reqs.cftCaps = NCCL_CFT_MULTIMEM;
+  }
+
+  static long long CopyBytes() {
+    return static_cast<long long>(sizeof(ncclDevCommRequirements) +
+                                  kResourceNodes * sizeof(ncclDevResourceRequirements) +
+                                  kTeamNodes * sizeof(ncclTeamRequirements));
+  }
+
+  // mallinfo2 needs glibc 2.33; older glibc only has the int-sized mallinfo.
+  static long long HeapInUse() {
+#ifdef DEV_RUNTIME_TEST_HAS_MALLINFO2
+    return static_cast<long long>(mallinfo2().uordblks);
+#else
+    return static_cast<long long>(mallinfo().uordblks);
+#endif
+  }
+
+  void ExpectRejectedWithoutLeak(bool rearch, const char* warning) {
+    // ScopedHook's own counter sees every g_loadParam call, so count the reads of
+    // this param separately: each call must branch on it (dev_runtime.cc:2813).
+    int rearchReads = 0;
+    auto prevLoadParam = g_loadParam;
+    ScopedHook rearchParam(g_loadParam, [rearch, prevLoadParam, &rearchReads](const char* env, int64_t deft) {
+      if (std::strcmp(env, "ENQUEUE_REARCH_ENABLE") != 0) return prevLoadParam(env, deft);
+      rearchReads++;
+      return int64_t(rearch);
+    });
+
+    // The first call names the check that fired, so the loop below is known to
+    // fail after the copy; it also runs ncclDevrInitOnce and warms up any lazily
+    // allocated logging state.
+    ncclResult_t res = ncclSuccess;
+    const std::string log =
+        RcclUnitTesting::CaptureLog([&] { res = ncclDevCommCreate(comm, &reqs, &outDevComm); });
+    ASSERT_EQ(res, ncclInvalidArgument) << "actual log:\n" << log;
+    ASSERT_TRUE(RcclUnitTesting::LogHas(log, warning)) << "actual log:\n" << log;
+    EXPECT_TRUE(ncclIntruQueueEmpty(&comm->devrState.commCreateTaskQueue));
+
+    int rejected = 0;
+    long long growth = 0;
+    RcclUnitTesting::CaptureLog([&] {
+      const long long before = HeapInUse();
+      for (int i = 0; i < kCalls; i++) {
+        if (ncclDevCommCreate(comm, &reqs, &outDevComm) == ncclInvalidArgument) rejected++;
+      }
+      growth = HeapInUse() - before;
+    });
+    EXPECT_EQ(rejected, kCalls);
+    EXPECT_GE(rearchReads, 1 + kCalls);
+    EXPECT_LT(growth, CopyBytes()) << kCalls << " rejected calls left " << growth
+                                   << " heap bytes behind; one copy is " << CopyBytes();
+  }
+};
+
+TEST_F(DevCommCreateFailureTest, CftUnsupported_TaskPath_ReleasesCopy) {
+  comm->gpuCftSupport = 0;
+  ExpectRejectedWithoutLeak(false, "not all ranks in the communicator support CFT");
+}
+
+TEST_F(DevCommCreateFailureTest, CftUnsupported_RearchJobPath_ReleasesCopy) {
+  comm->gpuCftSupport = 0;
+  ExpectRejectedWithoutLeak(true, "not all ranks in the communicator support CFT");
+}
+
+TEST_F(DevCommCreateFailureTest, MultimemWithoutNvls_TaskPath_ReleasesCopy) {
+  comm->gpuCftSupport = 1;
+  comm->nvlsSupport = 0;
+  ExpectRejectedWithoutLeak(false, "NVLS is disabled or unsupported");
+}
+
+TEST_F(DevCommCreateFailureTest, MultimemWithoutNvls_RearchJobPath_ReleasesCopy) {
+  comm->gpuCftSupport = 1;
+  comm->nvlsSupport = 0;
+  ExpectRejectedWithoutLeak(true, "NVLS is disabled or unsupported");
+}
+
 // devrGinContextsTotal sizes the per-context resource regions for the largest
 // ginContextCount any active backend could round nGinContextsRequested up to.
 
@@ -6715,6 +6872,16 @@ TEST(DevrGinContextsTotal, SingleBackend_RoundsUpToConnectionCount) {
   ginState.backends[0].ginCommCount = 3;
   EXPECT_EQ(devrGinContextsTotal(&ginState, 8), 9);
   EXPECT_EQ(devrGinContextsTotal(&ginState, 6), 6);
+}
+
+// AICOMRCCL-3181: a 0 request with an active backend must size the per-context
+// regions to one context per connection, matching ncclGinContextCount's promotion
+// in ginDevCommSetupWithBackend -- the two halves of the fix must not diverge.
+TEST(DevrGinContextsTotal, ZeroRequest_PromotedToConnectionCount) {
+  struct ncclGinState ginState{};
+  ginState.numActiveBackends = 1;
+  ginState.backends[0].ginCommCount = 3;
+  EXPECT_EQ(devrGinContextsTotal(&ginState, 0), 3);
 }
 
 // Branch: the widest backend is not the one that rounds furthest.
@@ -6745,11 +6912,13 @@ TEST(DevrGinContextsTotal, ZeroConnectionBackend_TreatedAsOne) {
 // ncclDevrCommCreateInternal is where a queued create is actually carried out.
 // This suite covers its GIN request validation, which runs before any resource
 // is touched and rejects combinations the communicator cannot serve, and the
-// resource-window sizing that follows it, up to the cuMemCreate call.
+// resource-window sizing that follows it, up to the cuMemCreate call. A devcomm
+// that asks for no resources has no window to create, so its build completes.
 //
-// The rest of the devcomm build -- symmetric-memory window creation, GIN
-// window registration, barriers -- is not covered here beyond a failed GIN
-// connect.
+// The rest of the devcomm build -- GIN activation, symmetric-memory window
+// creation, GIN window registration, barriers -- is not covered here beyond a
+// failed GIN activation. The capture-mode test below is the one exception: it
+// reaches ncclGinDevCommSetup and stops there.
 
 class DevrCommCreateInternalTest : public NcclVersionCompatTest {
 protected:
@@ -6758,6 +6927,10 @@ protected:
   ncclComm* comm = nullptr;
   ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
   ncclDevComm outDevComm{};
+  size_t memSegmentSizes[2] = {8192, 8192};
+  hipMemGenericAllocationHandle_t memHandles[2] = {reinterpret_cast<hipMemGenericAllocationHandle_t>(0x55),
+                                                   reinterpret_cast<hipMemGenericAllocationHandle_t>(0x56)};
+  ncclDevrMemory mems[2] = {};
 
   void SetUp() override {
     DevRuntimeMicroTest::SetUp();
@@ -6776,12 +6949,19 @@ protected:
     comm->sharedRes = sharedResStorage.get();
     comm->nRanks = 1;
     comm->devrState.lsaSize = 1;
+    // This fixture skips ncclDevrInitOnce, which sets cftMcSize from
+    // computeCftMcSize. That helper returns at least 1, so production does
+    // not pass 0 to idivRcp32. A value-initialized comm would.
     comm->devrState.cftSize = 1;
     comm->devrState.cftMcSize = 1;
+    // granularity 1 keeps the signal-region size assertion exact: alignUp
+    // would otherwise round the 96-byte window up to a page.
     comm->devrState.granularity = 1;
   }
 
   void TearDown() override {
+    comm->devrState.memHead = nullptr;
+    for (ncclDevrMemory& mem : mems) free(mem.ginSegmentInfos);
     while (comm->devrState.teamHead != nullptr) {
       ncclDevrTeam* next = comm->devrState.teamHead->next;
       free(comm->devrState.teamHead);
@@ -6793,6 +6973,20 @@ protected:
   ncclResult_t Create() {
     return ncclDevrCommCreateInternal(comm, &reqs, &outDevComm, /*isInternal=*/false,
                                       /*deviceCodeVersion=*/NCCL_VERSION_CODE);
+  }
+
+  // Puts mems on memHead as GIN-capable memories obtained before GIN was enabled.
+  void LinkPreGinMemories() {
+    for (int m = 0; m < 2; m++) {
+      mems[m].primaryAddr = reinterpret_cast<void*>(0x100000 * (m + 1));
+      mems[m].size = memSegmentSizes[m];
+      mems[m].numSegments = 1;
+      mems[m].maxGlobalNumSegments = 1;
+      mems[m].segmentSizes = &memSegmentSizes[m];
+      mems[m].memHandles = &memHandles[m];
+    }
+    mems[0].next = &mems[1];
+    comm->devrState.memHead = &mems[0];
   }
 };
 
@@ -6825,17 +7019,55 @@ TEST_F(DevrCommCreateInternalTest, FullGinRequestedOnRailOnlyComm_ReturnsInvalid
 
 // Branch: the deprecated ginForceEnable is equivalent to asking for a full
 // connection, so it fails the same support check rather than being ignored.
-//
-// The counterpart -- the same requirements with the flag clear, which requests
-// nothing and passes the gate -- is not tested: passing the gate is only
-// observable once the devcomm build completes, and this fixture stops that
-// build at the resource-window cuMemCreate.
 TEST_F(DevrCommCreateInternalTest, GinForceEnable_BehavesAsFullConnection) {
   reqs.ginForceEnable = true;
   reqs.ginConnectionType = NCCL_GIN_CONNECTION_NONE;  // overridden by the flag
   comm->globalGinSupport = NCCL_GIN_CONNECTION_RAIL;
 
   EXPECT_EQ(Create(), ncclInvalidArgument);
+}
+
+// ginSignalCount stays at its initializer value of 0. The barrier fakes also
+// zero their ginSignalCount, so ginSignalTotal stays 0 and the signal-region
+// sizing is not taken. Setup fails before the resource window is created.
+TEST_F(DevrCommCreateInternalTest, GinSetupFails_RestoresStreamCaptureMode) {
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+
+  hipStreamCaptureMode threadMode = hipStreamCaptureModeGlobal;
+  hipStreamCaptureMode requested = hipStreamCaptureModeGlobal;
+  bool sawRequest = false;
+  ScopedHook exchange(g_hipThreadExchangeStreamCaptureMode, [&](hipStreamCaptureMode* mode) {
+    if (mode == nullptr) return hipErrorInvalidValue;
+    if (!sawRequest) {
+      requested = *mode;
+      sawRequest = true;
+    }
+    hipStreamCaptureMode previous = threadMode;
+    threadMode = *mode;
+    *mode = previous;
+    return hipSuccess;
+  });
+  ScopedHook ginSetup(g_devrGinDevCommSetup,
+                      [](struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*, uint32_t) {
+                        return ncclInternalError;
+                      });
+
+  EXPECT_EQ(Create(), ncclInternalError);
+  EXPECT_EQ(ginSetup.calls, 1);
+  EXPECT_TRUE(sawRequest);
+  EXPECT_EQ(requested, hipStreamCaptureModeRelaxed);
+  EXPECT_EQ(threadMode, hipStreamCaptureModeGlobal);
+}
+
+// Branch: the same requirements with the flag clear request nothing, so they
+// pass the gate that GinForceEnable_BehavesAsFullConnection fails.
+TEST_F(DevrCommCreateInternalTest, GinForceEnableClear_PassesGate) {
+  reqs.ginForceEnable = false;
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_NONE;
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_RAIL;
+
+  EXPECT_EQ(Create(), ncclSuccess);
 }
 
 // Integration point: the resource-window allocation must use the rounded
@@ -6882,6 +7114,79 @@ TEST_F(DevrCommCreateInternalTest, GinConnectFails_RetryConnectsAgain) {
   EXPECT_FALSE(comm->devrState.ginEnabled);
 }
 
+// Register fails after connect: activation rolls back, so the retry registers again.
+TEST_F(DevrCommCreateInternalTest, GinRegisterFailsAfterConnect_RollsBackActivation) {
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+  LinkPreGinMemories();
+
+  void* const goodHostWin = reinterpret_cast<void*>(0xa1);
+  int goodRegistrations = 0;
+  int goodDeregistrations = 0;
+  ScopedHook connect(g_devrGinConnectOnce, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook reg(g_devrGinRegister, [&](ncclComm*, void* addr, size_t, void* hostWins[], ncclGinWindow_t[], uint32_t[],
+                                        int, bool, int) {
+    // Registration only runs once connect has latched GIN.
+    EXPECT_TRUE(comm->devrState.ginEnabled);
+    if (addr != mems[0].primaryAddr) return ncclSystemError;
+    hostWins[0] = goodHostWin;
+    goodRegistrations++;
+    return ncclSuccess;
+  });
+  ScopedHook dereg(g_devrGinDeregister, [&](ncclComm*, void* hostWins[], uint32_t const[]) {
+    if (hostWins[0] == goodHostWin) goodDeregistrations++;
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(Create(), ncclSystemError);
+  ASSERT_FALSE(comm->devrState.ginEnabled);
+  EXPECT_EQ(goodRegistrations, 1);
+  EXPECT_EQ(goodDeregistrations, 1);
+  EXPECT_EQ(mems[0].ginSegmentInfos, nullptr);
+  EXPECT_EQ(mems[0].ginHostWins[0], nullptr);
+  EXPECT_EQ(mems[1].ginSegmentInfos, nullptr);
+
+  EXPECT_EQ(Create(), ncclSystemError);
+  EXPECT_EQ(connect.calls, 2);
+  EXPECT_EQ(goodRegistrations, 2);
+  EXPECT_EQ(goodDeregistrations, 2);
+  EXPECT_FALSE(comm->devrState.ginEnabled);
+}
+
+// Stream creation fails after every memory registered: activation still rolls back.
+TEST_F(DevrCommCreateInternalTest, StreamCreateFailsAfterGinRegister_RollsBackActivation) {
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+  comm->sharedRes->ginState.numActiveBackends = 1;
+  comm->sharedRes->ginState.backends[0].ginCommCount = 1;
+  LinkPreGinMemories();
+
+  int registrations = 0;
+  int deregistrations = 0;
+  ScopedHook connect(g_devrGinConnectOnce, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook reg(g_devrGinRegister, [&](ncclComm*, void* addr, size_t, void* hostWins[], ncclGinWindow_t[], uint32_t[],
+                                        int, bool, int) {
+    hostWins[0] = addr;
+    registrations++;
+    return ncclSuccess;
+  });
+  ScopedHook dereg(g_devrGinDeregister, [&](ncclComm*, void* hostWins[], uint32_t const[]) {
+    if (hostWins[0] == mems[0].primaryAddr || hostWins[0] == mems[1].primaryAddr) deregistrations++;
+    return ncclSuccess;
+  });
+  ScopedHook stream(g_hipStreamCreateWithFlags, [](hipStream_t*, unsigned) { return hipErrorInvalidValue; });
+
+  EXPECT_NE(Create(), ncclSuccess);
+  EXPECT_EQ(stream.calls, 1);
+  EXPECT_EQ(registrations, 2);
+  EXPECT_EQ(deregistrations, 2);
+  EXPECT_FALSE(comm->devrState.ginEnabled);
+  for (ncclDevrMemory& mem : mems) {
+    EXPECT_EQ(mem.ginSegmentInfos, nullptr);
+    EXPECT_EQ(mem.ginHostWins[0], nullptr);
+  }
+}
+
 // Branch: a GIN request rejected after the support checks but before connect
 // leaves GIN unlatched, so a later valid create still connects.
 TEST_F(DevrCommCreateInternalTest, WorldGinBarrierOnRail_RejectedWithoutLatchingGin) {
@@ -6893,6 +7198,19 @@ TEST_F(DevrCommCreateInternalTest, WorldGinBarrierOnRail_RejectedWithoutLatching
   EXPECT_EQ(Create(), ncclInvalidArgument);
   EXPECT_EQ(connect.calls, 0);
   EXPECT_FALSE(comm->devrState.ginEnabled);
+}
+
+// Branch: GIN already enabled on the comm by an earlier devComm. A devComm
+// that requests no GIN connection must not get GIN dev-comm setup (AICOMRCCL-3230).
+TEST_F(DevrCommCreateInternalTest, NoGinRequestedOnGinEnabledComm_SkipsGinDevCommSetup) {
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_NONE;
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+  comm->devrState.ginEnabled = true;
+  ScopedHook setup(g_devrGinDevCommSetup,
+                   [](ncclComm*, ncclDevCommRequirements const*, ncclDevComm*, uint32_t) { return ncclSuccess; });
+
+  EXPECT_EQ(Create(), ncclSuccess);
+  EXPECT_EQ(setup.calls, 0);
 }
 
 

@@ -5,7 +5,9 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/mimg.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/decode_factories.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/image_address.h"
 #include <algorithm>
 #include <bit>
 #include <memory>
@@ -43,7 +45,7 @@ ImageLoadMimg::ImageLoadMimg(const MachineInst *inst)
              (reinterpret_cast<const OpEncoding *>(inst)->acc
                   ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
                   : 0))),
-      vaddr((reinterpret_cast<const OpEncoding *>(inst)->a16 ? 64 : 96), OperandType::OPR_VGPR,
+      vaddr(32 * (reinterpret_cast<const OpEncoding *>(inst)->a16 ? 2u : 3u), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)) {
   dst_operands_[0] = &vdata;
@@ -54,6 +56,18 @@ ImageLoadMimg::ImageLoadMimg(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+void ImageLoadMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
+  const uint32_t count = (inst_.a16 ? 2u : 3u);
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageLoadMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -75,14 +89,30 @@ ImageLoadMipMimg::ImageLoadMipMimg(const MachineInst *inst)
              (reinterpret_cast<const OpEncoding *>(inst)->acc
                   ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
                   : 0))),
-      vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(32 * (0u +
+                  (reinterpret_cast<const OpEncoding *>(inst)->a16 ? (3u + 1u + 1) / 2 : 3u + 1u)),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)) {
   dst_operands_[0] = &vdata;
   src_operands_[0] = &vaddr;
   src_operands_[1] = &srsrc;
   num_src_ = 2;
   num_dst_ = 1;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+void ImageLoadMipMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
+  const uint32_t count = (0u + (inst_.a16 ? (3u + 1u + 1) / 2 : 3u + 1u));
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageLoadMipMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -225,7 +255,7 @@ ImageStoreMimg::ImageStoreMimg(const MachineInst *inst)
              (reinterpret_cast<const OpEncoding *>(inst)->acc
                   ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
                   : 0))),
-      vaddr((reinterpret_cast<const OpEncoding *>(inst)->a16 ? 64 : 96), OperandType::OPR_VGPR,
+      vaddr(32 * (reinterpret_cast<const OpEncoding *>(inst)->a16 ? 2u : 3u), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)) {
   src_operands_[0] = &vdata;
@@ -233,12 +263,21 @@ ImageStoreMimg::ImageStoreMimg(const MachineInst *inst)
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
-  set_memory_issue_info(
-      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
-                                       amdgpu::MemoryCompletionClass::VMEM},
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+void ImageStoreMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
+  const uint32_t count = (inst_.a16 ? 2u : 3u);
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageStoreMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -260,14 +299,30 @@ ImageStoreMipMimg::ImageStoreMipMimg(const MachineInst *inst)
              (reinterpret_cast<const OpEncoding *>(inst)->acc
                   ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
                   : 0))),
-      vaddr(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(32 * (0u +
+                  (reinterpret_cast<const OpEncoding *>(inst)->a16 ? (3u + 1u + 1) / 2 : 3u + 1u)),
+            OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)) {
   src_operands_[0] = &vdata;
   src_operands_[1] = &vaddr;
   src_operands_[2] = &srsrc;
   num_src_ = 3;
   num_dst_ = 0;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+void ImageStoreMipMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
+  const uint32_t count = (0u + (inst_.a16 ? (3u + 1u + 1) / 2 : 3u + 1u));
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageStoreMipMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -342,8 +397,8 @@ DecodeResult decodeImageStoreMipPckMimg(const MachineInst *opcode,
 } // namespace detail
 
 ImageGetResinfoMimg::ImageGetResinfoMimg(const MachineInst *inst)
-    : Mimg("image_get_resinfo", reinterpret_cast<const OpEncoding *>(inst),
-           selected_exec_fn(InstructionExecutionId::ImageGetResinfoMimg)),
+    : ImageAddressInstruction("image_get_resinfo", reinterpret_cast<const OpEncoding *>(inst),
+                              selected_exec_fn(InstructionExecutionId::ImageGetResinfoMimg)),
       vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, false, false, false),
             OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
@@ -868,7 +923,8 @@ ImageSampleMimg::ImageSampleMimg(const MachineInst *inst)
              (reinterpret_cast<const OpEncoding *>(inst)->acc
                   ? OpSelVgprOrAccvgpr::OPR_VGPR_OR_ACCVGPR_ACC_MIN
                   : 0))),
-      vaddr(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vaddr),
+      vaddr(32 * (reinterpret_cast<const OpEncoding *>(inst)->a16 ? 2u : 3u), OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(256, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->srsrc * 4)),
       ssamp(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)) {
   dst_operands_[0] = &vdata;
@@ -877,7 +933,21 @@ ImageSampleMimg::ImageSampleMimg(const MachineInst *inst)
   src_operands_[2] = &ssamp;
   num_src_ = 3;
   num_dst_ = 1;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+void ImageSampleMimg::implicit_uses(RegisterSet &uses) const {
+  Mimg::implicit_uses(uses);
+  const auto registers = amdgpu::contiguous_image_address_registers(inst_.vaddr);
+  const uint32_t count = (inst_.a16 ? 2u : 3u);
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageSampleMimg::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
