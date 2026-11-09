@@ -301,11 +301,12 @@ HIP_TEST_CASE(Unit_hipMemcpyPeerAsync_Negative_Parameters) {
 /**
  * Test Description
  * ------------------------
- *  - Allocates VMM (expandable-segment style) memory on two devices and copies
- *    with hipMemcpyPeerAsync while hipMemSetAccess grants only the owning
- *    device. The runtime must either copy the bytes or return an explicit
- *    error. A success return with an unchanged destination is the bug.
- *  - Repeats after granting the peer device access as a positive control.
+ *  - Allocates VMM (expandable-segment style) memory on two devices, enables
+ *    peer access, and grants hipMemSetAccess to the owning device only.
+ *  - hipMemcpyPeerAsync and hipMemcpyPeer must return an explicit error instead
+ *    of reporting success while copying zero bytes.
+ *  - Positive control: after hipMemSetAccess grants the peer device access to
+ *    both mappings, the copies must succeed and transfer every byte.
  * Test source
  * ------------------------
  *  - unit/memory/hipMemcpyPeerAsync.cc
@@ -371,6 +372,7 @@ HIP_TEST_CASE(Unit_hipMemcpyPeerAsync_VmmPeerAccessValidation) {
   HIP_CHECK(hipMemCreate(&dst_handle, size, &prop, 0));
   HIP_CHECK(hipMemMap(dst, size, 0, dst_handle, 0));
 
+  // Owner-only access on both mappings.
   hipMemAccessDesc desc{};
   desc.location.type = hipMemLocationTypeDevice;
   desc.flags = hipMemAccessFlagsProtReadWrite;
@@ -387,18 +389,13 @@ HIP_TEST_CASE(Unit_hipMemcpyPeerAsync_VmmPeerAccessValidation) {
   HIP_CHECK(hipStreamCreate(&stream));
   std::vector<unsigned char> host(size, 0);
 
-  // Owner-only VMM access. Returning success without copying is the bug.
-  hipError_t copy_status = hipMemcpyPeerAsync(dst, 1, src, 0, size, stream);
-  if (copy_status == hipSuccess) {
-    HIP_CHECK(hipStreamSynchronize(stream));
-    HIP_CHECK(hipSetDevice(1));
-    HIP_CHECK(hipMemcpy(host.data(), dst, size, hipMemcpyDeviceToHost));
-    REQUIRE(std::all_of(host.begin(), host.end(),
-                        [pattern](unsigned char value) { return value == pattern; }));
-  } else {
-    // An explicit error is acceptable: the API must not silently succeed.
-    (void)hipGetLastError();
-  }
+  // Negative: peer access is enabled, but hipMemSetAccess never granted the
+  // current device access to the peer-owned mapping. The copy must fail
+  // explicitly; returning success with an unchanged destination is the bug.
+  REQUIRE(hipMemcpyPeerAsync(dst, 1, src, 0, size, stream) == hipErrorInvalidValue);
+  (void)hipGetLastError();
+  REQUIRE(hipMemcpyPeer(dst, 1, src, 0, size) == hipErrorInvalidValue);
+  (void)hipGetLastError();
 
   // Positive control: grant the peer device access to both mappings.
   desc.location.id = 1;
@@ -412,6 +409,17 @@ HIP_TEST_CASE(Unit_hipMemcpyPeerAsync_VmmPeerAccessValidation) {
   HIP_CHECK(hipMemcpyPeerAsync(dst, 1, src, 0, size, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
   HIP_CHECK(hipSetDevice(1));
+  HIP_CHECK(hipMemcpy(host.data(), dst, size, hipMemcpyDeviceToHost));
+  REQUIRE(std::all_of(host.begin(), host.end(),
+                      [pattern](unsigned char value) { return value == pattern; }));
+
+  // Sync peer copy with the same explicit grant.
+  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipMemset(src, pattern, size));
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipMemcpyPeer(dst, 1, src, 0, size));
+  HIP_CHECK(hipSetDevice(1));
+  std::fill(host.begin(), host.end(), 0);
   HIP_CHECK(hipMemcpy(host.data(), dst, size, hipMemcpyDeviceToHost));
   REQUIRE(std::all_of(host.begin(), host.end(),
                       [pattern](unsigned char value) { return value == pattern; }));
