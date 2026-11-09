@@ -115,6 +115,7 @@ test_categories:
       - "CollTraceUtilsTest.*"
       - "GinPluginInitFail.*"
       - "CpuAffinity.*"
+      - "RasDiagnostics.*"
     exclude_windows:
       - "*"
     labels:
