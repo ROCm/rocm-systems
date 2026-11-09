@@ -106,6 +106,26 @@ class CheckMadKnobs(unittest.TestCase):
                 tm.check_mad_knobs(self.work_dir(text), config)
         tm.check_mad_knobs(self.work_dir('read -a a <<< "$PRIMUS_EXTRA_ARGS"\n'), config)
 
+    def test_comments_single_quotes_and_escapes_do_not_count(self):
+        config = tm.WORKLOAD_CONFIGS["llama-3.1-70b-pp4-training"]
+        for text in ('# x="${PRIMUS_EXTRA_ARGS:-}"\n',
+                     'x=1  # "$PRIMUS_EXTRA_ARGS"\n',
+                     "echo '${PRIMUS_EXTRA_ARGS:-}'\n",
+                     'echo \\${PRIMUS_EXTRA_ARGS}\n',
+                     'echo "\\$PRIMUS_EXTRA_ARGS"\n'):
+            with self.subTest(text=text), self.assertRaises(RuntimeError):
+                tm.check_mad_knobs(self.work_dir(text), config)
+
+    def test_expansions_around_other_quoting_count(self):
+        config = tm.WORKLOAD_CONFIGS["llama-3.1-70b-pp4-training"]
+        # The pinned script's own read (scripts/primus_megatron-lm, line 265).
+        for text in ("IFS=$' \\t\\n' read -r -d '' -a extra_args "
+                     '<<< "$PRIMUS_EXTRA_ARGS" || true\n',
+                     'echo "don\'t"; x="${PRIMUS_EXTRA_ARGS:-}"\n',
+                     "echo 'a'; n=${#x}  # ok\nx=$PRIMUS_EXTRA_ARGS\n"):
+            with self.subTest(text=text):
+                tm.check_mad_knobs(self.work_dir(text), config)
+
     def test_missing_script_fails(self):
         config = tm.WORKLOAD_CONFIGS["llama-3.1-70b-pp4-training"]
         with self.assertRaises(RuntimeError):

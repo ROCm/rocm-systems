@@ -297,6 +297,50 @@ CLUSTER_CONFIGS = {
 }
 
 
+def _shell_code(text: str) -> str:
+    """*text* without what bash does not expand: comments, '...' and \\-escapes.
+
+    A lexer, not a parser: heredoc bodies are read as code, and an unbalanced
+    quote in one hides the rest of the file, which fails loudly rather than
+    passing.
+    """
+    out: list[str] = []
+    quote = ""  # "", "'", '"' or "$'"
+    i = 0
+    while i < len(text):
+        c = text[i]
+        if quote == "'":
+            if c == "'":
+                quote = ""
+        elif quote == "$'":
+            if c == "\\":
+                i += 1
+            elif c == "'":
+                quote = ""
+        elif c == "\\":
+            i += 1
+        elif quote == '"':
+            if c == '"':
+                quote = ""
+            out.append(c)
+        elif c == "'":
+            if out and out[-1] == "$":
+                out.pop()
+                quote = "$'"
+            else:
+                quote = "'"
+        elif c == "#" and (not out or out[-1] in " \t\n;&|()"):
+            end = text.find("\n", i)
+            i = len(text) if end < 0 else end
+            continue
+        else:
+            if c == '"':
+                quote = '"'
+            out.append(c)
+        i += 1
+    return "".join(out)
+
+
 def check_mad_knobs(work_dir: Path, workload_config: dict) -> None:
     """Fail if the MAD pin's Megatron script never expands a PRIMUS_* knob we set.
 
@@ -312,7 +356,7 @@ def check_mad_knobs(work_dir: Path, workload_config: dict) -> None:
         return
     script = (work_dir / "scripts" / "primus_megatron-lm"
               / "primus_megatron-lm_benchmark_report.sh")
-    text = script.read_text(errors="replace") if script.is_file() else ""
+    text = _shell_code(script.read_text(errors="replace")) if script.is_file() else ""
     missing = [k for k in knobs
                if not re.search(rf"\$\{{?{re.escape(k)}\b", text)]
     if missing:
