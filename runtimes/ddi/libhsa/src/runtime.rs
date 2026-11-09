@@ -71,6 +71,8 @@ pub(crate) use clock::{
 };
 mod logging;
 mod status;
+#[cfg(test)]
+pub(crate) use admission::install_test_public_raw_gate;
 pub(crate) use admission::{
     ApiLeaseScope, InFlightToken, InFlightTracker, enter_public_raw_handle, process_admission,
 };
