@@ -40,7 +40,7 @@ concurrency:
 
 jobs:
   health:
-    name: ${{ matrix.host }}
+    name: ${{ matrix.host }} (${{ matrix.gfx }})
     # A manual run can pick any branch; only develop's reviewed code may run here.
     if: ${{ github.ref == 'refs/heads/develop' }}
     strategy:
@@ -50,6 +50,13 @@ jobs:
           - host: lsttstrix
             label: lstt-gfx1151
             gfx: gfx1151
+          # One row per runner entry, so the two arches check in parallel.
+          - host: lsttserver2
+            label: lstt-gfx90a
+            gfx: gfx90a
+          - host: lsttserver2
+            label: lstt-gfx1100
+            gfx: gfx1100
     runs-on:
       - ${{ matrix.label }}
       - ${{ matrix.host }}
