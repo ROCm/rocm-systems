@@ -90,6 +90,11 @@ set(SRC_FILES
   device/symmetric/reduce_scatter.cuh
   device/symmetric/reduce_scatter_gin.cuh
   device/symmetric/symk.cuh
+  device/datamover/dataMover.h
+  device/datamover/dmCore.h
+  device/datamover/ldsDmaMover.h
+  device/datamover/sdmaMover.h
+  device/datamover/vectorMover.h
   device/tdm/asyncCopy.h
   device/tdm/cachePolicy.h
   device/tdm/ll128Tdm.h
