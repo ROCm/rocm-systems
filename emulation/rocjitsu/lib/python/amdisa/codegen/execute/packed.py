@@ -1382,9 +1382,15 @@ def gen_dot2_true16(
     for i in range(2):
         L.append(f'    if (amdgpu::dot2_src_needs_half_replication(inst_.src{i}))')
         L.append(f'      raw{i} = (raw{i} & 0xffffu) * 0x10001u;')
+    # Inline accumulators replicate their low half before OPSEL. Registers and
+    # literals retain independent halves, as for the packed multiplicands.
     L.append(
-        f'    uint32_t acc_bits = ::rocjitsu::amdgpu::read_vop3_true16_src({s2}, wf, lane, opsel, 2);'
+        f'    uint32_t acc_bits = amdgpu::RegisterAccess(wf).read_lane({s2}, lane);'
     )
+    L.append('    if (amdgpu::dot2_src_needs_half_replication(inst_.src2))')
+    L.append('      acc_bits = (acc_bits & 0xffffu) * 0x10001u;')
+    L.append('    if (opsel & 4u)')
+    L.append('      acc_bits >>= 16;')
     L.append('    const auto half = [&](uint32_t bits, unsigned source) {')
     L.append(
         f'      return uint16_t(amdgpu::source_modifier::apply<{fmt}>(bits & 0xffffu, source, inst_.abs, inst_.neg));'

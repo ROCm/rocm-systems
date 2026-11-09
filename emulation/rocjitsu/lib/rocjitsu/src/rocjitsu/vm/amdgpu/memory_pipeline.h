@@ -173,6 +173,12 @@ protected:
 private:
   VmAccessOutcome initiate_global_access(VectorMemState &state, Wavefront &wf,
                                          uint64_t request_lanes);
+  // Per-request mutable state lives only in per_lane_addr, response_data and
+  // translated; sampling swaps each tap's versions around this call. The other
+  // request fields must be shared by every tap. Translation may refresh an
+  // unready request snapshot, so each tap retains its own translation progress.
+  VmAccessOutcome initiate_texel_access(VectorMemState &state, Wavefront &wf,
+                                        uint64_t request_lanes);
   L1VectorCache *l1_;
   L2Cache *l2_;
 };

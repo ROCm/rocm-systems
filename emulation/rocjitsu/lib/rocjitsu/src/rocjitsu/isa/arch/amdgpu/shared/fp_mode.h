@@ -26,7 +26,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <limits>
-#include <stdexcept>
 #include <type_traits>
 
 #if RJ_HOST_ARCH_X86
@@ -696,8 +695,8 @@ Bits atomic_scalar(ScalarAtomicOp operation, Bits old_bits, Bits source_bits, Bi
     return (denorm_mode & 2u) ? result : flush(result);
   }
 
-  if (operation != ScalarAtomicOp::FMIN && operation != ScalarAtomicOp::FMAX)
-    throw std::invalid_argument("unsupported scalar floating-point atomic operation");
+  assert((operation == ScalarAtomicOp::FMIN || operation == ScalarAtomicOp::FMAX) &&
+         "unsupported scalar floating-point atomic operation");
 
   // CDNA1-4 / RDNA1-3.5 preserve selected denormals and propagate SNaNs.
   // CDNA5 / RDNA4 MIN_NUM/MAX_NUM select from the flushed values instead.
@@ -1158,8 +1157,12 @@ inline uint64_t binary_f64(uint64_t src0, uint64_t src1, BinaryF64Op operation, 
 
 /// @brief Apply F64 OMOD/CLAMP under the architectural rounding mode.
 /// @details A nonzero OMOD flushes a denormal result and converts either signed zero to +0.
+/// With OMOD and CLAMP disabled, no floating-point work is needed, so the original bits are
+/// returned without entering the host floating-point environment.
 inline uint64_t finish_f64(uint64_t value, uint32_t round_mode, uint32_t omod, bool clamp,
                            bool clamp_nan_to_zero) {
+  if (omod == 0 && !clamp)
+    return value;
   double result;
   {
     detail::ScopedFenv environment(round_mode);

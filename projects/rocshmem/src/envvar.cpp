@@ -237,11 +237,14 @@ namespace envvar {
 
   namespace tdm {
     const var<uint32_t> tile_bytes("TILE_BYTES",
-        "TDM tile size in bytes for LDS-staged IPC transfers. 0 (default) "
-        "auto-sets the tile to use all LDS available per block", 0);
-    const var<size_t> threshold("THRESHOLD",
-        "TDM transfer size threshold in bytes; transfers smaller than this use "
-        "the normal (non-TDM) copy path instead", 16384);
+        "TDM tile size in bytes for LDS-staged IPC transfers. 0 auto-sizes "
+        "the tile to use all LDS available per block", 131072);
+    const var<size_t> put_threshold("PUT_THRESHOLD",
+        "TDM transfer size threshold in bytes for put; transfers smaller "
+        "than this use the normal (non-TDM) copy path instead", 16384);
+    const var<size_t> get_threshold("GET_THRESHOLD",
+        "TDM transfer size threshold in bytes for get; transfers smaller "
+        "than this use the normal (non-TDM) copy path instead", 1024);
   }  // namespace tdm
 
   namespace _detail {

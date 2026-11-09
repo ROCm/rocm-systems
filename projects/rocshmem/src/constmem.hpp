@@ -46,7 +46,8 @@ struct constmem_t {
   uintptr_t heap_base;  // Local symmetric heap base
   size_t heap_size;     // Local symmetric heap size in bytes
   uint32_t tdm_tile_bytes;
-  size_t tdm_threshold;  // transfers smaller than this skip the TDM path
+  size_t tdm_put_threshold;  // put transfers smaller than this skip the TDM path
+  size_t tdm_get_threshold;  // get transfers smaller than this skip the TDM path
 } __attribute__ ((aligned (16)));
 
 extern __constant__ constmem_t constmem;
