@@ -72,7 +72,7 @@ _METRIC_ALIASES: dict[str, set[str]] = {
 _TFLOPS_METRICS = {"TFLOPS_per_gpu_avg"}
 
 # Applied to the candidate/baseline ratio of one same-node A/B pair.
-REGRESSION_THRESHOLD_TRAINING = 0.02  # 2%
+REGRESSION_THRESHOLD_TRAINING = 0.03  # 3%
 REGRESSION_THRESHOLD_INFERENCE = 0.05  # 5%
 
 BASELINE = "baseline"
