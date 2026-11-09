@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "util/diagnostic.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -36,7 +38,10 @@ RunStats &operator+=(RunStats &left, const RunStats &right);
                                           std::uintptr_t data_address, std::size_t size);
 
 /// @brief Exercise code-object and executable loading for one byte sequence.
-[[nodiscard]] RunStats run_input(std::span<const uint8_t> bytes);
+/// @details Oversized inputs fail and emit a diagnostic. Loader invariant
+/// violations terminate the process, including in builds with NDEBUG.
+util::FailureOr<RunStats> run_input(std::span<const uint8_t> bytes,
+                                    util::DiagnosticEmitter diagnostic = {});
 /// @brief Return the deterministic structured corpus used by the generator.
 [[nodiscard]] std::vector<std::vector<uint8_t>> seed_corpus();
 /// @brief Generate one bounded input deterministically from @p seed.

@@ -134,4 +134,40 @@ if(NOT rerun_stdout MATCHES "\\\"inputs\\\":2")
 endif()
 assert_saved_failure("successful rerun")
 
+function(assert_cli_failure expected_diagnostic)
+    execute_process(
+        COMMAND "${FUZZ_EXECUTABLE}" ${ARGN}
+        RESULT_VARIABLE result
+        OUTPUT_VARIABLE stdout
+        ERROR_VARIABLE stderr
+    )
+    if(NOT result EQUAL 2 OR NOT stderr MATCHES "${expected_diagnostic}")
+        message(
+            FATAL_ERROR
+            "expected exit 2 and '${expected_diagnostic}', got ${result}: ${stdout}${stderr}"
+        )
+    endif()
+endfunction()
+
+assert_cli_failure("expected an unsigned integer" --random 18446744073709551616)
+assert_cli_failure("expected an unsigned integer" --random 1tail)
+assert_cli_failure("threads must be positive" --random 1 --threads 0)
+assert_cli_failure("input has an invalid size" --input "${WORK_DIRECTORY}/missing.bin")
+file(WRITE "${WORK_DIRECTORY}/empty.bin" "")
+execute_process(
+    COMMAND "${FUZZ_EXECUTABLE}" --input "${WORK_DIRECTORY}/empty.bin"
+    RESULT_VARIABLE empty_result
+    OUTPUT_VARIABLE empty_stdout
+    ERROR_VARIABLE empty_stderr
+)
+if(NOT empty_result EQUAL 0 OR NOT empty_stdout MATCHES "\\\"inputs\\\":1")
+    message(
+        FATAL_ERROR
+        "empty input failed (${empty_result}): ${empty_stdout}${empty_stderr}"
+    )
+endif()
+string(REPEAT "x" 1048577 oversized_bytes)
+file(WRITE "${WORK_DIRECTORY}/oversized.bin" "${oversized_bytes}")
+assert_cli_failure("input has an invalid size" --input "${WORK_DIRECTORY}/oversized.bin")
+
 file(REMOVE_RECURSE "${WORK_DIRECTORY}")
