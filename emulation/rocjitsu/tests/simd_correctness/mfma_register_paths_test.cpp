@@ -185,8 +185,8 @@ TEST(MfmaRegisterPathsTest, SparseOutputLayoutMatchesScalar) {
       expect_matches_scalar(
           "f32 4x4x4x4", shape, overlap, /*cross_chunks=*/false, 71,
           [&](ExactFixture &fx, uint32_t dst, uint32_t a, uint32_t b, uint32_t c) {
-            amdgpu::exec_f32(*fx.cu, 4, 4, 4, 4, 32, dst, a, b, c, amdgpu::extract_f32,
-                             amdgpu::extract_f32, const_acc);
+            amdgpu::exec_f32<4, 4, 4, 4>(*fx.cu, 32, dst, a, b, c, amdgpu::extract_f32,
+                                         amdgpu::extract_f32, const_acc);
           });
       if (::testing::Test::HasFatalFailure())
         return;
@@ -288,8 +288,9 @@ TEST(MfmaRegisterPathsTest, Fp8ChunkedLayoutMatchesScalarWithLanePermutations) {
           expect_matches_scalar(
               "fp8 16x16x128", shape, overlap, cross_chunks, 21 + p.cbsz,
               [&](ExactFixture &fx, uint32_t dst, uint32_t a, uint32_t b, uint32_t c) {
-                amdgpu::exec_f32(*fx.cu, 16, 16, 128, 1, 8, dst, a, b, c, amdgpu::extract_fp8,
-                                 amdgpu::extract_fp8, const_acc, p.cbsz, p.abid, p.blgp);
+                amdgpu::exec_f32<16, 16, 128, 1>(*fx.cu, 8, dst, a, b, c, amdgpu::extract_fp8,
+                                                 amdgpu::extract_fp8, const_acc, p.cbsz, p.abid,
+                                                 p.blgp);
               });
           if (::testing::Test::HasFatalFailure())
             return;
@@ -346,8 +347,12 @@ TEST(MfmaRegisterPathsTest, F8F6F4MatchesScalarForEveryFormatPair) {
                   [&](ExactFixture &fx, uint32_t dst, uint32_t a, uint32_t b, uint32_t c) {
                     ASSERT_TRUE(amdgpu::dispatch_matrix_fmt_pair(
                         a_fmt, b_fmt, [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {
-                          amdgpu::exec_f32_mixed(*fx.cu, mfma.m, mfma.n, mfma.k, 1, a_bits, b_bits,
-                                                 dst, a, b, c, ea, eb, const_acc);
+                          if (mfma.m == 16)
+                            amdgpu::exec_f32_mixed<16, 16, 128, 1>(*fx.cu, a_bits, b_bits, dst, a,
+                                                                   b, c, ea, eb, const_acc);
+                          else
+                            amdgpu::exec_f32_mixed<32, 32, 64, 1>(*fx.cu, a_bits, b_bits, dst, a, b,
+                                                                  c, ea, eb, const_acc);
                         }));
                   });
               if (::testing::Test::HasFatalFailure())
@@ -368,8 +373,9 @@ TEST(MfmaRegisterPathsTest, Bf16FourByFourMatchesScalarWithLanePermutations) {
         expect_matches_scalar(
             "bf16 4x4x2x16", shape, overlap, /*cross_chunks=*/false, 51 + p.cbsz,
             [&](ExactFixture &fx, uint32_t dst, uint32_t a, uint32_t b, uint32_t c) {
-              amdgpu::exec_f32(*fx.cu, 4, 4, 2, 16, 16, dst, a, b, c, amdgpu::extract_bf16,
-                               amdgpu::extract_bf16, const_acc, p.cbsz, p.abid, p.blgp);
+              amdgpu::exec_f32<4, 4, 2, 16>(*fx.cu, 16, dst, a, b, c, amdgpu::extract_bf16,
+                                            amdgpu::extract_bf16, const_acc, p.cbsz, p.abid,
+                                            p.blgp);
             });
         if (::testing::Test::HasFatalFailure())
           return;
