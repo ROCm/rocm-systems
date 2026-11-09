@@ -145,8 +145,7 @@ void CollTrace::recordCurCollResult(int rank, float latency) {
   }
 
   if (shouldAggregateRingBuffer(collId) && pastColls_.size() > 0) {
-    std::vector<float> latencyAllGather;
-    latencyAllGather.resize(static_cast<size_t>(comm_->localRanks) * NCCL_COLLTRACE_RECORD_MAX, 0);
+    std::vector<float> latencyAllGather(static_cast<size_t>(comm_->localRanks) * NCCL_COLLTRACE_RECORD_MAX, 0);
     int start = (comm_->localRank) * NCCL_COLLTRACE_RECORD_MAX;
     for (int i = start; i < start + NCCL_COLLTRACE_RECORD_MAX; i++) {
       latencyAllGather[i] = pastColls_[i - start]->latencyMs;
