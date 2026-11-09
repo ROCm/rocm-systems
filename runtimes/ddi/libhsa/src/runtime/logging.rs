@@ -12,7 +12,7 @@ thread_local! {
 
 /// Prevents C stream callbacks from recursively entering the log writer or
 /// replacing its stream while the borrowed pointer is in use.
-pub(crate) struct LogWriteScope;
+pub(crate) struct LogWriteScope(std::marker::PhantomData<std::rc::Rc<()>>);
 
 impl LogWriteScope {
     /// Marks entry into a process logging callback scope.
@@ -20,7 +20,7 @@ impl LogWriteScope {
         if IN_LOG_WRITE.with(|active| active.replace(true)) {
             return None;
         }
-        Some(Self)
+        Some(Self(std::marker::PhantomData))
     }
 
     /// Checks whether the current thread is writing through the log callback.
