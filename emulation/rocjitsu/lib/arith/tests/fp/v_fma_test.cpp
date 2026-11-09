@@ -751,30 +751,49 @@ TEST(FpFmaF64, GuestRounding) {
 // Tininess is judged after rounding. (1 - 2^-53) * 2^-1022 is exact at full precision, so it
 // is tiny in every rounding mode although subnormal rounding can reach the smallest normal;
 // (1 - 2^-52) * (2^-1022 + 2^-1074) is not tiny unless rounded down. Flushing outputs and OMOD
-// zero tiny results, OMOD even when MODE keeps denormals. Expected results are gfx1201
-// captures of V_FMA_F64 with a +0 addend, in nearest, up, down and zero rounding.
+// zero tiny results, OMOD even when MODE keeps denormals. Adding the smallest subnormal to the
+// first product puts the exact sum half an ULP above the smallest normal, so the recheck must
+// include the addend. Expected results are gfx1201 captures of V_FMA_F64 (input denormals
+// kept), in nearest, up, down and zero rounding.
 TEST(FpFmaF64, RoundedMinimumNormal) {
   using namespace rocjitsu::arith::test;
   const struct {
-    uint64_t a, b, fp_flags;
+    uint64_t a, b, c, fp_flags;
     uint32_t instruction_flags;
     uint64_t expected[4];
   } cases[] = {
-      {0x3fefffffffffffffULL, 0x0010000000000000ULL, RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS, 0, {}},
+      {0x3fefffffffffffffULL, 0x0010000000000000ULL, 0, RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS, 0, {}},
       {0x3fefffffffffffffULL,
        0x0010000000000000ULL,
        0,
        0,
+       0,
        {0x0010000000000000ULL, 0x0010000000000000ULL, 0x000fffffffffffffULL,
         0x000fffffffffffffULL}},
-      {0x3fefffffffffffffULL, 0x0010000000000000ULL, 0, RJ_ARITH_ALU_OMOD_2, {}},
+      {0x3fefffffffffffffULL, 0x0010000000000000ULL, 0, 0, RJ_ARITH_ALU_OMOD_2, {}},
+      {0x3fefffffffffffffULL,
+       0x0010000000000000ULL,
+       1,
+       RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+       0,
+       {0x0010000000000000ULL, 0x0010000000000001ULL, 0x0010000000000000ULL,
+        0x0010000000000000ULL}},
+      {0x3fefffffffffffffULL,
+       0x0010000000000000ULL,
+       1,
+       0,
+       RJ_ARITH_ALU_OMOD_2,
+       {0x0020000000000000ULL, 0x0020000000000001ULL, 0x0020000000000000ULL,
+        0x0020000000000000ULL}},
       {0x3feffffffffffffeULL,
        0x0010000000000001ULL,
+       0,
        RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
        0,
        {0x0010000000000000ULL, 0x0010000000000000ULL, 0, 0}},
       {0x3feffffffffffffeULL,
        0x0010000000000001ULL,
+       0,
        0,
        RJ_ARITH_ALU_OMOD_2,
        {0x0020000000000000ULL, 0x0020000000000000ULL, 0, 0}},
@@ -786,13 +805,14 @@ TEST(FpFmaF64, RoundedMinimumNormal) {
           Registers<8, 32> r;
           write_fp(r.v, 0, 64, test.a);
           write_fp(r.v + 2, 0, 64, test.b);
-          write_fp(r.v + 4, 0, 64, 0);
+          write_fp(r.v + 4, 0, 64, test.c);
           ASSERT_EQ(rj_arith_v_fma_f64_w32_gfx12(
                         cpu | semantics | test.fp_flags | (uint64_t(rounding) << 24), 1,
                         test.instruction_flags, r.v + 6, r.v, r.v + 2, r.v + 4, nullptr),
                     RJ_ARITH_SUCCESS);
           EXPECT_EQ(read_fp(r.v + 6, 0, 64), test.expected[rounding])
-              << std::hex << test.a << " * " << test.b << " rounding " << rounding;
+              << std::hex << test.a << " * " << test.b << " + " << test.c << " rounding "
+              << rounding;
         }
       }
     }
