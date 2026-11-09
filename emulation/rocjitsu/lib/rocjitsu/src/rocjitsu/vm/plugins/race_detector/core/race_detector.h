@@ -84,10 +84,12 @@ public:
   void validateWrite(int addr, WaveId, int lane, int nBytes,
                      MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS) const;
 
-  /// Conservative chunk-count check for a whole instruction. False proves that
-  /// validateRead (or validateWrite, when isWrite) would report nothing for
-  /// any access by `wave` within `accessed`, so per-lane validation can be
-  /// skipped. Costs one lookup per 16-byte chunk the intervals touch.
+  /// @brief Conservatively check an instruction's LDS intervals for conflicts.
+  /// @details The intervals must describe valid LDS byte ranges. False proves
+  /// that validateRead (or validateWrite, when isWrite) would report nothing
+  /// for any access by `wave` within `accessed`, so per-lane validation can be
+  /// skipped. Visits the 16-byte chunks of each interval, without scanning gaps
+  /// between intervals. Separate intervals can visit the same chunk.
   bool mayConflict(const IntervalSet &accessed, WaveId wave, bool isWrite,
                    MemoryOrderClass currentMemoryOrder) const;
 
