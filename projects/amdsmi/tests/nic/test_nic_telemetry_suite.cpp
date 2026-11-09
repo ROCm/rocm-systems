@@ -516,7 +516,7 @@ static void test_sensor_shim_struct_copies_every_record_field() {
   check("a negative value survives", info->sensors[1].value == -5);
 }
 
-static void test_sensor_shim_struct_reports_overflow_and_keeps_what_fits() {
+static void test_sensor_shim_struct_keeps_what_fits_and_still_succeeds() {
   auto records = std::vector<hw::SensorRecord_t>{};
   for (uint32_t i = 0; i < (SMI_NIC_MAX_SENSORS + 1); ++i) {
     records.push_back(make_sensor_record(i, i, "t"));
@@ -525,8 +525,7 @@ static void test_sensor_shim_struct_reports_overflow_and_keeps_what_fits() {
   auto info = std::make_unique<smi_nic_sensor_info_t>();
   const auto status = smi_nic_sensor_info_from_records_for_testing(records, info.get());
 
-  check("more records than the struct holds report no resource",
-        status == SMI_NIC_STATUS_NO_RESOURCE);
+  check("more records than the struct holds still succeed", status == SMI_NIC_STATUS_SUCCESS);
   check("the records that fit are kept", info->count == SMI_NIC_MAX_SENSORS);
   check("the last kept record is intact",
         info->sensors[SMI_NIC_MAX_SENSORS - 1].value == (SMI_NIC_MAX_SENSORS - 1));
@@ -954,7 +953,7 @@ int main() {
   test_fw_info_of_a_device_without_versions_is_empty();
   test_telemetry_shim_struct_copies_every_snapshot_field();
   test_sensor_shim_struct_copies_every_record_field();
-  test_sensor_shim_struct_reports_overflow_and_keeps_what_fits();
+  test_sensor_shim_struct_keeps_what_fits_and_still_succeeds();
   test_sensor_shim_struct_truncates_a_long_label_with_a_terminator();
   test_sensor_shim_struct_of_a_nic_without_hwmon_is_empty();
   test_context_entry_points_reject_bad_input();

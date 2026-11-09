@@ -37,6 +37,11 @@ class FakeDriver_t {
 
   // The count grows by one right after the next count query, as a reconfiguration would.
   auto grow_after_next_query() -> void { m_is_growing_once = true; }
+  // The same, for a reconfiguration that adds many entries at once, such as more queues.
+  auto grow_after_next_query_by(uint32_t extra) -> void {
+    m_is_growing_once = true;
+    m_growth = extra;
+  }
   auto grow_after_every_query() -> void { m_is_growing_always = true; }
   auto fail_strings_with(int error) -> void { m_strings_error = error; }
   auto name_stats_with(std::string name_template) -> void {
@@ -64,7 +69,7 @@ class FakeDriver_t {
     ++m_num_count_queries;
     const auto reported = m_count;
     if (m_is_growing_always || m_is_growing_once) {
-      ++m_count;
+      m_count += m_growth;
       m_is_growing_once = false;
     }
     return {true, reported, 0};
@@ -105,6 +110,7 @@ class FakeDriver_t {
   bool m_is_input_checked;
   bool m_is_growing_once = false;
   bool m_is_growing_always = false;
+  uint32_t m_growth = 1;
   int m_strings_error = 0;
   std::string m_name_template = kNameTemplate;
   int m_num_count_queries = 0;
@@ -148,6 +154,19 @@ TEST_F(NicUnit, DriverStatsCountChangeIsRetriedOnAKernelThatChecksTheInput) {
   ASSERT_TRUE(result.success);
   expect_entries(result.value, 4);
   EXPECT_EQ(driver.num_count_queries(), 2);
+}
+
+TEST_F(NicUnit, DriverStatsLargeGrowthStaysInsideTheBufferOnAnOlderKernel) {
+  constexpr auto kStartCount = uint32_t{16};
+  constexpr auto kGrowth = uint32_t{100};
+  auto driver = FakeDriver_t{kStartCount, /*is_input_checked=*/false};
+  driver.grow_after_next_query_by(kGrowth);
+
+  const auto result = ioctl_internal::read_driver_statistics(driver.ioctls());
+
+  EXPECT_FALSE(driver.has_overflowed());
+  ASSERT_TRUE(result.success);
+  expect_entries(result.value, kStartCount + kGrowth);
 }
 
 TEST_F(NicUnit, DriverStatsGrowthStaysInsideTheBufferOnAnOlderKernel) {

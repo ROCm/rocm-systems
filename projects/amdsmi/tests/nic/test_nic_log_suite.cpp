@@ -534,6 +534,45 @@ auto test_netlink_recovers_when_the_reset_cannot_reconnect() -> void {
         "ret=" + std::to_string(recovered));
 }
 
+// A handler that fails part-way through a dump leaves the rest of the dump on the socket. With
+// auto-ack off libnl takes those leftovers for the reply to the next request, so the next query
+// has to start on a socket that holds nothing.
+auto test_netlink_failed_query_leaves_nothing_for_the_next() -> void {
+  std::cout << "\nNetlink query: a failed query does not leak its replies into the next one\n";
+  auto client = nl::GenericNetlinkClient{};
+  check("connect", (client.connect() == 0));
+  const auto family = client.resolve_family_id("nlctrl");
+  check("nlctrl resolves", family.has_value());
+  if (!family.has_value()) {
+    return;
+  }
+
+  auto dump_messages = int{0};
+  const auto failed = client.query(
+      *family, CTRL_CMD_GETFAMILY, 1, nullptr,
+      [&dump_messages](struct nl_msg*, void*) -> int {
+        dump_messages += 1;
+        return -NLE_INVAL;
+      },
+      nullptr, (NLM_F_REQUEST | NLM_F_DUMP));
+  check("the failing handler fails the query", (failed < 0), "ret=" + std::to_string(failed));
+  check("the handler ran", (dump_messages > 0));
+
+  // One family asked for by name: the kernel answers with exactly one message
+  auto replies = int{0};
+  const auto next = client.query(
+      *family, CTRL_CMD_GETFAMILY, 1,
+      [](nl::NLMessage& msg) { return nla_put_string(msg.get(), CTRL_ATTR_FAMILY_NAME, "nlctrl"); },
+      [&replies](struct nl_msg*, void*) -> int {
+        replies += 1;
+        return NL_OK;
+      },
+      nullptr, NLM_F_REQUEST);
+  check("the next query succeeds", (next == 0), "ret=" + std::to_string(next));
+  check("the next query sees only its own reply", (replies == 1),
+        "replies=" + std::to_string(replies));
+}
+
 auto test_devlink_describe_reporters() -> void {
   std::cout << "\nDevlink describe: reporters\n";
   auto fw = nl::DevlinkReporter{};
@@ -764,6 +803,7 @@ int main() {
   test_netlink_connect_bounds_the_receive();
   test_netlink_silent_peer_times_out();
   test_netlink_recovers_when_the_reset_cannot_reconnect();
+  test_netlink_failed_query_leaves_nothing_for_the_next();
   test_devlink_describe_reporters();
   test_devlink_describe_port_split_unknown();
   test_devlink_describe_device_info_masks_serials();

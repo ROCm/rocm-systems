@@ -128,6 +128,9 @@ namespace {
 
 constexpr int kFatalSignals[] = {SIGSEGV, SIGBUS, SIGABRT, SIGILL, SIGFPE};
 
+constexpr std::chrono::milliseconds kReapTimeout{200};
+constexpr useconds_t kReapPollMicros = 1000;
+
 // A handler stops the kernel and systemd-coredump from logging a crash on every init.
 void exit_on_fatal_signal(int /*signal_number*/) { ::_exit(1); }
 
@@ -198,8 +201,20 @@ std::optional<PortMtu> run_isolated(const MtuProbe_t& probe, std::chrono::millis
 
   // A child that answered exits by itself; anything still running is hung and gets killed.
   ::kill(child, SIGKILL);
+  // A child stuck in an uninterruptible kernel call dies only when that call returns, so the wait
+  // is bounded: the caller holds the device's MTU mutex. A child still running after the bound
+  // stays a zombie until this process exits; MTUs are read once per port, so few can pile up.
   auto status = int{0};
-  while ((::waitpid(child, &status, 0) < 0) && (errno == EINTR)) {
+  const auto reap_by = std::chrono::steady_clock::now() + kReapTimeout;
+  for (;;) {
+    const auto reaped = ::waitpid(child, &status, WNOHANG);
+    if ((reaped == child) || ((reaped < 0) && (errno != EINTR))) {
+      break;
+    }
+    if (std::chrono::steady_clock::now() >= reap_by) {
+      break;
+    }
+    ::usleep(kReapPollMicros);
   }
 
   if (received != sizeof(PortMtu)) {

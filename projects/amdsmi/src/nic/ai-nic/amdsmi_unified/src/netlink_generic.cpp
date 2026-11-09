@@ -145,8 +145,8 @@ int GenericNetlinkClient::query_impl(int family_id, uint8_t cmd, uint8_t version
     return -NLE_BAD_SOCK;
   }
 
-  // A timed-out query leaves its socket unusable; the replacement is opened here so a failed
-  // attempt (for example no free descriptors) is retried by the next query.
+  // A failed query can leave its socket unusable or holding replies; the replacement is opened
+  // here so a failed attempt (for example no free descriptors) is retried by the next query.
   if (is_reconnect_pending_) {
     socket_ = NLSocket();
     const int reconnect_ret = open_socket();
@@ -184,13 +184,11 @@ int GenericNetlinkClient::query_impl(int family_id, uint8_t cmd, uint8_t version
   }
 
   ret = nl_recvmsgs(socket_.get(), cb.get());
-  if (ret == -NLE_AGAIN) {
-    // A late reply must not reach the next query, and a fresh socket has a new port id. The same
-    // code can come from a kernel NLMSG_ERROR of -EAGAIN, where the replacement is harmless.
-    is_reconnect_pending_ = true;
-    return ret;
-  }
   if (ret < 0) {
+    // A failed read can leave replies queued, and with auto-ack off libnl accepts them as the
+    // answer to the next query. A fresh socket has a new port id, so none of them reach it. A
+    // kernel NLMSG_ERROR leaves nothing queued, where the replacement is harmless.
+    is_reconnect_pending_ = true;
     return ret;
   }
 

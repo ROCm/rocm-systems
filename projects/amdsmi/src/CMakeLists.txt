@@ -488,9 +488,6 @@ install(
     COMPONENT dev
 )
 set(UNIFIED_NIC_INCLUDES
-    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/netlink_generic.h"
-    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/netlink_wrapper.h"
-    "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_devlink_netlink.h"
     "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_ethtool_ioctl.h"
     "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_nic.h"
     "${PROJECT_SOURCE_DIR}/src/nic/ai-nic/amdsmi_unified/inc/smi_nic_hwmon.h"

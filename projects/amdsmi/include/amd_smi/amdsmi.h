@@ -10463,7 +10463,8 @@ amdsmi_status_t amdsmi_get_nic_telemetry(amdsmi_processor_handle processor_handl
  *  @param[in] processor_handle NIC for which to query
  *
  *  @param[in,out] num_sensors As input, the number of ::amdsmi_nic_sensor_t entries @p sensors
- *  can hold. On return, the number of records available, which can exceed the input.
+ *  can hold. On return, the number of records available, which can exceed the input. At most
+ *  128 records are returned for one NIC.
  *
  *  @param[out] sensors Array to fill, or NULL to only query the record count. When the array is
  *  too small, as many records as fit are written and ::AMDSMI_STATUS_INSUFFICIENT_SIZE is

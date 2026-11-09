@@ -137,7 +137,8 @@ typedef struct {
  * @brief Read every hwmon sensor attribute of the NIC registered under @p device.
  *
  * A NIC with no hwmon node yields an empty list, not an error. More than SMI_NIC_MAX_SENSORS
- * attributes keep the first SMI_NIC_MAX_SENSORS and report ::SMI_NIC_STATUS_NO_RESOURCE.
+ * attributes keep the first SMI_NIC_MAX_SENSORS and still succeed; ::SMI_NIC_STATUS_NO_RESOURCE
+ * means an allocation failed.
  *
  * @param ctx Context returned by ::smi_nic_create_context.
  * @param device Packed BDF, in the ::amdsmi_bdf_t as_uint encoding.

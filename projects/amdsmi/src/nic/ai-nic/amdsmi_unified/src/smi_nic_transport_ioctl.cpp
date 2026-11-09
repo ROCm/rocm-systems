@@ -80,7 +80,7 @@ namespace {
 // answer 0 on a mismatch; older ones write their current count whatever size we allocated, so the
 // headroom is best effort there. Either way a mismatch is a reason to start over.
 constexpr int kMaxStatsAttempts = 3;
-constexpr size_t kStatsHeadroom = 64;
+constexpr size_t kStatsHeadroom = 256;
 
 }  // namespace
 
@@ -100,7 +100,7 @@ Result<VendorStatistics> read_driver_statistics(const DriverStatsIoctls_t& ioctl
      * ethtool_gstrings/ethtool_stats are variable-length: a fixed header
      * followed by `capacity` trailing entries.
      */
-    const size_t capacity = static_cast<size_t>(stats_num) + kStatsHeadroom;
+    const size_t capacity = (2 * static_cast<size_t>(stats_num)) + kStatsHeadroom;
     auto strings =
         make_zeroed<ethtool_gstrings>(sizeof(ethtool_gstrings) + (capacity * ETH_GSTRING_LEN));
     auto stats = make_zeroed<ethtool_stats>(sizeof(ethtool_stats) + (capacity * sizeof(uint64_t)));

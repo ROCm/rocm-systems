@@ -94,6 +94,10 @@ using MtuProbe_t = std::function<std::optional<PortMtu>()>;
  *
  * A crash, a nonzero exit or a run past @p timeout in the child yields
  * std::nullopt; the child is killed and reaped, and the caller is unaffected.
+ *
+ * The probe is best effort in a multithreaded host: the child inherits locks other threads held
+ * at fork time, which the timeout turns into a missing answer. A child that cannot be killed
+ * promptly stays a zombie until the process exits.
  */
 std::optional<PortMtu> run_isolated(const MtuProbe_t& probe, std::chrono::milliseconds timeout);
 

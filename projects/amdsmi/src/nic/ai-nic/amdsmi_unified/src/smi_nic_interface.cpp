@@ -1225,8 +1225,9 @@ smi_nic_status_t smi_nic_sensor_info_from_records_for_testing(
     sensor.value = record.value;
   }
   info->count = static_cast<uint32_t>(count);
-  return (records.size() > SMI_NIC_MAX_SENSORS) ? SMI_NIC_STATUS_NO_RESOURCE
-                                                : SMI_NIC_STATUS_SUCCESS;
+  // A longer list keeps its first SMI_NIC_MAX_SENSORS records; NO_RESOURCE is left to allocation
+  // failures so the caller can tell the two apart.
+  return SMI_NIC_STATUS_SUCCESS;
 }
 
 smi_nic_status_t smi_get_nic_hwmon_sensors(smi_nic_ctx_t ctx, uint64_t device,
