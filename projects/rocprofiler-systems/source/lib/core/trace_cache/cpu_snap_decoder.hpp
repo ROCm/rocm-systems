@@ -31,9 +31,9 @@ class cpu_snap_decoder
 {
 public:
     /// Receives each slice. The sample's string views are valid only during the call.
-    using emit_fn = std::function<void(const backtrace_region_sample&)>;
+    using on_slice_fn = std::function<void(const backtrace_region_sample&)>;
 
-    explicit cpu_snap_decoder(emit_fn emit);
+    explicit cpu_snap_decoder(on_slice_fn on_slice);
     ~cpu_snap_decoder();
 
     cpu_snap_decoder(const cpu_snap_decoder&)            = delete;
