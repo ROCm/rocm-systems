@@ -256,6 +256,8 @@ cases:
   Unit_HRR_OverflowingMemcpy3D_Direct: {}
   Unit_HRR_PinnedHostAlloc_Direct: {}
   Unit_HRR_PinnedHostBlobRefused: {}
+  Unit_HRR_PinnedHostChunksRoundtrip: {}
+  Unit_HRR_PinnedHostChunks_Direct: {}
   Unit_HRR_PinnedHostFork: {}
   Unit_HRR_PinnedHostFork_Direct: {}
   Unit_HRR_PinnedHostFreedRoundtrip: {}

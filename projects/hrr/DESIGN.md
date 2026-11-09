@@ -437,6 +437,7 @@ Version history, so an archive written by an older runtime can be placed:
   those events as the wrong API.
 - **v13** puts pinned host snapshot records after the fixed fields of a
   `hipGraphLaunch` or `hipGraphLaunch_spt` event. A v12 reader would launch the graph without restoring them.
+  A record names one chunk of an allocation, at a non-zero offset after the first.
 
 ```
 <output_dir>/
@@ -571,14 +572,18 @@ ranges of `hipHostMalloc`, `hipHostAlloc`, `hipMallocHost`, `hipMemAllocHost` an
 `hipGraphLaunch`, it reads the 8-byte-aligned words of
 the arguments, by-value structs included. Under the tracking lock it only resolves each
 tracked allocation a word points into and counts itself as a reader of it; a free of that
-allocation waits until no snapshot reads it. After the lock it hashes the whole allocation in
-place. If the archive already holds a blob with that hash, that blob is the snapshot. Otherwise
-it copies the allocation and writes the copy as a blob named by the copy's own hash, so a host
-store between the two reads cannot leave a blob that differs from its name. An allocation
-whose last snapshot found new bytes is copied without the in-place hash. The read ends before
-the blob is written. Either way it adds a
-record (base, offset 0, length, blob hash, direction 0) to the launch event, unless the hash
-and the launch stream equal those of the allocation's last record. Struct words pointing into such an allocation
+allocation waits until no snapshot reads it. After the lock it reads the allocation in
+chunks of `HIP_HRR_HOST_SNAPSHOT_CHUNK_KB` (64 KiB; an allocation of more than 1024
+chunks gets larger ones) and hashes each chunk in place. A chunk whose hash equals its
+last record's, or names a blob the archive already holds, needs nothing more. Every other
+chunk is copied, and once the read has ended the copy is written as a blob named by the
+copy's own hash, so a host store between the two reads cannot leave a blob that differs
+from its name. A chunk whose last snapshot found new bytes is copied without the in-place
+hash. Each chunk gets a record (base, offset, length, blob hash, direction 0) in the launch
+event, unless its hash and the launch stream equal those of its last record. A launch that
+follows a few host stores therefore writes only the chunks they touched, though every
+byte of the allocation is still read once per launch: nothing assumes a chunk is unchanged.
+Struct words pointing into such an allocation
 are flagged for translation like
 embedded device pointers, and replay translates them without the device-address shape
 check. Replay checks each record names the base of a pinned host
@@ -604,7 +609,7 @@ Kept deliberately simple:
   the application's graphs.
 - `HIP_HRR_HOST_SNAPSHOTS=0` turns snapshots off; an allocation larger than
   `HIP_HRR_HOST_SNAPSHOT_MAX_MB` (64) is not snapshotted and is listed under
-  `unreplayable_apis`. A snapshot over `HIP_HRR_CAPTURE_MAX_BLOB_MB` is recorded with a
+  `unreplayable_apis`. A chunk over `HIP_HRR_CAPTURE_MAX_BLOB_MB` is recorded with a
   zero hash on every launch that reads it, and replay refuses that launch outside a
   stream capture.
 - Replay restores nothing for a launch replayed into a capturing stream. The kernels
@@ -613,7 +618,7 @@ Kept deliberately simple:
   launch into a capturing stream does not become the allocation's last, so the graph
   launch records the bytes again.
 - A `hipHostRegister` device alias that differs from the host address is not tracked.
-- An unchanged allocation gets no record, so device writes into it between two launches
+- An unchanged chunk gets no record, so device writes into it between two launches
   stay in replay's buffer as they did at capture; a host store that puts back exactly the
   last recorded bytes after such a device write is missed.
 - A restore is ordered on the launch stream only; work on other streams reading the buffer
