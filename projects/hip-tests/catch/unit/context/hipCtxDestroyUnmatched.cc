@@ -13,6 +13,8 @@
  *  - Validates that hipCtxDestroy rejects a handle the caller never created:
  *    -# When the handle comes from hipCtxGetCurrent
  *      - Expected output: return `hipErrorInvalidContext`
+ *    -# When a matched hipCtxCreate/hipCtxDestroy pair is destroyed a second time
+ *      - Expected output: return `hipErrorInvalidContext`
  *    -# The device context remains usable afterwards
  *      - Expected output: `hipMalloc` returns `hipSuccess`
  *  - Nothing is allocated before the destroy. A live allocation holds its own
@@ -33,6 +35,10 @@ HIP_TEST_CASE(Unit_hipCtxDestroy_WithoutCreate_Negative) {
 
   REQUIRE(hipCtxDestroy(context) == hipErrorInvalidContext);
 
+  HIP_CHECK(hipCtxCreate(&context, 0, 0));
+  HIP_CHECK(hipCtxDestroy(context));
+  REQUIRE(hipCtxDestroy(context) == hipErrorInvalidContext);
+
   void* ptr = nullptr;
   HIP_CHECK(hipMalloc(&ptr, 1024));
   REQUIRE(ptr != nullptr);
@@ -49,6 +55,8 @@ HIP_TEST_CASE(Unit_hipCtxDestroy_WithoutCreate_Negative) {
  *      - Expected output: is_active = 1
  *    -# The device context remains usable afterwards
  *      - Expected output: `hipMalloc` returns `hipSuccess`
+ *    -# When hipDevicePrimaryCtxRelease is called more often than retained
+ *      - Expected output: return `hipErrorInvalidContext`
  * Test source
  * ------------------------
  *  - unit/context/hipCtxDestroyUnmatched.cc
@@ -79,5 +87,6 @@ HIP_TEST_CASE(Unit_hipCtxDestroy_AfterPrimaryCtxRetain_Negative) {
   HIP_CHECK(hipFree(ptr));
 
   HIP_CHECK(hipDevicePrimaryCtxRelease(device));
+  REQUIRE(hipDevicePrimaryCtxRelease(device) == hipErrorInvalidContext);
 }
 #endif  // HT_AMD
