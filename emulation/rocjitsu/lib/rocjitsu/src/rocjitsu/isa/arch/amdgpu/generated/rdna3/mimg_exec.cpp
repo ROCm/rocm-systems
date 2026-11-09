@@ -233,7 +233,8 @@ void ImageMsaaLoadMimg::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageBvhIntersectRayMimg::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_image_bvh_intersect_ray_mimg(*this, wf);
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
 }
 
 void ImageBvh64IntersectRayMimg::execute_impl(amdgpu::Wavefront &wf) {

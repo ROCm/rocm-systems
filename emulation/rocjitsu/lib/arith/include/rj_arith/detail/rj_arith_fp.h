@@ -807,8 +807,9 @@ int rj_arith_v_fma_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
 // Unary FP64 arithmetic uses the same low/high VGPR layout, Compatibility
 // resolution and host-environment contract as FP64 FMA above. Guest rounding
 // controls FRACT subtraction and output scaling; the integral operation itself
-// has the direction named by its mnemonic. FP64 SQRT/RCP/RSQ instead reject
-// directed rounding flags with RJ_ARITH_ERROR_INVALID_FLAGS, including with OMOD.
+// has the direction named by its mnemonic. FP64 SQRT/RCP/RSQ retain nearest-rounded core
+// approximations; guest ROUND controls SQRT/RSQ OMOD scaling. RCP overflow
+// produces signed infinity independently of ROUND, including during OMOD.
 // Guest denormal flags control flushing.
 // RDNA3 disables OMOD when IEEE
 // is set or output denormals are preserved; RDNA4 applies OMOD independently.
@@ -871,6 +872,10 @@ int rj_arith_v_fract_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t 
                                    uint32_t *const *d, const uint32_t *const *a,
                                    uint32_t *excp_flag_user);
 
+// FP64 SQRT/RCP/RSQ retain the native nearest-rounded approximations used by
+// the legacy executor under the default host environment. Guest ROUND controls
+// SQRT/RSQ OMOD, not these core approximations. RCP overflow produces signed
+// infinity regardless of ROUND. Exact semantics remain unsupported.
 int rj_arith_v_sqrt_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                             uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 int rj_arith_v_sqrt_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,

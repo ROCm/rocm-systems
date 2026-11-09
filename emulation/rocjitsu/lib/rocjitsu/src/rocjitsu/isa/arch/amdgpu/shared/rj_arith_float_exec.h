@@ -98,26 +98,35 @@ inline void execute_float_conversion(Wavefront &wave, FloatUnary32Function wave3
   }
 }
 
-// Execute with guest FP modes and routed operands. Only successfully written
-// lanes contribute fresh causes; rejected calls commit neither results nor state.
+// Execute with guest FP modes and routed operands. Compatibility preserves the
+// legacy RCP_IFLAG/SQRT status from all EXEC lanes, including suppressed writes.
+// Rejected calls commit neither results nor state.
 // Exponent extraction returns an integer and ignores guest arithmetic rounding.
 inline void execute_float_unary32(Wavefront &wave, FloatUnary32Function wave32,
                                   FloatUnary64Function wave64, uint64_t flags, uint64_t modifiers,
-                                  const Operand &destination, const Operand &source, bool rdna3) {
-  const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
+                                  const Operand &destination, const Operand &source, bool rdna3,
+                                  bool guest_rounding = false,
+                                  bool compatibility_all_exec = false) {
+  const bool all_exec = compatibility_all_exec &&
+                        (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY;
+  const uint64_t exec_mask = all_exec ? wave.exec() : wave.exec() & wave.vgpr_write_mask();
   if (!wave.exec())
     return;
-  flags = float32_flags(wave, flags, rdna3) & ~RJ_ARITH_FP_ROUND_MASK;
+  flags = float32_flags(wave, flags, rdna3);
+  if (!guest_rounding)
+    flags &= ~RJ_ARITH_FP_ROUND_MASK;
   RegisterAccess registers(wave);
   VectorInput32 a(registers, wave, source, wave.exec());
   uint32_t causes = 0;
   const bool success = write_vector32_result(
-      wave, registers, destination, exec_mask, [&](uint32_t *const *d, uint64_t write_mask) {
+      wave, registers, destination, exec_mask,
+      [&](uint32_t *const *d, uint64_t write_mask) {
         uint32_t *state = &causes;
         return wave.wf_size() == 32
                    ? wave32(flags, uint32_t(write_mask), modifiers, d, &a.data, state)
                    : wave64(flags, write_mask, modifiers, d, &a.data, state);
-      });
+      },
+      /*allow_direct=*/(exec_mask & ~wave.vgpr_write_mask()) == 0);
   if (success) {
     wave.set_trapsts(wave.trapsts() | causes);
     wave.raise_alu_causes(causes);
@@ -193,11 +202,14 @@ inline void execute_float_binary64(Wavefront &wave, FloatBinary32Function wave32
 inline void execute_float64_word(Wavefront &wave, FloatBinary32Function wave32,
                                  FloatBinary64Function wave64, uint64_t flags, uint64_t modifiers,
                                  const Operand &destination, const Operand &source,
-                                 const Operand &integer, bool rdna3) {
+                                 const Operand &integer, bool rdna3, bool ldexp) {
   const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
   if (!wave.exec())
     return;
   flags = float16_f64_flags(wave, flags, rdna3);
+  // TRIG_PREOP uses a fixed table policy; LDEXP rounds and clamps by MODE.
+  if (!ldexp)
+    flags &= ~(RJ_ARITH_FP_ROUND_MASK | RJ_ARITH_FP_DX10_CLAMP_OFF);
   RegisterAccess registers(wave);
   VectorInput64 a(registers, wave, source, wave.exec());
   VectorInput32 b(registers, wave, integer, wave.exec());
@@ -511,16 +523,19 @@ inline void execute_dot2_f16(Wavefront &wave, FloatTernaryWave32Function wave32,
   }
 }
 
-// Extract the FP16 exponent, independent of guest arithmetic rounding.
+// Fixed-rounding cores can still use guest rounding for FRACT or output scaling.
 // Routed VOP1 halves and explicit VOP3 selectors both
 // preserve the destination's other half, including when source and destination alias.
 inline void execute_float_unary16(Wavefront &wave, FloatUnary32Function wave32,
                                   FloatUnary64Function wave64, uint64_t flags, uint64_t modifiers,
-                                  const Operand &destination, const Operand &source, bool rdna3) {
+                                  const Operand &destination, const Operand &source, bool rdna3,
+                                  bool guest_rounding = false) {
   const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
   if (!wave.exec())
     return;
-  flags = float16_flags(wave, flags, rdna3) & ~RJ_ARITH_FP_ROUND_MASK;
+  flags = float16_flags(wave, flags, rdna3);
+  if (!guest_rounding)
+    flags &= ~RJ_ARITH_FP_ROUND_MASK;
   RegisterAccess registers(wave);
   VectorInput32 a(registers, wave, source, wave.exec(),
                   modifiers & RJ_ARITH_ALU_HIGH_A ? 0xC : 0x3);

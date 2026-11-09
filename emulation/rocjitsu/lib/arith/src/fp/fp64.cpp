@@ -31,14 +31,9 @@ int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
     known |= RJ_ARITH_ALU_ABS_C | RJ_ARITH_ALU_NEG_C;
   }
 
-  constexpr uint64_t fp_flags =
-      RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS |
-      RJ_ARITH_FP_IEEE_MODE |
-      ((Op != rocjitsu::arith::Fp64::Rcp && Op != rocjitsu::arith::Fp64::Rsq &&
-        Op != rocjitsu::arith::Fp64::Sqrt)
-           ? RJ_ARITH_FP_ROUND_MASK
-           : 0) |
-      (Rdna3 ? RJ_ARITH_FP_DX10_CLAMP_OFF : 0);
+  constexpr uint64_t fp_flags = RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
+                                RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | RJ_ARITH_FP_IEEE_MODE |
+                                RJ_ARITH_FP_ROUND_MASK | (Rdna3 ? RJ_ARITH_FP_DX10_CLAMP_OFF : 0);
   if (int error = rocjitsu::arith::validate(flags, instruction_flags & ~known, fp_flags)) {
     return error;
   }
@@ -51,6 +46,10 @@ int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
   }
   if constexpr (Rdna3) {
     instruction_flags = uint32_t(rocjitsu::arith::rdna3_output_modifiers(flags, instruction_flags));
+  }
+  // RCP overflow is independent of guest ROUND, including output scaling.
+  if constexpr (Op == rocjitsu::arith::Fp64::Rcp) {
+    flags &= ~RJ_ARITH_FP_ROUND_MASK;
   }
   if (exec_mask == 0) {
     return RJ_ARITH_SUCCESS;
