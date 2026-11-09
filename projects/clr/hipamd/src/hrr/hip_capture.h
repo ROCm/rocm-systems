@@ -11,7 +11,6 @@
 
 namespace hrr_cap {
 
-// 128-bit hash (FNV-1a variant) — return type of write_blob / write_code_object
 struct Hash128 {
   uint64_t lo;
   uint64_t hi;
@@ -20,33 +19,25 @@ struct Hash128 {
 }  // namespace hrr_cap
 
 
-// Check if capture is enabled (HIP_HRR_CAPTURE_OUTPUT env var set and not empty or blank,
-// and the process not started in secure-execution mode)
+// True when HIP_HRR_CAPTURE_OUTPUT is set and not blank, and the process did not start in secure-execution mode.
 bool hip_capture_enabled();
 
-// Return the output directory from the env var
 const char* hip_capture_output_dir();
 
-// Snapshot real fn ptrs (must be called while live table holds real ptrs)
+// Call while the live table still holds the real pointers.
 void hip_capture_build_table();
 
-// Install capture shims into live dispatch tables
 void hip_capture_install();
 
-// Restore real dispatch tables
 void hip_capture_uninstall();
 
-// Hook compiler dispatch table for <<<>>> launch path
 void hip_capture_build_compiler_table();
 
 struct HipCompilerDispatchTable;
 
-// Swap the compiler shims into the live table. Call only from
-// hip_capture_build_compiler_table(), after it snapshots g_real_compiler_table.
+// Call only from hip_capture_build_compiler_table(), after it snapshots g_real_compiler_table.
 void hip_capture_install_compiler_table(const HipCompilerDispatchTable& shims);
 
-// Called from hip_context.cpp init() — performs build + conditional install
 void hip_capture_init();
 
-// Called at atexit — uninstalls shims and flushes the archive to disk
 void hip_capture_shutdown();

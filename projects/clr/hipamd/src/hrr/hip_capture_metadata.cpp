@@ -17,8 +17,8 @@
 #include <string>
 #include <vector>
 
-// Kept out of hip_capture.cpp: glibc's <sys/auxv.h> includes <elf.h>, whose
-// Elf64_* typedefs collide with the ones CLR's ELF headers put in the global
+// Kept out of hip_capture.cpp: glibc's <sys/auxv.h> includes <elf.h>, whose Elf64_* typedefs
+// collide with the ones CLR's ELF headers put in the global namespace.
 #if defined(__linux__)
 #include <sys/auxv.h>
 #ifndef AT_SECURE

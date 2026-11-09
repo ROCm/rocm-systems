@@ -14,11 +14,10 @@ namespace metadata {
 // set-group-ID, file capabilities or an LSM transition). Always false off Linux.
 bool secure_exec();
 
-// Collects best-effort capture environment metadata for the HRR manifest.
 std::string collect_json();
 
-// Escapes `s` for use inside a JSON string literal (quotes not included):
-// backslash, double quote, the short control escapes and any other byte below
+// Escapes `s` for a JSON string literal, quotes not included: backslash, double quote,
+// the short control escapes and any other byte below 0x20 as a four-digit hex escape.
 std::string json_escape(const char* s);
 
 }  // namespace metadata

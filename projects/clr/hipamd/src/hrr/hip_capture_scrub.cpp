@@ -8,8 +8,7 @@
 
 #include <cstring>
 
-// Field offsets are spelled out rather than taken from <elf.h>, which Windows
-// does not have and whose Elf64_* typedefs collide with CLR's own ELF headers.
+// Offsets are spelled out because Windows lacks <elf.h> and its Elf64_* typedefs collide with CLR's ELF headers.
 
 namespace hrr_cap {
 namespace scrub {
@@ -34,7 +33,6 @@ T read(const uint8_t* p, size_t at) {
   return v;
 }
 
-// [offset, offset + size) lies inside [0, limit).
 bool in_range(uint64_t offset, uint64_t size, size_t limit) {
   return offset <= limit && size <= limit - offset;
 }

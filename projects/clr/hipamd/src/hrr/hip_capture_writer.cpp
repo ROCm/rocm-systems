@@ -4,11 +4,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-/*
- * Crash safety: events.bin uses a raw fd, checkpointed every kCheckpointEvents events;
- * a clean shutdown appends an hrr_eof_record trailer, whose absence marks a crash-truncated archive.
- * Access (POSIX): directories 0700, files 0600, opened relative to checked directory descriptors.
- */
+// events.bin ends with an hrr_eof_record on clean shutdown; a missing one marks a crash-truncated archive.
 
 #include "hip_capture_writer.h"
 #include "hip_capture.h"
@@ -109,23 +105,17 @@ static void hash_hex(Hash128 h, char buf[33]) {
 }
 
 
-// Buffer must comfortably hold the largest single record. payload_length is a
-// uint32_t (v4); in practice the largest record is a kernel-launch event whose
 static constexpr size_t   kBufCap           = 256u * 1024u;
-// Flush+fsync every N events to bound crash data loss.
 static constexpr uint64_t kCheckpointEvents = 4096;
-// Path buffers are filled at open() so the signal path never touches std::string.
+// Filled in open() so the crash path never touches std::string.
 static constexpr size_t   kPathMax          = 4096;
 static constexpr size_t   kMetadataJsonMax  = 128u * 1024u;
 static constexpr size_t   kEmergencyManifestMax = kMetadataJsonMax + 1024u;
 
-// Lock order: g_pinned_mu (hip_capture.cpp, held while a launch copies pinned
-// host memory or writes its event), then g_reopen_mu, then g_file_mu, then
-// g_blob_mu, then g_unreplayable_mu. Only fork() holds them all: the pinned
-// prepare handler takes g_pinned_mu, then atfork_prepare takes the rest.
+// Lock order: g_pinned_mu (hip_capture.cpp), g_reopen_mu, g_file_mu, g_blob_mu, g_unreplayable_mu.
+// Only fork() holds them all: the pinned prepare handler takes g_pinned_mu, then atfork_prepare takes the rest.
 static std::mutex   g_file_mu;
 static int          g_events_fd = -1;
-// g_base_dir is the archive path requested via HIP_HRR_CAPTURE_OUTPUT.
 static std::string  g_base_dir;
 static std::string  g_output_dir;
 static char         g_manifest_path[kPathMax] = {0};
@@ -134,38 +124,37 @@ static uint64_t     g_parent_pid = 0;
 static char         g_metadata_json[kMetadataJsonMax] = {0};
 static size_t       g_metadata_json_len = 0;
 
-// App-managed write buffer for events.bin (protected by g_file_mu).
+// Write buffer for events.bin, guarded by g_file_mu.
 static uint8_t  g_buf[kBufCap];
 static size_t   g_buf_len            = 0;
 static uint64_t g_events_since_ckpt  = 0;
-// Set once flush() finalizes events.bin, with or without the trailer, under
-// g_blob_mu as well as g_file_mu. No record is appended and no blob or code
+// Set once flush() finalizes events.bin, under g_blob_mu and g_file_mu.
+// After it, no record is appended and no blob or code object is claimed.
 static std::atomic<bool> g_events_finalized{false};
 
-// Set when an event could not be serialized losslessly and had to be dropped
-// (e.g. an oversized kernel launch). A capture with this flag set is finalized
+// Set when an event was dropped because it could not be serialized losslessly.
+// flush() then omits the trailer and writes complete=false.
 static std::atomic<bool> g_capture_incomplete{false};
 
-// Crash-callback guard over g_buf / g_buf_len, raised by writer threads while
-// they mutate the buffer. If the crash interrupts a writer mid-lock,
+// Raised by writer threads while they mutate g_buf. If a crash interrupts a writer,
+// the crash callback sees the flag and skips the buffer flush.
 static std::atomic_flag g_buf_busy = ATOMIC_FLAG_INIT;
 
-// Raise g_buf_busy for a thread that already holds g_file_mu. Writers are
-// serialized by the mutex, so the flag can only be up already because the crash
+// Raises g_buf_busy for a thread holding g_file_mu. Only the crash callback can hold it
+// already, so this spins briefly.
 static void claim_buf_locked() {
   while (g_buf_busy.test_and_set(std::memory_order_acquire)) std::this_thread::yield();
 }
 
-// RAII for writer threads: take the thread<->thread mutex AND raise g_buf_busy so
-// the crash callback can tell a g_buf mutation is in flight. Member order
+// Takes g_file_mu and raises g_buf_busy. The destructor clears the flag before
+// the member unlocks the mutex.
 struct BufWriteGuard {
   std::lock_guard<std::mutex> lk_;
   BufWriteGuard() : lk_(g_file_mu) { claim_buf_locked(); }
   ~BufWriteGuard() { g_buf_busy.clear(std::memory_order_release); }
 };
 
-// emergency_finalize builds the crash manifest here rather than on the stack:
-// the crash handler can run on a thread with little stack left.
+// The crash manifest is built here, not on the stack: the crash handler may run with little stack left.
 static std::atomic_flag g_emergency_manifest_busy = ATOMIC_FLAG_INIT;
 static char g_emergency_manifest_buf[kEmergencyManifestMax];
 
@@ -173,41 +162,36 @@ static std::atomic<uint64_t> g_seq_id{0};
 static std::atomic<uint64_t> g_event_count{0};
 static std::atomic<uint64_t> g_blob_count{0};
 
-// Blob and code object writes claimed under g_blob_mu and not finished yet.
 static uint64_t                g_blob_writes_in_flight = 0;  // under g_blob_mu
 static std::condition_variable g_blob_writes_done;
 
-// Set in a forked child. POSIX allows the child of a multithreaded process only
-// async-signal-safe calls until it execs, and open() is far from that, so the
+// Set in a forked child. Until exec it may call only async-signal-safe functions,
+// so the first record reopens the archive instead of atfork_child.
 static std::atomic<bool> g_reopen_after_fork{false};
 static std::mutex        g_reopen_mu;
 
-// Set when capture stops early, for space or at the size limit; see
-// stop_capture_locked(). A forked child keeps a stop for space, as the file
+// Set when capture stops early, for space or at the size limit; see stop_capture_locked().
+// A forked child keeps a stop for space, because the file system is still short.
 static std::atomic<bool> g_capture_stopped{false};
 static bool              g_stopped_at_limit = false;  // under g_file_mu
 
-// Keys of the blobs and code objects written to this archive, so repeated bytes
-// (common for weight tensors) are written once.
+// Keys of blobs and code objects already written, so repeated bytes are written once.
 static std::mutex                      g_blob_mu;
 static std::unordered_set<std::string> g_written_blobs;
-// Descriptors of the archive directories open() checked, pid-<pid>, blobs/ and
-// code_objects/. Every file inside the archive is created, opened, renamed and
+// Descriptors of the directories open() checked: pid-<pid>, blobs/ and code_objects/.
+// Every file in the archive is created, opened, renamed and removed through them.
 static std::atomic<int> g_dir_fd{-1};
 static std::atomic<int> g_blobs_fd{-1};
 static std::atomic<int> g_code_objects_fd{-1};
-// Keys a thread is reserving space for or writing, also under g_blob_mu. Another
-// caller with the same bytes waits for the claim to end, so the reserve is
+// Keys a thread is reserving space for or writing, guarded by g_blob_mu.
+// A caller with the same bytes waits, so the space is reserved once.
 static std::unordered_set<std::string> g_blob_claims;
 
-// APIs recorded in this archive that replay cannot reproduce (note_unreplayable).
 static std::mutex                      g_unreplayable_mu;
-// api -> distinct reasons it was noted for. One API can be unreplayable for
-// several reasons (e.g. a different truncated argument on different calls),
 static std::map<std::string, std::set<std::string>> g_unreplayable_apis;
 
-// Notes from note_unreplayable() that wait for the event the calling thread
-// writes next. Plain pointers and a count, so nothing here has a destructor: a
+// Notes from note_unreplayable() waiting for this thread's next event.
+// Plain pointers and a count, so the thread_local state needs no destructor.
 static constexpr size_t kMaxStagedNotes = 8;
 struct StagedNote {
   const char* api;
@@ -217,8 +201,7 @@ static thread_local StagedNote t_staged_notes[kMaxStagedNotes];
 static thread_local size_t     t_staged_count = 0;
 
 
-// Write the entire buffer, retrying short writes. Async-signal-safe: uses only
-// write(). Returns true if all bytes were written.
+// Retries short writes. Async-signal-safe: uses only write().
 static bool write_all_fd(int fd, const void* data, size_t len) {
   const uint8_t* p = static_cast<const uint8_t*>(data);
   size_t off = 0;
@@ -235,21 +218,17 @@ static bool write_all_fd(int fd, const void* data, size_t len) {
   return true;
 }
 
-// Drain the app buffer to the events fd. Caller must hold g_file_mu (or be the
-// crash callback that has claimed g_buf_busy via test_and_set). Does not fsync.
+// Caller holds g_file_mu, or is the crash callback that claimed g_buf_busy. Does not fsync.
 static void flush_buffer_locked() {
   if (g_events_fd < 0 || g_buf_len == 0) { g_buf_len = 0; return; }
   write_all_fd(g_events_fd, g_buf, g_buf_len);
   g_buf_len = 0;
 }
 
-// Append `len` bytes of one complete record to the buffer, flushing first if it
-// would not fit. A single record larger than the buffer (possible now that
 static void buffer_append_locked(const void* data, size_t len) {
   if (g_buf_len + len > kBufCap) flush_buffer_locked();
   if (len > kBufCap) {
-    // Oversized record: buffer is now empty (flushed above); write it straight
-    // through rather than memcpy'ing past the end of g_buf.
+    // Oversized record: write it directly rather than copy past the end of g_buf.
     if (g_events_fd >= 0) write_all_fd(g_events_fd, data, len);
     return;
   }
@@ -258,8 +237,8 @@ static void buffer_append_locked(const void* data, size_t len) {
 }
 
 
-// Create `path` and any missing parents: 0700 from the base directory down, and
-// 0777 minus the umask above it. `path` must lie under g_base_dir.
+// Creates `path` and missing parents: 0700 from g_base_dir down, 0777 above it.
+// `path` must lie under g_base_dir.
 static bool ensure_dir(const std::string& path) {
   if (path.empty()) {
     errno = ENOENT;
@@ -305,8 +284,8 @@ static bool owned_by_euid(const struct stat& st) { return st.st_uid == geteuid()
 #endif
 
 #ifndef _WIN32
-// pid-<pid>, blobs/, code_objects/ and each blobs/<xx> must be a real directory
-// owned by the effective user; anything else planted there (a symbolic link,
+// Each archive directory must be a real directory owned by the effective user.
+// Anything planted there, such as a symbolic link, is refused.
 static int open_private_dir(int at, const char* name) {
   if (::mkdirat(at, name, 0700) != 0 && errno != EEXIST) return -1;
   const int fd = ::openat(at, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
@@ -326,8 +305,7 @@ static int open_private_dir(int at, const char* name) {
   return -1;
 }
 
-// Closes the archive directory descriptors. Async-signal-safe: atfork_child
-// calls it.
+// Async-signal-safe: atfork_child calls it.
 static void close_dir_fds() {
   const int dir = g_dir_fd.exchange(-1);
   if (dir < 0) return;
@@ -337,7 +315,6 @@ static void close_dir_fds() {
 }
 #endif
 
-// pid-<pid>, created with any missing parents. On POSIX *fd gets its descriptor.
 static bool claim_pid_dir(const std::string& out_dir, int* fd) {
   if (!ensure_dir(out_dir)) return false;
 #ifdef _WIN32
@@ -349,8 +326,6 @@ static bool claim_pid_dir(const std::string& out_dir, int* fd) {
 #endif
 }
 
-// blobs/, code_objects/ or a blobs/<xx>: `name` in the directory `parent_fd` on
-// POSIX, where *fd gets its descriptor, and `path` on Windows.
 static bool claim_sub_dir(int parent_fd, const std::string& path, const char* name, int* fd) {
 #ifdef _WIN32
   (void)parent_fd;
@@ -364,8 +339,6 @@ static bool claim_sub_dir(int parent_fd, const std::string& path, const char* na
 #endif
 }
 
-// Directory descriptors open() holds until it publishes them; any still held
-// when it returns early are closed.
 struct PendingDirs {
   int dir = -1;
   int blobs = -1;
@@ -379,8 +352,6 @@ struct PendingDirs {
   }
 };
 
-// True when the claimed pid-<pid> holds an earlier process's archive: an
-// events.bin of the kind this writer leaves, a regular file with a single link
 static bool holds_earlier_archive(int dir_fd, const std::string& out_dir) {
 #ifdef _WIN32
   (void)dir_fd;
@@ -394,8 +365,8 @@ static bool holds_earlier_archive(int dir_fd, const std::string& out_dir) {
 #endif
 }
 
-// A process never adds to an archive it did not open: an earlier process with
-// the same pid, common in containers, keeps its archive. Renames pid-<pid> to
+// An earlier process with the same pid (common in containers) keeps its archive.
+// Renames pid-<pid> to pid-<pid>.prev-<n>.
 static bool move_earlier_archive_aside(const std::string& out_dir, std::string* moved_to) {
   for (unsigned n = 1; n <= 0xffff; ++n) {
     const std::string to = out_dir + ".prev-" + std::to_string(n);
@@ -412,8 +383,8 @@ static bool move_earlier_archive_aside(const std::string& out_dir, std::string* 
 }
 
 #ifndef _WIN32
-// Open a file inside the archive for writing and truncate it: 0600, never
-// through a symbolic link or a hard link. Truncation happens only after the
+// 0600, never through a symbolic link or hard link. Truncation happens only after
+// the checks pass, so a planted file is not destroyed.
 static int open_private_fd(int dir_fd, const char* name) {
   const int fd = ::openat(dir_fd, name, O_WRONLY | O_CREAT | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC, 0600);
   if (fd < 0) return -1;
@@ -435,8 +406,6 @@ static int open_private_fd(int dir_fd, const char* name) {
 }
 #endif
 
-// Opens `name` inside the archive for writing and truncates it: in the directory
-// `dir_fd` through open_private_fd on POSIX, in `dir` by path on Windows.
 static int open_in_archive(int dir_fd, const std::string& dir, const char* name) {
 #ifdef _WIN32
   (void)dir_fd;
@@ -447,7 +416,6 @@ static int open_in_archive(int dir_fd, const std::string& dir, const char* name)
 #endif
 }
 
-// Removes `name` from the archive directory, as open_in_archive() finds it.
 static void remove_in_archive(int dir_fd, const std::string& dir, const char* name) {
 #ifdef _WIN32
   (void)dir_fd;
@@ -458,7 +426,6 @@ static void remove_in_archive(int dir_fd, const std::string& dir, const char* na
 #endif
 }
 
-// fopen(path, "w") for a file inside the archive, opened by open_in_archive().
 static FILE* fopen_private(int dir_fd, const std::string& dir, const char* name) {
 #ifdef _WIN32
   (void)dir_fd;
@@ -472,8 +439,8 @@ static FILE* fopen_private(int dir_fd, const std::string& dir, const char* name)
 #endif
 }
 
-// fopen(path, "r") for a file inside the archive. On POSIX only a regular file
-// is read, never through a symbolic link, and a planted FIFO is refused rather
+// On POSIX only a regular file is read, never through a symbolic link.
+// A planted FIFO is refused rather than blocked on.
 static FILE* fopen_read_regular(const std::string& path) {
 #ifdef _WIN32
   return fopen(path.c_str(), "r");
@@ -507,7 +474,7 @@ static void reopen_after_fork() {
   if (!g_reopen_after_fork.load(std::memory_order_acquire)) return;
   std::lock_guard<std::mutex> lk(g_reopen_mu);
   if (!g_reopen_after_fork.load(std::memory_order_relaxed)) return;
-  // From the *base* dir, so the child selects its own pid-<pid> sub-archive.
+  // Open from the base dir so the child gets its own pid-<pid> archive.
   // open() assigns g_base_dir, so pass it a copy.
   const std::string base = g_base_dir;
   // A child whose archive is refused runs on uncaptured, without the shims.
@@ -516,8 +483,8 @@ static void reopen_after_fork() {
 }
 
 #ifndef _WIN32
-// The writer mutexes are held across fork(): a child must not inherit one that
-// a thread which does not exist in the child had locked, because the child
+// The writer mutexes are held across fork(), so a child never inherits one
+// that a thread absent from the child had locked.
 static void atfork_prepare() {
   g_reopen_mu.lock();
   g_file_mu.lock();
@@ -525,12 +492,12 @@ static void atfork_prepare() {
   if (g_events_fd >= 0)
     flush_buffer_locked();
   g_buf_busy.clear(std::memory_order_release);
-  // A blob write in flight holds its blobs/<xx> descriptor, which the child
-  // would keep without the thread that closes it. Wait for those writes, as
+  // A blob write in flight holds a blobs/<xx> descriptor that the child could not close.
+  // Wait for those writes first.
   std::unique_lock<std::mutex> blk(g_blob_mu);
   g_blob_writes_done.wait(blk, [] { return g_blob_writes_in_flight == 0; });
   blk.release();
-  // The child's shutdown writes its manifest under this one.
+  // The child's shutdown takes this mutex when it writes the manifest.
   g_unreplayable_mu.lock();
 }
 
@@ -546,12 +513,12 @@ static void atfork_child() {
   g_blob_mu.unlock();
   g_file_mu.unlock();
   g_reopen_mu.unlock();
-  // A crash callback on another thread can raise g_buf_busy after
-  // atfork_prepare clears it, or hold g_emergency_manifest_busy, which
+  // A crash callback on another thread can raise g_buf_busy after atfork_prepare clears it,
+  // or hold g_emergency_manifest_busy; neither thread exists in the child.
   g_buf_busy.clear(std::memory_order_release);
   g_emergency_manifest_busy.clear(std::memory_order_release);
-  // Only async-signal-safe work from here: drop the parent's events fd and
-  // forget its paths, so neither shutdown nor the crash path writes into the
+  // Only async-signal-safe work from here. Drop the parent's events fd and paths so
+  // neither shutdown nor the crash path writes into the parent's archive.
   const bool parent_open = g_events_fd >= 0;
   const bool parent_finalized = g_events_finalized;
   // The child's archive starts with a fresh HIP_HRR_CAPTURE_MAX_MB budget.
@@ -574,8 +541,7 @@ static void atfork_child() {
   // The child's archive is a new one: an event the parent dropped is not
   // missing from it.
   g_capture_incomplete.store(false, std::memory_order_relaxed);
-  // After flush() nothing would finalize a child's archive. The fd stays open
-  // until close(), but the shutdown that runs both is on the parent's exiting
+  // After the parent's flush() nothing would finalize a child's archive, so do not reopen one.
   if ((parent_open || parent_at_limit) && !parent_finalized)
     g_reopen_after_fork.store(true, std::memory_order_relaxed);
 }
@@ -743,8 +709,7 @@ static void update_root_manifest() {
   (void)atomic_write_file(kBaseDir, g_base_dir, "manifest.json", json.data(), json.size());
 }
 
-// Disk space
-// Capture stops rather than fill the file system it writes to. It keeps free
+// Capture stops rather than fill the file system it writes to; it keeps part of it free.
 
 static constexpr uint64_t kKeepFreeMax   = 4ull << 30;
 static constexpr uint64_t kSpaceCheckMax = 64ull << 20;
@@ -757,12 +722,9 @@ static uint64_t              g_space_check_bytes = kSpaceCheckMax;
 static std::atomic<uint64_t> g_file_block_bytes{kFileBlockDefault};
 // Events and blobs both count here. Protected by g_file_mu.
 static uint64_t g_bytes_since_space_check = 0;
-// Bytes already accepted by reserve_space and not yet finished writing. Concurrent
-// writers all count against the free-space check until they release.
+// Bytes accepted by reserve_space and not yet written; concurrent writers all count against the check.
 static std::atomic<uint64_t> g_bytes_reserved{0};
 
-// The file system holding `dir`: on POSIX the directory `dir_fd`, or `dir` when
-// there is none.
 static bool fs_space(int dir_fd, const std::string& dir, uint64_t* avail, uint64_t* total,
                      uint64_t* block = nullptr) {
   uint64_t bs = 0;
@@ -795,11 +757,10 @@ static bool fs_space(int dir_fd, const std::string& dir, uint64_t* avail, uint64
   return true;
 }
 
-// pid-<pid>/active tells producers outside the runtime that this process's
-// capture is on. open() removes a stale one before any step that can fail and
+// pid-<pid>/active tells producers outside the runtime that this process is capturing.
+// open() removes a stale one before any step that can fail.
 static constexpr const char* kActiveMarker = "active";
 
-// Flush what is buffered, close events.bin and mark the archive incomplete.
 static void stop_capture_locked(const char* why, bool at_limit) {
   char reason[256];
   snprintf(reason, sizeof(reason), "stopped writing: %s", why);
@@ -811,8 +772,7 @@ static void stop_capture_locked(const char* why, bool at_limit) {
     HRR_CLOSE(g_events_fd);
     g_events_fd = -1;
   }
-  // The application runs on, and producers would keep writing sidecars to an
-  // archive that records nothing, on a file system already short of space.
+  // The application runs on; producers must not keep writing sidecars into an archive that records nothing.
   remove_in_archive(g_dir_fd.load(), g_output_dir, kActiveMarker);
   mark_incomplete(reason);
   // Not gated on AMD_LOG_LEVEL, like the refusal in open().
@@ -829,8 +789,7 @@ static void stop_for_space(uint64_t keep_free) {
   stop_capture_locked(why, /*at_limit=*/false);
 }
 
-// Size the reserve for the file system holding `dir`, the archive open() is
-// about to publish, open as `dir_fd`. False when less than the reserve is free
+// Sizes the reserve for the archive's file system. Returns false when less than the reserve is free.
 static bool init_space_reserve(int dir_fd, const std::string& dir) {
   g_keep_free = 0;
   g_bytes_since_space_check = 0;
@@ -843,8 +802,7 @@ static bool init_space_reserve(int dir_fd, const std::string& dir) {
   return avail >= g_keep_free;
 }
 
-// Count `len` bytes toward the next free-space check and return true when one is
-// due. Caller must hold g_file_mu.
+// Counts `len` toward the next free-space check; true when one is due. Caller holds g_file_mu.
 static bool space_check_due_locked(uint64_t len) {
   g_bytes_since_space_check += len;
   if (len < g_space_check_bytes && g_bytes_since_space_check < g_space_check_bytes) return false;
@@ -852,8 +810,8 @@ static bool space_check_due_locked(uint64_t len) {
   return true;
 }
 
-// Read free space and return false, having stopped the capture, if `pending` more
-// bytes, on top of the events still buffered, would eat into the reserve. Must not
+// Returns false, having stopped the capture, if `pending` bytes plus the buffered events
+// would eat into the reserve. Must not be called with g_file_mu held.
 static bool check_space(uint64_t pending) {
   {
     // Read before the free space, so a flush in between is counted twice, not missed.
@@ -872,24 +830,22 @@ static uint64_t file_bytes(uint64_t len) {
   return (len + block - 1) / block * block;
 }
 
-// Size limits
-// HIP_HRR_CAPTURE_MAX_MB caps what a process archive holds: events.bin, and every
+// HIP_HRR_CAPTURE_MAX_MB caps what a process archive holds: events.bin and every blob and code object.
 
 static uint64_t              g_max_archive_bytes = 0;  // set by open()
 static uint64_t              g_max_blob_bytes = 0;     // set by open()
 static std::atomic<uint64_t> g_archive_bytes{0};
 static std::atomic<bool>     g_blob_cap_reported{false};
 
-// The limit in bytes that environment variable `name` sets in MiB, 0 unless
-// set. The MiB count is parsed as the CLR flags registry parses a size_t.
+// Limit in bytes from env var `name` (MiB), 0 if unset. Parsed as the CLR flags registry parses a size_t.
 static uint64_t env_limit_bytes(const char* name) {
   const char* v = std::getenv(name);
   const uint64_t mib = v ? static_cast<size_t>(std::atol(v)) : 0;
   return std::min<uint64_t>(mib, UINT64_MAX >> 20) << 20;
 }
 
-// Count `len` bytes toward the archive limit. False when they would take the
-// archive past it; the caller then drops the write and calls
+// Counts `len` toward the archive limit; false when it would pass the limit.
+// The caller then drops the write and calls stop_at_limit_locked().
 static bool charge_archive(uint64_t len) {
   if (g_max_archive_bytes == 0) return true;
   return g_archive_bytes.fetch_add(len, std::memory_order_relaxed) + len <=
@@ -904,7 +860,6 @@ static void stop_at_limit_locked() {
   stop_capture_locked(why, /*at_limit=*/true);
 }
 
-// Leave out a blob over HIP_HRR_CAPTURE_MAX_BLOB_MB, saying so once per archive.
 static void skip_oversized_blob(size_t len) {
   mark_incomplete("a copy over HIP_HRR_CAPTURE_MAX_BLOB_MB was not stored");
   if (g_blob_cap_reported.exchange(true, std::memory_order_relaxed)) return;
@@ -915,8 +870,8 @@ static void skip_oversized_blob(size_t len) {
           static_cast<unsigned long long>(g_max_blob_bytes >> 20));
 }
 
-// Account for a file of `len` bytes and return false, having stopped the
-// capture, if writing it would eat into the reserve. Must not be called with
+// Accounts for a file of `len` bytes. Returns false, having stopped the capture, if writing it
+// would eat into the reserve. Must not be called with g_file_mu held.
 static bool reserve_space(uint64_t len) {
   if (g_capture_stopped.load(std::memory_order_relaxed)) return false;
   len = file_bytes(len);
@@ -947,15 +902,14 @@ static void release_space(uint64_t len) {
   g_bytes_reserved.fetch_sub(file_bytes(len), std::memory_order_acq_rel);
 }
 
-// Held for the rest of a writer after reserve_space(len) succeeds, so every way
-// out of it, early returns and exceptions included, releases the bytes.
+// Releases the reserved bytes on every way out of a writer, including exceptions.
 struct SpaceReservation {
   uint64_t len;
   ~SpaceReservation() { release_space(len); }
 };
 
-// For open() refusing an archive. A forked child inherits these paths and
-// atexit(hip_capture_shutdown), so without this its flush() would finalize the
+// For open() refusing an archive. A forked child inherits these paths and the atexit shutdown,
+// so without this its flush() would finalize the parent's archive.
 static void clear_archive_paths() {
   g_base_dir.clear();
   g_output_dir.clear();
@@ -963,8 +917,8 @@ static void clear_archive_paths() {
 }
 
 
-// A failed open() keeps no archive path, so reopen_after_fork() does not open one
-// in a forked child. When this attempt created pid-<pid>, its empty directories go
+// A failed open() keeps no archive path, so reopen_after_fork() does not retry in a forked child.
+// If this attempt created pid-<pid>, its empty directories are removed.
 static bool open_failed(const std::string& out_dir, bool created_pid_dir) {
   if (created_pid_dir) {
     for (const char* sub : {"/blobs", "/code_objects", ""}) {
@@ -982,8 +936,8 @@ static bool open_failed(const std::string& out_dir, bool created_pid_dir) {
   return false;
 }
 
-// Names this process instance, so a producer can tell the marker its own writer
-// created from one that a killed process with the same pid left behind. On Linux
+// Names this process instance so a producer can tell its own marker from one a killed
+// process with the same pid left behind. On Linux: boot id plus process start time.
 static std::string process_instance() {
 #if defined(_WIN32)
   FILETIME created{}, exited{}, kernel{}, user{};
@@ -1047,8 +1001,8 @@ bool open(const char* output_dir) {
 #ifndef _WIN32
   install_atfork_handlers_once();
 #endif
-  // The archive is prepared in locals and published below under the writer
-  // mutex and g_buf_busy. A forked child opens its archive while other threads
+  // The archive is prepared in locals and published below under the writer mutex and g_buf_busy,
+  // because a forked child opens its archive while other threads may still be recording.
   g_base_dir = output_dir;
   const uint64_t pid = current_process_id();
   const uint64_t parent_pid = current_parent_process_id();
@@ -1098,7 +1052,6 @@ bool open(const char* output_dir) {
   static const uint64_t max_blob_bytes = env_limit_bytes("HIP_HRR_CAPTURE_MAX_BLOB_MB");
   g_max_archive_bytes = max_archive_bytes;
   g_max_blob_bytes = max_blob_bytes;
-  // The file header is the archive's first bytes.
   g_archive_bytes.store(sizeof(hrr_file_header), std::memory_order_relaxed);
   g_blob_cap_reported.store(false, std::memory_order_relaxed);
 
@@ -1152,8 +1105,7 @@ bool open(const char* output_dir) {
     BufWriteGuard lk;
     g_output_dir = out_dir;
 #ifndef _WIN32
-    // The previous archive's, if any. No blob writer is left on them: open() runs
-    // only while no archive is open.
+    // Closes the previous archive's descriptors. No blob writer uses them: open() runs only while no archive is open.
     close_dir_fds();
 #endif
     g_blobs_fd.store(std::exchange(dirs.blobs, -1));
@@ -1162,8 +1114,6 @@ bool open(const char* output_dir) {
     g_pid        = pid;
     g_parent_pid = parent_pid;
     snprintf(g_manifest_path, sizeof(g_manifest_path), "%s", manifest_path.c_str());
-    // Buffer/checkpoint state is reset here so it is consistent for this
-    // process's pid-<pid> sub-archive.
     g_buf_len           = 0;
     g_events_since_ckpt = 0;
     g_events_finalized  = false;
@@ -1181,11 +1131,10 @@ bool open(const char* output_dir) {
   return true;
 }
 
-// Caller holds g_blob_mu. A claimed write ends here even after flush() has cut
-// off new ones: flush() waits for it before reading the flag, so it still counts.
+// Caller holds g_blob_mu. A claimed write may end here after flush() stopped new ones;
+// flush() waits for it before reading the flag.
 static void mark_incomplete_locked(const char* reason) {
-  // Record once; the loud, AMD_LOG_LEVEL-routed message is emitted by the caller
-  // (e.g. serialize_kernel_launch) which has the relevant context. Here we only
+  // Record once. The caller logs the detailed message; this only logs the archive-level notice.
   if (!g_capture_incomplete.exchange(true, std::memory_order_relaxed)) {
     LogPrintfError(
         "[HRR capture] Archive marked INCOMPLETE: %s. The clean-shutdown "
@@ -1195,8 +1144,8 @@ static void mark_incomplete_locked(const char* reason) {
   }
 }
 
-// Past the trailer decision, an event a shim drops is one nothing would have
-// recorded anyway, and flipping the flag then would leave the trailer and the
+// After the trailer decision, a dropped event would not have been recorded anyway,
+// and flipping the flag then would make the trailer and the manifest disagree.
 void mark_incomplete(const char* reason) {
   std::lock_guard<std::mutex> lk(g_blob_mu);
   if (g_events_finalized) return;
@@ -1211,16 +1160,16 @@ static bool list_unreplayable_locked(const char* api, const char* reason) {
 }
 
 static void warn_unreplayable(const char* api, const char* reason) {
-  // Warning, not Error: unlike mark_incomplete() the archive is well-formed and
-  // every event is present — only the ability to re-execute this one call is
+  // Warning, not Error: the archive is well-formed and every event is present;
+  // only this one call cannot be re-executed.
   LogPrintfWarning(
       "[HRR capture] %s cannot be replayed: %s. The call is recorded, but "
       "replay will report it as unreplayable rather than reproduce it",
       api, reason);
 }
 
-// Staged, not listed: write_event_raw() lists the note under the same lock that
-// accepts the event, so a shim still reached through a wrapped slot after
+// Staged, not listed: write_event_raw() lists the note under the lock that accepts the event,
+// so a shim reached after shutdown does not list a note for a dropped event.
 void note_unreplayable(const char* api, const char* reason) {
   if (!api) return;
   if (!reason) reason = "(unspecified)";
@@ -1237,8 +1186,7 @@ void note_unreplayable(const char* api, const char* reason) {
 }
 
 void flush(const char* /*output_dir*/) {
-  // Always finalize the *effective* directory this process actually wrote to
-  // (g_output_dir), which is always a pid-<pid> sub-archive. The caller passes
+  // Finalizes g_output_dir, the pid-<pid> sub-archive this process wrote; the argument is ignored.
   std::lock_guard<std::mutex> reopen_lk(g_reopen_mu);
   g_reopen_after_fork.store(false, std::memory_order_release);
   bool incomplete;
@@ -1252,15 +1200,14 @@ void flush(const char* /*output_dir*/) {
     dir_fd = g_dir_fd.load();
     if (g_events_fd >= 0 && !g_events_finalized) {
       {
-        // Stop new blob and code object claims, then wait for the claimed writes
-        // to end: a failed one marks the capture incomplete, which decides the
+        // Stop new blob and code object claims, then wait for claimed writes: a failed one
+        // marks the capture incomplete, which decides whether the trailer is written.
         std::unique_lock<std::mutex> blk(g_blob_mu);
         g_events_finalized = true;
         g_blob_writes_done.wait(blk, [] { return g_blob_writes_in_flight == 0; });
       }
       incomplete = g_capture_incomplete.load(std::memory_order_relaxed);
-      // Skip the clean-shutdown trailer when the capture is known incomplete: its
-      // absence is exactly how the reader detects a non-faithful archive.
+      // An incomplete capture gets no trailer: its absence is how the reader detects a non-faithful archive.
       if (!incomplete) {
         hrr_eof_record rec = hrr_make_eof_record(
             g_seq_id.fetch_add(1, std::memory_order_relaxed), g_event_count.load());
@@ -1272,8 +1219,7 @@ void flush(const char* /*output_dir*/) {
       HRR_FSYNC(g_events_fd);
     }
     incomplete = g_capture_incomplete.load(std::memory_order_relaxed);
-    // close() runs later and the fd stays open until then. A thread can still
-    // record in between: a forked child's first record finishes opening the
+    // close() runs later, and a thread can record in between. Mark finalized again so none does.
     g_events_finalized = true;
   }
 
@@ -1296,8 +1242,8 @@ void close() {
     g_events_fd = -1;
   }
 #ifndef _WIN32
-  // The archive's directory descriptors go with events.bin, so the application
-  // keeps none of them after the capture. Blob and code object writes use them
+  // The directory descriptors close with events.bin, so the application keeps none after capture.
+  // Blob and code object writes use them, so wait for those first.
   {
     std::unique_lock<std::mutex> blk(g_blob_mu);
     g_events_finalized = true;
@@ -1333,12 +1279,10 @@ void emergency_finalize(bool clean_shutdown) {
   if (g_events_fd < 0 && (clean_shutdown || !g_capture_stopped.load(std::memory_order_relaxed)))
     return;
 
-  // Flush the in-memory buffer only if no writer thread is mid-mutation.
   bool locked = !g_buf_busy.test_and_set(std::memory_order_acquire);
   if (locked) {
     flush_buffer_locked();
-    // Clean shutdowns append the fixed-size trailer so the reader does not treat
-    // the archive as crash-truncated. The CLR crash callback passes
+    // Only clean shutdowns append the trailer; the CLR crash callback passes clean_shutdown=false.
     if (clean_shutdown && !g_events_finalized) {
       hrr_eof_record rec = hrr_make_eof_record(
           g_seq_id.fetch_add(1, std::memory_order_relaxed), g_event_count.load());
@@ -1351,8 +1295,8 @@ void emergency_finalize(bool clean_shutdown) {
   // the CRT invalid parameter handler, which ends the process by default.
   if (g_events_fd >= 0) HRR_FSYNC(g_events_fd);
 
-  // Best-effort manifest via raw open/write only. A clean shutdown writes
-  // complete:true (the trailer is present); a crash writes complete:false — its
+  // Best-effort manifest through raw open/write only.
+  // complete is true only for a clean shutdown that flushed the buffer.
   if (g_manifest_path[0] == '\0') return;
   // Concurrent crash callbacks must not share the emergency buffer. A second
   // entrant skips the manifest. close() holds the flag while it closes g_dir_fd.
@@ -1397,11 +1341,9 @@ void emergency_finalize(bool clean_shutdown) {
   g_emergency_manifest_busy.clear(std::memory_order_release);
 }
 
-// write_event_raw — unified write path for all events
-// hdr points to the hrr_event_header at the front of an hrr_args_* struct.
 
-// Assign sequence_id and buffer the record atomically so IDs are only consumed for
-// events that are actually written. A full record is always appended under the
+// Assigns sequence_id and buffers the record in one step, so IDs are consumed only by written events.
+// Caller holds g_file_mu.
 static void append_event_locked(hrr_event_header* hdr, uint32_t payload_len,
                                 size_t staged, bool* fresh) {
   hdr->sequence_id = g_seq_id.fetch_add(1, std::memory_order_relaxed);
@@ -1421,8 +1363,7 @@ static void append_event_locked(hrr_event_header* hdr, uint32_t payload_len,
 
 void write_event_raw(uint16_t api_id, hrr_event_header* hdr, uint32_t payload_len) {
   reopen_after_fork();
-  // Fill fields that don't require the lock (timestamp and thread_id are
-  // cheap and per-thread; getting them outside the lock keeps contention low).
+  // Filled outside the lock to keep contention low.
   hdr->event_type     = api_id;
   hdr->timestamp_ns   = amd::Os::timeNanos();
   hdr->thread_id      = current_thread_id();
@@ -1434,8 +1375,8 @@ void write_event_raw(uint16_t api_id, hrr_event_header* hdr, uint32_t payload_le
   t_staged_count = 0;
   bool fresh[kMaxStagedNotes] = {};
 
-  // A record is counted toward the next free-space check before it is written. When
-  // it makes a check due, the check runs first, so it covers the record, as for a
+  // A record counts toward the next free-space check before it is written. When that makes
+  // a check due, the check runs first, so it covers the record, as it does for a blob.
   bool due;
   {
     BufWriteGuard lk;
@@ -1450,8 +1391,8 @@ void write_event_raw(uint16_t api_id, hrr_event_header* hdr, uint32_t payload_le
     if (!due) append_event_locked(hdr, payload_len, staged, fresh);
   }
   if (due) {
-    // Outside g_file_mu, since check_space may take it to stop the capture. The
-    // record's bytes stay reserved until it is buffered, so a concurrent check counts
+    // Outside g_file_mu, since check_space may take it to stop the capture.
+    // The record's bytes stay reserved until it is buffered, so a concurrent check counts them.
     const uint64_t reserved =
         g_bytes_reserved.fetch_add(payload_len, std::memory_order_acq_rel) + payload_len;
     if (check_space(reserved)) {
@@ -1465,7 +1406,6 @@ void write_event_raw(uint16_t api_id, hrr_event_header* hdr, uint32_t payload_le
     if (fresh[i]) warn_unreplayable(t_staged_notes[i].api, t_staged_notes[i].reason);
 }
 
-// Atomic file write: write to a temp file then rename into place.
 
 static bool atomic_write_file(int dir_fd, const std::string& dir, const std::string& name,
                               const void* data, size_t len) {
@@ -1498,8 +1438,8 @@ static bool atomic_write_file(int dir_fd, const std::string& dir, const std::str
   return ok;
 }
 
-// Ends a write claimed in write_blob() or write_code_object(). A failed one is
-// unpublished so a later call can retry, and marks the capture incomplete: the
+// Ends a write claimed in write_blob() or write_code_object(). A failed write is unpublished
+// so a later call can retry, and marks the capture incomplete because the archive lacks the file.
 static void finish_claimed_write(const std::string& key, bool ok) {
   std::lock_guard<std::mutex> lk(g_blob_mu);
   if (!ok) {
@@ -1510,8 +1450,8 @@ static void finish_claimed_write(const std::string& key, bool ok) {
   if (--g_blob_writes_in_flight == 0) g_blob_writes_done.notify_all();
 }
 
-// Finishes a claimed write on every way out of the writer, a throw from
-// ensure_dir() or an allocation included, so no claim stays counted in flight
+// Finishes a claimed write on every way out of the writer, including a throw from
+// ensure_dir() or an allocation, so no claim stays counted in flight.
 class ClaimedWrite {
  public:
   explicit ClaimedWrite(const std::string& key) : key_(key) {}
@@ -1525,7 +1465,6 @@ class ClaimedWrite {
   bool ok_ = false;
 };
 
-// Claim `key` for reserving and writing, waiting while another thread holds it.
 static bool claim_blob(const std::string& key) {
   std::unique_lock<std::mutex> lk(g_blob_mu);
   while (g_blob_claims.count(key) != 0) {
@@ -1538,8 +1477,8 @@ static bool claim_blob(const std::string& key) {
   return true;
 }
 
-// Holds a claim from claim_blob() to the end of the writer, whichever way it
-// returns. A caller that waited then finds the key written, or claims it itself
+// Holds a claim from claim_blob() to the end of the writer. A caller that waited then
+// finds the key written, or claims it itself.
 class BlobClaim {
  public:
   explicit BlobClaim(const std::string& key) : key_(key) {}
@@ -1572,8 +1511,8 @@ Hash128 write_blob(const void* data, size_t len, bool capped) {
   hash_hex(h, hex);
   std::string key(hex);  // no prefix — plain blobs
 
-  // A caller with the same bytes waits here until this one is done, so the space
-  // is reserved once. The write counts in flight only once the space is reserved,
+  // A caller with the same bytes waits here, so the space is reserved once.
+  // The write counts as in flight only after the space is reserved.
   if (!claim_blob(key)) return h;  // already written
   const BlobClaim blob_claim(key);
   if (!reserve_space(len)) return {};
@@ -1634,7 +1573,6 @@ Hash128 write_code_object(const void* image, size_t image_size) {
   hash_hex(h, hex);
   std::string key = std::string("co:") + hex;  // namespace to match playback load_code_object key
 
-  // As in write_blob(), the key is claimed before the space is reserved.
   if (!claim_blob(key)) return h;  // already written
   const BlobClaim blob_claim(key);
   if (!reserve_space(image_size)) return {};
