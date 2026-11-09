@@ -97,6 +97,11 @@ extern std::function<hipError_t(void** /*ptr*/, std::size_t /*size*/, unsigned /
     g_hipMallocManaged;
 extern std::function<hipError_t(void* /*ptr*/)> g_hipFree;
 extern std::function<hipError_t(void* /*ptr*/)> g_hipHostFree;
+// Pinning of caller-owned host memory. Register and GetDevicePointer default to hipErrorInvalidValue, the fail-loud
+// floor, so an unhooked caller takes its hipHostMalloc fallback. Unregister defaults to hipSuccess.
+extern std::function<hipError_t(void* /*hostPtr*/, std::size_t /*size*/, unsigned /*flags*/)> g_hipHostRegister;
+extern std::function<hipError_t(void* /*hostPtr*/)> g_hipHostUnregister;
+extern std::function<hipError_t(void** /*devPtr*/, void* /*hostPtr*/, unsigned /*flags*/)> g_hipHostGetDevicePointer;
 extern int g_deviceCount;
 extern int g_currentDevice;
 extern std::function<hipError_t(int* /*dev*/)> g_hipGetDevice;
