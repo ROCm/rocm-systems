@@ -317,13 +317,11 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
 #pragma unroll
       for (int p = 0; p < NR; p++) regs[p] = nanUserLoad((UserVecPtr)(src + eltOf(p, lane)));
     } else if (eltN >= EltPerPack) {
+      // Unguarded: a pack wholly past eltN reads the slice's last pack, which alignTail() zeroes. A guarded load
+      // leaves these registers a pending load target where this path rejoins the full-slice one, and the
+      // s_waitcnt vmcnt(0) that costs there on gfx9 also drains the previous slice's FIFO stores, every full slice.
 #pragma unroll
-      for (int p = 0; p < NR; p++) {
-        int e0 = eltOf(p, lane);
-        v4u x = {0, 0, 0, 0};
-        if (e0 < eltN) x = nanUserLoad((UserVecPtr)(src + min(e0, eltN - EltPerPack)));
-        regs[p] = x;
-      }
+      for (int p = 0; p < NR; p++) regs[p] = nanUserLoad((UserVecPtr)(src + min(eltOf(p, lane), eltN - EltPerPack)));
     } else {
 #pragma unroll
       for (int p = 0; p < NR; p++) {
