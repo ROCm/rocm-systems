@@ -12,7 +12,7 @@ On gfx1201, GL2 (RDNA naming for what Instinct documentation refers to as L2/TCC
 the read/write cache with atomic units after the GL1 write-combining cache. Navi 48 has an 8 MB GL2. The RDNA4
 ISA shows one L2 read/write cache per memory channel. The tool models GL2 as 32 channels.
 
-After GL2, traffic goes through the Graphics Core Efficiency Arbiter (GCEA) toward the 64 MB Infinity
+After GL2, traffic goes through the Efficiency Arbiter (EA) toward the 64 MB Infinity
 Cache and DRAM. Those panels are documented under :doc:`gcea`.
 
 For Instinct L2 (TCC) coherence, channel hashing, and fabric metrics on CDNA

@@ -21,7 +21,7 @@ Requests from GL1 to GL2 are counted on the GL1-GL2 interface, the same stage as
 RDNA3.5. Counter names keep the ``GL1C_*`` prefix.
 
 For GL0 and the GL0-GL1 interface, see :doc:`gl0-cache`. For GL2, see
-:doc:`gl2-cache`; for the Graphics Core Efficiency Arbiter (GCEA) beyond GL2, see :doc:`gcea`.
+:doc:`gl2-cache`; for the Efficiency Arbiter (EA) beyond GL2, see :doc:`gcea`.
 
 .. note::
 
