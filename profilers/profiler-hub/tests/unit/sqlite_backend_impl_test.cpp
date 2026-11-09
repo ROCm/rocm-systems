@@ -4,6 +4,7 @@
 #include "backends/embedded_schema.hpp"
 #include "backends/sqlite_backend_impl.hpp"
 #include "profiler-hub/storage.hpp"
+#include "profiler-hub/version.hpp"
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -12,6 +13,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <ostream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -31,8 +34,21 @@
 #    include <tlhelp32.h>
 #endif
 
+// gtest finds PrintTo through argument-dependent lookup in profiler_hub, so this
+// makes parameterized test names show "3.0.0" instead of raw bytes.
+namespace profiler_hub
+{
+inline void
+PrintTo(const version_t& version, std::ostream* os)
+{
+    *os << version.to_string();
+}
+}  // namespace profiler_hub
+
 namespace
 {
+
+using rocpd::data_storage::schema::k_embedded_schemas;
 
 TEST(sqlite_backend_impl_test, get_schema_query_returns_non_empty_sql_for_rocpd_tables)
 {
@@ -225,25 +241,6 @@ struct sqlite_mock_guard
     sqlite_mock_guard& operator=(const sqlite_mock_guard&) = delete;
 };
 
-const embedded_schema_t*
-newest_embedded_schema()
-{
-    const embedded_schema_t* newest = nullptr;
-    for(const auto& schema : k_embedded_schemas)
-    {
-        const profiler_hub::version_t embedded{ schema.major,
-                                                schema.minor,
-                                                schema.patch };
-        if(newest == nullptr ||
-           profiler_hub::version_t{ newest->major, newest->minor, newest->patch } <
-               embedded)
-        {
-            newest = &schema;
-        }
-    }
-    return newest;
-}
-
 std::vector<std::string>
 expected_schema_sql(const embedded_schema_t& schema, const std::string& uuid)
 {
@@ -362,6 +359,16 @@ TEST(sqlite_backend_impl_test,
     {
         SCOPED_TRACE(schema.version);
         const profiler_hub::version_t version{ schema.major, schema.minor, schema.patch };
+        if(resolve_writable_schema(version) == nullptr)
+        {
+            EXPECT_THROW((profiler_hub::storage_t{ db_path, uuid, version }),
+                         std::runtime_error);
+            auto backend = mock_backend_t::create(
+                db_path, uuid, mock_backend_t::storage_mode_t::in_memory);
+            EXPECT_THROW(backend->initialize_schema(version), std::runtime_error);
+            continue;
+        }
+
         const profiler_hub::storage_t storage{ db_path, uuid, version };
         EXPECT_TRUE(storage.get_storage_version() == version);
 
@@ -377,7 +384,7 @@ TEST(sqlite_backend_impl_test,
 }
 
 TEST(sqlite_backend_impl_test,
-     storage_latest_sentinel_executes_the_newest_embedded_schema)
+     storage_latest_sentinel_executes_the_newest_writable_schema)
 {
     const std::string uuid = "schematest";
     const auto        db_path =
@@ -385,11 +392,16 @@ TEST(sqlite_backend_impl_test,
             .string();
     std::filesystem::remove(db_path);
 
-    const embedded_schema_t* newest = newest_embedded_schema();
-    ASSERT_NE(newest, nullptr);
+    const embedded_schema_t* writable =
+        resolve_writable_schema(profiler_hub::version_t{});
+    ASSERT_NE(writable, nullptr);
+    EXPECT_STREQ(writable->version, "3.0.1");
 
     const profiler_hub::storage_t storage{ db_path, uuid, profiler_hub::version_t{} };
-    EXPECT_TRUE(storage.get_storage_version().is_latest());
+    const profiler_hub::version_t created{ writable->major,
+                                           writable->minor,
+                                           writable->patch };
+    EXPECT_EQ(storage.get_storage_version(), created);
 
     ::testing::NiceMock<mock_sqlite_api> sqlite;
     const sqlite_mock_guard              guard{ sqlite };
@@ -397,11 +409,194 @@ TEST(sqlite_backend_impl_test,
         mock_backend_t::create(db_path, uuid, mock_backend_t::storage_mode_t::in_memory);
     {
         ::testing::InSequence sequence;
-        expect_schema_exec(sqlite, *newest, uuid);
+        expect_schema_exec(sqlite, *writable, uuid);
         backend->initialize_schema(storage.get_storage_version());
     }
     ASSERT_TRUE(::testing::Mock::VerifyAndClearExpectations(&sqlite));
 }
+
+TEST(sqlite_backend_impl_test, storage_3_0_0_executes_the_embedded_3_0_0_schema)
+{
+    const std::string uuid = "schematest";
+    const auto        db_path =
+        (std::filesystem::temp_directory_path() / "profiler_hub_mock_schema_300.db")
+            .string();
+    std::filesystem::remove(db_path);
+
+    const profiler_hub::version_t requested{ 3, 0, 0 };
+    const embedded_schema_t*      schema = resolve_writable_schema(requested);
+    ASSERT_NE(schema, nullptr);
+    EXPECT_STREQ(schema->version, "3.0.0");
+
+    const profiler_hub::storage_t storage{ db_path, uuid, requested };
+    EXPECT_EQ(storage.get_storage_version(), requested);
+
+    ::testing::NiceMock<mock_sqlite_api> sqlite;
+    const sqlite_mock_guard              guard{ sqlite };
+    auto                                 backend =
+        mock_backend_t::create(db_path, uuid, mock_backend_t::storage_mode_t::in_memory);
+    {
+        ::testing::InSequence sequence;
+        expect_schema_exec(sqlite, *schema, uuid);
+        backend->initialize_schema(storage.get_storage_version());
+    }
+    ASSERT_TRUE(::testing::Mock::VerifyAndClearExpectations(&sqlite));
+}
+
+TEST(sqlite_backend_impl_test, storage_3_0_2_is_rejected)
+{
+    const std::string uuid = "schematest";
+    const auto        db_path =
+        (std::filesystem::temp_directory_path() / "profiler_hub_mock_schema_302.db")
+            .string();
+    std::filesystem::remove(db_path);
+
+    const profiler_hub::version_t requested{ 3, 0, 2 };
+    EXPECT_EQ(resolve_writable_schema(requested), nullptr);
+    EXPECT_THROW((profiler_hub::storage_t{ db_path, uuid, requested }),
+                 std::runtime_error);
+
+    ::testing::NiceMock<mock_sqlite_api> sqlite;
+    const sqlite_mock_guard              guard{ sqlite };
+    auto                                 backend =
+        mock_backend_t::create(db_path, uuid, mock_backend_t::storage_mode_t::in_memory);
+    EXPECT_THROW(backend->initialize_schema(requested), std::runtime_error);
+}
+
+TEST(sqlite_backend_impl_test, supported_writable_schemas_lists_writer_versions)
+{
+    EXPECT_EQ(supported_writable_schemas(), "3.0.0, 3.0.1");
+}
+
+TEST(sqlite_backend_impl_test, latest_schema_version_matches_newest_embedded_schema)
+{
+    const profiler_hub::version_t latest =
+        rocpd::data_storage::schema::latest_schema_version();
+
+    // The newest version must be an embedded row, and no embedded row may be newer.
+    const embedded_schema_t* newest =
+        rocpd::data_storage::schema::find_embedded_schema(latest.to_string());
+    ASSERT_NE(newest, nullptr);
+    EXPECT_EQ(latest.to_string(), newest->version);
+    for(const auto& schema : k_embedded_schemas)
+    {
+        const profiler_hub::version_t embedded{ schema.major,
+                                                schema.minor,
+                                                schema.patch };
+        EXPECT_FALSE(latest < embedded);
+    }
+    EXPECT_TRUE(latest.is_latest(latest));
+    EXPECT_FALSE(profiler_hub::version_t{}.is_latest(latest));
+    EXPECT_FALSE((profiler_hub::version_t{ 3, 0, 1 }.is_latest(latest)));
+}
+
+class is_latest_schema_test : public ::testing::TestWithParam<profiler_hub::version_t>
+{};
+
+TEST_P(is_latest_schema_test, is_true_only_for_the_newest_versions_yml_entry)
+{
+    const profiler_hub::version_t version = GetParam();
+    const profiler_hub::version_t latest =
+        rocpd::data_storage::schema::latest_schema_version();
+
+    EXPECT_EQ(version.is_latest(latest), version == latest);
+}
+
+INSTANTIATE_TEST_SUITE_P(schemas_3_0_0_through_3_0_5,
+                         is_latest_schema_test,
+                         ::testing::Values(profiler_hub::version_t{ 3, 0, 0 },
+                                           profiler_hub::version_t{ 3, 0, 1 },
+                                           profiler_hub::version_t{ 3, 0, 2 },
+                                           profiler_hub::version_t{ 3, 0, 3 },
+                                           profiler_hub::version_t{ 3, 0, 4 },
+                                           profiler_hub::version_t{ 3, 0, 5 }));
+
+class embedded_schema_catalog_test
+: public ::testing::TestWithParam<profiler_hub::version_t>
+{};
+
+TEST_P(embedded_schema_catalog_test, version_is_embedded_from_versions_yml)
+{
+    const profiler_hub::version_t version = GetParam();
+    const embedded_schema_t*      schema =
+        rocpd::data_storage::schema::find_embedded_schema(version.to_string());
+
+    ASSERT_NE(schema, nullptr);
+    EXPECT_EQ(schema->version, version.to_string());
+    EXPECT_EQ(schema->major, version.major);
+    EXPECT_EQ(schema->minor, version.minor);
+    EXPECT_EQ(schema->patch, version.patch);
+    EXPECT_NE(schema->tables, nullptr);
+    EXPECT_NE(schema->indexes, nullptr);
+    EXPECT_NE(schema->views, nullptr);
+    EXPECT_NE(schema->data_views, nullptr);
+    EXPECT_NE(schema->summary_views, nullptr);
+    EXPECT_NE(schema->metadata, nullptr);
+}
+
+INSTANTIATE_TEST_SUITE_P(schemas_3_0_0_through_3_0_5,
+                         embedded_schema_catalog_test,
+                         ::testing::Values(profiler_hub::version_t{ 3, 0, 0 },
+                                           profiler_hub::version_t{ 3, 0, 1 },
+                                           profiler_hub::version_t{ 3, 0, 2 },
+                                           profiler_hub::version_t{ 3, 0, 3 },
+                                           profiler_hub::version_t{ 3, 0, 4 },
+                                           profiler_hub::version_t{ 3, 0, 5 }));
+
+TEST(sqlite_backend_impl_test, rejected_schema_names_the_writable_schemas)
+{
+    const auto db_path =
+        (std::filesystem::temp_directory_path() / "profiler_hub_mock_schema_reject.db")
+            .string();
+    std::filesystem::remove(db_path);
+
+    try
+    {
+        const profiler_hub::storage_t storage{ db_path,
+                                               "schematest",
+                                               profiler_hub::version_t{ 3, 0, 2 } };
+        FAIL() << "storage construction accepted schema 3.0.2";
+        (void) storage;
+    } catch(const std::runtime_error& error)
+    {
+        const std::string message = error.what();
+        EXPECT_NE(message.find("3.0.2"), std::string::npos);
+        EXPECT_NE(message.find(supported_writable_schemas()), std::string::npos);
+    }
+}
+
+class metadata_stamp_test : public ::testing::TestWithParam<profiler_hub::version_t>
+{};
+
+TEST_P(metadata_stamp_test, metadata_sql_contains_requested_schema_version)
+{
+    const profiler_hub::version_t version = GetParam();
+    const embedded_schema_t*      schema  = resolve_writable_schema(version);
+    ASSERT_NE(schema, nullptr);
+    EXPECT_EQ(schema->version, version.to_string());
+
+    const std::string uuid = "schematest";
+    const auto        db_path =
+        (std::filesystem::temp_directory_path() / "profiler_hub_mock_metadata_stamp.db")
+            .string();
+    std::filesystem::remove(db_path);
+
+    ::testing::NiceMock<mock_sqlite_api> sqlite;
+    const sqlite_mock_guard              guard{ sqlite };
+    auto                                 backend =
+        mock_backend_t::create(db_path, uuid, mock_backend_t::storage_mode_t::in_memory);
+    {
+        ::testing::InSequence sequence;
+        expect_schema_exec(sqlite, *schema, uuid);
+        backend->initialize_schema(version);
+    }
+    ASSERT_TRUE(::testing::Mock::VerifyAndClearExpectations(&sqlite));
+}
+
+INSTANTIATE_TEST_SUITE_P(writable_schemas,
+                         metadata_stamp_test,
+                         ::testing::Values(profiler_hub::version_t{ 3, 0, 0 },
+                                           profiler_hub::version_t{ 3, 0, 1 }));
 
 #ifdef _WIN32
 // profiler-hub.dll, libprofiler-hub.dll, and an optional -<version> suffix.

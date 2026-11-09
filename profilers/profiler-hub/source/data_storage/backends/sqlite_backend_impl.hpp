@@ -10,6 +10,7 @@
 #include "profiler-hub/version.hpp"
 
 #include <filesystem>
+#include <iterator>
 #include <regex>
 #include <stdexcept>
 #include <string>
@@ -21,7 +22,12 @@ namespace
 
 using rocpd::data_storage::schema::embedded_schema_t;
 using rocpd::data_storage::schema::find_embedded_schema;
-using rocpd::data_storage::schema::k_embedded_schemas;
+using rocpd::data_storage::schema::latest_schema_version;
+
+// Oldest to newest. version_t{} selects the last entry, which is the newest schema
+// the writer can populate. Add a version here only when a writer exists for it.
+inline constexpr profiler_hub::version_t k_writer_supported_versions[] = { { 3, 0, 0 },
+                                                                           { 3, 0, 1 } };
 
 /**
  * Creates the parent directory of `db_file` when it does not already exist.
@@ -80,6 +86,47 @@ get_schema_query(const char*                    schema_content,
 }
 
 /**
+ * Selects the embedded schema the writer is allowed to create.
+ * version_t{} (all zero) selects the last entry of k_writer_supported_versions.
+ * A concrete version is accepted only when it is in that list and embedded.
+ * @return The matching catalog row, or nullptr when the writer cannot create it.
+ */
+[[maybe_unused]] const embedded_schema_t*
+resolve_writable_schema(const profiler_hub::version_t& requested)
+{
+    const auto target = requested == profiler_hub::version_t{}
+                            ? std::rbegin(k_writer_supported_versions)[0]
+                            : requested;
+    for(const auto& version : k_writer_supported_versions)
+    {
+        if(version == target)
+        {
+            return find_embedded_schema(target.to_string());
+        }
+    }
+    return nullptr;
+}
+
+/**
+ * Versions the writer can populate, oldest to newest, from k_writer_supported_versions.
+ * @return A comma-separated list such as "3.0.1".
+ */
+[[maybe_unused]] std::string
+supported_writable_schemas()
+{
+    std::string supported;
+    for(const auto& version : k_writer_supported_versions)
+    {
+        if(!supported.empty())
+        {
+            supported += ", ";
+        }
+        supported += version.to_string();
+    }
+    return supported;
+}
+
+/**
  * Selects the embedded RocPD schema for `schema_version`.
  * A concrete version is looked up by "MAJOR.MINOR.PATCH". version_t{} (all zero)
  * selects the highest major.minor.patch in k_embedded_schemas.
@@ -88,26 +135,12 @@ get_schema_query(const char*                    schema_content,
 [[maybe_unused]] const embedded_schema_t*
 resolve_embedded_schema(const profiler_hub::version_t& schema_version)
 {
-    if(!schema_version.is_latest())
+    if(!(schema_version == profiler_hub::version_t{}))
     {
         return find_embedded_schema(schema_version.to_string());
     }
-    // version_t{} selects the highest major.minor.patch in k_embedded_schemas.
-    const embedded_schema_t* newest_schema = nullptr;
-    for(const auto& schema : k_embedded_schemas)
-    {
-        const profiler_hub::version_t embedded_version{ schema.major,
-                                                        schema.minor,
-                                                        schema.patch };
-        if(newest_schema == nullptr ||
-           profiler_hub::version_t{ newest_schema->major,
-                                    newest_schema->minor,
-                                    newest_schema->patch } < embedded_version)
-        {
-            newest_schema = &schema;
-        }
-    }
-    return newest_schema;
+    // version_t{} selects the highest major.minor.patch generated from versions.yml.
+    return find_embedded_schema(latest_schema_version().to_string());
 }
 
 }  // namespace
@@ -245,10 +278,10 @@ database_backend<SqlitePolicy>::discover_uuids()
 
 /**
  * Creates the RocPD schema for `schema_version` and marks the database initialized.
- * version_t{} (all zero) uses the newest embedded schema. An already-initialized
- * database logs a warning and returns. Tables, indexes, views, data views, summary
- * views, and metadata are executed in that order, with uuid and version placeholders
- * filled in. An unknown version throws.
+ * version_t{} (all zero) uses the newest schema in k_writer_supported_versions.
+ * An already-initialized database logs a warning and returns. Tables, indexes, views,
+ * data views, summary views, and metadata are executed in that order, with uuid and
+ * version placeholders filled in. A version the writer cannot create throws.
  */
 template <typename SqlitePolicy>
 void
@@ -260,12 +293,14 @@ database_backend<SqlitePolicy>::initialize_schema(profiler_hub::version_t schema
         return;
     }
 
-    // version_t{} (all-zero) means the newest entry generated from versions.yml.
-    const auto* schema = resolve_embedded_schema(schema_version);
+    // version_t{} (all-zero) means the newest writer-supported schema, not merely
+    // the newest schema embedded from versions.yml.
+    const auto* schema = resolve_writable_schema(schema_version);
     if(schema == nullptr)
     {
-        throw std::runtime_error("Unsupported rocpd schema version requested: " +
-                                 schema_version.to_string());
+        throw std::runtime_error(
+            "Unsupported rocpd schema version requested: " + schema_version.to_string() +
+            ". Writable schemas: " + supported_writable_schemas());
     }
 
     const profiler_hub::version_t resolved_version{ schema->major,
