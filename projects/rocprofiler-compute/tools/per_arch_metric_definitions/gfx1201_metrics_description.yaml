@@ -167,6 +167,68 @@ Memory chart - Workgroup Processors (WGPs):
     plain: The number of workgroups in the launch divided by the number of WGPs.
     rst: The number of workgroups in the launch divided by the number of WGPs.
     unit: Workgroups per WGP
+Roofline Performance Rates:
+  VALU FLOPs (FP32):
+    plain: Floating-point operations per second on the VALU, excluding WMMA instructions. Uses the aggregate VALU instruction counter, so it is an estimate rather than a precision-specific FLOP count.
+    rst: Floating-point operations per second on the VALU, excluding WMMA instructions. Uses the aggregate VALU instruction counter, so it is an estimate rather than a precision-specific FLOP count.
+    unit: GFLOP/s
+  WMMA FLOPs (F16->F32):
+    plain: Matrix operations per second at 8192 FLOPs per 16x16x16 WMMA instruction. The counter does not separate FP16, BF16, and FP8; the peak is the measured FP16 WMMA rate.
+    rst: Matrix operations per second at 8192 FLOPs per 16x16x16 WMMA instruction. The counter does not separate FP16, BF16, and FP8; the peak is the measured FP16 WMMA rate.
+    unit: GFLOP/s
+  VALU FLOPs (F64):
+    plain: 64-bit floating-point operations per second on the VALU.
+    rst: 64-bit floating-point operations per second on the VALU.
+    unit: GFLOP/s
+  GL2 Cache BW:
+    plain: Achieved bandwidth between the GL1 and GL2 caches.
+    rst: Achieved bandwidth between the GL1 and GL2 caches.
+    unit: Bytes/s
+  GL1 Cache BW:
+    plain: Achieved bandwidth between the GL0 (TCP Cache) and GL1 caches.
+    rst: Achieved bandwidth between the GL0 (TCP Cache) and GL1 caches.
+    unit: Bytes/s
+  GL0 Cache BW (TCP Cache):
+    plain: Achieved bandwidth at the GL0 vector cache (TCP Cache).
+    rst: Achieved bandwidth at the GL0 vector cache (TCP Cache).
+    unit: Bytes/s
+  LDS BW:
+    plain: Achieved bandwidth for Local Data Share memory operations.
+    rst: Achieved bandwidth for Local Data Share memory operations.
+    unit: Bytes/s
+  DRAM BW:
+    plain: Bandwidth of GL2C/EA read and write requests destined for DRAM, compared with the measured DRAM bandwidth. These requests are also served by the Infinity Cache, so a working set that fits in it can exceed this peak.
+    rst: Bandwidth of GL2C/EA read and write requests destined for DRAM, compared with the measured DRAM bandwidth. These requests are also served by the Infinity Cache, so a working set that fits in it can exceed this peak.
+    unit: Bytes/s
+  DRAM-Destined BW (Infinity Cache Peak):
+    plain: Bandwidth of GL2C/EA read and write requests destined for DRAM, compared with the measured Infinity Cache bandwidth. No counter separates Infinity Cache hits from DRAM traffic.
+    rst: Bandwidth of GL2C/EA read and write requests destined for DRAM, compared with the measured Infinity Cache bandwidth. No counter separates Infinity Cache hits from DRAM traffic.
+    unit: Bytes/s
+Roofline Plot Points:
+  AI L2:
+    plain: Arithmetic intensity relative to GL1-to-GL2 traffic.
+    rst: Arithmetic intensity relative to GL1-to-GL2 traffic.
+    unit: FLOPs/Byte
+  AI L1:
+    plain: Arithmetic intensity relative to GL0-to-GL1 traffic.
+    rst: Arithmetic intensity relative to GL0-to-GL1 traffic.
+    unit: FLOPs/Byte
+  AI L0:
+    plain: Arithmetic intensity relative to GL0 (TCP) requests.
+    rst: Arithmetic intensity relative to GL0 (TCP) requests.
+    unit: FLOPs/Byte
+  AI LDS:
+    plain: Arithmetic intensity relative to Local Data Share traffic.
+    rst: Arithmetic intensity relative to Local Data Share traffic.
+    unit: FLOPs/Byte
+  AI DRAM:
+    plain: Arithmetic intensity relative to GL2C/EA requests destined for DRAM. The plot marks the point at the DRAM level. Compare it with both the DRAM roof and the Infinity Cache (MALL) roof, since those requests can hit in the Infinity Cache.
+    rst: Arithmetic intensity relative to GL2C/EA requests destined for DRAM. The plot marks the point at the DRAM level. Compare it with both the DRAM roof and the Infinity Cache (MALL) roof, since those requests can hit in the Infinity Cache.
+    unit: FLOPs/Byte
+  Performance (GFLOPs):
+    plain: Achieved VALU plus WMMA throughput in billions of floating-point operations per second.
+    rst: Achieved VALU plus WMMA throughput in billions of floating-point operations per second.
+    unit: GFLOP/s
 Wave Dispatch Statistics:
   Compute Wave Dispatches:
     plain: Total wavefronts dispatched (SQ_WAVES_sum).

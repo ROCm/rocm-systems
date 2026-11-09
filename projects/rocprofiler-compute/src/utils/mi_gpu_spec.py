@@ -467,6 +467,11 @@ class MIGPUSpecs:
         return tuple(cls._roofline.get(gpu_arch, {}).get("bandwidth", []))
 
     @classmethod
+    def get_roofline_plots_mall(cls, gpu_arch: str) -> bool:
+        """Return whether gpu_arch draws its measured MALL bandwidth as a roof."""
+        return bool(cls._roofline.get(gpu_arch, {}).get("plot_mall", False))
+
+    @classmethod
     def get_roofline_data_types(
         cls, gpu_arch: str
     ) -> Tuple[Tuple[str, bool, bool], ...]:
