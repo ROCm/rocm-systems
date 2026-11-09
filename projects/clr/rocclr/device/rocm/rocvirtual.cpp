@@ -5979,7 +5979,7 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
     }
 
     // Get device queue for exclusive GPU access
-    VirtualGPU* queue = dev().xferQueue();
+    VirtualGPU* queue = dev().coopQueue();
     if (!queue) {
       LogError("Runtime failed to acquire a cooperative queue!");
       vcmd.setStatus(CL_INVALID_OPERATION);
@@ -6223,8 +6223,13 @@ void VirtualGPU::submitAcquireExtObjects(amd::AcquireExtObjectsCommand& vcmd) {
     amd::InteropObject* interop = mem->getInteropObj();
     if (!interop) continue;
     // Copy data from the original D3D resource to the shared intermediate resource
-    // (no-op for GL and for resources that are already directly shared)
-    interop->copyOrigToShared();
+    // (no-op for GL and for resources that are already directly shared). A failure here
+    // means the staged surface still holds stale or uninitialised pixels, so report it
+    // rather than letting the kernel read them.
+    if (!interop->copyOrigToShared()) {
+      LogError("copyOrigToShared() failed; the shared surface was not updated");
+      vcmd.setStatus(CL_INVALID_OPERATION);
+    }
   }
 
   profilingEnd();

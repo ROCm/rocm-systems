@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/decoder.h"
 
 #include <array>
+#include <cstdlib>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -26,8 +27,15 @@ constexpr std::array kTargets = {
 uint64_t run_decode(std::span<const uint8_t> payload) {
   if (payload.size() != decode_fuzz::kWindowSize)
     return 0;
-  thread_local std::unique_ptr<Decoder> decoder = decode_fuzz::create_decoder("gfx1250");
-  return decode_fuzz::decode_window(*decoder, payload).valid;
+  thread_local util::FailureOr<std::unique_ptr<Decoder>> decoder =
+      decode_fuzz::create_decoder("gfx1250");
+  if (decoder.failed())
+    std::abort();
+  const util::FailureOr<decode_fuzz::DecodeRecord> record =
+      decode_fuzz::decode_window(*decoder.value(), payload);
+  if (record.failed())
+    std::abort();
+  return record.value().valid;
 }
 
 uint64_t run_execution(std::span<const uint8_t> payload) {
@@ -89,6 +97,11 @@ std::vector<std::vector<uint8_t>> seed_corpus() {
       execution_fuzz::random_input(17, 32, execution_fuzz::FuzzTarget::Gfx1250);
   execution_seed.insert(execution_seed.begin(), static_cast<uint8_t>(FuzzTarget::Execution));
   seeds.push_back(std::move(execution_seed));
+
+  std::vector<uint8_t> kernel_seed = execution_fuzz::generated_kernel_input(
+      0, execution_fuzz::kGeneratedKernelSeedSize, execution_fuzz::FuzzTarget::Gfx1250);
+  kernel_seed.insert(kernel_seed.begin(), static_cast<uint8_t>(FuzzTarget::Execution));
+  seeds.push_back(std::move(kernel_seed));
 
   for (std::vector<uint8_t> code_object_seed : code_object_fuzz::seed_corpus()) {
     code_object_seed.insert(code_object_seed.begin(), static_cast<uint8_t>(FuzzTarget::CodeObject));

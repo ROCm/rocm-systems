@@ -231,7 +231,8 @@ class NullDevice : public amd::Device {
   // List of dummy functions which are disabled for NullDevice
 
   //! Create a new virtual device environment.
-  device::VirtualDevice* createVirtualDevice(amd::CommandQueue* queue = nullptr) override {
+  device::VirtualDevice* createVirtualDevice(amd::CommandQueue* queue = nullptr,
+                                             bool cooperative = false) override {
     ShouldNotReachHere();
     return nullptr;
   }
@@ -328,6 +329,12 @@ class NullDevice : public amd::Device {
   virtual bool ValidateMemAccess(amd::Memory& mem, bool read_write) const override {
     ShouldNotReachHere();
     return true;
+  }
+
+  [[nodiscard]] bool writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
+                                       const void* src) const override {
+    ShouldNotReachHere();
+    return false;
   }
 
   //! Determine if we can use device memory for SVM
@@ -470,7 +477,8 @@ class Device : public NullDevice {
   ///////////////////////////////////////////////////////////////////////////////
 
   //! Instantiate a new virtual device
-  virtual device::VirtualDevice* createVirtualDevice(amd::CommandQueue* queue = nullptr) override;
+  virtual device::VirtualDevice* createVirtualDevice(amd::CommandQueue* queue = nullptr,
+                                                     bool cooperative = false) override;
 
   //! Construct an device program object from the ELF assuming it is valid
   virtual device::Program* createProgram(amd::Program& owner,
@@ -652,6 +660,9 @@ class Device : public NullDevice {
   //! return a new device pointer accessible by the GPU agent.
   void* hostLock(void* hostMem, size_t size, MemorySegment memSegment) const;
 
+  [[nodiscard]] bool writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
+                                       const void* src) const override;
+
   //! Returns transfer engine object
   const device::BlitManager& xferMgr() const { return xferQueue()->blitMgr(); }
 
@@ -699,6 +710,9 @@ class Device : public NullDevice {
   VirtualGPUs vgpus_;  //!< The list of all running virtual gpus (lock protected)
 
   VirtualGPU* xferQueue() const;
+
+  //! Cooperative-launch queue, created on first cooperative launch
+  VirtualGPU* coopQueue() const;
 
   struct QueueExtras {
     void* metadataRingBuffer = nullptr;
@@ -866,6 +880,8 @@ class Device : public NullDevice {
   static constexpr bool offlineDevice_ = false;
   VirtualGPU* xferQueue_;  //!< Transfer queue, created on demand
   mutable std::once_flag xferQueueOnce_;  //!< Serialises lazy creation of xferQueue_
+  VirtualGPU* coopQueue_;  //!< Cooperative-launch queue, created on demand
+  mutable std::once_flag coopQueueOnce_;  //!< Serialises lazy creation of coopQueue_
 
   std::atomic<size_t> freeMem_;       //!< Total of free memory available
   mutable std::recursive_mutex vgpusAccess_;  //!< Lock to serialise virtual gpu list access

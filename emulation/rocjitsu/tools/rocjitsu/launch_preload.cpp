@@ -37,7 +37,7 @@ extern "C" void __tsan_init();
 
 extern "C" char **environ;
 
-namespace rocjitsu::cli {
+namespace rocjitsu::launcher {
 namespace {
 
 bool env_name_matches(std::string_view entry, const std::string &name) {
@@ -172,4 +172,4 @@ int execvp_with_environment(const char *file, char *const argv[], LaunchEnvironm
   return execvpe(file, argv, environment.envp());
 }
 
-} // namespace rocjitsu::cli
+} // namespace rocjitsu::launcher
