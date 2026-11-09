@@ -234,14 +234,17 @@ races. Some examples:
   loads and stores complete out of order with each other, so a partial
   `s_wait_asynccnt` retires the oldest of each kind only when the count
   guarantees it: after a load and then a store, `s_wait_asynccnt 1` retires
-  neither. A store lane reads, and is tracked for, the bytes of its source
-  inside the wave's LDS allocation; bytes past it read zero. The ISA specifies
-  out-of-range LDS behavior for async loads only (CDNA5 ISA 3.3.3), so this is
-  a modeling choice that tracks every byte a store may read. A copy with no
-  active lanes touches no LDS but issues and counts on `asynccnt`; the hardware
-  may skip it only when no load, store, async or tensor operation is pending
-  (3.2.2.1), and counting it then retires no later copy early. Either way, the
-  instruction occupies its `asynccnt` slot.
+  neither. `ds_atomic_async_barrier_arrive_b64` also completes on `asynccnt`, in
+  order with async loads (10.8), so partial waits count it with the loads. The
+  ISA specifies out-of-range LDS behavior for async loads only: their LDS write
+  is dropped (CDNA5 ISA 3.3.3). As modeling choices, a load lane with any byte
+  past the wave's LDS allocation writes nothing and is not tracked, while a
+  store lane reads, and is tracked for, the bytes of its source inside the
+  allocation, and zeros past it, so every byte a store may read is tracked. A
+  copy with no active lanes touches no LDS but issues and counts on
+  `asynccnt`; the hardware may skip it only when no load, store, async or
+  tensor operation is pending (3.2.2.1), and counting it then retires no later
+  copy early. Either way, the instruction occupies its `asynccnt` slot.
 
 Detection is at byte granularity: D16 (half-register) loads only flag races on
 the affected bytes, and LDS races are tracked per byte.
@@ -554,6 +557,12 @@ this source tree. The original
 
 - **Async copy scope**: only the LDS side of an async copy is tracked. Its
   global memory accesses are not checked.
+
+- **Async copy LDS alignment**: async copies use their LDS addresses as
+  computed. DS instructions have their LDS address aligned in every alignment
+  mode except unaligned (CDNA5 ISA 3.3.4.1), but the ISA does not say whether
+  async copies follow that rule, so neither the emulator nor the detector
+  applies it to them.
 
 - **False positives with LDS barrier synchronization**: a tensor load can
   request an arrival on an LDS barrier cell when it completes, and a consumer
