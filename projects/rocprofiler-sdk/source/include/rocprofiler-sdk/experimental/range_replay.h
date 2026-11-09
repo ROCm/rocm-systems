@@ -414,3 +414,43 @@ rocprofiler_range_replay_host_run(uint64_t                        range_id,
 /** @} */
 
 ROCPROFILER_EXTERN_C_FINI
+
+#if defined(__cplusplus) && __cplusplus >= 201703L
+#    include <memory>
+#    include <type_traits>
+
+namespace rocprofiler
+{
+namespace range_replay
+{
+/**
+ * @brief C++ form of @ref rocprofiler_range_replay_host_run.
+ *
+ * @p body is any callable, typically a lambda with captures. It is invoked as @c body(pass) when
+ * it accepts a @c uint64_t, otherwise as @c body(), and its result is discarded. It is called by
+ * reference through @c user_data, so it is neither copied nor moved: state it keeps (a mutable
+ * lambda's captures) is shared by every pass and, like any host memory, is rewound only if
+ * registered with @ref rocprofiler_range_replay_host_track_memory. An exception it throws closes
+ * the range and propagates out of this function. Requires C++17.
+ */
+template <typename FuncT>
+inline rocprofiler_status_t
+host_run(uint64_t range_id, FuncT&& body)
+{
+    using body_ptr_t = std::add_pointer_t<std::remove_reference_t<FuncT>>;
+
+    body_ptr_t callable = std::addressof(body);
+    return rocprofiler_range_replay_host_run(
+        range_id,
+        [](uint64_t pass, void* user_data) {
+            auto* func = *static_cast<body_ptr_t*>(user_data);
+            if constexpr(std::is_invocable_v<decltype(*func), uint64_t>)
+                (*func)(pass);
+            else
+                (*func)();
+        },
+        &callable);
+}
+}  // namespace range_replay
+}  // namespace rocprofiler
+#endif
