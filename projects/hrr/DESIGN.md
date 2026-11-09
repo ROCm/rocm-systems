@@ -377,7 +377,7 @@ Normal builds generate temporary files and verify them against the checked-in co
 
 The generator classifies each API:
 - **`MANUAL_CAPTURE_APIS`**: kernel launches ×4, memcpy H2D+D2H ×8, module load ×3, `__hipRegisterFatBinary`, `hipHostRegister/Unregister`, `hipMemcpy3D` variants ×4, array creation ×2, VMM, stream/memory attribute APIs, `hipMemcpyWithStream`
-- **`MANUAL_PLAYBACK_APIS`**: above plus malloc ×4, free ×2, stream create/destroy ×4, event create/destroy ×3, `hipModuleGetFunction`, the full graph chain ×4, VMM APIs ×6, and other APIs requiring non-trivial handle translation or replay logic
+- **`MANUAL_PLAYBACK_APIS`**: above plus malloc ×4, free ×2, stream create/destroy ×4, event create/destroy ×3, `hipEventElapsedTime`, `hipModuleGetFunction`, the full graph chain ×4, VMM APIs ×6, and other APIs requiring non-trivial handle translation or replay logic
 - **`NOOP_PLAYBACK_APIS`**: APIs where replay is not meaningful (stale handles, context-destroying calls, missing in ROCm SDK 6.4) — emit `return hipSuccess;` without calling the real function. These are **not replay-tested**; tests that exercise only these APIs verify capture does not crash, not that replay works.
 
 Generated capture shims for manual APIs are pass-throughs (no `write_event()`).
@@ -551,12 +551,13 @@ or direct GPU access via the mapped flag. At capture time:
 
 At playback:
 
-- `playback_hipHostRegister` allocates a fresh 64-byte-aligned host buffer (`_aligned_malloc`
-  on Windows, `posix_memalign` on Linux), restores the blob snapshot into it, calls
-  `hipHostRegister` on the new buffer, and records `(recorded_ptr → live_ptr)` in `alloc_map`
+- `playback_hipHostRegister` takes the recorded address's block in `host_reg_blocks` (the
+  same block again when it is large enough), restores the blob snapshot into it, calls
+  `hipHostRegister` on it, and records `(recorded_ptr → live_ptr)` in `alloc_map`
   (for kernel-arg pointer translation) and `host_reg_bufs` (for cleanup at Unregister).
-- `playback_hipHostUnregister` translates the pointer, calls `hipHostUnregister`, frees the
-  backing buffer, and removes both map entries.
+- `playback_hipHostUnregister` translates the pointer, calls `hipHostUnregister`, and removes
+  both map entries. The block stays, charged to the host budget, until the context is
+  destroyed, since a graph node may still point into it.
 
 ### Pinned Host Snapshots
 
@@ -632,6 +633,26 @@ the kernarg buffer into the per-thread exec stack (`hip::tls.exec_stack_.top().a
 before the launch, and `capture_hipLaunchByPtr` snapshots it (a copy, since the real
 `hipLaunchByPtr` moves the exec out via `PopExec`) and feeds it through the same
 signature-driven serialization path.
+
+#### Start and stop events of `hipExtModuleLaunchKernel`
+
+The runtime marks `startEvent` and `stopEvent` inside the launch, so an app never
+calls `hipEventRecord` on them and `hipEventElapsedTime` still succeeds. Capture
+writes that side effect as a `hipEventRecord` for a non-null start event before
+the launch record and one for a non-null stop event after it, and sets
+`HRR_FILE_FLAG_EXT_LAUNCH_EVENT_MARKERS` in `hrr_file_header.reserved` (no version
+bump: an older reader replays the extra events like any others).
+`playback_hipEventElapsedTime` returns `hipErrorInvalidHandle` for such an
+archive, so a missing marker fails the replay. Only an archive without the flag,
+captured before the markers were stored, gets the fallback: a captured success
+with both handles live continues, warns once and clears the sticky error.
+`Unit_HRR_ExtLaunchEventMarkers` checks the order on a real capture and both
+replay outcomes.
+
+Follow-up: `hipExtLaunchKernel` and `hipHccModuleLaunchKernel` also take start and
+stop events, but their playback is a no-op (the launch itself is not replayed), so
+no marker is applied at replay either. Replaying those launches is the fix; the
+capture shim records no marker for them.
 
 ### Pointers Embedded in By-Value Struct Args (`value_kind == 3`)
 
@@ -1288,7 +1309,8 @@ peer access from another process), the copy will operate on uninitialised memory
 ### `hipMallocManaged` — Unified Memory Not Validated
 
 Managed memory allocations are tracked in `alloc_map` and translated like any other
-device pointer. However the capture layer does not snapshot managed memory contents
+device pointer. Because the runtime may back them from host memory, replay charges
+their padded size to `--max-host-bytes` until `hipFree`. However the capture layer does not snapshot managed memory contents
 at any point. D2H validation blobs cover only explicitly synchronised
 `hipMemcpy`-family calls; data accessed by the CPU directly through a managed pointer
 is never captured.
@@ -1630,7 +1652,9 @@ handle-*creating* APIs — `hipHostRegister`, `hipHostGetDevicePointer`, `hipHos
 (finding H6), restoring symmetry with their already-ordered destroy/free counterparts.
 Under `--multi-thread`, a cross-thread consumer (e.g. `hipMemMap`) can no longer
 dispatch before the create populates the translation map and silently
-`return hipSuccess` while skipping the mapping.
+`return hipSuccess` while skipping the mapping. `hipMemMap` and `hipMemUnmap` are
+ordered too: a host-located handle's `--max-host-bytes` charge is held until its
+last mapping goes, so the map count must follow capture order.
 
 ### Validation-Fidelity Caveats
 

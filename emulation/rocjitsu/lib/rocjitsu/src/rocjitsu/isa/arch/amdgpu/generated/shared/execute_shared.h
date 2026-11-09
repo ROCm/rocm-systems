@@ -211,7 +211,10 @@ inline void execute_ds_swizzle_b32_vds([[maybe_unused]] Inst &inst,
 
 template <typename Inst>
 inline void execute_image_bvh_intersect_ray_mimg([[maybe_unused]] Inst &inst,
-                                                 [[maybe_unused]] Wavefront &wf) {}
+                                                 [[maybe_unused]] Wavefront &wf) {
+  wf.report_instruction_execution_error(
+      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+}
 
 template <typename Inst>
 inline void execute_lds_param_load_ldsdir([[maybe_unused]] Inst &inst,
@@ -1512,7 +1515,9 @@ inline void execute_s_delay_alu_sopp([[maybe_unused]] Inst &inst, [[maybe_unused
 
 template <typename Inst>
 inline void execute_s_denorm_mode_sopp([[maybe_unused]] Inst &inst,
-                                       [[maybe_unused]] Wavefront &wf) {}
+                                       [[maybe_unused]] Wavefront &wf) {
+  wf.set_fp_denorm_mode(static_cast<uint32_t>(inst.simm16.encoding_value_));
+}
 
 template <typename Inst>
 inline void execute_s_ff0_i32_b32_sop1([[maybe_unused]] Inst &inst,
@@ -2332,7 +2337,7 @@ inline void execute_s_rndne_f32_sop1([[maybe_unused]] Inst &inst, [[maybe_unused
 
 template <typename Inst>
 inline void execute_s_round_mode_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-
+  wf.set_fp_round_mode(static_cast<uint32_t>(inst.simm16.encoding_value_));
 }
 
 template <typename Inst>

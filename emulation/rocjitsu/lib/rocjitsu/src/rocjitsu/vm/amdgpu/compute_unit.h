@@ -10,11 +10,13 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/vm/amdgpu/arithmetic_policy.h"
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
 #include "rocjitsu/vm/amdgpu/decoded_instruction_cache.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/gws_device.h"
+#include "rocjitsu/vm/amdgpu/image_addressing.h"
 #include "rocjitsu/vm/amdgpu/instruction_cache.h"
 #include "rocjitsu/vm/amdgpu/instruction_compute_unit_view.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
@@ -30,6 +32,7 @@
 #include "simdojo/components/register_file.h"
 #include "simdojo/components/vector_reg.h"
 #include "util/bit.h"
+#include "util/diagnostic.h"
 #include "util/except.h"
 #include "util/log.h"
 #include "util/result.h"
@@ -145,6 +148,8 @@ public:
     uint32_t sgprs_per_wf; ///< Scalar GPRs per wavefront (allocation granularity).
     uint32_t vgprs_per_wf; ///< Vector GPRs per wavefront (allocation granularity).
     uint32_t lds_size_kb;  ///< Local Data Share size in kilobytes.
+    /// Device tiling identity, when present.
+    std::optional<uint32_t> image_gb_addr_config = std::nullopt;
     /// Maximum CU step() iterations per functional slice. One step can issue
     /// one instruction for every runnable wavefront resident on the CU.
     uint32_t functional_quantum = kFunctionalQuantum;
@@ -157,6 +162,8 @@ public:
     MemoryWaitDiagnostics memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
     /// Opt in to gfx1250 replay-source overwrite diagnostics independently.
     MemoryWaitDiagnostics xcnt_diagnostics = MemoryWaitDiagnostics::Off;
+
+    ArithmeticPolicy arithmetic{};
 
     /// @brief Whether gfx1250 replay-source diagnostics are enabled.
     bool xcnt_checks_enabled() const {
@@ -195,19 +202,26 @@ public:
   /// @brief Validate ISA support and CU resource limits without allocating execution state.
   /// @details Shared with create() so validation-only callers apply the same checks.
   /// @param config CU configuration parameters.
-  /// @throws std::runtime_error if the target or resource limits are unsupported.
-  static void validate(const Config &config);
+  /// @param emit_error Destination for failure diagnostics. Omitting it discards the message.
+  /// @returns Success, or diagnosed failure for unsupported targets or resource limits.
+  static util::Result validate(const Config &config, util::DiagnosticEmitter emit_error = {});
 
   /// @brief Create a compute unit for the given architecture and execution mode.
+  /// @details Validation finishes before allocating execution state. Allocation failures may still
+  /// throw; already constructed resources are owned by RAII members and are cleaned during
+  /// unwinding. Diagnostic-sink exceptions propagate for both configuration and execution-mode
+  /// rejection.
   /// @param name Human-readable name (e.g., "cu0").
   /// @param config CU configuration parameters.
   /// @param memory Shared GPU memory (not owned).
   /// @param l2 Shared L2 cache (owned by the XCD).
   /// @param exec_mode Execution mode for the CU.
-  /// @returns Owning pointer to the created compute unit.
+  /// @param emit_error Destination for failure diagnostics. Omitting it discards the message.
+  /// @returns Owning pointer, or nullptr after diagnosing invalid configuration or execution mode.
   static std::unique_ptr<ComputeUnitCore>
   create(std::string name, const Config &config, GpuMemory *memory, L2Cache *l2,
-         simdojo::ExecMode exec_mode = simdojo::ExecMode::FUNCTIONAL);
+         simdojo::ExecMode exec_mode = simdojo::ExecMode::FUNCTIONAL,
+         util::DiagnosticEmitter emit_error = {});
 
   /// @brief Activate an idle wavefront slot with the given dispatch parameters.
   ///
@@ -323,6 +337,13 @@ public:
     assert(!has_active_wfs());
     config_.memory_wait_diagnostics = memory;
     config_.xcnt_diagnostics = xcnt;
+  }
+
+  /// @brief Restore arithmetic configuration before resuming checkpoint execution.
+  void restore_arithmetic_policy(ArithmeticPolicy policy) {
+    assert(!has_active_wfs());
+    config_.arithmetic = policy;
+    arithmetic_ = ArithmeticExecution(policy);
   }
 
   /// @brief Select whether the CP continuation event owns functional execution.
@@ -741,6 +762,8 @@ public:
   /// @brief Return the CU configuration.
   /// @returns Const reference to the CU configuration.
   const Config &config() const { return config_; }
+  uint64_t arithmetic_flags() const { return arithmetic_.flags(); }
+
   /// @brief Lazily acquire and cache the VM helper pool.
   matrix_coexecution::SharedPool &async_pool();
 
@@ -897,6 +920,12 @@ public:
   /// @brief Return the ISA architecture.
   /// @returns Architecture enum value.
   rj_code_arch_t arch() const { return config_.arch; }
+
+  /// @brief Return the device tiling identity, or standalone CU defaults.
+  ImageAddressConfig image_address_config() const {
+    return {config_.arch, config_.image_gb_addr_config.value_or(
+                              default_image_address_config(config_.arch).gb_addr_config)};
+  }
 
   /// @brief Return the wave size (lanes per wavefront, ISA-defined).
   /// @returns Lanes per wavefront.
@@ -1323,10 +1352,12 @@ public:
   /// thread or from single-threaded test contexts only.
   /// @param inst The decoded instruction.
   /// @param wf The wavefront executing the instruction.
-  /// @param failure_detail Receives `UnimplementedInst::what()` when that legacy
-  /// exception is translated; otherwise the pointed-to string is unchanged.
+  /// @param failure_detail Receives the reported register-access diagnostic or
+  /// `UnimplementedInst::what()` when that legacy exception is translated.
+  /// Otherwise the pointed-to string is unchanged.
   /// @returns Failure for an unimplemented instruction stub or a reported operand
-  /// failure. The wavefront retains the reason for caller-owned diagnostics.
+  /// or register-access failure. The wavefront retains the reason for caller-owned
+  /// diagnostics.
   /// Each call clears the previous error; a failed call does not halt the wavefront.
   /// Other host failures inside implemented instructions still raise exceptions.
   util::Result execute_instruction(Instruction *inst, Wavefront &wf,
@@ -1348,6 +1379,8 @@ public:
       if (failure_detail)
         *failure_detail = error.what();
     }
+    if (failure_detail && wf.instruction_execution_error_detail())
+      *failure_detail = wf.instruction_execution_error_detail();
     return wf.instruction_execution_failed() ? util::Result::failure() : util::Result::success();
   }
 
@@ -1476,6 +1509,7 @@ protected:
   virtual std::unique_ptr<Wavefront> create_wavefront(uint32_t wf_id) = 0;
 
   Config config_;
+  ArithmeticExecution arithmetic_;
   matrix_coexecution::SharedPool *async_pool_ = nullptr;
   GpuMemory *memory_;
   uint32_t wf_size_ = 0;
@@ -1825,6 +1859,12 @@ inline bool InstructionComputeUnitView::setreg_vgpr_msb_fixup() const {
   return raw_cu().setreg_vgpr_msb_fixup();
 }
 inline rj_code_arch_t InstructionComputeUnitView::arch() const { return raw_cu().arch(); }
+inline uint64_t InstructionComputeUnitView::arithmetic_flags() const {
+  return raw_cu().arithmetic_flags();
+}
+inline ImageAddressConfig InstructionComputeUnitView::image_address_config() const {
+  return raw_cu().image_address_config();
+}
 inline bool InstructionComputeUnitView::observes_register_access() const {
   return raw_cu().observes_register_access();
 }
@@ -1884,6 +1924,13 @@ inline bool InstructionComputeUnitView::observes_tensor_dma_memory_access() cons
 inline void InstructionComputeUnitView::report_tensor_dma_memory_access(
     const TensorDmaMemoryAccessObservation &access) {
   raw_cu().plugin_group().onAmdgpuTensorDmaMemoryAccess(access, raw_wavefront());
+}
+inline bool InstructionComputeUnitView::observes_tensor_dma_issue() const {
+  return raw_cu().plugin_group().observes_tensor_dma_issue(raw_wavefront());
+}
+inline void
+InstructionComputeUnitView::report_tensor_dma_issue(const TensorDmaIssueObservation &issue) {
+  raw_cu().plugin_group().onAmdgpuTensorDmaIssued(issue, raw_wavefront());
 }
 
 /// @brief Execution-mode-aware compute unit shell.
@@ -2042,6 +2089,8 @@ public:
                                          MAX_VGPR_FILE_REGISTERS>;
 
   /// @brief Construct an ISA-parameterized compute unit.
+  /// @details Internal ISA-specific extensions supply validated configuration;
+  /// use ComputeUnitCore::create() for input validation.
   /// @param name Human-readable name (e.g., "cu0").
   /// @param config CU configuration parameters.
   /// @param memory Shared GPU memory (not owned).

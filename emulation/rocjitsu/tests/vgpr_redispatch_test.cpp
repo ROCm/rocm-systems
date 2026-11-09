@@ -4,6 +4,7 @@
 /// @file vgpr_redispatch_test.cpp
 /// @brief Integration coverage for VGPR storage recycling through compute units.
 
+#include "compute_unit_test_util.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -41,7 +42,9 @@ TEST_P(VgprRedispatchTest, RecycledAllocationStartsZero) {
   config.vgprs_per_wf = test_case.vgprs_per_wf;
   config.lds_size_kb = 64;
 
-  auto compute_unit = ComputeUnitCore::create("vgpr_redispatch_cu", config, &gpu_memory, &l2);
+  std::unique_ptr<ComputeUnitCore> compute_unit;
+  ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(
+      compute_unit, "vgpr_redispatch_cu", config, &gpu_memory, &l2));
   compute_unit->set_plugin_group(std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{}));
   ASSERT_EQ(compute_unit->wf_size(), test_case.wave_size);
 
@@ -89,7 +92,9 @@ TEST_P(VgprRedispatchTest, BlockOwnershipTracksDispatchAndRetirement) {
   config.vgprs_per_wf = test_case.vgprs_per_wf;
   config.lds_size_kb = 64;
 
-  auto compute_unit = ComputeUnitCore::create("vgpr_owner_cu", config, &gpu_memory, &l2);
+  std::unique_ptr<ComputeUnitCore> compute_unit;
+  ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(compute_unit, "vgpr_owner_cu",
+                                                                  config, &gpu_memory, &l2));
   const uint32_t block_size = compute_unit->vgpr_allocation_block_size();
   ASSERT_GT(block_size, 0u);
 
