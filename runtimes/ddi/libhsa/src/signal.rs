@@ -24,6 +24,7 @@ use std::time::{Duration, Instant};
 
 use crate::platform::event::{SignalEvent, SignalEventAddressing, SignalEventService};
 use rocddi::memory::device::{Allocation, DeviceAccess, MemoryKind};
+#[cfg(test)]
 use rocddi::session::DriverContextLifetime;
 
 use crate::callback_arg::CallbackArg;
@@ -480,13 +481,13 @@ impl SignalState {
     }
 
     /// Initializes signal registries and stores the native context lifetime.
-    pub(crate) fn new(lifetime: DriverContextLifetime) -> Self {
+    pub(crate) fn new(session: &rocddi::session::Session) -> Self {
         Self {
             signal_slabs: Vec::new(),
             recycled_signals: Vec::new(),
             batches: HashMap::new(),
             batch_members: HashMap::new(),
-            event_service: SignalEventService::new(lifetime),
+            event_service: SignalEventService::new(session),
             interrupt_signals: HashMap::new(),
             signal_event_pool: Vec::new(),
             owned_ipc_signals: HashMap::new(),

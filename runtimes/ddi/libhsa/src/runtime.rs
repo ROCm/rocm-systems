@@ -591,6 +591,7 @@ impl HsaState {
             });
         }
         let gpus = std::mem::take(&mut pending.gpus);
+        let signal_state = SignalState::new(pending.session.as_ref().ok_or(ERROR)?);
         let session = pending.session.take().ok_or(ERROR)?;
         let health = Arc::new(GenerationHealth::new());
         Ok(Self {
@@ -600,7 +601,7 @@ impl HsaState {
             loader: LoaderState::new(),
             image_state: ImageState::new(),
             memory_state: MemoryState::new(health.clone()),
-            signal_state: SignalState::new(lifetime),
+            signal_state,
             host_page_size,
             system_alloc_max_bytes,
             cpus,

@@ -1090,7 +1090,7 @@ pub(crate) unsafe extern "C" fn create(
         let accesses = unsafe { array(create.accesses, create.access_count) }?;
         // SAFETY: The live scope borrows its parent instance.
         let instance = unsafe { object(scope.instance) }?;
-        if instance.closing || instance.process_id != std::process::id() {
+        if instance.closing || !instance.native.is_current_process() {
             return Err(PRECONDITION);
         }
         if !unique_devices(accesses) {

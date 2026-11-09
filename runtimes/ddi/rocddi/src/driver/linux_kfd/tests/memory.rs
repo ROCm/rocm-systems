@@ -478,7 +478,11 @@ impl Fixture {
             },
             gpu_counter_frequency_hz: 0,
         };
-        super::super::LinuxKfdDriver::with_context_lifetime(lifetime).allocate_owned(
+        super::super::LinuxKfdDriver::with_context_lifetime(
+            lifetime,
+            crate::os::ProcessIdentity::capture().expect("test process identity"),
+        )
+        .allocate_owned(
             &device,
             &[],
             kind,
