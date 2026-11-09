@@ -2231,6 +2231,80 @@ TEST(FaultDropBarrier, Gfx1250WaveModeComesFromTargetDespiteMissingLegacyBit) {
             0u);
 }
 
+TEST(FaultDropBarrier, UnreachableBranchToMovedStorageRejectsApply) {
+  const DropTargetRow &row = kDropRows[7];
+  ASSERT_EQ(row.target, ROCJITSU_CODE_TARGET_GFX950);
+  constexpr uint64_t kBranchOffset = 8;
+  const uint32_t barrier = 0xbf8a0000u;
+  const uint32_t end = checked_encoding(build_s_endpgm(row.arch));
+  for (const bool moved_target : {false, true}) {
+    SCOPED_TRACE(moved_target);
+    std::vector<uint8_t> image = make_barrier_elf_for_target(
+        row, {barrier, end, checked_encoding(build_s_nop(0, row.arch))});
+    const AmdGpuCodeObject original(image.data(), image.size());
+    ASSERT_TRUE(original.is_valid());
+    ASSERT_EQ(original.text_sections().size(), 1u);
+    const Section &text = *original.text_sections().front();
+    const std::vector<Elf64_Shdr> sections = CodeObjectPatcher(original).section_headers();
+    const std::vector<Elf64_Shdr>::const_iterator storage =
+        std::ranges::find_if(sections, [&](const Elf64_Shdr &section) {
+          return (section.sh_flags & SHF_ALLOC) != 0 && section.sh_size != 0 &&
+                 section.sh_addr >= text.vaddr() + text.size();
+        });
+    ASSERT_NE(storage, sections.end());
+    const uint64_t destination = moved_target ? storage->sh_addr : text.vaddr() + 4;
+    const int64_t displacement =
+        static_cast<int64_t>(destination) - static_cast<int64_t>(text.vaddr() + kBranchOffset + 4);
+    ASSERT_EQ(displacement % 4, 0);
+    ASSERT_GE(displacement / 4, std::numeric_limits<int16_t>::min());
+    ASSERT_LE(displacement / 4, std::numeric_limits<int16_t>::max());
+    const uint32_t branch =
+        checked_encoding(build_s_branch(static_cast<int16_t>(displacement / 4), row.arch));
+    std::memcpy(image.data() + text.sectionOffset() + kBranchOffset, &branch, sizeof(branch));
+
+    const FaultMutationContext context(image);
+    ASSERT_TRUE(context.source().is_valid());
+    std::unique_ptr<Decoder> decoder =
+        Decoder::create(default_isa_target_registry(), context.source().target_id());
+    ASSERT_NE(decoder, nullptr);
+    EXPECT_TRUE(branch_reaches(*decoder, *context.source().text_sections().front(), kBranchOffset,
+                               destination - text.vaddr()));
+    // Reachable ownership ends at s_endpgm, but the immutable structural facts
+    // must retain the following branch across the discovery seed and apply fork.
+    FaultMutationError error;
+    const FailureOr<FaultBarrierInventory> inventory =
+        discover_drop_barriers(context, "test_kernel", error);
+    ASSERT_TRUE(inventory.succeeded()) << error.message;
+    ASSERT_EQ(inventory.value().barriers().size(), 1u);
+    EXPECT_EQ(inventory.value().barriers().front().form, StaticBarrierForm::FullSingleton);
+    ASSERT_EQ(inventory.value().barriers().front().members.size(), 1u);
+    EXPECT_EQ(inventory.value().barriers().front().members.front().offset, 0u);
+    const DropBarrierSelection selection = select_barrier_for_test(inventory.value());
+    for (int attempt = 0; attempt < 2; ++attempt) {
+      SCOPED_TRACE(attempt);
+      const FailureOr<DropBarrierResult> result = apply_drop_barrier(context, selection, error);
+      if (moved_target) {
+        EXPECT_TRUE(result.failed());
+        EXPECT_EQ(error.code, FaultMutationErrorCode::UnsupportedForm);
+        EXPECT_EQ(error.offset, kBranchOffset);
+        EXPECT_EQ(error.message,
+                  "replacement growth cannot preserve a retained direct branch to moved storage");
+      } else {
+        ASSERT_TRUE(result.succeeded()) << error.message;
+        const AmdGpuCodeObject mutant(result.value().image.data(), result.value().image.size());
+        ASSERT_TRUE(mutant.is_valid());
+        EXPECT_TRUE(branch_reaches(*decoder, *mutant.text_sections().front(), kBranchOffset, 4));
+        const std::vector<Elf64_Shdr> updated = CodeObjectPatcher(mutant).section_headers();
+        ASSERT_EQ(updated.size(), sections.size());
+        const size_t storage_index = static_cast<size_t>(storage - sections.begin());
+        EXPECT_GT(updated[storage_index].sh_addr, storage->sh_addr);
+      }
+      EXPECT_TRUE(std::ranges::equal(context.image(), image));
+      EXPECT_EQ(std::memcmp(context.source().image_data(), image.data(), image.size()), 0);
+    }
+  }
+}
+
 TEST(FaultDropBarrier, DiscoveryUsesFullTextClauseFactsAcrossUnreachableGap) {
   // Synthetic structural control: reachable CFG decoding skips the clause at 4,
   // while checked edits conservatively retain its linear membership at signal 12.

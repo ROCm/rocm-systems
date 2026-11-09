@@ -230,6 +230,11 @@ addresses. The restriction is conservative and can reject a safe target when
 unrelated allocated metadata moves. Complete address-builder relocation is not
 implemented; see [replacement validation](dbi-design.md#instruction-replacement).
 
+Retained direct branches also reject when their destinations lie in storage
+moved or consumed by growth, including later allocated sections and loaded tails.
+Full-text source facts include unreachable references, so discovery may succeed
+while apply rejects the complete Drop batch.
+
 For ConSan use, follow the [fresh-prepare integration contract](consan.md#fault-injection).
 Fresh prepare currently requires a single-kernel image and rejects remaining
 `s_barrier*` instructions in the analyzed scope. Sibling-preserving multi-kernel
