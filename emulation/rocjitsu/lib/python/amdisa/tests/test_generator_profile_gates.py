@@ -9680,9 +9680,10 @@ def test_gfx1250_async_store_records_lds_source_addresses(
     assert fill in body
     assert 'd->per_lane_lds_src_bytes.fill(0);' in body
     assert body.index(fill) < body.index('for (uint32_t lane = 0;')
-    # Each lane reads the whole DWORDs of its source inside the allocation; the
-    # rest of its payload stays zero. The recorded address and byte count are
-    # the ones the read uses, after IOFFSET and the allocation range check.
+    # Each lane reads the in-range bytes of its source, and the rest of its
+    # payload stays zero: a B128 lane at offset 250 of a 256-byte allocation
+    # reads six bytes. The recorded address and byte count are the ones the read
+    # uses, after IOFFSET and the allocation range check.
     source = (
         'const auto source = '
         f'async_lds_lane_source(inst_, wf, lane_lds_addr, {elem_size * num_elems});'
