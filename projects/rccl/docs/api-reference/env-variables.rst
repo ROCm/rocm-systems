@@ -235,6 +235,23 @@ in the following table.
         | Values above ``3600000`` (one hour) are lowered to ``3600000``.
         | ``0`` or less disables telemetry.
 
+    * - | ``NCCL_RUN_RAS_DIAGNOSTICS``
+        | Runs the RAS diagnostics at every communicator initialization. RCCL
+          compares the ``NCCL_*`` environment, the driver version, and the GPU
+          configuration across the ranks, checks the GPUs for ECC errors and
+          down XGMI links, and prints a report with the ``NCCL DIAG`` prefix to the
+          ``stdout`` of the process that hosts rank 0. Requires
+          ``NCCL_RAS_ENABLE=1`` (default). See :ref:`using-rccl-ras-diagnostics`.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled.
+
+    * - | ``NCCL_DIAGNOSTICS_ECC_THRESHOLD``
+        | Number of correctable ECC errors, as reported by AMD SMI, at or above
+          which the RAS diagnostics report a GPU. Uncorrectable and deferred
+          errors are always reported.
+      - | ``0``: Corrected errors are not reported (default).
+        | ``N`` > 0: Ranks with at least ``N`` correctable errors are reported.
+
 .. _check-mode:
 
 Validating collective arguments
@@ -369,6 +386,21 @@ collected in the following table.
       - | Protocol name string
         | Used to override automatic protocol selection
 
+    * - | ``RCCL_P2P_BATCH_THRESHOLD``
+        | Per-peer byte size above which point-to-point sends and receives are
+        | not fused into one batch. Send and receive sizes must be equal to
+        | fuse. This does not turn batching on; that is
+        | ``RCCL_P2P_BATCH_ENABLE``.
+        | A negative value selects the architecture default: 64 KiB on gfx950
+        | (MI350) with 16 or more nodes, and no size limit elsewhere. An
+        | explicit ``-1`` is the same as leaving the variable unset. A
+        | non-negative value, including ``65536``, is the cutoff on every
+        | architecture. ``0`` fuses no positive-size message.
+      - | Integer byte count.
+        | Default: ``-1`` (architecture default).
+        | Negative: architecture default.
+        | ``0`` or greater: cutoff on every architecture.
+
     * - | ``RCCL_DIRECT_ALLGATHER_DISABLE``
         | Controls the direct AllGather algorithm. Because the algorithm builds a full
           point-to-point mesh, its queue-pair footprint grows with the square
@@ -377,6 +409,30 @@ collected in the following table.
         | ``0``: Skips the automatic AINIC check. The size, architecture and
           CTA-policy gates in ``rcclUseAllGatherDirect`` still apply.
         | Any other value: Disabled.
+
+    * - | ``RCCL_DIRECT_REDUCE_SCATTER_DISABLE``
+        | Disables the direct ReduceScatter algorithm. Unlike
+          ``RCCL_DIRECT_ALLGATHER_DISABLE`` there is no automatic mode: the
+          algorithm is eligible by default, and any non-zero value turns it off
+          outright. Read once per process on the first eligibility check, so
+          changing it afterwards has no effect.
+      - | ``0``: Enabled (default). The architecture, PXN, size and node-count
+          gates in ``rcclUseReduceScatterDirect`` still apply.
+        | Any other value: Disabled.
+
+    * - | ``RCCL_DIRECT_REDUCE_SCATTER_THRESHOLD``
+        | Sets the largest ReduceScatter, in total bytes (``recvcount`` x type
+          size x the number of ranks), that can select the direct ReduceScatter
+          algorithm. The algorithm is additionally restricted to gfx950, needs
+          PXN enabled and ``RCCL_DIRECT_REDUCE_SCATTER_DISABLE`` unset or ``0``,
+          and is only considered at 2, 4, 8 or 16 nodes. Narrower per-node-count
+          windows apply on top of this value: 128 KiB to 2 MiB at 2 nodes, and
+          up to 4 MiB at 4 nodes.
+      - | Total bytes
+        | Default: ``8388608`` (8 MiB). This is also a hard upper limit, so
+          larger values are clamped to it and only lower values change
+          behavior.
+        | Leave unset or set to ``8388608`` to use the default.
 
     * - | ``RCCL_HIERARCHICAL_ALLGATHER_MIN_BYTES_PER_RANK``
         | Sets the smallest AllGather, in bytes per rank (``sendcount`` x type
@@ -634,6 +690,16 @@ in the following table.
           A port that reports 0 does not participate. The same 1 MiB floor and
           128-byte rounding apply. ``0`` is treated as unset.
 
+    * - | ``RCCL_NET_SHARED_HOST_HUGEPAGES``
+        | Backs the host-memory shared P2P network staging pools (used by
+          connections without GPU Direct RDMA) with 2 MiB pages, so each
+          pool takes fewer NIC memory-registration page-table entries.
+          Falls back to the regular pinned host allocation if the huge-page
+          allocation or registration fails. Hosts with transparent huge
+          pages set to ``never`` get 4 KiB pages either way.
+      - | ``1``: Use 2 MiB pages (default).
+        | ``0``: Use the regular pinned host allocation.
+
     * - | ``RCCL_IB_GDR_FLUSH_FLAG``
         | Replaces the GPUDirect RDMA flush of Simple-protocol receives in the
           ``IB`` network transport (``net_ib``). By default, the proxy fences
@@ -823,6 +889,14 @@ in the following table.
       - | ``536870912`` (512 MiB) by default, matching the CE AllReduce pool
         | ``0``: do not allocate scratch, and do not select GinScatter
 
+    * - | ``NCCL_GIN_PROXY_POLL_BATCH``
+        | Maximum GIN operations the proxy thread issues per peer in each
+          progress iteration. Larger values cut polling overhead when queues
+          are deep.
+      - | Integer value (default: ``32``)
+        | Values below ``1`` are treated as ``1``, which issues one operation
+          per iteration and never sends the RMA aggregation hint
+
     * - | ``NCCL_RMA_PLUGIN``
         | Selects external one-sided RMA plugins, which are also the backend
           the built-in GIN proxy forwards to.
@@ -955,6 +1029,40 @@ intended for debugging and development purposes.
           ``NCCL_DEBUG,NCCL_ALGO``): disable caching for those keys only.
         | ``ALL``: disable caching for every parameter except
           ``NCCL_NO_CACHE``.
+
+Graph capture
+=============
+
+RCCL operations can be captured into HIP graphs. Mixing captured and
+non-captured operations on a communicator is supported only when the
+communicator is configured for it, which is not the default.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 40,60
+
+    * - **Environment variable**
+      - **Values**
+
+    * - | ``NCCL_GRAPH_MIXING_SUPPORT``
+        | Enables or disables support for graph mixing: launching several
+          graphs that use the same communicator concurrently, or issuing a
+          non-captured RCCL operation while a graph launch on that
+          communicator is outstanding. Communicators that share resources
+          through ``ncclCommSplit`` count as the same communicator. Mixing is
+          supported only when every communicator involved has
+          ``graphUsageMode`` set to ``2`` in ``ncclConfig_t``.
+        | When set, this variable overrides ``graphUsageMode`` on every
+          communicator. Do not combine ``1`` with
+          ``NCCL_GRAPH_STREAM_ORDERING=0``.
+      - | ``0``: Disabled. Sets ``graphUsageMode`` to ``0``, under which
+          capturing RCCL operations is not supported.
+        | ``1``: Enabled. Sets ``graphUsageMode`` to ``2``.
+        | Default: unset. Each communicator's ``graphUsageMode`` applies,
+          which defaults to ``0``, so mixing is disabled. Other values are
+          ignored.
+        | To use graphs without mixing, leave this variable unset and set
+          ``graphUsageMode`` to ``1``.
 
 Multi-communicator ordering
 ===========================
@@ -1278,6 +1386,31 @@ threshold table introduced for gfx1250.
       - | ``0``: Resolved from the per-arch table at runtime (default).
         | ``N``: Use ``N`` threads per block, overriding the table. ``N`` must be a
           multiple of 32 from 32 to 1024. Pre-table default: ``512``.
+
+    * - | ``RCCL_DDA_LL128_ASYNC_WIRE``
+        | Opts in to the LDS-staged writer for the DDA LL128 two-shot ``ncclAllReduce``
+          on gfx1250 communicators with one LL128 warp per wavefront (wave32). When
+          enabled, launches whose per-rank shard is at least 2 MiB stage their wire
+          stores in LDS through gfx1250 async LDS stores, using two 2 KiB windows per
+          warp of dynamic LDS. It is off by default. Other architectures are unaffected.
+      - | ``0``: Cooperative writer for every launch, no dynamic LDS (default).
+        | ``1``: Staged writer from 2 MiB shards on gfx1250 wave32 communicators.
+
+    * - | ``RCCL_DDA_A2A_PUSH``
+        | Selects the ``ncclAllToAll`` kernel on the DDA fabric (VMM) tier. The push
+          kernels write each rank's chunks straight into its peers' DDA scratch
+          buffers and sync all ranks before finishing.
+      - | ``1``: Push kernels (default).
+        | ``0``: The previous pull kernel, where each rank reads its chunks from its
+          peers' DDA scratch buffers.
+
+    * - | ``RCCL_DDA_A2A_TDM``
+        | Moves the data of the DDA fabric ``ncclAllToAll`` push kernels through the
+          tensor data mover (TDM) on gfx1250. In-place calls, and builds or devices
+          without TDM support, use vector loads and stores. Has no effect when
+          ``RCCL_DDA_A2A_PUSH=0``.
+      - | ``1``: Use the TDM (default).
+        | ``0``: Use vector loads and stores.
 
     * - | ``RCCL_CE_ALLREDUCE``
         | Enables the Copy Engine (CE) registered-window AllReduce path. When ``-1`` (auto),

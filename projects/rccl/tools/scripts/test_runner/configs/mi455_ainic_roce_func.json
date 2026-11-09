@@ -2582,6 +2582,11 @@
           "test_filter": "SendRecv.UserBufferRegister"
         },
         {
+          "name": "SendRecv.SingleRankGroupedSendRecvToSelf",
+          "description": "1-rank grouped send/recv to self, default env and forced 256 P2P channels per peer",
+          "test_filter": "SendRecv.SingleRankGroupedSendRecvToSelf"
+        },
+        {
           "name": "GroupCall.Identical",
           "description": "GroupCall identical",
           "test_filter": "GroupCall.Identical"
@@ -5887,6 +5892,16 @@
           "name": "DDA_Fabric_AllReduce_LL_FreshComm_NonBlockingStream",
           "description": "32 fresh comms with staggered rank arrival, each running two LL one-shot AllReduces on a non-blocking stream right after init; catches the init zero fills landing after a rank's first LL kernel (about 35 s at 8 ranks)",
           "test_filter": "DdaMPI_AllReduce.LLFreshCommNonBlockingStream"
+        },
+        {
+          "name": "DDA_Fabric_AllReduce_Registered_Captured",
+          "description": "Registered sum AllReduce under graph capture at 8 MiB and the capture bound picks DDA within the replaced Ring grid and returns exact sums",
+          "test_filter": "DdaMPI_AllReduceRegistered.CapturedSumsWithinRingGrid"
+        },
+        {
+          "name": "DDA_Fabric_AllReduce_Registered_Eager",
+          "description": "Registered eager sum AllReduce with 1 MiB shards picks DDA LL128 within the CE-registered grid and returns exact sums; skips below 8 ranks",
+          "test_filter": "DdaMPI_AllReduceRegistered.EagerSumsWithinCeGrid"
         }
       ]
     },
