@@ -97,6 +97,15 @@ class CheckMadKnobs(unittest.TestCase):
             tm.check_mad_knobs(old, config)
         tm.check_mad_knobs(self.work_dir('x="${PRIMUS_EXTRA_ARGS:-}"\n'), config)
 
+    def test_only_an_expansion_of_the_knob_counts(self):
+        config = tm.WORKLOAD_CONFIGS["llama-3.1-70b-pp4-training"]
+        for text in ("# PRIMUS_EXTRA_ARGS is read by run_primus()\n",
+                     'x="${PRIMUS_EXTRA_ARGS_V2:-}"\n',
+                     'x="${MY_PRIMUS_EXTRA_ARGS:-}"\n'):
+            with self.subTest(text=text), self.assertRaises(RuntimeError):
+                tm.check_mad_knobs(self.work_dir(text), config)
+        tm.check_mad_knobs(self.work_dir('read -a a <<< "$PRIMUS_EXTRA_ARGS"\n'), config)
+
     def test_missing_script_fails(self):
         config = tm.WORKLOAD_CONFIGS["llama-3.1-70b-pp4-training"]
         with self.assertRaises(RuntimeError):
@@ -106,6 +115,34 @@ class CheckMadKnobs(unittest.TestCase):
         empty = self.work_dir(None)
         tm.check_mad_knobs(empty, tm.WORKLOAD_CONFIGS["llama-3.1-70b-training"])
         tm.check_mad_knobs(empty, tm.WORKLOAD_CONFIGS["llama-3.1-405b-maxtext"])
+
+
+class IgnoredMadKnobs(unittest.TestCase):
+
+    # As MAD 36339bd8 prints it from warn_if_knobs_ignored().
+    WARN = ("[WARN] PRIMUS_TRAIN_ITERS/PRIMUS_DISABLE_PROFILE/PRIMUS_EXTRA_ARGS are set, "
+            "but Llama-3.3-70B launches primus-cli directly rather than through "
+            "run_primus(), so they had no effect on this run.\n")
+
+    def setUp(self):
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp)
+        self.run_dir = tmp
+        self.logs = tmp / "slurm_output"
+        self.logs.mkdir()
+
+    def test_reports_the_logs_with_the_warning(self):
+        (self.logs / "x_node_0.out").write_text("train\n" + self.WARN)
+        (self.logs / "x_node_1.out").write_text("train\n")
+        self.assertEqual(tm.ignored_mad_knobs(self.run_dir), ["x_node_0.out"])
+
+    def test_honoured_knobs_are_not_reported(self):
+        (self.logs / "x_node_0.out").write_text(
+            "[INFO] Primus CLI knobs from environment: --pipeline_model_parallel_size 4\n")
+        self.assertEqual(tm.ignored_mad_knobs(self.run_dir), [])
+
+    def test_missing_slurm_output(self):
+        self.assertEqual(tm.ignored_mad_knobs(self.run_dir / "nope"), [])
 
 
 if __name__ == "__main__":

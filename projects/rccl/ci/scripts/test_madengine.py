@@ -298,10 +298,12 @@ CLUSTER_CONFIGS = {
 
 
 def check_mad_knobs(work_dir: Path, workload_config: dict) -> None:
-    """Fail if the MAD pin's Megatron script never reads a PRIMUS_* knob we set.
+    """Fail if the MAD pin's Megatron script never expands a PRIMUS_* knob we set.
 
     An unknown knob is simply ignored there, and the run measures the shipped
     config under this workload's name -- the PP=4 key would score FSDP.
+    Expanding it is necessary, not sufficient: ignored_mad_knobs() catches a
+    model whose launch path bypasses it.
     """
     if workload_config.get("family", "megatron") != "megatron":
         return
@@ -311,7 +313,8 @@ def check_mad_knobs(work_dir: Path, workload_config: dict) -> None:
     script = (work_dir / "scripts" / "primus_megatron-lm"
               / "primus_megatron-lm_benchmark_report.sh")
     text = script.read_text(errors="replace") if script.is_file() else ""
-    missing = [k for k in knobs if k not in text]
+    missing = [k for k in knobs
+               if not re.search(rf"\$\{{?{re.escape(k)}\b", text)]
     if missing:
         raise RuntimeError(
             f"MAD pin {MAD_REF[:12]} does not read {', '.join(missing)} "
@@ -607,6 +610,21 @@ def squash_log_spam(run_dir: Path) -> int:
             log.warning("Could not squash %s: %s", path, exc)
             tmp.unlink(missing_ok=True)
     return saved
+
+
+# What MAD's Megatron script prints when the model launches primus-cli itself
+# and the PRIMUS_* knobs never reach it.
+_KNOBS_IGNORED_MARK = "rather than through run_primus()"
+
+
+def ignored_mad_knobs(work_dir: Path) -> list[str]:
+    """Node logs of one phase in which MAD reports the PRIMUS_* knobs ignored."""
+    log_dir = work_dir / "slurm_output"
+    return [
+        log_file.name
+        for log_file in (sorted(log_dir.glob("*node_*.out")) if log_dir.is_dir() else [])
+        if _KNOBS_IGNORED_MARK in log_file.read_text(errors="replace")
+    ]
 
 
 def runtime_rccl_versions(work_dir: Path) -> list[str]:
@@ -2692,6 +2710,17 @@ def main() -> None:
             rccl_verification_failed = True
             exit_code = max(exit_code, 1)
 
+    # Step 5c: A run that ignored the knobs measured the shipped config.
+    knobs_ignored = False
+    if any(k.startswith("PRIMUS_") for k in workload_config.get("env_vars", {})):
+        for phase, run_dir in phases:
+            ignored = ignored_mad_knobs(run_dir)
+            if ignored:
+                log.error("%s: MAD ignored the PRIMUS_* knobs (%s)",
+                          phase, ", ".join(ignored))
+                knobs_ignored = True
+                exit_code = max(exit_code, 1)
+
     # Step 6: Parse each phase's results and save its artifacts
     metric_key = workload_config["metric_key"]
     phase_results = {}
@@ -2718,7 +2747,7 @@ def main() -> None:
 
     all_rows = [r for rows in phase_results.values() for r in rows]
 
-    if (exit_code != 0 and not rccl_verification_failed
+    if (exit_code != 0 and not rccl_verification_failed and not knobs_ignored
             and metrics_prove_completion(family, phase_results)):
         log.info(
             "Overriding madengine exit code %d → 0: all %d run(s) across "
