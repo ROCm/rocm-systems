@@ -124,10 +124,10 @@ def test_gfx1201_memory_demand_belongs_to_l2():
     layout = Layouts.for_arch("gfx1201")
     blocks = {block.id: block for block in layout.blocks()}
     # DRAM Read/Write Requests and Read/Write Bandwidth
-    memory_demand = {"3.8.0", "3.8.1", "3.8.2", "3.8.3"}
+    memory_demand = {"3.9.0", "3.9.1", "3.9.2", "3.9.3"}
     assert memory_demand <= {item.metric_id for item in blocks["l2"].items}
     # GDDR6 Read/Write Bandwidth
-    assert {item.metric_id for item in blocks["gddr6"].items} == {"3.10.1", "3.10.2"}
+    assert {item.metric_id for item in blocks["gddr6"].items} == {"3.11.1", "3.11.2"}
 
 
 @pytest.mark.parametrize(

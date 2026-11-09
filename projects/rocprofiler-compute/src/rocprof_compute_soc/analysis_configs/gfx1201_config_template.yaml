@@ -48,18 +48,21 @@ panels:
     title: GL0-GL1 Interface
   - type: metric_table
     id: 6
-    title: GL1 (Write-Combining)
+    title: GL1 Cache (L1)
   - type: metric_table
     id: 7
-    title: GL2 Cache (L2)
+    title: GL1-GL2 Interface
   - type: metric_table
     id: 8
-    title: EA to DRAM
+    title: GL2 Cache (L2)
   - type: metric_table
     id: 9
-    title: Workgroup Processors (WGPs)
+    title: EA to DRAM
   - type: metric_table
     id: 10
+    title: Workgroup Processors (WGPs)
+  - type: metric_table
+    id: 11
     title: Infinity Cache and GDDR6
 - file: command_processor_cpc.yaml
   panel_id: 5

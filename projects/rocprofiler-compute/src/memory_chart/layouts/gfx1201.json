@@ -4,12 +4,12 @@
   "scope": {"labels": ["GPU", "GDDR6"], "split": "gddr6"},
   "blocks": [
     {"id": "cu", "title": "WGPs", "column": 0, "row": 0, "order": 0, "style": "list", "content": [
-      {"metric_id": "3.9.0", "title": "Wave Occ", "category": "util", "bar": false},
-      {"metric_id": "3.9.1", "title": "vGPRs", "category": "util", "bar": false},
-      {"metric_id": "3.9.2", "title": "sGPRs", "category": "util", "bar": false},
-      {"metric_id": "3.9.4", "title": "Scratch/Wave", "category": "util", "bar": false},
-      {"metric_id": "3.9.3", "title": "LDS Alloc", "category": "util", "bar": false},
-      {"metric_id": "3.9.5", "title": "Workgroups/WGP", "category": "util", "bar": false}
+      {"metric_id": "3.10.0", "title": "Wave Occ", "category": "util", "bar": false},
+      {"metric_id": "3.10.1", "title": "vGPRs", "category": "util", "bar": false},
+      {"metric_id": "3.10.2", "title": "sGPRs", "category": "util", "bar": false},
+      {"metric_id": "3.10.4", "title": "Scratch/Wave", "category": "util", "bar": false},
+      {"metric_id": "3.10.3", "title": "LDS Alloc", "category": "util", "bar": false},
+      {"metric_id": "3.10.5", "title": "Workgroups/WGP", "category": "util", "bar": false}
     ]},
 
     {"id": "lds", "title": "LDS", "column": 1, "row": 0, "order": 0, "style": "panel", "content": [
@@ -37,21 +37,21 @@
     ]},
 
     {"id": "l2", "title": "L2", "column": 3, "row": 0, "order": 0, "style": "panel", "content": [
-      {"metric_id": "3.7.0", "title": "Util", "category": "util", "bar": true},
-      {"metric_id": "3.7.1", "title": "Hit Rate", "category": "hit", "bar": true},
-      {"metric_id": "3.8.0", "title": "Memory Read Req", "category": "read", "bar": false},
-      {"metric_id": "3.8.1", "title": "Memory Write Req", "category": "write", "bar": false},
-      {"metric_id": "3.8.2", "title": "Memory Read BW", "category": "read", "bar": false},
-      {"metric_id": "3.8.3", "title": "Memory Write BW", "category": "write", "bar": false}
+      {"metric_id": "3.8.0", "title": "Util", "category": "util", "bar": true},
+      {"metric_id": "3.8.1", "title": "Hit Rate", "category": "hit", "bar": true},
+      {"metric_id": "3.9.0", "title": "Memory Read Req", "category": "read", "bar": false},
+      {"metric_id": "3.9.1", "title": "Memory Write Req", "category": "write", "bar": false},
+      {"metric_id": "3.9.2", "title": "Memory Read BW", "category": "read", "bar": false},
+      {"metric_id": "3.9.3", "title": "Memory Write BW", "category": "write", "bar": false}
     ]},
 
     {"id": "infinity_cache", "title": "Infinity Cache", "column": 4, "row": 0, "order": 0, "style": "panel", "content": [
-      {"metric_id": "3.10.0", "title": "Hit Rate", "category": "hit", "bar": true}
+      {"metric_id": "3.11.0", "title": "Hit Rate", "category": "hit", "bar": true}
     ]},
 
     {"id": "gddr6", "title": "GDDR6", "column": 5, "row": 0, "order": 0, "style": "panel", "content": [
-      {"metric_id": "3.10.1", "title": "Read BW", "category": "read", "bar": false},
-      {"metric_id": "3.10.2", "title": "Write BW", "category": "write", "bar": false}
+      {"metric_id": "3.11.1", "title": "Read BW", "category": "read", "bar": false},
+      {"metric_id": "3.11.2", "title": "Write BW", "category": "write", "bar": false}
     ]}
   ],
   "arrows": [
@@ -71,10 +71,10 @@
 
     {"from": "dcache", "to": "gl1", "direction": "backward", "metric_id": "3.2.3", "title": "Read Req", "category": "read", "style": "inline"},
 
-    {"from": "gl1", "to": "l2", "direction": "backward", "metric_id": "3.6.4", "title": "Read BW", "category": "read", "style": "stacked"},
-    {"from": "gl1", "to": "l2", "direction": "forward", "metric_id": "3.6.5", "title": "Write BW", "category": "write", "style": "stacked"},
+    {"from": "gl1", "to": "l2", "direction": "backward", "metric_id": "3.7.0", "title": "Read BW", "category": "read", "style": "stacked"},
+    {"from": "gl1", "to": "l2", "direction": "forward", "metric_id": "3.7.1", "title": "Write BW", "category": "write", "style": "stacked"},
 
-    {"from": "l2", "to": "infinity_cache", "direction": "backward", "metric_id": "3.7.2", "title": "Read BW", "category": "read", "style": "stacked"},
-    {"from": "l2", "to": "infinity_cache", "direction": "forward", "metric_id": "3.7.3", "title": "Write BW", "category": "write", "style": "stacked"}
+    {"from": "l2", "to": "infinity_cache", "direction": "backward", "metric_id": "3.8.2", "title": "Read BW", "category": "read", "style": "stacked"},
+    {"from": "l2", "to": "infinity_cache", "direction": "forward", "metric_id": "3.8.3", "title": "Write BW", "category": "write", "style": "stacked"}
   ]
 }

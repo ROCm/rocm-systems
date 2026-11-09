@@ -148,7 +148,7 @@ Memory chart - GL0-GL1 Interface:
     plain: Write requests the vector L0 cache sent to GL1. The counters give no write size.
     rst: Write requests the vector L0 cache sent to GL1. The counters give no write size.
     unit: Requests per Normalization Unit
-Memory chart - GL1 (Write-Combining):
+Memory chart - GL1 Cache (L1):
   GL1 Utilization:
     plain: Percentage of GL1 cycles with a request pending. GL1 is a write-combining cache between the WGPs and L2.
     rst: Percentage of GL1 cycles with a request pending. GL1 is a write-combining cache between the WGPs and L2.
@@ -165,6 +165,7 @@ Memory chart - GL1 (Write-Combining):
     plain: Percentage of GL1 cycles stalled because no buffer entry was free.
     rst: Percentage of GL1 cycles stalled because no buffer entry was free.
     unit: Percent
+Memory chart - GL1-GL2 Interface:
   GL1-GL2 Read Bandwidth:
     plain: Bytes L2 returned to GL1, from the physical 32-byte beats returned.
     rst: Bytes L2 returned to GL1, from the physical 32-byte beats returned.

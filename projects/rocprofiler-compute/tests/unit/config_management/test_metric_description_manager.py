@@ -23,13 +23,13 @@ Panel Config:
           value: GL1C_GL1_RET_32B_sum
           unit: Bytes
   - metric_table:
-      id: 308
+      id: 309
       metric:
         DRAM-Bound Reads:
           value: GL2C_EA_RDREQ_DRAM_32B_sum
           unit: Bytes/s
   - metric_table:
-      id: 310
+      id: 311
       metric:
         Physical GDDR6 Reads:
           value: None
@@ -75,7 +75,7 @@ def test_navi48_descriptions_use_distinct_memory_sections(memory_arch_dir):
     )
 
     assert descriptions == {
-        "Memory chart - GL1 (Write-Combining)": {
+        "Memory chart - GL1 Cache (L1)": {
             "GL1 Returns": {
                 "plain": "Bytes returned to GL1 clients.",
                 "rst": "Bytes returned to GL1 clients.",

@@ -137,9 +137,12 @@ GFX1250_PANEL_ID_TO_SECTION: dict[int, str] = {
 
 GFX1201_PANEL_ID_TO_SECTION: Dict[int, str] = {
     **GFX1250_PANEL_ID_TO_SECTION,
-    306: "Memory chart - GL1 (Write-Combining)",
-    308: "Memory chart - EA to DRAM",
-    310: "Memory chart - Infinity Cache and GDDR6",
+    306: "Memory chart - GL1 Cache (L1)",
+    307: "Memory chart - GL1-GL2 Interface",
+    308: "Memory chart - GL2 Cache (L2)",
+    309: "Memory chart - EA to DRAM",
+    310: "Memory chart - Workgroup Processors (WGPs)",
+    311: "Memory chart - Infinity Cache and GDDR6",
     1304: "GL2C Request Bandwidth",
 }
 
