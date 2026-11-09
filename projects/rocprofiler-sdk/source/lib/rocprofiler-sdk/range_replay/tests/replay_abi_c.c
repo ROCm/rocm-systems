@@ -143,6 +143,22 @@ rocprofiler_test_c_range_host_begin_compiles(uint64_t range_id)
     return status;
 }
 
+static void
+rocprofiler_test_c_range_body(uint64_t pass, void* user_data)
+{
+    *(uint64_t*) user_data += pass;
+}
+
+// The host_run entry point and its body type, as a C caller writes them. Not emitted, like the
+// host-begin check above.
+static inline __attribute__((unused)) rocprofiler_status_t
+rocprofiler_test_c_range_host_run_compiles(uint64_t range_id)
+{
+    uint64_t                        sum  = 0;
+    rocprofiler_range_replay_body_t body = rocprofiler_test_c_range_body;
+    return rocprofiler_range_replay_host_run(range_id, body, &sum);
+}
+
 // Enum values as C sees them. An enum whose underlying type differs between the languages would
 // show up as a mismatch here rather than as a wrong branch taken at runtime in a tool.
 int

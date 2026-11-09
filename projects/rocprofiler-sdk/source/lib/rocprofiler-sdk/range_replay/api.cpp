@@ -21,6 +21,7 @@
 // THE SOFTWARE.
 
 #include "lib/common/logging.hpp"
+#include "lib/common/scope_destructor.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
@@ -45,8 +46,15 @@ namespace range_replay
 {
 namespace
 {
+// How the extra passes of a host-replay range re-run the application's code.
+enum class host_rerun_t
+{
+    jump,  // siglongjmp to the target ROCPROFILER_RANGE_REPLAY_HOST_BEGIN armed
+    body,  // rocprofiler_range_replay_host_run calls the body again
+};
+
 rocprofiler_status_t
-begin_range(uint64_t range_id)
+begin_range(uint64_t range_id, host_rerun_t rerun)
 {
     // Consumed before any early return, so an arming is never carried to a later begin() whose
     // sigsetjmp frame may be gone.
@@ -61,7 +69,8 @@ begin_range(uint64_t range_id)
 
     if(!open_range(range_id)) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
-    auto* ctx = current_range();
+    auto* ctx               = current_range();
+    ctx->opened_by_host_run = (rerun == host_rerun_t::body);
 
     const auto* corr_id   = context::get_latest_correlation_id();
     ctx->thread_id        = (corr_id != nullptr) ? corr_id->thread_idx : common::get_tid();
@@ -86,7 +95,7 @@ begin_range(uint64_t range_id)
 
     if(ctx->plan.host_replay)
     {
-        if(host_jmp_armed)
+        if(rerun == host_rerun_t::body || host_jmp_armed)
             host::enter_range(*ctx, std::move(pending_regions));
         else
             ctx->record.decline(ROCPROFILER_RANGE_REPLAY_STATUS_HOST_JMP_NOT_SET);
@@ -138,6 +147,35 @@ end_range()
     close_range(ctx, status, divergence_count);
     return 0;
 }
+
+// host_run's body exited by an exception: close the range without running the passes it has left.
+// The range is taken first, so the thread is released even if a callback below throws.
+void
+abandon_range()
+{
+    auto ctx = range_context_t{};
+    if(!take_range(ctx)) return;
+    ctx.record.decline(ROCPROFILER_RANGE_REPLAY_STATUS_BODY_EXCEPTION);
+    if(ctx.host.enabled) host::abandon_pass(ctx);
+    close_range(ctx, ctx.record.status(), 0);
+}
+
+uint64_t
+current_host_pass()
+{
+    const auto* ctx = current_range();
+    return (ctx != nullptr && ctx->host.enabled) ? ctx->host.pass : 0;
+}
+
+// The body of a host_run whose range did not open still runs, once, as the pass the thread is
+// executing. Regions it registers outside any range would otherwise be pending for the next
+// begin(), which may capture them after the memory is gone.
+void
+run_body_once(rocprofiler_range_replay_body_t body, void* user_data)
+{
+    const auto _drop_pending = common::scope_destructor{[]() { take_pending_host_regions(); }};
+    body(current_host_pass(), user_data);
+}
 }  // namespace
 }  // namespace range_replay
 }  // namespace rocprofiler
@@ -146,7 +184,42 @@ extern "C" {
 rocprofiler_status_t
 rocprofiler_range_replay_begin(uint64_t range_id)
 {
-    return ::rocprofiler::range_replay::begin_range(range_id);
+    namespace range_replay = ::rocprofiler::range_replay;
+    return range_replay::begin_range(range_id, range_replay::host_rerun_t::jump);
+}
+
+rocprofiler_status_t
+rocprofiler_range_replay_host_run(uint64_t                        range_id,
+                                  rocprofiler_range_replay_body_t body,
+                                  void*                           user_data)
+{
+    namespace range_replay = ::rocprofiler::range_replay;
+
+    if(body == nullptr) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    const auto status = range_replay::begin_range(range_id, range_replay::host_rerun_t::body);
+    if(status != ROCPROFILER_STATUS_SUCCESS)
+    {
+        range_replay::run_body_once(body, user_data);
+        return status;
+    }
+
+    for(auto pass = uint64_t{0};;)
+    {
+        try
+        {
+            body(pass, user_data);
+        } catch(...)
+        {
+            range_replay::abandon_range();
+            throw;
+        }
+
+        const auto next = range_replay::end_range();
+        if(next < 0) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+        if(next == 0) return ROCPROFILER_STATUS_SUCCESS;
+        pass = static_cast<uint64_t>(next);
+    }
 }
 
 void*
@@ -176,15 +249,20 @@ rocprofiler_range_replay_get_host_pass(uint64_t* pass)
 {
     if(pass == nullptr) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
-    const auto* ctx = ::rocprofiler::range_replay::current_range();
-    *pass           = (ctx != nullptr && ctx->host.enabled) ? ctx->host.pass : 0;
+    *pass = ::rocprofiler::range_replay::current_host_pass();
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
 rocprofiler_status_t
 rocprofiler_range_replay_end(void)
 {
-    const auto next = ::rocprofiler::range_replay::end_range();
+    namespace range_replay = ::rocprofiler::range_replay;
+
+    if(const auto* live = range_replay::current_range();
+       live != nullptr && live->opened_by_host_run)
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    const auto next = range_replay::end_range();
     if(next < 0) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
     if(next > 0)

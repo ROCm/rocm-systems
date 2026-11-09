@@ -23,14 +23,16 @@
 #pragma once
 
 // Host replay: range replay's alternate execution path, selected by the tool setting host_replay at
-// CONFIG and the application opening the range with ROCPROFILER_RANGE_REPLAY_HOST_BEGIN.
+// CONFIG and the application opening the range with ROCPROFILER_RANGE_REPLAY_HOST_BEGIN or running
+// it with rocprofiler_range_replay_host_run.
 //
 // Packet replay records a range's dispatch packets and re-submits them, so it can only replay a
 // range whose whole effect is those packets on one queue. Host replay records nothing: the
 // application's code between begin and end is the program. end() restores the state the range
 // started from and siglongjmps to the sigsetjmp the application took just before begin(), and the
-// application executes the range again. Copies, memsets, several queues and agents, graph launches,
-// balanced allocate/free pairs and host computation are therefore part of every pass.
+// application executes the range again; host_run restores the same state and calls the body again.
+// Copies, memsets, several queues and agents, graph launches, balanced allocate/free pairs and host
+// computation are therefore part of every pass.
 //
 // What has to hold for the passes to be repeatable, and how each part is enforced:
 //  - Device memory on every GPU agent is snapshotted at begin and restored before every extra pass.
@@ -62,8 +64,9 @@ namespace range_replay
 {
 namespace host
 {
-// Outcome of one end() of a host-replay range. next_pass > 0: the caller must siglongjmp with that
-// value once every C++ object in its frame is destroyed. next_pass == 0: the range is finished and
+// Outcome of one end() of a host-replay range. next_pass > 0: the caller must re-run the range as
+// that pass, either by siglongjmp with that value once every C++ object in its frame is destroyed,
+// or by calling host_run's body again. next_pass == 0: the range is finished and
 // status/divergence_count are what CLOSE reports.
 struct step_result_t
 {
@@ -89,6 +92,13 @@ track_region(range_context_t& ctx, void* ptr, size_t size);
 // range.
 step_result_t
 finish_pass(range_context_t& ctx);
+
+// Called instead of finish_pass when the pass ends without reaching end() (host_run's body threw),
+// on a range already taken from the thread. Fences the pass's GPU tail, raises PASS exit for a
+// re-executed pass so every PASS enter is paired, and drops the local-context override before
+// CLOSE. Nothing is restored: the application continues from the state the pass left.
+void
+abandon_pass(range_context_t& ctx);
 
 // Capture and restore of registered host regions. GPU-free.
 host_region_t
