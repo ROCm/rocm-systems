@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rocjitsu/code/rj_code.h"
+#include "util/diagnostic.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -23,7 +24,9 @@ inline constexpr uint32_t kAddressPairStrideBytes = 256;
 /// @details The harness seeds address pairs in s[0:15] and v[0:15] at
 /// kAddressPairStrideBytes intervals in mapped memory. Vector addresses advance
 /// by four bytes per lane. The kernel uses s[16:31], s[40:42], and v[16:33] as
-/// scratch and ends with an explicit s_endpgm.
-void write_generated_kernel(std::span<uint8_t> payload, rj_code_arch_t arch, uint64_t seed);
+/// scratch and ends with an explicit s_endpgm. Returns failure with a diagnostic
+/// for undersized payloads or unsupported architectures, leaving payload unchanged.
+util::Result write_generated_kernel(std::span<uint8_t> payload, rj_code_arch_t arch, uint64_t seed,
+                                    util::DiagnosticEmitter diagnostic = {});
 
 } // namespace rocjitsu::execution_fuzz

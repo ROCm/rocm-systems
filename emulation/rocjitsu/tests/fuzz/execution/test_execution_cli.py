@@ -174,6 +174,56 @@ class ExecutionFuzzCliTest(unittest.TestCase):
                     process.communicate(timeout=10)
             self.assertFalse(marker.exists())
 
+    def test_campaign_artifact_failure_is_reported_without_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            # A nonempty directory makes removal of the previous marker fail.
+            marker = output / "current.seed"
+            marker.mkdir()
+            (marker / "keep").write_text("previous marker")
+            replay = output / "current.bin"
+            replay.write_bytes(b"previous input")
+            result = self.run_execution_fuzz(
+                "--random",
+                "1",
+                "--seed",
+                "42",
+                "--threads",
+                "1",
+                "--async",
+                "off",
+                "--output",
+                output,
+            )
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertIn("seed=42", result.stderr)
+            self.assertIn("cannot remove artifact", result.stderr)
+            self.assertEqual(replay.read_bytes(), b"previous input")
+            self.assertFalse((output / "failure.bin").exists())
+            self.assertFalse((output / "failure.seed").exists())
+            self.assertNotIn('"executed"', result.stdout)
+
+    def test_campaign_input_write_failure_does_not_publish_seed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            (output / "current.bin").mkdir()
+            marker = output / "current.seed"
+            marker.write_text("999\n")
+            result = self.run_execution_fuzz(
+                "--random",
+                "1",
+                "--threads",
+                "1",
+                "--async",
+                "off",
+                "--output",
+                output,
+            )
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertIn("cannot write input", result.stderr)
+            self.assertFalse(marker.exists())
+            self.assertFalse((output / "failure.seed").exists())
+
     def test_documented_bounded_random_smoke(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             result = self.run_execution_fuzz(
@@ -181,6 +231,22 @@ class ExecutionFuzzCliTest(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(json.loads(result.stdout)["inputs"], 4)
+
+    def test_seed_emission_rejects_invalid_destination_and_range(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            existing = directory / "existing.bin"
+            existing.write_bytes(b"keep")
+            result = self.run_execution_fuzz("--emit-seeds", directory)
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn("seed destination must be an empty directory", result.stderr)
+            self.assertEqual(existing.read_bytes(), b"keep")
+            overflow = self.run_execution_fuzz(
+                "--emit-seeds", directory / "seeds", "--seed", (1 << 64) - 1
+            )
+            self.assertEqual(overflow.returncode, 2, overflow.stderr)
+            self.assertIn("seed range exceeds uint64", overflow.stderr)
+            self.assertFalse(list((directory / "seeds").glob("*.bin")))
 
     def test_random_seed_range_cannot_wrap(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
