@@ -719,6 +719,9 @@ jobs:
         echo "${version}"
         grep -q '^AMD clang version' <<< "${version}" \
           || { echo "${CXX} is not AMD clang"; exit 1; }
+        # The race tests' reports get file and line from llvm-symbolizer.
+        symbolizer="$(dirname "${CXX}")/llvm-symbolizer"
+        test -x "${symbolizer}" || { echo "no ${symbolizer}"; exit 1; }
 
     - name: Set the cache date and compiler
       shell: bash
@@ -802,6 +805,8 @@ jobs:
       shell: bash
       run: |
         set -euo pipefail
+        # RDC's core only: the ROCr and profiler modules (BUILD_RUNTIME,
+        # BUILD_PROFILER) are built by rdc_build, with GCC.
         cmake \
           -B build-clang \
           -DCMAKE_C_COMPILER_LAUNCHER=ccache \
@@ -885,6 +890,9 @@ jobs:
         test "${ran}" -ge 2 || { echo "ran ${ran} gtests"; failed=1; }
         # Race tests: built, never installed. ThreadSanitizer reports every
         # race it sees, then exits with 66; the test results still pass.
+        # binutils' addr2line cannot read AMD clang's DWARF 5, so the
+        # toolchain's llvm-symbolizer gives the reports their file:line.
+        export TSAN_OPTIONS="external_symbolizer_path=$(dirname "${CXX}")/llvm-symbolizer"
         echo "::group::rdc_race_tests"
         timeout -k 30 "${limit}" build-clang/tests/race/rdc_race_tests \
           --gtest_output="xml:build/test-results-clang-rdc_race_tests.xml" || {
