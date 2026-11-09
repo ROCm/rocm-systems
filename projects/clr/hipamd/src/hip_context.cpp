@@ -164,8 +164,8 @@ hipError_t hipCtxCreate(hipCtx_t* ctx, unsigned int flags, hipDevice_t device) {
 
   *ctx = reinterpret_cast<hipCtx_t>(g_devices[device]);
 
-  g_devices[device]->RetainExplicitCtx();
   g_devices[device]->retain();
+  g_devices[device]->RetainExplicitCtx();
   g_devices[device]->setFlags(flags);
   tls.ctxt_stack_.push(g_devices[device]);
 
