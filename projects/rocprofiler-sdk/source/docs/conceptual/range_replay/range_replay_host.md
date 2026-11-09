@@ -1,5 +1,5 @@
 (range-replay-host)=
-# Host range replay (`sigsetjmp` / `siglongjmp`)
+# Host range replay
 
 Packet replay records the dispatch packets a range submits and re-submits them. That is cheap, but
 it only reproduces a range whose whole effect is those packets on one queue. A real time-stepping
@@ -9,7 +9,10 @@ next step's kernels. Packet replay declines such a range, and it has to: the rec
 contain the copies, the host computation, or the second stream.
 
 Host replay is the alternate path for those ranges. Nothing is recorded. The application's own code
-between begin and end *is* the program, and each extra pass runs it again:
+between begin and end *is* the program, and each extra pass runs it again. The application either
+brackets that code with a macro and `rocprofiler_range_replay_end`, which jump back with
+`siglongjmp`, or passes it as a function to `rocprofiler_range_replay_host_run`, which calls it once
+per pass (see "API-driven host replay" below). The jump-based protocol:
 
 ```text
  ROCPROFILER_RANGE_REPLAY_HOST_BEGIN  <-----------------------------+
@@ -75,11 +78,115 @@ if(sigsetjmp(*static_cast<sigjmp_buf*>(jmpbuf_fn()), 1) == 0)
 consumes the arming whether or not host replay is then used, so a buffer from an earlier range is
 never a jump target.
 
-| Tool sets `host_replay` | Application armed the jump | Result |
+| Tool sets `host_replay` | Application | Result |
 |---|---|---|
-| no | either | packet replay |
-| yes | yes | host replay |
-| yes | no | declined, `HOST_JMP_NOT_SET` (the range runs once) |
+| no | any | packet replay |
+| yes | armed the jump (the macro) | host replay |
+| yes | called `rocprofiler_range_replay_host_run` | host replay |
+| yes | called begin without arming the jump | declined, `HOST_JMP_NOT_SET` (the range runs once) |
+
+## API-driven host replay
+
+`rocprofiler_range_replay_host_run(range_id, body, user_data)` runs the same protocol without a
+jump. The application passes the range body as a function. The SDK opens the range as begin does
+(CONFIG is delivered once), calls the body for every pass, and returns after CLOSE:
+
+```text
+ rocprofiler_range_replay_host_run(range_id, body, user_data)
+   begin + CONFIG
+   +--> body(pass, user_data)       kernels, copies, host computation, ...
+   |    fence compute queues, PASS exit
+   |    more passes?  yes -> restore device memory + registered host
+   +--------------------- memory, PASS enter
+                  no  -> CLOSE, return
+```
+
+From C:
+
+```c
+static void
+run_time_steps(uint64_t pass, void* user_data)
+{
+    struct solver* s = user_data;
+    for(int step = 0; step < s->n_steps; ++step)
+        time_step(s, step, pass);  // kernels, copies, host computation, ...
+    hipDeviceSynchronize();
+}
+
+hipDeviceSynchronize();  // on every participating device
+rocprofiler_range_replay_host_track_memory(&solver.host_state, sizeof(solver.host_state));
+rocprofiler_range_replay_host_run(range_id, run_time_steps, &solver);
+```
+
+From C++17, the header's `rocprofiler::range_replay::host_run` wrapper forwards any callable,
+invoked as `f(pass)` or `f()`. It is called by reference, so captures are not copied:
+
+```cpp
+rocprofiler::range_replay::host_run(range_id, [&](uint64_t pass) {
+    auto residuals = std::vector<double>(n_steps);  // destroyed at the end of every pass
+    for(int step = 0; step < n_steps; ++step)
+        residuals[step] = time_step(step, pass);
+    hipDeviceSynchronize();
+});
+```
+
+Both paths share the fence, the snapshot, the restore, the divergence check and the decline rules
+on this page. They differ in how a pass is re-entered:
+
+| | Macro and `rocprofiler_range_replay_end` | `rocprofiler_range_replay_host_run` |
+|---|---|---|
+| Re-entry | `siglongjmp` to the caller's `sigsetjmp` | the SDK calls the body again |
+| C++ objects with destructors | must not be live across the jump | allowed; destroyed at the end of each pass |
+| Locals the range modifies | `volatile`, or re-initialized in the range | no rule; the body's locals start fresh each pass |
+| Callers | C or C++ with POSIX `sigsetjmp`, same function and thread | anything that can pass a C function pointer |
+| Exceptions | must not leave the range | close the range with `BODY_EXCEPTION` and propagate |
+| `HOST_JMP_NOT_SET` | when the jump was not armed | never |
+| Cost per pass | one `siglongjmp` | one indirect call |
+
+Rules 1 to 3 of the application's contract below do not apply to the body.
+Rules 4 to 7 do: GPU work submitted before the call must be complete, and all GPU work the body
+submits must be complete when it returns.
+
+The tool still chooses the replay. Without `host_replay` the body is called once, with pass 0, and
+its dispatches are recorded and packet-replayed as between begin and end.
+
+When the range cannot be opened, the body still runs once, so the application's work happens
+whether or not a tool replays it, and `host_run` returns the error begin would have returned:
+`CONTEXT_NOT_FOUND`, `CONTEXT_NOT_STARTED`, or `INVALID_ARGUMENT` when a range is already open on
+the thread. The body is then passed 0, or the current pass of the enclosing host range, and host
+regions it registers are dropped when `host_run` returns rather than carried to the next range. A
+NULL body returns `INVALID_ARGUMENT` and runs nothing.
+
+Ranges do not nest. From inside the body, `rocprofiler_range_replay_begin`,
+`rocprofiler_range_replay_end` and `rocprofiler_range_replay_host_run` return `INVALID_ARGUMENT`
+and leave the running range unchanged; a nested `host_run` still runs its own body once.
+`rocprofiler_range_replay_get_host_pass` returns the body's `pass`, and
+`rocprofiler_range_replay_host_track_memory` behaves as between begin and end.
+
+If the body throws a C++ exception, the range closes without its remaining passes. The SDK fences the
+pass's GPU work, raises PASS exit for a re-executed pass so every PASS enter is paired, and CLOSE
+reports `BODY_EXCEPTION`, or the reason the range had already been declined for. The exception then
+propagates to the caller of `host_run`. Nothing is restored: the application continues from the
+state the throwing pass left. The body must return or throw; leaving it with `longjmp` leaves the
+range open on the thread.
+
+Other languages call the C entry point directly. With Python `ctypes`, for example:
+
+```python
+import ctypes
+
+sdk = ctypes.CDLL("librocprofiler-sdk.so")  # already loaded by the tool
+BODY = ctypes.CFUNCTYPE(None, ctypes.c_uint64, ctypes.c_void_p)
+sdk.rocprofiler_range_replay_host_run.argtypes = [ctypes.c_uint64, BODY, ctypes.c_void_p]
+sdk.rocprofiler_range_replay_host_run.restype = ctypes.c_int
+
+body = BODY(lambda pass_index, _: run_iteration(pass_index))
+sdk.rocprofiler_range_replay_host_run(range_id, body, None)
+```
+
+A Python exception does not propagate through a `ctypes` callback: `ctypes` reports it and the
+callback returns normally, so the SDK continues with the next pass. Python objects are host memory
+like any other and are not rewound.
 
 ## What is restored before each extra pass
 
@@ -109,6 +216,7 @@ Any difference is reported as `divergence_count` on CLOSE.
 | Condition | Status |
 |---|---|
 | Tool asked for host replay, application did not arm the jump | `HOST_JMP_NOT_SET` |
+| The body passed to `rocprofiler_range_replay_host_run` threw | `BODY_EXCEPTION` |
 | Another thread dispatches to any GPU while the range is open | `CONCURRENT_DISPATCH` |
 | Another thread copies into device memory while the range is open | `MEMORY_COPY_IN_RANGE` |
 | Tracked device allocation addresses, sizes, or lifetimes differ at the end of a pass (a leak, or freeing/replacing pre-existing memory) | `ALLOCATION_CHANGED_IN_RANGE` |
@@ -134,7 +242,8 @@ the first-use allocation declines `ALLOCATION_CHANGED_IN_RANGE`.
 ## The application's contract
 
 `siglongjmp` restores registers and the stack pointer. It does not run destructors or restore
-locals. The code between the macro and `end` must follow these rules:
+locals. The code between the macro and `end` must follow these rules. A `host_run` body follows
+rules 4 to 7 only:
 
 1. **Same thread, same function.** The frame that expanded the macro must still be live at `end`.
 2. **No C++ object with a non-trivial destructor may be live across the jump.** Put the range body
@@ -180,7 +289,17 @@ runtime, just as for packet replay. See [Performance](range_replay_performance.m
 
 - `range-replay-host-replay-test` is a GPU-free unit test. It covers the arming consumption, the
   begin macro's two returns, the registry rules that differ from packet replay, and host-region
-  capture and restore, including a full jump-and-rewind loop.
+  capture and restore, including a full jump-and-rewind loop. It also covers `host_run` with no
+  context (the body runs once) and with a NULL body.
+- `range-replay-host-run-test` is a GPU-free unit test of `host_run` against a tool registered with
+  `rocprofiler_force_configure`. It covers the pass sequence, packet mode, nested entry points in
+  the body, host-region restore, exceptions on the first and on a replayed pass, and the C++
+  wrapper.
+- `tests/range-replay-host-api` is the `host_run` integration test. Each step runs kernels on two
+  streams joined by events and a host computation that feeds the next step, through the C++
+  wrapper. The application checks every pass and the final state bit for bit against a host
+  reference of one execution. Variants check that packet replay declines the range and that a body
+  that throws on pass 1 closes it with `BODY_EXCEPTION`.
 - `tests/range-replay-host` is the integration test. A time-stepping solver runs inside one range.
   Each step does an FFT, a spectral filter, an inverse FFT, a 5-point stencil, Jacobi sweeps, a
   device-to-device copy, a memset, a device-to-host residual reduced on the host, and a

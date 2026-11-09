@@ -49,6 +49,7 @@ GPU dependencies so the table below can be unit tested directly.
 | Queue interposition is enabled | `UNSUPPORTED_QUEUE_PATH` | `begin` |
 | Nothing was recorded | `NO_DISPATCH` | close time |
 | Tool asked for one pass or none | `NO_PASS_COUNT` | close time |
+| The body passed to `rocprofiler_range_replay_host_run` threw | `BODY_EXCEPTION` | when the exception reaches `host_run` |
 
 **First reason wins.** A declined range stops recording, so a range that ran past its budget does not
 keep copying kernargs, and a later observation cannot mask the original cause. `MULTI_AGENT` is
