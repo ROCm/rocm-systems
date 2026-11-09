@@ -3487,21 +3487,33 @@ int64_t GpuAgent::WslEpochOffset(uint64_t end) {
 // WSL only; the caller must hold t1_lock_.  The AQL timestamp clock can lag
 // D3DKMT's GPUClockCounter by hours, so every completed packet looks older than
 // t0_ and was reported as invalid (zero duration).  An end tick that predates t0_
-// by more than the process uptime is an epoch offset, not an early timestamp;
-// latch it once, taking the just-completed end as "now".  Durations are always
-// exact (start and end shift together).  Absolute times are biased late by the
-// delay between the packet completing and the first translation that reaches this
-// - microseconds for an immediate read, up to seconds for a deferred batch -
-// because the offset is anchored to t1_ sampled then, not at completion.  If the
-// process runs longer than the lag before its first translated packet, that packet
-// already has end >= t0_, is indistinguishable from a native tick, and the offset
-// is never latched (absolute times then run ~lag early; durations stay exact).
-// These are accepted limitations of this workaround.  The robust fix - reporting a
-// GPUClockCounter in the CP epoch (as PAL does on native Windows) or exposing a
-// contemporaneous CP-clock/calibration pair - belongs in librocdxg/KMD, where the
-// epoch is known, rather than being reconstructed heuristically here.
+// by more than the time elapsed since t0_ is an epoch offset, not an early
+// timestamp; latch it once, taking the just-completed end as "now".
+//
+// With lag L, a packet completing at Tc (since t0_) and first translated at Tq
+// has t0_ - end = L - Tc and t1_ - t0_ = Tq, so detection needs Tc + Tq < L:
+//  - Tc + Tq < L: latched.  Durations are exact (start and end shift together);
+//    absolute times are biased late by Tq - Tc, microseconds for an immediate
+//    read, up to seconds for a deferred batch.
+//  - Tc + Tq >= L but Tc < L (e.g. L/2 <= Tc < L when read promptly): not
+//    latched; the packet still predates t0_, so it keeps reporting zero.
+//  - Tc >= L: end >= t0_, indistinguishable from a native tick; not latched,
+//    and absolute times run ~L early (durations exact).
+// Profiling normally starts within seconds of agent creation, far inside the
+// first case.  A contemporaneous pair would remove all three limits, but ROCr
+// cannot read the CP clock on WSL: HsaClockCounters carries only the D3DKMT
+// calibration clock, and sampling the CP clock would need a GPU timestamp packet
+// plus a blocking wait at profiling-enable on the DXG path.  The robust fix -
+// reporting a GPUClockCounter in the CP epoch (as PAL does on native Windows) -
+// belongs in librocdxg/KMD, where the epoch is known.
 int64_t GpuAgent::DetectWslOffsetLocked(uint64_t end) {
   if (gpu_clock_offset_ != 0 || end == 0 || end >= t0_.GPUClockCounter)
+    return gpu_clock_offset_;
+  // t1_ only advances, so if the check below already fails against the current
+  // t1_, a fresh SyncClocks (a D3DKMT round trip under t1_lock_) cannot make it
+  // pass.  Return without it so the not-latched window does not pay a calibration
+  // round trip on every translated timestamp.
+  if (t0_.GPUClockCounter - end <= t1_.GPUClockCounter - t0_.GPUClockCounter)
     return gpu_clock_offset_;
   SyncClocks();
   if (t0_.GPUClockCounter - end > t1_.GPUClockCounter - t0_.GPUClockCounter)
