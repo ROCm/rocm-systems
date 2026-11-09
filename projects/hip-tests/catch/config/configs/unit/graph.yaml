@@ -576,6 +576,9 @@ graph:
   Unit_hipGraphExecUpdate_CapturedMemcpyAndKernel:
     <<: *level_default
     tags: [exec]
+  Unit_hipGraphExecUpdate_HostEventAllocNodes:
+    <<: *level_default
+    tags: [exec]
   Unit_hipGraphExecEventRecordNodeSetEvent_Functional:
     <<: *level_default
     tags: [exec]
@@ -1027,6 +1030,54 @@ graph:
     unsupported:
       targets: [amd_windows]
       reason: "AIRUNTIME-2744 - Linux-only test (wrapped in #ifdef __linux__ in unit/graph/hipStreamBeginCaptureToGraph.cc); never built or run on native Windows"
+    tags: [capture]
+  Unit_hipStreamBeginRecaptureToGraph_InPlaceUpdate:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamBeginRecaptureToGraph_Callback:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamBeginRecaptureToGraph_ParameterStatus:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamBeginRecaptureToGraph_IneligibleChangeThenExecUpdate:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamBeginRecaptureToGraph_Matching:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamBeginRecaptureToGraph_AllocFree:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamBeginRecaptureToGraph_LaunchAttributes:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamBeginRecaptureToGraph_GraphSources:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamBeginRecaptureToGraph_EmbeddedGraph:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamBeginRecaptureToGraph_UserObjects:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamBeginRecaptureToGraph_Unrecapturable:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamBeginRecaptureToGraph_CaptureInfo:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamBeginRecaptureToGraph_CaptureRules:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamBeginRecaptureToGraph_Validation:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamBeginRecaptureToGraph_HipSpecificNodeCounts:
+    <<: *level_default
+    tags: [capture]
+  Unit_hipStreamBeginRecaptureToGraph_ForkedThreads:
+    <<: *level_default
     tags: [capture]
   Unit_hipGetProcAddress_GraphAPIs_StreamCapture:
     <<: *level_default

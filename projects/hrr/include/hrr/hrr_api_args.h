@@ -104,8 +104,11 @@
  * wrong API.
  * v16: hipDeviceGetExecAffinitySupport was appended to HipDispatchTable,
  * shifting the compiler API IDs up by one. A v15 reader would decode
+ * those events as the wrong API.
+ * v17: hipStreamBeginRecaptureToGraph was appended to HipDispatchTable,
+ * shifting the compiler API IDs up by one. A v16 reader would decode
  * those events as the wrong API. */
-#define HRR_VERSION ((uint16_t)16u)
+#define HRR_VERSION ((uint16_t)17u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)
@@ -6023,6 +6026,16 @@ typedef struct {
     uint64_t dev;
 } hrr_args_hipDeviceGetExecAffinitySupport;
 
+/* hipError_t hipStreamBeginRecaptureToGraph(hipStream_t stream, hipStreamCaptureMode mode, hipGraph_t graph, hipGraphRecaptureCallbackData* callbackData) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t stream;
+    int32_t mode;
+    uint64_t graph;
+    uint64_t callbackData;
+} hrr_args_hipStreamBeginRecaptureToGraph;
+
 /* ---- API id enumeration ---- */
 typedef enum hrr_api_id {
     HRR_API_HIPAPINAME = 0,
@@ -6583,16 +6596,17 @@ typedef enum hrr_api_id {
     HRR_API_HIPGRAPHGETID = 555,
     HRR_API_HIPGRAPHEXECGETID = 556,
     HRR_API_HIPDEVICEGETEXECAFFINITYSUPPORT = 557,
-    HRR_API_HIPPOPCALLCONFIGURATION = 558,
-    HRR_API_HIPPUSHCALLCONFIGURATION = 559,
-    HRR_API_HIPREGISTERFATBINARY = 560,
-    HRR_API_HIPREGISTERFUNCTION = 561,
-    HRR_API_HIPREGISTERMANAGEDVAR = 562,
-    HRR_API_HIPREGISTERSURFACE = 563,
-    HRR_API_HIPREGISTERTEXTURE = 564,
-    HRR_API_HIPREGISTERVAR = 565,
-    HRR_API_HIPUNREGISTERFATBINARY = 566,
-    HRR_API_COUNT = 567
+    HRR_API_HIPSTREAMBEGINRECAPTURETOGRAPH = 558,
+    HRR_API_HIPPOPCALLCONFIGURATION = 559,
+    HRR_API_HIPPUSHCALLCONFIGURATION = 560,
+    HRR_API_HIPREGISTERFATBINARY = 561,
+    HRR_API_HIPREGISTERFUNCTION = 562,
+    HRR_API_HIPREGISTERMANAGEDVAR = 563,
+    HRR_API_HIPREGISTERSURFACE = 564,
+    HRR_API_HIPREGISTERTEXTURE = 565,
+    HRR_API_HIPREGISTERVAR = 566,
+    HRR_API_HIPUNREGISTERFATBINARY = 567,
+    HRR_API_COUNT = 568
 } hrr_api_id_t;
 
 /* Array of API names indexed by hrr_api_id_t */
@@ -7156,6 +7170,7 @@ const char* const hrr_api_names[HRR_API_COUNT] = {
     "hipGraphGetId",
     "hipGraphExecGetId",
     "hipDeviceGetExecAffinitySupport",
+    "hipStreamBeginRecaptureToGraph",
     "__hipPopCallConfiguration",
     "__hipPushCallConfiguration",
     "__hipRegisterFatBinary",
