@@ -3,22 +3,17 @@
 # gfx12 panel template. Tables with no carried metric are empty.
 Panel Config:
   id: 1300
-  title: GL2 Cache
+  title: GL2 Cache (L2)
   data source:
     - metric_table:
-        id: 1301
-        title: GL2A Processing
+        id: 1310
+        title: GL2 Cache Request Statistics
         header: &id001
           metric: Metric
           avg: Avg
           min: Min
           max: Max
           unit: Unit
-        metric: {}
-    - metric_table:
-        id: 1310
-        title: GL2C Utilization
-        header: *id001
         metric:
           Total Requests:
             avg: SUM(GL2C_REQ_sum) / SUM($denom)
@@ -52,7 +47,7 @@ Panel Config:
             unit: (Count + $normUnit)
     - metric_table:
         id: 1311
-        title: GL2C Cache Lookup
+        title: GL2 Cache Performance
         header: *id001
         metric:
           GL2 Cache Hit Rate:
@@ -71,18 +66,8 @@ Panel Config:
             max: MAX(GL2C_MISS_sum / $denom)
             unit: (Count + $normUnit)
     - metric_table:
-        id: 1302
-        title: GL2C-EA Stalls
-        header: *id001
-        metric: {}
-    - metric_table:
-        id: 1303
-        title: GL2C-EA Interface - Latencies
-        header: *id001
-        metric: {}
-    - metric_table:
         id: 1304
-        title: GL2C-EA Interface - DRAM Bandwidth
+        title: GL2 Cache Bandwidth
         header: *id001
         metric:
           GL2 Cache Read BW:
@@ -95,24 +80,4 @@ Panel Config:
             min: MIN((GL2C_EA_WRREQ_32B_sum * 32 + GL2C_EA_WRREQ_64B_sum * 64 + GL2C_EA_WRREQ_128B_sum * 128 + GL2C_EA_WRREQ_256B_sum * 256) / ((End_Timestamp - Start_Timestamp) / 1e9))
             max: MAX((GL2C_EA_WRREQ_32B_sum * 32 + GL2C_EA_WRREQ_64B_sum * 64 + GL2C_EA_WRREQ_128B_sum * 128 + GL2C_EA_WRREQ_256B_sum * 256) / ((End_Timestamp - Start_Timestamp) / 1e9))
             unit: Bytes/s
-    - metric_table:
-        id: 1305
-        title: GL2C-EA Interface - Host CPU Bandwidth
-        header: *id001
-        metric: {}
-    - metric_table:
-        id: 1306
-        title: GL2C-EA Interface - PCIe Bandwidth
-        header: *id001
-        metric: {}
-    - metric_table:
-        id: 1307
-        title: GL2C-EA Interface - Remote Node Bandwidth
-        header: *id001
-        metric: {}
-    - metric_table:
-        id: 1308
-        title: GL2C-EA Interface - Remote Memory Bandwidth (Same Node)
-        header: *id001
-        metric: {}
   metrics_description: {}

@@ -3,27 +3,17 @@
 # gfx12 panel template. Tables with no carried metric are empty.
 Panel Config:
   id: 1100
-  title: GL1 Cache
+  title: GL1 Cache (L1)
   data source:
     - metric_table:
-        id: 1101
-        title: GL1A Processing
+        id: 1102
+        title: GL1 Cache Utilization
         header: &id001
           metric: Metric
           avg: Avg
           min: Min
           max: Max
           unit: Unit
-        metric:
-          Hit Rate:
-            avg: None
-            min: None
-            max: None
-            unit: Percent
-    - metric_table:
-        id: 1102
-        title: GL1C Utilization
-        header: *id001
         metric:
           GL1 Cache Busy:
             avg: 100 * SUM(GL1C_BUSY) / SUM(GL1C_CYCLE)
@@ -47,7 +37,7 @@ Panel Config:
             unit: (Cycles + $normUnit)
     - metric_table:
         id: 1103
-        title: GL1C Request
+        title: GL1 Cache Request Statistics
         header: *id001
         metric:
           Total Requests:
@@ -65,14 +55,9 @@ Panel Config:
             min: MIN(GL1C_REQ_WRITE_sum / $denom)
             max: MAX(GL1C_REQ_WRITE_sum / $denom)
             unit: (Count + $normUnit)
-          Miss Requests:
-            avg: None
-            min: None
-            max: None
-            unit: (Count + $normUnit)
     - metric_table:
         id: 1104
-        title: GL1C Request Bandwidth
+        title: GL1 Cache Request Bandwidth
         header: *id001
         metric:
           Read Bytes:
@@ -92,13 +77,8 @@ Panel Config:
               * 128 + GL1C_REQ_WRITE_256B_sum * 256) / $denom)
             unit: (Bytes + $normUnit)
     - metric_table:
-        id: 1105
-        title: GL1C Multicast
-        header: *id001
-        metric: {}
-    - metric_table:
         id: 1106
-        title: GL1C-GLARB Interface
+        title: GL1-GL2 Interface
         header: *id001
         metric:
           GL2 Read Requests:

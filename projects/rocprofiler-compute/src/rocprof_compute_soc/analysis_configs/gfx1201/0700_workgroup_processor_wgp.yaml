@@ -170,11 +170,6 @@ Panel Config:
             min: MIN(SQ_INSTS_LDS_PARAM_LOAD_sum / $denom)
             max: MAX(SQ_INSTS_LDS_PARAM_LOAD_sum / $denom)
             unit: (Count + $normUnit)
-          WAVE32 LDS Parameter Load Instructions:
-            avg: None
-            min: None
-            max: None
-            unit: (Count + $normUnit)
     - metric_table:
         id: 708
         title: VALU Instruction Mix
@@ -190,16 +185,6 @@ Panel Config:
             unit: Instructions
             peak: None
             pct_of_peak: false
-          SQ_INST_CYCLES_VALU:
-            value: None
-            unit: Cycles
-            peak: None
-            pct_of_peak: false
-    - metric_table:
-        id: 709
-        title: VALU FLOPs and IOPs Counting
-        header: *id001
-        metric: {}
     - metric_table:
         id: 710
         title: WMMA Instruction FLOPs and IOPs Counting
@@ -217,7 +202,7 @@ Panel Config:
             pct_of_peak: false
     - metric_table:
         id: 711
-        title: Instruction Issue Stalls
+        title: Wait State Analysis
         header: *id001
         metric:
           Wait for Any:
@@ -225,41 +210,6 @@ Panel Config:
             min: MIN(100 * SQ_WAIT_ANY_sum / SQG_WAVE_CYCLES_sum)
             max: MAX(100 * SQ_WAIT_ANY_sum / SQG_WAVE_CYCLES_sum)
             unit: Percent
-          Wait for Instruction Fetch:
-            avg: None
-            min: None
-            max: None
-            unit: Percent
-          Wait for Barrier:
-            avg: None
-            min: None
-            max: None
-            unit: Percent
-          Wait for Counter:
-            avg: None
-            min: None
-            max: None
-            unit: Percent
-    - metric_table:
-        id: 712
-        title: Compute Pipeline Utilization
-        header: *id001
-        metric: {}
-    - metric_table:
-        id: 713
-        title: WGP Latencies
-        header: *id001
-        metric: {}
-    - metric_table:
-        id: 714
-        title: WGP-TXA Interface
-        header: *id001
-        metric: {}
-    - metric_table:
-        id: 715
-        title: WGP-TXD Interface
-        header: *id001
-        metric: {}
     - metric_table:
         id: 716
         title: Instruction Cache
@@ -280,9 +230,4 @@ Panel Config:
             min: MIN(100 * SQC_DCACHE_HITS_sum / SQC_DCACHE_REQ_sum)
             max: MAX(100 * SQC_DCACHE_HITS_sum / SQC_DCACHE_REQ_sum)
             unit: Percent
-    - metric_table:
-        id: 718
-        title: SQC-GL1 Interface
-        header: *id001
-        metric: {}
   metrics_description: {}
