@@ -15,6 +15,8 @@
 #include "simdojo/sim/component.h"
 #include "simdojo/sim/message.h"
 
+#include "util/diagnostic.h"
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -80,7 +82,7 @@ namespace amdgpu {
 /// reconciliation mutex. See L2MaintenanceMutex for admission and publication.
 class L2Cache : public simdojo::Component {
 public:
-  static constexpr uint32_t LINE_SIZE_BITS = 7; // 128 bytes
+  static constexpr uint32_t LINE_SIZE_BITS = 7;
   static constexpr uint32_t NUM_SETS = 2048;
   static constexpr uint32_t ASSOCIATIVITY = 16;
 
@@ -120,7 +122,10 @@ public:
   void set_gpu_vm(GpuVm *gpu_vm) { gpu_vm_ = gpu_vm; }
 
   /// @brief Rebind this cache to a device-local coherence domain before use.
-  void set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence);
+  /// @details A null domain fails without changing registration.
+  /// @param emit_error Destination for failure diagnostics.
+  util::Result set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence,
+                                    util::DiagnosticEmitter emit_error = {});
   const std::shared_ptr<DeviceCacheCoherence> &coherence_domain() const { return coherence_; }
 
   /// Diagnostic totals are exact at quiescence. Concurrent queries sample
@@ -358,6 +363,14 @@ public:
   /// correct for a global flush. Retained only for call-site signature symmetry.
   VmAccessOutcome flush_all(uint32_t vmid = 0);
 
+  /// @brief Publish and invalidate only the specified address space.
+  /// @details On failure, no line in this VMID is invalidated. Previously published lines
+  /// remain cached clean; unpublished bytes and unvisited dirty lines remain dirty for retry.
+  /// Other VMIDs are untouched.
+  /// Consumers of memory shared across VMIDs rely on the producer publishing its
+  /// own writes before synchronization; this does not publish another VMID's dirty alias.
+  [[nodiscard]] VmAccessOutcome flush_address_space(uint32_t vmid);
+
   /// @brief Create a completer port for a CU connection (one per CU).
   /// @param name Name suffix for the port (used for port naming).
   /// @returns Pointer to the newly created completer port.
@@ -451,7 +464,7 @@ private:
   // Store allocation leaves untouched bytes absent instead of reading backing.
   VmAccessOutcome ensure_line(uint64_t addr, uint32_t vmid = 0, bool fetch_on_miss = true);
   VmAccessOutcome flush_line_locked(uint64_t addr, uint32_t vmid = 0);
-  VmAccessOutcome flush_dirty_locked();
+  VmAccessOutcome flush_dirty_locked(std::optional<uint32_t> vmid = std::nullopt);
   [[nodiscard]] VmAccessOutcome flush_dirty_to_legacy_backing_locked();
   using DirtyMask = std::array<uint64_t, LINE_SIZE / 64>;
   void mark_dirty_bytes(uint64_t line_addr, uint32_t offset, uint32_t size, uint32_t vmid);

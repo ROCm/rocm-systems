@@ -8,8 +8,9 @@ use std::env;
 use std::error::Error;
 use std::fs;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+/// Header table names paired with their generated Rust field names.
 const TABLES: [(&str, &str); 6] = [
     ("core", "CoreApiTable"),
     ("amd_ext", "AmdExtTable"),
@@ -19,6 +20,7 @@ const TABLES: [(&str, &str); 6] = [
     ("pc_sampling_ext", "PcSamplingExtTable"),
 ];
 
+/// Extension exports that must remain visible in the public ABI.
 const PUBLIC_EXTENSION_SYMBOLS: [&str; 28] = [
     "hsa_ext_image_get_capability",
     "hsa_ext_image_data_get_info",
@@ -50,16 +52,29 @@ const PUBLIC_EXTENSION_SYMBOLS: [&str; 28] = [
     "hsa_ven_amd_pcs_flush",
 ];
 
+/// Table fields implemented privately rather than exported directly.
 const PRIVATE_TABLE_FUNCTIONS: [&str; 3] = [
     "hsa_amd_queue_intercept_create",
     "hsa_amd_queue_intercept_register",
     "hsa_amd_runtime_queue_create_register",
 ];
 
+/// Macro families whose invocations each define one HSA C entry point.
+const ENTRY_MACROS: [&str; 6] = [
+    "queue_store_entry",
+    "queue_compare_exchange_entry",
+    "queue_add_entry",
+    "signal_exchange_entry",
+    "signal_compare_exchange_entry",
+    "signal_fetch_entry",
+];
+
+/// Builds an invalid-data error for a header or export-table mismatch.
 fn invalid(message: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message.into())
 }
 
+/// Parses the exported HSA symbol names from the linker version script.
 fn exported_symbols(source: &str) -> Result<Vec<String>, io::Error> {
     let exports: Vec<String> = source
         .lines()
@@ -81,6 +96,100 @@ fn exported_symbols(source: &str) -> Result<Vec<String>, io::Error> {
     Ok(exports)
 }
 
+/// Extracts an HSA name at the start of a function signature or macro call.
+fn hsa_name(input: &str) -> Option<&str> {
+    let input = input.trim_start();
+    let end = input
+        .find(|ch: char| !ch.is_ascii_alphanumeric() && ch != '_')
+        .unwrap_or(input.len());
+    let name = &input[..end];
+    name.starts_with("hsa_").then_some(name)
+}
+
+/// Finds concrete C bodies and known macro-generated bodies in one source.
+fn entry_bodies(source: &str) -> Vec<String> {
+    let mut bodies = Vec::new();
+    let mut lines = source.lines();
+    while let Some(line) = lines.next() {
+        let line = line.trim_start();
+        let direct = line
+            .strip_prefix("pub unsafe extern \"C\" fn ")
+            .or_else(|| line.strip_prefix("pub extern \"C\" fn "));
+        if let Some(name) = direct.and_then(hsa_name) {
+            bodies.push(name.to_owned());
+        }
+        for macro_name in ENTRY_MACROS {
+            let invocation = format!("{macro_name}!(");
+            if let Some(rest) = line.strip_prefix(&invocation) {
+                let argument = if rest.trim().is_empty() {
+                    lines.next().unwrap_or_default()
+                } else {
+                    rest
+                };
+                if let Some(name) = hsa_name(argument) {
+                    bodies.push(name.to_owned());
+                }
+                break;
+            }
+        }
+    }
+    bodies
+}
+
+/// Visits Rust source files without following paths outside this crate.
+fn rust_sources(directory: &Path, files: &mut Vec<PathBuf>) -> io::Result<()> {
+    for entry in fs::read_dir(directory)? {
+        let path = entry?.path();
+        if path.is_dir() {
+            rust_sources(&path, files)?;
+        } else if path.extension().is_some_and(|extension| extension == "rs") {
+            files.push(path);
+        }
+    }
+    Ok(())
+}
+
+/// Enforces one implementation per HSA export, always inside the API adapter.
+fn check_api_organization(source_root: &Path, exports: &[String]) -> io::Result<()> {
+    let expected: HashSet<&str> = exports
+        .iter()
+        .map(String::as_str)
+        .chain(PRIVATE_TABLE_FUNCTIONS)
+        .collect();
+    let mut implementations: HashMap<String, Vec<PathBuf>> = HashMap::new();
+    let mut files = Vec::new();
+    rust_sources(source_root, &mut files)?;
+    for path in files {
+        for name in entry_bodies(&fs::read_to_string(&path)?) {
+            implementations.entry(name).or_default().push(path.clone());
+        }
+    }
+    for name in &expected {
+        let Some(paths) = implementations.get(*name) else {
+            return Err(invalid(format!("missing HSA C implementation: {name}")));
+        };
+        if paths.len() != 1 {
+            return Err(invalid(format!(
+                "HSA C implementation {name} has {} bodies: {paths:?}",
+                paths.len()
+            )));
+        }
+        if !paths[0].starts_with(source_root.join("api")) {
+            return Err(invalid(format!(
+                "HSA C implementation {name} is outside api: {}",
+                paths[0].display()
+            )));
+        }
+    }
+    for name in implementations.keys() {
+        if !expected.contains(name.as_str()) {
+            return Err(invalid(format!("unexpected HSA C implementation: {name}")));
+        }
+    }
+    Ok(())
+}
+
+/// Extracts the ordered function fields of a named API table in a header.
 fn table_fields(header: &str, table: &str) -> Result<Vec<String>, io::Error> {
     let start = format!("struct {table} {{");
     let (_, rest) = header
@@ -103,6 +212,7 @@ fn table_fields(header: &str, table: &str) -> Result<Vec<String>, io::Error> {
     Ok(fields)
 }
 
+/// Reads a numeric preprocessor definition from a vendored HSA header.
 fn macro_u32(header: &str, name: &str) -> Result<u32, io::Error> {
     let value = header
         .lines()
@@ -122,6 +232,7 @@ fn macro_u32(header: &str, name: &str) -> Result<u32, io::Error> {
 }
 
 #[allow(clippy::too_many_lines)]
+/// Generates Rust table layouts and original implementation pointers.
 fn generate_rust(exports: &[String], tables: &[(&str, Vec<String>)], amd_step: u32) -> String {
     let runtime_functions: HashSet<&str> = exports
         .iter()
@@ -133,6 +244,23 @@ fn generate_rust(exports: &[String], tables: &[(&str, Vec<String>)], amd_step: u
         .enumerate()
         .map(|(index, name)| (name.as_str(), index))
         .collect();
+    let bridge_names: Vec<&str> = exports
+        .iter()
+        .map(String::as_str)
+        .chain(PRIVATE_TABLE_FUNCTIONS)
+        .chain(
+            tables
+                .iter()
+                .find(|(member, _)| *member == "tools")
+                .into_iter()
+                .flat_map(|(_, fields)| fields.iter().map(String::as_str)),
+        )
+        .collect();
+    let bridge_positions: HashMap<&str, usize> = bridge_names
+        .iter()
+        .enumerate()
+        .map(|(index, name)| (*name, index))
+        .collect();
     let mut lines = vec![
         "// Copyright (c) 2026 Advanced Micro Devices, Inc.".to_owned(),
         "// SPDX-License-Identifier: MIT".to_owned(),
@@ -141,10 +269,18 @@ fn generate_rust(exports: &[String], tables: &[(&str, Vec<String>)], amd_step: u
         "use std::ffi::c_void;".to_owned(),
         "use std::sync::atomic::{AtomicPtr, Ordering};".to_owned(),
         String::new(),
+        "/// Number of public HSA exports with dispatch slots.".to_owned(),
         format!("pub(super) const EXPORT_COUNT: usize = {};", exports.len()),
+        "/// Number of tool-visible bridge slots.".to_owned(),
+        format!(
+            "pub(super) const BRIDGE_COUNT: usize = {};",
+            bridge_names.len()
+        ),
+        "/// AMD extension table revision read from the public header.".to_owned(),
         format!("pub(super) const AMD_EXT_STEP: u32 = {amd_step};"),
     ];
     for (member, fields) in tables {
+        lines.push(format!("/// Number of `{member}` API function slots."));
         lines.push(format!(
             "pub(super) const {}_COUNT: usize = {};",
             member.to_ascii_uppercase(),
@@ -157,9 +293,15 @@ fn generate_rust(exports: &[String], tables: &[(&str, Vec<String>)], amd_step: u
         .map(String::as_str)
         .chain(PRIVATE_TABLE_FUNCTIONS)
     {
+        lines.push(format!("    /// Native implementation of `{name}`."));
         lines.push(format!("    fn __hsa_impl_{name}();"));
     }
+    for name in &bridge_names {
+        lines.push(format!("    /// Stable registrar bridge for `{name}`."));
+        lines.push(format!("    fn __hsa_bridge_{name}();"));
+    }
     for name in PUBLIC_EXTENSION_SYMBOLS {
+        lines.push(format!("    /// Public export address of `{name}`."));
         lines.push(format!(
             "    #[link_name = \"{name}\"] fn __hsa_export_{name}();"
         ));
@@ -167,7 +309,9 @@ fn generate_rust(exports: &[String], tables: &[(&str, Vec<String>)], amd_step: u
     lines.extend([
         "}".to_owned(),
         String::new(),
-        "static HSA_DEFAULT_SLOTS: [AtomicPtr<c_void>; EXPORT_COUNT] = [".to_owned(),
+        "/// Published functions read by the assembly export trampolines.".to_owned(),
+        "#[unsafe(no_mangle)]".to_owned(),
+        "static hsa_dispatch_slots: [AtomicPtr<c_void>; EXPORT_COUNT] = [".to_owned(),
     ]);
     for name in exports {
         lines.push(format!(
@@ -177,17 +321,37 @@ fn generate_rust(exports: &[String], tables: &[(&str, Vec<String>)], amd_step: u
     lines.extend([
         "];".to_owned(),
         String::new(),
+        "/// Native fallbacks for bridges without a registrar table.".to_owned(),
         "#[unsafe(no_mangle)]".to_owned(),
-        "static hsa_dispatch_slots: [AtomicPtr<c_void>; EXPORT_COUNT] = [".to_owned(),
+        "static hsa_profiler_default_slots: [AtomicPtr<c_void>; BRIDGE_COUNT] = [".to_owned(),
     ]);
-    for index in 0..exports.len() {
+    for name in &bridge_names {
+        let initial = if tables
+            .iter()
+            .any(|(member, fields)| *member == "tools" && fields.iter().any(|field| field == name))
+        {
+            "super::no_scratch_callback as *mut c_void".to_owned()
+        } else {
+            format!("__hsa_impl_{name} as *mut c_void")
+        };
+        lines.push(format!("    AtomicPtr::new({initial}),"));
+    }
+    lines.extend([
+        "];".to_owned(),
+        String::new(),
+        "/// Addresses of registrar fields read by the assembly bridges.".to_owned(),
+        "#[unsafe(no_mangle)]".to_owned(),
+        "static hsa_profiler_slots: [AtomicPtr<c_void>; BRIDGE_COUNT] = [".to_owned(),
+    ]);
+    for index in 0..bridge_names.len() {
         lines.push(format!(
-            "    AtomicPtr::new(std::ptr::addr_of!(HSA_DEFAULT_SLOTS[{index}]) as *mut c_void),"
+            "    AtomicPtr::new(std::ptr::addr_of!(hsa_profiler_default_slots[{index}]) as *mut c_void),"
         ));
     }
     lines.extend([
         "];".to_owned(),
         String::new(),
+        "/// Collects the native functions that seed every tool API table.".to_owned(),
         "pub(super) fn initial_functions() -> InitialFunctions {".to_owned(),
         "    InitialFunctions {".to_owned(),
     ]);
@@ -207,10 +371,34 @@ fn generate_rust(exports: &[String], tables: &[(&str, Vec<String>)], amd_step: u
         "    }".to_owned(),
         "}".to_owned(),
         String::new(),
+        "/// Stable bridge pointers offered as the registrar layer to legacy tools.".to_owned(),
+        "pub(super) fn bridge_functions() -> InitialFunctions {".to_owned(),
+        "    InitialFunctions {".to_owned(),
+    ]);
+    for (member, fields) in tables {
+        lines.push(format!("        {member}: ["));
+        for name in fields {
+            let value = if bridge_positions.contains_key(name.as_str()) {
+                format!("__hsa_bridge_{name} as *mut c_void")
+            } else {
+                "std::ptr::null_mut()".to_owned()
+            };
+            lines.push(format!("            {value},"));
+        }
+        lines.push("        ],".to_owned());
+    }
+    lines.extend([
+        "    }".to_owned(),
+        "}".to_owned(),
+        String::new(),
+        "/// Original function pointers for all tool-visible HSA tables.".to_owned(),
         "#[derive(Clone, Copy)]".to_owned(),
         "pub(super) struct InitialFunctions {".to_owned(),
     ]);
     for (member, _) in tables {
+        lines.push(format!(
+            "    /// Original pointers in the `{member}` table."
+        ));
         lines.push(format!(
             "    pub(super) {member}: [*mut c_void; {}_COUNT],",
             member.to_ascii_uppercase()
@@ -219,6 +407,7 @@ fn generate_rust(exports: &[String], tables: &[(&str, Vec<String>)], amd_step: u
     lines.extend([
         "}".to_owned(),
         String::new(),
+        "/// Checks that all required native table slots are populated.".to_owned(),
         "pub(super) fn valid(tables: &super::ApiTables) -> bool {".to_owned(),
     ]);
     let mut checks = Vec::new();
@@ -233,13 +422,14 @@ fn generate_rust(exports: &[String], tables: &[(&str, Vec<String>)], amd_step: u
     lines.extend([
         "}".to_owned(),
         String::new(),
-        "pub(super) fn publish(tables: &super::ApiTables) {".to_owned(),
+        "/// Points bridges at retained registrar fields after registration.".to_owned(),
+        "pub(super) unsafe fn publish_profiler(tables: *mut super::ApiTables) {".to_owned(),
     ]);
     for (member, fields) in tables {
         for (index, name) in fields.iter().enumerate() {
-            if let Some(position) = positions.get(name.as_str()) {
+            if let Some(position) = bridge_positions.get(name.as_str()) {
                 lines.push(format!(
-                    "    hsa_dispatch_slots[{position}].store((&raw const tables.{member}.functions[{index}]) as *mut c_void, Ordering::Release);"
+                    "    hsa_profiler_slots[{position}].store((unsafe {{ &raw const (*tables).{member}.functions[{index}] }}) as *mut c_void, Ordering::Release);"
                 ));
             }
         }
@@ -247,16 +437,44 @@ fn generate_rust(exports: &[String], tables: &[(&str, Vec<String>)], amd_step: u
     lines.extend([
         "}".to_owned(),
         String::new(),
-        "pub(super) fn reset() {".to_owned(),
+        "/// Restores bridges to native or no-op storage.".to_owned(),
+        "pub(super) fn reset_profiler() {".to_owned(),
     ]);
-    for index in 0..exports.len() {
+    for index in 0..bridge_names.len() {
         lines.push(format!(
-            "    hsa_dispatch_slots[{index}].store(std::ptr::addr_of!(HSA_DEFAULT_SLOTS[{index}]) as *mut c_void, Ordering::Release);"
+            "    hsa_profiler_slots[{index}].store(std::ptr::addr_of!(hsa_profiler_default_slots[{index}]) as *mut c_void, Ordering::Release);"
         ));
     }
     lines.extend([
         "}".to_owned(),
         String::new(),
+        "/// Publishes a snapshot of the tool tables to atomic dispatch slots.".to_owned(),
+        "pub(super) fn publish(tables: &super::ApiTables) {".to_owned(),
+    ]);
+    for (member, fields) in tables {
+        for (index, name) in fields.iter().enumerate() {
+            if let Some(position) = positions.get(name.as_str()) {
+                lines.push(format!(
+                    "    hsa_dispatch_slots[{position}].store(tables.{member}.functions[{index}], Ordering::Release);"
+                ));
+            }
+        }
+    }
+    lines.extend([
+        "}".to_owned(),
+        String::new(),
+        "/// Restores every public dispatch slot to its native implementation.".to_owned(),
+        "pub(super) fn reset() {".to_owned(),
+    ]);
+    for (index, name) in exports.iter().enumerate() {
+        lines.push(format!(
+            "    hsa_dispatch_slots[{index}].store(__hsa_impl_{name} as *mut c_void, Ordering::Release);"
+        ));
+    }
+    lines.extend([
+        "}".to_owned(),
+        String::new(),
+        "/// Finds the public address of a supported extension export.".to_owned(),
         "pub(super) fn public_address(name: &str) -> Option<usize> {".to_owned(),
         "    match name {".to_owned(),
     ]);
@@ -274,13 +492,28 @@ fn generate_rust(exports: &[String], tables: &[(&str, Vec<String>)], amd_step: u
     lines.join("\n")
 }
 
-fn generate_dispatch(exports: &[String]) -> String {
+/// Generates the C dispatch declarations for exported HSA symbols.
+fn generate_dispatch(exports: &[String], tables: &[(&str, Vec<String>)]) -> String {
+    let bridge_names: Vec<&str> = exports
+        .iter()
+        .map(String::as_str)
+        .chain(PRIVATE_TABLE_FUNCTIONS)
+        .chain(
+            tables
+                .iter()
+                .find(|(member, _)| *member == "tools")
+                .into_iter()
+                .flat_map(|(_, fields)| fields.iter().map(String::as_str)),
+        )
+        .collect();
     let mut lines = vec![
         "/* Copyright (c) 2026 Advanced Micro Devices, Inc. */".to_owned(),
         "/* SPDX-License-Identifier: MIT */".to_owned(),
         "/* Generated from the Linux HSA exports. */".to_owned(),
         ".text".to_owned(),
         ".hidden hsa_dispatch_slots".to_owned(),
+        ".hidden hsa_profiler_slots".to_owned(),
+        ".hidden hsa_profiler_default_slots".to_owned(),
     ];
     for name in exports
         .iter()
@@ -295,26 +528,52 @@ fn generate_dispatch(exports: &[String]) -> String {
             format!(".type {name}, @function"),
             format!("{name}:"),
             format!(
-                "    mov r11, qword ptr [rip + hsa_dispatch_slots + {}]",
+                "    jmp qword ptr [rip + hsa_dispatch_slots + {}]",
                 index * 8
             ),
-            "    jmp qword ptr [r11]".to_owned(),
             format!(".size {name}, .-{name}"),
         ]);
+    }
+    for (index, name) in bridge_names.iter().enumerate() {
+        lines.extend([
+            format!(".hidden __hsa_bridge_{name}"),
+            format!(".globl __hsa_bridge_{name}"),
+            format!(".type __hsa_bridge_{name}, @function"),
+            format!("__hsa_bridge_{name}:"),
+            format!(
+                "    mov r11, qword ptr [rip + hsa_profiler_slots + {}]",
+                index * 8
+            ),
+            "    mov r11, qword ptr [r11]".to_owned(),
+        ]);
+        lines.extend([
+            "    test r11, r11".to_owned(),
+            format!("    jnz .Lhsa_bridge_call_{index}"),
+            format!(
+                "    mov r11, qword ptr [rip + hsa_profiler_default_slots + {}]",
+                index * 8
+            ),
+            format!(".Lhsa_bridge_call_{index}:"),
+            "    jmp r11".to_owned(),
+        ]);
+        lines.push(format!(".size __hsa_bridge_{name}, .-__hsa_bridge_{name}"));
     }
     lines.push(String::new());
     lines.join("\n")
 }
 
+/// Regenerates the ABI tables and dispatch assembly when their inputs change.
 fn main() -> Result<(), Box<dyn Error>> {
     let manifest = env::var("CARGO_MANIFEST_DIR")?;
     let manifest = Path::new(&manifest);
     let header = manifest.join("../../api-headers/include/hsa/hsa_api_trace.h");
     let versions = manifest.join("../../api-headers/include/hsa/hsa_api_trace_version.h");
     let exports = manifest.join("src/exports_linux.S");
+    let source_root = manifest.join("src");
     println!("cargo:rerun-if-changed={}", header.display());
     println!("cargo:rerun-if-changed={}", versions.display());
     println!("cargo:rerun-if-changed={}", exports.display());
+    println!("cargo:rerun-if-changed={}", source_root.display());
 
     let header = fs::read_to_string(header)?;
     let amd_step = macro_u32(
@@ -322,6 +581,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         "HSA_AMD_EXT_API_TABLE_STEP_VERSION",
     )?;
     let exports = exported_symbols(&fs::read_to_string(exports)?)?;
+    check_api_organization(&source_root, &exports)?;
     let tables = TABLES
         .iter()
         .map(|&(member, table)| table_fields(&header, table).map(|fields| (member, fields)))
@@ -334,7 +594,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     )?;
     fs::write(
         out.join("api_trace_dispatch_linux.S"),
-        generate_dispatch(&exports),
+        generate_dispatch(&exports, &tables),
     )?;
     Ok(())
 }

@@ -60,6 +60,9 @@ class LoaderContext final : public rocr::amd::hsa::loader::Context {
 
   void* SegmentAlloc(amdgpu_hsa_elf_segment_t segment, hsa_agent_t agent, size_t size, size_t align, bool zero) override;
 
+  hsa_status_t SegmentAllocAt(amdgpu_hsa_elf_segment_t segment, hsa_agent_t agent, size_t size,
+                              void* address, void** seg) override;
+
   bool SegmentCopy(amdgpu_hsa_elf_segment_t segment, hsa_agent_t agent, void* dst, size_t offset, const void* src, size_t size) override;
 
   void SegmentFree(amdgpu_hsa_elf_segment_t segment, hsa_agent_t agent, void* seg, size_t size = 0) override;

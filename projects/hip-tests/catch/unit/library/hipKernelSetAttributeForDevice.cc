@@ -275,6 +275,8 @@ HIP_TEST_CASE(Unit_hipKernelSetAttributeForDevice_Positive_CrossDevice) {
     std::fill(image.begin(), image.end(), 0);
   }
 
+  LoadLibraryKernel(&library, &kernel);
+
   HIP_CHECK(
       hipKernelSetAttributeForDevice(kernel, hipFuncAttributeMaxDynamicSharedMemorySize, 0, 0));
   HIP_CHECK(

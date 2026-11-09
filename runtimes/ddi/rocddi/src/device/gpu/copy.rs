@@ -6,14 +6,23 @@
 use std::mem::ManuallyDrop;
 use std::ops::{Deref, DerefMut};
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering, fence};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering, fence};
+use std::time::Duration;
 
 use crate::device::gpu::GpuDevice;
 use crate::device::gpu::kernel_queue::{
     KernelCommand, KernelQueue, KernelQueueFormat, KernelQueueWait,
 };
+use crate::device::gpu::queue::{
+    Queue, QueueParameters, QueuePriority, QueueRequest, QueueRingMemory, SdmaEngineSelection,
+    ring_doorbell,
+};
 use crate::memory::{Allocation, DeviceAccess, MemoryKind};
+use crate::topology::{GpuSdmaDialect, GpuTargetProfile};
 use crate::{Error, ErrorKind};
+
+mod packet;
+use packet::{SdmaCommand, TimingAddresses, encode_gfx9_timestamp};
 
 // GFX12.0 SDMA 7.0.1 uses the OSS5 COPY_LINEAR and GCR packet layouts. Keep the packet
 // format here so either frontend can use the same native copy mechanism.
@@ -42,14 +51,19 @@ const SDMA_SIGNAL_ADD64: u32 = 0x6f;
 const SDMA_SIGNAL_SUB64: u32 = 0x70;
 const SDMA_CONST_FILL_DWORD: u32 = 0x0b | (2 << 30);
 const SDMA_TIMESTAMP_GET_GLOBAL_SYS: u32 = 0x0d | (2 << 8) | (3 << 24);
+const SDMA_TIMESTAMP_GET_GLOBAL_GFX9: u32 = 0x0d | (2 << 8);
 const SDMA_USER_GCR: u32 = 0x11 | (1 << 8);
 const GCR_WRITEBACK: u32 = (1 << 31) | (1 << 22);
 const GCR_INVALIDATE: u32 = (1 << 30) | (1 << 25) | (1 << 24) | (1 << 23);
 const NATIVE_WAIT_NS: u64 = 50_000_000;
+const USER_RING_BYTES: u64 = 4096;
+const SDMA_FENCE_BYTES: usize = 16;
 
 /// Packet format selected from the activated GPU target.
 #[derive(Clone, Copy)]
 enum SdmaProtocol {
+    /// SDMA 4 packet layout used by GFX9 KFD user queues.
+    Gfx9,
     /// SDMA 7.0 packet layout used by GFX12.0.
     Gfx12_0,
     /// Extended packet layout used by GFX12.5.
@@ -251,356 +265,38 @@ fn validate_fill_range(destination: u64, count: u64) -> Result<(), CopyFailure> 
     Ok(())
 }
 
-fn encode_cache_envelope(command: &mut [u32], trailing_gcr: usize) {
-    command.fill(0);
-    command[0] = SDMA_USER_GCR;
-    command[2] = GCR_WRITEBACK | GCR_INVALIDATE;
-    command[trailing_gcr] = SDMA_USER_GCR;
-    command[trailing_gcr + 2] = GCR_WRITEBACK;
+/// The GFX9 transport publishes packets directly to a KFD SDMA ring. GFX12
+/// retains the DRM-mediated indirect-buffer submission path.
+enum CopyQueue {
+    Kernel(KernelQueue),
+    User(Queue),
 }
 
-fn encode_copy(command: &mut [u32], destination: u64, source: u64, size: u32) {
-    // The command allocation is reused only after native retirement. Every
-    // word is written, including reserved fields, before the release fence.
-    encode_cache_envelope(command, 12);
-    encode_copy_packet(command, 5, destination, source, size);
-}
-
-#[allow(
-    clippy::cast_possible_truncation,
-    reason = "packet addresses are deliberately split into their low and high dwords"
-)]
-fn encode_copy_packet(
-    command: &mut [u32],
-    offset: usize,
-    destination: u64,
-    source: u64,
-    size: u32,
-) {
-    command[offset] = SDMA_COPY_LINEAR;
-    command[offset + 1] = size - 1;
-    command[offset + 3] = source as u32;
-    command[offset + 4] = (source >> 32) as u32;
-    command[offset + 5] = destination as u32;
-    command[offset + 6] = (destination >> 32) as u32;
-}
-
-#[allow(
-    clippy::cast_possible_truncation,
-    reason = "the packet address is deliberately split into low and high dwords"
-)]
-fn encode_fill(command: &mut [u32], destination: u64, value: u32, count: u32) {
-    encode_cache_envelope(command, 10);
-    command[5] = SDMA_CONST_FILL_DWORD;
-    command[6] = destination as u32;
-    command[7] = (destination >> 32) as u32;
-    command[8] = value;
-    command[9] = (count - 1) * 4;
-}
-
-fn encode_gfx1250_cache_envelope(command: &mut [u32], trailing_gcr: usize) {
-    command.fill(0);
-    command[0] = SDMA_USER_GCR;
-    command[3] = (1 << 4) | (1 << 14);
-    command[trailing_gcr] = SDMA_USER_GCR;
-    command[trailing_gcr + 3] = (1 << 4) | (1 << 15);
-}
-
-#[allow(
-    clippy::cast_possible_truncation,
-    reason = "packet addresses are deliberately split into low and high dwords"
-)]
-fn encode_gfx1250_copy_packet(
-    command: &mut [u32],
-    offset: usize,
-    destination: u64,
-    source: u64,
-    size: u32,
-) {
-    command[offset] = SDMA_COPY_LINEAR | (1 << 28);
-    command[offset + 1] = size - 1;
-    command[offset + 2] = (3 << 18) | (3 << 26);
-    command[offset + 3] = source as u32;
-    command[offset + 4] = (source >> 32) as u32;
-    command[offset + 5] = destination as u32;
-    command[offset + 6] = (destination >> 32) as u32;
-}
-
-fn encode_gfx1250_copy(
-    command: &mut [u32],
-    destination: u64,
-    source: u64,
-    size: u32,
-    timing: Option<TimingAddresses>,
-) -> u64 {
-    let copy_offset = 6 + usize::from(timing.is_some_and(|timing| timing.start.is_some())) * 3;
-    let end_offset = copy_offset + COPY_PACKET_BYTES / 4;
-    let trailing_gcr = end_offset + usize::from(timing.is_some()) * 3;
-    encode_gfx1250_cache_envelope(command, trailing_gcr);
-    if let Some(start) = timing.and_then(|timing| timing.start) {
-        encode_timestamp(command, 6, start);
-    }
-    encode_gfx1250_copy_packet(command, copy_offset, destination, source, size);
-    if let Some(timing) = timing {
-        encode_timestamp(command, end_offset, timing.end);
-    }
-    ((trailing_gcr + GFX1250_GCR_PACKET_BYTES / 4) * 4) as u64
-}
-
-#[allow(
-    clippy::cast_possible_truncation,
-    reason = "packet address is deliberately split into low and high dwords"
-)]
-fn encode_gfx1250_fill(command: &mut [u32], destination: u64, value: u32, count: u32) -> u64 {
-    let trailing_gcr = 6 + FILL_PACKET_BYTES / 4;
-    encode_gfx1250_cache_envelope(command, trailing_gcr);
-    command[6] = SDMA_CONST_FILL_DWORD | (3 << 24) | (1 << 29);
-    command[7] = destination as u32;
-    command[8] = (destination >> 32) as u32;
-    command[9] = value;
-    command[10] = (count - 1) * 4;
-    ((trailing_gcr + GFX1250_GCR_PACKET_BYTES / 4) * 4) as u64
-}
-
-#[allow(
-    clippy::cast_possible_truncation,
-    reason = "packet addresses are deliberately split into low and high dwords"
-)]
-fn encode_gfx1250_swap(
-    command: &mut [u32],
-    address_a: u64,
-    address_b: u64,
-    size: u32,
-    timing: Option<TimingAddresses>,
-) -> u64 {
-    let swap_offset = 6 + usize::from(timing.is_some_and(|timing| timing.start.is_some())) * 3;
-    let end_offset = swap_offset + SWAP_PACKET_BYTES / 4;
-    let trailing_gcr = end_offset + usize::from(timing.is_some()) * 3;
-    encode_gfx1250_cache_envelope(command, trailing_gcr);
-    if let Some(start) = timing.and_then(|timing| timing.start) {
-        encode_timestamp(command, 6, start);
-    }
-    command[swap_offset] = SDMA_COPY_SWAP;
-    command[swap_offset + 1] = size - 1;
-    command[swap_offset + 2] = (3 << 18) | (3 << 26);
-    command[swap_offset + 3] = address_a as u32;
-    command[swap_offset + 4] = (address_a >> 32) as u32;
-    command[swap_offset + 5] = address_b as u32;
-    command[swap_offset + 6] = (address_b >> 32) as u32;
-    if let Some(timing) = timing {
-        encode_timestamp(command, end_offset, timing.end);
-    }
-    ((trailing_gcr + GFX1250_GCR_PACKET_BYTES / 4) * 4) as u64
-}
-
-#[allow(
-    clippy::cast_possible_truncation,
-    reason = "packet addresses and operands are deliberately split into dwords"
-)]
-fn encode_gfx1250_controlled(
-    command: &mut [u32],
-    destination: u64,
-    source: u64,
-    size: u32,
-    swap: bool,
-    options: GpuCopyOptions,
-    timing: Option<TimingAddresses>,
-) -> u64 {
-    let packet_offset = 6 + usize::from(timing.is_some_and(|timing| timing.start.is_some())) * 3;
-    let copy_offset = packet_offset + 1 + usize::from(options.wait.is_some()) * 7;
-    let signal_offset = copy_offset + 6;
-    let end_offset = signal_offset + usize::from(options.signal.is_some()) * 5;
-    let trailing_gcr = end_offset + usize::from(timing.is_some()) * 3;
-    encode_gfx1250_cache_envelope(command, trailing_gcr);
-    if let Some(start) = timing.and_then(|timing| timing.start) {
-        encode_timestamp(command, 6, start);
+impl CopyQueue {
+    fn healthy(&self) -> bool {
+        match self {
+            Self::Kernel(queue) => queue.status().terminal.is_none(),
+            Self::User(queue) => queue.check().is_ok(),
+        }
     }
 
-    command[packet_offset] = (if swap {
-        SDMA_COPY_SWAP
-    } else {
-        SDMA_COPY_LINEAR
-    }) | u32::from(options.indirect_source) << 20
-        | u32::from(options.indirect_destination) << 21
-        | u32::from(options.wait.is_some()) << 30
-        | u32::from(options.signal.is_some()) << 31;
-    if let Some(wait) = options.wait {
-        let offset = packet_offset + 1;
-        command[offset] = u32::from(wait.function) | (3 << 18);
-        command[offset + 1] = wait.address as u32;
-        command[offset + 2] = (wait.address >> 32) as u32;
-        command[offset + 3] = wait.reference as u32;
-        command[offset + 4] = (wait.reference >> 32) as u32;
-        command[offset + 5] = wait.mask as u32;
-        command[offset + 6] = (wait.mask >> 32) as u32;
-    }
-    command[copy_offset] = size - 1;
-    command[copy_offset + 1] = if options.indirect_source || options.indirect_destination {
-        (3 << 10) | (3 << 18) | (3 << 26)
-    } else {
-        (3 << 18) | (3 << 26)
-    };
-    command[copy_offset + 2] = source as u32;
-    command[copy_offset + 3] = (source >> 32) as u32;
-    command[copy_offset + 4] = destination as u32;
-    command[copy_offset + 5] = (destination >> 32) as u32;
-    if let Some(signal) = options.signal {
-        command[signal_offset] = (match signal.operation {
-            GpuCopySignalOperation::Write => SDMA_SIGNAL_WRITE64,
-            GpuCopySignalOperation::Add => SDMA_SIGNAL_ADD64,
-            GpuCopySignalOperation::Subtract => SDMA_SIGNAL_SUB64,
-        }) | (3 << 18);
-        command[signal_offset + 1] = signal.address as u32;
-        command[signal_offset + 2] = (signal.address >> 32) as u32;
-        command[signal_offset + 3] = signal.data as u32;
-        command[signal_offset + 4] = (signal.data >> 32) as u32;
-    }
-    if let Some(timing) = timing {
-        encode_timestamp(command, end_offset, timing.end);
-    }
-    ((trailing_gcr + GFX1250_GCR_PACKET_BYTES / 4) * 4) as u64
-}
-
-/// Optional GPU timestamp destinations for one encoded command.
-#[derive(Clone, Copy)]
-struct TimingAddresses {
-    /// First-packet timestamp address, when start timing is requested.
-    start: Option<u64>,
-    /// Address written after the last packet.
-    end: u64,
-}
-
-#[allow(
-    clippy::cast_possible_truncation,
-    reason = "packet addresses are deliberately split into their low and high dwords"
-)]
-fn encode_timestamp(command: &mut [u32], offset: usize, address: u64) {
-    command[offset] = SDMA_TIMESTAMP_GET_GLOBAL_SYS;
-    command[offset + 1] = address as u32;
-    command[offset + 2] = (address >> 32) as u32;
-}
-
-fn encode_timed_copy(
-    command: &mut [u32],
-    destination: u64,
-    source: u64,
-    size: u32,
-    timing: TimingAddresses,
-) -> u64 {
-    let copy_offset = 5 + usize::from(timing.start.is_some()) * TIMESTAMP_PACKET_BYTES / 4;
-    let end_offset = copy_offset + COPY_PACKET_BYTES / 4;
-    let trailing_gcr = end_offset + TIMESTAMP_PACKET_BYTES / 4;
-    encode_cache_envelope(command, trailing_gcr);
-    if let Some(start) = timing.start {
-        encode_timestamp(command, 5, start);
-    }
-    encode_copy_packet(command, copy_offset, destination, source, size);
-    encode_timestamp(command, end_offset, timing.end);
-    ((trailing_gcr + GCR_PACKET_BYTES / 4) * 4) as u64
-}
-
-/// Native SDMA operation encoded into the shared indirect buffer.
-#[derive(Clone, Copy)]
-enum SdmaCommand {
-    /// Copies bytes from source to destination.
-    Copy {
-        destination: u64,
-        source: u64,
-        size: u32,
-        options: GpuCopyOptions,
-    },
-    /// Writes a dword value to a consecutive destination range.
-    Fill {
-        destination: u64,
-        value: u32,
-        count: u32,
-    },
-    /// Exchanges equal-sized source and destination ranges.
-    Swap {
-        address_a: u64,
-        address_b: u64,
-        size: u32,
-        options: GpuCopyOptions,
-    },
-}
-
-impl SdmaCommand {
-    fn encode(
-        &self,
-        words: &mut [u32],
-        timing: Option<TimingAddresses>,
-        protocol: SdmaProtocol,
-    ) -> u64 {
-        match *self {
-            Self::Copy {
-                destination,
-                source,
-                size,
-                options,
-            } => match protocol {
-                SdmaProtocol::Gfx12_0 => {
-                    debug_assert!(options.is_plain());
-                    if let Some(timing) = timing {
-                        encode_timed_copy(words, destination, source, size, timing)
-                    } else {
-                        encode_copy(words, destination, source, size);
-                        COMMAND_BYTES as u64
-                    }
-                }
-                SdmaProtocol::Gfx12_5 => {
-                    if options.is_plain() {
-                        encode_gfx1250_copy(words, destination, source, size, timing)
-                    } else {
-                        encode_gfx1250_controlled(
-                            words,
-                            destination,
-                            source,
-                            size,
-                            false,
-                            options,
-                            timing,
-                        )
-                    }
-                }
-            },
-            Self::Fill {
-                destination,
-                value,
-                count,
-            } => {
-                debug_assert!(timing.is_none());
-                match protocol {
-                    SdmaProtocol::Gfx12_0 => {
-                        encode_fill(words, destination, value, count);
-                        FILL_COMMAND_BYTES as u64
-                    }
-                    SdmaProtocol::Gfx12_5 => encode_gfx1250_fill(words, destination, value, count),
-                }
-            }
-            Self::Swap {
-                address_a,
-                address_b,
-                size,
-                options,
-            } => {
-                if options.is_plain() {
-                    encode_gfx1250_swap(words, address_a, address_b, size, timing)
-                } else {
-                    encode_gfx1250_controlled(
-                        words, address_b, address_a, size, true, options, timing,
-                    )
-                }
-            }
+    #[allow(unsafe_code)]
+    fn destroy(&mut self) -> Result<(), Error> {
+        match self {
+            Self::Kernel(queue) => queue.destroy(),
+            // SAFETY: The resource owner has stopped publishing and proved the
+            // fence packet retired before it calls this method.
+            Self::User(queue) => unsafe { queue.destroy() },
         }
     }
 }
 
 /// Native resources for one operation. An unretired submission may still read
-/// the indirect buffer; Drop keeps both owners for process teardown then.
+/// the indirect buffer or fence address; Drop retains both owners then.
 struct CopyResources {
     /// Native submission queue retained until command retirement.
-    queue: ManuallyDrop<KernelQueue>,
-    /// GPU-visible indirect command buffer.
+    queue: ManuallyDrop<CopyQueue>,
+    /// GFX12 indirect command buffer or GFX9 fence destination.
     command: ManuallyDrop<Allocation>,
     /// CPU mapping of that command buffer.
     host_address: usize,
@@ -630,43 +326,74 @@ struct TimingState {
 
 impl CopyResources {
     fn new(gpu: &GpuDevice<'_>, format: KernelQueueFormat) -> Result<Self, CopyFailure> {
-        let queue = gpu
-            .create_kernel_queue(format)
-            .map_err(CopyFailure::retired)?;
+        let dialect = gpu.info().target_profile.sdma_dialect().ok_or_else(|| {
+            CopyFailure::retired(Error::Operation {
+                kind: ErrorKind::Unsupported,
+                detail: "no qualified SDMA packet dialect for this GPU",
+            })
+        })?;
+        let gfx9 = dialect == GpuSdmaDialect::Gfx9;
         let command = gpu
             .device()
             .allocate(
                 MemoryKind::System,
                 4096,
                 4096,
-                DeviceAccess::READ | DeviceAccess::EXECUTE,
+                DeviceAccess::READ | DeviceAccess::WRITE | DeviceAccess::EXECUTE,
             )
             .map_err(CopyFailure::retired)?;
-        let mut resources = Self {
-            queue: ManuallyDrop::new(queue),
-            command: ManuallyDrop::new(command),
-            host_address: 0,
-            command_address: 0,
-            pending: None,
-            submitting: false,
-            submitted_any: false,
-            timing: None,
-            protocol: if gpu.info().gfx_minor == 5 {
-                SdmaProtocol::Gfx12_5
-            } else {
-                SdmaProtocol::Gfx12_0
-            },
-        };
-        resources.host_address = resources.command.info().host_address.ok_or_else(|| {
-            resources.failure(Error::Operation {
+        let host_address = command.info().host_address.ok_or_else(|| {
+            CopyFailure::retired(Error::Operation {
                 kind: ErrorKind::Unsupported,
                 detail: "native command backing has no host mapping",
             })
         })?;
-        resources.command_address = resources
-            .command
+        let command_address = command
             .device_address(gpu.device())
-            .map_err(|error| resources.failure(error))?;
+            .map_err(CopyFailure::retired)?;
+        let queue = if gfx9 {
+            let parameters = match format {
+                KernelQueueFormat::Sdma => QueueParameters::Sdma,
+                KernelQueueFormat::SdmaOnEngine(engine) => QueueParameters::SdmaByEngine {
+                    selection: SdmaEngineSelection::Id(engine),
+                    ring_memory: QueueRingMemory::System,
+                },
+                KernelQueueFormat::Pm4 => return Err(invalid("PM4 is not an SDMA copy format")),
+            };
+            // SAFETY: SDMA requests contain no external addresses. This owner
+            // is the sole producer and retains its ring through destruction.
+            #[allow(unsafe_code)]
+            let queue = unsafe {
+                gpu.create_queue(QueueRequest {
+                    ring_size_bytes: USER_RING_BYTES,
+                    parameters,
+                    priority: QueuePriority::Normal,
+                    device_producer: false,
+                })
+            }
+            .map_err(CopyFailure::retired)?;
+            CopyQueue::User(queue)
+        } else {
+            CopyQueue::Kernel(
+                gpu.create_kernel_queue(format)
+                    .map_err(CopyFailure::retired)?,
+            )
+        };
+        let resources = Self {
+            queue: ManuallyDrop::new(queue),
+            command: ManuallyDrop::new(command),
+            host_address,
+            command_address,
+            pending: None,
+            submitting: false,
+            submitted_any: false,
+            timing: None,
+            protocol: match dialect {
+                GpuSdmaDialect::Gfx9 => SdmaProtocol::Gfx9,
+                GpuSdmaDialect::Gfx1200 => SdmaProtocol::Gfx12_0,
+                GpuSdmaDialect::Gfx1250 => SdmaProtocol::Gfx12_5,
+            },
+        };
         Ok(resources)
     }
 
@@ -678,11 +405,148 @@ impl CopyResources {
     }
 
     fn refresh_retirement(&mut self) {
-        if self
-            .pending
-            .is_some_and(|submission| self.queue.status().retired_submission >= submission)
-        {
+        let retired = match &*self.queue {
+            CopyQueue::Kernel(queue) => self
+                .pending
+                .is_some_and(|submission| queue.status().retired_submission >= submission),
+            CopyQueue::User(queue) => self.pending.is_some_and(|submission| {
+                self.fence_word().load(Ordering::Acquire) == 1
+                    && queue
+                        .progress()
+                        .is_ok_and(|(read, write)| read == write && write == submission)
+            }),
+        };
+        if retired {
             self.pending = None;
+        }
+    }
+
+    #[allow(unsafe_code)]
+    fn fence_word(&self) -> &AtomicU32 {
+        // SAFETY: The retained system allocation owns an aligned host page.
+        unsafe { &*(self.host_address as *const AtomicU32) }
+    }
+
+    #[allow(
+        unsafe_code,
+        clippy::cast_possible_truncation,
+        clippy::too_many_lines,
+        reason = "one bounded producer transaction contains encoding, publication, and retirement"
+    )]
+    fn submit_user_packet(
+        &mut self,
+        command: SdmaCommand,
+        cancel: &AtomicBool,
+    ) -> Result<(), CopyFailure> {
+        let timing = self.timing.as_ref().and_then(|state| {
+            matches!(command, SdmaCommand::Copy { .. }).then_some(TimingAddresses {
+                start: (!state.started).then_some(state.start),
+                end: state.end,
+            })
+        });
+        let mut words =
+            [0_u32; (COPY_PACKET_BYTES + TIMESTAMP_PACKET_BYTES * 2 + SDMA_FENCE_BYTES) / 4];
+        let mut offset = 0;
+        if let Some(start) = timing.and_then(|timing| timing.start) {
+            encode_gfx9_timestamp(&mut words, offset, start);
+            offset += TIMESTAMP_PACKET_BYTES / 4;
+        }
+        let command_bytes = command.encode(&mut words[offset..], None, SdmaProtocol::Gfx9) as usize;
+        offset += command_bytes / 4;
+        if let Some(timing) = timing {
+            encode_gfx9_timestamp(&mut words, offset, timing.end);
+            offset += TIMESTAMP_PACKET_BYTES / 4;
+        }
+        let fence_offset = offset;
+        words[fence_offset] = 5; // SDMA v4 FENCE, 32-bit system write.
+        words[fence_offset + 1] = self.command_address as u32;
+        words[fence_offset + 2] = (self.command_address >> 32) as u32;
+        words[fence_offset + 3] = 1;
+        let packet_bytes = (fence_offset + SDMA_FENCE_BYTES / 4) * 4;
+        let CopyQueue::User(queue) = &*self.queue else {
+            return Err(invalid("KFD SDMA packet requires a user queue"));
+        };
+        let info = queue.info();
+        let write = loop {
+            let (read, write) = queue.progress().map_err(|error| self.failure(error))?;
+            if read > write {
+                return Err(self.failure(Error::Operation {
+                    kind: ErrorKind::DriverContract,
+                    detail: "KFD SDMA read index exceeded its write index",
+                }));
+            }
+            if write % 4 != 0 {
+                return Err(self.failure(Error::Operation {
+                    kind: ErrorKind::DriverContract,
+                    detail: "KFD SDMA write index is not dword aligned",
+                }));
+            }
+            if read == write {
+                break write;
+            }
+            if cancel.load(Ordering::Acquire) {
+                return Err(self.failure(Error::Operation {
+                    kind: ErrorKind::Busy,
+                    detail: "SDMA copy was cancelled before ring reuse",
+                }));
+            }
+            std::thread::sleep(Duration::from_micros(50));
+        };
+        let offset = write & (info.ring_size_bytes - 1);
+        let padding = if offset + packet_bytes as u64 > info.ring_size_bytes {
+            info.ring_size_bytes - offset
+        } else {
+            0
+        };
+        let next = write
+            .checked_add(padding)
+            .and_then(|value| value.checked_add(packet_bytes as u64))
+            .ok_or_else(|| invalid("KFD SDMA write index overflowed"))?;
+        self.fence_word().store(0, Ordering::Release);
+        self.submitting = true;
+        let ring = info.ring_host_address as *mut u32;
+        // SAFETY: The exclusive producer owns a 4096-byte ring. Queue progress
+        // proved it empty, and the command plus optional NOP padding fits.
+        unsafe {
+            for index in 0..padding as usize / 4 {
+                ring.add((offset as usize / 4) + index).write_volatile(0);
+            }
+            let base = if padding == 0 { offset as usize / 4 } else { 0 };
+            for (index, word) in words[..packet_bytes / 4].iter().enumerate() {
+                ring.add(base + index).write_volatile(*word);
+            }
+            fence(Ordering::Release);
+            (&*(info.write_index_host_address as *const AtomicU64)).store(next, Ordering::Release);
+            ring_doorbell(info.doorbell_host_address, next);
+        }
+        self.pending = Some(next);
+        self.submitting = false;
+        self.submitted_any = true;
+        if let Some(state) = self.timing.as_mut() {
+            if timing.is_some() {
+                state.started = true;
+            }
+        }
+        loop {
+            if self.fence_word().load(Ordering::Acquire) == 1 {
+                // The fence proves operand completion. Wait for the ring read
+                // index as well so a following publication or destroy sees an
+                // empty queue even when its pointer update trails the write.
+                let (read, observed_write) =
+                    queue.progress().map_err(|error| self.failure(error))?;
+                if read == observed_write && observed_write == next {
+                    self.pending = None;
+                    return Ok(());
+                }
+            }
+            queue.check().map_err(|error| self.failure(error))?;
+            if cancel.load(Ordering::Acquire) {
+                return Err(self.failure(Error::Operation {
+                    kind: ErrorKind::Busy,
+                    detail: "SDMA copy was cancelled before retirement",
+                }));
+            }
+            std::thread::sleep(Duration::from_micros(50));
         }
     }
 
@@ -697,6 +561,9 @@ impl CopyResources {
                 kind: ErrorKind::Busy,
                 detail: "SDMA copy was cancelled",
             }));
+        }
+        if matches!(&*self.queue, CopyQueue::User(_)) {
+            return self.submit_user_packet(command, cancel);
         }
         let timing = self.timing.as_ref().and_then(|timing| {
             matches!(command, SdmaCommand::Copy { .. } | SdmaCommand::Swap { .. }).then_some(
@@ -718,7 +585,13 @@ impl CopyResources {
         // SAFETY: Packet bytes, synchronization, and backing lifetime are
         // established by this resource owner and the caller's operand contract.
         let submission = unsafe {
-            self.queue.submit(KernelCommand {
+            let CopyQueue::Kernel(queue) = &mut *self.queue else {
+                return Err(self.failure(Error::Operation {
+                    kind: ErrorKind::Internal,
+                    detail: "SDMA indirect submission lost its kernel queue",
+                }));
+            };
+            queue.submit(KernelCommand {
                 device_address: self.command_address,
                 byte_length,
             })
@@ -736,7 +609,13 @@ impl CopyResources {
         }
         self.pending = Some(submission);
         loop {
-            let wait = self.queue.wait(submission, NATIVE_WAIT_NS, 0);
+            let CopyQueue::Kernel(queue) = &*self.queue else {
+                return Err(self.failure(Error::Operation {
+                    kind: ErrorKind::Internal,
+                    detail: "SDMA indirect wait lost its kernel queue",
+                }));
+            };
+            let wait = queue.wait(submission, NATIVE_WAIT_NS, 0);
             self.refresh_retirement();
             match wait {
                 Ok(KernelQueueWait::Retired) => return Ok(()),
@@ -863,7 +742,11 @@ impl Drop for CopyResources {
             // separately retains its source and destination after this error.
             return;
         }
-        let _ = self.queue.destroy();
+        if self.queue.destroy().is_err() {
+            // Native ownership is uncertain. Keep the fence or indirect buffer
+            // alongside the queue transport through process teardown.
+            return;
+        }
         let _ = self.command.free();
         // SAFETY: Pending native access was ruled out above. These fields are
         // dropped exactly once and remain owned by this resource bundle.
@@ -920,7 +803,7 @@ impl CopyResourcePool {
             .for_format(format)?
             .take();
         let resources = match cached {
-            Some(resources) if resources.queue.status().terminal.is_none() => resources,
+            Some(resources) if resources.queue.healthy() => resources,
             Some(_) | None => CopyResources::new(gpu, format)?,
         };
         Ok(CopyResourceLease {
@@ -938,7 +821,7 @@ impl CopyResourcePool {
             .map_err(|_| poisoned_pool())?
             .for_format(format)?
             .as_ref()
-            .is_some_and(|resources| resources.queue.status().terminal.is_none())
+            .is_some_and(|resources| resources.queue.healthy())
         {
             return Ok(());
         }
@@ -947,7 +830,7 @@ impl CopyResourcePool {
         let slot = idle.for_format(format)?;
         let stale = if slot
             .as_ref()
-            .is_none_or(|resources| resources.queue.status().terminal.is_some())
+            .is_none_or(|resources| !resources.queue.healthy())
         {
             slot.replace(resources)
         } else {
@@ -1012,10 +895,7 @@ impl Drop for CopyResourceLease<'_> {
             return;
         };
         resources.refresh_retirement();
-        if resources.pending.is_some()
-            || resources.submitting
-            || resources.queue.status().terminal.is_some()
-        {
+        if resources.pending.is_some() || resources.submitting || !resources.queue.healthy() {
             return;
         }
         resources.timing = None;
@@ -1047,7 +927,7 @@ struct CopyTiming {
     host_address: usize,
 }
 
-/// An ordered GFX12.0 SDMA copy sequence sharing one native queue and command
+/// An ordered SDMA copy sequence sharing one native queue and command or fence
 /// allocation. Each operation retires before the next begins. A failed
 /// operation makes the sequence terminal, so an unretired packet cannot be
 /// replaced in the shared command allocation.
@@ -1268,7 +1148,7 @@ impl<'device, 'cancel> GpuCopySequence<'device, 'cancel> {
             // SAFETY: The caller supplied the same direct-range contract.
             return unsafe { self.copy_linear(destination, source, size) };
         }
-        if self.gpu.info().gfx_minor != 5 {
+        if self.gpu.info().target_profile != GpuTargetProfile::Gfx1250 {
             return self.record(Err(CopyFailure::retired(Error::Operation {
                 kind: ErrorKind::Unsupported,
                 detail: "controlled SDMA copy is supported only on gfx1250",
@@ -1343,7 +1223,7 @@ impl<'device, 'cancel> GpuCopySequence<'device, 'cancel> {
         options: GpuCopyOptions,
     ) -> Result<(), CopyFailure> {
         self.active()?;
-        if self.gpu.info().gfx_minor != 5 {
+        if self.gpu.info().target_profile != GpuTargetProfile::Gfx1250 {
             return self.record(Err(CopyFailure::retired(Error::Operation {
                 kind: ErrorKind::Unsupported,
                 detail: "native SDMA swap is supported only on gfx1250",
@@ -1556,15 +1436,16 @@ impl<'device> GpuDevice<'device> {
         Ok((staging, host, device))
     }
 
-    /// Reports whether this activated GPU exposes the GFX12.0 OSS5 packet
-    /// format and bounded native SDMA submission path.
+    /// Reports whether this activated GPU has a qualified SDMA packet format
+    /// and native submission path.
     #[must_use]
     pub fn supports_linear_copy(&self) -> bool {
         let info = self.info();
-        matches!(
-            (info.gfx_major, info.gfx_minor, info.gfx_stepping),
-            (12, 0, 0 | 1) | (12, 5, 0)
-        ) && info.queues.kernel_sdma
+        match info.target_profile.sdma_dialect() {
+            Some(GpuSdmaDialect::Gfx9) => cfg!(target_arch = "x86_64") && info.queues.sdma,
+            Some(GpuSdmaDialect::Gfx1200 | GpuSdmaDialect::Gfx1250) => info.queues.kernel_sdma,
+            None => false,
+        }
     }
 
     /// Copies a non-overlapping device-address range through the GFX12.0 SDMA
@@ -1760,110 +1641,6 @@ impl<'device> GpuDevice<'device> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn gfx1201_linear_copy_encodes_system_cache_controls_and_full_addresses() {
-        let mut command = [u32::MAX; COMMAND_BYTES / 4];
-        encode_copy(
-            &mut command,
-            0x1234_5678_9abc_def0,
-            0xfeed_face_cafe_babe,
-            4096,
-        );
-        assert_eq!(command[0], SDMA_USER_GCR);
-        assert_eq!(command[2], GCR_WRITEBACK | GCR_INVALIDATE);
-        assert_eq!(
-            command[5..12],
-            [
-                1,
-                4095,
-                0,
-                0xcafe_babe,
-                0xfeed_face,
-                0x9abc_def0,
-                0x1234_5678
-            ]
-        );
-        assert_eq!(command[12], SDMA_USER_GCR);
-        assert_eq!(command[14], GCR_WRITEBACK);
-        assert_eq!(command[16], 0);
-    }
-
-    #[test]
-    fn gfx1201_timed_copy_brackets_packets_with_global_gpu_timestamps() {
-        let copy = SdmaCommand::Copy {
-            destination: 0x1234_5678_9abc_def0,
-            source: 0xfeed_face_cafe_babe,
-            size: 64,
-            options: GpuCopyOptions::default(),
-        };
-        let mut command = [u32::MAX; TIMED_COMMAND_BYTES / 4];
-        let byte_length = copy.encode(
-            &mut command,
-            Some(TimingAddresses {
-                start: Some(0xaabb_ccdd_1122_3344),
-                end: 0x5566_7788_99aa_bbcc,
-            }),
-            SdmaProtocol::Gfx12_0,
-        );
-        assert_eq!(byte_length, TIMED_COMMAND_BYTES as u64);
-        assert_eq!(command[0], SDMA_USER_GCR);
-        assert_eq!(command[2], GCR_WRITEBACK | GCR_INVALIDATE);
-        assert_eq!(
-            &command[5..18],
-            &[
-                SDMA_TIMESTAMP_GET_GLOBAL_SYS,
-                0x1122_3344,
-                0xaabb_ccdd,
-                SDMA_COPY_LINEAR,
-                63,
-                0,
-                0xcafe_babe,
-                0xfeed_face,
-                0x9abc_def0,
-                0x1234_5678,
-                SDMA_TIMESTAMP_GET_GLOBAL_SYS,
-                0x99aa_bbcc,
-                0x5566_7788,
-            ]
-        );
-        assert_eq!(command[18], SDMA_USER_GCR);
-        assert_eq!(command[20], GCR_WRITEBACK);
-        assert_eq!(&command[21..], &[0, 0]);
-
-        let byte_length = copy.encode(
-            &mut command,
-            Some(TimingAddresses {
-                start: None,
-                end: 0x5566_7788_99aa_bbcc,
-            }),
-            SdmaProtocol::Gfx12_0,
-        );
-        assert_eq!(
-            byte_length,
-            (TIMED_COMMAND_BYTES - TIMESTAMP_PACKET_BYTES) as u64
-        );
-        assert_eq!(command[5], SDMA_COPY_LINEAR);
-        assert_eq!(command[12], SDMA_TIMESTAMP_GET_GLOBAL_SYS);
-        assert_eq!(command[15], SDMA_USER_GCR);
-        assert_eq!(&command[20..], &[0, 0, 0]);
-    }
-
-    #[test]
-    fn gfx1201_fill_encodes_dword_count_and_cache_controls() {
-        let mut command = [u32::MAX; COMMAND_BYTES / 4];
-        encode_fill(&mut command, 0x1234_5678_9abc_def0, 0xaabb_ccdd, 1024);
-        assert_eq!(command[0], SDMA_USER_GCR);
-        assert_eq!(command[2], GCR_WRITEBACK | GCR_INVALIDATE);
-        assert_eq!(command[5], SDMA_CONST_FILL_DWORD);
-        assert_eq!(
-            command[6..10],
-            [0x9abc_def0, 0x1234_5678, 0xaabb_ccdd, 4092]
-        );
-        assert_eq!(command[10], SDMA_USER_GCR);
-        assert_eq!(command[12], GCR_WRITEBACK);
-        assert_eq!(command[14], 0);
-    }
 
     #[test]
     fn fill_range_checks_alignment_and_extent_before_native_acquisition() {

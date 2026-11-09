@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -24,7 +25,8 @@ protected:
     config.sgprs_per_wf = 102;
     config.vgprs_per_wf = 16;
     config.lds_size_kb = 64;
-    cu_ = amdgpu::ComputeUnitCore::create("scalar_buffer_store", config, &memory_, &l2_);
+    ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(cu_, "scalar_buffer_store",
+                                                                    config, &memory_, &l2_));
     wave_ = cu_->dispatch_wf(0, 0, 102, 16);
     ASSERT_NE(wave_, nullptr);
     // Scalar memory instructions execute even with no active vector lanes.
@@ -74,6 +76,18 @@ TEST_P(ScalarBufferStore, BufferStoresRespectPerDwordBounds) {
   EXPECT_EQ(memory_.read32(0x4004), 101u);
   EXPECT_EQ(memory_.read32(0x4008), 102u);
   EXPECT_EQ(memory_.read32(0x400c), 10u);
+}
+
+// gfx90a: a DWORD only partly inside the buffer is not written.
+TEST_P(ScalarBufferStore, BufferStoreSkipsDwordThatEndsPastTheBuffer) {
+  for (uint32_t records : {13u, 16u}) {
+    SCOPED_TRACE(records);
+    base(records);
+    memory_.write32(0x400c, 10);
+    put(32, 100);
+    ASSERT_NO_FATAL_FAILURE(issue(24, true, 12)); // S_BUFFER_STORE_DWORD at offset 12.
+    EXPECT_EQ(memory_.read32(0x400c), records == 16 ? 100u : 10u);
+  }
 }
 
 INSTANTIATE_TEST_SUITE_P(Cdna, ScalarBufferStore,
