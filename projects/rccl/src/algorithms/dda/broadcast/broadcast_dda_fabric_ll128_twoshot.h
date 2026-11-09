@@ -109,6 +109,8 @@ __global__ void ddaBroadcastFabricLL128TwoShot(
         else
           for (int u = 0; u < kDdaLL128WordsPerThread; ++u) regs[u] = 0;
         ddaLL128StoreWire(scatterDst + wireOff, regs, flag, flagLane);
+        if (elt > 0)
+          ddaLL128StoreRegs<int8_t>(recvbuff + dOff, regs, elt, lane, flagLane);
       }
 
       // Gather push: chunk[root] -> gather slot[root]
@@ -122,18 +124,17 @@ __global__ void ddaBroadcastFabricLL128TwoShot(
         else
           for (int u = 0; u < kDdaLL128WordsPerThread; ++u) regs[u] = 0;
         ddaLL128StoreWire(gatherDst + wireOff, regs, flag, flagLane);
+        if (elt > 0 && col == 0)
+          ddaLL128StoreRegs<int8_t>(recvbuff + dOff, regs, elt, lane, flagLane);
       }
     }
 
-    // Phase 3: self-copy (out-of-place only)
-    if (sendbuff != reinterpret_cast<const int8_t*>(recvbuff)) {
-      const v4u* s4 = reinterpret_cast<const v4u*>(sendbuff);
-      v4u* d4 = reinterpret_cast<v4u*>(recvbuff);
-      const size_t nVec = totalBytes >> 4;
-      const size_t gtid = (size_t)flatBlockId * (size_t)nthreads + (size_t)tid;
-      const size_t stride = (size_t)totalBlk * (size_t)nthreads;
-      for (size_t i = gtid; i < nVec; i += stride) d4[i] = s4[i];
-    }
+    // Phase 3: eliminated — recvbuff writes fused into Phase 1+2 above.
+    // (sendbuff data was already in registers after LoadRegs; StoreRegs
+    //  writes it to recvbuff without re-reading sendbuff.)
+    // Phase 3: ELIMINATED (recvbuff writes fused into Phase 1+2 above)
+    // Root writes chunk[peer] to recvbuff in Phase 1 (all columns, no redundancy)
+    // and chunk[root] to recvbuff in Phase 2 (col==0 only, avoids 3x redundancy).
 
         // Phase 4: wait for every peer's allgather contribution.
     // Q5: non-roots forward only 1 padding slice to the root (see Phase 1).
