@@ -218,6 +218,19 @@ pub(crate) enum DeviceDriverState {
 }
 
 impl DeviceDriverState {
+    /// Driver-local event origin for an activated endpoint.
+    #[allow(
+        clippy::unnecessary_wraps,
+        reason = "the test driver has no native event origin"
+    )]
+    pub(crate) fn event_origin_id(&self) -> Option<crate::device::event::DeviceEventOriginId> {
+        match self {
+            Self::LinuxKfd { state, .. } => Some(state.event_origin_id()),
+            #[cfg(test)]
+            Self::Test { .. } => None,
+        }
+    }
+
     /// Uses the retained activation driver to check its cached local-memory
     /// access policy for two devices of that same driver instance.
     pub(crate) fn can_access_local_memory(
