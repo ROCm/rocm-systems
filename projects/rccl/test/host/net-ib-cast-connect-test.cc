@@ -2598,8 +2598,7 @@ TEST_F(NetIbCastConnectFlushMicrotest, DmaBufParamOff_FallsBackToGdrOrNoFlush) {
   EXPECT_EQ(r->devs[0].gpuFlush.qp.qp, nullptr);
 }
 
-// Pins AICOMRCCL-3081; a fix flips this pin.
-TEST_F(NetIbCastConnectFlushMicrotest, Accept_KnownBug_DmaBufExportFailureReportsSuccess) {
+TEST_F(NetIbCastConnectFlushMicrotest, Accept_DmaBufExportFailureReturnsSystemError) {
   Hook(g_ibCastDmaBufSupport, [](int) { return ncclSuccess; });
   pfn_hsa_amd_portable_export_dmabuf = [](const void*, size_t, int* fd, uint64_t*) {
     *fd = -1;
@@ -2614,9 +2613,8 @@ TEST_F(NetIbCastConnectFlushMicrotest, Accept_KnownBug_DmaBufExportFailureReport
   ASSERT_EQ(IbCastAccept(lc, &rc, nullptr), ncclSuccess);
   ASSERT_EQ(IbCastConnect(nullptr, 0, &h, &sc, nullptr), ncclSuccess);
   const std::string log = CaptureLog([&] { res = IbCastAccept(lc, &rc, nullptr); });
-  EXPECT_TRUE(LogHas(log, "Failed to export DMA BUF")) << log;
-  // The receiver comm is gone, yet the caller is told to keep polling.
-  EXPECT_EQ(res, ncclSuccess);
+  EXPECT_TRUE(LogHas(log, "Failed to export DMA BUF: micro-hsa-status")) << log;
+  EXPECT_EQ(res, ncclSystemError);
   EXPECT_EQ(rc, nullptr);
   EXPECT_EQ(static_cast<ncclIbListenComm*>(lc)->stage, nullptr);
   Abandon(&h);

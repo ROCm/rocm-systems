@@ -180,6 +180,62 @@ rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
   "int64_t g_paramMaxNchannels = -2;" "the MaxNchannels fake default")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/wrap_fakes.cc"
   "static int64_t DefaultParamForceCe() { return 1; }" "the ForceCe fake default")
+# RasDiagnosticsTests.cpp (rccl-UnitTests) classifies report lines by kRasFailureMarkers and kRasHealthMarkers;
+# each marker must stay both in those lists and in every source file that emits it (comma-separated).
+set(_rccl_ras_tests "${CMAKE_CURRENT_LIST_DIR}/../RasDiagnosticsTests.cpp")
+set(_rccl_ras_markers
+  "ras/diagnostics_checks_common.cc|diagnostics incomplete"
+  "ras/diagnostics_env.cc,ras/diagnostics_gpu.cc|mismatch across"
+  "ras/diagnostics_env.cc|differ across ranks"
+  "ras/diagnostics_env.cc|comparison may be"
+  "ras/diagnostics_gpu.cc|uncorrected volatile errors on rank(s)"
+  "ras/diagnostics_gpu.cc|at or above threshold"
+  "ras/diagnostics_gpu.cc|inactive link(s)")
+foreach(_entry IN LISTS _rccl_ras_markers)
+  string(REPLACE "|" ";" _ras_pair "${_entry}")
+  list(GET _ras_pair 0 _ras_sources)
+  list(GET _ras_pair 1 _marker)
+  string(REPLACE "," ";" _ras_files "${_ras_sources}")
+  foreach(_ras_cc IN LISTS _ras_files)
+    rccl_assert_source_line("${_rccl_src_root}/${_ras_cc}" "${_marker}" "the RAS markers in test/RasDiagnosticsTests.cpp")
+  endforeach()
+  rccl_assert_source_line("${_rccl_ras_tests}" "\"${_marker}\"," "the report lines it marks in src/${_ras_sources}")
+endforeach()
+# The check labels, the report header and the skip line it parses the report by. src emits each as the start of a
+# literal; a check label may be passed on without its ": ".
+set(_rccl_ras_labels
+  "ras/diagnostics_gpu.cc|GPU inventory: "
+  "ras/diagnostics_gpu.cc|ECC: "
+  "ras/diagnostics_env.cc|NCCL environment: "
+  "ras/ras.cc|NCCL DIAG === RAS Diagnostics ==="
+  "ras/ras.cc|NCCL DIAG INFO RAS diagnostics skipped: NCCL_RAS_ENABLE=0")
+foreach(_entry IN LISTS _rccl_ras_labels)
+  string(REPLACE "|" ";" _ras_pair "${_entry}")
+  list(GET _ras_pair 0 _ras_cc)
+  list(GET _ras_pair 1 _label)
+  string(REGEX REPLACE ": $" "" _src_label "${_label}")
+  rccl_assert_source_line("${_rccl_src_root}/${_ras_cc}" "\"${_src_label}"
+    "the RAS labels in test/RasDiagnosticsTests.cpp")
+  rccl_assert_source_line("${_rccl_ras_tests}" "= \"${_label}\"" "the report lines it labels in src/${_ras_cc}")
+endforeach()
+# The driver labels are macros on the AMD SMI arm of diagnostics_gpu.cc.
+rccl_assert_source_line("${_rccl_src_root}/ras/diagnostics_gpu.cc"
+  "#define RAS_DIAG_DRIVER_LABEL \"HIP driver version\"" "kDriver in test/RasDiagnosticsTests.cpp")
+rccl_assert_source_line("${_rccl_ras_tests}" "= \"HIP driver version: \""
+  "RAS_DIAG_DRIVER_LABEL in src/ras/diagnostics_gpu.cc")
+rccl_assert_source_line("${_rccl_src_root}/ras/diagnostics_gpu.cc"
+  "#define RAS_DIAG_GPU_DRIVER_LABEL \"AMD GPU driver version\"" "kGpuDriver in test/RasDiagnosticsTests.cpp")
+rccl_assert_source_line("${_rccl_ras_tests}" "= \"AMD GPU driver version: \""
+  "RAS_DIAG_GPU_DRIVER_LABEL in src/ras/diagnostics_gpu.cc")
+unset(_rccl_ras_tests)
+unset(_rccl_ras_markers)
+unset(_rccl_ras_labels)
+unset(_src_label)
+unset(_ras_pair)
+unset(_ras_sources)
+unset(_ras_files)
+unset(_ras_cc)
+unset(_marker)
 # gdr-probe-test.cc pins the GDR probe's registration flags to production's; these
 # keep its kRegAccessFlags and both reg.cc copies spelling the same set.
 set(_rccl_reg_access_flags
@@ -222,7 +278,8 @@ endforeach()
 foreach(_dda_param
     "RCCL_PARAM(DdaLL, \"DDA_LL\", 1)"
     "RCCL_PARAM(DdaLLOneShotThreshold, \"DDA_LL_ONESHOT_THRESHOLD\", (size_t)(1) * 1024 * 1024)"
-    "RCCL_PARAM(DdaLL128OneShotThreshold, \"DDA_LL128_ONESHOT_THRESHOLD\", (size_t)(4) * 1024 * 1024)")
+    "RCCL_PARAM(DdaLL128OneShotThreshold, \"DDA_LL128_ONESHOT_THRESHOLD\", (size_t)(4) * 1024 * 1024)"
+    "RCCL_PARAM(DdaLL128AsyncWire, \"DDA_LL128_ASYNC_WIRE\", 0)")
   rccl_assert_source_line("${_rccl_src_root}/rccl_wrap.cc" "${_dda_param}" "algorithms/dda/dda-coll-seams.cc")
   rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/algorithms/dda/dda-coll-seams.cc" "${_dda_param}"
     "the rccl_wrap.cc DDA param")
@@ -312,6 +369,7 @@ function(rccl_define_micro_source_lists)
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     # real ncclP2pImportShareableBuffer, for dev-runtime-test.cc's cuMem window import.
     ${RCCL_HOST_HIPIFY_DIR}/src/transport/p2p_tmp.cc
+    fakes/amdsmi_fakes.cc
     fakes/channel_fakes.cc
     fakes/argcheck_fakes.cc
     fakes/dev_runtime_micro_fakes.cc
@@ -563,6 +621,7 @@ function(rccl_define_micro_source_lists)
     algorithms/dda/reduce_scatter/dda-reduce-scatter-fabric-ll128-test.cc
     algorithms/dda/reduce_scatter/dda-reduce-scatter-ipc-test.cc
     algorithms/dda/dda-coll-seams.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     fakes/hip_fakes.cc
     fakes/nccl_fakes.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
@@ -1107,6 +1166,7 @@ function(rccl_define_micro_source_lists)
     net-ib-cast-connect-test.cc
     fakes/env_fakes.cc
     fakes/hip_fakes.cc
+    fakes/hsa_fakes.cc
     fakes/ibvwrap_fakes.cc
     fakes/ionicdvwrap_fakes.cc
     fakes/libc_fakes.cc
@@ -1705,6 +1765,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     CSV_TUNER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/tuner/csv_tuner.cc"
     # Source tuner/ dir, so a test can check the generator embedded the CSVs verbatim.
     RCCL_TUNER_CSV_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../tuner"
+    RING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/ring.cc"
     RAS_CLIENT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/client.cc"
     RMA_PROXY_LAUNCH_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_proxy_launch.cc"
     RMA_PROXY_PROGRESS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_proxy_progress.cc"

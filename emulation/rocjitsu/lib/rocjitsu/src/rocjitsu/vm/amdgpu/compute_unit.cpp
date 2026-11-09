@@ -1608,6 +1608,7 @@ void ComputeUnitCore::report_routed_access(const Instruction &inst, Wavefront &w
                                            std::span<const uint64_t> pre_routing_addresses,
                                            uint64_t flat_local_lane_mask,
                                            uint64_t flat_dds_lane_mask) {
+  std::vector<ImageSampleFootprint> image_footprints;
   MemoryAccessObservation access;
   access.mnemonic = inst.mnemonic();
   access.pc = wf.pc;
@@ -1675,7 +1676,12 @@ void ComputeUnitCore::report_routed_access(const Instruction &inst, Wavefront &w
     access.non_temporal = state.non_temporal;
     access.force_l1_bypass = state.request_force_l1_bypass;
     access.lds_destination = state.lds_dst;
-    access.addresses = std::span<const uint64_t>(state.per_lane_addr.data(), wf_size);
+    if (state.image_sample) {
+      for (const auto &tap : state.image_sample->taps)
+        image_footprints.push_back({std::span(tap.addresses).first(wf_size), tap.lane_mask});
+      access.image_sample_footprints = image_footprints;
+    } else
+      access.addresses = std::span<const uint64_t>(state.per_lane_addr.data(), wf_size);
     access.element_lane_masks = state.element_lane_masks.view();
     if (state.ds2_active)
       access.secondary_addresses =
@@ -1900,10 +1906,9 @@ constinit thread_local ComputeUnitCore::InstructionVmSnapshot
     *ComputeUnitCore::instruction_vm_snapshot_ = nullptr;
 
 template <bool EnableAsync>
-[[gnu::always_inline]] inline ComputeUnitCore::IssueOutcome ComputeUnitCore::issue_instruction_impl(
-    Wavefront *active,
-    std::conditional_t<EnableAsync, AsyncInstructionWindow *, NoAsyncWindow> window,
-    std::conditional_t<EnableAsync, AsyncInstructionWindowStorage *, NoAsyncWindow> storage) {
+[[gnu::always_inline]] inline ComputeUnitCore::IssueOutcome
+ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<EnableAsync> window,
+                                        MaybeAsyncWindowStorage<EnableAsync> storage) {
   uint32_t vmid = active->process_id();
   const auto drain_async_window = [&]() {
     if constexpr (EnableAsync) {
@@ -2019,10 +2024,9 @@ template <bool EnableAsync>
 
   active->trace_inst_count_++;
 
-  util::StringDiagnostic decode_error;
   const bool reuse_decoded = !debugger_active;
   DecodeResult decoded = decoded_inst_cache_.decode(*decoder_, active->pc, vmid, words,
-                                                    decode_error.emitter(), reuse_decoded);
+                                                    decode_error_.emitter(), reuse_decoded);
   if (decoded.failed()) {
     drain_async_window();
     // Preserve debugger-first handling of illegal instructions. PM4 failures
@@ -2039,14 +2043,14 @@ template <bool EnableAsync>
         "words=[{:#x},{:#x},{:#x},{:#x}]: {}",
         this->name(), active->wf_id(), active->pc, active->process_id(), active->queue_id(),
         active->dispatch_id(), active->wg_id(), words[0], words[1], words[2], words[3],
-        decode_error.message());
+        decode_error_.message());
+    decode_error_({});
     handle_instruction_failure(*active, failure, exception_claimed);
     return IssueOutcome::NotIssued;
   }
   Instruction *inst = decoded.value().get();
   DecodedInstructionCache::ScopedReturn return_decoded(decoded_inst_cache_, decoded.value(),
                                                        active->pc, vmid, words, reuse_decoded);
-  std::string execution_failure_detail;
   const auto fail_current_instruction = [&]() {
     return_decoded.discard();
     if constexpr (EnableAsync) {
@@ -2054,7 +2058,10 @@ template <bool EnableAsync>
         window->drain();
     }
     fail_wave_instruction(*active, inst->mnemonic(), active->pc,
-                          active->instruction_execution_error(), execution_failure_detail);
+                          active->instruction_execution_error(),
+                          // Taken before reporting, so a throwing failure handler
+                          // cannot leave it for the next instruction.
+                          std::exchange(execution_failure_detail_, {}));
   };
   // Operand resolution outside execute_instruction() participates in the same
   // per-instruction failure contract as the generated execution callback.
@@ -2176,7 +2183,7 @@ template <bool EnableAsync>
   // hardware saves the interrupted PC/status in TTMPs and begins fetching at
   // TBA. The handler advances TTMP0:1 for software traps, sends the KFD
   // interrupt message, restores STATUS, and returns through s_rfe_b64.
-  if (std::string_view(inst->mnemonic()) == "s_trap") {
+  if (inst->flags() & SOFTWARE_TRAP) {
     // s_trap bypasses execute_instruction(), but still occupies the adjacent
     // instruction slot that ends the gfx1250 setreg/VGPR-MSB hazard window.
     active->clear_setreg_vgpr_msb_hazard();
@@ -2284,7 +2291,7 @@ template <bool EnableAsync>
 
   const uint32_t executing_process = active->process_id();
   const util::Result execution_result =
-      execute_instruction(inst, *active, &execution_failure_detail);
+      execute_instruction(inst, *active, &execution_failure_detail_);
 
   if (execution_result.failed()) [[unlikely]] {
     fail_current_instruction();
@@ -2376,9 +2383,16 @@ template <bool EnableAsync>
       // a perfectly mapped buffer.
       dbg_bytes = std::max(1u, dbg_is_atomic ? d.elem_size : d.num_elems * d.elem_size);
       dbg_addrs.reserve(d.wf_size);
-      for (uint32_t lane = 0; lane < d.wf_size; ++lane)
-        if (d.lane_mask & (1ULL << lane))
-          dbg_addrs.push_back(d.per_lane_addr[lane]);
+      if (d.image_sample) {
+        for (const auto &tap : d.image_sample->taps)
+          for (uint32_t lane = 0; lane < d.wf_size; ++lane)
+            if (tap.lane_mask & (uint64_t{1} << lane))
+              dbg_addrs.push_back(tap.addresses[lane]);
+      } else {
+        for (uint32_t lane = 0; lane < d.wf_size; ++lane)
+          if (d.lane_mask & (1ULL << lane))
+            dbg_addrs.push_back(d.per_lane_addr[lane]);
+      }
     }
   }
   // One predicate for the whole access, used both to decide that this
