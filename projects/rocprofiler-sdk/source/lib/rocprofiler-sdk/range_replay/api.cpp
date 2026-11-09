@@ -45,6 +45,56 @@ namespace range_replay
 {
 namespace
 {
+rocprofiler_status_t
+begin_range(uint64_t range_id)
+{
+    // Consumed before any early return, so an arming is never carried to a later begin() whose
+    // sigsetjmp frame may be gone.
+    const bool host_jmp_armed  = take_host_jmp_armed();
+    auto       pending_regions = take_pending_host_regions();
+
+    if(!has_registered_range_replay_context()) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
+
+    if(!has_active_range_replay_contexts()) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED;
+
+    if(current_range() != nullptr) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    if(!open_range(range_id)) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    auto* ctx = current_range();
+
+    const auto* corr_id   = context::get_latest_correlation_id();
+    ctx->thread_id        = (corr_id != nullptr) ? corr_id->thread_idx : common::get_tid();
+    ctx->internal_corr_id = (corr_id != nullptr) ? corr_id->internal : 0;
+    ctx->ancestor_corr_id = (corr_id != nullptr) ? corr_id->ancestor : 0;
+
+    ctx->plan = execute_config_callback(
+        range_id, ctx->thread_id, ctx->internal_corr_id, ctx->ancestor_corr_id);
+
+    // Both replay paths depend on the interception path in hsa/queue.cpp: packet replay to
+    // re-submit, host replay to see dispatches from other threads. The write-pointer
+    // virtualization path has its own submission handling, which this beta does not cover, so a
+    // range opened under it is declined rather than replayed.
+    if(hsa::queue_interposition::supports_queue_interposition())
+    {
+        static std::atomic<bool> _warned{false};
+        if(!_warned.exchange(true, std::memory_order_relaxed))
+            ROCP_WARNING << "range replay: not supported with queue interposition enabled; ranges "
+                            "will be recorded and declined";
+        ctx->record.decline(ROCPROFILER_RANGE_REPLAY_STATUS_UNSUPPORTED_QUEUE_PATH);
+    }
+
+    if(ctx->plan.host_replay)
+    {
+        if(host_jmp_armed)
+            host::enter_range(*ctx, std::move(pending_regions));
+        else
+            ctx->record.decline(ROCPROFILER_RANGE_REPLAY_STATUS_HOST_JMP_NOT_SET);
+    }
+
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
 void
 close_range(range_context_t&                  ctx,
             rocprofiler_range_replay_status_t status,
@@ -96,55 +146,7 @@ extern "C" {
 rocprofiler_status_t
 rocprofiler_range_replay_begin(uint64_t range_id)
 {
-    namespace range_replay = ::rocprofiler::range_replay;
-
-    // Consumed before any early return, so an arming is never carried to a later begin() whose
-    // sigsetjmp frame may be gone.
-    const bool host_jmp_armed  = range_replay::take_host_jmp_armed();
-    auto       pending_regions = range_replay::take_pending_host_regions();
-
-    if(!range_replay::has_registered_range_replay_context())
-        return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
-
-    if(!range_replay::has_active_range_replay_contexts())
-        return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED;
-
-    if(range_replay::current_range() != nullptr) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
-
-    if(!range_replay::open_range(range_id)) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
-
-    auto* ctx = range_replay::current_range();
-
-    const auto* corr_id = ::rocprofiler::context::get_latest_correlation_id();
-    ctx->thread_id = (corr_id != nullptr) ? corr_id->thread_idx : ::rocprofiler::common::get_tid();
-    ctx->internal_corr_id = (corr_id != nullptr) ? corr_id->internal : 0;
-    ctx->ancestor_corr_id = (corr_id != nullptr) ? corr_id->ancestor : 0;
-
-    ctx->plan = range_replay::execute_config_callback(
-        range_id, ctx->thread_id, ctx->internal_corr_id, ctx->ancestor_corr_id);
-
-    // Both replay paths depend on the interception path in hsa/queue.cpp: packet replay to
-    // re-submit, host replay to see dispatches from other threads. The write-pointer
-    // virtualization path has its own submission handling, which this beta does not cover, so a
-    // range opened under it is declined rather than replayed.
-    if(::rocprofiler::hsa::queue_interposition::supports_queue_interposition())
-    {
-        static std::atomic<bool> _warned{false};
-        if(!_warned.exchange(true, std::memory_order_relaxed))
-            ROCP_WARNING << "range replay: not supported with queue interposition enabled; ranges "
-                            "will be recorded and declined";
-        ctx->record.decline(ROCPROFILER_RANGE_REPLAY_STATUS_UNSUPPORTED_QUEUE_PATH);
-    }
-
-    if(ctx->plan.host_replay)
-    {
-        if(host_jmp_armed)
-            range_replay::host::enter_range(*ctx, std::move(pending_regions));
-        else
-            ctx->record.decline(ROCPROFILER_RANGE_REPLAY_STATUS_HOST_JMP_NOT_SET);
-    }
-
-    return ROCPROFILER_STATUS_SUCCESS;
+    return ::rocprofiler::range_replay::begin_range(range_id);
 }
 
 void*
