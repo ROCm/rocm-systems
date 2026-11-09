@@ -41,6 +41,7 @@
 #include "fakes/collective_stubs.h"  // g_ncclArgsGlobalCheck
 #include "fakes/ce_fakes.h"      // g_ncclCeInit, g_ncclCeEnsureAllReduceStaging
 #include "fakes/hip_fakes.h"     // g_hipThreadExchangeStreamCaptureMode
+#include "fakes/sym_kernels_fakes.h"  // g_symkAvailable
 #include "fakes/transport_stubs.h"  // g_ncclTransportP2pSetup
 #include "ScopedHook.h"          // RAII install/restore for controllable seams
 #include "WaitUntil.h"           // bounded poll for what the other thread does
@@ -377,9 +378,10 @@ TEST_F(GroupEndInternalTest, BlockingGroupWithPendingJob_RunsSynchronouslyAndRet
     << "the single-job fast path must mark itself as running on the caller's own thread";
 }
 
-// Multi-rank symmetric task prep must defer until every local comm has enqueued its job;
-// running the first inline can block in bootstrap consensus before its siblings enter it.
-TEST_F(GroupEndInternalTest, MultiRankSymmetricCommEnqueuesAsyncJob) {
+// Production initializes symk at communicator setup. This fallback covers any
+// capable comm that nevertheless reaches prepare uninitialized: every local
+// rank must enqueue before one can block in bootstrap consensus.
+TEST_F(GroupEndInternalTest, UninitializedMultiRankSymmetricCommEnqueuesAsyncJob) {
   auto comm = std::make_unique<ncclComm>();  // value-initialised => zeroed
   comm->intraRanks = 2;
   comm->symmetricSupport = 1;
@@ -405,6 +407,40 @@ TEST_F(GroupEndInternalTest, MultiRankSymmetricCommEnqueuesAsyncJob) {
   EXPECT_TRUE(ncclIntruQueueEmpty(&asyncCollJobs));
 
   queued->destructor(queued);
+}
+
+TEST_F(GroupEndInternalTest, InitializedOrIneligibleSymmetricCommPreparesInline) {
+  struct Case {
+    int intraRanks;
+    bool symmetricSupport;
+    bool p2pCrossClique;
+    bool initialized;
+  };
+  for (Case c : {Case{2, true, false, true}, Case{1, true, false, false},
+                 Case{2, false, false, false}, Case{2, true, true, false}}) {
+    auto comm = std::make_unique<ncclComm>();
+    comm->intraRanks = c.intraRanks;
+    comm->symmetricSupport = c.symmetricSupport;
+    comm->p2pCrossClique = c.p2pCrossClique;
+    comm->symkState.initialized = c.initialized;
+    int prepareCalls = 0;
+    ScopedHook prepareTasks(
+        g_ncclPrepareTasks,
+        [&prepareCalls](struct ncclComm*, bool* algoNeedConnect, bool* needConnect, ncclSimInfo_t*) {
+          prepareCalls++;
+          memset(algoNeedConnect, 0, sizeof(bool) * NCCL_NUM_ALGORITHMS);
+          *needConnect = false;
+          return ncclSuccess;
+        });
+    ncclIntruQueue<ncclAsyncJob, &ncclAsyncJob::next> asyncCollJobs;
+    ncclIntruQueueConstruct(&asyncCollJobs);
+    ncclSimInfo_t simInfo{};
+
+    ASSERT_EQ(ncclSuccess,
+              ncclPrepareTasksAndCollPreconnect(comm.get(), &simInfo, &asyncCollJobs));
+    EXPECT_EQ(1, prepareCalls);
+    EXPECT_TRUE(ncclIntruQueueEmpty(&asyncCollJobs));
+  }
 }
 
 TEST_F(GroupEndInternalTest, DepthZero_ReturnsInvalidUsage) {
