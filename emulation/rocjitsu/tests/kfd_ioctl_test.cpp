@@ -48,6 +48,7 @@ RJ_DIAGNOSTIC_POP
 #include <linux/filter.h>
 #include <linux/seccomp.h>
 #include <poll.h>
+#include <pthread.h>
 #include <spawn.h>
 #include <sys/eventfd.h>
 #include <sys/mman.h>
@@ -8697,6 +8698,107 @@ constexpr size_t framed_ioctl_request_bytes(size_t arg_bytes) {
 // signal-interrupted wait produces, without having to time a signal. Queued
 // before the client sends anything: the two directions are independent, so the
 // reply can already be waiting when the request goes out.
+namespace {
+
+void check_native_rpc_exit(bool waiting_for_payload) {
+  int sockets[2];
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sockets), 0);
+  const CloseOnScopeExit server{sockets[1]};
+  rocjitsu::RemoteDriver driver(sockets[0]);
+  int pipe_fds[2];
+  ASSERT_EQ(::pipe2(pipe_fds, O_CLOEXEC), 0);
+  const CloseOnScopeExit pipe_read{pipe_fds[0]}, pipe_write{pipe_fds[1]};
+  struct stat identity {};
+  ASSERT_EQ(::fstat(pipe_read.get(), &identity), 0);
+  const auto aliases = [&] {
+    size_t count = 0;
+    for (const auto &entry : std::filesystem::directory_iterator("/proc/self/fd")) {
+      struct stat info {};
+      if (::stat(entry.path().c_str(), &info) == 0 && info.st_dev == identity.st_dev &&
+          info.st_ino == identity.st_ino)
+        ++count;
+    }
+    return count;
+  };
+  ASSERT_EQ(aliases(), 2u);
+  if (waiting_for_payload) {
+    rocjitsu::RpcHeader response{};
+    response.opcode = rocjitsu::RPC_IOCTL;
+    response.payload_bytes = sizeof(kfd_ioctl_get_version_args);
+    const int reply_fd = pipe_read.get();
+    ASSERT_EQ(rocjitsu::rpc_send_msg(sockets[1], &response, sizeof(response), &reply_fd, 1),
+              sizeof(response));
+  }
+
+  struct WaitState {
+    rocjitsu::RemoteDriver *driver;
+    std::atomic<pid_t> tid{0};
+    bool returned = false;
+  } state{&driver};
+  pthread_t waiter{};
+  ASSERT_EQ(::pthread_create(
+                &waiter, nullptr,
+                +[](void *argument) -> void * {
+                  auto *state = static_cast<WaitState *>(argument);
+                  state->tid.store(syscall(SYS_gettid), std::memory_order_release);
+                  kfd_ioctl_get_version_args version{};
+                  (void)state->driver->ioctl(AMDKFD_IOC_GET_VERSION, &version);
+                  state->returned = true;
+                  return nullptr;
+                },
+                &state),
+            0);
+  bool blocked = false;
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while (std::chrono::steady_clock::now() < deadline) {
+    if (const pid_t tid = state.tid.load(std::memory_order_acquire)) {
+      std::ifstream syscall_state("/proc/self/task/" + std::to_string(tid) + "/syscall");
+      long number;
+      if (syscall_state >> number && number == SYS_recvmsg &&
+          aliases() == (waiting_for_payload ? 3u : 2u)) {
+        blocked = true;
+        break;
+      }
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  EXPECT_TRUE(blocked);
+  ASSERT_EQ(::pthread_cancel(waiter), 0);
+  void *result = nullptr;
+  ASSERT_EQ(::pthread_join(waiter, &result), 0);
+  EXPECT_EQ(result, PTHREAD_CANCELED);
+  EXPECT_FALSE(state.returned);
+  EXPECT_EQ(aliases(), 2u) << "the unadopted reply descriptor survived native exit";
+
+  // Both calls need rpc_mutex_. They must finish, and the abandoned response
+  // must never be reused as another ioctl's reply.
+  kfd_ioctl_get_version_args after{};
+  EXPECT_EQ(driver.ioctl(AMDKFD_IOC_GET_VERSION, &after), -EPROTO);
+  EXPECT_EQ(driver.close(), 0);
+}
+
+} // namespace
+
+TEST(RemoteDriverStreamPoisonDeathTest, NativeExitDuringHeaderReceiveUnlocksAndPoisonsTheStream) {
+  ASSERT_EXIT(
+      {
+        ::alarm(5);
+        check_native_rpc_exit(false);
+        _exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
+TEST(RemoteDriverStreamPoisonDeathTest, NativeExitDuringPayloadReceiveClosesTheUnadoptedFd) {
+  ASSERT_EXIT(
+      {
+        ::alarm(5);
+        check_native_rpc_exit(true);
+        _exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
 TEST(RemoteDriverStreamPoisonTest, TruncatedIoctlReplyMakesEveryLaterCallFailFast) {
   int sv[2];
   ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << ::strerror(errno);
