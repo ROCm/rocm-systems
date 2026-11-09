@@ -466,11 +466,8 @@ hipError_t ihipMallocManaged(void** ptr, size_t size, size_t align, bool use_hos
 
   const amd::Device& dev = *ctx.devices()[0];
 
-  // A module-scope __managed__ variable's storage has to outlive hipDeviceReset(), so keep it
-  // out of the purge there. ROCCLR_MEM_INTERNAL_MEMORY is what MemObjMap::Purge() skips, and
-  // it already covers the analogous case in roc::Program, where a buffer wraps device globals
-  // the program owns rather than storage the buffer allocated. Teardown is unaffected:
-  // removeFatBinary() still frees the storage through ihipFree().
+  // ROCCLR_MEM_INTERNAL_MEMORY ties this storage's lifetime to the module that declares the
+  // variable rather than to the device, so hipDeviceReset() leaves it mapped.
   const cl_svm_mem_flags keep_across_reset =
       (owner == ManagedMemOwner::kModuleVariable) ? ROCCLR_MEM_INTERNAL_MEMORY : 0;
 
