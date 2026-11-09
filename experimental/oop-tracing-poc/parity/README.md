@@ -77,16 +77,19 @@ only, so the probes' exit fields (result, outputs) are not compared.
 
 | Workload | argument values | equal | APIs |
 |---|---|---|---|
-| `vadd` | 105 | 104 | 12 |
-| `mt 4 2 50` | 10,768 | 10,767 | 25 |
-| `rocblas-test` smoke | 840,012 | 832,291 (all but `deviceFunction`) | 17 |
+| `vadd` | 105 | 105 | 12 |
+| `mt 4 2 50` | 10,768 | 10,768 | 25 |
+| `rocblas-test` smoke | 840,012 | 840,012 | 17 |
 
-Differences:
-- `__hipRegisterFunction(..., char* deviceFunction, ...)`: rocprofv3 prints the kernel name; the
-  probe records the address, because the generator treats only `const char*` as a string. Fix in
-  the CLR annotations (#15122): mark it as a string, uncapped, like `deviceName`.
-- Names, values equal by position: `hipExtModuleLaunchKernel` `f`/`hStream` (the public
-  declaration in `hip_ext.h`) are `func`/`stream` in rocprofv3; `hipGetDevicePropertiesR0600`
-  `device` is `deviceId` in rocprofv3 and in `hip_runtime_api.h`. That declaration is inside
-  `#if HIP_TARGET_API_VERSION >= 600`, which the generator's parse does not enter, so it took the
-  dispatch-table typedef's name (#15087: define the version when parsing).
+Before two fixes, the comparison found (both fixed on the CLR and generator branches):
+- `__hipRegisterFunction(..., char* deviceFunction, ...)`: rocprofv3 recorded the kernel name, the
+  probe the address, because only `const char*` inputs were strings. The generator now lets
+  `strings` name a `char*` input (#15087), and the CLR annotations record `deviceFunction` and
+  `deviceName` as uncapped strings (#15122).
+- `hipGetDevicePropertiesR0600` `device` (rocprofv3 and `hip_runtime_api.h`: `deviceId`), and
+  `hipMemAdvise_v2` `device` (`location`): the probes had been generated with a HIP 0.0 version
+  stub, so declarations under `#if HIP_TARGET_API_VERSION >= 600` were not parsed. Regenerated
+  with the build's `hip_version.h` (#15122).
+
+One naming difference remains by design: `hipExtModuleLaunchKernel` `f`/`hStream` are the public
+declaration's names (`hip_ext.h`); rocprofv3 calls them `func`/`stream`. Values are equal.
