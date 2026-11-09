@@ -57,7 +57,8 @@ use crate::{Error, ErrorKind};
 
 /// Inert constructors for the driver backends compiled into this target.
 /// Each session constructs fresh instances from this immutable catalog.
-pub(crate) type DriverFactory = fn(DriverContextLifetime) -> Result<DriverInstance, Error>;
+pub(crate) type DriverFactory =
+    fn(DriverContextLifetime, crate::os::ProcessIdentity) -> Result<DriverInstance, Error>;
 
 pub(crate) const BUILTIN_DRIVER_FACTORIES: &[DriverFactory] = &[
     #[cfg(all(
@@ -71,9 +72,12 @@ pub(crate) const BUILTIN_DRIVER_FACTORIES: &[DriverFactory] = &[
     target_os = "linux",
     any(target_arch = "x86_64", target_arch = "aarch64")
 ))]
-fn new_linux_kfd(lifetime: DriverContextLifetime) -> Result<DriverInstance, Error> {
+fn new_linux_kfd(
+    lifetime: DriverContextLifetime,
+    process: crate::os::ProcessIdentity,
+) -> Result<DriverInstance, Error> {
     Ok(DriverInstance::LinuxKfd(Shared::new(
-        KfdDriver::with_context_lifetime(lifetime),
+        KfdDriver::with_context_lifetime(lifetime, process),
     )?))
 }
 

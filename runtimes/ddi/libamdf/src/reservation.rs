@@ -73,7 +73,7 @@ pub(crate) unsafe extern "C" fn host_capabilities(
     boundary(|| unsafe {
         let instance = object(pointer.cast::<Instance>())?;
         let out = output(out, AMDF_STRUCTURE_TYPE_MEMORY_RESERVATION_CAPABILITIES)?;
-        if instance.closing || instance.process_id != std::process::id() {
+        if instance.closing || !instance.native.is_current_process() {
             return Err(PRECONDITION);
         }
         let page = host::host_page_size().map_err(|error| native(&error))?;
@@ -102,7 +102,7 @@ pub(crate) unsafe extern "C" fn create(
     boundary(|| unsafe {
         output_pointer(out)?;
         let instance = object(pointer.cast::<Instance>())?;
-        if instance.closing || instance.process_id != std::process::id() {
+        if instance.closing || !instance.native.is_current_process() {
             return Err(PRECONDITION);
         }
         let info = input(info, AMDF_STRUCTURE_TYPE_MEMORY_RESERVATION_CREATE_INFO)?;
