@@ -11,6 +11,7 @@
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
+#include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/instruction_mix/plugin.h"
 #include "rocjitsu/vm/plugins/logging/plugin.h"
 #include "rocjitsu/vm/plugins/plugin_config_resolver.h"
@@ -2421,6 +2422,11 @@ TEST(HookOrderingTest, BarrierTwoWaves) {
   EXPECT_EQ(log.count(HookEvent::BARRIER_RESOLVED), 1u);
   EXPECT_EQ(log.count(HookEvent::WAVEFRONT_DISPATCHED), 2u);
   EXPECT_EQ(log.count(HookEvent::WAVEFRONT_HALTED), 2u);
+  for (const HookEvent &e : p->events) {
+    if (e.kind == HookEvent::BARRIER_RESOLVED) {
+      EXPECT_EQ(e.barrier_kind, BarrierKind::Workgroup);
+    }
+  }
 
   ASSERT_EQ(p->events.front().kind, HookEvent::INIT);
   ASSERT_EQ(p->events.back().kind, HookEvent::SHUTDOWN);

@@ -120,6 +120,13 @@ public:
 
   WaveRaceState &getWaveRaceState(int waveIndex);
 
+  /// A workgroup barrier covers all waves, including those that ended before
+  /// it resolved. Retire their WAVE_COMPLETE events; ACTIVE events stay pending.
+  void flushWorkgroupBarrierEvents() {
+    for (auto &wave : waveRaceStates)
+      wave.flushBarrierPendingEvents();
+  }
+
 private:
   void setProfiler(ProfilerInterface &);
 
