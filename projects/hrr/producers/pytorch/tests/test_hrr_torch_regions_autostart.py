@@ -84,8 +84,7 @@ class AutostartTest(unittest.TestCase):
         return json.loads(proc.stdout.strip().splitlines()[-1])
 
     def test_import_alone_records_nothing(self):
-        # A started producer enables history within milliseconds here, so a
-        # second without it is a clear negative.
+        # A started producer enables history within milliseconds, so a second without it is a clear negative.
         got = self.import_producer({}, wait_s=1.0)
         self.assertEqual(got["threads"], 0)
         self.assertEqual(got["calls"], [])

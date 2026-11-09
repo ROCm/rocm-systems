@@ -23,8 +23,7 @@ _BATCH_PREFIX = struct.calcsize(_EVENT_HEADER) + 8  # + u32 n, u32 flags
 
 _INTERVAL_S = float(os.environ.get("HRR_REGIONS_INTERVAL_S", "2.0"))
 _VERBOSE = os.environ.get("HRR_REGIONS_VERBOSE", "") not in ("", "0")
-# PyTorch's trace ring depth, per device, which bounds how much allocator
-# history the process holds. Must exceed the number of alloc/free events between
+# PyTorch's per-device trace ring depth bounds the allocator history held. It must exceed the alloc/free events between polls.
 _MAX_ENTRIES = int(os.environ.get("HRR_REGIONS_MAX_ENTRIES", "100000"))
 
 _ACTIONS = {
@@ -220,8 +219,7 @@ class _Stream:
         if self._fh is None or self._pid != os.getpid():
             self.close()
             regions = os.path.join(d, "regions")
-            # Private as the README asks, and never through a planted link. The
-            # file is opened relative to the directory checked, so the
+            # Private as the README asks, never through a planted link: open the file relative to the directory checked.
             if os.name == "nt":
                 try:
                     os.mkdir(regions, 0o700)
@@ -244,8 +242,7 @@ class _Stream:
                 if dfd is not None:
                     os.close(dfd)
             self._pid = os.getpid()
-            # Only on a fresh file. The stream is opened for append and can be
-            # re-opened after close(), so writing unconditionally would splice
+            # Only on a fresh file: the stream opens for append and can reopen after close(), so an unconditional header would splice.
             if self._fh.tell() == 0:
                 self._fh.write(_FILE_HEADER)
 

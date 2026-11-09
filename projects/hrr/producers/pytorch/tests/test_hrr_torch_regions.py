@@ -26,7 +26,6 @@ import hrr_torch_regions as regions  # noqa: E402
 
 RECORD = (regions._ADD, regions._BLOCK, 0, 0x1000, 256, 1)
 VICTIM_CONTENTS = b"must survive the producer\n"
-# What the tests take this process to be, so they do not depend on /proc.
 INSTANCE = "00000000-0000-0000-0000-000000000000 4242"
 
 
@@ -74,8 +73,7 @@ class ArchiveDirTest(_ArchiveCase):
             self.assertIsNone(regions._archive_dir())
 
     def test_events_bin_without_marker(self):
-        # What a refused capture can leave behind: pid-<pid> and events.bin,
-        # but no marker.
+        # A refused capture can leave pid-<pid> and events.bin but no marker.
         self.marker.unlink()
         self.assertTrue((self.archive / "events.bin").is_file())
         self.assertIsNone(regions._archive_dir())
