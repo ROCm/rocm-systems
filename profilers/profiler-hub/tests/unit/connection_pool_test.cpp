@@ -154,7 +154,13 @@ TEST_F(connection_pool_test,
 TEST_F(connection_pool_test, connections_of_a_pool_share_the_catalog)
 {
     auto                    catalog = std::make_shared<reader_catalog_t>();
-    common::connection_pool pool{ m_db_path, 2, catalog };
+    common::connection_pool pool{ m_db_path,
+                                  2,
+                                  catalog,
+                                  "",
+                                  reader_types::trace_format_t{
+                                      reader_types::trace_schema_t::rocpd,
+                                      version_t{ 3, 0, 0 } } };
 
     EXPECT_GE(catalog.use_count(), 2);
 }
