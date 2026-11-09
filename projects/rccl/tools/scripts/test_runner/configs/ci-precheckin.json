@@ -171,7 +171,7 @@
         {"name": "Diagnostics.P2pDisabledReportsNoEdges", "description": "NCCL_RUN_DIAGNOSTICS with NCCL_P2P_DISABLE=1", "test_filter": "Diagnostics.P2pDisabledReportsNoEdges", "timeout": 240},
         {"name": "Diagnostics.ReportOnStdoutOnly", "description": "NCCL_RUN_DIAGNOSTICS report goes to stdout only", "test_filter": "Diagnostics.ReportOnStdoutOnly", "timeout": 240},
         {"name": "Diagnostics.SingleProcessPeerAccessNotice", "description": "NCCL_RUN_DIAGNOSTICS peer-access notice in one process", "test_filter": "Diagnostics.SingleProcessPeerAccessNotice", "timeout": 240},
-        {"name": "Diagnostics.ReportParserOnFixedCapture", "description": "Diagnostics report parser on a fixed capture (no GPU)", "test_filter": "Diagnostics.ReportParserOnFixedCapture", "timeout": 60}
+        {"name": "Diagnostics.ReportParserOnFixedCapture", "description": "Diagnostics report parser on a fixed capture (no multi-GPU requirement)", "test_filter": "Diagnostics.ReportParserOnFixedCapture", "timeout": 60}
       ]
     },
     "unit_tests_fixtures": {
