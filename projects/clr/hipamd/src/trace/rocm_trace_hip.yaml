@@ -40,6 +40,11 @@ capture_level: rocm_hip_trace_capture
 apis:
   __hipPopCallConfiguration:
     out: [blockDim, gridDim, sharedMem, stream]
+  __hipRegisterFunction:
+    # Both are the kernel's mangled name; deviceFunction is declared char* (not const) but is
+    # text. Kernel names are recorded whole (RC-GEN-8).
+    strings: [deviceFunction]
+    uncapped: [deviceFunction, deviceName]
   hipApiName:
     strings: [result]
   hipArray3DCreate:
