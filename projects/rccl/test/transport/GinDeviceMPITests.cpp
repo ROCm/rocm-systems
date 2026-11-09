@@ -148,14 +148,14 @@ std::string mixedBackendTwoNodeSkipReason() {
   std::string local = ginEnvDisabledReason();
   if (local.empty()) local = cuMemReason();
 #ifndef ENABLE_ROCSHMEM_GIN
-  if (local.empty()) local = "AICOMRCCL-3417 requires ENABLE_ROCSHMEM_GIN";
+  if (local.empty()) local = "Requires ENABLE_ROCSHMEM_GIN";
 #else
   if (local.empty() && gin_anvil_sdma_probe() <= 0)
-    local = "AICOMRCCL-3417 requires Anvil SDMA (gin_anvil_sdma_probe)";
+    local = "Requires Anvil SDMA (gin_anvil_sdma_probe)";
 #endif
   // Presence, not value: ginAnvilInit rejects an empty NCCL_GIN_TYPE.
   if (local.empty() && std::getenv("NCCL_GIN_TYPE"))
-    local = "AICOMRCCL-3417 requires NCCL_GIN_TYPE to be unset";
+    local = "Requires NCCL_GIN_TYPE to be unset";
   // crossNodeReason splits MPI_COMM_TYPE_SHARED. Every rank must call it.
   std::string cross = crossNodeReason();
   if (local.empty()) local = std::move(cross);
