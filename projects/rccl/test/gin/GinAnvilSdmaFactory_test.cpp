@@ -18,6 +18,7 @@
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
+#include <hsa/hsa_ext_amd.h>
 
 #include <cstdlib>
 #include <cstring>
@@ -301,9 +302,29 @@ TEST_F(GinAnvilSdmaFactoryTest, Create_MultiRankTable) {
   }
 
   int ndev = 0;
-  if (hipGetDeviceCount(&ndev) != hipSuccess || ndev < 2) return;
+  ASSERT_EQ(hipGetDeviceCount(&ndev), hipSuccess);
+  if (ndev < 2) {
+    RecordProperty("cross_device_cases", "not run: fewer than two GPUs");
+    return;
+  }
 
-  // The factory enables peer access itself, so a failed cross-device create is a failure, not a skip.
+  auto hasXgmiPeerAccess = [](int peer) {
+    int canAccess = 0;
+    uint32_t linkType = 0;
+    uint32_t hopCount = 0;
+    const hipError_t peerStatus = hipDeviceCanAccessPeer(&canAccess, 0, peer);
+    EXPECT_EQ(peerStatus, hipSuccess);
+    if (peerStatus != hipSuccess || !canAccess) return false;
+    const hipError_t linkStatus = hipExtGetLinkTypeAndHopCount(0, peer, &linkType, &hopCount);
+    EXPECT_EQ(linkStatus, hipSuccess);
+    return linkStatus == hipSuccess && linkType == HSA_AMD_LINK_INFO_TYPE_XGMI;
+  };
+  if (!hasXgmiPeerAccess(1)) {
+    RecordProperty("cross_device_cases", "not run: GPUs 0 and 1 require peer-accessible XGMI");
+    return;
+  }
+
+  // A failed create on this peer-accessible XGMI path is a regression, not a skip.
   CreateOut out2{};
   ASSERT_EQ(tryCreate(2, 0, 0, mockAllgatherFillDevices, 1, &out2), 0);
   std::vector<void*> t2 = readTable(out2, 2);
@@ -313,9 +334,15 @@ TEST_F(GinAnvilSdmaFactoryTest, Create_MultiRankTable) {
   EXPECT_EQ(t2[0], dev0Handle);
   destroyOut(&out2);
 
-  // With 2 channels a channel-major table differs from the pe-major one. Peer 2's queues are new, so
-  // both of its channels exist; peers 0 and 1 reuse 1-channel queues from above.
-  if (ndev < 3) return;
+  // With 2 channels a channel-major table differs from the pe-major one; peers reuse whatever queues already exist.
+  if (ndev < 3) {
+    RecordProperty("two_channel_case", "not run: fewer than three GPUs");
+    return;
+  }
+  if (!hasXgmiPeerAccess(2)) {
+    RecordProperty("two_channel_case", "not run: GPUs 0 and 2 require peer-accessible XGMI");
+    return;
+  }
   constexpr int kChannels = 2;
   CreateOut out3{};
   ASSERT_EQ(tryCreate(3, 0, 0, mockAllgatherFillDevices, kChannels, &out3), 0);
