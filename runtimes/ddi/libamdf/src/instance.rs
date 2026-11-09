@@ -45,8 +45,6 @@ pub(crate) struct Instance {
     pub host_backing_head: Mutex<usize>,
     /// Native signal page service for the process KFD connection.
     pub event_service: Mutex<SignalEventService>,
-    /// Whether this instance uses process-wide native resource lifetime.
-    pub process_lifetime: bool,
     /// One observer per activated endpoint, shared by its device handles.
     event_observers: Mutex<OwnerVec<ObserverRecord>>,
     /// Host page size cached for memory profile queries.
@@ -58,6 +56,11 @@ pub(crate) struct Instance {
 }
 
 impl Instance {
+    /// Reports the immutable native lifetime selected for this instance.
+    pub(crate) fn process_lifetime(&self) -> bool {
+        self.native.driver_context_lifetime() == session::DriverContextLifetime::Process
+    }
+
     /// Reserves frontend owner storage under this instance's callback policy.
     pub(crate) fn owner_slot<T>(&self) -> Result<UninitOwned<T>, u64> {
         self.host_allocator
@@ -711,7 +714,6 @@ pub(crate) unsafe extern "C" fn create(
             ids: AtomicU64::new(1),
             host_backing_head: Mutex::new(0),
             event_service: Mutex::new(SignalEventService::new(lifetime)),
-            process_lifetime: info.native_lifetime == AMDF_NATIVE_LIFETIME_PROCESS,
             event_observers: Mutex::new(OwnerVec::with_allocator(host_allocator)),
             scope: Scope {
                 instance: std::ptr::null_mut(),
@@ -988,7 +990,7 @@ pub(crate) unsafe extern "C" fn device_create(
         };
         // Feature queries are metadata-only. Sample the process signal-page
         // state here so they never contend on its native-resource mutex.
-        let native_events_available = if instance.process_lifetime {
+        let native_events_available = if instance.process_lifetime() {
             process_signal_event_available(&native).map_err(|error| {
                 unregister(&endpoint.children);
                 crate::support::native(&error)
