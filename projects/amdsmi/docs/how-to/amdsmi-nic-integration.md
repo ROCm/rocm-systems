@@ -78,9 +78,9 @@ System
 ```
 
 AMD SMI surfaces every discovered NIC, AMD or third-party, through the single
-``AMDSMI_PROCESSOR_TYPE_AMD_NIC`` processor type. The public API does not expose a
-per-vendor processor type; vendor distinction is an implementation detail of the
-NIC library's plugin layer (see
+``AMDSMI_PROCESSOR_TYPE_AMD_NIC`` processor type. The processor type does not tell
+vendors apart; ``amdsmi_get_nic_type()`` and the vendor name from
+``amdsmi_get_nic_asic_info()`` do, and discovery is done by the NIC library's plugin layer (see
 [Vendor plugin architecture](#vendor-plugin-architecture)).
 
 Each NIC is represented as a **processor handle** (`amdsmi_processor_handle`).
@@ -1638,8 +1638,9 @@ documented in its repository and user guide linked above.
 - **Bare-metal (BM) under ROCm**: Linux bare-metal with ROCm installed; primary deployment surface and the focus of this guide.
 - **Host AMD SMI (virtualization host)**: Linux virtualization host (KVM/QEMU) managing AMD devices passed through to guests; maintained in its own repository (linked above).
 
-NIC APIs documented in this guide are part of the shared public header and are
-exposed by both libraries. A NIC backend requires its vendor kernel driver to
+NIC APIs documented in this guide are part of the shared public header. Those tagged
+``@platform{gpu_bm_linux}`` only, such as ``amdsmi_get_nic_type()`` and
+``amdsmi_get_nic_telemetry()``, are exposed by the bare-metal library alone. A NIC backend requires its vendor kernel driver to
 be loaded on the platform performing the queries.
 
 ### Build system

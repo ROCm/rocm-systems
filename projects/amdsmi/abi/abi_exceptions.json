@@ -4,6 +4,13 @@
   "breaks": [
     {"path": "semantics/field:amdsmi_apu_metrics_t.average_gfx_activity", "old": {}, "new": {"unit": ["%"]}, "why": "#13540: APU activity is reported in whole percent"},
     {"path": "semantics/field:amdsmi_apu_metrics_t.average_mm_activity", "old": {}, "new": {"unit": ["%"]}, "why": "#13540: APU activity is reported in whole percent"},
-    {"path": "semantics/field:amdsmi_apu_metrics_t.average_vcn_activity", "old": {}, "new": {"unit": ["%"]}, "why": "#13540: APU activity is reported in whole percent"}
+    {"path": "semantics/field:amdsmi_apu_metrics_t.average_vcn_activity", "old": {}, "new": {"unit": ["%"]}, "why": "#13540: APU activity is reported in whole percent"},
+    {"path": "types/amdsmi_nic_fw_entry_t/size", "old": 512, "new": 516, "why": "#12724: NIC firmware entry now holds a version type plus the name and version, and the array grows from 16 to 64 entries; amdsmi_get_nic_fw_info() returned NOT_YET_IMPLEMENTED before"},
+    {"path": "types/amdsmi_nic_fw_entry_t/align", "old": 1, "new": 4, "why": "#12724: NIC firmware entry now holds a version type plus the name and version, and the array grows from 16 to 64 entries; amdsmi_get_nic_fw_info() returned NOT_YET_IMPLEMENTED before"},
+    {"path": "types/amdsmi_nic_fw_entry_t/fields/name", "old": [0, 256, "char[256]"], "new": null, "why": "#12724: NIC firmware entry now holds a version type plus the name and version, and the array grows from 16 to 64 entries; amdsmi_get_nic_fw_info() returned NOT_YET_IMPLEMENTED before"},
+    {"path": "types/amdsmi_nic_fw_entry_t/fields/version", "old": [256, 256, "char[256]"], "new": null, "why": "#12724: NIC firmware entry now holds a version type plus the name and version, and the array grows from 16 to 64 entries; amdsmi_get_nic_fw_info() returned NOT_YET_IMPLEMENTED before"},
+    {"path": "types/amdsmi_nic_fw_info_t/size", "old": 8196, "new": 33028, "why": "#12724: NIC firmware entry now holds a version type plus the name and version, and the array grows from 16 to 64 entries; amdsmi_get_nic_fw_info() returned NOT_YET_IMPLEMENTED before"},
+    {"path": "types/amdsmi_nic_fw_info_t/fields/fw", "old": [4, 8192, "amdsmi_nic_fw_entry_t[16]"], "new": [4, 33024, "amdsmi_nic_fw_entry_t[64]"], "why": "#12724: NIC firmware entry now holds a version type plus the name and version, and the array grows from 16 to 64 entries; amdsmi_get_nic_fw_info() returned NOT_YET_IMPLEMENTED before"},
+    {"path": "macros/AMDSMI_MAX_NIC_FW", "old": 16, "new": 64, "why": "#12724: NIC firmware entry now holds a version type plus the name and version, and the array grows from 16 to 64 entries; amdsmi_get_nic_fw_info() returned NOT_YET_IMPLEMENTED before"}
   ]
 }

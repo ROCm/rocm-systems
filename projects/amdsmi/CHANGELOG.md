@@ -124,7 +124,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 ### Changed
 
 - **``--nic`` output now labels each device ``NIC`` instead of ``AI_NIC``**.  
-  - The device key is ``nic`` in JSON and CSV and ``NIC: <n>`` in text, matching the host interface. ``static --nic`` now lists ``ASIC``, ``BUS``, ``DRIVER`` and ``NUMA`` directly under the device instead of under a nested ``nic`` key. ``metric --nic --rdma`` now groups counters as ``RDMA_DEVICES`` > ``RDMA_DEVICE_<n>`` > ``PORTS`` > ``PORT_<n>`` instead of ``RDMA_PORTS``. ``metric --nic --port --json`` now returns the default counter set, as text does; add ``--extended`` for the full set. Scripts that read ``ai_nic``, the nested ``nic`` key or ``RDMA_PORTS`` must be updated.
+  - The device key is ``nic`` in JSON and CSV and ``NIC: <n>`` in text, matching the host interface. ``static --nic`` now lists ``ASIC``, ``BUS``, ``DRIVER`` and ``NUMA`` directly under the device instead of under a nested ``nic`` key. ``metric --nic --port --json`` now returns the default counter set, as text does; add ``--extended`` for the full set. Scripts that read ``ai_nic`` or the nested ``nic`` key must be updated.
 
 - **``amd-smi list --nic`` now enumerates UALoE endpoints**.  
   - They appear as rows with their BDF, and their other fields read ``N/A``. NIC indices are positional, so these rows renumber the AI-NIC cards after them; select a device by BDF where the identity has to be stable.
@@ -146,9 +146,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **AI-NIC identity and telemetry fields now report values instead of ``N/A``**.  
   - They are read from the port function, and on a card with more than one port they report port 0.
-
-- **AI-NIC ``HEALTH`` now reads the card's management function**.  
-  - ``HEALTH`` read ``UNSUPPORTED`` on every AI-NIC because the health reporter belongs to a different function than the one that was queried.
 
 - **``amd-smi firmware --nic`` now reports NIC firmware versions** (breaking).  
   - ``amdsmi_get_nic_fw_info()`` is implemented and its entry layout changed, so callers must recompile and read ``entry.fw.name`` where ``entry.name`` was used; the Python function returns a firmware name to version dictionary. This is an ABI break in ``amdsmi_nic_fw_entry_t`` and ``amdsmi_nic_fw_info_t``, and ``AMDSMI_MAX_NIC_FW`` grows from 16 to 64.
@@ -265,8 +262,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Removed the internal `amd-smi` CLI exception classes `AmdSmiParameterNotSupportedException` and `AmdSmiUnknownErrorException`**.  
   These were CLI-internal (not part of the public `amdsmi` Python library), their exit-code behavior is superseded by the reworked CLI process exit codes described above.
 
-- **Removed the Broadcom NIC and switch device path**.  
-  - ``--brcm_nic``, ``--brcm_switch``, ``--switch``, ``--nic_switch`` and ``topology --nic_topo`` are gone, with their Python and ``rsmi_*`` helpers. Broadcom NICs appear through ``--nic`` like every other NIC.
+- **Removed the Broadcom NIC and switch device path** (breaking).  
+  - ``--brcm_nic``, ``--brcm_switch``, ``--switch``, ``--nic_switch``, ``topology --nic_topo``, the ``BRCM_NIC`` CMake option and the Python and ``rsmi_*`` Broadcom NIC and switch functions are gone. Broadcom NICs appear through ``--nic`` like every other NIC.
 
 ### Optimized
 
@@ -289,12 +286,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed ``amd-smi static --nic`` printing ``4294967295 Mb/s`` for a link that is down**.  
   - A link speed, MTU, FEC mode or carrier the NIC could not report now reads ``N/A``.
-
-- **Fixed the NIC ``ASIC`` temperature showing the board temperature**.  
-  - ``amd-smi metric --nic`` now reports the die temperature as ``ASIC`` and the board temperature as ``BOARD`` on AI-NICs, where ``BOARD`` was ``N/A``.
-
-- **Fixed the ``CAPABILITY`` list in ``amd-smi static --nic`` and ``list --nic`` being misaligned**.  
-  - The capability list is now indented under its key.
 
 - **Fixed `amd-smi set`/`reset` on a GPU silently exiting `0` after a per-device failure.**  
   - A device error during GPU `set`/`reset` is now recorded, so the process exits with a non-zero code instead of reporting success.
