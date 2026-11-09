@@ -25,6 +25,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: 
@@ -114,6 +115,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: CPC
@@ -133,6 +135,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: CPC
@@ -152,6 +155,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: CPC
@@ -171,6 +175,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: CPC
@@ -209,6 +214,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: CPC
@@ -315,6 +321,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
             - gfx1250
@@ -921,6 +928,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQ_INSTS_GDS,sum)/reduce(SQ_WAVES,sum)
@@ -1026,8 +1034,8 @@ rocprofiler-sdk:
           block: GL2C
           event: 132
     - name: GL2C_EA_RDREQ
-      description: Number of GL2C/EA read requests (either 32-byte or 64-byte or 128-byte) for all 
-        clients.
+      description: Number of GL2C/EA read requests (either 32-byte, 64-byte, 128-byte or 256-byte) 
+        for all clients.
       properties: []
       definitions:
         - architectures:
@@ -1041,14 +1049,15 @@ rocprofiler-sdk:
           block: GL2C
           event: 117
     - name: GL2C_EA_RDREQ_sum
-      description: Number of GL2C/EA read requests (either 32-byte or 64-byte or 128-byte). Sum over
-        GL2C instances.
+      description: Number of GL2C/EA read requests (either 32-byte, 64-byte, 128-byte or 256-byte). 
+        Sum over GL2C instances.
       properties: []
       definitions:
         - architectures:
             - gfx12
             - gfx1200
             - gfx1201
+            - gfx1250
           expression: reduce(GL2C_EA_RDREQ,sum)
     - name: GL2C_EA_RDREQ_128B
       description: Number of 128-byte GL2C/EA read requests
@@ -1312,14 +1321,15 @@ rocprofiler-sdk:
           block: GL2C
           event: 105
     - name: GL2C_EA_WRREQ_sum
-      description: Number of transactions (either 32-byte or 64-byte) going over the GL2C_EA_WRREQ 
-        interface. Sum over GL2C instances.
+      description: Number of transactions (all sizes) going over the GL2C_EA_WRREQ interface. Sum 
+        over GL2C instances.
       properties: []
       definitions:
         - architectures:
             - gfx12
             - gfx1200
             - gfx1201
+            - gfx1250
           expression: reduce(GL2C_EA_WRREQ,sum)
     - name: GL2C_EA_WRREQ_STALL
       description: Number of cycles a write request was stalled.
@@ -1841,6 +1851,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
             - gfx1250
@@ -1953,6 +1964,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
             - gfx1250
@@ -1977,6 +1989,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GRBM
@@ -2607,6 +2620,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
             - gfx1250
@@ -2631,6 +2645,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
             - gfx1250
@@ -2655,6 +2670,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
             - gfx1250
@@ -3546,6 +3562,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -3571,6 +3588,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -3596,6 +3614,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -3622,6 +3641,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -3673,6 +3693,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -3822,6 +3843,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -3857,6 +3879,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -3876,6 +3899,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -3912,6 +3936,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -3969,6 +3994,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -4069,6 +4095,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -4104,6 +4131,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -4127,6 +4155,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -4655,6 +4684,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -4763,6 +4793,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -4818,6 +4849,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -4948,6 +4980,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -5130,6 +5163,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -6347,6 +6381,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -6418,6 +6453,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -6502,6 +6538,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -6693,6 +6730,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
             - gfx1250
@@ -6789,6 +6827,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -6843,6 +6882,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -7030,6 +7070,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -7058,6 +7099,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -7085,6 +7127,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -7112,6 +7155,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -7139,6 +7183,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -7606,6 +7651,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -7622,6 +7668,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -7645,6 +7692,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -8492,6 +8540,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(TA_TA_BUSY,sum)
@@ -11336,6 +11385,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: TCP
@@ -11354,6 +11404,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(TCP_GATE_EN2,sum)
@@ -12873,6 +12924,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: TCP
@@ -12888,6 +12940,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: TCP
@@ -13983,6 +14036,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: CPC
@@ -13995,6 +14049,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: CPC
@@ -14008,6 +14063,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(CPC_GUS_READ_REQUEST_SENT,sum)
@@ -14019,6 +14075,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: CPC
@@ -14032,6 +14089,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(CPC_GUS_WRITE_REQUEST_SENT,sum)
@@ -14044,6 +14102,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: CPC
@@ -14056,6 +14115,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: CPC
@@ -14068,6 +14128,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: CPC
@@ -14081,6 +14142,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: CPC
@@ -14093,6 +14155,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: CPC
@@ -14106,6 +14169,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(CPC_MEC_INSTR_CACHE_HIT,sum)
@@ -14117,6 +14181,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: CPC
@@ -14130,6 +14195,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(CPC_MEC_INSTR_CACHE_MISS,sum)
@@ -14141,6 +14207,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: CPC
@@ -14154,6 +14221,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(CPC_TCIU_READ_REQUEST_SENT,sum)
@@ -14165,6 +14233,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: CPC
@@ -14178,6 +14247,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(CPC_TCIU_WRITE_REQUEST_SENT,sum)
@@ -14190,6 +14260,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GCEA
@@ -14205,6 +14276,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GCEA_ALWAYS_COUNT,sum)
@@ -14216,6 +14288,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GCEA
@@ -14229,6 +14302,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GCEA_PRB_REQ,sum)
@@ -14240,6 +14314,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GCEA
@@ -14253,6 +14328,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GCEA_RDRAM_CHAINED_REQ_PER_CLIGRP,sum)
@@ -14265,6 +14341,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GCEA
@@ -14279,6 +14356,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GCEA_RDRAM_NUM_BANKS_VLD,sum)
@@ -14290,6 +14368,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GCEA
@@ -14303,6 +14382,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GCEA_RDRAM_REQ_PER_CLIGRP,sum)
@@ -14314,6 +14394,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GCEA
@@ -14327,6 +14408,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GCEA_RDRAM_SIZE_REQ,sum)
@@ -14338,6 +14420,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GCEA
@@ -14351,6 +14434,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GCEA_RRET_VLD,sum)
@@ -14362,6 +14446,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GCEA
@@ -14375,6 +14460,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GCEA_SARB_BUSY,sum)
@@ -14386,6 +14472,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GCEA
@@ -14399,6 +14486,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GCEA_SARB_DRAM_REQ_PER_VC,sum)
@@ -14410,6 +14498,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GCEA
@@ -14423,6 +14512,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GCEA_SARB_REQ_PER_VC,sum)
@@ -14434,6 +14524,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GCEA
@@ -14447,6 +14538,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GCEA_SARB_STALLED,sum)
@@ -14458,6 +14550,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GCEA
@@ -14470,6 +14563,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GCEA
@@ -14483,6 +14577,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GCEA_WDRAM_CHAINED_REQ_PER_CLIGRP,sum)
@@ -14495,6 +14590,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GCEA
@@ -14509,6 +14605,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GCEA_WDRAM_NUM_BANKS_VLD,sum)
@@ -14520,6 +14617,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GCEA
@@ -14533,6 +14631,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GCEA_WDRAM_REQ_PER_CLIGRP,sum)
@@ -14544,6 +14643,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GCEA
@@ -14557,6 +14657,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GCEA_WDRAM_SIZE_REQ,sum)
@@ -14568,6 +14669,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GCEA
@@ -14581,6 +14683,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GCEA_WRET_VLD,sum)
@@ -14593,6 +14696,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GL1C
@@ -14607,6 +14711,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GL1C_BUSY,sum)
@@ -14619,6 +14724,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GL1C
@@ -14632,6 +14738,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GL1C_CYCLE,sum)
@@ -14643,6 +14750,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GL1C
@@ -14655,6 +14763,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GL1C
@@ -14668,6 +14777,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GL1C_GL2_REQ_READ_128B,sum)
@@ -14679,6 +14789,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GL1C
@@ -14692,6 +14803,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GL1C_GL2_REQ_READ_32B,sum)
@@ -14703,6 +14815,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GL1C
@@ -14716,6 +14829,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GL1C_GL2_REQ_READ_64B,sum)
@@ -14727,6 +14841,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GL1C
@@ -14740,6 +14855,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GL1C_GL2_REQ_READ_LATENCY,sum)
@@ -14752,6 +14868,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GL1C_GL2_REQ_READ,sum)
@@ -14763,6 +14880,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GL1C
@@ -14775,6 +14893,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GL1C
@@ -14788,6 +14907,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GL1C_GL2_REQ_WRITE_32B,sum)
@@ -14799,6 +14919,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GL1C
@@ -14812,6 +14933,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GL1C_GL2_REQ_WRITE_64B,sum)
@@ -14823,6 +14945,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GL1C
@@ -14836,6 +14959,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GL1C_GL2_REQ_WRITE_LATENCY,sum)
@@ -14848,6 +14972,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GL1C_GL2_REQ_WRITE,sum)
@@ -14859,6 +14984,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GL1C
@@ -14873,6 +14999,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GL1C
@@ -14887,6 +15014,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GL1C_REQ_MISS,sum)
@@ -14898,6 +15026,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GL1C
@@ -14911,6 +15040,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GL1C_REQ_READ,sum)
@@ -14922,6 +15052,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GL1C
@@ -14935,6 +15066,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GL1C_REQ_WRITE,sum)
@@ -14947,6 +15079,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GL1C_REQ,sum)
@@ -14958,6 +15091,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GL1C
@@ -14972,6 +15106,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GL1C_STALL_GL2_GL1,sum)
@@ -14983,6 +15118,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GL1C
@@ -14996,6 +15132,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GL1C_STALL_LFIFO_FULL,sum)
@@ -15008,6 +15145,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GL1C
@@ -15022,6 +15160,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GL1C_STARVE,sum)
@@ -15229,6 +15368,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GL2C
@@ -15247,6 +15387,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GL2C_ATOMIC,sum)
@@ -15258,6 +15399,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GL2C
@@ -15275,6 +15417,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GL2C_BUSY,sum)
@@ -15288,6 +15431,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GL2C
@@ -15303,6 +15447,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GL2C_COMPRESSED_READ_96_REQ,sum)
@@ -15314,6 +15459,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GL2C
@@ -15331,19 +15477,22 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GL2C_CYCLE,sum)
     - name: GL2C_EA_RDREQ_DRAM
       description: >-
         Number of GL2C/EA read requests (either 32-byte, 64-byte, 96-byte or 128-byte or 256-byte) destined
-        for DRAM (MC).
+        for DRAM (MC). On gfx1250 the unit is 32-byte sectors, not requests: a 64-byte request is counted
+        as 2, 128-byte as 4 and 256-byte as 8, so bytes read from DRAM = 32 x value.
       properties: []
       definitions:
         - architectures:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GL2C
@@ -15355,26 +15504,32 @@ rocprofiler-sdk:
     - name: GL2C_EA_RDREQ_DRAM_sum
       description: >-
         Sum across all GL2C instances: Number of GL2C/EA read requests (either 32-byte, 64-byte, 96-byte
-        or 128-byte or 256-byte) destined for DRAM (MC).
+        or 128-byte or 256-byte) destined for DRAM (MC). On gfx1250 the unit is 32-byte sectors, not
+        requests: a 64-byte request is counted as 2, 128-byte as 4 and 256-byte as 8, so bytes read from
+        DRAM = 32 x value.
       properties: []
       definitions:
         - architectures:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
+            - gfx1250
           expression: reduce(GL2C_EA_RDREQ_DRAM,sum)
     - name: GL2C_EA_WRREQ_DRAM
       description: >-
-        Number of GL2C/EA write requests (either 32-byte, 64-byte, 96-byte or 128-byte) destined for DRAM
-        (MC).
+        Number of GL2C/EA write requests (either 32-byte, 64-byte, 96-byte or 128-byte or 256-byte) destined
+        for DRAM (MC). On gfx1250 the unit is 32-byte sectors, not requests: a 64-byte request is counted
+        as 2, 128-byte as 4 and 256-byte as 8, so bytes written to DRAM = 32 x value.
       properties: []
       definitions:
         - architectures:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GL2C
@@ -15386,16 +15541,37 @@ rocprofiler-sdk:
     - name: GL2C_EA_WRREQ_DRAM_sum
       description: >-
         Sum across all GL2C instances: Number of GL2C/EA write requests (either 32-byte, 64-byte, 96-byte
-        or 128-byte) destined for DRAM (MC).
+        or 128-byte or 256-byte) destined for DRAM (MC). On gfx1250 the unit is 32-byte sectors, not
+        requests: a 64-byte request is counted as 2, 128-byte as 4 and 256-byte as 8, so bytes
+        written to DRAM = 32 x value.
       properties: []
       definitions:
         - architectures:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
+            - gfx1250
           expression: reduce(GL2C_EA_WRREQ_DRAM,sum)
+    - name: HBM_READ_BYTES
+      description: >-
+        Bytes read from DRAM (HBM) by all GL2C instances (32 x GL2C_EA_RDREQ_DRAM_sum). GL2C_READ_SECTORS
+        is not a substitute; it can differ from DRAM traffic, for example on sparse accesses.
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          expression: GL2C_EA_RDREQ_DRAM_sum*32
+    - name: HBM_WRITE_BYTES
+      description: >-
+        Bytes written to DRAM (HBM) by all GL2C instances (32 x GL2C_EA_WRREQ_DRAM_sum).
+      properties: []
+      definitions:
+        - architectures:
+            - gfx1250
+          expression: GL2C_EA_WRREQ_DRAM_sum*32
     - name: GL2C_READ
       description: >-
         Number of read requests, including compressed reads and metadata reads. This is measured at output_fifos
@@ -15406,6 +15582,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GL2C
@@ -15423,6 +15600,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GL2C
@@ -15437,6 +15615,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GL2C_READ_128_REQ,sum)
@@ -15449,6 +15628,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GL2C
@@ -15467,6 +15647,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GL2C_READ_32_REQ,sum)
@@ -15479,6 +15660,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GL2C
@@ -15493,6 +15675,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GL2C_READ_64_REQ,sum)
@@ -15506,6 +15689,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GL2C_READ,sum)
@@ -15520,6 +15704,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GL2C
@@ -15539,6 +15724,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GL2C_REQ,sum)
@@ -15558,6 +15744,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GL2C
@@ -15576,6 +15763,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GL2C_WRITE,sum)
@@ -15587,6 +15775,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: GRBM
@@ -15600,6 +15789,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(GRBM_GUI_ACTIVE,sum)
@@ -15625,6 +15815,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SPI_CSN_WAVE,sum)
@@ -15637,6 +15828,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQC_DCACHE_BUSY_CYCLES,sum)
@@ -15649,6 +15841,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQC_DCACHE_HITS,sum)
@@ -15674,6 +15867,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQC_DCACHE_INPUT_VALID_READYB,sum)
@@ -15686,6 +15880,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQC_DCACHE_MISSES,sum)
@@ -15698,6 +15893,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQC_DCACHE_REQ,sum)
@@ -15710,6 +15906,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQC_ICACHE_BUSY_CYCLES,sum)
@@ -15722,6 +15919,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQC_ICACHE_HITS,sum)
@@ -15751,6 +15949,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQC_ICACHE_INPUT_VALID_READYB,sum)
@@ -15763,6 +15962,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQC_ICACHE_MISSES,sum)
@@ -15775,6 +15975,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQC_ICACHE_REQ,sum)
@@ -15787,6 +15988,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQC_LDS_BANK_CONFLICT,sum)
@@ -15800,6 +16002,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQC_LDS_IDX_ACTIVE,sum)
@@ -15812,6 +16015,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQC_TC_DATA_READ_REQ,sum)
@@ -15824,6 +16028,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQC_TC_INST_REQ,sum)
@@ -15837,6 +16042,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQ_BUSY_CYCLES,avr)
@@ -15849,6 +16055,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQ_BUSY_CYCLES,sum)
@@ -15860,6 +16067,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -15877,6 +16085,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQ_INSTS_ALL,sum)
@@ -15889,6 +16098,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQ_INSTS_DUAL_VALU_WAVE32,sum)
@@ -15900,6 +16110,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -15913,6 +16124,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQ_INSTS_FLAT_LOAD,sum)
@@ -15924,6 +16136,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -15937,6 +16150,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQ_INSTS_FLAT_STORE,sum)
@@ -15949,6 +16163,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQ_INSTS_FLAT,sum)
@@ -15960,6 +16175,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -15973,6 +16189,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQ_INSTS_INTERNAL,sum)
@@ -15984,6 +16201,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -15997,6 +16215,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQ_INSTS_LDS_DIRECT_LOAD,sum)
@@ -16008,6 +16227,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -16021,6 +16241,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQ_INSTS_LDS_PARAM_LOAD,sum)
@@ -16033,6 +16254,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQ_INSTS_LDS,sum)
@@ -16045,6 +16267,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQ_INSTS_SALU,sum)
@@ -16057,6 +16280,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQ_INSTS_SMEM,sum)
@@ -16068,6 +16292,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -16086,6 +16311,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQ_INSTS_TEX_LOAD,sum)
@@ -16099,6 +16325,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQ_INSTS_TEX_STORE,sum)
@@ -16111,6 +16338,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQ_INSTS_TEX,sum)
@@ -16122,6 +16350,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -16135,6 +16364,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQ_INSTS_VALU_DP,sum)
@@ -16146,6 +16376,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -16163,6 +16394,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQ_INSTS_VALU_TRANS,sum)
@@ -16175,6 +16407,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQ_INSTS_VALU,sum)
@@ -16188,6 +16421,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -16202,6 +16436,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQ_INSTS_WAVE32_LDS_PARAM_LOAD,sum)
@@ -16213,6 +16448,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -16248,6 +16484,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQ_INST_CYCLES_LDS,sum)
@@ -16260,6 +16497,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQ_ITEMS,sum)
@@ -16272,6 +16510,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQ_LDS_ATOMIC_RETURN,sum)
@@ -16283,6 +16522,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -16295,6 +16535,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -16307,6 +16548,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: SQ
@@ -16321,6 +16563,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQ_WAIT_INST_LDS,sum)
@@ -16334,6 +16577,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(SQ_WAVE_CYCLES,sum)
@@ -16345,6 +16589,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: TCP
@@ -16360,6 +16605,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(TCP_DATA_FIFO_STALL,sum)
@@ -16371,6 +16617,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: TCP
@@ -16383,6 +16630,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: TCP
@@ -16396,6 +16644,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(TCP_GL1_REQ_READ_128B,sum)
@@ -16408,6 +16657,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(TCP_GL1_REQ_READ,sum)
@@ -16419,6 +16669,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: TCP
@@ -16432,6 +16683,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(TCP_GL1_REQ_WRITE,sum)
@@ -16443,6 +16695,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: TCP
@@ -16456,6 +16709,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(TCP_GL1_TCP_BACK_PRESSURE,sum)
@@ -16468,6 +16722,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(TCP_REQ_MISS,sum)
@@ -16479,6 +16734,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: TCP
@@ -16492,6 +16748,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(TCP_REQ_READ,sum)
@@ -16503,6 +16760,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: TCP
@@ -16516,6 +16774,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(TCP_REQ_WRITE,sum)
@@ -16528,6 +16787,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(TCP_REQ,sum)
@@ -16539,6 +16799,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           block: TCP
@@ -16552,6 +16813,7 @@ rocprofiler-sdk:
             - gfx1150
             - gfx1151
             - gfx1152
+            - gfx1153
             - gfx1170
             - gfx1171
           expression: reduce(TCP_TCP_TA_REQ_STALL,sum)

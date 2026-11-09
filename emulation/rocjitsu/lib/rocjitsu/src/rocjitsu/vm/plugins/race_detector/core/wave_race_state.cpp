@@ -191,6 +191,7 @@ void WaveRaceState::prepareForCounterIncrement(amdgpu::WaitCounterType type, uin
   case amdgpu::WaitCounterType::DSCNT:
   case amdgpu::WaitCounterType::KMCNT:
   case amdgpu::WaitCounterType::TENSORCNT:
+  case amdgpu::WaitCounterType::SAMPLECNT:
   case amdgpu::WaitCounterType::ASYNCCNT:
     return;
   default:
@@ -277,6 +278,19 @@ void WaveRaceState::registerLdsEvent(
   intervals.finalize();
   registerEventWithIntervals(instruction, type, std::move(registers), execMask, byteMask,
                              std::move(intervals), counterObligations, memoryOrder);
+}
+
+void WaveRaceState::registerLdsRangeEvent(
+    InstructionSnapshot instruction, MemoryEventType type, std::span<const LdsByteRange> ranges,
+    std::span<const amdgpu::MemoryCounterObligation> counterObligations,
+    MemoryOrderClass memoryOrder) {
+  IntervalSet intervals;
+  for (const auto &range : ranges)
+    appendLdsInterval(intervals, range.address, static_cast<int>(range.bytes), *detector,
+                      /*elementBytes=*/1);
+  intervals.finalize();
+  registerEventWithIntervals(instruction, type, {}, 0, 0xF, std::move(intervals),
+                             counterObligations, memoryOrder);
 }
 
 void WaveRaceState::registerDualOffsetLdsEvent(InstructionSnapshot instruction,
@@ -393,7 +407,7 @@ void WaveRaceState::applyCounterConstraint(amdgpu::WaitCounterType type, int max
   // can still be pending after the counter constraint is satisfied.
   for (MemoryOrderClass order :
        {MemoryOrderClass::VMEM, MemoryOrderClass::LDS, MemoryOrderClass::GDS,
-        MemoryOrderClass::ASYNC_LOAD, MemoryOrderClass::ASYNC_STORE}) {
+        MemoryOrderClass::ASYNC_LOAD, MemoryOrderClass::ASYNC_STORE, MemoryOrderClass::TENSOR}) {
     auto belongsToOrder = [&](EventId eventId) {
       return detector->events().pendingCompletionClass(eventId, type) == order;
     };
@@ -424,6 +438,8 @@ int WaveRaceState::doNotWaitValue(amdgpu::WaitCounterType type) const {
     return amdgpu::WaitCounters::TENSORCNT_MAX;
   case amdgpu::WaitCounterType::ASYNCCNT:
     return amdgpu::WaitCounters::ASYNCCNT_MAX;
+  case amdgpu::WaitCounterType::SAMPLECNT:
+    return amdgpu::WaitCounters::SAMPLECNT_MAX;
   }
   assert(false && "invalid wait counter type");
   return -1;

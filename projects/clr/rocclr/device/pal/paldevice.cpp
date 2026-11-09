@@ -1203,7 +1203,7 @@ bool Device::initializeHeapResources() {
 }
 
 // ================================================================================================
-device::VirtualDevice* Device::createVirtualDevice(amd::CommandQueue* queue) {
+device::VirtualDevice* Device::createVirtualDevice(amd::CommandQueue* queue, bool /*cooperative*/) {
   bool profiling = false;
   uint rtCUs = amd::CommandQueue::RealTimeDisabled;
   uint deviceQueueSize = 0;
@@ -1255,13 +1255,24 @@ typedef std::unordered_map<int, bool> requestedDevices_t;
 static void parseRequestedDeviceList(const char* requestedDeviceList,
                                      requestedDevices_t& requestedDevices, uint32_t numDevices,
                                      Pal::IDevice* deviceList[Pal::MaxDevices]) {
-  char* pch = strtok(const_cast<char*>(requestedDeviceList), ",");
-  while (pch != nullptr) {
+  const char* cursor = requestedDeviceList;
+  while (*cursor != '\0') {
+    while (*cursor == ',') {
+      ++cursor;
+    }
+    if (*cursor == '\0') {
+      break;
+    }
+    const char* token_end = cursor;
+    while (*token_end != '\0' && *token_end != ',') {
+      ++token_end;
+    }
+    std::string token(cursor, token_end);
+    cursor = token_end;
+
     bool deviceIdValid = true;
-    // UUID needs to be specified in the format GPU-<body>, <body> encodes UUID as a 16 chars
-    char* deviceUuid = strstr(pch, "GPU-");
-    // If Uuid is specified, then convert it to index
-    if (deviceUuid != nullptr) {
+    // UUID form is GPU-<body>, <body> is 16 chars. Match the body at byte 4.
+    if (token.find("GPU-") != std::string::npos) {
       for (uint32_t i = 0; i < numDevices; i++) {
         Pal::DeviceProperties properties;
         // Retrieve device properties
@@ -1274,18 +1285,17 @@ static void parseRequestedDeviceList(const char* requestedDeviceList,
         char uuid[17] = {0};
         setUUID(&properties, &uuid[0]);
 
-        // Convert it to index
-        if (strcmp(pch + 4, uuid) == 0) {
-          snprintf(pch, strlen(pch), "%d", i);
+        if (strcmp(token.c_str() + 4, uuid) == 0) {
+          token = std::to_string(i);
           break;
         }
       }
     }
 
-    int currentDeviceIndex = atoi(pch);
+    int currentDeviceIndex = atoi(token.c_str());
     // Validate device index.
-    for (size_t i = 0; i < strlen(pch); i++) {
-      if (!isdigit(reinterpret_cast<unsigned char*>(pch)[i])) {
+    for (size_t i = 0; i < token.size(); i++) {
+      if (!isdigit(static_cast<unsigned char>(token[i]))) {
         deviceIdValid = false;
         break;
       }
@@ -1293,8 +1303,6 @@ static void parseRequestedDeviceList(const char* requestedDeviceList,
     if (currentDeviceIndex < 0 || static_cast<uint32_t>(currentDeviceIndex) >= numDevices) {
       deviceIdValid = false;
     }
-    // Get next token.
-    pch = strtok(nullptr, ",");
 
     if (!deviceIdValid) {
       // Exit the loop as anything to the right of invalid deviceId
@@ -1330,6 +1338,7 @@ bool Device::init() {
   info.maxSvmSize = static_cast<Pal::gpusize>(OCL_SET_SVM_SIZE * Mi);
   info.clientApiId = (amd::IS_HIP) ? Pal::ClientApi::Hip : Pal::ClientApi::OpenCl;
   info.instrApiVer = RgpSqttInstrumentationApiVersion;
+  info.flags.optInForOmniCache = amd::IS_HIP && OMNICACHE_ENABLE;
 
   if (IS_LINUX) {
     //! @note: Linux may have a deadlock if runtime will attempt to reserve
@@ -1462,6 +1471,21 @@ Memory* Device::getGpuMemory(amd::Memory* mem) const {
 }
 
 const device::BlitManager& Device::xferMgr() const { return xferQueue_->blitMgr(); }
+
+// ================================================================================================
+[[nodiscard]] bool Device::writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
+                                             const void* src) const {
+  if (src == nullptr) {
+    return false;
+  }
+  pal::Memory* devMem = getGpuMemory(&dst);
+  if (devMem == nullptr) {
+    return false;
+  }
+  // PAL runs this as a CP packet on its own transfer queue and blocks until it completes.
+  static_cast<const KernelBlitManager&>(xferMgr()).writeRawData(*devMem, offset, size, src);
+  return true;
+}
 
 Pal::ChNumFormat Device::getPalFormat(const amd::Image::Format& format,
                                       Pal::ChannelMapping* channel) const {
@@ -1665,8 +1689,8 @@ pal::Memory* Device::createBuffer(amd::Memory& owner, bool directAccess) const {
         // Pipe initialize in order read_idx, write_idx, end_idx. Refer clk_pipe_t structure.
         // Init with 3 DWORDS for 32bit addressing and 6 DWORDS for 64bit
         size_t pipeInit[3] = {0, 0, owner.asPipe()->getMaxNumPackets()};
-        static_cast<const KernelBlitManager&>(xferMgr()).writeRawData(*gpuMemory, sizeof(pipeInit),
-                                                                      pipeInit);
+        static_cast<const KernelBlitManager&>(xferMgr()).writeRawData(*gpuMemory, 0,
+                                                                      sizeof(pipeInit), pipeInit);
       }
       // If memory has direct access from host, then get CPU address
       if (gpuMemory->isHostMemDirectAccess() && (type != Resource::ExternalPhysical) &&
@@ -1994,13 +2018,17 @@ bool Device::globalFreeMemory(size_t* freeMemory) const {
   // Don't report cached memory in runtime as allocated, since allocedMem tracked at PAL calls
   Pal::gpusize local = allocedMem[Pal::GpuHeapLocal] - resourceCache().persistentCacheSize();
   Pal::gpusize invisible = allocedMem[Pal::GpuHeapInvisible] - resourceCache().lclCacheSize();
-  Pal::gpusize total_alloced = local + invisible;
   size_t cache_group_local = resourceCache().persistentCacheSize() + resourceCache().lclCacheSize();
   // Allocated system memory without cached allocations. Cache size contains all allocations, so
   // don't count persistent and local
   Pal::gpusize system_memory = allocedMem[Pal::GpuHeapGartCacheable] +
                                allocedMem[Pal::GpuHeapGartUswc] + cache_group_local -
                                resourceCache().cacheSize();
+
+  // fillDeviceInfo() adds the aperture to globalMemSize_ only on an APU, so charge it only
+  // there; on a discrete part the aperture is separate memory and must not reduce free VRAM
+  const bool apu_system = settings().apuSystem_;
+  Pal::gpusize total_alloced = local + invisible + (apu_system ? system_memory : 0);
 
 #if IS_WINDOWS
   // Second, query OS for overall memory usage on the system
@@ -2010,25 +2038,21 @@ bool Device::globalFreeMemory(size_t* freeMemory) const {
     // Query OS how much memory is available
     iDev()->QueryGpuMemoryBudgetInfo(&mem_budget_info);
 
-    Pal::gpusize system_total_alloced = mem_budget_info.usage[Pal::GpuHeapGroupLocal];
+    // The segment groups partition memory, and on an APU the KMD reports aperture
+    // allocations in the local group, so only their sum maps onto the heaps charged above
+    Pal::gpusize os_alloced = mem_budget_info.usage[Pal::GpuHeapGroupLocal];
+    Pal::gpusize os_cached = cache_group_local;
+    if (apu_system) {
+      os_alloced += mem_budget_info.usage[Pal::GpuHeapGroupNonLocal];
+      os_cached = resourceCache().cacheSize();
+    }
     // Avoid possible negative values in case of alignments
-    if (mem_budget_info.usage[Pal::GpuHeapGroupLocal] > cache_group_local) {
-      system_total_alloced = mem_budget_info.usage[Pal::GpuHeapGroupLocal] - cache_group_local;
+    if (os_alloced > os_cached) {
+      os_alloced -= os_cached;
     }
-    // System usage exceeds per process usage for device memory
-    if (system_total_alloced > total_alloced) {
-      total_alloced = system_total_alloced;
-    }
-    system_total_alloced = mem_budget_info.usage[Pal::GpuHeapGroupNonLocal];
-    // Avoid possible negative values in case of extra alignments
-    if (mem_budget_info.usage[Pal::GpuHeapGroupNonLocal] >
-        (resourceCache().cacheSize() - cache_group_local)) {
-      system_total_alloced = mem_budget_info.usage[Pal::GpuHeapGroupNonLocal] + cache_group_local -
-                             resourceCache().cacheSize();
-    }
-    // System usage exceeds per process usage for system memory
-    if (system_total_alloced > system_memory) {
-      system_memory = system_total_alloced;
+    // System usage exceeds per process usage
+    if (os_alloced > total_alloced) {
+      total_alloced = os_alloced;
     }
   }
 #endif
@@ -2044,23 +2068,15 @@ bool Device::globalFreeMemory(size_t* freeMemory) const {
       (freeMemory[TotalFreeMemory] > HIP_HIDDEN_FREE_MEM * Ki) ? HIP_HIDDEN_FREE_MEM * Ki : 0;
 
   Pal::gpusize largest_block = 0;
-  if (settings().apuSystem_) {
-    system_memory /= Ki;
-    if (system_memory >= freeMemory[TotalFreeMemory]) {
-      freeMemory[TotalFreeMemory] = 0;
-    } else {
-      freeMemory[TotalFreeMemory] -= system_memory;
-    }
-    if (system_memory < heaps_[Pal::GpuHeapGartUswc].logicalSize) {
-      largest_block = heaps_[Pal::GpuHeapGartUswc].logicalSize - system_memory;
-    }
+  if (apu_system && system_memory < heaps_[Pal::GpuHeapGartUswc].logicalSize) {
+    largest_block = heaps_[Pal::GpuHeapGartUswc].logicalSize - system_memory;
   }
 
   if (invisible < heaps_[Pal::GpuHeapInvisible].logicalSize) {
     largest_block = std::max(largest_block, heaps_[Pal::GpuHeapInvisible].logicalSize - invisible);
   }
   if (local < heaps_[Pal::GpuHeapLocal].logicalSize) {
-    largest_block = std::max(largest_block, heaps_[Pal::GpuHeapLocal].logicalSize - invisible);
+    largest_block = std::max(largest_block, heaps_[Pal::GpuHeapLocal].logicalSize - local);
   }
 
   largest_block /= Ki;

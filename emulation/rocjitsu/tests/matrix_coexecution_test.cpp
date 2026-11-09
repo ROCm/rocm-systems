@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "async_mma_test_util.h"
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "mma_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/isa.h"
@@ -217,7 +218,9 @@ TEST(MatrixCoexecutionTest, IssueMatchesSerialForLargeShapesAndHazards) {
       config.num_wf_slots = 1;
       config.sgprs_per_wf = 106;
       config.vgprs_per_wf = 128;
-      auto cu = amdgpu::ComputeUnitCore::create("matrix_test_cu", config, &memory, &l2);
+      std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+      ASSERT_NO_FATAL_FAILURE(
+          rocjitsu::test::initialize_compute_unit(cu, "matrix_test_cu", config, &memory, &l2));
       auto *wf = cu->dispatch_wf(0, pc, 106, 128);
       ASSERT_NE(wf, nullptr);
       wf->set_exec(0xFFFFFFFFu);
@@ -292,9 +295,12 @@ TEST(MatrixCoexecutionTest, WiderBatchChecksNonAdjacentDependenciesAndAllocatesB
         config.num_wf_slots = 1;
         config.sgprs_per_wf = 106;
         config.vgprs_per_wf = 128;
-        auto cu = amdgpu::ComputeUnitCore::create("wide_cu", config, &memory, &l2,
-                                                  clocked ? simdojo::ExecMode::CLOCKED
-                                                          : simdojo::ExecMode::FUNCTIONAL);
+        std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+        rocjitsu::test::initialize_compute_unit(cu, "wide_cu", config, &memory, &l2,
+                                                clocked ? simdojo::ExecMode::CLOCKED
+                                                        : simdojo::ExecMode::FUNCTIONAL);
+        if (!cu)
+          return std::vector<uint32_t>{};
         auto *wf = cu->dispatch_wf(0, pc, 106, 128);
         wf->set_exec(0xFFFFFFFFu);
         const uint32_t base = wf->vgpr_alloc().base;
@@ -331,7 +337,10 @@ TEST(MatrixCoexecutionTest, WiderBatchChecksNonAdjacentDependenciesAndAllocatesB
         return output;
       };
       const auto expected = execute(false);
-      EXPECT_EQ(execute(true), expected);
+      ASSERT_FALSE(::testing::Test::HasFatalFailure());
+      const auto actual = execute(true);
+      ASSERT_FALSE(::testing::Test::HasFatalFailure());
+      EXPECT_EQ(actual, expected);
     }
   }
 }
@@ -387,7 +396,10 @@ TEST(AsyncInstructionQueueTest, InterleavedMemoryMmaAndRegisterReuseMatchSerial)
     config.num_wf_slots = 1;
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 128;
-    auto cu = amdgpu::ComputeUnitCore::create("interleave_cu", config, &memory, &l2);
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    rocjitsu::test::initialize_compute_unit(cu, "interleave_cu", config, &memory, &l2);
+    if (!cu)
+      return std::vector<uint32_t>{};
     auto *wf = cu->dispatch_wf(0, pc, 106, 128);
     wf->set_exec(0xFFFFFFFFu);
     const auto base = wf->vgpr_alloc().base;
@@ -431,7 +443,11 @@ TEST(AsyncInstructionQueueTest, InterleavedMemoryMmaAndRegisterReuseMatchSerial)
   };
   const auto submitted = amdgpu::async_execution::stats.mma;
   const auto retired = amdgpu::async_execution::stats.retired_mma;
-  EXPECT_EQ(execute(true), execute(false));
+  const auto actual = execute(true);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
+  const auto expected = execute(false);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
+  EXPECT_EQ(actual, expected);
   const auto offloads = amdgpu::async_execution::stats.mma - submitted;
   EXPECT_EQ(amdgpu::async_execution::stats.retired_mma - retired, offloads);
   EXPECT_GT(offloads, 0u);
@@ -934,7 +950,9 @@ TEST(AsyncInstructionQueueTest, SmallerWmmaAndMultiBlockMfmaMatchSerialAcrossReg
       config.num_wf_slots = 1;
       config.sgprs_per_wf = 106;
       config.vgprs_per_wf = 256;
-      auto cu = amdgpu::ComputeUnitCore::create("extended_matrix_cu", config, &memory, &l2);
+      std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+      ASSERT_NO_FATAL_FAILURE(
+          rocjitsu::test::initialize_compute_unit(cu, "extended_matrix_cu", config, &memory, &l2));
       auto *wf = cu->dispatch_wf(0, pc, 106, 256);
       ASSERT_NE(wf, nullptr);
       const unsigned wave_size = c.mfma ? 64 : 32;
