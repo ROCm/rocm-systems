@@ -626,14 +626,13 @@ in the following table.
           signaled tail, and for a point-to-point send the tail keeps the
           write-with-immediate.
       - | Integer bytes. Default: ``-1`` (unset).
-        | A positive value sets the cap. On gfx1250 it is also limited to
-          256 MiB, and a smaller non-zero port ``max_msg_sz`` limits it further.
-          The smallest such port across devices wins. A port that reports 0 does
-          not. The result is raised to at least 1 MiB and rounded down to a
-          multiple of 128 bytes.
-        | When unset, gfx1250 uses 256 MiB and every other architecture uses the
-          port limit, with the same 1 MiB floor and 128-byte rounding. ``0`` is
-          treated as unset.
+        | A positive value explicitly sets the cap, overriding the automatic
+          gfx1250 and port limits. The result is raised to at least 1 MiB and
+          rounded down to a multiple of 128 bytes.
+        | When unset, gfx1250 is limited to 256 MiB and every architecture is
+          limited by the smallest non-zero port ``max_msg_sz`` across devices.
+          A port that reports 0 does not participate. The same 1 MiB floor and
+          128-byte rounding apply. ``0`` is treated as unset.
 
     * - | ``RCCL_IB_GDR_FLUSH_FLAG``
         | Replaces the GPUDirect RDMA flush of Simple-protocol receives in the

@@ -397,10 +397,11 @@ static bool IbCastGpuIsGfx1250() {
   return IsArchMatch(prop.gcnArchName, "gfx1250");
 }
 
-// The cap is the smallest of a positive RCCL_IB_MAX_MSG_SIZE, the gfx1250 limit
-// of 256 MiB, and the smallest non-zero port max_msg_sz. An unset value, or 0,
-// does not take part. The result is raised to at least 1 MiB and rounded down
-// to IB_WRITE_CHUNK_ALIGNMENT. The environment value can only lower the cap.
+// A positive RCCL_IB_MAX_MSG_SIZE explicitly sets the cap, overriding the
+// automatic gfx1250 and port limits. When unset or 0, the cap is the smallest
+// of the gfx1250 256 MiB limit and the non-zero port max_msg_sz values. The
+// result is raised to at least 1 MiB and rounded down to
+// IB_WRITE_CHUNK_ALIGNMENT.
 static void IbCastInitMaxPostSendBytes() {
   constexpr uint32_t kGfx1250Cap = 256u * 1024u * 1024u;
   constexpr uint32_t kMinCap = 1024u * 1024u;
@@ -410,13 +411,14 @@ static void IbCastInitMaxPostSendBytes() {
   if (requested > 0) {
     INFO(NCCL_ENV, "NET/IB: RCCL_IB_MAX_MSG_SIZE set by environment to %lld", (long long)requested);
     IbCastMaxPostSendBytes = (uint32_t)std::min(requested, (int64_t)UINT32_MAX);
-  }
-  if (IbCastGpuIsGfx1250()) {
-    IbCastMaxPostSendBytes = std::min(IbCastMaxPostSendBytes, kGfx1250Cap);
-  }
-  for (int i = 0; i < IbCastNDevs; i++) {
-    uint32_t portMax = IbCastDevs[i].portAttr.max_msg_sz;
-    if (portMax != 0 && portMax < IbCastMaxPostSendBytes) IbCastMaxPostSendBytes = portMax;
+  } else {
+    if (IbCastGpuIsGfx1250()) {
+      IbCastMaxPostSendBytes = std::min(IbCastMaxPostSendBytes, kGfx1250Cap);
+    }
+    for (int i = 0; i < IbCastNDevs; i++) {
+      uint32_t portMax = IbCastDevs[i].portAttr.max_msg_sz;
+      if (portMax != 0 && portMax < IbCastMaxPostSendBytes) IbCastMaxPostSendBytes = portMax;
+    }
   }
   // The floor covers every source, so no data post splits below 1 MiB.
   IbCastMaxPostSendBytes = std::max(IbCastMaxPostSendBytes, kMinCap);

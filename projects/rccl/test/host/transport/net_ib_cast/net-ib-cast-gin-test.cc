@@ -1134,7 +1134,7 @@ TEST_F(NetIbCastGinDataMicrotest, IPut_TwoPorts_UsesTheSmallerLimit) {
   EXPECT_EQ(IbCastMaxPostSendBytes, kSmaller);
 }
 
-TEST_F(NetIbCastGinDataMicrotest, IPut_RequestedCap_IsLoweredByGfx1250AndThePort) {
+TEST_F(NetIbCastGinDataMicrotest, IPut_RequestedCap_OverridesGfx1250AndThePort) {
   constexpr uint32_t kRequested = 512u * kMiB;
   ScopedHook props(g_hipGetDeviceProperties, [](hipDeviceProp_t* prop, int) {
     *prop = hipDeviceProp_t{};
@@ -1142,7 +1142,7 @@ TEST_F(NetIbCastGinDataMicrotest, IPut_RequestedCap_IsLoweredByGfx1250AndThePort
     return hipSuccess;
   });
   ApplyMaxMsgSize(kRequested, 2u * kMiB);
-  EXPECT_EQ(IbCastMaxPostSendBytes, 2u * kMiB);
+  EXPECT_EQ(IbCastMaxPostSendBytes, kRequested);
 }
 
 TEST_F(NetIbCastGinDataMicrotest, IPut_MoreChunksThanTheStackHolds_PostsThemFromTheHeap) {
