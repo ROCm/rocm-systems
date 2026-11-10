@@ -33,22 +33,29 @@ rocprof-compute profile --name <workload_name> --speed-of-light -- <application>
 
 ### Navi48 (gfx1201)
 
-Linux GPU metrics start with ROCm Compute Profiler 3.11 (ROCm 10.3); ROCm 10.2
-and 10.1 shipped without gfx1201 support. Follow the `STABLE_STD` prerequisite
-and counter limits in the [RDNA System Speed-of-Light](../../docs/conceptual/rdna/system-speed-of-light.rst).
+This section is the one Navi48 reference for the rocprof-compute skills; the
+memory, kernel-bottleneck, and roofline skills point here.
+
+Linux GPU metrics, the Memory Chart, and roofline start with ROCm Compute
+Profiler 3.11 (ROCm 10.3); ROCm 10.2 and 10.1 shipped without gfx1201 support.
+PC sampling is outside Navi48 support in this release. Follow the `STABLE_STD`
+prerequisite and counter limits in the
+[RDNA System Speed-of-Light](../../docs/conceptual/rdna/system-speed-of-light.rst),
+and compare runs only within one performance state. List the Navi48 aliases
+with `rocprof-compute --list-metrics-gfx-id gfx1201`: the cache blocks are
+`gl0`, `gl1`, and `gl2`, and LDS metrics belong to the WGP block, `wgp`.
 
 `VALU Issue Rate` and `FP64 VALU Issue Rate` use `GInstr/s`, with no FLOP peak
 or percentage of a floating-point peak. Do not turn those instruction rates
-into FLOPs. `WMMA FLOPs (F16->F32 16x16x16)` assumes that precision and shape;
-the raw counter counts issues per vec32 and cannot distinguish FP16, BF16, FP8,
-or BF8. Its FLOP conversion and peak need validation for the kernel's precision
-and wave size. Present that comparison as approximate. Do not subtract WMMA
-issues to infer FP32 FLOPs from these rows or combine WMMA and VALU into an
-independent total. The roofline rows do subtract them as a documented estimate;
-see the `rocprof-compute-roofline` skill.
+into FLOPs or use them to judge distance from a FLOP ceiling.
+`WMMA FLOPs (F16->F32 16x16x16)` assumes that precision and shape; the raw
+counter counts issues per vec32 and cannot distinguish FP16, BF16, FP8, or BF8.
+Present that comparison as approximate. Do not subtract WMMA issues to infer
+FP32 FLOPs from these rows or combine WMMA and VALU into an independent total.
 A fixed wave32 FP16-to-FP32 16x16x16 diagnostic supports WMMA inclusion in
 VALU for that instruction; counted population and other variants remain
-unqualified.
+unqualified. WGP `SQ_INST_CYCLES_VALU` is a raw SIMD execution-cycle count with
+no peak; it is not elapsed time, FLOPs, or utilization.
 
 `Wave Dependency Wait` and `Wave Issue Wait` are percentages of wave cycles,
 from `SQ_WAIT_ANY` and `SQ_WAIT_INST_ANY` over `SQG_WAVE_CYCLES`. The
@@ -59,13 +66,34 @@ and wave-count normalization are validated. Treat these values as unknown when
 inferring occupancy limits or quantified scheduler stalls. Restoration is
 tracked under AIPROFCOMP-907.
 
-`GL2 Cache BW` reports a percentage of the L2 interface peak. `GL2-Fabric Read BW`
-and `GL2-Fabric Write BW` include traffic served or absorbed by Infinity Cache.
-They have no GDDR6 percentage of peak. Use the Memory Chart
-and available cache metrics for memory questions, or the roofline for measured
-ceilings (`rocprof-compute-roofline` skill). If the relevant row has no usable peak,
-report its measured rate and compare like workloads in the same performance
-state instead of inferring a percent of peak or a throughput bottleneck.
+For memory, read `memchart` first. GL1 is a write-combining stage: read its
+utilization and stalls, and do not invent a hit rate when the report prints
+`N/A`. `GL2 Cache BW` reports a percentage of the L2 interface peak; the
+`GL2 Cache Bandwidth` table counts size-weighted requests at the GL2 output
+FIFOs. `GL2-Fabric Read BW`, `GL2-Fabric Write BW`, and the Memory Chart
+`DRAM Read Bandwidth` and `DRAM Write Bandwidth` include traffic served or
+absorbed by the Infinity Cache, so they do not measure physical GDDR6 bytes
+and have no GDDR6 peak. `Infinity Cache Hit Rate` and GDDR6 bandwidth are
+`N/A`; treat them as unknown, not zero. The LDS byte-access rate normalization
+is provisional.
+
+On the roofline, the device-memory roof is `DRAM` and the `MALL` roof is the
+64 MB Infinity Cache. The `AI DRAM` point counts GL2C requests destined for
+memory, which the Infinity Cache can also serve, so the plot marks it once, at
+`DRAM`. Compare it with both roofs yourself, because "Limited by" and the hover
+text never name `MALL`. A point above `DRAM` and below `MALL` means the
+Infinity Cache is absorbing the traffic; never call that kernel DRAM-limited.
+Under `STABLE_STD` the measured roofs sit well below the interface peak. The
+VALU roofline rows subtract WMMA issues from all VALU issues and multiply by
+the wave size, validated only for one wave32 FP16 16x16x16 case. They are
+estimates: integer and floating-point instructions both count and an FMA is
+one issue, so they read low for FMA-only loops and high when index arithmetic
+dominates. The WMMA row is compared with the FP16 WMMA peak. WMMA points need
+an SDK that supports SQ event 233; check the profiling warnings.
+
+If a row has no usable peak, report its measured rate and compare like
+workloads in the same performance state instead of inferring a percent of peak
+or a throughput bottleneck.
 
 ### Collect only what the question needs
 
@@ -87,10 +115,6 @@ also runs roofline benchmarks on architectures that support them.
   times. Pair it with `-k`. See Iteration multiplexing in
   [profile mode](../../docs/how-to/profile/mode.rst).
 - Tell the user which analysis panels the narrower profile leaves empty.
-
-In ROCm 10.2 and 10.1, use `--list-blocks <gfx_arch>` to list blocks and
-`--list-metrics <gfx_arch>` to list metrics. The architecture selector changed
-in ROCm 10.3.
 
 ## 2. Read it
 

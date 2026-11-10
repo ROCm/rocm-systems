@@ -51,31 +51,10 @@ unavailable.
 
 ### Navi48 (gfx1201)
 
-GPU metrics and the Memory Chart are available on Linux starting with
-ROCm Compute Profiler 3.11 (ROCm 10.3). ROCm 10.2 and 10.1 shipped without
-gfx1201 support. Apply the `STABLE_STD` performance-state prerequisite in the
-[Quickstart](../../docs/install/quickstart.rst) before collecting counters,
-and keep that state consistent when comparing runs.
-
-PC sampling is outside Navi48 support in this release. Roofline is available;
-use the `rocprof-compute-roofline` skill for measured ceilings. Use `sol`
-first, then `memchart` or an available detailed block. List the
-Navi48 aliases with `rocprof-compute --list-metrics-gfx-id gfx1201`; for example,
-its WGP block is `wgp`, and its cache blocks are `gl0`, `gl1`, and `gl2`.
-Do not send a Navi48 user to an unsupported collection mode or infer physical
-GDDR6 bandwidth from L2 traffic. Instruction issue rates without a printed
-peak also cannot establish how close the kernel is to a FLOP ceiling.
-
-WGP `SQ_INST_CYCLES_VALU` reports raw SDK SIMD execution-cycle counts, with
-no peak comparison. Its counted instance/wave population remains unqualified;
-do not interpret it as elapsed GPU time, FLOPs or utilization.
-
-Treat `Wavefront Occupancy` and WGP `Wave Life` as provisional on Navi48:
-living-wave counter units, reduction, and wave-count normalization still need
-validation. The WGP Instruction Issue Stalls table is omitted from the CLI
-because its values are unavailable, and the `wave_wait` shortcut is unavailable.
-Do not infer an occupancy resource limit or quantified scheduler stall from
-those metrics. Restoration is tracked under AIPROFCOMP-907.
+Before profiling Navi48, read the
+[Navi48 (gfx1201)](../rocprof-compute-speed-of-light/SKILL.md#navi48-gfx1201)
+section of the `rocprof-compute-speed-of-light` skill for its release,
+performance-state prerequisite, unsupported modes, and provisional metrics.
 
 ## 2. Collect what you need before profiling
 
@@ -138,10 +117,6 @@ also runs roofline benchmarks on architectures that support them.
   times. Pair it with `-k`. See Iteration multiplexing in
   [profile mode](../../docs/how-to/profile/mode.rst).
 - Tell the user which analysis panels the narrower profile leaves empty.
-
-In ROCm 10.2 and 10.1, use `--list-blocks <gfx_arch>` to list blocks and
-`--list-metrics <gfx_arch>` to list metrics. The architecture selector changed
-in ROCm 10.3.
 
 ## 4. Find the hot kernel
 

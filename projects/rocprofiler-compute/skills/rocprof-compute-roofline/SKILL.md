@@ -15,11 +15,10 @@ carries the same numbers in readable form.
 
 ## 1. Collect
 
-On Navi48 (gfx1201), roofline and the benchmark start with the same ROCm
-Compute Profiler release as its GPU metrics, 3.11 (ROCm 10.3). ROCm 10.2 and
-10.1 shipped without gfx1201 support. Apply the `STABLE_STD` prerequisite and
-read the roofline limits in the [RDNA4 roofline](../../docs/conceptual/rdna/wgp.rst)
-before collecting.
+On Navi48 (gfx1201), read the
+[Navi48 (gfx1201)](../rocprof-compute-speed-of-light/SKILL.md#navi48-gfx1201)
+section of the `rocprof-compute-speed-of-light` skill before collecting. It
+explains the `DRAM` and `MALL` roofs and the estimated VALU rows.
 
 Collect only the roofline block:
 
@@ -74,10 +73,6 @@ also runs the roofline benchmarks.
   [profile mode](../../docs/how-to/profile/mode.rst).
 - Tell the user which analysis panels the narrower profile leaves empty.
 
-In ROCm 10.2 and 10.1, use `--list-blocks <gfx_arch>` to list blocks and
-`--list-metrics <gfx_arch>` to list metrics. The architecture selector changed
-in ROCm 10.3.
-
 ## 2. Read the table
 
 ```bash
@@ -128,26 +123,6 @@ know the intent, the counters know what ran.
 
 HBM answers "am I limited by main memory", while L2 and vL1D show whether
 caches are absorbing the traffic.
-
-On gfx1201 (Navi48, for example the Radeon RX 9070), the device-memory roof is
-`DRAM` and the `MALL` roof is the 64 MB Infinity Cache. The `AI DRAM` point
-counts GL2C requests destined for memory, which the Infinity Cache can also
-serve, and no counter separates the two. The plot marks that point once, at
-`DRAM`; compare its performance with both roofs yourself, because "Limited by"
-and the hover text never name `MALL`. Above `DRAM` and below `MALL` means the
-Infinity Cache is absorbing the traffic. Never call such a kernel limited by
-DRAM. Measured roofs depend on the performance state: under `STABLE_STD` they
-sit well below the interface peak, so compare runs only within one state.
-
-The Navi48 VALU rows subtract the WMMA instruction count from the aggregate VALU
-count and multiply by the wave size, which is validated only for one fixed
-wave32 FP16 16x16x16 case. They are estimates, not FLOP counts: integer and
-floating-point instructions both count and an FMA is one issue, so they can read
-low for FMA-only loops and high when index and loop arithmetic dominate (about
-twice the true rate in a tiled FP32 matrix multiply). One WMMA counter covers
-FP16, BF16, FP8, and BF8, so the WMMA row is compared with the FP16 WMMA peak. WMMA
-points need an SDK that supports SQ event 233; check the profiling warnings and
-counter output. MI architectures and gfx1250 keep the `HBM` roof.
 
 `--view table` prints one table for all kernels together instead of one per
 kernel. To compare many kernels, write the

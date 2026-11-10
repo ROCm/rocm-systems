@@ -88,10 +88,6 @@ also runs roofline benchmarks on architectures that support them.
   [profile mode](../../docs/how-to/profile/mode.rst).
 - Tell the user which analysis panels the narrower profile leaves empty.
 
-In ROCm 10.2 and 10.1, use `--list-blocks <gfx_arch>` to list blocks and
-`--list-metrics <gfx_arch>` to list metrics. The architecture selector changed
-in ROCm 10.3.
-
 ## 3. List the captured operators
 
 List when you need the operator names from this run; filtering does not

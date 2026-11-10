@@ -37,35 +37,11 @@ caches `gl0` and `gl2`.
 
 ### Navi48 (gfx1201)
 
-Navi48 GPU metrics and the Memory Chart are available on Linux starting with
-ROCm Compute Profiler 3.11 (ROCm 10.3). ROCm 10.2 and 10.1 shipped without
-gfx1201 support. Apply the `STABLE_STD` prerequisite in the
-[Quickstart](../../docs/install/quickstart.rst) before profiling and compare
-baselines in the same performance state.
-
-Collect `memchart` first. Add `gl0`, `gl1`, `gl2`, or `wgp` only when the chart
-points at that level; LDS metrics belong to `wgp` on Navi48. Discover aliases with
-`rocprof-compute --list-metrics-gfx-id gfx1201`.
-
-GL1 is a write-combining stage. Read its utilization and stalls; do not invent a
-hit rate when the report prints `N/A`. EA to DRAM reports
-`DRAM Read Bandwidth` and `DRAM Write Bandwidth`, including
-traffic served or absorbed by Infinity Cache. Those values do not measure bytes
-reaching physical GDDR6 and must not be compared against a GDDR6 peak.
-`Infinity Cache Hit Rate`, `GDDR6 Read Bandwidth`, and `GDDR6 Write Bandwidth`
-remain `N/A`; treat unavailable values as unknown, not zero.
-
-The `GL2 Cache Bandwidth` table reports size-weighted requests at GL2 output
-FIFOs. Reads cover uncompressed categories and writes include recompressed
-requests. Keep these rates distinct from GL2/EA interface traffic and physical
-GDDR6 bandwidth. LDS byte-access rate uses load, store, and atomic dword counters;
-its hardware normalization remains provisional.
-
-Treat the WGP occupancy field as provisional. Navi48 living-wave counter units,
-instance reduction, and WGP normalization still require validation, so it does
-not establish an exact occupancy limit. The WGP Instruction Issue Stalls table
-is omitted from the CLI while its values are unavailable. See the Navi48 guide
-for the metrics whose restoration is tracked under AIPROFCOMP-907.
+Before reading a Navi48 Memory Chart, read the
+[Navi48 (gfx1201)](../rocprof-compute-speed-of-light/SKILL.md#navi48-gfx1201)
+section of the `rocprof-compute-speed-of-light` skill. It covers the GL1, GL2,
+DRAM, and Infinity Cache rows that do not measure what their CDNA counterparts
+do.
 
 ### Collect only what the question needs
 
@@ -87,10 +63,6 @@ also runs roofline benchmarks on architectures that support them.
   times. Pair it with `-k`. See Iteration multiplexing in
   [profile mode](../../docs/how-to/profile/mode.rst).
 - Tell the user which analysis panels the narrower profile leaves empty.
-
-In ROCm 10.2 and 10.1, use `--list-blocks <gfx_arch>` to list blocks and
-`--list-metrics <gfx_arch>` to list metrics. The architecture selector changed
-in ROCm 10.3.
 
 ## 2. Open the level the chart points at
 
