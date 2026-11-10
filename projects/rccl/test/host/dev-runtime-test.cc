@@ -15,6 +15,7 @@
 
 #include "fakes/dev_runtime_micro_fakes.h"
 #include "fakes/hip_fakes.h"      // the shared g_hip* seams this suite drives
+#include "fakes/mgmt_task_enq_fakes.h"  // g_ncclMgmtTaskEnqueue
 #include "fakes/nccl_fakes.h"     // g_ncclProxyClientGetFdBlocking
 #include "fakes/devcomm_fakes.h"  // g_ncclTeamLsa
 #include "fakes/nccl_device_core_fakes.h"  // g_ncclTeamWorld and the rest of the ncclTeam* family
@@ -6888,7 +6889,7 @@ TEST_F(DevCommCreateJitTest, RearchJobPath_UseRuntimeVersion_RecordsRuntimeVersi
     return std::string(env) == "ENQUEUE_REARCH_ENABLE" ? 1 : deftVal;
   });
   uint32_t jobVersion = 0;
-  ScopedHook enqueue(g_devrMgmtTaskEnqueue,
+  ScopedHook enqueue(g_ncclMgmtTaskEnqueue,
                      [&](ncclAsyncJob* job, ncclResult_t (*)(ncclAsyncJob*), void (*destructor)(void*), ncclComm_t) {
                        jobVersion = reinterpret_cast<ncclDevrCommCreateAsyncJob*>(job)->deviceCodeVersion;
                        destructor(job);

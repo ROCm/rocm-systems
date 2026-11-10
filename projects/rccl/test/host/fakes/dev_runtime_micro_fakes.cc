@@ -32,6 +32,7 @@
 
 #include "fakes/dev_runtime_micro_fakes.h"
 #include "fakes/hip_fakes.h"   // shared HIP seams + InstallHipVmmEmulator()
+#include "fakes/mgmt_task_enq_fakes.h"  // ResetMgmtTaskEnqFakes()
 #include "fakes/nccl_device_core_fakes.h"  // ncclTeam* accessors + ResetNcclDeviceCoreFakes()
 #include "fakes/nccl_fakes.h"  // g_ncclProxyClientGetFdBlocking, ResetNcclFakes()
 #include "signature-drift.h"
@@ -508,23 +509,6 @@ extern "C" ncclResult_t ncclCftBarrierCreateRequirement(ncclTeam_t, int, ncclCft
 
 #undef ASSERT_HOOK_MATCHES_PROD
 
-// The enqueue-rearch job path: collective_stubs.cc defaults
-// ncclParamEnqueueRearchEnable to 0, so call sites take the in-group task
-// branch. DevCommCreateFailureTest turns it on only for requests rejected
-// before this enqueue, so the default never owns a job. A test that lets a
-// create reach it installs a hook that runs the job and then its destructor.
-static ncclResult_t DefaultMgmtTaskEnqueue(struct ncclAsyncJob*, ncclResult_t (*)(struct ncclAsyncJob*),
-                                           void (*)(void*), ncclComm_t) {
-  return ncclSuccess;
-}
-std::function<ncclResult_t(struct ncclAsyncJob*, ncclResult_t (*)(struct ncclAsyncJob*), void (*)(void*), ncclComm_t)>
-    g_devrMgmtTaskEnqueue = DefaultMgmtTaskEnqueue;
-
-ncclResult_t ncclMgmtTaskEnqueue(struct ncclAsyncJob* job, ncclResult_t (*func)(struct ncclAsyncJob*),
-                                 void (*destructor)(void*), ncclComm_t comm) {
-  return g_devrMgmtTaskEnqueue(job, func, destructor, comm);
-}
-
 // ---------------------------------------------------------------------------
 // Params are not cached here (see fakes/dev_runtime_micro_fakes.h), so the default just
 // hands back the value the NCCL_PARAM declaration was written with.
@@ -550,7 +534,7 @@ void ResetDevRuntimeMicroFakes() {
   g_devrBootstrapRecv                           = DefaultBootstrapRecv;
   g_devrGinConnectOnce                          = DefaultGinConnectOnce;
   g_devrGinDevCommSetup                         = DefaultGinDevCommSetup;
-  g_devrMgmtTaskEnqueue                         = DefaultMgmtTaskEnqueue;
+  ResetMgmtTaskEnqFakes();
   g_devrGinRegister                             = DefaultGinRegister;
   g_devrGinDeregister                           = DefaultGinDeregister;
   g_devrRmaProxyConnectOnce                     = DefaultRmaProxyConnectOnce;
