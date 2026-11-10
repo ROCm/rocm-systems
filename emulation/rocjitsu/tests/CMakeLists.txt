@@ -2463,7 +2463,7 @@ set(_rj_interposer_drm_tests
     PrimeImportSharesTheBufferAndItsMetadata
     PrimaryNodePathHasCharacterDeviceMetadata
     RenderNodePathMetadataMatchesDescriptor
-    TimestampUsesAdvertisedNanosecondClock
+    TimestampUsesAdvertisedDeviceClock
 )
 set(_rj_interposer_gem_tests
     LowAddressMappingHonorsMap32Bit
@@ -4557,6 +4557,10 @@ if(RJ_ENABLE_HIP_TESTS)
     endif()
 
     if(RJ_HIP_RUNTIME_SUPPORTS_GFX950)
+        if(HSA_RUNTIME64)
+            rj_add_hip_test(hip_shader_rtc_test ARCH gfx950 EXTRA_LIBS ${HSA_RUNTIME64})
+            rj_add_hip_test_case(hip_shader_rtc_test "HipShaderRtcTest.AqlKernelReadsTheCalibratedGpuClock")
+        endif()
         rj_add_hip_test(hip_hw_id_test ARCH gfx950)
         rj_add_hip_test_case(
             hip_hw_id_test

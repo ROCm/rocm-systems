@@ -756,6 +756,19 @@ void RaceDetectorPlugin::onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/, const 
     read.reset();
     return;
   }
+  // The CDNA1 CU delivers this hook for S_TRAP only after entering a configured
+  // handler. Its implicit wait completes this wave's register obligations.
+  // Cross-wave LDS intervals still need a barrier.
+  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA1 && inst.mnemonic() == "s_trap" &&
+      wf.in_trap_handler()) {
+    PendingWaitCount wait;
+    for (auto counter : {amdgpu::WaitCounterType::VMCNT, amdgpu::WaitCounterType::EXPCNT,
+                         amdgpu::WaitCounterType::LGKMCNT})
+      wait.add(counter, 0);
+    get_state(wf)->race_state->dispatch(wait);
+    return;
+  }
+
   // Only explicit waits are handled here. Embedded waits (e.g. VINTERP wait_exp)
   // remain unsupported by the plugin; they must retire events before the
   // instruction's register accesses, as in MemoryWaitScoreboard::before.
@@ -765,10 +778,17 @@ void RaceDetectorPlugin::onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/, const 
   if (fields.failed() || !fields.value())
     return;
 
+  onAmdgpuImplicitMemoryWait(wf, *fields.value());
+}
+
+void RaceDetectorPlugin::onAmdgpuImplicitMemoryWait(amdgpu::Wavefront &wf,
+                                                    const amdgpu::WaitFields &fields) {
+  auto *s = get_state(wf);
+  assert(s && s->race_state);
   const auto model = amdgpu::waitcnt_model(wf.cu().arch()).value();
   PendingWaitCount wait;
-  for (size_t i = 0; i < fields.value()->size(); ++i) {
-    const auto threshold = (*fields.value())[i];
+  for (size_t i = 0; i < fields.size(); ++i) {
+    const auto threshold = fields[i];
     if (!threshold)
       continue;
     if (const auto counter =
@@ -777,6 +797,19 @@ void RaceDetectorPlugin::onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/, const 
   }
   if (!wait.empty())
     s->race_state->dispatch(wait);
+}
+
+void RaceDetectorPlugin::onAmdgpuTrapEntered(amdgpu::Wavefront &wf) {
+  if (wf.cu().arch() != ROCJITSU_CODE_ARCH_CDNA2)
+    return;
+  auto *s = get_state(wf);
+  if (!s || !s->race_state)
+    return;
+  PendingWaitCount drain;
+  for (const auto counter : {amdgpu::WaitCounterType::VMCNT, amdgpu::WaitCounterType::EXPCNT,
+                             amdgpu::WaitCounterType::LGKMCNT})
+    drain.add(counter, 0);
+  s->race_state->dispatch(drain);
 }
 
 void RaceDetectorPlugin::onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts,

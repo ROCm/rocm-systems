@@ -1177,7 +1177,7 @@ int GuestKfd::get_clock_counters_ioctl(void *arg) {
   if (args->gpu_id != guest_.gpu_id)
     return forward_ioctl(AMDKFD_IOC_GET_CLOCK_COUNTERS, arg);
 
-  return LinuxKfd::get_clock_counters_ioctl(arg);
+  return fill_get_clock_counters_ioctl(arg, guest_.clock_frequency_mhz());
 }
 
 int GuestKfd::acquire_vm_ioctl(void *arg) {

@@ -32,6 +32,7 @@ public:
     // Identification
     uint32_t gpu_id = 0;
     uint32_t gfx_target_version = 0;
+    [[nodiscard]] uint32_t clock_frequency_mhz() const;
     uint32_t vendor_id = 0x1002; // AMD
     uint32_t device_id = 0;
     uint32_t family_id = 0;
