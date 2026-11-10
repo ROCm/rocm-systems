@@ -1681,6 +1681,17 @@ TEST_F(Gfx1250CounterCapacityRaceTest, CapacityCountsGlobalFlatSlot) {
   EXPECT_FALSE(tensor_load_oldest());
 }
 
+// Likewise for a FLAT to LDS: a load, a FLAT to LDS and kCapacity - 2 more loads
+// fill LOADcnt, so the next load completes the first one.
+TEST_F(Gfx1250CounterCapacityRaceTest, CapacityCountsLdsFlatSlot) {
+  vmem_load(0, /*vgpr=*/0);
+  flat_load(0, /*vgpr=*/2, FlatRoute::Lds);
+  for (int index = 0; index < kCapacity - 2; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  vmem_load(0, /*vgpr=*/1);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
 TEST_F(Gfx1250CounterCapacityRaceTest, PartialLoadcntWaitCountsLdsFlatSlot) {
   vmem_load(0, /*vgpr=*/0);
   flat_load(0, /*vgpr=*/2, FlatRoute::Lds);
