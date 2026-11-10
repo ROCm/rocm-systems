@@ -1194,9 +1194,9 @@ def amdsmi_get_cpu_handles() -> Dict[str, Any]:
     """
     cpu_count = ctypes.c_uint32(0)
     null_ptr = POINTER(amdsmi_wrapper.amdsmi_processor_handle)()
-    _check_res(amdsmi_wrapper.amdsmi_get_cpu_handles(ctypes.byref(cpu_count), null_ptr))
+    _check_res(_amdsmi_entry_point("amdsmi_get_cpu_handles")(ctypes.byref(cpu_count), null_ptr))
     proc_handles = (amdsmi_wrapper.amdsmi_processor_handle * cpu_count.value)()
-    _check_res(amdsmi_wrapper.amdsmi_get_cpu_handles(ctypes.byref(cpu_count), proc_handles))
+    _check_res(_amdsmi_entry_point("amdsmi_get_cpu_handles")(ctypes.byref(cpu_count), proc_handles))
     cpu_handles = [
         amdsmi_wrapper.amdsmi_processor_handle(proc_handles[sock_idx])
         for sock_idx in range(cpu_count.value)
@@ -1273,9 +1273,13 @@ def amdsmi_get_processor_handles() -> List[c_void_p]:
 def amdsmi_get_cpucore_handles() -> List[c_void_p]:
     cores_count = ctypes.c_uint32(0)
     null_ptr = POINTER(amdsmi_wrapper.amdsmi_processor_handle)()
-    _check_res(amdsmi_wrapper.amdsmi_get_cpucore_handles(ctypes.byref(cores_count), null_ptr))
+    _check_res(
+        _amdsmi_entry_point("amdsmi_get_cpucore_handles")(ctypes.byref(cores_count), null_ptr)
+    )
     proc_handles = (amdsmi_wrapper.amdsmi_processor_handle * cores_count.value)()
-    _check_res(amdsmi_wrapper.amdsmi_get_cpucore_handles(ctypes.byref(cores_count), proc_handles))
+    _check_res(
+        _amdsmi_entry_point("amdsmi_get_cpucore_handles")(ctypes.byref(cores_count), proc_handles)
+    )
     core_handles = [
         amdsmi_wrapper.amdsmi_processor_handle(proc_handles[sock_idx])
         for sock_idx in range(cores_count.value)
@@ -1290,7 +1294,9 @@ def amdsmi_get_cpu_hsmp_proto_ver(processor_handle: processor_handle_t) -> int:
 
     proto_ver = ctypes.c_uint32()
     _check_res(
-        amdsmi_wrapper.amdsmi_get_cpu_hsmp_proto_ver(processor_handle, ctypes.byref(proto_ver))
+        _amdsmi_entry_point("amdsmi_get_cpu_hsmp_proto_ver")(
+            processor_handle, ctypes.byref(proto_ver)
+        )
     )
 
     return proto_ver.value
@@ -1302,7 +1308,7 @@ def amdsmi_get_cpu_smu_fw_version(processor_handle: processor_handle_t) -> Dict[
 
     smu_fw = amdsmi_wrapper.amdsmi_smu_fw_version_t()
 
-    _check_res(amdsmi_wrapper.amdsmi_get_cpu_smu_fw_version(processor_handle, smu_fw))
+    _check_res(_amdsmi_entry_point("amdsmi_get_cpu_smu_fw_version")(processor_handle, smu_fw))
 
     return {
         "smu_fw_debug_ver_num": smu_fw.debug,
@@ -1318,7 +1324,9 @@ def amdsmi_get_cpu_hsmp_driver_version(processor_handle: processor_handle_t) -> 
     hsmp_driver_version = amdsmi_wrapper.amdsmi_hsmp_driver_version_t()
 
     _check_res(
-        amdsmi_wrapper.amdsmi_get_cpu_hsmp_driver_version(processor_handle, hsmp_driver_version)
+        _amdsmi_entry_point("amdsmi_get_cpu_hsmp_driver_version")(
+            processor_handle, hsmp_driver_version
+        )
     )
 
     return {
@@ -1332,7 +1340,9 @@ def amdsmi_get_cpu_core_energy(processor_handle: processor_handle_t) -> str:
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
     penergy = ctypes.c_uint64()
-    _check_res(amdsmi_wrapper.amdsmi_get_cpu_core_energy(processor_handle, ctypes.byref(penergy)))
+    _check_res(
+        _amdsmi_entry_point("amdsmi_get_cpu_core_energy")(processor_handle, ctypes.byref(penergy))
+    )
 
     return f"{float(penergy.value * pow(10, -6))} J"
 
@@ -1343,7 +1353,9 @@ def amdsmi_get_cpu_core_ccd_power(processor_handle: processor_handle_t) -> int:
 
     power = ctypes.c_uint32()
 
-    _check_res(amdsmi_wrapper.amdsmi_get_cpu_core_ccd_power(processor_handle, ctypes.byref(power)))
+    _check_res(
+        _amdsmi_entry_point("amdsmi_get_cpu_core_ccd_power")(processor_handle, ctypes.byref(power))
+    )
 
     return power.value  # in mW
 
@@ -1353,14 +1365,16 @@ def amdsmi_get_cpu_socket_energy(processor_handle: processor_handle_t) -> str:
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
     penergy = ctypes.c_uint64()
-    _check_res(amdsmi_wrapper.amdsmi_get_cpu_socket_energy(processor_handle, ctypes.byref(penergy)))
+    _check_res(
+        _amdsmi_entry_point("amdsmi_get_cpu_socket_energy")(processor_handle, ctypes.byref(penergy))
+    )
 
     return f"{float(penergy.value * pow(10, -6))} J"
 
 
 def amdsmi_get_threads_per_core():
     threads_per_core = ctypes.c_uint32()
-    _check_res(amdsmi_wrapper.amdsmi_get_threads_per_core(ctypes.byref(threads_per_core)))
+    _check_res(_amdsmi_entry_point("amdsmi_get_threads_per_core")(ctypes.byref(threads_per_core)))
 
     return threads_per_core.value
 
@@ -1371,7 +1385,9 @@ def amdsmi_get_cpu_prochot_status(processor_handle: processor_handle_t) -> int:
 
     prochot = ctypes.c_uint32()
     _check_res(
-        amdsmi_wrapper.amdsmi_get_cpu_prochot_status(processor_handle, ctypes.byref(prochot))
+        _amdsmi_entry_point("amdsmi_get_cpu_prochot_status")(
+            processor_handle, ctypes.byref(prochot)
+        )
     )
 
     return prochot.value
@@ -1384,7 +1400,7 @@ def amdsmi_get_cpu_fclk_mclk(processor_handle: processor_handle_t):
     fclk = ctypes.c_uint32()
     mclk = ctypes.c_uint32()
     _check_res(
-        amdsmi_wrapper.amdsmi_get_cpu_fclk_mclk(
+        _amdsmi_entry_point("amdsmi_get_cpu_fclk_mclk")(
             processor_handle, ctypes.byref(fclk), ctypes.byref(mclk)
         )
     )
@@ -1397,7 +1413,9 @@ def amdsmi_get_cpu_cclk_limit(processor_handle: processor_handle_t) -> str:
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
     cclk = ctypes.c_uint32()
-    _check_res(amdsmi_wrapper.amdsmi_get_cpu_cclk_limit(processor_handle, ctypes.byref(cclk)))
+    _check_res(
+        _amdsmi_entry_point("amdsmi_get_cpu_cclk_limit")(processor_handle, ctypes.byref(cclk))
+    )
 
     return f"{cclk.value} MHz"
 
@@ -1406,7 +1424,7 @@ def amdsmi_get_cpu_socket_current_active_freq_limit(processor_handle: processor_
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
-    amdsmi_wrapper.amdsmi_get_cpu_socket_current_active_freq_limit.argtypes = [
+    _amdsmi_entry_point("amdsmi_get_cpu_socket_current_active_freq_limit").argtypes = [
         amdsmi_wrapper.amdsmi_processor_handle,
         POINTER(ctypes.c_uint16),
         POINTER(ctypes.c_char_p * len(amdsmi_wrapper.amdsmi_hsmp_freqlimit_src_names)),
@@ -1415,7 +1433,7 @@ def amdsmi_get_cpu_socket_current_active_freq_limit(processor_handle: processor_
     src_type = (ctypes.c_char_p * len(amdsmi_wrapper.amdsmi_hsmp_freqlimit_src_names))()
 
     _check_res(
-        amdsmi_wrapper.amdsmi_get_cpu_socket_current_active_freq_limit(
+        _amdsmi_entry_point("amdsmi_get_cpu_socket_current_active_freq_limit")(
             processor_handle, ctypes.byref(freq), src_type
         )
     )
@@ -1435,7 +1453,7 @@ def amdsmi_get_cpu_socket_freq_range(processor_handle: processor_handle_t):
     freq_max = ctypes.c_uint16()
     freq_min = ctypes.c_uint16()
     _check_res(
-        amdsmi_wrapper.amdsmi_get_cpu_socket_freq_range(
+        _amdsmi_entry_point("amdsmi_get_cpu_socket_freq_range")(
             processor_handle, ctypes.byref(freq_max), ctypes.byref(freq_min)
         )
     )
@@ -1449,7 +1467,9 @@ def amdsmi_get_cpu_core_current_freq_limit(processor_handle: processor_handle_t)
 
     freq = ctypes.c_uint32()
     _check_res(
-        amdsmi_wrapper.amdsmi_get_cpu_core_current_freq_limit(processor_handle, ctypes.byref(freq))
+        _amdsmi_entry_point("amdsmi_get_cpu_core_current_freq_limit")(
+            processor_handle, ctypes.byref(freq)
+        )
     )
 
     return f"{freq.value} MHz"
@@ -1460,7 +1480,9 @@ def amdsmi_get_cpu_socket_power(processor_handle: processor_handle_t) -> int:
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
     ppower = ctypes.c_uint32()
-    _check_res(amdsmi_wrapper.amdsmi_get_cpu_socket_power(processor_handle, ctypes.byref(ppower)))
+    _check_res(
+        _amdsmi_entry_point("amdsmi_get_cpu_socket_power")(processor_handle, ctypes.byref(ppower))
+    )
 
     return ppower.value  # in mW
 
@@ -1470,7 +1492,9 @@ def amdsmi_get_cpu_socket_power_cap(processor_handle: processor_handle_t) -> int
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
     pcap = ctypes.c_uint32()
-    _check_res(amdsmi_wrapper.amdsmi_get_cpu_socket_power_cap(processor_handle, ctypes.byref(pcap)))
+    _check_res(
+        _amdsmi_entry_point("amdsmi_get_cpu_socket_power_cap")(processor_handle, ctypes.byref(pcap))
+    )
 
     return pcap.value  # in mW
 
@@ -1481,7 +1505,9 @@ def amdsmi_get_cpu_socket_power_cap_max(processor_handle: processor_handle_t) ->
 
     pmax = ctypes.c_uint32()
     _check_res(
-        amdsmi_wrapper.amdsmi_get_cpu_socket_power_cap_max(processor_handle, ctypes.byref(pmax))
+        _amdsmi_entry_point("amdsmi_get_cpu_socket_power_cap_max")(
+            processor_handle, ctypes.byref(pmax)
+        )
     )
 
     return pmax.value  # in mW
@@ -1493,7 +1519,7 @@ def amdsmi_get_cpu_pwr_svi_telemetry_all_rails(processor_handle: processor_handl
 
     power = ctypes.c_uint32()
     _check_res(
-        amdsmi_wrapper.amdsmi_get_cpu_pwr_svi_telemetry_all_rails(
+        _amdsmi_entry_point("amdsmi_get_cpu_pwr_svi_telemetry_all_rails")(
             processor_handle, ctypes.byref(power)
         )
     )
@@ -1509,7 +1535,9 @@ def amdsmi_set_cpu_socket_power_cap(processor_handle: processor_handle_t, power_
 
     power_cap_32 = ctypes.c_uint32(power_cap)
 
-    _check_res(amdsmi_wrapper.amdsmi_set_cpu_socket_power_cap(processor_handle, power_cap_32))
+    _check_res(
+        _amdsmi_entry_point("amdsmi_set_cpu_socket_power_cap")(processor_handle, power_cap_32)
+    )
 
 
 def amdsmi_set_cpu_pwr_efficiency_mode(
@@ -1532,7 +1560,7 @@ def amdsmi_set_cpu_pwr_efficiency_mode(
     ppt_limit_32 = ctypes.c_uint32(ppt_limit)
 
     _check_res(
-        amdsmi_wrapper.amdsmi_set_cpu_pwr_efficiency_mode(
+        _amdsmi_entry_point("amdsmi_set_cpu_pwr_efficiency_mode")(
             processor_handle, mode_8, ctypes.byref(util_32), ctypes.byref(ppt_limit_32)
         )
     )
@@ -1549,7 +1577,7 @@ def amdsmi_get_cpu_pwr_efficiency_mode(processor_handle: processor_handle_t) -> 
     ppt_limit = ctypes.c_uint32()
 
     _check_res(
-        amdsmi_wrapper.amdsmi_get_cpu_pwr_efficiency_mode(
+        _amdsmi_entry_point("amdsmi_get_cpu_pwr_efficiency_mode")(
             processor_handle, ctypes.byref(mode), ctypes.byref(util), ctypes.byref(ppt_limit)
         )
     )
@@ -1563,7 +1591,9 @@ def amdsmi_get_cpu_core_boostlimit(processor_handle: processor_handle_t) -> int:
 
     boostlimit = ctypes.c_uint32()
     _check_res(
-        amdsmi_wrapper.amdsmi_get_cpu_core_boostlimit(processor_handle, ctypes.byref(boostlimit))
+        _amdsmi_entry_point("amdsmi_get_cpu_core_boostlimit")(
+            processor_handle, ctypes.byref(boostlimit)
+        )
     )
 
     # In MHz"
@@ -1576,7 +1606,7 @@ def amdsmi_get_cpu_socket_c0_residency(processor_handle: processor_handle_t) -> 
 
     c0_residency = ctypes.c_uint32()
     _check_res(
-        amdsmi_wrapper.amdsmi_get_cpu_socket_c0_residency(
+        _amdsmi_entry_point("amdsmi_get_cpu_socket_c0_residency")(
             processor_handle, ctypes.byref(c0_residency)
         )
     )
@@ -1591,7 +1621,9 @@ def amdsmi_set_cpu_core_boostlimit(processor_handle: processor_handle_t, boostli
         raise AmdSmiParameterException(boostlimit, int)
     boostlimit_32 = ctypes.c_uint32(boostlimit)
 
-    _check_res(amdsmi_wrapper.amdsmi_set_cpu_core_boostlimit(processor_handle, boostlimit_32))
+    _check_res(
+        _amdsmi_entry_point("amdsmi_set_cpu_core_boostlimit")(processor_handle, boostlimit_32)
+    )
 
 
 def amdsmi_set_cpu_socket_boostlimit(processor_handle: processor_handle_t, boostlimit: int):
@@ -1601,7 +1633,9 @@ def amdsmi_set_cpu_socket_boostlimit(processor_handle: processor_handle_t, boost
         raise AmdSmiParameterException(boostlimit, int)
     boostlimit_32 = ctypes.c_uint32(boostlimit)
 
-    _check_res(amdsmi_wrapper.amdsmi_set_cpu_socket_boostlimit(processor_handle, boostlimit_32))
+    _check_res(
+        _amdsmi_entry_point("amdsmi_set_cpu_socket_boostlimit")(processor_handle, boostlimit_32)
+    )
 
 
 def amdsmi_get_cpu_ddr_bw(processor_handle: processor_handle_t):
@@ -1610,7 +1644,7 @@ def amdsmi_get_cpu_ddr_bw(processor_handle: processor_handle_t):
 
     ddr_bw = amdsmi_wrapper.amdsmi_ddr_bw_metrics_t()
 
-    _check_res(amdsmi_wrapper.amdsmi_get_cpu_ddr_bw(processor_handle, ddr_bw))
+    _check_res(_amdsmi_entry_point("amdsmi_get_cpu_ddr_bw")(processor_handle, ddr_bw))
 
     return {
         "ddr_bw_max_bw": f"{ddr_bw.max_bw} Gbps",
@@ -1626,7 +1660,9 @@ def amdsmi_get_cpu_socket_temperature(processor_handle: processor_handle_t) -> s
     ptmon = ctypes.c_uint32()
 
     _check_res(
-        amdsmi_wrapper.amdsmi_get_cpu_socket_temperature(processor_handle, ctypes.byref(ptmon))
+        _amdsmi_entry_point("amdsmi_get_cpu_socket_temperature")(
+            processor_handle, ctypes.byref(ptmon)
+        )
     )
 
     return f"{ptmon.value} Degrees C"
@@ -1644,7 +1680,7 @@ def amdsmi_get_cpu_dimm_temp_range_and_refresh_rate(
     dimm = amdsmi_wrapper.amdsmi_temp_range_refresh_rate_t()
 
     _check_res(
-        amdsmi_wrapper.amdsmi_get_cpu_dimm_temp_range_and_refresh_rate(
+        _amdsmi_entry_point("amdsmi_get_cpu_dimm_temp_range_and_refresh_rate")(
             processor_handle, dimm_addr_8, ctypes.byref(dimm)
         )
     )
@@ -1662,7 +1698,7 @@ def amdsmi_get_cpu_dimm_power_consumption(processor_handle: processor_handle_t, 
     dimm = amdsmi_wrapper.amdsmi_dimm_power_t()
 
     _check_res(
-        amdsmi_wrapper.amdsmi_get_cpu_dimm_power_consumption(
+        _amdsmi_entry_point("amdsmi_get_cpu_dimm_power_consumption")(
             processor_handle, dimm_addr_8, ctypes.byref(dimm)
         )
     )
@@ -1684,7 +1720,7 @@ def amdsmi_get_cpu_dimm_thermal_sensor(processor_handle: processor_handle_t, dim
     dimm_thermal = amdsmi_wrapper.amdsmi_dimm_thermal_t()
 
     _check_res(
-        amdsmi_wrapper.amdsmi_get_cpu_dimm_thermal_sensor(
+        _amdsmi_entry_point("amdsmi_get_cpu_dimm_thermal_sensor")(
             processor_handle, dimm_addr_8, ctypes.byref(dimm_thermal)
         )
     )
@@ -1708,7 +1744,9 @@ def amdsmi_set_cpu_xgmi_width(processor_handle: processor_handle_t, min_width: i
     min_width_8 = ctypes.c_uint8(min_width)
     max_width_8 = ctypes.c_uint8(max_width)
 
-    _check_res(amdsmi_wrapper.amdsmi_set_cpu_xgmi_width(processor_handle, min_width_8, max_width_8))
+    _check_res(
+        _amdsmi_entry_point("amdsmi_set_cpu_xgmi_width")(processor_handle, min_width_8, max_width_8)
+    )
 
 
 def amdsmi_set_cpu_gmi3_link_width_range(
@@ -1725,7 +1763,7 @@ def amdsmi_set_cpu_gmi3_link_width_range(
     max_link_width_8 = ctypes.c_uint8(max_link_width)
 
     _check_res(
-        amdsmi_wrapper.amdsmi_set_cpu_gmi3_link_width_range(
+        _amdsmi_entry_point("amdsmi_set_cpu_gmi3_link_width_range")(
             processor_handle, min_link_width_8, max_link_width_8
         )
     )
@@ -1735,7 +1773,7 @@ def amdsmi_cpu_apb_enable(processor_handle: processor_handle_t):
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
-    _check_res(amdsmi_wrapper.amdsmi_cpu_apb_enable(processor_handle))
+    _check_res(_amdsmi_entry_point("amdsmi_cpu_apb_enable")(processor_handle))
 
 
 def amdsmi_cpu_apb_disable(processor_handle: processor_handle_t, pstate: int):
@@ -1746,7 +1784,7 @@ def amdsmi_cpu_apb_disable(processor_handle: processor_handle_t, pstate: int):
 
     pstate_8 = ctypes.c_uint8(pstate)
 
-    _check_res(amdsmi_wrapper.amdsmi_cpu_apb_disable(processor_handle, pstate_8))
+    _check_res(_amdsmi_entry_point("amdsmi_cpu_apb_disable")(processor_handle, pstate_8))
 
 
 def amdsmi_set_cpu_socket_lclk_dpm_level(
@@ -1766,7 +1804,7 @@ def amdsmi_set_cpu_socket_lclk_dpm_level(
     max_val_8 = ctypes.c_uint8(max_val)
 
     _check_res(
-        amdsmi_wrapper.amdsmi_set_cpu_socket_lclk_dpm_level(
+        _amdsmi_entry_point("amdsmi_set_cpu_socket_lclk_dpm_level")(
             processor_handle, nbio_id_8, min_val_8, max_val_8
         )
     )
@@ -1782,7 +1820,9 @@ def amdsmi_get_cpu_socket_lclk_dpm_level(processor_handle: processor_handle_t, n
     dpm_level = amdsmi_wrapper.amdsmi_dpm_level_t()
 
     _check_res(
-        amdsmi_wrapper.amdsmi_get_cpu_socket_lclk_dpm_level(processor_handle, nbio_id_8, dpm_level)
+        _amdsmi_entry_point("amdsmi_get_cpu_socket_lclk_dpm_level")(
+            processor_handle, nbio_id_8, dpm_level
+        )
     )
 
     return {
@@ -1801,7 +1841,7 @@ def amdsmi_set_cpu_pcie_link_rate(processor_handle: processor_handle_t, rate_ctr
     prev_mode_8 = ctypes.c_uint8()
 
     _check_res(
-        amdsmi_wrapper.amdsmi_set_cpu_pcie_link_rate(
+        _amdsmi_entry_point("amdsmi_set_cpu_pcie_link_rate")(
             processor_handle, rate_ctrl_8, ctypes.byref(prev_mode_8)
         )
     )
@@ -1823,7 +1863,9 @@ def amdsmi_set_cpu_df_pstate_range(
     max_pstate_8 = ctypes.c_uint8(max_pstate)
 
     _check_res(
-        amdsmi_wrapper.amdsmi_set_cpu_df_pstate_range(processor_handle, min_pstate_8, max_pstate_8)
+        _amdsmi_entry_point("amdsmi_set_cpu_df_pstate_range")(
+            processor_handle, min_pstate_8, max_pstate_8
+        )
     )
 
 
@@ -1843,7 +1885,7 @@ def amdsmi_get_cpu_current_io_bandwidth(
     io_bw = ctypes.c_uint32()
 
     _check_res(
-        amdsmi_wrapper.amdsmi_get_cpu_current_io_bandwidth(
+        _amdsmi_entry_point("amdsmi_get_cpu_current_io_bandwidth")(
             processor_handle, link, ctypes.byref(io_bw)
         )
     )
@@ -1867,7 +1909,9 @@ def amdsmi_get_cpu_current_xgmi_bw(
     xgmi_bw = ctypes.c_uint32()
 
     _check_res(
-        amdsmi_wrapper.amdsmi_get_cpu_current_xgmi_bw(processor_handle, link, ctypes.byref(xgmi_bw))
+        _amdsmi_entry_point("amdsmi_get_cpu_current_xgmi_bw")(
+            processor_handle, link, ctypes.byref(xgmi_bw)
+        )
     )
 
     return f"{xgmi_bw.value} Mbps"
@@ -1880,7 +1924,7 @@ def amdsmi_get_hsmp_metrics_table_version(processor_handle: processor_handle_t):
     metric_tbl_version = ctypes.c_uint32()
 
     _check_res(
-        amdsmi_wrapper.amdsmi_get_hsmp_metrics_table_version(
+        _amdsmi_entry_point("amdsmi_get_hsmp_metrics_table_version")(
             processor_handle, ctypes.byref(metric_tbl_version)
         )
     )
@@ -1902,7 +1946,7 @@ def amdsmi_set_cpu_xgmi_pstate_range(
     max_pstate_8 = ctypes.c_uint8(max_pstate)
 
     _check_res(
-        amdsmi_wrapper.amdsmi_set_cpu_xgmi_pstate_range(
+        _amdsmi_entry_point("amdsmi_set_cpu_xgmi_pstate_range")(
             processor_handle, min_pstate_8, max_pstate_8
         )
     )
@@ -1916,7 +1960,7 @@ def amdsmi_get_cpu_xgmi_pstate_range(processor_handle: processor_handle_t):
     max_pstate = ctypes.c_uint8()
 
     _check_res(
-        amdsmi_wrapper.amdsmi_get_cpu_xgmi_pstate_range(
+        _amdsmi_entry_point("amdsmi_get_cpu_xgmi_pstate_range")(
             processor_handle, ctypes.byref(min_pstate), ctypes.byref(max_pstate)
         )
     )
@@ -1933,7 +1977,7 @@ def amdsmi_set_cpu_rail_isofreq_policy(processor_handle: processor_handle_t, val
     value_bool = ctypes.c_bool(value)
 
     _check_res(
-        amdsmi_wrapper.amdsmi_set_cpu_rail_isofreq_policy(
+        _amdsmi_entry_point("amdsmi_set_cpu_rail_isofreq_policy")(
             processor_handle, ctypes.byref(value_bool)
         )
     )
@@ -1949,7 +1993,7 @@ def amdsmi_get_cpu_rail_isofreq_policy(processor_handle: processor_handle_t) -> 
     cpurailiso = ctypes.c_uint8()
 
     _check_res(
-        amdsmi_wrapper.amdsmi_get_cpu_rail_isofreq_policy(
+        _amdsmi_entry_point("amdsmi_get_cpu_rail_isofreq_policy")(
             processor_handle, ctypes.byref(cpurailiso)
         )
     )
@@ -1966,7 +2010,9 @@ def amdsmi_set_cpu_dfc_ctrl(processor_handle: processor_handle_t, value: int) ->
 
     value_8 = ctypes.c_uint8(value)
 
-    _check_res(amdsmi_wrapper.amdsmi_set_cpu_dfc_ctrl(processor_handle, ctypes.byref(value_8)))
+    _check_res(
+        _amdsmi_entry_point("amdsmi_set_cpu_dfc_ctrl")(processor_handle, ctypes.byref(value_8))
+    )
 
     return value_8.value
 
@@ -1977,7 +2023,9 @@ def amdsmi_get_cpu_dfc_ctrl(processor_handle: processor_handle_t) -> int:
 
     dfc_ctrl = ctypes.c_uint8()
 
-    _check_res(amdsmi_wrapper.amdsmi_get_cpu_dfc_ctrl(processor_handle, ctypes.byref(dfc_ctrl)))
+    _check_res(
+        _amdsmi_entry_point("amdsmi_get_cpu_dfc_ctrl")(processor_handle, ctypes.byref(dfc_ctrl))
+    )
 
     return dfc_ctrl.value
 
@@ -1990,7 +2038,7 @@ def amdsmi_set_cpu_pc6_enable(processor_handle: processor_handle_t, value: int):
 
     value_8 = ctypes.c_uint8(value)
 
-    _check_res(amdsmi_wrapper.amdsmi_set_cpu_pc6_enable(processor_handle, value_8))
+    _check_res(_amdsmi_entry_point("amdsmi_set_cpu_pc6_enable")(processor_handle, value_8))
 
 
 def amdsmi_get_cpu_pc6_enable(processor_handle: processor_handle_t) -> int:
@@ -1999,7 +2047,9 @@ def amdsmi_get_cpu_pc6_enable(processor_handle: processor_handle_t) -> int:
 
     pc6_enable = ctypes.c_uint8()
 
-    _check_res(amdsmi_wrapper.amdsmi_get_cpu_pc6_enable(processor_handle, ctypes.byref(pc6_enable)))
+    _check_res(
+        _amdsmi_entry_point("amdsmi_get_cpu_pc6_enable")(processor_handle, ctypes.byref(pc6_enable))
+    )
 
     return pc6_enable.value
 
@@ -2012,7 +2062,7 @@ def amdsmi_set_cpu_cc6_enable(processor_handle: processor_handle_t, value: int):
 
     value_8 = ctypes.c_uint8(value)
 
-    _check_res(amdsmi_wrapper.amdsmi_set_cpu_cc6_enable(processor_handle, value_8))
+    _check_res(_amdsmi_entry_point("amdsmi_set_cpu_cc6_enable")(processor_handle, value_8))
 
 
 def amdsmi_get_cpu_cc6_enable(processor_handle: processor_handle_t) -> int:
@@ -2021,7 +2071,9 @@ def amdsmi_get_cpu_cc6_enable(processor_handle: processor_handle_t) -> int:
 
     cc6_enable = ctypes.c_uint8()
 
-    _check_res(amdsmi_wrapper.amdsmi_get_cpu_cc6_enable(processor_handle, ctypes.byref(cc6_enable)))
+    _check_res(
+        _amdsmi_entry_point("amdsmi_get_cpu_cc6_enable")(processor_handle, ctypes.byref(cc6_enable))
+    )
 
     return cc6_enable.value
 
@@ -2047,7 +2099,7 @@ def amdsmi_get_cpu_dimm_sb_reg(
     data = ctypes.c_uint32()
 
     _check_res(
-        amdsmi_wrapper.amdsmi_get_cpu_dimm_sb_reg(
+        _amdsmi_entry_point("amdsmi_get_cpu_dimm_sb_reg")(
             processor_handle, dimm_addr_32, lid_32, reg_offset_32, reg_space_32, ctypes.byref(data)
         )
     )
@@ -2083,7 +2135,7 @@ def amdsmi_set_cpu_dimm_sb_reg(
     write_data_32 = ctypes.c_uint32(write_data)
 
     _check_res(
-        amdsmi_wrapper.amdsmi_set_cpu_dimm_sb_reg(
+        _amdsmi_entry_point("amdsmi_set_cpu_dimm_sb_reg")(
             processor_handle, dimm_addr_32, lid_32, reg_offset_32, reg_space_32, write_data_32
         )
     )
@@ -2095,7 +2147,7 @@ def amdsmi_get_cpu_tdelta(processor_handle: processor_handle_t) -> int:
 
     tdelta = ctypes.c_uint8()
 
-    _check_res(amdsmi_wrapper.amdsmi_get_cpu_tdelta(processor_handle, ctypes.byref(tdelta)))
+    _check_res(_amdsmi_entry_point("amdsmi_get_cpu_tdelta")(processor_handle, ctypes.byref(tdelta)))
 
     return tdelta.value
 
@@ -2117,7 +2169,7 @@ def amdsmi_get_cpu_svi3_vr_controller_temp(
     temperature_32 = ctypes.c_uint32()
 
     _check_res(
-        amdsmi_wrapper.amdsmi_get_cpu_svi3_vr_controller_temp(
+        _amdsmi_entry_point("amdsmi_get_cpu_svi3_vr_controller_temp")(
             processor_handle,
             ctypes.byref(rail_selection_32),
             ctypes.byref(rail_index_32),
@@ -2143,7 +2195,7 @@ def amdsmi_get_cpu_enabled_commands(processor_handle: processor_handle_t):
     read_mask2_u32 = ctypes.c_uint32()
 
     _check_res(
-        amdsmi_wrapper.amdsmi_get_cpu_enabled_commands(
+        _amdsmi_entry_point("amdsmi_get_cpu_enabled_commands")(
             processor_handle,
             ctypes.byref(mask),
             ctypes.byref(read_mask0_u32),
@@ -2159,7 +2211,7 @@ def amdsmi_get_cpu_enabled_commands(processor_handle: processor_handle_t):
     write_mask2_u32 = ctypes.c_uint32()
 
     _check_res(
-        amdsmi_wrapper.amdsmi_get_cpu_enabled_commands(
+        _amdsmi_entry_point("amdsmi_get_cpu_enabled_commands")(
             processor_handle,
             ctypes.byref(mask),
             ctypes.byref(write_mask0_u32),
@@ -2185,7 +2237,7 @@ def amdsmi_get_cpu_core_floor_freq_limit(processor_handle: processor_handle_t) -
     floorlimit = ctypes.c_uint32()
 
     _check_res(
-        amdsmi_wrapper.amdsmi_get_cpu_core_floor_freq_limit(
+        _amdsmi_entry_point("amdsmi_get_cpu_core_floor_freq_limit")(
             processor_handle, ctypes.byref(floorlimit)
         )
     )
@@ -2201,7 +2253,9 @@ def amdsmi_get_cpu_floor_freq_limit(processor_handle: processor_handle_t) -> int
     floorlimit = ctypes.c_uint32()
 
     _check_res(
-        amdsmi_wrapper.amdsmi_get_cpu_floor_freq_limit(processor_handle, ctypes.byref(floorlimit))
+        _amdsmi_entry_point("amdsmi_get_cpu_floor_freq_limit")(
+            processor_handle, ctypes.byref(floorlimit)
+        )
     )
 
     # In MHz
@@ -2215,7 +2269,7 @@ def amdsmi_get_cpu_core_eff_floor_freq_limit(processor_handle: processor_handle_
     eff_floor_freq_limit = ctypes.c_uint32()
 
     _check_res(
-        amdsmi_wrapper.amdsmi_get_cpu_core_eff_floor_freq_limit(
+        _amdsmi_entry_point("amdsmi_get_cpu_core_eff_floor_freq_limit")(
             processor_handle, ctypes.byref(eff_floor_freq_limit)
         )
     )
@@ -2231,7 +2285,7 @@ def amdsmi_get_cpu_eff_floor_freq_limit(processor_handle: processor_handle_t) ->
     eff_floor_freq_limit = ctypes.c_uint32()
 
     _check_res(
-        amdsmi_wrapper.amdsmi_get_cpu_eff_floor_freq_limit(
+        _amdsmi_entry_point("amdsmi_get_cpu_eff_floor_freq_limit")(
             processor_handle, ctypes.byref(eff_floor_freq_limit)
         )
     )
@@ -2248,7 +2302,9 @@ def amdsmi_set_cpu_core_floor_freq_limit(processor_handle: processor_handle_t, f
 
     floorlimit_32 = ctypes.c_uint32(floorlimit)
 
-    _check_res(amdsmi_wrapper.amdsmi_set_cpu_core_floor_freq_limit(processor_handle, floorlimit_32))
+    _check_res(
+        _amdsmi_entry_point("amdsmi_set_cpu_core_floor_freq_limit")(processor_handle, floorlimit_32)
+    )
 
 
 def amdsmi_set_cpu_floor_freq_limit(processor_handle: processor_handle_t, floorlimit: int):
@@ -2259,7 +2315,9 @@ def amdsmi_set_cpu_floor_freq_limit(processor_handle: processor_handle_t, floorl
 
     floorlimit_32 = ctypes.c_uint32(floorlimit)
 
-    _check_res(amdsmi_wrapper.amdsmi_set_cpu_floor_freq_limit(processor_handle, floorlimit_32))
+    _check_res(
+        _amdsmi_entry_point("amdsmi_set_cpu_floor_freq_limit")(processor_handle, floorlimit_32)
+    )
 
 
 def amdsmi_set_cpu_msr_floor_freq_limit(processor_handle: processor_handle_t, msrfloorlimit: int):
@@ -2271,7 +2329,9 @@ def amdsmi_set_cpu_msr_floor_freq_limit(processor_handle: processor_handle_t, ms
     msrfloorlimit_32 = ctypes.c_uint32(msrfloorlimit)
 
     _check_res(
-        amdsmi_wrapper.amdsmi_set_cpu_msr_floor_freq_limit(processor_handle, msrfloorlimit_32)
+        _amdsmi_entry_point("amdsmi_set_cpu_msr_floor_freq_limit")(
+            processor_handle, msrfloorlimit_32
+        )
     )
 
 
@@ -2286,7 +2346,9 @@ def amdsmi_set_cpu_core_msr_floor_freq_limit(
     msrfloorlimit_32 = ctypes.c_uint32(msrfloorlimit)
 
     _check_res(
-        amdsmi_wrapper.amdsmi_set_cpu_core_msr_floor_freq_limit(processor_handle, msrfloorlimit_32)
+        _amdsmi_entry_point("amdsmi_set_cpu_core_msr_floor_freq_limit")(
+            processor_handle, msrfloorlimit_32
+        )
     )
 
 
@@ -2295,7 +2357,9 @@ def amdsmi_get_cpu_freq_range() -> Dict[str, int]:
     fmax = ctypes.c_uint32()
     fmin = ctypes.c_uint32()
 
-    _check_res(amdsmi_wrapper.amdsmi_get_cpu_freq_range(ctypes.byref(fmax), ctypes.byref(fmin)))
+    _check_res(
+        _amdsmi_entry_point("amdsmi_get_cpu_freq_range")(ctypes.byref(fmax), ctypes.byref(fmin))
+    )
 
     # In MHz
     return {"fmax": fmax.value, "fmin": fmin.value}
@@ -2309,7 +2373,7 @@ def amdsmi_set_cpu_sdps_limit(processor_handle: processor_handle_t, sdps_limit: 
 
     sdps_limit_32 = ctypes.c_uint32(sdps_limit)
 
-    _check_res(amdsmi_wrapper.amdsmi_set_cpu_sdps_limit(processor_handle, sdps_limit_32))
+    _check_res(_amdsmi_entry_point("amdsmi_set_cpu_sdps_limit")(processor_handle, sdps_limit_32))
 
 
 def amdsmi_get_cpu_sdps_limit(processor_handle: processor_handle_t) -> int:
@@ -2317,7 +2381,9 @@ def amdsmi_get_cpu_sdps_limit(processor_handle: processor_handle_t) -> int:
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
     sdps_limit = ctypes.c_uint32()
-    _check_res(amdsmi_wrapper.amdsmi_get_cpu_sdps_limit(processor_handle, ctypes.byref(sdps_limit)))
+    _check_res(
+        _amdsmi_entry_point("amdsmi_get_cpu_sdps_limit")(processor_handle, ctypes.byref(sdps_limit))
+    )
 
     return sdps_limit.value  # in mW
 
@@ -2333,7 +2399,7 @@ def amdsmi_get_hsmp_metrics_table(processor_handle: processor_handle_t):
     fraction_uq10 = fraction_q10
     fraction_uq16 = 1 / math.pow(2, 16)
 
-    _check_res(amdsmi_wrapper.amdsmi_get_hsmp_metrics_table(processor_handle, mtbl))
+    _check_res(_amdsmi_entry_point("amdsmi_get_hsmp_metrics_table")(processor_handle, mtbl))
 
     rawtime = int(mtbl.timestamp)
     rawtime = time()
@@ -2410,7 +2476,7 @@ def amdsmi_first_online_core_on_cpu_socket(processor_handle: processor_handle_t)
     pcore_ind = ctypes.c_uint32()
 
     _check_res(
-        amdsmi_wrapper.amdsmi_first_online_core_on_cpu_socket(
+        _amdsmi_entry_point("amdsmi_first_online_core_on_cpu_socket")(
             processor_handle, ctypes.byref(pcore_ind)
         )
     )
@@ -2420,13 +2486,13 @@ def amdsmi_first_online_core_on_cpu_socket(processor_handle: processor_handle_t)
 
 def amdsmi_get_cpu_family():
     family = ctypes.c_uint32()
-    _check_res(amdsmi_wrapper.amdsmi_get_cpu_family(ctypes.byref(family)))
+    _check_res(_amdsmi_entry_point("amdsmi_get_cpu_family")(ctypes.byref(family)))
     return family.value
 
 
 def amdsmi_get_cpu_model():
     model = ctypes.c_uint32()
-    _check_res(amdsmi_wrapper.amdsmi_get_cpu_model(ctypes.byref(model)))
+    _check_res(_amdsmi_entry_point("amdsmi_get_cpu_model")(ctypes.byref(model)))
     return model.value
 
 
@@ -2436,20 +2502,20 @@ def amdsmi_get_cpu_model_name(processor_handle: processor_handle_t):
 
     cpu_info = amdsmi_wrapper.amdsmi_cpu_info_t()
 
-    _check_res(amdsmi_wrapper.amdsmi_get_cpu_model_name(processor_handle, cpu_info))
+    _check_res(_amdsmi_entry_point("amdsmi_get_cpu_model_name")(processor_handle, cpu_info))
     return f"{cpu_info.model_name}"
 
 
 def amdsmi_get_cpu_cores_per_socket(sock_count: ctypes.c_uint32):
     cps = amdsmi_wrapper.amdsmi_sock_info_t()
 
-    _check_res(amdsmi_wrapper.amdsmi_get_cpu_cores_per_socket(sock_count, cps))
+    _check_res(_amdsmi_entry_point("amdsmi_get_cpu_cores_per_socket")(sock_count, cps))
     return {"socket_id": cps.socket_id, "cores_per_socket": cps.cores_per_socket}
 
 
 def amdsmi_get_cpu_socket_count():
     sock_count = ctypes.c_uint32()
-    _check_res(amdsmi_wrapper.amdsmi_get_cpu_socket_count(ctypes.byref(sock_count)))
+    _check_res(_amdsmi_entry_point("amdsmi_get_cpu_socket_count")(ctypes.byref(sock_count)))
     return sock_count.value
 
 
@@ -3005,12 +3071,17 @@ def amdsmi_get_cpu_affinity_with_scope(
     if not isinstance(scope, AmdSmiAffinityScope):
         raise AmdSmiParameterException(scope, AmdSmiAffinityScope)
 
-    socket_count = amdsmi_get_cpu_socket_count()
-    sock_info = amdsmi_get_cpu_cores_per_socket(socket_count)
-    core_count = sock_info["cores_per_socket"]
+    try:
+        socket_count = amdsmi_get_cpu_socket_count()
+        sock_info = amdsmi_get_cpu_cores_per_socket(socket_count)
+        cpu_total = socket_count * sock_info["cores_per_socket"]
+    except AmdSmiLibraryException as e:
+        if e.get_error_code() != amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED:
+            raise
+        cpu_total = os.cpu_count() or 1
 
     size = ctypes.c_uint32(0)
-    size = (socket_count * core_count) / (ctypes.sizeof(ctypes.c_uint64) * 8)
+    size = cpu_total / (ctypes.sizeof(ctypes.c_uint64) * 8)
     size = int(math.ceil(size))
     size = ctypes.c_uint32(size)
     cpu_set = (ctypes.c_uint64 * size.value)()
@@ -7363,7 +7434,7 @@ def amdsmi_get_esmi_err_msg(status: AmdSmiStatus) -> str:
     # Create a pointer to a pointer to char (char**)
     status_string_p_p = ctypes.pointer(ctypes.pointer(ctypes.c_char()))
 
-    _check_res(amdsmi_wrapper.amdsmi_get_esmi_err_msg(status.value, status_string_p_p))
+    _check_res(_amdsmi_entry_point("amdsmi_get_esmi_err_msg")(status.value, status_string_p_p))
 
     # Use string_cast helper function if available in wrapper
     if not status_string_p_p.contents:
@@ -7615,24 +7686,11 @@ def amdsmi_get_gpu_fabric_info(processor_handle: processor_handle_t) -> Dict[str
 
     The C API may return AMDSMI_STATUS_NO_DATA when no sysfs files produced usable
     lines; the struct is still populated with BDF and sentinel/default fabric fields.
-    An unconfigured accelerator returns AMDSMI_STATUS_SUCCESS and reports itself
-    through the accelerator_state key.
-
-    A library predating the nested (version 2) layout never echoes back
-    AMDSMI_FABRIC_INFO_VERSION_2 and instead fills the flat version 1 member; this
-    degrades gracefully to that flat layout (mirroring amd_smi_fabric_example.cc)
-    rather than raising. The returned dict always carries the same keys; the
-    station-only fields (station_flags, num_stations, lane_en_bitmap, the
-    ppod/vpod/station masks, and local_accelerator_count) have no version 1
-    equivalent and are None on that path, "version" reports which layout was
-    actually filled.
     """
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
     fabric_info = amdsmi_wrapper.amdsmi_fabric_info_t()
-    # Selects the nested layout; the flat v1 layout carries no station data
-    fabric_info.fabric_version = amdsmi_wrapper.AMDSMI_FABRIC_INFO_VERSION_2
     ret = amdsmi_wrapper.amdsmi_get_gpu_fabric_info(processor_handle, ctypes.byref(fabric_info))
     if ret == amdsmi_wrapper.AMDSMI_STATUS_RETRY:
         raise AmdSmiRetryException()
@@ -7641,265 +7699,23 @@ def amdsmi_get_gpu_fabric_info(processor_handle: processor_handle_t) -> Dict[str
     if ret not in (amdsmi_wrapper.AMDSMI_STATUS_SUCCESS, amdsmi_wrapper.AMDSMI_STATUS_NO_DATA):
         raise AmdSmiLibraryException(ret)
 
-    if fabric_info.fabric_version != amdsmi_wrapper.AMDSMI_FABRIC_INFO_VERSION_2:
-        # A library predating the nested layout filled the flat v1 member instead; read
-        # it directly rather than erroring, so callers linked against an older
-        # libamd_smi.so keep working the way they did before the v2 layout existed
-        v1 = fabric_info.fabric_info.v1
-        return {
-            "bdf": _format_bdf(fabric_info.bdf),
-            "version": 1,
-            "accelerator_id": v1.accelerator_id,
-            "fabric_type": _FABRIC_TYPE_NAMES.get(v1.fabric_type, "UNKNOWN"),
-            "bandwidth": v1.bandwidth,
-            "latency": v1.latency,
-            "ppod_id": list(v1.ppod_id),
-            "ppod_size": v1.ppod_size,
-            "vpod_id": v1.vpod_id,
-            "vpod_size": v1.vpod_size,
-            "local_accelerators": list(v1.local_accelerators),
-            "local_accelerator_count": None,
-            "vpod_active_accelerators": list(v1.vpod_active_accelerators),
-            "addr_mode": _FABRIC_ADDR_MODE_NAMES.get(v1.addr_mode, "UNKNOWN"),
-            "accel_state": _FABRIC_ACCEL_STATE_NAMES.get(v1.accel_state, "UNKNOWN"),
-            # Station data has no version 1 equivalent
-            "station_flags": None,
-            "num_stations": None,
-            "lane_en_bitmap": None,
-            # No per-field read mask exists in version 1
-            "ppod_mask": None,
-            "vpod_mask": None,
-            "station_mask": None,
-        }
-
-    v2 = fabric_info.fabric_info.v2
-    ppod = v2.ppod
-    vpod = v2.vpod
-    station = v2.station
+    v1 = fabric_info.fabric_info.v1
     return {
         "bdf": _format_bdf(fabric_info.bdf),
-        "version": 2,
-        "accelerator_id": ppod.accelerator_id,
-        "fabric_type": _FABRIC_TYPE_NAMES.get(v2.fabric_type, "UNKNOWN"),
-        "bandwidth": ppod.bandwidth,
-        "latency": ppod.latency,
-        "ppod_id": list(ppod.ppod_id),
-        "ppod_size": ppod.ppod_size,
-        "vpod_id": vpod.vpod_id,
-        "vpod_size": vpod.vpod_size,
-        "local_accelerators": list(ppod.local_accelerators),
-        "local_accelerator_count": ppod.local_accelerator_count,
-        "vpod_active_accelerators": list(vpod.vpod_active_accelerators),
-        "addr_mode": _FABRIC_ADDR_MODE_NAMES.get(vpod.addr_mode, "UNKNOWN"),
-        "accel_state": _FABRIC_ACCEL_STATE_NAMES.get(v2.accel_state, "UNKNOWN"),
-        "station_flags": station.station_flags,
-        "num_stations": station.num_stations,
-        "lane_en_bitmap": list(station.lane_en_bitmap),
-        # Which fields above were actually read; a clear bit means the field holds its sentinel
-        "ppod_mask": v2.ppod_mask,
-        "vpod_mask": v2.vpod_mask,
-        "station_mask": v2.station_mask,
+        "version": fabric_info.fabric_version,
+        "accelerator_id": v1.accelerator_id,
+        "fabric_type": _FABRIC_TYPE_NAMES.get(v1.fabric_type, "UNKNOWN"),
+        "bandwidth": v1.bandwidth,
+        "latency": v1.latency,
+        "ppod_id": list(v1.ppod_id),
+        "ppod_size": v1.ppod_size,
+        "vpod_id": v1.vpod_id,
+        "vpod_size": v1.vpod_size,
+        "local_accelerators": list(v1.local_accelerators),
+        "vpod_active_accelerators": list(v1.vpod_active_accelerators),
+        "addr_mode": _FABRIC_ADDR_MODE_NAMES.get(v1.addr_mode, "UNKNOWN"),
+        "accel_state": _FABRIC_ACCEL_STATE_NAMES.get(v1.accel_state, "UNKNOWN"),
     }
-
-
-# Field name -> AMDSMI_FABRIC_*_FIELD_* mask bit, one map per config struct's `data`
-# member. Keys are exactly the ctypes field names on that struct.
-_FABRIC_PPOD_CONFIG_FIELD_MASKS = {
-    "accelerator_id": amdsmi_wrapper.AMDSMI_FABRIC_PPOD_FIELD_ACCEL_ID,
-    "ppod_id": amdsmi_wrapper.AMDSMI_FABRIC_PPOD_FIELD_PPOD_ID,
-    "ppod_size": amdsmi_wrapper.AMDSMI_FABRIC_PPOD_FIELD_PPOD_SIZE,
-    "local_accelerators": amdsmi_wrapper.AMDSMI_FABRIC_PPOD_FIELD_LOCAL_ACCELS,
-    "bandwidth": amdsmi_wrapper.AMDSMI_FABRIC_PPOD_FIELD_BANDWIDTH,
-    "latency": amdsmi_wrapper.AMDSMI_FABRIC_PPOD_FIELD_LATENCY,
-}
-
-_FABRIC_VPOD_CONFIG_FIELD_MASKS = {
-    "vpod_id": amdsmi_wrapper.AMDSMI_FABRIC_VPOD_FIELD_VPOD_ID,
-    "vpod_size": amdsmi_wrapper.AMDSMI_FABRIC_VPOD_FIELD_VPOD_SIZE,
-    "vpod_active_accelerators": amdsmi_wrapper.AMDSMI_FABRIC_VPOD_FIELD_VPOD_ACTIVE_ACCELS,
-    "addr_mode": amdsmi_wrapper.AMDSMI_FABRIC_VPOD_FIELD_ADDR_MODE,
-}
-
-_FABRIC_STATION_CONFIG_FIELD_MASKS = {
-    "station_flags": amdsmi_wrapper.AMDSMI_FABRIC_DF_FIELD_STATION_FLAGS,
-    "lane_en_bitmap": amdsmi_wrapper.AMDSMI_FABRIC_DF_FIELD_LANE_EN_BITMAP,
-    "num_stations": amdsmi_wrapper.AMDSMI_FABRIC_DF_FIELD_NUM_STATIONS,
-}
-
-
-def _populate_fabric_config_data(config, data: Dict[str, Any], field_masks: Dict[str, int]) -> int:
-    """
-    Write `data` into a fabric ppod/vpod/station config struct's `.data` member and
-    return the OR of the mask bits for the fields written.
-
-    Only the keys present in `data` are written (and included in the mask), matching
-    the C API contract: an unmasked field is not read by the driver, so it is left at
-    whatever the zero-initialized struct already holds.
-
-    Args:
-        config: a freshly constructed amdsmi_fabric_{ppod,vpod,station}_config_t;
-            its `.data` member is written in place
-        data: mapping of `.data` field name to value to write
-        field_masks: the AMDSMI_FABRIC_*_FIELD_* mask bit for each valid field name
-            on this config struct
-
-    Returns:
-        int: OR of the mask bits for every field named in `data`
-
-    Raises:
-        AmdSmiParameterException: `data` names a field that is not in `field_masks`,
-            or a field's value has the wrong type or length
-    """
-    for field_name in data:
-        if field_name not in field_masks:
-            raise AmdSmiParameterException(field_name, list(field_masks.keys()))
-
-    mask = 0
-    for field_name, value in data.items():
-        mask |= field_masks[field_name]
-        target = getattr(config.data, field_name)
-        try:
-            if isinstance(target, ctypes.Array):
-                target[:] = value
-            else:
-                setattr(config.data, field_name, value)
-        except (TypeError, ValueError) as e:
-            raise AmdSmiParameterException(value, type(target), str(e)) from e
-    return mask
-
-
-def amdsmi_set_gpu_fabric_ppod_config(
-    processor_handle: processor_handle_t, ppod_data: Dict[str, Any], commit: bool = True
-) -> None:
-    """
-    Apply physical PoD (PPOD) fabric configuration.
-
-    When `commit` is True, the masked fields (derived from the keys present in
-    `ppod_data`) are written and then committed. When False, the request is
-    validated and nothing is written: the driver ignores the staging files unless
-    a commit follows.
-
-    Args:
-        processor_handle: GPU processor handle
-        ppod_data: mapping of fields to write. Valid keys: "accelerator_id" (int),
-            "ppod_id" (16-byte iterable), "ppod_size" (int),
-            "local_accelerators" (16-entry iterable of accelerator IDs; fill unused
-            slots with UINT32_MAX), "bandwidth" (int), "latency" (int). Only the
-            supplied fields are written; `ppod_data` must select at least one field
-        commit: when True (default), write the masked fields then commit; when
-            False, validate only and write nothing
-
-    Raises:
-        AmdSmiParameterException: processor_handle is not a processor_handle_t,
-            ppod_data is not a dict, commit is not a bool, or ppod_data names an
-            unrecognized field or supplies a malformed value
-        AmdSmiException: the underlying call failed
-    """
-    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
-        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
-    if not isinstance(ppod_data, dict):
-        raise AmdSmiParameterException(ppod_data, dict)
-    if not isinstance(commit, bool):
-        raise AmdSmiParameterException(commit, bool)
-
-    config = amdsmi_wrapper.amdsmi_fabric_ppod_config_t()
-    config.version = amdsmi_wrapper.AMDSMI_FABRIC_PPOD_CONFIG_V1
-    config.commit = commit
-    config.mask = _populate_fabric_config_data(config, ppod_data, _FABRIC_PPOD_CONFIG_FIELD_MASKS)
-
-    _check_res(
-        amdsmi_wrapper.amdsmi_set_gpu_fabric_ppod_config(processor_handle, ctypes.byref(config))
-    )
-
-
-def amdsmi_set_gpu_fabric_vpod_config(
-    processor_handle: processor_handle_t, vpod_data: Dict[str, Any], commit: bool = True
-) -> None:
-    """
-    Apply virtual PoD (VPOD) fabric configuration.
-
-    When `commit` is True, the masked fields (derived from the keys present in
-    `vpod_data`) are written and then committed. When False, the request is
-    validated and nothing is written: the driver ignores the staging files unless
-    a commit follows.
-
-    Args:
-        processor_handle: GPU processor handle
-        vpod_data: mapping of fields to write. Valid keys: "vpod_id" (int,
-            nonzero), "vpod_size" (int), "vpod_active_accelerators" (32-entry
-            iterable; fill unused slots with UINT32_MAX, 0 is a valid accelerator
-            ID), "addr_mode" (int, an amdsmi_fabric_npa_address_mode_t value).
-            Only the supplied fields are written; `vpod_data` must select at
-            least one field
-        commit: when True (default), write the masked fields then commit; when
-            False, validate only and write nothing
-
-    Raises:
-        AmdSmiParameterException: processor_handle is not a processor_handle_t,
-            vpod_data is not a dict, commit is not a bool, or vpod_data names an
-            unrecognized field or supplies a malformed value
-        AmdSmiException: the underlying call failed
-    """
-    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
-        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
-    if not isinstance(vpod_data, dict):
-        raise AmdSmiParameterException(vpod_data, dict)
-    if not isinstance(commit, bool):
-        raise AmdSmiParameterException(commit, bool)
-
-    config = amdsmi_wrapper.amdsmi_fabric_vpod_config_t()
-    config.version = amdsmi_wrapper.AMDSMI_FABRIC_VPOD_CONFIG_V1
-    config.commit = commit
-    config.mask = _populate_fabric_config_data(config, vpod_data, _FABRIC_VPOD_CONFIG_FIELD_MASKS)
-
-    _check_res(
-        amdsmi_wrapper.amdsmi_set_gpu_fabric_vpod_config(processor_handle, ctypes.byref(config))
-    )
-
-
-def amdsmi_set_gpu_fabric_station_config(
-    processor_handle: processor_handle_t, station_data: Dict[str, Any], commit: bool = True
-) -> None:
-    """
-    Apply DF/station fabric configuration.
-
-    When `commit` is True, the masked fields (derived from the keys present in
-    `station_data`) are written and then committed. When False, the request is
-    validated and nothing is written: the driver ignores the staging files unless
-    a commit follows.
-
-    Args:
-        processor_handle: GPU processor handle
-        station_data: mapping of fields to write. Valid keys: "station_flags"
-            (int), "lane_en_bitmap" (64-byte iterable), "num_stations" (int, 0 to
-            255). Only the supplied fields are written; `station_data` must
-            select at least one field
-        commit: when True (default), write the masked fields then commit; when
-            False, validate only and write nothing
-
-    Raises:
-        AmdSmiParameterException: processor_handle is not a processor_handle_t,
-            station_data is not a dict, commit is not a bool, or station_data
-            names an unrecognized field or supplies a malformed value
-        AmdSmiException: the underlying call failed
-    """
-    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
-        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
-    if not isinstance(station_data, dict):
-        raise AmdSmiParameterException(station_data, dict)
-    if not isinstance(commit, bool):
-        raise AmdSmiParameterException(commit, bool)
-
-    config = amdsmi_wrapper.amdsmi_fabric_station_config_t()
-    config.version = amdsmi_wrapper.AMDSMI_FABRIC_STATION_CONFIG_V1
-    config.commit = commit
-    config.mask = _populate_fabric_config_data(
-        config, station_data, _FABRIC_STATION_CONFIG_FIELD_MASKS
-    )
-
-    _check_res(
-        amdsmi_wrapper.amdsmi_set_gpu_fabric_station_config(processor_handle, ctypes.byref(config))
-    )
 
 
 def amdsmi_get_gpu_busy_percent(processor_handle: processor_handle_t):

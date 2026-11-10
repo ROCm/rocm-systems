@@ -757,7 +757,7 @@ impl SessionHandle {
     pub(super) fn create(
         resources: Resources,
         agent: HsaAgent,
-        quarantine: &AtomicBool,
+        quarantine: &crate::runtime::GenerationHealth,
     ) -> Result<Arc<Self>, Status> {
         let session = Arc::new(Self {
             agent,
@@ -801,7 +801,7 @@ impl SessionHandle {
         };
         if status != SUCCESS {
             if trap_may_be_installed {
-                quarantine.store(true, Ordering::Release);
+                quarantine.quarantine();
             }
             session.quarantine();
             return Err(status);

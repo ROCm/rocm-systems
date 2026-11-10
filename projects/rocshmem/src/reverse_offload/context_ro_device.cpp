@@ -728,12 +728,14 @@ __device__ void build_queue_element(
 
   // Blocking requires the CPU to complete the operation.
   if (blocking) {
+    // Poll the caller's flag, not queue_element->status: the host frees the
+    // slot on read, so another lane may reuse it.
     int network_status{0};
     do {
-      refresh_volatile_sbyte(&network_status, queue_element->status);
+      refresh_volatile_sbyte(&network_status, status);
     } while (network_status == 0);
 
-    *(queue_element->status) = 0;
+    *status = 0;
     __threadfence();
   }
   if (default_ctx) {
