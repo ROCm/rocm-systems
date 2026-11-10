@@ -3866,7 +3866,10 @@ typedef struct {
  *  The handle is resolved through its render node. A GPU in SPX reports the
  *  whole GPU's CUID. In DPX and above each handle is a compute partition and
  *  reports that partition's own CUID, never the whole GPU's; a partition
- *  whose UnitID cannot be determined gets ::AMDSMI_STATUS_NOT_SUPPORTED.
+ *  whose UnitID cannot be determined gets ::AMDSMI_STATUS_NOT_SUPPORTED. A
+ *  handle with no render node is named by its BDF only when the GPU reports SPX
+ *  or has no compute-partition attribute; otherwise it may be a partition,
+ *  that BDF names the whole GPU, and the call fails the same way.
  *
  *  On failure @p info comes back cleared, never partly filled.
  *
@@ -3879,7 +3882,9 @@ typedef struct {
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
  *          ::AMDSMI_STATUS_NOT_SUPPORTED when built without CUID support, when
  *          no CUID exists for this device, or for a partition whose UnitID
- *          cannot be determined, non-zero on other failures
+ *          cannot be determined,
+ *          ::AMDSMI_STATUS_NO_DATA when the node has no usable machine ID,
+ *          without which no CUID can be formed, non-zero on other failures
  */
 amdsmi_status_t amdsmi_get_gpu_cuid_info(amdsmi_processor_handle processor_handle,
                                          amdsmi_cuid_info_t* info);
@@ -3914,9 +3919,11 @@ typedef struct {
  *
  *  The platform, each CPU package, each AMD GPU or GPU partition, each NPU,
  *  and each NIC function, ordered by component type, then BDF, then device
- *  path.
+ *  path, with the numbers in a path compared as numbers: cpu96 before cpu192.
  *  Unlike ::amdsmi_get_gpu_cuid_info this needs no processor handle, so it
- *  also covers components amd-smi does not manage.
+ *  also covers components amd-smi does not manage. The node is rediscovered on
+ *  every call, so a component added or removed since the last one is
+ *  reflected, also in a long-running process.
  *
  *  Every PCI function with a CUID is listed. A NIC's UnitID is its PCI
  *  function number, so the functions of one card have distinct CUIDs even
@@ -3938,10 +3945,10 @@ typedef struct {
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, including
  *          with *@p count set to 0 when the node has no components,
  *          ::AMDSMI_STATUS_INVAL when @p count is null,
+ *          ::AMDSMI_STATUS_NO_DATA when the node has no usable machine ID,
+ *          which fails every component rather than leaving the list empty,
  *          ::AMDSMI_STATUS_INSUFFICIENT_SIZE when @p components is too small
  *          (the first N entries, N being the input *@p count, are written),
- *          ::AMDSMI_STATUS_NO_PERM when this caller may not read a
- *          component's auxiliary flag,
  *          ::AMDSMI_STATUS_NOT_SUPPORTED when built without CUID support,
  *          non-zero on other failures
  */

@@ -3195,7 +3195,8 @@ def amdsmi_get_gpu_cuid_info(processor_handle: processor_handle_t) -> Dict[str, 
         AmdSmiParameterException: If the input parameters are invalid.
         AmdSmiLibraryException: If the library reports an error, including
             AMDSMI_STATUS_NOT_SUPPORTED against a libamd_smi.so that predates
-            the call, or when the auxiliary flag cannot be read.
+            the call, AMDSMI_STATUS_NO_DATA when the node has no usable
+            machine ID, or when the auxiliary flag cannot be read.
     """
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
@@ -3218,7 +3219,10 @@ def amdsmi_get_cuid_components() -> List[Dict[str, Any]]:
     """
     Lists every component on the node that has a CUID: the platform, each CPU
     package, each AMD GPU or GPU partition, each NPU, and each NIC, ordered by
-    component type, then BDF, then device path. Needs no processor handle.
+    component type, then BDF, then device path, with the numbers in a path
+    compared as numbers. Needs no processor handle. The
+    node is rediscovered on every call, so a component added or removed since
+    the last one is reflected.
 
     Every CUID is temporary, so the primary CUIDs are empty.
 
@@ -3232,9 +3236,9 @@ def amdsmi_get_cuid_components() -> List[Dict[str, Any]]:
 
     Raises:
         AmdSmiLibraryException: If the library reports an error, including
-            AMDSMI_STATUS_NO_PERM when this caller may not read a component's
-            auxiliary flag, and AMDSMI_STATUS_NOT_SUPPORTED when built without
-            CUID or against a libamd_smi.so that predates the call.
+            AMDSMI_STATUS_NO_DATA when the node has no usable machine ID, and
+            AMDSMI_STATUS_NOT_SUPPORTED when built without CUID or against a
+            libamd_smi.so that predates the call.
     """
     entry = _amdsmi_entry_point("amdsmi_get_cuid_components")
 

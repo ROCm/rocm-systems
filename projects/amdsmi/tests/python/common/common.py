@@ -318,6 +318,22 @@ def stub_modules(test_cls, modules):
     add_class_cleanup(test_cls, stub_modules_at_import(modules))
 
 
+def host_has_machine_id():
+    """Whether libamdcuid finds a machine identity here, read as it reads one.
+
+    /var/lib/dbus/machine-id only where /etc/machine-id does not exist, and 32
+    hex digits that are not all zero. Without one there is no temporary CUID,
+    and every CUID call answers AMDSMI_STATUS_NO_DATA.
+    """
+    path = "/etc/machine-id" if os.path.exists("/etc/machine-id") else "/var/lib/dbus/machine-id"
+    try:
+        with open(path, encoding="ascii", errors="replace") as file:
+            line = file.readline().rstrip("\n")
+    except OSError:
+        return False
+    return len(line) == 32 and all(c in "0123456789abcdefABCDEF" for c in line) and line != "0" * 32
+
+
 # Provenance, not just the value: an explicit AMDSMI_PATH can name the same path
 # as the default, and cli_search_order() has to tell those two apart.
 _env_share = os.environ.get("AMDSMI_PATH")

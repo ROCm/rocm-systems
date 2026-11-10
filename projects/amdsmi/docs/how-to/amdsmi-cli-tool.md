@@ -137,7 +137,7 @@ alone does not hide a readable CUID.
 The `oam_id` field identifies the physical board slot in multi-GPU OAM chassis.
 The `ID` shown for `--gpu` (0, 1, 2, …) is an enumeration index assigned in discovery
 order, not the device-type value returned by `amdsmi_get_gpu_id()`; `--gpu` also accepts a
-BDF or UUID to select a specific card.
+BDF, UUID or CUID to select a specific card.
 ```
 
 ```shell-session
@@ -157,10 +157,10 @@ List Arguments:
 
 Device Arguments:
   -g, --gpu GPU [GPU ...]  Select a GPU ID, BDF, UUID or CUID from the possible choices:
-                           ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                           ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                           ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                           ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                           ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                           ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                           ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                           ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
                              all | Selects all devices
   -U, --cpu CPU [CPU ...]     Select a CPU ID from the possible choices:
                               ID: 0
@@ -194,11 +194,12 @@ described under [`amd-smi list`](#cmd-list). It does not fall back to a
 legacy UUID.
 
 Every temporary CUID needs a machine-id. Without a valid `/etc/machine-id` (or
-`/var/lib/dbus/machine-id` when `/etc/machine-id` does not exist), every CUID
-field reads `N/A` with `cuid_metadata_status` `not_supported`, and
-`amd-smi node --cuid` lists no components. A container with its own machine-id
-gets its own CUIDs; bind-mount the host's `/etc/machine-id` read-only to get
-the host's.
+`/var/lib/dbus/machine-id` when `/etc/machine-id` does not exist), every GPU's
+`cuid_metadata_status` reads `amdsmi_error_40` (`AMDSMI_STATUS_NO_DATA`), not the
+`not_supported` of a GPU that has no CUID, and `amd-smi node --cuid` prints the
+error in place of the components and exits with status 40. A container with its
+own machine-id gets its own CUIDs; bind-mount the host's `/etc/machine-id`
+read-only to get the host's.
 
 On a GPU in SPX the handle reports the whole GPU's CUID. In DPX and above,
 on a partition-capable GPU such as an MI300-series GPU, each GPU handle is a
@@ -258,10 +259,10 @@ CPU Arguments:
 
 Device Arguments:
   -g, --gpu GPU [GPU ...]  Select a GPU ID, BDF, UUID or CUID from the possible choices:
-                           ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                           ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                           ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                           ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                           ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                           ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                           ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                           ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
                              all | Selects all devices
   -U, --cpu CPU [CPU ...]  Select a CPU ID from the possible choices:
                            ID: 0
@@ -298,10 +299,10 @@ Firmware Arguments:
 
 Device Arguments:
   -g, --gpu GPU [GPU ...]      Select a GPU ID, BDF, UUID or CUID from the possible choices:
-                               ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                               ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                               ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                               ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                               ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                               ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                               ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                               ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
                                  all | Selects all devices
   -U, --cpu CPU [CPU ...]     Select a CPU ID from the possible choices:
                               ID: 0
@@ -342,10 +343,10 @@ Bad Pages Arguments:
 
 Device Arguments:
   -g, --gpu GPU [GPU ...]  Select a GPU ID, BDF, UUID or CUID from the possible choices:
-                           ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                           ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                           ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                           ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                           ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                           ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                           ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                           ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
                              all | Selects all devices
   -U, --cpu CPU [CPU ...]     Select a CPU ID from the possible choices:
                               ID: 0
@@ -465,10 +466,10 @@ CPU Core Arguments:
 
 Device Arguments:
   -g, --gpu GPU [GPU ...]      Select a GPU ID, BDF, UUID or CUID from the possible choices:
-                               ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                               ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                               ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                               ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                               ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                               ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                               ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                               ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
                                  all | Selects all devices
   -U, --cpu CPU [CPU ...]     Select a CPU ID from the possible choices:
                               ID: 0
@@ -581,10 +582,10 @@ Watch Arguments:
 
 Device Arguments:
   -g, --gpu GPU [GPU ...]      Select a GPU ID, BDF, UUID or CUID from the possible choices:
-                               ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                               ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                               ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                               ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                               ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                               ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                               ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                               ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
                                  all | Selects all devices
   -U, --cpu CPU [CPU ...]      Select a CPU ID from the possible choices:
                                ID: 0
@@ -621,10 +622,10 @@ Event Arguments:
 
 Device Arguments:
   -g, --gpu GPU [GPU ...]     Select a GPU ID, BDF, UUID or CUID from the possible choices:
-                              ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                              ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                              ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                              ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                              ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                              ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                              ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                              ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
                                 all | Selects all devices
   -U, --cpu CPU [CPU ...]     Select a CPU ID from the possible choices:
                               ID: 0
@@ -672,10 +673,10 @@ Topology arguments:
 
 Device Arguments:
   -g, --gpu GPU [GPU ...]     Select a GPU ID, BDF, UUID or CUID from the possible choices:
-                              ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                              ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                              ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                              ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                              ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                              ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                              ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                              ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
                                 all | Selects all devices
   -U, --cpu CPU [CPU ...]     Select a CPU ID from the possible choices:
                               ID: 0
@@ -834,10 +835,10 @@ CPU Core Arguments:
 
 Device Arguments:
   -g, --gpu GPU [GPU ...]                      Select a GPU ID, BDF, UUID or CUID from the possible choices:
-                                               ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                                               ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                                               ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                                               ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                                               ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                                               ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                                               ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                                               ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
                                                  all | Selects all devices
   -U, --cpu CPU [CPU ...]                                        Select a CPU ID from the possible choices:
                                                                  ID: 0
@@ -903,10 +904,10 @@ Reset Arguments:
 
 Device Arguments:
   -g, --gpu GPU [GPU ...]     Select a GPU ID, BDF, UUID or CUID from the possible choices:
-                              ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                              ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                              ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                              ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                              ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                              ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                              ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                              ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
                                 all | Selects all devices
   -U, --cpu CPU [CPU ...]     Select a CPU ID from the possible choices:
                               ID: 0
@@ -965,10 +966,10 @@ Watch Arguments:
 
 Device Arguments:
   -g, --gpu GPU [GPU ...]      Select a GPU ID, BDF, UUID or CUID from the possible choices:
-                               ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                               ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                               ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                               ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                               ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                               ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                               ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                               ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
                                  all | Selects all devices
   -U, --cpu CPU [CPU ...]      Select a CPU ID from the possible choices:
                                ID: 0
@@ -1008,10 +1009,10 @@ XGMI arguments:
 
 Device Arguments:
   -g, --gpu GPU [GPU ...]     Select a GPU ID, BDF, UUID or CUID from the possible choices:
-                              ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                              ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                              ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                              ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                              ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                              ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                              ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                              ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
                                 all | Selects all devices
   -U, --cpu CPU [CPU ...]     Select a CPU ID from the possible choices:
                               ID: 0
@@ -1052,10 +1053,10 @@ Partition arguments:
 
 Device Arguments:
   -g, --gpu GPU [GPU ...]  Select a GPU ID, BDF, UUID or CUID from the possible choices:
-                           ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                           ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                           ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                           ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                           ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                           ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                           ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                           ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
                              all | Selects all devices
 
 Command Modifiers:
@@ -1099,10 +1100,10 @@ AFID Arguments:
 
 Device Arguments:
   -g, --gpu GPU [GPU ...]     Select a GPU ID, BDF, UUID or CUID from the possible choices:
-                              ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                              ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                              ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                              ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                              ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                              ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                              ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                              ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
                                 all | Selects all devices
   -U, --cpu CPU [CPU ...]     Select a CPU ID from the possible choices:
                               ID: 0
@@ -1147,10 +1148,10 @@ Fabric arguments:
 
 Device Arguments:
   -g, --gpu GPU [GPU ...]  Select a GPU ID, BDF, UUID or CUID from the possible choices:
-                           ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                           ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                           ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
-                           ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+                           ID: 0 | BDF: 0000:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                           ID: 1 | BDF: 0001:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                           ID: 2 | BDF: 0002:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+                           ID: 3 | BDF: 0003:01:00.0 | UUID: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX | CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
                              all | Selects all devices
 
 Command Modifiers:
