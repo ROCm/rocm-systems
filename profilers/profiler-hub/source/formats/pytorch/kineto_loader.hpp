@@ -37,6 +37,7 @@ struct load_diag_t
     std::uint64_t meta_events{};
     std::uint64_t other_events{};
     std::uint64_t bad_events{};
+    std::uint64_t clamped_events{};
     std::uint64_t gunzip_ms{};
     std::uint64_t parse_ms{};
 };
