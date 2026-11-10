@@ -138,6 +138,7 @@
 #include <vector>
 
 namespace {
+constexpr uint32_t kRdnaFormat32 = 20u << 12; // V# word3 FORMAT = BUF_FMT_32_UINT
 
 using namespace rocjitsu;
 
@@ -6437,7 +6438,7 @@ TEST(RdnaAddrCalcTest, Rdna3MubufWrapsOffsetPartBeforeBoundsCheck) {
   cu->write_sgpr(sbase, static_cast<uint32_t>(kBase));
   cu->write_sgpr(sbase + 1, static_cast<uint32_t>(kBase >> 32));
   cu->write_sgpr(sbase + 2, 0x1000);
-  cu->write_sgpr(sbase + 3, 0);
+  cu->write_sgpr(sbase + 3, kRdnaFormat32);
   cu->write_vgpr(vbase + 4, 0, 0xFFFF'FFF0u);
 
   rdna3::MubufMachineInst inst{};
@@ -6476,7 +6477,7 @@ TEST(RdnaAddrCalcTest, Rdna3IndexedBoundsExcludeSoffset) {
   cu->write_sgpr(sbase, static_cast<uint32_t>(kBase));
   cu->write_sgpr(sbase + 1, static_cast<uint32_t>(kBase >> 32));
   cu->write_sgpr(sbase + 2, 120);
-  cu->write_sgpr(sbase + 3, 1u << 28); // Index-only mode.
+  cu->write_sgpr(sbase + 3, (1u << 28) | kRdnaFormat32); // Index-only mode.
   cu->write_sgpr(sbase + 8, 64);
   cu->write_vgpr(vbase + 4, 0, 116);
 
@@ -6517,7 +6518,7 @@ TEST(RdnaAddrCalcTest, Rdna3MubufCompleteBoundsIncludesSoffsetAndPayload) {
   cu->write_sgpr(sbase + 8, static_cast<uint32_t>(kBase));
   cu->write_sgpr(sbase + 9, static_cast<uint32_t>(kBase >> 32));
   cu->write_sgpr(sbase + 10, kNumRecords);
-  cu->write_sgpr(sbase + 11, 3u << 28); // OOB_SELECT=COMPLETE.
+  cu->write_sgpr(sbase + 11, (3u << 28) | kRdnaFormat32); // OOB_SELECT=COMPLETE.
   cu->write_sgpr(sbase + 31, kSoffset);
   for (uint32_t lane = 0; lane < 6; ++lane)
     cu->write_vgpr(vbase + 37, lane, 4 * (lane + 1));
@@ -6950,7 +6951,7 @@ TEST(RdnaAddrCalcTest, Rdna4VbufferWrapsOffsetPartBeforeBaseAddition) {
   cu->write_sgpr(sbase + 4, static_cast<uint32_t>(kBase));
   cu->write_sgpr(sbase + 5, static_cast<uint32_t>(kBase >> 32));
   cu->write_sgpr(sbase + 6, 0x1000);
-  cu->write_sgpr(sbase + 7, 3u << 28); // Complete byte-range bounds.
+  cu->write_sgpr(sbase + 7, (3u << 28) | kRdnaFormat32); // Complete byte-range bounds.
   cu->write_vgpr(vbase + 4, 0, 0xFFFF'8200u);
 
   rdna4::VbufferMachineInst inst{};
