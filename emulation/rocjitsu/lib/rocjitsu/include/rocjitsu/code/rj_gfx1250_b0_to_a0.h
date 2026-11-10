@@ -58,6 +58,7 @@ typedef void (*rj_gfx1250_b0_to_a0_diagnostic_callback_t)(
 /// library allocates @p translated_elf with malloc-compatible storage and writes
 /// its size to @p translated_size. Release the allocation with
 /// rj_gfx1250_b0_to_a0_free(). Output arguments are cleared on failure.
+/// Internal allocation failures terminate the calling process before returning a status.
 ///
 /// @param[in] source_elf Source code-object bytes.
 /// @param[in] source_size Number of bytes in @p source_elf.
@@ -79,8 +80,8 @@ typedef void (*rj_gfx1250_b0_to_a0_diagnostic_callback_t)(
 /// @retval ROCJITSU_STATUS_INVALID_CODE_OBJECT The input is not a gfx1250 code object, or
 ///         translating it produced nothing dispatchable. Both are properties of the input, so
 ///         repeating the call reaches the same verdict.
-/// @retval ROCJITSU_STATUS_OUT_OF_RESOURCES Output allocation failed. Environmental: the same
-///         input may translate on a later attempt.
+/// @retval ROCJITSU_STATUS_OUT_OF_RESOURCES Final output-buffer allocation failed.
+///         The same input may translate on a later attempt.
 /// @retval ROCJITSU_STATUS_ERROR Internal translator error. Carries no promise
 ///         about the input.
 #ifdef __cplusplus
