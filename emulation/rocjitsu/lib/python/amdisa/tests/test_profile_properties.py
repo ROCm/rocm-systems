@@ -697,7 +697,10 @@ def test_gfx1250_operand_execution_backend_uses_separate_source(tmp_path):
     assert ': IsaOperand<Isa>(size_bits, opr_type, encoding_value)' in operand_cpp
     assert 'ROCJITSU_ISA_MODEL_ONLY' not in operand_cpp
     assert 'uint32_t Operand::read_scalar' in operand_cpp
-    assert 'current_isa_operand_backend()' in operand_cpp
+    assert 'detail::current_isa_operand_backend_inline()' in operand_cpp
+    assert 'struct UnpackedVgpr {};' in operand_h
+    assert 'UnpackedSource' not in operand_h
+    assert 'OperandType::OPR_SRC;' not in operand_cpp
     assert (
         'execution_backend_ ? execution_backend_->read_scalar : nullptr' in operand_cpp
     )

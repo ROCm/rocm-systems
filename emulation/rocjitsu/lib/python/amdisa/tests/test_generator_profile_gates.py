@@ -6462,7 +6462,7 @@ def test_gfx1251_packed_u64_decode_rejects_undefined_layouts_and_register_tuples
     assert 'src1 <= 236u' in lshl
     assert 'src1 == 253u' in lshl
     assert 'src1 == 231u' not in lshl
-    assert 'src1(64, OperandType::OPR_SRC,' in lshl_constructor
+    assert 'src1(64, Operand::UnpackedSource{},' in lshl_constructor
     assert 'make_after_selector_validation' not in lshl_constructor
 
 
@@ -9522,7 +9522,7 @@ def test_generated_operands_validate_vgpr_source_selectors(
         assert validation in operand
 
 
-def test_generated_operand_validation_switch_is_shared_by_constructors(
+def test_generated_operand_constructors_preserve_selector_validation(
     amdgpu_generated_root: Path,
 ):
     literal16_constructor = (
@@ -9543,7 +9543,41 @@ def test_generated_operand_validation_switch_is_shared_by_constructors(
         'rdna4',
     ):
         operand = (amdgpu_generated_root / arch / 'operand.cpp').read_text()
-        assert operand.count('switch (opr_type) {') == 1
+
+        # Check the validation in each overload that can construct a selector.
+        def constructor(parameters: str) -> str:
+            start = operand.index(f'Operand::Operand(int size_bits, {parameters}')
+            return operand[start : operand.index('\n\n', start)]
+
+        ordinary = constructor('OperandType opr_type, int encoding_value)')
+        switch = ordinary.split('  switch (opr_type) {\n', 1)[1].split('\n  }', 1)[0]
+        assert (
+            'defer_encoding_error(EncodingError::InvalidVgprSourceSelector);' in switch
+        )
+        if _profile_for_arch(arch).uses_packed_16bit_e32_source_selectors:
+            packed = constructor('OperandType opr_type, int encoding_value, bool')
+            assert switch in packed
+            assert 'packed_16bit_source_(packed_16bit_source)' in packed
+            assert 'packed_16bit_dst_(packed_16bit_dst)' in packed
+            assert (
+                'set_register_byte_mask((encoding_value & 128) ? 0xc : 0x3);' in packed
+            )
+        if arch == 'cdna5':
+            for tag, kind in [
+                ('UnpackedVgpr', 'OPR_VGPR'),
+                ('UnpackedSource', 'OPR_SRC'),
+            ]:
+                tagged = constructor(f'{tag}, int encoding_value)')
+                assert (
+                    f'constexpr OperandType opr_type = OperandType::{kind};' in tagged
+                )
+                assert 'constexpr bool packed_16bit_source = false;' in tagged
+                assert 'constexpr bool packed_16bit_dst = false;' in tagged
+                case = switch.split(f'case OperandType::{kind}:', 1)[1].split(
+                    'break;', 1
+                )[0]
+                assert 'defer_encoding_error(EncodingError::InvalidSelector);' in case
+                assert case in tagged
         assert literal16_constructor in operand
 
 
@@ -9713,10 +9747,9 @@ def test_generated_atomic_def_use_follows_return_control(
         ('BufferAtomicCmpswapB32Vbuffer', 64, 32),
         ('BufferAtomicCmpswapB64Vbuffer', 128, 64),
     ):
-        cmpswap = gfx1250_buffer.split(f'{mnemonic}::{mnemonic}')[1]
-        cmpswap = cmpswap.split(f'void {mnemonic}::execute_impl')[0]
-        assert f'vdata({payload_bits}, OperandType::OPR_VGPR' in cmpswap
-        assert f'vdata_return({return_bits}, OperandType::OPR_VGPR' in cmpswap
+        cmpswap = _generated_constructor_body(gfx1250_buffer, mnemonic)
+        assert f'vdata({payload_bits}, Operand::UnpackedVgpr{{}},' in cmpswap
+        assert f'vdata_return({return_bits}, Operand::UnpackedVgpr{{}},' in cmpswap
         assert 'src_operands_[0] = &vdata;' in cmpswap
         assert 'dst_operands_[num_dst_++] = &vdata_return;' in cmpswap
 
@@ -9793,15 +9826,15 @@ def test_generated_cdna5_swmmac_tied_destination_metadata(
     )
     for class_name, destination_bits in ordinary_forms:
         constructor = _generated_constructor_body(source, class_name)
-        assert f'vdst({destination_bits}, OperandType::OPR_VGPR' in constructor
+        assert f'vdst({destination_bits}, Operand::UnpackedVgpr{{}},' in constructor
         assert 'dst_operands_[0] = &vdst;' in constructor
         assert f'void {class_name}::implicit_uses(RegisterSet &uses) const' in source
         assert f'void {class_name}::implicit_use_operands(' in source
 
     class_name = 'VSwmmacBf16f3216x16x64Bf16Vop3p'
     constructor = _generated_constructor_body(source, class_name)
-    assert 'vdst(256, OperandType::OPR_VGPR' in constructor
-    assert 'vdst_result(128, OperandType::OPR_VGPR' in constructor
+    assert 'vdst(256, Operand::UnpackedVgpr{},' in constructor
+    assert 'vdst_result(128, Operand::UnpackedVgpr{},' in constructor
     assert 'dst_operands_[0] = &vdst_result;' in constructor
     assert 'vdst_result.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);' in constructor
     assert 'src_operands_[0] = &vdst' not in constructor
