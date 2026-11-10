@@ -74,12 +74,14 @@ impl Instance {
 
     /// Reserves frontend owner storage under this instance's callback policy.
     pub(crate) fn owner_slot<T>(&self) -> Result<UninitOwned<T>, u64> {
+        self.require_current_process()?;
         self.host_allocator
             .with_scope(|| Owned::<T>::try_new_uninit().map_err(|_| EXHAUSTED))
     }
 
     /// Creates a shared frontend owner retaining the same callback policy.
     fn shared<T>(&self, value: T) -> Result<Shared<T>, u64> {
+        self.require_current_process()?;
         self.host_allocator
             .with_scope(|| Shared::new(value).map_err(|_| EXHAUSTED))
     }
@@ -97,6 +99,15 @@ pub(crate) struct Endpoint {
     pub children: AtomicU64,
     /// Embedded endpoint memory profile namespace.
     pub scope: Scope,
+}
+
+impl Endpoint {
+    /// Rejects an inherited endpoint before its instance can allocate or
+    /// activate native state.
+    pub(crate) fn require_current_process(&self) -> Result<(), u64> {
+        // SAFETY: A live endpoint borrows its live instance.
+        unsafe { &*self.instance }.require_current_process()
+    }
 }
 
 /// Explicitly activated device handle borrowing its endpoint.
@@ -388,6 +399,12 @@ pub(crate) fn advance_reset_epoch(epoch: &AtomicU64, resource_epoch: u64) {
 }
 
 impl Device {
+    /// Rejects an inherited device before entering frontend or native state.
+    pub(crate) fn require_current_process(&self) -> Result<(), u64> {
+        // SAFETY: A live device borrows its live endpoint and instance.
+        unsafe { device_instance(self) }.require_current_process()
+    }
+
     /// Reports loss of the native exception observer without inventing reset.
     pub(crate) fn event_observation_failed(&self) -> bool {
         self.event_observer.polling_failed.load(Ordering::Acquire)
@@ -939,6 +956,7 @@ pub(crate) unsafe extern "C" fn enumerate(
 ) -> u64 {
     crate::support::boundary(|| unsafe {
         let instance = object(pointer.cast::<Instance>())?;
+        instance.require_current_process()?;
         if instance.closing {
             return Err(PRECONDITION);
         }
@@ -981,6 +999,7 @@ pub(crate) unsafe extern "C" fn open(
     crate::support::boundary(|| {
         unsafe {
             let instance = object(pointer.cast::<Instance>())?;
+            instance.require_current_process()?;
             if instance.closing {
                 return Err(PRECONDITION);
             }
@@ -1137,6 +1156,7 @@ pub(crate) unsafe extern "C" fn device_create(
 ) -> u64 {
     crate::support::boundary(|| unsafe {
         let endpoint = object(pointer.cast::<Endpoint>())?;
+        endpoint.require_current_process()?;
         output_pointer(out)?;
         let info = input(info, AMDF_STRUCTURE_TYPE_GPU_DEVICE_CREATE_INFO)?;
         if info.reserved != 0 {
