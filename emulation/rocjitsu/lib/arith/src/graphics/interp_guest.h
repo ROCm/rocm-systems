@@ -9,9 +9,11 @@
 
 namespace rocjitsu::arith {
 
-constexpr uint64_t interp_fp_flags = RJ_ARITH_FP_ROUND_MASK | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
-                                     RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS |
-                                     RJ_ARITH_FP_INPUT_DENORMALS_F16_MASK;
+constexpr uint64_t interp_round_denorm_flags =
+    RJ_ARITH_FP_ROUND_MASK | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
+    RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | RJ_ARITH_FP_INPUT_DENORMALS_F16_MASK;
+constexpr uint64_t interp_fp_flags =
+    interp_round_denorm_flags | RJ_ARITH_FP_IEEE_MODE | RJ_ARITH_FP_DX10_CLAMP_OFF;
 
 // Broadcast quad coefficients before invoking FMA; preserve aliases and packed destinations.
 template <bool P2, bool Half, bool Rtz = false>
@@ -33,10 +35,10 @@ int interp_guest(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *co
   if constexpr (Half && P2) {
     const bool high = mode & RJ_ARITH_ALU_HIGH_D;
     mode &= ~RJ_ARITH_ALU_HIGH_D;
-    auto call = high ? rj_arith_v_fma_mixhi_f16_w32_gfx12 : rj_arith_v_fma_mixlo_f16_w32_gfx12;
+    auto call = high ? rj_arith_v_fma_mixhi_f16_w32 : rj_arith_v_fma_mixlo_f16_w32;
     return call(flags, exec_mask, mode, d, &ap, b, &cp, nullptr);
   }
-  return rj_arith_v_fma_mix_f32_w32_gfx12(flags, exec_mask, mode, d, &ap, b, &cp, nullptr);
+  return rj_arith_v_fma_mix_f32_w32(flags, exec_mask, mode, d, &ap, b, &cp, nullptr);
 }
 
 } // namespace rocjitsu::arith

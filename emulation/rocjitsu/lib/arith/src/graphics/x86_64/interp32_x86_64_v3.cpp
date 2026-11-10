@@ -15,8 +15,8 @@ namespace rocjitsu::arith {
 // Evaluate an FP32 interpolation stage. Preserve destination lanes outside exec_mask.
 // Requires the named CPU features and validated instruction controls.
 template <bool P2>
-void interp32_x86_64_v3(uint32_t exec_mask, uint32_t mode, uint32_t *d, const uint32_t *a,
-                        const uint32_t *b, const uint32_t *c) {
+uint32_t interp32_x86_64_v3(uint32_t exec_mask, uint32_t mode, uint32_t *d, const uint32_t *a,
+                            const uint32_t *b, const uint32_t *c) {
   auto flip_a = _mm256_set1_epi32(mode & RJ_ARITH_ALU_NEG_A ? INT32_MIN : 0);
   auto flip_b = _mm256_set1_epi32(mode & RJ_ARITH_ALU_NEG_B ? INT32_MIN : 0);
   auto flip_c = _mm256_set1_epi32(mode & RJ_ARITH_ALU_NEG_C ? INT32_MIN : 0);
@@ -34,6 +34,10 @@ void interp32_x86_64_v3(uint32_t exec_mask, uint32_t mode, uint32_t *d, const ui
       z = _mm256_permute_ps(z, _MM_SHUFFLE(0, 0, 0, 0));
     }
     auto value = _mm256_fmadd_ps(x, y, z);
+    if ((exec_mask >> lane) &
+        uint32_t(_mm256_movemask_ps(_mm256_cmp_ps(value, value, _CMP_UNORD_Q)))) {
+      return exec_mask & (~uint32_t{0} << lane);
+    }
     if (mode & RJ_ARITH_ALU_CLAMP) {
       value = _mm256_min_ps(_mm256_max_ps(value, _mm256_setzero_ps()), _mm256_set1_ps(1));
     }
@@ -42,11 +46,12 @@ void interp32_x86_64_v3(uint32_t exec_mask, uint32_t mode, uint32_t *d, const ui
     _mm256_maskstore_epi32(reinterpret_cast<int *>(d + lane), lane_exec_mask,
                            _mm256_castps_si256(value));
   }
+  return 0;
 }
 
-template void interp32_x86_64_v3<true>(uint32_t, uint32_t, uint32_t *, const uint32_t *,
-                                       const uint32_t *, const uint32_t *);
-template void interp32_x86_64_v3<false>(uint32_t, uint32_t, uint32_t *, const uint32_t *,
-                                        const uint32_t *, const uint32_t *);
+template uint32_t interp32_x86_64_v3<true>(uint32_t, uint32_t, uint32_t *, const uint32_t *,
+                                           const uint32_t *, const uint32_t *);
+template uint32_t interp32_x86_64_v3<false>(uint32_t, uint32_t, uint32_t *, const uint32_t *,
+                                            const uint32_t *, const uint32_t *);
 
 } // namespace rocjitsu::arith

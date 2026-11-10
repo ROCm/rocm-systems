@@ -91,14 +91,17 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
   }
-  if (flags & rocjitsu::arith::interp_fp_flags) {
-    return rocjitsu::arith::interp_guest<P2, true, Rtz>(flags, exec_mask, mode, d, a, b, c);
+  const auto guest = [&](uint32_t lanes) {
+    return lanes ? rocjitsu::arith::interp_guest<P2, true, Rtz>(flags, lanes, mode, d, a, b, c)
+                 : RJ_ARITH_SUCCESS;
+  };
+  if (flags & rocjitsu::arith::interp_round_denorm_flags) {
+    return guest(exec_mask);
   }
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
-    rocjitsu::arith::interp16_x86_64_v3<P2, Rtz>(flags & RJ_ARITH_FP16_OVFL, exec_mask, mode, d[0],
-                                                 a[0], b[0], c[0]);
-    return RJ_ARITH_SUCCESS;
+    return guest(rocjitsu::arith::interp16_x86_64_v3<P2, Rtz>(flags & RJ_ARITH_FP16_OVFL, exec_mask,
+                                                              mode, d[0], a[0], b[0], c[0]));
   }
 #endif
   unsigned sa = mode & RJ_ARITH_ALU_HIGH_A ? 16 : 0, sc = mode & RJ_ARITH_ALU_HIGH_C ? 16 : 0,
@@ -122,6 +125,11 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
     }
     if (mode & RJ_ARITH_ALU_NEG_C) {
       z ^= 0x80000000;
+    }
+    if (((exec_mask >> lane) & 1u) &&
+        ((x & 0x7fffffff) >= 0x7f800000 || (y & 0x7fffffff) >= 0x7f800000 ||
+         (z & 0x7fffffff) >= 0x7f800000)) {
+      return guest(exec_mask);
     }
     if constexpr (P2) {
       uint16_t h = Rtz ? rocjitsu::arith::interp16_rtz_half(x, y, z, mode & RJ_ARITH_ALU_CLAMP)
