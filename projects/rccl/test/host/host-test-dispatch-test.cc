@@ -1009,12 +1009,9 @@ TEST(HostDispatchLogMicrotest, ALogDirectoryThatCannotBeMadeIsRefusedWithItsReas
     // to work out why their logs went to the console.
     const ScopedDir dir("rccl-host-dispatch-logdir");
     const std::filesystem::path blocked = std::filesystem::path(dir.path()) / "blocked";
-    std::filesystem::create_directory(blocked);
-    std::filesystem::permissions(blocked, std::filesystem::perms::owner_read |
-                                              std::filesystem::perms::owner_exec);
+    std::ofstream(blocked.string(), std::ios::binary) << "not a directory";
 
     const std::optional<std::string> problem = prepareLogDirectory((blocked / "run.logs").string());
-    std::filesystem::permissions(blocked, std::filesystem::perms::owner_all);   // so it can be removed
 
     ASSERT_TRUE(problem.has_value());
     EXPECT_FALSE(problem->empty());
