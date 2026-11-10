@@ -220,9 +220,18 @@ producer_loop(
         buffer.end_timestamp   = end_ts;
 
         if(!isHeader)
-            parameters.copy_data_fn(queue, buffer.memory, src, size);
+        {
+            if(!parameters.copy_data_fn(queue, buffer.memory, src, size))
+            {
+                ROCP_CI_LOG(ERROR) << "Discarding ATT chunk " << buffer.chunk_index << ": copy of "
+                                   << size << " bytes failed";
+                buffer.size = 0;
+            }
+        }
         else
+        {
             std::memcpy(buffer.memory, src, size);
+        }
 
         auto copy_time = (std::chrono::system_clock::now() - t0).count() * 1E-9f;
         ROCP_TRACE << "Copy: " << copy_time << " s. BW: " << size / copy_time;
