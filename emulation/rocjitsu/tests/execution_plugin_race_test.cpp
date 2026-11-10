@@ -536,6 +536,7 @@ protected:
 
   PluginFixture fixture;
   StringSink *sink = nullptr;
+  RaceDetectorPlugin *plugin = nullptr;
   std::array<Wavefront *, 2> waves{};
   std::unique_ptr<Decoder> decoder;
 
@@ -545,7 +546,9 @@ protected:
     PluginSinkConfig sink_config;
     sink = &sink_config.emplace<StringSink>();
     fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
-    ASSERT_TRUE(fixture.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+    auto race_plugin = std::make_unique<RaceDetectorPlugin>();
+    plugin = race_plugin.get();
+    ASSERT_TRUE(fixture.plugin_group_->add(std::move(race_plugin)));
     fixture.soc->set_plugin_group(fixture.plugin_group_);
     fixture.plugin_group_->onInit();
     for (auto &wave : waves) {
@@ -1501,6 +1504,11 @@ protected:
   }
 
   bool tensor_load_oldest() { return tensor_load(0, {{.address = kOldestAddress, .bytes = 4}}); }
+
+  WaveRaceState &race_state(int wave) {
+    return *static_cast<RaceWavefrontState *>(waves[wave]->plugin_state(plugin->slot_index()))
+                ->race_state;
+  }
 };
 
 TEST_F(Gfx1250CounterCapacityRaceTest, FullLoadcntCompletesOldestLoad) {
@@ -1673,6 +1681,40 @@ TEST_F(Gfx1250CounterCapacityRaceTest, SendmsgDoesNotAdvanceDscnt) {
     ds_read(0, kYoungerAddress);
   ASSERT_NO_FATAL_FAILURE(issue_word(0, 0xBFB60000u)); // s_sendmsg 0.
   EXPECT_TRUE(tensor_load_oldest());
+}
+
+// S_SENDMSG_RTN_B* increments KMcnt by 2 (CDNA5 ISA 5.4), and other messages by
+// 1 (CDNA5 ISA 5.7.1), on a 5-bit KMcnt that holds 2^5 - 1 tokens. No gfx1250
+// instruction registers an event in an ordered KMcnt class, so these tests
+// register synthetic ones to observe each message's increment.
+class Gfx1250MessageCapacityRaceTest : public Gfx1250CounterCapacityRaceTest {
+protected:
+  static constexpr int kKmcntCapacity = 31;
+
+  /// Leave one KMcnt slot free with ordered synthetic events.
+  void fill_kmcnt_but_one() {
+    for (int index = 0; index < kKmcntCapacity - 1; ++index)
+      register_pending_event(race_state(0), /*pc=*/0x80 + 4 * index,
+                             MemoryEventType::VGPR_TO_GLOBAL, /*registers=*/{},
+                             WaitCounterType::KMCNT, MemoryOrderClass::VMEM);
+  }
+
+  EventStatus status(int event) {
+    return race_state(0).getDetector()->events().status(EventId{event});
+  }
+};
+
+TEST_F(Gfx1250MessageCapacityRaceTest, ReturningMessageTakesTwoKmcntSlots) {
+  fill_kmcnt_but_one();
+  ASSERT_NO_FATAL_FAILURE(issue_word(0, 0xBE804C00u)); // s_sendmsg_rtn_b32 s0, 0.
+  EXPECT_EQ(status(0), EventStatus::WAVE_COMPLETE);
+  EXPECT_EQ(status(1), EventStatus::ACTIVE);
+}
+
+TEST_F(Gfx1250MessageCapacityRaceTest, MessageTakesOneKmcntSlot) {
+  fill_kmcnt_but_one();
+  ASSERT_NO_FATAL_FAILURE(issue_word(0, 0xBFB60000u)); // s_sendmsg 0.
+  EXPECT_EQ(status(0), EventStatus::ACTIVE);
 }
 
 TEST_F(Gfx1250CounterCapacityRaceTest, FullAsynccntCompletesOldestAsyncLoad) {
