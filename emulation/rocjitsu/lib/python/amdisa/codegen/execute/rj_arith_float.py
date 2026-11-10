@@ -1168,7 +1168,7 @@ def gen_float_dot32(ctx: ExecuteContext) -> str | None:
                 f'      (({high} & 2) ? 0u : RJ_ARITH_DOT_HI_B_LOW);',
                 f'  amdgpu::arith::execute_ternary32(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
                 '      wf.cu().arithmetic_flags(), modifiers,',
-                f'      {dst[0]}, {", ".join(src)});',
+                f'      {dst[0]}, {", ".join(src)}, 0xF, 0xF, wf.exec() & wf.vgpr_write_mask());',
             ]
         )
     if mnemonic not in DOT2_F32_NAMES:
