@@ -17,6 +17,7 @@ from amdisa.__main__ import (
     _unshared_execute_keys_from_variants,
 )
 from amdisa.codegen import CodeGenerator
+from amdisa.codegen._generator import _ImageInstructionForm
 from amdisa.codegen.config import CodegenConfig
 from amdisa.codegen.execute import ExecuteContext
 from amdisa.codegen.execute.floating_policy import (
@@ -5585,11 +5586,11 @@ def test_gfx11_graphics_sources_use_vgpr_selectors():
         assert profile.mimg_nsa_dword_count_expr == '1u'
 
 
-def test_rdna3_5_disassembly_overrides_do_not_change_rdna3():
+def test_gfx11_profiles_share_image_operand_layout():
     rdna3 = Rdna3Profile()
     rdna3_5 = Rdna3_5Profile()
 
-    assert not rdna3.renders_gfx11_image_syntax
+    assert rdna3.renders_gfx11_image_syntax
     assert not rdna3.split_ds_2addr_offsets
     assert not rdna3.vop3p_absolute_source_instructions
     assert not rdna3.sendmsg_return_symbolic
@@ -5674,6 +5675,98 @@ def test_generated_rdna3_5_fuzz_disassembly_rules(amdgpu_generated_root: Path):
     )
 
 
+@pytest.mark.parametrize(
+    ('profile', 'ordinary', 'bvh', 'multi'),
+    [
+        (Cdna2Profile, False, False, False),
+        (Rdna1Profile, True, False, True),
+        (Rdna2Profile, True, False, True),
+        (Rdna3Profile, True, False, True),
+        (Rdna3_5Profile, True, False, True),
+        (Rdna4Profile, False, False, False),
+    ],
+)
+def test_mimg_r128_resource_sizing(profile, ordinary, bvh, multi):
+    for name, expected in [
+        ('IMAGE_LOAD', ordinary),
+        ('IMAGE_BVH_INTERSECT_RAY', bvh),
+        ('IMAGE_BVH64_INTERSECT_RAY', bvh),
+        ('IMAGE_LOAD_BY2', multi),
+    ]:
+        assert profile().mimg_r128_resource(name) == expected
+
+
+@pytest.mark.parametrize(
+    'arch,profile_type,preparation_count',
+    [('rdna2', Rdna2Profile, 1), ('rdna3', Rdna3Profile, 2)],
+)
+def test_extended_image_controls_emit_execution_and_source_footprints(
+    tmp_path, monkeypatch, arch, profile_type, preparation_count
+):
+    spec = Parser(str(_mrisa_dir() / f'amdgpu_isa_{arch}.xml'), profile_type()).parse()
+    semantics = derive_all_semantics(spec)
+    generator = CodeGenerator(spec, str(tmp_path), semantics)
+    forms = {
+        'IMAGE_SAMPLE_D': _ImageInstructionForm(
+            sampled=True, derivatives=True, gradient16=True, offset=True, lod_clamp=True
+        ),
+        'IMAGE_GATHER4_LZ': _ImageInstructionForm(
+            sampled=True,
+            gather=True,
+            horizontal=True,
+            lod_bias=True,
+            offset=True,
+            compare=True,
+        ),
+    }
+    for name, form in forms.items():
+        monkeypatch.setitem(generator._IMAGE_INSTRUCTION_FORMS, name, form)
+    generator.gen_insts()
+    header = (tmp_path / arch / 'mimg.h').read_text().replace('} ;', '};')
+    instructions = next(
+        enc.insts for enc in spec.inst_encodings if enc.enc_name == 'ENC_MIMG'
+    )
+    for name, form in forms.items():
+        inst = next(inst for inst in instructions if inst.name == name)
+        body = generator._gen_execute_body(
+            inst, semantics.instructions[name], 'ENC_MIMG'
+        )
+        for flag in (
+            'offset',
+            'lod_clamp',
+            'lod_bias',
+            'compare',
+            'horizontal',
+            'gradient16',
+        ):
+            assert body.count(f'.{flag} = true') == preparation_count * getattr(
+                form, flag
+            )
+        assert body.count(f'ImageSampleMode::{form.sample_mode}') == preparation_count
+
+    derivative = _generated_class_body(header, 'ImageSampleDMimg')
+    gather = _generated_class_body(header, 'ImageGather4LzMimg')
+    axes = 'amdgpu::image_derivative_component_count(inst_.dim)'
+    assert f'1 + 2 * amdgpu::image_gradient_vector_words({axes}, true)' in derivative
+    assert f'amdgpu::image_prefix_low16_words(1, {axes}, false, true)' in derivative
+    assert 'amdgpu::image_coordinate_count(inst_.dim) + 1' in derivative
+    assert '.mode = amdgpu::ImageSampleMode::Derivatives16' in derivative
+    assert '.offset = true' in derivative and '.clamp = true' in derivative
+    assert '.compare = true' in gather and '.gather = true' in gather
+    assert '.lod_warning = bool(inst_.lwe)' in gather
+    if arch == 'rdna3':
+        ordinary = generator._ordinary_image_encoding()
+        assert f'.linear_candidate = bool({ordinary})' in derivative
+        assert '.filtered_feedback_candidate = bool(' in derivative
+        assert f'if ({ordinary} &&' in body
+    else:
+        assert '.linear_candidate = false' in derivative
+    assert '.filtered_feedback_candidate' not in gather
+    assert 'modifiers.image_prefix_words = 3;' in gather
+    assert 'amdgpu::image_prefix_low16_words(3, 0, inst_.a16, true)' in gather
+    assert 'amdgpu::image_coordinate_count(inst_.dim) + 0' in gather
+
+
 def test_supported_image_opcodes_have_explicit_operand_forms():
     forms = {
         'IMAGE_LOAD': (),
@@ -5691,7 +5784,21 @@ def test_supported_image_opcodes_have_explicit_operand_forms():
     for name, flags in forms.items():
         assert generator._issues_image_memory(name)
         form = generator._image_instruction_form(name)
-        assert {key for key, value in vars(form).items() if value} == set(flags)
+        assert {
+            key for key, value in vars(form).items() if value and key != 'sampled'
+        } == set(flags)
+        sampled = name.startswith(('IMAGE_SAMPLE', 'IMAGE_GATHER'))
+        assert form.sampled == sampled
+        assert form.transfer_mode == (
+            'Mip' if not sampled and 'mip' in flags else 'Default'
+        )
+        expected_sample = {
+            'IMAGE_SAMPLE_L': 'Explicit',
+            'IMAGE_SAMPLE_D': 'Derivatives',
+            'IMAGE_SAMPLE_LZ': 'Zero',
+            'IMAGE_GATHER4_LZ': 'Zero',
+        }.get(name, 'Implicit')
+        assert form.sample_mode == expected_sample
     for name in ('IMAGE_SAMPLE_D_CL', 'IMAGE_SAMPLE_L_O'):
         assert not generator._issues_image_memory(name)
         with pytest.raises(KeyError):
@@ -5801,8 +5908,8 @@ def test_generated_rdna_image_load_tracks_d16_destination_preservation(
         header, f'ImageLoad{suffix}', 'void amdgpu_register_modifiers'
     )
     assert (
-        'modifiers.set_packed_image_result(std::popcount(uint32_t{inst_.dmask}), '
-        'vdata.size_bits() / 32)' in ' '.join(modifiers.split())
+        'modifiers.set_packed_image_result(std::max(1, std::popcount(uint32_t{inst_.dmask})));'
+        in ' '.join(modifiers.split())
     )
 
 

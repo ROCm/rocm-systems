@@ -272,6 +272,21 @@ TEST(DecoderPoolTest, UnusedDecoderPreservesNullContextAllocatorHooks) {
   EXPECT_EQ(rocjitsu::Instruction::dealloc_fn_, dealloc_fn);
 }
 
+TEST(Cdna1Decode, RejectsUnassignedImageAndFlatSegmentOpcodes) {
+  auto decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_CDNA1);
+  ASSERT_NE(decoder, nullptr);
+  std::array<uint32_t, 2> image{0xf0001100u, 0};
+  ASSERT_TRUE(decoder->decode(image.data()).succeeded());
+  image[0] |= 1u; // The high MIMG opcode bit is in bit 0.
+  EXPECT_TRUE(decoder->decode(image.data()).failed());
+  for (uint32_t segment = 0; segment < 4; ++segment) {
+    std::array<uint32_t, 2> add{0xdd080000u | segment << 14, 0};
+    EXPECT_EQ(decoder->decode(add.data()).succeeded(), segment == 0 || segment == 2);
+  }
+  std::array<uint32_t, 2> scratch_load{0xdc504000u, 0x007f0000u};
+  EXPECT_TRUE(decoder->decode(scratch_load.data()).succeeded());
+}
+
 TEST(Cdna1Decode, FloatAtomicReturnRequiresCdna2) {
   auto mi100 = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_CDNA1);
   auto mi200 = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);

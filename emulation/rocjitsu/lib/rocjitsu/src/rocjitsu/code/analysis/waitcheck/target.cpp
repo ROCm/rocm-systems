@@ -465,8 +465,8 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
     return util::Result::success();
   }
 
-  if (mnemonic == "image_msaa_load" || mnemonic == "image_get_lod" ||
-      mnemonic.starts_with("image_sample") || mnemonic.starts_with("image_gather")) {
+  const auto vmem_type = amdgpu::vmem_read_type(mnemonic);
+  if (vmem_type == amdgpu::VmemWriteback::Sample) {
     events.push_back({amdgpu::image_sample_wait_counter(model.value()), WaitEventKind::Sample});
     if (expert)
       events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::Sample,
@@ -475,7 +475,7 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
     return util::Result::success();
   }
 
-  if (mnemonic.starts_with("image_bvh")) {
+  if (vmem_type == amdgpu::VmemWriteback::Bvh) {
     events.push_back({amdgpu::image_bvh_wait_counter(model.value()), WaitEventKind::Bvh});
     if (expert)
       events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::Bvh,

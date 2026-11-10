@@ -10,8 +10,37 @@
 #include <bit>
 #include <cstdint>
 #include <span>
+#include <type_traits>
+#include <utility>
 
 namespace rocjitsu::amdgpu {
+
+inline uint64_t image_tap_misses(const ImageSampleAccess::Tap &tap) {
+  return tap.translated.nonresident_lanes.value_or(0);
+}
+
+inline uint64_t image_tap_misses(const GraphicsSampleAccess::Tap &tap) { return tap.missing_lanes; }
+
+// The pipeline issues one address set per filtered tap or multisample fragment.
+template <typename State, typename Visit> bool visit_image_sample_taps(State &state, Visit visit) {
+  auto apply = [&](auto &tap) {
+    if constexpr (std::is_const_v<State>)
+      visit(std::as_const(tap));
+    else
+      visit(tap);
+  };
+  if (state.image_sample) {
+    for (auto &tap : state.image_sample->taps)
+      apply(tap);
+    return true;
+  }
+  if (state.graphics_sample) {
+    for (auto &tap : std::span(state.graphics_sample->taps).first(state.graphics_sample->tap_count))
+      apply(tap);
+    return true;
+  }
+  return false;
+}
 
 struct MemoryByteRange {
   uint64_t address;

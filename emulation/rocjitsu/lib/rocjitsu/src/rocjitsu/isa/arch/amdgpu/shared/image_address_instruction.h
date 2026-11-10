@@ -28,6 +28,12 @@ class ImageAddressInstruction : public Encoding {
       Form.kind == ImageAddressKind::Bvh || Form.kind == ImageAddressKind::Bvh64;
   static constexpr bool gfx12 = requires(typename Encoding::OpEncoding e) { e.vaddr0; };
 
+  bool reads_address_inputs() const {
+    if constexpr (Form.kind == ImageAddressKind::ResourceInfo && requires { this->inst_.dim; })
+      return this->inst_.dmask != 0;
+    return true;
+  }
+
   bool scattered() const {
     if constexpr (requires { this->inst_.nsa; })
       return this->inst_.nsa != 0;
@@ -92,9 +98,9 @@ class ImageAddressInstruction : public Encoding {
           const unsigned dimensions = image_derivative_component_count(e.dim);
           const unsigned axis_words = Form.g16 ? (dimensions + 1) / 2 : dimensions;
           m.image_prefix_words += 2 * axis_words;
-          if (Form.g16 && (dimensions & 1))
-            m.image_low_half_prefix =
-                (1u << (Form.extra_words + axis_words - 1)) | (1u << (m.image_prefix_words - 1));
+          if constexpr (Form.g16)
+            m.image_prefix_low16_words =
+                image_prefix_low16_words(Form.extra_words, dimensions, false, false);
         }
       }
       return m.image_prefix_words +
@@ -117,14 +123,15 @@ public:
     address(m);
     if constexpr (Form.sample_result)
       if (this->inst_.d16)
-        m.set_packed_image_result(std::popcount(uint32_t{this->inst_.dmask}),
-                                  this->dst_operand(0)->size_bits() / 32);
+        m.set_packed_image_result(std::max(1, std::popcount(uint32_t{this->inst_.dmask})));
   }
   bool tracks_explicit_source(uint8_t index) const override {
-    return index != 0 && Encoding::tracks_explicit_source(index);
+    return index != 0 && reads_address_inputs() && Encoding::tracks_explicit_source(index);
   }
   void implicit_uses(RegisterSet &uses) const override {
     Encoding::implicit_uses(uses);
+    if (!reads_address_inputs())
+      return;
     RegisterModifiers m;
     const auto words = address(m);
     for (unsigned i = 0; i < words; ++i)

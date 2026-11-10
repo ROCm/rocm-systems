@@ -20,8 +20,10 @@
 #include "rocjitsu/vm/amdgpu/gpu_vm_access.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/lds_allocation.h"
+#include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
+#include "rocjitsu/vm/graphics/image_access.h"
 
 #include <algorithm>
 #include <array>
@@ -83,18 +85,49 @@ public:
   bool atomic_loaded = false;
 };
 
+/// Per-lane texture status. A resident fetch leaves the status VGPR unchanged.
+class TexelStatus {
+public:
+  bool report_failure = false;
+  std::array<uint8_t, 64> lod{};
+  uint64_t failures = 0;
+  uint64_t lod_warnings = 0;
+  uint64_t written_lanes() const {
+    return (lod_warnings & ~failures) | (report_failure ? failures : 0);
+  }
+};
+
 /// @brief Texel footprint captured at issue time for one filtered image instruction.
 struct ImageSampleAccess {
   struct Tap {
     std::array<uint64_t, 64> addresses{};
     std::array<float, 64> weights{};
     uint64_t lane_mask = 0;
+    uint64_t border_mask = 0;
     std::vector<uint8_t> response;
     TranslatedMemoryProgress translated;
   };
   std::vector<Tap> taps;
   uint32_t next_tap = 0;
+  // A group load/store uses the same independently addressed texel requests
+  // as filtering. Its four VDATA slots concatenate the participating texels.
+  struct Transfer {
+    uint32_t dmask;
+    uint32_t slots_per_texel;
+    bool raw;
+    bool sign_extend;
+  };
+  std::optional<Transfer> transfer;
   bool gather = false;
+  bool horizontal = false;
+  bool packed_row = false;
+  bool fp32_bilinear = false;
+  uint32_t border_color = 0;
+  struct DepthCompare {
+    uint8_t function;
+    std::array<float, 64> reference{};
+  };
+  std::unique_ptr<DepthCompare> depth_compare;
   /// GFX12 quads with an active fractional-mip lane blend every active lane.
   uint64_t mip_blend_mask = 0;
 };
@@ -266,11 +299,37 @@ public:
   uint32_t buffer_components = 0;
   bool buffer_d16 = false;
   bool check_texel_residency = false;
+  std::unique_ptr<TexelStatus> texel_status;
   // Image DMASK packs only enabled shader components into the data tuple.
   // A nonzero mask asks store capture to scatter that tuple back into its
   // original X/Y/Z/W slots before applying image selector/padding semantics.
   uint32_t image_store_component_mask = 0;
+  struct BlockCompressedImage {
+    uint32_t format = 0;                         // RDNA1/2 image format number (169 through 178).
+    std::vector<std::array<uint8_t, 64>> texels; // Per-tap in-block texel per lane.
+  };
+  std::unique_ptr<BlockCompressedImage> image_bc;
   bool image_srgb = false;
+  uint32_t image_bc_format = 0;
+  std::array<uint8_t, 64> image_bc_texels{};
+  bool image_sampling = false;
+  std::unique_ptr<ImageFeedback> image_status;
+  // Completion supplies the status write mask before the wave can resume.
+  std::unique_ptr<MemoryWaitScoreboard::DeferredWrite> feedback_wait;
+  [[nodiscard]] bool has_feedback_result() const {
+    return texel_status || (image_status && image_status->returns_status()) ||
+           reports_buffer_residency();
+  }
+  [[nodiscard]] uint64_t feedback_write_lanes() const {
+    if (texel_status)
+      return texel_status->written_lanes();
+    if (image_status)
+      return image_status->written_misses() | image_status->written_warnings();
+    return buffer_missing_lanes;
+  }
+
+  std::unique_ptr<ImageMetadataAccess> image_metadata;
+  std::unique_ptr<GraphicsSampleAccess> graphics_sample;
   std::unique_ptr<ImageSampleAccess> image_sample;
   // Some accesses use an interleaved ("swizzled") layout: consecutive units
   // of a lane are separated rather than contiguous. Units are 4 bytes for

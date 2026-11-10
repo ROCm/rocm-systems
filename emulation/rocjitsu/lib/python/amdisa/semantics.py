@@ -2797,15 +2797,29 @@ def _derive_mimg(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(name, 'image_store')
     if upper.startswith('IMAGE_LOAD'):
         return InstructionSemantics(name, 'image_load')
-    if upper.startswith('IMAGE_ATOMIC'):
-        return InstructionSemantics(name, 'image_atomic')
+    if upper.startswith('IMAGE_ATOMIC_'):
+        suffix = upper.removeprefix('IMAGE_ATOMIC_')
+        # GFX12 image opcodes spell types differently from buffer atomics.
+        for image_type, buffer_type in (
+            ('_UINT', '_U32'),
+            ('_INT', '_I32'),
+            ('_FLT', '_F32'),
+        ):
+            if suffix.endswith(image_type):
+                suffix = suffix.removesuffix(image_type) + buffer_type
+                break
+        info = _derive_flat_atomic_info(suffix, False)
+        return InstructionSemantics(
+            name, 'image_atomic', operation=info[0] if info else None, elem_size=4
+        )
+
     if upper.startswith('IMAGE_SAMPLE') or upper.startswith('IMAGE_GATHER'):
         return InstructionSemantics(name, 'image_sample')
     if upper.startswith('IMAGE_GET_RESINFO') or upper.startswith('IMAGE_GET_LOD'):
         return InstructionSemantics(name, 'image_query')
     if upper.startswith('IMAGE_MSAA_LOAD'):
         return InstructionSemantics(name, 'image_load')
-    if upper.startswith('IMAGE_BVH_INTERSECT'):
+    if upper in ('IMAGE_BVH_INTERSECT_RAY', 'IMAGE_BVH64_INTERSECT_RAY'):
         return InstructionSemantics(name, 'image_bvh')
     return InstructionSemantics(name, 'nop')
 

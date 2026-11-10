@@ -151,6 +151,9 @@ protected:
   FaultHandler fault_handler_;
 };
 
+/// Remove sparse texel misses from the request using the instruction's VM snapshot.
+VmAccessOutcome qualify_image_feedback(VectorMemState &state, const GpuVmAccess &vm);
+
 /// Suppress only buffer TFE elements inside published nonresident PRT ranges.
 void qualify_buffer_residency(VectorMemState &state, const GpuVmAccess &vm);
 
@@ -193,6 +196,7 @@ private:
   // translated; sampling swaps each tap's versions around this call. The other
   // request fields must be shared by every tap. Translation may refresh an
   // unready request snapshot, so each tap retains its own translation progress.
+  VmAccessOutcome initiate_image_metadata_access(VectorMemState &d, Wavefront &wf);
   VmAccessOutcome initiate_texel_access(VectorMemState &state, Wavefront &wf,
                                         uint64_t request_lanes);
   L1VectorCache *l1_;

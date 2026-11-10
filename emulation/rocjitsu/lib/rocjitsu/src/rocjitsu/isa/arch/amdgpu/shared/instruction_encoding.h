@@ -193,6 +193,16 @@ constexpr uint64_t valu_swap_write_lanes(uint64_t exec, unsigned wave_size, unsi
   return exec & wave & (upper ? lower << stride : lower);
 }
 
+constexpr bool has_gfx11_image_operands(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA4;
+}
+
+/// VMEM and EXP substitute v0 independently for each missing source DWORD.
+constexpr uint16_t gfx115_source_vgpr(uint32_t selector, uint32_t allocation) {
+  return selector < allocation ? static_cast<uint16_t>(selector) : 0;
+}
+
 /// @brief Decoded register-access modifiers.
 /// @details This view contains no wave state or values.
 struct RegisterModifiers {
@@ -203,11 +213,10 @@ struct RegisterModifiers {
   uint8_t memory_result_last_bytes = 0xf; // Last data word, excluding optional image status.
   /// A nonzero count bounds the payload masks. An appended status word owns all four bytes.
   uint8_t memory_result_payload_words = 0;
-  bool memory_result_has_status = false;
-  void set_packed_image_result(unsigned components, unsigned result_words) {
+  void set_packed_image_result(unsigned components) {
     if (components & 1u) {
       memory_result_last_bytes = 0x3;
-      memory_result_has_status = result_words > (components + 1) / 2;
+      memory_result_payload_words = (components + 1) / 2;
     }
   }
   const Operand *packed_store_data = nullptr; // Only the low half of the final word is stored.
@@ -216,16 +225,23 @@ struct RegisterModifiers {
 
   /// VADDR operand enabling coordinate tracking.
   const Operand *image_address = nullptr;
+  const Operand *image_resource = nullptr;
+  bool image_resource_info = false;
+  std::optional<uint8_t> image_transfer_dim;
+  bool image_reads_address = true;
+  /// Sampling controls select active lanes and implicit derivative inputs from the 2x2 quad.
+  std::optional<ImageSampleSources> image_sample_sources;
+  const Operand *image_store_data = nullptr;
   /// Coordinate VGPR selectors, including NSA selectors.
   ImageAddressRegisters image_coordinates{};
   /// Number of tracked coordinate components.
   uint8_t image_coordinate_count = 0;
   /// Coordinates occupy packed 16-bit halves.
   bool image_a16 = false;
-  /// VGPR words occupied by derivative inputs.
+  /// VGPR words before coordinates, including offset, bias, compare, and explicit gradients.
   uint8_t image_prefix_words = 0;
-  /// Prefix words whose upper half is unused by packed odd-dimensional derivatives.
-  uint16_t image_low_half_prefix = 0;
+  /// Prefix words in which only the low half carries an input.
+  uint16_t image_prefix_low16_words = 0;
   /// GFX9 derives its actual tuple from the descriptor. The sentinel
   /// leaves RDNA's instruction-derived coordinate metadata in effect.
   struct Gfx9ImageTuple {

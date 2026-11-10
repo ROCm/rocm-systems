@@ -46,7 +46,7 @@ class EventRegistry {
         counterObligations;
     uint8_t numCounterObligations;
     uint8_t satisfiedCounterMask;
-    MemoryOrderClass memoryOrder;
+    VgprWriteOrder writeOrder;
     EventStatus status;
     uint8_t byteMask;
     uint8_t lastRegisterByteMask;
@@ -54,6 +54,7 @@ class EventRegistry {
     std::vector<uint32_t> registers;
     IntervalSet ldsIntervals;
     LdsAccess ldsAccess;
+    ConditionalVgprWrite feedback{};
   };
 
 public:
@@ -62,7 +63,7 @@ public:
               std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
               IntervalSet ldsIntervals,
               std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-              MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0,
+              VgprWriteOrder writeOrder, uint8_t lastRegisterByteMask = 0,
               LdsAccess ldsAccess = {}) {
     int id = base_offset_ + static_cast<int>(entries_.size());
     assert(!counterObligations.empty() ||
@@ -74,7 +75,7 @@ public:
                     {},
                     static_cast<uint8_t>(counterObligations.size()),
                     0,
-                    memoryOrder,
+                    writeOrder,
                     counterObligations.empty() ? EventStatus::WAVE_COMPLETE : EventStatus::ACTIVE,
                     byteMask,
                     lastRegisterByteMask ? lastRegisterByteMask : byteMask,
@@ -158,7 +159,8 @@ public:
     const auto &event = entries_[index(id)];
     return event.ldsAccess.read_modify_write || isToLds(event.type);
   }
-  MemoryOrderClass memoryOrder(EventId id) const { return entries_[index(id)].memoryOrder; }
+  VgprWriteOrder writeOrder(EventId id) const { return entries_[index(id)].writeOrder; }
+  MemoryOrderClass memoryOrder(EventId id) const { return writeOrder(id).completion; }
   EventStatus status(EventId id) const { return entries_[index(id)].status; }
   bool isTrimmable(EventId id) const { return isEntryTrimmable(entries_[index(id)]); }
   const InstructionSnapshot &instruction(EventId id) const {
@@ -167,9 +169,19 @@ public:
   /// Packed loads can write fewer bytes in the last destination without
   /// creating a second event or consuming another wait-counter increment.
   uint8_t registerByteMask(EventId id, uint32_t reg) const {
+    if (const auto feedback = entries_[index(id)].feedback; feedback.lanes && reg == feedback.reg)
+      return 0xf;
     const auto &event = entries_[index(id)];
     return !event.registers.empty() && reg == event.registers.back() ? event.lastRegisterByteMask
                                                                      : event.byteMask;
+  }
+  void setConditionalVgprWrite(EventId id, ConditionalVgprWrite feedback) {
+    entries_[index(id)].feedback = feedback;
+  }
+  uint64_t registerLanes(EventId id, uint32_t reg) const {
+    const auto &event = entries_[index(id)];
+    return event.feedback.lanes && reg == event.feedback.reg ? event.feedback.lanes
+                                                             : event.execMask;
   }
   uint64_t execMask(EventId id) const { return entries_[index(id)].execMask; }
   WaveId waveId(EventId id) const { return entries_[index(id)].waveId; }

@@ -17,20 +17,23 @@ namespace cdna2 {
 
 namespace {
 template <typename MimgMachineInst>
+bool mimg_has_status(const MimgMachineInst *inst, bool sampler) {
+  // A dropped fetch with DMASK=0 cannot produce TFE status. LWE
+  // can still return status for samplers. Both share one DWORD.
+  bool status = false;
+  if constexpr (requires { inst->tfe; })
+    status = inst->tfe && inst->dmask;
+  if constexpr (requires { inst->lwe; })
+    status = status || (sampler && inst->lwe);
+  return status;
+}
+template <typename MimgMachineInst>
 uint32_t mimg_vdata_bits(const MimgMachineInst *inst, bool gather4, bool d16_allowed,
                          bool status_allowed, bool sampler) {
   uint32_t words = gather4 ? 4u : std::max(1, std::popcount(uint32_t{inst->dmask}));
   if (d16_allowed && inst->d16)
     words = (words + 1) / 2;
-  // A dropped fetch with DMASK=0 cannot produce TFE status. LWE
-  // can still return status for sampler operations. Both flags
-  // share one status word; stores do not consume that word.
-  bool status = false;
-  if constexpr (requires { inst->tfe; })
-    status = status_allowed && inst->tfe && inst->dmask;
-  if constexpr (requires { inst->lwe; })
-    status = status || (status_allowed && sampler && inst->lwe);
-  if (status)
+  if (status_allowed && mimg_has_status(inst, sampler))
     ++words;
   return words * 32;
 }
@@ -39,7 +42,7 @@ uint32_t mimg_vdata_bits(const MimgMachineInst *inst, bool gather4, bool d16_all
 ImageLoadMimg::ImageLoadMimg(const MachineInst *inst)
     : Mimg("image_load", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageLoadMimg)),
-      vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, false),
+      vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, false, false),
             OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -83,7 +86,7 @@ DecodeResult decodeImageLoadMimg(const MachineInst *opcode, const DecodeErrorEmi
 ImageLoadMipMimg::ImageLoadMipMimg(const MachineInst *inst)
     : Mimg("image_load_mip", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageLoadMipMimg)),
-      vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, false),
+      vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, false, false),
             OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -129,7 +132,7 @@ DecodeResult decodeImageLoadMipMimg(const MachineInst *opcode,
 ImageLoadPckMimg::ImageLoadPckMimg(const MachineInst *inst)
     : Mimg("image_load_pck", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageLoadPckMimg)),
-      vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, false, true, false),
+      vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, false, false, false),
             OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -159,7 +162,7 @@ DecodeResult decodeImageLoadPckMimg(const MachineInst *opcode,
 ImageLoadPckSgnMimg::ImageLoadPckSgnMimg(const MachineInst *inst)
     : Mimg("image_load_pck_sgn", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageLoadPckSgnMimg)),
-      vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, false, true, false),
+      vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, false, false, false),
             OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -189,7 +192,7 @@ DecodeResult decodeImageLoadPckSgnMimg(const MachineInst *opcode,
 ImageLoadMipPckMimg::ImageLoadMipPckMimg(const MachineInst *inst)
     : Mimg("image_load_mip_pck", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageLoadMipPckMimg)),
-      vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, false, true, false),
+      vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, false, false, false),
             OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -219,7 +222,7 @@ DecodeResult decodeImageLoadMipPckMimg(const MachineInst *opcode,
 ImageLoadMipPckSgnMimg::ImageLoadMipPckSgnMimg(const MachineInst *inst)
     : Mimg("image_load_mip_pck_sgn", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageLoadMipPckSgnMimg)),
-      vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, false, true, false),
+      vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, false, false, false),
             OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc
@@ -917,7 +920,7 @@ DecodeResult decodeImageAtomicDecMimg(const MachineInst *opcode,
 ImageSampleMimg::ImageSampleMimg(const MachineInst *inst)
     : Mimg("image_sample", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::ImageSampleMimg)),
-      vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, true, true),
+      vdata(mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), false, true, false, true),
             OperandType::OPR_VGPR_OR_ACCVGPR,
             (reinterpret_cast<const OpEncoding *>(inst)->vdata +
              (reinterpret_cast<const OpEncoding *>(inst)->acc

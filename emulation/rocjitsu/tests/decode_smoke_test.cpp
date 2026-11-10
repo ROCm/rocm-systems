@@ -473,6 +473,28 @@ TEST(DecoderSmokeTest, Gfx90aAccumulatorOnlySourcesRequireRegisters) {
   }
 }
 
+TEST(DecoderSmokeTest, Gfx90aRejectsUnassignedImageAndFlatEncodings) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
+  ASSERT_NE(decoder, nullptr);
+  // MIMG bit 0 is bit 7 of the opcode. FLAT bit 15:14 selects the segment,
+  // with separate opcode tables for generic, scratch and global addresses.
+  constexpr std::array valid = {
+      std::array{0xf0000100u, 0x00020000u}, // image_load
+      std::array{0xdd080000u, 0x00000000u}, // flat_atomic_add
+      std::array{0xdd088000u, 0x007f0000u}, // global_atomic_add
+      std::array{0xdc504000u, 0x007f0000u}, // scratch_load_dword
+  };
+  for (const auto &words : valid)
+    EXPECT_TRUE(decoder->decode_window(words).succeeded()) << std::hex << words[0];
+  constexpr std::array invalid = {
+      std::array{0xf0000101u, 0x00020000u}, // unassigned MIMG opcode 128
+      std::array{0xdd084000u, 0x007f0000u}, // scratch has no atomic_add
+      std::array{0xdc50c000u, 0x007f0000u}, // reserved segment 3
+  };
+  for (const auto &words : invalid)
+    EXPECT_TRUE(decoder->decode_window(words).failed()) << std::hex << words[0];
+}
+
 TEST(DecoderSmokeTest, Gfx942ClassifiesTimestampTrapAndDebugBranchBlocks) {
   using amdgpu::ExecutionBlock;
   struct TestCase {
@@ -806,7 +828,7 @@ TEST(DecoderSmokeTest, Gfx1201ImageDataWidthUsesMaskPackingAndStatus) {
           }
 }
 
-TEST(DecoderSmokeTest, MultiPixelImageLoadsKeepTheirXmlTuple) {
+TEST(DecoderSmokeTest, MultiPixelImageLoadsCompactTheSelectedDataSlots) {
   struct TestCase {
     rj_code_arch_t arch;
     uint16_t opcode;
@@ -821,12 +843,12 @@ TEST(DecoderSmokeTest, MultiPixelImageLoadsKeepTheirXmlTuple) {
     SCOPED_TRACE(static_cast<unsigned>(tc.arch));
     SCOPED_TRACE(tc.opcode);
     const auto words = tc.arch == ROCJITSU_CODE_ARCH_RDNA1
-                           ? rdna1::build_mimg(tc.opcode, {.dmask = 1, .vdata = 8})
-                           : rdna2::build_mimg(tc.opcode, {.dmask = 1, .vdata = 8});
+                           ? rdna1::build_mimg(tc.opcode, {.dmask = 5, .vdata = 8})
+                           : rdna2::build_mimg(tc.opcode, {.dmask = 5, .vdata = 8});
     auto decoder = Decoder::create(tc.arch);
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
-    EXPECT_EQ(inst->dst_operand(0)->size_bits(), 128);
+    EXPECT_EQ(inst->dst_operand(0)->size_bits(), 64);
   }
 }
 
@@ -3182,6 +3204,7 @@ TEST(Cdna2DecodeTest, MemoryDisassemblyPreservesInactiveAddressesAndModifiers) {
   const Case cases[] = {
       {{0xdd089fff, 0x00660201}, "global_atomic_add v1, v2, flat_scratch offset:-1"},
       {{0xdd089fff, 0x006a0201}, "global_atomic_add v1, v2, vcc offset:-1"},
+      {{0xf0820100, 0x00620501}, "image_sample v5, v1, s[8:15], s[12:15] dmask:0x1 lwe"},
       {{0xe0503000, 0x00010100}, "buffer_load_dword v1, v[0:1], s[4:7], s0 idxen offen"},
       {{0xe9783000, 0x00010100},
        "tbuffer_load_format_x v1, v[0:1], s[4:7], s0 format:47 idxen offen"},
@@ -3191,6 +3214,9 @@ TEST(Cdna2DecodeTest, MemoryDisassemblyPreservesInactiveAddressesAndModifiers) {
       {{0xdc704000, 0x00040200}, "scratch_store_dword off, v2, s4"},
       {{0xde508000, 0x027f0002}, "global_load_dword v2, v[2:3], off scc"},
       {{0xdc50a000, 0x007f0002}, "global_load_dword v[2:3], off lds"},
+      {{0xf202f180, 0x80020502},
+       "image_load v5, v2, s[8:15] dmask:0x1 unorm glc slc scc a16 lwe da d16"},
+      {{0xf0489100, 0x00020501}, "image_atomic_add v5, v1, s[8:15] dmask:0x1 unorm a16"},
   };
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);

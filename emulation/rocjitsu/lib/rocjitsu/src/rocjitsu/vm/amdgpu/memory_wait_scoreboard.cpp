@@ -282,6 +282,21 @@ bool MemoryWaitScoreboard::needs_buffer_payload_lanes(const Instruction &inst,
          name.find("_format_") != std::string_view::npos;
 }
 
+void MemoryWaitScoreboard::check_image_store_payload(const Instruction &inst, const Wavefront &wf) {
+  const auto &data = *inst.data_as<VectorMemState>();
+  RegisterModifiers modifiers;
+  inst.amdgpu_register_modifiers(modifiers);
+  assert(modifiers.image_store_data);
+  const uint32_t first = modifiers.image_store_data->encoding_value();
+  const uint32_t words =
+      data.buffer_d16 ? (data.buffer_components + 1) / 2 : data.buffer_components;
+  for (uint32_t word = 0; word < words; ++word) {
+    const auto reg = gfx115_source_vgpr(first + word, wf.num_vgprs());
+    const bool half = data.buffer_d16 && 2 * word + 1 == data.buffer_components;
+    access({RegClass::VGPR, reg, 1}, data.lane_mask, half ? 0x3 : 0xf, false);
+  }
+}
+
 void MemoryWaitScoreboard::check_instruction(const Instruction &inst, Wavefront &wf) {
   if (empty() || inst.is_empty_global_transpose(wf.exec()))
     return;
@@ -324,6 +339,100 @@ void MemoryWaitScoreboard::check_instruction(const Instruction &inst, Wavefront 
   check_instruction_pending(inst, wf);
 }
 
+namespace {
+struct ImageSourceBytes {
+  uint8_t active = 0;
+  uint8_t quad = 0;
+};
+
+/// Return the byte masks for the active and helper lanes of each sampler input.
+template <typename Read>
+std::array<ImageSourceBytes, 12> image_sample_source_bytes(const RegisterModifiers &modifiers,
+                                                           const Wavefront &wf, Read read) {
+  std::array<ImageSourceBytes, 12> result{};
+  const auto &sample = *modifiers.image_sample_sources;
+  const auto backed = [&](uint32_t reg, uint32_t words) {
+    return scalar_selector_range_is_backed(wf, reg, words);
+  };
+  if (!backed(sample.sampler, 4))
+    return result;
+  const uint32_t resource = modifiers.image_resource->encoding_value();
+  const uint32_t word3 = read(resource + 3);
+  const auto arch = wf.cu().arch();
+  const bool gfx11 = arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5;
+  const bool volume = (word3 >> 28) == kImage3d;
+  if (gfx11 && volume &&
+      (sample.query || sample.compare || sample.offset || sample.clamp || sample.gather ||
+       sample.mode == ImageSampleMode::Bias || sample.mode == ImageSampleMode::Derivatives16))
+    return result;
+  const bool native_texture =
+      !sample.query && uses_native_2d_sampler(arch, resource, sample.sampler, sample.dim,
+                                              sample.unorm, read, backed);
+  const bool native_filter = sample.linear_candidate && native_texture;
+  const uint32_t filter = read(sample.sampler + 2);
+  const uint32_t word1 = read(resource + 1);
+  const bool compute_feedback =
+      (sample.linear_candidate || sample.filtered_feedback_candidate) && !sample.clamp &&
+      compute_filtered_image_feedback(arch, sample.dim, word3 >> 28, word1, filter);
+  const bool linear =
+      !native_filter && (compute_feedback || (volume && !sample.query) ||
+                         (gfx11 ? (sample.linear_candidate &&
+                                   use_linear_image_path(resource, sample.sampler, sample.dim,
+                                                         sample.unorm, true, read, backed))
+                                : arch != ROCJITSU_CODE_ARCH_RDNA4 || sample.linear_candidate));
+  const bool gradients =
+      sample.mode == ImageSampleMode::Derivatives || sample.mode == ImageSampleMode::Derivatives16;
+  const auto mip = rdna_image_mip_range(arch, word1, word3);
+  const bool needs_gradients =
+      linear
+          ? gradients || linear_image_needs_implicit_lod((filter >> 26) & 3, mip.first, mip.last) ||
+                ((filter >> 20) & 3) != ((filter >> 22) & 3)
+          : graphics_image_needs_gradients(sample.query,
+                                           graphics_sample_has_fixed_lod(sample.query,
+                                                                         sample.lod_warning, filter,
+                                                                         native_texture)
+                                               ? 0u
+                                           : arch == ROCJITSU_CODE_ARCH_RDNA4 ? (word1 >> 12) & 31u
+                                                                              : (word1 >> 16) & 15u,
+                                           sample.dim, sample.gather, filter);
+  const bool quad = needs_gradients && (sample.mode == ImageSampleMode::Implicit ||
+                                        sample.mode == ImageSampleMode::Bias);
+  const bool a16 = modifiers.image_a16;
+  const bool bias = sample.mode == ImageSampleMode::Bias;
+  const unsigned gradient_start =
+      unsigned(sample.offset) + unsigned(bias) + unsigned(sample.compare);
+  const unsigned prefix = modifiers.image_prefix_words;
+  for (unsigned word = 0; word < prefix; ++word) {
+    uint8_t bytes = image_prefix_word_bytes(word, modifiers.image_prefix_low16_words);
+    if (!linear && sample.offset && word == 0 && sample.dim == kImageDimCube)
+      bytes = 0;
+    if (bias && word == unsigned(sample.offset))
+      bytes = linear || needs_gradients ? (a16 ? 0x3 : 0xf) : 0;
+    if (gradients && word >= gradient_start) {
+      if (!needs_gradients)
+        bytes = 0;
+      else if (sample.mode == ImageSampleMode::Derivatives16 &&
+               image_derivative_component_count(sample.dim) == 1)
+        bytes = 0x3; // dx and dy each start in the low half of a separate word.
+    }
+    result[word].active = bytes;
+  }
+  // Cube unfolding also reads the face selector from each derivative source lane.
+  const unsigned spatial =
+      !linear && sample.dim == kImageDimCube ? 3u : image_derivative_component_count(sample.dim);
+  const bool array = sample.dim == kImageDim1dArray || sample.dim == kImageDim2dArray;
+  const unsigned count = sample.query && array ? spatial : modifiers.image_coordinate_count;
+  for (unsigned component = 0; component < count; ++component) {
+    auto &word = result[prefix + (a16 ? component / 2 : component)];
+    const uint8_t bytes = a16 ? (component % 2 ? 0xc : 0x3) : 0xf;
+    word.active |= bytes;
+    if (quad && component < spatial)
+      word.quad |= bytes;
+  }
+  return result;
+}
+} // namespace
+
 void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wavefront &wf) {
   // These VGPR-returning loads reject the entire tuple, including TFE, before address preparation.
   if (gfx11_rejects_buffer_load(inst, wf))
@@ -348,15 +457,82 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
   const bool ignores_exec = (inst.flags() & IGNORES_EXEC) || matrix || scalar_lane_read ||
                             scalar_lane_write || (memory_issue && !memory_issue->exec_masked);
   const uint64_t all_lanes = wf.wf_size() == 64 ? ~uint64_t{0} : uint64_t{0xffffffff};
-  uint64_t lanes = ignores_exec ? all_lanes : wf.exec();
+  uint64_t lanes = ignores_exec ? all_lanes : wf.memory_exec(inst);
   if (vector && !ignores_exec)
     access({RegClass::EXEC, 0, static_cast<uint8_t>(wf.wf_size() / 32)}, ~uint64_t{0}, 0xf, false);
   RegisterModifiers modifiers;
   inst.amdgpu_register_modifiers(modifiers);
   const RegisterAccess registers(wf);
-  if (modifiers.image_address) {
+  const bool gfx11 =
+      wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 || wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5;
+  const bool gfx12_sample = wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4 &&
+                            modifiers.image_sample_sources &&
+                            !modifiers.image_sample_sources->query;
+  const bool check_image_result =
+      (gfx11 && modifiers.image_address) || gfx12_sample || modifiers.image_resource_info;
+  if (check_image_result) {
+    for (int i = 0; i < inst.num_dst_operands(); ++i) {
+      const auto &dst = *inst.dst_operand(i);
+      if (dst.decoded_vgpr() &&
+          !registers.destination_register(dst, true, bool(inst.flags() & RESERVES_UNWRITTEN_VGPR)))
+        return;
+    }
+  }
+  // Dropped and unbound texture operations do not acquire coordinate or payload VGPRs.
+  bool read_image_inputs = modifiers.image_reads_address;
+  if (const auto *resource = modifiers.image_resource; resource && read_image_inputs) {
+    const auto shape = registers.scalar_control_value(resource->encoding_value() + 3);
+    const auto format = registers.scalar_control_value(resource->encoding_value() + 1);
+    read_image_inputs =
+        shape && format && !image_descriptor_is_unbound(wf.cu().arch(), *format, *shape);
+  }
+  if (modifiers.image_sample_sources && read_image_inputs) {
+    const auto inputs = image_sample_source_bytes(modifiers, wf, [&](uint32_t selector) {
+      return registers.scalar_control_value(selector).value_or(0);
+    });
+    const uint64_t helpers = ImageDerivativeQuad::source_lanes(lanes) & ~lanes;
+    for (unsigned index = 0; index < inputs.size(); ++index) {
+      const auto bytes = inputs[index];
+      if (!bytes.active)
+        continue;
+      auto selector = modifiers.image_coordinates[index];
+      if (has_gfx11_image_operands(wf.cu().arch()))
+        selector = gfx115_source_vgpr(selector, wf.num_vgprs());
+      else if (selector >= wf.num_vgprs())
+        continue;
+      const RegisterRef reg{RegClass::VGPR, static_cast<uint16_t>(selector), 1};
+      if (bytes.quad == bytes.active) {
+        access(reg, lanes | helpers, bytes.active, false);
+      } else {
+        access(reg, lanes, bytes.active, false);
+        access(reg, helpers, bytes.quad, false);
+      }
+    }
+  } else if (modifiers.image_address && read_image_inputs) {
+    auto check_coordinate = [&](uint16_t reg, uint8_t bytes, uint64_t readers) {
+      if (has_gfx11_image_operands(wf.cu().arch()))
+        reg = gfx115_source_vgpr(reg, wf.num_vgprs());
+      if (reg < wf.num_vgprs())
+        access({RegClass::VGPR, reg, 1}, readers, bytes, false);
+    };
     uint32_t components = modifiers.image_coordinate_count;
     uint32_t prefix = modifiers.image_prefix_words;
+    if (const auto dim = modifiers.image_transfer_dim) {
+      const uint32_t resource = modifiers.image_resource->encoding_value();
+      const auto read = [&](uint32_t index) {
+        return registers.scalar_control_value(index).value_or(0);
+      };
+      const auto backed = [&](uint32_t index, uint32_t count) {
+        return scalar_selector_range_is_backed(wf, index, count);
+      };
+      if (!gfx11 || use_linear_image_path(resource, 0, *dim, true, false, read, backed)) {
+        const uint32_t type = read(resource + 3) >> 28;
+        const auto shape = image_coordinate_shape(type, true);
+        const uint32_t slice = image_transfer_slice_coordinate(type, *dim, false, shape.has_y);
+        components = image_transfer_coordinate_count(
+            type, shape.has_y, shape.has_slice || type == kImage2dMsaaArray, slice);
+      }
+    }
     const RegisterModifiers::Gfx9ImageTuple &tuple = modifiers.gfx9_image_tuple;
     if (tuple.resource_selector != ~0u) {
       const std::optional<uint32_t> descriptor =
@@ -370,16 +546,13 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     }
     for (uint32_t word = 0; word < prefix; ++word) {
       const uint16_t reg = modifiers.image_coordinates[word];
-      if (reg < wf.num_vgprs())
-        access({RegClass::VGPR, reg, 1}, lanes,
-               (modifiers.image_low_half_prefix & (1u << word)) ? 0x3 : 0xf, false);
+      check_coordinate(reg, image_prefix_word_bytes(word, modifiers.image_prefix_low16_words),
+                       lanes);
     }
     for (uint32_t component = 0; component < components; ++component) {
       const uint32_t word = prefix + (modifiers.image_a16 ? component / 2 : component);
       const uint16_t reg = modifiers.image_coordinates[word];
-      if (reg < wf.num_vgprs())
-        access({RegClass::VGPR, reg, 1}, lanes,
-               modifiers.image_a16 ? (component % 2 ? 0xc : 0x3) : 0xf, false);
+      check_coordinate(reg, modifiers.image_a16 ? (component % 2 ? 0xc : 0x3) : 0xf, lanes);
     }
   }
   if (modifiers.exec_all_if_nonzero)
@@ -390,8 +563,6 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
   bool read_buffer_offset = true;
   bool cdna5_type_mismatch = false;
   if (const auto *resource = modifiers.buffer_resource) {
-    const bool gfx11 =
-        wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 || wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5;
     const auto arch = wf.cu().arch();
     const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
     unsigned first_resource_word = 0;
@@ -794,7 +965,9 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
         (!write && op == modifiers.buffer_address && !read_buffer_address) ||
         (!write && op == buffer_payload && !reads_buffer_payload) ||
         (!write && op == modifiers.buffer_offset && !read_buffer_offset) ||
-        op == modifiers.image_address || (!pending_scalar_ && !op->is_vgpr()))
+        (!write && gfx12_sample && !modifiers.image_reads_address && !op->is_vgpr()) ||
+        op == modifiers.image_address || op == modifiers.image_store_data ||
+        (!pending_scalar_ && !op->is_vgpr()))
       return;
     if (op == modifiers.block_data) {
       for (uint32_t word = 0; word < kBlockDwordCount; ++word)
@@ -1066,9 +1239,9 @@ void MemoryWaitScoreboard::check_memory_result(const Instruction &inst, Wavefron
   const auto defs = std::ranges::find(classified.value(), TrackedRegisterSource::Defs,
                                       &ClassifiedEvent::registers);
   const bool has_defs = defs != classified.value().end();
-  const uint16_t order = has_defs && has_ordered_writeback(*defs, wf.cu().arch())
-                             ? ordered_write_order(*defs, wf.cu().arch())
-                             : kUnordered;
+  const auto order = has_defs && has_ordered_writeback(*defs, wf.cu().arch())
+                         ? ordered_write_order(*defs, wf.cu().arch())
+                         : kUnordered;
   const bool vector_replay =
       replay && xevent->kind != WaitEventKind::Smem && (wf.mode_raw() & (1u << 25));
   for (unsigned i = 0; i < count; ++i) {
@@ -1080,6 +1253,14 @@ void MemoryWaitScoreboard::check_memory_result(const Instruction &inst, Wavefron
     if (!has_defs)
       continue;
     auto check = [&](RegisterRef range, uint8_t bytes) {
+      if (inst.data() && inst.data()->tag() == GLOBAL_MEM) {
+        const auto &d = *inst.data_as<VectorMemState>();
+        if (d.is_load && (inst.flags() & CONDITIONAL_LAST_VGPR_DEF) &&
+            uint32_t{range.index} + range.width - 1 ==
+                d.dst_reg_base - wf.vgpr_alloc().base + d.destination_vgpr_count() &&
+            !--range.width)
+          return;
+      }
       if (vector_replay)
         xcnt_ordered_write(range, vector_lanes, bytes);
       access(range, vector_lanes, bytes, true, order);
@@ -1191,7 +1372,8 @@ uint64_t MemoryWaitScoreboard::issue(WaitCounterKind counter, bool unordered,
     });
     const auto slot = static_cast<uint16_t>(it - orders_.begin());
     if (it == orders_.end())
-      orders_.push_back({counter, ordering_kind});
+      orders_.push_back({counter, VmemWriteback::Ordinary, ordering_kind});
+    orders_[slot].last_writeback = VmemWriteback::Ordinary;
     orders_[slot].issued += units;
     last_order_[i] = slot;
   }
@@ -1199,6 +1381,17 @@ uint64_t MemoryWaitScoreboard::issue(WaitCounterKind counter, bool unordered,
 }
 
 namespace {
+VmemWriteback vmem_writeback(const waitcheck_detail::ClassifiedEvent &event, rj_code_arch_t arch) {
+  using namespace waitcheck_detail;
+  if (has_ordered_vmem_reads(arch) && event.counter == WaitCounterKind::Load) {
+    if (event.kind == WaitEventKind::Sample)
+      return VmemWriteback::Sample;
+    if (event.kind == WaitEventKind::Bvh)
+      return VmemWriteback::Bvh;
+  }
+  return VmemWriteback::Ordinary;
+}
+
 std::optional<uint32_t> completion_order_kind(const waitcheck_detail::ClassifiedEvent &event,
                                               rj_code_arch_t arch) {
   using namespace waitcheck_detail;
@@ -1222,10 +1415,6 @@ std::optional<uint32_t> completion_order_kind(const waitcheck_detail::Classified
     kind = uint32_t{1} << static_cast<unsigned>(event.kind == WaitEventKind::AsyncLdsStore
                                                     ? WaitEventKind::AsyncLdsStore
                                                     : WaitEventKind::AsyncLdsLoad);
-  // Older RDNA samples and BVH operations share VMcnt, not a completion FIFO.
-  if (model == WaitcntModel::LegacyVscnt && event.counter == WaitCounterKind::Load &&
-      (event.kind == WaitEventKind::Sample || event.kind == WaitEventKind::Bvh))
-    kind = uint32_t{1} << static_cast<unsigned>(event.kind);
   return kind;
 }
 } // namespace
@@ -1233,7 +1422,11 @@ std::optional<uint32_t> completion_order_kind(const waitcheck_detail::Classified
 uint64_t MemoryWaitScoreboard::issue(const waitcheck_detail::ClassifiedEvent &event,
                                      rj_code_arch_t arch, uint32_t units) {
   const auto kind = completion_order_kind(event, arch);
-  return issue(event.counter, !kind, kind.value_or(0), units);
+  const auto sequence = issue(event.counter, !kind, kind.value_or(0), units);
+  const auto fifo = last_order_[static_cast<size_t>(event.counter)];
+  if (fifo != kUnordered)
+    orders_[fifo].last_writeback = vmem_writeback(event, arch);
+  return sequence;
 }
 
 uint32_t MemoryWaitScoreboard::issue_units(const Instruction &inst,
@@ -1253,15 +1446,18 @@ uint32_t MemoryWaitScoreboard::issue_units(const Instruction &inst,
   return 1;
 }
 
-uint16_t MemoryWaitScoreboard::ordered_write_order(const waitcheck_detail::ClassifiedEvent &event,
-                                                   rj_code_arch_t arch) const {
+MemoryWaitScoreboard::WriteOrder
+MemoryWaitScoreboard::ordered_write_order(const waitcheck_detail::ClassifiedEvent &event,
+                                          rj_code_arch_t arch) const {
   const auto kind = completion_order_kind(event, arch);
   if (!kind)
     return kUnordered;
   const auto it = std::ranges::find_if(orders_, [&](const Order &order) {
     return order.counter == event.counter && order.kind == *kind;
   });
-  return it == orders_.end() ? kUnordered : static_cast<uint16_t>(it - orders_.begin());
+  if (it == orders_.end())
+    return kUnordered;
+  return {static_cast<uint16_t>(it - orders_.begin()), vmem_writeback(event, arch)};
 }
 
 bool MemoryWaitScoreboard::completed(WaitCounterKind counter, uint64_t sequence, uint16_t order,
@@ -1294,6 +1490,7 @@ void MemoryWaitScoreboard::stamp_order(Event &event) const {
   if (event.sequence == issued_[counter] && last_order_[counter] != kUnordered) {
     event.order = last_order_[counter];
     event.order_sequence = orders_[event.order].issued;
+    event.writeback = orders_[event.order].last_writeback;
   }
 }
 
@@ -1321,6 +1518,7 @@ void MemoryWaitScoreboard::add(Event event) {
   if (overlap)
     std::erase_if(events_, [&](const Event &old) {
       const bool ordered = event.order != kUnordered && old.order == event.order &&
+                           old.writeback == event.writeback &&
                            old.order_sequence <= event.order_sequence;
       // Scalar replay sources have a different proof: every sufficient wait
       // drains their entire X group, so its newest covering source is enough.
@@ -1505,23 +1703,64 @@ void MemoryWaitScoreboard::before(const Instruction &inst, rj_code_arch_t arch) 
     retire_completed();
 }
 
+std::unique_ptr<MemoryWaitScoreboard::DeferredWrite>
+MemoryWaitScoreboard::defer_write(RegisterRef reg) const {
+  auto write = std::make_unique<DeferredWrite>();
+  if (!pending_.pending(reg, true))
+    return write;
+  reg = pending_.canonical(reg);
+  for (const auto &event : events_) {
+    if (reg.cls == event.reg.cls && reg.index < event.reg.index + event.reg.width &&
+        event.reg.index < reg.index + reg.width)
+      write->producers.push_back({event.counter, event.sequence, required_wait(event)});
+  }
+  return write;
+}
+
+void MemoryWaitScoreboard::complete_deferred_write(DeferredWrite &write, uint64_t lanes) {
+  auto &result = write.result;
+  result.lanes &= lanes;
+  if (result.lanes && !write.producers.empty())
+    check_pending(pending_.canonical(result.reg), result.lanes, result.bytes, true,
+                  {result.order, result.writeback}, &write);
+  add(result);
+}
+
 void MemoryWaitScoreboard::access_pending(RegisterRef reg, uint64_t lanes, uint8_t bytes,
-                                          bool write, uint16_t ordered_write_order) {
+                                          bool write, WriteOrder ordered_write_order) {
+  check_pending(reg, lanes, bytes, write, ordered_write_order, nullptr);
+}
+
+void MemoryWaitScoreboard::check_pending(RegisterRef reg, uint64_t lanes, uint8_t bytes, bool write,
+                                         WriteOrder ordered_write_order,
+                                         const DeferredWrite *deferred) {
   for (auto &event : events_) {
     // Sharing a counter does not prove ordered writeback. The old result and
     // incoming write must belong to the same FIFO class, even in a mixed queue.
     if (event.reported || (!write && event.counter == WaitCounterKind::X) ||
-        (write && ordered_write_order != kUnordered && event.order == ordered_write_order &&
-         event.ordered_overwrite) ||
+        (write && ordered_write_order.fifo != kUnordered &&
+         event.order == ordered_write_order.fifo &&
+         event.writeback == ordered_write_order.writeback && event.ordered_overwrite) ||
         event.reg.cls != reg.cls || !(event.lanes & lanes) || !(event.bytes & bytes) ||
         reg.index >= event.reg.index + event.reg.width || event.reg.index >= reg.index + reg.width)
       continue;
+    uint32_t threshold;
+    if (deferred) {
+      const auto it = std::ranges::find_if(deferred->producers, [&](const auto &producer) {
+        return producer.counter == event.counter && producer.sequence == event.sequence;
+      });
+      if (it == deferred->producers.end())
+        continue;
+      threshold = it->required;
+    } else {
+      threshold = required_wait(event);
+    }
     event.reported = true;
     if (reporter_) {
       const auto first = std::max(reg.index, event.reg.index);
       const auto end = std::min(reg.index + reg.width, event.reg.index + event.reg.width);
       const RegisterRef overlap{reg.cls, first, static_cast<uint8_t>(end - first)};
-      reporter_(context_, {event, pc_, overlap, write, required_wait(event)});
+      reporter_(context_, {event, deferred ? deferred->result.pc : pc_, overlap, write, threshold});
     }
   }
   const auto size = events_.size();

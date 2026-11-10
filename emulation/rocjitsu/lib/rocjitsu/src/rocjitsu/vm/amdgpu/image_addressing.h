@@ -30,6 +30,7 @@ struct ImageLayout {
   uint32_t swizzle_mode = 0;  ///< Generation-specific descriptor swizzle encoding.
   uint32_t dimensions = 2;    ///< Spatial dimensions, excluding array layers.
   uint32_t mip_levels = 1;    ///< Number of levels in the backing allocation.
+  uint32_t samples = 1;       ///< Physical fragments per texel (GFX10 2D MSAA).
 };
 
 /// @brief Default tiling identity for a standalone CU without a device description.
@@ -48,7 +49,7 @@ public:
   /// @brief Check coordinates against the selected mip view, preserving array layers.
   bool contains(uint32_t x, uint32_t y, uint32_t z) const;
   /// @brief Address a texel whose coordinates satisfy contains().
-  uint64_t byte_offset(uint32_t x, uint32_t y, uint32_t z) const;
+  uint64_t byte_offset(uint32_t x, uint32_t y, uint32_t z, uint32_t sample = 0) const;
 
 private:
   ImageAddressing() = default;

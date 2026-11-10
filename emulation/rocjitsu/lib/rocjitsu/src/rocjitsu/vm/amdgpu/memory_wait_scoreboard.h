@@ -11,6 +11,7 @@
 #include <array>
 #include <cassert>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <span>
 #include <vector>
@@ -137,6 +138,13 @@ class MemoryWaitScoreboard {
 public:
   static constexpr uint8_t kFullDwordByteMask = 0xf;
   static constexpr uint16_t kUnordered = UINT16_MAX;
+  class WriteOrder {
+  public:
+    constexpr WriteOrder(uint16_t fifo, VmemWriteback writeback = VmemWriteback::Ordinary)
+        : fifo(fifo), writeback(writeback) {}
+    uint16_t fifo;
+    VmemWriteback writeback;
+  };
   explicit MemoryWaitScoreboard(MemoryWaitShadow &shadow) : pending_(shadow) {
     last_order_.fill(kUnordered);
   }
@@ -155,6 +163,16 @@ public:
     // qualify for ordered writeback (see access_pending). Results whose counter
     // decrements in order are not necessarily written to registers in order.
     bool ordered_overwrite = true;
+    VmemWriteback writeback = VmemWriteback::Ordinary;
+  };
+  struct DeferredWrite {
+    Event result{};
+    struct ProducerThreshold {
+      WaitCounterKind counter;
+      uint64_t sequence;
+      uint32_t required;
+    };
+    std::vector<ProducerThreshold> producers;
   };
   struct Hazard {
     Event producer;
@@ -180,6 +198,8 @@ public:
   /// Return whether address preparation can change which lanes supply VDATA.
   static bool needs_buffer_payload_lanes(const Instruction &inst, rj_code_arch_t arch);
   void check_instruction(const Instruction &inst, Wavefront &wf);
+  /// Check the GFX11/12 image store's payload after addressing has selected the requested lanes.
+  void check_image_store_payload(const Instruction &inst, const Wavefront &wf);
   struct MemoryLanes {
     uint64_t issue;
     uint64_t result;
@@ -208,18 +228,21 @@ public:
   static uint32_t issue_units(const Instruction &inst,
                               const waitcheck_detail::ClassifiedEvent &event, rj_code_arch_t arch);
   /// Find the incoming producer's FIFO class without issuing its completion.
-  uint16_t ordered_write_order(const waitcheck_detail::ClassifiedEvent &event,
-                               rj_code_arch_t arch) const;
+  WriteOrder ordered_write_order(const waitcheck_detail::ClassifiedEvent &event,
+                                 rj_code_arch_t arch) const;
   /// Admission can force completion before the incoming instruction reads its operands.
   void backpressure(WaitCounterKind counter, uint32_t capacity, uint32_t incoming_units = 1);
   void add(Event event);
+  /// Capture older overwrite thresholds before the conditional result occupies a counter position.
+  std::unique_ptr<DeferredWrite> defer_write(RegisterRef reg) const;
+  void complete_deferred_write(DeferredWrite &write, uint64_t lanes);
   void wait(WaitCounterKind counter, uint32_t threshold);
   uint64_t outstanding(WaitCounterKind counter) const {
     const auto i = static_cast<size_t>(counter);
     return issued_[i] - retired_[i];
   }
   [[gnu::always_inline]] void access(RegisterRef reg, uint64_t lanes, uint8_t bytes, bool write,
-                                     uint16_t ordered_write_order = kUnordered) {
+                                     WriteOrder ordered_write_order = kUnordered) {
     if (!lanes || !bytes)
       return;
     if (!pending_.pending(reg, write))
@@ -244,7 +267,9 @@ private:
   void check_memory_result(const Instruction &inst, Wavefront &wf, uint64_t vector_lanes,
                            const RegisterModifiers &modifiers);
   void access_pending(RegisterRef reg, uint64_t lanes, uint8_t bytes, bool write,
-                      uint16_t ordered_write_order);
+                      WriteOrder ordered_write_order);
+  void check_pending(RegisterRef reg, uint64_t lanes, uint8_t bytes, bool write,
+                     WriteOrder ordered_write_order, const DeferredWrite *deferred);
   void rebuild_mask();
   void clear_destination(const Event &event);
   void retire_completed();
@@ -259,6 +284,7 @@ private:
   std::array<uint32_t, kCounters> ordering_kinds_{};
   struct Order {
     WaitCounterKind counter;
+    VmemWriteback last_writeback;
     uint32_t kind;
     uint64_t issued = 0;
     uint64_t retired = 0;
