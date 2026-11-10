@@ -218,8 +218,8 @@ static_assert(AQLPROFILE_SPM_PARAMETER_TYPE_LAST == 4 && "Dont forget to add def
 
 struct sq_spm_policy_t
 {
-    bool enable_sq_32bit     = true;
-    bool enable_sq_even_lane = true;
+    bool spm_enable_sq_32bit     = true;
+    bool spm_enable_sq_even_lane = true;
 };
 
 static bool
@@ -233,8 +233,8 @@ static sq_spm_policy_t
 get_sq_spm_policy(aql_profile::Pm4Factory* pm4_factory)
 {
     return {
-        .enable_sq_32bit = pm4_factory->SqSpm32BitEnabled(),
-        .enable_sq_even_lane = pm4_factory->SqSpmEvenLaneEnabled(),
+        .spm_enable_sq_32bit     = pm4_factory->SpmSq32BitEnabled(),
+        .spm_enable_sq_even_lane = pm4_factory->SpmSqEvenLaneEnabled(),
     };
 }
 
@@ -280,7 +280,8 @@ resolve_spm_depth(aql_profile::Pm4Factory*      pm4_factory,
         return false;
     }
 
-    if(is_gfx12_sq && requested_depth == AQLPROFILE_SPM_DEPTH_32_BITS && !sq_policy.enable_sq_32bit)
+    if(is_gfx12_sq && requested_depth == AQLPROFILE_SPM_DEPTH_32_BITS &&
+       !sq_policy.spm_enable_sq_32bit)
     {
         WARN_LOGGING("gfx12 SQ 32-bit SPM depth is disabled, but {} was requested",
                      depth_name(requested_depth));
@@ -404,7 +405,7 @@ AllocateCounter(counter_des_t&                                          counter_
     if(block_info->spm_counter_count == 0)
         throw std::runtime_error(std::string("SPM not supported for block ") + block_info->name);
 
-    if(is_gfx12_sqc && !is_32bit && !sq_policy.enable_sq_even_lane) spm_counter_count /= 2;
+    if(is_gfx12_sqc && !is_32bit && !sq_policy.spm_enable_sq_even_lane) spm_counter_count /= 2;
 
     if(reg_index >= spm_counter_count)
         throw std::runtime_error(
@@ -591,10 +592,10 @@ _internal_aqlprofile_spm_create_packets(aqlprofile_handle_t*          handle,
                                      (pm4_factory->GetGpuId() == aql_profile::MI200_GPU_ID);
         trace_config.spm_force_sample_before_stop =
             pm4_factory->GetGpuId() >= aql_profile::GFX11_GPU_ID;
-        trace_config.enable_sq_32bit      = sq_policy.enable_sq_32bit;
-        trace_config.enable_sq_even_lane  = sq_policy.enable_sq_even_lane;
-        trace_config.spm_sample_delay_max = pm4_factory->GetSpmSampleDelayMax();
-        trace_config.sampleRate           = normalize_spm_sample_interval(
+        trace_config.spm_enable_sq_32bit     = sq_policy.spm_enable_sq_32bit;
+        trace_config.spm_enable_sq_even_lane = sq_policy.spm_enable_sq_even_lane;
+        trace_config.spm_sample_delay_max    = pm4_factory->GetSpmSampleDelayMax();
+        trace_config.sampleRate              = normalize_spm_sample_interval(
             pm4_factory, s->parameters.at(AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL));
         if(trace_config.sampleRate == 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 

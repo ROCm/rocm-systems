@@ -173,7 +173,7 @@ public:
                                        block_des.id == HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ);
             const bool  is_odd_only_sqc_16bit =
                 (is_gfx12_sqc && counter_des.spm_depth == AQLPROFILE_SPM_DEPTH_16_BITS &&
-                 !config->enable_sq_even_lane);
+                 !config->spm_enable_sq_even_lane);
 
             // The builder consumes resolved per-counter SPM depth and does not re-derive policy.
             // See resolve_spm_depth() in spm_v2.cpp for the current compatibility/default rules.
@@ -381,7 +381,8 @@ public:
                     const bool  is_sqc_even_mirror =
                         (Primitives::GFXIP_LEVEL >= 11 &&
                          (counter_des.block_info->attr & CounterBlockSqAttr));
-                    const bool map_even_lane = config->enable_sq_even_lane || !is_sqc_even_mirror;
+                    const bool map_even_lane =
+                        config->spm_enable_sq_even_lane || !is_sqc_even_mirror;
                     if(counter_des.spm_depth != depth[n]) continue;
                     if(depth[n] == AQLPROFILE_SPM_DEPTH_32_BITS)
                     {
