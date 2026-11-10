@@ -36,6 +36,12 @@
  *   - RecoversAfterTimeout
  *   - BackToBackTimeouts
  *
+ * HybridBarrierTimeoutMPITest — 4-arg ncclBarrierSession::sync (LSA then rail GIN),
+ *                               2 nodes x 2 ranks, same env as the GIN suite:
+ *   - HealthyBarrierReturnsSuccess
+ *   - AbsentLsaPeerStillSignalsRail: rail stage still runs after the LSA timeout
+ *   - AbsentLsaAndRailPeersShareOneBudget: both stages time out within one budget
+ *
  * Timing note: clock64() is arch-dependent. Tests use a generous kHealthy budget
  * so healthy cases never false-trip, and rely on "absent peer guarantees expiry"
  * for timeout cases — never on a precise cycle-to-wallclock mapping.
@@ -48,10 +54,12 @@
 #include "nccl.h"
 #include "nccl_device.h"
 
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <thread>
 #include <hip/hip_runtime.h>
 #include <mpi.h>
 
@@ -219,6 +227,77 @@ int runGinBarrier(ncclDevComm devComm, hipStream_t stream, uint64_t timeoutCycle
     (void)hipMemcpy(&hResult, dResult, sizeof(int), hipMemcpyDeviceToHost);
     (void)hipFree(dResult);
     return hResult;
+}
+
+// --- Hybrid (LSA + rail GIN) barrier helpers ---
+
+// Covers a kHealthyTimeoutCycles run on any arch; a stuck stage fails here instead of hanging.
+constexpr int kHybridKernelWaitSeconds = 120;
+
+struct HybridBarrierOut {
+    int result;
+    unsigned long long elapsedCycles;
+};
+
+__global__ void hybridBarrierTimeoutKernel(struct ncclDevComm devComm,
+                                           uint64_t timeoutCycles, HybridBarrierOut* out) {
+    ncclGin gin{devComm, /*ginContext=*/0};
+    {
+        ncclBarrierSession<ncclCoopCta> bar{
+            ncclCoopCta(), ncclTeamTagWorld(), gin, /*index=*/0u};
+        const uint64_t start = clock64();
+        ncclResult_t r = bar.sync(ncclCoopCta(), cuda::memory_order_relaxed,
+                                  ncclGinFenceLevel::None, timeoutCycles);
+        const uint64_t elapsed = clock64() - start;
+        // Only the thread waiting on a peer sees that peer's timeout.
+        if (r != ncclSuccess) atomicCAS(&out->result, static_cast<int>(ncclSuccess), static_cast<int>(r));
+        if (threadIdx.x == 0) out->elapsedCycles = elapsed;
+    }
+    gin.flush(ncclCoopCta());
+}
+
+bool waitStreamWithin(hipStream_t stream, int seconds) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(seconds);
+    while (hipStreamQuery(stream) == hipErrorNotReady) {
+        if (std::chrono::steady_clock::now() >= deadline) return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    return true;
+}
+
+struct HybridBarrierRun {
+    int result = -1;
+    unsigned long long elapsedCycles = 0;
+    bool finishedInTime = false;
+};
+
+// Present ranks run first with a bounded wait; absent ranks then run a zero-budget
+// barrier so any rank still stuck on them is released before teardown.
+HybridBarrierRun runHybridBarrier(ncclDevComm devComm, hipStream_t stream,
+                                  bool isAbsent, uint64_t timeoutCycles) {
+    HybridBarrierRun run;
+    HybridBarrierOut* dOut = nullptr;
+    if (hipMalloc(&dOut, sizeof(*dOut)) != hipSuccess) return run;
+    HybridBarrierOut init{static_cast<int>(ncclSuccess), 0};
+    (void)hipMemcpy(dOut, &init, sizeof(init), hipMemcpyHostToDevice);
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (!isAbsent) {
+        hybridBarrierTimeoutKernel<<<1, 256, 0, stream>>>(devComm, timeoutCycles, dOut);
+        run.finishedInTime = waitStreamWithin(stream, kHybridKernelWaitSeconds);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (isAbsent) {
+        hybridBarrierTimeoutKernel<<<1, 256, 0, stream>>>(devComm, /*timeoutCycles=*/0ULL, dOut);
+        run.finishedInTime = true;
+    }
+    (void)hipStreamSynchronize(stream);
+    HybridBarrierOut h{-1, 0};
+    (void)hipMemcpy(&h, dOut, sizeof(h), hipMemcpyDeviceToHost);
+    (void)hipFree(dOut);
+    run.result = h.result;
+    run.elapsedCycles = h.elapsedCycles;
+    MPI_Barrier(MPI_COMM_WORLD);
+    return run;
 }
 
 } // namespace
@@ -678,6 +757,114 @@ TEST_F(GinBarrierTimeoutMPITest, BackToBackTimeouts)
     if (!isAbsent) EXPECT_EQ(kRounds, timeouts);
     MPI_Barrier(MPI_COMM_WORLD);
     ASSERT_MPI_TRUE((isAbsent || timeouts == kRounds) ? 1 : 0);
+}
+
+// ============================================================
+// HybridBarrierTimeoutMPITest — 4-arg ncclBarrierSession::sync (3 tests)
+// ============================================================
+
+// Roles on 2 nodes x 2 ranks: A=(lsa 1, rail 1), B is A's LSA peer, D is A's
+// rail peer, C is B's rail peer and D's LSA peer.
+struct HybridRoles {
+    bool isA = false, isB = false, isC = false, isD = false;
+};
+
+class HybridBarrierTimeoutMPITest : public MPITestBase {
+ protected:
+    std::string skipReason_;
+
+    bool setUpHybridDevComm(ncclComm_t* commOut, hipStream_t* streamOut,
+                            ncclDevComm* devCommOut, HybridRoles* rolesOut) {
+        skipReason_.clear();
+        if (auto reason = ginBarrierSkipReason(); !reason.empty()) {
+            skipReason_ = reason; return false;
+        }
+        if (!validateTestPrerequisites(4, 4, kNoPowerOfTwoRequired, 2, 2)) {
+            skipReason_ = "Hybrid barrier timeout tests require exactly 2 nodes x 2 ranks";
+            return false;
+        }
+        if (createTestCommunicator() != ncclSuccess) {
+            ADD_FAILURE() << "createTestCommunicator failed"; return false;
+        }
+        ncclComm_t comm = getActiveCommunicator();
+        ncclTeam_t lsaTeam  = ncclTeamLsa(comm);
+        ncclTeam_t railTeam = ncclTeamRail(comm);
+        int sizes[2]    = {lsaTeam.nRanks, railTeam.nRanks};
+        int minSizes[2] = {0, 0}, maxSizes[2] = {0, 0};
+        MPI_Allreduce(sizes, minSizes, 2, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
+        MPI_Allreduce(sizes, maxSizes, 2, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+        if (minSizes[0] != 2 || maxSizes[0] != 2 || minSizes[1] != 2 || maxSizes[1] != 2) {
+            skipReason_ = "Hybrid barrier timeout tests require 2-rank LSA and rail teams";
+            return false;
+        }
+        ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
+        reqs.barrierCount      = 1;
+        reqs.ginConnectionType = NCCL_GIN_CONNECTION_RAIL;
+        ncclResult_t devRc = ncclDevCommCreate(comm, &reqs, devCommOut);
+        int anyFailed = devRc != ncclSuccess ? 1 : 0;
+        MPI_Allreduce(MPI_IN_PLACE, &anyFailed, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+        if (anyFailed) {
+            if (devRc == ncclSuccess) (void)ncclDevCommDestroy(comm, devCommOut);
+            skipReason_ = std::string("Hybrid devComm unavailable; ncclDevCommCreate returned ")
+                        + ncclGetErrorString(devRc);
+            return false;
+        }
+        rolesOut->isA = lsaTeam.rank == 1 && railTeam.rank == 1;
+        rolesOut->isB = lsaTeam.rank == 0 && railTeam.rank == 1;
+        rolesOut->isC = lsaTeam.rank == 0 && railTeam.rank == 0;
+        rolesOut->isD = lsaTeam.rank == 1 && railTeam.rank == 0;
+        *commOut = comm; *streamOut = getActiveStream(); return true;
+    }
+};
+
+#define HYBRID_SETUP_OR_BAIL() \
+    do { if (!skipReason_.empty()) GTEST_SKIP() << skipReason_; return; } while (0)
+
+TEST_F(HybridBarrierTimeoutMPITest, HealthyBarrierReturnsSuccess)
+{
+    ncclComm_t comm{}; hipStream_t stream{}; ncclDevComm devComm{}; HybridRoles roles;
+    if (!setUpHybridDevComm(&comm, &stream, &devComm, &roles)) HYBRID_SETUP_OR_BAIL();
+    SCOPE_EXIT((void)ncclDevCommDestroy(comm, &devComm));
+    HybridBarrierRun run = runHybridBarrier(devComm, stream, /*isAbsent=*/false, kHealthyTimeoutCycles);
+    ASSERT_MPI_TRUE(run.finishedInTime);
+    ASSERT_MPI_EQ(static_cast<int>(ncclSuccess), run.result);
+}
+
+// A is absent. B's LSA stage times out, yet B must still signal C on the rail,
+// so C (10x+ budget) succeeds; D's rail stage times out on A.
+TEST_F(HybridBarrierTimeoutMPITest, AbsentLsaPeerStillSignalsRail)
+{
+    ncclComm_t comm{}; hipStream_t stream{}; ncclDevComm devComm{}; HybridRoles roles;
+    if (!setUpHybridDevComm(&comm, &stream, &devComm, &roles)) HYBRID_SETUP_OR_BAIL();
+    SCOPE_EXIT((void)ncclDevCommDestroy(comm, &devComm));
+    static_assert(kHealthyTimeoutCycles >= 10 * kShortTimeoutCycles, "C needs >= 10x B's budget");
+    const uint64_t budget = roles.isC ? kHealthyTimeoutCycles : kShortTimeoutCycles;
+    HybridBarrierRun run = runHybridBarrier(devComm, stream, roles.isA, budget);
+    const int expected = static_cast<int>(roles.isC ? ncclSuccess : ncclTimeout);
+    bool ok = roles.isA || (run.finishedInTime && run.result == expected);
+    EXPECT_TRUE(ok) << (roles.isB ? "B" : roles.isC ? "C" : "D") << " expected "
+                    << ncclGetErrorString(static_cast<ncclResult_t>(expected)) << ", got "
+                    << run.result << (run.finishedInTime ? "" : " (kernel did not finish in time)");
+    ASSERT_MPI_TRUE(ok ? 1 : 0);
+}
+
+// A and C are absent, so B and D time out in both stages. The rail stage gets
+// only what the LSA stage left, so the total stays near one budget, not two.
+TEST_F(HybridBarrierTimeoutMPITest, AbsentLsaAndRailPeersShareOneBudget)
+{
+    ncclComm_t comm{}; hipStream_t stream{}; ncclDevComm devComm{}; HybridRoles roles;
+    if (!setUpHybridDevComm(&comm, &stream, &devComm, &roles)) HYBRID_SETUP_OR_BAIL();
+    SCOPE_EXIT((void)ncclDevCommDestroy(comm, &devComm));
+    const bool isAbsent = roles.isA || roles.isC;
+    HybridBarrierRun run = runHybridBarrier(devComm, stream, isAbsent, kShortTimeoutCycles);
+    const unsigned long long maxCycles = kShortTimeoutCycles + kShortTimeoutCycles / 2;
+    bool ok = isAbsent || (run.finishedInTime && run.result == static_cast<int>(ncclTimeout) &&
+                           run.elapsedCycles >= kShortTimeoutCycles && run.elapsedCycles < maxCycles);
+    EXPECT_TRUE(ok) << (roles.isB ? "B" : "D") << " expected ncclTimeout within ["
+                    << kShortTimeoutCycles << ", " << maxCycles << ") cycles, got result "
+                    << run.result << " after " << run.elapsedCycles << " cycles"
+                    << (run.finishedInTime ? "" : " (kernel did not finish in time)");
+    ASSERT_MPI_TRUE(ok ? 1 : 0);
 }
 
 #endif // MPI_TESTS_ENABLED
