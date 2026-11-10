@@ -239,7 +239,8 @@ inline bool ddaUserBuffers16ByteAligned(const void* sendbuff, const void* recvbu
 // Above it the host pre-copies the whole input into scratch. The cutoff is per
 // shard, so a multi-rank total cannot stage twice, and it lives only here: the
 // kernel takes a single copy-in-kernel flag and does not re-derive the size.
-constexpr size_t kDdaRsIpcKernelCopyMaxBytes = 1ULL * 1024 * 1024;
+// On gfx950 the in-kernel copy wins through a 256 KiB shard and loses above that.
+constexpr size_t kDdaRsIpcKernelCopyMaxBytes = 256ULL * 1024;
 
 enum class DdaRsIpcStaging {
   InKernel,    // kernel copies each shard from sendbuff
