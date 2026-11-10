@@ -205,6 +205,42 @@ def print_table(sites, executions_per_site, x, model, unit):
         print(f"{site:{name_width}s} {count:8d} {reference} {value:14.3f}")
 
 
+def group_collinear(rows: list[list[float]], threshold: float) -> list[list[int]]:
+    """Group sites whose per-window execution counts are proportional.
+
+    Sites in the same loop body run the same number of times in every window,
+    so their columns of A are (nearly) parallel and the fit cannot tell them
+    apart: it only sees their sum, and individual values swing wildly. Sites
+    whose columns have cosine similarity >= threshold are merged, and each
+    group is fitted as one column. Largest sites seed groups first.
+    """
+    cols = [list(col) for col in zip(*rows)]
+    norms = [sum(v * v for v in col) ** 0.5 for col in cols]
+    groups: list[list[int]] = []
+    for i in sorted(range(len(cols)), key=lambda c: -norms[c]):
+        for group in groups:
+            seed = group[0]
+            if norms[i] and norms[seed]:
+                cosine = sum(a * b for a, b in zip(cols[i], cols[seed])) / (norms[i] * norms[seed])
+                if cosine >= threshold:
+                    group.append(i)
+                    break
+        else:
+            groups.append([i])
+    return groups
+
+
+def group_label(members: list[str]) -> str:
+    """Short name for a group: the site, or its distinct locations."""
+    if len(members) == 1:
+        return members[0]
+    locations = sorted({m.split("@", 1)[1] for m in members})
+    shown = ", ".join(locations[:3]) + (
+        f", +{len(locations) - 3} more" if len(locations) > 3 else ""
+    )
+    return f"{len(members)} sites: {shown}"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Fit per-source-line counter activity from SQTT markers and SPM samples."
@@ -242,6 +278,13 @@ def main() -> int:
         choices=sorted(SITE_KINDS),
         default="lds",
         help="Which traced instructions become sites (columns of A).",
+    )
+    parser.add_argument(
+        "--group-threshold",
+        type=float,
+        default=0.97,
+        help="Merge sites whose per-window counts have at least this cosine similarity "
+        "(they cannot be told apart); 1 disables merging.",
     )
     parser.add_argument("--banks", type=int, default=64, help="LDS banks in the bank model.")
     parser.add_argument("--bank-bytes", type=int, default=4, help="Bytes per bank word.")
@@ -408,6 +451,31 @@ def main() -> int:
         f"{args.samples_per_window} SPM samples; {scope}"
     )
     rows = [A[k] for k in used]
+
+    # Merge sites that always run together; the fit then reports one value per
+    # group, in events per execution of one of its sites.
+    columns, labels = sites, sites
+    counts, references = dict(executions_per_site), dict(model)
+    if args.group_threshold < 1:
+        groups = group_collinear(rows, args.group_threshold)
+        if len(groups) < len(sites):
+            labels = [group_label([sites[i] for i in group]) for group in groups]
+            rows = [[sum(row[i] for i in group) for group in groups] for row in rows]
+            counts = {
+                label: sum(executions_per_site[sites[i]] for i in group)
+                for label, group in zip(labels, groups)
+            }
+            references = {
+                label: sum(model[sites[i]] for i in group)
+                for label, group in zip(labels, groups)
+                if all(sites[i] in model for i in group)
+            }
+            columns = labels
+            print(
+                f"{len(sites)} sites merged into {len(groups)} groups that run together "
+                f"(cosine >= {args.group_threshold})"
+            )
+
     for name in counters:
         y = [Y[name][k] for k in used]
         x = solve_least_squares(rows, y)
@@ -415,7 +483,7 @@ def main() -> int:
             f"\n{name}: {sum(Y[name]):.0f} total, fit leaves "
             f"{100 * relative_residual(rows, y, x):.1f}% unexplained"
         )
-        print_table(sites, executions_per_site, x, model, "fit/exec")
+        print_table(columns, counts, x, references, "fit/exec")
     return 0
 
 
