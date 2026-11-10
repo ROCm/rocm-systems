@@ -26,12 +26,14 @@ void check_bitfield(Call call, Bitfield operation) {
       input.v[4][lane] = 0x03020100U + uint32_t(lane % 4) * 0x04040404U;
     }
   }
+  const bool is_align = operation == Bitfield::Alignbit || operation == Bitfield::Alignbyte;
   check_integer_word<Lanes, Operands, true>(
       call,
       [=]([[maybe_unused]] uint32_t a, [[maybe_unused]] uint32_t b, [[maybe_unused]] uint32_t c,
-          [[maybe_unused]] uint32_t d, [[maybe_unused]] uint32_t mode,
-          [[maybe_unused]] int lane) { return bitfield_reference(operation, a, b, c); },
-      RJ_ARITH_ALU_CLAMP, false, input);
+          [[maybe_unused]] uint32_t d, uint32_t mode, [[maybe_unused]] int lane) {
+        return bitfield_reference(operation, a, b, (mode & RJ_ARITH_ALU_HIGH_C) ? c >> 16 : c);
+      },
+      RJ_ARITH_ALU_CLAMP | (is_align ? RJ_ARITH_ALU_HIGH_C : 0u), false, input);
 }
 
 } // namespace rocjitsu::arith::test

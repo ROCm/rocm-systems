@@ -549,6 +549,9 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
   }
   if (selected_lane) {
     const auto *selector = first_lane ? nullptr : inst.src_operand(inst.num_src_operands() - 1);
+    // WRITELANE's tied VDST precedes SRC0 on older targets and follows SRC1 on newer ones.
+    if (scalar_lane_write && selector == inst.dst_operand(0))
+      selector = inst.src_operand(inst.num_src_operands() - 2);
     if (selector)
       if (auto reg = resolve(*selector, false))
         access(*reg, ~uint64_t{0}, 0xf, false);

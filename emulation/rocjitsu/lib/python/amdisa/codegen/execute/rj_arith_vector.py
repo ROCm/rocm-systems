@@ -160,6 +160,11 @@ def gen_vector32(ctx: ExecuteContext) -> str | None:
     )
     if mnemonic == 'V_MOV_B32' and is_vop3:
         modifiers = '((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u)'
+    if mnemonic in ('V_ALIGNBIT_B32', 'V_ALIGNBYTE_B32'):
+        modifiers = (
+            f'({modifiers}) | '
+            '((amdgpu::vop3_opsel(inst_) & 4u) ? RJ_ARITH_ALU_HIGH_C : 0u)'
+        )
     return (
         f'  amdgpu::arith::execute_{kind}32(wf, {wave_api(api, 32)}, {wave_api(api, 64)},\n'
         '      wf.cu().arithmetic_flags(),\n'
@@ -434,10 +439,16 @@ def gen_packed_integer(ctx: ExecuteContext) -> str | None:
     lines.append('      ' + ' |\n      '.join(terms) + ';')
     api = 'rj_arith_' + mnemonic.lower()
     kind = 'ternary' if count == 3 else 'binary'
+    access = (
+        '/*a_bytes=*/0xF, /*b_bytes=*/0xF, /*source_exec_mask=*/~uint64_t{0}'
+        if count == 3
+        else '/*destination_bytes=*/0xF'
+    )
     lines += [
         f'  amdgpu::arith::execute_{kind}32(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
         '      wf.cu().arithmetic_flags(),',
-        f'      modifiers, {dst[0]}, {", ".join(src)});',
+        f'      modifiers, {dst[0]}, {", ".join(src)}, {access},',
+        '      amdgpu::packed_integer_negations(wf.cu().arch(), inst_));',
     ]
     return '\n'.join(lines)
 

@@ -901,7 +901,6 @@ void VSubrevCoCiU32Vop2::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 RJ_NOINLINE void VSubrevCoCiU32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
-  std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
@@ -912,7 +911,6 @@ RJ_NOINLINE void VSubrevCoCiU32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf
     amdgpu::dpp::apply_dpp(vsrc1, dpp_plan_, dpp_old_exec_, dpp_src1_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(vsrc1, dpp8_lane_sel_, dpp_fi_, dpp_src1_, wf);
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
   if (inst_.src0 == amdgpu::SRC_DPP)
@@ -999,7 +997,6 @@ void VSubrevNcU32Vop2::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 RJ_NOINLINE void VSubrevNcU32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
-  std::optional<StagedOperand> dpp_src0_;
   std::optional<StagedOperand> dpp_src1_;
   amdgpu::dpp::DppPlan dpp_plan_;
   if (inst_.src0 == amdgpu::SRC_DPP)
@@ -1010,7 +1007,6 @@ RJ_NOINLINE void VSubrevNcU32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) 
     amdgpu::dpp::apply_dpp(vsrc1, dpp_plan_, dpp_old_exec_, dpp_src1_, wf);
   if (amdgpu::dpp::is_src_dpp8(inst_.src0))
     amdgpu::dpp::apply_dpp8(vsrc1, dpp8_lane_sel_, dpp_fi_, dpp_src1_, wf);
-  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
   ScopedOperandDelegate dpp_src1_binding_(vsrc1, dpp_src1_ ? &*dpp_src1_ : nullptr);
   amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
   if (inst_.src0 == amdgpu::SRC_DPP)
