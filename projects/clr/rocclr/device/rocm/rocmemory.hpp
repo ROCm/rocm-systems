@@ -114,10 +114,9 @@ class Memory : public device::Memory {
     return agent;
   }
 
-  //! Get the global index of the owning agent (computed during create(), thread-safe).
-  //! Lets copy paths classify agents (CPU / local / peer) without handle comparisons.
-  int getOwningAgentIndex() const {
-    return owningAgentIndex_.load(std::memory_order_acquire);
+  //! Get the owning agent's KFD topology node ID (computed during create(), thread-safe).
+  uint32_t getOwningAgentDriverNodeId() const {
+    return owningAgentDriverNodeId_.load(std::memory_order_acquire);
   }
 
   //! Recompute and cache the owning agent by querying pointer_info on the (already-backed)
@@ -139,10 +138,10 @@ class Memory : public device::Memory {
   void decIndMapCount() override;
 
   //! Set the owning agent (called during create() after allocation, thread-safe).
-  //! Also caches the agent's global index for fast classification during copies.
+  //! Also caches its KFD topology node ID for copy-engine selection.
   void setOwningAgent(hsa_agent_t agent) {
     owningAgentHandle_.store(agent.handle, std::memory_order_release);
-    owningAgentIndex_.store(Device::agentGlobalIndex(agent), std::memory_order_release);
+    owningAgentDriverNodeId_.store(Device::agentDriverNodeId(agent), std::memory_order_release);
   }
 
   // Free / deregister device memory.
@@ -202,7 +201,7 @@ class Memory : public device::Memory {
 
   amd::Memory* pinnedMemory_;        //!< Memory used as pinned system memory
   std::atomic<uint64_t> owningAgentHandle_;  //!< HSA agent handle (atomic for thread-safety)
-  std::atomic<int> owningAgentIndex_{-1};    //!< Global index of the owning agent (thread-safe)
+  std::atomic<uint32_t> owningAgentDriverNodeId_{UINT32_MAX};  //!< KFD node ID (thread-safe)
 };
 
 class Buffer : public roc::Memory {
