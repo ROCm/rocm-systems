@@ -11,6 +11,8 @@ set(profiler-hub_sources
     ${CMAKE_CURRENT_LIST_DIR}/histogram_grid.hpp
     ${CMAKE_CURRENT_LIST_DIR}/formats/trace_formats.cpp
     ${CMAKE_CURRENT_LIST_DIR}/formats/trace_formats.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/formats/rocpd/rocpd_probe.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/formats/rocpd/rocpd_probe.hpp
     ${CMAKE_CURRENT_LIST_DIR}/reader_catalog.cpp
     ${CMAKE_CURRENT_LIST_DIR}/reader_catalog.hpp
     ${CMAKE_CURRENT_LIST_DIR}/populate_reader_catalog.cpp
