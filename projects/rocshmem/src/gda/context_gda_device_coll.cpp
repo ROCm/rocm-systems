@@ -307,6 +307,12 @@ __device__ void GDAContext::internal_put_broadcastmem_wave(void *dst, const void
       }
     }
     memcpy_wave<MemcpyKind::Put>(dst, const_cast<void *>(src), nelems);
+    // the data must have landed before the barrier tells the others to read it
+    if (is_thread_zero_in_wave()) {
+      for (int i = pe_start; i < finish; i += stride) {
+        if (i != constmem.my_pe) qps[i].quiet(wf_info);
+      }
+    }
   }
 }
 
@@ -345,7 +351,11 @@ __device__ void GDAContext::internal_broadcastmem_wave(void *dst, const void *sr
     long *p_sync) {  // NOLINT(runtime/int)
 
   ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
-  if (constmem.num_pes < 4) { //TODO: optimized for IPC
+#if defined(ROCSHMEM_GDA_BROADCAST_GET)
+  if (constmem.num_pes < 4) {  // get-based fan-out needs RDMA READ
+#else
+  if (true) {  // put-based: RDMA READ is not available on every NIC (MetaRoCE AINIC)
+#endif
     internal_put_broadcastmem_wave(dst, src, nelems, pe_root, pe_start, stride,
       pe_size, wf_info);
   } else {
@@ -366,6 +376,12 @@ __device__ void GDAContext::internal_put_broadcastmem_wg(void *dst, const void *
         internal_putmem_nbi_wg(dst, src, nelems, i, i, wf_info);
     }
     memcpy_wg<MemcpyKind::Put>(dst, const_cast<void *>(src), nelems);
+    // the data must have landed before the barrier tells the others to read it
+    if (is_thread_zero_in_block()) {
+      for (int i = pe_start; i < finish; i += stride) {
+        if (constmem.my_pe != i) qps[i].quiet(wf_info);
+      }
+    }
   }
 }
 
@@ -397,7 +413,11 @@ __device__ void GDAContext::internal_broadcastmem_wg(void *dst, const void *src,
     int nelems, int pe_root, int pe_start, int stride, int pe_size,
     long *p_sync) {  // NOLINT(runtime/int)
   ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
-  if (constmem.num_pes < 4) { //TODO: optimized for IPC
+#if defined(ROCSHMEM_GDA_BROADCAST_GET)
+  if (constmem.num_pes < 4) {  // get-based fan-out needs RDMA READ
+#else
+  if (true) {  // put-based: RDMA READ is not available on every NIC (MetaRoCE AINIC)
+#endif
     internal_put_broadcastmem_wg(dst, src, nelems, pe_root, pe_start, stride,
       pe_size, wf_info);
   } else {
@@ -415,6 +435,7 @@ __device__ void GDAContext::alltoallmem_wg(rocshmem_team_t team, void *dst,
 
 __device__ void GDAContext::alltoallmem_linear_thread_puts_wg(rocshmem_team_t team,
     void *dst, const void *src, int nelems) {
+#if defined(ROCSHMEM_GDA_ALLTOALL_ATOMIC)
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
 
   int pe_size = team_obj->num_pes;
@@ -452,6 +473,29 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wg(rocshmem_team_t te
   }
 
   __syncthreads();
+#else
+  GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
+  int pe_size = team_obj->num_pes;
+  int my_pe_in_team = team_obj->my_pe;
+  int pe_start = team_obj->tinfo_wrt_world->pe_start;
+  int stride = team_obj->tinfo_wrt_world->stride;
+  long *pSync = team_obj->alltoall_pSync;
+  int tid = get_flat_block_id();
+  int step_size = get_flat_block_size() < WF_SIZE ? get_flat_block_size() : WF_SIZE;
+  ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
+  // Puts only (no RDMA atomics, which the MetaRoCE AINIC rejects): each PE writes its blocks, waits for
+  // its own puts to complete, then a put-based barrier tells everyone that all data has landed.
+  for (int j = tid; j < pe_size; j += step_size) {
+    int dest_pe = team_obj->get_pe_in_world(j);
+    char *dst_local = reinterpret_cast<char *>(dst) + my_pe_in_team * nelems;
+    const char *src_local = reinterpret_cast<const char *>(src) + j * nelems;
+    qps[dest_pe].put_nbi_single(dst_local, src_local, nelems, PostOpt{RingDB<true>});
+  }
+  for (int j = tid; j < pe_size; j += step_size) {
+    qps[team_obj->get_pe_in_world(j)].quiet_single();
+  }
+  internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, pSync, wf_info);
+#endif
 }
 
 __device__ int GDAContext::alltoallmem_wave(rocshmem_team_t team,
@@ -498,6 +542,7 @@ __device__ void GDAContext::alltoallmem_linear_wave(rocshmem_team_t team, void *
 
 __device__ void GDAContext::alltoallmem_linear_thread_puts_wave(rocshmem_team_t team,
     void *dst, const void *src, int nelems) {
+#if defined(ROCSHMEM_GDA_ALLTOALL_ATOMIC)
   GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
 
   int pe_size = team_obj->num_pes;
@@ -535,6 +580,30 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wave(rocshmem_team_t 
   }
 
   sync_wave(team);
+#else
+  GDATeam *team_obj = reinterpret_cast<GDATeam *>(team);
+  int pe_size = team_obj->num_pes;
+  int my_pe_in_team = team_obj->my_pe;
+  int pe_start = team_obj->tinfo_wrt_world->pe_start;
+  int stride = team_obj->tinfo_wrt_world->stride;
+  long *pSync = team_obj->alltoall_pSync;
+  int tid = get_flat_block_id() % WF_SIZE;
+  int step_size = get_flat_block_size() < WF_SIZE ? get_flat_block_size() : WF_SIZE;
+  ActiveWFInfo wf_info(ctx_id_, ThreadScope::wave);
+  // Puts only (no RDMA atomics, which the MetaRoCE AINIC rejects): each PE writes its blocks, waits for
+  // its own puts to complete, then a put-based barrier tells everyone that all data has landed.
+  for (int j = tid; j < pe_size; j += step_size) {
+    int dest_pe = team_obj->get_pe_in_world(j);
+    char *dst_local = reinterpret_cast<char *>(dst) + my_pe_in_team * nelems;
+    const char *src_local = reinterpret_cast<const char *>(src) + j * nelems;
+    qps[dest_pe].put_nbi_single(dst_local, src_local, nelems, PostOpt{RingDB<true>});
+  }
+  for (int j = tid; j < pe_size; j += step_size) {
+    qps[team_obj->get_pe_in_world(j)].quiet_single();
+  }
+  __builtin_amdgcn_wave_barrier();
+  internal_sync_wave(constmem.my_pe, pe_start, stride, pe_size, pSync, wf_info);
+#endif
 }
 
 __device__ void GDAContext::fcollectmem_wg(rocshmem_team_t team, void *dst,

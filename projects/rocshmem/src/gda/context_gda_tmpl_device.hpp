@@ -941,6 +941,12 @@ __device__ void GDAContext::internal_put_broadcast_wave(T *dst, const T *src,
       }
     }
     memcpy_wave<MemcpyKind::Put>(dst, const_cast<T *>(src), nelems * sizeof(T));
+    // the data must have landed before the barrier tells the others to read it
+    if (is_thread_zero_in_wave()) {
+      for (int i = pe_start; i < finish; i += stride) {
+        if (i != constmem.my_pe) qps[i].quiet(wf_info);
+      }
+    }
   }
 }
 
@@ -982,7 +988,11 @@ __device__ void GDAContext::internal_broadcast_wave(T *dst, const T *src,
     long *p_sync) {  // NOLINT(runtime/int)
 
   ActiveWFInfo wf_info(ctx_id_, ThreadScope::wg);
-  if (constmem.num_pes < 4) { //TODO: optimized for IPC
+#if defined(ROCSHMEM_GDA_BROADCAST_GET)
+  if (constmem.num_pes < 4) {  // get-based fan-out needs RDMA READ
+#else
+  if (true) {  // put-based: RDMA READ is not available on every NIC (MetaRoCE AINIC)
+#endif
     internal_put_broadcast_wave(dst, src, nelems, pe_root, pe_start, stride,
       pe_size, wf_info);
   } else {
