@@ -25,6 +25,14 @@ Available examples:
   counts. Any SPM counter can be passed with `--counter`. Without SPM input it
   runs a self-check against an LDS bank model. `lds_conflict.hip` is a test
   kernel with one conflict-free and one fully conflicting LDS load.
+- `sqtt_site_rewrite.py` adds site markers to an already-compiled code object,
+  so kernels can be profiled with `counter_fit.py` without rebuilding them with
+  the sqtt-marker plugin. Each LDS instruction is replaced by an `s_branch` to
+  a stub (`s_ttracedata_imm <id>`, the original instruction, `s_branch` back)
+  placed after `.text`, and a `.sqtt_funcmap` section maps IDs to source lines.
+  Prototype limits: up to 63 sites per code object and stub space limited to
+  the page slack after `.text`. `lds_module.cpp` loads a code object with
+  `hipModuleLoad` and dumps the kernel output for bit-for-bit comparison.
 
 The sample input parser derives nonzero code-object IDs from common rocprofiler
 capture filenames such as `code_object_id_7.out`. Each code object is loaded
