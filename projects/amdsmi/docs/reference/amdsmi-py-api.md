@@ -428,7 +428,7 @@ Input parameters:
 
 * `processor_handle` device for which to query
 
-Output: CUID string unique to the device
+Output: CUID string. A temporary CUID is node-local, so it is not unique across nodes
 
 Exceptions that can be thrown by `amdsmi_get_gpu_device_cuid` function:
 
@@ -439,6 +439,7 @@ Exceptions that can be thrown by `amdsmi_get_gpu_device_cuid` function:
 
 - `AMDSMI_STATUS_INVAL` - Invalid parameters
 - `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NO_DATA` - The node has no usable machine ID
 - `AMDSMI_STATUS_INSUFFICIENT_SIZE` - Buffer provided is not of large enough size
 
 Example:
@@ -535,8 +536,8 @@ Exceptions that can be thrown by `amdsmi_get_gpu_cuid_info` function:
 #### Possible Library Exceptions
 
 - `AMDSMI_STATUS_INVAL` - Invalid parameters
-- `AMDSMI_STATUS_NO_PERM` - The auxiliary flag cannot be read by this caller
 - `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NO_DATA` - The node has no usable machine ID
 
 Example:
 
@@ -564,8 +565,10 @@ finally:
 
 Description: Lists every component on the node that has a CUID: the platform,
 each CPU package, each AMD GPU and GPU partition, each NPU, and each NIC
-function, ordered by component type, then BDF, then device path. Needs no
-processor handle. Every CUID is temporary, so `primary` is empty.
+function, ordered by component type, then BDF, then device path, with the
+numbers in a path compared as numbers. Needs no processor handle. The node is rediscovered on every call, so a component added
+or removed since the last one is reflected. Every CUID is temporary, so
+`primary` is empty.
 
 Input parameters: `None`
 
@@ -588,7 +591,7 @@ Exceptions that can be thrown by `amdsmi_get_cuid_components` function:
 
 #### Possible Library Exceptions
 
-- `AMDSMI_STATUS_NO_PERM` - A component's auxiliary flag cannot be read by this caller
+- `AMDSMI_STATUS_NO_DATA` - The node has no usable machine ID
 - `AMDSMI_STATUS_NOT_SUPPORTED` - Built without CUID support
 - `AMDSMI_STATUS_API_FAILED` - API call failed
 

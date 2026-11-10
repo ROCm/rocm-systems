@@ -149,7 +149,7 @@ alone does not hide a readable CUID.
 The `oam_id` field identifies the physical board slot in multi-GPU OAM chassis.
 The `ID` shown for `--gpu` (0, 1, 2, …) is an enumeration index assigned in discovery
 order, not the device-type value returned by `amdsmi_get_gpu_id()`; `--gpu` also accepts a
-BDF or UUID to select a specific card.
+BDF, UUID or CUID to select a specific card.
 ```
 
 ```shell-session
@@ -206,11 +206,12 @@ described under [`amd-smi list`](#cmd-list). It does not fall back to a
 legacy UUID.
 
 Every temporary CUID needs a machine-id. Without a valid `/etc/machine-id` (or
-`/var/lib/dbus/machine-id` when `/etc/machine-id` does not exist), every CUID
-field reads `N/A` with `cuid_metadata_status` `not_supported`, and
-`amd-smi node --cuid` lists no components. A container with its own machine-id
-gets its own CUIDs; bind-mount the host's `/etc/machine-id` read-only to get
-the host's.
+`/var/lib/dbus/machine-id` when `/etc/machine-id` does not exist), every GPU's
+`cuid_metadata_status` reads `amdsmi_error_40` (`AMDSMI_STATUS_NO_DATA`), not the
+`not_supported` of a GPU that has no CUID, and `amd-smi node --cuid` prints the
+error in place of the components and exits with status 40. A container with its
+own machine-id gets its own CUIDs; bind-mount the host's `/etc/machine-id`
+read-only to get the host's.
 
 On a GPU in SPX the handle reports the whole GPU's CUID. In DPX and above,
 on a partition-capable GPU such as an MI300-series GPU, each GPU handle is a
