@@ -71,6 +71,7 @@ inline constexpr size_t kOtherWaveContextRows = 16;
 /// synchronization and control-flow rows, and both sides of each jump.
 /// Disassemble only printed rows. Returns failure when `disassemble` fails.
 /// The callback must not throw.
+/// A same-wave conflict must not follow the current access in the trace.
 util::FailureOr<std::string> formatTrace(const RingBuffer<InstructionSnapshot, 256> &trace,
                         const std::function<util::FailureOr<std::string>(const InstructionSnapshot &)> &disassemble,
                         std::optional<MarkedInstruction> conflict, MarkedInstruction read);

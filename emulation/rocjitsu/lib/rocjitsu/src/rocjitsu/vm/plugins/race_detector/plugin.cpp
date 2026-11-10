@@ -184,8 +184,8 @@ util::FailureOr<std::string> formatTrace(const RingBuffer<InstructionSnapshot, 2
         conflict_index = i;
         break;
       }
-  if (conflict_index && read_index && *conflict_index > *read_index)
-    throw std::invalid_argument("race conflict follows the current access in the wave trace");
+  assert((!conflict_index || !read_index || *conflict_index <= *read_index) &&
+         "race conflict follows the current access in the wave trace");
   const size_t last = read_index ? *read_index + 1 : n;
   size_t first = read_index.value_or(n);
   if (conflict && conflict->wave == read.wave) {
