@@ -15,15 +15,6 @@ carries the same numbers in readable form.
 
 ## 1. Collect
 
-Check the architecture before collecting. Navi48 (gfx1201) GPU metrics and the
-Memory Chart start with ROCm Compute Profiler 3.11 (ROCm 10.3), but roofline and
-benchmarking are outside its support scope in this release. ROCm 10.2 and 10.1
-shipped without gfx1201 support. For Navi48, use the available Speed-of-Light
-and memory metrics, following the `STABLE_STD` prerequisite and interpretation
-limits in the [Navi48 guide](../../docs/conceptual/rdna/navi48.rst). Explain that
-these metrics do not supply a measured roofline ceiling; do not retry roofline
-collection or fabricate arithmetic intensity and peak data.
-
 Collect only the roofline block:
 
 ```bash
@@ -34,8 +25,8 @@ Collecting it runs microbenchmarks in addition to profiling the application,
 which takes extra time. An existing profile already has roofline unless it was
 collected with `--no-roof`, or with a `-b` list that left out `roof`.
 
-MI100 (gfx908) also does not support the roofline microbenchmarks. On MI100 the
-benchmark is skipped and the profile
+MI100 (gfx908) does not support the roofline microbenchmarks. Every other
+supported architecture does. On MI100 the benchmark is skipped and the profile
 still succeeds, so a missing roofline there is not a mistake in how the profile
 was run. Never tell an MI100 user to re-profile without `--no-roof`; use
 Speed-of-Light and the `rocprof-compute-memory` skill instead. Confirm support
@@ -52,13 +43,12 @@ application.
 ### Collect only what the question needs
 
 Never run a full profile. It replays the application once per counter pass and
-also runs roofline benchmarks on architectures that support them.
+also runs the roofline benchmarks.
 
-- List block aliases with `rocprof-compute --list-metrics-gfx-id <gfx_arch>`
-  and metrics with
-  `rocprof-compute --list-metrics-gfx-id <gfx_arch> --list-metrics all`.
-  Pass `-b` only the block aliases, block ids, or metric ids (for example
-  `2.1.0`) the question needs. Aliases differ by architecture.
+- List what this GPU can collect with `rocprof-compute --list-blocks <gfx_arch>`
+  and `rocprof-compute --list-metrics <gfx_arch>`. Pass `-b` only the block
+  aliases, block ids, or metric ids (for example `2.1.0`) the question needs.
+  Aliases differ by architecture.
 - `--set <set_name>` collects a predefined topic in one pass.
   `rocprof-compute profile --list-sets` lists the sets.
 - Add `-k <kernel_name>` when the user names the kernels that matter.
@@ -69,10 +59,6 @@ also runs roofline benchmarks on architectures that support them.
   times. Pair it with `-k`. See Iteration multiplexing in
   [profile mode](../../docs/how-to/profile/mode.rst).
 - Tell the user which analysis panels the narrower profile leaves empty.
-
-In ROCm 10.2 and 10.1, use `--list-blocks <gfx_arch>` to list blocks and
-`--list-metrics <gfx_arch>` to list metrics. The architecture selector changed
-in ROCm 10.3.
 
 ## 2. Read the table
 
