@@ -5986,9 +5986,13 @@ TEST(Gfx1250ExecutionTest, SwmmacIu8K128MatchesIndependentSparseLayoutOracle) {
       for (uint32_t lane = 0; lane < 32; ++lane)
         cu.write_vgpr(base + kAcc + reg, lane, 0);
 
-    amdgpu::exec_swmmac_i32<16, 16, 128>(cu, 8, base + kAcc, base + kA, base + kB, base + kAcc,
-                                         base + kIndex, 32, 0, amdgpu::extract_u8,
-                                         amdgpu::extract_u8, false);
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+    const auto words = cdna5::build_vop3p(
+        cdna5::kVSwmmacI3216x16x128Iu8Vop3p,
+        {.vdst = kAcc, .src0 = 256 + kA, .src1 = 256 + kB, .src2 = 256 + kIndex});
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_TRUE(cu.execute_instruction(inst.get(), *wf).succeeded());
 
     for (uint32_t row = 0; row < 16; ++row)
       for (uint32_t col = 0; col < 16; ++col) {
@@ -5996,6 +6000,42 @@ TEST(Gfx1250ExecutionTest, SwmmacIu8K128MatchesIndependentSparseLayoutOracle) {
         EXPECT_EQ(cu.read_vgpr(base + kAcc + out.reg, out.lane), expected[row * 16 + col])
             << "row=" << row << " col=" << col;
       }
+  }
+}
+
+// Independent source signs and CLAMP must survive decoded control forwarding.
+TEST(Gfx1250ExecutionTest, SwmmacIu8K128SignsAndClamp) {
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *wf = sim.dispatch_scratch_wf();
+  ASSERT_NE(wf, nullptr);
+  auto &cu = *sim.cu();
+  const auto base = wf->vgpr_alloc().base;
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  for (uint8_t signs : {0, 1, 2}) {
+    for (uint8_t clamp : {0, 1}) {
+      for (uint32_t lane = 0; lane < 32; ++lane) {
+        for (uint32_t reg = 0; reg < 8; ++reg) {
+          cu.write_vgpr(base + reg, lane, 0x80808080U);
+          cu.write_vgpr(base + 40 + reg, lane, signs ? 0 : INT32_MAX);
+        }
+        for (uint32_t reg = 16; reg < 32; ++reg)
+          cu.write_vgpr(base + reg, lane, 0xffffffffU);
+        for (uint32_t reg = 56; reg < 58; ++reg)
+          cu.write_vgpr(base + reg, lane, 0x44444444U);
+      }
+      const auto words = cdna5::build_vop3p(
+          cdna5::kVSwmmacI3216x16x128Iu8Vop3p,
+          {.vdst = 40, .clamp = clamp, .src0 = 256, .src1 = 272, .src2 = 312, .neg = signs});
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+      ASSERT_NE(inst, nullptr);
+      ASSERT_TRUE(cu.execute_instruction(inst.get(), *wf).succeeded());
+      const uint32_t expected = signs == 1   ? uint32_t(-2088960)
+                                : signs == 2 ? uint32_t(-8192)
+                                : clamp      ? uint32_t(INT32_MAX)
+                                             : uint32_t(INT32_MAX) + 2088960U;
+      EXPECT_EQ(cu.read_vgpr(base + 40, 0), expected);
+    }
   }
 }
 
