@@ -525,16 +525,40 @@ TEST(RaceDetector, Gfx1250CounterCapacity_CombinedCounterFailsLoudly) {
 }
 
 TEST(RaceDetector, Gfx1250CounterCapacity_ArchCapacitiesConfigureSplitCountersOnly) {
+  // 6-bit LOADcnt, STOREcnt, DScnt, ASYNCcnt and TENSORcnt, and 5-bit KMcnt
+  // (CDNA5 ISA 5.7.1), each holding 2^n - 1 tokens.
   constexpr auto capacities = counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5);
-  EXPECT_EQ(capacities.loadcnt, gfx1250Capacity(amdgpu::WaitCounterKind::Load));
-  EXPECT_EQ(capacities.storecnt, gfx1250Capacity(amdgpu::WaitCounterKind::Store));
-  EXPECT_EQ(capacities.dscnt, gfx1250Capacity(amdgpu::WaitCounterKind::Ds));
-  EXPECT_EQ(capacities.kmcnt, gfx1250Capacity(amdgpu::WaitCounterKind::Km));
-  EXPECT_EQ(capacities.asynccnt, gfx1250Capacity(amdgpu::WaitCounterKind::Async));
-  EXPECT_EQ(capacities.tensorcnt, gfx1250Capacity(amdgpu::WaitCounterKind::Tensor));
+  EXPECT_EQ(capacities.loadcnt, 63);
+  EXPECT_EQ(capacities.storecnt, 63);
+  EXPECT_EQ(capacities.dscnt, 63);
+  EXPECT_EQ(capacities.kmcnt, 31);
+  EXPECT_EQ(capacities.asynccnt, 63);
+  EXPECT_EQ(capacities.tensorcnt, 63);
   // gfx1250 has no combined VMCNT or LGKMCNT.
   EXPECT_EQ(capacities.vmcnt, 0);
   EXPECT_EQ(capacities.lgkmcnt, 0);
+}
+
+// split() returns each split counter's own field, and zero for the rest.
+TEST(RaceDetector, CounterCapacity_SplitReturnsEachCountersOwnCapacity) {
+  constexpr CounterCapacities capacities{.vmcnt = 1,
+                                         .lgkmcnt = 2,
+                                         .loadcnt = 3,
+                                         .storecnt = 4,
+                                         .dscnt = 5,
+                                         .kmcnt = 6,
+                                         .asynccnt = 7,
+                                         .tensorcnt = 8};
+  EXPECT_EQ(capacities.split(amdgpu::WaitCounterType::LOADCNT), 3);
+  EXPECT_EQ(capacities.split(amdgpu::WaitCounterType::STORECNT), 4);
+  EXPECT_EQ(capacities.split(amdgpu::WaitCounterType::DSCNT), 5);
+  EXPECT_EQ(capacities.split(amdgpu::WaitCounterType::KMCNT), 6);
+  EXPECT_EQ(capacities.split(amdgpu::WaitCounterType::ASYNCCNT), 7);
+  EXPECT_EQ(capacities.split(amdgpu::WaitCounterType::TENSORCNT), 8);
+  for (const auto counter : {amdgpu::WaitCounterType::VMCNT, amdgpu::WaitCounterType::LGKMCNT,
+                             amdgpu::WaitCounterType::VSCNT, amdgpu::WaitCounterType::EXPCNT,
+                             amdgpu::WaitCounterType::SAMPLECNT})
+    EXPECT_EQ(capacities.split(counter), 0) << static_cast<int>(counter);
 }
 
 // Pre-GFX12 targets keep their combined capacities; their split counter names
