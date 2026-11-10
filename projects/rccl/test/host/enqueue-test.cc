@@ -4253,6 +4253,49 @@ TEST_F(EnqueueMicrotest, CollTaskAppend_NoDecision_WritesNone) {
   EXPECT_EQ(RCCL_SYMK_EXTRACT_NONE, t->symkExtract);
 }
 
+TEST_F(EnqueueMicrotest, CollTaskAppend_NoUserConfig_InheritsCommCTAPolicyAndDoesNotIsolate) {
+  CollTaskComm cc;
+  cc.get()->config.CTAPolicy = NCCL_CTA_POLICY_EFFICIENCY;
+  ncclInfo info = MakeCollInfo(cc.get(), /*decisionValid=*/false, NCCL_ALGO_RING);
+  info.collConfig = NCCL_COLLCONFIG_INITIALIZER;
+  info.collConfig.size = 0;
+  ncclDevRedOpFull opDev{};
+  ASSERT_EQ(ncclSuccess, collTaskAppend(cc.get(), &info, opDev));
+  const ncclTaskColl* t = ncclTaskCollSorterDequeueAll(&cc.get()->planner.collSorter);
+  ASSERT_NE(nullptr, t);
+  EXPECT_FALSE(t->aggIsolate);
+  EXPECT_EQ(NCCL_CTA_POLICY_EFFICIENCY, t->CTAPolicy);
+}
+
+TEST_F(EnqueueMicrotest, CollTaskAppend_UnsetPerCallCTAPolicy_DoesNotIsolate) {
+  CollTaskComm cc;
+  cc.get()->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT;
+  ncclInfo info = MakeCollInfo(cc.get(), /*decisionValid=*/false, NCCL_ALGO_RING);
+  info.collConfig = NCCL_COLLCONFIG_INITIALIZER;
+  info.collConfig.size = sizeof(ncclCollConfig_t);
+  ncclDevRedOpFull opDev{};
+  ASSERT_EQ(ncclSuccess, collTaskAppend(cc.get(), &info, opDev));
+  const ncclTaskColl* t = ncclTaskCollSorterDequeueAll(&cc.get()->planner.collSorter);
+  ASSERT_NE(nullptr, t);
+  EXPECT_FALSE(t->aggIsolate);
+  EXPECT_EQ(NCCL_CTA_POLICY_DEFAULT, t->CTAPolicy);
+}
+
+TEST_F(EnqueueMicrotest, CollTaskAppend_PerCallCTAPolicy_IsolatesWhenItDiffers) {
+  CollTaskComm cc;
+  cc.get()->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT;
+  ncclInfo info = MakeCollInfo(cc.get(), /*decisionValid=*/false, NCCL_ALGO_RING);
+  info.collConfig = NCCL_COLLCONFIG_INITIALIZER;
+  info.collConfig.size = sizeof(ncclCollConfig_t);
+  info.collConfig.CTAPolicy = NCCL_CTA_POLICY_EFFICIENCY;
+  ncclDevRedOpFull opDev{};
+  ASSERT_EQ(ncclSuccess, collTaskAppend(cc.get(), &info, opDev));
+  const ncclTaskColl* t = ncclTaskCollSorterDequeueAll(&cc.get()->planner.collSorter);
+  ASSERT_NE(nullptr, t);
+  EXPECT_TRUE(t->aggIsolate);
+  EXPECT_EQ(NCCL_CTA_POLICY_EFFICIENCY, t->CTAPolicy);
+}
+
 // ===========================================================================
 // ceCollTaskAppend -- deferred CE staging setup (ROCM-32044)
 // ===========================================================================
@@ -5437,6 +5480,50 @@ TEST_F(EnqueueMicrotest, GetAlgoInfo_NoTunerNaviSingleNodeAllReduce_UsesRing) {
   }
 }
 
+namespace {
+uint64_t GeneralBit(int algo, int proto) { return 1ull << (algo * NCCL_NUM_PROTOCOLS + proto); }
+}  // namespace
+
+TEST_F(EnqueueMicrotest, GetAlgoInfo_GeneralSelection_SkipsGfx950AndNaviOverrides) {
+  {
+    AlgoInfoComm cc;
+    cc.get()->nNodes = 1;
+    SetSingleGpuArch(&cc.base.topo(), "gfx950");
+    ScriptCheapest(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+    ncclTaskColl task = NoTunerTask(64 / sizeof(float));
+    task.algMask = GeneralBit(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+    ASSERT_EQ(ncclSuccess, getAlgoInfo(cc.get(), &task, 0, 0, 1, nullptr));
+    EXPECT_EQ(NCCL_ALGO_RING, task.algorithm);
+    EXPECT_EQ(NCCL_PROTO_SIMPLE, task.protocol);
+  }
+  {
+    AlgoInfoComm cc;
+    SetSingleGpuArch(&cc.base.topo(), "gfx1200");
+    ScriptCheapest(NCCL_ALGO_TREE, NCCL_PROTO_SIMPLE);
+    ncclTaskColl task = NoTunerTask(1 << 20);
+    task.algMask = GeneralBit(NCCL_ALGO_TREE, NCCL_PROTO_SIMPLE);
+    ASSERT_EQ(ncclSuccess, getAlgoInfo(cc.get(), &task, 0, 0, 1, nullptr));
+    EXPECT_EQ(NCCL_ALGO_TREE, task.algorithm);
+    EXPECT_EQ(NCCL_PROTO_SIMPLE, task.protocol);
+  }
+}
+
+TEST_F(EnqueueMicrotest, GetAlgoInfo_DirectReduceScatter_RejectsASelectionThatExcludesRingSimple) {
+  AlgoInfoComm cc;
+  cc.get()->enableDirectReduceScatter = true;
+  ScriptCheapest(NCCL_ALGO_TREE, NCCL_PROTO_SIMPLE);
+  ncclTaskColl task = CostTask(ncclFuncReduceScatter);
+  task.count = 1024;
+  task.algMask = GeneralBit(NCCL_ALGO_TREE, NCCL_PROTO_SIMPLE);
+  task.forceAlgSelection = 1;
+  EXPECT_EQ(ncclInvalidArgument, getAlgoInfo(cc.get(), &task, 0, 0, 1, nullptr));
+
+  task.forceAlgSelection = 0;
+  ASSERT_EQ(ncclSuccess, getAlgoInfo(cc.get(), &task, 0, 0, 1, nullptr));
+  EXPECT_EQ(NCCL_ALGO_RING, task.algorithm);
+  EXPECT_EQ(NCCL_PROTO_SIMPLE, task.protocol);
+}
+
 TEST_F(EnqueueMicrotest, UpdateCollCostTable_PatSizeWindowWidensWithNodeCount) {
   struct {
     int nNodes;
@@ -5451,6 +5538,128 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_PatSizeWindowWidensWithNodeCount) {
     ScriptAllTimes(1.0f);
     ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, c.nBytes, 0, 0, 1, /*userAlgoInput=*/0, tbl.ptr()));
     EXPECT_EQ(c.written, tbl.written(NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE)) << c.nNodes << " nodes, " << c.nBytes;
+  }
+}
+
+TEST_F(EnqueueMicrotest, UpdateCollCostTable_GeneralAlgMask_KeepsOnlyTheNamedCell) {
+  CostComm cc;
+  auto task = CostTask(ncclFuncAllReduce);
+  ScriptAllTimes(1.0f);
+  CostTable open;
+  ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 1 << 20, 0, 0, 1, 0, open.ptr()));
+  ASSERT_TRUE(open.written(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE));
+  ASSERT_TRUE(open.written(NCCL_ALGO_TREE, NCCL_PROTO_LL));
+
+  CostTable named;
+  task.algMask = GeneralBit(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+  ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 1 << 20, 0, 0, 1, 0, named.ptr()));
+  EXPECT_TRUE(named.written(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE));
+  EXPECT_FALSE(named.written(NCCL_ALGO_TREE, NCCL_PROTO_LL));
+  EXPECT_EQ(1, named.countWritten());
+}
+
+TEST_F(EnqueueMicrotest, UpdateCollCostTable_SymmetricAlgMask_LeavesTheGeneralTable) {
+  CostComm cc;
+  ScriptAllTimes(1.0f);
+  CostTable open;
+  auto plain = CostTask(ncclFuncAllReduce);
+  ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &plain, 1 << 20, 0, 0, 1, 0, open.ptr()));
+
+  CostTable sym;
+  auto task = CostTask(ncclFuncAllReduce);
+  task.algMask = 1ull << (NCCL_NUM_ALGORITHMS * NCCL_NUM_PROTOCOLS);
+  ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 1 << 20, 0, 0, 1, 0, sym.ptr()));
+  EXPECT_EQ(open.countWritten(), sym.countWritten());
+  EXPECT_GT(sym.countWritten(), 1);
+}
+
+TEST_F(EnqueueMicrotest, UpdateCollCostTable_PatSelection_BypassesTheSizeWindow) {
+  CostComm cc(/*nRanks=*/48, /*nNodes=*/6);
+  const size_t nBytes = (32 << 10) - 1;
+  ScriptAllTimes(1.0f);
+  CostTable open;
+  auto plain = CostTask(ncclFuncAllGather);
+  ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &plain, nBytes, 0, 0, 1, 0, open.ptr()));
+  EXPECT_FALSE(open.written(NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE));
+
+  CostTable named;
+  auto task = CostTask(ncclFuncAllGather);
+  task.algMask = GeneralBit(NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE);
+  ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, nBytes, 0, 0, 1, 0, named.ptr()));
+  EXPECT_TRUE(named.written(NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE));
+}
+
+TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_UnsatisfiableGeneralSelection_ErrorsWhenForced) {
+  AlgoInfoComm cc;
+  auto task = CostTask(ncclFuncAllReduce);
+  task.algMask = GeneralBit(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+  task.forceAlgSelection = 1;
+  CostTable tbl;
+  EXPECT_EQ(ncclInvalidArgument, topoGetAlgoInfo(cc.get(), &task, 1 << 20, tbl.ptr(), nullptr));
+}
+
+TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_UnsatisfiableGeneralSelection_FallsBackWhenNotForced) {
+  AlgoInfoComm cc;
+  auto task = CostTask(ncclFuncAllReduce);
+  task.algMask = GeneralBit(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+  task.forceAlgSelection = 0;
+  CostTable tbl;
+  ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, 1 << 20, tbl.ptr(), nullptr));
+  EXPECT_EQ(NCCL_ALGO_RING, task.algorithm);
+  EXPECT_EQ(NCCL_PROTO_SIMPLE, task.protocol);
+}
+
+TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_GeneralSelection_IgnoresACheaperCellOutsideTheMask) {
+  AlgoInfoComm cc;
+  auto task = CostTask(ncclFuncAllReduce);
+  task.algMask = GeneralBit(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+  task.forceAlgSelection = 1;
+  CostTable tbl;
+  tbl.t[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = 1.0f;
+  tbl.t[NCCL_ALGO_TREE][NCCL_PROTO_LL] = 0.0f;
+  ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, 1 << 20, tbl.ptr(), nullptr));
+  EXPECT_EQ(NCCL_ALGO_RING, task.algorithm);
+  EXPECT_EQ(NCCL_PROTO_SIMPLE, task.protocol);
+}
+
+TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_ProtocolHeuristic_StaysInsideTheSelection) {
+  AlgoInfoComm cc;
+  auto task = CostTask(ncclFuncAllReduce);
+  task.algMask = GeneralBit(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+  task.forceAlgSelection = 1;
+  CostTable tbl;
+  tbl.t[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = 0.5f;
+  g_rcclUpdateCollectiveProtocol = [](ncclComm*, size_t const&, ncclTaskColl* info) { info->protocol = NCCL_PROTO_LL; };
+  ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, 1 << 20, tbl.ptr(), nullptr));
+  EXPECT_EQ(NCCL_ALGO_RING, task.algorithm);
+  EXPECT_EQ(NCCL_PROTO_SIMPLE, task.protocol);
+}
+
+TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_GeneralSelection_SkipsPivotAndTreeDefined) {
+  {
+    AlgoInfoComm cc;
+    cc.get()->nChannels = 32;
+    cc.base.topo().pivotA2ANumBiRings = 3;
+    auto task = CostTask(ncclFuncAllReduce);
+    task.algMask = GeneralBit(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+    CostTable tbl;
+    tbl.t[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = 0.5f;
+    ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, 2200008, tbl.ptr(), nullptr));
+    EXPECT_EQ(NCCL_ALGO_RING, task.algorithm);
+    EXPECT_EQ(NCCL_PROTO_SIMPLE, task.protocol);
+    EXPECT_EQ(32, task.nMaxChannels);
+  }
+  {
+    AlgoInfoComm cc;
+    cc.get()->nChannels = 80;
+    cc.base.topo().treeDefined = 1;
+    auto task = CostTask(ncclFuncAllReduce);
+    task.algMask = GeneralBit(NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+    CostTable tbl;
+    tbl.t[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE] = 0.5f;
+    ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, 1 << 20, tbl.ptr(), nullptr));
+    EXPECT_EQ(NCCL_ALGO_RING, task.algorithm);
+    EXPECT_EQ(80, task.nMaxChannels);
   }
 }
 

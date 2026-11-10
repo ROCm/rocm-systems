@@ -137,3 +137,35 @@ The Scatter operation distributes a total of N*k values from the root rank to k 
 Important note: The root argument is one of the ranks, not a device number, and is therefore impacted by a different rank to device mapping.
 
 Related links: :c:func:`ncclScatter`.
+
+.. _coll-config:
+
+Per-collective configuration
+----------------------------
+
+Each collective has an ``nccl*Config`` entry point that takes a trailing ``ncclCollConfig_t*``.
+``NULL`` is the same call as the plain collective. Initialize the struct with ``NCCL_COLLCONFIG_INITIALIZER``
+and pass the same config on every rank.
+
+.. code-block:: c++
+
+   ncclCollConfig_t config = NCCL_COLLCONFIG_INITIALIZER;
+   config.algSelection = "RING";
+   config.minCTAs = 2;
+   config.maxCTAs = 8;
+   config.userProfilerTag = 42;
+   ncclAllReduceConfig(send, recv, count, ncclFloat, ncclSum, comm, stream, &config);
+
+``algSelection`` limits that call to the named algorithms. ``RING`` and ``TREE`` apply to AllReduce,
+``PAT`` to AllGather and ReduceScatter, and the ``SYMK_*`` names to the symmetric kernels of that
+collective. AlltoAll, Gather, and Scatter have no selectable names. An unknown or unusable name is an
+error unless ``forceAlgSelection`` is 0, in which case RCCL falls back to automatic selection.
+``NCCL_ALGO`` and ``NCCL_PROTO`` still override the per-call string. A tuner plugin cannot put a
+pattern back once the string has removed it. A symmetric-only name is handled by the symmetric
+scheduler and does not by itself change the ring/tree choice.
+
+``minCTAs`` and ``maxCTAs`` bound the channel count for that call. An unset ``CTAPolicy`` inherits the
+communicator policy, and ``NCCL_CTA_POLICY`` overrides the per-call value. A per-call ``CTAPolicy``
+is applied by the symmetric scheduler. Copy-engine selection, and the efficiency override in the
+general cost model, still follow the communicator policy. ``userProfilerTag`` is copied into profiler
+events and does not change the algorithm. ``cgaClusterSize`` is accepted and has no effect on HIP.

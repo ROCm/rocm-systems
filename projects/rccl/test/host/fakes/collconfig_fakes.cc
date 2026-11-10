@@ -47,6 +47,14 @@ bool ncclCollConfigNeedAggIsolate(const ncclCollConfig_t* config) {
   return false;
 }
 
+int ncclCollConfigResolveCTAPolicy(int configVal, int commVal, bool envOverridden) {
+  if (envOverridden || configVal == NCCL_CONFIG_UNDEF_INT) return commVal;
+  if ((configVal & NCCL_CTA_POLICY_ZERO) && (configVal & NCCL_CTA_POLICY_EFFICIENCY)) {
+    configVal &= ~NCCL_CTA_POLICY_EFFICIENCY;
+  }
+  return configVal;
+}
+
 ncclResult_t ncclCollConfigGetAlgMask(const ncclCollConfig_t* config, ncclFunc_t, uint64_t* outMask) {
   if (ncclCollConfigHasAlgSelection(config)) {
     FailLoud("collconfig_fakes", "ncclCollConfigGetAlgMask: config->algSelection needs the real parser");

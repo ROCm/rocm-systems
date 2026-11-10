@@ -550,7 +550,7 @@ ncclCollConfig_t
   the same value range as :ref:`NCCL_CGA_CLUSTER_SIZE`; an out-of-range value
   is ignored and NCCL falls through to the next priority source. All
   collectives in a group must use the same value; inconsistent values result
-  in undefined behavior.
+  in undefined behavior. On HIP the value is accepted and has no effect.
 
  .. c:member:: const char* algSelection
 
@@ -597,8 +597,8 @@ ncclCollConfig_t
 
   Algorithm names are implementation details and may evolve. AllToAll,
   Gather, and Scatter lower to point-to-point sends and receives and expose
-  no selectable names; Copy Engine paths are likewise not selectable here.
-  Request a Copy Engine path with ``CTAPolicy`` instead.
+  no selectable names. Copy Engine paths are not selectable through
+  ``algSelection``. On RCCL they follow the communicator ``CTAPolicy``.
 
  .. c:member:: int forceAlgSelection
 
@@ -615,8 +615,10 @@ ncclCollConfig_t
   Per-collective override of the communicator's CTA policy. A set value replaces
   the communicator value; see :ref:`cta_policy_flags`. If both
   ``NCCL_CTA_POLICY_ZERO`` and ``NCCL_CTA_POLICY_EFFICIENCY`` are set, Zero-CTA
-  takes precedence. Copy Engine paths are selected through this policy, not
-  ``algSelection``.
+  takes precedence. An unset value inherits the communicator policy, and
+  ``NCCL_CTA_POLICY`` overrides the per-call value. On RCCL the symmetric
+  scheduler applies the per-call value. Copy-engine selection and the general
+  cost model's efficiency override follow the communicator policy.
 
  .. c:member:: uint64_t userProfilerTag
 

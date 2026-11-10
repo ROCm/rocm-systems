@@ -89,15 +89,25 @@ Since they may perform inter-CPU synchronization, each call has to be done from 
 
 .. doxygenfunction:: ncclReduce
 
+.. doxygenfunction:: ncclReduceConfig
+
 .. doxygenfunction:: ncclBcast
 
 .. doxygenfunction:: ncclBroadcast
 
+.. doxygenfunction:: ncclBroadcastConfig
+
 .. doxygenfunction:: ncclAllReduce
+
+.. doxygenfunction:: ncclAllReduceConfig
 
 .. doxygenfunction:: ncclReduceScatter
 
+.. doxygenfunction:: ncclReduceScatterConfig
+
 .. doxygenfunction:: ncclAllGather
+
+.. doxygenfunction:: ncclAllGatherConfig
 
 .. doxygenfunction:: ncclSend
 
@@ -105,9 +115,15 @@ Since they may perform inter-CPU synchronization, each call has to be done from 
 
 .. doxygenfunction:: ncclGather
 
+.. doxygenfunction:: ncclGatherConfig
+
 .. doxygenfunction:: ncclScatter
 
+.. doxygenfunction:: ncclScatterConfig
+
 .. doxygenfunction:: ncclAllToAll
+
+.. doxygenfunction:: ncclAlltoAllConfig
 
 Group semantics
 ---------------
