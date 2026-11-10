@@ -50,6 +50,13 @@ enum class SdmaDecision {
   kAbortBadChannels,       // a rank has an invalid channel count: every rank aborts
 };
 
+// This rank's status before any queue is wired. Queues are wired only on kSdmaReady. A bad channel
+// count is reported even with SDMA disabled, so the group still aborts on it.
+inline int initialSdmaStatus(bool enabled, int channels) {
+  if (channels < 1 || channels > 8) return kSdmaBadChannels;
+  return enabled ? kSdmaReady : kSdmaDisabledByEnv;
+}
+
 struct SdmaAgreement {
   SdmaDecision decision{SdmaDecision::kCommit};
   // Comma-separated local ranks that caused the fallback or abort, for the line every rank logs.

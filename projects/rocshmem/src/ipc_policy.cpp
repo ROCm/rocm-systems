@@ -295,9 +295,9 @@ __host__ void IpcOnImpl::ipcHostStop() {
     CHECK_HIP(hipFree(pes_with_ipc_avail));
   }
 
-  if (shm_comm != nullptr && shm_comm != MPI_COMM_NULL) {
+  if (shm_comm != static_cast<MPI_Comm>(0) && shm_comm != MPI_COMM_NULL) {
     mpilib_ftable_.Comm_free(&shm_comm);
-    shm_comm = nullptr;
+    shm_comm = static_cast<MPI_Comm>(0);
   }
 }
 

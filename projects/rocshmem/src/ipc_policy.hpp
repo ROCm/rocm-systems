@@ -115,9 +115,10 @@ class IpcOnImpl {
   int ipc_stride{0};    // 0 = pattern invalid
 
   // Node-local IPC communicator created by the MPI ipcHostInit and freed by ipcHostStop. Only the
-  // instance that ran ipcHostInit owns it, so initFrom does not copy it. Defaults to nullptr rather
-  // than MPI_COMM_NULL, which is resolved from the loaded MPI library on the host.
-  MPI_Comm shm_comm{nullptr};
+  // instance that ran ipcHostInit owns it, so initFrom does not copy it. Defaults to 0 rather than
+  // MPI_COMM_NULL, which is resolved from the loaded MPI library on the host. A cast rather than
+  // nullptr, because MPICH defines MPI_Comm as an int.
+  MPI_Comm shm_comm{static_cast<MPI_Comm>(0)};
 
   __host__ void ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
                             MPI_Comm thread_comm);

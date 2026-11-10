@@ -52,8 +52,8 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int num_pes, int rank,
   numChannels = static_cast<int>(envvar::sdma::num_channels);
   // Not aborted on here: the group agrees on it below, so a rank with a bad value does not leave
   // its peers waiting in the exchange.
-  const bool channelsValid = numChannels >= 1 && numChannels <= 8;
-  if (!channelsValid) {
+  int status = initialSdmaStatus(sdmaEnabled, numChannels);
+  if (status == kSdmaBadChannels) {
     LOG_ERROR("ROCSHMEM_SDMA_NUM_CHANNELS=%d is out of range [1, 8]", numChannels);
   }
 
@@ -63,15 +63,13 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int num_pes, int rank,
 
   wiredPeers = 0;
   uint32_t queuesBefore = 0;
-  int status = channelsValid ? kSdmaDisabledByEnv : kSdmaBadChannels;
-  if (sdmaEnabled && channelsValid) {
+  if (status == kSdmaReady) {
     LOG_INFO("SDMA init with threshold=%zu, channels=%d, local_size=%d",
              sdmaThreshold, numChannels, shm_size);
 
     // Initialize the Anvil library
     sdma_anvil::anvil.init();
     queuesBefore = sdma_anvil::anvil.queuesUsed();
-    status = kSdmaReady;
 
     // Connect to every local PE. A failure is not acted on here; the group agrees on the result
     // below, because disagreeing on sdmaEnabled hangs alltoall.
