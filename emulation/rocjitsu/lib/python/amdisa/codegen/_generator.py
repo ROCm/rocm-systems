@@ -15669,6 +15669,16 @@ class CodeGenerator:
                 )
                 if requires_compute_unit:
                     cpp_includes.append(('rocjitsu/vm/amdgpu/compute_unit.h', False))
+                if any(
+                    'amdgpu::arith::exec_dense_fp_matrix<' in str(impl)
+                    for impl in class_func_impls.model + class_func_impls.execution
+                ):
+                    cpp_includes.append(
+                        (
+                            'rocjitsu/isa/arch/amdgpu/shared/rj_arith_dense_matrix_exec.h',
+                            False,
+                        )
+                    )
                 if has_matrix_exec:
                     if self.isa_spec.profile.uses_rj_arith_matrix:
                         cpp_includes.append(
