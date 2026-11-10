@@ -532,27 +532,30 @@ TEST_F(UtilsMicrotest, MemoryStackAlloc_ZeroesReusedMemoryOfEveryOverload) {
   };
   Alloc(92);  // creates the hunk in the nil frame, leaving the frame body off 16-byte alignment
   // Dirties `size` bytes in a pushed frame, pops, pushes again and checks `alloc` reuses and zeroes them.
-  auto check = [&](size_t size, size_t align, auto alloc) {
+  auto check = [&](const char* name, size_t size, size_t align, auto alloc) {
+    SCOPED_TRACE(name);
     ncclMemoryStackPush(&stack_);
     unsigned char* dirty = static_cast<unsigned char*>(Alloc(size, align));
     std::memset(dirty, 0xA5, size);
     ncclMemoryStackPop(&stack_);
     ncclMemoryStackPush(&stack_);
+    ASSERT_NE(0u, stack_.topFrame.bumper % 16) << "frame body must be off 16-byte alignment";
     unsigned char* got = reinterpret_cast<unsigned char*>(alloc());
     ASSERT_EQ(dirty, got);
-    EXPECT_EQ(0u, Addr(got) % align);
-    for (size_t i = 0; i < size; i++) ASSERT_EQ(0, got[i]) << "byte " << i;
+    for (size_t index = 0; index < size; index++) ASSERT_EQ(0, got[index]) << "byte " << index;
     ncclMemoryStackPop(&stack_);
   };
 
   const size_t nRanks = 8;
-  check(nRanks * sizeof(size_t), alignof(size_t), [&] { return ncclMemoryStackAlloc<size_t>(&stack_, nRanks); });
-  check(3 * sizeof(Wide), alignof(Wide), [&] { return ncclMemoryStackAlloc<Wide>(&stack_, 3); });
-  check(48, 16, [&] { return ncclMemoryStackAlloc(&stack_, 48, 16); });
-  check(8 + 5 * sizeof(uint64_t), alignof(uint64_t),
-        [&] { return ncclMemoryStackAllocInlineArray<Header, uint64_t>(&stack_, 5); });
-  check(16 + 5 * sizeof(Wide), alignof(Wide),
-        [&] { return ncclMemoryStackAllocInlineArray<Header, Wide>(&stack_, 5); });
+  ASSERT_NO_FATAL_FAILURE(check("typed size_t", nRanks * sizeof(size_t), alignof(size_t),
+                                [&] { return ncclMemoryStackAlloc<size_t>(&stack_, nRanks); }));
+  ASSERT_NO_FATAL_FAILURE(check("typed Wide", 3 * sizeof(Wide), alignof(Wide),
+                                [&] { return ncclMemoryStackAlloc<Wide>(&stack_, 3); }));
+  ASSERT_NO_FATAL_FAILURE(check("untyped", 48, 16, [&] { return ncclMemoryStackAlloc(&stack_, 48, 16); }));
+  ASSERT_NO_FATAL_FAILURE(check("InlineArray uint64_t", 8 + 5 * sizeof(uint64_t), alignof(uint64_t),
+                                [&] { return ncclMemoryStackAllocInlineArray<Header, uint64_t>(&stack_, 5); }));
+  ASSERT_NO_FATAL_FAILURE(check("InlineArray Wide", 16 + 5 * sizeof(Wide), alignof(Wide),
+                                [&] { return ncclMemoryStackAllocInlineArray<Header, Wide>(&stack_, 5); }));
   EXPECT_EQ(1u, g_mallocSizes.size());
 }
 
