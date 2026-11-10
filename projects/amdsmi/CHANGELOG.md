@@ -14,7 +14,17 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Python `amdsmi_get_gpu_cache_entries()` and Rust `amdsmi_get_gpu_cache_entries()` wrap it.
   - `amdsmi_get_gpu_cache_info()`, `amdsmi_gpu_cache_info_t` and `AMDSMI_MAX_CACHE_TYPES` are unchanged, including the separate entry per CU-sharing count.
 
+### Changed
+
+- **`amd-smi static --cache` reports each cache once and tells the level-1 data caches apart**.  
+  - It now uses `amdsmi_get_gpu_cache_entries()`: each cache is one `CACHE_<N>` entry, so entry count and numbering change on GPUs whose caches were split by CU-sharing count (for example MI210 and MI300X), and it shows `CACHE_LINE_SIZE` and `MIN_NUM_CU_SHARED`, or `N/A` where the driver does not report them.
+  - `CACHE_ACRONYM` reports `vL1D` (vector), `sL1D` (scalar) and `GL1` (per shader array) instead of `L1D` for every level-1 data cache; `L1I`, `L2` and `L3` are unchanged.
+  - Labels rely on the order KFD lists level-1 caches in (vector data, instruction, scalar data, GL1) and on the scalar data and instruction caches sharing the same Compute Units, not on particular sharing counts, so they stay correct however the driver splits Compute Units between caches.
+
 ### Resolved Issues
+
+- **Fixed `amd-smi static --cache` splitting one cache into several entries, and printing `N/A` on heavily harvested GPUs**.  
+  - It printed a separate entry for every distinct CU-sharing count within a cache. CU harvesting varies that count from GPU to GPU, so one cache could appear as several rows, and on GPUs with per-shader-array GL1 caches the entries could exceed `AMDSMI_MAX_CACHE_TYPES` (10), at which point the query failed and the CLI printed `N/A`.
 
 - **Fixed `amd-smi` failures on non-x86 systems where the library is built without ESMI (EPYC CPU) support**.  
   - `amd-smi` no longer tries to initialize CPU monitoring on such builds, and the Python CPU APIs now raise `AmdSmiLibraryException` with `AMDSMI_STATUS_NOT_SUPPORTED` instead of `AttributeError`. CPU affinity is reported again instead of N/A, and the Go shim builds without ESMI.
@@ -90,9 +100,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   ```
 
 ### Changed
-
-- **`amd-smi static --cache` now tells the level-1 data caches apart**.  
-  - `CACHE_ACRONYM` reports `vL1D` (vector), `sL1D` (scalar) and `GL1` (per shader array) instead of `L1D` for every level-1 data cache; `L1I`, `L2` and `L3` are unchanged.
 
 - **Use fwupd daemon to read and write UMA carveout information**.  
   - `amdsmi_get_gpu_uma_carveout_info()` / `amdsmi_set_gpu_uma_carveout()` (and therefore `amd-smi static/set --mem-carveout`) now read and write the carveout through the fwupd BIOS-settings interface on integrated GPUs and fallback to amdgpu `.../device/uma/carveout` sysfs node when the fwupd daemon is absent.
