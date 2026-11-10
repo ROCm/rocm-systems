@@ -122,7 +122,7 @@ class CheckMadKnobs(unittest.TestCase):
         for text in ("IFS=$' \\t\\n' read -r -d '' -a extra_args "
                      '<<< "$PRIMUS_EXTRA_ARGS" || true\n',
                      'echo "don\'t"; x="${PRIMUS_EXTRA_ARGS:-}"\n',
-                     "echo 'a'; n=${#x}  # ok\nx=$PRIMUS_EXTRA_ARGS\n"):
+                     "echo 'a'; n=${#x}; x=$PRIMUS_EXTRA_ARGS  # ok\n"):
             with self.subTest(text=text):
                 tm.check_mad_knobs(self.work_dir(text), config)
 
