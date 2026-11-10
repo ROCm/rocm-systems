@@ -165,16 +165,19 @@ static ncclResult_t postTuneP2pRecordPreconnect(struct ncclComm* comm, int peer,
 
   if (peer < 0 || peer >= comm->nRanks) return ncclInvalidArgument;
   if (comm->rank == peer) return ncclSuccess;
-  if (isSendNotRecv ? planner->peers[peer].sendSeen : planner->peers[peer].recvSeen) return ncclSuccess;
+  int connIndex = rcclP2pTaskConnIndex(comm, collAPI, peer);
+  bool& seen = isSendNotRecv ?
+                 (connIndex == NCCL_CONN_IDX_P2P_CE ? planner->peers[peer].sendCeSeen : planner->peers[peer].sendSeen) :
+                 (connIndex == NCCL_CONN_IDX_P2P_CE ? planner->peers[peer].recvCeSeen : planner->peers[peer].recvSeen);
+  if (seen) return ncclSuccess;
 
   NCCLCHECK(postTuneP2pChannelBase(comm, peer, isSendNotRecv, &base));
 
   // Mark channels that need pre-connect. planner->peers[peer].send/recvSeen is
   // private to each comm, so we need to set it anyway. Leave it clear when only
   // some parts are connected, so a later task to this peer still connects the rest.
-  int nParts = rcclP2pTaskParts(comm, collAPI);
-  if (nParts == comm->p2pnChannelsPerPeer)
-    (isSendNotRecv ? planner->peers[peer].sendSeen : planner->peers[peer].recvSeen) = true;
+  int nParts = rcclP2pTaskParts(comm, collAPI, peer);
+  if (nParts == comm->p2pnChannelsPerPeer || connIndex == NCCL_CONN_IDX_P2P_CE) seen = true;
   for (int c = 0; c < nParts; c++) {
     int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, c, comm->p2pnChannelsPerPeer, comm->nNodes,
                                           comm->p2pChannelShiftSize);
@@ -183,17 +186,41 @@ static ncclResult_t postTuneP2pRecordPreconnect(struct ncclComm* comm, int peer,
     // shared comms, so set hasSeen to avoid duplicate connection setup if user
     // groups sendrecv ops with split shared comms together.
     if (isSendNotRecv) {
-      if (comm->channels[channelId].peers[peer]->send[1].hasSeen == 0) {
-        comm->channels[channelId].peers[peer]->send[1].hasSeen = 1;
-        comm->channels[channelId].peers[peer]->send[1].p2pOnly = 1;
-        comm->connectSend[peer].masks[channelId / 64] |= (1ULL << (channelId % 64));
+      if (comm->channels[channelId].peers[peer]->send[connIndex].hasSeen == 0) {
+        comm->channels[channelId].peers[peer]->send[connIndex].hasSeen = 1;
+        comm->channels[channelId].peers[peer]->send[connIndex].p2pOnly = 1;
+        comm->connectSend[peer + CHANNEL_MASK_OFFSET(comm->nRanks, connIndex)].masks[channelId / 64] |=
+          (1ULL << (channelId % 64));
         *needPreconnect = true;
       }
     } else {
-      if (comm->channels[channelId].peers[peer]->recv[1].hasSeen == 0) {
-        comm->channels[channelId].peers[peer]->recv[1].hasSeen = 1;
-        comm->channels[channelId].peers[peer]->recv[1].p2pOnly = 1;
-        comm->connectRecv[peer].masks[channelId / 64] |= (1ULL << (channelId % 64));
+      if (comm->channels[channelId].peers[peer]->recv[connIndex].hasSeen == 0) {
+        comm->channels[channelId].peers[peer]->recv[connIndex].hasSeen = 1;
+        comm->channels[channelId].peers[peer]->recv[connIndex].p2pOnly = 1;
+        comm->connectRecv[peer + CHANNEL_MASK_OFFSET(comm->nRanks, connIndex)].masks[channelId / 64] |=
+          (1ULL << (channelId % 64));
+        *needPreconnect = true;
+      }
+    }
+  }
+
+  // P2P-NET selection is size-dependent and happens later in addP2pToPlan.
+  // Record a complete tile only when lifting a CE-specific cap; preserve
+  // intentional limits such as multi-node AINIC Scatter for kernel P2P.
+  if (comm->p2pNet) {
+    int netParts = connIndex == NCCL_CONN_IDX_P2P_CE ? comm->p2pnChannelsPerPeer : nParts;
+    for (int c = 0; c < netParts; c++) {
+      int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, c, comm->p2pnChannelsPerPeer, comm->nNodes,
+                                            comm->p2pChannelShiftSize);
+      struct ncclConnector* netConn = isSendNotRecv ?
+                                        &comm->channels[channelId].peers[peer]->send[NCCL_CONN_IDX_P2P_NET] :
+                                        &comm->channels[channelId].peers[peer]->recv[NCCL_CONN_IDX_P2P_NET];
+      if (netConn->hasSeen == 0) {
+        netConn->hasSeen = 1;
+        netConn->p2pOnly = 1;
+        struct channelMasks* masks = isSendNotRecv ? &comm->connectSend[peer + comm->nRanks * NCCL_CONN_IDX_P2P_NET] :
+                                                     &comm->connectRecv[peer + comm->nRanks * NCCL_CONN_IDX_P2P_NET];
+        masks->masks[channelId / 64] |= (1ULL << (channelId % 64));
         *needPreconnect = true;
       }
     }
@@ -237,6 +264,7 @@ static ncclResult_t postTuneP2pRegisterBuffer(struct ncclComm* comm, struct nccl
   bool proxySameProcess;
 
   if (protocol != NCCL_PROTO_SIMPLE) return ncclSuccess;
+  if (rcclP2pTaskUsesCe(comm, task->collAPI, peer)) return ncclSuccess;
   if (!task->allowUB || task->bytes == 0 || task->buff == nullptr || peer == comm->rank) return ncclSuccess;
 
   NCCLCHECK(postTuneP2pChannelBase(comm, peer, isSendNotRecv, &base));
@@ -958,6 +986,7 @@ static ncclResult_t postTuneAllGatherVTasks(
 static ncclResult_t postTuneP2pTasks(
   struct ncclComm* comm, struct ncclIntruQueue<struct ncclTaskTuningInfo, &ncclTaskTuningInfo::next>* p2pTaskQueue) {
   bool needPreconnect = false;
+  bool needCePreconnect = false;
   struct ncclKernelPlanner* planner = &comm->planner;
 
   for (struct ncclTaskTuningInfo* tInfo = ncclIntruQueueHead(p2pTaskQueue); tInfo != nullptr; tInfo = tInfo->next) {
@@ -965,10 +994,13 @@ static ncclResult_t postTuneP2pTasks(
     bool isSendNotRecv = raw->func == ncclFuncSend;
 
     NCCLCHECK(postTuneP2pRecordPreconnect(comm, raw->peer, isSendNotRecv, raw->collAPI, &needPreconnect));
+    needCePreconnect |= rcclP2pTaskUsesCe(comm, raw->collAPI, raw->peer);
   }
 
   if (needPreconnect) {
     NCCLCHECK(ncclTransportP2pSetup(comm, NULL, 1));
+    if (needCePreconnect) NCCLCHECK(ncclTransportP2pSetup(comm, NULL, NCCL_CONN_IDX_P2P_CE));
+    if (comm->p2pNet) NCCLCHECK(ncclTransportP2pSetup(comm, NULL, NCCL_CONN_IDX_P2P_NET));
   }
 
   for (struct ncclTaskTuningInfo* tInfo = ncclIntruQueueHead(p2pTaskQueue); tInfo != nullptr; tInfo = tInfo->next) {

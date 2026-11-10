@@ -31,6 +31,9 @@ int64_t ncclParamAllgathervEnable();
 int64_t ncclParamP2pLLThreshold();
 int64_t ncclParamChunkSize();
 int64_t ncclParamLaunchOrderImplicit();
+bool rcclP2pDirectApi(ncclFunc_t collAPI);
+bool rcclP2pTaskUsesCe(struct ncclComm* comm, ncclFunc_t collAPI, int peer);
+int rcclP2pTaskConnIndex(struct ncclComm* comm, ncclFunc_t collAPI, int peer);
 
 ncclResult_t ncclGroupJobLaunch(struct ncclIntruQueue<struct ncclAsyncJob, &ncclAsyncJob::next>* asyncJobsMain,
                                 volatile bool* groupAbortFlag);

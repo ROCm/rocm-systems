@@ -439,4 +439,18 @@ TEST(ChannelDefaults, Gfx950_SaturateOff_MaxP2pPeersIgnored)
     ExpectPoolInvariant(r);
 }
 
+TEST(ChannelDefaults, Gfx1250_CopyEngineDoesNotChangeCommunicatorChannels)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "ChannelDefaults_Gfx1250_CopyEngineKeepsChannels",
+        []()
+        {
+            const ResolvedChannels r = ResolveP2pChannels("gfx1250", /*nRanks=*/8);
+            EXPECT_EQ(r.p2pnChannels, (int)MAXCHANNELS);
+            EXPECT_EQ(r.p2pnChannelsPerPeer, pow2Down(r.p2pnChannels / 8));
+            ExpectPoolInvariant(r);
+        },
+        {{"NCCL_P2P_USE_CUDA_MEMCPY", "1"}});
+}
+
 } // namespace RcclUnitTesting

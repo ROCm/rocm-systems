@@ -229,21 +229,29 @@ struct ncclMgmtTaskJob {
 ncclResult_t ncclP2PPreconnectFunc(struct ncclAsyncJob* job_) {
   struct ncclPreconnectJob* job = (struct ncclPreconnectJob*)job_;
   struct ncclComm* comm = job->comm;
+  ncclResult_t ret = ncclSuccess;
   // Preconnect is not meant to be captured;
   // swap to relaxed mode so CUDA graph capture works correctly.
   cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
   CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
-  CUDACHECK(cudaSetDevice(comm->cudaDev));
+  CUDACHECKGOTO(cudaSetDevice(comm->cudaDev), ret, exit);
   if (!job_->isThreadMain && ncclOsCpuCount(comm->cpuAffinity)) ncclOsSetAffinity(comm->cpuAffinity);
-  NCCLCHECK(ncclTransportP2pSetup(comm, NULL, 1));
-  if (comm->p2pNet) NCCLCHECK(ncclTransportP2pSetup(comm, NULL, NCCL_CONN_IDX_P2P_NET));
-  if (mode != cudaStreamCaptureModeRelaxed) CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
-  INFO(
-    NCCL_INIT,
-    "rank %d/%d cudaDev %d nvmlDev %d busId %#llx commId 0x%016llx Send/Recv P2P transport setup complete (p2pNet=%d)",
-    comm->rank, comm->nRanks, comm->cudaDev, comm->nvmlDev, (unsigned long long)comm->busId,
-    (unsigned long long)comm->commHash, comm->p2pNet ? 1 : 0);
-  return ncclSuccess;
+  NCCLCHECKGOTO(ncclTransportP2pSetup(comm, NULL, 1), ret, exit);
+  if (ncclP2pUsesMemcpy()) NCCLCHECKGOTO(ncclTransportP2pSetup(comm, NULL, NCCL_CONN_IDX_P2P_CE), ret, exit);
+  if (comm->p2pNet) NCCLCHECKGOTO(ncclTransportP2pSetup(comm, NULL, NCCL_CONN_IDX_P2P_NET), ret, exit);
+
+exit:
+  if (mode != cudaStreamCaptureModeRelaxed) {
+    cudaError_t err = cudaThreadExchangeStreamCaptureMode(&mode);
+    if (ret == ncclSuccess && err != cudaSuccess) ret = rcclCudaErrorHandler(err);
+  }
+  if (ret == ncclSuccess)
+    INFO(NCCL_INIT,
+         "rank %d/%d cudaDev %d nvmlDev %d busId %#llx commId 0x%016llx Send/Recv P2P transport setup complete "
+         "(p2pNet=%d)",
+         comm->rank, comm->nRanks, comm->cudaDev, comm->nvmlDev, (unsigned long long)comm->busId,
+         (unsigned long long)comm->commHash, comm->p2pNet ? 1 : 0);
+  return ret;
 }
 
 ncclResult_t ncclCollPreconnect(struct ncclComm* comm, bool* algoNeedConnect) {

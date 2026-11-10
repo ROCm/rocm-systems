@@ -1361,7 +1361,17 @@ NCCL_PARAM(P2pCuReduceScaleEnable, "P2P_CU_REDUCE_SCALE_ENABLE", 0);
 // uses deliberately oversubscribes channels across rounds.
 // Unset defaults to on for gfx1250, off elsewhere.
 RCCL_PARAM(SaturateP2pNChannels, "SATURATE_P2P_NCHANNELS", RCCL_VALUE_UNSET);
+// The gfx1250 CE P2P path allocates one staging buffer and event ring per channel;
+// its connections share one stream per proxy thread. Capping channels limits VMM
+// resources and avoids over-subscribing SDMA queues.
+RCCL_PARAM(P2pCeChannelsPerPeer, "P2P_CE_CHANNELS_PER_PEER", 16);
 extern int64_t ncclParamWorkArgsBytes();
+
+int rcclP2pCeChannelsPerPeerCap(int current, int pool, bool isGfx1250, bool useMemcpy, int64_t configuredCap) {
+  if (!isGfx1250 || !useMemcpy || configuredCap <= 0 || pool <= 0) return current;
+  int cap = pow2Down((int)std::min<int64_t>(configuredCap, pool));
+  return std::min(current, std::max(1, cap));
+}
 
 ncclResult_t ncclTopoComputeP2pChannelsPerPeer(struct ncclComm* comm) {
   int g = 0;
