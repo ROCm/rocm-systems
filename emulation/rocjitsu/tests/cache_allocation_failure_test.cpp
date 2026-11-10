@@ -104,14 +104,21 @@ TEST_P(CacheAllocationFailureTest, CopyAssignmentReusesExistingBacking) {
   EXPECT_EQ(assigned_tag, previous_line.tag);
 }
 
+// Keep GCC from folding the fresh cache's null storage into unreachable tag accesses.
+[[gnu::noinline]] void expect_lazy_cache_miss(LazyCache &store) {
+  EXPECT_FALSE(store.lookup(0, nullptr, /*vmid=*/7));
+  EXPECT_EQ(std::as_const(store).peek(0, /*vmid=*/7), nullptr);
+  EXPECT_EQ(store.line_data_for_read(0, /*vmid=*/7), nullptr);
+  EXPECT_EQ(store.line_data_for_write(0, /*vmid=*/7), nullptr);
+}
+
 TEST_P(CacheAllocationFailureTest, LazyConstructionCopyAndFreshInvalidationDeferAllocation) {
   failures_remaining = 1;
   LazyCache source;
   source.invalidate_all();
   source.invalidate(0, /*vmid=*/7);
   source.invalidate_all_vmids(0);
-  EXPECT_FALSE(source.lookup(0, nullptr, /*vmid=*/7));
-  EXPECT_EQ(std::as_const(source).peek(0, /*vmid=*/7), nullptr);
+  expect_lazy_cache_miss(source);
   LazyCache copied(source);
   LazyCache assigned;
   assigned = copied;
@@ -122,8 +129,7 @@ TEST_P(CacheAllocationFailureTest, LazyConstructionCopyAndFreshInvalidationDefer
 TEST_P(CacheAllocationFailureTest, LazyDataQueriesOnMissDoNotAllocate) {
   LazyCache store;
   failures_remaining = 1;
-  EXPECT_EQ(store.line_data_for_read(0, /*vmid=*/7), nullptr);
-  EXPECT_EQ(store.line_data_for_write(0, /*vmid=*/7), nullptr);
+  expect_lazy_cache_miss(store);
   EXPECT_EQ(failures_remaining, 1u);
   failures_remaining = 0;
   auto line = store.allocate_with_data(0, /*vmid=*/7);
