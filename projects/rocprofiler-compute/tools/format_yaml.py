@@ -23,6 +23,7 @@ import yaml
 # Path patterns that contain metric equations to check (substrings matched against path)
 EQUATION_FILE_PATTERNS = [
     "analysis_configs/gfx",
+    "metric_library/gfx",
 ]
 
 # Path suffixes to exclude from equation checking
@@ -36,8 +37,9 @@ SKIP_FILE_PATTERNS = [
     "profiling_config.yaml",
 ]
 
-# YAML keys that contain metric equations
-EQUATION_KEYS = {"value", "avg", "min", "max", "peak"}
+# YAML keys that contain metric equations ("formula" and "peak_empirical" in metric
+# library files)
+EQUATION_KEYS = {"value", "avg", "min", "max", "peak", "formula", "peak_empirical"}
 
 # Literal string values that should not be parsed as equations
 LITERAL_VALUES = {"N/A", "None", "null", "true", "false", "Peak (Empirical)"}
