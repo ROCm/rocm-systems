@@ -6818,6 +6818,16 @@ TEST_F(DevCommCreateJitTest, UseRuntimeVersion_QueuesRuntimeVersion) {
   EXPECT_EQ(QueuedDeviceCodeVersion(), static_cast<uint32_t>(NCCL_VERSION_CODE));
 }
 
+// Branch: a pre-2.31 caller has no useRuntimeVersion, so whatever byte sits at
+// its offset is not trusted and the caller's own version is kept.
+TEST_F(DevCommCreateJitTest, UseRuntimeVersionFromPre231Caller_IsIgnored) {
+  reqs.version = kPreJitFieldVersion;
+  reqs.useRuntimeVersion = true;  // stands in for whatever lies past the old struct
+
+  ASSERT_EQ(ncclDevCommCreate(comm, &reqs, &outDevComm), ncclSuccess);
+  EXPECT_EQ(QueuedDeviceCodeVersion(), kPreJitFieldVersion);
+}
+
 
 // ---------------------------------------------------------------------------
 // ncclDevCommCreate deep-copies the caller's requirements before it checks
