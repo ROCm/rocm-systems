@@ -55,10 +55,10 @@ float ncclTuningGetTime(struct ncclTuningInput_t* const inputs, int a, float* la
   // Relegate fp8 reduction trees of sufficient depth that they incur precision loss
   // to be least preferred.
   float precision_ratio = 1.0;
-  if (inputs->datatype == ncclFloat8e4m3 || inputs->datatype == ncclFloat8e5m2) {
-    if (a == NCCL_ALGO_RING && inputs->comm->nRanks > 8) {
-      precision_ratio = 1024.0; // Any factor large enough to act as a partition between lossy and non-lossy algos.
-    }
+  if (a == NCCL_ALGO_RING &&
+      rcclPenalizeFp8Ring(inputs->datatype, inputs->func, inputs->comm->nRanks, inputs->comm->nNodes, inputs->nBytes,
+                          inputs->comm->archName)) {
+    precision_ratio = 1024.0; // Any factor large enough to act as a partition between lossy and non-lossy algos.
   }
 
   return (*lat * latCount + inputs->nBytes / (1000 * (*bw))) * precision_ratio;

@@ -364,6 +364,20 @@ TEST_F(TuningGeneralMicrotest, RingModelInitMultiNodeNetOverheadAndInterLatency)
   EXPECT_NEAR(160.0f / 14, RingBw(ncclFuncAllReduce, NCCL_PROTO_SIMPLE), 1e-4);
 }
 
+TEST_F(TuningGeneralMicrotest, TimeEstimateAllowsValidatedGfx1250Fp8AllReduceRing) {
+  ncclTuningInput_t input = MakeTimeInput(256ULL << 20, 1, ncclFloat8e4m3);
+  input.func = ncclFuncAllReduce;
+  comm_->nRanks = 16;
+  comm_->nNodes = 1;
+  comm_->archName = const_cast<char*>("gfx1250");
+  float latency = 1.0f, bandwidth = 1.0f;
+  const float base = latency + static_cast<float>(input.nBytes) / (1000.0f * bandwidth);
+  EXPECT_FLOAT_EQ(base, ncclTuningGetTime(&input, NCCL_ALGO_RING, &latency, &bandwidth));
+
+  comm_->archName = const_cast<char*>("gfx950");
+  EXPECT_FLOAT_EQ(base * 1024.0f, ncclTuningGetTime(&input, NCCL_ALGO_RING, &latency, &bandwidth));
+}
+
 TEST_F(TuningGeneralMicrotest, ThreadCountValidationUsesDefaultAndBounds) {
   EXPECT_EQ(128, ncclTuningGetNthreads("threads", -2, 64, 256, 128));
   EXPECT_EQ(128, ncclTuningGetNthreads("threads", 0, 64, 256, 128));

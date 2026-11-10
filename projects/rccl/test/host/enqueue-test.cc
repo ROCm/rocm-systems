@@ -1874,20 +1874,16 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_TopoGetAlgoTimeFailure_Propagates) 
             updateCollCostTable(cc.get(), &task, 1 << 20, 0, 0, 1, 0, tbl.ptr()));
 }
 
-TEST_F(EnqueueMicrotest, UpdateCollCostTable_Fp8RingAboveEightRanks_IsPenalised) {
-  // The fp8 precision-loss penalty: RING costs are multiplied by 1024 when
-  // nRanks > 8 and the datatype is fp8. Assert the RATIO, so the penalty factor
-  // itself is pinned rather than just "bigger".
+TEST_F(EnqueueMicrotest, UpdateCollCostTable_Fp8Gfx1250SingleNodeLargeAllReduce_RingNotPenalised) {
   for (auto dt : {ncclFloat8e4m3, ncclFloat8e5m2}) {
     ResetEnqueueTestDeps();
     CostComm big(/*nRanks=*/16);
+    big.get()->archName = const_cast<char*>("gfx1250");
     CostTable tbl;
     auto task = CostTask(ncclFuncAllReduce, dt);
     ScriptAllTimes(2.0f);
-    ASSERT_EQ(ncclSuccess, updateCollCostTable(big.get(), &task, 1 << 20, 0, 0, 1, 0, tbl.ptr()));
-    EXPECT_FLOAT_EQ(2.0f * 1024.0f, tbl.t[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE])
-        << "dtype=" << int(dt);
-    // TREE is not penalised -- that asymmetry is the point of the penalty.
+    ASSERT_EQ(ncclSuccess, updateCollCostTable(big.get(), &task, 256ULL << 20, 0, 0, 1, 0, tbl.ptr()));
+    EXPECT_FLOAT_EQ(2.0f, tbl.t[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE]) << "dtype=" << int(dt);
     EXPECT_FLOAT_EQ(2.0f, tbl.t[NCCL_ALGO_TREE][NCCL_PROTO_SIMPLE]) << "dtype=" << int(dt);
   }
 }
@@ -1900,6 +1896,24 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_Fp8AtOrBelowEightRanks_NotPenalised
   ScriptAllTimes(2.0f);
   ASSERT_EQ(ncclSuccess, updateCollCostTable(eight.get(), &task, 1 << 20, 0, 0, 1, 0, tbl.ptr()));
   EXPECT_FLOAT_EQ(2.0f, tbl.t[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE]);
+}
+
+TEST_F(EnqueueMicrotest, UpdateCollCostTable_Fp8NonAllReduceRingAboveEightRanks_IsPenalised) {
+  CostComm big(/*nRanks=*/16);
+  CostTable tbl;
+  auto task = CostTask(ncclFuncReduceScatter, ncclFloat8e4m3);
+  ScriptAllTimes(2.0f);
+  ASSERT_EQ(ncclSuccess, updateCollCostTable(big.get(), &task, 1 << 20, 0, 0, 1, 0, tbl.ptr()));
+  EXPECT_FLOAT_EQ(2.0f * 1024.0f, tbl.t[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE]);
+}
+
+TEST_F(EnqueueMicrotest, UpdateCollCostTable_Fp8AllReduceOutsideGfx1250LargeRingCase_IsPenalised) {
+  CostComm big(/*nRanks=*/16);
+  CostTable tbl;
+  auto task = CostTask(ncclFuncAllReduce, ncclFloat8e4m3);
+  ScriptAllTimes(2.0f);
+  ASSERT_EQ(ncclSuccess, updateCollCostTable(big.get(), &task, 256ULL << 20, 0, 0, 1, 0, tbl.ptr()));
+  EXPECT_FLOAT_EQ(2.0f * 1024.0f, tbl.t[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE]);
 }
 
 TEST_F(EnqueueMicrotest, UpdateCollCostTable_NonFp8_NeverPenalised) {

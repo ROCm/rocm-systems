@@ -27,6 +27,7 @@ THE SOFTWARE.
 #include "core.h"
 #include "rccl_decision.h"
 #include "sym_kernels.h"
+#include "archinfo.h"
 
 typedef enum RcclTunableColls {
   RCCL_UNSUPPORTED_TUNABLE = -1,
@@ -530,4 +531,15 @@ int rcclWarpSpeedComputeNChannels(struct ncclComm* comm, int nc, int channelMult
                                   int adjustedMaxNchannels, bool userUpdatedMaxChannels);
 int rcclWarpSpeedAdjustChannels(struct ncclComm* comm, struct ncclTaskColl* info, int nc);
 #endif
+
+// FP8 ring reductions with more than 8 ranks take a 1024x cost penalty.
+// Exempt a 16-rank, single-node gfx1250 allreduce from 256 MiB up: there the
+// intra-node tree is a chain of the same depth as the ring.
+static inline bool rcclPenalizeFp8Ring(ncclDataType_t dtype, ncclFunc_t func, int nRanks, int nNodes, size_t nBytes,
+                                       const char* arch) {
+  if ((dtype != ncclFloat8e4m3 && dtype != ncclFloat8e5m2) || nRanks <= 8) return false;
+  const bool exempt = func == ncclFuncAllReduce && nRanks == 16 && nNodes == 1 && nBytes >= (256ull << 20) &&
+                      IsArchMatch(arch, "gfx1250");
+  return !exempt;
+}
 #endif
