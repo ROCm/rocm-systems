@@ -10,6 +10,7 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <set>
 #include <sstream>
 
 #include "cuid_util.h"
@@ -43,11 +44,11 @@ bool is_accel_entry(const char* name) {
   return true;
 }
 
-// Discover NPU devices via /sys/class/accel (when amdxdna driver is loaded)
-amdcuid_status_t discover_via_accel(std::vector<DevicePtr>& npus) {
+// NPUs with an accel node, named by it.
+void discover_via_accel(std::vector<DevicePtr>& npus, std::set<std::string>& seen_bdfs) {
   const char* accel_path = "/sys/class/accel";
   DIR* dir = opendir(accel_path);
-  if (!dir) return AMDCUID_STATUS_UNSUPPORTED;
+  if (!dir) return;
 
   struct dirent* entry;
   // This call site owns its DIR*, which is all POSIX requires for readdir to be
@@ -68,27 +69,26 @@ amdcuid_status_t discover_via_accel(std::vector<DevicePtr>& npus) {
       amdcuid_status_t status = CuidNpu::discover_single(&info, device_path);
       if (status != AMDCUID_STATUS_SUCCESS) continue;
 
+      seen_bdfs.insert(info.bdf);
       npus.emplace_back(std::make_shared<CuidNpu>(info));
     }
   }
   closedir(dir);
-
-  return npus.empty() ? AMDCUID_STATUS_UNSUPPORTED : AMDCUID_STATUS_SUCCESS;
 }
 
-// Fallback for kernels without the accel class: scan the PCI bus.
-// discover_single() still requires amdxdna.
-amdcuid_status_t discover_via_pci_bus(std::vector<DevicePtr>& npus) {
+// An NPU is classified from its PCI function, so one bound to amdxdna without
+// an accel node, or on a kernel without the accel class, is found here.
+void discover_via_pci_bus(std::vector<DevicePtr>& npus, const std::set<std::string>& seen_bdfs) {
   const char* pci_path = "/sys/bus/pci/devices";
   DIR* dir = opendir(pci_path);
-  if (!dir) return AMDCUID_STATUS_UNSUPPORTED;
+  if (!dir) return;
 
   struct dirent* entry;
   // This call site owns its DIR*, which is all POSIX requires for readdir to be
   // safe; readdir_r is deprecated and must not be adopted.
   // NOLINTNEXTLINE(concurrency-mt-unsafe)
   while ((entry = readdir(dir)) != NULL) {
-    if (entry->d_name[0] == '.') continue;
+    if (entry->d_name[0] == '.' || seen_bdfs.count(entry->d_name) > 0) continue;
 
     std::string device_path = std::string(pci_path) + "/" + entry->d_name;
 
@@ -112,19 +112,16 @@ amdcuid_status_t discover_via_pci_bus(std::vector<DevicePtr>& npus) {
     npus.emplace_back(std::make_shared<CuidNpu>(info));
   }
   closedir(dir);
-
-  return npus.empty() ? AMDCUID_STATUS_UNSUPPORTED : AMDCUID_STATUS_SUCCESS;
 }
 
 }  // namespace
 
 amdcuid_status_t CuidNpu::discover(std::vector<DevicePtr>& npus) {
-  // Try /sys/class/accel first (when amdxdna driver is loaded)
-  amdcuid_status_t status = discover_via_accel(npus);
-  if (status == AMDCUID_STATUS_SUCCESS) return status;
-
-  // Fallback: scan PCI bus for processing accelerator class devices
-  return discover_via_pci_bus(npus);
+  const size_t before = npus.size();
+  std::set<std::string> seen_bdfs;
+  discover_via_accel(npus, seen_bdfs);
+  discover_via_pci_bus(npus, seen_bdfs);
+  return npus.size() > before ? AMDCUID_STATUS_SUCCESS : AMDCUID_STATUS_UNSUPPORTED;
 }
 
 amdcuid_status_t CuidNpu::discover_single(amdcuid_npu_info* npu_info,
