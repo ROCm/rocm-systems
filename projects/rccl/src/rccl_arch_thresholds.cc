@@ -245,6 +245,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .ddaVmmBlockBudget = 2048,
   .ddaVmmMinBlocks = 32,
   .ddaVmmMaxBlocks = 128,
+  .ddaLL128BcTwoShotThreads = 256,  // two-shot broadcast: 256 threads
   // Ring / Tree crossovers, same sweep (AllReduce LL128: AICOMRCCL-2874/2875).
   .arRingLL128MaxPerRank = 32ULL*1024*1024,       // Ring LL128 beats Simple to 256M/512M/1G/2G at 8-64
   .arTreeLL128Unlimited = true,                   // Tree LL128 beats Tree Simple 1.3-2.9x at 32M-16G
@@ -491,6 +492,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   .ddaA2aLL128MaxBlocks = 72,
   .ddaA2aLL128MaxBlocksMinBytes = 256ULL*1024,
   .ddaA2aLL128MaxBlocksMaxBytes = 16ULL*1024*1024,
+
+  .ddaLL128BcTwoShotThreads = 256,  // two-shot broadcast: 256 threads
   // Ring / Tree crossovers, same sweep (AllReduce LL128: AICOMRCCL-2874/2875).
   .arRingLL128MaxPerRank = 16ULL*1024*1024,       // Ring Simple beats LL128 1.1-1.3x from 256M/512M/1G
                                                   // at 8/16/32 (DPX)
