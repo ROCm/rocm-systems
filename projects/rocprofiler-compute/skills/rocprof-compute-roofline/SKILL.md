@@ -18,7 +18,7 @@ carries the same numbers in readable form.
 On Navi48 (gfx1201), roofline and the benchmark start with the same ROCm
 Compute Profiler release as its GPU metrics, 3.11 (ROCm 10.3). ROCm 10.2 and
 10.1 shipped without gfx1201 support. Apply the `STABLE_STD` prerequisite and
-read the roofline limits in the [Navi48 guide](../../docs/conceptual/rdna/navi48.rst)
+read the roofline limits in the [RDNA4 roofline](../../docs/conceptual/rdna/wgp.rst)
 before collecting.
 
 Collect only the roofline block:

@@ -54,7 +54,7 @@ unavailable.
 GPU metrics and the Memory Chart are available on Linux starting with
 ROCm Compute Profiler 3.11 (ROCm 10.3). ROCm 10.2 and 10.1 shipped without
 gfx1201 support. Apply the `STABLE_STD` performance-state prerequisite in the
-[Navi48 guide](../../docs/conceptual/rdna/navi48.rst) before collecting counters,
+[Quickstart](../../docs/install/quickstart.rst) before collecting counters,
 and keep that state consistent when comparing runs.
 
 PC sampling is outside Navi48 support in this release. Roofline is available;

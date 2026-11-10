@@ -35,7 +35,7 @@ rocprof-compute profile --name <workload_name> --speed-of-light -- <application>
 
 Linux GPU metrics start with ROCm Compute Profiler 3.11 (ROCm 10.3); ROCm 10.2
 and 10.1 shipped without gfx1201 support. Follow the `STABLE_STD` prerequisite
-and counter limits in the [Navi48 guide](../../docs/conceptual/rdna/navi48.rst).
+and counter limits in the [RDNA System Speed-of-Light](../../docs/conceptual/rdna/system-speed-of-light.rst).
 
 `VALU Issue Rate` and `FP64 VALU Issue Rate` use `GInstr/s`, with no FLOP peak
 or percentage of a floating-point peak. Do not turn those instruction rates

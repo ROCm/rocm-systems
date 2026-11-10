@@ -40,7 +40,7 @@ caches `gl0` and `gl2`.
 Navi48 GPU metrics and the Memory Chart are available on Linux starting with
 ROCm Compute Profiler 3.11 (ROCm 10.3). ROCm 10.2 and 10.1 shipped without
 gfx1201 support. Apply the `STABLE_STD` prerequisite in the
-[Navi48 guide](../../docs/conceptual/rdna/navi48.rst) before profiling and compare
+[Quickstart](../../docs/install/quickstart.rst) before profiling and compare
 baselines in the same performance state.
 
 Collect `memchart` first. Add `gl0`, `gl1`, `gl2`, or `wgp` only when the chart
@@ -132,8 +132,8 @@ they mean:
 Client APUs use a different hierarchy; see the
 [RDNA performance model](../../docs/conceptual/rdna/rdna-performance-model.rst)
 for GL0, GL1, and GL2. For Navi48's RDNA4 hierarchy and traffic boundaries, use
-the [Navi48 guide](../../docs/conceptual/rdna/navi48.rst) and the
-[RDNA4 performance model](../../docs/conceptual/rdna4/rdna4-performance-model.rst).
+the [Efficiency Arbiter](../../docs/conceptual/rdna/gcea.rst) and the
+[RDNA3-RDNA4 performance model](../../docs/conceptual/rdna/rdna-performance-model.rst).
 
 Read hit rates and utilizations against the `Percent of Peak` and `Peak`
 columns the report prints. Do not apply a remembered cutoff such as "L2 hit
