@@ -25,6 +25,7 @@ from utils.utils_analysis import pass_tables_on_rows
 from utils.utils_common import (
     MEMBW_ANALYSIS_PANEL_ID,
     METRIC_ID_RE,
+    METRIC_LIBRARY_ID_RE,
     SUPPORTED_FIELD,
     convert_filter_blocks_to_panel_ids,
     convert_metric_id_to_panel_info,
@@ -86,6 +87,11 @@ def build_dfs(
 
     if filter_metrics and arch:
         warn_numeric_metric_ids(filter_metrics, arch)
+    saved_blocks = [str(t) for t in profiling_config.get("filter_blocks", [])]
+    if not filter_metrics and any(METRIC_LIBRARY_ID_RE.match(t) for t in saved_blocks):
+        # Saved metric ids (--set, or -b with metric ids) filter rows, as -b does.
+        filter_metrics = saved_blocks
+    if filter_metrics and arch:
         filter_metrics = expand_metric_ids(filter_metrics, arch)
     if filter_metrics:
         numeric_tokens = [t for t in filter_metrics if METRIC_ID_RE.match(str(t))]
