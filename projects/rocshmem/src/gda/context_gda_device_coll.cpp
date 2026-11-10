@@ -91,14 +91,14 @@ __device__ void GDAContext::internal_direct_barrier_wg(int pe, int PE_start,
     __syncthreads();
 
     // Announce to other PEs that all have reached
-    for (int i = wf_id + 1, j = PE_start + stride + wf_id;
+    for (int i = wf_id + 1, j = PE_start + stride * (wf_id + 1);
              i < n_pes;
              i+= wf_count, j += (wf_count * stride)) {
       internal_putmem_nbi_wave(&pSync[0], &flag_val, sizeof(*pSync), j,
         j, wf_info);
     }
 
-    for (int i = wf_id + 1, j = PE_start + stride + wf_id;
+    for (int i = wf_id + 1, j = PE_start + stride * (wf_id + 1);
              i < n_pes;
              i+= wf_count, j += (wf_count * stride)) {
       qps[j].quiet(wf_info);
@@ -175,6 +175,24 @@ __device__ void GDAContext::internal_sync_wg(int pe, int PE_start, int stride,
       internal_atomic_barrier(pe, PE_start, stride, PE_size, pSync, wf_info);
     }
   }
+  __threadfence_system();
+  __syncthreads();
+}
+
+// Same as internal_sync_wave/internal_sync_wg, but always the direct barrier: the barrier used for 64 or more PEs
+// is built on RDMA atomics, which not every NIC supports. pSync needs one slot per PE (the pSync arrays of the
+// collectives have 256 or more).
+__device__ void GDAContext::internal_sync_wave_put_only(int pe, int PE_start,
+    int stride, int PE_size, int64_t *pSync, ActiveWFInfo &wf_info) {
+  if (is_thread_zero_in_wave()) {
+    internal_direct_barrier(pe, PE_start, stride, PE_size, pSync, wf_info);
+  }
+}
+
+__device__ void GDAContext::internal_sync_wg_put_only(int pe, int PE_start,
+    int stride, int PE_size, int64_t *pSync, ActiveWFInfo &wf_info) {
+  __syncthreads();
+  internal_direct_barrier_wg(pe, PE_start, stride, PE_size, pSync, wf_info);
   __threadfence_system();
   __syncthreads();
 }
@@ -312,6 +330,7 @@ __device__ void GDAContext::internal_put_broadcastmem_wave(void *dst, const void
       for (int i = pe_start; i < finish; i += stride) {
         if (i != constmem.my_pe) qps[i].quiet(wf_info);
       }
+      ipcImpl_.ipcQuiet();
     }
   }
 }
@@ -363,7 +382,7 @@ __device__ void GDAContext::internal_broadcastmem_wave(void *dst, const void *sr
   }
 
   // Synchronize on completion of broadcast
-  internal_sync_wave(constmem.my_pe, pe_start, stride, pe_size, p_sync, wf_info);
+  internal_sync_wave_put_only(constmem.my_pe, pe_start, stride, pe_size, p_sync, wf_info);
 }
 
 __device__ void GDAContext::internal_put_broadcastmem_wg(void *dst, const void *src,
@@ -381,6 +400,7 @@ __device__ void GDAContext::internal_put_broadcastmem_wg(void *dst, const void *
       for (int i = pe_start; i < finish; i += stride) {
         if (constmem.my_pe != i) qps[i].quiet(wf_info);
       }
+      ipcImpl_.ipcQuiet();
     }
   }
 }
@@ -425,7 +445,7 @@ __device__ void GDAContext::internal_broadcastmem_wg(void *dst, const void *src,
   }
 
   // Synchronize on completion of broadcast
-  internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, p_sync, wf_info);
+  internal_sync_wg_put_only(constmem.my_pe, pe_start, stride, pe_size, p_sync, wf_info);
 }
 
 __device__ void GDAContext::alltoallmem_wg(rocshmem_team_t team, void *dst,
@@ -494,7 +514,7 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wg(rocshmem_team_t te
   for (int j = tid; j < pe_size; j += step_size) {
     qps[team_obj->get_pe_in_world(j)].quiet_single();
   }
-  internal_sync_wg(constmem.my_pe, pe_start, stride, pe_size, pSync, wf_info);
+  internal_sync_wg_put_only(constmem.my_pe, pe_start, stride, pe_size, pSync, wf_info);
 #endif
 }
 
@@ -602,7 +622,7 @@ __device__ void GDAContext::alltoallmem_linear_thread_puts_wave(rocshmem_team_t 
     qps[team_obj->get_pe_in_world(j)].quiet_single();
   }
   __builtin_amdgcn_wave_barrier();
-  internal_sync_wave(constmem.my_pe, pe_start, stride, pe_size, pSync, wf_info);
+  internal_sync_wave_put_only(constmem.my_pe, pe_start, stride, pe_size, pSync, wf_info);
 #endif
 }
 
