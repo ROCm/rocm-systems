@@ -19,6 +19,10 @@ add_library(
     conversion/normalized.cpp
     conversion/pack.cpp
     conversion/packed_conversion.cpp
+    compare/class.cpp
+    compare/constant_compare.cpp
+    compare/float_compare.cpp
+    compare/integer_compare.cpp
     dot/scalar_repair.cpp
     dot/dot.cpp
     dot/fp8_dot.cpp
@@ -44,7 +48,35 @@ add_library(
     graphics/interp16.cpp
     graphics/interp32.cpp
     graphics/mullit.cpp
+    integer/bit_count.cpp
+    integer/bitfield.cpp
+    integer/boolean.cpp
+    integer/carry.cpp
+    integer/integer16.cpp
+    integer/integer16_ternary.cpp
+    integer/integer_add.cpp
+    integer/integer_mad.cpp
+    integer/integer_minmax.cpp
+    integer/integer_mul.cpp
+    integer/integer_ternary.cpp
+    integer/mad64.cpp
+    integer/sad.cpp
+    integer/shift.cpp
+    register/cndmask.cpp
+    math/half_trig.cpp
+    math/half_unary.cpp
+    math/rcp_iflag.cpp
+    math/trig.cpp
+    math/trig_preop.cpp
+    math/unary.cpp
     register/dpp.cpp
+    register/ds_permute.cpp
+    register/ds_swizzle.cpp
+    register/lane_transfer.cpp
+    register/move.cpp
+    register/permlane.cpp
+    register/relative_move.cpp
+    register/swap.cpp
     wmma/swmmac16.cpp
     wmma/swmmac8.cpp
     wmma/swmmac_float.cpp

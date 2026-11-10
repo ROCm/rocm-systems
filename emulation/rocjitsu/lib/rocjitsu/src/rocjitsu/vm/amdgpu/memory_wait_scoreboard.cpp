@@ -9,6 +9,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/flat_address.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/image_resource.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/register_modifiers.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h"
 #include "rocjitsu/isa/instruction.h"
@@ -270,7 +271,8 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     for (uint32_t word = 0; word < prefix; ++word) {
       const uint16_t reg = modifiers.image_coordinates[word];
       if (reg < wf.num_vgprs())
-        access({RegClass::VGPR, reg, 1}, lanes, 0xf, false);
+        access({RegClass::VGPR, reg, 1}, lanes,
+               (modifiers.image_low_half_prefix & (1u << word)) ? 0x3 : 0xf, false);
     }
     for (uint32_t component = 0; component < components; ++component) {
       const uint32_t word = prefix + (modifiers.image_a16 ? component / 2 : component);
@@ -296,6 +298,16 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     check_memory_result(inst, wf,
                         (inst.flags() & CONDITIONAL_MEMORY_LANES) ? result_lanes(inst, wf) : lanes,
                         modifiers);
+  // SUBREV permutes VSRC1, unlike other integer DPP instructions.
+  const bool reverse_dpp =
+      name.starts_with("v_subrev_") &&
+      (name.ends_with("u32") || name.ends_with("u32_e32") || name.ends_with("u32_e64")) &&
+      (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 || wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4);
+  const Operand *routed_source = reverse_dpp ? inst.src_operand(1) : modifiers.src0;
+  // Floating DOT4 filters its non-routed source observations with its destinations.
+  const bool filtered_dot4 =
+      wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4 && name.starts_with("v_dot4_f32_");
+  uint64_t source_lanes = lanes;
   uint64_t src0_lanes = lanes;
   uint64_t destination_lanes = lanes;
   if (modifiers.dpp || modifiers.dpp8) {
@@ -305,8 +317,10 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
                                  modifiers.bank_mask, modifiers.bound_ctrl, modifiers.fi, wf.exec(),
                                  modifiers.inactive_uses_bound_ctrl)
             : dpp::make_dpp8_plan(wf.wf_size(), modifiers.control, modifiers.fi, wf.exec());
-    src0_lanes = dpp::dpp_physical_source_mask(plan, lanes, wf.wf_size());
     destination_lanes &= plan.row_bank_mask & plan.source_write_mask;
+    if (filtered_dot4)
+      source_lanes = destination_lanes;
+    src0_lanes = dpp::dpp_physical_source_mask(plan, lanes, wf.wf_size());
   }
   if (modifiers.ds_permutation != DsPermutation::None) {
     std::optional<RegisterRef> address;
@@ -441,28 +455,14 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     };
     const uint32_t low = variable ? 0 : control(selector, 0);
     const uint32_t high = control(group, 0);
-    uint64_t read_lanes = 0, write_lanes = 0;
-    uint64_t remaining = lanes;
-    while (remaining) {
-      const unsigned lane = std::countr_zero(remaining);
-      remaining &= remaining - 1;
-      const uint32_t selection = variable ? control(selector, lane)
-                                 : row16 ? (((lane & 15) < 8 ? low : high) >> ((lane & 7) * 4)) & 15
-                                         : low;
-      const unsigned source = valu_permutation_source(kind, lane, selection, high, wf.wf_size());
-      if (source >= wf.wf_size()) {
-        if (!row16 && kind != ValuPermutation::Perm64)
-          write_lanes |= uint64_t{1} << lane;
-        continue;
-      }
-      if (row16 && !modifiers.fi && !(lanes & (uint64_t{1} << source))) {
-        if (modifiers.bound_ctrl)
-          write_lanes |= uint64_t{1} << lane;
-        continue;
-      }
-      read_lanes |= uint64_t{1} << source;
-      write_lanes |= uint64_t{1} << lane;
-    }
+    const auto permutation = valu_permutation_lanes(
+        kind, lanes, wf.wf_size(), high, row16, modifiers.fi, modifiers.bound_ctrl,
+        [&](unsigned lane) {
+          return variable ? control(selector, lane)
+                 : row16  ? (((lane & 15) < 8 ? low : high) >> ((lane & 7) * 4)) & 15
+                          : low;
+        });
+    const auto [read_lanes, write_lanes] = permutation;
     if (read_lanes)
       if (const auto reg = resolve(*inst.src_operand(0), false))
         access(*reg, reg->cls == RegClass::VGPR ? read_lanes : ~uint64_t{0}, 0xf, false);
@@ -512,8 +512,8 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
       std::optional<uint32_t> base;
       if (reg && reg->cls == RegClass::VGPR)
         base = reg->index + (wf.vgpr_msb_for_role(operand.vgpr_msb_role()) << 8);
-      const auto index =
-          relative_vgpr_index(base, offset, operand.vgpr_count(), wf.vgpr_alloc().count);
+      const auto index = relative_vgpr_index(base, offset, operand.vgpr_count(),
+                                             wf.vgpr_alloc().count, wf.cu().arch());
       if (!index)
         return std::nullopt;
       return RegisterRef{RegClass::VGPR, static_cast<uint16_t>(*index),
@@ -549,6 +549,9 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
   }
   if (selected_lane) {
     const auto *selector = first_lane ? nullptr : inst.src_operand(inst.num_src_operands() - 1);
+    // WRITELANE's tied VDST precedes SRC0 on older targets and follows SRC1 on newer ones.
+    if (scalar_lane_write && selector == inst.dst_operand(0))
+      selector = inst.src_operand(inst.num_src_operands() - 2);
     if (selector)
       if (auto reg = resolve(*selector, false))
         access(*reg, ~uint64_t{0}, 0xf, false);
@@ -574,6 +577,41 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
         access(*reg, reg->cls == RegClass::VGPR ? uint64_t{1} << lane : ~uint64_t{0}, 0xf, true);
     return;
   }
+  std::optional<uint64_t> selection;
+  if (name.starts_with("v_cndmask_") && lanes &&
+      (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 || wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4)) {
+    // Check the condition dependency before using its current value to select sources.
+    const auto *condition = inst.num_src_operands() > 2 ? inst.src_operand(2) : nullptr;
+    if (!condition || condition->is_fieldless()) {
+      if (lanes & 0xffffffffu)
+        access({RegClass::VCC, 0, 1}, ~uint64_t{0}, 0xf, false);
+      if (lanes >> 32)
+        access({RegClass::VCC, 1, 1}, ~uint64_t{0}, 0xf, false);
+      selection = wf.vcc_mask();
+    } else {
+      if (auto reg = resolve(*condition, false))
+        access(*reg, ~uint64_t{0}, 0xf, false);
+      if (condition->encoding_value() == 124) {
+        // NULL denotes zero for the whole mask, not a NULL/M0 register pair.
+        selection = 0;
+      } else if (auto value = condition->const_value()) {
+        selection = *value;
+      } else if (auto lo = registers.scalar_control_value(condition->encoding_value())) {
+        selection = *lo;
+        if (wf.wf_size() == 64) {
+          const auto selector = condition->encoding_value();
+          if (selector == 251 || selector == 106)
+            selection = wf.vcc_mask();
+          else if (selector == 252 || selector == 126)
+            selection = wf.exec();
+          else if (auto hi = registers.scalar_control_value(selector + 1))
+            *selection |= uint64_t{*hi} << 32;
+          else
+            selection.reset();
+        }
+      }
+    }
+  }
   auto check_operand = [&](const Operand *op, bool write) {
     const bool mix_preservation = !write && op == inst.dst_operand(0) &&
                                   (name.find("mixlo_") != std::string_view::npos ||
@@ -588,13 +626,17 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
             access(*reg, lanes, 0xf, write);
       return;
     }
-    const auto reg = resolve(*op, write);
+    auto reg = resolve(*op, write);
     if (!reg || reg->cls == RegClass::ACC_VGPR)
+      return;
+    // gfx1201 DPP8/DPP16 SUBREV substitutes zero for a scalar/inline SRC1.
+    if (!write && reverse_dpp && (modifiers.dpp || modifiers.dpp8) && op == routed_source &&
+        reg->cls != RegClass::VGPR && wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4)
       return;
     uint64_t accessed_lanes = reg->cls != RegClass::VGPR ? ~uint64_t{0}
                               : write                    ? destination_lanes
-                              : op == modifiers.src0     ? src0_lanes
-                                                         : lanes;
+                              : op == routed_source      ? src0_lanes
+                                                         : source_lanes;
     // Interpolation coefficients are quad broadcasts, including inactive lanes.
     if (!write && reg->cls == RegClass::VGPR && name.starts_with("v_interp_") &&
         (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 ||
@@ -607,9 +649,22 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
       else if (op == inst.src_operand(2) && !p2)
         accessed_lanes = quads;
     }
+    if (selection && !write && reg->cls == RegClass::VGPR) {
+      if (op == inst.src_operand(1))
+        accessed_lanes &= *selection;
+      else if (op == inst.src_operand(0) && !modifiers.dpp && !modifiers.dpp8)
+        accessed_lanes &= ~*selection;
+    }
     if (vector && !lanes && !write && !inst.is_memory_op())
       return;
     uint8_t bytes = op->register_byte_mask();
+    if (!write && op == modifiers.packed_store_data && reg->width == (op->size_bits() + 31) / 32) {
+      const RegisterRef tail{reg->cls, static_cast<uint16_t>(reg->index + reg->width - 1), 1};
+      if (--reg->width)
+        access(*reg, accessed_lanes, bytes, false);
+      access(tail, accessed_lanes, 0x3, false);
+      return;
+    }
     if (modifiers.sdwa && reg->cls == RegClass::VGPR) {
       if (write)
         bytes = sdwa::sdwa_dst_byte_mask(modifiers.dst_selection, modifiers.dst_unused);
@@ -820,17 +875,7 @@ void MemoryWaitScoreboard::check_memory_result(const Instruction &inst, Wavefron
         xcnt_ordered_write(range, vector_lanes, bytes);
       access(range, vector_lanes, bytes, true, order);
     };
-    const uint8_t bytes = wf.cu().sram_ecc() ? 0xf : modifiers.memory_result_bytes;
-    const uint8_t tail = wf.cu().sram_ecc() ? 0xf : modifiers.memory_result_last_bytes;
-    if (bytes == tail) {
-      check(reg, bytes);
-    } else {
-      const RegisterRef last{reg.cls, static_cast<uint16_t>(reg.index + reg.width - 1), 1};
-      --reg.width;
-      if (reg.width)
-        check(reg, bytes);
-      check(last, tail);
-    }
+    for_each_memory_result_range(reg, modifiers, wf.cu().sram_ecc(), check);
   }
 }
 
