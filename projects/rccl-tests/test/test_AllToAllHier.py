@@ -74,7 +74,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def _run_hier(request, per_peer_bytes, dtype, group_size):
+def _run_hier(request, per_peer_bytes, dtype, group_size, extra=None):
     if NP < 2:
         pytest.skip("need >= 2 ranks/GPUs for AllToAll")
     size = str(int(per_peer_bytes * NP))
@@ -84,7 +84,7 @@ def _run_hier(request, per_peer_bytes, dtype, group_size):
     args = (
         mpi_launch_prefix(request, LAUNCHER, NP, MPI_OPTS)
         + gin_env_xflags(env + XENV)
-        + gin_perf_argv(executable, size, dtype, CTAS, impl=5)
+        + gin_perf_argv(executable, size, dtype, CTAS, extra=extra, impl=5)
     )
     cmd = " ".join(shlex.quote(a) for a in args)
     hang_msg = gin_hang_msg(
@@ -126,4 +126,18 @@ def test_AllToAllHierSplitGroups(request, group_size, per_peer_bytes):
     rc = _run_hier(request, per_peer_bytes, "int32", group_size)
     assert rc == 0, "hierarchical AllToAll failed (exit {}) with group size {}".format(
         rc, group_size
+    )
+
+
+# --gin_resource_sharing: 0 = thread, 1 = CTA, 2 = device. Group size 2 puts
+# traffic on both DevComms.
+@pytest.mark.parametrize("sharing", [0, 1, 2])
+def test_AllToAllHierResourceSharing(request, sharing):
+    if NP <= 2:
+        pytest.skip("group size 2 leaves no network peers at {} ranks".format(NP))
+    rc = _run_hier(
+        request, 64 * 1024, "int32", 2, extra=["--gin_resource_sharing", str(sharing)]
+    )
+    assert rc == 0, "hierarchical AllToAll failed (exit {}) with --gin_resource_sharing {}".format(
+        rc, sharing
     )

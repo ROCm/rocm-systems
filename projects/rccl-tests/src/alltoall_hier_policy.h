@@ -19,8 +19,10 @@
 
 namespace alltoall_hier {
 
-// CTAs [0, netCtaCount) drive the network DevComm; the rest drive Anvil SDMA.
-ALLTOALL_HIER_HD inline int netCtaCount(int nCtas) { return nCtas / 2; }
+// CTA 0 drives the network DevComm; CTAs [netCtas, nCtas) drive Anvil SDMA. Each
+// network CTA's world barrier signals every peer, so a second network CTA would be
+// a second poster on each peer QP, which --gin_resource_sharing 0 (THREAD) forbids.
+constexpr int netCtas = 1;
 
 // Peers outside the LSA team [lsaBase, lsaBase + lsaSize) use the network
 // DevComm. With groupSize > 0, so do LSA peers outside this rank's group of

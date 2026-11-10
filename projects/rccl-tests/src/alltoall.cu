@@ -230,7 +230,7 @@ testResult_t AlltoAllGetMultiDevCommRequirements(int deviceImpl, ncclDevCommRequ
   TESTCHECK(testCheckGinBackendCompiled((ncclGinType_t)netType));
 #endif
 
-  const int netCtas = alltoall_hier::netCtaCount(deviceCtaCount);
+  const int netCtas = alltoall_hier::netCtas;
   const int sdmaCtas = deviceCtaCount - netCtas;
 
   ncclDevCommRequirements* sdma = &reqs[hierSdmaDevComm];
@@ -595,13 +595,15 @@ __device__ void hierPutWait(ncclGin& gin, ncclTeam world, bool net, int lsaBase,
   gin.flush(ncclCoopCta());
 }
 
-// Hierarchical alltoall: CTAs [0, netCtaCount) put to network peers on
-// netComm and synchronize with a world barrier; the remaining CTAs put to LSA
-// peers on sdmaComm (Anvil SDMA) and synchronize with an LSA barrier.
+// Hierarchical alltoall: CTA 0 puts to network peers on netComm and synchronizes
+// with a world barrier; the remaining CTAs put to LSA peers on sdmaComm (Anvil
+// SDMA) and synchronize with an LSA barrier. Only the network ncclGin takes the
+// --gin_resource_sharing mode: the SDMA CTAs all flush every peer, so they stay
+// GPU-locked.
 template <typename T>
 __device__ void hierAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count,
                                  struct ncclDevComm const& sdmaComm, struct ncclDevComm const& netComm, int groupSize) {
-  const int netCtas = alltoall_hier::netCtaCount(gridDim.x);
+  const int netCtas = alltoall_hier::netCtas;
   const bool net = blockIdx.x < netCtas;
   struct ncclDevComm const& devComm = net ? netComm : sdmaComm;
   const int groupCta = net ? blockIdx.x : blockIdx.x - netCtas;
@@ -612,7 +614,7 @@ __device__ void hierAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, ncclWi
   const int lsaBase = world.rank - lsa.rank;
   const int nPeers = alltoall_hier::peerCount(net, world.rank, world.nRanks, lsaBase, lsa.nRanks, groupSize);
 
-  ncclGin gin { devComm, 0 };
+  ncclGin gin { devComm, 0, net ? ginResourceSharingModeDev() : NCCL_GIN_RESOURCE_SHARING_GPU };
   const uint64_t signalBase = gin.readSignal(groupCta);
 
   if (net) {

@@ -2380,7 +2380,7 @@ int main(int argc, char* argv[], char **envp) {
             "[-j,--devtime_skip_mid <count> skip at mid tier (-1=min(-P,2); default: -1)] \n\t"
             "[-k,--devtime_skip_large <count> skip at large tier (-1=min(-P,1); default: -1)] \n\t"
             "[-H,--devtime_check <0/1> validate timed-kernel output before datacheck (default: 0)] \n\t"
-            "[--gin_resource_sharing <0/1/2> GIN tester ncclGin resource-sharing mode: 0=thread (exclusive-QP, drops SQ lock), 1=CTA, 2=device (default: 0). all_gather ignores this and stays GPU-locked (multi-CTA poster)] \n\t"
+            "[--gin_resource_sharing <0/1/2> GIN tester ncclGin resource-sharing mode: 0=thread (exclusive-QP, drops SQ lock), 1=CTA, 2=device (default: 0). all_gather ignores this and stays GPU-locked (multi-CTA poster); alltoall -D 5 applies it to the network DevComm only] \n\t"
             "[-h,--help]\n",
           programName);
         return 0;

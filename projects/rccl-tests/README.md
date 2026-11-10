@@ -222,7 +222,7 @@ Note that the reported bandwidth is per group, hence to get the total bandwidth 
 
 ### Hierarchical alltoall over two GIN backends
 
-`alltoall_perf -R 2 -D 5` creates two DevComms on the same communicator: one on the Anvil SDMA GIN backend for intra-node (LSA) peers, and one on a network GIN backend for all other peers. Half of the `-V` CTAs drive each DevComm, so `-V` must be at least 2. It needs a CMake build with `-DENABLE_DEVICE_API=ON -DENABLE_ROCSHMEM_GIN=ON`, and both backends active on the communicator: leave `NCCL_GIN_TYPE` unset. When either backend is not active on the communicator, the test prints `# SKIP` and exits successfully.
+`alltoall_perf -R 2 -D 5` creates two DevComms on the same communicator: one on the Anvil SDMA GIN backend for intra-node (LSA) peers, and one on a network GIN backend for all other peers. CTA 0 drives the network DevComm and the remaining `-V` − 1 CTAs drive Anvil SDMA, so `-V` must be at least 2. `--gin_resource_sharing` applies to the network DevComm only; the SDMA DevComm stays GPU-locked, because every SDMA CTA flushes every peer. It needs a CMake build with `-DENABLE_DEVICE_API=ON -DENABLE_ROCSHMEM_GIN=ON`, and both backends active on the communicator: leave `NCCL_GIN_TYPE` unset. When either backend is not active on the communicator, the test prints `# SKIP` and exits successfully.
 
 - `RCCL_TESTS_A2A_HIER_NET_GIN_TYPE=<type>` selects the network backend (default: `2`, PROXY).
 - `RCCL_TESTS_A2A_HIER_GROUP_SIZE=<n>` splits each node's ranks into groups of `n` consecutive local ranks and sends to local peers in other groups over the network backend, so a single node moves data on both backends. Default: `0` (all local peers use Anvil SDMA).

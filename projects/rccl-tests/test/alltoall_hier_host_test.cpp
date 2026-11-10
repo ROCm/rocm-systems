@@ -11,7 +11,6 @@
 
 #include "alltoall_hier_policy.h"
 
-using alltoall_hier::netCtaCount;
 using alltoall_hier::peerCount;
 using alltoall_hier::peerUsesNet;
 
@@ -32,12 +31,6 @@ int sentTo(bool net, int rank, int nRanks, int lsaSize, int groupSize) {
 }
 
 }  // namespace
-
-TEST(AllToAllHierPolicy, NetCtaCount) {
-  EXPECT_EQ(netCtaCount(2), 1);
-  EXPECT_EQ(netCtaCount(3), 1);
-  EXPECT_EQ(netCtaCount(16), 8);
-}
 
 TEST(AllToAllHierPolicy, SplitIsSymmetric) {
   for (int nodes = 1; nodes <= 3; nodes++) {
