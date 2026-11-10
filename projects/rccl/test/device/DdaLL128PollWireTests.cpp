@@ -20,7 +20,7 @@
 //                late entry, ignores an invalid entry that never gets the flag, and ends on abort
 //
 // Every test but CooperativeLoadOnGfx1250, WaitBatch* and *Staged* has a *Batched twin, run with the batched
-// load and poll pair the AllGather LL128 kernel uses.
+// load and poll pair the AllGather LL128 kernel uses, and the AlltoAll one with the cooperative builtins.
 // The host raises the abort flag after kWatchdog, so a broken poll fails instead of hanging.
 
 #include <chrono>
@@ -71,7 +71,8 @@ __host__ __device__ inline uint64_t roundFlag(uint32_t round) { return (uint64_t
 // This lane's first 16B chunk of the slice, as the production callers address it.
 __device__ inline uint64_t* laneSlot(uint64_t* wire, int lane) { return wire + 2 * lane; }
 
-// kBatched picks the batched load and poll the AllGather LL128 kernel uses over the plain pair.
+// kBatched picks the batched load and poll over the plain pair (AllGather LL128, and AlltoAll
+// LL128 with the cooperative builtins).
 template <bool kBatched>
 __device__ void loadRegs(uint64_t (&regs)[kDdaLL128WordsPerThread], const int8_t* src, int elt, int lane,
                          bool flagLane) {
