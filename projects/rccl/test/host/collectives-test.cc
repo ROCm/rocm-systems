@@ -1205,6 +1205,74 @@ TEST_F(CollectivesMicrotest, SliceSteps_FollowArchAndOneSlice) {
   }
 }
 
+// The Config entry points enqueue the same Ring/Simple steps as the plain ones, which the
+// one-slice kernels need: gfx950 single-node runs one step per chunk, so the default 4/2 steps
+// put data at the wrong 512 KiB offset or fault.
+TEST_F(CollectivesMicrotest, ConfigEntryPoints_UseThePlainSliceSteps) {
+  struct Case {
+    const char* arch;
+    int oneSlice;
+    int arChunk, arSlice, agChunk, agSlice, rsChunk, rsSlice;
+  };
+  const std::vector<Case> cases = {
+      {"gfx942", 0, ALLREDUCE_CHUNKSTEPS, ALLREDUCE_SLICESTEPS, ALLGATHER_CHUNKSTEPS, ALLGATHER_SLICESTEPS,
+       REDUCESCATTER_CHUNKSTEPS, REDUCESCATTER_SLICESTEPS},
+      {"gfx942", 1, ALLREDUCE_CHUNKSTEPS, ALLREDUCE_SLICESTEPS_SINGLE_NODE, ALLGATHER_CHUNKSTEPS,
+       ALLGATHER_SLICESTEPS_SINGLE_NODE, REDUCESCATTER_CHUNKSTEPS, REDUCESCATTER_SLICESTEPS_SINGLE_NODE},
+      {"gfx950", 0, ALLREDUCE_CHUNKSTEPS, ALLREDUCE_SLICESTEPS, ALLGATHER_CHUNKSTEPS, ALLGATHER_SLICESTEPS,
+       REDUCESCATTER_CHUNKSTEPS, REDUCESCATTER_SLICESTEPS},
+      {"gfx950", 1, 1, 1, 1, 1, 1, 1},
+  };
+  ncclCollConfig_t config{};
+  config.maxCTAs = 8;
+  for (const Case& tc : cases) {
+    SCOPED_TRACE(std::string(tc.arch) + " oneSlice=" + std::to_string(tc.oneSlice));
+    SetArch(tc.arch);
+    comm_->rcclUseOneSlice = tc.oneSlice;
+    fake.enqueued.clear();
+    ASSERT_EQ(ncclSuccess, ncclAllReduceConfig(send_.data(), recv_.data(), kCount, ncclFloat32, ncclSum, comm_.get(),
+                                               stream_, &config));
+    ASSERT_EQ(ncclSuccess,
+              ncclAllGatherConfig(send_.data(), recv_.data(), kCount, ncclFloat32, comm_.get(), stream_, &config));
+    ASSERT_EQ(ncclSuccess, ncclReduceScatterConfig(send_.data(), recv_.data(), kCount, ncclFloat32, ncclSum,
+                                                   comm_.get(), stream_, &config));
+    ASSERT_EQ(ncclSuccess, AllReduce());
+    ASSERT_EQ(ncclSuccess, AllGather());
+    ASSERT_EQ(ncclSuccess, ReduceScatter());
+    ASSERT_EQ(6u, fake.enqueued.size());
+    EXPECT_EQ(tc.arChunk, Info(0).chunkSteps);
+    EXPECT_EQ(tc.arSlice, Info(0).sliceSteps);
+    EXPECT_EQ(tc.agChunk, Info(1).chunkSteps);
+    EXPECT_EQ(tc.agSlice, Info(1).sliceSteps);
+    EXPECT_EQ(tc.rsChunk, Info(2).chunkSteps);
+    EXPECT_EQ(tc.rsSlice, Info(2).sliceSteps);
+    for (size_t i = 0; i < 3; ++i) {
+      EXPECT_EQ(Info(i + 3).coll, Info(i).coll);
+      EXPECT_EQ(Info(i + 3).chunkSteps, Info(i).chunkSteps);
+      EXPECT_EQ(Info(i + 3).sliceSteps, Info(i).sliceSteps);
+    }
+  }
+}
+
+// A null comm must still reach ncclEnqueueCheck, which reports it, instead of being dereferenced for the steps.
+TEST_F(CollectivesMicrotest, ConfigEntryPoints_NullCommKeepsTheDefaultSteps) {
+  ncclCollConfig_t config{};
+  fake.enqueueResults = {ncclInvalidArgument, ncclInvalidArgument, ncclInvalidArgument};
+  EXPECT_EQ(ncclInvalidArgument,
+            ncclAllReduceConfig(send_.data(), recv_.data(), kCount, ncclFloat32, ncclSum, nullptr, stream_, &config));
+  EXPECT_EQ(ncclInvalidArgument,
+            ncclAllGatherConfig(send_.data(), recv_.data(), kCount, ncclFloat32, nullptr, stream_, &config));
+  EXPECT_EQ(ncclInvalidArgument, ncclReduceScatterConfig(send_.data(), recv_.data(), kCount, ncclFloat32, ncclSum,
+                                                         nullptr, stream_, &config));
+  ASSERT_EQ(3u, fake.enqueued.size());
+  EXPECT_EQ(ALLREDUCE_CHUNKSTEPS, Info(0).chunkSteps);
+  EXPECT_EQ(ALLREDUCE_SLICESTEPS, Info(0).sliceSteps);
+  EXPECT_EQ(ALLGATHER_CHUNKSTEPS, Info(1).chunkSteps);
+  EXPECT_EQ(ALLGATHER_SLICESTEPS, Info(1).sliceSteps);
+  EXPECT_EQ(REDUCESCATTER_CHUNKSTEPS, Info(2).chunkSteps);
+  EXPECT_EQ(REDUCESCATTER_SLICESTEPS, Info(2).sliceSteps);
+}
+
 // AllGather dispatch
 
 TEST_F(CollectivesMicrotest, AllGather_SelectsOnceAndEnqueuesTheDecision) {
@@ -1413,6 +1481,17 @@ TEST_F(CollectivesHierarchicalMicrotest, AllGather_SingleSliceIntraComm) {
   EXPECT_EQ(ALLGATHER_SLICESTEPS, Info(0).sliceSteps);
 }
 
+TEST_F(CollectivesHierarchicalMicrotest, AllGather_Gfx950SingleSliceIntraCommUsesOneStep) {
+  Decide(RCCL_HIERARCHICAL_ALLGATHER);
+  SetArch("gfx950");
+  intra_->rcclUseOneSlice = 1;
+  EXPECT_EQ(ncclSuccess, AllGather());
+  EXPECT_EQ(1, Info(1).chunkSteps);
+  EXPECT_EQ(1, Info(1).sliceSteps);
+  EXPECT_EQ(ALLGATHER_CHUNKSTEPS, Info(0).chunkSteps);
+  EXPECT_EQ(ALLGATHER_SLICESTEPS, Info(0).sliceSteps);
+}
+
 TEST_F(CollectivesHierarchicalMicrotest, AllGather_InPlaceStagesTheOwnSliceFirst) {
   Decide(RCCL_HIERARCHICAL_ALLGATHER);
   const float* own = recv_.data() + comm_->rank * kCount;
@@ -1560,6 +1639,17 @@ TEST_F(CollectivesHierarchicalMicrotest, ReduceScatter_SingleSliceIntraComm) {
   intra_->rcclUseOneSlice = 1;
   EXPECT_EQ(ncclSuccess, ReduceScatter());
   EXPECT_EQ(REDUCESCATTER_SLICESTEPS_SINGLE_NODE, Info(0).sliceSteps);
+}
+
+TEST_F(CollectivesHierarchicalMicrotest, ReduceScatter_Gfx950SingleSliceIntraCommUsesOneStep) {
+  Decide(RCCL_HIERARCHICAL_REDUCESCATTER);
+  SetArch("gfx950");
+  intra_->rcclUseOneSlice = 1;
+  EXPECT_EQ(ncclSuccess, ReduceScatter());
+  EXPECT_EQ(1, Info(0).chunkSteps);
+  EXPECT_EQ(1, Info(0).sliceSteps);
+  EXPECT_EQ(REDUCESCATTER_CHUNKSTEPS, Info(1).chunkSteps);
+  EXPECT_EQ(REDUCESCATTER_SLICESTEPS, Info(1).sliceSteps);
 }
 
 TEST_F(CollectivesHierarchicalMicrotest, ReduceScatter_DirectInterStep) {
