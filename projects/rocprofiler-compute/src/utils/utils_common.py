@@ -43,6 +43,9 @@ from vendored import yaml
 # Global constants
 NS_TO_MS = 1.0 / 1_000_000.0
 METRIC_ID_RE = re.compile(pattern=r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
+# Metric library id format: {category}.{subcategory}_{name}, in lowercase with
+# underscores.
+METRIC_LIBRARY_ID_RE = re.compile(r"^[a-z][a-z0-9]*\.[a-z0-9]+(_[a-z0-9]+)*$")
 PC_SAMPLING_BLOCK_IDS = ("21", "pc_sampling")
 # Block 4 and its alias; ids such as 4.1 are roofline metrics
 ROOFLINE_BLOCK_IDS = ("4", "roof")
