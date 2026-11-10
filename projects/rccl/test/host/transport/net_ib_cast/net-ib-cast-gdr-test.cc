@@ -5,7 +5,7 @@
  ************************************************************************/
 
 // Host-only microtests for src/transport/net_ib_cast/gdr.cc (NET_IB_CAST_GDR_CC_PATH): GPUDirect
-// RDMA, peermem and DMA-BUF detection. Every answer is latched by a std::call_once, so each case
+// RDMA, peermem and DMA-BUF detection. Every answer is cached in a function-local static, so each case
 // runs in its own process.
 
 #include <gtest/gtest.h>
@@ -13,12 +13,14 @@
 #include <errno.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <cstring>
 #include <functional>
 #include <string>
 
 #include "../../../common/LogCapture.hpp"
 #include "../../../common/ProcessIsolatedTestRunner.hpp"
+#include "JoinThreadsOnExit.h"
 #include "fakes/gdr_peermem_fakes.h"
 #include "fakes/gdr_probe_fakes.h"
 #include "fakes/ibvwrap_fakes.h"
@@ -90,16 +92,33 @@ TEST_F(NetIbCastGdrMicrotestIsolated, GdrSupport_ProbeSaysNo_FailsAndDoesNotProb
   });
 }
 
-// gdr_peermem.h says a probe that could not run (-1) must not be cached, but call_once latches it.
-// Pins AICOMRCCL-3089; a fix flips this pin.
-TEST_F(NetIbCastGdrMicrotestIsolated, GdrSupport_KnownBug_ProbeThatCouldNotRunIsNeverRetried) {
+TEST_F(NetIbCastGdrMicrotestIsolated, GdrSupport_ProbeCouldNotRun_FailsAndProbesAgainNextCall) {
   RUN_ISOLATED_TEST("NetIbCastGdr_ProbeCouldNotRun", []() {
     int answer = -1;
     ScopedHook scan(g_ncclIbScanDefaultPeerMemClients, [] { return 0; });
     ScopedHook probe(g_ncclIbProbeGdrSupport, [&](struct ibv_context*, int) { return answer; });
     EXPECT_EQ(IbCastGdrSupport(), ncclSystemError);
     answer = 1;  // the device could now be probed
-    EXPECT_EQ(IbCastGdrSupport(), ncclSystemError);
+    EXPECT_EQ(IbCastGdrSupport(), ncclSuccess);
+    EXPECT_EQ(IbCastGdrSupport(), ncclSuccess);
+    EXPECT_EQ(probe.calls, 2);
+  });
+}
+
+TEST_F(NetIbCastGdrMicrotestIsolated, GdrSupport_ConcurrentFirstCalls_ProbeOnce) {
+  RUN_ISOLATED_TEST("NetIbCastGdr_ConcurrentProbe", []() {
+    ScopedHook scan(g_ncclIbScanDefaultPeerMemClients, [] { return 0; });
+    ScopedHook probe(g_ncclIbProbeGdrSupport, [](struct ibv_context*, int) { return 1; });
+    std::atomic<int> successes{0};
+    {
+      JoinThreadsOnExit threads;
+      for (int i = 0; i < 8; ++i) {
+        threads.spawn([&] {
+          if (IbCastGdrSupport() == ncclSuccess) successes.fetch_add(1);
+        });
+      }
+    }
+    EXPECT_EQ(successes.load(), 8);
     EXPECT_EQ(probe.calls, 1);
   });
 }

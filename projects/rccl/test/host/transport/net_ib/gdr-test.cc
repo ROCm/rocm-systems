@@ -156,6 +156,30 @@ TEST_F(NetIbGdrMicrotest, GdrSupport_PublicApiCachesProbeFailure) {
       ::testing::ExitedWithCode(0), "");
 }
 
+TEST_F(NetIbGdrMicrotest, GdrSupport_PublicApiRetriesProbeThatCouldNotRun) {
+  EXPECT_EXIT(
+      {
+        static ibv_context context{};
+        ncclIbDevs[0].context = &context;
+        ncclIbGdrModuleLoaded = 0;
+        ncclIbGdrBlocklisted = 0;
+        int answer = -1;
+        int probes = 0;
+        g_ncclIbScanDefaultPeerMemClients = [] { return 0; };
+        g_ncclIbProbeGdrSupport = [&](ibv_context*, int) {
+          ++probes;
+          return answer;
+        };
+        if (ncclIbGdrSupport() != ncclSystemError) std::exit(1);
+        answer = 1;
+        if (ncclIbGdrSupport() != ncclSuccess) std::exit(2);
+        if (ncclIbGdrSupport() != ncclSuccess) std::exit(3);
+        if (probes != 2) std::exit(4);
+        std::exit(0);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
 TEST_F(NetIbGdrMicrotest, GdrSupport_PublicApiHyperVBlocklistSkipsRuntimeProbe) {
   EXPECT_EXIT(
       {

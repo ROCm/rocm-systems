@@ -64,12 +64,12 @@ ncclResult_t ncclIbGdrSupport() {
   // Don't probe past a deliberate safety override.
   if (ncclIbGdrBlocklisted) return ncclSystemError;
 
-  static std::once_flag probeOnce;
-  static bool probeResult = false;
-  std::call_once(probeOnce, []() {
-    probeResult = ncclIbProbeGdrSupport(ncclIbDevs[0].context, ncclIbRelaxedOrderingEnabled) == 1;
-  });
-  return probeResult ? ncclSuccess : ncclSystemError;
+  // Cache only a definitive 1/0; a probe that couldn't run (-1) is retried on the next call.
+  static std::mutex probeMutex;
+  static int probeResult = -1;
+  std::lock_guard<std::mutex> lock(probeMutex);
+  if (probeResult == -1) probeResult = ncclIbProbeGdrSupport(ncclIbDevs[0].context, ncclIbRelaxedOrderingEnabled);
+  return probeResult == 1 ? ncclSuccess : ncclSystemError;
 }
 
 static int ncclIbPeerMemModuleLoaded = 0; // 1 = true, 0 = false
