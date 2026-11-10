@@ -1,5 +1,3 @@
-# gfx1201 (RDNA 4, Navi 48) -- System Speed-of-Light
-# Metrics without a validated counter expression use None, so analyze shows N/A.
 Panel Config:
   id: 200
   alias: sol

@@ -1,6 +1,3 @@
-# gfx1201 (RDNA 4, Navi 48) -- GL0 Texture Data (TXD)
-# Metric bodies are carried from the gfx1201 metrics port and placed in the
-# gfx12 panel template. Tables with no carried metric are empty.
 Panel Config:
   id: 1000
   alias: txd

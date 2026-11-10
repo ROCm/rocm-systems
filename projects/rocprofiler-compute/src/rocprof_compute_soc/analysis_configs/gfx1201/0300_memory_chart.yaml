@@ -1,10 +1,3 @@
-# gfx1201 (RDNA 4, Navi 48) -- Memory Chart
-#
-# Levels follow the RDNA 4 ISA (section 1.2.3) and the Navi 48 Hot Chips 2025
-# disclosure: L0 per WGP, the read-only instruction and scalar caches, the GL1
-# write-combining cache, L2, Infinity Cache, then GDDR6.
-# Requests the L2 sends toward memory can be served by the Infinity Cache.
-# Direct Infinity Cache hit rate and GDDR6 bandwidth are not collected here.
 Panel Config:
   id: 300
   alias: memchart

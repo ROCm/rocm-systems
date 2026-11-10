@@ -1,20 +1,3 @@
-# Profile shortcut sets for gfx1201 (RDNA4 - Navi48, e.g. Radeon RX 9070)
-#
-# Each set provides a named subset of the full profile for quick-look analysis.
-# Use with: rocprof-compute profile --set <set_option> ...
-#
-# Panel IDs for gfx1201:
-#   200 = System Speed-of-Light
-#   300 = Memory Chart
-#   500 = CPC
-#   600 = SPI
-#   700 = WGP
-#   900 = L0 Cache (TCP)
-#  1100 = L1 Cache (GL1C)
-#  1300 = L2 Cache (GL2C)
-#  1400 = GCEA
-#  1700 = GRBM
-
 sets:
 - title: Compute Throughput FLOPS
   set_option: compute_thruput_flops
