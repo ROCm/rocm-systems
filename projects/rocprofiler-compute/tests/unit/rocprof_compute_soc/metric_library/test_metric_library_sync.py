@@ -10,7 +10,7 @@ Until the cutover, the library copies the analysis configs:
 - every row peak is a peak of its metric, and every library peak has a row;
 - the library reads the same counters as detect_counters();
 - the library variables equal get_build_in_vars();
-- each library set reads the same counters as --set on profile_configs/sets.
+- each library set lists the metrics of its old set in profile_configs/sets.
 
 The check skips the roofline panel of an arch without a roofline benchmark (gfx908).
 """
@@ -38,11 +38,7 @@ from utils.utils_common import (
     canonical_config_arch,
     parse_sets_yaml,
 )
-from utils.utils_counter_defs import (
-    extract_counters_and_variables,
-    get_build_in_vars,
-    metric_value_keys,
-)
+from utils.utils_counter_defs import get_build_in_vars, metric_value_keys
 
 
 class Row(NamedTuple):
@@ -157,8 +153,6 @@ CDNA_UNIT_VARIANTS = {"7.1.8": ("LDS Allocation", "Bytes")}
 UNIT_VARIANTS = {
     arch: CDNA_UNIT_VARIANTS for arch in ("gfx908", "gfx90a", "gfx942", "gfx950")
 }
-# Sets of profile_configs/sets with no library set (arch -> set options).
-SETS_WITHOUT_METRICS = {"gfx908": ("compute_thruput_flops",)}
 UNIT_VARIANTS["gfx115x"] = {
     "3.4.0": ("LDS Req", "(Requests + $normUnit)"),
     "7.2.4": ("LDS Allocation", "Bytes"),
@@ -288,19 +282,14 @@ def row_metric_id(row: Row, library: loader.MetricLibrary, arch: str) -> Optiona
     return metric_id
 
 
-def make_soc(
-    arch: str,
-    membw_analysis: bool,
-    filter_blocks: List[str],
-    set_selected: Optional[str] = None,
-) -> OmniSoC_Base:
+def make_soc(arch: str, membw_analysis: bool, filter_blocks: List[str]) -> OmniSoC_Base:
     """Return an OmniSoC_Base for arch, with no GPU needed."""
     args = SimpleNamespace(
         config_dir=config.analysis_configs_dir,
         filter_blocks=filter_blocks,
         membw_analysis=membw_analysis,
         roof_only=False,
-        set_selected=set_selected,
+        set_selected=None,
     )
     machine_specs = SimpleNamespace(
         gpu_arch=arch,
@@ -324,6 +313,27 @@ def shown_blocks(arch: str) -> List[str]:
         for path in (config.analysis_configs_dir / arch).glob("*.yaml")
     }
     return [str(int(file_id) // 100) for file_id in sorted(file_ids - unshown)]
+
+
+def old_sets_by_metric_id(arch_view: SimpleNamespace) -> Dict[str, Dict[str, Any]]:
+    """Return each old set of the arch, with the metric ids of its rows.
+
+    Rows without a formula are left out, and so is a set without any formula.
+    """
+    metric_id_by_position = dict(
+        zip((row.legacy_id for row in arch_view.rows), arch_view.metric_ids)
+    )
+    old_sets = {}
+    for set_option, entry in parse_sets_yaml(member_arch(arch_view.arch)).items():
+        metric_ids = [
+            metric_id_by_position.get(str(position))
+            for item in entry["metric"]
+            for position in item
+        ]
+        metric_ids = [metric_id for metric_id in metric_ids if metric_id is not None]
+        if metric_ids:
+            old_sets[set_option] = {"title": entry["title"], "metrics": metric_ids}
+    return old_sets
 
 
 @pytest.fixture(scope="module", params=list(loader.METRIC_LIBRARY_PARENT_ARCH))
@@ -451,27 +461,5 @@ def test_variables_match_get_build_in_vars(arch_view):
 
 
 def test_sets_match_profile_configs(arch_view):
-    gpu_arch = member_arch(arch_view.arch)
-    gpu_series = mi_gpu_specs.get_gpu_series(gpu_arch)
-    without_metrics = set(SETS_WITHOUT_METRICS.get(arch_view.arch, ()))
-    shipped = set(parse_sets_yaml(gpu_arch))
-    assert set(arch_view.library.sets) == shipped - without_metrics
-    no_metric_counters, _ = extract_counters_and_variables("", gpu_series)
-    errors = []
-    for set_option in sorted(shipped):
-        soc = make_soc(gpu_arch, False, [], set_selected=set_option)
-        expected, _ = soc.detect_counters()
-        if set_option in without_metrics:
-            if expected - no_metric_counters:
-                errors.append(f"{set_option}: remove it from SETS_WITHOUT_METRICS")
-            continue
-        metric_ids = arch_view.library.sets[set_option]["metrics"]
-        actual = soc._expand_tcc_template_counters(
-            arch_view.library.get_counters_for_metrics(metric_ids, gpu_series)
-        )
-        if actual != expected:
-            errors.append(
-                f"{set_option}: missing {sorted(expected - actual)}, "
-                f"extra {sorted(actual - expected)}"
-            )
-    assert errors == []
+    """Each library set has the title of its old set and the metrics of its rows."""
+    assert arch_view.library.sets == old_sets_by_metric_id(arch_view)

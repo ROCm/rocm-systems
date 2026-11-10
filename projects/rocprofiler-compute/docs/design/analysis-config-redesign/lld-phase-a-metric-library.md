@@ -673,10 +673,10 @@ compute_thruput_util:
   `get_counters_for_metrics()` to confirm that each set's counters fit in one pass on
   every GPU arch the directory serves.
 - **Transition.** Production `--set` and `--list-sets` keep reading
-  `profile_configs/sets/` until the cutover. The sync test proves that each string-ID
-  set yields the same counters as the numeric set it replaces. gfx908 has no
-  `compute_thruput_flops` set: it has no MFMA counters, so the numeric set's rows show
-  no equation and collect nothing (`SETS_WITHOUT_METRICS`).
+  `profile_configs/sets/` until the cutover. The sync test checks that each string-ID
+  set has the title of the numeric set it replaces and lists the metrics of its rows, in
+  order. A numeric set whose rows show no formula on an arch has no library set there:
+  gfx908 has no MFMA counters, so it has no `compute_thruput_flops` set.
 
 ### Built-in variable migration
 
@@ -693,7 +693,7 @@ unchanged -- it receives the same `dict[str, str]` regardless of source.
 
 | Tool | What changes |
 |---|---|
-| `validate_sets_metric_ids.py` | No change in what it checks: the numeric files keep their positional and one-pass checks until the cutover. Its per-block limit check moves to `utils_counter_defs.counters_over_block_limits()`, which `tools/validate_metric_library.py` also uses for `metric_library/{arch}/sets.yaml`. |
+| `validate_sets_metric_ids.py` | No change: the numeric files keep their positional and one-pass checks until the cutover. `tools/validate_metric_library.py` checks `metric_library/{arch}/sets.yaml` with its own copy of the one-pass check. |
 | `format_yaml.py` | Also checks `metric_library/gfx*` files (its pre-commit hook covers them): the `formula`, `peak` and `peak_empirical` keys. Core equation formatting logic (factoring constants out of aggregation) is unchanged. |
 | `hash_manager.py` | No change: it keeps hashing the analysis configs, and `tools/validate_metric_library.py` checks the metric library files. |
 | `verify_against_config_template.py` | No change: `tools/validate_metric_library.py` checks the metric library files, and this script keeps checking the old panel files until the cutover. |
