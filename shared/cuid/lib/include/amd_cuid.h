@@ -47,7 +47,23 @@ extern "C" {
 //! UnitID 0. The platform needs no SMBIOS. No query discloses a serial of a
 //! component with a temporary CUID. A malformed component is left out of the
 //! inventory, and a lookup returns why it failed.
-#define AMDCUID_LIB_VERSION_MINOR 2
+//!
+//! 2.3.0: a lookup answers only for a component discovery lists, re-running
+//! discovery on a miss, and accepts any spelling of a BDF; return codes
+//! follow this header (INVALID_ARGUMENT for an invalid type or a NULL key
+//! buffer, WRONG_DEVICE_TYPE for a BDF listed as another type). GPU
+//! partitions are found from the KFD topology on kernels without the xcp
+//! kobject, a GPU whose compute mode cannot be read stays whole when the
+//! driver or KFD says so, a CPX partition is counted from the parent's
+//! enforce_isolation when KFD hides a sibling, and every amdxdna NPU is
+//! found. A partition whose
+//! cuid_unit_id is malformed is INVALID_FORMAT, as a whole GPU's is, not
+//! UNSUPPORTED. A DerivedID never
+//! carries bit 117. A firmware UUID containing only some 00 or FF octets is
+//! adopted as the Platform CUID; only all-zero and all-ones are absent. The
+//! library is usable in a child after fork(), exports no SHA-256 symbols,
+//! links from C, and installs amdcuid.pc.
+#define AMDCUID_LIB_VERSION_MINOR 3
 
 //! Patch version should be updated for each bug fix or non-API change
 //!
