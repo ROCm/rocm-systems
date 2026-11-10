@@ -388,7 +388,7 @@ def test_allocator_keeps_tcc_request_row_and_level_pairs():
     assert read_home is not row_home
 
 
-def test_eval_tool_wraps_gfx1250_exclusive_families(tmp_path) -> None:
+def test_eval_tool_wraps_gfx1250_exclusive_families(tmp_path, monkeypatch) -> None:
     """The offline pass report must use the same gfx1250 family split as profiling."""
     tool_path = (
         Path(__file__).resolve().parents[3] / "tools" / "eval_single_pass_metrics.py"
@@ -406,7 +406,9 @@ def test_eval_tool_wraps_gfx1250_exclusive_families(tmp_path) -> None:
         soc.detect_counters.return_value = (set(), None)
         return soc
 
-    module._build_inspector_soc = fake_soc
-    module.mi_gpu_specs.get_perfmon_config = lambda arch: {"SQ": 8}
+    monkeypatch.setattr(module, "_build_inspector_soc", fake_soc)
+    monkeypatch.setattr(
+        module.mi_gpu_specs, "get_perfmon_config", lambda arch: {"SQ": 8}
+    )
     module._build_soc("gfx1250", tmp_path)
     assert seen["config"].exclusive_families == (("SP_VALU_", "SQ_VMEM_"),)
