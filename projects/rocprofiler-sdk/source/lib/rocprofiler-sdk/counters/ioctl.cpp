@@ -112,12 +112,11 @@ handle_pmc_ioctl_error(const rocprofiler_agent_t* agent)
                 agent->id.handle);
             return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI;
         default:
-            ROCP_WARNING << fmt::format(
-                "Failed to lock device {} (error: {}). PMC Counters may be "
-                "inaccurate and System Counter "
-                "Collection will be degraded.",
-                agent->id.handle,
-                strerror(err));
+            ROCP_WARNING << fmt::format("Failed to lock device {} (error: {}). PMC Counters may be "
+                                        "inaccurate and System Counter "
+                                        "Collection will be degraded.",
+                                        agent->id.handle,
+                                        strerror(err));
             return ROCPROFILER_STATUS_ERROR;
     }
 }
