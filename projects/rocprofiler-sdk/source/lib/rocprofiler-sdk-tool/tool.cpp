@@ -4963,6 +4963,8 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
     (void) info;
     (void) ucontext;
 
+    // A pre-exec fork child shares the parent's eventfd but not its worker thread. Do not let a
+    // signal in the child wake the parent's finalization worker.
     if(tool_owner_pid != ::getpid())
     {
         restore_signal_disposition(signo);
