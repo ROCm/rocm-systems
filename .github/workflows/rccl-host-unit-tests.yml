@@ -44,7 +44,8 @@ jobs:
         run: |
           python3 -m venv "$RUNNER_TEMP/rccl-ci-tests-venv"
           "$RUNNER_TEMP/rccl-ci-tests-venv/bin/python" -m pip install \
-            --disable-pip-version-check -r projects/rccl/test/kernel-count/requirements.txt
+            --disable-pip-version-check -r projects/rccl/test/kernel-count/requirements.txt \
+            pyyaml
           "$RUNNER_TEMP/rccl-ci-tests-venv/bin/python" -m pytest -q \
             projects/rccl/test/test_accl_profiler_ci.py \
             projects/rccl/test/test_plan_rccl_ci.py \
