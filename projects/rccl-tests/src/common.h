@@ -9,6 +9,8 @@
 #define __COMMON_H__
 
 #define NCCL_TESTS_VERSION "2.19.6"
+// Socket encryption pre-shared key; util.cu redacts it from the JSON report by this name.
+#define NCCL_TESTS_TLS_PSK_ENV "NCCL_TESTS_TLS_PSK"
 
 #include "rccl/rccl.h"
 // nccl_device.h provides the device-API public types referenced below
