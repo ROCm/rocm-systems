@@ -1505,6 +1505,40 @@ protected:
 
   bool tensor_load_oldest() { return tensor_load(0, {{.address = kOldestAddress, .bytes = 4}}); }
 
+  /// Issue a one-lane ds_atomic_async_barrier_arrive_b64 on the barrier cell at
+  /// `address`, with the counter metadata it decodes with (see
+  /// AsyncBarrierArriveDecodesAsAnAsyncLoad).
+  void async_barrier_arrive(int wave, uint32_t address) {
+    waves[wave]->pc += 16;
+    auto state = std::make_unique<VectorMemState>(LOCAL_MEM);
+    state->elem_size = sizeof(uint64_t);
+    state->num_elems = 1;
+    state->is_load = false;
+    state->wf_size = waves[wave]->wf_size();
+    state->exec_mask = 1;
+    state->lane_mask = 1;
+    state->per_lane_addr[0] = address;
+    TestMemoryInstruction inst(std::move(state),
+                               {{WaitCounterType::ASYNCCNT, MemoryCompletionClass::ASYNC_LOAD}});
+    issue(wave, inst, {}, /*exec=*/1);
+  }
+
+  /// Issue a one-lane async store from LDS, which counts on ASYNCcnt in the
+  /// async-store class.
+  void async_store(int wave) {
+    waves[wave]->pc += 16;
+    auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+    state->elem_size = sizeof(uint32_t);
+    state->num_elems = 1;
+    state->is_load = false;
+    state->wf_size = waves[wave]->wf_size();
+    state->exec_mask = 1;
+    state->lane_mask = 1;
+    TestMemoryInstruction inst(std::move(state),
+                               {{WaitCounterType::ASYNCCNT, MemoryCompletionClass::ASYNC_STORE}});
+    issue(wave, inst, {}, /*exec=*/1);
+  }
+
   WaveRaceState &race_state(int wave) {
     return *static_cast<RaceWavefrontState *>(waves[wave]->plugin_state(plugin->slot_index()))
                 ->race_state;
@@ -1728,6 +1762,46 @@ TEST_F(Gfx1250CounterCapacityRaceTest, AsynccntAtCapacityKeepsOldestAsyncLoadPen
   dtl_write(0, kOldestAddress);
   for (int index = 0; index < kCapacity - 1; ++index)
     dtl_write(0, kYoungerAddress);
+  EXPECT_TRUE(ds_read(0, kOldestAddress));
+}
+
+// ds_atomic_async_barrier_arrive_b64 counts on ASYNCcnt and "is kept in-order
+// with async-loads" (CDNA5 ISA 10.8), so it decodes into the async-load class.
+TEST_F(Gfx1250CounterCapacityRaceTest, AsyncBarrierArriveDecodesAsAnAsyncLoad) {
+  const std::array<uint32_t, 2> words{0xD9580000u,
+                                      0x00000000u}; // ds_atomic_async_barrier_arrive_b64.
+  std::unique_ptr<Instruction> arrive(decode_valid(*decoder, words.data()));
+  ASSERT_NE(arrive, nullptr);
+  ASSERT_EQ(std::string_view(arrive->mnemonic()), "ds_atomic_async_barrier_arrive_b64");
+  const auto *info = arrive->amdgpu_memory_issue_info();
+  ASSERT_NE(info, nullptr);
+  const auto obligations = info->counter_obligations();
+  ASSERT_EQ(obligations.size(), 1u);
+  EXPECT_EQ(obligations[0].wait_counter_type(), WaitCounterType::ASYNCCNT);
+  EXPECT_EQ(obligations[0].completion_class(), MemoryCompletionClass::ASYNC_LOAD);
+  EXPECT_EQ(obligations[0].counter_increment(), 1);
+}
+
+// The arrive fills ASYNCcnt together with async loads, so an async load issued
+// once they fill it completes the oldest async load.
+TEST_F(Gfx1250CounterCapacityRaceTest, AsyncBarrierArriveFillsAsynccntWithAsyncLoads) {
+  dtl_write(0, kOldestAddress);
+  for (int index = 0; index < kCapacity - 2; ++index)
+    dtl_write(0, kYoungerAddress);
+  async_barrier_arrive(0, kFlatLdsAddress);
+  dtl_write(0, kYoungerAddress);
+  EXPECT_FALSE(ds_read(0, kOldestAddress));
+}
+
+// An async store in the same position does not: async loads and stores
+// complete out of order with each other (CDNA5 ISA 10.8), so a full ASYNCcnt
+// does not prove the oldest async load complete.
+TEST_F(Gfx1250CounterCapacityRaceTest, AsyncStoreDoesNotFillAsynccntWithAsyncLoads) {
+  dtl_write(0, kOldestAddress);
+  for (int index = 0; index < kCapacity - 2; ++index)
+    dtl_write(0, kYoungerAddress);
+  async_store(0);
+  dtl_write(0, kYoungerAddress);
   EXPECT_TRUE(ds_read(0, kOldestAddress));
 }
 
