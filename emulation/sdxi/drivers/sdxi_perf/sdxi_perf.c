@@ -62,8 +62,10 @@ static int cxt_stat_show(struct seq_file *m, void *v)
 	struct sdxi_perf_dev *p  = cf->priv;
 	u64 sel = ((u64)cf->stat_sel << 8) | cf->cid;
 
+	u64 val;
+
 	writeq(sel, p->bar0 + SDXI_CTR_SELECT);
-	u64 val = readq(p->bar0 + SDXI_CTR_VAL);
+	val = readq(p->bar0 + SDXI_CTR_VAL);
 	seq_printf(m, "%llu\n", val);
 	return 0;
 }
@@ -191,6 +193,6 @@ static void __exit sdxi_perf_exit(void)
 module_init(sdxi_perf_init);
 module_exit(sdxi_perf_exit);
 
-MODULE_LICENSE("MIT");
+MODULE_LICENSE("Dual MIT/GPL");
 MODULE_AUTHOR("Advanced Micro Devices, Inc.");
 MODULE_DESCRIPTION("SDXI emulator per-context performance counters via debugfs");

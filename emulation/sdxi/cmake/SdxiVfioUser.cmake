@@ -71,8 +71,17 @@ add_library(
     ${libvfio-user_SOURCE_DIR}/lib/tran.c
     ${libvfio-user_SOURCE_DIR}/lib/tran_sock.c
 )
+# Sources include headers as <vfio-user/libvfio-user.h>; create a shim
+# directory with a vfio-user/ subdirectory symlink to satisfy that spelling.
+set(_vfio_shim_dir "${CMAKE_CURRENT_BINARY_DIR}/vfio-user-include")
+file(MAKE_DIRECTORY "${_vfio_shim_dir}")
+if(NOT EXISTS "${_vfio_shim_dir}/vfio-user")
+    file(CREATE_LINK "${libvfio-user_SOURCE_DIR}/include" "${_vfio_shim_dir}/vfio-user" SYMBOLIC)
+endif()
+unset(_vfio_shim_dir)
+
 target_include_directories(libvfio-user SYSTEM PUBLIC
-    ${libvfio-user_SOURCE_DIR}/include
+    "${CMAKE_CURRENT_BINARY_DIR}/vfio-user-include"
 )
 target_include_directories(libvfio-user PRIVATE
     ${libvfio-user_SOURCE_DIR}/lib
