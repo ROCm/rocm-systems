@@ -3,6 +3,8 @@
 
 #include "cache_directory.hpp"
 
+#include "formats/trace_formats.hpp"
+
 #include <profiler-hub/cpp/reader.hpp>
 #include <profiler-hub/cpp/reader_types.hpp>
 
@@ -94,7 +96,11 @@ std::string human_size(uint64_t bytes)
 
 std::string format_label(reader_types::trace_schema_t schema)
 {
-    return schema == reader_types::trace_schema_t::rocpd ? "rocpd" : "unknown";
+    for(const format_entry_t& entry : format_entries())
+    {
+        if(entry.schema == schema) return entry.name;
+    }
+    return "unknown";
 }
 
 }  // namespace
