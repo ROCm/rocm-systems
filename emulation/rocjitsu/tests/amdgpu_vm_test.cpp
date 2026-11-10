@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "aql_queue.h"
+#include "compute_unit_test_util.h"
 #include "config_test_util.h"
 #include "halt_snapshot_plugin.h"
 #include "instruction_failure_test_util.h"
@@ -34,6 +35,7 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/partitioning.h"
 #include "rocjitsu/vm/amdgpu/request_mtype_resolver.h"
+#include "rocjitsu/vm/amdgpu/shader_engine.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/amdgpu/wf_scheduler.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
@@ -127,7 +129,7 @@ class CommandProcessorCacheTestAccess {
 public:
   static void flush_gpu_caches(CommandProcessor &cp) {
     std::lock_guard lock(cp.hw_queue_mutex_);
-    cp.flush_gpu_caches();
+    EXPECT_EQ(cp.flush_gpu_caches(), VmAccessOutcome::Complete);
   }
 
   static void flush_completion_caches(CommandProcessor &cp) {
@@ -553,14 +555,153 @@ TEST(CommandProcessorTest, LargeInternalWorkgroupsKeepCallbackOrderAndReclaimFai
   }
 }
 
-TEST(ComputeUnitConfigTest, RejectsWavefrontSlotsAboveIsaMaximum) {
-  VmFixture fixture;
-  EXPECT_THROW(fixture.initialize("cdna3", 1, 33), util::ConfigError);
+TEST(ComputeUnitConfigTest, DirectFactoryDiagnosesRejectedConfiguration) {
+  using Config = amdgpu::ComputeUnitCore::Config;
+  const Config valid{
+      .arch = ROCJITSU_CODE_ARCH_CDNA3,
+      .num_wf_slots = 8,
+      .sgprs_per_wf = 104,
+      .vgprs_per_wf = 256,
+      .lds_size_kb = 64,
+  };
+  struct InvalidConfig {
+    Config config;
+    const char *message;
+  };
+  std::vector<InvalidConfig> cases;
+  Config invalid = valid;
+  invalid.num_wf_slots = 33;
+  cases.push_back({invalid, "num_wf_slots exceeds the ISA maximum of 32"});
+  invalid = valid;
+  invalid.vgprs_per_wf = 513;
+  cases.push_back({invalid, "effective VGPRs per wavefront exceeds the ISA maximum of 512"});
+  invalid = valid;
+  invalid.arch = ROCJITSU_CODE_ARCH_INVALID;
+  cases.push_back({invalid, "Unsupported architecture for ComputeUnit"});
+  invalid.arch = ROCJITSU_CODE_ARCH_RV64I;
+  cases.push_back({invalid, "Unsupported architecture for ComputeUnit"});
+  invalid = valid;
+  invalid.target = static_cast<rj_code_target_id_t>(UINT32_MAX);
+  cases.push_back({invalid, "unsupported concrete GPU target"});
+
+  for (const auto &test_case : cases) {
+    SCOPED_TRACE(test_case.message);
+    util::StringDiagnostic diagnostic;
+    EXPECT_TRUE(amdgpu::ComputeUnitCore::validate(test_case.config, diagnostic.emitter()).failed());
+    EXPECT_EQ(diagnostic.message(), test_case.message);
+    for (auto mode : {simdojo::ExecMode::FUNCTIONAL, simdojo::ExecMode::CLOCKED}) {
+      diagnostic("");
+      std::unique_ptr<amdgpu::ComputeUnitCore> compute_unit;
+      EXPECT_NO_THROW(compute_unit =
+                          amdgpu::ComputeUnitCore::create("rejected", test_case.config, nullptr,
+                                                          nullptr, mode, diagnostic.emitter()));
+      EXPECT_EQ(compute_unit, nullptr);
+      EXPECT_EQ(diagnostic.message(), test_case.message);
+    }
+  }
 }
 
-TEST(ComputeUnitConfigTest, RejectsVgprSpanAboveIsaMaximum) {
-  VmFixture fixture;
-  EXPECT_THROW(fixture.initialize("cdna3", 1, 32, 64, 104, 513), util::ConfigError);
+TEST(ComputeUnitConfigTest, FixtureSetupStopsWithRejectedConfigurationDiagnostic) {
+  ::testing::TestPartResultArray failures;
+  bool continued_setup = false;
+  {
+    ::testing::ScopedFakeTestPartResultReporter reporter(
+        ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD, &failures);
+    [&] {
+      std::unique_ptr<amdgpu::ComputeUnitCore> compute_unit;
+      const amdgpu::ComputeUnitCore::Config config{
+          .arch = ROCJITSU_CODE_ARCH_CDNA3,
+          .num_wf_slots = 33,
+          .sgprs_per_wf = 104,
+          .vgprs_per_wf = 256,
+          .lds_size_kb = 64,
+      };
+      ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(
+          compute_unit, "rejected_fixture", config, nullptr, nullptr));
+      continued_setup = true;
+    }();
+  }
+  EXPECT_FALSE(continued_setup);
+  ASSERT_GE(failures.size(), 1);
+  EXPECT_TRUE(failures.GetTestPartResult(0).fatally_failed());
+  EXPECT_NE(std::string(failures.GetTestPartResult(0).message())
+                .find("num_wf_slots exceeds the ISA maximum of 32"),
+            std::string::npos);
+}
+
+TEST(ComputeUnitConfigTest, DirectFactoryDiagnosesUnsupportedExecutionMode) {
+  const amdgpu::ComputeUnitCore::Config config{
+      .arch = ROCJITSU_CODE_ARCH_CDNA3,
+      .num_wf_slots = 8,
+      .sgprs_per_wf = 104,
+      .vgprs_per_wf = 256,
+      .lds_size_kb = 64,
+  };
+  util::StringDiagnostic diagnostic;
+  std::unique_ptr<amdgpu::ComputeUnitCore> compute_unit;
+  EXPECT_NO_THROW(compute_unit = amdgpu::ComputeUnitCore::create(
+                      "rejected", config, nullptr, nullptr, static_cast<simdojo::ExecMode>(255),
+                      diagnostic.emitter()));
+  EXPECT_EQ(compute_unit, nullptr);
+  EXPECT_EQ(diagnostic.message(), "Unsupported execution mode for ComputeUnit");
+}
+
+TEST(ComputeUnitConfigTest, DirectFactoryPropagatesDiagnosticDeliveryFailures) {
+  const struct {
+    const char *name;
+    uint32_t wave_slots;
+    simdojo::ExecMode mode;
+    const char *message;
+  } cases[] = {
+      {"invalid wave slots", 33, simdojo::ExecMode::FUNCTIONAL,
+       "num_wf_slots exceeds the ISA maximum of 32"},
+      {"unsupported execution mode", 8, static_cast<simdojo::ExecMode>(255),
+       "Unsupported execution mode for ComputeUnit"},
+  };
+  for (const auto &test_case : cases) {
+    SCOPED_TRACE(test_case.name);
+    const amdgpu::ComputeUnitCore::Config config{
+        .arch = ROCJITSU_CODE_ARCH_CDNA3,
+        .num_wf_slots = test_case.wave_slots,
+        .sgprs_per_wf = 104,
+        .vgprs_per_wf = 256,
+        .lds_size_kb = 64,
+    };
+    std::string diagnostic;
+    uint32_t deliveries = 0;
+    auto sink = [&](std::string_view message) {
+      diagnostic = message;
+      ++deliveries;
+      throw std::runtime_error("diagnostic delivery failed");
+    };
+    EXPECT_THROW((void)amdgpu::ComputeUnitCore::create("rejected", config, nullptr, nullptr,
+                                                       test_case.mode,
+                                                       util::DiagnosticEmitter(sink)),
+                 std::runtime_error);
+    EXPECT_EQ(deliveries, 1u);
+    EXPECT_EQ(diagnostic, test_case.message);
+  }
+}
+
+TEST(ComputeUnitConfigTest, ShaderEngineTranslatesRejectedConfigurationToConfigError) {
+  const amdgpu::ShaderEngine::Config config{
+      .num_compute_units = 1,
+      .compute_unit =
+          {
+              .arch = ROCJITSU_CODE_ARCH_CDNA3,
+              .num_wf_slots = 33,
+              .sgprs_per_wf = 104,
+              .vgprs_per_wf = 256,
+              .lds_size_kb = 64,
+          },
+  };
+  try {
+    amdgpu::ShaderEngine shader_engine("rejected", config, ROCJITSU_CODE_ARCH_CDNA3, nullptr,
+                                       nullptr);
+    FAIL() << "Expected rejected CU configuration to throw ConfigError";
+  } catch (const util::ConfigError &error) {
+    EXPECT_STREQ(error.what(), "Config error: num_wf_slots exceeds the ISA maximum of 32");
+  }
 }
 
 TEST(ComputeUnitConfigTest, DirectFactoryAcceptsExecutionEnabledConcreteTarget) {
@@ -611,8 +752,14 @@ TEST(ComputeUnitConfigTest, DirectFactoryRejectsTargetFromAnotherArchitecture) {
       .lds_size_kb = 64,
   };
 
-  EXPECT_THROW((void)amdgpu::ComputeUnitCore::create("cu", config, &memory, &l2),
-               util::ConfigError);
+  util::StringDiagnostic diagnostic;
+  std::unique_ptr<amdgpu::ComputeUnitCore> compute_unit;
+  EXPECT_NO_THROW(compute_unit = amdgpu::ComputeUnitCore::create("cu", config, &memory, &l2,
+                                                                 simdojo::ExecMode::FUNCTIONAL,
+                                                                 diagnostic.emitter()));
+  EXPECT_EQ(compute_unit, nullptr);
+  EXPECT_EQ(diagnostic.message(),
+            "concrete GPU target does not belong to the configured architecture");
 }
 
 enum class SubmitTrigger { DispatchBegin, AfterInstruction };
@@ -1097,7 +1244,9 @@ TEST(RdnaDispatchTest, WgpModeCombinesSiblingCuLdsCapacity) {
     SCOPED_TRACE(arch);
     VmFixture f;
     ASSERT_NO_FATAL_FAILURE(f.initialize(arch, 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128));
-    const uint32_t code[] = {build_s_endpgm(f.cu()->arch())};
+    util::FailureOr<uint32_t> maybe_endpgm = build_s_endpgm(f.cu()->arch());
+    ASSERT_TRUE(maybe_endpgm.succeeded());
+    const uint32_t code[] = {maybe_endpgm.value()};
     auto *snap = f.capture_halts();
     uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), 104, 64, 2, kWgpLdsBytes,
                                  /*wgp_mode=*/true);
@@ -5058,7 +5207,9 @@ TEST(RdnaDispatchTest, PackedTidHonorsRequestedComponents) {
       SCOPED_TRACE(arch + " component_count=" + std::to_string(component_count));
       VmFixture f;
       ASSERT_NO_FATAL_FAILURE(f.initialize(arch, 1, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128));
-      const uint32_t code[] = {build_s_endpgm(f.cu()->arch())};
+      util::FailureOr<uint32_t> maybe_endpgm = build_s_endpgm(f.cu()->arch());
+      ASSERT_TRUE(maybe_endpgm.succeeded());
+      const uint32_t code[] = {maybe_endpgm.value()};
       auto *snap = f.capture_halts();
       uint64_t ko =
           f.write_kernel(0x1000, code, sizeof(code), 104, 32, 2, 0, false, component_count);
@@ -5241,7 +5392,9 @@ TEST(CommandProcessorTest, KfdQueueRequestsResizesAndReclaimsDynamicScratchBefor
 
   VmFixture fixture;
   ASSERT_NO_FATAL_FAILURE(fixture.initialize("cdna5", /*num_cus=*/1, /*num_wf_slots=*/2));
-  const uint32_t code[] = {build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5)};
+  util::FailureOr<uint32_t> maybe_endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_TRUE(maybe_endpgm.succeeded());
+  const uint32_t code[] = {maybe_endpgm.value()};
   const uint64_t first_kernel = fixture.write_kernel(0x1000, code, sizeof(code));
   fixture.mem()->write32(first_kernel + offsetof(kernel_descriptor_t, private_segment_fixed_size),
                          kFirstPrivateBytes);
@@ -5407,7 +5560,9 @@ TEST(CommandProcessorTest, RuntimeScratchStrideSurvivesLargeThenSmallPrivateSegm
                            KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, 1);
         return descriptor;
       }());
-      const uint32_t code[] = {build_s_endpgm(f.cu()->arch())};
+      util::FailureOr<uint32_t> maybe_s_endpgm = build_s_endpgm(f.cu()->arch());
+      ASSERT_TRUE(maybe_s_endpgm.succeeded());
+      const uint32_t code[] = {maybe_s_endpgm.value()};
       const uint64_t large = f.write_kernel(0x1000, code, sizeof(code));
       const uint64_t small = f.write_kernel(0x2000, code, sizeof(code));
       f.mem()->write32(large + offsetof(kernel_descriptor_t, private_segment_fixed_size), 1024);
@@ -5473,7 +5628,9 @@ TEST(CommandProcessorTest, Cdna5RuntimeScratchAcceptsTargetGranules) {
   ASSERT_NO_FATAL_FAILURE(f.initialize("cdna5", 1, 2));
   constexpr uint64_t kRing = 0xF0000000, kQueue = 0xF0010000, kDoorbell = 0xF0020000;
   constexpr uint64_t kBacking = 0x800000, kStride = 1536;
-  const uint32_t code[] = {build_s_endpgm(f.cu()->arch())};
+  util::FailureOr<uint32_t> maybe_s_endpgm_2 = build_s_endpgm(f.cu()->arch());
+  ASSERT_TRUE(maybe_s_endpgm_2.succeeded());
+  const uint32_t code[] = {maybe_s_endpgm_2.value()};
   const uint64_t kernel = f.write_kernel(0x1000, code, sizeof(code));
   f.mem()->write32(kernel + offsetof(kernel_descriptor_t, private_segment_fixed_size), 48);
   f.mem()->write64(kQueue + offsetof(amd_queue_t, scratch_backing_memory_location), kBacking);
@@ -5646,7 +5803,9 @@ TEST(CommandProcessorTest, KfdQueueHonorsAsyncScratchCutoffsAndTracksPerXccUse) 
                                              /*num_shader_engines=*/2));
   fixture.cp()->set_scratch_wave_divisor(2);
   fixture.cp()->set_scratch_xcc_layout_for_test(kXccId, kXccCount);
-  const uint32_t code[] = {build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5)};
+  util::FailureOr<uint32_t> maybe_endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_TRUE(maybe_endpgm.succeeded());
+  const uint32_t code[] = {maybe_endpgm.value()};
   const uint64_t kernel = fixture.write_kernel(0x4000, code, sizeof(code));
   fixture.mem()->write32(kernel + offsetof(kernel_descriptor_t, private_segment_fixed_size),
                          kPrivateBytes);
@@ -6063,10 +6222,18 @@ TEST_P(WavefrontSlotTest, SparseSlotsExecuteAcrossRetirementWaitPauseAndReuse) {
   ASSERT_NO_FATAL_FAILURE(f.initialize(arch, 1, kSlots));
   auto *cu = f.cu();
   constexpr uint64_t kCode = 0x1000;
+  util::FailureOr<uint32_t> maybe_s_endpgm_3 = build_s_endpgm(cu->arch());
+  ASSERT_TRUE(maybe_s_endpgm_3.succeeded());
+  util::FailureOr<uint32_t> maybe_s_mov_b32_4 =
+      build_s_mov_b32(0, scalar_positive_inline_u32(2), cu->arch());
+  ASSERT_TRUE(maybe_s_mov_b32_4.succeeded());
+  util::FailureOr<uint32_t> maybe_s_mov_b32_5 =
+      build_s_mov_b32(0, scalar_positive_inline_u32(1), cu->arch());
+  ASSERT_TRUE(maybe_s_mov_b32_5.succeeded());
   const std::array code = {
-      build_s_mov_b32(0, scalar_positive_inline_u32(1), cu->arch()),
-      build_s_mov_b32(0, scalar_positive_inline_u32(2), cu->arch()),
-      build_s_endpgm(cu->arch()),
+      maybe_s_mov_b32_5.value(),
+      maybe_s_mov_b32_4.value(),
+      maybe_s_endpgm_3.value(),
   };
   f.mem()->load_image(reinterpret_cast<const uint8_t *>(code.data()), sizeof(code), kCode);
 
@@ -6112,9 +6279,14 @@ TEST_P(WavefrontSlotTest, LowerBarrierWaiterResumesAfterSparseHigherSlotRetires)
   ASSERT_NO_FATAL_FAILURE(f.initialize(arch, 1, kSlots));
   auto *cu = f.cu();
   constexpr uint64_t kCode = 0x1000;
+  util::FailureOr<uint32_t> maybe_s_endpgm_1 = build_s_endpgm(cu->arch());
+  ASSERT_TRUE(maybe_s_endpgm_1.succeeded());
+  util::FailureOr<uint32_t> maybe_s_mov_b32_2 =
+      build_s_mov_b32(0, scalar_positive_inline_u32(7), cu->arch());
+  ASSERT_TRUE(maybe_s_mov_b32_2.succeeded());
   const std::array code = {
-      build_s_mov_b32(0, scalar_positive_inline_u32(7), cu->arch()),
-      build_s_endpgm(cu->arch()),
+      maybe_s_mov_b32_2.value(),
+      maybe_s_endpgm_1.value(),
   };
   f.mem()->load_image(reinterpret_cast<const uint8_t *>(code.data()), sizeof(code), kCode);
   auto *low = cu->dispatch_wf_at(0, 7, kCode, 104, 256, wave_size);
@@ -6178,11 +6350,21 @@ TEST(TrapRegisterPcTest, SetpcPrecheckReadsDecodedTtmpPair) {
   constexpr uint64_t kStartPc = 0x1000;
   constexpr uint64_t kTargetPc = kStartPc + 2 * sizeof(uint32_t);
   constexpr uint32_t kTtmp0Selector = 108;
+  util::FailureOr<uint32_t> maybe_s_endpgm_3 = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(maybe_s_endpgm_3.succeeded());
+  util::FailureOr<uint32_t> maybe_s_endpgm_4 = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(maybe_s_endpgm_4.succeeded());
+  util::FailureOr<uint32_t> maybe_s_setpc_b64 =
+      build_s_setpc_b64(kTtmp0Selector, ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(maybe_s_setpc_b64.succeeded());
+  util::FailureOr<uint32_t> maybe_s_mov_b32 =
+      build_s_mov_b32(/*sdst=*/0, scalar_positive_inline_u32(1), ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(maybe_s_mov_b32.succeeded());
   const std::array<uint32_t, 4> code = {
-      build_s_setpc_b64(kTtmp0Selector, ROCJITSU_CODE_ARCH_CDNA4),
-      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
-      build_s_mov_b32(/*sdst=*/0, scalar_positive_inline_u32(1), ROCJITSU_CODE_ARCH_CDNA4),
-      build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4),
+      maybe_s_setpc_b64.value(),
+      maybe_s_endpgm_3.value(),
+      maybe_s_mov_b32.value(),
+      maybe_s_endpgm_4.value(),
   };
   mem.load_image(reinterpret_cast<const uint8_t *>(code.data()), sizeof(code), kStartPc);
 
@@ -6584,7 +6766,9 @@ TEST(CommandProcessorAqlTest, BlockingBarriersRetireBeforeUnsupportedSuccessorFa
     SCOPED_TRACE(format);
     VmFixture f;
     ASSERT_NO_FATAL_FAILURE(f.initialize("cdna5", 1, 8));
-    const uint32_t code[] = {build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5)};
+    util::FailureOr<uint32_t> maybe_endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
+    ASSERT_TRUE(maybe_endpgm.succeeded());
+    const uint32_t code[] = {maybe_endpgm.value()};
     const uint64_t kernel = f.write_kernel(0x1000, code, sizeof(code));
     constexpr uint64_t kPriorCompletionSignal = 0x7000;
     constexpr uint64_t kBarrierCompletionSignal = 0x7100;
@@ -6626,7 +6810,9 @@ TEST(CommandProcessorAqlTest, UnsupportedSuccessorDoesNotStrandResidentDispatch)
   auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
   ASSERT_TRUE(group->add(std::move(lifecycle)));
   f.soc_ptr->set_plugin_group(group);
-  const uint32_t code[] = {build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4)};
+  util::FailureOr<uint32_t> maybe_endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_TRUE(maybe_endpgm.succeeded());
+  const uint32_t code[] = {maybe_endpgm.value()};
   const uint64_t kernel = f.write_kernel(0x1000, code, sizeof(code));
   constexpr uint64_t kCompletionSignal = 0x7000;
   init_completion_signal(f.mem(), kCompletionSignal);
@@ -6654,7 +6840,9 @@ TEST(CommandProcessorAqlTest, UnsupportedSuccessorDoesNotStrandResidentDispatch)
 TEST(CommandProcessorAqlTest, Pm4IbRetiresBeforeUnsupportedSuccessorFaultsQueue) {
   VmFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize("cdna5", 1, 8));
-  const uint32_t code[] = {build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5)};
+  util::FailureOr<uint32_t> maybe_endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_TRUE(maybe_endpgm.succeeded());
+  const uint32_t code[] = {maybe_endpgm.value()};
   const uint64_t kernel = f.write_kernel(0x1000, code, sizeof(code));
   constexpr uint64_t kPriorCompletionSignal = 0x7000;
   constexpr uint64_t kPm4CompletionSignal = 0x7100;
@@ -7313,8 +7501,11 @@ TEST(ClusterDispatchTest, Rdna4ExtendedDispatchKeepsOrdinaryTtmpWorkgroupIds) {
   ASSERT_NO_FATAL_FAILURE(f.initialize("rdna4", 1, 8, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128));
   auto *snap = f.capture_halts();
 
-  const uint32_t code[] = {build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4),
-                           build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4)};
+  util::FailureOr<uint32_t> maybe_nop = build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(maybe_nop.succeeded());
+  util::FailureOr<uint32_t> maybe_endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
+  ASSERT_TRUE(maybe_endpgm.succeeded());
+  const uint32_t code[] = {maybe_nop.value(), maybe_endpgm.value()};
   uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), /*sgprs=*/128);
 
   amdgpu::AmdExtKernelDispatchPacket ext{};
@@ -8264,6 +8455,28 @@ TEST_P(IsaTest, SEndpgm_Halts) {
   EXPECT_TRUE(fx.halted());
 }
 
+// The emulator's null-PC return sentinel is another normal termination path.
+// Keep a counter pending to distinguish draining it from freeing the wave early.
+TEST(ComputeUnitTest, NullPcReturnDrainsMemoryBeforeHalt) {
+  VmFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize("cdna4", /*num_cus=*/1, /*num_wf_slots=*/1));
+  const std::array<uint32_t, 1> words = cdna4::build_sop1(cdna4::kSSetPcB64Sop1, {.ssrc0 = 0});
+  constexpr uint64_t kPc = 0x1000;
+  fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(words.data()), sizeof(words), kPc);
+  amdgpu::Wavefront *wave = fixture.cu()->dispatch_wf(0, kPc, 104, 32);
+  ASSERT_NE(wave, nullptr);
+  fixture.cu()->write_sgpr(wave->sgpr_alloc().base, 0);
+  fixture.cu()->write_sgpr(wave->sgpr_alloc().base + 1, 0);
+  wave->wait_counters().increment(amdgpu::WaitCounterType::LGKMCNT);
+
+  fixture.cu()->step();
+
+  ASSERT_EQ(wave->state(), amdgpu::WfState::ENDING);
+  EXPECT_FALSE(wave->is_halted());
+  wave->release_wait_counter(amdgpu::WaitCounterType::LGKMCNT);
+  EXPECT_TRUE(wave->is_halted());
+}
+
 TEST_P(IsaTest, VMovB32_PerLane) {
   ExecFixture fx;
   ASSERT_NO_FATAL_FAILURE(fx.initialize(arch()));
@@ -8515,8 +8728,8 @@ TEST_P(IsaTest, MfmaF16Accumulation) {
   uint32_t s1 = vb + 18;
   uint32_t s2 = vb + 256;
   uint32_t const_acc = amdgpu::ACC_FROM_VGPR;
-  amdgpu::exec_f32(*cu, 16, 16, 32, 1, 16, dst, s0, s1, s2, amdgpu::extract_f16,
-                   amdgpu::extract_f16, const_acc);
+  amdgpu::exec_f32<16, 16, 32, 1>(*cu, 16, dst, s0, s1, s2, amdgpu::extract_f16,
+                                  amdgpu::extract_f16, const_acc);
 
   // Verify: every output element should be exactly 32.0f
   float expected = 32.0f;
@@ -8567,8 +8780,8 @@ TEST_P(IsaTest, MfmaF16AccumulationPatterned) {
 
   // Execute MFMA with zero accumulator (const_acc = 0.0f)
   uint32_t dst = vb + 256;
-  amdgpu::exec_f32(*cu, 16, 16, 32, 1, 16, dst, vb + 10, vb + 18, dst, amdgpu::extract_f16,
-                   amdgpu::extract_f16, std::bit_cast<uint32_t>(0.0f));
+  amdgpu::exec_f32<16, 16, 32, 1>(*cu, 16, dst, vb + 10, vb + 18, dst, amdgpu::extract_f16,
+                                  amdgpu::extract_f16, std::bit_cast<uint32_t>(0.0f));
 
   // With const_acc=0.0, all outputs should be 32.0 (sum of 32 ones*ones)
   float expected = 32.0f;
@@ -10398,9 +10611,11 @@ TEST(AqlDispatchTest, ThrowingIssueHooksReclaimDecodedInstruction) {
     ASSERT_TRUE(group->add(std::make_unique<ThrowingIssuePlugin>(hook)));
     f.soc_ptr->set_plugin_group(group);
     // An indirect branch to zero halts outside execute_instruction().
-    const uint32_t code = hook == ThrowingIssuePlugin::Halt
-                              ? build_s_setpc_b64(0, ROCJITSU_CODE_ARCH_CDNA4)
-                              : 0xBE800000u;
+    const util::FailureOr<uint32_t> maybe_code =
+        hook == ThrowingIssuePlugin::Halt ? build_s_setpc_b64(0, ROCJITSU_CODE_ARCH_CDNA4)
+                                          : util::FailureOr<uint32_t>(0xBE800000u);
+    ASSERT_TRUE(maybe_code.succeeded());
+    const uint32_t code = maybe_code.value();
     f.write_kernel(0x1000, &code, sizeof(code));
     ASSERT_NE(f.dispatch_scratch_wf(), nullptr);
 
@@ -10712,6 +10927,71 @@ TEST(Pm4DispatchTest, BaseCoordinatesThreadgroupInfoAndIndirectZeroOrigin) {
   }
 }
 
+TEST(Pm4DispatchTest, NativeRingFetchesRaw57BitBranchTarget) {
+  VmFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize("cdna5"));
+  auto *halts = f.capture_halts();
+  constexpr uint64_t code = 0x8000, ring = 0x9000, target_page = 0xa000;
+  constexpr uint64_t target = (uint64_t{1} << 56) | target_page;
+  constexpr uint64_t root = 0x1000, leaf_table = 0x5000;
+  // The low ring and the high target share the lower four page-table levels.
+  f.mem()->write64(root + (target >> 48) * sizeof(uint64_t), (root + 4096) | 1);
+  for (uint64_t table = root; table < leaf_table; table += 4096)
+    f.mem()->write64(table, (table + 4096) | 1);
+  for (uint64_t page : {code, ring, target_page})
+    f.mem()->write64(leaf_table + (page >> 12) * sizeof(uint64_t),
+                     page | (uint64_t{1} << 63) | 0x71);
+  const auto space = f.soc_ptr->gpu_vm().register_unrouted_gfx12_address_space(
+      77, root, std::make_shared<amdgpu::GpuMemoryPhysicalAccess>(*f.mem()));
+  ASSERT_TRUE(space);
+  const auto setpc = build_s_setpc_b64(0, f.cu()->arch());
+  const auto endpgm = build_s_endpgm(f.cu()->arch());
+  ASSERT_TRUE(setpc.succeeded());
+  ASSERT_TRUE(endpgm.succeeded());
+  f.mem()->write32(code, setpc.value());
+  f.mem()->write32(target_page, endpgm.value());
+  const uint32_t packets[] = {
+      0xc0037600,
+      amdgpu::kPm4ComputeNumThreadX,
+      1,
+      1,
+      1,
+      0xc0027600,
+      amdgpu::kPm4ComputePgmLo,
+      uint32_t(code >> 8),
+      0,
+      0xc0017600,
+      amdgpu::kPm4ComputePgmRsrc2,
+      2u << 1,
+      0xc0027600,
+      amdgpu::kPm4ComputeUserData0,
+      uint32_t(target),
+      uint32_t(target >> 32),
+      0xc0031500,
+      1,
+      1,
+      1,
+      0x8001,
+  };
+  for (size_t i = 0; i < std::size(packets); ++i)
+    f.mem()->write32(ring + i * sizeof(uint32_t), packets[i]);
+  const auto registration =
+      f.cp()->register_queue({.address_space = space,
+                              .process_id = 77,
+                              .queue_id = 71,
+                              .ring_base_va = ring,
+                              .ring_size = 256,
+                              .read_ptr_va = ring + 256,
+                              .packet_format = amdgpu::QueuePacketFormat::Pm4});
+  ASSERT_NE(registration, 0u);
+  ASSERT_EQ(f.cp()->notify_pm4_queue_doorbell(registration, std::size(packets)),
+            amdgpu::QueueSubmissionStatus::Accepted);
+  f.engine->run();
+  EXPECT_FALSE(f.cp()->queue_faulted_for_test(71, 77));
+  EXPECT_EQ(halts->snapshots().size(), 1u);
+  EXPECT_TRUE(f.cp()->unregister_pm4_queue_registration(registration));
+}
+
 TEST(Pm4DispatchTest, MaskedPredExecDoesNotReplaySkippedNativeRingTail) {
   for (const auto *arch : {"cdna3", "cdna4"}) {
     SCOPED_TRACE(arch);
@@ -10895,7 +11175,9 @@ TEST(Pm4DispatchTest, InstructionFailureReclaimsWgpReservationsForOtherQueues) {
           submission.buffers.push_back({ib, uint32_t(words.size())});
           // Keep the second queue pending until the first reports failure. The
           // first grid may also have workgroups that never found LDS capacity.
-          submission.ready = [&, index] { return index == 0 || completed[0]; };
+          submission.ready = [&, index](util::DiagnosticEmitter) -> util::FailureOr<bool> {
+            return index == 0 || completed[0];
+          };
           f.engine->register_as_primary();
           submission.complete = [&, index](bool success) {
             EXPECT_FALSE(completed[index]);
@@ -11139,7 +11421,7 @@ TEST(Pm4DispatchTest, CancellationFailsPendingSubmissionAndReleasesVmBinding) {
   ASSERT_TRUE(f.cp()->register_drm_queue(std::move(queue)));
   EXPECT_FALSE(adapter.unregister_address_space(address_space));
   amdgpu::Pm4Submission submission;
-  submission.ready = [] { return false; };
+  submission.ready = [](util::DiagnosticEmitter) -> util::FailureOr<bool> { return false; };
   uint32_t callbacks = 0;
   submission.complete = [&](bool success) {
     EXPECT_FALSE(success);
@@ -11172,7 +11454,7 @@ TEST(Pm4DispatchTest, ExactQueueRetirementPreservesOtherQueuesAndReleasesBinding
     queue.process_id = 7;
     ASSERT_TRUE(f.cp()->register_drm_queue(std::move(queue)));
     amdgpu::Pm4Submission submission;
-    submission.ready = [] { return false; };
+    submission.ready = [](util::DiagnosticEmitter) -> util::FailureOr<bool> { return false; };
     submission.complete = [&, i](bool success) {
       EXPECT_FALSE(success);
       ++callbacks[i];

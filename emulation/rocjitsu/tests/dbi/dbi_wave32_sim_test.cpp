@@ -82,25 +82,38 @@ std::vector<uint32_t> patch_and_run(const std::vector<uint32_t> &text, uint64_t 
 
 // The kernel's saved-EXEC sequence, with a no-op probe at the anchor.
 std::vector<uint32_t> run_saved_exec_kernel(bool descriptor_wave32) {
-  constexpr uint16_t kExecLo = scalar_operand_exec_lo(kArch);
+  constexpr util::FailureOr<uint16_t> exec_lo = scalar_operand_exec_lo(kArch);
+  static_assert(exec_lo.succeeded());
+  constexpr uint16_t kExecLo = exec_lo.value();
+
+  constexpr util::FailureOr<uint32_t> save_exec = build_s_mov_b32(/*sdst=*/1, kExecLo, kArch);
+  static_assert(save_exec.succeeded());
+  constexpr util::FailureOr<uint32_t> set_exec =
+      build_s_mov_b32(kExecLo, scalar_positive_inline_u32(kAnchorMask), kArch);
+  static_assert(set_exec.succeeded());
+  constexpr util::FailureOr<uint32_t> restore_exec = build_s_mov_b32(kExecLo, /*ssrc0=*/1, kArch);
+  static_assert(restore_exec.succeeded());
+  constexpr util::FailureOr<uint32_t> endpgm = build_s_endpgm(kArch);
+  static_assert(endpgm.succeeded());
+  constexpr util::FailureOr<uint32_t> setpc = build_s_setpc_b64(/*s[30:31]=*/30, kArch);
+  static_assert(setpc.succeeded());
   constexpr auto compare =
       rdna4::build_vop3(rdna4::kVCmpEqU32Vop3, {.vdst = 0, .src0 = 128, .src1 = 256 + 7});
   std::vector<uint32_t> text{
       test::make_mov_vgpr_inline(3, 0),
-      build_s_mov_b32(/*sdst=*/1, kExecLo, kArch),
-      build_s_mov_b32(kExecLo, scalar_positive_inline_u32(kAnchorMask), kArch),
+      save_exec.value(),
+      set_exec.value(),
   };
   const uint64_t anchor_offset = text.size() * sizeof(uint32_t);
   text.insert(text.end(), {
                               test::make_mov_vgpr_inline(1, 5),
                               compare[0],
                               compare[1],
-                              build_s_mov_b32(kExecLo, /*ssrc0=*/1, kArch),
+                              restore_exec.value(),
                               test::make_mov_vgpr_inline(3, kWritten),
-                              build_s_endpgm(kArch),
+                              endpgm.value(),
                           });
-  return patch_and_run(text, anchor_offset, {build_s_setpc_b64(/*s[30:31]=*/30, kArch)},
-                       descriptor_wave32);
+  return patch_and_run(text, anchor_offset, {setpc.value()}, descriptor_wave32);
 }
 
 TEST(DbiWave32Sim, CompareIntoS0KeepsSavedExecInS1) {
@@ -123,18 +136,25 @@ TEST(DbiWave32Sim, PlannedAsWave64LosesSavedExec) {
 // probe's compare into s2 is planned as clobbering only s2, so the call needs
 // no spill; s3 then reaches v3 only if the compare really writes s2 alone.
 TEST(DbiWave32Sim, ProbeCompareIntoS2KeepsKernelValueInS3) {
+  constexpr util::FailureOr<uint32_t> mov =
+      build_s_mov_b32(/*sdst=*/3, scalar_positive_inline_u32(kWritten), kArch);
+  static_assert(mov.succeeded());
+  constexpr util::FailureOr<uint32_t> endpgm = build_s_endpgm(kArch);
+  static_assert(endpgm.succeeded());
+  constexpr util::FailureOr<uint32_t> setpc = build_s_setpc_b64(/*s[30:31]=*/30, kArch);
+  static_assert(setpc.succeeded());
+
   const std::vector<uint32_t> text{
-      build_s_mov_b32(/*sdst=*/3, scalar_positive_inline_u32(kWritten), kArch),
+      mov.value(),
       test::make_mov_vgpr_inline(1, 5),
       rdna4::build_vop1(rdna4::kVMovB32Vop1, {.src0 = 3, .vdst = 3})[0],
-      build_s_endpgm(kArch),
+      endpgm.value(),
   };
   constexpr auto compare =
       rdna4::build_vop3(rdna4::kVCmpEqU32Vop3, {.vdst = 2, .src0 = 128, .src1 = 128});
-  const std::vector<uint32_t> v3 =
-      patch_and_run(text, /*anchor_offset=*/sizeof(uint32_t),
-                    {compare[0], compare[1], build_s_setpc_b64(/*s[30:31]=*/30, kArch)},
-                    /*descriptor_wave32=*/true);
+  const std::vector<uint32_t> v3 = patch_and_run(text, /*anchor_offset=*/sizeof(uint32_t),
+                                                 {compare[0], compare[1], setpc.value()},
+                                                 /*descriptor_wave32=*/true);
   ASSERT_EQ(v3.size(), kWaveSize) << "kernel did not run to completion (no dispatched wave)";
   for (uint32_t lane = 0; lane < kWaveSize; ++lane)
     EXPECT_EQ(v3[lane], kWritten) << "lane " << lane << " lost the kernel's s3";

@@ -14,6 +14,7 @@
 #include "nccl_device.h"
 #include "rccl_vector_types.h"
 #include "gin_sdma_devtime.h" // shared device-side (wall_clock64) timing scaffold
+#include "gin_resource_sharing.h"  // --gin_resource_sharing mode selection
 #endif
 
 void AllGatherGetCollByteCount(size_t *sendcount, size_t *recvcount, size_t *paramcount, size_t *sendInplaceOffset, size_t *recvInplaceOffset, size_t count, size_t eltSize, int nranks) {
@@ -202,7 +203,11 @@ __device__ void ginAllGatherBody(ncclWindow_t sendwin, size_t sendoffset, ncclWi
 
   const int ginContext = 0;
   const unsigned int signalIndex = blockIdx.x;
-  ncclGin gin { devComm, ginContext };
+  // GPU-locked, NOT --gin_resource_sharing: unlike alltoall/broadcast, the puts
+  // here are spread across CTAs (peer r on CTA r%gridDim.x) and every CTA posts
+  // the world barrier, so qps[peer] is multi-poster -- THREAD's lock elision would
+  // race. Keep the SQ lock regardless of the CLI selection.
+  ncclGin gin { devComm, ginContext, NCCL_GIN_RESOURCE_SHARING_GPU };
   const uint64_t signalValue = gin.readSignal(signalIndex);
 
   ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, blockIdx.x };
@@ -396,6 +401,12 @@ void AllGatherGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, in
 
 testResult_t AllGatherRunTest(struct threadArgs* args, int root, ncclDataType_t type, const char* typeName, ncclRedOp_t op, const char* opName) {
   args->collTest = &allGatherTest;
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+  for (int i = 0; i < args->nGpus; i++) {
+    CUDACHECK(cudaSetDevice(args->gpus[i]));
+    TESTCHECK(uploadGinResourceSharingMode());
+  }
+#endif
   ncclDataType_t *run_types;
   const char **run_typenames;
   int type_count;

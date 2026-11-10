@@ -212,6 +212,10 @@ public:
   void set_scratch_xcc_layout_for_test(uint32_t xcc_id, uint32_t xcc_count);
 
   /// @brief Register a queue and return its CP-local lifetime identity.
+  /// @details Invalid layout and VM capability publication failures return zero.
+  /// Exceptions from VM capability access propagate before queue publication.
+  /// Monitor thread-creation errors propagate after rolling back owner and peer
+  /// registrations. Replicas do not repeat capability publication.
   uint64_t register_queue(ComputeQueueConfig queue);
 
   /// @brief Remove only the queue incarnation identified by @p registration_id.
@@ -499,6 +503,11 @@ public:
     std::lock_guard<std::mutex> lock(doorbell_thread_mutex_);
     return doorbell_running_;
   }
+  /// @brief Fail the next monitor startup with a thread-creation error.
+  void fail_next_doorbell_monitor_start_for_testing() {
+    std::lock_guard<std::mutex> lock(doorbell_thread_mutex_);
+    fail_next_doorbell_monitor_start_for_testing_ = true;
+  }
   /// @brief Test-only check that teardown reaped the monitor's thread handle.
   [[nodiscard]] bool doorbell_monitor_joinable_for_test() {
     std::lock_guard<std::mutex> lock(doorbell_thread_mutex_);
@@ -640,11 +649,17 @@ private:
 
   /// @brief Write back L2 and invalidate scalar, vector and instruction caches.
   /// @details Scalar and vector L1 are write-through and only need
-  /// invalidation. Dirty L2 data is published under the owning VMID. Requires
-  /// hw_queue_mutex_ and joined CU workers. CU maintenance takes each CU's
-  /// mutex to serialize with runtime snapshots, without delivering notifications
-  /// that could re-enter the CP and invalidate queue or dispatch references.
-  void flush_gpu_caches();
+  /// invalidation. A supplied address space limits L2 maintenance to its VMID;
+  /// otherwise all L2 lines are published under their owning VMIDs. If the supplied
+  /// address space cannot be looked up, returns Faulted without touching any cache.
+  /// Otherwise, returns the first incomplete L2 outcome after visiting every L2
+  /// and invalidating L1/I$.
+  /// Successful writebacks remain published; failed dirty lines remain for retry.
+  /// Requires hw_queue_mutex_ and joined CU workers. CU maintenance takes each
+  /// CU's mutex to serialize with runtime snapshots, without delivering
+  /// notifications that could re-enter the CP and invalidate queue or dispatch
+  /// references.
+  [[nodiscard]] VmAccessOutcome flush_gpu_caches(AddressSpaceHandle address_space = {});
 
   /// @brief Ask ROCr to provision scratch while leaving the head packet unconsumed.
   [[nodiscard]] AqlAdmissionResult request_dynamic_scratch(ComputeQueueRecord &queue,
@@ -1115,6 +1130,7 @@ private:
   std::mutex doorbell_thread_mutex_;
   // True while the lifecycle owns a running monitor.
   bool doorbell_running_ = false;
+  bool fail_next_doorbell_monitor_start_for_testing_ = false;
   std::jthread doorbell_thread_;
 };
 

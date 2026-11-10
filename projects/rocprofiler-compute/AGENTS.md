@@ -64,7 +64,13 @@ Agent Skills that drive `rocprof-compute` for end users live under
 **[`skills/`](skills/)**. Read **[`skills/README.md`](skills/README.md)** for
 the layout and how to run their evaluations.
 
-These skills have no CI coverage, so keeping them correct is each change's own
-responsibility. When a change alters CLI options, output layout, supported
-architectures, or whether a feature is experimental, update the matching skill
-in the same pull request, the same way you update docs and tests.
+CI checks only the structure and links of these skills. Keeping their content
+correct is up to each change.
+
+When a change alters CLI options, output layout, supported architectures, or
+whether a feature is experimental, update the matching skill in the same pull
+request, as you update docs and tests.
+
+Skills must also serve users on the two previous ROCm releases. When a change
+alters how a feature behaves, keep a short note in the skill saying how it
+worked before and in which release.

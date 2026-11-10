@@ -210,10 +210,6 @@ inline void execute_ds_swizzle_b32_vds([[maybe_unused]] Inst &inst,
 }
 
 template <typename Inst>
-inline void execute_image_bvh_intersect_ray_mimg([[maybe_unused]] Inst &inst,
-                                                 [[maybe_unused]] Wavefront &wf) {}
-
-template <typename Inst>
 inline void execute_lds_param_load_ldsdir([[maybe_unused]] Inst &inst,
                                           [[maybe_unused]] Wavefront &wf) {}
 

@@ -19,6 +19,7 @@ from amdisa.codegen.execute.conversion import (
     to_fp8_expr,
 )
 from amdisa.codegen.execute.fp8_formats import fp8_helper_name, uses_shared_fp8
+from amdisa.codegen.execute.required_vgpr import append_required_vgpr_offset
 from amdisa.codegen.execute.vop3_modifiers import (
     apply_output,
     output_policy_decl,
@@ -144,6 +145,30 @@ def _resolved_vgpr_offset_call(opnd: str, uses_vgpr_msb_indexing: bool) -> str:
     return f'Isa::resolved_vgpr_offset({opnd}.opr_type_, {opnd}.encoding_value_)'
 
 
+def _move_lanes(dst: str, src: str, use_rj_arith: bool, is_vop3: bool = False) -> str:
+    if use_rj_arith:
+        # Addressing and DPP source staging have already selected the operands.
+        modifiers = (
+            '((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u)'
+            if is_vop3
+            else '0u'
+        )
+        return (
+            '  amdgpu::arith::execute_unary32(wf, rj_arith_v_mov_b32_w32, rj_arith_v_mov_b32_w64,\n'
+            f'      wf.cu().arithmetic_flags(), {modifiers},\n'
+            f'      {dst}, {src});'
+        )
+    return '\n'.join(
+        [
+            '  uint64_t exec = wf.exec();',
+            '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {',
+            '    if (!(exec & (1ULL << lane))) continue;',
+            f'    amdgpu::RegisterAccess(wf).write_lane({dst}, lane, amdgpu::RegisterAccess(wf).read_lane({src}, lane));',
+            '  }',
+        ]
+    )
+
+
 def gen_vector_movrel(
     dst: list[str],
     src: list[str],
@@ -153,6 +178,8 @@ def gen_vector_movrel(
     supports_dpp8: bool = False,
     supports_sdwa: bool = False,
     inactive_uses_bound_ctrl: bool = False,
+    use_rj_arith: bool = False,
+    is_vop3: bool = False,
 ) -> str:
     """Generate M0-relative VGPR move bodies."""
     if op not in ('src', 'dst', 'srcdst', 'srcdst2'):
@@ -168,22 +195,21 @@ def gen_vector_movrel(
         )
         L.append(
             f'  bool rel_src_valid = amdgpu::relative_vgpr_index(rel_src_base, wf.m0(), '
-            f'{src[0]}.vgpr_count(), wf.vgpr_alloc().count).has_value();'
+            f'{src[0]}.vgpr_count(), wf.vgpr_alloc().count, wf.cu().arch()).has_value();'
         )
         L.append(
             f'  Operand rel_src({src[0]}.size_bits(), OperandType::OPR_VGPR, '
             f'static_cast<int>(rel_src_valid ? rel_src_index : 0u));'
         )
         _stage_movrel_source(
-            L, supports_dpp, supports_dpp8, supports_sdwa, inactive_uses_bound_ctrl
+            L,
+            supports_dpp,
+            supports_dpp8,
+            supports_sdwa,
+            inactive_uses_bound_ctrl,
+            use_rj_arith and not is_vop3,
         )
-        L.append('  uint64_t exec = wf.exec();')
-        L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-        L.append('    if (!(exec & (1ULL << lane))) continue;')
-        L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, amdgpu::RegisterAccess(wf).read_lane(rel_src, lane));'
-        )
-        L.append('  }')
+        L.append(_move_lanes(dst[0], 'rel_src', use_rj_arith, is_vop3))
         return '\n'.join(L)
 
     if op in ('srcdst', 'srcdst2'):
@@ -207,11 +233,11 @@ def gen_vector_movrel(
         )
         L.append(
             f'  bool rel_src_valid = amdgpu::relative_vgpr_index(rel_src_base, rel_src_offset, '
-            f'{src[0]}.vgpr_count(), wf.vgpr_alloc().count).has_value();'
+            f'{src[0]}.vgpr_count(), wf.vgpr_alloc().count, wf.cu().arch()).has_value();'
         )
         L.append(
             f'  bool rel_dst_valid = amdgpu::relative_vgpr_index(rel_dst_base, rel_dst_offset, '
-            f'{dst[0]}.vgpr_count(), wf.vgpr_alloc().count).has_value();'
+            f'{dst[0]}.vgpr_count(), wf.vgpr_alloc().count, wf.cu().arch()).has_value();'
         )
         L.append('  if (!rel_dst_valid) return;')
         L.append(
@@ -222,16 +248,14 @@ def gen_vector_movrel(
             f'  Operand rel_dst({dst[0]}.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));'
         )
         _stage_movrel_source(
-            L, supports_dpp, supports_dpp8, supports_sdwa, inactive_uses_bound_ctrl
+            L,
+            supports_dpp,
+            supports_dpp8,
+            supports_sdwa,
+            inactive_uses_bound_ctrl,
+            use_rj_arith and not is_vop3,
         )
-        L.append('  uint64_t exec = wf.exec();')
-        L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-        L.append('    if (!(exec & (1ULL << lane))) continue;')
-        L.append(
-            '    amdgpu::RegisterAccess(wf).write_lane(rel_dst, lane, '
-            'amdgpu::RegisterAccess(wf).read_lane(rel_src, lane));'
-        )
-        L.append('  }')
+        L.append(_move_lanes('rel_dst', 'rel_src', use_rj_arith, is_vop3))
         return '\n'.join(L)
 
     rel_dst_call = _resolved_vgpr_offset_call(dst[0], uses_vgpr_msb_indexing)
@@ -242,19 +266,13 @@ def gen_vector_movrel(
     )
     L.append(
         f'  bool rel_dst_valid = amdgpu::relative_vgpr_index(rel_dst_base, wf.m0(), '
-        f'{dst[0]}.vgpr_count(), wf.vgpr_alloc().count).has_value();'
+        f'{dst[0]}.vgpr_count(), wf.vgpr_alloc().count, wf.cu().arch()).has_value();'
     )
     L.append('  if (!rel_dst_valid) return;')
     L.append(
         f'  Operand rel_dst({dst[0]}.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));'
     )
-    L.append('  uint64_t exec = wf.exec();')
-    L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-    L.append('    if (!(exec & (1ULL << lane))) continue;')
-    L.append(
-        f'    amdgpu::RegisterAccess(wf).write_lane(rel_dst, lane, amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane));'
-    )
-    L.append('  }')
+    L.append(_move_lanes('rel_dst', src[0], use_rj_arith, is_vop3))
     return '\n'.join(L)
 
 
@@ -264,6 +282,7 @@ def _stage_movrel_source(
     supports_dpp8: bool,
     supports_sdwa: bool,
     inactive_uses_bound_ctrl: bool,
+    use_rj_arith: bool,
 ) -> None:
     """Stage modifiers from the M0-adjusted source VGPR, not its encoded base."""
     if not (supports_dpp or supports_dpp8 or supports_sdwa):
@@ -301,6 +320,11 @@ def _stage_movrel_source(
                 '                               rel_staged_src, wf);',
             ]
         )
+    if supports_dpp and use_rj_arith:
+        lines.append(
+            '  amdgpu::dpp::apply_source_modifiers(rel_src, rel_staged_src, wf, '
+            '1ULL << 31, dpp_modifiers_, 0);'
+        )
     lines.append(
         '  ScopedOperandDelegate rel_staged_src_binding('
         'rel_src, rel_staged_src ? &*rel_staged_src : nullptr);'
@@ -308,7 +332,10 @@ def _stage_movrel_source(
 
 
 def gen_vector_swaprel(
-    dst: list[str], src: list[str], uses_vgpr_msb_indexing: bool = False
+    dst: list[str],
+    src: list[str],
+    uses_vgpr_msb_indexing: bool = False,
+    use_rj_arith: bool = False,
 ) -> str:
     """Generate V_SWAPREL_B32 using the two unsigned M0 index fields."""
     d, s = dst[0], src[0]
@@ -321,10 +348,17 @@ def gen_vector_swaprel(
         '  uint32_t rel_dst_offset = (wf.m0() >> 16) & 0x3ffu;',
         '  uint64_t rel_src_index = rel_src_base ? static_cast<uint64_t>(*rel_src_base) + rel_src_offset : UINT64_MAX;',
         '  uint64_t rel_dst_index = rel_dst_base ? static_cast<uint64_t>(*rel_dst_base) + rel_dst_offset : UINT64_MAX;',
-        f'  if (!amdgpu::relative_vgpr_index(rel_src_base, rel_src_offset, {s}.vgpr_count(), wf.vgpr_alloc().count)) return;',
-        f'  if (!amdgpu::relative_vgpr_index(rel_dst_base, rel_dst_offset, {d}.vgpr_count(), wf.vgpr_alloc().count)) return;',
+        f'  if (!amdgpu::relative_vgpr_index(rel_src_base, rel_src_offset, {s}.vgpr_count(), wf.vgpr_alloc().count, wf.cu().arch())) return;',
+        f'  if (!amdgpu::relative_vgpr_index(rel_dst_base, rel_dst_offset, {d}.vgpr_count(), wf.vgpr_alloc().count, wf.cu().arch())) return;',
         f'  Operand rel_src({s}.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_src_index));',
         f'  Operand rel_dst({d}.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));',
+    ]
+    if use_rj_arith:
+        L += [
+            '  amdgpu::arith::execute_swap<false>(wf, wf.cu().arithmetic_flags(), rel_dst, rel_src);',
+        ]
+        return '\n'.join(L)
+    L += [
         '  uint64_t exec = wf.exec();',
         '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {',
         '    if (!(exec & (1ULL << lane))) continue;',
@@ -2682,12 +2716,9 @@ def _gen_sr_scalef32(ctx, mode: str, dst_fmt: str, src_fmt: str) -> str:
     if is_sr_pk_fp4_f32:
         L.append('  auto &cu = wf.cu();')
         L.append('  uint32_t vb = wf.vgpr_alloc().base;')
-        L.append(
-            f'  auto data_src_off = Isa::resolved_vgpr_offset({src[0]}.opr_type_, '
-            f'{src[0]}.encoding_value_);'
+        append_required_vgpr_offset(
+            L, 'data_src_off', src[0], uses_vgpr_msb_indexing=False
         )
-        L.append('  if (!data_src_off)')
-        L.append('    throw util::UnimplementedInst(mnemonic());')
         L.append(
             f'  uint32_t data_src_base = vb + amdgpu::apply_gpr_idx('
             f'wf, *data_src_off, {src[0]}.vgpr_msb_role());'
@@ -2999,12 +3030,9 @@ def _gen_wide_scalef32(
     if direction == 'narrow' and mode == '2xpk16':
         direct_ops.append(src[1])
     for direct_op in dict.fromkeys(direct_ops):
-        L.append(
-            f'  auto {direct_op}_off = Isa::resolved_vgpr_offset('
-            f'{direct_op}.opr_type_, {direct_op}.encoding_value_);'
+        append_required_vgpr_offset(
+            L, f'{direct_op}_off', direct_op, uses_vgpr_msb_indexing=False
         )
-        L.append(f'  if (!{direct_op}_off)')
-        L.append('    throw util::UnimplementedInst(mnemonic());')
         L.append(
             f'  uint32_t {direct_op}_base = vb + amdgpu::apply_gpr_idx('
             f'wf, *{direct_op}_off, {direct_op}.vgpr_msb_role());'

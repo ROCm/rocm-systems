@@ -23,12 +23,14 @@ namespace rocjitsu::plugins::race_detector {
 ///
 /// An event is trimmable when it can never be accessed again:
 ///   - RETIRED events (explicitly retired at s_barrier via retireEvent).
-///   - WAVE_COMPLETE non-LDS events. These have left all per-wave and
-///     per-register lists; retireEvent is a no-op for them, so they don't
-///     need to wait for s_barrier.
-///   - WAVE_COMPLETE LDS events are NOT trimmable until retired, because
-///     retireEvent must still remove them from ldsWriteEvents/ldsReadEvents
-///     and adjust byte counts.
+///   - WAVE_COMPLETE events without LDS intervals: non-LDS events, and LDS
+///     events that touch no LDS bytes, such as a tensor transfer that moves no
+///     data. These have left all per-wave and per-register lists and were never
+///     added to ldsWriteEvents/ldsReadEvents; retireEvent is a no-op for them,
+///     so they don't need to wait for s_barrier.
+///   - WAVE_COMPLETE LDS events with intervals are NOT trimmable until
+///     retired, because retireEvent must still remove them from
+///     ldsWriteEvents/ldsReadEvents and adjust byte counts.
 ///
 /// Trimming is attempted every kTrimAttemptInterval allocations. The
 /// trimmable prefix is scanned and erased only if it covers at least half
@@ -193,7 +195,8 @@ private:
   static bool isEntryTrimmable(const EventInfo &e) {
     if (e.status == EventStatus::RETIRED)
       return true;
-    return e.status == EventStatus::WAVE_COMPLETE && isWaveLocal(e.type);
+    return e.status == EventStatus::WAVE_COMPLETE &&
+           (isWaveLocal(e.type) || e.ldsIntervals.empty());
   }
 
   void tryTrimEvents() {
