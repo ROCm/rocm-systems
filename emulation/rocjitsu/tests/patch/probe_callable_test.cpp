@@ -12,9 +12,15 @@
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/patch/probe_symbol.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
 #include "rocjitsu/isa/register_set.h"
 
 #include <gtest/gtest.h>
@@ -261,6 +267,78 @@ TEST(ProbeCallableTest, RejectsSmemScratchAccess) {
                                     /*num_arg_dwords=*/0, &err)
                    .has_value());
   EXPECT_NE(err.find("scratch"), std::string::npos) << err;
+}
+
+TEST(ProbeCallableTest, RejectsProbeBodyThatMayEnableVskip) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr uint16_t kModeBit28 = amdgpu::MODE_HWREG | (28u << 6);
+  constexpr uint16_t kWholeMode = amdgpu::MODE_HWREG | (31u << 11);
+  constexpr util::FailureOr<uint32_t> setpc = build_s_setpc_b64(30, kArch);
+  static_assert(setpc.succeeded());
+  const std::vector<std::vector<uint32_t>> writes = {
+      {cdna4::build_sopc(cdna4::kSSetvskipSopc, {.ssrc0 = 129, .ssrc1 = 128})[0]},
+      {cdna4::build_sopc(cdna4::kSSetvskipSopc, {.ssrc0 = 4, .ssrc1 = 128})[0]},
+      {cdna4::build_sopk(cdna4::kSSetregB32Sopk, {.simm16 = kModeBit28, .sdst = 4})[0]},
+      {cdna4::build_sopk(cdna4::kSSetregImm32B32Sopk, {.simm16 = kModeBit28})[0], 1},
+      {cdna4::build_sopk(cdna4::kSSetregImm32B32Sopk, {.simm16 = kWholeMode})[0], 1u << 28}};
+  for (const std::vector<uint32_t> &write : writes) {
+    SCOPED_TRACE(write.front());
+    // Keep the write away from body offset zero: immediate MODE decoding must
+    // read its own literal, rather than treating the body's second word as one.
+    std::vector<uint32_t> body = {kSNop0};
+    body.insert(body.end(), write.begin(), write.end());
+    body.push_back(setpc.value());
+    const std::vector<uint8_t> image = make_elf(body, {}, EF_AMDGPU_MACH_AMDGCN_GFX950);
+    const AmdGpuCodeObject object(image.data(), image.size());
+
+    std::string error;
+    EXPECT_FALSE(build_probe_callable(object, whole_body_symbol(body), kArch, 0, &error));
+    EXPECT_NE(error.find("VSKIP"), std::string::npos) << error;
+  }
+}
+
+TEST(ProbeCallableTest, AcceptsProbeBodyThatOnlyClearsVskip) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr uint16_t kModeBit28 = amdgpu::MODE_HWREG | (28u << 6);
+  constexpr uint16_t kWholeMode = amdgpu::MODE_HWREG | (31u << 11);
+  constexpr util::FailureOr<uint32_t> setpc = build_s_setpc_b64(30, kArch);
+  static_assert(setpc.succeeded());
+  const std::vector<std::vector<uint32_t>> writes = {
+      {cdna4::build_sopc(cdna4::kSSetvskipSopc, {.ssrc0 = 128, .ssrc1 = 128})[0]},
+      // Select bit one of inline constant one: the selected bit is clear.
+      {cdna4::build_sopc(cdna4::kSSetvskipSopc, {.ssrc0 = 129, .ssrc1 = 129})[0]},
+      {cdna4::build_sopk(cdna4::kSSetregImm32B32Sopk, {.simm16 = kModeBit28})[0], 0},
+      // Nonzero MODE writes that leave VSKIP clear are also admissible.
+      {cdna4::build_sopk(cdna4::kSSetregImm32B32Sopk, {.simm16 = kWholeMode})[0], 1u << 5}};
+  for (const std::vector<uint32_t> &write : writes) {
+    SCOPED_TRACE(write.front());
+    std::vector<uint32_t> body = {kSNop0};
+    body.insert(body.end(), write.begin(), write.end());
+    body.push_back(setpc.value());
+    const std::vector<uint8_t> image = make_elf(body, {}, EF_AMDGPU_MACH_AMDGCN_GFX950);
+    const AmdGpuCodeObject object(image.data(), image.size());
+
+    std::string error;
+    const std::optional<ProbeCallable> callable =
+        build_probe_callable(object, whole_body_symbol(body), kArch, 0, &error);
+    ASSERT_TRUE(callable) << error;
+    EXPECT_EQ(callable->body_words, body);
+  }
+}
+
+TEST(ProbeCallableTest, AcceptsModeBit28WriteOnAnArchitectureWithoutVskip) {
+  constexpr uint16_t kModeBit28 = amdgpu::MODE_HWREG | (28u << 6);
+  const std::vector<uint32_t> body = {
+      rdna4::build_sopk(rdna4::kSSetregImm32B32Sopk, {.simm16 = kModeBit28})[0], 1,
+      kGfx12SSetpcS30S31};
+  const std::vector<uint8_t> image = make_elf(body, {}, EF_AMDGPU_MACH_AMDGCN_GFX1200);
+  const AmdGpuCodeObject object(image.data(), image.size());
+
+  std::string error;
+  const std::optional<ProbeCallable> callable =
+      build_probe_callable(object, whole_body_symbol(body), ROCJITSU_CODE_ARCH_RDNA4, 0, &error);
+  ASSERT_TRUE(callable) << error;
+  EXPECT_EQ(callable->body_words, body);
 }
 
 TEST(ProbeCallableTest, RejectsMissingReturn) {
