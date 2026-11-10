@@ -3494,9 +3494,10 @@
       "num_nodes": 1,
       "num_gpus": 8,
       "timeout": 600,
-      "description": "gfx1250 RCCL_RING_AUTO_REGISTER (default on): RCCL registers unregistered Ring Simple AllReduce/AllGather buffers itself. A buffer freed and reallocated at the same address, via ncclMemAlloc or a VMM remap, must get fresh peer mappings and exact results, and send/recv from an auto-registered buffer to an unregistered peer must not take the one-sided direct path. NCCL_ALGO and NCCL_PROTO are set here because RCCL caches them on first use; ranks skip off gfx1250.",
+      "description": "gfx1250 RCCL_RING_AUTO_REGISTER (opt-in, enabled here): RCCL registers unregistered Ring Simple AllReduce/AllGather buffers itself. A buffer freed and reallocated at the same address, via ncclMemAlloc or a VMM remap, must get fresh peer mappings and exact results, and send/recv from an auto-registered buffer to an unregistered peer must not take the one-sided direct path. RCCL_RING_AUTO_REGISTER, NCCL_ALGO and NCCL_PROTO are set here because RCCL reads them once per process; ranks skip off gfx1250.",
       "env_variables": {
         "NCCL_DEBUG": "WARN",
+        "RCCL_RING_AUTO_REGISTER": "1",
         "NCCL_ALGO": "Ring",
         "NCCL_PROTO": "Simple",
         "NCCL_CUMEM_ENABLE": "1"

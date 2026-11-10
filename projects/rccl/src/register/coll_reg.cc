@@ -16,7 +16,7 @@
 NCCL_PARAM(MloPartRdmaEnable, "MLOPART_RDMA_ENABLE", 0);
 #endif
 
-RCCL_PARAM(RingAutoRegister, "RING_AUTO_REGISTER", 1);
+RCCL_PARAM(RingAutoRegister, "RING_AUTO_REGISTER", 0);
 
 // gfx1250 Ring Simple: RCCL registers unregistered AllReduce/AllGather buffers so peers store straight into them
 // instead of copying through the P2P FIFO. Graph capture keeps its own registration path.

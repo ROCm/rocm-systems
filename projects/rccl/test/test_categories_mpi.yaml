@@ -102,8 +102,8 @@ test_categories:
       - "RCCL_DDA_ENABLE=0"
   quick_env_ring_auto_register:
     description: "RCCL_RING_AUTO_REGISTER on gfx1250: Ring Simple AllReduce/AllGather stay correct when the receive
-      buffer is freed and reallocated at the same address. NCCL_ALGO is cached on first use, so Ring and Simple are
-      set before launch; other architectures skip."
+      buffer is freed and reallocated at the same address. The feature is opt-in and, like NCCL_ALGO, read once per
+      process, so it and Ring/Simple are set before launch; other architectures skip."
     test_patterns:
       - "RingAutoRegister.*"
     exclude_windows: *mpi_exclude_windows
@@ -115,6 +115,7 @@ test_categories:
       - "mpi"
     env_variables:
       - "NCCL_DEBUG=WARN"
+      - "RCCL_RING_AUTO_REGISTER=1"
       - "NCCL_ALGO=Ring"
       - "NCCL_PROTO=Simple"
       - "NCCL_CUMEM_ENABLE=1"

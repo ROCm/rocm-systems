@@ -1580,8 +1580,8 @@ threshold table introduced for gfx1250.
           communicator is destroyed. As with ``ncclCommRegister``, every rank
           must pass the same kind of allocation to a collective: ring neighbours
           that disagree on whether a buffer is registered hang.
-      - | ``0``: Disabled. Unregistered buffers use the P2P FIFO path.
-        | ``1``: Enabled (default).
+      - | ``0``: Disabled (default). Unregistered buffers use the P2P FIFO path.
+        | ``1``: Enabled.
 
     * - | ``RCCL_RING_AUTO_REGISTER_WARN_BYTES``
         | ``RCCL_RING_AUTO_REGISTER`` keeps freed buffers' peer mappings, and

@@ -3766,8 +3766,9 @@ protected:
         const char* why     = nullptr;
         if (!IsArchMatch(getActiveCommunicator()->archName, "gfx1250"))
             why = "RCCL_RING_AUTO_REGISTER applies to gfx1250 only";
-        else if (autoReg && std::string(autoReg) == "0")
-            why = "RCCL_RING_AUTO_REGISTER=0";
+        else if (!autoReg || atoi(autoReg) == 0)
+            // Opt-in, and read once per process, so it has to be set at launch.
+            why = "RCCL_RING_AUTO_REGISTER is off; launch with RCCL_RING_AUTO_REGISTER=1";
         else if (getenv("NCCL_LOCAL_REGISTER") && std::string(getenv("NCCL_LOCAL_REGISTER")) == "0")
             why = "NCCL_LOCAL_REGISTER=0";
         else if (!ncclCuMemEnable())

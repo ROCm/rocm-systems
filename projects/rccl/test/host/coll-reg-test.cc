@@ -1391,6 +1391,7 @@ class RegisterCollRingAutoMicrotest : public RegisterCollRingMicrotest {
     regSlots_.clear();
     comm_->regCache.population = 0;
     comm_->archName = arch_;
+    g_loadParam = ParamOverride({{"LOCAL_REGISTER", 1}, {"GRAPH_REGISTER", 1}, {"RCCL_RING_AUTO_REGISTER", 1}});
     AutoRegisters(true);
   }
 
@@ -1439,6 +1440,13 @@ TEST_F(RegisterCollRingAutoMicrotest, BufferCannotBeRegistered_LeavesBufferUnreg
   EXPECT_EQ(autoCalls_.size(), 1u);
   ExpectUnregistered();
   EXPECT_TRUE(ipcLocal_.empty());
+}
+
+TEST_F(RegisterCollRingAutoMicrotest, AutoRegisterUnset_IsOffByDefault) {
+  g_loadParam = ParamOverride({{"LOCAL_REGISTER", 1}, {"GRAPH_REGISTER", 1}});
+  EXPECT_EQ(Run(), ncclSuccess);
+  ExpectNoAutoRegistration();
+  ExpectUnregistered();
 }
 
 TEST_F(RegisterCollRingAutoMicrotest, AutoRegisterOff_LeavesBufferUnregistered) {
