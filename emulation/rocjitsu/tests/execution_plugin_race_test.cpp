@@ -77,6 +77,12 @@ using namespace rocjitsu::plugins::race_detector;
 using namespace rocjitsu::test::execution_plugin;
 using mma_test::make_cdna4_mfma_scale_words;
 
+enum class InlineImageQuery { ResourceInfo, Lod };
+constexpr InlineImageQuery kInlineImageQueries[]{
+    InlineImageQuery::ResourceInfo,
+    InlineImageQuery::Lod,
+};
+
 void record_register_probe(ExecutionPluginGroup &plugins, Wavefront &wave) {
   auto decoder = Decoder::create(wave.cu().arch());
   const uint32_t word = S_NOP;
@@ -8652,6 +8658,20 @@ TEST(RaceDetectorPluginTest, Gfx10PackedImageOperandsMatchWaitChecksAndRegisterR
     bool compare = false;
   };
   const Case cases[] = {
+      {0, rdna1::kImageSampleDG16Mimg, false, false, {0x3, 0x3, 0xf}},
+      {0, rdna1::kImageSampleDG16Mimg, true, false, {0x3, 0x3, 0x3}},
+      {1, rdna1::kImageSampleDG16Mimg, true, false, {0xf, 0xf, 0xf}},
+      {2,
+       rdna1::kImageSampleCDOG16Mimg,
+       true,
+       true,
+       {0xf, 0xf, 0xf, 0x3, 0xf, 0x3, 0xf, 0x3},
+       true},
+      {3, rdna1::kImageSampleDOG16Mimg, false, true, {0xf, 0xf, 0xf, 0xf, 0xf, 0xf}},
+      {0, rdna1::kImageSampleBMimg, true, false, {0x3, 0x3}},
+      {1, rdna1::kImageSampleCBOMimg, true, true, {0xf, 0x3, 0xf, 0xf}, true},
+      {1, rdna1::kImageGather4BMimg, true, false, {0x3, 0xf}},
+      {0, rdna1::kImageSampleBMimg, false, false, {0xf, 0xf}},
       {0, rdna1::kImageSampleDMimg, true, false, {0xf, 0xf, 0x3}},
       {2, rdna1::kImageSampleDMimg, false, false, {0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf}},
   };
@@ -8757,7 +8777,36 @@ TEST(RaceDetectorPluginTest, Gfx10PackedImageOperandsMatchWaitChecksAndRegisterR
             }));
       }
     }
-
+    // Choose between two 1D mip levels using the low FP16; the high half contains a NaN.
+    cu->write_sgpr(sb + 1, (22u << 20) | (1u << 30));     // Width 2.
+    cu->write_sgpr(sb + 3, (8u << 28) | (1u << 16) | 4u); // LAST_LEVEL=1.
+    cu->write_sgpr(sb + 4, gfx1010 ? 0 : 63);
+    cu->write_sgpr(sb + 5, 1u << 4); // MAX_MIP=1.
+    cu->write_sgpr(sb + 9, 256u << 12);
+    cu->write_sgpr(sb + 10, 1u << 26);    // Point mip filter.
+    constexpr uint32_t mip1 = 0x40400000; // 3.0.
+    cu->write_sgpr(sb, 0x6000 >> 8);
+    // In a GFX10 linear mip chain the smaller, one-texel level is first.
+    f.mem->write32(0x6000, mip1);
+    f.mem->write32(0x6100, texel);
+    f.mem->write32(0x6104, texel);
+    for (bool bias : {false, true}) {
+      for (bool higher : {false, true}) {
+        SCOPED_TRACE(testing::Message() << "numeric bias=" << bias << " higher=" << higher);
+        for (unsigned lane = 0; lane < 4; ++lane) {
+          const uint32_t low = higher ? 0x3c00 : bias ? 0 : 0x3800;
+          cu->write_vgpr(vb, lane, 0x7e000000u | low);
+          cu->write_vgpr(vb + 1, lane, bias && (lane & 1) ? 0x3800 : 0);
+          cu->write_vgpr(vb + 2, lane, 0);
+        }
+        ASSERT_NO_FATAL_FAILURE(
+            issue(rdna1::build_mimg(bias ? rdna1::kImageSampleBMimg : rdna1::kImageSampleDG16Mimg,
+                                    {.dmask = 1, .vdata = 24, .ssamp = 2, .a16 = 1}),
+                  15));
+        EXPECT_EQ(cu->read_vgpr_storage(vb + 24, 0), higher ? mip1 : texel);
+        ASSERT_NO_FATAL_FAILURE(issue(std::array{legacy_wait_word(arch, 0, 0)}, 1));
+      }
+    }
     struct Transfer {
       uint16_t op;
       uint8_t dim;
@@ -9899,7 +9948,7 @@ TEST(RaceDetectorPluginTest, ParameterLoadReadsThreeCoefficientsAndWritesFourLan
 }
 
 TEST(RaceDetectorPluginTest, Gfx11WritebacksRespectImageAndLdsClasses) {
-  enum Op { Flat, Image, Bvh, Sample, SampleL, SampleLz, SampleD, Direct, Ds, Resinfo, Param };
+  enum Op { Flat, Image, Bvh, Sample, SampleL, SampleLz, SampleD, Direct, Ds, Resinfo, Param, Lod };
   // Both GFX11 profiles encode these operations and their field layouts identically.
   const auto encode = [](Op op, uint8_t dst) -> std::vector<uint32_t> {
     if (op == Direct || op == Param) {
@@ -9922,22 +9971,24 @@ TEST(RaceDetectorPluginTest, Gfx11WritebacksRespectImageAndLdsClasses) {
                         : op == SampleLz ? rdna3::kImageSampleLzMimg
                         : op == SampleD  ? rdna3::kImageSampleDMimg
                         : op == Bvh      ? rdna3::kImageBvhIntersectRayMimg
+                        : op == Lod      ? rdna3::kImageGetLodMimg
                                          : rdna3::kImageGetResinfoMimg;
-    const auto words =
-        rdna3::build_mimg(opcode, {.dim = uint8_t(op != Bvh),
-                                   .unorm = 1,
-                                   .dmask = uint8_t(op == Bvh ? 15 : 1),
-                                   .r128 = uint8_t(op == Bvh),
-                                   .vaddr = 16,
-                                   .vdata = dst,
-                                   .srsrc = uint8_t(op == Bvh ? 3 : 0),
-                                   .ssamp = uint8_t(op >= Sample && op <= SampleD ? 2 : 0)});
+    const auto words = rdna3::build_mimg(
+        opcode, {.dim = uint8_t(op != Bvh),
+                 .unorm = 1,
+                 .dmask = uint8_t(op == Bvh ? 15 : 1),
+                 .r128 = uint8_t(op == Bvh),
+                 .vaddr = 16,
+                 .vdata = dst,
+                 .srsrc = uint8_t(op == Bvh ? 3 : 0),
+                 .ssamp = uint8_t(op == Lod || (op >= Sample && op <= SampleD) ? 2 : 0)});
     return {words.begin(), words.end()};
   };
   const auto pipeline = [](Op op, unsigned lane, unsigned shared_lanes) {
     switch (op) {
     case Flat:
       return (shared_lanes >> lane) & 1 ? Ds : Image;
+    case Lod:
     case SampleL:
     case SampleLz:
     case SampleD:
@@ -9952,7 +10003,19 @@ TEST(RaceDetectorPluginTest, Gfx11WritebacksRespectImageAndLdsClasses) {
   };
   constexpr Op ops[]{
       // FLAT writeback follows the address space selected by each lane.
-      Flat, Direct, Ds, Image, Bvh, Sample, SampleL, SampleLz, SampleD, Resinfo, Param,
+      Flat,
+      Direct,
+      Ds,
+      Image,
+      Bvh,
+      Sample,
+      SampleL,
+      SampleLz,
+      SampleD,
+      // Inline LOD queries use sample writeback order.
+      Lod,
+      Resinfo,
+      Param,
   };
   constexpr uint64_t shared = uint64_t{2} << 32, global = uint64_t{8} << 32;
   for (const auto arch : {"rdna3", "rdna3.5"}) {
@@ -9964,7 +10027,8 @@ TEST(RaceDetectorPluginTest, Gfx11WritebacksRespectImageAndLdsClasses) {
           enum Wait { None, Full, Partial };
           for (auto wait : {None, Full, Partial}) {
             const auto has_vmcnt_result = [](Op op) {
-              return op == Image || op == Bvh || (op >= Sample && op <= SampleD) || op == Resinfo;
+              return op == Image || op == Bvh || (op >= Sample && op <= SampleD) || op == Resinfo ||
+                     op == Lod;
             };
             if (wait == Partial && (!has_vmcnt_result(a) || !has_vmcnt_result(b)))
               continue;
@@ -10022,7 +10086,7 @@ TEST(RaceDetectorPluginTest, Gfx11WritebacksRespectImageAndLdsClasses) {
             for (unsigned tick = 0; tick < 32 && wf->pc < pc + words.size() * 4; ++tick)
               ASSERT_TRUE(cu->step());
             ASSERT_EQ(wf->pc, pc + words.size() * 4);
-            const auto routed = [](Op op) { return op != Resinfo; };
+            const auto routed = [](Op op) { return op != Resinfo && op != Lod; };
             ASSERT_EQ(observed->accesses.size(), unsigned(routed(a)) + unsigned(routed(b)));
             for (const auto &access : observed->accesses)
               EXPECT_NE(access.request_lane_mask, 0u);
@@ -13707,6 +13771,148 @@ TEST(RaceDetectorPluginTest, Gfx11ImageCountersRetireInOrderAcrossWritebackClass
       }
     }
     wf->halt();
+  }
+}
+
+TEST(RaceDetectorPluginTest, Gfx10InlineImageQueriesTrackVmcntAndVgprWriteback) {
+  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+    SCOPED_TRACE(arch);
+    const bool gfx1010 = arch == ROCJITSU_CODE_ARCH_RDNA1;
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(1, gfx1010 ? "rdna1" : "rdna2", 32, 106, 32));
+    PluginSinkConfig sinks;
+    auto &sink = sinks.emplace<StringSink>();
+    f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sinks));
+    auto plugin = std::make_unique<RaceDetectorPlugin>();
+    auto *observer = plugin.get();
+    ASSERT_TRUE(f.plugin_group_->add(std::move(plugin)));
+    auto routing = std::make_unique<MemoryObservationPlugin>();
+    const auto &routed = routing->accesses;
+    ASSERT_TRUE(f.plugin_group_->add(std::move(routing)));
+    f.soc->set_plugin_group(f.plugin_group_);
+    f.plugin_group_->onInit();
+    auto *cu = f.cu();
+    auto *wave = cu->dispatch_wf(0, 0x8000, 106, 16, 32);
+    ASSERT_NE(wave, nullptr);
+    std::array<Wavefront *, 1> waves{wave};
+    f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 32, 106, waves);
+    auto &race =
+        *static_cast<RaceWavefrontState *>(wave->plugin_state(observer->slot_index()))->race_state;
+    const auto sb = wave->sgpr_alloc().base;
+    const auto vb = wave->vgpr_alloc().base;
+    cu->write_sgpr(sb, 0x4000 >> 8);
+    cu->write_sgpr(sb + 1, 20u << 20);
+    cu->write_sgpr(sb + 3, (9u << 28) | 4u);
+    cu->write_sgpr(sb + 4, gfx1010 ? 0 : 63);
+    cu->write_sgpr(sb + 12, 0x4000);
+    cu->write_sgpr(sb + 14, 256);
+    cu->write_sgpr(sb + 15, (3u << 28) | (20u << 12));
+    f.mem->write32(0x4000, 123);
+    const auto step = [&](const auto &words, uint64_t exec) {
+      const uint64_t pc = wave->pc + 0x100;
+      wave->pc = pc;
+      wave->set_exec(exec);
+      f.mem->load_image(reinterpret_cast<const uint8_t *>(words.data()), sizeof(words), pc);
+      for (unsigned tick = 0; tick < 32 && wave->pc == pc; ++tick)
+        ASSERT_TRUE(cu->step());
+      ASSERT_EQ(wave->pc, pc + sizeof(words));
+    };
+    const auto wait = [&](uint8_t threshold) {
+      ASSERT_NO_FATAL_FAILURE(step(std::array{legacy_wait_word(arch, threshold, 63)}, 1));
+    };
+    const auto read = [&](uint16_t reg, uint64_t exec, bool hazard) {
+      SCOPED_TRACE(testing::Message() << "read v" << reg << " exec=" << exec);
+      const auto output = sink.str().size();
+      ASSERT_NO_FATAL_FAILURE(step(
+          rdna1::build_vop1(rdna1::kVMovB32Vop1, {.src0 = uint16_t(256 + reg), .vdst = 3}), exec));
+      EXPECT_EQ(sink.str().find("type=VGPR access=read reg=" + std::to_string(reg), output) !=
+                    std::string::npos,
+                hazard);
+    };
+    for (const auto query_kind : kInlineImageQueries) {
+      const bool lod = query_kind == InlineImageQuery::Lod;
+      SCOPED_TRACE(lod ? "get_lod" : "get_resinfo");
+      const auto query = [lod](uint8_t dst, uint8_t addr = 0, uint8_t mask = 3) {
+        return rdna1::build_mimg(
+            lod ? rdna1::kImageGetLod : rdna1::kImageGetResinfo,
+            {.dim = 1, .dmask = mask, .vaddr = addr, .vdata = dst, .ssamp = uint8_t(lod ? 2 : 0)});
+      };
+      for (uint32_t reg : {8u, 9u}) {
+        for (unsigned lane : {1u, 2u})
+          cu->write_vgpr(vb + reg, lane, 0xdeadbeef);
+        ASSERT_NO_FATAL_FAILURE(step(query(8), 5));
+        EXPECT_EQ(cu->read_vgpr_storage(vb + reg, 1), 0xdeadbeefu);
+        EXPECT_NE(cu->read_vgpr_storage(vb + reg, 2), 0xdeadbeefu);
+        ASSERT_NO_FATAL_FAILURE(read(reg, 2, false));
+        ASSERT_NO_FATAL_FAILURE(read(reg, 4, true));
+        ASSERT_NO_FATAL_FAILURE(wait(0));
+        ASSERT_NO_FATAL_FAILURE(read(reg, 4, false));
+      }
+
+      for (bool waited : {false, true}) {
+        SCOPED_TRACE(testing::Message() << "query VADDR waited=" << waited);
+        ASSERT_NO_FATAL_FAILURE(step(query(8), 1));
+        if (waited) {
+          ASSERT_NO_FATAL_FAILURE(wait(0));
+        }
+        const auto output = sink.str().size();
+        ASSERT_NO_FATAL_FAILURE(step(query(12, 8), 1));
+        EXPECT_EQ(sink.str().find("type=VGPR access=read reg=8", output) != std::string::npos,
+                  !waited);
+        ASSERT_NO_FATAL_FAILURE(wait(0));
+      }
+      const auto output = sink.str().size();
+      ASSERT_NO_FATAL_FAILURE(step(query(8, 8), 1));
+      EXPECT_EQ(sink.str().find("RACE ", output), std::string::npos);
+      ASSERT_NO_FATAL_FAILURE(wait(0));
+      cu->write_vgpr(vb + 8, 0, 0xdeadbeefu);
+      cu->write_vgpr(vb + 9, 0, 0xbad0c0deu);
+      ASSERT_NO_FATAL_FAILURE(step(query(8, 0, 0), 1));
+      EXPECT_EQ(cu->read_vgpr_storage(vb + 8, 0), 0u);
+      EXPECT_EQ(cu->read_vgpr_storage(vb + 9, 0), 0xbad0c0deu);
+      ASSERT_NO_FATAL_FAILURE(read(8, 1, true));
+      ASSERT_NO_FATAL_FAILURE(wait(0));
+
+      cu->write_sgpr(sb + 3, 0); // An unbound image still writes zero results.
+      cu->write_vgpr(vb + 8, 0, 0xdeadbeefu);
+      ASSERT_NO_FATAL_FAILURE(step(query(8), 1));
+      EXPECT_EQ(cu->read_vgpr_storage(vb + 8, 0), 0u);
+      ASSERT_NO_FATAL_FAILURE(read(8, 1, true));
+      ASSERT_NO_FATAL_FAILURE(wait(0));
+      cu->write_sgpr(sb + 3, (9u << 28) | 4u);
+
+      // Empty and out-of-range queries consume a wait position without acquiring result lanes.
+      for (const auto &[exec, dst] : {std::pair{0u, 8u}, {1u, 15u}}) {
+        const auto routes = routed.size();
+        ASSERT_NO_FATAL_FAILURE(step(query(dst), exec));
+        EXPECT_EQ(routed.size(), routes);
+        ASSERT_NO_FATAL_FAILURE(read(dst, 1, false));
+        ASSERT_NO_FATAL_FAILURE(wait(0));
+      }
+    }
+    // A failing GET_LOD skips the scheduler's after-execute hook. Preserve the older load.
+    ASSERT_NO_FATAL_FAILURE(step(
+        rdna1::build_mubuf(rdna1::kBufferLoadDword, {.vdata = 12, .srsrc = 3, .soffset = 128}), 1));
+    const auto pending = race.getWaveMemoryEvents();
+    ASSERT_EQ(pending.size(), 1u);
+    cu->write_sgpr(sb + 10, 0x84000000u); // DERIV_ADJUST_EN.
+    auto decoder = Decoder::create(arch);
+    auto invalid = decoder->decode_window(
+        rdna1::build_mimg(rdna1::kImageGetLod, {.dim = 1, .dmask = 3, .vdata = 8, .ssamp = 2}));
+    ASSERT_TRUE(invalid.succeeded());
+    wave->set_exec(1);
+    cu->write_vgpr(vb + 8, 0, 0xdeadbeefu);
+    f.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, *invalid.value(), *wave);
+    ASSERT_TRUE(cu->execute_instruction(invalid.value().get(), *wave).failed());
+    EXPECT_EQ(wave->instruction_execution_error(),
+              InstructionExecutionError::UnimplementedInstruction);
+    EXPECT_EQ(cu->read_vgpr_storage(vb + 8, 0), 0xdeadbeefu);
+    EXPECT_EQ(race.getWaveMemoryEvents(), pending);
+    wave->clear_instruction_execution_error();
+    ASSERT_NO_FATAL_FAILURE(read(8, 1, false));
+    ASSERT_NO_FATAL_FAILURE(read(12, 1, true));
+    ASSERT_NO_FATAL_FAILURE(wait(0));
+    wave->halt();
   }
 }
 
