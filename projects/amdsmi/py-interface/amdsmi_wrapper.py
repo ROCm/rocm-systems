@@ -3251,35 +3251,15 @@ struct_amdsmi_nic_numa_info_t._fields_ = [
 ]
 
 amdsmi_nic_numa_info_t = struct_amdsmi_nic_numa_info_t
-
-# values for enumeration 'amdsmi_nic_fw_version_type_t'
-amdsmi_nic_fw_version_type_t__enumvalues = {
-    0: 'AMDSMI_NIC_FW_VERSION_TYPE_FIXED',
-    1: 'AMDSMI_NIC_FW_VERSION_TYPE_RUNNING',
-    2: 'AMDSMI_NIC_FW_VERSION_TYPE_STORED',
-}
-AMDSMI_NIC_FW_VERSION_TYPE_FIXED = 0
-AMDSMI_NIC_FW_VERSION_TYPE_RUNNING = 1
-AMDSMI_NIC_FW_VERSION_TYPE_STORED = 2
-amdsmi_nic_fw_version_type_t = ctypes.c_uint32 # enum
-class struct_amdsmi_nic_fw_t(Structure):
+class struct_amdsmi_nic_fw_entry_t(Structure):
     pass
 
-struct_amdsmi_nic_fw_t._pack_ = 1 # source:False
-struct_amdsmi_nic_fw_t._layout_ = 'ms'
-struct_amdsmi_nic_fw_t._fields_ = [
+struct_amdsmi_nic_fw_entry_t._pack_ = 1 # source:False
+struct_amdsmi_nic_fw_entry_t._layout_ = 'ms'
+struct_amdsmi_nic_fw_entry_t._fields_ = [
     ('name', ctypes.c_char * 256),
     ('version', ctypes.c_char * 256),
 ]
-
-amdsmi_nic_fw_t = struct_amdsmi_nic_fw_t
-class struct_amdsmi_nic_fw_entry_t(Structure):
-    _pack_ = 1 # source:False
-    _layout_ = 'ms'
-    _fields_ = [
-    ('type', amdsmi_nic_fw_version_type_t),
-    ('fw', amdsmi_nic_fw_t),
-     ]
 
 amdsmi_nic_fw_entry_t = struct_amdsmi_nic_fw_entry_t
 class struct_amdsmi_nic_fw_info_t(Structure):
@@ -3289,7 +3269,7 @@ struct_amdsmi_nic_fw_info_t._pack_ = 1 # source:False
 struct_amdsmi_nic_fw_info_t._layout_ = 'ms'
 struct_amdsmi_nic_fw_info_t._fields_ = [
     ('num_fw', ctypes.c_uint32),
-    ('fw', struct_amdsmi_nic_fw_entry_t * 64),
+    ('fw', struct_amdsmi_nic_fw_entry_t * 16),
 ]
 
 amdsmi_nic_fw_info_t = struct_amdsmi_nic_fw_info_t
@@ -5754,9 +5734,7 @@ __all__ = \
     'AMDSMI_METRIC_UNIT_MILLIDEGREE_CELSIUS',
     'AMDSMI_METRIC_UNIT_MILLIVOLT', 'AMDSMI_MM_UVD', 'AMDSMI_MM_VCE',
     'AMDSMI_MM_VCN', 'AMDSMI_MM__MAX', 'AMDSMI_NIC_CAP_FWCTL',
-    'AMDSMI_NIC_CAP_NETDEV', 'AMDSMI_NIC_FW_VERSION_TYPE_FIXED',
-    'AMDSMI_NIC_FW_VERSION_TYPE_RUNNING',
-    'AMDSMI_NIC_FW_VERSION_TYPE_STORED', 'AMDSMI_NIC_HEALTH_ERROR',
+    'AMDSMI_NIC_CAP_NETDEV', 'AMDSMI_NIC_HEALTH_ERROR',
     'AMDSMI_NIC_HEALTH_HEALTHY', 'AMDSMI_NIC_HEALTH_UNKNOWN',
     'AMDSMI_NIC_HEALTH_UNSUPPORTED', 'AMDSMI_NIC_HEALTH_WARNING',
     'AMDSMI_NIC_SENSOR_NAME_ALARM_CAP',
@@ -6130,8 +6108,7 @@ __all__ = \
     'amdsmi_mm_ip_t', 'amdsmi_name_value_t', 'amdsmi_nic_asic_info_t',
     'amdsmi_nic_bus_info_t', 'amdsmi_nic_capability_bits_t',
     'amdsmi_nic_driver_info_t', 'amdsmi_nic_fw_entry_t',
-    'amdsmi_nic_fw_info_t', 'amdsmi_nic_fw_t',
-    'amdsmi_nic_fw_version_type_t', 'amdsmi_nic_health_state_t',
+    'amdsmi_nic_fw_info_t', 'amdsmi_nic_health_state_t',
     'amdsmi_nic_health_t', 'amdsmi_nic_numa_info_t',
     'amdsmi_nic_port_info_t', 'amdsmi_nic_port_split_t',
     'amdsmi_nic_port_t', 'amdsmi_nic_rdma_dev_info_t',
@@ -6242,10 +6219,9 @@ __all__ = \
     'struct_amdsmi_name_value_t', 'struct_amdsmi_nic_asic_info_t',
     'struct_amdsmi_nic_bus_info_t', 'struct_amdsmi_nic_driver_info_t',
     'struct_amdsmi_nic_fw_entry_t', 'struct_amdsmi_nic_fw_info_t',
-    'struct_amdsmi_nic_fw_t', 'struct_amdsmi_nic_health_t',
-    'struct_amdsmi_nic_numa_info_t', 'struct_amdsmi_nic_port_info_t',
-    'struct_amdsmi_nic_port_split_t', 'struct_amdsmi_nic_port_t',
-    'struct_amdsmi_nic_rdma_dev_info_t',
+    'struct_amdsmi_nic_health_t', 'struct_amdsmi_nic_numa_info_t',
+    'struct_amdsmi_nic_port_info_t', 'struct_amdsmi_nic_port_split_t',
+    'struct_amdsmi_nic_port_t', 'struct_amdsmi_nic_rdma_dev_info_t',
     'struct_amdsmi_nic_rdma_devices_info_t',
     'struct_amdsmi_nic_rdma_port_info_t',
     'struct_amdsmi_nic_sensor_t', 'struct_amdsmi_nic_stat_t',

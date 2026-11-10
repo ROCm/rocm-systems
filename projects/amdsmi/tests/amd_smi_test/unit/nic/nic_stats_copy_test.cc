@@ -11,6 +11,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include <string>
+#include <tuple>
 #include <vector>
 
 #include "amd_smi/impl/amd_smi_nic_stats.h"
@@ -18,6 +20,7 @@
 
 namespace {
 
+using amd::smi::copy_nic_fw_info;
 using amd::smi::copy_nic_stats;
 using amd::smi::get_nic_stats;
 using amd::smi::was_nic_stat_scope_resolved;
@@ -45,6 +48,80 @@ auto make_out(uint32_t capacity) -> std::vector<amdsmi_nic_stat_t> {
     stat.value = kUnsetValue;
   }
   return out;
+}
+
+// The shim's firmware struct holds 64 versions of about 0.5 KB each, so it lives on the heap.
+auto make_fw_info(
+    const std::vector<std::tuple<smi_nic_fw_version_type_t, const char*, const char*>>& versions)
+    -> std::unique_ptr<smi_nic_fw_info_t> {
+  auto info = std::make_unique<smi_nic_fw_info_t>();
+  *info = {};
+  info->count = static_cast<uint32_t>(versions.size());
+  for (auto i = size_t{0}; i < versions.size(); ++i) {
+    const auto& [type, name, version] = versions[i];
+    info->versions[i].type = type;
+    std::snprintf(info->versions[i].name, sizeof(info->versions[i].name), "%s", name);
+    std::snprintf(info->versions[i].version, sizeof(info->versions[i].version), "%s", version);
+  }
+  return info;
+}
+
+TEST_F(NicUnit, FwInfoCopyKeepsTheNameAndVersionOfEachEntry) {
+  const auto shim = make_fw_info({{SMI_NIC_FW_VERSION_TYPE_FIXED, "board.id", "A"},
+                                  {SMI_NIC_FW_VERSION_TYPE_RUNNING, "fw.version", "1.0"}});
+  auto info = amdsmi_nic_fw_info_t{};
+
+  copy_nic_fw_info(*shim, &info);
+
+  EXPECT_EQ(info.num_fw, 2U);
+  EXPECT_STREQ(info.fw[0].name, "board.id");
+  EXPECT_STREQ(info.fw[0].version, "A");
+  EXPECT_STREQ(info.fw[1].name, "fw.version");
+  EXPECT_STREQ(info.fw[1].version, "1.0");
+}
+
+TEST_F(NicUnit, FwInfoCopyShowsTheKindOfAVersionThatRepeatsAName) {
+  const auto shim = make_fw_info({{SMI_NIC_FW_VERSION_TYPE_RUNNING, "fw.version", "1.0"},
+                                  {SMI_NIC_FW_VERSION_TYPE_STORED, "fw.version", "2.0"},
+                                  {SMI_NIC_FW_VERSION_TYPE_FIXED, "fw.version", "0.9"}});
+  auto info = amdsmi_nic_fw_info_t{};
+
+  copy_nic_fw_info(*shim, &info);
+
+  EXPECT_EQ(info.num_fw, 3U);
+  EXPECT_STREQ(info.fw[0].name, "fw.version");
+  EXPECT_STREQ(info.fw[1].name, "fw.version (stored)");
+  EXPECT_STREQ(info.fw[2].name, "fw.version (fixed)");
+  EXPECT_STREQ(info.fw[1].version, "2.0");
+}
+
+TEST_F(NicUnit, FwInfoCopyKeepsAtMostTheFirstMaxEntries) {
+  auto versions = std::vector<std::tuple<smi_nic_fw_version_type_t, const char*, const char*>>{};
+  auto storage = std::vector<std::string>{};
+  for (auto i = 0; i < AMDSMI_MAX_NIC_FW + 4; ++i) {
+    storage.push_back("fw_" + std::to_string(i));
+  }
+  for (const auto& name : storage) {
+    versions.emplace_back(SMI_NIC_FW_VERSION_TYPE_RUNNING, name.c_str(), "1");
+  }
+  const auto shim = make_fw_info(versions);
+  auto info = amdsmi_nic_fw_info_t{};
+
+  copy_nic_fw_info(*shim, &info);
+
+  EXPECT_EQ(info.num_fw, static_cast<uint32_t>(AMDSMI_MAX_NIC_FW));
+  EXPECT_STREQ(info.fw[AMDSMI_MAX_NIC_FW - 1].name, "fw_15");
+}
+
+TEST_F(NicUnit, FwInfoCopyOfNoVersionsIsEmpty) {
+  const auto shim = make_fw_info({});
+  auto info = amdsmi_nic_fw_info_t{};
+  info.num_fw = 5;
+
+  copy_nic_fw_info(*shim, &info);
+
+  EXPECT_EQ(info.num_fw, 0U);
+  EXPECT_STREQ(info.fw[0].name, "");
 }
 
 TEST_F(NicUnit, StatsCopyReportsSuccessWhenTheArrayHoldsEveryEntry) {

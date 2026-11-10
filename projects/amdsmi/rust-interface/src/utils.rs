@@ -12,7 +12,7 @@ pub use crate::amdsmi_wrapper::{
     AmdsmiComputePartitionTypeT, AmdsmiCounterCommandT, AmdsmiDevPerfLevelT, AmdsmiEventGroupT,
     AmdsmiEventTypeT, AmdsmiEvtNotificationTypeT, AmdsmiFreqIndT, AmdsmiFwBlockT, AmdsmiGpuBlockT,
     AmdsmiInitFlagsT, AmdsmiLinkStatusT, AmdsmiLinkTypeT, AmdsmiMemoryPartitionTypeT, AmdsmiMemoryTypeT,
-    AmdsmiNicFwVersionTypeT, AmdsmiNicHealthStateT, AmdsmiPowerProfilePresetMasksT, AmdsmiRasErrStateT, AmdsmiStatusT,
+    AmdsmiNicHealthStateT, AmdsmiPowerProfilePresetMasksT, AmdsmiRasErrStateT, AmdsmiStatusT,
     AmdsmiTemperatureMetricT, AmdsmiTemperatureTypeT, AmdsmiUtilizationCounterTypeT,
     AmdsmiVoltageMetricT, AmdsmiVoltageTypeT, AmdsmiXgmiStatusT, AmdsmiProcessorTypeT, AmdsmiAcceleratorPartitionTypeT
 };
@@ -25,7 +25,7 @@ pub use crate::amdsmi_wrapper::{
     AmdsmiFreqVoltRegionT, AmdsmiFrequenciesT, AmdsmiFrequencyRangeT, AmdsmiFwInfoT,
     AmdsmiGpuCacheInfoT, AmdsmiGpuCacheInfoTCache, AmdsmiGpuMetricsT, AmdsmiKfdInfoT,
     AmdsmiLinkMetricsT, AmdsmiLinkMetricsTLinks, AmdsmiLinkTopologyT, AmdsmiNameValueT,
-    AmdsmiNicFwEntryT, AmdsmiNicFwInfoT, AmdsmiNicFwT, AmdsmiNicHealthT, AmdsmiNicPortSplitT,
+    AmdsmiNicFwEntryT, AmdsmiNicFwInfoT, AmdsmiNicHealthT, AmdsmiNicPortSplitT,
     AmdsmiNicTelemetryT,
     AmdsmiOdVoltFreqDataT, AmdsmiP2pCapabilityT, AmdsmiPcieBandwidthT, AmdsmiPcieInfoT,
     AmdsmiPcieInfoTPcieMetric, AmdsmiPcieInfoTPcieStatic, AmdsmiPowerCapInfoT, AmdsmiPowerInfoT,

@@ -856,12 +856,11 @@ static_assert(static_cast<int>(SMI_NIC_KIND_AINIC) == static_cast<int>(AMDSMI_NI
 static_assert(static_cast<int>(SMI_NIC_KIND_UALOE) == static_cast<int>(AMDSMI_NIC_TYPE_UALOE));
 static_assert(static_cast<int>(SMI_NIC_KIND_OTHER) == static_cast<int>(AMDSMI_NIC_TYPE_OTHER));
 
-// The capability bitmask and the firmware entries are copied across as they are.
+// The capability bitmask is copied across as it is.
 static_assert(static_cast<uint32_t>(SMI_NIC_CAP_FWCTL) ==
               static_cast<uint32_t>(AMDSMI_NIC_CAP_FWCTL));
 static_assert(static_cast<uint32_t>(SMI_NIC_CAP_NETDEV) ==
               static_cast<uint32_t>(AMDSMI_NIC_CAP_NETDEV));
-static_assert(SMI_NIC_MAX_FW_VERSIONS <= AMDSMI_MAX_NIC_FW);
 
 amdsmi_status_t amdsmi_get_nic_type(amdsmi_processor_handle processor_handle,
                                     amdsmi_nic_type_t* type) {
@@ -992,18 +991,6 @@ amdsmi_status_t amdsmi_get_nic_rdma_dev_info(amdsmi_processor_handle processor_h
   return AMDSMI_STATUS_SUCCESS;
 }
 
-static amdsmi_nic_fw_version_type_t to_amdsmi_fw_version_type(smi_nic_fw_version_type_t type) {
-  switch (type) {
-    case SMI_NIC_FW_VERSION_TYPE_RUNNING:
-      return AMDSMI_NIC_FW_VERSION_TYPE_RUNNING;
-    case SMI_NIC_FW_VERSION_TYPE_STORED:
-      return AMDSMI_NIC_FW_VERSION_TYPE_STORED;
-    case SMI_NIC_FW_VERSION_TYPE_FIXED:
-      break;
-  }
-  return AMDSMI_NIC_FW_VERSION_TYPE_FIXED;
-}
-
 amdsmi_status_t amdsmi_get_nic_fw_info(amdsmi_processor_handle processor_handle,
                                        amdsmi_nic_fw_info_t* info) {
   AMDSMI_CHECK_INIT();
@@ -1024,15 +1011,14 @@ amdsmi_status_t amdsmi_get_nic_fw_info(amdsmi_processor_handle processor_handle,
     return amd::smi::ainic_to_amdsmi_status(nic_status);
   }
 
-  *info = {};
-  const uint32_t n = std::min<uint32_t>(shim_fw.count, AMDSMI_MAX_NIC_FW);
-  for (uint32_t i = 0; i < n; ++i) {
-    info->fw[i].type = to_amdsmi_fw_version_type(shim_fw.versions[i].type);
-    std::snprintf(info->fw[i].fw.name, sizeof(info->fw[i].fw.name), "%s", shim_fw.versions[i].name);
-    std::snprintf(info->fw[i].fw.version, sizeof(info->fw[i].fw.version), "%s",
-                  shim_fw.versions[i].version);
+  if (shim_fw.count > AMDSMI_MAX_NIC_FW) {
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__ << " | NIC reported " << shim_fw.count
+       << " firmware entries, returning the first " << AMDSMI_MAX_NIC_FW;
+    LOG_INFO(ss);
   }
-  info->num_fw = n;
+
+  amd::smi::copy_nic_fw_info(shim_fw, info);
   return AMDSMI_STATUS_SUCCESS;
 }
 

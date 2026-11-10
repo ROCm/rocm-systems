@@ -71,14 +71,15 @@ TEST_F(NicUnit, NicPublicLayoutVendorStatisticsSignatureMatchPreviousRelease) {
   EXPECT_TRUE((std::is_same_v<decltype(&amdsmi_get_nic_vendor_statistics), DevelopSignature_t>));
 }
 
-// The firmware layout follows amdsmi_unified: an entry is a version type plus the name and version.
-TEST_F(NicUnit, NicPublicLayoutFirmwareMatchesTheSharedInterface) {
-  EXPECT_EQ(AMDSMI_MAX_NIC_FW, 64);
-  EXPECT_EQ(sizeof(amdsmi_nic_fw_t), 2 * kMaxStringLength);
-  EXPECT_EQ(offsetof(amdsmi_nic_fw_entry_t, fw), sizeof(amdsmi_nic_fw_version_type_t));
-  EXPECT_EQ(static_cast<int>(AMDSMI_NIC_FW_VERSION_TYPE_FIXED), 0);
-  EXPECT_EQ(static_cast<int>(AMDSMI_NIC_FW_VERSION_TYPE_RUNNING), 1);
-  EXPECT_EQ(static_cast<int>(AMDSMI_NIC_FW_VERSION_TYPE_STORED), 2);
+// A binary built against the previous release reads the firmware array with these sizes.
+TEST_F(NicUnit, NicPublicLayoutFirmwareMatchesThePreviousRelease) {
+  constexpr auto kPreviousFwInfoSizeBytes = size_t{8196};
+
+  EXPECT_EQ(AMDSMI_MAX_NIC_FW, 16);
+  EXPECT_EQ(sizeof(amdsmi_nic_fw_entry_t), 2 * kMaxStringLength);
+  EXPECT_EQ(offsetof(amdsmi_nic_fw_entry_t, version), kMaxStringLength);
+  EXPECT_EQ(offsetof(amdsmi_nic_fw_info_t, fw), sizeof(uint32_t));
+  EXPECT_EQ(sizeof(amdsmi_nic_fw_info_t), kPreviousFwInfoSizeBytes);
 }
 
 // The library reports how a NIC connects to a device; the public call speaks amdsmi_link_type_t.

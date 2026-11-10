@@ -159,8 +159,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **AI-NIC identity and telemetry fields now report values instead of ``N/A``**.  
   - They are read from the port function, and on a card with more than one port they report port 0.
 
-- **``amd-smi firmware --nic`` now reports NIC firmware versions** (breaking).  
-  - ``amdsmi_get_nic_fw_info()`` is implemented and its entry layout changed, so callers must recompile and read ``entry.fw.name`` where ``entry.name`` was used; the Python function returns a firmware name to version dictionary. This is an ABI break in ``amdsmi_nic_fw_entry_t`` and ``amdsmi_nic_fw_info_t``, and ``AMDSMI_MAX_NIC_FW`` grows from 16 to 64.
+- **``amd-smi firmware --nic`` now reports NIC firmware versions**.  
+  - ``amdsmi_get_nic_fw_info()`` is implemented, and the Python function returns a firmware name to version dictionary. A NIC reports at most 16 entries, and a version that repeats an earlier name shows its kind after it, for example ``fw.version (stored)``. The types and ``AMDSMI_MAX_NIC_FW`` keep their previous layout.
 
 - **RDMA ``MAX_MTU`` and ``ACTIVE_MTU`` now come from libibverbs**.  
   - They read ``N/A`` when neither the RDMA provider nor sysfs can answer, and a provider that crashes no longer affects ``amd-smi`` or the library. A build without the libibverbs headers reads sysfs only, so more drivers show ``N/A``.

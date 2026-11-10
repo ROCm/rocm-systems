@@ -3052,7 +3052,7 @@ typedef struct {
  */
 #define AMDSMI_MAX_NIC_PORTS 32     //!< Maximum number of NIC ports
 #define AMDSMI_MAX_NIC_RDMA_DEV 32  //!< Maximum number of NIC RDMA devices
-#define AMDSMI_MAX_NIC_FW 64        //!< Maximum number of NIC firmwares
+#define AMDSMI_MAX_NIC_FW 16        //!< Maximum number of NIC firmwares
 
 /**
  * @brief Structure for NIC statistic name-value pairs
@@ -3145,17 +3145,6 @@ typedef struct {
 } amdsmi_nic_numa_info_t;
 
 /**
- * @brief NIC firmware version type
- *
- * @cond @tag{gpu_bm_linux} @tag{host} @endcond
- */
-typedef enum {
-  AMDSMI_NIC_FW_VERSION_TYPE_FIXED,    //!< Fixed (hardware) firmware version
-  AMDSMI_NIC_FW_VERSION_TYPE_RUNNING,  //!< Currently running firmware version
-  AMDSMI_NIC_FW_VERSION_TYPE_STORED    //!< Stored (pending) firmware version
-} amdsmi_nic_fw_version_type_t;
-
-/**
  * @brief NIC firmware information
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
@@ -3163,16 +3152,6 @@ typedef enum {
 typedef struct {
   char name[AMDSMI_MAX_STRING_LENGTH];
   char version[AMDSMI_MAX_STRING_LENGTH];
-} amdsmi_nic_fw_t;
-
-/**
- * @brief NIC firmware entry
- *
- * @cond @tag{gpu_bm_linux} @tag{host} @endcond
- */
-typedef struct {
-  amdsmi_nic_fw_version_type_t type;
-  amdsmi_nic_fw_t fw;
 } amdsmi_nic_fw_entry_t;
 
 /**
@@ -10418,7 +10397,9 @@ amdsmi_status_t amdsmi_get_nic_rdma_port_statistics(amdsmi_processor_handle proc
  *  @param[in] processor_handle NIC for which to query
  *
  *  @param[out] info reference to the nic firmware info struct.
- *  Must be allocated by user.
+ *  Must be allocated by user. At most ::AMDSMI_MAX_NIC_FW entries are returned, and a
+ *  version that repeats an earlier entry's name carries its kind (fixed, running or stored)
+ *  in parentheses after the name.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */

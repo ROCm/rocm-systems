@@ -351,7 +351,7 @@ rule and report emptiness through a count instead; see
 #define AMDSMI_MAX_STRING_LENGTH       256  // Max string buffer length
 #define AMDSMI_MAX_NIC_PORTS            32  // Max NIC ports
 #define AMDSMI_MAX_NIC_RDMA_DEV         32  // Max RDMA devices
-#define AMDSMI_MAX_NIC_FW               64  // Max firmware entries
+#define AMDSMI_MAX_NIC_FW               16  // Max firmware entries
 ```
 
 ### NIC ASIC information
@@ -513,31 +513,24 @@ typedef struct {
 ### NIC firmware information
 
 ```c
-typedef enum {
-    AMDSMI_NIC_FW_VERSION_TYPE_FIXED,    // fixed (hardware) version
-    AMDSMI_NIC_FW_VERSION_TYPE_RUNNING,  // currently running version
-    AMDSMI_NIC_FW_VERSION_TYPE_STORED    // stored (pending) version
-} amdsmi_nic_fw_version_type_t;
-
 typedef struct {
     char name[AMDSMI_MAX_STRING_LENGTH];
     char version[AMDSMI_MAX_STRING_LENGTH];
-} amdsmi_nic_fw_t;
-
-typedef struct {
-    amdsmi_nic_fw_version_type_t type;
-    amdsmi_nic_fw_t              fw;
 } amdsmi_nic_fw_entry_t;
 
 typedef struct {
     uint32_t              num_fw;
-    amdsmi_nic_fw_entry_t fw[AMDSMI_MAX_NIC_FW];   // AMDSMI_MAX_NIC_FW is 64
+    amdsmi_nic_fw_entry_t fw[AMDSMI_MAX_NIC_FW];   // AMDSMI_MAX_NIC_FW is 16
 } amdsmi_nic_fw_info_t;
 ```
 
-The entry holds the name and version in ``fw``, so read ``entry.fw.name`` and
-``entry.fw.version``. The version types and the entry layout are the ones
-``amdsmi_unified`` uses.
+The public entry keeps the layout of earlier releases, so it carries a name and a version and
+nothing else, and a NIC reports at most 16 entries. The NIC library's own entry
+(``smi_nic_fw_version_t``) also holds the kind of version (fixed, running or stored) and allows 64.
+``amdsmi_get_nic_fw_info()`` gives the first version of a name the bare name, and a later version of
+the same name its kind in parentheses, for example ``fw.version (stored)``. ``amdsmi_unified`` has a
+wider entry (``type`` plus ``fw``, 64 entries). The public header can follow it when the library
+version allows an ABI break.
 
 ### NIC telemetry
 
@@ -1683,6 +1676,6 @@ The following runtime dependencies are relevant to the BM AMD SMI NIC library:
 
 | Version | Date | Description |
 |---------|------|-------------|
-| 2.1 | October 23, 2026 | Aligned the NIC API with ``amdsmi_unified``: added ``amdsmi_get_nic_vendor_statistics_with_scope()`` and NIC support in ``amdsmi_topo_get_link_type()``, took the firmware version types from unified, and removed the statistics-scope setter and the NIC discovery filter. RDMA MTU now comes from libibverbs. Documented ``bng_en`` discovery and the ``shutdown`` sensor threshold. |
+| 2.1 | October 23, 2026 | Aligned the NIC API with ``amdsmi_unified``: added ``amdsmi_get_nic_vendor_statistics_with_scope()`` and NIC support in ``amdsmi_topo_get_link_type()``, and removed the statistics-scope setter and the NIC discovery filter. RDMA MTU now comes from libibverbs. Documented ``bng_en`` discovery and the ``shutdown`` sensor threshold. |
 | 2.0 | July 16, 2026 | Replaced the retired vendor-SMI-module example with the in-tree ``amdsminic`` vendor-plugin framework (``SmiNicSubsystem``, ``make_default_vendor_plugins()``, Pensando reference) and the shared ethtool transport. Updated public NIC API list, code organization, CLI, and build sections to match the current tree. |
 | 1.0 | April 26, 2026 | Initial public release. Covered AMD SMI bare-metal (BM) NIC public APIs, data structures, conventions, sysfs data sources, code organization, CLI commands, and external contribution guidelines for adding new NIC vendors. |

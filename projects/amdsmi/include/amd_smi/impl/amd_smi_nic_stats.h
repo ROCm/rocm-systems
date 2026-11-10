@@ -7,7 +7,9 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <memory>
+#include <string>
 
 #include "amd_smi/amdsmi.h"
 
@@ -66,6 +68,48 @@ inline auto copy_nic_stats(const smi_nic_stat_info_t& info, uint32_t* num_stats,
   const auto is_truncated = (info.count > *num_stats);
   *num_stats = info.count;
   return is_truncated ? AMDSMI_STATUS_INSUFFICIENT_SIZE : AMDSMI_STATUS_SUCCESS;
+}
+
+/** The kind of a firmware version, as it reads after a repeated name. */
+inline auto nic_fw_type_label(smi_nic_fw_version_type_t type) -> const char* {
+  switch (type) {
+    case SMI_NIC_FW_VERSION_TYPE_RUNNING:
+      return "running";
+    case SMI_NIC_FW_VERSION_TYPE_STORED:
+      return "stored";
+    case SMI_NIC_FW_VERSION_TYPE_FIXED:
+      break;
+  }
+  return "fixed";
+}
+
+/**
+ * Copies at most AMDSMI_MAX_NIC_FW firmware versions. The public entry holds a name and a version
+ * and nothing else, so a version that repeats an earlier entry's name (a running one and a stored
+ * one share it) carries its kind in parentheses after the name. The first one keeps the bare name.
+ */
+inline auto copy_nic_fw_info(const smi_nic_fw_info_t& shim, amdsmi_nic_fw_info_t* info) -> void {
+  *info = {};
+  const auto num_copied = std::min<uint32_t>(shim.count, AMDSMI_MAX_NIC_FW);
+  for (auto i = uint32_t{0}; i < num_copied; ++i) {
+    const auto& version = shim.versions[i];
+    auto& entry = info->fw[i];
+    const auto is_name_repeated = std::any_of(
+        shim.versions, shim.versions + i, [&version](const smi_nic_fw_version_t& earlier) {
+          return (std::strcmp(earlier.name, version.name) == 0);
+        });
+    if (is_name_repeated) {
+      auto labelled = std::string{version.name};
+      labelled += " (";
+      labelled += nic_fw_type_label(version.type);
+      labelled += ')';
+      std::snprintf(entry.name, sizeof(entry.name), "%s", labelled.c_str());
+    } else {
+      std::snprintf(entry.name, sizeof(entry.name), "%s", version.name);
+    }
+    std::snprintf(entry.version, sizeof(entry.version), "%s", version.version);
+  }
+  info->num_fw = num_copied;
 }
 
 /**
