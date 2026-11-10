@@ -223,7 +223,3 @@ class TestMonitorFallback(unittest.TestCase):
         )
         values = self._run()
         self.assertEqual((values["gfx_clk"], values["mem_clock"]), ("N/A", "N/A"))
-
-
-if __name__ == "__main__":
-    unittest.main()
