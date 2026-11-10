@@ -15,7 +15,7 @@ template <> struct can_group_do_async_copy<cooperative_groups::coalesced_group>
 template <> struct can_group_do_async_copy<cooperative_groups::thread_block>
     : public std::true_type {};
 
-#if defined(__HIP_DEVICE_COMPILE__) && __has_builtin(__builtin_amdgcn_tensor_load_to_lds) && \
+#if defined(__HIP_DEVICE_COMPILE__) && __has_builtin(__builtin_amdgcn_tensor_load_to_lds) &&       \
     __has_builtin(__builtin_amdgcn_tensor_store_from_lds)
 
 #include "amd_gfx1250_TDM.h"
@@ -105,7 +105,7 @@ __CG_STATIC_QUALIFIER__ bool dispatch_tdm_memcpy(const TyGroup& group, TyElem* _
 }
 #endif
 
-#if __has_builtin(__builtin_amdgcn_global_store_async_from_lds_b128) && \
+#if __has_builtin(__builtin_amdgcn_global_store_async_from_lds_b128) &&                            \
     __has_builtin(__builtin_amdgcn_global_load_async_to_lds_b128)
 template <typename TyElem>
 __CG_STATIC_QUALIFIER__ void accelerated_memcpy_global_to_lds(TyElem* __restrict__ dst,
@@ -284,8 +284,7 @@ template <class TyGroup, typename TyElem, typename TySize, size_t Hint = alignof
 __CG_STATIC_QUALIFIER__ void memcpy_async_bytes(const TyGroup& group, TyElem* __restrict__ dst,
                                                 const TyElem* __restrict__ src,
                                                 const TySize& count) {
-#if defined(__HIP_DEVICE_COMPILE__) && (defined(__gfx1250__) || defined(__gfx1251__)) &&           \
-    __has_builtin(__builtin_amdgcn_tensor_load_to_lds) &&                                          \
+#if defined(__HIP_DEVICE_COMPILE__) && __has_builtin(__builtin_amdgcn_tensor_load_to_lds) &&       \
     __has_builtin(__builtin_amdgcn_tensor_store_from_lds)
   if (details::dispatch_tdm_memcpy(group, dst, src, count)) {
     return;
