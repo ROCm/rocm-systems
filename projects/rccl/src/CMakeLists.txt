@@ -188,6 +188,7 @@ set(SRC_FILES
   include/collectives.h
   include/comm.h
   include/compiler.h
+  include/dda_done.h
   include/compiler/gcc.h
   include/compiler/msvc.h
   include/config/algorithm_parser.h

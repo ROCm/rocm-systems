@@ -2399,7 +2399,14 @@ ncclResult_t rcclAddonLaunchBegin(struct ncclComm* comm, cudaStream_t stream, st
     // doneEvent may carry a node from another capture or from outside one, and waiting on such an
     // event inside a capture breaks capture isolation, so a captured stream gets no edge here and is
     // ordered through deviceStream below instead, as native captured launches are.
-    CUDACHECK(hipStreamWaitEvent(stream, comm->doneEvent, 0));
+    // A DDA-IPC launch publishes a sequence into signal memory instead of recording doneEvent.
+    // The wait is on this stream, never on the previous one, which may already have been destroyed.
+    if (comm->addonDoneWait != 0 && comm->addonDone != nullptr) {
+      CUDACHECK(hipStreamWaitValue64(stream, &comm->addonDone->seq, comm->addonDoneWait, hipStreamWaitValueGte,
+                                    ~0ull));
+    } else {
+      CUDACHECK(hipStreamWaitEvent(stream, comm->doneEvent, 0));
+    }
   }
 
   // Capture never binds a fused stopEvent, so under capture nothing is offered and the epilogue
@@ -2425,6 +2432,8 @@ ncclResult_t rcclAddonLaunchEnd(struct ncclComm* comm, cudaStream_t stream,
   if (result == ncclSuccess) {
     if (!taken) {
       CUDACHECKGOTO(hipEventRecord(comm->doneEvent, stream), result, release);
+      // A real record covers every earlier publish on this stream. A capture record does not.
+      if (!state.capturing) comm->addonDoneWait = 0;
     }
     // The tag advances however the event was recorded: it is what tells the next collective on
     // another stream that an edge is needed.

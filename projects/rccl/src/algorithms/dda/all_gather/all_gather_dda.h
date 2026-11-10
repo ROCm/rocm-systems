@@ -20,7 +20,8 @@ template <typename T, int NRANKS, bool hasAcc>
 __launch_bounds__(512)
 #endif
   __global__ void ddaAllGatherIpc(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
-                                  const T* __restrict__ sendbuff, int selfRank, IpcGpuBarrier barrier) {
+                                  const T* __restrict__ sendbuff, int selfRank, IpcGpuBarrier barrier,
+                                  DdaDoneMark done) {
 
   const size_t countPerRank = count;
   constexpr auto countPerThread = sizeof(uint4) / sizeof(T);
@@ -40,6 +41,7 @@ __launch_bounds__(512)
 
   // barrier to ensure remote ranks won't free their buffers until I'm done
   barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, false /* hasSubsequentMemAccess */>();
+  ddaPublishDone(done);
 }
 
 } // namespace dda::common

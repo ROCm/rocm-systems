@@ -71,19 +71,21 @@ static ncclResult_t ncclAllReduceDdaIpcTyped(const void* sendbuff, void* recvbuf
   void* peerPtrsDev = comm->ddaPeerPtrsDev;
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
-  const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
+  const DdaDoneMark done = rcclPrepareAddonDone(comm);
+  const hipEvent_t stopEvent = done.seq != nullptr ? nullptr : rcclTakeAddonStopEvent(comm);
   if (treeOk) {
     CUDACHECK(cudaMemcpyAsync(comm->ddaScratch, sendbuff, count * sizeof(T), cudaMemcpyDeviceToDevice, stream));
     hipExtLaunchKernelGGL((dda::common::ddaAllReduceTreeIpc<T, kDdaNranks, false>), grid, block, 0, stream,
                           /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff), count,
-                          static_cast<const T*>(sendbuff), comm->rank, barrierHost, nullptr);
+                          static_cast<const T*>(sendbuff), comm->rank, barrierHost, nullptr, done);
   } else {
     hipExtLaunchKernelGGL((dda::common::ddaAllReduceFlatIpc<T, kDdaNranks, false>), grid, block, 0, stream,
                           /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff), count,
-                          static_cast<const T*>(sendbuff), comm->rank, barrierHost, nullptr);
+                          static_cast<const T*>(sendbuff), comm->rank, barrierHost, nullptr, done);
   }
 
   CUDACHECK(cudaGetLastError());
+  rcclCommitAddonDone(comm, done);
 
   return ncclSuccess;
 }
