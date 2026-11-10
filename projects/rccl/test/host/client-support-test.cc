@@ -1643,8 +1643,26 @@ void ExpectRunCommsRejects(std::vector<char> data, int nPeers = 1) {
 
 }  // namespace
 
-TEST_F(RasClientSupportMicrotest, RunComms_MoreRanksThanCommNRanks_ReturnsInternalError) {
-  ExpectRunCommsRejects(BuildRasCollComms({MakeCommSpec(1, {RankSpec{0, 0}, RankSpec{1, 0}})}));
+// An over-subscribed record (nRanks + nMissingRanks > commNRanks) is not rejected: rasCollCommsMerge emits one
+// on a suspected commHash collision or when a rank is destroyed mid-collective, and dropping the whole report
+// would terminate the client.  rasClientRunComms sizes its scratch arrays from nRanks (here 2, above commNRanks
+// 1) and must process it.  The two ranks also carry differing status, driving the MISMATCH breakdown whose
+// collOpCounts tally the old commNRanks-based sizing would have overrun.
+TEST_F(RasClientSupportMicrotest, RunComms_MoreRanksThanCommNRanks_AcceptedAndSummarized) {
+  struct rasPeerInfo peers[] = {MakePeer(4000)};
+  rasPeers = peers;
+  nRasPeers = 1;
+
+  RankSpec running{0, 0};
+  RankSpec aborted{1, 0};
+  aborted.abortFlag = true;
+  struct rasClient* client = MakeClient();
+  client->status = RAS_CLIENT_COMMS;
+  client->coll = MakeCollective(BuildRasCollComms({MakeCommSpec(1, {running, aborted})}), {MakeAddr(4000)});
+  bool closed = false;
+  ASSERT_EQ(rasClientRun(client, &closed), ncclSuccess);
+  EXPECT_NE(std::string::npos, DrainSendQueue(client).find("MISMATCH"));
+  FreeClient(client);
 }
 
 // A comm with no reported ranks is zeroed, not malformed: rasCollCommsInit emits one for a comm

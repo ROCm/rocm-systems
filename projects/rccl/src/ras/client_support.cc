@@ -1176,9 +1176,13 @@ static inline int rasCommStatusIndex(unsigned int status) {
   return status == 0 ? 0 : (int)(sizeof(unsigned int) * 8 - 1) - COMPILER_CLZ(status);
 }
 
-// Rejects peer-supplied RAS_COLL_COMMS records whose counts or indices would overrun rasClientRunComms' arrays.
-// A zeroed record (nRanks == 0) is not malformed: rasCollCommsInit emits one for a comm still initializing, and
-// rasClientRunComms handles it (status stays 0 -> NOCOMM via rasCommStatusIndex).  Only negative counts are rejected.
+// Rejects peer-supplied RAS_COLL_COMMS records whose extent would overrun the report buffer.  Only the record
+// geometry has to be sound here: negative counts, or a record whose ranks/missing-ranks run past coll->data.
+// Count relationships are deliberately not enforced -- a zeroed record (nRanks == 0, a comm still initializing)
+// and an over-subscribed one (nRanks + nMissingRanks > commNRanks, which rasCollCommsMerge emits on a commHash
+// collision or a rank destroyed mid-collective) are both processed rather than dropped, since dropping would
+// terminate the client and hide the whole report.  rasClientRunComms sizes its scratch arrays from nRanks (not
+// the peer's commNRanks) and indexes them only by nRanks, so those cases stay memory-safe.
 static ncclResult_t rasClientValidateComms(const struct rasCollective* coll) {
   const char* const end = coll->data + coll->nData;
   const struct rasCollComms* commsData = (const struct rasCollComms*)coll->data;
@@ -1190,7 +1194,7 @@ static ncclResult_t rasClientValidateComms(const struct rasCollective* coll) {
   const struct rasCollComms::comm* comm = commsData->comms;
   for (int commIdx = 0; commIdx < commsData->nComms; commIdx++) {
     if (end - (const char*)comm < (ptrdiff_t)sizeof(*comm) || comm->commNRanks < 0 || comm->nRanks < 0 ||
-        comm->nMissingRanks < 0 || (int64_t)comm->nRanks + comm->nMissingRanks > comm->commNRanks) {
+        comm->nMissingRanks < 0) {
       INFO(NCCL_RAS, "RAS rejecting malformed communicator record %d", commIdx);
       return ncclInternalError;
     }
@@ -1280,12 +1284,14 @@ static ncclResult_t rasClientRunComms(struct rasClient* client) {
   // of variable length, we create an auxiliary array that includes pointers to individual elements and simply sort
   // that array while keeping the data intact.
   NCCLCHECKGOTO(ncclCalloc(&auxComms, commsData->nComms), ret, fail);
-  // While initializing the just allocated array, also find out the size of the largest communicator so that we know
-  // how much memory to allocate for another temporary array.
+  // While initializing the just allocated array, also find out the largest number of reported ranks so that we
+  // know how much memory to allocate for another temporary array.  We size from nRanks rather than the peer's
+  // commNRanks: the scratch arrays are only ever indexed by nRanks, and commNRanks is both unbounded (a bogus
+  // INT_MAX would demand a ~32 GB allocation) and not guaranteed >= nRanks in an over-subscribed record.
   maxCommSize = 0;
   comm = commsData->comms;
   for (int commIdx = 0; commIdx < commsData->nComms; commIdx++) {
-    if (maxCommSize < comm->commNRanks) maxCommSize = comm->commNRanks;
+    if (maxCommSize < comm->nRanks) maxCommSize = comm->nRanks;
     auxComms[commIdx].comm = comm;
     comm = (struct rasCollComms::comm*)((char*)comm + rasCommRecordSize(comm));
   }
@@ -1699,10 +1705,10 @@ static ncclResult_t rasClientRunComms(struct rasClient* client) {
         rasOutAppend("#%d-%d (%016lx) MISMATCH\n", vcIdx, commIdx - vc->firstIdx, comm->commId.commHash);
 
         if (collOpCounts == nullptr) {
-          // Allocating comm->commNRanks elements ensures that we won't need to reallocate, because the valCounts
-          // array is reverse-sorted by commNRanks.  On the other hand, for this purpose allocating commNRanks
-          // elements may be massively overpessimistic...
-          NCCLCHECKGOTO(ncclCalloc(&collOpCounts, comm->commNRanks), ret, fail);
+          // Both frequency tallies below produce at most one entry per reported rank, plus (in the status tally)
+          // one "fake" NOCOMM entry, so maxCommSize + 1 never needs to reallocate.  maxCommSize is the largest
+          // nRanks across the report, so this one allocation is reused for every comm regardless of ordering.
+          NCCLCHECKGOTO(ncclCalloc(&collOpCounts, maxCommSize + 1), ret, fail);
         }
 
         if (COMPILER_POPCOUNT32(auxComm->status) > 1) {
