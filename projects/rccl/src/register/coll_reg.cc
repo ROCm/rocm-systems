@@ -16,6 +16,18 @@
 NCCL_PARAM(MloPartRdmaEnable, "MLOPART_RDMA_ENABLE", 0);
 #endif
 
+RCCL_PARAM(RingAutoRegister, "RING_AUTO_REGISTER", 1);
+
+// gfx1250 Ring Simple copies every hop through the P2P FIFO unless the peer can store straight into the user
+// buffer, and on gfx1250 that copy costs AllReduce ~8% and AllGather ~15% of large-message bandwidth (gfx950 has
+// the CU headroom to hide it). RCCL registers these buffers itself so unregistered calls take the direct path.
+// Graph capture keeps its own registration path.
+static bool rcclRingAutoRegister(struct ncclComm* comm, struct ncclTaskColl* info) {
+  return rcclParamRingAutoRegister() && ncclParamLocalRegister() && !comm->planner.persistent &&
+         (info->func == ncclFuncAllReduce || info->func == ncclFuncAllGather) &&
+         IsArchMatch(comm->archName, "gfx1250");
+}
+
 static ncclResult_t isMloPartBufRdmaCapable(struct ncclComm* comm, const void* ptr, bool* isRdmaCapable) {
   if (!comm->hasMloPart) {
     *isRdmaCapable = true;
@@ -364,9 +376,18 @@ ncclResult_t ncclRegisterCollBuffers(
       bool hasRecvNetPeer = false;
       bool hasSendNetPeer = false;
 
-      NCCLCHECK(ncclRegFind(comm, info->recvbuff, recvbuffSize, &recvRegRecord));
+      const bool autoRegister = rcclRingAutoRegister(comm, info);
+      if (autoRegister) {
+        NCCLCHECK(rcclRegAutoLocal(comm, (void*)info->recvbuff, recvbuffSize, &recvRegRecord));
+      } else {
+        NCCLCHECK(ncclRegFind(comm, info->recvbuff, recvbuffSize, &recvRegRecord));
+      }
       if (recvRegRecord == NULL && !(comm->planner.persistent && ncclParamGraphRegister())) goto exit;
-      NCCLCHECK(ncclRegFind(comm, info->sendbuff, sendbuffSize, &sendRegRecord));
+      if (autoRegister && comm->nNodes > 1) {
+        NCCLCHECK(rcclRegAutoLocal(comm, (void*)info->sendbuff, sendbuffSize, &sendRegRecord));
+      } else {
+        NCCLCHECK(ncclRegFind(comm, info->sendbuff, sendbuffSize, &sendRegRecord));
+      }
       if (comm->nNodes > 1 && sendRegRecord == NULL && !(comm->planner.persistent && ncclParamGraphRegister()))
         goto exit;
       NCCLCHECK(ncclCalloc(&sendNetConns, comm->nChannels));
