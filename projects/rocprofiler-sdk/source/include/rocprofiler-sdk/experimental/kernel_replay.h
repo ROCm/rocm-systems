@@ -75,6 +75,12 @@ typedef rocprofiler_status_t (*rocprofiler_kernel_replay_context_cb_t)(
  *   this pass, and the tool may overwrite it there to change the continue decision for this pass
  *   only (the next pass reverts to the CONFIG default).
  *
+ * Replay callbacks run on the thread that issued the dispatch while the SDK holds the replayed
+ * agent's replay lock. They must not submit GPU work to that agent (kernel launches, or copies and
+ * fills the runtime implements as kernels); the SDK stops the process with an error if they do.
+ * Work they submit to another agent runs once, is never replayed, and is not affected by
+ * @c replay_start_context / @c replay_stop_context.
+ *
  * The SDK maintains a single @c rocprofiler_user_data_t for the entire replay sequence
  * (CONFIG + all PASS operations). A tool can write per-dispatch state into
  * @c user_data during CONFIG PHASE_ENTER; the same value is delivered to every
@@ -172,6 +178,7 @@ typedef struct rocprofiler_callback_tracing_kernel_replay_data_t
     ///    positions a context once rather than re-issuing the same mask every pass.
     ///  - Scoped to the replay loop: each context's pre-replay active/inactive state
     ///    is restored once the loop completes. Global context state is never modified.
+    ///  - Scoped to the replayed agent: dispatches on other agents are unaffected.
     ///  - A local enable only undoes a prior local disable; it cannot promote a context that is
     ///    globally inactive (its service/callback thread may already be stopped).
     ///  - Coverage varies by service. Kernel dispatch tracing and dispatch thread trace

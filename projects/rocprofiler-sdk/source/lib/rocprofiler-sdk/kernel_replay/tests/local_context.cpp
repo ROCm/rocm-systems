@@ -339,3 +339,52 @@ TEST(kernel_replay_local_context, is_locally_enabled_ignores_rejected_toggles)
         << "a toggle outside the arm window is rejected";
     EXPECT_TRUE(lc::is_locally_enabled({11}));
 }
+
+// A loop's overrides apply only to dispatches on the agent it replays: a tool callback on the
+// replaying thread that dispatches to another agent must not see this loop's local stops.
+TEST(kernel_replay_local_context, overrides_apply_only_on_the_replay_agent)
+{
+    const rocprofiler_agent_id_t replayed{.handle = 7};
+    const rocprofiler_agent_id_t other{.handle = 9};
+
+    EXPECT_TRUE(lc::is_locally_enabled({21}, replayed));
+
+    {
+        fake_active_contexts             active{21};
+        lc::scoped_local_context_control loop{active.array, replayed};
+
+        lc::set_toggles_armed(true);
+        ASSERT_EQ(lc::replay_local_disable_context({21}), ROCPROFILER_STATUS_SUCCESS);
+        lc::set_toggles_armed(false);
+
+        EXPECT_FALSE(lc::is_locally_enabled({21}, replayed));
+        EXPECT_TRUE(lc::is_locally_enabled({21}, other))
+            << "another agent's dispatch is unaffected";
+        EXPECT_FALSE(lc::is_locally_enabled({21}))
+            << "the agent-agnostic query still sees the stop";
+    }
+
+    EXPECT_TRUE(lc::is_locally_enabled({21}, replayed)) << "a local stop must not outlive the loop";
+}
+
+// replaying_agent() names the loop's agent only while that loop runs, and only for a loop that
+// names one.
+TEST(kernel_replay_local_context, replaying_agent_tracks_the_loop)
+{
+    const rocprofiler_agent_id_t replayed{.handle = 7};
+
+    EXPECT_FALSE(lc::replaying_agent().has_value());
+    {
+        fake_active_contexts             active{21};
+        lc::scoped_local_context_control loop{active.array, replayed};
+        ASSERT_TRUE(lc::replaying_agent().has_value());
+        EXPECT_EQ(lc::replaying_agent()->handle, replayed.handle);
+    }
+    EXPECT_FALSE(lc::replaying_agent().has_value()) << "must not outlive the loop";
+
+    {
+        fake_active_contexts             active{21};
+        lc::scoped_local_context_control loop{active.array};
+        EXPECT_FALSE(lc::replaying_agent().has_value()) << "a loop that names no agent names none";
+    }
+}
