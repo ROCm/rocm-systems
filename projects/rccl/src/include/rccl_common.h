@@ -445,6 +445,9 @@ bool rcclIsArchSupportedForFunc(struct ncclTaskColl* info, char const* archName)
 // Decide the host-side value of comm->cheapPostSendFenceOff.
 // Returns 1 if the cheap post-send fence must be OFF (kernel uses the full
 // __threadfence_system()), or 0 if the cheap post-send fence can be ON.
+// Simple honors the result on every arch. LL128 honors it only where FIFO
+// stores are system scope (RCCL_LL_FIFO_SYS_SCOPE, gfx1250) and otherwise
+// always uses the full fence.
 //   cudaArch             : numeric device arch (comm->cudaArch = 100*major +
 //                          10*minor, i.e. gfx942 = 940, gfx950 = 950,
 //                          gfx1250 = 1250).

@@ -5,9 +5,11 @@
  ************************************************************************/
 
 // Unit tests for rcclComputeCheapPostSendFenceOff(), the host-side decision
-// for comm->cheapPostSendFenceOff. The return value gates whether the LL128 /
-// simple post-send path issues the full __threadfence_system() (return 1, cheap
-// fence OFF) or the cheap signal-only fence (return 0, cheap fence ON).
+// for comm->cheapPostSendFenceOff. The return value gates whether the Simple
+// post-send path issues the full __threadfence_system() (return 1, cheap fence
+// OFF) or the cheap signal-only fence (return 0, cheap fence ON). LL128 honors it
+// only where FIFO stores are system scope (gfx1250) and otherwise always uses the
+// full fence.
 //
 // Behavior under test:
 //   * cheap fence is only safe when cache-bypassing builtins are available
