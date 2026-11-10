@@ -56,6 +56,7 @@ ASSERT_HOOK_MATCHES_PROD(g_commGraphDeregister,       ncclCommGraphDeregister);
 ASSERT_HOOK_MATCHES_PROD(g_memTrackImportFromPeer,    ncclMemTrackImportFromPeer);
 ASSERT_HOOK_MATCHES_PROD(g_memTrack,                  ncclMemTrack);
 ASSERT_HOOK_MATCHES_PROD(g_memUntrackDynamic,         ncclMemUntrackDynamic);
+ASSERT_HOOK_MATCHES_PROD(g_memUntrackPersist,         ncclMemUntrackPersist);
 ASSERT_HOOK_MATCHES_PROD(g_dynMemMarkExportToPeer,    ncclDynMemMarkExportToPeer);
 ASSERT_HOOK_MATCHES_PROD(g_shmImportShareableBuffer,  ncclShmImportShareableBuffer);
 ASSERT_HOOK_MATCHES_PROD(g_shmIpcClose,               ncclShmIpcClose);
@@ -557,11 +558,16 @@ ncclResult_t ncclMemUntrackDynamic(struct ncclMemManager* manager, void* ptr, st
     return g_memUntrackDynamic(manager, ptr, info);
 }
 
-ncclResult_t ncclMemUntrackPersist(struct ncclMemManager* /*manager*/,
-                                   void*                  /*ptr*/,
-                                   size_t                 /*size*/)
+// --- Controllable seam: ncclMemUntrackPersist --------------------------
+static ncclResult_t DefaultMemUntrackPersist(struct ncclMemManager*, void*, size_t)
 {
     return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclMemManager*, void*, size_t)> g_memUntrackPersist = DefaultMemUntrackPersist;
+
+ncclResult_t ncclMemUntrackPersist(struct ncclMemManager* manager, void* ptr, size_t size)
+{
+    return g_memUntrackPersist(manager, ptr, size);
 }
 
 // --- Controllable seam: ncclDynMemMarkExportToPeer ----------------------
@@ -633,6 +639,7 @@ void ResetNcclFakes()
     g_memTrackImportFromPeer       = DefaultMemTrackImportFromPeer;
     g_memTrack                     = DefaultMemTrack;
     g_memUntrackDynamic            = DefaultMemUntrackDynamic;
+    g_memUntrackPersist            = DefaultMemUntrackPersist;
     g_dynMemMarkExportToPeer       = DefaultDynMemMarkExportToPeer;
     g_ncclTopoGetLinkType          = DefaultTopoGetLinkType;
     g_ncclTopoGetLinkTypeCalls     = 0;
@@ -644,5 +651,16 @@ void ResetNcclFakes()
     g_shmIpcClose                  = DefaultShmIpcClose;
     g_commGraphRegister            = DefaultCommGraphRegister;
     g_commGraphDeregister          = DefaultCommGraphDeregister;
+    ncclCuMemHandleType            = hipMemHandleTypePosixFileDescriptor;
     g_ncclSetThreadName            = DefaultSetThreadName;
 }
+
+// ppc64le TOC references survive --gc-sections, so rome_models.cc's
+// extern topoPathTypeStr[] needs a definition even when the code path is dead.
+// Weak so that tests linking topo_stubs.cc (which has a strong definition) win.
+#if defined(__powerpc64__) || defined(__PPC64__)
+#ifndef RCCL_NCCL_FAKES_OMIT_GRAPH
+#include "graph.h"
+__attribute__((weak)) const char* topoPathTypeStr[] = {"LOC", "XGMI", "NVB", "C2C", "PIX", "PXB", "P2C", "PXN", "PHB", "SYS", "NET", "DIS"};
+#endif
+#endif

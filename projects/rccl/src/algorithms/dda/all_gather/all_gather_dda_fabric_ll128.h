@@ -90,7 +90,7 @@ __launch_bounds__(1024)
     const int eltInSlice =
       rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
     uint64_t regs[kDdaLL128WordsPerThread];
-    ddaLL128LoadRegs<int8_t>(regs, srcBytes + dataByte, eltInSlice, lane, flagLane);
+    ddaLL128LoadRegsBatched<int8_t>(regs, srcBytes + dataByte, eltInSlice, lane, flagLane);
     ddaLL128StoreWire(
       scatterSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, regs, flag, flagLane);
   }
@@ -114,8 +114,8 @@ __launch_bounds__(1024)
     const int eltInSlice =
       rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
     uint64_t vr[kDdaLL128WordsPerThread];
-    if (!ddaLL128PollWire(gatherSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, vr, flag, lane,
-                          params)) {
+    if (!ddaLL128PollWireBatched(gatherSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, vr, flag, lane,
+                                 params)) {
       break; // not return: every thread must reach the __syncthreads below
     }
     ddaLL128StoreRegs<int8_t>(dstBytes + dataByte, vr, eltInSlice, lane, flagLane);

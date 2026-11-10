@@ -478,7 +478,11 @@ impl Fixture {
             },
             gpu_counter_frequency_hz: 0,
         };
-        super::super::LinuxKfdDriver::with_context_lifetime(lifetime).allocate_owned(
+        super::super::LinuxKfdDriver::with_context_lifetime(
+            lifetime,
+            crate::os::ProcessIdentity::capture().expect("test process identity"),
+        )
+        .allocate_owned(
             &device,
             &[],
             kind,
@@ -2440,6 +2444,28 @@ fn late_subscriber_receives_the_latest_fault_without_unbounded_history() {
 }
 
 #[test]
+fn hardware_event_keeps_native_origin_before_endpoint_activation() {
+    let fixture = Fixture::new([]);
+    let origin = crate::device::event::DeviceEventOriginId::from_driver_key(42);
+    assert_eq!(fixture.vm.event_origin_id(), origin);
+    let mut early = fixture.vm.subscribe_events().unwrap();
+    fixture.hardware.store(1, Ordering::Release);
+    let Some(DeviceEvent::GpuHardwareException(unattributed)) = early.poll().unwrap() else {
+        panic!("hardware exception was not delivered");
+    };
+    assert_eq!(unattributed.endpoint_id, None);
+    assert_eq!(unattributed.origin_id, Some(origin));
+
+    fixture.vm.loss.register_identity(42, [42; 16]).unwrap();
+    let mut late = fixture.vm.subscribe_events().unwrap();
+    let Some(DeviceEvent::GpuHardwareException(attributed)) = late.poll().unwrap() else {
+        panic!("retained hardware exception was not replayed");
+    };
+    assert_eq!(attributed.endpoint_id, Some([42; 16]));
+    assert_eq!(attributed.origin_id, Some(origin));
+}
+
+#[test]
 fn later_hardware_loss_is_reported_after_a_nonterminal_exception() {
     let fixture = Fixture::new([]);
     fixture.vm.loss.register_identity(42, [42; 16]).unwrap();
@@ -2450,6 +2476,9 @@ fn later_hardware_loss_is_reported_after_a_nonterminal_exception() {
         subscriber.poll().unwrap(),
         Some(DeviceEvent::GpuHardwareException(GpuHardwareException {
             endpoint_id: Some([42; 16]),
+            origin_id: Some(crate::device::event::DeviceEventOriginId::from_driver_key(
+                42
+            )),
             scope: GpuResetScope::Other,
             memory_lost: false,
             cause: GpuResetCause::Ecc,
@@ -2466,6 +2495,9 @@ fn later_hardware_loss_is_reported_after_a_nonterminal_exception() {
         subscriber.poll().unwrap(),
         Some(DeviceEvent::GpuHardwareException(GpuHardwareException {
             endpoint_id: Some([42; 16]),
+            origin_id: Some(crate::device::event::DeviceEventOriginId::from_driver_key(
+                42
+            )),
             scope: GpuResetScope::Other,
             memory_lost: true,
             cause: GpuResetCause::Ecc,
