@@ -259,12 +259,15 @@ TEST(RaceReportTraceTest, EmptyAndMissingCurrentTraceDoNotFabricateExecutionCont
   EXPECT_NE(report.find("outside recorded trace"), std::string::npos);
 }
 
-TEST(RaceReportTraceTest, RejectsReversedExecutionOrder) {
+#ifndef NDEBUG
+TEST(RaceReportTraceDeathTest, AssertsReversedExecutionOrder) {
   Trace trace;
   trace.push(snapshot(0x100, 0, 1));
   trace.push(snapshot(0x104, 1, 1));
-  EXPECT_THROW(formatTrace(trace, text, mark(trace, 1), mark(trace, 0)), std::invalid_argument);
+  EXPECT_DEATH(formatTrace(trace, text, mark(trace, 1), mark(trace, 0)),
+               "race conflict follows the current access");
 }
+#endif
 
 TEST(RaceReportDescriptionTest, DescribesRegisterAndLdsDirectionsAcrossCompletionStates) {
   using Space = RaceViolation::Space;
