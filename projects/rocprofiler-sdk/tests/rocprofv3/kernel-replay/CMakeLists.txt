@@ -15,7 +15,8 @@ set(rocprofv3-generate-env
     "PYTHONPATH=${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
     )
 
-rocprofiler_configure_pytest_files(COPY test_kernel_replay_cli.py)
+rocprofiler_configure_pytest_files(COPY test_kernel_replay_cli.py
+                                        test_kernel_replay_validate.py validate.py)
 
 # Unit test for the rocprofv3 kernel-replay CLI logic. Imports rocprofv3.py directly, so
 # it needs no GPU, no application run and no fixtures -- it guards which services replay
@@ -29,6 +30,17 @@ add_test(
 
 set_tests_properties(
     rocprofv3-test-kernel-replay-cli-unit
+    PROPERTIES TIMEOUT 60 LABELS "unit-tests;kernel-replay" FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+# Unit test for validate.py: feeds it synthetic replay JSON for gfx1201, gfx1250, gfx942
+# and mixed agents, and checks which common sanity counters it skips. Needs no GPU.
+add_test(NAME rocprofv3-test-kernel-replay-validate-unit
+         COMMAND ${Python3_EXECUTABLE}
+                 ${CMAKE_CURRENT_BINARY_DIR}/test_kernel_replay_validate.py)
+
+set_tests_properties(
+    rocprofv3-test-kernel-replay-validate-unit
     PROPERTIES TIMEOUT 60 LABELS "unit-tests;kernel-replay" FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
