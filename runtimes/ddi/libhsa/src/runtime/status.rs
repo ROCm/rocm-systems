@@ -24,6 +24,9 @@ pub(crate) fn map_error(error: rocddi::Error) -> Status {
 
 /// Runs an HSA ABI operation behind the panic-to-status boundary.
 pub(crate) fn boundary(operation: impl FnOnce() -> Status) -> Status {
+    if !crate::platform::process_is_current() {
+        return crate::ffi::NOT_INITIALIZED;
+    }
     #[cfg(not(test))]
     {
         let Some(token) = process_admission().enter() else {
