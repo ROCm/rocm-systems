@@ -110,7 +110,7 @@ profiler-hub/
 
 | File | Role | Purpose |
 |---|---|---|
-| `trace_trim.hpp`, `trace_trim.cpp` | Trim | Copies tables, views, and indexes into a new database, keeping only rows the trim rules allow. |
+| `trace_trim.hpp`, `trace_trim.cpp` | Trim | Copies tables, views, and indexes into a new database, keeping only rows the trim rules allow. The rocpd entry's `trim` calls it. |
 | `trim_schema.hpp` | Trim | Interface for per-table trim SQL and the copy-phase order. |
 
 ## source: storage and writer core
@@ -162,7 +162,7 @@ profiler-hub/
 
 | File | Role | Purpose |
 |---|---|---|
-| `trace_formats.hpp`, `trace_formats.cpp` | Shared | The format registry. One entry per format; an entry recognises its files, probes them, says which versions this build reads, and opens a source for a file, and maps a version to a reader factory and a trim-rule factory. The rocpd entry is always built; the format switches remove a version's reader and trim sources. |
+| `trace_formats.hpp`, `trace_formats.cpp` | Shared | The format registry. One entry per format; an entry recognises its files, probes them, says which versions this build reads, and opens a source for a file, trims a context's files, and maps a version to a reader factory and a trim-rule factory. The rocpd entry is always built; the format switches remove a version's reader and trim sources. |
 
 ### source/formats/rocpd
 

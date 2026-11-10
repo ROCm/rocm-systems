@@ -38,6 +38,7 @@ flowchart TB
   sql[("source SQLite")]
   catalog["catalog/<br/>PHC1 or PHD1"]
   tl["timeline/<br/>PHM1 PHE1 PHS1"]
+  entry["registry entry<br/>trim"]
   trimmer["trim_trace_files"]
   out[("trimmed SQLite")]
 
@@ -57,7 +58,7 @@ flowchart TB
   sqlite_api --> impl
 
   trim --> ctx
-  ctx --> trimmer
+  ctx --> entry --> trimmer
   sql --> trimmer --> out
 ```
 
@@ -111,8 +112,9 @@ tables (`source/formats/rocpd/rocpd_probe.cpp`):
 The probed schema and version form a `trace_format_t`. The entry for that
 schema says which versions this build reads and maps the version to two
 factories: one builds the `reader_t::impl` subclass (`rocpd_v2_reader` or
-`rocpd_v3_reader`), and one builds the trim rules. A file is accepted only when
-its entry reads the probed version.
+`rocpd_v3_reader`), and one builds the trim rules. The entry also trims: its
+`trim` copies a context's files into one database, and is null for a format that
+cannot trim. A file is accepted only when its entry reads the probed version.
 
 The compile options `PROFILER_HUB_ENABLE_ROCPD_V2` and
 `PROFILER_HUB_ENABLE_ROCPD_V3` (both on by default) remove that version's reader
@@ -379,8 +381,12 @@ Trimming has its own header, `profiler_hub_trim.h`, and does not go through
 the reader. `ph_trim_trace` takes an open context so it knows the sources,
 their schema, and their time origins.
 
-1. `ph_ctx::trim_trace` converts the requested window to each source's clock,
-   using each source's earliest track start, and calls `trim_trace_files`.
+1. `ph_ctx::trim_trace` returns `PH_RESULT_UNSUPPORTED_FILE` when its sources
+   are not all one format. Otherwise it converts the requested window to each
+   source's clock, using each source's earliest track start, and asks the
+   registry to trim (`trim_in_format`). The registry calls the format's `trim`,
+   or returns `PH_RESULT_UNSUPPORTED_FILE` when the format has none. For rocpd
+   that is `trim_trace_files`, with the first source's version.
 2. `trim_trace_files` (`source/trace_trim.cpp`):
    1. Rejects an output that is one of the inputs, and removes any existing
       output file.
