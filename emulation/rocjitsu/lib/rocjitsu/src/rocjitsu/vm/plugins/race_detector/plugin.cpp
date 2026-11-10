@@ -501,8 +501,9 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
   const auto &issue = routed ? *routed : *decoded;
   const auto obligations = issue.counter_obligations();
   const MemoryOrderClass memoryOrder = memoryOrderForObligations(obligations);
-  // Before gfx1250, FLAT is admitted here, on the domains its addresses used.
-  // On gfx1250 it counts on both domains and was admitted at issue.
+  // On the pre-GFX12 capacity targets, FLAT is admitted here, on the domains
+  // its addresses used. On gfx1250 it counts on both domains and was admitted
+  // at issue.
   const bool flatOnBothDomains = routed && flat_counts_on_both_domains(wf.cu().arch());
   if (routed && !flatOnBothDomains && access.request_lane_mask != 0 &&
       supports_counter_capacity(wf.cu().arch()) && rs->prepareForMemoryIssue(issue).failed()) {
@@ -874,9 +875,9 @@ void RaceDetectorPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Ins
   auto *s = get_state(wf);
   assert(s && s->race_state);
   if (supports_counter_capacity(wf.cu().arch())) {
-    // Before gfx1250, FLAT's address-dependent admission is applied after
-    // routing: before its operands are read, neither memory domain is
-    // guaranteed to be used. On gfx1250 every FLAT counts on both domains, so
+    // On the pre-GFX12 capacity targets, FLAT's address-dependent admission is
+    // applied after routing: before its operands are read, neither memory
+    // domain is guaranteed to be used. On gfx1250 every FLAT counts on both domains, so
     // it is admitted here like any other memory instruction.
     const bool flat = inst.mnemonic().starts_with("flat_");
     if (inst.is_memory_op() && (!flat || flat_counts_on_both_domains(wf.cu().arch()))) {

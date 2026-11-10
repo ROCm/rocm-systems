@@ -313,14 +313,14 @@ carry an EXP completion obligation. In particular, CDNA4 FLAT completion stays
 unordered; a nonzero wait cannot prove a result ready.
 
 Functional counter acquisition and the core memory-wait checker use the selected
-memory domains. So does the race detector on targets before gfx1250: it applies
-FLAT capacity constraints after addresses are resolved, because before the
-address operands are read, neither domain is guaranteed to need a counter slot.
-On those targets, a full LDS counter followed by a global-only FLAT therefore
-cannot prove an older LDS result complete. On gfx1250, every FLAT instruction
-increments both DScnt and LOADcnt or STOREcnt when it issues (CDNA5 ISA
-5.7.1.3), and the race detector counts it on both; see the gfx1250 capacity
-model below.
+memory domains. So does the race detector on the pre-GFX12 capacity targets
+(CDNA1 through CDNA4 and GFX11): it applies FLAT capacity constraints after
+addresses are resolved, because before the address operands are read, neither
+domain is guaranteed to need a counter slot. On those targets, a full LDS
+counter followed by a global-only FLAT therefore cannot prove an older LDS
+result complete. On gfx1250, every FLAT instruction increments both DScnt and
+LOADcnt or STOREcnt when it issues (CDNA5 ISA 5.7.1.3), and the race detector
+counts it on both; see the gfx1250 capacity model below.
 
 A mixture of global and scratch lanes uses the same VMEM domain. Mixed LDS/global
 observations still attach both obligations to the whole race-plugin event, so a
