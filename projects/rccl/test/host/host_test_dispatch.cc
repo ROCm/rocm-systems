@@ -261,13 +261,23 @@ class NoopTest : public ::testing::Test {
 
 }  // namespace
 
+// What a filter selected, split by whether the case will run.
+//
+// *suppressed* is gtest's third state, not a second kind of no: a DISABLED_ case the filter
+// matched is not run, but it IS reported, as status="notrun" result="suppressed". Both lists
+// are in candidate order.
+struct FilterMatches {
+    std::vector<size_t> runnable;
+    std::vector<size_t> suppressed;
+};
+
 // The indices of *candidates* that *filter* selects, decided by gtest itself.
 //
 // The empty tests have to be "run" to be selected: should_run() is meaningless until the filter
 // is applied inside UnitTest::Run(). Why gtest resolves this rather than a matcher of our own:
 // MICROTEST_README.md, "rccl-UnitTestsHostAll".
-std::vector<size_t> resolveFilter(const std::vector<CandidateCase> &candidates,
-                                  const std::string &filter, bool also_run_disabled)
+FilterMatches resolveFilter(const std::vector<CandidateCase> &candidates,
+                            const std::string &filter, bool also_run_disabled)
 {
     ::testing::GTEST_FLAG(filter) = filter;
     ::testing::GTEST_FLAG(also_run_disabled_tests) = also_run_disabled;
@@ -286,22 +296,34 @@ std::vector<size_t> resolveFilter(const std::vector<CandidateCase> &candidates,
     // Matched back by name rather than by registration order: gtest groups its reporting by
     // suite, so the two orders agree only while every suite's cases are contiguous here.
     std::unordered_set<std::string> runnable;
+    std::unordered_set<std::string> suppressed;
     for (int s = 0; s < unit_test->total_test_suite_count(); ++s) {
         const ::testing::TestSuite *suite = unit_test->GetTestSuite(s);
         for (int t = 0; t < suite->total_test_count(); ++t) {
-            if (suite->GetTestInfo(t)->should_run()) {
-                runnable.insert(std::string(suite->name()) + "." + suite->GetTestInfo(t)->name());
+            const ::testing::TestInfo *info = suite->GetTestInfo(t);
+            const std::string name = std::string(suite->name()) + "." + info->name();
+            if (info->should_run()) {
+                runnable.insert(name);
+            } else if (info->is_reportable()) {
+                // gtest's own "matched the filter, report it but do not run it". Taking it from
+                // gtest rather than re-deriving it from the DISABLED_ prefix keeps the two from
+                // disagreeing about what belongs in a report.
+                suppressed.insert(name);
             }
         }
     }
 
-    std::vector<size_t> selected;
+    FilterMatches matches;
     for (size_t i = 0; i < candidates.size(); ++i) {
-        if (runnable.count(fmt::format("{}.{}", candidates[i].suite, candidates[i].raw.test)) > 0) {
-            selected.push_back(i);
+        const std::string name =
+            fmt::format("{}.{}", candidates[i].suite, candidates[i].raw.test);
+        if (runnable.count(name) > 0) {
+            matches.runnable.push_back(i);
+        } else if (suppressed.count(name) > 0) {
+            matches.suppressed.push_back(i);
         }
     }
-    return selected;
+    return matches;
 }
 
 // Whether gtest would refuse to run *name* for being disabled.
@@ -318,6 +340,9 @@ struct Selection {
     std::string path;
     std::string qualifier;
     std::vector<TestCaseName> cases;   // as the binary itself knows them
+    // Matched but not run: named in the child's filter so it reports them as suppressed, and
+    // kept apart from *cases* so they do not count towards the binary being wholly selected.
+    std::vector<TestCaseName> suppressed;
     size_t runnable = 0;               // cases the binary holds that this run could run at all
 };
 
@@ -328,7 +353,7 @@ struct Selection {
 std::vector<Selection> group(const std::string &directory,
                              const std::vector<std::string> &binaries,
                              const std::vector<CandidateCase> &candidates,
-                             const std::vector<size_t> &indices, bool also_run_disabled)
+                             const FilterMatches &matches, bool also_run_disabled)
 {
     std::vector<size_t> held(binaries.size(), 0);
     for (const CandidateCase &candidate : candidates) {
@@ -336,15 +361,29 @@ std::vector<Selection> group(const std::string &directory,
             ++held[candidate.binary];
         }
     }
+    // The two lists are merged back into candidate order, so a binary gets one Selection
+    // whichever list its cases came from and the selections stay in binary order -- which is
+    // the order the merged report is assembled in.
     std::vector<Selection> selections;
-    for (const size_t index : indices) {
+    std::vector<size_t> slot(binaries.size(), std::numeric_limits<size_t>::max());
+    size_t run = 0;
+    size_t sup = 0;
+    while (run < matches.runnable.size() || sup < matches.suppressed.size()) {
+        const bool takeRunnable =
+            sup == matches.suppressed.size() ||
+            (run < matches.runnable.size() && matches.runnable[run] < matches.suppressed[sup]);
+        const size_t index = takeRunnable ? matches.runnable[run++] : matches.suppressed[sup++];
         const CandidateCase &candidate = candidates[index];
-        const std::string path = directory + "/" + binaries[candidate.binary];
-        if (selections.empty() || selections.back().path != path) {
-            selections.push_back(Selection{path, qualifierFor(binaries[candidate.binary]), {},
+        if (slot[candidate.binary] == std::numeric_limits<size_t>::max()) {
+            slot[candidate.binary] = selections.size();
+            selections.push_back(Selection{directory + "/" + binaries[candidate.binary],
+                                           qualifierFor(binaries[candidate.binary]),
+                                           {},
+                                           {},
                                            held[candidate.binary]});
         }
-        selections.back().cases.push_back(candidate.raw);
+        Selection &selection = selections[slot[candidate.binary]];
+        (takeRunnable ? selection.cases : selection.suppressed).push_back(candidate.raw);
     }
     return selections;
 }
@@ -359,9 +398,16 @@ std::vector<std::string> childFilters(const Selection &selection)
     if (selection.cases.size() == selection.runnable) {
         return {"*"};
     }
+    // The suppressed cases go in the filter too. gtest reports a DISABLED_ case it was asked
+    // for as status="notrun" result="suppressed" without running it, which is exactly what the
+    // whole-binary "*" above already gets -- so naming them is what makes a partial selection
+    // report them the same way a total one does, with gtest still the one deciding.
+    std::vector<TestCaseName> named = selection.cases;
+    named.insert(named.end(), selection.suppressed.begin(), selection.suppressed.end());
+
     std::vector<std::string> filters;
     std::string current;
-    for (const TestCaseName &name : selection.cases) {
+    for (const TestCaseName &name : named) {
         const std::string entry = name.suite + "." + name.test;
         if (!current.empty() && current.size() + 1 + entry.size() > kMaxFilterChars) {
             filters.push_back(current);
@@ -1963,7 +2009,7 @@ int main(int argc, char **argv)
         fmt::print(stderr, "host-test-dispatch: {} could not list its tests\n", binary);
     }
     const std::vector<CandidateCase> &candidates = enumeration.candidates;
-    const std::vector<size_t> chosen =
+    const FilterMatches chosen =
         resolveFilter(candidates, options.filter, options.alsoRunDisabled);
 
     if (options.listTests) {
@@ -1977,7 +2023,10 @@ int main(int argc, char **argv)
         return enumeration.unlistable.empty() ? status : 1;
     }
 
-    if (chosen.empty() && !candidates.empty()) {
+    // Suppressed counts as selected here: a filter that matched only DISABLED_ cases runs
+    // nothing, but it is not the mistake this warning is about and it still has a report to
+    // write.
+    if (chosen.runnable.empty() && chosen.suppressed.empty() && !candidates.empty()) {
         // Not an error -- gtest exits 0 for a filter that matches nothing, and the shared
         // categories yaml hands every binary every category's patterns, most of which it does
         // not own. But the usual cause here is a pattern written against a single binary, whose

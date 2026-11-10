@@ -235,7 +235,7 @@ TEST(HostDispatchGroupMicrotest, DisabledCasesDoNotCountAsHeldByTheBinary)
     // and the biggest binary would then be asked for its 2000-odd cases by name -- past the exec
     // argument limit -- to run exactly what "*" runs.
     const std::vector<Selection> selections =
-        group("/dir", {"rccl-UnitTestsMicro"}, oneEnabledOneDisabled(), {0}, false);
+        group("/dir", {"rccl-UnitTestsMicro"}, oneEnabledOneDisabled(), {{0}, {}}, false);
     ASSERT_EQ(selections.size(), 1u);
     EXPECT_EQ(selections[0].runnable, 1u);
     EXPECT_EQ(childFilters(selections[0]), (std::vector<std::string>{"*"}));
@@ -244,11 +244,56 @@ TEST(HostDispatchGroupMicrotest, DisabledCasesDoNotCountAsHeldByTheBinary)
 TEST(HostDispatchGroupMicrotest, DisabledCasesCountWhenTheCallerAsksForThem)
 {
     const std::vector<Selection> selections =
-        group("/dir", {"rccl-UnitTestsMicro"}, oneEnabledOneDisabled(), {0}, true);
+        group("/dir", {"rccl-UnitTestsMicro"}, oneEnabledOneDisabled(), {{0}, {}}, true);
     ASSERT_EQ(selections.size(), 1u);
     EXPECT_EQ(selections[0].runnable, 2u);
     // One of two selected is a real partial selection now, so the case is named.
     EXPECT_EQ(childFilters(selections[0]), (std::vector<std::string>{"Suite.Enabled"}));
+}
+
+TEST(HostDispatchGroupMicrotest, APartialSelectionStillNamesTheDisabledCasesTheFilterMatched)
+{
+    // A whole-binary selection sends "*" and gtest reports the binary's DISABLED_ cases as
+    // suppressed. A partial one sends an explicit list, and without the suppressed names in it
+    // the merged report has no entry for them at all -- while --gtest_list_tests goes on
+    // listing them, so a consumer comparing the two sees cases that vanished. Named here, gtest
+    // reports them from the child exactly as the "*" path does.
+    const std::vector<CandidateCase> candidates = {
+        CandidateCase{0, "Micro/Suite", TestCaseName{"Suite", "Enabled"}},
+        CandidateCase{0, "Micro/Suite", TestCaseName{"Suite", "Other"}},
+        CandidateCase{0, "Micro/Suite", TestCaseName{"Suite", "DISABLED_Skipped"}}};
+    const std::vector<Selection> selections =
+        group("/dir", {"rccl-UnitTestsMicro"}, candidates, {{0}, {2}}, false);
+
+    ASSERT_EQ(selections.size(), 1u);
+    EXPECT_EQ(childFilters(selections[0]),
+              (std::vector<std::string>{"Suite.Enabled:Suite.DISABLED_Skipped"}));
+}
+
+TEST(HostDispatchGroupMicrotest, SuppressedCasesDoNotMakeAWholeBinaryLookPartial)
+{
+    // The "*" shortcut turns on every runnable case being selected. Counting the suppressed
+    // ones into that would tip the biggest binary into being asked for its 2000-odd cases by
+    // name, past the exec argument limit, to run exactly what "*" runs.
+    const std::vector<Selection> selections =
+        group("/dir", {"rccl-UnitTestsMicro"}, oneEnabledOneDisabled(), {{0}, {1}}, false);
+
+    ASSERT_EQ(selections.size(), 1u);
+    EXPECT_EQ(selections[0].suppressed.size(), 1u);
+    EXPECT_EQ(childFilters(selections[0]), (std::vector<std::string>{"*"}));
+}
+
+TEST(HostDispatchGroupMicrotest, ABinaryMatchedOnlyByADisabledCaseIsStillRun)
+{
+    // Nothing of it will run, but it has a report to write: gtest asked for a DISABLED_ case
+    // alone still emits the suppressed entry for it, and dropping the binary would lose that.
+    const std::vector<Selection> selections =
+        group("/dir", {"rccl-UnitTestsMicro"}, oneEnabledOneDisabled(), {{}, {1}}, false);
+
+    ASSERT_EQ(selections.size(), 1u);
+    EXPECT_TRUE(selections[0].cases.empty());
+    EXPECT_EQ(childFilters(selections[0]),
+              (std::vector<std::string>{"Suite.DISABLED_Skipped"}));
 }
 
 TEST(HostDispatchGroupMicrotest, CasesAreGroupedUnderTheBinaryThatOwnsThem)
@@ -258,8 +303,8 @@ TEST(HostDispatchGroupMicrotest, CasesAreGroupedUnderTheBinaryThatOwnsThem)
         CandidateCase{1, "MicroInit/Suite", TestCaseName{"Suite", "B"}},
         CandidateCase{1, "MicroInit/Suite", TestCaseName{"Suite", "C"}}};
     const std::vector<Selection> selections =
-        group("/dir", {"rccl-UnitTestsMicro", "rccl-UnitTestsMicroInit"}, candidates, {0, 1, 2},
-              false);
+        group("/dir", {"rccl-UnitTestsMicro", "rccl-UnitTestsMicroInit"}, candidates,
+              {{0, 1, 2}, {}}, false);
     ASSERT_EQ(selections.size(), 2u);
     EXPECT_EQ(selections[0].path, "/dir/rccl-UnitTestsMicro");
     EXPECT_EQ(selections[1].path, "/dir/rccl-UnitTestsMicroInit");
