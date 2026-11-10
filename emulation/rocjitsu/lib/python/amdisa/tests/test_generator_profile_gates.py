@@ -566,6 +566,7 @@ def test_gfx1250_dual_atomic_generator_covers_each_variant(
     name: str, elem_size: int, scale: str, dst_dwords: int
 ) -> None:
     codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(arch_name='cdna5', profile=Cdna5Profile())
     codegen._vgpr_base_expr = lambda operand, **_kwargs: operand
     codegen._append_wait_counter_type = (
         lambda lines, _sem, *_args, **_kwargs: lines.append(
@@ -576,8 +577,8 @@ def test_gfx1250_dual_atomic_generator_covers_each_variant(
         name, 'ds_atomic2', operation='swap', elem_size=elem_size, num_elems=1
     )
     body = codegen._gen_ds_atomic2([], [], sem)
-    assert f'inst_.offset0) * {scale}' in body
-    assert f'inst_.offset1) * {scale}' in body
+    assert f'amdgpu::ds_address(wf.lds_base(), base, inst_.offset0 * {scale})' in body
+    assert f'amdgpu::ds_address(wf.lds_base(), base, inst_.offset1 * {scale})' in body
     assert f'd->ds2_dst_reg_base = vdst + {dst_dwords};' in body
     assert 'd->ds2_active = true;' in body
     assert 'd->ds2_store_data' in body
@@ -9355,6 +9356,7 @@ def test_ds_atomic_codegen_returns_only_with_explicit_vdst(
     dst_operands: list[str], returns_data: bool
 ):
     codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(arch_name='rdna4', profile=Rdna4Profile())
     codegen._vgpr_base_expr = lambda operand, **_kwargs: operand
     codegen._append_wait_counter_type = (
         lambda lines, _sem, *_args, **_kwargs: lines.append(
@@ -10003,10 +10005,10 @@ def test_generated_atomic_def_use_follows_return_control(
         ('rdna3_5', 'BufferAtomicCmpswapF32Mubuf', 64, 32),
     ):
         buffer = (amdgpu_generated_root / arch / 'mubuf.cpp').read_text()
-        cmpswap = buffer.split(f'{mnemonic}::{mnemonic}')[1]
-        cmpswap = cmpswap.split(f'void {mnemonic}::execute_impl')[0]
+        cmpswap = _generated_constructor_body(buffer, mnemonic)
         assert f'vdata({payload_bits}, OperandType::OPR_VGPR' in cmpswap
-        assert f'vdata_return({return_bits}, OperandType::OPR_VGPR' in cmpswap
+        status = ' + 32u * inst_.tfe' if arch in ('rdna3', 'rdna3_5') else ''
+        assert f'vdata_return({return_bits}{status}, OperandType::OPR_VGPR' in cmpswap
         assert 'src_operands_[0] = &vdata;' in cmpswap
         assert 'dst_operands_[num_dst_++] = &vdata_return;' in cmpswap
 
@@ -10278,13 +10280,16 @@ def test_generated_smem_rejects_invalid_complete_scalar_selector_ranges(
         assert 'd->dst_register = *dst_register;' in smem_exec
         assert 'auto address = smem_calculate_address(' in smem_exec
         assert 'if (!address)' in smem_exec
-        if 'd->is_load = false;' in smem_exec:
-            assert 'const uint32_t sdata_sel = inst_.sdata;' in smem_exec
+        for store in re.findall(
+            r'void S(?:Buffer|Scratch)?Store\w+::execute_impl\([^)]*\) \{(.*?)\n\}',
+            smem_exec,
+            re.DOTALL,
+        ):
+            assert 'const uint32_t sdata_sel = inst_.sdata;' in store
             assert (
-                'auto src_register = amdgpu::resolve_scalar_register_range(wf,'
-                in smem_exec
+                'auto src_register = amdgpu::resolve_scalar_register_range(wf,' in store
             )
-            assert 'read_scalar_register(wf, *src_register, i)' in smem_exec
+            assert 'read_scalar_register(wf, *src_register, i)' in store
 
 
 @pytest.mark.parametrize(

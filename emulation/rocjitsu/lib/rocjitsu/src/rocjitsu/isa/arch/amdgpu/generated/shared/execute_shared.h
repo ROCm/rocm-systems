@@ -54,37 +54,9 @@ inline void execute_buffer_gl1_inv_mubuf([[maybe_unused]] Inst &inst,
 }
 
 template <typename Inst>
-inline void execute_buffer_inv_mubuf([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  wf.cu().l1_vector().invalidate_all();
-  if (auto *l2 = wf.cu().l2())
-    l2->flush_all(wf.process_id());
-}
-
-template <typename Inst>
 inline void execute_buffer_wbl2_mubuf([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   if (auto *l2 = wf.cu().l2())
     l2->flush_all(wf.process_id());
-}
-
-template <typename Inst>
-inline void execute_ds_bpermute_b32_ds([[maybe_unused]] Inst &inst,
-                                       [[maybe_unused]] Wavefront &wf) {
-  uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  uint32_t offset = inst.inst_.offset0 | (inst.inst_.offset1 << 8);
-  ::rocjitsu::amdgpu::RegisterAccess regs(wf);
-  const unsigned group_width = amdgpu::ds_permute_group_width(wf.cu().arch(), wf.wf_size());
-  uint32_t tmp[64] = {};
-  for (unsigned lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (uint64_t{1} << lane)))
-      continue;
-    const unsigned source =
-        amdgpu::ds_permute_lane(lane, regs.read_lane(inst.addr, lane), offset, group_width);
-    if (exec & (uint64_t{1} << source))
-      tmp[lane] = regs.read_lane(inst.data0, source);
-  }
-  for (unsigned lane = 0; lane < wf.wf_size(); ++lane)
-    if (exec & (uint64_t{1} << lane))
-      regs.write_lane(inst.vdst, lane, tmp[lane]);
 }
 
 template <typename Inst>
@@ -135,25 +107,6 @@ template <typename Inst>
 inline void execute_ds_nop_vds([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {}
 
 template <typename Inst>
-inline void execute_ds_permute_b32_ds([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  uint32_t offset = inst.inst_.offset0 | (inst.inst_.offset1 << 8);
-  ::rocjitsu::amdgpu::RegisterAccess regs(wf);
-  const unsigned group_width = amdgpu::ds_permute_group_width(wf.cu().arch(), wf.wf_size());
-  uint32_t tmp[64] = {};
-  for (unsigned lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (uint64_t{1} << lane)))
-      continue;
-    const unsigned destination =
-        amdgpu::ds_permute_lane(lane, regs.read_lane(inst.addr, lane), offset, group_width);
-    tmp[destination] = regs.read_lane(inst.data0, lane);
-  }
-  for (unsigned lane = 0; lane < wf.wf_size(); ++lane)
-    if (exec & (uint64_t{1} << lane))
-      regs.write_lane(inst.vdst, lane, tmp[lane]);
-}
-
-template <typename Inst>
 inline void execute_ds_permute_b32_vds([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
@@ -167,24 +120,6 @@ inline void execute_ds_permute_b32_vds([[maybe_unused]] Inst &inst,
     const unsigned destination =
         amdgpu::ds_permute_lane(lane, regs.read_lane(inst.addr, lane), offset, group_width);
     tmp[destination] = regs.read_lane(inst.data0, lane);
-  }
-  for (unsigned lane = 0; lane < wf.wf_size(); ++lane)
-    if (exec & (uint64_t{1} << lane))
-      regs.write_lane(inst.vdst, lane, tmp[lane]);
-}
-
-template <typename Inst>
-inline void execute_ds_swizzle_b32_ds([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  uint32_t offset = inst.inst_.offset0 | (inst.inst_.offset1 << 8);
-  ::rocjitsu::amdgpu::RegisterAccess regs(wf);
-  uint32_t tmp[64] = {};
-  for (unsigned lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (uint64_t{1} << lane)))
-      continue;
-    const unsigned source = amdgpu::ds_swizzle_lane(lane, offset);
-    if (exec & (uint64_t{1} << source))
-      tmp[lane] = regs.read_lane(inst.addr, source);
   }
   for (unsigned lane = 0; lane < wf.wf_size(); ++lane)
     if (exec & (uint64_t{1} << lane))

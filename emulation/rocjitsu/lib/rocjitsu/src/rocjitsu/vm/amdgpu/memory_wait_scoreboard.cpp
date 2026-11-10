@@ -3,7 +3,6 @@
 
 #include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna2/register_destinations.h"
-#include "rocjitsu/isa/arch/amdgpu/cdna5/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/branch_stack.h"
@@ -162,29 +161,49 @@ bool MemoryWaitScoreboard::result_is_written(const Instruction &inst, Wavefront 
 }
 
 uint64_t MemoryWaitScoreboard::result_lanes(const Instruction &inst, Wavefront &wf) {
+  return memory_lanes(inst, wf).result;
+}
+
+static bool gfx11_rejects_buffer_load(const Instruction &inst, const Wavefront &wave) {
+  const auto arch = wave.cu().arch();
+  if (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA3_5)
+    return false;
+  const auto name = inst.mnemonic();
+  return (name.starts_with("buffer_load_") || name.starts_with("tbuffer_load_")) &&
+         !RegisterAccess(wave).vgpr_results_fit_allocation(inst);
+}
+
+MemoryWaitScoreboard::MemoryLanes MemoryWaitScoreboard::memory_lanes(const Instruction &inst,
+                                                                     Wavefront &wf) {
+  if (gfx11_rejects_buffer_load(inst, wf))
+    return {wf.exec(), 0};
+  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2 &&
+      !RegisterAccess(wf).vgpr_results_fit_allocation(inst))
+    return {};
   if (inst.is_memory_op() && wf.memory_destination_out_of_range(inst))
-    return 0;
+    return {};
   const auto *issue = inst.amdgpu_memory_issue_info();
   uint64_t lanes = issue && !issue->exec_masked
                        ? (wf.wf_size() == 64 ? ~uint64_t{0} : uint64_t{0xffffffff})
-                       : wf.exec();
+                       : wf.memory_exec(inst);
   if (!(inst.flags() & CONDITIONAL_MEMORY_LANES))
-    return lanes;
+    return {lanes, lanes};
   RegisterModifiers modifiers;
   inst.amdgpu_register_modifiers(modifiers);
   if (modifiers.exec_all_if_nonzero)
     lanes = wave32_exec_all_if_nonzero(lanes);
   if (modifiers.exec_whole_quads)
     lanes = result_is_written(inst, wf) ? whole_active_quads(lanes) : 0;
-  if (lanes && wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5 && modifiers.buffer_resource &&
-      !modifiers.scalar_buffer_words) {
+  if (lanes && modifiers.buffer_resource && !modifiers.scalar_buffer_words) {
     const auto selector = modifiers.buffer_resource->encoding_value();
-    if (addr_calc::buffer_resource_range_is_backed(wf, selector))
-      if (const auto word3 = RegisterAccess(wf).scalar_control_value(selector + 3))
-        if (cdna5::decode_buffer_resource(0, 0, 0, *word3).type != 0)
-          return 0;
+    if (addr_calc::buffer_resource_range_is_backed(wf, selector)) {
+      const auto word3 = RegisterAccess(wf).scalar_control_value(selector + 3);
+      // A non-buffer descriptor consumes the counter position but writes no VGPR lanes.
+      if (word3 && (*word3 >> 30))
+        return {lanes, 0};
+    }
   }
-  return lanes;
+  return {lanes, lanes};
 }
 
 MemoryWaitScoreboard::FlatLanes MemoryWaitScoreboard::flat_lanes(const Instruction &inst,
@@ -193,7 +212,7 @@ MemoryWaitScoreboard::FlatLanes MemoryWaitScoreboard::flat_lanes(const Instructi
                                                                  uint64_t shared_limit) {
   if (wf.memory_destination_out_of_range(inst))
     return {};
-  FlatLanes result{wf.exec(), 0};
+  FlatLanes result{wf.memory_exec(inst), 0};
   RegisterModifiers modifiers;
   inst.amdgpu_register_modifiers(modifiers);
   assert(modifiers.flat_address);
@@ -209,32 +228,62 @@ MemoryWaitScoreboard::FlatLanes MemoryWaitScoreboard::flat_lanes(const Instructi
       return {0, 0};
     scalar = *lo | (uint64_t{*hi} << 32);
   }
-  if (!shared_base || !result.requests)
+  if (!result.requests || (!shared_base && wf.cu().arch() != ROCJITSU_CODE_ARCH_RDNA1 &&
+                           wf.cu().arch() != ROCJITSU_CODE_ARCH_RDNA2))
     return result;
   const auto arch = wf.cu().arch();
   const auto layout = flat_private_layout(arch);
-  const auto address = registers.source_register(*modifiers.flat_address);
+  const int32_t segment_offset =
+      flat_selects_segment_before_offset(arch) ? modifiers.flat_offset : 0;
+  const bool vector_pointer32 = wf.flat_pointer32() && !modifiers.flat_scalar_address;
+  const auto address = vector_pointer32
+                           ? registers.block_data_register(*modifiers.flat_address, 0, false)
+                           : registers.source_register(*modifiers.flat_address);
   uint64_t remaining = result.requests;
   while (remaining) {
     const unsigned lane = std::countr_zero(remaining);
     remaining &= remaining - 1;
     const uint64_t vector =
         address ? registers.vector_control_value(*address, lane).value_or(0) : 0;
-    const uint64_t value =
-        scalar +
-        flat_vector_offset(vector,
-                           modifiers.flat_scalar_address && arch == ROCJITSU_CODE_ARCH_CDNA5,
-                           modifiers.flat_scale) +
-        modifiers.flat_offset;
-    const auto translated = translate_flat_address(wf, value, lane, layout);
-    if (!translated.swizzled && translated.value >= shared_base && translated.value <= shared_limit)
+    uint64_t value = scalar +
+                     flat_vector_offset(
+                         vector, modifiers.flat_scalar_address && arch == ROCJITSU_CODE_ARCH_CDNA5,
+                         modifiers.flat_scale) +
+                     modifiers.flat_offset;
+    if (vector_pointer32)
+      value = static_cast<uint32_t>(value);
+    const uint64_t aperture_pointer = value - segment_offset;
+    const auto translated =
+        translate_flat_address(wf, aperture_pointer, lane, layout, segment_offset);
+    // GFX10.3 retains any complete element of a partial private tuple.
+    // Its decoded width is the first element; GFX10.1 requires the complete transfer.
+    if ((arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2) &&
+        translated.private_address && translated.swizzled &&
+        uint64_t{translated.private_offset} + modifiers.flat_access_bytes >
+            wf.scratch_lane_size()) {
+      result.requests &= ~(uint64_t{1} << lane);
+      continue;
+    }
+    if (!translated.swizzled &&
+        flat_in_shared_aperture(aperture_pointer, shared_base, shared_limit))
       result.shared |= uint64_t{1} << lane;
   }
   return result;
 }
 
+bool MemoryWaitScoreboard::needs_buffer_payload_lanes(const Instruction &inst,
+                                                      rj_code_arch_t arch) {
+  const auto name = inst.mnemonic();
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+    return name.starts_with("buffer_store_") || name.starts_with("buffer_atomic_");
+  return (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+          arch == ROCJITSU_CODE_ARCH_RDNA4) &&
+         (name.starts_with("buffer_store_") || name.starts_with("tbuffer_store_")) &&
+         name.find("_format_") != std::string_view::npos;
+}
+
 void MemoryWaitScoreboard::check_instruction(const Instruction &inst, Wavefront &wf) {
-  if (empty())
+  if (empty() || inst.is_empty_global_transpose(wf.exec()))
     return;
   const bool cdna2_valu = wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA2 && (inst.flags() & VALU);
   if (cdna2_valu && !cdna2::valu_destinations_in_range(inst, wf))
@@ -276,6 +325,9 @@ void MemoryWaitScoreboard::check_instruction(const Instruction &inst, Wavefront 
 }
 
 void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wavefront &wf) {
+  // These VGPR-returning loads reject the entire tuple, including TFE, before address preparation.
+  if (gfx11_rejects_buffer_load(inst, wf))
+    return;
   if (wf.discards_valu_result(inst) ||
       (inst.is_memory_op() && wf.memory_destination_out_of_range(inst)))
     return;
@@ -334,11 +386,57 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     lanes = wave32_exec_all_if_nonzero(lanes);
   if (modifiers.exec_whole_quads)
     lanes = result_is_written(inst, wf) ? whole_active_quads(lanes) : 0;
+  bool read_buffer_address = true;
+  bool read_buffer_offset = true;
+  bool cdna5_type_mismatch = false;
   if (const auto *resource = modifiers.buffer_resource) {
-    for (const auto reg :
-         registers.buffer_resource_registers(*resource, modifiers.scalar_buffer_words))
-      if (reg)
-        access(*reg, ~uint64_t{0}, 0xf, false);
+    const bool gfx11 =
+        wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 || wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5;
+    const auto arch = wf.cu().arch();
+    const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+    unsigned first_resource_word = 0;
+    if ((gfx11 || gfx12) && !modifiers.scalar_buffer_words) {
+      const auto selector = resource->encoding_value();
+      const auto control = addr_calc::buffer_resource_range_is_backed(wf, selector)
+                               ? registers.scalar_control_value(selector + 3)
+                               : std::nullopt;
+      const bool rdna4 = arch == ROCJITSU_CODE_ARCH_RDNA4;
+      const bool typed = name.starts_with("tbuffer_");
+      const bool formatted = typed || name.find("_format_") != std::string_view::npos;
+      if (!control) {
+        first_resource_word = 4;
+        read_buffer_offset = read_buffer_address = false;
+      } else {
+        const bool non_buffer = (*control >> 30) != 0;
+        cdna5_type_mismatch = arch == ROCJITSU_CODE_ARCH_CDNA5 && non_buffer;
+        const unsigned format = addr_calc::rdna_buffer_resource_format(arch, *control);
+        if (formatted && (non_buffer || !format || (typed && !modifiers.encoded_buffer_format))) {
+          // Format preparation reads only the descriptor's control word.
+          first_resource_word = 3;
+          read_buffer_offset = read_buffer_address = false;
+        } else if (non_buffer || (rdna4 && !format)) {
+          // RDNA4 reads the stride, bounds and control before fetching the base.
+          first_resource_word = rdna4 ? 1 : 0;
+          read_buffer_offset = read_buffer_address = false;
+        } else if (gfx11 && !typed && !format) {
+          // GFX11 raw address calculation has already consumed SOFFSET here.
+          read_buffer_address = false;
+        }
+      }
+      if (read_buffer_address && modifiers.buffer_offset) {
+        const uint32_t offset = modifiers.buffer_offset->encoding_value();
+        // MUBUF/MTBUF accept inline constants. VBUFFER uses a 7-bit register
+        // selector, and CDNA5 stops before VADDR for encodings above M0.
+        read_buffer_address = (gfx11 && resolve_src_scalar_statically(offset).has_value()) ||
+                              ((arch != ROCJITSU_CODE_ARCH_CDNA5 || offset <= kModernM0Selector) &&
+                               resolve_scalar_register_range(wf, offset, 1).has_value());
+      }
+    }
+    const auto words =
+        registers.buffer_resource_registers(*resource, modifiers.scalar_buffer_words);
+    for (unsigned word = first_resource_word; word < words.size(); ++word)
+      if (words[word])
+        access(*words[word], ~uint64_t{0}, 0xf, false);
   }
   // FLAT's result ordering depends on its planned memory domains. The issuer
   // checks those results after checking address sources, still before execution.
@@ -459,6 +557,9 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
       return scalar_register(op.encoding_value(), wf.wf_size() / 32, write);
     if (gfx10_valu && !write && op.is_vgpr())
       return registers.gfx10_valu_source_vgpr(op);
+    if (!write && wf.flat_pointer32() && &op == modifiers.flat_address &&
+        !modifiers.flat_scalar_address)
+      return registers.block_data_register(op, 0, false);
     auto reg = write ? registers.destination_register(op)
                      : registers.source_register(op, &op == modifiers.wordwise_source0 ||
                                                          &op == modifiers.wordwise_source1);
@@ -681,11 +782,18 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
       }
     }
   }
+  const Operand *buffer_payload =
+      needs_buffer_payload_lanes(inst, wf.cu().arch()) ? inst.src_operand(0) : nullptr;
+  const bool reads_buffer_payload =
+      wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5 ? !cdna5_type_mismatch : read_buffer_address;
   auto check_operand = [&](const Operand *op, bool write) {
     const bool mix_preservation = !write && op == inst.dst_operand(0) &&
                                   (name.find("mixlo_") != std::string_view::npos ||
                                    name.find("mixhi_") != std::string_view::npos);
     if (mix_preservation || !op || op == hwreg || op == modifiers.buffer_resource ||
+        (!write && op == modifiers.buffer_address && !read_buffer_address) ||
+        (!write && op == buffer_payload && !reads_buffer_payload) ||
+        (!write && op == modifiers.buffer_offset && !read_buffer_offset) ||
         op == modifiers.image_address || (!pending_scalar_ && !op->is_vgpr()))
       return;
     if (op == modifiers.block_data) {
@@ -706,6 +814,10 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
                               : write                    ? destination_lanes
                               : op == routed_source      ? src0_lanes
                                                          : source_lanes;
+    if (!write && op == buffer_payload && inst.data() && inst.data()->tag() == GLOBAL_MEM) {
+      const auto &data = *inst.data_as<VectorMemState>();
+      accessed_lanes = wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5 ? data.exec_mask : data.lane_mask;
+    }
     if (!write && !destination_lanes && modifiers.dpp && reg->cls != RegClass::VGPR &&
         wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5 && name == "v_add_f32" &&
         op == inst.src_operand(1))
@@ -716,6 +828,8 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
       if (reg->cls == RegClass::VGPR)
         accessed_lanes &= destination_lanes;
     }
+    if (!write && reg->cls == RegClass::VGPR && (inst.flags() & COMPACT_WAVE64_MEMORY_RESULT))
+      accessed_lanes &= UINT32_MAX;
     // Interpolation coefficients are quad broadcasts, including inactive lanes.
     if (!write && reg->cls == RegClass::VGPR && name.starts_with("v_interp_") &&
         (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 ||
@@ -918,7 +1032,7 @@ void MemoryWaitScoreboard::check_memory_result(const Instruction &inst, Wavefron
           }
       continue;
     }
-    auto reg = registers.destination_register(operand);
+    auto reg = registers.memory_destination_register(inst, operand);
     if (!reg && operand.is_fieldless())
       if (auto special = operand.to_special_reg_class())
         reg = RegisterRef{*special, 0, 1};

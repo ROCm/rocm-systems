@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/indexed_ds_bounds.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -406,6 +407,13 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
   auto *detector = rs->getDetector();
   auto waveId = rs->getWaveId();
   const InstructionSnapshot &instruction = current_instruction(*s, wf);
+  // One DDS request faults the entire FLAT operation before any segment accesses memory.
+  if (access.flat_dds_lane_mask)
+    return;
+  if (const auto *data = inst.data();
+      data && (data->tag() == amdgpu::LOCAL_MEM || data->tag() == amdgpu::GLOBAL_MEM) &&
+      inst.data_as<amdgpu::VectorMemState>()->rejects_routed_access())
+    return;
   const auto *decoded = inst.amdgpu_memory_issue_info();
   assert(decoded && "memory instruction reached the race detector without issue metadata");
   if (!decoded)
@@ -449,12 +457,16 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
       registers = std::move(*destinations);
     }
 
+    const auto bounds =
+        amdgpu::indexed_ds_access_bounds(d, wf.cu().arch(), wf.lds_base(), wf.lds_size());
     uint32_t laneAddrs[64]{};
     uint32_t secondLaneAddrs[64]{};
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       if (!(ldsMask & (1ULL << lane)))
         continue;
       auto validate = [&](uint64_t address) {
+        if (bounds && !bounds->contains(address))
+          return amdgpu::kInvalidLdsAddress;
         auto bytes = detector->ldsBytesInRange(address, perLaneBytes, d.elem_size);
         if (access.flat_local_allocation_end && d.elem_size != 0)
           bytes = amdgpu::whole_element_bytes_in_range(address, bytes, d.elem_size,
