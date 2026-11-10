@@ -1,7 +1,6 @@
 {
     "jobs": [
         {
-            "pc_sampling_beta_enabled": true,
             "kernel_trace": true,
             "pc_sampling_unit": "time",
             "pc_sampling_method": "host_trap",
@@ -9,7 +8,8 @@
             "output_file": "out",
             "output_format": [
                 "csv"
-            ]
+            ],
+            "agent_index": "type-relative" 
         }
     ]
 }
