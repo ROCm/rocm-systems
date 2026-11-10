@@ -497,7 +497,9 @@ mi_gpu_spec:
         roofline:
           bandwidth: [DRAM, MALL, L2, L1, L0, LDS]
           plot_mall: true
-          valu: [FP16, FP32, FP64, I8, I32, I64]
+          # No native support for I8 or I64. RDNA4 has no native 8-bit VALU
+          # and no native 64-bit integer multiply-add.
+          valu: [FP16, FP32, FP64, I32]
           wmma: [FP8, BF8, FP16, BF16]
         models:
           - gpu_model: rdna4_navi48
