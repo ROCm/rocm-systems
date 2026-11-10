@@ -1070,6 +1070,8 @@ util::Result execute_tensor_dma(Inst &inst, Wavefront &wf, bool store_from_lds) 
     // Only a fresh instruction reaches this block: a deferred transfer resumes
     // from its retained state, so each instruction is reported once.
     report_issued_tensor_dma(wf, *state);
+    if (wf.instruction_execution_failed()) [[unlikely]]
+      return util::Result::failure();
     inst.set_data(std::move(state));
   }
   TensorDmaState &state = *inst.template data_as<TensorDmaState>();

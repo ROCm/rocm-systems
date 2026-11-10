@@ -727,6 +727,13 @@ Callbacks must not retain instruction or wave references. There is no completion
 notification. Holding the callback mutex does not provide a complete
 architectural snapshot.
 
+Plugins that need to report instruction failures from register hooks must keep
+`supports_async_instructions()` false. Helper register hooks can run while the
+issuer clears the same wave's instruction error field for its next instruction;
+neither reading nor writing that field from a helper is safe. Issuer-thread issue
+callbacks may report failures. The CU checks the retained error after the full
+issue callback fanout and drains accepted jobs before cancelling the wave.
+
 Throughput, instruction mix, and kernel logging support this contract. The
 [simulator race detector](race-detector.md) keeps synchronous execution until
 its dependency-event access and diagnostic context support concurrent register

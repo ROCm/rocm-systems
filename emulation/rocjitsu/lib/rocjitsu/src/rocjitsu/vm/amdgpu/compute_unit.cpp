@@ -2173,6 +2173,10 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
         active->clear_setreg_vgpr_msb_hazard();
         if (observes_async_instruction_issued_)
           plugin_group_->onAmdgpuAsyncInstructionIssued(active->pc, *inst, *active);
+        if (active->instruction_execution_failed()) [[unlikely]] {
+          fail_current_instruction();
+          return IssueOutcome::Issued;
+        }
         active->pc += inst_size;
         record_gws_instruction_progress(active->process_id());
         return IssueOutcome::Issued;

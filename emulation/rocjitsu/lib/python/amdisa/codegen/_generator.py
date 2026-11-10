@@ -7864,8 +7864,9 @@ class CodeGenerator:
         if cls == 'tensor_load_to_lds':
             return (
                 '  if (amdgpu::execute_tensor_load_to_lds(*this, wf).failed()) [[unlikely]] {\n'
-                '    wf.report_instruction_execution_error(\n'
-                '        amdgpu::InstructionExecutionError::UnsupportedOperandValue);\n'
+                '    if (!wf.instruction_execution_failed())\n'
+                '      wf.report_instruction_execution_error(\n'
+                '          amdgpu::InstructionExecutionError::UnsupportedOperandValue);\n'
                 '    return;\n'
                 '  }'
             )
@@ -7873,8 +7874,9 @@ class CodeGenerator:
         if cls == 'tensor_store_from_lds':
             return (
                 '  if (amdgpu::execute_tensor_store_from_lds(*this, wf).failed()) [[unlikely]] {\n'
-                '    wf.report_instruction_execution_error(\n'
-                '        amdgpu::InstructionExecutionError::UnsupportedOperandValue);\n'
+                '    if (!wf.instruction_execution_failed())\n'
+                '      wf.report_instruction_execution_error(\n'
+                '          amdgpu::InstructionExecutionError::UnsupportedOperandValue);\n'
                 '    return;\n'
                 '  }'
             )

@@ -9,6 +9,7 @@
 #include "instruction_failure_test_util.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/async_scoreboard.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
@@ -1632,6 +1633,79 @@ TEST(ExecutionPluginTest, SynchronousObserverDisablesActualMmaOffload) {
   }
   EXPECT_EQ(before, 2u);
   EXPECT_EQ(after, before);
+}
+
+TEST(ExecutionPluginTest, ReportedAsyncIssueFailureDrainsBeforeCancellation) {
+  class AsyncFailurePlugin final : public ExecutionPlugin {
+  public:
+    explicit AsyncFailurePlugin(bool reject)
+        : ExecutionPlugin(reject ? "async_reject" : "async_observer"), reject_(reject) {}
+
+    bool supports_async_instructions() const override { return true; }
+    void onAmdgpuAsyncInstructionIssued(uint64_t pc, const Instruction &,
+                                        Wavefront &wave) override {
+      ++issued;
+      issuing_pc = pc;
+      if (reject_)
+        wave.report_instruction_execution_error(InstructionExecutionError::PluginFailure,
+                                                "async issue hook failed");
+      else
+        EXPECT_EQ(wave.instruction_execution_error(), InstructionExecutionError::PluginFailure);
+    }
+    void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &, Wavefront &) override {
+      ++before_callbacks;
+    }
+    void onAmdgpuWavefrontCancelled(Wavefront &wave) override {
+      ++cancellations;
+      EXPECT_EQ(wave.pc, issuing_pc);
+    }
+    void onAmdgpuWavefrontHalted(Wavefront &) override { ++halts; }
+
+    uint64_t issuing_pc = 0;
+    unsigned issued = 0;
+    unsigned before_callbacks = 0;
+    unsigned cancellations = 0;
+    unsigned halts = 0;
+
+  private:
+    bool reject_;
+  };
+
+  PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4));
+  fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto rejecting_plugin = std::make_unique<AsyncFailurePlugin>(true);
+  auto *rejecting = rejecting_plugin.get();
+  auto observing_plugin = std::make_unique<AsyncFailurePlugin>(false);
+  auto *observing = observing_plugin.get();
+  ASSERT_TRUE(fixture.plugin_group_->add(std::move(rejecting_plugin)));
+  ASSERT_TRUE(fixture.plugin_group_->add(std::move(observing_plugin)));
+  fixture.soc->set_plugin_group(fixture.plugin_group_);
+  fixture.plugin_group_->onInit();
+  const uint64_t submitted_before = async_execution::stats.mma;
+  const uint64_t retired_before = async_execution::stats.retired_mma;
+  unsigned failures = 0;
+  fixture.cu()->set_execution_failure_handler([&](Wavefront &wave) {
+    ++failures;
+    EXPECT_EQ(wave.pc, rejecting->issuing_pc);
+    EXPECT_EQ(wave.instruction_execution_error(), InstructionExecutionError::PluginFailure);
+    EXPECT_STREQ(wave.instruction_execution_error_detail(), "async issue hook failed");
+    EXPECT_EQ(observing->issued, 1u);
+    EXPECT_EQ(async_execution::stats.mma - submitted_before, 1u);
+    EXPECT_EQ(async_execution::stats.retired_mma - retired_before, 1u);
+    return false;
+  });
+  const auto code = independent_wmma_kernel();
+  fixture.run_kernel(code.data(), code.size(), 32, 32);
+  fixture.shutdown();
+  EXPECT_EQ(fixture.engine->last_exit().code, 1);
+  EXPECT_EQ(failures, 1u);
+  for (const auto *plugin : {rejecting, observing}) {
+    EXPECT_EQ(plugin->issued, 1u);
+    EXPECT_EQ(plugin->before_callbacks, 0u);
+    EXPECT_EQ(plugin->cancellations, 1u);
+    EXPECT_EQ(plugin->halts, 0u);
+  }
 }
 
 TEST(ThroughputPluginTest, AsyncMmaCountsHaveExplicitlyUnavailableHandlerTiming) {
