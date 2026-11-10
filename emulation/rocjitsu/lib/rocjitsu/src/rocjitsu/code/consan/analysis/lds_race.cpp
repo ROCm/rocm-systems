@@ -445,10 +445,11 @@ LdsRaceExecutionResult analyze_lds_race_execution(const Manifest &facts,
       complete_witnesses |= 1u << slot;
   }
   result.valid_observations = observations.size();
-  std::map<uint32_t, Bucket> words;
+  using RangeBuckets = std::map<std::pair<uint32_t, uint32_t>, Bucket>;
+  RangeBuckets ranges;
   for (const Observation &observation : observations) {
     const LdsRaceParticipant &participant = observation.participant;
-    Bucket &bucket = words[participant.offset];
+    Bucket &bucket = ranges[{participant.offset, participant.width}];
     Bucket::Wave &wave = bucket.waves[participant.wave];
     (participant.access == AccessKind::Write ? wave.writes : wave.reads).push_back(&observation);
     if (participant.access == AccessKind::Write && observation.lanes() > 1) {
@@ -460,10 +461,28 @@ LdsRaceExecutionResult analyze_lds_race_execution(const Manifest &facts,
             {LdsRaceFindingKind::InstructionCollision, participant, {}, pairs});
     }
   }
-  // Admitted aligned b32 accesses overlap iff their byte offsets are equal.
-  // Different dispatches never share this map, regardless of storage reuse.
-  for (const auto &[offset, bucket] : words) {
-    (void)offset;
+  // Sweep checked half-open byte ranges. Grouping identical ranges retains
+  // aggregate counting for dense no-barrier cases and never enumerates Read/Read
+  // pairs. Natural alignment and the admitted widths bound active range shapes.
+  struct ActiveRange {
+    uint32_t end;
+    const Bucket *bucket;
+  };
+  std::vector<ActiveRange> active;
+  for (const auto &[range, bucket] : ranges) {
+    std::erase_if(active, [&](const ActiveRange &prior) { return prior.end <= range.first; });
+    for (const ActiveRange &prior : active)
+      for (const auto &[prior_wave, prior_accesses] : prior.bucket->waves)
+        for (const auto &[wave, accesses] : bucket.waves) {
+          if (prior_wave == wave)
+            continue;
+          compare(prior_accesses.writes, accesses.writes, examples, facts.scope, completions,
+                  complete_witnesses, complete, result);
+          compare(prior_accesses.writes, accesses.reads, examples, facts.scope, completions,
+                  complete_witnesses, complete, result);
+          compare(prior_accesses.reads, accesses.writes, examples, facts.scope, completions,
+                  complete_witnesses, complete, result);
+        }
     std::vector<const Observation *> prior_reads, prior_writes;
     for (const auto &[wave, accesses] : bucket.waves) {
       (void)wave;
@@ -476,6 +495,7 @@ LdsRaceExecutionResult analyze_lds_race_execution(const Manifest &facts,
       prior_writes.insert(prior_writes.end(), accesses.writes.begin(), accesses.writes.end());
       prior_reads.insert(prior_reads.end(), accesses.reads.begin(), accesses.reads.end());
     }
+    active.push_back({range.first + range.second, &bucket});
   }
   return result;
 }

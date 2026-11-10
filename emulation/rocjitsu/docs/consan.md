@@ -160,13 +160,15 @@ original code-object files nor live HSA state.
 ## Available analysis
 
 `LdsRaceDetection` is the only implemented analysis. It checks ordinary native
-32-bit LDS reads/writes at naturally aligned addresses, using the same
-observations for two checks:
+LDS reads/writes at naturally aligned addresses, using the same observations
+for two checks. All supported targets admit ordinary single-range b16, b32,
+b64, and b128: gfx942/gfx950 wave64, gfx1100/gfx1201 wave32 or wave64, and
+gfx1250 wave32.
 
 | Check | What it reports |
 | --- | --- |
-| Cross-wave conflict | Address-group records from different waves access the same LDS word, with at least one write. Read/read pairs do not conflict. |
-| Same-instruction ordinary-store collision | Multiple lanes of one store observation write the same LDS word. |
+| Cross-wave conflict | Address-group records from different waves access overlapping half-open byte ranges, with at least one write. Read/read pairs do not conflict. |
+| Same-instruction ordinary-store collision | Multiple lanes of one store observation write the same LDS range. |
 
 ### Analysis and admission
 
@@ -179,6 +181,31 @@ and [runtime admission](../lib/rocjitsu/src/rocjitsu/hooks/consan/hsa_plugin.cpp
 The input code object must contain exactly one kernel, matching the requested
 entry. Selecting an entry does not exclude sibling kernels from this requirement;
 provide a code object containing only the selected kernel.
+
+The forms are `ds_store_b16`, `ds_load_u16`, `ds_load_i16`, and
+`ds_store_b32/b64/b128` or `ds_load_b32/b64/b128` on gfx1100/gfx1201/gfx1250.
+gfx942/gfx950 use the corresponding `ds_write_*` and `ds_read_*` names.
+The b16 loads write a whole 32-bit result with unsigned or signed extension. Access probes
+capture addresses before an aliased load can overwrite them, record actual byte
+widths and byte immediates, and preserve every guest result word. b8/b96,
+partial-register subword loads, dual-range, transpose, FLAT, and atomic forms
+remain unsupported. The existing minimum fixed LDS extent remains four bytes.
+
+Access widths are measured in bytes. `NativeLdsAccess::width` and
+`SiteFacts::width` default to zero, meaning unspecified and invalid. Producers
+must explicitly supply 2, 4, 8, or 16; zero never implies b32 or a zero-length
+access. Manifest admission rejects zero, and a committed observation must match
+its site's width. An all-zero uncommitted report slot still represents vacant
+storage, not an access.
+
+Range admission checks bounds by subtraction before calculating ends. Diagnosis
+sweeps checked ranges, retaining grouped counts for identical ranges, excluding
+Read/Read and same-wave pairs, and treating adjacent ranges as disjoint. Natural
+alignment and the admitted widths bound active range shapes. Widths share the
+same four-address-group quota, loss rules, exact collision masks, and qualified
+barrier certificates. The compatibility token/options reject older b32-only
+producer interpretations and target-specific width restrictions. Geometry remains
+one workgroup in this change.
 
 The barrier profile requires at least two waves in one complete 1D workgroup
 and a closed forward CFG. Preparation and facts admission reject a declared maximum

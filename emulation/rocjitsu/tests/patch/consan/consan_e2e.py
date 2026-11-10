@@ -67,10 +67,21 @@ class AnalysisDriver(Driver):
         case = self.args.case
         pairs = (
             1
-            if case in ('race', 'high_lane', 'barrier_missing_second')
+            if case
+            in (
+                'race',
+                'high_lane',
+                'mixed_overlap',
+                'mixed_b16',
+                'barrier_missing_second',
+            )
             else (2 if case == 'repeat_race' else 0)
         )
-        collisions = 1 if case == 'collision' else 0
+        collisions = (
+            (self.args.threads // self.args.wave_size)
+            if case == 'wide_collision'
+            else (1 if case == 'collision' else 0)
+        )
         status = 1 if pairs or collisions else 0
         # The dynamic loader's own trace records the analyzer's actual modules
         # without linking a runtime or adding a live-registry input to the tool.
@@ -112,7 +123,14 @@ class AnalysisDriver(Driver):
             assert analyzed['cross_wave_pairs'] == (
                 1
                 if case
-                in ('race', 'repeat_race', 'high_lane', 'barrier_missing_second')
+                in (
+                    'race',
+                    'repeat_race',
+                    'high_lane',
+                    'mixed_overlap',
+                    'mixed_b16',
+                    'barrier_missing_second',
+                )
                 else 0
             )
             assert analyzed['collision_groups'] == collisions
@@ -132,8 +150,25 @@ class AnalysisDriver(Driver):
                 for participant in (finding['first'], finding['second']):
                     site = raw['sites'][participant['site']]
                     assert participant['original_offset'] == site['original_offset']
+            if case == 'mixed_barrier':
+                assert analyzed['ordered_pairs'] == 1
+                assert (
+                    analyzed['required_barrier_waves']
+                    == analyzed['completed_barrier_waves']
+                    == len(observed['rows'])
+                )
+                finding = analyzed['ordered_examples'][0]
+                assert finding['ordering'] == 'ordered'
+                assert (finding['first']['offset'], finding['first']['width']) == (0, 8)
+                assert (finding['second']['offset'], finding['second']['width']) == (
+                    4,
+                    4,
+                )
             if case.startswith('barrier'):
-                assert result['scope'] == 'native_lds_b32_epoch_workgroup_barriers'
+                assert (
+                    result['scope']
+                    == 'native_lds_single_range_epoch_workgroup_barriers'
+                )
                 assert analyzed['ordered_pairs'] == (
                     2 if case == 'barrier_multiple' else 1
                 )

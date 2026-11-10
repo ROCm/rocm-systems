@@ -113,6 +113,7 @@ protected:
       facts.sites.push_back({.id = site,
                              .analysis = AnalysisKind::LdsRaceDetection,
                              .access = AccessKind::Write,
+                             .width = 4,
                              .original_offset = uint64_t{site} * 8,
                              .original_size = 8,
                              .prepared_guest_offset = uint64_t{site} * 128,
@@ -225,6 +226,60 @@ TEST_F(ConSanAnalysis, OverlappingWriteReadProducesAttributedUnorderedCrossWaveF
   EXPECT_EQ(finding.second.original_offset, 8u);
   EXPECT_EQ(finding.first.mask, 1u);
   EXPECT_FALSE(execution.ordering_uncertain);
+}
+
+TEST_F(ConSanAnalysis, UnequalStartMixedWidthRangesOverlapAndAdjacentRangesDoNot) {
+  capture_.header.manifest.target = 1250;
+  capture_.header.manifest.sites[0].width = 8;
+  for (const uint32_t offset : {4u, 8u}) {
+    capture_.executions.clear();
+    append_execution();
+    access(0, 0, 1, 0);
+    access(1, 1, 1, offset);
+    const FailureOr<LdsRaceResult> result = analyze();
+    ASSERT_TRUE(result.succeeded()) << error_.message;
+    EXPECT_EQ(result.value().executions[0].valid_observations, 2u);
+    EXPECT_EQ(result.value().cross_wave_pairs, offset == 4 ? 1u : 0u);
+    EXPECT_TRUE(result.value().coverage_complete);
+  }
+}
+
+TEST_F(ConSanAnalysis, DecoderControlWideBoundsCannotWrapOrSilentlyBecomeB32) {
+  capture_.header.manifest.target = 1250;
+  for (const uint32_t width : {2u, 8u, 16u}) {
+    capture_.header.manifest.sites[0].width = width;
+    for (const uint32_t offset : {1u, 128u - width + 1, UINT32_MAX - 7}) {
+      capture_.executions.clear();
+      append_execution();
+      access(0, 0, 1, offset, 3);
+      access(1, 1, 1);
+      const FailureOr<LdsRaceResult> result = analyze();
+      ASSERT_TRUE(result.succeeded()) << error_.message;
+      EXPECT_EQ(result.value().executions[0].valid_observations, 1u);
+      EXPECT_EQ(result.value().executions[0].rejected_records, 1u);
+      EXPECT_EQ(result.value().cross_wave_pairs, 0u);
+      EXPECT_EQ(result.value().collision_groups, 0u);
+      EXPECT_FALSE(result.value().coverage_complete);
+    }
+  }
+  for (const uint32_t width : {0u, 1u, 3u, 12u, 32u}) {
+    capture_.header.manifest.sites[0].width = width;
+    EXPECT_TRUE(validate_manifest(capture_.header.manifest).failed());
+  }
+  capture_.header.manifest.sites[0].width = 8;
+  capture_.header.manifest.target = 1201;
+  EXPECT_TRUE(validate_manifest(capture_.header.manifest).succeeded());
+}
+
+TEST_F(ConSanAnalysis, MixedWidthUnequalStartPairUsesTheQualifiedBarrierCertificate) {
+  capture_.header.manifest.sites[0].width = 8;
+  access(0, 0, 1, 0);
+  access(1, 1, 1, 4);
+  barrier();
+  const FailureOr<LdsRaceResult> result = analyze();
+  ASSERT_TRUE(result.succeeded()) << error_.message;
+  EXPECT_EQ(result.value().executions[0].ordered_pairs, 1u);
+  EXPECT_EQ(result.value().cross_wave_pairs, 0u);
 }
 
 TEST_F(ConSanAnalysis, FixedBarrierCertificateOrdersRetainedPairAndSurvivesUnrelatedLocalGap) {

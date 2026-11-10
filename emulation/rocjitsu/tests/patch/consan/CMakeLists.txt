@@ -397,6 +397,7 @@ if(TARGET consan_hsa_runner)
         list(GET _parts 0 _gpu)
         list(GET _parts 1 _wave_size)
         math(EXPR _threads "2 * ${_wave_size}")
+        math(EXPR _width_threads "2 * ${_wave_size} + 1")
         math(EXPR _partial_threads "3 * ${_wave_size} + 1")
         set(_kind hip)
         if(_gpu STREQUAL "gfx1250")
@@ -409,7 +410,31 @@ if(TARGET consan_hsa_runner)
                 )
             endforeach()
             if(RJ_BUILD_CONSAN_ANALYZER)
+                set(_width_cases wide_u16 wide_i16 wide_b64 wide_b128)
                 if(_gpu STREQUAL "gfx1250")
+                    list(
+                        APPEND _width_cases
+                        wide_u16_high
+                        wide_i16_high
+                        wide_b64_high
+                        wide_b128_high
+                        wide_alias
+                        wide_collision
+                        mixed_overlap
+                        mixed_b16
+                        mixed_disjoint
+                        mixed_read_read
+                    )
+                endif()
+                foreach(_width_case IN LISTS _width_cases)
+                    consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
+                        ${_width_case} ${_width_threads} production analysis
+                    )
+                endforeach()
+                if(_gpu STREQUAL "gfx1250")
+                    consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
+                        mixed_barrier ${_width_threads} production analysis
+                    )
                     foreach(
                         _barrier_case
                         IN

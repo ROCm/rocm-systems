@@ -114,6 +114,7 @@ FailureOr<PreparedArtifact> lower(const InputProgram &program, InputError &error
     args.push_back({ProbeArgSource::AnchorExecLo});
     args.push_back(program.wave_size == 64 ? ProbeArgValue{ProbeArgSource::AnchorExecHi}
                                            : probe_arg_imm(0));
+    args.push_back(probe_arg_imm(access.width));
     add(access.original_offset, InstrumentationKind::BeforeInst, "rj_consan_access",
         std::move(args));
   }
@@ -144,6 +145,7 @@ FailureOr<PreparedArtifact> lower(const InputProgram &program, InputError &error
     artifact.manifest.sites.push_back({.id = access.site,
                                        .analysis = AnalysisKind::LdsRaceDetection,
                                        .access = access.kind,
+                                       .width = access.width,
                                        .original_offset = access.original_offset,
                                        .original_size = 8,
                                        .prepared_guest_offset = mapping->guest_offset,

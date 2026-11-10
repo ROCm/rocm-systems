@@ -88,7 +88,7 @@ protected:
 
   void run(std::string_view fixture, Bootstrap mode, RunResult &result,
            test::TargetMode target_mode = {"gfx1100", 32}, uint32_t threads = 64,
-           bool target_fixture = false) {
+           bool target_fixture = false, uint32_t output_words_per_wave = 1) {
 #ifdef CONSAN_FIXTURE_DIR
     const std::vector<uint8_t> original =
         test::read_fixture(target_fixture ? test::target_fixture_path(target_mode, fixture)
@@ -265,11 +265,13 @@ protected:
     soc->flush_all();
     if (instrumented)
       memory->read_block(kReport, result.report);
-    std::vector<uint8_t> output(std::max(wave_count, 2u) * sizeof(uint32_t));
+    std::vector<uint8_t> output(std::max(wave_count * output_words_per_wave, 2u) *
+                                sizeof(uint32_t));
     memory->read_block(kOutput, output);
     std::memcpy(result.output.data(), output.data(), sizeof(result.output));
-    result.full_output.resize(wave_count);
-    std::memcpy(result.full_output.data(), output.data(), wave_count * sizeof(uint32_t));
+    result.full_output.resize(wave_count * output_words_per_wave);
+    std::memcpy(result.full_output.data(), output.data(),
+                result.full_output.size() * sizeof(uint32_t));
 #else
     (void)fixture;
     (void)mode;
@@ -277,6 +279,7 @@ protected:
     (void)target_mode;
     (void)threads;
     (void)target_fixture;
+    (void)output_words_per_wave;
 #endif
   }
 };
@@ -546,6 +549,7 @@ std::vector<ObservedAccess> published_accesses(const RunResult &result, bool exh
         EXPECT_EQ(wire::read_u32(result.report, record + wire::kRecordCommit),
                   wire::kAccessCommitted);
         EXPECT_EQ(wire::read_u32(result.report, record + wire::kRecordSite), site.id);
+        EXPECT_EQ(wire::read_u32(result.report, record + wire::kRecordWidth), site.width);
         EXPECT_EQ(wire::read_u32(result.report, record + wire::kRecordFlags),
                   wire::kExactGuestMask);
         accesses.push_back({wave, site.id,
@@ -709,6 +713,73 @@ TEST_F(ConSanBootstrapSim, Gfx1250BarrierPreservesOutputAndGuestStateAtEmptyExec
         EXPECT_EQ(record.mask, mask);
     }
   }
+}
+
+TEST_P(ConSanTargetSim, NativeWidthsPreserveEveryWordAndAllGuestState) {
+  const test::TargetMode target = GetParam();
+  const uint32_t wave_size = target.wave_size;
+  for (const char *name : {"u16", "i16", "b64", "b128", "u16-high", "i16-high", "b64-high",
+                           "b128-high", "b128-alias"}) {
+    const std::string_view kind(name);
+    if (std::string_view(target.target) != "gfx1250" && kind != "i16" && kind != "b64-high" &&
+        kind != "b128-alias")
+      continue;
+    for (const uint32_t threads : {2 * wave_size, 2 * wave_size + 1}) {
+      SCOPED_TRACE(name);
+      SCOPED_TRACE(threads);
+      const std::string fixture = "width-" + std::string(name);
+      RunResult before, after;
+      run(fixture, Bootstrap::None, before, target, threads, true, 4);
+      ASSERT_FALSE(HasFatalFailure());
+      run(fixture, Bootstrap::Instrumented, after, target, threads, true, 4);
+      ASSERT_FALSE(HasFatalFailure());
+      expect_guest_state(before, after);
+      std::vector<uint32_t> expected;
+      const uint32_t waves = (threads + wave_size - 1) / wave_size;
+      for (uint32_t wave = 0; wave < waves; ++wave) {
+        const bool inactive =
+            kind.ends_with("-high") && wave * wave_size + wave_size - 1 >= threads;
+        std::array<uint32_t, 4> words{7u + wave, 0x01234567u, 0x76543210u, 0xa5a5a5a5u};
+        if (kind.starts_with("i16"))
+          words[0] += 0xffff8000u;
+        else if (kind.starts_with("u16"))
+          words[0] += 0x8000u;
+        else
+          words[1] = 0x89abcdefu;
+        if (kind.starts_with("b128")) {
+          words[2] = 0x13579bdfu;
+          words[3] = 0xfedcba98u;
+        }
+        if (inactive)
+          words.fill(0);
+        expected.insert(expected.end(), words.begin(), words.end());
+      }
+      EXPECT_EQ(before.full_output, expected);
+      EXPECT_EQ(after.full_output, expected);
+      const std::vector<ObservedAccess> records = published_accesses(after);
+      const bool high = kind.ends_with("-high");
+      EXPECT_EQ(records.size(), 2u * (high ? threads / wave_size : waves));
+      for (const ObservedAccess &record : records)
+        EXPECT_EQ(record.mask, high ? uint64_t{1} << (wave_size - 1) : 1);
+    }
+  }
+}
+
+TEST_F(ConSanBootstrapSim, MixedWidthBarrierPreservesTheIndependentCrossWaveValueAndState) {
+  RunResult before, after;
+  run("mixed-5", Bootstrap::None, before, {"gfx1250", 32}, 65, true);
+  ASSERT_FALSE(HasFatalFailure());
+  run("mixed-5", Bootstrap::Instrumented, after, {"gfx1250", 32}, 65, true);
+  ASSERT_FALSE(HasFatalFailure());
+  expect_guest_state(before, after);
+  EXPECT_EQ(before.output[0], 8u);
+  EXPECT_EQ(after.output[0], 8u);
+  const std::vector<ObservedAccess> records = published_accesses(after);
+  ASSERT_EQ(records.size(), 2u);
+  EXPECT_EQ(records[0].offset, 0u);
+  EXPECT_EQ(records[1].offset, 4u);
+  EXPECT_EQ(after.manifest.sites[0].width, 8u);
+  EXPECT_EQ(after.manifest.sites[1].width, 4u);
 }
 
 const auto target_name = [](const auto &info) {
