@@ -129,11 +129,9 @@ enum InstFlags : uint64_t {
   /// @details Whether it does depends on operands and execution state; for
   /// example, s_sethalt 0 clears the halt bit.
   SUSPENDS_WAVE = (1ULL << 36),
-  /// @brief May write the PC although it carries none of the control-flow flags
-  /// above: trap entry and return (s_trap, s_rfe*) and the debug conditional
-  /// branches (s_cbranch_cdbg*).
-  /// @details Kept separate from BRANCH and COND_BRANCH so CFG construction does
-  /// not change. Query through writes_pc(), which combines them.
+  /// @brief Marks architectural PC writers, including trap entry and return.
+  /// @details Direct conditional branches additionally carry COND_BRANCH and a
+  /// decoded displacement. Query writes_pc() for the combined classification.
   WRITES_PC = (1ULL << 37),
   /// @brief Software trap instruction (s_trap).
   SOFTWARE_TRAP = (1ULL << 38)

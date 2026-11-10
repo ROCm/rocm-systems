@@ -199,6 +199,23 @@ bool CommandProcessor::has_registered_queues() const {
   return active_queue_registrations_ != 0 || !compute_queues_.empty();
 }
 
+bool CommandProcessor::has_pending_aql_dispatch_work() const {
+  const auto pending = [](const DispatchEntry &entry) {
+    return (!entry.is_non_kernel() && !entry.fully_dispatched()) ||
+           (entry.completion_signal != 0 && !entry.completion_notified);
+  };
+  // A peer can own workgroups before its next doorbell pass moves the shard into its queue.
+  {
+    std::lock_guard lock(fanout_inbox_mutex_);
+    if (std::ranges::any_of(fanout_inbox_, pending))
+      return true;
+  }
+  std::lock_guard lock(hw_queue_mutex_);
+  return std::ranges::any_of(compute_queues_, [&](const ComputeQueueRecord &queue) {
+    return std::ranges::any_of(queue.entries, pending);
+  });
+}
+
 void CommandProcessor::configure_for_arch(rj_code_arch_t arch) {
   // Matches LLVM's FeaturePackedTID: gfx90a and later CDNA targets, plus
   // GFX11 and later RDNA targets, receive work-item IDs packed in v0.
@@ -498,6 +515,7 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
   using namespace rocjitsu::amdhsa;
   uint32_t sbase = wf->sgpr_alloc().base;
   uint32_t kcp = pkt.kernel_code_properties;
+  wf->set_accum_vgpr_base(pkt.accum_vgpr_base);
 
   // User SGPRs per AMDHSA ABI: placed sequentially based on enable bits.
   // Order: private_segment_buffer(4), dispatch_ptr(2), queue_ptr(2),
@@ -830,8 +848,9 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
     // and s33 as its current frame value for explicit scratch SADDR operands.
     // The pointer is an offset within the per-wave scratch slice, not the SRD
     // base address supplied in the user SGPR block.
-    if (cu->config().arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-        cu->config().arch == ROCJITSU_CODE_ARCH_CDNA4) {
+    if ((cu->config().arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+         cu->config().arch == ROCJITSU_CODE_ARCH_CDNA4) &&
+        wf->num_sgprs() >= 34) {
       cu->write_sgpr(sbase + 32, 32);
       cu->write_sgpr(sbase + 33, 0);
     }
@@ -935,9 +954,10 @@ void CommandProcessor::set_xcd_topology(uint32_t rank, std::vector<CommandProces
   scratch_xcc_count_ = static_cast<uint32_t>(peers.size());
   xcd_peers_ = std::move(peers);
   // Carve this XCD its own dispatch-id space; see allocate_dispatch_id().
-  dispatch_id_stride_ = static_cast<uint32_t>(xcd_peers_.size());
+  const auto count = static_cast<uint32_t>(xcd_peers_.size());
+  next_dispatch_id_ = next_dispatch_id_for_topology(rank, count);
+  dispatch_id_stride_ = count;
   dispatch_id_base_ = 1 + rank;
-  next_dispatch_id_ = dispatch_id_base_;
 }
 
 void CommandProcessor::set_scratch_slots_per_cu(uint32_t slots) {
@@ -2489,6 +2509,7 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
     }
     for (uint32_t w = 0; w < entry.wfs_per_workgroup; ++w) {
       Wavefront *wf = wg_wavefronts[w];
+      wf->set_accum_vgpr_base(entry.accum_vgpr_base);
       wf->set_lds_base(lds_base);
       wf->set_lds_size(aligned_lds_bytes_per_workgroup(entry));
       wf->set_lds(placement.lds);
@@ -3300,6 +3321,9 @@ util::Result CommandProcessor::dispatch_pm4(const ComputeQueueRecord &queue, Pm4
     return emit_error.emit() << "unsupported PM4 wave size";
   dp.vgprs_per_wf =
       (RJ_AMDHSA_BITS_GET(rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT) + 1) * *granule;
+  if (arch == ROCJITSU_CODE_ARCH_CDNA2 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+      arch == ROCJITSU_CODE_ARCH_CDNA4)
+    dp.accum_vgpr_base = gfx90a_accum_vgpr_base(regs[kPm4ComputePgmRsrc3Gfx9]);
   if (dp.vgprs_per_wf > cus_[0]->vgpr_allocation_block_size())
     return emit_error.emit() << "PM4 launch exceeds available VGPRs";
   dp.initial_mode_raw = initial_mode_from_compute_pgm_rsrc1(rsrc1, arch);
@@ -4158,10 +4182,15 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
   uint32_t sgpr_limit = cus_.empty() ? 112 : cus_[0]->config().sgprs_per_wf;
   uint32_t vgpr_limit = cus_.empty() ? 256 : cus_[0]->vgpr_allocation_block_size();
   uint32_t required_sgprs = sgprs > 0 ? sgprs : sgpr_limit;
-  if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)
+  // gfx942 places VCC and FLAT_SCRATCH relative to the descriptor allocation.
+  // A kernel using the stack ABI must itself request s32 and s33.
+  if (arch == ROCJITSU_CODE_ARCH_CDNA4)
     required_sgprs = std::max(required_sgprs, 34u); // s32 stack pointer, s33 frame pointer
   dp.sgprs_per_wf = std::min(required_sgprs, sgpr_limit);
   dp.vgprs_per_wf = std::min(vgprs > 0 ? vgprs : vgpr_limit, vgpr_limit);
+  if (arch == ROCJITSU_CODE_ARCH_CDNA2 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+      arch == ROCJITSU_CODE_ARCH_CDNA4)
+    dp.accum_vgpr_base = gfx90a_accum_vgpr_base(kd.compute_pgm_rsrc3);
   dp.kernarg_addr = reinterpret_cast<uint64_t>(pkt.kernarg_address);
   dp.kernarg_size = kd.kernarg_size;
   dp.num_user_sgprs = user_sgprs;

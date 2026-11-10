@@ -1039,6 +1039,45 @@ TEST(MemoryWaitExecutionTest, D16ImageWaitsTrackPartialResultsAndRealImplicitRea
   }
 }
 
+TEST(MemoryWaitExecutionTest, Cdna1DiscardedValuDoesNotAcquirePendingSources) {
+  for (bool wait : {false, true}) {
+    for (uint32_t dst : {3u, 40u}) {
+      SCOPED_TRACE(testing::Message() << "dst=" << dst << " wait=" << wait);
+      GpuMemory memory("discarded_valu_memory");
+      L2Cache l2("discarded_valu_l2");
+      ComputeUnitCore::Config config{};
+      config.arch = ROCJITSU_CODE_ARCH_CDNA1;
+      config.num_wf_slots = 1;
+      config.sgprs_per_wf = 96;
+      config.vgprs_per_wf = 64;
+      config.lds_size_kb = 64;
+      config.functional_quantum = 1;
+      auto cu = ComputeUnitCore::create("discarded_valu_cu", config, &memory, &l2);
+      constexpr uint64_t pc = 0x4000;
+      auto *wave = cu->dispatch_wf(0, pc, 96, 16, 64);
+      ASSERT_NE(wave, nullptr);
+      wave->set_exec(1);
+      wave->set_lds_size(256);
+      const auto base = wave->vgpr_alloc().base;
+      cu->write_vgpr(base + 1, 0, 4);
+      cu->write_vgpr(base + dst, 0, 0xcafe0000);
+      cu->lds().write32(4, 0x12345678);
+      memory.write32(pc, 0xd86c0000); // ds_read_b32 v0, v1
+      memory.write32(pc + 4, 1);
+      const uint64_t consumer = pc + (wait ? 12 : 8);
+      if (wait)
+        memory.write32(pc + 8, 0xbf8cc07f);               // s_waitcnt lgkmcnt(0)
+      memory.write32(consumer, 0x7e000300 | (dst << 17)); // v_mov_b32 vdst, v0
+      for (unsigned tick = 0; wave->pc <= consumer && tick < 32; ++tick) {
+        ASSERT_TRUE(cu->step());
+      }
+      ASSERT_EQ(wave->pc, consumer + 4);
+      EXPECT_EQ(cu->memory_wait_diagnostic_count(), unsigned(!wait && dst == 3));
+      EXPECT_EQ(cu->read_vgpr(base + dst, 0), dst == 3 ? 0x12345678u : 0xcafe0000u);
+    }
+  }
+}
+
 TEST(MemoryWaitExecutionTest, SampleAndLoadWaitsAreIndependent) {
   GpuMemory memory("sample_wait_memory");
   L2Cache l2("sample_wait_l2");
@@ -2093,6 +2132,43 @@ struct MemoryWaitOrderingTest : ::testing::Test {
     }
   }
 };
+
+TEST_F(MemoryWaitOrderingTest, Cdna2ValuReadsTheFallbackRegisterAndSkipsInvalidDestinations) {
+  ASSERT_NO_FATAL_FAILURE(setup(ROCJITSU_CODE_ARCH_CDNA2));
+  wf->set_accum_offset(24); // v0-v23 and a0-a7.
+  auto &state = wf->ensure_memory_wait_scoreboard();
+  auto decoder = Decoder::create(cu->arch());
+  std::vector<MemoryWaitScoreboard::Hazard> hazards;
+  auto check_move = [&](uint8_t dst, uint8_t src, bool reads_v0) {
+    SCOPED_TRACE(std::format("dst={} src={} m0={:#x}", dst, src, wf->m0()));
+    state.clear();
+    ASSERT_NO_FATAL_FAILURE(track(cdna2::build_ds(cdna2::kDsReadB32Ds, {.addr = 2, .vdst = 0})));
+    hazards.clear();
+    state.bind(wf->pc, &hazards, [](void *p, const auto &hazard) {
+      static_cast<decltype(hazards) *>(p)->push_back(hazard);
+    });
+    util::StringDiagnostic error;
+    auto decoded = decoder->decode_window(
+        cdna2::build_vop1(cdna2::kVMovB32Vop1,
+                          {.src0 = static_cast<uint16_t>(256 + src), .vdst = dst}),
+        0, error.emitter());
+    ASSERT_TRUE(decoded.succeeded()) << error.message();
+    state.check_instruction(*decoded.value(), *wf);
+    ASSERT_EQ(hazards.size(), reads_v0 ? 1u : 0u);
+    if (reads_v0) {
+      EXPECT_FALSE(hazards.front().write);
+      EXPECT_EQ(hazards.front().producer.reg.index, 0u);
+    }
+  };
+  check_move(1, 24, true);
+  check_move(1, 0, true);
+  check_move(1, 23, false);
+  check_move(24, 0, false);
+  wf->set_mode_raw(Wavefront::GPR_IDX_EN_BIT);
+  wf->set_m0((1u << 12) | 1u); // SRC0 index of one forces the detailed checker.
+  check_move(1, 23, true);
+  check_move(24, 23, false);
+}
 
 TEST_F(MemoryWaitOrderingTest, IncomingLdsRoutedFlatPreservesLdsWriteOrder) {
   for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
@@ -3496,7 +3572,8 @@ TEST(XcntExecutionTest, ScalarRegisterOffsetOverwriteNeedsTranslationOrCompletio
       auto counts_result = run_xcnt_kernel(code);
       ASSERT_TRUE(counts_result.succeeded());
       const auto counts = std::move(counts_result).value();
-      EXPECT_EQ(counts[0], selector != 124 && !wait ? 1u : 0u);
+      // User writes to TTMP0 are discarded, so they cannot race a replay.
+      EXPECT_EQ(counts[0], selector != 124 && selector != 108 && !wait ? 1u : 0u);
       EXPECT_EQ(counts[1], 0u);
     }
 }
@@ -4249,6 +4326,18 @@ void check_vector_footprints(rj_code_arch_t arch, unsigned wave_size, unsigned n
   group->onShutdown();
 }
 
+TEST(MemoryWaitFootprintTest, Gfx10ValuAllocationMatchesExecutionRegisterCallbacks) {
+  const std::vector<std::vector<uint32_t>> instructions{
+      {0x7e060317},             // MOV v3, v23
+      {0xd6ff0002, 0x02021e80}, // LSHLREV_B64 v[2:3], 0, v[15:16]
+      {0x7e0602fa, 0xff005517}, // MOV_DPP v3, v23 quad_perm:[1,1,1,1]
+      {0x7e0602f9, 0x00020617}, // MOV_SDWA v3, v23 src0_sel:BYTE_2
+      {0x7e040517},             // READFIRSTLANE s2, v23
+      {0xd70f6a17, 0x02020501}, // ADD_CO_U32 v23, vcc_lo, v1, v2
+  };
+  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2})
+    check_vector_footprints(arch, 32, 16, instructions);
+}
 TEST(MemoryWaitFootprintTest, NarrowDsAndBufferStoresCheckOnlyConsumedBytes) {
   std::vector<std::vector<uint32_t>> cases;
   for (auto opcode : {rdna3::kDsStoreB8Ds, rdna3::kDsStoreB16Ds, rdna3::kDsStoreB8D16HiDs,
@@ -4518,21 +4607,66 @@ void add_vop3_dpp16_footprint_case(std::vector<std::vector<uint32_t>> &cases, co
   cases.emplace_back(words.begin(), words.end());
 }
 
+TEST(MemoryWaitFootprintTest, Gfx1030HalfArithmeticReadsOnlySelectedBytes) {
+  std::vector<std::vector<uint32_t>> cases;
+  for (unsigned opcode : {50u, 51u, 52u, 53u}) {
+    const uint32_t compact = (opcode << 25) | (2u << 17) | (4u << 9);
+    cases.push_back({0xd5000002u | (opcode << 16), 0x02020903u});
+    cases.push_back({compact | 259u});
+    cases.push_back({compact | 250u, 0xff00e403u}); // DPP16
+    cases.push_back({compact | 249u, 0x06050603u}); // SDWA SRC0 WORD_1
+  }
+  for (unsigned wave_size : {32u, 64u})
+    check_vector_footprints(ROCJITSU_CODE_ARCH_RDNA2, wave_size, 16, cases);
+}
+
+TEST(MemoryWaitFootprintTest, Fp16ComparisonsTrackOnlyTheSelectedGfx10Bytes) {
+  // VOPC and VOP3 share the low halves. CLAMP and the VOP3 OP_SEL bits
+  // do not select a different source half on GFX10 compares.
+  const std::vector<std::vector<uint32_t>> cases{{0x7d940903u},
+                                                 {0xd4ca000au, 0x02020903u},
+                                                 {0xd4ca800au, 0x02020903u},
+                                                 {0xd4ca980au, 0x02020903u}};
+  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2})
+    for (const unsigned wave : {32u, 64u})
+      check_vector_footprints(arch, wave, 16, cases);
+}
+
+TEST(MemoryWaitFootprintTest, DppCompareWaitsMatchUnpermutedReadsAndModifierStaging) {
+  // Keep SRC0's modifier staging and compare SRC1's acquisition against
+  // the applied row and bank masks, including each selected FP16 half.
+  const std::vector<std::vector<uint32_t>> cases{
+      {0xd402000au, 0x000202fau, 0x1f00e400u},
+      {0xd402100au, 0x000202fau, 0x1f00e400u},
+      {0xd402000au, 0x000202fau, 0xf100e400u},
+      {0x7c0402fau, 0x1f00e400u},  // Compact DPP.
+      {0x7c0402fau, 0x1f40e400u}}; // Compact SRC1 NEG stages its operand under the original EXEC.
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4})
+    for (const unsigned wave : {32u, 64u})
+      check_vector_footprints(arch, wave, 16, cases);
+}
+
 TEST(MemoryWaitFootprintTest, InterpolationReadsQuadCoefficients) {
-  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4}) {
-    std::vector<std::vector<uint32_t>> cases;
-    for (bool p2 : {false, true}) {
-      const auto words = arch == ROCJITSU_CODE_ARCH_RDNA3
-                             ? rdna3::build_vinterp(
-                                   p2 ? rdna3::kVInterpP2F32Vinterp : rdna3::kVInterpP10F32Vinterp,
-                                   {.vdst = 3, .src0 = 256, .src1 = 257, .src2 = 258})
-                             : rdna4::build_vinterp(
-                                   p2 ? rdna4::kVInterpP2F32Vinterp : rdna4::kVInterpP10F32Vinterp,
-                                   {.vdst = 3, .src0 = 256, .src1 = 257, .src2 = 258});
+  // These six VINTERP encodings share opcode, VGPR and modifier fields on GFX11 and GFX12.
+  std::vector<std::vector<uint32_t>> cases;
+  for (const auto opcode :
+       {rdna3::kVInterpP10F32Vinterp, rdna3::kVInterpP2F32Vinterp, rdna3::kVInterpP10F16F32Vinterp,
+        rdna3::kVInterpP2F16F32Vinterp, rdna3::kVInterpP10RtzF16F32Vinterp,
+        rdna3::kVInterpP2RtzF16F32Vinterp}) {
+    const bool half = opcode >= rdna3::kVInterpP10F16F32Vinterp;
+    const bool p2 =
+        opcode == rdna3::kVInterpP2F16F32Vinterp || opcode == rdna3::kVInterpP2RtzF16F32Vinterp;
+    for (uint8_t selection : {uint8_t{0}, uint8_t(p2 ? 9 : 5)}) {
+      if (!half && selection)
+        continue;
+      const auto words = rdna3::build_vinterp(
+          opcode, {.vdst = 3, .op_sel = selection, .src0 = 256, .src1 = 257, .src2 = 258});
       cases.emplace_back(words.begin(), words.end());
     }
-    check_vector_footprints(arch, 32, 16, cases);
   }
+  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4})
+    for (const unsigned wave_size : {32u, 64u})
+      check_vector_footprints(arch, wave_size, 16, cases);
 }
 
 // NULL is a whole-wave zero condition even when the adjacent M0 register is nonzero.
@@ -4838,6 +4972,9 @@ TEST(MemoryWaitExecutionTest, Wave32MaskDestinationsAtScalarRegisterBoundaries) 
           rocjitsu::test::initialize_compute_unit(cu, "mask_boundary_cu", config, &memory, &l2));
       auto *wf = cu->dispatch_wf(0, 0x100, 106, 32, 32);
       ASSERT_NE(wf, nullptr);
+      // Exercise a writable TTMP so the mask boundary is observable.
+      if (destination == 123)
+        wf->set_in_trap_handler(true);
       auto decoder = Decoder::create(arch);
       const auto words = arch == ROCJITSU_CODE_ARCH_RDNA3
                              ? rdna3::build_vop3(rdna3::kVCmpGtI32Vop3,

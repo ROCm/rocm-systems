@@ -1071,9 +1071,51 @@ public:
   }
   explicit RegisterAccess(const Wavefront &wf) : RegisterAccess(wf.cu()) { wf_ = &wf; }
 
+  /// GFX11.5 replicates A and B across halfwaves. A wave64 lane holds half
+  /// as many accumulator and result words as a wave32 lane.
+  [[nodiscard]] std::optional<RegisterRef> gfx115_wmma_register(const Operand &op,
+                                                                bool destination) const {
+    auto reg = op.decoded_vgpr();
+    if (!reg)
+      return std::nullopt;
+    const auto &wf = wavefront();
+    if (wf.wf_size() == 64 && (destination || op.vgpr_msb_role() == VgprMsbRole::Src2))
+      reg->width /= 2;
+    if (!destination) {
+      const auto base = wf.vgpr_alloc().base;
+      if (const auto mapped = remapped_valu_source(op, base + reg->index, reg->width))
+        reg->index = static_cast<uint16_t>(mapped->lo - base);
+    }
+    return reg;
+  }
+
+  [[nodiscard]] uint32_t gfx115_wmma_source_base(const Operand &op, uint32_t fallback) const {
+    auto reg = gfx115_wmma_register(op, false);
+    return reg ? wavefront().vgpr_alloc().base + reg->index : fallback;
+  }
+
+  /// Whether all decoded VGPR result tuples fit the wave's logical allocation.
+  [[nodiscard]] bool vgpr_results_fit_allocation(const Instruction &inst) const {
+    const auto &allocation = wavefront().vgpr_alloc();
+    for (int i = 0; i < inst.num_dst_operands(); ++i) {
+      const auto &operand = *inst.dst_operand(i);
+      const auto reg =
+          cu_->arch() == ROCJITSU_CODE_ARCH_RDNA3_5 && (inst.flags() & MATRIX_REGISTER_ACCESSES)
+              ? gfx115_wmma_register(operand, true)
+              : operand.decoded_vgpr();
+      if (reg && operand.size_bits() &&
+          !allocation.contains(allocation.base + reg->index, reg->width))
+        return false;
+    }
+    return true;
+  }
+
   /// @brief Resolve a destination without reading its value or notifying observers.
-  /// @details Use the execution resolver for dynamic VGPR indexing.
-  [[nodiscard]] std::optional<RegisterRef> destination_register(const Operand &op) const {
+  /// @details Use the execution resolver for dynamic VGPR indexing. Extra allocation
+  /// words participate in a memory transaction's bounds check without becoming writes.
+  [[nodiscard]] std::optional<RegisterRef> destination_register(const Operand &op,
+                                                                bool memory_result = false,
+                                                                unsigned extra_words = 0) const {
     auto reg = op.to_register_ref();
     if (!reg) {
       if (auto special = op.to_special_reg_class())
@@ -1083,7 +1125,9 @@ public:
     if (reg->cls == RegClass::VGPR || reg->cls == RegClass::ACC_VGPR) {
       auto &wf = mutable_wavefront();
       auto base = op.simd_vgpr_base_mut(wf);
-      if (!base || !cu_->owns_vgpr_range(wf, *base, reg->width))
+      if (!base ||
+          !(memory_result ? cu_->owns_memory_result_range(wf, *base, reg->width + extra_words)
+                          : cu_->valid_operand_vgpr_range(wf, *base, reg->width)))
         return std::nullopt;
       reg->cls = RegClass::VGPR;
       reg->index = static_cast<uint16_t>(*base - wf.vgpr_alloc().base);
@@ -1095,6 +1139,11 @@ public:
   /// @param wordwise Preserve the backed prefix for emitters that validate each dword.
   [[nodiscard]] std::optional<RegisterRef> source_register(const Operand &op,
                                                            bool wordwise = false) const;
+
+  /// Resolve the contiguous part of a GFX10 VALU VGPR input. A wholly missing
+  /// input reads V0. If a tuple straddles the allocation, its remaining words
+  /// also read V0 and must be checked with the same lane and byte masks.
+  [[nodiscard]] std::optional<RegisterRef> gfx10_valu_source_vgpr(const Operand &op) const;
 
   /// Resolve one block data word: unowned destinations are ignored, while
   /// unowned sources use this wave's VGPR0, independently of the other words.
@@ -1119,8 +1168,12 @@ public:
   // ISA-specific resolver/backend.
   [[nodiscard]] uint32_t read_scalar(const Operand &op) const {
     const Wavefront &wf = wavefront();
-    if (auto base = op.simd_vgpr_base(wf); base && !cu_->owns_vgpr_range(wf, *base, 1))
-      return 0;
+    if (auto base = op.simd_vgpr_base(wf)) {
+      if (auto mapped = remapped_valu_source(op, *base, 1))
+        return read_vgpr(mapped->lo, 0);
+      if (!cu_->valid_operand_vgpr_range(wf, *base, 1))
+        return read_unowned_word(*base, 0);
+    }
     return op.read_scalar(wf);
   }
 
@@ -1133,21 +1186,33 @@ public:
     // Generated scalar-only operand types cannot reference VGPR storage. A
     // delegate may still do so, and must retain the normal ownership check.
     if (op.is_vgpr() || op.delegate()) {
-      if (auto base = op.simd_vgpr_base(wf); base && !cu_->owns_vgpr_range(wf, *base, 1))
-        return 0;
+      if (auto base = op.simd_vgpr_base(wf)) {
+        if (auto mapped = remapped_valu_source(op, *base, 1))
+          return read_vgpr(mapped->lo, 0);
+        if (!cu_->valid_operand_vgpr_range(wf, *base, 1))
+          return read_unowned_word(*base, 0);
+      }
     }
     return op.read_scalar(wf);
   }
   [[nodiscard]] uint64_t read_scalar64(const Operand &op) const {
     const Wavefront &wf = wavefront();
-    if (auto base = op.simd_vgpr_base(wf); base && !cu_->owns_vgpr_range(wf, *base, 2))
-      return 0;
+    if (auto base = op.simd_vgpr_base(wf)) {
+      if (auto mapped = remapped_valu_source(op, *base, 2))
+        return uint64_t{read_vgpr(mapped->lo, 0)} | (uint64_t{read_vgpr(mapped->hi, 0)} << 32);
+      if (!cu_->valid_operand_vgpr_range(wf, *base, 2))
+        return read_unowned_pair(*base, 0);
+    }
     return op.read_scalar64(wf);
   }
   [[nodiscard]] uint32_t read_lane(const Operand &op, uint32_t lane) const {
     const Wavefront &wf = wavefront();
-    if (auto base = op.simd_vgpr_base(wf); base && !cu_->owns_vgpr_range(wf, *base, 1))
-      return 0;
+    if (auto base = op.simd_vgpr_base(wf)) {
+      if (auto mapped = remapped_valu_source(op, *base, 1))
+        return read_remapped_valu_word(op, mapped->lo, lane);
+      if (!cu_->valid_operand_vgpr_range(wf, *base, 1))
+        return read_unowned_word(*base, lane);
+    }
     return op.read_lane(wf, lane);
   }
   /// Optimization: fast path for generated operands opted in via kStaticRegisterAccess.
@@ -1155,28 +1220,41 @@ public:
     requires OperandT::kStaticRegisterAccess
   [[nodiscard]] uint32_t read_lane(const OperandT &op, uint32_t lane) const {
     const Wavefront &wf = wavefront();
-    if (auto base = op.simd_vgpr_base(wf); base && !cu_->owns_vgpr_range(wf, *base, 1))
-      return 0;
+    if (auto base = op.simd_vgpr_base(wf)) {
+      if (auto mapped = remapped_valu_source(op, *base, 1))
+        return read_remapped_valu_word(op, mapped->lo, lane);
+      if (!cu_->valid_operand_vgpr_range(wf, *base, 1))
+        return read_unowned_word(*base, lane);
+    }
     return op.read_lane(wf, lane);
   }
 
   /// @brief Read the lane selected by a scalar-lane instruction.
-  /// @pre The decoded source is a VGPR (validated by the ISA decoder).
+  /// @pre The decoder validated a VGPR or a target-supported direct LDS source.
   [[nodiscard]] uint32_t read_scalar_selected_lane(const Operand &op, uint32_t lane) const {
     const Wavefront &wf = wavefront();
     assert((wf.wf_size() == 32 || wf.wf_size() == 64) &&
            "scalar lane selection requires Wave32 or Wave64");
     lane &= wf.wf_size() - 1;
     auto physical_reg = op.simd_vgpr_base(wf);
-    assert(physical_reg && "scalar lane read requires a VGPR source");
-    if (!cu_->owns_vgpr_range(wf, *physical_reg, 1))
-      return 0;
+    // A direct LDS source has no physical VGPR and is uniform across the wave.
+    if (!physical_reg)
+      return read_lane(op, lane);
+    if (auto mapped = remapped_valu_source(op, *physical_reg, 1))
+      return read_remapped_valu_word(op, mapped->lo, lane);
+    if (!cu_->valid_operand_vgpr_range(wf, *physical_reg, 1))
+      return read_unowned_word(*physical_reg, lane);
     return read_vgpr(*physical_reg, lane);
   }
   [[nodiscard]] uint64_t read_lane64(const Operand &op, uint32_t lane) const {
     const Wavefront &wf = wavefront();
-    if (auto base = op.simd_vgpr_base(wf); base && !cu_->owns_vgpr_range(wf, *base, 2))
-      return 0;
+    if (auto base = op.simd_vgpr_base(wf)) {
+      if (auto mapped = remapped_valu_source(op, *base, 2))
+        return uint64_t{read_vgpr(mapped->lo, lane)} |
+               (uint64_t{read_vgpr(mapped->hi, lane)} << 32);
+      if (!cu_->valid_operand_vgpr_range(wf, *base, 2))
+        return read_unowned_pair(*base, lane);
+    }
     return op.read_lane64(wf, lane);
   }
 
@@ -1206,16 +1284,17 @@ public:
         (op.simd_vgpr_base(wf).has_value() || (scalar_mode == ScalarPairMode::Preserve &&
                                                is_src_scalar_register_pair(op.encoding_value())));
     if (is_register_pair) {
-      const uint64_t pair = op.read_lane64(wf, lane);
+      const uint64_t pair = read_lane64(op, lane);
       return {static_cast<uint32_t>(pair), static_cast<uint32_t>(pair >> 32)};
     }
 
-    const uint32_t value = op.read_lane(wf, lane);
+    const uint32_t value = read_lane(op, lane);
     return {value, value};
   }
   void write_scalar(const Operand &op, uint32_t value) const {
     Wavefront &wf = mutable_wavefront();
-    if (auto base = op.simd_vgpr_base_mut(wf); base && !mutable_cu().owns_vgpr_range(wf, *base, 1))
+    if (auto base = op.simd_vgpr_base_mut(wf);
+        base && !mutable_cu().valid_operand_vgpr_range(wf, *base, 1))
       return;
     op.write_scalar(wf, value);
   }
@@ -1228,14 +1307,15 @@ public:
     // need the backing-storage check; the normal write still notifies observers.
     if (op.is_vgpr()) {
       if (auto base = op.simd_vgpr_base_mut(wf);
-          base && !mutable_cu().owns_vgpr_range(wf, *base, 1))
+          base && !mutable_cu().valid_operand_vgpr_range(wf, *base, 1))
         return;
     }
     op.write_scalar(wf, value);
   }
   void write_scalar64(const Operand &op, uint64_t value) const {
     Wavefront &wf = mutable_wavefront();
-    if (auto base = op.simd_vgpr_base_mut(wf); base && !mutable_cu().owns_vgpr_range(wf, *base, 2))
+    if (auto base = op.simd_vgpr_base_mut(wf);
+        base && !mutable_cu().valid_operand_vgpr_range(wf, *base, 2))
       return;
     op.write_scalar64(wf, value);
   }
@@ -1246,7 +1326,8 @@ public:
       write_lane_masked(op, lane, value, mask);
       return;
     }
-    if (auto base = op.simd_vgpr_base_mut(wf); base && !mutable_cu().owns_vgpr_range(wf, *base, 1))
+    if (auto base = op.simd_vgpr_base_mut(wf);
+        base && !mutable_cu().valid_operand_vgpr_range(wf, *base, 1))
       return;
     if (op.simd_vgpr_storage_mut(wf) && !(wf.vgpr_write_mask() & (uint64_t{1} << lane)))
       return;
@@ -1262,7 +1343,8 @@ public:
       write_lane_masked(op, lane, value, mask);
       return;
     }
-    if (auto base = op.simd_vgpr_base_mut(wf); base && !mutable_cu().owns_vgpr_range(wf, *base, 1))
+    if (auto base = op.simd_vgpr_base_mut(wf);
+        base && !mutable_cu().valid_operand_vgpr_range(wf, *base, 1))
       return;
     if (op.simd_vgpr_storage_mut(wf) && !(wf.vgpr_write_mask() & (uint64_t{1} << lane)))
       return;
@@ -1281,7 +1363,7 @@ public:
     lane &= wf.wf_size() - 1;
     auto physical_reg = op.simd_vgpr_base_mut(wf);
     assert(physical_reg && "scalar lane write requires a VGPR destination");
-    if (!mutable_cu().owns_vgpr_range(wf, *physical_reg, 1))
+    if (!mutable_cu().valid_operand_vgpr_range(wf, *physical_reg, 1))
       return;
     VgprStorage storage = op.simd_vgpr_storage_mut(wf);
     assert(storage && "scalar lane write requires VGPR storage");
@@ -1298,7 +1380,7 @@ public:
     Wavefront &wf = mutable_wavefront();
     auto physical_reg = op.simd_vgpr_base_mut(wf);
     assert(physical_reg && "partial-byte operand write requires a VGPR destination");
-    if (!mutable_cu().owns_vgpr_range(wf, *physical_reg, 1))
+    if (!mutable_cu().valid_operand_vgpr_range(wf, *physical_reg, 1))
       return;
     VgprStorage storage = op.simd_vgpr_storage_mut(wf);
     assert(storage && "partial-byte operand write requires VGPR storage");
@@ -1311,7 +1393,8 @@ public:
 
   void write_lane64(const Operand &op, uint32_t lane, uint64_t value) const {
     Wavefront &wf = mutable_wavefront();
-    if (auto base = op.simd_vgpr_base_mut(wf); base && !mutable_cu().owns_vgpr_range(wf, *base, 2))
+    if (auto base = op.simd_vgpr_base_mut(wf);
+        base && !mutable_cu().valid_operand_vgpr_range(wf, *base, 2))
       return;
     if (op.simd_vgpr_storage64_mut(wf).lo && !(wf.vgpr_write_mask() & (uint64_t{1} << lane)))
       return;
@@ -1320,8 +1403,18 @@ public:
 
   void read_chunk(const Operand &op, uint32_t lane_base, uint32_t count, uint32_t *out) const {
     const Wavefront &wf = wavefront();
-    if (auto base = op.simd_vgpr_base(wf); base && !cu_->owns_vgpr_range(wf, *base, 1)) {
-      std::ranges::fill_n(out, count, 0u);
+    if (auto base = op.simd_vgpr_base(wf)) {
+      if (auto mapped = remapped_valu_source(op, *base, 1)) {
+        const uint64_t lanes = util::mask<uint64_t>(static_cast<int>(count)) << lane_base;
+        auto view = read_vgpr_region(mapped->lo, 1, lanes);
+        for (unsigned i = 0; i < count; ++i)
+          out[i] = view.lane(0, lane_base + i);
+        return;
+      }
+    }
+    if (auto base = op.simd_vgpr_base(wf); base && !cu_->valid_operand_vgpr_range(wf, *base, 1)) {
+      for (uint32_t i = 0; i < count; ++i)
+        out[i] = read_unowned_word(*base, lane_base + i);
       return;
     }
     op.read_lane_chunk(wf, lane_base, count, out);
@@ -1340,7 +1433,7 @@ public:
     uint64_t full_mask = util::mask<uint64_t>(static_cast<int>(count));
     if (op.simd_capable()) {
       auto base = op.simd_vgpr_base_mut(wf);
-      if (base && !mutable_cu().owns_vgpr_range(wf, *base, 1))
+      if (base && !mutable_cu().valid_operand_vgpr_range(wf, *base, 1))
         return;
       if (op.simd_vgpr_storage_mut(wf))
         lane_mask &= wf.vgpr_write_mask() >> lane_base;
@@ -1360,7 +1453,14 @@ public:
                                              uint8_t byte_mask = 0xF) const {
     const Wavefront &wf = wavefront();
     auto base = op.simd_vgpr_base(wf);
-    const bool valid = !base || cu_->owns_vgpr_range(wf, *base, 1);
+    if (base)
+      if (auto mapped = remapped_valu_source(op, *base, 1))
+        return OperandReadView(op, wf, fallback_storage(mapped->lo, lane_mask, byte_mask),
+                               byte_mask, false);
+    const bool valid = !base || cu_->valid_operand_vgpr_range(wf, *base, 1);
+    if (!valid && uses_vgpr0_fallback())
+      return OperandReadView(op, wf, fallback_storage(*base, lane_mask, byte_mask), byte_mask,
+                             false);
     ConstVgprStorage storage = valid ? op.simd_vgpr_storage(wf) : ConstVgprStorage{};
     if (storage)
       op.simd_notify_read(wf, lane_mask, byte_mask);
@@ -1371,7 +1471,18 @@ public:
                                                  uint8_t byte_mask = 0xF) const {
     const Wavefront &wf = wavefront();
     auto base = op.simd_vgpr_base(wf);
-    const bool valid = !base || cu_->owns_vgpr_range(wf, *base, 2);
+    if (base)
+      if (auto mapped = remapped_valu_source(op, *base, 2))
+        return OperandRead64View(op, wf,
+                                 {fallback_storage(mapped->lo, lane_mask, byte_mask),
+                                  fallback_storage(mapped->hi, lane_mask, byte_mask)},
+                                 byte_mask, false);
+    const bool valid = !base || cu_->valid_operand_vgpr_range(wf, *base, 2);
+    if (!valid && uses_vgpr0_fallback())
+      return OperandRead64View(op, wf,
+                               {fallback_storage(*base, lane_mask, byte_mask),
+                                fallback_storage(*base + 1, lane_mask, byte_mask)},
+                               byte_mask, false);
     ConstVgprStoragePair64 storage = valid ? op.simd_vgpr_storage64(wf) : ConstVgprStoragePair64{};
     if (storage.lo)
       op.simd_notify_read64(wf, lane_mask, byte_mask);
@@ -1388,7 +1499,18 @@ public:
                                                           uint8_t byte_mask = 0xF) const {
     const Wavefront &wf = wavefront();
     auto base = op.simd_vgpr_base(wf);
-    const bool valid = !base || cu_->owns_vgpr_range(wf, *base, 2);
+    if (base)
+      if (auto mapped = remapped_valu_source(op, *base, 2))
+        return OperandReadPair32View(op, wf,
+                                     {fallback_storage(mapped->lo, lane_mask, byte_mask),
+                                      fallback_storage(mapped->hi, lane_mask, byte_mask)},
+                                     byte_mask, false, scalar_mode);
+    const bool valid = !base || cu_->valid_operand_vgpr_range(wf, *base, 2);
+    if (!valid && uses_vgpr0_fallback())
+      return OperandReadPair32View(op, wf,
+                                   {fallback_storage(*base, lane_mask, byte_mask),
+                                    fallback_storage(*base + 1, lane_mask, byte_mask)},
+                                   byte_mask, false, scalar_mode);
     ConstVgprStoragePair64 storage = valid ? op.simd_vgpr_storage64(wf) : ConstVgprStoragePair64{};
     if (storage.lo)
       op.simd_notify_read64(wf, lane_mask, byte_mask);
@@ -1401,7 +1523,7 @@ public:
     Wavefront &wf = mutable_wavefront();
     byte_mask &= operand_write_byte_mask(op);
     auto base = op.simd_vgpr_base_mut(wf);
-    const bool valid = !base || mutable_cu().owns_vgpr_range(wf, *base, 1);
+    const bool valid = !base || mutable_cu().valid_operand_vgpr_range(wf, *base, 1);
     VgprStorage storage = valid ? op.simd_vgpr_storage_mut(wf) : VgprStorage{};
     const uint64_t permitted_write_lane_mask =
         storage ? lane_mask & wf.vgpr_write_mask() : lane_mask;
@@ -1413,7 +1535,7 @@ public:
   [[nodiscard]] OperandWrite64View write_operand64(const Operand &op, uint64_t lane_mask) const {
     Wavefront &wf = mutable_wavefront();
     auto base = op.simd_vgpr_base_mut(wf);
-    const bool valid = !base || mutable_cu().owns_vgpr_range(wf, *base, 2);
+    const bool valid = !base || mutable_cu().valid_operand_vgpr_range(wf, *base, 2);
     VgprStoragePair64 storage = valid ? op.simd_vgpr_storage64_mut(wf) : VgprStoragePair64{};
     const uint64_t permitted_write_lane_mask =
         storage.lo ? lane_mask & wf.vgpr_write_mask() : lane_mask;
@@ -1427,7 +1549,7 @@ public:
                                                             uint64_t lane_mask) const {
     Wavefront &wf = mutable_wavefront();
     auto base = op.simd_vgpr_base_mut(wf);
-    const bool valid = !base || mutable_cu().owns_vgpr_range(wf, *base, 2);
+    const bool valid = !base || mutable_cu().valid_operand_vgpr_range(wf, *base, 2);
     VgprStoragePair64 storage = valid ? op.simd_vgpr_storage64_mut(wf) : VgprStoragePair64{};
     const uint64_t permitted_write_lane_mask =
         storage.lo ? lane_mask & wf.vgpr_write_mask() : lane_mask;
@@ -1443,7 +1565,7 @@ public:
     Wavefront &wf = mutable_wavefront();
     write_byte_mask &= operand_write_byte_mask(op);
     auto base = op.simd_vgpr_base_mut(wf);
-    const bool valid = !base || mutable_cu().owns_vgpr_range(wf, *base, 1);
+    const bool valid = !base || mutable_cu().valid_operand_vgpr_range(wf, *base, 1);
     VgprStorage storage = valid ? op.simd_vgpr_storage_mut(wf) : VgprStorage{};
     if (!storage && valid && write_byte_mask != rocjitsu::ExecutionPlugin::kFullByteMask) {
       (void)reject(wf, "partial-byte OperandReadWriteView requires VGPR storage");
@@ -1463,7 +1585,7 @@ public:
                                                            uint8_t byte_mask = 0xF) const {
     Wavefront &wf = mutable_wavefront();
     auto base = op.simd_vgpr_base_mut(wf);
-    const bool valid = !base || mutable_cu().owns_vgpr_range(wf, *base, 2);
+    const bool valid = !base || mutable_cu().valid_operand_vgpr_range(wf, *base, 2);
     VgprStoragePair64 storage = valid ? op.simd_vgpr_storage64_mut(wf) : VgprStoragePair64{};
     const uint64_t permitted_write_lane_mask =
         storage.lo ? lane_mask & wf.vgpr_write_mask() : lane_mask;
@@ -1476,11 +1598,24 @@ public:
                                   base && !valid);
   }
 
+  /// Report the architectural spelling of a gfx942 scalar alias. The race
+  /// detector converts it to physical storage; other observers see the name.
+  void observe_scalar_alias(RegisterRef reg, bool write) const {
+    if (!cu_->observes_register_access() || cu_->arch() != ROCJITSU_CODE_ARCH_CDNA3)
+      return;
+    if (write)
+      cu_->notify_scalar_register_write(wavefront(), reg);
+    else
+      cu_->notify_scalar_register_read(wavefront(), reg);
+  }
+
   // Logical TTMP access. TTMPs are wave-private scalar registers and do not
   // occupy slots in the CU's physical SGPR file.
+  static bool shader_can_access_ttmp(const Wavefront &wf) { return wf.shader_can_access_ttmp(); }
+
   [[nodiscard]] uint32_t read_ttmp(uint32_t index) const {
     const Wavefront &wf = wavefront();
-    if (index >= kTtmpRegisterCount)
+    if (!wf.shader_can_access_ttmp() || index >= kTtmpRegisterCount)
       return 0;
     cu_->notify_scalar_register_read(wf,
                                      RegisterRef{RegClass::TTMP, static_cast<uint16_t>(index), 1});
@@ -1489,7 +1624,8 @@ public:
 
   [[nodiscard]] uint64_t read_ttmp64(uint32_t index) const {
     const Wavefront &wf = wavefront();
-    if (index >= kTtmpRegisterCount || kTtmpRegisterCount - index < 2)
+    if (!wf.shader_can_access_ttmp() || index >= kTtmpRegisterCount ||
+        kTtmpRegisterCount - index < 2)
       return 0;
     cu_->notify_scalar_register_read(wf,
                                      RegisterRef{RegClass::TTMP, static_cast<uint16_t>(index), 2});
@@ -1499,7 +1635,7 @@ public:
 
   void write_ttmp(uint32_t index, uint32_t value) const {
     Wavefront &wf = mutable_wavefront();
-    if (index >= kTtmpRegisterCount)
+    if (!wf.shader_can_write_ttmp() || index >= kTtmpRegisterCount)
       return;
     mutable_cu().notify_scalar_register_write(
         wf, RegisterRef{RegClass::TTMP, static_cast<uint16_t>(index), 1});
@@ -1508,7 +1644,8 @@ public:
 
   void write_ttmp64(uint32_t index, uint64_t value) const {
     Wavefront &wf = mutable_wavefront();
-    if (index >= kTtmpRegisterCount || kTtmpRegisterCount - index < 2)
+    if (!wf.shader_can_write_ttmp() || index >= kTtmpRegisterCount ||
+        kTtmpRegisterCount - index < 2)
       return;
     mutable_cu().notify_scalar_register_write(
         wf, RegisterRef{RegClass::TTMP, static_cast<uint16_t>(index), 2});
@@ -1650,6 +1787,13 @@ public:
     auto base = op.simd_vgpr_base(wavefront());
     if (!base)
       return std::nullopt;
+    if (!cu_->valid_operand_vgpr_range(wavefront(), *base, reg_count) && uses_vgpr0_fallback())
+      return std::nullopt; // A partial tuple can require noncontiguous source registers.
+    if (auto mapped = remapped_valu_source(op, *base, reg_count)) {
+      if (reg_count != 1 && cu_->arch() != ROCJITSU_CODE_ARCH_RDNA3_5)
+        return std::nullopt; // CDNA1 can substitute nonconsecutive source words.
+      return read_vgpr_region(mapped->lo, reg_count, lane_mask);
+    }
     return read_vgpr_region(*base, reg_count, lane_mask);
   }
 
@@ -1750,6 +1894,77 @@ public:
   }
 
 private:
+  bool uses_vgpr0_fallback() const {
+    return (cu_->arch() == ROCJITSU_CODE_ARCH_RDNA1 || cu_->arch() == ROCJITSU_CODE_ARCH_RDNA2) &&
+           wavefront().num_vgprs() != 0;
+  }
+
+  // An out-of-range source word uses VGPR0 of the issuing wave. Resolve tuple
+  // words independently so an in-range low word is preserved at the boundary.
+  uint32_t gfx10_source_word(uint32_t reg) const {
+    const auto &allocation = wavefront().vgpr_alloc();
+    return allocation.contains(reg) ? reg : allocation.base;
+  }
+
+  uint32_t read_unowned_word(uint32_t physical_reg, uint32_t lane) const {
+    return uses_vgpr0_fallback() ? read_vgpr(gfx10_source_word(physical_reg), lane) : 0;
+  }
+
+  uint64_t read_unowned_pair(uint32_t physical_reg, uint32_t lane) const {
+    return uint64_t{read_unowned_word(physical_reg, lane)} |
+           (uint64_t{read_unowned_word(physical_reg + 1, lane)} << 32);
+  }
+
+  ConstVgprStorage fallback_storage(uint32_t physical_reg, uint64_t lanes, uint8_t bytes) const {
+    const uint32_t source = gfx10_source_word(physical_reg);
+    observe_vgpr_region(wavefront(), source, 1, lanes, bytes);
+    return {reinterpret_cast<const uint32_t *>(cu_->raw_vgpr_data(source)),
+            cu_->vgpr_storage_lane_count()};
+  }
+
+  uint32_t read_remapped_valu_word(const Operand &op, uint32_t reg, uint32_t lane) const {
+    // Compact true16 VGPRs return their selected half normalized to bits 15:0.
+    if (cu_->arch() == ROCJITSU_CODE_ARCH_RDNA3_5 && op.size_bits() == 16 && !op.simd_capable()) {
+      const uint8_t bytes = op.register_byte_mask();
+      const uint32_t value = read_vgpr(reg, lane, bytes);
+      return (value >> (bytes == ExecutionPlugin::kHighHalfByteMask ? 16 : 0)) & 0xffffu;
+    }
+    return read_vgpr(reg, lane);
+  }
+
+  struct SourceWords {
+    uint32_t lo, hi;
+  };
+  // VALU register-role tags identify the operands whose allocation bounds select VGPR0.
+  [[nodiscard]] std::optional<SourceWords> remapped_valu_source(const Operand &op, uint32_t reg,
+                                                                uint32_t words) const {
+    const auto &wf = wavefront();
+    const auto arch = cu_->arch();
+    // CDNA2 resolves its unified VGPR/AccVGPR allocation in its operand backend.
+    if ((arch != ROCJITSU_CODE_ARCH_CDNA1 && arch != ROCJITSU_CODE_ARCH_CDNA3 &&
+         arch != ROCJITSU_CODE_ARCH_CDNA4 && arch != ROCJITSU_CODE_ARCH_RDNA3_5) ||
+        op.vgpr_msb_role() == VgprMsbRole::None || !wf.num_vgprs())
+      return std::nullopt;
+    const auto base = wf.vgpr_alloc().base;
+    if (wf.vgpr_bank(false).contains(reg - base, words))
+      return std::nullopt;
+    const auto ref = op.to_register_ref();
+    if (!ref || (ref->cls != RegClass::VGPR && ref->cls != RegClass::ACC_VGPR))
+      return std::nullopt;
+    auto bank = wf.vgpr_bank(ref->cls == RegClass::ACC_VGPR);
+    bank.base += base;
+    if (bank.contains(reg, words))
+      return std::nullopt;
+    // A GFX11.5 VALU operand outside the allocation selects VGPR0 as its tuple base.
+    if (cu_->arch() == ROCJITSU_CODE_ARCH_RDNA3_5) {
+      // VOPD preserves the low two register-index bits.
+      const auto first = bank.base + (op.is_vopd_source() ? (reg - bank.base) % 4 : 0);
+      return SourceWords{first, first + 1};
+    }
+    return SourceWords{bank.contains(reg) ? reg : bank.base,
+                       bank.contains(reg + 1) ? reg + 1 : bank.base};
+  }
+
   /// Acquire unobserved, wave-owned storage for the direct bulk-write APIs.
   template <size_t MaxRegisters>
   std::optional<std::array<uint32_t *, MaxRegisters>>

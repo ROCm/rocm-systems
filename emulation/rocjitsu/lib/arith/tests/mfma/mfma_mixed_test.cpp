@@ -168,4 +168,63 @@ TEST(MfmaMixed, ScaleF32_16x16x128) {
 TEST(MfmaMixed, ScaleF32_32x32x64) {
   arithmetic<32, 64, true>(rj_arith_v_mfma_scale_f32_32x32x64_f8f6f4_w64);
 }
+
+TEST(MfmaMixed, ScaleClampsFiniteOverflowAndPreservesNonfiniteInputs) {
+  struct Column {
+    uint8_t b, scale_b;
+    uint32_t c, normal, clamped;
+  };
+  constexpr uint32_t nan = 0x7fc00000;
+  constexpr Column columns[] = {
+      {0x3c, 127, 0, 0x7f800000, 0x7f7fffff}, // BF8 +1 times a large scale
+      {0xbc, 127, 0, 0xff800000, 0xff7fffff}, // BF8 -1 times a large scale
+      {0x7c, 127, 0, 0x7f800000, 0x7f800000}, // BF8 +infinity
+      {0xfc, 127, 0, 0xff800000, 0xff800000}, // BF8 -infinity
+      {0x7e, 127, 0, nan, nan},               // BF8 NaN
+      {0, 127, 0x7f800000, 0x7f800000, 0x7f800000},
+      {0, 127, nan, nan, nan},
+      {0x3c, 255, 0, nan, nan}, // E8M0 NaN scale
+  };
+  std::array<uint32_t, 64> ones, packed_b, initial, scale_a, scale_b;
+  ones.fill(0x3c3c3c3c);
+  scale_a.fill(254); // 2^127
+  for (size_t lane = 0; lane < ones.size(); ++lane) {
+    const auto &column = columns[lane % std::size(columns)];
+    packed_b[lane] = uint32_t{column.b} * 0x01010101u;
+    initial[lane] = column.c;
+    scale_b[lane] = column.scale_b;
+  }
+  std::array<const uint32_t *, 8> a, b;
+  std::array<const uint32_t *, 16> c;
+  std::array<std::array<uint32_t, 64>, 16> result;
+  std::array<uint32_t *, 16> d;
+  a.fill(ones.data());
+  b.fill(packed_b.data());
+  c.fill(initial.data());
+  for (size_t reg = 0; reg < d.size(); ++reg) {
+    d[reg] = result[reg].data();
+  }
+  for (auto entry : {rj_arith_v_mfma_scale_f32_16x16x128_f8f6f4_w64,
+                     rj_arith_v_mfma_scale_f32_32x32x64_f8f6f4_w64}) {
+    for (uint64_t cpu : supported_cpu_levels()) {
+      for (bool clamp : {false, true}) {
+        const auto flags = cpu | RJ_ARITH_SEMANTICS_LOOSE | (clamp ? RJ_ARITH_FP16_OVFL : 0);
+        constexpr uint64_t bf8_inputs = 1 | (1 << 3);
+        ASSERT_EQ(entry(flags, bf8_inputs, d.data(), a.data(), b.data(), c.data(), scale_a.data(),
+                        scale_b.data()),
+                  RJ_ARITH_SUCCESS);
+        for (size_t lane = 0; lane < std::size(columns); ++lane) {
+          const auto expected = clamp ? columns[lane].clamped : columns[lane].normal;
+          SCOPED_TRACE(::testing::Message()
+                       << "cpu=" << cpu << " clamp=" << clamp << " lane=" << lane);
+          if (expected == nan) {
+            EXPECT_TRUE(std::isnan(std::bit_cast<float>(result.front()[lane])));
+          } else {
+            EXPECT_EQ(result.front()[lane], expected);
+          }
+        }
+      }
+    }
+  }
+}
 } // namespace

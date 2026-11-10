@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna2/register_destinations.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna5/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
@@ -24,7 +25,7 @@ namespace rocjitsu::amdgpu {
 std::optional<uint32_t> RegisterAccess::scalar_control_value(uint32_t selector) const {
   const auto &wf = wavefront();
   const auto m0 = scalar_m0_selector(wf.cu().arch());
-  if (!can_resolve_src_scalar(selector, m0))
+  if (!can_resolve_src_scalar(selector, wf.cu().arch()))
     return std::nullopt;
   // Preserve invalid-backing rejection for address planning. Constants and
   // computed aliases have no storage range and use the shared value decoder.
@@ -34,7 +35,9 @@ std::optional<uint32_t> RegisterAccess::scalar_control_value(uint32_t selector) 
     return RegisterAccess(wave).cu_->read_sgpr_storage(wave.sgpr_alloc().base + reg);
   },
                                   [](const Wavefront &wave, uint32_t reg) {
-                                    return wave.ttmp(reg);
+                                    return RegisterAccess::shader_can_access_ttmp(wave)
+                                               ? wave.ttmp(reg)
+                                               : 0u;
                                   }>(wf, selector, m0);
 }
 
@@ -58,6 +61,16 @@ std::optional<RegisterRef> RegisterAccess::source_register(const Operand &op, bo
   auto width = static_cast<uint8_t>(std::max(1, op.size_bits() / 32));
   // Immediate encodings can overlap the numeric VGPR selector range.
   if (auto base = op.is_vgpr() ? op.simd_vgpr_base(wf) : std::nullopt) {
+    if (auto mapped = remapped_valu_source(op, *base, width)) {
+      // GFX11.5 selects the base of the whole operand. CDNA1 can substitute
+      // individual words of a pair, which the per-word scanner handles.
+      if (cu_->arch() == ROCJITSU_CODE_ARCH_RDNA3_5 || (width == 2 && mapped->hi == mapped->lo + 1))
+        return RegisterRef{RegClass::VGPR, static_cast<uint16_t>(mapped->lo - wf.vgpr_alloc().base),
+                           width};
+      if (width == 1 || mapped->lo == mapped->hi)
+        return RegisterRef{RegClass::VGPR, static_cast<uint16_t>(mapped->lo - wf.vgpr_alloc().base),
+                           1};
+    }
     // Qualified memory bodies acquire source dwords independently. Preserve a
     // backed prefix when a later word lies beyond this wave's ownership block.
     if (wordwise)
@@ -69,8 +82,11 @@ std::optional<RegisterRef> RegisterAccess::source_register(const Operand &op, bo
   }
   if (op.const_value())
     return std::nullopt;
-  if (auto reg = op.to_register_ref())
+  if (auto reg = op.to_register_ref()) {
+    if (reg->cls == RegClass::TTMP && !wf.shader_can_access_ttmp())
+      return std::nullopt;
     return reg;
+  }
   if (auto special = op.to_special_reg_class())
     return RegisterRef{*special, 0, width};
   if (op.has_register_selector()) {
@@ -84,6 +100,21 @@ std::optional<RegisterRef> RegisterAccess::source_register(const Operand &op, bo
       return RegisterRef{RegClass::SCC, 0, 1};
   }
   return std::nullopt;
+}
+
+std::optional<RegisterRef> RegisterAccess::gfx10_valu_source_vgpr(const Operand &op) const {
+  const auto &wf = wavefront();
+  const auto &allocation = wf.vgpr_alloc();
+  if (!op.reads_value() || !op.size_bits() || !allocation.count)
+    return std::nullopt;
+  const auto base = op.simd_vgpr_base(wf);
+  if (!base)
+    return std::nullopt;
+  const uint32_t first = gfx10_source_word(*base);
+  const uint32_t index = first - allocation.base;
+  const uint32_t width =
+      first == *base ? std::min<uint32_t>(op.vgpr_count(), allocation.count - index) : 1;
+  return RegisterRef{RegClass::VGPR, static_cast<uint16_t>(index), static_cast<uint8_t>(width)};
 }
 
 std::array<std::optional<RegisterRef>, 4>
@@ -131,6 +162,8 @@ bool MemoryWaitScoreboard::result_is_written(const Instruction &inst, Wavefront 
 }
 
 uint64_t MemoryWaitScoreboard::result_lanes(const Instruction &inst, Wavefront &wf) {
+  if (inst.is_memory_op() && wf.memory_destination_out_of_range(inst))
+    return 0;
   const auto *issue = inst.amdgpu_memory_issue_info();
   uint64_t lanes = issue && !issue->exec_masked
                        ? (wf.wf_size() == 64 ? ~uint64_t{0} : uint64_t{0xffffffff})
@@ -158,6 +191,8 @@ MemoryWaitScoreboard::FlatLanes MemoryWaitScoreboard::flat_lanes(const Instructi
                                                                  Wavefront &wf,
                                                                  uint64_t shared_base,
                                                                  uint64_t shared_limit) {
+  if (wf.memory_destination_out_of_range(inst))
+    return {};
   FlatLanes result{wf.exec(), 0};
   RegisterModifiers modifiers;
   inst.amdgpu_register_modifiers(modifiers);
@@ -201,6 +236,9 @@ MemoryWaitScoreboard::FlatLanes MemoryWaitScoreboard::flat_lanes(const Instructi
 void MemoryWaitScoreboard::check_instruction(const Instruction &inst, Wavefront &wf) {
   if (empty())
     return;
+  const bool cdna2_valu = wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA2 && (inst.flags() & VALU);
+  if (cdna2_valu && !cdna2::valu_destinations_in_range(inst, wf))
+    return;
   // A clear register byte proves independence for every lane and byte mask.
   // Only a possible overlap needs the precise instruction-specific footprints.
   if (!pending_scalar_ && (inst.flags() & DIRECT_REGISTER_ACCESSES) && !wf.gpr_idx_en()) {
@@ -208,9 +246,11 @@ void MemoryWaitScoreboard::check_instruction(const Instruction &inst, Wavefront 
       const auto reg = op.decoded_vgpr();
       if (!reg)
         return op.is_fieldless() && op.is_vgpr();
-      const unsigned index =
-          reg->index +
-          (reg->index < ACC_VGPR_OFFSET ? wf.vgpr_msb_for_role(op.vgpr_msb_role()) << 8 : 0);
+      unsigned index = reg->index;
+      if (cdna2_valu)
+        index = apply_gpr_idx(wf, index, op.vgpr_msb_role());
+      else if (index < ACC_VGPR_OFFSET)
+        index += wf.vgpr_msb_for_role(op.vgpr_msb_role()) << 8;
       if (index + reg->width > wf.vgpr_alloc().count || index + reg->width > REGISTER_SET_MAX_VGPRS)
         return true;
       return pending_.pending_vgpr(static_cast<uint16_t>(index), reg->width);
@@ -236,7 +276,15 @@ void MemoryWaitScoreboard::check_instruction(const Instruction &inst, Wavefront 
 }
 
 void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wavefront &wf) {
+  if (wf.discards_valu_result(inst) ||
+      (inst.is_memory_op() && wf.memory_destination_out_of_range(inst)))
+    return;
   const auto name = inst.mnemonic();
+  // VOPD only executes its two operations in a wave32.
+  if (wf.wf_size() != 32 && name.starts_with("v_dual_"))
+    return;
+  const bool gfx10_valu = (inst.flags() & VALU) && (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA1 ||
+                                                    wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2);
   const bool vector = name.starts_with("v_") || name.starts_with("ds_") ||
                       name.starts_with("lds_") || (inst.is_memory_op() && !name.starts_with("s_"));
   const bool scalar_lane_read = name.starts_with("v_readlane_b32");
@@ -376,9 +424,27 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     access({RegClass::SCC, 0, 1}, ~uint64_t{0}, 0xf, hwreg_write);
   if (name.starts_with("v_dual_") && name.find("cndmask") != std::string_view::npos && lanes)
     access({RegClass::VCC, 0, 1}, ~uint64_t{0}, 0xf, false);
+  auto scalar_register = [&](uint32_t selector, uint8_t width,
+                             bool write) -> std::optional<RegisterRef> {
+    if (width == 2 && scalar_pair_crosses_register_region(wf, selector))
+      return std::nullopt;
+    const auto base = scalar_register_for_selector(wf, selector);
+    if (base && base->storage == ScalarRegisterStorage::SGPR &&
+        scalar_gpr_out_of_range(wf, selector, width)) {
+      if (write)
+        return std::nullopt;
+      selector = 0;
+    }
+    const auto range = write ? resolve_scalar_destination_range(wf, selector, width)
+                             : resolve_scalar_register_range(wf, selector, width);
+    return range ? range->register_ref() : std::nullopt;
+  };
   auto resolve = [&](const Operand &op, bool write) -> std::optional<RegisterRef> {
     // MMA execution applies GPR_IDX only to ordinary VGPRs, never its
     // separate accumulator bank. Keep that bank's decoded identity intact.
+    if (matrix && wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5)
+      if (auto reg = registers.gfx115_wmma_register(op, write))
+        return reg;
     if (matrix)
       if (auto reg = op.to_register_ref(); reg && reg->cls == RegClass::ACC_VGPR) {
         reg->cls = RegClass::VGPR;
@@ -389,10 +455,10 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     // a wave32 mask may occupy VCC_HI without also accessing the next selector.
     const bool wave_mask = vector && !op.is_vgpr() && op.size_bits() == 64 &&
                            (write || (modifiers.src2_is_wave_mask && &op == inst.src_operand(2)));
-    if (wave_mask && op.has_register_selector() && !op.const_value()) {
-      const auto range = resolve_scalar_register_range(wf, op.encoding_value(), wf.wf_size() / 32);
-      return range ? std::optional(range->register_ref()) : std::nullopt;
-    }
+    if (wave_mask && op.has_register_selector() && !op.const_value())
+      return scalar_register(op.encoding_value(), wf.wf_size() / 32, write);
+    if (gfx10_valu && !write && op.is_vgpr())
+      return registers.gfx10_valu_source_vgpr(op);
     auto reg = write ? registers.destination_register(op)
                      : registers.source_register(op, &op == modifiers.wordwise_source0 ||
                                                          &op == modifiers.wordwise_source1);
@@ -410,6 +476,10 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     }
     if (!reg)
       return std::nullopt;
+    if (reg->cls == RegClass::SGPR)
+      return scalar_register(reg->index, reg->width, write);
+    if (reg->cls == RegClass::TTMP)
+      return scalar_register(kTtmpSelectorFirst + reg->index, reg->width, write);
     if (wave_mask)
       reg->width = static_cast<uint8_t>(wf.wf_size() / 32);
     if (op.is_fieldless() && (vector || name.starts_with("s_cbranch")) &&
@@ -490,9 +560,8 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
       const auto selector =
           relative_scalar_selector(wf, operand.encoding_value(), wf.m0(), width, write, split)
               .value_or(0);
-      if (auto range = resolve_scalar_register_range(wf, selector, width))
-        if (auto reg = range->register_ref())
-          access(*reg, ~uint64_t{0}, 0xf, write);
+      if (const auto reg = scalar_register(selector, width, write))
+        access(*reg, ~uint64_t{0}, 0xf, write);
     };
     check_relative(*inst.src_operand(0), source_relative, false);
     check_relative(*inst.dst_operand(0), destination_relative, true);
@@ -637,6 +706,16 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
                               : write                    ? destination_lanes
                               : op == routed_source      ? src0_lanes
                                                          : source_lanes;
+    if (!write && !destination_lanes && modifiers.dpp && reg->cls != RegClass::VGPR &&
+        wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5 && name == "v_add_f32" &&
+        op == inst.src_operand(1))
+      return;
+    if (!write && op == modifiers.dpp_masked_compare_rhs) {
+      if (!destination_lanes)
+        return;
+      if (reg->cls == RegClass::VGPR)
+        accessed_lanes &= destination_lanes;
+    }
     // Interpolation coefficients are quad broadcasts, including inactive lanes.
     if (!write && reg->cls == RegClass::VGPR && name.starts_with("v_interp_") &&
         (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 ||
@@ -679,13 +758,27 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
       if (lanes >> 32)
         access({RegClass::VCC, 1, 1}, ~uint64_t{0}, bytes, false);
     } else {
+      if (!write && reg->cls == RegClass::VGPR && reg->width == 2) {
+        const auto base = wf.vgpr_alloc().base;
+        if (auto mapped = registers.remapped_valu_source(*op, base + reg->index, 2)) {
+          for (const auto source : {mapped->lo, mapped->hi})
+            access({RegClass::VGPR, static_cast<uint16_t>(source - base), 1}, accessed_lanes, bytes,
+                   false);
+          return;
+        }
+      }
       access(*reg, accessed_lanes, bytes, write);
+      if (gfx10_valu && !write && reg->cls == RegClass::VGPR && reg->index != 0 &&
+          reg->width < op->vgpr_count())
+        access({RegClass::VGPR, 0, 1}, accessed_lanes, bytes, false);
     }
   };
-  for (int i = 0; i < inst.num_src_operands(); ++i) {
-    if (!inst.tracks_explicit_source(i))
-      continue;
-    check_operand(inst.src_operand(i), false);
+  if (!modifiers.constant_float_compare || !wf.dx10_clamp()) {
+    for (int i = 0; i < inst.num_src_operands(); ++i) {
+      if (!inst.tracks_explicit_source(i))
+        continue;
+      check_operand(inst.src_operand(i), false);
+    }
   }
   const bool partial_destination =
       inst.dst_operand(0) && inst.dst_operand(0)->register_byte_mask() != 0xf;
@@ -836,6 +929,8 @@ void MemoryWaitScoreboard::check_memory_result(const Instruction &inst, Wavefron
     }
     // Completion validates every vector destination together, including the
     // independent pointer word returned by LDS stack operations.
+    if (reg && reg->cls == RegClass::TTMP && !wf.shader_can_write_ttmp())
+      continue;
     if (operand.decoded_vgpr() && !reg)
       return;
     if (reg) {
@@ -1100,6 +1195,7 @@ uint32_t MemoryWaitScoreboard::required_wait(const Event &event) const {
 void MemoryWaitScoreboard::add(Event event) {
   if (!event.lanes || !event.bytes || !event.reg.width)
     return;
+  event.reg = pending_.canonical(event.reg);
   stamp_order(event);
   // A newer result covering the entire old destination is the stronger
   // dependency within the same FIFO class. Discard the superseded record rather
@@ -1232,6 +1328,7 @@ uint64_t MemoryWaitScoreboard::issue_xcnt(std::optional<WaitCounterKind> complet
 void MemoryWaitScoreboard::xcnt_ordered_write(RegisterRef reg, uint64_t lanes, uint8_t bytes) {
   if (xcnt_scalar_ || !pending_.pending(reg, true))
     return;
+  reg = pending_.canonical(reg);
   uint64_t through = 0;
   for (const auto &event : events_)
     if (event.counter == WaitCounterKind::X && event.reg.cls == reg.cls && (event.lanes & lanes) &&

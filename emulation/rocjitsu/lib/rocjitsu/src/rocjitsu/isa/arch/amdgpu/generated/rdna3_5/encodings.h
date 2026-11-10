@@ -466,6 +466,17 @@ public:
       amdgpu::dpp::append_dpp8_disassembly(out, dpp8_lane_sel_, dpp_fi_);
   }
   void implicit_uses(RegisterSet &uses) const override;
+  void append_src_operand(std::string &out, uint8_t index) const override {
+    const bool dpp = has_encoded_dpp() && index < 2;
+    const bool absolute = dpp && ((dpp_modifiers_.absolute >> index) & 1);
+    if (dpp && ((dpp_modifiers_.negate >> index) & 1))
+      out += "-";
+    if (absolute)
+      out += "|";
+    Instruction::append_src_operand(out, index);
+    if (absolute)
+      out += "|";
+  }
   bool default_encoding();
   bool has_lit();
   bool has_dpp8();
@@ -528,6 +539,17 @@ public:
                                             amdgpu::dpp::DppCtrlDialect::Gfx10Plus);
     if (has_encoded_dpp8())
       amdgpu::dpp::append_dpp8_disassembly(out, dpp8_lane_sel_, dpp_fi_);
+  }
+  void append_src_operand(std::string &out, uint8_t index) const override {
+    const bool dpp = has_encoded_dpp() && index < 2;
+    const bool absolute = dpp && ((dpp_modifiers_.absolute >> index) & 1);
+    if (dpp && ((dpp_modifiers_.negate >> index) & 1))
+      out += "-";
+    if (absolute)
+      out += "|";
+    Instruction::append_src_operand(out, index);
+    if (absolute)
+      out += "|";
   }
   bool default_encoding();
   bool has_lit();
@@ -592,6 +614,17 @@ public:
       amdgpu::dpp::append_dpp8_disassembly(out, dpp8_lane_sel_, dpp_fi_);
   }
   void implicit_uses(RegisterSet &uses) const override;
+  void append_src_operand(std::string &out, uint8_t index) const override {
+    const bool dpp = has_encoded_dpp() && index < 2;
+    const bool absolute = dpp && ((dpp_modifiers_.absolute >> index) & 1);
+    if (dpp && ((dpp_modifiers_.negate >> index) & 1))
+      out += "-";
+    if (absolute)
+      out += "|";
+    Instruction::append_src_operand(out, index);
+    if (absolute)
+      out += "|";
+  }
   bool default_encoding();
   bool has_lit();
   bool has_dpp8();
@@ -998,6 +1031,20 @@ public:
 class Flat : public IsaInstruction<Isa> {
 public:
   Flat(std::string_view mnemonic, const FlatMachineInst *inst, ExecuteFn exec_fn);
+  static Result validate_encoding([[maybe_unused]] std::string_view mnemonic,
+                                  const FlatMachineInst *inst,
+                                  const util::DiagnosticEmitter &emit_error) {
+    const auto &inst_ = *inst;
+    static constexpr uint8_t segment_masks[128] = {
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+        7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 0, 0, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5,
+        5, 5, 5, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
+        0, 0, 5, 5, 5, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    if (!(segment_masks[inst_.op] & (1u << inst_.seg))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " has an invalid segment";
+    return Result::success();
+  }
   void build_modifiers(std::string &out) const override {
     auto *inst = &inst_;
     (void)inst;

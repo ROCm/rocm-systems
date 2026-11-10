@@ -1503,6 +1503,7 @@ TEST(WaveDebugTest, TrapRegistersRoundTripAndReset) {
 // -----------------------------------------------------------------------------
 
 struct ParsedWave {
+  uint64_t sgprs_addr = 0;
   uint64_t pc = 0, exec = 0, vcc = 0, wave_id = 0;
   uint32_t status = 0, trapsts = 0, mode = 0, m0 = 0, ttmp6 = 0, ttmp11 = 0;
   bool first = false, last = false;
@@ -1561,6 +1562,7 @@ std::vector<ParsedWave> parse_cwsr(const std::map<uint64_t, uint32_t> &mem, uint
     const uint64_t vgprs_addr = accv - static_cast<uint64_t>(vgpr_count) * 256;
 
     ParsedWave pw;
+    pw.sgprs_addr = sgprs_addr;
     pw.last = rl & (1u << 16);
     pw.first = rl & (1u << 17);
     pw.m0 = rd(hwregs + 0 * 4);
@@ -1945,6 +1947,42 @@ TEST(WaveDebugTest, CwsrSerializationRoundTripsThroughDbgapiLayout) {
 
 // rocm-dbgapi applies each COMPUTE_RELAUNCH state to following wave words.
 // A large LDS group must not make unrelated groups consume the same stride.
+TEST(WaveDebugTest, Cdna3CwsrUsesEachWavesPhysicalSgprAllocation) {
+  constexpr uint64_t base = 0x400000000ULL;
+  constexpr uint32_t bytes = 0x40000;
+  const std::array<uint32_t, 3> encoded{16, 24, 106}, physical{16, 32, 112}, vcc_slot{14, 30, 106};
+  std::vector<kmd::CwsrWaveState> waves;
+  for (uint32_t i = 0; i < encoded.size(); ++i) {
+    auto wave = make_wave(i + 1, 0x2000 + 4 * i);
+    wave.num_sgprs = encoded[i];
+    wave.sgprs.resize(encoded[i], 0x01020304);
+    wave.vcc = 0x123456789abcdef0ull + i;
+    wave.flat_scratch = 0x23456789abcdef00ull + i;
+    waves.push_back(wave);
+  }
+  std::map<uint64_t, uint32_t> image;
+  auto write32 = [&](uint64_t address, uint32_t value) { image[address] = value; };
+  auto read32 = [&](uint64_t address) { return image.at(address); };
+  auto layout = kmd::serialize_queue_cwsr(base, bytes, waves, write32, ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(layout.ok);
+  const auto parsed = parse_cwsr(image, base, 512);
+  ASSERT_EQ(parsed.size(), waves.size());
+  for (size_t i = 0; i < waves.size(); ++i) {
+    ASSERT_EQ(parsed[i].sgprs.size(), physical[i]);
+    EXPECT_EQ(parsed[i].vcc, waves[i].vcc);
+    const uint64_t vcc = parsed[i].sgprs_addr + vcc_slot[i] * 4;
+    const uint64_t flat = vcc - 4 * sizeof(uint32_t);
+    EXPECT_EQ(read32(flat), static_cast<uint32_t>(waves[i].flat_scratch));
+    EXPECT_EQ(read32(flat + 4), static_cast<uint32_t>(waves[i].flat_scratch >> 32));
+    write32(flat, 0x87654321u);
+    write32(vcc + 4, 0xfedcba98u);
+  }
+  ASSERT_TRUE(kmd::deserialize_queue_cwsr(base, bytes, waves, read32, ROCJITSU_CODE_ARCH_CDNA3));
+  for (uint32_t i = 0; i < waves.size(); ++i) {
+    EXPECT_EQ(waves[i].flat_scratch, 0x2345678987654321ull);
+    EXPECT_EQ(waves[i].vcc, 0xfedcba989abcdef0ull + i);
+  }
+}
 TEST(WaveDebugTest, CwsrUsesGroupLdsStateChanges) {
   constexpr uint64_t kCtxBase = 0x400000000ULL;
   constexpr uint32_t kAreaSize = 0x4000;

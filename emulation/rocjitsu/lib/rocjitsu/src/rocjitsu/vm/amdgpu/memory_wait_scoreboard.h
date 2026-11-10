@@ -5,6 +5,7 @@
 
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/code/analysis/waitcheck/target.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna3/sgpr_layout.h"
 #include "rocjitsu/isa/register_set.h"
 
 #include <array>
@@ -33,6 +34,20 @@ public:
   static constexpr size_t kSpecialBase = kTtmpBase + REGISTER_SET_MAX_TTMPS;
   static constexpr size_t kScalarShadowSlots = 256;
   static constexpr size_t kRegisters = REGISTER_SET_MAX_VGPRS + kScalarShadowSlots;
+  /// Map the named gfx942 special registers into the SGPR dependence space.
+  void set_sgpr_alias_end(uint16_t end) { sgpr_alias_end_ = end; }
+  RegisterRef canonical(RegisterRef reg) const {
+    if (sgpr_alias_end_) {
+      if (reg.cls == RegClass::VCC)
+        return {RegClass::SGPR, static_cast<uint16_t>(cdna3::vcc_base(sgpr_alias_end_) + reg.index),
+                reg.width};
+      if (reg.cls == RegClass::FLAT_SCRATCH)
+        return {RegClass::SGPR,
+                static_cast<uint16_t>(cdna3::flat_scratch_base(sgpr_alias_end_) + reg.index),
+                reg.width};
+    }
+    return reg;
+  }
   static size_t index(RegisterRef reg) {
     if (reg.cls == RegClass::VGPR && reg.index < REGISTER_SET_MAX_VGPRS)
       return reg.index;
@@ -60,6 +75,7 @@ public:
   }
 
   bool pending(RegisterRef reg, bool write = false) const {
+    reg = canonical(reg);
     for (unsigned r = 0; r < reg.width; ++r) {
       auto element = reg;
       element.index += r;
@@ -74,6 +90,7 @@ public:
   // Result ranges are normally contiguous physical VGPRs. Resolve their file
   // once and combine the overlap probe with marking the same shadow bytes.
   bool mark(RegisterRef reg, uint8_t bits) {
+    reg = canonical(reg);
     bool overlap = false;
     if (reg.cls == RegClass::VGPR && reg.index + reg.width <= REGISTER_SET_MAX_VGPRS) {
       for (unsigned r = 0; r < reg.width; ++r) {
@@ -94,6 +111,7 @@ public:
     return overlap;
   }
   void clear(RegisterRef reg) {
+    reg = canonical(reg);
     if (reg.cls == RegClass::VGPR && reg.index + reg.width <= REGISTER_SET_MAX_VGPRS) {
       for (unsigned r = 0; r < reg.width; ++r)
         bytes_[reg.index + r] = 0;
@@ -109,6 +127,7 @@ public:
   void reset() { bytes_.fill(0); }
 
 private:
+  uint16_t sgpr_alias_end_ = 0;
   std::array<uint8_t, kRegisters> bytes_{};
 };
 
@@ -198,7 +217,7 @@ public:
       return;
     if (!pending_.pending(reg, write))
       return;
-    access_pending(reg, lanes, bytes, write, ordered_write_order);
+    access_pending(pending_.canonical(reg), lanes, bytes, write, ordered_write_order);
   }
 
   void bind(uint64_t pc, void *context, Reporter reporter) {

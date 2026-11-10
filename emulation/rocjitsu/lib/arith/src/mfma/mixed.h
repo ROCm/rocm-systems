@@ -36,7 +36,8 @@ void mfma_decode_mixed(const uint32_t *const *input, int format, float output[M]
 template <int M, int K, bool Scaled = false>
 void mfma_mixed_kernel(uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
                        const uint32_t *const *b, const uint32_t *const *c,
-                       const uint32_t *scale_a = nullptr, const uint32_t *scale_b = nullptr) {
+                       const uint32_t *scale_a = nullptr, const uint32_t *scale_b = nullptr,
+                       bool clamp_overflow = false) {
   alignas(64) float left[M][K], right_rows[M][K], right[K][M], result[M][M];
   mfma_decode_mixed<M, K>(a, int(controls & 7), left);
   mfma_decode_mixed<M, K>(b, int(controls >> 3 & 7), right_rows);
@@ -46,6 +47,7 @@ void mfma_mixed_kernel(uint64_t controls, uint32_t *const *d, const uint32_t *co
     }
   }
   for (int row = 0; row < M; ++row) {
+    bool clamp[M];
     for (int col = 0; col < M; ++col) {
       auto out = mfma_output<M, 1>(row, col, 0);
       uint32_t initial = c[out.reg][out.lane];
@@ -56,6 +58,7 @@ void mfma_mixed_kernel(uint64_t controls, uint32_t *const *d, const uint32_t *co
         if (controls & RJ_ARITH_MFMA_SCALE_NEG_C) {
           initial ^= 0x80000000U;
         }
+        clamp[col] = clamp_overflow && __builtin_isfinite(as_float(initial));
       }
       result[row][col] = as_float(initial);
     }
@@ -84,7 +87,15 @@ void mfma_mixed_kernel(uint64_t controls, uint32_t *const *d, const uint32_t *co
           float scaled = a_exp == 255 || b_exp == 255
                              ? as_float(0x7fc00000U)
                              : __builtin_ldexpf(sums[col], a_exp + b_exp - 254);
+          // A finite low-precision dot fits in FP32 before scaling, so a
+          // nonfinite block identifies a nonfinite input to this output.
+          clamp[col] = clamp[col] && __builtin_isfinite(sums[col]);
           result[row][col] += scaled;
+        }
+      }
+      for (int col = 0; col < M; ++col) {
+        if (clamp[col] && __builtin_isinf(result[row][col])) {
+          result[row][col] = as_float(as_bits(result[row][col]) - 1u);
         }
       }
     } else {
