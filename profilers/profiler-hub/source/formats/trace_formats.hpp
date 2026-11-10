@@ -24,8 +24,9 @@ struct source_request_t;
  * An entry recognises its own files from their first bytes, probes them for
  * version and GUIDs, and says which versions this build reads. The probe walks
  * the entries in order and the first one that recognises a file wins. Once a
- * file is accepted, connections build their reader from its entry and the
- * trimmer takes its row filter from it. A new format adds an entry in
+ * file is accepted, its entry opens the file's source, the rocpd source's
+ * connections build their reader from the entry, and the trimmer takes its row
+ * filter from it. A new format adds an entry in
  * trace_formats.cpp, and a PROFILER_HUB_ENABLE_<FORMAT> CMake option when its
  * sources can be left out. The rocpd entry is always built: with both rocpd
  * version options off it supports no version, and the probe reports a rocpd

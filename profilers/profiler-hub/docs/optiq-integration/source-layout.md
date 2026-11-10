@@ -73,7 +73,7 @@ profiler-hub/
 | File | Role | Purpose |
 |---|---|---|
 | `profiler_hub_c_api.cpp` | Shared | Every C function. Checks arguments, runs work now or on a future, catches exceptions, and calls `ph_ctx`. |
-| `ph_ctx.hpp`, `ph_ctx.cpp` | Reader | The opaque context. Loads one or more traces, builds the published track list and global ids, owns caches and result buffers, and serves every query. |
+| `ph_ctx.hpp`, `ph_ctx.cpp` | Reader | The opaque context. Opens each trace file through its format's registry entry, loads one or more traces, builds the published track list and global ids, owns caches and result buffers, and serves every query by asking each file's source. |
 | `ph_future.hpp`, `ph_future.cpp` | Shared | The opaque `ph_future`: progress, cancel, and completion for one operation. |
 | `pending_futures.hpp`, `pending_futures.cpp` | Reader | Futures that were submitted but not finished. Cancels them when the context is destroyed. |
 
@@ -82,7 +82,8 @@ profiler-hub/
 | File | Role | Purpose |
 |---|---|---|
 | `reader.cpp` | Reader | `reader_t` methods. Forwards each query to the format-specific implementation. Holds the catalog getters and default empty results. |
-| `reader_impl.hpp` | Reader | `reader_t::impl`, the abstract per-format backend: catalog build, timeline, details, correlation, tables, summaries, and histograms. |
+| `format_source.hpp` | Reader | `format_source`, one open trace file as the context sees it: the catalog and its loading, track reads, which track an event is on, per-event reads, table queries, summaries, and the histogram. A registry entry opens one per file. A read a format declines is checked first and throws if called anyway. |
+| `reader_impl.hpp` | Reader | `reader_t::impl`, the abstract per-connection read backend of the rocpd formats: catalog build, timeline, details, correlation, tables, summaries, and histograms. |
 | `reader_catalog.hpp`, `reader_catalog.cpp` | Reader | The shared in-memory catalog of strings, info rows, tracks, and lookup maps, and its schema-3 builders. |
 | `populate_reader_catalog.hpp`, `populate_reader_catalog.cpp` | Reader | Fills one catalog in parallel across the pool's connections. |
 | `file_probe.cpp`, `file_probe_failure.hpp` | Reader | Checks that the file exists, is a regular file and is readable, then asks each format registry entry in order whether the file is its own and returns that entry's probe result, without loading the file. The exception carries a failed probe result. |
@@ -93,8 +94,8 @@ profiler-hub/
 | `track_window.hpp` | Reader | Turns a C time window into a reader filter. |
 | `track_read_options.hpp` | Reader | Event-count threshold and part count for parallel whole-track reads. |
 | `track_row_reader.hpp` | Reader | Track reads on one leased connection, returned on destruction. |
-| `connection_source.hpp` | Reader | Interface that leases a `track_row_reader` from a connection. |
-| `pooled_connection_source.hpp`, `pooled_connection_source.cpp` | Reader | `connection_source` that borrows readers from a `connection_pool`. |
+| `connection_source.hpp` | Reader | Interface a source hands to `cached_track_reader` for whole-track reads; it leases a `track_row_reader`. |
+| `pooled_connection_source.hpp`, `pooled_connection_source.cpp` | Reader | The rocpd source's `connection_source`: it borrows readers from a `connection_pool`. |
 
 ## source: caches
 
@@ -161,13 +162,14 @@ profiler-hub/
 
 | File | Role | Purpose |
 |---|---|---|
-| `trace_formats.hpp`, `trace_formats.cpp` | Shared | The format registry. One entry per format; an entry recognises its files, probes them, says which versions this build reads, and maps a version to a reader factory and a trim-rule factory. The rocpd entry is always built; the format switches remove a version's reader and trim sources. |
+| `trace_formats.hpp`, `trace_formats.cpp` | Shared | The format registry. One entry per format; an entry recognises its files, probes them, says which versions this build reads, and opens a source for a file, and maps a version to a reader factory and a trim-rule factory. The rocpd entry is always built; the format switches remove a version's reader and trim sources. |
 
 ### source/formats/rocpd
 
 | File | Role | Purpose |
 |---|---|---|
 | `rocpd_probe.hpp`, `rocpd_probe.cpp` | Reader | Recognises a rocpd file by the SQLite header and probes its metadata tables for the schema version and GUIDs. |
+| `rocpd_source.hpp`, `rocpd_source.cpp` | Reader | The rocpd source. Owns the catalog, the pool of eight connections and the pooled connection source. Loads the catalog (the parallel fill, then the v2 aggregates or v3 derived tracks when the cache missed) and answers each read through one leased connection. |
 
 ### source/formats/rocpd_v2 (legacy .rpd)
 
