@@ -2020,7 +2020,10 @@ TEST(RaceDetectorPluginTest, FlatInvalidSharedLanesKeepDependenciesWithoutLdsInt
       wait.updates.clear();
       wait.add(WaitCounterType::DSCNT, 0);
       race.dispatch(wait);
-      EXPECT_EQ(events.status(event), EventStatus::WAVE_COMPLETE);
+      // A single-wave workgroup retires a completed event with LDS bytes at once;
+      // one without LDS bytes stays wave-complete until the registry trims it.
+      EXPECT_EQ(events.status(event),
+                test.has_lds ? EventStatus::RETIRED : EventStatus::WAVE_COMPLETE);
     }
   }
 }

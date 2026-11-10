@@ -161,7 +161,10 @@ TEST(RaceDetector, MixedFlatKeepsOneCounterEntryAndAllRegisterLanes) {
     wait.add(amdgpu::WaitCounterType::LOADCNT, 1);
     wait.add(amdgpu::WaitCounterType::DSCNT, 1);
     wave.dispatch(wait);
-    EXPECT_EQ(events.status(EventId{0}), EventStatus::WAVE_COMPLETE);
+    // A single-wave workgroup retires a completed event with LDS bytes at once;
+    // one without LDS bytes stays wave-complete until the registry trims it.
+    EXPECT_EQ(events.status(EventId{0}),
+              lds_mask != 0 ? EventStatus::RETIRED : EventStatus::WAVE_COMPLETE);
     EXPECT_EQ(events.status(EventId{1}), EventStatus::ACTIVE);
     for (int lane : {0, 1}) {
       wave.checkVgprRead(1, lane, 0xf);
@@ -247,7 +250,8 @@ TEST(RaceDetector, InvalidLdsAddressesKeepRegisterAndCounterDependencies) {
     wait.updates.clear();
     wait.add(amdgpu::WaitCounterType::DSCNT, 0);
     wave.dispatch(wait);
-    EXPECT_EQ(events.status(event), EventStatus::WAVE_COMPLETE);
+    // The event has LDS bytes, so the single-wave workgroup retires it at once.
+    EXPECT_EQ(events.status(event), EventStatus::RETIRED);
     violations.clear();
     wave.checkVgprReadLanes(1, 0xf, 0xf);
     EXPECT_TRUE(violations.empty());
@@ -1355,11 +1359,12 @@ TEST(RaceDetector, TensorDma_PartialWaitsUseTheObligationClassNotTheEventOrder) 
     MemoryOrderClass eventOrder;
     EventStatus olderAfterWait;
   };
+  // A completed event has LDS bytes, so the single-wave workgroup retires it.
   for (const Case c :
-       {Case{MemoryOrderClass::TENSOR, MemoryOrderClass::UNORDERED, EventStatus::WAVE_COMPLETE},
+       {Case{MemoryOrderClass::TENSOR, MemoryOrderClass::UNORDERED, EventStatus::RETIRED},
         Case{MemoryOrderClass::UNORDERED, MemoryOrderClass::TENSOR, EventStatus::ACTIVE}}) {
-    SCOPED_TRACE(c.olderAfterWait == EventStatus::WAVE_COMPLETE ? "TENSOR obligation"
-                                                                : "UNORDERED obligation");
+    SCOPED_TRACE(c.olderAfterWait == EventStatus::RETIRED ? "TENSOR obligation"
+                                                          : "UNORDERED obligation");
     std::vector<RaceViolation> violations;
     RaceDetector detector(
         1, 4, 4, Dim3d(0), [&](RaceViolation v) { violations.push_back(v); },
