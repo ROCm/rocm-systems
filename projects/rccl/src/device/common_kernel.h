@@ -245,14 +245,13 @@ __device__ __forceinline__ void reduceAndStore(RedFn redFn, BytePack<BytePerPack
   for (int s = 0; s < MinSrcs; s++) {
 #pragma unroll Unroll
     for (int u = 0; u < Unroll; u++) {
-      if (s < PreOpSrcs) buff[s][u] = applyPreOp(redFn, buff[s][u]);
+      if (s == 0 && 0 < PreOpSrcs) buff[0][u] = applyPreOp(redFn, buff[0][u]);
       if (s > 0) buff[0][u] = applyReduce(redFn, buff[0][u], buff[s][u]);
     }
   }
   for (int s = MinSrcs; (MinSrcs < MaxSrcs) && (s < MaxSrcs) && (s < nSrcs); s++) {
 #pragma unroll Unroll
     for (int u = 0; u < Unroll; u++) {
-      if (s < PreOpSrcs) buff[s][u] = applyPreOp(redFn, buff[s][u]);
       buff[0][u] = applyReduce(redFn, buff[0][u], buff[s][u]);
     }
   }
@@ -498,7 +497,6 @@ __device__ __forceinline__ void reduceCopyPacksWithBias(int nThreads, int& threa
 #pragma unroll Unroll
       for (int u = 0; u < Unroll; u++) {
         // coverity[dead_error_line]
-        if (s < PreOpSrcs) tmp[u] = applyPreOp(redFn, tmp[u]);
         acc[u] = applyReduce(redFn, acc[u], tmp[u]);
       }
     }
@@ -516,7 +514,6 @@ __device__ __forceinline__ void reduceCopyPacksWithBias(int nThreads, int& threa
       for (int u = 0; u < Unroll; u++) {
         // Yes, for some template arguments this code will be unreachable.  That's fine.
         // coverity[dead_error_line]
-        if (s < PreOpSrcs) tmp[u] = applyPreOp(redFn, tmp[u]);
         acc[u] = applyReduce(redFn, acc[u], tmp[u]);
       }
     }

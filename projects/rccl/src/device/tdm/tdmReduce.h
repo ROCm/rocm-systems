@@ -42,9 +42,9 @@ __device__ __forceinline__ void tdmReduceWait() {
 }
 
 // acc = (First ? preOp(acc) : acc) op in over this lane's packs, then postOp when asked; a null `in` leaves a single
-// source. `in` holds source inSrc. As in reduceCopyPacks, the pre-op applies to every source below PreOpSrcs.
+// source. As in reduceCopyPacks, the pre-op applies to source 0 only, when PreOpSrcs is nonzero.
 template <typename RedFn, int PreOpSrcs, bool First>
-__device__ __forceinline__ void tdmReduceCombine(RedFn redFn, BytePack<16>* acc, const BytePack<16>* in, int inSrc,
+__device__ __forceinline__ void tdmReduceCombine(RedFn redFn, BytePack<16>* acc, const BytePack<16>* in,
                                                  bool doPostOp) {
   const int lane = laneId();
 #pragma unroll 4
@@ -52,11 +52,7 @@ __device__ __forceinline__ void tdmReduceCombine(RedFn redFn, BytePack<16>* acc,
     const int tilePack = lane + WARP_SIZE * lanePack;
     BytePack<16> x = acc[tilePack];
     if (First && 0 < PreOpSrcs) x = applyPreOp(redFn, x);
-    if (in != nullptr) {
-      BytePack<16> y = in[tilePack];
-      if (inSrc < PreOpSrcs) y = applyPreOp(redFn, y);
-      x = applyReduce(redFn, x, y);
-    }
+    if (in != nullptr) x = applyReduce(redFn, x, in[tilePack]);
     if (doPostOp) x = applyPostOp(redFn, x);
     acc[tilePack] = x;
   }
@@ -89,12 +85,11 @@ __device__ __forceinline__ void reduceCopyTdm(int nThreads, int& thread, uint64_
       tdmReduceLoadTile(acc, cvta_to_global(srcPtrFn(0)) + cursor);
       if (twoSrcs) tdmReduceLoadTile(in, cvta_to_global(srcPtrFn(1)) + cursor);
       tdmReduceWait();
-      tdmReduceCombine<RedFn, PreOpSrcs, /*First=*/true>(redFn, acc, twoSrcs ? in : nullptr, /*inSrc=*/1,
-                                                         postOp && nSrcs <= 2);
+      tdmReduceCombine<RedFn, PreOpSrcs, /*First=*/true>(redFn, acc, twoSrcs ? in : nullptr, postOp && nSrcs <= 2);
       for (int s = 2; s < MaxSrcs && s < nSrcs; s++) {
         tdmReduceLoadTile(in, cvta_to_global(srcPtrFn(s)) + cursor);
         tdmReduceWait();
-        tdmReduceCombine<RedFn, PreOpSrcs, /*First=*/false>(redFn, acc, in, s, postOp && s == nSrcs - 1);
+        tdmReduceCombine<RedFn, PreOpSrcs, /*First=*/false>(redFn, acc, in, postOp && s == nSrcs - 1);
       }
       // The lanes' LDS writes must be visible to the mover before it reads the tile back out.
       __threadfence_block();
