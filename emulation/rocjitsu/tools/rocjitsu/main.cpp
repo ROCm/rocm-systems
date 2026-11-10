@@ -269,9 +269,15 @@ std::optional<uint64_t> read_u64_property(const std::filesystem::path &path, std
   return std::nullopt;
 }
 
-std::vector<KfdGpuOrdinal> real_kfd_gpu_ordinals() {
+util::FailureOr<std::vector<KfdGpuOrdinal>>
+real_kfd_gpu_ordinals(util::DiagnosticEmitter emit_error) {
   std::filesystem::path nodes_dir = "/sys/devices/virtual/kfd/kfd/topology/nodes";
-  if (!std::filesystem::exists(nodes_dir))
+  std::error_code ec;
+  const bool exists = std::filesystem::exists(nodes_dir, ec);
+  if (ec)
+    return emit_error.emit() << "cannot inspect KFD topology: " << nodes_dir << ": "
+                             << ec.message();
+  if (!exists)
     nodes_dir = "/sys/class/kfd/kfd/topology/nodes";
 
   struct KfdNodeInfo {
@@ -282,24 +288,30 @@ std::vector<KfdGpuOrdinal> real_kfd_gpu_ordinals() {
   };
 
   std::vector<KfdNodeInfo> nodes;
-  std::error_code ec;
-  for (const auto &entry : std::filesystem::directory_iterator(nodes_dir, ec)) {
-    if (!entry.is_directory(ec))
+  for (std::filesystem::directory_iterator node(nodes_dir, ec), end; node != end;
+       node.increment(ec)) {
+    const bool is_directory = node->is_directory(ec);
+    if (ec)
+      return emit_error.emit() << "cannot inspect KFD node: " << node->path() << ": "
+                               << ec.message();
+    if (!is_directory)
       continue;
 
-    std::string name = entry.path().filename().string();
+    std::string name = node->path().filename().string();
     const std::optional<uint32_t> node_id = config::parse_uint32(name);
     if (!node_id)
       continue;
 
-    auto gpu_id = read_u32_file(entry.path() / "gpu_id");
+    auto gpu_id = read_u32_file(node->path() / "gpu_id");
     if (gpu_id && *gpu_id != 0) {
-      const std::filesystem::path properties = entry.path() / "properties";
+      const std::filesystem::path properties = node->path() / "properties";
       uint32_t gfx_target_version = read_u32_property(properties, "gfx_target_version").value_or(0);
       uint64_t unique_id = read_u64_property(properties, "unique_id").value_or(0);
       nodes.push_back({*node_id, *gpu_id, gfx_target_version, unique_id});
     }
   }
+  if (ec)
+    return emit_error.emit() << "cannot read KFD topology: " << nodes_dir << ": " << ec.message();
 
   std::ranges::sort(nodes, {}, &KfdNodeInfo::node_id);
 
@@ -359,7 +371,7 @@ dbt_execution_gpu_ordinals(const std::string &dbt_config_path,
                            const rocjitsu::config::DbtGuestConfig &dbt_guest,
                            util::DiagnosticEmitter emit_error) {
   if (dbt_guest.host.backend == rocjitsu::config::DbtExecutionBackend::Hardware)
-    return real_kfd_gpu_ordinals();
+    return real_kfd_gpu_ordinals(emit_error);
 
   const std::string host_config_path = rocjitsu::config::resolve_dbt_host_config_path(
       dbt_config_path, dbt_guest.host.simulator_config_path);
