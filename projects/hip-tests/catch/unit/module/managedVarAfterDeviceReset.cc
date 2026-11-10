@@ -19,13 +19,14 @@ namespace {
 // The helper needs exactly one visible device. With more than one, the variable's storage is
 // shared across devices and a reset leaves it alone regardless, so the test would pass whether
 // or not the runtime is correct.
-void runWithOneVisibleDevice(const char* deferredLoading) {
+void runWithOneVisibleDevice([[maybe_unused]] const char* deferredLoading) {
   hip::SpawnProc proc("managedVarAfterDeviceReset_exe", true);
-  proc.setEnv("HIP_VISIBLE_DEVICES", "0");
 #if HT_NVIDIA
   proc.setEnv("CUDA_VISIBLE_DEVICES", "0");
-#endif
+#else
+  proc.setEnv("HIP_VISIBLE_DEVICES", "0");
   proc.setEnv("HIP_ENABLE_DEFERRED_LOADING", deferredLoading);
+#endif
   const int exitCode = proc.run();
   INFO(proc.getOutput());
   REQUIRE(exitCode == 0);
