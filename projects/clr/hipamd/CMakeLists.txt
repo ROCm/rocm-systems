@@ -114,13 +114,6 @@ set(HIP_VERSION_GITHASH "0000000")
 # FIXME: Two different version strings used.
 # Below we use UNIX commands, not compatible with Windows.
 if(GIT_FOUND)
-  # TheROCk builds perform shallow cloning having only latest single commit & without any commit history
-  # Fetch commit history for current branch
-  execute_process(COMMAND ${GIT_EXECUTABLE} fetch --unshallow
-    RESULT_VARIABLE git_result
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    ERROR_QUIET)
-
   # use the clr commit date, instead of build date
   execute_process(COMMAND ${GIT_EXECUTABLE} log -1 --format=%ct -- ${CMAKE_SOURCE_DIR}
     RESULT_VARIABLE git_result
