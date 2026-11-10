@@ -76,6 +76,13 @@ struct HwregSlice {
                     .width = static_cast<uint16_t>(((hwreg >> 11) & 0x1f) + 1)};
 }
 
+/// @brief Whether an S_SETREG slice covers one MODE bit.
+[[nodiscard]] constexpr bool hwreg_slice_overlaps_mode_bit(uint16_t hwreg, uint16_t bit) {
+  const HwregSlice slice = decode_vgpr_msb_hwreg(hwreg);
+  return slice.id == MODE_HWREG && slice.begin <= bit &&
+         static_cast<uint32_t>(slice.begin) + slice.width > bit;
+}
+
 /// @brief Whether an S_SETREG slice overlaps MODE.VGPR_MSB (bits 19:12).
 [[nodiscard]] constexpr bool hwreg_slice_overlaps_vgpr_msb(uint16_t hwreg) {
   const HwregSlice slice = decode_vgpr_msb_hwreg(hwreg);

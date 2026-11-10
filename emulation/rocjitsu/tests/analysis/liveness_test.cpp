@@ -412,17 +412,6 @@ using RegisterSetTypes = testing::Types<RegisterSetT<RegisterSetWordType::Standa
 #endif
 TYPED_TEST_SUITE(RegisterSetTyped, RegisterSetTypes);
 
-TEST(VgprMsbHwregSlice, MatchesTheBankFieldBitsForEveryEncoding) {
-  for (uint32_t encoding = 0; encoding <= 0xffffu; ++encoding) {
-    const amdgpu::HwregSlice slice = amdgpu::decode_vgpr_msb_hwreg(encoding);
-    bool overlaps = false;
-    for (uint32_t bit = 12; bit <= 19; ++bit)
-      overlaps |= slice.id == amdgpu::MODE_HWREG && bit >= slice.begin &&
-                  bit < static_cast<uint32_t>(slice.begin) + slice.width;
-    ASSERT_EQ(amdgpu::hwreg_slice_overlaps_vgpr_msb(encoding), overlaps) << encoding;
-  }
-}
-
 TYPED_TEST(RegisterSetTyped, WordIterationRangeOperationsMatchModelAtBoundaries) {
   using RegisterSet = TypeParam;
   constexpr std::array classes{RegClass::SGPR, RegClass::VGPR, RegClass::ACC_VGPR};
@@ -5803,6 +5792,17 @@ TEST(LivenessAnalysis, ExecMaskedVgprDefDoesNotKillInactiveLaneValue) {
   auto free_vgpr = maybe_free_run.value();
   ASSERT_TRUE(free_vgpr.has_value());
   EXPECT_NE(*free_vgpr, 0);
+}
+
+TEST(VgprMsbHwregSlice, MatchesTheBankFieldBitsForEveryEncoding) {
+  for (uint32_t encoding = 0; encoding <= 0xffffu; ++encoding) {
+    const amdgpu::HwregSlice slice = amdgpu::decode_vgpr_msb_hwreg(encoding);
+    bool overlaps = false;
+    for (uint32_t bit = 12; bit <= 19; ++bit)
+      overlaps |= slice.id == amdgpu::MODE_HWREG && bit >= slice.begin &&
+                  bit < static_cast<uint32_t>(slice.begin) + slice.width;
+    ASSERT_EQ(amdgpu::hwreg_slice_overlaps_vgpr_msb(encoding), overlaps) << encoding;
+  }
 }
 
 TEST(LivenessAnalysis, Gfx1250VgprMsbResolvesPhysicalRegisterBank) {
