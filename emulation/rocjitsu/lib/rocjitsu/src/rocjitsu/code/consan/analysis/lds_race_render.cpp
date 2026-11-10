@@ -34,7 +34,8 @@ void write_json_string(std::ostream &out, std::string_view value) {
 }
 
 void write_participant(std::ostream &out, const LdsRaceParticipant &value) {
-  out << "{\"wave\":" << value.wave << ",\"site\":" << value.site << ",\"phase\":" << value.phase
+  out << "{\"workgroup_x\":" << value.workgroup << ",\"wave\":" << value.wave
+      << ",\"site\":" << value.site << ",\"phase\":" << value.phase
       << ",\"sequence\":" << value.sequence << ",\"mask\":" << value.mask
       << ",\"offset\":" << value.offset << ",\"width\":" << value.width
       << ",\"original_offset\":" << value.original_offset << ",\"access\":\""
@@ -81,7 +82,7 @@ std::string render_lds_race_analysis(const LdsRaceResult &result) {
       << "\",\"scope\":\""
       << (result.scope == ScopeKind::NativeLdsWorkgroupBarrier
               ? "native_lds_single_range_epoch_workgroup_barriers"
-              : "native_lds_single_range_no_sync_one_workgroup")
+              : "native_lds_single_range_no_sync_bounded_1d")
       << "\"" << ",\"run_identity\":\"" << hex_bytes(result.run_identity)
       << "\",\"original_sha256\":\"" << hex_bytes(result.original.sha256)
       << "\",\"original_bytes\":" << result.original.bytes << ",\"entry\":";
@@ -99,6 +100,8 @@ std::string render_lds_race_analysis(const LdsRaceResult &result) {
       out << ',';
     first = false;
     out << "{\"serial\":" << execution.serial
+        << ",\"workgroup_count\":" << execution.workgroup_count
+        << ",\"waves_per_workgroup\":" << execution.waves_per_workgroup
         << ",\"valid_observations\":" << execution.valid_observations
         << ",\"rejected_records\":" << execution.rejected_records
         << ",\"lost_occurrences\":" << execution.lost_occurrences
@@ -128,6 +131,11 @@ std::string render_lds_race_analysis(const LdsRaceResult &result) {
         out << "null";
       else
         out << issue.site;
+      out << ",\"workgroup_x\":";
+      if (issue.workgroup == UINT32_MAX)
+        out << "null";
+      else
+        out << issue.workgroup;
       out << ",\"reason\":";
       write_json_string(out, issue.reason);
       out << '}';

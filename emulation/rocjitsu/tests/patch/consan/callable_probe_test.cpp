@@ -27,10 +27,10 @@ TEST_P(ConSanCallableProbe, CompiledBodiesAreSelfContainedAndUseOnlyTheirArgumen
   ASSERT_FALSE(image.empty());
   AmdGpuCodeObject object(image.data(), image.size());
   ASSERT_TRUE(object.is_valid());
-  for (const auto &[name, arguments] : {std::pair{"rj_consan_entry", uint8_t{4}},
-                                        {"rj_consan_access", uint8_t{10}},
-                                        {"rj_consan_exit", uint8_t{4}},
-                                        {"rj_consan_barrier", uint8_t{6}}}) {
+  for (const auto &[name, arguments] : {std::pair{"rj_consan_entry", uint8_t{5}},
+                                        {"rj_consan_access", uint8_t{11}},
+                                        {"rj_consan_exit", uint8_t{5}},
+                                        {"rj_consan_barrier", uint8_t{7}}}) {
     SCOPED_TRACE(name);
     std::string error;
     const std::optional<ResolvedProbeSymbol> symbol = resolve_probe_symbol(object, name, &error);

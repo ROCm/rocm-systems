@@ -204,10 +204,21 @@ Read/Read and same-wave pairs, and treating adjacent ranges as disjoint. Natural
 alignment and the admitted widths bound active range shapes. Widths share the
 same four-address-group quota, loss rules, exact collision masks, and qualified
 barrier certificates. The compatibility token/options reject older b32-only
-producer interpretations and target-specific width restrictions. Geometry remains
-one workgroup in this change.
+producer interpretations and target-specific width restrictions.
 
-The barrier profile requires at least two waves in one complete 1D workgroup
+gfx1250 wave32 accepts one through sixteen complete 1D workgroups; other
+target/wave profiles remain limited to one. Grid/workgroup Y and Z must equal
+one, and grid X must be nonzero and divisible by workgroup X. Each group retains
+all of its waves, including a partial final wave. Multi-group launches require
+the original descriptor's workgroup-X input; kernels without it remain
+supported for one group.
+
+Each workgroup has independent LDS and barrier participants. Equal numeric
+LDS addresses in different workgroups cannot form conflict candidates, and
+missing evidence in one group does not invalidate another group's complete
+barrier witness.
+
+The barrier profile requires at least two waves in each complete 1D workgroup
 and a closed forward CFG. Preparation and facts admission reject a declared maximum
 workgroup size no larger than one wave, since no valid dispatch could use it.
 The original `s_wait_dscnt 0` must immediately precede

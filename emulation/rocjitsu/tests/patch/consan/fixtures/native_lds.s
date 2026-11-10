@@ -291,7 +291,11 @@ CONSAN_KERNEL:
   // gfx1100 wave32 requires at least 16 user+system SGPR inputs. The
   // kernarg pointer stays at s[0:1]; padding moves workgroup X to s15.
   .amdhsa_user_sgpr_count 15
+#if defined(CONSAN_NO_WORKGROUP_ID) && CONSAN_NO_WORKGROUP_ID
+  .amdhsa_system_sgpr_workgroup_id_x 0
+#else
   .amdhsa_system_sgpr_workgroup_id_x 1
+#endif
   .amdhsa_system_vgpr_workitem_id 0
   .amdhsa_next_free_vgpr 8
   .amdhsa_next_free_sgpr 16
