@@ -89,6 +89,7 @@ def gen_pk_binop(
     op: str | None,
     dtype: str | None,
     opsel_exprs: tuple[str, str] = ('', ''),
+    multiply_clamp: bool = False,
 ) -> str:
     """Generate packed 16-bit binary op (V_PK_ADD_I16, V_PK_MUL_F16, etc.)."""
     d, s0, s1 = dst[0], src[0], src[1]
@@ -217,8 +218,8 @@ def gen_pk_binop(
             'add': ('a_lo + b_lo', 'a_hi + b_hi'),
             'sub': ('a_lo - b_lo', 'a_hi - b_hi'),
             'mul': (
-                'static_cast<uint32_t>(a_lo) * b_lo',
-                'static_cast<uint32_t>(a_hi) * b_hi',
+                'amdgpu::vop3_integer_mul<uint16_t, 16>(a_lo, b_lo, inst_.clamp && (wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA2 || wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2))',
+                'amdgpu::vop3_integer_mul<uint16_t, 16>(a_hi, b_hi, inst_.clamp && (wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA2 || wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2))',
             ),
             'max': ('a_lo > b_lo ? a_lo : b_lo', 'a_hi > b_hi ? a_hi : b_hi'),
             'min': ('a_lo < b_lo ? a_lo : b_lo', 'a_hi < b_hi ? a_hi : b_hi'),
@@ -232,6 +233,11 @@ def gen_pk_binop(
             ),
         }
         lo_expr, hi_expr = u_op_map[op]
+        if multiply_clamp:
+            lo_expr, hi_expr = (
+                'amdgpu::vop3_mul_lo_u16(a_lo, b_lo, inst_.clamp)',
+                'amdgpu::vop3_mul_lo_u16(a_hi, b_hi, inst_.clamp)',
+            )
         if op in ('add', 'sub'):
             L.append(
                 f'    uint16_t rlo = static_cast<uint16_t>(amdgpu::vop3_integer_{op}<uint16_t>(a_lo, b_lo, inst_.clamp));'
@@ -994,6 +1000,7 @@ def gen_mad_mix_lo_hi(
     opsel_exprs: tuple[str, str] = ('', ''),
     use_cdna5_helpers: bool = False,
     fused_result: bool = False,
+    fused_f32_intermediate: bool = False,
 ) -> str:
     """Generate V_MAD_MIXLO_F16 / V_MAD_MIXHI_F16."""
     d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
@@ -1061,9 +1068,18 @@ def gen_mad_mix_lo_hi(
             ]
         )
     else:
-        L.append(
-            f'    float result = {"std::fma(a, b, c)" if use_cdna5_helpers else "a * b + c"};'
-        )
+        if fused_f32_intermediate:
+            L.extend(
+                [
+                    '    float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::FMA>(',
+                    '        a, b, c, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(),',
+                    '        wf.cu().arch(), wf.ieee_mode());',
+                ]
+            )
+        else:
+            L.append(
+                f'    float result = {"std::fma(a, b, c)" if use_cdna5_helpers else "a * b + c"};'
+            )
         L.append(
             '    if (inst_.clamp) result = amdgpu::clamp_floating_result(result, wf);'
         )

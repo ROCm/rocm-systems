@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/isa/arch/amdgpu/rdna1/addr_calc.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_flat.h"
@@ -43,14 +44,16 @@ std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdg
   auto soffset = read_smem_offset(inst.soffset, wf);
   if (!soffset)
     return std::nullopt;
-  off += *soffset;
-  // Only the non-buffer addressing section defines a negative sum as undefined.
-  if (!amdgpu::addr_calc::smem_is_buffer_load_op(inst.op) && off < 0)
-    wf.report_undefined_behavior("negative combined scalar-memory offset");
-  if (amdgpu::addr_calc::smem_is_buffer_load_op(inst.op))
-    return amdgpu::addr_calc::scalar_buffer_address(wf, sbase_sel, *base, off, state,
+  if (amdgpu::addr_calc::smem_is_buffer_load_op(inst.op) || inst.op == kSAtcProbeBuffer)
+    return amdgpu::addr_calc::scalar_buffer_address(wf, sbase_sel, *base, off + *soffset, state,
                                                     /*align_mask=*/3, /*size_align_mask=*/0);
-  return (*base + off) & ~0x3ULL;
+  // RDNA1 §7.2.1 aligns each input independently and scales the register
+  // offset by a full wave for scalar scratch loads.
+  const bool scratch = inst.op >= kSScratchLoadDword && inst.op <= kSScratchLoadDwordx4;
+  const int64_t scale = scratch ? 64 : 1;
+  if (off + *soffset * scale < 0)
+    wf.report_undefined_behavior("negative combined scalar-memory offset");
+  return (*base & ~uint64_t{3}) + (off & ~int64_t{3}) + (*soffset & ~uint32_t{3}) * scale;
 }
 
 void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf,
@@ -65,7 +68,8 @@ void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf
   d.lane_mask = exec;
   d.exec_mask = exec;
   d.wf_size = wf.wf_size();
-  int64_t offset = static_cast<int64_t>(static_cast<int32_t>(inst.offset << 20) >> 20);
+  const int32_t offset = inst.seg == 0 ? static_cast<int32_t>(inst.offset & 0x7ffu)
+                                       : static_cast<int32_t>(inst.offset << 20) >> 20;
   amdgpu::RegisterAccess regs(cu);
   uint64_t saddr_val = 0;
   if (has_saddr(inst.saddr)) {
@@ -78,17 +82,20 @@ void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf
     saddr_val = *saddr;
   }
   uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
-  auto vaddr_region = regs.read_vgpr_region(vbase, has_saddr(inst.saddr) ? 1 : 2, exec);
+  const bool single_vgpr = has_saddr(inst.saddr) || wf.flat_pointer32();
+  auto vaddr_region = regs.read_vgpr_region(vbase, single_vgpr ? 1 : 2, exec);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint64_t vaddr;
-    if (has_saddr(inst.saddr)) {
+    if (single_vgpr) {
       vaddr = vaddr_region.lane(0, lane);
     } else {
       vaddr = vaddr_region.lane64(0, lane);
     }
     uint64_t address = saddr_val + vaddr + offset;
+    if (wf.flat_pointer32() && !has_saddr(inst.saddr))
+      address = static_cast<uint32_t>(address);
     if (inst.seg == 0) {
       address = amdgpu::addr_calc::capture_flat_private_address(wf, d, address, lane);
     }

@@ -4,6 +4,7 @@
 #ifndef ROCJITSU_ISA_AMDGPU_SHARED_SCALAR_OPERAND_SELECTORS_H_
 #define ROCJITSU_ISA_AMDGPU_SHARED_SCALAR_OPERAND_SELECTORS_H_
 
+#include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/register_set.h"
 
 #include <cstdint>
@@ -29,6 +30,26 @@ inline constexpr uint32_t kExecSelectorFirst = 126;
 inline constexpr uint32_t kExecSelectorLast = 127;
 inline constexpr uint32_t kFlatScratchBaseSelectorFirst = 230;
 inline constexpr uint32_t kFlatScratchBaseSelectorLast = 231;
+
+[[nodiscard]] inline constexpr bool scalar_selector_is_null(rj_code_arch_t arch,
+                                                            uint32_t selector) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return selector == kGfx10NullSelector;
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+  case ROCJITSU_CODE_ARCH_CDNA5:
+    return selector == kModernNullSelector;
+  case ROCJITSU_CODE_ARCH_CDNA1:
+  case ROCJITSU_CODE_ARCH_CDNA2:
+  case ROCJITSU_CODE_ARCH_CDNA3:
+  case ROCJITSU_CODE_ARCH_CDNA4:
+  default:
+    return false;
+  }
+}
 
 /// Backing selected by a decoded scalar-register operand.
 enum class ScalarRegisterStorage : uint8_t {

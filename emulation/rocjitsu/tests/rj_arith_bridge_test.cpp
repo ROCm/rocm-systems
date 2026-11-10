@@ -539,6 +539,38 @@ TEST(ArithBridgeTest, CompatibilityMulDppStatusIncludesWriteSuppressedLanes) {
   }
 }
 
+TEST(ArithBridgeTest, Gfx12ExceptionalOperandsUpdateUserFlags) {
+  for (const bool report : {true, false}) {
+    BridgeFixture fixture(
+        false, 32,
+        parse_arithmetic_policy(report ? "compatibility" : "bit_exact_empirical_no_fp_status"));
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
+    fixture.wave->set_mode_raw(0xf0);
+    auto check = [&](std::array<uint32_t, 2> words, uint32_t lhs, uint32_t rhs, uint32_t causes) {
+      auto instruction = fixture.decoder->decode_window(words);
+      ASSERT_TRUE(instruction.succeeded());
+      fixture.cu->write_vgpr(fixture.base() + 1, 0, lhs);
+      fixture.cu->write_vgpr(fixture.base() + 2, 0, rhs);
+      fixture.cu->write_vgpr(fixture.base() + 1, 1, 0);
+      fixture.cu->write_vgpr(fixture.base() + 2, 1, 0);
+      for (uint64_t exec : {1u, 2u}) {
+        fixture.wave->set_exec(exec);
+        fixture.wave->set_trapsts(0x40);
+        ASSERT_TRUE(
+            fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+        EXPECT_EQ(fixture.wave->trapsts(), 0x40u | (report && exec == 1 ? causes : 0u))
+            << instruction.value()->mnemonic();
+      }
+    };
+    check({0xd5080000, 0x00020501}, 0, 0x7f800000, 1);             // MUL of zero and infinity
+    check({0xd5030000, 0x00020501}, 0x7f7fffff, 0x7f7fffff, 0x28); // ADD overflows
+    check({0xd5150000, 0x00020501}, 0x7f800010, 0, 1);             // MIN_NUM with sNaN
+    check({0xd7650000, 0x00020501}, 0x7fc12345, 0xff800010, 1);    // MINIMUM with mixed NaNs
+    check({0xd4128008, 0x00020501}, 0x7fc12345, 0, 1);             // signaling CMP
+    check({0xc8d00501, 0x00020104}, 0x7f7fffff, 0x40000000, 0x28); // dual MUL slot
+  }
+}
+
 TEST(ArithBridgeTest, CompatibilityMulRetainsLegacyStatus) {
   for (bool rdna3 : {false, true}) {
     for (uint32_t lanes : {32u, 64u}) {

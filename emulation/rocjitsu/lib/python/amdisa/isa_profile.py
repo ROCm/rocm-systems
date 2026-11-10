@@ -1298,6 +1298,12 @@ _SMEM_MODIFIERS_GLC_DLC = [
     EncodingModifier('dlc'),
 ]
 
+# The trailing conditionally written VGPR distinguishes feedback-capable fetches
+# and returning atomics from stores and instructions that ignore the encoded bit.
+_BUFFER_FEEDBACK_MODIFIER = EncodingModifier(
+    'tfe', condition='inst->tfe && (flags_ & CONDITIONAL_LAST_VGPR_DEF)'
+)
+
 _MUBUF_MODIFIERS_GLC_DLC = [
     EncodingModifier('offen'),
     EncodingModifier('idxen'),
@@ -1306,6 +1312,7 @@ _MUBUF_MODIFIERS_GLC_DLC = [
     EncodingModifier('dlc'),
     EncodingModifier('slc'),
     EncodingModifier('lds'),
+    _BUFFER_FEEDBACK_MODIFIER,
 ]
 
 _MTBUF_MODIFIERS_GLC_DLC = [
@@ -1314,6 +1321,7 @@ _MTBUF_MODIFIERS_GLC_DLC = [
     EncodingModifier('glc'),
     EncodingModifier('dlc'),
     EncodingModifier('slc'),
+    _BUFFER_FEEDBACK_MODIFIER,
 ]
 
 _FLAT_MODIFIERS_GLC_DLC = [
@@ -2159,6 +2167,44 @@ class Cdna2Profile(CdnaProfile):
     - ENC_VOP3PX2 does not exist in CDNA2 XML.
     """
 
+    @property
+    def semantic_overrides(self) -> dict[str, tuple[str, ...]]:
+        return {
+            **super().semantic_overrides,
+            'BUFFER_STORE_LDS_DWORD': ('buffer_store_from_lds', '', ''),
+            'BUFFER_INVL2': ('gl2_inv', '', ''),
+            'S_RFE_RESTORE_B64': ('trap_return', '', ''),
+            'S_SETHALT': ('sethalt', '', ''),
+            'S_SETPRIO': ('setprio', '', ''),
+            'S_WAKEUP': ('wakeup', '', ''),
+        }
+
+    # MI200 adds row broadcasts to its double-precision ALU. LLVM's gfx90a
+    # assembler also exposes the five unary forms omitted by the base XML.
+    def dpp_opcode_rule(
+        self, enc_name: str, inst_name: str, *, src0_size_bits: int | None = None
+    ) -> DppOpcodeRule:
+        if enc_name == 'ENC_VOP1' and _opcode_uses_64bit_data(inst_name):
+            return DppOpcodeRule.ROW_SELECT_ONLY
+        return super().dpp_opcode_rule(
+            enc_name, inst_name, src0_size_bits=src0_size_bits
+        )
+
+    def supports_dpp_opcode(
+        self, enc_name: str, inst_name: str, *, has_modifier_encoding: bool
+    ) -> bool:
+        if enc_name == 'ENC_VOP1' and inst_name in {
+            'V_CVT_F64_F32',
+            'V_RNDNE_F64',
+            'V_RCP_F64',
+            'V_RSQ_F64',
+            'V_SQRT_F64',
+        }:
+            return True
+        return super().supports_dpp_opcode(
+            enc_name, inst_name, has_modifier_encoding=has_modifier_encoding
+        )
+
     legacy_flat_lds = True
     scratch_has_vaddr_expr = 'inst_.saddr == 0x7F'
 
@@ -2177,10 +2223,6 @@ class Cdna2Profile(CdnaProfile):
         return 8
 
     @property
-    def dpp_64bit_input_row_select_only(self) -> bool:
-        return False
-
-    @property
     def flat_scratch_mechanism(self) -> str:
         return 'sgpr_pair'
 
@@ -2196,27 +2238,35 @@ class Cdna2Profile(CdnaProfile):
         upper = enc_name.upper()
         if upper == 'ENC_SMEM':
             return _SMEM_MODIFIERS  # soffset_en/imm/glc/nv present in CDNA2
-        if upper == 'ENC_MUBUF':
-            return _MUBUF_MODIFIERS_GLC
-        if upper == 'ENC_MTBUF':
-            return _MTBUF_MODIFIERS_GLC
+        if upper in ('ENC_MUBUF', 'ENC_MTBUF'):
+            # Assembly requires IDXEN before OFFEN when both address components are used.
+            modifiers = [
+                EncodingModifier('idxen'),
+                EncodingModifier('offen'),
+                EncodingModifier('offset', is_offset=True),
+                EncodingModifier('glc'),
+                EncodingModifier('slc'),
+                EncodingModifier('scc'),
+            ]
+            if upper == 'ENC_MUBUF':
+                modifiers.append(EncodingModifier('lds'))
+            return modifiers
         if upper == 'ENC_FLAT':
-            return _FLAT_MODIFIERS_GLC
+            return [
+                *_FLAT_MODIFIERS_GLC,
+                EncodingModifier('scc'),
+                EncodingModifier('lds'),
+            ]
+        if upper == 'ENC_MIMG':
+            return [
+                EncodingModifier(flag)
+                for flag in ('unorm', 'glc', 'slc', 'scc', 'a16', 'lwe', 'da', 'd16')
+            ]
         return []
 
     @property
     def skip_encodings(self) -> frozenset[str]:
         return frozenset()
-
-    def dpp_opcode_rule(
-        self,
-        enc_name: str,
-        inst_name: str,
-        *,
-        src0_size_bits: int | None = None,
-    ) -> DppOpcodeRule:
-        del enc_name, src0_size_bits
-        return _legacy_dpp_opcode_rule(inst_name)
 
 
 class Rdna1Profile(_AmdgpuProfileBase):
@@ -2240,6 +2290,12 @@ class Rdna1Profile(_AmdgpuProfileBase):
       padding fields for gaps in the MicrocodeFormat bitfield layout.
     """
 
+    semantic_class_overrides = {
+        'DS_ORDERED_COUNT': 'ds_ordered_count',
+        'S_ATC_PROBE': 'smem_atc_probe',
+        'S_ATC_PROBE_BUFFER': 'smem_atc_probe',
+    }
+
     @property
     def mimg_max_nsa_words(self) -> int:
         return 3
@@ -2256,6 +2312,19 @@ class Rdna1Profile(_AmdgpuProfileBase):
     flat_offset_bits = 12
     scratch_has_vaddr_expr = '(inst_.saddr == 0x7D || inst_.saddr == 0x7F)'
 
+    def skip_inst_encoding(
+        self, enc_name: str, enc_cond: str, *, unique_segment_opcode: bool = False
+    ) -> bool:
+        # The XML spells the unmodified VOP3 relative-move form as a
+        # conjunction of negative modifier conditions rather than "default".
+        if enc_name == 'ENC_VOP3' and enc_cond == (
+            'Nothas_dpp16_Nothas_dpp8_Nothas_lit_0_Nothas_lit_1_Nothas_lit_2'
+        ):
+            return False
+        return super().skip_inst_encoding(
+            enc_name, enc_cond, unique_segment_opcode=unique_segment_opcode
+        )
+
     def saddr_null_selector_expr(self, enc_name: str) -> str | None:
         if enc_name.upper() == 'ENC_FLAT':
             return '0x7D'
@@ -2271,6 +2340,18 @@ class Rdna1Profile(_AmdgpuProfileBase):
     @property
     def ds_compare_store_compare_first(self) -> bool:
         # CDNA1-4 / RDNA1-2 DS CMPST reverses the BUFFER operand order.
+        return True
+
+    @property
+    def dpp_supports_wave_controls(self) -> bool:
+        return False
+
+    @property
+    def dpp_supports_row_broadcast_controls(self) -> bool:
+        return False
+
+    @property
+    def dpp_supports_row_xmask(self) -> bool:
         return True
 
     @property
@@ -2364,6 +2445,34 @@ class Rdna2Profile(Rdna1Profile):
     remain skipped (``_SKIP_DPP_SDWA = True``).
     """
 
+    @property
+    def dpp_supports_row_xmask(self) -> bool:
+        return True
+
+    @property
+    def dpp_supports_wave_controls(self) -> bool:
+        return False
+
+    @property
+    def dpp_supports_row_broadcast_controls(self) -> bool:
+        return False
+
+    def skip_inst_encoding(
+        self, enc_name: str, enc_cond: str, *, unique_segment_opcode: bool = False
+    ) -> bool:
+        # The three relative-source moves use this spelling for their plain VOP3 form.
+        if enc_name == 'ENC_VOP3' and enc_cond == (
+            'Nothas_dpp16_Nothas_dpp8_Nothas_lit_0_Nothas_lit_1_Nothas_lit_2'
+        ):
+            return False
+        return super().skip_inst_encoding(
+            enc_name, enc_cond, unique_segment_opcode=unique_segment_opcode
+        )
+
+    @property
+    def integer_clamp_dtypes(self) -> dict[str, str]:
+        return {**super().integer_clamp_dtypes, 'V_MUL_LO_U16': 'u16'}
+
     # GFX10.3 assigns SADDR=127 to the immediate-only scratch form.
     scratch_has_vaddr_expr = 'inst_.saddr == 0x7D'
 
@@ -2414,12 +2523,36 @@ class Rdna3Profile(_AmdgpuProfileBase):
     flat_saddr_null_aliases = ('127',)
 
     @property
+    def renders_gfx11_image_syntax(self) -> bool:
+        return True
+
+    @property
     def has_gfx11_image_address_extension(self) -> bool:
         return True
 
     @property
     def mimg_max_nsa_words(self) -> int:
         return 1
+
+    @property
+    def gfx11_mimg_nsa_group_words(
+        self,
+    ) -> dict[str, tuple[tuple[int, ...], tuple[int, ...]]]:
+        return {
+            'IMAGE_BVH_INTERSECT_RAY': ((1, 1, 3, 3, 3), (1, 1, 3, 3)),
+            'IMAGE_BVH64_INTERSECT_RAY': ((2, 1, 3, 3, 3), (2, 1, 3, 3)),
+        }
+
+    @property
+    def gfx11_mimg_gather_style_instructions(self) -> frozenset[str]:
+        return frozenset({'IMAGE_MSAA_LOAD'})
+
+    @property
+    def gfx11_mimg_fixed_vdata_words(self) -> dict[str, int]:
+        return {
+            'IMAGE_BVH_INTERSECT_RAY': 4,
+            'IMAGE_BVH64_INTERSECT_RAY': 4,
+        }
 
     @property
     def gfx11_mimg_fixed_vaddr_words(self) -> dict[str, tuple[int, int]]:
@@ -2658,6 +2791,17 @@ class Rdna3_5Profile(Rdna3Profile):
     """
 
     @property
+    def semantic_class_overrides(self) -> dict[str, str]:
+        return {
+            **super().semantic_class_overrides,
+            'DS_ADD_GS_REG_RTN': 'ds_gs_reg',
+            'DS_SUB_GS_REG_RTN': 'ds_gs_reg',
+            'DS_ORDERED_COUNT': 'ds_ordered_count',
+            'S_ATC_PROBE': 'atc_probe',
+            'S_ATC_PROBE_BUFFER': 'atc_probe',
+        }
+
+    @property
     def uses_rj_arith_matrix(self) -> bool:
         # RDNA3.5 retains its legacy implementation despite sharing the RDNA3 layout.
         return False
@@ -2668,36 +2812,12 @@ class Rdna3_5Profile(Rdna3Profile):
         return ((192, 192),)
 
     @property
-    def renders_gfx11_image_syntax(self) -> bool:
-        return True
-
-    @property
     def split_ds_2addr_offsets(self) -> bool:
         return True
 
     @property
     def vop3p_absolute_source_instructions(self) -> frozenset[str]:
         return frozenset({'V_FMA_MIX_F32', 'V_FMA_MIXLO_F16', 'V_FMA_MIXHI_F16'})
-
-    @property
-    def gfx11_mimg_gather_style_instructions(self) -> frozenset[str]:
-        return frozenset({'IMAGE_MSAA_LOAD'})
-
-    @property
-    def gfx11_mimg_fixed_vdata_words(self) -> dict[str, int]:
-        return {
-            'IMAGE_BVH_INTERSECT_RAY': 4,
-            'IMAGE_BVH64_INTERSECT_RAY': 4,
-        }
-
-    @property
-    def gfx11_mimg_nsa_group_words(
-        self,
-    ) -> dict[str, tuple[tuple[int, ...], tuple[int, ...]]]:
-        return {
-            'IMAGE_BVH_INTERSECT_RAY': ((1, 1, 3, 3, 3), (1, 1, 3, 3)),
-            'IMAGE_BVH64_INTERSECT_RAY': ((2, 1, 3, 3, 3), (2, 1, 3, 3)),
-        }
 
     @property
     def sendmsg_return_symbolic(self) -> bool:
@@ -2732,6 +2852,19 @@ class Rdna4Profile(_AmdgpuProfileBase):
     _SKIP_DPP_SDWA = True
     _SKIP = frozenset({'VOPDXY', 'VOPDXY_INST_LITERAL'})
     _SOP1_BASE_COND = 'Nothas_lit_0_Nothas_lit_1'
+
+    def normalize_operand_type(
+        self, enc_name: str, field_name: str, operand_type: str
+    ) -> str:
+        # The five V_S_*_F16 operations can source M0, EXEC or SCC on GFX12.
+        # The XML's narrower class omits them from the otherwise scalar input.
+        if (
+            enc_name.upper() == 'ENC_VOP3'
+            and field_name == 'src0'
+            and operand_type == 'OPR_SREG_LITERAL'
+        ):
+            return 'OPR_SSRC'
+        return super().normalize_operand_type(enc_name, field_name, operand_type)
 
     def normalize_encoding_condition(self, enc_name: str, cond_name: str) -> str:
         if enc_name.upper() == 'ENC_SOP1' and cond_name == self._SOP1_BASE_COND:
@@ -2967,14 +3100,6 @@ class Rdna4Profile(_AmdgpuProfileBase):
         return True
 
     @property
-    def semantic_overrides(self) -> dict[str, tuple[str, ...]]:
-        return {
-            'S_BARRIER_SIGNAL': ('true_nop', '', ''),
-            'S_BARRIER_SIGNAL_ISFIRST': ('true_nop', '', ''),
-            'S_BARRIER_WAIT': ('barrier', '', ''),
-        }
-
-    @property
     def renders_true16_vop3_operands(self) -> bool:
         return True
 
@@ -3126,17 +3251,6 @@ class Cdna5Profile(Rdna4Profile):
         # gfx1250 groups source lanes by four rows and two eight-column halves.
         # Keep every mnemonic alias on the corresponding CDNA5 DS routing.
         return 7
-
-    @property
-    def semantic_overrides(self) -> dict[str, tuple[str, ...]]:
-        overrides = dict(super().semantic_overrides)
-        for mnemonic in (
-            'S_BARRIER_SIGNAL',
-            'S_BARRIER_SIGNAL_ISFIRST',
-            'S_BARRIER_WAIT',
-        ):
-            overrides.pop(mnemonic, None)
-        return overrides
 
     @property
     def ds_addtid_m0_base_bits(self) -> int:

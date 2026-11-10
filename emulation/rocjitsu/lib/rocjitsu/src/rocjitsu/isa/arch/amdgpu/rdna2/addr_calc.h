@@ -11,13 +11,19 @@
 #include <optional>
 
 namespace rocjitsu {
+class Instruction;
 namespace amdgpu {
+enum MemPipelineTag : uint8_t;
 class Wavefront;
 class VectorMemState;
 class ScalarMemState;
 } // namespace amdgpu
 
 namespace rdna2 {
+
+/// Suppress a memory instruction whose decoded return tuple crosses the wave allocation.
+bool nullify_unallocated_memory_return(Instruction &inst, const amdgpu::Wavefront &wf,
+                                       amdgpu::MemPipelineTag pipeline);
 
 std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf,
                                                amdgpu::ScalarMemState *state = nullptr);

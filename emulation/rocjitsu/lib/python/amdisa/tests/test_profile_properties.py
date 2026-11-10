@@ -265,7 +265,7 @@ def test_dpp_suppressed_compare_policy(profile, expected):
         (CdnaProfile(), 32, DppOpcodeRule.ALLOW),
         (CdnaProfile(), 64, DppOpcodeRule.ROW_SELECT_ONLY),
         (Cdna1Profile(), 64, DppOpcodeRule.ALLOW),
-        (Cdna2Profile(), 64, DppOpcodeRule.ALLOW),
+        (Cdna2Profile(), 64, DppOpcodeRule.ROW_SELECT_ONLY),
     ],
 )
 def test_cdna_64bit_input_dpp_rule(profile, src0_size_bits, expected):
@@ -324,10 +324,11 @@ def test_cdna3_and_4_lane_special_opcodes_do_not_accept_dpp(opcode):
     ],
 )
 def test_legacy_dpp_prohibition_tables(profile, opcode):
-    assert (
-        profile.dpp_opcode_rule('ENC_VOP1', opcode, src0_size_bits=64)
-        is DppOpcodeRule.FORBID
-    )
+    encoding = 'ENC_VOPC' if opcode.startswith(('V_CMP_', 'V_CMPX_')) else 'ENC_VOP1'
+    expected = DppOpcodeRule.FORBID
+    if isinstance(profile, Cdna2Profile) and encoding == 'ENC_VOP1' and 'F64' in opcode:
+        expected = DppOpcodeRule.ROW_SELECT_ONLY
+    assert profile.dpp_opcode_rule(encoding, opcode, src0_size_bits=64) is expected
 
 
 @pytest.mark.parametrize(
@@ -369,7 +370,9 @@ def test_legacy_dpp_prohibition_tables_do_not_match_nearby_legal_opcodes(
     ('profile', 'wave', 'row_bcast', 'row_xmask'),
     [
         (CdnaProfile(), True, True, False),
-        (Rdna1Profile(), True, True, False),
+        (Rdna1Profile(), False, False, True),
+        (Rdna2Profile(), False, False, True),
+        (Rdna2Profile(), False, False, True),
         (Rdna3Profile(), False, False, True),
         (Rdna4Profile(), False, False, True),
         (Cdna5Profile(), False, False, True),

@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/hsa_clock.h"
@@ -21,6 +23,33 @@ Wavefront::Wavefront(ComputeUnitCore &cu, uint32_t wf_id, uint32_t default_wf_si
       default_wf_size_(default_wf_size), max_wf_size_(max_wf_size), max_sgprs_(max_sgprs),
       max_vgprs_(max_vgprs), mode_has_gpr_idx_en_(mode_has_gpr_idx_en),
       memory_wait_checks_enabled_(cu.config().memory_wait_checks_enabled()) {}
+
+bool Wavefront::valu_destinations_allocated(const Instruction &inst) const {
+  for (int i = 0; i < inst.num_dst_operands(); ++i) {
+    const auto *op = inst.dst_operand(i);
+    const auto ref = op->to_register_ref();
+    if (ref && ref->cls == RegClass::SGPR && inst.num_dst_operands() > 1 &&
+        !sgpr_alloc().contains(sgpr_alloc().base + ref->index, ref->width))
+      return false;
+    if (!ref || (ref->cls != RegClass::VGPR && ref->cls != RegClass::ACC_VGPR))
+      continue;
+    const uint32_t start = ref->cls == RegClass::ACC_VGPR
+                               ? ref->index
+                               : apply_gpr_idx(*this, ref->index, op->vgpr_msb_role());
+    if (start >= num_vgprs() || ref->width > num_vgprs() - start)
+      return false;
+  }
+  return true;
+}
+
+bool Wavefront::cdna2_memory_destination_out_of_range(const Instruction &inst) const {
+  for (int i = 0; i < inst.num_dst_operands(); ++i) {
+    const auto reg = inst.dst_operand(i)->decoded_vgpr();
+    if (reg && !cdna2_vgpr_range_is_allocated(reg->index, reg->width))
+      return true;
+  }
+  return false;
+}
 
 void Wavefront::update_activity_counts(bool was_active, bool was_runnable) {
   if (!activity_tracked_)
@@ -48,17 +77,124 @@ void Wavefront::update_activity_counts(bool was_active, bool was_runnable) {
   (void)previous;
 }
 
+ShaderExportIssue Wavefront::shader_export_issue(const ShaderExportOperands &operands) const {
+  // GFX11.5 section 3.2.3: only DONE or POS0 can issue at zero EXEC.
+  if ((status_raw() & (1u << 18)) || (!exec() && !operands.done && operands.target != 12))
+    return ShaderExportIssue::Skip;
+  return export_ready() ? ShaderExportIssue::Accept : ShaderExportIssue::WaitForReady;
+}
+
+bool Wavefront::export_shader_data(const ShaderExportOperands &operands) {
+  switch (shader_export_issue(operands)) {
+  case ShaderExportIssue::Skip:
+    return true;
+  case ShaderExportIssue::WaitForReady:
+    set_state(WfState::EXPORT_WAIT);
+    return false;
+  case ShaderExportIssue::Accept:
+    break;
+  }
+
+  const uint64_t lanes = operands.source_lanes(exec());
+  const uint8_t row = operands.row_from_m0 ? static_cast<uint8_t>(m0()) : 0;
+  auto previous = std::ranges::find_if(shader_exports_, [&](const ShaderExportRow &entry) {
+    return entry.target == operands.target && entry.row == row;
+  });
+  auto &output = previous == shader_exports_.end() ? shader_exports_.emplace_back() : *previous;
+  output = {operands.target, row, operands.components, operands.done, lanes};
+  RegisterAccess regs(*this);
+  operands.for_each_source(num_vgprs(), [&](unsigned channel, uint16_t source) {
+    for (uint64_t pending = lanes; pending; pending &= pending - 1) {
+      const unsigned lane = std::countr_zero(pending);
+      output.values[lane][channel] = regs.read_vgpr(vgpr_alloc().base + source, lane);
+    }
+  });
+  if (operands.done)
+    set_status_raw(status_raw() & ~(1u << 27)); // MUST_EXPORT
+  return true;
+}
+
+void Wavefront::set_in_trap_handler(bool value) {
+  if (in_trap_handler_ == value)
+    return;
+  const bool was_runnable = !is_halted() && !debug_paused();
+  if (!value && trap_resume_exec_edited_)
+    set_exec(trap_saved_exec_);
+  trap_resume_exec_edited_ = false;
+  in_trap_handler_ = value;
+  status_raw_ = value ? status_raw_ | kStatusPrivMask
+                      : (status_raw_ & ~kStatusPrivMask) | (trap_saved_status_ & kStatusPrivMask);
+  if (was_runnable != (!is_halted() && !debug_paused()))
+    update_activity_counts(!is_halted(), was_runnable);
+}
+
 bool Wavefront::uses_separate_trap_ctrl() const {
   return isa_properties(cu_.arch()).wave_state_layout != WaveStateLayout::Legacy;
 }
 
+bool Wavefront::discards_valu_result(const Instruction &inst) const {
+  if (!(inst.flags() & VALU))
+    return false;
+  switch (cu_.arch()) {
+  case ROCJITSU_CODE_ARCH_CDNA1:
+    return !valu_destinations_allocated(inst);
+  case ROCJITSU_CODE_ARCH_RDNA1:
+  case ROCJITSU_CODE_ARCH_RDNA2:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return !vgpr_destinations_allocated(inst);
+  default:
+    return false;
+  }
+}
+
+bool Wavefront::vgpr_destinations_allocated(const Instruction &inst) const {
+  for (int i = 0; i < inst.num_dst_operands(); ++i) {
+    const auto &operand = *inst.dst_operand(i);
+    const auto reg =
+        cu_.arch() == ROCJITSU_CODE_ARCH_RDNA3_5 && (inst.flags() & MATRIX_REGISTER_ACCESSES)
+            ? RegisterAccess(*this).gfx115_wmma_register(operand, true)
+            : operand.decoded_vgpr();
+    if (reg && operand.size_bits() &&
+        !vgpr_alloc().contains(vgpr_alloc().base + reg->index, reg->width))
+      return false;
+  }
+  return true;
+}
+
+uint64_t Wavefront::memory_exec(const Instruction &inst) const {
+  if (inst.flags() & FIRST_ACTIVE_MEMORY_LANE) {
+    if (cu_.arch() == ROCJITSU_CODE_ARCH_RDNA3_5 && !vgpr_destinations_allocated(inst))
+      return 0;
+    const uint64_t active = exec();
+    return active & -active;
+  }
+  if ((cu_.arch() == ROCJITSU_CODE_ARCH_RDNA1 || cu_.arch() == ROCJITSU_CODE_ARCH_RDNA2) &&
+      (inst.flags() & (VMEM | LDS)) && !vgpr_destinations_allocated(inst))
+    return 0;
+  return exec();
+}
+
+void Wavefront::observe_cancelled_memory_issue(const Instruction &inst) {
+  cu_.plugin_group().onAmdgpuMemoryIssueCancelled(inst, *this);
+}
+
+void Wavefront::observe_lds_direct_read(uint32_t address, uint32_t bytes, uint32_t lane) const {
+  record_lds_source_read(address, bytes);
+  cu_.plugin_group().onAmdgpuLdsDirectRead(*this, address, bytes, lane);
+}
+
 bool Wavefront::has_gpu_memory() const { return cu_.memory() != nullptr; }
+
+uint64_t Wavefront::shader_cycles() const { return cu_.cycle_count(); }
+
+uint64_t Wavefront::realtime_clock() const {
+  return gpu_clock_from_ns(realtime_timestamp(), gpu_clock_mhz(cu_.arch()));
+}
 
 uint64_t Wavefront::realtime_timestamp() const {
   if (use_system_clock_)
     return hsa_system_timestamp();
-  auto *engine = cu_.engine();
-  return engine ? engine->global_time() : 0;
+  return cu_.model_realtime_timestamp() / (simdojo::TICKS_PER_SECOND / 1'000'000'000);
 }
 
 std::optional<GpuVmAccess> Wavefront::snapshot_vm_access() const {
@@ -117,6 +253,27 @@ uint32_t Wavefront::barrier_state(int32_t barrier_id) const {
   return cu_.barrier_state(*this, barrier_id);
 }
 
+void Wavefront::restore_rdna4_checkpoint_barriers(uint8_t complete_mask, uint8_t waiting) {
+  barrier_complete_[kWorkgroupBarrierBit] = (complete_mask & 1u) != 0;
+  barrier_complete_[kWorkgroupTrapBarrierBit] = (complete_mask & 2u) != 0;
+  if (waiting) {
+    waiting_barrier_bit_ = waiting;
+    set_state(WfState::BARRIER);
+  }
+}
+
+bool Wavefront::workgroup_barrier_complete() const {
+  return barrier_complete_[kWorkgroupBarrierBit];
+}
+
+bool Wavefront::trap_barrier_complete() const {
+  return barrier_complete_[kWorkgroupTrapBarrierBit];
+}
+
+void Wavefront::set_workgroup_barrier_complete(bool complete) {
+  barrier_complete_[kWorkgroupBarrierBit] = complete;
+}
+
 void Wavefront::barrier_wait(int32_t barrier_id) { cu_.barrier_wait(*this, barrier_id); }
 
 bool Wavefront::barrier_leave() { return cu_.named_barrier_leave(*this); }
@@ -140,6 +297,20 @@ bool Wavefront::fail_pm4_submission() {
     return false;
   pm4_failure_->fail();
   return true;
+}
+
+void Wavefront::end_ordered_ps(uint32_t instruction_size) {
+  if (!wait_counters_.empty()) {
+    set_wait_all();
+    // Retry the message at this PC after the implicit waits have completed.
+    pc -= instruction_size;
+    return;
+  }
+  if (!cu_.handle_sendmsg(*this, 7)) { // MSG_ORDERED_PS_DONE
+    report_instruction_execution_error(InstructionExecutionError::MissingExecutionBackend);
+    return;
+  }
+  end(EndReason::OrderedPsDone);
 }
 
 void Wavefront::halt(CpCompletionNotice notice) {

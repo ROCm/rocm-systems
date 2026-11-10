@@ -64,7 +64,8 @@ public:
                           std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
                           IntervalSet ldsIntervals,
                           std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                          MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0);
+                          VgprWriteOrder writeOrder, uint8_t lastRegisterByteMask = 0,
+                          LdsAccess ldsAccess = {});
 
   /// Transition an event from ACTIVE to WAVE_COMPLETE.
   void markEventWaveComplete(EventId);
@@ -72,17 +73,24 @@ public:
   /// Satisfy the event's obligations covered by one wait-counter update.
   /// Returns true once every obligation for the event has been satisfied.
   bool satisfyEventWaitCounter(EventId, amdgpu::WaitCounterType);
+  bool appendCounterOnly(EventId id, amdgpu::MemoryCounterObligation issue) {
+    return events_.appendCounterOnly(id, issue);
+  }
 
   /// Retire an event. For LDS-touching events, removes from live lists
   /// and decrements per-byte counts. All events are marked RETIRED in the
   /// registry, enabling prefix trimming.
   void retireEvent(EventId);
+  /// Publish a completed LDS portion at a workgroup barrier. Its VGPR result
+  /// and other counter obligations may still be active.
+  void retireLdsIntervals(EventId);
 
   /// Check for RAW hazards: no outstanding LDS writes overlap the range.
   /// Same-wave operations are ordered only when both belong to the same
   /// non-UNORDERED completion class.
   void validateRead(int addr, WaveId, int lane, int nBytes,
-                    MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS) const;
+                    MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS,
+                    uint8_t atomicBytes = 0) const;
 
   /// Check for WAR hazards: no outstanding LDS reads overlap the range.
   /// Same-wave operations are ordered only when both belong to the same
@@ -90,7 +98,12 @@ public:
   /// TODO(newling): WAW detection (write vs outstanding writes) is not
   /// implemented.
   void validateWrite(int addr, WaveId, int lane, int nBytes,
-                     MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS) const;
+                     MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS,
+                     uint8_t atomicBytes = 0) const;
+
+  /// SRC2 reads a second LDS operand and updates its first address atomically.
+  /// Both ranges share the issuing instruction's wait and barrier lifetime.
+  void attachSrc2Source(EventId id, IntervalSet sourceReads);
 
   /// True only when the complete access lies in the CU's logical LDS backing.
   bool validLdsRange(uint64_t address, uint64_t bytes) const {
@@ -105,6 +118,9 @@ public:
     return std::min(bytes, ldsSizeBytes_ - address) / elementBytes * elementBytes;
   }
 
+  void setConditionalVgprWrite(EventId id, ConditionalVgprWrite feedback) {
+    events_.setConditionalVgprWrite(id, feedback);
+  }
   const EventRegistry &events() const { return events_; }
 
   const std::vector<EventId> &getLdsWriteEvents() const { return ldsWriteEvents; }
@@ -118,7 +134,18 @@ public:
   std::string decorateException(const RaceViolation &, uint64_t wavePc, int numSourceLines,
                                 std::function<std::string_view(int)> getSourceLine) const;
 
+  /// Retire completed LDS accesses for all logical waves of this workgroup,
+  /// including waves that exited and released their physical slots.
+  void resolveWorkgroupBarrier();
+
   WaveRaceState &getWaveRaceState(int waveIndex);
+
+  /// A resolved workgroup barrier publishes completed LDS intervals from all
+  /// its waves, including ones that have already halted.
+  void flushWorkgroupBarrierEvents() {
+    for (auto &wave : waveRaceStates)
+      wave.flushBarrierPendingEvents();
+  }
 
 private:
   void setProfiler(ProfilerInterface &);
@@ -137,6 +164,12 @@ private:
   static bool hasPotentialLdsConflict(int addr, int nBytes,
                                       const std::vector<LdsChunkCounts> &counts, WaveId wave,
                                       MemoryOrderClass currentMemoryOrder);
+
+  struct Src2Event {
+    EventId id;
+    IntervalSet sourceReads;
+  };
+  std::vector<Src2Event> src2Events;
 
   /// Active LDS write events (for scanning during read validation).
   std::vector<EventId> ldsWriteEvents;

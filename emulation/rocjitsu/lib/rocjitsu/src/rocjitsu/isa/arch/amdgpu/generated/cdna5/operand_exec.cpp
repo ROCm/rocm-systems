@@ -101,7 +101,7 @@ std::optional<uint32_t> Isa::resolved_vgpr_offset(const amdgpu::Wavefront &wf, O
 
 bool Isa::simd_capable_value(OperandType opr_type, int ev) {
   return resolved_vgpr_offset(opr_type, ev).has_value() || is_immediate_type(opr_type) ||
-         amdgpu::can_resolve_src_scalar(ev, kM0EncodingValue);
+         amdgpu::can_resolve_src_scalar(ev, ROCJITSU_CODE_ARCH_CDNA5);
 }
 
 bool Operand::simd_capable_exec() const {

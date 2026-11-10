@@ -205,6 +205,11 @@ void DeviceCacheCoherence::release_cache_locks(size_t locked_l2_count,
   }
 }
 
+bool DeviceCacheCoherence::has_multiple_l2_caches() const {
+  std::shared_lock lock(mutex_);
+  return l2_caches_.size() > 1;
+}
+
 void DeviceCacheCoherence::register_l2_cache(L2Cache *cache) {
   std::unique_lock lock(mutex_);
   assert(cache != nullptr);

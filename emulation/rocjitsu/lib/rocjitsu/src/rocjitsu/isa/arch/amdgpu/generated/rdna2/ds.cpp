@@ -2145,6 +2145,14 @@ DsOrderedCountDs::DsOrderedCountDs(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   dsmem_in.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
+                                       (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
+                                                       : amdgpu::MemoryCompletionClass::LDS)},
+       (inst_.gds != 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})},
+      false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 

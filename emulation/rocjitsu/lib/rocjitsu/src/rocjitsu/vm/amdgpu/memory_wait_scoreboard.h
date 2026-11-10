@@ -10,6 +10,7 @@
 #include <array>
 #include <cassert>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <span>
 #include <vector>
@@ -33,6 +34,17 @@ public:
   static constexpr size_t kSpecialBase = kTtmpBase + REGISTER_SET_MAX_TTMPS;
   static constexpr size_t kScalarShadowSlots = 256;
   static constexpr size_t kRegisters = REGISTER_SET_MAX_VGPRS + kScalarShadowSlots;
+  /// Map the named gfx942 special registers into the SGPR dependence space.
+  void set_sgpr_alias_end(uint16_t end) { sgpr_alias_end_ = end; }
+  RegisterRef canonical(RegisterRef reg) const {
+    if (sgpr_alias_end_) {
+      if (reg.cls == RegClass::VCC)
+        return {RegClass::SGPR, static_cast<uint16_t>(sgpr_alias_end_ - 2 + reg.index), reg.width};
+      if (reg.cls == RegClass::FLAT_SCRATCH)
+        return {RegClass::SGPR, static_cast<uint16_t>(sgpr_alias_end_ - 6 + reg.index), reg.width};
+    }
+    return reg;
+  }
   static size_t index(RegisterRef reg) {
     if (reg.cls == RegClass::VGPR && reg.index < REGISTER_SET_MAX_VGPRS)
       return reg.index;
@@ -45,9 +57,9 @@ public:
     return kRegisters;
   }
   static constexpr uint8_t kResult = 1;
-  static constexpr uint8_t kReplaySource = 2;
+  static constexpr uint8_t kSource = 2;
   bool test(size_t i, bool write = false) const {
-    return i < kRegisters && (bytes_[i] & (write ? kResult | kReplaySource : kResult));
+    return i < kRegisters && (bytes_[i] & (write ? kResult | kSource : kResult));
   }
   bool pending_vgpr(uint16_t index, uint8_t width) const {
     assert(index + width <= REGISTER_SET_MAX_VGPRS);
@@ -60,6 +72,7 @@ public:
   }
 
   bool pending(RegisterRef reg, bool write = false) const {
+    reg = canonical(reg);
     for (unsigned r = 0; r < reg.width; ++r) {
       auto element = reg;
       element.index += r;
@@ -74,6 +87,7 @@ public:
   // Result ranges are normally contiguous physical VGPRs. Resolve their file
   // once and combine the overlap probe with marking the same shadow bytes.
   bool mark(RegisterRef reg, uint8_t bits) {
+    reg = canonical(reg);
     bool overlap = false;
     if (reg.cls == RegClass::VGPR && reg.index + reg.width <= REGISTER_SET_MAX_VGPRS) {
       for (unsigned r = 0; r < reg.width; ++r) {
@@ -94,6 +108,7 @@ public:
     return overlap;
   }
   void clear(RegisterRef reg) {
+    reg = canonical(reg);
     if (reg.cls == RegClass::VGPR && reg.index + reg.width <= REGISTER_SET_MAX_VGPRS) {
       for (unsigned r = 0; r < reg.width; ++r)
         bytes_[reg.index + r] = 0;
@@ -109,6 +124,7 @@ public:
   void reset() { bytes_.fill(0); }
 
 private:
+  uint16_t sgpr_alias_end_ = 0;
   std::array<uint8_t, kRegisters> bytes_{};
 };
 
@@ -118,6 +134,12 @@ class MemoryWaitScoreboard {
 public:
   static constexpr uint8_t kFullDwordByteMask = 0xf;
   static constexpr uint16_t kUnordered = UINT16_MAX;
+  struct WriteOrder {
+    constexpr WriteOrder(uint16_t fifo, VmemWriteback writeback = VmemWriteback::Ordinary)
+        : fifo(fifo), writeback(writeback) {}
+    uint16_t fifo;
+    VmemWriteback writeback;
+  };
   explicit MemoryWaitScoreboard(MemoryWaitShadow &shadow) : pending_(shadow) {
     last_order_.fill(kUnordered);
   }
@@ -136,6 +158,27 @@ public:
     // qualify for ordered writeback (see access_pending). Results whose counter
     // decrements in order are not necessarily written to registers in order.
     bool ordered_overwrite = true;
+    // GFX11 FLAT reads need both counters, while an ordered incoming memory
+    // write competes only with lanes written by this counter's pipeline.
+    uint64_t writeback_lanes = ~uint64_t{0};
+    VmemWriteback writeback = VmemWriteback::Ordinary;
+    bool gds_source_lock = false;
+    bool export_source = false; // EXP reads its original VGPR and EXEC values at completion.
+    bool holds_source() const {
+      return gds_source_lock || export_source || counter == WaitCounterKind::X;
+    }
+    uint8_t shadow_kind() const {
+      return holds_source() ? MemoryWaitShadow::kSource : MemoryWaitShadow::kResult;
+    }
+  };
+  struct DeferredWrite {
+    Event result{};
+    struct ProducerThreshold {
+      WaitCounterKind counter;
+      uint64_t sequence;
+      uint32_t required;
+    };
+    std::vector<ProducerThreshold> producers;
   };
   struct Hazard {
     Event producer;
@@ -157,8 +200,18 @@ public:
   /// may issue before cancelling that instruction with this snapshot.
   IssueSnapshot issue_snapshot() const { return issued_; }
   bool cancel_last_issue(uint64_t pc, const IssueSnapshot &before);
-  void before(const Instruction &inst, rj_code_arch_t arch);
+  [[nodiscard]] static util::FailureOr<std::optional<WaitFields>>
+  runtime_wait_fields(const Instruction &inst, const Wavefront &wf);
+  void before(const Instruction &inst, rj_code_arch_t arch, const Wavefront *wf = nullptr);
+  void apply_explicit_wait(const WaitFields &fields);
+  /// Return whether address preparation can change which lanes supply VDATA.
+  static bool needs_buffer_payload_lanes(const Instruction &inst, rj_code_arch_t arch);
   void check_instruction(const Instruction &inst, Wavefront &wf);
+  struct MemoryLanes {
+    uint64_t issue;
+    uint64_t result;
+  };
+  static MemoryLanes memory_lanes(const Instruction &inst, Wavefront &wf);
   static uint64_t result_lanes(const Instruction &inst, Wavefront &wf);
   static bool result_is_written(const Instruction &inst, Wavefront &wf);
   struct FlatLanes {
@@ -181,24 +234,28 @@ public:
   /// Use the same decoded counter units for admission and issue accounting.
   static uint32_t issue_units(const Instruction &inst,
                               const waitcheck_detail::ClassifiedEvent &event, rj_code_arch_t arch);
-  /// Find the incoming producer's FIFO class without issuing its completion.
-  uint16_t ordered_write_order(const waitcheck_detail::ClassifiedEvent &event,
-                               rj_code_arch_t arch) const;
+  /// Find the incoming producer's writeback order without issuing its completion.
+  WriteOrder ordered_write_order(const waitcheck_detail::ClassifiedEvent &event,
+                                 rj_code_arch_t arch) const;
   /// Admission can force completion before the incoming instruction reads its operands.
   void backpressure(WaitCounterKind counter, uint32_t capacity, uint32_t incoming_units = 1);
   void add(Event event);
+  /// Capture older overwrite thresholds before the conditional result occupies a counter position.
+  std::unique_ptr<DeferredWrite> defer_write(RegisterRef reg) const;
+  void complete_deferred_write(DeferredWrite &write, uint64_t lanes);
   void wait(WaitCounterKind counter, uint32_t threshold);
+  void wait(const WaitFields &fields);
   uint64_t outstanding(WaitCounterKind counter) const {
     const auto i = static_cast<size_t>(counter);
     return issued_[i] - retired_[i];
   }
   [[gnu::always_inline]] void access(RegisterRef reg, uint64_t lanes, uint8_t bytes, bool write,
-                                     uint16_t ordered_write_order = kUnordered) {
+                                     WriteOrder ordered_write_order = kUnordered) {
     if (!lanes || !bytes)
       return;
     if (!pending_.pending(reg, write))
       return;
-    access_pending(reg, lanes, bytes, write, ordered_write_order);
+    access_pending(pending_.canonical(reg), lanes, bytes, write, ordered_write_order);
   }
 
   void bind(uint64_t pc, void *context, Reporter reporter) {
@@ -218,7 +275,9 @@ private:
   void check_memory_result(const Instruction &inst, Wavefront &wf, uint64_t vector_lanes,
                            const RegisterModifiers &modifiers);
   void access_pending(RegisterRef reg, uint64_t lanes, uint8_t bytes, bool write,
-                      uint16_t ordered_write_order);
+                      WriteOrder ordered_write_order);
+  void check_pending(RegisterRef reg, uint64_t lanes, uint8_t bytes, bool write,
+                     WriteOrder ordered_write_order, const DeferredWrite *deferred);
   void rebuild_mask();
   void clear_destination(const Event &event);
   void retire_completed();
@@ -233,6 +292,7 @@ private:
   std::array<uint32_t, kCounters> ordering_kinds_{};
   struct Order {
     WaitCounterKind counter;
+    VmemWriteback last_writeback;
     uint32_t kind;
     uint64_t issued = 0;
     uint64_t retired = 0;

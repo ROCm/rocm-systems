@@ -133,8 +133,6 @@ void SSetpcB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;
   const uint64_t encoded = amdgpu::RegisterAccess(wf).read_scalar64(ssrc0);
   uint64_t target = encoded & kPcAddressMask;
-  if (encoded >> 32 == 0x1FFFFu && wf.code_load_bias() != 0)
-    target = wf.code_load_bias() + static_cast<int32_t>(encoded);
   wf.pc = target - size_;
 }
 
@@ -145,13 +143,40 @@ void SSwappcB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
     next_pc |= ~kPcAddressMask;
   const uint64_t encoded = amdgpu::RegisterAccess(wf).read_scalar64(ssrc0);
   uint64_t target = encoded & kPcAddressMask;
-  if (encoded >> 32 == 0x1FFFFu && wf.code_load_bias() != 0)
-    target = wf.pc + size_ - 20 + static_cast<int32_t>(encoded);
   wf.pc = target - size_;
   amdgpu::RegisterAccess(wf).write_scalar64(sdst, next_pc);
 }
 
-void SRfeB64Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_rfe_b64_sop1(*this, wf); }
+void SRfeB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
+  uint64_t saved_pc = amdgpu::RegisterAccess(wf).read_scalar64(ssrc0);
+  constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;
+  wf.pc = (saved_pc & kPcAddressMask) - size_;
+
+  constexpr uint32_t kStatusHalt = 1u << 13;
+  const bool keep_halted = (wf.status_raw() & kStatusHalt) != 0;
+  // GFX12 returns the interrupted wave state while preserving the handler's
+  // STATE_PRIV.HALT decision. Older layouts keep using the live STATUS word.
+  if (wf.in_trap_handler() && wf.uses_separate_trap_ctrl()) {
+    uint32_t restored_status = wf.trap_saved_status();
+    restored_status =
+        keep_halted ? (restored_status | kStatusHalt) : (restored_status & ~kStatusHalt);
+    wf.set_status_raw(restored_status);
+  }
+
+  wf.set_in_trap_handler(false);
+
+  // The handler sets STATUS.HALT when it wants the wave to stay
+  // stopped for the debugger; honour that on the way out.
+  if (keep_halted) {
+    wf.set_debug_single_step(false);
+    wf.set_debug_halted(true);
+  } else {
+    // Nothing is halting the wave any more, so an s_sendmsghalt marker
+    // left over from an earlier stop is stale. Leaving it set would make
+    // the next resume clear a HALT the handler raises later.
+    wf.set_self_halted(false);
+  }
+}
 
 void SAndSaveexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_and_saveexec_b64_sop1(*this, wf);

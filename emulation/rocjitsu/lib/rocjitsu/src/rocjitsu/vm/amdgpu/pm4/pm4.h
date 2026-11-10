@@ -31,7 +31,9 @@ inline constexpr uint32_t kPm4ComputeScratchLo = 0x210;
 inline constexpr uint32_t kPm4ComputeScratchHi = 0x211;
 inline constexpr uint32_t kPm4ComputePgmRsrc1 = 0x212;
 inline constexpr uint32_t kPm4ComputePgmRsrc2 = 0x213;
+inline constexpr uint32_t kPm4ComputePgmRsrc3Gfx9 = 0x22d;
 inline constexpr uint32_t kPm4ComputeTmpringSize = 0x218;
+inline constexpr uint32_t kPm4ComputePgmRsrc3Gfx90a = kPm4ComputePgmRsrc3Gfx9;
 inline constexpr uint32_t kPm4ComputeUserData0 = 0x240;
 
 /// @brief Type-3 packet opcodes accepted by the command processor.
@@ -125,6 +127,8 @@ struct Pm4IndirectBuffer {
   /// Nonzero only for a root ring frame; nested IBs always use linear addresses.
   uint64_t ring_base = 0;
   uint32_t ring_bytes = 0;
+  /// DRM asks the kernel to reset this ring's compute wave IDs before this IB.
+  bool reset_gds_wave_id = false;
 };
 
 /// @brief Shared launch/wave failure status; wake the CP to cancel the owning queue.

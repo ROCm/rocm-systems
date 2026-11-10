@@ -132,8 +132,8 @@ constexpr V f32_to_integer(V bits, Rounding rounding, NanResult nan_result) {
   const V half = (V(L{1}) << shift) >> 1;
   const V rounded =
       kept + choose(detail::rounds_up<F32>(rounding, negative, kept, rest, half), V(L{1}), V(L{0}));
-  // At or above 2^31 every Int saturates; below it the left shift is at most 7 bits.
-  const auto huge = field >= V(kUnitField + 8);
+  // Unsigned DWORD results retain one more magnitude bit than signed results.
+  const auto huge = field >= V(kUnitField + (std::is_same_v<Int, uint32_t> ? 9 : 8));
   const V left = choose(integral && !huge, field - V(kUnitField), V(L{0}));
   const V units = choose(integral, significand << left, rounded);
 

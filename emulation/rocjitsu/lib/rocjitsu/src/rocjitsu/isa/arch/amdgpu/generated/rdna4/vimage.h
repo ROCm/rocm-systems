@@ -20,12 +20,15 @@ public:
   ImageLoadVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_transfer_dim = inst_.dim;
+    modifiers.image_resource = &rsrc;
+    modifiers.image_reads_address = inst_.dmask;
     modifiers.image_address = &vaddr;
     modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
-    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u))
-      modifiers.memory_result_last_bytes = 0x3;
+    if (inst_.d16)
+      modifiers.set_packed_image_result(std::max(1, std::popcount(uint32_t{inst_.dmask})));
   }
   bool should_print_src_operand(uint8_t operand_index) const override;
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
@@ -42,12 +45,14 @@ public:
   ImageLoadMipVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_resource = &rsrc;
+    modifiers.image_reads_address = inst_.dmask;
     modifiers.image_address = &vaddr;
     modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
     modifiers.image_a16 = inst_.a16;
     modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
-    if (inst_.d16 && (std::popcount(uint32_t{inst_.dmask}) & 1u))
-      modifiers.memory_result_last_bytes = 0x3;
+    if (inst_.d16)
+      modifiers.set_packed_image_result(std::max(1, std::popcount(uint32_t{inst_.dmask})));
   }
   bool should_print_src_operand(uint8_t operand_index) const override;
   void append_src_operand(std::string &out, uint8_t operand_index) const override;
@@ -63,6 +68,22 @@ class ImageLoadPckVimage : public Vimage {
 public:
   ImageLoadPckVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_transfer_dim = inst_.dim;
+    modifiers.image_resource = &rsrc;
+    modifiers.image_reads_address = inst_.dmask;
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
+    if (inst_.d16)
+      modifiers.set_packed_image_result(std::max(1, std::popcount(uint32_t{inst_.dmask})));
+  }
+  bool should_print_src_operand(uint8_t operand_index) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  bool implicit_preservation_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -72,6 +93,22 @@ class ImageLoadPckSgnVimage : public Vimage {
 public:
   ImageLoadPckSgnVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_transfer_dim = inst_.dim;
+    modifiers.image_resource = &rsrc;
+    modifiers.image_reads_address = inst_.dmask;
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
+    if (inst_.d16)
+      modifiers.set_packed_image_result(std::max(1, std::popcount(uint32_t{inst_.dmask})));
+  }
+  bool should_print_src_operand(uint8_t operand_index) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  bool implicit_preservation_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -81,6 +118,21 @@ class ImageLoadMipPckVimage : public Vimage {
 public:
   ImageLoadMipPckVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_resource = &rsrc;
+    modifiers.image_reads_address = inst_.dmask;
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
+    if (inst_.d16)
+      modifiers.set_packed_image_result(std::max(1, std::popcount(uint32_t{inst_.dmask})));
+  }
+  bool should_print_src_operand(uint8_t operand_index) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  bool implicit_preservation_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -90,6 +142,21 @@ class ImageLoadMipPckSgnVimage : public Vimage {
 public:
   ImageLoadMipPckSgnVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_resource = &rsrc;
+    modifiers.image_reads_address = inst_.dmask;
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
+    if (inst_.d16)
+      modifiers.set_packed_image_result(std::max(1, std::popcount(uint32_t{inst_.dmask})));
+  }
+  bool should_print_src_operand(uint8_t operand_index) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  bool implicit_preservation_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -100,6 +167,10 @@ public:
   ImageStoreVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_store_data = &vdata;
+    modifiers.image_transfer_dim = inst_.dim;
+    modifiers.image_resource = &rsrc;
+    modifiers.image_reads_address = inst_.dmask;
     modifiers.image_address = &vaddr;
     modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
     modifiers.image_a16 = inst_.a16;
@@ -119,6 +190,9 @@ public:
   ImageStoreMipVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_store_data = &vdata;
+    modifiers.image_resource = &rsrc;
+    modifiers.image_reads_address = inst_.dmask;
     modifiers.image_address = &vaddr;
     modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
     modifiers.image_a16 = inst_.a16;
@@ -137,6 +211,20 @@ class ImageStorePckVimage : public Vimage {
 public:
   ImageStorePckVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_store_data = &vdata;
+    modifiers.image_transfer_dim = inst_.dim;
+    modifiers.image_resource = &rsrc;
+    modifiers.image_reads_address = inst_.dmask;
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
+  }
+  bool should_print_src_operand(uint8_t operand_index) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -146,6 +234,19 @@ class ImageStoreMipPckVimage : public Vimage {
 public:
   ImageStoreMipPckVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_store_data = &vdata;
+    modifiers.image_resource = &rsrc;
+    modifiers.image_reads_address = inst_.dmask;
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 1;
+  }
+  bool should_print_src_operand(uint8_t operand_index) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -155,6 +256,20 @@ class ImageAtomicSwapVimage : public Vimage {
 public:
   ImageAtomicSwapVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_atomic_data = &vdata;
+    modifiers.image_transfer_dim = inst_.dim;
+    modifiers.image_resource = &rsrc;
+    modifiers.image_reads_address = inst_.dmask;
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
+  }
+  bool should_print_src_operand(uint8_t operand_index) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vdata_return;
   Operand vaddr;
@@ -167,6 +282,20 @@ class ImageAtomicCmpswapVimage : public Vimage {
 public:
   ImageAtomicCmpswapVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_atomic_data = &vdata;
+    modifiers.image_transfer_dim = inst_.dim;
+    modifiers.image_resource = &rsrc;
+    modifiers.image_reads_address = inst_.dmask;
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
+  }
+  bool should_print_src_operand(uint8_t operand_index) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vdata_return;
   Operand vaddr;
@@ -179,6 +308,20 @@ class ImageAtomicAddUintVimage : public Vimage {
 public:
   ImageAtomicAddUintVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_atomic_data = &vdata;
+    modifiers.image_transfer_dim = inst_.dim;
+    modifiers.image_resource = &rsrc;
+    modifiers.image_reads_address = inst_.dmask;
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
+  }
+  bool should_print_src_operand(uint8_t operand_index) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vdata_return;
   Operand vaddr;
@@ -191,6 +334,20 @@ class ImageAtomicSubUintVimage : public Vimage {
 public:
   ImageAtomicSubUintVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_atomic_data = &vdata;
+    modifiers.image_transfer_dim = inst_.dim;
+    modifiers.image_resource = &rsrc;
+    modifiers.image_reads_address = inst_.dmask;
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
+  }
+  bool should_print_src_operand(uint8_t operand_index) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vdata_return;
   Operand vaddr;
@@ -203,6 +360,20 @@ class ImageAtomicMinIntVimage : public Vimage {
 public:
   ImageAtomicMinIntVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_atomic_data = &vdata;
+    modifiers.image_transfer_dim = inst_.dim;
+    modifiers.image_resource = &rsrc;
+    modifiers.image_reads_address = inst_.dmask;
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
+  }
+  bool should_print_src_operand(uint8_t operand_index) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vdata_return;
   Operand vaddr;
@@ -215,6 +386,20 @@ class ImageAtomicMinUintVimage : public Vimage {
 public:
   ImageAtomicMinUintVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_atomic_data = &vdata;
+    modifiers.image_transfer_dim = inst_.dim;
+    modifiers.image_resource = &rsrc;
+    modifiers.image_reads_address = inst_.dmask;
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
+  }
+  bool should_print_src_operand(uint8_t operand_index) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vdata_return;
   Operand vaddr;
@@ -227,6 +412,20 @@ class ImageAtomicMaxIntVimage : public Vimage {
 public:
   ImageAtomicMaxIntVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_atomic_data = &vdata;
+    modifiers.image_transfer_dim = inst_.dim;
+    modifiers.image_resource = &rsrc;
+    modifiers.image_reads_address = inst_.dmask;
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
+  }
+  bool should_print_src_operand(uint8_t operand_index) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vdata_return;
   Operand vaddr;
@@ -239,6 +438,20 @@ class ImageAtomicMaxUintVimage : public Vimage {
 public:
   ImageAtomicMaxUintVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_atomic_data = &vdata;
+    modifiers.image_transfer_dim = inst_.dim;
+    modifiers.image_resource = &rsrc;
+    modifiers.image_reads_address = inst_.dmask;
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
+  }
+  bool should_print_src_operand(uint8_t operand_index) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vdata_return;
   Operand vaddr;
@@ -251,6 +464,20 @@ class ImageAtomicAndVimage : public Vimage {
 public:
   ImageAtomicAndVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_atomic_data = &vdata;
+    modifiers.image_transfer_dim = inst_.dim;
+    modifiers.image_resource = &rsrc;
+    modifiers.image_reads_address = inst_.dmask;
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
+  }
+  bool should_print_src_operand(uint8_t operand_index) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vdata_return;
   Operand vaddr;
@@ -263,6 +490,20 @@ class ImageAtomicOrVimage : public Vimage {
 public:
   ImageAtomicOrVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_atomic_data = &vdata;
+    modifiers.image_transfer_dim = inst_.dim;
+    modifiers.image_resource = &rsrc;
+    modifiers.image_reads_address = inst_.dmask;
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
+  }
+  bool should_print_src_operand(uint8_t operand_index) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vdata_return;
   Operand vaddr;
@@ -275,6 +516,20 @@ class ImageAtomicXorVimage : public Vimage {
 public:
   ImageAtomicXorVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_atomic_data = &vdata;
+    modifiers.image_transfer_dim = inst_.dim;
+    modifiers.image_resource = &rsrc;
+    modifiers.image_reads_address = inst_.dmask;
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
+  }
+  bool should_print_src_operand(uint8_t operand_index) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vdata_return;
   Operand vaddr;
@@ -287,6 +542,20 @@ class ImageAtomicIncUintVimage : public Vimage {
 public:
   ImageAtomicIncUintVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_atomic_data = &vdata;
+    modifiers.image_transfer_dim = inst_.dim;
+    modifiers.image_resource = &rsrc;
+    modifiers.image_reads_address = inst_.dmask;
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
+  }
+  bool should_print_src_operand(uint8_t operand_index) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vdata_return;
   Operand vaddr;
@@ -299,6 +568,20 @@ class ImageAtomicDecUintVimage : public Vimage {
 public:
   ImageAtomicDecUintVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_atomic_data = &vdata;
+    modifiers.image_transfer_dim = inst_.dim;
+    modifiers.image_resource = &rsrc;
+    modifiers.image_reads_address = inst_.dmask;
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
+  }
+  bool should_print_src_operand(uint8_t operand_index) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vdata_return;
   Operand vaddr;
@@ -311,6 +594,17 @@ class ImageGetResinfoVimage : public Vimage {
 public:
   ImageGetResinfoVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_resource_info = true;
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates[0] = inst_.vaddr0;
+    modifiers.image_coordinate_count = inst_.dmask != 0;
+    modifiers.image_a16 = inst_.a16;
+  }
+  bool should_print_src_operand(uint8_t operand_index) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vaddr;
   Operand rsrc;
@@ -356,6 +650,20 @@ class ImageAtomicAddFltVimage : public Vimage {
 public:
   ImageAtomicAddFltVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_atomic_data = &vdata;
+    modifiers.image_transfer_dim = inst_.dim;
+    modifiers.image_resource = &rsrc;
+    modifiers.image_reads_address = inst_.dmask;
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
+  }
+  bool should_print_src_operand(uint8_t operand_index) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vdata_return;
   Operand vaddr;
@@ -368,6 +676,20 @@ class ImageAtomicMinFltVimage : public Vimage {
 public:
   ImageAtomicMinFltVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_atomic_data = &vdata;
+    modifiers.image_transfer_dim = inst_.dim;
+    modifiers.image_resource = &rsrc;
+    modifiers.image_reads_address = inst_.dmask;
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
+  }
+  bool should_print_src_operand(uint8_t operand_index) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vdata_return;
   Operand vaddr;
@@ -380,6 +702,20 @@ class ImageAtomicMaxFltVimage : public Vimage {
 public:
   ImageAtomicMaxFltVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_atomic_data = &vdata;
+    modifiers.image_transfer_dim = inst_.dim;
+    modifiers.image_resource = &rsrc;
+    modifiers.image_reads_address = inst_.dmask;
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
+  }
+  bool should_print_src_operand(uint8_t operand_index) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vdata_return;
   Operand vaddr;
@@ -392,6 +728,20 @@ class ImageAtomicPkAddF16Vimage : public Vimage {
 public:
   ImageAtomicPkAddF16Vimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_atomic_data = &vdata;
+    modifiers.image_transfer_dim = inst_.dim;
+    modifiers.image_resource = &rsrc;
+    modifiers.image_reads_address = inst_.dmask;
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
+  }
+  bool should_print_src_operand(uint8_t operand_index) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vdata_return;
   Operand vaddr;
@@ -404,6 +754,20 @@ class ImageAtomicPkAddBf16Vimage : public Vimage {
 public:
   ImageAtomicPkAddBf16Vimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.image_atomic_data = &vdata;
+    modifiers.image_transfer_dim = inst_.dim;
+    modifiers.image_resource = &rsrc;
+    modifiers.image_reads_address = inst_.dmask;
+    modifiers.image_address = &vaddr;
+    modifiers.image_coordinates = amdgpu::gfx12_image_address_registers(inst_);
+    modifiers.image_a16 = inst_.a16;
+    modifiers.image_coordinate_count = amdgpu::image_coordinate_count(inst_.dim) + 0;
+  }
+  bool should_print_src_operand(uint8_t operand_index) const override;
+  void append_src_operand(std::string &out, uint8_t operand_index) const override;
+  void implicit_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t operand_index) const override;
   Operand vdata;
   Operand vdata_return;
   Operand vaddr;

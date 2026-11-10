@@ -18,7 +18,9 @@ rj_add_object_library(
 )
 target_link_libraries(
     rocjitsu_plugin_race_detector
-    INTERFACE $<TARGET_OBJECTS:rocjitsu_wait_counter_policy>
+    INTERFACE
+        $<TARGET_OBJECTS:rocjitsu_wait_counter_policy>
+        $<TARGET_OBJECTS:rocjitsu_waitcheck_target>
 )
 
 rj_add_object_library(
@@ -100,9 +102,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
                 wait_policy_objects
                 rocjitsu_wait_counter_policy
             )
+            rj_vptr_free_object_library(wait_target_objects rocjitsu_waitcheck_target)
             target_link_libraries(
                 ${plugin_objects}
-                INTERFACE $<TARGET_OBJECTS:${wait_policy_objects}>
+                INTERFACE
+                    $<TARGET_OBJECTS:${wait_policy_objects}>
+                    $<TARGET_OBJECTS:${wait_target_objects}>
             )
         endif()
         # Link the plugin's own logic. Any simulator code it references is

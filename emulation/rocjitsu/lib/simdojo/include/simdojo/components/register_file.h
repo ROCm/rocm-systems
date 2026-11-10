@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <type_traits>
@@ -351,25 +352,27 @@ public:
 
   /// @brief Try to allocate a contiguous block of registers.
   /// @param count Number of registers needed (must be <= regs_per_block).
-  /// @returns Base register index, or -1 if no free block.
+  /// @param block Optional fixed block ordinal, for restoring a physical allocation.
+  /// @returns Base register index, or -1 if the requested allocation is unavailable.
   /// @post On success, every register in the returned allocation block is zero.
-  int32_t allocate(uint32_t count) {
+  int32_t allocate(uint32_t count, std::optional<uint32_t> block = std::nullopt) {
     if (count == 0 || regs_per_block_ == 0 || free_block_count_ == 0)
       return -1;
     assert(count <= regs_per_block_ && "requested register count exceeds block size");
-    for (size_t i = 0; i < free_blocks_.size(); ++i) {
-      if (free_blocks_[i]) {
-        free_blocks_[i] = false;
-        --free_block_count_;
-        uint32_t base = static_cast<uint32_t>(i * regs_per_block_);
-        if (needs_reset_[i]) {
-          data_.reset(base, regs_per_block_);
-          needs_reset_[i] = false;
-        }
-        return static_cast<int32_t>(base);
-      }
+    const size_t i =
+        block ? *block
+              : static_cast<size_t>(std::find(free_blocks_.begin(), free_blocks_.end(), true) -
+                                    free_blocks_.begin());
+    if (i >= free_blocks_.size() || !free_blocks_[i])
+      return -1;
+    free_blocks_[i] = false;
+    --free_block_count_;
+    const auto base = static_cast<uint32_t>(i * regs_per_block_);
+    if (needs_reset_[i]) {
+      data_.reset(base, regs_per_block_);
+      needs_reset_[i] = false;
     }
-    return -1;
+    return static_cast<int32_t>(base);
   }
 
   /// @brief Free a previously allocated block.

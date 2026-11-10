@@ -128,34 +128,52 @@ void SCallB64Sopk::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SWaitcntVscntSopk::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
-  wf.set_wait_target_vscnt(static_cast<uint8_t>(cnt));
+  const uint32_t threshold =
+      amdgpu::RegisterAccess(wf).read_scalar(sdst) + static_cast<uint32_t>(simm16.encoding_value_);
+  wf.wait_for({.vscnt = static_cast<uint8_t>(threshold & 0x3fu)});
 }
 
 void SWaitcntVmcntSopk::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
-  wf.set_wait_target_loadcnt(static_cast<uint8_t>(cnt));
+  const uint32_t threshold =
+      amdgpu::RegisterAccess(wf).read_scalar(sdst) + static_cast<uint32_t>(simm16.encoding_value_);
+  wf.wait_for({.vmcnt = static_cast<uint8_t>(threshold & 0x3fu)});
 }
 
 void SWaitcntExpcntSopk::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
-  wf.set_wait_counter("wait_expcnt", cnt);
+  const uint32_t threshold =
+      amdgpu::RegisterAccess(wf).read_scalar(sdst) + static_cast<uint32_t>(simm16.encoding_value_);
+  wf.wait_for({.expcnt = static_cast<uint8_t>(threshold & 0x7u)});
 }
 
 void SWaitcntLgkmcntSopk::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
-  const auto current_wait = wf.wait_target();
-  wf.set_wait_target(current_wait.vmcnt, static_cast<uint8_t>(cnt), current_wait.expcnt);
+  const uint32_t threshold =
+      amdgpu::RegisterAccess(wf).read_scalar(sdst) + static_cast<uint32_t>(simm16.encoding_value_);
+  wf.wait_for({.lgkmcnt = static_cast<uint8_t>(threshold & 0x3fu)});
 }
 
 void SSubvectorLoopBeginSopk::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  const uint64_t exec = wf.exec_raw();
+  (void)amdgpu::RegisterAccess(wf).read_scalar(sdst);
+  if (!exec) {
+    wf.pc += int64_t{static_cast<int16_t>(simm16.encoding_value_)} * 4;
+  } else if (static_cast<uint32_t>(exec) == 0) {
+    amdgpu::RegisterAccess(wf).write_scalar(sdst, 0);
+  } else {
+    amdgpu::RegisterAccess(wf).write_scalar(sdst, static_cast<uint32_t>(exec >> 32));
+    wf.write_exec_hi(0);
+  }
 }
 
 void SSubvectorLoopEndSopk::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  const uint64_t exec = wf.exec_raw();
+  const uint32_t saved = amdgpu::RegisterAccess(wf).read_scalar(sdst);
+  if (exec >> 32) {
+    wf.write_exec_lo(saved);
+  } else if (saved != 0) {
+    amdgpu::RegisterAccess(wf).write_scalar(sdst, static_cast<uint32_t>(exec));
+    wf.write_exec(uint64_t{saved} << 32);
+    wf.pc += int64_t{static_cast<int16_t>(simm16.encoding_value_)} * 4;
+  }
 }
 
 } // namespace rdna1

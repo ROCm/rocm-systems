@@ -60,6 +60,8 @@ namespace rocjitsu::test {
 
 class ComputeUnitTestAccess {
 public:
+  static void tick_memory_pipelines(amdgpu::ComputeUnitCore &cu) { cu.tick_pipelines(); }
+
   static amdgpu::Wavefront *sgpr_owner(const amdgpu::ComputeUnitCore &cu, uint32_t reg_idx) {
     return cu.sgpr_owner(reg_idx);
   }
@@ -293,6 +295,7 @@ struct CapturedAccess {
   uint64_t architectural_exec_lane_mask = 0;
   uint64_t valid_lane_mask = 0;
   uint64_t request_lane_mask = 0;
+  std::optional<uint64_t> ordered_count_result_lane_mask;
   uint64_t inactive_lane_mask = 0;
   uint64_t unknown_lane_mask = 0;
   uint64_t scratch_lane_mask = 0;
@@ -309,6 +312,8 @@ struct CapturedAccess {
   std::vector<uint64_t> pre_routing_addresses;
   std::vector<uint64_t> execution_addresses;
   std::vector<uint64_t> secondary_addresses;
+  std::vector<uint32_t> lds_source_addresses;
+  std::optional<amdgpu::LdsAllocationRange> lds_allocation;
   std::vector<amdgpu::WaitCounterType> issued_counters;
 };
 
@@ -376,6 +381,7 @@ public:
     captured.architectural_exec_lane_mask = access.architectural_exec_lane_mask;
     captured.valid_lane_mask = access.valid_lane_mask;
     captured.request_lane_mask = access.request_lane_mask;
+    captured.ordered_count_result_lane_mask = access.ordered_count_result_lane_mask;
     captured.inactive_lane_mask = access.inactive_lane_mask();
     captured.unknown_lane_mask = access.unknown_lane_mask();
     captured.scratch_lane_mask = access.scratch_lane_mask;
@@ -397,6 +403,9 @@ public:
                                           access.pre_routing_addresses.end());
     captured.secondary_addresses.assign(access.secondary_addresses.begin(),
                                         access.secondary_addresses.end());
+    captured.lds_source_addresses.assign(access.lds_source_addresses.begin(),
+                                         access.lds_source_addresses.end());
+    captured.lds_allocation = access.lds_allocation;
     accesses.push_back(std::move(captured));
   }
 
@@ -744,6 +753,10 @@ struct PluginFixture {
     RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                        granulated_sgpr_count);
     RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+    if (cu()->arch() == ROCJITSU_CODE_ARCH_CDNA4) {
+      // These kernels use the 256-register allocation for ordinary VGPRs.
+      RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 63);
+    }
     kd.group_segment_fixed_size = group_segment_fixed_size;
     mem->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), addr);
     mem->load_image(reinterpret_cast<const uint8_t *>(code), num_words * 4,

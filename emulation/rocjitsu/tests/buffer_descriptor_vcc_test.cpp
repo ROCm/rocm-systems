@@ -63,7 +63,8 @@ TEST(RdnaAddrCalcTest, BufferDescriptorCanSpanSgprsAndVccWithoutReadingAdjacentW
     // Adjacent storage has zero NUM_RECORDS; the real bound lives in VCC_LO.
     cu->write_sgpr(next->sgpr_alloc().base, 0);
     cu->write_sgpr(next->sgpr_alloc().base + 1, 0);
-    wf->set_vcc_raw(arch == ROCJITSU_CODE_ARCH_CDNA5 ? 0 : (uint64_t{3u << 28} << 32) | 16);
+    const uint32_t resource_flags = (3u << 28) | (20u << 12); // Bound R32 with byte-range checking.
+    wf->set_vcc_raw(arch == ROCJITSU_CODE_ARCH_CDNA5 ? 0 : (uint64_t{resource_flags} << 32) | 16);
     amdgpu::VectorMemState state(amdgpu::GLOBAL_MEM);
     state.elem_size = 4;
     state.num_elems = 1;

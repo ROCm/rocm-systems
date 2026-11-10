@@ -574,6 +574,7 @@ RJ_DECODE_FACTORY(rdna4, detail, decodeSFmaakF32Sop2);
 RJ_DECODE_FACTORY(rdna4, detail, decodeSFmacF16Sop2);
 RJ_DECODE_FACTORY(rdna4, detail, decodeSFmacF32Sop2);
 RJ_DECODE_FACTORY(rdna4, detail, decodeSFmamkF32Sop2);
+RJ_DECODE_FACTORY(rdna4, detail, decodeSGetBarrierStateSop1);
 RJ_DECODE_FACTORY(rdna4, detail, decodeSGetpcB64Sop1);
 RJ_DECODE_FACTORY(rdna4, detail, decodeSGetregB32Sopk);
 RJ_DECODE_FACTORY(rdna4, detail, decodeSIcacheInvSopp);

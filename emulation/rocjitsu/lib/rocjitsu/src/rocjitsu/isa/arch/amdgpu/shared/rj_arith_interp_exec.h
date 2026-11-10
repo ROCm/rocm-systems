@@ -13,6 +13,42 @@
 
 namespace rocjitsu::amdgpu::arith {
 
+// GFX11.5 interpolation is one mixed FMA with fixed quad broadcasts. Reuse
+// the GFX11 exact kernel for NaN priority, guest rounding, and packed writes.
+// VINTERP never raises FP exceptions, including under the strictest policy.
+template <bool P2, bool Half, bool Rtz, typename Mask>
+inline int gfx115_interp(uint64_t flags, Mask exec, uint64_t modifiers, uint32_t *const *dst,
+                         const uint32_t *const *a, const uint32_t *const *b,
+                         const uint32_t *const *c) {
+  constexpr unsigned width = sizeof(Mask) * 8;
+  std::array<uint32_t, width> coefficient{}, origin{};
+  for (Mask active = exec; active; active &= active - 1) {
+    const unsigned lane = std::countr_zero(active);
+    const unsigned quad = lane & ~3u;
+    coefficient[lane] = a[0][quad + (P2 ? 2 : 1)];
+    origin[lane] = c[0][P2 ? lane : quad];
+  }
+  const uint32_t *ap = coefficient.data(), *cp = origin.data();
+  flags = (flags & ~RJ_ARITH_SEMANTICS_MASK) | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS;
+  if constexpr (Rtz)
+    flags = (flags & ~RJ_ARITH_FP_ROUND_MASK) | RJ_ARITH_FP_ROUND_ZERO;
+  if constexpr (Half)
+    modifiers |= RJ_ARITH_MIX_F16_A | (P2 ? 0 : RJ_ARITH_MIX_F16_C);
+  const bool high = modifiers & RJ_ARITH_ALU_HIGH_D;
+  modifiers &= ~RJ_ARITH_ALU_HIGH_D;
+  if constexpr (width == 32) {
+    const auto fma = Half && P2
+                         ? (high ? rj_arith_v_fma_mixhi_f16_w32 : rj_arith_v_fma_mixlo_f16_w32)
+                         : rj_arith_v_fma_mix_f32_w32;
+    return fma(flags, exec, modifiers, dst, &ap, b, &cp, nullptr);
+  } else {
+    const auto fma = Half && P2
+                         ? (high ? rj_arith_v_fma_mixhi_f16_w64 : rj_arith_v_fma_mixlo_f16_w64)
+                         : rj_arith_v_fma_mix_f32_w64;
+    return fma(flags, exec, modifiers, dst, &ap, b, &cp, nullptr);
+  }
+}
+
 // Observe the quad-broadcast source lanes even when they are inactive in EXEC.
 // Acquire every input before writes, and preserve the other half for FP16 P2.
 // Interpolation uses guest FP controls and has no FP-status output.

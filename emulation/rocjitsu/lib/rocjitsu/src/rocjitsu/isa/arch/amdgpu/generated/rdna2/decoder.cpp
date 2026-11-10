@@ -178,6 +178,14 @@ DecodeResult DecoderImpl::subDecodeDs(const MachineInst *opcode,
 DecodeResult DecoderImpl::subDecodeFlat(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Flat::OpEncoding op = *reinterpret_cast<const decltype(op) *>(opcode);
+  static constexpr uint8_t segment_masks[] = {
+      0, 0, 0, 0, 0, 0, 0, 0, 7, 7, 7, 7, 7, 7, 7, 7, 0, 0, 0, 0, 0, 0, 4, 4, 7, 7,
+      7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 5, 5, 5,
+      4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 5, 5, 5, 5, 0, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+  if (!(segment_masks[op.op] & (1u << op.seg))) [[unlikely]]
+    return emit_error.emit() << "Invalid FLAT segment for opcode " << static_cast<unsigned>(op.op);
 #if RJ_HOST_HAS_X86_64_ELF_REL32
   return sub_decode_flat[op.op](opcode, emit_error);
 #else
@@ -209,9 +217,9 @@ DecodeResult DecoderImpl::subDecodeMimg(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Mimg::OpEncoding op = *reinterpret_cast<const decltype(op) *>(opcode);
 #if RJ_HOST_HAS_X86_64_ELF_REL32
-  return sub_decode_mimg[op.op](opcode, emit_error);
+  return sub_decode_mimg[op.op | (op.opm << 7)](opcode, emit_error);
 #else
-  switch (static_cast<unsigned>(op.op)) { RJ_SUB_DECODE_MIMG_ROWS }
+  switch (static_cast<unsigned>(op.op | (op.opm << 7))) { RJ_SUB_DECODE_MIMG_ROWS }
 #endif
 }
 

@@ -2498,5 +2498,29 @@ void SRndneF16Sop1::implicit_uses(RegisterSet &uses) const {
     uses.expand(*r);
 }
 
+SGetBarrierStateSop1::SGetBarrierStateSop1(const MachineInst *inst)
+    : Sop1("s_get_barrier_state", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SGetBarrierStateSop1)),
+      sdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->sdst),
+      ssrc0(32, OperandType::OPR_SSRC_BARRIER_ID,
+            reinterpret_cast<const OpEncoding *>(inst)->ssrc0) {
+  dst_operands_[0] = &sdst;
+  src_operands_[0] = &ssrc0;
+  num_src_ = 1;
+  num_dst_ = 1;
+  flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+namespace detail {
+DecodeResult decodeSGetBarrierStateSop1(const MachineInst *opcode,
+                                        const DecodeErrorEmitter &emit_error) {
+  Result validation = Sop1::validate_encoding(
+      "s_get_barrier_state", reinterpret_cast<const Sop1::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SGetBarrierStateSop1>(opcode);
+}
+} // namespace detail
+
 } // namespace rdna4
 } // namespace rocjitsu

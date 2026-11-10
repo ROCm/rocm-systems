@@ -340,12 +340,14 @@ struct DispatchEntry {
   uint32_t wfs_per_workgroup = 1;
   uint32_t sgprs_per_wf = 104;
   uint32_t vgprs_per_wf = 256;
+  uint32_t accum_vgpr_base = 0;
   uint64_t kernarg_addr = 0;
   uint32_t kernarg_size = 0;
   uint32_t num_user_sgprs = 2;
   uint32_t kernel_code_properties = 0;
   /// Register-programmed compute launches use the PM4 user-data register ABI.
   bool pm4_abi = false;
+  bool uses_kfd_queue_abi = false; ///< KFD AQL dispatches use the calibrated GPU clock.
   std::shared_ptr<Pm4FailureState>
       pm4_failure{};                     ///< Shared with all waves and the owning submission.
   std::array<uint32_t, 16> user_sgprs{}; ///< PM4 COMPUTE_USER_DATA register values.
@@ -357,6 +359,7 @@ struct DispatchEntry {
   uint8_t kernel_wave_size = 0;
   uint16_t kernarg_preload = 0;
   uint32_t initial_mode_raw = 0;
+  uint32_t initial_ib_sts2 = 0; ///< GFX11 memory-order and forward-progress state.
   uint64_t dispatch_ptr = 0;
   uint64_t queue_ptr = 0;
   uint32_t workgroup_id_offset = 0;
@@ -382,6 +385,10 @@ struct DispatchEntry {
   bool enable_wg_id_y = false;
   bool enable_wg_id_z = false;
   bool enable_wg_info = false;
+  enum class OrderedAppend { Disabled, PerWave, PerWorkgroup };
+  OrderedAppend ordered_append = OrderedAppend::Disabled;
+  /// Number of distinct compute IDs in the ring's GDS_COMPUTE_MAX_WAVE_ID range.
+  uint32_t ordered_id_count = 4096;
   bool enable_private_segment = false;
   uint8_t enable_vgpr_workitem_id = 0;
   uint16_t workgroup_size_x = 64;

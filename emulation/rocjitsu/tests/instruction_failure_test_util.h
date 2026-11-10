@@ -3,15 +3,17 @@
 
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <format>
 #include <string>
 
 namespace rocjitsu::test {
 
-// s_rfe_restore_b64 s[0:1], s0 decodes on CDNA3/4 but has no execution implementation.
-inline constexpr uint32_t kUnimplementedInstruction = 0x95800000u;
-inline constexpr char kUnimplementedInstructionMnemonic[] = "s_rfe_restore_b64";
+// The CDNA3/4 decoder recognizes DS_ADD_U32. Executing its unsupported GDS mode
+// exercises the execution-failure path independently of legal opcode coverage.
+inline constexpr std::array<uint32_t, 2> kUnimplementedInstruction{0xd8010000u, 0};
+inline constexpr char kUnimplementedInstructionMnemonic[] = "ds_add_u32";
 inline constexpr uint32_t kUndecodableInstruction = 0xbfff0000u;
 // Formatted like the instruction words in the compute unit's decode diagnostic.
 inline const std::string kUndecodableInstructionText =

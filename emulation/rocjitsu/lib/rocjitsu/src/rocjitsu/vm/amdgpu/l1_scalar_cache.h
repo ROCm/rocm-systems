@@ -57,11 +57,15 @@ public:
   /// restrictions; CC/UC loads bypass resident K$ data and refetch through L2.
   /// Private RAM batching must be enabled only for unobserved functional requests.
   VmAccessOutcome load(uint64_t addr, uint32_t num_dwords, uint32_t *dst, uint32_t vmid = 0,
-                       bool allow_private_batch = false, Mtype instruction_mtype = Mtype::RW);
+                       bool allow_private_batch = false, Mtype instruction_mtype = Mtype::RW,
+                       bool force_l1_bypass = false);
+
+  /// Advisory prefetch: copy a cacheable resident L2 line without a backing read.
+  void prefetch_resident(uint64_t addr, uint32_t vmid);
 
   /// @brief Scalar load: read num_bytes contiguous bytes from addr.
   VmAccessOutcome load_bytes(uint64_t addr, uint32_t num_bytes, uint8_t *dst, uint32_t vmid = 0,
-                             Mtype instruction_mtype = Mtype::RW);
+                             Mtype instruction_mtype = Mtype::RW, bool force_l1_bypass = false);
 
   /// @brief Scalar store: write num_dwords contiguous dwords to addr.
   ///
@@ -70,6 +74,9 @@ public:
   /// restriction comes from the instruction or the page.
   VmAccessOutcome store(uint64_t addr, uint32_t num_dwords, const uint32_t *src, uint32_t vmid = 0,
                         Mtype instruction_mtype = Mtype::RW);
+
+  /// Probe a cacheable scalar line and fill it only through a fault-free backing read.
+  void prefetch(uint64_t address, uint32_t vmid);
 
   /// @brief Handle s_dcache_wb; a no-op because K$ is write-through.
   /// @param vmid Ignored. Retained only for call-site signature symmetry.

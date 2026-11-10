@@ -4,6 +4,7 @@
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_SHARED_MEMORY_ISSUE_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_MEMORY_ISSUE_H_
 
+#include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter.h"
 
 #include <array>
@@ -13,6 +14,21 @@
 #include <span>
 
 namespace rocjitsu::amdgpu {
+
+/// RDNA and gfx1250 allocate a vector-memory and an LDS counter position
+/// for every generic FLAT, even when all requesting lanes resolve to one space.
+[[nodiscard]] constexpr bool flat_issues_both_counter_domains(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+}
+
+/// With the GFX10/GFX11 wait counters, each generic FLAT result needs both
+/// domains. Split-counter targets can establish completion per lane and space.
+[[nodiscard]] constexpr bool flat_requires_both_counters(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5;
+}
 
 /// @brief Completion ordering associated with an AMDGPU memory issue.
 /// @details Counter membership and completion ordering are separate: operations
@@ -68,7 +84,7 @@ private:
                                 static_cast<uint8_t>(wait_counter_type));
   }
 
-  static_assert(static_cast<uint8_t>(WaitCounterType::SAMPLECNT) < 16);
+  static_assert(static_cast<uint8_t>(WaitCounterType::BVHCNT) < 16);
   static_assert(static_cast<uint8_t>(MemoryCompletionClass::UNORDERED) < 8);
   uint8_t encoded_ = 0;
 };
@@ -80,7 +96,8 @@ private:
 /// Each obligation carries its own completion-order class because operations
 /// sharing one counter need not form one FIFO, and one instruction's different
 /// counter domains can have different ordering guarantees. Decoded FLAT metadata
-/// lists possible domains; address routing selects the domains actually used.
+/// lists both domains. GFX10 occupies both for each issue. Other targets use
+/// the domains selected by address routing.
 /// The dynamic race detector requires every attached obligation for whole-event
 /// completion, including destination-register and memory dependencies. This API
 /// does not represent a separate source-register lifetime. The same obligations

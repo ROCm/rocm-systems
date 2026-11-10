@@ -18,7 +18,7 @@
 namespace rocjitsu {
 namespace rdna4 {
 
-void SNopSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_nop_sopp(*this, wf); }
+void SNopSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 void SSetkillSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_setkill_sopp(*this, wf);
@@ -28,9 +28,14 @@ void SSethaltSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_sethalt_sopp(*this, wf);
 }
 
-void SSleepSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_sleep_sopp(*this, wf); }
+void SSleepSopp::execute_impl(amdgpu::Wavefront &wf) {
+  const uint32_t control = simm16.encoding_value_;
+  wf.issue_sleep_with_credit((control & 0x8000u) ? amdgpu::Wavefront::kSleepForever
+                                                 : 64u * (control & 0x7fu));
+  wf.cu().request_functional_yield();
+}
 
-void SClauseSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_clause_sopp(*this, wf); }
+void SClauseSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 void SDelayAluSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_delay_alu_sopp(*this, wf);
@@ -61,7 +66,7 @@ void SDenormModeSopp::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SBarrierWaitSopp::execute_impl(amdgpu::Wavefront &wf) {
-  wf.set_state(amdgpu::WfState::BARRIER);
+  amdgpu::execute_s_barrier_wait_sopp(*this, wf);
 }
 
 void SCodeEndSopp::execute_impl(amdgpu::Wavefront &wf) {
@@ -128,76 +133,77 @@ void SSetprioSopp::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SSendmsgSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_sendmsg_sopp(*this, wf);
+  const uint32_t message = static_cast<uint32_t>(simm16.encoding_value_);
+  if (wf.in_trap_handler() && (message & 0xFu) == 1u)
+    wf.set_trap_interrupt_sent(true);
+  wf.cu().handle_sendmsg(wf, message);
 }
 
 void SSendmsghaltSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_sendmsghalt_sopp(*this, wf);
+  const uint32_t message = static_cast<uint32_t>(simm16.encoding_value_);
+  if (wf.in_trap_handler() && (message & 0xFu) == 1u)
+    wf.set_trap_interrupt_sent(true);
+  wf.cu().handle_sendmsg(wf, message);
+
+  // S_SENDMSGHALT halts the wave. Keep the architectural bit and the
+  // scheduler flag in step -- s_rfe consults STATUS.HALT on the way out.
+  constexpr uint32_t kStatusHalt = 1u << 13;
+  wf.set_status_raw(wf.status_raw() | kStatusHalt);
+  wf.set_debug_halted(true);
+  // Remember who raised the bit. The trap handler also raises HALT, via
+  // s_setreg just before it returns, and there it means "keep the wave
+  // stopped" -- the opposite of what it means here, where the wave has
+  // already reported and is waiting to be resumed. The CWSR record cannot
+  // distinguish the two, so the resume path reads this instead.
+  wf.set_self_halted(true);
 }
 
-void SIncperflevelSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_incperflevel_sopp(*this, wf);
-}
+void SIncperflevelSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
-void SDecperflevelSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_decperflevel_sopp(*this, wf);
-}
+void SDecperflevelSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
-void STtracedataSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_ttracedata_sopp(*this, wf);
-}
+void STtracedataSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
-void STtracedataImmSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_ttracedata_imm_sopp(*this, wf);
-}
+void STtracedataImmSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 void SIcacheInvSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_icache_inv_sopp(*this, wf);
 }
 
 void SWaitLoadcntSopp::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
-  wf.set_wait_counter("wait_loadcnt", cnt);
+  wf.set_wait_counter("wait_loadcnt", static_cast<uint16_t>(simm16.encoding_value_));
 }
 
 void SWaitStorecntSopp::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
-  wf.set_wait_counter("wait_storecnt", cnt);
+  wf.set_wait_counter("wait_storecnt", static_cast<uint16_t>(simm16.encoding_value_));
 }
 
 void SWaitSamplecntSopp::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
-  wf.set_wait_counter("wait_samplecnt", cnt);
+  wf.set_wait_counter("wait_samplecnt", static_cast<uint16_t>(simm16.encoding_value_));
 }
 
 void SWaitBvhcntSopp::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
-  wf.set_wait_counter("wait_bvhcnt", cnt);
+  wf.set_wait_counter("wait_bvhcnt", static_cast<uint16_t>(simm16.encoding_value_));
 }
 
 void SWaitExpcntSopp::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
-  wf.set_wait_counter("wait_expcnt", cnt);
+  wf.set_wait_counter("wait_expcnt", static_cast<uint16_t>(simm16.encoding_value_));
 }
 
 void SWaitDscntSopp::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
-  wf.set_wait_counter("wait_dscnt", cnt);
+  wf.set_wait_counter("wait_dscnt", static_cast<uint16_t>(simm16.encoding_value_));
 }
 
 void SWaitKmcntSopp::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
-  wf.set_wait_counter("wait_kmcnt", cnt);
+  wf.set_wait_counter("wait_kmcnt", static_cast<uint16_t>(simm16.encoding_value_));
 }
 
 void SWaitLoadcntDscntSopp::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
-  wf.set_wait_counter("wait_loadcnt_dscnt", cnt);
+  wf.set_wait_counter("wait_loadcnt_dscnt", static_cast<uint16_t>(simm16.encoding_value_));
 }
 
 void SWaitStorecntDscntSopp::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
-  wf.set_wait_counter("wait_storecnt_dscnt", cnt);
+  wf.set_wait_counter("wait_storecnt_dscnt", static_cast<uint16_t>(simm16.encoding_value_));
 }
 
 } // namespace rdna4

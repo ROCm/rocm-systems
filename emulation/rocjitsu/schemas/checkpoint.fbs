@@ -8,7 +8,106 @@ include "simulation_config.fbs";
 
 namespace rocjitsu.fb;
 
+// Older checkpoints omit the GFX10 tables and retain machine launch defaults.
+struct Gfx10Apertures {
+  shared_base: ulong;
+  shared_limit: ulong;
+  private_base: ulong;
+  private_limit: ulong;
+  ptr32: bool;
+}
+
+struct Gfx10WaitLimits {
+  vm: ubyte;
+  lgkm: ubyte;
+  exp: ubyte;
+  vs: ubyte;
+}
+
+table Gfx10WaveResources {
+  apertures: Gfx10Apertures (required);
+  override_launch: bool;
+  wait_limits: Gfx10WaitLimits (required);
+  trapsts: uint;
+  scratch_base: ulong;
+  scratch_lane_size: uint;
+  lds_base: uint;
+  lds_size: uint;
+  dispatch_id: uint;
+  wave_in_group: uint;
+  queue_id: uint;
+  queue_packet_id: uint;
+  vgpr_count: uint;
+  self_halted: bool;
+}
+
+table Gfx10CuResources {
+  launch_apertures: Gfx10Apertures (required);
+  next_lds_alloc: uint;
+  lds: [ubyte];
+  // Writers predating the scheduler records can restore memory resources independently.
+  memory_resources_only: bool;
+}
+
+// A wave may still belong to an originally multiwave workgroup after every
+// other member retired. Preserve this separately from its live membership.
+table Gfx10WaveScheduling {
+  ready_cycle: uint64;
+  nop_ready_cycle: uint64;
+  sleep_cycles: uint32;
+  prefetch_lines: ubyte;
+  clause_remaining: ubyte;
+  clause_kind: ubyte;
+  clause_interval: ubyte;
+  clause_run: ubyte;
+  owns_clause: bool;
+  system_clock: bool;
+  at_barrier: bool;
+  registered_workgroup: bool;
+  multiwave_workgroup: bool;
+}
+
+table Gfx10CuScheduling {
+  cycle_count: uint64;
+  // S_INCPERFLEVEL and S_DECPERFLEVEL address 16 CU counters.
+  perf_levels: [uint32];
+  // S_MEMREALTIME uses the model clock for AQL and the host clock for PM4.
+  model_realtime: uint64;
+}
+
+// Logical allocation counts are independent of the fixed CU register blocks.
+struct Rdna2WaveRegisters {
+  num_sgprs: uint32;
+  num_vgprs: uint32;
+  trapsts: uint32;
+}
+
+/// Byte range owned by a workgroup within its CU's LDS.
+struct LdsWindow {
+  base: uint32;
+  size: uint32;
+}
+
 /// Serialized state of a single wavefront.
+// LaunchDefaults identifies a standalone writer that did not model frontend grants.
+enum GraphicsWait: ubyte { None, Export, Parameters, LaunchDefaults }
+
+struct WaveExceptionRegisters {
+  trapsts: uint32;
+  gfx12_user_extra: uint32;
+  gfx12_trap_ctrl: uint32;
+}
+
+/// One graphics export buffer row and its four component values per wave lane.
+table ShaderExportRow {
+  target: ubyte;
+  row: ubyte;
+  components: ubyte;
+  done: bool;
+  valid_lanes: uint64;
+  values: [uint32] (required);
+}
+
 table WavefrontState {
   wf_id: uint32;
   wg_id: uint32;
@@ -18,7 +117,7 @@ table WavefrontState {
   m0: uint32;
   halted: bool;
   status: uint32;
-  sgprs: [uint32]; // Scalar register file (NUM_SGPRS entries).
+  sgprs: [uint32]; // RDNA2 stores its full physical block, including fixed SGPRs.
   vgprs: [ubyte];  // Vector register file (raw bytes).
   mode: uint32;     // MODE register.
   wave_sched_mode: uint32; // WAVE_SCHED_MODE register.
@@ -45,6 +144,58 @@ table WavefrontState {
   // Transient gfx1250 instruction-adjacency state. Appended last so older
   // checkpoints restore it as false.
   setreg_vgpr_msb_hazard: bool;
+  gfx10_resources: Gfx10WaveResources;
+  gfx10_scheduling: Gfx10WaveScheduling;
+  dispatch_id: uint32;
+  // Remaining delay, including the GFX12 wait-for-wakeup sentinel.
+  sleep_cycles: uint32;
+  // Required for active RDNA2 wave records. Owned CU resources use the GFX10 resource tables.
+  rdna2_allocation_state_known: bool;
+  // The allocation HWREGs can carry nonzero bases even with no LDS or scratch bytes.
+  rdna2_lds_base: uint32;
+  rdna2_scratch_base: uint64;
+  // Active RDNA2 waves require an explicit owner, including the standalone process zero.
+  rdna2_process_id: uint32 = null;
+  rdna2_internal_address_space: bool;
+  rdna2_registers: Rdna2WaveRegisters;
+  // RDNA4 and CDNA5 STATE_PRIV.SLEEP_WAKEUP. Older checkpoints default to no credit.
+  sleep_wakeup: bool;
+  // Read together with the CU's GFX12 group table.
+  process_id: uint32;
+  queue_id: uint32;
+  wave_in_group: uint32;
+  barrier_complete_mask: ubyte; // bit 0: workgroup, bit 1: trap
+  waiting_barrier: ubyte; // 0: none, 1: workgroup, 2: trap
+  // CDNA3 may have additional addressable SGPRs in a partially requested physical block.
+  requested_sgprs: uint32 = null;
+  flat_scratch: uint64 = null;
+  lds_window: LdsWindow;
+  // Architectural VGPR allocation, distinct from the serialized physical register block.
+  // Older records omit the total and restore the configured VGPR count.
+  num_vgprs: uint32 = null;
+  accum_vgpr_base: uint32; // CDNA descriptor boundary in VGPRs; zero for descriptor-less waves.
+  // CDNA4 SGPR payloads include the full rounded allocation. Keep the requested
+  // count separately; older records store exactly the requested words.
+  num_sgprs: uint32 = null;
+  // None, Export and Parameters preserve the readiness bits supplied by the frontend.
+  graphics_wait: GraphicsWait = null;
+  // GFX11 user-visible prefetch and launch flags. Wave size is reconstructed at restore.
+  ib_sts2_gfx11: uint32;
+  exceptions: WaveExceptionRegisters;
+  // Non-RDNA2 waves distinguish direct memory from the standalone VM's identity mapping.
+  // Older records with process-owned GFX12 work cannot establish which mapping was used.
+  uses_internal_address_space: bool = null;
+  shader_exports: [ShaderExportRow];
+}
+
+/// A formerly multiwave group retains its barriers even with one live member.
+struct Rdna4CheckpointGroup {
+  dispatch_id: uint32;
+  wg_id: uint32;
+  live_members: uint32;
+  workgroup_signals: ubyte;
+  trap_signals: ubyte;
+  multiwave: bool;
 }
 
 /// Serialized state of a compute unit.
@@ -66,6 +217,22 @@ table ComputeUnitState {
   gws_wait_limit: uint32 = null;
   // Omission inherits the CU template policy, which need not be Compatibility.
   arithmetic: ArithmeticPolicyConfig;
+  gfx10_resources: Gfx10CuResources;
+  gfx10_scheduling: Gfx10CuScheduling;
+  // Source of the per-CU shader cycle counter; older records start at zero.
+  cycle_count: uint64;
+  // Shared SGPR/VGPR physical block ordinal for each RDNA2 record in wavefronts order.
+  // Older files lack this vector and retain first-free register allocation on restore.
+  rdna2_register_blocks: [uint32];
+  // RDNA4 and CDNA5 use the same workgroup/trap barrier layout. The writer
+  // rejects resident named barrier allocations, whose state this record cannot encode.
+  rdna4_workgroups: [Rdna4CheckpointGroup];
+  // This CU-owned LDS prefix is shared by its resident waves. Earlier CDNA3
+  // records used its length as the bump allocator reservation.
+  lds: [ubyte];
+  lds_cursor: uint32 = null;
+  // Raw simulation ticks for the shader realtime clock. GFX10 stores these in gfx10_scheduling.
+  model_realtime: uint64 = null;
 }
 
 /// Serialized state of a command processor.
@@ -73,6 +240,8 @@ table CommandProcessorState {
   name: string;
   dispatched: uint64; // Number of packets already processed.
   next_cu: uint64;    // Round-robin CU index.
+  // Per-XCD dispatch ID sequences, shared by AQL and PM4 launches.
+  next_dispatch_ids: [uint32];
 }
 
 /// A single 4KB memory page.
@@ -93,6 +262,8 @@ table SimulationCheckpoint {
   compute_units: [ComputeUnitState];
   command_processor: CommandProcessorState;
   memory: GpuMemoryState;
+  // One cursor per XCD, in topology order, paired with rdna4_workgroups on RDNA4 and CDNA5.
+  rdna4_next_dispatch_ids: [uint32];
 }
 
 root_type SimulationCheckpoint;

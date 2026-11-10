@@ -17,20 +17,23 @@ namespace cdna1 {
 
 namespace {
 template <typename MimgMachineInst>
+bool mimg_has_status(const MimgMachineInst *inst, bool sampler) {
+  // A dropped fetch with DMASK=0 cannot produce TFE status. LWE
+  // can still return status for samplers. Both share one DWORD.
+  bool status = false;
+  if constexpr (requires { inst->tfe; })
+    status = inst->tfe && inst->dmask;
+  if constexpr (requires { inst->lwe; })
+    status = status || (sampler && inst->lwe);
+  return status;
+}
+template <typename MimgMachineInst>
 uint32_t mimg_vdata_bits(const MimgMachineInst *inst, bool gather4, bool d16_allowed,
                          bool status_allowed, bool sampler) {
   uint32_t words = gather4 ? 4u : std::max(1, std::popcount(uint32_t{inst->dmask}));
   if (d16_allowed && inst->d16)
     words = (words + 1) / 2;
-  // A dropped fetch with DMASK=0 cannot produce TFE status. LWE
-  // can still return status for sampler operations. Both flags
-  // share one status word; stores do not consume that word.
-  bool status = false;
-  if constexpr (requires { inst->tfe; })
-    status = status_allowed && inst->tfe && inst->dmask;
-  if constexpr (requires { inst->lwe; })
-    status = status || (status_allowed && sampler && inst->lwe);
-  if (status)
+  if (status_allowed && mimg_has_status(inst, sampler))
     ++words;
   return words * 32;
 }

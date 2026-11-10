@@ -4,18 +4,26 @@
 #include "rocjitsu/vm/amdgpu/buffer_format.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/hwfloat/unorm.h"
+#include "rocjitsu/vm/amdgpu/buffer_format_detail.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "rocjitsu/vm/graphics/image_bc.h"
+#include "rocjitsu/vm/graphics/image_completion.h"
 #include "util/data_types.h"
 
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <limits>
+#include <optional>
+#include <stdexcept>
 
 namespace rocjitsu::amdgpu {
+using namespace buffer_format_detail;
 namespace {
 using Number = BufferNumberFormat;
 using Format = BufferFormat;
@@ -103,64 +111,6 @@ util::FailureOr<Format> decode(uint32_t id, BufferFormatEncoding encoding) {
   return util::Result::failure();
 }
 
-uint32_t mask(uint32_t bits) { return bits == 32 ? ~0u : (1u << bits) - 1; }
-bool integer(Number n) { return n == Number::Uint || n == Number::Sint; }
-
-// Independent of the host floating-point rounding mode.
-double round_even(double value) {
-  const double lo = std::floor(value);
-  const double fraction = value - lo;
-  return lo + (fraction > 0.5 || (fraction == 0.5 && std::fmod(lo, 2.0) != 0));
-}
-
-uint32_t read_bits(std::span<const uint8_t> bytes, uint32_t offset, uint32_t width) {
-  uint64_t value = 0;
-  for (uint32_t i = offset / 8; i < (offset + width + 7) / 8; ++i)
-    value |= uint64_t{bytes[i]} << ((i - offset / 8) * 8);
-  return static_cast<uint32_t>(value >> (offset % 8)) & mask(width);
-}
-
-uint32_t unpack(uint32_t value, uint32_t width, Number n) {
-  const int32_t signed_value = static_cast<int32_t>(value << (32 - width)) >> (32 - width);
-  if (n == Number::Uint || (n == Number::Float && width == 32))
-    return value;
-  if (n == Number::Sint)
-    return static_cast<uint32_t>(signed_value);
-  float result = 0;
-  switch (n) {
-  case Number::Unorm:
-    result = static_cast<float>(value) / mask(width);
-    break;
-  case Number::Snorm:
-    result = std::max(-1.0f, static_cast<float>(signed_value) / mask(width - 1));
-    break;
-  case Number::Uscaled:
-    result = static_cast<float>(value);
-    break;
-  case Number::Sscaled:
-    result = static_cast<float>(signed_value);
-    break;
-  case Number::Float:
-    if (width == 16)
-      return std::bit_cast<uint32_t>(util::f16_to_f32(static_cast<uint16_t>(value)));
-    // Unsigned 10/11-bit floats have five exponent bits and bias 15.
-    {
-      const uint32_t mantissa_bits = width - 5;
-      const uint32_t exponent = value >> mantissa_bits;
-      const uint32_t mantissa = value & mask(mantissa_bits);
-      if (exponent == 31)
-        return 0x7f800000u | (mantissa << (23 - mantissa_bits));
-      result = std::ldexp(static_cast<float>(mantissa + (exponent ? 1u << mantissa_bits : 0)),
-                          (exponent ? static_cast<int>(exponent) - 15 : -14) -
-                              static_cast<int>(mantissa_bits));
-    }
-    break;
-  default:
-    break;
-  }
-  return std::bit_cast<uint32_t>(result);
-}
-
 uint32_t pack(uint32_t value, uint32_t width, Number n, BufferFormatEncoding encoding) {
   // Native gfx1100/gfx1201 integer stores saturate before narrowing, including D16 sources.
   if (encoding == BufferFormatEncoding::Gfx11 && integer(n) && width < 32) {
@@ -172,6 +122,8 @@ uint32_t pack(uint32_t value, uint32_t width, Number n, BufferFormatEncoding enc
   }
   if (integer(n) || (n == Number::Float && width == 32))
     return value & mask(width);
+  if (n == Number::Unorm && hwfloat::supports_unorm_width(width))
+    return hwfloat::unorm_from_f32(value, width);
   const float input = std::bit_cast<float>(value);
   if (n == Number::Float) {
     if (width == 16)
@@ -210,36 +162,18 @@ uint32_t pack(uint32_t value, uint32_t width, Number n, BufferFormatEncoding enc
 }
 } // namespace
 
+util::FailureOr<BufferFormat> decode_buffer_format(uint32_t format, BufferFormatEncoding encoding) {
+  return decode(format, encoding);
+}
+
 util::FailureOr<uint32_t> buffer_format_bytes(uint32_t format, BufferFormatEncoding encoding) {
   const auto decoded = decode(format, encoding);
   if (decoded.failed())
     return util::Result::failure();
-  const auto &f = decoded.value();
-  uint32_t bits = 0;
-  for (auto width : f.widths)
-    bits += width;
-  return bits / 8;
+  return decoded.value().byte_size();
 }
 
 namespace {
-std::array<uint32_t, 4> unpack_format(const Format &f, uint32_t selectors,
-                                      std::span<const uint8_t> bytes) {
-  std::array<uint32_t, 4> channels{}, result{};
-  uint32_t offset = 0;
-  for (uint32_t i = 0; i < 4; ++i) {
-    if (f.widths[i] && !bytes.empty())
-      channels[i] = unpack(read_bits(bytes, offset, f.widths[i]), f.widths[i], f.number);
-    offset += f.widths[i];
-  }
-  for (uint32_t i = 0; i < 4; ++i) {
-    const uint32_t sel = (selectors >> (3 * i)) & 7;
-    result[i] = sel >= 4   ? channels[sel - 4]
-                : sel == 1 ? (integer(f.number) ? 1u : 0x3f800000u)
-                           : 0;
-  }
-  return result;
-}
-
 // Native gfx1100/gfx1201 sweeps qualify exact selector patterns by memory
 // channel count. General DST_SEL routing is not an inverse of load swizzling.
 // CDNA1-4, RDNA1/2 and RDNA3.5 use this policy by extrapolation, without native
@@ -276,7 +210,7 @@ util::FailureOr<uint32_t> resolve_store_selectors(const Format &f, uint32_t sele
 
 void pack_format(const Format &f, uint32_t selectors, std::span<const uint32_t> components,
                  std::span<uint8_t> bytes, BufferStoreMissingChannel missing,
-                 BufferFormatEncoding encoding, uint32_t component_mask) {
+                 BufferFormatEncoding encoding, uint32_t component_mask, bool raw = false) {
   // Native Gfx11-format stores encode SCALED as NORM, unlike SCALED loads.
   const auto number = encoding != BufferFormatEncoding::Gfx11 ? f.number
                       : f.number == Number::Uscaled           ? Number::Unorm
@@ -305,16 +239,52 @@ void pack_format(const Format &f, uint32_t selectors, std::span<const uint32_t> 
         }
       }
     }
-    const uint64_t bits = uint64_t{pack(component, width, number, encoding)} << (offset % 8);
+    const uint64_t bits =
+        uint64_t{raw ? (component & mask(width)) : pack(component, width, number, encoding)}
+        << (offset % 8);
     for (uint32_t b = offset / 8; b < (offset + width + 7) / 8; ++b)
       bytes[b] |= static_cast<uint8_t>(bits >> ((b - offset / 8) * 8));
     offset += width;
   }
 }
 
+// Integer UNORM conversion is independent of the caller's FP environment.
+void pack_components(const Format &format, uint32_t selectors, std::span<const uint32_t> components,
+                     std::span<uint8_t> bytes, BufferStoreMissingChannel missing,
+                     BufferFormatEncoding encoding) {
+  const uint32_t component_mask = (1u << components.size()) - 1u;
+  if (format.number == Number::Unorm && std::ranges::all_of(format.widths, [](uint32_t width) {
+        return width == 0 || hwfloat::supports_unorm_width(width);
+      })) {
+    pack_format(format, selectors, components, bytes, missing, encoding, component_mask);
+    return;
+  }
+  const fp_mode::detail::ScopedFenv environment(0);
+  pack_format(format, selectors, components, bytes, missing, encoding, component_mask);
+}
+
 } // namespace
 
-bool image_store_selectors_supported(const BufferFormat &format, uint32_t selectors) {
+bool image_store_selectors_supported(const BufferFormat &format, uint32_t selectors, bool gfx10) {
+  if (gfx10) {
+    // A one-to-one mapping of all storage channels can be inverted for stores,
+    // including a component supplied by a later shader VGPR slot.
+    unsigned mapped = 0;
+    const unsigned channels = std::count_if(format.widths.begin(), format.widths.end(),
+                                            [](unsigned width) { return width != 0; });
+    for (unsigned shader = 0; shader < 4; ++shader) {
+      const unsigned selector = (selectors >> (3 * shader)) & 7;
+      if (selector <= 1)
+        continue;
+      if (selector < 4 || selector - 4 >= channels || (mapped & (1u << (selector - 4)))) {
+        mapped = 0;
+        break;
+      }
+      mapped |= 1u << (selector - 4);
+    }
+    if (mapped && mapped == ((1u << channels) - 1))
+      return true;
+  }
   return resolve_store_selectors(format, selectors, true).succeeded();
 }
 
@@ -332,15 +302,12 @@ util::Result pack_buffer_format(uint32_t format, uint32_t selectors,
                                 std::span<const uint32_t> components, std::span<uint8_t> bytes,
                                 BufferFormatEncoding encoding, BufferStoreMissingChannel missing) {
   const auto decoded = decode(format, encoding);
-  if (decoded.failed() || components.empty())
+  if (decoded.failed() || components.empty() || components.size() > 4)
     return util::Result::failure();
   const auto resolved = resolve_store_selectors(decoded.value(), selectors);
   if (resolved.failed())
     return util::Result::failure();
-  const fp_mode::detail::ScopedFenv environment(0);
-  const uint32_t component_mask = (1u << components.size()) - 1u;
-  pack_format(decoded.value(), resolved.value(), components, bytes, missing, encoding,
-              component_mask);
+  pack_components(decoded.value(), resolved.value(), components, bytes, missing, encoding);
   return util::Result::success();
 }
 
@@ -358,6 +325,57 @@ util::FailureOr<bool> prepare_buffer_format_state(VectorMemState &d) {
   return true;
 }
 
+util::FailureOr<bool> prepare_gfx10_image_format(VectorMemState &d) {
+  using enum BufferNumberFormat;
+  if (d.buffer_format >= 169 && d.buffer_format <= 178) {
+    d.image_bc = std::make_unique<VectorMemState::BlockCompressedImage>();
+    d.image_bc->format = d.buffer_format;
+    const unsigned kind = (d.buffer_format - 169) / 2; // BC1 through BC5
+    d.image_srgb = kind < 3 && d.buffer_format % 2 == 0;
+    d.elem_size = kind == 0 || kind == 3 ? 8 : 16;
+    d.decoded_buffer_format = kind < 3    ? Format{{8, 8, 8, 8}, Unorm}
+                              : kind == 3 ? Format{{32, 0, 0, 0}, Float}
+                                          : Format{{32, 32, 0, 0}, Float};
+    return true;
+  }
+  switch (d.buffer_format) {
+  case 133:
+    d.decoded_buffer_format = {{5, 6, 5, 0}, Unorm};
+    break;
+  case 134:
+    d.decoded_buffer_format = {{5, 5, 5, 1}, Unorm};
+    break;
+  case 135:
+    d.decoded_buffer_format = {{1, 5, 5, 5}, Unorm};
+    break;
+  case 136:
+    d.decoded_buffer_format = {{4, 4, 4, 4}, Unorm};
+    break;
+  case 137:
+    d.decoded_buffer_format = {{4, 4, 0, 0}, Unorm};
+    break;
+  case 141:
+    d.decoded_buffer_format = {{24, 8, 0, 0}, Unorm};
+    break;
+  case 142:
+    d.decoded_buffer_format = {{24, 8, 0, 0}, Uint};
+    break;
+  case 143:
+    d.decoded_buffer_format = {{8, 24, 0, 0}, Unorm};
+    break;
+  case 144:
+    d.decoded_buffer_format = {{8, 24, 0, 0}, Uint};
+    break;
+  default:
+    return prepare_buffer_format_state(d);
+  }
+  unsigned bits = 0;
+  for (unsigned width : d.decoded_buffer_format.widths)
+    bits += width;
+  d.elem_size = bits / 8;
+  return true;
+}
+
 util::FailureOr<bool> prepare_buffer_format(Wavefront &wf, VectorMemState &d, uint32_t resource,
                                             int format, uint32_t components) {
   d.buffer_components = components;
@@ -368,6 +386,12 @@ util::FailureOr<bool> prepare_buffer_format(Wavefront &wf, VectorMemState &d, ui
     return false;
   const uint32_t word3 = read_scalar_selector(wf, resource + 3);
   const auto arch = wf.cu().arch();
+  if ((arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+       arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5) &&
+      (word3 >> 30) != 0) {
+    d.exec_mask = 0;
+    return false;
+  }
   d.buffer_format_encoding = arch_is_cdna_4_or_lower(arch)      ? BufferFormatEncoding::Gfx9
                              : arch == ROCJITSU_CODE_ARCH_RDNA1 ? BufferFormatEncoding::Rdna1
                              : arch == ROCJITSU_CODE_ARCH_RDNA2 ? BufferFormatEncoding::Rdna2
@@ -415,7 +439,7 @@ util::FailureOr<bool> prepare_buffer_format(Wavefront &wf, VectorMemState &d, ui
   return true;
 }
 
-void capture_buffer_format_store(Wavefront &wf, VectorMemState &d, uint32_t data_base) {
+void capture_buffer_format_store(Wavefront &wf, VectorMemState &d, uint32_t data_base, bool raw) {
   // Native gfx1201 replicates X and gfx1100 zero-fills. Other families use the
   // extrapolated zero-fill policy described by BufferStoreMissingChannel.
   const auto missing = wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4
@@ -423,15 +447,42 @@ void capture_buffer_format_store(Wavefront &wf, VectorMemState &d, uint32_t data
                            : BufferStoreMissingChannel::Zero;
   RegisterAccess regs(wf);
   const uint32_t registers = d.buffer_d16 ? (d.buffer_components + 1) / 2 : d.buffer_components;
-  auto data = regs.read_vgpr_region(data_base, registers, d.lane_mask);
+  // Image stores on GFX11 and GFX12 substitute VGPR0 for each unallocated source word.
+  const bool image = d.image_store_component_mask && has_gfx11_image_operands(wf.cu().arch());
+  const bool partial_word = image && d.buffer_d16 && (d.buffer_components & 1);
+  uint32_t allocated = registers;
+  if (image) {
+    const uint32_t first = data_base - wf.vgpr_alloc().base;
+    allocated = std::min(registers, wf.num_vgprs() - std::min(first, wf.num_vgprs()));
+  }
+  const bool allocated_half = partial_word && allocated == registers;
+  const auto data = regs.read_vgpr_region(data_base, allocated - allocated_half, d.lane_mask);
+  std::optional<RegisterAccess::VgprReadRegion> tail;
+  if (allocated_half)
+    tail.emplace(regs.read_vgpr_region(data_base + allocated - 1, 1, d.lane_mask, 0x3));
+  else if (allocated < registers) {
+    const bool only_half = partial_word && allocated + 1 == registers;
+    tail.emplace(
+        regs.read_vgpr_region(wf.vgpr_alloc().base, 1, d.lane_mask, only_half ? 0x3 : 0xf));
+  }
+  const auto source_word = [&](uint32_t word, uint32_t lane) {
+    return word < allocated - allocated_half ? data.lane(word, lane) : tail->lane(0, lane);
+  };
   const auto &format = d.decoded_buffer_format;
   const fp_mode::detail::ScopedFenv environment(0);
-  d.store_data.resize(d.wf_size * d.elem_size);
+  const auto *transfer =
+      d.image_sample && d.image_sample->transfer ? &*d.image_sample->transfer : nullptr;
+  if (transfer) {
+    for (auto &tap : d.image_sample->taps)
+      tap.response.resize(d.wf_size * d.elem_size);
+  } else {
+    d.store_data.resize(d.wf_size * d.elem_size);
+  }
   for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
     if (!(d.lane_mask & (1ULL << lane)))
       continue;
     std::array<uint32_t, 4> components{};
-    uint32_t remaining_image_components = d.image_store_component_mask;
+    uint32_t remaining_image_components = transfer ? transfer->dmask : d.image_store_component_mask;
     for (uint32_t i = 0; i < d.buffer_components; ++i) {
       uint32_t shader_component = i;
       if (remaining_image_components) {
@@ -439,17 +490,34 @@ void capture_buffer_format_store(Wavefront &wf, VectorMemState &d, uint32_t data
         remaining_image_components &= remaining_image_components - 1;
       }
       if (!d.buffer_d16) {
-        components[shader_component] = data.lane(i, lane);
+        components[shader_component] = source_word(i, lane);
         continue;
       }
       const uint32_t shift = d.d16_hi ? 16 : (i % 2) * 16;
-      const uint16_t half = data.lane(i / 2, lane) >> shift;
+      const uint16_t half = source_word(i / 2, lane) >> shift;
       components[shader_component] =
           integer(format.number)
               ? format.number == Number::Sint
                     ? static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>(half)))
                     : half
               : std::bit_cast<uint32_t>(util::f16_to_f32(half));
+    }
+    if (transfer) {
+      const unsigned width = transfer->slots_per_texel;
+      for (unsigned i = 0; i < d.image_sample->taps.size(); ++i) {
+        auto &tap = d.image_sample->taps[i];
+        if (!(tap.lane_mask & (uint64_t{1} << lane)))
+          continue;
+        auto bytes = std::span(tap.response).subspan(lane * d.elem_size, d.elem_size);
+        if (transfer->raw) {
+          std::memcpy(bytes.data(), &components[i], bytes.size());
+        } else {
+          const unsigned mask = (transfer->dmask >> (i * width)) & ((1u << width) - 1);
+          pack_format(format, d.buffer_selectors, std::span(components).subspan(i * width, width),
+                      bytes, missing, d.buffer_format_encoding, mask);
+        }
+      }
+      continue;
     }
     const bool image_store = d.image_store_component_mask != 0;
     const uint32_t component_mask =
@@ -458,15 +526,39 @@ void capture_buffer_format_store(Wavefront &wf, VectorMemState &d, uint32_t data
         image_store ? std::span(components) : std::span(components).first(d.buffer_components);
     pack_format(format, d.buffer_selectors, shader_components,
                 std::span(d.store_data).subspan(lane * d.elem_size, d.elem_size), missing,
-                d.buffer_format_encoding, component_mask);
+                d.buffer_format_encoding, component_mask, raw);
   }
 }
 
 namespace {
 std::array<uint32_t, 4> image_texel_values(const VectorMemState &state,
-                                           std::span<const uint8_t> bytes) {
+                                           std::span<const uint8_t> bytes,
+                                           uint8_t block_texel = 0) {
+  std::array<uint8_t, 8> decoded_bytes{};
+  if (state.image_bc && !bytes.empty()) {
+    const uint32_t format = state.image_bc->format;
+    const uint32_t kind = (format - 169) / 2;
+    if (kind < 3) {
+      const auto rgba = decode_image_bc(kind, block_texel, bytes);
+      std::copy(rgba.begin(), rgba.end(), decoded_bytes.begin());
+      bytes = std::span(decoded_bytes).first(4);
+    } else {
+      const bool signed_format = format % 2 == 0;
+      const unsigned count = kind == 3 ? 1 : 2;
+      for (unsigned c = 0; c < count; ++c) {
+        const int32_t value =
+            decode_image_bc_scalar(bytes.subspan(c * 8, 8), block_texel, signed_format);
+        const float channel = float(value) / (64 * (signed_format ? 127 : 255));
+        std::memcpy(decoded_bytes.data() + c * 4, &channel, sizeof(channel));
+      }
+      bytes = std::span(decoded_bytes).first(count * 4);
+    }
+  }
   auto values = unpack_format(state.decoded_buffer_format, state.buffer_selectors, bytes);
-  for (uint32_t component = 0; component < state.buffer_components; ++component) {
+  const uint32_t channels = state.image_sample && state.image_sample->transfer
+                                ? state.image_sample->transfer->slots_per_texel
+                                : state.buffer_components;
+  for (uint32_t component = 0; component < channels; ++component) {
     const uint32_t selector = (state.buffer_selectors >> (3 * component)) & 7;
     if (state.image_srgb && selector >= 4 && selector <= 6) {
       const float value = std::bit_cast<float>(values[component]);
@@ -477,7 +569,7 @@ std::array<uint32_t, 4> image_texel_values(const VectorMemState &state,
         linear = util::bf16_to_f32(util::f32_to_bf16_rne(linear));
       values[component] = std::bit_cast<uint32_t>(linear);
     }
-    if (state.image_sample && !state.image_sample->gather &&
+    if (state.image_sample && !state.image_sample->transfer && !state.image_sample->gather &&
         state.decoded_buffer_format.number == Number::Float) {
       const uint32_t magnitude = values[component] & 0x7fffffffu;
       if (magnitude > 0x7f800000u)
@@ -489,16 +581,112 @@ std::array<uint32_t, 4> image_texel_values(const VectorMemState &state,
   return values;
 }
 
+// A horizontal transfer packs DMASK-selected slots in increasing order.
+std::array<uint32_t, 4> group_image_values(const VectorMemState &state, uint32_t lane) {
+  const auto &group = *state.image_sample;
+  const auto &transfer = *group.transfer;
+  std::array<uint32_t, 4> values{};
+  for (unsigned tap_index = 0; tap_index < group.taps.size(); ++tap_index) {
+    const auto &tap = group.taps[tap_index];
+    if (!(tap.lane_mask & (uint64_t{1} << lane)))
+      continue;
+    const auto bytes = std::span(tap.response).subspan(lane * state.elem_size, state.elem_size);
+    std::array<uint32_t, 4> texel{};
+    if (transfer.raw) {
+      std::memcpy(&texel[0], bytes.data(), bytes.size());
+      if (transfer.sign_extend && bytes.size() < sizeof(uint32_t)) {
+        const unsigned width = bytes.size() * 8;
+        const uint32_t sign = 1u << (width - 1);
+        texel[0] = (texel[0] ^ sign) - sign;
+      }
+    } else {
+      texel = image_texel_values(state, bytes,
+                                 state.image_bc ? state.image_bc->texels[tap_index][lane] : 0);
+    }
+    for (unsigned component = 0; component < transfer.slots_per_texel; ++component) {
+      const unsigned slot = tap_index * transfer.slots_per_texel + component;
+      if (transfer.dmask & (1u << slot))
+        values[std::popcount(transfer.dmask & ((1u << slot) - 1))] = texel[component];
+    }
+  }
+  return values;
+}
+
+// Compare each tap before spatial or mip filtering.
+std::array<uint32_t, 4> image_tap_values(const VectorMemState &state, uint32_t lane,
+                                         const ImageSampleAccess::Tap &tap) {
+  std::array<uint32_t, 4> values{};
+  if (tap.lane_mask & (uint64_t{1} << lane)) {
+    const auto bytes = std::span(tap.response).subspan(lane * state.elem_size, state.elem_size);
+    const auto index = &tap - state.image_sample->taps.data();
+    values =
+        image_texel_values(state, bytes, state.image_bc ? state.image_bc->texels[index][lane] : 0);
+  }
+  if (state.image_sample->border_color && (tap.border_mask & (uint64_t{1} << lane))) {
+    const auto number = state.decoded_buffer_format.number;
+    const uint32_t one =
+        number == Number::Uint || number == Number::Sint ? 1u : std::bit_cast<uint32_t>(1.0f);
+    for (uint32_t i = 0; i < values.size(); ++i) {
+      const uint32_t selector = (state.buffer_selectors >> (3 * i)) & 7u;
+      if (selector == 1 ||
+          (selector >= 4 && (state.image_sample->border_color == 2 || selector == 7)))
+        values[i] = one;
+    }
+  }
+  if (const auto &compare = state.image_sample->depth_compare) {
+    const float ref = compare->reference[lane];
+    for (auto &value : values) {
+      const float depth = std::bit_cast<float>(value);
+      bool pass = false;
+      switch (compare->function) {
+      case 1:
+        pass = ref < depth;
+        break;
+      case 2:
+        pass = ref == depth;
+        break;
+      case 3:
+        pass = ref <= depth;
+        break;
+      case 4:
+        pass = ref > depth;
+        break;
+      case 5:
+        pass = ref != depth;
+        break;
+      case 6:
+        pass = ref >= depth;
+        break;
+      case 7:
+        pass = true;
+        break;
+      }
+      value = std::bit_cast<uint32_t>(pass ? 1.0f : 0.0f);
+    }
+  }
+  return values;
+}
+
 std::array<uint32_t, 4> image_sample_values(const VectorMemState &state, uint32_t lane) {
+  if (state.image_status && state.image_status->zero_sample_result(lane))
+    return {};
   std::array<uint32_t, 4> selected{};
+  if (state.image_sample->packed_row) {
+    uint32_t byte = 0;
+    for (const auto &tap : state.image_sample->taps) {
+      for (uint32_t i = 0; i < state.elem_size; ++i, ++byte)
+        if (tap.lane_mask & (uint64_t{1} << lane))
+          selected[byte / 4] |= uint32_t{tap.response[lane * state.elem_size + i]}
+                                << (8 * (byte % 4));
+    }
+    return selected;
+  }
   if (state.image_sample->gather) {
     constexpr std::array<uint32_t, 4> order{2, 3, 1, 0};
     for (uint32_t component = 0; component < 4; ++component) {
-      const auto &tap = state.image_sample->taps[order[component]];
-      if (tap.lane_mask & (uint64_t{1} << lane)) {
-        const auto bytes = std::span(tap.response).subspan(lane * state.elem_size, state.elem_size);
-        selected[component] = image_texel_values(state, bytes)[0];
-      }
+      const auto &tap =
+          state.image_sample->taps[state.image_sample->horizontal ? component : order[component]];
+      selected[component] = image_tap_values(state, lane, tap)[0];
     }
     return selected;
   }
@@ -509,14 +697,7 @@ std::array<uint32_t, 4> image_sample_values(const VectorMemState &state, uint32_
     const float weight = tap.weights[lane];
     if (weight == 0)
       continue;
-    const auto bytes =
-        tap.lane_mask & (uint64_t{1} << lane)
-            ? std::span(tap.response).subspan(lane * state.elem_size, state.elem_size)
-            : std::span<const uint8_t>{};
-    auto values = image_texel_values(state, bytes);
-    // A transparent-black border is independent of absent resource channels.
-    if (!(tap.lane_mask & (uint64_t{1} << lane)))
-      values.fill(0);
+    auto values = image_tap_values(state, lane, tap);
     selected = values;
     ++contributors;
     if (weight == 1 && contributors == 1 && preserve_single_tap)
@@ -546,67 +727,33 @@ std::array<uint32_t, 4> image_sample_values(const VectorMemState &state, uint32_
 } // namespace
 
 void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const VectorMemState &d) {
+  if (d.image_sampling || d.graphics_sample || d.image_bc_format ||
+      (d.image_status && !d.image_sample)) {
+    complete_image_load(wf, cu, d);
+    return;
+  }
   const uint32_t registers = d.buffer_d16 ? (d.buffer_components + 1) / 2 : d.buffer_components;
   if (!d.lds_dst && !cu.owns_vgpr_range(wf, d.dst_reg_base, registers))
     return;
-  const auto &format = d.decoded_buffer_format;
   const fp_mode::detail::ScopedFenv environment(0);
   const uint64_t lane_write_mask =
       d.lds_dst ? lds_destination_write_mask(d, cu.arch()) : d.exec_mask;
   for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
-    if (!(lane_write_mask & (1ULL << lane)))
+    if (!(lane_write_mask & (uint64_t{1} << lane)))
       continue;
     std::array<uint32_t, 4> values;
     if (d.image_sample) {
-      values = image_sample_values(d, lane);
+      values =
+          d.image_sample->transfer ? group_image_values(d, lane) : image_sample_values(d, lane);
     } else {
       const auto bytes = d.lane_mask & (1ULL << lane)
                              ? std::span(d.response_data).subspan(lane * d.elem_size, d.elem_size)
                              : std::span<const uint8_t>{};
-      values = image_texel_values(d, bytes);
+      values = image_texel_values(d, bytes,
+                                  d.image_bc && !bytes.empty() ? d.image_bc->texels[0][lane] : 0);
     }
-    for (uint32_t reg = 0; reg < registers; ++reg) {
-      if (!d.buffer_d16) {
-        if (d.lds_dst)
-          wf.lds().write((d.lds_per_lane_addr ? d.per_lane_lds_addr[lane]
-                                              : d.lds_base + lane * registers * 4) +
-                             reg * 4,
-                         reinterpret_cast<const uint8_t *>(&values[reg]), 4);
-        else
-          cu.write_vgpr(d.dst_reg_base + reg, lane, values[reg]);
-        continue;
-      }
-      uint32_t packed = 0, write_mask = 0;
-      for (uint32_t i = reg * 2; i < std::min(reg * 2 + 2, d.buffer_components); ++i) {
-        const uint32_t shift = d.d16_hi ? 16 : (i % 2) * 16;
-        uint16_t half = static_cast<uint16_t>(values[i]);
-        if (d.buffer_format_encoding == BufferFormatEncoding::Gfx11 && integer(format.number)) {
-          // Native RDNA3/4 typed and untyped D16 conversions saturate integers.
-          half = format.number == Number::Uint
-                     ? static_cast<uint16_t>(std::min(values[i], 0xffffu))
-                     : static_cast<uint16_t>(
-                           std::clamp(static_cast<int32_t>(values[i]), -32768, 32767));
-        }
-        if (!integer(format.number)) {
-          const float value = std::bit_cast<float>(values[i]);
-          // Only FLOAT32 -> D16 truncates. Other conversions round to nearest even.
-          half = format.number == Number::Float && format.widths[0] == 32
-                     ? util::f32_to_f16_rtz(value)
-                     : util::f32_to_f16(value);
-        }
-        packed |= uint32_t{half} << shift;
-        write_mask |= 0xffffu << shift;
-      }
-      if (write_mask != ~0u && !cu.sram_ecc() && !d.lds_dst)
-        packed |= cu.read_vgpr_storage(d.dst_reg_base + reg, lane) & ~write_mask;
-      if (d.lds_dst)
-        wf.lds().write(
-            (d.lds_per_lane_addr ? d.per_lane_lds_addr[lane] : d.lds_base + lane * registers * 4) +
-                reg * 4,
-            reinterpret_cast<const uint8_t *>(&packed), 4);
-      else
-        cu.write_vgpr(d.dst_reg_base + reg, lane, packed);
-    }
+    write_format_load_lane(wf, cu, d, lane, values);
   }
 }
+
 } // namespace rocjitsu::amdgpu

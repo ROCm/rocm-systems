@@ -4,12 +4,15 @@
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
+#include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include <array>
 #include <gtest/gtest.h>
@@ -156,6 +159,132 @@ TEST_P(FlatLdsTransfer, ScratchWidthsAndAddressModesPreserveInactiveLanesAndVgpr
     }
 }
 
+TEST_P(FlatLdsTransfer, GlobalLoadsToLdsPreserveInactiveLanesAndVgprs) {
+  if (!modern())
+    GTEST_SKIP() << "Tests specific to modern architectures.";
+  const std::array<uint32_t, 5> expected{0x81, 0xffffff81, 0x8081, 0xffff8081, 0x76548081};
+  const int base_offset = 64;
+  const uint64_t exec_mask = 0x25;
+  for (unsigned kind = 0; kind < 5; ++kind) {
+    for (bool scalar_base : {false, true}) {
+      for (int offset : {-4, 0, 4}) {
+        SCOPED_TRACE(testing::Message()
+                     << "kind=" << kind << " scalar_base=" << scalar_base << " offset=" << offset);
+        clear();
+        wave->set_exec(exec_mask);
+        wave->set_m0(base_offset);
+        scalar(4, 0x20000);
+        scalar(5, 0);
+        for (unsigned lane = 0; lane < wave->wf_size(); ++lane) {
+          const int source_slot = base_offset + static_cast<int>(lane) * 4;
+          const int address_before_offset = source_slot - offset;
+
+          vector(2, lane,
+                 scalar_base ? static_cast<uint32_t>(address_before_offset)
+                             : 0x20000u + static_cast<uint32_t>(address_before_offset));
+          vector(3, lane, 0);
+          memory.write32(0x20000u + static_cast<uint32_t>(source_slot), 0x76548081u + lane);
+        }
+
+        ASSERT_NO_FATAL_FAILURE(
+            issue(encoding(kind, 2, false, scalar_base ? 4 : vector_saddr(), offset)));
+        for (unsigned lane = 0; lane < wave->wf_size(); ++lane) {
+          const unsigned destination =
+              static_cast<unsigned>(128 + 64 + offset + static_cast<int>(lane) * 4);
+          const bool active = (exec_mask & (uint64_t{1} << lane)) != 0;
+
+          EXPECT_EQ(wave->lds().read32(destination), active ? expected[kind] + lane : 0xccccccccu)
+              << "lane=" << lane;
+
+          EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 8, lane), 0xdeadbeefu)
+              << "lane=" << lane;
+        }
+      }
+    }
+  }
+}
+
+TEST_P(FlatLdsTransfer, Cdna3CoincidentDsWritesIgnoreData1) {
+  if (GetParam().first != ROCJITSU_CODE_ARCH_CDNA3)
+    GTEST_SKIP();
+  wave->set_lds_size(512);
+  wave->set_exec(1);
+  vector(0, 0, 0);
+  vector(2, 0, 0x12345678);
+  vector(3, 0, 0x90abcdef);
+  const auto load_words =
+      cdna3::build_flat(cdna3::kFlatLoadDwordFlat, {.seg = 2, .addr = 4, .saddr = 127, .vdst = 8});
+  std::unique_ptr<Instruction> load(decode_valid(*decoder, load_words.data()));
+  ASSERT_NE(load, nullptr);
+  auto &board = wave->ensure_memory_wait_scoreboard();
+  unsigned hazards = 0;
+  for (uint16_t opcode :
+       {cdna3::kDsWrite2B32, cdna3::kDsWrite2st64B32, cdna3::kDsWrite2B64, cdna3::kDsWrite2st64B64,
+        cdna3::kDsWrxchg2RtnB32, cdna3::kDsWrxchg2st64RtnB32, cdna3::kDsWrxchg2RtnB64,
+        cdna3::kDsWrxchg2st64RtnB64}) {
+    SCOPED_TRACE(opcode);
+    for (uint8_t offset : {0, 1}) {
+      auto words = cdna3::build_ds(
+          opcode, {.offset1 = offset, .addr = 0, .data0 = 2, .data1 = 8, .vdst = 10});
+      std::unique_ptr<Instruction> store(decode_valid(*decoder, words.data()));
+      ASSERT_NE(store, nullptr);
+      board.clear();
+      cu->track_memory_wait(*load, *wave);
+      hazards = 0;
+      board.bind(8, &hazards, [](void *context, const amdgpu::MemoryWaitScoreboard::Hazard &) {
+        ++*static_cast<unsigned *>(context);
+      });
+      board.check_instruction(*store, *wave);
+      EXPECT_EQ(hazards, offset != 0 ? 1u : 0u);
+    }
+    board.clear();
+    // A coincident store must also execute when DATA1 is outside the VGPR allocation.
+    auto words = cdna3::build_ds(opcode, {.addr = 0, .data0 = 2, .data1 = 254, .vdst = 10});
+    std::unique_ptr<Instruction> store(decode_valid(*decoder, words.data()));
+    ASSERT_NE(store, nullptr);
+    ASSERT_TRUE(cu->execute_instruction(store.get(), *wave).succeeded());
+    amdgpu::LocalMemPipeline local;
+    ASSERT_EQ(local.issue(store.release(), *wave), amdgpu::VmAccessOutcome::Complete);
+    EXPECT_EQ(wave->lds().read32(wave->lds_base()), 0x12345678u);
+  }
+}
+
+TEST_P(FlatLdsTransfer, Cdna3DualAddressAccessesRespectTheWorkgroupAllocation) {
+  if (GetParam().first != ROCJITSU_CODE_ARCH_CDNA3)
+    GTEST_SKIP();
+  ASSERT_EQ(cu->allocate_lds(1), 0u);
+  const uint32_t allocation = cu->allocate_lds(1);
+  ASSERT_EQ(allocation, 512u);
+  wave->set_lds_base(allocation);
+  wave->set_lds_size(512);
+  wave->set_m0(0xffffffffu);
+  wave->set_exec(1);
+  vector(0, 0, 508);
+  vector(1, 0, 0x11223344);
+  vector(2, 0, 0xaabbccdd);
+  const uint32_t last = allocation + 508;
+  wave->lds().write32(last + 4, 0xdeadbeef);
+  amdgpu::LocalMemPipeline local;
+  auto issue_ds = [&](uint16_t op, uint8_t offset1) {
+    const auto words =
+        cdna3::build_ds(op, {.offset1 = offset1, .addr = 0, .data0 = 1, .data1 = 2, .vdst = 6});
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wave).succeeded());
+    ASSERT_EQ(local.issue(inst.release(), *wave), amdgpu::VmAccessOutcome::Complete);
+  };
+  ASSERT_NO_FATAL_FAILURE(issue_ds(cdna3::kDsWrite2B32, 0));
+  EXPECT_EQ(wave->lds().read32(last), 0x11223344u);
+  ASSERT_NO_FATAL_FAILURE(issue_ds(cdna3::kDsWrite2B32, 1));
+  EXPECT_EQ(wave->lds().read32(last + 4), 0xdeadbeefu);
+  ASSERT_NO_FATAL_FAILURE(issue_ds(cdna3::kDsRead2B32, 1));
+  EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 6, 0), 0x11223344u);
+  EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 7, 0), 0u);
+  ASSERT_NO_FATAL_FAILURE(issue_ds(cdna3::kDsWrxchg2RtnB32, 0));
+  EXPECT_EQ(wave->lds().read32(last), 0x11223344u);
+  EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 7, 0), 0x11223344u);
+}
+
 TEST_P(FlatLdsTransfer, LegacyGlobalWidthsAndScalarOrVectorBase) {
   if (modern())
     GTEST_SKIP() << "Modern GLOBAL LDS transfers use separate opcodes.";
@@ -204,6 +333,23 @@ TEST_P(FlatLdsTransfer, EmptyExecDoesNotTouchLdsOrVgprs) {
   EXPECT_EQ(wave->lds().read32(128), 0xcccccccc);
 }
 
+TEST_P(FlatLdsTransfer, Cdna2ScratchChecksLogicalBytesBeforeSwizzling) {
+  if (GetParam().first != ROCJITSU_CODE_ARCH_CDNA2)
+    GTEST_SKIP();
+  clear();
+  wave->set_exec(3);
+  wave->set_scratch_lane_size(4);
+  vector(2, 0, 0);
+  vector(2, 1, 4);
+  memory.write32(0x10000, 0xabcdef01);
+  memory.write32(0x10000 + 256 + 4, 0xfeedbeef);
+  ASSERT_NO_FATAL_FAILURE(issue(encoding(4, 1, true, 127, 0, false), false));
+  EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 8, 0), 0xabcdef01u);
+  EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 8, 1), 0u);
+  // The dedicated SCRATCH instruction bypasses generic FLAT aperture error checking.
+  EXPECT_EQ(wave->trapsts() & (1u << 8), 0u);
+}
+
 TEST_P(FlatLdsTransfer, OrdinaryScratchLoadsUseSameAddressSelection) {
   for (bool has_vector : {false, true}) {
     clear();
@@ -250,8 +396,6 @@ TEST_P(FlatLdsTransfer, SegmentDispatchAndInvalidLegacyDestinations) {
       EXPECT_TRUE(decode_fails(*decoder, words.data()));
     }
     if (modern()) {
-      // Preserve the GLOBAL sibling's decoding. Its execution remains
-      // unimplemented and is covered by a separate change (PR #13218).
       auto words = encoding(kind, 2, false, 127);
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
       ASSERT_NE(inst, nullptr);
@@ -332,6 +476,7 @@ TEST_P(FlatLdsTransfer, RdnaScratchScalarOffsetIsUnsigned) {
   if (!rdna())
     GTEST_SKIP() << "CDNA retains its existing scalar-offset arithmetic.";
   wave->set_exec(1);
+  wave->set_scratch_lane_size(0x80000004);
   scalar(4, 0x80000000);
   auto words = encoding(4, 1, false, 4);
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));

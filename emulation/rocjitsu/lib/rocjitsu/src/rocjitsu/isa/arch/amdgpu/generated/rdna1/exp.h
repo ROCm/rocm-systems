@@ -18,6 +18,13 @@ class ExpExp : public Exp {
 public:
   ExpExp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.gfx10_export =
+        amdgpu::Gfx10ShaderExportOperands{inst_.tgt,
+                                          inst_.en,
+                                          bool(inst_.compr),
+                                          {inst_.vsrc0, inst_.vsrc1, inst_.vsrc2, inst_.vsrc3}};
+  }
   Operand tgt;
   Operand vsrc0;
   Operand vsrc1;

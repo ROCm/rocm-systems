@@ -28,6 +28,36 @@
 
 namespace rocjitsu {
 
+/// Optional notification that an already routed memory issue was withdrawn before wave resumption.
+class AmdgpuMemoryIssueCancellationObserver {
+public:
+  virtual ~AmdgpuMemoryIssueCancellationObserver() = default;
+  virtual void onAmdgpuMemoryIssueCancelled(const Instruction &inst, amdgpu::Wavefront &wf) = 0;
+};
+
+/// Observes conditional image returns after translation succeeds, before shader execution resumes.
+class AmdgpuImageFeedbackObserver {
+public:
+  virtual ~AmdgpuImageFeedbackObserver() = default;
+  virtual void onAmdgpuImageFeedbackQualified(const Instruction &inst, amdgpu::Wavefront &wf) = 0;
+};
+
+/// Optional notification when an implicit instruction wait retires its memory producers.
+class AmdgpuImplicitMemoryWaitObserver {
+public:
+  virtual ~AmdgpuImplicitMemoryWaitObserver() = default;
+  virtual void onAmdgpuImplicitMemoryWait(amdgpu::Wavefront &wf,
+                                          const amdgpu::WaitFields &fields) = 0;
+};
+
+/// Optional observation of a VALU lane sourcing bytes directly from LDS.
+class AmdgpuLdsDirectReadObserver {
+public:
+  virtual ~AmdgpuLdsDirectReadObserver() = default;
+  virtual void onAmdgpuLdsDirectRead(const amdgpu::Wavefront &wf, uint32_t address, uint32_t bytes,
+                                     uint32_t lane) = 0;
+};
+
 /// @brief Abstract plugin interface for execution hooks.
 ///
 /// Plugins receive callbacks at key points during simulation execution.
@@ -375,6 +405,22 @@ private:
   std::string name_;
   uint32_t slot_index_ = 0;
   PluginSink *sink_ = &StderrSink::instance();
+};
+
+/// Optional interface for plugins that observe a wave entering its trap handler.
+/// Separate from ExecutionPlugin to preserve its vtable for loadable plugins.
+class AmdgpuTrapEntryObserver {
+public:
+  virtual ~AmdgpuTrapEntryObserver() = default;
+  virtual void onAmdgpuTrapEntered(amdgpu::Wavefront &wf) = 0;
+};
+
+/// A full workgroup barrier also synchronizes completed writes from waves that
+/// have already exited. Only live waves remain in the callback span.
+class AmdgpuWorkgroupBarrierObserver {
+public:
+  virtual ~AmdgpuWorkgroupBarrierObserver() = default;
+  virtual void onAmdgpuWorkgroupBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts) = 0;
 };
 
 } // namespace rocjitsu

@@ -3,11 +3,25 @@
 
 #include "rocjitsu/code/analysis/waitcheck/target.h"
 
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
 
 namespace rocjitsu {
 namespace waitcheck_detail {
+
+std::optional<RegisterRef> WaitcheckTarget::register_operand(const Operand &operand,
+                                                             rj_code_arch_t arch) {
+  if (const auto ref = operand.to_register_ref())
+    return ref;
+  // Mesh exports read M0 through a fieldless input. Scalar instructions such
+  // as S_SENDMSG_RTN_B32 can produce the same register through a selector.
+  if (amdgpu::has_typed_export_waits(arch) &&
+      (operand.to_special_reg_class() == RegClass::M0 ||
+       (operand.has_register_selector() && operand.encoding_value() == amdgpu::kModernM0Selector)))
+    return RegisterRef{RegClass::M0, 0, 1};
+  return std::nullopt;
+}
 
 bool WaitcheckTarget::vm_vsrc_event_implied_by_wait(WaitEventKind kind, WaitCounterKind counter) {
   switch (counter) {
@@ -244,7 +258,7 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
     return util::Result::failure();
   auto has_register_result = [&] {
     for (int i = 0; i < inst.num_dst_operands(); ++i) {
-      if (const Operand *operand = inst.dst_operand(i); operand && operand->to_register_ref())
+      if (const Operand *operand = inst.dst_operand(i); operand && register_operand(*operand, arch))
         return true;
     }
     return false;
@@ -428,6 +442,16 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
   }
 
   if (is_vmem_store(mnemonic)) {
+    // The LDS-to-buffer transfer also occupies LGKM on targets whose issue metadata
+    // includes it. Account for that unordered position even if a store fault cancels it.
+    if (mnemonic == "buffer_store_lds_dword") {
+      const auto *issue = inst.amdgpu_memory_issue_info();
+      if (issue && std::ranges::any_of(issue->counter_obligations(), [](const auto &obligation) {
+            return obligation.wait_counter_type() == amdgpu::WaitCounterType::LGKMCNT;
+          }))
+        events.emplace_back(WaitCounterKind::Ds, WaitEventKind::Unknown,
+                            TrackedRegisterSource::None, false, false);
+    }
     events.push_back({amdgpu::vmem_store_wait_counter(model.value()), WaitEventKind::VmemStore,
                       TrackedRegisterSource::None, false, false});
     if (expert)
@@ -465,8 +489,8 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
     return util::Result::success();
   }
 
-  if (mnemonic == "image_msaa_load" || mnemonic == "image_get_lod" ||
-      mnemonic.starts_with("image_sample") || mnemonic.starts_with("image_gather")) {
+  const auto vmem_type = amdgpu::vmem_read_type(mnemonic);
+  if (vmem_type == amdgpu::VmemWriteback::Sample) {
     events.push_back({amdgpu::image_sample_wait_counter(model.value()), WaitEventKind::Sample});
     if (expert)
       events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::Sample,
@@ -475,7 +499,7 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
     return util::Result::success();
   }
 
-  if (mnemonic.starts_with("image_bvh")) {
+  if (vmem_type == amdgpu::VmemWriteback::Bvh) {
     events.push_back({amdgpu::image_bvh_wait_counter(model.value()), WaitEventKind::Bvh});
     if (expert)
       events.push_back({WaitCounterKind::VmVsrc, WaitEventKind::Bvh,
@@ -485,8 +509,32 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
   }
 
   if (mnemonic == "export" || mnemonic == "exp") {
-    events.push_back({WaitCounterKind::Exp, WaitEventKind::Export, TrackedRegisterSource::Uses,
-                      false, true, true});
+    auto kind = WaitEventKind::Export;
+    auto sources = TrackedRegisterSource::Uses;
+    if (amdgpu::has_typed_export_waits(arch)) {
+      // M0 supplies the row at issue. The export grant reads the enabled VGPRs
+      // and EXEC; the latter is protected by check_exec_defs.
+      sources = TrackedRegisterSource::VectorUses;
+      amdgpu::RegisterModifiers modifiers;
+      inst.amdgpu_register_modifiers(modifiers);
+      if (modifiers.shader_export) {
+        const uint8_t target = modifiers.shader_export->target;
+        // RDNA4 groups color with depth but gives the blend pair a separate FIFO (ISA 5.7).
+        if (target <= 7)
+          kind = WaitEventKind::ExportMrt;
+        else if (target == 21 || target == 22)
+          kind = arch == ROCJITSU_CODE_ARCH_RDNA4 ? WaitEventKind::ExportDualSourceBlend
+                                                  : WaitEventKind::ExportMrt;
+        else if (target == 8)
+          kind =
+              arch == ROCJITSU_CODE_ARCH_RDNA4 ? WaitEventKind::ExportMrt : WaitEventKind::ExportZ;
+        else if (target >= 12 && target <= 16)
+          kind = WaitEventKind::ExportPosition;
+        else if (target == 20)
+          kind = WaitEventKind::ExportPrimitive;
+      }
+    }
+    events.push_back({WaitCounterKind::Exp, kind, sources, false, true, true});
     return util::Result::success();
   }
 

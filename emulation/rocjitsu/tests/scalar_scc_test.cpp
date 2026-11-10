@@ -13,6 +13,7 @@
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
 
@@ -29,6 +30,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cstdint>
@@ -186,13 +188,14 @@ EncodingWords encode_sopk(const ScalarSccProfile &profile, std::string_view mnem
 
 class ScalarSccFixture {
 public:
-  ScalarSccFixture(const ScalarSccProfile &profile, std::string_view test_name)
+  ScalarSccFixture(const ScalarSccProfile &profile, std::string_view test_name,
+                   uint32_t wave_size = 0, uint32_t num_sgprs = 106)
       : profile(profile),
         gpu_mem(std::string(profile.name) + "_" + std::string(test_name) + "_mem"),
         l2(std::string(profile.name) + "_" + std::string(test_name) + "_l2") {
     config.arch = profile.arch;
     config.num_wf_slots = 1;
-    config.sgprs_per_wf = 106;
+    config.sgprs_per_wf = num_sgprs;
     config.vgprs_per_wf = 256;
     config.lds_size_kb = 64;
     rocjitsu::test::initialize_compute_unit(cu, std::string(profile.name), config, &gpu_mem, &l2);
@@ -200,7 +203,7 @@ public:
       return;
     decoder = Decoder::create(profile.arch);
     if (cu)
-      wf = cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+      wf = cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf, wave_size);
   }
 
   ~ScalarSccFixture() {
@@ -244,6 +247,306 @@ public:
   std::unique_ptr<Decoder> decoder;
   amdgpu::Wavefront *wf = nullptr;
 };
+
+TEST(ScalarSccTest, Gfx10SubvectorLoopUsesOnlyExecAndItsScratchSgpr) {
+  for (const auto &profile : kScalarSccProfiles) {
+    if (profile.arch != ROCJITSU_CODE_ARCH_RDNA1 && profile.arch != ROCJITSU_CODE_ARCH_RDNA2)
+      continue;
+    ScalarSccFixture f(profile, "subvector", 64);
+    ASSERT_TRUE(f.ready());
+    // GFX10: s_subvector_loop_begin s2, +4 and s_subvector_loop_end s2, -3.
+    const auto begin = f.decode({0xbd820004u, 0}, "s_subvector_loop_begin");
+    const auto end = f.decode({0xbe02fffdu, 0}, "s_subvector_loop_end");
+    ASSERT_TRUE(begin && end);
+    EXPECT_EQ(begin->branch_offset_bytes(), 16);
+    EXPECT_EQ(end->branch_offset_bytes(), -12);
+    EXPECT_NE(begin->flags() & COND_BRANCH, 0u);
+    EXPECT_NE(end->flags() & COND_BRANCH, 0u);
+    const RegisterRef scratch{RegClass::SGPR, 2, 1};
+    EXPECT_EQ(InstDefUse(*begin, 64).uses.contains(scratch),
+              profile.arch == ROCJITSU_CODE_ARCH_RDNA1);
+    EXPECT_TRUE(InstDefUse(*end, 64).uses.contains(scratch));
+    EXPECT_EQ(begin->disassemble(), "s_subvector_loop_begin s2, 4");
+    const auto execute = [&](Instruction &inst, uint64_t pc) {
+      f.wf->pc = pc;
+      EXPECT_TRUE(f.cu->execute_instruction(&inst, *f.wf).succeeded());
+      return f.wf->pc + inst.size();
+    };
+
+    const auto temp = f.sgpr_base() + 2;
+    f.cu->write_sgpr(temp, 0xdeadbeef);
+    f.wf->write_exec(0);
+    EXPECT_EQ(execute(*begin, 0x1000), 0x1014u);
+    EXPECT_EQ(f.cu->read_sgpr(temp), 0xdeadbeefu);
+
+    constexpr uint64_t mask = 0x0000000b00000005ull;
+    f.wf->write_exec(mask);
+    EXPECT_EQ(execute(*begin, 0x1000), 0x1004u);
+    EXPECT_EQ(f.wf->exec_raw(), 5u);
+    EXPECT_EQ(f.cu->read_sgpr(temp), 11u);
+    EXPECT_EQ(execute(*end, 0x100c), 0x1004u);
+    EXPECT_EQ(f.wf->exec_raw(), 11ull << 32);
+    EXPECT_EQ(f.cu->read_sgpr(temp), 5u);
+    EXPECT_EQ(execute(*end, 0x100c), 0x1010u);
+    EXPECT_EQ(f.wf->exec_raw(), mask);
+
+    auto andexec =
+        f.decode(encode_sop1(profile, "s_and_saveexec_b32", 2, 128), "s_and_saveexec_b32");
+    ASSERT_TRUE(andexec);
+    EXPECT_EQ(execute(*andexec, 0x1010), 0x1014u);
+    EXPECT_EQ(f.wf->exec_raw(), 11ull << 32);
+    EXPECT_EQ(f.cu->read_sgpr(temp), 5u);
+    EXPECT_FALSE(f.wf->read_scc());
+  }
+}
+
+TEST(ScalarSccTest, Gfx10WaitRegisterValueIsDynamicAndWraps) {
+  using amdgpu::WaitCounterKind;
+  using amdgpu::WaitCounterPolicy;
+  for (const auto &profile : kScalarSccProfiles) {
+    if (profile.arch != ROCJITSU_CODE_ARCH_RDNA1 && profile.arch != ROCJITSU_CODE_ARCH_RDNA2)
+      continue;
+    ScalarSccFixture f(profile, "wait_register");
+    ASSERT_TRUE(f.ready());
+    const auto dynamic = f.decode({0xbc000001u, 0}, "s_waitcnt_vmcnt");
+    const auto immediate = f.decode({0xbc7d0040u, 0}, "s_waitcnt_vmcnt");
+    ASSERT_TRUE(dynamic && immediate);
+    const auto unknown = WaitCounterPolicy::explicit_wait_fields(*dynamic, profile.arch);
+    ASSERT_TRUE(unknown.succeeded());
+    // Without the executing wave's SGPR, a static checker cannot prove a threshold.
+    EXPECT_FALSE(unknown.value());
+    const auto zero = WaitCounterPolicy::explicit_wait_fields(*immediate, profile.arch);
+    ASSERT_TRUE(zero.succeeded() && zero.value());
+    const auto load = static_cast<size_t>(WaitCounterKind::Load);
+    EXPECT_EQ((*zero.value())[load], 0u);
+    f.cu->write_sgpr(f.sgpr_base(), 63);
+    f.wf->wait_counters().vmcnt = 1;
+    const auto resolved = amdgpu::MemoryWaitScoreboard::runtime_wait_fields(*dynamic, *f.wf);
+    ASSERT_TRUE(resolved.succeeded() && resolved.value());
+    EXPECT_EQ((*resolved.value())[load], 0u);
+    EXPECT_TRUE(f.cu->execute_instruction(dynamic.get(), *f.wf).succeeded());
+    EXPECT_EQ(f.wf->wait_target().vmcnt, 0u);
+    EXPECT_EQ(f.wf->state(), amdgpu::WfState::WAITCNT);
+    f.wf->wait_counters().vmcnt = 0;
+    f.wf->set_state(amdgpu::WfState::RUNNING);
+    f.wf->set_wait_target({.expcnt = 0});
+    f.wf->wait_counters().expcnt = 1;
+    EXPECT_TRUE(f.cu->execute_instruction(immediate.get(), *f.wf).succeeded());
+    EXPECT_EQ(f.wf->state(), amdgpu::WfState::RUNNING);
+    f.wf->wait_counters().expcnt = 0;
+  }
+}
+
+TEST(ScalarSccTest, Rdna2HwregsUseTheExecutingWavesState) {
+  const auto profile =
+      std::ranges::find(kScalarSccProfiles, ROCJITSU_CODE_ARCH_RDNA2, &ScalarSccProfile::arch);
+  ASSERT_NE(profile, kScalarSccProfiles.end());
+  ScalarSccFixture f(*profile, "hwreg");
+  ASSERT_TRUE(f.ready());
+  f.wf->set_lds_base(512);
+  f.wf->set_lds_size(4096);
+  f.wf->wait_counters().vmcnt = 45;
+  f.wf->wait_counters().vscnt = 12;
+  f.wf->wait_counters().expcnt = 2;
+  f.wf->wait_counters().lgkmcnt = 5;
+  f.wf->set_apertures(0x1234000000000000ull, 0x12340000ffffffffull, 0xabcd000000000000ull,
+                      0xabcd0000ffffffffull);
+  f.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
+    return amdgpu::ComputeUnitCore::TrapHandlerConfig{.tba = 0x3456789abc00, .tma = 0x123456778800};
+  });
+  for (const auto &[id, expected] :
+       {std::pair{6u, 0x10002u}, std::pair{7u, 0x3080052du}, std::pair{15u, 0x1234abcdu},
+        std::pair{16u, 0x789abc00u}, std::pair{17u, 0x3456u}, std::pair{18u, 0x56778800u},
+        std::pair{19u, 0x1234u}, std::pair{25u, 0u}}) {
+    SCOPED_TRACE(id);
+    const auto read =
+        f.decode(encode_sopk(*profile, "s_getreg_b32", 2, id | (31u << 11)), "s_getreg_b32");
+    ASSERT_TRUE(read);
+    EXPECT_TRUE(f.cu->execute_instruction(read.get(), *f.wf).succeeded());
+    EXPECT_EQ(f.cu->read_sgpr(f.sgpr_base() + 2), expected);
+  }
+  f.wf->wait_counters() = {};
+  for (const auto &[selector, address] : {std::pair{235u, f.wf->shared_aperture_base()},
+                                          std::pair{236u, f.wf->shared_aperture_limit()},
+                                          std::pair{237u, f.wf->private_aperture_base()},
+                                          std::pair{238u, f.wf->private_aperture_limit()}}) {
+    SCOPED_TRACE(selector);
+    for (std::string_view mnemonic : {"s_mov_b32", "s_mov_b64"}) {
+      const auto read = f.decode(encode_sop1(*profile, mnemonic, 2, selector), mnemonic);
+      ASSERT_TRUE(read);
+      EXPECT_TRUE(f.cu->execute_instruction(read.get(), *f.wf).succeeded());
+      EXPECT_EQ(f.cu->read_sgpr(f.sgpr_base() + 2), static_cast<uint32_t>(address));
+      if (mnemonic == "s_mov_b64") {
+        EXPECT_EQ(f.cu->read_sgpr(f.sgpr_base() + 3), address >> 32);
+      }
+    }
+  }
+}
+
+TEST(ScalarSccTest, Cdna1ReadsUnallocatedSourcesAndZeroPredicates) {
+  ScalarSccFixture f(kScalarSccProfiles.front(), "scalar_sources", /*wave_size=*/0,
+                     /*num_sgprs=*/32);
+  ASSERT_TRUE(f.ready());
+  f.cu->write_sgpr(f.sgpr_base(), 0x12345678);
+  f.cu->write_sgpr(f.sgpr_base() + 1, 0xabcdef01);
+  f.wf->write_exec(0);
+  f.wf->set_vcc_raw(0);
+  for (const auto &[selector, expected] : std::array<std::pair<unsigned, uint64_t>, 3>{
+           {{40, 0xabcdef0112345678ULL}, {251, 1}, {252, 1}}}) {
+    auto mov = f.decode({0xbe840100u | selector, 0}, "s_mov_b64");
+    ASSERT_TRUE(mov);
+    ASSERT_TRUE(f.cu->execute_instruction(mov.get(), *f.wf).succeeded());
+    EXPECT_EQ(f.cu->read_sgpr(f.sgpr_base() + 4), static_cast<uint32_t>(expected));
+    EXPECT_EQ(f.cu->read_sgpr(f.sgpr_base() + 5), expected >> 32);
+  }
+  auto mov = f.decode({0xbe840028, 0}, "s_mov_b32"); // s4, s40
+  ASSERT_TRUE(mov);
+  ASSERT_TRUE(f.cu->execute_instruction(mov.get(), *f.wf).succeeded());
+  EXPECT_EQ(f.cu->read_sgpr(f.sgpr_base() + 4), 0x12345678u);
+}
+
+TEST(ScalarSccTest, Cdna1ForkConsumesOneSharedLiteralWord) {
+  ScalarSccFixture f(kScalarSccProfiles.front(), "fork_literal");
+  ASSERT_TRUE(f.ready());
+  f.cu->write_sgpr(f.sgpr_base(), 0x100);
+  f.cu->write_sgpr(f.sgpr_base() + 1, 0);
+  for (uint32_t word : {0x948000ffu, 0x9480ff00u, 0x9480ffffu}) {
+    auto fork = f.decode({word, 0x100}, "s_cbranch_g_fork");
+    ASSERT_TRUE(fork);
+    EXPECT_EQ(fork->size(), 8u);
+    f.wf->pc = 0x400;
+    f.wf->write_exec(0x100);
+    ASSERT_TRUE(f.cu->execute_instruction(fork.get(), *f.wf).succeeded());
+    EXPECT_EQ(f.wf->pc + fork->size(), 0x100u);
+    EXPECT_EQ(f.wf->cond_stack_ptr(), 0u);
+  }
+}
+
+TEST(ScalarSccTest, Cdna1ConditionalDebugBranchesReadBothStatusFlags) {
+  ScalarSccFixture f(kScalarSccProfiles.front(), "debug_branches");
+  ASSERT_TRUE(f.ready());
+  constexpr std::array names{"s_cbranch_cdbgsys", "s_cbranch_cdbguser", "s_cbranch_cdbgsys_or_user",
+                             "s_cbranch_cdbgsys_and_user"};
+  for (unsigned flags = 0; flags < 4; ++flags) {
+    f.wf->set_status_raw(flags << 20);
+    const std::array expected{bool(flags & 2), bool(flags & 1), flags != 0, flags == 3};
+    for (unsigned i = 0; i < names.size(); ++i) {
+      auto branch = f.decode({0xbf970002u + (i << 16), 0}, names[i]);
+      ASSERT_TRUE(branch);
+      f.wf->pc = 0x100;
+      ASSERT_TRUE(f.cu->execute_instruction(branch.get(), *f.wf).succeeded());
+      EXPECT_EQ(f.wf->pc + branch->size(), expected[i] ? 0x10cu : 0x104u);
+    }
+  }
+}
+
+TEST(ScalarSccTest, Cdna1RestrictsShaderWritesToTrapTemporaryPairs) {
+  ScalarSccFixture f(kScalarSccProfiles.front(), "trap_temporaries");
+  ASSERT_TRUE(f.ready());
+  auto mov = f.decode({0xbeec0181u, 0}, "s_mov_b64"); // ttmp[0:1], 1
+  ASSERT_TRUE(mov);
+  f.wf->set_ttmp(0, 12);
+  f.wf->set_ttmp(1, 34);
+  ASSERT_TRUE(f.cu->execute_instruction(mov.get(), *f.wf).succeeded());
+  EXPECT_EQ(f.wf->ttmp(0), 12u);
+  EXPECT_EQ(f.wf->ttmp(1), 34u);
+  f.wf->set_in_trap_handler(true);
+  ASSERT_TRUE(f.cu->execute_instruction(mov.get(), *f.wf).succeeded());
+  EXPECT_EQ(f.wf->ttmp(0), 1u);
+  EXPECT_EQ(f.wf->ttmp(1), 0u);
+  auto rfe = f.decode({0x95800200u, 0}, "s_rfe_restore_b64"); // s[0:1], s2
+  ASSERT_TRUE(rfe);
+  f.cu->write_sgpr(f.sgpr_base(), 0x100);
+  f.cu->write_sgpr(f.sgpr_base() + 1, 0);
+  ASSERT_TRUE(f.cu->execute_instruction(rfe.get(), *f.wf).succeeded());
+  EXPECT_EQ(f.wf->pc + rfe->size(), 0x100u);
+  EXPECT_FALSE(f.wf->in_trap_handler());
+  EXPECT_EQ(f.wf->status_raw() & (1u << 5), 0u);
+}
+
+TEST(ScalarSccTest, Cdna1TrapDrainsCountersBeforeEnteringConfiguredHandler) {
+  ScalarSccFixture f(kScalarSccProfiles.front(), "trap_order");
+  ASSERT_TRUE(f.ready());
+  f.cu->set_functional_quantum(1);
+  constexpr uint64_t trap_pc = 0x1000, handler = 0x2000;
+  f.gpu_mem.write32(trap_pc, 0xbf920007u);     // s_trap 7
+  f.gpu_mem.write32(handler, 0xb8840142u);     // s_getreg_b32 s4, hwreg(STATUS,5,1)
+  f.gpu_mem.write32(handler + 4, 0xb885f810u); // s5 = TBA_LO
+  f.gpu_mem.write32(handler + 8, 0xb886f812u); // s6 = TMA_LO
+  f.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
+    return amdgpu::ComputeUnitCore::TrapHandlerConfig{handler, 0x3000, true};
+  });
+  f.wf->pc = trap_pc;
+  f.wf->wait_counters().vmcnt = 1;
+  f.cu->step();
+  EXPECT_FALSE(f.wf->in_trap_handler());
+  EXPECT_EQ(f.wf->pc, trap_pc);
+  f.wf->release_wait_counter(amdgpu::WaitCounterType::VMCNT);
+  for (unsigned i = 0; i < 3 && !f.wf->in_trap_handler(); ++i)
+    f.cu->step();
+  ASSERT_TRUE(f.wf->in_trap_handler());
+  ASSERT_EQ(f.wf->pc, handler);
+  f.cu->step();
+  f.cu->step();
+  f.cu->step();
+  EXPECT_EQ(f.cu->read_sgpr(f.sgpr_base() + 4), 1u);
+  EXPECT_EQ(f.cu->read_sgpr(f.sgpr_base() + 5), handler);
+  EXPECT_EQ(f.cu->read_sgpr(f.sgpr_base() + 6), 0x3000u);
+}
+
+TEST(ScalarSccTest, Cdna1TrapRetiresImplicitMemoryWaitOnlyOnHandlerEntry) {
+  constexpr uint64_t program = 0x1000, handler = 0x2000, data = 0x3000;
+  for (bool install_handler : {false, true}) {
+    SCOPED_TRACE(install_handler);
+    ScalarSccFixture f(kScalarSccProfiles.front(), "trap_wait_check");
+    ASSERT_TRUE(f.ready());
+    f.cu->set_functional_quantum(1);
+    f.l2.set_backing_memory(&f.gpu_mem);
+    f.gpu_mem.write32(data, 123);
+    f.gpu_mem.write32(program, 0xc0020200u); // s_load_dword s8, s[0:1], 0
+    f.gpu_mem.write32(program + 4, 0);
+    f.gpu_mem.write32(program + 8, 0xbf920007u);  // s_trap 7
+    f.gpu_mem.write32(program + 12, 0xbe890008u); // s_mov_b32 s9, s8
+    f.gpu_mem.write32(handler, 0xbe890008u);
+    if (install_handler) {
+      f.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
+        return amdgpu::ComputeUnitCore::TrapHandlerConfig{handler, 0, false};
+      });
+    }
+    f.cu->write_sgpr(f.sgpr_base(), data);
+    f.cu->write_sgpr(f.sgpr_base() + 1, 0);
+    f.wf->pc = program;
+    f.cu->step();
+    ASSERT_EQ(f.wf->pc, program + 8);
+    ASSERT_NE(f.wf->memory_wait_scoreboard(), nullptr);
+    ASSERT_FALSE(f.wf->memory_wait_scoreboard()->empty());
+    const uint64_t consumer = install_handler ? handler : program + 12;
+    for (unsigned i = 0; i < 8 && f.wf->pc != consumer; ++i)
+      f.cu->step();
+    ASSERT_EQ(f.wf->pc, consumer);
+    f.cu->step();
+    EXPECT_EQ(f.cu->read_sgpr(f.sgpr_base() + 9), 123u);
+    EXPECT_EQ(f.cu->memory_wait_diagnostic_count(), install_handler ? 0u : 1u);
+  }
+}
+
+TEST(ScalarSccTest, Cdna1ShaderHaltStopsNextInstruction) {
+  ScalarSccFixture f(kScalarSccProfiles.front(), "shader_halt");
+  ASSERT_TRUE(f.ready());
+  f.cu->set_functional_quantum(1);
+  f.wf->pc = 0x1000;
+  f.gpu_mem.write32(0x1000, 0xbf8f0003u); // s_setprio 3
+  f.gpu_mem.write32(0x1004, 0xbf8d0001u); // s_sethalt 1
+  f.gpu_mem.write32(0x1008, 0xb004007bu); // s_movk_i32 s4,123
+  f.cu->step();
+  EXPECT_EQ((f.wf->status_raw() >> 3) & 3u, 3u);
+  f.cu->step();
+  EXPECT_TRUE(f.wf->debug_halted());
+  EXPECT_TRUE(f.wf->status_halt());
+  f.cu->step();
+  EXPECT_EQ(f.wf->pc, 0x1008u);
+  EXPECT_EQ(f.cu->read_sgpr(f.sgpr_base() + 4), 0u);
+}
 
 class WrexecPair {
 public:
@@ -391,6 +694,87 @@ void run_wrexec_scc_cases(const ScalarSccProfile &profile, const WrexecPair &pai
     EXPECT_EQ(fixture.wf->exec(), test_case.expected & lane_mask)
         << profile.name << " " << test_case.mnemonic;
     fixture.expect_scc_consumer(expected_scc, test_case.mnemonic);
+  }
+}
+
+TEST(ScalarSccTest, B32ExecInstructionsPreserveTheOtherHalfOfAWave) {
+  for (const auto &profile : kScalarSccProfiles) {
+    if (!profile.has_wrexec_b32)
+      continue;
+    SCOPED_TRACE(profile.name);
+    // The CDNA5 ISA exposes these B32 operations on wave32.
+    const uint32_t wave_size = profile.arch == ROCJITSU_CODE_ARCH_CDNA5 ? 32 : 64;
+    ScalarSccFixture fixture(profile, "b32_exec", wave_size);
+    ASSERT_TRUE(fixture.ready());
+    const char *wrexec = profile.wrexec_dialect == WrexecDialect::Andn ? "s_andn1_wrexec_b32"
+                                                                       : "s_and_not0_wrexec_b32";
+    for (const std::string_view mnemonic : {"s_and_saveexec_b32", wrexec}) {
+      SCOPED_TRACE(mnemonic);
+      auto inst = fixture.decode(encode_sop1(profile, mnemonic, 4, 0), mnemonic);
+      ASSERT_NE(inst, nullptr);
+      const uint64_t high = wave_size == 64 ? uint64_t{0xdeadbeef} << 32 : 0;
+      fixture.wf->set_exec_raw(high | 15);
+      fixture.cu->write_sgpr(fixture.sgpr_base(), mnemonic == "s_and_saveexec_b32" ? 0 : 15);
+      ASSERT_TRUE(fixture.cu->execute_instruction(inst.get(), *fixture.wf).succeeded());
+      EXPECT_EQ(fixture.wf->exec_raw(), high);
+      EXPECT_FALSE(fixture.wf->read_scc());
+      EXPECT_EQ(fixture.cu->read_sgpr(fixture.sgpr_base() + 4),
+                mnemonic == "s_and_saveexec_b32" ? 15u : 0u);
+    }
+  }
+}
+
+TEST(ScalarSccTest, Gfx10SubvectorLoopExecutesAndRestoresBothHalves) {
+  for (const auto &profile : kScalarSccProfiles) {
+    if (profile.arch != ROCJITSU_CODE_ARCH_RDNA1 && profile.arch != ROCJITSU_CODE_ARCH_RDNA2)
+      continue;
+    ScalarSccFixture f(profile, "gfx10_subvector", 64);
+    ASSERT_TRUE(f.ready());
+    const auto begin =
+        f.decode(encode_sopk(profile, "s_subvector_loop_begin", 4, 8), "s_subvector_loop_begin");
+    const auto end =
+        f.decode(encode_sopk(profile, "s_subvector_loop_end", 4, 0xfffe), "s_subvector_loop_end");
+    ASSERT_NE(begin, nullptr);
+    ASSERT_NE(end, nullptr);
+    f.wf->pc = 0x100;
+    f.wf->write_exec(0);
+    ASSERT_TRUE(f.cu->execute_instruction(begin.get(), *f.wf).succeeded());
+    EXPECT_EQ(f.wf->pc, 0x120u);
+    f.wf->pc = 0x100;
+    f.wf->write_exec((uint64_t{3} << 32) | 5);
+    ASSERT_TRUE(f.cu->execute_instruction(begin.get(), *f.wf).succeeded());
+    EXPECT_EQ(f.wf->exec(), 5u);
+    EXPECT_EQ(f.cu->read_sgpr(f.sgpr_base() + 4), 3u);
+    f.wf->pc = 0x120;
+    ASSERT_TRUE(f.cu->execute_instruction(end.get(), *f.wf).succeeded());
+    EXPECT_EQ(f.wf->pc, 0x118u);
+    EXPECT_EQ(f.wf->exec(), uint64_t{3} << 32);
+    EXPECT_EQ(f.cu->read_sgpr(f.sgpr_base() + 4), 5u);
+    f.wf->pc = 0x120;
+    ASSERT_TRUE(f.cu->execute_instruction(end.get(), *f.wf).succeeded());
+    EXPECT_EQ(f.wf->pc, 0x120u);
+    EXPECT_EQ(f.wf->exec(), (uint64_t{3} << 32) | 5);
+  }
+}
+
+TEST(ScalarSccTest, Gfx10WaitUsesTheRegisterAndForgetsEarlierCounterLimits) {
+  for (const auto &profile : kScalarSccProfiles) {
+    if (profile.arch != ROCJITSU_CODE_ARCH_RDNA1 && profile.arch != ROCJITSU_CODE_ARCH_RDNA2)
+      continue;
+    ScalarSccFixture f(profile, "gfx10_wait");
+    ASSERT_TRUE(f.ready());
+    auto vm = f.decode(encode_sopk(profile, "s_waitcnt_vmcnt", 4, 2), "s_waitcnt_vmcnt");
+    auto ds = f.decode(encode_sopk(profile, "s_waitcnt_lgkmcnt", 4, 1), "s_waitcnt_lgkmcnt");
+    ASSERT_NE(vm, nullptr);
+    ASSERT_NE(ds, nullptr);
+    f.cu->write_sgpr(f.sgpr_base() + 4, 63);
+    ASSERT_TRUE(f.cu->execute_instruction(vm.get(), *f.wf).succeeded());
+    EXPECT_EQ(f.wf->wait_target().vmcnt, 1u);
+    f.wf->wait_counters().vmcnt = 2;
+    ASSERT_TRUE(f.cu->execute_instruction(ds.get(), *f.wf).succeeded());
+    EXPECT_EQ(f.wf->wait_target().lgkmcnt, 0u);
+    EXPECT_EQ(f.wf->state(), amdgpu::WfState::RUNNING);
+    f.wf->wait_counters().vmcnt = 0;
   }
 }
 

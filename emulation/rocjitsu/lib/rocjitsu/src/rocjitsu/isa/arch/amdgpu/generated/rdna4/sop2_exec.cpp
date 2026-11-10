@@ -6,6 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/sop2.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_fp.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
@@ -188,68 +189,94 @@ void SPackHlB32B16Sop2::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_pack_hl_b32_b16_sop2(*this, wf);
 }
 
-void SAddF32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_add_f32_sop2(*this, wf); }
+void SAddF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::scalar_fp::arithmetic<amdgpu::scalar_fp::F32, amdgpu::scalar_fp::Op::Add>(wf, sdst, ssrc0,
+                                                                                    ssrc1);
+}
 
-void SSubF32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_sub_f32_sop2(*this, wf); }
+void SSubF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::scalar_fp::arithmetic<amdgpu::scalar_fp::F32, amdgpu::scalar_fp::Op::Sub>(wf, sdst, ssrc0,
+                                                                                    ssrc1);
+}
 
 void SMinNumF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_min_num_f32_sop2(*this, wf);
+  amdgpu::scalar_fp::select<amdgpu::scalar_fp::F32, amdgpu::minmax::MinNum>(wf, sdst, ssrc0, ssrc1);
 }
 
 void SMaxNumF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_max_num_f32_sop2(*this, wf);
+  amdgpu::scalar_fp::select<amdgpu::scalar_fp::F32, amdgpu::minmax::MaxNum>(wf, sdst, ssrc0, ssrc1);
 }
 
-void SMulF32Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_mul_f32_sop2(*this, wf); }
+void SMulF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::scalar_fp::arithmetic<amdgpu::scalar_fp::F32, amdgpu::scalar_fp::Op::Mul>(wf, sdst, ssrc0,
+                                                                                    ssrc1);
+}
 
 void SFmaakF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_fmaak_f32_sop2(*this, wf);
+  amdgpu::scalar_fp::arithmetic<amdgpu::scalar_fp::F32, amdgpu::scalar_fp::Op::Fma>(wf, sdst, ssrc0,
+                                                                                    ssrc1, &simm32);
 }
 
 void SFmamkF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_fmamk_f32_sop2(*this, wf);
+  amdgpu::scalar_fp::arithmetic<amdgpu::scalar_fp::F32, amdgpu::scalar_fp::Op::Fma>(wf, sdst, ssrc0,
+                                                                                    simm32, &ssrc1);
 }
 
 void SFmacF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_fmac_f32_sop2(*this, wf);
+  amdgpu::scalar_fp::arithmetic<amdgpu::scalar_fp::F32, amdgpu::scalar_fp::Op::Fma>(wf, sdst, ssrc0,
+                                                                                    ssrc1, &sdst);
 }
 
 void SCvtPkRtzF16F32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cvt_pk_rtz_f16_f32_sop2(*this, wf);
+  amdgpu::scalar_fp::pack_rtz(wf, sdst, ssrc0, ssrc1);
 }
 
-void SAddF16Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_add_f16_sop2(*this, wf); }
+void SAddF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::scalar_fp::arithmetic<amdgpu::scalar_fp::F16, amdgpu::scalar_fp::Op::Add>(wf, sdst, ssrc0,
+                                                                                    ssrc1);
+}
 
-void SSubF16Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_sub_f16_sop2(*this, wf); }
+void SSubF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::scalar_fp::arithmetic<amdgpu::scalar_fp::F16, amdgpu::scalar_fp::Op::Sub>(wf, sdst, ssrc0,
+                                                                                    ssrc1);
+}
 
 void SMinNumF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_min_num_f16_sop2(*this, wf);
+  amdgpu::scalar_fp::select<amdgpu::scalar_fp::F16, amdgpu::minmax::MinNum>(wf, sdst, ssrc0, ssrc1);
 }
 
 void SMaxNumF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_max_num_f16_sop2(*this, wf);
+  amdgpu::scalar_fp::select<amdgpu::scalar_fp::F16, amdgpu::minmax::MaxNum>(wf, sdst, ssrc0, ssrc1);
 }
 
-void SMulF16Sop2::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_mul_f16_sop2(*this, wf); }
+void SMulF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::scalar_fp::arithmetic<amdgpu::scalar_fp::F16, amdgpu::scalar_fp::Op::Mul>(wf, sdst, ssrc0,
+                                                                                    ssrc1);
+}
 
 void SFmacF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_fmac_f16_sop2(*this, wf);
+  amdgpu::scalar_fp::arithmetic<amdgpu::scalar_fp::F16, amdgpu::scalar_fp::Op::Fma>(wf, sdst, ssrc0,
+                                                                                    ssrc1, &sdst);
 }
 
 void SMinimumF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_minimum_f32_sop2(*this, wf);
+  amdgpu::scalar_fp::select<amdgpu::scalar_fp::F32, amdgpu::minmax::Minimum>(wf, sdst, ssrc0,
+                                                                             ssrc1);
 }
 
 void SMaximumF32Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_maximum_f32_sop2(*this, wf);
+  amdgpu::scalar_fp::select<amdgpu::scalar_fp::F32, amdgpu::minmax::Maximum>(wf, sdst, ssrc0,
+                                                                             ssrc1);
 }
 
 void SMinimumF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_minimum_f16_sop2(*this, wf);
+  amdgpu::scalar_fp::select<amdgpu::scalar_fp::F16, amdgpu::minmax::Minimum>(wf, sdst, ssrc0,
+                                                                             ssrc1);
 }
 
 void SMaximumF16Sop2::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_maximum_f16_sop2(*this, wf);
+  amdgpu::scalar_fp::select<amdgpu::scalar_fp::F16, amdgpu::minmax::Maximum>(wf, sdst, ssrc0,
+                                                                             ssrc1);
 }
 
 void SAddNcU64Sop2::execute_impl(amdgpu::Wavefront &wf) {

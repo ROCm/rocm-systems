@@ -34,6 +34,14 @@ void mtbuf_calculate_addresses(const MtbufMachineInst &inst, amdgpu::Wavefront &
 void ds_calculate_addresses(const DsMachineInst &inst, amdgpu::Wavefront &wf,
                             amdgpu::VectorMemState &d);
 
+/// MI100 non-returning DS_SRC2 uses VGPR0 when ADDR is outside the wave allocation.
+constexpr uint16_t ds_src2_address_register(uint16_t addr, uint32_t vgpr_count) {
+  return addr < vgpr_count ? addr : 0;
+}
+
+void ds_calculate_src2_addresses(const DsMachineInst &inst, amdgpu::Wavefront &wf,
+                                 amdgpu::VectorMemState &d);
+
 } // namespace cdna1
 } // namespace rocjitsu
 

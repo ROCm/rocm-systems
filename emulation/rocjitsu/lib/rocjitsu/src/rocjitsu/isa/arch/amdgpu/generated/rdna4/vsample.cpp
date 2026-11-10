@@ -17,20 +17,23 @@ namespace rdna4 {
 
 namespace {
 template <typename MimgMachineInst>
+bool mimg_has_status(const MimgMachineInst *inst, bool sampler) {
+  // A dropped fetch with DMASK=0 cannot produce TFE status. LWE
+  // can still return status for samplers. Both share one DWORD.
+  bool status = false;
+  if constexpr (requires { inst->tfe; })
+    status = inst->tfe && inst->dmask;
+  if constexpr (requires { inst->lwe; })
+    status = status || (sampler && inst->lwe);
+  return status;
+}
+template <typename MimgMachineInst>
 uint32_t mimg_vdata_bits(const MimgMachineInst *inst, bool gather4, bool d16_allowed,
                          bool status_allowed, bool sampler) {
   uint32_t words = gather4 ? 4u : std::max(1, std::popcount(uint32_t{inst->dmask}));
   if (d16_allowed && inst->d16)
     words = (words + 1) / 2;
-  // A dropped fetch with DMASK=0 cannot produce TFE status. LWE
-  // can still return status for sampler operations. Both flags
-  // share one status word; stores do not consume that word.
-  bool status = false;
-  if constexpr (requires { inst->tfe; })
-    status = status_allowed && inst->tfe && inst->dmask;
-  if constexpr (requires { inst->lwe; })
-    status = status || (status_allowed && sampler && inst->lwe);
-  if (status)
+  if (status_allowed && mimg_has_status(inst, sampler))
     ++words;
   return words * 32;
 }
@@ -78,6 +81,8 @@ ImageSampleVsample::ImageSampleVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  if (mimg_has_status(&inst_, true))
+    flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::SAMPLECNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -117,7 +122,7 @@ void ImageSampleVsample::implicit_uses(RegisterSet &uses) const {
 }
 
 bool ImageSampleVsample::implicit_preservation_uses(RegisterSet &preservation_uses) const {
-  const uint32_t components = std::popcount(uint32_t{inst_.dmask});
+  const uint32_t components = std::max(1, std::popcount(uint32_t{inst_.dmask}));
   if (inst_.d16 && (components & 1u))
     if (auto r = vdata.to_register_ref()) {
       const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
@@ -161,6 +166,8 @@ ImageSampleDVsample::ImageSampleDVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  if (mimg_has_status(&inst_, true))
+    flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::SAMPLECNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -204,7 +211,7 @@ void ImageSampleDVsample::implicit_uses(RegisterSet &uses) const {
 }
 
 bool ImageSampleDVsample::implicit_preservation_uses(RegisterSet &preservation_uses) const {
-  const uint32_t components = std::popcount(uint32_t{inst_.dmask});
+  const uint32_t components = std::max(1, std::popcount(uint32_t{inst_.dmask}));
   if (inst_.d16 && (components & 1u))
     if (auto r = vdata.to_register_ref()) {
       const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
@@ -250,6 +257,8 @@ ImageSampleLVsample::ImageSampleLVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  if (mimg_has_status(&inst_, true))
+    flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::SAMPLECNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -291,7 +300,7 @@ void ImageSampleLVsample::implicit_uses(RegisterSet &uses) const {
 }
 
 bool ImageSampleLVsample::implicit_preservation_uses(RegisterSet &preservation_uses) const {
-  const uint32_t components = std::popcount(uint32_t{inst_.dmask});
+  const uint32_t components = std::max(1, std::popcount(uint32_t{inst_.dmask}));
   if (inst_.d16 && (components & 1u))
     if (auto r = vdata.to_register_ref()) {
       const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
@@ -366,6 +375,8 @@ ImageSampleLzVsample::ImageSampleLzVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  if (mimg_has_status(&inst_, true))
+    flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::SAMPLECNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
@@ -405,7 +416,7 @@ void ImageSampleLzVsample::implicit_uses(RegisterSet &uses) const {
 }
 
 bool ImageSampleLzVsample::implicit_preservation_uses(RegisterSet &preservation_uses) const {
-  const uint32_t components = std::popcount(uint32_t{inst_.dmask});
+  const uint32_t components = std::max(1, std::popcount(uint32_t{inst_.dmask}));
   if (inst_.d16 && (components & 1u))
     if (auto r = vdata.to_register_ref()) {
       const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
@@ -884,7 +895,47 @@ ImageGather4Vsample::ImageGather4Vsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  if (mimg_has_status(&inst_, true))
+    flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::SAMPLECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+bool ImageGather4Vsample::should_print_src_operand(uint8_t operand_index) const {
+  return src_operands_[operand_index] == &vaddr || Vsample::should_print_src_operand(operand_index);
+}
+
+void ImageGather4Vsample::append_src_operand(std::string &out, uint8_t operand_index) const {
+  if (src_operands_[operand_index] != &vaddr) {
+    Vsample::append_src_operand(out, operand_index);
+    return;
+  }
+  const auto registers = amdgpu::gfx12_image_address_registers(inst_);
+  const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
+  if (count == 1) {
+    out += "v" + std::to_string(registers[0]);
+    return;
+  }
+  out += "[";
+  for (uint32_t index = 0; index < count; ++index) {
+    if (index != 0)
+      out += ", ";
+    out += "v" + std::to_string(registers[index]);
+  }
+  out += "]";
+}
+
+void ImageGather4Vsample::implicit_uses(RegisterSet &uses) const {
+  Vsample::implicit_uses(uses);
+  const auto registers = amdgpu::gfx12_image_address_registers(inst_);
+  const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageGather4Vsample::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -913,7 +964,49 @@ ImageGather4LVsample::ImageGather4LVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  if (mimg_has_status(&inst_, true))
+    flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::SAMPLECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+}
+
+bool ImageGather4LVsample::should_print_src_operand(uint8_t operand_index) const {
+  return src_operands_[operand_index] == &vaddr || Vsample::should_print_src_operand(operand_index);
+}
+
+void ImageGather4LVsample::append_src_operand(std::string &out, uint8_t operand_index) const {
+  if (src_operands_[operand_index] != &vaddr) {
+    Vsample::append_src_operand(out, operand_index);
+    return;
+  }
+  const auto registers = amdgpu::gfx12_image_address_registers(inst_);
+  const uint32_t count = (0u + (inst_.a16 ? (amdgpu::image_coordinate_count(inst_.dim) + 1u + 1) / 2
+                                          : amdgpu::image_coordinate_count(inst_.dim) + 1u));
+  if (count == 1) {
+    out += "v" + std::to_string(registers[0]);
+    return;
+  }
+  out += "[";
+  for (uint32_t index = 0; index < count; ++index) {
+    if (index != 0)
+      out += ", ";
+    out += "v" + std::to_string(registers[index]);
+  }
+  out += "]";
+}
+
+void ImageGather4LVsample::implicit_uses(RegisterSet &uses) const {
+  Vsample::implicit_uses(uses);
+  const auto registers = amdgpu::gfx12_image_address_registers(inst_);
+  const uint32_t count = (0u + (inst_.a16 ? (amdgpu::image_coordinate_count(inst_.dim) + 1u + 1) / 2
+                                          : amdgpu::image_coordinate_count(inst_.dim) + 1u));
+  for (uint32_t index = 0; index < count; ++index)
+    uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+}
+
+bool ImageGather4LVsample::tracks_explicit_source(uint8_t operand_index) const {
+  return !(src_operands_[operand_index] == &vaddr);
 }
 
 namespace detail {
@@ -971,6 +1064,8 @@ ImageGather4LzVsample::ImageGather4LzVsample(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  if (mimg_has_status(&inst_, true))
+    flags_ |= CONDITIONAL_LAST_VGPR_DEF;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::SAMPLECNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;

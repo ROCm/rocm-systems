@@ -329,7 +329,36 @@ void SSwappcB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::RegisterAccess(wf).write_scalar64(sdst, next_pc);
 }
 
-void SRfeB64Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_rfe_b64_sop1(*this, wf); }
+void SRfeB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
+  uint64_t saved_pc = amdgpu::RegisterAccess(wf).read_scalar64(ssrc0);
+  constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;
+  wf.pc = (saved_pc & kPcAddressMask) - size_;
+
+  constexpr uint32_t kStatusHalt = 1u << 13;
+  const bool keep_halted = (wf.status_raw() & kStatusHalt) != 0;
+  // GFX12 returns the interrupted wave state while preserving the handler's
+  // STATE_PRIV.HALT decision. Older layouts keep using the live STATUS word.
+  if (wf.in_trap_handler() && wf.uses_separate_trap_ctrl()) {
+    uint32_t restored_status = wf.trap_saved_status();
+    restored_status =
+        keep_halted ? (restored_status | kStatusHalt) : (restored_status & ~kStatusHalt);
+    wf.set_status_raw(restored_status);
+  }
+
+  wf.set_in_trap_handler(false);
+
+  // The handler sets STATUS.HALT when it wants the wave to stay
+  // stopped for the debugger; honour that on the way out.
+  if (keep_halted) {
+    wf.set_debug_single_step(false);
+    wf.set_debug_halted(true);
+  } else {
+    // Nothing is halting the wave any more, so an s_sendmsghalt marker
+    // left over from an earlier stop is stale. Leaving it set would make
+    // the next resume clear a HALT the handler raises later.
+    wf.set_self_halted(false);
+  }
+}
 
 void SSendmsgRtnB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t msg = static_cast<uint32_t>(ssrc0.encoding_value_);
@@ -339,11 +368,13 @@ void SSendmsgRtnB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
     value = wf.realtime_timestamp();
     break;
   }
+  case 0x82:
+  case 0x85:
+    value = wf.cu().trap_message_address(msg);
+    break;
   case 0x80:
   case 0x81:
-  case 0x82:
   case 0x84:
-  case 0x85:
   case 0x86:
   case 0x87:
   case 0x88:
@@ -366,11 +397,13 @@ void SSendmsgRtnB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
     value = wf.realtime_timestamp();
     break;
   }
+  case 0x82:
+  case 0x85:
+    value = wf.cu().trap_message_address(msg);
+    break;
   case 0x80:
   case 0x81:
-  case 0x82:
   case 0x84:
-  case 0x85:
   case 0x86:
   case 0x87:
   case 0x88:

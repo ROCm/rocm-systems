@@ -86,7 +86,7 @@ _ADDR_CALC_CALLS: frozenset[str] = frozenset(
     }
 )
 
-_EXEC_CONTEXT_IDS: frozenset[str] = frozenset({'EXEC', 'EXEC_RAW'})
+_EXEC_CONTEXT_IDS: frozenset[str] = frozenset({'EXEC', 'EXEC_RAW', 'EXEC_LO'})
 
 
 def derive_properties(block: SemaBlock) -> InstructionProperty:

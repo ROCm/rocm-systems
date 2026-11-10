@@ -270,8 +270,10 @@ void Vopd::init_operands() {
   num_src_ = 0;
 
   const auto add_src = [this](Operand *op) {
-    if (op)
+    if (op) {
+      op->set_vopd_source();
       src_operands_[num_src_++] = op;
+    }
   };
   const auto add_slot_sources = [&](const Slot &slot) {
     switch (slot.op) {

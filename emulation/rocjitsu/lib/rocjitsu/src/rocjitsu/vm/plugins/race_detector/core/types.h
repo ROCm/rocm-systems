@@ -5,8 +5,10 @@
 
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include "rocjitsu/vm/plugins/race_detector/core/dim3d.h"
+#include "rocjitsu/vm/plugins/race_detector/core/instruction_snapshot.h"
 #include <algorithm>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 namespace rocjitsu::plugins::race_detector {
@@ -71,7 +73,7 @@ enum class EventStatus {
 /// Describes a detected race condition. Used by the race detection layer
 /// to report violations without depending on any exception type.
 struct RaceViolation {
-  enum class Space { VGPR, SGPR, TTMP, LDS };
+  enum class Space { VGPR, SGPR, TTMP, LDS, EXEC };
   Space space;
   int index;    ///< Register index (VGPR/SGPR) or byte address (LDS).
   int wave;     ///< Wave that triggered the violation.
@@ -79,6 +81,9 @@ struct RaceViolation {
   bool isWrite; ///< True if the violating access was a write.
   Dim3d workgroupId;
   EventId conflictingEvent; ///< Exact pending memory event that caused the violation.
+
+  // Wave-local source locks own their instruction outside the event registry.
+  std::optional<InstructionSnapshot> sourceInstruction;
 
   RaceViolation(Space space, int index, int wave, int lane, bool isWrite, Dim3d workgroupId,
                 EventId conflictingEvent)

@@ -15,12 +15,15 @@ near guard.
 
 from types import SimpleNamespace
 
+import pytest
+
 from amdisa.codegen import CodeGenerator
 
 
-def _body(name: str) -> str:
+def _body(name: str, arch_name: str = 'rdna3') -> str:
     """Emitted execute() body for a sleep op, straight from the generator."""
     generator = CodeGenerator.__new__(CodeGenerator)
+    generator.isa_spec = SimpleNamespace(arch_name=arch_name)
     sem = SimpleNamespace(
         name=name,
         semantic_class='true_nop',
@@ -43,12 +46,25 @@ class TestSleepBody:
         assert 'simm16.encoding_value_' in body
         assert '0x7Fu' in body
 
+    @pytest.mark.parametrize('arch', ['rdna4', 'cdna5'])
+    def test_gfx12_immediate_sleep_can_wait_for_wakeup(self, arch):
+        body = _body('S_SLEEP', arch)
+        assert 'simm16.encoding_value_' in body
+        assert 'kSleepForever' in body
+        assert '0x8000u' in body
+        assert 'kSleepForever' not in _body('S_SLEEP_VAR', arch)
+
     def test_sleep_var_takes_its_count_from_a_scalar(self):
         """S_SLEEP_VAR is the same delay with the 7-bit count in an operand."""
         body = _body('S_SLEEP_VAR')
         assert 'read_scalar(ssrc0)' in body
         assert '0x7Fu' in body
         assert 'wf.set_sleep_cycles(' in body
+
+    @pytest.mark.parametrize('arch', ['rdna4', 'cdna5'])
+    def test_gfx12_both_sleep_forms_consume_wakeup_credit(self, arch):
+        for name in ('S_SLEEP', 'S_SLEEP_VAR'):
+            assert 'wf.issue_sleep_with_credit(' in _body(name, arch)
 
     def test_both_still_yield_to_the_event_loop(self):
         """FUNCTIONAL execution has to return so peer CUs can make progress."""

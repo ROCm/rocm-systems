@@ -139,6 +139,8 @@ public:
   void register_l2_cache(L2Cache *cache);
   /// @brief Remove an L2 cache before its storage is destroyed.
   void unregister_l2_cache(L2Cache *cache);
+  /// Whether this device topology has more than one registered XCD L2.
+  [[nodiscard]] bool has_multiple_l2_caches() const;
   /// @brief Register a memory-side cache in this device-local domain.
   void register_memory_side_cache(MemorySideCache *cache);
   /// @brief Remove a memory-side cache before its storage is destroyed.

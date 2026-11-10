@@ -2467,6 +2467,7 @@ TEST(GpuVmPipeline, MixedFlatAtomicRetryPreservesLdsAndCompletedGlobalLanes) {
   auto &wf = *context.wf;
   wf.set_exec(0x7);
   wf.set_lds_base(context.cu->allocate_lds(256));
+  wf.set_lds_size(256);
   constexpr uint32_t lds_offset = 64;
   constexpr std::array<uint32_t, 3> initial = {10, 20, 30};
   constexpr std::array<uint32_t, 3> source = {1, 2, 3};
@@ -2521,6 +2522,7 @@ TEST(GpuVmPipeline, MixedFlatLegacyAtomicRetryRefreshesVmSnapshot) {
     auto &wf = *context.wf;
     wf.set_exec(0x7);
     wf.set_lds_base(context.cu->allocate_lds(256));
+    wf.set_lds_size(256);
     constexpr uint32_t lds_offset = 64;
     constexpr std::array<uint32_t, 3> initial = {10, 20, 30};
     constexpr std::array<uint32_t, 3> source = {1, 2, 3};

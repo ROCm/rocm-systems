@@ -3,6 +3,8 @@
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -72,10 +74,83 @@ protected:
   amdgpu::Wavefront *wave_ = nullptr;
 };
 
+TEST_P(BufferLdsTransfer, Cdna2InvalidatePreservesDirtyLocalMemory) {
+  if (GetParam() != ROCJITSU_CODE_ARCH_CDNA2)
+    GTEST_SKIP();
+  constexpr uint64_t address = 0x4000;
+  memory_.write32(address, 1);
+  std::array<uint8_t, amdgpu::L2Cache::LINE_SIZE> line{};
+  line[0] = 2;
+  ASSERT_EQ(l2_.writeback_line(address, line.data(), 0, 4, amdgpu::Mtype::RW, wave_->process_id()),
+            amdgpu::VmAccessOutcome::Complete);
+  ASSERT_EQ(memory_.read32(address), 1u);
+  const auto words = cdna2::build_mubuf(cdna2::kBufferInvl2);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder_, words.data()));
+  ASSERT_TRUE(cu_->execute_instruction(inst.get(), *wave_).succeeded());
+  EXPECT_EQ(memory_.read32(address), 1u);
+  ASSERT_EQ(l2_.flush_all(), amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(memory_.read32(address), 2u);
+}
+
+TEST_P(BufferLdsTransfer, Cdna2StoreLdsUsesM0OffsetAndCapturedActiveLanes) {
+  if (GetParam() != ROCJITSU_CODE_ARCH_CDNA2)
+    GTEST_SKIP();
+  for (const auto fields :
+       {cdna2::MubufBuilderFields{}, cdna2::MubufBuilderFields{.offen = 1, .lds = 1}}) {
+    const auto words = cdna2::build_mubuf(cdna2::kBufferStoreLdsDword, fields);
+    std::unique_ptr<Instruction> invalid(decode_valid(*decoder_, words.data()));
+    ASSERT_TRUE(cu_->execute_instruction(invalid.get(), *wave_).failed());
+    EXPECT_EQ(wave_->instruction_execution_error(),
+              amdgpu::InstructionExecutionError::InvalidInstructionEncoding);
+    wave_->clear_instruction_execution_error();
+  }
+  wave_->set_m0(8);
+  wave_->set_exec(7);
+  wave_->set_lds_size(20); // Third source word is beyond this workgroup.
+  scalar(0, 0x4000);
+  scalar(1, 4u << 16);
+  scalar(2, 256);
+  scalar(3, 1u << 23); // add TID, linear stride of four bytes
+  for (unsigned i = 0; i < 3; ++i) {
+    wave_->lds().write32(wave_->lds_base() + 12 + 4 * i, 0x11000000u + i);
+    memory_.write32(0x4004 + 4 * i, 0xccccccccu);
+  }
+  ASSERT_NO_FATAL_FAILURE(issue(
+      cdna2::build_mubuf(cdna2::kBufferStoreLdsDword, {.offset = 4, .lds = 1, .soffset = 128})));
+  cu_->l1_vector().flush_all();
+  l2_.flush_all();
+  EXPECT_EQ(memory_.read32(0x4004), 0x11000000u);
+  EXPECT_EQ(memory_.read32(0x4008), 0x11000001u);
+  EXPECT_EQ(memory_.read32(0x400c), 0xccccccccu);
+}
+
+TEST(BufferLdsTransferDecode, Gfx950RestrictsLdsBitToDocumentedLoadOpcodes) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  ASSERT_NE(decoder, nullptr);
+  for (auto op : {cdna4::kBufferLoadFormatX, cdna4::kBufferLoadUbyte, cdna4::kBufferLoadSbyte,
+                  cdna4::kBufferLoadUshort, cdna4::kBufferLoadSshort, cdna4::kBufferLoadDword,
+                  cdna4::kBufferLoadDwordx3, cdna4::kBufferLoadDwordx4}) {
+    const auto words = cdna4::build_mubuf(op, {.lds = 1, .soffset = 128});
+    EXPECT_FALSE(decode_fails(*decoder, words.data())) << op;
+  }
+  for (auto op : {cdna4::kBufferLoadDwordx2, cdna4::kBufferLoadFormatXy, cdna4::kBufferLoadUbyteD16,
+                  cdna4::kBufferStoreDword, cdna4::kBufferAtomicAdd}) {
+    for (uint8_t lds : {0, 1}) {
+      const auto words = cdna4::build_mubuf(op, {.lds = lds, .soffset = 128});
+      EXPECT_EQ(decode_fails(*decoder, words.data()), lds != 0) << op;
+    }
+  }
+}
+
 TEST_P(BufferLdsTransfer, BufferNarrowAndX3TransfersUseDwordLaneLayout) {
   for (unsigned opcode :
        {cdna4::kBufferLoadSbyteMubuf,
         cdna4::kBufferLoadDwordx3Mubuf}) { // BUFFER_LOAD_SBYTE / BUFFER_LOAD_DWORDX3.
+    if (GetParam() == ROCJITSU_CODE_ARCH_CDNA1 && opcode == cdna4::kBufferLoadDwordx3Mubuf) {
+      const auto words = cdna4::build_mubuf(opcode, {.lds = 1});
+      EXPECT_TRUE(decoder_->decode(words.data()).failed());
+      continue;
+    }
     clear_lds();
     wave_->set_exec(0x25);
     wave_->set_m0(0xfffc0040);
@@ -104,6 +179,24 @@ TEST_P(BufferLdsTransfer, BufferNarrowAndX3TransfersUseDwordLaneLayout) {
   }
 }
 
+TEST(BufferLdsDecode, Mi100RequiresOneOfSixLoadsOrTheDedicatedStore) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA1);
+  ASSERT_NE(decoder, nullptr);
+  // LLVM gfx908 bytes for BUFFER_LOAD_FORMAT_X and BUFFER_STORE_LDS_DWORD
+  // with s[4:7] and s0. Both require TFE clear.
+  for (uint32_t lo : {0xe0010000u, 0xe0f50000u}) {
+    std::array<uint32_t, 2> words{lo, 0x00010000u};
+    EXPECT_TRUE(decoder->decode(words.data()).succeeded());
+    words[1] |= 1u << 23;
+    EXPECT_TRUE(decoder->decode(words.data()).failed());
+  }
+  for (uint32_t lo : {0xe0f40000u, 0xe0550000u, 0xe0050000u, 0xe0810000u}) {
+    // STORE_LDS_DWORD without LDS, then LDS forms of DWORDX2, FORMAT_XY, UBYTE_D16.
+    std::array<uint32_t, 2> words{lo, 0x00010000u};
+    EXPECT_TRUE(decoder->decode(words.data()).failed());
+  }
+}
+
 TEST_P(BufferLdsTransfer, RawAndFormatBufferLoadsShareM0WidthAndAllocationBounds) {
   for (auto opcode : {cdna4::kBufferLoadDwordMubuf, cdna4::kBufferLoadFormatXMubuf})
     for (uint32_t m0 : {0x10040u, 0xfffc0042u}) {
@@ -124,6 +217,9 @@ TEST_P(BufferLdsTransfer, RawAndFormatBufferLoadsShareM0WidthAndAllocationBounds
       auto words = cdna4::build_mubuf(
           opcode, {.offen = 1, .lds = 1, .vaddr = 2, .vdata = 8, .srsrc = 0, .soffset = 128});
       ASSERT_NO_FATAL_FAILURE(issue(words));
+      if (GetParam() == ROCJITSU_CODE_ARCH_CDNA2) {
+        EXPECT_EQ(wave_->trapsts() & (1u << 8), 0u);
+      }
       const unsigned offset = m0 & (GetParam() == ROCJITSU_CODE_ARCH_CDNA4 ? 0x3ffff : 0xffff);
       for (unsigned lane = 0; lane < 3; ++lane) {
         if (offset < 4096) {

@@ -28,6 +28,14 @@ class L1VectorCache;
 class L2Cache;
 class Lds;
 
+/// Capture an ordered-count operand before the owning wave can be suspended.
+bool prepare_ordered_count(Wavefront &wf, VectorMemState &state, uint32_t offset0, uint32_t offset1,
+                           uint32_t addr, uint32_t vdst);
+
+/// An unaligned native GFX12 LDS atomic faults before any active lane accesses bytes.
+bool native_ds_atomic_misaligned(const VectorMemState &state, rj_code_arch_t arch,
+                                 uint64_t request_lanes);
+
 enum class [[nodiscard]] MemoryAccessCompletion {
   Complete,
   Deferred,
@@ -126,7 +134,14 @@ protected:
       delete inst;
       return;
     }
+    const auto *state = inst->data();
+    if (state && (state->tag() == GLOBAL_MEM || state->tag() == LOCAL_MEM) &&
+        inst->data_as<VectorMemState>()->address_range_violation_lanes)
+      wf.record_rdna2_memory_violation();
     release_wait_counters(wf, counters);
+    if (state && (state->tag() == GLOBAL_MEM || state->tag() == LOCAL_MEM) &&
+        inst->data_as<VectorMemState>()->flat_memory_violation)
+      wf.complete_flat_memory_violation();
     if (wf.state() == WfState::VM_RETRY)
       wf.set_state(WfState::RUNNING);
     delete inst;
@@ -137,6 +152,19 @@ protected:
   std::queue<PipelineEntry> returned_;
   FaultHandler fault_handler_;
 };
+
+/// Remove sparse texel misses from the request using the instruction's VM snapshot.
+VmAccessOutcome qualify_image_feedback(VectorMemState &state, const GpuVmAccess &vm);
+
+struct BufferResidency {
+  ElementLaneMasks element_lanes;
+  uint64_t missing_lanes = 0;
+  uint64_t resident_lanes = 0;
+};
+
+/// Query TFE buffer elements without changing the issued request or reporting a VM fault.
+VmAccessOutcome query_buffer_residency(const VectorMemState &state, const GpuVmAccess &vm,
+                                       BufferResidency &residency);
 
 /// @brief Scalar memory pipeline for SMEM instructions.
 ///
@@ -177,6 +205,7 @@ private:
   // translated; sampling swaps each tap's versions around this call. The other
   // request fields must be shared by every tap. Translation may refresh an
   // unready request snapshot, so each tap retains its own translation progress.
+  VmAccessOutcome initiate_image_metadata_access(VectorMemState &d, Wavefront &wf);
   VmAccessOutcome initiate_texel_access(VectorMemState &state, Wavefront &wf,
                                         uint64_t request_lanes);
   L1VectorCache *l1_;
@@ -187,6 +216,19 @@ private:
 class LocalMemPipeline : public MemoryPipeline {
 public:
   LocalMemPipeline() : MemoryPipeline(WaitCounterType::LGKMCNT) {}
+  /// Capture synchronous indexed GDS errors before its source locks are registered.
+  static void capture_gds_violations(VectorMemState &data, const Wavefront &wf);
+
+  struct DsAccessLanes {
+    uint64_t primary;
+    uint64_t secondary;
+    bool reuse_primary_result;
+  };
+
+  /// CDNA4 bounds each native DS address set independently and performs
+  /// one access when the two uniform offsets coincide.
+  static DsAccessLanes cdna4_ds_access_lanes(const VectorMemState &d, const Wavefront &wf,
+                                             uint64_t request_lanes);
 
 protected:
   VmAccessOutcome initiate_access(Instruction &inst, Wavefront &wf) override;

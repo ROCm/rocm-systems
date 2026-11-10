@@ -1,0 +1,50 @@
+<IsaAdditions Id="rdna4-barrier-state" BaseArchitecture="AMD RDNA 4" BaseSchemaVersion="1.1.1">
+  <!-- AMD RDNA 4 ISA section 5.6.2 and SOP1 opcode 80. LLVM gfx1201 encodes s_get_barrier_state s2, -1 as 0xbe8250c1. -->
+  <EncodingIdentifierAdditions>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_SOP1</EncodingName>
+      <Opcode>80</Opcode>
+      <EncodingIdentifier Radix="2">10111110100000000101000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+  </EncodingIdentifierAdditions>
+  <InstructionAdditions>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>S_GET_BARRIER_STATE</InstructionName>
+      <Description>Read out current barrier state. Increments KMCNT on issue and decrements KMCNT when operation completes.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_SOP1</EncodingName>
+          <EncodingCondition>Nothas_lit_0_Nothas_lit_1</EncodingCondition>
+          <Opcode Radix="10">80</Opcode>
+          <Operands>
+            <Operand Input="false" Output="true" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>SDST</FieldName>
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_SREG</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>SSRC0</FieldName>
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_SSRC_BARRIER_ID</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>MESSAGE</Name>
+        <FunctionalSubgroups>
+          <Subgroup>STATIC</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+  </InstructionAdditions>
+</IsaAdditions>

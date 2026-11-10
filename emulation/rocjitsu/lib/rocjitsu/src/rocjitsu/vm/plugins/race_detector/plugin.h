@@ -73,10 +73,34 @@ struct RaceWavefrontState : WavefrontState {
   /// a copy of its encoding, so reports can disassemble it after the code is
   /// rewritten or unmapped.
   RingBuffer<InstructionSnapshot, 256> trace;
+  // A retry stalls the wave, so a cancelled routed issue precedes its next instruction.
+  EventId routed_lds_source_event;
   WaveRaceState *race_state = nullptr;
+  struct LdsOperandRead {
+    uint32_t address;
+    uint32_t bytes;
+    uint32_t lane;
+  };
+  std::optional<LdsOperandRead> lds_operand_read;
+
+  // The GFX10 and GFX11 inline image queries write every selected DWORD on the same
+  // active lanes. Gather the actual register writes until execution succeeds.
+  struct ImageQuery {
+    amdgpu::VmemWriteback type;
+    amdgpu::WaitCounterType counter;
+    uint64_t lanes = 0;
+    std::vector<uint32_t> registers;
+  };
+  std::optional<ImageQuery> image_query;
 };
 
-class RaceDetectorPlugin : public ExecutionPlugin {
+class RaceDetectorPlugin : public ExecutionPlugin,
+                           public AmdgpuWorkgroupBarrierObserver,
+                           public AmdgpuImageFeedbackObserver,
+                           public AmdgpuTrapEntryObserver,
+                           public AmdgpuImplicitMemoryWaitObserver,
+                           public AmdgpuLdsDirectReadObserver,
+                           public AmdgpuMemoryIssueCancellationObserver {
 public:
   /// @param config_json Plugin configuration object as a JSON string (unused;
   ///        this plugin takes no configuration). May be null.
@@ -103,8 +127,14 @@ public:
 
   void onAmdgpuWavefrontCancelled(amdgpu::Wavefront &wf) override;
 
+  void onAmdgpuImageFeedbackQualified(const Instruction &inst, amdgpu::Wavefront &wf) override;
   void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
                                   const Instruction &inst, amdgpu::Wavefront &wf) override;
+
+  void onAmdgpuMemoryIssueCancelled(const Instruction &inst, amdgpu::Wavefront &wf) override;
+
+  void onAmdgpuLdsDirectRead(const amdgpu::Wavefront &wf, uint32_t address, uint32_t bytes,
+                             uint32_t lane) override;
 
   /// Register an issued tensor DMA instruction's LDS side as an event on TENSORCNT.
   void onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObservation &issue,
@@ -127,6 +157,10 @@ public:
   void onAmdgpuAfterExecuteInstruction(uint64_t pc, const Instruction &inst,
                                        amdgpu::Wavefront &wf) override;
 
+  void onAmdgpuTrapEntered(amdgpu::Wavefront &wf) override;
+  void onAmdgpuImplicitMemoryWait(amdgpu::Wavefront &wf, const amdgpu::WaitFields &fields) override;
+
+  void onAmdgpuWorkgroupBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts) override;
   void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts) override;
 
   std::string getSummary() const;

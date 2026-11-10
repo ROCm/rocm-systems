@@ -18,7 +18,9 @@
 namespace rocjitsu {
 namespace rdna1 {
 
-void SNopSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_nop_sopp(*this, wf); }
+void SNopSopp::execute_impl(amdgpu::Wavefront &wf) {
+  wf.delay_nop_issue(simm16.encoding_value_ & 15u);
+}
 
 void SEndpgmSopp::execute_impl(amdgpu::Wavefront &wf) { wf.end(); }
 
@@ -93,18 +95,51 @@ void SSethaltSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_sethalt_sopp(*this, wf);
 }
 
-void SSleepSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_sleep_sopp(*this, wf); }
+void SSleepSopp::execute_impl(amdgpu::Wavefront &wf) {
+  constexpr uint32_t kSleepClocksPerUnit = 64;
+  wf.set_sleep_cycles(kSleepClocksPerUnit *
+                      (static_cast<uint32_t>(simm16.encoding_value_) & 0x7Fu));
+  wf.cu().request_functional_yield();
+}
 
 void SSetprioSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_setprio_sopp(*this, wf);
 }
 
 void SSendmsgSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_sendmsg_sopp(*this, wf);
+  const uint32_t message = static_cast<uint32_t>(simm16.encoding_value_);
+  if (wf.in_trap_handler() && (message & 0xFu) == 1u)
+    wf.set_trap_interrupt_sent(true);
+  const uint32_t id = message & 15u;
+  if (!wf.cu().handle_sendmsg(wf, message) && id >= 2u && id <= 7u) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::MissingExecutionBackend);
+    return;
+  }
 }
 
 void SSendmsghaltSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_sendmsghalt_sopp(*this, wf);
+  const uint32_t message = static_cast<uint32_t>(simm16.encoding_value_);
+  if (wf.in_trap_handler() && (message & 0xFu) == 1u)
+    wf.set_trap_interrupt_sent(true);
+  const uint32_t id = message & 15u;
+  if (!wf.cu().handle_sendmsg(wf, message) && id >= 2u && id <= 7u) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::MissingExecutionBackend);
+    return;
+  }
+
+  // S_SENDMSGHALT halts the wave. Keep the architectural bit and the
+  // scheduler flag in step -- s_rfe consults STATUS.HALT on the way out.
+  constexpr uint32_t kStatusHalt = 1u << 13;
+  wf.set_status_raw(wf.status_raw() | kStatusHalt);
+  wf.set_debug_halted(true);
+  // Remember who raised the bit. The trap handler also raises HALT, via
+  // s_setreg just before it returns, and there it means "keep the wave
+  // stopped" -- the opposite of what it means here, where the wave has
+  // already reported and is waiting to be resumed. The CWSR record cannot
+  // distinguish the two, so the resume path reads this instead.
+  wf.set_self_halted(true);
 }
 
 void STrapSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_trap_sopp(*this, wf); }
@@ -114,36 +149,50 @@ void SIcacheInvSopp::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SIncperflevelSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_incperflevel_sopp(*this, wf);
+  wf.cu().update_shader_perf_level(simm16.encoding_value_ & 15u, 1);
 }
 
 void SDecperflevelSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_decperflevel_sopp(*this, wf);
+  wf.cu().update_shader_perf_level(simm16.encoding_value_ & 15u, -1);
 }
 
 void STtracedataSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_ttracedata_sopp(*this, wf);
+  wf.cu().emit_shader_trace_data(wf.m0());
 }
 
 void SCbranchCdbgsysSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cbranch_cdbgsys_sopp(*this, wf);
+  if ((wf.status_raw() & (1u << 21)) != 0) {
+    int16_t offset = static_cast<int16_t>(simm16.encoding_value_);
+    wf.pc = wf.pc + 4 + static_cast<int64_t>(offset) * 4 - size_;
+  }
 }
 
 void SCbranchCdbguserSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cbranch_cdbguser_sopp(*this, wf);
+  if ((wf.status_raw() & (1u << 20)) != 0) {
+    int16_t offset = static_cast<int16_t>(simm16.encoding_value_);
+    wf.pc = wf.pc + 4 + static_cast<int64_t>(offset) * 4 - size_;
+  }
 }
 
 void SCbranchCdbgsysOrUserSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cbranch_cdbgsys_or_user_sopp(*this, wf);
+  if ((wf.status_raw() & (3u << 20)) != 0) {
+    int16_t offset = static_cast<int16_t>(simm16.encoding_value_);
+    wf.pc = wf.pc + 4 + static_cast<int64_t>(offset) * 4 - size_;
+  }
 }
 
 void SCbranchCdbgsysAndUserSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cbranch_cdbgsys_and_user_sopp(*this, wf);
+  if ((wf.status_raw() & (3u << 20)) == (3u << 20)) {
+    int16_t offset = static_cast<int16_t>(simm16.encoding_value_);
+    wf.pc = wf.pc + 4 + static_cast<int64_t>(offset) * 4 - size_;
+  }
 }
 
-void SEndpgmSavedSopp::execute_impl(amdgpu::Wavefront &wf) { wf.end(); }
+void SEndpgmSavedSopp::execute_impl(amdgpu::Wavefront &wf) {
+  wf.end(amdgpu::Wavefront::EndReason::Saved);
+}
 
-void SEndpgmOrderedPsDoneSopp::execute_impl(amdgpu::Wavefront &wf) { wf.end(); }
+void SEndpgmOrderedPsDoneSopp::execute_impl(amdgpu::Wavefront &wf) { wf.end_ordered_ps(size_); }
 
 void SCodeEndSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_code_end_sopp(*this, wf);
@@ -153,7 +202,9 @@ void SInstPrefetchSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_inst_prefetch_sopp(*this, wf);
 }
 
-void SClauseSopp::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_clause_sopp(*this, wf); }
+void SClauseSopp::execute_impl(amdgpu::Wavefront &wf) {
+  wf.begin_instruction_clause(simm16.encoding_value_);
+}
 
 void SWaitIdleSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_wait_idle_sopp(*this, wf);
@@ -172,7 +223,7 @@ void SDenormModeSopp::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void STtracedataImmSopp::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_ttracedata_imm_sopp(*this, wf);
+  wf.cu().emit_shader_trace_data(simm16.encoding_value_ & 0xffu);
 }
 
 } // namespace rdna1

@@ -238,11 +238,7 @@ public:
   }
 
   /// Barrier: flush all waves' barrier-pending events (simulates s_barrier).
-  void barrier() {
-    for (auto *w : waves_) {
-      w->flushBarrierPendingEvents();
-    }
-  }
+  void barrier() { detector_->resolveWorkgroupBarrier(); }
 
   // -- Trigger race checks --
 

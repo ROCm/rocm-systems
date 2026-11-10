@@ -4586,7 +4586,8 @@ VAccvgprMovB32Vop1::VAccvgprMovB32Vop1(const MachineInst *inst)
   num_dst_ = 1;
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop1VopDppMachineInst *>(inst);
-    src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
+    src0 = Operand(32, OperandType::OPR_SRC_ACCVGPR,
+                   OpSelSrcAccvgpr::OPR_SRC_ACCVGPR_ACC_MIN + dp->vsrc0);
     dpp_ctrl_ = dp->dpp_ctrl;
     dpp_row_mask_ = dp->row_mask;
     dpp_bank_mask_ = dp->bank_mask;
@@ -4594,7 +4595,8 @@ VAccvgprMovB32Vop1::VAccvgprMovB32Vop1(const MachineInst *inst)
   }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA) {
     auto *sw = reinterpret_cast<const Vop1VopSdwaMachineInst *>(inst);
-    src0 = Operand(32, sw->s0 ? OperandType::OPR_SRC : OperandType::OPR_VGPR, sw->vsrc0);
+    src0 = Operand(32, OperandType::OPR_SRC_ACCVGPR,
+                   OpSelSrcAccvgpr::OPR_SRC_ACCVGPR_ACC_MIN + sw->vsrc0);
     sdwa_src0_sel_ = sw->src0_sel;
     sdwa_src0_sext_ = sw->src0_sext;
     sdwa_src0_neg_ = sw->src0_neg;
@@ -4627,11 +4629,17 @@ DecodeResult decodeVAccvgprMovB32Vop1(const MachineInst *opcode,
       reinterpret_cast<const Vop1::OpEncoding *>(opcode), emit_error);
   if (validation.failed()) [[unlikely]]
     return Result::failure();
+  const auto acc_src = reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0;
+  if (acc_src < 256 && acc_src != amdgpu::SRC_DPP && acc_src != amdgpu::SRC_SDWA) [[unlikely]]
+    return emit_error.emit() << "V_ACCVGPR_MOV_B32 requires an accumulator source";
   if (reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop1VopDppMachineInst *>(inst);
     if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, true, true, false)) [[unlikely]]
       return emit_error.emit() << "v_accvgpr_mov_b32: reserved DPP control";
   }
+  if (reinterpret_cast<const Vop1::OpEncoding *>(inst)->src0 == amdgpu::SRC_SDWA &&
+      reinterpret_cast<const Vop1VopSdwaMachineInst *>(inst)->s0) [[unlikely]]
+    return emit_error.emit() << "V_ACCVGPR_MOV_B32 requires an accumulator source";
   return std::make_unique<VAccvgprMovB32Vop1>(opcode);
 }
 } // namespace detail

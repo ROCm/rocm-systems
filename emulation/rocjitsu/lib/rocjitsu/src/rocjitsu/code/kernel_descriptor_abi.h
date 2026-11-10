@@ -68,6 +68,7 @@ enum : uint32_t {
   RJ_DESCRIPTOR_FIELD(COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z, 9, 1),
   RJ_DESCRIPTOR_FIELD(COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO, 10, 1),
   RJ_DESCRIPTOR_FIELD(COMPUTE_PGM_RSRC2_ENABLE_VGPR_WORKITEM_ID, 11, 2),
+  RJ_DESCRIPTOR_FIELD(COMPUTE_PGM_RSRC2_ENABLE_EXCEPTION_MEMORY, 14, 1),
   RJ_DESCRIPTOR_FIELD(COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE, 15, 9),
 
   RJ_DESCRIPTOR_FIELD(COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 0, 6),
@@ -98,6 +99,13 @@ inline constexpr uint8_t FLOAT_ROUND_MODE_PLUS_INFINITY = 1;
 inline constexpr uint8_t FLOAT_ROUND_MODE_ZERO = 3;
 inline constexpr uint8_t FLOAT_DENORM_MODE_FLUSH_SRC = 2;
 inline constexpr uint8_t FLOAT_DENORM_MODE_FLUSH_NONE = 3;
+
+/// First accumulator in the unified GFX90A/GFX94x/GFX950 allocation, in VGPRs.
+inline constexpr uint32_t gfx90a_accum_vgpr_base(uint32_t rsrc3) {
+  const auto field = (rsrc3 & COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET) >>
+                     COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET_SHIFT;
+  return (field + 1) * 4;
+}
 
 } // namespace rocjitsu::amdhsa
 

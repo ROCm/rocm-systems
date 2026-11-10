@@ -61,7 +61,8 @@ inline int32_t image_footprint_logarithm(uint32_t footprint_norm, int exponent) 
 /// nested XY/Z vector norms. GFX11/12 captures qualify the precision stages;
 /// older image architectures use the same model without physical qualification.
 inline double image_gradient_lod(std::array<double, 3> screen_dx, std::array<double, 3> screen_dy,
-                                 const std::array<uint32_t, 3> &extents, uint32_t dimensions) {
+                                 const std::array<uint32_t, 3> &extents, uint32_t dimensions,
+                                 uint32_t log_anisotropy = 0) {
   std::array<double, 6> gradients{screen_dx[0], screen_dx[1], screen_dx[2],
                                   screen_dy[0], screen_dy[1], screen_dy[2]};
   std::array<double, 3> largest_gradient{};
@@ -117,6 +118,14 @@ inline double image_gradient_lod(std::array<double, 3> screen_dx, std::array<dou
     const uint32_t first_norm = image_polygon_norm(fixed[0] + fixed[4], fixed[1] - fixed[3]);
     const uint32_t second_norm = image_polygon_norm(fixed[0] - fixed[4], fixed[1] + fixed[3]);
     footprint_norm = (first_norm + second_norm) >> 1;
+    if (log_anisotropy) {
+      const uint32_t minor = std::abs((int32_t(first_norm) - int32_t(second_norm)) >> 1);
+      const auto major_lod = image_footprint_logarithm(footprint_norm, exponent);
+      const auto minor_lod = image_footprint_logarithm(minor, exponent);
+      return double(std::max(minor_lod,
+                             major_lod - int32_t(log_anisotropy) * kImageLodFractionScale)) /
+             kImageLodFractionScale;
+    }
   }
   return image_footprint_logarithm(footprint_norm, exponent) / double(kImageLodFractionScale);
 }

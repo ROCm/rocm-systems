@@ -89,7 +89,7 @@ inline constexpr ArgSimArch kRdna4ArgArch{"rdna4", ROCJITSU_CODE_ARCH_RDNA4,
 // only -- nothing checks a probe body's own clobbers against the bound, so a
 // probe scratch register at v4 or above is accepted here rather than rejected.
 // Execution is unaffected either way: DbiSim dispatches its own descriptor with
-// the full register file (see dbi_sim.h).
+// 256 VGPRs (see dbi_sim.h).
 class DbiArgSimBase : public ::testing::Test {
 protected:
   explicit DbiArgSimBase(const ArgSimArch &a) : a_(a) {}
@@ -104,8 +104,8 @@ protected:
     // v_mov v0, K0 ; v_mov v1, v0 (ANCHOR at offset 4, v0 live) ; s_endpgm.
     const std::vector<uint8_t> target = test::with_descriptor_metadata(
         test::make_amdgpu_kernel_elf({test::make_mov_vgpr_inline(0, kGuestValue), kMovV1V0, endpgm},
-                                     /*private_bytes=*/64,
-                                     /*granulated_sgpr_count=*/3, a_.e_flags),
+                                     /*private_bytes=*/64, test::kCallableProbeGranulatedSgprCount,
+                                     a_.e_flags),
         a_.arch);
     auto probe = test::make_amdgpu_probe_elf("rj_test_arg_probe", {kMovV3V0, setpc}, a_.e_flags);
 
@@ -242,7 +242,7 @@ TEST_P(DbiGuestArgumentSim, OverlappingArgumentsCaptureGuestValuesBeforeOverwrit
       test::make_amdgpu_kernel_elf(
           {test::make_mov_vgpr_inline(0, 7), test::make_mov_vgpr_inline(1, 13), guest_move.value(),
            endpgm.value()},
-          /*private_bytes=*/64, /*granulated_sgpr_count=*/3, target.e_flags,
+          /*private_bytes=*/64, test::kCallableProbeGranulatedSgprCount, target.e_flags,
           /*granulated_vgpr_count=*/3, /*accum_offset=*/1),
       target.arch);
   const std::vector<uint8_t> body = test::make_amdgpu_probe_elf(

@@ -347,16 +347,6 @@ void SRfeI64Sop1::execute_impl(amdgpu::Wavefront &wf) {
     wf.set_status_raw(restored_status);
   }
 
-  // Returning from the handler puts the interrupted EXEC back. The handler runs
-  // under its own mask -- it parks a doorbell id in EXEC_LO on the way to
-  // MSG_INTERRUPT -- and restoring that is part of returning, not part of
-  // stopping for a debugger: a handler that returns without stopping the wave
-  // used to leave its mask installed, so the application ran on with every lane
-  // active. That silently un-diverges a branch (gdb.rocm/lane-info.exp sees
-  // lanes that converged out of a branch reported active again) and is
-  // permanent, because nothing later puts the application's mask back.
-  if (wf.in_trap_handler())
-    wf.set_exec(wf.trap_saved_exec());
   wf.set_in_trap_handler(false);
 
   // The handler sets STATUS.HALT when it wants the wave to stay
@@ -377,24 +367,71 @@ void SAddPcI64Sop1::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SSendmsgRtnB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_sendmsg_rtn_b32_sop1(*this, wf);
+  uint32_t msg = static_cast<uint32_t>(ssrc0.encoding_value_);
+  uint64_t value = 0;
+  switch (msg) {
+  case 0x83: {
+    value = wf.realtime_timestamp();
+    break;
+  }
+  case 0x82:
+  case 0x85:
+    value = wf.cu().trap_message_address(msg);
+    break;
+  case 0x80:
+  case 0x81:
+  case 0x84:
+  case 0x86:
+  case 0x87:
+  case 0x88:
+  case 0x98:
+  default:
+    value = 0;
+    break;
+  }
+  if (sdst.size_bits() == 64)
+    amdgpu::RegisterAccess(wf).write_scalar64(sdst, value);
+  else
+    amdgpu::RegisterAccess(wf).write_scalar(sdst, static_cast<uint32_t>(value));
 }
 
 void SSendmsgRtnB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_sendmsg_rtn_b64_sop1(*this, wf);
+  uint32_t msg = static_cast<uint32_t>(ssrc0.encoding_value_);
+  uint64_t value = 0;
+  switch (msg) {
+  case 0x83: {
+    value = wf.realtime_timestamp();
+    break;
+  }
+  case 0x82:
+  case 0x85:
+    value = wf.cu().trap_message_address(msg);
+    break;
+  case 0x80:
+  case 0x81:
+  case 0x84:
+  case 0x86:
+  case 0x87:
+  case 0x88:
+  case 0x98:
+  default:
+    value = 0;
+    break;
+  }
+  if (sdst.size_bits() == 64)
+    amdgpu::RegisterAccess(wf).write_scalar64(sdst, value);
+  else
+    amdgpu::RegisterAccess(wf).write_scalar(sdst, static_cast<uint32_t>(value));
 }
 
 void SBarrierSignalSop1::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t source = amdgpu::RegisterAccess(wf).read_scalar(ssrc0);
-  bool source_is_m0 = ssrc0.encoding_value() == OpSelSsrcBarrierId::OPR_SSRC_BARRIER_ID_M0;
-  int32_t barrier_id = amdgpu::barrier_operand_id(source, source_is_m0);
-  uint32_t member_count = source_is_m0 ? ((source >> 16) & 0x7fu) : 0;
-  wf.barrier_signal(barrier_id, member_count);
+  amdgpu::execute_s_barrier_signal_sop1(*this, wf);
 }
 
 void SBarrierSignalIsfirstSop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t source = amdgpu::RegisterAccess(wf).read_scalar(ssrc0);
-  bool source_is_m0 = ssrc0.encoding_value() == OpSelSsrcBarrierId::OPR_SSRC_BARRIER_ID_M0;
+  bool source_is_m0 =
+      static_cast<uint32_t>(ssrc0.encoding_value()) == amdgpu::scalar_m0_selector(wf.cu().arch());
   int32_t barrier_id = amdgpu::barrier_operand_id(source, source_is_m0);
   uint32_t member_count = source_is_m0 ? ((source >> 16) & 0x7fu) : 0;
   bool barrier_valid = (wf.barrier_state(barrier_id) & 1u) != 0;
@@ -404,15 +441,13 @@ void SBarrierSignalIsfirstSop1::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SGetBarrierStateSop1::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t source = amdgpu::RegisterAccess(wf).read_scalar(ssrc0);
-  bool source_is_m0 = ssrc0.encoding_value() == OpSelSsrcBarrierId::OPR_SSRC_BARRIER_ID_M0;
-  int32_t barrier_id = amdgpu::barrier_operand_id(source, source_is_m0);
-  amdgpu::RegisterAccess(wf).write_scalar(sdst, wf.barrier_state(barrier_id));
+  amdgpu::execute_s_get_barrier_state_sop1(*this, wf);
 }
 
 void SBarrierInitSop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t source = amdgpu::RegisterAccess(wf).read_scalar(ssrc0);
-  bool source_is_m0 = ssrc0.encoding_value() == OpSelSsrcBarrierId::OPR_SSRC_BARRIER_ID_M0;
+  bool source_is_m0 =
+      static_cast<uint32_t>(ssrc0.encoding_value()) == amdgpu::scalar_m0_selector(wf.cu().arch());
   int32_t barrier_id = amdgpu::barrier_operand_id(source, source_is_m0);
   uint32_t member_source = wf.m0();
   uint32_t member_count = (member_source >> 16) & 0x7fu;
@@ -421,7 +456,8 @@ void SBarrierInitSop1::execute_impl(amdgpu::Wavefront &wf) {
 
 void SBarrierJoinSop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t source = amdgpu::RegisterAccess(wf).read_scalar(ssrc0);
-  bool source_is_m0 = ssrc0.encoding_value() == OpSelSsrcBarrierId::OPR_SSRC_BARRIER_ID_M0;
+  bool source_is_m0 =
+      static_cast<uint32_t>(ssrc0.encoding_value()) == amdgpu::scalar_m0_selector(wf.cu().arch());
   int32_t barrier_id = amdgpu::barrier_operand_id(source, source_is_m0);
   wf.barrier_join(barrier_id);
 }
@@ -430,7 +466,13 @@ void SAllocVgprSop1::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_alloc_vgpr_sop1(*this, wf);
 }
 
-void SWakeupBarrierSop1::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SWakeupBarrierSop1::execute_impl(amdgpu::Wavefront &wf) {
+  uint32_t source = amdgpu::RegisterAccess(wf).read_scalar(ssrc0);
+  bool source_is_m0 =
+      static_cast<uint32_t>(ssrc0.encoding_value()) == amdgpu::scalar_m0_selector(wf.cu().arch());
+  int32_t barrier_id = amdgpu::barrier_operand_id(source, source_is_m0);
+  wf.cu().wake_sleeping_workgroup(wf, barrier_id);
+}
 
 void SSleepVarSop1::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_sleep_var_sop1(*this, wf);

@@ -774,7 +774,7 @@ class TestDeriveScalarSplitBarrier:
             ('S_BARRIER_SIGNAL_ISFIRST', 'scalar_barrier_signal', 'signal_isfirst'),
             ('S_BARRIER_INIT', 'scalar_barrier_init', None),
             ('S_BARRIER_JOIN', 'scalar_barrier_join', None),
-            ('S_WAKEUP_BARRIER', 'true_nop', None),
+            ('S_WAKEUP_BARRIER', 'scalar_barrier_wakeup', None),
         ],
     )
     def test_named_barrier_ops_derive_execution_model(
@@ -3236,9 +3236,8 @@ class TestDeriveSpecialScalar:
         cpp = lower_sema_block(block)
         assert 'write_scalar' in cpp
         if dtype == 'b32':
-            assert 'wf.exec()' in cpp
-            assert 'wf.set_exec(' in cpp
-            assert 'wf.exec_raw()' not in cpp
+            assert 'static_cast<uint32_t>(wf.exec_raw())' in cpp
+            assert 'wf.write_exec_lo(' in cpp
         else:
             assert 'wf.exec_raw()' in cpp
             assert 'wf.write_exec(' in cpp
@@ -3306,7 +3305,7 @@ class TestDeriveSpecialScalar:
                 'amdgpu::RegisterAccess(wf).write_scalar(inst.dst0, '
                 'static_cast<uint32_t>(result));'
             ) in cpp
-            assert 'wf.set_exec(result);' in cpp
+            assert 'wf.write_exec_lo(result);' in cpp
         else:
             assert (
                 'amdgpu::RegisterAccess(wf).write_scalar(inst.dst0, '

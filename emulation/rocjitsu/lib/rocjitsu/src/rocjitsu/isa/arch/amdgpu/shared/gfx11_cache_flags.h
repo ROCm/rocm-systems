@@ -24,6 +24,8 @@
 
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx940_cache_flags.h"
 
+#include "rocjitsu/vm/amdgpu/atomic_op.h"
+
 #include <cstdint>
 
 namespace rocjitsu {
@@ -41,6 +43,15 @@ namespace amdgpu {
 /// @param slc Scope bit 1 (field named "slc" in generated machine_insts.h).
 [[nodiscard]] inline constexpr Mtype mtype_from_flags_gfx11(bool glc, bool dlc, bool slc) {
   return mtype_from_scope_nt(static_cast<uint8_t>((slc << 1) | glc), dlc);
+}
+
+/// RDNA 3.5 ISA 4.1.1: load GLC bypasses the client cache and still uses L2.
+/// Stores and atomics have device scope regardless of GLC. SLC and DLC are
+/// replacement hints for graphics caches and MALL; they do not select system scope.
+template <typename MemState> inline void apply_rdna35_cache_policy(MemState &state, bool glc) {
+  const bool load = state.is_load && state.atomic_op == AtomicOp::NONE;
+  state.request_force_l1_bypass = load && glc;
+  state.mtype = load ? Mtype::RW : Mtype::CC;
 }
 
 } // namespace amdgpu

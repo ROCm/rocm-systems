@@ -451,6 +451,17 @@ public:
       amdgpu::dpp::append_dpp8_disassembly(out, dpp8_lane_sel_, dpp_fi_);
   }
   void implicit_uses(RegisterSet &uses) const override;
+  void append_src_operand(std::string &out, uint8_t index) const override {
+    const bool dpp = has_encoded_dpp() && index < 2;
+    const bool absolute = dpp && ((dpp_modifiers_.absolute >> index) & 1);
+    if (dpp && ((dpp_modifiers_.negate >> index) & 1))
+      out += "-";
+    if (absolute)
+      out += "|";
+    Instruction::append_src_operand(out, index);
+    if (absolute)
+      out += "|";
+  }
   bool default_encoding();
   bool has_lit();
   bool has_dpp8();
@@ -513,6 +524,17 @@ public:
                                             amdgpu::dpp::DppCtrlDialect::Gfx10Plus);
     if (has_encoded_dpp8())
       amdgpu::dpp::append_dpp8_disassembly(out, dpp8_lane_sel_, dpp_fi_);
+  }
+  void append_src_operand(std::string &out, uint8_t index) const override {
+    const bool dpp = has_encoded_dpp() && index < 2;
+    const bool absolute = dpp && ((dpp_modifiers_.absolute >> index) & 1);
+    if (dpp && ((dpp_modifiers_.negate >> index) & 1))
+      out += "-";
+    if (absolute)
+      out += "|";
+    Instruction::append_src_operand(out, index);
+    if (absolute)
+      out += "|";
   }
   bool default_encoding();
   bool has_lit();
@@ -577,6 +599,17 @@ public:
       amdgpu::dpp::append_dpp8_disassembly(out, dpp8_lane_sel_, dpp_fi_);
   }
   void implicit_uses(RegisterSet &uses) const override;
+  void append_src_operand(std::string &out, uint8_t index) const override {
+    const bool dpp = has_encoded_dpp() && index < 2;
+    const bool absolute = dpp && ((dpp_modifiers_.absolute >> index) & 1);
+    if (dpp && ((dpp_modifiers_.negate >> index) & 1))
+      out += "-";
+    if (absolute)
+      out += "|";
+    Instruction::append_src_operand(out, index);
+    if (absolute)
+      out += "|";
+  }
   bool default_encoding();
   bool has_lit();
   bool has_dpp8();
@@ -641,6 +674,24 @@ public:
                                   const Vop3MachineInst *inst,
                                   const util::DiagnosticEmitter &emit_error) {
     const auto &inst_ = *inst;
+    if ((inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) &&
+        inst_.src1 < 256 &&
+        (inst_.op <= 47 || (inst_.op >= 49 && inst_.op <= 54) ||
+         (inst_.op >= 57 && inst_.op <= 62) || (inst_.op >= 64 && inst_.op <= 95) ||
+         (inst_.op >= 125 && inst_.op <= 175) || (inst_.op >= 177 && inst_.op <= 182) ||
+         (inst_.op >= 185 && inst_.op <= 190) || (inst_.op >= 192 && inst_.op <= 223) ||
+         (inst_.op >= 253 && inst_.op <= 255) || inst_.op == 257 ||
+         (inst_.op >= 259 && inst_.op <= 268) || (inst_.op >= 271 && inst_.op <= 276) ||
+         (inst_.op >= 280 && inst_.op <= 286) || (inst_.op >= 293 && inst_.op <= 295) ||
+         inst_.op == 299 || inst_.op == 303 || (inst_.op >= 306 && inst_.op <= 310) ||
+         (inst_.op >= 313 && inst_.op <= 315) || (inst_.op >= 521 && inst_.op <= 552) ||
+         (inst_.op >= 567 && inst_.op <= 571) || inst_.op == 573 ||
+         (inst_.op >= 576 && inst_.op <= 577) || (inst_.op >= 580 && inst_.op <= 593) ||
+         (inst_.op >= 595 && inst_.op <= 615) || (inst_.op >= 771 && inst_.op <= 775) ||
+         (inst_.op >= 777 && inst_.op <= 782) || (inst_.op >= 785 && inst_.op <= 787) ||
+         (inst_.op >= 796 && inst_.op <= 815) || (inst_.op >= 824 && inst_.op <= 826) ||
+         (inst_.op >= 828 && inst_.op <= 830) || (inst_.op >= 864 && inst_.op <= 868))) [[unlikely]]
+      return emit_error.emit() << "RDNA3 DPP requires a VGPR for SRC1";
     if ((inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) &&
         (inst_.src0 == 255 || inst_.src1 == 255 || inst_.src2 == 255)) [[unlikely]]
       return emit_error.emit() << "DPP and literal operands cannot be combined";
@@ -733,6 +784,11 @@ public:
                                   const Vop3pMachineInst *inst,
                                   const util::DiagnosticEmitter &emit_error) {
     const auto &inst_ = *inst;
+    if ((inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) &&
+        inst_.src1 < 256 &&
+        (inst_.op <= 19 || (inst_.op >= 22 && inst_.op <= 26) ||
+         (inst_.op >= 32 && inst_.op <= 34) || (inst_.op >= 64 && inst_.op <= 69))) [[unlikely]]
+      return emit_error.emit() << "RDNA3 DPP requires a VGPR for SRC1";
     if ((inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) &&
         (inst_.src0 == 255 || inst_.src1 == 255 || inst_.src2 == 255)) [[unlikely]]
       return emit_error.emit() << "DPP and literal operands cannot be combined";
@@ -831,6 +887,8 @@ public:
       out += " dlc";
     if (inst->slc)
       out += " slc";
+    if (inst->tfe && (flags_ & CONDITIONAL_LAST_VGPR_DEF))
+      out += " tfe";
   }
   using OpEncoding = MubufMachineInst;
   const OpEncoding inst_;
@@ -852,6 +910,8 @@ public:
       out += " dlc";
     if (inst->slc)
       out += " slc";
+    if (inst->tfe && (flags_ & CONDITIONAL_LAST_VGPR_DEF))
+      out += " tfe";
   }
   using OpEncoding = MtbufMachineInst;
   const OpEncoding inst_;
@@ -860,25 +920,98 @@ public:
 class Mimg : public IsaInstruction<Isa> {
 public:
   Mimg(std::string_view mnemonic, const MimgMachineInst *inst, ExecuteFn exec_fn);
+  bool omits_gfx11_mimg_dim_dmask() const;
+  uint32_t gfx11_mimg_nsa_group_width(uint32_t index, uint32_t vaddr_words) const;
   bool should_print_dst_operand(uint8_t operand_index) const override {
     // Image atomics have one encoded VDATA tuple, printed as a source.
     return !mnemonic_.starts_with("image_atomic_") &&
            Instruction::should_print_dst_operand(operand_index);
   }
+  void capture_nsa_words(const MachineInst *inst, const Operand *vaddr);
+  std::string image_vdata_name(int bits) const;
+  void append_dst_operand(std::string &out, uint8_t index) const override {
+    const auto *operand = dst_operands_[index];
+    const bool status = flags_ & (CONDITIONAL_LAST_VGPR_DEF | UNWRITTEN_LAST_VGPR);
+    if (operand->is_vgpr() && !omits_gfx11_mimg_dim_dmask() && status != bool(inst_.tfe))
+      out += image_vdata_name(operand->size_bits() + 32 * (int(inst_.tfe) - int(status)));
+    else
+      Instruction::append_dst_operand(out, index);
+  }
+  std::string full_image_resource_name() const;
   void append_src_operand(std::string &out, uint8_t operand_index) const override {
     const ::rocjitsu::Operand *operand = src_operands_[operand_index];
-    if (operand_index == 0 && inst_.tfe && mnemonic_.starts_with("image_atomic_")) {
-      // VDATA is the first source. Assembly includes the status slot;
-      // the source dependency includes only the atomic payload.
-      const auto first = operand->encoding_value();
-      const auto last = first + operand->size_bits() / 32;
-      out += first == last ? "v" + std::to_string(first)
-                           : "v[" + std::to_string(first) + ":" + std::to_string(last) + "]";
+    if (inst_.tfe && operand_index == 0 && operand->is_vgpr() && operand != nsa_vaddr_operand_) {
+      // Store and atomic payloads never consume the spelled TFE slot.
+      out += image_vdata_name(operand->size_bits() + 32);
       return;
     }
-    Instruction::append_src_operand(out, operand_index);
+    // LLVM spells regular T# operands with eight SGPRs even in R128 mode.
+    if (inst_.r128 && !omits_gfx11_mimg_dim_dmask() && operand_index &&
+        src_operands_[operand_index - 1] == nsa_vaddr_operand_) {
+      out += full_image_resource_name();
+      return;
+    }
+    if (!inst_.nsa || operand != nsa_vaddr_operand_) {
+      Instruction::append_src_operand(out, operand_index);
+      return;
+    }
+    const uint32_t vaddr_words = (operand->size_bits() + 31) / 32;
+    out += "[";
+    uint32_t consumed_words = 0;
+    for (uint32_t index = 0; index < 5 && consumed_words < vaddr_words; ++index) {
+      const uint32_t group_words = gfx11_mimg_nsa_group_width(index, vaddr_words);
+      if (group_words == 0)
+        break;
+      if (index != 0)
+        out += ", ";
+      const uint32_t selector =
+          index == 0 ? inst_.vaddr : (raw_words_[2] >> ((index - 1) * 8)) & 0xffu;
+      if (group_words > 1) {
+        out += "v[" + std::to_string(selector) + ":";
+        out += std::to_string(selector + group_words - 1) + "]";
+      } else {
+        out += "v" + std::to_string(selector);
+      }
+      consumed_words += group_words;
+    }
+    out += "]";
   }
-  void capture_nsa_words(const MachineInst *inst, const Operand *vaddr);
+  void build_modifiers(std::string &out) const override {
+    auto *inst = &inst_;
+    (void)inst;
+    if (!omits_gfx11_mimg_dim_dmask()) {
+      out += " dmask:0x";
+      out += "0123456789abcdef"[inst->dmask & 0xfu];
+    }
+    if (!omits_gfx11_mimg_dim_dmask()) {
+      static constexpr std::string_view dims[] = {
+          "1D", "2D", "3D", "CUBE", "1D_ARRAY", "2D_ARRAY", "2D_MSAA", "2D_MSAA_ARRAY"};
+      out += " dim:SQ_RSRC_IMG_";
+      out += dims[inst->dim & 7u];
+    }
+    if (!omits_gfx11_mimg_dim_dmask()) {
+      if (inst->unorm)
+        out += " unorm";
+      if (inst->glc)
+        out += " glc";
+      if (inst->slc)
+        out += " slc";
+      if (inst->dlc)
+        out += " dlc";
+      if (inst->r128)
+        out += " r128";
+    }
+    if (inst->a16)
+      out += " a16";
+    if (!omits_gfx11_mimg_dim_dmask()) {
+      if (inst->tfe)
+        out += " tfe";
+      if (inst->lwe)
+        out += " lwe";
+      if (inst->d16)
+        out += " d16";
+    }
+  }
   bool has_nsa();
   using OpEncoding = MimgMachineInst;
   const OpEncoding inst_;
@@ -896,6 +1029,20 @@ public:
 class Flat : public IsaInstruction<Isa> {
 public:
   Flat(std::string_view mnemonic, const FlatMachineInst *inst, ExecuteFn exec_fn);
+  static Result validate_encoding([[maybe_unused]] std::string_view mnemonic,
+                                  const FlatMachineInst *inst,
+                                  const util::DiagnosticEmitter &emit_error) {
+    const auto &inst_ = *inst;
+    static constexpr uint8_t segment_masks[128] = {
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+        7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 0, 0, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5,
+        5, 5, 5, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
+        0, 0, 5, 5, 5, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    if (!(segment_masks[inst_.op] & (1u << inst_.seg))) [[unlikely]]
+      return emit_error.emit() << mnemonic << " has an invalid segment";
+    return Result::success();
+  }
   void build_modifiers(std::string &out) const override {
     auto *inst = &inst_;
     (void)inst;
@@ -948,6 +1095,10 @@ public:
                                   const Vop3SdstEncMachineInst *inst,
                                   const util::DiagnosticEmitter &emit_error) {
     const auto &inst_ = *inst;
+    if ((inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) &&
+        inst_.src1 < 256 &&
+        ((inst_.op >= 288 && inst_.op <= 290) || (inst_.op >= 764 && inst_.op <= 770))) [[unlikely]]
+      return emit_error.emit() << "RDNA3 DPP requires a VGPR for SRC1";
     if ((inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) &&
         (inst_.src0 == 255 || inst_.src1 == 255 || inst_.src2 == 255)) [[unlikely]]
       return emit_error.emit() << "DPP and literal operands cannot be combined";

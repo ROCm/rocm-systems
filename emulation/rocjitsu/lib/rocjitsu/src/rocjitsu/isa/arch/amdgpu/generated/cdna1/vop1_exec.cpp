@@ -7,6 +7,7 @@
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/vop1.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
@@ -1134,7 +1135,7 @@ RJ_NOINLINE void VFrexpMantF32Vop1::execute_modifier_impl(amdgpu::Wavefront &wf)
 }
 
 void VClrexcpVop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_clrexcp_vop1(*this, wf);
+  wf.set_trapsts(wf.trapsts() & ~amdgpu::kAluExceptionTrapstsMask);
 }
 
 void VScreenPartition4seB32Vop1::execute_impl(amdgpu::Wavefront &wf) {

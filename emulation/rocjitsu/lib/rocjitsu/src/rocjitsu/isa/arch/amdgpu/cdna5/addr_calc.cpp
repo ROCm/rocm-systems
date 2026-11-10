@@ -116,6 +116,8 @@ void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
     d.exec_mask = amdgpu::wave32_exec_all_if_nonzero(d.exec_mask);
     d.lane_mask = d.exec_mask;
   }
+  if (d.transpose && !d.exec_mask)
+    return;
   uint64_t exec = d.exec_mask;
   int64_t offset = static_cast<int64_t>(signed_ioffset(inst.ioffset));
   bool saddr_present = has_saddr(inst.saddr);

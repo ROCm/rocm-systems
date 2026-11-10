@@ -4,6 +4,8 @@
 #include "rocjitsu/vm/amdgpu/gws_device.h"
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
 #include <algorithm>
@@ -12,9 +14,82 @@
 namespace rocjitsu {
 namespace amdgpu {
 
+uint32_t GwsDevice::reserve_ordered_ids(uint32_t process_id, uint32_t queue_id, uint32_t count,
+                                        uint32_t id_count) {
+  std::lock_guard lock(mutex_);
+  assert(id_count && id_count <= kComputeWaveIdMask + 1);
+  auto &ring = ordered_rings_[process_id][queue_id];
+  ring.id_count = id_count;
+  const uint32_t base = ring.next_launch;
+  ring.next_launch = (base + count) % id_count;
+  return base;
+}
+
+std::optional<uint32_t> GwsDevice::ordered_count(uint32_t process_id, uint32_t queue_id,
+                                                 uint32_t logical_wave, uint32_t address,
+                                                 uint32_t value, bool exchange, bool release) {
+  std::lock_guard lock(mutex_);
+  auto &ring = ordered_rings_[process_id][queue_id];
+  if (logical_wave != ring.oldest)
+    return std::nullopt;
+  auto &gds = gds_.try_emplace(process_id, 64).first->second;
+  const uint32_t previous = gds.read32(address);
+  gds.write32(address, exchange ? value : previous + value);
+  if (release)
+    ring.oldest = (ring.oldest + 1) % ring.id_count;
+  return previous;
+}
+
+void GwsDevice::reset_ordered_ids(uint32_t process_id, uint32_t queue_id) {
+  std::lock_guard lock(mutex_);
+  if (auto it = ordered_rings_.find(process_id); it != ordered_rings_.end()) {
+    it->second.erase(queue_id);
+    if (it->second.empty())
+      ordered_rings_.erase(it);
+  }
+}
+
+bool GwsDevice::prepare_register_access(Wavefront &wf, VectorMemState &d, uint8_t offset0,
+                                        uint8_t offset1, uint32_t src, uint32_t dst, bool ordered,
+                                        bool subtract) {
+  const uint32_t m0 = wf.m0();
+  const uint32_t index = ordered ? ((m0 >> 16) / 4 + offset0 / 4) : ((offset0 >> 2) & 15);
+  const uint8_t op = (offset1 >> 4) & 3;
+  if (ordered && ((offset0 & 3) || index >= 16 || (offset1 & 2 && !(offset1 & 1)) || op == 2 ||
+                  (op == 1 && (index < 4 || index > 7)) || (op && index >= 8))) {
+    wf.report_instruction_execution_error(InstructionExecutionError::InvalidInstructionEncoding);
+    return false;
+  }
+  const uint32_t words = index < 8 ? 1u : 2u;
+  const uint64_t exec = ordered || wf.vgpr_alloc().contains(dst, words) ? wf.exec() : 0;
+  // An empty ordered wave sends ADD(0) regardless of the encoded operation.
+  // Preserve release/done and the walker step, without requiring a WRAP ring.
+  if (ordered && !exec)
+    offset1 &= ~0x30u;
+  else if (ordered && op == 3) {
+    wf.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+    return false;
+  }
+  const uint32_t operand =
+      exec ? RegisterAccess(wf.cu()).read_vgpr(src, std::countr_zero(exec)) : 0;
+  d.gds = true;
+  d.elem_size = words * sizeof(uint32_t);
+  d.num_elems = 1;
+  d.is_load = true;
+  d.dst_reg_base = dst;
+  d.exec_mask = d.lane_mask = exec ? exec & -exec : uint64_t{ordered};
+  d.gds_register.emplace(VectorMemState::GdsRegisterAccess{
+      operand, static_cast<uint16_t>(m0 & 0x1fff), static_cast<uint8_t>(index), offset1,
+      static_cast<uint8_t>((m0 >> 13) & 7), ordered, subtract});
+  return true;
+}
+
 void GwsDevice::release_process(uint32_t process_id) {
   std::lock_guard<std::mutex> lock(mutex_);
+  gds_.erase(process_id);
+  ordered_rings_.erase(process_id);
   resources_.erase(process_id);
+  data_shares_.erase(process_id);
   instruction_progress_.erase(process_id);
   auto it = parked_.find(process_id);
   if (it != parked_.end()) {
@@ -23,9 +98,38 @@ void GwsDevice::release_process(uint32_t process_id) {
   }
 }
 
+bool GwsDevice::has_gds_data() {
+  std::lock_guard lock(mutex_);
+  return std::ranges::any_of(
+      gds_, [](const auto &entry) { return entry.second.materialized_size_bytes() != 0; });
+}
+
+void GwsDevice::retire_ordered_dispatch(uint32_t process_id, uint32_t queue_id,
+                                        uint32_t dispatch_id) {
+  std::lock_guard lock(mutex_);
+  const auto share = data_shares_.find(process_id);
+  if (share != data_shares_.end())
+    share->second.ordered_walkers.erase((uint64_t{queue_id} << 32) | dispatch_id);
+}
+
 size_t GwsDevice::tracked_process_count() {
   std::lock_guard<std::mutex> lock(mutex_);
   return resources_.size();
+}
+
+bool GwsDevice::has_gds_checkpoint_state() {
+  std::lock_guard lock(mutex_);
+  if (!ordered_rings_.empty() || std::ranges::any_of(gds_, [](const auto &entry) {
+        return entry.second.materialized_size_bytes() != 0;
+      }))
+    return true;
+  return std::ranges::any_of(data_shares_, [](const auto &entry) {
+    const auto &share = entry.second;
+    return share.memory.materialized_size_bytes() != 0 ||
+           std::ranges::any_of(share.streamout, [](uint64_t value) { return value != 0; }) ||
+           std::ranges::any_of(share.ordered_walkers,
+                               [](const auto &walker) { return walker.second != 0; });
+  });
 }
 
 void GwsDevice::release_sema_waiter(Resource &res, uint64_t seq) {
@@ -187,11 +291,12 @@ void GwsDevice::sema_release_all(ComputeUnitCore &cu, Wavefront &wf, uint32_t ri
     return;
   std::lock_guard<std::mutex> lock(mutex_);
   Resource &res = resources_[wf.process_id()][rid];
-  // Release every currently parked waiter via a generation bump and clear credits
-  // so waiters that park afterwards (with the new generation) are not spuriously
-  // released by this one.
+  // Release all queued P waiters. GFX11 adds their count to the existing
+  // credits, while earlier targets replace the counter with the waiter count.
+  // The generation wake below consumes each newly released waiter's credit.
   ++res.release_gen;
-  res.counter = 0;
+  if (cu.arch() != ROCJITSU_CODE_ARCH_RDNA3 && cu.arch() != ROCJITSU_CODE_ARCH_RDNA3_5)
+    res.counter = 0;
   // Retire the released waiters' credit reservations now. The generation bump above
   // wakes every currently queued P-waiter regardless of credits, so their arrival
   // stamps no longer entitle them to a credit; leaving the stamps queued would let a

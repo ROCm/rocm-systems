@@ -839,7 +839,7 @@ class _ScalarSaveexec(_ScalarDeriver):
         stmts: list[SemaNode] = []
         is_b32 = sem.data_type == 'b32'
         src_ty = SemaType.U32 if is_b32 else SemaType.U64
-        exec_id = 'EXEC' if is_b32 else 'EXEC_RAW'
+        exec_id = 'EXEC_LO' if is_b32 else 'EXEC_RAW'
 
         # Cache source and EXEC before any writes (prevents aliasing).
         src0 = _cast(_src(0), src_ty)
@@ -2120,6 +2120,25 @@ class _DsAtomic(_ScalarDeriver):
         addr = _addr_call(
             'CalcDsAddr', _cast(_src(0), SemaType.U32), _id('OFFSET', SemaType.U32)
         )
+        operand = _cast(_src(1), elem_ty)
+        if '_SRC2_' in sem.name.upper():
+            # MI100 11.3.3 selects the immediate or VGPR high bits as a
+            # signed 15-bit displacement in dwords for both 32- and 64-bit data.
+            raw = _cast(_src(0), SemaType.U32)
+            offset = _id('OFFSET', SemaType.U32)
+            indirect = SemaNode(SemaNodeKind.AND, children=(offset, _lit('0x8000')))
+            low = SemaNode(SemaNodeKind.AND, children=(raw, _lit('0x1ffff')))
+            high = SemaNode(SemaNodeKind.SHR, children=(raw, _lit('17')))
+            base = SemaNode(SemaNodeKind.TERNARY, children=(indirect, low, raw))
+            addr = _addr_call('CalcDsAddr', base, _lit('0'))
+            index = SemaNode(SemaNodeKind.TERNARY, children=(indirect, high, offset))
+            delta = SemaNode(
+                SemaNodeKind.SIGNEXT_FROM_BIT, children=(index, _lit('14'))
+            )
+            scaled = SemaNode(SemaNodeKind.MUL, children=(delta, _lit('4')))
+            operand = _mem_read(
+                SemaNode(SemaNodeKind.ADD, children=(_id('addr'), scaled)), elem_ty
+            )
         stmts = [
             _assign(_id('addr', SemaType.U32), addr),
             SemaNode(
@@ -2129,7 +2148,7 @@ class _DsAtomic(_ScalarDeriver):
                 children=(
                     _id(f'atomic_{op}'),
                     _id('addr', SemaType.U32),
-                    _cast(_src(1), elem_ty),
+                    operand,
                 ),
             ),
         ]
@@ -2795,7 +2814,7 @@ class _ScalarWrexec(_ScalarDeriver):
     def derive(sem: InstructionSemantics) -> SemaBlock:
         is_b32 = sem.data_type == 'b32'
         src_ty = SemaType.U32 if is_b32 else SemaType.U64
-        exec_id = 'EXEC' if is_b32 else 'EXEC_RAW'
+        exec_id = 'EXEC_LO' if is_b32 else 'EXEC_RAW'
         stmts = [
             _assign(_id('src', SemaType.U64), _cast(_src(0), src_ty)),
             _assign(_id('old_exec', SemaType.U64), _id(exec_id, SemaType.U64)),
@@ -2984,6 +3003,22 @@ class _CbranchJoin(_ScalarDeriver):
         # Synthetic: makes the block report WRITES_EXEC.
         body = _assign(_id('EXEC_RAW', SemaType.U64), result)
         return SemaBlock(sem.name, ExecModel.BRANCH, body)
+
+
+@_register('subvector_loop')
+class _SubvectorLoop(_ScalarDeriver):
+    @staticmethod
+    def derive(sem: InstructionSemantics) -> SemaBlock:
+        call = f'subvector_loop_{sem.operation}'
+        args = [_id(call), _id('EXEC', SemaType.U64), _src(0)]
+        if sem.operation == 'end':
+            args.append(_dst(0))
+        updated = SemaNode(
+            SemaNodeKind.CALL, ty=SemaType.U64, call_name=call, children=tuple(args)
+        )
+        return SemaBlock(
+            sem.name, ExecModel.BRANCH, _assign(_id('EXEC', SemaType.U64), updated)
+        )
 
 
 @_register('endpgm')

@@ -144,9 +144,10 @@ void execute_lds_stack(Wavefront &wf, VectorMemState &d) {
       if (first != count) {
         for (uint32_t i = count; i-- > first + 1;)
           if (data[i + 2] != invalid) {
-            wf.lds().write32(static_cast<uint32_t>(d.per_lane_addr[lane]) +
-                                 (index % size) * stack_slot_bytes,
-                             data[i + 2]);
+            const uint32_t address =
+                static_cast<uint32_t>(d.per_lane_addr[lane]) + (index % size) * stack_slot_bytes;
+            if (wf.cu().arch() != ROCJITSU_CODE_ARCH_RDNA3_5 || wf.contains_lds_range(address, 4))
+              wf.lds().write32(address, data[i + 2]);
             index = (index + 1) & 0xffff;
           }
         result[0] = data[first + 2];
@@ -154,8 +155,12 @@ void execute_lds_stack(Wavefront &wf, VectorMemState &d) {
         --index;
         const uint32_t address =
             static_cast<uint32_t>(d.per_lane_addr[lane]) + (index % size) * stack_slot_bytes;
-        result[0] = wf.lds().read32(address);
-        wf.lds().write32(address, invalid);
+        if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5 && !wf.contains_lds_range(address, 4)) {
+          result[0] = 0;
+        } else {
+          result[0] = wf.lds().read32(address);
+          wf.lds().write32(address, invalid);
+        }
       } else
         result[0] = terminal;
       ptr = (ptr & 0xffff0000u) | index;

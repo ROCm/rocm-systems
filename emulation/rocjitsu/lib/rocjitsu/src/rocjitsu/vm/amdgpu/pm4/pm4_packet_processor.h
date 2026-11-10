@@ -50,6 +50,8 @@ struct Pm4ExecutionContext {
   /// The processor sets queue.publication_faulted before calling this callback
   /// on terminal cursor-publication failures; CP preserves that failure state.
   std::function<void()> fault_queue;
+  /// Apply AMDGPU_IB_FLAG_RESET_GDS_MAX_WAVE_ID before entering the supplied IB.
+  std::function<void()> reset_gds_wave_id;
 };
 
 /// @brief Process a bounded turn of a native ring or DRM indirect-buffer stream.

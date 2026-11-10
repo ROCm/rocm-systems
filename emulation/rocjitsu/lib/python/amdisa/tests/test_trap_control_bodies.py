@@ -16,9 +16,10 @@ from types import SimpleNamespace
 from amdisa.codegen import CodeGenerator
 
 
-def _body(name: str) -> str:
+def _body(name: str, arch: str = 'cdna4') -> str:
     """Emitted execute() body for a trap-control op, straight from the generator."""
     generator = CodeGenerator.__new__(CodeGenerator)
+    generator.isa_spec = SimpleNamespace(arch_name=arch)
     sem = SimpleNamespace(
         name=name,
         semantic_class='true_nop',
@@ -36,21 +37,14 @@ class TestSRfeBody:
         assert 'read_scalar64(ssrc0)' in body
         assert 'kPcAddressMask' in body
 
-    def test_restores_the_interrupted_exec(self):
-        """Regression: a handler that returns without stopping the wave used to
-        leave its own EXEC mask installed, silently un-diverging a branch for
-        the rest of the kernel. gdb.rocm/lane-info.exp catches it, as does
-        WaveDebugTest.TrapHandlerRestoresInterruptedExecWhenReturningWithoutStopping.
-        This block once existed only in the checked-in generated header, so the
-        next regeneration would have removed it."""
+    def test_preserves_the_guest_handlers_exec(self):
         body = _body('S_RFE_B64')
-        assert 'wf.set_exec(wf.trap_saved_exec());' in body
-        assert 'if (wf.in_trap_handler())' in body
-        # The restore has to happen while the flag still says we are in the
-        # handler, so it must precede the clear.
-        assert body.index('wf.set_exec(wf.trap_saved_exec());') < body.index(
-            'wf.set_in_trap_handler(false);'
-        )
+        assert 'wf.set_exec(' not in body
+        assert 'wf.set_in_trap_handler(false);' in body
+
+    def test_rdna_handler_selects_the_return_exec(self):
+        for arch in ('rdna1', 'rdna2', 'rdna3', 'rdna3_5', 'rdna4'):
+            assert 'wf.set_exec' not in _body('S_RFE_B64', arch)
 
     def test_honours_status_halt_on_the_way_out(self):
         body = _body('S_RFE_B64')
@@ -61,10 +55,10 @@ class TestSRfeBody:
         """GFX1250 spells it S_RFE_I64 (SOP1 opcode 74). Omitting a spelling
         leaves that ISA's generated execute_impl() an empty no-op, so its trap
         handlers can never return."""
-        for name in ('S_RFE', 'S_RFE_B64', 'S_RFE_I64'):
+        for name in ('S_RFE', 'S_RFE_B64', 'S_RFE_I64', 'S_RFE_RESTORE_B64'):
             body = _body(name)
             assert 'kPcAddressMask' in body, f'{name} has no trap-return body'
-            assert 'wf.set_exec(wf.trap_saved_exec());' in body, name
+            assert 'wf.set_in_trap_handler(false);' in body, name
 
     def test_gfx12_restores_application_status_and_gfx1250_restores_the_full_pc(self):
         body = _body('S_RFE_I64')

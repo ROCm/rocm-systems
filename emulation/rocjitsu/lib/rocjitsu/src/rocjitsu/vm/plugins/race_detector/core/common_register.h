@@ -3,14 +3,21 @@
 
 #pragma once
 #include "rocjitsu/isa/arch/amdgpu/shared/memory_issue.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 
 #include <cassert>
+#include <optional>
 #include <ostream>
 #include <span>
 #include <sstream>
 #include <string>
 
 namespace rocjitsu::plugins::race_detector {
+
+struct ConditionalVgprWrite {
+  uint32_t reg = 0;
+  uint64_t lanes = 0;
+};
 
 /// Categorizes in-flight memory operations for race detection.
 enum class MemoryEventType {
@@ -42,12 +49,47 @@ enum class MemoryEventType {
   /// defaultWaitCounterType and defaultMemoryOrder return those of a tensor DMA
   /// store (TENSORCNT, TENSOR).
   LDS_TO_GLOBAL,
+  DIRECT_LDS_READ, ///< Completed synchronous read, retained until a workgroup barrier.
+
+  /// GFX10 DS_ORDERED_COUNT holds its contributing VGPR lane until EXPCNT retires.
+  GDS_ORDERED_COUNT_SOURCE,
+
+  /// A completed GFX10 VALU operand read, visible to peer writes until a barrier.
+  LDS_OPERAND_READ,
 
   N
 };
 
 /// Race-detector name for the decoded hardware completion-order classification.
 using MemoryOrderClass = amdgpu::MemoryCompletionClass;
+
+/// Effects on ordinary LDS bytes, independent of the instruction's registers.
+struct LdsAccess {
+  // A routed FLAT operation publishes its LDS bytes when the LDS counter retires.
+  bool uses_flat_lds = false;
+  bool read_modify_write = false;
+  uint8_t aligned_atomic_bytes = 0;
+
+  MemoryOrderClass order(MemoryOrderClass wholeEventOrder) const {
+    return uses_flat_lds ? MemoryOrderClass::LDS : wholeEventOrder;
+  }
+};
+
+/// GFX10 VMEM reads retire on one counter while separate types can write the
+/// same VGPR out of issue order.
+struct VgprWriteOrder {
+  constexpr VgprWriteOrder(MemoryOrderClass completion,
+                           amdgpu::VmemWriteback type = amdgpu::VmemWriteback::Ordinary)
+      : completion(completion), type(type) {}
+  bool operator==(const VgprWriteOrder &) const = default;
+  MemoryOrderClass completion;
+  amdgpu::VmemWriteback type;
+  // Parameter and direct LDS loads share an EXPCNT stream separate from indexed DS.
+  bool direct_lds = false;
+  // GFX11 FLAT reads require both counters, while each lane writes back in
+  // the FIFO of the memory it accessed. A mask of zero means all lanes use VMEM.
+  std::optional<uint64_t> flat_lds_lanes;
+};
 
 /// Derive the ordering usable for whole-event hazards such as destination WAW.
 /// Per-counter ordering remains useful for partial waits, but an event spanning
@@ -82,14 +124,16 @@ inline bool isToTtmp(MemoryEventType t) { return t == MemoryEventType::GLOBAL_TO
 inline bool isToScalar(MemoryEventType t) { return isToSgpr(t) || isToTtmp(t); }
 
 inline bool isFromLds(MemoryEventType t) {
-  return t == MemoryEventType::LDS_TO_VGPR || t == MemoryEventType::LDS_TO_GLOBAL;
+  return t == MemoryEventType::LDS_TO_VGPR || t == MemoryEventType::LDS_TO_GLOBAL ||
+         t == MemoryEventType::LDS_OPERAND_READ || t == MemoryEventType::DIRECT_LDS_READ;
 }
 
 /// True if the event touches LDS (read or write).
 inline bool isLdsInvolved(MemoryEventType t) { return isToLds(t) || isFromLds(t); }
 
 inline bool isFromVgpr(MemoryEventType t) {
-  return t == MemoryEventType::VGPR_TO_GLOBAL || t == MemoryEventType::VGPR_TO_LDS;
+  return t == MemoryEventType::VGPR_TO_GLOBAL || t == MemoryEventType::VGPR_TO_LDS ||
+         t == MemoryEventType::GDS_ORDERED_COUNT_SOURCE;
 }
 
 /// True if the event doesn't touch LDS — safe to trim at WAVE_COMPLETE.
@@ -111,6 +155,10 @@ inline amdgpu::WaitCounterType defaultWaitCounterType(MemoryEventType t) {
     return amdgpu::WaitCounterType::LGKMCNT;
   case MemoryEventType::LDS_TO_GLOBAL:
     return amdgpu::WaitCounterType::TENSORCNT;
+  case MemoryEventType::GDS_ORDERED_COUNT_SOURCE:
+    return amdgpu::WaitCounterType::EXPCNT;
+  case MemoryEventType::LDS_OPERAND_READ:
+  case MemoryEventType::DIRECT_LDS_READ: // Synchronous reads have no counter.
   case MemoryEventType::N:
     break;
   }
@@ -132,9 +180,12 @@ inline MemoryOrderClass defaultMemoryOrder(MemoryEventType t) {
   case MemoryEventType::GLOBAL_TO_SGPR:
   case MemoryEventType::GLOBAL_TO_TTMP:
   case MemoryEventType::SCALAR_TO_GLOBAL:
+  case MemoryEventType::GDS_ORDERED_COUNT_SOURCE:
+  case MemoryEventType::DIRECT_LDS_READ:
     return MemoryOrderClass::UNORDERED;
   case MemoryEventType::LDS_TO_GLOBAL:
     return MemoryOrderClass::TENSOR;
+  case MemoryEventType::LDS_OPERAND_READ:
   case MemoryEventType::N:
     break;
   }

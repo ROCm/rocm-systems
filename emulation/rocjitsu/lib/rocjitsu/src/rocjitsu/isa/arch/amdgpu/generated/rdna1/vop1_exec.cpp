@@ -1240,7 +1240,7 @@ RJ_NOINLINE void VFrexpMantF32Vop1::execute_modifier_impl(amdgpu::Wavefront &wf)
 }
 
 void VClrexcpVop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_clrexcp_vop1(*this, wf);
+  wf.set_trapsts(wf.trapsts() & ~amdgpu::kAluExceptionTrapstsMask);
 }
 
 void VMovreldB32Vop1::execute_impl(amdgpu::Wavefront &wf) {

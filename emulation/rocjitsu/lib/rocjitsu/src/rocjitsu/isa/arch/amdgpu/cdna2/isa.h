@@ -24,8 +24,6 @@ namespace cdna2 {
 /// MFMA outputs select VGPRs or AccVGPRs through the instruction encoding.
 /// All other constants inherit from `amdgpu::CdnaIsaBase`.
 ///
-/// CDNA2 hardware does not expose COND_DBG_USER / COND_DBG_SYS but those
-/// bits are inert in simulation via `amdgpu::CdnaStatusReg`.
 struct Isa : amdgpu::CdnaIsaBase {
   static constexpr uint32_t MAX_ACC_VGPRS_PER_WF =
       256;                               ///< Separate AccVGPR file (encoding base 512).

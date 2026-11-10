@@ -700,13 +700,9 @@ def test_scalar_fmamk_generated_execute_uses_literal_multiplier():
 
     body = codegen._gen_execute_body(inst, sem, 'ENC_SOP2')
 
-    assert 'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0))' in body
     assert (
-        'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(simm32))' in body
-    )
-    assert 'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1))' in body
-    assert body.index('amdgpu::RegisterAccess(wf).read_scalar(simm32)') < body.index(
-        'amdgpu::RegisterAccess(wf).read_scalar(ssrc1)'
+        'amdgpu::scalar_fp::arithmetic<amdgpu::scalar_fp::F32, amdgpu::scalar_fp::Op::Fma>'
+        '(wf, sdst, ssrc0, simm32, &ssrc1);' in body
     )
 
 

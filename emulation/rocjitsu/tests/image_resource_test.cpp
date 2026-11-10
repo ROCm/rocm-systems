@@ -53,23 +53,29 @@ TEST(ImageResourceDecodeTest, Rdna1UsesSixteenBitDepthAndBaseArray) {
             (std::array<uint32_t, 4>{1, 1, 0x8001u, 1}));
 }
 
-TEST(ImageResourceDecodeTest, Gfx12SeparatesUav3dAndFullDepthScale) {
+TEST(ImageResourceDecodeTest, Gfx12SeparatesWarningThresholdAndLinkedScales) {
   std::array<uint32_t, 8> descriptor{};
   util::insert_bits_into_words(descriptor.data(), 124, 4, amdgpu::kImage3d);
   // Adjacent reserved and scale fields must not become ARRAY_PITCH or leak
   // into the independently decoded UAV3D and five-bit DEPTH_SCALE controls.
   util::insert_bits_into_words(descriptor.data(), 160, 4, 15u);
   util::insert_bits_into_words(descriptor.data(), 170, 10, 1023u);
-  for (bool uav3d : {false, true}) {
-    for (uint32_t depth_scale = 0; depth_scale < 32; ++depth_scale) {
-      SCOPED_TRACE(testing::Message() << uav3d << ':' << depth_scale);
-      util::insert_bits_into_words(descriptor.data(), 164, 1, static_cast<uint32_t>(uav3d));
-      util::insert_bits_into_words(descriptor.data(), 165, 5, depth_scale);
-      const amdgpu::ImageResource resource =
-          amdgpu::decode_image_resource(descriptor, ROCJITSU_CODE_ARCH_RDNA4);
-      EXPECT_EQ(resource.uav3d, uav3d);
-      EXPECT_EQ(resource.depth_scale, depth_scale);
-      EXPECT_EQ(resource.array_pitch, 0u);
+  for (bool linked : {false, true}) {
+    util::insert_bits_into_words(descriptor.data(), 184, 1, uint32_t(linked));
+    for (bool uav3d : {false, true}) {
+      for (uint32_t depth_scale = 0; depth_scale < 32; ++depth_scale) {
+        SCOPED_TRACE(testing::Message() << uav3d << ':' << depth_scale);
+        util::insert_bits_into_words(descriptor.data(), 164, 1, static_cast<uint32_t>(uav3d));
+        util::insert_bits_into_words(descriptor.data(), 165, 5, depth_scale);
+        const amdgpu::ImageResource resource =
+            amdgpu::decode_image_resource(descriptor, ROCJITSU_CODE_ARCH_RDNA4);
+        EXPECT_EQ(resource.uav3d, uav3d);
+        EXPECT_EQ(resource.depth_scale, linked ? depth_scale : 0u);
+        EXPECT_EQ(resource.height_scale, linked ? 31u : 0u);
+        EXPECT_EQ(resource.width_scale, linked ? 31u : 0u);
+        EXPECT_EQ(resource.min_lod_warn, linked ? 0u : ((0xffu << 5) | depth_scale));
+        EXPECT_EQ(resource.array_pitch, 0u);
+      }
     }
   }
 }

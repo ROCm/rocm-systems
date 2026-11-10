@@ -236,6 +236,7 @@ class SSubvectorLoopBeginSopk : public Sopk {
 public:
   SSubvectorLoopBeginSopk(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  std::optional<int64_t> branch_offset_bytes() const override;
   Operand sdst;
   Operand simm16;
   Operand sdst_exec;
@@ -246,6 +247,7 @@ class SSubvectorLoopEndSopk : public Sopk {
 public:
   SSubvectorLoopEndSopk(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  std::optional<int64_t> branch_offset_bytes() const override;
   Operand sdst;
   Operand simm16;
   Operand sdst_exec;

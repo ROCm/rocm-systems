@@ -669,7 +669,7 @@ constexpr auto kSpecialParameters = make_special_parameters();
 
 class PseudoScalarFixture {
 public:
-  explicit PseudoScalarFixture(const PseudoScalarProfile &profile)
+  explicit PseudoScalarFixture(const PseudoScalarProfile &profile, uint32_t wave_size = 0)
       : profile(profile), gpu_memory(std::string(profile.name) + "_pseudo_scalar_memory"),
         l2(std::string(profile.name) + "_pseudo_scalar_l2") {
     config.arch = profile.arch;
@@ -683,7 +683,8 @@ public:
       return;
     decoder = Decoder::create(profile.arch);
     if (compute_unit)
-      wavefront = compute_unit->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+      wavefront =
+          compute_unit->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf, wave_size);
   }
 
   ~PseudoScalarFixture() {
@@ -776,6 +777,28 @@ TEST_P(PseudoScalarExecTest, ExecutesWithVccAsSourceAndDestination) {
     EXPECT_TRUE(fixture.compute_unit->execute_instruction(instruction.get(), *fixture.wavefront)
                     .succeeded());
     EXPECT_EQ(fixture.wavefront->vcc(), expected);
+  }
+}
+
+TEST(PseudoScalarSpecialSourceTest, Rdna4HalfTranscendentalsReadSpecialScalarSources) {
+  PseudoScalarFixture fixture(kProfiles[0], 64);
+  ASSERT_TRUE(fixture.ready());
+  fixture.wavefront->set_m0(0x4400u);
+  fixture.wavefront->set_exec_raw(0x440000004400ull);
+  fixture.wavefront->write_scc(true);
+  fixture.wavefront->set_fp_denorm_mode(0xf);
+  constexpr uint32_t dest = 4;
+  // gfx1201 returns sqrt(4) for M0 and either EXEC half, and sqrt(2^-24) for SCC.
+  for (uint32_t selector : {125u, 126u, 127u, 253u}) {
+    SCOPED_TRACE(selector);
+    const auto words = encode_vop3(fixture.profile, "v_s_sqrt_f16", dest, selector);
+    std::unique_ptr<Instruction> inst(decode_valid(*fixture.decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    fixture.compute_unit->write_sgpr(fixture.sgpr_base() + dest, 0xdeadbeef);
+    ASSERT_TRUE(
+        fixture.compute_unit->execute_instruction(inst.get(), *fixture.wavefront).succeeded());
+    EXPECT_EQ(fixture.compute_unit->read_sgpr(fixture.sgpr_base() + dest),
+              selector == 253u ? 0x0c00u : 0x4000u);
   }
 }
 

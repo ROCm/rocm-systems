@@ -119,6 +119,17 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         continue;
       }
       auto &ib = submission.buffers.front();
+      if (ib.reset_gds_wave_id) {
+        if (context.arch != ROCJITSU_CODE_ARCH_RDNA1 && context.arch != ROCJITSU_CODE_ARCH_RDNA2)
+          return fail("unsupported GDS wave ID reset on this target");
+        // GFX10's KMD emits this reset only on a compute ring.
+        if (!submission.graphics_engine) {
+          if (!context.reset_gds_wave_id)
+            return fail("missing GDS wave ID reset service");
+          context.reset_gds_wave_id();
+        }
+        ib.reset_gds_wave_id = false;
+      }
       if (!ib.dwords) {
         submission.buffers.pop_front();
         continue;
@@ -343,7 +354,7 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         const uint32_t selection = words[1] >> 29;
         uint64_t value = address(4);
         if (selection == 3)
-          value = hsa_system_timestamp();
+          value = gpu_timestamp(context.arch);
         else if (selection != 0 && selection != 1 && selection != 2)
           return fail("unsupported RELEASE_MEM data source");
         const size_t bytes = selection == 0 ? 0 : selection == 1 ? 4 : 8;
@@ -381,7 +392,7 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         } else if (source == 5)
           value = address(1);
         else if (source == 9)
-          value = hsa_system_timestamp();
+          value = gpu_timestamp(context.arch);
         else if (source == 1 || source == 2) {
           if (access->read(address(1), {reinterpret_cast<std::byte *>(&value), bytes}) !=
               VmAccessOutcome::Complete)

@@ -193,8 +193,14 @@ void VPkMulLoU16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     uint16_t b_lo = static_cast<uint16_t>(sel1_lo ? (raw1 >> 16) : raw1);
     uint16_t a_hi = static_cast<uint16_t>(sel0_hi ? (raw0 >> 16) : raw0);
     uint16_t b_hi = static_cast<uint16_t>(sel1_hi ? (raw1 >> 16) : raw1);
-    uint16_t rlo = static_cast<uint16_t>(static_cast<uint32_t>(a_lo) * b_lo);
-    uint16_t rhi = static_cast<uint16_t>(static_cast<uint32_t>(a_hi) * b_hi);
+    uint16_t rlo = static_cast<uint16_t>(amdgpu::vop3_integer_mul<uint16_t, 16>(
+        a_lo, b_lo,
+        inst_.clamp && (wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA2 ||
+                        wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2)));
+    uint16_t rhi = static_cast<uint16_t>(amdgpu::vop3_integer_mul<uint16_t, 16>(
+        a_hi, b_hi,
+        inst_.clamp && (wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA2 ||
+                        wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2)));
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
         *this, wf, vdst, lane, static_cast<uint32_t>(rlo) | (static_cast<uint32_t>(rhi) << 16));
   }

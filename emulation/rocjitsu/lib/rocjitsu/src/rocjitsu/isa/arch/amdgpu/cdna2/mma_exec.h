@@ -20,6 +20,10 @@ namespace cdna2 {
 template <typename F>
 inline uint32_t resolve_acc(uint32_t vb, uint32_t dst, int src2_ev, uint32_t &const_acc,
                             F &&get_const) {
+  if (src2_ev < 256) {
+    const_acc = get_const();
+    return amdgpu::NO_ACC_REGISTER;
+  }
   return amdgpu::resolve_acc<amdgpu::AccMode::Separate>(vb, dst, src2_ev, const_acc,
                                                         std::forward<F>(get_const));
 }

@@ -6,6 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/sop1.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_fp.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -329,74 +330,121 @@ void SSwappcB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::RegisterAccess(wf).write_scalar64(sdst, next_pc);
 }
 
-void SRfeB64Sop1::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_rfe_b64_sop1(*this, wf); }
+void SRfeB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
+  uint64_t saved_pc = amdgpu::RegisterAccess(wf).read_scalar64(ssrc0);
+  constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;
+  wf.pc = (saved_pc & kPcAddressMask) - size_;
+
+  constexpr uint32_t kStatusHalt = 1u << 13;
+  const bool keep_halted = (wf.status_raw() & kStatusHalt) != 0;
+  // GFX12 returns the interrupted wave state while preserving the handler's
+  // STATE_PRIV.HALT decision. Older layouts keep using the live STATUS word.
+  if (wf.in_trap_handler() && wf.uses_separate_trap_ctrl()) {
+    uint32_t restored_status = wf.trap_saved_status();
+    restored_status =
+        keep_halted ? (restored_status | kStatusHalt) : (restored_status & ~kStatusHalt);
+    wf.set_status_raw(restored_status);
+  }
+
+  wf.set_in_trap_handler(false);
+
+  // The handler sets STATUS.HALT when it wants the wave to stay
+  // stopped for the debugger; honour that on the way out.
+  if (keep_halted) {
+    wf.set_debug_single_step(false);
+    wf.set_debug_halted(true);
+  } else {
+    // Nothing is halting the wave any more, so an s_sendmsghalt marker
+    // left over from an earlier stop is stale. Leaving it set would make
+    // the next resume clear a HALT the handler raises later.
+    wf.set_self_halted(false);
+  }
+}
 
 void SSendmsgRtnB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_sendmsg_rtn_b32_sop1(*this, wf);
+  uint32_t msg = static_cast<uint32_t>(ssrc0.encoding_value_);
+  uint64_t value = wf.cu().return_message(msg);
+  if (sdst.size_bits() == 64)
+    amdgpu::RegisterAccess(wf).write_scalar64(sdst, value);
+  else
+    amdgpu::RegisterAccess(wf).write_scalar(sdst, static_cast<uint32_t>(value));
 }
 
 void SSendmsgRtnB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_sendmsg_rtn_b64_sop1(*this, wf);
+  uint32_t msg = static_cast<uint32_t>(ssrc0.encoding_value_);
+  uint64_t value = wf.cu().return_message(msg);
+  if (sdst.size_bits() == 64)
+    amdgpu::RegisterAccess(wf).write_scalar64(sdst, value);
+  else
+    amdgpu::RegisterAccess(wf).write_scalar(sdst, static_cast<uint32_t>(value));
 }
 
 void SCeilF32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_ceil_f32_sop1(*this, wf);
+  amdgpu::scalar_fp::round_integral<amdgpu::scalar_fp::F32, amdgpu::scalar_fp::Op::Ceil>(wf, sdst,
+                                                                                         ssrc0);
 }
 
 void SFloorF32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_floor_f32_sop1(*this, wf);
+  amdgpu::scalar_fp::round_integral<amdgpu::scalar_fp::F32, amdgpu::scalar_fp::Op::Floor>(wf, sdst,
+                                                                                          ssrc0);
 }
 
 void STruncF32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_trunc_f32_sop1(*this, wf);
+  amdgpu::scalar_fp::round_integral<amdgpu::scalar_fp::F32, amdgpu::scalar_fp::Op::Trunc>(wf, sdst,
+                                                                                          ssrc0);
 }
 
 void SRndneF32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_rndne_f32_sop1(*this, wf);
+  amdgpu::scalar_fp::round_integral<amdgpu::scalar_fp::F32, amdgpu::scalar_fp::Op::Rndne>(wf, sdst,
+                                                                                          ssrc0);
 }
 
 void SCvtF32I32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cvt_f32_i32_sop1(*this, wf);
+  amdgpu::scalar_fp::convert<amdgpu::scalar_fp::I32, amdgpu::scalar_fp::F32>(wf, sdst, ssrc0);
 }
 
 void SCvtF32U32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cvt_f32_u32_sop1(*this, wf);
+  amdgpu::scalar_fp::convert<amdgpu::scalar_fp::U32, amdgpu::scalar_fp::F32>(wf, sdst, ssrc0);
 }
 
 void SCvtI32F32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cvt_i32_f32_sop1(*this, wf);
+  amdgpu::scalar_fp::convert<amdgpu::scalar_fp::F32, amdgpu::scalar_fp::I32>(wf, sdst, ssrc0);
 }
 
 void SCvtU32F32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cvt_u32_f32_sop1(*this, wf);
+  amdgpu::scalar_fp::convert<amdgpu::scalar_fp::F32, amdgpu::scalar_fp::U32>(wf, sdst, ssrc0);
 }
 
 void SCvtF16F32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cvt_f16_f32_sop1(*this, wf);
+  amdgpu::scalar_fp::convert<amdgpu::scalar_fp::F32, amdgpu::scalar_fp::F16>(wf, sdst, ssrc0);
 }
 
 void SCvtF32F16Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cvt_f32_f16_sop1(*this, wf);
+  amdgpu::scalar_fp::convert<amdgpu::scalar_fp::F16, amdgpu::scalar_fp::F32>(wf, sdst, ssrc0);
 }
 
 void SCvtHiF32F16Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cvt_hi_f32_f16_sop1(*this, wf);
+  amdgpu::scalar_fp::convert<amdgpu::scalar_fp::F16, amdgpu::scalar_fp::F32>(wf, sdst, ssrc0, true);
 }
 
 void SCeilF16Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_ceil_f16_sop1(*this, wf);
+  amdgpu::scalar_fp::round_integral<amdgpu::scalar_fp::F16, amdgpu::scalar_fp::Op::Ceil>(wf, sdst,
+                                                                                         ssrc0);
 }
 
 void SFloorF16Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_floor_f16_sop1(*this, wf);
+  amdgpu::scalar_fp::round_integral<amdgpu::scalar_fp::F16, amdgpu::scalar_fp::Op::Floor>(wf, sdst,
+                                                                                          ssrc0);
 }
 
 void STruncF16Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_trunc_f16_sop1(*this, wf);
+  amdgpu::scalar_fp::round_integral<amdgpu::scalar_fp::F16, amdgpu::scalar_fp::Op::Trunc>(wf, sdst,
+                                                                                          ssrc0);
 }
 
 void SRndneF16Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_rndne_f16_sop1(*this, wf);
+  amdgpu::scalar_fp::round_integral<amdgpu::scalar_fp::F16, amdgpu::scalar_fp::Op::Rndne>(wf, sdst,
+                                                                                          ssrc0);
 }
 
 } // namespace rdna3_5

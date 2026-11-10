@@ -447,6 +447,7 @@ class SRfeRestoreB64Sop2 : public Sop2 {
 public:
   SRfeRestoreB64Sop2(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  bool tracks_explicit_source(uint8_t operand_index) const override { return operand_index != 1; }
   Operand ssrc0;
   Operand ssrc1;
   Operand pc;

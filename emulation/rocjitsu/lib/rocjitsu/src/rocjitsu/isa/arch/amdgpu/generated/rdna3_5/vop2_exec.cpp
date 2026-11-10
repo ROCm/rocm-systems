@@ -85,6 +85,12 @@ void VAddF32Vop2::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
+  if (wf.dx10_clamp()) {
+    amdgpu::execute_v_add_f32_vop2(*this, wf);
+    return;
+  }
+  CapturedArithmeticSource lhs_input(wf, src0, 0xf);
+  CapturedArithmeticSource rhs_input(wf, vsrc1, 0xf, wf.exec());
   amdgpu::execute_v_add_f32_vop2(*this, wf);
 }
 
@@ -108,6 +114,12 @@ RJ_NOINLINE void VAddF32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  if (wf.dx10_clamp()) {
+    amdgpu::execute_v_add_f32_vop2(*this, wf);
+    return;
+  }
+  CapturedArithmeticSource lhs_input(wf, src0, 0xf);
+  CapturedArithmeticSource rhs_input(wf, vsrc1, 0xf, wf.exec());
   amdgpu::execute_v_add_f32_vop2(*this, wf);
   dpp_write_mask_scope_.restore();
 }
