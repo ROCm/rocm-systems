@@ -5,22 +5,23 @@ import { expect, test, vi } from 'vitest';
 import CompareRunsView from '../../src/components/views/CompareRunsView.jsx';
 import RunMetadataDiff from '../../src/components/compare/RunMetadataDiff.jsx';
 import ComparisonMetrics from '../../src/components/compare/ComparisonMetrics.jsx';
-import { ThemeProvider, createTheme } from '@mui/material/styles';
+import { ThemeProvider } from '@mui/material/styles';
+import { createDashboardTheme } from '../../src/theme/theme.js';
 import { formatDuration, formatPercent } from '../../src/utils/formatters.js';
 import { selectRunComparison } from '../../src/data/selectors.js';
 import { colorTokens } from '../../src/theme/tokens.js';
 
-test.each(['light', 'dark'])('%s baseline metric reads purple from the shared palette', (mode) => {
-  const original = colorTokens[mode].purpleText;
-  const theme = createTheme({ palette: { mode } });
+test.each(['light', 'dark'])('%s baseline metric icon reads secondary accent from the shared palette', (mode) => {
+  const original = colorTokens[mode].secondaryAccent;
   const model = { comparable: [{}], notComparable: [], candidateDuration: 8, baselineDuration: 10, aggregateDelta: -20 };
-  const draw = () => renderToStaticMarkup(createElement(ThemeProvider, { theme }, createElement(ComparisonMetrics, { model })));
+  // The theme is rebuilt per draw so a changed shared token must flow through.
+  const draw = () => renderToStaticMarkup(createElement(ThemeProvider, { theme: createDashboardTheme(mode) }, createElement(ComparisonMetrics, { model, candidate: {}, baseline: {} })));
   expect(draw()).toContain(`color:${original}`);
   try {
-    colorTokens[mode].purpleText = '#123456';
+    colorTokens[mode].secondaryAccent = '#123456';
     expect(draw()).toContain('color:#123456');
   } finally {
-    colorTokens[mode].purpleText = original;
+    colorTokens[mode].secondaryAccent = original;
   }
 });
 import { adaptPublishedDashboardData } from '../../src/data/dashboardDataAdapter.js';
@@ -43,7 +44,7 @@ const run = (runId, duration, branch = 'develop') => ({ runId, branch, timestamp
 const baseline = run('fictional-base', 10);
 const candidate = run('fictional-next', 8, 'topic/fictional');
 const data = { runs: [baseline], allRuns: [baseline, candidate], latestRun: baseline };
-const render = (props = {}) => { captured.chart = null; captured.selectors = []; return renderToStaticMarkup(createElement(CompareRunsView, { data, filters, selectedBaselineId: baseline.runId, selectedCandidateId: candidate.runId, onBaselineChange() {}, onCandidateChange() {}, ...props })); };
+const render = (props = {}) => { captured.chart = null; captured.selectors = []; return renderToStaticMarkup(createElement(ThemeProvider, { theme: createDashboardTheme('light') }, createElement(CompareRunsView, { data, filters, selectedBaselineId: baseline.runId, selectedCandidateId: candidate.runId, onBaselineChange() {}, onCandidateChange() {}, ...props }))); };
 
 test('comparison copy names thread policy in headings, matching rules and filter subtitles', () => {
   const html = render();
@@ -72,7 +73,8 @@ test('comparison metrics use five real badge icons with signed delta, neutral em
   const html = render();
   for (const icon of ['SpeedRounded', 'TimerRounded', 'HistoryRounded', 'FactCheckRounded', 'FilterAltOffRounded']) expect(html).toContain(`data-testid="${icon}Icon"`);
   expect(html).toContain('-20.0%');
-  expect(html).toContain('data-testid="comparison-metric-comparable" data-tone="success"');
+  // Coverage is a neutral value with an olive icon accent; only the aggregate carries outcome color.
+  expect(html).toContain('data-testid="comparison-metric-comparable" data-tone="neutral"');
   expect(html).toContain('data-testid="comparison-metric-not-comparable" data-tone="neutral"');
   const empty = render({ filters: { targets: [], suites: [], modes: [] } });
   expect(empty).toContain('data-testid="comparison-metric-comparable" data-tone="neutral"');
@@ -121,7 +123,7 @@ test('swap invokes an atomic explicit pair callback and benchmark chart options 
   render({ onSwap });
   captured.swap.onClick();
   expect(onSwap).toHaveBeenCalledExactlyOnceWith({ baselineId: candidate.runId, candidateId: baseline.runId });
-  expect(captured.chart.option.textStyle.fontFamily).toBeTruthy();
+  // Global chart text style is applied by the shared Chart wrapper; this view supplies its own axis fonts.
   expect(captured.chart.option.yAxis.data[0]).toContain('single');
   expect(captured.chart.option.xAxis.axisLabel.fontFamily).toBeTruthy();
 });
@@ -215,7 +217,7 @@ test('validated positive ratio overflow uses generic no-ratio copy and keeps mea
 test('metadata is a bounded neutral field/baseline/candidate union and preserves full literal source/environment values', () => {
   const base = { ...baseline, sourceBase: { branch: 'develop', commit: 'b'.repeat(40) }, environment: [{ key: 'baseOnly', label: 'Base only', value: '-old+literal' }, { key: 'flag', label: 'Flag', value: false }] };
   const next = { ...candidate, pullRequest: { number: 42, url: 'https://github.com/ROCm/rocm-systems/pull/42' }, environment: [{ key: 'nextOnly', label: 'Next only', value: 'full-value' }, { key: 'flag', label: 'Flag', value: true }] };
-  const html = renderToStaticMarkup(createElement(RunMetadataDiff, { baseline: base, candidate: next, filters }));
+  const html = renderToStaticMarkup(createElement(ThemeProvider, { theme: createDashboardTheme('light') }, createElement(RunMetadataDiff, { baseline: base, candidate: next, filters })));
   expect(html).toContain('>Field<');
   expect(html).toContain('data-testid="metadata-row-baseOnly"');
   expect(html).toContain('data-testid="metadata-row-nextOnly"');
@@ -224,7 +226,7 @@ test('metadata is a bounded neutral field/baseline/candidate union and preserves
   expect(html).not.toContain('Changed');
   expect(html).toContain('data-different="true"');
   expect(html).toContain('Highlighted rows indicate metadata differences, not performance.');
-  expect(html).toContain('height:366px');
+  expect(html).toContain('max-height:400px');
   expect(html).toContain('position:sticky');
   expect(html).toContain('tabindex="0"');
   expect(html).not.toContain('− original');

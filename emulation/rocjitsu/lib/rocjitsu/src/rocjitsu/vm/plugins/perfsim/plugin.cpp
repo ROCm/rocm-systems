@@ -993,7 +993,9 @@ struct PerfsimPlugin::Impl {
       reject_wave(wave, access.dispatch_id, "memory route or decoded address space is unknown");
       return;
     }
-    if (access.wavefront_size != 32 || access.addresses.size() != access.wavefront_size ||
+    if (access.wavefront_size != 32 ||
+        (access.image_sample_footprints.empty() &&
+         access.addresses.size() != access.wavefront_size) ||
         (!access.pre_routing_addresses.empty() &&
          access.pre_routing_addresses.size() != access.wavefront_size) ||
         (!access.secondary_addresses.empty() &&
@@ -1037,6 +1039,25 @@ struct PerfsimPlugin::Impl {
       }
     }
 
+    if (!access.image_sample_footprints.empty()) {
+      if (access.route != amdgpu::MemoryRoute::GLOBAL ||
+          access.decoded_space != amdgpu::DecodedMemorySpace::GLOBAL || !access.is_load ||
+          !access.addresses.empty() || !access.secondary_addresses.empty()) {
+        reject_wave(wave, access.dispatch_id, "image sample has inconsistent routing");
+        return;
+      }
+      for (const auto &footprint : access.image_sample_footprints) {
+        if (footprint.addresses.size() != access.wavefront_size ||
+            (footprint.lane_mask & ~access.request_lane_mask) != 0) {
+          reject_wave(wave, access.dispatch_id, "image sample has an invalid footprint");
+          return;
+        }
+        if (footprint.lane_mask)
+          record_memory(*wave, access, footprint.lane_mask, FFM_RESOURCE_GLOBAL,
+                        footprint.addresses);
+      }
+      return;
+    }
     const uint64_t requests = access.request_lane_mask;
     if (requests == 0)
       return;
@@ -1469,6 +1490,8 @@ void PerfsimPlugin::record_instruction(uint64_t pc, const Instruction &inst, amd
                        "instruction callback could not be matched to its wavefront");
     return;
   }
+  // The FFM event holds four DWORDs. A five-DWORD GFX10 NSA instruction
+  // exceeds that event format even though the CU hook supplies the full window.
   const int encoding_bytes = inst.size();
   if (encoding_bytes <= 0 || encoding_bytes % 4 != 0 || encoding_bytes > 16 ||
       !inst.raw_encoding()) {

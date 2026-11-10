@@ -130,6 +130,7 @@ class MemoryRegion;
 namespace core {
 extern bool g_use_interrupt_wait;
 extern bool g_use_mwaitx;
+extern bool g_use_yielding_poll;
 
 /// @brief  Runtime class provides the following functions:
 /// - open and close connection to kernel driver.
@@ -573,7 +574,11 @@ class Runtime {
       kfd_version.supports_event_age = true;
 
     if (thunkLoader()->IsDXG()) {
+#if !defined(_WIN32)
       kfd_version.supports_event_age = false;
+#else
+      kfd_version.supports_event_age = true;
+#endif
     }
 
     kfd_version.supports_metadata_prefetch = false;

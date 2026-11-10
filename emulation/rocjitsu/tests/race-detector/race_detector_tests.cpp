@@ -161,7 +161,10 @@ TEST(RaceDetector, MixedFlatKeepsOneCounterEntryAndAllRegisterLanes) {
     wait.add(amdgpu::WaitCounterType::LOADCNT, 1);
     wait.add(amdgpu::WaitCounterType::DSCNT, 1);
     wave.dispatch(wait);
-    EXPECT_EQ(events.status(EventId{0}), EventStatus::WAVE_COMPLETE);
+    // A single-wave workgroup retires a completed event with LDS bytes at once;
+    // one without LDS bytes stays wave-complete until the registry trims it.
+    EXPECT_EQ(events.status(EventId{0}),
+              lds_mask != 0 ? EventStatus::RETIRED : EventStatus::WAVE_COMPLETE);
     EXPECT_EQ(events.status(EventId{1}), EventStatus::ACTIVE);
     for (int lane : {0, 1}) {
       wave.checkVgprRead(1, lane, 0xf);
@@ -247,7 +250,8 @@ TEST(RaceDetector, InvalidLdsAddressesKeepRegisterAndCounterDependencies) {
     wait.updates.clear();
     wait.add(amdgpu::WaitCounterType::DSCNT, 0);
     wave.dispatch(wait);
-    EXPECT_EQ(events.status(event), EventStatus::WAVE_COMPLETE);
+    // The event has LDS bytes, so the single-wave workgroup retires it at once.
+    EXPECT_EQ(events.status(event), EventStatus::RETIRED);
     violations.clear();
     wave.checkVgprReadLanes(1, 0xf, 0xf);
     EXPECT_TRUE(violations.empty());
@@ -1355,11 +1359,12 @@ TEST(RaceDetector, TensorDma_PartialWaitsUseTheObligationClassNotTheEventOrder) 
     MemoryOrderClass eventOrder;
     EventStatus olderAfterWait;
   };
+  // A completed event has LDS bytes, so the single-wave workgroup retires it.
   for (const Case c :
-       {Case{MemoryOrderClass::TENSOR, MemoryOrderClass::UNORDERED, EventStatus::WAVE_COMPLETE},
+       {Case{MemoryOrderClass::TENSOR, MemoryOrderClass::UNORDERED, EventStatus::RETIRED},
         Case{MemoryOrderClass::UNORDERED, MemoryOrderClass::TENSOR, EventStatus::ACTIVE}}) {
-    SCOPED_TRACE(c.olderAfterWait == EventStatus::WAVE_COMPLETE ? "TENSOR obligation"
-                                                                : "UNORDERED obligation");
+    SCOPED_TRACE(c.olderAfterWait == EventStatus::RETIRED ? "TENSOR obligation"
+                                                          : "UNORDERED obligation");
     std::vector<RaceViolation> violations;
     RaceDetector detector(
         1, 4, 4, Dim3d(0), [&](RaceViolation v) { violations.push_back(v); },
@@ -1370,7 +1375,7 @@ TEST(RaceDetector, TensorDma_PartialWaitsUseTheObligationClassNotTheEventOrder) 
     for (uint32_t address : {0u, 64u}) {
       const std::array ranges{LdsByteRange{.address = address, .bytes = 16}};
       wave.registerLdsRangeEvent(testInstruction(address), MemoryEventType::GLOBAL_TO_LDS, ranges,
-                                 /*elementBytes=*/4, obligations, c.eventOrder);
+                                 obligations, c.eventOrder);
     }
     PendingWaitCount wait;
     wait.add(amdgpu::WaitCounterType::TENSORCNT, 1);
@@ -1394,8 +1399,8 @@ TEST(RaceDetector, TensorDma_WaitedTransfersWithoutRangesDoNotAccumulate) {
                                                                MemoryOrderClass::TENSOR}};
   constexpr int kTransfers = 4096;
   for (int i = 0; i < kTransfers; ++i) {
-    wave.registerLdsRangeEvent(testInstruction(i), MemoryEventType::LDS_TO_GLOBAL, {},
-                               /*elementBytes=*/4, obligations, MemoryOrderClass::TENSOR);
+    wave.registerLdsRangeEvent(testInstruction(i), MemoryEventType::LDS_TO_GLOBAL, {}, obligations,
+                               MemoryOrderClass::TENSOR);
     PendingWaitCount wait;
     wait.add(amdgpu::WaitCounterType::TENSORCNT, 0);
     wave.dispatch(wait);
@@ -1760,6 +1765,15 @@ TEST(RaceDetector, TensorDma_RangeEdgesAreBytePrecise) {
   EXPECT_TRUE(b.hasLdsRace(15));
   b.checkLdsRead(/*wave=*/1, /*lane=*/0, /*addr=*/14, /*bytes=*/4);
   EXPECT_TRUE(b.hasLdsRace(14));
+}
+
+TEST(RaceDetector, TensorDma_RangeEndingMidElementTracksItsTailBytes) {
+  // A range can end mid-element, as when an element straddles the end of the
+  // wave's LDS allocation. Its trailing bytes are tracked, not rounded away.
+  RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/4, /*sgprs=*/4);
+  b.tensorLoadToLds(/*wave=*/0, {{.address = 0, .bytes = 6}});
+  b.checkLdsRead(/*wave=*/1, /*lane=*/0, /*addr=*/4, /*bytes=*/2);
+  EXPECT_TRUE(b.hasLdsRace(4));
 }
 
 // ---- Exec mask ----
