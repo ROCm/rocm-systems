@@ -88,10 +88,10 @@ Memory chart - Instruction Cache:
     plain: Percentage of instruction cache requests that hit. The instruction cache is read-only and shared by the WGPs it serves.
     rst: Percentage of instruction cache requests that hit. The instruction cache is read-only and shared by the WGPs it serves.
     unit: Percent
-  ICache-GL1 Read Requests:
-    plain: Instruction requests the instruction cache sent to GL1 after a miss.
-    rst: Instruction requests the instruction cache sent to GL1 after a miss.
-    unit: Requests per Normalization Unit
+  ICache-GL1 Read Bandwidth:
+    plain: Not collected by this implementation. The instruction cache counters give no request size.
+    rst: Not collected by this implementation. The instruction cache counters give no request size.
+    unit: Bytes/s
 Memory chart - Scalar Data Cache:
   DCache Requests:
     plain: Scalar data cache requests after bank serialization, normalized by the chosen unit.
@@ -105,10 +105,10 @@ Memory chart - Scalar Data Cache:
     plain: Bytes loaded by scalar memory instructions, from the dwords each instruction loads. Bounds-check reductions are ignored.
     rst: Bytes loaded by scalar memory instructions, from the dwords each instruction loads. Bounds-check reductions are ignored.
     unit: Bytes/s
-  DCache-GL1 Read Requests:
-    plain: Data read requests the scalar data cache sent to GL1 after a miss.
-    rst: Data read requests the scalar data cache sent to GL1 after a miss.
-    unit: Requests per Normalization Unit
+  DCache-GL1 Read Bandwidth:
+    plain: Not collected by this implementation. The scalar data cache counters give no request size.
+    rst: Not collected by this implementation. The scalar data cache counters give no request size.
+    unit: Bytes/s
 Memory chart - GL0 Cache (Vector L0):
   GL0 Read Requests:
     plain: Read requests to the vector L0 cache (TCP), counted per cache line accessed.
@@ -144,10 +144,10 @@ Memory chart - GL0-GL1 Interface:
     plain: Bytes the vector L0 cache requested from GL1, from the 64-byte and 128-byte read request counts.
     rst: Bytes the vector L0 cache requested from GL1, from the 64-byte and 128-byte read request counts.
     unit: Bytes/s
-  GL0-GL1 Write Requests:
-    plain: Write requests the vector L0 cache sent to GL1. The counters give no write size.
-    rst: Write requests the vector L0 cache sent to GL1. The counters give no write size.
-    unit: Requests per Normalization Unit
+  GL0-GL1 Write Bandwidth:
+    plain: Not collected by this implementation. The GL0-GL1 write counters give no write size.
+    rst: Not collected by this implementation. The GL0-GL1 write counters give no write size.
+    unit: Bytes/s
 Memory chart - GL1 Cache (L1):
   GL1 Utilization:
     plain: Percentage of GL1 cycles with a request pending. GL1 is a write-combining cache between the WGPs and L2.

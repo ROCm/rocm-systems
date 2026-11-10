@@ -1,6 +1,6 @@
 {
   "archs": ["gfx1201"],
-  "description": "RDNA 4 Navi 48: WGPs, LDS/L0 and the read-only L1 caches, GL1, L2, Infinity Cache, GDDR6.",
+  "description": "RDNA 4 Navi 48: WGPs, LDS/GL0/SQC, GL1, GL2, Infinity Cache, GDDR6.",
   "scope": {"labels": ["GPU", "GDDR6"], "split": "gddr6"},
   "blocks": [
     {"id": "cu", "title": "WGPs", "column": 0, "row": 0, "order": 0, "style": "list", "content": [
@@ -17,10 +17,10 @@
       {"metric_id": "3.4.3", "title": "BW", "category": "bw", "bar": false},
       {"metric_id": "3.4.2", "title": "Bank Conflict", "category": "stall", "bar": true}
     ]},
-    {"id": "l0", "title": "L0 (Vector)", "column": 1, "row": 0, "order": 1, "style": "panel", "content": [
+    {"id": "l0", "title": "GL0", "column": 1, "row": 0, "order": 1, "style": "panel", "content": [
       {"metric_id": "3.3.2", "title": "Hit Rate", "category": "hit", "bar": true}
     ]},
-    {"id": "l1", "title": "L1 (Read-Only)", "column": 1, "row": 0, "order": 2, "style": "panel"},
+    {"id": "l1", "title": "SQC", "column": 1, "row": 0, "order": 2, "style": "panel"},
     {"id": "icache", "title": "Instruction Cache", "column": 1, "order": 0, "style": "panel", "parent": "l1", "content": [
       {"metric_id": "3.1.1", "title": "Hit Rate", "category": "hit", "bar": true}
     ]},
@@ -29,14 +29,14 @@
       {"metric_id": "3.2.2", "title": "Load BW", "category": "read", "bar": false}
     ]},
 
-    {"id": "gl1", "title": "GL1 (Write-Combining)", "column": 2, "row": 0, "order": 0, "style": "panel", "content": [
+    {"id": "gl1", "title": "GL1", "column": 2, "row": 0, "order": 0, "style": "panel", "content": [
       {"metric_id": "3.6.0", "title": "Util", "category": "util", "bar": true},
       {"metric_id": "3.6.1", "title": "Req Credit Stall", "category": "stall", "bar": true},
       {"metric_id": "3.6.2", "title": "Data Credit Stall", "category": "stall", "bar": true},
       {"metric_id": "3.6.3", "title": "Buffer Full", "category": "stall", "bar": true}
     ]},
 
-    {"id": "l2", "title": "L2", "column": 3, "row": 0, "order": 0, "style": "panel", "content": [
+    {"id": "l2", "title": "GL2", "column": 3, "row": 0, "order": 0, "style": "panel", "content": [
       {"metric_id": "3.8.0", "title": "Util", "category": "util", "bar": true},
       {"metric_id": "3.8.1", "title": "Hit Rate", "category": "hit", "bar": true},
       {"metric_id": "3.9.0", "title": "Memory Read Req", "category": "read", "bar": false},
@@ -65,11 +65,11 @@
     {"from": "cu", "to": "dcache", "direction": "backward", "metric_id": "3.2.0", "title": "SMEM", "category": "read", "style": "inline"},
 
     {"from": "l0", "to": "gl1", "direction": "backward", "metric_id": "3.5.0", "title": "Read BW", "category": "read", "style": "stacked"},
-    {"from": "l0", "to": "gl1", "direction": "forward", "metric_id": "3.5.1", "title": "Write Req", "category": "write", "style": "inline"},
+    {"from": "l0", "to": "gl1", "direction": "forward", "metric_id": "3.5.1", "title": "Write BW", "category": "write", "style": "stacked"},
 
-    {"from": "icache", "to": "gl1", "direction": "backward", "metric_id": "3.1.2", "title": "Read Req", "category": "read", "style": "inline"},
+    {"from": "icache", "to": "gl1", "direction": "backward", "metric_id": "3.1.2", "title": "ICache Read BW", "category": "read", "style": "stacked"},
 
-    {"from": "dcache", "to": "gl1", "direction": "backward", "metric_id": "3.2.3", "title": "Read Req", "category": "read", "style": "inline"},
+    {"from": "dcache", "to": "gl1", "direction": "backward", "metric_id": "3.2.3", "title": "DCache Read BW", "category": "read", "style": "stacked"},
 
     {"from": "gl1", "to": "l2", "direction": "backward", "metric_id": "3.7.0", "title": "Read BW", "category": "read", "style": "stacked"},
     {"from": "gl1", "to": "l2", "direction": "forward", "metric_id": "3.7.1", "title": "Write BW", "category": "write", "style": "stacked"},

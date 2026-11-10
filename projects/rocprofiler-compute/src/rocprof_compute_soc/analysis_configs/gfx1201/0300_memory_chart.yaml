@@ -24,9 +24,9 @@ Panel Config:
         ICache Hit Rate:
           value: 100 * SUM(SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_REQ_sum)
           unit: Percent
-        ICache-GL1 Read Requests:
-          value: SUM(SQC_TC_INST_REQ_sum) / SUM($denom)
-          unit: (Requests + $normUnit)
+        ICache-GL1 Read Bandwidth:
+          value: None
+          unit: Bytes/s
       cli_style: mem_chart
   - metric_table:
       id: 302
@@ -42,9 +42,9 @@ Panel Config:
         DCache Load Bandwidth:
           value: 4 * SUM(SQC_SMEM_LOAD_DWORDS_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
-        DCache-GL1 Read Requests:
-          value: SUM(SQC_TC_DATA_READ_REQ_sum) / SUM($denom)
-          unit: (Requests + $normUnit)
+        DCache-GL1 Read Bandwidth:
+          value: None
+          unit: Bytes/s
       cli_style: mem_chart
   - metric_table:
       id: 303
@@ -89,9 +89,9 @@ Panel Config:
           value: SUM(TCP_GL1_REQ_READ_128B_sum * 128 + TCP_GL1_REQ_READ_64B_sum * 64) / (SUM(End_Timestamp
             - Start_Timestamp) / 1e9)
           unit: Bytes/s
-        GL0-GL1 Write Requests:
-          value: SUM(TCP_GL1_REQ_WRITE_sum) / SUM($denom)
-          unit: (Requests + $normUnit)
+        GL0-GL1 Write Bandwidth:
+          value: None
+          unit: Bytes/s
       cli_style: mem_chart
   - metric_table:
       id: 306
@@ -208,8 +208,9 @@ Panel Config:
     ICache Hit Rate: >-
       Percentage of instruction cache requests that hit. The instruction cache is
       read-only and shared by the WGPs it serves.
-    ICache-GL1 Read Requests: >-
-      Instruction requests the instruction cache sent to GL1 after a miss.
+    ICache-GL1 Read Bandwidth: >-
+      Not collected by this implementation. The instruction cache counters give no
+      request size.
     DCache Requests: >-
       Scalar data cache requests after bank serialization, normalized by the chosen unit.
     DCache Hit Rate: >-
@@ -217,8 +218,9 @@ Panel Config:
     DCache Load Bandwidth: >-
       Bytes loaded by scalar memory instructions, from the dwords each instruction loads.
       Bounds-check reductions are ignored.
-    DCache-GL1 Read Requests: >-
-      Data read requests the scalar data cache sent to GL1 after a miss.
+    DCache-GL1 Read Bandwidth: >-
+      Not collected by this implementation. The scalar data cache counters give no
+      request size.
     GL0 Read Requests: >-
       Read requests to the vector L0 cache (TCP), counted per cache line accessed.
     GL0 Write Requests: >-
@@ -242,8 +244,9 @@ Panel Config:
     GL0-GL1 Read Bandwidth: >-
       Bytes the vector L0 cache requested from GL1, from the 64-byte and 128-byte read
       request counts.
-    GL0-GL1 Write Requests: >-
-      Write requests the vector L0 cache sent to GL1. The counters give no write size.
+    GL0-GL1 Write Bandwidth: >-
+      Not collected by this implementation. The GL0-GL1 write counters give no write
+      size.
     GL1 Utilization: >-
       Percentage of GL1 cycles with a request pending. GL1 is a write-combining cache
       between the WGPs and L2.
