@@ -1393,6 +1393,232 @@ TEST_F(TensorDmaRaceTest, TransferWithoutLdsBytesLeavesTheLoadPendingUntilTheWai
   EXPECT_TRUE(ds_read(0, 4));
 }
 
+/// Drives gfx1250 counter-capacity backpressure through the plugin's hooks.
+/// Each split counter holds 63 tokens (CDNA5 ISA 5.7.1); issuing one more
+/// stalls until the oldest completes, which proves it complete for its wave.
+/// Each test issues an oldest operation and enough younger ones to fill or
+/// overflow the counter, then probes the oldest operation's register or LDS
+/// bytes. Probes are same-wave accesses in another completion class, so they
+/// race unless the oldest operation is complete.
+class Gfx1250CounterCapacityRaceTest : public TensorDmaRaceTest {
+protected:
+  // LOADcnt, DScnt, ASYNCcnt and TENSORcnt are 6-bit counters (CDNA5 ISA 5.7.1,
+  // table "Counter Size Description"), and issue stalls rather than overflow
+  // one, so each holds 2^6 - 1 tokens.
+  static constexpr int kCapacity = 63;
+  static constexpr uint32_t kOldestAddress = 0;
+  static constexpr uint32_t kYoungerAddress = 64;
+
+  /// Issue a one-lane, one-dword vector memory operation on the global route,
+  /// as execution does: the issue hook, then the routed-memory hook.
+  void vmem(int wave, bool is_load, uint32_t vgpr, uint64_t exec = 1,
+            std::string_view mnemonic = {}) {
+    waves[wave]->pc += 16;
+    auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+    state->elem_size = sizeof(uint32_t);
+    state->num_elems = 1;
+    state->is_load = is_load;
+    state->wf_size = waves[wave]->wf_size();
+    state->exec_mask = exec;
+    state->lane_mask = exec;
+    state->dst_reg_base = waves[wave]->vgpr_alloc().base + vgpr;
+    const auto counter = is_load ? WaitCounterType::LOADCNT : WaitCounterType::STORECNT;
+    std::unique_ptr<TestMemoryInstruction> inst;
+    MemoryAccessObservation access{};
+    if (mnemonic.empty()) {
+      inst = std::make_unique<TestMemoryInstruction>(
+          std::move(state),
+          std::initializer_list<MemoryCounterObligation>{{counter, MemoryCompletionClass::VMEM}});
+    } else {
+      // A generic FLAT access that resolved to global memory. FLAT carries
+      // both counter domains until routing selects the one it used.
+      state->wait_counter_type = counter;
+      inst = std::make_unique<TestMemoryInstruction>(std::move(state), mnemonic,
+                                                     WaitCounterType::DSCNT);
+      access.route = MemoryRoute::GLOBAL;
+      access.decoded_space = DecodedMemorySpace::FLAT;
+      access.request_lane_mask = exec;
+    }
+    const uint64_t wave_exec = waves[wave]->exec();
+    waves[wave]->set_exec(exec);
+    fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[wave]->pc, *inst, *waves[wave]);
+    fixture.plugin_group_->onAmdgpuMemoryAccessRouted(access, *inst, *waves[wave]);
+    waves[wave]->set_exec(wave_exec);
+  }
+
+  void vmem_load(int wave, uint32_t vgpr, uint64_t exec = 1) { vmem(wave, true, vgpr, exec); }
+  void vmem_store(int wave) { vmem(wave, false, /*vgpr=*/0); }
+  void flat_global_load(int wave, uint32_t vgpr) {
+    vmem(wave, true, vgpr, /*exec=*/1, "flat_load_b32");
+  }
+
+  /// Issue an instruction decoded from `word` through the issue hook only, as
+  /// execution does for one that is not a memory operation.
+  void issue_word(int wave, uint32_t word) {
+    waves[wave]->pc += 16;
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, &word));
+    ASSERT_NE(inst, nullptr);
+    fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[wave]->pc, *inst, *waves[wave]);
+  }
+
+  /// Read one lane of a VGPR and report whether it raced.
+  bool vgpr_read(int wave, uint32_t vgpr) {
+    waves[wave]->pc += 16;
+    record_register_probe(*fixture.plugin_group_, *waves[wave]);
+    const size_t previous = sink->str().size();
+    fixture.plugin_group_->onAmdgpuReadVgprLanes(waves[wave], waves[wave]->vgpr_alloc().base + vgpr,
+                                                 /*lane_mask=*/1);
+    return sink->str().find("RACE ", previous) != std::string::npos;
+  }
+
+  bool tensor_load_oldest() { return tensor_load(0, {{.address = kOldestAddress, .bytes = 4}}); }
+};
+
+TEST_F(Gfx1250CounterCapacityRaceTest, FullLoadcntCompletesOldestLoad) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, LoadcntAtCapacityKeepsOldestLoadPending) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  EXPECT_TRUE(vgpr_read(0, 0));
+}
+
+// Loads and stores use separate counters on gfx1250 (CDNA5 ISA 5.7.1), so a
+// full STOREcnt says nothing about a pending load.
+TEST_F(Gfx1250CounterCapacityRaceTest, StorecntPressureDoesNotCompleteALoad) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity; ++index)
+    vmem_store(0);
+  EXPECT_TRUE(vgpr_read(0, 0));
+}
+
+// A VMEM instruction with EXEC zero still counts unless every VMEM counter is
+// zero (CDNA5 ISA 3.2.2.1), so it applies backpressure like any other load.
+TEST_F(Gfx1250CounterCapacityRaceTest, ExecZeroLoadTakesALoadcntSlot) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  vmem_load(0, /*vgpr=*/2, /*exec=*/0);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, ExecZeroLoadBelowCapacityKeepsOldestLoadPending) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 2; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  vmem_load(0, /*vgpr=*/2, /*exec=*/0);
+  EXPECT_TRUE(vgpr_read(0, 0));
+}
+
+// FLAT applies capacity to the counter domains its addresses resolved to.
+TEST_F(Gfx1250CounterCapacityRaceTest, FlatResolvedToGlobalAdvancesLoadcnt) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  flat_global_load(0, /*vgpr=*/2);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, FlatResolvedToGlobalDoesNotAdvanceDscnt) {
+  ds_read(0, kOldestAddress);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    ds_read(0, kYoungerAddress);
+  flat_global_load(0, /*vgpr=*/2);
+  EXPECT_TRUE(tensor_load_oldest());
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, FullDscntCompletesOldestDsRead) {
+  ds_read(0, kOldestAddress);
+  for (int index = 0; index < kCapacity; ++index)
+    ds_read(0, kYoungerAddress);
+  EXPECT_FALSE(tensor_load_oldest());
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, DscntAtCapacityKeepsOldestDsReadPending) {
+  ds_read(0, kOldestAddress);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    ds_read(0, kYoungerAddress);
+  EXPECT_TRUE(tensor_load_oldest());
+}
+
+// Messages use KMcnt on gfx1250 (CDNA5 ISA 5.7.1.5), not a counter shared with
+// DS operations.
+TEST_F(Gfx1250CounterCapacityRaceTest, SendmsgDoesNotAdvanceDscnt) {
+  ds_read(0, kOldestAddress);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    ds_read(0, kYoungerAddress);
+  ASSERT_NO_FATAL_FAILURE(issue_word(0, 0xBFB60000u)); // s_sendmsg 0.
+  EXPECT_TRUE(tensor_load_oldest());
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, FullAsynccntCompletesOldestAsyncLoad) {
+  dtl_write(0, kOldestAddress);
+  for (int index = 0; index < kCapacity; ++index)
+    dtl_write(0, kYoungerAddress);
+  EXPECT_FALSE(ds_read(0, kOldestAddress));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, AsynccntAtCapacityKeepsOldestAsyncLoadPending) {
+  dtl_write(0, kOldestAddress);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    dtl_write(0, kYoungerAddress);
+  EXPECT_TRUE(ds_read(0, kOldestAddress));
+}
+
+// Transfers that move no data still take a TENSORcnt slot.
+TEST_F(Gfx1250CounterCapacityRaceTest, FullTensorcntCompletesOldestTensorLoad) {
+  tensor_load_oldest();
+  for (int index = 0; index < kCapacity; ++index)
+    tensor_load(0, {});
+  EXPECT_FALSE(ds_read(0, kOldestAddress));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, TensorcntAtCapacityKeepsOldestTensorLoadPending) {
+  tensor_load_oldest();
+  for (int index = 0; index < kCapacity - 1; ++index)
+    tensor_load(0, {});
+  EXPECT_TRUE(ds_read(0, kOldestAddress));
+}
+
+// A tensor instruction's admission completes the oldest transfer before its
+// own LDS bytes are checked, so overwriting that transfer's source is safe.
+TEST_F(Gfx1250CounterCapacityRaceTest, TensorAdmissionPrecedesItsLdsCheck) {
+  tensor_store(0, {{.address = kOldestAddress, .bytes = 4}});
+  for (int index = 0; index < kCapacity - 1; ++index)
+    tensor_load(0, {});
+  EXPECT_FALSE(tensor_load_oldest());
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, TensorBelowCapacityOverwritingAPendingSourceRaces) {
+  tensor_store(0, {{.address = kOldestAddress, .bytes = 4}});
+  for (int index = 0; index < kCapacity - 2; ++index)
+    tensor_load(0, {});
+  EXPECT_TRUE(tensor_load_oldest());
+}
+
+// Capacity proves completion only for the issuing wave; another wave still
+// needs a barrier.
+TEST_F(Gfx1250CounterCapacityRaceTest, CapacityCompletedDsWriteIsReleasedByABarrier) {
+  ds_write(0, kOldestAddress);
+  for (int index = 0; index < kCapacity; ++index)
+    ds_write(0, kYoungerAddress);
+  barrier();
+  EXPECT_FALSE(ds_read(1, kOldestAddress));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, DsWriteBelowCapacityIsNotReleasedByABarrier) {
+  ds_write(0, kOldestAddress);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    ds_write(0, kYoungerAddress);
+  barrier();
+  EXPECT_TRUE(ds_read(1, kOldestAddress));
+}
+
 // Wave 1 writes LDS and may end; wave 0 then passes a barrier and reads the
 // bytes. The fixture's DS helpers are not specific to tensor DMA.
 class ExitedWaveRaceTest : public TensorDmaRaceTest {
