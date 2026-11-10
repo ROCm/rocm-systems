@@ -746,8 +746,8 @@ that contains both ``roofline.csv`` and application performance counters
    The gfx1201 WMMA instruction counter requires a ROCprofiler-SDK and
    aqlprofile installation that supports SQ event 233. Check profiling warnings
    and counter output before relying on WMMA roofline points. One WMMA counter
-   covers FP16, BF16, and FP8, so the WMMA row is compared with the FP16 WMMA
-   peak. The aggregate VALU instruction counter gives an estimate, not a
+   covers FP16, BF16, FP8, and BF8, so the WMMA row is compared with the FP16
+   WMMA peak. The aggregate VALU instruction counter gives an estimate, not a
    precision-specific FLOP count. See :doc:`/conceptual/rdna/navi48`.
 
    CDNA4+ also supports Microscaling formats, which can be identified by the "MX" prefix in datatypes. More details and other resources about MX per CDNA architecture can be found at `AMD CDNA Architecture <https://www.amd.com/en/technologies/cdna.html>`_.

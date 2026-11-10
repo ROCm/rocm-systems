@@ -394,7 +394,7 @@ WGP WMMA Instruction FLOPs and IOPs Counting:
     rst: Raw count of work cycles sent for WMMA reported by the SDK counter. Its conversion to instruction counts or FLOPs requires validation.
     unit: Cycles
   SQ_WMMA_VALU_INSTS:
-    rst: Raw WMMA vector instruction count. The aggregate counter does not distinguish FP16, BF16, or FP8, and its wave-size interpretation requires validation.
+    rst: Raw WMMA vector instruction count. The aggregate counter does not distinguish FP16, BF16, FP8, and BF8, and its wave-size interpretation requires validation.
     unit: Instructions
 WGP Utilization:
   WGP Utilization:
