@@ -60,8 +60,10 @@ subtrees:
           title: Command processor (CP)
         - file: conceptual/cdna/references.rst
       - file: conceptual/rdna/rdna-performance-model.rst
-        title: RDNA3
+        title: RDNA
         entries:
+        - file: conceptual/rdna/navi48.rst
+          title: Navi48 (gfx1201)
         - file: conceptual/rdna/system-speed-of-light.rst
           title: System Speed-of-Light
         - file: conceptual/rdna/shader-engine.rst

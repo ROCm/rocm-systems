@@ -8,6 +8,7 @@
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 
 import re
+from pathlib import Path
 
 import yaml
 
@@ -173,6 +174,45 @@ for context_name, section_name in rdna_gfx115x_section_map.items():
     jinja_contexts[context_name] = {
         "data": gfx115x_metrics.get(section_name, {}),
     }
+
+# Navi48 metrics are generated from the gfx1201 descriptions and panel YAMLs.
+with (Path(__file__).resolve().parent / "data/metrics/gfx1201_metrics.yaml").open(
+    encoding="utf-8"
+) as metrics_file:
+    gfx1201_metrics = yaml.safe_load(metrics_file)
+
+rdna_gfx1201_section_map = {
+    "sys-sol-gfx1201": "System Speed-of-Light",
+    "navi48-memory-chart-instruction-cache-gfx1201": (
+        "Memory chart - Instruction Cache"
+    ),
+    "navi48-memory-chart-scalar-data-cache-gfx1201": (
+        "Memory chart - Scalar Data Cache"
+    ),
+    "navi48-memory-chart-gl0-gfx1201": "Memory chart - GL0 Cache (Vector L0)",
+    "navi48-memory-chart-lds-gfx1201": "Memory chart - LDS (Local Data Share)",
+    "navi48-memory-chart-gl0-gl1-gfx1201": "Memory chart - GL0-GL1 Interface",
+    "navi48-memory-chart-gl1-gfx1201": "Memory chart - GL1 Cache (L1)",
+    "navi48-memory-chart-gl1-gl2-gfx1201": "Memory chart - GL1-GL2 Interface",
+    "navi48-memory-chart-gl2-gfx1201": "Memory chart - GL2 Cache (L2)",
+    "navi48-memory-chart-ea-to-dram-gfx1201": "Memory chart - EA to DRAM",
+    "navi48-memory-chart-infinity-cache-gfx1201": (
+        "Memory chart - Infinity Cache and GDDR6"
+    ),
+    "navi48-memory-chart-wgp-gfx1201": "Memory chart - Workgroup Processors (WGPs)",
+    "navi48-gl2-utilization-gfx1201": "GL2 Cache Request Statistics",
+    "navi48-gl2-lookup-gfx1201": "GL2 Cache Performance",
+    "navi48-gl2-bandwidth-gfx1201": "GL2 Cache Bandwidth",
+    "navi48-ea-utilization-gfx1201": "EA Utilization",
+    "navi48-ea-traffic-gfx1201": "EA Traffic Bandwidth",
+    "navi48-ea-outstanding-requests-gfx1201": (
+        "EA-SDP Interface - Outstanding Requests"
+    ),
+    "navi48-ea-stalls-gfx1201": "EA-SDP Interface - Stalls",
+}
+
+for context_name, section_name in rdna_gfx1201_section_map.items():
+    jinja_contexts[context_name] = {"data": gfx1201_metrics[section_name]}
 
 external_toc_path = "./sphinx/_toc.yml"
 external_projects_current_project = "rocprofiler-compute"

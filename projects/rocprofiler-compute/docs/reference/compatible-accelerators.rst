@@ -6,7 +6,7 @@
 Compatible GPUs/APUs
 ***********************
 
-The following table lists SoCs (System on Chip) tested for compatibility with
+The following table lists SoCs (System on Chip) supported by
 ROCm Compute Profiler. See :doc:`rocm:reference/gpu-arch-specs` for full AMD Instinct™ GPUs and AMD Ryzen™ APUs specifications.
 
 .. _def-soc:
@@ -53,3 +53,18 @@ ROCm Compute Profiler. See :doc:`rocm:reference/gpu-arch-specs` for full AMD Ins
 
       * - AMD Ryzen AI Max / Ryzen™ AI Max+ 300 and 400 Series integrated graphics (Strix/Halo, Gorgon/Halo, Gorgon/Point gfx1153)
         - Supported ✅ (see :doc:`/conceptual/rdna/rdna-performance-model`)
+
+  .. tab-item:: AMD Radeon GPUs
+
+    .. list-table::
+      :header-rows: 1
+
+      * - Platform
+        - Status
+
+      * - Navi48 (gfx1201), including AMD Radeon RX 9070
+        - GPU metrics and Memory Chart on Linux. See
+          :doc:`/conceptual/rdna/navi48` for prerequisites and limitations.
+
+      * - Navi44 (gfx1200)
+        - Not supported in this release.

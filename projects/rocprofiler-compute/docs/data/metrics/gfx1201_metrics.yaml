@@ -1,0 +1,617 @@
+System Speed-of-Light:
+  VALU Issue Rate:
+    rst: Billions of VALU instruction issues per second. The counter includes floating-point and integer instructions and does not count FLOPs or active lanes. No percentage of FP32 peak is reported.
+    unit: GInstr/s
+  WMMA FLOPs (F16->F32 16x16x16):
+    rst: Estimated matrix FLOPs per second, assuming FP16 inputs with FP32 accumulation for 16x16x16 matrices. The conversion of 8192 FLOPs per counter increment and peak of 1024 FLOPs/CU/cycle are provisional. The raw counter counts WMMA issues per vec32 and does not distinguish FP16, BF16, FP8, or BF8. A fixed wave32 FP16-to-FP32 16x16x16 diagnostic supports overlap with the general VALU instruction counter for that instruction. Counted wave population, other shapes/types, wave64 interpretation, and the applicable peak still require validation. Treat the FLOP conversion and percentage of peak as approximations.
+    unit: GFLOP/s
+  FP64 VALU Issue Rate:
+    rst: Billions of double-precision VALU instruction issues per second. This is an instruction rate, without accounting for FLOPs per instruction or active lanes. No percentage of FP64 peak is reported.
+    unit: GInstr/s
+  IPC:
+    rst: Instructions issued per busy SQ cycle, excluding internal instructions.
+    unit: Instr/cycle
+  Wavefront Occupancy:
+    rst: Estimated average resident wave count over GPU-active cycles. Navi48 living-wave counter units and instance reduction still require validation; do not treat this as a validated occupancy or resource-limit measurement.
+    unit: Wavefronts
+  GL2 Cache Hit Rate:
+    rst: Percentage of L2 lookups that hit.
+    unit: Percent
+  GL2-Fabric Read BW:
+    rst: Size-weighted L2 read requests over its EA interface, from the configured 32, 64, 128, and 256-byte categories. Separate compressed request and data counters are not included; their overlap and byte coverage require qualification. Infinity Cache can serve this traffic, so it is not compared against the GDDR6 peak.
+    unit: Bytes/s
+  GL2-Fabric Write BW:
+    rst: Size-weighted L2 write requests over its EA interface, from the configured 32, 64, 128, and 256-byte categories. Separate compressed request and data counters are not included; their overlap and byte coverage require qualification. Infinity Cache can absorb this traffic, so it is not compared against the GDDR6 peak.
+    unit: Bytes/s
+  LDS Bank Conflicts:
+    rst: Cycles LDS stalled on conflicting bank addresses, averaged per dispatch.
+    unit: Cycles
+  Wave Dependency Wait:
+    rst: Percentage of wave cycles spent waiting for anything, such as pending memory operations or prior instruction results.
+    unit: Percent
+  Wave Issue Wait:
+    rst: Percentage of wave cycles spent waiting for any instruction to issue.
+    unit: Percent
+  GL0 Cache Hit Rate (TCP Cache):
+    rst: Percentage of vector L0 cache line accesses that hit.
+    unit: Percent
+  GL0 Cache BW (TCP Cache):
+    rst: Not available on gfx1201. The L0 counters give no access size.
+    unit: Bytes/s
+  GL1 Cache Hit Rate:
+    rst: Not available in this gfx1201 configuration. No qualified GL1 data hit/miss measurement is collected for the Navi48 write-combining stage.
+    unit: Percent
+  GL1 Cache Read BW:
+    rst: Bytes GL1 returned to its clients, from the physical 32-byte beats returned.
+    unit: Bytes/s
+  GL2 Cache BW:
+    rst: Size-weighted uncompressed read requests measured at the GL2 output FIFOs, from the 32, 64, 128, and 256-byte categories. This request rate does not measure all L2 traffic or physical GDDR6 transfers. The percentage of peak uses the L2 interface width, not the GDDR6 peak.
+    unit: Bytes/s
+  Scalar Data Cache Hit Rate:
+    rst: Percentage of scalar data cache requests that hit.
+    unit: Percent
+  Scalar Data Cache BW:
+    rst: Bytes loaded by scalar memory instructions, from the dwords each instruction loads.
+    unit: Bytes/s
+  Instruction Cache Hit Rate:
+    rst: Percentage of instruction cache requests that hit.
+    unit: Percent
+  Instruction Cache BW:
+    rst: Not available on gfx1201. The instruction cache counters give no request size.
+    unit: Bytes/s
+Memory chart - Instruction Cache:
+  ICache Requests:
+    rst: Instruction cache requests from the SQ, normalized by the chosen unit.
+    unit: Requests per Normalization Unit
+  ICache Hit Rate:
+    rst: Percentage of instruction cache requests that hit. The instruction cache is read-only and shared by the WGPs it serves.
+    unit: Percent
+  ICache-GL1 Read Bandwidth:
+    rst: Not collected by this implementation. The instruction cache counters give no request size.
+    unit: Bytes/s
+Memory chart - Scalar Data Cache:
+  DCache Requests:
+    rst: Scalar data cache requests after bank serialization, normalized by the chosen unit.
+    unit: Requests per Normalization Unit
+  DCache Hit Rate:
+    rst: Percentage of scalar data cache requests that hit. The scalar data cache is read-only.
+    unit: Percent
+  DCache Load Bandwidth:
+    rst: Bytes loaded by scalar memory instructions, from the dwords each instruction loads. Bounds-check reductions are ignored.
+    unit: Bytes/s
+  DCache-GL1 Read Bandwidth:
+    rst: Not collected by this implementation. The scalar data cache counters give no request size.
+    unit: Bytes/s
+Memory chart - GL0 Cache (Vector L0):
+  GL0 Read Requests:
+    rst: Read requests to the vector L0 cache (TCP), counted per cache line accessed.
+    unit: Requests per Normalization Unit
+  GL0 Write Requests:
+    rst: Write requests to the vector L0 cache (TCP), counted per cache line accessed.
+    unit: Requests per Normalization Unit
+  GL0 Hit Rate:
+    rst: Percentage of vector L0 cache line accesses that hit.
+    unit: Percent
+Memory chart - LDS (Local Data Share):
+  LDS Req:
+    rst: LDS instructions issued, including FLAT instructions that resolve to LDS. This counts instructions, not data, so it does not separate reads from writes.
+    unit: Requests per Normalization Unit
+  LDS Utilization:
+    rst: Percentage of the LDS cycle budget across all CUs spent on indexed (non-direct, non-interpolation) accesses, over GPU-active cycles. Two CUs share a WGP's LDS, so a saturated LDS reads well below 100%.
+    unit: Percent
+  LDS Bank Conflict Rate:
+    rst: LDS cycles stalled by bank conflicts, as a percentage of cycles LDS spent on indexed accesses.
+    unit: Percent
+  LDS Bandwidth:
+    rst: LDS byte-access rate from load, store, and atomic dword counters, using four bytes per dword. Counter exposure and hardware normalization remain subject to Navi48 qualification.
+    unit: Bytes/s
+Memory chart - GL0-GL1 Interface:
+  GL0-GL1 Read Bandwidth:
+    rst: Bytes the vector L0 cache requested from GL1, from the 64-byte and 128-byte read request counts.
+    unit: Bytes/s
+  GL0-GL1 Write Bandwidth:
+    rst: Not collected by this implementation. The GL0-GL1 write counters give no write size.
+    unit: Bytes/s
+Memory chart - GL1 Cache (L1):
+  GL1 Utilization:
+    rst: Percentage of GL1 cycles with a request pending. GL1 is a write-combining cache between the WGPs and L2.
+    unit: Percent
+  GL1 Request Credit Stall Rate:
+    rst: Percentage of GL1 cycles stalled because GL1 had no L2 request credits.
+    unit: Percent
+  GL1 Data Credit Stall Rate:
+    rst: Percentage of GL1 cycles stalled because GL1 had no L2 data credits.
+    unit: Percent
+  GL1 Buffer Full Stall Rate:
+    rst: Percentage of GL1 cycles stalled because no buffer entry was free.
+    unit: Percent
+Memory chart - GL1-GL2 Interface:
+  GL1-GL2 Read Bandwidth:
+    rst: Bytes L2 returned to GL1, from the physical 32-byte beats returned.
+    unit: Bytes/s
+  GL1-GL2 Write Bandwidth:
+    rst: Bytes GL1 wrote to L2, from the physical 32-byte data beats sent.
+    unit: Bytes/s
+Memory chart - GL2 Cache (L2):
+  GL2 Utilization:
+    rst: Percentage of L2 cycles with a request pending.
+    unit: Percent
+  GL2 Hit Rate:
+    rst: Percentage of L2 lookups that hit.
+    unit: Percent
+  GL2-Fabric Read BW:
+    rst: Bytes L2 read over its EA interface, from the 32, 64, 128, and 256-byte read request counts. This includes traffic the Infinity Cache serves.
+    unit: Bytes/s
+  GL2-Fabric Write BW:
+    rst: Bytes L2 wrote over its EA interface, from the 32, 64, 128, and 256-byte write request counts. 64-byte requests include atomics.
+    unit: Bytes/s
+Memory chart - EA to DRAM:
+  DRAM Read Requests:
+    rst: L2 read requests over EA destined for DRAM. Infinity Cache can serve them before they reach GDDR6.
+    unit: Requests per Normalization Unit
+  DRAM Write Requests:
+    rst: L2 write requests over EA destined for DRAM. Infinity Cache can absorb them before they reach GDDR6.
+    unit: Requests per Normalization Unit
+  DRAM Read Bandwidth:
+    rst: Bytes L2 read over EA for requests destined for DRAM, in 32-byte units. Infinity Cache hits are included, so this can exceed the GDDR6 bandwidth peak.
+    unit: Bytes/s
+  DRAM Write Bandwidth:
+    rst: Bytes L2 wrote over EA for requests destined for DRAM, in 32-byte units. Infinity Cache hits are included.
+    unit: Bytes/s
+Memory chart - Infinity Cache and GDDR6:
+  Infinity Cache Hit Rate:
+    rst: Not collected by this implementation. Memory-destined L2 traffic can be served by Infinity Cache; its hit rate cannot be inferred from that traffic.
+    unit: Percent
+  GDDR6 Read Bandwidth:
+    rst: Not collected by this implementation. Memory-destined L2 read bandwidth includes Infinity Cache hits and does not measure traffic reaching GDDR6.
+    unit: Bytes/s
+  GDDR6 Write Bandwidth:
+    rst: Not collected by this implementation. Memory-destined L2 write bandwidth does not measure traffic reaching GDDR6.
+    unit: Bytes/s
+Memory chart - Workgroup Processors (WGPs):
+  Wavefront Occupancy:
+    rst: Estimated resident waves relative to the configured maximum. Navi48 living-wave counter units, instance reduction, and WGP normalization still require validation; this is a provisional occupancy estimate.
+    unit: Percent
+  VGPR:
+    rst: 'The number of architected vector general-purpose registers allocated for the kernel. Note: this may not exactly match the number of VGPRs requested by the compiler due to allocation granularity.'
+    unit: Registers
+  SGPR:
+    rst: 'The number of scalar general-purpose registers allocated for the kernel. Note: this may not exactly match the number of SGPRs requested by the compiler due to allocation granularity.'
+    unit: Registers
+  LDS Allocation:
+    rst: 'The number of bytes of LDS memory (or, shared memory) allocated per workgroup. Note: This may also be larger than what was requested at compile time due to both allocation granularity and dynamic per-dispatch LDS allocations.'
+    unit: Bytes per Workgroup
+  Scratch Allocation:
+    rst: 'The amount of scratch memory requested per wavefront, in KB: the scratch bytes requested per work-item multiplied by the wavefront size. Scratch memory is used for stack memory on the accelerator, as well as for register spills and restores.'
+    unit: KB per Wave
+  Workgroups:
+    rst: The number of workgroups in the launch divided by the number of WGPs.
+    unit: Workgroups per WGP
+Roofline Performance Rates:
+  VALU FLOPs (FP32):
+    rst: Floating-point operations per second on the VALU, excluding WMMA instructions. Uses the aggregate VALU instruction counter, so it is an estimate rather than a precision-specific FLOP count.
+    unit: GFLOP/s
+  WMMA FLOPs (F16->F32):
+    rst: Matrix operations per second at 8192 FLOPs per 16x16x16 WMMA instruction. The counter does not separate FP16, BF16, FP8, and BF8. The peak is the measured FP16 WMMA rate. BF8 has its own measured roof, V_WMMA_F32_16X16X16_BF8_BF8, at the same 8192 FLOPs per instruction.
+    unit: GFLOP/s
+  VALU FLOPs (F64):
+    rst: 64-bit floating-point operations per second on the VALU.
+    unit: GFLOP/s
+  GL2 Cache BW:
+    rst: Achieved bandwidth between the GL1 and GL2 caches.
+    unit: Bytes/s
+  GL1 Cache BW:
+    rst: Achieved bandwidth between the GL0 (TCP Cache) and GL1 caches.
+    unit: Bytes/s
+  GL0 Cache BW (TCP Cache):
+    rst: Achieved bandwidth at the GL0 vector cache (TCP Cache).
+    unit: Bytes/s
+  LDS BW:
+    rst: Achieved bandwidth for Local Data Share memory operations.
+    unit: Bytes/s
+  DRAM BW:
+    rst: Bandwidth of GL2C/EA read and write requests destined for DRAM, compared with the measured DRAM bandwidth. These requests are also served by the Infinity Cache, so a working set that fits in it can exceed this peak.
+    unit: Bytes/s
+  DRAM-Destined BW (Infinity Cache Peak):
+    rst: Bandwidth of GL2C/EA read and write requests destined for DRAM, compared with the measured Infinity Cache bandwidth. No counter separates Infinity Cache hits from DRAM traffic.
+    unit: Bytes/s
+Roofline Plot Points:
+  AI L2:
+    rst: Arithmetic intensity relative to GL1-to-GL2 traffic.
+    unit: FLOPs/Byte
+  AI L1:
+    rst: Arithmetic intensity relative to GL0-to-GL1 traffic.
+    unit: FLOPs/Byte
+  AI L0:
+    rst: Arithmetic intensity relative to GL0 (TCP) requests.
+    unit: FLOPs/Byte
+  AI LDS:
+    rst: Arithmetic intensity relative to Local Data Share traffic.
+    unit: FLOPs/Byte
+  AI DRAM:
+    rst: Arithmetic intensity relative to GL2C/EA requests destined for DRAM. The plot marks the point at the DRAM level. Compare it with both the DRAM roof and the Infinity Cache (MALL) roof, since those requests can hit in the Infinity Cache.
+    unit: FLOPs/Byte
+  Performance (GFLOPs):
+    rst: Achieved VALU plus WMMA throughput in billions of floating-point operations per second.
+    unit: GFLOP/s
+CPC Utilizations:
+  CPC Busy:
+    rst: Percentage of CPC counted cycles marked busy processing commands.
+    unit: Percent
+  CPC Idle:
+    rst: Percentage of CPC counted cycles marked idle.
+    unit: Percent
+  CPC Stalled:
+    rst: Percentage of CPC counted cycles marked stalled.
+    unit: Percent
+  GCRIU Busy:
+    rst: Percentage of CPC counted cycles with its cache-rinse interface busy.
+    unit: Percent
+  GUS Read Requests:
+    rst: Not available on gfx1201. This configuration does not collect CPC GUS read-request counters.
+    unit: Count per Normalization Unit
+  GUS Write Requests:
+    rst: Not available on gfx1201. This configuration does not collect CPC GUS write-request counters.
+    unit: Count per Normalization Unit
+  Instruction Cache Hit Rate:
+    rst: Percentage of Micro Engine instruction-cache lookups that hit.
+    unit: Percent
+  Instruction Cache Hits:
+    rst: Micro Engine instruction-cache hits, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  Instruction Cache Misses:
+    rst: Micro Engine instruction-cache misses, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  ME1 Stall on Memory Read:
+    rst: Micro Engine 1 cycles stalled waiting on memory reads, normalized by the chosen unit.
+    unit: Cycles per Normalization Unit
+  ME1 Stall on Memory Write:
+    rst: Micro Engine 1 cycles stalled waiting on memory writes, normalized by the chosen unit.
+    unit: Cycles per Normalization Unit
+  ME1 Stall on RCIU Ready:
+    rst: Micro Engine 1 cycles stalled waiting on its register-cache interface, normalized by the chosen unit.
+    unit: Cycles per Normalization Unit
+  ME1 Stall on ROQ Data:
+    rst: Micro Engine 1 cycles stalled waiting on ring-output-queue data, normalized by the chosen unit.
+    unit: Cycles per Normalization Unit
+  TCIU Busy:
+    rst: Percentage of CPC counted cycles with its texture-cache interface busy.
+    unit: Percent
+  TCIU Read Requests:
+    rst: CPC read requests sent through its texture-cache interface, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  TCIU Write Requests:
+    rst: CPC write requests sent through its texture-cache interface, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  UTCL2 Busy:
+    rst: Percentage of CPC counted cycles with its L2 address-translation interface busy.
+    unit: Percent
+Wave Dispatch Statistics:
+  Compute Wave Dispatches:
+    rst: Measured dispatched wave count, normalized by the chosen unit. Navi48 wave-count normalization still requires validation; this count need not match the application's launch geometry.
+    unit: Count per Normalization Unit
+  Wave Dispatch Rate:
+    rst: Measured dispatched waves per GPU-active cycle. Navi48 wave-count normalization still requires validation; compare like workloads in the same performance state.
+    unit: Waves/cycle
+SPI Utilization:
+  SPI Busy:
+    rst: Percentage of GPU-active cycles with the shader input processor busy.
+    unit: Percent
+WGP Scalar Data Cache:
+  Dcache Hit Rate:
+    rst: Percentage of scalar data-cache requests that hit.
+    unit: Percent
+WGP Wavefront Dispatch:
+  Dispatched Threads:
+    rst: Measured valid work-items reported by the SQ counter. Navi48 work-item and wave-count normalization still require validation; this count need not match the application's launch geometry.
+    unit: Threads
+  Dispatched Waves:
+    rst: Measured dispatched waves reported by the SQ counter. Navi48 wave-count normalization still requires validation; this count need not match the application's launch geometry.
+    unit: Waves
+WGP Wavefront Launch Stats:
+  Grid Size:
+    rst: Number of work-items in the dispatch grid, from dispatch metadata.
+    unit: Work-items
+  LDS Allocation:
+    rst: Bytes of LDS allocated per workgroup, from dispatch metadata.
+    unit: Bytes
+  SGPRs:
+    rst: Scalar general-purpose registers allocated for the kernel, from dispatch metadata. Allocation granularity can increase the reported value above the compiler's request.
+    unit: Registers
+  Scratch Allocation:
+    rst: Bytes of scratch memory allocated per work-item, from dispatch metadata.
+    unit: Bytes per Work-item
+  VGPRs:
+    rst: Architectural vector general-purpose registers allocated for the kernel, from dispatch metadata. Allocation granularity can increase the reported value above the compiler's request.
+    unit: Registers
+  Workgroup Size:
+    rst: Number of work-items per workgroup, from dispatch metadata.
+    unit: Work-items
+WGP Instruction Cache:
+  Icache Hit Rate:
+    rst: Percentage of instruction-cache requests that hit.
+    unit: Percent
+WGP VMEM Instruction Mix:
+  Instructions - Flat Load:
+    rst: Issued flat-addressed load instructions, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  Instructions - Flat Store:
+    rst: Issued flat-addressed store instructions, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  Instructions - TEX Load:
+    rst: Issued buffer loads, image loads, samples, and atomics with a return value, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  Instructions - TEX Store:
+    rst: Issued buffer stores, image stores, and atomics without a return value, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  Instructions - VMEM Flat:
+    rst: Issued flat-addressed vector memory instructions, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+WGP Wavefront Instruction Mix:
+  Instructions - Internal:
+    rst: Issued internal instructions, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  Instructions - LDS:
+    rst: Issued LDS instructions, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  Instructions - SALU:
+    rst: Issued scalar arithmetic instructions, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  Instructions - SMEM:
+    rst: Issued scalar memory instructions, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  Instructions - Transcendental:
+    rst: Issued transcendental vector arithmetic instructions, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  Instructions - VALU:
+    rst: Issued vector arithmetic instructions, normalized by the chosen unit. The counter includes integer and floating-point instructions.
+    unit: Count per Normalization Unit
+  Instructions - VMEM:
+    rst: Issued vector memory instructions, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  Total Instructions:
+    rst: Total issued instructions, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+WGP LDS Instruction Mix:
+  LDS Direct Load Instructions:
+    rst: Issued LDS direct-load instructions reported by the counter, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  LDS Parameter Load Instructions:
+    rst: Issued LDS parameter-load instructions reported by the counter, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  WAVE32 LDS Parameter Load Instructions:
+    rst: Not available on gfx1201. This configuration does not collect the WAVE32 LDS parameter-load instruction counter.
+    unit: Count per Normalization Unit
+WGP VALU Instruction Mix:
+  SQ_INSTS_VALU:
+    rst: Raw vector arithmetic instruction count. This includes integer and floating-point instructions and is not a FLOP count.
+    unit: Instructions
+  SQ_INST_CYCLES_VALU:
+    rst: SDK-reported aggregate SIMD execution-cycle count for VALU operations. Overlapping V_OP32_1 and V_OP32_T instructions count separately. The counted instance and wave population still require qualification; this is not elapsed GPU time, a FLOP count, or a utilization percentage.
+    unit: Cycles
+WGP WMMA Instruction FLOPs and IOPs Counting:
+  SQ_INST_CYCLES_VALU_WMMA:
+    rst: Raw count of work cycles sent for WMMA reported by the SDK counter. Its conversion to instruction counts or FLOPs requires validation.
+    unit: Cycles
+  SQ_WMMA_VALU_INSTS:
+    rst: Raw WMMA vector instruction count. The aggregate counter does not distinguish FP16, BF16, or FP8, and its wave-size interpretation requires validation.
+    unit: Instructions
+WGP Utilization:
+  WGP Utilization:
+    rst: Average SQ busy-cycle count relative to GPU-active cycles, expressed as a percentage. Navi48 counter-instance reduction requires validation.
+    unit: Percent
+WGP Instruction Issue Stalls:
+  Wait for Barrier:
+    rst: Not available on gfx1201 while wait-counter units and instance reduction are being validated.
+    unit: Percent
+  Wait for Counter:
+    rst: Not available on gfx1201 while wait-counter units and instance reduction are being validated.
+    unit: Percent
+  Wait for Instruction Fetch:
+    rst: Not available on gfx1201 while wait-counter units and instance reduction are being validated.
+    unit: Percent
+  Wait for Any:
+    rst: Not available on gfx1201 while wait-counter normalization is being validated. Average, minimum and maximum wait percentages cannot yet be determined reliably.
+    unit: Percent
+WGP Wavefront Life:
+  Wave Life:
+    rst: Estimated average wave lifetime from accumulated living-wave cycles divided by measured dispatched waves. Navi48 counter units, instance reduction, and wave-count normalization still require validation.
+    unit: Cycles
+GL0 Stalls:
+  Data FIFO Stall:
+    rst: TCP data-FIFO stall counter, normalized by the chosen unit.
+    unit: Cycles per Normalization Unit
+  GL1 Back Pressure:
+    rst: TCP back-pressure counter from GL1, normalized by the chosen unit.
+    unit: Cycles per Normalization Unit
+  TA Req Stall:
+    rst: TCP request-stall counter toward the texture addresser, normalized by the chosen unit.
+    unit: Cycles per Normalization Unit
+GL0 Utilization:
+  GL0 Busy (TCP):
+    rst: TCP clock-enabled count relative to GPU-active cycles in this configuration, expressed as a percentage. Counter-instance and WGP normalization on Navi48 still require validation.
+    unit: Percent
+GL0-GL1 Interface:
+  GL1 Read 128B Requests:
+    rst: 128-byte read requests TCP sends to GL1, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  GL1 Read Requests:
+    rst: Read requests TCP sends to GL1, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  GL1 Write Requests:
+    rst: Write requests TCP sends to GL1, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+GL0 Cache Performance:
+  Hit Rate:
+    rst: Percentage of TCP requests that do not miss in the vector GL0 cache.
+    unit: Percent
+GL0 Request Statistics:
+  Miss Requests:
+    rst: Vector GL0 cache requests reported as misses, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  Read Requests:
+    rst: Vector GL0 cache read requests, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  Total Requests:
+    rst: Total vector GL0 cache requests, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  Write Requests:
+    rst: Vector GL0 cache write requests, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+GL1 Cache Utilization:
+  GL1 Cache Busy:
+    rst: Percentage of GL1 counted cycles marked busy. GL1 combines writes between WGPs and L2 on Navi48.
+    unit: Percent
+  GL1 Cache Starve:
+    rst: GL1 starvation counter as a percentage of GL1 counted cycles.
+    unit: Percent
+  GL2 Data Credit Stall:
+    rst: GL1 stalls waiting for L2 data credits, normalized by the chosen unit.
+    unit: Cycles per Normalization Unit
+  GL2 Request Credit Stall:
+    rst: GL1 stalls waiting for L2 request credits, normalized by the chosen unit.
+    unit: Cycles per Normalization Unit
+GL1-GL2 Interface:
+  GL2 Read 128B Requests:
+    rst: 128-byte read requests GL1 sends to L2, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  GL2 Read Requests:
+    rst: Read requests GL1 sends to L2, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  GL2 Write Requests:
+    rst: Write requests GL1 sends to L2, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+GL1A Processing:
+  Hit Rate:
+    rst: Not available on gfx1201. The write-combining GL1 stage has no hit-rate measurement in this configuration.
+    unit: Percent
+GL1 Cache Request Statistics:
+  Miss Requests:
+    rst: Not available on gfx1201. This configuration does not collect GL1 miss-request counters.
+    unit: Count per Normalization Unit
+  Read Requests:
+    rst: GL1 read requests, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  Total Requests:
+    rst: Total GL1 requests, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  Write Requests:
+    rst: GL1 write requests, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+GL1 Cache Request Bandwidth:
+  Read Bytes:
+    rst: Read bytes requested from GL1, derived from the 32, 64, 128, and 256-byte request counts and normalized by the chosen unit.
+    unit: Bytes per Normalization Unit
+  Write Bytes:
+    rst: Write bytes requested from GL1, derived from the 32, 64, 128, and 256-byte request counts and normalized by the chosen unit.
+    unit: Bytes per Normalization Unit
+GL2 Cache Request Statistics:
+  Total Requests:
+    rst: L2 requests, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  Read Requests:
+    rst: L2 read requests, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  Write Requests:
+    rst: L2 write requests, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  Atomic Requests:
+    rst: L2 atomic requests, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  EA Read Requests (DRAM):
+    rst: L2 read requests over EA destined for memory. Infinity Cache can serve these requests before they reach GDDR6.
+    unit: Count per Normalization Unit
+  EA Write Requests (DRAM):
+    rst: L2 write requests over EA destined for memory. Infinity Cache can absorb these requests before they reach GDDR6.
+    unit: Count per Normalization Unit
+GL2 Cache Performance:
+  GL2 Cache Hit Rate:
+    rst: Percentage of L2 lookups that hit.
+    unit: Percent
+  GL2 Cache Hits:
+    rst: L2 lookups that hit, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+  GL2 Cache Misses:
+    rst: L2 lookups that miss, normalized by the chosen unit.
+    unit: Count per Normalization Unit
+GL2 Cache Bandwidth:
+  GL2 Cache Read BW:
+    rst: Size-weighted uncompressed read requests measured at GL2 output FIFOs, using the 32, 64, 128, and 256-byte request categories. This request rate excludes the separate compressed-read categories and does not measure all L2 traffic or physical GDDR6 transfers. Complete compression coverage and request-size normalization require Navi48 qualification.
+    unit: Bytes/s
+  GL2 Cache Write BW:
+    rst: Size-weighted write requests measured at GL2 output FIFOs, including recompressed writes, using the 32, 64, 128, and 256-byte request categories. This request rate does not measure all L2 traffic or physical GDDR6 transfers. Overlap with the separate compressed-write categories and request-size normalization require Navi48 qualification.
+    unit: Bytes/s
+EA Traffic Bandwidth:
+  DRAM Read Requests:
+    rst: Read commands reported by the EA DRAM-bound command interface, normalized by the chosen unit. This count does not establish physical GDDR6 byte traffic.
+    unit: Count per Normalization Unit
+  DRAM Write Requests:
+    rst: Write commands reported by the EA DRAM-bound command interface, normalized by the chosen unit. This count does not establish physical GDDR6 byte traffic.
+    unit: Count per Normalization Unit
+  DRAM Read Chained Requests:
+    rst: Not available on gfx1201.
+    unit: Count per Normalization Unit
+  DRAM Read Banks Active:
+    rst: Not available on gfx1201.
+    unit: Count per Normalization Unit
+  DRAM Read Size (32B increments):
+    rst: DRAM read data EA requested, in 32-byte units.
+    unit: Count per Normalization Unit
+  DRAM Write Chained Requests:
+    rst: Not available on gfx1201.
+    unit: Count per Normalization Unit
+  DRAM Write Banks Active:
+    rst: Not available on gfx1201.
+    unit: Count per Normalization Unit
+  DRAM Write Size (32B increments):
+    rst: DRAM write data EA requested, in 32-byte units.
+    unit: Count per Normalization Unit
+EA Utilization:
+  SARB Busy:
+    rst: Not available in this gfx1201 configuration. No qualified EA busy measurement and counting denominator are collected.
+    unit: Percent
+  SARB Stalled:
+    rst: Cycles the EA front end was ready but the back end could not send to SDP.
+    unit: Cycles per Normalization Unit
+  SARB Starving:
+    rst: Cycles the EA back end was ready but the front end had nothing to send.
+    unit: Cycles per Normalization Unit
+  SARB Total Requests:
+    rst: 'Requests EA sent to SDP: DRAM reads and writes, IO reads and writes, and MAM writes.'
+    unit: Count per Normalization Unit
+  SARB DRAM Requests:
+    rst: DRAM read and write requests EA sent to SDP.
+    unit: Count per Normalization Unit
+EA-SDP Interface - Outstanding Requests:
+  Read Returns:
+    rst: Read response data beats from SDP.
+    unit: Count per Normalization Unit
+  Write Returns:
+    rst: Write responses from SDP.
+    unit: Count per Normalization Unit
+  Probe Requests:
+    rst: Not available on gfx1201.
+    unit: Count per Normalization Unit
+EA-SDP Interface - Stalls:
+  DRAM Stall:
+    rst: Cycles the DRAM front end was ready but the EA back end for DRAM was not.
+    unit: Cycles per Normalization Unit
+  IO Read Stall:
+    rst: Cycles the IO read front end was ready but the EA back end for IO reads was not.
+    unit: Cycles per Normalization Unit
+  IO Write Stall:
+    rst: Cycles the IO write front end was ready but the EA back end for IO writes was not.
+    unit: Cycles per Normalization Unit
+GRBM Metrics:
+  CP Busy:
+    rst: Percentage of GPU-active cycles with the command processor busy.
+    unit: Percent
+  GL2C Busy:
+    rst: Percentage of GPU-active cycles with GL2 cache busy.
+    unit: Percent
+  GPU Busy:
+    rst: Percentage of GRBM counted cycles with the GPU active.
+    unit: Percent
+  TA Busy:
+    rst: Percentage of GPU-active cycles with the texture addresser busy.
+    unit: Percent

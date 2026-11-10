@@ -107,6 +107,20 @@ Ensure ROCm is installed and follow the steps:
 
 For detailed installation instructions, refer to :doc:`/install/core-install`.
 
+.. note::
+
+   On Navi48 (gfx1201), set the target GPU to ``STABLE_STD`` before collecting
+   counters. For example, if Navi48 is GPU 0:
+
+   .. code-block:: bash
+
+      sudo /opt/rocm/bin/amd-smi set --gpu 0 --perf-level STABLE_STD
+
+   Select the actual Navi48 GPU index from ``amd-smi list``. Omitting ``--gpu``
+   changes the performance level of all GPUs. This changes the clock policy;
+   use the same performance state for baseline comparisons. See
+   :doc:`/conceptual/rdna/navi48` for supported features and unavailable metrics.
+
 .. _profile-quickstart:
 
 Profiling
@@ -148,7 +162,10 @@ https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-compute/s
 What happens during profiling?
 ------------------------------
 
-The application runs multiple times to collect all required performance counters; it executes multiple times during profiling. Roofline analysis runs automatically unless you select blocks with ``-b`` or ``--set`` that do not include the roofline block (block 4).
+The application runs multiple times to collect all required performance counters;
+it executes multiple times during profiling. On architectures with roofline
+benchmark support, roofline analysis runs automatically unless you select blocks
+with ``-b`` or ``--set`` that do not include the roofline block (block 4).
 
 After profiling, the generated files can be found inside:
 
@@ -158,7 +175,7 @@ After profiling, the generated files can be found inside:
 
 For detailed information on all profiling options, refer to :doc:`../how-to/profile/mode`.
 
-During the profiling phase, roofline microbenchmarks also run to collect
+On architectures with roofline support, roofline microbenchmarks also run to collect
 hardware peak data (saved as ``roofline.csv``). To generate roofline HTML
 charts from this data, run ``rocprof-compute analyze`` on the output directory.
 For detailed information on roofline analysis, refer to :ref:`Standalone roofline <standalone-roofline>`.

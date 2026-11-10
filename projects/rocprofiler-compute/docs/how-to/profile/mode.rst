@@ -726,6 +726,30 @@ that contains both ``roofline.csv`` and application performance counters
    * gfx9 (CDNA1/2/3/4) supports Matrix Fused MultiplyAdd (MFMA).
    * gfx10+ (RDNA3+) supports Wave Matrix Multiply Accumulate (WMMA).
 
+   On gfx1201 (Navi 48, for example the Radeon RX 9070), the roofline has two
+   device-memory roofs:
+
+   * ``DRAM`` is the measured device-memory bandwidth (CSV column ``DRAMBw``).
+     Navi 48 has no HBM. Its 256-bit, 20 Gbps GDDR6 interface peaks at 640 GB/s
+     at the default performance level. The measured roof is lower under
+     ``STABLE_STD``.
+   * ``MALL`` is the measured bandwidth of the 64 MB Infinity Cache. The
+     benchmark reads a buffer of half the Infinity Cache capacity repeatedly,
+     so the reads miss in the 8 MB L2 and hit in the Infinity Cache.
+
+   The ``AI DRAM`` point counts GL2C/EA requests destined for memory. The
+   Infinity Cache serves some of those requests, and no performance counter
+   separates its hits from physical GDDR6 traffic, so read the point against
+   both roofs. A kernel whose working set fits in the Infinity Cache can sit
+   above the ``DRAM`` roof and below the ``MALL`` roof.
+
+   The gfx1201 WMMA instruction counter requires a ROCprofiler-SDK and
+   aqlprofile installation that supports SQ event 233. Check profiling warnings
+   and counter output before relying on WMMA roofline points. One WMMA counter
+   covers FP16, BF16, and FP8, so the WMMA row is compared with the FP16 WMMA
+   peak. The aggregate VALU instruction counter gives an estimate, not a
+   precision-specific FLOP count. See :doc:`/conceptual/rdna/navi48`.
+
    CDNA4+ also supports Microscaling formats, which can be identified by the "MX" prefix in datatypes. More details and other resources about MX per CDNA architecture can be found at `AMD CDNA Architecture <https://www.amd.com/en/technologies/cdna.html>`_.
 
    The cache levels that are benchmarked are dependent on the memory hierarchy levels of the architecture. See the :ref:`CDNA Performance Model <cdna-performance-model>` or :ref:`RDNA Performance Model <rdna-performance-model>` pages to view more information about the hardware blocks and cache levels supported in each architecture.
