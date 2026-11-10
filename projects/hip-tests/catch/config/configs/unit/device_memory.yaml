@@ -9,7 +9,7 @@ device_memory:
     <<: *level_default
     tags: [device_lang]
   Unit_Device_memset_Positive:
-    level: [*level_0, *level_default]
+    <<: *level_default
   Unit_Device_memset_Negative_Parameters_RTC:
     <<: *level_default
     tags: [device_lang]

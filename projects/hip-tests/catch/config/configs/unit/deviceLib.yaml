@@ -361,7 +361,7 @@ deviceLib:
     <<: *level_default
     tags: [types]
   Unit_e8m0_float_constructors:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [types]
   Unit_e8m0_int_constructors:
     <<: *level_default
@@ -391,7 +391,7 @@ deviceLib:
     <<: *level_default
     tags: [types]
   Unit_all_fp6_ocp_vector_cvt_interger_data_device:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [types]
   Unit_all_fp4_from_double:
     level: [*level_0, *level_default]
@@ -619,7 +619,7 @@ deviceLib:
     <<: *level_default
     tags: [memory]
   Unit_fp8_ocp_compare_host_device:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [types]
   Unit_fp8x2_ocp_compare_host_device:
     <<: *level_default

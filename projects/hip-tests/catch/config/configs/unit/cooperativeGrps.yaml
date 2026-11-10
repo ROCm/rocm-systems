@@ -28,7 +28,7 @@ cooperativeGrps:
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [cooperative, groups]
   Unit_Thread_Block_Tile_Shfl_Up_Positive_Basic:
-    level: [*level_0, *level_default]
+    <<: *level_default
     disabled:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."

@@ -22,7 +22,7 @@ memory:
     <<: *level_default
     tags: [multigpu, transfer, image, P1]
   Unit_hipMemcpy2DToArrayAsync_Positive_Default:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [transfer, image, P1]
   Unit_hipMemcpy2DToArrayAsync_Positive_Synchronization_Behavior:
     <<: *level_default
@@ -61,7 +61,7 @@ memory:
     <<: *level_default
     tags: [transfer, P1]
   Unit_hipMemcpy3D_Positive_Array:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [transfer, image, P1]
   Unit_hipMemcpy3D_Negative_Parameters:
     <<: *level_default
@@ -73,7 +73,7 @@ memory:
     <<: *level_default
     tags: [multigpu, image, P1]
   Unit_hipMemcpy3DAsync_Positive_Basic:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [transfer, P0]
   Unit_hipMemcpy3DAsync_Positive_Synchronization_Behavior:
     <<: *level_default
@@ -82,7 +82,7 @@ memory:
     <<: *level_default
     tags: [transfer, P1]
   Unit_hipMemcpy3DAsync_Positive_Array:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [transfer, image, P1]
   Unit_hipMemcpy3DAsync_Negative_Parameters:
     <<: *level_default
@@ -97,7 +97,7 @@ memory:
     <<: *level_default
     tags: [multigpu, image, P1]
   Unit_hipMemcpyParam2D_Positive_Basic:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [transfer, P1]
   Unit_hipMemcpyParam2D_Positive_Synchronization_Behavior:
     <<: *level_default
@@ -118,7 +118,7 @@ memory:
     <<: *level_default
     tags: [transfer]
   Unit_hipMemcpyParam2DAsync_Positive_Basic:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [transfer, P1]
   Unit_hipMemcpyParam2DAsync_Positive_Synchronization_Behavior:
     <<: *level_default
@@ -178,7 +178,7 @@ memory:
     <<: *level_default
     tags: [transfer, P1]
   Unit_hipMemcpy2DAsync_Positive_Basic:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [transfer, P0]
   Unit_hipMemcpy2DAsync_Positive_Synchronization_Behavior:
     <<: *level_default
@@ -205,7 +205,7 @@ memory:
     <<: *level_default
     tags: [transfer, P1]
   Unit_hipMemcpy2DFromArray_Positive_Default:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [transfer, image, P1]
   Unit_hipMemcpy2DFromArray_Positive_Synchronization_Behavior:
     <<: *level_default
@@ -226,7 +226,7 @@ memory:
     <<: *level_default
     tags: [multigpu, transfer, image, P1]
   Unit_hipMemcpy2DFromArrayAsync_Positive_Default:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [transfer, image, P1]
   Unit_hipMemcpy2DFromArrayAsync_Positive_Synchronization_Behavior:
     <<: *level_default
@@ -250,10 +250,10 @@ memory:
     <<: *level_default
     tags: [transfer, image, P1]
   Unit_hipMemcpyAtoD_Basic:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [transfer, image, P0]
   Unit_hipMemcpyAtoH_Positive_Default:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [transfer, image, P0]
   Unit_hipMemcpyAtoH_Positive_Synchronization_Behavior:
     <<: *level_default
@@ -268,7 +268,7 @@ memory:
     <<: *level_default
     tags: [transfer, image]
   Unit_hipMemcpyAtoHAsync_Basic:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [transfer, image, P1]
   Unit_hipMemcpyAtoHAsync_Capture:
     <<: *level_default
@@ -280,13 +280,13 @@ memory:
     <<: *level_default
     tags: [transfer, image, P1]
   Unit_hipMemcpyDtoA_BasicPositive:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [transfer, image]
   Unit_hipMemcpyAtoH_multiDevice_PeerDeviceContext:
     <<: *level_default
     tags: [multigpu, transfer, image, P1]
   Unit_hipMemcpyHtoA_Positive_Default:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [transfer, image, P0]
   Unit_hipMemcpyHtoA_Positive_Synchronization_Behavior:
     <<: *level_default
@@ -301,7 +301,7 @@ memory:
     <<: *level_default
     tags: [transfer, image]
   Unit_hipMemcpyHtoAAsync_Basic:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [image, P1]
   Unit_hipMemcpyHtoAAsync_Negative:
     <<: *level_default
@@ -319,7 +319,7 @@ memory:
     <<: *level_default
     tags: [transfer, image]
   Unit_hipMemcpyAtoA_Basic:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [transfer, image, P1]
   Unit_hipMemcpyHtoA_multiDevice_PeerDeviceContext:
     <<: *level_default
@@ -407,7 +407,7 @@ memory:
     <<: *level_default
     tags: [alloc]
   Unit_hipHostUnregister_MemoryNotAccessibleAfterUnregister:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [alloc]
   Unit_hipHostUnregister_NullPtr:
     <<: *level_default
@@ -425,7 +425,7 @@ memory:
     <<: *level_default
     tags: [alloc]
   Unit_hipHostGetFlags_flagCombos:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [query, P1]
   Unit_hipHostGetFlags_DifferentThreads:
     <<: *level_default
@@ -548,10 +548,10 @@ memory:
     <<: *level_default
     tags: [memset, P0]
   Unit_hipMemset_SmallBufferSizes:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [memset, P1]
   Unit_hipMemset_2AsyncOperations:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [memset, P1]
   Unit_hipMemset_UnalignedKernelCornerCases:
     <<: *level_default
@@ -562,7 +562,7 @@ memory:
     level: [*level_0, *level_default]
     tags: [memset, P1]
   Unit_hipMemset3DAsync_BasicFunctional:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [memset, P1]
   Unit_hipMemset3DAsync_capturehipMemset3DAsync:
     <<: *level_default
@@ -576,7 +576,7 @@ memory:
     level: [*level_0, *level_default]
     tags: [memset, P1]
   Unit_hipMemset2DAsync_BasicFunctional:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [memset, P0]
   Unit_hipMemset2D_UniqueWidthHeight:
     <<: *level_default
@@ -665,7 +665,7 @@ memory:
       reason: "AIRUNTIME-2744 - huge memory usage, no point enabling it with ASAN; needs to be re-triaged."
     tags: [alloc, P1, managed_memory]
   Unit_hipMemRangeGetAttribute_Positive_ReadMostly_Basic:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [query, P1, managed_memory]
   Unit_hipMemRangeGetAttribute_Positive_ReadMostly_Partial_Range:
     <<: *level_default
@@ -680,7 +680,7 @@ memory:
     <<: *level_default
     tags: [query, P1, managed_memory]
   Unit_hipMemRangeGetAttribute_Positive_LastPrefetchLocation_Basic:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [query, P1, managed_memory]
   Unit_hipMemRangeGetAttribute_Positive_LastPrefetchLocation_CPU:
     <<: *level_default
@@ -746,7 +746,7 @@ memory:
     <<: *level_default
     tags: [query, P1]
   Unit_hipMemsetD32_ValidBuffer:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [memset, P1]
   Unit_hipMemsetD32_InvalidArg:
     <<: *level_default
@@ -756,7 +756,7 @@ memory:
     tags: [memset, P1]
   Unit_hipMemsetD32_Capture: *level_default
   Unit_hipMemsetD16_ValidBuffer:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [memset, P1]
   Unit_hipMemsetD16_InvalidArg:
     <<: *level_default
@@ -766,7 +766,7 @@ memory:
     tags: [memset, P1]
   Unit_hipMemsetD16_Capture: *level_default
   Unit_hipMemsetD16Async_ValidBuffer:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [memset, P1]
   Unit_hipMemsetD16Async_InvalidArg:
     <<: *level_default
@@ -775,7 +775,7 @@ memory:
     <<: *level_default
     tags: [memset, P1]
   Unit_hipMemsetD32Async_ValidBuffer:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [memset, P1]
   Unit_hipMemsetD32Async_InvalidArg:
     <<: *level_default
@@ -784,7 +784,7 @@ memory:
     <<: *level_default
     tags: [memset, P1]
   Unit_hipMemsetD8Async_ValidBuffer:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [memset, P1]
   Unit_hipMemsetD8Async_InvalidArg:
     <<: *level_default
@@ -811,7 +811,7 @@ memory:
     <<: *level_default
     tags: [transfer, image, P1]
   Unit_hipMemcpy2DArrayToArray_BasicPositive:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [transfer, image]
   Unit_hipMemcpy3DBatchAsync_PointerToPointer_MatchesSourceAfterSync:
     level: [*level_0, *level_default]
@@ -918,7 +918,7 @@ memory:
     <<: *level_default
     tags: [transfer, stream]
   Unit_hipMemcpyBatchAsync_D2H_Functional:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [transfer, P1]
   Unit_hipMemcpyBatchAsync_H2H_Functional:
     <<: *level_default
@@ -1005,7 +1005,7 @@ memory:
     <<: *level_2
     tags: [P1]
   Unit_hipMemsetD2D8_BasicFunctional:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [memset]
   Unit_hipMemsetD2D8_UnEvenRowsCols:
     <<: *level_default
@@ -1014,7 +1014,7 @@ memory:
     <<: *level_default
     tags: [memset]
   Unit_hipMemsetD2D8Async_BasicFunctional:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [memset]
   Unit_hipMemsetD2D8Async_UnEvenRowsCols:
     <<: *level_default
@@ -1023,7 +1023,7 @@ memory:
     <<: *level_default
     tags: [memset]
   Unit_hipMemsetD2D16_BasicFunctional:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [memset]
   Unit_hipMemsetD2D16_UnEvenRowsCols:
     <<: *level_default
@@ -1032,7 +1032,7 @@ memory:
     <<: *level_default
     tags: [memset]
   Unit_hipMemsetD2D16Async_BasicFunctional:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [memset]
   Unit_hipMemsetD2D16Async_UnEvenRowsCols:
     <<: *level_default
@@ -1041,7 +1041,7 @@ memory:
     <<: *level_default
     tags: [memset]
   Unit_hipMemsetD2D32_BasicFunctional:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [memset]
   Unit_hipMemsetD2D32_UnEvenRowsCols:
     <<: *level_default
@@ -1050,7 +1050,7 @@ memory:
     <<: *level_default
     tags: [memset]
   Unit_hipMemsetD2D32Async_BasicFunctional:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [memset]
   Unit_hipMemsetD2D32Async_UnEvenRowsCols:
     <<: *level_default
@@ -1125,7 +1125,7 @@ memory:
     <<: *level_default
     tags: [query, P1]
   Unit_hipPointerGetAttributes_GpuIter:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [query, P1]
   Unit_hipPointerGetAttributes_GpuIter_Managed__Memory:
     <<: *level_default
@@ -1176,7 +1176,7 @@ memory:
     <<: *level_default
     tags: [alloc]
   Unit_hipArray_Valid:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [alloc, image, P0]
   Unit_hipArray_Invalid:
     <<: *level_default
@@ -1197,7 +1197,7 @@ memory:
     <<: *level_default
     tags: [alloc, image, P1]
   Unit_hipMemcpyDeviceToDeviceNoCU_SingleStream:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [transfer, P1]
   Unit_hipMemcpyDeviceToDeviceNoCU_WithCU_NoCU_Comb_SingleStrm:
     <<: *level_default
@@ -1277,7 +1277,7 @@ memory:
     <<: *level_default
     tags: [query, managed_memory]
   Unit_hipMemAdvise_v2_Device_Host:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [query, managed_memory]
   Unit_hipMemAdvise_v2_HostNuma_HostNumaCurrent:
     <<: *level_default
@@ -1349,7 +1349,7 @@ memory:
     <<: *level_default
     tags: [alloc, P1]
   Unit_hipDeviceSetMemPool_Basic:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [alloc, P1]
   Unit_hipDeviceSetMemPool_DestroyCurrentMempool:
     <<: *level_default
@@ -1361,7 +1361,7 @@ memory:
     <<: *level_default
     tags: [alloc, P1]
   Unit_hipMemPoolSetGetAccess_Positive_Basic:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [alloc, P1]
   Unit_hipMemPoolSetGetAccess_Positive_MultipleGPU:
     <<: *level_default
@@ -1397,7 +1397,7 @@ memory:
     <<: *level_default
     tags: [alloc, P1]
   Unit_hipMemPoolSetGetAttribute_Positive_Default:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [alloc, P1]
   Unit_hipMemPoolSetGetAttribute_Positive_MemBasic:
     <<: *level_default
@@ -1469,7 +1469,7 @@ memory:
     <<: *level_default
     tags: [alloc, P0]
   Unit_hipMemPoolTrimTo_VaryingMinBytesToHold:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [alloc, P1]
   Unit_hipMemPoolTrimTo_MGpuVaryingMinBytesToHold:
     <<: *level_default
@@ -1556,7 +1556,7 @@ memory:
     <<: *level_default
     tags: [alloc, P1]
   Unit_hipMemcpyPeer_Positive_Default:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [multigpu, transfer, P1]
   Unit_hipMemcpyPeer_Positive_Synchronization_Behavior:
     <<: *level_default
@@ -1574,7 +1574,7 @@ memory:
     <<: *level_default
     tags: [multigpu, transfer, P1]
   Unit_hipMemcpyPeerAsync_Positive_Default:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [multigpu, transfer, P1]
   Unit_hipMemcpyPeerAsync_Positive_Synchronization_Behavior:
     <<: *level_default
@@ -1598,7 +1598,7 @@ memory:
     <<: *level_default
     tags: [transfer, P1]
   Unit_hipMemcpyWithStream_TestkindDtoH:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [transfer, P1]
   Unit_hipMemcpyWithStream_TestkindHtoH:
     <<: *level_default
@@ -1706,7 +1706,7 @@ memory:
     <<: *level_default
     tags: [transfer, P1]
   Unit_hipMemcpyDtoD_Positive_Basic:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [transfer, P0]
   Unit_hipMemcpyDtoD_Positive_Synchronization_Behavior:
     <<: *level_default
@@ -1745,7 +1745,7 @@ memory:
     <<: *level_default
     tags: [multigpu, P1]
   Unit_hipMemcpyDtoHAsync_Positive_Basic:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [transfer, P1]
   Unit_hipMemcpyDtoHAsync_Positive_Synchronization_Behavior:
     <<: *level_default
@@ -1757,7 +1757,7 @@ memory:
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [transfer, P1]
   Unit_hipMemcpyHtoDAsync_Positive_Basic:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [transfer, P1]
   Unit_hipMemcpyHtoDAsync_Positive_Synchronization_Behavior:
     <<: *level_default
@@ -1911,7 +1911,7 @@ memory:
     <<: *level_default
     tags: [alloc, P1]
   Unit_hipMallocPitch_Memcpy2D:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [P1]
   Unit_hipMallocPitch_MultiThread:
     <<: *level_default
@@ -1938,7 +1938,7 @@ memory:
     <<: *level_default
     tags: [alloc, image, P1]
   Unit_hipMalloc3DArray_happy:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [image, P1]
   Unit_hipMalloc3DArray_MaxTexture:
     <<: *level_default
@@ -1998,7 +1998,7 @@ memory:
     <<: *level_default
     tags: [image, P1]
   Unit_hipArray3DCreate_happy:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [image, P1]
   Unit_hipArray3DCreate_MaxTexture:
     <<: *level_default
@@ -2064,7 +2064,7 @@ memory:
       reason: "AIRUNTIME-2892 - fails under device ASAN on gfx90a but passes on the non-ASAN build; disabled on asan pending re-triage."
     tags: [image, P1]
   Unit_hipDrvMemcpy3D_HosttoDevice:
-    level: [*level_0, *level_default]
+    <<: *level_default
     disabled:
       targets: [asan]
       reason: "AIRUNTIME-2892 - fails under device ASAN on gfx90a but passes on the non-ASAN build; disabled on asan pending re-triage."
@@ -2103,7 +2103,7 @@ memory:
     <<: *level_default
     tags: [transfer, P1]
   Unit_hipDrvMemcpy3DAsync_Positive_Array:
-    level: [*level_0, *level_default]
+    <<: *level_default
     disabled:
       targets: [amd_windows, amd_wsl]
       reason: "AIRUNTIME-2744 - disabled due to defect EXSWHTEC-238; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device; needs to be re-triaged. amd_windows re-disabled (AIRUNTIME-2892): test passes but the full suite exceeds the 120min CI timeout with these tests enabled; improve test runtimes or raise the TheRock total timeout."
@@ -2214,7 +2214,7 @@ memory:
     <<: *level_default
     tags: [query, managed_memory]
   Unit_hipMemDiscardBatchAsync_SingleDiscard:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [managed_memory]
   Unit_hipMemDiscardBatchAsync_MultipleDiscards:
     <<: *level_default
@@ -2553,7 +2553,7 @@ memory:
       reason: "AIRUNTIME-2744 - test soft-hangs in the stress test on 13/09/23; ASAN run temporarily disabled until PR #5287 is merged; gfx1201 (amd_wsl) self-skips because the GPU does not support managed memory; needs to be re-triaged on asan."
     tags: [query, P1, managed_memory]
   Unit_hipMemGetAddressRange_Positive:
-    level: [*level_0, *level_default]
+    <<: *level_default
     disabled:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
@@ -2574,7 +2574,7 @@ memory:
       reason: "AIRUNTIME-2892 - needs to be further investigated; test fails in PSDB, gfx1201 (amd_windows) is FLAKY (passed then failed within 10 runs). asan disabled (AIRUNTIME-2892): fails under device ASAN on gfx90a but passes on the non-ASAN build; re-triage."
     tags: [alloc, P1]
   Unit_hipMallocMipmappedArray_happy:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [P1]
   Unit_hipMallocMipmappedArray_Negative_NullArrayPtr:
     <<: *level_default
@@ -2676,7 +2676,7 @@ memory:
     <<: *level_default
     tags: [alloc, image, P1]
   Unit_hipMallocArray_happy:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [image, P1]
   Unit_hipMallocArray_MaxTexture_Default:
     <<: *level_default
@@ -2736,7 +2736,7 @@ memory:
     <<: *level_default
     tags: [alloc, P0]
   Unit_hipHostAlloc_DataValidation:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [alloc, P1]
   Unit_hipHostAlloc_Negative:
     <<: *level_default
@@ -2784,7 +2784,7 @@ memory:
     <<: *level_default
     tags: [transfer, P1]
   Unit_hipDrvMemcpy2DUnaligned_Positive_Basic:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [transfer, P1]
   Unit_hipDrvMemcpy2DUnaligned_Positive_Synchronization_Behavior:
     <<: *level_default
@@ -2793,7 +2793,7 @@ memory:
     <<: *level_default
     tags: [transfer, P1]
   Unit_hipArrayGetInfo_Positive_Basic:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [query, image, P1]
   Unit_hipArrayGetInfo_Negative_Parameters:
     <<: *level_default
@@ -2805,7 +2805,7 @@ memory:
     <<: *level_default
     tags: [image, P1]
   Unit_hipArrayCreate_happy:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [image, P1]
   Unit_hipArrayCreate_maxTexture:
     <<: *level_default
@@ -2838,13 +2838,13 @@ memory:
     <<: *level_default
     tags: [query, P1]
   Unit_hipArrayGetDescriptor_Positive_Basic:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [query, image, P1]
   Unit_hipArrayGetDescriptor_Negative_Parameters:
     <<: *level_default
     tags: [query, image, P1]
   Unit_hipArray3DGetDescriptor_Positive_Basic:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [query, image, P1]
   Unit_hipArray3DGetDescriptor_Negative_Parameters:
     <<: *level_default
@@ -2892,7 +2892,7 @@ memory:
     <<: *level_default
     tags: [alloc]
   Unit_hipMemGetDefaultMemPool_Basic:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [alloc]
   Unit_hipMemGetDefaultMemPool_Functional:
     <<: *level_default

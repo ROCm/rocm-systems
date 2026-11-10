@@ -97,7 +97,7 @@ kernel:
     <<: *level_default
     tags: [launch, P1]
   Unit_hipExtDynDataPrefetch_SingleRegion:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [launch, P1]
   Unit_hipExtDynDataPrefetch_TemporalHints:
     <<: *level_default

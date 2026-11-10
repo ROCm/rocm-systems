@@ -13,7 +13,7 @@ surface:
     <<: *level_default
     tags: [surfop, texture, image]
   Unit_surf1D_Positive_ReadWrite:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [surfop, texture, image]
   Unit_surf1DLayeredread_Positive_Basic:
     <<: *level_default
@@ -31,7 +31,7 @@ surface:
     <<: *level_default
     tags: [surfop, texture, image]
   Unit_surf2D_Positive_ReadWrite:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [surfop, texture, image]
   Unit_surf2DLayeredread_Positive_Basic:
     <<: *level_default

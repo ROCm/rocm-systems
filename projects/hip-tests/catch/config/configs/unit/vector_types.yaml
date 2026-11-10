@@ -4,7 +4,7 @@ vector_types:
     <<: *level_default
     tags: [types]
   Unit_make_vector_SanityCheck_Basic_Device:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [types]
   Unit_VectorAndVectorOperations_SanityCheck_Basic_Host:
     <<: *level_default
@@ -13,7 +13,7 @@ vector_types:
     <<: *level_default
     tags: [types]
   Unit_VectorAndVectorOperations_SanityCheck_Basic_Device:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [types]
   Unit_VectorAndValueTypeOperations_SanityCheck_Basic_Device:
     <<: *level_default

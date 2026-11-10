@@ -46,7 +46,7 @@ texture:
       reason: "AIRUNTIME-2744 - failed in stress tests on 03/11/23 (SWDEV-431191) and 10/11/23 (SWDEV-432250); gfx1201 (amd_wsl) self-skips the variant. Needs re-triage."
     tags: [sample, image]
   Unit_Layered2DTexture_Check_HostBufferToFromLayered2DArray:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [sample, image]
   Unit_Layered2DTexture_Check_DeviceBufferToFromLayered2DArray:
     <<: *level_default
@@ -79,7 +79,7 @@ texture:
     <<: *level_default
     tags: [sample, image]
   Unit_hipGetChannelDesc_CreateAndGet:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [texobj, image]
   Unit_hipGetChannelDesc_Negative_Parameters:
     <<: *level_default
@@ -217,7 +217,7 @@ texture:
       reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device. amd_windows re-disabled (AIRUNTIME-2892): test passes but the full suite exceeds the 120min CI timeout with these tests enabled; improve test runtimes or raise the TheRock total timeout."
     tags: [texref, image]
   Unit_hipCreateTextureObject_tex1DfetchVerification:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [texobj, image]
   Unit_hipTextureObj1DCheckModes:
     <<: *level_default
@@ -268,7 +268,7 @@ texture:
     <<: *level_default
     tags: [texobj, image]
   Unit_TexObjectCreate_TypeArray:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [texobj, image]
   Unit_TexObjectCreate_TypeArray_NullptrArray:
     <<: *level_default
@@ -292,19 +292,19 @@ texture:
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [texobj, image]
   Unit_hipGetTexObjectResourceDesc_positive:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [texobj, image]
   Unit_hipGetTexObjectResourceDesc_Negative_Parameters:
     <<: *level_default
     tags: [texobj, image]
   Unit_hipGetTexObjectResourceViewDesc_positive:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [texobj, image]
   Unit_hipGetTexObjectResourceViewDesc_Negative_Parameters:
     <<: *level_default
     tags: [texobj, image]
   Unit_hipGetTexObjectTextureDesc_positive:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [texobj, image]
   Unit_hipGetTexObjectTextureDesc_Negative_Parameters:
     <<: *level_default
@@ -313,19 +313,19 @@ texture:
     <<: *level_default
     tags: [texobj, image]
   Unit_hipGetTextureObjectResourceDesc_positive:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [texobj, image]
   Unit_hipGetTextureObjectResourceDesc_Negative_Parameters:
     <<: *level_default
     tags: [texobj, image]
   Unit_hipGetTextureObjectResourceViewDesc_positive:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [texobj, image]
   Unit_hipGetTextureObjectResourceViewDesc_Negative_Parameters:
     <<: *level_default
     tags: [texobj, image]
   Unit_hipGetTextureObjectTextureDesc_positive:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [texobj, image]
   Unit_hipGetTextureObjectTextureDesc_Negative_Parameters:
     <<: *level_default
@@ -397,7 +397,7 @@ texture:
     <<: *level_default
     tags: [texref, image]
   Unit_hipBindTextureToArray_Positive_1D:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [texref, image]
   Unit_hipBindTextureToArray_Positive_2D:
     <<: *level_default
@@ -655,7 +655,7 @@ texture:
     <<: *level_default
     tags: [image]
   Unit_hipDeviceGetTexture1DLinearMaxWidth_Positive:
-    level: [*level_0, *level_default]
+    <<: *level_default
     tags: [texobj, image]
   Unit_hipDeviceGetTexture1DLinearMaxWidth_Negative:
     <<: *level_default
