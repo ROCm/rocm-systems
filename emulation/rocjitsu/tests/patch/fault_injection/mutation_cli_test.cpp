@@ -39,11 +39,16 @@ using test::checked_encoding;
 
 class FaultMutationCli : public ::testing::Test {
 protected:
-  test::ScopedTempDirectory directory_{"fault-cli-"};
-  std::filesystem::path root_ = directory_.path();
-  std::filesystem::path input_ = root_ / "original.hsaco";
-  std::filesystem::path output_ = root_ / "mutant.hsaco";
+  test::ScopedTempDirectory directory_;
+  std::filesystem::path root_, input_, output_;
   std::string stdout_, stderr_;
+
+  void SetUp() override {
+    ASSERT_TRUE(directory_.initialize("fault-cli-"));
+    root_ = directory_.path();
+    input_ = root_ / "original.hsaco";
+    output_ = root_ / "mutant.hsaco";
+  }
 
   static void write(const std::filesystem::path &path, std::span<const uint8_t> image) {
     std::ofstream file(path, std::ios::binary);
