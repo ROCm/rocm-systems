@@ -711,6 +711,7 @@ global:
     hipExtMemcpyBatchAsync;
     hipMemcpyWithAttributesAsync;
     hipMemcpy3DWithAttributesAsync;
+    hipArrayGetSparseProperties;
 local:
     *;
 } hip_7.17;

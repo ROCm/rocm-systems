@@ -48,7 +48,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 1
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 40
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 41
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -1164,6 +1164,8 @@ typedef hipError_t (*t_hipMemGetMemPool)(hipMemPool_t* pool, hipMemLocation* loc
                                          hipMemAllocationType type);
 typedef hipError_t (*t_hipMipmappedArrayGetMemoryRequirements)(
     hipArrayMemoryRequirements* memoryRequirements, hipMipmappedArray_t mipmap, hipDevice_t device);
+typedef hipError_t (*t_hipArrayGetSparseProperties)(hipArraySparseProperties* sparseProperties,
+                                                    hipArray_t array);
 typedef hipError_t (*t_hipGreenCtxCreate)(hipExecutionCtx_t* ctx, hipDevResourceDesc_t desc, int device,
                                          unsigned int flags);
 typedef hipError_t (*t_hipExecutionCtxDestroy)(hipExecutionCtx_t ctx);
@@ -1884,8 +1886,11 @@ struct HipDispatchTable {
   t_hipMemcpyWithAttributesAsync hipMemcpyWithAttributesAsync_fn;
   t_hipMemcpy3DWithAttributesAsync hipMemcpy3DWithAttributesAsync_fn;
 
-  // DO NOT EDIT ABOVE!
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 41
+  t_hipArrayGetSparseProperties hipArrayGetSparseProperties_fn;
+
+  // DO NOT EDIT ABOVE!
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 42
 
   // ******************************************************************************************* //
   //

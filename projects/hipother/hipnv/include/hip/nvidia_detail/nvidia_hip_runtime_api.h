@@ -532,6 +532,8 @@ typedef struct cudaFuncAttributes hipFuncAttributes;
 typedef struct cudaLaunchParams hipLaunchParams;
 typedef CUDA_LAUNCH_PARAMS hipFunctionLaunchParams;
 typedef cudaArrayMemoryRequirements hipArrayMemoryRequirements;
+typedef struct cudaArraySparseProperties hipArraySparseProperties;
+#define hipArraySparsePropertiesSingleMipTail cudaArraySparsePropertiesSingleMipTail
 #define hipFunction_attribute CUfunction_attribute
 #define hipPointer_attribute CUpointer_attribute
 
@@ -2637,6 +2639,11 @@ inline static hipError_t hipMipmappedArrayGetMemoryRequirements(
     hipDevice_t device) {
   return hipCUDAErrorTohipError(
       cudaMipmappedArrayGetMemoryRequirements(memoryRequirements, mipmap, device));
+}
+
+inline static hipError_t hipArrayGetSparseProperties(hipArraySparseProperties* sparseProperties,
+                                                     hipArray_t array) {
+  return hipCUDAErrorTohipError(cudaArrayGetSparseProperties(sparseProperties, array));
 }
 
 __HIP_DEPRECATED inline static hipError_t hipMemcpyToArray(hipArray_t dst, size_t wOffset,

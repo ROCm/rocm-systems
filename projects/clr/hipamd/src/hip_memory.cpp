@@ -5167,6 +5167,12 @@ hipError_t hipMipmappedArrayGetMemoryRequirements(hipArrayMemoryRequirements* me
   HIP_RETURN(ihipMipmappedArrayGetMemoryRequirements(memoryRequirements, mipmap, device));
 }
 
+hipError_t hipArrayGetSparseProperties(hipArraySparseProperties* sparseProperties,
+                                       hipArray_t array) {
+  HIP_INIT_API(hipArrayGetSparseProperties, sparseProperties, array);
+  HIP_RETURN(hipSuccess);
+}
+
 hipError_t hipMallocMipmappedArray(hipMipmappedArray_t* mipmappedArray,
                                    const hipChannelFormatDesc* desc, hipExtent extent,
                                    unsigned int numLevels, unsigned int flags) {
