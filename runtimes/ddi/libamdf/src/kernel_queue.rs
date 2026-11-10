@@ -33,6 +33,11 @@ struct KernelQueue {
 }
 
 impl KernelQueue {
+    fn require_current_process(&self) -> Result<(), u64> {
+        // SAFETY: A live kernel queue borrows its registered device.
+        unsafe { &*self.device }.require_current_process()
+    }
+
     fn require_usable(&self) -> Result<(), u64> {
         if self.destroying.load(Ordering::Acquire) {
             Err(PRECONDITION)
@@ -85,6 +90,7 @@ pub(crate) unsafe extern "C" fn create(
             AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_CREATE_INFO,
         )?;
         let device = object(pointer.cast::<Device>())?;
+        device.require_current_process()?;
         let family = instance::family(device.native.endpoint(), create_info.queue_family_ordinal)?;
         if family.publication_modes & AMDF_QUEUE_PUBLICATION_MODE_KERNEL == 0 {
             return Err(UNSUPPORTED);
@@ -157,6 +163,7 @@ pub(crate) unsafe extern "C" fn status(
     crate::support::boundary(|| unsafe {
         let out = output(out, AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS)?;
         let queue = object(pointer.cast::<KernelQueue>())?;
+        queue.require_current_process()?;
         queue.require_usable()?;
         out.publish(queue.public_status(queue.native.status()));
         Ok(())
@@ -170,6 +177,7 @@ pub(crate) unsafe extern "C" fn refresh_status(
     crate::support::boundary(|| unsafe {
         let out = output(out, AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS)?;
         let queue = object(pointer.cast::<KernelQueue>())?;
+        queue.require_current_process()?;
         queue.require_usable()?;
         let sample = queue
             .native
@@ -210,6 +218,7 @@ pub(crate) unsafe extern "C" fn request_notification(
             _ => return Err(INVALID),
         }
         let queue = object(pointer.cast::<KernelQueue>())?;
+        queue.require_current_process()?;
         queue.require_usable()?;
         if submission > queue.accepted.load(Ordering::Acquire) {
             return Err(RANGE);
@@ -227,6 +236,7 @@ pub(crate) unsafe extern "C" fn wait(
     crate::support::boundary(|| unsafe {
         let start = Instant::now();
         let queue = object(pointer.cast::<KernelQueue>())?;
+        queue.require_current_process()?;
         queue.require_usable()?;
         let remaining = if timeout_nanoseconds == AMDF_TIMEOUT_INFINITE {
             AMDF_TIMEOUT_INFINITE
@@ -262,6 +272,7 @@ pub(crate) unsafe extern "C" fn submit(
         }
         let descriptors = array(submit_info.commands, submit_info.command_count)?;
         let queue = object(pointer.cast::<KernelQueue>())?;
+        queue.require_current_process()?;
         queue.require_usable()?;
         if (*queue.device).current_reset_epoch() != queue.info.reset_epoch {
             return Err(LOST);
@@ -301,6 +312,7 @@ pub(crate) unsafe extern "C" fn submit(
 
 pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_kernel_queue_t) -> u64 {
     crate::support::boundary(|| unsafe {
+        object(pointer.cast::<KernelQueue>())?.require_current_process()?;
         let queue = exclusive(pointer.cast::<KernelQueue>())?;
         if !queue.destroying.load(Ordering::Acquire) {
             let accepted = queue.accepted.load(Ordering::Acquire);

@@ -1020,6 +1020,7 @@ pub(crate) unsafe extern "C" fn device_profile(
 ) -> u64 {
     crate::support::boundary(|| unsafe {
         let scope = object(pointer.cast::<Scope>())?;
+        (*scope.instance).require_current_process()?;
         let out = output(out, AMDF_STRUCTURE_TYPE_MEMORY_PROFILE)?;
         let accesses = array(accesses, count)?;
         output_array(caps, count)?;
@@ -1085,6 +1086,8 @@ pub(crate) unsafe extern "C" fn create(
         }
         // SAFETY: The C caller retains this provider-owned scope for the call.
         let scope = unsafe { object(pointer.cast::<Scope>()) }?;
+        // SAFETY: A live scope borrows its creating instance.
+        unsafe { &*scope.instance }.require_current_process()?;
         output_pointer(out)?;
         // SAFETY: The caller supplies a readable descriptor; input validates
         // its prefix before copying the complete record.
@@ -1976,6 +1979,7 @@ pub(crate) unsafe extern "C" fn import(
             publish_release(out_release_info, amdf_memory_release_info_t::default());
         }
         let scope = object(scope_pointer.cast::<Scope>())?;
+        (*scope.instance).require_current_process()?;
         let info = input(info, AMDF_STRUCTURE_TYPE_MEMORY_IMPORT_INFO)?;
         output_pointer(out)?;
         let external = *object(external_pointer)?;

@@ -26,6 +26,7 @@ pub(crate) unsafe extern "C" fn queue_clock_info(
     boundary(|| unsafe {
         output_pointer(out)?;
         let device = object(pointer.cast::<Device>())?;
+        device.require_current_process()?;
         let _family = instance::family(device.native.endpoint(), ordinal)?;
         let gpu = device
             .native
@@ -47,6 +48,7 @@ pub(crate) unsafe extern "C" fn clock_sample(
     boundary(|| unsafe {
         output_pointer(out)?;
         let device = object(pointer.cast::<Device>())?;
+        device.require_current_process()?;
         let _family = instance::family(device.native.endpoint(), ordinal)?;
         let gpu = device
             .native
