@@ -5899,19 +5899,30 @@ class CodeGenerator:
                           ((raw_words_[0] >> 12) & 1u) | (((raw_words_[1] >> 28) & 1u) << 1);
                       uint32_t c_modifier = amdgpu::wmma_c_modifier(
                           (raw_words_[1] >> 29) & 7u, (raw_words_[0] >> 8) & 7u);
-                      bool dispatched = amdgpu::dispatch_matrix_fmt_pair(
-                          inst_.cbsz, inst_.blgp,
-                          [&](uint32_t a_bits, uint32_t b_bits, auto ea, auto eb) {{
-                            amdgpu::exec_f32_scaled_mixed(
-                                cu, {spec.m}, {spec.n}, {spec.k}, 1, a_bits, b_bits, dst, s0b,
-                                s1b, s2, ea, eb, const_acc, vb, scale_a, scale_b, scale_a_byte,
-                                scale_b_byte, c_modifier);
-                          }});
-                      if (!dispatched) {{
+                      if (inst_.cbsz > 4 || inst_.blgp > 4) {{
                         wf.report_instruction_execution_error(
                             amdgpu::InstructionExecutionError::UnsupportedOperandValue);
                         return;
                       }}
+                      // Normalize selected scale bytes before arithmetic can overwrite aliased VGPRs.
+                      uint32_t scales_a[64], scales_b[64];
+                      for (uint32_t lane = 0; lane < 64; ++lane) {{
+                        scales_a[lane] = amdgpu::read_mfma_scale_e8m0(wf, vb, scale_a, lane, scale_a_byte);
+                        scales_b[lane] = amdgpu::read_mfma_scale_e8m0(wf, vb, scale_b, lane, scale_b_byte);
+                      }}
+                      uint64_t controls = inst_.cbsz | (uint64_t(inst_.blgp) << 3) |
+                                          (uint64_t(c_modifier) << 10);
+                      auto invoke = [&](uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c) {{
+                        return rj_arith_v_mfma_scale_f32_{spec.m}x{spec.n}x{spec.k}_f8f6f4_w64(
+                            flags, controls, d, a, b, c, scales_a, scales_b);
+                      }};
+                      auto registers_for = [](uint32_t fmt) {{ return fmt < 2 ? 8u : fmt < 4 ? 6u : 4u; }};
+                      amdgpu::arith::exec_dense_fp_matrix<8, {spec.m * spec.n // 64}, 64>(
+                          wf, invoke, cu.arithmetic_flags(), controls, dst, s0b, s1b, s2,
+                          const_acc != amdgpu::ACC_FROM_VGPR ? std::optional<uint32_t>(const_acc) : std::nullopt,
+                          ~uint64_t{{0}}, ~uint64_t{{0}}, registers_for(inst_.cbsz), registers_for(inst_.blgp));
                     }}
                     '''))
         return outputs
@@ -6613,38 +6624,52 @@ class CodeGenerator:
                 return scale16 ? amdgpu::RegisterAccess(wf).read_lane64(operand, lane)
                                : amdgpu::RegisterAccess(wf).read_lane(operand, lane);
               };
-              auto scale0 = [&](uint32_t lane) -> uint64_t {
-                return scale_word(scale_src0, lane);
-              };
-              auto scale1 = [&](uint32_t lane) -> uint64_t {
-                return scale_word(scale_src1, lane);
-              };
-
-              bool dispatched = false;
-              if (inst_.op == 0x88) {
-                amdgpu::exec_wmma_f32_scaled_mixed<32, 16, 128>(cu, 4, 4, dst, src0_base,
-                                                   src1_base, s2, amdgpu::extract_fp4,
-                                                   amdgpu::extract_fp4, const_acc, scale0, scale1,
-                                                   matrix_a_scale, matrix_b_scale,
-                                                   scale0_inline_zero ? 0u : matrix_a_scale_fmt,
-                                                   scale1_inline_zero ? 0u : matrix_b_scale_fmt, scale16,
-                                                   amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));
-                dispatched = true;
-              } else {
-                dispatched = amdgpu::dispatch_matrix_fmt_pair(
-                    matrix_a_fmt, matrix_b_fmt,
-                    [&](uint32_t a_bits, uint32_t b_bits, auto extract_a, auto extract_b) {
-                      amdgpu::exec_wmma_f32_scaled_mixed<16, 16, 128>(cu, a_bits, b_bits, dst, src0_base, src1_base, s2,
-                          extract_a, extract_b, const_acc, scale0, scale1, matrix_a_scale,
-                          matrix_b_scale, scale0_inline_zero ? 0u : matrix_a_scale_fmt,
-                          scale1_inline_zero ? 0u : matrix_b_scale_fmt, scale16,
-                          amdgpu::wmma_c_modifier(inst_.neg, inst_.neg_hi));
-                    });
+              const bool wide = inst_.op == 0x88;
+              if ((!wide && (matrix_a_fmt > 4 || matrix_b_fmt > 4)) ||
+                  (!scale0_inline_zero && matrix_a_scale_fmt == 3) ||
+                  (!scale1_inline_zero && matrix_b_scale_fmt == 3))
+                { wf.report_instruction_execution_error(amdgpu::InstructionExecutionError::UnsupportedOperandValue); return; }
+              // Preserve packed scale sourcing before any destination can alias it.
+              uint32_t scales_a[2][32] = {}, scales_b[2][32] = {};
+              for (uint32_t lane = 0; lane < 32; ++lane) {
+                // Only consumed lanes are reads: unused halves must not create races.
+                if (wide || lane / 16 == (matrix_a_scale & 1)) {
+                  uint64_t a = scale_word(scale_src0, lane);
+                  scales_a[0][lane] = uint32_t(a); scales_a[1][lane] = uint32_t(a >> 32);
+                }
+                if (lane / 16 == (matrix_b_scale & 1)) {
+                  uint64_t b = scale_word(scale_src1, lane);
+                  scales_b[0][lane] = uint32_t(b); scales_b[1][lane] = uint32_t(b >> 32);
+                }
               }
-              if (!dispatched) {
-                wf.report_instruction_execution_error(
-                    amdgpu::InstructionExecutionError::UnsupportedOperandValue);
-                return;
+              const uint32_t *sa[] = {scales_a[0], scales_a[1]};
+              const uint32_t *sb[] = {scales_b[0], scales_b[1]};
+              uint64_t controls = wide ? 0 : matrix_a_fmt | (uint64_t(matrix_b_fmt) << 3);
+              if (inst_.neg & 4) controls |= RJ_ARITH_WMMA_MIXED_NEG_C;
+              if (inst_.neg_hi & 4) controls |= RJ_ARITH_WMMA_MIXED_ABS_C;
+              controls |= uint64_t(scale0_inline_zero ? 0 : matrix_a_scale_fmt) << 8;
+              controls |= uint64_t(scale1_inline_zero ? 0 : matrix_b_scale_fmt) << 10;
+              controls |= uint64_t(matrix_a_scale & 1) << 12;
+              controls |= uint64_t(matrix_b_scale & 1) << 13;
+              auto entry = wide ? (scale16 ? rj_arith_v_wmma_scale16_f32_32x16x128_f4_w32
+                                           : rj_arith_v_wmma_scale_f32_32x16x128_f4_w32)
+                                : (scale16 ? rj_arith_v_wmma_scale16_f32_16x16x128_f8f6f4_w32
+                                           : rj_arith_v_wmma_scale_f32_16x16x128_f8f6f4_w32);
+              auto invoke = [&](uint64_t flags, uint64_t controls, uint32_t *const *d,
+                                const uint32_t *const *a, const uint32_t *const *b,
+                                const uint32_t *const *c) {
+                return entry(flags, controls, d, a, b, c, sa, sb);
+              };
+              auto registers_for = [](uint32_t fmt) { return fmt < 2 ? 16u : fmt < 4 ? 12u : 8u; };
+              if (wide) {
+                amdgpu::arith::exec_dense_fp_matrix<16, 16, 32>(wf, invoke, cu.arithmetic_flags(),
+                    controls, dst, src0_base, src1_base, s2,
+                    const_acc != amdgpu::ACC_FROM_VGPR ? std::optional<uint32_t>(const_acc) : std::nullopt, 0xffffffffULL, 0xffffffffULL, 16, 8);
+              } else {
+                amdgpu::arith::exec_dense_fp_matrix<16, 8, 32>(wf, invoke, cu.arithmetic_flags(),
+                    controls, dst, src0_base, src1_base, s2,
+                    const_acc != amdgpu::ACC_FROM_VGPR ? std::optional<uint32_t>(const_acc) : std::nullopt,
+                    0xffffffffULL, 0xffffffffULL, registers_for(matrix_a_fmt), registers_for(matrix_b_fmt));
               }
             }
             ''')

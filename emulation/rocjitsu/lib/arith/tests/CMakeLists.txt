@@ -219,6 +219,10 @@ if(UNIX AND CMAKE_NM AND RJ_ARITH_ENABLE_X86_64)
     )
 endif()
 
+rj_arith_add_test(rj_arith_mfma_mixed_test mfma/mfma_mixed_test.cpp)
+
+rj_arith_add_test(rj_arith_wmma_gfx1250_mixed_test wmma/gfx1250_mixed_test.cpp)
+
 # Related comparison predicates share a binary; every entry point has its own test.
 foreach(
     family
