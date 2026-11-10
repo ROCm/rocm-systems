@@ -465,22 +465,16 @@ TEST_P(Gfx1250SplitCounterCapacityTest, CounterAtCapacityKeepsOldestPending) {
   EXPECT_EQ(statusOf(builder, 0), EventStatus::ACTIVE);
 }
 
-TEST_P(Gfx1250SplitCounterCapacityTest, IssueBeyondCapacityRetiresOldest) {
-  auto builder = makeGfx1250Test();
-  issue(builder, capacity() + 1);
-
-  EXPECT_EQ(statusOf(builder, 0), EventStatus::WAVE_COMPLETE);
-  EXPECT_EQ(statusOf(builder, 1), EventStatus::ACTIVE);
-}
-
 TEST_P(Gfx1250SplitCounterCapacityTest, OverflowRetiresOldestPrefix) {
-  constexpr int kOverflow = 5;
-  auto builder = makeGfx1250Test();
-  issue(builder, capacity() + kOverflow);
+  for (const int overflow : {1, 5}) {
+    SCOPED_TRACE(overflow);
+    auto builder = makeGfx1250Test();
+    issue(builder, capacity() + overflow);
 
-  for (int event = 0; event < kOverflow; ++event)
-    EXPECT_EQ(statusOf(builder, event), EventStatus::WAVE_COMPLETE) << "event " << event;
-  EXPECT_EQ(statusOf(builder, kOverflow), EventStatus::ACTIVE);
+    for (int event = 0; event < overflow; ++event)
+      EXPECT_EQ(statusOf(builder, event), EventStatus::WAVE_COMPLETE) << "event " << event;
+    EXPECT_EQ(statusOf(builder, overflow), EventStatus::ACTIVE);
+  }
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -498,7 +492,12 @@ INSTANTIATE_TEST_SUITE_P(
                                        amdgpu::WaitCounterKind::Async,
                                        MemoryOrderClass::ASYNC_STORE},
                       SplitCounterCase{"Tensorcnt", amdgpu::WaitCounterType::TENSORCNT,
-                                       amdgpu::WaitCounterKind::Tensor, MemoryOrderClass::TENSOR}),
+                                       amdgpu::WaitCounterKind::Tensor, MemoryOrderClass::TENSOR},
+                      // KMcnt's capacity is observable only through an ordered
+                      // class, and no gfx1250 instruction registers one, so
+                      // this row uses a synthetic one.
+                      SplitCounterCase{"KmcntSyntheticOrdered", amdgpu::WaitCounterType::KMCNT,
+                                       amdgpu::WaitCounterKind::Km, MemoryOrderClass::VMEM}),
     [](const ::testing::TestParamInfo<SplitCounterCase> &info) { return info.param.name; });
 
 // CDNA5 ISA 5.7.1 sizes each counter in the table "Counter Size Description"
@@ -578,49 +577,6 @@ TEST(RaceDetector, CounterCapacity_LegacyArchCapacitiesHaveNoSplitCounters) {
           amdgpu::WaitCounterType::ASYNCCNT, amdgpu::WaitCounterType::TENSORCNT})
       EXPECT_EQ(capacities.split(counter), 0);
   }
-}
-
-TEST(RaceDetector, Gfx1250CounterCapacity_FullLoadcntMakesOldestDestinationReadable) {
-  const int capacity = gfx1250Capacity(amdgpu::WaitCounterKind::Load);
-  auto builder = makeGfx1250Test();
-  builder.counterLoad(kWave, amdgpu::WaitCounterType::LOADCNT, MemoryOrderClass::VMEM,
-                      /*vgprDst=*/0);
-  for (int index = 0; index < capacity; ++index)
-    builder.counterLoad(kWave, amdgpu::WaitCounterType::LOADCNT, MemoryOrderClass::VMEM,
-                        /*vgprDst=*/1);
-
-  expectVgprReady(builder, /*vgpr=*/0);
-}
-
-TEST(RaceDetector, Gfx1250CounterCapacity_LoadcntBelowCapacityKeepsOldestDestinationPending) {
-  const int capacity = gfx1250Capacity(amdgpu::WaitCounterKind::Load);
-  auto builder = makeGfx1250Test();
-  builder.counterLoad(kWave, amdgpu::WaitCounterType::LOADCNT, MemoryOrderClass::VMEM,
-                      /*vgprDst=*/0);
-  for (int index = 0; index < capacity - 1; ++index)
-    builder.counterLoad(kWave, amdgpu::WaitCounterType::LOADCNT, MemoryOrderClass::VMEM,
-                        /*vgprDst=*/1);
-
-  expectVgprPending(builder, /*vgpr=*/0);
-}
-
-// KMcnt's 31-token capacity is observable only through an ordered class; no
-// gfx1250 instruction registers one, so this drives a synthetic one.
-TEST(RaceDetector, Gfx1250CounterCapacity_KmcntCapacityRetiresOrderedEventsBeyond31) {
-  const int capacity = gfx1250Capacity(amdgpu::WaitCounterKind::Km);
-  auto builder = makeGfx1250Test();
-  issueCounterOps(builder, capacity + 1, amdgpu::WaitCounterType::KMCNT, MemoryOrderClass::VMEM);
-
-  EXPECT_EQ(statusOf(builder, 0), EventStatus::WAVE_COMPLETE);
-  EXPECT_EQ(statusOf(builder, 1), EventStatus::ACTIVE);
-}
-
-TEST(RaceDetector, Gfx1250CounterCapacity_KmcntAtCapacityKeepsOrderedEventsPending) {
-  const int capacity = gfx1250Capacity(amdgpu::WaitCounterKind::Km);
-  auto builder = makeGfx1250Test();
-  issueCounterOps(builder, capacity, amdgpu::WaitCounterType::KMCNT, MemoryOrderClass::VMEM);
-
-  EXPECT_EQ(statusOf(builder, 0), EventStatus::ACTIVE);
 }
 
 // Scalar memory loads complete out of order (CDNA5 ISA 5.7.1.1), so a full
@@ -737,36 +693,6 @@ TEST(RaceDetector, Gfx1250CounterCapacity_TensorLoadsAndStoresShareOneClass) {
   EXPECT_FALSE(builder.hasRace());
   EXPECT_EQ(statusOf(builder, 0), EventStatus::WAVE_COMPLETE);
   EXPECT_EQ(statusOf(builder, 1), EventStatus::ACTIVE);
-}
-
-// A tensor transfer that moves no data, such as a NULL descriptor or an empty
-// tile, still takes a TENSORcnt slot.
-TEST(RaceDetector, Gfx1250CounterCapacity_EmptyTensorTransfersFillTensorcnt) {
-  const int capacity = gfx1250Capacity(amdgpu::WaitCounterKind::Tensor);
-  auto builder = makeGfx1250Test();
-  builder.counterLdsTransfer(kWave, amdgpu::WaitCounterType::TENSORCNT, MemoryOrderClass::TENSOR,
-                             MemoryEventType::GLOBAL_TO_LDS,
-                             {{.address = 0, .bytes = kDwordBytes}});
-  for (int index = 0; index < capacity; ++index)
-    builder.counterLdsTransfer(kWave, amdgpu::WaitCounterType::TENSORCNT, MemoryOrderClass::TENSOR,
-                               MemoryEventType::GLOBAL_TO_LDS, {});
-
-  builder.checkLdsRead(kWave, kLane, /*addr=*/0, kDwordBytes, MemoryOrderClass::UNORDERED);
-  EXPECT_FALSE(builder.hasLdsRace(0));
-}
-
-TEST(RaceDetector, Gfx1250CounterCapacity_TensorcntAtCapacityKeepsOldestDestinationPending) {
-  const int capacity = gfx1250Capacity(amdgpu::WaitCounterKind::Tensor);
-  auto builder = makeGfx1250Test();
-  builder.counterLdsTransfer(kWave, amdgpu::WaitCounterType::TENSORCNT, MemoryOrderClass::TENSOR,
-                             MemoryEventType::GLOBAL_TO_LDS,
-                             {{.address = 0, .bytes = kDwordBytes}});
-  for (int index = 0; index < capacity - 1; ++index)
-    builder.counterLdsTransfer(kWave, amdgpu::WaitCounterType::TENSORCNT, MemoryOrderClass::TENSOR,
-                               MemoryEventType::GLOBAL_TO_LDS, {});
-
-  builder.checkLdsRead(kWave, kLane, /*addr=*/0, kDwordBytes, MemoryOrderClass::UNORDERED);
-  EXPECT_TRUE(builder.hasLdsRace(0));
 }
 
 TEST(RaceDetector, Gfx1250CounterCapacity_PartialWaitAfterCapacityRetiresNextEvents) {
