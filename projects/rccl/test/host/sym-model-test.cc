@@ -315,6 +315,16 @@ int64_t SymCtasAtMaxBlocks(const char* env, int64_t deftVal) {
   return std::string(env) == "SYM_CTAS" ? ncclSymkMaxBlocks : deftVal;
 }
 
+// g_loadParam stub: SYM_CTAS reads 100, above both hierarchical block caps.
+int64_t SymCtas100(const char* env, int64_t deftVal) {
+  return std::string(env) == "SYM_CTAS" ? 100 : deftVal;
+}
+
+// g_loadParam stub: SYM_CTAS reads 21, under the TDM block cap but not a multiple of the package split.
+int64_t SymCtas21(const char* env, int64_t deftVal) {
+  return std::string(env) == "SYM_CTAS" ? 21 : deftVal;
+}
+
 // Packages of two ranks, so the fixture's four ranks make two packages.
 class SymModelTdmHierTest : public SymModelTdmReachableTest {
  protected:
@@ -352,6 +362,40 @@ TEST_F(SymModelTdmHierTest, ForcedHierTma_SymCtasAboveTheCap_LaunchesTheCap) {
   ncclTuningResult_t r = EvaluateForcedHierTma(size_t(64) << 20);
   ASSERT_TRUE(r.valid);
   EXPECT_EQ(r.nChannels, ncclSymkAgHierTmaMaxBlocks);
+}
+
+// Each hierarchical kernel keeps its own cap under NCCL_SYM_CTAS.
+TEST_F(SymModelTdmHierTest, SymCtasAboveBothCaps_EachKernelLaunchesItsOwnCap) {
+  ScopedHook loadParam(g_loadParam, SymCtas100);
+  comm_->tuningContext.forced[ncclFuncAllGather] = 1;
+  ncclTuningResult_t tma = Evaluate(Input(ncclFuncAllGather, size_t(64) << 20), ncclSymkKernelId_AllGather_HierLsaTmaST);
+  ASSERT_TRUE(tma.valid);
+  EXPECT_EQ(tma.nChannels, ncclSymkAgHierTmaMaxBlocks);
+  ncclTuningResult_t vec = Evaluate(Input(ncclFuncAllGather, size_t(64) << 20), ncclSymkKernelId_AllGather_HierLsaST);
+  ASSERT_TRUE(vec.valid);
+  EXPECT_EQ(vec.nChannels, ncclSymkAgHierMaxBlocks);
+}
+
+// 21 blocks on three packages split as 4 for the copying group and 8 for each pushing group, so 20 launch.
+TEST_F(SymModelTdmHierTest, ForcedHierTma_SymCtasTrimmedByThePackageSplit) {
+  ScopedHook loadParam(g_loadParam, SymCtas21);
+  comm_->nRanks = 6;
+  ncclTuningResult_t r = EvaluateForcedHierTma(size_t(64) << 20);
+  ASSERT_TRUE(r.valid);
+  EXPECT_EQ(r.nChannels, 20);
+}
+
+// Sixteen ranks in packages of two make eight packages; the TDM kernel launches 3 + 7 * 6 = 45 blocks, the vector one 4 + 7 * 9 = 67.
+TEST_F(SymModelTdmHierTest, EightPackages_BlockCounts) {
+  ScopedHook loadParam(g_loadParam, SymCtas100);  // The vector kernel only reaches its cap when asked to.
+  comm_->nRanks = 16;
+  comm_->tuningContext.forced[ncclFuncAllGather] = 1;
+  ncclTuningResult_t tma = EvaluateForcedHierTma(size_t(64) << 20);
+  ASSERT_TRUE(tma.valid);
+  EXPECT_EQ(tma.nChannels, 45);
+  ncclTuningResult_t vec = Evaluate(Input(ncclFuncAllGather, size_t(64) << 20), ncclSymkKernelId_AllGather_HierLsaST);
+  ASSERT_TRUE(vec.valid);
+  EXPECT_EQ(vec.nChannels, 67);
 }
 
 // The vector kernels hold every size range, so neither TDM kernel runs unless asked for.

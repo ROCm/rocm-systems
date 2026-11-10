@@ -74,11 +74,15 @@ static bool rcclSymkAllGatherYieldsInPartitionMode(struct ncclTuningInput_t* con
       (inputs->winRegType != ncclSymSendRegRecvReg && inputs->winRegType != ncclSymSendNonregRecvReg)) {
     return false;
   }
-  uint32_t allowed = valid_kmask & uint32_t(inputs->tuningMask >> NCCL_TUNING_SYM_KERNEL_ID_OFFSET);
-  int st = allowed >> vecSt & 1 ? vecSt : tmaSt;
-  int hier = allowed >> vecHier & 1 ? vecHier : tmaHier;
-  bool hasSt = allowed >> st & 1;
-  bool hasHier = allowed >> hier & 1;
+  struct AllowMask {
+    uint32_t bits;
+    bool has(int id) const { return bits >> id & 1; }
+  };
+  const AllowMask allowed{valid_kmask & uint32_t(inputs->tuningMask >> NCCL_TUNING_SYM_KERNEL_ID_OFFSET)};
+  int st = allowed.has(vecSt) ? vecSt : tmaSt;
+  int hier = allowed.has(vecHier) ? vecHier : tmaHier;
+  bool hasSt = allowed.has(st);
+  bool hasHier = allowed.has(hier);
   if (!hasSt && !hasHier) return false;
   int afterLL = hasSt ? st : hier;
   if (hasHier && ncclSymkGfx1250AllGatherPrefersHier(comm->nRanks, inputs->nBytes)) return kernelId != hier;
