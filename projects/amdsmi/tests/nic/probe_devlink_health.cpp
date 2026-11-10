@@ -1,7 +1,7 @@
+// Copyright Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
+
 /*
- * Copyright Advanced Micro Devices, Inc.
- *
  * Live devlink health probe.
  *
  * Unlike test_nic_telemetry_suite (which runs against fakes), this exercises the

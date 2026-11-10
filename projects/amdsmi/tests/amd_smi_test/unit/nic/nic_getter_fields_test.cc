@@ -103,6 +103,38 @@ TEST_F(NicUnit, RdmaDevInfoIsTheRdmaField) {
   check_getter(amdsmi_get_nic_rdma_dev_info, info->rdma_dev, *info);
 }
 
+TEST_F(NicUnit, DeviceBdfIsTheBusBdf) {
+  const auto info = make_filled_info();
+  check_getter(amdsmi_get_nic_device_bdf, info->bus.bdf, *info);
+}
+
+TEST_F(NicUnit, PortStatisticsKeepItsStatusCodes) {
+  const auto info = make_filled_info();
+  auto num_stats = uint32_t{0};
+
+  EXPECT_EQ(amdsmi_get_nic_port_statistics(nullptr, 0, &num_stats, nullptr),
+            AMDSMI_STATUS_NOT_INIT);
+  ASSERT_EQ(amdsmi_init(AMDSMI_INIT_AMD_NICS), AMDSMI_STATUS_SUCCESS);
+  {
+    AMDSmiAINICDevice device(*info);
+    ScopedProcessorRegistration registration(&device);
+
+    EXPECT_EQ(amdsmi_get_nic_port_statistics(registration.handle(), 0, nullptr, nullptr),
+              AMDSMI_STATUS_INVAL);
+    EXPECT_EQ(amdsmi_get_nic_port_statistics(nullptr, 0, &num_stats, nullptr), AMDSMI_STATUS_INVAL);
+    // The registered device is not one the NIC library discovered.
+    EXPECT_EQ(amdsmi_get_nic_port_statistics(registration.handle(), 0, &num_stats, nullptr),
+              AMDSMI_STATUS_NOT_FOUND);
+  }
+  {
+    amd::smi::AMDSmiProcessor gpu(AMDSMI_PROCESSOR_TYPE_AMD_GPU);
+    ScopedProcessorRegistration registration(&gpu);
+    EXPECT_EQ(amdsmi_get_nic_port_statistics(registration.handle(), 0, &num_stats, nullptr),
+              AMDSMI_STATUS_NOT_SUPPORTED);
+  }
+  EXPECT_EQ(amdsmi_shut_down(), AMDSMI_STATUS_SUCCESS);
+}
+
 TEST_F(NicUnit, RdmaPortStatisticsKeepItsStatusCodes) {
   auto info = make_filled_info();
   auto num_stats = uint32_t{0};

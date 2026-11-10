@@ -1,7 +1,7 @@
+// Copyright Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
+
 /*
- * Copyright Advanced Micro Devices, Inc.
- *
  * Ethtool netlink client. Requires Linux kernel 5.6+ with ethtool netlink.
  * netlink_ethtool_stub.cpp stands in when the UAPI headers lack it.
  */

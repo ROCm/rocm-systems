@@ -1,7 +1,7 @@
+// Copyright Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
+
 /*
- * Copyright Advanced Micro Devices, Inc.
- *
  * Unit tests for the tiered vendor-stat mechanism (StatTable_t filtering,
  * query-time refresh, FEC merge). No hardware, no root: the transport is a
  * fake returning canned VendorStatistics/FecStatistics_t.

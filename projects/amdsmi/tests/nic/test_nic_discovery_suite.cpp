@@ -1,7 +1,7 @@
+// Copyright Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
+
 /*
- * Copyright Advanced Micro Devices, Inc.
- *
  * Hardware-independent unit tests for NIC vendor-subsystem driver detection.
  * Driver sysfs paths are redirected to a tmpdir tree, so these run root-free
  * with no live NIC and validate role->path mapping, not any real device.

@@ -1989,6 +1989,32 @@ class AMDSMIParser(argparse.ArgumentParser):
         self._add_device_arguments(bad_pages_parser, required=False)
         self._add_command_modifiers(bad_pages_parser)
 
+    @staticmethod
+    def _guard_nic_rejects_gpu_arguments(parser: argparse.ArgumentParser) -> None:
+        """The NIC path never reads the GPU and CPU metric flags, so one given with --nic would be
+        accepted and silently ignored; reject it at parse time."""
+        _original_parse_known_args = parser.parse_known_args
+        gpu_group_titles = {parser._optionals.title, "CPU Arguments", "CPU Core Arguments"}
+        nic_dests = {"help", "nic"}
+
+        def _intercept(args=None, namespace=None):
+            namespace, extras = _original_parse_known_args(args, namespace)
+            if getattr(namespace, "nic", None) is None:
+                return namespace, extras
+            given_flags = [
+                action.option_strings[-1]
+                for group in parser._action_groups
+                if group.title in gpu_group_titles
+                for action in group._group_actions
+                if (action.dest not in nic_dests)
+                and (getattr(namespace, action.dest, action.default) != action.default)
+            ]
+            if given_flags:
+                parser.error(f"arguments {'/'.join(given_flags)}: not allowed with --nic")
+            return namespace, extras
+
+        parser.parse_known_args = _intercept
+
     def _add_metric_parser(self, subparsers: argparse._SubParsersAction, func):
         # Subparser help text
         metric_help = "Gets metric/performance information about the specified GPU or NIC"
@@ -2467,6 +2493,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             self._guard_extended_requires_port(metric_parser)
             self._guard_nic_arguments_require_nic(metric_parser)
             self._guard_nic_rejects_watch(metric_parser)
+            self._guard_nic_rejects_gpu_arguments(metric_parser)
 
         # Add Universal Arguments & watch Args
         self._add_watch_arguments(metric_parser)

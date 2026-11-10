@@ -1,7 +1,7 @@
+// Copyright Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
+
 /*
- * Copyright Advanced Micro Devices, Inc.
- *
  * Unit tests for the NIC debug-log seam and the read chokepoints that feed it.
  * No hardware, no root: reads go against real files in a tmpdir and the sink is
  * a capture function standing in for libamd_smi's LOG_DEBUG adapter.
@@ -573,6 +573,35 @@ auto test_netlink_failed_query_leaves_nothing_for_the_next() -> void {
         "replies=" + std::to_string(replies));
 }
 
+// Parsing without a policy does not check attribute lengths, so a getter must not read past a
+// short attribute or past a string that has no terminator.
+auto test_netlink_getters_check_the_attribute_length() -> void {
+  std::cout << "\nNetlink attributes: a getter does not read past a short or unterminated one\n";
+  constexpr auto kTextType = 1;
+  constexpr auto kByteType = 2;
+  constexpr auto kTextBytes = std::array<char, 8>{'A', 'A', 'A', 'A', 'A', 'A', 'A', 'A'};
+  constexpr auto kByteValue = uint8_t{7};
+  auto msg = nl::NLMessage{};
+  msg.put_genl_header(0, 0, GENL_ID_CTRL, 0, 0, CTRL_CMD_GETFAMILY, 1);
+  nla_put(msg.get(), kTextType, kTextBytes.size(), kTextBytes.data());
+  nla_put(msg.get(), kByteType, sizeof(kByteValue), &kByteValue);
+
+  struct nlattr* attrs[kByteType + 1] = {};
+  const auto parsed =
+      nl::NLAttributes::parse(nlmsg_hdr(msg.get()), GENL_HDRLEN, attrs, kByteType, nullptr);
+  check("the message parses", (parsed == 0), "ret=" + std::to_string(parsed));
+  check("a string without a NUL reads as empty",
+        std::string{nl::NLAttributes::get_string(attrs[kTextType])}.empty());
+  check("a missing string reads as empty",
+        std::string{nl::NLAttributes::get_string(nullptr)}.empty());
+  check("a one-byte attribute is not read as a u32",
+        (nl::NLAttributes::get_u32(attrs[kByteType]) == 0));
+  check("a one-byte attribute is not read as a u16",
+        (nl::NLAttributes::get_u16(attrs[kByteType]) == 0));
+  check("a one-byte attribute still reads as a u8",
+        (nl::NLAttributes::get_u8(attrs[kByteType]) == kByteValue));
+}
+
 auto test_devlink_describe_reporters() -> void {
   std::cout << "\nDevlink describe: reporters\n";
   auto fw = nl::DevlinkReporter{};
@@ -804,6 +833,7 @@ int main() {
   test_netlink_silent_peer_times_out();
   test_netlink_recovers_when_the_reset_cannot_reconnect();
   test_netlink_failed_query_leaves_nothing_for_the_next();
+  test_netlink_getters_check_the_attribute_length();
   test_devlink_describe_reporters();
   test_devlink_describe_port_split_unknown();
   test_devlink_describe_device_info_masks_serials();

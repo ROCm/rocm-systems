@@ -452,25 +452,89 @@ smi_nic_status_t fill_ainic_rdma_mtu(smi_nic_ctx_t ctx, uint64_t bdf_int,
 // RDMA device info is optional for an AI-NIC; a missing RDMA/ionic driver or an
 // empty result must not abort discovery of the rest of the NIC. Only meaningful
 // for a status the caller has already found to be non-SUCCESS.
+// The NIC getters write an smi_nic_* struct through a pointer to its amdsmi_nic_* mirror, so every
+// member keeps its offset and size in both. A reorder or a resized member fails the build here
+// instead of leaving a port that reports another member's bytes.
+#define AMDSMI_NIC_MIRRORED_MEMBER(smi_type, amdsmi_type, member)                \
+  static_assert((offsetof(smi_type, member) == offsetof(amdsmi_type, member)) && \
+                    (sizeof(smi_type::member) == sizeof(amdsmi_type::member)),   \
+                #smi_type "::" #member " does not mirror " #amdsmi_type "::" #member)
+
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_bus_info_t, amdsmi_nic_bus_info_t, bdf);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_bus_info_t, amdsmi_nic_bus_info_t, max_pcie_width);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_bus_info_t, amdsmi_nic_bus_info_t, max_pcie_speed);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_bus_info_t, amdsmi_nic_bus_info_t, pcie_interface_version);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_bus_info_t, amdsmi_nic_bus_info_t, slot_type);
+
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_driver_info_t, amdsmi_nic_driver_info_t, name);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_driver_info_t, amdsmi_nic_driver_info_t, version);
+
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_asic_info_t, amdsmi_nic_asic_info_t, vendor_id);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_asic_info_t, amdsmi_nic_asic_info_t, subvendor_id);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_asic_info_t, amdsmi_nic_asic_info_t, device_id);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_asic_info_t, amdsmi_nic_asic_info_t, subsystem_id);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_asic_info_t, amdsmi_nic_asic_info_t, revision);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_asic_info_t, amdsmi_nic_asic_info_t, permanent_address);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_asic_info_t, amdsmi_nic_asic_info_t, product_name);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_asic_info_t, amdsmi_nic_asic_info_t, part_number);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_asic_info_t, amdsmi_nic_asic_info_t, serial_number);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_asic_info_t, amdsmi_nic_asic_info_t, vendor_name);
+
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_numa_info_t, amdsmi_nic_numa_info_t, node);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_numa_info_t, amdsmi_nic_numa_info_t, affinity);
+
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_port_t, amdsmi_nic_port_t, bdf);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_port_t, amdsmi_nic_port_t, port_num);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_port_t, amdsmi_nic_port_t, type);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_port_t, amdsmi_nic_port_t, flavour);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_port_t, amdsmi_nic_port_t, netdev);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_port_t, amdsmi_nic_port_t, ifindex);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_port_t, amdsmi_nic_port_t, mac_address);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_port_t, amdsmi_nic_port_t, carrier);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_port_t, amdsmi_nic_port_t, mtu);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_port_t, amdsmi_nic_port_t, link_state);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_port_t, amdsmi_nic_port_t, link_speed);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_port_t, amdsmi_nic_port_t, active_fec);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_port_t, amdsmi_nic_port_t, autoneg);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_port_t, amdsmi_nic_port_t, pause_autoneg);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_port_t, amdsmi_nic_port_t, pause_rx);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_port_t, amdsmi_nic_port_t, pause_tx);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_port_info_t, amdsmi_nic_port_info_t, num_ports);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_port_info_t, amdsmi_nic_port_info_t, ports);
+
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_rdma_port_info_t, amdsmi_nic_rdma_port_info_t, netdev);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_rdma_port_info_t, amdsmi_nic_rdma_port_info_t, state);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_rdma_port_info_t, amdsmi_nic_rdma_port_info_t, rdma_port);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_rdma_port_info_t, amdsmi_nic_rdma_port_info_t, max_mtu);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_rdma_port_info_t, amdsmi_nic_rdma_port_info_t, active_mtu);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_rdma_dev_info_t, amdsmi_nic_rdma_dev_info_t, rdma_dev);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_rdma_dev_info_t, amdsmi_nic_rdma_dev_info_t, node_guid);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_rdma_dev_info_t, amdsmi_nic_rdma_dev_info_t, node_type);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_rdma_dev_info_t, amdsmi_nic_rdma_dev_info_t, sys_image_guid);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_rdma_dev_info_t, amdsmi_nic_rdma_dev_info_t, fw_ver);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_rdma_dev_info_t, amdsmi_nic_rdma_dev_info_t, num_rdma_ports);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_rdma_dev_info_t, amdsmi_nic_rdma_dev_info_t, rdma_port_info);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_rdma_devices_info_t, amdsmi_nic_rdma_devices_info_t,
+                           num_rdma_dev);
+AMDSMI_NIC_MIRRORED_MEMBER(smi_nic_rdma_devices_info_t, amdsmi_nic_rdma_devices_info_t,
+                           rdma_dev_info);
+
+#undef AMDSMI_NIC_MIRRORED_MEMBER
+
 static bool is_nic_rdma_failure_fatal(smi_nic_status_t status) {
   return (status != SMI_NIC_STATUS_NO_DATA) && (status != SMI_NIC_STATUS_DRIVER_NOT_LOADED);
 }
 
 amdsmi_status_t populate_amd_ainic_device(const smi_nic_ctx_t& ctx, uint64_t bdf_int,
                                           AMDSmiAINICDevice::AINICInfo& ai_nic_info) {
-  // Each getter writes an smi_nic_* struct through a pointer to its amdsmi_nic_*
-  // mirror. sizeof plus the trailing member's offset catches a reorder that shifts
-  // that member; swapping two same-sized members ahead of it stays invisible.
+  // Each getter writes an smi_nic_* struct through a pointer to its amdsmi_nic_* mirror; the
+  // member-by-member layout checks are above, and the sizes are checked here.
   static_assert(sizeof(smi_nic_bus_info_t) == sizeof(ai_nic_info.bus));
-  static_assert(offsetof(smi_nic_bus_info_t, slot_type) ==
-                offsetof(amdsmi_nic_bus_info_t, slot_type));
   smi_nic_status_t status = g_nic_info_getters->bus(
       ctx, bdf_int, reinterpret_cast<smi_nic_bus_info_t*>(&ai_nic_info.bus));
   CHK_AMDNIC_RET(status);
 
   static_assert(sizeof(smi_nic_driver_info_t) == sizeof(ai_nic_info.driver));
-  static_assert(offsetof(smi_nic_driver_info_t, version) ==
-                offsetof(amdsmi_nic_driver_info_t, version));
   status = g_nic_info_getters->driver(
       ctx, bdf_int, reinterpret_cast<smi_nic_driver_info_t*>(&ai_nic_info.driver));
   // A fwctl-only NIC has no host netdev to query for driver name/version; that is
@@ -480,8 +544,6 @@ amdsmi_status_t populate_amd_ainic_device(const smi_nic_ctx_t& ctx, uint64_t bdf
   }
 
   static_assert(sizeof(smi_nic_asic_info_t) == sizeof(ai_nic_info.asic));
-  static_assert(offsetof(smi_nic_asic_info_t, vendor_name) ==
-                offsetof(amdsmi_nic_asic_info_t, vendor_name));
   status = g_nic_info_getters->asic(ctx, bdf_int,
                                     reinterpret_cast<smi_nic_asic_info_t*>(&ai_nic_info.asic));
   CHK_AMDNIC_RET(status);
@@ -501,14 +563,11 @@ amdsmi_status_t populate_amd_ainic_device(const smi_nic_ctx_t& ctx, uint64_t bdf
   }
 
   static_assert(sizeof(smi_nic_numa_info_t) == sizeof(ai_nic_info.numa));
-  static_assert(offsetof(smi_nic_numa_info_t, affinity) ==
-                offsetof(amdsmi_nic_numa_info_t, affinity));
   status = g_nic_info_getters->numa(ctx, bdf_int,
                                     reinterpret_cast<smi_nic_numa_info_t*>(&ai_nic_info.numa));
   CHK_AMDNIC_RET(status);
 
   static_assert(sizeof(smi_nic_port_info_t) == sizeof(ai_nic_info.port));
-  static_assert(offsetof(smi_nic_port_info_t, ports) == offsetof(amdsmi_nic_port_info_t, ports));
   status = g_nic_info_getters->port(ctx, bdf_int,
                                     reinterpret_cast<smi_nic_port_info_t*>(&ai_nic_info.port));
   // A fwctl-only NIC has no host netdev/port to report link state for; that is
@@ -518,8 +577,6 @@ amdsmi_status_t populate_amd_ainic_device(const smi_nic_ctx_t& ctx, uint64_t bdf
   }
 
   static_assert(sizeof(smi_nic_rdma_devices_info_t) == sizeof(ai_nic_info.rdma_dev));
-  static_assert(offsetof(smi_nic_rdma_devices_info_t, rdma_dev_info) ==
-                offsetof(amdsmi_nic_rdma_devices_info_t, rdma_dev_info));
   status = g_nic_info_getters->rdma(
       ctx, bdf_int, reinterpret_cast<smi_nic_rdma_devices_info_t*>(&ai_nic_info.rdma_dev));
   if (status != SMI_NIC_STATUS_SUCCESS) {
@@ -671,6 +728,9 @@ amdsmi_status_t AMDSmiSystem::get_gpu_socket_id(uint32_t index, std::string& soc
 }
 
 amdsmi_status_t AMDSmiSystem::cleanup() {
+  // A GPU shutdown failure is reported after the NIC branch has run, so it cannot leave the NIC
+  // context and the debug-log sink behind.
+  amdsmi_status_t status = AMDSMI_STATUS_SUCCESS;
 #ifdef ENABLE_ESMI_LIB
   if (init_flag_ & AMDSMI_INIT_AMD_CPUS) {
     for (uint32_t i = 0; i < sockets_.size(); i++) {
@@ -696,12 +756,14 @@ amdsmi_status_t AMDSmiSystem::cleanup() {
 #ifdef ENABLE_WSL_BACKEND
     bool used_wsl = WSLGPUBackend::IsActive();
     amdsmi_status_t wsl_ret = WSLGPUBackend::Shutdown();
-    if (wsl_ret != AMDSMI_STATUS_SUCCESS) return wsl_ret;
+    if (wsl_ret != AMDSMI_STATUS_SUCCESS) {
+      status = wsl_ret;
+    }
     if (!used_wsl) {
 #endif
       rsmi_status_t ret = rsmi_shut_down();
-      if (ret != RSMI_STATUS_SUCCESS) {
-        return amd::smi::rsmi_to_amdsmi_status(ret);
+      if ((ret != RSMI_STATUS_SUCCESS) && (status == AMDSMI_STATUS_SUCCESS)) {
+        status = amd::smi::rsmi_to_amdsmi_status(ret);
       }
 #ifdef ENABLE_WSL_BACKEND
     }
@@ -719,7 +781,7 @@ amdsmi_status_t AMDSmiSystem::cleanup() {
     }
     sockets_.clear();
   }
-  return AMDSMI_STATUS_SUCCESS;
+  return status;
 }
 
 amdsmi_status_t AMDSmiSystem::handle_to_socket(amdsmi_socket_handle socket_handle,

@@ -1,7 +1,7 @@
+// Copyright Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
+
 /*
- * Copyright Advanced Micro Devices, Inc.
- *
  * Unit tests for the pass/fail harness (nic_check.h) that every standalone NIC suite reports
  * through. A harness that miscounted, or exited 0 after a failure, would turn all of them green.
  *

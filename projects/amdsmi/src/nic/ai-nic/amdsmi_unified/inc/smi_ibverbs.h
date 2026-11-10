@@ -1,8 +1,5 @@
-/*
- * Copyright Advanced Micro Devices, Inc.
- *
- * SPDX-License-Identifier: MIT
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #ifndef AMDSMI_UNIFIED_SMI_IBVERBS_H_
 #define AMDSMI_UNIFIED_SMI_IBVERBS_H_

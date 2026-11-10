@@ -1,7 +1,7 @@
+// Copyright Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
+
 /*
- * Copyright Advanced Micro Devices, Inc.
- *
  * Unit tests for the PCI VPD parser (smi_nic_vpd). Hardware-independent: every
  * case feeds a synthetic VPD image built to the PCI resource-tag layout, so the
  * tests validate the TLV walk (keyword-length honouring, truncation safety),

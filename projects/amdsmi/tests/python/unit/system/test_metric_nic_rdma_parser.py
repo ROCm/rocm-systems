@@ -77,6 +77,7 @@ def _metric_parser():
     parser_self._guard_extended_requires_port = AMDSMIParser._guard_extended_requires_port
     parser_self._guard_nic_arguments_require_nic = AMDSMIParser._guard_nic_arguments_require_nic
     parser_self._guard_nic_rejects_watch = AMDSMIParser._guard_nic_rejects_watch
+    parser_self._guard_nic_rejects_gpu_arguments = AMDSMIParser._guard_nic_rejects_gpu_arguments
     subparsers = argparse.ArgumentParser().add_subparsers()
     AMDSMIParser._add_metric_parser(parser_self, subparsers, lambda *args, **kwargs: None)
     parser = subparsers.choices["metric"]
@@ -180,6 +181,29 @@ class TestMetricNicWatchValidation(unittest.TestCase):
     def test_nic_without_a_watch_flag_is_accepted(self):
         namespace, _ = self.parser.parse_known_args(["--nic", "--port", "0"])
         self.assertEqual(namespace.port, 0)
+
+
+class TestMetricNicGpuArgumentValidation(unittest.TestCase):
+    """A GPU metric flag with ``--nic`` is a usage error, not a silent no-op."""
+
+    def setUp(self):
+        self.parser = _metric_parser()
+
+    def _assert_rejected(self, *argv):
+        with mock.patch.object(self.parser, "exit", side_effect=SystemExit(2)):
+            with self.assertRaises(SystemExit):
+                self.parser.parse_known_args(list(argv))
+
+    def test_a_gpu_metric_flag_is_rejected_with_nic(self):
+        self._assert_rejected("--nic", "--mem-usage")
+
+    def test_the_gpu_metric_flag_is_still_accepted_without_nic(self):
+        namespace, _ = self.parser.parse_known_args(["--mem-usage"])
+        self.assertTrue(namespace.mem_usage)
+
+    def test_the_nic_flags_are_accepted_with_nic(self):
+        namespace, _ = self.parser.parse_known_args(["--nic", "--port", "0", "--sensors"])
+        self.assertEqual((namespace.port, namespace.sensors), (0, True))
 
 
 class TestMetricNicSensorsParser(unittest.TestCase):

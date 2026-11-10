@@ -1,7 +1,7 @@
+// Copyright Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
+
 /*
- * Copyright Advanced Micro Devices, Inc.
- *
  * Ethtool netlink client for builds whose UAPI headers predate ethtool netlink. init() fails, so
  * the auto backend uses ioctl and every query reports ENOTSUP.
  */

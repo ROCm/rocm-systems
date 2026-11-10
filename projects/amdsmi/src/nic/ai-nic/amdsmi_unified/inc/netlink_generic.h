@@ -1,7 +1,7 @@
+// Copyright Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
+
 /*
- * Copyright Advanced Micro Devices, Inc.
- *
  * Generic Netlink Client - Layer 2
  *
  * Provides a high-level interface for generic netlink communication,

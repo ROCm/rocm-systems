@@ -874,12 +874,19 @@ smi_nic_status_t smi_get_nic_vendor_statistics_count_with_scope(smi_nic_ctx_t ct
   }
 
   const auto& port = ports[port_index];
-  if (port.collect_vendor_statistics() != 0) {
+  // The FEC netlink query can throw on a libnl allocation failure; keep it off the C ABI boundary.
+  try {
+    if (port.collect_vendor_statistics() != 0) {
+      return SMI_NIC_STATUS_ERROR;
+    }
+    const auto tier =
+        (scope == SMI_NIC_STAT_SCOPE_EXTENDED) ? StatTier_t::Extended : StatTier_t::Default;
+    *count = capped_stat_count(port.get_vendor_stats_map(tier).size());
+  } catch (const std::bad_alloc&) {
+    return SMI_NIC_STATUS_NO_RESOURCE;
+  } catch (...) {
     return SMI_NIC_STATUS_ERROR;
   }
-  const auto tier =
-      (scope == SMI_NIC_STAT_SCOPE_EXTENDED) ? StatTier_t::Extended : StatTier_t::Default;
-  *count = capped_stat_count(port.get_vendor_stats_map(tier).size());
 
   return SMI_NIC_STATUS_SUCCESS;
 }
@@ -924,22 +931,29 @@ smi_nic_status_t smi_get_nic_vendor_statistics_list_with_scope(smi_nic_ctx_t ctx
   }
 
   const auto& port = ports[port_index];
-  if (port.collect_vendor_statistics() != 0) {
-    return SMI_NIC_STATUS_ERROR;
-  }
-  const auto tier =
-      (scope == SMI_NIC_STAT_SCOPE_EXTENDED) ? StatTier_t::Extended : StatTier_t::Default;
-  const auto stats_map = port.get_vendor_stats_map(tier);
-
-  stats->count = capped_stat_count(stats_map.size());
-  uint32_t i = 0;
-  for (const auto& stat_pair : stats_map) {
-    if (i >= stats->count) {
-      break;
+  // The FEC netlink query can throw on a libnl allocation failure; keep it off the C ABI boundary.
+  try {
+    if (port.collect_vendor_statistics() != 0) {
+      return SMI_NIC_STATUS_ERROR;
     }
-    std::snprintf(stats->stats[i].name, SMI_NIC_MAX_STRING_LENGTH, "%s", stat_pair.first.c_str());
-    stats->stats[i].value = stat_pair.second;
-    i++;
+    const auto tier =
+        (scope == SMI_NIC_STAT_SCOPE_EXTENDED) ? StatTier_t::Extended : StatTier_t::Default;
+    const auto stats_map = port.get_vendor_stats_map(tier);
+
+    stats->count = capped_stat_count(stats_map.size());
+    uint32_t i = 0;
+    for (const auto& stat_pair : stats_map) {
+      if (i >= stats->count) {
+        break;
+      }
+      std::snprintf(stats->stats[i].name, SMI_NIC_MAX_STRING_LENGTH, "%s", stat_pair.first.c_str());
+      stats->stats[i].value = stat_pair.second;
+      i++;
+    }
+  } catch (const std::bad_alloc&) {
+    return SMI_NIC_STATUS_NO_RESOURCE;
+  } catch (...) {
+    return SMI_NIC_STATUS_ERROR;
   }
 
   return SMI_NIC_STATUS_SUCCESS;

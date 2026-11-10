@@ -3343,14 +3343,16 @@ class MetricCommands:
             return f"{value} {degree}{unit}".rstrip()
         return value
 
-    def _nic_temperatures(self, nic_handle, nic_id):
-        """The ASIC and board temperatures, picked out of the NIC's hwmon temperature readings."""
+    def _nic_hwmon_records(self, nic_handle, nic_id):
+        """The NIC's hwmon records, read once per device since each read rescans sysfs."""
         try:
-            records = amdsmi_interface.amdsmi_get_nic_hwmon_sensors(nic_handle)
+            return amdsmi_interface.amdsmi_get_nic_hwmon_sensors(nic_handle)
         except amdsmi_exception.AmdSmiLibraryException as e:
             logging.debug("Failed to get hwmon sensors for nic %s | %s", nic_id, e.get_error_info())
-            records = []
+            return []
 
+    def _nic_temperatures(self, records):
+        """The ASIC and board temperatures, picked out of the NIC's hwmon temperature readings."""
         readings_by_instance = {}
         for record in records:
             if record["category"] == "TEMPERATURE" and record["attribute"] == _NIC_SENSOR_READING:
@@ -3384,14 +3386,8 @@ class MetricCommands:
                 break
         return temperatures
 
-    def _nic_sensors(self, nic_handle, nic_id):
+    def _nic_sensors(self, records):
         """One SENSOR_<n> block per hwmon sensor of a NIC, grouping its records and thresholds."""
-        try:
-            records = amdsmi_interface.amdsmi_get_nic_hwmon_sensors(nic_handle)
-        except amdsmi_exception.AmdSmiLibraryException as e:
-            logging.debug("Failed to get hwmon sensors for nic %s | %s", nic_id, e.get_error_info())
-            return {}
-
         groups = {}
         for record in records:
             key = (record["instance"], record["category"], record["channel"])
@@ -3506,11 +3502,12 @@ class MetricCommands:
         except amdsmi_exception.AmdSmiLibraryException as e:
             logging.debug("Failed to get telemetry for nic %s | %s", nic_id, e.get_error_info())
         # Same shape as the GPU temperature section: "ASIC: 27 °C" in text, value and unit in JSON.
-        values["temperature"] = self._nic_temperatures(args.nic, nic_id)
+        hwmon_records = self._nic_hwmon_records(args.nic, nic_id)
+        values["temperature"] = self._nic_temperatures(hwmon_records)
         values.update(telemetry)
 
         if getattr(args, "sensors", False):
-            sensors = self._nic_sensors(args.nic, nic_id)
+            sensors = self._nic_sensors(hwmon_records)
             if sensors and self.logger.is_csv_format():
                 values.update(_flatten_with_prefix(sensors, ""))
             elif sensors:

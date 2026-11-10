@@ -88,10 +88,17 @@ void TestHWTopologyRead::Run(void) {
     amdsmi_link_type_t null_type;
     amdsmi_p2p_capability_t null_cap;
     uint64_t null_hops;
+    // The hop count is optional: leaving it out must change neither the status nor the type.
+    amdsmi_link_type_t type_with_hops;
+    uint64_t hops_with_type;
+    const auto with_hops_status = amdsmi_topo_get_link_type(
+        processor_handles_[0], processor_handles_[0], &hops_with_type, &type_with_hops);
     const auto null_hops_status = amdsmi_topo_get_link_type(
         processor_handles_[0], processor_handles_[0], nullptr, &null_type);
-    EXPECT_TRUE((null_hops_status == AMDSMI_STATUS_SUCCESS) ||
-                (null_hops_status == AMDSMI_STATUS_NOT_SUPPORTED));
+    EXPECT_EQ(null_hops_status, with_hops_status);
+    if (null_hops_status == AMDSMI_STATUS_SUCCESS) {
+      EXPECT_EQ(null_type, type_with_hops);
+    }
     ASSERT_EQ(amdsmi_topo_get_link_type(processor_handles_[0], processor_handles_[0], &null_hops,
                                         nullptr),
               AMDSMI_STATUS_INVAL);

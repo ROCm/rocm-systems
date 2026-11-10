@@ -110,6 +110,12 @@ class TestMetricNicSensors(unittest.TestCase):
         stored = command.logger.store_ainic_output.call_args[0]
         return stored[2], get_sensors
 
+    def test_the_hwmon_records_are_read_once_per_nic(self):
+        for sensors in (True, False):
+            with self.subTest(sensors=sensors):
+                _, get_sensors = self._run(_IONIC_RECORDS, sensors=sensors)
+                self.assertEqual(get_sensors.call_count, 1)
+
     def test_text_numbers_one_block_per_sensor_in_c_v_w(self):
         values, _ = self._run(_IONIC_RECORDS)
         self.assertEqual(

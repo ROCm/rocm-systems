@@ -1,7 +1,7 @@
+// Copyright Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
+
 /*
- * Copyright Advanced Micro Devices, Inc.
- *
  * Performance benchmark for NIC transport backends
  *
  * Compares ioctl vs netlink performance for ethtool operations.

@@ -1,7 +1,7 @@
+// Copyright Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
+
 /*
- * Copyright Advanced Micro Devices, Inc.
- *
  * Pass/fail counting shared by the standalone NIC suites (test_nic_*_suite.cpp). Each suite is its
  * own executable, so the inline counters are per process.
  */

@@ -1,7 +1,7 @@
+// Copyright Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
+
 /*
- * Copyright Advanced Micro Devices, Inc.
- *
  * Implementation of RAII wrappers for libnl-3 netlink library
  */
 
@@ -220,14 +220,35 @@ int NLAttributes::parse(struct nlmsghdr* nlh, int hdrlen, struct nlattr** tb, in
   return nlmsg_parse(nlh, hdrlen, tb, maxtype, policy);
 }
 
-uint32_t NLAttributes::get_u32(struct nlattr* attr) { return attr ? nla_get_u32(attr) : 0; }
+namespace {
 
-uint16_t NLAttributes::get_u16(struct nlattr* attr) { return attr ? nla_get_u16(attr) : 0; }
+// Parsing without an nla_policy does not check attribute lengths, so a getter that reads a fixed
+// width has to.
+auto is_payload_at_least(const struct nlattr* attr, size_t size) -> bool {
+  return ((attr != nullptr) && (static_cast<size_t>(nla_len(attr)) >= size));
+}
 
-uint8_t NLAttributes::get_u8(struct nlattr* attr) { return attr ? nla_get_u8(attr) : 0; }
+}  // namespace
+
+uint32_t NLAttributes::get_u32(struct nlattr* attr) {
+  return is_payload_at_least(attr, sizeof(uint32_t)) ? nla_get_u32(attr) : 0;
+}
+
+uint16_t NLAttributes::get_u16(struct nlattr* attr) {
+  return is_payload_at_least(attr, sizeof(uint16_t)) ? nla_get_u16(attr) : 0;
+}
+
+uint8_t NLAttributes::get_u8(struct nlattr* attr) {
+  return is_payload_at_least(attr, sizeof(uint8_t)) ? nla_get_u8(attr) : 0;
+}
 
 const char* NLAttributes::get_string(struct nlattr* attr) {
-  return attr ? nla_get_string(attr) : "";
+  // nla_get_string() reads up to a NUL, which nothing guarantees without a policy.
+  if ((attr == nullptr) ||
+      (std::memchr(nla_data(attr), '\0', static_cast<size_t>(nla_len(attr))) == nullptr)) {
+    return "";
+  }
+  return nla_get_string(attr);
 }
 
 bool NLAttributes::is_present(struct nlattr* attr) { return attr != nullptr; }

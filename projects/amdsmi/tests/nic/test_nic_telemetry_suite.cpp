@@ -1,7 +1,7 @@
+// Copyright Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
+
 /*
- * Copyright Advanced Micro Devices, Inc.
- *
  * Unit tests for the NIC telemetry facade (health / port-split).
  *
  * These tests need no hardware and no root: devlink is exercised through a fake
@@ -830,6 +830,21 @@ static void test_hwmon_scan_ionic_layout() {
   check("power unit is microwatts", records[4].unit == hw::Unit_t::MicroWatt);
 }
 
+// A label is device text: an escape sequence in it must not reach a terminal or a JSON consumer.
+static void test_hwmon_scan_makes_a_label_printable() {
+  std::cout << "\nHwmon scan: control bytes in a label are replaced\n";
+  write_sysfs_file("scan_label/hwmon0/temp1_input", "37000\n");
+  write_sysfs_file("scan_label/hwmon0/temp1_label", "board\x1b[31m temp\r\n");
+  const auto records = hw::scan_sensors(g_tmpdir + "/scan_label");
+
+  check("one record", records.size() == 1, "got " + std::to_string(records.size()));
+  if (records.size() != 1) {
+    return;
+  }
+  check("the escape and the carriage return become question marks",
+        records[0].label == "board?[31m temp?", records[0].label);
+}
+
 // File set of a bnxt_en hwmon node as listed on b20-31.
 static void test_hwmon_scan_bnxt_layout_reports_shutdown_and_alarms() {
   std::cout << "\nHwmon scan: bnxt node with shutdown threshold and alarm files\n";
@@ -966,6 +981,7 @@ int main() {
   test_snapshot_mixed();
   test_snapshot_all_unsupported();
   test_hwmon_scan_ionic_layout();
+  test_hwmon_scan_makes_a_label_printable();
   test_hwmon_scan_bnxt_layout_reports_shutdown_and_alarms();
   test_hwmon_scan_two_instances_stay_distinct();
   test_hwmon_scan_missing_label_is_empty();

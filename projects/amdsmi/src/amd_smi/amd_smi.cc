@@ -1143,9 +1143,19 @@ amdsmi_status_t amdsmi_get_nic_hwmon_sensors(amdsmi_processor_handle processor_h
 
 amdsmi_status_t amdsmi_get_nic_device_bdf(amdsmi_processor_handle processor_handle,
                                           amdsmi_bdf_t* bdf) {
-  (void)processor_handle;
-  (void)bdf;
-  return AMDSMI_STATUS_NOT_YET_IMPLEMENTED;
+  AMDSMI_CHECK_INIT();
+
+  if (bdf == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  uint64_t bdf_int = 0;
+  amdsmi_status_t status = get_nic_bdf(processor_handle, &bdf_int);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    return status;
+  }
+  bdf->as_uint = bdf_int;
+  return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t amdsmi_get_nic_port_statistics(amdsmi_processor_handle processor_handle,

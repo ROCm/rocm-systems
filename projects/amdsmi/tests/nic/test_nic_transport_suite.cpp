@@ -1,7 +1,7 @@
+// Copyright Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
+
 /*
- * Copyright Advanced Micro Devices, Inc.
- *
  * Comprehensive test suite for NIC transport layer
  *
  * Tests all three backends (ioctl, netlink, auto) and validates:

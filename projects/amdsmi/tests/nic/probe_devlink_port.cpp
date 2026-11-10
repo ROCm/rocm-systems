@@ -1,7 +1,7 @@
+// Copyright Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
+
 /*
- * Copyright Advanced Micro Devices, Inc.
- *
  * Live devlink port-split probe.
  *
  * Exercises the real DevlinkNetlinkClient against a live kernel: queries the

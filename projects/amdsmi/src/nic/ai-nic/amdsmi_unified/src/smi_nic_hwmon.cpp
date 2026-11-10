@@ -15,6 +15,8 @@
 #include <tuple>
 #include <utility>
 
+#include "smi_nic_text.h"
+
 namespace amd::smi::nic::hwmon {
 
 namespace {
@@ -185,7 +187,7 @@ auto scan_sensors(const std::string& hwmon_root) -> std::vector<SensorRecord_t> 
         auto label = read_first_line(it->path());
         if (label.has_value()) {
           labels[std::make_pair(parsed->kind->category, parsed->channel)] =
-              std::move(label.value());
+              text::printable_ascii(std::move(label.value()));
         }
         continue;
       }
