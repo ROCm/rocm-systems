@@ -32,6 +32,7 @@
 #include "rocjitsu/hooks/virtual_lds.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "util/arena_alloc.h"
+#include "util/diagnostic.h"
 #include "util/intrusive_list.h"
 #include "util/log.h"
 
@@ -364,7 +365,15 @@ void restore_signal_backtrace_handlers() {
 [[nodiscard]] std::optional<HookConfig> parse_config() {
   std::optional<rocjitsu::config::DbtGuestConfig> dbt_guest;
   try {
-    dbt_guest = rocjitsu::config::load_dbt_guest_config_from_runtime_config();
+    util::StringDiagnostic diagnostic;
+    auto maybe_dbt_guest =
+        rocjitsu::config::load_dbt_guest_config_from_runtime_config(diagnostic.emitter());
+    if (maybe_dbt_guest.failed()) {
+      std::fprintf(stderr, "[rocjitsu-hooks] failed to load runtime config: %s\n",
+                   diagnostic.message().c_str());
+      return std::nullopt;
+    }
+    dbt_guest = std::move(maybe_dbt_guest.value());
   } catch (const std::exception &error) {
     std::fprintf(stderr, "[rocjitsu-hooks] failed to load runtime config: %s\n", error.what());
     return std::nullopt;
@@ -578,6 +587,8 @@ void trace_virtual_lds_kernarg(uint64_t packet_id, const void *kernarg, size_t s
     return "kernel-skipped";
   case DiagnosticKind::ResidualRewrite:
     return "residual-rewrite";
+  case DiagnosticKind::InternalError:
+    return "internal-error";
   }
   return "unknown";
 }

@@ -84,6 +84,7 @@ static ncclResult_t ncclReduceScatterDdaFabricLL128Typed(const void* sendbuff, v
        "(warp-per-slice, bankSize=%zu)",
        nRanks, shardBytes, slices, grid.x, block.x, bankSize);
 
+  const dda::common::DdaKernelParams params{comm->abortFlagDev};
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   // NRANKS_CT 4/8: unrolled peer loops; 0: runtime fallback.
   switch (nRanks) {
@@ -91,19 +92,19 @@ static ncclResult_t ncclReduceScatterDdaFabricLL128Typed(const void* sendbuff, v
     hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL128<T, 4>), grid, block, 0, stream,
                           /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff),
                           static_cast<const T*>(sendbuff), shardBytes, comm->rank, nRanks, epochDev, epochLen, slices,
-                          bankSize);
+                          bankSize, params);
     break;
   case 8:
     hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL128<T, 8>), grid, block, 0, stream,
                           /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff),
                           static_cast<const T*>(sendbuff), shardBytes, comm->rank, nRanks, epochDev, epochLen, slices,
-                          bankSize);
+                          bankSize, params);
     break;
   default:
     hipExtLaunchKernelGGL((dda::common::ddaReduceScatterFabricLL128<T, 0>), grid, block, 0, stream,
                           /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff),
                           static_cast<const T*>(sendbuff), shardBytes, comm->rank, nRanks, epochDev, epochLen, slices,
-                          bankSize);
+                          bankSize, params);
     break;
   }
 
@@ -116,9 +117,6 @@ static ncclResult_t ncclReduceScatterDdaFabricLL128Typed(const void* sendbuff, v
 
 bool ncclReduceScatterDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t recvcount,
                                              ncclDataType_t datatype, ncclRedOp_t op) {
-  if (!rcclParamDdaLL()) {
-    return false;
-  }
   if (comm == nullptr || comm->bootstrap == nullptr) {
     return false;
   }

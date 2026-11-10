@@ -14,7 +14,7 @@ from amdisa.codegen.execute.simd_codegen import (
 )
 from amdisa.cross_isa import SharedInstInfo, SharedInstructionPlan
 from amdisa.gpuisa import InstEncoding, Instruction, Operand
-from amdisa.isa_profile import Cdna5Profile, Rdna4Profile
+from amdisa.isa_profile import Cdna4Profile, Cdna5Profile, Rdna4Profile
 from amdisa.parser import Parser, _uniquify_fieldless_names
 from amdisa.semantics import InstructionSemantics
 
@@ -700,21 +700,19 @@ def test_scalar_fmamk_generated_execute_uses_literal_multiplier():
 
     body = codegen._gen_execute_body(inst, sem, 'ENC_SOP2')
 
-    assert 'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0))' in body
-    assert (
-        'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(simm32))' in body
-    )
-    assert 'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1))' in body
-    assert body.index('amdgpu::RegisterAccess(wf).read_scalar(simm32)') < body.index(
-        'amdgpu::RegisterAccess(wf).read_scalar(ssrc1)'
-    )
+    assert 'rj_arith_s_fmamk_f32(' in body
+    assert 'input0 = registers.read_scalar(ssrc0)' in body
+    assert 'input1 = registers.read_scalar(simm32)' in body
+    assert 'input2 = registers.read_scalar(ssrc1)' in body
+    assert '&result, input0, input1, input2,' in body
 
 
-def test_vector_fmaak_execute_uses_fieldless_simm32_operand():
+@pytest.mark.parametrize('arch', ['rdna4', 'cdna5'])
+def test_vector_fmaak_execute_uses_fieldless_simm32_operand(arch):
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
-        arch_name='rdna4',
-        profile=Rdna4Profile(),
+        arch_name=arch,
+        profile=Rdna4Profile() if arch == 'rdna4' else Cdna5Profile(),
         inst_encodings=[],
         encoding_map={},
     )
@@ -733,7 +731,11 @@ def test_vector_fmaak_execute_uses_fieldless_simm32_operand():
 
     body = codegen._gen_execute_body(inst, sem, 'ENC_VOP2')
 
-    assert 'std::bit_cast<float>(simm32.encoding_value_)' in body
+    if arch == 'rdna4':
+        assert 'amdgpu::arith::execute_float_fma32' in body
+        assert 'vdst, src0, vsrc1, simm32,' in body
+    else:
+        assert 'std::bit_cast<float>(simm32.encoding_value_)' in body
     assert 'simm32_' not in body
 
 
@@ -789,11 +791,12 @@ def test_scalar_mul_u64_generated_execute_reads_full_source_pairs():
 
     body = codegen._gen_execute_body(inst, sem, 'ENC_SOP2')
 
-    assert 'amdgpu::RegisterAccess(wf).read_scalar64(ssrc0)' in body
-    assert 'amdgpu::RegisterAccess(wf).read_scalar64(ssrc1)' in body
-    assert 'amdgpu::RegisterAccess(wf).write_scalar64(sdst, result);' in body
-    assert 'amdgpu::RegisterAccess(wf).read_scalar(ssrc0)' not in body
-    assert 'amdgpu::RegisterAccess(wf).read_scalar(ssrc1)' not in body
+    assert 'registers.read_scalar64(ssrc0)' in body
+    assert 'registers.read_scalar64(ssrc1)' in body
+    assert 'registers.write_scalar64(sdst, result);' in body
+    assert 'rj_arith_s_mul_u64(' in body
+    assert 'registers.read_scalar(ssrc0)' not in body
+    assert 'registers.read_scalar(ssrc1)' not in body
 
 
 def test_scalar_addpc_generated_execute_uses_unsigned_pc_addition():
@@ -812,6 +815,155 @@ def test_scalar_addpc_generated_execute_uses_unsigned_pc_addition():
 
     assert body == '  wf.pc += amdgpu::RegisterAccess(wf).read_scalar64(ssrc0);'
     assert 'int64_t' not in body
+
+
+def _cdna4_codegen() -> CodeGenerator:
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name='cdna4',
+        profile=Cdna4Profile(),
+        inst_encodings=[],
+        encoding_map={},
+    )
+    return codegen
+
+
+@pytest.mark.parametrize(
+    'arch_name,profile,pc_mask,has_rel32_tag',
+    [
+        ('cdna4', Cdna4Profile, '0x0000FFFFFFFFFFFFULL', True),
+        ('rdna4', Rdna4Profile, '0x0000FFFFFFFFFFFFULL', True),
+        ('cdna5', Cdna5Profile, '0x01FFFFFFFFFFFFFFULL', False),
+    ],
+)
+@pytest.mark.parametrize('operation', ['scalar_setpc', 'scalar_swappc'])
+def test_scalar_pc_target_decoding_preserves_raw_address_width(
+    arch_name, profile, pc_mask, has_rel32_tag, operation
+):
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name=arch_name,
+        profile=profile(),
+        inst_encodings=[],
+        encoding_map={},
+    )
+    operands = [_operand('ssrc0', 'OPR_SSRC', size=64, order=1)]
+    if operation == 'scalar_swappc':
+        operands.insert(
+            0,
+            _operand(
+                'sdst',
+                'OPR_SDST',
+                size=64,
+                is_input=False,
+                is_output=True,
+                order=0,
+            ),
+        )
+    name = 'S_SETPC_B64' if operation == 'scalar_setpc' else 'S_SWAPPC_B64'
+    inst = Instruction(name, 'ENC_SOP1', opcode=0, operands=operands)
+
+    body = codegen._gen_execute_body(
+        inst, InstructionSemantics(name, operation), 'ENC_SOP1'
+    )
+
+    assert f'constexpr uint64_t kPcAddressMask = {pc_mask};' in body
+    assert 'uint64_t target = encoded & kPcAddressMask;' in body
+    assert ('if (encoded >> 32 == 0x1FFFFu' in body) == has_rel32_tag
+    assert 'encoded >> 32 == 0xFFFFFFFFu' not in body
+    assert 'target |= ~kPcAddressMask' not in body
+    assert body.count('wf.pc = target - size_;') == 1
+    if operation == 'scalar_swappc':
+        assert body.index('wf.pc = target - size_;') < body.index(
+            'write_scalar64(sdst, next_pc)'
+        )
+
+
+def test_cbranch_fork_generated_execute_reads_mask_and_target_operands():
+    codegen = _cdna4_codegen()
+    i_fork = Instruction(
+        'S_CBRANCH_I_FORK',
+        'ENC_SOPK',
+        opcode=16,
+        operands=[
+            _operand('sdst', 'OPR_SDST', size=64, order=1),
+            _operand('simm16', 'OPR_LABEL', size=16, order=2),
+        ],
+    )
+    g_fork = Instruction(
+        'S_CBRANCH_G_FORK',
+        'ENC_SOP2',
+        opcode=41,
+        operands=[
+            _operand('ssrc0', 'OPR_SSRC_NOLIT', size=64, order=1),
+            _operand('ssrc1', 'OPR_SSRC_NOLIT', size=64, order=2),
+        ],
+    )
+
+    i_body = codegen._gen_execute_body(
+        i_fork,
+        InstructionSemantics('S_CBRANCH_I_FORK', 'cbranch_fork', operation='direct'),
+        'ENC_SOPK',
+    )
+    g_body = codegen._gen_execute_body(
+        g_fork,
+        InstructionSemantics('S_CBRANCH_G_FORK', 'cbranch_fork', operation='indirect'),
+        'ENC_SOP2',
+    )
+
+    assert 'compare = amdgpu::RegisterAccess(wf).read_scalar64(sdst);' in i_body
+    assert 'static_cast<int16_t>(simm16.encoding_value_)' in i_body
+    assert 'compare = amdgpu::RegisterAccess(wf).read_scalar64(ssrc0);' in g_body
+    assert 'encoded = amdgpu::RegisterAccess(wf).read_scalar64(ssrc1);' in g_body
+    assert 'constexpr uint64_t kPcAddressMask = 0x0000FFFFFFFFFFFFULL;' in g_body
+    assert 'uint64_t target = encoded & kPcAddressMask;' in g_body
+    assert 'if (encoded >> 32 == 0x1FFFFu && wf.code_load_bias() != 0)' in g_body
+    assert 'encoded >> 32 == 0xFFFFFFFFu' not in g_body
+    assert 'target |= ~kPcAddressMask' not in g_body
+    assert g_body.count('wf.pc =') == 1
+    for body in (i_body, g_body):
+        assert body.endswith(
+            '  wf.pc = amdgpu::cbranch_fork(wf, compare, target, wf.pc + size_) - size_;'
+        )
+
+
+def test_cbranch_join_generated_execute_reads_saved_csp_from_ssrc0():
+    codegen = _cdna4_codegen()
+    join = Instruction(
+        'S_CBRANCH_JOIN',
+        'ENC_SOP1',
+        opcode=46,
+        operands=[
+            _operand('ssrc0', 'OPR_SREG', order=1),
+            _operand(
+                'sdst_exec',
+                'OPR_SDST_EXEC',
+                size=64,
+                is_input=False,
+                is_output=True,
+                order=2,
+                fieldless=True,
+            ),
+            _operand(
+                'pc',
+                'OPR_PC',
+                size=64,
+                is_input=False,
+                is_output=True,
+                order=3,
+                fieldless=True,
+            ),
+        ],
+    )
+
+    body = codegen._gen_execute_body(
+        join, InstructionSemantics('S_CBRANCH_JOIN', 'cbranch_join'), 'ENC_SOP1'
+    )
+
+    assert body == (
+        '  const uint32_t saved_csp = amdgpu::RegisterAccess(wf).read_scalar(ssrc0);\n'
+        '  wf.pc = amdgpu::cbranch_join(wf, saved_csp, wf.pc + size_) - size_;'
+    )
 
 
 def test_literal_fma_can_share_with_matching_operand_layouts_only():
@@ -929,4 +1081,5 @@ def test_inline_literal_fma_emits_body_with_literal_source():
     cg = _fma_codegen()
     sem = InstructionSemantics('V_FMAMK_F32', 'vector_fmamk', data_type='f32')
     body = cg._gen_execute_body(_fma_inst(with_simm32=True), sem, 'ENC_VOP2')
-    assert 'simm32.encoding_value_' in body
+    assert 'amdgpu::arith::execute_float_fma32' in body
+    assert 'vdst, src0, simm32, vsrc1,' in body

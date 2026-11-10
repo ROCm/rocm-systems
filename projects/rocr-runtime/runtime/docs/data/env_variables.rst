@@ -89,10 +89,10 @@
         | 1: Enable
 
     * - | ``HSA_OVERRIDE_CPU_AFFINITY_DEBUG``
-        | Controls whether ROCm helper threads inherit the parent process's CPU affinity mask.
+        | Controls the CPU affinity of ROCm helper threads.
       - ``1``
-      - | 0: Enable inheritance. Helper threads use the parent process's core affinity mask, which should be set with enough cores for all threads.
-        | 1: Disable inheritance. Helper threads spawn on all available cores, ignoring the parent's affinity settings, which may affect performance in certain environments.
+      - | 0: Helper threads inherit the exact CPU affinity mask of the thread that creates them, which should include enough cores for all threads.
+        | 1: Helper threads may run on every CPU of the NUMA node(s) that the creating thread is allowed to run on. If the creating thread is unrestricted, helper threads may run on all CPUs. This keeps helper threads in the same NUMA domain(s) as an application that binds itself to specific cores.
 
     * - | ``HSA_ENABLE_DEBUG``
         | Enables additional debug information and validation in the runtime.
@@ -107,10 +107,10 @@
         | Any other value: Automatically load the HotSwap tool when a supported agent is present.
 
     * - | ``HSA_DISABLE_GFX12_STRICT``
-        | Controls reporting of the "strict" ISA variant on A0 silicon. Disabled by default, so the agent keeps the base target. Set to 0 to opt in and have the agent report the strict variant instead.
-      - ``1``
-      - | 0: Report the strict ISA variant on A0 agents.
-        | 1, unset, empty, or any other value: Keep the base target on A0 agents.
+        | Controls reporting of the "strict" ISA variant on A0 silicon. Enabled by default, so the agent reports the strict variant and accepts native strict code objects. Set to 1 as an emergency kill switch to fall back to the base target.
+      - ``0``
+      - | 1: Keep the base target on A0 agents.
+        | 0, unset, or any other value: Report the strict ISA variant on A0 agents.
 
     * - | ``HSA_HOTSWAP_VERBOSE``
         | Enables HotSwap diagnostic logging to stderr. Read by the HotSwap tool itself, not by the runtime, so it has no effect unless the tool is loaded. Errors are always reported regardless of this setting.

@@ -27,3 +27,7 @@ void ResetRcclArchThresholdsFakes() {
   g_archThresholdsTable[RCCL_TUNING_PARTITION_SPX] = nullptr;
   g_archThresholdsTable[RCCL_TUNING_PARTITION_DPX] = nullptr;
 }
+
+bool rcclWindowFits(size_t totalBytes, size_t minBytes, size_t maxBytes) {
+  return maxBytes > 0 && totalBytes >= minBytes && totalBytes <= maxBytes;
+}

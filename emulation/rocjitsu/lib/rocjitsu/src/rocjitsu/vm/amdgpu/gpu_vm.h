@@ -8,7 +8,9 @@
 
 #include "rocjitsu/vm/amdgpu/gpu_handles.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
+#include "rocjitsu/vm/amdgpu/vm_mutation_epoch.h"
 #include "util/distributed_shared_mutex.h"
+#include "util/intrusive_shared_ptr.h"
 
 #include <array>
 #include <atomic>
@@ -367,12 +369,12 @@ struct VmMtypeSnapshot {
   bool may_batch_private_ram = false;
   uint64_t begin = 0;
   uint64_t size = 0;
-  std::shared_ptr<const std::atomic<uint64_t>> mutation_epoch{};
+  util::IntrusiveSharedPtr<const VmMutationEpoch> mutation_epoch{};
   uint64_t captured_epoch = 0;
 
   [[nodiscard]] bool unchanged(uint64_t address) const {
     return address >= begin && address - begin < size && mutation_epoch &&
-           captured_epoch == mutation_epoch->load(std::memory_order_acquire);
+           captured_epoch == mutation_epoch->value.load(std::memory_order_acquire);
   }
 };
 
@@ -404,12 +406,18 @@ public:
 
 private:
   friend class GpuVmAccess;
-  static constexpr std::size_t kSnapshotCount = 64;
+  static constexpr std::size_t kSnapshotCount = 128;
   using Snapshots = std::array<VmMtypeSnapshot, kSnapshotCount>;
+  // Interleaved lanes revisit short page runs in widely separated rows.
+  // Offset each 128-page block by eight slots to separate those runs without
+  // mirroring adjacent pages at block boundaries; adding page >> 10 spreads
+  // 4 MiB strides. Runs of up to 119 pages are conflict-free, but pages about
+  // 120 apart can alias. Range and mutation-token checks validate every hit.
+  [[nodiscard]] static std::size_t snapshot_index(uint64_t address) {
+    const uint64_t page = address >> 12;
+    return (page + ((page >> 7) << 3) + (page >> 10)) % kSnapshotCount;
+  }
   std::weak_ptr<GpuVmAccessState> access_state_;
-  // Interleaved lanes can revisit several pages in one request.
-  // Hashing by 4 KiB page avoids discarding their copied policy on every lane;
-  // each snapshot still validates its translator-provided range and epoch.
   std::unique_ptr<Snapshots> snapshots_;
 };
 
@@ -721,6 +729,9 @@ private:
   AddressSpaceInfo info_;
   std::shared_ptr<GpuVmAccessState> access_state_;
 };
+
+/// @brief Shared snapshot storage with metadata isolated from reference-count updates.
+using GpuVmAccessSnapshot = util::RefCountedCacheAligned<GpuVmAccess>;
 
 /// @brief Owns GPU address-space identities independently of their front end.
 ///

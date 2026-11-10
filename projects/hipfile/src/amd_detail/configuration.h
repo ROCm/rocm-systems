@@ -13,6 +13,7 @@ class Configuration {
 
     std::optional<bool> m_fastpath_override;
     std::optional<bool> m_fallback_override;
+    std::optional<bool> m_host_override;
 
 public:
     virtual ~Configuration() = default;
@@ -23,8 +24,9 @@ public:
 
     /// @brief Override fastpath backend enablement.
     ///
-    /// If hipAmdFileRead/hipAmdFileWrite are not available fastpath() will
-    /// return false even if fastpath(true) is called.
+    /// If hipAmdFileRead/hipAmdFileWrite are not available, or ROCr is running
+    /// on WSL2 (/dev/dxg), fastpath() will return false even if fastpath(true)
+    /// is called.
     virtual void fastpath(bool enabled) noexcept;
 
     /// @brief Checks if the fallback backend is enabled
@@ -46,6 +48,13 @@ public:
     /// @brief Gets the size of the async buffer used for I/O operations
     /// @return the size of the async buffer in bytes
     virtual size_t asyncBufferSize() const noexcept;
+
+    /// @brief Checks if the host backend is enabled
+    /// @return true if the host backend is enabled, false otherwise
+    virtual bool host() const noexcept;
+
+    /// @brief Override host backend enablement
+    virtual void host(bool enabled) noexcept;
 };
 
 }

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-//! Host-only backing and host cache operations.
+//! Host-only backing and address reservations.
 //!
 //! These operations do not activate an endpoint or establish device access.
 //! A CPU executing host code can use this backing independently of whether it
@@ -15,7 +15,6 @@
 
 use crate::Error;
 use crate::ErrorKind;
-use crate::cpu_cache;
 use crate::memory::storage::Shared;
 use crate::os;
 
@@ -230,40 +229,4 @@ impl HostAllocation {
 /// Returns a native error if the platform does not report a valid page size.
 pub fn host_page_size() -> Result<u64, Error> {
     os::host_page_size()
-}
-
-/// Qualifies explicit host-cache maintenance and returns its line granularity.
-/// The adapter uses success to advertise a mapping's maintenance recipe. A
-/// backend qualifies both an available maintenance operation and its exact
-/// granularity; this call opens no native endpoint and allocates no metadata.
-///
-/// # Errors
-/// Returns `Unsupported` when the target has no implemented recipe or lacks the
-/// required instruction and valid line size. Callers must not advertise a cache
-/// operation using an unqualified nominal hardware line size.
-pub fn host_cache_line_size() -> Result<u32, Error> {
-    cpu_cache::cache_line_size()
-}
-/// Executes the qualified host-cache maintenance recipe over a nonempty host
-/// range. The backend provides the writeback, invalidation, and ordering
-/// sequence required by the current host architecture. The adapter checks
-/// mapping permissions and handles any public empty-range no-op before calling
-/// this bridge. This operation neither waits for device work nor supplies its
-/// retirement. A zero `line_size` selects an ordering-only recipe for a
-/// write-combined view; nonzero values select the qualified write-back recipe.
-///
-/// # Errors
-/// Rejects an unsupported recipe, a line size different from the qualified
-/// value, a null address, an empty range, or numeric address overflow before
-/// executing cache instructions. Address validity itself is a caller obligation.
-///
-/// # Safety
-/// Every intersecting cache line, including bytes outside the logical range,
-/// must remain mapped through the call. The caller must externally synchronize
-/// access to those complete lines and prevent concurrent unmapping.
-#[allow(unsafe_code)]
-pub unsafe fn host_cache_control(pointer: usize, length: u64, line_size: u32) -> Result<(), Error> {
-    // SAFETY: The public caller provides the live mapped range required by the
-    // private native boundary; the backend validates the numeric extent.
-    unsafe { cpu_cache::cache_control(pointer, length, line_size) }
 }

@@ -4,10 +4,10 @@
 #pragma once
 
 #include "aql_queue.h"
+#include "config_test_util.h"
 #include "decode_test_util.h"
 #include "halt_snapshot_plugin.h"
 
-#include "embedded_schema.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/kernel_descriptor_abi.h"
@@ -62,7 +62,6 @@
 #include <optional>
 #include <set>
 #include <shared_mutex>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -112,16 +111,18 @@ struct Gfx1250Sim {
   std::shared_ptr<ExecutionPluginGroup> plugin_group;
   test::HaltSnapshotPlugin *snapshot = nullptr;
 
-  Gfx1250Sim() : loaded(config::load_config(kGfx1250ConfigPath, rocjitsu::kEmbeddedSchema)) {
-    build();
+  void initialize() {
+    ASSERT_TRUE(load_valid_config(kGfx1250ConfigPath, loaded));
+    ASSERT_NO_FATAL_FAILURE(build());
   }
 
-  explicit Gfx1250Sim(const std::string &config_json)
-      : loaded(config::load_config_from_string(config_json, rocjitsu::kEmbeddedSchema)) {
-    build();
+  void initialize(const std::string &config_json) {
+    ASSERT_TRUE(load_valid_config_from_string(config_json, loaded));
+    ASSERT_NO_FATAL_FAILURE(build());
   }
 
   void build() {
+    util::StringDiagnostic admission_diagnostic;
     soc = loaded.soc();
     memory = loaded.memory();
     // This fixture drives the engine directly and inspects single-partition
@@ -130,8 +131,10 @@ struct Gfx1250Sim {
     loaded.engine_config.num_threads = 1;
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
     engine->topology().set_root(loaded.take_root());
-    loaded.wire_links(engine->topology());
-    engine->create();
+    ASSERT_TRUE(loaded.wire_links(engine->topology(), admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
+    ASSERT_TRUE(engine->create(admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
     // Capture every wavefront's final register state at halt. A wave frees its
     // registers at s_endpgm, so tests that run a kernel to completion read the
     // result from the snapshot rather than the (freed) slot.
@@ -268,6 +271,7 @@ enum class VopdOp : uint16_t {
   CndmaskB32 = 9,
   FmaF32 = 19,
   FmaF64 = 32,
+  AddF64 = 33,
 };
 
 struct VopdSlot {

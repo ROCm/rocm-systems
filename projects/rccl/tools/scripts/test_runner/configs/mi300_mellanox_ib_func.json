@@ -207,7 +207,7 @@
       ]
     },
     "cast_multithread": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 600,
       "command_args": "--net_ib_nthreads=4",
       "env_variables": {
@@ -229,7 +229,7 @@
       ]
     },
     "fault_inject_multithread": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 600,
       "command_args": "--net_ib_nthreads=4",
       "env_variables": {
@@ -286,6 +286,60 @@
           "name": "GdrFlush_RepeatedFlushBurst",
           "description": "50-iteration GPU recv+flush burst over the dma-buf scratchpad; an intermittent QP async-fatal would surface as a non-success flush. The whole burst must stay clean.",
           "test_filter": "GdrFlushTest.RepeatedFlush_NoFaultBurst"
+        }
+      ]
+    },
+    "net_ib_gdr_flush_flag_base": {
+      "extends": "net_ib_base",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 1200,
+      "description": "Shared env for remote GDR flush flag suites. Carries no tests: extends merges test lists, so children would inherit them.",
+      "env_variables": {
+        "RCCL_IB_GDR_FLUSH_FLAG": "1",
+        "NCCL_IB_ADAPTIVE_ROUTING": "0"
+      }
+    },
+    "net_ib_gdr_flush_flag": {
+      "extends": "net_ib_gdr_flush_flag_base",
+      "tests": [
+        {
+          "name": "GdrFlushFlag_DefaultQps",
+          "description": "Remote GDR flush flag with default QPs. GdrFlushFlagTest needs 2 ranks; GdrFlushFlagProtoSwitchMPITest needs 2 nodes.",
+          "test_filter": "GdrFlushFlagTest.*:GdrFlushTest.*:GdrFlushFlagProtoSwitchMPITest.*-GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
+        },
+        {
+          "name": "GdrFlushFlag_FusedNic",
+          "description": "Fused (two-NIC) device keeps the RDMA read flush. Its own process: the vNIC it makes stays in the device list, and later comms in the process would use it and run without the flag.",
+          "test_filter": "GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
+        }
+      ]
+    },
+    "net_ib_gdr_flush_flag_4qps": {
+      "extends": "net_ib_gdr_flush_flag_base",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "4"
+      },
+      "tests": [
+        {
+          "name": "GdrFlushFlag_4Qps",
+          "description": "Remote GDR flush flag over 4 QPs per connection: requests rotate over the QPs and each flag tracks its own QP.",
+          "test_filter": "GdrFlushFlagTest.*:GdrFlushFlagProtoSwitchMPITest.*-GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
+        }
+      ]
+    },
+    "net_ib_gdr_flush_flag_4qps_split": {
+      "extends": "net_ib_gdr_flush_flag_base",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "4",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
+      },
+      "tests": [
+        {
+          "name": "GdrFlushFlag_4QpsSplit",
+          "description": "Remote GDR flush flag over 4 QPs with NCCL_IB_SPLIT_DATA_ON_QPS=1: every request spans all 4 QPs, and the GPU waits on all 4 flags.",
+          "test_filter": "GdrFlushFlagTest.*:GdrFlushFlagProtoSwitchMPITest.*-GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
         }
       ]
     },
@@ -555,7 +609,7 @@
         }
       ]
     },
-    "cast_base": {
+    "cast_scheduler_base": {
       "extends": "net_ib_base",
       "num_nodes": 2,
       "num_gpus": 1,
@@ -565,11 +619,33 @@
         "RCCL_IB_QP_SCHED_WEIGHT": "0",
         "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "50",
         "RCCL_IB_QP_SCHED_RESET_INTERVAL": "60000",
-        "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN": "65536"
+        "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN": "65536",
+        "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME": "0"
       }
     },
+    "cast_setup": {
+      "extends": "net_ib_base",
+      "timeout": 120,
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "2",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
+      },
+      "tests": [
+        {
+          "name": "Cast_SetupUnilateralConnectFailureReported",
+          "description": "One invalid connect-side device must fail setup on both ranks without hanging",
+          "test_filter": "NetIbMPITest.CastSetupUnilateralConnectFailureReported"
+        },
+        {
+          "name": "Cast_SetupPeerFailurePropagates",
+          "description": "A post-connect failure must reach the healthy peer through setup reduction",
+          "test_filter": "NetIbMPITest.CastSetupPeerFailurePropagates"
+        }
+      ]
+    },
+
     "cast_wrr_split": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 120,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "2",
@@ -619,10 +695,11 @@
           "description": "regMr, regMrDmaBuf and deregMr reject a null communicator, and regMr rejects a zero size, instead of dereferencing it",
           "test_filter": "NetIbMPITest.CastRegistrationRejectsBadArguments"
         }
+
       ]
     },
     "cast_wrr_no_split": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 120,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "2",
@@ -661,7 +738,7 @@
       ]
     },
     "cast_single_qp": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 60,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "1",
@@ -676,7 +753,7 @@
       ]
     },
     "cast_four_qp": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 120,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "4",
@@ -696,7 +773,7 @@
       ]
     },
     "cast_max_qp": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 120,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "128",
@@ -711,7 +788,7 @@
       ]
     },
     "cast_stress": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 300,
       "env_variables": {
         "NCCL_IB_QPS_PER_CONNECTION": "2",
@@ -726,7 +803,7 @@
       ]
     },
     "fault_inject_cast": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 300,
       "env_variables": {
         "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
@@ -767,7 +844,7 @@
       ]
     },
     "resiliency_failover": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 300,
       "env_variables": {
         "NCCL_IB_RESILIENCY_PORT_FAILOVER": "1",
@@ -814,7 +891,7 @@
       ]
     },
     "resiliency_recovery": {
-      "extends": "cast_base",
+      "extends": "cast_scheduler_base",
       "timeout": 300,
       "env_variables": {
         "NCCL_IB_RESILIENCY_PORT_FAILOVER": "1",
@@ -879,6 +956,11 @@
           "name": "NetIB_Branch_NullCommClose",
           "description": "closeSend/closeRecv/closeListen on NULL comm returns ncclSuccess without crash",
           "test_filter": "NetIbMPITest.NullCommClose"
+        },
+        {
+          "name": "NetIB_Branch_NullCommCastDataPath",
+          "description": "IB-CAST isend/irecv/iflush reject a NULL comm instead of dereferencing it",
+          "test_filter": "NetIbMPITest.NullCommCastDataPath"
         },
         {
           "name": "NetIB_Branch_SetNetAttrNoOp",
@@ -1298,9 +1380,9 @@
           "test_filter": "RcclAlltoAllDecision.*"
         },
         {
-          "name": "RcclCeAr2ShotMax",
+          "name": "RcclCeNonRegMax",
           "description": "CE AllReduce 2-shot arch threshold upper-bound tests",
-          "test_filter": "RcclCeAr2ShotMax.*"
+          "test_filter": "RcclCeNonRegMax.*"
         },
         {
           "name": "RcclCeArGrownBuffer",
@@ -1780,6 +1862,11 @@
           "test_filter": "Register.ProcessIsolatedRegisterTests"
         },
         {
+          "name": "Register.P2pIpcSegmentReuse",
+          "description": "Verify a reused P2P IPC registration stays in bounds when the registered buffer spans multiple cuMem segments",
+          "test_filter": "Register.P2pIpcSegmentReuse"
+        },
+        {
           "name": "SendRecv.SinglePairs",
           "description": "SendRecv single pairs",
           "test_filter": "SendRecv.SinglePairs"
@@ -2032,6 +2119,21 @@
         {
           "name": "GinSdmaPolicy_AllTests",
           "description": "All GIN-SDMA AllReduce/put policy unit tests",
+          "test_filter": "*"
+        }
+      ]
+    },
+    "unit_tests_gin_scatter_reduce_gpu": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsGinScatterReduceGpu",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 300,
+      "tests": [
+        {
+          "name": "GinScatterReduceGpu_AllTests",
+          "description": "GinScatter local reduce, including 64 MiB and 1 GiB multi-rank sums",
           "test_filter": "*"
         }
       ]
@@ -2770,6 +2872,52 @@
         }
       ]
     },
+    "revoke_mpi_tests_dda_ipc": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "IncompleteCollective_DdaIpcAllReduce",
+          "description": "Rank 7 skips DDA-IPC AllReduce so ranks 0-6 wait in IpcGpuBarrier; asserts DDA-IPC via rcclGetCollImplInfo; revoke must unblock stream sync then shrink",
+          "test_filter": "RevokeDdaIpcMPITest.IncompleteCollective_DdaIpcAllReduce"
+        },
+        {
+          "name": "IncompleteCollective_DdaIpcAllReduceTree",
+          "description": "Rank 7 skips a 512 KiB DDA-IPC AllReduce so ranks 0-6 wait in the tree kernel's IpcGpuBarrier; asserts DDA-IPC via rcclGetCollImplInfo; revoke must unblock stream sync then shrink",
+          "test_filter": "RevokeDdaIpcMPITest.IncompleteCollective_DdaIpcAllReduceTree"
+        },
+        {
+          "name": "IncompleteCollective_DdaIpcAllGather",
+          "description": "Rank 7 skips DDA-IPC AllGather so ranks 0-6 wait in IpcGpuBarrier; asserts DDA-IPC via rcclGetCollImplInfo; revoke must unblock stream sync then shrink",
+          "test_filter": "RevokeDdaIpcMPITest.IncompleteCollective_DdaIpcAllGather"
+        },
+        {
+          "name": "IncompleteCollective_DdaIpcReduceScatter",
+          "description": "Rank 7 skips DDA-IPC ReduceScatter so ranks 0-6 wait in IpcGpuBarrier; asserts DDA-IPC via rcclGetCollImplInfo; revoke must unblock stream sync then shrink",
+          "test_filter": "RevokeDdaIpcMPITest.IncompleteCollective_DdaIpcReduceScatter"
+        },
+        {
+          "name": "IncompleteCollective_DdaIpcAlltoAll",
+          "description": "Rank 7 skips DDA-IPC AlltoAll so ranks 0-6 wait in IpcGpuBarrier; asserts DDA-IPC via rcclGetCollImplInfo; revoke must unblock stream sync then shrink",
+          "test_filter": "RevokeDdaIpcMPITest.IncompleteCollective_DdaIpcAlltoAll"
+        },
+        {
+          "name": "ShrinkAbort_DisablesDdaOnParent",
+          "description": "NCCL_SHRINK_ABORT on an 8-rank DDA-IPC parent: the parent stops selecting DDA and the 7-rank child AllReduce succeeds",
+          "test_filter": "RevokeDdaIpcMPITest.ShrinkAbort_DisablesDdaOnParent"
+        }
+      ]
+    },
+
     "revoke_mpi_tests_multinode": {
       "extends": "default",
       "is_gtest": true,
@@ -3034,13 +3182,106 @@
         },
         {
           "name": "CE_Internal_Launch",
-          "description": "ncclCeLaunchBatchOps: empty batch succeeds; 4-op batch transfers data correctly",
-          "test_filter": "CeInternalMPITest.Launch*"
+          "description": "ncclCeLaunchBatchOps: empty batch succeeds; 4-op batch transfers data correctly; chunked unequal sizes copy without overrun",
+          "test_filter": "CeInternalMPITest.Launch*",
+          "env_variables": {
+            "RCCL_CE_BATCH_ASYNC_ENABLE": "1"
+          }
         },
         {
           "name": "CE_Internal_Neg",
           "description": "ncclCeImplemented returns false for non-CE collectives; true on supported driver",
           "test_filter": "CeInternalNeg.*"
+        }
+      ]
+    },
+    "ce_allreduce_lsa_guard": {
+      "extends": "ce_base",
+      "num_ranks": 4,
+      "num_gpus": 4,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_LSA_TEAM_SIZE": "2",
+        "RCCL_CE_ALLREDUCE": "1",
+        "RCCL_FORCE_CE_ALLREDUCE": "1"
+      },
+      "tests": [
+        {
+          "name": "CE_AllReduce_LsaGuard_SplitLsaTeam",
+          "description": "One node, 4 ranks, LSA team of 2: ncclCeAllReduce rejects before staging or launch (single-step and pipelined), the comm stays usable, and forced CE AllReduce is never selected",
+          "test_filter": "CeAllReduceLsaGuardTest.*"
+        }
+      ]
+    },
+    "ce_allreduce_spanning_lsa": {
+      "extends": "ce_base",
+      "num_ranks": 4,
+      "num_gpus": 4,
+      "timeout": 300,
+      "env_variables": {
+        "RCCL_CE_ALLREDUCE": "1",
+        "RCCL_FORCE_CE_ALLREDUCE": "1"
+      },
+      "tests": [
+        {
+          "name": "CE_AllReduce_SpanningLsa_ForcedUnregistered",
+          "description": "One node, 4 ranks, one LSA team: forced CE AllReduce on unregistered buffers selects CE before staging exists, allocates staging, and returns the correct sum",
+          "test_filter": "CeAllReduceSpanningLsaTest.*"
+        }
+      ]
+    },
+    "ce_allreduce_lsa_guard_multinode": {
+      "extends": "ce_base",
+      "num_ranks": 4,
+      "num_nodes": 2,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_IB_DISABLE": "0",
+        "RCCL_CE_ALLREDUCE": "1",
+        "RCCL_FORCE_CE_ALLREDUCE": "1"
+      },
+      "tests": [
+        {
+          "name": "CE_AllReduce_LsaGuard_MultiNode",
+          "description": "Two nodes, 2 ranks each: ncclCeAllReduce rejects before staging or launch (single-step and pipelined), the comm stays usable, and forced CE AllReduce is never selected",
+          "test_filter": "CeAllReduceLsaGuardTest.*"
+        }
+      ]
+    },
+    "ce_allreduce_recv_offset": {
+      "extends": "ce_base",
+      "num_ranks": 2,
+      "num_gpus": 2,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_DEBUG_SUBSYS": "INIT,COLL,REG",
+        "NCCL_LOCAL_REGISTER": "1",
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
+        "NCCL_WIN_ENABLE": "1",
+        "RCCL_CE_ALLREDUCE": "1",
+        "RCCL_FORCE_CE_ALLREDUCE": "1"
+      },
+      "tests": [
+        {
+          "name": "CE_RecvOffset_Symmetric_Lsa",
+          "description": "Registered CE AllReduce into a multi-segment symmetric window at a non-zero receive offset uses the window-relative offset",
+          "test_filter": "UBR_MultiSegment.Symmetric_Lsa"
+        },
+        {
+          "name": "CE_RecvOffset_BeforeLegacyRecvOffsetCorruptsResult",
+          "description": "BEFORE control: fault injection restores the legacy base-relative offset and the result must be corrupted (ENABLE_FAULT_INJECTION build)",
+          "test_filter": "UBR_MultiSegment.Symmetric_Lsa_BeforeLegacyRecvOffsetCorruptsResult"
+        },
+        {
+          "name": "CE_RecvOffset_RecvRangePastWindowFallsBack",
+          "description": "Receive range past the window tail disables the registered CE fast path and falls back to staging",
+          "test_filter": "UBR_MultiSegment.Symmetric_Lsa_RecvRangePastWindowFallsBack"
+        },
+        {
+          "name": "CE_RecvOffset_RecvRangePastWindowChunkedFallback",
+          "description": "Chunked registered CE AllReduce whose receive range runs past the window tail falls back to staging for every chunk",
+          "test_filter": "UBR_MultiSegment.Symmetric_Lsa_RecvRangePastWindowChunkedFallback"
         }
       ]
     },
@@ -3069,6 +3310,43 @@
           "name": "CE_FaultInj_MultipleFaults",
           "description": "Multiple CE_FAULT_* bits simultaneously; all target functions return ncclSystemError; ncclCeFaultClear restores all",
           "test_filter": "CeFaultInjTest.MultipleFaultsArmedAndCleared"
+        }
+      ]
+    },
+    "grow_mpi_tests_netbidir": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 1,
+      "num_gpus": 4,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "RCCL_MPI_LOG_ALL_RANKS": "1",
+        "NCCL_OOB_NET_ENABLE": "1",
+        "NCCL_BOOTSTRAP_BIDIR_NET": "1"
+      },
+      "tests": [
+        {
+          "name": "Grow_SendRecv_NetBidir",
+          "description": "Regression for AICOMRCCL-3004: ncclCommGrow with NCCL_OOB_NET_ENABLE=1 and NCCL_BOOTSTRAP_BIDIR_NET=1 (4 ranks) must not hang; net bidir reverse ring is disabled during grow",
+          "test_filter": "GrowMPITest.Grow_SendRecv"
+        },
+        {
+          "name": "DoubleGrow_AllReduce_NetBidir",
+          "description": "Regression for AICOMRCCL-3004: two sequential grows with net bidir OOB enabled complete and AllReduce verifies on the grown communicator",
+          "test_filter": "GrowMPITest.DoubleGrow_AllReduce"
+        },
+        {
+          "name": "Grow_RankPreservation_NetBidir",
+          "description": "Regression for AICOMRCCL-3004: rank indices preserved after grow with net bidir OOB enabled",
+          "test_filter": "GrowMPITest.Grow_RankPreservation"
+        },
+        {
+          "name": "Grow_CoordinatorOnlyUniqueId_NetBidir",
+          "description": "Regression for AICOMRCCL-3004: coordinator-only uniqueId grow with net bidir OOB enabled, exercising inner existing ranks that run with nHandles==0 under NCCL_BOOTSTRAP_BIDIR_NET=1",
+          "test_filter": "GrowMPITest.Grow_CoordinatorOnlyUniqueId"
         }
       ]
     },
@@ -3350,6 +3628,19 @@
           "name": "GIN_GetFlush_ConcurrentBlocks",
           "description": "8 CTAs get + flush concurrently on one GIN context",
           "test_filter": "GinMPIDeviceTests.GetFlush_ConcurrentBlocks"
+        },
+        {
+          "name": "GIN_PutBurst_LocalCounter",
+          "description": "256-put burst through the GIN proxy",
+          "test_filter": "GinMPIDeviceTests.PutBurst_LocalCounter"
+        },
+        {
+          "name": "GIN_PutBurst_LocalCounter_PollBatch1",
+          "description": "256-put burst through the GIN proxy, one GFD per peer per progress iteration",
+          "test_filter": "GinMPIDeviceTests.PutBurst_LocalCounter",
+          "env_variables": {
+            "NCCL_GIN_PROXY_POLL_BATCH": "1"
+          }
         }
       ]
     },
@@ -3430,6 +3721,24 @@
       "enabled": true
     },
     {
+      "name": "GDR Flush Flag - Default QPs (2-Node, 2-Rank)",
+      "description": "Remote GDR flush flag (RCCL_IB_GDR_FLUSH_FLAG=1) over 2 ranks on 2 nodes",
+      "config": "net_ib_gdr_flush_flag",
+      "enabled": true
+    },
+    {
+      "name": "GDR Flush Flag - 4 QPs (2-Node, 2-Rank)",
+      "description": "Remote GDR flush flag over 4 QPs per connection",
+      "config": "net_ib_gdr_flush_flag_4qps",
+      "enabled": true
+    },
+    {
+      "name": "GDR Flush Flag - 4 QPs split (2-Node, 2-Rank)",
+      "description": "Remote GDR flush flag over 4 QPs with NCCL_IB_SPLIT_DATA_ON_QPS=1",
+      "config": "net_ib_gdr_flush_flag_4qps_split",
+      "enabled": true
+    },
+    {
       "name": "GDR Flush - cuMem AllGather (Multi-Node)",
       "description": "Cross-node AllGather over cuMem/DMA-BUF GDR exercising the base recv+flush path with the RO=0 scratchpad write+read fence",
       "config": "gdr_flush_cumem_multinode",
@@ -3499,6 +3808,12 @@
       "name": "NET IB - CAST WRR+Split (QPS=2, splitData=1)",
       "description": "White-box WRR scheduler tests with split-data path enabled: token counts, threshold boundary, split/WRR token accounting, sched enable/disable",
       "config": "cast_wrr_split",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CAST Setup Failure Propagation",
+      "description": "Rank-agreed CAST setup failures must report cleanly without hanging",
+      "config": "cast_setup",
       "enabled": true
     },
     {
@@ -3754,6 +4069,12 @@
       "enabled": true
     },
     {
+      "name": "Unit Tests - GinScatter reduce GPU",
+      "description": "All rccl-UnitTestsGinScatterReduceGpu cases",
+      "config": "unit_tests_gin_scatter_reduce_gpu",
+      "enabled": true
+    },
+    {
       "name": "Unit Tests - GIN-SDMA AllGather policy",
       "description": "All rccl-UnitTestsGinSdmaAllGatherPolicy cases",
       "config": "unit_tests_gin_sdma_allgather_policy",
@@ -3832,6 +4153,12 @@
       "enabled": true
     },
     {
+      "name": "Revoke MPI Tests - DDA IPC (8-rank, single-node)",
+      "description": "ncclCommRevoke unblocks ranks spinning in the DDA-IPC IpcGpuBarrier for AllReduce, AllGather, ReduceScatter and AlltoAll when one rank skips the collective",
+      "config": "revoke_mpi_tests_dda_ipc",
+      "enabled": true
+    },
+    {
       "name": "Revoke MPI Tests - Multi-Node (4-rank, 2-node)",
       "description": "ncclCommRevoke multi-node scenarios: asymmetric shrink across nodes (ring-only topology after revoke) and repeated revoke/shrink generations to verify no leaked resources",
       "config": "revoke_mpi_tests_multinode",
@@ -3874,6 +4201,30 @@
       "enabled": true
     },
     {
+      "name": "CE AllReduce LSA Guard (split LSA team, single node)",
+      "description": "ncclCeAllReduce must reject a comm whose LSA team does not span it before staging or any launch. Runs on one node with NCCL_LSA_TEAM_SIZE=2 at 4 ranks.",
+      "config": "ce_allreduce_lsa_guard",
+      "enabled": true
+    },
+    {
+      "name": "CE AllReduce Spanning LSA (forced unregistered, single node)",
+      "description": "One node, 4 ranks, one LSA team: forced CE AllReduce on unregistered buffers selects CE before staging exists, allocates staging, and returns the correct sum",
+      "config": "ce_allreduce_spanning_lsa",
+      "enabled": true
+    },
+    {
+      "name": "CE AllReduce LSA Guard (multi-node)",
+      "description": "ncclCeAllReduce must reject a comm spanning two nodes before staging or any launch; forced CE AllReduce must never be selected.",
+      "config": "ce_allreduce_lsa_guard_multinode",
+      "enabled": true
+    },
+    {
+      "name": "CE AllReduce Receive Offset (registered CE, single node)",
+      "description": "Registered CE AllReduce into multi-segment symmetric windows: receive-offset AFTER/BEFORE regression and past-window staging fallback.",
+      "config": "ce_allreduce_recv_offset",
+      "enabled": true
+    },
+    {
       "name": "CE Fault Injection Tests",
       "description": "Per-function error injection for CE code paths (ENABLE_FAULT_INJECTION build). Verifies ncclSystemError propagation and recovery for Init, SyncPrep, and LaunchOp faults.",
       "config": "ce_fault_injection",
@@ -3883,6 +4234,12 @@
       "name": "Grow MPI Tests (2-rank)",
       "description": "ncclCommGrow coverage at 2 ranks on a single node: argument validation, rank preservation, config inheritance, non-blocking grow, parent destroy lifecycle, error recovery regrow, and ncclCommGetUniqueId edge cases",
       "config": "grow_mpi_tests",
+      "enabled": true
+    },
+    {
+      "name": "Grow MPI Tests - Net Bidir Regression (4-rank, single-node)",
+      "description": "AICOMRCCL-3004: ncclCommGrow over the network bootstrap with NCCL_BOOTSTRAP_BIDIR_NET=1 at 4 ranks on one node, guarding against the bidirectional-net reverse-ring hang during grow (Grow_SendRecv, DoubleGrow_AllReduce, Grow_RankPreservation, Grow_CoordinatorOnlyUniqueId).",
+      "config": "grow_mpi_tests_netbidir",
       "enabled": true
     },
     {
@@ -3911,7 +4268,7 @@
     },
     {
       "name": "GIN Device MPI - Get/Flush Visibility",
-      "description": "GIN proxy device-side get + flush / flushAsync + wait visibility over IB across two nodes",
+      "description": "GIN proxy device-side get + flush / flushAsync + wait visibility and a put burst over IB across two nodes",
       "config": "gin_device_get_flush",
       "enabled": true
     },

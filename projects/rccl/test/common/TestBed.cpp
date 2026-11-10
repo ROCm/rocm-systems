@@ -4,39 +4,62 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 #include <fcntl.h>
+#include <poll.h>
+#include <sys/wait.h>
 #include <cerrno>
+#include <chrono>
 #include <csignal>
 #include <cstdio>
 #include <cstring>
+#include <thread>
 #include <unistd.h>
 #include "TestBed.hpp"
 #include "PipeUtils.hpp"
 #include <rccl/rccl.h>
 
-#define PIPE_WRITE(childId, val)                                        \
-  ASSERT_EQ(RcclUnitTesting::safe_pipe_write(childList[childId]->parentWriteFd, &val, sizeof(val)), \
-            static_cast<ssize_t>(sizeof(val)))
+// A worker that stops answering takes every worker of this TestBed with it
+// (AbandonChildren), so the current test fails and later tests start fresh.
+#define PIPE_WRITE(childId, val)                                                        \
+  do                                                                                    \
+  {                                                                                     \
+    if (RcclUnitTesting::safe_pipe_write(childList[childId]->parentWriteFd, &val, sizeof(val)) != \
+        static_cast<ssize_t>(sizeof(val)))                                              \
+    {                                                                                   \
+      TEST_ERROR("Unable to write to child %d: Error %s", childId, strerror(errno));   \
+      FAIL() << AbandonChildren(childId);                                               \
+    }                                                                                   \
+  } while (0)
 
+#define PIPE_WRITE_VEC(childId, vec)                                                    \
+  do                                                                                    \
+  {                                                                                     \
+    if (!RcclUnitTesting::pipe_write_vec(childList[childId]->parentWriteFd, vec))       \
+    {                                                                                   \
+      TEST_ERROR("Unable to write to child %d: Error %s", childId, strerror(errno));   \
+      FAIL() << AbandonChildren(childId);                                               \
+    }                                                                                   \
+  } while (0)
 
 #define PIPE_READ(childId, val)                                                         \
   {                                                                                     \
     if (ev.verbose) TEST_INFO("Calling PIPE_READ to Child %d", childId); \
+    int const lostChildId = WaitForChild(childId);                                      \
+    if (lostChildId >= 0)                                                               \
+    {                                                                                   \
+      TEST_ERROR("Child %d pipe closed while waiting for child %d", lostChildId, childId); \
+      FAIL() << AbandonChildren(lostChildId);                                           \
+    }                                                                                   \
     ssize_t retval = RcclUnitTesting::safe_pipe_read(childList[childId]->parentReadFd, &val, sizeof(val)); \
     if (ev.verbose) TEST_INFO("Got PIPE_READ %ld from Child %d", retval, childId); \
-    if (retval == -1)                                                                   \
+    if (retval != static_cast<ssize_t>(sizeof(val)))                                    \
     {                                                                                   \
-      TEST_ERROR("Unable to read from child %d: Error %s", childId, strerror(errno));      \
-      FAIL();                                                                           \
-    }                                                                                   \
-    else if (retval == 0)                                                               \
-    {                                                                                   \
-      TEST_ERROR("Child %d pipe closed unexpectedly", childId);                            \
-      exit(1);                                                                          \
-    }                                                                                   \
-    else if (retval < static_cast<ssize_t>(sizeof(val)))                                \
-    {                                                                                   \
-      TEST_ERROR("Child %d pipe read incomplete (%ld / %lu)", childId, retval, sizeof(val)); \
-      exit(1);                                                                          \
+      if (retval == -1)                                                                 \
+        TEST_ERROR("Unable to read from child %d: Error %s", childId, strerror(errno)); \
+      else if (retval == 0)                                                             \
+        TEST_ERROR("Child %d pipe closed unexpectedly", childId);                       \
+      else                                                                              \
+        TEST_ERROR("Child %d pipe read incomplete (%ld / %lu)", childId, retval, sizeof(val)); \
+      FAIL() << AbandonChildren(childId);                                               \
     }                                                                                   \
   }
 #define PIPE_CHECK(childId)                         \
@@ -169,6 +192,101 @@ namespace RcclUnitTesting
     child->childWriteFd = -1;
     child->childReadFd = -1;
     return true;
+  }
+
+  int TestBed::WaitForChild(int const childId)
+  {
+    // A peer that dies can leave childId blocked in a collective forever, so
+    // watch every active child's pipe, not only the one being read.
+    std::vector<pollfd> fds;
+    std::vector<int> fdChildIds;
+    for (int c = 0; c < static_cast<int>(childList.size()); ++c)
+    {
+      if (childList[c] == nullptr || childList[c]->parentReadFd < 0) continue;
+      fds.push_back({childList[c]->parentReadFd, POLLIN, 0});
+      fdChildIds.push_back(c);
+    }
+    if (std::find(fdChildIds.begin(), fdChildIds.end(), childId) == fdChildIds.end())
+      return -1;  // no pipe to wait on; the read that follows reports it
+
+    while (true)
+    {
+      if (poll(fds.data(), fds.size(), -1) < 0)
+      {
+        if (errno == EINTR) continue;
+        return -1;  // the read that follows reports the error
+      }
+      for (size_t i = 0; i < fds.size(); ++i)
+      {
+        if (fds[i].revents == 0) continue;
+        if (fdChildIds[i] == childId) return -1;
+        if (fds[i].revents & (POLLHUP | POLLERR | POLLNVAL)) return fdChildIds[i];
+        // Data queued by another child is read later. Stop polling it for input
+        // (which would spin) but keep watching for its hangup.
+        fds[i].events = 0;
+      }
+    }
+  }
+
+  std::string TestBed::AbandonChildren(int const lostChildId)
+  {
+    std::string reason = "Child " + std::to_string(lostChildId) + " stopped responding";
+    TestBedChild* const lost = (lostChildId >= 0 && lostChildId < static_cast<int>(childList.size()))
+                               ? childList[lostChildId] : nullptr;
+    if (lost != nullptr && lost->pid > 0)
+    {
+      // The pipe closes before the process is gone (a core dump can take a
+      // while), so give it time to finish dying and report the real cause.
+      int status = 0;
+      pid_t waitResult = 0;
+      auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+      while ((waitResult = waitpid(lost->pid, &status, WNOHANG)) == 0 &&
+             std::chrono::steady_clock::now() < deadline)
+      {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      }
+      reason += " (pid " + std::to_string(lost->pid) + ")";
+      if (waitResult == lost->pid)
+      {
+        if (WIFSIGNALED(status))
+          reason += ": killed by signal " + std::to_string(WTERMSIG(status)) + " (" + strsignal(WTERMSIG(status)) + ")";
+        else if (WIFEXITED(status))
+          reason += ": exited with code " + std::to_string(WEXITSTATUS(status));
+        lost->pid = -1;
+      }
+    }
+    reason += "; stopping all workers of this TestBed";
+    TEST_ERROR("%s", reason.c_str());
+
+    // Surviving workers may be waiting on the lost one inside a collective, so
+    // they cannot be asked to stop. childList either borrows pool workers or
+    // owns its children, and the pool may also hold workers from an earlier
+    // config: collect each worker once.
+    std::set<TestBedChild*> workers(this->poolChildren.begin(), this->poolChildren.end());
+    workers.insert(this->childList.begin(), this->childList.end());
+    workers.erase(nullptr);
+    for (TestBedChild* c : workers)
+    {
+      if (c->pid > 0) kill(c->pid, SIGKILL);
+    }
+    for (TestBedChild* c : workers)
+    {
+      if (c->pid > 0)
+      {
+        while (waitpid(c->pid, nullptr, 0) == -1 && errno == EINTR) {}
+      }
+      c->ClosePipes();
+      delete c;
+    }
+
+    this->poolChildren.clear();
+    this->childList.clear();
+    this->configUsedPool = false;
+    this->numActiveChildren = 0;
+    this->numActiveRanks = 0;
+    this->rankToChildMap.clear();
+    this->rankToDeviceMap.clear();
+    return reason;
   }
 
   void TestBed::InitComms(std::vector<std::vector<int>> const& deviceIdsPerProcess,
@@ -359,7 +477,7 @@ namespace RcclUnitTesting
       PIPE_WRITE(childId, numGroupCalls);
 
       // Send the number of collectives to be run per group call
-      ASSERT_TRUE(RcclUnitTesting::pipe_write_vec(childList[childId]->parentWriteFd, this->numCollectivesInGroup));
+      PIPE_WRITE_VEC(childId, this->numCollectivesInGroup);
 
       // Send the RCCL communication with blocking or non-blocking option
       PIPE_WRITE(childId, useBlocking);
@@ -372,7 +490,7 @@ namespace RcclUnitTesting
       PIPE_WRITE(childId, useMulti);
 
       // Send how many streams to use per group call
-      ASSERT_TRUE(RcclUnitTesting::pipe_write_vec(childList[childId]->parentWriteFd, this->numStreamsPerGroup));
+      PIPE_WRITE_VEC(childId, this->numStreamsPerGroup);
 
       // Send the GPUs this child uses
       int const numGpus = deviceIdsPerProcess[childId].size();
@@ -426,8 +544,8 @@ namespace RcclUnitTesting
       FAIL();
     }
 
-    // An out-of-range value would make the worker exit, and the parent's broken
-    // pipe would then abort the whole test binary rather than fail this test.
+    // An out-of-range value would make the worker exit, which costs this
+    // TestBed all of its workers rather than just this collective.
     // redOp is not checked: custom scalar reductions use values >= ncclNumOps.
     if (funcType < 0 || funcType >= ncclNumFuncs)
     {
@@ -772,9 +890,41 @@ namespace RcclUnitTesting
     for (int i = 0; i < this->numGroupCalls; ++i)
       if (groupId == -1 || groupId == i) groupList.push_back(i);
 
+    // Symmetric registration is grouped across every rank owned by a child.
+    // Mirror that shape during teardown, and finish deregistration on every
+    // child before any backing allocation is freed.
+    std::vector<std::vector<int>> ranksPerChild(this->numActiveChildren);
+    for (int currRank : rankList)
+      ranksPerChild[rankToChildMap[currRank]].push_back(currRank);
+
+    int const deregCmd = TestBedChild::CHILD_DEREGISTER_MEM;
     int const deallocCmd = TestBedChild::CHILD_DEALLOCATE_MEM;
-    std::vector<int> ackChildIds;
     for (auto currGroup : groupList) {
+      // Phase 1: deregister all selected windows/handles. Send every child its
+      // command before waiting so any collective registration teardown can
+      // make progress across processes.
+      for (int childId = 0; childId < this->numActiveChildren; ++childId) {
+        if (ranksPerChild[childId].empty()) continue;
+        PIPE_WRITE(childId, deregCmd);
+        PIPE_WRITE(childId, currGroup);
+        PIPE_WRITE(childId, collId);
+        int const numRanks = static_cast<int>(ranksPerChild[childId].size());
+        PIPE_WRITE(childId, numRanks);
+        for (int currRank : ranksPerChild[childId])
+          PIPE_WRITE(childId, currRank);
+      }
+
+      std::vector<int> deregAckChildIds;
+      for (int childId = 0; childId < this->numActiveChildren; ++childId)
+        if (!ranksPerChild[childId].empty()) deregAckChildIds.push_back(childId);
+
+      bool allDeregistered = false;
+      CollectAcks(deregAckChildIds, &allDeregistered);
+      if (!allDeregistered) return;
+
+      // Phase 2: now no selected communicator retains a window/registration
+      // over these buffers, so their backing allocations can be released.
+      std::vector<int> deallocAckChildIds;
       for (auto currRank : rankList)
       {
         int const childId = rankToChildMap[currRank];
@@ -782,12 +932,12 @@ namespace RcclUnitTesting
         PIPE_WRITE(childId, currRank);
         PIPE_WRITE(childId, currGroup);
         PIPE_WRITE(childId, collId);
-        ackChildIds.push_back(childId);
+        deallocAckChildIds.push_back(childId);
       }
-    }
 
-    // Each CHILD_DEALLOCATE_MEM command produces one acknowledgement.
-    CollectAcks(ackChildIds);
+      // Each CHILD_DEALLOCATE_MEM command produces one acknowledgement.
+      CollectAcks(deallocAckChildIds);
+    }
 
     InteractiveWait("Finishing DeallocateMem");
   }
@@ -1308,6 +1458,10 @@ namespace RcclUnitTesting
           }
         }
         this->DeallocateMem();
+        if (testing::Test::HasFailure())
+        {
+          isCorrect = false;
+        }
       }
     }
       this->DestroyComms();

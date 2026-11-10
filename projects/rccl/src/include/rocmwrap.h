@@ -40,9 +40,9 @@
 #define NCCL_CUMEM_VERSION_SUPPORTED(v) \
   (NCCL_VER_GE(v, ROCM_VER_7_12_60540) || NCCL_VER_IN(v, ROCM_VER_7_0_2_2, ROCM_VER_7_0_3_0))
 
-// cuMem HOST allocations: native only. NOT part of the 7.0.2.x backport (relies
-// on hipDeviceAttributeHostNumaId, which is absent there).
-#define NCCL_CUMEM_HOST_VERSION_SUPPORTED(v) NCCL_VER_GE(v, ROCM_VER_7_12_60540)
+// cuMem HOST allocations: native 7.12 OR the 7.0.2.x backport.
+#define NCCL_CUMEM_HOST_VERSION_SUPPORTED(v) \
+  (NCCL_VER_GE(v, ROCM_VER_7_12_60540) || NCCL_VER_IN(v, ROCM_VER_7_0_2_2, ROCM_VER_7_0_3_0))
 
 // Back-compat alias for the few call sites that compare against the native
 // minimum directly.
@@ -70,12 +70,31 @@
 
 #define NCCL_CUMEM_DMABUF_EXPORT_GATE NCCL_CUMEM_DMABUF_EXPORT_GATE_FOR(NCCL_CUMEM_DMABUF_EXPORT_PROBE, HIP_VERSION)
 
+// CMake sets RCCL_HIP_MEM_LOCATION_HOST_SUPPORTED when hipMemLocationTypeHost
+// compiles. Stock ROCm 7.0.2 has the backport's HIP_VERSION but no host location
+// types, so compile-time host VMM code needs the probe as well as the version.
+#if defined(RCCL_HIP_MEM_LOCATION_HOST_SUPPORTED)
+#define NCCL_CUMEM_HOST_PROBE 1
+#else
+#define NCCL_CUMEM_HOST_PROBE 0
+#endif
+
+#define NCCL_CUMEM_HOST_GATE_FOR(probe, v) ((probe) && NCCL_CUMEM_HOST_VERSION_SUPPORTED(v))
+
+#define NCCL_CUMEM_HOST_GATE NCCL_CUMEM_HOST_GATE_FOR(NCCL_CUMEM_HOST_PROBE, HIP_VERSION)
+
+// Kernel version packing used by ncclGetKernelVersionCode(). cuMem works below 6.8; 6.8 is a performance recommendation.
+#define NCCL_KERNEL_VERSION_CODE(major, minor) (((major) << 16) | ((minor) << 8))
+#define NCCL_CUMEM_PERF_KERNEL_VERSION NCCL_KERNEL_VERSION_CODE(6, 8)
+#define NCCL_CUMEM_KERNEL_PERF_RECOMMENDED(kernelVersionCode) \
+  ((kernelVersionCode) >= NCCL_CUMEM_PERF_KERNEL_VERSION)
+
 // HIP: implemented in rma_proxy_launch.cc (hipStreamBatchMemOp + old-HIP fallback).
 // CUDA: implemented in cudawrap.cc (cuStreamBatchMemOp).
 ncclResult_t ncclCuStreamBatchMemOp(cudaStream_t stream, unsigned int numOps, CUstreamBatchMemOpParams* batchParams);
 
 // Re-declare the DMA-BUF export entry as a weak reference. hsa_init,
-// hsa_system_get_info and hsa_status_string are required and resolve as hard
+// hsa_shut_down, hsa_system_get_info and hsa_status_string are required and resolve as hard
 // dependencies, but hsa_amd_portable_export_dmabuf is optional: older ROCr
 // runtimes may not export it. A weak reference resolves to NULL at load time
 // when the symbol is absent (instead of failing librccl's load with an
@@ -85,7 +104,7 @@ ncclResult_t ncclCuStreamBatchMemOp(cudaStream_t stream, unsigned int numOps, CU
 extern "C" hsa_status_t hsa_amd_portable_export_dmabuf(const void* ptr, size_t size, int* dmabuf, uint64_t* offset)
   __attribute__((weak));
 
-// hsa_init, hsa_system_get_info and hsa_status_string are called directly via the
+// hsa_init, hsa_shut_down, hsa_system_get_info and hsa_status_string are called directly via the
 // hsa-runtime64 library that librccl links against. Only the DMA-BUF export entry
 // keeps a function-pointer indirection, because it doubles as the runtime feature
 // gate: pfn_hsa_amd_portable_export_dmabuf stays NULL when the platform does not

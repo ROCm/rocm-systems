@@ -115,7 +115,9 @@ void flat_calculate_addresses(const VflatMachineInst &inst, amdgpu::Wavefront &w
       vaddr = vaddr_region.lane64(0, lane);
     }
     uint64_t addr = saddr_val + vaddr + offset;
-    addr = amdgpu::translate_flat_address(wf, addr, lane, amdgpu::FlatPrivateLayout::Linear).value;
+    addr =
+        amdgpu::translate_flat_address(wf, addr, lane, amdgpu::flat_private_layout(wf.cu().arch()))
+            .value;
     d.per_lane_addr[lane] = addr;
   }
 }
@@ -156,14 +158,14 @@ void flat_calculate_addresses(const VglobalMachineInst &inst, amdgpu::Wavefront 
 void flat_calculate_addresses(const VscratchMachineInst &inst, amdgpu::Wavefront &wf,
                               amdgpu::VectorMemState &d) {
   // GFX12 VSCRATCH: scratch_base + lane scratch slice + optional VGPR
-  // (32-bit) + optional saddr + signed 24-bit offset.
+  // (signed 32-bit) + optional signed saddr + signed 24-bit offset.
   auto &cu = wf.cu();
   init_vector_mem_state(wf, d);
   uint64_t exec = d.exec_mask;
   int64_t offset = static_cast<int64_t>(static_cast<int32_t>(inst.ioffset << 8) >> 8);
   uint64_t scratch_base = wf.scratch_base();
   uint32_t lane_stride = wf.scratch_lane_size();
-  uint32_t saddr_val = 0;
+  int64_t saddr_val = 0;
   amdgpu::RegisterAccess regs(cu);
   if (has_saddr(inst.saddr)) {
     const uint32_t sb_sel = inst.saddr;
@@ -172,7 +174,7 @@ void flat_calculate_addresses(const VscratchMachineInst &inst, amdgpu::Wavefront
       amdgpu::reject_vector_memory_access(d);
       return;
     }
-    saddr_val = *saddr;
+    saddr_val = static_cast<int32_t>(*saddr);
   }
   uint32_t vbase = wf.vgpr_alloc().base + inst.vaddr;
   std::optional<amdgpu::RegisterAccess::VgprReadRegion> vaddr_region;
@@ -181,9 +183,12 @@ void flat_calculate_addresses(const VscratchMachineInst &inst, amdgpu::Wavefront
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t vaddr = inst.sve ? vaddr_region->lane(0, lane) : 0;
+    const int64_t vaddr =
+        inst.sve ? amdgpu::flat_vector_offset(vaddr_region->lane(0, lane), /*signed_offset=*/true)
+                 : 0;
+    const uint64_t private_offset = static_cast<uint64_t>(vaddr + saddr_val + offset);
     d.per_lane_addr[lane] =
-        scratch_base + static_cast<uint64_t>(lane) * lane_stride + vaddr + saddr_val + offset;
+        scratch_base + static_cast<uint64_t>(lane) * lane_stride + private_offset;
   }
 }
 
@@ -221,6 +226,8 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
   d.element_lane_masks.clear();
   if (per_element)
     d.element_lane_masks.assign(d.num_elems, d.exec_mask);
+  const amdgpu::addr_calc::RdnaBufferOobSelect mode =
+      amdgpu::addr_calc::rdna_buffer_oob_select(srd3);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(d.exec_mask & (1ULL << lane)))
       continue;
@@ -229,7 +236,7 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
     const uint32_t offset = amdgpu::addr_calc::buffer_offset_part(voffset, ioff);
     const auto address = amdgpu::addr_calc::rdna_buffer_address(srd1, srd3, stride, inst.idxen != 0,
                                                                 index, offset, *soffset, lane);
-    if (!amdgpu::addr_calc::rdna_buffer_range_check_lane(d, lane, (srd3 >> 28) & 3, stride, records,
+    if (!amdgpu::addr_calc::rdna_buffer_range_check_lane(d, lane, mode, stride, records,
                                                          address.index, offset, *soffset,
                                                          address.swizzled, per_element)) {
       d.lane_mask &= ~(uint64_t{1} << lane);

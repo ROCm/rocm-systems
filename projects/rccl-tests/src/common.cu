@@ -45,6 +45,17 @@ extern char **environ;
 #define DIVUP(x, y) \
     (((x)+(y)-1)/(y))
 
+// ROCM-2696: ncclMemAlloc relies on hipMemRetainAllocationHandle, which had a bug
+// in older HIP versions that could cause use-after-free or segfaults due to premature allocation release.
+// The ROCm 7.0.2.x backport (HIP_VERSION in [70051831, 70060000)) carries the same hipMemRetainAllocationHandle
+// fix, so the guard covers that range as well.
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0) && \
+    (HIP_VERSION >= 71260540 || (HIP_VERSION >= 70051831 && HIP_VERSION < 70060000))
+#define USE_NCCL_MEM_ALLOC 1
+#else
+#define USE_NCCL_MEM_ALLOC 0
+#endif
+
 int test_ncclVersion = 0; // init'd with ncclGetVersion()
 int32_t gpu_block3;
 size_t cache_bytes = 192 * 1024 * 1024; // Use 192MB
@@ -172,6 +183,7 @@ int devtimeLoopLarge = 0;
 int devtimeSkipMid = -1;
 int devtimeSkipLarge = -1;
 int devtimeCheck = 0;
+int ginResourceSharingMode = 0;  // CLI: 0=thread (default), 1=CTA, 2=device
 int unalign = 0;
 int memory_report = 0;
 
@@ -806,45 +818,31 @@ static testResult_t deregisterTestWindows(
 }
 #endif
 
+// Must mirror the memorytype branches in AllocateBuffs.
+static testResult_t freeTestBuffer(void** buff) {
+  if (*buff == nullptr) return testSuccess;
+  if (memorytype == ncclHost) {
+    CUDACHECK(hipHostFree(*buff));
+  } else if (memorytype == ncclFine || memorytype == ncclManaged) {
+    CUDACHECK(cudaFree(*buff));
+  } else {
+#if USE_NCCL_MEM_ALLOC
+    NCCLCHECK(ncclMemFree(*buff));
+#else
+    CUDACHECK(cudaFree(*buff));
+#endif
+  }
+  *buff = nullptr;
+  return testSuccess;
+}
+
 static testResult_t freeTestDeviceBuffers(
     void** sendbuffs, void** recvbuffs, void** bias, void** expected, int count) {
   for (int i = 0; i < count; i++) {
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0) && \
-    (HIP_VERSION >= 71260540 || (HIP_VERSION >= 70051831 && HIP_VERSION < 70060000))
-    if (sendbuffs[i]) {
-      NCCLCHECK(ncclMemFree(sendbuffs[i]));
-      sendbuffs[i] = nullptr;
-    }
-    if (recvbuffs[i]) {
-      NCCLCHECK(ncclMemFree(recvbuffs[i]));
-      recvbuffs[i] = nullptr;
-    }
-    if (test_bias && bias[i]) {
-      NCCLCHECK(ncclMemFree(bias[i]));
-      bias[i] = nullptr;
-    }
-    if (datacheck && expected[i]) {
-      NCCLCHECK(ncclMemFree(expected[i]));
-      expected[i] = nullptr;
-    }
-#else
-    if (sendbuffs[i]) {
-      CUDACHECK(cudaFree(sendbuffs[i]));
-      sendbuffs[i] = nullptr;
-    }
-    if (recvbuffs[i]) {
-      CUDACHECK(cudaFree(recvbuffs[i]));
-      recvbuffs[i] = nullptr;
-    }
-    if (test_bias && bias[i]) {
-      CUDACHECK(cudaFree(bias[i]));
-      bias[i] = nullptr;
-    }
-    if (datacheck && expected[i]) {
-      CUDACHECK(cudaFree(expected[i]));
-      expected[i] = nullptr;
-    }
-#endif
+    TESTCHECK(freeTestBuffer(&sendbuffs[i]));
+    TESTCHECK(freeTestBuffer(&recvbuffs[i]));
+    if (test_bias) TESTCHECK(freeTestBuffer(&bias[i]));
+    if (datacheck) TESTCHECK(freeTestBuffer(&expected[i]));
   }
   return testSuccess;
 }
@@ -1595,6 +1593,11 @@ static bool DiscoverRdmaNics(NetworkCounterContext& ctx) {
     }
     return true;
   }
+  const char* hca = getenv("NCCL_IB_HCA");
+  if (hca && hca[0] != '\0') {
+    fprintf(stderr, "# Warning: NCCL_IB_HCA=%s selects no IB device, disabling net counter collection\n", hca);
+    return false;
+  }
   std::vector<std::string> all_nics;
   NetCounterGetNetworkInterfaces(all_nics);
   for (const auto& nic : all_nics) {
@@ -1611,24 +1614,28 @@ static bool DiscoverRdmaNics(NetworkCounterContext& ctx) {
   return true;
 }
 
-static NicType DetectNicTypeFromIbDevices(const std::vector<std::string>& ib_names,
-                                          bool& mixed) {
-  NicType nic_type = NIC_UNKNOWN;
-  mixed = false;
-  for (size_t i = 0; i < ib_names.size(); i++) {
-    NicType t = NetCounterDetectNicType(ib_names[i]);
-    if (t == NIC_UNKNOWN) continue;
-    if (nic_type == NIC_UNKNOWN) {
-      nic_type = t;
-    } else if (t != nic_type) {
-      mixed = true;
-      break;
+// Use the most common NIC type's table (a tie goes to the first NCCL_IB_HCA
+// device). Discovered devices of another known type (e.g. a frontend NIC) are
+// skipped; an explicit NCCL_IB_HCA list is kept.
+static NicType SelectNicType(NetworkCounterContext& ctx, bool& mixed, std::vector<std::string>& skipped) {
+  std::vector<NicType> types;
+  for (const auto& ib : ctx.ib_names) { types.push_back(NetCounterDetectNicType(ib)); }
+  const char* hca = getenv("NCCL_IB_HCA");
+  bool explicit_list = hca && hca[0] != '\0';
+  NicType nic_type = NetCounterDominantNicType(types, mixed, explicit_list);
+  std::vector<bool> keep = NetCounterKeepDevices(types, nic_type, explicit_list);
+  std::vector<std::string> nics, ibs;
+  for (size_t i = 0; i < types.size(); i++) {
+    if (!keep[i]) {
+      skipped.push_back(ctx.ib_names[i] + "(" + NicTypeStr(types[i]) + ")");
+      continue;
     }
+    nics.push_back(ctx.nic_names[i]);
+    ibs.push_back(ctx.ib_names[i]);
   }
-  if (mixed) {
-    fprintf(stderr,
-            "# Warning: mixed NIC types detected during counter table selection\n");
-  }
+  if (!skipped.empty()) { mixed = false; }
+  ctx.nic_names = nics;
+  ctx.ib_names = ibs;
   return nic_type;
 }
 
@@ -1653,8 +1660,9 @@ NetworkCounterContext NetCounterCollectBefore(struct threadArgs* args) {
     return ctx;
   }
 
-  bool mixed_detect = false;
-  NicType nic_type = DetectNicTypeFromIbDevices(ctx.ib_names, mixed_detect);
+  bool mixed = false;
+  std::vector<std::string> skipped;
+  NicType nic_type = SelectNicType(ctx, mixed, skipped);
   ctx.selected_counters = NetCounterGetCounterList(nic_type);
 
   size_t ndevs = ctx.nic_names.size();
@@ -1682,7 +1690,12 @@ NetworkCounterContext NetCounterCollectBefore(struct threadArgs* args) {
     }
   }
   printf("\n");
-  printf("# NIC type: %s\n", mixed_detect ? "MIXED" : NicTypeStr(nic_type));
+  printf("# NIC type: %s\n", mixed ? "MIXED" : NicTypeStr(nic_type));
+  if (!skipped.empty()) {
+    printf("# Skipped (other NIC type):");
+    for (const auto& s : skipped) { printf(" %s", s.c_str()); }
+    printf("\n");
+  }
   printf("# Counters (%zu):", ctx.selected_counters.size());
   for (const auto& d : ctx.selected_counters) { printf(" %s", d.name.c_str()); }
   printf("\n");
@@ -1912,12 +1925,7 @@ testResult_t AllocateBuffs(void **sendbuff, size_t sendBytes, void **recvbuff, s
 #endif
   }
   else {
-    // ROCM-2696:HIP_VERSION check added because ncclMemAlloc relies on hipMemRetainAllocationHandle, which had a bug
-    // in older HIP versions that could cause use-after-free or segfaults due to premature allocation release.
-    // The ROCm 7.0.2.x backport (HIP_VERSION in [70051831, 70060000)) carries the same hipMemRetainAllocationHandle
-    // fix, so extend the guard to cover that range as well.
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0) && \
-    (HIP_VERSION >= 71260540 || (HIP_VERSION >= 70051831 && HIP_VERSION < 70060000))
+#if USE_NCCL_MEM_ALLOC
     NCCLCHECK(ncclMemAlloc(sendbuff, nbytes));
     NCCLCHECK(ncclMemAlloc(recvbuff, nbytes));
     if (bias) NCCLCHECK(ncclMemAlloc(bias, nbytes));
@@ -1929,7 +1937,12 @@ testResult_t AllocateBuffs(void **sendbuff, size_t sendBytes, void **recvbuff, s
     if (datacheck) CUDACHECK(cudaMalloc(expected, recvBytes));
 #endif
   }
+  // Zero payloads run faster on some hardware, so no timed buffer may stay zero:
+  // recvbuff is the in-place source and initData fills only the first rotation slot.
+  // Zero data runs faster, so fill every rotation slot: recvbuff is the
+  // in-place source and initData fills only the first slot.
   CUDACHECK(hipMemset(*sendbuff, 1, nbytes));
+  CUDACHECK(hipMemset(*recvbuff, 2, nbytes));
   if (bias) CUDACHECK(hipMemset(*bias, 1, nbytes));
   if (datacheck) CUDACHECK(hipMemset(*expected, 1, recvBytes));
   return testSuccess;
@@ -2034,6 +2047,7 @@ int main(int argc, char* argv[], char **envp) {
     {"devtime_skip_mid", required_argument, 0, 'j'},
     {"devtime_skip_large", required_argument, 0, 'k'},
     {"devtime_check", required_argument, 0, 'H'},
+    {"gin_resource_sharing", required_argument, 0, 1000},
     {"help", no_argument, 0, 'h'},
     {}
   };
@@ -2238,6 +2252,14 @@ int main(int argc, char* argv[], char **envp) {
           return -1;
         }
         break;
+      case 1000:
+        ginResourceSharingMode = (int)strtol(optarg, NULL, 0);
+        if (ginResourceSharingMode < 0 || ginResourceSharingMode > 2) {
+          fprintf(stderr, "gin_resource_sharing must be 0 (thread), 1 (CTA), or 2 (device), got %d\n",
+                  ginResourceSharingMode);
+          return -1;
+        }
+        break;
       case 'L':
         devtimeLoop = (int)strtol(optarg, NULL, 0);
         break;
@@ -2323,6 +2345,7 @@ int main(int argc, char* argv[], char **envp) {
             "[-j,--devtime_skip_mid <count> skip at mid tier (-1=min(-P,2); default: -1)] \n\t"
             "[-k,--devtime_skip_large <count> skip at large tier (-1=min(-P,1); default: -1)] \n\t"
             "[-H,--devtime_check <0/1> validate timed-kernel output before datacheck (default: 0)] \n\t"
+            "[--gin_resource_sharing <0/1/2> GIN tester ncclGin resource-sharing mode: 0=thread (exclusive-QP, drops SQ lock), 1=CTA, 2=device (default: 0). all_gather ignores this and stays GPU-locked (multi-CTA poster)] \n\t"
             "[-h,--help]\n",
           programName);
         return 0;
@@ -2525,6 +2548,37 @@ testResult_t run() {
     maxBytes = memMaxBytes;
     if (minBytes > maxBytes) minBytes = maxBytes;
     if (proc == 0) printf("#\n# Reducing maxBytes to %ld due to memory limitation\n", maxBytes);
+  }
+
+  const char* tlsPsk = getenv(NCCL_TESTS_TLS_PSK_ENV);
+  if (tlsPsk) {
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,32,0)
+    typedef ncclResult_t (*ncclSetEncryption_t)(const ncclEncryptionConfig_t*);
+#ifdef RCCL_TESTS_STATIC_RCCL
+    ncclSetEncryption_t setEncryption = ncclSetEncryption;
+#else
+    // Looked up at run time: a direct reference would keep the binary from loading against
+    // an older librccl when it is linked with -z now or run with LD_BIND_NOW.
+    ncclSetEncryption_t setEncryption = (ncclSetEncryption_t) dlsym(RTLD_DEFAULT, "ncclSetEncryption");
+    if (setEncryption == NULL) {
+      fprintf(stderr, NCCL_TESTS_TLS_PSK_ENV " is set, but the RCCL library (%d) has no ncclSetEncryption; 2.32 or newer is required.\n",
+        test_ncclVersion);
+      return testInvalidUsage;
+    }
+#endif
+    ncclEncryptionConfig_t encryption = NCCL_ENCRYPTION_CONFIG_INITIALIZER;
+    encryption.mode = NCCL_ENCRYPTION_MODE_PSK;
+    encryption.psk = tlsPsk;
+    NCCLCHECK(setEncryption(&encryption));
+    // RCCL keeps its own copy of the key. Dropping the variable keeps it out of RCCL's RAS
+    // environment report, which collects every NCCL_* entry, and out of child processes.
+    unsetenv(NCCL_TESTS_TLS_PSK_ENV);
+    if (proc == 0) printf("# Socket encryption: TLS (PSK)\n");
+#else
+    fprintf(stderr, NCCL_TESTS_TLS_PSK_ENV " is set, but rccl-tests was built against RCCL %d headers; 2.32 or newer is required.\n",
+      NCCL_VERSION_CODE);
+    return testInvalidUsage;
+#endif
   }
 
   ncclUniqueId ncclId;

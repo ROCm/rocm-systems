@@ -1,6 +1,11 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 
+// Keep in sync with its copies under projects/rocprofiler-compute/:
+//   skills/rocprof-compute-kernel-bottleneck/evals/samples/common.h
+//   skills/rocprof-compute-memory/evals/samples/common.h
+//   skills/rocprof-compute-pc-sampling/evals/samples/common.h
+
 #pragma once
 
 #include <hip/hip_runtime.h>

@@ -49,6 +49,17 @@
 # argument bytes for HIP_HRR_DEBUG_ARGS only in a Debug runtime. Contains its
 # own hidden [.][hrr-direct] workload.
 #
+# hrr_kernel_signature_test.cc covers the check replay makes of a kernel launch
+# record's arguments against the signature of the kernel in the code object
+# (AIRUNTIME-3070): an unmodified archive replays, a copy whose launch record has
+# too few arguments is refused with nothing launched, and copies with an extra or
+# a wider argument replay like the original. Contains its own hidden
+# [.][hrr-direct] workload.
+#
+# hrr_pinned_host_test.cc covers pinned host memory a kernel reads directly,
+# which capture snapshots before each launch and replay writes back. Contains
+# its own hidden [.][hrr-direct] workloads.
+#
 # hrr_va_placement_test.cc covers capture-address placement: a device pointer
 # stored in device memory by an H2D copy (ROCM-31827). Contains its own hidden
 # [.][hrr-direct] workload.
@@ -89,8 +100,11 @@ set(HRR_GPU_WORKLOAD_SOURCES
   hrr_regions_test.cc
   hrr_api_matrix_workload_test.cc
   hrr_kernel_args_test.cc
+  hrr_kernel_signature_test.cc
+  hrr_pinned_host_test.cc
   hrr_va_placement_test.cc
   hrr_disk_space_test.cc
+  hrr_host_alloc_budget_test.cc
 )
 
 if(NOT DEFINED HIP_PLATFORM)

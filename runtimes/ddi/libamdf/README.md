@@ -4,7 +4,7 @@
 # libamdf
 
 libamdf implements the AMDF C API in Rust over [rocddi](../rocddi/README.md).
-`amdf_query_api` negotiates core ABI v11; the GPU extension supports v3 and
+`amdf_query_api` negotiates core ABI v12; the GPU extension supports v3 and
 the observation extension supports v1. The XDNA extension is not implemented.
 The [AMDF headers](../../api-headers/include/amdf/) define the public contract,
 including arguments, ownership, and error behavior.
@@ -15,11 +15,20 @@ The Rust modules are private implementation details.
 An instance owns a rocddi session. Creating an instance, enumerating endpoints,
 and opening an endpoint do not activate a GPU. Device creation activates an
 endpoint for execution. CPU memory services work without an available GPU.
+Endpoint host NUMA locality is a passive OS hint captured at `endpoint_open`;
+it does not publish a CPU endpoint or determine caller CPU affinity. The host
+profiling clock is a stateless observation service. A host mapping retains its
+qualified cache-maintenance recipe until unmap; the recipe is selected from
+that mapping's cache policy.
 
 The instance's `native_lifetime` selects a process-owned or instance-owned
 driver context. On Linux KFD, PROCESS can reuse the primary connection;
 INSTANCE GPU activation requires a secondary context supported by KFD UAPI
 1.19 or newer.
+Each instance owns its own rocddi session and teardown state. A busy or failed
+destruction attempt on one instance does not close another instance. Native
+teardown failures retain the affected public instance for a destruction retry;
+there is no process-wide AMDF init or shutdown reference count.
 
 The CMake build stages `libamdf.a` and a `libamdf.so` alias of the shared image
 that also exports HSA. Each ABI owns a separate rocddi session and public
