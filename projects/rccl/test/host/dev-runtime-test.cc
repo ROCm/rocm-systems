@@ -6828,6 +6828,19 @@ TEST_F(DevCommCreateJitTest, UseRuntimeVersionFromPre231Caller_IsIgnored) {
   EXPECT_EQ(QueuedDeviceCodeVersion(), kPreJitFieldVersion);
 }
 
+// Branch: NCCL_DEV_API_JIT=1 selects the runtime version for a caller that
+// cannot set useRuntimeVersion, including one compiled before it existed.
+TEST_F(DevCommCreateJitTest, DevApiJitParam_QueuesRuntimeVersionForAnyCaller) {
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "DEV_API_JIT" ? 1 : deftVal;
+  });
+  reqs.version = kPreJitFieldVersion;
+  reqs.useRuntimeVersion = false;
+
+  ASSERT_EQ(ncclDevCommCreate(comm, &reqs, &outDevComm), ncclSuccess);
+  EXPECT_EQ(QueuedDeviceCodeVersion(), static_cast<uint32_t>(NCCL_VERSION_CODE));
+}
+
 
 // ---------------------------------------------------------------------------
 // ncclDevCommCreate deep-copies the caller's requirements before it checks
