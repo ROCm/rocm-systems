@@ -82,6 +82,7 @@ from amdisa.codegen.shared_baselines import (
 )
 from amdisa.codegen.execute.vop3_modifiers import vop3_src_mod
 from amdisa.codegen.execute.vector_special import (
+    cvt_scale_layout,
     gen_vector_cvt_pk,
     gen_vector_cvt_scale,
 )
@@ -12947,6 +12948,13 @@ class CodeGenerator:
                                 access_conditions.append(
                                     'modifiers.flat_offset = inst_.offset & 0xfff;'
                                 )
+                        if inst_sem.semantic_class == 'vector_cvt_scale' and (
+                            inst_sem.operation or ''
+                        ).startswith('unpack_'):
+                            fmt = cvt_scale_layout(inst_sem.operation.rsplit('_', 1)[1])
+                            access_conditions.append(
+                                f'modifiers.cvt_scale = amdgpu::CvtScaleSelection::{fmt}(inst_.opsel);'
+                            )
                         valu_permutations = {
                             'vector_permlane16': (
                                 'Perm16Var' if inst_sem.operation == 'var' else 'Perm16'
@@ -14726,6 +14734,19 @@ class CodeGenerator:
                                 'if ((inst_.sdst < 105u && (inst_.sdst & 1u)) || '
                                 '(inst_.ssrc0 < 105u && (inst_.ssrc0 & 1u))) '
                                 'flags_ |= MISALIGNED_SCALAR_DATA;'
+                            )
+                    if (
+                        inst_sem
+                        and inst_sem.semantic_class == 'vector_cvt_scale'
+                        and (inst_sem.operation or '').startswith('unpack_')
+                    ):
+                        ctor_body_parts.append('flags_ |= CHECK_CVT_SCALE_OVERLAP;')
+                        if (
+                            cvt_scale_layout(inst_sem.operation.rsplit('_', 1)[1])
+                            == 'f8'
+                        ):
+                            ctor_body_parts.append(
+                                'if (inst_.opsel >= 12) flags_ |= RESERVED_CVT_SCALE_SELECTOR;'
                             )
                     if inst_sem and inst_sem.semantic_class == 'mfma':
                         ctor_body_parts.append('flags_ |= MATRIX_REGISTER_ACCESSES;')

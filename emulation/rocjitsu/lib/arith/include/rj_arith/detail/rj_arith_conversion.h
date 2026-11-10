@@ -985,7 +985,9 @@ int rj_arith_v_cvt_sr_pk_bf16_f32_w64(uint64_t flags, uint64_t exec_mask, uint64
                                       const uint32_t *const *b, const uint32_t *const *c);
 
 // FP16 narrowing uses the same operand, seed, selector, overflow and preservation
-// contracts as the BF16 forms above. Packed RNE preserves truncated NaN payloads;
+// contracts as the BF16 forms above. Packed SR uses the high 13 bits of each
+// half-seed at the discarded precision. Packed RNE honors FLUSH_OUTPUT_DENORMALS
+// on each rounded half and preserves truncated NaN payloads;
 // stochastic rounding produces a signed all-ones NaN. Packed FP16 forms support
 // Loose, allow-Loose and Compatibility only: their inherited model is not
 // qualified for strict bit-exact semantics.

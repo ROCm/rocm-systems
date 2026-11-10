@@ -2626,6 +2626,7 @@ VCvtScalePk8F16Fp4Vop3::VCvtScalePk8F16Fp4Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= CHECK_CVT_SCALE_OVERLAP;
 }
 
 namespace detail {
@@ -2662,6 +2663,7 @@ VCvtScalePk8Bf16Fp4Vop3::VCvtScalePk8Bf16Fp4Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= CHECK_CVT_SCALE_OVERLAP;
 }
 
 namespace detail {
@@ -2698,6 +2700,7 @@ VCvtScalePk8F32Fp4Vop3::VCvtScalePk8F32Fp4Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= CHECK_CVT_SCALE_OVERLAP;
 }
 
 namespace detail {
@@ -2734,6 +2737,9 @@ VCvtScalePk8F16Fp8Vop3::VCvtScalePk8F16Fp8Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= CHECK_CVT_SCALE_OVERLAP;
+  if (inst_.opsel >= 12)
+    flags_ |= RESERVED_CVT_SCALE_SELECTOR;
 }
 
 namespace detail {
@@ -2770,6 +2776,9 @@ VCvtScalePk8Bf16Fp8Vop3::VCvtScalePk8Bf16Fp8Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= CHECK_CVT_SCALE_OVERLAP;
+  if (inst_.opsel >= 12)
+    flags_ |= RESERVED_CVT_SCALE_SELECTOR;
 }
 
 namespace detail {
@@ -2806,6 +2815,9 @@ VCvtScalePk8F32Fp8Vop3::VCvtScalePk8F32Fp8Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= CHECK_CVT_SCALE_OVERLAP;
+  if (inst_.opsel >= 12)
+    flags_ |= RESERVED_CVT_SCALE_SELECTOR;
 }
 
 namespace detail {
@@ -2842,6 +2854,9 @@ VCvtScalePk8F16Bf8Vop3::VCvtScalePk8F16Bf8Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= CHECK_CVT_SCALE_OVERLAP;
+  if (inst_.opsel >= 12)
+    flags_ |= RESERVED_CVT_SCALE_SELECTOR;
 }
 
 namespace detail {
@@ -2878,6 +2893,9 @@ VCvtScalePk8Bf16Bf8Vop3::VCvtScalePk8Bf16Bf8Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= CHECK_CVT_SCALE_OVERLAP;
+  if (inst_.opsel >= 12)
+    flags_ |= RESERVED_CVT_SCALE_SELECTOR;
 }
 
 namespace detail {
@@ -2914,6 +2932,9 @@ VCvtScalePk8F32Bf8Vop3::VCvtScalePk8F32Bf8Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= CHECK_CVT_SCALE_OVERLAP;
+  if (inst_.opsel >= 12)
+    flags_ |= RESERVED_CVT_SCALE_SELECTOR;
 }
 
 namespace detail {
@@ -3532,6 +3553,7 @@ VCvtScalePk16F16Fp6Vop3::VCvtScalePk16F16Fp6Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= CHECK_CVT_SCALE_OVERLAP;
 }
 
 namespace detail {
@@ -3568,6 +3590,7 @@ VCvtScalePk16Bf16Fp6Vop3::VCvtScalePk16Bf16Fp6Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= CHECK_CVT_SCALE_OVERLAP;
 }
 
 namespace detail {
@@ -3604,6 +3627,7 @@ VCvtScalePk16F32Fp6Vop3::VCvtScalePk16F32Fp6Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= CHECK_CVT_SCALE_OVERLAP;
 }
 
 namespace detail {
@@ -3640,6 +3664,7 @@ VCvtScalePk16F16Bf6Vop3::VCvtScalePk16F16Bf6Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= CHECK_CVT_SCALE_OVERLAP;
 }
 
 namespace detail {
@@ -3676,6 +3701,7 @@ VCvtScalePk16Bf16Bf6Vop3::VCvtScalePk16Bf16Bf6Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= CHECK_CVT_SCALE_OVERLAP;
 }
 
 namespace detail {
@@ -3712,6 +3738,7 @@ VCvtScalePk16F32Bf6Vop3::VCvtScalePk16F32Bf6Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  flags_ |= CHECK_CVT_SCALE_OVERLAP;
 }
 
 namespace detail {

@@ -358,12 +358,12 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
   }
   if (!resource.swizzle_enabled)
     d.element_lane_masks.assign(d.num_elems, exec);
-  // Triton PR 12512 reports raw B128 crossings with 4/8 aligned bytes left
-  // that differ from CDNA5 ISA 9.4.1's exact per-DWORD check. Follow the PR's
-  // stated end + 4 <= NUM_RECORDS rule for crossing accesses, retaining all
-  // DWORDs when the whole access fits. Other widths and byte-granular bounds
-  // are model extensions awaiting gfx1250 qualification. Keep structured
-  // accesses on the documented rule until their behavior is measured.
+  // For a crossing raw vector access, keep a DWORD when its end + 4 <= NUM_RECORDS
+  // (Triton PR 12512). This differs from the exact per-DWORD check in CDNA5 ISA 9.4.1.
+  // gfx1250 loads confirm the crossing rule for B64 with 4 bytes left and B128
+  // with 4 or 8 bytes left, with SOFFSET encoded as null or an SGPR containing zero.
+  // Other raw crossing cases extrapolate this rule. Whole accesses retain all DWORDs,
+  // including exact fits. Structured accesses use the documented check.
   constexpr uint32_t kDwordBytes = sizeof(uint32_t);
   d.lane_mask = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {

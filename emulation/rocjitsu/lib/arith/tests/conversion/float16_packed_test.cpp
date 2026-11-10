@@ -54,13 +54,13 @@ template <int Lanes, int Op, typename Call> void check(Call call) {
   const uint32_t edges[] = {0x33000000U, 0x33000001U, 0x387fc000U, 0x38800000U,
                             0x3f801000U, 0x3f803000U, 0x477ff000U, 0xc77ff000U,
                             0x7f800001U, 0x7fc01234U, 0xff800001U, 0x7f800000U,
-                            0xff800000U, 0x80000000U, 1,           0x3f800fffU};
+                            0xff800000U, 0x80000000U, 0xb5800000U, 0x3f800000U};
   for (int lane = 0; lane < 16; ++lane) {
     input.v[0][lane] = edges[lane];
   }
   if constexpr (Op == 2 || Op == 3) {
     for (int lane = 0; lane < Lanes; ++lane) {
-      constexpr uint32_t seeds[] = {0, ~0U, 0x00001000U, 0x80000000U};
+      constexpr uint32_t seeds[] = {0, ~0U, 0x00001000U, 0x80008000U};
       input.v[Op == 2 ? 2 : 4][lane] = seeds[lane % 4];
     }
   }
@@ -93,17 +93,19 @@ template <int Lanes, int Op, typename Call> void check(Call call) {
                  (narrow_reference(uint32_t(a), b, true, saturate) << shift);
         }
         if constexpr (Op == 3) {
-          if ((a & 0x7fffffffU) < 0x47800000U) {
-            a += c & 0xffffU;
-          }
-          if ((b & 0x7fffffffU) < 0x47800000U) {
-            b += c >> 16;
-          }
+          return narrow_reference(uint32_t(a), c << 16, true, saturate) |
+                 (narrow_reference(b, c & 0xffff0000u, true, saturate) << 16);
         }
-        return narrow_reference(uint32_t(a), 0, Op == 3, saturate) |
-               (narrow_reference(b, 0, Op == 3, saturate) << 16);
+        auto rounded = [&](uint32_t raw) {
+          const uint32_t half = narrow_reference(raw, 0, false, saturate);
+          if ((flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) && (half & 0x7c00u) == 0) {
+            return half & 0x8000u;
+          }
+          return half;
+        };
+        return rounded(uint32_t(a)) | (rounded(b) << 16);
       },
-      conversion_bits, mode, Op == 2);
+      conversion_bits, mode, Op == 2, Op == 1 ? RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS : 0);
 }
 } // namespace
 
