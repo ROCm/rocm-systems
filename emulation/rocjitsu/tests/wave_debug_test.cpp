@@ -389,6 +389,66 @@ TEST(WaveDebugTest, RfeRestoreReturnsFromTheTrapHandlerLikeRfe) {
   }
 }
 
+// The ignored second operand is not a read: a load still pending into it must
+// not be charged to the return. Charging it there also used up the hazard, so
+// a resumed read that skipped the wait went unreported.
+TEST(WaveDebugTest, RfeRestoreDoesNotWaitOnItsIgnoredOperand) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
+                    ROCJITSU_CODE_ARCH_CDNA4}) {
+    for (bool resumed_wait : {false, true}) {
+      SCOPED_TRACE(static_cast<int>(arch));
+      SCOPED_TRACE(resumed_wait);
+      WaveDebugFixture fx(arch);
+      std::vector<uint32_t> kernel = {kSTrapBreakpoint};
+      if (resumed_wait)
+        kernel.push_back(0xBF8C0000u); // s_waitcnt 0
+      kernel.insert(kernel.end(), {
+                                      0xBE850001u, // s_mov_b32 s5, s1
+                                      kSEndpgm,
+                                  });
+      for (uint32_t i = 0; i < kernel.size(); ++i)
+        fx.gpu_mem.write32(kKernelAddr + i * 4, kernel[i]);
+
+      const uint32_t handler[] = {
+          0x806C846Cu,              // s_add_u32 ttmp0, ttmp0, 4
+          0x826D806Du,              // s_addc_u32 ttmp1, ttmp1, 0
+          0xC0020041u, 0x00000000u, // s_load_dword s1, s[2:3], 0
+          0x9580016Cu,              // s_rfe_restore_b64 ttmp[0:1], s1
+      };
+      for (uint32_t i = 0; i < std::size(handler); ++i)
+        fx.gpu_mem.write32(kTrapHandlerAddr + i * 4, handler[i]);
+
+      fx.cu->set_trap_handler_resolver([](const amdgpu::Wavefront &) {
+        return amdgpu::ComputeUnitCore::TrapHandlerConfig{kTrapHandlerAddr, 0, true};
+      });
+
+      // The handler's scalar load needs the cache hierarchy's functional path.
+      fx.l2.set_backing_memory(&fx.gpu_mem);
+
+      auto *wf = fx.dispatch(kKernelAddr);
+      ASSERT_NE(wf, nullptr);
+      const uint32_t sbase = wf->sgpr_alloc().base;
+      fx.cu->write_sgpr(sbase + 2, kKernelAddr);
+      fx.cu->write_sgpr(sbase + 3, 0);
+
+      fx.cu->step();
+      ASSERT_TRUE(wf->in_trap_handler());
+      for (int i = 0; i < 4 && wf->in_trap_handler(); ++i)
+        fx.cu->step();
+      ASSERT_FALSE(wf->in_trap_handler());
+      EXPECT_EQ(fx.cu->memory_wait_diagnostic_count(), 0u);
+
+      const uint64_t endpgm = kKernelAddr + (kernel.size() - 1) * 4;
+      for (int i = 0; i < 4 && wf->pc != endpgm; ++i)
+        fx.cu->step();
+      ASSERT_EQ(wf->pc, endpgm);
+      EXPECT_FALSE(wf->instruction_execution_failed());
+      EXPECT_EQ(fx.cu->read_sgpr(sbase + 5), kSTrapBreakpoint);
+      EXPECT_EQ(fx.cu->memory_wait_diagnostic_count(), resumed_wait ? 0u : 1u);
+    }
+  }
+}
+
 TEST(WaveDebugTest, UnmappedInstructionFetchReportsMemoryViolationAtBranchTarget) {
   WaveDebugFixture fx;
   constexpr uint32_t kProcessId = 7;

@@ -11908,6 +11908,13 @@ class CodeGenerator:
                                 'void implicit_uses(RegisterSet &uses) const override'
                             )
                         )
+                    if inst.name == 'S_RFE_RESTORE_B64':
+                        public_members.append(
+                            cgen.Statement(
+                                'bool tracks_explicit_source('
+                                'uint8_t operand_index) const override'
+                            )
+                        )
                     # Embed the full mnemonic (with suffix) as a string literal
                     # so the encoding base gets a string_view to static storage.
                     rule = self.isa_spec.profile.mnemonic_rule(enc.enc_name)
@@ -14523,6 +14530,18 @@ class CodeGenerator:
                                 f'  {inst.fmt_true_enc_name}::implicit_uses(uses);\n'
                                 f'  uses.expand(RegisterRef{{RegClass::SGPR, 0, '
                                 f'{_BRANCH_STACK_SGPRS}}});\n'
+                                f'}}'
+                            )
+                        )
+                    # The return ignores ssrc1 (see _TRAP_RETURN_NAMES). It
+                    # still decodes and prints, but a result pending into it
+                    # must not be waited on at the return.
+                    if inst.name == 'S_RFE_RESTORE_B64':
+                        inst_impls.append(
+                            cgen.Line(
+                                f'bool {inst.fmt_name}::tracks_explicit_source'
+                                f'(uint8_t operand_index) const {{\n'
+                                f'  return src_operands_[operand_index] != &ssrc1;\n'
                                 f'}}'
                             )
                         )
