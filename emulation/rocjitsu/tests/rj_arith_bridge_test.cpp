@@ -6593,6 +6593,102 @@ TEST(ArithBridgeTest, InterpolationDistinguishesHalfAndFloatDenormalControls) {
   }
 }
 
+// Captured on gfx1100 and gfx1201. The first NaN wins after source modifiers;
+// narrowing P2 to FP16 always sets the quiet bit.
+TEST(ArithBridgeTest, InterpolationNanPayloadsFollowGuestModes) {
+  for (bool rdna3 : {true, false}) {
+    BridgeFixture fixture(rdna3);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
+    fixture.wave->set_exec(1);
+    for (unsigned op = 0; op < 6; ++op) {
+      const bool half = op >= 2, p2 = op & 1;
+      const unsigned coefficient = p2 ? 2 : 1;
+      fixture.cu->write_vgpr(fixture.base(), coefficient, half ? 0x7c15U : 0x7f801abcU);
+      fixture.cu->write_vgpr(fixture.base() + 1, 0, 0xffc00456U);
+      fixture.cu->write_vgpr(fixture.base() + 2, 0, 0x3f803c00U);
+      for (uint32_t denorm : {0U, 0xf0U})
+        for (bool ieee : {false, true})
+          for (bool dx10 : {false, true})
+            for (uint8_t clamp : {0, 1}) {
+              SCOPED_TRACE(::testing::Message() << rdna3 << '/' << op << '/' << denorm << '/'
+                                                << ieee << '/' << dx10 << '/' << +clamp);
+              fixture.wave->set_mode_raw(denorm | (uint32_t(ieee) << 9) | (uint32_t(dx10) << 8));
+              fixture.cu->write_vgpr(fixture.base() + 3, 0, 0xabcd1234U);
+              const auto words = rdna3 ? rdna3::build_vinterp(op, {.vdst = 3,
+                                                                   .clamp = clamp,
+                                                                   .src0 = 256,
+                                                                   .src1 = 257,
+                                                                   .src2 = 258,
+                                                                   .neg = 1})
+                                       : rdna4::build_vinterp(op, {.vdst = 3,
+                                                                   .clamp = clamp,
+                                                                   .src0 = 256,
+                                                                   .src1 = 257,
+                                                                   .src2 = 258,
+                                                                   .neg = 1});
+              auto inst = fixture.decoder->decode_window(words);
+              ASSERT_TRUE(inst.succeeded());
+              ASSERT_TRUE(
+                  fixture.cu->execute_instruction(inst.value().get(), *fixture.wave).succeeded());
+              uint32_t expected = half ? 0xff82a000U : 0xff801abcU;
+              if (ieee || !rdna3)
+                expected |= 0x00400000U;
+              if (half && p2)
+                expected = 0xfe15U;
+              if (clamp && (dx10 || !rdna3))
+                expected = 0;
+              if (half && p2)
+                expected |= 0xabcd0000U;
+              EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 3, 0), expected);
+            }
+    }
+  }
+}
+
+TEST(ArithBridgeTest, InterpolationCarriesPackedSignalingNanIntoP2) {
+  BridgeFixture fixture(/*rdna3=*/true, /*lanes=*/64);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
+  fixture.cu->set_plugin_group(nullptr); // Exercise the direct, aliased VGPR write.
+  fixture.wave->set_mode_raw(0x1f0);     // Preserve denormals, IEEE clear, DX10_CLAMP set.
+  fixture.wave->set_exec((uint64_t{1} << 32) | (uint64_t{1} << 51));
+  const uint32_t base = fixture.base();
+  auto run = [&](uint16_t opcode, rdna3::VinterpBuilderFields fields) {
+    auto inst = fixture.decoder->decode_window(rdna3::build_vinterp(opcode, fields));
+    ASSERT_TRUE(inst.succeeded());
+    ASSERT_TRUE(fixture.cu->execute_instruction(inst.value().get(), *fixture.wave).succeeded());
+  };
+  for (bool nan_in_a : {true, false}) {
+    SCOPED_TRACE(nan_in_a);
+    for (uint32_t quad : {32u, 48u}) {
+      fixture.cu->write_vgpr(base, quad + 1, 0x3c003c00);
+      fixture.cu->write_vgpr(base + 2, quad, 0);
+      fixture.cu->write_vgpr(base + 3, quad + 2, 0x3f800000);
+    }
+    fixture.cu->write_vgpr(base + 1, 32, 0x3f800000);
+    fixture.cu->write_vgpr(base + 1, 51, 0x3f800000);
+    if (nan_in_a)
+      fixture.cu->write_vgpr(base, 49, 0x7c253c00);
+    else
+      fixture.cu->write_vgpr(base + 2, 48, 0xfc150000);
+
+    // Only the high half of the selected coefficient is a NaN. P2 then consumes
+    // it solely through the aliased accumulator, after a finite quad.
+    ASSERT_NO_FATAL_FAILURE(
+        run(rdna3::kVInterpP10F16F32Vinterp, {.vdst = 2,
+                                              .op_sel = uint8_t(nan_in_a ? 1 : 4),
+                                              .src0 = 256,
+                                              .src1 = 257,
+                                              .src2 = 258,
+                                              .neg = uint8_t(nan_in_a)}));
+    const uint32_t nan = nan_in_a ? 0xff84a000 : 0xff82a000;
+    EXPECT_EQ(fixture.cu->read_vgpr(base + 2, 51), nan);
+    ASSERT_NO_FATAL_FAILURE(
+        run(rdna3::kVInterpP2F32Vinterp, {.vdst = 2, .src0 = 259, .src1 = 257, .src2 = 258}));
+    EXPECT_EQ(fixture.cu->read_vgpr(base + 2, 51), nan);
+    EXPECT_EQ(fixture.cu->read_vgpr(base + 2, 32), nan_in_a ? 0u : 0x40000000u);
+  }
+}
+
 TEST(ArithBridgeTest, InterpolationUsesGuestRoundingAndInputFlushing) {
   for (bool rdna3 : {false, true}) {
     BridgeFixture fixture(rdna3);

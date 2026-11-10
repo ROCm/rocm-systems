@@ -15,8 +15,8 @@ namespace rocjitsu::arith {
 // Evaluate an FP32 interpolation stage. Preserve destination lanes outside exec_mask.
 // Requires the named CPU features and validated instruction controls.
 template <bool P2>
-void interp32_x86_64_v4(uint32_t exec_mask, uint32_t mode, uint32_t *d, const uint32_t *a,
-                        const uint32_t *b, const uint32_t *c) {
+uint32_t interp32_x86_64_v4(uint32_t exec_mask, uint32_t mode, uint32_t *d, const uint32_t *a,
+                            const uint32_t *b, const uint32_t *c) {
   auto flip_a = _mm512_set1_epi32(mode & RJ_ARITH_ALU_NEG_A ? INT32_MIN : 0);
   auto flip_b = _mm512_set1_epi32(mode & RJ_ARITH_ALU_NEG_B ? INT32_MIN : 0);
   auto flip_c = _mm512_set1_epi32(mode & RJ_ARITH_ALU_NEG_C ? INT32_MIN : 0);
@@ -34,16 +34,20 @@ void interp32_x86_64_v4(uint32_t exec_mask, uint32_t mode, uint32_t *d, const ui
       z = _mm512_permute_ps(z, _MM_SHUFFLE(0, 0, 0, 0));
     }
     auto value = _mm512_fmadd_ps(x, y, z);
+    if ((exec_mask >> lane) & _mm512_fpclass_ps_mask(value, 0x81)) {
+      return exec_mask & (~uint32_t{0} << lane);
+    }
     if (mode & RJ_ARITH_ALU_CLAMP) {
       value = _mm512_min_ps(_mm512_max_ps(value, _mm512_setzero_ps()), _mm512_set1_ps(1));
     }
     _mm512_mask_storeu_epi32(d + lane, __mmask16(exec_mask >> lane), _mm512_castps_si512(value));
   }
+  return 0;
 }
 
-template void interp32_x86_64_v4<true>(uint32_t, uint32_t, uint32_t *, const uint32_t *,
-                                       const uint32_t *, const uint32_t *);
-template void interp32_x86_64_v4<false>(uint32_t, uint32_t, uint32_t *, const uint32_t *,
-                                        const uint32_t *, const uint32_t *);
+template uint32_t interp32_x86_64_v4<true>(uint32_t, uint32_t, uint32_t *, const uint32_t *,
+                                           const uint32_t *, const uint32_t *);
+template uint32_t interp32_x86_64_v4<false>(uint32_t, uint32_t, uint32_t *, const uint32_t *,
+                                            const uint32_t *, const uint32_t *);
 
 } // namespace rocjitsu::arith
