@@ -69,3 +69,25 @@ bool IsArchMatch(char const* arch, char const* target) {
   if (arch == nullptr || target == nullptr) return false;
   return (strncmp(arch, target, strlen(target)) == 0);
 }
+
+bool rcclArchIsBuilt(char const* archName) {
+  char const* targets = RCCL_BUILT_GPU_TARGETS;
+  // Nothing to check against, or one code object covers a whole family: assume supported.
+  if (targets[0] == '\0' || strstr(targets, "-generic") != nullptr) return true;
+  if (archName == nullptr) return true;
+
+  const size_t n = strcspn(archName, ":");  // base name, feature suffix dropped
+  if (n == 0) return true;
+
+  for (char const* p = targets; *p != '\0';) {
+    // GPU_TARGETS verbatim, so an entry ends at ';' (next target) or ':' (its own
+    // suffix, e.g. gfx942:xnack+). Comparing exactly n bytes AND requiring a
+    // delimiter is what keeps a shorter target ("gfx110") from accepting a longer
+    // device name ("gfx1103"), and "gfx1250" from accepting "gfx1250-strict".
+    if (strncmp(p, archName, n) == 0 && (p[n] == '\0' || p[n] == ';' || p[n] == ':')) return true;
+    char const* sep = strchr(p, ';');
+    if (sep == nullptr) break;
+    p = sep + 1;
+  }
+  return false;
+}

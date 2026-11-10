@@ -1101,6 +1101,19 @@ endif()
 if(ENABLE_WARP_SPEED)
   target_compile_definitions(rccl PRIVATE ENABLE_WARP_SPEED)
 endif()
+# Record the GPU targets this library actually has device code for, so init can
+# say so instead of faulting in hipFuncGetAttributes on an arch nobody built.
+# Use the resolved GPU_TARGETS (post rocm_check_target_ids), not DEFAULT_GPUS:
+# rocm_check_target_ids drops targets the compiler cannot offload to, and a
+# distro build may narrow the list further.
+#
+# Escape the ';' rather than re-joining: the value then round-trips the exact
+# string the user passes to -DGPU_TARGETS, so the WARN in init.cc names a list
+# they can paste back. Nothing parses or normalizes it at configure time, so
+# there is no arch-name shape for this to get wrong -- gfx1250-strict and any
+# future target record as-is.
+string(REPLACE ";" "\\;" RCCL_BUILT_GPU_TARGETS_STR "${GPU_TARGETS}")
+target_compile_definitions(rccl PRIVATE "RCCL_BUILT_GPU_TARGETS=\"${RCCL_BUILT_GPU_TARGETS_STR}\"")
 if(ENABLE_ROCSHMEM)
   target_compile_definitions(rccl PRIVATE ENABLE_ROCSHMEM)
 endif()
