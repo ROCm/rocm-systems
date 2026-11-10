@@ -1789,7 +1789,8 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
       } else {
         auto reg = operand.decoded_vgpr();
         if (reg && !wf.gpr_idx_en() &&
-            !(inst.flags() & (RESERVES_UNWRITTEN_VGPR | COMPACT_WAVE64_MEMORY_RESULT))) {
+            !(inst.flags() & (RESERVES_UNWRITTEN_VGPR | INCLUDES_UNWRITTEN_LAST_VGPR |
+                              COMPACT_WAVE64_MEMORY_RESULT))) {
           reg->index +=
               reg->index < ACC_VGPR_OFFSET ? wf.vgpr_msb_for_role(operand.vgpr_msb_role()) << 8 : 0;
           if (!owns_memory_result_range(wf, wf.vgpr_alloc().base + reg->index, reg->width))

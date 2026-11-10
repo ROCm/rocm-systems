@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/image_footprint.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/image_sampler.h"
 #include "rocjitsu/vm/graphics/image_cube.h"
+#include "rocjitsu/vm/graphics/image_filter.h"
 #include "util/data_types.h"
 
 #include <algorithm>
@@ -60,6 +61,143 @@ inline std::optional<uint32_t> image_sample_coordinate(double value, uint32_t si
   return static_cast<uint32_t>(value);
 }
 
+inline uint32_t image_selected_mip(double clamped_lod, ImageMipFilter filter) {
+  return static_cast<uint32_t>(
+      std::floor(clamped_lod + (filter == ImageMipFilter::Point ? 0.5 : 0.0)));
+}
+
+// HIP tex1D may view a 2D allocation as a 1D texture. DIM supplies X
+// and the sampler supplies zero for the missing Y coordinate.
+inline bool image_sample_view_matches(uint32_t dim, uint32_t resource_type) {
+  return dim + kImage1d == resource_type || image_sample_has_implicit_y(dim, resource_type);
+}
+
+inline uint32_t image_sample_cube_token(double coordinate) {
+  return static_cast<uint32_t>(
+      std::clamp(std::isnan(coordinate) ? 0.0 : coordinate, 0.0, double(UINT32_MAX)));
+}
+
+/// GFX10 cross-face gradient unfolding has not been qualified. Cube array
+/// indices do not affect whether the three gradient coordinates share a face.
+template <typename Read>
+inline bool gfx10_cube_derivatives_use_one_face(ImageDerivativeQuad quad, Read read) {
+  const auto face = [&](unsigned lane) {
+    return std::min(image_sample_cube_token(read(2, lane)) & 7u, 5u);
+  };
+  const unsigned origin = face(quad.origin);
+  return face(quad.right()) == origin && face(quad.bottom()) == origin;
+}
+
+/// Query the quad's sampling LOD without accessing texture memory. Read the
+/// entire coordinate quad before writing VDATA, which can alias VADDR.
+inline void execute_gfx10_image_get_lod(Wavefront &wf, uint32_t resource_reg, uint32_t sampler_reg,
+                                        uint32_t data, const ImageAddressRegisters &vaddr,
+                                        ImageFields fields) {
+  const uint32_t dst = wf.vgpr_alloc().base + data;
+  // GFX10 MIMG permits D16 on sample, gather, load and store operations.
+  if (fields.d16 || !image_lod_mask_supported(wf.cu().arch(), fields.dmask)) {
+    wf.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  RegisterAccess regs(wf);
+  if (!wf.exec() || !wf.vgpr_alloc().contains(dst, std::max(1, std::popcount(fields.dmask & 15u))))
+    return;
+  if (!fields.dmask) {
+    for (uint64_t lanes = wf.exec(); lanes; lanes &= lanes - 1)
+      write_image_lod(regs, dst, std::countr_zero(lanes), 0, 0, 0);
+    return;
+  }
+  std::array<uint32_t, 8> descriptor{};
+  std::array<uint32_t, 4> sampler_words{};
+  const uint32_t words = fields.r128 ? 4 : 8;
+  if (!scalar_selector_range_is_backed(wf, resource_reg, words) ||
+      !scalar_selector_range_is_backed(wf, sampler_reg, sampler_words.size()))
+    return;
+  for (uint32_t word_index = 0; word_index < words; ++word_index)
+    descriptor[word_index] = read_scalar_selector(wf, resource_reg + word_index);
+  for (uint32_t word_index = 0; word_index < sampler_words.size(); ++word_index)
+    sampler_words[word_index] = read_scalar_selector(wf, sampler_reg + word_index);
+  const ImageResource resource = decode_image_resource(descriptor, wf.cu().arch(), fields.r128);
+  const ImageSampler sampler = decode_image_sampler(sampler_words, wf.cu().arch());
+  const uint32_t axes = image_derivative_component_count(fields.dim);
+  const uint32_t base = wf.vgpr_alloc().base;
+  const bool bound = resource.type >= kImage1d && resource.data_format != 0;
+  if (bound && !image_supports_resource_type(resource.type, fields.r128, /*sampled=*/true)) {
+    wf.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  if (bound &&
+      (!image_sample_view_matches(fields.dim, resource.type) || sampler.derivative_adjust ||
+       sampler.secondary_lod_bias || sampler.aniso_override || sampler.mip_point_preclamp ||
+       sampler.max_aniso_ratio > 4 || sampler.mip_filter > ImageMipFilter::Linear ||
+       resource.last_level < resource.base_level)) {
+    wf.report_instruction_execution_error(InstructionExecutionError::UnimplementedInstruction);
+    return;
+  }
+  const std::array<uint32_t, 3> extents =
+      fields.unorm || sampler.force_unnormalized
+          ? std::array<uint32_t, 3>{1, 1, 1}
+          : std::array<uint32_t, 3>{std::max(1u, resource.width >> resource.base_level),
+                                    std::max(1u, resource.height >> resource.base_level),
+                                    std::max(1u, resource.depth >> resource.base_level)};
+  const bool anisotropic =
+      ((static_cast<uint32_t>(sampler.min_filter) | static_cast<uint32_t>(sampler.mag_filter)) &
+       2u) != 0;
+  // Cube and volume footprints use their major axis.
+  const uint32_t max_anisotropy =
+      anisotropic && fields.dim != kImageDimCube && axes <= 2 ? 1u << sampler.max_aniso_ratio : 0;
+  const auto coordinate = [&](unsigned axis, unsigned lane) {
+    const uint32_t selector = vaddr[fields.a16 ? axis / 2 : axis];
+    const uint32_t reg = base + (selector < wf.num_vgprs() ? selector : 0);
+    const uint8_t bytes = image_coordinate_component_bytes(axis, fields.a16);
+    const uint32_t bits = regs.read_vgpr(reg, lane, bytes);
+    return double(fields.a16 ? util::f16_to_f32(static_cast<uint16_t>(bits >> (16 * (axis % 2))))
+                             : std::bit_cast<float>(bits));
+  };
+  // Validate every live quad before writing VDATA, including when it aliases VADDR.
+  if (bound && fields.dim == kImageDimCube) {
+    for (unsigned lane = 0; lane < wf.wf_size(); lane += 4)
+      if ((wf.exec() & (uint64_t{15} << lane)) &&
+          !gfx10_cube_derivatives_use_one_face(ImageDerivativeQuad(lane), coordinate)) {
+        wf.report_instruction_execution_error(InstructionExecutionError::UnimplementedInstruction);
+        return;
+      }
+  }
+  for (uint32_t quad = 0; quad < wf.wf_size(); quad += 4) {
+    if (!(wf.exec() & (uint64_t{15} << quad)))
+      continue;
+    std::array<double, 3> dx{}, dy{};
+    for (uint32_t axis = 0; axis < axes && bound; ++axis) {
+      const double origin = coordinate(axis, quad);
+      dx[axis] = coordinate(axis, quad + 1) - origin;
+      dy[axis] = coordinate(axis, quad + 2) - origin;
+    }
+    const double raw = bound ? image_gradient_lod(dx, dy, extents, axes, max_anisotropy) +
+                                   double(sampler.lod_bias_fixed8) / kImageLodFractionScale
+                             : 0;
+    const double minimum =
+        double(std::max(sampler.min_lod_fixed8, resource.min_lod)) / kImageLodFractionScale;
+    const double maximum =
+        std::max(minimum, double(sampler.max_lod_fixed8) / kImageLodFractionScale);
+    const double clamped = bound && sampler.mip_filter != ImageMipFilter::None
+                               ? std::clamp(std::clamp(raw, minimum, maximum), 0.0,
+                                            double(resource.last_level - resource.base_level))
+                               : 0;
+    double selected = image_selected_mip(clamped, sampler.mip_filter);
+    if (sampler.mip_filter == ImageMipFilter::Linear) {
+      // PERF_MIP snaps the fractional result only for trilinear selection.
+      const uint32_t fraction =
+          static_cast<uint32_t>((clamped - selected) * kImageLodFractionScale);
+      selected += double(image_mip_fraction(fraction, sampler.perf_mip, resource.perf_mod)) /
+                  kImageLodFractionScale;
+    }
+    for (uint32_t lane = quad; lane < quad + 4; ++lane)
+      if (wf.exec() & (uint64_t{1} << lane))
+        write_image_lod(regs, dst, lane, fields.dmask, static_cast<float>(selected),
+                        static_cast<float>(raw));
+  }
+}
+
 /// @brief Capture the texel footprint before any memory request or destination write.
 inline util::Result prepare_image_sample(Wavefront &wf, VectorMemState &state,
                                          uint32_t resource_reg, uint32_t sampler_reg,
@@ -91,14 +229,13 @@ inline util::Result prepare_image_sample(Wavefront &wf, VectorMemState &state,
     return fail(InstructionExecutionError::UnimplementedInstruction);
   const bool gfx12 = wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4;
   const uint32_t type = gfx9 ? resource.type : fields.dim + kImage1d;
-  // HIP tex1D may view a width-by-one 2D allocation. DIM supplies X only;
-  // the missing Y coordinate is zero, including filtering and wrapping.
-  const bool one_dimensional_view = !gfx9 && image_sample_has_implicit_y(fields.dim, resource.type);
-  if (type != resource.type && !one_dimensional_view)
+  if (!gfx9 && !image_sample_view_matches(fields.dim, resource.type))
     return fail(InstructionExecutionError::UnimplementedInstruction);
+  const bool one_dimensional_view = type != resource.type;
   const ImageCoordinateShape shape = image_coordinate_shape(type, !gfx9 || fields.da);
   const bool has_y = shape.has_y;
   const bool volume = shape.volume;
+  const bool gfx11_volume = volume && !gfx12 && has_gfx11_plus_image_operands(wf.cu().arch());
   const bool layered = shape.layered;
   const bool has_slice = shape.has_slice;
   const uint32_t coordinates = shape.coordinates();
@@ -116,7 +253,7 @@ inline util::Result prepare_image_sample(Wavefront &wf, VectorMemState &state,
   const uint32_t prefix_words = gradient_base + (gradients ? 2 * gradient_stride : 0);
   const uint16_t prefix_low16_words =
       image_prefix_low16_words(gradient_base, fields.gradient16 ? spatial_dimensions : 0,
-                               fields.a16, fields.lod_bias, fields.offset);
+                               !gfx9 && fields.a16, fields.lod_bias, fields.offset);
   const uint32_t inputs = coordinates + (mode == ImageSampleMode::Explicit || fields.lod_clamp);
   const uint32_t registers = prefix_words + (fields.a16 ? (inputs + 1) / 2 : inputs);
   if (fields.packed_texels &&
@@ -159,6 +296,13 @@ inline util::Result prepare_image_sample(Wavefront &wf, VectorMemState &state,
   const bool normalized = !fields.unorm && !sampler.force_unnormalized;
   const bool truncate_coordinates = sampler.truncate_coordinates;
   std::array<ImageClamp, 3> wrap = sampler.clamp;
+  const bool gather4h = fields.horizontal && !fields.packed_texels;
+  // Match the graphics GATHER4H footprint in image_transfer.h: only border
+  // addressing survives, and four horizontal taps start 1.5 texels left of the center.
+  if (gather4h)
+    for (auto &axis : wrap)
+      if (axis != ImageClamp::Border)
+        axis = ImageClamp::Edge;
   for (uint32_t axis = 0; axis < filter_dimensions; ++axis)
     if (!gfx10 && wrap[axis] > ImageClamp::MirrorOnce && wrap[axis] != ImageClamp::Border)
       return fail(InstructionExecutionError::UnimplementedInstruction);
@@ -169,16 +313,19 @@ inline util::Result prepare_image_sample(Wavefront &wf, VectorMemState &state,
       axis = static_cast<ImageClamp>(unnormalized_image_clamp(static_cast<uint32_t>(axis)));
   const ImageXyFilter mag_filter = sampler.mag_filter;
   const ImageXyFilter min_filter = sampler.min_filter;
-  const ImageMipFilter mip_filter = sampler.mip_filter;
+  const ImageMipFilter mip_filter = fields.gather && sampler.mip_filter == ImageMipFilter::Linear
+                                        ? ImageMipFilter::Point
+                                        : sampler.mip_filter;
   if (mag_filter > ImageXyFilter::Linear || min_filter > ImageXyFilter::Linear ||
-      (!gfx10 && mag_filter != min_filter) || mip_filter > ImageMipFilter::Linear ||
-      sampler.border_color_type > (gfx10 ? 2u : 0u) || sampler.filter_mode ||
-      sampler.max_aniso_ratio || sampler.force_degamma || sampler.mc_coord_trunc ||
-      sampler.skip_degamma || sampler.z_filter || sampler.secondary_lod_bias ||
-      sampler.mip_point_preclamp || sampler.filter_precision_fix || sampler.compat_mode ||
+      (!gfx10 && !gfx11_volume && mag_filter != min_filter) ||
+      mip_filter > ImageMipFilter::Linear || sampler.border_color_type > (gfx10 ? 2u : 0u) ||
+      sampler.filter_mode || sampler.max_aniso_ratio || sampler.force_degamma ||
+      sampler.mc_coord_trunc || sampler.skip_degamma || sampler.z_filter ||
+      sampler.secondary_lod_bias || sampler.mip_point_preclamp || sampler.filter_precision_fix ||
+      sampler.compat_mode ||
       (sampler.blend_prt && !has_gfx11_plus_image_operands(wf.cu().arch())) ||
       has_unimplemented_image_sampler_controls(sampler) ||
-      (resource.perf_mod && (sampler.perf_mip || (volume && sampler.perf_z))))
+      (resource.perf_mod && ((!fields.gather && sampler.perf_mip) || (volume && sampler.perf_z))))
     return fail(InstructionExecutionError::UnimplementedInstruction);
   if (!fields.gather &&
       (mag_filter == ImageXyFilter::Linear || min_filter == ImageXyFilter::Linear ||
@@ -224,6 +371,8 @@ inline util::Result prepare_image_sample(Wavefront &wf, VectorMemState &state,
     return double(fields.a16 ? util::f16_to_f32((bits >> (16 * (component % 2))) & 0xffffu)
                              : std::bit_cast<float>(bits));
   };
+  double coarse_lod = 0;
+  uint32_t coarse_quad = UINT32_MAX;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(state.exec_mask & (uint64_t{1} << lane)))
       continue;
@@ -240,9 +389,8 @@ inline util::Result prepare_image_sample(Wavefront &wf, VectorMemState &state,
           std::bit_cast<float>(read_prefix(fields.offset + fields.lod_bias));
     double lod = mode == ImageSampleMode::Explicit ? read(coordinates, lane) : 0;
     if (gradients || (implicit_gradients &&
-                      (linear_image_needs_implicit_lod(static_cast<unsigned>(mip_filter),
-                                                       resource.base_level, resource.last_level) ||
-                       min_filter != mag_filter))) {
+                      linear_image_needs_implicit_lod(sampler_words[2], resource.base_level,
+                                                      resource.last_level, fields.gather))) {
       std::array<double, 3> dx{}, dy{};
       const std::array<uint32_t, 3> extents{std::max(1u, resource.width >> resource.base_level),
                                             std::max(1u, resource.height >> resource.base_level),
@@ -252,6 +400,8 @@ inline util::Result prepare_image_sample(Wavefront &wf, VectorMemState &state,
         const uint64_t quad_mask = uint64_t{15} << quad.origin;
         if (!has_gfx11_plus_image_operands(wf.cu().arch()) &&
             (state.exec_mask & quad_mask) != quad_mask)
+          return fail(InstructionExecutionError::UnimplementedInstruction);
+        if (gfx10 && cube && !gfx10_cube_derivatives_use_one_face(quad, read))
           return fail(InstructionExecutionError::UnimplementedInstruction);
         for (uint32_t axis = 0; axis < spatial_dimensions; ++axis) {
           dx[axis] = read(axis, quad.right()) - read(axis, quad.origin);
@@ -272,8 +422,18 @@ inline util::Result prepare_image_sample(Wavefront &wf, VectorMemState &state,
       }
       lod = image_gradient_lod(dx, dy, normalized ? extents : std::array<uint32_t, 3>{1, 1, 1},
                                spatial_dimensions);
+      if (fields.coarse_derivatives) {
+        // CD supplies one LOD per quad. A lane selection for disagreeing
+        // gradients has not been qualified on GFX10.
+        const uint32_t quad = lane / 4;
+        if (quad == coarse_quad && lod != coarse_lod)
+          return fail(InstructionExecutionError::UnimplementedInstruction);
+        coarse_quad = quad;
+        coarse_lod = lod;
+      }
     }
-    lod += instruction_bias;
+    // Shader bias has its own fixed-point rounding before footprint addition on GFX11/12.
+    lod += gfx9 || gfx10 ? instruction_bias : image_sample_round_even8(instruction_bias);
     if (std::isnan(lod))
       lod = 0;
     else if (std::isinf(lod))
@@ -304,9 +464,7 @@ inline util::Result prepare_image_sample(Wavefront &wf, VectorMemState &state,
       if (fields.lwe && absolute_lod * kImageLodFractionScale < resource.min_lod_warn)
         state.texel_status->lod_warnings |= uint64_t{1} << lane;
     }
-    const uint32_t first_level =
-        resource.base_level +
-        uint32_t(std::floor(lod + (mip_filter == ImageMipFilter::Point ? 0.5 : 0)));
+    const uint32_t first_level = resource.base_level + image_selected_mip(lod, mip_filter);
     if (state.image_status)
       state.image_status->record_sample(lane, mip_filter != ImageMipFilter::None, requested_lod,
                                         first_level);
@@ -332,7 +490,7 @@ inline util::Result prepare_image_sample(Wavefront &wf, VectorMemState &state,
     if (cube) {
       // Sampler cube-array tokens use three low bits for the face. Raw
       // IMAGE_LOAD/STORE instead take a linear face index.
-      const uint32_t token = static_cast<uint32_t>(std::clamp(layer, 0.0, double(UINT32_MAX)));
+      const uint32_t token = image_sample_cube_token(layer);
       face = std::min(token & 7u, 5u);
       cube_base = resource.base_array +
                   6 * std::min(token >> 3, (resource.depth - resource.base_array - 6) / 6);
@@ -366,7 +524,8 @@ inline util::Result prepare_image_sample(Wavefront &wf, VectorMemState &state,
             value = std::abs(value);
           value = std::clamp(value, 0.0, double(sizes[axis]));
         }
-        const double position = value - (linear ? 0.5 : 0);
+        const double center = gather4h ? (axis == 0 ? 1.5 : 0.0) : (linear ? 0.5 : 0.0);
+        const double position = value - center;
         origins[axis] =
             std::floor(!linear && !truncate_coordinates ? image_sample_fixed8(position) : position);
         fractions[axis] = linear ? image_sample_round_even8(position - origins[axis]) : 0;

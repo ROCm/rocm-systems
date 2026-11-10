@@ -67,6 +67,7 @@ using mma_test::make_cdna4_mfma_scale_words;
 enum class InlineImageQuery { ResourceInfo, Lod };
 constexpr InlineImageQuery kInlineImageQueries[]{
     InlineImageQuery::ResourceInfo,
+    InlineImageQuery::Lod,
 };
 
 void record_register_probe(ExecutionPluginGroup &plugins, Wavefront &wave) {
@@ -4217,7 +4218,15 @@ TEST(RaceDetectorPluginTest, Gfx11WritebacksRespectImageAndLdsClasses) {
     }
   };
   constexpr Op ops[]{
-      Image, Bvh, Sample, SampleL, SampleLz, SampleD, Resinfo,
+      Image,
+      Bvh,
+      Sample,
+      SampleL,
+      SampleLz,
+      SampleD,
+      // Inline LOD queries use sample writeback order.
+      Lod,
+      Resinfo,
   };
   constexpr uint64_t shared = uint64_t{2} << 32, global = uint64_t{8} << 32;
   for (const auto arch : {"rdna3", "rdna3.5"}) {
@@ -6383,6 +6392,20 @@ TEST(RaceDetectorPluginTest, Gfx10PackedImageOperandsMatchWaitChecksAndRegisterR
     bool compare = false;
   };
   const Case cases[] = {
+      {0, rdna1::kImageSampleDG16Mimg, false, false, {0x3, 0x3, 0xf}},
+      {0, rdna1::kImageSampleDG16Mimg, true, false, {0x3, 0x3, 0x3}},
+      {1, rdna1::kImageSampleDG16Mimg, true, false, {0xf, 0xf, 0xf}},
+      {2,
+       rdna1::kImageSampleCDOG16Mimg,
+       true,
+       true,
+       {0xf, 0xf, 0xf, 0x3, 0xf, 0x3, 0xf, 0x3},
+       true},
+      {3, rdna1::kImageSampleDOG16Mimg, false, true, {0xf, 0xf, 0xf, 0xf, 0xf, 0xf}},
+      {0, rdna1::kImageSampleBMimg, true, false, {0x3, 0x3}},
+      {1, rdna1::kImageSampleCBOMimg, true, true, {0xf, 0x3, 0xf, 0xf}, true},
+      {1, rdna1::kImageGather4BMimg, true, false, {0x3, 0xf}},
+      {0, rdna1::kImageSampleBMimg, false, false, {0xf, 0xf}},
       {0, rdna1::kImageSampleDMimg, true, false, {0xf, 0xf, 0x3}},
       {2, rdna1::kImageSampleDMimg, false, false, {0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf, 0xf}},
   };
@@ -6488,7 +6511,36 @@ TEST(RaceDetectorPluginTest, Gfx10PackedImageOperandsMatchWaitChecksAndRegisterR
             }));
       }
     }
-
+    // Choose between two 1D mip levels using the low FP16; the high half contains a NaN.
+    cu->write_sgpr(sb + 1, (22u << 20) | (1u << 30));     // Width 2.
+    cu->write_sgpr(sb + 3, (8u << 28) | (1u << 16) | 4u); // LAST_LEVEL=1.
+    cu->write_sgpr(sb + 4, gfx1010 ? 0 : 63);
+    cu->write_sgpr(sb + 5, 1u << 4); // MAX_MIP=1.
+    cu->write_sgpr(sb + 9, 256u << 12);
+    cu->write_sgpr(sb + 10, 1u << 26);    // Point mip filter.
+    constexpr uint32_t mip1 = 0x40400000; // 3.0.
+    cu->write_sgpr(sb, 0x6000 >> 8);
+    // In a GFX10 linear mip chain the smaller, one-texel level is first.
+    f.mem->write32(0x6000, mip1);
+    f.mem->write32(0x6100, texel);
+    f.mem->write32(0x6104, texel);
+    for (bool bias : {false, true}) {
+      for (bool higher : {false, true}) {
+        SCOPED_TRACE(testing::Message() << "numeric bias=" << bias << " higher=" << higher);
+        for (unsigned lane = 0; lane < 4; ++lane) {
+          const uint32_t low = higher ? 0x3c00 : bias ? 0 : 0x3800;
+          cu->write_vgpr(vb, lane, 0x7e000000u | low);
+          cu->write_vgpr(vb + 1, lane, bias && (lane & 1) ? 0x3800 : 0);
+          cu->write_vgpr(vb + 2, lane, 0);
+        }
+        ASSERT_NO_FATAL_FAILURE(
+            issue(rdna1::build_mimg(bias ? rdna1::kImageSampleBMimg : rdna1::kImageSampleDG16Mimg,
+                                    {.dmask = 1, .vdata = 24, .ssamp = 2, .a16 = 1}),
+                  15));
+        EXPECT_EQ(cu->read_vgpr_storage(vb + 24, 0), higher ? mip1 : texel);
+        ASSERT_NO_FATAL_FAILURE(issue(std::array{legacy_wait_word(arch, 0, 0)}, 1));
+      }
+    }
     struct Transfer {
       uint16_t op;
       uint8_t dim;
@@ -6615,6 +6667,7 @@ TEST(RaceDetectorPluginTest, Gfx10InlineImageQueriesTrackVmcntAndVgprWriteback) 
     auto &sink = sinks.emplace<StringSink>();
     f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sinks));
     auto plugin = std::make_unique<RaceDetectorPlugin>();
+    auto *observer = plugin.get();
     ASSERT_TRUE(f.plugin_group_->add(std::move(plugin)));
     auto routing = std::make_unique<MemoryObservationPlugin>();
     const auto &routed = routing->accesses;
@@ -6626,6 +6679,8 @@ TEST(RaceDetectorPluginTest, Gfx10InlineImageQueriesTrackVmcntAndVgprWriteback) 
     ASSERT_NE(wave, nullptr);
     std::array<Wavefront *, 1> waves{wave};
     f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 32, 106, waves);
+    auto &race =
+        *static_cast<RaceWavefrontState *>(wave->plugin_state(observer->slot_index()))->race_state;
     const auto sb = wave->sgpr_alloc().base;
     const auto vb = wave->vgpr_alloc().base;
     cu->write_sgpr(sb, 0x4000 >> 8);
@@ -6718,6 +6773,28 @@ TEST(RaceDetectorPluginTest, Gfx10InlineImageQueriesTrackVmcntAndVgprWriteback) 
         ASSERT_NO_FATAL_FAILURE(wait(0));
       }
     }
+    // A failing GET_LOD skips the scheduler's after-execute hook. Preserve the older load.
+    ASSERT_NO_FATAL_FAILURE(step(
+        rdna1::build_mubuf(rdna1::kBufferLoadDword, {.vdata = 12, .srsrc = 3, .soffset = 128}), 1));
+    const auto pending = race.getWaveMemoryEvents();
+    ASSERT_EQ(pending.size(), 1u);
+    cu->write_sgpr(sb + 10, 0x84000000u); // DERIV_ADJUST_EN.
+    auto decoder = Decoder::create(arch);
+    auto invalid = decoder->decode_window(
+        rdna1::build_mimg(rdna1::kImageGetLod, {.dim = 1, .dmask = 3, .vdata = 8, .ssamp = 2}));
+    ASSERT_TRUE(invalid.succeeded());
+    wave->set_exec(1);
+    cu->write_vgpr(vb + 8, 0, 0xdeadbeefu);
+    f.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave->pc, *invalid.value(), *wave);
+    ASSERT_TRUE(cu->execute_instruction(invalid.value().get(), *wave).failed());
+    EXPECT_EQ(wave->instruction_execution_error(),
+              InstructionExecutionError::UnimplementedInstruction);
+    EXPECT_EQ(cu->read_vgpr_storage(vb + 8, 0), 0xdeadbeefu);
+    EXPECT_EQ(race.getWaveMemoryEvents(), pending);
+    wave->clear_instruction_execution_error();
+    ASSERT_NO_FATAL_FAILURE(read(8, 1, false));
+    ASSERT_NO_FATAL_FAILURE(read(12, 1, true));
+    ASSERT_NO_FATAL_FAILURE(wait(0));
     wave->halt();
   }
 }

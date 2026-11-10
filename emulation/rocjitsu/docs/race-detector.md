@@ -394,6 +394,10 @@ The same completion-order distinction is used for nonzero partial waits; a
 zero wait still completes every event on the selected counter. The detector
 also uses these classes to determine whether two asynchronous writes to the
 same VGPR are ordered.
+Inline `IMAGE_GET_LOD` on GFX10/11 and `IMAGE_GET_RESINFO` occupy the
+applicable memory counter (VMCNT, or LOADCNT for GFX12 RESINFO). The detector
+tracks the VGPRs and lanes written by each successful query. GET_LOD uses
+sample writeback order and GET_RESINFO uses ordinary load writeback order.
 
 The plugin keeps track, for all registers and LDS memory bytes, of which memory
 operations are in flight. When an instruction in the emulator accesses an LDS

@@ -754,6 +754,18 @@ TEST(MemoryWaitExecutionTest, NsaImageChecksOnlyItsDecodedCoordinateRegisters) {
   }
 }
 
+void bind_sample_resource(amdgpu::ComputeUnitCore &cu, const amdgpu::Wavefront &wf,
+                          const amdgpu::RegisterModifiers &modifiers) {
+  const auto &sample = *modifiers.image_sample_sources;
+  const bool gfx12 = cu.arch() == ROCJITSU_CODE_ARCH_RDNA4;
+  const unsigned base = wf.sgpr_alloc().base;
+  const auto resource = base + modifiers.image_resource->encoding_value();
+  cu.write_sgpr(resource + 1, 22u << (gfx12 ? 17 : 20)); // R32_FLOAT
+  cu.write_sgpr(resource + 3, uint32_t(sample.dim + amdgpu::kImage1d) << 28);
+  // Distinct minification and magnification filters require the gradient inputs.
+  cu.write_sgpr(base + sample.sampler + 2, 1u << 22);
+}
+
 TEST(MemoryWaitExecutionTest, CompareSampleChecksItsEncodedAddressRegisters) {
   GpuMemory memory("sample_wait_memory");
   L2Cache l2("sample_wait_l2");
@@ -790,6 +802,10 @@ TEST(MemoryWaitExecutionTest, CompareSampleChecksItsEncodedAddressRegisters) {
     auto decoded = decoder->decode(words.data());
     ASSERT_TRUE(decoded.succeeded());
     ASSERT_EQ(decoded.value()->mnemonic(), "image_sample_c");
+    RegisterModifiers modifiers;
+    decoded.value()->amdgpu_register_modifiers(modifiers);
+    ASSERT_TRUE(modifiers.image_resource && modifiers.image_sample_sources);
+    bind_sample_resource(*cu, *wf, modifiers);
     RegisterSet uses;
     decoded.value()->implicit_uses(uses);
     EXPECT_FALSE(decoded.value()->tracks_explicit_source(0));
@@ -870,6 +886,8 @@ TEST(MemoryWaitExecutionTest, ImageAndFormattedBufferOperandFootprints) {
       }
       RegisterModifiers modifiers;
       inst.value()->amdgpu_register_modifiers(modifiers);
+      if (modifiers.image_sample_sources)
+        bind_sample_resource(*cu, *wf, modifiers);
       if (modifiers.bvh_resource) {
         // A triangle at node zero fits in the first slot of this BVH.
         cu->write_sgpr(wf->sgpr_alloc().base + *modifiers.bvh_resource + 3,
@@ -958,6 +976,91 @@ TEST(MemoryWaitExecutionTest, ImageAndFormattedBufferOperandFootprints) {
     probe({0xd045c011, 0x0000401d, 0x00000017}, {{v, 23, 15, 0}, {s, 35, 15, 0}, {s, 36, 0, 0}});
     probe({0xd045c001, 0x0000401d, 0x00000017}, {{v, 23, 15, 0}, {s, 39, 15, 0}});
   });
+}
+
+TEST(MemoryWaitExecutionTest, Gfx10GetLodWaitsOnQuadGradientInputsOnly) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+    SCOPED_TRACE(arch);
+    GpuMemory memory("get_lod_wait");
+    L2Cache l2("get_lod_wait_l2");
+    ComputeUnitCore::Config config{};
+    config.arch = arch;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 32;
+    config.vgprs_per_wf = 32;
+    std::unique_ptr<ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "get_lod_wait_cu", config, &memory, &l2));
+    auto *wf = cu->dispatch_wf(0, 0, 32, 16, 64);
+    ASSERT_NE(wf, nullptr);
+    // Lane 39 issues a query but supplies no derivative. Its quad's inputs are lanes 36..38.
+    const uint64_t exec = 1ull | (1ull << 39);
+    wf->set_exec(exec);
+    auto decoder = Decoder::create(arch);
+    auto &state = wf->ensure_memory_wait_scoreboard();
+    std::vector<MemoryWaitScoreboard::Hazard> hazards;
+    state.bind(0x200, &hazards, [](void *context, const auto &hazard) {
+      static_cast<decltype(hazards) *>(context)->push_back(hazard);
+    });
+    for (bool a16 : {false, true}) {
+      // 2D_ARRAY supplies three coordinates but only X/Y have derivatives.
+      // For A16 3D, X/Y share v2 and Z uses only the low half of NSA v9.
+      const uint8_t dim = a16 ? amdgpu::kImageDim3d : amdgpu::kImageDim2dArray;
+      cu->write_sgpr(wf->sgpr_alloc().base + 1, 20u << 20); // R32_UINT
+      cu->write_sgpr(wf->sgpr_alloc().base + 3, uint32_t(dim + amdgpu::kImage1d) << 28);
+      auto words = arch == ROCJITSU_CODE_ARCH_RDNA1
+                       ? rdna1::build_mimg(rdna1::kImageGetLodMimg, {.nsa = 1,
+                                                                     .dim = dim,
+                                                                     .dmask = 1,
+                                                                     .vaddr = 2,
+                                                                     .vdata = 8,
+                                                                     .ssamp = 2,
+                                                                     .a16 = uint8_t(a16)})
+                       : rdna2::build_mimg(rdna2::kImageGetLodMimg, {.nsa = 1,
+                                                                     .dim = dim,
+                                                                     .dmask = 1,
+                                                                     .vaddr = 2,
+                                                                     .vdata = 8,
+                                                                     .ssamp = 2,
+                                                                     .a16 = uint8_t(a16)});
+      for (uint32_t second : {9u, 23u}) {
+        // v23 is physically backed but outside the allocation, so the query reads v0.
+        const std::array<uint32_t, 3> encoded{words[0], words[1], second | (12u << 8)};
+        auto decoded = decoder->decode_window(encoded);
+        ASSERT_TRUE(decoded.succeeded());
+        const auto &inst = *decoded.value();
+        EXPECT_EQ(MemoryWaitScoreboard::result_lanes(inst, *wf), exec);
+        const auto check = [&](uint16_t reg, unsigned lane, uint8_t bytes, bool expected) {
+          SCOPED_TRACE(testing::Message() << "a16=" << a16 << " second=" << second << " reg=" << reg
+                                          << " lane=" << lane << " bytes=" << unsigned(bytes));
+          state.clear();
+          hazards.clear();
+          state.add({state.issue(WaitCounterKind::Load),
+                     0x100,
+                     uint64_t{1} << lane,
+                     {RegClass::VGPR, reg, 1},
+                     WaitCounterKind::Load,
+                     bytes});
+          state.check_instruction(inst, *wf);
+          EXPECT_EQ(hazards.size(), expected ? 1u : 0u);
+          if (!hazards.empty()) {
+            EXPECT_FALSE(hazards.front().write);
+          }
+        };
+        const uint16_t other = second == 23 ? 0 : 9;
+        for (unsigned lane : {0u, 1u, 2u, 3u, 4u, 36u, 37u, 38u, 39u}) {
+          const bool gradient_lane = lane < 3 || (lane >= 36 && lane < 39);
+          check(2, lane, 0xc, gradient_lane);
+          check(other, lane, 0x3, gradient_lane);
+          check(other, lane, 0xc, gradient_lane && !a16);
+        }
+        check(3, 1, 0xf, false);  // gap in the NSA tuple
+        check(12, 1, 0xf, false); // array index or unused extension byte
+        check(8, 1, 0xf, false);  // inactive result lane
+      }
+    }
+    wf->halt();
+  }
 }
 
 TEST(MemoryWaitExecutionTest, D16ImageWaitsTrackPartialResultsAndRealImplicitReads) {
@@ -1068,10 +1171,10 @@ TEST(MemoryWaitExecutionTest, D16ImageWaitsTrackPartialResultsAndRealImplicitRea
             return arch == ROCJITSU_CODE_ARCH_RDNA3
                        ? test::decode_gfx11_mimg<rdna3::MimgBuilderFields>(
                              *decoder, rdna3::build_mimg,
-                             sample ? rdna3::kImageSampleMimg : rdna3::kImageLoadMimg, fields)
+                             sample ? rdna3::kImageSampleOMimg : rdna3::kImageLoadMimg, fields)
                        : test::decode_gfx11_mimg<rdna3_5::MimgBuilderFields>(
                              *decoder, rdna3_5::build_mimg,
-                             sample ? rdna3_5::kImageSampleMimg : rdna3_5::kImageLoadMimg, fields);
+                             sample ? rdna3_5::kImageSampleOMimg : rdna3_5::kImageLoadMimg, fields);
           };
           auto decoded = decode_result();
           ASSERT_TRUE(decoded.succeeded());

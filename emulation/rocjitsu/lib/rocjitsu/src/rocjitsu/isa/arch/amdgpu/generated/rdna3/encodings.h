@@ -937,7 +937,7 @@ public:
   }
   void append_dst_operand(std::string &out, uint8_t index) const override {
     const auto *operand = dst_operands_[index];
-    const bool status = flags_ & CONDITIONAL_LAST_VGPR_DEF;
+    const bool status = flags_ & (CONDITIONAL_LAST_VGPR_DEF | INCLUDES_UNWRITTEN_LAST_VGPR);
     if (operand->is_vgpr() && !omits_gfx11_mimg_dim_dmask() && status != bool(inst_.tfe))
       out += image_vdata_name(operand->size_bits() + 32 * (int(inst_.tfe) - int(status)));
     else

@@ -1140,9 +1140,12 @@ public:
 
   [[nodiscard]] std::optional<RegisterRef> memory_destination_register(const Instruction &inst,
                                                                        const Operand &op) const {
-    return destination_register(op, true, bool(inst.flags() & RESERVES_UNWRITTEN_VGPR),
-                                wavefront().wf_size() == 64 &&
-                                    (inst.flags() & COMPACT_WAVE64_MEMORY_RESULT));
+    auto result = destination_register(op, true, bool(inst.flags() & RESERVES_UNWRITTEN_VGPR),
+                                       wavefront().wf_size() == 64 &&
+                                           (inst.flags() & COMPACT_WAVE64_MEMORY_RESULT));
+    if (result && result->cls == RegClass::VGPR && (inst.flags() & INCLUDES_UNWRITTEN_LAST_VGPR))
+      --result->width;
+    return result;
   }
 
   /// @brief Resolve a source using the execution bank and scalar selector.
