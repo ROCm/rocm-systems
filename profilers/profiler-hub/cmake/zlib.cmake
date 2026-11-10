@@ -3,49 +3,59 @@
 
 include_guard(DIRECTORY)
 
-# The loader only needs inflateInit2, inflate, inflateReset and inflateEnd, which
-# every zlib 1.2.x has, so a distribution's package is accepted from this
-# version on. The version that is fetched when none is found is pinned apart.
-set(ZLIB_MIN_VERSION "1.2.11" CACHE STRING "Minimum zlib version")
-set(ZLIB_FETCH_VERSION "1.3.1" CACHE STRING "zlib version to download")
+set(PROFILER_HUB_ZLIB_VERSION "1.3.2" CACHE STRING "Minimum zlib version")
 
-# FetchContent's own find_package() step looks for a package config file, which
-# zlib packages do not ship, so CMake's find module is called here instead.
-# Fetching forced on by FETCHCONTENT_TRY_FIND_PACKAGE_MODE=NEVER skips it, as it
-# does for the other dependencies.
-if(
-    NOT PROFILER_HUB_FETCH_DEPENDENCIES
-    OR NOT FETCHCONTENT_TRY_FIND_PACKAGE_MODE STREQUAL "NEVER"
-)
-    find_package(ZLIB ${ZLIB_MIN_VERSION})
-endif()
+# Fetching is Off by default: a missing or old package errors out.
+if(NOT PROFILER_HUB_FETCH_DEPENDENCIES)
+    find_package(ZLIB ${PROFILER_HUB_ZLIB_VERSION})
 
-if(ZLIB_FOUND)
-    message(STATUS "Using system zlib (version ${ZLIB_VERSION_STRING})")
-elseif(NOT PROFILER_HUB_FETCH_DEPENDENCIES)
-    # Fetching is Off by default: a missing or old package errors out.
-    message(
-        FATAL_ERROR
-        "profiler-hub requires zlib ${ZLIB_MIN_VERSION} or newer on CMAKE_PREFIX_PATH to read PyTorch traces. Configure with -DPROFILER_HUB_FETCH_DEPENDENCIES=ON to download it instead, or with -DPROFILER_HUB_ENABLE_PYTORCH_KINETO=OFF to leave PyTorch traces out."
-    )
+    if(NOT ZLIB_FOUND)
+        message(
+            FATAL_ERROR
+            "profiler-hub requires zlib ${PROFILER_HUB_ZLIB_VERSION} or newer on CMAKE_PREFIX_PATH. Configure with -DPROFILER_HUB_FETCH_DEPENDENCIES=ON to download it instead, or with -DPROFILER_HUB_ENABLE_PYTORCH_KINETO=OFF to leave PyTorch traces out."
+        )
+    endif()
+
+    message(STATUS "Using system zlib (version ${ZLIB_VERSION})")
 else()
     include(FetchContent)
 
     FetchContent_Declare(
-        zlib
+        ZLIB
         GIT_REPOSITORY https://github.com/madler/zlib.git
-        GIT_TAG v${ZLIB_FETCH_VERSION}
+        GIT_TAG v${PROFILER_HUB_ZLIB_VERSION}
         GIT_SHALLOW TRUE
+        # Without this, the MakeAvailable below always fetches.
+        FIND_PACKAGE_ARGS ${PROFILER_HUB_ZLIB_VERSION}
     )
 
-    set(ZLIB_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-    set(SKIP_INSTALL_ALL ON)
+    # zlib ignores BUILD_SHARED_LIBS: it builds a shared and a static library
+    # unless told otherwise.
+    set(ZLIB_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+    set(ZLIB_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    set(ZLIB_INSTALL OFF CACHE BOOL "" FORCE)
 
-    FetchContent_MakeAvailable(zlib)
+    # Force a static, PIC zlib regardless of a parent project's BUILD_SHARED_LIBS
+    # (e.g. rocprofiler-systems sets it ON project-wide, which would otherwise
+    # produce a libz.so that ZLIB_INSTALL=OFF never installs, leaving it
+    # unresolvable at runtime).
+    set(_PROFILER_HUB_BUILD_SHARED_LIBS_BACKUP ${BUILD_SHARED_LIBS})
+    set(BUILD_SHARED_LIBS OFF)
 
-    unset(SKIP_INSTALL_ALL)
+    # Tries find_package() first, fetches only if that fails.
+    FetchContent_MakeAvailable(ZLIB)
 
-    set_target_properties(zlibstatic PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    set(BUILD_SHARED_LIBS ${_PROFILER_HUB_BUILD_SHARED_LIBS_BACKUP})
+    unset(_PROFILER_HUB_BUILD_SHARED_LIBS_BACKUP)
 
-    add_library(ZLIB::ZLIB ALIAS zlibstatic)
+    if(TARGET zlibstatic)
+        set_target_properties(
+            zlibstatic
+            PROPERTIES POSITION_INDEPENDENT_CODE ON
+        )
+    endif()
+
+    if(NOT TARGET ZLIB::ZLIB)
+        add_library(ZLIB::ZLIB ALIAS zlibstatic)
+    endif()
 endif()
