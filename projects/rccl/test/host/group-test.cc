@@ -73,9 +73,9 @@ static std::function<bool()> g_threadCreateShouldFail = [] { return false; };
 // Pulls in group.cc's file-static helpers (groupLaunch, asyncJobLaunch, ...); must come last.
 #include GROUP_CC_PATH
 
-#include "dev_runtime.h"                  // ncclDevrCommCreateTask, ncclDevCommCompat
-#include "dev_runtime_internal.h"         // ncclDevrTeam, to free the teams the drained create obtains
-#include "fakes/dev_runtime_micro_fakes.h"  // ResetDevRuntimeMicroFakes: dev_runtime.cc is real in this binary
+#include "dev_runtime.h"
+#include "dev_runtime_internal.h"
+#include "fakes/dev_runtime_micro_fakes.h"
 
 // Compat records owned by the devcomm sources linked into this binary; the
 // devComm drain test below narrows them to make two versions distinguishable.
