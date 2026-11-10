@@ -665,7 +665,7 @@ static int sdxi_uring_cmd(struct io_uring_cmd *cmd, unsigned int issue_flags)
 	}
 	mutex_unlock(&sdev->lock);
 
-	io_uring_cmd_done(cmd, ret, 0, issue_flags);
+	io_uring_cmd_done(cmd, ret, issue_flags);
 	return 0;
 }
 #endif /* CONFIG_IO_URING */
