@@ -187,10 +187,7 @@ pthread_create_gotcha::wrapper::operator()() const
         }
         // The wall_clock report times every application thread, including threads
         // that never emit a region, so each one must be in the trace-cache metadata
-        if(get_use_timemory())
-        {
-            utility::thread_metadata_source{}.resolve_current_thread();
-        }
+        utility::thread_metadata_source{}.resolve_current_thread();
         get_cpu_cid_stack(_tid, m_config.parent_tid);
         if(m_config.enable_causal)
         {
@@ -416,8 +413,7 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
     auto const use_sampling       = config::get_use_sampling();
     auto const use_causal         = config::get_use_causal();
     auto const offset             = (!enabled || !active || info->is_offset);
-    auto const record_region =
-        (get_use_timemory() && active && !coverage && !offset && !is_paused());
+    auto const record_region      = (active && !coverage && !offset && !is_paused());
     auto const enable_sampling =
         (use_sampling && sample_child && active && !coverage && !offset);
     auto const enable_causal =
