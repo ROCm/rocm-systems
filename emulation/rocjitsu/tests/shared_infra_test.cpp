@@ -6640,7 +6640,9 @@ TEST(RdnaAddrCalcTest, Rdna4Saddr7cCoversGlobalFlatAndScratch) {
 }
 
 // RDNA4 ISA 11.2: SWIZZLE(SGPR_offset I32 + VGPR_offset I32 + IOFFSET I24, ThreadID).
-TEST(RdnaAddrCalcTest, Rdna4ScratchRegisterOffsetsAreSigned) {
+// Gfx12AddrCalcTest.ScratchSignedOffsetsAreWidenedBeforeScalingAndAddressing covers the
+// operand combinations; this pins a negative and a positive VGPR in the same wave.
+TEST(RdnaAddrCalcTest, Rdna4ScratchSignedVgprOffsetsArePerLane) {
   amdgpu::GpuMemory mem("rdna4_signed_scratch_mem");
   amdgpu::L2Cache l2("rdna4_signed_scratch_l2");
   amdgpu::ComputeUnitCore::Config cfg{};
@@ -6678,21 +6680,6 @@ TEST(RdnaAddrCalcTest, Rdna4ScratchRegisterOffsetsAreSigned) {
   rdna4::flat_calculate_addresses(inst, *wf, d);
   EXPECT_EQ(d.per_lane_addr[0], swizzled(0xC0, 0));
   EXPECT_EQ(d.per_lane_addr[1], swizzled(0x110, 1));
-
-  // A negative SGPR offset with a larger VGPR offset is also nonnegative in total.
-  cu->write_sgpr(sbase + 4, 0xFFFF'FFC0u);
-  cu->write_vgpr(vbase, 0, 0x100);
-  cu->write_vgpr(vbase, 1, 0x150);
-  rdna4::flat_calculate_addresses(inst, *wf, d);
-  EXPECT_EQ(d.per_lane_addr[0], swizzled(0xC0, 0));
-  EXPECT_EQ(d.per_lane_addr[1], swizzled(0x110, 1));
-
-  // IOFFSET still participates after both registers are sign-extended.
-  inst.ioffset = 0x40;
-  cu->write_sgpr(sbase + 4, 0xFFFF'FF00u);
-  cu->write_vgpr(vbase, 0, 0x180);
-  rdna4::flat_calculate_addresses(inst, *wf, d);
-  EXPECT_EQ(d.per_lane_addr[0], swizzled(0xC0, 0));
 }
 
 TEST(Gfx1250AddrCalcTest, FlatPrivateScratchDecodesLaneBits) {
@@ -6901,7 +6888,9 @@ TEST(Gfx1250AddrCalcTest, ScratchUsesDwordInterleavedWave32Layout) {
 }
 
 // CDNA5 ISA 10.2: SWIZZLE(SGPR_offset I32 + VGPR_offset I32 * ScaleFactor + IOFFSET I24, TID).
-TEST(Gfx1250AddrCalcTest, ScratchRegisterOffsetsAreSignedBeforeScaling) {
+// Gfx12AddrCalcTest.ScratchSignedOffsetsAreWidenedBeforeScalingAndAddressing covers the
+// operand combinations and scaling; this pins a negative and a positive VGPR in the same wave.
+TEST(Gfx1250AddrCalcTest, ScratchSignedVgprOffsetsArePerLane) {
   ScopedIsaExecutionBackend execution_backend_scope{&cdna5::execution_backend()};
   amdgpu::GpuMemory mem("gfx1250_signed_scratch_mem");
   amdgpu::L2Cache l2("gfx1250_signed_scratch_l2");
@@ -6939,20 +6928,6 @@ TEST(Gfx1250AddrCalcTest, ScratchRegisterOffsetsAreSignedBeforeScaling) {
   cu->write_sgpr(sbase + 4, 0x100);
   cu->write_vgpr(vbase, 0, 0xFFFF'FFC0u);
   cu->write_vgpr(vbase, 1, 0x10);
-  cdna5::flat_calculate_addresses(inst, *wf, d);
-  EXPECT_EQ(d.per_lane_addr[0], swizzled(0xC0, 0));
-  EXPECT_EQ(d.per_lane_addr[1], swizzled(0x110, 1));
-
-  cu->write_sgpr(sbase + 4, 0xFFFF'FFC0u);
-  cu->write_vgpr(vbase, 0, 0x100);
-  cdna5::flat_calculate_addresses(inst, *wf, d);
-  EXPECT_EQ(d.per_lane_addr[0], swizzled(0xC0, 0));
-
-  // SCALE_OFFSET multiplies the sign-extended VGPR: 0x100 + -16 * 4 = 0xC0.
-  inst.scale_offset = 1;
-  cu->write_sgpr(sbase + 4, 0x100);
-  cu->write_vgpr(vbase, 0, 0xFFFF'FFF0u);
-  cu->write_vgpr(vbase, 1, 0x4);
   cdna5::flat_calculate_addresses(inst, *wf, d);
   EXPECT_EQ(d.per_lane_addr[0], swizzled(0xC0, 0));
   EXPECT_EQ(d.per_lane_addr[1], swizzled(0x110, 1));
