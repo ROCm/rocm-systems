@@ -161,8 +161,8 @@ add_signal_handler_test(
 # Coordinated-shutdown case: profiler signal handlers are ON while the app runs its own
 # multi-process shutdown. The fork+exec workers block SIGINT and only exit once the parent
 # app's chained handler runs and the parent sends their shutdown command. Waiting for the
-# children before re-raising would deadlock; an unbounded profiler wait makes that
-# regression fail via the ctest timeout instead of eventually escaping through the
+# children before re-raising would deadlock. A profiler wait budget longer than the ctest
+# timeout makes that regression fail via ctest instead of escaping through the default
 # production wait budget.
 add_signal_handler_test(
     chained-handler
@@ -170,7 +170,7 @@ add_signal_handler_test(
     VALIDATE_EXPECT flushed-markers
     PASS_REGEX "clean exit"
     APP_EXTRA_FLAGS --app-signal-handler ENVIRONMENT
-                    "ROCPROF_FINALIZE_WAIT_TIMEOUT_SECONDS=0")
+                    "ROCPROF_FINALIZE_WAIT_TIMEOUT_SECONDS=60")
 
 # PR# 6717 regression: profiled app leaves a long-lived child alive at NORMAL exit.
 #
