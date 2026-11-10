@@ -1432,6 +1432,23 @@ protected:
   }
 
   void vmem_load(int wave, uint32_t vgpr, uint64_t exec = 1) { vmem(wave, true, vgpr, exec); }
+
+  /// Issue a one-dword DS read with EXEC zero.
+  void exec_zero_ds_read(int wave, uint32_t address) {
+    waves[wave]->pc += 16;
+    auto state = std::make_unique<VectorMemState>(LOCAL_MEM);
+    state->elem_size = sizeof(uint32_t);
+    state->num_elems = 1;
+    state->is_load = true;
+    state->wf_size = waves[wave]->wf_size();
+    state->exec_mask = 0;
+    state->lane_mask = 0;
+    state->dst_reg_base = waves[wave]->vgpr_alloc().base;
+    state->per_lane_addr[0] = address;
+    TestMemoryInstruction inst(std::move(state),
+                               {{WaitCounterType::DSCNT, MemoryCompletionClass::LDS}});
+    issue(wave, inst, {}, /*exec=*/0);
+  }
   void vmem_store(int wave) { vmem(wave, false, /*vgpr=*/0); }
 
   /// `Mixed` sends lane 0 to global memory and lane 1 to LDS.
@@ -1588,6 +1605,38 @@ TEST_F(Gfx1250CounterCapacityRaceTest, ExecZeroLoadBelowCapacityKeepsOldestLoadP
     vmem_load(0, /*vgpr=*/1);
   vmem_load(0, /*vgpr=*/2, /*exec=*/0);
   EXPECT_TRUE(vgpr_read(0, 0));
+}
+
+// An EXEC-zero instruction also holds its slot afterwards: it is skipped only
+// when its counters are all zero (CDNA5 ISA 3.2.2.1), and here the younger
+// loads keep LOADcnt nonzero. A load, 61 younger loads, an EXEC-zero load at
+// issue 63 and an active load at issue 64 fill LOADcnt, so the last issue
+// completes the oldest load.
+TEST_F(Gfx1250CounterCapacityRaceTest, ExecZeroLoadHoldsALoadcntSlot) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 2; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  vmem_load(0, /*vgpr=*/2, /*exec=*/0);
+  vmem_load(0, /*vgpr=*/1);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, ExecZeroDsReadHoldsADscntSlot) {
+  ds_read(0, kOldestAddress);
+  for (int index = 0; index < kCapacity - 2; ++index)
+    ds_read(0, kYoungerAddress);
+  exec_zero_ds_read(0, kYoungerAddress);
+  ds_read(0, kYoungerAddress);
+  EXPECT_FALSE(tensor_load_oldest());
+}
+
+// A load, then an EXEC-zero load: LOADcnt holds two, so waiting for one to
+// remain completes the first load.
+TEST_F(Gfx1250CounterCapacityRaceTest, PartialLoadcntWaitCountsExecZeroLoad) {
+  vmem_load(0, /*vgpr=*/0);
+  vmem_load(0, /*vgpr=*/2, /*exec=*/0);
+  wait_loadcnt(0, 1);
+  EXPECT_FALSE(vgpr_read(0, 0));
 }
 
 // Every FLAT instruction increments both DScnt and LOADcnt or STOREcnt when it
@@ -1975,6 +2024,15 @@ TEST_F(Gfx950CounterCapacityRaceTest, ExecZeroLoadAppliesNoBackpressure) {
   for (int index = 0; index < kVmcntCapacity - 1; ++index)
     load(/*lds=*/false, /*vgpr=*/1);
   load(/*lds=*/false, /*vgpr=*/2, /*exec=*/0);
+  EXPECT_TRUE(vgpr_read(0));
+}
+
+// Nor does an EXEC-zero load hold a slot for later waits there.
+TEST_F(Gfx950CounterCapacityRaceTest, PartialVmcntWaitDoesNotCountExecZeroLoad) {
+  load(/*lds=*/false, /*vgpr=*/0);
+  load(/*lds=*/false, /*vgpr=*/2, /*exec=*/0);
+  execute_wait(*fixture.plugin_group_, *wave,
+               legacy_wait_word(ROCJITSU_CODE_ARCH_CDNA4, /*vmcnt=*/1, /*lgkmcnt=*/15));
   EXPECT_TRUE(vgpr_read(0));
 }
 
@@ -5926,7 +5984,11 @@ TEST_P(IgnoredGlobalMemoryRaceTest, DoesNotCreateDestinationRace) {
   EXPECT_EQ(sink.str().find("RACE "), std::string::npos);
 }
 
-TEST_P(IgnoredGlobalMemoryRaceTest, DoesNotConsumeLoadcntOrderingSlot) {
+// An EXEC-zero VMEM instruction is skipped only when LOADcnt, STOREcnt,
+// ASYNCcnt and TENSORcnt are all zero (CDNA5 ISA 3.2.2.1). The pending load
+// keeps LOADcnt nonzero, so the EXEC-zero instruction holds a LOADcnt slot, and
+// waiting for one to remain completes the load.
+TEST_P(IgnoredGlobalMemoryRaceTest, HoldsLoadcntOrderingSlot) {
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(
       f.initialize(/*num_wf_slots=*/1, /*arch=*/"cdna5", /*wavefront_size=*/32));
@@ -5976,7 +6038,7 @@ TEST_P(IgnoredGlobalMemoryRaceTest, DoesNotConsumeLoadcntOrderingSlot) {
 
   f.plugin_group_->onAmdgpuReadVgprLanes(wf, wf->vgpr_alloc().base + kDestinationVgpr,
                                          /*lane_mask=*/0x1u, /*byte_mask=*/0xFu);
-  EXPECT_NE(sink.str().find("RACE "), std::string::npos);
+  EXPECT_EQ(sink.str().find("RACE "), std::string::npos);
 }
 
 INSTANTIATE_TEST_SUITE_P(LoadAndReturningAtomic, IgnoredGlobalMemoryRaceTest,
