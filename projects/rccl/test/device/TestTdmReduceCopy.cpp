@@ -4,7 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Tests for the TDM reduction path of reduceCopy (reduceCopyTdm in tdm/tdmReduce.h).
+// Tests for the TDM paths of reduceCopy: the reduction (reduceCopyTdm in tdm/tdmReduce.h)
+// and the one-source copy (tryTdmCopy in common_kernel.h).
 //
 // Each kernel drives reduceCopy from one block the way genericOp does: the pointer
 // lists live in shared memory and EnableTdmReduce is set. Every case runs twice, with
@@ -14,6 +15,7 @@
 
 #include "DeviceTestBase.hpp"
 
+#include <array>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -305,6 +307,149 @@ TEST_F(TdmReduceCopyTest, BuildFlagMatchesExpectation) {
   syncAndCheck();
   EXPECT_EQ(1, dGate.copyTo()[0]) << "The device pass has no TDM reduce path (TDM_SUPPORTED is 0 there), so every TDM "
                                   << "reduce suite runs the vector path.";
+}
+
+// Drives reduceCopy's copy shape, one source and no reduction, from the team of warps [warp0, 8), with the TDM SIMPLE
+// switch set to `tdmSimple`. Also writes canUseTdm's answer for the same team and pointers, or -1 when the device code
+// has no TDM SIMPLE path.
+template<typename T, int NDsts>
+__global__ void __launch_bounds__(kBlockThreads)
+  kTdmSimpleCopy(T* src, T* const* dsts, ssize_t nElts, [[maybe_unused]] int tdmSimple, int warp0, int* gate) {
+  __shared__ void* srcPtrs[1];
+  __shared__ void* dstPtrs[NDsts];
+  if (threadIdx.x == 0) {
+#if ENABLE_TDM_SIMPLE
+    ncclShmem.comm.tdmSimpleEnable = tdmSimple;
+    ncclShmem.comm.tdmSimpleReduceEnable = 0;
+#endif
+    srcPtrs[0] = src;
+    for (int d = 0; d < NDsts; d++) dstPtrs[d] = dsts[d];
+  }
+  __syncthreads();
+  const int base = warp0 * WARP_SIZE;
+  if (static_cast<int>(threadIdx.x) < base) return;
+  const int thread = threadIdx.x - base;
+  const int nThreads = blockDim.x - base;
+#if TDM_SUPPORTED && ENABLE_TDM_SIMPLE
+  const bool admitted = canUseTdm</*useAcc=*/0, FuncSum<T>, T, /*MultimemSrcs=*/0, /*MultimemDsts=*/0,
+                                  /*PreOpSrcs=*/0, /*Pipeline=*/0>(thread, nThreads, /*postOp=*/false, 1, srcPtrs,
+                                                                   NDsts, dstPtrs, nElts);
+  if (thread == 0) *gate = admitted ? 1 : 0;
+#else
+  if (thread == 0) *gate = -1;
+#endif
+  reduceCopy<4, /*useAcc=*/0, FuncSum<T>, T, /*MultimemSrcs=*/0, 1, 1, /*MultimemDsts=*/0, NDsts, NDsts,
+             /*PreOpSrcs=*/0>(thread, nThreads, 0, /*postOp=*/false, 1, srcPtrs, NDsts, dstPtrs, nElts);
+}
+
+class TdmSimpleCopyTest : public DeviceTestBase {
+protected:
+  // Sentinel padding on both sides of every destination window, a whole number of 256-byte lines so offset 0 is
+  // line-aligned.
+  static constexpr size_t kGuardBytes = 256;
+
+  bool supported_ = false;
+
+  void SetUp() override {
+    DeviceTestBase::SetUp();
+    supported_ = tdm::IsTdmCopySupported(0);
+  }
+
+  // Copies nElts from src + srcOff to each dst + dstOffs[d] (offsets in elements) with the TDM SIMPLE switch on and
+  // off. Both must match the source exactly and leave the guards alone, and the gate must admit the copy only with the
+  // switch on: the copy takes any alignment.
+  template<typename T, int NDsts>
+  void run(size_t nElts, size_t srcOff, const std::array<size_t, NDsts>& dstOffs, int warp0, const std::string& tag) {
+#if !ENABLE_TDM_SIMPLE
+    GTEST_SKIP() << "Built without ENABLE_TDM_SIMPLE";
+#endif
+    if (!supported_) GTEST_SKIP() << "TDM not supported on this device";
+
+    const size_t guardElts = kGuardBytes / sizeof(T);
+    std::vector<T> hSrc(srcOff + nElts);
+    for (size_t i = 0; i < hSrc.size(); i++) hSrc[i] = static_cast<T>((i * 2654435761u) >> 7);
+
+    T sentinel;
+    std::memset(&sentinel, 0xAB, sizeof(T));
+
+    for (int tdmSimple = 1; tdmSimple >= 0; tdmSimple--) {
+      DeviceBuffer<T> dSrc(hSrc.size());
+      dSrc.copyFrom(hSrc);
+      std::vector<DeviceBuffer<T>> dDst;
+      std::vector<T*> dstPtrs;
+      for (int d = 0; d < NDsts; d++) {
+        dDst.emplace_back(guardElts + dstOffs[d] + nElts + guardElts);
+        dDst.back().copyFrom(std::vector<T>(dDst.back().count, sentinel));
+        dstPtrs.push_back(dDst.back().ptr + guardElts + dstOffs[d]);
+      }
+      DeviceBuffer<T*> dDstPtrs(NDsts);
+      dDstPtrs.copyFrom(dstPtrs);
+      DeviceBuffer<int> dGate(1);
+
+      kTdmSimpleCopy<T, NDsts><<<1, kBlockThreads>>>(dSrc.ptr + srcOff, dDstPtrs.ptr, static_cast<ssize_t>(nElts),
+                                                     tdmSimple, warp0, dGate.ptr);
+      syncAndCheck();
+      const int gate = dGate.copyTo()[0];
+      if (gate < 0) GTEST_SKIP() << "Device code was built without the TDM SIMPLE path";
+      ASSERT_EQ(tdmSimple, gate) << tag << " tdmSimple=" << tdmSimple << ": TDM gate";
+
+      for (int d = 0; d < NDsts; d++) {
+        std::vector<T> out = dDst[d].copyTo();
+        const size_t start = guardElts + dstOffs[d];
+        for (size_t i = 0; i < out.size(); i++) {
+          const bool inside = i >= start && i < start + nElts;
+          const T& want = inside ? hSrc[srcOff + i - start] : sentinel;
+          ASSERT_EQ(0, std::memcmp(&out[i], &want, sizeof(T)))
+            << tag << " tdmSimple=" << tdmSimple << " dst=" << d << ": "
+            << (inside ? "mismatch at element " : "guard overwritten at index ")
+            << (inside ? i - start : i) << " of " << nElts;
+        }
+      }
+    }
+  }
+};
+
+// Enough for every warp of the block to stream many staging buffers.
+constexpr size_t kCopyBytes = (size_t(1) << 20) + 77;
+
+TEST_F(TdmSimpleCopyTest, Aligned) {
+  run<uint8_t, 1>(kCopyBytes, 0, {0}, 0, "aligned");
+}
+
+// Source and destination off their lines by different amounts, including one off and one on.
+TEST_F(TdmSimpleCopyTest, MisalignedOffsets) {
+  for (size_t srcOff : {0, 1, 2, 3, 64, 255})
+    for (size_t dstOff : {0, 1, 3, 128, 200}) {
+      if (srcOff == 0 && dstOff == 0) continue;
+      run<uint8_t, 1>(kCopyBytes, srcOff, {dstOff}, 0,
+                      "src+" + std::to_string(srcOff) + " dst+" + std::to_string(dstOff));
+    }
+}
+
+// The fp16 rccl-tests shape at offset 1: both legs 2 bytes off.
+TEST_F(TdmSimpleCopyTest, HalfOffsetOne) {
+  run<uint16_t, 1>(size_t(1) << 20, 1, {1}, 0, "half+1");
+}
+
+// directRecvCopySend's two destinations, each off its line by a different amount and neither matching the source.
+TEST_F(TdmSimpleCopyTest, TwoDstsDifferentOffsets) {
+  run<uint8_t, 2>(kCopyBytes, 5, {1, 130}, 0, "two dsts src+5");
+  run<uint16_t, 2>(kCopyBytes / 2, 0, {3, 0}, 0, "two dsts half");
+}
+
+// Teams that do not start at warp 0 take their staging from their own warps' slices.
+TEST_F(TdmSimpleCopyTest, TeamNotAtWarpZero) {
+  run<uint8_t, 1>(kCopyBytes, 1, {2}, 3, "warps 3-7");
+  run<uint8_t, 1>(kCopyBytes, 3, {0}, 7, "warp 7 alone");
+}
+
+// Sizes below the 256-byte head, around one staging buffer and one block's worth of them, and across many.
+TEST_F(TdmSimpleCopyTest, SizeSweep) {
+  for (size_t n : {size_t(1), size_t(3), size_t(127), size_t(255), size_t(256), size_t(257), size_t(511),
+                   size_t(8191), size_t(8193), size_t(16383), size_t(16385), size_t(65537), size_t(131071),
+                   size_t(131073), size_t(3 * 131072 + 100)})
+    for (size_t off : {0, 1})
+      run<uint8_t, 1>(n, off, {3 * off}, 0, std::to_string(n) + " bytes off " + std::to_string(off));
 }
 
 } // namespace RcclUnitTesting
