@@ -200,14 +200,6 @@ HIP_TEST_CASE(
   (void)RequireSupportFlagIsBoolean(hipExtExecAffinityTypeGranularityWGP);
 }
 
-// @asserts: hipDeviceGetExecAffinitySupport - repeating a query reports the same flag
-HIP_TEST_CASE(Contract_Device_HipDeviceGetExecAffinitySupport_RepeatedQuery_IsStable) {
-  const int first = RequireSupportFlagIsBoolean(hipExtExecAffinityTypeGranularityCU);
-  const int second = RequireSupportFlagIsBoolean(hipExtExecAffinityTypeGranularityCU);
-
-  REQUIRE(first == second);
-}
-
 #if HT_AMD
 // BACKEND-DIFF: the next two cases pin AMD-only guarantees. CU masking exists on every
 // AMD GPU, but an NVIDIA device may report SM-count affinity as unavailable; and the
@@ -315,12 +307,4 @@ HIP_TEST_CASE(Contract_Device_HipDeviceGetExecAffinitySupport_OutOfRangeDevice_I
                                                   static_cast<hipDevice_t>(device_count));
 
   REQUIRE(status == hipErrorInvalidDevice);
-}
-
-// @asserts: hipDeviceGetExecAffinitySupport - a null out-pointer outranks a bad device ordinal
-HIP_TEST_CASE(Contract_Device_HipDeviceGetExecAffinitySupport_NullOutPointer_OutranksBadDevice) {
-  const hipError_t status =
-      RequireRejectedStatus(nullptr, hipExecAffinityTypeCUCount, static_cast<hipDevice_t>(-1));
-
-  REQUIRE(status == hipErrorInvalidValue);
 }

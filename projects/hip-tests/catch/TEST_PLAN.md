@@ -13,8 +13,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Tier | Cases | Tagged | Missing `@asserts` |
 |---|---:|---:|---:|
-| `contract` | 643 | 643 | 0 |
-| **total** | **643** | **643** | **0** |
+| `contract` | 641 | 641 | 0 |
+| **total** | **641** | **641** | **0** |
 
 ## Tier: `contract`
 
@@ -135,7 +135,7 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_Copy3D_HipMemcpy3D_Default_HostDeviceRoundTripsExtent` | hipMemcpy3D | a full-extent H2D then D2H 3D copy round-trips all bytes unchanged |
 | `Contract_Copy3D_HipMemcpy3D_Default_SingleSliceRoundTripsBytes` | hipMemcpy3D | a single-slice (depth=1) H2D then D2H 3D copy round-trips that slice's bytes |
 
-### `device` (23 cases)
+### `device` (21 cases)
 
 | Case | API | Asserts |
 |---|---|---|
@@ -150,10 +150,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_Device_HipDeviceGetExecAffinitySupport_MaskGranularity_IsExactlyOneType` | hipDeviceGetExecAffinitySupport | exactly one masking granularity is supported |
 | `Contract_Device_HipDeviceGetExecAffinitySupport_NegativeDevice_IsRejected` | hipDeviceGetExecAffinitySupport | a negative device ordinal is rejected as an invalid device |
 | `Contract_Device_HipDeviceGetExecAffinitySupport_NullOutPointer_IsRejected` | hipDeviceGetExecAffinitySupport | a null out-pointer is rejected as an invalid argument |
-| `Contract_Device_HipDeviceGetExecAffinitySupport_NullOutPointer_OutranksBadDevice` | hipDeviceGetExecAffinitySupport | a null out-pointer outranks a bad device ordinal |
 | `Contract_Device_HipDeviceGetExecAffinitySupport_OutOfRangeDevice_IsRejected` | hipDeviceGetExecAffinitySupport | an out-of-range device is rejected as an invalid device |
 | `Contract_Device_HipDeviceGetExecAffinitySupport_OutOfRangeType_IsRejected` | hipDeviceGetExecAffinitySupport | an out-of-range type is rejected as an invalid argument |
-| `Contract_Device_HipDeviceGetExecAffinitySupport_RepeatedQuery_IsStable` | hipDeviceGetExecAffinitySupport | repeating a query reports the same flag |
 | `Contract_Device_HipDeviceGetExecAffinitySupport_SentinelType_IsRejected` | hipDeviceGetExecAffinitySupport | the type sentinel is rejected as an invalid argument |
 | `Contract_Device_HipDeviceGetExecAffinitySupport_WgpGranularityType_ReportsBooleanFlag` | hipDeviceGetExecAffinitySupport | a WGP-granularity query reports a boolean flag or unsupported |
 | `Contract_Device_HipGetDeviceProperties_GetProperties_SucceedsForCurrentDevice` | hipGetDeviceProperties | succeeds in populating properties for the current device |

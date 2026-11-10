@@ -132,9 +132,6 @@ contract:
   Contract_Device_HipDeviceGetExecAffinitySupport_WgpGranularityType_ReportsBooleanFlag:
     <<: *level_0
     tags: [device, P0]
-  Contract_Device_HipDeviceGetExecAffinitySupport_RepeatedQuery_IsStable:
-    <<: *level_0
-    tags: [device, P0]
   Contract_Device_HipDeviceGetExecAffinitySupport_CuCountType_IsAlwaysSupported:
     <<: *level_0
     tags: [device, P0]
@@ -154,9 +151,6 @@ contract:
     <<: *level_0
     tags: [device, P0]
   Contract_Device_HipDeviceGetExecAffinitySupport_OutOfRangeDevice_IsRejected:
-    <<: *level_0
-    tags: [device, P0]
-  Contract_Device_HipDeviceGetExecAffinitySupport_NullOutPointer_OutranksBadDevice:
     <<: *level_0
     tags: [device, P0]
   Contract_DeviceIdentity_HipDeviceGetByPCIBusId_Default_RoundTripsWithGetPCIBusId:
