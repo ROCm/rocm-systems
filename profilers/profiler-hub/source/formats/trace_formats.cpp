@@ -3,7 +3,9 @@
 
 #include "trace_formats.hpp"
 
+#include "common/debug.hpp"
 #include "formats/rocpd/rocpd_probe.hpp"
+#include "formats/rocpd/rocpd_source.hpp"
 #if PROFILER_HUB_ENABLE_ROCPD_V2
 #include "formats/rocpd_v2/rocpd_v2_reader.hpp"
 #endif
@@ -35,6 +37,12 @@ rocpd_supports(version_t version)
 #endif
     (void) version;
     return false;
+}
+
+std::unique_ptr<format_source>
+open_rocpd_source(const source_request_t& request)
+{
+    return std::make_unique<rocpd_source>(request);
 }
 
 std::unique_ptr<reader_t::impl>
@@ -92,6 +100,7 @@ format_entries()
                                              rocpd_supports,
                                              rocpd_matches,
                                              rocpd_probe,
+                                             open_rocpd_source,
                                              make_rocpd_reader,
                                              make_rocpd_trim } };
     return entries;
@@ -101,6 +110,25 @@ bool
 is_supported_format(const trace_format_t& format)
 {
     return find_format(format.schema, format.version) != nullptr;
+}
+
+std::unique_ptr<format_source>
+open_format_source(const source_request_t& request)
+{
+    const format_entry_t* entry =
+        find_format(request.format.schema, request.format.version);
+    if(entry == nullptr)
+    {
+        throw std::invalid_argument{ "no format reads trace schema version " +
+                                     std::to_string(request.format.version.major) };
+    }
+    LOG_INFO("[Profiler-Hub] Opening {} {}.{}.{} trace {}",
+             entry->name,
+             request.format.version.major,
+             request.format.version.minor,
+             request.format.version.patch,
+             request.path);
+    return entry->open(request);
 }
 
 std::unique_ptr<reader_t::impl>
