@@ -71,6 +71,10 @@ typedef struct rj_code_inst_t rj_code_inst_t;
 typedef struct rj_code_decoder_t rj_code_decoder_t;
 
 /// @brief Create a decoder for the architecture specified by @p arch.
+///
+/// @details Allocation failure in rj_code_decoder_create,
+/// rj_code_decoder_create_for_target, or rj_code_decoder_decode terminates the
+/// calling process; these calls do not return ROCJITSU_STATUS_OUT_OF_RESOURCES.
 /// @param[in] arch Architecture to create a decoder for.
 /// @param[out] decoder Newly created decoder handle (refcount = 0). Set to NULL
 /// on any failure when @p decoder itself is non-NULL.
