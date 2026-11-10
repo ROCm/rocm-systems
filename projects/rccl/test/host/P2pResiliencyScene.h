@@ -360,6 +360,8 @@ class P2pResiliencyScene {
     base->isSend = isSend;
     base->vProps.ndevs = ndevs;
     base->nqps = nqps;
+    // Connect sets this to the larger side's device count; the resiliency CQ/RQ sizing reads it.
+    base->nDataQps = ndevs;
     for (int d = 0; d < ndevs; d++) {
       base->vProps.devs[d] = kSceneIbDevBase + d;
       struct ncclIbNetCommDevBase* devBase = &comm->devs[d].base;
