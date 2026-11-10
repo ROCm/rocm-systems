@@ -7431,6 +7431,18 @@ TEST_F(DevrCommCreateInternalJitTest, CompileTimeDeviceCodeVersion_DownConvertsT
   EXPECT_EQ(outDevComm.magic, 0u);  // the runtime layout never landed in the caller's buffer
 }
 
+// Branch: a deviceCodeVersion no record serves is refused before the caller's
+// devComm is touched.
+TEST_F(DevrCommCreateInternalJitTest, UnservedDeviceCodeVersion_ReturnsErrorBeforeWritingDevComm) {
+  ncclDevCommCompat_v22907 = ncclDevCommCompat{};  // nothing serves the runtime version
+  memset(&outDevComm, 0xAB, sizeof(outDevComm));
+  ncclDevComm untouched;
+  memcpy(&untouched, &outDevComm, sizeof(untouched));
+
+  EXPECT_NE(CreateFor(NCCL_VERSION_CODE), ncclSuccess);
+  EXPECT_EQ(memcmp(&outDevComm, &untouched, sizeof(untouched)), 0);
+}
+
 
 // ---------------------------------------------------------------------------
 // ncclDevCommCopyLsaData copies the LSA-shared span of a devcomm between two
