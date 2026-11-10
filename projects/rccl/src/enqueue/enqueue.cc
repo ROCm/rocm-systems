@@ -5021,10 +5021,10 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
          rcclAllGatherCeRegisteredWindow(comm, recvBytes, winRegType, ceCapturing));
       const bool allGatherDecided = (info->coll == ncclFuncAllGather && info->decisionValid);
       const bool alltoAllDecided = (info->coll == ncclFuncAlltoAll && info->decisionValid);
-      // The CE-scratch branch below reads comm->ddaScratch. Its gates other than the scratch
-      // itself are rank-invariant, so run a deferred DDA IPC setup on them first.
-      if (comm->ddaIpcLazyScratchBytes != 0 && !rcclNcclAlgoEnvIsSet() && !allGatherDecided && !alltoAllDecided &&
-          rcclForceCeScratchEnabled(comm) && CeScratchAvailable && !hasSysmemSegment &&
+      // Deferred DDA IPC setup for the CE-scratch branch below, on its rank-invariant gates. Depth 1
+      // is ncclEnqueueCheck's own group: a user group may order comms differently per rank.
+      if (comm->ddaIpcLazyScratchBytes != 0 && ncclGroupDepth == 1 && !rcclNcclAlgoEnvIsSet() && !allGatherDecided &&
+          !alltoAllDecided && rcclForceCeScratchEnabled(comm) && CeScratchAvailable && !hasSysmemSegment &&
           recvBytes <= ncclDdaScratchCapacity(comm) && info->coll != ncclFuncAllReduce &&
           info->coll != ncclFuncReduceScatter) {
         NCCLCHECK(ncclDdaIpcEnsureInit(comm, ceCapturing));

@@ -46,7 +46,7 @@ bool ddaIpcCommEligible(const ncclComm* comm) {
          !comm->MNNVL && ddaArchSupported;
 }
 
-// Allocates and zeroes the scratch. Returns null, with the HIP error cleared, on failure.
+// Allocates and zeroes the scratch. Returns null, with the HIP error cleared, on any failure.
 void* ddaIpcAllocScratch(ncclComm* comm, size_t bytes) {
   void* scratch = nullptr;
 #if defined(HIP_UNCACHED_MEMORY)
@@ -62,7 +62,13 @@ void* ddaIpcAllocScratch(ncclComm* comm, size_t bytes) {
   // Zero the scratch once so the LL all-gather's first epoch (>= 1) never
   // false-matches leftover flag words (mirrors the fabric path). Harmless for
   // the copy-based DDA collectives, which overwrite their staging area per op.
-  HIP_CALL(hipMemset(scratch, 0, bytes));
+  hipError_t memsetErr = hipMemset(scratch, 0, bytes);
+  if (memsetErr != hipSuccess) {
+    WARN("ncclDdaIpcCommInit: hipMemset of the scratch failed (%s)", hipGetErrorString(memsetErr));
+    (void)cudaGetLastError();
+    CUDACHECKIGNORE(cudaFree(scratch));
+    return nullptr;
+  }
   return scratch;
 }
 
@@ -207,9 +213,8 @@ ncclResult_t ddaIpcSetup(ncclComm* comm, void* scratch, size_t bytes) {
   return ncclSuccess;
 }
 
-// Collective. Each rank votes on whether it holds its scratch, so a rank that cannot allocate
-// (out of memory, or capturing, where the setup's synchronous copies are illegal) leaves every
-// rank without DDA IPC instead of only some. *agreed reports whether the setup ran.
+// Collective: each rank votes on holding its scratch, so one unready rank leaves every rank without DDA IPC.
+// Capturing ranks may not allocate: the setup's synchronous copies are illegal in capture.
 ncclResult_t ddaIpcVoteAndSetup(ncclComm* comm, size_t bytes, bool mayAllocate, bool* agreed) {
   *agreed = false;
   void* scratch = mayAllocate ? ddaIpcAllocScratch(comm, bytes) : nullptr;
@@ -277,15 +282,13 @@ ncclResult_t ncclDdaIpcEnsureInit(ncclComm* comm, bool capturing) {
   if (comm == nullptr || comm->ddaIpcLazyScratchBytes == 0) {
     return ncclSuccess;
   }
-  // Votes run on the 1st, 2nd, 4th, 8th... trigger, so a rank that stays unready (capturing,
-  // out of memory) costs its peers O(log n) bootstrap AllGathers.
+  // Votes run on the 1st, 2nd, 4th, 8th... trigger: an unready rank costs its peers O(log n) AllGathers.
   const uint64_t call = ++comm->ddaIpcLazyCalls;
   if ((call & (call - 1)) != 0) {
     return ncclSuccess;
   }
 
-  // A rank that cannot select its device still votes (not ready): returning early would leave
-  // its peers waiting in the vote.
+  // A rank that cannot select its device still votes, not ready, so its peers do not hang.
   int savedDev = -1;
   bool onDevice = cudaGetDevice(&savedDev) == cudaSuccess;
   const bool switchDevice = onDevice && savedDev != comm->cudaDev;

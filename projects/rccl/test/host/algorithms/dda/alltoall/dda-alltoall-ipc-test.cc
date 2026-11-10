@@ -72,6 +72,20 @@ TEST_F(DdaAlltoallIpcMicrotest, Eligible_BaselineFp32) {
   EXPECT_TRUE(Eligible(4));
 }
 
+// A deferred comm has no IPC resources: the shape check that triggers its setup passes against
+// the deferred scratch size, full eligibility does not, and nothing deferred means no capacity.
+TEST_F(DdaAlltoallIpcMicrotest, Shape_DeferredSetupPassesShapeButNotEligibility) {
+  mock_.setIpcResourcesPresent(false);
+  comm().ddaScratchBytes = 0;
+  comm().ddaIpcLazyScratchBytes = DDA_IPC_BUFFER_SIZE;
+  EXPECT_TRUE(ncclAllToAllDdaIpcShapeEligible(mock_.get(), 4, ncclFloat32));
+  EXPECT_FALSE(Eligible(4));
+  const size_t overCapacity = DDA_IPC_BUFFER_SIZE / sizeof(float) / comm().nRanks + 4;
+  EXPECT_FALSE(ncclAllToAllDdaIpcShapeEligible(mock_.get(), overCapacity, ncclFloat32));
+  comm().ddaIpcLazyScratchBytes = 0;
+  EXPECT_FALSE(ncclAllToAllDdaIpcShapeEligible(mock_.get(), 4, ncclFloat32));
+}
+
 TEST_F(DdaAlltoallIpcMicrotest, Eligible_NeedsCommAndBootstrap) {
   EXPECT_FALSE(ncclAllToAllDdaIpcEligible(nullptr, kSendbuff, kRecvbuff, 4, ncclFloat32));
   comm().bootstrap = nullptr;

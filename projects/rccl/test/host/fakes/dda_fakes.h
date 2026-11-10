@@ -70,7 +70,7 @@ extern std::function<bool(ncclComm*, size_t, ncclDataType_t, ncclRedOp_t)> g_all
 extern std::function<bool(ncclComm*, size_t, ncclDataType_t)> g_allGatherDdaIpcShapeEligible;
 extern std::function<bool(ncclComm*, size_t, ncclDataType_t)> g_allToAllDdaIpcShapeEligible;
 extern std::function<bool(ncclComm*, size_t, ncclDataType_t, ncclRedOp_t)> g_reduceScatterDdaIpcShapeEligible;
-// The deferred DDA IPC setup the selectors trigger. Succeeds without doing anything by default.
+// The deferred DDA IPC setup the selectors trigger. Fails loud until a test installs it.
 extern std::function<ncclResult_t(ncclComm*, bool /*capturing*/)> g_ddaIpcEnsureInit;
 
 // The launchers. Fail loud until a test installs them.

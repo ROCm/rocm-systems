@@ -14,9 +14,8 @@
 struct ncclComm;
 
 ncclResult_t ncclDdaIpcCommInit(struct ncclComm* comm);
-// Runs the setup ncclDdaIpcCommInit deferred, once every rank votes ready; a no-op when nothing
-// is deferred. Collective: call only from rank-invariant points (collective type, count, datatype,
-// op and comm config, never buffer addresses). capturing: the caller's stream is capturing.
+// Runs the setup ncclDdaIpcCommInit deferred once every rank votes ready; no-op if nothing is deferred.
+// Collective: call only on rank-invariant inputs, never buffer addresses, and outside user groups.
 ncclResult_t ncclDdaIpcEnsureInit(struct ncclComm* comm, bool capturing);
 ncclResult_t ncclDdaIpcCommClosePeerMappings(struct ncclComm* comm);
 ncclResult_t ncclDdaIpcCommFini(struct ncclComm* comm);

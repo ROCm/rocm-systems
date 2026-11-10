@@ -468,9 +468,10 @@ void rcclSetCeAllReduceFastPath(struct ncclComm*) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclSetCeAllReduceFastPath");
 }
 // rcclCeAllReduceEnabled and rcclForceCeAllReduceEnabled have controllable fakes above.
-bool rcclForceCeScratchEnabled(const ncclComm*) {
+std::function<bool(const ncclComm*)> g_rcclForceCeScratchEnabled = [](const ncclComm*) -> bool {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclForceCeScratchEnabled");
-}
+};
+bool rcclForceCeScratchEnabled(const ncclComm* comm) { return g_rcclForceCeScratchEnabled(comm); }
 size_t rcclCeAr2ShotMax(const ncclComm*) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclCeAr2ShotMax");
 }
@@ -478,9 +479,10 @@ size_t rcclCeAr2ShotMin(const ncclComm*) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclCeAr2ShotMin");
 }
 // rcclCeArNonRegCap, which taskAppend and ncclCeInit call instead of rcclCeAr2ShotMax, is a seam above.
-bool rcclNcclAlgoEnvIsSet() {
+std::function<bool()> g_rcclNcclAlgoEnvIsSet = []() -> bool {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclNcclAlgoEnvIsSet");
-}
+};
+bool rcclNcclAlgoEnvIsSet() { return g_rcclNcclAlgoEnvIsSet(); }
 bool rcclAllGatherCeRegisteredWindow(const ncclComm*, size_t, ncclSymRegType_t, bool) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclAllGatherCeRegisteredWindow");
 }

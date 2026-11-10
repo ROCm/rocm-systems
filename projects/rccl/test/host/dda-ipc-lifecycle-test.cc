@@ -151,6 +151,7 @@ protected:
       comms_[rank] = std::make_unique<ncclComm>();
       ncclComm* comm = comms_[rank].get();
       comm->rank = rank;
+      comm->cudaDev = rank;
       comm->nRanks = kRanks;
       comm->nNodes = 1;
       comm->archName = archName_;
@@ -410,7 +411,7 @@ TEST_F(DdaIpcLifecycleMicrotest, LazyInitDefersScratchUntilFirstEnsure) {
 }
 
 // A rank that is capturing votes not ready, so every rank stays deferred and holds nothing.
-// The next vote (call 2) succeeds; call 3 does not vote at all.
+// The next vote (call 2) succeeds.
 TEST_F(DdaIpcLifecycleMicrotest, LazyInitWaitsWhileAnyRankCaptures) {
   g_ddaIpcLazyInit = 1;
   initializeDdaIpcForAllRanks();
@@ -439,6 +440,47 @@ TEST_F(DdaIpcLifecycleMicrotest, LazyInitWaitsWhileAnyRankCaptures) {
   EXPECT_TRUE(liveAllocations_.empty());
 }
 
+// A rank whose device switch fails still votes, not ready, so every rank stays deferred without a
+// desync, and every rank that switched gets its own device back.
+TEST_F(DdaIpcLifecycleMicrotest, LazyInitDeviceSwitchFailureKeepsEveryRankDeferred) {
+  g_ddaIpcLazyInit = 1;
+  initializeDdaIpcForAllRanks();
+  constexpr int kStartDev = 100;  // no rank's cudaDev, so every rank switches
+  constexpr int kFailingDev = 3;
+  static thread_local int tlsDev = kStartDev;
+  ScopedHook<hipError_t(int*)> getDevice{g_hipGetDevice, [](int* dev) {
+    *dev = tlsDev;
+    return hipSuccess;
+  }};
+  ScopedHook<hipError_t(int)> setDevice{g_hipSetDevice, [](int dev) {
+    if (dev == kFailingDev) return hipErrorInvalidDevice;
+    tlsDev = dev;
+    return hipSuccess;
+  }};
+
+  int restored[kRanks] = {};
+  std::vector<std::thread> threads;
+  for (int rank = 0; rank < kRanks; ++rank) {
+    threads.emplace_back([this, rank, &restored] {
+      tlsDev = kStartDev;
+      ensureResults_[rank] = ncclDdaIpcEnsureInit(comms_[rank].get(), /*capturing=*/false);
+      restored[rank] = tlsDev;
+    });
+  }
+  for (auto& thread : threads) {
+    thread.join();
+  }
+  for (int rank = 0; rank < kRanks; ++rank) {
+    EXPECT_EQ(ncclSuccess, ensureResults_[rank]) << "rank " << rank;
+    EXPECT_EQ(nullptr, comms_[rank]->ddaScratch) << "rank " << rank;
+    EXPECT_EQ(static_cast<size_t>(DDA_IPC_BUFFER_SIZE), comms_[rank]->ddaIpcLazyScratchBytes) << "rank " << rank;
+    EXPECT_EQ(kStartDev, restored[rank]) << "rank " << rank;
+  }
+  EXPECT_EQ(0, bootstrap_.timeouts);
+  EXPECT_EQ(0, bootstrap_.desyncs);
+  EXPECT_TRUE(liveAllocations_.empty());
+}
+
 // The votes back off: after a failed first vote, call 2 votes, call 3 does not.
 TEST_F(DdaIpcLifecycleMicrotest, LazyInitVotesOnlyOnPowerOfTwoCalls) {
   g_ddaIpcLazyInit = 1;
@@ -447,6 +489,7 @@ TEST_F(DdaIpcLifecycleMicrotest, LazyInitVotesOnlyOnPowerOfTwoCalls) {
   ensureDdaIpcForAllRanks(allCapturing);  // call 1: votes, nobody ready
   ensureDdaIpcForAllRanks(allCapturing);  // call 2: votes, nobody ready
   const int gathersAfterTwoVotes = bootstrap_.allGatherCalls;
+  EXPECT_EQ(2 * kRanks, gathersAfterTwoVotes);  // lazy comm init gathers nothing; each vote is one per rank
   ensureDdaIpcForAllRanks();              // call 3: no vote, even though all are ready
   EXPECT_EQ(gathersAfterTwoVotes, bootstrap_.allGatherCalls);
   for (int rank = 0; rank < kRanks; ++rank) {
