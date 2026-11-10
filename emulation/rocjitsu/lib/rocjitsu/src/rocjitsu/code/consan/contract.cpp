@@ -239,8 +239,11 @@ Result validate_manifest(const Manifest &manifest, ContractError *error,
 
   if ((manifest.scope == ScopeKind::NativeLdsWorkgroupBarrier) != !manifest.barriers.empty())
     return reject(error, ContractErrorCode::InvalidFacts, "barrier scope and facts disagree");
+  if (!manifest.barriers.empty() && entry.maximum_workgroup_size <= manifest.wave_size)
+    return reject(error, ContractErrorCode::InvalidFacts,
+                  "barrier profile requires a maximum workgroup size permitting two waves");
   std::vector<std::pair<uint64_t, uint64_t>> prepared_ranges;
-  prepared_ranges.reserve(manifest.sites.size() + 2 * manifest.barriers.size());
+  prepared_ranges.reserve(2 * manifest.sites.size() + 2 * manifest.barriers.size());
   uint64_t previous_barrier_end = 0;
   for (const BarrierFacts &barrier : manifest.barriers) {
     if (barrier.original_drain < previous_barrier_end || manifest.target != 1250 ||
@@ -295,6 +298,7 @@ Result validate_manifest(const Manifest &manifest, ContractError *error,
     previous_original_end = site.original_offset + site.original_size;
     prepared_ranges.emplace_back(site.prepared_guest_offset,
                                  site.prepared_guest_offset + site.prepared_guest_size);
+    prepared_ranges.emplace_back(site.probe_offset, site.probe_offset + site.probe_size);
   }
   std::sort(prepared_ranges.begin(), prepared_ranges.end());
   for (size_t index = 1; index < prepared_ranges.size(); ++index) {

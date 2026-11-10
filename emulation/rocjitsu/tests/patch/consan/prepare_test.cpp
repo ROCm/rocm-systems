@@ -185,7 +185,11 @@ TEST_F(ConSanPrepare, ModifiedPreparedIsaAndMappingsFailAfterRecomputingTheirIma
       build_input_program(original_, *target_profile("gfx1100"), "lds_producer_consumer", error_);
   ASSERT_TRUE(input.succeeded());
   PreparedArtifact broken = artifact.value();
+  // Keep the altered envelope disjoint so canonical-plan validation, rather
+  // than the structural overlap guard, rejects this mapping.
+  ASSERT_GT(broken.manifest.sites[0].probe_size, 4u);
   broken.manifest.sites[0].probe_offset += 4;
+  broken.manifest.sites[0].probe_size -= 4;
   EXPECT_TRUE(validate_manifest(broken.manifest).succeeded());
   EXPECT_TRUE(validate_prepared(original_, broken, error_).failed());
   EXPECT_NE(error_.message.find("canonical preservation plan"), std::string::npos);

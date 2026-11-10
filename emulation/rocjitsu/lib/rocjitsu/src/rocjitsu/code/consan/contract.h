@@ -45,8 +45,8 @@ inline constexpr uint32_t kSyncCapacity = 16;
 constexpr uint64_t sync_offset(uint64_t sites) {
   return kRowHeaderBytes + sites * kAddressGroupsPerSite * kAccessRecordBytes;
 }
-constexpr uint64_t report_row_bytes(uint64_t sites, bool barriers) {
-  return sync_offset(sites) + (barriers ? kSyncCapacity * kSyncRecordBytes : 0);
+constexpr uint64_t report_row_bytes(uint64_t sites, bool has_barriers) {
+  return sync_offset(sites) + (has_barriers ? kSyncCapacity * kSyncRecordBytes : 0);
 }
 inline constexpr std::array<KernargExtensionPayloadLayout, 1> kContextPointerPayloads = {
     {{.size = sizeof(uint64_t), .alignment = alignof(uint64_t)}}};
@@ -83,6 +83,14 @@ inline constexpr uint32_t kRowFinalSequence = 24;
 inline constexpr uint32_t kRowFinalPhase = 28;
 inline constexpr uint32_t kRowSyncLoss = 32;
 inline constexpr uint32_t kRowReservedBegin = 36;
+inline constexpr uint32_t kRowEntered = 1;
+inline constexpr uint32_t kRowExited = 2;
+inline constexpr uint32_t kRowExhausted = 4;
+
+// Fixed journal profile: slot equals static group, occurrence is 1, and phase
+// is slot + 1. Admission caps groups at sixteen, so kRowSyncLoss remains zero.
+// Repeated occurrences and dynamic overflow are unsupported; extending this
+// profile requires coordinated producer, reader, and compatibility changes.
 inline constexpr uint32_t kSyncCommit = 0;
 inline constexpr uint32_t kSyncGroup = 4;
 inline constexpr uint32_t kSyncOccurrence = 8;
@@ -91,9 +99,6 @@ inline constexpr uint32_t kSyncSequence = 16;
 inline constexpr uint32_t kSyncPhase = 20;
 inline constexpr uint32_t kSyncReservedBegin = 24;
 inline constexpr uint32_t kBarrierCompleted = 0x43534243;
-inline constexpr uint32_t kRowEntered = 1;
-inline constexpr uint32_t kRowExited = 2;
-inline constexpr uint32_t kRowExhausted = 4;
 
 inline constexpr uint32_t kRecordCommit = 0;
 inline constexpr uint32_t kRecordAnalysis = 4;

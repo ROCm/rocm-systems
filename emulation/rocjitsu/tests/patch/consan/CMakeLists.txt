@@ -419,6 +419,7 @@ if(TARGET consan_hsa_runner)
                             barrier_high
                             barrier_separated
                             barrier_multiple
+                            barrier_missing_second
                     )
                         consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
                             ${_barrier_case} 65 production analysis

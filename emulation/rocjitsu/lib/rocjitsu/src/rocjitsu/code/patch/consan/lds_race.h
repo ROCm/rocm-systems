@@ -31,16 +31,21 @@ struct NativeLdsAccess {
 /// @brief Qualify LDS scope and select sites without owning binary/CFG machinery.
 [[nodiscard]] Result qualify_lds_race_entry(const InputProgram &program, InputError &error);
 [[nodiscard]] Result qualify_lds_race_block(const BasicBlock &block, InputError &error);
+
+/// @brief Qualify original workgroup barrier groups and populate program.barriers.
+/// @details On the already qualified closed forward CFG, require an original LDS
+/// drain immediately before signal and a matching wait in the same block, with
+/// no intervening memory or synchronization. Each group block must dominate every exit.
+[[nodiscard]] Result qualify_lds_race_barrier(InputProgram &program,
+                                              std::span<BasicBlock *const> blocks,
+                                              InputError &error);
+
 [[nodiscard]] Result classify_lds_race_instruction(const Instruction &instruction,
                                                    rj_code_arch_t arch, uint32_t allocated_vgprs,
                                                    std::vector<NativeLdsAccess> &accesses,
                                                    InputError &error);
 [[nodiscard]] FailureOr<uint32_t> lds_race_row_stride(size_t sites, InputError &error,
-                                                      bool barriers);
-
-[[nodiscard]] Result qualify_lds_race_barrier(InputProgram &program,
-                                              std::span<BasicBlock *const> blocks,
-                                              InputError &error);
+                                                      bool has_barriers);
 
 /// @brief Check decoded LDS multiplicity and original bytes independently of emission.
 [[nodiscard]] Result validate_lds_race_accesses(const InputProgram &program,

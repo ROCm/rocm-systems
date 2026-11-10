@@ -41,6 +41,7 @@ CASES = (
     'barrier_high',
     'barrier_separated',
     'barrier_multiple',
+    'barrier_missing_second',
     'wrong-artifact',
     'bad-geometry',
     'profiling',
@@ -173,6 +174,7 @@ class Driver:
                 'barrier_high': 20,
                 'barrier_separated': 21,
                 'barrier_multiple': 24,
+                'barrier_missing_second': 27,
             }[fixture_name]
             prefix = 'hip' if args.fixture_kind == 'hip' else 'native'
             fixture = fixture_directory / f'{prefix}-{case_number}.hsaco'
@@ -361,6 +363,7 @@ class Driver:
             'barrier_high': 2,
             'barrier_separated': 2,
             'barrier_multiple': 3,
+            'barrier_missing_second': 3,
             'disjoint': 4,
             'read_read': 2,
             'collision': 1,
@@ -443,6 +446,19 @@ class Driver:
                     )
                     for wave in range(wave_count)
                 ]
+            if fixture in ('barrier_multiple', 'barrier_missing_second'):
+                assert [
+                    (wave, kind, record['site'], record['phase'], record['sequence'])
+                    for wave, kind, record in observations
+                ] == [
+                    (0, 2, 0, 0, 1),
+                    (0, 2, 2, 2 if fixture == 'barrier_multiple' else 1, 2),
+                    (1, 1, 1, 1, 1),
+                ]
+                assert all(
+                    record['mask'] == 1 and record['offset'] == 0
+                    for _, _, record in observations
+                )
             if fixture in ('disjoint', 'alias'):
                 assert [
                     (wave, kind, record['mask'], record['offset'])

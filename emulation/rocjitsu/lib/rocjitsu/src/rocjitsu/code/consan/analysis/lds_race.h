@@ -9,7 +9,7 @@ namespace rocjitsu::consan {
 
 inline constexpr uint32_t kMaxIntegrityIssueExamples = 128;
 
-enum class LdsRaceOrdering { Unordered, Ordered, Incomplete };
+enum class LdsRaceOrdering { Unordered, Ordered, Unresolved };
 
 enum class LdsRaceFindingKind { CrossWave, InstructionCollision };
 

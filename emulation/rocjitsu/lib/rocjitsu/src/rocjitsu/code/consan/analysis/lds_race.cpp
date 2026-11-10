@@ -297,11 +297,8 @@ Position position(const Observation &observation, ScopeKind scope,
     if ((complete_witnesses & (1u << slot)) == 0)
       continue;
     const Completion &completion = *evidence[access.wave].journal[slot];
+    // read_wave already validated this endpoint against every retained boundary.
     const bool before = access.phase < completion.phase;
-    if (before != (access.sequence <= completion.sequence)) {
-      result.complete = false;
-      continue;
-    }
     (before ? result.before : result.after) |= 1u << slot;
   }
   return result;
@@ -317,15 +314,15 @@ LdsRaceOrdering ordering(const Position &first, const Position &second) {
   // With B0 as the only witness, two accesses before it both have before=0b1,
   // after=0b0, so neither intersection orders them. Unordered requires complete
   // evidence; missing or contradictory required evidence keeps the candidate
-  // Incomplete.
+  // Unresolved.
   return first.complete && second.complete ? LdsRaceOrdering::Unordered
-                                           : LdsRaceOrdering::Incomplete;
+                                           : LdsRaceOrdering::Unresolved;
 }
 
 std::vector<LdsRaceFinding> &examples_for(LdsRaceExecutionResult &result, LdsRaceOrdering order) {
   if (order == LdsRaceOrdering::Ordered)
     return result.ordered_examples;
-  if (order == LdsRaceOrdering::Incomplete)
+  if (order == LdsRaceOrdering::Unresolved)
     return result.unresolved_examples;
   return result.cross_wave_examples;
 }
@@ -369,7 +366,7 @@ void compare(const std::vector<const Observation *> &first,
         result.cross_wave_pairs += pairs;
         result.cross_wave_lane_pairs += left_group.lanes * right_group.lanes;
         break;
-      case LdsRaceOrdering::Incomplete:
+      case LdsRaceOrdering::Unresolved:
         result.ordering_unresolved_pairs += pairs;
         result.coverage_complete = false;
         result.ordering_uncertain = true;

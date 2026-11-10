@@ -54,7 +54,7 @@ void write_examples(std::ostream &out, const std::vector<LdsRaceFinding> &findin
     if (finding.kind == LdsRaceFindingKind::CrossWave)
       out << ",\"ordering\":\""
           << (finding.ordering == LdsRaceOrdering::Ordered      ? "ordered"
-              : finding.ordering == LdsRaceOrdering::Incomplete ? "ordering_unresolved"
+              : finding.ordering == LdsRaceOrdering::Unresolved ? "ordering_unresolved"
                                                                 : "unordered")
           << "\"";
     else

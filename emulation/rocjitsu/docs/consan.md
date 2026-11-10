@@ -181,7 +181,9 @@ entry. Selecting an entry does not exclude sibling kernels from this requirement
 provide a code object containing only the selected kernel.
 
 The barrier profile requires at least two waves in one complete 1D workgroup
-and a closed forward CFG. The original `s_wait_dscnt 0` must immediately precede
+and a closed forward CFG. Preparation and facts admission reject a declared maximum
+workgroup size no larger than one wave, since no valid dispatch could use it.
+The original `s_wait_dscnt 0` must immediately precede
 `s_barrier_signal -1`; the matching `s_barrier_wait -1` must be in the same
 basic block. Admitted arithmetic may separate signal and wait; memory operations
 may not. Each group block must dominate every exit. Repeated occurrences, dynamic IDs,
@@ -201,7 +203,7 @@ conflict enumeration, including disjoint and Read/Read observations. Contradicto
 phase/sequence evidence records an integrity issue and incomplete coverage even
 when no conflicting pair exists. An endpoint that contradicts any retained valid
 boundary cannot supply ordering facts from another boundary: its cross-wave
-candidates remain Incomplete. The reader cannot tell which of the endpoint's
+candidates remain Unresolved. The reader cannot tell which of the endpoint's
 phase, sequence, or boundary is corrupt, so it does not select a consistent subset
 to certify that endpoint. Other consistent endpoints, including those in the same
 wave, may still use independently complete witnesses. An exact-mask store
@@ -215,7 +217,7 @@ conflicting endpoints in the same workgroup therefore remain confirmed even if
 an unrelated wave's row is missing, malformed, or has an invalid final phase.
 That row still causes an integrity issue and incomplete coverage. Rows with
 invalid identity, status, or sequence are rejected; contradictory endpoint
-phases remain Incomplete.
+phases remain Unresolved.
 This independence does not apply to barrier profiles: every required participant
 must supply the witnesses needed to classify the pair, even without LDS accesses.
 
@@ -231,10 +233,16 @@ Zero confirmed findings with gaps does not mean complete-clean. An independently
 complete journal witness can order a pair despite unrelated lost evidence.
 
 Barrier facts are saved with original/prepared signal/wait positions and the
-after-wait probe mapping. The producer compatibility token and options identity
+after-wait probe mapping. Prepared guest instructions and all per-site callback
+envelopes must have disjoint ranges, including access and barrier callbacks.
+The producer compatibility token and options identity
 cover these meanings, and incompatible artifacts/captures reject explicitly.
 The journal reserves sixteen 32-byte records per wave separately from access
-reservations. Compiled HIP probes store sequence and phase in each report row.
+reservations. Each slot belongs to its static group, with occurrence always one
+and phase equal to slot plus one. Admission caps groups at sixteen, so sync loss
+remains zero; repeated occurrences and dynamic overflow are unsupported.
+Extending this profile requires coordinated producer, reader, and compatibility
+changes. Compiled HIP probes store sequence and phase in each report row.
 The shared callable DBI planner owns register preservation and allocation; sizing
 and descriptor checks apply before preparation.
 
@@ -467,6 +475,11 @@ matching physical hardware. Required simulator cases must execute without skips;
 physical cases skip when the requested HSA agent is unavailable. Runtime-stage
 scenarios remain available without building the analyzer. Keep simulator and
 physical-target evidence distinct.
+
+The `barrier_multiple` capture uses wave-0 store, B0, wave-1 load, B1, wave-0
+store. B0 orders publication and B1 orders reuse, producing two ordered pairs.
+The sibling `barrier_missing_second` omits only B1 and retains barrier scope:
+its saved analysis must report one ordered pair and one confirmed unordered pair.
 
 The synchronized runner checks output preservation; that alone does not prove
 that a wait blocked an early consumer. The

@@ -122,12 +122,13 @@ protected:
         ASSERT_EQ(prepared.text_sections().size(), 1u);
         const uint64_t wait = prepared.text_sections().front()->sectionOffset() +
                               result.manifest.barriers.back().prepared_wait;
-        const uint32_t nop = build_s_nop(0, arch);
+        const FailureOr<uint32_t> nop = build_s_nop(0, arch);
+        ASSERT_TRUE(nop.succeeded());
         ASSERT_TRUE(wire::read_u32(image, wait).has_value());
-        ASSERT_NE(*wire::read_u32(image, wait), nop);
+        ASSERT_NE(*wire::read_u32(image, wait), nop.value());
         // Fault injection changes only the relocated publication wait. Keep
         // the completion callback and all other instrumentation intact.
-        wire::write_u32(image, wait, nop);
+        wire::write_u32(image, wait, nop.value());
         result.manifest.prepared.sha256 = digest(image);
       }
     } else if (mode != Bootstrap::None) {
@@ -679,7 +680,8 @@ TEST_P(ConSanHipSim, CompiledHipRaceDisjointAndReadReadExecuteTheirNativeSites) 
 }
 
 TEST_F(ConSanBootstrapSim, Gfx1250BarrierPreservesOutputAndGuestStateAtEmptyExecAndHighLanes) {
-  for (const char *fixture : {"native-15", "native-16", "native-20", "native-21", "native-24"}) {
+  for (const char *fixture :
+       {"native-15", "native-16", "native-20", "native-21", "native-24", "native-27"}) {
     for (const uint32_t threads : {64u, 65u}) {
       SCOPED_TRACE(fixture);
       SCOPED_TRACE(threads);
@@ -692,12 +694,19 @@ TEST_F(ConSanBootstrapSim, Gfx1250BarrierPreservesOutputAndGuestStateAtEmptyExec
       EXPECT_EQ(after.output[0], 7u);
       expect_guest_state(before, after);
       const std::vector<ObservedAccess> records = published_accesses(after);
-      ASSERT_EQ(records.size(), std::string_view(fixture) == "native-24" ? 3u : 2u);
-      EXPECT_EQ(records[0].wave, 0u);
-      EXPECT_EQ(records[1].wave, 1u);
+      const bool reuses_word =
+          std::string_view(fixture) == "native-24" || std::string_view(fixture) == "native-27";
+      ASSERT_EQ(records.size(), reuses_word ? 3u : 2u);
+      EXPECT_EQ(records.front().wave, 0u);
+      EXPECT_EQ(records.back().wave, 1u);
+      if (reuses_word) {
+        EXPECT_EQ(records[1].wave, 0u);
+        EXPECT_EQ(records[1].site, 2u);
+        EXPECT_EQ(after.manifest.sites[records[1].site].access, AccessKind::Write);
+      }
       const uint64_t mask = std::string_view(fixture) == "native-20" ? uint64_t{1} << 31 : 1;
-      EXPECT_EQ(records[0].mask, mask);
-      EXPECT_EQ(records[1].mask, mask);
+      for (const ObservedAccess &record : records)
+        EXPECT_EQ(record.mask, mask);
     }
   }
 }

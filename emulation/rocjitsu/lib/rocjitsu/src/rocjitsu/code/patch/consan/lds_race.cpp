@@ -160,6 +160,10 @@ Result qualify_lds_race_barrier(InputProgram &program, std::span<BasicBlock *con
   }
   if (members == 0)
     return Result::success();
+  if (program.maximum_workgroup_size <= program.wave_size)
+    return reject_instruction(
+        error, InputErrorCode::UnsupportedEntry,
+        "barrier profile requires a maximum workgroup size permitting two waves");
   if (members != 2 * program.barriers.size() || program.barriers.empty() ||
       program.barriers.size() > kSyncCapacity)
     return reject_instruction(error, InputErrorCode::UnsupportedSynchronization,
@@ -192,10 +196,10 @@ Result qualify_lds_race_barrier(InputProgram &program, std::span<BasicBlock *con
   return Result::success();
 }
 
-FailureOr<uint32_t> lds_race_row_stride(size_t sites, InputError &error, bool barriers) {
+FailureOr<uint32_t> lds_race_row_stride(size_t sites, InputError &error, bool has_barriers) {
   if (sites > ContractLimits{}.sites)
     return reject(error, "no bounded LDS report-row layout");
-  const uint64_t stride = report_row_bytes(sites, barriers);
+  const uint64_t stride = report_row_bytes(sites, has_barriers);
   if (stride > ContractLimits{}.report_bytes - kReportHeaderBytes)
     return reject(error, "no bounded LDS report-row layout");
   return static_cast<uint32_t>(stride);
