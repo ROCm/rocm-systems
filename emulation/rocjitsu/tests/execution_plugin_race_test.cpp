@@ -1433,7 +1433,8 @@ protected:
   void vmem_load(int wave, uint32_t vgpr, uint64_t exec = 1) { vmem(wave, true, vgpr, exec); }
   void vmem_store(int wave) { vmem(wave, false, /*vgpr=*/0); }
 
-  enum class FlatRoute { Global, Lds, NoActiveLanes };
+  /// `Mixed` sends lane 0 to global memory and lane 1 to LDS.
+  enum class FlatRoute { Global, Lds, Mixed, NoActiveLanes };
 
   /// Issue a one-lane, one-dword generic FLAT load whose addresses resolved as
   /// `route` says. It carries both decoded counter obligations, as gfx1250
@@ -1441,7 +1442,8 @@ protected:
   void flat_load(int wave, uint32_t vgpr, FlatRoute route) {
     waves[wave]->pc += 16;
     const bool lds = route == FlatRoute::Lds;
-    const uint64_t exec = route == FlatRoute::NoActiveLanes ? 0 : 1;
+    const bool mixed = route == FlatRoute::Mixed;
+    const uint64_t exec = route == FlatRoute::NoActiveLanes ? 0 : mixed ? 0x3 : 0x1;
     auto state = std::make_unique<VectorMemState>(lds ? LOCAL_MEM : GLOBAL_MEM);
     state->elem_size = sizeof(uint32_t);
     state->num_elems = 1;
@@ -1451,6 +1453,7 @@ protected:
     state->lane_mask = exec;
     state->dst_reg_base = waves[wave]->vgpr_alloc().base + vgpr;
     state->per_lane_addr[0] = kFlatLdsAddress;
+    state->per_lane_addr[1] = kFlatLdsAddress;
     TestMemoryInstruction inst(std::move(state),
                                {{WaitCounterType::LOADCNT, MemoryCompletionClass::VMEM},
                                 {WaitCounterType::DSCNT, MemoryCompletionClass::LDS}},
@@ -1460,7 +1463,7 @@ protected:
     access.decoded_space = DecodedMemorySpace::FLAT;
     access.request_lane_mask = exec;
     access.normalized_to_local = lds;
-    access.flat_local_lane_mask = lds ? exec : 0;
+    access.flat_local_lane_mask = lds ? exec : mixed ? 0x2 : 0;
     issue(wave, inst, access, exec);
   }
 
@@ -1689,6 +1692,36 @@ TEST_F(Gfx1250CounterCapacityRaceTest, GlobalFlatResultIsReadyAfterLoadcntWait) 
 
 TEST_F(Gfx1250CounterCapacityRaceTest, LdsFlatResultIsReadyAfterDscntWait) {
   flat_load(0, /*vgpr=*/2, FlatRoute::Lds);
+  wait_dscnt(0, 0);
+  EXPECT_FALSE(vgpr_read(0, 2));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, MixedFlatAdvancesDscnt) {
+  ds_read(0, kOldestAddress);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    ds_read(0, kYoungerAddress);
+  flat_load(0, /*vgpr=*/2, FlatRoute::Mixed);
+  EXPECT_FALSE(tensor_load_oldest());
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, MixedFlatAdvancesLoadcnt) {
+  vmem_load(0, /*vgpr=*/0);
+  for (int index = 0; index < kCapacity - 1; ++index)
+    vmem_load(0, /*vgpr=*/1);
+  flat_load(0, /*vgpr=*/2, FlatRoute::Mixed);
+  EXPECT_FALSE(vgpr_read(0, 0));
+}
+
+// A mixed FLAT's result depends on both domains, so it needs both waits.
+TEST_F(Gfx1250CounterCapacityRaceTest, MixedFlatResultNeedsBothWaits) {
+  flat_load(0, /*vgpr=*/2, FlatRoute::Mixed);
+  wait_loadcnt(0, 0);
+  EXPECT_TRUE(vgpr_read(0, 2));
+}
+
+TEST_F(Gfx1250CounterCapacityRaceTest, MixedFlatResultIsReadyAfterBothWaits) {
+  flat_load(0, /*vgpr=*/2, FlatRoute::Mixed);
+  wait_loadcnt(0, 0);
   wait_dscnt(0, 0);
   EXPECT_FALSE(vgpr_read(0, 2));
 }
