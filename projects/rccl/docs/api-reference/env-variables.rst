@@ -1572,7 +1572,9 @@ threshold table introduced for gfx1250.
           FIFO. RCCL registers the buffer's whole allocation and releases it when
           the communicator is destroyed. Only buffers that can be IPC-registered
           benefit (``ncclMemAlloc``, or VMM allocations with a fabric handle).
-          Not applied during graph capture or when ``NCCL_LOCAL_REGISTER=0``. If
+          Not applied during graph capture or when ``NCCL_LOCAL_REGISTER=0``.
+          Other operations on the buffer, such as send/receive, ignore this
+          registration and run as if it were unregistered. If
           the allocation is freed and a new one lands at the same address, RCCL
           stops using the old registration and keeps its peer mappings until the
           communicator is destroyed. As with ``ncclCommRegister``, every rank

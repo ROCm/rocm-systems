@@ -3798,7 +3798,10 @@ protected:
         ASSERT_MPI_TRUE(correct);
 
         struct ncclReg* reg = nullptr;
-        ASSERT_MPI_EQ(ncclSuccess, ncclRegFind(getActiveCommunicator(), recv, recvCount * sizeof(float), &reg));
+        {
+            rcclRegAutoScope visible(&getActiveCommunicator()->regCache);
+            ASSERT_MPI_EQ(ncclSuccess, ncclRegFind(getActiveCommunicator(), recv, recvCount * sizeof(float), &reg));
+        }
         const bool owned = reg != nullptr && reg->rcclAuto.owned;
         if (!owned) ADD_FAILURE() << what << ": receive buffer not auto-registered";
         ASSERT_MPI_TRUE(owned);
@@ -3900,6 +3903,48 @@ TEST_F(RingAutoRegister, AllReduce_FreedAndReusedAddress)
 TEST_F(RingAutoRegister, AllGather_FreedAndReusedAddress)
 {
     runStaleAllocation(true);
+}
+
+// Send/recv must not use RCCL's registration: the peer's buffer is unregistered, and a one-sided direct path hangs.
+TEST_F(RingAutoRegister, SendRecv_FromAutoRegisteredBufferToUnregisteredPeer)
+{
+    if (!validateTestPrerequisites(2, kNoProcessLimit, kNoPowerOfTwoRequired, 1, kNoNodeLimit)) {
+        GTEST_SKIP() << "Requires 2+ ranks";
+    }
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    if (auto reason = skipReason(); !reason.empty()) GTEST_SKIP() << reason;
+
+    int rank = 0, nRanks = 0;
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommUserRank(getActiveCommunicator(), &rank));
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommCount(getActiveCommunicator(), &nRanks));
+    if (nRanks % 2 != 0) GTEST_SKIP() << "Requires an even number of ranks";
+    const size_t bytes = kCountPerRank * sizeof(float);
+
+    void* send  = nullptr;
+    void* reg   = nullptr;
+    void* unreg = nullptr;
+    ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&send, bytes));
+    auto sendGuard = makeHipMemBufferAutoGuard(send);
+    ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&reg, bytes));
+    auto regGuard = makeHipMemBufferAutoGuard(reg);
+    ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&unreg, bytes));
+    auto unregGuard = makeHipMemBufferAutoGuard(unreg);
+
+    runAndCheck(false, (float*)send, (float*)reg, rank, nRanks, "AllReduce");
+    if (HasFailure() || IsSkipped()) return;
+
+    const int peer = rank ^ 1;
+    ASSERT_MPI_EQ(hipSuccess, hipMemset(unreg, 0xff, bytes));
+    ASSERT_MPI_EQ(ncclSuccess, ncclGroupStart());
+    ASSERT_MPI_EQ(ncclSuccess, ncclSend(reg, kCountPerRank, ncclFloat, peer, getActiveCommunicator(), getActiveStream()));
+    ASSERT_MPI_EQ(ncclSuccess,
+                  ncclRecv(unreg, kCountPerRank, ncclFloat, peer, getActiveCommunicator(), getActiveStream()));
+    ASSERT_MPI_EQ(ncclSuccess, ncclGroupEnd());
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+    const bool correct = verifyAllReduceResult<float>((float*)unreg, kCountPerRank, nRanks);
+    if (!correct) ADD_FAILURE() << "send/recv: wrong result";
+    ASSERT_MPI_TRUE(correct);
 }
 
 #endif // MPI_TESTS_ENABLED

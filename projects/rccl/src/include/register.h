@@ -78,6 +78,21 @@ struct ncclRegCache {
   struct ncclReg* rcclRetired;
   size_t rcclRetiredBytes;
   bool rcclRetiredWarned;
+  // RCCL: while set, ncclRegFind also returns RCCL-owned records nobody else holds. See rcclRegAutoScope.
+  bool rcclAutoVisible;
+};
+
+// RCCL: makes RCCL-owned records visible to ncclRegFind for the lifetime of the scope. Only the Ring
+// AllReduce/AllGather path that auto-registers may open one, because all its ring neighbours make the same choice.
+struct rcclRegAutoScope {
+  struct ncclRegCache* cache;
+  bool saved;
+  explicit rcclRegAutoScope(struct ncclRegCache* c, bool enable = true) : cache(c), saved(c->rcclAutoVisible) {
+    if (enable) cache->rcclAutoVisible = true;
+  }
+  ~rcclRegAutoScope() { cache->rcclAutoVisible = saved; }
+  rcclRegAutoScope(const rcclRegAutoScope&) = delete;
+  rcclRegAutoScope& operator=(const rcclRegAutoScope&) = delete;
 };
 
 ncclResult_t ncclRegCleanup(struct ncclComm* comm);

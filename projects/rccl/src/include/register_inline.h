@@ -21,6 +21,9 @@ static inline ncclResult_t ncclRegFind(struct ncclComm* comm, const void* data, 
     if ((uintptr_t)data < reg->begAddr) return ncclSuccess;
     if ((uintptr_t)data + size <= reg->endAddr) {
       if (reg->rcclAuto.owned) {
+        // A record only RCCL holds is for the Ring AllReduce/AllGather path that made it: elsewhere the peer's buffer
+        // may be unregistered, and both sides must agree to use registered buffers.
+        if (!cache->rcclAutoVisible && reg->localRefs == 1 && reg->graphRefs == 0) continue;
         bool stale = false;
         NCCLCHECK(rcclRegCheckOwned(comm, data, reg, &stale));
         if (stale) return ncclSuccess;

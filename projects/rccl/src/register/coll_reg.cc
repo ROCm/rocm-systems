@@ -375,6 +375,8 @@ ncclResult_t ncclRegisterCollBuffers(
       bool hasSendNetPeer = false;
 
       const bool autoRegister = rcclRingAutoRegister(comm, info);
+      // The IPC and NET registration below look the records up again.
+      rcclRegAutoScope autoVisible(&comm->regCache, autoRegister);
       if (autoRegister) {
         NCCLCHECK(rcclRegAutoLocal(comm, (void*)info->recvbuff, recvbuffSize, &recvRegRecord));
       } else {

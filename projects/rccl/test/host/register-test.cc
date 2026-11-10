@@ -1054,23 +1054,73 @@ TEST_F(RegisterAutoLocalMicrotest, ReusedAddressAlsoGraphRegistered_DropsOnlyRcc
   EXPECT_TRUE(Retired().empty());
 }
 
-TEST_F(RegisterAutoLocalMicrotest, OtherLookupOfReusedAddress_RetiresStaleRecordAndReturnsNothing) {
+TEST_F(RegisterAutoLocalMicrotest, LookupOutsideRingAutoPath_SkipsRecordOnlyRcclHolds) {
+  ncclReg* reg = Auto(0x10000, 0x2000);
+  ASSERT_NE(reg, nullptr);
+
+  ncclReg* found = reinterpret_cast<ncclReg*>(0x1);
+  EXPECT_EQ(ncclRegFind(comm_.get(), Ptr(0x14000), kPage, &found), ncclSuccess);
+  EXPECT_EQ(found, nullptr);
+  EXPECT_EQ(Population(), 1);
+  EXPECT_TRUE(reg->rcclAuto.owned);
+  EXPECT_FALSE(comm_->regCache.rcclAutoVisible);
+}
+
+TEST_F(RegisterAutoLocalMicrotest, LookupInsideScope_ReturnsOwnedRecord) {
+  ncclReg* reg = Auto(0x10000, 0x2000);
+  ncclReg* found = nullptr;
+  {
+    rcclRegAutoScope visible(&comm_->regCache);
+    EXPECT_EQ(ncclRegFind(comm_.get(), Ptr(0x14000), kPage, &found), ncclSuccess);
+  }
+  EXPECT_EQ(found, reg);
+  EXPECT_TRUE(Retired().empty());
+  EXPECT_FALSE(comm_->regCache.rcclAutoVisible);
+}
+
+TEST_F(RegisterAutoLocalMicrotest, DisabledScope_KeepsRecordHidden) {
+  Auto(0x10000, 0x2000);
+  ncclReg* found = reinterpret_cast<ncclReg*>(0x1);
+  {
+    rcclRegAutoScope visible(&comm_->regCache, /*enable=*/false);
+    EXPECT_EQ(ncclRegFind(comm_.get(), Ptr(0x10000), kPage, &found), ncclSuccess);
+  }
+  EXPECT_EQ(found, nullptr);
+}
+
+TEST_F(RegisterAutoLocalMicrotest, NestedScope_RestoresOuterVisibility) {
+  {
+    rcclRegAutoScope outer(&comm_->regCache);
+    Auto(0x10000, 0x2000);
+    EXPECT_TRUE(comm_->regCache.rcclAutoVisible);
+  }
+  EXPECT_FALSE(comm_->regCache.rcclAutoVisible);
+}
+
+TEST_F(RegisterAutoLocalMicrotest, UserRegistersSameAllocation_RecordVisibleEverywhere) {
+  ncclReg* reg = Auto(0x10000, 0x2000);
+  void* handle = nullptr;
+  ASSERT_EQ(ncclRegister(comm_.get(), Ptr(0x10000), 0x2000, false, &handle), ncclSuccess);
+  ASSERT_EQ(handle, reg);
+  EXPECT_EQ(reg->localRefs, 2);
+
+  ncclReg* found = nullptr;
+  EXPECT_EQ(ncclRegFind(comm_.get(), Ptr(0x10000), kPage, &found), ncclSuccess);
+  EXPECT_EQ(found, reg);
+}
+
+TEST_F(RegisterAutoLocalMicrotest, LookupInsideScopeOfReusedAddress_RetiresStaleRecordAndReturnsNothing) {
   ncclReg* stale = Auto(0x10000, 0x2000);
   bufferId_ = 8;
 
   ncclReg* found = reinterpret_cast<ncclReg*>(0x1);
-  EXPECT_EQ(ncclRegFind(comm_.get(), Ptr(0x10000), kPage, &found), ncclSuccess);
+  {
+    rcclRegAutoScope visible(&comm_->regCache);
+    EXPECT_EQ(ncclRegFind(comm_.get(), Ptr(0x10000), kPage, &found), ncclSuccess);
+  }
   EXPECT_EQ(found, nullptr);
   EXPECT_EQ(Population(), 0);
   EXPECT_EQ(Retired(), (std::vector<ncclReg*>{stale}));
-}
-
-TEST_F(RegisterAutoLocalMicrotest, LookupOfSameAllocation_ReturnsOwnedRecord) {
-  ncclReg* reg = Auto(0x10000, 0x2000);
-  ncclReg* found = nullptr;
-  EXPECT_EQ(ncclRegFind(comm_.get(), Ptr(0x14000), kPage, &found), ncclSuccess);
-  EXPECT_EQ(found, reg);
-  EXPECT_TRUE(Retired().empty());
 }
 
 TEST_F(RegisterAutoLocalMicrotest, UserRegistersReusedAddress_GetsFreshRecord) {

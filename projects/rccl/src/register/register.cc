@@ -254,7 +254,10 @@ ncclResult_t rcclRegAutoLocal(struct ncclComm* comm, void* buff, size_t size, st
   if (buff == NULL || size == 0) return ncclSuccess;
 
   // ncclRegFind drops a record whose allocation was freed and the address reused, so a hit is safe to use.
-  NCCLCHECK(ncclRegFind(comm, buff, size, reg));
+  {
+    rcclRegAutoScope visible(&comm->regCache);
+    NCCLCHECK(ncclRegFind(comm, buff, size, reg));
+  }
   if (*reg) return ncclSuccess;
 
   // The record covers the buffer's whole allocation: peers import the whole allocation anyway, later calls on
