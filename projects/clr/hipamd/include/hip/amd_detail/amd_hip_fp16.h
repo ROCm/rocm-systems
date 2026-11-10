@@ -756,30 +756,20 @@ inline __HOST_DEVICE__ bool __hisnan(__half x) {
   return (hr.x & 0x7FFFU) > 0x7C00u;
 }
 inline __HOST_DEVICE__ __half __hmax(const __half x, const __half y) {
-  if (__hisnan(x) && !__hisnan(y)) return y;
-  if (!__hisnan(x) && __hisnan(y)) return x;
-  if (__hisnan(x) && __hisnan(y)) return HIPRT_NAN_FP16;
-  if (static_cast<__half_raw>(x).data > static_cast<__half_raw>(y).data)
-    return __half_raw{static_cast<__half_raw>(x).data};
-  return __half_raw{static_cast<__half_raw>(y).data};
+  return __half_raw{__builtin_elementwise_maximumnum(static_cast<__half_raw>(x).data,
+                                                     static_cast<__half_raw>(y).data)};
 }
 inline __HOST_DEVICE__ __half __hmax_nan(const __half x, const __half y) {
-  if (__hisnan(x)) return x;
-  if (__hisnan(y)) return y;
-  return __hmax(x, y);
+  return __half_raw{__builtin_elementwise_maximum(static_cast<__half_raw>(x).data,
+                                                  static_cast<__half_raw>(y).data)};
 }
 inline __HOST_DEVICE__ __half __hmin(const __half x, const __half y) {
-  if (__hisnan(x) && !__hisnan(y)) return y;
-  if (!__hisnan(x) && __hisnan(y)) return x;
-  if (__hisnan(x) && __hisnan(y)) return HIPRT_NAN_FP16;
-  if (static_cast<__half_raw>(x).data > static_cast<__half_raw>(y).data)
-    return __half_raw{static_cast<__half_raw>(y).data};
-  return __half_raw{static_cast<__half_raw>(x).data};
+  return __half_raw{__builtin_elementwise_minimumnum(static_cast<__half_raw>(x).data,
+                                                     static_cast<__half_raw>(y).data)};
 }
 inline __HOST_DEVICE__ __half __hmin_nan(const __half x, const __half y) {
-  if (__hisnan(x)) return x;
-  if (__hisnan(y)) return y;
-  return __hmin(x, y);
+  return __half_raw{__builtin_elementwise_minimum(static_cast<__half_raw>(x).data,
+                                                  static_cast<__half_raw>(y).data)};
 }
 
 // Arithmetic

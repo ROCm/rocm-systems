@@ -1,9 +1,8 @@
 /*************************************************************************
  * Copyright (c) 2026, Advanced Micro Devices, Inc. All rights reserved.
  *
- * Host launcher + eligibility for the LL128-protocol DDA fabric all-to-all.
- * Personalized analogue of dda_all_gather_fabric_ll128.cu; reuses the codepath-
- * agnostic ddaAllToAllFabricLL128 kernel from alltoall_dda_fabric_ll128.h.
+ * Host launcher + eligibility for the LL128-protocol DDA fabric all-to-all
+ * (register-packed kernel ddaAllToAllFabricLL128, alltoall_dda_fabric_ll128.h).
  * See LICENSE.txt for license information.
  ************************************************************************/
 
@@ -12,7 +11,6 @@
 #include "algorithms/dda/alltoall/alltoall_dda_fabric_ll128.h"
 #include "checks.h"
 #include "comm.h"
-#include "algorithms/dda/dda_init_detail.h" // nccl_dda_detail::kDdaLLAgMaxBlocksPerPeer
 #include "debug.h"
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h" // dda::common::kDdaMaxNranks
 #include "param.h"
@@ -20,31 +18,26 @@
 #include <cuda_runtime.h>
 #include <hip/hip_ext.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib> // getenv (grid-shape tuning overrides)
 #include <utility>
 
-// Runtime-adjustable LL128 AllToAll block size (threads/block). Must be a
-// multiple of 16 (lanes per 128B line) in [16, 1024]; invalid values fall back
-// to the tuned default. Env: RCCL_DDA_LL128_A2A_THREADS.
-RCCL_PARAM(DdaLL128A2AThreads, "DDA_LL128_A2A_THREADS", 1024);
+constexpr unsigned kDdaLL128A2ADefaultThreads = 256;
+
+// Threads per block, overriding the arch table: a multiple of 32 in [32, 1024], else ignored.
+RCCL_PARAM(DdaLL128A2AThreads, "DDA_LL128_A2A_THREADS", 0);
 
 namespace {
 
-using dda::common::kDdaLL128A2AMaxPerChunkBytes;
-using dda::common::kDdaLL128A2ASlotStrideLines;
+using dda::common::kDdaLL128Warp;
+using dda::common::ddaBankSize;
+using dda::common::ddaLL128A2ASlotWords;
+using dda::common::ddaLL128Slices;
+using dda::common::ddaLL128SlotPayloadBytes;
+using dda::common::ddaLL128ValidThreads;
 using dda::common::kDdaLL128DataElems;
-using dda::common::LLLine128;
-using nccl_dda_detail::kDdaLLAgMaxBlocksPerPeer;
-
-// LL128 scratch: 2 banks * nRanks slots * kDdaLL128A2ASlotStrideLines * 128B.
-static inline size_t ddaLL128A2AScratchSize(int nRanks) {
-  return (size_t)2 * (size_t)nRanks * kDdaLL128A2ASlotStrideLines * sizeof(LLLine128);
-}
-
-// Grid-shape tuning knobs (env-overridable); defaults tuned for gfx1250.
-constexpr size_t kDdaLL128A2ALinesPerBlock = 4;
 
 static inline size_t ddaLL128A2ALinesPerBlockEnv(size_t dflt) {
   const char* s = getenv("RCCL_DDA_LL128_A2A_LPB");
@@ -62,86 +55,54 @@ static inline int ddaLL128A2AMaxBppEnv(int dflt) {
   }
   return dflt;
 }
-// Validated block size from the runtime flag; falls back to `dflt` if the
-// configured value is not a multiple of 16 in [16, 1024].
 static inline unsigned ddaLL128A2AThreads(unsigned dflt) {
   const int64_t v = rcclParamDdaLL128A2AThreads();
-  if (v >= 16 && v <= 1024 && (v % 16) == 0) {
-    return (unsigned)v;
-  }
-  return dflt;
+  return ddaLL128ValidThreads(v) ? (unsigned)v : dflt;
 }
 
-static inline int ddaLL128A2ABlocksPerPeer(size_t perChunkBytes) {
-  const size_t nWords = perChunkBytes >> 3;
-  const size_t numLines = (nWords + (size_t)kDdaLL128DataElems - 1) / (size_t)kDdaLL128DataElems;
-  const size_t linesPerBlock = ddaLL128A2ALinesPerBlockEnv(kDdaLL128A2ALinesPerBlock);
-  const int maxBpp = ddaLL128A2AMaxBppEnv(kDdaLLAgMaxBlocksPerPeer);
-  if (numLines <= linesPerBlock) {
-    return 1;
-  }
-  size_t bpp = (numLines + linesPerBlock - 1) / linesPerBlock;
-  if (bpp > (size_t)maxBpp) {
-    bpp = (size_t)maxBpp;
-  }
-  return (int)bpp;
+// Largest per-peer chunk the slot (carved from one scratch bank) can carry.
+static inline size_t ddaLL128A2AMaxPerChunkBytes(ncclComm* comm) {
+  return ddaLL128SlotPayloadBytes(ddaLL128A2ASlotWords(ddaBankSize(comm->ddaScratchBytes), comm->nRanks));
 }
 
-// Single source of the launch geometry: grid.x = peer (nRanks), grid.y = the
-// per-peer line split, clamped so flatBlockId (nRanks*bpp-1) stays within the
-// device epoch array.
+// Geometry: grid.x = peer columns, grid.y = blocks of a warp per slice, all within the block
+// budget and the epoch array.
 static inline std::pair<dim3, dim3> ddaAllToAllFabricLL128Geom(ncclComm* comm, size_t perChunkBytes) {
-  const unsigned threads = ddaLL128A2AThreads(1024); // multiple of 16 (lanes/line)
-  int blocksPerPeer = ddaLL128A2ABlocksPerPeer(perChunkBytes);
-  if (comm->nRanks * blocksPerPeer > comm->ddaLLEpochLen) {
-    blocksPerPeer = comm->ddaLLEpochLen / comm->nRanks;
-    if (blocksPerPeer < 1) blocksPerPeer = 1;
+  const size_t totalBytes = perChunkBytes * (size_t)comm->nRanks;
+  const int tuned = rcclDdaFabricA2aLL128Threads(comm, totalBytes);
+  const unsigned threads = ddaLL128A2AThreads(tuned > 0 ? (unsigned)tuned : kDdaLL128A2ADefaultThreads);
+  const size_t warps = threads / (unsigned)kDdaLL128Warp;
+  const int nPeers = comm->nRanks - 1;
+  const int cap = std::min(rcclDdaFabricA2aLL128Blocks(comm, totalBytes), comm->ddaLLEpochLen);
+  size_t blocksWanted = (ddaLL128Slices(perChunkBytes) + warps - 1) / warps;
+  // A warp moves a whole 16-line slice, so fewer than 16 lines per warp only adds idle blocks.
+  const size_t linesPerBlock = ddaLL128A2ALinesPerBlockEnv(0);
+  if (linesPerBlock > 0) {
+    const size_t nWords = perChunkBytes >> 3;
+    const size_t numLines = (nWords + (size_t)kDdaLL128DataElems - 1) / (size_t)kDdaLL128DataElems;
+    blocksWanted = (numLines + linesPerBlock - 1) / linesPerBlock;
   }
-  return std::make_pair(dim3((unsigned)comm->nRanks, (unsigned)blocksPerPeer), dim3(threads));
+  const int maxBpp = ddaLL128A2AMaxBppEnv(0);
+  if (maxBpp > 0) blocksWanted = std::min(blocksWanted, (size_t)maxBpp);
+  const auto grid = dda::common::ddaPeerGrid(nPeers, blocksWanted, cap < 0 ? 0 : (size_t)cap);
+  return std::make_pair(dim3(grid.cols, grid.blocksPerCol), dim3(threads));
 }
 
-template <typename T>
-static ncclResult_t ncclAllToAllDdaFabricLL128Typed(
-  const void* sendbuff, void* recvbuff,
-  size_t count, // per-peer element count of T (== bytes when T == int8_t)
-  ncclComm* comm, cudaStream_t stream) {
-  const int nRanks = comm->nRanks;
-  const size_t perChunkBytes = count * sizeof(T);
-
-  T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
-  uint32_t* epochDev = comm->ddaLLEpochDev;
-  const int epochLen = comm->ddaLLEpochLen;
-
-  auto gridBlock = ddaAllToAllFabricLL128Geom(comm, perChunkBytes);
-  const dim3 grid = gridBlock.first;
-  const dim3 block = gridBlock.second;
-  const int blocksPerPeer = (int)grid.y;
-
-  INFO(NCCL_COLL, "DDA fabric AllToAll LL128: nRanks=%d perChunkBytes=%zu grid=%ux%u block=%u (block-per-peer, bpp=%d)",
-       nRanks, perChunkBytes, grid.x, grid.y, block.x, blocksPerPeer);
-
-  const dda::common::DdaKernelParams params{comm->abortFlagDev};
+static ncclResult_t ddaAllToAllFabricLL128Launch(const void* sendbuff, void* recvbuff, size_t perChunkBytes,
+                                                 ncclComm* comm, cudaStream_t stream) {
+  const size_t slices = ddaLL128Slices(perChunkBytes);
+  const size_t bankSize = ddaBankSize(comm->ddaScratchBytes);
+  const auto gb = ddaAllToAllFabricLL128Geom(comm, perChunkBytes);
+  INFO(NCCL_COLL, "DDA fabric AllToAll LL128: nRanks=%d perChunkBytes=%zu slices=%zu grid=%ux%u block=%u", comm->nRanks,
+       perChunkBytes, slices, gb.first.x, gb.first.y, gb.second.x);
+  int8_t** peers = reinterpret_cast<int8_t**>(comm->ddaPeerPtrsDev);
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
-  switch (nRanks) {
-  case 4:
-    hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricLL128<T, 4>), grid, block, 0, stream, /*startEvent=*/nullptr,
-                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          perChunkBytes, comm->rank, nRanks, epochDev, epochLen, params);
-    break;
-  case 8:
-    hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricLL128<T, 8>), grid, block, 0, stream, /*startEvent=*/nullptr,
-                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          perChunkBytes, comm->rank, nRanks, epochDev, epochLen, params);
-    break;
-  default:
-    hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricLL128<T, 0>), grid, block, 0, stream, /*startEvent=*/nullptr,
-                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          perChunkBytes, comm->rank, nRanks, epochDev, epochLen, params);
-    break;
-  }
-
+  const dda::common::DdaKernelParams params{comm->abortFlagDev};
+  hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricLL128<int8_t>), gb.first, gb.second, 0, stream,
+                        /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<int8_t*>(recvbuff),
+                        static_cast<const int8_t*>(sendbuff), perChunkBytes, comm->rank, comm->nRanks,
+                        comm->ddaLLEpochDev, comm->ddaLLEpochLen, slices, bankSize, params);
   CUDACHECK(cudaGetLastError());
-
   return ncclSuccess;
 }
 
@@ -149,8 +110,6 @@ static ncclResult_t ncclAllToAllDdaFabricLL128Typed(
 
 bool ncclAllToAllDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                         ncclDataType_t datatype) {
-  (void)sendbuff;
-  (void)recvbuff;
   if (comm == nullptr || comm->bootstrap == nullptr) {
     return false;
   }
@@ -171,14 +130,14 @@ bool ncclAllToAllDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, vo
   if (perChunkBytes % 16 != 0) {
     return false;
   }
-  if (perChunkBytes > kDdaLL128A2AMaxPerChunkBytes) {
+  if (comm->ddaLLEpochDev == nullptr || comm->ddaLLEpochLen < 1) {
     return false;
   }
-  if (ddaLL128A2AScratchSize(comm->nRanks) > comm->ddaScratchBytes) {
-    return false;
-  }
-
-  return true;
+  // No pointer check: each rank passes its own buffers, so a rank-local refusal would leave its
+  // peers polling for a kernel it never runs. gfx1250's 16B global accesses take any alignment.
+  (void)sendbuff;
+  (void)recvbuff;
+  return perChunkBytes <= ddaLL128A2AMaxPerChunkBytes(comm);
 }
 
 uint32_t ncclAllToAllDdaFabricLL128Blocks(ncclComm* comm, size_t count, ncclDataType_t datatype) {
@@ -191,6 +150,5 @@ ncclResult_t ncclAllToAllDdaFabricLL128(const void* sendbuff, void* recvbuff, si
   if (!rcclDdaDatatypeSupported(comm, datatype)) {
     return ncclInvalidArgument;
   }
-  const int typeSize = ncclTypeSize(datatype);
-  return ncclAllToAllDdaFabricLL128Typed<int8_t>(sendbuff, recvbuff, count * typeSize, comm, stream);
+  return ddaAllToAllFabricLL128Launch(sendbuff, recvbuff, count * ncclTypeSize(datatype), comm, stream);
 }

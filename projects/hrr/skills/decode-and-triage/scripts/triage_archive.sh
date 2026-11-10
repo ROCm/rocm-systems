@@ -8,6 +8,13 @@ ANALYZER="$SCRIPT_DIR/analyze_replay_finding.py"
 ENSURE="$SCRIPT_DIR/ensure_playback.sh"
 REPLAY_DOCKER="$SCRIPT_DIR/replay_docker.sh"
 COMPAT="$SCRIPT_DIR/check_replay_compat.py"
+SANITIZER="$SCRIPT_DIR/archive_text.py"
+
+# Archive-derived text printed here (the archive's own path, and a finding name
+# built from it) goes through the same sanitizer as the Python scripts: a
+# directory name can carry a newline and a heading, and this script's output is
+# read by an agent. The replay's own output is filtered the same way below.
+safe() { python3 "$SANITIZER" --text "$1"; }
 
 ARCHIVE=""
 REPLAY_MODE="auto"
@@ -63,7 +70,7 @@ done
 
 [[ -n "$ARCHIVE" ]] || { echo "error: --archive required" >&2; exit 1; }
 ARCHIVE="$(readlink -f "$ARCHIVE" 2>/dev/null || realpath "$ARCHIVE" 2>/dev/null || echo "$ARCHIVE")"
-[[ -d "$ARCHIVE" ]] || { echo "error: archive not found: $ARCHIVE" >&2; exit 1; }
+[[ -d "$ARCHIVE" ]] || { echo "error: archive not found: $(safe "$ARCHIVE")" >&2; exit 1; }
 
 name="$(basename "$ARCHIVE")"
 # The pid keeps two runs in the same second from sharing a log and a finding.
@@ -118,7 +125,7 @@ FINDING="${OUTPUT:-$WORKDIR/${name}-${ts}${ext}}"
 # -o is checked too: a finding named into the archive writes there as surely
 # as a work directory inside it does. /dev/stdout is the caller's own stream.
 if [[ -n "$OUTPUT" ]] && ! [[ "$FINDING" -ef /dev/stdout ]] && in_archive "$FINDING"; then
-  echo "error: --output is inside the archive: $OUTPUT" >&2
+  echo "error: --output is inside the archive: $(safe "$OUTPUT")" >&2
   exit 1
 fi
 
@@ -260,7 +267,7 @@ run_native_replay() {
   # applies to it. Setting ROCR_VISIBLE_DEVICES re-indexes devices underneath a
   # HIP mask, which can land the replay on a device other than the one picked.
   HIP_VISIBLE_DEVICES="$gpu" HIP_HRR_REPLAY_PROGRESS_SECONDS="${HIP_HRR_REPLAY_PROGRESS_SECONDS:-30}" \
-    ${runner[@]+"${runner[@]}"} "$play" "$ARCHIVE" --max-wall-seconds "$timeout_s" ${sync_args[@]+"${sync_args[@]}"} 2>&1 | tee "$log"
+    ${runner[@]+"${runner[@]}"} "$play" "$ARCHIVE" --max-wall-seconds "$timeout_s" ${sync_args[@]+"${sync_args[@]}"} 2>&1 | tee "$log" | python3 "$SANITIZER"
   local rc=${PIPESTATUS[0]}
   # Deliberately not re-enabling `set -e` here. The caller wraps this call in
   # `set +e` precisely so a failing replay is survivable, and restores `set -e`
@@ -272,7 +279,7 @@ run_native_replay() {
 }
 
 mode="$(pick_replay_mode)"
-echo "[triage] archive=$ARCHIVE replay=$mode" >&2
+echo "[triage] archive=$(safe "$ARCHIVE") replay=$mode" >&2
 
 run_replay_preflight() {
   local replay_mode="$1" gpu="$2"
@@ -378,4 +385,4 @@ CMD=(python3 "$ANALYZER" --format "$FORMAT" --archive "$ARCHIVE")
 # and -f follows a link, so /dev/stdout redirected to a file would pass it.
 [[ -f "$FINDING" && ! -L "$FINDING" ]] && chmod 600 "$FINDING" 2>/dev/null || true
 [[ -n "$LOG" && -f "$LOG" ]] && chmod 600 "$LOG" 2>/dev/null || true
-echo "[triage] finding=$FINDING" >&2
+echo "[triage] finding=$(safe "$FINDING")" >&2

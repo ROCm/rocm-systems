@@ -19,6 +19,7 @@
 #include <unistd.h>
 #include <vector>
 
+#include "AsanCheck.h"
 #include "fakes/graph_fakes.h"
 
 #include "comm.h"
@@ -29,21 +30,9 @@
 // Defined in topo-test.cc, which owns topo.cc's NCCL_NETDEVS_POLICY statics.
 void TopoSetNetDevsPolicy(enum netDevsPolicy policy, int num);
 
-#define TOPO_SCENE_ASAN 0
-#if defined(__SANITIZE_ADDRESS__)
-#undef TOPO_SCENE_ASAN
-#define TOPO_SCENE_ASAN 1
-#elif defined(__has_feature)
-#if __has_feature(address_sanitizer)
-#undef TOPO_SCENE_ASAN
-#define TOPO_SCENE_ASAN 1
-#endif
-#endif
-
 namespace topo_scene {
 
 constexpr int kXmlNodes = 512;
-constexpr bool kAsan = TOPO_SCENE_ASAN;  // tests that pin a production leak or overflow skip under ASan
 
 struct FreeDeleter {
   void operator()(void* p) const { free(p); }
@@ -128,8 +117,9 @@ inline std::string Extra(const std::string& attrs) { return attrs.empty() ? "" :
 
 inline std::string System(const std::string& body) { return "<system version=\"2\">\n" + body + "</system>\n"; }
 
-constexpr const char* kAmdCpu = "arch=\"x86_64\" vendor=\"AuthenticAMD\" familyid=\"25\" modelid=\"1\"";
-constexpr const char* kRomeCpu = "arch=\"x86_64\" vendor=\"AuthenticAMD\" familyid=\"143\" modelid=\"49\"";
+// kAmdCpu is a Turin (family 1Ah) host, which is not Rome-class; kRomeCpu is a Rome (family 17h, model 0x31) host.
+constexpr const char* kAmdCpu = "arch=\"x86_64\" vendor=\"AuthenticAMD\" familyid=\"26\" modelid=\"2\"";
+constexpr const char* kRomeCpu = "arch=\"x86_64\" vendor=\"AuthenticAMD\" familyid=\"23\" modelid=\"49\"";
 constexpr const char* kIntelCpu = "arch=\"x86_64\" vendor=\"GenuineIntel\" familyid=\"6\" modelid=\"0x55\"";
 
 inline std::string Cpu(int numa, const std::string& body, const std::string& attrs = "", const char* ids = kAmdCpu) {
