@@ -80,3 +80,64 @@ set_tests_properties(
     rocprofv3-collector-env-selects-path
     PROPERTIES PASS_REGULAR_EXPRESSION "not available with --collector" ENVIRONMENT
                "ROCPROF_COLLECTOR=1" LABELS "unittests" TIMEOUT 60)
+
+# Before launch, rocprofv3 --collector checks for the LTTng session daemon and the HIP
+# runtime's probe schema. A fake lttng-tools prefix stands in for the daemon.
+set(_fake_lttng ${CMAKE_CURRENT_BINARY_DIR}/fake-lttng)
+file(
+    WRITE ${_fake_lttng}/bin/lttng-sessiond
+    "#!/bin/sh\n# stands in for lttng-sessiond in the rocprofv3 --collector tests\nexit 1\n"
+    )
+file(
+    CHMOD
+    ${_fake_lttng}/bin/lttng-sessiond
+    PERMISSIONS
+    OWNER_READ
+    OWNER_WRITE
+    OWNER_EXECUTE
+    GROUP_READ
+    GROUP_EXECUTE
+    WORLD_READ
+    WORLD_EXECUTE)
+set(_no_dir ${CMAKE_CURRENT_BINARY_DIR}/does-not-exist)
+
+function(rocprofv3_collector_prelaunch _name _expected)
+    cmake_parse_arguments(ARG "" "" "ENVIRONMENT" ${ARGN})
+    add_test(NAME rocprofv3-collector-prelaunch-${_name}
+             COMMAND ${Python3_EXECUTABLE} ${_rocprofv3} --collector --hip-trace
+                     ${ARG_UNPARSED_ARGUMENTS} -- true)
+    # Only the variables given: neither is inherited from the build environment.
+    set(_modifications "ROCPROFILER_COLLECTOR_LTTNG_PREFIX=unset:"
+                       "ROCPROFILER_COLLECTOR_SCHEMA_DIR=unset:")
+    foreach(_var ${ARG_ENVIRONMENT})
+        list(APPEND _modifications "${_var}")
+    endforeach()
+    # NAME=value -> NAME=set:value (the unset: entries above contain a colon already)
+    list(TRANSFORM _modifications REPLACE "^([A-Z_]+)=([^:]*)$" "\\1=set:\\2")
+    set_tests_properties(
+        rocprofv3-collector-prelaunch-${_name}
+        PROPERTIES PASS_REGULAR_EXPRESSION "${_expected}" ENVIRONMENT_MODIFICATION
+                   "${_modifications}" LABELS "unittests" TIMEOUT 60)
+endfunction()
+
+rocprofv3_collector_prelaunch(
+    no-lttng-in-prefix "lttng-sessiond not found in ROCPROFILER_COLLECTOR_LTTNG_PREFIX"
+    ENVIRONMENT "ROCPROFILER_COLLECTOR_LTTNG_PREFIX=${_no_dir}"
+    "ROCPROFILER_COLLECTOR_SCHEMA_DIR=${_collector_tests_dir}/test_schema")
+rocprofv3_collector_prelaunch(
+    no-lttng "lttng-sessiond not found: neither in this ROCm installation" ENVIRONMENT
+    "PATH=${_no_dir}"
+    "ROCPROFILER_COLLECTOR_SCHEMA_DIR=${_collector_tests_dir}/test_schema")
+rocprofv3_collector_prelaunch(
+    no-schema "probe schema .*rocm_hip.json. was not found.*HIP_ENABLE_ROCM_TRACE"
+    ENVIRONMENT "ROCPROFILER_COLLECTOR_LTTNG_PREFIX=${_fake_lttng}"
+    "ROCPROFILER_COLLECTOR_SCHEMA_DIR=${_no_dir}")
+rocprofv3_collector_prelaunch(
+    both-missing "lttng-sessiond not found.*; the HIP runtime's probe schema" ENVIRONMENT
+    "ROCPROFILER_COLLECTOR_LTTNG_PREFIX=${_no_dir}"
+    "ROCPROFILER_COLLECTOR_SCHEMA_DIR=${_no_dir}")
+# Both found: rocprofv3 runs the application under rocprofv3-collector.
+rocprofv3_collector_prelaunch(
+    ready "command: .*rocprofv3-collector', '--', 'true'" --echo ENVIRONMENT
+    "ROCPROFILER_COLLECTOR_LTTNG_PREFIX=${_fake_lttng}"
+    "ROCPROFILER_COLLECTOR_SCHEMA_DIR=${_collector_tests_dir}/test_schema")

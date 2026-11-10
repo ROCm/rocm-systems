@@ -319,10 +319,17 @@ files in every format, with the same columns and argument text:
   attach (``--pid``) are errors with ``--collector``. ``--hip-trace`` also implies HIP graph and
   HIP event tracing, which are not available yet: they are skipped with a warning, and are an
   error when requested explicitly.
-- It needs a HIP runtime built with its trace probes (``HIP_ENABLE_ROCM_TRACE``); with
-  another, no calls are recorded and ``rocprofv3`` warns.
-- It needs the LTTng tools (``lttng-sessiond``) of the ROCm installation, found in
-  ``lib/rocm_sysdeps``, or set ``ROCPROFILER_COLLECTOR_LTTNG_PREFIX`` to an lttng-tools prefix.
+- Before it starts the application, ``rocprofv3`` checks for what the collector needs, and
+  stops with an error naming what is missing:
+
+  - The LTTng tools (``lttng-sessiond``) of the ROCm installation, in ``lib/rocm_sysdeps``, or
+    in ``PATH``. Set ``ROCPROFILER_COLLECTOR_LTTNG_PREFIX`` to use another lttng-tools prefix.
+  - The HIP runtime's probe schema, ``share/rocm-trace/rocm_hip.json``, which a HIP runtime
+    built with its trace probes (``HIP_ENABLE_ROCM_TRACE``) installs. Set
+    ``ROCPROFILER_COLLECTOR_SCHEMA_DIR`` to its directory for a HIP runtime installed elsewhere.
+
+  An application that loads a different HIP runtime, without the probes, cannot be detected
+  before it runs: no calls are recorded, and ``rocprofv3`` warns.
 - Every process of the application's tree that loads HIP is traced, each with its own output
   files, as without ``--collector``.
 - Calls that complete outside ``rocprofv3``'s interception today are included: calls made

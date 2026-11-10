@@ -27,6 +27,7 @@ import sys
 import re
 import argparse
 import textwrap
+import shutil
 import subprocess
 
 # version info for rocprofiler-sdk / rocprofv3
@@ -2591,10 +2592,15 @@ def run(app_args, args, **kwargs):
             fatal_error(
                 "rocprofv3-collector not found: this installation was built without the collector (ROCPROFILER_BUILD_COLLECTOR)"
             )
-        # lttng-tools from the ROCm installation (TheRock's sysdeps), unless set
-        sysdeps = os.path.join(ROCM_DIR, "lib", "rocm_sysdeps")
-        if os.path.isfile(os.path.join(sysdeps, "bin", "lttng-sessiond")):
-            update_env("ROCPROFILER_COLLECTOR_LTTNG_PREFIX", sysdeps, overwrite=False)
+        # What the collector needs, checked here rather than found missing after the run.
+        lttng_prefix, schema_dir, errors = find_collector_prerequisites(ROCM_DIR, app_env)
+        if errors:
+            fatal_error("--collector (ROCPROF_COLLECTOR): {}".format("; ".join(errors)))
+        if lttng_prefix:
+            update_env(
+                "ROCPROFILER_COLLECTOR_LTTNG_PREFIX", lttng_prefix, overwrite=False
+            )
+        update_env("ROCPROFILER_COLLECTOR_SCHEMA_DIR", schema_dir, overwrite=False)
         app_args = [collector_program, "--"] + list(app_args)
 
     if args.log_level in ("info", "trace", "env", "config"):
@@ -2703,6 +2709,42 @@ def check_collector_services(args, explicit):
                 ", ".join(dropped)
             )
         )
+
+
+def find_collector_prerequisites(rocm_dir, environ):
+    """Before launch on the collector path: the LTTng session daemon and the HIP runtime's probe
+    schema. Returns (lttng prefix or None, schema directory, errors)."""
+    errors = []
+
+    lttng_prefix = environ.get("ROCPROFILER_COLLECTOR_LTTNG_PREFIX")
+    sysdeps = os.path.join(rocm_dir, "lib", "rocm_sysdeps")
+    if lttng_prefix:
+        daemon = os.path.join(lttng_prefix, "bin", "lttng-sessiond")
+        if not os.access(daemon, os.X_OK):
+            errors.append(
+                f"lttng-sessiond not found in ROCPROFILER_COLLECTOR_LTTNG_PREFIX ({daemon})"
+            )
+    elif os.access(os.path.join(sysdeps, "bin", "lttng-sessiond"), os.X_OK):
+        lttng_prefix = sysdeps
+    elif shutil.which("lttng-sessiond", path=environ.get("PATH")) is None:
+        errors.append(
+            f"lttng-sessiond not found: neither in this ROCm installation ({sysdeps}/bin) nor in "
+            "PATH. Install ROCm's LTTng tools, or set ROCPROFILER_COLLECTOR_LTTNG_PREFIX to an "
+            "lttng-tools installation"
+        )
+
+    schema_dir = environ.get("ROCPROFILER_COLLECTOR_SCHEMA_DIR") or os.path.join(
+        rocm_dir, "share", "rocm-trace"
+    )
+    schema = os.path.join(schema_dir, "rocm_hip.json")
+    if not os.path.isfile(schema):
+        errors.append(
+            f"the HIP runtime's probe schema ({schema}) was not found: this installation's HIP "
+            "runtime was built without its trace probes (HIP_ENABLE_ROCM_TRACE=ON). Set "
+            "ROCPROFILER_COLLECTOR_SCHEMA_DIR to the directory of rocm_hip.json for a HIP "
+            "runtime that has them"
+        )
+    return lttng_prefix, schema_dir, errors
 
 
 def find_collector_program():
