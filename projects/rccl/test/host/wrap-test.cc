@@ -10718,6 +10718,33 @@ TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetAndPerRankTableTier_PicksDdaL
   });
 }
 
+// Out of the box on DPX: the real table's Broadcast caps pick LL to 16 KiB, LL128 to 128 KiB, then Ring.
+TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetDpxTable_PicksTierByCap) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_BcUnsetDpxTable_PicksTierByCap", []() {
+    g_loadParam = BroadcastDdaParams(/*llMax=*/-1, /*ll128Max=*/-1, /*ddaEnable=*/1, /*ddaBc=*/-1);
+    ScopedHook ll(g_broadcastDdaFabricLLEligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    ScopedHook ll128(g_broadcastDdaFabricLL128Eligible, [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    ncclComm* comm = MakeBroadcastComm();
+    comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+    ASSERT_NE(nullptr, comm->archThresholds);
+    const struct {
+      size_t bytes;
+      int algo;
+    } cases[] = {
+      {16 * 1024, (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL},
+      {16 * 1024 + 16, (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128},
+      {128 * 1024, (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128},
+      {128 * 1024 + 16, NCCL_ALGO_RING},
+    };
+    for (const auto& c : cases) {
+      rcclCollDecision d = PoisonedDecision();
+      EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, c.bytes / 4, ncclFloat32, 0, false, &d)) << c.bytes;
+      EXPECT_EQ(c.algo, d.algo) << c.bytes;
+    }
+    DeleteCommWithArch(comm);
+  });
+}
+
 TEST(WrapMicrotestIsolated, SelectBroadcast_NullComm_ReturnsInvalidArgument) {
   RUN_ISOLATED_TEST("Wrap_SelectBroadcast_NullComm_ReturnsInvalidArgument", []() {
     g_loadParam = BroadcastDdaParams(INT64_MAX, INT64_MAX);
