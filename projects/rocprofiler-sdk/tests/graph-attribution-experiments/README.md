@@ -18,6 +18,30 @@ containing any node outside the recorded capture, including manually added nodes
 Graph node ordinals and capture matching still inherit the upstream ordering
 constraints. Resolving a HIP capture call does not establish Python layer labels.
 
+## Experimental memset attribution (native rocprofv3)
+
+`ROCPROFILER_EXPERIMENTAL_GRAPH_FILLBUFFER=1` enables a separate, default-off
+ROCclr `fillBufferUnAligned` decoder. It supports captured one-dimensional
+Memset nodes with element sizes 1, 2 and 4, and the tested 384-byte runtime
+argument segment. It checks destination, complete byte length, region geometry,
+workgroup fields and rotated by-value pattern payloads before requiring a unique
+capture-time parameter match. It never dereferences the runtime pattern pointer.
+The private runtime ABI must be revalidated for other ROCm builds.
+
+Successful runtime or driver graph-exec memset changes invalidate the whole capture plan; failed
+changes preserve it. Source-graph memset changes, duplicate matches, unrecorded
+nodes, child graphs and unsupported fill shapes refuse fill attribution. A zero
+ID is a coverage gap, not permission to infer a source from kernel name or order.
+
+The stdlib validator reads the **native rocprofv3 JSON**, checks exact source API
+IDs and every launch/dispatch count, and expects refusals for negative cases.
+The HIP probe independently checks all GPU bytes, including offset and typed
+patterns. Run with a compatible SDK/native tool build and runtime library paths:
+
+```bash
+SDK_BUILD=/absolute/sdk-build bash projects/rocprofiler-sdk/tests/graph-attribution-experiments/run_memset_native.sh /absolute/new-results
+```
+
 ## Native reproduction
 
 Build the SDK shared library and `rocprofiler-sdk-json-tool` with tests enabled.
