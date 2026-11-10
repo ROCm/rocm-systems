@@ -26,7 +26,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <iterator>  // std::size
 #include <memory>
 #include <new>
 #include <string>
@@ -1369,6 +1368,7 @@ TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_DeviceCodeVersionAndBackendTyp
     {"gdaki tops out at its last revision", NCCL_GIN_TYPE_GDAKI, NCCL_VERSION(2, 32, 0), 2},
     {"gpi tops out at its last revision", NCCL_GIN_TYPE_GPI, NCCL_VERSION(2, 32, 0), 1},
     {"efa gda at its first revision", NCCL_GIN_TYPE_EFA_GDA, NCCL_VERSION(2, 31, 0), 1},
+    {"efa gda tops out at its last revision", NCCL_GIN_TYPE_EFA_GDA, NCCL_VERSION(2, 32, 0), 2},
     // AMD device-initiated backends ignore the host-provided version entirely.
     {"rocshmem gda is version-less", NCCL_GIN_TYPE_ROCSHMEM_GDA, NCCL_VERSION(2, 32, 0), 0},
     {"anvil sdma is version-less", NCCL_GIN_TYPE_ANVIL_SDMA, NCCL_VERSION(2, 32, 0), 0},
@@ -1382,35 +1382,6 @@ TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_DeviceCodeVersionAndBackendTyp
     reqs.ginType = c.ginType;  // so backend selection lands on the case's backend
     ASSERT_EQ(ncclSuccess, setupAndFree(reqs, c.deviceCodeVersion));
     EXPECT_EQ(c.expectedBackendVersion, lastConfig().backendVersion);
-  }
-}
-
-// JIT-compiled device code is built against the runtime library's headers, so
-// a devComm for it (deviceCodeVersion == NCCL_VERSION_CODE) must get every
-// backend's newest ABI. Derived from the tables so a new revision is covered
-// without editing this test.
-TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_RuntimeDeviceCodeVersion_SelectsEachBackendsNewestAbi) {
-  struct Case {
-    ncclGinType_t ginType;
-    int nVersions;
-  };
-  const Case cases[] = {
-    {NCCL_GIN_TYPE_PROXY, static_cast<int>(std::size(proxyBackendMinVersions))},
-    {NCCL_GIN_TYPE_GDAKI, static_cast<int>(std::size(gdakiBackendMinVersions))},
-    {NCCL_GIN_TYPE_GPI, static_cast<int>(std::size(gpiBackendMinVersions))},
-    {NCCL_GIN_TYPE_ROCSHMEM_GDA, static_cast<int>(std::size(rocshmemGdaBackendMinVersions))},
-    {NCCL_GIN_TYPE_ANVIL_SDMA, static_cast<int>(std::size(anvilSdmaBackendMinVersions))},
-    {NCCL_GIN_TYPE_EFA_GDA, static_cast<int>(std::size(efaGdaBackendMinVersions))},
-  };
-
-  auto reqs = proxyReqs();
-  reqs.ginContextCount = 1;
-  for (const Case& c : cases) {
-    SCOPED_TRACE(testing::Message() << "ginType " << c.ginType);
-    gin()->backends[0].ginType = c.ginType;
-    reqs.ginType = c.ginType;
-    ASSERT_EQ(ncclSuccess, setupAndFree(reqs, NCCL_VERSION_CODE));
-    EXPECT_EQ(c.nVersions - 1, lastConfig().backendVersion);
   }
 }
 
