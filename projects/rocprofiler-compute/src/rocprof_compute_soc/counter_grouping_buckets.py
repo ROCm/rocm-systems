@@ -75,7 +75,15 @@ def iter_metric_groups(
     """
     priority_keys = _priority_metric_keys(priority_metric_ids)
     rows: List[_MetricGroup] = []
-    for stem_id, panel_id, metric_idx, metric_name, expressions in yaml_metrics:
+    for item in yaml_metrics:
+        if hasattr(item, "expressions"):
+            stem_id = item.stem_id
+            panel_id = item.table_id
+            metric_idx = item.metric_idx
+            metric_name = item.metric_name
+            expressions = item.expressions
+        else:
+            stem_id, panel_id, metric_idx, metric_name, expressions = item
         formula_hw, _ = extract_counters_and_variables(
             "\n".join(expressions),
             gpu_series,

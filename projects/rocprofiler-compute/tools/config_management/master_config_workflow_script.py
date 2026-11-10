@@ -21,6 +21,7 @@ PYTHON = sys.executable
 
 VERIFY_SCRIPT = TOOLS_DIR / "verify_against_config_template.py"
 HASH_CHECKER_SCRIPT = TOOLS_DIR / "hash_checker.py"
+METRIC_LIBRARY_SCRIPT = TOOLS_DIR.parent / "validate_metric_library.py"
 
 
 def run(cmd):
@@ -59,6 +60,9 @@ def main():
     ])
     if rc != 0:
         fatal("Template / architecture verification failed")
+
+    if run([PYTHON, METRIC_LIBRARY_SCRIPT]) != 0:
+        fatal("Metric library validation failed")
 
     if args.validate_only:
         print("\nValidation successful.")

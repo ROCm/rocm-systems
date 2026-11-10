@@ -57,7 +57,10 @@ std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdg
   if (!amdgpu::addr_calc::smem_is_buffer_load_op(inst.op) && off < 0)
     wf.report_undefined_behavior("negative combined scalar-memory offset");
   if (amdgpu::addr_calc::smem_is_buffer_load_op(inst.op)) {
-    return amdgpu::addr_calc::scalar_buffer_address(wf, sbase_sel, *base, off, state);
+    // The bound is not rounded to whole DWORDs, following RDNA3 sections 8.1.2 and
+    // 8.4.1; this is unverified on hardware.
+    return amdgpu::addr_calc::scalar_buffer_address(wf, sbase_sel, *base, off, state,
+                                                    /*align_mask=*/3, /*size_align_mask=*/0);
   }
   return (*base + off) & ~0x3ULL;
 }
@@ -127,8 +130,9 @@ void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf
     }
     uint64_t addr = saddr_val + vaddr + offset;
     if (inst.seg == 0)
-      addr =
-          amdgpu::translate_flat_address(wf, addr, lane, amdgpu::FlatPrivateLayout::Linear).value;
+      addr = amdgpu::translate_flat_address(wf, addr, lane,
+                                            amdgpu::flat_private_layout(wf.cu().arch()))
+                 .value;
     d.per_lane_addr[lane] = addr;
   }
 }
