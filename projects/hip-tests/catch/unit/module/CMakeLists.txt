@@ -478,15 +478,27 @@ target_link_libraries(hipGetFuncBySymbol_exe ${GPGPU_LINKER_LIBRARIES})
 add_dependencies(build_tests hipGetFuncBySymbol_exe)
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipGetFuncBySymbol_exe)
 
+if(UNIX)
+  add_executable(managedForkAfterRegister_exe EXCLUDE_FROM_ALL managedForkAfterRegister_exe.cc)
+  set_source_files_properties(managedForkAfterRegister_exe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
+  target_link_libraries(managedForkAfterRegister_exe ${GPGPU_LINKER_LIBRARIES})
+  add_dependencies(build_tests managedForkAfterRegister_exe)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS managedForkAfterRegister_exe)
+endif()
+
 # Common Tests - Test independent of all platforms
 set(TEST_SRC
   hipFuncSetAttribute.cc
   hipFuncGetAttributes.cc
   hipFuncSetSharedMemConfig.cc
   hipManagedKeywordBasic.cc
+  hipManagedKeywordDeferredInit.cc
   hipModule.cc
   hipModuleLoadMultProcessOnMultGPU.cc
 )
+if(UNIX)
+  list(APPEND TEST_SRC managedForkAfterRegister.cc)
+endif()
 set(AMD_TEST_SRC
     hipExtLaunchKernelGGL.cc
     hipExtLaunchMultiKernelMultiDevFunctional.cc

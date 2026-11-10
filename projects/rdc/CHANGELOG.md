@@ -2,16 +2,12 @@
 
 Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](https://rocm.docs.amd.com/projects/rdc/en/latest/).
 
-## RDC 1.4.0 for ROCm 10.1.0
+## RDC 1.4.0 for ROCm 10.2.0
 
 ### Changed
 
 - **`rdc_health_get()` returns `RDC_ST_GROUP_NOT_FOUND` for a GPU group that does not exist**.
   - It returned `RDC_ST_OK` with no health watches, so `rdci health -f` showed every watch as Off and exited successfully, and `rdci health -c` failed asking for watches to be enabled. Both commands now fail with a message that the group does not exist.
-
-### Removed
-
-- Removed the unused `GetBlockNameStr()` test helper and its GPU block name map. Nothing called it, and its `static_assert` on `AMDSMI_GPU_BLOCK_LAST` broke the RDC build whenever AMD SMI added an IP block (#10949).
 
 ### Resolved Issues
 
@@ -27,12 +23,10 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 - RDC no longer reports another GPU's XGMI link states, or garbage values that could crash `rdcd`, for a GPU whose link status AMD SMI cannot read. That GPU now reports no links.
   - `rdci link` now prints an error and exits with a nonzero status when it cannot get the link status, instead of printing nothing and exiting with 0.
 
-- `RDC_FI_GPU_MEMORY_CUR_BANDWIDTH` no longer reports zero under DMA or copy-only memory traffic on GPUs whose instantaneous UMC activity does not reflect DMA transfers. It now derives memory activity from the `mem_activity_acc` accumulator over firmware time, and falls back to the instantaneous `umc_activity` reading when the accumulator or firmware timestamp is unavailable.
+- The `RDC_FI_GPU_MEMORY_CUR_BANDWIDTH` fix for zero readings under DMA or copy-only memory traffic is now included.
 
 - `rdci topo` and `rdc_device_topology_get()` now report the links of the requested GPU. They reported links between other GPU pairs, which showed the wrong link types on systems where GPU pairs are not all linked the same way, such as XGMI hives joined by PCIe.
   - `rdci topo` now exits with an error code when the GPU index is out of range or the topology query fails, instead of exiting 0, and `rdc_device_topology_get()` reports link types RDC does not define as `RDC_IOLINK_TYPE_UNDEFINED`.
-
-- `RDC_FI_ECC_CORRECT_TOTAL`, `RDC_FI_ECC_UNCORRECT_TOTAL`, and `RDC_FI_ECC_DEFERRED_TOTAL` no longer hang when AMD SMI defines GPU blocks above bit 31. The block iteration used a 32-bit counter that wrapped to zero instead of terminating.
 
 - Opening or stopping an RDC handle no longer crashes the process when another handle is in use, and concurrent `rdc_connect()` calls no longer fail at random.
 
@@ -43,10 +37,25 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - `rdci dmon` and `rdci health -s` name the missing group again, for example `Cannot find the group 4242`. Since ROCm 7.12 they printed only `Group not found` (or `Fieldgroup not found` for a missing field group in `rdci dmon`).
 
+- `rdcd` no longer crashes during `rdci diag`, and later diagnostic runs and profiler fields keep working. Repeated `rdci diag` runs also no longer use up GPU memory in `rdcd`.
+  - After the first `rdci diag`, `rdcd` keeps the ROCm runtime loaded until it stops, as it already does after the first profiler field read, so changing the GPU partition mode needs `rdcd` stopped. `rdci diag` requests now run one at a time.
+
+- `rdci diag` now runs the Compute Queue and System memory checks on AMD Instinct MI455X GPUs instead of skipping them.
+
 - `RDC_FI_GPU_PARTITION_COUNT` now reports how many compute partitions the GPU is split into, for example 1 in SPX mode. It reported 65535 or N/A in every partition mode on most GPUs.
   - A GPU that cannot be partitioned now reports 1.
 
 - Stopping `rdcd`, or embedded RDC with `rdc_stop_embedded()`, no longer hangs. Rarely, the stop never returned and the process had to be killed.
+
+## RDC 1.3.1 for ROCm 10.1.0
+
+### Removed
+
+- Removed the unused `GetBlockNameStr()` test helper and its GPU block name map. Nothing called it, and its `static_assert` on `AMDSMI_GPU_BLOCK_LAST` broke the RDC build whenever AMD SMI added an IP block (#10949).
+
+### Resolved Issues
+
+- `RDC_FI_ECC_CORRECT_TOTAL`, `RDC_FI_ECC_UNCORRECT_TOTAL`, and `RDC_FI_ECC_DEFERRED_TOTAL` no longer hang when AMD SMI defines GPU blocks above bit 31. The block iteration used a 32-bit counter that wrapped to zero instead of terminating.
 
 ## RDC 1.3.1 for ROCm 7.14.0
 

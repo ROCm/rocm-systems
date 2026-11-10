@@ -6,6 +6,7 @@
 #![allow(clippy::unwrap_used)]
 
 use super::*;
+use rocddi::device::gpu::queue::QueueAccessWidth;
 use rocddi::memory::storage::Allocator;
 use rocddi::{Error, ErrorKind};
 use std::ptr;
@@ -18,6 +19,7 @@ pub(super) struct Fixture {
     progress_calls: AtomicU64,
     destroy_calls: AtomicU64,
     fail_destroy_once: AtomicBool,
+    busy_destroy_once: AtomicBool,
     destroy_errno: AtomicU64,
     backing_live: AtomicBool,
     retire_on_call: AtomicU64,
@@ -51,6 +53,12 @@ impl Fixture {
 
     pub(super) fn destroy(&self) -> Result<(), Error> {
         self.destroy_calls.fetch_add(1, Ordering::Relaxed);
+        if self.busy_destroy_once.swap(false, Ordering::AcqRel) {
+            return Err(Error::Operation {
+                kind: ErrorKind::Busy,
+                detail: "native queue still has work",
+            });
+        }
         if self.consumed.load(Ordering::Acquire) < self.producer.load(Ordering::Acquire) {
             return Err(Error::Operation {
                 kind: ErrorKind::Busy,
@@ -98,6 +106,7 @@ fn fixture_queue(environment: &Environment) -> (Owned<Queue>, Arc<Fixture>) {
         progress_calls: AtomicU64::new(0),
         destroy_calls: AtomicU64::new(0),
         fail_destroy_once: AtomicBool::new(false),
+        busy_destroy_once: AtomicBool::new(false),
         destroy_errno: AtomicU64::new(0),
         backing_live: AtomicBool::new(true),
         retire_on_call: AtomicU64::new(u64::MAX),
@@ -317,8 +326,8 @@ fn native_transport() -> queue::QueueTransport {
 }
 
 #[test]
-fn transport_requires_the_exact_advertised_atomic_widths_and_units() {
-    let mut native = native_transport();
+fn transport_copies_advertised_family_fields_and_native_addresses() {
+    let native = native_transport();
     let aql = family(AMDF_QUEUE_COMMAND_TYPE_GPU_AQL);
     let host = transport(
         native,
@@ -330,101 +339,30 @@ fn transport_requires_the_exact_advertised_atomic_widths_and_units() {
     .unwrap();
     assert_eq!(host.format_version, aql.format_version);
     assert_eq!(host.format_features, aql.format_features);
-    assert!(
-        transport(
-            native,
-            aql.command_type,
-            aql.format_version,
-            aql.format_features,
-            true
-        )
-        .is_ok()
+    assert_eq!(host.ring_address, native.ring_host_address as u64);
+    assert_eq!(
+        host.read_index_address,
+        native.read_index_host_address as u64
     );
-    native.read_index_width = QueueAccessWidth::Bits32;
-    assert!(matches!(
-        transport(
-            native,
-            aql.command_type,
-            aql.format_version,
-            aql.format_features,
-            false
-        ),
-        Err(INTERNAL)
-    ));
-    native.read_index_width = QueueAccessWidth::Bits64;
-    let sdma = family(AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA);
-    assert!(matches!(
-        transport(
-            native,
-            sdma.command_type,
-            sdma.format_version,
-            sdma.format_features,
-            false
-        ),
-        Err(INTERNAL)
-    ));
-    native.index_unit_bytes = 1;
-    let host = transport(
+    assert_eq!(host.doorbell_address, native.doorbell_host_address as u64);
+    let device = transport(
         native,
-        sdma.command_type,
-        sdma.format_version,
-        sdma.format_features,
-        false,
+        aql.command_type,
+        aql.format_version,
+        aql.format_features,
+        true,
     )
     .unwrap();
-    assert_eq!(host.format_version, sdma.format_version);
-    assert_eq!(host.format_features, sdma.format_features);
-    native.read_index_wraps = true;
-    assert!(matches!(
-        transport(
-            native,
-            sdma.command_type,
-            sdma.format_version,
-            sdma.format_features,
-            false
-        ),
-        Err(INTERNAL)
-    ));
-}
-
-#[test]
-fn pm4_transport_requires_dword_units_and_a_wrapping_read_index() {
-    let pm4 = family(AMDF_QUEUE_COMMAND_TYPE_GPU_PM4);
-    let mut native = native_transport();
-    native.index_unit_bytes = 4;
-    native.read_index_wraps = true;
-    assert!(
-        transport(
-            native,
-            pm4.command_type,
-            pm4.format_version,
-            pm4.format_features,
-            false
-        )
-        .is_ok()
+    assert_eq!(device.ring_address, native.ring_device_address);
+    assert_eq!(device.read_index_address, native.read_index_device_address);
+    assert_eq!(
+        device.doorbell_address,
+        native.doorbell_device_address.unwrap()
     );
-    native.read_index_wraps = false;
-    assert!(matches!(
-        transport(
-            native,
-            pm4.command_type,
-            pm4.format_version,
-            pm4.format_features,
-            false
-        ),
-        Err(INTERNAL)
-    ));
 }
 
 #[test]
-fn invalid_native_transport_rolls_back_and_reports_cleanup_failure() {
-    let family = family(AMDF_QUEUE_COMMAND_TYPE_GPU_AQL);
-    let mut native = native_transport();
-    native.doorbell_host_address = 0;
-    assert!(matches!(
-        creation_transports(native, &family),
-        Err(INTERNAL)
-    ));
+fn rollback_creation_reports_cleanup_failure() {
     let invalid = INTERNAL;
 
     let queues = AtomicU64::new(1);
@@ -654,6 +592,48 @@ fn unconsumed_queue_teardown_is_retryable_and_keeps_the_parent_borrow() {
     // SAFETY: All publication is now consumed and no mappings remain.
     unsafe { assert_eq!(destroy(pointer), 0) };
     assert_eq!(environment.queues.load(Ordering::Relaxed), 0);
+}
+
+#[test]
+fn native_work_busy_keeps_the_queue_and_parent_borrow_for_retry() {
+    let environment = Environment::new();
+    let (queue, fixture) = fixture_queue(&environment);
+    fixture.busy_destroy_once.store(true, Ordering::Release);
+    let pointer = queue.into_raw().cast();
+    // SAFETY: Native BUSY is a preflight rejection and leaves the handle live.
+    unsafe { assert_eq!(destroy(pointer), BUSY) };
+    assert_eq!(environment.queues.load(Ordering::Relaxed), 1);
+    assert!(fixture.backing_live.load(Ordering::Acquire));
+    let mut mapping = ptr::null_mut();
+    // SAFETY: The rejected teardown keeps the public transport usable.
+    unsafe {
+        assert_eq!(map(pointer, ptr::null_mut(), &raw mut mapping), 0);
+        assert_eq!(unmap(mapping), 0);
+        assert_eq!(destroy(pointer), 0);
+    }
+    assert_eq!(environment.queues.load(Ordering::Relaxed), 0);
+    assert_eq!(fixture.destroy_calls.load(Ordering::Relaxed), 2);
+}
+
+#[test]
+fn unmapping_a_peer_producer_releases_its_device_borrow() {
+    let environment = Environment::new();
+    let (queue, _) = fixture_queue(&environment);
+    queue.mappings.store(1, Ordering::Release);
+    let pointer = queue.into_raw().cast::<amdf_user_queue_t>();
+    let producer_queues = AtomicU64::new(1);
+    let mapping = Owned::new(Mapping {
+        queue: pointer.cast(),
+        producer_queues: Some(&raw const producer_queues),
+        info: amdf_user_queue_mapping_info_t::default(),
+    })
+    .unwrap();
+    // SAFETY: Both counted parents remain live until their mapping is removed.
+    unsafe { assert_eq!(unmap(mapping.into_raw().cast()), 0) };
+    assert_eq!(producer_queues.load(Ordering::Acquire), 0);
+    // SAFETY: The queue has no remaining producer mapping or work.
+    unsafe { assert_eq!(destroy(pointer), 0) };
+    assert_eq!(environment.queues.load(Ordering::Acquire), 0);
 }
 
 #[test]

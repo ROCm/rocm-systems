@@ -3,10 +3,15 @@
 
 #include "cdna5_sim_test_common.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vopd.h"
+#include "rocjitsu/vm/plugins/execution_plugin.h"
 
 #include <atomic>
+#include <memory>
 #include <mutex>
 #include <thread>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -22,6 +27,7 @@ public:
     std::vector<uint32_t> workgroup_ids;
     std::thread::id callback_thread;
     uint32_t active_instructions = 0;
+    BarrierKind kind = BarrierKind::Workgroup;
   };
 
   void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &,
@@ -34,9 +40,11 @@ public:
     active_instructions_.fetch_sub(1, std::memory_order_relaxed);
   }
 
-  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts) override {
+  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts,
+                               BarrierKind kind) override {
     Resolution resolution;
     resolution.span_size = wavefronts.size();
+    resolution.kind = kind;
     resolution.callback_thread = std::this_thread::get_id();
     resolution.active_instructions = active_instructions_.load(std::memory_order_relaxed);
     std::vector<uint32_t> workgroups;
@@ -723,6 +731,9 @@ TEST(Gfx1250SimulationTest, AqlDescriptorAllocatesNamedBarriersForTwoWaveKernel)
 
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto plugin = std::make_unique<BarrierSpanPlugin>();
+  auto *barrier_span = plugin.get();
+  ASSERT_TRUE(sim.plugin_group->add(std::move(plugin)));
   uint64_t kernel_object = sim.write_kernel(kKernelAddr, code, std::size(code), 104, 32, 2, false,
                                             false, false, 0, 0, 0, 0, 0, 1);
   test::AqlQueue queue(sim.memory, sim.cp());
@@ -732,6 +743,9 @@ TEST(Gfx1250SimulationTest, AqlDescriptorAllocatesNamedBarriersForTwoWaveKernel)
   ASSERT_EQ(sim.snapshot->snapshots().size(), 2u);
   for (const auto &wf : sim.snapshot->snapshots())
     EXPECT_EQ(wf.sgpr(4), 0x01000021u);
+  const auto resolutions = barrier_span->resolutions();
+  ASSERT_EQ(resolutions.size(), 1u);
+  EXPECT_EQ(resolutions[0].kind, BarrierKind::Named);
 }
 
 TEST(Gfx1250SimulationTest, ParallelClusterBarrierSynchronizesWorkgroupsAcrossComputeUnits) {
@@ -776,6 +790,7 @@ TEST(Gfx1250SimulationTest, ParallelClusterBarrierSynchronizesWorkgroupsAcrossCo
   const auto resolutions = barrier_span->resolutions();
   ASSERT_EQ(resolutions.size(), 1u);
   EXPECT_EQ(resolutions[0].span_size, 4u);
+  EXPECT_EQ(resolutions[0].kind, BarrierKind::Cluster);
   EXPECT_EQ(resolutions[0].workgroup_ids, (std::vector<uint32_t>{0, 1}));
   EXPECT_EQ(resolutions[0].callback_thread, cp_thread);
   EXPECT_EQ(resolutions[0].active_instructions, 0u);
@@ -2161,6 +2176,48 @@ TEST(Gfx1250SimulationTest, VopdFmacUsesDestinationAccumulator) {
   for (uint32_t lane = 0; lane < wf->wf_size; ++lane) {
     EXPECT_EQ(wf->vgpr(10, lane), 0x40E00000u) << "lane " << lane;
     EXPECT_EQ(wf->vgpr(9, lane), 0x40000000u) << "lane " << lane;
+  }
+}
+
+TEST(Gfx1250ExecutionTest, UnsupportedVopd3SlotDoesNotCommitMixedWidthPair) {
+  constexpr VopdOp kInvalidVopd3Op = static_cast<VopdOp>(63);
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *wf = sim.dispatch_scratch_wf();
+  ASSERT_NE(wf, nullptr);
+  const uint32_t base = wf->vgpr_alloc().base;
+  for (bool invalid_x : {false, true}) {
+    SCOPED_TRACE(::testing::Message() << "invalid_x=" << invalid_x);
+    const auto words = make_vopd3_pair({.op = invalid_x ? kInvalidVopd3Op : VopdOp::AddF64,
+                                        .src0 = vopd_src0_vgpr(2),
+                                        .src1 = 4,
+                                        .src2 = 0,
+                                        .dst = 8},
+                                       {.op = invalid_x ? VopdOp::AddF64 : kInvalidVopd3Op,
+                                        .src0 = vopd_src0_vgpr(6),
+                                        .src1 = 10,
+                                        .src2 = 0,
+                                        .dst = 12});
+    // Invalid encodings cannot reach this fallback through the decoder.
+    cdna5::Vopd inst(reinterpret_cast<const cdna5::MachineInst *>(words.data()));
+    wf->set_exec(0xAAAA'AAAA);
+    wf->set_vcc(0x12345678);
+    wf->write_scc(1);
+    for (uint32_t lane = 0; lane < 32; ++lane)
+      for (uint32_t reg = 0; reg < 16; ++reg)
+        sim.cu()->write_vgpr(base + reg, lane, 100u * reg + lane);
+    ASSERT_NE(inst.execute, nullptr);
+    wf->clear_instruction_execution_error();
+    ASSERT_NO_THROW(inst.execute(inst, wf));
+    EXPECT_EQ(wf->instruction_execution_error(),
+              amdgpu::InstructionExecutionError::UnimplementedInstruction);
+    EXPECT_EQ(wf->exec(), 0xAAAA'AAAAu);
+    EXPECT_EQ(wf->vcc(), 0x12345678u);
+    EXPECT_EQ(wf->read_scc(), 1u);
+    EXPECT_FALSE(wf->is_halted());
+    for (uint32_t lane = 0; lane < 32; ++lane)
+      for (uint32_t reg = 0; reg < 16; ++reg)
+        EXPECT_EQ(sim.cu()->read_vgpr(base + reg, lane), 100u * reg + lane);
   }
 }
 

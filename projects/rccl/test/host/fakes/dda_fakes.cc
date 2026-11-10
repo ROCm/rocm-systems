@@ -38,14 +38,21 @@
     return g_##hook(comm, count, type);                                                                   \
   }
 
+#define DEFINE_DDA_CAPPED_BLOCKS(hook, prod, sentinel)                                                    \
+  DdaCappedBlocksHook g_##hook = [](ncclComm*, size_t, ncclDataType_t, rcclDdaLaunchCap) { return sentinel; }; \
+  uint32_t prod(ncclComm* comm, size_t count, ncclDataType_t type, rcclDdaLaunchCap cap) {               \
+    return g_##hook(comm, count, type, cap);                                                             \
+  }                                                                                                      \
+  ASSERT_HOOK_MATCHES_PROD(g_##hook, prod);
+
 DEFINE_DDA_REDUCTION_ELIGIBLE(allReduceDdaIpcEligible, ncclAllReduceDdaIpcEligible)
 DEFINE_DDA_REDUCTION_ELIGIBLE(allReduceDdaFabricEligible, ncclAllReduceDdaFabricEligible)
 DEFINE_DDA_REDUCTION_ELIGIBLE(allReduceDdaFabricLLEligible, ncclAllReduceDdaFabricLLEligible)
 DEFINE_DDA_REDUCTION_ELIGIBLE(allReduceDdaFabricLL128Eligible, ncclAllReduceDdaFabricLL128Eligible)
 DEFINE_DDA_BLOCKS(allReduceDdaIpcBlocks, ncclAllReduceDdaIpcBlocks, 111)
-DEFINE_DDA_BLOCKS(allReduceDdaFabricBlocks, ncclAllReduceDdaFabricBlocks, 112)
-DEFINE_DDA_BLOCKS(allReduceDdaFabricLLBlocks, ncclAllReduceDdaFabricLLBlocks, 113)
-DEFINE_DDA_BLOCKS(allReduceDdaFabricLL128Blocks, ncclAllReduceDdaFabricLL128Blocks, 114)
+DEFINE_DDA_CAPPED_BLOCKS(allReduceDdaFabricBlocks, ncclAllReduceDdaFabricBlocks, 112)
+DEFINE_DDA_CAPPED_BLOCKS(allReduceDdaFabricLLBlocks, ncclAllReduceDdaFabricLLBlocks, 113)
+DEFINE_DDA_CAPPED_BLOCKS(allReduceDdaFabricLL128Blocks, ncclAllReduceDdaFabricLL128Blocks, 114)
 
 DEFINE_DDA_ALLGATHER_ELIGIBLE(allGatherDdaIpcEligible, ncclAllGatherDdaIpcEligible)
 DEFINE_DDA_ALLGATHER_ELIGIBLE(allGatherDdaFabricEligible, ncclAllGatherDdaFabricEligible)
@@ -95,6 +102,17 @@ DEFINE_DDA_BLOCKS(reduceScatterDdaFabricLL128Blocks, ncclReduceScatterDdaFabricL
   }                                                                                                      \
   ASSERT_HOOK_MATCHES_PROD(g_##hook, prod);
 
+#define DEFINE_DDA_CAPPED_REDUCE_LAUNCH(hook, prod)                                                       \
+  DdaCappedReduceLaunchHook g_##hook = [](const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, ncclComm*, \
+                                          hipStream_t, rcclDdaLaunchCap) -> ncclResult_t {                 \
+    FailLoudUnfaked("dda_fakes", #prod);                                                                 \
+  };                                                                                                     \
+  ncclResult_t prod(const void* send, void* recv, size_t count, ncclDataType_t type, ncclRedOp_t op,     \
+                    ncclComm* comm, hipStream_t stream, rcclDdaLaunchCap cap) {                          \
+    return g_##hook(send, recv, count, type, op, comm, stream, cap);                                     \
+  }                                                                                                      \
+  ASSERT_HOOK_MATCHES_PROD(g_##hook, prod);
+
 DEFINE_DDA_LAUNCH(allGatherDdaIpc, ncclAllGatherDdaIpc)
 DEFINE_DDA_LAUNCH(allGatherDdaFabric, ncclAllGatherDdaFabric)
 DEFINE_DDA_LAUNCH(allGatherDdaFabricLL, ncclAllGatherDdaFabricLL)
@@ -104,9 +122,9 @@ DEFINE_DDA_LAUNCH(allToAllDdaFabric, ncclAllToAllDdaFabric)
 DEFINE_DDA_LAUNCH(allToAllDdaFabricLL, ncclAllToAllDdaFabricLL)
 DEFINE_DDA_LAUNCH(allToAllDdaFabricLL128, ncclAllToAllDdaFabricLL128)
 DEFINE_DDA_REDUCE_LAUNCH(allReduceDdaIpc, ncclAllReduceDdaIpc)
-DEFINE_DDA_REDUCE_LAUNCH(allReduceDdaFabric, ncclAllReduceDdaFabric)
-DEFINE_DDA_REDUCE_LAUNCH(allReduceDdaFabricLL, ncclAllReduceDdaFabricLL)
-DEFINE_DDA_REDUCE_LAUNCH(allReduceDdaFabricLL128, ncclAllReduceDdaFabricLL128)
+DEFINE_DDA_CAPPED_REDUCE_LAUNCH(allReduceDdaFabric, ncclAllReduceDdaFabric)
+DEFINE_DDA_CAPPED_REDUCE_LAUNCH(allReduceDdaFabricLL, ncclAllReduceDdaFabricLL)
+DEFINE_DDA_CAPPED_REDUCE_LAUNCH(allReduceDdaFabricLL128, ncclAllReduceDdaFabricLL128)
 DEFINE_DDA_REDUCE_LAUNCH(reduceScatterDdaIpc, ncclReduceScatterDdaIpc)
 DEFINE_DDA_REDUCE_LAUNCH(reduceScatterDdaFabric, ncclReduceScatterDdaFabric)
 DEFINE_DDA_REDUCE_LAUNCH(reduceScatterDdaFabricLL, ncclReduceScatterDdaFabricLL)
