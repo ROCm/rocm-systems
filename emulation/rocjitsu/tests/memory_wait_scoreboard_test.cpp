@@ -870,6 +870,15 @@ TEST(MemoryWaitExecutionTest, ImageAndFormattedBufferOperandFootprints) {
       }
       RegisterModifiers modifiers;
       inst.value()->amdgpu_register_modifiers(modifiers);
+      if (modifiers.bvh_resource) {
+        // A triangle at node zero fits in the first slot of this BVH.
+        cu->write_sgpr(wf->sgpr_alloc().base + *modifiers.bvh_resource + 3,
+                       kGfx11BvhResourceType << 28);
+      } else if (inst.value()->mnemonic() == "image_msaa_load") {
+        const auto resource = wf->sgpr_alloc().base + modifiers.image_resource->encoding_value();
+        cu->write_sgpr(resource + 1, 20u << 20); // R32_UINT
+        cu->write_sgpr(resource + 3, uint32_t(amdgpu::kImage2dMsaaArray) << 28);
+      }
       if (modifiers.image_store_data) {
         // A bound 2D RGBA32_UINT image accepts all four components at coordinate zero.
         const auto resource = wf->sgpr_alloc().base + modifiers.image_resource->encoding_value();
@@ -1526,6 +1535,47 @@ TEST(MemoryWaitExecutionTest, Gfx115xImageStoreWaitsForFallbackDataRegister) {
       runner.cu->l1_vector().flush_all();
       runner.l2.flush_all();
       EXPECT_EQ(runner.memory.read32(texel), producer == 0 ? 107u : 17u);
+    }
+  }
+}
+
+TEST(MemoryWaitExecutionTest, Gfx115xAtomicUsesPendingVgprZeroForUnallocatedCompare) {
+  // In a 32-VGPR wave, v[31:32] supplies its comparison through v0.
+  // Returning TFE also needs v32 for the result, which nullifies that transaction.
+  struct Case {
+    uint8_t first, comparison;
+    bool glc, tfe, suppressed;
+  };
+  for (const Case test : {Case{30, 31, true, false, false}, Case{31, 0, true, false, false},
+                          Case{31, 0, true, true, true}, Case{31, 0, false, true, false}}) {
+    for (bool waited : {false, true}) {
+      SCOPED_TRACE(testing::Message() << "vdata=" << +test.first << " glc=" << test.glc
+                                      << " tfe=" << test.tfe << " waited=" << waited);
+      const auto atomic =
+          rdna3_5::build_mimg(rdna3_5::kImageAtomicCmpswapMimg, {.dim = 1,
+                                                                 .unorm = 1,
+                                                                 .dmask = 3,
+                                                                 .glc = test.glc,
+                                                                 .vaddr = 2,
+                                                                 .vdata = test.first,
+                                                                 .tfe = test.tfe});
+      Gfx115xSourceWaitProgram runner;
+      ASSERT_NO_FATAL_FAILURE(runner.initialize(test.comparison, 1, waited, atomic));
+      constexpr uint64_t texel = 0x8000;
+      const auto sb = runner.wf->sgpr_alloc().base, vb = runner.wf->vgpr_alloc().base;
+      runner.cu->write_sgpr(sb, texel >> 8);
+      runner.cu->write_sgpr(sb + 1, 20u << 20);                   // 32_UINT, 1x1 texel
+      runner.cu->write_sgpr(sb + 3, (9u << 28) | (1u << 9) | 4u); // 2D, X001
+      runner.cu->write_sgpr(sb + 4, 63); // 64 R32 texels give a 256-byte row.
+      runner.memory.write32(texel, 107);
+      runner.cu->write_vgpr(vb + test.first, 0, 7);
+      ASSERT_NO_FATAL_FAILURE(runner.issue_load(1));
+      ASSERT_EQ(runner.cu->read_vgpr(vb + test.comparison, 0), 107u);
+      runner.cu->step();
+      EXPECT_EQ(runner.wf->pc, runner.consumer_pc + 8);
+      EXPECT_EQ(runner.cu->memory_wait_diagnostic_count(), !test.suppressed && !waited ? 1u : 0u);
+      EXPECT_EQ(runner.memory.read32(texel), test.suppressed ? 107u : 7u);
+      EXPECT_EQ(runner.cu->read_vgpr(vb + test.first, 0), test.glc && !test.suppressed ? 107u : 7u);
     }
   }
 }

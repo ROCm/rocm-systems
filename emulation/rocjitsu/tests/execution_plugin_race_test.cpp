@@ -11,6 +11,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/image_address.h"
 
 #include "mma_test_util.h"
 #include "race-detector/race_test_instruction.h"
@@ -3256,6 +3257,70 @@ TEST(RaceDetectorPluginTest, FlatInvalidSharedLanesKeepDependenciesWithoutLdsInt
   }
 }
 
+TEST(RaceDetectorPluginTest, Rdna4NullifiedImageAtomicOccupiesLoadcntWithOlderGlobalLoad) {
+  for (const uint8_t vdata : {30, 31}) {
+    for (const int threshold : {-1, 0, 1}) {
+      SCOPED_TRACE(testing::Message() << "vdata=" << +vdata << " threshold=" << threshold);
+      PluginFixture f;
+      ASSERT_NO_FATAL_FAILURE(f.initialize(1, "rdna4", 32, 96, 32));
+      PluginSinkConfig config;
+      auto &sink = config.emplace<StringSink>();
+      f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(config));
+      ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+      f.soc->set_plugin_group(f.plugin_group_);
+      f.plugin_group_->onInit();
+
+      constexpr uint64_t pc = 0x8000;
+      constexpr uint32_t address = 0x4000;
+      auto *cu = f.cu();
+      auto *wf = cu->dispatch_wf(0, pc, 96, 32, 32);
+      ASSERT_NE(wf, nullptr);
+      ASSERT_EQ(wf->num_vgprs(), 32u);
+      wf->set_exec(1);
+      std::array waves{wf};
+      f.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 32, 96, waves);
+      f.mem->write32(address, 42);
+      wf->debug_write_vgpr(0, 0, address);
+      const auto sb = wf->sgpr_alloc().base;
+      cu->write_sgpr(sb, (address + 0x100) >> 8);
+      cu->write_sgpr(sb + 1, 48u << 17);
+      cu->write_sgpr(sb + 3, (9u << 28) | 0x688);
+      std::vector<uint32_t> code;
+      auto append = [&](const auto &words) { code.insert(code.end(), words.begin(), words.end()); };
+      append(rdna4::build_vglobal(rdna4::kGlobalLoadB32Vglobal,
+                                  {.saddr = amdgpu::kModernNullSelector, .vdst = 8}));
+      const uint64_t load_end = pc + 4 * code.size();
+      append(rdna4::build_vimage(
+          rdna4::kImageAtomicCmpswapVimage,
+          {.dim = 1, .dmask = 15, .vdata = vdata, .th = 1, .vaddr0 = 4, .vaddr1 = 5}));
+      const uint64_t image_end = pc + 4 * code.size();
+      if (threshold >= 0)
+        append(rdna4::build_sopp(rdna4::kSWaitLoadcntSopp,
+                                 {.simm16 = static_cast<uint16_t>(threshold)}));
+      append(rdna4::build_vop1(rdna4::kVMovB32Vop1, {.src0 = 264, .vdst = 9}));
+      f.mem->load_image(reinterpret_cast<const uint8_t *>(code.data()), code.size() * 4, pc);
+
+      ASSERT_TRUE(cu->step());
+      ASSERT_EQ(wf->pc, load_end);
+      ASSERT_TRUE(cu->step());
+      ASSERT_FALSE(wf->is_halted());
+      ASSERT_EQ(wf->pc, image_end);
+      ASSERT_EQ(wf->ensure_memory_wait_scoreboard().outstanding(WaitCounterKind::Load), 2u);
+      if (threshold >= 0) {
+        ASSERT_TRUE(cu->step());
+      }
+      ASSERT_TRUE(cu->step());
+      ASSERT_EQ(wf->pc, pc + code.size() * 4);
+      EXPECT_EQ(wf->debug_read_vgpr(9, 0), 42u);
+      const bool runtime_warning = cu->memory_wait_diagnostic_count() != 0;
+      const bool observer_warning = sink.str().find("Race on VGPR v8") != std::string::npos;
+      EXPECT_EQ(runtime_warning, threshold < 0);
+      EXPECT_EQ(observer_warning, threshold < 0);
+      wf->halt();
+    }
+  }
+}
+
 TEST(RaceDetectorPluginTest, Rdna4PartialLoadWaitRetiresOnlyOldestOrderedEvent) {
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1, /*arch=*/"rdna4", /*wavefront_size=*/32,
@@ -4152,7 +4217,7 @@ TEST(RaceDetectorPluginTest, Gfx11WritebacksRespectImageAndLdsClasses) {
     }
   };
   constexpr Op ops[]{
-      Image, Sample, SampleL, SampleLz, SampleD, Resinfo,
+      Image, Bvh, Sample, SampleL, SampleLz, SampleD, Resinfo,
   };
   constexpr uint64_t shared = uint64_t{2} << 32, global = uint64_t{8} << 32;
   for (const auto arch : {"rdna3", "rdna3.5"}) {
@@ -4200,7 +4265,8 @@ TEST(RaceDetectorPluginTest, Gfx11WritebacksRespectImageAndLdsClasses) {
             cu->write_sgpr(sb + 3, (9u << 28) | 4); // 1x1 R32_UINT image, select X.
             cu->write_sgpr(sb + 4, 63);
             cu->write_sgpr(sb + 12, 0x6000 >> 8);
-            cu->write_sgpr(sb + 15, 8u << 28); // One triangle node in the BVH resource.
+            cu->write_sgpr(sb + 15,
+                           kGfx11BvhResourceType << 28); // One triangle node in the BVH resource.
             f.mem->write32(0x4000, 0x1234);
             for (unsigned lane = 0; lane < 4; ++lane)
               wf->debug_write_vgpr(1, lane, (shared_lanes & (1u << lane) ? shared : global) >> 32);
@@ -6433,17 +6499,25 @@ TEST(RaceDetectorPluginTest, Gfx10PackedImageOperandsMatchWaitChecksAndRegisterR
       bool returns = false; // GLC on an atomic.
     };
     const unsigned msaa_offset = gfx1010 ? 32892 : 32956; // (3,7), fragment 2, 64KB_R_X.
-    const Transfer transfers[] = {
+    std::vector<Transfer> transfers{
         {rdna1::kImageLoadMimg, 0, {1}, 4},
+        {rdna1::kImageLoadPckMimg, 0, {1}, 4},
         {rdna1::kImageStoreMimg, 0, {1}, 4},
+        {rdna1::kImageAtomicAddMimg, 0, {1}, 4},
+        {rdna1::kImageAtomicAddMimg, 0, {1}, 4, true, false, true},
         {rdna1::kImageLoadMimg, 4, {1, 1}, 260},
+        {rdna1::kImageStorePckMimg, 5, {1, 1, 1}, 772, true, true},
+        {rdna1::kImageAtomicAddMimg, 2, {1, 1, 1}, 772, true, true, true},
         {rdna1::kImageLoadMipMimg, 1, {1, 1, 1}, 260, true, true},
+        {rdna1::kImageStoreMipPckMimg, 1, {1, 1, 1}, 260, true, true},
         {rdna1::kImageLoadMimg, 6, {3, 7, 2}, msaa_offset, true, true},
         {rdna1::kImageStoreMimg, 6, {3, 7, 2}, msaa_offset, true, true},
         {rdna1::kImageLoadMimg, 0, {1}, 4, false},
         {rdna1::kImageGetResinfoMimg, 1, {1}, 0},
         {rdna1::kImageGetResinfoMimg, 1, {0x7e000001}, 0, false},
     };
+    if (arch == ROCJITSU_CODE_ARCH_RDNA2)
+      transfers.push_back({rdna2::kImageMsaaLoadMimg, 6, {3, 7, 2}, msaa_offset, true, true});
     unsigned base_address = 0x200000;
     for (const auto &test : transfers) {
       SCOPED_TRACE(testing::Message()

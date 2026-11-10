@@ -336,6 +336,7 @@ public:
     return buffer_missing_lanes;
   }
 
+  std::unique_ptr<BvhIntersectionAccess> bvh;
   std::unique_ptr<ImageMetadataAccess> image_metadata;
   std::unique_ptr<GraphicsSampleAccess> graphics_sample;
   std::unique_ptr<ImageSampleAccess> image_sample;
@@ -512,6 +513,8 @@ public:
   [[nodiscard]] uint32_t destination_vgpr_count() const {
     if (compact_wave64_global_transpose())
       return num_elems / 2;
+    if (bvh)
+      return 4;
     if (buffer_components)
       return buffer_d16 ? (buffer_components + 1) / 2 : buffer_components;
     const uint32_t result_bytes = atomic_op == AtomicOp::NONE ? num_elems * elem_size : elem_size;

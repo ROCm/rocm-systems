@@ -2724,7 +2724,7 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
   const bool check_prepared_memory =
       deferred_texel_feedback ||
       (wait_state && !wait_state->empty() && inst->is_memory_wait_producer() &&
-       MemoryWaitScoreboard::needs_buffer_payload_lanes(*inst, config_.arch));
+       MemoryWaitScoreboard::needs_prepared_payload_lanes(*inst, config_.arch));
   bool wait_checked = false;
 
   if constexpr (EnableAsync) {
