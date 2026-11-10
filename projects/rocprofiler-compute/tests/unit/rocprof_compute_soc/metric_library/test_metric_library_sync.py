@@ -118,11 +118,66 @@ DISPLAY_VARIANTS = {
         "4.1.14": ROOFLINE_LDS_BW,
         "11.2.9": PIPELINE_MFMA_UTIL,
     },
+    "gfx115x": {
+        "3.4.3": (
+            "LDS Estimated Bandwidth",
+            "lds.theoretical_bw",
+            "32 * 4 * SUM(SQC_LDS_IDX_ACTIVE_sum - SQC_LDS_BANK_CONFLICT_sum)"
+            " / (SUM(End_Timestamp - Start_Timestamp) / 1e9)",
+        ),
+        "4.1.0": (
+            "VALU FLOPs",
+            "compute.valu_flops",
+            "SUM($wave_size * SQ_INSTS_VALU_sum)"
+            " / SUM(End_Timestamp - Start_Timestamp)",
+        ),
+        "4.1.1": (
+            "VALU FLOPs (F64)",
+            "compute.valu_flops_f64",
+            "SUM($wave_size * SQ_INSTS_VALU_DP_sum)"
+            " / SUM(End_Timestamp - Start_Timestamp)",
+        ),
+    },
+    "gfx1250": {
+        "3.3.4": (
+            "GL0 Hit Rate",
+            "gl0.hit_rate",
+            "SUM(TX_VMW_REQ_sum - TX_VMW_REQ_MISS_sum) / SUM(TX_VMW_REQ_sum) * 100",
+        ),
+    },
 }
 # Rows with a different unit from their metric (positional id -> label, unit).
 CDNA_UNIT_VARIANTS = {"7.1.8": ("LDS Allocation", "Bytes")}
 UNIT_VARIANTS = {
     arch: CDNA_UNIT_VARIANTS for arch in ("gfx908", "gfx90a", "gfx942", "gfx950")
+}
+UNIT_VARIANTS["gfx115x"] = {
+    "3.4.0": ("LDS Req", "(Requests + $normUnit)"),
+    "7.2.4": ("LDS Allocation", "Bytes"),
+    "9.2.0": ("Total Requests", "(Count + $normUnit)"),
+    "9.2.1": ("Read Requests", "(Count + $normUnit)"),
+    "9.2.2": ("Write Requests", "(Count + $normUnit)"),
+    "9.4.0": ("GL1 Read Requests", "(Count + $normUnit)"),
+    "9.4.2": ("GL1 Write Requests", "(Count + $normUnit)"),
+    "11.2.0": ("Total Requests", "(Count + $normUnit)"),
+    "11.2.1": ("Read Requests", "(Count + $normUnit)"),
+    "11.2.2": ("Write Requests", "(Count + $normUnit)"),
+    "11.4.0": ("GL2 Read Requests", "(Count + $normUnit)"),
+    "11.4.1": ("GL2 Read 128B Requests", "(Count + $normUnit)"),
+    "11.4.2": ("GL2 Write Requests", "(Count + $normUnit)"),
+}
+UNIT_VARIANTS["gfx1250"] = {
+    "2.1.17": ("Active WGPs", "WGPs per Cycle"),
+    "3.4.0": ("LDS Load Requests", "(Requests + $normUnit)"),
+    "3.4.1": ("LDS Store Requests", "(Requests + $normUnit)"),
+    "3.4.2": ("LDS Atomic Requests", "(Requests + $normUnit)"),
+    "3.4.3": ("Async Load Requests", "(Requests + $normUnit)"),
+    "3.4.4": ("Async Store Requests", "(Requests + $normUnit)"),
+    "3.4.14": ("TDM Load Requests", "(Requests + $normUnit)"),
+    "3.4.15": ("TDM Store Requests", "(Requests + $normUnit)"),
+    "6.2.0": ("Dispatched Workgroups", "Count"),
+    "6.2.1": ("Dispatched Wavefronts", "Count"),
+    "7.2.5": ("LDS Allocation", "Bytes"),
 }
 
 
