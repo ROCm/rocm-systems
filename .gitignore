@@ -20,3 +20,7 @@ __pycache__
 /projects/cuid/_build
 build/
 .worktrees/
+
+.idea/
+.depend/
+depend
