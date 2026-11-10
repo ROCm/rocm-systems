@@ -25,17 +25,19 @@ using Digest = std::array<uint8_t, 32>;
 // and internal API changes alone do not require a new token; no negotiation is
 // performed between producers and consumers.
 inline constexpr std::array<uint8_t, 16> kProducerContract = {
-    0x95, 0x38, 0x01, 0xa7, 0x49, 0xe2, 0x47, 0x1e, 0x84, 0xef, 0x49, 0xea, 0xa0, 0x0c, 0xf1, 0x83};
+    0x96, 0x2b, 0x01, 0xa7, 0x49, 0xe2, 0x47, 0x1e, 0x84, 0xef, 0x49, 0xea, 0xa0, 0x0c, 0xf1, 0x83};
 // Canonical hash input for the manifest's options identity. Changing any byte
 // changes the identity required by artifact and capture admission.
 inline constexpr std::string_view kMvpOptions =
-    "native-lds-widths=2,4,8,16;gfx1250-epoch-workgroup-barriers;workgroup-id=entry-"
-    "scalar;workgroups-1d=1..16;"
-    "mask64;address-groups-per-"
+    "native-lds-widths=2,4,8,16;gfx1250-epoch-workgroup-barriers;single-block-loop;"
+    "loop-lane-bank=ctz-mod4;sync-"
+    "quota=16;workgroup-id=entry-scalar;workgroups-1d=1..16;mask64;address-groups-per-"
     "site=4;collision=on";
 // Software record slots for distinct effective LDS address groups per wave/site.
-// Remaining lanes after these slots are filled cause one lost occurrence;
-// this reservation count is independent of the GPU's hardware LDS banks.
+// Acyclic accesses fill sequential slots; lanes beyond four groups cause loss.
+// Repeated accesses instead claim immutable lane-based banks, where a collision
+// can lose a representative before every bank is occupied. Neither policy
+// describes the GPU's hardware LDS banks.
 inline constexpr uint32_t kAddressGroupsPerSite = 4;
 inline constexpr uint32_t kReportHeaderBytes = 64;
 inline constexpr uint32_t kRowHeaderBytes = 64;
@@ -58,7 +60,11 @@ inline constexpr std::array<KernargExtensionPayloadLayout, 1> kContextPointerPay
 enum class AnalysisKind : uint32_t { Invalid = 0, LdsRaceDetection = 1 };
 enum class RecordKind : uint32_t { Access = 1 };
 enum class AccessKind : uint32_t { Read = 1, Write = 2 };
-enum class ScopeKind : uint32_t { NativeLdsNoSynchronization = 1, NativeLdsWorkgroupBarrier = 2 };
+enum class ScopeKind : uint32_t {
+  NativeLdsNoSynchronization = 1,
+  NativeLdsWorkgroupBarrier = 2,
+  NativeLdsWorkgroupBarrierLoop = 3
+};
 
 /// @brief GPU wire offsets; consumers never serialize native C++ struct layout.
 namespace wire {
@@ -86,16 +92,19 @@ inline constexpr uint32_t kRowLoss = 20;
 inline constexpr uint32_t kRowFinalSequence = 24;
 inline constexpr uint32_t kRowFinalPhase = 28;
 inline constexpr uint32_t kRowSyncLoss = 32;
-inline constexpr uint32_t kRowWorkgroupX = 36;
-inline constexpr uint32_t kRowReservedBegin = 40;
+inline constexpr uint32_t kRowAddressLoss = 36;
+inline constexpr uint32_t kRowCounterExhausted = 40;
+inline constexpr uint32_t kRowWorkgroupX = 44;
+inline constexpr uint32_t kRowReservedBegin = 48;
 inline constexpr uint32_t kRowEntered = 1;
 inline constexpr uint32_t kRowExited = 2;
 inline constexpr uint32_t kRowExhausted = 4;
 
-// Fixed journal profile: slot equals static group, occurrence is 1, and phase
-// is slot + 1. Admission caps groups at sixteen, so kRowSyncLoss remains zero.
-// Repeated occurrences and dynamic overflow are unsupported; extending this
-// profile requires coordinated producer, reader, and compatibility changes.
+// Acyclic groups retain slot=group, occurrence=1, phase=slot+1. Repeated
+// groups retain the first sixteen completion ordinals: group=slot%groups,
+// occurrence=slot/groups+1, phase=slot+1. Later completions add sync loss;
+// phase and loss counters saturate and set the sticky exhaustion flag.
+// Producer, reader, and compatibility changes must preserve this shared profile.
 inline constexpr uint32_t kSyncCommit = 0;
 inline constexpr uint32_t kSyncGroup = 4;
 inline constexpr uint32_t kSyncOccurrence = 8;
@@ -202,16 +211,18 @@ public:
   uint32_t prepared_sgprs = 0;
   uint32_t prepared_vgprs = 0;
   uint32_t maximum_workgroup_size = 1024;
-  // Scalar selector for the original workgroup-X input; UINT32_MAX means absent.
+  // Scalar operand selector for the original workgroup-X input: an ordinary
+  // SGPR or TTMP9 on gfx12. UINT32_MAX means the descriptor does not request X.
   uint32_t workgroup_id_scalar = UINT32_MAX;
   bool operator==(const EntryFacts &) const = default;
 };
 
 /// @brief A qualified gfx1250 wave32 workgroup barrier with implicit identity -1.
 /// @details The original drain precedes signal; signal/wait share a block without
-/// intervening memory operations or barriers, dominate all exits, and execute once
-/// per wave independently of EXEC. Completion is observed after the unchanged wait;
-/// access positions refer to original guest instructions.
+/// intervening memory operations or barriers. Acyclic groups dominate every exit and execute once
+/// per wave. Loop groups execute once per iteration of the qualified block, which may be bypassed.
+/// Completion follows the unchanged scalar wait, independently of EXEC; access positions refer to
+/// original guest instructions.
 class BarrierFacts {
 public:
   uint64_t original_drain = 0;
@@ -261,7 +272,7 @@ public:
   uint64_t report_bytes = 0;
   uint32_t group_bytes = 0;
   uint32_t private_bytes = 0;
-  // Total rows, grouped by workgroup and then local wave.
+  // Total report rows: workgroup_count * waves_per_workgroup, grouped by workgroup.
   uint32_t wave_count = 0;
   uint32_t workgroup_count = 1;
   uint32_t waves_per_workgroup = 0;

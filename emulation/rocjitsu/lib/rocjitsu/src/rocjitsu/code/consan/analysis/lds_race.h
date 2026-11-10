@@ -52,8 +52,13 @@ struct LdsRaceExecutionResult {
   uint32_t waves_per_workgroup = 0;
   uint64_t valid_observations = 0;
   uint64_t rejected_records = 0;
-  // Loss counts exhausted instruction occurrences, not missing lane records.
+  // Legacy access-loss total: dropped representatives plus occurrences that
+  // exceed the four-address-group limit. Saturated counts are lower bounds.
   uint64_t lost_occurrences = 0;
+  uint64_t dropped_representatives = 0;
+  uint64_t synchronization_loss = 0;
+  uint64_t address_group_exhaustion = 0;
+  uint32_t counter_exhausted_waves = 0;
   // Qualified candidate pairs excluded by a complete workgroup certificate.
   uint64_t ordered_pairs = 0;
   uint64_t ordering_unresolved_pairs = 0;
@@ -72,7 +77,7 @@ struct LdsRaceExecutionResult {
   // scope. Gaps never establish ordering for missing data.
   bool ordering_uncertain = false;
   uint64_t integrity_events = 0;
-  // Retain at most kMaxIntegrityIssueExamples; integrity_events remains complete.
+  // Bounded reasons include coverage loss; integrity_events counts only malformed evidence.
   std::vector<LdsRaceIntegrityIssue> issues;
   std::vector<LdsRaceFinding> cross_wave_examples;
   std::vector<LdsRaceFinding> collision_examples;
