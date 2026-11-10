@@ -46,11 +46,10 @@ both admission and issue accounting (two units for transfers larger than a DWORD
 but readiness still requires zero. Mixed hardware event types sharing a counter retain separate ordered-class
 positions: a nonzero wait proves an ordered result complete only when at least that
 many younger operations in its own class follow it. Generic FLAT on older CDNA is treated
-conservatively as unordered. Zero waits reset this ordering state. FLAT contributes only
-to memory domains used by its resolved requests; register dependencies follow the
-resolved routing masks. Mixed global/shared FLAT functional execution separates
-the lanes by address space; the diagnostic checker tracks their counter obligations
-independently of this functional execution.
+conservatively as unordered. Zero waits reset this ordering state. On RDNA and CDNA5, each issued generic FLAT instruction occupies both its vector-memory
+and LDS counter positions, even with empty EXEC. On older CDNA, the runtime
+selects counter domains from the resolved requests.
+Functional execution routes the requesting lanes by address space.
 
 GFX12 block transfers use their issue-time M0 DWORD mask for register dependencies.
 Disabled load destinations and store-data words do not require completion or replay
@@ -64,7 +63,11 @@ incoming register checks cover those actual sources, including the VGPR0 fallbac
 Legacy VMEM writeback can avoid an overwrite warning only when the pending result
 and the incoming producer share an ordered completion class. On legacy RDNA,
 ordinary loads, image samples and BVH results share VMcnt but keep separate
-classes. A newer result supersedes a fully covered older dependency only within
+writeback classes. On RDNA1/2 the VMCNT updates for ordinary loads and image
+samples occur in issue order across both kinds. A nonzero wait can therefore
+release an older load even when the younger load uses the other pipeline.
+Overlapping register writes from different pipelines still require a wait.
+A newer result supersedes a fully covered older dependency only within
 the same ordered class; other classes and unordered results remain tracked.
 On RDNA1 through RDNA3.5, a partial VMcnt wait retires these reads in issue
 order across writeback classes. RDNA3 ISA §5.6 distinguishes VGPR write order
@@ -76,8 +79,8 @@ Indexed LDS results are written to registers in issue order on every target, so
 an incoming indexed LDS load does not need a wait before overwriting a pending
 indexed LDS result in both the runtime and static checkers. RDNA3/3.5 section
 12.5, RDNA4 sections 5.7.1.4 and 12.5, and CDNA5 sections 5.7.1.4 and 11.2 state
-this directly; CDNA1-4 and RDNA1/2 section 4.4 order LGKM results of the same
-type. GDS and SMEM results have no ordered class and still require a wait.
+this directly. CDNA1-4 and RDNA1/2 section 4.4 order LGKM results of the same
+type. Scalar memory results require a wait on all targets.
 
 On RDNA3, RDNA3.5, RDNA4 and CDNA5, FLAT's LDS-serviced lanes share that order:
 incoming LDS-routed FLAT lanes and incoming indexed LDS loads can overwrite
@@ -115,8 +118,8 @@ or an explicit `vm_vsrc` wait releases it. FLAT load sources likewise require
 both routes. Source reads still require their own waits, even when the destination
 is an ordered overwrite.
 
-Before reading an incoming producer's operands, the checker applies the finite
-counter bound to each qualified ordered class in that counter. A capacity of `C`
+At admission, the checker applies the incoming producer's finite counter bound
+to each qualified ordered class in that counter. A capacity of `C`
 and an incoming increment of `U` leave at most `C-U` old counter units before
 admission, including when the incoming producer itself is unordered. Younger operations from a
 different completion class cannot prove readiness. Capacities come from the
@@ -127,10 +130,9 @@ partial wait. CDNA5 async load and store completion classes are separate;
 async barrier arrive orders with async loads. Proven completion also releases the
 associated replay translation prefix.
 
-FLAT admission is address-dependent, so the checker applies its memory-counter
-capacity constraints after routing, before checking result writeback. The instruction
-cannot use an unused domain's full counter to prove an older request complete. Address
-and other source operands are read before this inference is available.
+On targets with address-dependent FLAT admission, the checker applies its
+memory-counter capacity constraints after routing, before checking result
+writeback. Address and other source operands are read before this inference.
 
 ## VMEM completion and EXP source protection
 
@@ -152,8 +154,8 @@ obligations on all supported CDNA and RDNA targets. Source-data release must
 not gate a returning atomic's destination or memory completion. On legacy-counter
 targets such as gfx942, gfx950 and gfx1151, a returning GLOBAL atomic followed
 by `s_waitcnt vmcnt(0)` releases its result; no wait or an EXP-only wait leaves
-that result pending. Generic FLAT retains its separate
-VMEM/DS obligations for the resolved request domains. The FLAT-to-LDS tests
+that result pending. Generic FLAT follows the target-specific VMEM and LDS
+[counter rules](#flat-register-readiness). The FLAT-to-LDS tests
 wait for LGKM and the target's VMEM/store counters before a workgroup barrier,
 making the write visible to other waves without an EXP wait. The counter waits
 alone do not replace that barrier.
@@ -185,17 +187,13 @@ source-reuse guarantees on every target. The narrower rule is that a
 source-only obligation cannot serve as a destination or memory-completion
 requirement.
 
-Static waitcheck separately protects GDS source VGPRs and EXEC until an EXP
-wait on legacy targets other than CDNA4. Generated GDS metadata retains its
-LGKM and EXP obligations on those targets, but the dynamic detector's
-whole-event obligations do not implement this source-only protection. GDS data
-operations, such as DS loads, stores and atomics with `GDS=1`, are
-unimplemented and fail when executed. GWS operations (`ds_gws_*`) do execute
-with `GDS=1` on CDNA1–3 and RDNA1–3.5. They publish a zero-payload request
-through the local-memory pipeline, so their retained EXP obligation adds an
-EXPCNT token in emulation. That accounting is still not source VGPR/EXEC
-protection, and decoded-metadata and static-checker coverage do not establish
-dynamic GDS source/EXEC protection.
+Static waitcheck models indexed GDS and ordered-count source registers and EXEC
+on qualified legacy targets other than CDNA4. The executing GDS forms on this
+branch are the GWS operations below.
+
+GWS operations (`ds_gws_*`) execute with `GDS=1` on CDNA1–3 and RDNA1–3.5.
+They issue a zero-payload request through the local-memory pipeline and add an
+EXPCNT token on targets whose GWS metadata specifies that obligation.
 
 The external
 [`race` suite](https://github.com/ROCm/rocjitsu-test-corpus#rocjitsu-race-detector-integration)
@@ -209,27 +207,26 @@ retain older-target GDS obligations and check the CDNA4 fallback policy.
 
 ## FLAT register readiness
 
-FLAT contributes to VMEM when at least one lane requests global/scratch memory and
-to DS when at least one lane requests LDS memory. This conditional-participation
-rule is the runtime model across AMD GPU targets; physical validation on every
-architecture is not established. Its global/scratch and LDS portions can complete independently;
-RDNA4 ISA section 5.7.1.3 describes complementary lane masks for these portions.
-The checker uses the resolved address of each lane to associate a returned VGPR
-lane with its counter.
-For example, if lane 0 loads from LDS and lane 1 loads from global memory, a zero
-DS wait releases lane 0's register dependency while lane 1 still needs a VMEM wait.
-A consumer reading both lanes needs both; a consumer reading only lane 0 does not.
+On RDNA1 through RDNA 3.5, each issued generic FLAT instruction occupies both
+VM or VS and LGKM. The runtime waits for both domains before permitting a
+consumer of the returned register, including a wave whose lanes all resolved
+to the same aperture. An instruction with empty EXEC still contributes both
+counter positions to a later partial wait.
+
+On RDNA4 and CDNA5, generic FLAT occupies both DS and LOAD or STORE. Each
+domain retires its own lanes. For a mixed load with lane 0 in LDS and lane 1
+in global memory, a sufficient DS wait releases lane 0, while lane 1 still
+needs a LOAD wait. The runtime on CDNA1–4 selects the counter domains from the
+request addresses. With unknown addresses, static wait checking conservatively
+accounts for both possible routes.
 
 This distinction also appears in LLVM's AMDGPU wait insertion:
 [`mayAccessVMEMThroughFlat` and `mayAccessLDSThroughFlat`](https://github.com/llvm/llvm-project/blob/1ac93e094347b45208f215c98038606432c87d60/llvm/lib/Target/AMDGPU/SIInstrInfo.cpp#L4769)
 exclude the irrelevant address space when it is known from the memory operand.
 [`getEventsFor`](https://github.com/llvm/llvm-project/blob/1ac93e094347b45208f215c98038606432c87d60/llvm/lib/Target/AMDGPU/Utils/AMDGPUHWEvents.cpp#L110)
-then adds only the relevant completion events. Unknown FLAT pointers require both;
-the runtime checker has per-lane routing information unavailable to static codegen.
-Requiring both waits for every returned lane would warn about accesses that this
-policy accepts. Avoiding such false positives takes priority over diagnosing an
-unproven additional whole-instruction requirement. This does not treat a successful
-run without a wait as proof of an architectural completion guarantee.
+then adds the relevant completion events. Unknown FLAT pointers require both.
+On targets with address-dependent result readiness, the runtime checker can
+also identify the return path from the actual request addresses.
 
 A hardware probe on gfx1100 and gfx1201 used inline assembly to load LDS in even
 lanes and global memory in odd lanes, then immediately add to the returned value.
@@ -237,8 +234,10 @@ With only the DS wait, all 1,048,576 global-lane observations per device were wr
 and all LDS-lane observations were correct. Waiting for both produced no errors;
 omitting both broke both lane groups. VMEM-only waits happened to leave both groups
 ready in this probe, which does not establish a guarantee for the LDS lanes.
-These observations support keeping the lanes separate; they do not establish
-wait requirements on untested architectures or under all schedules.
+The gfx1201 result supports tracking lane readiness by address domain there.
+On gfx1100 the checker conservatively requires both waits for each returned
+lane, following the GFX11 guide even though the probe's LDS lanes succeeded
+with a DS wait alone. Neither capture measures CDNA completion.
 
 ## Producer accounting
 
@@ -246,9 +245,9 @@ wait requirements on untested architectures or under all schedules.
 |---|---|
 | Global, scratch, buffer, typed buffer, image loads and returning atomics | Load queue; track returned registers |
 | Stores and atomics without return | Store queue, or the shared legacy VMEM queue; no destination register |
-| Generic FLAT loads, stores and atomics | Only the VMEM/DS queues used by resolved requests; returned lanes depend on DS for the shared aperture and VMEM for global/scratch |
+| Generic FLAT loads, stores and atomics | RDNA and CDNA5 occupy both vector-memory and LDS queues. CDNA1–4 select queues from the resolved requests. See [FLAT register readiness](#flat-register-readiness) for result dependencies. |
 | LDS, including permutation, swizzle and DS no-op | DS/legacy LGKM queue; returning forms track registers |
-| GDS data operations (decoded metadata; execution unimplemented) | LGKM and, on legacy targets other than CDNA4, EXP. Static waitcheck separately protects source VGPRs and EXEC |
+| GDS data operations (static analysis) | LGKM and, on qualified legacy targets other than CDNA4, EXP source dependencies. |
 | GWS (`ds_gws_*`; executes on CDNA1–3 and RDNA1–3.5) | Zero-payload request on the DS/legacy LGKM queue with the GDS completion class, plus EXP; no register results. Static waitcheck separately protects source VGPRs and EXEC |
 | Scalar loads, atomics, cache operations, timestamps, barrier-state and wave-ID queries | KM/legacy LGKM queue; returned scalar registers are tracked |
 | Messages, including message returns | KM/legacy LGKM queue. Return forms contribute two units, with the result pending through the return unit |
@@ -263,9 +262,10 @@ wait requirements on untested architectures or under all schedules.
 | Tensor DMA loads/stores | TENSOR queue |
 | gfx1250 scalar address operations and multi-group VMEM, including async LDS transfers | X translation queue; protect source dwords against overwrite, plus VMEM EXEC. One X unit per instruction, independently of completion-counter units. Tensor DMA has no X event |
 
-Zero-EXEC vector producers generally still contribute positions behind pending requests;
-an empty queue may skip them. FLAT contributes no VMEM/DS position without a requesting
-lane. Scalar producers do not depend on EXEC. Prefetches that do not
+Zero-EXEC vector producers generally still contribute positions behind pending requests.
+The checker may skip bookkeeping on an empty queue. On RDNA and CDNA5 every issued generic FLAT contributes both positions even
+when no lanes request memory. CDNA1–4 count the domains with requests.
+Scalar producers do not depend on EXEC. Prefetches that do not
 increment completion counters contribute no entries.
 If a zero-EXEC instruction occupies an X position but no completion position, it
 has no completion-to-X mapping. Waiting on that empty completion counter cannot

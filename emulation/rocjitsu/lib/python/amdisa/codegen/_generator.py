@@ -8438,25 +8438,28 @@ class CodeGenerator:
             return '\n'.join(L)
 
         if cls == 'wait_counter':
-            # RDNA4 split-wait instructions: the immediate operand is
-            # the counter threshold directly (no bit-packing).
-            L.append(
-                f'  uint16_t cnt = static_cast<uint16_t>({src_ops[0]}.encoding_value_);'
-            )
-            if op == 'waitcnt_vscnt':
-                L.append('  wf.set_wait_target_vscnt(static_cast<uint8_t>(cnt));')
-            elif op == 'waitcnt_vmcnt':
-                L.append('  wf.set_wait_target_loadcnt(static_cast<uint8_t>(cnt));')
-            elif op == 'waitcnt_expcnt':
-                L.append('  wf.set_wait_counter("wait_expcnt", cnt);')
-            elif op == 'waitcnt_lgkmcnt':
-                L.append('  const auto current_wait = wf.wait_target();')
-                L.append(
-                    '  wf.set_wait_target(current_wait.vmcnt, static_cast<uint8_t>(cnt), current_wait.expcnt);'
+            if op.startswith('waitcnt_'):
+                field = op.removeprefix('waitcnt_')
+                # RDNA1 and RDNA2 ISA, SOPK S_WAITCNT_*: the comparison is
+                # counter-width (three or six bits), without clamping on carry.
+                # On GFX11 the encoding requires the NULL scalar operand.
+                mask = f'amdgpu::WaitCounters::{field.upper()}_MAX'
+                scalar_part = (
+                    'amdgpu::RegisterAccess(wf).read_scalar(sdst) + '
+                    if self.isa_spec.profile.waitcnt_family == 'gfx10'
+                    else ''
                 )
-            else:
-                L.append(f'  wf.set_wait_counter("{op}", cnt);')
-            return '\n'.join(L)
+                return (
+                    '  const uint32_t threshold = '
+                    + scalar_part
+                    + 'static_cast<uint32_t>(simm16.encoding_value_);\n'
+                    f'  wf.wait_for({{.{field} = static_cast<uint8_t>(threshold & {mask})}});'
+                )
+            return (
+                # GFX12 split waits (RDNA4 and gfx1250) carry the immediate threshold directly.
+                f'  wf.set_wait_counter("{op}", '
+                f'static_cast<uint16_t>({src_ops[0]}.encoding_value_));'
+            )
 
         if cls == 'tensor_load_to_lds':
             return (

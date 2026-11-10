@@ -247,6 +247,22 @@ def _profile_for_arch(arch_name: str):
     return profile_types[arch_name]()
 
 
+@pytest.mark.parametrize('arch', ['rdna1', 'rdna2', 'rdna3', 'rdna3_5'])
+def test_sopk_wait_threshold_uses_the_architectural_operands(
+    arch, amdgpu_generated_root
+):
+    source = (amdgpu_generated_root / arch / 'sopk_exec.cpp').read_text()
+    for counter in ('vmcnt', 'vscnt', 'expcnt', 'lgkmcnt'):
+        body = _generated_function_body(
+            source, f'void SWaitcnt{counter.capitalize()}Sopk::execute_impl('
+        )
+        assert ('read_scalar(sdst) +' in body) == (arch in ('rdna1', 'rdna2'))
+        assert (
+            f'.{counter} = static_cast<uint8_t>(threshold & amdgpu::WaitCounters::{counter.upper()}_MAX)'
+            in body
+        )
+
+
 @pytest.mark.parametrize(
     'arch_name',
     (

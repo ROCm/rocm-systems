@@ -1557,6 +1557,7 @@ protected:
   /// @param inst The memory instruction (ownership transferred).
   /// @param wf The issuing wavefront.
   VmAccessOutcome route_memory_inst(Instruction *inst, Wavefront &wf);
+  void lock_gds_sources(const Instruction &inst, Wavefront &wf, uint64_t sequence);
 
   [[nodiscard]] bool owns_memory_result_vgprs(const Wavefront &wf, uint32_t base,
                                               uint32_t count) const {

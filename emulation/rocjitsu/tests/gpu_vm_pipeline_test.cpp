@@ -8,6 +8,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
+#include "rocjitsu/vm/plugins/race_detector/plugin.h"
 
 #include <gtest/gtest.h>
 
@@ -1351,6 +1352,99 @@ TEST(GpuVmPipeline, ClaimedFaultResumesWithoutStaleMemoryWaits) {
       EXPECT_EQ(faults, 1u);
       EXPECT_EQ(context.cu->memory_wait_diagnostic_count(), 0u);
       EXPECT_EQ(context.cu->xcnt_diagnostic_count(), 0u);
+    }
+  }
+}
+
+TEST(GpuVmPipeline, ReissuedLoadPreservesOlderRaceAndScoreboardDependencies) {
+  for (bool scalar : {false, true}) {
+    for (bool retained_fault : {false, true}) {
+      SCOPED_TRACE(testing::Message()
+                   << "scalar=" << scalar << " retained_fault=" << retained_fault);
+      TranslatedPipelineContext context;
+      ASSERT_NO_FATAL_FAILURE(context.initialize(false, true));
+      ASSERT_NE(context.wf, nullptr);
+      auto &wave = *context.wf;
+      PluginSinkConfig sinks;
+      auto &sink = sinks.emplace<StringSink>();
+      auto group = std::make_shared<ExecutionPluginGroup>(std::move(sinks));
+      auto plugin = std::make_unique<plugins::race_detector::RaceDetectorPlugin>();
+      const auto *observer = plugin.get();
+      ASSERT_TRUE(group->add(std::move(plugin)));
+      context.sim.soc->set_plugin_group(group);
+      group->onInit();
+      std::array waves{&wave};
+      group->onAmdgpuWorkgroupDispatched(0, 0, 32, kGfx1250ScalarSlots, waves);
+      const auto &race = *static_cast<plugins::race_detector::RaceWavefrontState *>(
+                              wave.plugin_state(observer->slot_index()))
+                              ->race_state;
+
+      constexpr uint64_t code = 0x1000, data = 0x2000;
+      uint64_t cursor = code;
+      const auto emit = [&](const auto &words) {
+        context.external->store(cursor, words);
+        cursor += sizeof(words);
+      };
+      const auto load = [&](uint8_t dest) {
+        if (scalar)
+          emit(
+              cdna5::build_smem(cdna5::kSLoadB32Smem, {.sbase = 0, .sdata = dest, .soffset = 124}));
+        else
+          emit(cdna5::build_vglobal(cdna5::kGlobalLoadB32Vglobal, {.saddr = 0, .vdst = dest}));
+      };
+      load(4);
+      const uint64_t retry_pc = cursor;
+      load(5);
+      const uint64_t wait_pc = cursor;
+      emit(cdna5::build_sopp(scalar ? cdna5::kSWaitKmcntSopp : cdna5::kSWaitLoadcntSopp,
+                             {.simm16 = 2}));
+      emit(scalar ? cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 4, .sdst = 8})
+                  : cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 260, .vdst = 8}));
+      context.external->store(data, 42u);
+      wave.pc = code;
+      wave.set_exec(1);
+      wave.set_queue_id(1);
+      context.cu->write_sgpr(wave.sgpr_alloc().base, data);
+      context.cu->write_sgpr(wave.sgpr_alloc().base + 1, 0);
+      context.cu->write_vgpr(wave.vgpr_alloc().base, 0, 0);
+      context.cu->step();
+      ASSERT_EQ(wave.pc, retry_pc);
+      ASSERT_EQ(race.getWaveMemoryEvents().size(), 1u);
+      const auto older = race.getWaveMemoryEvents().front();
+      context.external->unavailable_translation_address = data;
+      context.cu->step();
+      ASSERT_EQ(wave.state(), amdgpu::WfState::VM_RETRY);
+      ASSERT_EQ(race.getWaveMemoryEvents().size(), 2u);
+      wave.set_runtime_suspended(true);
+      if (retained_fault) {
+        context.cu->set_memory_violation_handler(
+            [&](amdgpu::Wavefront &faulted, uint64_t, bool, uint64_t issue_pc) {
+              EXPECT_EQ(issue_pc, retry_pc);
+              faulted.pc = issue_pc;
+              return true;
+            });
+        context.external->unavailable_translation_address.reset();
+        context.external->faulted_read_call = context.external->read_calls + 1;
+      }
+      context.cu->retry_paused_queue_memory(77, 1, /*replay_loads=*/!retained_fault);
+      ASSERT_EQ(wave.pc, retry_pc);
+      ASSERT_EQ(wave.state(), amdgpu::WfState::RUNNING);
+      ASSERT_EQ(race.getWaveMemoryEvents().size(), 1u);
+      ASSERT_EQ(race.getWaveMemoryEvents().front(), older);
+      const auto counter = scalar ? amdgpu::WaitCounterKind::Km : amdgpu::WaitCounterKind::Load;
+      const auto &scoreboard = wave.ensure_memory_wait_scoreboard();
+      ASSERT_EQ(scoreboard.outstanding(counter), 1u);
+      context.external->unavailable_translation_address.reset();
+      wave.set_runtime_suspended(false);
+      context.cu->step();
+      ASSERT_EQ(wave.pc, wait_pc);
+      context.cu->step();
+      ASSERT_EQ(wave.pc, wait_pc + 4);
+      EXPECT_EQ(scoreboard.outstanding(counter), 2u);
+      ASSERT_EQ(race.getWaveMemoryEvents().size(), 2u);
+      EXPECT_EQ(race.getWaveMemoryEvents().front(), older);
+      context.cu->step();
+      EXPECT_NE(sink.str().find(scalar ? "Race on SGPR s4" : "Race on VGPR v4"), std::string::npos);
     }
   }
 }

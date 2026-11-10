@@ -157,45 +157,37 @@ void SIcacheInvSopp::execute_impl(amdgpu::Wavefront &wf) {
 void SSetprioIncWgSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 void SWaitLoadcntSopp::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
-  wf.set_wait_counter("wait_loadcnt", cnt);
+  wf.set_wait_counter("wait_loadcnt", static_cast<uint16_t>(simm16.encoding_value_));
 }
 
 void SWaitStorecntSopp::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
-  wf.set_wait_counter("wait_storecnt", cnt);
+  wf.set_wait_counter("wait_storecnt", static_cast<uint16_t>(simm16.encoding_value_));
 }
 
 void SWaitXcntSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 void SWaitDscntSopp::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
-  wf.set_wait_counter("wait_dscnt", cnt);
+  wf.set_wait_counter("wait_dscnt", static_cast<uint16_t>(simm16.encoding_value_));
 }
 
 void SWaitKmcntSopp::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
-  wf.set_wait_counter("wait_kmcnt", cnt);
+  wf.set_wait_counter("wait_kmcnt", static_cast<uint16_t>(simm16.encoding_value_));
 }
 
 void SWaitLoadcntDscntSopp::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
-  wf.set_wait_counter("wait_loadcnt_dscnt", cnt);
+  wf.set_wait_counter("wait_loadcnt_dscnt", static_cast<uint16_t>(simm16.encoding_value_));
 }
 
 void SWaitStorecntDscntSopp::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
-  wf.set_wait_counter("wait_storecnt_dscnt", cnt);
+  wf.set_wait_counter("wait_storecnt_dscnt", static_cast<uint16_t>(simm16.encoding_value_));
 }
 
 void SWaitAsynccntSopp::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
-  wf.set_wait_counter("wait_asynccnt", cnt);
+  wf.set_wait_counter("wait_asynccnt", static_cast<uint16_t>(simm16.encoding_value_));
 }
 
 void SWaitTensorcntSopp::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
-  wf.set_wait_counter("wait_tensorcnt", cnt);
+  wf.set_wait_counter("wait_tensorcnt", static_cast<uint16_t>(simm16.encoding_value_));
 }
 
 } // namespace cdna5

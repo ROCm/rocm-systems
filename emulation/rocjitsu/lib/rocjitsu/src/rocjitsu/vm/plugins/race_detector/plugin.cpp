@@ -3,6 +3,7 @@
 
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
 
+#include "rocjitsu/code/analysis/waitcheck/target.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/sgpr_layout.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 #include "rocjitsu/isa/instruction.h"
@@ -86,23 +87,12 @@ uint8_t vector_memory_byte_mask(const amdgpu::VectorMemState &state, const amdgp
   return ExecutionPlugin::kFullByteMask;
 }
 
-bool supports_counter_capacity(rj_code_arch_t arch) {
-  switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
-  case ROCJITSU_CODE_ARCH_CDNA2:
-  case ROCJITSU_CODE_ARCH_CDNA3:
-  case ROCJITSU_CODE_ARCH_CDNA4:
-  case ROCJITSU_CODE_ARCH_RDNA3:
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
-    return true;
-  default:
-    return false;
-  }
-}
-
 std::optional<std::vector<uint32_t>>
 validated_load_destinations(const amdgpu::VectorMemState &state, const amdgpu::Wavefront &wave) {
   const uint32_t vgpr_count = state.destination_vgpr_count();
+  if (state.has_feedback_result() &&
+      !wave.vgpr_alloc().contains(state.dst_reg_base, vgpr_count + 1))
+    return std::nullopt;
   const uint32_t ds2_vgpr_count = state.ds2_active ? state.ds2_destination_vgpr_count() : 0;
   const amdgpu::RegisterAccess registers_for(wave);
   std::vector<uint32_t> registers;
@@ -126,33 +116,88 @@ validated_load_destinations(const amdgpu::VectorMemState &state, const amdgpu::W
   return registers;
 }
 
+MemoryOrderClass vgpr_writeback_order(MemoryOrderClass completion, rj_code_arch_t arch) {
+  if (completion == MemoryOrderClass::VMEM && !amdgpu::has_ordered_vmem_writeback(arch))
+    return MemoryOrderClass::UNORDERED;
+  return completion;
+}
+
+void apply_wait_fields(WaveRaceState &state, const amdgpu::WaitFields &fields,
+                       rj_code_arch_t arch) {
+  const auto model = amdgpu::waitcnt_model(arch).value();
+  PendingWaitCount wait;
+  for (size_t i = 0; i < fields.size(); ++i) {
+    if (fields[i]) {
+      if (const auto counter =
+              amdgpu::memory_wait_counter_type(static_cast<amdgpu::WaitCounterKind>(i), model))
+        wait.add(*counter, static_cast<int>(*fields[i]));
+    }
+  }
+  if (!wait.empty())
+    state.dispatch(wait);
+}
+
+void drain_wave_counters(WaveRaceState &state, rj_code_arch_t arch) {
+  amdgpu::WaitFields drained;
+  drained.fill(0);
+  apply_wait_fields(state, drained, arch);
+}
+
+void register_global_load(WaveRaceState &rs, const InstructionSnapshot &instruction,
+                          const amdgpu::VectorMemState &d, const amdgpu::Wavefront &wf,
+                          uint64_t result_lanes, const amdgpu::MemoryIssueInfo &issue) {
+  const auto obligations = issue.counter_obligations();
+  const auto order = vgpr_writeback_order(memoryOrderForObligations(obligations), wf.cu().arch());
+  std::vector<uint32_t> registers;
+  if (result_lanes) {
+    auto destinations = validated_load_destinations(d, wf);
+    if (!destinations)
+      return;
+    registers = std::move(*destinations);
+    for (uint32_t i = 0; i < registers.size(); ++i)
+      rs.checkVgprWrite(static_cast<int>(registers[i]), result_lanes,
+                        vector_memory_byte_mask(d, wf, i), order);
+  }
+  if (!obligations.empty()) {
+    const uint8_t bytes = vector_memory_byte_mask(d, wf);
+    const uint8_t last =
+        registers.empty() ? bytes : vector_memory_byte_mask(d, wf, registers.size() - 1);
+    rs.registerEvent(instruction, MemoryEventType::GLOBAL_TO_VGPR, std::move(registers),
+                     result_lanes, bytes, obligations, order, last);
+  }
+}
+
 std::optional<amdgpu::MemoryIssueInfo>
 routed_flat_issue_info(const amdgpu::MemoryAccessObservation &access,
-                       const amdgpu::MemoryIssueInfo &decoded) {
+                       const amdgpu::MemoryIssueInfo &decoded, rj_code_arch_t arch,
+                       const Instruction &inst) {
   if (access.decoded_space != amdgpu::DecodedMemorySpace::FLAT ||
       (access.route != amdgpu::MemoryRoute::GLOBAL && access.route != amdgpu::MemoryRoute::LOCAL))
     return std::nullopt;
 
+  // A GFX10 generic FLAT return needs both counter acknowledgments even
+  // when every requesting lane took the same route (RDNA1/2 section 9.2).
+  if (amdgpu::flat_requires_both_counters(arch) && access.active_lane_mask != 0 &&
+      (access.is_load || access.request_lane_mask == 0))
+    return decoded;
+  // Routing also captures completions for rejected addresses without any
+  // backing traffic. Synthetic observers may supply only address/mask metadata.
+  if (const auto &routed = inst.data_as<amdgpu::VectorMemState>()->routed_issue_info)
+    return routed;
   if (access.request_lane_mask == 0)
     return decoded.for_flat_memory_domains(false, false);
+  if (amdgpu::flat_requires_both_counters(arch))
+    return decoded;
 
   const uint64_t shared_lanes =
       (access.flat_local_lane_mask | access.flat_dds_lane_mask) & access.request_lane_mask;
-  // Functional execution splits mixed requests by address space. The plugin's
-  // single mixed event retains both obligations until both domains are ready.
+  // A mixed route needs both issue domains.
   if (shared_lanes != 0 && shared_lanes != access.request_lane_mask)
     return decoded;
   if (access.route != (shared_lanes ? amdgpu::MemoryRoute::LOCAL : amdgpu::MemoryRoute::GLOBAL))
     return std::nullopt;
 
   return decoded.for_flat_memory_domains(shared_lanes == 0, shared_lanes != 0);
-}
-
-VgprWriteOrder vmem_result_order(rj_code_arch_t arch, MemoryOrderClass completion,
-                                 std::string_view mnemonic) {
-  if (completion == MemoryOrderClass::VMEM && amdgpu::has_ordered_vmem_reads(arch))
-    return {completion, amdgpu::vmem_read_type(mnemonic)};
-  return completion;
 }
 
 void register_global_vgpr_result(WaveRaceState &rs, const InstructionSnapshot &instruction,
@@ -184,6 +229,8 @@ void register_global_vgpr_result(WaveRaceState &rs, const InstructionSnapshot &i
 } // namespace
 
 MarkedInstruction findConflict(const RaceViolation &v, RaceDetector &detector) {
+  if (v.sourceInstruction)
+    return {*v.sourceInstruction, v.wave, -1};
   EventId event_id = v.conflictingEvent;
   if (!detector.events().contains(event_id))
     throw std::out_of_range("race violation references an unavailable conflicting event");
@@ -339,11 +386,13 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
       oss << "Race on SGPR s" << v.index;
     else if (v.space == RaceViolation::Space::TTMP)
       oss << "Race on TTMP ttmp" << v.index;
+    else if (v.space == RaceViolation::Space::EXEC)
+      oss << "Race on EXEC";
     else
       oss << "Race on LDS byte " << v.index;
     oss << " [workgroup (" << v.workgroupId.x << ", " << v.workgroupId.y << ", " << v.workgroupId.z
         << "), wave " << v.wave;
-    if (v.space != RaceViolation::Space::SGPR && v.space != RaceViolation::Space::TTMP)
+    if (v.space == RaceViolation::Space::VGPR || v.space == RaceViolation::Space::LDS)
       oss << ", lane " << v.lane;
     oss << "]\n";
 
@@ -364,6 +413,7 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
         observed_races_.emplace(dispatch_id, conflict.instruction.pc());
         const char *space = v.space == RaceViolation::Space::VGPR   ? "VGPR"
                             : v.space == RaceViolation::Space::SGPR ? "SGPR"
+                            : v.space == RaceViolation::Space::EXEC ? "EXEC"
                             : v.space == RaceViolation::Space::TTMP ? "TTMP"
                                                                     : "LDS";
         auto kernel_name_iter = dispatch_kernel_names_.find(dispatch_id);
@@ -410,19 +460,9 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupCompleted(uint32_t dispatch_id, uint32
 }
 
 void RaceDetectorPlugin::onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
-  if (RaceWavefrontState *state = get_state(wf); state && state->race_state) {
-    // Normal termination drains the wave's memory operations before this hook.
-    // Model s_endpgm's implicit wait, retaining LDS history until a subsequent
-    // workgroup barrier supplies ordering with the surviving waves.
-    const amdgpu::WaitcntModel model = amdgpu::waitcnt_model(wf.cu().arch()).value();
-    PendingWaitCount wait;
-    for (size_t index = 0; index < amdgpu::kWaitCounterCount; ++index) {
-      const auto kind = static_cast<amdgpu::WaitCounterKind>(index);
-      if (const std::optional<amdgpu::WaitCounterType> counter =
-              amdgpu::memory_wait_counter_type(kind, model))
-        wait.add(*counter, 0);
-    }
-    state->race_state->dispatch(wait);
+  if (wf.end_reason() != amdgpu::Wavefront::EndReason::None && wf.wait_counters().empty() &&
+      wf.has_plugin_state(slot_index())) {
+    drain_wave_counters(*get_state(wf)->race_state, wf.cu().arch());
   }
   release_wave_state(wf);
 }
@@ -446,9 +486,20 @@ void RaceDetectorPlugin::onAmdgpuImageFeedbackQualified(const Instruction &inst,
       d.dst_reg_base - wf.vgpr_alloc().base + d.destination_vgpr_count(), lanes};
   const auto obligations = issue->counter_obligations();
   const auto completion = memoryOrderForObligations(obligations);
+  const auto arch = wf.cu().arch();
+  const VgprWriteOrder writeOrder{vgpr_writeback_order(completion, arch),
+                                  amdgpu::has_ordered_vmem_reads(arch) &&
+                                          completion == MemoryOrderClass::VMEM
+                                      ? amdgpu::vmem_read_type(inst.mnemonic())
+                                      : amdgpu::VmemWriteback::Ordinary};
   register_global_vgpr_result(*s->race_state, current_instruction(*s, wf), d, wf, obligations,
-                              vmem_result_order(wf.cu().arch(), completion, inst.mnemonic()),
-                              feedback);
+                              writeOrder, feedback);
+}
+
+void RaceDetectorPlugin::onAmdgpuMemoryAccessCancelled(const Instruction &inst,
+                                                       amdgpu::Wavefront &wf) {
+  if (wf.has_plugin_state(slot_index()))
+    get_state(wf)->race_state->cancelRoutedIssue(inst);
 }
 
 void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
@@ -457,6 +508,7 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
   auto *s = get_state(wf);
   assert(s && s->race_state);
   auto *rs = s->race_state;
+  rs->beginRoutedIssue(inst);
   auto *detector = rs->getDetector();
   auto waveId = rs->getWaveId();
   const InstructionSnapshot &instruction = current_instruction(*s, wf);
@@ -471,36 +523,183 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
   assert(decoded && "memory instruction reached the race detector without issue metadata");
   if (!decoded)
     return;
+  const auto arch = wf.cu().arch();
+  auto routed = routed_flat_issue_info(access, *decoded, arch, inst);
+  // Address-dependent FLAT acquires only its routed domains. Admit them before
+  // registering either half of a mixed return.
+  if (routed && !amdgpu::flat_issues_both_counter_domains(arch))
+    rs->prepareForMemoryIssue(*routed);
+  const uint64_t shared_lanes = access.flat_local_lane_mask | access.flat_dds_lane_mask;
+  const bool split_results = routed && access.is_load &&
+                             !amdgpu::flat_requires_both_counters(arch) &&
+                             (amdgpu::flat_issues_both_counter_domains(arch) ||
+                              (shared_lanes && (access.active_lane_mask & ~shared_lanes))) &&
+                             !inst.data_as<amdgpu::VectorMemState>()->lds_dst;
+  if (split_results) {
+    const auto &state = *inst.data_as<amdgpu::VectorMemState>();
+    // GFX12 allocates both counter positions, even when only one route has lanes.
+    // Each destination lane completes with the pipeline that supplies its value.
+    register_global_load(*rs, instruction, state, wf, state.exec_mask & ~shared_lanes,
+                         decoded->for_flat_memory_domains(true, false));
+    routed = decoded->for_flat_memory_domains(false, true);
+    if (!(state.exec_mask & shared_lanes)) {
+      const auto lds = routed->counter_obligations();
+      rs->registerEvent(instruction, MemoryEventType::LDS_TO_VGPR, {}, 0, 0xf, lds,
+                        memoryOrderForObligations(lds));
+      return;
+    }
+  }
+  const auto &issue = routed ? *routed : *decoded;
+  const auto obligations = issue.counter_obligations();
+  const MemoryOrderClass memoryOrder = memoryOrderForObligations(obligations);
+  const bool gfx10 = arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+  const bool typed_vmem = amdgpu::has_ordered_vmem_reads(arch);
+  VgprWriteOrder writeOrder{vgpr_writeback_order(memoryOrder, arch),
+                            gfx10 && routed && access.is_load ? amdgpu::VmemWriteback::GenericFlat
+                            : typed_vmem && memoryOrder == MemoryOrderClass::VMEM
+                                ? amdgpu::vmem_read_type(inst.mnemonic())
+                                : amdgpu::VmemWriteback::Ordinary};
+  if (routed && access.is_load && amdgpu::flat_requires_both_counters(arch) &&
+      amdgpu::has_ordered_flat_lds_writeback(arch))
+    writeOrder.flat_lds_lanes = shared_lanes;
+  if (memoryOrder == MemoryOrderClass::LDS && amdgpu::has_ordered_lds_direct_writeback(arch) &&
+      std::ranges::any_of(obligations, [](auto o) {
+        return o.wait_counter_type() == amdgpu::WaitCounterType::EXPCNT;
+      }))
+    writeOrder.direct_lds = true;
+  if (inst.data()->tag() == amdgpu::LOCAL_MEM || inst.data()->tag() == amdgpu::GLOBAL_MEM) {
+    const auto &d = *inst.data_as<amdgpu::VectorMemState>();
+    // The pipeline plan also contains any slots with no data dependency,
+    // including both domains of an empty GFX10-GFX12 generic FLAT instruction.
+    const auto &issued = d.routed_issue_info ? *d.routed_issue_info : issue;
+    if (d.exec_mask == 0 && !(gfx10 && inst.mnemonic().starts_with("ds_gws_"))) {
+      const bool local = access.route == amdgpu::MemoryRoute::LOCAL;
+      if (local || access.route == amdgpu::MemoryRoute::GLOBAL) {
+        // An instruction can occupy counter slots without reading or writing any lanes.
+        const auto reg_load =
+            local ? MemoryEventType::LDS_TO_VGPR : MemoryEventType::GLOBAL_TO_VGPR;
+        const auto reg_store =
+            local ? MemoryEventType::VGPR_TO_LDS : MemoryEventType::VGPR_TO_GLOBAL;
+        const bool unconditional =
+            gfx10 || (routed && amdgpu::flat_issues_both_counter_domains(arch));
+        for (const auto &obligation : issued.counter_obligations()) {
+          if (!unconditional && !rs->hasPendingCounter(obligation.wait_counter_type()))
+            continue;
+          const bool returns =
+              d.is_load && obligation.wait_counter_type() != amdgpu::WaitCounterType::EXPCNT;
+          auto counter_order = writeOrder;
+          counter_order.completion = obligation.completion_class();
+          rs->registerEvent(instruction, returns ? reg_load : reg_store, {}, 0, 0xf,
+                            std::span(&obligation, 1), counter_order);
+        }
+      }
+      return;
+    }
+    if (routed && !split_results && d.routed_issue_info) {
+      for (const auto &obligation : issued.counter_obligations()) {
+        const auto counter = obligation.wait_counter_type();
+        if (std::ranges::find(obligations, counter,
+                              &amdgpu::MemoryCounterObligation::wait_counter_type) ==
+            obligations.end()) {
+          rs->registerEvent(instruction,
+                            d.is_load ? MemoryEventType::GLOBAL_TO_VGPR
+                                      : MemoryEventType::VGPR_TO_GLOBAL,
+                            {}, 0, 0xf, std::span(&obligation, 1), obligation.completion_class());
+        }
+      }
+    }
+  }
+
   if (wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA3 && access.scratch_lane_mask &&
       (access.decoded_space == amdgpu::DecodedMemorySpace::SCRATCH ||
        access.decoded_space == amdgpu::DecodedMemorySpace::FLAT))
     rs->checkScalarRead(wf.memory_wait_shadow().canonical({RegClass::FLAT_SCRATCH, 0, 2}));
 
-  const auto routed = routed_flat_issue_info(access, *decoded);
-  const auto &issue = routed ? *routed : *decoded;
-  const auto obligations = issue.counter_obligations();
-  const MemoryOrderClass memoryOrder = memoryOrderForObligations(obligations);
-  if (routed && access.request_lane_mask != 0 && supports_counter_capacity(wf.cu().arch()))
-    rs->prepareForMemoryIssue(issue);
-
-  const uint64_t sharedLanes = access.flat_local_lane_mask | access.flat_dds_lane_mask;
-  const bool mixedFlat = inst.data()->tag() == amdgpu::GLOBAL_MEM && sharedLanes != 0;
+  // RDNA2 issues vector memory instructions with empty effective EXEC,
+  // including loads and returning atomics nullified by VGPR tuple bounds.
+  // Keep each routed counter obligation in order without any register or LDS bytes.
+  const auto count_empty_issue = [&](MemoryEventType type) {
+    if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2 && !obligations.empty())
+      rs->registerEvent(instruction, type, {}, 0, 0xf, obligations, memoryOrder);
+  };
+  const bool mixedFlat = inst.data()->tag() == amdgpu::GLOBAL_MEM && shared_lanes != 0;
   if (inst.data()->tag() == amdgpu::LOCAL_MEM || mixedFlat) {
     auto &d = *inst.data_as<amdgpu::VectorMemState>();
-    const uint64_t execMask = d.exec_mask;
+    if ((std::ranges::any_of(
+            obligations, [](auto o) { return o.completion_class() == MemoryOrderClass::GDS; })) &&
+        amdgpu::has_ordered_gds_writeback(wf.cu().arch())) {
+      // GFX10 GDS returns are ordered with one another on LGKMCNT. EXPCNT
+      // protects the outgoing registers independently.
+      for (const auto &obligation : obligations) {
+        const bool outgoing = obligation.wait_counter_type() == amdgpu::WaitCounterType::EXPCNT;
+        const bool returning = !outgoing && d.is_load;
+        const uint64_t lanes = d.exec_mask;
+        const auto order = obligation.completion_class();
+        const auto bytes = returning ? vector_memory_byte_mask(d, wf) : uint8_t{0xf};
+        std::vector<uint32_t> registers;
+        if (returning && lanes) {
+          if (auto destinations = validated_load_destinations(d, wf)) {
+            registers = std::move(*destinations);
+            for (const auto reg : registers)
+              rs->checkVgprWrite(static_cast<int>(reg), lanes, bytes, order);
+          }
+        } else if (outgoing && lanes && (wf.cu().arch() != ROCJITSU_CODE_ARCH_RDNA2)) {
+          RegisterSet sources;
+          for (int i = 0; i < inst.num_src_operands(); ++i)
+            if (const auto src = inst.src_operand(i)->decoded_vgpr())
+              sources.expand(*src);
+          sources.for_each_ordinary([&](RegisterRef src) {
+            if (src.index < wf.num_vgprs())
+              registers.push_back(src.index);
+          });
+        }
+        const auto type = returning ? MemoryEventType::LDS_TO_VGPR : MemoryEventType::VGPR_TO_LDS;
+        rs->registerEvent(instruction, type, std::move(registers), lanes, bytes,
+                          std::span(&obligation, 1), order);
+      }
+      const amdgpu::RegisterAccess registers(wf);
+      if (gfx10 && registers.vgpr_results_fit_allocation(inst)) {
+        rs->lockGdsExec(instruction);
+        const auto lanes = registers.gds_source_lanes(inst);
+        if (lanes)
+          registers.for_each_gds_source(inst, [&](RegisterRef source) {
+            for (unsigned word = 0; word < source.width; ++word)
+              rs->lockGdsVgpr(instruction, source.index + word, lanes);
+          });
+      }
+      return;
+    }
+    const uint64_t execMask = split_results ? d.exec_mask & shared_lanes : d.exec_mask;
+    const bool native_ds = (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5) &&
+                           !inst.mnemonic().starts_with("flat_") && !d.lds_stack_inputs;
+
+    const uint32_t granule = native_ds && d.atomic_op == amdgpu::AtomicOp::NONE
+                                 ? (d.is_load ? std::min(d.elem_size, 4u) : 1u)
+                                 : d.elem_size;
     // DDS and allocation-OOB lanes participate in the instruction's
     // dependencies, but do not access bytes in the ordinary LDS allocation.
-    const uint64_t ldsMask = (mixedFlat ? execMask & access.flat_local_lane_mask : execMask) &
-                             ~(access.flat_dds_lane_mask | access.flat_local_oob_lane_mask);
-    if (execMask == 0)
-      return;
+    const uint64_t activeLdsLanes =
+        (wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA3) ? d.lane_mask : execMask;
+    const uint64_t ldsMask =
+        (mixedFlat || access.normalized_to_local ? activeLdsLanes & access.flat_local_lane_mask
+                                                 : activeLdsLanes) &
+        ~(access.flat_dds_lane_mask | access.flat_local_oob_lane_mask);
     LdsAccess ldsAccess{
+        .uses_flat_lds = routed.has_value(),
         .read_modify_write =
             (routed.has_value() || access.decoded_space == amdgpu::DecodedMemorySpace::LOCAL) &&
             d.atomic_op != amdgpu::AtomicOp::NONE};
     ldsAccess.aligned_atomic_bytes = ldsAccess.read_modify_write ? d.elem_size : 0;
+    const auto ldsOrder = ldsAccess.order(memoryOrder);
     auto type = d.is_load ? MemoryEventType::LDS_TO_VGPR : MemoryEventType::VGPR_TO_LDS;
+    if (execMask == 0) {
+      count_empty_issue(type);
+      return;
+    }
     const uint32_t perLaneBytes = d.num_elems * d.elem_size;
+    const uint32_t elementBytes = d.atomic_op == amdgpu::AtomicOp::NONE ? granule : perLaneBytes;
+    const auto allocation = access.lds_allocation;
+    const auto end = allocation ? std::optional{allocation->end} : access.flat_local_allocation_end;
 
     std::vector<uint32_t> registers;
     if (d.is_load) {
@@ -512,21 +711,33 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
 
     const auto bounds =
         amdgpu::indexed_ds_access_bounds(d, wf.cu().arch(), wf.lds_base(), wf.lds_size());
+    const bool secondAccess = d.has_second_ds_address(wf.cu().arch(), ldsMask);
     uint32_t laneAddrs[64]{};
     uint32_t secondLaneAddrs[64]{};
+    auto secondAddresses = access.secondary_addresses;
+    // A caller with an unknown route may supply only the instruction state.
+    if (access.route == amdgpu::MemoryRoute::UNKNOWN &&
+        d.has_second_ds_address(wf.cu().arch(), d.lane_mask))
+      secondAddresses = d.ds2_per_lane_addr;
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       if (!(ldsMask & (1ULL << lane)))
         continue;
       auto validate = [&](uint64_t address) {
+        if (allocation && address < allocation->begin)
+          return amdgpu::kInvalidLdsAddress;
         if (bounds && !bounds->contains(address))
           return amdgpu::kInvalidLdsAddress;
-        auto bytes = detector->ldsBytesInRange(address, perLaneBytes, d.elem_size);
-        if (access.flat_local_allocation_end && d.elem_size != 0)
-          bytes = amdgpu::whole_element_bytes_in_range(address, bytes, d.elem_size,
-                                                       *access.flat_local_allocation_end);
+        auto bytes = detector->ldsBytesInRange(address, perLaneBytes, elementBytes);
+        if (allocation)
+          bytes = allocation->retained_bytes(address, bytes, elementBytes);
+        else if (end)
+          bytes = amdgpu::whole_element_bytes_in_range(address, bytes, elementBytes, *end);
         if (bytes == 0)
           return amdgpu::kInvalidLdsAddress;
         const auto addr = static_cast<uint32_t>(address);
+        // Equal-width, naturally aligned atomic intervals overlap only when
+        // they refer to the same whole element. Partial or unaligned accesses
+        // retain the conservative byte-overlap check.
         const uint8_t atomicBytes =
             ldsAccess.read_modify_write && bytes == d.elem_size && address % d.elem_size == 0
                 ? d.elem_size
@@ -535,56 +746,46 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
           ldsAccess.aligned_atomic_bytes = 0;
         if (d.is_load || ldsAccess.read_modify_write)
           detector->validateRead(static_cast<int>(addr), waveId, static_cast<int>(lane), bytes,
-                                 memoryOrder, atomicBytes);
+                                 ldsOrder, atomicBytes);
         if (!d.is_load || ldsAccess.read_modify_write)
           detector->validateWrite(static_cast<int>(addr), waveId, static_cast<int>(lane), bytes,
-                                  memoryOrder, atomicBytes);
+                                  ldsOrder, atomicBytes);
         return addr;
       };
-      laneAddrs[lane] = validate(d.per_lane_addr[lane]);
-      if (d.ds2_active)
-        secondLaneAddrs[lane] = validate(d.ds2_per_lane_addr[lane]);
+      const uint64_t bit = uint64_t{1} << lane;
+      laneAddrs[lane] =
+          (d.ds_oob_lane_mask & bit) ? amdgpu::kInvalidLdsAddress : validate(d.per_lane_addr[lane]);
+      if (secondAccess)
+        secondLaneAddrs[lane] = (d.ds2_oob_lane_mask & bit) ? amdgpu::kInvalidLdsAddress
+                                                            : validate(secondAddresses[lane]);
     }
     uint8_t byte_mask = vector_memory_byte_mask(d, wf);
     if (d.is_load) {
       for (uint32_t reg : registers)
-        rs->checkVgprWrite(static_cast<int>(reg), execMask, byte_mask, memoryOrder);
+        rs->checkVgprWrite(static_cast<int>(reg), execMask, byte_mask, writeOrder);
     }
     if (obligations.empty())
       return;
-    if (d.ds2_active) {
-      rs->registerLdsEvent(instruction, type, std::move(registers), execMask, wf.wf_size(),
-                           std::span<const uint32_t>(laneAddrs, wf.wf_size()),
-                           std::span<const uint32_t>(secondLaneAddrs, wf.wf_size()), perLaneBytes,
-                           byte_mask, obligations, memoryOrder, d.elem_size, ldsAccess);
+    EventId eventId;
+    if (secondAccess) {
+      eventId = rs->registerLdsEvent(
+          instruction, type, std::move(registers), execMask, wf.wf_size(),
+          std::span<const uint32_t>(laneAddrs, wf.wf_size()),
+          std::span<const uint32_t>(secondLaneAddrs, wf.wf_size()), perLaneBytes, byte_mask,
+          obligations, memoryOrder, elementBytes, ldsAccess);
     } else {
-      rs->registerLdsEvent(instruction, type, std::move(registers), execMask, wf.wf_size(),
-                           std::span<const uint32_t>(laneAddrs, wf.wf_size()), perLaneBytes,
-                           byte_mask, obligations, memoryOrder, ldsMask, d.elem_size,
-                           access.flat_local_allocation_end, ldsAccess);
+      eventId = rs->registerLdsEvent(
+          instruction, type, std::move(registers), execMask, wf.wf_size(),
+          std::span<const uint32_t>(laneAddrs, wf.wf_size()), perLaneBytes, byte_mask, obligations,
+          writeOrder, ldsMask, elementBytes, end, ldsAccess);
     }
-    // A mixed instruction has one counter entry, with all register lanes but
-    // only the ordinary LDS lanes' intervals. Do not also register a global event.
+    // Only ordinary LDS lanes contribute intervals. When results split by route,
+    // the vector-memory lanes have already been registered separately.
     return;
   }
 
   if (inst.data()->tag() == amdgpu::GLOBAL_MEM) {
     auto &d = *inst.data_as<amdgpu::VectorMemState>();
-    if (d.exec_mask == 0) {
-      // A GFX11/GFX12 image issue advances a pending counter even without result lanes.
-      if (amdgpu::has_gfx11_image_operands(wf.cu().arch()) &&
-          inst.mnemonic().starts_with("image_")) {
-        for (const auto &obligation : obligations) {
-          if (rs->hasPendingCounter(obligation.wait_counter_type())) {
-            const auto type =
-                d.is_load ? MemoryEventType::GLOBAL_TO_VGPR : MemoryEventType::VGPR_TO_GLOBAL;
-            rs->registerEvent(instruction, type, {}, 0, 0xf, std::span(&obligation, 1),
-                              obligation.completion_class());
-          }
-        }
-      }
-      return;
-    }
     if (d.lds_dst) {
       uint32_t perLaneBytes = d.buffer_components
                                   ? 4u * d.destination_vgpr_count()
@@ -635,9 +836,7 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
                            perLaneBytes, 0xF, obligations, memoryOrder);
     } else if (d.is_load) {
       if (!d.has_feedback_result())
-        register_global_vgpr_result(
-            *rs, instruction, d, wf, obligations,
-            vmem_result_order(wf.cu().arch(), memoryOrder, inst.mnemonic()));
+        register_global_vgpr_result(*rs, instruction, d, wf, obligations, writeOrder);
     } else if (!obligations.empty()) {
       rs->registerEvent(instruction, MemoryEventType::VGPR_TO_GLOBAL, {}, d.exec_mask, 0xF,
                         obligations, memoryOrder);
@@ -648,6 +847,8 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
     auto &d = *inst.data_as<amdgpu::ScalarMemState>();
     if (d.is_load) {
       if (const auto reg = d.dst_register.register_ref()) {
+        if (reg->cls == RegClass::EXEC && reg->index < wf.wf_size() / 32)
+          rs->checkGdsExecWrite();
         rs->registerScalarLoad(instruction, wf.memory_wait_shadow().canonical(*reg), wf.exec(),
                                obligations, memoryOrder);
       } else {
@@ -680,6 +881,7 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObs
   // other memory instructions.
   const InstructionSnapshot &instruction = current_instruction(*s, wf);
   auto *rs = s->race_state;
+  rs->prepareForCounterIncrement(amdgpu::WaitCounterType::TENSORCNT);
   auto *detector = rs->getDetector();
   const auto waveId = rs->getWaveId();
   // Tensor transfers from one wave complete on TENSORCNT in issue order (CDNA5
@@ -747,7 +949,7 @@ void RaceDetectorPlugin::onAmdgpuWriteVgprLanes(const amdgpu::Wavefront *wf, uin
       query->registers.push_back(logical_reg);
     return;
   }
-  if (s->race_state->getVgprMemoryEvents(static_cast<int>(logical_reg)).empty())
+  if (!s->race_state->needsVgprWriteCheck(static_cast<int>(logical_reg)))
     return;
   s->race_state->checkVgprWriteLanes(static_cast<int>(logical_reg), lane_mask, byte_mask);
 }
@@ -769,36 +971,40 @@ void RaceDetectorPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Ins
   const InstructionSnapshot instruction = capture_instruction(pc, inst);
   auto *s = get_state(wf);
   assert(s && s->race_state);
+  s->race_state->finishRoutedIssue();
+  s->trace.push(instruction);
+  if (inst.has_embedded_memory_wait() && !inst.is_waitcnt()) {
+    const auto fields =
+        waitcheck_detail::WaitcheckTarget::embedded_wait_fields(inst, wf.cu().arch());
+    if (fields.succeeded() && fields.value())
+      apply_wait_fields(*s->race_state, *fields.value(), wf.cu().arch());
+  }
+  // Failed instructions skip the after-execute callback. A retried query
+  // starts a fresh capture and can publish only its own result.
+  s->lds_operand_read.reset();
+  s->image_query.reset();
   const auto arch = wf.cu().arch();
   const auto name = inst.mnemonic();
-  // A failed instruction skips the after-execute callback. Only publish the current query's writes.
-  s->image_query.reset();
-  const bool sampled_lod = name == "image_get_lod" && amdgpu::has_ordered_vmem_reads(arch);
+  // Inline queries reserve their issue slot before accessing mip/coordinate
+  // operands. A successful execution publishes the captured destination lanes.
+  const bool legacy_lod = name == "image_get_lod" && amdgpu::has_ordered_vmem_reads(arch);
   if (inst.is_memory_wait_producer() && !inst.is_memory_op() &&
-      (name == "image_get_resinfo" || sampled_lod)) {
+      (name == "image_get_resinfo" || legacy_lod)) {
     const auto counter = arch == ROCJITSU_CODE_ARCH_RDNA4 ? amdgpu::WaitCounterType::LOADCNT
                                                           : amdgpu::WaitCounterType::VMCNT;
-    if (supports_counter_capacity(arch))
-      s->race_state->prepareForCounterIncrement(counter);
-    s->image_query.emplace(counter);
+    s->race_state->prepareForCounterIncrement(counter);
+    s->image_query.emplace(amdgpu::vmem_read_type(name), counter);
   }
-  if (supports_counter_capacity(arch)) {
-    // FLAT's address-dependent admission is applied after routing. Before its
-    // operands are read, neither memory domain is guaranteed to be used.
-    if (inst.is_memory_op() && !inst.mnemonic().starts_with("flat_")) {
-      const auto *info = inst.amdgpu_memory_issue_info();
-      assert(info && "memory instruction reached the race detector without issue metadata");
-      if (info && (!info->exec_masked || wf.exec() != 0))
-        s->race_state->prepareForMemoryIssue(*info);
-    }
-
-    // Messages share LGKMCNT on the capacity-modeled targets but are not memory
-    // instructions, so they intentionally remain outside memory issue metadata.
-    if (std::string_view(inst.mnemonic()).starts_with("s_sendmsg"))
-      s->race_state->prepareForCounterIncrement(amdgpu::WaitCounterType::LGKMCNT);
+  const bool generic_flat = inst.mnemonic().starts_with("flat_");
+  // Fixed-domain FLAT must secure both slots before reading its address,
+  // including when EXEC is empty. Other FLAT requests reserve slots at routing.
+  if (inst.is_memory_op() && (!generic_flat || amdgpu::flat_issues_both_counter_domains(arch))) {
+    if (const auto *info = inst.amdgpu_memory_issue_info())
+      s->race_state->prepareForMemoryIssue(*info);
   }
-  s->lds_operand_read.reset();
-  s->trace.push(instruction);
+  // Messages also share the aggregate LGKMCNT on legacy targets.
+  if (inst.mnemonic().starts_with("s_sendmsg") && counterCapacitiesForArch(arch).lgkmcnt != 0)
+    s->race_state->prepareForCounterIncrement(amdgpu::WaitCounterType::LGKMCNT);
   // Implicit VCC operands use wave mask operations directly. Observe only
   // the architectural mask, excluding temporary VCC saves by SDWA execution.
   if (wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA3 && !s->race_state->getWaveMemoryEvents().empty()) {
@@ -826,6 +1032,11 @@ void RaceDetectorPlugin::onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/, const 
                                                          amdgpu::Wavefront &wf) {
   auto *s = get_state(wf);
   assert(s && s->race_state);
+  // S_TRAP reaches after-execute only after the CU enters the configured handler.
+  if (inst.mnemonic() == "s_trap" && wf.in_trap_handler()) {
+    drain_wave_counters(*s->race_state, wf.cu().arch());
+    return;
+  }
   if (auto &read = s->lds_operand_read) {
     s->race_state->recordLdsOperandRead(current_instruction(*s, wf), read->address, read->bytes,
                                         read->lane);
@@ -836,11 +1047,10 @@ void RaceDetectorPlugin::onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/, const 
     const std::array obligations{
         amdgpu::MemoryCounterObligation{query->counter, MemoryOrderClass::VMEM}};
     // GFX12 decrements LOADCNT in order but can write the VGPRs out of order.
-    const auto order = vmem_result_order(wf.cu().arch(),
-                                         query->counter == amdgpu::WaitCounterType::LOADCNT
-                                             ? MemoryOrderClass::UNORDERED
-                                             : MemoryOrderClass::VMEM,
-                                         inst.mnemonic());
+    const VgprWriteOrder order{query->counter == amdgpu::WaitCounterType::LOADCNT
+                                   ? MemoryOrderClass::UNORDERED
+                                   : MemoryOrderClass::VMEM,
+                               query->type};
     for (const auto reg : query->registers)
       s->race_state->checkVgprWrite(static_cast<int>(reg), query->lanes, kFullByteMask, order);
     // Success consumes one counter position even when EXEC or the destination
@@ -851,27 +1061,19 @@ void RaceDetectorPlugin::onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/, const 
     query.reset();
     return;
   }
-  // Only explicit waits are handled here. Embedded waits (e.g. VINTERP wait_exp)
-  // remain unsupported by the plugin; they must retire events before the
-  // instruction's register accesses, as in MemoryWaitScoreboard::before.
+  if (const auto reg = wf.instruction_exec_write();
+      reg && reg->index < wf.wf_size() / 32 && !wf.instruction_execution_failed())
+    get_state(wf)->race_state->checkGdsExecWrite();
+  // Embedded waits (e.g. VINTERP wait_exp) must retire before operand access.
   if (!inst.is_waitcnt())
     return;
-  const auto fields = amdgpu::WaitCounterPolicy::explicit_wait_fields(inst, wf.cu().arch());
+  const auto arch = wf.cu().arch();
+  const auto executed_limits = wf.wait_target().gfx10_wait_fields();
+  const auto fields = amdgpu::WaitCounterPolicy::executed_wait_fields(inst, arch, executed_limits);
   if (fields.failed() || !fields.value())
     return;
 
-  const auto model = amdgpu::waitcnt_model(wf.cu().arch()).value();
-  PendingWaitCount wait;
-  for (size_t i = 0; i < fields.value()->size(); ++i) {
-    const auto threshold = (*fields.value())[i];
-    if (!threshold)
-      continue;
-    if (const auto counter =
-            amdgpu::memory_wait_counter_type(static_cast<amdgpu::WaitCounterKind>(i), model))
-      wait.add(*counter, static_cast<int>(*threshold));
-  }
-  if (!wait.empty())
-    s->race_state->dispatch(wait);
+  apply_wait_fields(*s->race_state, *fields.value(), arch);
 }
 
 void RaceDetectorPlugin::onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts,

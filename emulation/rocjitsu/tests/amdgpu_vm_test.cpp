@@ -1033,6 +1033,178 @@ TEST(RdnaDispatchTest, Gfx1030TfeChecksDescriptorVgprsInsideLargerCuBlock) {
   }
 }
 
+TEST(RdnaDispatchTest, Gfx1030NullifiedMemoryTuplePreservesThePendingScalarSource) {
+  enum class Form {
+    BufferResource,
+    BufferOffset,
+    TypedBuffer,
+    BufferAtomic,
+    NoReturnAtomic,
+    Global,
+    Image,
+    Resinfo
+  };
+  for (auto form : {Form::BufferResource, Form::BufferOffset, Form::TypedBuffer, Form::BufferAtomic,
+                    Form::NoReturnAtomic, Form::Global, Form::Image, Form::Resinfo}) {
+    const bool image = form == Form::Image || form == Form::Resinfo;
+    for (bool fits : {false, true}) {
+      for (bool wait_after : {false, true}) {
+        for (bool empty_exec : {false, true}) {
+          if (empty_exec && form != Form::BufferResource && form != Form::BufferOffset)
+            continue;
+          SCOPED_TRACE(testing::Message()
+                       << "form=" << static_cast<unsigned>(form) << " fits=" << fits
+                       << " wait=" << wait_after << " EXEC=0 " << empty_exec);
+          const uint8_t dst = fits ? 14 : 15;
+          std::array<uint32_t, 2> probe;
+          switch (form) {
+          case Form::BufferResource:
+          case Form::BufferOffset:
+            probe = rdna2::build_mubuf(
+                rdna2::kBufferLoadDwordx2,
+                {.vdata = dst,
+                 .srsrc = static_cast<uint8_t>(form == Form::BufferOffset ? 2 : 1),
+                 .soffset = static_cast<uint8_t>(form == Form::BufferOffset ? 4 : 128)});
+            break;
+          case Form::TypedBuffer:
+            probe = rdna2::build_mtbuf(rdna2::kTbufferLoadFormatXy,
+                                       {.format = 22, .vdata = dst, .srsrc = 1, .soffset = 128});
+            break;
+          case Form::BufferAtomic:
+          case Form::NoReturnAtomic:
+            probe = rdna2::build_mubuf(rdna2::kBufferAtomicAddX2,
+                                       {.glc = uint8_t(form == Form::BufferAtomic),
+                                        .vdata = dst,
+                                        .srsrc = 1,
+                                        .soffset = 128});
+            break;
+          case Form::Global:
+            probe = rdna2::build_flat(rdna2::kFlatLoadDwordx2, {.seg = 2, .saddr = 4, .vdst = dst});
+            break;
+          case Form::Image:
+          case Form::Resinfo:
+            probe = rdna2::build_mimg(form == Form::Image ? rdna2::kImageLoadMimg
+                                                          : rdna2::kImageGetResinfoMimg,
+                                      {.dim = 1, .dmask = 3, .vdata = dst, .srsrc = 1});
+            break;
+          }
+          // The SMEM producer writes the resource base, SOFFSET, or a zero image descriptor.
+          // The final S_MOV is the first real reader if the probe skipped that scalar source.
+          const uint32_t code[] = {0xbe8003ff,
+                                   0x4000,
+                                   0xbe810380,
+                                   0xbe850380,
+                                   0xbe8603ff,
+                                   0x100,
+                                   0xbe8703ff,
+                                   image ? 0u : 0x3103c000u,
+                                   0xbe8803ff,
+                                   0x5000,
+                                   0xbe890380,
+                                   0xbe8a03ff,
+                                   0x100,
+                                   0xbe8b03ff,
+                                   0x3103c000,
+                                   0x7e000280,
+                                   empty_exec ? 0xbefe0480u : SOPP_S_NOP,
+                                   0xf4000100,
+                                   0xfa000000, // s_load_dword s4,s[0:1],0
+                                   probe[0],
+                                   probe[1],
+                                   wait_after ? 0xbf8c0000u : SOPP_S_NOP,
+                                   0xbe8c0304,
+                                   SOPP_S_ENDPGM}; // s_mov_b32 s12,s4
+          VmFixture f;
+          ASSERT_NO_FATAL_FAILURE(f.initialize("rdna2", 1, 4, 64, 128, 256));
+          PluginSinkConfig config;
+          auto &race = config.emplace<StringSink>();
+          auto plugins = std::make_shared<ExecutionPluginGroup>(std::move(config));
+          ASSERT_TRUE(plugins->add(std::make_unique<plugins::race_detector::RaceDetectorPlugin>()));
+          f.soc_ptr->set_plugin_group(plugins);
+          plugins->onInit();
+          f.mem()->write32(0x4000, form == Form::BufferOffset || image ? 0 : 0x5000);
+          const uint64_t kernel = f.write_kernel(0x1000, code, sizeof(code), 104, 16, 0, 1024);
+          test::AqlQueue queue(f.mem(), f.cp());
+          queue.dispatch(kernel, 32, 32);
+          testing::internal::CaptureStderr();
+          EXPECT_NO_THROW(f.engine->run());
+          const auto log = testing::internal::GetCapturedStderr();
+          EXPECT_EQ(f.engine->last_exit().code, 0) << log;
+          const bool probe_reads = fits || form == Form::Image || form == Form::NoReturnAtomic;
+          const bool hazard = probe_reads || !wait_after;
+          EXPECT_EQ(f.cu()->memory_wait_diagnostic_count(), unsigned(hazard)) << log;
+          EXPECT_EQ(race.str().find("Race on SGPR s4 [") != std::string::npos, hazard)
+              << race.str();
+          if (hazard) {
+            const auto pc = kernel + sizeof(amdhsa::kernel_descriptor_t) +
+                            (probe_reads ? 19 : 22) * sizeof(uint32_t);
+            EXPECT_NE(log.find(std::format("pc={:#x}: read of s4", pc)), std::string::npos) << log;
+            EXPECT_NE(race.str().find(std::format("==>  {:#x}  ", pc)), std::string::npos)
+                << race.str();
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(RdnaDispatchTest, Gfx1030SuppressedRegisterReturnPreservesTheNextConsumerHazard) {
+  for (uint16_t op : {rdna2::kDsSwizzleB32, rdna2::kDsPermuteB32, rdna2::kDsBpermuteB32,
+                      rdna2::kImageGetResinfoMimg, rdna2::kDsReadB64, rdna2::kDsAddRtnU64}) {
+    const bool query = op == rdna2::kImageGetResinfoMimg;
+    const bool memory = op == rdna2::kDsReadB64 || op == rdna2::kDsAddRtnU64;
+    for (bool fits : {false, true}) {
+      for (bool waited : {false, true}) {
+        SCOPED_TRACE(testing::Message() << "op=" << op << " fits=" << fits << " waited=" << waited);
+        const uint8_t result_words = query || memory ? 2 : 1;
+        const uint8_t dst = 16 - result_words + !fits;
+        // A DS read produces v1. The probed instruction consumes v1 only if
+        // its complete result fits. The following V_MOV always consumes v1.
+        const auto producer = rdna2::build_ds(rdna2::kDsReadB32, {.vdst = 1});
+        const auto candidate =
+            query    ? rdna2::build_mimg(op, {.dim = 1, .dmask = 3, .vaddr = 1, .vdata = dst})
+            : memory ? rdna2::build_ds(op, {.addr = 1, .data0 = 2, .vdst = dst})
+                     : rdna2::build_ds(op, {.offset1 = 0x80,
+                                            .addr = uint8_t(op == rdna2::kDsSwizzleB32),
+                                            .data0 = 1,
+                                            .vdst = dst});
+        const auto consumer = rdna2::build_vop1(rdna2::kVMovB32Vop1, {.src0 = 257, .vdst = 3});
+        const uint32_t code[] = {producer[0],  producer[1],  waited ? 0xbf8c0000u : SOPP_S_NOP,
+                                 candidate[0], candidate[1], consumer[0],
+                                 SOPP_S_ENDPGM};
+        VmFixture fixture;
+        ASSERT_NO_FATAL_FAILURE(fixture.initialize("rdna2", 1, 4, 64, 128, 256));
+        PluginSinkConfig sink_config;
+        auto &race = sink_config.emplace<StringSink>();
+        auto group = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+        ASSERT_TRUE(group->add(std::make_unique<plugins::race_detector::RaceDetectorPlugin>()));
+        fixture.soc_ptr->set_plugin_group(group);
+        group->onInit();
+        const uint64_t kernel = fixture.write_kernel(0x1000, code, sizeof(code), 104, 16, 0, 1024);
+        test::AqlQueue queue(fixture.mem(), fixture.cp());
+        queue.dispatch(kernel, 32, 32);
+        testing::internal::CaptureStderr();
+        EXPECT_NO_THROW(fixture.engine->run());
+        const auto diagnostic = testing::internal::GetCapturedStderr();
+        EXPECT_EQ(fixture.cu()->memory_wait_diagnostic_count(), waited ? 0u : 1u) << diagnostic;
+        if (waited) {
+          EXPECT_EQ(race.str().find("RACE "), std::string::npos) << race.str();
+        } else {
+          const uint64_t consumer_pc =
+              kernel + sizeof(amdhsa::kernel_descriptor_t) + (fits ? 3 : 5) * sizeof(uint32_t);
+          EXPECT_NE(diagnostic.find(std::format("pc={:#x}: read of v1", consumer_pc)),
+                    std::string::npos)
+              << diagnostic;
+          EXPECT_NE(race.str().find("type=VGPR access=read reg=1 "), std::string::npos)
+              << race.str();
+          EXPECT_NE(race.str().find(std::format("==>  {:#x}  ", consumer_pc)), std::string::npos)
+              << race.str();
+        }
+      }
+    }
+  }
+}
+
 TEST(RdnaDispatchTest, Gfx1030DsStoresUseTheIssuingWavesVgprZeroForUnallocatedWords) {
   for (uint32_t block : {16u, 256u}) {
     {

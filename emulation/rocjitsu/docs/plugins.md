@@ -476,15 +476,17 @@ There are two memory hooks, and they see different things.
 `onAmdgpuRouteMemoryInstruction` fires before routing decides anything: the
 instruction still carries the address space it decoded as and the addresses it
 computed. `onAmdgpuMemoryAccessRouted` fires once routing has settled and
-reports a `MemoryAccessObservation` describing the access the memory system is
-actually about to be asked for — the pipeline it was issued to, its routing-selected
-counter, and its effective addresses. The scalar `wait_counter` field does not
-describe the complete wait requirement: mixed FLAT retains its VMEM counter here,
-while `VectorMemState::routed_issue_info` carries both VMEM and LDS obligations.
-Consult that routed issue's `counter_obligations()` for the full set.
+reports the selected pipeline and effective addresses in a `MemoryAccessObservation`.
+The observation's scalar `wait_counter` field identifies the counter for that route. Mixed FLAT
+requests retain their VMEM counter in this field. For the full set of issued
+counters, use `onAmdgpuMemoryAccessRouted(access, inst, wf)`. For generic FLAT,
+`inst.data_as<VectorMemState>()->routed_issue_info->counter_obligations()` includes
+both VMEM and LDS on RDNA1–4 and CDNA5, even for uniform or empty requests.
+On CDNA1–4 each domain takes a position only when a lane requests it.
 
-When all requesting FLAT lanes use the shared aperture, routing selects the
-LDS pipeline and sets `normalized_to_local` to `true`. This flag describes the
+When at least one FLAT lane requests memory and all requests use the shared
+aperture, routing selects the LDS pipeline and sets
+`normalized_to_local` to `true`. This flag describes the
 uniform local route, not whether addresses were normalized.
 
 Mixed FLAT requests retain `MemoryRoute::GLOBAL`. The global pipeline separates the lanes by backing store, completing
@@ -500,18 +502,21 @@ and PC, then fault before any memory effects because DDS backing is unimplemente
 On other architectures the shared aperture remains LDS; out-of-backing accesses
 read zero and discard writes.
 
-For RDNA4 FLAT LDS requests, the offset wraps to 17 bits before adding the
-workgroup base. `flat_local_allocation_end` captures the exclusive modeled
-`lds_base + lds_size` limit and remains fixed across retries. This includes the
-current 256-byte scheduler rounding; PM4 sizes may already be 512-byte multiples
-before that rounding. Target allocation and encoding granules remain unmodeled.
-A lane whose first memory element does not fit is rejected in full and appears
-in `flat_local_oob_lane_mask`. Other lanes retain only complete elements below
-the allocation end (DWORDs for multiword transfers); atomics require their whole
-element. Rejected reads return zero and rejected writes are discarded. These
-bounds leave `valid_lane_mask`, `request_lane_mask` and nominal counter
-participation unchanged, so those masks describe requests rather than bytes
-actually accessed.
+For FLAT LDS requests on targets with workgroup bounds, `flat_local_allocation_end`
+is the exclusive `lds_base + lds_size` limit captured at issue and reused on retry.
+RDNA4 wraps the LDS offset to 17 bits before adding the workgroup base.
+A requesting lane whose first element does not fit in the allocation appears in
+`flat_local_oob_lane_mask`. Other lanes transfer only complete elements that
+fit, including individual DWORDs of a multiword transfer. An atomic requires
+its whole element. Rejected reads return zero and rejected writes are dropped.
+Use the allocation end and OOB mask when counting transferred bytes.
+`request_lane_mask` includes requests that reach this bounds check, even when
+they transfer zero bytes.
+
+For CDNA2 DS and bounded FLAT LDS requests, `lds_allocation` reports the
+workgroup range intersected with the backing. Apply its `retained_bytes`
+method to each requesting lane and each address set to recover the actual
+byte intervals. Equal-offset CDNA2 DS pairs report a single access.
 
 Observers must inspect `flat_local_lane_mask` and `flat_dds_lane_mask` to account
 for LDS and DDS lanes; choosing a backing store

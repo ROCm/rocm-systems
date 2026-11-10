@@ -40,7 +40,7 @@ EventId RaceDetector::allocateEventId(
                             lastRegisterByteMask, ldsAccess);
   if (hasLds) {
     const auto &ivs = events_.ldsIntervals(eid);
-    const WaveId orderedWave = writeOrder.completion == MemoryOrderClass::LDS ? waveId : WaveId{-1};
+    const WaveId orderedWave = events_.ldsOrder(eid) == MemoryOrderClass::LDS ? waveId : WaveId{-1};
     if (events_.writesLds(eid)) {
       ldsWriteEvents.push_back(eid);
       adjustByteCounts(ivs, byteWriteCounts, +1, orderedWave);
@@ -59,15 +59,23 @@ bool RaceDetector::satisfyEventWaitCounter(EventId eventId, amdgpu::WaitCounterT
   return events_.satisfyWaitCounter(eventId, waitCounter);
 }
 
-void RaceDetector::retireEvent(EventId eventId) {
+void RaceDetector::retireLdsIntervals(EventId eventId) {
+  const auto &bytes = events_.ldsIntervals(eventId);
+  if (!events_.hasLiveLdsIntervals(eventId))
+    return;
   if (events_.writesLds(eventId)) {
     removeFromUnorderedList(ldsWriteEvents, eventId);
-    adjustByteCounts(events_.ldsIntervals(eventId), byteWriteCounts, -1);
+    adjustByteCounts(bytes, byteWriteCounts, -1);
   }
   if (events_.readsLds(eventId)) {
     removeFromUnorderedList(ldsReadEvents, eventId);
-    adjustByteCounts(events_.ldsIntervals(eventId), byteReadCounts, -1);
+    adjustByteCounts(bytes, byteReadCounts, -1);
   }
+  events_.markLdsPublished(eventId);
+}
+
+void RaceDetector::retireEvent(EventId eventId) {
+  retireLdsIntervals(eventId);
   events_.markRetired(eventId);
 }
 
@@ -86,10 +94,10 @@ void RaceDetector::validateRead(int addr, WaveId wave, int lane, int nBytes,
       // Operations in the same non-UNORDERED class complete in issue order.
       // A completed event is safe for its owning wave regardless of class, but
       // remains live for cross-wave checks until a barrier retires it.
-      const MemoryOrderClass pendingMemoryOrder = events_.memoryOrder(eventId);
+      const MemoryOrderClass pendingMemoryOrder = events_.ldsOrder(eventId);
       const bool orderedWithCurrent = currentMemoryOrder != MemoryOrderClass::UNORDERED &&
                                       pendingMemoryOrder == currentMemoryOrder;
-      if (orderedWithCurrent || events_.status(eventId) == EventStatus::WAVE_COMPLETE) {
+      if (orderedWithCurrent || events_.ldsAccessComplete(eventId)) {
         continue;
       }
     }
@@ -118,10 +126,10 @@ void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
       // The read's destination VGPR remains independently protected by its
       // wait-counter obligations. This WAR check does not cover LDS
       // write/write ordering, which is not currently checked.
-      const MemoryOrderClass pendingMemoryOrder = events_.memoryOrder(eventId);
+      const MemoryOrderClass pendingMemoryOrder = events_.ldsOrder(eventId);
       const bool orderedWithCurrent = currentMemoryOrder != MemoryOrderClass::UNORDERED &&
                                       pendingMemoryOrder == currentMemoryOrder;
-      if (orderedWithCurrent || events_.status(eventId) == EventStatus::WAVE_COMPLETE)
+      if (orderedWithCurrent || events_.ldsAccessComplete(eventId))
         continue;
     }
     // Report a byte both accesses touch, not the start of this access.

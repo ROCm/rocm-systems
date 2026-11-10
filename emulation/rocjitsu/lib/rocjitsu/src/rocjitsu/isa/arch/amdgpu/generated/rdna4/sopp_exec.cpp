@@ -178,48 +178,39 @@ void SIcacheInvSopp::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SWaitLoadcntSopp::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
-  wf.set_wait_counter("wait_loadcnt", cnt);
+  wf.set_wait_counter("wait_loadcnt", static_cast<uint16_t>(simm16.encoding_value_));
 }
 
 void SWaitStorecntSopp::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
-  wf.set_wait_counter("wait_storecnt", cnt);
+  wf.set_wait_counter("wait_storecnt", static_cast<uint16_t>(simm16.encoding_value_));
 }
 
 void SWaitSamplecntSopp::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
-  wf.set_wait_counter("wait_samplecnt", cnt);
+  wf.set_wait_counter("wait_samplecnt", static_cast<uint16_t>(simm16.encoding_value_));
 }
 
 void SWaitBvhcntSopp::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
-  wf.set_wait_counter("wait_bvhcnt", cnt);
+  wf.set_wait_counter("wait_bvhcnt", static_cast<uint16_t>(simm16.encoding_value_));
 }
 
 void SWaitExpcntSopp::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
-  wf.set_wait_counter("wait_expcnt", cnt);
+  wf.set_wait_counter("wait_expcnt", static_cast<uint16_t>(simm16.encoding_value_));
 }
 
 void SWaitDscntSopp::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
-  wf.set_wait_counter("wait_dscnt", cnt);
+  wf.set_wait_counter("wait_dscnt", static_cast<uint16_t>(simm16.encoding_value_));
 }
 
 void SWaitKmcntSopp::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
-  wf.set_wait_counter("wait_kmcnt", cnt);
+  wf.set_wait_counter("wait_kmcnt", static_cast<uint16_t>(simm16.encoding_value_));
 }
 
 void SWaitLoadcntDscntSopp::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
-  wf.set_wait_counter("wait_loadcnt_dscnt", cnt);
+  wf.set_wait_counter("wait_loadcnt_dscnt", static_cast<uint16_t>(simm16.encoding_value_));
 }
 
 void SWaitStorecntDscntSopp::execute_impl(amdgpu::Wavefront &wf) {
-  uint16_t cnt = static_cast<uint16_t>(simm16.encoding_value_);
-  wf.set_wait_counter("wait_storecnt_dscnt", cnt);
+  wf.set_wait_counter("wait_storecnt_dscnt", static_cast<uint16_t>(simm16.encoding_value_));
 }
 
 } // namespace rdna4

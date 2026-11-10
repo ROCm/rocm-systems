@@ -98,8 +98,10 @@ public:
     wave.flat_pointer32_ = a.ptr32();
     wave.set_apertures(a.shared_base(), a.shared_limit(), a.private_base(), a.private_limit(),
                        s.override_launch());
-    wave.set_wait_target(limits.vm(), limits.lgkm(), limits.exp());
-    wave.set_wait_target_vscnt(limits.vs());
+    wave.wait_for({.vmcnt = limits.vm(),
+                   .lgkmcnt = limits.lgkm(),
+                   .expcnt = limits.exp(),
+                   .vscnt = limits.vs()});
     wave.set_trapsts(s.trapsts());
     if (s.self_halted()) {
       wave.set_debug_halted(true);

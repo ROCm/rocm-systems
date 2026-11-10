@@ -502,16 +502,28 @@ public:
   ///
   /// Wave32 leaves EXEC_HI available as scalar scratch. Vector instructions
   /// that update the execution mask must therefore preserve the non-lane bits.
-  void set_exec(uint64_t val) { exec_ = (exec_ & ~lane_mask()) | (val & lane_mask()); }
+  void set_exec(uint64_t val) {
+    exec_ = (exec_ & ~lane_mask()) | (val & lane_mask());
+    exec_written_words_ |= wf_size_ == 64 ? 3 : 1;
+  }
 
   /// @brief Write both architectural EXEC words as a scalar instruction result.
-  void write_exec(uint64_t val) { exec_ = val; }
+  void write_exec(uint64_t val) {
+    exec_ = val;
+    exec_written_words_ = 3;
+  }
 
   /// Write only EXEC_LO, including when both halves contain active lanes.
-  void write_exec_lo(uint32_t val) { exec_ = (exec_ & 0xffffffff00000000ULL) | val; }
+  void write_exec_lo(uint32_t val) {
+    exec_ = (exec_ & 0xffffffff00000000ULL) | val;
+    exec_written_words_ |= 1;
+  }
 
   /// Write only EXEC_HI, including when it is scalar scratch in wave32.
-  void write_exec_hi(uint32_t val) { exec_ = (exec_ & 0xffffffffu) | (uint64_t{val} << 32); }
+  void write_exec_hi(uint32_t val) {
+    exec_ = (exec_ & 0xffffffffu) | (uint64_t{val} << 32);
+    exec_written_words_ |= 2;
+  }
 
   /// Restore raw EXEC without recording an instruction write.
   void set_exec_raw(uint64_t val) { exec_ = val; }
@@ -566,6 +578,7 @@ public:
   static constexpr uint32_t IEEE_BIT = 1u << 9;
   static constexpr uint32_t GPR_IDX_EN_BIT = 1u << 27;
   static constexpr uint32_t VSKIP_BIT = 1u << 28;
+  static constexpr uint32_t kRdna2MemoryViolationEnable = 1u << 20;
   static constexpr uint32_t FP16_OVFL_BIT = 1u << 23;
   /// Short for conditional stack pointer, used by fork/join instructions
   static constexpr uint32_t CSP_SHIFT = 29;
@@ -691,93 +704,46 @@ public:
   /// @param expcnt Export counter threshold.
   const WaitTarget &wait_target() const { return wait_target_; }
 
-  /// Wait for every modeled memory pipeline, including stores and async DMA.
-  void set_wait_all() {
-    wait_target_ = {.vmcnt = 0,
-                    .lgkmcnt = 0,
-                    .expcnt = 0,
-                    .vscnt = 0,
-                    .dscnt = 0,
-                    .kmcnt = 0,
-                    .tensorcnt = 0,
-                    .asynccnt = 0,
-                    .samplecnt = 0,
-                    .bvhcnt = 0};
+  /// Install the thresholds of the current wait instruction. Unspecified
+  /// counters use their no-wait values, even if a previous wait used them.
+  void wait_for(WaitTarget target) {
+    wait_target_ = target;
     if (!wait_satisfied())
       set_state(WfState::WAITCNT);
+  }
+
+  /// Wait for every modeled memory pipeline, including stores and async DMA.
+  void set_wait_all() {
+    wait_for({.vmcnt = 0,
+              .lgkmcnt = 0,
+              .expcnt = 0,
+              .vscnt = 0,
+              .dscnt = 0,
+              .kmcnt = 0,
+              .tensorcnt = 0,
+              .asynccnt = 0,
+              .samplecnt = 0,
+              .bvhcnt = 0});
   }
 
   void set_wait_target(uint8_t vmcnt, uint8_t lgkmcnt, uint8_t expcnt) {
-    wait_target_.vmcnt = vmcnt;
-    wait_target_.lgkmcnt = lgkmcnt;
-    wait_target_.expcnt = expcnt;
-    if (!wait_satisfied())
-      set_state(WfState::WAITCNT);
+    wait_for({.vmcnt = vmcnt, .lgkmcnt = lgkmcnt, .expcnt = expcnt});
   }
 
-  /// @brief Set the VSCNT target (GFX10 S_WAITCNT_VSCNT).
-  void set_wait_target_vscnt(uint8_t threshold) {
-    wait_target_.vscnt = threshold;
-    if (!wait_satisfied())
-      set_state(WfState::WAITCNT);
-  }
+  void set_wait_target_vscnt(uint8_t threshold) { wait_for({.vscnt = threshold}); }
+  void set_wait_target_loadcnt(uint8_t threshold) { wait_for({.vmcnt = threshold}); }
+  void set_wait_target_storecnt(uint8_t threshold) { wait_for({.vscnt = threshold}); }
+  void set_wait_target_dscnt(uint8_t threshold) { wait_for({.dscnt = threshold}); }
+  void set_wait_target_kmcnt(uint8_t threshold) { wait_for({.kmcnt = threshold}); }
+  void set_wait_target_tensorcnt(uint8_t threshold) { wait_for({.tensorcnt = threshold}); }
+  void set_wait_target_asynccnt(uint8_t threshold) { wait_for({.asynccnt = threshold}); }
 
-  /// @brief Set the LOADCNT target (GFX11+ S_WAITCNT_VMCNT / S_WAIT_LOADCNT).
-  void set_wait_target_loadcnt(uint8_t threshold) {
-    wait_target_.vmcnt = threshold;
-    if (!wait_satisfied())
-      set_state(WfState::WAITCNT);
-  }
-
-  /// @brief Set the STORECNT target (GFX11+ S_WAITCNT_VSCNT / S_WAIT_STORECNT).
-  void set_wait_target_storecnt(uint8_t threshold) {
-    wait_target_.vscnt = threshold;
-    if (!wait_satisfied())
-      set_state(WfState::WAITCNT);
-  }
-
-  /// @brief Set the DSCNT target (GFX11+ S_WAITCNT_LGKMCNT / S_WAIT_DSCNT).
-  void set_wait_target_dscnt(uint8_t threshold) {
-    wait_target_.dscnt = threshold;
-    if (!wait_satisfied())
-      set_state(WfState::WAITCNT);
-  }
-
-  /// @brief Set the KMCNT target (GFX11+ S_WAIT_KMCNT).
-  void set_wait_target_kmcnt(uint8_t threshold) {
-    wait_target_.kmcnt = threshold;
-    if (!wait_satisfied())
-      set_state(WfState::WAITCNT);
-  }
-
-  /// @brief Set the TENSORCNT target (GFX12.5 S_WAIT_TENSORCNT).
-  void set_wait_target_tensorcnt(uint8_t threshold) {
-    wait_target_.tensorcnt = threshold;
-    if (!wait_satisfied())
-      set_state(WfState::WAITCNT);
-  }
-
-  /// @brief Set the ASYNCCNT target (GFX12.5 S_WAIT_ASYNCCNT).
-  void set_wait_target_asynccnt(uint8_t threshold) {
-    wait_target_.asynccnt = threshold;
-    if (!wait_satisfied())
-      set_state(WfState::WAITCNT);
-  }
-
-  /// @brief Set combined STORECNT + DSCNT targets (GFX12 S_WAIT_STORECNT_DSCNT).
   void set_wait_target_storecnt_dscnt(uint8_t storecnt, uint8_t dscnt) {
-    wait_target_.vscnt = storecnt;
-    wait_target_.dscnt = dscnt;
-    if (!wait_satisfied())
-      set_state(WfState::WAITCNT);
+    wait_for({.vscnt = storecnt, .dscnt = dscnt});
   }
 
-  /// @brief Set combined LOADCNT + DSCNT targets (GFX12 S_WAIT_LOADCNT_DSCNT).
   void set_wait_target_loadcnt_dscnt(uint8_t loadcnt, uint8_t dscnt) {
-    wait_target_.vmcnt = loadcnt;
-    wait_target_.dscnt = dscnt;
-    if (!wait_satisfied())
-      set_state(WfState::WAITCNT);
+    wait_for({.vmcnt = loadcnt, .dscnt = dscnt});
   }
 
   /// @brief Set a single split-wait counter threshold by name.
@@ -789,29 +755,23 @@ public:
     std::string_view name{counter_name};
     auto t = static_cast<uint8_t>(threshold);
     if (name == "wait_loadcnt")
-      set_wait_target_loadcnt(t);
+      set_wait_target_loadcnt(t & WaitCounters::VMCNT_MAX);
     else if (name == "wait_storecnt")
-      set_wait_target_storecnt(t);
+      set_wait_target_storecnt(t & WaitCounters::VSCNT_MAX);
     else if (name == "wait_dscnt")
-      set_wait_target_dscnt(t);
+      set_wait_target_dscnt(t & WaitCounters::DSCNT_MAX);
     else if (name == "wait_kmcnt")
-      set_wait_target_kmcnt(t);
+      set_wait_target_kmcnt(t & WaitCounters::KMCNT_MAX);
     else if (name == "wait_tensorcnt")
-      set_wait_target_tensorcnt(t);
+      set_wait_target_tensorcnt(t & WaitCounters::TENSORCNT_MAX);
     else if (name == "wait_asynccnt")
-      set_wait_target_asynccnt(t);
+      set_wait_target_asynccnt(t & WaitCounters::ASYNCCNT_MAX);
     else if (name == "wait_expcnt") {
-      wait_target_.expcnt = static_cast<uint8_t>(threshold & 0x07);
-      if (!wait_satisfied())
-        set_state(WfState::WAITCNT);
+      wait_for({.expcnt = static_cast<uint8_t>(threshold & 0x07)});
     } else if (name == "wait_samplecnt") {
-      wait_target_.samplecnt = static_cast<uint8_t>(threshold & 0x3f);
-      if (!wait_satisfied())
-        set_state(WfState::WAITCNT);
+      wait_for({.samplecnt = static_cast<uint8_t>(threshold & 0x3f)});
     } else if (name == "wait_bvhcnt") {
-      wait_target_.bvhcnt = static_cast<uint8_t>(t & WaitCounters::BVHCNT_MAX);
-      if (!wait_satisfied())
-        set_state(WfState::WAITCNT);
+      wait_for({.bvhcnt = static_cast<uint8_t>(t & WaitCounters::BVHCNT_MAX)});
     } else if (name == "wait_loadcnt_dscnt") {
       set_wait_target_loadcnt_dscnt(static_cast<uint8_t>((threshold >> 8) & 0x3F),
                                     static_cast<uint8_t>(threshold & 0x3F));
@@ -901,7 +861,31 @@ public:
     instruction_execution_error_detail_ = nullptr;
   }
 
-  void begin_instruction_execution() { clear_instruction_execution_error(); }
+  struct LdsSourceRead {
+    uint32_t address;
+    uint32_t bytes;
+  };
+
+  void begin_instruction_execution() {
+    clear_instruction_execution_error();
+    lds_source_read_.bytes = 0;
+    exec_written_words_ = 0;
+  }
+
+  /// EXEC words actually written by this instruction, even when the values agree.
+  std::optional<RegisterRef> instruction_exec_write() const {
+    if (!exec_written_words_)
+      return std::nullopt;
+    return RegisterRef{RegClass::EXEC, static_cast<uint16_t>(exec_written_words_ == 2),
+                       static_cast<uint8_t>(exec_written_words_ == 3 ? 2 : 1)};
+  }
+
+  /// The GFX10 direct operand broadcasts one range. Repeated lane evaluations
+  /// describe the same synchronous read to after-execute observers.
+  void record_lds_source_read(uint32_t address, uint32_t bytes) const {
+    lds_source_read_ = {address, bytes};
+  }
+  LdsSourceRead lds_source_read() const { return lds_source_read_; }
 
   // -- KFD debugger (trap) state --
   //
@@ -1157,9 +1141,13 @@ public:
 
   void halt(CpCompletionNotice notice = CpCompletionNotice::Send);
 
+  enum class EndReason : uint8_t { None, Normal, Saved, OrderedPsDone };
+  EndReason end_reason() const { return end_reason_; }
+
   /// End program execution. Halt immediately if memory has drained, or enter
   /// ENDING until the memory pipeline completes the outstanding work.
-  void end() {
+  void end(EndReason reason = EndReason::Normal) {
+    end_reason_ = reason;
     if (wait_counters_.empty())
       halt();
     else
@@ -1237,6 +1225,7 @@ public:
     if (memory_wait_scoreboard_)
       memory_wait_scoreboard_->clear();
     wait_counters_ = {};
+    end_reason_ = EndReason::None;
     wait_target_ = {};
     ready_cycle_ = 0;
     set_state(WfState::HALTED);
@@ -1245,6 +1234,8 @@ public:
     trapsts_ = 0;
     pending_memory_trap_ = false;
     pending_alu_causes_ = 0;
+    lds_source_read_ = {};
+    exec_written_words_ = 0;
     instruction_execution_error_ = InstructionExecutionError::None;
     instruction_execution_error_detail_ = nullptr;
     sleep_cycles_ = 0;
@@ -1300,6 +1291,7 @@ protected:
   std::shared_ptr<uint32_t> scratch_lease_;      ///< Resident PM4 scratch slot.
   uint32_t queue_id_ = 0; ///< KFD queue ID that launched this wave (debugger correlation).
   mutable InstructionExecutionError instruction_execution_error_ = InstructionExecutionError::None;
+  uint8_t exec_written_words_ = 0;
   mutable const char *instruction_execution_error_detail_ = nullptr;
   uint32_t lds_base_ = 0;     ///< Per-WG LDS base offset (set per dispatch).
   uint32_t lds_size_ = 0;     ///< Aligned per-WG LDS allocation size.
@@ -1454,8 +1446,10 @@ private:
   std::vector<uint8_t> hot_hook_subscriptions_;
   uint32_t hot_hook_observer_count_ = 0;
   bool hot_hook_subscriptions_valid_ = false;
+  mutable LdsSourceRead lds_source_read_{};
   mutable bool observing_lds_direct_read_ = false;
   uint64_t ready_cycle_ = 0;
+  EndReason end_reason_ = EndReason::None;
   WaitTarget wait_target_; ///< Current s_waitcnt thresholds.
 
   friend class ::rocjitsu::config::Gfx10CheckpointResources;
@@ -1467,6 +1461,7 @@ private:
   // storage. They intentionally bypass instruction read-observation because
   // completion writes produced memory results rather than instruction source
   // reads.
+  friend class MemoryPipeline;
   friend class GlobalMemPipeline;
   friend class LocalMemPipeline;
   friend class ScalarMemPipeline;

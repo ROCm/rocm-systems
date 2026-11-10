@@ -15,6 +15,23 @@
 
 namespace rocjitsu::amdgpu {
 
+/// RDNA and gfx1250 allocate a vector-memory and an LDS counter position
+/// for every generic FLAT, even when all requesting lanes resolve to one space.
+/// CDNA1–4 use address-domain participation as an unverified model. CDNA3/4
+/// ISA section 10.2 describes joint VM and LGKM completion.
+[[nodiscard]] constexpr bool flat_issues_both_counter_domains(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+}
+
+/// With the GFX10/GFX11 wait counters, each generic FLAT result needs both
+/// domains. Split-counter targets can establish completion per lane and space.
+[[nodiscard]] constexpr bool flat_requires_both_counters(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5;
+}
+
 /// @brief Completion ordering associated with an AMDGPU memory issue.
 /// @details Counter membership and completion ordering are separate: operations
 /// can share a wait counter without completing in one usable FIFO order.

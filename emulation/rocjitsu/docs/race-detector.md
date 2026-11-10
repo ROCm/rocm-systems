@@ -10,10 +10,16 @@ instructions.
 
 ## Target scope
 
-The race detector supports gfx942 (GFX9/CDNA3), gfx950 (GFX9/CDNA4) and
-gfx1151 (GFX11.5/RDNA3.5), with end-to-end tests for each. Support for gfx1250
-(CDNA5) is limited and under active development; end-to-end tests currently
-cover its tensor DMA races (see Tensor DMA races below).
+The race detector focuses on pre-GFX12 architectures. Its current end-to-end
+coverage exercises gfx942 (GFX9/CDNA3), gfx950 (GFX9/CDNA4), and gfx1151
+(GFX11.5/RDNA3.5). GFX12
+and later architectures are not supported. Some GFX12 split-counter behavior
+is already modeled and covered by plugin tests, including partial load waits
+and independent routing of FLAT destination lanes. This partial
+coverage does not establish complete counter, scheduling, or writeback support;
+the detector models issue-time capacity for the combined counters on CDNA1 through
+CDNA4 and RDNA1 through RDNA3.5, and for modeled split-counter operations on
+RDNA4 and CDNA5.
 
 ## Quick start
 
@@ -252,43 +258,32 @@ following lifecycle:
    still pending, such as a global load waiting on `loadcnt`, keeps every
    later retired event in the registry.
 
-Generic `FLAT_*` instructions select counter domains from their resolved memory
-requests. Global and scratch requests use the vector-memory counter; LDS
-requests use the LDS counter. An instruction with requests in both domains uses
-both counters. The runtime applies this conditional-participation model across
-AMD GPU targets, for loads, stores and atomics. Validation on every physical GPU
-architecture is not established.
+On RDNA and CDNA5 every issued generic `FLAT_*` instruction occupies a
+vector-memory and an LDS counter position, including when EXEC is empty. On
+RDNA1 through RDNA 3.5 a live destination needs sufficient waits on both
+counters. RDNA4 and CDNA5 track the returned lanes by their address domain.
+For CDNA1–4 the simulator models counter participation and
+result readiness by address domain. The CDNA3 and CDNA4 ISA guides, section
+10.2, describe joint VM and LGKM completion. CDNA hardware qualification is
+still needed to establish when one wait suffices. The conservative wait on
+gfx950 is `s_waitcnt vmcnt(0) lgkmcnt(0)`. LDS byte conflicts between waves
+also require workgroup synchronization.
 
-For uniform requests, the race detector uses only the selected memory domain.
-For example, on gfx950 with global addresses in every requesting lane, this use
-of `v8` has a sufficient wait:
+Routing preserves the decoded completion ordering for each issued counter.
+Generated VMEM/FLAT stores and atomics do not carry an EXP completion
+obligation. CDNA4 FLAT completion stays unordered in the model.
 
-```asm
-flat_load_dword v8, v[0:1]
-s_waitcnt vmcnt(0)
-flat_store_dword v[2:3], v8
-```
-
-LDS-only loads instead require `lgkmcnt(0)`. Newer targets use their corresponding
-split counters. Routing preserves decoded completion ordering and the VMEM/DS
-obligations used by the requests. Generated VMEM/FLAT stores and atomics do not
-carry an EXP completion obligation. In particular, CDNA4 FLAT completion stays
-unordered; a nonzero wait cannot prove a result ready.
-
-Functional counter acquisition and both runtime checkers use the selected memory
-domains. FLAT capacity constraints are applied after addresses are resolved.
+On targets with conditional counter participation, functional counter acquisition
+and both runtime checkers use the selected domains. FLAT capacity constraints are
+applied after addresses are resolved.
 Before reading the address operands, neither domain is guaranteed to need a
 counter slot. A full LDS counter followed by a global-only FLAT therefore cannot
 prove an older LDS result complete.
 
-A mixture of global and scratch lanes uses the same VMEM domain. Mixed LDS/global
-observations still attach both obligations to the whole race-plugin event, so a
-consumer restricted to an already-completed lane group can still get a false
-report. `TODO(newling)` regression cases track this remaining #12237 gap. The
-core checker's [FLAT register-readiness policy](memory-wait-counter-coverage.md#flat-register-readiness)
-tracks the groups separately. Functional execution splits mixed requests by
-address space, completing retryable global/scratch work before accessing LDS.
-The race plugin retains both counter obligations on its single mixed event.
+Global and scratch lanes share the VMEM domain. On RDNA1 through RDNA3.5 a FLAT
+result needs both counter waits. On targets with independent completion, each lane
+only waits for the pipeline that returned its result. Functional execution completes
+retryable global/scratch work before accessing LDS.
 LDS validation and interval registration are bounded by the CU backing capacity.
 For RDNA4 FLAT LDS, they also stop at the captured workgroup allocation end,
 retaining only complete memory elements; a lane whose first element does not fit
@@ -338,6 +333,9 @@ proves that the oldest read into `v0` completed. If those pending operations
 belonged to different or unordered classes, the capacity stall would not prove
 which individual event completed.
 
+On RDNA1 and RDNA2, GWS operations hold the contributing source VGPR and EXEC
+until EXPCNT allows an overwrite.
+
 The detector records the target-specific wait-counter family on every event.
 It handles both the combined wait fields and the standalone counter forms on
 supported targets, for example:
@@ -348,17 +346,21 @@ s_waitcnt_vmcnt null, 0        ; standalone VMCNT form
 s_waitcnt_lgkmcnt null, 0      ; standalone LGKMCNT form
 ```
 
-Counter-capacity backpressure is modeled for the VMCNT and LGKMCNT domains on
-CDNA1 through CDNA4 and GFX11. CDNA uses a four-bit LGKMCNT and six-bit VMCNT;
-GFX11 uses six-bit fields for both. GFX11 vector stores use the separate VSCNT
-domain and therefore do not create VMCNT pressure. Generic FLAT contributes to
-both modeled domains, so both capacity constraints are applied before operand
-reads.
+On CDNA1 through CDNA4, VMCNT holds up to 63 positions and LGKMCNT up to 15.
+On RDNA1 through RDNA3.5, both hold up to 63. Vector stores use a separate VSCNT
+on these RDNA targets. On RDNA4 and CDNA5 the detector applies the limits of
+the individual counters used by the operation. LOADCNT, STORECNT, DSCNT,
+SAMPLECNT, ASYNCCNT and TENSORCNT hold up to 63 positions where implemented,
+KMCNT holds up to 31, and BVHCNT and EXPCNT hold up to 7. Generic FLAT
+uses the target-specific admission rules above.
 
-The same completion-order distinction is used for nonzero partial waits; a
-zero wait still completes every event on the selected counter. The detector
-also uses these classes to determine whether two asynchronous writes to the
-same VGPR are ordered.
+A zero wait completes every event on the selected counter. On RDNA1/2,
+ordinary VMEM loads and image samples advance VMCNT in issue order, so a
+partial wait counts younger loads of either kind. Their register writes can
+complete out of order across the two kinds. The detector checks overlapping
+destinations separately when deciding whether to report an overwrite.
+The inline GFX10 query `IMAGE_GET_RESINFO` occupies VMCNT. The detector tracks
+the VGPRs and lanes it writes in ordinary load writeback order.
 
 The plugin keeps track, for all registers and LDS memory bytes, of which memory
 operations are in flight. When an instruction in the emulator accesses an LDS
@@ -378,11 +380,20 @@ complete from their in-order completion rule.
 **LDS race detection** uses coarse-grained counters (one per 16-byte chunk) for
 fast-path checks, with interval-based overlap scanning as a fallback. Live
 events are split by direction so that RAW and WAR hazards are checked
-independently. Chunks containing only ordinary LDS accesses from the accessing
+independently. An RDNA2 LDS atomic places the same event in both histories.
+Naturally aligned atomics of the same width can operate on the same word.
+A returning atomic also protects its result VGPR until its counter completes. Chunks containing only ordinary LDS accesses from the accessing
 wave can bypass the interval scan because those operations are ordered. A
 mixed chunk uses the scan until its count drains. The history remains available
 for checks by other waves until a barrier retires it. Direct-to-LDS and unordered
 memory operations still require their own completion checks.
+
+For indexed RDNA1/2 LDS instructions, the byte checks use the same workgroup
+allocation bounds as execution. The two addresses of a dual operation are
+checked independently. On RDNA1/2, an `LDS_DIRECT` source checks the actual
+byte, halfword or DWORD read by the instruction against pending writes. A
+completed read also protects those bytes against a conflicting write from
+another wave until workgroup synchronization.
 
 **VGPR race detection** tracks events per register, using the stored exec mask
 to determine which lanes are affected. Tracking is at byte granularity within
@@ -512,14 +523,10 @@ this source tree. The original
   covers instruction writes and scalar loads that overlap pending scalar-memory
   destinations. LDS WAW is not currently reported.
 
-- **Embedded waits**: the plugin handles explicit wait instructions, including
-  `s_wait_idle` and RDNA4's compatibility `s_waitcnt`, but does not apply waits
-  embedded in other instructions. For example, RDNA4 `v_interp_p10_f32` with
-  `wait_exp:0` retires pending EXPCNT results in the core checker, while the
-  plugin leaves them pending and can report false register hazards. With
-  `wait_exp:7` (no wait), both keep those results pending. The shared
-  `wait_hazard_test.cpp` suite records this boundary. Supporting embedded waits
-  requires retirement before the instruction's register accesses.
+- **Embedded waits**: the race detector applies the VINTERP EXPCNT threshold before
+  checking its VGPR sources on GFX11, GFX11.5 and GFX12. A threshold of 7 leaves
+  the prior exports pending. An explicit EXPCNT wait and an embedded zero threshold
+  both retire them. The typed wait-hazard suite covers the two checkers.
 
 - **Tensor DMA scope**: only the LDS side of a transfer is tracked. Its global
   memory accesses are not checked.
@@ -546,15 +553,6 @@ this source tree. The original
   hardware behavior for this encoding is not established. If hardware does not
   count it, a nonzero `s_wait_tensorcnt` that the detector accepts can leave an
   earlier transfer pending, so a real race would go unreported.
-
-- **No counter-capacity backpressure on gfx1250**: hardware stalls issue when a
-  wait counter is full, which proves the oldest pending entry complete without
-  an explicit wait. The detector models this only on CDNA1 through CDNA4 and
-  GFX11. On gfx1250, code that relies on a full counter instead of a wait
-  gets false positives: a wave that issues 64 tensor transfers has completed
-  its first, because the 6-bit `tensorcnt` holds at most 63, but the detector
-  still reports a read of the first transfer's LDS bytes as a race. Explicit
-  `s_wait_*` waits are handled correctly.
 
 - **Conservative DPP/SDWA write masks**: WAW precision depends on the execution
   plugin's instruction-write lane and byte masks. DPP destinations can currently

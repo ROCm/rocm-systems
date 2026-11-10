@@ -123,7 +123,7 @@ VmAccessOutcome MemoryPipeline::complete_entry(PipelineEntry entry) {
 }
 
 VmAccessOutcome MemoryPipeline::issue_impl(Instruction *inst, Wavefront &wf,
-                                           bool retain_unavailable) {
+                                           bool retain_unavailable, bool routing_observed) {
   const WaitCounterTokens counters = issue_counters(*inst);
   acquire_wait_counters(wf, counters);
   const VmAccessOutcome access = initiate_access(*inst, wf);
@@ -132,13 +132,14 @@ VmAccessOutcome MemoryPipeline::issue_impl(Instruction *inst, Wavefront &wf,
                   .wf = &wf,
                   .counters = counters,
                   .wave_generation = wf.dispatch_generation(),
-                  .issue_pc = wf.pc});
+                  .issue_pc = wf.pc,
+                  .routing_observed = routing_observed});
     wf.set_state(WfState::VM_RETRY);
     wf.cu().request_functional_yield();
     return VmAccessOutcome::Complete;
   }
   if (access != VmAccessOutcome::Complete) {
-    if (access == VmAccessOutcome::Faulted || wf.instruction_execution_failed()) {
+    if (access != VmAccessOutcome::Unavailable || wf.instruction_execution_failed()) {
       // An immediate fault can be retained by the same exception owner as a
       // retry fault. Discard its diagnostic producer before losing the instruction.
       [[maybe_unused]] const bool cancelled =
@@ -146,7 +147,8 @@ VmAccessOutcome MemoryPipeline::issue_impl(Instruction *inst, Wavefront &wf,
                                    .wf = &wf,
                                    .counters = counters,
                                    .wave_generation = wf.dispatch_generation(),
-                                   .issue_pc = wf.pc});
+                                   .issue_pc = wf.pc,
+                                   .routing_observed = routing_observed});
       assert(cancelled && "Faulted memory issue has no matching wait-check producer");
     }
     release_wait_counters(wf, counters);
@@ -157,15 +159,17 @@ VmAccessOutcome MemoryPipeline::issue_impl(Instruction *inst, Wavefront &wf,
                          .wf = &wf,
                          .counters = counters,
                          .wave_generation = wf.dispatch_generation(),
-                         .issue_pc = wf.pc});
+                         .issue_pc = wf.pc,
+                         .routing_observed = routing_observed});
 }
 
 VmAccessOutcome MemoryPipeline::issue(Instruction *inst, Wavefront &wf) {
-  return issue_impl(inst, wf, false);
+  return issue_impl(inst, wf, false, false);
 }
 
-VmAccessOutcome MemoryPipeline::issue_deferred(Instruction *inst, Wavefront &wf) {
-  return issue_impl(inst, wf, true);
+VmAccessOutcome MemoryPipeline::issue_deferred(Instruction *inst, Wavefront &wf,
+                                               bool routing_observed) {
+  return issue_impl(inst, wf, true, routing_observed);
 }
 
 void MemoryPipeline::defer_unavailable(Instruction *inst, Wavefront &wf) {
@@ -266,6 +270,8 @@ bool MemoryPipeline::cancel_wait_check_issue(const PipelineEntry &entry) {
                                        wf.cu().arch(), xcnt))
       return false;
   }
+  if (entry.routing_observed)
+    wf.raw_cu().plugin_group().onAmdgpuMemoryAccessCancelled(*entry.inst, wf);
   return true;
 }
 
