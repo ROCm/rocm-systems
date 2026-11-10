@@ -39,7 +39,7 @@ def test_output_matches_golden_files(fake_config):
         for name, text in files.items():
             with (EXPECTED / name).open("w", encoding="utf-8", newline="\n") as f:
                 f.write(text)
-    assert sorted(files) == ["fake_probes.cpp", "fake_probes.h"]
+    assert sorted(files) == ["fake_probes.cpp", "fake_probes.h", "fake_probes.json"]
     for name, text in files.items():
         assert text == (EXPECTED / name).read_text(encoding="utf-8"), (
             f"{name} differs from tests/data/expected; if the change is intended, "
@@ -154,7 +154,7 @@ def test_capture_levels_guard_fields(source):
 def test_check_passes_on_current_files_and_fails_on_stale(
     fake_config, tmp_path, capsys
 ):
-    for name in ("fake_probes.h", "fake_probes.cpp"):
+    for name in ("fake_probes.h", "fake_probes.cpp", "fake_probes.json"):
         shutil.copy(EXPECTED / name, tmp_path / name)
     args = [
         "--config",

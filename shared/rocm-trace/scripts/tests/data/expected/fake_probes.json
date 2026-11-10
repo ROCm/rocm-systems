@@ -1,0 +1,283 @@
+{
+  "schema": "rocm-trace-probe-schema",
+  "version": 1,
+  "generator": "rocm_trace_gen 1.0.0",
+  "config": "fake.yaml",
+  "provider": "fake_provider",
+  "string_cap": "ROCM_TRACE_STRING_CAP",
+  "capture_levels": ["none", "scalars", "full"],
+  "enums": {
+    "fakeError_t": {"signed": false, "size": 4, "enumerators": {"fakeSuccess": 0, "fakeErrorInvalidValue": 1}},
+    "fakeFlags": {"signed": false, "size": 4, "enumerators": {"fakeFlagHigh": 2147483648}},
+    "fakeWide": {"signed": false, "size": 8, "enumerators": {"fakeWideBig": 1099511627776}}
+  },
+  "skipped": [
+    {"api": "fakeSkipped", "table": "FakeTable", "reason": "the test of a skipped entry"}
+  ],
+  "events": [
+    {"name": "fakeScalars_enter", "api": "fakeScalars", "table": "FakeTable", "phase": "enter", "opcode": "start", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "a", "role": "argument", "param": "a", "type": "int8_t", "encoding": "Int8", "capture": "scalars"},
+        {"name": "b", "role": "argument", "param": "b", "type": "int16_t", "encoding": "Int16", "capture": "scalars"},
+        {"name": "c", "role": "argument", "param": "c", "type": "int32_t", "encoding": "Int32", "capture": "scalars"},
+        {"name": "d", "role": "argument", "param": "d", "type": "int64_t", "encoding": "Int64", "capture": "scalars"},
+        {"name": "e", "role": "argument", "param": "e", "type": "uint8_t", "encoding": "UInt8", "capture": "scalars"},
+        {"name": "f", "role": "argument", "param": "f", "type": "uint16_t", "encoding": "UInt16", "capture": "scalars"},
+        {"name": "g", "role": "argument", "param": "g", "type": "uint32_t", "encoding": "UInt32", "capture": "scalars"},
+        {"name": "h", "role": "argument", "param": "h", "type": "uint64_t", "encoding": "UInt64", "capture": "scalars"},
+        {"name": "i", "role": "argument", "param": "i", "type": "size_t", "encoding": "UInt64", "capture": "scalars"},
+        {"name": "j", "role": "argument", "param": "j", "type": "bool", "encoding": "Boolean", "capture": "scalars"},
+        {"name": "k", "role": "argument", "param": "k", "type": "float", "encoding": "Float32", "capture": "scalars"},
+        {"name": "l", "role": "argument", "param": "l", "type": "double", "encoding": "Float64", "capture": "scalars"}
+      ]},
+    {"name": "fakeScalars_exit", "api": "fakeScalars", "table": "FakeTable", "phase": "exit", "opcode": "stop", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "result", "role": "result", "param": "result", "type": "fakeError_t", "encoding": "UInt32", "enum": "fakeError_t", "capture": "none"},
+        {"name": "exception", "role": "exception", "param": "exception", "type": "bool", "encoding": "Boolean", "capture": "none"}
+      ]},
+    {"name": "fakeAlloc_enter", "api": "fakeAlloc", "table": "FakeTable", "phase": "enter", "opcode": "start", "level": "information", "keywords": ["API", "ALLOC"],
+      "fields": [
+        {"name": "ptr", "role": "argument", "param": "ptr", "type": "void **", "encoding": "Pointer", "capture": "scalars"},
+        {"name": "size", "role": "argument", "param": "size", "type": "size_t", "encoding": "UInt64", "capture": "scalars"}
+      ]},
+    {"name": "fakeAlloc_exit", "api": "fakeAlloc", "table": "FakeTable", "phase": "exit", "opcode": "stop", "level": "information", "keywords": ["API", "ALLOC"],
+      "fields": [
+        {"name": "result", "role": "result", "param": "result", "type": "fakeError_t", "encoding": "UInt32", "enum": "fakeError_t", "capture": "none"},
+        {"name": "ptr", "role": "output", "param": "ptr", "type": "void *", "param_type": "void **", "encoding": "Pointer", "capture": "full", "on_success": true},
+        {"name": "exception", "role": "exception", "param": "exception", "type": "bool", "encoding": "Boolean", "capture": "none"}
+      ]},
+    {"name": "fakeName_enter", "api": "fakeName", "table": "FakeTable", "phase": "enter", "opcode": "start", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "name", "role": "argument", "param": "name", "type": "char *", "encoding": "Pointer", "capture": "scalars"},
+        {"name": "len", "role": "argument", "param": "len", "type": "int", "encoding": "Int32", "capture": "scalars"}
+      ]},
+    {"name": "fakeName_exit", "api": "fakeName", "table": "FakeTable", "phase": "exit", "opcode": "stop", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "result", "role": "result", "param": "result", "type": "fakeError_t", "encoding": "UInt32", "enum": "fakeError_t", "capture": "none"},
+        {"name": "name", "role": "output", "param": "name", "type": "char *", "encoding": "CountedString", "capped": true, "capture": "full", "on_success": true},
+        {"name": "exception", "role": "exception", "param": "exception", "type": "bool", "encoding": "Boolean", "capture": "none"}
+      ]},
+    {"name": "fakeLoad_enter", "api": "fakeLoad", "table": "FakeTable", "phase": "enter", "opcode": "start", "level": "verbose", "keywords": ["API"],
+      "fields": [
+        {"name": "path", "role": "argument", "param": "path", "type": "const char *", "encoding": "CountedString", "capped": true, "capture": "full"},
+        {"name": "stream", "role": "argument", "param": "stream", "type": "fakeStream_t", "encoding": "Pointer", "capture": "scalars"}
+      ]},
+    {"name": "fakeLoad_exit", "api": "fakeLoad", "table": "FakeTable", "phase": "exit", "opcode": "stop", "level": "verbose", "keywords": ["API"],
+      "fields": [
+        {"name": "result", "role": "result", "param": "result", "type": "fakeError_t", "encoding": "UInt32", "enum": "fakeError_t", "capture": "none"},
+        {"name": "exception", "role": "exception", "param": "exception", "type": "bool", "encoding": "Boolean", "capture": "none"}
+      ]},
+    {"name": "fakeGetFunction_enter", "api": "fakeGetFunction", "table": "FakeTable", "phase": "enter", "opcode": "start", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "function", "role": "argument", "param": "function", "type": "fakeFunction_t *", "encoding": "Pointer", "capture": "scalars"},
+        {"name": "kname", "role": "argument", "param": "kname", "type": "const char *", "encoding": "String", "capture": "full"}
+      ]},
+    {"name": "fakeGetFunction_exit", "api": "fakeGetFunction", "table": "FakeTable", "phase": "exit", "opcode": "stop", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "result", "role": "result", "param": "result", "type": "fakeError_t", "encoding": "UInt32", "enum": "fakeError_t", "capture": "none"},
+        {"name": "function", "role": "output", "param": "function", "type": "fakeFunction_t", "param_type": "fakeFunction_t *", "encoding": "Pointer", "capture": "full", "on_success": true},
+        {"name": "exception", "role": "exception", "param": "exception", "type": "bool", "encoding": "Boolean", "capture": "none"}
+      ]},
+    {"name": "fakeScratch_enter", "api": "fakeScratch", "table": "FakeTable", "phase": "enter", "opcode": "start", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "buffer", "role": "argument", "param": "buffer", "type": "char *", "encoding": "Pointer", "capture": "scalars"},
+        {"name": "size", "role": "argument", "param": "size", "type": "size_t", "encoding": "UInt64", "capture": "scalars"}
+      ]},
+    {"name": "fakeScratch_exit", "api": "fakeScratch", "table": "FakeTable", "phase": "exit", "opcode": "stop", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "result", "role": "result", "param": "result", "type": "fakeError_t", "encoding": "UInt32", "enum": "fakeError_t", "capture": "none"},
+        {"name": "exception", "role": "exception", "param": "exception", "type": "bool", "encoding": "Boolean", "capture": "none"}
+      ]},
+    {"name": "fakeLaunch_enter", "api": "fakeLaunch", "table": "FakeTable", "phase": "enter", "opcode": "start", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "grid_x", "role": "argument", "param": "grid", "path": ["x"], "type": "uint32_t", "param_type": "fakeDim3", "encoding": "UInt32", "capture": "scalars"},
+        {"name": "grid_y", "role": "argument", "param": "grid", "path": ["y"], "type": "uint32_t", "param_type": "fakeDim3", "encoding": "UInt32", "capture": "scalars"},
+        {"name": "grid_z", "role": "argument", "param": "grid", "path": ["z"], "type": "uint32_t", "param_type": "fakeDim3", "encoding": "UInt32", "capture": "scalars"},
+        {"name": "block_x", "role": "argument", "param": "block", "path": ["x"], "type": "uint32_t", "param_type": "fakeDim3", "encoding": "UInt32", "capture": "scalars"},
+        {"name": "block_y", "role": "argument", "param": "block", "path": ["y"], "type": "uint32_t", "param_type": "fakeDim3", "encoding": "UInt32", "capture": "scalars"},
+        {"name": "block_z", "role": "argument", "param": "block", "path": ["z"], "type": "uint32_t", "param_type": "fakeDim3", "encoding": "UInt32", "capture": "scalars"},
+        {"name": "stream", "role": "argument", "param": "stream", "type": "fakeStream_t", "encoding": "Pointer", "capture": "scalars"}
+      ]},
+    {"name": "fakeLaunch_exit", "api": "fakeLaunch", "table": "FakeTable", "phase": "exit", "opcode": "stop", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "result", "role": "result", "param": "result", "type": "fakeError_t", "encoding": "UInt32", "enum": "fakeError_t", "capture": "none"},
+        {"name": "exception", "role": "exception", "param": "exception", "type": "bool", "encoding": "Boolean", "capture": "none"}
+      ]},
+    {"name": "fakeLaunchEx_enter", "api": "fakeLaunchEx", "table": "FakeTable", "phase": "enter", "opcode": "start", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "config_grid_x", "role": "argument", "param": "config", "path": ["grid", "x"], "type": "uint32_t", "param_type": "fakeLaunchConfig", "encoding": "UInt32", "capture": "scalars"},
+        {"name": "config_grid_y", "role": "argument", "param": "config", "path": ["grid", "y"], "type": "uint32_t", "param_type": "fakeLaunchConfig", "encoding": "UInt32", "capture": "scalars"},
+        {"name": "config_grid_z", "role": "argument", "param": "config", "path": ["grid", "z"], "type": "uint32_t", "param_type": "fakeLaunchConfig", "encoding": "UInt32", "capture": "scalars"},
+        {"name": "config_block_x", "role": "argument", "param": "config", "path": ["block", "x"], "type": "uint32_t", "param_type": "fakeLaunchConfig", "encoding": "UInt32", "capture": "scalars"},
+        {"name": "config_block_y", "role": "argument", "param": "config", "path": ["block", "y"], "type": "uint32_t", "param_type": "fakeLaunchConfig", "encoding": "UInt32", "capture": "scalars"},
+        {"name": "config_block_z", "role": "argument", "param": "config", "path": ["block", "z"], "type": "uint32_t", "param_type": "fakeLaunchConfig", "encoding": "UInt32", "capture": "scalars"},
+        {"name": "config_extra_0_x", "role": "argument", "param": "config", "path": ["extra", 0, "x"], "type": "uint32_t", "param_type": "fakeLaunchConfig", "encoding": "UInt32", "capture": "scalars"},
+        {"name": "config_extra_0_y", "role": "argument", "param": "config", "path": ["extra", 0, "y"], "type": "uint32_t", "param_type": "fakeLaunchConfig", "encoding": "UInt32", "capture": "scalars"},
+        {"name": "config_extra_0_z", "role": "argument", "param": "config", "path": ["extra", 0, "z"], "type": "uint32_t", "param_type": "fakeLaunchConfig", "encoding": "UInt32", "capture": "scalars"},
+        {"name": "config_extra_1_x", "role": "argument", "param": "config", "path": ["extra", 1, "x"], "type": "uint32_t", "param_type": "fakeLaunchConfig", "encoding": "UInt32", "capture": "scalars"},
+        {"name": "config_extra_1_y", "role": "argument", "param": "config", "path": ["extra", 1, "y"], "type": "uint32_t", "param_type": "fakeLaunchConfig", "encoding": "UInt32", "capture": "scalars"},
+        {"name": "config_extra_1_z", "role": "argument", "param": "config", "path": ["extra", 1, "z"], "type": "uint32_t", "param_type": "fakeLaunchConfig", "encoding": "UInt32", "capture": "scalars"},
+        {"name": "config_slots", "role": "argument", "param": "config", "path": ["slots"], "type": "void *[2]", "param_type": "fakeLaunchConfig", "encoding": "PointerFixedArray", "count": 2, "capture": "scalars"},
+        {"name": "config_weights_0", "role": "argument", "param": "config", "path": ["weights", 0], "type": "float", "param_type": "fakeLaunchConfig", "encoding": "Float32", "capture": "scalars"},
+        {"name": "config_weights_1", "role": "argument", "param": "config", "path": ["weights", 1], "type": "float", "param_type": "fakeLaunchConfig", "encoding": "Float32", "capture": "scalars"},
+        {"name": "config_flags", "role": "argument", "param": "config", "path": ["flags"], "type": "unsigned int", "param_type": "fakeLaunchConfig", "encoding": "UInt32", "capture": "scalars"},
+        {"name": "config_named_a", "role": "argument", "param": "config", "path": ["named", "a"], "type": "unsigned char", "param_type": "fakeLaunchConfig", "encoding": "UInt8", "capture": "scalars"},
+        {"name": "config_named_b", "role": "argument", "param": "config", "path": ["named", "b"], "type": "unsigned short", "param_type": "fakeLaunchConfig", "encoding": "UInt16", "capture": "scalars"}
+      ]},
+    {"name": "fakeLaunchEx_exit", "api": "fakeLaunchEx", "table": "FakeTable", "phase": "exit", "opcode": "stop", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "result", "role": "result", "param": "result", "type": "fakeError_t", "encoding": "UInt32", "enum": "fakeError_t", "capture": "none"},
+        {"name": "exception", "role": "exception", "param": "exception", "type": "bool", "encoding": "Boolean", "capture": "none"}
+      ]},
+    {"name": "fakeOpen_enter", "api": "fakeOpen", "table": "FakeTable", "phase": "enter", "opcode": "start", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "handle_reserved", "role": "argument", "param": "handle", "path": ["reserved"], "type": "char[16]", "param_type": "fakeHandle", "encoding": "Int8FixedArray", "count": 16, "capture": "scalars"},
+        {"name": "ptr", "role": "argument", "param": "ptr", "type": "void **", "encoding": "Pointer", "capture": "scalars"}
+      ]},
+    {"name": "fakeOpen_exit", "api": "fakeOpen", "table": "FakeTable", "phase": "exit", "opcode": "stop", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "result", "role": "result", "param": "result", "type": "fakeError_t", "encoding": "UInt32", "enum": "fakeError_t", "capture": "none"},
+        {"name": "ptr", "role": "output", "param": "ptr", "type": "void *", "param_type": "void **", "encoding": "Pointer", "capture": "full", "on_success": true},
+        {"name": "exception", "role": "exception", "param": "exception", "type": "bool", "encoding": "Boolean", "capture": "none"}
+      ]},
+    {"name": "fakeBits_enter", "api": "fakeBits", "table": "FakeTable", "phase": "enter", "opcode": "start", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "bits", "role": "argument", "param": "bits", "type": "fakeBits", "encoding": "UInt8FixedArray", "count": 4, "capture": "scalars"},
+        {"name": "value_kind", "role": "argument", "param": "value", "path": ["kind"], "type": "int", "param_type": "fakeValue", "encoding": "Int32", "capture": "scalars"},
+        {"name": "value_union", "role": "argument", "param": "value", "type": "fakeValue::(unnamed union)", "param_type": "fakeValue", "encoding": "UInt8FixedArray", "count": 8, "capture": "scalars"}
+      ]},
+    {"name": "fakeBits_exit", "api": "fakeBits", "table": "FakeTable", "phase": "exit", "opcode": "stop", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "result", "role": "result", "param": "result", "type": "fakeError_t", "encoding": "UInt32", "enum": "fakeError_t", "capture": "none"},
+        {"name": "exception", "role": "exception", "param": "exception", "type": "bool", "encoding": "Boolean", "capture": "none"}
+      ]},
+    {"name": "fakeCallback_enter", "api": "fakeCallback", "table": "FakeTable", "phase": "enter", "opcode": "start", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "stream", "role": "argument", "param": "stream", "type": "fakeStream_t", "encoding": "Pointer", "capture": "scalars"},
+        {"name": "cb", "role": "argument", "param": "cb", "type": "fakeCallback_t", "encoding": "Pointer", "capture": "scalars"}
+      ]},
+    {"name": "fakeCallback_exit", "api": "fakeCallback", "table": "FakeTable", "phase": "exit", "opcode": "stop", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "result", "role": "result", "param": "result", "type": "fakeError_t", "encoding": "UInt32", "enum": "fakeError_t", "capture": "none"},
+        {"name": "exception", "role": "exception", "param": "exception", "type": "bool", "encoding": "Boolean", "capture": "none"}
+      ]},
+    {"name": "fakeRawFn_enter", "api": "fakeRawFn", "table": "FakeTable", "phase": "enter", "opcode": "start", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "fn", "role": "argument", "param": "fn", "type": "void (*)(void *)", "encoding": "Pointer", "capture": "scalars"},
+        {"name": "arg", "role": "argument", "param": "arg", "type": "void *", "encoding": "Pointer", "capture": "scalars"}
+      ]},
+    {"name": "fakeRawFn_exit", "api": "fakeRawFn", "table": "FakeTable", "phase": "exit", "opcode": "stop", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "result", "role": "result", "param": "result", "type": "fakeError_t", "encoding": "UInt32", "enum": "fakeError_t", "capture": "none"},
+        {"name": "exception", "role": "exception", "param": "exception", "type": "bool", "encoding": "Boolean", "capture": "none"}
+      ]},
+    {"name": "fakeErrorString_enter", "api": "fakeErrorString", "table": "FakeTable", "phase": "enter", "opcode": "start", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "error", "role": "argument", "param": "error", "type": "fakeError_t", "encoding": "UInt32", "enum": "fakeError_t", "capture": "scalars"}
+      ]},
+    {"name": "fakeErrorString_exit", "api": "fakeErrorString", "table": "FakeTable", "phase": "exit", "opcode": "stop", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "result", "role": "result", "param": "result", "type": "const char *", "encoding": "CountedString", "capped": true, "capture": "full"},
+        {"name": "exception", "role": "exception", "param": "exception", "type": "bool", "encoding": "Boolean", "capture": "none"}
+      ]},
+    {"name": "fakeNoResult_enter", "api": "fakeNoResult", "table": "FakeTable", "phase": "enter", "opcode": "start", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "x", "role": "argument", "param": "x", "type": "int", "encoding": "Int32", "capture": "scalars"}
+      ]},
+    {"name": "fakeNoResult_exit", "api": "fakeNoResult", "table": "FakeTable", "phase": "exit", "opcode": "stop", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "exception", "role": "exception", "param": "exception", "type": "bool", "encoding": "Boolean", "capture": "none"}
+      ]},
+    {"name": "fakeMakeDim_enter", "api": "fakeMakeDim", "table": "FakeTable", "phase": "enter", "opcode": "start", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "x", "role": "argument", "param": "x", "type": "uint32_t", "encoding": "UInt32", "capture": "scalars"}
+      ]},
+    {"name": "fakeMakeDim_exit", "api": "fakeMakeDim", "table": "FakeTable", "phase": "exit", "opcode": "stop", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "result_x", "role": "result", "param": "result", "path": ["x"], "type": "uint32_t", "param_type": "fakeDim3", "encoding": "UInt32", "capture": "none"},
+        {"name": "result_y", "role": "result", "param": "result", "path": ["y"], "type": "uint32_t", "param_type": "fakeDim3", "encoding": "UInt32", "capture": "none"},
+        {"name": "result_z", "role": "result", "param": "result", "path": ["z"], "type": "uint32_t", "param_type": "fakeDim3", "encoding": "UInt32", "capture": "none"},
+        {"name": "exception", "role": "exception", "param": "exception", "type": "bool", "encoding": "Boolean", "capture": "none"}
+      ]},
+    {"name": "fakeGetDim_enter", "api": "fakeGetDim", "table": "FakeTable", "phase": "enter", "opcode": "start", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "dim", "role": "argument", "param": "dim", "type": "fakeDim3 *", "encoding": "Pointer", "capture": "scalars"}
+      ]},
+    {"name": "fakeGetDim_exit", "api": "fakeGetDim", "table": "FakeTable", "phase": "exit", "opcode": "stop", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "result", "role": "result", "param": "result", "type": "fakeError_t", "encoding": "UInt32", "enum": "fakeError_t", "capture": "none"},
+        {"name": "dim_x", "role": "output", "param": "dim", "path": ["x"], "type": "uint32_t", "param_type": "fakeDim3 *", "encoding": "UInt32", "capture": "full", "on_success": true},
+        {"name": "dim_y", "role": "output", "param": "dim", "path": ["y"], "type": "uint32_t", "param_type": "fakeDim3 *", "encoding": "UInt32", "capture": "full", "on_success": true},
+        {"name": "dim_z", "role": "output", "param": "dim", "path": ["z"], "type": "uint32_t", "param_type": "fakeDim3 *", "encoding": "UInt32", "capture": "full", "on_success": true},
+        {"name": "exception", "role": "exception", "param": "exception", "type": "bool", "encoding": "Boolean", "capture": "none"}
+      ]},
+    {"name": "fakeWide_enter", "api": "fakeWide", "table": "FakeTable", "phase": "enter", "opcode": "start", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "value", "role": "argument", "param": "value", "type": "fakeWide", "encoding": "UInt64", "enum": "fakeWide", "capture": "scalars"},
+        {"name": "flags", "role": "argument", "param": "flags", "type": "fakeFlags", "encoding": "UInt32", "enum": "fakeFlags", "capture": "scalars"},
+        {"name": "props", "role": "argument", "param": "props", "type": "fakeProps *", "encoding": "Pointer", "capture": "scalars"}
+      ]},
+    {"name": "fakeWide_exit", "api": "fakeWide", "table": "FakeTable", "phase": "exit", "opcode": "stop", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "result", "role": "result", "param": "result", "type": "fakeError_t", "encoding": "UInt32", "enum": "fakeError_t", "capture": "none"},
+        {"name": "exception", "role": "exception", "param": "exception", "type": "bool", "encoding": "Boolean", "capture": "none"}
+      ]},
+    {"name": "fakeUnnamed_enter", "api": "fakeUnnamed", "table": "FakeTable", "phase": "enter", "opcode": "start", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "arg_1", "role": "argument", "param": "arg_1", "type": "int", "encoding": "Int32", "capture": "scalars"},
+        {"name": "arg_2", "role": "argument", "param": "arg_2", "type": "const char *", "encoding": "CountedString", "capped": true, "capture": "full"}
+      ]},
+    {"name": "fakeUnnamed_exit", "api": "fakeUnnamed", "table": "FakeTable", "phase": "exit", "opcode": "stop", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "result", "role": "result", "param": "result", "type": "fakeError_t", "encoding": "UInt32", "enum": "fakeError_t", "capture": "none"},
+        {"name": "exception", "role": "exception", "param": "exception", "type": "bool", "encoding": "Boolean", "capture": "none"}
+      ]},
+    {"name": "fakeReserved_enter", "api": "fakeReserved", "table": "FakeTable", "phase": "enter", "opcode": "start", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "arg_result", "role": "argument", "param": "result", "type": "int", "encoding": "Int32", "capture": "scalars"},
+        {"name": "arg_timestamp", "role": "argument", "param": "timestamp", "type": "uint64_t", "encoding": "UInt64", "capture": "scalars"},
+        {"name": "arg_exception", "role": "argument", "param": "exception", "type": "int *", "encoding": "Pointer", "capture": "scalars"}
+      ]},
+    {"name": "fakeReserved_exit", "api": "fakeReserved", "table": "FakeTable", "phase": "exit", "opcode": "stop", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "result", "role": "result", "param": "result", "type": "fakeError_t", "encoding": "UInt32", "enum": "fakeError_t", "capture": "none"},
+        {"name": "arg_exception", "role": "output", "param": "exception", "type": "int", "param_type": "int *", "encoding": "Int32", "capture": "full", "on_success": true},
+        {"name": "exception", "role": "exception", "param": "exception", "type": "bool", "encoding": "Boolean", "capture": "none"}
+      ]},
+    {"name": "fakeThrow_enter", "api": "fakeThrow", "table": "FakeTable", "phase": "enter", "opcode": "start", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "x", "role": "argument", "param": "x", "type": "int", "encoding": "Int32", "capture": "scalars"}
+      ]},
+    {"name": "fakeThrow_exit", "api": "fakeThrow", "table": "FakeTable", "phase": "exit", "opcode": "stop", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "result", "role": "result", "param": "result", "type": "fakeError_t", "encoding": "UInt32", "enum": "fakeError_t", "capture": "none"},
+        {"name": "exception", "role": "exception", "param": "exception", "type": "bool", "encoding": "Boolean", "capture": "none"}
+      ]},
+    {"name": "fakeInit_enter", "api": "fakeInit", "table": "FakeDeclTable", "phase": "enter", "opcode": "start", "level": "information", "keywords": ["API"],
+      "fields": []},
+    {"name": "fakeInit_exit", "api": "fakeInit", "table": "FakeDeclTable", "phase": "exit", "opcode": "stop", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "exception", "role": "exception", "param": "exception", "type": "bool", "encoding": "Boolean", "capture": "none"}
+      ]},
+    {"name": "fakeCount_enter", "api": "fakeCount", "table": "FakeDeclTable", "phase": "enter", "opcode": "start", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "device", "role": "argument", "param": "device", "type": "int", "encoding": "Int32", "capture": "scalars"},
+        {"name": "count", "role": "argument", "param": "count", "type": "size_t *", "encoding": "Pointer", "capture": "scalars"}
+      ]},
+    {"name": "fakeCount_exit", "api": "fakeCount", "table": "FakeDeclTable", "phase": "exit", "opcode": "stop", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "result", "role": "result", "param": "result", "type": "fakeError_t", "encoding": "UInt32", "enum": "fakeError_t", "capture": "none"},
+        {"name": "count", "role": "output", "param": "count", "type": "size_t", "param_type": "size_t *", "encoding": "UInt64", "capture": "full", "on_success": true},
+        {"name": "exception", "role": "exception", "param": "exception", "type": "bool", "encoding": "Boolean", "capture": "none"}
+      ]},
+    {"name": "fakeRenamed_enter", "api": "fakeRenamed", "table": "FakeRenamedTable", "phase": "enter", "opcode": "start", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "public_name", "role": "argument", "param": "public_name", "type": "int", "encoding": "Int32", "capture": "scalars"}
+      ]},
+    {"name": "fakeRenamed_exit", "api": "fakeRenamed", "table": "FakeRenamedTable", "phase": "exit", "opcode": "stop", "level": "information", "keywords": ["API"],
+      "fields": [
+        {"name": "result", "role": "result", "param": "result", "type": "fakeError_t", "encoding": "UInt32", "enum": "fakeError_t", "capture": "none"},
+        {"name": "exception", "role": "exception", "param": "exception", "type": "bool", "encoding": "Boolean", "capture": "none"}
+      ]}
+  ]
+}

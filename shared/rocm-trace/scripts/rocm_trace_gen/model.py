@@ -32,7 +32,8 @@ class CType:
     ``size_t``); the generated code uses it for declarations. ``size`` is in
     bytes.
 
-    - Enums: ``enum_signed`` is the signedness of the underlying type.
+    - Enums: ``enum_signed`` is the signedness of the underlying type, and
+      ``enumerators`` lists ``(name, value)`` in declaration order.
     - Pointers: ``pointee`` is set for a parameter or result that points to a
       complete type (outputs are read through it); ``is_const_char_pointer``
       marks a ``const char*``, which RC-API-2 records as a string.
@@ -46,6 +47,7 @@ class CType:
     kind: Kind
     size: int = 0
     enum_signed: bool = True
+    enumerators: Tuple[Tuple[str, int], ...] = ()
     pointee: Optional["CType"] = None
     is_char_pointer: bool = False
     is_const_char_pointer: bool = False

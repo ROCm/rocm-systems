@@ -11,7 +11,7 @@ must keep one layout, or LTTng corrupts the trace.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 from .model import CType, Kind
 
@@ -22,13 +22,31 @@ class Unmappable(Exception):
     """A type has no field mapping."""
 
 
+Path = Tuple[Union[str, int], ...]
+
+
 @dataclass(frozen=True)
 class Field:
-    """One event field: ``macro(args..., "name")``."""
+    """One event field: ``macro(args..., "name")``.
+
+    The rest describes the field for the probe schema: ``ctype`` is the C type
+    it records (an array or union for the fixed-array fields), ``path`` the
+    members and indices from the parameter to it, ``param`` and ``param_type``
+    the parameter (or "result", "exception") and its type, ``role`` one of "argument", "output", "result",
+    "exception", and ``capture`` the lowest ROCM_TRACE_CAPTURE level that
+    records it ("none", "scalars", "full"), with ``on_success`` for outputs.
+    """
 
     macro: str
     args: Tuple[str, ...]
     name: str
+    ctype: Optional[CType] = None
+    path: Path = ()
+    param: str = ""
+    param_type: str = ""
+    role: str = ""
+    capture: str = "none"
+    on_success: bool = False
 
     def render(self) -> str:
         return f'{self.macro}({", ".join(self.args)}, "{self.name}")'
@@ -66,7 +84,9 @@ def _scalar_type(ctype: CType) -> Tuple[str, str]:
     raise Unmappable(f"'{ctype.spelling}'")
 
 
-def scalar(ctype: CType, expr: str, name: str, cond: Optional[str] = None) -> Field:
+def scalar(
+    ctype: CType, expr: str, name: str, cond: Optional[str] = None, path: Path = ()
+) -> Field:
     """The field for a number, enum, bool, or pointer."""
     c_type, tl_type = _scalar_type(ctype)
     if ctype.kind == Kind.POINTER:
@@ -75,25 +95,34 @@ def scalar(ctype: CType, expr: str, name: str, cond: Optional[str] = None) -> Fi
     else:
         value = f"static_cast<{c_type}>({expr})"
         zero = f"{c_type}{{}}"
-    return Field(f"TraceLogging{tl_type}", (_guard(cond, value, zero),), name)
+    return Field(
+        f"TraceLogging{tl_type}", (_guard(cond, value, zero),), name, ctype, path
+    )
 
 
 def string(
-    expr: str, name: str, capped: bool = True, cond: Optional[str] = None
+    expr: str,
+    name: str,
+    capped: bool = True,
+    cond: Optional[str] = None,
+    ctype: Optional[CType] = None,
 ) -> Field:
     """A NUL-terminated string; a null pointer records "". Capped strings
     record at most ROCM_TRACE_STRING_CAP bytes (RC-GEN-8)."""
     pointer = _guard(cond, expr, "static_cast<const char*>(nullptr)")
     if not capped:
-        return Field("TraceLoggingString", (pointer,), name)
+        return Field("TraceLoggingString", (pointer,), name, ctype)
     return Field(
         "TraceLoggingCountedString",
         (f"text({pointer})", f"text_size({pointer}, {STRING_CAP})"),
         name,
+        ctype,
     )
 
 
-def _array(ctype: CType, expr: str, name: str, cond: Optional[str]) -> List[Field]:
+def _array(
+    ctype: CType, expr: str, name: str, cond: Optional[str], path: Path
+) -> List[Field]:
     element = ctype.element
     assert element is not None
     # One set of fields per element for structs and nested arrays, and for floating point:
@@ -101,7 +130,9 @@ def _array(ctype: CType, expr: str, name: str, cond: Optional[str]) -> List[Fiel
     if element.kind in (Kind.RECORD, Kind.ARRAY, Kind.FLOAT):
         fields: List[Field] = []
         for i in range(ctype.count):
-            fields.extend(value(element, f"{expr}[{i}]", f"{name}_{i}", cond))
+            fields.extend(
+                value(element, f"{expr}[{i}]", f"{name}_{i}", cond, path + (i,))
+            )
         return fields
     c_type, tl_type = _scalar_type(element)
     if element.kind == Kind.POINTER:
@@ -117,25 +148,27 @@ def _array(ctype: CType, expr: str, name: str, cond: Optional[str]) -> List[Fiel
             f"TraceLogging{tl_type}FixedArray",
             (_guard(cond, pointer, zero), str(ctype.count)),
             name,
+            ctype,
+            path,
         )
     ]
 
 
 def value(
-    ctype: CType, expr: str, name: str, cond: Optional[str] = None
+    ctype: CType, expr: str, name: str, cond: Optional[str] = None, path: Path = ()
 ) -> List[Field]:
     """The fields for a value: one for a scalar, one per component for a
     struct or array (RC-API-1: all components of an aggregate)."""
     if ctype.kind == Kind.ARRAY:
-        return _array(ctype, expr, name, cond)
+        return _array(ctype, expr, name, cond, path)
     if ctype.kind != Kind.RECORD:
-        return [scalar(ctype, expr, name, cond)]
+        return [scalar(ctype, expr, name, cond, path)]
     if not ctype.members:
         raise Unmappable(
             f"struct '{ctype.spelling}' (incomplete, or nested too deeply)"
         )
     if ctype.is_union:
-        return [_union_bytes(ctype, f"&({expr})", name, cond)]
+        return [_union_bytes(ctype, f"&({expr})", name, cond, path)]
     fields: List[Field] = []
     for member, mtype in ctype.members:
         if mtype.kind in (Kind.UNSUPPORTED, Kind.VOID):
@@ -143,22 +176,32 @@ def value(
                 f"struct '{ctype.spelling}' (member '{member}' is '{mtype.spelling}')"
             )
         if member:
-            fields.extend(value(mtype, f"{expr}.{member}", f"{name}_{member}", cond))
+            fields.extend(
+                value(
+                    mtype,
+                    f"{expr}.{member}",
+                    f"{name}_{member}",
+                    cond,
+                    path + (member,),
+                )
+            )
         elif mtype.is_union:
             # An anonymous union starts where its first member does.
             first = mtype.members[0][0] if mtype.members else ""
             if not first:
                 raise Unmappable(f"struct '{ctype.spelling}' (an unnamed nested union)")
             fields.append(
-                _union_bytes(mtype, f"&({expr}.{first})", f"{name}_union", cond)
+                _union_bytes(mtype, f"&({expr}.{first})", f"{name}_union", cond, path)
             )
         else:
             # An anonymous struct: its members belong to the enclosing one.
-            fields.extend(value(mtype, expr, name, cond))
+            fields.extend(value(mtype, expr, name, cond, path))
     return fields
 
 
-def _union_bytes(ctype: CType, address: str, name: str, cond: Optional[str]) -> Field:
+def _union_bytes(
+    ctype: CType, address: str, name: str, cond: Optional[str], path: Path
+) -> Field:
     """A union's bytes: which member is active is unknown."""
     pointer = f"reinterpret_cast<const uint8_t*>({address})"
     zero = f"zeros<uint8_t, {ctype.size}>()"
@@ -166,4 +209,6 @@ def _union_bytes(ctype: CType, address: str, name: str, cond: Optional[str]) -> 
         "TraceLoggingUInt8FixedArray",
         (_guard(cond, pointer, zero), str(ctype.size)),
         name,
+        ctype,
+        path,
     )

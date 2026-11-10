@@ -2,12 +2,14 @@
 
 """The in-tree HIP dispatch tables parse, and every entry gets a probe."""
 
+import json
 import re
 
 import pytest
 
 from conftest import DATA, REPO, generate_files, resource_dir
 from rocm_trace_gen.parse import parse_tables
+from test_schema import assert_schema_matches_source
 
 HIP_INCLUDE = REPO / "projects" / "hip" / "include"
 CLR_INCLUDE = REPO / "projects" / "clr" / "hipamd" / "include"
@@ -72,3 +74,14 @@ def test_every_entry_gets_a_probe(clang_args):
     assert (
         installed == expected["HipDispatchTable"] + expected["HipCompilerDispatchTable"]
     )
+
+
+def test_hip_schema_matches_its_probes(clang_args):
+    files = generate_files(DATA / "hip_minimal.yaml", clang_args)
+    assert_schema_matches_source(files, "hip_trace_probes")
+    schema = json.loads(files["hip_trace_probes.json"])
+    kinds = schema["enums"]["hipMemcpyKind"]["enumerators"]
+    assert kinds["hipMemcpyHostToDevice"] == 1
+    memcpy = next(e for e in schema["events"] if e["name"] == "hipMemcpyAsync_enter")
+    kind = next(f for f in memcpy["fields"] if f["name"] == "kind")
+    assert kind["enum"] == "hipMemcpyKind"
