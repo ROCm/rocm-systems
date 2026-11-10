@@ -2386,6 +2386,13 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             vm_config_c_api_test
             ${CMAKE_CURRENT_SOURCE_DIR}/race-detector/race_test_config.json
     )
+    # An installed ROCm SDK may provide an older library with the same SONAME.
+    set_tests_properties(
+        VmConfigCApi
+        PROPERTIES
+            ENVIRONMENT_MODIFICATION
+                "LD_LIBRARY_PATH=path_list_prepend:$<TARGET_FILE_DIR:rocjitsu_shared>"
+    )
 
     # Resolve only public C symbols through RTLD_LOCAL. Linking simulator
     # objects here would hide whether an ordinary embedder can map its handles.
