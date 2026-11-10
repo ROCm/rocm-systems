@@ -170,23 +170,13 @@ code, so this shows the path from that instruction to the racing access, where
 synchronization is missing. If the reporting wave never ran that instruction,
 the report shows its last 16 instructions.
 
-The instruction table follows the reporting wave's execution order. A separate
-`--- jump forward ---` or `--- jump backward ---` line highlights a
-nonsequential transition immediately before its destination. A transition back
-to the same PC uses `--- same PC executed again ---`. These markers describe
-ordinary control flow; they do not imply a race. An event from another wave, or
-one older than the trace window, is shown separately without a jump marker
-across that boundary.
-
-Instruction lengths vary. A transition is nonsequential only when the next PC
-differs from the end of the previous captured instruction. Sequential progress
-by 4, 8, 12, 16 or 20 bytes does not introduce a marker.
+The instruction table follows the reporting wave's execution order. An event
+from another wave, or one older than the trace window, is shown separately.
 
 Each wave retains 256 instruction records. An excerpt longer than 128 records
-shows the first 64 and last 64. Synchronization and control-flow instructions,
-and both sides of nonsequential transitions, remain visible in the middle. The
-number of elided instructions is shown at each gap. Older unrecorded history
-is identified separately.
+shows the first 64 and last 64. Synchronization and control-flow instructions
+remain visible in the middle. The number of elided instructions is shown at
+each gap. Older unrecorded history is identified separately.
 
 The final summary counts emitted reports and observations suppressed by the
 existing PC-based deduplication. These counts are not the number of affected

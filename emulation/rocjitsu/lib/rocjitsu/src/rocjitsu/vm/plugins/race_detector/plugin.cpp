@@ -199,22 +199,12 @@ util::FailureOr<std::string> formatTrace(const RingBuffer<InstructionSnapshot, 2
         first = i;
   }
   const size_t span = last > first ? last - first : 0;
-  auto nonsequential = [&](size_t i) {
-    if (i <= first || i >= last)
-      return false;
-    const InstructionSnapshot &previous = trace[i - 1];
-    return (trace[i].pc() < previous.pc() ||
-            trace[i].pc() - previous.pc() != previous.encoding().size_bytes());
-  };
   std::vector<bool> shown(n);
   constexpr size_t head = kTraceContextRows / 2;
   constexpr size_t tail = kTraceContextRows - head;
-  for (size_t i = first; i < last; ++i) {
+  for (size_t i = first; i < last; ++i)
     shown[i] = span <= kTraceContextRows || i - first < head || last - i <= tail ||
                trace[i].preserve_in_trace();
-    if (nonsequential(i))
-      shown[i - 1] = shown[i] = true;
-  }
   // An elision notice takes a line, so hiding a single instruction saves nothing.
   for (size_t i = first; i < last; ++i)
     if (!shown[i] && (i == first || shown[i - 1]) && (i + 1 == last || shown[i + 1]))
@@ -261,14 +251,6 @@ util::FailureOr<std::string> formatTrace(const RingBuffer<InstructionSnapshot, 2
     const bool is_conflict = conflict_index && i == *conflict_index;
     const bool is_read = read_index && i == *read_index;
     const InstructionSnapshot &instruction = trace[i];
-    if (nonsequential(i)) {
-      const auto previous_pc = trace[i - 1].pc();
-      oss << "       --- "
-          << (instruction.pc() < previous_pc   ? "jump backward"
-              : instruction.pc() > previous_pc ? "jump forward"
-                                               : "same PC executed again")
-          << " ---\n";
-    }
     util::FailureOr<std::string> text = disassemble(instruction);
     if (text.failed())
       return util::Result::failure();

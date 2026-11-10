@@ -4890,7 +4890,6 @@ TEST(FormatTraceTest, WaveLaneAnnotations) {
                     "  ==>  0x100  ds_write_b32 v9, v12  ; <-- wave 3\n"
                     "       Execution trace below is for wave 0.\n"
                     "       0x100  ds_write_b32 v9, v12\n"
-                    "       --- jump forward ---\n"
                     "       0x108  s_nop 0\n"
                     "  ==>  0x10c  ds_read_b32 v8, v9  ; <-- wave 0 lane 5\n");
   EXPECT_NE(result.value().find("0x108  s_nop 0"), std::string::npos);
@@ -4966,7 +4965,6 @@ TEST(FormatTraceTest, IdenticalEncodingsKeepTheFirstProducerAndLastAccess) {
                     "  ==>  0x100  s_nop 0  ; <-- wave 0\n"
                     "       0x104  s_nop 0\n"
                     "       0x108  s_nop 0\n"
-                    "       --- jump backward ---\n"
                     "       0x100  s_nop 0\n"
                     "  ==>  0x104  s_nop 0  ; <-- wave 0 lane 0\n");
 }
@@ -4990,11 +4988,8 @@ TEST(FormatTraceTest, RepeatedPcKeepsEachCapturedEncoding) {
   ASSERT_TRUE(report.succeeded());
   EXPECT_EQ(report.value(), "       PC     Instruction\n"
                     "  ==>  0x100  ds_read_b32 v8, v0  ; <-- wave 0\n"
-                    "       --- jump forward ---\n"
                     "       0x104  s_nop 0\n"
-                    "       --- jump backward ---\n"
                     "       0x100  s_nop 0\n"
-                    "       --- jump forward ---\n"
                     "  ==>  0x108  s_nop 0  ; <-- wave 0 lane 0\n");
 }
 
@@ -5014,7 +5009,6 @@ TEST(FormatTraceTest, RewrittenReadPcDoesNotTrimAtAnEarlierEncoding) {
   EXPECT_EQ(report.value(), "       PC     Instruction\n"
                     "  ==>  0x100  s_nop 0  ; <-- wave 0\n"
                     "       0x104  s_nop 0\n"
-                    "       --- jump backward ---\n"
                     "  ==>  0x100  s_nop 7  ; <-- wave 0 lane 0\n");
 }
 
@@ -5163,7 +5157,7 @@ TEST(RaceDetectorPluginOutputTest, DispatchLineUsesQuestionMarksForUnresolvedKer
   EXPECT_NE(sink.str().find("[rocjitsu] Kernel dispatch: \"?\" symbol=\"?\"\n"), std::string::npos);
 }
 
-TEST(RaceDetectorPluginOutputTest, ExecutedJumpsHaveSeparatorsAtTheirDestinations) {
+TEST(RaceDetectorPluginOutputTest, TraceRowsFollowExecutedBranches) {
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize(1));
   PluginSinkConfig sink_config;
@@ -5180,14 +5174,12 @@ TEST(RaceDetectorPluginOutputTest, ExecutedJumpsHaveSeparatorsAtTheirDestination
   const std::array code{S_NOP, load[0], load[1], forward[0], read[0], S_ENDPGM, backward[0]};
   f.run_kernel(code.data(), code.size());
   const auto report = sink.str();
-  EXPECT_NE(report.find("0x104c  s_branch 2\n       --- jump forward ---\n       0x1058"),
-            std::string::npos)
-      << report;
-  EXPECT_NE(report.find("       --- jump backward ---\n  ==>  0x1050  v_mov_b32_e32 v9, v8"),
-            std::string::npos)
-      << report;
   EXPECT_NE(report.find("  ==>  0x1044  ds_read_b32 v8, v0"), std::string::npos) << report;
-  EXPECT_NE(report.find("0x1058  s_branch 65533\n"), std::string::npos) << report;
+  EXPECT_NE(report.find("       0x104c  s_branch 2\n"
+                        "       0x1058  s_branch 65533\n"
+                        "  ==>  0x1050  v_mov_b32_e32 v9, v8"),
+            std::string::npos)
+      << report;
   EXPECT_EQ(report.find("instructions elided"), std::string::npos);
 }
 

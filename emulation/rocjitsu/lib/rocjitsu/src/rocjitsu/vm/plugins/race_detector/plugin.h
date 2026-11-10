@@ -68,7 +68,7 @@ inline constexpr size_t kOtherWaveContextRows = 16;
 /// wave's conflict, the trace starts at the reporting wave's latest execution of
 /// the same instruction, or shows the last kOtherWaveContextRows rows when it has
 /// none. A span longer than kTraceContextRows keeps its first and last rows,
-/// synchronization and control-flow rows, and both sides of each jump.
+/// synchronization and control-flow rows.
 /// Disassemble only printed rows. Returns failure when `disassemble` fails.
 /// The callback must not throw.
 /// A same-wave conflict must not follow the current access in the trace.

@@ -41,29 +41,21 @@ InstructionSnapshot snapshot(uint64_t pc, uint32_t word, size_t width = 1,
 
 struct PrintedRow {
   bool marked;
-  std::string transition;
   uint64_t pc;
   size_t sequence;
 };
 
 std::vector<PrintedRow> rows(const std::string &report) {
   const std::regex pattern(R"(^\s*(==>\s*)?0x([0-9a-f]+)\s+instruction ([0-9]+))");
-  const std::regex marker(R"(^\s*--- (jump forward|jump backward|same PC executed again) ---$)");
   std::vector<PrintedRow> result;
   std::istringstream lines(report);
-  std::string line, transition;
+  std::string line;
   while (std::getline(lines, line)) {
     std::smatch match;
-    if (std::regex_search(line, match, marker)) {
-      EXPECT_TRUE(transition.empty());
-      transition = match[1];
-    } else if (std::regex_search(line, match, pattern)) {
-      result.push_back({match[1].matched, transition, std::stoull(match[2], nullptr, 16),
-                        std::stoull(match[3])});
-      transition.clear();
-    }
+    if (std::regex_search(line, match, pattern))
+      result.push_back(
+          {match[1].matched, std::stoull(match[2], nullptr, 16), std::stoull(match[3])});
   }
-  EXPECT_TRUE(transition.empty());
   return result;
 }
 
@@ -76,34 +68,15 @@ size_t elided_count(const std::string &report) {
   return result;
 }
 
-TEST(RaceReportTraceTest, VariableWidthSequentialInstructionsHaveNoJumpMarkers) {
-  Trace trace;
-  trace.push(snapshot(0x100, 0, 2));
-  trace.push(snapshot(0x108, 1, 1));
-  trace.push(snapshot(0x10c, 2, 3));
-  trace.push(snapshot(0x118, 3, 4));
-  trace.push(snapshot(0x128, 4, 5));
-  trace.push(snapshot(0x13c, 5, 1));
-  const auto report = formatTrace(trace, text, mark(trace, 0), mark(trace, 5));
-  const auto printed = rows(report);
-  ASSERT_EQ(printed.size(), 6u);
-  for (const auto &row : printed)
-    EXPECT_TRUE(row.transition.empty());
-  EXPECT_EQ(elided_count(report), 0u);
-}
-
-TEST(RaceReportTraceTest, ExactForwardBackwardAndRepeatedPcSeparators) {
+TEST(RaceReportTraceTest, PreservesExecutionOrderAcrossBranchesAndRepeatedPcs) {
   Trace trace;
   for (uint32_t i = 0; auto pc : {0x100u, 0x120u, 0x108u, 0x108u})
     trace.push(snapshot(pc, i++, 1));
   EXPECT_EQ(formatTrace(trace, text, mark(trace, 0), mark(trace, 3)),
             "       PC     Instruction\n"
             "  ==>  0x100  instruction 0  ; <-- wave 0 lane 0\n"
-            "       --- jump forward ---\n"
             "       0x120  instruction 1\n"
-            "       --- jump backward ---\n"
             "       0x108  instruction 2\n"
-            "       --- same PC executed again ---\n"
             "  ==>  0x108  instruction 3  ; <-- wave 0 lane 0\n");
 }
 
@@ -118,21 +91,6 @@ TEST(RaceReportTraceTest, PadsPcsSoInstructionsShareAColumn) {
       "       Execution trace below is for wave 0.\n"
       "       0xfc    instruction 0\n"
       "  ==>  0x100   instruction 1  ; <-- wave 0 lane 0\n");
-}
-
-TEST(RaceReportTraceTest, FullAddressRangeAndSelfLoopHaveCorrectJumpMarkers) {
-  Trace trace;
-  trace.push(snapshot(0, 0, 1));
-  trace.push(snapshot(UINT64_MAX, 1, 1));
-  trace.push(snapshot(0, 2, 1));
-  trace.push(snapshot(0, 3, 1));
-  const auto report = formatTrace(trace, text, mark(trace, 0), mark(trace, 3));
-  const auto printed = rows(report);
-  ASSERT_EQ(printed.size(), 4u);
-  EXPECT_TRUE(printed[0].transition.empty());
-  EXPECT_EQ(printed[1].transition, "jump forward");
-  EXPECT_EQ(printed[2].transition, "jump backward");
-  EXPECT_EQ(printed[3].transition, "same PC executed again");
 }
 
 TEST(RaceReportTraceTest, ContextLimitAndRingWrapPreserveRowsAndAccountForEveryGap) {
@@ -150,24 +108,23 @@ TEST(RaceReportTraceTest, ContextLimitAndRingWrapPreserveRowsAndAccountForEveryG
     ASSERT_TRUE(printed.back().marked);
     EXPECT_EQ(printed.front().sequence, length - trace.size());
     EXPECT_EQ(printed.back().sequence, length - 1);
-    for (const auto &row : printed)
-      EXPECT_TRUE(row.transition.empty());
     EXPECT_EQ(printed.size() + elided_count(report), trace.size());
   }
 }
 
-TEST(RaceReportTraceTest, ElisionNeverHidesSynchronizationOrEitherSideOfAJump) {
+TEST(RaceReportTraceTest, ElisionPreservesProtectedRowsAcrossPcDiscontinuities) {
   Trace trace;
   for (uint32_t i = 0; i < 200; ++i)
     trace.push(snapshot((i < 100 ? 0x1000u : 0x800u) + i * 4, i, 1, i == 80 || i == 120));
   const auto report = formatTrace(trace, text, mark(trace, 0), mark(trace, 199));
   const auto printed = rows(report);
   ASSERT_GT(elided_count(report), 0u);
-  for (size_t required : {0u, 80u, 99u, 100u, 120u, 199u})
+  for (size_t required : {0u, 80u, 120u, 199u})
     EXPECT_TRUE(
         std::ranges::any_of(printed, [=](const auto &row) { return row.sequence == required; }));
-  EXPECT_NE(report.find("instruction 99\n       --- jump backward ---\n       0x"),
-            std::string::npos);
+  for (size_t elided : {99u, 100u})
+    EXPECT_FALSE(
+        std::ranges::any_of(printed, [=](const auto &row) { return row.sequence == elided; }));
   EXPECT_EQ(printed.size() + elided_count(report), 200u);
 }
 
@@ -190,8 +147,6 @@ TEST(RaceReportTraceTest, RepeatedPcWithDifferentBytesSelectsTheMatchingEncoding
   const auto printed = rows(report);
   ASSERT_EQ(printed.size(), 4u);
   EXPECT_EQ(printed[0].sequence, 2u);
-  EXPECT_TRUE(printed[0].transition.empty());
-  EXPECT_EQ(printed[2].transition, "jump backward");
   EXPECT_EQ(printed.back().sequence, 5u);
 }
 
@@ -202,8 +157,6 @@ TEST(RaceReportTraceTest, OtherWaveConflictIsSeparateEvenWhenPcsAndEncodingsMatc
   const auto report = formatTrace(trace, text, mark(trace, 0, 1), mark(trace, 1));
   const auto printed = rows(report);
   ASSERT_EQ(printed.size(), 3u);
-  for (const auto &row : printed)
-    EXPECT_TRUE(row.transition.empty());
   EXPECT_NE(report.find("Execution trace below is for wave 0."), std::string::npos);
 }
 
@@ -233,7 +186,7 @@ TEST(RaceReportTraceTest, OtherWaveConflictNeverRunHereShowsOnlyRecentRows) {
   EXPECT_EQ(report.find("elided"), std::string::npos);
 }
 
-TEST(RaceReportTraceTest, ExpiredProducerRetainsIdentityAndMissingHistoryWithoutInventingAJump) {
+TEST(RaceReportTraceTest, ExpiredProducerRetainsIdentityAndMissingHistory) {
   Trace trace;
   const InstructionSnapshot producer = snapshot(0x100, 0, 1);
   trace.push(producer);
@@ -244,18 +197,16 @@ TEST(RaceReportTraceTest, ExpiredProducerRetainsIdentityAndMissingHistoryWithout
   ASSERT_GE(printed.size(), 2u);
   EXPECT_EQ(printed[0].sequence, 0u);
   EXPECT_EQ(printed[1].sequence, 44u);
-  EXPECT_TRUE(printed[1].transition.empty());
   EXPECT_NE(report.find("before trace window"), std::string::npos);
   EXPECT_NE(report.find("earlier instructions not recorded"), std::string::npos);
   EXPECT_EQ(printed.back().sequence, 299u);
   EXPECT_EQ(printed.size() - 1 + elided_count(report), trace.size());
 }
 
-TEST(RaceReportTraceTest, EmptyAndMissingCurrentTraceDoNotFabricateExecutionContinuity) {
+TEST(RaceReportTraceTest, EmptyTraceMarksCurrentAccessAsOutsideRecordedTrace) {
   const MarkedInstruction current{snapshot(0x104, 1, 1), 0, 0};
   const auto report = formatTrace({}, text, std::nullopt, current);
   ASSERT_EQ(rows(report).size(), 1u);
-  EXPECT_TRUE(rows(report)[0].transition.empty());
   EXPECT_NE(report.find("outside recorded trace"), std::string::npos);
 }
 
