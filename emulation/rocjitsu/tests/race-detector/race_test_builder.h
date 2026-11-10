@@ -197,16 +197,6 @@ public:
                                 order);
   }
 
-  /// A load into one VGPR.
-  void counterLoad(int wave, amdgpu::WaitCounterType counter, MemoryOrderClass order, int vgprDst) {
-    ASSERT_TRUE(waves_[wave]->prepareForCounterIncrement(counter).succeeded());
-    waves_[wave]->checkVgprWrite(vgprDst, defaultExec_, /*byteMask=*/0xF, order);
-    const std::array obligations{amdgpu::MemoryCounterObligation{counter, order}};
-    waves_[wave]->registerEvent(testInstruction(pc_++), MemoryEventType::GLOBAL_TO_VGPR,
-                                {static_cast<uint32_t>(vgprDst)}, defaultExec_, /*byteMask=*/0xF,
-                                obligations, order);
-  }
-
   /// A transfer that writes (GLOBAL_TO_LDS) or reads (LDS_TO_GLOBAL) LDS byte
   /// ranges, such as an async or tensor transfer. Its LDS accesses are checked
   /// as unordered, as the plugin checks async and tensor transfers.
