@@ -133,11 +133,16 @@ jobs:
       - name: Pull DVC files
         run: |
           cd ${{ github.workspace }}
-          dvc pull shared/amdgpu-windows-interop/wkmi/lnx/lib/libwkmi.a.dvc
+          $lib = "shared\amdgpu-windows-interop\wkmi\lnx\lib\libwkmi.a"
+
+          if ((Test-Path $lib) -and ((Get-Item $lib).Length -ge 1024)) {
+            Write-Host "$lib already present - skipping dvc pull."
+          } else {
+            dvc pull shared/amdgpu-windows-interop/wkmi/lnx/lib/libwkmi.a.dvc
+          }
 
           # A failed pull leaves the pointer behind rather than the archive, which would
           # otherwise surface much later as an unrelated-looking link error.
-          $lib = "shared\amdgpu-windows-interop\wkmi\lnx\lib\libwkmi.a"
           if (-not (Test-Path $lib)) {
             Write-Error "dvc pull finished but $lib is missing."
             exit 1
