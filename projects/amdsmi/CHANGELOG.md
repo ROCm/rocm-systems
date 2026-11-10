@@ -8,6 +8,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **`amd-smi ras --decode --cper-file <path>`**: decode a CPER record using the
+  vendored ADDC library and display the full event report (bank, error type, die,
+  syndrome, MCA flags, AFID) in human-readable, JSON, and CSV formats.
+
 - **Added `amdsmi_get_cper_json()` to return the decoded event report of a CPER record**.  
   - Returns the events, AFIDs, and FRUs of a record as JSON, in C and Python. There is no CLI change.
 
