@@ -401,10 +401,13 @@ impl DeviceDriverState {
     ) -> Result<VirtualMemory, Error> {
         match self {
             Self::LinuxKfd { driver, state } => {
+                let process = crate::os::ProcessIdentity::capture().map_err(|source| {
+                    crate::os::native_error("virtual memory process identity", source)
+                })?;
                 let owner = Shared::try_new_uninit()?;
                 let inner = driver.create_virtual_memory(state, kind, size, options)?;
                 Ok(VirtualMemory::new(VirtualMemoryState::from_linux_kfd(
-                    DriverVirtualMemory::new(driver.clone(), owner.write(inner)),
+                    DriverVirtualMemory::new(driver.clone(), owner.write(inner), process),
                 )))
             }
             #[cfg(test)]

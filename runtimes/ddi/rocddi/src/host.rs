@@ -9,3 +9,7 @@
 
 pub mod cache;
 pub mod clock;
+/// Linux process ownership support for the sibling runtime adapters.
+#[cfg(target_os = "linux")]
+#[doc(hidden)]
+pub mod linux;
