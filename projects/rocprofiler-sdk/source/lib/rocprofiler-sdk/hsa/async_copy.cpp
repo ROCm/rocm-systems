@@ -64,7 +64,7 @@ namespace async_copy
 void
 copy_time_cache::create(hsa_signal_t signal)
 {
-    m_data.wlock([signal](map_type& data) { data[signal.handle] = entry{}; });
+    m_data.wlock([signal](map_type& data) { data.erase(signal.handle); });
 }
 
 void
@@ -998,7 +998,16 @@ signal_create_impl(Args... args)
     auto _lock   = _cache->lock_lifetime();
     auto _status = _next(args...);
     if(_status == HSA_STATUS_SUCCESS)
-        _cache->create(*std::get<sizeof...(Args) - 1>(std::tie(args...)));
+    {
+        auto _signal = *std::get<sizeof...(Args) - 1>(std::tie(args...));
+        _cache->create(_signal);
+        if constexpr(TableIdx == ROCPROFILER_HSA_TABLE_ID_AmdExt &&
+                     OpIdx == ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_signal_create)
+        {
+            // IPC attachments can share this handle before any copy records its time.
+            if(std::get<3>(std::tie(args...)) & HSA_AMD_SIGNAL_IPC) _cache->retain(_signal);
+        }
+    }
     return _status;
 }
 

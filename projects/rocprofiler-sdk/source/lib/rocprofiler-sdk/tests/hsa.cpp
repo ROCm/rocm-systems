@@ -148,6 +148,19 @@ TEST(hsa, async_copy_signal_lifecycle)
     EXPECT_FALSE(cache.find({2}));
     cache.create(signal);
     EXPECT_FALSE(cache.find(signal));
+    cache.release(signal);
+    EXPECT_FALSE(cache.find(signal));
+
+    // IPC references can be retained before any copy records a timestamp.
+    cache.retain(signal);
+    cache.retain(signal);
+    cache.record(signal, HSA_STATUS_SUCCESS, {490, 500});
+    cache.release(signal);
+    value = cache.find(signal);
+    ASSERT_TRUE(value);
+    EXPECT_EQ(value->second.end, 500);
+    cache.release(signal);
+    EXPECT_FALSE(cache.find(signal));
 }
 
 TEST(hsa, high_precision_timestamp_contexts)
