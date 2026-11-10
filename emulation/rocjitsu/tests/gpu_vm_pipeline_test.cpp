@@ -874,6 +874,34 @@ TEST(GpuVmPipeline, ADeclinedFetchFaultIsOfferedOnlyOnce) {
   EXPECT_TRUE(context.wf->is_halted());
 }
 
+TEST(GpuVmPipeline, Cdna5InstructionFetchPreservesTheFullPcWidth) {
+  constexpr struct {
+    bool drm;
+    uint64_t pc;
+    uint64_t va;
+  } cases[] = {
+      {true, 0x0000800012345000, 0x0000800012345000},
+      {true, 0x01123456789ab000, 0xff123456789ab000},
+      {false, 0x01123456789ab000, 0x01123456789ab000},
+  };
+  for (const auto &[drm, pc, va] : cases) {
+    for (bool debug : {false, true}) {
+      SCOPED_TRACE(::testing::Message() << std::hex << pc << " drm=" << drm << " debug=" << debug);
+      TranslatedPipelineContext context;
+      ASSERT_NO_FATAL_FAILURE(context.initialize());
+      ASSERT_NE(context.wf, nullptr);
+      // Only this address requests a retry. Any other high VA faults the wave.
+      context.external->unavailable_translation_address = va;
+      context.wf->set_drm_shader_addresses(drm);
+      context.wf->pc = pc;
+      context.cu->set_debug_active(debug);
+      context.cu->step();
+      EXPECT_FALSE(context.wf->is_halted());
+      EXPECT_EQ(context.wf->pc, pc);
+    }
+  }
+}
+
 // A load from unmapped global memory faults once and does not complete, so it
 // never arrives at its barrier. That holds even when its whole LDS destination
 // lies past the wave's allocation: the global read still happens.

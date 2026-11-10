@@ -4987,11 +4987,12 @@ bool SimulatedKfd::on_wave_sendmsg(amdgpu::Wavefront &wave, uint32_t message) {
     // inspecting the TTMP values: a signal pointer can equal saved M0, and a
     // concurrent trap can legitimately rewrite those registers before the
     // second interrupt.
-    if (wave.pc >= 2 * sizeof(uint32_t)) {
+    const uint64_t pc = wave.vm_instruction_pc();
+    if (pc >= 2 * sizeof(uint32_t)) {
       const uint32_t payload_move =
-          wave.cu().fetch_instruction_word(wave.pc - 2 * sizeof(uint32_t), wave.process_id());
+          wave.cu().fetch_instruction_word(pc - 2 * sizeof(uint32_t), wave.process_id());
       const uint32_t delay =
-          wave.cu().fetch_instruction_word(wave.pc - sizeof(uint32_t), wave.process_id());
+          wave.cu().fetch_instruction_word(pc - sizeof(uint32_t), wave.process_id());
       const auto site =
           kmd::detail::classify_pre_gfx12_trap_interrupt_site(arch, payload_move, delay);
       if (site == kmd::detail::TrapInterruptSite::Profiling)
