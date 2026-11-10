@@ -111,6 +111,9 @@ static std::tuple<const amd::Isa*, const char*> findIsa(uint32_t gfxipMajor, uin
       palDeviceIter->gfxipMajor_, palDeviceIter->gfxipMinor_, palDeviceIter->gfxipStepping_,
       sramecc ? amd::Isa::Feature::Enabled : amd::Isa::Feature::Disabled,
       xnack ? amd::Isa::Feature::Enabled : amd::Isa::Feature::Disabled);
+  if (isa == nullptr) {
+    return std::make_tuple(nullptr, nullptr);
+  }
   return std::make_tuple(
       isa, (palDeviceIter->gfxipMajor_ > 8) ? isa->targetId() : palDeviceIter->palName_);
 }
@@ -2344,7 +2347,7 @@ void Device::destroyScratchBuffers() {
 
 void Device::fillHwSampler(uint32_t state, void* hwState, uint32_t hwStateSize,
                            const uint* addressMode, uint32_t mipFilter, float minLod,
-                           float maxLod) const {
+                           float maxLod, uint32_t maxAnisotropy) const {
   Pal::SamplerInfo samplerInfo = {};
   assert(addressMode != nullptr);
   samplerInfo.borderColorType = Pal::BorderColorType::TransparentBlack;
@@ -2353,15 +2356,24 @@ void Device::fillHwSampler(uint32_t state, void* hwState, uint32_t hwStateSize,
 
   samplerInfo.flags.unnormalizedCoords = !(state & amd::Sampler::StateNormalizedCoordsMask);
   samplerInfo.maxLod = 4096.0f;
+  samplerInfo.maxAnisotropy = maxAnisotropy;
 
   state &= ~amd::Sampler::StateNormalizedCoordsMask;
 
+  const bool aniso = (maxAnisotropy >= 2);
+
   // Program texture filter mode
   if (state == amd::Sampler::StateFilterLinear) {
-    samplerInfo.filter.magnification = Pal::XyFilterLinear;
-    samplerInfo.filter.minification = Pal::XyFilterLinear;
+    samplerInfo.filter.magnification =
+        aniso ? Pal::XyFilterAnisotropicLinear : Pal::XyFilterLinear;
+    samplerInfo.filter.minification =
+        aniso ? Pal::XyFilterAnisotropicLinear : Pal::XyFilterLinear;
     samplerInfo.filter.zFilter = Pal::ZFilterLinear;
+  } else if (aniso) {
+    samplerInfo.filter.magnification = Pal::XyFilterAnisotropicPoint;
+    samplerInfo.filter.minification = Pal::XyFilterAnisotropicPoint;
   }
+
 
   if (mipFilter == CL_FILTER_NEAREST) {
     samplerInfo.filter.mipFilter = Pal::MipFilterPoint;
@@ -2805,7 +2817,7 @@ bool Sampler::create(const amd::Sampler& owner) {
     return false;
   }
   dev_.fillHwSampler(owner.state(), hwState_, HsaSamplerObjectSize, owner.addessMode(),
-                     owner.mipFilter(), owner.minLod(), owner.maxLod());
+                     owner.mipFilter(), owner.minLod(), owner.maxLod(), owner.maxAnisotropy());
   return true;
 }
 
