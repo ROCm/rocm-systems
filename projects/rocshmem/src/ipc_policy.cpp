@@ -308,10 +308,18 @@ __host__ void IpcSdmaImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases
 
 __host__ void IpcSdmaImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
                                        TcpBootstrap *bootstrap) {
-  std::vector<int> shm_ranks;
-  IpcOnImpl::ipcHostInit(my_pe, heap_bases, bootstrap, &shm_ranks);
-  sdmaImpl_.sdmaHostInit(my_pe, shm_size, shm_rank, [&](int *values) {
-    bootstrap->groupAllGather(values, sizeof(int), shm_ranks);
+  IpcOnImpl::ipcHostInit(my_pe, heap_bases, bootstrap);
+
+  // SDMA connects via local HIP device ordinals (hipDeviceCanAccessPeer, engine-pinned KFD
+  // queues), which only exist within this process own node. shm_size/shm_rank come from the
+  // fabric pod, which vmm_fabric can legitimately span multiple nodes -- so SDMA must use its
+  // own node-local group instead of the pod.
+  std::vector<int> local_ranks = bootstrap->getLocalRanks();
+  int local_size = static_cast<int>(local_ranks.size());
+  int local_rank = static_cast<int>(std::find(local_ranks.begin(), local_ranks.end(), my_pe) -
+                                    local_ranks.begin());
+  sdmaImpl_.sdmaHostInit(my_pe, local_size, local_rank, [&](int *values) {
+    bootstrap->groupAllGather(values, sizeof(int), local_ranks);
   });
 }
 
