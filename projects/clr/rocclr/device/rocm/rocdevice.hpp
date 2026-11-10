@@ -992,11 +992,16 @@ class Device : public NullDevice {
   std::atomic<uint> numOfVgpus_;  //!< Virtual gpu unique index
 
   //! Returns the valid SDMA engine bitmask for the given operation type.
+  //! Note: maxSdmaD2DMask_ is intentionally NOT used here — it is queried for
+  //! self-to-self copies only and must not restrict peer D2D engine allocation.
+  //! Use GetSdmaD2DMask() for the same-device engine count heuristic.
   uint32_t GetSdmaValidMask(HwQueueEngine engine_type) const {
-    if (engine_type == HwQueueEngine::SdmaD2H) return maxSdmaReadMask_;
-    if (engine_type == HwQueueEngine::SdmaD2D && maxSdmaD2DMask_ != 0) return maxSdmaD2DMask_;
-    return maxSdmaWriteMask_;
+    return (engine_type == HwQueueEngine::SdmaD2H) ? maxSdmaReadMask_ : maxSdmaWriteMask_;
   }
+
+  //! Returns the SDMA engine mask for same-device D2D copies (0 if unavailable).
+  //! Used only by the blit-vs-SDMA heuristic, not for engine allocation.
+  uint32_t GetSdmaD2DMask() const { return maxSdmaD2DMask_; }
 
 #if DEVICE_ADDRESS_SANITIZER
   virtual device::UriLocator* createUriLocator() const;
