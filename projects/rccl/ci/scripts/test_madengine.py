@@ -2296,6 +2296,8 @@ def run_ab_in_one_allocation(
         pass
 
     env = os.environ.copy()
+    # Only the build lookups here need it; the nodes do not.
+    env.pop("GITHUB_TOKEN", None)
     docker_builds_dir = work_dir / "docker_builds"
     docker_builds_dir.mkdir(exist_ok=True)
     env["MAD_DOCKER_BUILDS"] = str(docker_builds_dir)
@@ -2684,8 +2686,10 @@ def rccl_artifact_exists(build: str, gpu_target: str, repo: str, timeout: int = 
     try:
         with urllib.request.urlopen(request, timeout=timeout):
             return True
-    except OSError:
-        return False
+    except urllib.error.HTTPError as exc:
+        if exc.code in (403, 404):
+            return False
+        raise
 
 
 def previous_scheduled_build(
@@ -2697,15 +2701,17 @@ def previous_scheduled_build(
     """The newest scheduled CI build of *schedule* older than *candidate*.
 
     Nightly means the previous scheduled run, weekly the previous Saturday's.
-    Whether that build passed does not matter: a regression it brought is
-    already on record, and comparing against it lets a second one show up on
-    its own instead of hiding behind the first. A run whose RCCL is not in the
-    bucket (its build failed, or retention dropped it) is skipped.
+    Runs whose RCCL is not in the bucket are skipped; whether a run passed
+    does not matter.
     """
     env = os.environ if env is None else env
-    created = artifact_build(candidate, env)["created_at"]
     query = {"event": "schedule", "branch": CI_BRANCH, "per_page": "100"}
-    if created:
+    if candidate:
+        # Without it the newest scheduled build would win, newer than an
+        # older candidate a dispatch names, and the ratio would run backwards.
+        created = artifact_build(candidate, env)["created_at"]
+        if not created:
+            raise RuntimeError(f"could not tell when candidate build {candidate} ran")
         query["created"] = f"<{created}"
     runs = _github_json(
         f"/actions/workflows/{CI_WORKFLOW}/runs?{urllib.parse.urlencode(query)}", env,
@@ -2918,7 +2924,7 @@ def resolve_baseline(
     try:
         build = previous_scheduled_build(candidate, schedule, gpu_target, env)
     except (OSError, ValueError, KeyError) as exc:
-        raise RuntimeError(f"could not list the scheduled CI builds: {exc}") from exc
+        raise RuntimeError(f"could not look up the scheduled CI builds: {exc}") from exc
     if build is None:
         raise RuntimeError(
             f"no {schedule} CI build before {candidate or 'now'} has its RCCL in "

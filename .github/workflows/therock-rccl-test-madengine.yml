@@ -248,10 +248,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           BASELINE_ARTIFACT_RUN_ID: ${{ steps.baseline.outputs.artifact_run_id }}
+          ARTIFACT_GROUP: ${{ inputs.artifact_group }}
         run: |
           python3 build_tools/install_rocm_from_artifacts.py \
             --run-id="${BASELINE_ARTIFACT_RUN_ID}" \
-            --artifact-group="${{ inputs.artifact_group }}" \
+            --artifact-group="${ARTIFACT_GROUP}" \
             --output-dir="${BASELINE_ARTIFACTS_DIR}" \
             --rccl
 
