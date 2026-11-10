@@ -1,0 +1,6 @@
+GRBM_COUNT_PER_XCD:
+  formula: GRBM_COUNT / $num_xcd
+GRBM_GUI_ACTIVE_PER_XCD:
+  formula: GRBM_GUI_ACTIVE / $num_xcd
+GRBM_SPI_BUSY_PER_XCD:
+  formula: GRBM_SPI_BUSY / $num_xcd
