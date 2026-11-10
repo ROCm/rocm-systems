@@ -164,7 +164,7 @@ private:
     submission.worker_tickets = 0;
   }
 
-  void drain_tasks(Submission &submission) {
+  void drain_tasks(Submission &submission) noexcept {
     while (true) {
       const size_t i = submission.next_task.fetch_add(1, std::memory_order_relaxed);
       if (i >= submission.tasks.size())
