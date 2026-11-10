@@ -1,3 +1,6 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 #pragma once
 
 /**
@@ -64,9 +67,11 @@ public:
      * @param clock             Clock stamping those records.
      * @param include_main_thread When false attach_initial() skips the thread whose
      *                          tid equals the process id.
+     * @param is_excluded       Tids it accepts are never attached and are detached
+     *                          when already tracked. May be empty.
      */
     thread_tracker(thread_source source, log_sink logger, clock_kind clock,
-                   bool include_main_thread);
+                   bool include_main_thread, std::function<bool(pid_t)> is_excluded = {});
 
     /**
      * Attach every listed thread except @p exclude_tid.
@@ -86,7 +91,8 @@ public:
 
     /**
      * Reconcile @p current with the trigger: detach (and tell @p pipeline about)
-     * threads that exited or whose tid was recycled, attach new ones. An attach
+     * threads that exited, whose tid was recycled or that became excluded, attach
+     * new ones. An attach
      * that throws is counted and logged once per tid.
      *
      * @param pipeline  May be null.
@@ -99,13 +105,16 @@ public:
     void reset() noexcept;
 
 private:
-    void try_attach(triggers::i_trigger& trigger, const thread_entry& entry, pid_t exclude_tid);
+    void try_attach(triggers::i_trigger& trigger, const thread_entry& entry,
+                    pid_t exclude_tid);
+    bool is_excluded(pid_t tid) const;
     void log_attach_failure(pid_t tid, std::string_view what);
 
     thread_source                            m_source;
     log_sink                                 m_logger;
     clock_kind                               m_clock;
     bool                                     m_include_main_thread;
+    std::function<bool(pid_t)>               m_is_excluded;
     std::unordered_map<pid_t, std::uint64_t> m_tid_start_ticks;
     std::unordered_set<pid_t>                m_logged_attach_failures;
     bool                                     m_listing_failed{ false };

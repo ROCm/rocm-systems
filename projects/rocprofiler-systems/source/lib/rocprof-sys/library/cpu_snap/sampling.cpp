@@ -4,6 +4,7 @@
 #include "library/cpu_snap/sampling.hpp"
 #include "common/env_vars.hpp"
 #include "core/config.hpp"
+#include "core/thread_list/internal_thread_list.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/cpu_snap_decoder.hpp"
 #include "core/trace_cache/sample_type.hpp"
@@ -54,6 +55,16 @@ setup()
     auto cfg           = make_sampler_config(settings);
     cfg.streaming.sink = &store_chunk;
     cfg.logger         = &forward_log_record;
+
+    // Never sample rocprofsys's own threads. The scope blocks creators of excluded
+    // threads, so a child is never listed before it is in the internal thread list.
+    cfg.threads.is_excluded = [](pid_t tid) {
+        return thread_list::get_internal_thread_list().is_excluded(tid);
+    };
+    cfg.threads.rescan_guard = [] {
+        return std::make_shared<thread_list::internal_thread_list::rescan_scope>(
+            thread_list::get_internal_thread_list().begin_rescan());
+    };
 
     g_sampler = std::make_unique<::cpu_snap::sampling::sampler>(std::move(cfg));
     g_sampler->start();

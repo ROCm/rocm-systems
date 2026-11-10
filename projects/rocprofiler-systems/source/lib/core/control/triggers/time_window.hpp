@@ -6,6 +6,7 @@
 #include "core/control/session.hpp"
 #include "core/control/waitable_clocks/contract.hpp"
 #include "core/state.hpp"
+#include "core/thread_list/internal_thread_list.hpp"
 
 #include <memory>
 #include <mutex>
@@ -118,6 +119,9 @@ private:
     void worker()
     {
         const auto thread_state_guard = state::thread::scoped(state::thread::Internal);
+        const thread_list::scoped_internal_thread internal_thread{
+            thread_list::get_internal_thread_list()
+        };
 
         const auto current_ts   = m_clock.now();
         const bool has_delay    = m_specs.delay > waitable_clocks::duration::zero();

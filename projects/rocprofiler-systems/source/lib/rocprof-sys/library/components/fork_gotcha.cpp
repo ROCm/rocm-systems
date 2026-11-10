@@ -6,6 +6,7 @@
 #include "common/env_vars.hpp"
 #include "core/config.hpp"
 #include "core/state.hpp"
+#include "core/thread_list/internal_thread_list.hpp"
 #include "library/components/fork_gotcha.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
@@ -130,6 +131,9 @@ postfork_child()
     // registers its, so the gotcha handler runs first - before the logger's
     // reset would.  See logger_t::reset_after_fork.
     logger_t::reset_after_fork();
+
+    // Same hazard as the logger lock: the list's locks may be inherited held.
+    thread_list::get_internal_thread_list().reset_after_fork();
 
     if(!is_child_process())
     {
