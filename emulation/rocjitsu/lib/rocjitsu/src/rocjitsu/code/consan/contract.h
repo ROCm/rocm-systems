@@ -25,11 +25,12 @@ using Digest = std::array<uint8_t, 32>;
 // and internal API changes alone do not require a new token; no negotiation is
 // performed between producers and consumers.
 inline constexpr std::array<uint8_t, 16> kProducerContract = {
-    0x93, 0x38, 0x01, 0xa7, 0x49, 0xe2, 0x47, 0x1e, 0x84, 0xef, 0x49, 0xea, 0xa0, 0x0c, 0xf1, 0x83};
+    0x94, 0x38, 0x01, 0xa7, 0x49, 0xe2, 0x47, 0x1e, 0x84, 0xef, 0x49, 0xea, 0xa0, 0x0c, 0xf1, 0x83};
 // Canonical hash input for the manifest's options identity. Changing any byte
 // changes the identity required by artifact and capture admission.
 inline constexpr std::string_view kMvpOptions =
-    "native-lds-widths=2,4,8,16;gfx1250-epoch-workgroup-barriers;one-workgroup-1d;"
+    "native-lds-widths=2,4,8,16;gfx1250-epoch-workgroup-barriers;workgroup-id=entry-"
+    "scalar;gfx1250-workgroups-1d=1..16;"
     "mask64;address-groups-per-"
     "site=4;collision=on";
 // Software record slots for distinct effective LDS address groups per wave/site.
@@ -42,6 +43,7 @@ inline constexpr uint32_t kAccessRecordBytes = 64;
 inline constexpr uint32_t kContextBytes = 64;
 inline constexpr uint32_t kSyncRecordBytes = 32;
 inline constexpr uint32_t kSyncCapacity = 16;
+inline constexpr uint32_t kWorkgroupIdTtmp9Selector = 108 + 9;
 
 constexpr uint64_t sync_offset(uint64_t sites) {
   return kRowHeaderBytes + sites * kAddressGroupsPerSite * kAccessRecordBytes;
@@ -83,7 +85,8 @@ inline constexpr uint32_t kRowLoss = 20;
 inline constexpr uint32_t kRowFinalSequence = 24;
 inline constexpr uint32_t kRowFinalPhase = 28;
 inline constexpr uint32_t kRowSyncLoss = 32;
-inline constexpr uint32_t kRowReservedBegin = 36;
+inline constexpr uint32_t kRowWorkgroupX = 36;
+inline constexpr uint32_t kRowReservedBegin = 40;
 inline constexpr uint32_t kRowEntered = 1;
 inline constexpr uint32_t kRowExited = 2;
 inline constexpr uint32_t kRowExhausted = 4;
@@ -198,6 +201,8 @@ public:
   uint32_t prepared_sgprs = 0;
   uint32_t prepared_vgprs = 0;
   uint32_t maximum_workgroup_size = 1024;
+  // Scalar selector for the original workgroup-X input; UINT32_MAX means absent.
+  uint32_t workgroup_id_scalar = UINT32_MAX;
   bool operator==(const EntryFacts &) const = default;
 };
 
@@ -255,7 +260,10 @@ public:
   uint64_t report_bytes = 0;
   uint32_t group_bytes = 0;
   uint32_t private_bytes = 0;
+  // Total rows, grouped by workgroup and then local wave.
   uint32_t wave_count = 0;
+  uint32_t workgroup_count = 1;
+  uint32_t waves_per_workgroup = 0;
   bool operator==(const LaunchLayout &) const = default;
 };
 
