@@ -267,14 +267,6 @@ def select_pass_with_normalization_fallback(
     return select_pass(required, layout), False
 
 
-# Dividing by these counters across passes is not a same-pass result.
-# Relaxing them would read another pass's copy.
-_SAME_PASS_COUNTERS = frozenset({
-    "SQ_WAVES",
-    "GRBM_GUI_ACTIVE",
-    "GRBM_GUI_ACTIVE_sum",
-})
-
 # Both binders write this into a metric that fits no single pass when the
 # profile copied a counter. Both evaluators leave such a cell unset.
 UNSET_EXPRESSION = ""

@@ -235,8 +235,7 @@ def _is_plain_collect_piece(piece: str) -> bool:
     """True for a normal identifier: not private, and not a dunder."""
     if not piece.isidentifier():
         return False
-    is_dunder = piece.startswith("__") and piece.endswith("__")
-    return not piece.startswith("_") and not is_dunder
+    return not piece.startswith("_")
 
 
 def _collect_piece_attribute(node: ast.Attribute) -> str | None:
