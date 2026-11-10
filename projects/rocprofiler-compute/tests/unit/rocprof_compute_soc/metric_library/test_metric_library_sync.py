@@ -119,7 +119,6 @@ DISPLAY_VARIANTS = {
         "11.2.9": PIPELINE_MFMA_UTIL,
     },
     "gfx115x": {
-        # LDS bandwidth with gfx115x's 32 LDS banks per CU written as a constant.
         "3.4.3": (
             "LDS Estimated Bandwidth",
             "lds.theoretical_bw",
