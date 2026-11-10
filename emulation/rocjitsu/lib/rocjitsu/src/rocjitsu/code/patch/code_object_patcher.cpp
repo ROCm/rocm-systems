@@ -222,10 +222,115 @@ bool load_mappings_preserve_text(std::span<const Elf64_Phdr> segments, size_t im
     if (overlap_begin >= overlap_end)
       continue;
     // A distinct backing or zero-fill range must not acquire executable bytes.
-    if (overlap_end - segment.p_vaddr > segment.p_filesz ||
-        segment.p_offset + (overlap_begin - segment.p_vaddr) !=
-            text_offset + (overlap_begin - text_vaddr))
+    if (!elf_load_maps_file_range(segment, text_offset + (overlap_begin - text_vaddr),
+                                  overlap_begin, overlap_end - overlap_begin))
       return false;
+  }
+  return true;
+}
+
+bool load_extent_is_valid(const Elf64_Phdr &segment, size_t image_size) {
+  return (segment.p_filesz == 0 ||
+          image_contains_range(image_size, segment.p_offset, segment.p_filesz)) &&
+         segment.p_filesz <= segment.p_memsz &&
+         segment.p_memsz <= std::numeric_limits<uint64_t>::max() - segment.p_vaddr;
+}
+
+bool rocr_load_extents_fit_allocation(std::span<const Elf64_Phdr> segments, size_t image_size) {
+  const Elf64_Phdr *first = nullptr;
+  const Elf64_Phdr *last = nullptr;
+  for (const Elf64_Phdr &segment : segments) {
+    if (segment.p_type != PT_LOAD)
+      continue;
+    if (!load_extent_is_valid(segment, image_size))
+      return false;
+    if (first == nullptr)
+      first = &segment;
+    last = &segment;
+  }
+  if (first == nullptr)
+    return true;
+  // ROCr LoadSizeV2 uses the last LOAD's end, not the maximum segment end.
+  // LoadSegmentV2 bounds each memory extent relative to the first LOAD's VA.
+  const uint64_t allocation_size = last->p_vaddr + last->p_memsz;
+  for (const Elf64_Phdr &segment : segments) {
+    if (segment.p_type != PT_LOAD)
+      continue;
+    if (segment.p_vaddr < first->p_vaddr)
+      return false;
+    const uint64_t offset = segment.p_vaddr - first->p_vaddr;
+    if (offset > allocation_size || segment.p_memsz > allocation_size - offset)
+      return false;
+  }
+  return true;
+}
+
+bool section_load_backing_is_preserved(std::span<const Elf64_Shdr> original_sections,
+                                       std::span<const Elf64_Shdr> sections,
+                                       std::span<const Elf64_Phdr> original_segments,
+                                       std::span<const Elf64_Phdr> segments,
+                                       size_t original_image_size, size_t image_size,
+                                       size_t text_index) {
+  if (original_sections.size() != sections.size() || original_segments.size() != segments.size())
+    return false;
+  for (size_t index = 0; index < segments.size(); ++index) {
+    if (original_segments[index].p_type == PT_LOAD &&
+        (segments[index].p_type != PT_LOAD ||
+         !load_extent_is_valid(original_segments[index], original_image_size) ||
+         !load_extent_is_valid(segments[index], image_size)))
+      return false;
+  }
+  for (size_t index = 0; index < original_sections.size(); ++index) {
+    const Elf64_Shdr &original = original_sections[index];
+    const Elf64_Shdr &section = sections[index];
+    if (index == text_index || original.sh_type == SHT_NULL ||
+        (original.sh_flags & SHF_ALLOC) == 0 || original.sh_size == 0)
+      continue;
+    const bool zero_fill = original.sh_type == SHT_NOBITS;
+    if (section.sh_size != original.sh_size ||
+        original.sh_size > std::numeric_limits<uint64_t>::max() - original.sh_addr ||
+        section.sh_size > std::numeric_limits<uint64_t>::max() - section.sh_addr ||
+        (!zero_fill &&
+         (!image_contains_range(original_image_size, original.sh_offset, original.sh_size) ||
+          !image_contains_range(image_size, section.sh_offset, section.sh_size))))
+      return false;
+    for (size_t segment_index = 0; segment_index < original_segments.size(); ++segment_index) {
+      const Elf64_Phdr &old_load = original_segments[segment_index];
+      if (old_load.p_type != PT_LOAD)
+        continue;
+      const uint64_t load_begin = old_load.p_vaddr + (zero_fill ? old_load.p_filesz : 0);
+      const uint64_t load_end =
+          old_load.p_vaddr + (zero_fill ? old_load.p_memsz : old_load.p_filesz);
+      const uint64_t begin = std::max(original.sh_addr, load_begin);
+      const uint64_t end = std::min(original.sh_addr + original.sh_size, load_end);
+      if (begin >= end)
+        continue;
+      const uint64_t section_offset = begin - original.sh_addr;
+      const uint64_t size = end - begin;
+      if (!zero_fill &&
+          !elf_load_maps_file_range(old_load, original.sh_offset + section_offset, begin, size))
+        return false;
+      const Elf64_Phdr &new_load = segments[segment_index];
+      const uint64_t target = section.sh_addr + section_offset;
+      if (zero_fill) {
+        if (target < new_load.p_vaddr)
+          return false;
+        const uint64_t offset = target - new_load.p_vaddr;
+        if (offset < new_load.p_filesz || offset > new_load.p_memsz ||
+            size > new_load.p_memsz - offset)
+          return false;
+        for (const Elf64_Phdr &other : segments) {
+          if (other.p_type == PT_LOAD && other.p_filesz != 0 &&
+              target < other.p_vaddr + other.p_filesz && other.p_vaddr < target + size)
+            return false;
+        }
+      } else if (!elf_load_maps_file_range(new_load, section.sh_offset + section_offset, target,
+                                           size) ||
+                 !elf_load_file_mappings_match_range(segments, section.sh_offset + section_offset,
+                                                     target, size)) {
+        return false;
+      }
+    }
   }
   return true;
 }
@@ -1453,6 +1558,9 @@ bool CodeObjectPatcher::replace_text(
   const uint64_t growth = new_text.size() - text_size_;
 
   if (growth != 0) {
+    const std::vector<Elf64_Shdr> original_sections = shdrs;
+    const std::vector<Elf64_Phdr> original_segments = phdrs;
+    const size_t original_image_size = image_.size();
     // insert_file_bytes() extends every LOAD containing the insertion point,
     // including a segment ending there. A divergent mapping would expose cave
     // bytes at another address, potentially replacing its original zero fill.
@@ -1523,6 +1631,10 @@ bool CodeObjectPatcher::replace_text(
               phdrs[i].p_offset % phdrs[i].p_align == phdrs[i].p_vaddr % phdrs[i].p_align) &&
              "shifted LOAD lost file/virtual address congruence");
     }
+    if (!section_load_backing_is_preserved(original_sections, shdrs, original_segments, phdrs,
+                                           original_image_size, image_.size(), *text_index) ||
+        (header.e_type == ET_DYN && !rocr_load_extents_fit_allocation(phdrs, image_.size())))
+      return false;
   }
 
   // File order and address order can differ. Even a LOAD whose file range

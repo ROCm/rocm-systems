@@ -98,6 +98,12 @@ Result validate_load_file_aliases(const AmdGpuCodeObject &source,
       }
     }
   }
+  for (const CheckedTextEdit &edit : edits) {
+    if (!elf_load_file_mappings_match_range(*segments, text.sectionOffset() + edit.offset,
+                                            text.vaddr() + edit.offset, edit.expected.size()))
+      return reject(error, TextEditErrorCode::InvalidImage,
+                    "edited virtual addresses have conflicting PT_LOAD file backing", edit.offset);
+  }
   return Result::success();
 }
 

@@ -99,6 +99,8 @@ public:
   /// dynamic relocation writes that overlap final .text after place remapping.
   /// Appended text must also have equivalent file backing in every overlapping
   /// final LOAD mapping, including segments that remain at their original address.
+  /// Loaded section backing must remain coherent after movement, and final LOAD
+  /// memory extents, including padding, must fit ROCr's combined allocation.
   [[nodiscard]] bool replace_text(
       std::span<const uint8_t> new_text,
       std::span<const TextOffsetRelocation> text_relocations = {},

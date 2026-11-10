@@ -275,6 +275,13 @@ also validates the loader-visible effects of text growth:
   memory range must be entirely file-backed. At each overlapping virtual address,
   the segment must load the same file bytes as `.text`. Different file backing
   or overlap with a segment's zero-fill storage rejects the patch.
+- Every originally loaded part of another allocated section must retain its
+  backing after layout. A moved section or descriptor symbol must still name
+  the corresponding file bytes or zero-fill range in its LOAD; moving section
+  metadata without moving its backing rejects the patch.
+- For linked ROCr images, every final LOAD memory extent must fit the combined
+  allocation calculated from the first LOAD's base and the last LOAD's end.
+  This includes alignment padding outside `.text`, not just appended instructions.
 
 The final mapping check includes segments that neither grow nor move. For
 example, a data segment stored before `.text` in the file can map at the original
@@ -307,9 +314,16 @@ static, inert and unsupported-form policies remain separate.
 The batch also checks aliases of edited bytes in `PT_LOAD` file ranges. Every
 mapping of those shared file bytes must expose them at the same virtual address;
 otherwise, editing an anchor would also modify bytes visible at another address.
-Aliases outside the edited anchors and empty file ranges do not participate in
-this source check. The separate [text growth checks](#text-growth-safety) validate
-the appended code and final loader layout. Descriptor ownership and whole-kernel
+
+At each edited virtual address, every LOAD file copy must also read the anchor's
+own file bytes. A disjoint file range containing another copy of the original
+instruction could otherwise restore that instruction over the patched branch.
+Empty file ranges perform no copy: modern ROCr zeroes the shared allocation
+once, rather than zeroing each segment's tail after copying it.
+
+Aliases outside the edited anchors do not participate in these source checks.
+The separate [text growth checks](#text-growth-safety) validate appended code,
+moved storage, and the final loader layout. Descriptor ownership and whole-kernel
 mapping qualification remain consumer responsibilities.
 
 The reference checks cover decoded direct-branch destinations, text-symbol

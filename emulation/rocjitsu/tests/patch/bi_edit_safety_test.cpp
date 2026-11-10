@@ -943,5 +943,394 @@ TEST(BiEditSafety, AllowsUneditedLoadAliasClearOfAppendedText) {
   expect_unedited_load_alias_growth_policy(256, false);
 }
 
+enum class AnchorLoadBacking { SeparateCopy, SameFile, UneditedWord, ZeroFill };
+
+void expect_anchor_load_backing_policy(AnchorLoadBacking backing) {
+  std::vector<uint8_t> image =
+      test::make_gfx1200_kernel_elf({kNop0Word, kNop1Word, kNop0Word, kEndpgmWord}, 0);
+  const AmdGpuCodeObject original(image.data(), image.size());
+  ASSERT_TRUE(original.is_valid());
+  const Section &text = *original.text_sections().front();
+  const uint64_t word_offset = backing == AnchorLoadBacking::UneditedWord ? 4 : 0;
+  const uint64_t file_offset =
+      backing == AnchorLoadBacking::SameFile ? text.sectionOffset() : 0x2100 + word_offset;
+  const uint64_t file_size = backing == AnchorLoadBacking::ZeroFill ? 0 : 4;
+  image.resize(0x2108, 0);
+  if (backing != AnchorLoadBacking::SameFile)
+    std::memcpy(image.data() + file_offset, text.data() + word_offset, sizeof(uint32_t));
+  Elf64_Ehdr header = {};
+  std::memcpy(&header, image.data(), sizeof(header));
+  header.e_ident[EI_DATA] = ELFDATA2LSB;
+  header.e_ident[EI_VERSION] = 1;
+  header.e_ident[EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
+  std::optional<std::vector<Elf64_Phdr>> segments =
+      read_elf_table<Elf64_Phdr>(image, header.e_phoff, header.e_phnum, header.e_phentsize);
+  ASSERT_TRUE(segments);
+  segments->push_back({.p_type = PT_LOAD,
+                       .p_flags = 0x4,
+                       .p_offset = file_offset,
+                       .p_vaddr = text.vaddr() + word_offset,
+                       .p_paddr = text.vaddr() + word_offset,
+                       .p_filesz = file_size,
+                       .p_memsz = sizeof(uint32_t),
+                       .p_align = 0x1000});
+  std::stable_sort(
+      segments->begin(), segments->end(),
+      [](const Elf64_Phdr &left, const Elf64_Phdr &right) { return left.p_vaddr < right.p_vaddr; });
+  header.e_phnum = static_cast<uint16_t>(segments->size());
+  ASSERT_LE(header.e_phoff + segments->size() * sizeof(Elf64_Phdr), text.sectionOffset());
+  for (const Elf64_Phdr &segment : *segments)
+    ASSERT_EQ(segment.p_offset % segment.p_align, segment.p_vaddr % segment.p_align);
+  std::memcpy(image.data(), &header, sizeof(header));
+  std::memcpy(image.data() + header.e_phoff, segments->data(),
+              segments->size() * sizeof(Elf64_Phdr));
+  const std::vector<uint8_t> pristine = image;
+  const AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  std::vector<uint8_t> loaded(0x10000, 0);
+  ASSERT_NO_FATAL_FAILURE(replay_load_segments(image, loaded));
+  ASSERT_EQ(std::memcmp(loaded.data() + text.vaddr(), text.data(), text.size()), 0);
+  Instrumentor instrumentor(source, kArch);
+  instrumentor.add_point_by_offset(0);
+  const Instrumentor::ValidationResult eligible = instrumentor.validate_points();
+  ASSERT_TRUE(eligible.errors.empty()) << eligible.errors.front();
+  ASSERT_EQ(eligible.sites.size(), 1u);
+  const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+  if (!result.elf_bytes.empty()) {
+    const AmdGpuCodeObject candidate(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(candidate.is_valid());
+    ASSERT_EQ(result.sites.size(), 1u);
+    const Section &emitted_text = *candidate.text_sections().front();
+    ASSERT_NO_FATAL_FAILURE(
+        expect_anchor_branch_to_cave(emitted_text, result.sites.front().instrumentation_offset));
+    ASSERT_NO_FATAL_FAILURE(replay_load_segments(result.elf_bytes, loaded));
+    uint32_t file_anchor = 0;
+    uint32_t loaded_anchor = 0;
+    std::memcpy(&file_anchor, emitted_text.data(), sizeof(file_anchor));
+    std::memcpy(&loaded_anchor, loaded.data() + text.vaddr(), sizeof(loaded_anchor));
+    EXPECT_EQ(loaded_anchor, file_anchor);
+    EXPECT_EQ(std::memcmp(loaded.data() + text.vaddr(), emitted_text.data(), emitted_text.size()),
+              0);
+    if (backing == AnchorLoadBacking::SeparateCopy) {
+      EXPECT_EQ(loaded_anchor, kNop0Word);
+    }
+  }
+  if (backing == AnchorLoadBacking::SeparateCopy) {
+    EXPECT_FALSE(result.errors.empty());
+    EXPECT_TRUE(result.elf_bytes.empty());
+    EXPECT_TRUE(result.sites.empty());
+    EXPECT_TRUE(result.patches.empty());
+    ASSERT_TRUE(result.edit_error);
+    EXPECT_EQ(result.edit_error->code, TextEditErrorCode::InvalidImage);
+    EXPECT_EQ(result.edit_error->offset, 0u);
+  } else {
+    ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+    EXPECT_EQ(result.sites.size(), 1u);
+  }
+  EXPECT_EQ(image, pristine);
+  EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
+}
+
+TEST(BiEditSafety, RejectsSeparateFileCopyOverwritingEditedAnchor) {
+  expect_anchor_load_backing_policy(AnchorLoadBacking::SeparateCopy);
+}
+
+TEST(BiEditSafety, KeepsEquivalentAnchorMappingsEligible) {
+  expect_anchor_load_backing_policy(AnchorLoadBacking::SameFile);
+}
+
+TEST(BiEditSafety, KeepsSeparateFileCopyOfUneditedWordEligible) {
+  expect_anchor_load_backing_policy(AnchorLoadBacking::UneditedWord);
+}
+
+TEST(BiEditSafety, KeepsZeroFileAnchorMappingEligible) {
+  expect_anchor_load_backing_policy(AnchorLoadBacking::ZeroFill);
+}
+
+enum class BssLoadLayout { None, Fixed, MovedWithEmptyMapping };
+
+struct GrowthLoadContract {
+  uint64_t descriptor_file_offset;
+  uint64_t descriptor_vaddr;
+  uint64_t tail_file_offset;
+  uint64_t tail_vaddr;
+  bool accepted;
+  BssLoadLayout bss = BssLoadLayout::None;
+  uint64_t descriptor_load_file_offset = 0;
+};
+
+void expect_growth_load_contract(const GrowthLoadContract &layout) {
+  constexpr uint64_t kTextOffset = 0x1ff0;
+  constexpr uint64_t kTextVaddr = 0x1ff0;
+  constexpr uint32_t kDataWord = 0x12345678;
+  const std::vector<uint8_t> original_image =
+      test::make_gfx1200_kernel_elf({kNop0Word, kNop1Word, kNop0Word, kEndpgmWord}, 0);
+  const AmdGpuCodeObject original(original_image.data(), original_image.size());
+  ASSERT_TRUE(original.is_valid());
+  const CodeObjectPatcher original_patcher(original);
+  std::vector<Elf64_Shdr> sections = original_patcher.section_headers();
+  ASSERT_EQ(sections.size(), 6u);
+  Elf64_Ehdr header = {};
+  std::memcpy(&header, original_image.data(), sizeof(header));
+  header.e_ident[EI_DATA] = ELFDATA2LSB;
+  header.e_ident[EI_VERSION] = 1;
+  header.e_ident[EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
+  std::vector<uint8_t> image(0x8000, 0);
+  uint64_t metadata_offset = 0x5000;
+  for (size_t index = 1; index < sections.size(); ++index) {
+    Elf64_Shdr &section = sections[index];
+    const uint64_t old_offset = section.sh_offset;
+    section.sh_offset =
+        index == 1 ? kTextOffset : (index == 2 ? layout.descriptor_file_offset : metadata_offset);
+    ASSERT_LE(old_offset, original_image.size());
+    ASSERT_LE(section.sh_size, original_image.size() - old_offset);
+    ASSERT_LE(section.sh_offset, image.size());
+    ASSERT_LE(section.sh_size, image.size() - section.sh_offset);
+    std::memcpy(image.data() + section.sh_offset, original_image.data() + old_offset,
+                section.sh_size);
+    if (index >= 3)
+      metadata_offset = test::align_up_for_test(section.sh_offset + section.sh_size, 8);
+  }
+  sections[1].sh_addr = kTextVaddr;
+  sections[2].sh_addr = layout.descriptor_vaddr;
+  amdhsa::kernel_descriptor_t descriptor = {};
+  std::memcpy(&descriptor, image.data() + sections[2].sh_offset, sizeof(descriptor));
+  descriptor.kernel_code_entry_byte_offset =
+      static_cast<int64_t>(kTextVaddr) - static_cast<int64_t>(layout.descriptor_vaddr);
+  std::memcpy(image.data() + sections[2].sh_offset, &descriptor, sizeof(descriptor));
+  const uint64_t descriptor_load_offset = layout.descriptor_load_file_offset == 0
+                                              ? layout.descriptor_file_offset
+                                              : layout.descriptor_load_file_offset;
+  std::memcpy(image.data() + descriptor_load_offset, &descriptor, sizeof(descriptor));
+  Elf64_Sym symbol = {};
+  std::memcpy(&symbol, image.data() + sections[3].sh_offset + sizeof(Elf64_Sym), sizeof(symbol));
+  ASSERT_EQ(symbol.st_shndx, 2u);
+  symbol.st_value = layout.descriptor_vaddr;
+  std::memcpy(image.data() + sections[3].sh_offset + sizeof(Elf64_Sym), &symbol, sizeof(symbol));
+  std::vector<Elf64_Phdr> segments = {{.p_type = PT_LOAD,
+                                       .p_flags = 0x4,
+                                       .p_offset = 0,
+                                       .p_vaddr = 0,
+                                       .p_paddr = 0,
+                                       .p_filesz = 0x200,
+                                       .p_memsz = 0x200,
+                                       .p_align = 0x1000},
+                                      {.p_type = PT_LOAD,
+                                       .p_flags = 0x5,
+                                       .p_offset = kTextOffset,
+                                       .p_vaddr = kTextVaddr,
+                                       .p_paddr = kTextVaddr,
+                                       .p_filesz = 16,
+                                       .p_memsz = 16,
+                                       .p_align = 0x1000},
+                                      {.p_type = PT_LOAD,
+                                       .p_flags = 0x4,
+                                       .p_offset = descriptor_load_offset,
+                                       .p_vaddr = layout.descriptor_vaddr,
+                                       .p_paddr = layout.descriptor_vaddr,
+                                       .p_filesz = sizeof(descriptor),
+                                       .p_memsz = sizeof(descriptor),
+                                       .p_align = 0x1000},
+                                      {.p_type = PT_LOAD,
+                                       .p_flags = 0x6,
+                                       .p_offset = layout.tail_file_offset,
+                                       .p_vaddr = layout.tail_vaddr,
+                                       .p_paddr = layout.tail_vaddr,
+                                       .p_filesz = sizeof(kDataWord),
+                                       .p_memsz = sizeof(kDataWord),
+                                       .p_align = 0x1000}};
+  if (layout.bss != BssLoadLayout::None) {
+    const uint64_t file_offset = layout.bss == BssLoadLayout::Fixed ? 0x1000 : 0x2000;
+    sections.push_back({.sh_name = 0,
+                        .sh_type = SHT_NOBITS,
+                        .sh_flags = SHF_ALLOC | SHF_WRITE,
+                        .sh_addr = 0x6000,
+                        .sh_offset = file_offset,
+                        .sh_size = sizeof(uint32_t),
+                        .sh_link = 0,
+                        .sh_info = 0,
+                        .sh_addralign = alignof(uint32_t),
+                        .sh_entsize = 0});
+    segments.push_back({.p_type = PT_LOAD,
+                        .p_flags = 0x6,
+                        .p_offset = file_offset,
+                        .p_vaddr = 0x6000,
+                        .p_paddr = 0x6000,
+                        .p_filesz = 0,
+                        .p_memsz = sizeof(uint32_t),
+                        .p_align = 0x1000});
+    if (layout.bss == BssLoadLayout::MovedWithEmptyMapping) {
+      segments.push_back({.p_type = PT_LOAD,
+                          .p_flags = 0x4,
+                          .p_offset = file_offset + 2,
+                          .p_vaddr = 0x6002,
+                          .p_paddr = 0x6002,
+                          .p_filesz = 0,
+                          .p_memsz = 0,
+                          .p_align = 1});
+    }
+  }
+  std::ranges::sort(segments, {}, &Elf64_Phdr::p_vaddr);
+  for (const Elf64_Phdr &segment : segments)
+    ASSERT_EQ(segment.p_offset % segment.p_align, segment.p_vaddr % segment.p_align);
+  header.e_phnum = static_cast<uint16_t>(segments.size());
+  header.e_shnum = static_cast<uint16_t>(sections.size());
+  header.e_shoff = metadata_offset;
+  ASSERT_LE(header.e_phoff + segments.size() * sizeof(Elf64_Phdr), 0x200u);
+  std::memcpy(image.data() + layout.tail_file_offset, &kDataWord, sizeof(kDataWord));
+  std::memcpy(image.data(), &header, sizeof(header));
+  std::memcpy(image.data() + header.e_phoff, segments.data(), segments.size() * sizeof(Elf64_Phdr));
+  std::memcpy(image.data() + header.e_shoff, sections.data(), sections.size() * sizeof(Elf64_Shdr));
+  image.resize(header.e_shoff + sections.size() * sizeof(Elf64_Shdr));
+  const uint64_t original_allocation = segments.back().p_vaddr + segments.back().p_memsz;
+  for (const Elf64_Phdr &segment : segments)
+    ASSERT_LE(segment.p_vaddr + segment.p_memsz, original_allocation);
+  const std::vector<uint8_t> pristine = image;
+  const AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  std::vector<uint8_t> loaded(0x10000, 0);
+  ASSERT_NO_FATAL_FAILURE(replay_load_segments(image, loaded));
+  ASSERT_EQ(std::memcmp(loaded.data() + layout.descriptor_vaddr, &descriptor, sizeof(descriptor)),
+            0);
+  Instrumentor instrumentor(source, kArch);
+  instrumentor.add_point_by_offset(0);
+  const Instrumentor::ValidationResult eligible = instrumentor.validate_points();
+  ASSERT_TRUE(eligible.errors.empty()) << eligible.errors.front();
+  ASSERT_EQ(eligible.sites.size(), 1u);
+  const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+  if (!result.elf_bytes.empty()) {
+    const AmdGpuCodeObject candidate(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(candidate.is_valid());
+    ASSERT_EQ(result.sites.size(), 1u);
+    const Section &text = *candidate.text_sections().front();
+    ASSERT_EQ(text.vaddr() + text.size(), 0x200cu);
+    ASSERT_NO_FATAL_FAILURE(
+        expect_anchor_branch_to_cave(text, result.sites.front().instrumentation_offset));
+    const CodeObjectPatcher emitted_patcher(candidate);
+    const std::vector<Elf64_Shdr> emitted_sections = emitted_patcher.section_headers();
+    std::memcpy(&header, result.elf_bytes.data(), sizeof(header));
+    const std::optional<std::vector<Elf64_Phdr>> emitted_segments = read_elf_table<Elf64_Phdr>(
+        result.elf_bytes, header.e_phoff, header.e_phnum, header.e_phentsize);
+    ASSERT_TRUE(emitted_segments);
+    ASSERT_EQ(emitted_segments->front().p_vaddr, 0u);
+    const uint64_t allocation = emitted_segments->back().p_vaddr + emitted_segments->back().p_memsz;
+    for (const Elf64_Phdr &segment : *emitted_segments)
+      EXPECT_LE(segment.p_vaddr + segment.p_memsz, allocation);
+    ASSERT_NO_FATAL_FAILURE(replay_load_segments(result.elf_bytes, loaded));
+    EXPECT_EQ(std::memcmp(loaded.data() + text.vaddr(), text.data(), text.size()), 0);
+    const Elf64_Shdr &emitted_descriptor = emitted_sections[2];
+    EXPECT_EQ(std::memcmp(loaded.data() + emitted_descriptor.sh_addr,
+                          result.elf_bytes.data() + emitted_descriptor.sh_offset,
+                          sizeof(descriptor)),
+              0);
+    Elf64_Sym emitted_symbol = {};
+    std::memcpy(&emitted_symbol,
+                result.elf_bytes.data() + emitted_sections[3].sh_offset + sizeof(Elf64_Sym),
+                sizeof(emitted_symbol));
+    EXPECT_EQ(emitted_symbol.st_value, emitted_descriptor.sh_addr);
+    amdhsa::kernel_descriptor_t loaded_descriptor = {};
+    std::memcpy(&loaded_descriptor, loaded.data() + emitted_symbol.st_value,
+                sizeof(loaded_descriptor));
+    EXPECT_EQ(emitted_symbol.st_value + loaded_descriptor.kernel_code_entry_byte_offset,
+              kTextVaddr);
+    if (layout.bss != BssLoadLayout::None) {
+      EXPECT_EQ(emitted_sections.back().sh_type, SHT_NOBITS);
+      EXPECT_EQ(emitted_sections.back().sh_addr, 0x7000u);
+      uint32_t zero_fill = 1;
+      std::memcpy(&zero_fill, loaded.data() + emitted_sections.back().sh_addr, sizeof(zero_fill));
+      EXPECT_EQ(zero_fill, 0u);
+    }
+    if (layout.descriptor_vaddr == 0x4000) {
+      EXPECT_EQ(emitted_descriptor.sh_addr, 0x5000u);
+    } else {
+      EXPECT_EQ(allocation, layout.tail_vaddr + sizeof(kDataWord));
+      const std::vector<Elf64_Phdr>::const_iterator text_load =
+          std::ranges::find(*emitted_segments, kTextVaddr, &Elf64_Phdr::p_vaddr);
+      ASSERT_NE(text_load, emitted_segments->end());
+      EXPECT_EQ(text_load->p_vaddr + text_load->p_memsz, 0x3000u);
+    }
+  }
+  if (layout.accepted) {
+    ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+    EXPECT_EQ(result.sites.size(), 1u);
+  } else {
+    EXPECT_FALSE(result.errors.empty());
+    EXPECT_TRUE(result.elf_bytes.empty());
+    EXPECT_TRUE(result.sites.empty());
+    EXPECT_TRUE(result.patches.empty());
+    EXPECT_FALSE(result.edit_error);
+  }
+  EXPECT_EQ(image, pristine);
+  EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
+}
+
+TEST(BiEditSafety, RejectsMovedDescriptorLosingItsLoadBacking) {
+  expect_growth_load_contract({.descriptor_file_offset = 0x1000,
+                               .descriptor_vaddr = 0x4000,
+                               .tail_file_offset = 0x4000,
+                               .tail_vaddr = 0x6000,
+                               .accepted = false});
+}
+
+TEST(BiEditSafety, KeepsMovedDescriptorWithMatchingLoadBackingEligible) {
+  expect_growth_load_contract({.descriptor_file_offset = 0x3000,
+                               .descriptor_vaddr = 0x4000,
+                               .tail_file_offset = 0x4000,
+                               .tail_vaddr = 0x6000,
+                               .accepted = true});
+}
+
+TEST(BiEditSafety, RejectsPaddedLoadBeyondRocrAllocation) {
+  expect_growth_load_contract({.descriptor_file_offset = 0x3000,
+                               .descriptor_vaddr = 0x1000,
+                               .tail_file_offset = 0x1200,
+                               .tail_vaddr = 0x2200,
+                               .accepted = false});
+}
+
+TEST(BiEditSafety, KeepsPaddedLoadWithinRocrAllocationEligible) {
+  expect_growth_load_contract({.descriptor_file_offset = 0x3000,
+                               .descriptor_vaddr = 0x1000,
+                               .tail_file_offset = 0x1200,
+                               .tail_vaddr = 0x3200,
+                               .accepted = true});
+}
+
+TEST(BiEditSafety, RejectsMovedZeroFillLosingItsLoadBacking) {
+  expect_growth_load_contract({.descriptor_file_offset = 0x3000,
+                               .descriptor_vaddr = 0x4000,
+                               .tail_file_offset = 0x4000,
+                               .tail_vaddr = 0x8000,
+                               .accepted = false,
+                               .bss = BssLoadLayout::Fixed});
+}
+
+TEST(BiEditSafety, KeepsMovedZeroFillWithEmptyLoadEligible) {
+  expect_growth_load_contract({.descriptor_file_offset = 0x3000,
+                               .descriptor_vaddr = 0x4000,
+                               .tail_file_offset = 0x4000,
+                               .tail_vaddr = 0x8000,
+                               .accepted = true,
+                               .bss = BssLoadLayout::MovedWithEmptyMapping});
+}
+
+TEST(BiEditSafety, RejectsMovedDescriptorWithUntrackedSourceBacking) {
+  expect_growth_load_contract({.descriptor_file_offset = 0x3000,
+                               .descriptor_vaddr = 0x4000,
+                               .tail_file_offset = 0x4000,
+                               .tail_vaddr = 0x6000,
+                               .accepted = false,
+                               .descriptor_load_file_offset = 0x1000});
+}
+
+TEST(BiEditSafety, RejectsDescriptorWithoutDeclaredBackingInOrderedLoads) {
+  expect_growth_load_contract({.descriptor_file_offset = 0x1000,
+                               .descriptor_vaddr = 0x4000,
+                               .tail_file_offset = 0x4000,
+                               .tail_vaddr = 0x6000,
+                               .accepted = false,
+                               .descriptor_load_file_offset = 0x3000});
+}
+
 } // namespace
 } // namespace rocjitsu
