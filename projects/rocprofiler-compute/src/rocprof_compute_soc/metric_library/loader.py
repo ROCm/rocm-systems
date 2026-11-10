@@ -24,6 +24,7 @@ METRIC_LIBRARY_PARENT_ARCH: Dict[str, Optional[str]] = {
     "gfx1250": None,
 }
 VARIABLES_FILENAME = "variables.yaml"
+SETS_FILENAME = "sets.yaml"
 # Top-level key for the list of parent ids to drop in a child file.
 REMOVE_KEY = "remove"
 # Metric fields whose expressions can name hardware counters.
@@ -168,17 +169,19 @@ def _kind(value: object) -> str:
 
 
 class MetricLibrary:
-    """One arch's metrics and built-in variables."""
+    """One arch's metrics, built-in variables and sets."""
 
     def __init__(
         self,
         arch: str,
         metrics: Dict[str, Dict[str, Any]],
         variables: Dict[str, Dict[str, Any]],
+        sets: Dict[str, Dict[str, Any]],
     ) -> None:
         self.arch = arch
         self.metrics = metrics
         self.variables = variables
+        self.sets = sets
 
     @classmethod
     def load(cls, metric_dir: Path, arch: str) -> "MetricLibrary":
@@ -188,8 +191,9 @@ class MetricLibrary:
             for file_name, paths in arch_files(metric_dir, arch).items()
         }
         variables = documents.pop(VARIABLES_FILENAME, {})
+        sets = documents.pop(SETS_FILENAME, {})
         metrics = combine_metric_documents(documents)
-        return cls(canonical_config_arch(arch), metrics, variables)
+        return cls(canonical_config_arch(arch), metrics, variables, sets)
 
     def get_counters_for_metrics(
         self, metric_ids: List[str], gpu_series: str

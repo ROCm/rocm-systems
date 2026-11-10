@@ -26,6 +26,13 @@ compute.valu_util:
   unit: Percent
   description: ""
 """
+BASE_SETS = """\
+busy:
+  title: Busy
+  metrics:
+  - compute.salu_util
+  - compute.ipc
+"""
 # A base and two children: gfx_c1 changes a description, gfx_c2 removes a metric.
 FAMILY_PARENT_ARCH = {"gfx_base": None, "gfx_c1": "gfx_base", "gfx_c2": "gfx_c1"}
 FAMILY_COMPUTE_FILES = {
@@ -348,3 +355,37 @@ def test_mapped_arch_needs_a_directory(tree):
     assert validate(tree) == [
         "[gfx_c1] is in METRIC_LIBRARY_PARENT_ARCH but has no directory"
     ]
+
+
+@pytest.mark.parametrize(
+    "old, new, message",
+    [
+        ("busy:", "Busy:", "a set option must be snake_case"),
+        ("  title: Busy\n", "", "'title' is required"),
+        (
+            "title: Busy",
+            "title: Busy\n  description: x",
+            "'description' is not a known",
+        ),
+        ("title: Busy", "title: ' '", "'title' must be a non-empty string"),
+        ("  - compute.ipc\n", "  - 5\n", "'metrics' must list metric ids"),
+        ("compute.ipc", "compute.salu_util", "'metrics' lists an id twice"),
+        ("compute.ipc", "compute.nope", "unknown metric ids ['compute.nope']"),
+    ],
+)
+def test_set_errors(tree, old, new, message):
+    write_file(tree / "gfx_base" / "sets.yaml", BASE_SETS.replace(old, new))
+    assert any(message in error for error in validate(tree))
+
+
+def test_set_must_fit_in_one_pass(monkeypatch):
+    monkeypatch.setattr(
+        validate_metric_library.mi_gpu_specs,
+        "get_perfmon_config",
+        lambda arch: {"SQ": 2},
+    )
+    errors = validate(loader.default_metric_library_dir())
+    assert (
+        "[gfx908] set compute_thruput_util: block SQ needs 3 counters "
+        "but one pass holds 2"
+    ) in errors
