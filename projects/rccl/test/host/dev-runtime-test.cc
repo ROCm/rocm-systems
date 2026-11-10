@@ -6796,6 +6796,17 @@ protected:
     ncclDevrCommCreateTask* task = ncclIntruQueueHead(&comm->devrState.commCreateTaskQueue);
     return task != nullptr ? task->deviceCodeVersion : 0;
   }
+
+  // Splits the compat table at kJitFieldVersion so that the caller's
+  // compile-time version and the runtime version resolve to different records.
+  static void SplitCompatAtJitFieldVersion() {
+    ncclDevCommCompat_v22902 = ncclDevCommCompat{};
+    ncclDevCommCompat_v22902.minVersion = 0;
+    ncclDevCommCompat_v22902.maxVersion = kJitFieldVersion;
+    ncclDevCommCompat_v22907 = ncclDevCommCompat{};
+    ncclDevCommCompat_v22907.minVersion = kJitFieldVersion + 1;
+    ncclDevCommCompat_v22907.maxVersion = NCCL_VERSION_CODE;
+  }
 };
 
 // Branch: an AOT caller older than the runtime keeps its own version, so its
@@ -6838,6 +6849,29 @@ TEST_F(DevCommCreateJitTest, DevApiJitParam_QueuesRuntimeVersionForAnyCaller) {
   reqs.useRuntimeVersion = false;
 
   ASSERT_EQ(ncclDevCommCreate(comm, &reqs, &outDevComm), ncclSuccess);
+  EXPECT_EQ(QueuedDeviceCodeVersion(), static_cast<uint32_t>(NCCL_VERSION_CODE));
+}
+
+// NVIDIA/nccl@678911ee: the requirements filter must come from the record for
+// the caller's compile-time version, because reqs has that version's layout
+// even when the device code is the runtime version's.
+TEST_F(DevCommCreateJitTest, UseRuntimeVersion_FiltersRequirementsWithCompileTimeRecord) {
+  SplitCompatAtJitFieldVersion();
+  static int compileTimeFilterCalls;
+  compileTimeFilterCalls = 0;
+  ncclDevCommCompat_v22902.devCommRequirementsFilter = [](ncclComm_t, ncclDevCommRequirements_t*) {
+    compileTimeFilterCalls++;
+    return ncclSuccess;
+  };
+  ncclDevCommCompat_v22907.devCommRequirementsFilter = [](ncclComm_t, ncclDevCommRequirements_t*) {
+    ADD_FAILURE() << "the runtime version's requirements filter ran on a compile-time-version struct";
+    return ncclInternalError;
+  };
+  reqs.version = kJitFieldVersion;
+  reqs.useRuntimeVersion = true;
+
+  ASSERT_EQ(ncclDevCommCreate(comm, &reqs, &outDevComm), ncclSuccess);
+  EXPECT_EQ(compileTimeFilterCalls, 1);
   EXPECT_EQ(QueuedDeviceCodeVersion(), static_cast<uint32_t>(NCCL_VERSION_CODE));
 }
 
